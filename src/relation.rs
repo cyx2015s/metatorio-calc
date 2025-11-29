@@ -1,3 +1,5 @@
+
+#[allow(dead_code)]
 pub fn are_categories_compatible(
     machine_categories: &Option<Vec<String>>,
     recipe_categories: &Option<Vec<String>>,

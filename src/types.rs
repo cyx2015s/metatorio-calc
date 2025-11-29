@@ -88,18 +88,18 @@ pub struct RecipePrototype {
 
     /// 配方原料
     #[serde(deserialize_with = "as_vec_or_empty")]
-    ingredients: Vec<RecipeIngredient>,
+    pub(crate) ingredients: Vec<RecipeIngredient>,
 
     /// 配方产出
     #[serde(deserialize_with = "as_vec_or_empty")]
-    results: Vec<RecipeResult>,
+    pub(crate) results: Vec<RecipeResult>,
 
     /// 允许的插件类别，为空表示所有，但仍受配方本身的加成限制
     #[serde(deserialize_with = "option_as_vec_or_empty")]
     allowed_module_categories: Option<Vec<String>>,
 
     /// 制作时间（秒）
-    energy_required: f64,
+    pub(crate) energy_required: f64,
 
     /// 配方污染倍数
     emissions_multiplier: f64,
@@ -165,6 +165,7 @@ impl Default for RecipePrototype {
     }
 }
 
+#[allow(dead_code)]
 impl RecipePrototype {
     /// 获取所有类别，包括主类别和额外类别
     pub fn categories(&self) -> Vec<String> {
@@ -178,6 +179,7 @@ impl RecipePrototype {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type")]
 #[allow(non_camel_case_types)]
+#[allow(dead_code)]
 pub enum RecipeIngredient {
     item(ItemIngredient),
     fluid(FluidIngredient),
@@ -187,11 +189,11 @@ pub enum RecipeIngredient {
 #[serde(default)]
 pub struct ItemIngredient {
     /// 物品 ID
-    name: String,
+    pub name: String,
 
     /// 消耗数量
     #[serde(deserialize_with = "floored")]
-    amount: u16,
+    pub amount: u16,
 }
 
 impl Default for ItemIngredient {
@@ -207,10 +209,10 @@ impl Default for ItemIngredient {
 #[serde(default)]
 pub struct FluidIngredient {
     /// 流体 ID
-    name: String,
+    pub name: String,
 
     /// 流体数量
-    amount: f64,
+    pub amount: f64,
 
     /// 默认温度为流体的最低温度，与流体原型有关
     temperature: Option<f64>,
@@ -237,6 +239,7 @@ impl Default for FluidIngredient {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type")]
 #[allow(non_camel_case_types)]
+#[allow(dead_code)]
 pub enum RecipeResult {
     item(ItemResult),
     fluid(FluidResult),
@@ -246,11 +249,11 @@ pub enum RecipeResult {
 #[serde(default)]
 pub struct ItemResult {
     /// 物品 ID
-    name: String,
+    pub(crate) name: String,
 
     /// 产出物品数量
     #[serde(deserialize_with = "option_floored")]
-    amount: Option<u16>,
+    pub(crate) amount: Option<u16>,
     /// 仅在 amount = nil 时读取，最小可能产出数量
     #[serde(deserialize_with = "option_floored")]
     amount_min: Option<u16>,
@@ -305,7 +308,7 @@ impl Debug for ItemResult {
 }
 
 impl ItemResult {
-    /// 计算当前配方的实际单词产量和每次结算产能加成时的额外产量
+    /// 计算当前配方的实际单次产量和每次结算产能加成时的额外产量
     pub fn normalized_output(&self) -> (f64, f64) {
         let extra = self.extra_count_fraction as f64;
         let prob = self.probability;
@@ -369,7 +372,7 @@ impl ItemResult {
 #[serde(default)]
 pub struct FluidResult {
     /// 流体 ID
-    name: String,
+    pub(crate) name: String,
 
     /// 流体产出数量
     amount: Option<f64>,
@@ -523,6 +526,7 @@ where
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type")]
 #[allow(non_camel_case_types)]
+#[allow(dead_code)]
 pub enum EnergySource {
     electric(ElectricEnergySource),
     burner(BurnerEnergySource),
@@ -645,6 +649,7 @@ pub struct Effect {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub enum EffectTypeLimitation {
     Single(String),
     Multiple(Vec<String>),
