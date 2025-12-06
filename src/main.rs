@@ -1,11 +1,12 @@
-use std::{collections::HashMap, fmt::Display, fs::read_to_string, path::Path, time::Instant};
+use std::{collections::HashMap, fmt::Display, fs::read_to_string, path::Path, thread::sleep, time::{Duration, Instant}};
 
-use good_lp::{Expression, ProblemVariables, Solution, SolverModel, VariableDefinition, clarabel, microlp};
+use good_lp::{Expression, ProblemVariables, Solution, SolverModel, VariableDefinition, microlp};
 use serde_json::*;
 
 mod lp;
 mod relation;
 mod types;
+mod context;
 
 use crate::types::{CraftingMachinePrototype, RecipePrototype};
 
@@ -206,4 +207,5 @@ fn main() {
     //     let value: CraftingMachinePrototype = serde_json::from_value(value.clone()).unwrap();
     //     println!("{:#?}", value);
     // }
+    sleep(Duration::from_millis(10000));
 }

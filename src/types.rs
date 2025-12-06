@@ -3,6 +3,7 @@
 use std::{cmp::Ordering, collections::HashMap, fmt::Debug};
 
 use serde::{de::DeserializeOwned, *};
+
 use serde_json::{Value, from_value};
 
 fn as_vec_or_empty<'de, T, D>(deserializer: D) -> Result<Vec<T>, D::Error>
@@ -70,14 +71,27 @@ where
         Err(_) => Ok(None),
     }
 }
+/// 如果某个原型除了叫什么，名字是什么，分组是什么之外其他都不关心（不影响量化计算）
+/// 可以使用这个结构体来简化反序列化。
+#[derive(Debug, Deserialize, Default)]
+#[serde(default)]
+pub(crate) struct InformativePrototype {
+    name: String,
+    order: String,
+    subgroup: Option<String>,
+    hidden: bool,
+    parameter: bool,
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(default)]
-pub struct RecipePrototype {
+pub(crate) struct RecipePrototype {
     /// 配方 ID
     name: String,
-
     order: String,
+    subgroup: Option<String>,
+    hidden: bool,
+    parameter: bool,
 
     /// 类别
     category: String,
@@ -161,6 +175,9 @@ impl Default for RecipePrototype {
             allow_pollution: true,
             allow_quality: true,
             allowed_module_categories: None,
+            subgroup: None,
+            hidden: false,
+            parameter: false,
         }
     }
 }
@@ -168,7 +185,7 @@ impl Default for RecipePrototype {
 #[allow(dead_code)]
 impl RecipePrototype {
     /// 获取所有类别，包括主类别和额外类别
-    pub fn categories(&self) -> Vec<String> {
+    pub(crate) fn categories(&self) -> Vec<String> {
         let mut categories = vec![self.category.clone()];
         categories.extend(self.additional_categories.clone());
         categories
@@ -180,20 +197,20 @@ impl RecipePrototype {
 #[serde(tag = "type")]
 #[allow(non_camel_case_types)]
 #[allow(dead_code)]
-pub enum RecipeIngredient {
+pub(crate) enum RecipeIngredient {
     item(ItemIngredient),
     fluid(FluidIngredient),
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(default)]
-pub struct ItemIngredient {
+pub(crate) struct ItemIngredient {
     /// 物品 ID
-    pub name: String,
+    pub(crate) name: String,
 
     /// 消耗数量
     #[serde(deserialize_with = "floored")]
-    pub amount: u16,
+    pub(crate) amount: u16,
 }
 
 impl Default for ItemIngredient {
@@ -207,12 +224,12 @@ impl Default for ItemIngredient {
 
 #[derive(Debug, Deserialize)]
 #[serde(default)]
-pub struct FluidIngredient {
+pub(crate) struct FluidIngredient {
     /// 流体 ID
-    pub name: String,
+    pub(crate) name: String,
 
     /// 流体数量
-    pub amount: f64,
+    pub(crate) amount: f64,
 
     /// 默认温度为流体的最低温度，与流体原型有关
     temperature: Option<f64>,
@@ -240,14 +257,14 @@ impl Default for FluidIngredient {
 #[serde(tag = "type")]
 #[allow(non_camel_case_types)]
 #[allow(dead_code)]
-pub enum RecipeResult {
+pub(crate) enum RecipeResult {
     item(ItemResult),
     fluid(FluidResult),
 }
 
 #[derive(Deserialize)]
 #[serde(default)]
-pub struct ItemResult {
+pub(crate) struct ItemResult {
     /// 物品 ID
     pub(crate) name: String,
 
@@ -309,7 +326,7 @@ impl Debug for ItemResult {
 
 impl ItemResult {
     /// 计算当前配方的实际单次产量和每次结算产能加成时的额外产量
-    pub fn normalized_output(&self) -> (f64, f64) {
+    pub(crate) fn normalized_output(&self) -> (f64, f64) {
         let extra = self.extra_count_fraction as f64;
         let prob = self.probability;
         let ignore = match self.ignored_by_productivity {
@@ -370,7 +387,7 @@ impl ItemResult {
 
 #[derive(Deserialize)]
 #[serde(default)]
-pub struct FluidResult {
+pub(crate) struct FluidResult {
     /// 流体 ID
     pub(crate) name: String,
 
@@ -421,7 +438,7 @@ impl Debug for FluidResult {
 
 impl FluidResult {
     /// 计算当前配方的实际单词产量和每次结算产能加成时的额外产量
-    pub fn normalized_output(&self) -> (f64, f64) {
+    pub(crate) fn normalized_output(&self) -> (f64, f64) {
         let prob = self.probability;
         let ignore = match self.ignored_by_productivity {
             Some(value) => value,
@@ -459,7 +476,7 @@ impl FluidResult {
 }
 
 #[derive(Deserialize, Default)]
-pub struct EnergyAmount {
+pub(crate) struct EnergyAmount {
     /// 每一刻消耗的能量（焦耳）
     /// 用作功率时，乘以60得到瓦特数
     amount: f64,
@@ -527,7 +544,7 @@ where
 #[serde(tag = "type")]
 #[allow(non_camel_case_types)]
 #[allow(dead_code)]
-pub enum EnergySource {
+pub(crate) enum EnergySource {
     electric(ElectricEnergySource),
     burner(BurnerEnergySource),
     heat(HeatEnergySource),
@@ -537,7 +554,7 @@ pub enum EnergySource {
 
 #[derive(Debug, Deserialize)]
 #[serde(default)]
-pub struct ElectricEnergySource {
+pub(crate) struct ElectricEnergySource {
     #[serde(deserialize_with = "as_energy")]
     buffer_capacity: Option<EnergyAmount>,
 
@@ -566,7 +583,7 @@ impl Default for ElectricEnergySource {
 
 #[derive(Debug, Deserialize)]
 #[serde(default)]
-pub struct BurnerEnergySource {
+pub(crate) struct BurnerEnergySource {
     burnt_inventory_size: u16,
     effectivity: f64,
     burner_usage: String,
@@ -586,14 +603,14 @@ impl Default for BurnerEnergySource {
 
 #[derive(Debug, Deserialize, Default)]
 #[serde(default)]
-pub struct HeatEnergySource {
+pub(crate) struct HeatEnergySource {
     max_temperature: f64,
     emissions_per_minute: Option<HashMap<String, f64>>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(default)]
-pub struct FluidEnergySource {
+pub(crate) struct FluidEnergySource {
     effectivity: f64,
     fluid_usage_per_tickop: f64,
     scale_fluid_usage: bool,
@@ -614,13 +631,13 @@ impl Default for FluidEnergySource {
 
 #[derive(Debug, Deserialize, Default)]
 #[serde(default)]
-pub struct VoidEnergySource {
+pub(crate) struct VoidEnergySource {
     emissions_per_minute: Option<HashMap<String, f64>>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(default)]
-pub struct EffectReceiver {
+pub(crate) struct EffectReceiver {
     base_effect: Effect,
     use_module_effects: bool,
     use_beacon_effects: bool,
@@ -640,7 +657,7 @@ impl Default for EffectReceiver {
 
 #[derive(Debug, Deserialize, Default)]
 #[serde(default)]
-pub struct Effect {
+pub(crate) struct Effect {
     consumption: f32,
     speed: f32,
     productivity: f32,
@@ -650,9 +667,11 @@ pub struct Effect {
 
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
-pub enum EffectTypeLimitation {
+#[serde(untagged)]
+pub(crate) enum EffectTypeLimitation {
     Single(String),
     Multiple(Vec<String>),
+    Empty(HashMap<String, Value>),
 }
 
 impl Default for EffectTypeLimitation {
@@ -663,9 +682,13 @@ impl Default for EffectTypeLimitation {
 
 #[derive(Debug, Deserialize, Default)]
 #[serde(default)]
-pub struct CraftingMachinePrototype {
+pub(crate) struct CraftingMachinePrototype {
     name: String,
     order: String,
+    subgroup: Option<String>,
+    hidden: bool,
+    parameter: bool,
+
     quality_affects_energy_usage: bool,
 
     #[serde(deserialize_with = "as_energy")]
@@ -675,11 +698,12 @@ pub struct CraftingMachinePrototype {
     #[serde(deserialize_with = "as_vec_or_empty")]
     crafting_categories: Vec<String>,
     energy_source: Option<EnergySource>,
-    effect_receiver: EffectReceiver,
+    effect_receiver: Option<EffectReceiver>,
+    #[serde(deserialize_with = "floored")]
+    module_slots: u16,
     quality_affects_module_slots: bool,
 
-    #[serde(deserialize_with = "as_vec_or_empty")]
-    allowed_effects: Vec<String>,
+    allowed_effects: Option<EffectTypeLimitation>,
     #[serde(deserialize_with = "option_as_vec_or_empty")]
     allowed_module_categories: Option<Vec<String>>,
 
@@ -695,4 +719,351 @@ pub struct CraftingMachinePrototype {
     input_limit: Option<u32>,
     #[serde(alias = "result_inventory_size", alias = "max_item_product_count")]
     output_limit: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub(crate) struct ItemPrototype {
+    name: String,
+    order: Option<String>,
+    subgroup: Option<String>,
+    hidden: bool,
+    parameter: bool,
+
+    stack_size: u32,
+
+    // 放置实体
+    place_result: Option<String>,
+
+    // 燃料行为
+    fuel_category: Option<String>,
+    burnt_result: Option<String>,
+    #[serde(deserialize_with = "as_energy")]
+    fuel_value: Option<EnergyAmount>,
+
+    // 变质行为
+    spoil_result: Option<String>,
+    #[serde(deserialize_with = "option_floored")]
+    spoil_ticks: Option<u32>,
+
+    // 种植行为
+    plant_result: Option<String>,
+
+    // 放置地格
+    // place_as_tile: Option<String>,
+
+    // 火箭发射
+    #[serde(deserialize_with = "option_as_vec_or_empty")]
+    rocket_launch_products: Option<Vec<ItemResult>>,
+
+    #[serde(deserialize_with = "option_as_vec_or_empty")]
+    flags: Option<Vec<String>>,
+
+    // 插件效果
+    effect: Option<Effect>,
+    category: Option<String>,
+}
+
+impl Default for ItemPrototype {
+    fn default() -> Self {
+        ItemPrototype {
+            name: "item-unknown".to_string(),
+            stack_size: 0,
+            place_result: None,
+            fuel_category: None,
+            burnt_result: None,
+            spoil_result: None,
+            plant_result: None,
+            // place_as_tile: None,
+            flags: None,
+            fuel_value: None,
+            spoil_ticks: None,
+            rocket_launch_products: None,
+            category: None,
+            effect: None,
+            order: None,
+            subgroup: None,
+            hidden: false,
+            parameter: false,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub(crate) struct FluidPrototype {
+    name: String,
+    order: String,
+    subgroup: Option<String>,
+    hidden: bool,
+    parameter: bool,
+
+    default_temperature: f64,
+    max_temperature: Option<f64>,
+
+    emissions_multiplier: f64,
+
+    #[serde(deserialize_with = "as_energy")]
+    heat_capacity: Option<EnergyAmount>,
+    #[serde(deserialize_with = "as_energy")]
+    fuel_value: Option<EnergyAmount>,
+    fuel_category: Option<String>,
+}
+
+impl Default for FluidPrototype {
+    fn default() -> Self {
+        FluidPrototype {
+            name: "fluid-unknown".to_string(),
+            order: String::new(),
+            default_temperature: 15.0,
+            max_temperature: None,
+            heat_capacity: Some(EnergyAmount { amount: 1000.0 }),
+            fuel_value: Some(EnergyAmount { amount: 0.0 }),
+            fuel_category: None,
+            subgroup: None,
+            emissions_multiplier: 0.0,
+            hidden: false,
+            parameter: false,
+        }
+    }
+}
+#[derive(Debug, Deserialize, Default)]
+#[serde(default)]
+pub(crate) struct MinableProperties {
+    mining_time: f64,
+    result: Option<String>,
+    #[serde(deserialize_with = "option_floored")]
+    count: Option<u16>,
+    #[serde(deserialize_with = "option_as_vec_or_empty")]
+    results: Option<Vec<RecipeResult>>,
+
+    fluid_amount: f64,
+    required_fluid: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub(crate) struct LootItem {
+    item: String,
+    probability: f64,
+    count_min: u16,
+    count_max: u16,
+}
+
+impl Default for LootItem {
+    fn default() -> Self {
+        LootItem {
+            item: "item-unknown".to_string(),
+            probability: 1.0,
+            count_min: 1,
+            count_max: 1,
+        }
+    }
+}
+
+/// 表示所有能够产出资源的实体，可能与 MachinePrototype 重叠，不过无所谓了，毕竟被转换的物体本身是什么类型可以很多变的
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub(crate) struct ResourceEntityPrototype {
+    // 类型太多了，得手动区分一下
+    r#type: String,
+    name: String,
+    order: String,
+    subgroup: Option<String>,
+    hidden: bool,
+    parameter: bool,
+
+    /// 击杀掉落物，也用作植物的收获掉落物
+    pub(crate) loot: Option<Vec<LootItem>>,
+
+    /// 出现于Entity、AsteroidChunk和Tile的定义中
+    pub(crate) minable: Option<MinableProperties>,
+    pub(crate) category: String,
+
+    /// 出现于植物的定义中
+    #[serde(deserialize_with = "floored")]
+    growth_ticks: u64,
+    harvest_emissions: Option<HashMap<String, f64>>,
+}
+
+impl Default for ResourceEntityPrototype {
+    fn default() -> Self {
+        ResourceEntityPrototype {
+            r#type: String::new(),
+            name: "entity-unknown".to_string(),
+            order: String::new(),
+            subgroup: None,
+            hidden: false,
+            parameter: false,
+            minable: None,
+            category: "basic-solid".to_string(),
+            growth_ticks: 0,
+            harvest_emissions: None,
+            loot: None,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub(crate) struct LabPrototype {
+    name: String,
+    order: String,
+    subgroup: Option<String>,
+    hidden: bool,
+    parameter: bool,
+
+    #[serde(deserialize_with = "as_energy")]
+    energy_usage: Option<EnergyAmount>,
+
+    energy_source: Option<EnergySource>,
+
+    /// 接受的科技包类型
+    #[serde(deserialize_with = "as_vec_or_empty")]
+    inputs: Vec<String>,
+
+    researching_speed: f64,
+
+    effect_receiver: Option<EffectReceiver>,
+
+    #[serde(deserialize_with = "floored")]
+    module_slots: u16,
+
+    quality_affects_module_slots: bool,
+    uses_quality_drain_modifier: bool,
+    science_pack_drain_rate_percent: u8,
+    allowed_effects: Option<EffectTypeLimitation>,
+    #[serde(deserialize_with = "option_as_vec_or_empty")]
+    allowed_module_categories: Option<Vec<String>>,
+}
+
+impl Default for LabPrototype {
+    fn default() -> Self {
+        LabPrototype {
+            name: "entity-unknown".to_string(),
+            order: String::new(),
+            subgroup: None,
+            hidden: false,
+            parameter: false,
+            energy_usage: None,
+            energy_source: None,
+            inputs: vec![],
+            researching_speed: 1.0,
+            effect_receiver: None,
+            module_slots: 0,
+            quality_affects_module_slots: false,
+            uses_quality_drain_modifier: false,
+            science_pack_drain_rate_percent: 100,
+            allowed_effects: None,
+            allowed_module_categories: None,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub(crate) struct FluidBox {
+    filter: Option<String>,
+    minimum_temperature: Option<f64>,
+    maximum_temperature: Option<f64>,
+    production_type: Option<String>,
+}
+
+/// 包括：采矿机，星岩抓取臂，农业塔，抽水泵
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub(crate) struct MiningDrillPrototype {
+    name: String,
+    order: String,
+    subgroup: Option<String>,
+    hidden: bool,
+    parameter: bool,
+
+    r#type: String,
+
+    /// 采矿机限定属性
+    resource_categories: Vec<String>,
+    mining_speed: f64,
+    #[serde(alias = "fluid_box")]
+    input_fluid_box: Option<FluidBox>, // 占位用，不需要具体内容
+    output_fluid_box: Option<FluidBox>, // 占位用，不需要具体内容
+    #[serde(deserialize_with = "as_energy")]
+    #[serde(alias = "energy_consumption ")]
+    energy_usage: Option<EnergyAmount>,
+    /// 也用于农业塔和抽水泵
+    /// 对于发电机而言，指定了发电的属性和电量
+    energy_source: Option<EnergySource>,
+    effect_receiver: Option<EffectReceiver>,
+    #[serde(deserialize_with = "floored")]
+    module_slots: u16,
+    quality_affects_module_slots: bool,
+    allowed_effects: Option<EffectTypeLimitation>,
+
+    #[serde(deserialize_with = "option_as_vec_or_empty")]
+    allowed_module_categories: Option<Vec<String>>,
+
+    /// 星岩抓取臂限定属性，实际上不好量化
+    #[serde(deserialize_with = "as_energy")]
+    passive_energy_usage: Option<EnergyAmount>,
+    #[serde(deserialize_with = "as_energy")]
+    arm_energy_usage: Option<EnergyAmount>,
+
+    /// 农业塔限定属性
+    radius: Option<f64>,
+    #[serde(deserialize_with = "option_floored")]
+    growth_grid_tile_size: Option<u32>,
+    #[serde(deserialize_with = "option_floored")]
+    input_inventory_size: Option<u16>,
+    #[serde(deserialize_with = "option_floored")]
+    output_inventory_size: Option<u16>,
+
+    /// 抽水泵限定属性
+    pumping_speed: Option<f64>,
+
+    /// 锅炉限定属性
+    mode: Option<String>,
+    target_temperature: Option<f64>,
+
+    /// 热能发电机限定属性
+    burner: Option<BurnerEnergySource>,
+    #[serde(deserialize_with = "as_energy")]
+    max_power_output: Option<EnergyAmount>,
+
+    /// 聚变反应堆限定属性
+    max_fluid_usage: Option<f64>,
+}
+
+impl Default for MiningDrillPrototype {
+    fn default() -> Self {
+        MiningDrillPrototype {
+            name: "entity-unknown".to_string(),
+            order: String::new(),
+            subgroup: None,
+            hidden: false,
+            parameter: false,
+            resource_categories: vec![],
+            energy_usage: None,
+            energy_source: None,
+            mining_speed: 1.0,
+            effect_receiver: None,
+            module_slots: 0,
+            quality_affects_module_slots: false,
+            allowed_effects: None,
+            allowed_module_categories: None,
+            r#type: String::new(),
+            passive_energy_usage: None,
+            arm_energy_usage: None,
+            growth_grid_tile_size: Some(3),
+            input_inventory_size: None,
+            output_inventory_size: None,
+            input_fluid_box: None,
+            output_fluid_box: None,
+            radius: None,
+            pumping_speed: None,
+            mode: None,
+            target_temperature: None,
+            burner: None,
+            max_power_output: None,
+            max_fluid_usage: None,
+        }
+    }
 }

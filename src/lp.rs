@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod lp_tests {
-    use good_lp::{Solution, SolverModel, constraint, variables};
+    use good_lp::{Solution, SolverModel, constraint, variables, clarabel};
 
     #[test]
     fn it_works() {
@@ -14,7 +14,7 @@ mod lp_tests {
                 b >= 0;
                 c >= 0;
         }
-        let mut model = vars.maximise(b + c - a).using(good_lp::clarabel);
+        let mut model = vars.maximise(b + c - a).using(clarabel);
         model
             .settings()
             .tol_feas(1e-12)
