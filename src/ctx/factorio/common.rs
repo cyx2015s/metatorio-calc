@@ -1,16 +1,59 @@
-use std::{collections::HashMap, fmt::Display};
+use std::{collections::HashMap, fmt::Display, hash::Hash, ops::Add};
 
 use serde::{Deserialize, Deserializer, de::DeserializeOwned};
 use serde_json::{Value, from_value};
 
 pub(crate) type Dict<T> = HashMap<String, T>;
 pub(crate) type Emissions = Dict<f64>;
-#[derive(Debug, Clone, Deserialize)]
-#[serde(untagged)]
-pub(crate) enum MapPosition {
-    Struct { x: f64, y: f64 },
-    Tuple(f64, f64),
+#[derive(Debug, Clone)]
+pub(crate) struct MapPosition(f64, f64);
+
+pub(crate) fn update_map<T, N>(map: &mut HashMap<T, N>, key: T, value: N)
+where
+    T: Hash + Eq,
+    N: Add<Output = N> + Copy + Default,
+{
+    let entry = map.entry(key).or_insert(N::default());
+    *entry = *entry + value;
 }
+
+impl<'de> Deserialize<'de> for MapPosition {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value: Value = Deserialize::deserialize(deserializer)?;
+        match value {
+            Value::Object(map) => {
+                let x = map.get("x").and_then(|v| v.as_f64()).ok_or_else(|| {
+                    serde::de::Error::custom("MapPosition 结构体缺少 x 字段或类型错误")
+                })?;
+                let y = map.get("y").and_then(|v| v.as_f64()).ok_or_else(|| {
+                    serde::de::Error::custom("MapPosition 结构体缺少 y 字段或类型错误")
+                })?;
+                Ok(MapPosition(x, y))
+            }
+            Value::Array(vec) => {
+                if vec.len() < 2 {
+                    return Err(serde::de::Error::custom(
+                        "MapPosition 数组长度不为 2",
+                    ));
+                }
+                let x = vec[0].as_f64().ok_or_else(|| {
+                    serde::de::Error::custom("MapPosition 数组第一个元素类型错误")
+                })?;
+                let y = vec[1].as_f64().ok_or_else(|| {
+                    serde::de::Error::custom("MapPosition 数组第二个元素类型错误")
+                })?;
+                Ok(MapPosition(x, y))
+            }
+            _ => Err(serde::de::Error::custom(
+                "MapPosition 既不是结构体也不是数组",
+            )),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub(crate) enum BoundingBox {
@@ -82,7 +125,7 @@ impl Default for PrototypeBase {
 #[derive(Debug, Clone)]
 /// 能量数量，单位为焦耳（J），如果是功率则为焦耳每刻（J/tick）
 pub(crate) struct EnergyAmount {
-    amount: f64,
+    pub(crate) amount: f64,
 }
 
 impl<'de> Deserialize<'de> for EnergyAmount {
@@ -163,6 +206,7 @@ pub(crate) enum EnergySource {
     Void(VoidEnergySource),
 }
 
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub(crate) struct ElectricEnergySource {
@@ -191,7 +235,7 @@ pub(crate) struct BurnerEnergySource {
     burnt_inventory_size: f64,
     effectivity: f64,
     burner_usage: String,
-    emissions_per_minute: Option<HashMap<String, f64>>,
+    emissions_per_minute: Option<Dict<f64>>,
 }
 
 impl Default for BurnerEnergySource {
@@ -209,7 +253,7 @@ impl Default for BurnerEnergySource {
 #[serde(default)]
 pub(crate) struct HeatEnergySource {
     max_temperature: f64,
-    emissions_per_minute: Option<HashMap<String, f64>>,
+    emissions_per_minute: Option<Dict<f64>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -219,7 +263,7 @@ pub(crate) struct FluidEnergySource {
     fluid_usage_per_tickop: f64,
     scale_fluid_usage: bool,
     burns_fluid: bool,
-    emissions_per_minute: Option<HashMap<String, f64>>,
+    emissions_per_minute: Option<Dict<f64>>,
 }
 impl Default for FluidEnergySource {
     fn default() -> Self {
@@ -236,13 +280,13 @@ impl Default for FluidEnergySource {
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
 pub(crate) struct VoidEnergySource {
-    emissions_per_minute: Option<HashMap<String, f64>>,
+    emissions_per_minute: Option<Dict<f64>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub(crate) struct EffectReceiver {
-    base_effect: Effect,
+    pub(crate) base_effect: Effect,
     use_module_effects: bool,
     use_beacon_effects: bool,
     use_surface_effects: bool,
@@ -262,11 +306,36 @@ impl Default for EffectReceiver {
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
 pub(crate) struct Effect {
-    consumption: f64,
-    speed: f64,
-    productivity: f64,
-    efficiency: f64,
-    quality: f64,
+    pub(crate) consumption: f64,
+    pub(crate) speed: f64,
+    pub(crate) productivity: f64,
+    pub(crate) pollution: f64,
+    pub(crate) quality: f64,
+}
+
+impl Add for Effect {
+    type Output = Effect;
+    fn add(self, rhs: Self) -> Self::Output {
+        Effect {
+            consumption: self.consumption + rhs.consumption,
+            speed: self.speed + rhs.speed,
+            productivity: self.productivity + rhs.productivity,
+            pollution: self.pollution + rhs.pollution,
+            quality: self.quality + rhs.quality,
+        }
+    }
+}
+
+impl Effect {
+    pub(crate) fn clamped(&self) -> Effect {
+        Effect {
+            consumption: self.consumption.clamp(-0.8, 327.67),
+            speed: self.speed.clamp(-0.8, 327.67),
+            productivity: self.productivity.clamp(0.0, 327.67),
+            pollution: self.pollution.clamp(-0.8, 327.67),
+            quality: self.quality.clamp(0.0, 327.67),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]

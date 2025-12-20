@@ -28,9 +28,9 @@ pub(crate) const ITEM_TYPES: &[&str] = &[
 
 /// 仅存储物品的基础属性，插件属性另行收集
 #[derive(Debug, Clone, Deserialize)]
-struct ItemPrototype {
+pub(crate) struct ItemPrototype {
     #[serde(flatten)]
-    base: PrototypeBase,
+    pub(crate) base: PrototypeBase,
 
     /// 变质可以自然发生，不绑定任何机器，所以属性存储在 Item 里
     #[serde(flatten)]
@@ -87,7 +87,7 @@ struct BurnProperty {
 
 #[derive(Debug, Clone, Deserialize)]
 struct PlantProperty {
-    plant_result: Option<String>,
+    plant_result: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]

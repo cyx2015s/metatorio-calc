@@ -1,10 +1,13 @@
-use std::fmt::Debug;
+use std::{collections::HashMap, fmt::Debug};
 
 use serde::Deserialize;
 
-use crate::ctx::factorio::common::{
-    Dict, EffectReceiver, EffectTypeLimitation, EnergyAmount, EnergySource, PrototypeBase,
-    as_vec_or_empty, option_as_vec_or_empty,
+use crate::ctx::factorio::{
+    common::{
+        Dict, Effect, EffectReceiver, EffectTypeLimitation, EnergyAmount, EnergySource,
+        PrototypeBase, as_vec_or_empty, option_as_vec_or_empty, update_map,
+    },
+    spec::{FactorioContext, GenericItem, GenericRecipe},
 };
 
 const RECIPE_TYPE: &str = "recipe";
@@ -20,12 +23,15 @@ pub(crate) struct RecipePrototype {
     additional_categories: Vec<String>,
 
     #[serde(deserialize_with = "as_vec_or_empty")]
+    #[serde(default)]
     ingredients: Vec<RecipeIngredient>,
 
     #[serde(deserialize_with = "as_vec_or_empty")]
+    #[serde(default)]
     results: Vec<RecipeResult>,
 
     #[serde(deserialize_with = "option_as_vec_or_empty")]
+    #[serde(default)]
     allowed_module_categories: Option<Vec<String>>,
 
     /// 制作时间（秒）
@@ -128,6 +134,7 @@ pub(crate) enum RecipeResult {
 }
 
 #[derive(Clone, Deserialize)]
+#[serde(default)]
 pub(crate) struct ItemResult {
     pub(crate) name: String,
     pub(crate) amount: Option<f64>,
@@ -230,6 +237,7 @@ impl ItemResult {
 }
 
 #[derive(Clone, Deserialize)]
+#[serde(default)]
 pub(crate) struct FluidResult {
     pub(crate) name: String,
     pub(crate) amount: Option<f64>,
@@ -319,37 +327,148 @@ const CRAFTING_MACHINE_TYPES: &[&str] = &["assembling-machine", "furnace", "rock
 pub(crate) struct CraftingMachinePrototype {
     #[serde(flatten)]
     pub(crate) base: PrototypeBase,
-
-    quality_affects_energy_usage: bool,
-
-    energy_usage: Option<EnergyAmount>,
-
-    crafting_speed: f64,
+    #[serde(default)]
+    pub(crate) quality_affects_energy_usage: bool,
+    #[serde(default)]
+    pub(crate) energy_usage: Option<EnergyAmount>,
+    #[serde(default)]
+    pub(crate) crafting_speed: f64,
 
     #[serde(deserialize_with = "as_vec_or_empty")]
-    crafting_categories: Vec<String>,
+    pub(crate) crafting_categories: Vec<String>,
 
-    energy_source: EnergySource,
+    pub(crate) energy_source: EnergySource,
+    #[serde(default)]
+    pub(crate) effect_receiver: Option<EffectReceiver>,
+    #[serde(default)]
+    pub(crate) module_slots: f64,
+    #[serde(default)]
+    pub(crate) quality_affects_module_slots: bool,
 
-    effect_receiver: Option<EffectReceiver>,
-
-    module_slots: f64,
-
-    quality_affects_module_slots: bool,
-
-    allowed_affects: Option<EffectTypeLimitation>,
+    pub(crate) allowed_affects: Option<EffectTypeLimitation>,
 
     #[serde(deserialize_with = "option_as_vec_or_empty")]
-    allowed_module_categories: Option<Vec<String>>,
+    #[serde(default)]
+    pub(crate) allowed_module_categories: Option<Vec<String>>,
+    #[serde(default)]
+    pub(crate) crafting_speed_quality_multiplier: Option<Dict<f64>>,
+    #[serde(default)]
+    pub(crate) module_slots_quality_bonus: Option<Dict<f64>>,
+    #[serde(default)]
+    pub(crate) energy_usage_quality_multiplier: Option<Dict<f64>>,
 
-    crafting_speed_quality_multiplier: Option<Dict<f64>>,
-    module_slots_quality_bonus: Option<Dict<f64>>,
-    energy_usage_quality_multiplier: Option<Dict<f64>>,
-
-    fixed_recipe: Option<String>,
-    fixed_quality: Option<String>,
+    pub(crate) fixed_recipe: Option<String>,
+    pub(crate) fixed_quality: Option<String>,
     #[serde(alias = "source_inventory_size", alias = "ingredient_count")]
-    input_limit: Option<f64>,
+    pub(crate) input_limit: Option<f64>,
     #[serde(alias = "result_inventory_size", alias = "max_item_product_count")]
-    output_limit: Option<f64>,
+    pub(crate) output_limit: Option<f64>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct RecipeConfig {
+    pub(crate) recipe: String,
+    pub(crate) quality: u8,
+    pub(crate) machine: Option<String>,
+    pub(crate) modules: Vec<String>,
+}
+
+impl GenericRecipe for RecipeConfig {
+    type KeyType = GenericItem;
+    fn as_hash_map(&self, ctx: &FactorioContext) -> HashMap<Self::KeyType, f64> {
+        let mut map = HashMap::new();
+
+        let mut module_effects = Effect::default();
+
+        let mut base_speed = 1.0;
+
+        let crafter = match &self.machine {
+            Some(machine_name) => Some(
+                ctx.crafters
+                    .get(machine_name)
+                    .expect("RecipeConfig 中的机器在上下文中不存在"),
+            ),
+            None => None,
+        };
+
+        if crafter.is_some() {
+            module_effects = module_effects
+                + crafter
+                    .unwrap()
+                    .effect_receiver
+                    .clone()
+                    .unwrap_or_default()
+                    .base_effect
+                    .clone();
+            base_speed = crafter.unwrap().crafting_speed;
+            // TODO: 计算能量消耗
+        }
+
+        module_effects = module_effects.clamped();
+
+        let recipe = ctx
+            .recipes
+            .get(&self.recipe)
+            .expect("RecipeConfig 中的配方在上下文中不存在");
+
+        for ingredient in &recipe.ingredients {
+            match ingredient {
+                RecipeIngredient::Item(item) => {
+                    let key = GenericItem::Item {
+                        name: item.name.clone(),
+                        quality: self.quality,
+                    };
+                    update_map(&mut map, key, -item.amount * (1.0 + module_effects.speed) * base_speed);
+                }
+                RecipeIngredient::Fluid(fluid) => {
+                    let key = GenericItem::Fluid {
+                        name: fluid.name.clone(),
+                        temperature: fluid.temperature.map(|x| x as i32),
+                    };
+                    update_map(&mut map, key, -fluid.amount * (1.0 + module_effects.speed) * base_speed);
+                }
+            }
+        }
+
+        for result in &recipe.results {
+            match result {
+                RecipeResult::Item(item) => {
+                    let key = GenericItem::Item {
+                        name: item.name.clone(),
+                        quality: self.quality,
+                    };
+                    let (base_yield, extra_yield) = item.normalized_output();
+                    update_map(
+                        &mut map,
+                        key,
+                        (base_yield
+                            + extra_yield
+                                * module_effects
+                                    .productivity
+                                    .clamp(0.0, recipe.maximum_productivity))
+                            * (1.0 + module_effects.speed) * base_speed,
+                    );
+                }
+                RecipeResult::Fluid(fluid) => {
+                    let key = GenericItem::Fluid {
+                        name: fluid.name.clone(),
+                        temperature: fluid.temperature.map(|x| x as i32),
+                    };
+                    let (base_yield, extra_yield) = fluid.normalized_output();
+                    update_map(
+                        &mut map,
+                        key,
+                        (base_yield
+                            + extra_yield
+                                * module_effects
+                                    .productivity
+                                    .clamp(0.0, recipe.maximum_productivity))
+                            * (1.0 + module_effects.speed) * base_speed,
+                    );
+                }
+            }
+        }
+
+        map
+    }
 }

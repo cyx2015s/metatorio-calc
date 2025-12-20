@@ -1,3 +1,4 @@
+
 use serde::Deserialize;
 
 use crate::ctx::factorio::{
@@ -6,16 +7,16 @@ use crate::ctx::factorio::{
 };
 
 pub(crate) const ENTITY_TYPES: &[&str] = &[
-    "arrow",
-    "artillery-flare",
-    "artillery-projectile",
-    "beam",
+    // "arrow",
+    // "artillery-flare",
+    // "artillery-projectile",
+    // "beam",
     "character-corpse",
     "cliff",
     "corpse",
-    "rail-remnants",
-    "deconstructible-tile-proxy",
-    "entity-ghost",
+    // "rail-remnants",
+    // "deconstructible-tile-proxy",
+    // "entity-ghost",
     "accumulator",
     "agricultural-tower",
     "artillery-turret",
@@ -27,7 +28,7 @@ pub(crate) const ENTITY_TYPES: &[&str] = &[
     "cargo-bay",
     "cargo-landing-pad",
     "cargo-pod",
-    "character",
+    // "character",
     "arithmetic-combinator",
     "decider-combinator",
     "selector-combinator",
@@ -59,13 +60,13 @@ pub(crate) const ENTITY_TYPES: &[&str] = &[
     "land-mine",
     "lightning-attractor",
     "linked-container",
-    "market",
+    // "market",
     "mining-drill",
     "offshore-pump",
     "pipe",
     "infinity-pipe",
     "pipe-to-ground",
-    "player-port",
+    // "player-port",
     "power-switch",
     "programmable-speaker",
     "proxy-container",
@@ -93,7 +94,7 @@ pub(crate) const ENTITY_TYPES: &[&str] = &[
     "simple-entity-with-force",
     "solar-panel",
     "space-platform-hub",
-    "spider-leg",
+    // "spider-leg",
     "spider-unit",
     "storage-tank",
     "thruster",
@@ -125,20 +126,20 @@ pub(crate) const ENTITY_TYPES: &[&str] = &[
     "plant",
     "explosion",
     "fire",
-    "stream",
-    "highlight-box",
-    "item-entity",
-    "item-request-proxy",
+    // "stream",
+    // "highlight-box",
+    // "item-entity",
+    // "item-request-proxy",
     "lightning",
-    "particle-source",
-    "projectile",
+    // "particle-source",
+    // "projectile",
     "resource",
-    "rocket-silo-rocket",
-    "rocket-silo-rocket-shadow",
-    "smoke-with-trigger",
-    "speech-bubble",
-    "sticker",
-    "tile-ghost",
+    // "rocket-silo-rocket",
+    // "rocket-silo-rocket-shadow",
+    // "smoke-with-trigger",
+    // "speech-bubble",
+    // "sticker",
+    // "tile-ghost",
 ];
 
 #[derive(Debug, Clone, Deserialize)]
@@ -146,9 +147,11 @@ pub(crate) struct EntityPrototype {
     #[serde(flatten)]
     pub(crate) base: PrototypeBase,
 
-    heating_energy: EnergyAmount,
+    heating_energy: Option<EnergyAmount>,
 
-    collision_box: BoundingBox,
+    collision_box: Option<BoundingBox>,
+
+    minable: Option<MiningProperty>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -156,6 +159,7 @@ pub(crate) struct MiningProperty {
     pub(crate) mining_time: f64,
 
     #[serde(deserialize_with = "option_as_vec_or_empty")]
+    #[serde(default)]
     pub(crate) results: Option<Vec<RecipeResult>>,
 
     pub(crate) result: Option<String>,
