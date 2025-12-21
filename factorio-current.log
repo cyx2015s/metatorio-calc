@@ -1,0 +1,45 @@
+   0.001 2025-12-21 23:16:12; Factorio 2.0.72 (build 84292, win64, full, space-age)
+   0.001 Operating system: Windows 11 (build 26100) 
+   0.001 Program arguments: "D:\FactorioStandalone\Factorio\bin\x64\factorio.exe" "--dump-data" "--config" "D:/tmpconfig/config.ini" 
+   0.001 Config path: D:/tmpconfig/config.ini
+   0.001 Read data path: D:/FactorioStandalone/Factorio/data
+   0.001 Write data path: D:/rust-projects/metatorio [100081/599999MB]
+   0.001 Binaries path: D:/FactorioStandalone/Factorio/bin
+   0.013 System info: [CPU: Intel(R) Core(TM) Ultra 7 155H, 22 cores, RAM: 26655/32221 MB, page: 51042/57206 MB, virtual: 4290/134217727 MB, extended virtual: 0 MB]
+   0.182 Memory info:
+   0.182  [0]: SK Hynix H58G76BK7HX095 4096 MB 7467 MHz 0.5 v 16|16
+   0.184  [1]: SK Hynix H58G76BK7HX095 4096 MB 7467 MHz 0.5 v 16|16
+   0.184  [2]: SK Hynix H58G76BK7HX095 4096 MB 7467 MHz 0.5 v 16|16
+   0.184  [3]: SK Hynix H58G76BK7HX095 4096 MB 7467 MHz 0.5 v 16|16
+   0.184  [4]: SK Hynix H58G76BK7HX095 4096 MB 7467 MHz 0.5 v 16|16
+   0.184  [5]: SK Hynix H58G76BK7HX095 4096 MB 7467 MHz 0.5 v 16|16
+   0.184  [6]: SK Hynix H58G76BK7HX095 4096 MB 7467 MHz 0.5 v 16|16
+   0.184  [7]: SK Hynix H58G76BK7HX095 4096 MB 7467 MHz 0.5 v 16|16
+   0.192 Running in headless mode
+   0.192 Audio is disabled
+   0.196 Info ModManager.cpp:446: FeatureFlag expansion-shaders = true
+   0.196 Info ModManager.cpp:446: FeatureFlag freezing = true
+   0.196 Info ModManager.cpp:446: FeatureFlag quality = true
+   0.196 Info ModManager.cpp:446: FeatureFlag rail-bridges = true
+   0.196 Info ModManager.cpp:446: FeatureFlag segmented-units = true
+   0.196 Info ModManager.cpp:446: FeatureFlag space-travel = true
+   0.196 Info ModManager.cpp:446: FeatureFlag spoiling = true
+   0.206 Loading mod core 0.0.0 (data.lua)
+   0.234 Loading mod base 2.0.72 (data.lua)
+   0.509 Loading mod elevated-rails 2.0.72 (data.lua)
+   0.551 Loading mod quality 2.0.72 (data.lua)
+   0.582 Loading mod space-age 2.0.72 (data.lua)
+   1.237 Loading mod base 2.0.72 (data-updates.lua)
+   1.259 Loading mod quality 2.0.72 (data-updates.lua)
+   1.286 Loading mod space-age 2.0.72 (data-updates.lua)
+   1.396 Checksum for core: 3316885848
+   1.396 Checksum of base: 1879415942
+   1.396 Checksum of elevated-rails: 70351106
+   1.396 Checksum of quality: 1142589254
+   1.396 Checksum of space-age: 1510664043
+   1.777 Prototype list checksum: 3295867752
+   7.233 Info PlayerData.cpp:66: Local player-data.json unavailable
+   7.233 Info PlayerData.cpp:71: Cloud player-data.json unavailable
+   7.235 Info GlobalContext.cpp:1294: Resetting config.
+   7.236 Factorio initialised
+   7.311 Goodbye

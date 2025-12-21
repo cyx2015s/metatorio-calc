@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Debug, hash::Hash};
+use std::{collections::HashMap, env, fmt::Debug, hash::Hash};
 
 use serde_json::Value;
 
@@ -26,7 +26,7 @@ pub(crate) struct FactorioContext {
 }
 
 impl FactorioContext {
-    pub(crate)  fn load(value: &Value) -> Self {
+    pub(crate) fn load(value: &Value) -> Self {
         let mut items = Dict::<ItemPrototype>::new();
         for item_type in ITEM_TYPES.iter() {
             if let Some(item_values) = value.get(item_type) {
@@ -77,6 +77,40 @@ impl FactorioContext {
             recipes,
             crafters,
         }
+    }
+
+    pub(crate) fn load_from_executable_path(
+        executable_path: &std::path::Path,
+    ) -> Option<FactorioContext> {
+        // 此步较为复杂，调用方应该异步执行
+        // 1. 在这个软件的数据文件夹下（秉持绿色原理，创建在这个项目程序本身的同级文件里），创建一个config.cfg
+        let self_path = match env::current_dir() {
+            Ok(path) => path,
+            _ => {
+                return None;
+            }
+        };
+        let config_path = self_path.join("/tmpconfig/config.ini");
+        if config_path.exists() == false {
+            std::fs::create_dir_all(config_path.parent()?).ok()?;
+        }
+        // 配置配置文件：写入到自定义的文件夹中避免和运行中的游戏抢锁
+        std::fs::write(&config_path, format!("[path]\nwrite-data={}\n[general]\nlocale=zh-CN", self_path.display())).ok()?;
+        let dump_raw_command = std::process::Command::new(executable_path)
+            .arg("--dump-data")
+            .arg("--config")
+            .arg(&config_path.to_str().unwrap())
+            .output()
+            .ok()?;
+        let status = dump_raw_command.status;
+        if status.success() == false {
+            return None;
+        }
+        let data_raw_dump_json_path = self_path.join("script-output/data-raw-dump.json");
+        let data_str = std::fs::read_to_string(data_raw_dump_json_path).ok()?;
+        let value: serde_json::Value = serde_json::from_str(&data_str).ok()?;
+        let ctx = FactorioContext::load(&value);
+        Some(ctx)
     }
 }
 

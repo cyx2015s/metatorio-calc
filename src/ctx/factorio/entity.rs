@@ -2,7 +2,7 @@
 use serde::Deserialize;
 
 use crate::ctx::factorio::{
-    common::{BoundingBox, EnergyAmount, PrototypeBase, as_vec_or_empty, option_as_vec_or_empty},
+    common::{BoundingBox, EnergyAmount, PrototypeBase, option_as_vec_or_empty},
     recipe::RecipeResult,
 };
 
