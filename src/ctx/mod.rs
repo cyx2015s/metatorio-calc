@@ -1,1 +1,1 @@
-mod factorio;
+pub(crate) mod factorio;

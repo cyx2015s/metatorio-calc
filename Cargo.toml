@@ -6,6 +6,8 @@ edition = "2024"
 [dependencies]
 dirs = "6.0.0"
 dotenv = "0.15.0"
+eframe = "0.33.3"
+egui = "0.33.3"
 good_lp = { "version" = "1.14.2", default-features = false, features = ["clarabel", "microlp"] }
 regex = "1.12.2"
 serde = { version = "1.0.228", features = ["derive"] }

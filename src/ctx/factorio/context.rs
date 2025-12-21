@@ -26,7 +26,7 @@ pub(crate) struct FactorioContext {
 }
 
 impl FactorioContext {
-    fn load(value: &Value) -> Self {
+    pub(crate)  fn load(value: &Value) -> Self {
         let mut items = Dict::<ItemPrototype>::new();
         for item_type in ITEM_TYPES.iter() {
             if let Some(item_values) = value.get(item_type) {
