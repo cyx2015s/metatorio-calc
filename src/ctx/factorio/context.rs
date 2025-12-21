@@ -2,12 +2,15 @@ use std::{collections::HashMap, fmt::Debug, hash::Hash};
 
 use serde_json::Value;
 
-use crate::ctx::factorio::{
-    common::Dict,
-    entity::{ENTITY_TYPES, EntityPrototype},
-    fluid::FluidPrototype,
-    item::{ITEM_TYPES, ItemPrototype},
-    recipe::{CraftingMachinePrototype, RecipeConfig, RecipePrototype},
+use crate::{
+    context::{ItemLike, RecipeLike},
+    ctx::factorio::{
+        common::Dict,
+        entity::{ENTITY_TYPES, EntityPrototype},
+        fluid::FluidPrototype,
+        item::{ITEM_TYPES, ItemPrototype},
+        recipe::{CraftingMachinePrototype, RecipeConfig, RecipePrototype},
+    },
 };
 
 #[derive(Debug)]
@@ -96,7 +99,9 @@ pub(crate) enum GenericItem {
     Electricity,
     FluidHeat,
     FluidFuel,
-    ItemFuel,
+    ItemFuel {
+        category: String,
+    },
     RocketPayload,
     Custom {
         name: String,
@@ -108,10 +113,8 @@ pub(crate) struct GenericItemWithLocation {
     location: u16,
 }
 
-pub(crate) trait GenericItemID: Debug + Clone + Hash + PartialEq + Eq {}
-
-impl GenericItemID for GenericItem {}
-impl GenericItemID for GenericItemWithLocation {}
+impl ItemLike for GenericItem {}
+impl ItemLike for GenericItemWithLocation {}
 
 pub(crate) fn make_located_generic_recipe(
     original: HashMap<GenericItem, f64>,
@@ -126,11 +129,6 @@ pub(crate) fn make_located_generic_recipe(
         located.insert(located_key, value);
     }
     located
-}
-
-pub(crate) trait GenericRecipe {
-    type KeyType;
-    fn as_hash_map(&self, ctx: &FactorioContext) -> HashMap<Self::KeyType, f64>;
 }
 
 fn sample_five<T: Debug>(map: &Dict<T>) {
@@ -168,9 +166,9 @@ fn test_recipe_normalized() {
         &serde_json::from_str(include_str!("../../../assets/data-raw-dump.json")).unwrap(),
     );
     let recipe_config = RecipeConfig {
-        recipe: "transport-belt".to_string(),
+        recipe: "pentapod-egg".to_string(),
         quality: 1,
-        machine: Some("foundry".to_string()),
+        machine: Some("centrifuge".to_string()),
         modules: vec![],
     };
     let result = recipe_config.as_hash_map(&ctx);

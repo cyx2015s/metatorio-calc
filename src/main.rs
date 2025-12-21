@@ -1,10 +1,8 @@
-use std::{collections::HashMap, fmt::Display, fs::read_to_string, path::Path, thread::sleep, time::{Duration, Instant}};
+use std::{fmt::Display, fs::read_to_string, path::Path};
 
-use good_lp::{Expression, ProblemVariables, Solution, SolverModel, VariableDefinition, microlp};
 use serde_json::*;
 
 mod lp;
-mod relation;
 mod context;
 mod ctx;
 

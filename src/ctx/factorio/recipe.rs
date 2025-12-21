@@ -2,15 +2,12 @@ use std::{collections::HashMap, fmt::Debug};
 
 use serde::Deserialize;
 
-use crate::ctx::factorio::{
-    common::{
+use crate::{context::RecipeLike, ctx::factorio::{common::{
         Dict, Effect, EffectReceiver, EffectTypeLimitation, EnergyAmount, EnergySource,
-        PrototypeBase, as_vec_or_empty, option_as_vec_or_empty, update_map,
-    },
-    spec::{FactorioContext, GenericItem, GenericRecipe},
-};
+        PrototypeBase, update_map,
+    }, context::{FactorioContext, GenericItem}}};
 
-const RECIPE_TYPE: &str = "recipe";
+use crate::ctx::factorio::common::{as_vec_or_empty, option_as_vec_or_empty};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
@@ -373,8 +370,9 @@ pub(crate) struct RecipeConfig {
     pub(crate) modules: Vec<String>,
 }
 
-impl GenericRecipe for RecipeConfig {
+impl RecipeLike for RecipeConfig {
     type KeyType = GenericItem;
+    type ContextType = FactorioContext;
     fn as_hash_map(&self, ctx: &FactorioContext) -> HashMap<Self::KeyType, f64> {
         let mut map = HashMap::new();
 
@@ -403,13 +401,15 @@ impl GenericRecipe for RecipeConfig {
             base_speed = crafter.unwrap().crafting_speed;
             // TODO: 计算能量消耗
         }
-
         module_effects = module_effects.clamped();
 
         let recipe = ctx
             .recipes
             .get(&self.recipe)
             .expect("RecipeConfig 中的配方在上下文中不存在");
+
+            
+        base_speed /= recipe.energy_required;
 
         for ingredient in &recipe.ingredients {
             match ingredient {
