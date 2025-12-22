@@ -1,10 +1,19 @@
-use std::{collections::HashMap, fmt::Display, hash::Hash, ops::Add};
+use std::{
+    collections::HashMap,
+    fmt::{Debug, Display},
+    hash::Hash,
+    ops::Add,
+};
 
 use serde::{Deserialize, Deserializer, de::DeserializeOwned};
 use serde_json::{Value, from_value};
 
+
 pub(crate) type Dict<T> = HashMap<String, T>;
 pub(crate) type Emissions = Dict<f64>;
+pub(crate) type OrderInfo = Vec<(String, Vec<(String, Vec<String>)>)>;
+pub(crate) type ReverseOrderInfo = HashMap<String, (usize, usize, usize)>;
+
 #[derive(Debug, Clone)]
 pub(crate) struct MapPosition(f64, f64);
 
@@ -35,9 +44,7 @@ impl<'de> Deserialize<'de> for MapPosition {
             }
             Value::Array(vec) => {
                 if vec.len() < 2 {
-                    return Err(serde::de::Error::custom(
-                        "MapPosition 数组长度不为 2",
-                    ));
+                    return Err(serde::de::Error::custom("MapPosition 数组长度不为 2"));
                 }
                 let x = vec[0].as_f64().ok_or_else(|| {
                     serde::de::Error::custom("MapPosition 数组第一个元素类型错误")
@@ -119,6 +126,16 @@ impl Default for PrototypeBase {
             hidden: false,
             parameter: false,
         }
+    }
+}
+
+pub(crate) trait HasPrototypeBase {
+    fn base(&self) -> &PrototypeBase;
+}
+
+impl HasPrototypeBase for PrototypeBase {
+    fn base(&self) -> &PrototypeBase {
+        &self
     }
 }
 
@@ -205,7 +222,6 @@ pub(crate) enum EnergySource {
     #[serde(rename = "void")]
     Void(VoidEnergySource),
 }
-
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
@@ -359,4 +375,106 @@ fn test_energy_amount_deserialize() {
     let ea2: EnergyAmount = serde_json::from_str(r#""2.5MW""#).unwrap();
     assert_eq!((ea2.amount * 60.0) as i32, 2_500_000.0 as i32);
     println!("{}", EnergyAmount { amount: 150000.0 });
+}
+
+#[derive(Debug, Clone, Deserialize)]
+/// 子组
+pub(crate) struct ItemSubgroup {
+    #[serde(flatten)]
+    pub(crate) base: PrototypeBase,
+    /// 所属组
+    pub(crate) group: String,
+}
+
+impl HasPrototypeBase for ItemSubgroup {
+    fn base(&self) -> &PrototypeBase {
+        &self.base
+    }
+}
+
+pub(crate) fn get_order_info<T: HasPrototypeBase + Clone>(
+    vec: &HashMap<String, T>,
+    groups: &Dict<PrototypeBase>,
+    subgroups: &Dict<ItemSubgroup>,
+) ->OrderInfo {
+    let mut grouped: HashMap<&String, HashMap<&String, Vec<&T>>> = HashMap::new();
+    let empty = &"".to_string();
+    for prototype in vec.values() {
+        let subgroup_name = &prototype.base().subgroup;
+        if let Some(subgroup) = subgroups.get(subgroup_name) {
+            let group_name = &subgroup.group;
+            if let Some(group) = groups.get(group_name) {
+                let group_entry = grouped
+                    .entry(&group.base().name)
+                    .or_insert_with(HashMap::new);
+                let subgroup_entry = group_entry
+                    .entry(&subgroup.base.name)
+                    .or_insert_with(Vec::new);
+                subgroup_entry.push(prototype);
+            } else {
+                let group_entry = grouped.entry(empty).or_insert_with(HashMap::new);
+                let subgroup_entry = group_entry
+                    .entry(&subgroup.base.name)
+                    .or_insert_with(Vec::new);
+                subgroup_entry.push(prototype);
+            }
+        } else {
+            let group_entry = grouped.entry(empty).or_insert_with(HashMap::new);
+            let subgroup_entry = group_entry.entry(empty).or_insert_with(Vec::new);
+            subgroup_entry.push(prototype);
+        }
+    }
+
+    let mut ret = vec![];
+
+    let mut group_keys: Vec<&&String> = grouped.keys().collect();
+    group_keys.sort_by_key(|k| {
+        groups
+            .get(**k)
+            .map(|g| g.order.clone())
+            .unwrap_or_else(|| "".to_string())
+    });
+
+    for group_key in group_keys {
+        let subgroups_map = grouped.get(group_key).unwrap();
+        let mut subgroup_keys: Vec<&&String> = subgroups_map.keys().collect();
+        subgroup_keys.sort_by_key(|k| {
+            subgroups
+                .get(**k)
+                .map(|sg| sg.base.order.clone())
+                .unwrap_or_else(|| "".to_string())
+        });
+
+        let mut subgroup_vec = vec![];
+        for subgroup_key in subgroup_keys {
+            let prototypes = subgroups_map.get(subgroup_key).unwrap();
+            let mut sorted_prototypes = prototypes.clone();
+            sorted_prototypes.sort_by_key(|p| &p.base().order);
+            let prototype_names: Vec<String> = sorted_prototypes
+                .iter()
+                .map(|p| p.base().name.clone())
+                .collect();
+            subgroup_vec.push(((*subgroup_key).clone(), prototype_names));
+        }
+        ret.push(((*group_key).clone(), subgroup_vec));
+    }
+
+    ret
+}
+
+pub(crate) fn get_reverse_order_info(
+    order_info: &OrderInfo,
+) -> ReverseOrderInfo {
+    let mut reverse_map: ReverseOrderInfo = HashMap::new();
+    for (group_index, group) in order_info.iter().enumerate() {
+        for (subgroup_index, subgroup) in group.1.iter().enumerate() {
+            for (item_index, item_name) in subgroup.1.iter().enumerate() {
+                reverse_map.insert(
+                    item_name.clone(),
+                    (group_index, subgroup_index, item_index),
+                );
+            }
+        }
+    }
+    reverse_map
 }

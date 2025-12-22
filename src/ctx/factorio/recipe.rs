@@ -3,8 +3,7 @@ use std::{collections::HashMap, fmt::Debug};
 use serde::Deserialize;
 
 use crate::{context::RecipeLike, ctx::factorio::{common::{
-        Dict, Effect, EffectReceiver, EffectTypeLimitation, EnergyAmount, EnergySource,
-        PrototypeBase, update_map,
+        Dict, Effect, EffectReceiver, EffectTypeLimitation, EnergyAmount, EnergySource, PrototypeBase, HasPrototypeBase, update_map
     }, context::{FactorioContext, GenericItem}}};
 
 use crate::ctx::factorio::common::{as_vec_or_empty, option_as_vec_or_empty};
@@ -128,6 +127,12 @@ pub(crate) enum RecipeResult {
     /// 流体产物
     #[serde(rename = "fluid")]
     Fluid(FluidResult),
+}
+
+impl HasPrototypeBase for RecipePrototype {
+    fn base(&self) -> &PrototypeBase {
+        &self.base
+    }
 }
 
 #[derive(Clone, Deserialize)]
@@ -360,6 +365,12 @@ pub(crate) struct CraftingMachinePrototype {
     pub(crate) input_limit: Option<f64>,
     #[serde(alias = "result_inventory_size", alias = "max_item_product_count")]
     pub(crate) output_limit: Option<f64>,
+}
+
+impl HasPrototypeBase for CraftingMachinePrototype {
+    fn base(&self) -> &PrototypeBase {
+        &self.base
+    }
 }
 
 #[derive(Debug, Clone)]

@@ -2,7 +2,7 @@
 use serde::Deserialize;
 
 use crate::ctx::factorio::{
-    common::{BoundingBox, EnergyAmount, PrototypeBase, option_as_vec_or_empty},
+    common::{BoundingBox, EnergyAmount, PrototypeBase, HasPrototypeBase, option_as_vec_or_empty},
     recipe::RecipeResult,
 };
 
@@ -167,4 +167,10 @@ pub(crate) struct MiningProperty {
 
     pub(crate) fluid_amount: Option<f64>,
     pub(crate) required_fluid: Option<String>,
+}
+
+impl HasPrototypeBase for EntityPrototype {
+    fn base(&self) -> &PrototypeBase {
+        &self.base
+    }
 }

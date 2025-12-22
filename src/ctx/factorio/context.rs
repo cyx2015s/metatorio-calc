@@ -3,18 +3,21 @@ use std::{collections::HashMap, env, fmt::Debug, hash::Hash};
 use serde_json::Value;
 
 use crate::{
-    context::{ItemLike, RecipeLike},
+    context::ItemLike,
     ctx::factorio::{
-        common::Dict,
+        common::{Dict, ItemSubgroup, PrototypeBase},
         entity::{ENTITY_TYPES, EntityPrototype},
         fluid::FluidPrototype,
         item::{ITEM_TYPES, ItemPrototype},
-        recipe::{CraftingMachinePrototype, RecipeConfig, RecipePrototype},
+        recipe::{CraftingMachinePrototype, RecipePrototype},
     },
 };
 
 #[derive(Debug)]
 pub(crate) struct FactorioContext {
+    /// 排序参考依据
+    pub(crate) groups: Dict<PrototypeBase>,
+    pub(crate) subgroups: Dict<ItemSubgroup>,
     /// 被转化的物品集合
     pub(crate) items: Dict<ItemPrototype>,
     pub(crate) entities: Dict<EntityPrototype>,
@@ -27,6 +30,18 @@ pub(crate) struct FactorioContext {
 
 impl FactorioContext {
     pub(crate) fn load(value: &Value) -> Self {
+        let groups: Dict<PrototypeBase> = serde_json::from_value(
+            value
+                .get("item-group")
+                .cloned()
+                .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
+        ).unwrap();
+        let subgroups: Dict<ItemSubgroup> = serde_json::from_value(
+            value
+                .get("item-subgroup")
+                .cloned()
+                .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
+        ).unwrap();
         let mut items = Dict::<ItemPrototype>::new();
         for item_type in ITEM_TYPES.iter() {
             if let Some(item_values) = value.get(item_type) {
@@ -71,6 +86,8 @@ impl FactorioContext {
             }
         }
         FactorioContext {
+            groups,
+            subgroups,
             items,
             entities,
             fluids,
@@ -90,12 +107,12 @@ impl FactorioContext {
                 return None;
             }
         };
-        let config_path = self_path.join("/tmpconfig/config.ini");
+        let config_path = self_path.join("tmp/config/config.ini");
         if config_path.exists() == false {
             std::fs::create_dir_all(config_path.parent()?).ok()?;
         }
         // 配置配置文件：写入到自定义的文件夹中避免和运行中的游戏抢锁
-        std::fs::write(&config_path, format!("[path]\nwrite-data={}\n[general]\nlocale=zh-CN", self_path.display())).ok()?;
+        std::fs::write(&config_path, format!("[path]\nwrite-data={}\n[general]\nlocale=zh-CN", self_path.join("tmp").display())).ok()?;
         let dump_raw_command = std::process::Command::new(executable_path)
             .arg("--dump-data")
             .arg("--config")
@@ -106,7 +123,7 @@ impl FactorioContext {
         if status.success() == false {
             return None;
         }
-        let data_raw_dump_json_path = self_path.join("script-output/data-raw-dump.json");
+        let data_raw_dump_json_path = self_path.join("tmp/script-output/data-raw-dump.json");
         let data_str = std::fs::read_to_string(data_raw_dump_json_path).ok()?;
         let value: serde_json::Value = serde_json::from_str(&data_str).ok()?;
         let ctx = FactorioContext::load(&value);

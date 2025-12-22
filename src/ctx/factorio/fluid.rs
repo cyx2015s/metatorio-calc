@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-use crate::ctx::factorio::common::{EnergyAmount, PrototypeBase};
+use crate::ctx::factorio::common::{EnergyAmount, PrototypeBase, HasPrototypeBase};
 
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct FluidPrototype {
@@ -16,4 +16,10 @@ pub(crate) struct FluidPrototype {
 
     /// 燃烧每单位液体所释放的能量
     pub(crate) fuel_value: Option<EnergyAmount>,
+}
+
+impl HasPrototypeBase for FluidPrototype {
+    fn base(&self) -> &PrototypeBase {
+        &self.base
+    }
 }

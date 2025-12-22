@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-use crate::ctx::factorio::common::{EnergyAmount, PrototypeBase};
+use crate::ctx::factorio::common::{EnergyAmount, PrototypeBase, HasPrototypeBase};
 
 pub(crate) const ITEM_TYPES: &[&str] = &[
     "item",
@@ -68,6 +68,12 @@ impl Default for ItemPrototype {
             place_as_tile: None,
             place_result: None,
         }
+    }
+}
+
+impl HasPrototypeBase for ItemPrototype {
+    fn base(&self) -> &PrototypeBase {
+        &self.base
     }
 }
 
