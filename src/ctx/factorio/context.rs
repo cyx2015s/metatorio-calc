@@ -119,8 +119,16 @@ impl FactorioContext {
             .arg(&config_path.to_str().unwrap())
             .output()
             .ok()?;
-        let status = dump_raw_command.status;
-        if status.success() == false {
+        if dump_raw_command.status.success() == false {
+            return None;
+        }
+        let dump_icon_sprites_command = std::process::Command::new(executable_path)
+            .arg("--dump-icon-sprites")
+            .arg("--config")
+            .arg(&config_path.to_str().unwrap())
+            .output()
+            .ok()?;
+        if dump_icon_sprites_command.status.success() == false {
             return None;
         }
         let data_raw_dump_json_path = self_path.join("tmp/script-output/data-raw-dump.json");
