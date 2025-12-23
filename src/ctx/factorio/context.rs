@@ -3,13 +3,21 @@ use std::{collections::HashMap, env, fmt::Debug, hash::Hash};
 use serde_json::Value;
 
 use crate::ctx::{
-    ItemLike, factorio::{
-        common::{Dict, ItemSubgroup, PrototypeBase}, entity::{ENTITY_TYPES, EntityPrototype}, fluid::FluidPrototype, item::{ITEM_TYPES, ItemPrototype}, mining::{MiningDrillPrototype, ResourcePrototype}, recipe::{CraftingMachinePrototype, RecipePrototype}
-    }
+    ItemLike,
+    factorio::{
+        common::{Dict, ItemSubgroup, PrototypeBase},
+        entity::{ENTITY_TYPES, EntityPrototype},
+        fluid::FluidPrototype,
+        item::{ITEM_TYPES, ItemPrototype},
+        mining::{MiningDrillPrototype, ResourcePrototype},
+        recipe::{CraftingMachinePrototype, RecipePrototype},
+    },
 };
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct FactorioContext {
+    /// 图标路径
+    pub(crate) icon_path: Option<std::path::PathBuf>,
     /// 排序参考依据
     pub(crate) groups: Dict<PrototypeBase>,
     pub(crate) subgroups: Dict<ItemSubgroup>,
@@ -92,13 +100,15 @@ impl FactorioContext {
                 .get("resource")
                 .cloned()
                 .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
-        ).unwrap();
+        )
+        .unwrap();
         let miners: Dict<MiningDrillPrototype> = serde_json::from_value(
             value
                 .get("mining-drill")
                 .cloned()
                 .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
-        ).unwrap();
+        )
+        .unwrap();
         FactorioContext {
             groups,
             subgroups,
@@ -109,6 +119,7 @@ impl FactorioContext {
             crafters,
             resources,
             miners,
+            icon_path: None,
         }
     }
 
@@ -145,19 +156,33 @@ impl FactorioContext {
         if dump_raw_command.status.success() == false {
             return None;
         }
-        // let dump_icon_sprites_command = std::process::Command::new(executable_path)
-        //     .arg("--dump-icon-sprites")
-        //     .arg("--config")
-        //     .arg(&config_path.to_str().unwrap())
-        //     .output()
-        //     .ok()?;
-        // if dump_icon_sprites_command.status.success() == false {
-        //     return None;
-        // }
-        let data_raw_dump_json_path = self_path.join("tmp/script-output/data-raw-dump.json");
-        let data_str = std::fs::read_to_string(data_raw_dump_json_path).ok()?;
-        let value: serde_json::Value = serde_json::from_str(&data_str).ok()?;
-        let ctx = FactorioContext::load(&value);
+        let dump_icon_sprites_command = std::process::Command::new(executable_path)
+            .arg("--dump-icon-sprites")
+            .arg("--config")
+            .arg("--disable-audio")
+            .arg(&config_path.to_str().unwrap())
+            .output()
+            .ok()?;
+        if dump_icon_sprites_command.status.success() == false {
+            return None;
+        }
+
+        FactorioContext::load_from_tmp_no_dump()
+    }
+
+    pub(crate) fn load_from_tmp_no_dump() -> Option<FactorioContext> {
+        let self_path = match env::current_dir() {
+            Ok(path) => path,
+            _ => {
+                panic!("Cannot get current directory");
+            }
+        };
+        let raw_path = self_path.join("tmp/script-output/data-raw-dump.json");
+        let icon_path = self_path.join("tmp/script-output/");
+        let mut ctx = FactorioContext::load(
+            &(serde_json::from_str(&std::fs::read_to_string(&raw_path).ok()?)).ok()?,
+        );
+        ctx.icon_path = Some(icon_path);
         Some(ctx)
     }
 }
@@ -241,4 +266,3 @@ fn test_load_context() {
     sample_five(&ctx.recipes);
     sample_five(&ctx.crafters);
 }
-

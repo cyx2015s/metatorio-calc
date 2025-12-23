@@ -4,14 +4,14 @@ use egui::{
     epaint::text::{FontInsert, InsertFontFamily},
 };
 
-use crate::{ctx::GameContextCreator, ctx::factorio::ui::FactorioContextCreator};
+use crate::{ctx::GameContextCreatorView, ctx::factorio::ui::FactorioContextCreatorView};
 
 pub(crate) mod ctx;
 pub(crate) mod lp;
 
 #[derive(Default)]
 pub(crate) struct MainPage {
-    pub(crate) creators: Vec<(String, Box<dyn GameContextCreator>)>,
+    pub(crate) creators: Vec<(String, Box<dyn GameContextCreatorView>)>,
     pub(crate) subviews: Vec<(String, Box<dyn SubView>)>,
     pub(crate) selected: usize,
 }
@@ -26,7 +26,7 @@ impl MainPage {
         Self {
             creators: vec![(
                 "预设：加载异星工厂上下文".to_string(),
-                Box::new(FactorioContextCreator::default()),
+                Box::new(FactorioContextCreatorView::default()),
             )],
             subviews: vec![],
             selected: 0,
@@ -95,10 +95,14 @@ fn add_font(ctx: &egui::Context) {
 }
 
 fn main() {
+    env_logger::init();
     run_native(
         "Demo App",
         NativeOptions::default(),
-        Box::new(|_cc| Ok(Box::new(MainPage::new(_cc)))),
+        Box::new(|_cc| {
+            egui_extras::install_image_loaders(&_cc.egui_ctx);
+            Ok(Box::new(MainPage::new(_cc)))
+        }),
     )
     .unwrap();
 }

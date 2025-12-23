@@ -1,13 +1,19 @@
-use std::any::{Any, TypeId};
+use std::{
+    any::{Any, TypeId},
+    fs,
+};
 
-use egui::ScrollArea;
+use egui::{AtomExt, ImageSource, ScrollArea, Vec2};
 
 use crate::{
     SubView,
     ctx::{
-        GameContextCreator, RecipeLike,
+        GameContextCreatorView, RecipeLike,
         factorio::{
-            common::{Effect, OrderInfo, ReverseOrderInfo}, context::FactorioContext, mining::MiningConfig, recipe::RecipeConfig
+            common::{Effect, OrderInfo, ReverseOrderInfo},
+            context::FactorioContext,
+            mining::MiningConfig,
+            recipe::RecipeConfig,
         },
     },
 };
@@ -128,6 +134,22 @@ impl SubView for FactorioPlanner {
                                 for recipe_name in subgroup.1.iter() {
                                     ui.collapsing(format!("Recipe {}", recipe_name), |ui| {
                                         if let Some(recipe) = self.ctx.recipes.get(recipe_name) {
+                                            if let Some(icon_path) = &self.ctx.icon_path {
+                                                let recipe_icon_path = format!(
+                                                    "file:///{}/recipe/{}.png",
+                                                    icon_path.to_string_lossy(),
+                                                    recipe_name
+                                                );
+                                                ui.add(
+                                                    egui::Image::new(recipe_icon_path)
+                                                        .fit_to_exact_size(Vec2 {
+                                                            x: 128.0,
+                                                            y: 128.0,
+                                                        }).show_loading_spinner(true).maintain_aspect_ratio(true).bg_fill(egui::Color32::from_rgb(11, 45, 14)),
+                                                );
+                                            } else {
+                                                ui.label("未找到图标路径！");
+                                            }
                                             ui.label(format!("配方: {}", recipe_name));
                                             ui.label(format!("{:#?}", recipe));
                                         } else {
@@ -144,12 +166,13 @@ impl SubView for FactorioPlanner {
 }
 
 #[derive(Default, Debug)]
-pub(crate) struct FactorioContextCreator {
+pub(crate) struct FactorioContextCreatorView {
     path: Option<std::path::PathBuf>,
+    skip_dumping: bool,
     created_context: Option<FactorioContext>,
 }
 
-impl SubView for FactorioContextCreator {
+impl SubView for FactorioContextCreatorView {
     fn ui(&mut self, ui: &mut egui::Ui) {
         ui.heading("加载异星工厂上下文");
         if let Some(path) = &self.path {
@@ -165,13 +188,16 @@ impl SubView for FactorioContextCreator {
                     self.path = Some(selected_path);
                 }
             });
+        ui.checkbox(&mut self.skip_dumping, "跳过数据转储");
         if self.path.is_some() {
             if ui
                 .button("新建上下文（阻塞！！！）")
                 .on_hover_text("从所选路径加载异星工厂上下文数据")
                 .clicked()
             {
-                if let Some(ctx) =
+                if self.skip_dumping {
+                    self.created_context = FactorioContext::load_from_tmp_no_dump();
+                } else if let Some(ctx) =
                     FactorioContext::load_from_executable_path(self.path.as_ref().unwrap())
                 {
                     self.created_context = Some(ctx);
@@ -181,7 +207,7 @@ impl SubView for FactorioContextCreator {
     }
 }
 
-impl GameContextCreator for FactorioContextCreator {
+impl GameContextCreatorView for FactorioContextCreatorView {
     fn try_create_subview(&mut self) -> Option<Box<dyn SubView>> {
         if self.created_context.is_some() {
             return Some(Box::new(FactorioPlanner {
@@ -230,7 +256,7 @@ impl GameContextCreator for FactorioContextCreator {
                             machine: Some("big-mining-drill".to_string()),
                             modules: vec![],
                             extra_effects: Effect::default(),
-                        })
+                        }),
                     ],
                 }],
                 selected_factory: 0,

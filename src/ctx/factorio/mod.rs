@@ -6,3 +6,4 @@ pub(crate) mod item;
 pub(crate) mod mining;
 pub(crate) mod recipe;
 pub(crate) mod ui;
+pub(crate) mod image;
