@@ -412,6 +412,7 @@ impl RecipeLike for RecipeConfig {
             base_speed = crafter.crafting_speed;
             // TODO: 计算能量消耗
         }
+        module_effects = module_effects + self.extra_effects.clone();
         module_effects = module_effects.clamped();
 
         let recipe = ctx

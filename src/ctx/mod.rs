@@ -3,7 +3,7 @@ use std::{collections::HashMap, fmt::Debug, hash::Hash};
 use crate::SubView;
 
 pub(crate) trait RecipeLike {
-    type KeyType;
+    type KeyType: Debug + Clone + Eq + Hash + PartialEq;
     type ContextType;
     fn as_hash_map(&self, ctx: &Self::ContextType) -> HashMap<Self::KeyType, f64>;
 }

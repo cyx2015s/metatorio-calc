@@ -1,26 +1,30 @@
+use std::any::{Any, TypeId};
+
 use egui::ScrollArea;
 
 use crate::{
     SubView,
-    ctx::{GameContextCreator, RecipeLike, factorio::{common::{Effect, OrderInfo, ReverseOrderInfo}, context::FactorioContext, recipe::RecipeConfig}},
+    ctx::{
+        GameContextCreator, RecipeLike,
+        factorio::{
+            common::{Effect, OrderInfo, ReverseOrderInfo}, context::FactorioContext, mining::MiningConfig, recipe::RecipeConfig
+        },
+    },
 };
 
 pub(crate) trait ConfigView {
     fn ui(&self, ui: &mut egui::Ui, ctx: &FactorioContext);
 }
 
-impl ConfigView for RecipeConfig {
+impl<T: RecipeLike<ContextType = FactorioContext> + 'static> ConfigView for T {
     fn ui(&self, ui: &mut egui::Ui, ctx: &FactorioContext) {
-        ui.horizontal(|ui| {
-            ui.label("配方");
-            let hash_map = self.as_hash_map(&ctx);
-            for (item, amount) in hash_map.iter() {
-                ui.label(format!("{:?}: {}", item, amount));
-            }
-        });
+        ui.label(format!(
+            "配方类型:{:?}\n配方转化: {:?}",
+            self.type_id(),
+            self.as_hash_map(ctx)
+        ));
     }
 }
-
 pub(crate) struct FactoryView {
     recipe_configs: Vec<Box<dyn ConfigView>>,
 }
@@ -43,7 +47,7 @@ pub(crate) struct FactorioPlanner {
 
 impl FactorioPlanner {
     pub(crate) fn new(ctx: FactorioContext) -> Self {
-        let mut ret = FactorioPlanner {
+        FactorioPlanner {
             item_order: None,
             ctx,
             factories: Vec::new(),
@@ -51,51 +55,7 @@ impl FactorioPlanner {
             reverse_item_order: None,
             recipe_order: None,
             reverse_recipe_order: None,
-        };
-        ret.factories.push(FactoryView {
-            recipe_configs: vec![
-                Box::new(RecipeConfig {
-                    recipe: "iron-gear-wheel".to_string(),
-                    machine: Some("assembling-machine-2".to_string()),
-                    modules: vec![],
-                    quality: 0,
-                    extra_effects: Effect::default(),
-                }),
-                Box::new(RecipeConfig {
-                    recipe: "iron-plate".to_string(),
-                    machine: Some("stone-furnace".to_string()),
-                    modules: vec![],
-                    quality: 0,
-                    extra_effects: Effect::default(),
-                }),
-                Box::new(RecipeConfig {
-                    recipe: "copper-plate".to_string(),
-                    machine: Some("stone-furnace".to_string()),
-                    modules: vec![],
-                    quality: 0,
-                    extra_effects: Effect::default(),
-                }),
-                Box::new(RecipeConfig {
-                    recipe: "copper-cable".to_string(),
-                    machine: Some("assembling-machine-2".to_string()),
-                    modules: vec![],
-                    quality: 0,
-                    extra_effects: Effect::default(),
-                }),
-                Box::new(RecipeConfig {
-                    recipe: "electronic-circuit".to_string(),
-                    machine: Some("assembling-machine-2".to_string()),
-                    modules: vec![],
-                    quality: 0,
-                    extra_effects: Effect::default(),
-                }),
-            ],
-        });
-
-        ret.factories.push(FactoryView {
-            recipe_configs: vec![],
-        });
-        ret
+        }
     }
 }
 
@@ -170,7 +130,6 @@ impl SubView for FactorioPlanner {
                                         if let Some(recipe) = self.ctx.recipes.get(recipe_name) {
                                             ui.label(format!("配方: {}", recipe_name));
                                             ui.label(format!("{:#?}", recipe));
-                                            
                                         } else {
                                             ui.label("未找到该配方！");
                                         }
@@ -228,7 +187,52 @@ impl GameContextCreator for FactorioContextCreator {
             return Some(Box::new(FactorioPlanner {
                 item_order: None,
                 ctx: self.created_context.take().unwrap(),
-                factories: Vec::new(),
+                factories: vec![FactoryView {
+                    recipe_configs: vec![
+                        Box::new(RecipeConfig {
+                            recipe: "iron-gear-wheel".to_string(),
+                            machine: Some("assembling-machine-2".to_string()),
+                            modules: vec![],
+                            quality: 0,
+                            extra_effects: Effect::default(),
+                        }),
+                        Box::new(RecipeConfig {
+                            recipe: "iron-plate".to_string(),
+                            machine: Some("stone-furnace".to_string()),
+                            modules: vec![],
+                            quality: 0,
+                            extra_effects: Effect::default(),
+                        }),
+                        Box::new(RecipeConfig {
+                            recipe: "copper-plate".to_string(),
+                            machine: Some("stone-furnace".to_string()),
+                            modules: vec![],
+                            quality: 0,
+                            extra_effects: Effect::default(),
+                        }),
+                        Box::new(RecipeConfig {
+                            recipe: "copper-cable".to_string(),
+                            machine: Some("assembling-machine-2".to_string()),
+                            modules: vec![],
+                            quality: 0,
+                            extra_effects: Effect::default(),
+                        }),
+                        Box::new(RecipeConfig {
+                            recipe: "electronic-circuit".to_string(),
+                            machine: Some("assembling-machine-2".to_string()),
+                            modules: vec![],
+                            quality: 0,
+                            extra_effects: Effect::default(),
+                        }),
+                        Box::new(MiningConfig {
+                            resource: "iron-ore".to_string(),
+                            quality: 0,
+                            machine: Some("big-mining-drill".to_string()),
+                            modules: vec![],
+                            extra_effects: Effect::default(),
+                        })
+                    ],
+                }],
                 selected_factory: 0,
                 reverse_item_order: None,
                 recipe_order: None,

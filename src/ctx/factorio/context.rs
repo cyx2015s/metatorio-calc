@@ -3,8 +3,8 @@ use std::{collections::HashMap, env, fmt::Debug, hash::Hash};
 use serde_json::Value;
 
 use crate::ctx::{
-    ItemLike, RecipeLike, factorio::{
-        common::{Dict, ItemSubgroup, PrototypeBase}, entity::{ENTITY_TYPES, EntityPrototype}, fluid::FluidPrototype, item::{ITEM_TYPES, ItemPrototype}, mining::{MiningDrillPrototype, ResourcePrototype}, recipe::{CraftingMachinePrototype, RecipeConfig, RecipePrototype}
+    ItemLike, factorio::{
+        common::{Dict, ItemSubgroup, PrototypeBase}, entity::{ENTITY_TYPES, EntityPrototype}, fluid::FluidPrototype, item::{ITEM_TYPES, ItemPrototype}, mining::{MiningDrillPrototype, ResourcePrototype}, recipe::{CraftingMachinePrototype, RecipePrototype}
     }
 };
 
@@ -145,15 +145,15 @@ impl FactorioContext {
         if dump_raw_command.status.success() == false {
             return None;
         }
-        let dump_icon_sprites_command = std::process::Command::new(executable_path)
-            .arg("--dump-icon-sprites")
-            .arg("--config")
-            .arg(&config_path.to_str().unwrap())
-            .output()
-            .ok()?;
-        if dump_icon_sprites_command.status.success() == false {
-            return None;
-        }
+        // let dump_icon_sprites_command = std::process::Command::new(executable_path)
+        //     .arg("--dump-icon-sprites")
+        //     .arg("--config")
+        //     .arg(&config_path.to_str().unwrap())
+        //     .output()
+        //     .ok()?;
+        // if dump_icon_sprites_command.status.success() == false {
+        //     return None;
+        // }
         let data_raw_dump_json_path = self_path.join("tmp/script-output/data-raw-dump.json");
         let data_str = std::fs::read_to_string(data_raw_dump_json_path).ok()?;
         let value: serde_json::Value = serde_json::from_str(&data_str).ok()?;

@@ -7,11 +7,11 @@ use crate::ctx::{
     factorio::{
         common::{
             Effect, EffectReceiver, EffectTypeLimitation, EnergySource, HasPrototypeBase,
-            PrototypeBase, option_as_vec_or_empty, update_map,
+            PrototypeBase, update_map, option_as_vec_or_empty
         },
         context::{FactorioContext, GenericItem, make_located_generic_recipe},
         entity::EntityPrototype,
-        recipe::{ItemResult, RecipeResult},
+        recipe::RecipeResult,
     },
 };
 
@@ -113,7 +113,7 @@ impl RecipeLike for MiningConfig {
             resource_drain_rate = miner.resource_drain_rate_percent.unwrap_or(100.0) / 100.0;
             base_speed *= miner.mining_speed;
         }
-
+        module_effects = module_effects + self.extra_effects.clone();
         module_effects = module_effects.clamped();
 
         // 计算矿物实体本身的消耗
@@ -200,9 +200,12 @@ fn test_mining_normalized() {
     let mining_config = MiningConfig {
         resource: "uranium-ore".to_string(),
         quality: 0,
-        machine: Some("electric-mining-drill".to_string()),
+        machine: Some("big-mining-drill".to_string()),
         modules: vec![],
-        extra_effects: Effect::default(),
+        extra_effects: Effect {
+            productivity: 1.0,
+            ..Default::default()
+        },
     };
 
     let result = mining_config.as_hash_map(&ctx);
