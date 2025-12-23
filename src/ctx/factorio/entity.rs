@@ -1,8 +1,7 @@
-
 use serde::Deserialize;
 
 use crate::ctx::factorio::{
-    common::{BoundingBox, EnergyAmount, PrototypeBase, HasPrototypeBase, option_as_vec_or_empty},
+    common::{BoundingBox, EnergyAmount, HasPrototypeBase, PrototypeBase, option_as_vec_or_empty},
     recipe::RecipeResult,
 };
 
@@ -147,11 +146,11 @@ pub(crate) struct EntityPrototype {
     #[serde(flatten)]
     pub(crate) base: PrototypeBase,
 
-    heating_energy: Option<EnergyAmount>,
+    pub(crate) heating_energy: Option<EnergyAmount>,
 
-    collision_box: Option<BoundingBox>,
+    pub(crate) collision_box: Option<BoundingBox>,
 
-    minable: Option<MiningProperty>,
+    pub(crate) minable: Option<MiningProperty>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

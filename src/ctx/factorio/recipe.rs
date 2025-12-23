@@ -2,9 +2,9 @@ use std::{collections::HashMap, fmt::Debug};
 
 use serde::Deserialize;
 
-use crate::{context::RecipeLike, ctx::factorio::{common::{
-        Dict, Effect, EffectReceiver, EffectTypeLimitation, EnergyAmount, EnergySource, PrototypeBase, HasPrototypeBase, update_map
-    }, context::{FactorioContext, GenericItem}}};
+use crate::ctx::{RecipeLike, factorio::{common::{
+        Dict, Effect, EffectReceiver, EffectTypeLimitation, EnergyAmount, EnergySource, HasPrototypeBase, PrototypeBase, update_map
+    }, context::{FactorioContext, GenericItem, make_located_generic_recipe}, entity::EntityPrototype}};
 
 use crate::ctx::factorio::common::{as_vec_or_empty, option_as_vec_or_empty};
 
@@ -328,7 +328,7 @@ const CRAFTING_MACHINE_TYPES: &[&str] = &["assembling-machine", "furnace", "rock
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct CraftingMachinePrototype {
     #[serde(flatten)]
-    pub(crate) base: PrototypeBase,
+    pub(crate) base: EntityPrototype,
     #[serde(default)]
     pub(crate) quality_affects_energy_usage: bool,
     #[serde(default)]
@@ -369,7 +369,7 @@ pub(crate) struct CraftingMachinePrototype {
 
 impl HasPrototypeBase for CraftingMachinePrototype {
     fn base(&self) -> &PrototypeBase {
-        &self.base
+        &self.base.base
     }
 }
 
@@ -379,6 +379,7 @@ pub(crate) struct RecipeConfig {
     pub(crate) quality: u8,
     pub(crate) machine: Option<String>,
     pub(crate) modules: Vec<String>,
+    pub(crate) extra_effects: Effect,
 }
 
 impl RecipeLike for RecipeConfig {
@@ -400,16 +401,15 @@ impl RecipeLike for RecipeConfig {
             None => None,
         };
 
-        if crafter.is_some() {
+        if let Some(crafter) = crafter {
             module_effects = module_effects
                 + crafter
-                    .unwrap()
                     .effect_receiver
                     .clone()
                     .unwrap_or_default()
                     .base_effect
                     .clone();
-            base_speed = crafter.unwrap().crafting_speed;
+            base_speed = crafter.crafting_speed;
             // TODO: 计算能量消耗
         }
         module_effects = module_effects.clamped();
@@ -482,4 +482,22 @@ impl RecipeLike for RecipeConfig {
 
         map
     }
+}
+
+#[test]
+fn test_recipe_normalized() {
+    let ctx = FactorioContext::load(
+        &serde_json::from_str(include_str!("../../../assets/data-raw-dump.json")).unwrap(),
+    );
+    let recipe_config = RecipeConfig {
+        recipe: "pentapod-egg".to_string(),
+        quality: 1,
+        machine: Some("centrifuge".to_string()),
+        modules: vec![],
+        extra_effects: Effect::default(),
+    };
+    let result = recipe_config.as_hash_map(&ctx);
+    println!("Recipe Result: {:?}", result);
+    let result_with_location = make_located_generic_recipe(result, 1);
+    println!("Recipe Result with Location: {:?}", result_with_location);
 }

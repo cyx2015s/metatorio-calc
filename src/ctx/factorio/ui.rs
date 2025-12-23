@@ -1,13 +1,8 @@
 use egui::ScrollArea;
 
 use crate::{
-    Renderable,
-    context::{GameContextCreator, RecipeLike},
-    ctx::factorio::{
-        common::{OrderInfo, ReverseOrderInfo},
-        context::FactorioContext,
-        recipe::RecipeConfig,
-    },
+    SubView,
+    ctx::{GameContextCreator, RecipeLike, factorio::{common::{Effect, OrderInfo, ReverseOrderInfo}, context::FactorioContext, recipe::RecipeConfig}},
 };
 
 pub(crate) trait ConfigView {
@@ -64,30 +59,35 @@ impl FactorioPlanner {
                     machine: Some("assembling-machine-2".to_string()),
                     modules: vec![],
                     quality: 0,
+                    extra_effects: Effect::default(),
                 }),
                 Box::new(RecipeConfig {
                     recipe: "iron-plate".to_string(),
                     machine: Some("stone-furnace".to_string()),
                     modules: vec![],
                     quality: 0,
+                    extra_effects: Effect::default(),
                 }),
                 Box::new(RecipeConfig {
                     recipe: "copper-plate".to_string(),
                     machine: Some("stone-furnace".to_string()),
                     modules: vec![],
                     quality: 0,
+                    extra_effects: Effect::default(),
                 }),
                 Box::new(RecipeConfig {
                     recipe: "copper-cable".to_string(),
                     machine: Some("assembling-machine-2".to_string()),
                     modules: vec![],
                     quality: 0,
+                    extra_effects: Effect::default(),
                 }),
                 Box::new(RecipeConfig {
                     recipe: "electronic-circuit".to_string(),
                     machine: Some("assembling-machine-2".to_string()),
                     modules: vec![],
                     quality: 0,
+                    extra_effects: Effect::default(),
                 }),
             ],
         });
@@ -107,7 +107,7 @@ impl Default for FactorioPlanner {
     }
 }
 
-impl Renderable for FactorioPlanner {
+impl SubView for FactorioPlanner {
     fn ui(&mut self, ui: &mut egui::Ui) {
         ui.heading("Factorio Planner");
         ui.horizontal(|ui| {
@@ -190,7 +190,7 @@ pub(crate) struct FactorioContextCreator {
     created_context: Option<FactorioContext>,
 }
 
-impl Renderable for FactorioContextCreator {
+impl SubView for FactorioContextCreator {
     fn ui(&mut self, ui: &mut egui::Ui) {
         ui.heading("加载异星工厂上下文");
         if let Some(path) = &self.path {
@@ -223,7 +223,7 @@ impl Renderable for FactorioContextCreator {
 }
 
 impl GameContextCreator for FactorioContextCreator {
-    fn try_create_subview(&mut self) -> Option<Box<dyn Renderable>> {
+    fn try_create_subview(&mut self) -> Option<Box<dyn SubView>> {
         if self.created_context.is_some() {
             return Some(Box::new(FactorioPlanner {
                 item_order: None,

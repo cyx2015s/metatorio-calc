@@ -4,24 +4,23 @@ use egui::{
     epaint::text::{FontInsert, InsertFontFamily},
 };
 
-use crate::{context::GameContextCreator, ctx::factorio::ui::FactorioContextCreator};
+use crate::{ctx::GameContextCreator, ctx::factorio::ui::FactorioContextCreator};
 
-pub(crate) mod context;
 pub(crate) mod ctx;
 pub(crate) mod lp;
 
 #[derive(Default)]
-pub(crate) struct MainFrame {
+pub(crate) struct MainPage {
     pub(crate) creators: Vec<(String, Box<dyn GameContextCreator>)>,
-    pub(crate) subviews: Vec<(String, Box<dyn Renderable>)>,
+    pub(crate) subviews: Vec<(String, Box<dyn SubView>)>,
     pub(crate) selected: usize,
 }
 
-trait Renderable {
+trait SubView {
     fn ui(&mut self, ui: &mut egui::Ui);
 }
 
-impl MainFrame {
+impl MainPage {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         add_font(&cc.egui_ctx);
         Self {
@@ -35,7 +34,7 @@ impl MainFrame {
     }
 }
 
-impl eframe::App for MainFrame {
+impl eframe::App for MainPage {
     fn update(&mut self, ctx: &eframe::egui::Context, frame: &mut eframe::Frame) {
         egui::SidePanel::left(Id::new("LeftPanel")).show(ctx, |ui| {
             ui.heading("Metatorio");
@@ -99,7 +98,7 @@ fn main() {
     run_native(
         "Demo App",
         NativeOptions::default(),
-        Box::new(|_cc| Ok(Box::new(MainFrame::new(_cc)))),
+        Box::new(|_cc| Ok(Box::new(MainPage::new(_cc)))),
     )
     .unwrap();
 }
