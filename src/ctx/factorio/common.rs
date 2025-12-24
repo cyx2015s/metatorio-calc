@@ -398,7 +398,7 @@ pub(crate) fn get_order_info<T: HasPrototypeBase + Clone>(
     subgroups: &Dict<ItemSubgroup>,
 ) ->OrderInfo {
     let mut grouped: HashMap<&String, HashMap<&String, Vec<&T>>> = HashMap::new();
-    let empty = &"".to_string();
+    let other = &"other".to_string();
     for prototype in vec.values() {
         let subgroup_name = &prototype.base().subgroup;
         if let Some(subgroup) = subgroups.get(subgroup_name) {
@@ -412,15 +412,15 @@ pub(crate) fn get_order_info<T: HasPrototypeBase + Clone>(
                     .or_insert_with(Vec::new);
                 subgroup_entry.push(prototype);
             } else {
-                let group_entry = grouped.entry(empty).or_insert_with(HashMap::new);
+                let group_entry = grouped.entry(other).or_insert_with(HashMap::new);
                 let subgroup_entry = group_entry
                     .entry(&subgroup.base.name)
                     .or_insert_with(Vec::new);
                 subgroup_entry.push(prototype);
             }
         } else {
-            let group_entry = grouped.entry(empty).or_insert_with(HashMap::new);
-            let subgroup_entry = group_entry.entry(empty).or_insert_with(Vec::new);
+            let group_entry = grouped.entry(other).or_insert_with(HashMap::new);
+            let subgroup_entry = group_entry.entry(other).or_insert_with(Vec::new);
             subgroup_entry.push(prototype);
         }
     }
@@ -449,7 +449,7 @@ pub(crate) fn get_order_info<T: HasPrototypeBase + Clone>(
         for subgroup_key in subgroup_keys {
             let prototypes = subgroups_map.get(subgroup_key).unwrap();
             let mut sorted_prototypes = prototypes.clone();
-            sorted_prototypes.sort_by_key(|p| &p.base().order);
+            sorted_prototypes.sort_by_key(|p| (&p.base().order, &p.base().name));
             let prototype_names: Vec<String> = sorted_prototypes
                 .iter()
                 .map(|p| p.base().name.clone())

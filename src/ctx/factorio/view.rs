@@ -1,14 +1,14 @@
 use std::any::Any;
 
-use egui::{ScrollArea, Vec2};
+use egui::{Image, ScrollArea, Sense, Vec2};
 
 use crate::{
     SubView,
     ctx::{
         GameContextCreatorView, RecipeLike,
         factorio::{
-            common::{Effect, OrderInfo, ReverseOrderInfo},
-            context::Context,
+            common::{Effect, OrderInfo},
+            context::{Context, GenericItem},
             mining::MiningConfig,
             recipe::RecipeConfig,
         },
@@ -38,27 +38,35 @@ pub(crate) struct PlannerView {
 
     pub(crate) factories: Vec<FactoryView>,
     pub(crate) selected_factory: usize,
+
+    pub(crate) item_selector_storage: ItemSelectorStorage,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 
-pub(crate) struct Icon {
-    pub(crate) root_path: std::path::PathBuf,
-    pub(crate) type_name: String,
-    pub(crate) item_name: String,
+pub(crate) struct Icon<'a> {
+    pub(crate) root_path: &'a std::path::Path,
+    pub(crate) type_name: &'a String,
+    pub(crate) item_name: &'a String,
     pub(crate) size: f32,
 }
 
-impl egui::Widget for Icon {
-    fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+impl<'a> Icon<'a> {
+    fn image(&'_ self) -> egui::Image<'_> {
         let icon_path = format!(
             "file://{}/{}/{}.png",
             self.root_path.to_string_lossy(),
             self.type_name,
             self.item_name
         );
+        egui::Image::new(icon_path)
+    }
+}
+
+impl<'a> egui::Widget for Icon<'a> {
+    fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         ui.add(
-            egui::Image::new(icon_path)
+            self.image()
                 .fit_to_exact_size(Vec2 {
                     x: self.size,
                     y: self.size,
@@ -73,12 +81,107 @@ impl egui::Widget for Icon {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ItemSelectorStorage {
+    pub(crate) current_type: u8,
+    pub(crate) group: usize,
+    pub(crate) subgroup: usize,
+    pub(crate) index: usize,
+    pub(crate) selected_item: Option<String>,
+}
+
+pub(crate) struct ItemSelector<'a> {
+    pub(crate) icon_path: &'a std::path::Path,
+    pub(crate) item_type: &'a String,
+    pub(crate) order_info: &'a OrderInfo,
+    pub(crate) storage: &'a mut ItemSelectorStorage,
+}
+
+impl egui::Widget for ItemSelector<'_> {
+    fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+        let mut response = ui.response().clone();
+        egui::Grid::new("ItemGroupGrid")
+            .min_row_height(64.0)
+            .min_col_width(64.0)
+            .max_col_width(64.0)
+            .spacing(Vec2 { x: 6.0, y: 6.0 })
+            .show(ui, |ui| {
+                for (i, group) in self.order_info.iter().enumerate() {
+                    if (i % 8) == 0 && i != 0 {
+                        ui.end_row();
+                    }
+                    let group_name = if group.0.is_empty() {
+                        "other".to_string()
+                    } else {
+                        group.0.clone()
+                    };
+                    if ui
+                        .add(Icon {
+                            root_path: self.icon_path,
+                            type_name: &"item-group".to_string(),
+                            item_name: &group_name,
+                            size: 64.0,
+                        })
+                        .interact(Sense::click())
+                        .clicked()
+                    {
+                        self.storage.group = i;
+                        self.storage.subgroup = 0;
+                        self.storage.index = 0;
+                        self.storage.selected_item = None;
+                    }
+                }
+            });
+        egui::Grid::new("ItemGrid")
+            .num_columns(16)
+            .max_col_width(35.0)
+            .min_col_width(35.0)
+            .min_row_height(35.0)
+            .spacing(Vec2 { x: 0.0, y: 0.0 })
+            .striped(true)
+            .show(ui, |ui| {
+                for (j, subgroup) in self.order_info[self.storage.group].1.iter().enumerate() {
+                    for (k, item_name) in subgroup.1.iter().enumerate() {
+                        if (k % 16) == 0 && k != 0 {
+                            ui.end_row();
+                        }
+                        let button = ui
+                            .add(
+                                Icon {
+                                    root_path: self.icon_path,
+                                    type_name: self.item_type,
+                                    item_name,
+                                    size: 32.0,
+                                },
+                            )
+                            .interact(Sense::click());
+
+                        if button.clicked() {
+                            self.storage.subgroup = j;
+                            self.storage.index = k;
+                            self.storage.selected_item = Some(item_name.clone());
+                        }
+                        if self.storage.group == self.storage.group
+                            && self.storage.subgroup == j
+                            && self.storage.index == k
+                        {
+                            response = response.union(button);
+                        }
+                    }
+                    ui.end_row();
+                }
+            });
+        response
+    }
+}
+
 impl PlannerView {
     pub(crate) fn new(ctx: Context) -> Self {
         PlannerView {
             ctx: ctx.build_order_info(),
             factories: Vec::new(),
             selected_factory: 0,
+            item_selector_storage: ItemSelectorStorage::default(),
         }
     }
 }
@@ -94,6 +197,7 @@ impl Default for PlannerView {
 impl SubView for PlannerView {
     fn ui(&mut self, ui: &mut egui::Ui) {
         ui.heading("Factorio Planner");
+
         ui.horizontal(|ui| {
             for i in 0..self.factories.len() {
                 if ui
@@ -114,6 +218,12 @@ impl SubView for PlannerView {
         ScrollArea::new([false, true])
             .auto_shrink([false, false])
             .show(ui, |ui| {
+                ui.add(ItemSelector {
+                    icon_path: self.ctx.icon_path.as_ref().unwrap(),
+                    item_type: &"item".to_string(),
+                    order_info: self.ctx.item_order.as_ref().unwrap(),
+                    storage: &mut self.item_selector_storage,
+                });
                 for group in self.ctx.item_order.as_ref().unwrap().iter() {
                     ui.collapsing(format!("Group {}", group.0), |ui| {
                         for subgroup in group.1.iter() {
@@ -123,9 +233,9 @@ impl SubView for PlannerView {
                                     if let Some(item) = self.ctx.items.get(item_name) {
                                         if let Some(icon_path) = &self.ctx.icon_path {
                                             ui.add(Icon {
-                                                root_path: icon_path.clone(),
-                                                type_name: "item".to_string(),
-                                                item_name: item_name.clone(),
+                                                root_path: icon_path.as_path(),
+                                                type_name: &"item".to_string(),
+                                                item_name: item_name,
                                                 size: 32.0,
                                             });
                                         } else {
@@ -150,9 +260,9 @@ impl SubView for PlannerView {
                                         if let Some(recipe) = self.ctx.recipes.get(recipe_name) {
                                             if let Some(icon_path) = &self.ctx.icon_path {
                                                 ui.add(Icon {
-                                                    root_path: icon_path.clone(),
-                                                    type_name: "recipe".to_string(),
-                                                    item_name: recipe_name.clone(),
+                                                    root_path: icon_path.as_path(),
+                                                    type_name: &"recipe".to_string(),
+                                                    item_name: recipe_name,
                                                     size: 32.0,
                                                 });
                                             } else {
@@ -288,6 +398,7 @@ impl GameContextCreatorView for ContextCreatorView {
                     ],
                 }],
                 selected_factory: 0,
+                item_selector_storage: ItemSelectorStorage::default(),
             }));
         }
         None
