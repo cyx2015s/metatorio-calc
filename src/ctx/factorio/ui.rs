@@ -71,7 +71,7 @@ impl egui::Widget for Icon {
                 .fit_to_exact_size(Vec2 { x: 32.0, y: 32.0 })
                 .show_loading_spinner(true)
                 .maintain_aspect_ratio(true)
-                .bg_fill(egui::Color32::from_rgb(11, 45, 14)),
+                .bg_fill(egui::Color32::from_rgba_premultiplied(0xaa, 0xaa, 0xaa, 0xaa)),
         )
     }
 }
@@ -203,42 +203,61 @@ impl SubView for PlannerView {
 #[derive(Default, Debug)]
 pub(crate) struct ContextCreatorView {
     path: Option<std::path::PathBuf>,
-    skip_dumping: bool,
+    mod_path: Option<std::path::PathBuf>,
     created_context: Option<Context>,
 }
 
 impl SubView for ContextCreatorView {
     fn ui(&mut self, ui: &mut egui::Ui) {
-        ui.heading("加载异星工厂上下文");
-        if let Some(path) = &self.path {
-            ui.label(format!("当前路径: {}", path.display()));
-        } else {
-            ui.label("当前路径: 未选择");
-        }
-        ui.button("选择路径")
-            .on_hover_text("选择异星工厂的可执行文件")
-            .clicked()
-            .then(|| {
-                if let Some(selected_path) = rfd::FileDialog::new().pick_file() {
-                    self.path = Some(selected_path);
-                }
-            });
-        ui.checkbox(&mut self.skip_dumping, "跳过数据转储");
-        if self.path.is_some() {
-            if ui
-                .button("新建上下文（阻塞！！！）")
-                .on_hover_text("从所选路径加载异星工厂上下文数据")
-                .clicked()
-            {
-                if self.skip_dumping {
-                    self.created_context = Context::load_from_tmp_no_dump();
-                } else if let Some(ctx) =
-                    Context::load_from_executable_path(self.path.as_ref().unwrap())
-                {
-                    self.created_context = Some(ctx);
+        ui.vertical_centered(|ui| {
+            ui.heading("Context Creator");
+            ui.separator();
+
+            ui.label("选择游戏路径:");
+            if ui.button("浏览...").clicked() {
+                if let Some(path) = rfd::FileDialog::new().pick_file() {
+                    self.path = Some(path);
                 }
             }
-        }
+            if let Some(path) = &self.path {
+                ui.label(format!("已选择路径: {}", path.display()));
+            } else {
+                ui.label("未选择路径");
+            }
+
+            ui.separator();
+
+            ui.label("选择Mod路径 (可选):");
+            if ui.button("浏览...").clicked() {
+                if let Some(mod_path) = rfd::FileDialog::new().pick_folder() {
+                    self.mod_path = Some(mod_path);
+                }
+            }
+            if let Some(mod_path) = &self.mod_path {
+                ui.label(format!("已选择Mod路径: {}", mod_path.display()));
+            } else {
+                ui.label("未选择Mod路径");
+            }
+
+            ui.separator();
+
+            if ui.button("加载上下文").clicked() {
+                if let Some(path) = &self.path {
+                    self.created_context = Context::load_from_executable_path(
+                        path,
+                        self.mod_path.as_deref(),
+                        Some("zh-CN"),
+                    );
+                }
+            }
+
+            
+            ui.separator();
+
+            if ui.button("加载缓存上下文").clicked() {
+                self.created_context = Context::load_from_tmp_no_dump();
+            }
+        });
     }
 }
 

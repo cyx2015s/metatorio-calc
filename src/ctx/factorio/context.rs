@@ -125,9 +125,12 @@ impl Context {
 
     pub(crate) fn load_from_executable_path(
         executable_path: &std::path::Path,
+        mod_path: Option<&std::path::Path>,
+        lang: Option<&str>,
     ) -> Option<Context> {
         // 此步较为复杂，调用方应该异步执行
         // 1. 在这个软件的数据文件夹下（秉持绿色原理，创建在这个项目程序本身的同级文件里），创建一个config.cfg
+        let lang = lang.unwrap_or("zh-CN");
         let self_path = match env::current_dir() {
             Ok(path) => path,
             _ => {
@@ -151,6 +154,11 @@ impl Context {
             .arg("--dump-data")
             .arg("--config")
             .arg(&config_path.to_str().unwrap())
+            .args(if let Some(mod_path) = mod_path {
+                vec!["--mod-directory", mod_path.to_str().unwrap()]
+            } else {
+                vec![]
+            })
             .output()
             .ok()?;
         if dump_raw_command.status.success() == false {
@@ -158,9 +166,14 @@ impl Context {
         }
         let dump_icon_sprites_command = std::process::Command::new(executable_path)
             .arg("--dump-icon-sprites")
-            .arg("--config")
             .arg("--disable-audio")
+            .arg("--config")
             .arg(&config_path.to_str().unwrap())
+            .args(if let Some(mod_path) = mod_path {
+                vec!["--mod-directory", mod_path.to_str().unwrap()]
+            } else {
+                vec![]
+            })
             .output()
             .ok()?;
         if dump_icon_sprites_command.status.success() == false {
