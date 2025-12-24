@@ -10,6 +10,7 @@ use crate::ctx::{
         fluid::FluidPrototype,
         item::{ITEM_TYPES, ItemPrototype},
         mining::{MiningDrillPrototype, ResourcePrototype},
+        module::ModulePrototype,
         recipe::{CraftingMachinePrototype, RecipePrototype},
     },
 };
@@ -26,6 +27,8 @@ pub(crate) struct Context {
     pub(crate) entities: Dict<EntityPrototype>,
     pub(crate) fluids: Dict<FluidPrototype>,
 
+    /// 插件
+    pub(crate) modules: Dict<ModulePrototype>,
     /// 配方类型集合：配方本身和制作配方的机器
     pub(crate) recipes: Dict<RecipePrototype>,
     pub(crate) crafters: Dict<CraftingMachinePrototype>,
@@ -54,44 +57,42 @@ impl Context {
         let mut items = Dict::<ItemPrototype>::new();
         for item_type in ITEM_TYPES.iter() {
             if let Some(item_values) = value.get(item_type) {
-                for item_kv in item_values.as_object().unwrap() {
-                    let item: ItemPrototype = serde_json::from_value(item_kv.1.clone()).unwrap();
-                    items.insert(item.base.name.clone(), item);
-                }
+                items.extend(
+                    serde_json::from_value::<Dict<ItemPrototype>>(item_values.clone()).unwrap(),
+                );
             }
         }
         let mut entities = Dict::<EntityPrototype>::new();
         for entity_type in ENTITY_TYPES.iter() {
             if let Some(entity_values) = value.get(entity_type) {
-                for entity_kv in entity_values.as_object().unwrap() {
-                    let entity: EntityPrototype =
-                        serde_json::from_value(entity_kv.1.clone()).unwrap();
-                    entities.insert(entity.base.name.clone(), entity);
-                }
+                entities.extend(
+                    serde_json::from_value::<Dict<EntityPrototype>>(entity_values.clone()).unwrap(),
+                );
             }
         }
-        let mut fluids = Dict::<FluidPrototype>::new();
-        if let Some(fluid_values) = value.get("fluid") {
-            for fluid_kv in fluid_values.as_object().unwrap() {
-                let fluid: FluidPrototype = serde_json::from_value(fluid_kv.1.clone()).unwrap();
-                fluids.insert(fluid.base.name.clone(), fluid);
-            }
-        }
-        let mut recipes = Dict::<RecipePrototype>::new();
-        if let Some(recipe_values) = value.get("recipe") {
-            for recipe_kv in recipe_values.as_object().unwrap() {
-                let recipe: RecipePrototype = serde_json::from_value(recipe_kv.1.clone()).unwrap();
-                recipes.insert(recipe.base.name.clone(), recipe);
-            }
-        }
+        let fluids: Dict<FluidPrototype> = serde_json::from_value(
+            value
+                .get("fluid")
+                .cloned()
+                .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
+        )
+        .unwrap();
+        let recipes: Dict<RecipePrototype> = serde_json::from_value(
+            value
+                .get("recipe")
+                .cloned()
+                .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
+        )
+        .unwrap();
         let mut crafters = Dict::<CraftingMachinePrototype>::new();
         for crafter_type in &["assembling-machine", "furnace", "rocket-silo"] {
             if let Some(crafter_values) = value.get(crafter_type) {
-                for crafter_kv in crafter_values.as_object().unwrap() {
-                    let crafter: CraftingMachinePrototype =
-                        serde_json::from_value(crafter_kv.1.clone()).unwrap();
-                    crafters.insert(crafter.base.base.name.clone(), crafter);
-                }
+                crafters.extend(
+                    serde_json::from_value::<Dict<CraftingMachinePrototype>>(
+                        crafter_values.clone(),
+                    )
+                    .unwrap(),
+                );
             }
         }
 
@@ -109,10 +110,18 @@ impl Context {
                 .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
         )
         .unwrap();
+        let modules: Dict<ModulePrototype> = serde_json::from_value(
+            value
+                .get("module")
+                .cloned()
+                .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
+        )
+        .unwrap();
         Context {
             groups,
             subgroups,
             items,
+            modules,
             entities,
             fluids,
             recipes,
@@ -192,9 +201,8 @@ impl Context {
         };
         let raw_path = self_path.join("tmp/script-output/data-raw-dump.json");
         let icon_path = self_path.join("tmp/script-output/");
-        let mut ctx = Context::load(
-            &(serde_json::from_str(&std::fs::read_to_string(&raw_path).ok()?)).ok()?,
-        );
+        let mut ctx =
+            Context::load(&(serde_json::from_str(&std::fs::read_to_string(&raw_path).ok()?)).ok()?);
         ctx.icon_path = Some(icon_path);
         Some(ctx)
     }

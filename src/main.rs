@@ -26,7 +26,7 @@ impl MainPage {
         Self {
             creators: vec![(
                 "预设：加载异星工厂上下文".to_string(),
-                Box::new(factorio::ui::ContextCreatorView::default()),
+                Box::new(factorio::view::ContextCreatorView::default()),
             )],
             subviews: vec![],
             selected: 0,

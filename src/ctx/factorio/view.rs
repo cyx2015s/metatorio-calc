@@ -1,6 +1,4 @@
-use std::
-    any::Any
-;
+use std::any::Any;
 
 use egui::{ScrollArea, Vec2};
 
@@ -56,6 +54,7 @@ pub(crate) struct Icon {
     pub(crate) root_path: std::path::PathBuf,
     pub(crate) type_name: String,
     pub(crate) item_name: String,
+    pub(crate) size: f32,
 }
 
 impl egui::Widget for Icon {
@@ -68,22 +67,26 @@ impl egui::Widget for Icon {
         );
         ui.add(
             egui::Image::new(icon_path)
-                .fit_to_exact_size(Vec2 { x: 32.0, y: 32.0 })
+                .fit_to_exact_size(Vec2 {
+                    x: self.size,
+                    y: self.size,
+                })
                 .show_loading_spinner(true)
                 .maintain_aspect_ratio(true)
-                .bg_fill(egui::Color32::from_rgba_premultiplied(0xaa, 0xaa, 0xaa, 0xaa)),
+                .bg_fill(egui::Color32::from_rgba_premultiplied(
+                    0xaa, 0xaa, 0xaa, 0xaa,
+                )),
         )
     }
 }
 
-
 impl PlannerView {
     pub(crate) fn new(ctx: Context) -> Self {
         PlannerView {
-            item_order: None,
             ctx,
             factories: Vec::new(),
             selected_factory: 0,
+            item_order: None,
             reverse_item_order: None,
             recipe_order: None,
             reverse_recipe_order: None,
@@ -154,8 +157,8 @@ impl SubView for PlannerView {
                                                 root_path: icon_path.clone(),
                                                 type_name: "item".to_string(),
                                                 item_name: item_name.clone(),
+                                                size: 32.0,
                                             });
-                                            
                                         } else {
                                             ui.label("未找到图标路径！");
                                         }
@@ -181,6 +184,7 @@ impl SubView for PlannerView {
                                                     root_path: icon_path.clone(),
                                                     type_name: "recipe".to_string(),
                                                     item_name: recipe_name.clone(),
+                                                    size: 32.0
                                                 });
                                             } else {
                                                 ui.label("未找到图标路径！");
@@ -231,8 +235,11 @@ impl SubView for ContextCreatorView {
             if ui.button("浏览...").clicked() {
                 if let Some(mod_path) = rfd::FileDialog::new().pick_folder() {
                     self.mod_path = Some(mod_path);
+                } else {
+                    self.mod_path = None;
                 }
             }
+
             if let Some(mod_path) = &self.mod_path {
                 ui.label(format!("已选择Mod路径: {}", mod_path.display()));
             } else {
@@ -251,7 +258,6 @@ impl SubView for ContextCreatorView {
                 }
             }
 
-            
             ui.separator();
 
             if ui.button("加载缓存上下文").clicked() {
