@@ -36,14 +36,6 @@ pub(crate) struct PlannerView {
     /// 存储游戏逻辑数据的全部上下文
     pub(crate) ctx: Context,
 
-    /// 物品遍历顺序，按大组、按小组、按自身
-    pub(crate) item_order: Option<OrderInfo>,
-    pub(crate) reverse_item_order: Option<ReverseOrderInfo>,
-
-    /// 配方遍历顺序，按大组、按小组、按自身
-    pub(crate) recipe_order: Option<OrderInfo>,
-    pub(crate) reverse_recipe_order: Option<ReverseOrderInfo>,
-
     pub(crate) factories: Vec<FactoryView>,
     pub(crate) selected_factory: usize,
 }
@@ -74,8 +66,9 @@ impl egui::Widget for Icon {
                 .show_loading_spinner(true)
                 .maintain_aspect_ratio(true)
                 .bg_fill(egui::Color32::from_rgba_premultiplied(
-                    0xaa, 0xaa, 0xaa, 0xaa,
-                )),
+                    0xaa, 0xaa, 0xaa, 0xcc,
+                ))
+                .corner_radius(4.0),
         )
     }
 }
@@ -83,13 +76,9 @@ impl egui::Widget for Icon {
 impl PlannerView {
     pub(crate) fn new(ctx: Context) -> Self {
         PlannerView {
-            ctx,
+            ctx: ctx.build_order_info(),
             factories: Vec::new(),
             selected_factory: 0,
-            item_order: None,
-            reverse_item_order: None,
-            recipe_order: None,
-            reverse_recipe_order: None,
         }
     }
 }
@@ -122,30 +111,10 @@ impl SubView for PlannerView {
                 config.ui(ui, &self.ctx);
             }
         }
-        if self.item_order.is_none() {
-            self.item_order = Some(crate::ctx::factorio::common::get_order_info(
-                &self.ctx.items,
-                &self.ctx.groups,
-                &self.ctx.subgroups,
-            ));
-            self.reverse_item_order = Some(crate::ctx::factorio::common::get_reverse_order_info(
-                self.item_order.as_ref().unwrap(),
-            ));
-        }
-        if self.recipe_order.is_none() {
-            self.recipe_order = Some(crate::ctx::factorio::common::get_order_info(
-                &self.ctx.recipes,
-                &self.ctx.groups,
-                &self.ctx.subgroups,
-            ));
-            self.reverse_recipe_order = Some(crate::ctx::factorio::common::get_reverse_order_info(
-                self.recipe_order.as_ref().unwrap(),
-            ));
-        }
         ScrollArea::new([false, true])
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                for group in self.item_order.as_ref().unwrap().iter() {
+                for group in self.ctx.item_order.as_ref().unwrap().iter() {
                     ui.collapsing(format!("Group {}", group.0), |ui| {
                         for subgroup in group.1.iter() {
                             ui.collapsing(format!("Subgroup {}", subgroup.0), |ui| {
@@ -172,7 +141,7 @@ impl SubView for PlannerView {
                         }
                     });
                 }
-                for group in self.recipe_order.as_ref().unwrap().iter() {
+                for group in self.ctx.recipe_order.as_ref().unwrap().iter() {
                     ui.collapsing(format!("Recipe Group {}", group.0), |ui| {
                         for subgroup in group.1.iter() {
                             ui.collapsing(format!("Recipe Subgroup {}", subgroup.0), |ui| {
@@ -184,7 +153,7 @@ impl SubView for PlannerView {
                                                     root_path: icon_path.clone(),
                                                     type_name: "recipe".to_string(),
                                                     item_name: recipe_name.clone(),
-                                                    size: 32.0
+                                                    size: 32.0,
                                                 });
                                             } else {
                                                 ui.label("未找到图标路径！");
@@ -271,7 +240,6 @@ impl GameContextCreatorView for ContextCreatorView {
     fn try_create_subview(&mut self) -> Option<Box<dyn SubView>> {
         if self.created_context.is_some() {
             return Some(Box::new(PlannerView {
-                item_order: None,
                 ctx: self.created_context.take().unwrap(),
                 factories: vec![FactoryView {
                     recipe_configs: vec![
@@ -320,9 +288,6 @@ impl GameContextCreatorView for ContextCreatorView {
                     ],
                 }],
                 selected_factory: 0,
-                reverse_item_order: None,
-                recipe_order: None,
-                reverse_recipe_order: None,
             }));
         }
         None

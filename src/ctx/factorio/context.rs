@@ -5,7 +5,10 @@ use serde_json::Value;
 use crate::ctx::{
     ItemLike,
     factorio::{
-        common::{Dict, ItemSubgroup, PrototypeBase},
+        common::{
+            Dict, ItemSubgroup, OrderInfo, PrototypeBase, ReverseOrderInfo, get_order_info,
+            get_reverse_order_info,
+        },
         entity::{ENTITY_TYPES, EntityPrototype},
         fluid::FluidPrototype,
         item::{ITEM_TYPES, ItemPrototype},
@@ -22,6 +25,15 @@ pub(crate) struct Context {
     /// 排序参考依据
     pub(crate) groups: Dict<PrototypeBase>,
     pub(crate) subgroups: Dict<ItemSubgroup>,
+
+    /// 物品遍历顺序，按大组、按小组、按自身
+    pub(crate) item_order: Option<OrderInfo>,
+    pub(crate) reverse_item_order: Option<ReverseOrderInfo>,
+
+    /// 配方遍历顺序，按大组、按小组、按自身
+    pub(crate) recipe_order: Option<OrderInfo>,
+    pub(crate) reverse_recipe_order: Option<ReverseOrderInfo>,
+
     /// 被转化的物品集合
     pub(crate) items: Dict<ItemPrototype>,
     pub(crate) entities: Dict<EntityPrototype>,
@@ -129,7 +141,9 @@ impl Context {
             resources,
             miners,
             icon_path: None,
+            ..Default::default()
         }
+        .build_order_info()
     }
 
     pub(crate) fn load_from_executable_path(
@@ -205,6 +219,15 @@ impl Context {
             Context::load(&(serde_json::from_str(&std::fs::read_to_string(&raw_path).ok()?)).ok()?);
         ctx.icon_path = Some(icon_path);
         Some(ctx)
+    }
+
+    pub(crate) fn build_order_info(mut self) -> Self {
+        self.item_order = Some(get_order_info(&self.items, &self.groups, &self.subgroups));
+        self.reverse_item_order = Some(get_reverse_order_info(&self.item_order.as_ref().unwrap()));
+        self.recipe_order = Some(get_order_info(&self.recipes, &self.groups, &self.subgroups));
+        self.reverse_recipe_order =
+            Some(get_reverse_order_info(&self.recipe_order.as_ref().unwrap()));
+        self
     }
 }
 
