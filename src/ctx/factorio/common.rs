@@ -399,6 +399,7 @@ pub(crate) fn get_order_info<T: HasPrototypeBase + Clone>(
 ) ->OrderInfo {
     let mut grouped: HashMap<&String, HashMap<&String, Vec<&T>>> = HashMap::new();
     let other = &"other".to_string();
+    let empty = &"".to_string();
     for prototype in vec.values() {
         let subgroup_name = &prototype.base().subgroup;
         if let Some(subgroup) = subgroups.get(subgroup_name) {
@@ -420,7 +421,7 @@ pub(crate) fn get_order_info<T: HasPrototypeBase + Clone>(
             }
         } else {
             let group_entry = grouped.entry(other).or_insert_with(HashMap::new);
-            let subgroup_entry = group_entry.entry(other).or_insert_with(Vec::new);
+            let subgroup_entry = group_entry.entry(empty).or_insert_with(Vec::new);
             subgroup_entry.push(prototype);
         }
     }

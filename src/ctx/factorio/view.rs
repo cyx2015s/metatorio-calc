@@ -1,6 +1,6 @@
 use std::any::Any;
 
-use egui::{Image, ScrollArea, Sense, Vec2};
+use egui::{ScrollArea, Sense, Vec2};
 
 use crate::{
     SubView,
@@ -8,7 +8,7 @@ use crate::{
         GameContextCreatorView, RecipeLike,
         factorio::{
             common::{Effect, OrderInfo},
-            context::{Context, GenericItem},
+            context::Context,
             mining::MiningConfig,
             recipe::RecipeConfig,
         },
@@ -220,8 +220,8 @@ impl SubView for PlannerView {
             .show(ui, |ui| {
                 ui.add(ItemSelector {
                     icon_path: self.ctx.icon_path.as_ref().unwrap(),
-                    item_type: &"item".to_string(),
-                    order_info: self.ctx.item_order.as_ref().unwrap(),
+                    item_type: &"recipe".to_string(),
+                    order_info: self.ctx.recipe_order.as_ref().unwrap(),
                     storage: &mut self.item_selector_storage,
                 });
                 for group in self.ctx.item_order.as_ref().unwrap().iter() {

@@ -20,11 +20,12 @@ pub(crate) struct RecipePrototype {
 
     #[serde(deserialize_with = "as_vec_or_empty")]
     #[serde(default)]
-    ingredients: Vec<RecipeIngredient>,
+    pub(crate) ingredients: Vec<RecipeIngredient>,
 
     #[serde(deserialize_with = "as_vec_or_empty")]
     #[serde(default)]
-    results: Vec<RecipeResult>,
+    pub(crate) results: Vec<RecipeResult>,
+    pub(crate) main_product: Option<String>,
 
     #[serde(deserialize_with = "option_as_vec_or_empty")]
     #[serde(default)]
@@ -72,6 +73,7 @@ impl Default for RecipePrototype {
                 hidden: false,
                 parameter: false,
             },
+            main_product: None,
             category: None,
             additional_categories: Vec::new(),
             ingredients: Vec::new(),
