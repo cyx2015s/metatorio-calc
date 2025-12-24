@@ -15,7 +15,7 @@ use crate::ctx::{
 };
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct FactorioContext {
+pub(crate) struct Context {
     /// 图标路径
     pub(crate) icon_path: Option<std::path::PathBuf>,
     /// 排序参考依据
@@ -35,7 +35,7 @@ pub(crate) struct FactorioContext {
     pub(crate) miners: Dict<MiningDrillPrototype>,
 }
 
-impl FactorioContext {
+impl Context {
     pub(crate) fn load(value: &Value) -> Self {
         let groups: Dict<PrototypeBase> = serde_json::from_value(
             value
@@ -109,7 +109,7 @@ impl FactorioContext {
                 .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
         )
         .unwrap();
-        FactorioContext {
+        Context {
             groups,
             subgroups,
             items,
@@ -125,7 +125,7 @@ impl FactorioContext {
 
     pub(crate) fn load_from_executable_path(
         executable_path: &std::path::Path,
-    ) -> Option<FactorioContext> {
+    ) -> Option<Context> {
         // 此步较为复杂，调用方应该异步执行
         // 1. 在这个软件的数据文件夹下（秉持绿色原理，创建在这个项目程序本身的同级文件里），创建一个config.cfg
         let self_path = match env::current_dir() {
@@ -167,10 +167,10 @@ impl FactorioContext {
             return None;
         }
 
-        FactorioContext::load_from_tmp_no_dump()
+        Context::load_from_tmp_no_dump()
     }
 
-    pub(crate) fn load_from_tmp_no_dump() -> Option<FactorioContext> {
+    pub(crate) fn load_from_tmp_no_dump() -> Option<Context> {
         let self_path = match env::current_dir() {
             Ok(path) => path,
             _ => {
@@ -179,7 +179,7 @@ impl FactorioContext {
         };
         let raw_path = self_path.join("tmp/script-output/data-raw-dump.json");
         let icon_path = self_path.join("tmp/script-output/");
-        let mut ctx = FactorioContext::load(
+        let mut ctx = Context::load(
             &(serde_json::from_str(&std::fs::read_to_string(&raw_path).ok()?)).ok()?,
         );
         ctx.icon_path = Some(icon_path);
@@ -253,7 +253,7 @@ fn sample_five<T: Debug>(map: &Dict<T>) {
 fn test_load_context() {
     let data = include_str!("../../../assets/data-raw-dump.json");
     let value: Value = serde_json::from_str(&data).unwrap();
-    let ctx = FactorioContext::load(&value);
+    let ctx = Context::load(&value);
     assert!(ctx.items.contains_key("iron-plate"));
     assert!(ctx.entities.contains_key("stone-furnace"));
     assert!(ctx.fluids.contains_key("water"));

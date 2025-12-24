@@ -4,7 +4,7 @@ use egui::{
     epaint::text::{FontInsert, InsertFontFamily},
 };
 
-use crate::{ctx::GameContextCreatorView, ctx::factorio::ui::FactorioContextCreatorView};
+use crate::{ctx::GameContextCreatorView, ctx::factorio};
 
 pub(crate) mod ctx;
 pub(crate) mod lp;
@@ -26,7 +26,7 @@ impl MainPage {
         Self {
             creators: vec![(
                 "预设：加载异星工厂上下文".to_string(),
-                Box::new(FactorioContextCreatorView::default()),
+                Box::new(factorio::ui::ContextCreatorView::default()),
             )],
             subviews: vec![],
             selected: 0,

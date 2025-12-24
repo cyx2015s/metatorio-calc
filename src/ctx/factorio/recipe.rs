@@ -4,7 +4,7 @@ use serde::Deserialize;
 
 use crate::ctx::{RecipeLike, factorio::{common::{
         Dict, Effect, EffectReceiver, EffectTypeLimitation, EnergyAmount, EnergySource, HasPrototypeBase, PrototypeBase, update_map
-    }, context::{FactorioContext, GenericItem, make_located_generic_recipe}, entity::EntityPrototype}};
+    }, context::{Context, GenericItem, make_located_generic_recipe}, entity::EntityPrototype}};
 
 use crate::ctx::factorio::common::{as_vec_or_empty, option_as_vec_or_empty};
 
@@ -384,8 +384,8 @@ pub(crate) struct RecipeConfig {
 
 impl RecipeLike for RecipeConfig {
     type KeyType = GenericItem;
-    type ContextType = FactorioContext;
-    fn as_hash_map(&self, ctx: &FactorioContext) -> HashMap<Self::KeyType, f64> {
+    type ContextType = Context;
+    fn as_hash_map(&self, ctx: &Context) -> HashMap<Self::KeyType, f64> {
         let mut map = HashMap::new();
 
         let mut module_effects = Effect::default();
@@ -487,7 +487,7 @@ impl RecipeLike for RecipeConfig {
 
 #[test]
 fn test_recipe_normalized() {
-    let ctx = FactorioContext::load(
+    let ctx = Context::load(
         &serde_json::from_str(include_str!("../../../assets/data-raw-dump.json")).unwrap(),
     );
     let recipe_config = RecipeConfig {

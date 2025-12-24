@@ -9,7 +9,7 @@ use crate::ctx::{
             Effect, EffectReceiver, EffectTypeLimitation, EnergySource, HasPrototypeBase,
             PrototypeBase, update_map, option_as_vec_or_empty
         },
-        context::{FactorioContext, GenericItem, make_located_generic_recipe},
+        context::{Context, GenericItem, make_located_generic_recipe},
         entity::EntityPrototype,
         recipe::RecipeResult,
     },
@@ -78,7 +78,7 @@ pub(crate) struct MiningConfig {
 
 impl RecipeLike for MiningConfig {
     type KeyType = GenericItem;
-    type ContextType = FactorioContext;
+    type ContextType = Context;
 
     fn as_hash_map(&self, ctx: &Self::ContextType) -> HashMap<Self::KeyType, f64> {
         let mut map = HashMap::new();
@@ -194,7 +194,7 @@ impl RecipeLike for MiningConfig {
 
 #[test]
 fn test_mining_normalized() {
-    let ctx = FactorioContext::load(
+    let ctx = Context::load(
         &serde_json::from_str(include_str!("../../../assets/data-raw-dump.json")).unwrap(),
     );
     let mining_config = MiningConfig {

@@ -1,9 +1,8 @@
-use std::{
-    any::{Any, TypeId},
-    fs,
-};
+use std::
+    any::Any
+;
 
-use egui::{AtomExt, ImageSource, ScrollArea, Vec2};
+use egui::{ScrollArea, Vec2};
 
 use crate::{
     SubView,
@@ -11,7 +10,7 @@ use crate::{
         GameContextCreatorView, RecipeLike,
         factorio::{
             common::{Effect, OrderInfo, ReverseOrderInfo},
-            context::FactorioContext,
+            context::Context,
             mining::MiningConfig,
             recipe::RecipeConfig,
         },
@@ -19,11 +18,11 @@ use crate::{
 };
 
 pub(crate) trait ConfigView {
-    fn ui(&self, ui: &mut egui::Ui, ctx: &FactorioContext);
+    fn ui(&self, ui: &mut egui::Ui, ctx: &Context);
 }
 
-impl<T: RecipeLike<ContextType = FactorioContext> + 'static> ConfigView for T {
-    fn ui(&self, ui: &mut egui::Ui, ctx: &FactorioContext) {
+impl<T: RecipeLike<ContextType = Context> + 'static> ConfigView for T {
+    fn ui(&self, ui: &mut egui::Ui, ctx: &Context) {
         ui.label(format!(
             "配方类型:{:?}\n配方转化: {:?}",
             self.type_id(),
@@ -35,9 +34,9 @@ pub(crate) struct FactoryView {
     recipe_configs: Vec<Box<dyn ConfigView>>,
 }
 
-pub(crate) struct FactorioPlanner {
+pub(crate) struct PlannerView {
     /// 存储游戏逻辑数据的全部上下文
-    pub(crate) ctx: FactorioContext,
+    pub(crate) ctx: Context,
 
     /// 物品遍历顺序，按大组、按小组、按自身
     pub(crate) item_order: Option<OrderInfo>,
@@ -51,9 +50,36 @@ pub(crate) struct FactorioPlanner {
     pub(crate) selected_factory: usize,
 }
 
-impl FactorioPlanner {
-    pub(crate) fn new(ctx: FactorioContext) -> Self {
-        FactorioPlanner {
+#[derive(Debug, Clone, Default)]
+
+pub(crate) struct Icon {
+    pub(crate) root_path: std::path::PathBuf,
+    pub(crate) type_name: String,
+    pub(crate) item_name: String,
+}
+
+impl egui::Widget for Icon {
+    fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+        let icon_path = format!(
+            "file://{}/{}/{}.png",
+            self.root_path.to_string_lossy(),
+            self.type_name,
+            self.item_name
+        );
+        ui.add(
+            egui::Image::new(icon_path)
+                .fit_to_exact_size(Vec2 { x: 32.0, y: 32.0 })
+                .show_loading_spinner(true)
+                .maintain_aspect_ratio(true)
+                .bg_fill(egui::Color32::from_rgb(11, 45, 14)),
+        )
+    }
+}
+
+
+impl PlannerView {
+    pub(crate) fn new(ctx: Context) -> Self {
+        PlannerView {
             item_order: None,
             ctx,
             factories: Vec::new(),
@@ -65,15 +91,15 @@ impl FactorioPlanner {
     }
 }
 
-impl Default for FactorioPlanner {
+impl Default for PlannerView {
     fn default() -> Self {
-        Self::new(FactorioContext::load(
+        Self::new(Context::load(
             &(serde_json::from_str(include_str!("../../../assets/data-raw-dump.json"))).unwrap(),
         ))
     }
 }
 
-impl SubView for FactorioPlanner {
+impl SubView for PlannerView {
     fn ui(&mut self, ui: &mut egui::Ui) {
         ui.heading("Factorio Planner");
         ui.horizontal(|ui| {
@@ -122,6 +148,22 @@ impl SubView for FactorioPlanner {
                             ui.collapsing(format!("Subgroup {}", subgroup.0), |ui| {
                                 for item_name in subgroup.1.iter() {
                                     ui.label(item_name);
+                                    if let Some(item) = self.ctx.items.get(item_name) {
+                                        if let Some(icon_path) = &self.ctx.icon_path {
+                                            ui.add(Icon {
+                                                root_path: icon_path.clone(),
+                                                type_name: "item".to_string(),
+                                                item_name: item_name.clone(),
+                                            });
+                                            
+                                        } else {
+                                            ui.label("未找到图标路径！");
+                                        }
+                                        ui.label(format!("物品: {}", item_name));
+                                        ui.label(format!("{:#?}", item));
+                                    } else {
+                                        ui.label("未找到该物品！");
+                                    }
                                 }
                             });
                         }
@@ -135,18 +177,11 @@ impl SubView for FactorioPlanner {
                                     ui.collapsing(format!("Recipe {}", recipe_name), |ui| {
                                         if let Some(recipe) = self.ctx.recipes.get(recipe_name) {
                                             if let Some(icon_path) = &self.ctx.icon_path {
-                                                let recipe_icon_path = format!(
-                                                    "file:///{}/recipe/{}.png",
-                                                    icon_path.to_string_lossy(),
-                                                    recipe_name
-                                                );
-                                                ui.add(
-                                                    egui::Image::new(recipe_icon_path)
-                                                        .fit_to_exact_size(Vec2 {
-                                                            x: 128.0,
-                                                            y: 128.0,
-                                                        }).show_loading_spinner(true).maintain_aspect_ratio(true).bg_fill(egui::Color32::from_rgb(11, 45, 14)),
-                                                );
+                                                ui.add(Icon {
+                                                    root_path: icon_path.clone(),
+                                                    type_name: "recipe".to_string(),
+                                                    item_name: recipe_name.clone(),
+                                                });
                                             } else {
                                                 ui.label("未找到图标路径！");
                                             }
@@ -166,13 +201,13 @@ impl SubView for FactorioPlanner {
 }
 
 #[derive(Default, Debug)]
-pub(crate) struct FactorioContextCreatorView {
+pub(crate) struct ContextCreatorView {
     path: Option<std::path::PathBuf>,
     skip_dumping: bool,
-    created_context: Option<FactorioContext>,
+    created_context: Option<Context>,
 }
 
-impl SubView for FactorioContextCreatorView {
+impl SubView for ContextCreatorView {
     fn ui(&mut self, ui: &mut egui::Ui) {
         ui.heading("加载异星工厂上下文");
         if let Some(path) = &self.path {
@@ -196,9 +231,9 @@ impl SubView for FactorioContextCreatorView {
                 .clicked()
             {
                 if self.skip_dumping {
-                    self.created_context = FactorioContext::load_from_tmp_no_dump();
+                    self.created_context = Context::load_from_tmp_no_dump();
                 } else if let Some(ctx) =
-                    FactorioContext::load_from_executable_path(self.path.as_ref().unwrap())
+                    Context::load_from_executable_path(self.path.as_ref().unwrap())
                 {
                     self.created_context = Some(ctx);
                 }
@@ -207,10 +242,10 @@ impl SubView for FactorioContextCreatorView {
     }
 }
 
-impl GameContextCreatorView for FactorioContextCreatorView {
+impl GameContextCreatorView for ContextCreatorView {
     fn try_create_subview(&mut self) -> Option<Box<dyn SubView>> {
         if self.created_context.is_some() {
-            return Some(Box::new(FactorioPlanner {
+            return Some(Box::new(PlannerView {
                 item_order: None,
                 ctx: self.created_context.take().unwrap(),
                 factories: vec![FactoryView {
