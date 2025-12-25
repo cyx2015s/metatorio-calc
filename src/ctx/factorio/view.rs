@@ -326,7 +326,7 @@ impl egui::Widget for ItemSelector<'_> {
                             .interact(Sense::click());
                         let button = if self.item_type == &"recipe".to_string() {
                             let prototype = self.ctx.recipes.get(item_name).unwrap();
-                            button.on_hover_ui(|ui| {
+                            button.on_hover_ui_at_pointer(|ui| {
                                 ui.add(PrototypeDetailView {
                                     ctx: self.ctx,
                                     prototype,

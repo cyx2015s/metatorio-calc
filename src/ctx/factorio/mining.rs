@@ -113,6 +113,15 @@ impl RecipeLike for MiningConfig {
             resource_drain_rate = miner.resource_drain_rate_percent.unwrap_or(100.0) / 100.0;
             base_speed *= miner.mining_speed;
         }
+
+        for module in self.modules.iter() {
+            let module_prototype = ctx
+                .modules
+                .get(module)
+                .expect("MiningConfig 中的插件在上下文中不存在");
+            module_effects = module_effects + module_prototype.effect.clone();
+        }
+
         module_effects = module_effects + self.extra_effects.clone();
         module_effects = module_effects.clamped();
 

@@ -414,6 +414,14 @@ impl RecipeLike for RecipeConfig {
             base_speed = crafter.crafting_speed;
             // TODO: 计算能量消耗
         }
+        for module in self.modules.iter() {
+            let module_prototype = ctx
+                .modules
+                .get(module)
+                .expect("RecipeConfig 中的插件在上下文中不存在");
+            module_effects = module_effects + module_prototype.effect.clone();
+        }
+
         module_effects = module_effects + self.extra_effects.clone();
         module_effects = module_effects.clamped();
 
