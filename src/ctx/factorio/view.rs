@@ -1,35 +1,22 @@
 use std::any::Any;
 
-use egui::{ScrollArea, Sense, Vec2};
+use egui::{Color32, Id, Layout, ScrollArea, Sense, Vec2, emath::align};
 
 use crate::{
     SubView,
     ctx::{
         GameContextCreatorView, RecipeLike,
         factorio::{
-            common::{Effect, OrderInfo},
-            context::Context,
+            common::{Effect, HasPrototypeBase, OrderInfo},
+            context::{Context, GenericItem},
             mining::MiningConfig,
-            recipe::RecipeConfig,
+            recipe::{RecipeConfig, RecipeIngredient, RecipePrototype, RecipeResult},
         },
     },
 };
 
-pub(crate) trait ConfigView {
-    fn ui(&self, ui: &mut egui::Ui, ctx: &Context);
-}
-
-impl<T: RecipeLike<ContextType = Context> + 'static> ConfigView for T {
-    fn ui(&self, ui: &mut egui::Ui, ctx: &Context) {
-        ui.label(format!(
-            "配方类型:{:?}\n配方转化: {:?}",
-            self.type_id(),
-            self.as_hash_map(ctx)
-        ));
-    }
-}
 pub(crate) struct FactoryView {
-    recipe_configs: Vec<Box<dyn ConfigView>>,
+    recipe_configs: Vec<Box<dyn RecipeLike<KeyType = GenericItem, ContextType = Context>>>,
 }
 
 pub(crate) struct PlannerView {
@@ -65,19 +52,202 @@ impl<'a> Icon<'a> {
 
 impl<'a> egui::Widget for Icon<'a> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
-        ui.add(
-            self.image()
-                .fit_to_exact_size(Vec2 {
-                    x: self.size,
-                    y: self.size,
-                })
-                .show_loading_spinner(true)
-                .maintain_aspect_ratio(true)
-                .bg_fill(egui::Color32::from_rgba_premultiplied(
-                    0xaa, 0xaa, 0xaa, 0xcc,
-                ))
-                .corner_radius(4.0),
-        )
+        egui::Frame::NONE
+            .fill(egui::Color32::from_rgba_premultiplied(
+                0xaa, 0xaa, 0xaa, 0xcc,
+            ))
+            .corner_radius(4.0)
+            .show(ui, |ui| {
+                ui.add(
+                    self.image()
+                        .max_size(Vec2 {
+                            x: self.size,
+                            y: self.size,
+                        })
+                        .maintain_aspect_ratio(true)
+                        .shrink_to_fit()
+                        .show_loading_spinner(true)
+                );
+            })
+            .response
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct PrototypeDetailView<'a, T: HasPrototypeBase> {
+    pub(crate) ctx: &'a Context,
+    pub(crate) prototype: &'a T,
+}
+
+impl<'a> egui::Widget for PrototypeDetailView<'a, RecipePrototype> {
+    fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+        let mut ingredients: Vec<&RecipeIngredient> = self.prototype.ingredients.iter().collect();
+        ingredients.sort_by_key(|ingredient| match ingredient {
+            RecipeIngredient::Item(i) => {
+                (0, &self.ctx.reverse_item_order.as_ref().unwrap()[&i.name])
+            }
+            RecipeIngredient::Fluid(f) => {
+                (1, &self.ctx.reverse_fluid_order.as_ref().unwrap()[&f.name])
+            }
+        });
+        let mut results: Vec<&RecipeResult> = self.prototype.results.iter().collect();
+        results.sort_by_key(|result| match result {
+            RecipeResult::Item(i) => (0, &self.ctx.reverse_item_order.as_ref().unwrap()[&i.name]),
+            RecipeResult::Fluid(f) => (1, &self.ctx.reverse_fluid_order.as_ref().unwrap()[&f.name]),
+        });
+        ui.vertical(|ui| {
+            ui.label(format!("{}s", self.prototype.energy_required));
+            ui.horizontal_top(|ui| {
+                if ingredients.is_empty() {
+                    ui.label("无原料");
+                } else {
+                    egui::Grid::new("RecipePrototypeGrid")
+                        .min_col_width(35.0)
+                        .max_col_width(105.0)
+                        .min_row_height(35.0)
+                        .spacing(Vec2 { x: 0.0, y: 0.0 })
+                        .show(ui, |ui| {
+                            for ingredient in ingredients.iter() {
+                                match ingredient {
+                                    RecipeIngredient::Item(i) => {
+                                        let icon = ui.add(Icon {
+                                            root_path: self
+                                                .ctx
+                                                .icon_path
+                                                .as_ref()
+                                                .unwrap()
+                                                .as_path(),
+                                            type_name: &"item".to_string(),
+                                            item_name: &i.name,
+                                            size: 32.0,
+                                        });
+                                        ui.vertical(|ui| {
+                                            ui.label(format!("x{}", i.amount));
+                                        });
+                                    }
+                                    RecipeIngredient::Fluid(f) => {
+                                        let icon = ui.add(Icon {
+                                            root_path: self
+                                                .ctx
+                                                .icon_path
+                                                .as_ref()
+                                                .unwrap()
+                                                .as_path(),
+                                            type_name: &"fluid".to_string(),
+                                            item_name: &f.name,
+                                            size: 32.0,
+                                        });
+                                        ui.vertical(|ui| {
+                                            ui.label(format!("x{}", f.amount));
+                                            match f.temperature {
+                                                Some(t) => {
+                                                    ui.label(format!("{}℃", t));
+                                                }
+                                                None => {
+                                                    match (f.min_temperature, f.max_temperature) {
+                                                        (Some(min_t), Some(max_t)) => {
+                                                            ui.label(format!(
+                                                                "{}~{}℃",
+                                                                min_t, max_t
+                                                            ));
+                                                        }
+                                                        (Some(min_t), None) => {
+                                                            ui.label(format!("≥{}℃", min_t));
+                                                        }
+                                                        (None, Some(max_t)) => {
+                                                            ui.label(format!("≤{}℃", max_t));
+                                                        }
+                                                        (None, None) => {}
+                                                    }
+                                                }
+                                            }
+                                        });
+                                    }
+                                }
+                                ui.end_row();
+                            }
+                        });
+                }
+                ui.label("→");
+                if results.len() == 0 {
+                    ui.label("无产出");
+                    ui.end_row();
+                } else {
+                    egui::Grid::new("RecipePrototypeResultGrid")
+                        .min_col_width(35.0)
+                        .max_col_width(105.0)
+                        .min_row_height(35.0)
+                        .spacing(Vec2 { x: 0.0, y: 0.0 })
+                        .show(ui, |ui| {
+                            for result in results.iter() {
+                                match result {
+                                    RecipeResult::Item(i) => {
+                                        let icon = ui.add(Icon {
+                                            root_path: self
+                                                .ctx
+                                                .icon_path
+                                                .as_ref()
+                                                .unwrap()
+                                                .as_path(),
+                                            type_name: &"item".to_string(),
+                                            item_name: &i.name,
+                                            size: 32.0,
+                                        });
+                                        let output = i.normalized_output();
+                                        ui.vertical(|ui| {
+                                            ui.label(format!(
+                                                "x{}+{}",
+                                                output.0 - output.1,
+                                                output.1
+                                            ));
+                                        });
+                                    }
+                                    RecipeResult::Fluid(f) => {
+                                        let icon = ui.add(Icon {
+                                            root_path: self
+                                                .ctx
+                                                .icon_path
+                                                .as_ref()
+                                                .unwrap()
+                                                .as_path(),
+                                            type_name: &"fluid".to_string(),
+                                            item_name: &f.name,
+                                            size: 32.0,
+                                        });
+                                        let output = f.normalized_output();
+                                        ui.vertical(|ui| {
+                                            ui.label(format!(
+                                                "x{}+{}",
+                                                output.0 - output.1,
+                                                output.1
+                                            ));
+                                            match f.temperature {
+                                                Some(t) => {
+                                                    ui.label(format!("@{}°C", t));
+                                                }
+                                                None => {
+                                                    ui.label(format!(
+                                                        "@{}°C",
+                                                        &self
+                                                            .ctx
+                                                            .fluids
+                                                            .get(&f.name)
+                                                            .unwrap()
+                                                            .default_temperature
+                                                    ));
+                                                }
+                                            }
+                                        });
+                                    }
+                                }
+                                ui.end_row();
+                            }
+                        });
+                }
+            });
+        });
+
+        ui.response()
     }
 }
 
@@ -91,6 +261,7 @@ pub(crate) struct ItemSelectorStorage {
 }
 
 pub(crate) struct ItemSelector<'a> {
+    pub(crate) ctx: &'a Context,
     pub(crate) icon_path: &'a std::path::Path,
     pub(crate) item_type: &'a String,
     pub(crate) order_info: &'a OrderInfo,
@@ -146,15 +317,24 @@ impl egui::Widget for ItemSelector<'_> {
                             ui.end_row();
                         }
                         let button = ui
-                            .add(
-                                Icon {
-                                    root_path: self.icon_path,
-                                    type_name: self.item_type,
-                                    item_name,
-                                    size: 32.0,
-                                },
-                            )
+                            .add(Icon {
+                                root_path: self.icon_path,
+                                type_name: self.item_type,
+                                item_name,
+                                size: 32.0,
+                            })
                             .interact(Sense::click());
+                        let button = if self.item_type == &"recipe".to_string() {
+                            let prototype = self.ctx.recipes.get(item_name).unwrap();
+                            button.on_hover_ui(|ui| {
+                                ui.add(PrototypeDetailView {
+                                    ctx: self.ctx,
+                                    prototype,
+                                });
+                            })
+                        } else {
+                            button
+                        };
 
                         if button.clicked() {
                             self.storage.subgroup = j;
@@ -212,13 +392,14 @@ impl SubView for PlannerView {
             ui.label("没有工厂。");
         } else {
             for config in self.factories[self.selected_factory].recipe_configs.iter() {
-                config.ui(ui, &self.ctx);
+                ui.label(format!("{:?}", config.as_hash_map(&self.ctx)));
             }
         }
         ScrollArea::new([false, true])
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.add(ItemSelector {
+                    ctx: &self.ctx,
                     icon_path: self.ctx.icon_path.as_ref().unwrap(),
                     item_type: &"recipe".to_string(),
                     order_info: self.ctx.recipe_order.as_ref().unwrap(),
