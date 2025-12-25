@@ -14,6 +14,7 @@ use crate::ctx::{
         item::{ITEM_TYPES, ItemPrototype},
         mining::{MiningDrillPrototype, ResourcePrototype},
         module::ModulePrototype,
+        quality::QualityPrototype,
         recipe::{CraftingMachinePrototype, RecipePrototype, RecipeResult},
     },
 };
@@ -25,6 +26,9 @@ pub(crate) struct Context {
     /// 排序参考依据
     pub(crate) groups: Dict<PrototypeBase>,
     pub(crate) subgroups: Dict<ItemSubgroup>,
+
+    /// 品质
+    pub(crate) qualities: Vec<QualityPrototype>,
 
     /// 物品遍历顺序，按大组、按小组、按自身
     pub(crate) item_order: Option<OrderInfo>,
@@ -133,7 +137,19 @@ impl Context {
                 .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
         )
         .unwrap();
+        let mut qualities = vec![];
+        let mut cur_quality = value.get("quality").unwrap().get("normal").unwrap();
+        while !cur_quality.is_null() {
+            let quality: QualityPrototype = serde_json::from_value(cur_quality.clone()).unwrap();
+            qualities.push(quality.clone());
+            cur_quality = value
+                .get("quality")
+                .unwrap()
+                .get(quality.next.as_ref().unwrap_or(&"".to_string()))
+                .unwrap_or(&Value::Null)
+        }
         Context {
+            qualities,
             groups,
             subgroups,
             items,
@@ -308,7 +324,8 @@ pub(crate) enum GenericItem {
     ItemFuel {
         category: String,
     },
-    RocketPayload,
+    RocketPayloadWeight,
+    RocketPayloadStack,
     Custom {
         name: String,
     },

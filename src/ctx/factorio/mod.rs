@@ -8,3 +8,4 @@ pub(crate) mod mining;
 pub(crate) mod module;
 pub(crate) mod recipe;
 pub(crate) mod view;
+pub(crate) mod quality;

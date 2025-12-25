@@ -8,14 +8,10 @@ use std::{
 use serde::{Deserialize, Deserializer, de::DeserializeOwned};
 use serde_json::{Value, from_value};
 
-
 pub(crate) type Dict<T> = HashMap<String, T>;
 pub(crate) type Emissions = Dict<f64>;
 pub(crate) type OrderInfo = Vec<(String, Vec<(String, Vec<String>)>)>;
 pub(crate) type ReverseOrderInfo = HashMap<String, (usize, usize, usize)>;
-
-#[derive(Debug, Clone)]
-pub(crate) struct MapPosition(f64, f64);
 
 pub(crate) fn update_map<T, N>(map: &mut HashMap<T, N>, key: T, value: N)
 where
@@ -25,6 +21,78 @@ where
     let entry = map.entry(key).or_insert(N::default());
     *entry = *entry + value;
 }
+
+#[derive(Debug, Clone)]
+pub(crate) struct Color(u8, u8, u8, u8);
+
+impl<'de> Deserialize<'de> for Color {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value: Value = Deserialize::deserialize(deserializer)?;
+        match value {
+            Value::Array(vec) => {
+                if vec.len() < 3 {
+                    return Err(serde::de::Error::custom("Color 数组长度不为 3 或 4"));
+                }
+                let r = (vec[0]
+                    .as_f64()
+                    .ok_or_else(|| serde::de::Error::custom("Color 数组第一个元素类型错误"))?
+                    * 255.0) as u8;
+                let g = (vec[1]
+                    .as_f64()
+                    .ok_or_else(|| serde::de::Error::custom("Color 数组第二个元素类型错误"))?
+                    * 255.0) as u8;
+                let b = (vec[2]
+                    .as_f64()
+                    .ok_or_else(|| serde::de::Error::custom("Color 数组第三个元素类型错误"))?
+                    * 255.0) as u8;
+                let a = if vec.len() >= 4 {
+                    (vec[3]
+                        .as_f64()
+                        .ok_or_else(|| serde::de::Error::custom("Color 数组第四个元素类型错误"))?
+                        * 255.0) as u8
+                } else {
+                    255
+                };
+                Ok(Color(r, g, b, a))
+            }
+            Value::Object(object) => {
+                let r = (object
+                    .get("r")
+                    .and_then(|v| v.as_f64())
+                    .ok_or_else(|| serde::de::Error::custom("Color 结构体缺少 r 字段或类型错误"))?
+                    * 255.0) as u8;
+                let g = (object
+                    .get("g")
+                    .and_then(|v| v.as_f64())
+                    .ok_or_else(|| serde::de::Error::custom("Color 结构体缺少 g 字段或类型错误"))?
+                    * 255.0) as u8;
+                let b = (object
+                    .get("b")
+                    .and_then(|v| v.as_f64())
+                    .ok_or_else(|| serde::de::Error::custom("Color 结构体缺少 b 字段或类型错误"))?
+                    * 255.0) as u8;
+                let a = if let Some(alpha_value) = object.get("a") {
+                    (alpha_value
+                        .as_f64()
+                        .ok_or_else(|| {
+                            serde::de::Error::custom("Color 结构体的 a 字段类型错误")
+                        })?
+                        * 255.0) as u8
+                } else {
+                    255
+                };
+                Ok(Color(r, g, b, a))
+            }
+            _ => Err(serde::de::Error::custom("Color 不是数组类型")),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct MapPosition(f64, f64);
 
 impl<'de> Deserialize<'de> for MapPosition {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -396,7 +464,7 @@ pub(crate) fn get_order_info<T: HasPrototypeBase + Clone>(
     vec: &HashMap<String, T>,
     groups: &Dict<PrototypeBase>,
     subgroups: &Dict<ItemSubgroup>,
-) ->OrderInfo {
+) -> OrderInfo {
     let mut grouped: HashMap<&String, HashMap<&String, Vec<&T>>> = HashMap::new();
     let other = &"other".to_string();
     let empty = &"".to_string();
@@ -463,17 +531,12 @@ pub(crate) fn get_order_info<T: HasPrototypeBase + Clone>(
     ret
 }
 
-pub(crate) fn get_reverse_order_info(
-    order_info: &OrderInfo,
-) -> ReverseOrderInfo {
+pub(crate) fn get_reverse_order_info(order_info: &OrderInfo) -> ReverseOrderInfo {
     let mut reverse_map: ReverseOrderInfo = HashMap::new();
     for (group_index, group) in order_info.iter().enumerate() {
         for (subgroup_index, subgroup) in group.1.iter().enumerate() {
             for (item_index, item_name) in subgroup.1.iter().enumerate() {
-                reverse_map.insert(
-                    item_name.clone(),
-                    (group_index, subgroup_index, item_index),
-                );
+                reverse_map.insert(item_name.clone(), (group_index, subgroup_index, item_index));
             }
         }
     }

@@ -29,12 +29,13 @@ pub(crate) struct PlannerView {
     pub(crate) item_selector_storage: ItemSelectorStorage,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 
 pub(crate) struct Icon<'a> {
-    pub(crate) root_path: &'a std::path::Path,
+    pub(crate) ctx: &'a Context,
     pub(crate) type_name: &'a String,
     pub(crate) item_name: &'a String,
+    pub(crate) quality: u8,
     pub(crate) size: f32,
 }
 
@@ -42,7 +43,7 @@ impl<'a> Icon<'a> {
     fn image(&'_ self) -> egui::Image<'_> {
         let icon_path = format!(
             "file://{}/{}/{}.png",
-            self.root_path.to_string_lossy(),
+            self.ctx.icon_path.as_ref().unwrap().to_string_lossy(),
             self.type_name,
             self.item_name
         );
@@ -58,7 +59,7 @@ impl<'a> egui::Widget for Icon<'a> {
             ))
             .corner_radius(4.0)
             .show(ui, |ui| {
-                ui.add(
+                let icon = ui.add(
                     self.image()
                         .max_size(Vec2 {
                             x: self.size,
@@ -66,10 +67,91 @@ impl<'a> egui::Widget for Icon<'a> {
                         })
                         .maintain_aspect_ratio(true)
                         .shrink_to_fit()
-                        .show_loading_spinner(true)
+                        .show_loading_spinner(true),
                 );
+                if self.quality > 0 {
+                    ui.put(
+                        icon.rect
+                            .split_left_right_at_fraction(0.5)
+                            .1
+                            .split_top_bottom_at_fraction(0.5)
+                            .1,
+                        egui::Image::new(format!(
+                            "file://{}/{}/{}.png",
+                            self.ctx.icon_path.as_ref().unwrap().to_string_lossy(),
+                            "quality",
+                            self.ctx.qualities[self.quality as usize].base.name
+                        )),
+                    );
+                }
             })
             .response
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct GenericIcon<'a> {
+    pub(crate) ctx: &'a Context,
+    pub(crate) item: &'a GenericItem,
+    pub(crate) size: f32,
+}
+
+impl<'a> egui::Widget for GenericIcon<'a> {
+    fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+        match self.item {
+            GenericItem::Custom { name } => ui.label(format!("Custom Item: {}", name)),
+            GenericItem::Item { name, quality } => {
+                let icon = ui.add(Icon {
+                    ctx: &self.ctx,
+                    type_name: &"item".to_string(),
+                    item_name: &name,
+                    size: self.size,
+                    quality: 0,
+                });
+                ui.put(
+                    icon.rect
+                        .split_left_right_at_fraction(0.5)
+                        .1
+                        .split_left_right_at_fraction(0.5)
+                        .1,
+                    Icon {
+                        ctx: &self.ctx,
+                        type_name: &"quality".to_string(),
+                        item_name: &format!("{}", quality),
+                        size: self.size / 2.0,
+                        quality: *quality,
+                    },
+                );
+                icon
+            }
+            GenericItem::Fluid { name, temperature } => {
+                let icon = ui.add(Icon {
+                    ctx: &self.ctx,
+                    type_name: &"fluid".to_string(),
+                    item_name: &name,
+                    size: self.size,
+                    quality: 0,
+                });
+                icon
+            }
+            GenericItem::Entity { name, quality } => {
+                let icon = ui.add(Icon {
+                    ctx: &self.ctx,
+                    type_name: &"entity".to_string(),
+                    item_name: &name,
+                    size: self.size,
+                    quality: *quality,
+                });
+                icon
+            }
+            GenericItem::Heat => ui.label("热量"),
+            GenericItem::Electricity => ui.label("电力"),
+            GenericItem::FluidHeat => ui.label("流体热量"),
+            GenericItem::FluidFuel => ui.label("流体燃料"),
+            GenericItem::ItemFuel { category } => ui.label(format!("燃料: {}", category)),
+            GenericItem::RocketPayloadWeight => ui.label("火箭重量载荷"),
+            GenericItem::RocketPayloadStack => ui.label("火箭堆叠载荷"),
+        }
     }
 }
 
@@ -111,15 +193,11 @@ impl<'a> egui::Widget for PrototypeDetailView<'a, RecipePrototype> {
                                 match ingredient {
                                     RecipeIngredient::Item(i) => {
                                         let icon = ui.add(Icon {
-                                            root_path: self
-                                                .ctx
-                                                .icon_path
-                                                .as_ref()
-                                                .unwrap()
-                                                .as_path(),
+                                            ctx: &self.ctx,
                                             type_name: &"item".to_string(),
                                             item_name: &i.name,
                                             size: 32.0,
+                                            quality: 0,
                                         });
                                         ui.vertical(|ui| {
                                             ui.label(format!("x{}", i.amount));
@@ -127,15 +205,11 @@ impl<'a> egui::Widget for PrototypeDetailView<'a, RecipePrototype> {
                                     }
                                     RecipeIngredient::Fluid(f) => {
                                         let icon = ui.add(Icon {
-                                            root_path: self
-                                                .ctx
-                                                .icon_path
-                                                .as_ref()
-                                                .unwrap()
-                                                .as_path(),
+                                            ctx: &self.ctx,
                                             type_name: &"fluid".to_string(),
                                             item_name: &f.name,
                                             size: 32.0,
+                                            quality: 0,
                                         });
                                         ui.vertical(|ui| {
                                             ui.label(format!("x{}", f.amount));
@@ -183,15 +257,11 @@ impl<'a> egui::Widget for PrototypeDetailView<'a, RecipePrototype> {
                                 match result {
                                     RecipeResult::Item(i) => {
                                         let icon = ui.add(Icon {
-                                            root_path: self
-                                                .ctx
-                                                .icon_path
-                                                .as_ref()
-                                                .unwrap()
-                                                .as_path(),
+                                            ctx: &self.ctx,
                                             type_name: &"item".to_string(),
                                             item_name: &i.name,
                                             size: 32.0,
+                                            quality: 0,
                                         });
                                         let output = i.normalized_output();
                                         ui.vertical(|ui| {
@@ -204,15 +274,11 @@ impl<'a> egui::Widget for PrototypeDetailView<'a, RecipePrototype> {
                                     }
                                     RecipeResult::Fluid(f) => {
                                         let icon = ui.add(Icon {
-                                            root_path: self
-                                                .ctx
-                                                .icon_path
-                                                .as_ref()
-                                                .unwrap()
-                                                .as_path(),
+                                            ctx: &self.ctx,
                                             type_name: &"fluid".to_string(),
                                             item_name: &f.name,
                                             size: 32.0,
+                                            quality: 0,
                                         });
                                         let output = f.normalized_output();
                                         ui.vertical(|ui| {
@@ -288,10 +354,11 @@ impl egui::Widget for ItemSelector<'_> {
                     };
                     if ui
                         .add(Icon {
-                            root_path: self.icon_path,
+                            ctx: &self.ctx,
                             type_name: &"item-group".to_string(),
                             item_name: &group_name,
                             size: 64.0,
+                            quality: 0,
                         })
                         .interact(Sense::click())
                         .clicked()
@@ -318,10 +385,11 @@ impl egui::Widget for ItemSelector<'_> {
                         }
                         let button = ui
                             .add(Icon {
-                                root_path: self.icon_path,
-                                type_name: self.item_type,
-                                item_name,
+                                ctx: &self.ctx,
+                                type_name: &self.item_type,
+                                item_name: &item_name,
                                 size: 32.0,
+                                quality: 0,
                             })
                             .interact(Sense::click());
                         let button = if self.item_type == &"recipe".to_string() {
@@ -414,10 +482,11 @@ impl SubView for PlannerView {
                                     if let Some(item) = self.ctx.items.get(item_name) {
                                         if let Some(icon_path) = &self.ctx.icon_path {
                                             ui.add(Icon {
-                                                root_path: icon_path.as_path(),
+                                                ctx: &self.ctx,
                                                 type_name: &"item".to_string(),
                                                 item_name: item_name,
                                                 size: 32.0,
+                                                quality: 0,
                                             });
                                         } else {
                                             ui.label("未找到图标路径！");
@@ -441,10 +510,11 @@ impl SubView for PlannerView {
                                         if let Some(recipe) = self.ctx.recipes.get(recipe_name) {
                                             if let Some(icon_path) = &self.ctx.icon_path {
                                                 ui.add(Icon {
-                                                    root_path: icon_path.as_path(),
+                                                    ctx: &self.ctx,
                                                     type_name: &"recipe".to_string(),
-                                                    item_name: recipe_name,
+                                                    item_name: &recipe_name,
                                                     size: 32.0,
+                                                    quality: 0,
                                                 });
                                             } else {
                                                 ui.label("未找到图标路径！");
