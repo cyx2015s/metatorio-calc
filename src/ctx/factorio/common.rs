@@ -18,7 +18,7 @@ where
     T: Hash + Eq,
     N: Add<Output = N> + Copy + Default,
 {
-    let entry = map.entry(key).or_insert(N::default());
+    let entry = map.entry(key).or_default();
     *entry = *entry + value;
 }
 
@@ -169,6 +169,7 @@ where
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 /// PrototypeBase 基类中我们关心的字段
+#[derive(Default)]
 pub(crate) struct PrototypeBase {
     /// 类型名
     pub(crate) r#type: String,
@@ -184,18 +185,6 @@ pub(crate) struct PrototypeBase {
     pub(crate) parameter: bool,
 }
 
-impl Default for PrototypeBase {
-    fn default() -> Self {
-        PrototypeBase {
-            r#type: String::new(),
-            name: String::new(),
-            order: String::new(),
-            subgroup: String::new(),
-            hidden: false,
-            parameter: false,
-        }
-    }
-}
 
 pub(crate) trait HasPrototypeBase {
     fn base(&self) -> &PrototypeBase;
@@ -203,7 +192,7 @@ pub(crate) trait HasPrototypeBase {
 
 impl HasPrototypeBase for PrototypeBase {
     fn base(&self) -> &PrototypeBase {
-        &self
+        self
     }
 }
 
@@ -236,12 +225,9 @@ impl<'de> Deserialize<'de> for EnergyAmount {
                 _ => 1.0,
             };
             let dimension_char = value.chars().last();
-            match dimension_char {
-                Some('W') => multiplier /= 60.0,
-                _ => {}
-            }
+            if let Some('W') = dimension_char { multiplier /= 60.0 }
             let numeric_value: f64 = value
-                .trim_end_matches(|c: char| !c.is_digit(10))
+                .trim_end_matches(|c: char| !c.is_ascii_digit())
                 .parse()
                 .map_err(serde::de::Error::custom)?;
             Ok(EnergyAmount {
@@ -293,6 +279,7 @@ pub(crate) enum EnergySource {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub(crate) struct ElectricEnergySource {
     buffer_capacity: Option<EnergyAmount>,
     input_flow_limit: Option<EnergyAmount>,
@@ -301,17 +288,6 @@ pub(crate) struct ElectricEnergySource {
     emissions_per_minute: Option<Emissions>,
 }
 
-impl Default for ElectricEnergySource {
-    fn default() -> Self {
-        ElectricEnergySource {
-            buffer_capacity: None,
-            input_flow_limit: None,
-            output_flow_limit: None,
-            drain: None,
-            emissions_per_minute: None,
-        }
-    }
-}
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
@@ -475,21 +451,21 @@ pub(crate) fn get_order_info<T: HasPrototypeBase + Clone>(
             if let Some(group) = groups.get(group_name) {
                 let group_entry = grouped
                     .entry(&group.base().name)
-                    .or_insert_with(HashMap::new);
+                    .or_default();
                 let subgroup_entry = group_entry
                     .entry(&subgroup.base.name)
-                    .or_insert_with(Vec::new);
+                    .or_default();
                 subgroup_entry.push(prototype);
             } else {
-                let group_entry = grouped.entry(other).or_insert_with(HashMap::new);
+                let group_entry = grouped.entry(other).or_default();
                 let subgroup_entry = group_entry
                     .entry(&subgroup.base.name)
-                    .or_insert_with(Vec::new);
+                    .or_default();
                 subgroup_entry.push(prototype);
             }
         } else {
-            let group_entry = grouped.entry(other).or_insert_with(HashMap::new);
-            let subgroup_entry = group_entry.entry(empty).or_insert_with(Vec::new);
+            let group_entry = grouped.entry(other).or_default();
+            let subgroup_entry = group_entry.entry(empty).or_default();
             subgroup_entry.push(prototype);
         }
     }
@@ -501,7 +477,7 @@ pub(crate) fn get_order_info<T: HasPrototypeBase + Clone>(
         groups
             .get(**k)
             .map(|g| g.order.clone())
-            .unwrap_or_else(|| "".to_string())
+            .unwrap_or_default()
     });
 
     for group_key in group_keys {
@@ -511,7 +487,7 @@ pub(crate) fn get_order_info<T: HasPrototypeBase + Clone>(
             subgroups
                 .get(**k)
                 .map(|sg| sg.base.order.clone())
-                .unwrap_or_else(|| "".to_string())
+                .unwrap_or_default()
         });
 
         let mut subgroup_vec = vec![];

@@ -181,7 +181,7 @@ impl Context {
             }
         };
         let config_path = self_path.join("tmp/config/config.ini");
-        if config_path.exists() == false {
+        if !config_path.exists() {
             std::fs::create_dir_all(config_path.parent()?).ok()?;
         }
         // 配置配置文件：写入到自定义的文件夹中避免和运行中的游戏抢锁
@@ -196,7 +196,7 @@ impl Context {
         let dump_raw_command = std::process::Command::new(executable_path)
             .arg("--dump-data")
             .arg("--config")
-            .arg(&config_path.to_str().unwrap())
+            .arg(config_path.to_str().unwrap())
             .args(if let Some(mod_path) = mod_path {
                 vec!["--mod-directory", mod_path.to_str().unwrap()]
             } else {
@@ -204,14 +204,14 @@ impl Context {
             })
             .output()
             .ok()?;
-        if dump_raw_command.status.success() == false {
+        if !dump_raw_command.status.success() {
             return None;
         }
         let dump_icon_sprites_command = std::process::Command::new(executable_path)
             .arg("--dump-icon-sprites")
             .arg("--disable-audio")
             .arg("--config")
-            .arg(&config_path.to_str().unwrap())
+            .arg(config_path.to_str().unwrap())
             .args(if let Some(mod_path) = mod_path {
                 vec!["--mod-directory", mod_path.to_str().unwrap()]
             } else {
@@ -219,7 +219,7 @@ impl Context {
             })
             .output()
             .ok()?;
-        if dump_icon_sprites_command.status.success() == false {
+        if !dump_icon_sprites_command.status.success() {
             return None;
         }
 
@@ -243,7 +243,7 @@ impl Context {
 
     pub(crate) fn build_order_info(mut self) -> Self {
         self.item_order = Some(get_order_info(&self.items, &self.groups, &self.subgroups));
-        self.reverse_item_order = Some(get_reverse_order_info(&self.item_order.as_ref().unwrap()));
+        self.reverse_item_order = Some(get_reverse_order_info(self.item_order.as_ref().unwrap()));
         // 没有 order 的recipe 的 order 从 item 派生
         for (recipe_name, recipe) in self.recipes.iter_mut() {
             if recipe.base.order.is_empty() && !recipe.base.hidden {
@@ -272,20 +272,18 @@ impl Context {
                     for result in &recipe.results {
                         match result {
                             RecipeResult::Item(r) => {
-                                if r.name == *recipe_name {
-                                    if let Some(item) = self.items.get(&r.name) {
+                                if r.name == *recipe_name
+                                    && let Some(item) = self.items.get(&r.name) {
                                         recipe.base.subgroup = item.base.subgroup.clone();
                                         recipe.base.order = item.base.order.clone();
                                     }
-                                }
                             }
                             RecipeResult::Fluid(f) => {
-                                if f.name == *recipe_name {
-                                    if let Some(fluid) = self.fluids.get(&f.name) {
+                                if f.name == *recipe_name
+                                    && let Some(fluid) = self.fluids.get(&f.name) {
                                         recipe.base.subgroup = fluid.base.subgroup.clone();
                                         recipe.base.order = fluid.base.order.clone();
                                     }
-                                }
                             }
                         }
                     }
@@ -294,10 +292,10 @@ impl Context {
         }
         self.recipe_order = Some(get_order_info(&self.recipes, &self.groups, &self.subgroups));
         self.reverse_recipe_order =
-            Some(get_reverse_order_info(&self.recipe_order.as_ref().unwrap()));
+            Some(get_reverse_order_info(self.recipe_order.as_ref().unwrap()));
         self.fluid_order = Some(get_order_info(&self.fluids, &self.groups, &self.subgroups));
         self.reverse_fluid_order =
-            Some(get_reverse_order_info(&self.fluid_order.as_ref().unwrap()));
+            Some(get_reverse_order_info(self.fluid_order.as_ref().unwrap()));
         self
     }
 }

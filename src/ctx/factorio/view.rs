@@ -1,6 +1,5 @@
-use std::any::Any;
 
-use egui::{Color32, Id, Layout, ScrollArea, Sense, Vec2, emath::align};
+use egui::{ScrollArea, Sense, Vec2};
 
 use crate::{
     SubView,
@@ -102,9 +101,9 @@ impl<'a> egui::Widget for GenericIcon<'a> {
             GenericItem::Custom { name } => ui.label(format!("Custom Item: {}", name)),
             GenericItem::Item { name, quality } => {
                 let icon = ui.add(Icon {
-                    ctx: &self.ctx,
+                    ctx: self.ctx,
                     type_name: &"item".to_string(),
-                    item_name: &name,
+                    item_name: name,
                     size: self.size,
                     quality: 0,
                 });
@@ -115,7 +114,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                         .split_left_right_at_fraction(0.5)
                         .1,
                     Icon {
-                        ctx: &self.ctx,
+                        ctx: self.ctx,
                         type_name: &"quality".to_string(),
                         item_name: &format!("{}", quality),
                         size: self.size / 2.0,
@@ -125,24 +124,24 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                 icon
             }
             GenericItem::Fluid { name, temperature } => {
-                let icon = ui.add(Icon {
-                    ctx: &self.ctx,
+                
+                ui.add(Icon {
+                    ctx: self.ctx,
                     type_name: &"fluid".to_string(),
-                    item_name: &name,
+                    item_name: name,
                     size: self.size,
                     quality: 0,
-                });
-                icon
+                })
             }
             GenericItem::Entity { name, quality } => {
-                let icon = ui.add(Icon {
-                    ctx: &self.ctx,
+                
+                ui.add(Icon {
+                    ctx: self.ctx,
                     type_name: &"entity".to_string(),
-                    item_name: &name,
+                    item_name: name,
                     size: self.size,
                     quality: *quality,
-                });
-                icon
+                })
             }
             GenericItem::Heat => ui.label("热量"),
             GenericItem::Electricity => ui.label("电力"),
@@ -193,7 +192,7 @@ impl<'a> egui::Widget for PrototypeDetailView<'a, RecipePrototype> {
                                 match ingredient {
                                     RecipeIngredient::Item(i) => {
                                         let icon = ui.add(Icon {
-                                            ctx: &self.ctx,
+                                            ctx: self.ctx,
                                             type_name: &"item".to_string(),
                                             item_name: &i.name,
                                             size: 32.0,
@@ -205,7 +204,7 @@ impl<'a> egui::Widget for PrototypeDetailView<'a, RecipePrototype> {
                                     }
                                     RecipeIngredient::Fluid(f) => {
                                         let icon = ui.add(Icon {
-                                            ctx: &self.ctx,
+                                            ctx: self.ctx,
                                             type_name: &"fluid".to_string(),
                                             item_name: &f.name,
                                             size: 32.0,
@@ -243,7 +242,7 @@ impl<'a> egui::Widget for PrototypeDetailView<'a, RecipePrototype> {
                         });
                 }
                 ui.label("→");
-                if results.len() == 0 {
+                if results.is_empty() {
                     ui.label("无产出");
                     ui.end_row();
                 } else {
@@ -257,7 +256,7 @@ impl<'a> egui::Widget for PrototypeDetailView<'a, RecipePrototype> {
                                 match result {
                                     RecipeResult::Item(i) => {
                                         let icon = ui.add(Icon {
-                                            ctx: &self.ctx,
+                                            ctx: self.ctx,
                                             type_name: &"item".to_string(),
                                             item_name: &i.name,
                                             size: 32.0,
@@ -274,7 +273,7 @@ impl<'a> egui::Widget for PrototypeDetailView<'a, RecipePrototype> {
                                     }
                                     RecipeResult::Fluid(f) => {
                                         let icon = ui.add(Icon {
-                                            ctx: &self.ctx,
+                                            ctx: self.ctx,
                                             type_name: &"fluid".to_string(),
                                             item_name: &f.name,
                                             size: 32.0,
@@ -328,7 +327,6 @@ pub(crate) struct ItemSelectorStorage {
 
 pub(crate) struct ItemSelector<'a> {
     pub(crate) ctx: &'a Context,
-    pub(crate) icon_path: &'a std::path::Path,
     pub(crate) item_type: &'a String,
     pub(crate) order_info: &'a OrderInfo,
     pub(crate) storage: &'a mut ItemSelectorStorage,
@@ -354,7 +352,7 @@ impl egui::Widget for ItemSelector<'_> {
                     };
                     if ui
                         .add(Icon {
-                            ctx: &self.ctx,
+                            ctx: self.ctx,
                             type_name: &"item-group".to_string(),
                             item_name: &group_name,
                             size: 64.0,
@@ -385,9 +383,9 @@ impl egui::Widget for ItemSelector<'_> {
                         }
                         let button = ui
                             .add(Icon {
-                                ctx: &self.ctx,
-                                type_name: &self.item_type,
-                                item_name: &item_name,
+                                ctx: self.ctx,
+                                type_name: self.item_type,
+                                item_name,
                                 size: 32.0,
                                 quality: 0,
                             })
@@ -409,8 +407,7 @@ impl egui::Widget for ItemSelector<'_> {
                             self.storage.index = k;
                             self.storage.selected_item = Some(item_name.clone());
                         }
-                        if self.storage.group == self.storage.group
-                            && self.storage.subgroup == j
+                        if self.storage.subgroup == j
                             && self.storage.index == k
                         {
                             response = response.union(button);
@@ -468,7 +465,6 @@ impl SubView for PlannerView {
             .show(ui, |ui| {
                 ui.add(ItemSelector {
                     ctx: &self.ctx,
-                    icon_path: self.ctx.icon_path.as_ref().unwrap(),
                     item_type: &"recipe".to_string(),
                     order_info: self.ctx.recipe_order.as_ref().unwrap(),
                     storage: &mut self.item_selector_storage,
@@ -484,7 +480,7 @@ impl SubView for PlannerView {
                                             ui.add(Icon {
                                                 ctx: &self.ctx,
                                                 type_name: &"item".to_string(),
-                                                item_name: item_name,
+                                                item_name,
                                                 size: 32.0,
                                                 quality: 0,
                                             });
@@ -512,7 +508,7 @@ impl SubView for PlannerView {
                                                 ui.add(Icon {
                                                     ctx: &self.ctx,
                                                     type_name: &"recipe".to_string(),
-                                                    item_name: &recipe_name,
+                                                    item_name: recipe_name,
                                                     size: 32.0,
                                                     quality: 0,
                                                 });
@@ -548,11 +544,10 @@ impl SubView for ContextCreatorView {
             ui.separator();
 
             ui.label("选择游戏路径:");
-            if ui.button("浏览...").clicked() {
-                if let Some(path) = rfd::FileDialog::new().pick_file() {
+            if ui.button("浏览...").clicked()
+                && let Some(path) = rfd::FileDialog::new().pick_file() {
                     self.path = Some(path);
                 }
-            }
             if let Some(path) = &self.path {
                 ui.label(format!("已选择路径: {}", path.display()));
             } else {
@@ -578,15 +573,14 @@ impl SubView for ContextCreatorView {
 
             ui.separator();
 
-            if ui.button("加载上下文").clicked() {
-                if let Some(path) = &self.path {
+            if ui.button("加载上下文").clicked()
+                && let Some(path) = &self.path {
                     self.created_context = Context::load_from_executable_path(
                         path,
                         self.mod_path.as_deref(),
                         Some("zh-CN"),
                     );
                 }
-            }
 
             ui.separator();
 

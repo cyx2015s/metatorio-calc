@@ -40,7 +40,7 @@ impl eframe::App for MainPage {
             ui.heading("Metatorio");
             for (i, creator) in self.creators.iter_mut().enumerate() {
                 if ui
-                    .selectable_label(self.selected == i, format!("{}", creator.0))
+                    .selectable_label(self.selected == i, creator.0.to_string())
                     .clicked()
                 {
                     self.selected = i;
@@ -57,7 +57,7 @@ impl eframe::App for MainPage {
                 if ui
                     .selectable_label(
                         self.selected == i + self.creators.len(),
-                        format!("{}", subview.0),
+                        subview.0.to_string(),
                     )
                     .clicked()
                 {

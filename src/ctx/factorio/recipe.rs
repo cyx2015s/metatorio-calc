@@ -4,7 +4,7 @@ use serde::Deserialize;
 
 use crate::ctx::{RecipeLike, factorio::{common::{
         Dict, Effect, EffectReceiver, EffectTypeLimitation, EnergyAmount, EnergySource, HasPrototypeBase, PrototypeBase, update_map
-    }, context::{Context, GenericItem, make_located_generic_recipe}, entity::EntityPrototype}};
+    }, context::{Context, GenericItem}, entity::EntityPrototype}};
 
 use crate::ctx::factorio::common::{as_vec_or_empty, option_as_vec_or_empty};
 
@@ -194,7 +194,7 @@ impl ItemResult {
                 // amount (prob * (1 - extra))
                 // amount + 1 (prob * extra)
                 // 1 (1 - prob * extra)
-                let base = amount as f64;
+                let base = amount;
                 let productivity = f64::max((base - ignore) * prob * (1.0 - extra), 0.0)
                     + f64::max((base + 1.0 - ignore) * prob * extra, 0.0)
                     + f64::max((1.0 - ignore) * (1.0 - prob) * extra, 0.0);
@@ -206,12 +206,9 @@ impl ItemResult {
                 // (min ~ max) + 1 (prob * extra)
                 // 1 (1 - prob * extra)
                 // 减去 ignore 前要先判断范围，还要求平均
-                let min = match self.amount_min {
-                    Some(value) => value as f64,
-                    None => 0.0,
-                };
+                let min = self.amount_min.unwrap_or(0.0);
                 let max = match self.amount_max {
-                    Some(value) => value as f64,
+                    Some(value) => value,
                     None => min,
                 };
                 let max = f64::max(max, min);
@@ -301,10 +298,7 @@ impl FluidResult {
                 (base * prob, productivity)
             }
             None => {
-                let min = match self.amount_min {
-                    Some(value) => value,
-                    None => 0.0,
-                };
+                let min = self.amount_min.unwrap_or(0.0);
                 let max = match self.amount_max {
                     Some(value) => value,
                     None => min,
@@ -394,14 +388,9 @@ impl RecipeLike for RecipeConfig {
 
         let mut base_speed = 1.0;
 
-        let crafter = match &self.machine {
-            Some(machine_name) => Some(
-                ctx.crafters
+        let crafter = self.machine.as_ref().map(|machine_name| ctx.crafters
                     .get(machine_name)
-                    .expect("RecipeConfig 中的机器在上下文中不存在"),
-            ),
-            None => None,
-        };
+                    .expect("RecipeConfig 中的机器在上下文中不存在"));
 
         if let Some(crafter) = crafter {
             module_effects = module_effects
@@ -509,6 +498,6 @@ fn test_recipe_normalized() {
     };
     let result = recipe_config.as_hash_map(&ctx);
     println!("Recipe Result: {:?}", result);
-    let result_with_location = make_located_generic_recipe(result, 1);
+    let result_with_location = crate::ctx::factorio::context::make_located_generic_recipe(result, 1);
     println!("Recipe Result with Location: {:?}", result_with_location);
 }

@@ -9,7 +9,7 @@ use crate::ctx::{
             Effect, EffectReceiver, EffectTypeLimitation, EnergySource, HasPrototypeBase,
             PrototypeBase, update_map, option_as_vec_or_empty
         },
-        context::{Context, GenericItem, make_located_generic_recipe},
+        context::{Context, GenericItem},
         entity::EntityPrototype,
         recipe::RecipeResult,
     },
@@ -219,6 +219,6 @@ fn test_mining_normalized() {
 
     let result = mining_config.as_hash_map(&ctx);
     println!("Mining Result: {:?}", result);
-    let result_with_location = make_located_generic_recipe(result, 42);
+    let result_with_location = crate::ctx::factorio::context::make_located_generic_recipe(result, 42);
     println!("Mining Result with Location: {:?}", result_with_location);
 }
