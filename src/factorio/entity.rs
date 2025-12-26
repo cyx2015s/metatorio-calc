@@ -1,11 +1,11 @@
 use serde::Deserialize;
 
-use crate::ctx::factorio::{
+use crate::factorio::{
     common::{BoundingBox, EnergyAmount, HasPrototypeBase, PrototypeBase, option_as_vec_or_empty},
     recipe::RecipeResult,
 };
 
-pub(crate) const ENTITY_TYPES: &[&str] = &[
+pub const ENTITY_TYPES: &[&str] = &[
     // "arrow",
     // "artillery-flare",
     // "artillery-projectile",
@@ -142,30 +142,30 @@ pub(crate) const ENTITY_TYPES: &[&str] = &[
 ];
 
 #[derive(Debug, Clone, Deserialize)]
-pub(crate) struct EntityPrototype {
+pub struct EntityPrototype {
     #[serde(flatten)]
-    pub(crate) base: PrototypeBase,
+    pub base: PrototypeBase,
 
-    pub(crate) heating_energy: Option<EnergyAmount>,
+    pub heating_energy: Option<EnergyAmount>,
 
-    pub(crate) collision_box: Option<BoundingBox>,
+    pub collision_box: Option<BoundingBox>,
 
-    pub(crate) minable: Option<MiningProperty>,
+    pub minable: Option<MiningProperty>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub(crate) struct MiningProperty {
-    pub(crate) mining_time: f64,
+pub struct MiningProperty {
+    pub mining_time: f64,
 
     #[serde(deserialize_with = "option_as_vec_or_empty")]
     #[serde(default)]
-    pub(crate) results: Option<Vec<RecipeResult>>,
+    pub results: Option<Vec<RecipeResult>>,
 
-    pub(crate) result: Option<String>,
-    pub(crate) count: Option<f64>,
+    pub result: Option<String>,
+    pub count: Option<f64>,
 
-    pub(crate) fluid_amount: Option<f64>,
-    pub(crate) required_fluid: Option<String>,
+    pub fluid_amount: Option<f64>,
+    pub required_fluid: Option<String>,
 }
 
 impl HasPrototypeBase for EntityPrototype {

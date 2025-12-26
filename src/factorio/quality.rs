@@ -1,23 +1,23 @@
 use serde::Deserialize;
 
-use crate::ctx::factorio::common::{Color, HasPrototypeBase, PrototypeBase};
+use crate::factorio::common::{Color, HasPrototypeBase, PrototypeBase};
 
 #[derive(Debug, Clone, Deserialize)]
-pub(crate) struct QualityPrototype {
+pub struct QualityPrototype {
     #[serde(flatten)]
-    pub(crate) base: PrototypeBase,
+    pub base: PrototypeBase,
 
     /// 品质链条基本是线性的，这个用于在上下文中获取下标
     #[serde(default)]
-    pub(crate) index: usize,
+    pub index: usize,
 
-    pub(crate) level: f64,
-    pub(crate) color: Color,
+    pub level: f64,
+    pub color: Color,
 
-    pub(crate) next: Option<String>,
+    pub next: Option<String>,
 
     #[serde(default)]
-    pub(crate) next_probability: f64, // 0
+    pub next_probability: f64, // 0
     #[serde(default)]
     beacon_power_usage_multiplier: Option<f64>, // 1
     #[serde(default)]

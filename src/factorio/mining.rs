@@ -2,12 +2,12 @@ use std::collections::HashMap;
 
 use serde::Deserialize;
 
-use crate::ctx::{
-    RecipeLike,
+use crate::{
+    concept::RecipeLike,
     factorio::{
         common::{
             Effect, EffectReceiver, EffectTypeLimitation, EnergySource, HasPrototypeBase,
-            PrototypeBase, update_map, option_as_vec_or_empty
+            PrototypeBase, option_as_vec_or_empty, update_map,
         },
         context::{Context, GenericItem},
         entity::EntityPrototype,
@@ -16,14 +16,14 @@ use crate::ctx::{
 };
 
 #[derive(Debug, Clone, Deserialize)]
-pub(crate) struct ResourcePrototype {
+pub struct ResourcePrototype {
     #[serde(flatten)]
-    pub(crate) base: EntityPrototype,
+    pub base: EntityPrototype,
 
-    pub(crate) category: Option<String>,
+    pub category: Option<String>,
 
     #[serde(default)]
-    pub(crate) infinite: bool,
+    pub infinite: bool,
 }
 
 impl HasPrototypeBase for ResourcePrototype {
@@ -33,32 +33,32 @@ impl HasPrototypeBase for ResourcePrototype {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub(crate) struct MiningDrillPrototype {
+pub struct MiningDrillPrototype {
     #[serde(flatten)]
-    pub(crate) base: EntityPrototype,
+    pub base: EntityPrototype,
 
-    pub(crate) mining_speed: f64,
+    pub mining_speed: f64,
 
-    pub(crate) resource_categories: Vec<String>,
+    pub resource_categories: Vec<String>,
 
-    pub(crate) energy_source: EnergySource,
+    pub energy_source: EnergySource,
     #[serde(default)]
-    pub(crate) effect_receiver: Option<EffectReceiver>,
+    pub effect_receiver: Option<EffectReceiver>,
     #[serde(default)]
-    pub(crate) module_slots: f64,
+    pub module_slots: f64,
     #[serde(default)]
-    pub(crate) quality_affects_module_slots: bool,
+    pub quality_affects_module_slots: bool,
 
-    pub(crate) allowed_affects: Option<EffectTypeLimitation>,
+    pub allowed_affects: Option<EffectTypeLimitation>,
 
     #[serde(deserialize_with = "option_as_vec_or_empty")]
     #[serde(default)]
-    pub(crate) allowed_module_categories: Option<Vec<String>>,
+    pub allowed_module_categories: Option<Vec<String>>,
 
     #[serde(default)]
-    pub(crate) uses_force_mining_productivity_bonus: bool,
+    pub uses_force_mining_productivity_bonus: bool,
 
-    pub(crate) resource_drain_rate_percent: Option<f64>,
+    pub resource_drain_rate_percent: Option<f64>,
 }
 
 impl HasPrototypeBase for MiningDrillPrototype {
@@ -68,12 +68,12 @@ impl HasPrototypeBase for MiningDrillPrototype {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct MiningConfig {
-    pub(crate) resource: String,
-    pub(crate) quality: u8,
-    pub(crate) machine: Option<String>,
-    pub(crate) modules: Vec<(String, u8)>,
-    pub(crate) extra_effects: Effect,
+pub struct MiningConfig {
+    pub resource: String,
+    pub quality: u8,
+    pub machine: Option<String>,
+    pub modules: Vec<(String, u8)>,
+    pub extra_effects: Effect,
 }
 
 impl RecipeLike for MiningConfig {
@@ -204,7 +204,7 @@ impl RecipeLike for MiningConfig {
 #[test]
 fn test_mining_normalized() {
     let ctx = Context::load(
-        &serde_json::from_str(include_str!("../../../assets/data-raw-dump.json")).unwrap(),
+        &serde_json::from_str(include_str!("../../assets/data-raw-dump.json")).unwrap(),
     );
     let mining_config = MiningConfig {
         resource: "uranium-ore".to_string(),
@@ -219,6 +219,6 @@ fn test_mining_normalized() {
 
     let result = mining_config.as_hash_map(&ctx);
     println!("Mining Result: {:?}", result);
-    let result_with_location = crate::ctx::factorio::context::make_located_generic_recipe(result, 42);
+    let result_with_location = crate::factorio::context::make_located_generic_recipe(result, 42);
     println!("Mining Result with Location: {:?}", result_with_location);
 }

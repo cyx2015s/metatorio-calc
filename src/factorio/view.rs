@@ -4,40 +4,38 @@ use egui::{ScrollArea, Sense, Vec2};
 
 use crate::{
     SubView,
-    ctx::{
-        GameContextCreatorView, RecipeLike,
-        factorio::{
-            common::{Effect, HasPrototypeBase, OrderInfo},
-            context::{Context, GenericItem},
-            format::CompactNumberLabel,
-            mining::MiningConfig,
-            recipe::{RecipeConfig, RecipeIngredient, RecipePrototype, RecipeResult},
-        },
+    concept::{GameContextCreatorView, RecipeLike},
+    factorio::{
+        common::{Effect, HasPrototypeBase, OrderInfo},
+        context::{Context, GenericItem},
+        format::CompactNumberLabel,
+        mining::MiningConfig,
+        recipe::{RecipeConfig, RecipeIngredient, RecipePrototype, RecipeResult},
     },
 };
 
-pub(crate) struct FactoryView {
+pub struct FactoryView {
     recipe_configs: Vec<Box<dyn RecipeLike<KeyType = GenericItem, ContextType = Context>>>,
 }
 
-pub(crate) struct PlannerView {
+pub struct PlannerView {
     /// 存储游戏逻辑数据的全部上下文
-    pub(crate) ctx: Context,
+    pub ctx: Context,
 
-    pub(crate) factories: Vec<FactoryView>,
-    pub(crate) selected_factory: usize,
+    pub factories: Vec<FactoryView>,
+    pub selected_factory: usize,
 
-    pub(crate) item_selector_storage: ItemSelectorStorage,
+    pub item_selector_storage: ItemSelectorStorage,
 }
 
 #[derive(Debug)]
 
-pub(crate) struct Icon<'a> {
-    pub(crate) ctx: &'a Context,
-    pub(crate) type_name: &'a String,
-    pub(crate) item_name: &'a String,
-    pub(crate) quality: u8,
-    pub(crate) size: f32,
+pub struct Icon<'a> {
+    pub ctx: &'a Context,
+    pub type_name: &'a String,
+    pub item_name: &'a String,
+    pub quality: u8,
+    pub size: f32,
 }
 
 impl<'a> Icon<'a> {
@@ -91,10 +89,10 @@ impl<'a> egui::Widget for Icon<'a> {
 }
 
 #[derive(Debug)]
-pub(crate) struct GenericIcon<'a> {
-    pub(crate) ctx: &'a Context,
-    pub(crate) item: &'a GenericItem,
-    pub(crate) size: f32,
+pub struct GenericIcon<'a> {
+    pub ctx: &'a Context,
+    pub item: &'a GenericItem,
+    pub size: f32,
 }
 
 impl<'a> egui::Widget for GenericIcon<'a> {
@@ -163,9 +161,9 @@ impl<'a> egui::Widget for GenericIcon<'a> {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct PrototypeDetailView<'a, T: HasPrototypeBase> {
-    pub(crate) ctx: &'a Context,
-    pub(crate) prototype: &'a T,
+pub struct PrototypeDetailView<'a, T: HasPrototypeBase> {
+    pub ctx: &'a Context,
+    pub prototype: &'a T,
 }
 
 impl<'a> egui::Widget for PrototypeDetailView<'a, RecipePrototype> {
@@ -358,19 +356,19 @@ impl<'a> egui::Widget for PrototypeDetailView<'a, RecipePrototype> {
 }
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct ItemSelectorStorage {
-    pub(crate) current_type: u8,
-    pub(crate) group: usize,
-    pub(crate) subgroup: usize,
-    pub(crate) index: usize,
-    pub(crate) selected_item: Option<String>,
+pub struct ItemSelectorStorage {
+    pub current_type: u8,
+    pub group: usize,
+    pub subgroup: usize,
+    pub index: usize,
+    pub selected_item: Option<String>,
 }
 
-pub(crate) struct ItemSelector<'a> {
-    pub(crate) ctx: &'a Context,
-    pub(crate) item_type: &'a String,
-    pub(crate) order_info: &'a OrderInfo,
-    pub(crate) storage: &'a mut ItemSelectorStorage,
+pub struct ItemSelector<'a> {
+    pub ctx: &'a Context,
+    pub item_type: &'a String,
+    pub order_info: &'a OrderInfo,
+    pub storage: &'a mut ItemSelectorStorage,
 }
 
 impl egui::Widget for ItemSelector<'_> {
@@ -460,7 +458,7 @@ impl egui::Widget for ItemSelector<'_> {
 }
 
 impl PlannerView {
-    pub(crate) fn new(ctx: Context) -> Self {
+    pub fn new(ctx: Context) -> Self {
         PlannerView {
             ctx: ctx.build_order_info(),
             factories: Vec::new(),
@@ -473,7 +471,7 @@ impl PlannerView {
 impl Default for PlannerView {
     fn default() -> Self {
         Self::new(Context::load(
-            &(serde_json::from_str(include_str!("../../../assets/data-raw-dump.json"))).unwrap(),
+            &(serde_json::from_str(include_str!("../../assets/data-raw-dump.json"))).unwrap(),
         ))
     }
 }
@@ -633,7 +631,7 @@ impl SubView for PlannerView {
 }
 
 #[derive(Default, Debug)]
-pub(crate) struct ContextCreatorView {
+pub struct ContextCreatorView {
     path: Option<std::path::PathBuf>,
     mod_path: Option<std::path::PathBuf>,
     created_context: Option<Context>,

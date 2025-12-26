@@ -4,19 +4,20 @@ use egui::{
     epaint::text::{FontInsert, InsertFontFamily},
 };
 
-use crate::{ctx::GameContextCreatorView, ctx::factorio};
+use crate::{concept::GameContextCreatorView};
 
-pub(crate) mod ctx;
-pub(crate) mod lp;
+pub mod concept;
+pub mod lp;
+pub mod factorio;
 
 #[derive(Default)]
-pub(crate) struct MainPage {
-    pub(crate) creators: Vec<(String, Box<dyn GameContextCreatorView>)>,
-    pub(crate) subviews: Vec<(String, Box<dyn SubView>)>,
-    pub(crate) selected: usize,
+pub struct MainPage {
+    pub creators: Vec<(String, Box<dyn GameContextCreatorView>)>,
+    pub subviews: Vec<(String, Box<dyn SubView>)>,
+    pub selected: usize,
 }
 
-trait SubView {
+pub trait SubView {
     fn ui(&mut self, ui: &mut egui::Ui);
 }
 

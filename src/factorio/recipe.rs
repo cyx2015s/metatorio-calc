@@ -2,17 +2,25 @@ use std::{collections::HashMap, fmt::Debug};
 
 use serde::Deserialize;
 
-use crate::ctx::{RecipeLike, factorio::{common::{
-        Dict, Effect, EffectReceiver, EffectTypeLimitation, EnergyAmount, EnergySource, HasPrototypeBase, PrototypeBase, update_map
-    }, context::{Context, GenericItem}, entity::EntityPrototype}};
+use crate::{
+    concept::RecipeLike,
+    factorio::{
+        common::{
+            Dict, Effect, EffectReceiver, EffectTypeLimitation, EnergyAmount, EnergySource,
+            HasPrototypeBase, PrototypeBase, update_map,
+        },
+        context::{Context, GenericItem},
+        entity::EntityPrototype,
+    },
+};
 
-use crate::ctx::factorio::common::{as_vec_or_empty, option_as_vec_or_empty};
+use crate::factorio::common::{as_vec_or_empty, option_as_vec_or_empty};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
-pub(crate) struct RecipePrototype {
+pub struct RecipePrototype {
     #[serde(flatten)]
-    pub(crate) base: PrototypeBase,
+    pub base: PrototypeBase,
 
     category: Option<String>,
     #[serde(deserialize_with = "as_vec_or_empty")]
@@ -20,19 +28,19 @@ pub(crate) struct RecipePrototype {
 
     #[serde(deserialize_with = "as_vec_or_empty")]
     #[serde(default)]
-    pub(crate) ingredients: Vec<RecipeIngredient>,
+    pub ingredients: Vec<RecipeIngredient>,
 
     #[serde(deserialize_with = "as_vec_or_empty")]
     #[serde(default)]
-    pub(crate) results: Vec<RecipeResult>,
-    pub(crate) main_product: Option<String>,
+    pub results: Vec<RecipeResult>,
+    pub main_product: Option<String>,
 
     #[serde(deserialize_with = "option_as_vec_or_empty")]
     #[serde(default)]
     allowed_module_categories: Option<Vec<String>>,
 
     /// 制作时间（秒）
-    pub(crate) energy_required: f64,
+    pub energy_required: f64,
 
     /// 配方污染倍数
     emissions_multiplier: f64,
@@ -95,7 +103,7 @@ impl Default for RecipePrototype {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type")]
-pub(crate) enum RecipeIngredient {
+pub enum RecipeIngredient {
     /// 物品原料
     #[serde(rename = "item")]
     Item(ItemIngredient),
@@ -105,24 +113,24 @@ pub(crate) enum RecipeIngredient {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub(crate) struct ItemIngredient {
-    pub(crate) name: String,
-    pub(crate) amount: f64,
+pub struct ItemIngredient {
+    pub name: String,
+    pub amount: f64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub(crate) struct FluidIngredient {
-    pub(crate) name: String,
-    pub(crate) amount: f64,
-    pub(crate) temperature: Option<f64>,
-    pub(crate) min_temperature: Option<f64>,
-    pub(crate) max_temperature: Option<f64>,
-    pub(crate) fluidbox_index: Option<f64>,
+pub struct FluidIngredient {
+    pub name: String,
+    pub amount: f64,
+    pub temperature: Option<f64>,
+    pub min_temperature: Option<f64>,
+    pub max_temperature: Option<f64>,
+    pub fluidbox_index: Option<f64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type")]
-pub(crate) enum RecipeResult {
+pub enum RecipeResult {
     /// 物品产物
     #[serde(rename = "item")]
     Item(ItemResult),
@@ -139,16 +147,16 @@ impl HasPrototypeBase for RecipePrototype {
 
 #[derive(Clone, Deserialize)]
 #[serde(default)]
-pub(crate) struct ItemResult {
-    pub(crate) name: String,
-    pub(crate) amount: Option<f64>,
-    pub(crate) amount_min: Option<f64>,
-    pub(crate) amount_max: Option<f64>,
-    pub(crate) probability: f64,
-    pub(crate) ignored_by_stats: Option<f64>,
-    pub(crate) ignored_by_productivity: Option<f64>,
-    pub(crate) extra_count_fraction: f64,
-    pub(crate) percent_spoiled: f64,
+pub struct ItemResult {
+    pub name: String,
+    pub amount: Option<f64>,
+    pub amount_min: Option<f64>,
+    pub amount_max: Option<f64>,
+    pub probability: f64,
+    pub ignored_by_stats: Option<f64>,
+    pub ignored_by_productivity: Option<f64>,
+    pub extra_count_fraction: f64,
+    pub percent_spoiled: f64,
 }
 
 impl Default for ItemResult {
@@ -181,7 +189,7 @@ impl Debug for ItemResult {
 
 impl ItemResult {
     /// 计算当前配方的实际单次产量和每次结算产能加成时的额外产量
-    pub(crate) fn normalized_output(&self) -> (f64, f64) {
+    pub fn normalized_output(&self) -> (f64, f64) {
         let extra = self.extra_count_fraction;
         let prob = self.probability;
         let ignore = match self.ignored_by_productivity {
@@ -239,18 +247,18 @@ impl ItemResult {
 
 #[derive(Clone, Deserialize)]
 #[serde(default)]
-pub(crate) struct FluidResult {
-    pub(crate) name: String,
-    pub(crate) amount: Option<f64>,
-    pub(crate) amount_min: Option<f64>,
-    pub(crate) amount_max: Option<f64>,
-    pub(crate) probability: f64,
-    pub(crate) ignored_by_stats: Option<f64>,
-    pub(crate) ignored_by_productivity: Option<f64>,
-    pub(crate) temperature: Option<f64>,
-    pub(crate) min_temperature: Option<f64>,
-    pub(crate) max_temperature: Option<f64>,
-    pub(crate) fluidbox_index: f64,
+pub struct FluidResult {
+    pub name: String,
+    pub amount: Option<f64>,
+    pub amount_min: Option<f64>,
+    pub amount_max: Option<f64>,
+    pub probability: f64,
+    pub ignored_by_stats: Option<f64>,
+    pub ignored_by_productivity: Option<f64>,
+    pub temperature: Option<f64>,
+    pub min_temperature: Option<f64>,
+    pub max_temperature: Option<f64>,
+    pub fluidbox_index: f64,
 }
 
 impl Default for FluidResult {
@@ -285,7 +293,7 @@ impl Debug for FluidResult {
 
 impl FluidResult {
     /// 计算当前配方的实际单词产量和每次结算产能加成时的额外产量
-    pub(crate) fn normalized_output(&self) -> (f64, f64) {
+    pub fn normalized_output(&self) -> (f64, f64) {
         let prob = self.probability;
         let ignore = match self.ignored_by_productivity {
             Some(value) => value,
@@ -322,45 +330,45 @@ impl FluidResult {
 const CRAFTING_MACHINE_TYPES: &[&str] = &["assembling-machine", "furnace", "rocket-silo"];
 
 #[derive(Debug, Clone, Deserialize)]
-pub(crate) struct CraftingMachinePrototype {
+pub struct CraftingMachinePrototype {
     #[serde(flatten)]
-    pub(crate) base: EntityPrototype,
+    pub base: EntityPrototype,
     #[serde(default)]
-    pub(crate) quality_affects_energy_usage: bool,
+    pub quality_affects_energy_usage: bool,
     #[serde(default)]
-    pub(crate) energy_usage: Option<EnergyAmount>,
+    pub energy_usage: Option<EnergyAmount>,
     #[serde(default)]
-    pub(crate) crafting_speed: f64,
+    pub crafting_speed: f64,
 
     #[serde(deserialize_with = "as_vec_or_empty")]
-    pub(crate) crafting_categories: Vec<String>,
+    pub crafting_categories: Vec<String>,
 
-    pub(crate) energy_source: EnergySource,
+    pub energy_source: EnergySource,
     #[serde(default)]
-    pub(crate) effect_receiver: Option<EffectReceiver>,
+    pub effect_receiver: Option<EffectReceiver>,
     #[serde(default)]
-    pub(crate) module_slots: f64,
+    pub module_slots: f64,
     #[serde(default)]
-    pub(crate) quality_affects_module_slots: bool,
+    pub quality_affects_module_slots: bool,
 
-    pub(crate) allowed_affects: Option<EffectTypeLimitation>,
+    pub allowed_affects: Option<EffectTypeLimitation>,
 
     #[serde(deserialize_with = "option_as_vec_or_empty")]
     #[serde(default)]
-    pub(crate) allowed_module_categories: Option<Vec<String>>,
+    pub allowed_module_categories: Option<Vec<String>>,
     #[serde(default)]
-    pub(crate) crafting_speed_quality_multiplier: Option<Dict<f64>>,
+    pub crafting_speed_quality_multiplier: Option<Dict<f64>>,
     #[serde(default)]
-    pub(crate) module_slots_quality_bonus: Option<Dict<f64>>,
+    pub module_slots_quality_bonus: Option<Dict<f64>>,
     #[serde(default)]
-    pub(crate) energy_usage_quality_multiplier: Option<Dict<f64>>,
+    pub energy_usage_quality_multiplier: Option<Dict<f64>>,
 
-    pub(crate) fixed_recipe: Option<String>,
-    pub(crate) fixed_quality: Option<String>,
+    pub fixed_recipe: Option<String>,
+    pub fixed_quality: Option<String>,
     #[serde(alias = "source_inventory_size", alias = "ingredient_count")]
-    pub(crate) input_limit: Option<f64>,
+    pub input_limit: Option<f64>,
     #[serde(alias = "result_inventory_size", alias = "max_item_product_count")]
-    pub(crate) output_limit: Option<f64>,
+    pub output_limit: Option<f64>,
 }
 
 impl HasPrototypeBase for CraftingMachinePrototype {
@@ -370,12 +378,12 @@ impl HasPrototypeBase for CraftingMachinePrototype {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct RecipeConfig {
-    pub(crate) recipe: String,
-    pub(crate) quality: u8,
-    pub(crate) machine: Option<String>,
-    pub(crate) modules: Vec<(String, u8)>,
-    pub(crate) extra_effects: Effect,
+pub struct RecipeConfig {
+    pub recipe: String,
+    pub quality: u8,
+    pub machine: Option<String>,
+    pub modules: Vec<(String, u8)>,
+    pub extra_effects: Effect,
 }
 
 impl RecipeLike for RecipeConfig {
@@ -388,9 +396,11 @@ impl RecipeLike for RecipeConfig {
 
         let mut base_speed = 1.0;
 
-        let crafter = self.machine.as_ref().map(|machine_name| ctx.crafters
-                    .get(machine_name)
-                    .expect("RecipeConfig 中的机器在上下文中不存在"));
+        let crafter = self.machine.as_ref().map(|machine_name| {
+            ctx.crafters
+                .get(machine_name)
+                .expect("RecipeConfig 中的机器在上下文中不存在")
+        });
 
         if let Some(crafter) = crafter {
             module_effects = module_effects
@@ -419,7 +429,6 @@ impl RecipeLike for RecipeConfig {
             .get(&self.recipe)
             .expect("RecipeConfig 中的配方在上下文中不存在");
 
-            
         base_speed /= recipe.energy_required;
 
         for ingredient in &recipe.ingredients {
@@ -429,14 +438,22 @@ impl RecipeLike for RecipeConfig {
                         name: item.name.clone(),
                         quality: self.quality,
                     };
-                    update_map(&mut map, key, -item.amount * (1.0 + module_effects.speed) * base_speed);
+                    update_map(
+                        &mut map,
+                        key,
+                        -item.amount * (1.0 + module_effects.speed) * base_speed,
+                    );
                 }
                 RecipeIngredient::Fluid(fluid) => {
                     let key = GenericItem::Fluid {
                         name: fluid.name.clone(),
                         temperature: fluid.temperature.map(|x| x as i32),
                     };
-                    update_map(&mut map, key, -fluid.amount * (1.0 + module_effects.speed) * base_speed);
+                    update_map(
+                        &mut map,
+                        key,
+                        -fluid.amount * (1.0 + module_effects.speed) * base_speed,
+                    );
                 }
             }
         }
@@ -457,7 +474,8 @@ impl RecipeLike for RecipeConfig {
                                 * module_effects
                                     .productivity
                                     .clamp(0.0, recipe.maximum_productivity))
-                            * (1.0 + module_effects.speed) * base_speed,
+                            * (1.0 + module_effects.speed)
+                            * base_speed,
                     );
                 }
                 RecipeResult::Fluid(fluid) => {
@@ -474,7 +492,8 @@ impl RecipeLike for RecipeConfig {
                                 * module_effects
                                     .productivity
                                     .clamp(0.0, recipe.maximum_productivity))
-                            * (1.0 + module_effects.speed) * base_speed,
+                            * (1.0 + module_effects.speed)
+                            * base_speed,
                     );
                 }
             }
@@ -487,7 +506,7 @@ impl RecipeLike for RecipeConfig {
 #[test]
 fn test_recipe_normalized() {
     let ctx = Context::load(
-        &serde_json::from_str(include_str!("../../../assets/data-raw-dump.json")).unwrap(),
+        &serde_json::from_str(include_str!("../../assets/data-raw-dump.json")).unwrap(),
     );
     let recipe_config = RecipeConfig {
         recipe: "pentapod-egg".to_string(),
@@ -498,6 +517,6 @@ fn test_recipe_normalized() {
     };
     let result = recipe_config.as_hash_map(&ctx);
     println!("Recipe Result: {:?}", result);
-    let result_with_location = crate::ctx::factorio::context::make_located_generic_recipe(result, 1);
+    let result_with_location = crate::factorio::context::make_located_generic_recipe(result, 1);
     println!("Recipe Result with Location: {:?}", result_with_location);
 }

@@ -2,8 +2,8 @@ use std::{collections::HashMap, env, fmt::Debug, hash::Hash};
 
 use serde_json::Value;
 
-use crate::ctx::{
-    ItemLike,
+use crate::{
+    concept::ItemLike,
     factorio::{
         common::{
             Dict, ItemSubgroup, OrderInfo, PrototypeBase, ReverseOrderInfo, get_order_info,
@@ -20,50 +20,50 @@ use crate::ctx::{
 };
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct Context {
+pub struct Context {
     /// 图标路径
-    pub(crate) icon_path: Option<std::path::PathBuf>,
+    pub icon_path: Option<std::path::PathBuf>,
     /// 排序参考依据
-    pub(crate) groups: Dict<PrototypeBase>,
-    pub(crate) subgroups: Dict<ItemSubgroup>,
+    pub groups: Dict<PrototypeBase>,
+    pub subgroups: Dict<ItemSubgroup>,
 
     /// 品质
-    pub(crate) qualities: Vec<QualityPrototype>,
+    pub qualities: Vec<QualityPrototype>,
 
     /// 物品遍历顺序，按大组、按小组、按自身
-    pub(crate) item_order: Option<OrderInfo>,
-    pub(crate) reverse_item_order: Option<ReverseOrderInfo>,
+    pub item_order: Option<OrderInfo>,
+    pub reverse_item_order: Option<ReverseOrderInfo>,
 
     /// 配方遍历顺序，按大组、按小组、按自身
-    pub(crate) recipe_order: Option<OrderInfo>,
-    pub(crate) reverse_recipe_order: Option<ReverseOrderInfo>,
+    pub recipe_order: Option<OrderInfo>,
+    pub reverse_recipe_order: Option<ReverseOrderInfo>,
 
     /// 流体遍历顺序，按大组、按小组、按自身
-    pub(crate) fluid_order: Option<OrderInfo>,
-    pub(crate) reverse_fluid_order: Option<ReverseOrderInfo>,
+    pub fluid_order: Option<OrderInfo>,
+    pub reverse_fluid_order: Option<ReverseOrderInfo>,
 
     /// 实体遍历顺序，按大组、按小组、按自身
-    pub(crate) entity_order: Option<OrderInfo>,
-    pub(crate) reverse_entity_order: Option<ReverseOrderInfo>,
+    pub entity_order: Option<OrderInfo>,
+    pub reverse_entity_order: Option<ReverseOrderInfo>,
 
     /// 被转化的物品集合
-    pub(crate) items: Dict<ItemPrototype>,
-    pub(crate) entities: Dict<EntityPrototype>,
-    pub(crate) fluids: Dict<FluidPrototype>,
+    pub items: Dict<ItemPrototype>,
+    pub entities: Dict<EntityPrototype>,
+    pub fluids: Dict<FluidPrototype>,
 
     /// 插件
-    pub(crate) modules: Dict<ModulePrototype>,
+    pub modules: Dict<ModulePrototype>,
     /// 配方类型集合：配方本身和制作配方的机器
-    pub(crate) recipes: Dict<RecipePrototype>,
-    pub(crate) crafters: Dict<CraftingMachinePrototype>,
+    pub recipes: Dict<RecipePrototype>,
+    pub crafters: Dict<CraftingMachinePrototype>,
 
     /// 采矿类型集合：资源本身和采矿机器
-    pub(crate) resources: Dict<ResourcePrototype>,
-    pub(crate) miners: Dict<MiningDrillPrototype>,
+    pub resources: Dict<ResourcePrototype>,
+    pub miners: Dict<MiningDrillPrototype>,
 }
 
 impl Context {
-    pub(crate) fn load(value: &Value) -> Self {
+    pub fn load(value: &Value) -> Self {
         let groups: Dict<PrototypeBase> = serde_json::from_value(
             value
                 .get("item-group")
@@ -170,7 +170,7 @@ impl Context {
         .build_order_info()
     }
 
-    pub(crate) fn load_from_executable_path(
+    pub fn load_from_executable_path(
         executable_path: &std::path::Path,
         mod_path: Option<&std::path::Path>,
         lang: Option<&str>,
@@ -230,7 +230,7 @@ impl Context {
         Context::load_from_tmp_no_dump()
     }
 
-    pub(crate) fn load_from_tmp_no_dump() -> Option<Context> {
+    pub fn load_from_tmp_no_dump() -> Option<Context> {
         let self_path = match env::current_dir() {
             Ok(path) => path,
             _ => {
@@ -245,7 +245,7 @@ impl Context {
         Some(ctx)
     }
 
-    pub(crate) fn build_order_info(mut self) -> Self {
+    pub fn build_order_info(mut self) -> Self {
         self.item_order = Some(get_order_info(&self.items, &self.groups, &self.subgroups));
         self.reverse_item_order = Some(get_reverse_order_info(self.item_order.as_ref().unwrap()));
         // 没有 order 的recipe 的 order 从 item 派生
@@ -277,17 +277,19 @@ impl Context {
                         match result {
                             RecipeResult::Item(r) => {
                                 if r.name == *recipe_name
-                                    && let Some(item) = self.items.get(&r.name) {
-                                        recipe.base.subgroup = item.base.subgroup.clone();
-                                        recipe.base.order = item.base.order.clone();
-                                    }
+                                    && let Some(item) = self.items.get(&r.name)
+                                {
+                                    recipe.base.subgroup = item.base.subgroup.clone();
+                                    recipe.base.order = item.base.order.clone();
+                                }
                             }
                             RecipeResult::Fluid(f) => {
                                 if f.name == *recipe_name
-                                    && let Some(fluid) = self.fluids.get(&f.name) {
-                                        recipe.base.subgroup = fluid.base.subgroup.clone();
-                                        recipe.base.order = fluid.base.order.clone();
-                                    }
+                                    && let Some(fluid) = self.fluids.get(&f.name)
+                                {
+                                    recipe.base.subgroup = fluid.base.subgroup.clone();
+                                    recipe.base.order = fluid.base.order.clone();
+                                }
                             }
                         }
                     }
@@ -298,9 +300,12 @@ impl Context {
         self.reverse_recipe_order =
             Some(get_reverse_order_info(self.recipe_order.as_ref().unwrap()));
         self.fluid_order = Some(get_order_info(&self.fluids, &self.groups, &self.subgroups));
-        self.reverse_fluid_order =
-            Some(get_reverse_order_info(self.fluid_order.as_ref().unwrap()));
-        self.entity_order = Some(get_order_info(&self.entities, &self.groups, &self.subgroups));
+        self.reverse_fluid_order = Some(get_reverse_order_info(self.fluid_order.as_ref().unwrap()));
+        self.entity_order = Some(get_order_info(
+            &self.entities,
+            &self.groups,
+            &self.subgroups,
+        ));
         self.reverse_entity_order =
             Some(get_reverse_order_info(self.entity_order.as_ref().unwrap()));
         self
@@ -308,7 +313,7 @@ impl Context {
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub(crate) enum GenericItem {
+pub enum GenericItem {
     Item {
         name: String,
         quality: u8,
@@ -339,7 +344,7 @@ pub(crate) enum GenericItem {
     },
 }
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub(crate) struct GenericItemWithLocation {
+pub struct GenericItemWithLocation {
     base: GenericItem,
     location: u16,
 }
@@ -347,7 +352,7 @@ pub(crate) struct GenericItemWithLocation {
 impl ItemLike for GenericItem {}
 impl ItemLike for GenericItemWithLocation {}
 
-pub(crate) fn make_located_generic_recipe(
+pub fn make_located_generic_recipe(
     original: HashMap<GenericItem, f64>,
     location: u16,
 ) -> HashMap<GenericItemWithLocation, f64> {
@@ -375,7 +380,7 @@ fn sample_five<T: Debug>(map: &Dict<T>) {
 
 #[test]
 fn test_load_context() {
-    let data = include_str!("../../../assets/data-raw-dump.json");
+    let data = include_str!("../../assets/data-raw-dump.json");
     let value: Value = serde_json::from_str(&data).unwrap();
     let ctx = Context::load(&value);
     assert!(ctx.items.contains_key("iron-plate"));

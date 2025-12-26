@@ -1,8 +1,8 @@
 use serde::Deserialize;
 
-use crate::ctx::factorio::common::{EnergyAmount, PrototypeBase, HasPrototypeBase};
+use crate::factorio::common::{EnergyAmount, PrototypeBase, HasPrototypeBase};
 
-pub(crate) const ITEM_TYPES: &[&str] = &[
+pub const ITEM_TYPES: &[&str] = &[
     "item",
     "ammo",
     "capsule",
@@ -28,9 +28,9 @@ pub(crate) const ITEM_TYPES: &[&str] = &[
 
 /// 仅存储物品的基础属性，插件属性另行收集
 #[derive(Debug, Clone, Deserialize)]
-pub(crate) struct ItemPrototype {
+pub struct ItemPrototype {
     #[serde(flatten)]
-    pub(crate) base: PrototypeBase,
+    pub base: PrototypeBase,
 
     /// 变质可以自然发生，不绑定任何机器，所以属性存储在 Item 里
     #[serde(flatten)]

@@ -1,4 +1,4 @@
-pub(crate) fn compact_number_string(num: f64) -> String {
+pub fn compact_number_string(num: f64) -> String {
     let abs_num = num.abs();
 
     match abs_num {
@@ -72,20 +72,20 @@ pub(crate) fn compact_number_string(num: f64) -> String {
 
 #[derive(Debug, Clone)]
 
-pub(crate) struct CompactNumberLabel {
-    pub(crate) value: f64,
-    pub(crate) format: Option<String>,
+pub struct CompactNumberLabel {
+    pub value: f64,
+    pub format: Option<String>,
 }
 
 impl CompactNumberLabel {
-    pub(crate) fn new(value: f64) -> Self {
+    pub fn new(value: f64) -> Self {
         Self {
             value,
             format: None,
         }
     }
 
-    pub(crate) fn with_format(mut self, format: &str) -> Self {
+    pub fn with_format(mut self, format: &str) -> Self {
         self.format = Some(format.to_string());
         self
     }

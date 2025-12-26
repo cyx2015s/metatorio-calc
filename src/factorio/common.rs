@@ -8,12 +8,12 @@ use std::{
 use serde::{Deserialize, Deserializer, de::DeserializeOwned};
 use serde_json::{Value, from_value};
 
-pub(crate) type Dict<T> = HashMap<String, T>;
-pub(crate) type Emissions = Dict<f64>;
-pub(crate) type OrderInfo = Vec<(String, Vec<(String, Vec<String>)>)>;
-pub(crate) type ReverseOrderInfo = HashMap<String, (usize, usize, usize)>;
+pub type Dict<T> = HashMap<String, T>;
+pub type Emissions = Dict<f64>;
+pub type OrderInfo = Vec<(String, Vec<(String, Vec<String>)>)>;
+pub type ReverseOrderInfo = HashMap<String, (usize, usize, usize)>;
 
-pub(crate) fn update_map<T, N>(map: &mut HashMap<T, N>, key: T, value: N)
+pub fn update_map<T, N>(map: &mut HashMap<T, N>, key: T, value: N)
 where
     T: Hash + Eq,
     N: Add<Output = N> + Copy + Default,
@@ -23,7 +23,7 @@ where
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct Color(u8, u8, u8, u8);
+pub struct Color(u8, u8, u8, u8);
 
 impl<'de> Deserialize<'de> for Color {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -92,7 +92,7 @@ impl<'de> Deserialize<'de> for Color {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct MapPosition(f64, f64);
+pub struct MapPosition(f64, f64);
 
 impl<'de> Deserialize<'de> for MapPosition {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -131,7 +131,7 @@ impl<'de> Deserialize<'de> for MapPosition {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
-pub(crate) enum BoundingBox {
+pub enum BoundingBox {
     Struct {
         left_top: MapPosition,
         right_bottom: MapPosition,
@@ -141,7 +141,7 @@ pub(crate) enum BoundingBox {
     Triplet(MapPosition, MapPosition, f64),
 }
 
-pub(crate) fn as_vec_or_empty<'de, T, D>(deserializer: D) -> Result<Vec<T>, D::Error>
+pub fn as_vec_or_empty<'de, T, D>(deserializer: D) -> Result<Vec<T>, D::Error>
 where
     D: Deserializer<'de>,
     T: DeserializeOwned,
@@ -154,7 +154,7 @@ where
     }
 }
 
-pub(crate) fn option_as_vec_or_empty<'de, T, D>(deserializer: D) -> Result<Option<Vec<T>>, D::Error>
+pub fn option_as_vec_or_empty<'de, T, D>(deserializer: D) -> Result<Option<Vec<T>>, D::Error>
 where
     D: Deserializer<'de>,
     T: DeserializeOwned,
@@ -170,23 +170,23 @@ where
 #[serde(default)]
 /// PrototypeBase 基类中我们关心的字段
 #[derive(Default)]
-pub(crate) struct PrototypeBase {
+pub struct PrototypeBase {
     /// 类型名
-    pub(crate) r#type: String,
+    pub r#type: String,
     /// 内部名
-    pub(crate) name: String,
+    pub name: String,
     /// 排序依据
-    pub(crate) order: String,
+    pub order: String,
     /// 子组
-    pub(crate) subgroup: String,
+    pub subgroup: String,
     /// 默认隐藏
-    pub(crate) hidden: bool,
+    pub hidden: bool,
     /// 视为参数
-    pub(crate) parameter: bool,
+    pub parameter: bool,
 }
 
 
-pub(crate) trait HasPrototypeBase {
+pub trait HasPrototypeBase {
     fn base(&self) -> &PrototypeBase;
 }
 
@@ -198,8 +198,8 @@ impl HasPrototypeBase for PrototypeBase {
 
 #[derive(Debug, Clone)]
 /// 能量数量，单位为焦耳（J），如果是功率则为焦耳每刻（J/tick）
-pub(crate) struct EnergyAmount {
-    pub(crate) amount: f64,
+pub struct EnergyAmount {
+    pub amount: f64,
 }
 
 impl<'de> Deserialize<'de> for EnergyAmount {
@@ -264,7 +264,7 @@ impl Display for EnergyAmount {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type")]
 
-pub(crate) enum EnergySource {
+pub enum EnergySource {
     #[serde(rename = "electric")]
     Electric(ElectricEnergySource),
     #[serde(rename = "burner")]
@@ -280,7 +280,7 @@ pub(crate) enum EnergySource {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 #[derive(Default)]
-pub(crate) struct ElectricEnergySource {
+pub struct ElectricEnergySource {
     buffer_capacity: Option<EnergyAmount>,
     input_flow_limit: Option<EnergyAmount>,
     output_flow_limit: Option<EnergyAmount>,
@@ -291,7 +291,7 @@ pub(crate) struct ElectricEnergySource {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
-pub(crate) struct BurnerEnergySource {
+pub struct BurnerEnergySource {
     burnt_inventory_size: f64,
     effectivity: f64,
     burner_usage: String,
@@ -311,14 +311,14 @@ impl Default for BurnerEnergySource {
 
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
-pub(crate) struct HeatEnergySource {
+pub struct HeatEnergySource {
     max_temperature: f64,
     emissions_per_minute: Option<Dict<f64>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
-pub(crate) struct FluidEnergySource {
+pub struct FluidEnergySource {
     effectivity: f64,
     fluid_usage_per_tickop: f64,
     scale_fluid_usage: bool,
@@ -339,14 +339,14 @@ impl Default for FluidEnergySource {
 
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
-pub(crate) struct VoidEnergySource {
+pub struct VoidEnergySource {
     emissions_per_minute: Option<Dict<f64>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
-pub(crate) struct EffectReceiver {
-    pub(crate) base_effect: Effect,
+pub struct EffectReceiver {
+    pub base_effect: Effect,
     use_module_effects: bool,
     use_beacon_effects: bool,
     use_surface_effects: bool,
@@ -365,12 +365,12 @@ impl Default for EffectReceiver {
 
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
-pub(crate) struct Effect {
-    pub(crate) consumption: f64,
-    pub(crate) speed: f64,
-    pub(crate) productivity: f64,
-    pub(crate) pollution: f64,
-    pub(crate) quality: f64,
+pub struct Effect {
+    pub consumption: f64,
+    pub speed: f64,
+    pub productivity: f64,
+    pub pollution: f64,
+    pub quality: f64,
 }
 
 impl Add for Effect {
@@ -387,7 +387,7 @@ impl Add for Effect {
 }
 
 impl Effect {
-    pub(crate) fn clamped(&self) -> Effect {
+    pub fn clamped(&self) -> Effect {
         Effect {
             consumption: self.consumption.clamp(-0.8, 327.67),
             speed: self.speed.clamp(-0.8, 327.67),
@@ -400,7 +400,7 @@ impl Effect {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
-pub(crate) enum EffectTypeLimitation {
+pub enum EffectTypeLimitation {
     Single(String),
     Multiple(Vec<String>),
     Empty(HashMap<String, Value>),
@@ -423,11 +423,11 @@ fn test_energy_amount_deserialize() {
 
 #[derive(Debug, Clone, Deserialize)]
 /// 子组
-pub(crate) struct ItemSubgroup {
+pub struct ItemSubgroup {
     #[serde(flatten)]
-    pub(crate) base: PrototypeBase,
+    pub base: PrototypeBase,
     /// 所属组
-    pub(crate) group: String,
+    pub group: String,
 }
 
 impl HasPrototypeBase for ItemSubgroup {
@@ -436,7 +436,7 @@ impl HasPrototypeBase for ItemSubgroup {
     }
 }
 
-pub(crate) fn get_order_info<T: HasPrototypeBase + Clone>(
+pub fn get_order_info<T: HasPrototypeBase + Clone>(
     vec: &HashMap<String, T>,
     groups: &Dict<PrototypeBase>,
     subgroups: &Dict<ItemSubgroup>,
@@ -507,7 +507,7 @@ pub(crate) fn get_order_info<T: HasPrototypeBase + Clone>(
     ret
 }
 
-pub(crate) fn get_reverse_order_info(order_info: &OrderInfo) -> ReverseOrderInfo {
+pub fn get_reverse_order_info(order_info: &OrderInfo) -> ReverseOrderInfo {
     let mut reverse_map: ReverseOrderInfo = HashMap::new();
     for (group_index, group) in order_info.iter().enumerate() {
         for (subgroup_index, subgroup) in group.1.iter().enumerate() {
