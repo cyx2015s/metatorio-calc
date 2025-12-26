@@ -11,14 +11,17 @@ pub mod factorio;
 
 pub struct MainPage {
     pub creators: Vec<(String, Box<dyn GameContextCreatorView>)>,
-    pub subview_receiver: std::sync::mpsc::Receiver<Box<dyn SubView>>,
-    pub subview_sender: std::sync::mpsc::Sender<Box<dyn SubView>>,
-    pub subviews: Vec<(String, Box<dyn SubView>)>,
+    pub subview_receiver: std::sync::mpsc::Receiver<Box<dyn Subview>>,
+    pub subview_sender: std::sync::mpsc::Sender<Box<dyn Subview>>,
+    pub subviews: Vec<(String, Box<dyn Subview>)>,
     pub selected: usize,
 }
 
-pub trait SubView: Send {
+pub trait Subview: Send {
     fn view(&mut self, ui: &mut egui::Ui);
+    fn should_close(&self) -> bool {
+        false
+    }
 }
 
 impl MainPage {
@@ -28,7 +31,7 @@ impl MainPage {
         let mut ret = Self {
             creators: vec![(
                 "预设：加载异星工厂上下文".to_string(),
-                Box::new(factorio::view::ContextCreatorView::default()),
+                Box::new(factorio::view::FactorioContextCreatorView::default()),
             )],
             subview_receiver: rx,
             subview_sender: tx,

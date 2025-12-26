@@ -2,7 +2,7 @@
 use egui::{ScrollArea, Sense, Vec2};
 
 use crate::{
-    SubView,
+    Subview,
     concept::{GameContextCreatorView, RecipeLike},
     factorio::{
         common::{HasPrototypeBase, OrderInfo},
@@ -13,7 +13,7 @@ use crate::{
 };
 
 pub struct FactoryView {
-    recipe_configs: Vec<Box<dyn RecipeLike<KeyType = GenericItem, ContextType = Context>>>,
+    recipe_configs: Vec<Box<dyn RecipeLike<ItemType = GenericItem, ContextType = Context>>>,
 }
 
 pub struct PlannerView {
@@ -475,7 +475,7 @@ impl Default for PlannerView {
     }
 }
 
-impl SubView for PlannerView {
+impl Subview for PlannerView {
     fn view(&mut self, ui: &mut egui::Ui) {
         ui.heading("Factorio Planner");
 
@@ -630,14 +630,14 @@ impl SubView for PlannerView {
 }
 
 #[derive(Default, Debug)]
-pub struct ContextCreatorView {
+pub struct FactorioContextCreatorView {
     path: Option<std::path::PathBuf>,
     mod_path: Option<std::path::PathBuf>,
-    subview_sender: Option<std::sync::mpsc::Sender<Box<dyn SubView>>>,
+    subview_sender: Option<std::sync::mpsc::Sender<Box<dyn Subview>>>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
-impl SubView for ContextCreatorView {
+impl Subview for FactorioContextCreatorView {
     fn view(&mut self, ui: &mut egui::Ui) {
         ui.vertical_centered(|ui| {
             ui.heading("Context Creator");
@@ -729,8 +729,8 @@ impl SubView for ContextCreatorView {
     }
 }
 
-impl GameContextCreatorView for ContextCreatorView {
-    fn set_subview_sender(&mut self, sender: std::sync::mpsc::Sender<Box<dyn SubView>>) {
+impl GameContextCreatorView for FactorioContextCreatorView {
+    fn set_subview_sender(&mut self, sender: std::sync::mpsc::Sender<Box<dyn Subview>>) {
         self.subview_sender = Some(sender);
     }
     // fn try_create_subview(&mut self) -> Option<Box<dyn SubView>> {

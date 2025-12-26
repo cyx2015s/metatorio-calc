@@ -387,9 +387,9 @@ pub struct RecipeConfig {
 }
 
 impl RecipeLike for RecipeConfig {
-    type KeyType = GenericItem;
+    type ItemType = GenericItem;
     type ContextType = Context;
-    fn as_hash_map(&self, ctx: &Context) -> HashMap<Self::KeyType, f64> {
+    fn as_hash_map(&self, ctx: &Context) -> HashMap<Self::ItemType, f64> {
         let mut map = HashMap::new();
 
         let mut module_effects = Effect::default();

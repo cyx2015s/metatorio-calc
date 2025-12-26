@@ -3,16 +3,13 @@ use std::collections::HashMap;
 use serde::Deserialize;
 
 use crate::{
-    concept::RecipeLike,
-    factorio::{
+    Subview, concept::RecipeLike, factorio::{
         common::{
             Effect, EffectReceiver, EffectTypeLimitation, EnergySource, HasPrototypeBase,
             PrototypeBase, option_as_vec_or_empty, update_map,
         },
-        model::context::{Context, GenericItem},
-        model::entity::EntityPrototype,
-        model::recipe::RecipeResult,
-    },
+        model::{context::{Context, GenericItem}, entity::EntityPrototype, recipe::RecipeResult},
+    }
 };
 
 #[derive(Debug, Clone, Deserialize)]
@@ -77,10 +74,10 @@ pub struct MiningConfig {
 }
 
 impl RecipeLike for MiningConfig {
-    type KeyType = GenericItem;
+    type ItemType = GenericItem;
     type ContextType = Context;
 
-    fn as_hash_map(&self, ctx: &Self::ContextType) -> HashMap<Self::KeyType, f64> {
+    fn as_hash_map(&self, ctx: &Self::ContextType) -> HashMap<Self::ItemType, f64> {
         let mut map = HashMap::new();
 
         let mut module_effects = Effect::default();
