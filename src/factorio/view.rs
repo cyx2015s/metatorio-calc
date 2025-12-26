@@ -3,7 +3,7 @@ use egui::{ScrollArea, Sense, Vec2};
 
 use crate::{
     Subview,
-    concept::{GameContextCreatorView, RecipeLike},
+    concept::{GameContextCreatorView, AsFlow},
     factorio::{
         common::{HasPrototypeBase, OrderInfo},
         format::CompactNumberLabel,
@@ -13,7 +13,7 @@ use crate::{
 };
 
 pub struct FactoryView {
-    recipe_configs: Vec<Box<dyn RecipeLike<ItemType = GenericItem, ContextType = Context>>>,
+    recipe_configs: Vec<Box<dyn AsFlow<ItemIdentType = GenericItem, ContextType = Context>>>,
 }
 
 pub struct PlannerView {
@@ -493,7 +493,7 @@ impl Subview for PlannerView {
             ui.label("没有工厂。");
         } else {
             for config in &self.factories[self.selected_factory].recipe_configs {
-                let vec_of_map = config.as_hash_map(&self.ctx);
+                let vec_of_map = config.as_flow(&self.ctx);
                 let mut keys = vec_of_map[0].keys().collect::<Vec<&GenericItem>>();
                 keys.sort_by_key(|g| match g {
                     GenericItem::Item { name, quality } => (

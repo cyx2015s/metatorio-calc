@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use serde::Deserialize;
 
 use crate::{
-    concept::RecipeLike, factorio::{
+    concept::AsFlow, factorio::{
         common::{
             Effect, EffectReceiver, EffectTypeLimitation, EnergySource, HasPrototypeBase,
             PrototypeBase, option_as_vec_or_empty, update_map,
@@ -73,11 +73,11 @@ pub struct MiningConfig {
     pub extra_effects: Effect,
 }
 
-impl RecipeLike for MiningConfig {
-    type ItemType = GenericItem;
+impl AsFlow for MiningConfig {
+    type ItemIdentType = GenericItem;
     type ContextType = Context;
 
-    fn as_hash_map(&self, ctx: &Self::ContextType) -> Vec<HashMap<Self::ItemType, f64>> {
+    fn as_flow(&self, ctx: &Self::ContextType) -> Vec<HashMap<Self::ItemIdentType, f64>> {
         let mut map = HashMap::new();
 
         let mut module_effects = Effect::default();
@@ -214,7 +214,7 @@ fn test_mining_normalized() {
         },
     };
 
-    let result = mining_config.as_hash_map(&ctx);
+    let result = mining_config.as_flow(&ctx);
     println!("Mining Result: {:?}", result);
     let result_with_location =
         crate::factorio::model::context::make_located_generic_recipe(result[0].clone(), 42);

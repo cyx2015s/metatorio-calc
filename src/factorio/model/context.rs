@@ -3,7 +3,7 @@ use std::{collections::HashMap, env, fmt::Debug, hash::Hash};
 use serde_json::Value;
 
 use crate::{
-    concept::ItemLike,
+    concept::ItemIdent,
     factorio::{
         common::{
             Dict, ItemSubgroup, OrderInfo, PrototypeBase, ReverseOrderInfo, get_order_info,
@@ -423,8 +423,8 @@ pub struct GenericItemWithLocation {
     location: u16,
 }
 
-impl ItemLike for GenericItem {}
-impl ItemLike for GenericItemWithLocation {}
+impl ItemIdent for GenericItem {}
+impl ItemIdent for GenericItemWithLocation {}
 
 pub fn make_located_generic_recipe(
     original: HashMap<GenericItem, f64>,

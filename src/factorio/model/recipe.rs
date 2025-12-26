@@ -3,7 +3,7 @@ use std::{collections::HashMap, fmt::Debug};
 use serde::Deserialize;
 
 use crate::{
-    concept::RecipeLike,
+    concept::AsFlow,
     factorio::{
         common::{
             Dict, Effect, EffectReceiver, EffectTypeLimitation, EnergyAmount, EnergySource,
@@ -386,10 +386,10 @@ pub struct RecipeConfig {
     pub extra_effects: Effect,
 }
 
-impl RecipeLike for RecipeConfig {
-    type ItemType = GenericItem;
+impl AsFlow for RecipeConfig {
+    type ItemIdentType = GenericItem;
     type ContextType = Context;
-    fn as_hash_map(&self, ctx: &Context) -> Vec<HashMap<Self::ItemType, f64>> {
+    fn as_flow(&self, ctx: &Context) -> Vec<HashMap<Self::ItemIdentType, f64>> {
         let mut map = HashMap::new();
 
         let mut module_effects = Effect::default();
@@ -515,7 +515,7 @@ fn test_recipe_normalized() {
         modules: vec![],
         extra_effects: Effect::default(),
     };
-    let result = recipe_config.as_hash_map(&ctx);
+    let result = recipe_config.as_flow(&ctx);
     println!("Recipe Result: {:?}", result);
     let result_with_location = crate::factorio::model::context::make_located_generic_recipe(result[0].clone(), 1);
     println!("Recipe Result with Location: {:?}", result_with_location);
