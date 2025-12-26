@@ -1,4 +1,4 @@
-use std::fmt::format;
+use std::{fmt::format, path::PathBuf};
 
 use egui::{ScrollArea, Sense, Vec2};
 
@@ -7,8 +7,8 @@ use crate::{
     concept::{GameContextCreatorView, RecipeLike},
     factorio::{
         common::{Effect, HasPrototypeBase, OrderInfo},
-        model::context::{Context, GenericItem},
         format::CompactNumberLabel,
+        model::context::{Context, GenericItem},
         model::mining::MiningConfig,
         model::recipe::{RecipeConfig, RecipeIngredient, RecipePrototype, RecipeResult},
     },
@@ -634,7 +634,8 @@ impl SubView for PlannerView {
 pub struct ContextCreatorView {
     path: Option<std::path::PathBuf>,
     mod_path: Option<std::path::PathBuf>,
-    created_context: Option<Context>,
+    subview_sender: Option<std::sync::mpsc::Sender<Box<dyn SubView>>>,
+    thread: Option<std::thread::JoinHandle<()>>,
 }
 
 impl SubView for ContextCreatorView {
@@ -674,86 +675,125 @@ impl SubView for ContextCreatorView {
 
             ui.separator();
 
-            if ui.button("加载上下文").clicked()
+            if ui
+                .add_enabled(
+                    self.path.is_some() && self.thread.is_none(),
+                    egui::Button::new("加载游戏上下文"),
+                )
+                .clicked()
                 && let Some(path) = &self.path
+                && let Some(sender) = &self.subview_sender
+                && let None = self.thread
             {
-                self.created_context = Context::load_from_executable_path(
-                    path,
-                    self.mod_path.as_deref(),
-                    Some("zh-CN"),
-                );
+                let exe_path = path.clone().as_path().to_owned();
+                let mod_path = self.mod_path.clone().map(|p| p.as_path().to_owned());
+                let sender = sender.clone();
+                self.thread = Some(std::thread::spawn(move || {
+                    if let Some(ctx) = Context::load_from_executable_path(
+                        &exe_path,
+                        mod_path.as_ref().map(|p| p.as_path()),
+                        None,
+                    ) {
+                        sender
+                            .send(Box::new(PlannerView::new(ctx)))
+                            .expect("Failed to send subview");
+                    }
+                }));
             }
 
             ui.separator();
 
-            if ui.button("加载缓存上下文").clicked() {
-                self.created_context = Context::load_from_tmp_no_dump();
+            if ui.add_enabled(
+                self.thread.is_none(),
+                egui::Button::new("加载缓存上下文"),
+            )
+            .clicked()
+                && let Some(sender) = &self.subview_sender
+                && let None = self.thread
+            {
+                let sender = sender.clone();
+                self.thread = Some(std::thread::spawn(move || {
+                    if let Some(ctx) = Context::load_from_tmp_no_dump() {
+                        sender
+                            .send(Box::new(PlannerView::new(ctx)))
+                            .expect("Failed to send subview");
+                    }
+                }));
+            }
+            if let Some(ref thread) = self.thread
+                && thread.is_finished()
+            {
+                let thread = self.thread.take().unwrap();
+                thread.join().expect("Failed to join thread");
             }
         });
     }
 }
 
 impl GameContextCreatorView for ContextCreatorView {
-    fn try_create_subview(&mut self) -> Option<Box<dyn SubView>> {
-        if self.created_context.is_some() {
-            return Some(Box::new(PlannerView {
-                ctx: self.created_context.take().unwrap(),
-                factories: vec![FactoryView {
-                    recipe_configs: vec![
-                        Box::new(RecipeConfig {
-                            recipe: "iron-gear-wheel".to_string(),
-                            machine: Some("assembling-machine-2".to_string()),
-                            modules: vec![
-                                ("speed-module".to_string(), 0),
-                                ("speed-module".to_string(), 0),
-                            ],
-                            quality: 0,
-                            extra_effects: Effect::default(),
-                        }),
-                        Box::new(RecipeConfig {
-                            recipe: "iron-plate".to_string(),
-                            machine: Some("stone-furnace".to_string()),
-                            modules: vec![("productivity-module-3".to_string(), 0); 5],
-                            quality: 0,
-                            extra_effects: Effect::default(),
-                        }),
-                        Box::new(RecipeConfig {
-                            recipe: "copper-plate".to_string(),
-                            machine: Some("stone-furnace".to_string()),
-                            modules: vec![("productivity-module-3".to_string(), 0); 2],
-                            quality: 0,
-                            extra_effects: Effect::default(),
-                        }),
-                        Box::new(RecipeConfig {
-                            recipe: "copper-cable".to_string(),
-                            machine: Some("assembling-machine-2".to_string()),
-                            modules: vec![],
-                            quality: 0,
-                            extra_effects: Effect {
-                                speed: 100.0,
-                                ..Default::default()
-                            },
-                        }),
-                        Box::new(RecipeConfig {
-                            recipe: "electronic-circuit".to_string(),
-                            machine: Some("assembling-machine-2".to_string()),
-                            modules: vec![],
-                            quality: 0,
-                            extra_effects: Effect::default(),
-                        }),
-                        Box::new(MiningConfig {
-                            resource: "iron-ore".to_string(),
-                            quality: 0,
-                            machine: Some("big-mining-drill".to_string()),
-                            modules: vec![],
-                            extra_effects: Effect::default(),
-                        }),
-                    ],
-                }],
-                selected_factory: 0,
-                item_selector_storage: ItemSelectorStorage::default(),
-            }));
-        }
-        None
+    fn set_subview_sender(&mut self, sender: std::sync::mpsc::Sender<Box<dyn SubView>>) {
+        self.subview_sender = Some(sender);
     }
+    // fn try_create_subview(&mut self) -> Option<Box<dyn SubView>> {
+    //     if self.created_context.is_some() {
+    //         return Some(Box::new(PlannerView {
+    //             ctx: self.created_context.take().unwrap(),
+    //             factories: vec![FactoryView {
+    //                 recipe_configs: vec![
+    //                     Box::new(RecipeConfig {
+    //                         recipe: "iron-gear-wheel".to_string(),
+    //                         machine: Some("assembling-machine-2".to_string()),
+    //                         modules: vec![
+    //                             ("speed-module".to_string(), 0),
+    //                             ("speed-module".to_string(), 0),
+    //                         ],
+    //                         quality: 0,
+    //                         extra_effects: Effect::default(),
+    //                     }),
+    //                     Box::new(RecipeConfig {
+    //                         recipe: "iron-plate".to_string(),
+    //                         machine: Some("stone-furnace".to_string()),
+    //                         modules: vec![("productivity-module-3".to_string(), 0); 5],
+    //                         quality: 0,
+    //                         extra_effects: Effect::default(),
+    //                     }),
+    //                     Box::new(RecipeConfig {
+    //                         recipe: "copper-plate".to_string(),
+    //                         machine: Some("stone-furnace".to_string()),
+    //                         modules: vec![("productivity-module-3".to_string(), 0); 2],
+    //                         quality: 0,
+    //                         extra_effects: Effect::default(),
+    //                     }),
+    //                     Box::new(RecipeConfig {
+    //                         recipe: "copper-cable".to_string(),
+    //                         machine: Some("assembling-machine-2".to_string()),
+    //                         modules: vec![],
+    //                         quality: 0,
+    //                         extra_effects: Effect {
+    //                             speed: 100.0,
+    //                             ..Default::default()
+    //                         },
+    //                     }),
+    //                     Box::new(RecipeConfig {
+    //                         recipe: "electronic-circuit".to_string(),
+    //                         machine: Some("assembling-machine-2".to_string()),
+    //                         modules: vec![],
+    //                         quality: 0,
+    //                         extra_effects: Effect::default(),
+    //                     }),
+    //                     Box::new(MiningConfig {
+    //                         resource: "iron-ore".to_string(),
+    //                         quality: 0,
+    //                         machine: Some("big-mining-drill".to_string()),
+    //                         modules: vec![],
+    //                         extra_effects: Effect::default(),
+    //                     }),
+    //                 ],
+    //             }],
+    //             selected_factory: 0,
+    //             item_selector_storage: ItemSelectorStorage::default(),
+    //         }));
+    //     }
+    //     None
+    // }
 }

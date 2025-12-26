@@ -10,29 +10,36 @@ pub mod concept;
 pub mod lp;
 pub mod factorio;
 
-#[derive(Default)]
 pub struct MainPage {
     pub creators: Vec<(String, Box<dyn GameContextCreatorView>)>,
+    pub subview_receiver: std::sync::mpsc::Receiver<Box<dyn SubView>>,
+    pub subview_sender: std::sync::mpsc::Sender<Box<dyn SubView>>,
     pub subviews: Vec<(String, Box<dyn SubView>)>,
     pub selected: usize,
 }
 
-pub trait SubView {
+pub trait SubView: Send {
     fn ui(&mut self, ui: &mut egui::Ui);
 }
 
 impl MainPage {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         add_font(&cc.egui_ctx);
-        // cc.egui_ctx.set_zoom_factor(1.25);
-        Self {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut ret = Self {
             creators: vec![(
                 "预设：加载异星工厂上下文".to_string(),
                 Box::new(factorio::view::ContextCreatorView::default()),
             )],
+            subview_receiver: rx,
+            subview_sender: tx,
             subviews: vec![],
             selected: 0,
+        };
+        for creator in &mut ret.creators {
+            creator.1.set_subview_sender(ret.subview_sender.clone());
         }
+        ret
     }
 }
 
@@ -47,10 +54,11 @@ impl eframe::App for MainPage {
                 {
                     self.selected = i;
                 }
-                if let Some(subview) = creator.1.try_create_subview() {
-                    self.subviews.push((creator.0.clone(), subview));
-                    self.selected = self.subviews.len() - 1;
-                }
+            }
+            
+            while let Some(subview) = self.subview_receiver.try_recv().ok() {
+                let name = format!("子视图 {}", self.subviews.len() + 1);
+                self.subviews.push((name, subview));   
             }
 
             ui.separator();
