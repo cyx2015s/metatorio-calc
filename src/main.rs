@@ -1,6 +1,6 @@
 use eframe::*;
 use egui::{
-    Id,
+    Id, Vec2,
     epaint::text::{FontInsert, InsertFontFamily},
 };
 
@@ -23,6 +23,7 @@ trait SubView {
 impl MainPage {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         add_font(&cc.egui_ctx);
+        // cc.egui_ctx.set_zoom_factor(1.25);
         Self {
             creators: vec![(
                 "预设：加载异星工厂上下文".to_string(),
@@ -98,10 +99,20 @@ fn main() {
     env_logger::init();
     run_native(
         "Demo App",
-        NativeOptions::default(),
-        Box::new(|_cc| {
-            egui_extras::install_image_loaders(&_cc.egui_ctx);
-            Ok(Box::new(MainPage::new(_cc)))
+        NativeOptions {
+            viewport: egui::ViewportBuilder::default()
+                .with_maximized(true)
+                .with_min_inner_size(Vec2 { x: 800.0, y: 600.0 }),
+            ..Default::default()
+        },
+        Box::new(|cc| {
+            egui_extras::install_image_loaders(&cc.egui_ctx);
+            cc.egui_ctx.all_styles_mut(|style| {
+                style.interaction.tooltip_delay = 0.0;
+                style.interaction.tooltip_grace_time = 0.0;
+                style.interaction.show_tooltips_only_when_still = false;
+            });
+            Ok(Box::new(MainPage::new(cc)))
         }),
     )
     .unwrap();

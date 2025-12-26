@@ -72,7 +72,7 @@ pub(crate) struct MiningConfig {
     pub(crate) resource: String,
     pub(crate) quality: u8,
     pub(crate) machine: Option<String>,
-    pub(crate) modules: Vec<String>,
+    pub(crate) modules: Vec<(String, u8)>,
     pub(crate) extra_effects: Effect,
 }
 
@@ -117,7 +117,7 @@ impl RecipeLike for MiningConfig {
         for module in self.modules.iter() {
             let module_prototype = ctx
                 .modules
-                .get(module)
+                .get(&module.0) // 暂时忽略品质
                 .expect("MiningConfig 中的插件在上下文中不存在");
             module_effects = module_effects + module_prototype.effect.clone();
         }

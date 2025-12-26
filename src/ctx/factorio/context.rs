@@ -42,6 +42,10 @@ pub(crate) struct Context {
     pub(crate) fluid_order: Option<OrderInfo>,
     pub(crate) reverse_fluid_order: Option<ReverseOrderInfo>,
 
+    /// 实体遍历顺序，按大组、按小组、按自身
+    pub(crate) entity_order: Option<OrderInfo>,
+    pub(crate) reverse_entity_order: Option<ReverseOrderInfo>,
+
     /// 被转化的物品集合
     pub(crate) items: Dict<ItemPrototype>,
     pub(crate) entities: Dict<EntityPrototype>,
@@ -296,6 +300,9 @@ impl Context {
         self.fluid_order = Some(get_order_info(&self.fluids, &self.groups, &self.subgroups));
         self.reverse_fluid_order =
             Some(get_reverse_order_info(self.fluid_order.as_ref().unwrap()));
+        self.entity_order = Some(get_order_info(&self.entities, &self.groups, &self.subgroups));
+        self.reverse_entity_order =
+            Some(get_reverse_order_info(self.entity_order.as_ref().unwrap()));
         self
     }
 }
@@ -324,6 +331,9 @@ pub(crate) enum GenericItem {
     },
     RocketPayloadWeight,
     RocketPayloadStack,
+    Pollution {
+        name: String,
+    },
     Custom {
         name: String,
     },

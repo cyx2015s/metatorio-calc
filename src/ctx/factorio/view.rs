@@ -1,3 +1,4 @@
+use std::fmt::format;
 
 use egui::{ScrollArea, Sense, Vec2};
 
@@ -8,6 +9,7 @@ use crate::{
         factorio::{
             common::{Effect, HasPrototypeBase, OrderInfo},
             context::{Context, GenericItem},
+            format::CompactNumberLabel,
             mining::MiningConfig,
             recipe::{RecipeConfig, RecipeIngredient, RecipePrototype, RecipeResult},
         },
@@ -100,56 +102,62 @@ impl<'a> egui::Widget for GenericIcon<'a> {
         match self.item {
             GenericItem::Custom { name } => ui.label(format!("Custom Item: {}", name)),
             GenericItem::Item { name, quality } => {
-                let icon = ui.add(Icon {
-                    ctx: self.ctx,
-                    type_name: &"item".to_string(),
-                    item_name: name,
-                    size: self.size,
-                    quality: 0,
-                });
-                ui.put(
-                    icon.rect
-                        .split_left_right_at_fraction(0.5)
-                        .1
-                        .split_left_right_at_fraction(0.5)
-                        .1,
+                let icon = ui.add_sized(
+                    [self.size, self.size],
                     Icon {
                         ctx: self.ctx,
-                        type_name: &"quality".to_string(),
-                        item_name: &format!("{}", quality),
-                        size: self.size / 2.0,
+                        type_name: &"item".to_string(),
+                        item_name: name,
+                        size: self.size,
                         quality: *quality,
                     },
                 );
                 icon
             }
-            GenericItem::Fluid { name, temperature } => {
-                
-                ui.add(Icon {
+            GenericItem::Fluid { name, temperature } => ui.add_sized(
+                [self.size, self.size],
+                Icon {
                     ctx: self.ctx,
                     type_name: &"fluid".to_string(),
                     item_name: name,
                     size: self.size,
                     quality: 0,
-                })
-            }
-            GenericItem::Entity { name, quality } => {
-                
-                ui.add(Icon {
+                },
+            ),
+            GenericItem::Entity { name, quality } => ui.add_sized(
+                [self.size, self.size],
+                Icon {
                     ctx: self.ctx,
                     type_name: &"entity".to_string(),
                     item_name: name,
                     size: self.size,
                     quality: *quality,
-                })
+                },
+            ),
+            GenericItem::Heat => ui.add_sized([self.size, self.size], egui::Label::new("热量")),
+            GenericItem::Electricity => {
+                ui.add_sized([self.size, self.size], egui::Label::new("电力"))
             }
-            GenericItem::Heat => ui.label("热量"),
-            GenericItem::Electricity => ui.label("电力"),
-            GenericItem::FluidHeat => ui.label("流体热量"),
-            GenericItem::FluidFuel => ui.label("流体燃料"),
-            GenericItem::ItemFuel { category } => ui.label(format!("燃料: {}", category)),
-            GenericItem::RocketPayloadWeight => ui.label("火箭重量载荷"),
-            GenericItem::RocketPayloadStack => ui.label("火箭堆叠载荷"),
+            GenericItem::FluidHeat => {
+                ui.add_sized([self.size, self.size], egui::Label::new("流体热量"))
+            }
+            GenericItem::FluidFuel => {
+                ui.add_sized([self.size, self.size], egui::Label::new("流体燃料"))
+            }
+            GenericItem::ItemFuel { category } => ui.add_sized(
+                [self.size, self.size],
+                egui::Label::new(format!("燃料: {}", category)),
+            ),
+            GenericItem::RocketPayloadWeight => {
+                ui.add_sized([self.size, self.size], egui::Label::new("火箭重量载荷"))
+            }
+            GenericItem::RocketPayloadStack => {
+                ui.add_sized([self.size, self.size], egui::Label::new("火箭堆叠载荷"))
+            }
+            GenericItem::Pollution { name } => ui.add_sized(
+                [self.size, self.size],
+                egui::Label::new(format!("污染 {}", name)),
+            ),
         }
     }
 }
@@ -177,7 +185,7 @@ impl<'a> egui::Widget for PrototypeDetailView<'a, RecipePrototype> {
             RecipeResult::Fluid(f) => (1, &self.ctx.reverse_fluid_order.as_ref().unwrap()[&f.name]),
         });
         ui.vertical(|ui| {
-            ui.label(format!("{}s", self.prototype.energy_required));
+            ui.add(CompactNumberLabel::new(self.prototype.energy_required).with_format("{}s"));
             ui.horizontal_top(|ui| {
                 if ingredients.is_empty() {
                     ui.label("无原料");
@@ -198,8 +206,10 @@ impl<'a> egui::Widget for PrototypeDetailView<'a, RecipePrototype> {
                                             size: 32.0,
                                             quality: 0,
                                         });
-                                        ui.vertical(|ui| {
-                                            ui.label(format!("x{}", i.amount));
+                                        ui.horizontal(|ui| {
+                                            ui.vertical(|ui| {
+                                                ui.add(CompactNumberLabel::new(i.amount));
+                                            });
                                         });
                                     }
                                     RecipeIngredient::Fluid(f) => {
@@ -211,7 +221,9 @@ impl<'a> egui::Widget for PrototypeDetailView<'a, RecipePrototype> {
                                             quality: 0,
                                         });
                                         ui.vertical(|ui| {
-                                            ui.label(format!("x{}", f.amount));
+                                            ui.horizontal(|ui| {
+                                                ui.add(CompactNumberLabel::new(f.amount));
+                                            });
                                             match f.temperature {
                                                 Some(t) => {
                                                     ui.label(format!("{}℃", t));
@@ -219,16 +231,29 @@ impl<'a> egui::Widget for PrototypeDetailView<'a, RecipePrototype> {
                                                 None => {
                                                     match (f.min_temperature, f.max_temperature) {
                                                         (Some(min_t), Some(max_t)) => {
-                                                            ui.label(format!(
-                                                                "{}~{}℃",
-                                                                min_t, max_t
-                                                            ));
+                                                            ui.horizontal(|ui| {
+                                                                ui.add(
+                                                                    CompactNumberLabel::new(min_t)
+                                                                        .with_format("{}℃"),
+                                                                );
+                                                                ui.label(" ~ ");
+                                                                ui.add(
+                                                                    CompactNumberLabel::new(max_t)
+                                                                        .with_format("{}℃"),
+                                                                );
+                                                            });
                                                         }
                                                         (Some(min_t), None) => {
-                                                            ui.label(format!("≥{}℃", min_t));
+                                                            ui.add(
+                                                                CompactNumberLabel::new(min_t)
+                                                                    .with_format("≥{}℃"),
+                                                            );
                                                         }
                                                         (None, Some(max_t)) => {
-                                                            ui.label(format!("≤{}℃", max_t));
+                                                            ui.add(
+                                                                CompactNumberLabel::new(max_t)
+                                                                    .with_format("≤{}℃"),
+                                                            );
                                                         }
                                                         (None, None) => {}
                                                     }
@@ -264,11 +289,18 @@ impl<'a> egui::Widget for PrototypeDetailView<'a, RecipePrototype> {
                                         });
                                         let output = i.normalized_output();
                                         ui.vertical(|ui| {
-                                            ui.label(format!(
-                                                "x{}+{}",
-                                                output.0 - output.1,
-                                                output.1
-                                            ));
+                                            ui.horizontal(|ui| {
+                                                ui.style_mut().spacing.item_spacing.x = 0.0;
+
+                                                ui.add(CompactNumberLabel::new(
+                                                    output.0 - output.1,
+                                                ));
+
+                                                ui.add(
+                                                    CompactNumberLabel::new(output.1)
+                                                        .with_format("+{}"),
+                                                );
+                                            });
                                         });
                                     }
                                     RecipeResult::Fluid(f) => {
@@ -281,25 +313,34 @@ impl<'a> egui::Widget for PrototypeDetailView<'a, RecipePrototype> {
                                         });
                                         let output = f.normalized_output();
                                         ui.vertical(|ui| {
-                                            ui.label(format!(
-                                                "x{}+{}",
-                                                output.0 - output.1,
-                                                output.1
-                                            ));
+                                            ui.horizontal(|ui| {
+                                                ui.style_mut().spacing.item_spacing.x = 0.0;
+                                                ui.add(CompactNumberLabel::new(
+                                                    output.0 - output.1,
+                                                ));
+                                                ui.add(
+                                                    CompactNumberLabel::new(output.1)
+                                                        .with_format("+{}"),
+                                                );
+                                            });
                                             match f.temperature {
                                                 Some(t) => {
-                                                    ui.label(format!("@{}°C", t));
+                                                    ui.add(
+                                                        CompactNumberLabel::new(t)
+                                                            .with_format("@{}°C"),
+                                                    );
                                                 }
                                                 None => {
-                                                    ui.label(format!(
-                                                        "@{}°C",
-                                                        &self
-                                                            .ctx
-                                                            .fluids
-                                                            .get(&f.name)
-                                                            .unwrap()
-                                                            .default_temperature
-                                                    ));
+                                                    ui.add(
+                                                        CompactNumberLabel::new(
+                                                            self.ctx
+                                                                .fluids
+                                                                .get(&f.name)
+                                                                .unwrap()
+                                                                .default_temperature,
+                                                        )
+                                                        .with_format("@{}°C"),
+                                                    );
                                                 }
                                             }
                                         });
@@ -407,9 +448,7 @@ impl egui::Widget for ItemSelector<'_> {
                             self.storage.index = k;
                             self.storage.selected_item = Some(item_name.clone());
                         }
-                        if self.storage.subgroup == j
-                            && self.storage.index == k
-                        {
+                        if self.storage.subgroup == j && self.storage.index == k {
                             response = response.union(button);
                         }
                     }
@@ -456,8 +495,71 @@ impl SubView for PlannerView {
         if self.selected_factory >= self.factories.len() {
             ui.label("没有工厂。");
         } else {
-            for config in self.factories[self.selected_factory].recipe_configs.iter() {
-                ui.label(format!("{:?}", config.as_hash_map(&self.ctx)));
+            for config in &self.factories[self.selected_factory].recipe_configs {
+                let map = config.as_hash_map(&self.ctx);
+                let mut keys = map.keys().collect::<Vec<&GenericItem>>();
+                keys.sort_by_key(|g| match g {
+                    GenericItem::Item { name, quality } => (
+                        0,
+                        self.ctx
+                            .reverse_item_order
+                            .as_ref()
+                            .unwrap()
+                            .get(name)
+                            .cloned()
+                            .unwrap(),
+                        String::new(),
+                    ),
+                    GenericItem::Fluid { name, temperature } => (
+                        1,
+                        self.ctx
+                            .reverse_fluid_order
+                            .as_ref()
+                            .unwrap()
+                            .get(name)
+                            .cloned()
+                            .unwrap(),
+                        String::new(),
+                    ),
+                    GenericItem::Entity { name, quality } => (
+                        2,
+                        self.ctx
+                            .reverse_entity_order
+                            .as_ref()
+                            .unwrap()
+                            .get(name)
+                            .cloned()
+                            .unwrap(),
+                        String::new(),
+                    ),
+                    GenericItem::Heat => (3, (0usize, 0usize, 0usize), String::new()),
+                    GenericItem::Electricity => (4, (0usize, 0usize, 0usize), String::new()),
+                    GenericItem::FluidHeat => (5, (0usize, 0usize, 0usize), String::new()),
+                    GenericItem::FluidFuel => (6, (0usize, 0usize, 0usize), String::new()),
+                    GenericItem::ItemFuel { category } => {
+                        (7, (0usize, 0usize, 0usize), category.clone())
+                    }
+                    GenericItem::RocketPayloadWeight => {
+                        (8, (0usize, 0usize, 0usize), String::new())
+                    }
+                    GenericItem::RocketPayloadStack => (9, (0usize, 0usize, 0usize), String::new()),
+                    GenericItem::Pollution { name } => (10, (0usize, 0usize, 0usize), name.clone()),
+                    GenericItem::Custom { name } => (11, (0usize, 0usize, 0usize), name.clone()),
+                });
+
+                ui.horizontal_top(|ui| {
+                    for key in keys {
+                        let amount = map.get(key).unwrap();
+                        ui.vertical(|ui| {
+                            let icon = ui.add(GenericIcon {
+                                ctx: &self.ctx,
+                                item: key,
+                                size: 32.0,
+                            });
+                            ui.add(CompactNumberLabel::new(*amount).with_format("{}"));
+                        });
+                    }
+                });
             }
         }
         ScrollArea::new([false, true])
@@ -545,9 +647,10 @@ impl SubView for ContextCreatorView {
 
             ui.label("选择游戏路径:");
             if ui.button("浏览...").clicked()
-                && let Some(path) = rfd::FileDialog::new().pick_file() {
-                    self.path = Some(path);
-                }
+                && let Some(path) = rfd::FileDialog::new().pick_file()
+            {
+                self.path = Some(path);
+            }
             if let Some(path) = &self.path {
                 ui.label(format!("已选择路径: {}", path.display()));
             } else {
@@ -574,13 +677,14 @@ impl SubView for ContextCreatorView {
             ui.separator();
 
             if ui.button("加载上下文").clicked()
-                && let Some(path) = &self.path {
-                    self.created_context = Context::load_from_executable_path(
-                        path,
-                        self.mod_path.as_deref(),
-                        Some("zh-CN"),
-                    );
-                }
+                && let Some(path) = &self.path
+            {
+                self.created_context = Context::load_from_executable_path(
+                    path,
+                    self.mod_path.as_deref(),
+                    Some("zh-CN"),
+                );
+            }
 
             ui.separator();
 
@@ -601,21 +705,24 @@ impl GameContextCreatorView for ContextCreatorView {
                         Box::new(RecipeConfig {
                             recipe: "iron-gear-wheel".to_string(),
                             machine: Some("assembling-machine-2".to_string()),
-                            modules: vec![],
+                            modules: vec![
+                                ("speed-module".to_string(), 0),
+                                ("speed-module".to_string(), 0),
+                            ],
                             quality: 0,
                             extra_effects: Effect::default(),
                         }),
                         Box::new(RecipeConfig {
                             recipe: "iron-plate".to_string(),
                             machine: Some("stone-furnace".to_string()),
-                            modules: vec![],
+                            modules: vec![("productivity-module-3".to_string(), 0); 5],
                             quality: 0,
                             extra_effects: Effect::default(),
                         }),
                         Box::new(RecipeConfig {
                             recipe: "copper-plate".to_string(),
                             machine: Some("stone-furnace".to_string()),
-                            modules: vec![],
+                            modules: vec![("productivity-module-3".to_string(), 0); 2],
                             quality: 0,
                             extra_effects: Effect::default(),
                         }),
@@ -624,7 +731,10 @@ impl GameContextCreatorView for ContextCreatorView {
                             machine: Some("assembling-machine-2".to_string()),
                             modules: vec![],
                             quality: 0,
-                            extra_effects: Effect::default(),
+                            extra_effects: Effect {
+                                speed: 100.0,
+                                ..Default::default()
+                            },
                         }),
                         Box::new(RecipeConfig {
                             recipe: "electronic-circuit".to_string(),

@@ -374,7 +374,7 @@ pub(crate) struct RecipeConfig {
     pub(crate) recipe: String,
     pub(crate) quality: u8,
     pub(crate) machine: Option<String>,
-    pub(crate) modules: Vec<String>,
+    pub(crate) modules: Vec<(String, u8)>,
     pub(crate) extra_effects: Effect,
 }
 
@@ -406,7 +406,7 @@ impl RecipeLike for RecipeConfig {
         for module in self.modules.iter() {
             let module_prototype = ctx
                 .modules
-                .get(module)
+                .get(&module.0) // 暂时忽略品质
                 .expect("RecipeConfig 中的插件在上下文中不存在");
             module_effects = module_effects + module_prototype.effect.clone();
         }
