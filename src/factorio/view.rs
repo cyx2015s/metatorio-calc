@@ -1,4 +1,3 @@
-use std::{fmt::format, path::PathBuf};
 
 use egui::{ScrollArea, Sense, Vec2};
 
@@ -6,11 +5,10 @@ use crate::{
     SubView,
     concept::{GameContextCreatorView, RecipeLike},
     factorio::{
-        common::{Effect, HasPrototypeBase, OrderInfo},
+        common::{HasPrototypeBase, OrderInfo},
         format::CompactNumberLabel,
         model::context::{Context, GenericItem},
-        model::mining::MiningConfig,
-        model::recipe::{RecipeConfig, RecipeIngredient, RecipePrototype, RecipeResult},
+        model::recipe::{RecipeIngredient, RecipePrototype, RecipeResult},
     },
 };
 
@@ -100,7 +98,8 @@ impl<'a> egui::Widget for GenericIcon<'a> {
         match self.item {
             GenericItem::Custom { name } => ui.label(format!("Custom Item: {}", name)),
             GenericItem::Item { name, quality } => {
-                let icon = ui.add_sized(
+                
+                ui.add_sized(
                     [self.size, self.size],
                     Icon {
                         ctx: self.ctx,
@@ -109,8 +108,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                         size: self.size,
                         quality: *quality,
                     },
-                );
-                icon
+                )
             }
             GenericItem::Fluid { name, temperature } => ui.add_sized(
                 [self.size, self.size],
@@ -692,7 +690,7 @@ impl SubView for ContextCreatorView {
                 self.thread = Some(std::thread::spawn(move || {
                     if let Some(ctx) = Context::load_from_executable_path(
                         &exe_path,
-                        mod_path.as_ref().map(|p| p.as_path()),
+                        mod_path.as_deref(),
                         None,
                     ) {
                         sender

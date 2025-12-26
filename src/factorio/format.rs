@@ -103,7 +103,7 @@ impl egui::Widget for CompactNumberLabel {
                     .size(ui.style().text_styles[&egui::TextStyle::Body].size * 0.9),
             ));
             let parsed_number = text.parse::<f64>();
-            if let Err(_) = parsed_number {
+            if parsed_number.is_err() {
                 label.on_hover_text(self.value.to_string())
             } else if let Ok(n) = parsed_number
                 && f64::abs(n - self.value) > 1e-6
@@ -118,7 +118,7 @@ impl egui::Widget for CompactNumberLabel {
                     ui.style().text_styles[&egui::TextStyle::Body].size * 0.9,
                 )));
             let parsed_number = text.parse::<f64>();
-            if let Err(_) = parsed_number {
+            if parsed_number.is_err() {
                 label.on_hover_text(self.value.to_string())
             } else if let Ok(n) = parsed_number
                 && f64::abs(n - self.value) > 1e-6

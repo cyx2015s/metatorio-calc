@@ -228,6 +228,20 @@ impl Context {
         if !dump_icon_sprites_command.status.success() {
             return None;
         }
+        let dump_locale_command = std::process::Command::new(executable_path)
+            .arg("--dump-prototype-locale")
+            .arg("--config")
+            .arg(config_path.to_str().unwrap())
+            .args(if let Some(mod_path) = mod_path {
+                vec!["--mod-directory", mod_path.to_str().unwrap()]
+            } else {
+                vec![]
+            })
+            .output()
+            .ok()?;
+        if !dump_locale_command.status.success() {
+            return None;
+        }
 
         Context::load_from_tmp_no_dump()
     }

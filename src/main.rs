@@ -57,7 +57,7 @@ impl eframe::App for MainPage {
                     }
                 }
 
-                while let Some(subview) = self.subview_receiver.try_recv().ok() {
+                while let Ok(subview) = self.subview_receiver.try_recv() {
                     let name = format!("子视图 {}", self.subviews.len() + 1);
                     self.subviews.push((name, subview));
                 }
