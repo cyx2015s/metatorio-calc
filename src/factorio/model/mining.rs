@@ -9,9 +9,9 @@ use crate::{
             Effect, EffectReceiver, EffectTypeLimitation, EnergySource, HasPrototypeBase,
             PrototypeBase, option_as_vec_or_empty, update_map,
         },
-        context::{Context, GenericItem},
-        entity::EntityPrototype,
-        recipe::RecipeResult,
+        model::context::{Context, GenericItem},
+        model::entity::EntityPrototype,
+        model::recipe::RecipeResult,
     },
 };
 
@@ -204,7 +204,7 @@ impl RecipeLike for MiningConfig {
 #[test]
 fn test_mining_normalized() {
     let ctx = Context::load(
-        &serde_json::from_str(include_str!("../../assets/data-raw-dump.json")).unwrap(),
+        &serde_json::from_str(include_str!("../../../assets/data-raw-dump.json")).unwrap(),
     );
     let mining_config = MiningConfig {
         resource: "uranium-ore".to_string(),
@@ -219,6 +219,7 @@ fn test_mining_normalized() {
 
     let result = mining_config.as_hash_map(&ctx);
     println!("Mining Result: {:?}", result);
-    let result_with_location = crate::factorio::context::make_located_generic_recipe(result, 42);
+    let result_with_location =
+        crate::factorio::model::context::make_located_generic_recipe(result, 42);
     println!("Mining Result with Location: {:?}", result_with_location);
 }

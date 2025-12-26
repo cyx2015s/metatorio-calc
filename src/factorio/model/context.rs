@@ -9,13 +9,15 @@ use crate::{
             Dict, ItemSubgroup, OrderInfo, PrototypeBase, ReverseOrderInfo, get_order_info,
             get_reverse_order_info,
         },
-        entity::{ENTITY_TYPES, EntityPrototype},
-        fluid::FluidPrototype,
-        item::{ITEM_TYPES, ItemPrototype},
-        mining::{MiningDrillPrototype, ResourcePrototype},
-        module::ModulePrototype,
-        quality::QualityPrototype,
-        recipe::{CraftingMachinePrototype, RecipePrototype, RecipeResult},
+        model::entity::{ENTITY_TYPES, EntityPrototype},
+        model::fluid::FluidPrototype,
+        model::item::{ITEM_TYPES, ItemPrototype},
+        model::mining::{MiningDrillPrototype, ResourcePrototype},
+        model::module::ModulePrototype,
+        model::quality::QualityPrototype,
+        model::recipe::{
+            CRAFTING_MACHINE_TYPES, CraftingMachinePrototype, RecipePrototype, RecipeResult,
+        },
     },
 };
 
@@ -109,7 +111,7 @@ impl Context {
         )
         .unwrap();
         let mut crafters = Dict::<CraftingMachinePrototype>::new();
-        for crafter_type in &["assembling-machine", "furnace", "rocket-silo"] {
+        for crafter_type in CRAFTING_MACHINE_TYPES.iter() {
             if let Some(crafter_values) = value.get(crafter_type) {
                 crafters.extend(
                     serde_json::from_value::<Dict<CraftingMachinePrototype>>(
@@ -380,7 +382,7 @@ fn sample_five<T: Debug>(map: &Dict<T>) {
 
 #[test]
 fn test_load_context() {
-    let data = include_str!("../../assets/data-raw-dump.json");
+    let data = include_str!("../../../assets/data-raw-dump.json");
     let value: Value = serde_json::from_str(&data).unwrap();
     let ctx = Context::load(&value);
     assert!(ctx.items.contains_key("iron-plate"));

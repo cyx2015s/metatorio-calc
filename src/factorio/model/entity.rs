@@ -2,7 +2,7 @@ use serde::Deserialize;
 
 use crate::factorio::{
     common::{BoundingBox, EnergyAmount, HasPrototypeBase, PrototypeBase, option_as_vec_or_empty},
-    recipe::RecipeResult,
+    model::recipe::RecipeResult,
 };
 
 pub const ENTITY_TYPES: &[&str] = &[

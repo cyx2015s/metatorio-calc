@@ -7,10 +7,10 @@ use crate::{
     concept::{GameContextCreatorView, RecipeLike},
     factorio::{
         common::{Effect, HasPrototypeBase, OrderInfo},
-        context::{Context, GenericItem},
+        model::context::{Context, GenericItem},
         format::CompactNumberLabel,
-        mining::MiningConfig,
-        recipe::{RecipeConfig, RecipeIngredient, RecipePrototype, RecipeResult},
+        model::mining::MiningConfig,
+        model::recipe::{RecipeConfig, RecipeIngredient, RecipePrototype, RecipeResult},
     },
 };
 
@@ -204,7 +204,7 @@ impl<'a> egui::Widget for PrototypeDetailView<'a, RecipePrototype> {
                                             size: 32.0,
                                             quality: 0,
                                         });
-                                        ui.horizontal(|ui| {
+                                        ui.horizontal_top(|ui| {
                                             ui.vertical(|ui| {
                                                 ui.add(CompactNumberLabel::new(i.amount));
                                             });
@@ -219,7 +219,7 @@ impl<'a> egui::Widget for PrototypeDetailView<'a, RecipePrototype> {
                                             quality: 0,
                                         });
                                         ui.vertical(|ui| {
-                                            ui.horizontal(|ui| {
+                                            ui.horizontal_top(|ui| {
                                                 ui.add(CompactNumberLabel::new(f.amount));
                                             });
                                             match f.temperature {
@@ -229,7 +229,7 @@ impl<'a> egui::Widget for PrototypeDetailView<'a, RecipePrototype> {
                                                 None => {
                                                     match (f.min_temperature, f.max_temperature) {
                                                         (Some(min_t), Some(max_t)) => {
-                                                            ui.horizontal(|ui| {
+                                                            ui.horizontal_top(|ui| {
                                                                 ui.add(
                                                                     CompactNumberLabel::new(min_t)
                                                                         .with_format("{}℃"),
@@ -287,7 +287,7 @@ impl<'a> egui::Widget for PrototypeDetailView<'a, RecipePrototype> {
                                         });
                                         let output = i.normalized_output();
                                         ui.vertical(|ui| {
-                                            ui.horizontal(|ui| {
+                                            ui.horizontal_top(|ui| {
                                                 ui.style_mut().spacing.item_spacing.x = 0.0;
 
                                                 ui.add(CompactNumberLabel::new(
@@ -311,7 +311,7 @@ impl<'a> egui::Widget for PrototypeDetailView<'a, RecipePrototype> {
                                         });
                                         let output = f.normalized_output();
                                         ui.vertical(|ui| {
-                                            ui.horizontal(|ui| {
+                                            ui.horizontal_top(|ui| {
                                                 ui.style_mut().spacing.item_spacing.x = 0.0;
                                                 ui.add(CompactNumberLabel::new(
                                                     output.0 - output.1,

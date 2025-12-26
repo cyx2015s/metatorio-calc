@@ -9,8 +9,8 @@ use crate::{
             Dict, Effect, EffectReceiver, EffectTypeLimitation, EnergyAmount, EnergySource,
             HasPrototypeBase, PrototypeBase, update_map,
         },
-        context::{Context, GenericItem},
-        entity::EntityPrototype,
+        model::context::{Context, GenericItem},
+        model::entity::EntityPrototype,
     },
 };
 
@@ -327,7 +327,7 @@ impl FluidResult {
     }
 }
 
-const CRAFTING_MACHINE_TYPES: &[&str] = &["assembling-machine", "furnace", "rocket-silo"];
+pub const CRAFTING_MACHINE_TYPES: &[&str] = &["assembling-machine", "furnace", "rocket-silo"];
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct CraftingMachinePrototype {
@@ -506,7 +506,7 @@ impl RecipeLike for RecipeConfig {
 #[test]
 fn test_recipe_normalized() {
     let ctx = Context::load(
-        &serde_json::from_str(include_str!("../../assets/data-raw-dump.json")).unwrap(),
+        &serde_json::from_str(include_str!("../../../assets/data-raw-dump.json")).unwrap(),
     );
     let recipe_config = RecipeConfig {
         recipe: "pentapod-egg".to_string(),
@@ -517,6 +517,6 @@ fn test_recipe_normalized() {
     };
     let result = recipe_config.as_hash_map(&ctx);
     println!("Recipe Result: {:?}", result);
-    let result_with_location = crate::factorio::context::make_located_generic_recipe(result, 1);
+    let result_with_location = crate::factorio::model::context::make_located_generic_recipe(result, 1);
     println!("Recipe Result with Location: {:?}", result_with_location);
 }

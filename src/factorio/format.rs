@@ -39,8 +39,8 @@ pub fn compact_number_string(num: f64) -> String {
                     .to_string()
             }
         }
-        n if n < 1000.0 => {
-            // 100-1000：保留整数
+        n if n < 10000.0 => {
+            // 100-10000：保留整数
             format!("{:.0}", num)
         }
         n if n < 1_000_000.0 => {
