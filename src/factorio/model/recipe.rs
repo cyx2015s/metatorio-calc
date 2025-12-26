@@ -389,7 +389,7 @@ pub struct RecipeConfig {
 impl RecipeLike for RecipeConfig {
     type ItemType = GenericItem;
     type ContextType = Context;
-    fn as_hash_map(&self, ctx: &Context) -> HashMap<Self::ItemType, f64> {
+    fn as_hash_map(&self, ctx: &Context) -> Vec<HashMap<Self::ItemType, f64>> {
         let mut map = HashMap::new();
 
         let mut module_effects = Effect::default();
@@ -499,7 +499,7 @@ impl RecipeLike for RecipeConfig {
             }
         }
 
-        map
+        vec![map]
     }
 }
 
@@ -517,6 +517,6 @@ fn test_recipe_normalized() {
     };
     let result = recipe_config.as_hash_map(&ctx);
     println!("Recipe Result: {:?}", result);
-    let result_with_location = crate::factorio::model::context::make_located_generic_recipe(result, 1);
+    let result_with_location = crate::factorio::model::context::make_located_generic_recipe(result[0].clone(), 1);
     println!("Recipe Result with Location: {:?}", result_with_location);
 }

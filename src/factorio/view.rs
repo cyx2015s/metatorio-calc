@@ -493,8 +493,8 @@ impl Subview for PlannerView {
             ui.label("没有工厂。");
         } else {
             for config in &self.factories[self.selected_factory].recipe_configs {
-                let map = config.as_hash_map(&self.ctx);
-                let mut keys = map.keys().collect::<Vec<&GenericItem>>();
+                let vec_of_map = config.as_hash_map(&self.ctx);
+                let mut keys = vec_of_map[0].keys().collect::<Vec<&GenericItem>>();
                 keys.sort_by_key(|g| match g {
                     GenericItem::Item { name, quality } => (
                         *quality as usize,
@@ -546,7 +546,7 @@ impl Subview for PlannerView {
 
                 ui.horizontal_top(|ui| {
                     for key in keys {
-                        let amount = map.get(key).unwrap();
+                        let amount = vec_of_map[0].get(key).unwrap();
                         ui.vertical(|ui| {
                             let icon = ui.add(GenericIcon {
                                 ctx: &self.ctx,

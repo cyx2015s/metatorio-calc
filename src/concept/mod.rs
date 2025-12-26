@@ -5,7 +5,7 @@ use crate::Subview;
 pub trait RecipeLike: Send {
     type ItemType: ItemLike;
     type ContextType;
-    fn as_hash_map(&self, ctx: &Self::ContextType) -> HashMap<Self::ItemType, f64>;
+    fn as_hash_map(&self, ctx: &Self::ContextType) -> Vec<HashMap<Self::ItemType, f64>>;
 }
 
 pub trait ItemLike: Debug + Clone + Eq + Hash + PartialEq {}
@@ -16,6 +16,11 @@ pub trait GameContextCreatorView: Subview {
 
 pub trait RecipeLikeEditorView: RecipeLike {
     fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &Self::ContextType);
+    /// 传入的为系数，和 as_hash_map 返回值顺序一致
+    /// 默认实现是不处理，不知道暂时也没有关系，但是和展示界面会有关
+    fn notify_solution(&self, solution: Vec<f64>) {
+        println!("RecipeLike::notify_solution called with {:?}", solution);
+    }
 }
 
 pub trait RecipeLikeCreatorView: Subview {
@@ -32,4 +37,9 @@ pub trait RecipeLikeCreatorView: Subview {
             >,
         >,
     );
+}
+
+pub trait FactoryView: Subview {
+    type ItemType: ItemLike;
+    type ContextType;
 }

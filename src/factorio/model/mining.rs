@@ -77,7 +77,7 @@ impl RecipeLike for MiningConfig {
     type ItemType = GenericItem;
     type ContextType = Context;
 
-    fn as_hash_map(&self, ctx: &Self::ContextType) -> HashMap<Self::ItemType, f64> {
+    fn as_hash_map(&self, ctx: &Self::ContextType) -> Vec<HashMap<Self::ItemType, f64>> {
         let mut map = HashMap::new();
 
         let mut module_effects = Effect::default();
@@ -85,7 +85,7 @@ impl RecipeLike for MiningConfig {
         let mut base_speed = 1.0;
         let resource_ore = match ctx.resources.get(&self.resource) {
             Some(r) => r,
-            None => return map,
+            None => return vec![map],
         };
 
         assert!(resource_ore.base.minable.is_some());
@@ -194,7 +194,7 @@ impl RecipeLike for MiningConfig {
                     * (1.0 + module_effects.productivity),
             );
         }
-        map
+        vec![map]
     }
 }
 
@@ -217,6 +217,6 @@ fn test_mining_normalized() {
     let result = mining_config.as_hash_map(&ctx);
     println!("Mining Result: {:?}", result);
     let result_with_location =
-        crate::factorio::model::context::make_located_generic_recipe(result, 42);
+        crate::factorio::model::context::make_located_generic_recipe(result[0].clone(), 42);
     println!("Mining Result with Location: {:?}", result_with_location);
 }
