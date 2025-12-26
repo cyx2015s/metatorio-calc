@@ -498,7 +498,7 @@ impl SubView for PlannerView {
                 let mut keys = map.keys().collect::<Vec<&GenericItem>>();
                 keys.sort_by_key(|g| match g {
                     GenericItem::Item { name, quality } => (
-                        0,
+                        *quality as usize,
                         self.ctx
                             .reverse_item_order
                             .as_ref()
@@ -509,7 +509,7 @@ impl SubView for PlannerView {
                         String::new(),
                     ),
                     GenericItem::Fluid { name, temperature } => (
-                        1,
+                        0x100usize,
                         self.ctx
                             .reverse_fluid_order
                             .as_ref()
@@ -520,7 +520,7 @@ impl SubView for PlannerView {
                         String::new(),
                     ),
                     GenericItem::Entity { name, quality } => (
-                        2,
+                        0x200usize + *quality as usize,
                         self.ctx
                             .reverse_entity_order
                             .as_ref()
@@ -530,19 +530,19 @@ impl SubView for PlannerView {
                             .unwrap(),
                         String::new(),
                     ),
-                    GenericItem::Heat => (3, (0usize, 0usize, 0usize), String::new()),
-                    GenericItem::Electricity => (4, (0usize, 0usize, 0usize), String::new()),
-                    GenericItem::FluidHeat => (5, (0usize, 0usize, 0usize), String::new()),
-                    GenericItem::FluidFuel => (6, (0usize, 0usize, 0usize), String::new()),
+                    GenericItem::Heat => (0x300usize, (0usize, 0usize, 0usize), String::new()),
+                    GenericItem::Electricity => (0x400usize, (0usize, 0usize, 0usize), String::new()),
+                    GenericItem::FluidHeat => (0x500usize, (0usize, 0usize, 0usize), String::new()),
+                    GenericItem::FluidFuel => (0x600usize, (0usize, 0usize, 0usize), String::new()),
                     GenericItem::ItemFuel { category } => {
-                        (7, (0usize, 0usize, 0usize), category.clone())
+                        (0x700usize, (0usize, 0usize, 0usize), category.clone())
                     }
                     GenericItem::RocketPayloadWeight => {
-                        (8, (0usize, 0usize, 0usize), String::new())
+                        (0x800usize, (0usize, 0usize, 0usize), String::new())
                     }
-                    GenericItem::RocketPayloadStack => (9, (0usize, 0usize, 0usize), String::new()),
-                    GenericItem::Pollution { name } => (10, (0usize, 0usize, 0usize), name.clone()),
-                    GenericItem::Custom { name } => (11, (0usize, 0usize, 0usize), name.clone()),
+                    GenericItem::RocketPayloadStack => (0x900usize, (0usize, 0usize, 0usize), String::new()),
+                    GenericItem::Pollution { name } => (0xa00usize, (0usize, 0usize, 0usize), name.clone()),
+                    GenericItem::Custom { name } => (0xb00usize, (0usize, 0usize, 0usize), name.clone()),
                 });
 
                 ui.horizontal_top(|ui| {
