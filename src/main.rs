@@ -4,7 +4,7 @@ use egui::{
     epaint::text::{FontInsert, InsertFontFamily},
 };
 
-use crate::{concept::GameContextCreatorView};
+use crate::concept::GameContextCreatorView;
 
 pub mod concept;
 pub mod factorio;
@@ -44,43 +44,47 @@ impl MainPage {
 
 impl eframe::App for MainPage {
     fn update(&mut self, ctx: &eframe::egui::Context, frame: &mut eframe::Frame) {
-        egui::SidePanel::left(Id::new("LeftPanel")).show(ctx, |ui| {
-            ui.heading("Metatorio");
-            for (i, creator) in self.creators.iter_mut().enumerate() {
-                if ui
-                    .selectable_label(self.selected == i, creator.0.to_string())
-                    .clicked()
-                {
-                    self.selected = i;
+        egui::SidePanel::left(Id::new("LeftPanel"))
+            .width_range(200.0..=280.0)
+            .show(ctx, |ui| {
+                ui.heading("Metatorio");
+                for (i, creator) in self.creators.iter_mut().enumerate() {
+                    if ui
+                        .selectable_label(self.selected == i, creator.0.to_string())
+                        .clicked()
+                    {
+                        self.selected = i;
+                    }
                 }
-            }
-            
-            while let Some(subview) = self.subview_receiver.try_recv().ok() {
-                let name = format!("子视图 {}", self.subviews.len() + 1);
-                self.subviews.push((name, subview));   
-            }
 
-            ui.separator();
-
-            for (i, subview) in self.subviews.iter().enumerate() {
-                if ui
-                    .selectable_label(
-                        self.selected == i + self.creators.len(),
-                        subview.0.to_string(),
-                    )
-                    .clicked()
-                {
-                    self.selected = i + self.creators.len();
+                while let Some(subview) = self.subview_receiver.try_recv().ok() {
+                    let name = format!("子视图 {}", self.subviews.len() + 1);
+                    self.subviews.push((name, subview));
                 }
-            }
-        });
+
+                ui.separator();
+
+                for (i, subview) in self.subviews.iter().enumerate() {
+                    if ui
+                        .selectable_label(
+                            self.selected == i + self.creators.len(),
+                            subview.0.to_string(),
+                        )
+                        .clicked()
+                    {
+                        self.selected = i + self.creators.len();
+                    }
+                }
+            });
         if self.selected < self.creators.len() {
             egui::CentralPanel::default().show(ctx, |ui| {
                 self.creators[self.selected].1.view(ui);
             });
         } else {
             egui::CentralPanel::default().show(ctx, |ui| {
-                self.subviews[self.selected - self.creators.len()].1.view(ui);
+                self.subviews[self.selected - self.creators.len()]
+                    .1
+                    .view(ui);
             });
         }
     }

@@ -195,14 +195,14 @@ impl ItemResult {
         let ignore = match self.ignored_by_productivity {
             Some(value) => value,
             None => self.ignored_by_stats.unwrap_or(0.0),
-        };
+        }.floor();
         match self.amount {
             Some(amount) => {
                 // 产出分别为：
                 // amount (prob * (1 - extra))
                 // amount + 1 (prob * extra)
                 // 1 (1 - prob * extra)
-                let base = amount;
+                let base = amount.floor();
                 let productivity = f64::max((base - ignore) * prob * (1.0 - extra), 0.0)
                     + f64::max((base + 1.0 - ignore) * prob * extra, 0.0)
                     + f64::max((1.0 - ignore) * (1.0 - prob) * extra, 0.0);
@@ -214,11 +214,11 @@ impl ItemResult {
                 // (min ~ max) + 1 (prob * extra)
                 // 1 (1 - prob * extra)
                 // 减去 ignore 前要先判断范围，还要求平均
-                let min = self.amount_min.unwrap_or(0.0);
+                let min = self.amount_min.unwrap_or(0.0).floor();
                 let max = match self.amount_max {
                     Some(value) => value,
                     None => min,
-                };
+                }.floor();
                 let max = f64::max(max, min);
 
                 let productivity = f64::max(

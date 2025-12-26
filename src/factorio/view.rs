@@ -168,6 +168,7 @@ pub struct PrototypeDetailView<'a, T: HasPrototypeBase> {
 
 impl<'a> egui::Widget for PrototypeDetailView<'a, RecipePrototype> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+        ui.label(&self.prototype.base().name);
         let mut ingredients: Vec<&RecipeIngredient> = self.prototype.ingredients.iter().collect();
         ingredients.sort_by_key(|ingredient| match ingredient {
             RecipeIngredient::Item(i) => {
