@@ -477,7 +477,7 @@ impl Default for PlannerView {
 }
 
 impl SubView for PlannerView {
-    fn ui(&mut self, ui: &mut egui::Ui) {
+    fn view(&mut self, ui: &mut egui::Ui) {
         ui.heading("Factorio Planner");
 
         ui.horizontal(|ui| {
@@ -639,7 +639,7 @@ pub struct ContextCreatorView {
 }
 
 impl SubView for ContextCreatorView {
-    fn ui(&mut self, ui: &mut egui::Ui) {
+    fn view(&mut self, ui: &mut egui::Ui) {
         ui.vertical_centered(|ui| {
             ui.heading("Context Creator");
             ui.separator();

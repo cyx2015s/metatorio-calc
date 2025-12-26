@@ -7,7 +7,6 @@ use egui::{
 use crate::{concept::GameContextCreatorView};
 
 pub mod concept;
-pub mod lp;
 pub mod factorio;
 
 pub struct MainPage {
@@ -19,7 +18,7 @@ pub struct MainPage {
 }
 
 pub trait SubView: Send {
-    fn ui(&mut self, ui: &mut egui::Ui);
+    fn view(&mut self, ui: &mut egui::Ui);
 }
 
 impl MainPage {
@@ -77,11 +76,11 @@ impl eframe::App for MainPage {
         });
         if self.selected < self.creators.len() {
             egui::CentralPanel::default().show(ctx, |ui| {
-                self.creators[self.selected].1.ui(ui);
+                self.creators[self.selected].1.view(ui);
             });
         } else {
             egui::CentralPanel::default().show(ctx, |ui| {
-                self.subviews[self.selected - self.creators.len()].1.ui(ui);
+                self.subviews[self.selected - self.creators.len()].1.view(ui);
             });
         }
     }
