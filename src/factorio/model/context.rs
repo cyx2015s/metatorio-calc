@@ -22,18 +22,18 @@ use crate::{
 };
 
 pub const LOCALE_CATEGORIES: &[&str] = &[
-    &"airborne-pollutant",
-    &"asteroid-chunk",
-    &"entity",
-    &"fluid",
-    &"fuel-category",
-    &"item-group",
-    &"item",
-    &"quality",
-    &"recipe",
-    &"space-location",
-    &"technology",
-    &"tile",
+    "airborne-pollutant",
+    "asteroid-chunk",
+    "entity",
+    "fluid",
+    "fuel-category",
+    "item-group",
+    "item",
+    "quality",
+    "recipe",
+    "space-location",
+    "technology",
+    "tile",
 ];
 
 #[derive(Debug, Clone, Default)]

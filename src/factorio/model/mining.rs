@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use serde::Deserialize;
 
 use crate::{
-    Subview, concept::RecipeLike, factorio::{
+    concept::RecipeLike, factorio::{
         common::{
             Effect, EffectReceiver, EffectTypeLimitation, EnergySource, HasPrototypeBase,
             PrototypeBase, option_as_vec_or_empty, update_map,

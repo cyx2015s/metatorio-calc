@@ -434,10 +434,10 @@ impl egui::Widget for ItemSelector<'_> {
                                     ctx: self.ctx,
                                     prototype,
                                 });
-                                ui.label((&self.ctx.get_display_name((self.item_type), (item_name))));
+                                ui.label(self.ctx.get_display_name(self.item_type, item_name));
                             })
                         } else {
-                            button.on_hover_text_at_pointer(&self.ctx.get_display_name(self.item_type, item_name))
+                            button.on_hover_text_at_pointer(self.ctx.get_display_name(self.item_type, item_name))
                         };
 
                         if button.clicked() {
