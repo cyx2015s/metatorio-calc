@@ -159,14 +159,13 @@ impl<'a> egui::Widget for GenericIcon<'a> {
 }
 
 #[derive(Debug, Clone)]
-pub struct PrototypeDetailView<'a, T: HasPrototypeBase> {
+pub struct PrototypeHover<'a, T: HasPrototypeBase> {
     pub ctx: &'a Context,
     pub prototype: &'a T,
 }
 
-impl<'a> egui::Widget for PrototypeDetailView<'a, RecipePrototype> {
+impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
-        ui.label(&self.prototype.base().name);
         let mut ingredients: Vec<&RecipeIngredient> = self.prototype.ingredients.iter().collect();
         ingredients.sort_by_key(|ingredient| match ingredient {
             RecipeIngredient::Item(i) => {
@@ -431,13 +430,14 @@ impl egui::Widget for ItemSelector<'_> {
                         let button = if self.item_type == &"recipe".to_string() {
                             let prototype = self.ctx.recipes.get(item_name).unwrap();
                             button.on_hover_ui_at_pointer(|ui| {
-                                ui.add(PrototypeDetailView {
+                                ui.add(PrototypeHover {
                                     ctx: self.ctx,
                                     prototype,
                                 });
+                                ui.label((&self.ctx.get_display_name((self.item_type), (item_name))));
                             })
                         } else {
-                            button
+                            button.on_hover_text_at_pointer(&self.ctx.get_display_name(self.item_type, item_name))
                         };
 
                         if button.clicked() {

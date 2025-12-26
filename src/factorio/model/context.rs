@@ -21,10 +21,28 @@ use crate::{
     },
 };
 
+pub const LOCALE_CATEGORIES: &[&str] = &[
+    &"airborne-pollutant",
+    &"asteroid-chunk",
+    &"entity",
+    &"fluid",
+    &"fuel-category",
+    &"item-group",
+    &"item",
+    &"quality",
+    &"recipe",
+    &"space-location",
+    &"technology",
+    &"tile",
+];
+
 #[derive(Debug, Clone, Default)]
 pub struct Context {
     /// 图标路径
     pub icon_path: Option<std::path::PathBuf>,
+    /// 翻译信息
+    pub localized_name: Dict<Dict<String>>,
+    pub localized_description: Dict<Dict<String>>,
     /// 排序参考依据
     pub groups: Dict<PrototypeBase>,
     pub subgroups: Dict<ItemSubgroup>,
@@ -194,8 +212,9 @@ impl Context {
         std::fs::write(
             &config_path,
             format!(
-                "[path]\nwrite-data={}\n[general]\nlocale=zh-CN",
-                self_path.join("tmp").display()
+                "[path]\nwrite-data={}\n[general]\nlocale={}",
+                self_path.join("tmp").display(),
+                lang
             ),
         )
         .ok()?;
@@ -258,7 +277,46 @@ impl Context {
         let mut ctx =
             Context::load(&(serde_json::from_str(&std::fs::read_to_string(&raw_path).ok()?)).ok()?);
         ctx.icon_path = Some(icon_path);
+        for locale_category in LOCALE_CATEGORIES.iter() {
+            let locale_path =
+                self_path.join(format!("tmp/script-output/{}-locale.json", locale_category));
+            if locale_path.exists() {
+                // name: a => A, b => B
+                // description: a => A desc, b => B desc
+                let locale_values: Dict<Dict<String>> =
+                    serde_json::from_str(&std::fs::read_to_string(&locale_path).ok()?).ok()?;
+                ctx.localized_name.insert(
+                    locale_category.to_string(),
+                    locale_values.get("names").cloned().unwrap_or_default(),
+                );
+                ctx.localized_description.insert(
+                    locale_category.to_string(),
+                    locale_values
+                        .get("descriptions")
+                        .cloned()
+                        .unwrap_or_default(),
+                );
+            } else {
+                ctx.localized_name.insert(
+                    locale_category.to_string(),
+                    Dict::new(),
+                );
+                ctx.localized_description.insert(
+                    locale_category.to_string(),
+                    Dict::new(),
+                );
+            }
+        }
         Some(ctx)
+    }
+
+    pub fn get_display_name(&self, category: &str, key: &str) -> String {
+        self.localized_name
+            .get(category)
+            .unwrap()
+            .get(key)
+            .unwrap_or(&format!("{} (unlocalized)", key))
+            .to_string()
     }
 
     pub fn build_order_info(mut self) -> Self {
@@ -383,17 +441,6 @@ pub fn make_located_generic_recipe(
     located
 }
 
-fn sample_five<T: Debug>(map: &Dict<T>) {
-    let mut count = 0;
-    for (key, value) in map.iter() {
-        println!("Key: {}, Value: {:?}", key, value);
-        count += 1;
-        if count >= 5 {
-            break;
-        }
-    }
-}
-
 #[test]
 fn test_load_context() {
     let data = include_str!("../../../assets/data-raw-dump.json");
@@ -404,10 +451,4 @@ fn test_load_context() {
     assert!(ctx.fluids.contains_key("water"));
     assert!(ctx.recipes.contains_key("iron-gear-wheel"));
     assert!(ctx.crafters.contains_key("assembling-machine-1"));
-    // sample 5 for each
-    sample_five(&ctx.items);
-    sample_five(&ctx.entities);
-    sample_five(&ctx.fluids);
-    sample_five(&ctx.recipes);
-    sample_five(&ctx.crafters);
 }
