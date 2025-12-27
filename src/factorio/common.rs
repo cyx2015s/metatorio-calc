@@ -202,6 +202,7 @@ pub struct EnergyAmount {
     pub amount: f64,
 }
 
+
 impl<'de> Deserialize<'de> for EnergyAmount {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -284,18 +285,18 @@ pub struct ElectricEnergySource {
     buffer_capacity: Option<EnergyAmount>,
     input_flow_limit: Option<EnergyAmount>,
     output_flow_limit: Option<EnergyAmount>,
-    drain: Option<EnergyAmount>,
-    emissions_per_minute: Option<Emissions>,
+    pub drain: Option<EnergyAmount>,
+    pub emissions_per_minute: Option<Emissions>,
 }
 
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct BurnerEnergySource {
-    burnt_inventory_size: f64,
-    effectivity: f64,
-    burner_usage: String,
-    emissions_per_minute: Option<Dict<f64>>,
+    pub burnt_inventory_size: f64,
+    pub effectivity: f64,
+    pub burner_usage: String,
+    pub emissions_per_minute: Option<Dict<f64>>,
 }
 
 impl Default for BurnerEnergySource {
@@ -312,27 +313,55 @@ impl Default for BurnerEnergySource {
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
 pub struct HeatEnergySource {
-    max_temperature: f64,
-    emissions_per_minute: Option<Dict<f64>>,
+    pub max_temperature: f64,
+    pub emissions_per_minute: Option<Dict<f64>>,
+}
+
+#[derive(Debug, Deserialize, Clone, PartialEq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum FluidIOMode {
+    #[default]
+    None,
+    Input,
+    InputOutput,
+    Output,
+}
+
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct FluidBox {
+    #[serde(default)]
+    pub filter: Option<String>,
+    pub minimum_temperature: Option<f64>,
+    pub maximum_temperature: Option<f64>,
+    #[serde(default)]
+    pub production_type: FluidIOMode,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct FluidEnergySource {
-    effectivity: f64,
-    fluid_usage_per_tickop: f64,
-    scale_fluid_usage: bool,
-    burns_fluid: bool,
-    emissions_per_minute: Option<Dict<f64>>,
+    pub effectivity: f64,
+    pub fluid_usage_per_tick: f64,
+    pub scale_fluid_usage: bool,
+    pub burns_fluid: bool,
+    pub emissions_per_minute: Option<Dict<f64>>,
+    pub fluid_box: FluidBox,
 }
 impl Default for FluidEnergySource {
     fn default() -> Self {
         FluidEnergySource {
             effectivity: 1.0,
-            fluid_usage_per_tickop: 0.0,
+            fluid_usage_per_tick: 0.0,
             scale_fluid_usage: false,
             burns_fluid: false,
             emissions_per_minute: None,
+            fluid_box: FluidBox {
+                filter: None,
+                minimum_temperature: None,
+                maximum_temperature: None,
+                production_type: FluidIOMode::None,
+            },
         }
     }
 }

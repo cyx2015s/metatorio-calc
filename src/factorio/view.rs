@@ -1,9 +1,8 @@
-
 use egui::{ScrollArea, Sense, Vec2};
 
 use crate::{
     Subview,
-    concept::{GameContextCreatorView, AsFlow},
+    concept::{AsFlow, GameContextCreatorView},
     factorio::{
         common::{HasPrototypeBase, OrderInfo},
         format::CompactNumberLabel,
@@ -97,19 +96,16 @@ impl<'a> egui::Widget for GenericIcon<'a> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         match self.item {
             GenericItem::Custom { name } => ui.label(format!("Custom Item: {}", name)),
-            GenericItem::Item { name, quality } => {
-                
-                ui.add_sized(
-                    [self.size, self.size],
-                    Icon {
-                        ctx: self.ctx,
-                        type_name: &"item".to_string(),
-                        item_name: name,
-                        size: self.size,
-                        quality: *quality,
-                    },
-                )
-            }
+            GenericItem::Item { name, quality } => ui.add_sized(
+                [self.size, self.size],
+                Icon {
+                    ctx: self.ctx,
+                    type_name: &"item".to_string(),
+                    item_name: name,
+                    size: self.size,
+                    quality: *quality,
+                },
+            ),
             GenericItem::Fluid { name, temperature } => ui.add_sized(
                 [self.size, self.size],
                 Icon {
@@ -134,10 +130,10 @@ impl<'a> egui::Widget for GenericIcon<'a> {
             GenericItem::Electricity => {
                 ui.add_sized([self.size, self.size], egui::Label::new("电力"))
             }
-            GenericItem::FluidHeat => {
+            GenericItem::FluidHeat { filter } => {
                 ui.add_sized([self.size, self.size], egui::Label::new("流体热量"))
             }
-            GenericItem::FluidFuel => {
+            GenericItem::FluidFuel { filter } => {
                 ui.add_sized([self.size, self.size], egui::Label::new("流体燃料"))
             }
             GenericItem::ItemFuel { category } => ui.add_sized(
@@ -437,7 +433,9 @@ impl egui::Widget for ItemSelector<'_> {
                                 ui.label(self.ctx.get_display_name(self.item_type, item_name));
                             })
                         } else {
-                            button.on_hover_text_at_pointer(self.ctx.get_display_name(self.item_type, item_name))
+                            button.on_hover_text_at_pointer(
+                                self.ctx.get_display_name(self.item_type, item_name),
+                            )
                         };
 
                         if button.clicked() {
@@ -530,18 +528,30 @@ impl Subview for PlannerView {
                         String::new(),
                     ),
                     GenericItem::Heat => (0x300usize, (0usize, 0usize, 0usize), String::new()),
-                    GenericItem::Electricity => (0x400usize, (0usize, 0usize, 0usize), String::new()),
-                    GenericItem::FluidHeat => (0x500usize, (0usize, 0usize, 0usize), String::new()),
-                    GenericItem::FluidFuel => (0x600usize, (0usize, 0usize, 0usize), String::new()),
+                    GenericItem::Electricity => {
+                        (0x400usize, (0usize, 0usize, 0usize), String::new())
+                    }
+                    GenericItem::FluidHeat { filter } => {
+                        (0x500usize, (0usize, 0usize, 0usize), filter.clone().unwrap_or_default())
+                    }
+                    GenericItem::FluidFuel { filter } => {
+                        (0x600usize, (0usize, 0usize, 0usize), filter.clone().unwrap_or_default())
+                    }
                     GenericItem::ItemFuel { category } => {
                         (0x700usize, (0usize, 0usize, 0usize), category.clone())
                     }
                     GenericItem::RocketPayloadWeight => {
                         (0x800usize, (0usize, 0usize, 0usize), String::new())
                     }
-                    GenericItem::RocketPayloadStack => (0x900usize, (0usize, 0usize, 0usize), String::new()),
-                    GenericItem::Pollution { name } => (0xa00usize, (0usize, 0usize, 0usize), name.clone()),
-                    GenericItem::Custom { name } => (0xb00usize, (0usize, 0usize, 0usize), name.clone()),
+                    GenericItem::RocketPayloadStack => {
+                        (0x900usize, (0usize, 0usize, 0usize), String::new())
+                    }
+                    GenericItem::Pollution { name } => {
+                        (0xa00usize, (0usize, 0usize, 0usize), name.clone())
+                    }
+                    GenericItem::Custom { name } => {
+                        (0xb00usize, (0usize, 0usize, 0usize), name.clone())
+                    }
                 });
 
                 ui.horizontal_top(|ui| {
@@ -688,11 +698,9 @@ impl Subview for FactorioContextCreatorView {
                 let mod_path = self.mod_path.clone().map(|p| p.as_path().to_owned());
                 let sender = sender.clone();
                 self.thread = Some(std::thread::spawn(move || {
-                    if let Some(ctx) = Context::load_from_executable_path(
-                        &exe_path,
-                        mod_path.as_deref(),
-                        None,
-                    ) {
+                    if let Some(ctx) =
+                        Context::load_from_executable_path(&exe_path, mod_path.as_deref(), None)
+                    {
                         sender
                             .send(Box::new(PlannerView::new(ctx)))
                             .expect("Failed to send subview");
@@ -702,11 +710,9 @@ impl Subview for FactorioContextCreatorView {
 
             ui.separator();
 
-            if ui.add_enabled(
-                self.thread.is_none(),
-                egui::Button::new("加载缓存上下文"),
-            )
-            .clicked()
+            if ui
+                .add_enabled(self.thread.is_none(), egui::Button::new("加载缓存上下文"))
+                .clicked()
                 && let Some(sender) = &self.subview_sender
                 && let None = self.thread
             {

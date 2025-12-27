@@ -297,14 +297,10 @@ impl Context {
                         .unwrap_or_default(),
                 );
             } else {
-                ctx.localized_name.insert(
-                    locale_category.to_string(),
-                    Dict::new(),
-                );
-                ctx.localized_description.insert(
-                    locale_category.to_string(),
-                    Dict::new(),
-                );
+                ctx.localized_name
+                    .insert(locale_category.to_string(), Dict::new());
+                ctx.localized_description
+                    .insert(locale_category.to_string(), Dict::new());
             }
         }
         Some(ctx)
@@ -403,8 +399,16 @@ pub enum GenericItem {
     },
     Heat,
     Electricity,
-    FluidHeat,
-    FluidFuel,
+    /// 带筛选功能的流体热源
+    /// None 表示任意流体，可以从任意带筛选的流体热源中获取
+    FluidHeat {
+        filter: Option<String>,
+    },
+    /// 带筛选功能的流体燃料
+    /// None 表示任意流体，可以从任意带筛选的流体燃料中获取
+    FluidFuel {
+        filter: Option<String>,
+    },
     ItemFuel {
         category: String,
     },

@@ -111,7 +111,6 @@ fn add_font(ctx: &egui::Context) {
 }
 
 fn main() {
-    env_logger::init();
     run_native(
         "Demo App",
         NativeOptions {
