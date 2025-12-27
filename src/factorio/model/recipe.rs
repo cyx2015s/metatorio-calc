@@ -9,8 +9,11 @@ use crate::{
             Dict, Effect, EffectReceiver, EffectTypeLimitation, EnergyAmount, EnergySource,
             HasPrototypeBase, PrototypeBase, update_map,
         },
-        model::context::{Context, GenericItem},
-        model::entity::EntityPrototype,
+        model::{
+            context::{Context, GenericItem},
+            energy::energy_source_as_flow,
+            entity::EntityPrototype,
+        },
     },
 };
 
@@ -430,155 +433,16 @@ impl AsFlow for RecipeConfig {
                     .base_effect
                     .clone();
             base_speed = crafter.crafting_speed;
-            match &crafter.energy_source {
-                EnergySource::Electric(source) => {
-                    let energy_usage = crafter.energy_usage.as_ref().expect(
-                        "CraftingMachinePrototype 的 energy_usage 在使用 Electric 能源时不能为空",
-                    ).amount * 60.0;
-                    update_map(&mut map, GenericItem::Electricity, energy_usage);
-                    update_map(
-                        &mut map,
-                        GenericItem::Electricity,
-                        -source
-                            .drain
-                            .as_ref()
-                            .map(|d| d.amount * 60.0)
-                            .unwrap_or(energy_usage / 30.0),
-                    );
-                    for (pollutant, emmision) in source
-                        .emissions_per_minute
-                        .as_ref()
-                        .unwrap_or(&HashMap::new())
-                        .iter()
-                    {
-                        update_map(
-                            &mut map,
-                            GenericItem::Pollution {
-                                name: pollutant.clone(),
-                            },
-                            *emmision / 60.0,
-                        );
-                    }
-                }
-                EnergySource::Heat(source) => {
-                    update_map(
-                        &mut map,
-                        GenericItem::Heat,
-                        -crafter.energy_usage.as_ref().expect("CraftingMachinePrototype 的 energy_usage 在使用 Heat 能源时不能为空").amount * 60.0,
-                    );
-                    for (pollutant, emmision) in source
-                        .emissions_per_minute
-                        .as_ref()
-                        .unwrap_or(&HashMap::new())
-                        .iter()
-                    {
-                        update_map(
-                            &mut map,
-                            GenericItem::Pollution {
-                                name: pollutant.clone(),
-                            },
-                            *emmision / 60.0,
-                        );
-                    }
-                }
-                EnergySource::Burner(source) => {
-                    let energy_usage = crafter
-                        .energy_usage
-                        .as_ref()
-                        .expect(
-                            "CraftingMachinePrototype 的 energy_usage 在使用 Burner 能源时不能为空",
-                        )
-                        .amount
-                        * 60.0; // 每秒的能量消耗
-                    if let Some(actual_fuel) = self.instance_fuel.as_ref() {
-                        // 使用具体燃料
-                        let fuel_prototype = ctx
-                            .items
-                            .get(&actual_fuel.0)
-                            .expect("RecipeConfig 中的燃料在上下文中不存在");
-                        let fuel_property = fuel_prototype
-                            .burn
-                            .as_ref()
-                            .expect("RecipeConfig 中的燃料在上下文中没有燃料值");
-                        let fuel_burn_speed = energy_usage / fuel_property.fuel_value.amount; // 一个物品的能量值
-
-                        update_map(
-                            &mut map,
-                            GenericItem::Item {
-                                name: actual_fuel.0.clone(),
-                                quality: actual_fuel.1 as u8,
-                            },
-                            -fuel_burn_speed,
-                        );
-                        if let Some(burnt_result) = &fuel_property.burnt_result {
-                            update_map(
-                                &mut map,
-                                GenericItem::Item {
-                                    name: burnt_result.clone(),
-                                    quality: actual_fuel.1 as u8,
-                                },
-                                fuel_burn_speed,
-                            );
-                        }
-                    } else {
-                        update_map(
-                            &mut map,
-                            GenericItem::ItemFuel {
-                                category: self.machine.clone().unwrap(),
-                            },
-                            -energy_usage,
-                        );
-                    }
-
-                    for (pollutant, emmision) in source
-                        .emissions_per_minute
-                        .as_ref()
-                        .unwrap_or(&HashMap::new())
-                        .iter()
-                    {
-                        update_map(
-                            &mut map,
-                            GenericItem::Pollution {
-                                name: pollutant.clone(),
-                            },
-                            *emmision / 60.0,
-                        );
-                    }
-                }
-                EnergySource::Fluid(source) => {
-                    let energy_usage = crafter
-                        .energy_usage
-                        .as_ref()
-                        .expect(
-                            "CraftingMachinePrototype 的 energy_usage 在使用 Fluid 能源时不能为空",
-                        )
-                        .amount
-                        * 60.0;
-
-                    if let Some(actual_fuel) = self.instance_fuel.as_ref() {
-                        
-                        
-                    } else {
-
-                        
-                    }
-
-                    for (pollutant, emmision) in source
-                        .emissions_per_minute
-                        .as_ref()
-                        .unwrap_or(&HashMap::new())
-                        .iter()
-                    {
-                        update_map(
-                            &mut map,
-                            GenericItem::Pollution {
-                                name: pollutant.clone(),
-                            },
-                            *emmision / 60.0,
-                        );
-                    }
-                }
-                EnergySource::Void(source) => {}
+            let energy_related_flow = energy_source_as_flow(
+                ctx,
+                &crafter.energy_source,
+                crafter.energy_usage.as_ref().expect("CraftingMachinePrototype 中的机器没有能量消耗"),
+                &module_effects,
+                &self.instance_fuel,
+                &mut base_speed,
+            );
+            for (key, value) in energy_related_flow.into_iter() {
+                update_map(&mut map, key, value);
             }
         }
 
@@ -667,9 +531,9 @@ fn test_recipe_normalized() {
         &serde_json::from_str(include_str!("../../../assets/data-raw-dump.json")).unwrap(),
     );
     let recipe_config = RecipeConfig {
-        recipe: "pentapod-egg".to_string(),
+        recipe: "iron-gear-wheel".to_string(),
         quality: 1,
-        machine: Some("biochamber".to_string()),
+        machine: Some("assembling-machine-1".to_string()),
         modules: vec![],
         extra_effects: Effect::default(),
         instance_fuel: Some(("nutrients".to_string(), 0)),

@@ -8,6 +8,7 @@ use std::{
 use serde::{Deserialize, Deserializer, de::DeserializeOwned};
 use serde_json::{Value, from_value};
 
+
 pub type Dict<T> = HashMap<String, T>;
 pub type Emissions = Dict<f64>;
 pub type OrderInfo = Vec<(String, Vec<(String, Vec<String>)>)>;
@@ -59,27 +60,22 @@ impl<'de> Deserialize<'de> for Color {
                 Ok(Color(r, g, b, a))
             }
             Value::Object(object) => {
-                let r = (object
-                    .get("r")
-                    .and_then(|v| v.as_f64())
-                    .ok_or_else(|| serde::de::Error::custom("Color 结构体缺少 r 字段或类型错误"))?
-                    * 255.0) as u8;
-                let g = (object
-                    .get("g")
-                    .and_then(|v| v.as_f64())
-                    .ok_or_else(|| serde::de::Error::custom("Color 结构体缺少 g 字段或类型错误"))?
-                    * 255.0) as u8;
-                let b = (object
-                    .get("b")
-                    .and_then(|v| v.as_f64())
-                    .ok_or_else(|| serde::de::Error::custom("Color 结构体缺少 b 字段或类型错误"))?
-                    * 255.0) as u8;
+                let r =
+                    (object.get("r").and_then(|v| v.as_f64()).ok_or_else(|| {
+                        serde::de::Error::custom("Color 结构体缺少 r 字段或类型错误")
+                    })? * 255.0) as u8;
+                let g =
+                    (object.get("g").and_then(|v| v.as_f64()).ok_or_else(|| {
+                        serde::de::Error::custom("Color 结构体缺少 g 字段或类型错误")
+                    })? * 255.0) as u8;
+                let b =
+                    (object.get("b").and_then(|v| v.as_f64()).ok_or_else(|| {
+                        serde::de::Error::custom("Color 结构体缺少 b 字段或类型错误")
+                    })? * 255.0) as u8;
                 let a = if let Some(alpha_value) = object.get("a") {
                     (alpha_value
                         .as_f64()
-                        .ok_or_else(|| {
-                            serde::de::Error::custom("Color 结构体的 a 字段类型错误")
-                        })?
+                        .ok_or_else(|| serde::de::Error::custom("Color 结构体的 a 字段类型错误"))?
                         * 255.0) as u8
                 } else {
                     255
@@ -185,7 +181,6 @@ pub struct PrototypeBase {
     pub parameter: bool,
 }
 
-
 pub trait HasPrototypeBase {
     fn base(&self) -> &PrototypeBase;
 }
@@ -201,7 +196,6 @@ impl HasPrototypeBase for PrototypeBase {
 pub struct EnergyAmount {
     pub amount: f64,
 }
-
 
 impl<'de> Deserialize<'de> for EnergyAmount {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -226,7 +220,9 @@ impl<'de> Deserialize<'de> for EnergyAmount {
                 _ => 1.0,
             };
             let dimension_char = value.chars().last();
-            if let Some('W') = dimension_char { multiplier /= 60.0 }
+            if let Some('W') = dimension_char {
+                multiplier /= 60.0
+            }
             let numeric_value: f64 = value
                 .trim_end_matches(|c: char| !c.is_ascii_digit())
                 .parse()
@@ -289,7 +285,6 @@ pub struct ElectricEnergySource {
     pub emissions_per_minute: Option<Emissions>,
 }
 
-
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct BurnerEnergySource {
@@ -327,7 +322,6 @@ pub enum FluidIOMode {
     Output,
 }
 
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct FluidBox {
     #[serde(default)]
@@ -344,6 +338,7 @@ pub struct FluidEnergySource {
     pub effectivity: f64,
     pub fluid_usage_per_tick: f64,
     pub scale_fluid_usage: bool,
+    pub maximum_temperature: f64,
     pub burns_fluid: bool,
     pub emissions_per_minute: Option<Dict<f64>>,
     pub fluid_box: FluidBox,
@@ -354,6 +349,7 @@ impl Default for FluidEnergySource {
             effectivity: 1.0,
             fluid_usage_per_tick: 0.0,
             scale_fluid_usage: false,
+            maximum_temperature: 0.0,
             burns_fluid: false,
             emissions_per_minute: None,
             fluid_box: FluidBox {
@@ -369,7 +365,7 @@ impl Default for FluidEnergySource {
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
 pub struct VoidEnergySource {
-    emissions_per_minute: Option<Dict<f64>>,
+    pub emissions_per_minute: Option<Dict<f64>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -478,18 +474,12 @@ pub fn get_order_info<T: HasPrototypeBase + Clone>(
         if let Some(subgroup) = subgroups.get(subgroup_name) {
             let group_name = &subgroup.group;
             if let Some(group) = groups.get(group_name) {
-                let group_entry = grouped
-                    .entry(&group.base().name)
-                    .or_default();
-                let subgroup_entry = group_entry
-                    .entry(&subgroup.base.name)
-                    .or_default();
+                let group_entry = grouped.entry(&group.base().name).or_default();
+                let subgroup_entry = group_entry.entry(&subgroup.base.name).or_default();
                 subgroup_entry.push(prototype);
             } else {
                 let group_entry = grouped.entry(other).or_default();
-                let subgroup_entry = group_entry
-                    .entry(&subgroup.base.name)
-                    .or_default();
+                let subgroup_entry = group_entry.entry(&subgroup.base.name).or_default();
                 subgroup_entry.push(prototype);
             }
         } else {
@@ -502,12 +492,7 @@ pub fn get_order_info<T: HasPrototypeBase + Clone>(
     let mut ret = vec![];
 
     let mut group_keys: Vec<&&String> = grouped.keys().collect();
-    group_keys.sort_by_key(|k| {
-        groups
-            .get(**k)
-            .map(|g| g.order.clone())
-            .unwrap_or_default()
-    });
+    group_keys.sort_by_key(|k| groups.get(**k).map(|g| g.order.clone()).unwrap_or_default());
 
     for group_key in group_keys {
         let subgroups_map = grouped.get(group_key).unwrap();

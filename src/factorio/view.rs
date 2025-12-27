@@ -368,6 +368,9 @@ pub struct ItemSelector<'a> {
 impl egui::Widget for ItemSelector<'_> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         let mut response = ui.response().clone();
+        let available_space= ui.available_size();
+        let group_count = (available_space.x as usize / 70).max(4);
+        let item_count = (available_space.x as usize / 35).max(8);
         egui::Grid::new("ItemGroupGrid")
             .min_row_height(64.0)
             .min_col_width(64.0)
@@ -375,7 +378,7 @@ impl egui::Widget for ItemSelector<'_> {
             .spacing(Vec2 { x: 6.0, y: 6.0 })
             .show(ui, |ui| {
                 for (i, group) in self.order_info.iter().enumerate() {
-                    if (i % 8) == 0 && i != 0 {
+                    if (i % group_count) == 0 && i != 0 {
                         ui.end_row();
                     }
                     let group_name = if group.0.is_empty() {
@@ -402,7 +405,7 @@ impl egui::Widget for ItemSelector<'_> {
                 }
             });
         egui::Grid::new("ItemGrid")
-            .num_columns(16)
+            .num_columns(item_count)
             .max_col_width(35.0)
             .min_col_width(35.0)
             .min_row_height(35.0)
@@ -411,7 +414,7 @@ impl egui::Widget for ItemSelector<'_> {
             .show(ui, |ui| {
                 for (j, subgroup) in self.order_info[self.storage.group].1.iter().enumerate() {
                     for (k, item_name) in subgroup.1.iter().enumerate() {
-                        if (k % 16) == 0 && k != 0 {
+                        if (k % item_count) == 0 && k != 0 {
                             ui.end_row();
                         }
                         let button = ui
@@ -578,63 +581,63 @@ impl Subview for PlannerView {
                     order_info: self.ctx.recipe_order.as_ref().unwrap(),
                     storage: &mut self.item_selector_storage,
                 });
-                for group in self.ctx.item_order.as_ref().unwrap().iter() {
-                    ui.collapsing(format!("Group {}", group.0), |ui| {
-                        for subgroup in group.1.iter() {
-                            ui.collapsing(format!("Subgroup {}", subgroup.0), |ui| {
-                                for item_name in subgroup.1.iter() {
-                                    ui.label(item_name);
-                                    if let Some(item) = self.ctx.items.get(item_name) {
-                                        if let Some(icon_path) = &self.ctx.icon_path {
-                                            ui.add(Icon {
-                                                ctx: &self.ctx,
-                                                type_name: &"item".to_string(),
-                                                item_name,
-                                                size: 32.0,
-                                                quality: 0,
-                                            });
-                                        } else {
-                                            ui.label("未找到图标路径！");
-                                        }
-                                        ui.label(format!("物品: {}", item_name));
-                                        ui.label(format!("{:#?}", item));
-                                    } else {
-                                        ui.label("未找到该物品！");
-                                    }
-                                }
-                            });
-                        }
-                    });
-                }
-                for group in self.ctx.recipe_order.as_ref().unwrap().iter() {
-                    ui.collapsing(format!("Recipe Group {}", group.0), |ui| {
-                        for subgroup in group.1.iter() {
-                            ui.collapsing(format!("Recipe Subgroup {}", subgroup.0), |ui| {
-                                for recipe_name in subgroup.1.iter() {
-                                    ui.collapsing(format!("Recipe {}", recipe_name), |ui| {
-                                        if let Some(recipe) = self.ctx.recipes.get(recipe_name) {
-                                            if let Some(icon_path) = &self.ctx.icon_path {
-                                                ui.add(Icon {
-                                                    ctx: &self.ctx,
-                                                    type_name: &"recipe".to_string(),
-                                                    item_name: recipe_name,
-                                                    size: 32.0,
-                                                    quality: 0,
-                                                });
-                                            } else {
-                                                ui.label("未找到图标路径！");
-                                            }
-                                            ui.label(format!("配方: {}", recipe_name));
-                                            ui.label(format!("{:#?}", recipe));
-                                        } else {
-                                            ui.label("未找到该配方！");
-                                        }
-                                    });
-                                }
-                            });
-                        }
-                    });
-                }
+                // for group in self.ctx.item_order.as_ref().unwrap().iter() {
+                //     ui.collapsing(format!("Group {}", group.0), |ui| {
+                //         for subgroup in group.1.iter() {
+                //             ui.collapsing(format!("Subgroup {}", subgroup.0), |ui| {
+                //                 for item_name in subgroup.1.iter() {
+                //                     ui.label(item_name);
+                //                     if let Some(item) = self.ctx.items.get(item_name) {
+                //                         if let Some(icon_path) = &self.ctx.icon_path {
+                //                             ui.add(Icon {
+                //                                 ctx: &self.ctx,
+                //                                 type_name: &"item".to_string(),
+                //                                 item_name,
+                //                                 size: 32.0,
+                //                                 quality: 0,
+                //                             });
+                //                         } else {
+                //                             ui.label("未找到图标路径！");
+                //                         }
+                //                         ui.label(format!("物品: {}", item_name));
+                //                         ui.label(format!("{:#?}", item));
+                //                     } else {
+                //                         ui.label("未找到该物品！");
+                //                     }
+                //                 }
+                //             });
+                //         }
+                //     });
+                // }
+                // for group in self.ctx.recipe_order.as_ref().unwrap().iter() {
+                //     ui.collapsing(format!("Recipe Group {}", group.0), |ui| {
+                //         for subgroup in group.1.iter() {
+                //             ui.collapsing(format!("Recipe Subgroup {}", subgroup.0), |ui| {
+                //                 for recipe_name in subgroup.1.iter() {
+                //                     ui.collapsing(format!("Recipe {}", recipe_name), |ui| {
+                //                         if let Some(recipe) = self.ctx.recipes.get(recipe_name) {
+                //                             if let Some(icon_path) = &self.ctx.icon_path {
+                //                                 ui.add(Icon {
+                //                                     ctx: &self.ctx,
+                //                                     type_name: &"recipe".to_string(),
+                //                                     item_name: recipe_name,
+                //                                     size: 32.0,
+                //                                     quality: 0,
+                //                                 });
+                //                             } else {
+                //                                 ui.label("未找到图标路径！");
+                //                             }
+                //                             ui.label(format!("配方: {}", recipe_name));
+                //                             ui.label(format!("{:#?}", recipe));
+                //                         } else {
+                //                             ui.label("未找到该配方！");
+                //                         }
+                //                     });
+                //                 }
+                //             });
+                //         }
+                //     });
+                // }
             });
     }
 }
