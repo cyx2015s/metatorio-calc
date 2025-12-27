@@ -5,10 +5,9 @@ use serde::Deserialize;
 use crate::{
     concept::AsFlow, factorio::{
         common::{
-            Effect, EffectReceiver, EffectTypeLimitation, EnergySource, HasPrototypeBase,
-            PrototypeBase, option_as_vec_or_empty, update_map,
+            Effect, EffectReceiver, EffectTypeLimitation, EnergyAmount, EnergySource, HasPrototypeBase, PrototypeBase, option_as_vec_or_empty, update_map
         },
-        model::{context::{Context, GenericItem}, entity::EntityPrototype, recipe::RecipeResult},
+        model::{context::{Context, GenericItem}, energy::energy_source_as_flow, entity::EntityPrototype, recipe::RecipeResult},
     }
 };
 
@@ -39,6 +38,8 @@ pub struct MiningDrillPrototype {
     pub resource_categories: Vec<String>,
 
     pub energy_source: EnergySource,
+    #[serde(default)]
+    pub energy_usage: Option<EnergyAmount>,
     #[serde(default)]
     pub effect_receiver: Option<EffectReceiver>,
     #[serde(default)]
@@ -71,6 +72,7 @@ pub struct MiningConfig {
     pub machine: Option<String>,
     pub modules: Vec<(String, u8)>,
     pub extra_effects: Effect,
+    pub instance_fuel: Option<(String, i32)>,
 }
 
 impl AsFlow for MiningConfig {
@@ -99,17 +101,6 @@ impl AsFlow for MiningConfig {
         base_speed = base_speed / mining_property.mining_time;
 
         let mut resource_drain_rate = 1.0;
-        if let Some(miner) = miner {
-            module_effects = module_effects
-                + miner
-                    .effect_receiver
-                    .clone()
-                    .unwrap_or_default()
-                    .base_effect
-                    .clone();
-            resource_drain_rate = miner.resource_drain_rate_percent.unwrap_or(100.0) / 100.0;
-            base_speed *= miner.mining_speed;
-        }
 
         for module in self.modules.iter() {
             let module_prototype = ctx
@@ -121,6 +112,29 @@ impl AsFlow for MiningConfig {
 
         module_effects = module_effects + self.extra_effects.clone();
         module_effects = module_effects.clamped();
+
+        if let Some(miner) = miner {
+            module_effects = module_effects
+                + miner
+                    .effect_receiver
+                    .clone()
+                    .unwrap_or_default()
+                    .base_effect
+                    .clone();
+            resource_drain_rate = miner.resource_drain_rate_percent.unwrap_or(100.0) / 100.0;
+            base_speed *= miner.mining_speed;
+            let energy_related_flow = energy_source_as_flow(
+                ctx,
+                &miner.energy_source,
+                miner.energy_usage.as_ref().expect("MiningDrillPrototype 中的机器没有能量消耗"),
+                &module_effects,
+                &self.instance_fuel,
+                &mut base_speed,
+            );
+            for (key, value) in energy_related_flow.into_iter() {
+                update_map(&mut map, key, value);
+            }
+        }
 
         // 计算矿物实体本身的消耗
         update_map(
@@ -212,6 +226,7 @@ fn test_mining_normalized() {
             productivity: 1.0,
             ..Default::default()
         },
+        instance_fuel: None,
     };
 
     let result = mining_config.as_flow(&ctx);

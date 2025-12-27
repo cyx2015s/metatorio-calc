@@ -17,7 +17,7 @@ pub fn energy_source_as_flow(
     match energy_source {
         EnergySource::Electric(source) => {
             let energy_usage = energy_usage.amount * 60.0 * (1.0 + effects.consumption);
-            update_map(&mut map, GenericItem::Electricity, energy_usage);
+            update_map(&mut map, GenericItem::Electricity, -energy_usage);
             update_map(
                 &mut map,
                 GenericItem::Electricity,
