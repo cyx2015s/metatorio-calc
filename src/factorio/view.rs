@@ -4,10 +4,13 @@ use crate::{
     Subview,
     concept::{AsFlow, GameContextCreatorView},
     factorio::{
-        common::{HasPrototypeBase, OrderInfo},
+        common::{Effect, HasPrototypeBase, OrderInfo},
         format::CompactNumberLabel,
-        model::context::{Context, GenericItem},
-        model::recipe::{RecipeIngredient, RecipePrototype, RecipeResult},
+        model::{
+            context::{Context, GenericItem},
+            mining::MiningConfig,
+            recipe::{RecipeConfig, RecipeIngredient, RecipePrototype, RecipeResult},
+        },
     },
 };
 
@@ -141,14 +144,14 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                 egui::Label::new(format!("燃料: {}", category)),
             ),
             GenericItem::RocketPayloadWeight => {
-                ui.add_sized([self.size, self.size], egui::Label::new("火箭重量载荷"))
+                ui.add_sized([self.size, self.size], egui::Label::new("重量载荷"))
             }
             GenericItem::RocketPayloadStack => {
-                ui.add_sized([self.size, self.size], egui::Label::new("火箭堆叠载荷"))
+                ui.add_sized([self.size, self.size], egui::Label::new("堆叠载荷"))
             }
             GenericItem::Pollution { name } => ui.add_sized(
                 [self.size, self.size],
-                egui::Label::new(format!("污染 {}", name)),
+                egui::Label::new(self.ctx.get_display_name("airborne-pollutant", name)),
             ),
         }
     }
@@ -368,7 +371,7 @@ pub struct ItemSelector<'a> {
 impl egui::Widget for ItemSelector<'_> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         let mut response = ui.response().clone();
-        let available_space= ui.available_size();
+        let available_space = ui.available_size();
         let group_count = (available_space.x as usize / 70).max(4);
         let item_count = (available_space.x as usize / 35).max(8);
         egui::Grid::new("ItemGroupGrid")
@@ -459,12 +462,39 @@ impl egui::Widget for ItemSelector<'_> {
 
 impl PlannerView {
     pub fn new(ctx: Context) -> Self {
-        PlannerView {
+        let mut ret = PlannerView {
             ctx: ctx.build_order_info(),
             factories: Vec::new(),
             selected_factory: 0,
             item_selector_storage: ItemSelectorStorage::default(),
-        }
+        };
+        ret.factories.push(FactoryView {
+            recipe_configs: vec![
+                Box::new(RecipeConfig {
+                    recipe: "iron-gear-wheel".to_string(),
+                    quality: 1,
+                    machine: Some("assembling-machine-1".to_string()),
+                    modules: vec![],
+                    extra_effects: Effect {
+                        productivity: 1.0,
+                        ..Default::default()
+                    },
+                    instance_fuel: None,
+                }),
+                Box::new(MiningConfig {
+                    resource: "iron-ore".to_string(),
+                    quality: 0,
+                    machine: Some("electric-mining-drill".to_string()),
+                    modules: vec![],
+                    extra_effects: Effect {
+                        speed: 1.0,
+                        ..Default::default()
+                    },
+                    instance_fuel: None,
+                }),
+            ],
+        });
+        ret
     }
 }
 
@@ -534,12 +564,16 @@ impl Subview for PlannerView {
                     GenericItem::Electricity => {
                         (0x400usize, (0usize, 0usize, 0usize), String::new())
                     }
-                    GenericItem::FluidHeat { filter } => {
-                        (0x500usize, (0usize, 0usize, 0usize), filter.clone().unwrap_or_default())
-                    }
-                    GenericItem::FluidFuel { filter } => {
-                        (0x600usize, (0usize, 0usize, 0usize), filter.clone().unwrap_or_default())
-                    }
+                    GenericItem::FluidHeat { filter } => (
+                        0x500usize,
+                        (0usize, 0usize, 0usize),
+                        filter.clone().unwrap_or_default(),
+                    ),
+                    GenericItem::FluidFuel { filter } => (
+                        0x600usize,
+                        (0usize, 0usize, 0usize),
+                        filter.clone().unwrap_or_default(),
+                    ),
                     GenericItem::ItemFuel { category } => {
                         (0x700usize, (0usize, 0usize, 0usize), category.clone())
                     }
@@ -560,13 +594,20 @@ impl Subview for PlannerView {
                 ui.horizontal_top(|ui| {
                     for key in keys {
                         let amount = vec_of_map[0].get(key).unwrap();
+
                         ui.vertical(|ui| {
-                            let icon = ui.add(GenericIcon {
-                                ctx: &self.ctx,
-                                item: key,
-                                size: 32.0,
-                            });
-                            ui.add(CompactNumberLabel::new(*amount).with_format("{}"));
+                            ui.add_sized(
+                                [35.0, 35.0],
+                                GenericIcon {
+                                    ctx: &self.ctx,
+                                    item: key,
+                                    size: 32.0,
+                                },
+                            );
+                            ui.add_sized(
+                                [35.0, 10.0],
+                                CompactNumberLabel::new(*amount).with_format("{}"),
+                            );
                         });
                     }
                 });

@@ -397,6 +397,19 @@ pub struct RecipeConfig {
     pub instance_fuel: Option<(String, i32)>,
 }
 
+impl Default for RecipeConfig {
+    fn default() -> Self {
+        RecipeConfig {
+            recipe: "recipe-unknown".to_string(),
+            quality: 0,
+            machine: None,
+            modules: vec![],
+            extra_effects: Effect::default(),
+            instance_fuel: None,
+        }
+    }
+}
+
 impl AsFlow for RecipeConfig {
     type ItemIdentType = GenericItem;
     type ContextType = Context;

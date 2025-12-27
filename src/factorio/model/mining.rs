@@ -75,6 +75,19 @@ pub struct MiningConfig {
     pub instance_fuel: Option<(String, i32)>,
 }
 
+impl Default for MiningConfig {
+    fn default() -> Self {
+        MiningConfig {
+            resource: "entity-unknown".to_string(),
+            quality: 0,
+            machine: None,
+            modules: vec![],
+            extra_effects: Effect::default(),
+            instance_fuel: None,
+        }
+    }
+}
+
 impl AsFlow for MiningConfig {
     type ItemIdentType = GenericItem;
     type ContextType = Context;
@@ -90,7 +103,9 @@ impl AsFlow for MiningConfig {
             None => return vec![map],
         };
 
-        assert!(resource_ore.base.minable.is_some());
+        if resource_ore.base.minable.is_none() {
+            return vec![];
+        }
 
         let mining_property = resource_ore.base.minable.as_ref().unwrap();
         let miner = match &self.machine {
