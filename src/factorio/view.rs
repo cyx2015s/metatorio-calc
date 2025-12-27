@@ -98,61 +98,92 @@ pub struct GenericIcon<'a> {
 impl<'a> egui::Widget for GenericIcon<'a> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         match self.item {
-            GenericItem::Custom { name } => ui.label(format!("Custom Item: {}", name)),
-            GenericItem::Item { name, quality } => ui.add_sized(
-                [self.size, self.size],
-                Icon {
-                    ctx: self.ctx,
-                    type_name: &"item".to_string(),
-                    item_name: name,
-                    size: self.size,
-                    quality: *quality,
-                },
-            ),
-            GenericItem::Fluid { name, temperature } => ui.add_sized(
-                [self.size, self.size],
-                Icon {
-                    ctx: self.ctx,
-                    type_name: &"fluid".to_string(),
-                    item_name: name,
-                    size: self.size,
-                    quality: 0,
-                },
-            ),
-            GenericItem::Entity { name, quality } => ui.add_sized(
-                [self.size, self.size],
-                Icon {
-                    ctx: self.ctx,
-                    type_name: &"entity".to_string(),
-                    item_name: name,
-                    size: self.size,
-                    quality: *quality,
-                },
-            ),
+            GenericItem::Custom { name } => ui.label(format!("特殊: {}", name)),
+            GenericItem::Item { name, quality } => ui
+                .add_sized(
+                    [self.size, self.size],
+                    Icon {
+                        ctx: self.ctx,
+                        type_name: &"item".to_string(),
+                        item_name: name,
+                        size: self.size,
+                        quality: *quality,
+                    },
+                )
+                .on_hover_text(format!("物品: {}", self.ctx.get_display_name("item", name))),
+            GenericItem::Fluid { name, temperature } => ui
+                .add_sized(
+                    [self.size, self.size],
+                    Icon {
+                        ctx: self.ctx,
+                        type_name: &"fluid".to_string(),
+                        item_name: name,
+                        size: self.size,
+                        quality: 0,
+                    },
+                )
+                .on_hover_text(format!(
+                    "流体: {}",
+                    self.ctx.get_display_name("fluid", name)
+                )),
+            GenericItem::Entity { name, quality } => ui
+                .add_sized(
+                    [self.size, self.size],
+                    Icon {
+                        ctx: self.ctx,
+                        type_name: &"entity".to_string(),
+                        item_name: name,
+                        size: self.size,
+                        quality: *quality,
+                    },
+                )
+                .on_hover_text(format!(
+                    "实体: {}",
+                    self.ctx.get_display_name("entity", name)
+                )),
             GenericItem::Heat => ui.add_sized([self.size, self.size], egui::Label::new("热量")),
             GenericItem::Electricity => {
                 ui.add_sized([self.size, self.size], egui::Label::new("电力"))
             }
-            GenericItem::FluidHeat { filter } => {
-                ui.add_sized([self.size, self.size], egui::Label::new("流体热量"))
-            }
-            GenericItem::FluidFuel { filter } => {
-                ui.add_sized([self.size, self.size], egui::Label::new("流体燃料"))
-            }
-            GenericItem::ItemFuel { category } => ui.add_sized(
-                [self.size, self.size],
-                egui::Label::new(format!("燃料: {}", category)),
-            ),
+            GenericItem::FluidHeat { filter } => ui
+                .add_sized([self.size, self.size], egui::Label::new("液热"))
+                .on_hover_text(format!(
+                    "过滤器: {}",
+                    filter
+                        .as_ref()
+                        .map(|f| self.ctx.get_display_name("fluid", f))
+                        .unwrap_or("无".to_string())
+                )),
+            GenericItem::FluidFuel { filter } => ui
+                .add_sized([self.size, self.size], egui::Label::new("液燃"))
+                .on_hover_text(format!(
+                    "过滤器: {}",
+                    filter
+                        .as_ref()
+                        .map(|f| self.ctx.get_display_name("fluid", f))
+                        .unwrap_or("无".to_string())
+                )),
+            GenericItem::ItemFuel { category } => ui
+                .add_sized(
+                    [self.size, self.size],
+                    egui::Label::new(format!("物燃")),
+                )
+                .on_hover_text(format!("类别: {}", category,)),
             GenericItem::RocketPayloadWeight => {
-                ui.add_sized([self.size, self.size], egui::Label::new("重量载荷"))
+                ui.add_sized([self.size, self.size], egui::Label::new("重量"))
             }
             GenericItem::RocketPayloadStack => {
-                ui.add_sized([self.size, self.size], egui::Label::new("堆叠载荷"))
+                ui.add_sized([self.size, self.size], egui::Label::new("堆叠"))
             }
-            GenericItem::Pollution { name } => ui.add_sized(
-                [self.size, self.size],
-                egui::Label::new(self.ctx.get_display_name("airborne-pollutant", name)),
-            ),
+            GenericItem::Pollution { name } => ui
+                .add_sized(
+                    [self.size, self.size],
+                    egui::Label::new(self.ctx.get_display_name("airborne-pollutant", name)),
+                )
+                .on_hover_text(format!(
+                    "污染物: {}",
+                    self.ctx.get_display_name("airborne-pollutant", name)
+                )),
         }
     }
 }
@@ -472,7 +503,7 @@ impl PlannerView {
             recipe_configs: vec![
                 Box::new(RecipeConfig {
                     recipe: "iron-gear-wheel".to_string(),
-                    quality: 1,
+                    quality: 0,
                     machine: Some("assembling-machine-1".to_string()),
                     modules: vec![],
                     extra_effects: Effect {
@@ -488,6 +519,7 @@ impl PlannerView {
                     modules: vec![],
                     extra_effects: Effect {
                         speed: 1.0,
+                        productivity: 2.3,
                         ..Default::default()
                     },
                     instance_fuel: None,

@@ -38,7 +38,7 @@ pub fn energy_source_as_flow(
                     GenericItem::Pollution {
                         name: pollutant.clone(),
                     },
-                    *emmision / 60.0,
+                    *emmision * (1.0 + effects.pollution) * (1.0 + effects.consumption) / 60.0,
                 );
             }
         }
@@ -59,7 +59,7 @@ pub fn energy_source_as_flow(
                     GenericItem::Pollution {
                         name: pollutant.clone(),
                     },
-                    *emmision / 60.0,
+                    *emmision * (1.0 + effects.pollution) * (1.0 + effects.consumption) / 60.0,
                 );
             }
         }
@@ -117,7 +117,7 @@ pub fn energy_source_as_flow(
                     GenericItem::Pollution {
                         name: pollutant.clone(),
                     },
-                    *emmision / 60.0,
+                    *emmision * (1.0 + effects.pollution) * (1.0 + effects.consumption) / 60.0,
                 );
             }
         }
@@ -238,7 +238,7 @@ pub fn energy_source_as_flow(
                     GenericItem::Pollution {
                         name: pollutant.clone(),
                     },
-                    *emmision / 60.0,
+                    *emmision * (1.0 + effects.pollution) * (1.0 + effects.consumption) / 60.0,
                 );
             }
         }
@@ -254,7 +254,7 @@ pub fn energy_source_as_flow(
                     GenericItem::Pollution {
                         name: pollutant.clone(),
                     },
-                    *emmision / 60.0,
+                    *emmision * (1.0 + effects.pollution) * (1.0 + effects.consumption) / 60.0,
                 );
             }
         }
