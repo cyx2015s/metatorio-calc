@@ -23,6 +23,14 @@ where
     *entry = *entry + value;
 }
 
+pub fn version_string_to_triplet(version: &str) -> (u16, u16, u16) {
+    let parts: Vec<&str> = version.split('.').collect();
+    let major = parts.get(0).and_then(|s| s.parse::<u16>().ok()).unwrap_or(0);
+    let minor = parts.get(1).and_then(|s| s.parse::<u16>().ok()).unwrap_or(0);
+    let patch = parts.get(2).and_then(|s| s.parse::<u16>().ok()).unwrap_or(0);
+    (major, minor, patch)
+}
+
 #[derive(Debug, Clone)]
 pub struct Color(u8, u8, u8, u8);
 

@@ -18,7 +18,7 @@ pub trait AsFlowEditor: AsFlow {
     fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &Self::ContextType);
     /// 传入的为系数，和 as_hash_map 返回值顺序一致
     /// 默认实现是不处理，不知道暂时也没有关系，但是和展示界面会有关
-    fn notify_solution(&self, solution: Vec<f64>) {
+    fn notify_solution(&mut self, solution: Vec<f64>) {
         println!("RecipeLike::notify_solution called with {:?}", solution);
     }
 }

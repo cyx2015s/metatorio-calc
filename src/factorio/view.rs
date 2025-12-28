@@ -540,12 +540,16 @@ impl Default for PlannerView {
 
 impl Subview for PlannerView {
     fn view(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Factorio Planner");
-
+        ui.heading("工厂规划器");
+        ui.collapsing("模组版本信息", |ui| {
+            for (mod_name, mod_version) in &self.ctx.mods {
+                ui.label(format!("模组 {} 版本 {}", mod_name, mod_version));
+            }
+        });
         ui.horizontal(|ui| {
             for i in 0..self.factories.len() {
                 if ui
-                    .selectable_label(self.selected_factory == i, format!("Factory {}", i + 1))
+                    .selectable_label(self.selected_factory == i, format!("工厂 {}", i + 1))
                     .clicked()
                 {
                     self.selected_factory = i;

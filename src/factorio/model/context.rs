@@ -7,16 +7,18 @@ use crate::{
     factorio::{
         common::{
             Dict, ItemSubgroup, OrderInfo, PrototypeBase, ReverseOrderInfo, get_order_info,
-            get_reverse_order_info,
+            get_reverse_order_info, version_string_to_triplet,
         },
-        model::entity::{ENTITY_TYPES, EntityPrototype},
-        model::fluid::FluidPrototype,
-        model::item::{ITEM_TYPES, ItemPrototype},
-        model::mining::{MiningDrillPrototype, ResourcePrototype},
-        model::module::ModulePrototype,
-        model::quality::QualityPrototype,
-        model::recipe::{
-            CRAFTING_MACHINE_TYPES, CraftingMachinePrototype, RecipePrototype, RecipeResult,
+        model::{
+            entity::{ENTITY_TYPES, EntityPrototype},
+            fluid::FluidPrototype,
+            item::{ITEM_TYPES, ItemPrototype},
+            mining::{MiningDrillPrototype, ResourcePrototype},
+            module::ModulePrototype,
+            quality::QualityPrototype,
+            recipe::{
+                CRAFTING_MACHINE_TYPES, CraftingMachinePrototype, RecipePrototype, RecipeResult,
+            },
         },
     },
 };
@@ -38,6 +40,8 @@ pub const LOCALE_CATEGORIES: &[&str] = &[
 
 #[derive(Debug, Clone, Default)]
 pub struct Context {
+    /// 模组信息
+    pub mods: Vec<(String, String)>,
     /// 图标路径
     pub icon_path: Option<std::path::PathBuf>,
     /// 翻译信息
@@ -205,6 +209,10 @@ impl Context {
             }
         };
         let config_path = self_path.join("tmp/config/config.ini");
+        let tmp_mod_list_json_path = self_path.join("tmp/mods/mod-list.json");
+        if tmp_mod_list_json_path.exists() {
+            std::fs::remove_file(&tmp_mod_list_json_path).ok()?;
+        }
         if !config_path.exists() {
             std::fs::create_dir_all(config_path.parent()?).ok()?;
         }
@@ -262,6 +270,110 @@ impl Context {
             return None;
         }
 
+        if mod_path.is_some() {
+            // 把 mod-list.json 也复制过来
+            let mod_list_json_path = mod_path.unwrap().join("mod-list.json");
+            if mod_list_json_path.exists() {
+                std::fs::copy(&mod_list_json_path, &tmp_mod_list_json_path).ok()?;
+            }
+        }
+        // 扫描游戏可执行文件下，补充版本信息
+        let mut mod_list_json_content =
+            serde_json::from_str::<Value>(&std::fs::read_to_string(&tmp_mod_list_json_path).ok()?)
+                .ok()?;
+        for mod_info in mod_list_json_content.get_mut("mods")?.as_array_mut()? {
+            if mod_info.get("enabled")?.as_bool()? {
+                log::info!("处理模组信息 {:?}", mod_info);
+                let mod_name = mod_info.get("name")?.as_str()?.to_string();
+                if let None = mod_info.get("version") {
+                    log::info!("模组 {} 缺少版本信息，尝试补全", &mod_name);
+
+                    if ["base", "space-age", "quality", "elevated-rails"]
+                        .contains(&mod_name.as_str())
+                    {
+                        // 在游戏可执行文件附近寻找info.json
+                        log::info!("在游戏可执行文件附近寻找info.json");
+                        let info_json_path = executable_path
+                            .join("../../../data")
+                            .join(&mod_name)
+                            .join("info.json");
+                        let info_json_content = serde_json::from_str::<Value>(
+                            &std::fs::read_to_string(&info_json_path).ok()?,
+                        );
+                        mod_info["version"] = info_json_content.ok()?.get("version")?.clone();
+                        log::info!("模组 {} 的版本是 {}", &mod_name, &mod_info["version"]);
+                    } else {
+                        // 在模组路径下寻找info.json
+                        log::info!("在模组路径下寻找 {} 的 info.json", mod_name);
+                        if mod_path.is_none() {
+                            continue;
+                        }
+                        // 可能是 zip 包
+                        for entry in std::fs::read_dir(mod_path.unwrap()).ok()? {
+                            let entry = entry.ok()?;
+                            let file_name = entry.file_name().into_string().ok()?;
+
+                            if file_name.starts_with(format!("{}_", &mod_name).as_str())
+                                && file_name.ends_with(".zip")
+                            {
+                                log::info!("可能匹配的文件：{}", file_name);
+                                log::info!(
+                                    "模组 {} 是压缩包，尝试从压缩包文件名读取版本",
+                                    &mod_name
+                                );
+                                let version_str = file_name.split("_").last();
+                                if let Some(version_str) = version_str {
+                                    let version = version_str.trim_end_matches(".zip");
+                                    mod_info["version"] = Value::String(version.to_string());
+                                    let new_version = version_string_to_triplet(version);
+                                    let old_version = version_string_to_triplet(
+                                        mod_info["version"].as_str().unwrap_or("0.0.0"),
+                                    );
+                                    if old_version < new_version {
+                                        mod_info["version"] = Value::String(version.to_string());
+                                    }
+                                    log::info!(
+                                        "压缩包模组 {} 的版本是 {}",
+                                        &mod_name,
+                                        &mod_info["version"]
+                                    );
+                                }
+                            } else if &file_name == &mod_name {
+                                let info_json_path = entry.path().join("info.json");
+                                if !info_json_path.exists() {
+                                    // 垃圾文件夹，不用管
+                                    continue;
+                                }
+                                let info_json_content = serde_json::from_str::<Value>(
+                                    &std::fs::read_to_string(&info_json_path).ok()?,
+                                );
+                                let version = info_json_content.unwrap().get("version")?.as_str()?.to_owned();
+                                let new_version = version_string_to_triplet(&version);
+                                let old_version = version_string_to_triplet(
+                                    mod_info["version"].as_str().unwrap_or("0.0.0"),
+                                );
+                                if old_version <= new_version {
+                                    // 同版本模组，文件优先
+                                    mod_info["version"] = Value::String(version.to_string());
+                                }
+                                log::info!(
+                                    "文件模组 {} 的版本是 {}",
+                                    &mod_name,
+                                    mod_info["version"]
+                                );
+
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        std::fs::write(
+            &tmp_mod_list_json_path,
+            serde_json::to_string_pretty(&mod_list_json_content).ok()?,
+        )
+        .ok()?;
         Context::load_from_tmp_no_dump()
     }
 
@@ -301,6 +413,19 @@ impl Context {
                     .insert(locale_category.to_string(), Dict::new());
                 ctx.localized_description
                     .insert(locale_category.to_string(), Dict::new());
+            }
+        }
+        let mod_list_json_path = self_path.join("tmp/mods/mod-list.json");
+        let mut mod_list_json_content =
+            serde_json::from_str::<Value>(&std::fs::read_to_string(&mod_list_json_path).ok()?)
+                .ok()?;
+        for mod_info in mod_list_json_content.get_mut("mods")?.as_array_mut()? {
+            log::info!("加载模组信息 {:?}", mod_info);
+            if mod_info.get("enabled")?.as_bool()? {
+                let mod_name = mod_info.get("name")?.as_str()?.to_string();
+                log::info!("启用模组 {}", &mod_name);
+                ctx.mods
+                    .push((mod_name, mod_info.get("version")?.as_str()?.to_string()));
             }
         }
         Some(ctx)

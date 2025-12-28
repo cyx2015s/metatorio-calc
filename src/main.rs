@@ -50,7 +50,7 @@ impl eframe::App for MainPage {
         egui::SidePanel::left(Id::new("LeftPanel"))
             .width_range(200.0..=280.0)
             .show(ctx, |ui| {
-                ui.heading("Metatorio");
+                ui.heading("切向量化 Metatorio");
                 for (i, creator) in self.creators.iter_mut().enumerate() {
                     if ui
                         .selectable_label(self.selected == i, creator.0.to_string())
@@ -111,6 +111,8 @@ fn add_font(ctx: &egui::Context) {
 }
 
 fn main() {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    log::info!("应用程序启动");
     run_native(
         "Demo App",
         NativeOptions {
