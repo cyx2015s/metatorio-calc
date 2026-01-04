@@ -38,8 +38,3 @@ pub trait AsFlowSource: Subview {
         >,
     );
 }
-
-pub trait FactoryView: Subview {
-    type ItemType: ItemIdent;
-    type ContextType;
-}

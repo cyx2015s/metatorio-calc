@@ -14,7 +14,7 @@ use crate::{
             fluid::FluidPrototype,
             item::{ITEM_TYPES, ItemPrototype},
             mining::{MiningDrillPrototype, ResourcePrototype},
-            module::ModulePrototype,
+            module::{BeaconPrototype, ModulePrototype},
             quality::QualityPrototype,
             recipe::{
                 CRAFTING_MACHINE_TYPES, CraftingMachinePrototype, RecipePrototype, RecipeResult,
@@ -77,6 +77,7 @@ pub struct Context {
 
     /// 插件
     pub modules: Dict<ModulePrototype>,
+    pub beacons: Dict<BeaconPrototype>,
     /// 配方类型集合：配方本身和制作配方的机器
     pub recipes: Dict<RecipePrototype>,
     pub crafters: Dict<CraftingMachinePrototype>,
@@ -165,6 +166,12 @@ impl Context {
                 .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
         )
         .unwrap();
+        let beacons: Dict<BeaconPrototype> = serde_json::from_value(
+            value
+                .get("beacon")
+                .cloned()
+                .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
+        ).unwrap();
         let mut qualities = vec![];
         let mut cur_quality = value.get("quality").unwrap().get("normal").unwrap();
         while !cur_quality.is_null() {
@@ -182,6 +189,7 @@ impl Context {
             subgroups,
             items,
             modules,
+            beacons,
             entities,
             fluids,
             recipes,

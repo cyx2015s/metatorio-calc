@@ -2,9 +2,9 @@ use egui::{ScrollArea, Sense, Vec2};
 
 use crate::{
     Subview,
-    concept::{AsFlow, GameContextCreatorView},
+    concept::{AsFlow, AsFlowEditor, GameContextCreatorView},
     factorio::{
-        common::{Effect, HasPrototypeBase, OrderInfo},
+        common::{Effect, HasPrototypeBase, OrderInfo, sort_generic_items},
         format::CompactNumberLabel,
         model::{
             context::{Context, GenericItem},
@@ -15,7 +15,7 @@ use crate::{
 };
 
 pub struct FactoryView {
-    recipe_configs: Vec<Box<dyn AsFlow<ItemIdentType = GenericItem, ContextType = Context>>>,
+    recipe_configs: Vec<Box<dyn AsFlowEditor<ItemIdentType = GenericItem, ContextType = Context>>>,
 }
 
 pub struct PlannerView {
@@ -211,6 +211,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
             RecipeResult::Fluid(f) => (1, &self.ctx.reverse_fluid_order.as_ref().unwrap()[&f.name]),
         });
         ui.vertical(|ui| {
+            ui.label(self.ctx.get_display_name("recipe", &self.prototype.base.name));
             ui.add(CompactNumberLabel::new(self.prototype.energy_required).with_format("{}s"));
             ui.horizontal_top(|ui| {
                 if ingredients.is_empty() {
@@ -462,15 +463,14 @@ impl egui::Widget for ItemSelector<'_> {
                             .interact(Sense::click());
                         let button = if self.item_type == &"recipe".to_string() {
                             let prototype = self.ctx.recipes.get(item_name).unwrap();
-                            button.on_hover_ui_at_pointer(|ui| {
+                            button.on_hover_ui(|ui| {
                                 ui.add(PrototypeHover {
                                     ctx: self.ctx,
                                     prototype,
                                 });
-                                ui.label(self.ctx.get_display_name(self.item_type, item_name));
                             })
                         } else {
-                            button.on_hover_text_at_pointer(
+                            button.on_hover_text(
                                 self.ctx.get_display_name(self.item_type, item_name),
                             )
                         };
@@ -502,32 +502,45 @@ impl PlannerView {
         ret.factories.push(FactoryView {
             recipe_configs: vec![
                 Box::new(RecipeConfig {
-                    recipe: "iron-gear-wheel".to_string(),
-                    quality: 0,
-                    machine: Some("assembling-machine-1".to_string()),
+                    recipe: ("iron-gear-wheel".to_string()).into(),
+                    machine: Some(("assembling-machine-1".to_string()).into()),
                     modules: vec![],
-                    extra_effects: Effect {
-                        productivity: 1.0,
-                        ..Default::default()
-                    },
+                    extra_effects: Effect::default(),
                     instance_fuel: None,
                 }),
-                Box::new(MiningConfig {
-                    resource: "iron-ore".to_string(),
-                    quality: 0,
-                    machine: Some("electric-mining-drill".to_string()),
-                    modules: vec![],
-                    extra_effects: Effect {
-                        speed: 1.0,
-                        productivity: 2.3,
-                        ..Default::default()
-                    },
+                Box::new(RecipeConfig {
+                    recipe: ("copper-cable".into()),
+                    
+                    machine: Some(("assembling-machine-2".into())),
+                    modules: vec![("productivity-module-3".into())],
+                    extra_effects: Effect::default(),
                     instance_fuel: None,
                 }),
+                Box::new(RecipeConfig {
+                    recipe: ("transport-belt".into()),
+                    machine: Some(("assembling-machine-2".into())),
+                    modules: vec![("speed-module-3".into()),("speed-module-3".into())],
+                    extra_effects: Effect::default(),
+                    instance_fuel: None,
+                }),
+                // Box::new(MiningConfig {
+                //     resource: "iron-ore".to_string(),
+                //     quality: 0,
+                //     machine: Some(("electric-mining-drill".to_string(), 0)),
+                //     modules: vec![],
+                //     extra_effects: Effect {
+                //         speed: 1.0,
+                //         productivity: 2.3,
+                //         ..Default::default()
+                //     },
+                //     instance_fuel: None,
+                // }),
             ],
         });
         ret
     }
+    
+    
 }
 
 impl Default for PlannerView {
@@ -559,94 +572,8 @@ impl Subview for PlannerView {
         if self.selected_factory >= self.factories.len() {
             ui.label("没有工厂。");
         } else {
-            for config in &self.factories[self.selected_factory].recipe_configs {
-                let vec_of_map = config.as_flow(&self.ctx);
-                let mut keys = vec_of_map[0].keys().collect::<Vec<&GenericItem>>();
-                keys.sort_by_key(|g| match g {
-                    GenericItem::Item { name, quality } => (
-                        *quality as usize,
-                        self.ctx
-                            .reverse_item_order
-                            .as_ref()
-                            .unwrap()
-                            .get(name)
-                            .cloned()
-                            .unwrap(),
-                        String::new(),
-                    ),
-                    GenericItem::Fluid { name, temperature } => (
-                        0x100usize,
-                        self.ctx
-                            .reverse_fluid_order
-                            .as_ref()
-                            .unwrap()
-                            .get(name)
-                            .cloned()
-                            .unwrap(),
-                        String::new(),
-                    ),
-                    GenericItem::Entity { name, quality } => (
-                        0x200usize + *quality as usize,
-                        self.ctx
-                            .reverse_entity_order
-                            .as_ref()
-                            .unwrap()
-                            .get(name)
-                            .cloned()
-                            .unwrap(),
-                        String::new(),
-                    ),
-                    GenericItem::Heat => (0x300usize, (0usize, 0usize, 0usize), String::new()),
-                    GenericItem::Electricity => {
-                        (0x400usize, (0usize, 0usize, 0usize), String::new())
-                    }
-                    GenericItem::FluidHeat { filter } => (
-                        0x500usize,
-                        (0usize, 0usize, 0usize),
-                        filter.clone().unwrap_or_default(),
-                    ),
-                    GenericItem::FluidFuel { filter } => (
-                        0x600usize,
-                        (0usize, 0usize, 0usize),
-                        filter.clone().unwrap_or_default(),
-                    ),
-                    GenericItem::ItemFuel { category } => {
-                        (0x700usize, (0usize, 0usize, 0usize), category.clone())
-                    }
-                    GenericItem::RocketPayloadWeight => {
-                        (0x800usize, (0usize, 0usize, 0usize), String::new())
-                    }
-                    GenericItem::RocketPayloadStack => {
-                        (0x900usize, (0usize, 0usize, 0usize), String::new())
-                    }
-                    GenericItem::Pollution { name } => {
-                        (0xa00usize, (0usize, 0usize, 0usize), name.clone())
-                    }
-                    GenericItem::Custom { name } => {
-                        (0xb00usize, (0usize, 0usize, 0usize), name.clone())
-                    }
-                });
-
-                ui.horizontal_top(|ui| {
-                    for key in keys {
-                        let amount = vec_of_map[0].get(key).unwrap();
-
-                        ui.vertical(|ui| {
-                            ui.add_sized(
-                                [35.0, 35.0],
-                                GenericIcon {
-                                    ctx: &self.ctx,
-                                    item: key,
-                                    size: 32.0,
-                                },
-                            );
-                            ui.add_sized(
-                                [35.0, 10.0],
-                                CompactNumberLabel::new(*amount).with_format("{}"),
-                            );
-                        });
-                    }
-                });
+            for config in &mut self.factories[self.selected_factory].recipe_configs {
+                config.editor_view(ui, &self.ctx);
             }
         }
         ScrollArea::new([false, true])
@@ -658,63 +585,6 @@ impl Subview for PlannerView {
                     order_info: self.ctx.recipe_order.as_ref().unwrap(),
                     storage: &mut self.item_selector_storage,
                 });
-                // for group in self.ctx.item_order.as_ref().unwrap().iter() {
-                //     ui.collapsing(format!("Group {}", group.0), |ui| {
-                //         for subgroup in group.1.iter() {
-                //             ui.collapsing(format!("Subgroup {}", subgroup.0), |ui| {
-                //                 for item_name in subgroup.1.iter() {
-                //                     ui.label(item_name);
-                //                     if let Some(item) = self.ctx.items.get(item_name) {
-                //                         if let Some(icon_path) = &self.ctx.icon_path {
-                //                             ui.add(Icon {
-                //                                 ctx: &self.ctx,
-                //                                 type_name: &"item".to_string(),
-                //                                 item_name,
-                //                                 size: 32.0,
-                //                                 quality: 0,
-                //                             });
-                //                         } else {
-                //                             ui.label("未找到图标路径！");
-                //                         }
-                //                         ui.label(format!("物品: {}", item_name));
-                //                         ui.label(format!("{:#?}", item));
-                //                     } else {
-                //                         ui.label("未找到该物品！");
-                //                     }
-                //                 }
-                //             });
-                //         }
-                //     });
-                // }
-                // for group in self.ctx.recipe_order.as_ref().unwrap().iter() {
-                //     ui.collapsing(format!("Recipe Group {}", group.0), |ui| {
-                //         for subgroup in group.1.iter() {
-                //             ui.collapsing(format!("Recipe Subgroup {}", subgroup.0), |ui| {
-                //                 for recipe_name in subgroup.1.iter() {
-                //                     ui.collapsing(format!("Recipe {}", recipe_name), |ui| {
-                //                         if let Some(recipe) = self.ctx.recipes.get(recipe_name) {
-                //                             if let Some(icon_path) = &self.ctx.icon_path {
-                //                                 ui.add(Icon {
-                //                                     ctx: &self.ctx,
-                //                                     type_name: &"recipe".to_string(),
-                //                                     item_name: recipe_name,
-                //                                     size: 32.0,
-                //                                     quality: 0,
-                //                                 });
-                //                             } else {
-                //                                 ui.label("未找到图标路径！");
-                //                             }
-                //                             ui.label(format!("配方: {}", recipe_name));
-                //                             ui.label(format!("{:#?}", recipe));
-                //                         } else {
-                //                             ui.label("未找到该配方！");
-                //                         }
-                //                     });
-                //                 }
-                //             });
-                //         }
-                //     });
-                // }
             });
     }
 }
@@ -819,66 +689,4 @@ impl GameContextCreatorView for FactorioContextCreatorView {
     fn set_subview_sender(&mut self, sender: std::sync::mpsc::Sender<Box<dyn Subview>>) {
         self.subview_sender = Some(sender);
     }
-    // fn try_create_subview(&mut self) -> Option<Box<dyn SubView>> {
-    //     if self.created_context.is_some() {
-    //         return Some(Box::new(PlannerView {
-    //             ctx: self.created_context.take().unwrap(),
-    //             factories: vec![FactoryView {
-    //                 recipe_configs: vec![
-    //                     Box::new(RecipeConfig {
-    //                         recipe: "iron-gear-wheel".to_string(),
-    //                         machine: Some("assembling-machine-2".to_string()),
-    //                         modules: vec![
-    //                             ("speed-module".to_string(), 0),
-    //                             ("speed-module".to_string(), 0),
-    //                         ],
-    //                         quality: 0,
-    //                         extra_effects: Effect::default(),
-    //                     }),
-    //                     Box::new(RecipeConfig {
-    //                         recipe: "iron-plate".to_string(),
-    //                         machine: Some("stone-furnace".to_string()),
-    //                         modules: vec![("productivity-module-3".to_string(), 0); 5],
-    //                         quality: 0,
-    //                         extra_effects: Effect::default(),
-    //                     }),
-    //                     Box::new(RecipeConfig {
-    //                         recipe: "copper-plate".to_string(),
-    //                         machine: Some("stone-furnace".to_string()),
-    //                         modules: vec![("productivity-module-3".to_string(), 0); 2],
-    //                         quality: 0,
-    //                         extra_effects: Effect::default(),
-    //                     }),
-    //                     Box::new(RecipeConfig {
-    //                         recipe: "copper-cable".to_string(),
-    //                         machine: Some("assembling-machine-2".to_string()),
-    //                         modules: vec![],
-    //                         quality: 0,
-    //                         extra_effects: Effect {
-    //                             speed: 100.0,
-    //                             ..Default::default()
-    //                         },
-    //                     }),
-    //                     Box::new(RecipeConfig {
-    //                         recipe: "electronic-circuit".to_string(),
-    //                         machine: Some("assembling-machine-2".to_string()),
-    //                         modules: vec![],
-    //                         quality: 0,
-    //                         extra_effects: Effect::default(),
-    //                     }),
-    //                     Box::new(MiningConfig {
-    //                         resource: "iron-ore".to_string(),
-    //                         quality: 0,
-    //                         machine: Some("big-mining-drill".to_string()),
-    //                         modules: vec![],
-    //                         extra_effects: Effect::default(),
-    //                     }),
-    //                 ],
-    //             }],
-    //             selected_factory: 0,
-    //             item_selector_storage: ItemSelectorStorage::default(),
-    //         }));
-    //     }
-    //     None
-    // }
 }

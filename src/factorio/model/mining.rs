@@ -5,7 +5,7 @@ use serde::Deserialize;
 use crate::{
     concept::AsFlow, factorio::{
         common::{
-            Effect, EffectReceiver, EffectTypeLimitation, EnergyAmount, EnergySource, HasPrototypeBase, PrototypeBase, option_as_vec_or_empty, update_map
+            Effect, EffectReceiver, EffectTypeLimitation, EnergyAmount, EnergySource, HasPrototypeBase, IdWithQuality, PrototypeBase, option_as_vec_or_empty, update_map
         },
         model::{context::{Context, GenericItem}, energy::energy_source_as_flow, entity::EntityPrototype, recipe::RecipeResult},
     }
@@ -67,19 +67,17 @@ impl HasPrototypeBase for MiningDrillPrototype {
 
 #[derive(Debug, Clone)]
 pub struct MiningConfig {
-    pub resource: String,
-    pub quality: u8,
-    pub machine: Option<String>,
-    pub modules: Vec<(String, u8)>,
+    pub resource: IdWithQuality,
+    pub machine: Option<IdWithQuality>,
+    pub modules: Vec<IdWithQuality>,
     pub extra_effects: Effect,
-    pub instance_fuel: Option<(String, i32)>,
+    pub instance_fuel: Option<IdWithQuality>,
 }
 
 impl Default for MiningConfig {
     fn default() -> Self {
         MiningConfig {
-            resource: "entity-unknown".to_string(),
-            quality: 0,
+            resource: ("entity-unknown".to_string(), 0).into(),
             machine: None,
             modules: vec![],
             extra_effects: Effect::default(),
@@ -98,7 +96,7 @@ impl AsFlow for MiningConfig {
         let mut module_effects = Effect::default();
 
         let mut base_speed = 1.0;
-        let resource_ore = match ctx.resources.get(&self.resource) {
+        let resource_ore = match ctx.resources.get(&self.resource.0) {
             Some(r) => r,
             None => return vec![map],
         };
@@ -109,7 +107,7 @@ impl AsFlow for MiningConfig {
 
         let mining_property = resource_ore.base.minable.as_ref().unwrap();
         let miner = match &self.machine {
-            Some(machine_name) => ctx.miners.get(machine_name),
+            Some(machine_name) => ctx.miners.get(&machine_name.0),
             None => None,
         };
 
@@ -143,7 +141,7 @@ impl AsFlow for MiningConfig {
                 &miner.energy_source,
                 miner.energy_usage.as_ref().expect("MiningDrillPrototype 中的机器没有能量消耗"),
                 &module_effects,
-                &self.instance_fuel,
+                &self.instance_fuel.as_ref().map(|id_with_quality| (id_with_quality.0.clone(), id_with_quality.1 as i32)),
                 &mut base_speed,
             );
             for (key, value) in energy_related_flow.into_iter() {
@@ -156,7 +154,7 @@ impl AsFlow for MiningConfig {
             &mut map,
             GenericItem::Entity {
                 name: resource_ore.base.base.name.clone(),
-                quality: self.quality,
+                quality: self.resource.1,
             },
             -base_speed * (1.0 + module_effects.speed) * resource_drain_rate,
         );
@@ -186,7 +184,7 @@ impl AsFlow for MiningConfig {
                 let item = match result {
                     RecipeResult::Item(r) => GenericItem::Entity {
                         name: r.name.clone(),
-                        quality: self.quality,
+                        quality: self.resource.1,
                     },
                     RecipeResult::Fluid(r) => GenericItem::Fluid {
                         name: r.name.clone(),
@@ -215,7 +213,7 @@ impl AsFlow for MiningConfig {
                 &mut map,
                 GenericItem::Item {
                     name: result.clone(),
-                    quality: self.quality,
+                    quality: self.resource.1,
                 },
                 base_speed
                     * (1.0 + module_effects.speed)
@@ -233,9 +231,8 @@ fn test_mining_normalized() {
         &serde_json::from_str(include_str!("../../../assets/data-raw-dump.json")).unwrap(),
     );
     let mining_config = MiningConfig {
-        resource: "uranium-ore".to_string(),
-        quality: 0,
-        machine: Some("big-mining-drill".to_string()),
+        resource: ("uranium-ore".to_string(), 0).into(),
+        machine: Some(("big-mining-drill".to_string(), 0).into()),
         modules: vec![],
         extra_effects: Effect {
             productivity: 1.0,

@@ -3,17 +3,15 @@ use std::{collections::HashMap, fmt::Debug};
 use serde::Deserialize;
 
 use crate::{
-    concept::AsFlow,
+    concept::{AsFlow, AsFlowEditor},
     factorio::{
         common::{
-            Dict, Effect, EffectReceiver, EffectTypeLimitation, EnergyAmount, EnergySource,
-            HasPrototypeBase, PrototypeBase, update_map,
-        },
-        model::{
+            Dict, Effect, EffectReceiver, EffectTypeLimitation, EnergyAmount, EnergySource, HasPrototypeBase, IdWithQuality, PrototypeBase, sort_generic_items, update_map
+        }, format::CompactNumberLabel, model::{
             context::{Context, GenericItem},
             energy::energy_source_as_flow,
             entity::EntityPrototype,
-        },
+        }, view::{GenericIcon, Icon, PrototypeHover}
     },
 };
 
@@ -384,10 +382,9 @@ impl HasPrototypeBase for CraftingMachinePrototype {
 
 #[derive(Debug, Clone)]
 pub struct RecipeConfig {
-    pub recipe: String,
-    pub quality: u8,
-    pub machine: Option<String>,
-    pub modules: Vec<(String, u8)>,
+    pub recipe: IdWithQuality,
+    pub machine: Option<IdWithQuality>,
+    pub modules: Vec<IdWithQuality>,
     pub extra_effects: Effect,
 
     /// 当机器的能源类型为Fluid、Burner时，用统一的抽象能源还是用具体的燃料
@@ -400,8 +397,7 @@ pub struct RecipeConfig {
 impl Default for RecipeConfig {
     fn default() -> Self {
         RecipeConfig {
-            recipe: "recipe-unknown".to_string(),
-            quality: 0,
+            recipe: ("recipe-unknown".to_string(), 0).into(),
             machine: None,
             modules: vec![],
             extra_effects: Effect::default(),
@@ -420,9 +416,11 @@ impl AsFlow for RecipeConfig {
 
         let mut base_speed = 1.0;
 
-        let crafter = self.machine.as_ref().map(|machine_name| {
+
+
+        let crafter = self.machine.as_ref().map(|machine| {
             ctx.crafters
-                .get(machine_name)
+                .get(&machine.0)
                 .expect("RecipeConfig 中的机器在上下文中不存在")
         });
 
@@ -461,7 +459,7 @@ impl AsFlow for RecipeConfig {
 
         let recipe = ctx
             .recipes
-            .get(&self.recipe)
+            .get(&self.recipe.0)
             .expect("RecipeConfig 中的配方在上下文中不存在");
 
         base_speed /= recipe.energy_required;
@@ -471,7 +469,7 @@ impl AsFlow for RecipeConfig {
                 RecipeIngredient::Item(item) => {
                     let key = GenericItem::Item {
                         name: item.name.clone(),
-                        quality: self.quality,
+                        quality: self.recipe.1,
                     };
                     update_map(
                         &mut map,
@@ -498,7 +496,7 @@ impl AsFlow for RecipeConfig {
                 RecipeResult::Item(item) => {
                     let key = GenericItem::Item {
                         name: item.name.clone(),
-                        quality: self.quality,
+                        quality: self.recipe.1,
                     };
                     let (base_yield, extra_yield) = item.normalized_output();
                     update_map(
@@ -544,16 +542,85 @@ fn test_recipe_normalized() {
         &serde_json::from_str(include_str!("../../../assets/data-raw-dump.json")).unwrap(),
     );
     let recipe_config = RecipeConfig {
-        recipe: "iron-gear-wheel".to_string(),
-        quality: 1,
-        machine: Some("assembling-machine-1".to_string()),
+        recipe: ("iron-gear-wheel".to_string(), 0).into(),
+        machine: Some(("assembling-machine-1".to_string(), 0).into()),
         modules: vec![],
         extra_effects: Effect::default(),
-        instance_fuel: Some(("nutrients".to_string(), 0)),
+        instance_fuel: Some(("nutrients".to_string(), 0).into()),
     };
     let result = recipe_config.as_flow(&ctx);
     println!("Recipe Result: {:?}", result);
     let result_with_location =
         crate::factorio::model::context::make_located_generic_recipe(result[0].clone(), 1);
     println!("Recipe Result with Location: {:?}", result_with_location);
+}
+
+impl AsFlowEditor for RecipeConfig {
+    fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &Self::ContextType) {
+        ui.horizontal(|ui| {
+            
+            ui.add_sized([35.0,50.0], Icon {
+                ctx,
+                type_name: &"recipe".to_string(),
+                item_name: &self.recipe.0,
+                quality: self.recipe.1,
+                size: 32.0,
+            }).on_hover_ui(|ui| {
+                ui.add(PrototypeHover {
+                    ctx,
+                    prototype: ctx.recipes.get(&self.recipe.0).unwrap(),
+                });
+            });
+            ui.separator();
+            ui.vertical(|ui| {
+                if let Some(machine) = &mut self.machine {
+                    ui.label("机器");
+                    ui.add(GenericIcon {
+                        ctx,
+                        item: &GenericItem::Entity { name: machine.0.clone(), quality: machine.1 },
+                        size: 32.0,
+                    });
+                }
+                // if ui.button("更改").clicked() {}
+            });
+            ui.separator();
+            for module in &mut self.modules {
+                ui.vertical(|ui| {
+                    ui.label("插件");
+                    ui.add(GenericIcon {
+                        ctx,
+                        item: &GenericItem::Item { name: module.0.clone(), quality: module.1 },
+                        size: 32.0,
+                    });
+                });
+            }
+            let flows = self.as_flow(&ctx);
+            for flow in &flows {
+                let mut keys = flow.keys().collect::<Vec<&GenericItem>>();
+                sort_generic_items(&mut keys, &ctx);
+                ui.horizontal_top(|ui| {
+                    for key in keys {
+                        let amount = flow.get(key).unwrap();
+
+                        ui.vertical(|ui| {
+                            ui.add_sized(
+                                [35.0, 35.0],
+                                GenericIcon {
+                                    ctx,
+                                    item: key,
+                                    size: 32.0,
+                                },
+                            );
+                            ui.add_sized(
+                                [35.0, 10.0],
+                                CompactNumberLabel::new(*amount).with_format("{}"),
+                            );
+                        });
+                    }
+                });
+            }
+            ui.separator();
+            ui.label("1");
+        });
+    }
 }
