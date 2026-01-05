@@ -171,7 +171,8 @@ impl Context {
                 .get("beacon")
                 .cloned()
                 .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
-        ).unwrap();
+        )
+        .unwrap();
         let mut qualities = vec![];
         let mut cur_quality = value.get("quality").unwrap().get("normal").unwrap();
         while !cur_quality.is_null() {
@@ -355,7 +356,11 @@ impl Context {
                                 let info_json_content = serde_json::from_str::<Value>(
                                     &std::fs::read_to_string(&info_json_path).ok()?,
                                 );
-                                let version = info_json_content.unwrap().get("version")?.as_str()?.to_owned();
+                                let version = info_json_content
+                                    .unwrap()
+                                    .get("version")?
+                                    .as_str()?
+                                    .to_owned();
                                 let new_version = version_string_to_triplet(&version);
                                 let old_version = version_string_to_triplet(
                                     mod_info["version"].as_str().unwrap_or("0.0.0"),

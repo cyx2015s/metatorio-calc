@@ -1,4 +1,5 @@
 pub mod context;
+pub mod energy;
 pub mod entity;
 pub mod fluid;
 pub mod item;
@@ -6,4 +7,3 @@ pub mod mining;
 pub mod module;
 pub mod quality;
 pub mod recipe;
-pub mod energy;

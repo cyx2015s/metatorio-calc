@@ -2,7 +2,8 @@ use serde::Deserialize;
 
 use crate::factorio::{
     common::{
-        Effect, EffectTypeLimitation, EnergyAmount, EnergySource, IdWithQuality, PrototypeBase, option_as_vec_or_empty
+        Effect, EffectTypeLimitation, EnergyAmount, EnergySource, IdWithQuality, PrototypeBase,
+        option_as_vec_or_empty,
     },
     model::{context::Context, entity::EntityPrototype},
 };
@@ -39,7 +40,7 @@ pub struct BeaconPrototype {
     pub quality_affects_module_slots: bool,
     #[serde(default)]
     pub allowed_effects: Option<EffectTypeLimitation>,
-    
+
     #[serde(deserialize_with = "option_as_vec_or_empty")]
     #[serde(default)]
     pub allowed_module_categories: Option<Vec<String>>,

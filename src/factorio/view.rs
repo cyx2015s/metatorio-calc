@@ -164,10 +164,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                         .unwrap_or("无".to_string())
                 )),
             GenericItem::ItemFuel { category } => ui
-                .add_sized(
-                    [self.size, self.size],
-                    egui::Label::new(format!("物燃")),
-                )
+                .add_sized([self.size, self.size], egui::Label::new(format!("物燃")))
                 .on_hover_text(format!("类别: {}", category,)),
             GenericItem::RocketPayloadWeight => {
                 ui.add_sized([self.size, self.size], egui::Label::new("重量"))
@@ -211,7 +208,10 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
             RecipeResult::Fluid(f) => (1, &self.ctx.reverse_fluid_order.as_ref().unwrap()[&f.name]),
         });
         ui.vertical(|ui| {
-            ui.label(self.ctx.get_display_name("recipe", &self.prototype.base.name));
+            ui.label(
+                self.ctx
+                    .get_display_name("recipe", &self.prototype.base.name),
+            );
             ui.add(CompactNumberLabel::new(self.prototype.energy_required).with_format("{}s"));
             ui.horizontal_top(|ui| {
                 if ingredients.is_empty() {
@@ -470,9 +470,8 @@ impl egui::Widget for ItemSelector<'_> {
                                 });
                             })
                         } else {
-                            button.on_hover_text(
-                                self.ctx.get_display_name(self.item_type, item_name),
-                            )
+                            button
+                                .on_hover_text(self.ctx.get_display_name(self.item_type, item_name))
                         };
 
                         if button.clicked() {
@@ -510,7 +509,7 @@ impl PlannerView {
                 }),
                 Box::new(RecipeConfig {
                     recipe: ("copper-cable".into()),
-                    
+
                     machine: Some(("assembling-machine-2".into())),
                     modules: vec![("productivity-module-3".into())],
                     extra_effects: Effect::default(),
@@ -519,7 +518,7 @@ impl PlannerView {
                 Box::new(RecipeConfig {
                     recipe: ("transport-belt".into()),
                     machine: Some(("assembling-machine-2".into())),
-                    modules: vec![("speed-module-3".into()),("speed-module-3".into())],
+                    modules: vec![("speed-module-3".into()), ("speed-module-3".into())],
                     extra_effects: Effect::default(),
                     instance_fuel: None,
                 }),
@@ -539,8 +538,6 @@ impl PlannerView {
         });
         ret
     }
-    
-    
 }
 
 impl Default for PlannerView {

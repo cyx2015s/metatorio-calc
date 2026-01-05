@@ -10,7 +10,6 @@ use serde_json::{Value, from_value};
 
 use crate::factorio::model::context::{Context, GenericItem};
 
-
 pub type Dict<T> = HashMap<String, T>;
 pub type Emissions = Dict<f64>;
 pub type OrderInfo = Vec<(String, Vec<(String, Vec<String>)>)>;
@@ -37,7 +36,6 @@ impl From<(String, u8)> for IdWithQuality {
     }
 }
 
-
 pub fn update_map<T, N>(map: &mut HashMap<T, N>, key: T, value: N)
 where
     T: Hash + Eq,
@@ -49,9 +47,18 @@ where
 
 pub fn version_string_to_triplet(version: &str) -> (u16, u16, u16) {
     let parts: Vec<&str> = version.split('.').collect();
-    let major = parts.get(0).and_then(|s| s.parse::<u16>().ok()).unwrap_or(0);
-    let minor = parts.get(1).and_then(|s| s.parse::<u16>().ok()).unwrap_or(0);
-    let patch = parts.get(2).and_then(|s| s.parse::<u16>().ok()).unwrap_or(0);
+    let major = parts
+        .get(0)
+        .and_then(|s| s.parse::<u16>().ok())
+        .unwrap_or(0);
+    let minor = parts
+        .get(1)
+        .and_then(|s| s.parse::<u16>().ok())
+        .unwrap_or(0);
+    let patch = parts
+        .get(2)
+        .and_then(|s| s.parse::<u16>().ok())
+        .unwrap_or(0);
     (major, minor, patch)
 }
 
@@ -566,68 +573,55 @@ pub fn get_reverse_order_info(order_info: &OrderInfo) -> ReverseOrderInfo {
 }
 
 pub fn sort_generic_items(keys: &mut Vec<&GenericItem>, ctx: &Context) {
-        keys.sort_by_key(|g| match g {
-            GenericItem::Item { name, quality } => (
-                *quality as usize,
-                ctx
-                    .reverse_item_order
-                    .as_ref()
-                    .unwrap()
-                    .get(name)
-                    .cloned()
-                    .unwrap(),
-                String::new(),
-            ),
-            GenericItem::Fluid { name, temperature } => (
-                0x100usize,
-                ctx
-                    .reverse_fluid_order
-                    .as_ref()
-                    .unwrap()
-                    .get(name)
-                    .cloned()
-                    .unwrap(),
-                String::new(),
-            ),
-            GenericItem::Entity { name, quality } => (
-                0x200usize + *quality as usize,
-                ctx
-                    .reverse_entity_order
-                    .as_ref()
-                    .unwrap()
-                    .get(name)
-                    .cloned()
-                    .unwrap(),
-                String::new(),
-            ),
-            GenericItem::Heat => (0x300usize, (0usize, 0usize, 0usize), String::new()),
-            GenericItem::Electricity => {
-                (0x400usize, (0usize, 0usize, 0usize), String::new())
-            }
-            GenericItem::FluidHeat { filter } => (
-                0x500usize,
-                (0usize, 0usize, 0usize),
-                filter.clone().unwrap_or_default(),
-            ),
-            GenericItem::FluidFuel { filter } => (
-                0x600usize,
-                (0usize, 0usize, 0usize),
-                filter.clone().unwrap_or_default(),
-            ),
-            GenericItem::ItemFuel { category } => {
-                (0x700usize, (0usize, 0usize, 0usize), category.clone())
-            }
-            GenericItem::RocketPayloadWeight => {
-                (0x800usize, (0usize, 0usize, 0usize), String::new())
-            }
-            GenericItem::RocketPayloadStack => {
-                (0x900usize, (0usize, 0usize, 0usize), String::new())
-            }
-            GenericItem::Pollution { name } => {
-                (0xa00usize, (0usize, 0usize, 0usize), name.clone())
-            }
-            GenericItem::Custom { name } => {
-                (0xb00usize, (0usize, 0usize, 0usize), name.clone())
-            }
-        });
-    }
+    keys.sort_by_key(|g| match g {
+        GenericItem::Item { name, quality } => (
+            *quality as usize,
+            ctx.reverse_item_order
+                .as_ref()
+                .unwrap()
+                .get(name)
+                .cloned()
+                .unwrap(),
+            String::new(),
+        ),
+        GenericItem::Fluid { name, temperature } => (
+            0x100usize,
+            ctx.reverse_fluid_order
+                .as_ref()
+                .unwrap()
+                .get(name)
+                .cloned()
+                .unwrap(),
+            String::new(),
+        ),
+        GenericItem::Entity { name, quality } => (
+            0x200usize + *quality as usize,
+            ctx.reverse_entity_order
+                .as_ref()
+                .unwrap()
+                .get(name)
+                .cloned()
+                .unwrap(),
+            String::new(),
+        ),
+        GenericItem::Heat => (0x300usize, (0usize, 0usize, 0usize), String::new()),
+        GenericItem::Electricity => (0x400usize, (0usize, 0usize, 0usize), String::new()),
+        GenericItem::FluidHeat { filter } => (
+            0x500usize,
+            (0usize, 0usize, 0usize),
+            filter.clone().unwrap_or_default(),
+        ),
+        GenericItem::FluidFuel { filter } => (
+            0x600usize,
+            (0usize, 0usize, 0usize),
+            filter.clone().unwrap_or_default(),
+        ),
+        GenericItem::ItemFuel { category } => {
+            (0x700usize, (0usize, 0usize, 0usize), category.clone())
+        }
+        GenericItem::RocketPayloadWeight => (0x800usize, (0usize, 0usize, 0usize), String::new()),
+        GenericItem::RocketPayloadStack => (0x900usize, (0usize, 0usize, 0usize), String::new()),
+        GenericItem::Pollution { name } => (0xa00usize, (0usize, 0usize, 0usize), name.clone()),
+        GenericItem::Custom { name } => (0xb00usize, (0usize, 0usize, 0usize), name.clone()),
+    });
+}

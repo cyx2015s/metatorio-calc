@@ -3,12 +3,19 @@ use std::collections::HashMap;
 use serde::Deserialize;
 
 use crate::{
-    concept::AsFlow, factorio::{
+    concept::AsFlow,
+    factorio::{
         common::{
-            Effect, EffectReceiver, EffectTypeLimitation, EnergyAmount, EnergySource, HasPrototypeBase, IdWithQuality, PrototypeBase, option_as_vec_or_empty, update_map
+            Effect, EffectReceiver, EffectTypeLimitation, EnergyAmount, EnergySource,
+            HasPrototypeBase, IdWithQuality, PrototypeBase, option_as_vec_or_empty, update_map,
         },
-        model::{context::{Context, GenericItem}, energy::energy_source_as_flow, entity::EntityPrototype, recipe::RecipeResult},
-    }
+        model::{
+            context::{Context, GenericItem},
+            energy::energy_source_as_flow,
+            entity::EntityPrototype,
+            recipe::RecipeResult,
+        },
+    },
 };
 
 #[derive(Debug, Clone, Deserialize)]
@@ -90,7 +97,7 @@ impl AsFlow for MiningConfig {
     type ItemIdentType = GenericItem;
     type ContextType = Context;
 
-    fn as_flow(&self, ctx: &Self::ContextType) -> Vec<HashMap<Self::ItemIdentType, f64>> {
+    fn as_flow(&self, ctx: &Self::ContextType) -> HashMap<Self::ItemIdentType, f64> {
         let mut map = HashMap::new();
 
         let mut module_effects = Effect::default();
@@ -98,11 +105,11 @@ impl AsFlow for MiningConfig {
         let mut base_speed = 1.0;
         let resource_ore = match ctx.resources.get(&self.resource.0) {
             Some(r) => r,
-            None => return vec![map],
+            None => return map,
         };
 
         if resource_ore.base.minable.is_none() {
-            return vec![];
+            return map;
         }
 
         let mining_property = resource_ore.base.minable.as_ref().unwrap();
@@ -139,9 +146,15 @@ impl AsFlow for MiningConfig {
             let energy_related_flow = energy_source_as_flow(
                 ctx,
                 &miner.energy_source,
-                miner.energy_usage.as_ref().expect("MiningDrillPrototype 中的机器没有能量消耗"),
+                miner
+                    .energy_usage
+                    .as_ref()
+                    .expect("MiningDrillPrototype 中的机器没有能量消耗"),
                 &module_effects,
-                &self.instance_fuel.as_ref().map(|id_with_quality| (id_with_quality.0.clone(), id_with_quality.1 as i32)),
+                &self
+                    .instance_fuel
+                    .as_ref()
+                    .map(|id_with_quality| (id_with_quality.0.clone(), id_with_quality.1 as i32)),
                 &mut base_speed,
             );
             for (key, value) in energy_related_flow.into_iter() {
@@ -221,7 +234,7 @@ impl AsFlow for MiningConfig {
                     * (1.0 + module_effects.productivity),
             );
         }
-        vec![map]
+        map
     }
 }
 
@@ -244,6 +257,6 @@ fn test_mining_normalized() {
     let result = mining_config.as_flow(&ctx);
     println!("Mining Result: {:?}", result);
     let result_with_location =
-        crate::factorio::model::context::make_located_generic_recipe(result[0].clone(), 42);
+        crate::factorio::model::context::make_located_generic_recipe(result.clone(), 42);
     println!("Mining Result with Location: {:?}", result_with_location);
 }

@@ -5,7 +5,7 @@ use crate::Subview;
 pub trait AsFlow: Send {
     type ItemIdentType: ItemIdent;
     type ContextType;
-    fn as_flow(&self, ctx: &Self::ContextType) -> Vec<HashMap<Self::ItemIdentType, f64>>;
+    fn as_flow(&self, ctx: &Self::ContextType) -> HashMap<Self::ItemIdentType, f64>;
 }
 
 pub trait ItemIdent: Debug + Clone + Eq + Hash + PartialEq {}
