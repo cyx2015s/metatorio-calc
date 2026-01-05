@@ -25,7 +25,7 @@ pub struct PlannerView {
     pub factories: Vec<FactoryView>,
     pub selected_factory: usize,
 
-    pub item_selector_storage: ItemSelectorStorage,
+    pub selected_item: Option<String>,
 }
 
 #[derive(Debug)]
@@ -393,19 +393,26 @@ pub struct ItemSelectorStorage {
     pub selected_item: Option<String>,
 }
 
+
 pub struct ItemSelector<'a> {
     pub ctx: &'a Context,
     pub item_type: &'a String,
     pub order_info: &'a OrderInfo,
-    pub storage: &'a mut ItemSelectorStorage,
+    pub selected_item: &'a mut Option<String>,
 }
 
+
 impl egui::Widget for ItemSelector<'_> {
-    fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+    fn ui(mut self, ui: &mut egui::Ui) -> egui::Response {
         let mut response = ui.response().clone();
         let available_space = ui.available_size();
         let group_count = (available_space.x as usize / 70).max(4);
         let item_count = (available_space.x as usize / 35).max(8);
+        let id = ui.id();
+        let mut storage: ItemSelectorStorage = ui.memory(move |mem| {
+            mem.data.get_temp::<ItemSelectorStorage>(id).unwrap_or_default()
+        });      
+          
         egui::Grid::new("ItemGroupGrid")
             .min_row_height(64.0)
             .min_col_width(64.0)
@@ -432,10 +439,10 @@ impl egui::Widget for ItemSelector<'_> {
                         .interact(Sense::click())
                         .clicked()
                     {
-                        self.storage.group = i;
-                        self.storage.subgroup = 0;
-                        self.storage.index = 0;
-                        self.storage.selected_item = None;
+                        storage.group = i;
+                        storage.subgroup = 0;
+                        storage.index = 0;
+                        storage.selected_item = None;
                     }
                 }
             });
@@ -447,7 +454,7 @@ impl egui::Widget for ItemSelector<'_> {
             .spacing(Vec2 { x: 0.0, y: 0.0 })
             .striped(true)
             .show(ui, |ui| {
-                for (j, subgroup) in self.order_info[self.storage.group].1.iter().enumerate() {
+                for (j, subgroup) in self.order_info[storage.group].1.iter().enumerate() {
                     for (k, item_name) in subgroup.1.iter().enumerate() {
                         if (k % item_count) == 0 && k != 0 {
                             ui.end_row();
@@ -475,17 +482,21 @@ impl egui::Widget for ItemSelector<'_> {
                         };
 
                         if button.clicked() {
-                            self.storage.subgroup = j;
-                            self.storage.index = k;
-                            self.storage.selected_item = Some(item_name.clone());
+                            storage.subgroup = j;
+                            storage.index = k;
+                            storage.selected_item = Some(item_name.clone());
+                            self.selected_item.replace(item_name.clone());
                         }
-                        if self.storage.subgroup == j && self.storage.index == k {
+                        if storage.subgroup == j && storage.index == k {
                             response = response.union(button);
                         }
                     }
                     ui.end_row();
                 }
             });
+        ui.memory_mut(move |mem| {
+            mem.data.insert_temp::<ItemSelectorStorage>(id, storage.clone());
+        });
         response
     }
 }
@@ -496,7 +507,7 @@ impl PlannerView {
             ctx: ctx.build_order_info(),
             factories: Vec::new(),
             selected_factory: 0,
-            item_selector_storage: ItemSelectorStorage::default(),
+            selected_item: None,
         };
         ret.factories.push(FactoryView {
             recipe_configs: vec![
@@ -556,6 +567,9 @@ impl Subview for PlannerView {
                 ui.label(format!("模组 {} 版本 {}", mod_name, mod_version));
             }
         });
+        ui.label(format!("选中物品: {}", 
+            self.selected_item.as_ref().map(|name| self.ctx.get_display_name("recipe", name)).unwrap_or("无".to_string())
+        ));
         ui.horizontal(|ui| {
             for i in 0..self.factories.len() {
                 if ui
@@ -580,7 +594,7 @@ impl Subview for PlannerView {
                     ctx: &self.ctx,
                     item_type: &"recipe".to_string(),
                     order_info: self.ctx.recipe_order.as_ref().unwrap(),
-                    storage: &mut self.item_selector_storage,
+                    selected_item: &mut self.selected_item,
                 });
             });
     }
