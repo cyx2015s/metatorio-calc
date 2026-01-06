@@ -1,5 +1,6 @@
 use std::{collections::HashMap, fmt::Debug};
 
+use egui::{Id, LayerId, PopupAnchor};
 use serde::Deserialize;
 
 use crate::{
@@ -14,8 +15,9 @@ use crate::{
             context::{Context, GenericItem},
             energy::energy_source_as_flow,
             entity::EntityPrototype,
+            module::ModuleConfig,
         },
-        view::{GenericIcon, Icon, PrototypeHover},
+        view::{GenericIcon, Icon, ItemSelector, PrototypeHover},
     },
 };
 
@@ -388,7 +390,7 @@ impl HasPrototypeBase for CraftingMachinePrototype {
 pub struct RecipeConfig {
     pub recipe: IdWithQuality,
     pub machine: Option<IdWithQuality>,
-    pub modules: Vec<IdWithQuality>,
+    pub module_config: ModuleConfig,
     pub extra_effects: Effect,
 
     /// 当机器的能源类型为Fluid、Burner时，用统一的抽象能源还是用具体的燃料
@@ -403,7 +405,7 @@ impl Default for RecipeConfig {
         RecipeConfig {
             recipe: ("recipe-unknown".to_string(), 0).into(),
             machine: None,
-            modules: vec![],
+            module_config: ModuleConfig::new(),
             extra_effects: Effect::default(),
             instance_fuel: None,
         }
@@ -416,7 +418,7 @@ impl AsFlow for RecipeConfig {
     fn as_flow(&self, ctx: &Context) -> HashMap<Self::ItemIdentType, f64> {
         let mut map = HashMap::new();
 
-        let mut module_effects = Effect::default();
+        let mut module_effects = self.module_config.get_effect(&ctx);
 
         let mut base_speed = 1.0;
 
@@ -425,14 +427,6 @@ impl AsFlow for RecipeConfig {
                 .get(&machine.0)
                 .expect("RecipeConfig 中的机器在上下文中不存在")
         });
-
-        for module in self.modules.iter() {
-            let module_prototype = ctx
-                .modules
-                .get(&module.0) // 暂时忽略品质
-                .expect("RecipeConfig 中的插件在上下文中不存在");
-            module_effects = module_effects + module_prototype.effect.clone();
-        }
 
         module_effects = module_effects + self.extra_effects.clone();
         module_effects = module_effects.clamped();
@@ -549,7 +543,7 @@ fn test_recipe_normalized() {
     let recipe_config = RecipeConfig {
         recipe: ("iron-gear-wheel".to_string(), 0).into(),
         machine: Some(("assembling-machine-1".to_string(), 0).into()),
-        modules: vec![],
+        module_config: ModuleConfig::new(),
         extra_effects: Effect::default(),
         instance_fuel: Some(("nutrients".to_string(), 0).into()),
     };
@@ -563,51 +557,74 @@ fn test_recipe_normalized() {
 impl AsFlowEditor for RecipeConfig {
     fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &Self::ContextType) {
         ui.horizontal(|ui| {
-            ui.add_sized(
-                [35.0, 50.0],
-                Icon {
-                    ctx,
-                    type_name: &"recipe".to_string(),
-                    item_name: &self.recipe.0,
-                    quality: self.recipe.1,
-                    size: 32.0,
-                },
-            )
-            .on_hover_ui(|ui| {
-                ui.add(PrototypeHover {
-                    ctx,
-                    prototype: ctx.recipes.get(&self.recipe.0).unwrap(),
-                });
+            ui.vertical(|ui| {
+                ui.label("配方");
+
+                let recipe_button = ui
+                    .add_sized(
+                        [35.0, 35.0],
+                        Icon {
+                            ctx,
+                            type_name: &"recipe".to_string(),
+                            item_name: &self.recipe.0,
+                            quality: self.recipe.1,
+                            size: 32.0,
+                        },
+                    )
+                    .interact(egui::Sense::click())
+                    .on_hover_ui(|ui| {
+                        ui.add(PrototypeHover {
+                            ctx,
+                            prototype: ctx.recipes.get(&self.recipe.0).unwrap(),
+                        });
+                    });
+                let mut recipe = None;
+                egui::Popup::menu(&recipe_button)
+                    // .open_memory(Some(egui::SetOpenCommand::Toggle))
+                    // .close_behavior(egui::PopupCloseBehavior::CloseOnClick)
+                    .show(|ui| {
+                        egui::ScrollArea::both().
+                        
+                        show(ui, |ui| {
+                            ui.add(ItemSelector {
+                                ctx,
+                                item_type: &"recipe".to_string(),
+                                order_info: &ctx.recipe_order.as_ref().unwrap(),
+                                selected_item: &mut recipe,
+                            });
+                        })
+                        ;
+                    });
+                if let Some(selected) = recipe {
+                    self.recipe = (selected, self.recipe.1).into();
+                } else {
+
+                }
             });
             ui.separator();
             ui.vertical(|ui| {
                 if let Some(machine) = &mut self.machine {
                     ui.label("机器");
-                    ui.add(GenericIcon {
-                        ctx,
-                        item: &GenericItem::Entity {
-                            name: machine.0.clone(),
-                            quality: machine.1,
+                    ui.add_sized(
+                        [35.0, 35.0],
+                        GenericIcon {
+                            ctx,
+                            item: &GenericItem::Entity {
+                                name: machine.0.clone(),
+                                quality: machine.1,
+                            },
+                            size: 32.0,
                         },
-                        size: 32.0,
-                    });
+                    );
                 }
-                // if ui.button("更改").clicked() {}
             });
+
             ui.separator();
-            for module in &mut self.modules {
-                ui.vertical(|ui| {
-                    ui.label("插件");
-                    ui.add(GenericIcon {
-                        ctx,
-                        item: &GenericItem::Item {
-                            name: module.0.clone(),
-                            quality: module.1,
-                        },
-                        size: 32.0,
-                    });
-                });
-            }
+            // TODO: 插件编辑界面
+            ui.label("TODO");
+            ui.label("插件编辑");
+            ui.separator();
+
             let flow = self.as_flow(&ctx);
 
             let mut keys = flow.keys().collect::<Vec<&GenericItem>>();
@@ -632,9 +649,6 @@ impl AsFlowEditor for RecipeConfig {
                     });
                 }
             });
-
-            ui.separator();
-            ui.label("1");
         });
     }
 }

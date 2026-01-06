@@ -57,14 +57,14 @@ pub enum BeaconCounter {
     SameType,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ModuleConfig {
     pub modules: Vec<IdWithQuality>,
     pub beacons: Vec<BeaconConfig>,
     pub extra_effects: Effect,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct BeaconConfig {
     pub modules: Vec<IdWithQuality>,
     pub count: usize,

@@ -7,9 +7,7 @@ use crate::{
         common::{Effect, HasPrototypeBase, OrderInfo, sort_generic_items},
         format::CompactNumberLabel,
         model::{
-            context::{Context, GenericItem},
-            mining::MiningConfig,
-            recipe::{RecipeConfig, RecipeIngredient, RecipePrototype, RecipeResult},
+            context::{Context, GenericItem}, mining::MiningConfig, module::ModuleConfig, recipe::{RecipeConfig, RecipeIngredient, RecipePrototype, RecipeResult}
         },
     },
 };
@@ -60,6 +58,7 @@ impl<'a> egui::Widget for Icon<'a> {
             .show(ui, |ui| {
                 let icon = ui.add(
                     self.image()
+                    
                         .max_size(Vec2 {
                             x: self.size,
                             y: self.size,
@@ -514,7 +513,7 @@ impl PlannerView {
                 Box::new(RecipeConfig {
                     recipe: ("iron-gear-wheel".to_string()).into(),
                     machine: Some(("assembling-machine-1".to_string()).into()),
-                    modules: vec![],
+                    module_config: ModuleConfig::default(),
                     extra_effects: Effect::default(),
                     instance_fuel: None,
                 }),
@@ -522,14 +521,14 @@ impl PlannerView {
                     recipe: ("copper-cable".into()),
 
                     machine: Some(("assembling-machine-2".into())),
-                    modules: vec![("productivity-module-3".into())],
+                    module_config: ModuleConfig::default(),
                     extra_effects: Effect::default(),
                     instance_fuel: None,
                 }),
                 Box::new(RecipeConfig {
                     recipe: ("transport-belt".into()),
                     machine: Some(("assembling-machine-2".into())),
-                    modules: vec![("speed-module-3".into()), ("speed-module-3".into())],
+                    module_config: ModuleConfig::default(),
                     extra_effects: Effect::default(),
                     instance_fuel: None,
                 }),
