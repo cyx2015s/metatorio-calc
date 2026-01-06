@@ -47,8 +47,7 @@ where
 
 pub fn version_string_to_triplet(version: &str) -> (u16, u16, u16) {
     let parts: Vec<&str> = version.split('.').collect();
-    let major = parts
-        .get(0)
+    let major = parts.first()
         .and_then(|s| s.parse::<u16>().ok())
         .unwrap_or(0);
     let minor = parts
@@ -584,7 +583,7 @@ pub fn sort_generic_items(keys: &mut Vec<&GenericItem>, ctx: &Context) {
                 .unwrap(),
             String::new(),
         ),
-        GenericItem::Fluid { name, temperature } => (
+        GenericItem::Fluid { name, temperature: _ } => (
             0x100usize,
             ctx.reverse_fluid_order
                 .as_ref()

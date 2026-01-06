@@ -294,7 +294,7 @@ impl Context {
             if mod_info.get("enabled")?.as_bool()? {
                 log::info!("处理模组信息 {:?}", mod_info);
                 let mod_name = mod_info.get("name")?.as_str()?.to_string();
-                if let None = mod_info.get("version") {
+                if mod_info.get("version").is_none() {
                     log::info!("模组 {} 缺少版本信息，尝试补全", &mod_name);
 
                     if ["base", "space-age", "quality", "elevated-rails"]
@@ -347,7 +347,7 @@ impl Context {
                                         &mod_info["version"]
                                     );
                                 }
-                            } else if &file_name == &mod_name {
+                            } else if file_name == mod_name {
                                 let info_json_path = entry.path().join("info.json");
                                 if !info_json_path.exists() {
                                     // 垃圾文件夹，不用管

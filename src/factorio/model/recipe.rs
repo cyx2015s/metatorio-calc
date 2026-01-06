@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt::Debug};
 
-use egui::{Id, LayerId, PopupAnchor};
+use egui::Popup;
 use serde::Deserialize;
 
 use crate::{
@@ -418,7 +418,7 @@ impl AsFlow for RecipeConfig {
     fn as_flow(&self, ctx: &Context) -> HashMap<Self::ItemIdentType, f64> {
         let mut map = HashMap::new();
 
-        let mut module_effects = self.module_config.get_effect(&ctx);
+        let mut module_effects = self.module_config.get_effect(ctx);
 
         let mut base_speed = 1.0;
 
@@ -579,26 +579,29 @@ impl AsFlowEditor for RecipeConfig {
                         });
                     });
                 let mut recipe = None;
-                egui::Popup::menu(&recipe_button)
-                    // .open_memory(Some(egui::SetOpenCommand::Toggle))
-                    // .close_behavior(egui::PopupCloseBehavior::CloseOnClick)
-                    .show(|ui| {
-                        egui::ScrollArea::both().
-                        
-                        show(ui, |ui| {
+                let mut popup = egui::Popup::menu(&recipe_button)
+                    .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
+                    .width(700.0)
+                    .open_memory(None);
+                let popup_id = popup.get_id();
+                if recipe_button.clicked() {
+                    Popup::open_id(ui.ctx(), popup_id);
+                }
+                popup.show(|ui| {
+                    egui::ScrollArea::vertical()
+                        .max_width(f32::INFINITY)
+                        .show(ui, |ui| {
                             ui.add(ItemSelector {
                                 ctx,
                                 item_type: &"recipe".to_string(),
-                                order_info: &ctx.recipe_order.as_ref().unwrap(),
+                                order_info: ctx.recipe_order.as_ref().unwrap(),
                                 selected_item: &mut recipe,
                             });
-                        })
-                        ;
-                    });
+                        });
+                });
                 if let Some(selected) = recipe {
                     self.recipe = (selected, self.recipe.1).into();
-                } else {
-
+                    Popup::close_id(ui.ctx(), popup_id);
                 }
             });
             ui.separator();
@@ -625,10 +628,10 @@ impl AsFlowEditor for RecipeConfig {
             ui.label("插件编辑");
             ui.separator();
 
-            let flow = self.as_flow(&ctx);
+            let flow = self.as_flow(ctx);
 
             let mut keys = flow.keys().collect::<Vec<&GenericItem>>();
-            sort_generic_items(&mut keys, &ctx);
+            sort_generic_items(&mut keys, ctx);
             ui.horizontal_top(|ui| {
                 for key in keys {
                     let amount = flow.get(key).unwrap();

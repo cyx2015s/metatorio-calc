@@ -2,12 +2,12 @@ use egui::{ScrollArea, Sense, Vec2};
 
 use crate::{
     Subview,
-    concept::{AsFlow, AsFlowEditor, GameContextCreatorView},
+    concept::{AsFlowEditor, GameContextCreatorView},
     factorio::{
-        common::{Effect, HasPrototypeBase, OrderInfo, sort_generic_items},
+        common::{Effect, HasPrototypeBase, OrderInfo},
         format::CompactNumberLabel,
         model::{
-            context::{Context, GenericItem}, mining::MiningConfig, module::ModuleConfig, recipe::{RecipeConfig, RecipeIngredient, RecipePrototype, RecipeResult}
+            context::{Context, GenericItem}, module::ModuleConfig, recipe::{RecipeConfig, RecipeIngredient, RecipePrototype, RecipeResult}
         },
     },
 };
@@ -110,7 +110,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                     },
                 )
                 .on_hover_text(format!("物品: {}", self.ctx.get_display_name("item", name))),
-            GenericItem::Fluid { name, temperature } => ui
+            GenericItem::Fluid { name, temperature: _ } => ui
                 .add_sized(
                     [self.size, self.size],
                     Icon {
@@ -163,7 +163,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                         .unwrap_or("无".to_string())
                 )),
             GenericItem::ItemFuel { category } => ui
-                .add_sized([self.size, self.size], egui::Label::new(format!("物燃")))
+                .add_sized([self.size, self.size], egui::Label::new("物燃".to_string()))
                 .on_hover_text(format!("类别: {}", category,)),
             GenericItem::RocketPayloadWeight => {
                 ui.add_sized([self.size, self.size], egui::Label::new("重量"))
@@ -225,7 +225,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
                             for ingredient in ingredients.iter() {
                                 match ingredient {
                                     RecipeIngredient::Item(i) => {
-                                        let icon = ui.add(Icon {
+                                        let _icon = ui.add(Icon {
                                             ctx: self.ctx,
                                             type_name: &"item".to_string(),
                                             item_name: &i.name,
@@ -239,7 +239,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
                                         });
                                     }
                                     RecipeIngredient::Fluid(f) => {
-                                        let icon = ui.add(Icon {
+                                        let _icon = ui.add(Icon {
                                             ctx: self.ctx,
                                             type_name: &"fluid".to_string(),
                                             item_name: &f.name,
@@ -306,7 +306,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
                             for result in results.iter() {
                                 match result {
                                     RecipeResult::Item(i) => {
-                                        let icon = ui.add(Icon {
+                                        let _icon = ui.add(Icon {
                                             ctx: self.ctx,
                                             type_name: &"item".to_string(),
                                             item_name: &i.name,
@@ -330,7 +330,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
                                         });
                                     }
                                     RecipeResult::Fluid(f) => {
-                                        let icon = ui.add(Icon {
+                                        let _icon = ui.add(Icon {
                                             ctx: self.ctx,
                                             type_name: &"fluid".to_string(),
                                             item_name: &f.name,
@@ -402,7 +402,7 @@ pub struct ItemSelector<'a> {
 
 
 impl egui::Widget for ItemSelector<'_> {
-    fn ui(mut self, ui: &mut egui::Ui) -> egui::Response {
+    fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         let mut response = ui.response().clone();
         let available_space = ui.available_size();
         let group_count = (available_space.x as usize / 70).max(4);
@@ -520,14 +520,14 @@ impl PlannerView {
                 Box::new(RecipeConfig {
                     recipe: ("copper-cable".into()),
 
-                    machine: Some(("assembling-machine-2".into())),
+                    machine: Some("assembling-machine-2".into() ),
                     module_config: ModuleConfig::default(),
                     extra_effects: Effect::default(),
                     instance_fuel: None,
                 }),
                 Box::new(RecipeConfig {
                     recipe: ("transport-belt".into()),
-                    machine: Some(("assembling-machine-2".into())),
+                    machine: Some("assembling-machine-2".into() ),
                     module_config: ModuleConfig::default(),
                     extra_effects: Effect::default(),
                     instance_fuel: None,

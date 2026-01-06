@@ -46,7 +46,7 @@ impl MainPage {
 }
 
 impl eframe::App for MainPage {
-    fn update(&mut self, ctx: &eframe::egui::Context, frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
         egui::SidePanel::left(Id::new("LeftPanel"))
             .width_range(200.0..=280.0)
             .show(ctx, |ui| {

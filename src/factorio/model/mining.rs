@@ -118,7 +118,7 @@ impl AsFlow for MiningConfig {
             None => None,
         };
 
-        base_speed = base_speed / mining_property.mining_time;
+        base_speed /= mining_property.mining_time;
 
         let mut resource_drain_rate = 1.0;
 
