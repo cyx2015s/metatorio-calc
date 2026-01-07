@@ -124,6 +124,7 @@ fn main() {
             viewport: egui::ViewportBuilder::default()
                 .with_maximized(true)
                 .with_min_inner_size(Vec2 { x: 800.0, y: 600.0 }),
+                renderer: Renderer::Wgpu,
             ..Default::default()
         },
         Box::new(|cc| {

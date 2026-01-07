@@ -10,7 +10,7 @@ use crate::{
             Dict, Effect, EffectReceiver, EffectTypeLimitation, EnergyAmount, EnergySource,
             HasPrototypeBase, IdWithQuality, PrototypeBase, sort_generic_items, update_map,
         },
-        format::CompactNumberLabel,
+        format::SignedCompactLabel,
         model::{
             context::{Context, GenericItem},
             energy::energy_source_as_flow,
@@ -581,15 +581,17 @@ impl AsFlowEditor for RecipeConfig {
                 let mut recipe = None;
                 let mut popup = egui::Popup::menu(&recipe_button)
                     .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
-                    .width(700.0)
+                    // .width(700.0)
                     .open_memory(None);
                 let popup_id = popup.get_id();
                 if recipe_button.clicked() {
                     Popup::open_id(ui.ctx(), popup_id);
                 }
                 popup.show(|ui| {
+                    ui.label("选择配方");
                     egui::ScrollArea::vertical()
                         .max_width(f32::INFINITY)
+                        .auto_shrink(false)
                         .show(ui, |ui| {
                             ui.add(ItemSelector {
                                 ctx,
@@ -638,16 +640,16 @@ impl AsFlowEditor for RecipeConfig {
 
                     ui.vertical(|ui| {
                         ui.add_sized(
+                            [35.0, 15.0],
+                            SignedCompactLabel::new(*amount),
+                        );
+                        ui.add_sized(
                             [35.0, 35.0],
                             GenericIcon {
                                 ctx,
                                 item: key,
                                 size: 32.0,
                             },
-                        );
-                        ui.add_sized(
-                            [35.0, 10.0],
-                            CompactNumberLabel::new(*amount).with_format("{}"),
                         );
                     });
                 }
