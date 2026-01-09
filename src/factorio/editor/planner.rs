@@ -2,9 +2,12 @@ use egui::ScrollArea;
 
 use crate::{
     concept::{AsFlowEditor, AsFlowSource, ContextBound, EditorView},
-    factorio::model::{
-        context::{FactorioContext, GenericItem},
-        recipe::RecipeConfigSource,
+    factorio::{
+        editor::reverse_selector::ReverseItemSelector,
+        model::{
+            context::{FactorioContext, GenericItem},
+            recipe::RecipeConfigSource,
+        },
     },
 };
 
@@ -52,6 +55,18 @@ impl EditorView for FactoryInstance {
                 ui.separator();
             }
         });
+
+        let mut temp: Option<String> = None;
+        ui.add(ReverseItemSelector {
+            ctx,
+            type_name: &"recipe".to_string(),
+            reverse_order: ctx.reverse_recipe_order.as_ref().unwrap(),
+            filter: Box::new(|s, ctx| ctx.get_display_name("recipe", s).contains("铁")),
+            selected_item: &mut temp,
+        });
+        if let Some(selected_recipe) = temp {
+            log::debug!("Selected recipe: {}", selected_recipe);
+        }
     }
 }
 

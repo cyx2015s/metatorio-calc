@@ -105,9 +105,9 @@ fn add_font(ctx: &egui::Context) {
 
 fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
-        .format_module_path(false)
+        .format_module_path(true)
         .format_target(false)
-        .format_file(true)
+        .format_file(false)
         .format_line_number(true)
         .init();
     log::info!("应用程序启动");
