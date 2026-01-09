@@ -1,18 +1,9 @@
-use egui::{ScrollArea, Sense, Vec2};
+use egui::Vec2;
 
-use crate::{
-    Subview,
-    concept::{AsFlowEditor, GameContextCreatorView},
-    factorio::{
-        common::{Effect, HasPrototypeBase, OrderInfo},
-        format::{CompactLabel, SignedCompactLabel},
-        model::{
-            context::{Context, GenericItem},
-            module::ModuleConfig,
-            recipe::{RecipeConfig, RecipeIngredient, RecipePrototype, RecipeResult},
-        },
-    },
-};
+use crate::factorio::{
+        common::HasPrototypeBase,
+        model::context::{Context, GenericItem},
+    };
 
 
 #[derive(Debug)]

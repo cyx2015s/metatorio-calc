@@ -279,9 +279,9 @@ impl Context {
             return None;
         }
 
-        if mod_path.is_some() {
+        if let Some(mod_path) = mod_path {
             // 把 mod-list.json 也复制过来
-            let mod_list_json_path = mod_path.unwrap().join("mod-list.json");
+            let mod_list_json_path = mod_path.join("mod-list.json");
             if mod_list_json_path.exists() {
                 std::fs::copy(&mod_list_json_path, &tmp_mod_list_json_path).ok()?;
             }

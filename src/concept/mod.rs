@@ -8,6 +8,14 @@ pub trait AsFlow: Send {
     fn as_flow(&self, ctx: &Self::ContextType) -> HashMap<Self::ItemIdentType, f64>;
 }
 
+pub type AsFlowSender<S> = std::sync::mpsc::Sender<
+    Box<
+        dyn AsFlowEditor<
+                ItemIdentType = <<S as AsFlowSource>::RecipeType as AsFlow>::ItemIdentType,
+                ContextType = <<S as AsFlowSource>::RecipeType as AsFlow>::ContextType,
+            >,
+    >,
+>;
 pub trait ItemIdent: Debug + Clone + Eq + Hash + PartialEq {}
 
 pub trait GameContextCreatorView: Subview {
@@ -28,13 +36,6 @@ pub trait AsFlowSource: Subview {
     /// 传递创建的配方信息
     fn set_recipe_like_sender(
         &mut self,
-        sender: std::sync::mpsc::Sender<
-            Box<
-                dyn AsFlowEditor<
-                        ItemIdentType = <Self::RecipeType as AsFlow>::ItemIdentType,
-                        ContextType = <Self::RecipeType as AsFlow>::ContextType,
-                    >,
-            >,
-        >,
+        sender: AsFlowSender<Self>,
     );
 }

@@ -576,7 +576,7 @@ impl AsFlowEditor for RecipeConfig {
                         });
                     });
                 let mut recipe = None;
-                let mut popup = egui::Popup::menu(&recipe_button)
+                let popup = egui::Popup::menu(&recipe_button)
                     .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
                     // .width(700.0)
                     .open_memory(None);
