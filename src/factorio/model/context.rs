@@ -39,7 +39,7 @@ pub const LOCALE_CATEGORIES: &[&str] = &[
 ];
 
 #[derive(Debug, Clone, Default)]
-pub struct Context {
+pub struct FactorioContext {
     /// 模组信息
     pub mods: Vec<(String, String)>,
     /// 图标路径
@@ -87,7 +87,7 @@ pub struct Context {
     pub miners: Dict<MiningDrillPrototype>,
 }
 
-impl Context {
+impl FactorioContext {
     pub fn load(value: &Value) -> Self {
         let groups: Dict<PrototypeBase> = serde_json::from_value(
             value
@@ -184,7 +184,7 @@ impl Context {
                 .get(quality.next.as_ref().unwrap_or(&"".to_string()))
                 .unwrap_or(&Value::Null)
         }
-        Context {
+        FactorioContext {
             qualities,
             groups,
             subgroups,
@@ -207,7 +207,7 @@ impl Context {
         executable_path: &std::path::Path,
         mod_path: Option<&std::path::Path>,
         lang: Option<&str>,
-    ) -> Option<Context> {
+    ) -> Option<FactorioContext> {
         // 此步较为复杂，调用方应该异步执行
         // 1. 在这个软件的数据文件夹下（秉持绿色原理，创建在这个项目程序本身的同级文件里），创建一个config.cfg
         let lang = lang.unwrap_or("zh-CN");
@@ -387,10 +387,10 @@ impl Context {
             serde_json::to_string_pretty(&mod_list_json_content).ok()?,
         )
         .ok()?;
-        Context::load_from_tmp_no_dump()
+        FactorioContext::load_from_tmp_no_dump()
     }
 
-    pub fn load_from_tmp_no_dump() -> Option<Context> {
+    pub fn load_from_tmp_no_dump() -> Option<FactorioContext> {
         let self_path = match env::current_dir() {
             Ok(path) => path,
             _ => {
@@ -399,8 +399,9 @@ impl Context {
         };
         let raw_path = self_path.join("tmp/script-output/data-raw-dump.json");
         let icon_path = self_path.join("tmp/script-output/");
-        let mut ctx =
-            Context::load(&(serde_json::from_str(&std::fs::read_to_string(&raw_path).ok()?)).ok()?);
+        let mut ctx = FactorioContext::load(
+            &(serde_json::from_str(&std::fs::read_to_string(&raw_path).ok()?)).ok()?,
+        );
         ctx.icon_path = Some(icon_path);
         for locale_category in LOCALE_CATEGORIES.iter() {
             let locale_path =
@@ -587,7 +588,7 @@ pub fn make_located_generic_recipe(
 fn test_load_context() {
     let data = include_str!("../../../assets/data-raw-dump.json");
     let value: Value = serde_json::from_str(&data).unwrap();
-    let ctx = Context::load(&value);
+    let ctx = FactorioContext::load(&value);
     assert!(ctx.items.contains_key("iron-plate"));
     assert!(ctx.entities.contains_key("stone-furnace"));
     assert!(ctx.fluids.contains_key("water"));

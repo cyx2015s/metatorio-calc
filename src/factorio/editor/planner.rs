@@ -1,29 +1,53 @@
 use egui::ScrollArea;
 
 use crate::{
-    concept::AsFlowEditor,
-    factorio::model::context::{Context, GenericItem},
+    concept::{AsFlowEditor, AsFlowSource, ContextBound, EditorView},
+    factorio::model::{
+        context::{FactorioContext, GenericItem},
+        recipe::RecipeConfigSource,
+    },
 };
 
 pub struct FactoryInstance {
     pub name: String,
-    pub recipe_configs:
-        Vec<Box<dyn AsFlowEditor<ItemIdentType = GenericItem, ContextType = Context>>>,
+    pub flow_sources:
+        Vec<Box<dyn AsFlowSource<ContextType = FactorioContext, ItemIdentType = GenericItem>>>,
+    pub flow_configs:
+        Vec<Box<dyn AsFlowEditor<ItemIdentType = GenericItem, ContextType = FactorioContext>>>,
+    pub flow_receiver: std::sync::mpsc::Receiver<
+        Box<dyn AsFlowEditor<ItemIdentType = GenericItem, ContextType = FactorioContext>>,
+    >,
+    pub flow_sender: std::sync::mpsc::Sender<
+        Box<dyn AsFlowEditor<ItemIdentType = GenericItem, ContextType = FactorioContext>>,
+    >,
 }
 
 pub struct PlannerView {
     /// 存储游戏逻辑数据的全部上下文
-    pub ctx: Context,
+    pub ctx: FactorioContext,
 
     pub factories: Vec<FactoryInstance>,
     pub selected_factory: usize,
 }
 
-impl FactoryInstance {
-    pub fn view(&mut self, ui: &mut egui::Ui, ctx: &Context) {
+impl ContextBound for FactoryInstance {
+    type ContextType = FactorioContext;
+    type ItemIdentType = GenericItem;
+}
+
+impl EditorView for FactoryInstance {
+    fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &FactorioContext) {
         ui.heading(&self.name);
+        for recipe_source in &mut self.flow_sources {
+            recipe_source.editor_view(ui, ctx);
+            ui.separator();
+        }
+        while let Ok(flow_source) = self.flow_receiver.try_recv() {
+            self.flow_configs.push(flow_source);
+        }
+
         ScrollArea::vertical().show(ui, |ui| {
-            for recipe_config in &mut self.recipe_configs {
+            for recipe_config in &mut self.flow_configs {
                 recipe_config.editor_view(ui, ctx);
                 ui.separator();
             }
@@ -32,8 +56,8 @@ impl FactoryInstance {
 }
 
 use crate::{
-    Subview,
     concept::GameContextCreatorView,
+    concept::Subview,
     factorio::{
         common::Effect,
         model::{module::ModuleConfig, recipe::RecipeConfig},
@@ -41,7 +65,9 @@ use crate::{
 };
 
 impl PlannerView {
-    pub fn new(ctx: Context) -> Self {
+    pub fn new(ctx: FactorioContext) -> Self {
+        let (tx, rx) = std::sync::mpsc::channel();
+
         let mut ret = PlannerView {
             ctx: ctx.build_order_info(),
             factories: Vec::new(),
@@ -49,7 +75,13 @@ impl PlannerView {
         };
         ret.factories.push(FactoryInstance {
             name: "工厂".to_string(),
-            recipe_configs: vec![
+            flow_sources: vec![Box::new(RecipeConfigSource {
+                editing: RecipeConfig::default(),
+                sender: tx.clone(),
+            })],
+            flow_sender: tx,
+            flow_receiver: rx,
+            flow_configs: vec![
                 Box::new(RecipeConfig {
                     recipe: ("iron-gear-wheel".to_string()).into(),
                     machine: Some(("assembling-machine-1".to_string()).into()),
@@ -92,7 +124,7 @@ impl PlannerView {
 
 impl Default for PlannerView {
     fn default() -> Self {
-        Self::new(Context::load(
+        Self::new(FactorioContext::load(
             &(serde_json::from_str(include_str!("../../../assets/data-raw-dump.json"))).unwrap(),
         ))
     }
@@ -119,7 +151,7 @@ impl Subview for PlannerView {
         if self.selected_factory >= self.factories.len() {
             ui.label("没有工厂。");
         } else {
-            self.factories[self.selected_factory].view(ui, &self.ctx);
+            self.factories[self.selected_factory].editor_view(ui, &self.ctx);
         }
     }
 }
@@ -183,9 +215,11 @@ impl Subview for FactorioContextCreatorView {
                 let mod_path = self.mod_path.clone().map(|p| p.as_path().to_owned());
                 let sender = sender.clone();
                 self.thread = Some(std::thread::spawn(move || {
-                    if let Some(ctx) =
-                        Context::load_from_executable_path(&exe_path, mod_path.as_deref(), None)
-                    {
+                    if let Some(ctx) = FactorioContext::load_from_executable_path(
+                        &exe_path,
+                        mod_path.as_deref(),
+                        None,
+                    ) {
                         sender
                             .send(Box::new(PlannerView::new(ctx)))
                             .expect("Failed to send subview");
@@ -203,7 +237,7 @@ impl Subview for FactorioContextCreatorView {
             {
                 let sender = sender.clone();
                 self.thread = Some(std::thread::spawn(move || {
-                    if let Some(ctx) = Context::load_from_tmp_no_dump() {
+                    if let Some(ctx) = FactorioContext::load_from_tmp_no_dump() {
                         sender
                             .send(Box::new(PlannerView::new(ctx)))
                             .expect("Failed to send subview");

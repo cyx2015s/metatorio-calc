@@ -4,7 +4,7 @@ use egui::{
     epaint::text::{FontInsert, InsertFontFamily},
 };
 
-use crate::concept::GameContextCreatorView;
+use crate::concept::*;
 
 pub mod concept;
 pub mod factorio;
@@ -15,13 +15,6 @@ pub struct MainPage {
     pub subview_sender: std::sync::mpsc::Sender<Box<dyn Subview>>,
     pub subviews: Vec<(String, Box<dyn Subview>)>,
     pub selected: usize,
-}
-
-pub trait Subview: Send {
-    fn view(&mut self, ui: &mut egui::Ui);
-    fn should_close(&self) -> bool {
-        false
-    }
 }
 
 impl MainPage {
@@ -124,7 +117,7 @@ fn main() {
             viewport: egui::ViewportBuilder::default()
                 .with_maximized(true)
                 .with_min_inner_size(Vec2 { x: 800.0, y: 600.0 }),
-                renderer: Renderer::Wgpu,
+            renderer: Renderer::Wgpu,
             ..Default::default()
         },
         Box::new(|cc| {

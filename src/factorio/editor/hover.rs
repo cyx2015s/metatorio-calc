@@ -1,13 +1,20 @@
 use egui::Vec2;
 
-use crate::factorio::{common::HasPrototypeBase, editor::icon::Icon, format::{CompactLabel, SignedCompactLabel}, model::{context::Context, recipe::{RecipeIngredient, RecipePrototype, RecipeResult}}};
+use crate::factorio::{
+    common::HasPrototypeBase,
+    editor::icon::Icon,
+    format::{CompactLabel, SignedCompactLabel},
+    model::{
+        context::FactorioContext,
+        recipe::{RecipeIngredient, RecipePrototype, RecipeResult},
+    },
+};
 
 #[derive(Debug, Clone)]
 pub struct PrototypeHover<'a, T: HasPrototypeBase> {
-    pub ctx: &'a Context,
+    pub ctx: &'a FactorioContext,
     pub prototype: &'a T,
 }
-
 
 impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {

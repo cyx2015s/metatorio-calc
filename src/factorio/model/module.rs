@@ -5,7 +5,7 @@ use crate::factorio::{
         Effect, EffectTypeLimitation, EnergyAmount, EnergySource, IdWithQuality, PrototypeBase,
         option_as_vec_or_empty,
     },
-    model::{context::Context, entity::EntityPrototype},
+    model::{context::FactorioContext, entity::EntityPrototype},
 };
 
 #[derive(Debug, Clone, Deserialize)]
@@ -79,7 +79,7 @@ impl ModuleConfig {
         }
     }
 
-    pub fn get_effect(&self, ctx: &Context) -> Effect {
+    pub fn get_effect(&self, ctx: &FactorioContext) -> Effect {
         let mut total_effect = self.extra_effects.clone();
         for module in &self.modules {
             if let Some(module_proto) = ctx.modules.get(&module.0) {

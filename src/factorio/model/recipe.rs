@@ -1,20 +1,24 @@
 use std::{collections::HashMap, fmt::Debug};
 
-use egui::Popup;
+use egui::{Label, Popup};
 use serde::Deserialize;
 
 use crate::{
-    concept::{AsFlow, AsFlowEditor},
+    concept::*,
     factorio::{
-        common::{
-            Dict, Effect, EffectReceiver, EffectTypeLimitation, EnergyAmount, EnergySource,
-            HasPrototypeBase, IdWithQuality, PrototypeBase, sort_generic_items, update_map,
-        }, editor::{hover::PrototypeHover, icon::{GenericIcon, Icon}, selector::ItemSelector}, format::SignedCompactLabel, model::{
-            context::{Context, GenericItem},
+        common::*,
+        editor::{
+            hover::PrototypeHover,
+            icon::{GenericIcon, Icon},
+            selector::ItemSelector,
+        },
+        format::SignedCompactLabel,
+        model::{
+            context::{FactorioContext, GenericItem},
             energy::energy_source_as_flow,
             entity::EntityPrototype,
             module::ModuleConfig,
-        }
+        },
     },
 };
 
@@ -397,6 +401,11 @@ pub struct RecipeConfig {
     pub instance_fuel: Option<(String, i32)>,
 }
 
+impl ContextBound for RecipeConfig {
+    type ContextType = FactorioContext;
+    type ItemIdentType = GenericItem;
+}
+
 impl Default for RecipeConfig {
     fn default() -> Self {
         RecipeConfig {
@@ -410,9 +419,7 @@ impl Default for RecipeConfig {
 }
 
 impl AsFlow for RecipeConfig {
-    type ItemIdentType = GenericItem;
-    type ContextType = Context;
-    fn as_flow(&self, ctx: &Context) -> HashMap<Self::ItemIdentType, f64> {
+    fn as_flow(&self, ctx: &FactorioContext) -> HashMap<Self::ItemIdentType, f64> {
         let mut map = HashMap::new();
 
         let mut module_effects = self.module_config.get_effect(ctx);
@@ -534,7 +541,7 @@ impl AsFlow for RecipeConfig {
 
 #[test]
 fn test_recipe_normalized() {
-    let ctx = Context::load(
+    let ctx = FactorioContext::load(
         &serde_json::from_str(include_str!("../../../assets/data-raw-dump.json")).unwrap(),
     );
     let recipe_config = RecipeConfig {
@@ -551,7 +558,7 @@ fn test_recipe_normalized() {
     println!("Recipe Result with Location: {:?}", result_with_location);
 }
 
-impl AsFlowEditor for RecipeConfig {
+impl EditorView for RecipeConfig {
     fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &Self::ContextType) {
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
@@ -618,6 +625,9 @@ impl AsFlowEditor for RecipeConfig {
                             size: 32.0,
                         },
                     );
+                } else {
+                    ui.label("机器");
+                    ui.add_sized([35.0, 35.0], Label::new("空"));
                 }
             });
 
@@ -636,10 +646,7 @@ impl AsFlowEditor for RecipeConfig {
                     let amount = flow.get(key).unwrap();
 
                     ui.vertical(|ui| {
-                        ui.add_sized(
-                            [35.0, 15.0],
-                            SignedCompactLabel::new(*amount),
-                        );
+                        ui.add_sized([35.0, 15.0], SignedCompactLabel::new(*amount));
                         ui.add_sized(
                             [35.0, 35.0],
                             GenericIcon {
@@ -652,5 +659,35 @@ impl AsFlowEditor for RecipeConfig {
                 }
             });
         });
+    }
+}
+
+impl AsFlowEditor for RecipeConfig {}
+
+pub struct RecipeConfigSource {
+    pub editing: RecipeConfig,
+    pub sender: AsFlowSender<GenericItem, FactorioContext>,
+}
+
+impl ContextBound for RecipeConfigSource {
+    type ContextType = FactorioContext;
+    type ItemIdentType = GenericItem;
+}
+
+impl AsFlowSource for RecipeConfigSource {
+    fn set_as_flow_sender(&mut self, sender: AsFlowSender<GenericItem, FactorioContext>) {
+        self.sender = sender;
+    }
+}
+
+impl EditorView for RecipeConfigSource {
+    fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &Self::ContextType) {
+        if ui.button("[测试] 添加随机配方").clicked() {
+            let mut new_config = self.editing.clone();
+            new_config.recipe = ("iron-gear-wheel".to_string(), 0).into();
+            self.sender
+                .send(Box::new(new_config))
+                .expect("RecipeConfigSource 发送配方失败");
+        }
     }
 }

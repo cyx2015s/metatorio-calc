@@ -1,6 +1,10 @@
 use egui::{Sense, Vec2};
 
-use crate::factorio::{common::OrderInfo, editor::{hover::PrototypeHover, icon::Icon}, model::context::Context};
+use crate::factorio::{
+    common::OrderInfo,
+    editor::{hover::PrototypeHover, icon::Icon},
+    model::context::FactorioContext,
+};
 
 #[derive(Debug, Clone, Default)]
 pub struct ItemSelectorStorage {
@@ -12,7 +16,7 @@ pub struct ItemSelectorStorage {
 }
 
 pub struct ItemSelector<'a> {
-    pub ctx: &'a Context,
+    pub ctx: &'a FactorioContext,
     pub item_type: &'a String,
     pub order_info: &'a OrderInfo,
     pub selected_item: &'a mut Option<String>,

@@ -3,14 +3,14 @@ use std::collections::HashMap;
 use serde::Deserialize;
 
 use crate::{
-    concept::AsFlow,
+    concept::{AsFlow, ContextBound},
     factorio::{
         common::{
             Effect, EffectReceiver, EffectTypeLimitation, EnergyAmount, EnergySource,
             HasPrototypeBase, IdWithQuality, PrototypeBase, option_as_vec_or_empty, update_map,
         },
         model::{
-            context::{Context, GenericItem},
+            context::{FactorioContext, GenericItem},
             energy::energy_source_as_flow,
             entity::EntityPrototype,
             recipe::RecipeResult,
@@ -93,10 +93,12 @@ impl Default for MiningConfig {
     }
 }
 
-impl AsFlow for MiningConfig {
+impl ContextBound for MiningConfig {
+    type ContextType = FactorioContext;
     type ItemIdentType = GenericItem;
-    type ContextType = Context;
+}
 
+impl AsFlow for MiningConfig {
     fn as_flow(&self, ctx: &Self::ContextType) -> HashMap<Self::ItemIdentType, f64> {
         let mut map = HashMap::new();
 
@@ -240,7 +242,7 @@ impl AsFlow for MiningConfig {
 
 #[test]
 fn test_mining_normalized() {
-    let ctx = Context::load(
+    let ctx = FactorioContext::load(
         &serde_json::from_str(include_str!("../../../assets/data-raw-dump.json")).unwrap(),
     );
     let mining_config = MiningConfig {

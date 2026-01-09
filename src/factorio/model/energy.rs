@@ -2,11 +2,11 @@ use std::collections::HashMap;
 
 use crate::factorio::{
     common::{Effect, EnergyAmount, EnergySource, update_map},
-    model::context::{Context, GenericItem},
+    model::context::{FactorioContext, GenericItem},
 };
 
 pub fn energy_source_as_flow(
-    ctx: &Context,
+    ctx: &FactorioContext,
     energy_source: &EnergySource,
     energy_usage: &EnergyAmount,
     effects: &Effect,

@@ -8,7 +8,7 @@ use std::{
 use serde::{Deserialize, Deserializer, de::DeserializeOwned};
 use serde_json::{Value, from_value};
 
-use crate::factorio::model::context::{Context, GenericItem};
+use crate::factorio::model::context::{FactorioContext, GenericItem};
 
 pub type Dict<T> = HashMap<String, T>;
 pub type Emissions = Dict<f64>;
@@ -47,7 +47,8 @@ where
 
 pub fn version_string_to_triplet(version: &str) -> (u16, u16, u16) {
     let parts: Vec<&str> = version.split('.').collect();
-    let major = parts.first()
+    let major = parts
+        .first()
         .and_then(|s| s.parse::<u16>().ok())
         .unwrap_or(0);
     let minor = parts
@@ -571,7 +572,7 @@ pub fn get_reverse_order_info(order_info: &OrderInfo) -> ReverseOrderInfo {
     reverse_map
 }
 
-pub fn sort_generic_items(keys: &mut Vec<&GenericItem>, ctx: &Context) {
+pub fn sort_generic_items(keys: &mut Vec<&GenericItem>, ctx: &FactorioContext) {
     keys.sort_by_key(|g| match g {
         GenericItem::Item { name, quality } => (
             *quality as usize,
@@ -583,7 +584,10 @@ pub fn sort_generic_items(keys: &mut Vec<&GenericItem>, ctx: &Context) {
                 .unwrap(),
             String::new(),
         ),
-        GenericItem::Fluid { name, temperature: _ } => (
+        GenericItem::Fluid {
+            name,
+            temperature: _,
+        } => (
             0x100usize,
             ctx.reverse_fluid_order
                 .as_ref()

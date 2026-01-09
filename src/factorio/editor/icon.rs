@@ -1,15 +1,14 @@
 use egui::Vec2;
 
 use crate::factorio::{
-        common::HasPrototypeBase,
-        model::context::{Context, GenericItem},
-    };
-
+    common::HasPrototypeBase,
+    model::context::{FactorioContext, GenericItem},
+};
 
 #[derive(Debug)]
 
 pub struct Icon<'a> {
-    pub ctx: &'a Context,
+    pub ctx: &'a FactorioContext,
     pub type_name: &'a String,
     pub item_name: &'a String,
     pub quality: u8,
@@ -68,7 +67,7 @@ impl<'a> egui::Widget for Icon<'a> {
 
 #[derive(Debug)]
 pub struct GenericIcon<'a> {
-    pub ctx: &'a Context,
+    pub ctx: &'a FactorioContext,
     pub item: &'a GenericItem,
     pub size: f32,
 }
@@ -165,4 +164,3 @@ impl<'a> egui::Widget for GenericIcon<'a> {
         }
     }
 }
-

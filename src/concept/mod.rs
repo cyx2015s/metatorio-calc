@@ -1,41 +1,48 @@
 use std::{collections::HashMap, fmt::Debug, hash::Hash};
 
-use crate::Subview;
 
-pub trait AsFlow: Send {
-    type ItemIdentType: ItemIdent;
+pub trait Subview: Send {
+    fn view(&mut self, ui: &mut egui::Ui);
+    fn should_close(&self) -> bool {
+        false
+    }
+}
+
+pub trait ContextBound {
     type ContextType;
+    type ItemIdentType: ItemIdent;
+}
+
+pub trait EditorView: Send + ContextBound {
+    fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &Self::ContextType);
+}
+
+pub trait AsFlow: Send + ContextBound {
     fn as_flow(&self, ctx: &Self::ContextType) -> HashMap<Self::ItemIdentType, f64>;
 }
 
-pub type AsFlowSender<S> = std::sync::mpsc::Sender<
+pub type AsFlowSender<I, C> = std::sync::mpsc::Sender<
     Box<
         dyn AsFlowEditor<
-                ItemIdentType = <<S as AsFlowSource>::RecipeType as AsFlow>::ItemIdentType,
-                ContextType = <<S as AsFlowSource>::RecipeType as AsFlow>::ContextType,
+                ItemIdentType = I,
+                ContextType = C,
             >,
     >,
 >;
-pub trait ItemIdent: Debug + Clone + Eq + Hash + PartialEq {}
+
+pub trait ItemIdent: Debug + Clone + Eq + Hash {}
 
 pub trait GameContextCreatorView: Subview {
     fn set_subview_sender(&mut self, sender: std::sync::mpsc::Sender<Box<dyn Subview>>);
 }
 
-pub trait AsFlowEditor: AsFlow {
-    fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &Self::ContextType);
-    /// 传入的为系数，和 as_hash_map 返回值顺序一致
-    /// 默认实现是不处理，不知道暂时也没有关系，但是和展示界面会有关
-    fn notify_solution(&mut self, solution: Vec<f64>) {
-        println!("RecipeLike::notify_solution called with {:?}", solution);
+pub trait AsFlowEditor: AsFlow + EditorView {
+    fn notify_solution(&mut self, solution: f64) {
+        println!("AsFlowEditor::notify_solution called with {:?}", solution);
     }
 }
 
-pub trait AsFlowSource: Subview {
-    type RecipeType: AsFlowEditor;
+pub trait AsFlowSource: EditorView + ContextBound {
     /// 传递创建的配方信息
-    fn set_recipe_like_sender(
-        &mut self,
-        sender: AsFlowSender<Self>,
-    );
+    fn set_as_flow_sender(&mut self, sender: AsFlowSender<Self::ItemIdentType, Self::ContextType>);
 }
