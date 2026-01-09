@@ -31,7 +31,7 @@ impl MainPage {
         let mut ret = Self {
             creators: vec![(
                 "预设：加载异星工厂上下文".to_string(),
-                Box::new(factorio::view::FactorioContextCreatorView::default()),
+                Box::new(factorio::editor::planner::FactorioContextCreatorView::default()),
             )],
             subview_receiver: rx,
             subview_sender: tx,

@@ -9,15 +9,12 @@ use crate::{
         common::{
             Dict, Effect, EffectReceiver, EffectTypeLimitation, EnergyAmount, EnergySource,
             HasPrototypeBase, IdWithQuality, PrototypeBase, sort_generic_items, update_map,
-        },
-        format::SignedCompactLabel,
-        model::{
+        }, editor::{hover::PrototypeHover, icon::{GenericIcon, Icon}, selector::ItemSelector}, format::SignedCompactLabel, model::{
             context::{Context, GenericItem},
             energy::energy_source_as_flow,
             entity::EntityPrototype,
             module::ModuleConfig,
-        },
-        view::{GenericIcon, Icon, ItemSelector, PrototypeHover},
+        }
     },
 };
 
