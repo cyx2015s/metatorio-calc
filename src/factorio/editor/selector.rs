@@ -10,7 +10,6 @@ use crate::factorio::{
 
 #[derive(Debug, Clone, Default)]
 pub struct ItemSelectorStorage {
-    pub current_type: u8,
     pub group: usize,
     pub subgroup: usize,
     pub index: usize,
@@ -62,18 +61,28 @@ impl egui::Widget for ItemSelector<'_> {
                 .get_temp::<ItemSelectorStorage>(id)
                 .unwrap_or_default()
         });
-        let mut render_group: HashMap<&str, bool> = HashMap::new();
-        for group in self.order_info.iter() {
+        let mut filtered_group = HashMap::new();
+        for (i, group) in self.order_info.iter().enumerate() {
             for subgroup in group.1.iter() {
                 for item_name in subgroup.1.iter() {
                     if !(self.filter)(item_name, self.ctx) {
                         continue;
                     }
-                    render_group.insert(&group.0, true);
+                    filtered_group.insert(i, true);
                     break;
                 }
             }
         }
+        if !filtered_group.contains_key(&storage.group) {
+            storage.group = filtered_group.iter().next().map(|(k, _)| *k).unwrap_or(0);
+            storage.subgroup = 0;
+            storage.index = 0;
+            storage.selected_item = None;
+        }
+        if filtered_group.is_empty() {
+            return response;
+        }
+
         egui::Grid::new("ItemGroupGrid")
             .min_row_height(64.0)
             .min_col_width(64.0)
@@ -90,7 +99,7 @@ impl egui::Widget for ItemSelector<'_> {
                     } else {
                         group.0.clone()
                     };
-                    if !render_group.contains_key(&group.0.as_str()) {
+                    if !filtered_group.contains_key(&i) {
                         continue;
                     }
                     idx += 1;

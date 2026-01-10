@@ -1,9 +1,8 @@
 use egui::Vec2;
 
-use crate::factorio::{
-    common::HasPrototypeBase,
-    model::context::{FactorioContext, GenericItem},
-};
+use crate::factorio::
+    model::context::{FactorioContext, GenericItem}
+;
 
 #[derive(Debug)]
 

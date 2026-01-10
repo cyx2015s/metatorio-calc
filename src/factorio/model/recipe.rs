@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt::Debug};
 
-use egui::{Label, Popup};
+use egui::{Label, Popup, Sense};
 use serde::Deserialize;
 
 use crate::{
@@ -585,7 +585,6 @@ impl EditorView for RecipeConfig {
                 let mut recipe = None;
                 let popup = egui::Popup::menu(&recipe_button)
                     .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
-                    // .width(700.0)
                     .open_memory(None);
                 let popup_id = popup.get_id();
                 if recipe_button.clicked() {
@@ -604,7 +603,6 @@ impl EditorView for RecipeConfig {
                                     ctx.recipe_order.as_ref().unwrap(),
                                     &mut recipe,
                                 )
-                                .with_filter(|s, _| s.contains("iron")),
                             );
                         });
                 });
@@ -615,7 +613,7 @@ impl EditorView for RecipeConfig {
             });
             ui.separator();
             ui.vertical(|ui| {
-                if let Some(machine) = &mut self.machine {
+                let entity_button = if let Some(machine) = &mut self.machine {
                     ui.label("机器");
                     ui.add_sized(
                         [35.0, 35.0],
@@ -627,10 +625,58 @@ impl EditorView for RecipeConfig {
                             },
                             size: 32.0,
                         },
-                    );
+                    )
+                    .interact(Sense::click())
                 } else {
                     ui.label("机器");
-                    ui.add_sized([35.0, 35.0], Label::new("空"));
+                    ui.add_sized([35.0, 35.0], Label::new("空"))
+                };
+                let popup = egui::Popup::menu(&entity_button)
+                    .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
+                    .open_memory(None);
+                let popup_id = popup.get_id();
+                if entity_button.clicked() {
+                    Popup::open_id(ui.ctx(), popup_id);
+                }
+                let mut selected_entity: Option<String> = None;
+                popup.show(|ui| {
+                    ui.label("选择机器");
+                    egui::ScrollArea::vertical()
+                        .max_width(f32::INFINITY)
+                        .auto_shrink(false)
+                        .show(ui, |ui| {
+                            ui.add(
+                                ItemSelector::new(
+                                    ctx,
+                                    &"entity".to_string(),
+                                    ctx.recipe_order.as_ref().unwrap(),
+                                    &mut selected_entity,
+                                )
+                                .with_filter(|crafter_name, ctx| {
+                                    let recipe_prototype = ctx.recipes.get(self.recipe.0.as_str()).unwrap();
+                                    if let Some(crafter) = ctx.crafters.get(crafter_name) {
+                                        if crafter.crafting_categories.contains(
+                                            recipe_prototype
+                                                .category
+                                                .as_ref()
+                                                .map_or(&"crafting".to_string(), |v| v),
+                                        ) {
+                                            return true;
+                                        }
+                                        if recipe_prototype.additional_categories.iter().any(|cat| {
+                                            crafter.crafting_categories.contains(cat)
+                                        }) {
+                                            return true;
+                                        }
+                                    }
+                                    return false;
+                                }),
+                            );
+                        });
+                });
+                if let Some(selected) = selected_entity {
+                    self.machine = Some((selected, 0).into());
+                    Popup::close_id(ui.ctx(), popup_id);
                 }
             });
 
