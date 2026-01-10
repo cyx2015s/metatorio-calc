@@ -597,12 +597,15 @@ impl EditorView for RecipeConfig {
                         .max_width(f32::INFINITY)
                         .auto_shrink(false)
                         .show(ui, |ui| {
-                            ui.add(ItemSelector {
-                                ctx,
-                                item_type: &"recipe".to_string(),
-                                order_info: ctx.recipe_order.as_ref().unwrap(),
-                                selected_item: &mut recipe,
-                            });
+                            ui.add(
+                                ItemSelector::new(
+                                    ctx,
+                                    &"recipe".to_string(),
+                                    ctx.recipe_order.as_ref().unwrap(),
+                                    &mut recipe,
+                                )
+                                .with_filter(|s, _| s.contains("iron")),
+                            );
                         });
                 });
                 if let Some(selected) = recipe {
@@ -681,7 +684,7 @@ impl AsFlowSource for RecipeConfigSource {
 }
 
 impl EditorView for RecipeConfigSource {
-    fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &Self::ContextType) {
+    fn editor_view(&mut self, ui: &mut egui::Ui, _ctx: &Self::ContextType) {
         if ui.button("[测试] 添加随机配方").clicked() {
             let mut new_config = self.editing.clone();
             new_config.recipe = ("iron-gear-wheel".to_string(), 0).into();

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use egui::{Sense, Vec2};
 
 use crate::factorio::{
@@ -19,7 +21,33 @@ pub struct ItemSelector<'a> {
     pub ctx: &'a FactorioContext,
     pub item_type: &'a String,
     pub order_info: &'a OrderInfo,
+    pub filter: Box<dyn Fn(&str, &FactorioContext) -> bool + 'a>,
     pub selected_item: &'a mut Option<String>,
+}
+
+impl<'a> ItemSelector<'a> {
+    pub fn new(
+        ctx: &'a FactorioContext,
+        item_type: &'a String,
+        order_info: &'a OrderInfo,
+        selected_item: &'a mut Option<String>,
+    ) -> Self {
+        Self {
+            ctx,
+            item_type,
+            order_info,
+            filter: Box::new(|_, _| true),
+            selected_item,
+        }
+    }
+
+    pub fn with_filter<F>(mut self, filter: F) -> Self
+    where
+        F: Fn(&str, &FactorioContext) -> bool + 'a,
+    {
+        self.filter = Box::new(filter);
+        self
+    }
 }
 
 impl egui::Widget for ItemSelector<'_> {
@@ -34,15 +62,27 @@ impl egui::Widget for ItemSelector<'_> {
                 .get_temp::<ItemSelectorStorage>(id)
                 .unwrap_or_default()
         });
-
+        let mut render_group: HashMap<&str, bool> = HashMap::new();
+        for group in self.order_info.iter() {
+            for subgroup in group.1.iter() {
+                for item_name in subgroup.1.iter() {
+                    if !(self.filter)(item_name, self.ctx) {
+                        continue;
+                    }
+                    render_group.insert(&group.0, true);
+                    break;
+                }
+            }
+        }
         egui::Grid::new("ItemGroupGrid")
             .min_row_height(64.0)
             .min_col_width(64.0)
             .max_col_width(64.0)
             .spacing(Vec2 { x: 6.0, y: 6.0 })
             .show(ui, |ui| {
+                let mut idx = 0;
                 for (i, group) in self.order_info.iter().enumerate() {
-                    if (i % group_count) == 0 && i != 0 {
+                    if (idx % group_count) == 0 && idx != 0 {
                         ui.end_row();
                     }
                     let group_name = if group.0.is_empty() {
@@ -50,6 +90,10 @@ impl egui::Widget for ItemSelector<'_> {
                     } else {
                         group.0.clone()
                     };
+                    if !render_group.contains_key(&group.0.as_str()) {
+                        continue;
+                    }
+                    idx += 1;
                     if ui
                         .add(Icon {
                             ctx: self.ctx,
@@ -77,10 +121,15 @@ impl egui::Widget for ItemSelector<'_> {
             .striped(true)
             .show(ui, |ui| {
                 for (j, subgroup) in self.order_info[storage.group].1.iter().enumerate() {
+                    let mut idx = 0;
                     for (k, item_name) in subgroup.1.iter().enumerate() {
-                        if (k % item_count) == 0 && k != 0 {
+                        if (idx % item_count) == 0 && idx != 0 {
                             ui.end_row();
                         }
+                        if !(self.filter)(item_name, self.ctx) {
+                            continue;
+                        }
+                        idx += 1;
                         let button = ui
                             .add(Icon {
                                 ctx: self.ctx,
@@ -113,7 +162,9 @@ impl egui::Widget for ItemSelector<'_> {
                             response = response.union(button);
                         }
                     }
-                    ui.end_row();
+                    if idx != 0 {
+                        ui.end_row();
+                    }
                 }
             });
         ui.memory_mut(move |mem| {
