@@ -77,18 +77,21 @@ where
         Err(err) => {
             let mut err_string = match err {
                 good_lp::ResolutionError::Unbounded => {
-                    "无界。存在能够无限产生目标物品且不增加消耗的配方组合。".to_string() 
+                    "无界。存在能够无限产生目标物品且不增加消耗的配方组合。".to_string()
                 }
                 good_lp::ResolutionError::Infeasible => {
-                    "无解。不存在能够满足目标物品需求的配方组合。".to_string() 
+                    "无解。不存在能够满足目标物品需求的配方组合。".to_string()
                 }
-                good_lp::ResolutionError::Other(_) => "求解过程中发生未知错误。".to_string() ,
-                good_lp::ResolutionError::Str(s) => format!("求解过程中发生内部错误：{}", s) ,
+                good_lp::ResolutionError::Other(_) => "求解过程中发生未知错误。".to_string(),
+                good_lp::ResolutionError::Str(s) => format!("求解过程中发生内部错误：{}", s),
             };
             if !no_providers.is_empty() {
+                let mut no_providers = no_providers.iter().collect::<Vec<_>>();
+                no_providers.sort_by_key(|x| format!("{:?}", x));
                 err_string += format!("此外，以下物品缺少生产来源：{:?}", no_providers).as_str();
             }
             Err(err_string)
         }
     }
 }
+

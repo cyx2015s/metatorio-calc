@@ -5,7 +5,7 @@ use egui::Vec2;
 use crate::factorio::{
     common::OrderInfo,
     editor::{hover::PrototypeHover, icon::Icon},
-    model::context::FactorioContext,
+    model::{context::FactorioContext, item},
 };
 
 #[derive(Debug, Clone, Default)]
@@ -19,7 +19,6 @@ pub struct ItemSelectorStorage {
 pub struct ItemSelector<'a> {
     pub ctx: &'a FactorioContext,
     pub item_type: &'a String,
-    pub order_info: &'a OrderInfo,
     pub filter: Box<dyn Fn(&str, &FactorioContext) -> bool + 'a>,
     pub selected_item: &'a mut Option<String>,
 }
@@ -28,13 +27,11 @@ impl<'a> ItemSelector<'a> {
     pub fn new(
         ctx: &'a FactorioContext,
         item_type: &'a String,
-        order_info: &'a OrderInfo,
         selected_item: &'a mut Option<String>,
     ) -> Self {
         Self {
             ctx,
             item_type,
-            order_info,
             filter: Box::new(|_, _| true),
             selected_item,
         }
@@ -62,7 +59,7 @@ impl egui::Widget for ItemSelector<'_> {
                 .unwrap_or_default()
         });
         let mut filtered_group = HashMap::new();
-        for (i, group) in self.order_info.iter().enumerate() {
+        for (i, group) in self.ctx.ordered_entries[self.item_type].iter().enumerate() {
             for subgroup in group.1.iter() {
                 for item_name in subgroup.1.iter() {
                     if !(self.filter)(item_name, self.ctx) {
@@ -83,7 +80,7 @@ impl egui::Widget for ItemSelector<'_> {
             ui.label("无满足条件的选项。");
             return response;
         }
-
+        let order_info = &self.ctx.ordered_entries[self.item_type];
         egui::Grid::new("ItemGroupGrid")
             .min_row_height(64.0)
             .min_col_width(64.0)
@@ -91,7 +88,7 @@ impl egui::Widget for ItemSelector<'_> {
             .spacing(Vec2 { x: 6.0, y: 6.0 })
             .show(ui, |ui| {
                 let mut idx = 0;
-                for (i, group) in self.order_info.iter().enumerate() {
+                for (i, group) in self.ctx.ordered_entries[self.item_type].iter().enumerate() {
                     if (idx % group_count) == 0 && idx != 0 {
                         ui.end_row();
                     }
@@ -130,7 +127,7 @@ impl egui::Widget for ItemSelector<'_> {
             .spacing(Vec2 { x: 0.0, y: 0.0 })
             .striped(true)
             .show(ui, |ui| {
-                for (j, subgroup) in self.order_info[storage.group].1.iter().enumerate() {
+                for (j, subgroup) in order_info[storage.group].1.iter().enumerate() {
                     let mut idx = 0;
                     for (k, item_name) in subgroup.1.iter().enumerate() {
                         if (idx % item_count) == 0 && idx != 0 {
@@ -144,7 +141,7 @@ impl egui::Widget for ItemSelector<'_> {
                             .add(Icon {
                                 ctx: self.ctx,
                                 type_name: self.item_type,
-                                item_name,
+                                item_name: &item_name.to_string(),
                                 size: 32.0,
                                 quality: 0,
                             })
@@ -190,10 +187,10 @@ pub fn selector_menu_with_filter(
     ctx: &FactorioContext,
     label_str: &str,
     item_type: &str,
-    order_info: &OrderInfo,
     button: egui::Response,
 ) -> Option<String> {
     let mut selecting_item = None;
+    let order_info = &ctx.ordered_entries[item_type];
     let popup = egui::Popup::menu(&button)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .open_memory(None);
@@ -212,16 +209,20 @@ pub fn selector_menu_with_filter(
             .auto_shrink(false)
             .show(ui, |ui| {
                 ui.add(
-                    ItemSelector::new(ctx, &item_type.to_string(), order_info, &mut selecting_item)
-                        .with_filter(|s, f| {
-                            if filter_string.is_empty() {
-                                return true;
-                            }
-                            s.to_lowercase().contains(&filter_string.to_lowercase())
-                                || f.get_display_name(item_type, s)
-                                    .to_lowercase()
-                                    .contains(&filter_string.to_lowercase())
-                        }),
+                    ItemSelector::new(
+                        ctx,
+                        &item_type.to_string(),
+                        &mut selecting_item,
+                    )
+                    .with_filter(|s, f| {
+                        if filter_string.is_empty() {
+                            return true;
+                        }
+                        s.to_lowercase().contains(&filter_string.to_lowercase())
+                            || f.get_display_name(item_type, s)
+                                .to_lowercase()
+                                .contains(&filter_string.to_lowercase())
+                    }),
                 );
             });
     });

@@ -201,7 +201,6 @@ impl EditorView for FactoryInstance {
                                             ctx,
                                             "选择物品",
                                             "item",
-                                            ctx.item_order.as_ref().unwrap(),
                                             icon,
                                         ) {
                                             *item = GenericItem::Item {
@@ -210,13 +209,15 @@ impl EditorView for FactoryInstance {
                                             };
                                         }
                                     }
-                                    GenericItem::Fluid { name: _, temperature } => {
+                                    GenericItem::Fluid {
+                                        name: _,
+                                        temperature,
+                                    } => {
                                         if let Some(selected) = selector_menu_with_filter(
                                             ui,
                                             ctx,
                                             "选择流体",
                                             "fluid",
-                                            ctx.fluid_order.as_ref().unwrap(),
                                             icon,
                                         ) {
                                             *item = GenericItem::Fluid {
@@ -335,11 +336,12 @@ impl Default for PlannerView {
 impl Subview for PlannerView {
     fn view(&mut self, ui: &mut egui::Ui) {
         ui.heading("工厂规划器");
-        ui.collapsing("模组版本信息", |ui| {
+        ui.button("模组版本信息").on_hover_ui(|ui| {
             for (mod_name, mod_version) in &self.ctx.mods {
                 ui.label(format!("模组 {} 版本 {}", mod_name, mod_version));
             }
         });
+        ui.separator();
         ui.horizontal(|ui| {
             for i in 0..self.factories.len() {
                 if ui
@@ -369,6 +371,7 @@ impl Subview for PlannerView {
                 self.new_factory_name.clear();
             }
         });
+        ui.separator();
         if self.selected_factory >= self.factories.len() {
             ui.label("没有工厂。");
         } else {
@@ -440,10 +443,7 @@ impl Subview for FactorioContextCreatorView {
                 }
             }
             if ui
-                .add_enabled(
-                    can_load_context,
-                    egui::Button::new("加载游戏上下文"),
-                )
+                .add_enabled(can_load_context, egui::Button::new("加载游戏上下文"))
                 .clicked()
                 && let Some(path) = &self.path
                 && let Some(sender) = &self.subview_sender

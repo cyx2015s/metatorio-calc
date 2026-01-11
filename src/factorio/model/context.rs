@@ -1,4 +1,12 @@
-use std::{collections::HashMap, env, fmt::Debug, hash::Hash, io::Write, path::PathBuf, process::{Command, Stdio}};
+use std::{
+    collections::HashMap,
+    env,
+    fmt::Debug,
+    hash::Hash,
+    io::Write,
+    path::PathBuf,
+    process::{Command, Stdio},
+};
 
 use serde_json::Value;
 
@@ -41,21 +49,8 @@ pub struct FactorioContext {
     /// 品质
     pub qualities: Vec<QualityPrototype>,
 
-    /// 物品遍历顺序，按大组、按小组、按自身
-    pub item_order: Option<OrderInfo>,
-    pub reverse_item_order: Option<ReverseOrderInfo>,
-
-    /// 配方遍历顺序，按大组、按小组、按自身
-    pub recipe_order: Option<OrderInfo>,
-    pub reverse_recipe_order: Option<ReverseOrderInfo>,
-
-    /// 流体遍历顺序，按大组、按小组、按自身
-    pub fluid_order: Option<OrderInfo>,
-    pub reverse_fluid_order: Option<ReverseOrderInfo>,
-
-    /// 实体遍历顺序，按大组、按小组、按自身
-    pub entity_order: Option<OrderInfo>,
-    pub reverse_entity_order: Option<ReverseOrderInfo>,
+    pub ordered_entries: HashMap<String, OrderInfo>,
+    pub order_of_entries: HashMap<String, ReverseOrderInfo>,
 
     /// 被转化的物品集合
     pub items: Dict<ItemPrototype>,
@@ -250,7 +245,6 @@ impl FactorioContext {
             } else {
                 vec![]
             })
-            
             .stdout(Stdio::inherit())
             .output()
             .ok()?;
@@ -446,8 +440,14 @@ impl FactorioContext {
     }
 
     pub fn build_order_info(mut self) -> Self {
-        self.item_order = Some(get_order_info(&self.items, &self.groups, &self.subgroups));
-        self.reverse_item_order = Some(get_reverse_order_info(self.item_order.as_ref().unwrap()));
+        self.ordered_entries.insert(
+            "item".to_string(),
+            get_order_info(&self.items, &self.groups, &self.subgroups),
+        );
+        self.order_of_entries.insert(
+            "item".into(),
+            get_reverse_order_info(&self.ordered_entries["item"]),
+        );
         // 没有 order 的recipe 的 order 从 item 派生
         for (recipe_name, recipe) in self.recipes.iter_mut() {
             if recipe.base.order.is_empty() && !recipe.base.hidden {
@@ -496,11 +496,10 @@ impl FactorioContext {
                 }
             }
         }
-        self.recipe_order = Some(get_order_info(&self.recipes, &self.groups, &self.subgroups));
-        self.reverse_recipe_order =
-            Some(get_reverse_order_info(self.recipe_order.as_ref().unwrap()));
-        self.fluid_order = Some(get_order_info(&self.fluids, &self.groups, &self.subgroups));
-        self.reverse_fluid_order = Some(get_reverse_order_info(self.fluid_order.as_ref().unwrap()));
+        self.ordered_entries.insert("recipe".into(), get_order_info(&self.recipes, &self.groups, &self.subgroups));
+        self.order_of_entries.insert("recipe".into(), get_reverse_order_info(&self.ordered_entries["recipe"]));
+        self.ordered_entries.insert("fluid".into(), get_order_info(&self.fluids, &self.groups, &self.subgroups));
+        self.order_of_entries.insert("fluid".into(), get_reverse_order_info(&self.ordered_entries["fluid"]));
         // 没有 order 的 entity，从 item 派生
         for (entity_name, entity) in self.entities.iter_mut() {
             for item in self.items.values() {
@@ -510,13 +509,8 @@ impl FactorioContext {
                 }
             }
         }
-        self.entity_order = Some(get_order_info(
-            &self.entities,
-            &self.groups,
-            &self.subgroups,
-        ));
-        self.reverse_entity_order =
-            Some(get_reverse_order_info(self.entity_order.as_ref().unwrap()));
+        self.ordered_entries.insert("entity".into(), get_order_info(&self.entities, &self.groups, &self.subgroups));
+        self.order_of_entries.insert("entity".into(), get_reverse_order_info(&self.ordered_entries["entity"]));
         self
     }
 }

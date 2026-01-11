@@ -575,12 +575,7 @@ pub fn sort_generic_items(keys: &mut Vec<&GenericItem>, ctx: &FactorioContext) {
     keys.sort_by_key(|g| match g {
         GenericItem::Item { name, quality } => (
             *quality as usize,
-            ctx.reverse_item_order
-                .as_ref()
-                .unwrap()
-                .get(name)
-                .cloned()
-                .unwrap(),
+            ctx.order_of_entries["item"].get(name).cloned().unwrap(),
             String::new(),
         ),
         GenericItem::Fluid {
@@ -588,22 +583,12 @@ pub fn sort_generic_items(keys: &mut Vec<&GenericItem>, ctx: &FactorioContext) {
             temperature: _,
         } => (
             0x100usize,
-            ctx.reverse_fluid_order
-                .as_ref()
-                .unwrap()
-                .get(name)
-                .cloned()
-                .unwrap(),
+            ctx.order_of_entries["fluid"].get(name).cloned().unwrap(),
             String::new(),
         ),
         GenericItem::Entity { name, quality } => (
             0x200usize + *quality as usize,
-            ctx.reverse_entity_order
-                .as_ref()
-                .unwrap()
-                .get(name)
-                .cloned()
-                .unwrap(),
+            ctx.order_of_entries["entity"].get(name).cloned().unwrap(),
             String::new(),
         ),
         GenericItem::Heat => (0x300usize, (0usize, 0usize, 0usize), String::new()),

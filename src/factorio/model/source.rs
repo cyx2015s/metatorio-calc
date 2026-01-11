@@ -141,7 +141,6 @@ impl EditorView for SourceConfig {
                         ctx,
                         "选择物体",
                         "item",
-                        ctx.item_order.as_ref().unwrap(),
                         icon,
                     ) {
                         self.item = GenericItem::Item {
@@ -159,7 +158,6 @@ impl EditorView for SourceConfig {
                         ctx,
                         "选择流体",
                         "fluid",
-                        ctx.fluid_order.as_ref().unwrap(),
                         icon,
                     ) {
                         self.item = GenericItem::Fluid {
@@ -174,7 +172,6 @@ impl EditorView for SourceConfig {
                         ctx,
                         "选择实体",
                         "entity",
-                        ctx.entity_order.as_ref().unwrap(),
                         icon,
                     ) {
                         self.item = GenericItem::Entity {

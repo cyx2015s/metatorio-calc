@@ -619,7 +619,6 @@ impl EditorView for RecipeConfig {
                     ctx,
                     "选择配方",
                     "recipe",
-                    ctx.recipe_order.as_ref().unwrap(),
                     recipe_button,
                 ) {
                     self.recipe = (selected, self.recipe.1).into();
@@ -663,7 +662,6 @@ impl EditorView for RecipeConfig {
                                 ItemSelector::new(
                                     ctx,
                                     &"entity".to_string(),
-                                    ctx.recipe_order.as_ref().unwrap(),
                                     &mut selected_entity,
                                 )
                                 .with_filter(

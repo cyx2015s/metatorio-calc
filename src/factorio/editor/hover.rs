@@ -21,16 +21,16 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
         let mut ingredients: Vec<&RecipeIngredient> = self.prototype.ingredients.iter().collect();
         ingredients.sort_by_key(|ingredient| match ingredient {
             RecipeIngredient::Item(i) => {
-                (0, &self.ctx.reverse_item_order.as_ref().unwrap()[&i.name])
+                (0, &self.ctx.order_of_entries["item"][&i.name])
             }
             RecipeIngredient::Fluid(f) => {
-                (1, &self.ctx.reverse_fluid_order.as_ref().unwrap()[&f.name])
+                (1, &self.ctx.order_of_entries["fluid"][&f.name])
             }
         });
         let mut results: Vec<&RecipeResult> = self.prototype.results.iter().collect();
         results.sort_by_key(|result| match result {
-            RecipeResult::Item(i) => (0, &self.ctx.reverse_item_order.as_ref().unwrap()[&i.name]),
-            RecipeResult::Fluid(f) => (1, &self.ctx.reverse_fluid_order.as_ref().unwrap()[&f.name]),
+            RecipeResult::Item(i) => (0, &self.ctx.order_of_entries["item"][&i.name]),
+            RecipeResult::Fluid(f) => (1, &self.ctx.order_of_entries["fluid"][&f.name]),
         });
         ui.vertical(|ui| {
             ui.label(
