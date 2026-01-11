@@ -8,6 +8,7 @@ use crate::concept::*;
 
 pub mod concept;
 pub mod factorio;
+pub mod solver;
 
 pub struct MainPage {
     pub creators: Vec<(String, Box<dyn GameContextCreatorView>)>,

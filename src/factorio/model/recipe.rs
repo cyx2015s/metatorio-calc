@@ -398,6 +398,7 @@ pub struct RecipeConfig {
     /// 类型为Fluid时，值为(流体名, 流体温度)
     /// 类型为Burner时，值为(物品名, 物品品质)
     pub instance_fuel: Option<(String, i32)>,
+    pub solved_ratio: Option<f64>,
 }
 
 impl ContextBound for RecipeConfig {
@@ -413,6 +414,7 @@ impl Default for RecipeConfig {
             module_config: ModuleConfig::new(),
             extra_effects: Effect::default(),
             instance_fuel: None,
+            solved_ratio: None,
         }
     }
 }
@@ -536,6 +538,36 @@ impl AsFlow for RecipeConfig {
 
         map
     }
+
+    fn cost(&self, ctx: &Self::ContextType) -> f64 {
+        if self.machine.is_some() {
+            let crafter = ctx.crafters.get(&self.machine.as_ref().unwrap().0).unwrap();
+            crafter
+                .base
+                .collision_box
+                .as_ref()
+                .map_or(1.0, |bounding_box| match bounding_box {
+                    BoundingBox::Struct {
+                        left_top,
+                        right_bottom,
+                        orientation: _,
+                    } => {
+                        f64::ceil(right_bottom.1 - left_top.1)
+                            * f64::ceil(right_bottom.0 - left_top.0)
+                    }
+                    BoundingBox::Pair(map_position, map_position1) => {
+                        f64::ceil(map_position1.1 - map_position.1)
+                            * f64::ceil(map_position1.0 - map_position.0)
+                    }
+                    BoundingBox::Triplet(map_position, map_position1, _) => {
+                        f64::ceil(map_position1.1 - map_position.1)
+                            * f64::ceil(map_position1.0 - map_position.0)
+                    }
+                })
+        } else {
+            16.0
+        }
+    }
 }
 
 #[test]
@@ -549,6 +581,7 @@ fn test_recipe_normalized() {
         module_config: ModuleConfig::new(),
         extra_effects: Effect::default(),
         instance_fuel: Some(("nutrients".to_string(), 0).into()),
+        solved_ratio: None,
     };
     let result = recipe_config.as_flow(&ctx);
     println!("Recipe Result: {:?}", result);
@@ -701,7 +734,15 @@ impl EditorView for RecipeConfig {
     }
 }
 
-impl AsFlowEditor for RecipeConfig {}
+impl AsFlowEditor for RecipeConfig {
+    fn notify_solution(&mut self, solution: f64) {
+        self.solved_ratio = Some(solution);
+    }
+
+    fn get_solution(&self) -> Option<f64> {
+        self.solved_ratio
+    }
+}
 
 pub struct RecipeConfigSource {
     pub editing: RecipeConfig,

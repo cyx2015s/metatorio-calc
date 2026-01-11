@@ -1,13 +1,17 @@
+use std::collections::HashMap;
+
 use crate::{
     concept::{AsFlowEditor, AsFlowEditorSource, AsFlowSender, ContextBound, EditorView},
     factorio::{
         editor::{icon::GenericIcon, selector::selector_menu_with_filter},
+        format::CompactLabel,
         model::{
             context::{FactorioContext, GenericItem},
             recipe::RecipeConfigSource,
             source::SourceConfigSource,
         },
     },
+    solver::basic_solver,
 };
 
 pub struct FactoryInstance {
@@ -90,6 +94,31 @@ struct FactoryInstancePanelSplitInfo {
 impl EditorView for FactoryInstance {
     fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &FactorioContext) {
         ui.heading(&self.name);
+        if ui.button("求解").clicked() {
+            // TODO: 触发计算
+            let flows = self
+                .flow_editors
+                .iter()
+                .map(|fe| (fe.as_flow(ctx), fe.cost(ctx)))
+                .enumerate()
+                .collect::<HashMap<usize, (_, _)>>();
+            let target = self
+                .target
+                .iter()
+                .map(|(item, amount)| (item.clone(), *amount))
+                .collect::<HashMap<GenericItem, f64>>();
+            let result = basic_solver(target, flows);
+            match result {
+                Ok(solution) => {
+                    for (idx, value) in solution.iter() {
+                        self.flow_editors[*idx].notify_solution(*value);
+                    }
+                }
+                Err(err) => {
+                    log::error!("求解失败： {}", err);
+                }
+            }
+        }
         let split_ratio = ui.memory(|mem| {
             mem.data
                 .get_temp(ui.id())
@@ -101,6 +130,7 @@ impl EditorView for FactoryInstance {
 
         ui.put(target_panel, |ui: &mut egui::Ui| {
             egui::ScrollArea::vertical()
+                .id_salt(1)
                 .show(ui, |ui| {
                     ui.vertical(|ui| {
                         ui.heading("优化目标");
@@ -188,13 +218,7 @@ impl EditorView for FactoryInstance {
                                 }
                                 ui.vertical(|ui| {
                                     ui.label("目标产量");
-                                    ui.add(
-                                        egui::Slider::new(
-                                            amount,
-                                            -1024.0..=1024.0,
-                                        )
-                                        .suffix("/s"),
-                                    );
+                                    ui.add(egui::DragValue::new(amount).suffix("/s"));
                                 });
                                 if ui.button("删除").clicked() {
                                     delete_target = Some(idx);
@@ -221,6 +245,7 @@ impl EditorView for FactoryInstance {
 
         ui.put(source_panel, |ui: &mut egui::Ui| {
             egui::ScrollArea::vertical()
+                .id_salt(2)
                 .show(ui, |ui| {
                     ui.vertical(|ui| {
                         ui.heading("游戏机制");
@@ -233,19 +258,28 @@ impl EditorView for FactoryInstance {
                 })
                 .inner
         });
-        let mut delte_flow: Option<usize> = None;
+        let mut delete_flow: Option<usize> = None;
         ui.put(flows_panel, |ui: &mut egui::Ui| {
             egui::ScrollArea::vertical()
+                .id_salt(3)
                 .show(ui, |ui| {
                     ui.vertical(|ui| {
                         ui.heading("配方配置");
                         for (i, flow_config) in self.flow_editors.iter_mut().enumerate() {
                             ui.horizontal(|ui| {
-                                if ui.button("删除").clicked() {
-                                    delte_flow = Some(i);
-                                }
+                                ui.vertical(|ui| {
+                                    if ui.button("删除").clicked() {
+                                        delete_flow = Some(i);
+                                    }
+                                    if let Some(solution) = flow_config.get_solution() {
+                                        ui.add(CompactLabel::new(solution));
+                                    } else {
+                                        ui.label("未求解");
+                                    }
+                                });
+
                                 ui.separator();
-                                flow_config.editor_view(ui, ctx);
+                                ui.vertical(|ui| flow_config.editor_view(ui, ctx));
                             });
                             ui.separator();
                         }
@@ -254,7 +288,7 @@ impl EditorView for FactoryInstance {
                 })
                 .inner
         });
-        if let Some(idx) = delte_flow {
+        if let Some(idx) = delete_flow {
             self.flow_editors.remove(idx);
         }
 

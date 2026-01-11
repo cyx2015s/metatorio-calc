@@ -127,7 +127,7 @@ impl<'de> Deserialize<'de> for Color {
 }
 
 #[derive(Debug, Clone)]
-pub struct MapPosition(f64, f64);
+pub struct MapPosition(pub f64, pub f64);
 
 impl<'de> Deserialize<'de> for MapPosition {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>

@@ -8,4 +8,3 @@ pub mod module;
 pub mod quality;
 pub mod recipe;
 pub mod source;
-
