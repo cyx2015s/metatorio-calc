@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, ops::Not};
 
 use crate::{
     concept::{AsFlowEditor, AsFlowEditorSource, AsFlowSender, ContextBound, EditorView},
@@ -424,10 +424,24 @@ impl Subview for FactorioContextCreatorView {
             }
 
             ui.separator();
-
+            let mut can_load_context = true;
+            if self.path.is_none() {
+                ui.label("请选择游戏可执行文件以继续。");
+                can_load_context = false;
+            }
+            if self.thread.is_some() {
+                ui.label("有一个正在加载的游戏上下文了。");
+                can_load_context = false;
+            }
+            if let Some(mod_path) = self.mod_path.as_ref() {
+                if !mod_path.join("mod-list.json").exists() {
+                    ui.label("模组文件夹下未找到 mod-list.json。");
+                    can_load_context = false;
+                }
+            }
             if ui
                 .add_enabled(
-                    self.path.is_some() && self.thread.is_none(),
+                    can_load_context,
                     egui::Button::new("加载游戏上下文"),
                 )
                 .clicked()
