@@ -618,6 +618,10 @@ impl EditorView for RecipeConfig {
                             );
                         });
                 });
+
+                ui.memory_mut(|mem| {
+                    mem.data.insert_temp(id, filter_string);
+                });
                 if let Some(selected) = recipe {
                     self.recipe = (selected, self.recipe.1).into();
                     egui::Popup::close_id(ui.ctx(), popup_id);
@@ -732,7 +736,7 @@ impl EditorView for RecipeConfig {
     }
 }
 
-impl AsFlowSenderSource for RecipeConfig {}
+impl AsFlowEditor for RecipeConfig {}
 
 pub struct RecipeConfigSource {
     pub editing: RecipeConfig,
@@ -744,7 +748,7 @@ impl ContextBound for RecipeConfigSource {
     type ItemIdentType = GenericItem;
 }
 
-impl AsFlowSource for RecipeConfigSource {
+impl AsFlowEditorSource for RecipeConfigSource {
     fn set_as_flow_sender(&mut self, sender: AsFlowSender<GenericItem, FactorioContext>) {
         self.sender = sender;
     }

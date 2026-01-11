@@ -1,22 +1,22 @@
 use crate::{
-    concept::{AsFlowSenderSource, AsFlowSender, AsFlowSource, ContextBound, EditorView},
+    concept::{AsFlowSender, AsFlowEditor, AsFlowEditorSource, ContextBound, EditorView},
     factorio::model::{
         context::{FactorioContext, GenericItem},
-        recipe::RecipeConfigSource,
+        recipe::RecipeConfigSource, source::SourceConfigSource,
     },
 };
 
 pub struct FactoryInstance {
     pub name: String,
     pub flow_editor_sources:
-        Vec<Box<dyn AsFlowSource<ContextType = FactorioContext, ItemIdentType = GenericItem>>>,
+        Vec<Box<dyn AsFlowEditorSource<ContextType = FactorioContext, ItemIdentType = GenericItem>>>,
     pub flow_editors:
-        Vec<Box<dyn AsFlowSenderSource<ItemIdentType = GenericItem, ContextType = FactorioContext>>>,
+        Vec<Box<dyn AsFlowEditor<ItemIdentType = GenericItem, ContextType = FactorioContext>>>,
     pub flow_receiver: std::sync::mpsc::Receiver<
-        Box<dyn AsFlowSenderSource<ItemIdentType = GenericItem, ContextType = FactorioContext>>,
+        Box<dyn AsFlowEditor<ItemIdentType = GenericItem, ContextType = FactorioContext>>,
     >,
     pub flow_sender: std::sync::mpsc::Sender<
-        Box<dyn AsFlowSenderSource<ItemIdentType = GenericItem, ContextType = FactorioContext>>,
+        Box<dyn AsFlowEditor<ItemIdentType = GenericItem, ContextType = FactorioContext>>,
     >,
 }
 impl Default for FactoryInstance {
@@ -47,7 +47,7 @@ impl FactoryInstance {
         F: Fn(
             AsFlowSender<GenericItem, FactorioContext>,
         )
-            -> Box<dyn AsFlowSource<ContextType = FactorioContext, ItemIdentType = GenericItem>>,
+            -> Box<dyn AsFlowEditorSource<ContextType = FactorioContext, ItemIdentType = GenericItem>>,
     >(
         mut self,
         f: F,
@@ -181,6 +181,10 @@ impl Subview for PlannerView {
                         Box::new(RecipeConfigSource {
                             editing: RecipeConfig::default(),
                             sender: s,
+                        })
+                    }).add_flow_source(|s| {
+                        Box::new(SourceConfigSource {
+                            sender: s
                         })
                     }));
                 self.new_factory_name.clear();

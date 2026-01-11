@@ -18,12 +18,17 @@ pub trait EditorView: Send + ContextBound {
 }
 
 pub trait AsFlow: Send + ContextBound {
+    /// 传递物品流信息
     fn as_flow(&self, ctx: &Self::ContextType) -> HashMap<Self::ItemIdentType, f64>;
+    /// 执行成本，默认返回 1.0
+    fn cost(&self, _ctx: &Self::ContextType) -> f64 {
+        1.0
+    }
 }
 
 pub type AsFlowSender<I, C> = std::sync::mpsc::Sender<
     Box<
-        dyn AsFlowSenderSource<
+        dyn AsFlowEditor<
                 ItemIdentType = I,
                 ContextType = C,
             >,
@@ -36,13 +41,13 @@ pub trait GameContextCreatorView: Subview {
     fn set_subview_sender(&mut self, sender: std::sync::mpsc::Sender<Box<dyn Subview>>);
 }
 
-pub trait AsFlowSenderSource: AsFlow + EditorView {
+pub trait AsFlowEditor: AsFlow + EditorView {
     fn notify_solution(&mut self, solution: f64) {
         println!("AsFlowEditor::notify_solution called with {:?}", solution);
     }
 }
 
-pub trait AsFlowSource: EditorView + ContextBound {
+pub trait AsFlowEditorSource: EditorView + ContextBound {
     /// 传递创建的配方信息
     fn set_as_flow_sender(&mut self, sender: AsFlowSender<Self::ItemIdentType, Self::ContextType>);
 }

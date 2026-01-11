@@ -497,11 +497,16 @@ impl FactorioContext {
             Some(get_reverse_order_info(self.recipe_order.as_ref().unwrap()));
         self.fluid_order = Some(get_order_info(&self.fluids, &self.groups, &self.subgroups));
         self.reverse_fluid_order = Some(get_reverse_order_info(self.fluid_order.as_ref().unwrap()));
-        self.entity_order = Some(get_order_info(
-            &self.entities,
-            &self.groups,
-            &self.subgroups,
-        ));
+        // 没有 order 的 entity，从 item 派生
+        for (entity_name, entity) in self.entities.iter_mut() {
+            for item in self.items.values() {
+                if item.place_result.as_ref() == Some(entity_name) {
+                    entity.base.subgroup = item.base.subgroup.clone();
+                    entity.base.order = item.base.order.clone();
+                }
+            }
+        }
+        self.entity_order = Some(get_order_info(&self.entities, &self.groups, &self.subgroups));
         self.reverse_entity_order =
             Some(get_reverse_order_info(self.entity_order.as_ref().unwrap()));
         self

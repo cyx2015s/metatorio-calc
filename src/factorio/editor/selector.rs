@@ -80,6 +80,7 @@ impl egui::Widget for ItemSelector<'_> {
             storage.selected_item = None;
         }
         if filtered_group.is_empty() {
+            ui.label("无满足条件的选项。");
             return response;
         }
 
