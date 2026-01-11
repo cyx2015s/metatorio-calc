@@ -388,7 +388,7 @@ pub struct FactorioContextCreatorView {
 impl Subview for FactorioContextCreatorView {
     fn view(&mut self, ui: &mut egui::Ui) {
         ui.vertical_centered(|ui| {
-            ui.heading("Context Creator");
+            ui.heading("创建游戏上下文");
             ui.separator();
 
             ui.label("选择游戏路径:");

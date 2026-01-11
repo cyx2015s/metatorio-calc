@@ -1,8 +1,5 @@
-use eframe::*;
-use egui::{
-    Id, Vec2,
-    epaint::text::{FontInsert, InsertFontFamily},
-};
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 
 use crate::concept::*;
 
@@ -24,7 +21,7 @@ impl MainPage {
         let (tx, rx) = std::sync::mpsc::channel();
         let mut ret = Self {
             creators: vec![(
-                "预设：加载异星工厂上下文".to_string(),
+                "异星工厂".to_string(),
                 Box::new(factorio::editor::planner::FactorioContextCreatorView::default()),
             )],
             subview_receiver: rx,
@@ -42,10 +39,10 @@ impl MainPage {
 impl eframe::App for MainPage {
     fn update(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
         ctx.request_repaint_after_secs(0.1);
-        egui::SidePanel::left(Id::new("LeftPanel"))
+        egui::SidePanel::left(egui::Id::new("LeftPanel"))
             .width_range(200.0..=280.0)
             .show(ctx, |ui| {
-                ui.heading("切向量化 Metatorio");
+                ui.heading("切向量化");
                 for (i, creator) in self.creators.iter_mut().enumerate() {
                     if ui
                         .selectable_label(self.selected == i, creator.0.to_string())
@@ -89,15 +86,15 @@ impl eframe::App for MainPage {
 }
 
 fn add_font(ctx: &egui::Context) {
-    ctx.add_font(FontInsert::new(
+    ctx.add_font(egui::epaint::text::FontInsert::new(
         "LXGW",
         egui::FontData::from_static(include_bytes!("../assets/font.ttf")),
         vec![
-            InsertFontFamily {
+            egui::epaint::text::InsertFontFamily {
                 family: egui::FontFamily::Monospace,
                 priority: egui::epaint::text::FontPriority::Highest,
             },
-            InsertFontFamily {
+            egui::epaint::text::InsertFontFamily {
                 family: egui::FontFamily::Proportional,
                 priority: egui::epaint::text::FontPriority::Highest,
             },
@@ -113,13 +110,23 @@ fn main() {
         .format_line_number(true)
         .init();
     log::info!("应用程序启动");
-    run_native(
+    let icon_image = image::load_from_memory(include_bytes!("../assets/icon.png")).unwrap();
+    eframe::run_native(
         "Demo App",
-        NativeOptions {
+        eframe::NativeOptions {
             viewport: egui::ViewportBuilder::default()
                 .with_maximized(true)
-                .with_min_inner_size(Vec2 { x: 800.0, y: 600.0 }),
-            renderer: Renderer::Wgpu,
+                .with_min_inner_size(egui::Vec2 { x: 800.0, y: 600.0 })
+                .with_title("切向量化 [内内内内测版]")
+                .with_icon(egui::IconData {
+                    rgba: icon_image.to_rgba8().into_raw(),
+                    width: icon_image.width(),
+                    height: icon_image.height(),
+                }),
+                
+
+            renderer: eframe::Renderer::Wgpu,
+
             ..Default::default()
         },
         Box::new(|cc| {
