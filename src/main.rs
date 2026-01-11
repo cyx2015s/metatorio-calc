@@ -1,7 +1,4 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-
-
-use crate::concept::*;
+use crate::{concept::*, factorio::model::context::get_workding_directory};
 
 pub mod concept;
 pub mod factorio;
@@ -123,7 +120,6 @@ fn main() {
                     width: icon_image.width(),
                     height: icon_image.height(),
                 }),
-                
 
             renderer: eframe::Renderer::Wgpu,
 

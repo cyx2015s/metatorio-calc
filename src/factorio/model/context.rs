@@ -1,4 +1,4 @@
-use std::{collections::HashMap, env, fmt::Debug, hash::Hash, path::PathBuf};
+use std::{collections::HashMap, env, fmt::Debug, hash::Hash, io::Write, path::PathBuf, process::{Command, Stdio}};
 
 use serde_json::Value;
 
@@ -74,7 +74,7 @@ pub struct FactorioContext {
     pub miners: Dict<MiningDrillPrototype>,
 }
 
-fn get_workding_directory() -> PathBuf {
+pub fn get_workding_directory() -> PathBuf {
     env::current_exe().unwrap().parent().unwrap().to_path_buf()
 }
 
@@ -212,16 +212,18 @@ impl FactorioContext {
             std::fs::create_dir_all(config_path.parent()?).ok()?;
         }
         // 配置配置文件：写入到自定义的文件夹中避免和运行中的游戏抢锁
-        std::fs::write(
-            &config_path,
-            format!(
-                "[path]\nwrite-data={}\n[general]\nlocale={}",
-                self_path.join("tmp").display(),
-                lang
-            ),
-        )
-        .ok()?;
-        let dump_raw_command = std::process::Command::new(executable_path)
+        let mut config_file = std::fs::File::create(&config_path).ok()?;
+
+        config_file.write(b"[path]\nwrite-data=").ok()?;
+        config_file
+            .write(self_path.join("tmp").as_os_str().as_encoded_bytes())
+            .ok()?;
+        config_file
+            .write(format!("\n[general]\nlocale={}", lang).as_bytes())
+            .ok()?;
+
+        log::info!("创建 config.ini 成功");
+        let dump_raw_command = Command::new(executable_path)
             .arg("--dump-data")
             .arg("--config")
             .arg(config_path.to_str().unwrap())
@@ -230,12 +232,15 @@ impl FactorioContext {
             } else {
                 vec![]
             })
+            .stdout(Stdio::inherit())
             .output()
             .ok()?;
         if !dump_raw_command.status.success() {
             return None;
         }
-        let dump_icon_sprites_command = std::process::Command::new(executable_path)
+
+        log::info!("导出原始数据成功");
+        let dump_icon_sprites_command = Command::new(executable_path)
             .arg("--dump-icon-sprites")
             .arg("--disable-audio")
             .arg("--config")
@@ -245,12 +250,15 @@ impl FactorioContext {
             } else {
                 vec![]
             })
+            
+            .stdout(Stdio::inherit())
             .output()
             .ok()?;
         if !dump_icon_sprites_command.status.success() {
             return None;
         }
-        let dump_locale_command = std::process::Command::new(executable_path)
+        log::info!("导出图标数据成功");
+        let dump_locale_command = Command::new(executable_path)
             .arg("--dump-prototype-locale")
             .arg("--config")
             .arg(config_path.to_str().unwrap())
@@ -259,8 +267,10 @@ impl FactorioContext {
             } else {
                 vec![]
             })
+            .stdout(Stdio::inherit())
             .output()
             .ok()?;
+        log::info!("导出翻译数据成功");
         if !dump_locale_command.status.success() {
             return None;
         }
@@ -377,7 +387,6 @@ impl FactorioContext {
     }
 
     pub fn load_from_tmp_no_dump() -> Option<FactorioContext> {
-        
         let self_path = get_workding_directory();
         let raw_path = self_path.join("tmp/script-output/data-raw-dump.json");
         let icon_path = self_path.join("tmp/script-output/");
@@ -501,7 +510,11 @@ impl FactorioContext {
                 }
             }
         }
-        self.entity_order = Some(get_order_info(&self.entities, &self.groups, &self.subgroups));
+        self.entity_order = Some(get_order_info(
+            &self.entities,
+            &self.groups,
+            &self.subgroups,
+        ));
         self.reverse_entity_order =
             Some(get_reverse_order_info(self.entity_order.as_ref().unwrap()));
         self
