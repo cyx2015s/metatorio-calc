@@ -1,6 +1,8 @@
 // Git 版本信息
 include!(concat!(env!("OUT_DIR"), "/git_hash.rs"));
 
+use egui::Id;
+
 use crate::concept::*;
 
 pub mod concept;
@@ -43,8 +45,11 @@ impl eframe::App for MainPage {
             .width_range(200.0..=280.0)
             .show(ctx, |ui| {
                 ui.heading("切向量化");
-                ui.label(format!("构建信息: {}", GIT_HASH));
-                ui.hyperlink("https://github.com/cyx2015s/metatorio-calc");
+                ui.label(format!("构建哈希: {}", GIT_HASH));
+                ui.add(egui::Hyperlink::from_label_and_url(
+                    "Github 仓库",
+                    "https://github.com/cyx2015s/metatorio-calc",
+                ));
                 for (i, creator) in self.creators.iter_mut().enumerate() {
                     if ui
                         .selectable_label(self.selected == i, creator.0.to_string())
@@ -72,6 +77,31 @@ impl eframe::App for MainPage {
                         self.selected = i + self.creators.len();
                     }
                 }
+                ui.separator();
+                let mut show_font_license = ui.memory(|mem| {
+                    mem.data
+                        .get_temp::<bool>(Id::new("字体与授权"))
+                        .unwrap_or(false)
+                });
+                if ui.checkbox(&mut show_font_license, "字体与授权").clicked() {
+                    ui.memory_mut(|mem| {
+                        mem.data
+                            .insert_temp::<bool>(Id::new("字体与授权"), !show_font_license);
+                    });
+                }
+                if show_font_license {
+                    egui::Window::new("字体与授权")
+                        .open(&mut show_font_license)
+                        .show(ctx, |ui| {
+                            egui::ScrollArea::vertical().show(ui, |ui| {
+                                ui.label(include_str!("../assets/LICENSE"));
+                            });
+                        });
+                }
+                ui.memory_mut(|mem| {
+                    mem.data
+                        .insert_temp(Id::new("字体与授权"), show_font_license);
+                })
             });
         if self.selected < self.creators.len() {
             egui::CentralPanel::default().show(ctx, |ui| {

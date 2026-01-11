@@ -108,7 +108,10 @@ impl EditorView for FactoryInstance {
                 .target
                 .iter()
                 .map(|(item, amount)| (item.clone(), *amount))
-                .collect::<HashMap<GenericItem, f64>>();
+                .fold(HashMap::new(), |mut acc, (item, amount)| {
+                    *acc.entry(item).or_insert(0.0) += amount;
+                    acc
+                });
             let result = basic_solver(target, flows);
             match result {
                 Ok(solution) => {
@@ -139,15 +142,14 @@ impl EditorView for FactoryInstance {
         let (left_panel, flows_panel) = max_rect.split_left_right_at_fraction(split_ratio.h);
         let (target_panel, source_panel) = left_panel.split_top_bottom_at_fraction(split_ratio.v);
 
-        ui.put(target_panel, |ui: &mut egui::Ui| {
-            egui::ScrollArea::vertical()
-                .id_salt(1)
-                .show(ui, |ui| {
+        ui.put(target_panel.shrink(4.0), |ui: &mut egui::Ui| {
+            egui::ScrollArea::vertical().id_salt(1).show(ui, |ui| {
+                ui.horizontal_top(|ui| {
                     ui.vertical(|ui| {
                         ui.heading("优化目标");
                         let mut delete_target: Option<usize> = None;
                         for (idx, (item, amount)) in self.target.iter_mut().enumerate() {
-                            ui.horizontal(|ui| {
+                            ui.horizontal_top(|ui| {
                                 let icon = ui
                                     .add_sized(
                                         [35.0, 35.0],
@@ -253,9 +255,10 @@ impl EditorView for FactoryInstance {
                     .response
                 })
                 .inner
+            }).inner
         });
 
-        ui.put(source_panel, |ui: &mut egui::Ui| {
+        ui.put(source_panel.shrink(4.0), |ui: &mut egui::Ui| {
             egui::ScrollArea::vertical()
                 .id_salt(2)
                 .show(ui, |ui| {
@@ -271,7 +274,7 @@ impl EditorView for FactoryInstance {
                 .inner
         });
         let mut delete_flow: Option<usize> = None;
-        ui.put(flows_panel, |ui: &mut egui::Ui| {
+        ui.put(flows_panel.shrink(4.0), |ui: &mut egui::Ui| {
             egui::ScrollArea::vertical()
                 .id_salt(3)
                 .show(ui, |ui| {
