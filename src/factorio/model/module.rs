@@ -1,11 +1,8 @@
 use serde::Deserialize;
 
 use crate::factorio::{
-    common::{
-        Effect, EffectTypeLimitation, EnergyAmount, EnergySource, IdWithQuality, PrototypeBase,
-        option_as_vec_or_empty,
-    },
-    model::{context::FactorioContext, entity::EntityPrototype},
+    common::*,
+    model::{context::*, entity::*},
 };
 
 #[derive(Debug, Clone, Deserialize)]

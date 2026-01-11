@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-use crate::factorio::common::{EnergyAmount, HasPrototypeBase, PrototypeBase};
+use crate::factorio::common::*;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct FluidPrototype {

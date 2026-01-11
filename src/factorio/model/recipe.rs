@@ -1,6 +1,5 @@
 use std::{collections::HashMap, fmt::Debug};
 
-use egui::{Label, Popup, Sense};
 use serde::Deserialize;
 
 use crate::{
@@ -588,10 +587,14 @@ impl EditorView for RecipeConfig {
                     .open_memory(None);
                 let popup_id = popup.get_id();
                 if recipe_button.clicked() {
-                    Popup::open_id(ui.ctx(), popup_id);
+                    egui::Popup::open_id(ui.ctx(), popup_id);
                 }
+                let id = ui.id();
+                let mut filter_string =
+                    ui.memory(move |mem| mem.data.get_temp::<String>(id).unwrap_or_default());
                 popup.show(|ui| {
                     ui.label("选择配方");
+                    ui.add(egui::TextEdit::singleline(&mut filter_string).hint_text("筛选器……"));
                     egui::ScrollArea::vertical()
                         .max_width(f32::INFINITY)
                         .auto_shrink(false)
@@ -603,12 +606,21 @@ impl EditorView for RecipeConfig {
                                     ctx.recipe_order.as_ref().unwrap(),
                                     &mut recipe,
                                 )
+                                .with_filter(|s, f| {
+                                    if filter_string.is_empty() {
+                                        return true;
+                                    }
+                                    s.to_lowercase().contains(&filter_string.to_lowercase())
+                                        || f.get_display_name(&"recipe".to_string(), s)
+                                            .to_lowercase()
+                                            .contains(&filter_string.to_lowercase())
+                                }),
                             );
                         });
                 });
                 if let Some(selected) = recipe {
                     self.recipe = (selected, self.recipe.1).into();
-                    Popup::close_id(ui.ctx(), popup_id);
+                    egui::Popup::close_id(ui.ctx(), popup_id);
                 }
             });
             ui.separator();
@@ -626,17 +638,17 @@ impl EditorView for RecipeConfig {
                             size: 32.0,
                         },
                     )
-                    .interact(Sense::click())
+                    .interact(egui::Sense::click())
                 } else {
                     ui.label("机器");
-                    ui.add_sized([35.0, 35.0], Label::new("空"))
+                    ui.add_sized([35.0, 35.0], egui::Label::new("空"))
                 };
                 let popup = egui::Popup::menu(&entity_button)
                     .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
                     .open_memory(None);
                 let popup_id = popup.get_id();
                 if entity_button.clicked() {
-                    Popup::open_id(ui.ctx(), popup_id);
+                    egui::Popup::open_id(ui.ctx(), popup_id);
                 }
                 let mut selected_entity: Option<String> = None;
                 popup.show(|ui| {
@@ -652,31 +664,34 @@ impl EditorView for RecipeConfig {
                                     ctx.recipe_order.as_ref().unwrap(),
                                     &mut selected_entity,
                                 )
-                                .with_filter(|crafter_name, ctx| {
-                                    let recipe_prototype = ctx.recipes.get(self.recipe.0.as_str()).unwrap();
-                                    if let Some(crafter) = ctx.crafters.get(crafter_name) {
-                                        if crafter.crafting_categories.contains(
-                                            recipe_prototype
-                                                .category
-                                                .as_ref()
-                                                .map_or(&"crafting".to_string(), |v| v),
-                                        ) {
-                                            return true;
+                                .with_filter(
+                                    |crafter_name, ctx| {
+                                        let recipe_prototype =
+                                            ctx.recipes.get(self.recipe.0.as_str()).unwrap();
+                                        if let Some(crafter) = ctx.crafters.get(crafter_name) {
+                                            if crafter.crafting_categories.contains(
+                                                recipe_prototype
+                                                    .category
+                                                    .as_ref()
+                                                    .map_or(&"crafting".to_string(), |v| v),
+                                            ) {
+                                                return true;
+                                            }
+                                            if recipe_prototype.additional_categories.iter().any(
+                                                |cat| crafter.crafting_categories.contains(cat),
+                                            ) {
+                                                return true;
+                                            }
                                         }
-                                        if recipe_prototype.additional_categories.iter().any(|cat| {
-                                            crafter.crafting_categories.contains(cat)
-                                        }) {
-                                            return true;
-                                        }
-                                    }
-                                    return false;
-                                }),
+                                        return false;
+                                    },
+                                ),
                             );
                         });
                 });
                 if let Some(selected) = selected_entity {
                     self.machine = Some((selected, 0).into());
-                    Popup::close_id(ui.ctx(), popup_id);
+                    egui::Popup::close_id(ui.ctx(), popup_id);
                 }
             });
 
@@ -690,28 +705,34 @@ impl EditorView for RecipeConfig {
 
             let mut keys = flow.keys().collect::<Vec<&GenericItem>>();
             sort_generic_items(&mut keys, ctx);
-            ui.horizontal_top(|ui| {
-                for key in keys {
-                    let amount = flow.get(key).unwrap();
 
-                    ui.vertical(|ui| {
-                        ui.add_sized([35.0, 15.0], SignedCompactLabel::new(*amount));
-                        ui.add_sized(
-                            [35.0, 35.0],
-                            GenericIcon {
-                                ctx,
-                                item: key,
-                                size: 32.0,
-                            },
-                        );
-                    });
-                }
+            ui.horizontal_top(|ui| {
+                ui.horizontal_wrapped(|ui| {
+                    for key in keys {
+                        let amount = flow.get(key).unwrap();
+
+                        ui.vertical(|ui| {
+                            ui.add_sized([35.0, 15.0], SignedCompactLabel::new(*amount));
+                            ui.add_sized(
+                                [35.0, 35.0],
+                                GenericIcon {
+                                    ctx,
+                                    item: key,
+                                    size: 32.0,
+                                },
+                            );
+                        });
+                        if ui.available_size_before_wrap().x < 35.0 {
+                            ui.end_row();
+                        }
+                    }
+                });
             });
         });
     }
 }
 
-impl AsFlowEditor for RecipeConfig {}
+impl AsFlowSenderSource for RecipeConfig {}
 
 pub struct RecipeConfigSource {
     pub editing: RecipeConfig,

@@ -23,7 +23,7 @@ pub trait AsFlow: Send + ContextBound {
 
 pub type AsFlowSender<I, C> = std::sync::mpsc::Sender<
     Box<
-        dyn AsFlowEditor<
+        dyn AsFlowSenderSource<
                 ItemIdentType = I,
                 ContextType = C,
             >,
@@ -36,7 +36,7 @@ pub trait GameContextCreatorView: Subview {
     fn set_subview_sender(&mut self, sender: std::sync::mpsc::Sender<Box<dyn Subview>>);
 }
 
-pub trait AsFlowEditor: AsFlow + EditorView {
+pub trait AsFlowSenderSource: AsFlow + EditorView {
     fn notify_solution(&mut self, solution: f64) {
         println!("AsFlowEditor::notify_solution called with {:?}", solution);
     }

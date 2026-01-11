@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use egui::{Sense, Vec2};
+use egui::Vec2;
 
 use crate::factorio::{
     common::OrderInfo,
@@ -111,7 +111,7 @@ impl egui::Widget for ItemSelector<'_> {
                             size: 64.0,
                             quality: 0,
                         })
-                        .interact(Sense::click())
+                        .interact(egui::Sense::click())
                         .clicked()
                     {
                         storage.group = i;
@@ -147,7 +147,7 @@ impl egui::Widget for ItemSelector<'_> {
                                 size: 32.0,
                                 quality: 0,
                             })
-                            .interact(Sense::click());
+                            .interact(egui::Sense::click());
                         let button = if self.item_type == &"recipe".to_string() {
                             let prototype = self.ctx.recipes.get(item_name).unwrap();
                             button.on_hover_ui(|ui| {

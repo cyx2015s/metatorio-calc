@@ -1,27 +1,60 @@
-use egui::ScrollArea;
-
 use crate::{
-    concept::{AsFlowEditor, AsFlowSource, ContextBound, EditorView},
-    factorio::{
-        model::{
-            context::{FactorioContext, GenericItem},
-            recipe::RecipeConfigSource,
-        },
+    concept::{AsFlowSenderSource, AsFlowSender, AsFlowSource, ContextBound, EditorView},
+    factorio::model::{
+        context::{FactorioContext, GenericItem},
+        recipe::RecipeConfigSource,
     },
 };
 
 pub struct FactoryInstance {
     pub name: String,
-    pub flow_sources:
+    pub flow_editor_sources:
         Vec<Box<dyn AsFlowSource<ContextType = FactorioContext, ItemIdentType = GenericItem>>>,
-    pub flow_configs:
-        Vec<Box<dyn AsFlowEditor<ItemIdentType = GenericItem, ContextType = FactorioContext>>>,
+    pub flow_editors:
+        Vec<Box<dyn AsFlowSenderSource<ItemIdentType = GenericItem, ContextType = FactorioContext>>>,
     pub flow_receiver: std::sync::mpsc::Receiver<
-        Box<dyn AsFlowEditor<ItemIdentType = GenericItem, ContextType = FactorioContext>>,
+        Box<dyn AsFlowSenderSource<ItemIdentType = GenericItem, ContextType = FactorioContext>>,
     >,
     pub flow_sender: std::sync::mpsc::Sender<
-        Box<dyn AsFlowEditor<ItemIdentType = GenericItem, ContextType = FactorioContext>>,
+        Box<dyn AsFlowSenderSource<ItemIdentType = GenericItem, ContextType = FactorioContext>>,
     >,
+}
+impl Default for FactoryInstance {
+    fn default() -> Self {
+        let (tx, rx) = std::sync::mpsc::channel();
+        FactoryInstance {
+            name: "工厂".to_string(),
+            flow_editor_sources: Vec::new(),
+            flow_editors: Vec::new(),
+            flow_receiver: rx,
+            flow_sender: tx,
+        }
+    }
+}
+
+impl FactoryInstance {
+    pub fn new(name: String) -> Self {
+        let (tx, rx) = std::sync::mpsc::channel();
+        FactoryInstance {
+            name,
+            flow_editor_sources: Vec::new(),
+            flow_editors: Vec::new(),
+            flow_receiver: rx,
+            flow_sender: tx,
+        }
+    }
+    pub fn add_flow_source<
+        F: Fn(
+            AsFlowSender<GenericItem, FactorioContext>,
+        )
+            -> Box<dyn AsFlowSource<ContextType = FactorioContext, ItemIdentType = GenericItem>>,
+    >(
+        mut self,
+        f: F,
+    ) -> Self {
+        self.flow_editor_sources.push(f(self.flow_sender.clone()));
+        self
+    }
 }
 
 pub struct PlannerView {
@@ -30,6 +63,7 @@ pub struct PlannerView {
 
     pub factories: Vec<FactoryInstance>,
     pub selected_factory: usize,
+    pub new_factory_name: String,
 }
 
 impl ContextBound for FactoryInstance {
@@ -37,91 +71,76 @@ impl ContextBound for FactoryInstance {
     type ItemIdentType = GenericItem;
 }
 
+/// 信息用于保存工厂面板的拆分状态，不用 pub
+#[derive(Debug, Clone, Copy)]
+struct FactoryInstancePanelSplitInfo {
+    pub h: f32,
+    pub v: f32,
+}
+
 impl EditorView for FactoryInstance {
     fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &FactorioContext) {
         ui.heading(&self.name);
-        for recipe_source in &mut self.flow_sources {
-            recipe_source.editor_view(ui, ctx);
-            ui.separator();
-        }
-        while let Ok(flow_source) = self.flow_receiver.try_recv() {
-            self.flow_configs.push(flow_source);
-        }
+        let split_ratio = ui.memory(|mem| {
+            mem.data
+                .get_temp(ui.id())
+                .unwrap_or(FactoryInstancePanelSplitInfo { h: 0.4, v: 0.4 })
+        });
+        let max_rect = ui.available_rect_before_wrap();
+        let (left_panel, flows_panel) = max_rect.split_left_right_at_fraction(split_ratio.h);
+        let (target_panel, source_panel) = left_panel.split_top_bottom_at_fraction(split_ratio.v);
 
-        ScrollArea::vertical().show(ui, |ui| {
-            for recipe_config in &mut self.flow_configs {
-                recipe_config.editor_view(ui, ctx);
-                ui.separator();
-            }
+        ui.put(target_panel, |ui: &mut egui::Ui| {
+            egui::ScrollArea::vertical().show(ui, |ui|{
+                ui.vertical(|ui| {
+                    ui.heading("优化目标");
+                }).response
+            }).inner
         });
 
+        ui.put(source_panel, |ui: &mut egui::Ui| {
+            egui::ScrollArea::vertical().show(ui, |ui|{
+                ui.vertical(|ui| {
+                    ui.heading("游戏机制");
+                    for flow_source in &mut self.flow_editor_sources {
+                        flow_source.editor_view(ui, ctx);
+                        ui.separator();
+                    }
+                    
+                }).response
+            }).inner
+        });
+
+        ui.put(flows_panel, |ui: &mut egui::Ui| {
+            egui::ScrollArea::vertical().show(ui, |ui|{
+                ui.vertical(|ui| {
+                    ui.heading("配方配置");
+                    for flow_config in &mut self.flow_editors {
+                        flow_config.editor_view(ui, ctx);
+                        ui.separator();
+                    }
+                }).response
+            }).inner
+        });
+
+        while let Ok(flow_source) = self.flow_receiver.try_recv() {
+            self.flow_editors.push(flow_source);
+        }
     }
 }
 
 use crate::{
-    concept::GameContextCreatorView,
-    concept::Subview,
-    factorio::{
-        common::Effect,
-        model::{module::ModuleConfig, recipe::RecipeConfig},
-    },
+    concept::GameContextCreatorView, concept::Subview, factorio::model::recipe::RecipeConfig,
 };
 
 impl PlannerView {
     pub fn new(ctx: FactorioContext) -> Self {
-        let (tx, rx) = std::sync::mpsc::channel();
-
-        let mut ret = PlannerView {
+        PlannerView {
             ctx: ctx.build_order_info(),
             factories: Vec::new(),
             selected_factory: 0,
-        };
-        ret.factories.push(FactoryInstance {
-            name: "工厂".to_string(),
-            flow_sources: vec![Box::new(RecipeConfigSource {
-                editing: RecipeConfig::default(),
-                sender: tx.clone(),
-            })],
-            flow_sender: tx,
-            flow_receiver: rx,
-            flow_configs: vec![
-                Box::new(RecipeConfig {
-                    recipe: ("iron-gear-wheel".to_string()).into(),
-                    machine: Some(("assembling-machine-1".to_string()).into()),
-                    module_config: ModuleConfig::default(),
-                    extra_effects: Effect::default(),
-                    instance_fuel: None,
-                }),
-                Box::new(RecipeConfig {
-                    recipe: ("copper-cable".into()),
-
-                    machine: Some("assembling-machine-2".into()),
-                    module_config: ModuleConfig::default(),
-                    extra_effects: Effect::default(),
-                    instance_fuel: None,
-                }),
-                Box::new(RecipeConfig {
-                    recipe: ("transport-belt".into()),
-                    machine: Some("assembling-machine-2".into()),
-                    module_config: ModuleConfig::default(),
-                    extra_effects: Effect::default(),
-                    instance_fuel: None,
-                }),
-                // Box::new(MiningConfig {
-                //     resource: "iron-ore".to_string(),
-                //     quality: 0,
-                //     machine: Some(("electric-mining-drill".to_string(), 0)),
-                //     modules: vec![],
-                //     extra_effects: Effect {
-                //         speed: 1.0,
-                //         productivity: 2.3,
-                //         ..Default::default()
-                //     },
-                //     instance_fuel: None,
-                // }),
-            ],
-        });
-        ret
+            new_factory_name: String::new(),
+        }
     }
 }
 
@@ -149,6 +168,22 @@ impl Subview for PlannerView {
                 {
                     self.selected_factory = i;
                 }
+            }
+            ui.text_edit_singleline(&mut self.new_factory_name);
+            if ui.button("添加工厂").clicked() {
+                let name = if self.new_factory_name.is_empty() {
+                    format!("工厂 {}", self.factories.len() + 1)
+                } else {
+                    self.new_factory_name.clone()
+                };
+                self.factories
+                    .push(FactoryInstance::new(name).add_flow_source(|s| {
+                        Box::new(RecipeConfigSource {
+                            editing: RecipeConfig::default(),
+                            sender: s,
+                        })
+                    }));
+                self.new_factory_name.clear();
             }
         });
         if self.selected_factory >= self.factories.len() {

@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-use crate::factorio::common::{EnergyAmount, HasPrototypeBase, PrototypeBase};
+use crate::factorio::common::*;
 
 pub const ITEM_TYPES: &[&str] = &[
     "item",
