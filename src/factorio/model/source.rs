@@ -31,8 +31,11 @@ impl AsFlow for SourceConfig {
     }
 
     fn cost(&self, _ctx: &Self::ContextType) -> f64 {
-        // 返回一个较大的成本
-        1024.0
+        // 返回一个默认较合理的成本
+        match self.item {
+            GenericItem::Electricity => 1.0 / 1024.0,
+            _ => 1024.0,
+        }
     }
 }
 

@@ -399,6 +399,9 @@ impl Subview for FactorioContextCreatorView {
             }
             if let Some(path) = &self.path {
                 ui.label(format!("已选择路径: {}", path.display()));
+                if path.to_string_lossy().contains("steam") {
+                    ui.label("若为 Steam 版本的游戏，请启动 Steam 再执行加载游戏上下文");
+                }
             } else {
                 ui.label("未选择路径");
             }
