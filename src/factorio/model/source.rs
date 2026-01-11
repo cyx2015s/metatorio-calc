@@ -1,10 +1,7 @@
 use crate::{
     concept::{AsFlow, AsFlowEditor, AsFlowEditorSource, AsFlowSender, ContextBound, EditorView},
     factorio::{
-        editor::{
-            icon::GenericIcon,
-            selector::selector_menu_with_filter,
-        },
+        editor::{icon::GenericIcon, selector::selector_menu_with_filter},
         model::context::{FactorioContext, GenericItem},
     },
 };
@@ -136,13 +133,9 @@ impl EditorView for SourceConfig {
                 .interact(egui::Sense::click());
             match &self.item {
                 GenericItem::Item { name: _, quality } => {
-                    if let Some(selected) = selector_menu_with_filter(
-                        ui,
-                        ctx,
-                        "选择物体",
-                        "item",
-                        icon,
-                    ) {
+                    if let Some(selected) =
+                        selector_menu_with_filter(ui, ctx, "选择物体", "item", icon)
+                    {
                         self.item = GenericItem::Item {
                             name: selected,
                             quality: *quality,
@@ -153,13 +146,9 @@ impl EditorView for SourceConfig {
                     name: _,
                     temperature: _,
                 } => {
-                    if let Some(selected) = selector_menu_with_filter(
-                        ui,
-                        ctx,
-                        "选择流体",
-                        "fluid",
-                        icon,
-                    ) {
+                    if let Some(selected) =
+                        selector_menu_with_filter(ui, ctx, "选择流体", "fluid", icon)
+                    {
                         self.item = GenericItem::Fluid {
                             name: selected,
                             temperature: None,
@@ -167,13 +156,9 @@ impl EditorView for SourceConfig {
                     }
                 }
                 GenericItem::Entity { name: _, quality } => {
-                    if let Some(selected) = selector_menu_with_filter(
-                        ui,
-                        ctx,
-                        "选择实体",
-                        "entity",
-                        icon,
-                    ) {
+                    if let Some(selected) =
+                        selector_menu_with_filter(ui, ctx, "选择实体", "entity", icon)
+                    {
                         self.item = GenericItem::Entity {
                             name: selected,
                             quality: *quality,

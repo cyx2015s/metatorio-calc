@@ -207,20 +207,16 @@ pub fn selector_menu_with_filter(
             .auto_shrink(false)
             .show(ui, |ui| {
                 ui.add(
-                    ItemSelector::new(
-                        ctx,
-                        &item_type.to_string(),
-                        &mut selecting_item,
-                    )
-                    .with_filter(|s, f| {
-                        if filter_string.is_empty() {
-                            return true;
-                        }
-                        s.to_lowercase().contains(&filter_string.to_lowercase())
-                            || f.get_display_name(item_type, s)
-                                .to_lowercase()
-                                .contains(&filter_string.to_lowercase())
-                    }),
+                    ItemSelector::new(ctx, &item_type.to_string(), &mut selecting_item)
+                        .with_filter(|s, f| {
+                            if filter_string.is_empty() {
+                                return true;
+                            }
+                            s.to_lowercase().contains(&filter_string.to_lowercase())
+                                || f.get_display_name(item_type, s)
+                                    .to_lowercase()
+                                    .contains(&filter_string.to_lowercase())
+                        }),
                 );
             });
     });

@@ -1,9 +1,6 @@
 use serde::Deserialize;
 
-use crate::factorio::{
-    common::*,
-    model::recipe::*,
-};
+use crate::factorio::{common::*, model::recipe::*};
 
 pub const ENTITY_TYPES: &[&str] = &[
     // "arrow",

@@ -20,12 +20,8 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         let mut ingredients: Vec<&RecipeIngredient> = self.prototype.ingredients.iter().collect();
         ingredients.sort_by_key(|ingredient| match ingredient {
-            RecipeIngredient::Item(i) => {
-                (0, &self.ctx.order_of_entries["item"][&i.name])
-            }
-            RecipeIngredient::Fluid(f) => {
-                (1, &self.ctx.order_of_entries["fluid"][&f.name])
-            }
+            RecipeIngredient::Item(i) => (0, &self.ctx.order_of_entries["item"][&i.name]),
+            RecipeIngredient::Fluid(f) => (1, &self.ctx.order_of_entries["fluid"][&f.name]),
         });
         let mut results: Vec<&RecipeResult> = self.prototype.results.iter().collect();
         results.sort_by_key(|result| match result {

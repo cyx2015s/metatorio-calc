@@ -614,13 +614,9 @@ impl EditorView for RecipeConfig {
                             prototype: ctx.recipes.get(&self.recipe.0).unwrap(),
                         });
                     });
-                if let Some(selected) = selector_menu_with_filter(
-                    ui,
-                    ctx,
-                    "选择配方",
-                    "recipe",
-                    recipe_button,
-                ) {
+                if let Some(selected) =
+                    selector_menu_with_filter(ui, ctx, "选择配方", "recipe", recipe_button)
+                {
                     self.recipe = (selected, self.recipe.1).into();
                 }
             });
@@ -659,13 +655,8 @@ impl EditorView for RecipeConfig {
                         .auto_shrink(false)
                         .show(ui, |ui| {
                             ui.add(
-                                ItemSelector::new(
-                                    ctx,
-                                    &"entity".to_string(),
-                                    &mut selected_entity,
-                                )
-                                .with_filter(
-                                    |crafter_name, ctx| {
+                                ItemSelector::new(ctx, &"entity".to_string(), &mut selected_entity)
+                                    .with_filter(|crafter_name, ctx| {
                                         let recipe_prototype =
                                             ctx.recipes.get(self.recipe.0.as_str()).unwrap();
                                         if let Some(crafter) = ctx.crafters.get(crafter_name) {
@@ -684,8 +675,7 @@ impl EditorView for RecipeConfig {
                                             }
                                         }
                                         false
-                                    },
-                                ),
+                                    }),
                             );
                         });
                 });

@@ -6,12 +6,7 @@ use crate::{
     concept::{AsFlow, ContextBound},
     factorio::{
         common::*,
-        model::{
-            context::*,
-            energy::*,
-            entity::*,
-            recipe::*,
-        },
+        model::{context::*, energy::*, entity::*, recipe::*},
     },
 };
 

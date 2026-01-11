@@ -496,10 +496,22 @@ impl FactorioContext {
                 }
             }
         }
-        self.ordered_entries.insert("recipe".into(), get_order_info(&self.recipes, &self.groups, &self.subgroups));
-        self.order_of_entries.insert("recipe".into(), get_reverse_order_info(&self.ordered_entries["recipe"]));
-        self.ordered_entries.insert("fluid".into(), get_order_info(&self.fluids, &self.groups, &self.subgroups));
-        self.order_of_entries.insert("fluid".into(), get_reverse_order_info(&self.ordered_entries["fluid"]));
+        self.ordered_entries.insert(
+            "recipe".into(),
+            get_order_info(&self.recipes, &self.groups, &self.subgroups),
+        );
+        self.order_of_entries.insert(
+            "recipe".into(),
+            get_reverse_order_info(&self.ordered_entries["recipe"]),
+        );
+        self.ordered_entries.insert(
+            "fluid".into(),
+            get_order_info(&self.fluids, &self.groups, &self.subgroups),
+        );
+        self.order_of_entries.insert(
+            "fluid".into(),
+            get_reverse_order_info(&self.ordered_entries["fluid"]),
+        );
         // 没有 order 的 entity，从 item 派生
         for (entity_name, entity) in self.entities.iter_mut() {
             for item in self.items.values() {
@@ -509,8 +521,14 @@ impl FactorioContext {
                 }
             }
         }
-        self.ordered_entries.insert("entity".into(), get_order_info(&self.entities, &self.groups, &self.subgroups));
-        self.order_of_entries.insert("entity".into(), get_reverse_order_info(&self.ordered_entries["entity"]));
+        self.ordered_entries.insert(
+            "entity".into(),
+            get_order_info(&self.entities, &self.groups, &self.subgroups),
+        );
+        self.order_of_entries.insert(
+            "entity".into(),
+            get_reverse_order_info(&self.ordered_entries["entity"]),
+        );
         self
     }
 }

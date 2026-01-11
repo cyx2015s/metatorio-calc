@@ -437,10 +437,11 @@ impl Subview for FactorioContextCreatorView {
                 can_load_context = false;
             }
             if let Some(mod_path) = self.mod_path.as_ref()
-                && !mod_path.join("mod-list.json").exists() {
-                    ui.label("模组文件夹下未找到 mod-list.json。");
-                    can_load_context = false;
-                }
+                && !mod_path.join("mod-list.json").exists()
+            {
+                ui.label("模组文件夹下未找到 mod-list.json。");
+                can_load_context = false;
+            }
             if ui
                 .add_enabled(can_load_context, egui::Button::new("加载游戏上下文"))
                 .clicked()

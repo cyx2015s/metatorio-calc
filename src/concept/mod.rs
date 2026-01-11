@@ -1,6 +1,5 @@
 use std::{collections::HashMap, fmt::Debug, hash::Hash};
 
-
 pub trait Subview: Send {
     fn view(&mut self, ui: &mut egui::Ui);
     fn should_close(&self) -> bool {
@@ -26,14 +25,8 @@ pub trait AsFlow: Send + ContextBound {
     }
 }
 
-pub type AsFlowSender<I, C> = std::sync::mpsc::Sender<
-    Box<
-        dyn AsFlowEditor<
-                ItemIdentType = I,
-                ContextType = C,
-            >,
-    >,
->;
+pub type AsFlowSender<I, C> =
+    std::sync::mpsc::Sender<Box<dyn AsFlowEditor<ItemIdentType = I, ContextType = C>>>;
 
 pub trait ItemIdent: Debug + Clone + Eq + Hash {}
 pub trait GameContextCreatorView: Subview {
