@@ -218,7 +218,7 @@ pub fn selector_menu_with_filter(
                                 return true;
                             }
                             s.to_lowercase().contains(&filter_string.to_lowercase())
-                                || f.get_display_name(&item_type.to_string(), s)
+                                || f.get_display_name(item_type, s)
                                     .to_lowercase()
                                     .contains(&filter_string.to_lowercase())
                         }),
@@ -229,7 +229,7 @@ pub fn selector_menu_with_filter(
     ui.memory_mut(|mem| {
         mem.data.insert_temp(id, filter_string);
     });
-    if let Some(_) = selecting_item.clone() {
+    if selecting_item.clone().is_some() {
         egui::Popup::close_id(ui.ctx(), popup_id);
     }
     selecting_item

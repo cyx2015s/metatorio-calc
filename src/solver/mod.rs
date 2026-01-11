@@ -31,7 +31,7 @@ where
         }
     }
     let mut no_providers: HashSet<I> = item_balances.keys().cloned().collect();
-    for (recipe_id, flow) in &flows {
+    for flow in flows.values() {
         for (item_id, &amount) in &flow.0 {
             if amount > 0.0 {
                 no_providers.remove(item_id);
@@ -71,19 +71,19 @@ where
                 let value = sol.value(var);
                 result.insert(recipe_id.clone(), value);
             }
-            log::info!("求解完成，代价函数结果为: {}", sol.eval(&optimization_expr));
+            log::debug!("求解完成，代价函数结果为: {}", sol.eval(&optimization_expr));
             Ok(result)
         }
         Err(err) => {
             let mut err_string = match err {
                 good_lp::ResolutionError::Unbounded => {
-                    ("无界。存在能够无限产生目标物品且不增加消耗的配方组合。".to_string())
+                    "无界。存在能够无限产生目标物品且不增加消耗的配方组合。".to_string() 
                 }
                 good_lp::ResolutionError::Infeasible => {
-                    ("无解。不存在能够满足目标物品需求的配方组合。".to_string())
+                    "无解。不存在能够满足目标物品需求的配方组合。".to_string() 
                 }
-                good_lp::ResolutionError::Other(_) => ("求解过程中发生未知错误。".to_string()),
-                good_lp::ResolutionError::Str(s) => (format!("求解过程中发生内部错误：{}", s)),
+                good_lp::ResolutionError::Other(_) => "求解过程中发生未知错误。".to_string() ,
+                good_lp::ResolutionError::Str(s) => format!("求解过程中发生内部错误：{}", s) ,
             };
             if !no_providers.is_empty() {
                 err_string += format!("此外，以下物品缺少生产来源：{:?}", no_providers).as_str();

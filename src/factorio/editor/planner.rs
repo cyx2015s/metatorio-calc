@@ -97,7 +97,7 @@ impl EditorView for FactoryInstance {
         let id = ui.id();
         // FIXME
         // 主线程算东西之后会卡死的，现在先这样
-        if ui.ctx().cumulative_frame_nr() % 10 == 0 {
+        if ui.ctx().cumulative_frame_nr().is_multiple_of(10) {
             let flows = self
                 .flow_editors
                 .iter()
@@ -120,7 +120,6 @@ impl EditorView for FactoryInstance {
                     })
                 }
                 Err(err) => {
-                    log::error!("求解失败： {}", err);
                     ui.memory_mut(|mem| {
                         mem.data.insert_temp(id, err);
                     });
@@ -196,7 +195,7 @@ impl EditorView for FactoryInstance {
                                         });
                                 });
                                 match item {
-                                    GenericItem::Item { name, quality } => {
+                                    GenericItem::Item { name: _, quality } => {
                                         if let Some(selected) = selector_menu_with_filter(
                                             ui,
                                             ctx,
@@ -211,7 +210,7 @@ impl EditorView for FactoryInstance {
                                             };
                                         }
                                     }
-                                    GenericItem::Fluid { name, temperature } => {
+                                    GenericItem::Fluid { name: _, temperature } => {
                                         if let Some(selected) = selector_menu_with_filter(
                                             ui,
                                             ctx,

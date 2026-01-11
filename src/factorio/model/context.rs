@@ -1,4 +1,4 @@
-use std::{collections::HashMap, env, fmt::Debug, hash::Hash};
+use std::{collections::HashMap, env, fmt::Debug, hash::Hash, path::PathBuf};
 
 use serde_json::Value;
 
@@ -72,6 +72,10 @@ pub struct FactorioContext {
     /// 采矿类型集合：资源本身和采矿机器
     pub resources: Dict<ResourcePrototype>,
     pub miners: Dict<MiningDrillPrototype>,
+}
+
+fn get_workding_directory() -> PathBuf {
+    env::current_exe().unwrap().parent().unwrap().to_path_buf()
 }
 
 impl FactorioContext {
@@ -198,12 +202,7 @@ impl FactorioContext {
         // 此步较为复杂，调用方应该异步执行
         // 1. 在这个软件的数据文件夹下（秉持绿色原理，创建在这个项目程序本身的同级文件里），创建一个config.cfg
         let lang = lang.unwrap_or("zh-CN");
-        let self_path = match env::current_dir() {
-            Ok(path) => path,
-            _ => {
-                return None;
-            }
-        };
+        let self_path = get_workding_directory();
         let config_path = self_path.join("tmp/config/config.ini");
         let tmp_mod_list_json_path = self_path.join("tmp/mods/mod-list.json");
         if tmp_mod_list_json_path.exists() {
@@ -378,12 +377,8 @@ impl FactorioContext {
     }
 
     pub fn load_from_tmp_no_dump() -> Option<FactorioContext> {
-        let self_path = match env::current_dir() {
-            Ok(path) => path,
-            _ => {
-                panic!("Cannot get current directory");
-            }
-        };
+        
+        let self_path = get_workding_directory();
         let raw_path = self_path.join("tmp/script-output/data-raw-dump.json");
         let icon_path = self_path.join("tmp/script-output/");
         let mut ctx = FactorioContext::load(

@@ -3,12 +3,9 @@ use crate::{
     factorio::{
         editor::{
             icon::GenericIcon,
-            selector::{ItemSelector, selector_menu_with_filter},
+            selector::selector_menu_with_filter,
         },
-        model::{
-            context::{FactorioContext, GenericItem},
-            item,
-        },
+        model::context::{FactorioContext, GenericItem},
     },
 };
 
@@ -26,7 +23,7 @@ impl ContextBound for SourceConfig {
 impl AsFlow for SourceConfig {
     fn as_flow(
         &self,
-        ctx: &Self::ContextType,
+        _ctx: &Self::ContextType,
     ) -> std::collections::HashMap<Self::ItemIdentType, f64> {
         let mut map = std::collections::HashMap::new();
         map.insert(self.item.clone(), 1.0);
@@ -128,14 +125,14 @@ impl EditorView for SourceConfig {
                 .add_sized(
                     [35.0, 35.0],
                     GenericIcon {
-                        ctx: &ctx,
+                        ctx,
                         item: &self.item,
                         size: 32.0,
                     },
                 )
                 .interact(egui::Sense::click());
             match &self.item {
-                GenericItem::Item { name, quality } => {
+                GenericItem::Item { name: _, quality } => {
                     if let Some(selected) = selector_menu_with_filter(
                         ui,
                         ctx,
@@ -151,7 +148,7 @@ impl EditorView for SourceConfig {
                     }
                 }
                 GenericItem::Fluid {
-                    name,
+                    name: _,
                     temperature: _,
                 } => {
                     if let Some(selected) = selector_menu_with_filter(
@@ -168,7 +165,7 @@ impl EditorView for SourceConfig {
                         };
                     }
                 }
-                GenericItem::Entity { name, quality } => {
+                GenericItem::Entity { name: _, quality } => {
                     if let Some(selected) = selector_menu_with_filter(
                         ui,
                         ctx,
@@ -209,7 +206,7 @@ impl ContextBound for SourceConfigSource {
 }
 
 impl EditorView for SourceConfigSource {
-    fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &Self::ContextType) {
+    fn editor_view(&mut self, ui: &mut egui::Ui, _ctx: &Self::ContextType) {
         if ui.button("添加无限源").clicked() {
             let source = SourceConfig {
                 item: GenericItem::Item {

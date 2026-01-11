@@ -299,7 +299,6 @@ impl Display for EnergyAmount {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type")]
-
 pub enum EnergySource {
     #[serde(rename = "electric")]
     Electric(ElectricEnergySource),

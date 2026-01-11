@@ -685,7 +685,7 @@ impl EditorView for RecipeConfig {
                                                 return true;
                                             }
                                         }
-                                        return false;
+                                        false
                                     },
                                 ),
                             );
