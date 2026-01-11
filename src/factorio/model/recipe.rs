@@ -646,7 +646,7 @@ impl EditorView for RecipeConfig {
                     ui.add_sized([35.0, 35.0], egui::Label::new("空"))
                 };
                 let popup = egui::Popup::menu(&entity_button)
-                    .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
+                    .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                     .open_memory(None);
                 let popup_id = popup.get_id();
                 if entity_button.clicked() {

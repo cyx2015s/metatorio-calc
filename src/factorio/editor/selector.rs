@@ -195,7 +195,7 @@ pub fn selector_menu_with_filter(
 ) -> Option<String> {
     let mut selecting_item = None;
     let popup = egui::Popup::menu(&button)
-        .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .open_memory(None);
     let popup_id = popup.get_id();
     if button.clicked() {

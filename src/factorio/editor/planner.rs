@@ -94,8 +94,10 @@ struct FactoryInstancePanelSplitInfo {
 impl EditorView for FactoryInstance {
     fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &FactorioContext) {
         ui.heading(&self.name);
-        if ui.button("求解").clicked() {
-            // TODO: 触发计算
+        let id = ui.id();
+        // FIXME
+        // 主线程算东西之后会卡死的，现在先这样
+        if ui.ctx().cumulative_frame_nr() % 10 == 0 {
             let flows = self
                 .flow_editors
                 .iter()
@@ -113,12 +115,22 @@ impl EditorView for FactoryInstance {
                     for (idx, value) in solution.iter() {
                         self.flow_editors[*idx].notify_solution(*value);
                     }
+                    ui.memory_mut(|mem| {
+                        mem.data.remove::<String>(id);
+                    })
                 }
                 Err(err) => {
                     log::error!("求解失败： {}", err);
+                    ui.memory_mut(|mem| {
+                        mem.data.insert_temp(id, err);
+                    });
                 }
             }
         }
+        if let Some(err_info) = ui.memory(|mem| mem.data.get_temp::<String>(id)) {
+            ui.label(format!("求解错误: {}", err_info));
+        }
+
         let split_ratio = ui.memory(|mem| {
             mem.data
                 .get_temp(ui.id())
