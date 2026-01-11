@@ -1,15 +1,21 @@
 use crate::{
-    concept::{AsFlowSender, AsFlowEditor, AsFlowEditorSource, ContextBound, EditorView},
-    factorio::model::{
-        context::{FactorioContext, GenericItem},
-        recipe::RecipeConfigSource, source::SourceConfigSource,
+    concept::{AsFlowEditor, AsFlowEditorSource, AsFlowSender, ContextBound, EditorView},
+    factorio::{
+        editor::{icon::GenericIcon, selector::selector_menu_with_filter},
+        model::{
+            context::{FactorioContext, GenericItem},
+            recipe::RecipeConfigSource,
+            source::SourceConfigSource,
+        },
     },
 };
 
 pub struct FactoryInstance {
     pub name: String,
-    pub flow_editor_sources:
-        Vec<Box<dyn AsFlowEditorSource<ContextType = FactorioContext, ItemIdentType = GenericItem>>>,
+    pub target: Vec<(GenericItem, f64)>,
+    pub flow_editor_sources: Vec<
+        Box<dyn AsFlowEditorSource<ContextType = FactorioContext, ItemIdentType = GenericItem>>,
+    >,
     pub flow_editors:
         Vec<Box<dyn AsFlowEditor<ItemIdentType = GenericItem, ContextType = FactorioContext>>>,
     pub flow_receiver: std::sync::mpsc::Receiver<
@@ -24,6 +30,7 @@ impl Default for FactoryInstance {
         let (tx, rx) = std::sync::mpsc::channel();
         FactoryInstance {
             name: "工厂".to_string(),
+            target: Vec::new(),
             flow_editor_sources: Vec::new(),
             flow_editors: Vec::new(),
             flow_receiver: rx,
@@ -37,6 +44,7 @@ impl FactoryInstance {
         let (tx, rx) = std::sync::mpsc::channel();
         FactoryInstance {
             name,
+            target: Vec::new(),
             flow_editor_sources: Vec::new(),
             flow_editors: Vec::new(),
             flow_receiver: rx,
@@ -46,8 +54,9 @@ impl FactoryInstance {
     pub fn add_flow_source<
         F: Fn(
             AsFlowSender<GenericItem, FactorioContext>,
-        )
-            -> Box<dyn AsFlowEditorSource<ContextType = FactorioContext, ItemIdentType = GenericItem>>,
+        ) -> Box<
+            dyn AsFlowEditorSource<ContextType = FactorioContext, ItemIdentType = GenericItem>,
+        >,
     >(
         mut self,
         f: F,
@@ -91,37 +100,163 @@ impl EditorView for FactoryInstance {
         let (target_panel, source_panel) = left_panel.split_top_bottom_at_fraction(split_ratio.v);
 
         ui.put(target_panel, |ui: &mut egui::Ui| {
-            egui::ScrollArea::vertical().show(ui, |ui|{
-                ui.vertical(|ui| {
-                    ui.heading("优化目标");
-                }).response
-            }).inner
+            egui::ScrollArea::vertical()
+                .show(ui, |ui| {
+                    ui.vertical(|ui| {
+                        ui.heading("优化目标");
+                        let mut delete_target: Option<usize> = None;
+                        for (idx, (item, amount)) in self.target.iter_mut().enumerate() {
+                            ui.horizontal(|ui| {
+                                let icon = ui
+                                    .add_sized(
+                                        [35.0, 35.0],
+                                        GenericIcon {
+                                            ctx,
+                                            item,
+                                            size: 32.0,
+                                        },
+                                    )
+                                    .interact(egui::Sense::click());
+                                ui.vertical(|ui| {
+                                    let label = ui.label("选择目标产物类型");
+                                    egui::ComboBox::from_id_salt(label.id)
+                                        .selected_text(match item {
+                                            GenericItem::Item { .. } => "物体",
+                                            GenericItem::Fluid { .. } => "流体",
+                                            GenericItem::Entity { .. } => "实体",
+                                            GenericItem::Heat => "热量",
+                                            GenericItem::Electricity => "电力",
+                                            GenericItem::FluidHeat { .. } => "流体热量",
+                                            GenericItem::FluidFuel { .. } => "流体燃料",
+                                            GenericItem::ItemFuel { .. } => "物体燃料",
+                                            GenericItem::RocketPayloadWeight => "重量载荷",
+                                            GenericItem::RocketPayloadStack => "堆叠载荷",
+                                            GenericItem::Pollution { .. } => "污染",
+                                            _ => "特殊",
+                                        })
+                                        .show_ui(ui, |ui| {
+                                            ui.selectable_value(
+                                                item,
+                                                GenericItem::Item {
+                                                    name: "item-unknown".to_string(),
+                                                    quality: 0,
+                                                },
+                                                "物体",
+                                            );
+                                            ui.selectable_value(
+                                                item,
+                                                GenericItem::Fluid {
+                                                    name: "fluid-unknown".to_string(),
+                                                    temperature: None,
+                                                },
+                                                "流体",
+                                            );
+                                        });
+                                });
+                                match item {
+                                    GenericItem::Item { name, quality } => {
+                                        if let Some(selected) = selector_menu_with_filter(
+                                            ui,
+                                            ctx,
+                                            "选择物品",
+                                            "item",
+                                            ctx.item_order.as_ref().unwrap(),
+                                            icon,
+                                        ) {
+                                            *item = GenericItem::Item {
+                                                name: selected,
+                                                quality: *quality,
+                                            };
+                                        }
+                                    }
+                                    GenericItem::Fluid { name, temperature } => {
+                                        if let Some(selected) = selector_menu_with_filter(
+                                            ui,
+                                            ctx,
+                                            "选择流体",
+                                            "fluid",
+                                            ctx.fluid_order.as_ref().unwrap(),
+                                            icon,
+                                        ) {
+                                            *item = GenericItem::Fluid {
+                                                name: selected,
+                                                temperature: *temperature,
+                                            };
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                                ui.vertical(|ui| {
+                                    ui.label("目标产量");
+                                    ui.add(
+                                        egui::Slider::new(
+                                            amount,
+                                            -1024.0..=1024.0,
+                                        )
+                                        .suffix("/s"),
+                                    );
+                                });
+                                if ui.button("删除").clicked() {
+                                    delete_target = Some(idx);
+                                }
+                            });
+                        }
+                        if let Some(idx) = delete_target {
+                            self.target.remove(idx);
+                        }
+                        if ui.button("添加目标产物").clicked() {
+                            self.target.push((
+                                GenericItem::Item {
+                                    name: "item-unknown".to_string(),
+                                    quality: 0,
+                                },
+                                1.0,
+                            ));
+                        }
+                    })
+                    .response
+                })
+                .inner
         });
 
         ui.put(source_panel, |ui: &mut egui::Ui| {
-            egui::ScrollArea::vertical().show(ui, |ui|{
-                ui.vertical(|ui| {
-                    ui.heading("游戏机制");
-                    for flow_source in &mut self.flow_editor_sources {
-                        flow_source.editor_view(ui, ctx);
-                        ui.separator();
-                    }
-                    
-                }).response
-            }).inner
+            egui::ScrollArea::vertical()
+                .show(ui, |ui| {
+                    ui.vertical(|ui| {
+                        ui.heading("游戏机制");
+                        for flow_source in &mut self.flow_editor_sources {
+                            flow_source.editor_view(ui, ctx);
+                            ui.separator();
+                        }
+                    })
+                    .response
+                })
+                .inner
         });
-
+        let mut delte_flow: Option<usize> = None;
         ui.put(flows_panel, |ui: &mut egui::Ui| {
-            egui::ScrollArea::vertical().show(ui, |ui|{
-                ui.vertical(|ui| {
-                    ui.heading("配方配置");
-                    for flow_config in &mut self.flow_editors {
-                        flow_config.editor_view(ui, ctx);
-                        ui.separator();
-                    }
-                }).response
-            }).inner
+            egui::ScrollArea::vertical()
+                .show(ui, |ui| {
+                    ui.vertical(|ui| {
+                        ui.heading("配方配置");
+                        for (i, flow_config) in self.flow_editors.iter_mut().enumerate() {
+                            ui.horizontal(|ui| {
+                                if ui.button("删除").clicked() {
+                                    delte_flow = Some(i);
+                                }
+                                ui.separator();
+                                flow_config.editor_view(ui, ctx);
+                            });
+                            ui.separator();
+                        }
+                    })
+                    .response
+                })
+                .inner
         });
+        if let Some(idx) = delte_flow {
+            self.flow_editors.remove(idx);
+        }
 
         while let Ok(flow_source) = self.flow_receiver.try_recv() {
             self.flow_editors.push(flow_source);
@@ -176,17 +311,16 @@ impl Subview for PlannerView {
                 } else {
                     self.new_factory_name.clone()
                 };
-                self.factories
-                    .push(FactoryInstance::new(name).add_flow_source(|s| {
-                        Box::new(RecipeConfigSource {
-                            editing: RecipeConfig::default(),
-                            sender: s,
+                self.factories.push(
+                    FactoryInstance::new(name)
+                        .add_flow_source(|s| {
+                            Box::new(RecipeConfigSource {
+                                editing: RecipeConfig::default(),
+                                sender: s,
+                            })
                         })
-                    }).add_flow_source(|s| {
-                        Box::new(SourceConfigSource {
-                            sender: s
-                        })
-                    }));
+                        .add_flow_source(|s| Box::new(SourceConfigSource { sender: s })),
+                );
                 self.new_factory_name.clear();
             }
         });

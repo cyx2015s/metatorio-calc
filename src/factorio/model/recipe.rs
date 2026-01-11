@@ -9,7 +9,7 @@ use crate::{
         editor::{
             hover::PrototypeHover,
             icon::{GenericIcon, Icon},
-            selector::ItemSelector,
+            selector::{ItemSelector, selector_menu_with_filter},
         },
         format::SignedCompactLabel,
         model::{
@@ -581,50 +581,15 @@ impl EditorView for RecipeConfig {
                             prototype: ctx.recipes.get(&self.recipe.0).unwrap(),
                         });
                     });
-                let mut recipe = None;
-                let popup = egui::Popup::menu(&recipe_button)
-                    .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
-                    .open_memory(None);
-                let popup_id = popup.get_id();
-                if recipe_button.clicked() {
-                    egui::Popup::open_id(ui.ctx(), popup_id);
-                }
-                let id = ui.id();
-                let mut filter_string =
-                    ui.memory(move |mem| mem.data.get_temp::<String>(id).unwrap_or_default());
-                popup.show(|ui| {
-                    ui.label("选择配方");
-                    ui.add(egui::TextEdit::singleline(&mut filter_string).hint_text("筛选器……"));
-                    egui::ScrollArea::vertical()
-                        .max_width(f32::INFINITY)
-                        .auto_shrink(false)
-                        .show(ui, |ui| {
-                            ui.add(
-                                ItemSelector::new(
-                                    ctx,
-                                    &"recipe".to_string(),
-                                    ctx.recipe_order.as_ref().unwrap(),
-                                    &mut recipe,
-                                )
-                                .with_filter(|s, f| {
-                                    if filter_string.is_empty() {
-                                        return true;
-                                    }
-                                    s.to_lowercase().contains(&filter_string.to_lowercase())
-                                        || f.get_display_name(&"recipe".to_string(), s)
-                                            .to_lowercase()
-                                            .contains(&filter_string.to_lowercase())
-                                }),
-                            );
-                        });
-                });
-
-                ui.memory_mut(|mem| {
-                    mem.data.insert_temp(id, filter_string);
-                });
-                if let Some(selected) = recipe {
+                if let Some(selected) = selector_menu_with_filter(
+                    ui,
+                    ctx,
+                    "选择配方",
+                    "recipe",
+                    ctx.recipe_order.as_ref().unwrap(),
+                    recipe_button,
+                ) {
                     self.recipe = (selected, self.recipe.1).into();
-                    egui::Popup::close_id(ui.ctx(), popup_id);
                 }
             });
             ui.separator();
@@ -756,9 +721,9 @@ impl AsFlowEditorSource for RecipeConfigSource {
 
 impl EditorView for RecipeConfigSource {
     fn editor_view(&mut self, ui: &mut egui::Ui, _ctx: &Self::ContextType) {
-        if ui.button("[测试] 添加随机配方").clicked() {
+        if ui.button("添加配方").clicked() {
             let mut new_config = self.editing.clone();
-            new_config.recipe = ("iron-gear-wheel".to_string(), 0).into();
+            new_config.recipe = ("recipe-unknown".to_string(), 0).into();
             self.sender
                 .send(Box::new(new_config))
                 .expect("RecipeConfigSource 发送配方失败");

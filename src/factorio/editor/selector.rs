@@ -184,3 +184,53 @@ impl egui::Widget for ItemSelector<'_> {
         response
     }
 }
+
+pub fn selector_menu_with_filter(
+    ui: &mut egui::Ui,
+    ctx: &FactorioContext,
+    label_str: &str,
+    item_type: &str,
+    order_info: &OrderInfo,
+    button: egui::Response,
+) -> Option<String> {
+    let mut selecting_item = None;
+    let popup = egui::Popup::menu(&button)
+        .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
+        .open_memory(None);
+    let popup_id = popup.get_id();
+    if button.clicked() {
+        egui::Popup::open_id(ui.ctx(), popup_id);
+    }
+    let id = ui.id();
+    let mut filter_string =
+        ui.memory(move |mem| mem.data.get_temp::<String>(id).unwrap_or_default());
+    popup.show(|ui| {
+        ui.label(label_str);
+        ui.add(egui::TextEdit::singleline(&mut filter_string).hint_text("筛选器……"));
+        egui::ScrollArea::vertical()
+            .max_width(f32::INFINITY)
+            .auto_shrink(false)
+            .show(ui, |ui| {
+                ui.add(
+                    ItemSelector::new(ctx, &item_type.to_string(), order_info, &mut selecting_item)
+                        .with_filter(|s, f| {
+                            if filter_string.is_empty() {
+                                return true;
+                            }
+                            s.to_lowercase().contains(&filter_string.to_lowercase())
+                                || f.get_display_name(&item_type.to_string(), s)
+                                    .to_lowercase()
+                                    .contains(&filter_string.to_lowercase())
+                        }),
+                );
+            });
+    });
+
+    ui.memory_mut(|mem| {
+        mem.data.insert_temp(id, filter_string);
+    });
+    if let Some(_) = selecting_item.clone() {
+        egui::Popup::close_id(ui.ctx(), popup_id);
+    }
+    selecting_item
+}

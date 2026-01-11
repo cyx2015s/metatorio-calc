@@ -1,8 +1,14 @@
 use crate::{
     concept::{AsFlow, AsFlowEditor, AsFlowEditorSource, AsFlowSender, ContextBound, EditorView},
     factorio::{
-        editor::{icon::GenericIcon, selector::ItemSelector},
-        model::context::{FactorioContext, GenericItem},
+        editor::{
+            icon::GenericIcon,
+            selector::{ItemSelector, selector_menu_with_filter},
+        },
+        model::{
+            context::{FactorioContext, GenericItem},
+            item,
+        },
     },
 };
 
@@ -129,50 +135,14 @@ impl EditorView for SourceConfig {
                 .interact(egui::Sense::click());
             match &self.item {
                 GenericItem::Item { name, quality } => {
-                    let mut selecting_item = None;
-                    let popup = egui::Popup::menu(&icon)
-                        .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
-                        .open_memory(None);
-                    let popup_id = popup.get_id();
-                    if icon.clicked() {
-                        egui::Popup::open_id(ui.ctx(), popup_id);
-                    }
-                    let id = ui.id();
-                    let mut filter_string =
-                        ui.memory(move |mem| mem.data.get_temp::<String>(id).unwrap_or_default());
-                    popup.show(|ui| {
-                        ui.label("选择物品");
-                        ui.add(
-                            egui::TextEdit::singleline(&mut filter_string).hint_text("筛选器……"),
-                        );
-                        egui::ScrollArea::vertical()
-                            .max_width(f32::INFINITY)
-                            .auto_shrink(false)
-                            .show(ui, |ui| {
-                                ui.add(
-                                    ItemSelector::new(
-                                        ctx,
-                                        &"item".to_string(),
-                                        ctx.item_order.as_ref().unwrap(),
-                                        &mut selecting_item,
-                                    )
-                                    .with_filter(|s, f| {
-                                        if filter_string.is_empty() {
-                                            return true;
-                                        }
-                                        s.to_lowercase().contains(&filter_string.to_lowercase())
-                                            || f.get_display_name(&"item".to_string(), s)
-                                                .to_lowercase()
-                                                .contains(&filter_string.to_lowercase())
-                                    }),
-                                );
-                            });
-                    });
-                    ui.memory_mut(|mem| {
-                        mem.data.insert_temp(id, filter_string);
-                    });
-                    if let Some(selected) = selecting_item {
-                        egui::Popup::close_id(ui.ctx(), popup_id);
+                    if let Some(selected) = selector_menu_with_filter(
+                        ui,
+                        ctx,
+                        "选择物体",
+                        "item",
+                        ctx.item_order.as_ref().unwrap(),
+                        icon,
+                    ) {
                         self.item = GenericItem::Item {
                             name: selected,
                             quality: *quality,
@@ -183,51 +153,14 @@ impl EditorView for SourceConfig {
                     name,
                     temperature: _,
                 } => {
-                    let mut selecting_item = None;
-                    let popup = egui::Popup::menu(&icon)
-                        .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
-                        .open_memory(None);
-                    let popup_id = popup.get_id();
-                    if icon.clicked() {
-                        egui::Popup::open_id(ui.ctx(), popup_id);
-                    }
-                    let id = ui.id();
-                    let mut filter_string =
-                        ui.memory(move |mem| mem.data.get_temp::<String>(id).unwrap_or_default());
-                    popup.show(|ui| {
-                        ui.label("选择流体");
-                        ui.add(
-                            egui::TextEdit::singleline(&mut filter_string).hint_text("筛选器……"),
-                        );
-                        egui::ScrollArea::vertical()
-                            .max_width(f32::INFINITY)
-                            .auto_shrink(false)
-                            .show(ui, |ui| {
-                                ui.add(
-                                    ItemSelector::new(
-                                        ctx,
-                                        &"fluid".to_string(),
-                                        ctx.fluid_order.as_ref().unwrap(),
-                                        &mut selecting_item,
-                                    )
-                                    .with_filter(|s, f| {
-                                        if filter_string.is_empty() {
-                                            return true;
-                                        }
-                                        s.to_lowercase().contains(&filter_string.to_lowercase())
-                                            || f.get_display_name(&"fluid".to_string(), s)
-                                                .to_lowercase()
-                                                .contains(&filter_string.to_lowercase())
-                                    }),
-                                );
-                            });
-                    });
-
-                    ui.memory_mut(|mem| {
-                        mem.data.insert_temp(id, filter_string);
-                    });
-                    if let Some(selected) = selecting_item {
-                        egui::Popup::close_id(ui.ctx(), popup_id);
+                    if let Some(selected) = selector_menu_with_filter(
+                        ui,
+                        ctx,
+                        "选择流体",
+                        "fluid",
+                        ctx.fluid_order.as_ref().unwrap(),
+                        icon,
+                    ) {
                         self.item = GenericItem::Fluid {
                             name: selected,
                             temperature: None,
@@ -235,51 +168,14 @@ impl EditorView for SourceConfig {
                     }
                 }
                 GenericItem::Entity { name, quality } => {
-                    let mut selecting_item = None;
-                    let popup = egui::Popup::menu(&icon)
-                        .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)
-                        .open_memory(None);
-                    let popup_id = popup.get_id();
-                    if icon.clicked() {
-                        egui::Popup::open_id(ui.ctx(), popup_id);
-                    }
-                    let id = ui.id();
-                    let mut filter_string =
-                        ui.memory(move |mem| mem.data.get_temp::<String>(id).unwrap_or_default());
-                    popup.show(|ui| {
-                        ui.label("选择实体");
-                        ui.add(
-                            egui::TextEdit::singleline(&mut filter_string).hint_text("筛选器……"),
-                        );
-                        egui::ScrollArea::vertical()
-                            .max_width(f32::INFINITY)
-                            .auto_shrink(false)
-                            .show(ui, |ui| {
-                                ui.add(
-                                    ItemSelector::new(
-                                        ctx,
-                                        &"entity".to_string(),
-                                        ctx.entity_order.as_ref().unwrap(),
-                                        &mut selecting_item,
-                                    )
-                                    .with_filter(|s, f| {
-                                        if filter_string.is_empty() {
-                                            return true;
-                                        }
-                                        s.to_lowercase().contains(&filter_string.to_lowercase())
-                                            || f.get_display_name(&"entity".to_string(), s)
-                                                .to_lowercase()
-                                                .contains(&filter_string.to_lowercase())
-                                    }),
-                                );
-                            });
-                    });
-
-                    ui.memory_mut(|mem| {
-                        mem.data.insert_temp(id, filter_string);
-                    });
-                    if let Some(selected) = selecting_item {
-                        egui::Popup::close_id(ui.ctx(), popup_id);
+                    if let Some(selected) = selector_menu_with_filter(
+                        ui,
+                        ctx,
+                        "选择实体",
+                        "entity",
+                        ctx.entity_order.as_ref().unwrap(),
+                        icon,
+                    ) {
                         self.item = GenericItem::Entity {
                             name: selected,
                             quality: *quality,
