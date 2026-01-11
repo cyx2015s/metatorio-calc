@@ -5,6 +5,18 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::hash::Hash;
 
+pub fn hash_map_add<T>(a: &HashMap<T, f64>, b: &HashMap<T, f64>, c: f64) -> HashMap<T, f64>
+where
+    T: Eq + Hash + Clone,
+{
+    let mut result = a.clone();
+    for (key, value) in b {
+        let entry = result.entry(key.clone()).or_insert(0.0);
+        *entry += value * c;
+    }
+    result
+}
+
 pub fn basic_solver<I, R>(
     target: HashMap<I, f64>,                   // 目标物品及其需求量
     flows: HashMap<R, (HashMap<I, f64>, f64)>, // 配方标识符及其物品流
