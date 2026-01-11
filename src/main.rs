@@ -1,4 +1,7 @@
-use crate::{concept::*, factorio::model::context::get_workding_directory};
+// Git 版本信息
+include!(concat!(env!("OUT_DIR"), "/git_hash.rs"));
+
+use crate::concept::*;
 
 pub mod concept;
 pub mod factorio;
@@ -40,6 +43,8 @@ impl eframe::App for MainPage {
             .width_range(200.0..=280.0)
             .show(ctx, |ui| {
                 ui.heading("切向量化");
+                ui.label(format!("构建信息: {}", GIT_HASH));
+                ui.hyperlink("https://github.com/cyx2015s/metatorio-calc");
                 for (i, creator) in self.creators.iter_mut().enumerate() {
                     if ui
                         .selectable_label(self.selected == i, creator.0.to_string())

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ops::Not};
+use std::collections::HashMap;
 
 use crate::{
     concept::{AsFlowEditor, AsFlowEditorSource, AsFlowSender, ContextBound, EditorView},
@@ -436,12 +436,11 @@ impl Subview for FactorioContextCreatorView {
                 ui.label("有一个正在加载的游戏上下文了。");
                 can_load_context = false;
             }
-            if let Some(mod_path) = self.mod_path.as_ref() {
-                if !mod_path.join("mod-list.json").exists() {
+            if let Some(mod_path) = self.mod_path.as_ref()
+                && !mod_path.join("mod-list.json").exists() {
                     ui.label("模组文件夹下未找到 mod-list.json。");
                     can_load_context = false;
                 }
-            }
             if ui
                 .add_enabled(can_load_context, egui::Button::new("加载游戏上下文"))
                 .clicked()

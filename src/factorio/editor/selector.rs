@@ -3,9 +3,8 @@ use std::collections::HashMap;
 use egui::Vec2;
 
 use crate::factorio::{
-    common::OrderInfo,
     editor::{hover::PrototypeHover, icon::Icon},
-    model::{context::FactorioContext, item},
+    model::context::FactorioContext,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -190,7 +189,6 @@ pub fn selector_menu_with_filter(
     button: egui::Response,
 ) -> Option<String> {
     let mut selecting_item = None;
-    let order_info = &ctx.ordered_entries[item_type];
     let popup = egui::Popup::menu(&button)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .open_memory(None);
