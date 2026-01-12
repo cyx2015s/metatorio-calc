@@ -30,26 +30,21 @@ pub trait AsFlow: Send + ContextBound {
 pub type AsFlowSender<I, C> =
     std::sync::mpsc::Sender<Box<dyn AsFlowEditor<ItemIdentType = I, ContextType = C>>>;
 
-
 pub trait ItemIdent: Debug + Clone + Eq + Hash {}
 pub trait GameContextCreatorView: Subview {
     fn set_subview_sender(&mut self, sender: std::sync::mpsc::Sender<Box<dyn Subview>>);
 }
 
-pub trait AsFlowEditor: AsFlow + EditorView {
-    fn notify_solution(&mut self, solution: f64) {
-        println!("AsFlowEditor::notify_solution called with {:?}", solution);
-    }
+pub trait AsFlowEditor: AsFlow + EditorView {}
 
-    fn get_solution(&self) -> Option<f64> {
-        None
-    }
-}
+impl<T> AsFlowEditor for T where T: AsFlow + EditorView {}
 
 pub trait AsFlowEditorSource: EditorView + ContextBound {
     /// 传递创建的配方信息
     fn set_as_flow_sender(&mut self, sender: AsFlowSender<Self::ItemIdentType, Self::ContextType>);
 
+    /// TODO
+    /// 游戏机制提供器可选：自动填充逻辑
     fn auto_populate(
         &mut self,
         _ctx: &Self::ContextType,
@@ -58,6 +53,18 @@ pub trait AsFlowEditorSource: EditorView + ContextBound {
         Box<dyn AsFlowEditor<ItemIdentType = Self::ItemIdentType, ContextType = Self::ContextType>>,
     > {
         // 默认不实现任何自动填充逻辑
+        vec![]
+    }
+
+    /// 在规划界面点击物品时，可以提供一些推荐配方
+    fn hint_populate(
+        &mut self,
+        _ctx: &Self::ContextType,
+        _item: &Self::ItemIdentType,
+        _value: f64,
+    ) -> Vec<
+        Box<dyn AsFlowEditor<ItemIdentType = Self::ItemIdentType, ContextType = Self::ContextType>>,
+    > {
         vec![]
     }
 }

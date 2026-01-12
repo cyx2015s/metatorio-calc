@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Debug};
+use std::fmt::Debug;
 
 use serde::Deserialize;
 
@@ -398,7 +398,6 @@ pub struct RecipeConfig {
     /// 类型为Fluid时，值为(流体名, 流体温度)
     /// 类型为Burner时，值为(物品名, 物品品质)
     pub instance_fuel: Option<(String, i32)>,
-    pub solved_ratio: Option<f64>,
 }
 
 impl ContextBound for RecipeConfig {
@@ -414,7 +413,6 @@ impl Default for RecipeConfig {
             module_config: ModuleConfig::new(),
             extra_effects: Effect::default(),
             instance_fuel: None,
-            solved_ratio: None,
         }
     }
 }
@@ -581,7 +579,6 @@ fn test_recipe_normalized() {
         module_config: ModuleConfig::new(),
         extra_effects: Effect::default(),
         instance_fuel: Some(("nutrients".to_string(), 0).into()),
-        solved_ratio: None,
     };
     let result = recipe_config.as_flow(&ctx);
     println!("Recipe Result: {:?}", result);
@@ -722,15 +719,6 @@ impl EditorView for RecipeConfig {
     }
 }
 
-impl AsFlowEditor for RecipeConfig {
-    fn notify_solution(&mut self, solution: f64) {
-        self.solved_ratio = Some(solution);
-    }
-
-    fn get_solution(&self) -> Option<f64> {
-        self.solved_ratio
-    }
-}
 
 pub struct RecipeConfigSource {
     pub editing: RecipeConfig,

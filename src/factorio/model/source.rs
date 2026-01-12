@@ -1,5 +1,5 @@
 use crate::{
-    concept::{AsFlow, AsFlowEditor, AsFlowEditorSource, AsFlowSender, ContextBound, EditorView, Flow},
+    concept::{AsFlow, AsFlowEditorSource, AsFlowSender, ContextBound, EditorView, Flow},
     factorio::{
         editor::{icon::GenericIcon, selector::selector_menu_with_filter},
         model::context::{FactorioContext, GenericItem},
@@ -9,7 +9,6 @@ use crate::{
 /// 特殊：指代线性规划的无穷物体源
 pub struct SourceConfig {
     pub item: GenericItem,
-    pub solved_ratio: Option<f64>,
 }
 
 impl ContextBound for SourceConfig {
@@ -171,16 +170,6 @@ impl EditorView for SourceConfig {
     }
 }
 
-impl AsFlowEditor for SourceConfig {
-    fn notify_solution(&mut self, solution: f64) {
-        self.solved_ratio = Some(solution);
-    }
-
-    fn get_solution(&self) -> Option<f64> {
-        self.solved_ratio
-    }
-}
-
 pub struct SourceConfigSource {
     pub sender: AsFlowSender<GenericItem, FactorioContext>,
 }
@@ -198,7 +187,6 @@ impl EditorView for SourceConfigSource {
                     name: "item-unknown".to_string(),
                     quality: 0,
                 },
-                solved_ratio: None,
             };
             self.sender.send(Box::new(source)).unwrap();
         }

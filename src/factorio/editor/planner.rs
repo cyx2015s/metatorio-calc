@@ -143,7 +143,6 @@ impl EditorView for FactoryInstance {
                     self.solution = solution.clone();
                     for fe in self.flow_editors.iter_mut() {
                         let var_value = self.solution.get(&box_as_ptr(fe)).cloned().unwrap_or(0.0);
-                        fe.notify_solution(var_value);
                         let flow = fe.as_flow(ctx);
                         self.total_flow = flow_add(&self.total_flow, &flow, var_value);
                     }
@@ -364,10 +363,11 @@ impl EditorView for FactoryInstance {
                                     if ui.button("删除").clicked() {
                                         delete_flow = Some(i);
                                     }
+                                    let ptr = box_as_ptr(flow_config);
                                     if err_info.is_none()
-                                        && let Some(solution) = flow_config.get_solution()
+                                        && let Some(solution) = self.solution.get(&ptr)
                                     {
-                                        ui.add(CompactLabel::new(solution));
+                                        ui.add(CompactLabel::new(*solution));
                                     } else {
                                         ui.label("待解");
                                     }
