@@ -127,8 +127,7 @@ impl EditorView for FactoryInstance {
                         let var_value = self.solution.get(&box_as_ptr(fe)).cloned().unwrap_or(0.0);
                         fe.notify_solution(var_value);
                         let flow = fe.as_flow(ctx);
-                        self.total_flow =
-                            hash_map_add(&self.total_flow, &flow, var_value);
+                        self.total_flow = hash_map_add(&self.total_flow, &flow, var_value);
                     }
                     ui.memory_mut(|mem| {
                         mem.data.remove::<String>(id);
