@@ -16,9 +16,11 @@ pub trait EditorView: Send + ContextBound {
     fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &Self::ContextType);
 }
 
+pub type Flow<I> = HashMap<I, f64>;
+
 pub trait AsFlow: Send + ContextBound {
     /// 传递物品流信息
-    fn as_flow(&self, ctx: &Self::ContextType) -> HashMap<Self::ItemIdentType, f64>;
+    fn as_flow(&self, ctx: &Self::ContextType) -> Flow<Self::ItemIdentType>;
     /// 执行成本，默认返回 1.0
     fn cost(&self, _ctx: &Self::ContextType) -> f64 {
         1.0
@@ -27,6 +29,7 @@ pub trait AsFlow: Send + ContextBound {
 
 pub type AsFlowSender<I, C> =
     std::sync::mpsc::Sender<Box<dyn AsFlowEditor<ItemIdentType = I, ContextType = C>>>;
+
 
 pub trait ItemIdent: Debug + Clone + Eq + Hash {}
 pub trait GameContextCreatorView: Subview {
@@ -46,4 +49,15 @@ pub trait AsFlowEditor: AsFlow + EditorView {
 pub trait AsFlowEditorSource: EditorView + ContextBound {
     /// 传递创建的配方信息
     fn set_as_flow_sender(&mut self, sender: AsFlowSender<Self::ItemIdentType, Self::ContextType>);
+
+    fn auto_populate(
+        &mut self,
+        _ctx: &Self::ContextType,
+        _flows: &HashMap<usize, Flow<Self::ItemIdentType>>,
+    ) -> Vec<
+        Box<dyn AsFlowEditor<ItemIdentType = Self::ItemIdentType, ContextType = Self::ContextType>>,
+    > {
+        // 默认不实现任何自动填充逻辑
+        vec![]
+    }
 }

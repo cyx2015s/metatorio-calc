@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
-use crate::factorio::{
+use crate::{concept::Flow, factorio::{
     common::{Effect, EnergyAmount, EnergySource, update_map},
     model::context::{FactorioContext, GenericItem},
-};
+}};
 
 pub fn energy_source_as_flow(
     ctx: &FactorioContext,
@@ -12,7 +12,7 @@ pub fn energy_source_as_flow(
     effects: &Effect,
     instance_fuel: &Option<(String, i32)>,
     fulfillment: &mut f64,
-) -> HashMap<GenericItem, f64> {
+) -> Flow<GenericItem> {
     let mut map = HashMap::new();
     match energy_source {
         EnergySource::Electric(source) => {

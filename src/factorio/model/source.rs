@@ -1,5 +1,5 @@
 use crate::{
-    concept::{AsFlow, AsFlowEditor, AsFlowEditorSource, AsFlowSender, ContextBound, EditorView},
+    concept::{AsFlow, AsFlowEditor, AsFlowEditorSource, AsFlowSender, ContextBound, EditorView, Flow},
     factorio::{
         editor::{icon::GenericIcon, selector::selector_menu_with_filter},
         model::context::{FactorioContext, GenericItem},
@@ -21,7 +21,7 @@ impl AsFlow for SourceConfig {
     fn as_flow(
         &self,
         _ctx: &Self::ContextType,
-    ) -> std::collections::HashMap<Self::ItemIdentType, f64> {
+    ) -> Flow<Self::ItemIdentType> {
         let mut map = std::collections::HashMap::new();
         map.insert(self.item.clone(), 1.0);
         map

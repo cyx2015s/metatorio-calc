@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use serde::Deserialize;
 
 use crate::{
-    concept::{AsFlow, ContextBound},
+    concept::{AsFlow, ContextBound, Flow},
     factorio::{
         common::*,
         model::{context::*, energy::*, entity::*, recipe::*},
@@ -91,8 +91,8 @@ impl ContextBound for MiningConfig {
 }
 
 impl AsFlow for MiningConfig {
-    fn as_flow(&self, ctx: &Self::ContextType) -> HashMap<Self::ItemIdentType, f64> {
-        let mut map = HashMap::new();
+    fn as_flow(&self, ctx: &Self::ContextType) -> Flow<Self::ItemIdentType> {
+        let mut map = Flow::new();
 
         let mut module_effects = Effect::default();
 

@@ -11,7 +11,7 @@ use std::{
 use serde_json::Value;
 
 use crate::{
-    concept::ItemIdent,
+    concept::{Flow, ItemIdent},
     factorio::{
         common::*,
         model::{entity::*, fluid::*, item::*, mining::*, module::*, quality::*, recipe::*},
@@ -582,9 +582,9 @@ impl ItemIdent for GenericItem {}
 impl ItemIdent for GenericItemWithLocation {}
 
 pub fn make_located_generic_recipe(
-    original: HashMap<GenericItem, f64>,
+    original: Flow<GenericItem>,
     location: u16,
-) -> HashMap<GenericItemWithLocation, f64> {
+) -> Flow<GenericItemWithLocation> {
     let mut located = HashMap::new();
     for (key, value) in original.into_iter() {
         let located_key = GenericItemWithLocation {

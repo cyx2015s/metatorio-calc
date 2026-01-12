@@ -420,8 +420,8 @@ impl Default for RecipeConfig {
 }
 
 impl AsFlow for RecipeConfig {
-    fn as_flow(&self, ctx: &FactorioContext) -> HashMap<Self::ItemIdentType, f64> {
-        let mut map = HashMap::new();
+    fn as_flow(&self, ctx: &FactorioContext) -> Flow<Self::ItemIdentType> {
+        let mut map = Flow::new();
 
         let mut module_effects = self.module_config.get_effect(ctx);
 

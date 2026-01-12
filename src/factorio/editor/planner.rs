@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    concept::{AsFlowEditor, AsFlowEditorSource, AsFlowSender, ContextBound, EditorView},
+    concept::{AsFlowEditor, AsFlowEditorSource, AsFlowSender, ContextBound, EditorView, Flow},
     factorio::{
         common::sort_generic_items,
         editor::{icon::GenericIcon, selector::selector_menu_with_filter},
@@ -12,14 +12,14 @@ use crate::{
             source::SourceConfigSource,
         },
     },
-    solver::{basic_solver, box_as_ptr, hash_map_add},
+    solver::{basic_solver, box_as_ptr, flow_add},
 };
 
 pub struct FactoryInstance {
     pub name: String,
     pub target: Vec<(GenericItem, f64)>,
-    pub solution: HashMap<usize, f64>, // key 为 AsFlowEditor 的唯一标识符（通过 box_as_ptr 获得）
-    pub total_flow: HashMap<GenericItem, f64>,
+    pub solution: Flow<usize>,
+    pub total_flow: Flow<GenericItem>,
     pub flow_editor_sources: Vec<
         Box<dyn AsFlowEditorSource<ContextType = FactorioContext, ItemIdentType = GenericItem>>,
     >,
@@ -31,18 +31,16 @@ pub struct FactoryInstance {
     pub flow_sender: std::sync::mpsc::Sender<
         Box<dyn AsFlowEditor<ItemIdentType = GenericItem, ContextType = FactorioContext>>,
     >,
-    pub solver_sender: std::sync::mpsc::Sender<(
-        HashMap<GenericItem, f64>,
-        HashMap<usize, (HashMap<GenericItem, f64>, f64)>,
-    )>,
-    pub solver_receiver: std::sync::mpsc::Receiver<Result<HashMap<usize, f64>, String>>,
+    pub solver_sender:
+        std::sync::mpsc::Sender<(Flow<GenericItem>, HashMap<usize, (Flow<GenericItem>, f64)>)>,
+    pub solver_receiver: std::sync::mpsc::Receiver<Result<Flow<usize>, String>>,
 }
 impl Default for FactoryInstance {
     fn default() -> Self {
         let (tx, rx) = std::sync::mpsc::channel();
         let (solver_sender, solver_receiver_internal) = std::sync::mpsc::channel::<(
-            HashMap<GenericItem, f64>,
-            HashMap<usize, (HashMap<GenericItem, f64>, f64)>,
+            Flow<GenericItem>,
+            HashMap<usize, (Flow<GenericItem>, f64)>,
         )>();
         let (solver_sender_internal, solver_receiver) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
@@ -72,8 +70,8 @@ impl FactoryInstance {
     pub fn new(name: String) -> Self {
         let (tx, rx) = std::sync::mpsc::channel();
         let (solver_sender, solver_receiver_internal) = std::sync::mpsc::channel::<(
-            HashMap<GenericItem, f64>,
-            HashMap<usize, (HashMap<GenericItem, f64>, f64)>,
+            Flow<GenericItem>,
+            HashMap<usize, (Flow<GenericItem>, f64)>,
         )>();
         let (solver_sender_internal, solver_receiver) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
@@ -147,7 +145,7 @@ impl EditorView for FactoryInstance {
                         let var_value = self.solution.get(&box_as_ptr(fe)).cloned().unwrap_or(0.0);
                         fe.notify_solution(var_value);
                         let flow = fe.as_flow(ctx);
-                        self.total_flow = hash_map_add(&self.total_flow, &flow, var_value);
+                        self.total_flow = flow_add(&self.total_flow, &flow, var_value);
                     }
                     ui.memory_mut(|mem| {
                         mem.data.remove::<String>(id);
