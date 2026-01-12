@@ -31,10 +31,28 @@ pub struct FactoryInstance {
     pub flow_sender: std::sync::mpsc::Sender<
         Box<dyn AsFlowEditor<ItemIdentType = GenericItem, ContextType = FactorioContext>>,
     >,
+    pub solver_sender: std::sync::mpsc::Sender<(
+        HashMap<GenericItem, f64>,
+        HashMap<usize, (HashMap<GenericItem, f64>, f64)>,
+    )>,
+    pub solver_receiver: std::sync::mpsc::Receiver<Result<HashMap<usize, f64>, String>>,
 }
 impl Default for FactoryInstance {
     fn default() -> Self {
         let (tx, rx) = std::sync::mpsc::channel();
+        let (solver_sender, solver_receiver_internal) = std::sync::mpsc::channel::<(
+            HashMap<GenericItem, f64>,
+            HashMap<usize, (HashMap<GenericItem, f64>, f64)>,
+        )>();
+        let (solver_sender_internal, solver_receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            while let Ok((target, flows)) = solver_receiver_internal.recv() {
+                let result = basic_solver(target, flows);
+                if solver_sender_internal.send(result).is_err() {
+                    break;
+                }
+            }
+        });
         FactoryInstance {
             name: "工厂".to_string(),
             target: Vec::new(),
@@ -44,6 +62,8 @@ impl Default for FactoryInstance {
             flow_editors: Vec::new(),
             flow_receiver: rx,
             flow_sender: tx,
+            solver_sender,
+            solver_receiver,
         }
     }
 }
@@ -51,6 +71,19 @@ impl Default for FactoryInstance {
 impl FactoryInstance {
     pub fn new(name: String) -> Self {
         let (tx, rx) = std::sync::mpsc::channel();
+        let (solver_sender, solver_receiver_internal) = std::sync::mpsc::channel::<(
+            HashMap<GenericItem, f64>,
+            HashMap<usize, (HashMap<GenericItem, f64>, f64)>,
+        )>();
+        let (solver_sender_internal, solver_receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            while let Ok((target, flows)) = solver_receiver_internal.recv() {
+                let result = basic_solver(target, flows);
+                if solver_sender_internal.send(result).is_err() {
+                    break;
+                }
+            }
+        });
         FactoryInstance {
             name,
             target: Vec::new(),
@@ -60,6 +93,8 @@ impl FactoryInstance {
             flow_editors: Vec::new(),
             flow_receiver: rx,
             flow_sender: tx,
+            solver_sender,
+            solver_receiver,
         }
     }
     pub fn add_flow_source<
@@ -102,23 +137,8 @@ impl EditorView for FactoryInstance {
     fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &FactorioContext) {
         ui.heading(&self.name);
         let id = ui.id();
-        // FIXME
-        // 主线程算东西之后会卡死的，现在先这样
-        if ui.ctx().cumulative_frame_nr().is_multiple_of(10) {
-            let flows = self
-                .flow_editors
-                .iter()
-                .map(|fe| (box_as_ptr(fe), (fe.as_flow(ctx), fe.cost(ctx))))
-                .collect::<HashMap<usize, (_, _)>>();
-            let target = self
-                .target
-                .iter()
-                .map(|(item, amount)| (item.clone(), *amount))
-                .fold(HashMap::new(), |mut acc, (item, amount)| {
-                    *acc.entry(item).or_insert(0.0) += amount;
-                    acc
-                });
-            let result = basic_solver(target, flows);
+
+        while let Ok(result) = self.solver_receiver.try_recv() {
             match result {
                 Ok(solution) => {
                     self.total_flow.clear();
@@ -141,6 +161,23 @@ impl EditorView for FactoryInstance {
                     });
                 }
             }
+        }
+
+        if ui.ctx().cumulative_frame_nr().is_multiple_of(10) {
+            let flows = self
+                .flow_editors
+                .iter()
+                .map(|fe| (box_as_ptr(fe), (fe.as_flow(ctx), fe.cost(ctx))))
+                .collect::<HashMap<usize, (_, _)>>();
+            let target = self
+                .target
+                .iter()
+                .map(|(item, amount)| (item.clone(), *amount))
+                .fold(HashMap::new(), |mut acc, (item, amount)| {
+                    *acc.entry(item).or_insert(0.0) += amount;
+                    acc
+                });
+            let _ = self.solver_sender.send((target, flows));
         }
         let err_info = ui.memory(|mem| mem.data.get_temp::<String>(id)).clone();
         if let Some(err_info) = &err_info {
