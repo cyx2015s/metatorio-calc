@@ -689,7 +689,6 @@ impl EditorView for RecipeConfig {
     }
 }
 
-
 pub struct RecipeConfigSource {
     pub editing: RecipeConfig,
     pub sender: AsFlowSender<GenericItem, FactorioContext>,
@@ -703,6 +702,77 @@ impl ContextBound for RecipeConfigSource {
 impl AsFlowEditorSource for RecipeConfigSource {
     fn set_as_flow_sender(&mut self, sender: AsFlowSender<GenericItem, FactorioContext>) {
         self.sender = sender;
+    }
+
+    fn hint_populate(
+        &self,
+        ctx: &Self::ContextType,
+        _flows: &std::collections::HashMap<usize, Flow<Self::ItemIdentType>>,
+        item: &Self::ItemIdentType,
+        value: f64,
+    ) -> Vec<
+        Box<dyn AsFlowEditor<ItemIdentType = Self::ItemIdentType, ContextType = Self::ContextType>>,
+    > {
+        let item_name = match item {
+            GenericItem::Item { name, .. } => name,
+            GenericItem::Fluid { name, .. } => name,
+            _ => return vec![], // Not an item or fluid, do nothing.
+        };
+
+        let mut suggestions = Vec::new();
+
+        for recipe_proto in ctx.recipes.values() {
+            let matches = if recipe_proto.base.hidden {
+                false
+            } else if value < 0.0 {
+                // We have a deficit, need recipes that PRODUCE this item
+                recipe_proto.results.iter().any(|result| match result {
+                    RecipeResult::Item(r) => &r.name == item_name,
+                    RecipeResult::Fluid(r) => &r.name == item_name,
+                })
+            } else {
+                // We have a surplus, need recipes that CONSUME this item
+                recipe_proto
+                    .ingredients
+                    .iter()
+                    .any(|ingredient| match ingredient {
+                        RecipeIngredient::Item(i) => &i.name == item_name,
+                        RecipeIngredient::Fluid(i) => &i.name == item_name,
+                    })
+            };
+
+            if matches {
+                let mut recipe_config = RecipeConfig::default();
+                recipe_config.recipe = (recipe_proto.base.name.clone(), 0).into();
+                // Try to find a suitable machine
+                let category = recipe_proto
+                    .category
+                    .as_ref()
+                    .map_or("crafting", |s| s.as_str());
+                if let Some(machine) = ctx
+                    .crafters
+                    .values()
+                    .find(|crafter| crafter.crafting_categories.contains(&category.to_string()))
+                {
+                    recipe_config.machine = Some((machine.base.base.name.clone(), 0).into());
+                }
+                let actual_produce = recipe_config.as_flow(ctx).get(item).cloned().unwrap_or(0.0);
+                if (value < 0.0 && actual_produce <= 0.0) || (value > 0.0 && actual_produce >= 0.0)
+                {
+                    // This recipe does not actually help with the deficit/surplus
+                    continue;
+                }
+                suggestions.push(Box::new(recipe_config)
+                    as Box<
+                        dyn AsFlowEditor<
+                                ItemIdentType = Self::ItemIdentType,
+                                ContextType = Self::ContextType,
+                            >,
+                    >);
+            }
+        }
+
+        suggestions
     }
 }
 

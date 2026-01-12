@@ -25,6 +25,8 @@ pub struct FactoryInstance {
     >,
     pub flow_editors:
         Vec<Box<dyn AsFlowEditor<ItemIdentType = GenericItem, ContextType = FactorioContext>>>,
+    pub hint_flows:
+        Vec<Box<dyn AsFlowEditor<ItemIdentType = GenericItem, ContextType = FactorioContext>>>,
     pub flow_receiver: std::sync::mpsc::Receiver<
         Box<dyn AsFlowEditor<ItemIdentType = GenericItem, ContextType = FactorioContext>>,
     >,
@@ -58,6 +60,7 @@ impl Default for FactoryInstance {
             total_flow: HashMap::new(),
             flow_editor_sources: Vec::new(),
             flow_editors: Vec::new(),
+            hint_flows: Vec::new(),
             flow_receiver: rx,
             flow_sender: tx,
             solver_sender,
@@ -84,15 +87,11 @@ impl FactoryInstance {
         });
         FactoryInstance {
             name,
-            target: Vec::new(),
-            solution: HashMap::new(),
-            total_flow: HashMap::new(),
-            flow_editor_sources: Vec::new(),
-            flow_editors: Vec::new(),
             flow_receiver: rx,
             flow_sender: tx,
             solver_sender,
             solver_receiver,
+            ..Default::default()
         }
     }
     pub fn add_flow_source<
@@ -325,6 +324,7 @@ impl EditorView for FactoryInstance {
                 .inner
         });
         let mut delete_flow: Option<usize> = None;
+        let mut add_hint_flow: Option<usize> = None;
         ui.put(flows_panel.shrink(4.0), |ui: &mut egui::Ui| {
             egui::ScrollArea::vertical()
                 .id_salt(3)
@@ -348,10 +348,10 @@ impl EditorView for FactoryInstance {
                                             size: 32.0,
                                         },
                                     );
-                                    if ui.available_size_before_wrap().x < 35.0 {
-                                        ui.end_row();
-                                    }
                                 });
+                                if ui.available_size_before_wrap().x < 35.0 {
+                                    ui.end_row();
+                                }
                             }
                         });
 
@@ -396,14 +396,61 @@ impl EditorView for FactoryInstance {
                                                     [35.0, 15.0],
                                                     SignedCompactLabel::new(amount),
                                                 );
-                                                ui.add_sized(
-                                                    [35.0, 35.0],
-                                                    GenericIcon {
-                                                        ctx,
-                                                        item,
-                                                        size: 32.0,
-                                                    },
-                                                );
+                                                let icon = ui
+                                                    .add_sized(
+                                                        [35.0, 35.0],
+                                                        GenericIcon {
+                                                            ctx,
+                                                            item,
+                                                            size: 32.0,
+                                                        },
+                                                    )
+                                                    .interact(egui::Sense::click());
+                                                let popup_id = icon.id.with("弹窗提示").with(i);
+                                                if icon.clicked() {
+                                                    egui::Popup::toggle_id(ui.ctx(), popup_id);
+                                                    self.hint_flows.clear();
+                                                    for source in &self.flow_editor_sources {
+                                                        self.hint_flows.extend(
+                                                            source.hint_populate(
+                                                                ctx,
+                                                                &HashMap::new(),
+                                                                &item,
+                                                                amount,
+                                                            ),
+                                                        );
+                                                    }
+                                                }
+                                                egui::Popup::menu(&icon)
+                                                    .id(popup_id)
+                                                    .open_memory(None)
+                                                    .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                                                    .show(|ui| {
+                                                        egui::ScrollArea::vertical().show(
+                                                            ui,
+                                                            |ui| {
+                                                                ui.label("推荐配方");
+                                                                if self.hint_flows.is_empty() {
+                                                                    ui.label("无推荐配方");
+                                                                } else {
+                                                                    
+                                                                    for (idx, hint_flow) in
+                                                                        self.hint_flows.iter_mut().enumerate()
+                                                                    {
+                                                                        ui.horizontal( |ui| {
+                                                                            ui.disable();
+                                                                            hint_flow.editor_view(ui, ctx);
+                                                                        });
+                                                                        if ui.button("添加").clicked() {
+                                                                            add_hint_flow = Some(idx);
+                                                                            // dbg!(add_hint_flow);
+                                                                        }
+                                                                        ui.separator();
+                                                                    }
+                                                                }
+                                                            },
+                                                        );
+                                                    })
                                             });
                                             if ui.available_size_before_wrap().x < 35.0 {
                                                 ui.end_row();
@@ -422,6 +469,10 @@ impl EditorView for FactoryInstance {
             self.flow_editors.remove(idx);
         }
 
+        if let Some(idx) = add_hint_flow {
+            let hint_flow = self.hint_flows.remove(idx);
+            self.flow_editors.push(hint_flow);
+        }
         while let Ok(flow_source) = self.flow_receiver.try_recv() {
             self.flow_editors.push(flow_source);
         }

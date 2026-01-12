@@ -46,7 +46,7 @@ pub trait AsFlowEditorSource: EditorView + ContextBound {
     /// TODO
     /// 游戏机制提供器可选：自动填充逻辑
     fn auto_populate(
-        &mut self,
+        &self,
         _ctx: &Self::ContextType,
         _flows: &HashMap<usize, Flow<Self::ItemIdentType>>,
     ) -> Vec<
@@ -58,7 +58,7 @@ pub trait AsFlowEditorSource: EditorView + ContextBound {
 
     /// 在规划界面点击物品时，可以提供一些推荐配方
     fn hint_populate(
-        &mut self,
+        &self,
         _ctx: &Self::ContextType,
         _flows: &HashMap<usize, Flow<Self::ItemIdentType>>,
         _item: &Self::ItemIdentType,

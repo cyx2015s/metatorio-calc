@@ -17,10 +17,7 @@ impl ContextBound for SourceConfig {
 }
 
 impl AsFlow for SourceConfig {
-    fn as_flow(
-        &self,
-        _ctx: &Self::ContextType,
-    ) -> Flow<Self::ItemIdentType> {
+    fn as_flow(&self, _ctx: &Self::ContextType) -> Flow<Self::ItemIdentType> {
         let mut map = std::collections::HashMap::new();
         map.insert(self.item.clone(), 1.0);
         map
@@ -196,5 +193,27 @@ impl EditorView for SourceConfigSource {
 impl AsFlowEditorSource for SourceConfigSource {
     fn set_as_flow_sender(&mut self, sender: AsFlowSender<GenericItem, FactorioContext>) {
         self.sender = sender;
+    }
+
+    fn hint_populate(
+        &self,
+        _ctx: &Self::ContextType,
+        _flows: &std::collections::HashMap<usize, Flow<Self::ItemIdentType>>,
+        item: &Self::ItemIdentType,
+        value: f64,
+    ) -> Vec<
+        Box<
+            dyn crate::concept::AsFlowEditor<
+                    ItemIdentType = Self::ItemIdentType,
+                    ContextType = Self::ContextType,
+                >,
+        >,
+    > {
+        if value < 0.0 {
+            let source = SourceConfig { item: item.clone() };
+            vec![Box::new(source)]
+        } else {
+            vec![]
+        }
     }
 }
