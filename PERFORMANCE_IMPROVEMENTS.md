@@ -16,17 +16,7 @@ The following performance bottlenecks were identified and addressed:
 
 **Impact**: Reduces CPU usage when the application is idle or when no active operations are in progress.
 
-## 2. Inefficient Solver Invocations
-
-**Problem**: The linear programming solver was invoked every 10 frames regardless of whether input data had changed.
-
-**Solution**: Added change tracking to `FactoryInstance` structure to detect when targets or flow editors are modified. The solver now only runs when data actually changes.
-
-**Files Changed**: `src/factorio/editor/planner.rs`
-
-**Impact**: Dramatically reduces unnecessary solver invocations, saving computation for complex production planning scenarios.
-
-## 3. String Cloning in Sorting Operations
+## 2. String Cloning in Sorting Operations
 
 **Problem**: The `sort_generic_items()` function used `sort_by_key`, which required cloning strings during every comparison operation. Similarly, `get_order_info()` cloned order strings repeatedly.
 
@@ -34,12 +24,14 @@ The following performance bottlenecks were identified and addressed:
 - Changed `sort_generic_items()` from `sort_by_key` to `sort_by` and use string slices (`&str`) instead of owned strings
 - Changed `get_order_info()` to use borrowed references in comparison functions
 - Used `.copied()` instead of `.cloned()` for tuples of integers
+- Extracted `get_generic_item_sort_key()` helper function to eliminate code duplication
+- Added `sort_generic_items_owned()` for efficient sorting of owned items
 
 **Files Changed**: `src/factorio/common.rs`
 
 **Impact**: Reduces memory allocations and improves sorting performance, especially for large item lists.
 
-## 4. Repeated Sorting of Display Items
+## 3. Repeated Sorting of Display Items
 
 **Problem**: The total flow display sorted items every frame, even though the total flow only changes when solver results arrive.
 
@@ -56,17 +48,18 @@ While specific benchmarks haven't been conducted, the improvements should provid
 - **Reduced idle CPU usage**: From ~10% to near 0% when no operations are in progress
 - **Faster UI response**: Eliminated unnecessary work during rendering
 - **Reduced memory allocations**: Fewer string clones and temporary allocations
-- **Better solver efficiency**: Solver only runs when needed, not on a fixed schedule
 
 ## Future Optimization Opportunities
 
 Additional optimization opportunities identified but not yet implemented:
 
-1. **Item selector filtering**: The selector rebuilds its filtered group list every frame. This could be cached based on the current filter.
+1. **Solver change detection**: The solver currently runs every 10 frames. Adding change detection to only run when data changes would reduce unnecessary invocations, but this involves design challenges with internal mutability that need to be addressed first.
 
-2. **Flow calculations for individual recipes**: Each recipe's flow is calculated and sorted during rendering. Could be cached per recipe.
+2. **Item selector filtering**: The selector rebuilds its filtered group list every frame. This could be cached based on the current filter.
 
-3. **Context loading**: The initial context loading from Factorio executable could potentially be parallelized or optimized.
+3. **Flow calculations for individual recipes**: Each recipe's flow is calculated and sorted during rendering. Could be cached per recipe.
+
+4. **Context loading**: The initial context loading from Factorio executable could potentially be parallelized or optimized.
 
 ## Compatibility
 
@@ -77,6 +70,6 @@ All performance improvements maintain full backward compatibility with existing 
 To verify these improvements:
 
 1. Monitor CPU usage when the application is idle vs. previous versions
-2. Test solver responsiveness with large production plans (100+ recipes)
-3. Verify UI remains responsive when displaying many items in total flow
-4. Ensure all existing functionality works correctly after optimizations
+2. Verify UI remains responsive when displaying many items in total flow
+3. Ensure all existing functionality works correctly after optimizations
+
