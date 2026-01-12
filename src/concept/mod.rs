@@ -60,6 +60,7 @@ pub trait AsFlowEditorSource: EditorView + ContextBound {
     fn hint_populate(
         &mut self,
         _ctx: &Self::ContextType,
+        _flows: &HashMap<usize, Flow<Self::ItemIdentType>>,
         _item: &Self::ItemIdentType,
         _value: f64,
     ) -> Vec<

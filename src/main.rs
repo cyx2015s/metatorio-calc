@@ -1,3 +1,8 @@
+use mimalloc::MiMalloc;
+
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
+
 // Git 版本信息
 include!(concat!(env!("OUT_DIR"), "/git_hash.rs"));
 
