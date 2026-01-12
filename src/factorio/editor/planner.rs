@@ -385,12 +385,11 @@ impl EditorView for FactoryInstance {
                                 let flow = flow_config.as_flow(ctx);
                                 let mut keys = flow.keys().collect::<Vec<_>>();
                                 sort_generic_items(&mut keys, ctx);
-                                let multiplier = solution_val.unwrap_or(1.0);
                                 ui.horizontal_top(|ui| {
                                     ui.horizontal_wrapped(|ui| {
                                         for item in keys {
                                             let amount =
-                                                flow.get(item).cloned().unwrap_or(0.0) * multiplier;
+                                                flow.get(item).cloned().unwrap_or(0.0);
                                             ui.vertical(|ui| {
                                                 ui.add_sized(
                                                     [35.0, 15.0],
@@ -433,7 +432,6 @@ impl EditorView for FactoryInstance {
                                                                 if self.hint_flows.is_empty() {
                                                                     ui.label("无推荐配方");
                                                                 } else {
-                                                                    
                                                                     for (idx, hint_flow) in
                                                                         self.hint_flows.iter_mut().enumerate()
                                                                     {
