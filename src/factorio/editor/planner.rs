@@ -36,6 +36,10 @@ pub struct FactoryInstance {
     pub solver_sender:
         std::sync::mpsc::Sender<(Flow<GenericItem>, HashMap<usize, (Flow<GenericItem>, f64)>)>,
     pub solver_receiver: std::sync::mpsc::Receiver<Result<Flow<usize>, String>>,
+    /// Track changes to avoid unnecessary solver invocations
+    pub last_target_len: usize,
+    pub last_flow_editors_len: usize,
+    pub needs_solve: bool,
 }
 impl Default for FactoryInstance {
     fn default() -> Self {
@@ -65,6 +69,9 @@ impl Default for FactoryInstance {
             flow_sender: tx,
             solver_sender,
             solver_receiver,
+            last_target_len: 0,
+            last_flow_editors_len: 0,
+            needs_solve: false,
         }
     }
 }
@@ -159,7 +166,18 @@ impl EditorView for FactoryInstance {
             }
         }
 
-        if ui.ctx().cumulative_frame_nr().is_multiple_of(10) {
+        // Check if data has changed before triggering solver
+        let target_len_changed = self.target.len() != self.last_target_len;
+        let flow_editors_len_changed = self.flow_editors.len() != self.last_flow_editors_len;
+        
+        if target_len_changed || flow_editors_len_changed {
+            self.last_target_len = self.target.len();
+            self.last_flow_editors_len = self.flow_editors.len();
+            self.needs_solve = true;
+        }
+
+        // Only run solver every 10 frames if data needs solving
+        if self.needs_solve && ui.ctx().cumulative_frame_nr().is_multiple_of(10) {
             let flows = self
                 .flow_editors
                 .iter()
@@ -174,6 +192,7 @@ impl EditorView for FactoryInstance {
                     acc
                 });
             let _ = self.solver_sender.send((target, flows));
+            self.needs_solve = false;
         }
         let err_info = ui.memory(|mem| mem.data.get_temp::<String>(id)).clone();
         if let Some(err_info) = &err_info {

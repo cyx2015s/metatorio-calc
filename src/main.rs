@@ -45,7 +45,10 @@ impl MainPage {
 
 impl eframe::App for MainPage {
     fn update(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
-        ctx.request_repaint_after_secs(0.1);
+        // Only request frequent repaints if we're waiting for subviews
+        if !self.subview_receiver.is_empty() {
+            ctx.request_repaint_after_secs(0.1);
+        }
         egui::SidePanel::left(egui::Id::new("LeftPanel"))
             .width_range(200.0..=280.0)
             .show(ctx, |ui| {
@@ -67,6 +70,8 @@ impl eframe::App for MainPage {
                 while let Ok(subview) = self.subview_receiver.try_recv() {
                     let name = format!("子视图 {}", self.subviews.len() + 1);
                     self.subviews.push((name, subview));
+                    // Request a repaint after receiving a new subview
+                    ctx.request_repaint();
                 }
 
                 ui.separator();
