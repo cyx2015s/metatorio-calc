@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::{
     concept::{AsFlowEditor, AsFlowEditorSource, AsFlowSender, ContextBound, EditorView, Flow},
     factorio::{
-        common::sort_generic_items,
+        common::{sort_generic_items, sort_generic_items_owned},
         editor::{icon::GenericIcon, selector::selector_menu_with_filter},
         format::{CompactLabel, SignedCompactLabel},
         model::{
@@ -157,11 +157,7 @@ impl EditorView for FactoryInstance {
                     }
                     // Update sorted keys cache when total_flow changes
                     self.total_flow_sorted_keys = self.total_flow.keys().cloned().collect();
-                    let mut keys_refs: Vec<&GenericItem> =
-                        self.total_flow_sorted_keys.iter().collect();
-                    sort_generic_items(&mut keys_refs, ctx);
-                    // Rebuild the sorted keys vector based on the sorted references
-                    self.total_flow_sorted_keys = keys_refs.into_iter().cloned().collect();
+                    sort_generic_items_owned(&mut self.total_flow_sorted_keys, ctx);
                     ui.memory_mut(|mem| {
                         mem.data.remove::<String>(id);
                     })

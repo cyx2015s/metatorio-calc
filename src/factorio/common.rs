@@ -576,87 +576,67 @@ pub fn get_reverse_order_info(order_info: &OrderInfo) -> ReverseOrderInfo {
     reverse_map
 }
 
+/// Helper function to generate sort key for a GenericItem
+/// Returns (category, order_info, name) tuple for sorting
+fn get_generic_item_sort_key<'a>(
+    item: &'a GenericItem,
+    ctx: &FactorioContext,
+) -> (usize, (usize, usize, usize), &'a str) {
+    match item {
+        GenericItem::Item { name, quality } => (
+            *quality as usize,
+            ctx.order_of_entries["item"].get(name).copied().unwrap_or((0, 0, 0)),
+            "",
+        ),
+        GenericItem::Fluid {
+            name,
+            temperature: _,
+        } => (
+            0x100usize,
+            ctx.order_of_entries["fluid"].get(name).copied().unwrap_or((0, 0, 0)),
+            "",
+        ),
+        GenericItem::Entity { name, quality } => (
+            0x200usize + *quality as usize,
+            ctx.order_of_entries["entity"].get(name).copied().unwrap_or((0, 0, 0)),
+            "",
+        ),
+        GenericItem::Heat => (0x300usize, (0usize, 0usize, 0usize), ""),
+        GenericItem::Electricity => (0x400usize, (0usize, 0usize, 0usize), ""),
+        GenericItem::FluidHeat { filter } => (
+            0x500usize,
+            (0usize, 0usize, 0usize),
+            filter.as_deref().unwrap_or(""),
+        ),
+        GenericItem::FluidFuel { filter } => (
+            0x600usize,
+            (0usize, 0usize, 0usize),
+            filter.as_deref().unwrap_or(""),
+        ),
+        GenericItem::ItemFuel { category } => {
+            (0x700usize, (0usize, 0usize, 0usize), category.as_str())
+        }
+        GenericItem::RocketPayloadWeight => (0x800usize, (0usize, 0usize, 0usize), ""),
+        GenericItem::RocketPayloadStack => (0x900usize, (0usize, 0usize, 0usize), ""),
+        GenericItem::Pollution { name } => (0xa00usize, (0usize, 0usize, 0usize), name.as_str()),
+        GenericItem::Custom { name } => (0xb00usize, (0usize, 0usize, 0usize), name.as_str()),
+    }
+}
+
 pub fn sort_generic_items(keys: &mut Vec<&GenericItem>, ctx: &FactorioContext) {
     // Use sort_by instead of sort_by_key to avoid cloning strings during comparison
     keys.sort_by(|a, b| {
-        let a_key = match a {
-            GenericItem::Item { name, quality } => (
-                *quality as usize,
-                ctx.order_of_entries["item"].get(name).copied().unwrap_or((0, 0, 0)),
-                "",
-            ),
-            GenericItem::Fluid {
-                name,
-                temperature: _,
-            } => (
-                0x100usize,
-                ctx.order_of_entries["fluid"].get(name).copied().unwrap_or((0, 0, 0)),
-                "",
-            ),
-            GenericItem::Entity { name, quality } => (
-                0x200usize + *quality as usize,
-                ctx.order_of_entries["entity"].get(name).copied().unwrap_or((0, 0, 0)),
-                "",
-            ),
-            GenericItem::Heat => (0x300usize, (0usize, 0usize, 0usize), ""),
-            GenericItem::Electricity => (0x400usize, (0usize, 0usize, 0usize), ""),
-            GenericItem::FluidHeat { filter } => (
-                0x500usize,
-                (0usize, 0usize, 0usize),
-                filter.as_deref().unwrap_or(""),
-            ),
-            GenericItem::FluidFuel { filter } => (
-                0x600usize,
-                (0usize, 0usize, 0usize),
-                filter.as_deref().unwrap_or(""),
-            ),
-            GenericItem::ItemFuel { category } => {
-                (0x700usize, (0usize, 0usize, 0usize), category.as_str())
-            }
-            GenericItem::RocketPayloadWeight => (0x800usize, (0usize, 0usize, 0usize), ""),
-            GenericItem::RocketPayloadStack => (0x900usize, (0usize, 0usize, 0usize), ""),
-            GenericItem::Pollution { name } => (0xa00usize, (0usize, 0usize, 0usize), name.as_str()),
-            GenericItem::Custom { name } => (0xb00usize, (0usize, 0usize, 0usize), name.as_str()),
-        };
-        let b_key = match b {
-            GenericItem::Item { name, quality } => (
-                *quality as usize,
-                ctx.order_of_entries["item"].get(name).copied().unwrap_or((0, 0, 0)),
-                "",
-            ),
-            GenericItem::Fluid {
-                name,
-                temperature: _,
-            } => (
-                0x100usize,
-                ctx.order_of_entries["fluid"].get(name).copied().unwrap_or((0, 0, 0)),
-                "",
-            ),
-            GenericItem::Entity { name, quality } => (
-                0x200usize + *quality as usize,
-                ctx.order_of_entries["entity"].get(name).copied().unwrap_or((0, 0, 0)),
-                "",
-            ),
-            GenericItem::Heat => (0x300usize, (0usize, 0usize, 0usize), ""),
-            GenericItem::Electricity => (0x400usize, (0usize, 0usize, 0usize), ""),
-            GenericItem::FluidHeat { filter } => (
-                0x500usize,
-                (0usize, 0usize, 0usize),
-                filter.as_deref().unwrap_or(""),
-            ),
-            GenericItem::FluidFuel { filter } => (
-                0x600usize,
-                (0usize, 0usize, 0usize),
-                filter.as_deref().unwrap_or(""),
-            ),
-            GenericItem::ItemFuel { category } => {
-                (0x700usize, (0usize, 0usize, 0usize), category.as_str())
-            }
-            GenericItem::RocketPayloadWeight => (0x800usize, (0usize, 0usize, 0usize), ""),
-            GenericItem::RocketPayloadStack => (0x900usize, (0usize, 0usize, 0usize), ""),
-            GenericItem::Pollution { name } => (0xa00usize, (0usize, 0usize, 0usize), name.as_str()),
-            GenericItem::Custom { name } => (0xb00usize, (0usize, 0usize, 0usize), name.as_str()),
-        };
+        let a_key = get_generic_item_sort_key(a, ctx);
+        let b_key = get_generic_item_sort_key(b, ctx);
+        a_key.cmp(&b_key)
+    });
+}
+
+/// Sort a vector of owned GenericItems in-place
+pub fn sort_generic_items_owned(keys: &mut Vec<GenericItem>, ctx: &FactorioContext) {
+    keys.sort_by(|a, b| {
+        let a_key = get_generic_item_sort_key(a, ctx);
+        let b_key = get_generic_item_sort_key(b, ctx);
         a_key.cmp(&b_key)
     });
 }
