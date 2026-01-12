@@ -11,7 +11,6 @@ use crate::{
             icon::{GenericIcon, Icon},
             selector::{ItemSelector, selector_menu_with_filter},
         },
-        format::SignedCompactLabel,
         model::{
             context::{FactorioContext, GenericItem},
             energy::energy_source_as_flow,
@@ -589,7 +588,7 @@ fn test_recipe_normalized() {
 
 impl EditorView for RecipeConfig {
     fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &Self::ContextType) {
-        ui.horizontal(|ui| {
+        ui.horizontal_top(|ui| {
             ui.vertical(|ui| {
                 ui.label("配方");
 
@@ -686,35 +685,6 @@ impl EditorView for RecipeConfig {
             // TODO: 插件编辑界面
             ui.label("TODO");
             ui.label("插件编辑");
-            ui.separator();
-
-            let flow = self.as_flow(ctx);
-
-            let mut keys = flow.keys().collect::<Vec<&GenericItem>>();
-            sort_generic_items(&mut keys, ctx);
-
-            ui.horizontal_top(|ui| {
-                ui.horizontal_wrapped(|ui| {
-                    for key in keys {
-                        let amount = flow.get(key).unwrap();
-
-                        ui.vertical(|ui| {
-                            ui.add_sized([35.0, 15.0], SignedCompactLabel::new(*amount));
-                            ui.add_sized(
-                                [35.0, 35.0],
-                                GenericIcon {
-                                    ctx,
-                                    item: key,
-                                    size: 32.0,
-                                },
-                            );
-                        });
-                        if ui.available_size_before_wrap().x < 35.0 {
-                            ui.end_row();
-                        }
-                    }
-                });
-            });
         });
     }
 }

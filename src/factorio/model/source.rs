@@ -43,7 +43,7 @@ impl EditorView for SourceConfig {
 
                 egui::ComboBox::from_id_salt(label.id)
                     .selected_text(match &self.item {
-                        GenericItem::Item { .. } => "物体",
+                        GenericItem::Item { .. } => "物品",
                         GenericItem::Fluid { .. } => "流体",
                         GenericItem::Entity { .. } => "实体",
                         GenericItem::Heat => "热量",
@@ -63,7 +63,7 @@ impl EditorView for SourceConfig {
                                 name: "item-unknown".to_string(),
                                 quality: 0,
                             },
-                            "物体",
+                            "物品",
                         );
                         ui.selectable_value(
                             &mut self.item,

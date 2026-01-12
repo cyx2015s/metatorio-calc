@@ -214,7 +214,7 @@ impl EditorView for FactoryInstance {
                                         let label = ui.label("选择目标产物类型");
                                         egui::ComboBox::from_id_salt(label.id)
                                             .selected_text(match item {
-                                                GenericItem::Item { .. } => "物体",
+                                                GenericItem::Item { .. } => "物品",
                                                 GenericItem::Fluid { .. } => "流体",
                                                 GenericItem::Entity { .. } => "实体",
                                                 GenericItem::Heat => "热量",
@@ -234,7 +234,7 @@ impl EditorView for FactoryInstance {
                                                         name: "item-unknown".to_string(),
                                                         quality: 0,
                                                     },
-                                                    "物体",
+                                                    "物品",
                                                 );
                                                 ui.selectable_value(
                                                     item,
@@ -359,15 +359,20 @@ impl EditorView for FactoryInstance {
                         for (i, flow_config) in self.flow_editors.iter_mut().enumerate() {
                             ui.separator();
                             ui.horizontal(|ui| {
+                                let ptr = box_as_ptr(flow_config);
+                                let solution_val = if err_info.is_none() {
+                                    self.solution.get(&ptr).cloned()
+                                } else {
+                                    None
+                                };
                                 ui.vertical(|ui| {
                                     if ui.button("删除").clicked() {
                                         delete_flow = Some(i);
                                     }
-                                    let ptr = box_as_ptr(flow_config);
                                     if err_info.is_none()
-                                        && let Some(solution) = self.solution.get(&ptr)
+                                        && let Some(solution) = solution_val
                                     {
-                                        ui.add(CompactLabel::new(*solution));
+                                        ui.add(CompactLabel::new(solution));
                                     } else {
                                         ui.label("待解");
                                     }
@@ -375,6 +380,37 @@ impl EditorView for FactoryInstance {
 
                                 ui.separator();
                                 ui.vertical(|ui| flow_config.editor_view(ui, ctx));
+
+                                ui.separator();
+                                let flow = flow_config.as_flow(ctx);
+                                let mut keys = flow.keys().collect::<Vec<_>>();
+                                sort_generic_items(&mut keys, ctx);
+                                let multiplier = solution_val.unwrap_or(1.0);
+                                ui.horizontal_top(|ui| {
+                                    ui.horizontal_wrapped(|ui| {
+                                        for item in keys {
+                                            let amount =
+                                                flow.get(item).cloned().unwrap_or(0.0) * multiplier;
+                                            ui.vertical(|ui| {
+                                                ui.add_sized(
+                                                    [35.0, 15.0],
+                                                    SignedCompactLabel::new(amount),
+                                                );
+                                                ui.add_sized(
+                                                    [35.0, 35.0],
+                                                    GenericIcon {
+                                                        ctx,
+                                                        item,
+                                                        size: 32.0,
+                                                    },
+                                                );
+                                            });
+                                            if ui.available_size_before_wrap().x < 35.0 {
+                                                ui.end_row();
+                                            }
+                                        }
+                                    });
+                                });
                             });
                         }
                     })
