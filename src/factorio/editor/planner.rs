@@ -12,12 +12,13 @@ use crate::{
             source::SourceConfigSource,
         },
     },
-    solver::{basic_solver, hash_map_add},
+    solver::{basic_solver, box_as_ptr, hash_map_add},
 };
 
 pub struct FactoryInstance {
     pub name: String,
     pub target: Vec<(GenericItem, f64)>,
+    pub solution: HashMap<usize, f64>, // key 为 AsFlowEditor 的唯一标识符（通过 box_as_ptr 获得）
     pub total_flow: HashMap<GenericItem, f64>,
     pub flow_editor_sources: Vec<
         Box<dyn AsFlowEditorSource<ContextType = FactorioContext, ItemIdentType = GenericItem>>,
@@ -37,6 +38,7 @@ impl Default for FactoryInstance {
         FactoryInstance {
             name: "工厂".to_string(),
             target: Vec::new(),
+            solution: HashMap::new(),
             total_flow: HashMap::new(),
             flow_editor_sources: Vec::new(),
             flow_editors: Vec::new(),
@@ -52,6 +54,7 @@ impl FactoryInstance {
         FactoryInstance {
             name,
             target: Vec::new(),
+            solution: HashMap::new(),
             total_flow: HashMap::new(),
             flow_editor_sources: Vec::new(),
             flow_editors: Vec::new(),
@@ -105,8 +108,7 @@ impl EditorView for FactoryInstance {
             let flows = self
                 .flow_editors
                 .iter()
-                .map(|fe| (fe.as_flow(ctx), fe.cost(ctx)))
-                .enumerate()
+                .map(|fe| (box_as_ptr(fe), (fe.as_flow(ctx), fe.cost(ctx))))
                 .collect::<HashMap<usize, (_, _)>>();
             let target = self
                 .target
@@ -119,21 +121,22 @@ impl EditorView for FactoryInstance {
             let result = basic_solver(target, flows);
             match result {
                 Ok(solution) => {
-                    self.total_flow = HashMap::new();
-                    for (idx, value) in solution.iter() {
-                        self.flow_editors[*idx].notify_solution(*value);
-                        self.total_flow = hash_map_add(
-                            &self.total_flow,
-                            &self.flow_editors[*idx].as_flow(ctx),
-                            *value,
-                        );
+                    self.total_flow.clear();
+                    self.solution = solution.clone();
+                    for fe in self.flow_editors.iter_mut() {
+                        let var_value = self.solution.get(&box_as_ptr(fe)).cloned().unwrap_or(0.0);
+                        fe.notify_solution(var_value);
+                        let flow = fe.as_flow(ctx);
+                        self.total_flow =
+                            hash_map_add(&self.total_flow, &flow, var_value);
                     }
                     ui.memory_mut(|mem| {
                         mem.data.remove::<String>(id);
                     })
                 }
                 Err(err) => {
-                    self.total_flow = HashMap::new();
+                    self.total_flow.clear();
+                    self.solution.clear();
                     ui.memory_mut(|mem| {
                         mem.data.insert_temp(id, err);
                     });
@@ -318,7 +321,7 @@ impl EditorView for FactoryInstance {
                                 });
                             }
                         });
-                        
+
                         ui.heading("配方配置");
                         for (i, flow_config) in self.flow_editors.iter_mut().enumerate() {
                             ui.separator();
@@ -327,7 +330,9 @@ impl EditorView for FactoryInstance {
                                     if ui.button("删除").clicked() {
                                         delete_flow = Some(i);
                                     }
-                                    if err_info.is_none() && let Some(solution) = flow_config.get_solution() {
+                                    if err_info.is_none()
+                                        && let Some(solution) = flow_config.get_solution()
+                                    {
                                         ui.add(CompactLabel::new(solution));
                                     } else {
                                         ui.label("待解");

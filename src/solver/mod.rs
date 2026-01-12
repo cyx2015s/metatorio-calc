@@ -17,6 +17,14 @@ where
     result
 }
 
+/// 返回值仅用作 AsFlowEditor 的唯一标识符
+pub fn box_as_ptr<T: ?Sized>(b: &Box<T>) -> usize {
+    &**b as *const T as *const () as usize
+}
+
+
+/// 求解流程：从所有的 AsFlow 配方收集 Flow 信息
+/// （可选）：通知各个游戏机制根据当前的 Flow 信息添加自动的补充信息
 pub fn basic_solver<I, R>(
     target: HashMap<I, f64>,                   // 目标物品及其需求量
     flows: HashMap<R, (HashMap<I, f64>, f64)>, // 配方标识符及其物品流
