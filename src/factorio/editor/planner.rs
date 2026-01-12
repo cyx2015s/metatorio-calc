@@ -20,6 +20,8 @@ pub struct FactoryInstance {
     pub target: Vec<(GenericItem, f64)>,
     pub solution: Flow<usize>,
     pub total_flow: Flow<GenericItem>,
+    /// Cached sorted keys for total_flow to avoid sorting every frame
+    pub total_flow_sorted_keys: Vec<GenericItem>,
     pub flow_editor_sources: Vec<
         Box<dyn AsFlowEditorSource<ContextType = FactorioContext, ItemIdentType = GenericItem>>,
     >,
@@ -62,6 +64,7 @@ impl Default for FactoryInstance {
             target: Vec::new(),
             solution: HashMap::new(),
             total_flow: HashMap::new(),
+            total_flow_sorted_keys: Vec::new(),
             flow_editor_sources: Vec::new(),
             flow_editors: Vec::new(),
             hint_flows: Vec::new(),
@@ -152,12 +155,20 @@ impl EditorView for FactoryInstance {
                         let flow = fe.as_flow(ctx);
                         self.total_flow = flow_add(&self.total_flow, &flow, var_value);
                     }
+                    // Update sorted keys cache when total_flow changes
+                    self.total_flow_sorted_keys = self.total_flow.keys().cloned().collect();
+                    let mut keys_refs: Vec<&GenericItem> =
+                        self.total_flow_sorted_keys.iter().collect();
+                    sort_generic_items(&mut keys_refs, ctx);
+                    // Rebuild the sorted keys vector based on the sorted references
+                    self.total_flow_sorted_keys = keys_refs.into_iter().cloned().collect();
                     ui.memory_mut(|mem| {
                         mem.data.remove::<String>(id);
                     })
                 }
                 Err(err) => {
                     self.total_flow.clear();
+                    self.total_flow_sorted_keys.clear();
                     self.solution.clear();
                     ui.memory_mut(|mem| {
                         mem.data.insert_temp(id, err);
@@ -349,10 +360,9 @@ impl EditorView for FactoryInstance {
                 .id_salt(3)
                 .show(ui, |ui| {
                     ui.vertical(|ui| {
-                        let mut keys = self.total_flow.keys().collect::<Vec<_>>();
-                        sort_generic_items(&mut keys, ctx);
+                        // Use cached sorted keys instead of sorting every frame
                         ui.horizontal_wrapped(|ui| {
-                            for item in keys {
+                            for item in &self.total_flow_sorted_keys {
                                 let mut amount = self.total_flow.get(item).cloned().unwrap_or(0.0);
                                 if amount.abs() < 1e-9 {
                                     amount = amount.abs();
