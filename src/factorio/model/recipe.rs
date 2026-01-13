@@ -689,18 +689,18 @@ impl EditorView for RecipeConfig {
     }
 }
 
-pub struct RecipeConfigSource {
+pub struct RecipeConfigProvider {
     pub editing: RecipeConfig,
-    pub sender: AsFlowSender<GenericItem, FactorioContext>,
+    pub sender: MechanicSender<GenericItem, FactorioContext>,
 }
 
-impl ContextBound for RecipeConfigSource {
+impl ContextBound for RecipeConfigProvider {
     type ContextType = FactorioContext;
     type ItemIdentType = GenericItem;
 }
 
-impl AsFlowEditorSource for RecipeConfigSource {
-    fn set_as_flow_sender(&mut self, sender: AsFlowSender<GenericItem, FactorioContext>) {
+impl MechanicProvider for RecipeConfigProvider {
+    fn set_mechanic_sender(&mut self, sender: MechanicSender<GenericItem, FactorioContext>) {
         self.sender = sender;
     }
 
@@ -711,7 +711,7 @@ impl AsFlowEditorSource for RecipeConfigSource {
         item: &Self::ItemIdentType,
         value: f64,
     ) -> Vec<
-        Box<dyn AsFlowEditor<ItemIdentType = Self::ItemIdentType, ContextType = Self::ContextType>>,
+        Box<dyn Mechanic<ItemIdentType = Self::ItemIdentType, ContextType = Self::ContextType>>,
     > {
         let item_name = match item {
             GenericItem::Item { name, .. } => name,
@@ -764,7 +764,7 @@ impl AsFlowEditorSource for RecipeConfigSource {
                 }
                 suggestions.push(Box::new(recipe_config)
                     as Box<
-                        dyn AsFlowEditor<
+                        dyn Mechanic<
                                 ItemIdentType = Self::ItemIdentType,
                                 ContextType = Self::ContextType,
                             >,
@@ -776,7 +776,7 @@ impl AsFlowEditorSource for RecipeConfigSource {
     }
 }
 
-impl EditorView for RecipeConfigSource {
+impl EditorView for RecipeConfigProvider {
     fn editor_view(&mut self, ui: &mut egui::Ui, _ctx: &Self::ContextType) {
         if ui.button("添加配方").clicked() {
             let mut new_config = self.editing.clone();

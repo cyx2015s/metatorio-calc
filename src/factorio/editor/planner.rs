@@ -1,15 +1,15 @@
 use std::collections::HashMap;
 
 use crate::{
-    concept::{AsFlowEditor, AsFlowEditorSource, AsFlowSender, ContextBound, EditorView, Flow},
+    concept::{Mechanic, MechanicProvider, MechanicSender, ContextBound, EditorView, Flow},
     factorio::{
         common::{sort_generic_items, sort_generic_items_owned},
         editor::{icon::GenericIcon, selector::selector_menu_with_filter},
         format::{CompactLabel, SignedCompactLabel},
         model::{
             context::{FactorioContext, GenericItem},
-            recipe::RecipeConfigSource,
-            source::SourceConfigSource,
+            recipe::RecipeConfigProvider,
+            source::InfiniteSourceProvider,
         },
     },
     solver::{basic_solver, box_as_ptr, flow_add},
@@ -23,17 +23,17 @@ pub struct FactoryInstance {
     /// Cached sorted keys for total_flow to avoid sorting every frame
     pub total_flow_sorted_keys: Vec<GenericItem>,
     pub flow_editor_sources: Vec<
-        Box<dyn AsFlowEditorSource<ContextType = FactorioContext, ItemIdentType = GenericItem>>,
+        Box<dyn MechanicProvider<ContextType = FactorioContext, ItemIdentType = GenericItem>>,
     >,
     pub flow_editors:
-        Vec<Box<dyn AsFlowEditor<ItemIdentType = GenericItem, ContextType = FactorioContext>>>,
+        Vec<Box<dyn Mechanic<ItemIdentType = GenericItem, ContextType = FactorioContext>>>,
     pub hint_flows:
-        Vec<Box<dyn AsFlowEditor<ItemIdentType = GenericItem, ContextType = FactorioContext>>>,
+        Vec<Box<dyn Mechanic<ItemIdentType = GenericItem, ContextType = FactorioContext>>>,
     pub flow_receiver: std::sync::mpsc::Receiver<
-        Box<dyn AsFlowEditor<ItemIdentType = GenericItem, ContextType = FactorioContext>>,
+        Box<dyn Mechanic<ItemIdentType = GenericItem, ContextType = FactorioContext>>,
     >,
     pub flow_sender: std::sync::mpsc::Sender<
-        Box<dyn AsFlowEditor<ItemIdentType = GenericItem, ContextType = FactorioContext>>,
+        Box<dyn Mechanic<ItemIdentType = GenericItem, ContextType = FactorioContext>>,
     >,
     pub solver_sender:
         std::sync::mpsc::Sender<(Flow<GenericItem>, HashMap<usize, (Flow<GenericItem>, f64)>)>,
@@ -99,9 +99,9 @@ impl FactoryInstance {
     }
     pub fn add_flow_source<
         F: Fn(
-            AsFlowSender<GenericItem, FactorioContext>,
+            MechanicSender<GenericItem, FactorioContext>,
         ) -> Box<
-            dyn AsFlowEditorSource<ContextType = FactorioContext, ItemIdentType = GenericItem>,
+            dyn MechanicProvider<ContextType = FactorioContext, ItemIdentType = GenericItem>,
         >,
     >(
         mut self,
@@ -613,12 +613,12 @@ impl Subview for PlannerView {
                 self.factories.push(
                     FactoryInstance::new(name)
                         .add_flow_source(|s| {
-                            Box::new(RecipeConfigSource {
+                            Box::new(RecipeConfigProvider {
                                 editing: RecipeConfig::default(),
                                 sender: s,
                             })
                         })
-                        .add_flow_source(|s| Box::new(SourceConfigSource { sender: s })),
+                        .add_flow_source(|s| Box::new(InfiniteSourceProvider { sender: s })),
                 );
                 self.new_factory_name.clear();
             }

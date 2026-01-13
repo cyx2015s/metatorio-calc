@@ -1,5 +1,5 @@
 use crate::{
-    concept::{AsFlow, AsFlowEditorSource, AsFlowSender, ContextBound, EditorView, Flow},
+    concept::{AsFlow, MechanicProvider, MechanicSender, ContextBound, EditorView, Flow},
     factorio::{
         editor::{icon::GenericIcon, selector::selector_menu_with_filter},
         model::context::{FactorioContext, GenericItem},
@@ -7,16 +7,16 @@ use crate::{
 };
 
 /// 特殊：指代线性规划的无穷物体源
-pub struct SourceConfig {
+pub struct InfiniteSource {
     pub item: GenericItem,
 }
 
-impl ContextBound for SourceConfig {
+impl ContextBound for InfiniteSource {
     type ContextType = FactorioContext;
     type ItemIdentType = GenericItem;
 }
 
-impl AsFlow for SourceConfig {
+impl AsFlow for InfiniteSource {
     fn as_flow(&self, _ctx: &Self::ContextType) -> Flow<Self::ItemIdentType> {
         let mut map = std::collections::HashMap::new();
         map.insert(self.item.clone(), 1.0);
@@ -32,7 +32,7 @@ impl AsFlow for SourceConfig {
     }
 }
 
-impl EditorView for SourceConfig {
+impl EditorView for InfiniteSource {
     fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &Self::ContextType) {
         ui.horizontal_top(|ui| {
             ui.vertical(|ui| {
@@ -167,19 +167,19 @@ impl EditorView for SourceConfig {
     }
 }
 
-pub struct SourceConfigSource {
-    pub sender: AsFlowSender<GenericItem, FactorioContext>,
+pub struct InfiniteSourceProvider {
+    pub sender: MechanicSender<GenericItem, FactorioContext>,
 }
 
-impl ContextBound for SourceConfigSource {
+impl ContextBound for InfiniteSourceProvider {
     type ContextType = FactorioContext;
     type ItemIdentType = GenericItem;
 }
 
-impl EditorView for SourceConfigSource {
+impl EditorView for InfiniteSourceProvider {
     fn editor_view(&mut self, ui: &mut egui::Ui, _ctx: &Self::ContextType) {
         if ui.button("添加无限源").clicked() {
-            let source = SourceConfig {
+            let source = InfiniteSource {
                 item: GenericItem::Item {
                     name: "item-unknown".to_string(),
                     quality: 0,
@@ -190,8 +190,8 @@ impl EditorView for SourceConfigSource {
     }
 }
 
-impl AsFlowEditorSource for SourceConfigSource {
-    fn set_as_flow_sender(&mut self, sender: AsFlowSender<GenericItem, FactorioContext>) {
+impl MechanicProvider for InfiniteSourceProvider {
+    fn set_mechanic_sender(&mut self, sender: MechanicSender<GenericItem, FactorioContext>) {
         self.sender = sender;
     }
 
@@ -203,14 +203,14 @@ impl AsFlowEditorSource for SourceConfigSource {
         value: f64,
     ) -> Vec<
         Box<
-            dyn crate::concept::AsFlowEditor<
+            dyn crate::concept::Mechanic<
                     ItemIdentType = Self::ItemIdentType,
                     ContextType = Self::ContextType,
                 >,
         >,
     > {
         if value < 0.0 {
-            let source = SourceConfig { item: item.clone() };
+            let source = InfiniteSource { item: item.clone() };
             vec![Box::new(source)]
         } else {
             vec![]

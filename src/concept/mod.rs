@@ -7,18 +7,18 @@ pub trait Subview: Send {
     }
 }
 
-pub trait ContextBound {
+pub trait ContextBound: Send {
     type ContextType;
     type ItemIdentType: ItemIdent;
 }
 
-pub trait EditorView: Send + ContextBound {
+pub trait EditorView: ContextBound {
     fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &Self::ContextType);
 }
 
 pub type Flow<I> = HashMap<I, f64>;
 
-pub trait AsFlow: Send + ContextBound {
+pub trait AsFlow: ContextBound {
     /// 传递物品流信息
     fn as_flow(&self, ctx: &Self::ContextType) -> Flow<Self::ItemIdentType>;
     /// 执行成本，默认返回 1.0
@@ -27,21 +27,21 @@ pub trait AsFlow: Send + ContextBound {
     }
 }
 
-pub type AsFlowSender<I, C> =
-    std::sync::mpsc::Sender<Box<dyn AsFlowEditor<ItemIdentType = I, ContextType = C>>>;
+pub type MechanicSender<I, C> =
+    std::sync::mpsc::Sender<Box<dyn Mechanic<ItemIdentType = I, ContextType = C>>>;
 
 pub trait ItemIdent: Debug + Clone + Eq + Hash {}
 pub trait GameContextCreatorView: Subview {
     fn set_subview_sender(&mut self, sender: std::sync::mpsc::Sender<Box<dyn Subview>>);
 }
 
-pub trait AsFlowEditor: AsFlow + EditorView {}
+pub trait Mechanic: AsFlow + EditorView {}
 
-impl<T> AsFlowEditor for T where T: AsFlow + EditorView {}
+impl<T> Mechanic for T where T: AsFlow + EditorView {}
 
-pub trait AsFlowEditorSource: EditorView + ContextBound {
+pub trait MechanicProvider: EditorView + ContextBound {
     /// 传递创建的配方信息
-    fn set_as_flow_sender(&mut self, sender: AsFlowSender<Self::ItemIdentType, Self::ContextType>);
+    fn set_mechanic_sender(&mut self, sender: MechanicSender<Self::ItemIdentType, Self::ContextType>);
 
     /// TODO
     /// 游戏机制提供器可选：自动填充逻辑
@@ -49,9 +49,8 @@ pub trait AsFlowEditorSource: EditorView + ContextBound {
         &self,
         _ctx: &Self::ContextType,
         _flows: &HashMap<usize, Flow<Self::ItemIdentType>>,
-    ) -> Vec<
-        Box<dyn AsFlowEditor<ItemIdentType = Self::ItemIdentType, ContextType = Self::ContextType>>,
-    > {
+    ) -> Vec<Box<dyn Mechanic<ItemIdentType = Self::ItemIdentType, ContextType = Self::ContextType>>>
+    {
         // 默认不实现任何自动填充逻辑
         vec![]
     }
@@ -63,9 +62,8 @@ pub trait AsFlowEditorSource: EditorView + ContextBound {
         _flows: &HashMap<usize, Flow<Self::ItemIdentType>>,
         _item: &Self::ItemIdentType,
         _value: f64,
-    ) -> Vec<
-        Box<dyn AsFlowEditor<ItemIdentType = Self::ItemIdentType, ContextType = Self::ContextType>>,
-    > {
+    ) -> Vec<Box<dyn Mechanic<ItemIdentType = Self::ItemIdentType, ContextType = Self::ContextType>>>
+    {
         vec![]
     }
 }
