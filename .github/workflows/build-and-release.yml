@@ -3,7 +3,6 @@ name: Build and Release Binaries
 on:
   push:
     branches:
-      - main
       - master
     paths-ignore:
       - '**.md'
@@ -69,6 +68,8 @@ jobs:
 
       - name: Build binary
         run: cargo build --release --target ${{ matrix.target }}
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
 
       - name: Prepare binary (Unix)
         if: matrix.os != 'windows-latest'
