@@ -1,6 +1,7 @@
 use good_lp::{Solution, SolverModel, variable};
 
 use crate::concept::{Flow, ItemIdent};
+use crate::factorio::model::item;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::hash::Hash;
@@ -68,7 +69,7 @@ where
     }
     let mut constraints = Vec::new();
     for (item_id, expr) in item_balances {
-        if !target.contains_key(&item_id) {
+        if !target.contains_key(&item_id) && !no_providers.contains(&item_id) {
             constraints.push(expr.geq(0.0));
         }
     }
@@ -107,7 +108,7 @@ where
             if !no_providers.is_empty() {
                 let mut no_providers = no_providers.iter().collect::<Vec<_>>();
                 no_providers.sort_by_key(|x| format!("{:?}", x));
-                err_string += format!("此外，以下物品缺少生产来源：{:?}", no_providers).as_str();
+                // err_string += format!("此外，以下物品缺少生产来源：{:?}", no_providers).as_str();
             }
             Err(err_string)
         }
