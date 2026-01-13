@@ -116,23 +116,28 @@ impl FactoryInstance {
         let mut add_hint_flow: Option<usize> = None;
         ui.horizontal_wrapped(|ui| {
             for item in &self.total_flow_sorted_keys {
-                let mut amount = self.total_flow.get(item).cloned().unwrap_or(0.0);
-                if amount.abs() < 1e-9 {
-                    amount = amount.abs();
+                let amount = self.total_flow.get(item).cloned().unwrap_or(0.0);
+                if amount.abs() < 1e-6 {
+                    continue;
                 }
                 ui.vertical(|ui| {
                     ui.add_sized([35.0, 15.0], SignedCompactLabel::new(amount));
-                    let icon = ui.add_sized(
-                        [35.0, 35.0],
-                        GenericIcon {
-                            ctx,
-                            item,
-                            size: 32.0,
-                        },
-                    );
+                    let icon = ui
+                        .push_id(&item, |ui| {
+                            ui.add_sized(
+                                [35.0, 35.0],
+                                GenericIcon {
+                                    ctx,
+                                    item,
+                                    size: 32.0,
+                                },
+                            )
+                            .interact(egui::Sense::click())
+                        })
+                        .inner;
 
-                    let popup_id = icon.id.with("弹窗提示");
-                    if icon.clicked() {
+                    let popup_id = egui::Id::new("目标").with(&item);
+                    if icon.clicked_by(egui::PointerButton::Secondary) {
                         egui::Popup::toggle_id(ui.ctx(), popup_id);
                         self.hint_flows.clear();
                         for source in &self.flow_editor_sources {
@@ -206,54 +211,53 @@ impl FactoryInstance {
                             let amount = flow.get(item).cloned().unwrap_or(0.0);
                             ui.vertical(|ui| {
                                 ui.add_sized([35.0, 15.0], SignedCompactLabel::new(amount));
-                                let icon = ui
-                                    .add_sized(
-                                        [35.0, 35.0],
-                                        GenericIcon {
+                                let icon = ui.add_sized(
+                                    [35.0, 35.0],
+                                    GenericIcon {
+                                        ctx,
+                                        item,
+                                        size: 32.0,
+                                    },
+                                ).interact(egui::Sense::click());
+                                let popup_id = icon.id.with("弹窗提示");
+                                if icon.clicked_by(egui::PointerButton::Secondary) {
+                                    egui::Popup::toggle_id(ui.ctx(), popup_id);
+                                    self.hint_flows.clear();
+                                    for source in &self.flow_editor_sources {
+                                        self.hint_flows.extend(source.hint_populate(
                                             ctx,
-                                            item,
-                                            size: 32.0,
-                                        },
-                                    );
-                                // let popup_id = icon.id.with("弹窗提示");
-                                // if icon.clicked() {
-                                //     egui::Popup::toggle_id(ui.ctx(), popup_id);
-                                //     self.hint_flows.clear();
-                                //     for source in &self.flow_editor_sources {
-                                //         self.hint_flows.extend(source.hint_populate(
-                                //             ctx,
-                                //             &HashMap::new(),
-                                //             &item,
-                                //             amount,
-                                //         ));
-                                //     }
-                                // }
-                                // egui::Popup::menu(&icon)
-                                //     .id(popup_id)
-                                //     .open_memory(None)
-                                //     .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                                //     .show(|ui| {
-                                //         egui::ScrollArea::vertical().show(ui, |ui| {
-                                //             ui.label("推荐配方");
-                                //             if self.hint_flows.is_empty() {
-                                //                 ui.label("无推荐配方");
-                                //             } else {
-                                //                 for (idx, hint_flow) in
-                                //                     self.hint_flows.iter_mut().enumerate()
-                                //                 {
-                                //                     ui.horizontal(|ui| {
-                                //                         ui.disable();
-                                //                         hint_flow.editor_view(ui, ctx);
-                                //                     });
-                                //                     if ui.button("添加").clicked() {
-                                //                         add_hint_flow = Some(idx);
-                                //                         // dbg!(add_hint_flow);
-                                //                     }
-                                //                     ui.separator();
-                                //                 }
-                                //             }
-                                //         });
-                                //     });
+                                            &HashMap::new(),
+                                            &item,
+                                            amount,
+                                        ));
+                                    }
+                                }
+                                egui::Popup::menu(&icon)
+                                    .id(popup_id)
+                                    .open_memory(None)
+                                    .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                                    .show(|ui| {
+                                        egui::ScrollArea::vertical().show(ui, |ui| {
+                                            ui.label("推荐配方");
+                                            if self.hint_flows.is_empty() {
+                                                ui.label("无推荐配方");
+                                            } else {
+                                                for (idx, hint_flow) in
+                                                    self.hint_flows.iter_mut().enumerate()
+                                                {
+                                                    ui.horizontal(|ui| {
+                                                        ui.disable();
+                                                        hint_flow.editor_view(ui, ctx);
+                                                    });
+                                                    if ui.button("添加").clicked() {
+                                                        add_hint_flow = Some(idx);
+                                                        // dbg!(add_hint_flow);
+                                                    }
+                                                    ui.separator();
+                                                }
+                                            }
+                                        });
+                                    });
                             });
                             if ui.available_size_before_wrap().x < 35.0 {
                                 ui.end_row();
@@ -364,6 +368,7 @@ impl EditorView for FactoryInstance {
                 .show(ui, |ui| {
                     ui.horizontal_top(|ui| {
                         ui.vertical(|ui| {
+                            let mut add_hint_flow = None;
                             ui.heading("优化目标");
                             let mut delete_target: Option<usize> = None;
                             for (idx, (item, amount)) in self.target.iter_mut().enumerate() {
@@ -378,6 +383,48 @@ impl EditorView for FactoryInstance {
                                             },
                                         )
                                         .interact(egui::Sense::click());
+                                    let popup_id = icon.id.with("弹窗提示").with(&item);
+                                    if icon.clicked_by(egui::PointerButton::Secondary) {
+                                        egui::Popup::toggle_id(ui.ctx(), popup_id);
+                                        self.hint_flows.clear();
+                                        for source in &self.flow_editor_sources {
+                                            self.hint_flows.extend(source.hint_populate(
+                                                ctx,
+                                                &HashMap::new(),
+                                                &item,
+                                                -*amount,
+                                            ));
+                                        }
+                                    }
+                                    egui::Popup::menu(&icon)
+                                        .id(popup_id)
+                                        .open_memory(None)
+                                        .close_behavior(
+                                            egui::PopupCloseBehavior::CloseOnClickOutside,
+                                        )
+                                        .show(|ui| {
+                                            egui::ScrollArea::vertical().show(ui, |ui| {
+                                                ui.label("推荐配方");
+                                                if self.hint_flows.is_empty() {
+                                                    ui.label("无推荐配方");
+                                                } else {
+                                                    for (idx, hint_flow) in
+                                                        self.hint_flows.iter_mut().enumerate()
+                                                    {
+                                                        ui.horizontal(|ui| {
+                                                            ui.disable();
+                                                            hint_flow.editor_view(ui, ctx);
+                                                        });
+                                                        if ui.button("添加").clicked() {
+                                                            add_hint_flow = Some(idx);
+                                                            // dbg!(add_hint_flow);
+                                                        }
+                                                        ui.separator();
+                                                    }
+                                                }
+                                            });
+                                        });
+
                                     ui.vertical(|ui| {
                                         let label = ui.label("选择目标产物类型");
                                         egui::ComboBox::from_id_salt(label.id)
@@ -459,6 +506,10 @@ impl EditorView for FactoryInstance {
                             }
                             if let Some(idx) = delete_target {
                                 self.target.remove(idx);
+                            }
+                            if let Some(idx) = add_hint_flow {
+                                let hint_flow = self.hint_flows.remove(idx);
+                                self.flow_editors.push(hint_flow);
                             }
                             if ui.button("添加目标产物").clicked() {
                                 self.target.push((
