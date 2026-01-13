@@ -8,7 +8,7 @@ Automatically builds binaries for multiple platforms and architectures.
 
 ### Triggers
 
-- **Push to main/master**: Builds binaries and uploads them as artifacts
+- **Push to master**: Builds binaries and uploads them as artifacts
 - **Release creation**: Builds binaries and attaches them to the release
 - **Manual trigger**: Can be triggered manually via workflow_dispatch
 
@@ -67,7 +67,7 @@ For more complex cross-compilation scenarios, consider using the [cross](https:/
 
 You can customize the workflow behavior by modifying:
 
-- **Trigger branches**: Change the `branches` list under `on.push`
+- **Trigger branches**: Change the `branches` list under `on.push` (currently set to `master`)
 - **Ignored paths**: Modify `paths-ignore` to skip builds for certain file changes
 - **Build flags**: Add cargo features or flags to the `cargo build` command
 - **Environment variables**: Add or modify variables in the `env` section
