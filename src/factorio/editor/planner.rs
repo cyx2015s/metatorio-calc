@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 
+use egui::Vec2;
+
 use crate::{
-    concept::{Mechanic, MechanicProvider, MechanicSender, ContextBound, EditorView, Flow},
+    concept::{ContextBound, EditorView, Flow, Mechanic, MechanicProvider, MechanicSender},
     factorio::{
         common::{sort_generic_items, sort_generic_items_owned},
         editor::{icon::GenericIcon, selector::selector_menu_with_filter},
@@ -22,9 +24,8 @@ pub struct FactoryInstance {
     pub total_flow: Flow<GenericItem>,
     /// Cached sorted keys for total_flow to avoid sorting every frame
     pub total_flow_sorted_keys: Vec<GenericItem>,
-    pub flow_editor_sources: Vec<
-        Box<dyn MechanicProvider<ContextType = FactorioContext, ItemIdentType = GenericItem>>,
-    >,
+    pub flow_editor_sources:
+        Vec<Box<dyn MechanicProvider<ContextType = FactorioContext, ItemIdentType = GenericItem>>>,
     pub flow_editors:
         Vec<Box<dyn Mechanic<ItemIdentType = GenericItem, ContextType = FactorioContext>>>,
     pub hint_flows:
@@ -100,9 +101,8 @@ impl FactoryInstance {
     pub fn add_flow_source<
         F: Fn(
             MechanicSender<GenericItem, FactorioContext>,
-        ) -> Box<
-            dyn MechanicProvider<ContextType = FactorioContext, ItemIdentType = GenericItem>,
-        >,
+        )
+            -> Box<dyn MechanicProvider<ContextType = FactorioContext, ItemIdentType = GenericItem>>,
     >(
         mut self,
         f: F,
@@ -139,6 +139,7 @@ impl FactoryInstance {
                     let popup_id = egui::Id::new("目标").with(&item);
                     if icon.clicked_by(egui::PointerButton::Secondary) {
                         egui::Popup::toggle_id(ui.ctx(), popup_id);
+
                         self.hint_flows.clear();
                         for source in &self.flow_editor_sources {
                             self.hint_flows.extend(source.hint_populate(
@@ -151,26 +152,30 @@ impl FactoryInstance {
                     }
                     egui::Popup::menu(&icon)
                         .id(popup_id)
+                        .width(150.0)
                         .open_memory(None)
                         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                         .show(|ui| {
-                            egui::ScrollArea::vertical().show(ui, |ui| {
-                                ui.label("推荐配方");
-                                if self.hint_flows.is_empty() {
-                                    ui.label("无推荐配方");
-                                } else {
-                                    for (idx, hint_flow) in self.hint_flows.iter_mut().enumerate() {
-                                        ui.horizontal(|ui| {
-                                            ui.disable();
-                                            hint_flow.editor_view(ui, ctx);
-                                        });
-                                        if ui.button("添加").clicked() {
-                                            add_hint_flow = Some(idx);
-                                            // dbg!(add_hint_flow);
+                            ui.allocate_ui(Vec2 { x: 150.0, y: 300.0 }, |ui| {
+                                egui::ScrollArea::vertical().show(ui, |ui| {
+                                    ui.label("推荐配方");
+                                    if self.hint_flows.is_empty() {
+                                        ui.label("无推荐配方");
+                                    } else {
+                                        for (idx, hint_flow) in
+                                            self.hint_flows.iter_mut().enumerate()
+                                        {
+                                            ui.horizontal(|ui| {
+                                                ui.disable();
+                                                hint_flow.editor_view(ui, ctx);
+                                            });
+                                            if ui.button("添加").clicked() {
+                                                add_hint_flow = Some(idx);
+                                            }
+                                            ui.separator();
                                         }
-                                        ui.separator();
                                     }
-                                }
+                                })
                             });
                         });
                 });
@@ -209,16 +214,22 @@ impl FactoryInstance {
                     ui.horizontal_wrapped(|ui| {
                         for item in keys {
                             let amount = flow.get(item).cloned().unwrap_or(0.0);
+
                             ui.vertical(|ui| {
-                                ui.add_sized([35.0, 15.0], SignedCompactLabel::new(amount));
-                                let icon = ui.add_sized(
-                                    [35.0, 35.0],
-                                    GenericIcon {
-                                        ctx,
-                                        item,
-                                        size: 32.0,
-                                    },
-                                ).interact(egui::Sense::click());
+                                ui.add_sized(
+                                    [35.0, 15.0],
+                                    SignedCompactLabel::new(amount * solution_val.unwrap_or(1.0)),
+                                );
+                                let icon = ui
+                                    .add_sized(
+                                        [35.0, 35.0],
+                                        GenericIcon {
+                                            ctx,
+                                            item,
+                                            size: 32.0,
+                                        },
+                                    )
+                                    .interact(egui::Sense::click());
                                 let popup_id = icon.id.with("弹窗提示");
                                 if icon.clicked_by(egui::PointerButton::Secondary) {
                                     egui::Popup::toggle_id(ui.ctx(), popup_id);
@@ -234,28 +245,30 @@ impl FactoryInstance {
                                 }
                                 egui::Popup::menu(&icon)
                                     .id(popup_id)
+                                    .width(150.0)
                                     .open_memory(None)
                                     .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                                     .show(|ui| {
-                                        egui::ScrollArea::vertical().show(ui, |ui| {
-                                            ui.label("推荐配方");
-                                            if self.hint_flows.is_empty() {
-                                                ui.label("无推荐配方");
-                                            } else {
-                                                for (idx, hint_flow) in
-                                                    self.hint_flows.iter_mut().enumerate()
-                                                {
-                                                    ui.horizontal(|ui| {
-                                                        ui.disable();
-                                                        hint_flow.editor_view(ui, ctx);
-                                                    });
-                                                    if ui.button("添加").clicked() {
-                                                        add_hint_flow = Some(idx);
-                                                        // dbg!(add_hint_flow);
+                                        ui.allocate_ui(Vec2 { x: 150.0, y: 300.0 }, |ui| {
+                                            egui::ScrollArea::vertical().show(ui, |ui| {
+                                                ui.label("推荐配方");
+                                                if self.hint_flows.is_empty() {
+                                                    ui.label("无推荐配方");
+                                                } else {
+                                                    for (idx, hint_flow) in
+                                                        self.hint_flows.iter_mut().enumerate()
+                                                    {
+                                                        ui.horizontal(|ui| {
+                                                            ui.disable();
+                                                            hint_flow.editor_view(ui, ctx);
+                                                        });
+                                                        if ui.button("添加").clicked() {
+                                                            add_hint_flow = Some(idx);
+                                                        }
+                                                        ui.separator();
                                                     }
-                                                    ui.separator();
                                                 }
-                                            }
+                                            })
                                         });
                                     });
                             });
@@ -397,31 +410,34 @@ impl EditorView for FactoryInstance {
                                         }
                                     }
                                     egui::Popup::menu(&icon)
+                                        .width(150.0)
                                         .id(popup_id)
                                         .open_memory(None)
                                         .close_behavior(
                                             egui::PopupCloseBehavior::CloseOnClickOutside,
                                         )
                                         .show(|ui| {
-                                            egui::ScrollArea::vertical().show(ui, |ui| {
-                                                ui.label("推荐配方");
-                                                if self.hint_flows.is_empty() {
-                                                    ui.label("无推荐配方");
-                                                } else {
-                                                    for (idx, hint_flow) in
-                                                        self.hint_flows.iter_mut().enumerate()
-                                                    {
-                                                        ui.horizontal(|ui| {
-                                                            ui.disable();
-                                                            hint_flow.editor_view(ui, ctx);
-                                                        });
-                                                        if ui.button("添加").clicked() {
-                                                            add_hint_flow = Some(idx);
-                                                            // dbg!(add_hint_flow);
+                                            ui.allocate_ui(Vec2 { x: 150.0, y: 300.0 }, |ui| {
+                                                egui::ScrollArea::vertical().show(ui, |ui| {
+                                                    ui.label("推荐配方");
+                                                    if self.hint_flows.is_empty() {
+                                                        ui.label("无推荐配方");
+                                                    } else {
+                                                        for (idx, hint_flow) in
+                                                            self.hint_flows.iter_mut().enumerate()
+                                                        {
+                                                            ui.horizontal(|ui| {
+                                                                ui.disable();
+                                                                hint_flow.editor_view(ui, ctx);
+                                                            });
+                                                            if ui.button("添加").clicked() {
+                                                                add_hint_flow = Some(idx);
+                                                                // dbg!(add_hint_flow);
+                                                            }
+                                                            ui.separator();
                                                         }
-                                                        ui.separator();
                                                     }
-                                                }
+                                                })
                                             });
                                         });
 

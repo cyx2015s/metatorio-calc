@@ -1,9 +1,9 @@
 use serde::Deserialize;
 
-use crate::factorio::{
+use crate::{concept::{ContextBound, EditorView}, factorio::{
     common::*,
     model::{context::*, entity::*},
-};
+}};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ModulePrototype {
@@ -84,5 +84,16 @@ impl ModuleConfig {
             }
         }
         total_effect
+    }
+}
+
+impl ContextBound for ModuleConfig {
+    type ContextType = FactorioContext;
+    type ItemIdentType = GenericItem;
+}
+
+impl EditorView for ModuleConfig {
+    fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &Self::ContextType) {
+        
     }
 }
