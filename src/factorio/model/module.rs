@@ -93,7 +93,7 @@ impl ContextBound for ModuleConfig {
 }
 
 impl EditorView for ModuleConfig {
-    fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &Self::ContextType) {
+    fn editor_view(&mut self, _ui: &mut egui::Ui, _ctx: &Self::ContextType) {
         
     }
 }

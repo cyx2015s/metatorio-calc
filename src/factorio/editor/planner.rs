@@ -3,7 +3,9 @@ use std::collections::HashMap;
 use egui::Vec2;
 
 use crate::{
-    concept::{ContextBound, EditorView, Flow, Mechanic, MechanicProvider, MechanicSender},
+    concept::{
+        ContextBound, EditorView, Flow, ItemIdent, Mechanic, MechanicProvider, MechanicSender,
+    },
     factorio::{
         common::{sort_generic_items, sort_generic_items_owned},
         editor::{icon::GenericIcon, selector::selector_menu_with_filter},
@@ -123,7 +125,7 @@ impl FactoryInstance {
                 ui.vertical(|ui| {
                     ui.add_sized([35.0, 15.0], SignedCompactLabel::new(amount));
                     let icon = ui
-                        .push_id(&item, |ui| {
+                        .push_id(item, |ui| {
                             ui.add_sized(
                                 [35.0, 35.0],
                                 GenericIcon {
@@ -136,48 +138,16 @@ impl FactoryInstance {
                         })
                         .inner;
 
-                    let popup_id = egui::Id::new("目标").with(&item);
-                    if icon.clicked_by(egui::PointerButton::Secondary) {
-                        egui::Popup::toggle_id(ui.ctx(), popup_id);
-
-                        self.hint_flows.clear();
-                        for source in &self.flow_editor_sources {
-                            self.hint_flows.extend(source.hint_populate(
-                                ctx,
-                                &HashMap::new(),
-                                &item,
-                                amount,
-                            ));
-                        }
-                    }
-                    egui::Popup::menu(&icon)
-                        .id(popup_id)
-                        .width(150.0)
-                        .open_memory(None)
-                        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                        .show(|ui| {
-                            ui.allocate_ui(Vec2 { x: 150.0, y: 300.0 }, |ui| {
-                                egui::ScrollArea::vertical().show(ui, |ui| {
-                                    ui.label("推荐配方");
-                                    if self.hint_flows.is_empty() {
-                                        ui.label("无推荐配方");
-                                    } else {
-                                        for (idx, hint_flow) in
-                                            self.hint_flows.iter_mut().enumerate()
-                                        {
-                                            ui.horizontal(|ui| {
-                                                ui.disable();
-                                                hint_flow.editor_view(ui, ctx);
-                                            });
-                                            if ui.button("添加").clicked() {
-                                                add_hint_flow = Some(idx);
-                                            }
-                                            ui.separator();
-                                        }
-                                    }
-                                })
-                            });
-                        });
+                    show_hint_popup(
+                        ui,
+                        ctx,
+                        item,
+                        amount,
+                        &icon,
+                        &mut add_hint_flow,
+                        &mut self.hint_flows,
+                        &self.flow_editor_sources,
+                    );
                 });
                 if ui.available_size_before_wrap().x < 35.0 {
                     ui.end_row();
@@ -186,7 +156,8 @@ impl FactoryInstance {
         });
 
         ui.heading("配方配置");
-        for (i, flow_config) in self.flow_editors.iter_mut().enumerate() {
+        let flow_editors = &mut self.flow_editors;
+        for (i, flow_config) in flow_editors.iter_mut().enumerate() {
             ui.separator();
             ui.horizontal(|ui| {
                 let ptr = box_as_ptr(flow_config);
@@ -230,47 +201,16 @@ impl FactoryInstance {
                                         },
                                     )
                                     .interact(egui::Sense::click());
-                                let popup_id = icon.id.with("弹窗提示");
-                                if icon.clicked_by(egui::PointerButton::Secondary) {
-                                    egui::Popup::toggle_id(ui.ctx(), popup_id);
-                                    self.hint_flows.clear();
-                                    for source in &self.flow_editor_sources {
-                                        self.hint_flows.extend(source.hint_populate(
-                                            ctx,
-                                            &HashMap::new(),
-                                            &item,
-                                            amount,
-                                        ));
-                                    }
-                                }
-                                egui::Popup::menu(&icon)
-                                    .id(popup_id)
-                                    .width(150.0)
-                                    .open_memory(None)
-                                    .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                                    .show(|ui| {
-                                        ui.allocate_ui(Vec2 { x: 150.0, y: 300.0 }, |ui| {
-                                            egui::ScrollArea::vertical().show(ui, |ui| {
-                                                ui.label("推荐配方");
-                                                if self.hint_flows.is_empty() {
-                                                    ui.label("无推荐配方");
-                                                } else {
-                                                    for (idx, hint_flow) in
-                                                        self.hint_flows.iter_mut().enumerate()
-                                                    {
-                                                        ui.horizontal(|ui| {
-                                                            ui.disable();
-                                                            hint_flow.editor_view(ui, ctx);
-                                                        });
-                                                        if ui.button("添加").clicked() {
-                                                            add_hint_flow = Some(idx);
-                                                        }
-                                                        ui.separator();
-                                                    }
-                                                }
-                                            })
-                                        });
-                                    });
+                                show_hint_popup(
+                                    ui,
+                                    ctx,
+                                    item,
+                                    amount,
+                                    &icon,
+                                    &mut add_hint_flow,
+                                    &mut self.hint_flows,
+                                    &self.flow_editor_sources,
+                                );
                             });
                             if ui.available_size_before_wrap().x < 35.0 {
                                 ui.end_row();
@@ -289,6 +229,52 @@ impl FactoryInstance {
             self.flow_editors.push(hint_flow);
         }
     }
+}
+
+fn show_hint_popup<I: ItemIdent, C>(
+    ui: &mut egui::Ui,
+    ctx: &C,
+    item: &I,
+    amount: f64,
+    icon: &egui::Response,
+    add_hint_flow: &mut Option<usize>,
+    hint_flows: &mut Vec<Box<dyn Mechanic<ContextType = C, ItemIdentType = I> + 'static>>,
+    editor_sources: &Vec<Box<dyn MechanicProvider<ContextType = C, ItemIdentType = I>>>,
+) {
+    let popup_id = icon.id.with("弹窗提示");
+    if icon.clicked_by(egui::PointerButton::Secondary) {
+        egui::Popup::toggle_id(ui.ctx(), popup_id);
+        hint_flows.clear();
+        for source in editor_sources {
+            hint_flows.extend(source.hint_populate(ctx, item, amount));
+        }
+    }
+    egui::Popup::menu(icon)
+        .id(popup_id)
+        .width(150.0)
+        .open_memory(None)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| {
+            ui.allocate_ui(Vec2 { x: 150.0, y: 300.0 }, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    ui.label("推荐配方");
+                    if hint_flows.is_empty() {
+                        ui.label("无推荐配方");
+                    } else {
+                        for (idx, hint_flow) in hint_flows.iter_mut().enumerate() {
+                            ui.horizontal(|ui| {
+                                ui.disable();
+                                hint_flow.editor_view(ui, ctx);
+                            });
+                            if ui.button("添加").clicked() {
+                                *add_hint_flow = Some(idx);
+                            }
+                            ui.separator();
+                        }
+                    }
+                })
+            });
+        });
 }
 
 pub struct PlannerView {
@@ -396,51 +382,17 @@ impl EditorView for FactoryInstance {
                                             },
                                         )
                                         .interact(egui::Sense::click());
-                                    let popup_id = icon.id.with("弹窗提示").with(&item);
-                                    if icon.clicked_by(egui::PointerButton::Secondary) {
-                                        egui::Popup::toggle_id(ui.ctx(), popup_id);
-                                        self.hint_flows.clear();
-                                        for source in &self.flow_editor_sources {
-                                            self.hint_flows.extend(source.hint_populate(
-                                                ctx,
-                                                &HashMap::new(),
-                                                &item,
-                                                -*amount,
-                                            ));
-                                        }
-                                    }
-                                    egui::Popup::menu(&icon)
-                                        .width(150.0)
-                                        .id(popup_id)
-                                        .open_memory(None)
-                                        .close_behavior(
-                                            egui::PopupCloseBehavior::CloseOnClickOutside,
-                                        )
-                                        .show(|ui| {
-                                            ui.allocate_ui(Vec2 { x: 150.0, y: 300.0 }, |ui| {
-                                                egui::ScrollArea::vertical().show(ui, |ui| {
-                                                    ui.label("推荐配方");
-                                                    if self.hint_flows.is_empty() {
-                                                        ui.label("无推荐配方");
-                                                    } else {
-                                                        for (idx, hint_flow) in
-                                                            self.hint_flows.iter_mut().enumerate()
-                                                        {
-                                                            ui.horizontal(|ui| {
-                                                                ui.disable();
-                                                                hint_flow.editor_view(ui, ctx);
-                                                            });
-                                                            if ui.button("添加").clicked() {
-                                                                add_hint_flow = Some(idx);
-                                                                // dbg!(add_hint_flow);
-                                                            }
-                                                            ui.separator();
-                                                        }
-                                                    }
-                                                })
-                                            });
-                                        });
 
+                                    show_hint_popup(
+                                        ui,
+                                        ctx,
+                                        item,
+                                        *amount,
+                                        &icon,
+                                        &mut add_hint_flow,
+                                        &mut self.hint_flows,
+                                        &self.flow_editor_sources,
+                                    );
                                     ui.vertical(|ui| {
                                         let label = ui.label("选择目标产物类型");
                                         egui::ComboBox::from_id_salt(label.id)

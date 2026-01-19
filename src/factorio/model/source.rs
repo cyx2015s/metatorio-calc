@@ -198,7 +198,6 @@ impl MechanicProvider for InfiniteSourceProvider {
     fn hint_populate(
         &self,
         _ctx: &Self::ContextType,
-        _flows: &std::collections::HashMap<usize, Flow<Self::ItemIdentType>>,
         item: &Self::ItemIdentType,
         value: f64,
     ) -> Vec<

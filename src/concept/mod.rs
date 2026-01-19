@@ -59,7 +59,6 @@ pub trait MechanicProvider: EditorView + ContextBound {
     fn hint_populate(
         &self,
         _ctx: &Self::ContextType,
-        _flows: &HashMap<usize, Flow<Self::ItemIdentType>>,
         _item: &Self::ItemIdentType,
         _value: f64,
     ) -> Vec<Box<dyn Mechanic<ItemIdentType = Self::ItemIdentType, ContextType = Self::ContextType>>>

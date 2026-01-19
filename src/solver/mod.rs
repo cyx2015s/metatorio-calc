@@ -1,7 +1,6 @@
 use good_lp::{Solution, SolverModel, variable};
 
 use crate::concept::{Flow, ItemIdent};
-use crate::factorio::model::item;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::hash::Hash;
@@ -95,7 +94,7 @@ where
             Ok(result)
         }
         Err(err) => {
-            let mut err_string = match err {
+            let err_string = match err {
                 good_lp::ResolutionError::Unbounded => {
                     "无界。存在能够无限产生目标物品且不增加消耗的配方组合。".to_string()
                 }

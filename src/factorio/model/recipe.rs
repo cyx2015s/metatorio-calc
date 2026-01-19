@@ -707,7 +707,6 @@ impl MechanicProvider for RecipeConfigProvider {
     fn hint_populate(
         &self,
         ctx: &Self::ContextType,
-        _flows: &std::collections::HashMap<usize, Flow<Self::ItemIdentType>>,
         item: &Self::ItemIdentType,
         value: f64,
     ) -> Vec<
