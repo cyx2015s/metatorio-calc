@@ -1,7 +1,7 @@
 use serde::Deserialize;
 
 use crate::{
-    concept::{AsFlow, ContextBound, Flow},
+    concept::{AsFlow, SolveContext, Flow},
     factorio::{
         common::*,
         model::{context::*, energy::*, entity::*, recipe::*},
@@ -83,13 +83,13 @@ impl Default for MiningConfig {
     }
 }
 
-impl ContextBound for MiningConfig {
-    type ContextType = FactorioContext;
+impl SolveContext for MiningConfig {
+    type GameContext = FactorioContext;
     type ItemIdentType = GenericItem;
 }
 
 impl AsFlow for MiningConfig {
-    fn as_flow(&self, ctx: &Self::ContextType) -> Flow<Self::ItemIdentType> {
+    fn as_flow(&self, ctx: &Self::GameContext) -> Flow<Self::ItemIdentType> {
         let mut map = Flow::new();
 
         let mut module_effects = Effect::default();

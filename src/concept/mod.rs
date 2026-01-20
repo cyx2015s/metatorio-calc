@@ -7,28 +7,28 @@ pub trait Subview: Send {
     }
 }
 
-pub trait ContextBound: Send {
-    type ContextType;
+pub trait SolveContext: Send {
+    type GameContext;
     type ItemIdentType: ItemIdent;
 }
 
-pub trait EditorView: ContextBound {
-    fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &Self::ContextType);
+pub trait EditorView: SolveContext {
+    fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &Self::GameContext);
 }
 
 pub type Flow<I> = HashMap<I, f64>;
 
-pub trait AsFlow: ContextBound {
+pub trait AsFlow: SolveContext {
     /// 传递物品流信息
-    fn as_flow(&self, ctx: &Self::ContextType) -> Flow<Self::ItemIdentType>;
+    fn as_flow(&self, ctx: &Self::GameContext) -> Flow<Self::ItemIdentType>;
     /// 执行成本，默认返回 1.0
-    fn cost(&self, _ctx: &Self::ContextType) -> f64 {
+    fn cost(&self, _ctx: &Self::GameContext) -> f64 {
         1.0
     }
 }
 
 pub type MechanicSender<I, C> =
-    std::sync::mpsc::Sender<Box<dyn Mechanic<ItemIdentType = I, ContextType = C>>>;
+    std::sync::mpsc::Sender<Box<dyn Mechanic<ItemIdentType = I, GameContext = C>>>;
 
 pub trait ItemIdent: Debug + Clone + Eq + Hash {}
 pub trait GameContextCreatorView: Subview {
@@ -39,17 +39,17 @@ pub trait Mechanic: AsFlow + EditorView {}
 
 impl<T> Mechanic for T where T: AsFlow + EditorView {}
 
-pub trait MechanicProvider: EditorView + ContextBound {
+pub trait MechanicProvider: EditorView + SolveContext {
     /// 传递创建的配方信息
-    fn set_mechanic_sender(&mut self, sender: MechanicSender<Self::ItemIdentType, Self::ContextType>);
+    fn set_mechanic_sender(&mut self, sender: MechanicSender<Self::ItemIdentType, Self::GameContext>);
 
     /// TODO
     /// 游戏机制提供器可选：自动填充逻辑
     fn auto_populate(
         &self,
-        _ctx: &Self::ContextType,
+        _ctx: &Self::GameContext,
         _flows: &HashMap<usize, Flow<Self::ItemIdentType>>,
-    ) -> Vec<Box<dyn Mechanic<ItemIdentType = Self::ItemIdentType, ContextType = Self::ContextType>>>
+    ) -> Vec<Box<dyn Mechanic<ItemIdentType = Self::ItemIdentType, GameContext = Self::GameContext>>>
     {
         // 默认不实现任何自动填充逻辑
         vec![]
@@ -58,10 +58,10 @@ pub trait MechanicProvider: EditorView + ContextBound {
     /// 在规划界面点击物品时，可以提供一些推荐配方
     fn hint_populate(
         &self,
-        _ctx: &Self::ContextType,
+        _ctx: &Self::GameContext,
         _item: &Self::ItemIdentType,
         _value: f64,
-    ) -> Vec<Box<dyn Mechanic<ItemIdentType = Self::ItemIdentType, ContextType = Self::ContextType>>>
+    ) -> Vec<Box<dyn Mechanic<ItemIdentType = Self::ItemIdentType, GameContext = Self::GameContext>>>
     {
         vec![]
     }

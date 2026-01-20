@@ -4,7 +4,7 @@ use egui::Vec2;
 
 use crate::{
     concept::{
-        ContextBound, EditorView, Flow, ItemIdent, Mechanic, MechanicProvider, MechanicSender,
+        SolveContext, EditorView, Flow, ItemIdent, Mechanic, MechanicProvider, MechanicSender,
     },
     factorio::{
         common::{sort_generic_items, sort_generic_items_owned},
@@ -27,16 +27,16 @@ pub struct FactoryInstance {
     /// Cached sorted keys for total_flow to avoid sorting every frame
     pub total_flow_sorted_keys: Vec<GenericItem>,
     pub flow_editor_sources:
-        Vec<Box<dyn MechanicProvider<ContextType = FactorioContext, ItemIdentType = GenericItem>>>,
+        Vec<Box<dyn MechanicProvider<GameContext = FactorioContext, ItemIdentType = GenericItem>>>,
     pub flow_editors:
-        Vec<Box<dyn Mechanic<ItemIdentType = GenericItem, ContextType = FactorioContext>>>,
+        Vec<Box<dyn Mechanic<ItemIdentType = GenericItem, GameContext = FactorioContext>>>,
     pub hint_flows:
-        Vec<Box<dyn Mechanic<ItemIdentType = GenericItem, ContextType = FactorioContext>>>,
+        Vec<Box<dyn Mechanic<ItemIdentType = GenericItem, GameContext = FactorioContext>>>,
     pub flow_receiver: std::sync::mpsc::Receiver<
-        Box<dyn Mechanic<ItemIdentType = GenericItem, ContextType = FactorioContext>>,
+        Box<dyn Mechanic<ItemIdentType = GenericItem, GameContext = FactorioContext>>,
     >,
     pub flow_sender: std::sync::mpsc::Sender<
-        Box<dyn Mechanic<ItemIdentType = GenericItem, ContextType = FactorioContext>>,
+        Box<dyn Mechanic<ItemIdentType = GenericItem, GameContext = FactorioContext>>,
     >,
     pub solver_sender:
         std::sync::mpsc::Sender<(Flow<GenericItem>, HashMap<usize, (Flow<GenericItem>, f64)>)>,
@@ -104,7 +104,7 @@ impl FactoryInstance {
         F: Fn(
             MechanicSender<GenericItem, FactorioContext>,
         )
-            -> Box<dyn MechanicProvider<ContextType = FactorioContext, ItemIdentType = GenericItem>>,
+            -> Box<dyn MechanicProvider<GameContext = FactorioContext, ItemIdentType = GenericItem>>,
     >(
         mut self,
         f: F,
@@ -238,8 +238,8 @@ fn show_hint_popup<I: ItemIdent, C>(
     amount: f64,
     icon: &egui::Response,
     add_hint_flow: &mut Option<usize>,
-    hint_flows: &mut Vec<Box<dyn Mechanic<ContextType = C, ItemIdentType = I> + 'static>>,
-    editor_sources: &Vec<Box<dyn MechanicProvider<ContextType = C, ItemIdentType = I>>>,
+    hint_flows: &mut Vec<Box<dyn Mechanic<GameContext = C, ItemIdentType = I> + 'static>>,
+    editor_sources: &Vec<Box<dyn MechanicProvider<GameContext = C, ItemIdentType = I>>>,
 ) {
     let popup_id = icon.id.with("弹窗提示");
     if icon.clicked_by(egui::PointerButton::Secondary) {
@@ -286,8 +286,8 @@ pub struct PlannerView {
     pub new_factory_name: String,
 }
 
-impl ContextBound for FactoryInstance {
-    type ContextType = FactorioContext;
+impl SolveContext for FactoryInstance {
+    type GameContext = FactorioContext;
     type ItemIdentType = GenericItem;
 }
 
@@ -387,7 +387,7 @@ impl EditorView for FactoryInstance {
                                         ui,
                                         ctx,
                                         item,
-                                        *amount,
+                                        -*amount,
                                         &icon,
                                         &mut add_hint_flow,
                                         &mut self.hint_flows,

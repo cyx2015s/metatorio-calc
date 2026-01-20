@@ -15,7 +15,7 @@ use crate::{
             context::{FactorioContext, GenericItem},
             energy::energy_source_as_flow,
             entity::EntityPrototype,
-            module::ModuleConfig,
+            module::{ModuleConfig, ModuleConfigEditor},
         },
     },
 };
@@ -399,8 +399,8 @@ pub struct RecipeConfig {
     pub instance_fuel: Option<(String, i32)>,
 }
 
-impl ContextBound for RecipeConfig {
-    type ContextType = FactorioContext;
+impl SolveContext for RecipeConfig {
+    type GameContext = FactorioContext;
     type ItemIdentType = GenericItem;
 }
 
@@ -536,7 +536,7 @@ impl AsFlow for RecipeConfig {
         map
     }
 
-    fn cost(&self, ctx: &Self::ContextType) -> f64 {
+    fn cost(&self, ctx: &Self::GameContext) -> f64 {
         if self.machine.is_some() {
             let crafter = ctx.crafters.get(&self.machine.as_ref().unwrap().0).unwrap();
             crafter
@@ -587,7 +587,7 @@ fn test_recipe_normalized() {
 }
 
 impl EditorView for RecipeConfig {
-    fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &Self::ContextType) {
+    fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &Self::GameContext) {
         ui.horizontal_top(|ui| {
             ui.vertical(|ui| {
                 ui.label("配方");
@@ -683,8 +683,19 @@ impl EditorView for RecipeConfig {
 
             ui.separator();
             // TODO: 插件编辑界面
-            ui.label("TODO");
-            ui.label("插件编辑");
+
+            if let Some(machine_proto) = self
+                .machine
+                .as_ref()
+                .and_then(|machine| ctx.crafters.get(&machine.0))
+            {
+                ui.add(ModuleConfigEditor::new(
+                    ctx,
+                    &mut self.module_config,
+                    &machine_proto.allowed_affects,
+                    &machine_proto.allowed_module_categories,
+                ));
+            };
         });
     }
 }
@@ -694,8 +705,8 @@ pub struct RecipeConfigProvider {
     pub sender: MechanicSender<GenericItem, FactorioContext>,
 }
 
-impl ContextBound for RecipeConfigProvider {
-    type ContextType = FactorioContext;
+impl SolveContext for RecipeConfigProvider {
+    type GameContext = FactorioContext;
     type ItemIdentType = GenericItem;
 }
 
@@ -706,12 +717,11 @@ impl MechanicProvider for RecipeConfigProvider {
 
     fn hint_populate(
         &self,
-        ctx: &Self::ContextType,
+        ctx: &Self::GameContext,
         item: &Self::ItemIdentType,
         value: f64,
-    ) -> Vec<
-        Box<dyn Mechanic<ItemIdentType = Self::ItemIdentType, ContextType = Self::ContextType>>,
-    > {
+    ) -> Vec<Box<dyn Mechanic<ItemIdentType = Self::ItemIdentType, GameContext = Self::GameContext>>>
+    {
         let item_name = match item {
             GenericItem::Item { name, .. } => name,
             GenericItem::Fluid { name, .. } => name,
@@ -765,7 +775,7 @@ impl MechanicProvider for RecipeConfigProvider {
                     as Box<
                         dyn Mechanic<
                                 ItemIdentType = Self::ItemIdentType,
-                                ContextType = Self::ContextType,
+                                GameContext = Self::GameContext,
                             >,
                     >);
             }
@@ -776,7 +786,7 @@ impl MechanicProvider for RecipeConfigProvider {
 }
 
 impl EditorView for RecipeConfigProvider {
-    fn editor_view(&mut self, ui: &mut egui::Ui, _ctx: &Self::ContextType) {
+    fn editor_view(&mut self, ui: &mut egui::Ui, _ctx: &Self::GameContext) {
         if ui.button("添加配方").clicked() {
             let mut new_config = self.editing.clone();
             new_config.recipe = ("recipe-unknown".to_string(), 0).into();

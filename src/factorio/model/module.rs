@@ -1,9 +1,12 @@
 use serde::Deserialize;
 
-use crate::{concept::{ContextBound, EditorView}, factorio::{
-    common::*,
-    model::{context::*, entity::*},
-}};
+use crate::{
+    concept::SolveContext,
+    factorio::{
+        common::*,
+        model::{context::*, entity::*},
+    },
+};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ModulePrototype {
@@ -87,13 +90,48 @@ impl ModuleConfig {
     }
 }
 
-impl ContextBound for ModuleConfig {
-    type ContextType = FactorioContext;
+impl SolveContext for ModuleConfig {
+    type GameContext = FactorioContext;
     type ItemIdentType = GenericItem;
 }
 
-impl EditorView for ModuleConfig {
-    fn editor_view(&mut self, _ui: &mut egui::Ui, _ctx: &Self::ContextType) {
-        
+
+pub struct ModuleConfigEditor<'a> {
+    pub module_config: &'a mut ModuleConfig,
+    pub allowed_effects: &'a Option<EffectTypeLimitation>,
+    pub allowed_module_categories: &'a Option<Vec<String>>,
+
+    pub ctx: &'a FactorioContext,
+    pub lazy_get_allowed: Option<Box<dyn Fn(&FactorioContext, &str) -> (&'a Option<EffectTypeLimitation>, &'a Option<Vec<String>>)>>,
+}
+
+impl<'a> ModuleConfigEditor<'a> {
+    pub fn new<'b>(
+        ctx: &'b FactorioContext,
+        module_config: &'b mut ModuleConfig,
+        allowed_effects: &'b Option<EffectTypeLimitation>,
+        allowed_module_categories: &'b Option<Vec<String>>,
+    ) -> Self
+    where
+        'b: 'a,
+    {
+        Self {
+            module_config,
+            allowed_effects,
+            allowed_module_categories,
+            ctx,
+            lazy_get_allowed: None,
+        }
+    }
+}
+
+impl egui::Widget for ModuleConfigEditor<'_> {
+    fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+        ui.label(format!(
+            "效果类型： {:?}，插件组别： {:?}",
+            self.allowed_effects,
+            self.allowed_module_categories)
+        );
+        ui.response().clone()
     }
 }

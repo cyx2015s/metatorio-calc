@@ -1,5 +1,5 @@
 use crate::{
-    concept::{AsFlow, MechanicProvider, MechanicSender, ContextBound, EditorView, Flow},
+    concept::{AsFlow, MechanicProvider, MechanicSender, SolveContext, EditorView, Flow},
     factorio::{
         editor::{icon::GenericIcon, selector::selector_menu_with_filter},
         model::context::{FactorioContext, GenericItem},
@@ -11,19 +11,19 @@ pub struct InfiniteSource {
     pub item: GenericItem,
 }
 
-impl ContextBound for InfiniteSource {
-    type ContextType = FactorioContext;
+impl SolveContext for InfiniteSource {
+    type GameContext = FactorioContext;
     type ItemIdentType = GenericItem;
 }
 
 impl AsFlow for InfiniteSource {
-    fn as_flow(&self, _ctx: &Self::ContextType) -> Flow<Self::ItemIdentType> {
+    fn as_flow(&self, _ctx: &Self::GameContext) -> Flow<Self::ItemIdentType> {
         let mut map = std::collections::HashMap::new();
         map.insert(self.item.clone(), 1.0);
         map
     }
 
-    fn cost(&self, _ctx: &Self::ContextType) -> f64 {
+    fn cost(&self, _ctx: &Self::GameContext) -> f64 {
         // 返回一个默认较合理的成本
         match self.item {
             GenericItem::Electricity => 1.0 / 1024.0,
@@ -33,7 +33,7 @@ impl AsFlow for InfiniteSource {
 }
 
 impl EditorView for InfiniteSource {
-    fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &Self::ContextType) {
+    fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &Self::GameContext) {
         ui.horizontal_top(|ui| {
             ui.vertical(|ui| {
                 let label = ui.label("无限物体源");
@@ -171,13 +171,13 @@ pub struct InfiniteSourceProvider {
     pub sender: MechanicSender<GenericItem, FactorioContext>,
 }
 
-impl ContextBound for InfiniteSourceProvider {
-    type ContextType = FactorioContext;
+impl SolveContext for InfiniteSourceProvider {
+    type GameContext = FactorioContext;
     type ItemIdentType = GenericItem;
 }
 
 impl EditorView for InfiniteSourceProvider {
-    fn editor_view(&mut self, ui: &mut egui::Ui, _ctx: &Self::ContextType) {
+    fn editor_view(&mut self, ui: &mut egui::Ui, _ctx: &Self::GameContext) {
         if ui.button("添加无限源").clicked() {
             let source = InfiniteSource {
                 item: GenericItem::Item {
@@ -197,14 +197,14 @@ impl MechanicProvider for InfiniteSourceProvider {
 
     fn hint_populate(
         &self,
-        _ctx: &Self::ContextType,
+        _ctx: &Self::GameContext,
         item: &Self::ItemIdentType,
         value: f64,
     ) -> Vec<
         Box<
             dyn crate::concept::Mechanic<
                     ItemIdentType = Self::ItemIdentType,
-                    ContextType = Self::ContextType,
+                    GameContext = Self::GameContext,
                 >,
         >,
     > {
