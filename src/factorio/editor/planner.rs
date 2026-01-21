@@ -8,7 +8,7 @@ use crate::{
     },
     factorio::{
         common::{sort_generic_items, sort_generic_items_owned},
-        editor::{icon::GenericIcon, selector::selector_menu_with_filter},
+        editor::{icon::GenericIcon, selector::simple_selector_with_filter},
         format::{CompactLabel, SignedCompactLabel},
         model::{
             context::{FactorioContext, GenericItem},
@@ -347,8 +347,8 @@ impl EditorView for FactoryInstance {
                 });
             let _ = self.solver_sender.send((target, flows));
         }
-        let err_info = ui.memory(|mem| mem.data.get_temp::<String>(id)).clone();
-        if let Some(err_info) = &err_info {
+        let err_info = ui.memory(|mem|mem.data.get_temp::<String>(id));
+        if let Some(err_info) = err_info {
             ui.label(format!("求解错误: {}", err_info));
         }
 
@@ -431,12 +431,12 @@ impl EditorView for FactoryInstance {
                                     });
                                     match item {
                                         GenericItem::Item { name: _, quality } => {
-                                            if let Some(selected) = selector_menu_with_filter(
+                                            if let Some(selected) = simple_selector_with_filter(
                                                 ui,
                                                 ctx,
                                                 "选择物品",
                                                 "item",
-                                                icon,
+                                                &icon,
                                             ) {
                                                 *item = GenericItem::Item {
                                                     name: selected,
@@ -448,12 +448,12 @@ impl EditorView for FactoryInstance {
                                             name: _,
                                             temperature,
                                         } => {
-                                            if let Some(selected) = selector_menu_with_filter(
+                                            if let Some(selected) = simple_selector_with_filter(
                                                 ui,
                                                 ctx,
                                                 "选择流体",
                                                 "fluid",
-                                                icon,
+                                                &icon,
                                             ) {
                                                 *item = GenericItem::Fluid {
                                                     name: selected,

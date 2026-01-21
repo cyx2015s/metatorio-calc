@@ -1,3 +1,4 @@
+use egui::Grid;
 use serde::Deserialize;
 
 use crate::{
@@ -97,6 +98,8 @@ impl SolveContext for ModuleConfig {
 
 pub struct ModuleConfigEditor<'a> {
     pub module_config: &'a mut ModuleConfig,
+
+    pub module_slots: usize,
     pub allowed_effects: &'a Option<EffectTypeLimitation>,
     pub allowed_module_categories: &'a Option<Vec<String>>,
 
@@ -107,6 +110,7 @@ impl<'a> ModuleConfigEditor<'a> {
     pub fn new<'b>(
         ctx: &'b FactorioContext,
         module_config: &'b mut ModuleConfig,
+        module_slots: usize,
         allowed_effects: &'b Option<EffectTypeLimitation>,
         allowed_module_categories: &'b Option<Vec<String>>,
     ) -> Self
@@ -115,6 +119,7 @@ impl<'a> ModuleConfigEditor<'a> {
     {
         Self {
             module_config,
+            module_slots,
             allowed_effects,
             allowed_module_categories,
             ctx,
@@ -124,14 +129,9 @@ impl<'a> ModuleConfigEditor<'a> {
 
 impl egui::Widget for ModuleConfigEditor<'_> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
-        ui.add_sized(
-            [150.0, 40.0],
-            egui::Label::new(format!(
-                "效果类型： {:?}，插件组别： {:?}",
-                self.allowed_effects, self.allowed_module_categories
-            ))
-            .wrap_mode(egui::TextWrapMode::Wrap),
-        );
+        Grid::new("插件加成").num_columns(2).show(ui, |ui| {
+            // ui.label(form)
+        });
         ui.response().clone()
     }
 }

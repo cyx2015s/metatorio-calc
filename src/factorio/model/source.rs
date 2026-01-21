@@ -1,7 +1,7 @@
 use crate::{
     concept::{AsFlow, EditorView, Flow, MechanicProvider, MechanicSender, SolveContext},
     factorio::{
-        editor::{icon::GenericIcon, selector::selector_menu_with_filter},
+        editor::{icon::GenericIcon, selector::simple_selector_with_filter},
         model::context::{FactorioContext, GenericItem},
     },
 };
@@ -130,7 +130,7 @@ impl EditorView for InfiniteSource {
             match &self.item {
                 GenericItem::Item { name: _, quality } => {
                     if let Some(selected) =
-                        selector_menu_with_filter(ui, ctx, "选择物体", "item", icon)
+                        simple_selector_with_filter(ui, ctx, "选择物体", "item", &&icon)
                     {
                         self.item = GenericItem::Item {
                             name: selected,
@@ -143,7 +143,7 @@ impl EditorView for InfiniteSource {
                     temperature: _,
                 } => {
                     if let Some(selected) =
-                        selector_menu_with_filter(ui, ctx, "选择流体", "fluid", icon)
+                        simple_selector_with_filter(ui, ctx, "选择流体", "fluid", &icon)
                     {
                         self.item = GenericItem::Fluid {
                             name: selected,
@@ -153,7 +153,7 @@ impl EditorView for InfiniteSource {
                 }
                 GenericItem::Entity { name: _, quality } => {
                     if let Some(selected) =
-                        selector_menu_with_filter(ui, ctx, "选择实体", "entity", icon)
+                        simple_selector_with_filter(ui, ctx, "选择实体", "entity", &icon)
                     {
                         self.item = GenericItem::Entity {
                             name: selected,

@@ -181,14 +181,13 @@ impl egui::Widget for ItemSelector<'_> {
     }
 }
 
-pub fn selector_menu_with_filter(
+pub fn complex_selector<T>(
     ui: &mut egui::Ui,
     ctx: &FactorioContext,
-    label_str: &str,
-    item_type: &str,
-    button: egui::Response,
-) -> Option<String> {
-    let mut selecting_item = None;
+    button: &egui::Response,
+    value: &mut T,
+    show_fn: impl FnOnce(&mut egui::Ui, &FactorioContext, &mut T) -> bool,
+) {
     let popup = egui::Popup::menu(&button)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .open_memory(None);
@@ -196,36 +195,58 @@ pub fn selector_menu_with_filter(
     if button.clicked() {
         egui::Popup::open_id(ui.ctx(), popup_id);
     }
-    let id = ui.id();
-    let mut filter_string =
-        ui.memory(move |mem| mem.data.get_temp::<String>(id).unwrap_or_default());
+    let mut should_close = false;
     popup.show(|ui| {
-        ui.label(label_str);
-        ui.add(egui::TextEdit::singleline(&mut filter_string).hint_text("筛选器……"));
-        egui::ScrollArea::vertical()
-            .max_width(f32::INFINITY)
-            .auto_shrink(false)
-            .show(ui, |ui| {
-                ui.add(
-                    ItemSelector::new(ctx, &item_type.to_string(), &mut selecting_item)
-                        .with_filter(|s, f| {
-                            if filter_string.is_empty() {
-                                return true;
-                            }
-                            s.to_lowercase().contains(&filter_string.to_lowercase())
-                                || f.get_display_name(item_type, s)
-                                    .to_lowercase()
-                                    .contains(&filter_string.to_lowercase())
-                        }),
-                );
-            });
+        should_close = show_fn(ui, ctx, value);
     });
-
-    ui.memory_mut(|mem| {
-        mem.data.insert_temp(id, filter_string);
-    });
-    if selecting_item.clone().is_some() {
+    if should_close {
         egui::Popup::close_id(ui.ctx(), popup_id);
     }
+}
+
+pub fn simple_selector_with_filter(
+    ui: &mut egui::Ui,
+    ctx: &FactorioContext,
+    label_str: &str,
+    item_type: &str,
+    button: &egui::Response,
+) -> Option<String> {
+    let mut selecting_item = None;
+
+    let id = ui.id();
+
+    complex_selector(
+        ui,
+        ctx,
+        button,
+        &mut selecting_item,
+        |ui, ctx, selected_item| {
+            let mut filter_string =
+                ui.memory(move |mem| mem.data.get_temp::<String>(id).unwrap_or_default());
+            ui.label(label_str);
+            ui.add(egui::TextEdit::singleline(&mut filter_string).hint_text("筛选器……"));
+            egui::ScrollArea::vertical()
+                .max_width(f32::INFINITY)
+                .auto_shrink(false)
+                .show(ui, |ui| {
+                    ui.add(
+                        ItemSelector::new(ctx, &item_type.to_string(), selected_item)
+                            .with_filter(|s, f| {
+                                if filter_string.is_empty() {
+                                    return true;
+                                }
+                                s.to_lowercase().contains(&filter_string.to_lowercase())
+                                    || f.get_display_name(item_type, s)
+                                        .to_lowercase()
+                                        .contains(&filter_string.to_lowercase())
+                            }),
+                    );
+                });
+            ui.memory_mut(|mem| {
+                mem.data.insert_temp(id, filter_string);
+            });
+            selected_item.is_some()
+        },
+    );
     selecting_item
 }

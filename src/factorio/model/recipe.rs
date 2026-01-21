@@ -9,7 +9,7 @@ use crate::{
         editor::{
             hover::PrototypeHover,
             icon::{GenericIcon, Icon},
-            selector::{ItemSelector, selector_menu_with_filter},
+            selector::{ItemSelector, simple_selector_with_filter},
         },
         model::{
             context::{FactorioContext, GenericItem},
@@ -612,7 +612,7 @@ impl EditorView for RecipeConfig {
                         });
                     });
                 if let Some(selected) =
-                    selector_menu_with_filter(ui, ctx, "选择配方", "recipe", recipe_button)
+                    simple_selector_with_filter(ui, ctx, "选择配方", "recipe", &recipe_button)
                 {
                     self.recipe = (selected, self.recipe.1).into();
                 }
@@ -723,6 +723,7 @@ impl EditorView for RecipeConfig {
                 ui.add(ModuleConfigEditor::new(
                     ctx,
                     &mut self.module_config,
+                    machine_proto.module_slots as usize,
                     &Some(allowed_effects),
                     allowed_module_categories,
                 ));
