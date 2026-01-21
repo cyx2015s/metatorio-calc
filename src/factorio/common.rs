@@ -5,6 +5,7 @@ use std::{
     ops::Add,
 };
 
+use indexmap::IndexMap;
 use serde::{Deserialize, Deserializer, de::DeserializeOwned};
 use serde_json::{Value, from_value};
 
@@ -36,7 +37,7 @@ impl From<(String, u8)> for IdWithQuality {
     }
 }
 
-pub fn update_map<T, N>(map: &mut HashMap<T, N>, key: T, value: N)
+pub fn index_map_update_entry<T, N>(map: &mut IndexMap<T, N>, key: T, value: N)
 where
     T: Hash + Eq,
     N: Add<Output = N> + Copy + Default,

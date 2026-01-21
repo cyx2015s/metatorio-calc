@@ -150,12 +150,12 @@ impl AsFlow for MiningConfig {
                 &mut base_speed,
             );
             for (key, value) in energy_related_flow.into_iter() {
-                update_map(&mut map, key, value);
+                index_map_update_entry(&mut map, key, value);
             }
         }
 
         // 计算矿物实体本身的消耗
-        update_map(
+        index_map_update_entry(
             &mut map,
             GenericItem::Entity {
                 name: resource_ore.base.base.name.clone(),
@@ -181,7 +181,7 @@ impl AsFlow for MiningConfig {
                 * mining_property
                     .fluid_amount
                     .expect("必须指定每次开采的流体消耗");
-            update_map(&mut map, fluid_item, -amount);
+            index_map_update_entry(&mut map, fluid_item, -amount);
         }
 
         if let Some(results) = &mining_property.results {
@@ -200,7 +200,7 @@ impl AsFlow for MiningConfig {
                     RecipeResult::Item(r) => r.normalized_output(),
                     RecipeResult::Fluid(r) => r.normalized_output(),
                 };
-                update_map(
+                index_map_update_entry(
                     &mut map,
                     item,
                     base_speed
@@ -214,7 +214,7 @@ impl AsFlow for MiningConfig {
                 .as_ref()
                 .expect("results or result must exist");
             let count = mining_property.count.unwrap_or(1.0);
-            update_map(
+            index_map_update_entry(
                 &mut map,
                 GenericItem::Item {
                     name: result.clone(),

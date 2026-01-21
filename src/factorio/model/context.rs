@@ -8,6 +8,7 @@ use std::{
     process::{Command, Stdio},
 };
 
+use indexmap::IndexMap;
 use serde_json::Value;
 
 use crate::{
@@ -585,7 +586,7 @@ pub fn make_located_generic_recipe(
     original: Flow<GenericItem>,
     location: u16,
 ) -> Flow<GenericItemWithLocation> {
-    let mut located = HashMap::new();
+    let mut located = IndexMap::new();
     for (key, value) in original.into_iter() {
         let located_key = GenericItemWithLocation {
             base: key,

@@ -1,4 +1,5 @@
 use good_lp::{Solution, SolverModel, variable};
+use indexmap::IndexMap;
 
 use crate::concept::{Flow, ItemIdent};
 use std::collections::{HashMap, HashSet};
@@ -26,7 +27,7 @@ pub fn box_as_ptr<T: ?Sized>(b: &Box<T>) -> usize {
 /// （可选）：通知各个游戏机制根据当前的 Flow 信息添加自动的补充信息
 pub fn basic_solver<I, R>(
     target: Flow<I>,                   // 目标物品及其需求量
-    flows: HashMap<R, (Flow<I>, f64)>, // 配方标识符及其物品流和代价
+    flows: IndexMap<R, (Flow<I>, f64)>, // 配方标识符及其物品流和代价
 ) -> Result<Flow<R>, String>
 where
     I: ItemIdent,
@@ -85,7 +86,7 @@ where
         .solve();
     match solution {
         Ok(sol) => {
-            let mut result = HashMap::new();
+            let mut result = IndexMap::new();
             for (recipe_id, var) in flow_vars {
                 let value = sol.value(var);
                 result.insert(recipe_id.clone(), value);

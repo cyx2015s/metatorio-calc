@@ -1,5 +1,7 @@
 use std::{collections::HashMap, fmt::Debug, hash::Hash};
 
+use indexmap::IndexMap;
+
 pub trait Subview: Send {
     fn view(&mut self, ui: &mut egui::Ui);
     fn should_close(&self) -> bool {
@@ -16,7 +18,7 @@ pub trait EditorView: SolveContext {
     fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &Self::GameContext);
 }
 
-pub type Flow<I> = HashMap<I, f64>;
+pub type Flow<I> = IndexMap<I, f64>;
 
 pub trait AsFlow: SolveContext {
     /// 传递物品流信息

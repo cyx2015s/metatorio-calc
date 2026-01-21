@@ -1,3 +1,5 @@
+use indexmap::IndexMap;
+
 use crate::{
     concept::{AsFlow, EditorView, Flow, MechanicProvider, MechanicSender, SolveContext},
     factorio::{
@@ -18,7 +20,7 @@ impl SolveContext for InfiniteSource {
 
 impl AsFlow for InfiniteSource {
     fn as_flow(&self, _ctx: &Self::GameContext) -> Flow<Self::ItemIdentType> {
-        let mut map = std::collections::HashMap::new();
+        let mut map = IndexMap::new();
         map.insert(self.item.clone(), 1.0);
         map
     }

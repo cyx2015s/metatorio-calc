@@ -1,6 +1,5 @@
-use std::collections::HashMap;
-
 use egui::Vec2;
+use indexmap::IndexMap;
 
 use crate::{
     concept::{
@@ -39,7 +38,7 @@ pub struct FactoryInstance {
         Box<dyn Mechanic<ItemIdentType = GenericItem, GameContext = FactorioContext>>,
     >,
     pub solver_sender:
-        std::sync::mpsc::Sender<(Flow<GenericItem>, HashMap<usize, (Flow<GenericItem>, f64)>)>,
+        std::sync::mpsc::Sender<(Flow<GenericItem>, IndexMap<usize, (Flow<GenericItem>, f64)>)>,
     pub solver_receiver: std::sync::mpsc::Receiver<Result<Flow<usize>, String>>,
 }
 impl Default for FactoryInstance {
@@ -47,7 +46,7 @@ impl Default for FactoryInstance {
         let (tx, rx) = std::sync::mpsc::channel();
         let (solver_sender, solver_receiver_internal) = std::sync::mpsc::channel::<(
             Flow<GenericItem>,
-            HashMap<usize, (Flow<GenericItem>, f64)>,
+            IndexMap<usize, (Flow<GenericItem>, f64)>,
         )>();
         let (solver_sender_internal, solver_receiver) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
@@ -61,8 +60,8 @@ impl Default for FactoryInstance {
         FactoryInstance {
             name: "工厂".to_string(),
             target: Vec::new(),
-            solution: HashMap::new(),
-            total_flow: HashMap::new(),
+            solution: IndexMap::new(),
+            total_flow: IndexMap::new(),
             total_flow_sorted_keys: Vec::new(),
             flow_editor_sources: Vec::new(),
             flow_editors: Vec::new(),
@@ -80,7 +79,7 @@ impl FactoryInstance {
         let (tx, rx) = std::sync::mpsc::channel();
         let (solver_sender, solver_receiver_internal) = std::sync::mpsc::channel::<(
             Flow<GenericItem>,
-            HashMap<usize, (Flow<GenericItem>, f64)>,
+            IndexMap<usize, (Flow<GenericItem>, f64)>,
         )>();
         let (solver_sender_internal, solver_receiver) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
@@ -336,12 +335,12 @@ impl EditorView for FactoryInstance {
                 .flow_editors
                 .iter()
                 .map(|fe| (box_as_ptr(fe), (fe.as_flow(ctx), fe.cost(ctx))))
-                .collect::<HashMap<usize, (_, _)>>();
+                .collect::<IndexMap<usize, (_, _)>>();
             let target = self
                 .target
                 .iter()
                 .map(|(item, amount)| (item.clone(), *amount))
-                .fold(HashMap::new(), |mut acc, (item, amount)| {
+                .fold(IndexMap::new(), |mut acc, (item, amount)| {
                     *acc.entry(item).or_insert(0.0) += amount;
                     acc
                 });

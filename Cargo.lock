@@ -2318,6 +2318,7 @@ dependencies = [
  "env_logger",
  "good_lp",
  "image",
+ "indexmap",
  "log",
  "mimalloc",
  "regex",

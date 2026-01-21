@@ -1,9 +1,11 @@
 use std::collections::HashMap;
 
+use indexmap::IndexMap;
+
 use crate::{
     concept::Flow,
     factorio::{
-        common::{Effect, EnergyAmount, EnergySource, update_map},
+        common::{Effect, EnergyAmount, EnergySource, index_map_update_entry},
         model::context::{FactorioContext, GenericItem},
     },
 };
@@ -16,12 +18,12 @@ pub fn energy_source_as_flow(
     instance_fuel: &Option<(String, i32)>,
     fulfillment: &mut f64,
 ) -> Flow<GenericItem> {
-    let mut map = HashMap::new();
+    let mut map = IndexMap::new();
     match energy_source {
         EnergySource::Electric(source) => {
             let energy_usage = energy_usage.amount * 60.0 * (1.0 + effects.consumption);
-            update_map(&mut map, GenericItem::Electricity, -energy_usage);
-            update_map(
+            index_map_update_entry(&mut map, GenericItem::Electricity, -energy_usage);
+            index_map_update_entry(
                 &mut map,
                 GenericItem::Electricity,
                 -source
@@ -36,7 +38,7 @@ pub fn energy_source_as_flow(
                 .unwrap_or(&HashMap::new())
                 .iter()
             {
-                update_map(
+                index_map_update_entry(
                     &mut map,
                     GenericItem::Pollution {
                         name: pollutant.clone(),
@@ -46,7 +48,7 @@ pub fn energy_source_as_flow(
             }
         }
         EnergySource::Heat(source) => {
-            update_map(
+            index_map_update_entry(
                 &mut map,
                 GenericItem::Heat,
                 -energy_usage.amount * 60.0 * (1.0 + effects.consumption),
@@ -57,7 +59,7 @@ pub fn energy_source_as_flow(
                 .unwrap_or(&HashMap::new())
                 .iter()
             {
-                update_map(
+                index_map_update_entry(
                     &mut map,
                     GenericItem::Pollution {
                         name: pollutant.clone(),
@@ -81,7 +83,7 @@ pub fn energy_source_as_flow(
                     .expect("RecipeConfig 中的燃料在上下文中没有燃料值");
                 let fuel_burn_speed = energy_usage / fuel_property.fuel_value.amount; // 一个物品的能量值
 
-                update_map(
+                index_map_update_entry(
                     &mut map,
                     GenericItem::Item {
                         name: actual_fuel.0.clone(),
@@ -90,7 +92,7 @@ pub fn energy_source_as_flow(
                     -fuel_burn_speed,
                 );
                 if let Some(burnt_result) = &fuel_property.burnt_result {
-                    update_map(
+                    index_map_update_entry(
                         &mut map,
                         GenericItem::Item {
                             name: burnt_result.clone(),
@@ -100,7 +102,7 @@ pub fn energy_source_as_flow(
                     );
                 }
             } else {
-                update_map(
+                index_map_update_entry(
                     &mut map,
                     GenericItem::ItemFuel {
                         category: source.burner_usage.clone(),
@@ -115,7 +117,7 @@ pub fn energy_source_as_flow(
                 .unwrap_or(&HashMap::new())
                 .iter()
             {
-                update_map(
+                index_map_update_entry(
                     &mut map,
                     GenericItem::Pollution {
                         name: pollutant.clone(),
@@ -154,7 +156,7 @@ pub fn energy_source_as_flow(
                         fuel_burn_speed = source.fluid_usage_per_tick * 60.0;
                     }
 
-                    update_map(
+                    index_map_update_entry(
                         &mut map,
                         GenericItem::Fluid {
                             name: actual_fuel.0.clone(),
@@ -164,7 +166,7 @@ pub fn energy_source_as_flow(
                     );
                 } else {
                     // 假定不会受到功率限制（流体热值太低且流量限制太小的情形）
-                    update_map(
+                    index_map_update_entry(
                         &mut map,
                         GenericItem::FluidFuel {
                             filter: source.fluid_box.filter.clone(),
@@ -210,7 +212,7 @@ pub fn energy_source_as_flow(
                         fuel_burn_speed = source.fluid_usage_per_tick * 60.0;
                     }
 
-                    update_map(
+                    index_map_update_entry(
                         &mut map,
                         GenericItem::Fluid {
                             name: actual_fuel.0.clone(),
@@ -220,7 +222,7 @@ pub fn energy_source_as_flow(
                     );
                 } else {
                     // 假定不会受到功率限制（流体热值太低且流量限制太小的情形）
-                    update_map(
+                    index_map_update_entry(
                         &mut map,
                         GenericItem::FluidHeat {
                             filter: source.fluid_box.filter.clone(),
@@ -236,7 +238,7 @@ pub fn energy_source_as_flow(
                 .unwrap_or(&HashMap::new())
                 .iter()
             {
-                update_map(
+                index_map_update_entry(
                     &mut map,
                     GenericItem::Pollution {
                         name: pollutant.clone(),
@@ -252,7 +254,7 @@ pub fn energy_source_as_flow(
                 .unwrap_or(&HashMap::new())
                 .iter()
             {
-                update_map(
+                index_map_update_entry(
                     &mut map,
                     GenericItem::Pollution {
                         name: pollutant.clone(),

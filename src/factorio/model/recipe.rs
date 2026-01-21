@@ -455,7 +455,7 @@ impl AsFlow for RecipeConfig {
                 &mut base_speed,
             );
             for (key, value) in energy_related_flow.into_iter() {
-                update_map(&mut map, key, value);
+                index_map_update_entry(&mut map, key, value);
             }
         }
 
@@ -473,7 +473,7 @@ impl AsFlow for RecipeConfig {
                         name: item.name.clone(),
                         quality: self.recipe.1,
                     };
-                    update_map(
+                    index_map_update_entry(
                         &mut map,
                         key,
                         -item.amount * (1.0 + module_effects.speed) * base_speed,
@@ -484,7 +484,7 @@ impl AsFlow for RecipeConfig {
                         name: fluid.name.clone(),
                         temperature: fluid.temperature.map(|x| x as i32),
                     };
-                    update_map(
+                    index_map_update_entry(
                         &mut map,
                         key,
                         -fluid.amount * (1.0 + module_effects.speed) * base_speed,
@@ -501,7 +501,7 @@ impl AsFlow for RecipeConfig {
                         quality: self.recipe.1,
                     };
                     let (base_yield, extra_yield) = item.normalized_output();
-                    update_map(
+                    index_map_update_entry(
                         &mut map,
                         key,
                         (base_yield
@@ -519,7 +519,7 @@ impl AsFlow for RecipeConfig {
                         temperature: fluid.temperature.map(|x| x as i32),
                     };
                     let (base_yield, extra_yield) = fluid.normalized_output();
-                    update_map(
+                    index_map_update_entry(
                         &mut map,
                         key,
                         (base_yield
