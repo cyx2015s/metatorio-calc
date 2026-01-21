@@ -132,7 +132,7 @@ impl EditorView for InfiniteSource {
             match &self.item {
                 GenericItem::Item { name: _, quality } => {
                     if let Some(selected) =
-                        simple_selector_with_filter(ui, ctx, "选择物体", "item", &&icon)
+                        simple_selector_with_filter(ui, ctx, "选择物体", "item", &icon)
                     {
                         self.item = GenericItem::Item {
                             name: selected,

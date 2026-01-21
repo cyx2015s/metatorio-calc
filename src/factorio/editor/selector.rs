@@ -17,7 +17,7 @@ pub struct ItemSelectorStorage {
 
 pub struct ItemSelector<'a> {
     pub ctx: &'a FactorioContext,
-    pub item_type: &'a String,
+    pub item_type: &'a str,
     pub filter: Box<dyn Fn(&str, &FactorioContext) -> bool + 'a>,
     pub selected_item: &'a mut Option<String>,
 }
@@ -25,7 +25,7 @@ pub struct ItemSelector<'a> {
 impl<'a> ItemSelector<'a> {
     pub fn new(
         ctx: &'a FactorioContext,
-        item_type: &'a String,
+        item_type: &'a str,
         selected_item: &'a mut Option<String>,
     ) -> Self {
         Self {
@@ -188,7 +188,7 @@ pub fn complex_selector<T>(
     value: &mut T,
     show_fn: impl FnOnce(&mut egui::Ui, &FactorioContext, &mut T) -> bool,
 ) {
-    let popup = egui::Popup::menu(&button)
+    let popup = egui::Popup::menu(button)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .open_memory(None);
     let popup_id = popup.get_id();
@@ -230,8 +230,8 @@ pub fn simple_selector_with_filter(
                 .auto_shrink(false)
                 .show(ui, |ui| {
                     ui.add(
-                        ItemSelector::new(ctx, &item_type.to_string(), selected_item)
-                            .with_filter(|s, f| {
+                        ItemSelector::new(ctx, &item_type.to_string(), selected_item).with_filter(
+                            |s, f| {
                                 if filter_string.is_empty() {
                                     return true;
                                 }
@@ -239,7 +239,8 @@ pub fn simple_selector_with_filter(
                                     || f.get_display_name(item_type, s)
                                         .to_lowercase()
                                         .contains(&filter_string.to_lowercase())
-                            }),
+                            },
+                        ),
                     );
                 });
             ui.memory_mut(|mem| {

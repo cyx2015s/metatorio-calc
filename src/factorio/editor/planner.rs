@@ -346,7 +346,7 @@ impl EditorView for FactoryInstance {
                 });
             let _ = self.solver_sender.send((target, flows));
         }
-        let err_info = ui.memory(|mem|mem.data.get_temp::<String>(id));
+        let err_info = ui.memory(|mem| mem.data.get_temp::<String>(id));
         if let Some(err_info) = err_info {
             ui.label(format!("求解错误: {}", err_info));
         }

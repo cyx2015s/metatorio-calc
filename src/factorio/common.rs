@@ -66,9 +66,9 @@ pub fn version_string_to_triplet(version: &str) -> (u16, u16, u16) {
 #[derive(Debug, Clone)]
 pub struct Color(u8, u8, u8, u8);
 
-impl Into<egui::Color32> for Color {
-    fn into(self) -> egui::Color32 {
-        egui::Color32::from_rgba_unmultiplied(self.0, self.1, self.2, self.3)
+impl From<Color> for egui::Color32 {
+    fn from(val: Color) -> Self {
+        egui::Color32::from_rgba_unmultiplied(val.0, val.1, val.2, val.3)
     }
 }
 

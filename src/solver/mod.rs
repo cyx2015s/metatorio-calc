@@ -26,7 +26,7 @@ pub fn box_as_ptr<T: ?Sized>(b: &Box<T>) -> usize {
 /// 求解流程：从所有的 AsFlow 配方收集 Flow 信息
 /// （可选）：通知各个游戏机制根据当前的 Flow 信息添加自动的补充信息
 pub fn basic_solver<I, R>(
-    target: Flow<I>,                   // 目标物品及其需求量
+    target: Flow<I>,                    // 目标物品及其需求量
     flows: IndexMap<R, (Flow<I>, f64)>, // 配方标识符及其物品流和代价
 ) -> Result<Flow<R>, String>
 where

@@ -6,8 +6,8 @@ use crate::factorio::model::context::{FactorioContext, GenericItem};
 
 pub struct Icon<'a> {
     pub ctx: &'a FactorioContext,
-    pub type_name: &'a String,
-    pub item_name: &'a String,
+    pub type_name: &'a str,
+    pub item_name: &'a str,
     pub quality: u8,
     pub size: f32,
 }

@@ -129,7 +129,7 @@ impl<'a> ModuleConfigEditor<'a> {
 
 impl egui::Widget for ModuleConfigEditor<'_> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
-        Grid::new("插件加成").num_columns(2).show(ui, |ui| {
+        Grid::new("插件加成").num_columns(2).show(ui, |_ui| {
             // ui.label(form)
         });
         ui.response().clone()

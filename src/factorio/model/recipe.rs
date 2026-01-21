@@ -711,13 +711,9 @@ impl EditorView for RecipeConfig {
                     (None, None) => &None,
                     (None, Some(_)) => &recipe_proto.allowed_module_categories,
                     (Some(_), None) => &machine_proto.allowed_module_categories,
-                    (Some(a), Some(b)) => &Some(
-                        [
-                            a.iter().cloned().collect::<Vec<_>>().as_slice(),
-                            b.iter().cloned().collect::<Vec<_>>().as_slice(),
-                        ]
-                        .concat(),
-                    ),
+                    (Some(a), Some(b)) => {
+                        &Some([a.to_vec().as_slice(), b.to_vec().as_slice()].concat())
+                    }
                 };
 
                 ui.add(ModuleConfigEditor::new(
