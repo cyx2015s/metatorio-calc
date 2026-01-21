@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 dirs = "6.0.0"
 dotenv = "0.15.0"
+dyn-clone = "1.0.20"
 eframe = { version = "0.33.3", features = ["wgpu"] }
 egui = "0.33.3"
 egui_extras = { version = "0.33.3", features = ["all_loaders"] }
@@ -19,6 +20,7 @@ regex = "1.12.2"
 rfd = "0.16.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
+typetag = "0.2.21"
 
 [build-dependencies]
 # build.rs
