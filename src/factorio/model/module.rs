@@ -95,7 +95,6 @@ impl SolveContext for ModuleConfig {
     type ItemIdentType = GenericItem;
 }
 
-
 pub struct ModuleConfigEditor<'a> {
     pub module_config: &'a mut ModuleConfig,
     pub allowed_effects: &'a Option<EffectTypeLimitation>,
@@ -125,11 +124,14 @@ impl<'a> ModuleConfigEditor<'a> {
 
 impl egui::Widget for ModuleConfigEditor<'_> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
-        ui.add_sized([150.0, 40.0], egui::Label::new(format!(
-            "效果类型： {:?}，插件组别： {:?}",
-            self.allowed_effects,
-            self.allowed_module_categories)
-        ).wrap_mode(egui::TextWrapMode::Wrap));
+        ui.add_sized(
+            [150.0, 40.0],
+            egui::Label::new(format!(
+                "效果类型： {:?}，插件组别： {:?}",
+                self.allowed_effects, self.allowed_module_categories
+            ))
+            .wrap_mode(egui::TextWrapMode::Wrap),
+        );
         ui.response().clone()
     }
 }

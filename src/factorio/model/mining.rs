@@ -1,7 +1,7 @@
 use serde::Deserialize;
 
 use crate::{
-    concept::{AsFlow, SolveContext, Flow},
+    concept::{AsFlow, Flow, SolveContext},
     factorio::{
         common::*,
         model::{context::*, energy::*, entity::*, recipe::*},

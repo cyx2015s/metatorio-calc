@@ -41,7 +41,10 @@ impl<T> Mechanic for T where T: AsFlow + EditorView {}
 
 pub trait MechanicProvider: EditorView + SolveContext {
     /// 传递创建的配方信息
-    fn set_mechanic_sender(&mut self, sender: MechanicSender<Self::ItemIdentType, Self::GameContext>);
+    fn set_mechanic_sender(
+        &mut self,
+        sender: MechanicSender<Self::ItemIdentType, Self::GameContext>,
+    );
 
     /// TODO
     /// 游戏机制提供器可选：自动填充逻辑

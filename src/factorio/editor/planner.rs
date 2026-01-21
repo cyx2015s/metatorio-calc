@@ -4,7 +4,7 @@ use egui::Vec2;
 
 use crate::{
     concept::{
-        SolveContext, EditorView, Flow, ItemIdent, Mechanic, MechanicProvider, MechanicSender,
+        EditorView, Flow, ItemIdent, Mechanic, MechanicProvider, MechanicSender, SolveContext,
     },
     factorio::{
         common::{sort_generic_items, sort_generic_items_owned},

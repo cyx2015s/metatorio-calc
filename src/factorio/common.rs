@@ -521,10 +521,8 @@ impl EffectTypeLimitation {
         let other_normalized = other.normalized();
         match (self_normalized, other_normalized) {
             (EffectTypeLimitation::Multiple(v1), EffectTypeLimitation::Multiple(v2)) => {
-                let intersection: Vec<String> = v1
-                    .into_iter()
-                    .filter(|item| v2.contains(item))
-                    .collect();
+                let intersection: Vec<String> =
+                    v1.into_iter().filter(|item| v2.contains(item)).collect();
                 EffectTypeLimitation::Multiple(intersection)
             }
             _ => EffectTypeLimitation::default(),

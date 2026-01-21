@@ -1,5 +1,5 @@
 use crate::{
-    concept::{AsFlow, MechanicProvider, MechanicSender, SolveContext, EditorView, Flow},
+    concept::{AsFlow, EditorView, Flow, MechanicProvider, MechanicSender, SolveContext},
     factorio::{
         editor::{icon::GenericIcon, selector::selector_menu_with_filter},
         model::context::{FactorioContext, GenericItem},
