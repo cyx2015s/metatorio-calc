@@ -102,7 +102,6 @@ pub struct ModuleConfigEditor<'a> {
     pub allowed_module_categories: &'a Option<Vec<String>>,
 
     pub ctx: &'a FactorioContext,
-    pub lazy_get_allowed: Option<Box<dyn Fn(&FactorioContext, &str) -> (&'a Option<EffectTypeLimitation>, &'a Option<Vec<String>>)>>,
 }
 
 impl<'a> ModuleConfigEditor<'a> {
@@ -120,18 +119,17 @@ impl<'a> ModuleConfigEditor<'a> {
             allowed_effects,
             allowed_module_categories,
             ctx,
-            lazy_get_allowed: None,
         }
     }
 }
 
 impl egui::Widget for ModuleConfigEditor<'_> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
-        ui.label(format!(
+        ui.add_sized([150.0, 40.0], egui::Label::new(format!(
             "效果类型： {:?}，插件组别： {:?}",
             self.allowed_effects,
             self.allowed_module_categories)
-        );
+        ).wrap_mode(egui::TextWrapMode::Wrap));
         ui.response().clone()
     }
 }

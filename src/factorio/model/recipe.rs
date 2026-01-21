@@ -43,37 +43,37 @@ pub struct RecipePrototype {
 
     #[serde(deserialize_with = "option_as_vec_or_empty")]
     #[serde(default)]
-    allowed_module_categories: Option<Vec<String>>,
+    pub allowed_module_categories: Option<Vec<String>>,
 
     /// 制作时间（秒）
     pub energy_required: f64,
 
     /// 配方污染倍数
-    emissions_multiplier: f64,
+    pub emissions_multiplier: f64,
 
     /// 最大产能加成
-    maximum_productivity: f64,
+    pub maximum_productivity: f64,
 
     /// 开局是否可用
-    enabled: bool,
+    pub enabled: bool,
 
     /// 产物若为可变质，是否永远新鲜
-    result_is_always_fresh: bool,
+    pub result_is_always_fresh: bool,
 
     /// 是否允许使用降低能耗的插件
-    allow_consumption: bool,
+    pub allow_consumption: bool,
 
     /// 是否允许使用增加速度的插件
-    allow_speed: bool,
+    pub allow_speed: bool,
 
     /// 是否允许使用增加产能的插件
-    allow_productivity: bool,
+    pub allow_productivity: bool,
 
     /// 是否允许使用降低污染的插件
-    allow_pollution: bool,
+    pub allow_pollution: bool,
 
     /// 是否允许使用增加品质的插件
-    allow_quality: bool,
+    pub allow_quality: bool,
 }
 
 impl Default for RecipePrototype {
@@ -359,7 +359,8 @@ pub struct CraftingMachinePrototype {
     #[serde(default)]
     pub quality_affects_module_slots: bool,
 
-    pub allowed_affects: Option<EffectTypeLimitation>,
+    #[serde(default)]
+    pub allowed_effects: Option<EffectTypeLimitation>,
 
     #[serde(deserialize_with = "option_as_vec_or_empty")]
     #[serde(default)]
@@ -688,12 +689,42 @@ impl EditorView for RecipeConfig {
                 .machine
                 .as_ref()
                 .and_then(|machine| ctx.crafters.get(&machine.0))
+                && let Some(recipe_proto) = ctx.recipes.get(&self.recipe.0)
             {
+                let allowed_effects = EffectTypeLimitation::new(
+                    recipe_proto.allow_consumption,
+                    recipe_proto.allow_speed,
+                    recipe_proto.allow_productivity,
+                    recipe_proto.allow_pollution,
+                    recipe_proto.allow_quality,
+                )
+                .intersect(
+                    machine_proto
+                        .allowed_effects
+                        .as_ref()
+                        .unwrap_or(&EffectTypeLimitation::default()),
+                );
+                let allowed_module_categories = match (
+                    machine_proto.allowed_module_categories.as_ref(),
+                    recipe_proto.allowed_module_categories.as_ref(),
+                ) {
+                    (None, None) => &None,
+                    (None, Some(_)) => &recipe_proto.allowed_module_categories,
+                    (Some(_), None) => &machine_proto.allowed_module_categories,
+                    (Some(a), Some(b)) => &Some(
+                        [
+                            a.iter().cloned().collect::<Vec<_>>().as_slice(),
+                            b.iter().cloned().collect::<Vec<_>>().as_slice(),
+                        ]
+                        .concat(),
+                    ),
+                };
+
                 ui.add(ModuleConfigEditor::new(
                     ctx,
                     &mut self.module_config,
-                    &machine_proto.allowed_affects,
-                    &machine_proto.allowed_module_categories,
+                    &Some(allowed_effects),
+                    allowed_module_categories,
                 ));
             };
         });

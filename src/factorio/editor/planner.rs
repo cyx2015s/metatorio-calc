@@ -239,7 +239,7 @@ fn show_hint_popup<I: ItemIdent, C>(
     icon: &egui::Response,
     add_hint_flow: &mut Option<usize>,
     hint_flows: &mut Vec<Box<dyn Mechanic<GameContext = C, ItemIdentType = I> + 'static>>,
-    editor_sources: &Vec<Box<dyn MechanicProvider<GameContext = C, ItemIdentType = I>>>,
+    editor_sources: &[Box<dyn MechanicProvider<GameContext = C, ItemIdentType = I>>],
 ) {
     let popup_id = icon.id.with("弹窗提示");
     if icon.clicked_by(egui::PointerButton::Secondary) {

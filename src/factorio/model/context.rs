@@ -606,4 +606,6 @@ fn test_load_context() {
     assert!(ctx.fluids.contains_key("water"));
     assert!(ctx.recipes.contains_key("iron-gear-wheel"));
     assert!(ctx.crafters.contains_key("assembling-machine-1"));
+    dbg!(ctx.recipes.get("electronic-circuit"));
+    dbg!(ctx.crafters.get("oil-refinery"));
 }

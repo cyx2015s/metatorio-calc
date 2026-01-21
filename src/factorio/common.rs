@@ -65,6 +65,12 @@ pub fn version_string_to_triplet(version: &str) -> (u16, u16, u16) {
 #[derive(Debug, Clone)]
 pub struct Color(u8, u8, u8, u8);
 
+impl Into<egui::Color32> for Color {
+    fn into(self) -> egui::Color32 {
+        egui::Color32::from_rgba_unmultiplied(self.0, self.1, self.2, self.3)
+    }
+}
+
 impl<'de> Deserialize<'de> for Color {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -475,6 +481,57 @@ impl Default for EffectTypeLimitation {
     }
 }
 
+impl EffectTypeLimitation {
+    pub fn new(
+        allow_consumption: bool,
+        allow_speed: bool,
+        allow_productivity: bool,
+        allow_pollution: bool,
+        allow_quality: bool,
+    ) -> Self {
+        let mut ret = vec![];
+        if allow_consumption {
+            ret.push("consumption".to_string());
+        }
+        if allow_speed {
+            ret.push("speed".to_string());
+        }
+        if allow_productivity {
+            ret.push("productivity".to_string());
+        }
+        if allow_pollution {
+            ret.push("pollution".to_string());
+        }
+        if allow_quality {
+            ret.push("quality".to_string());
+        }
+        EffectTypeLimitation::Multiple(ret)
+    }
+
+    pub fn normalized(&self) -> Self {
+        match self {
+            EffectTypeLimitation::Single(s) => EffectTypeLimitation::Multiple(vec![s.clone()]),
+            EffectTypeLimitation::Empty(_) => EffectTypeLimitation::default(),
+            other => other.clone(),
+        }
+    }
+
+    pub fn intersect(&self, other: &EffectTypeLimitation) -> EffectTypeLimitation {
+        let self_normalized = self.normalized();
+        let other_normalized = other.normalized();
+        match (self_normalized, other_normalized) {
+            (EffectTypeLimitation::Multiple(v1), EffectTypeLimitation::Multiple(v2)) => {
+                let intersection: Vec<String> = v1
+                    .into_iter()
+                    .filter(|item| v2.contains(item))
+                    .collect();
+                EffectTypeLimitation::Multiple(intersection)
+            }
+            _ => EffectTypeLimitation::default(),
+        }
+    }
+}
+
 #[test]
 fn test_energy_amount_deserialize() {
     let ea1: EnergyAmount = serde_json::from_str(r#""150kJ""#).unwrap();
@@ -585,7 +642,10 @@ fn get_generic_item_sort_key<'a>(
     match item {
         GenericItem::Item { name, quality } => (
             *quality as usize,
-            ctx.order_of_entries["item"].get(name).copied().unwrap_or((0, 0, 0)),
+            ctx.order_of_entries["item"]
+                .get(name)
+                .copied()
+                .unwrap_or((0, 0, 0)),
             "",
         ),
         GenericItem::Fluid {
@@ -593,12 +653,18 @@ fn get_generic_item_sort_key<'a>(
             temperature: _,
         } => (
             0x100usize,
-            ctx.order_of_entries["fluid"].get(name).copied().unwrap_or((0, 0, 0)),
+            ctx.order_of_entries["fluid"]
+                .get(name)
+                .copied()
+                .unwrap_or((0, 0, 0)),
             "",
         ),
         GenericItem::Entity { name, quality } => (
             0x200usize + *quality as usize,
-            ctx.order_of_entries["entity"].get(name).copied().unwrap_or((0, 0, 0)),
+            ctx.order_of_entries["entity"]
+                .get(name)
+                .copied()
+                .unwrap_or((0, 0, 0)),
             "",
         ),
         GenericItem::Heat => (0x300usize, (0usize, 0usize, 0usize), ""),

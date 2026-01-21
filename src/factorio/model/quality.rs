@@ -3,6 +3,7 @@ use serde::Deserialize;
 use crate::factorio::common::*;
 
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
 pub struct QualityPrototype {
     #[serde(flatten)]
     pub base: PrototypeBase,

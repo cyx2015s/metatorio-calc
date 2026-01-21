@@ -44,7 +44,7 @@ pub struct MiningDrillPrototype {
     #[serde(default)]
     pub quality_affects_module_slots: bool,
 
-    pub allowed_affects: Option<EffectTypeLimitation>,
+    pub allowed_effects: Option<EffectTypeLimitation>,
 
     #[serde(deserialize_with = "option_as_vec_or_empty")]
     #[serde(default)]
