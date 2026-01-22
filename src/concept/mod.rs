@@ -37,9 +37,11 @@ pub trait GameContextCreatorView: Subview {
     fn set_subview_sender(&mut self, sender: std::sync::mpsc::Sender<Box<dyn Subview>>);
 }
 
-pub trait Mechanic: AsFlow + EditorView + dyn_clone::DynClone {}
+pub trait Mechanic: AsFlow + EditorView + dyn_clone::DynClone + erased_serde::Serialize {}
 
-impl<T> Mechanic for T where T: AsFlow + EditorView + dyn_clone::DynClone {}
+impl<T> Mechanic for T where T: AsFlow + EditorView + dyn_clone::DynClone + erased_serde::Serialize {}
+
+erased_serde::serialize_trait_object!(<C, I> Mechanic<GameContext = C, ItemIdentType = I>);
 
 dyn_clone::clone_trait_object!(<C, I> Mechanic<GameContext = C, ItemIdentType = I>);
 

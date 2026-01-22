@@ -9,7 +9,8 @@ use crate::{
 };
 
 /// 特殊：指代线性规划的无穷物体源
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(tag = "type")]
 pub struct InfiniteSource {
     pub item: GenericItem,
 }
@@ -170,8 +171,9 @@ impl EditorView for InfiniteSource {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct InfiniteSourceProvider {
+    #[serde(skip)]
     pub sender: MechanicSender<GenericItem, FactorioContext>,
 }
 

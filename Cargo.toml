@@ -11,6 +11,7 @@ eframe = { version = "0.33.3", features = ["wgpu"] }
 egui = "0.33.3"
 egui_extras = { version = "0.33.3", features = ["all_loaders"] }
 env_logger = "0.11.8"
+erased-serde = "0.4.9"
 good_lp = { "version" = "1.14.2", default-features = false, features = ["microlp"] }
 image = { version = "0.25.9", features = ["png"] }
 indexmap = "2.13.0"

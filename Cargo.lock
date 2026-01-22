@@ -2343,6 +2343,7 @@ dependencies = [
  "egui",
  "egui_extras",
  "env_logger",
+ "erased-serde",
  "good_lp",
  "image",
  "indexmap",

@@ -1,5 +1,8 @@
+use std::io;
+
 use egui::Vec2;
 use indexmap::IndexMap;
+use serde::Serialize;
 
 use crate::{
     concept::{
@@ -170,6 +173,12 @@ impl FactoryInstance {
                     if ui.button("test 复制").clicked() {
                         clone_flow = Some(i);
                     }
+                    if ui.button("test 序列化").clicked() {
+                        let json_serializer = &mut serde_json::Serializer::new(io::stderr());
+                        log::info!("=== 测试序列化");
+                        flow_config.serialize(json_serializer).ok();
+                        log::info!("=== 序列化结束");
+                    }
                     if let Some(solution) = solution_val {
                         ui.add(CompactLabel::new(solution));
                     } else {
@@ -229,7 +238,6 @@ impl FactoryInstance {
         if let Some(idx) = delete_flow {
             self.flow_editors.remove(idx);
         }
-
 
         if let Some(idx) = add_hint_flow {
             let hint_flow = self.hint_flows.remove(idx);

@@ -65,7 +65,6 @@ pub struct MiningConfig {
     pub resource: IdWithQuality,
     pub machine: Option<IdWithQuality>,
     pub modules: Vec<IdWithQuality>,
-    pub extra_effects: Effect,
     pub instance_fuel: Option<IdWithQuality>,
 }
 
@@ -75,7 +74,6 @@ impl Default for MiningConfig {
             resource: ("entity-unknown".to_string(), 0).into(),
             machine: None,
             modules: vec![],
-            extra_effects: Effect::default(),
             instance_fuel: None,
         }
     }
@@ -120,7 +118,6 @@ impl AsFlow for MiningConfig {
             module_effects = module_effects + module_prototype.effect.clone();
         }
 
-        module_effects = module_effects + self.extra_effects.clone();
         module_effects = module_effects.clamped();
 
         if let Some(miner) = miner {
@@ -237,10 +234,6 @@ fn test_mining_normalized() {
         resource: ("uranium-ore".to_string(), 0).into(),
         machine: Some(("big-mining-drill".to_string(), 0).into()),
         modules: vec![],
-        extra_effects: Effect {
-            productivity: 1.0,
-            ..Default::default()
-        },
         instance_fuel: None,
     };
 

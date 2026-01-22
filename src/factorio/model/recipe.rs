@@ -384,12 +384,12 @@ impl HasPrototypeBase for CraftingMachinePrototype {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(tag = "type")]
 pub struct RecipeConfig {
     pub recipe: IdWithQuality,
     pub machine: Option<IdWithQuality>,
     pub module_config: ModuleConfig,
-    pub extra_effects: Effect,
 
     /// 当机器的能源类型为Fluid、Burner时，用统一的抽象能源还是用具体的燃料
     /// 类型为Electric、Heat、Void时无效
@@ -409,7 +409,6 @@ impl Default for RecipeConfig {
             recipe: ("recipe-unknown".to_string(), 0).into(),
             machine: None,
             module_config: ModuleConfig::new(),
-            extra_effects: Effect::default(),
             instance_fuel: None,
         }
     }
@@ -429,7 +428,6 @@ impl AsFlow for RecipeConfig {
                 .expect("RecipeConfig 中的机器在上下文中不存在")
         });
 
-        module_effects = module_effects + self.extra_effects.clone();
         module_effects = module_effects.clamped();
 
         if let Some(crafter) = crafter {
@@ -575,7 +573,6 @@ fn test_recipe_normalized() {
         recipe: ("iron-gear-wheel".to_string(), 0).into(),
         machine: Some(("assembling-machine-1".to_string(), 0).into()),
         module_config: ModuleConfig::new(),
-        extra_effects: Effect::default(),
         instance_fuel: Some(("nutrients".to_string(), 0).into()),
     };
     let result = recipe_config.as_flow(&ctx);
@@ -726,9 +723,10 @@ impl EditorView for RecipeConfig {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct RecipeConfigProvider {
     pub editing: RecipeConfig,
+    #[serde(skip)]
     pub sender: MechanicSender<GenericItem, FactorioContext>,
 }
 

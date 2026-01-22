@@ -15,7 +15,7 @@ pub type Emissions = Dict<f64>;
 pub type OrderInfo = Vec<(String, Vec<(String, Vec<String>)>)>;
 pub type ReverseOrderInfo = HashMap<String, (usize, usize, usize)>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct IdWithQuality(pub String, pub u8);
 
 impl From<String> for IdWithQuality {
@@ -416,9 +416,9 @@ pub struct VoidEnergySource {
 #[serde(default)]
 pub struct EffectReceiver {
     pub base_effect: Effect,
-    use_module_effects: bool,
-    use_beacon_effects: bool,
-    use_surface_effects: bool,
+    pub use_module_effects: bool,
+    pub use_beacon_effects: bool,
+    pub use_surface_effects: bool,
 }
 
 impl Default for EffectReceiver {
@@ -432,7 +432,7 @@ impl Default for EffectReceiver {
     }
 }
 
-#[derive(Debug, Clone, serde::Deserialize, Default)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
 #[serde(default)]
 pub struct Effect {
     pub consumption: f64,
