@@ -37,11 +37,13 @@ pub trait GameContextCreatorView: Subview {
     fn set_subview_sender(&mut self, sender: std::sync::mpsc::Sender<Box<dyn Subview>>);
 }
 
-pub trait Mechanic: AsFlow + EditorView {}
+pub trait Mechanic: AsFlow + EditorView + dyn_clone::DynClone {}
 
-impl<T> Mechanic for T where T: AsFlow + EditorView {}
+impl<T> Mechanic for T where T: AsFlow + EditorView + dyn_clone::DynClone {}
 
-pub trait MechanicProvider: EditorView + SolveContext {
+dyn_clone::clone_trait_object!(<C, I> Mechanic<GameContext = C, ItemIdentType = I>);
+
+pub trait MechanicProvider: EditorView + SolveContext + dyn_clone::DynClone {
     /// 传递创建的配方信息
     fn set_mechanic_sender(
         &mut self,
@@ -71,3 +73,5 @@ pub trait MechanicProvider: EditorView + SolveContext {
         vec![]
     }
 }
+
+dyn_clone::clone_trait_object!(<C, I> MechanicProvider<GameContext = C, ItemIdentType = I>);

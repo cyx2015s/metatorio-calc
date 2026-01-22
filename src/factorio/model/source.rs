@@ -9,6 +9,7 @@ use crate::{
 };
 
 /// 特殊：指代线性规划的无穷物体源
+#[derive(Debug, Clone)]
 pub struct InfiniteSource {
     pub item: GenericItem,
 }
@@ -169,6 +170,7 @@ impl EditorView for InfiniteSource {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct InfiniteSourceProvider {
     pub sender: MechanicSender<GenericItem, FactorioContext>,
 }

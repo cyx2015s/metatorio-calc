@@ -728,6 +728,7 @@ impl EditorView for RecipeConfig {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct RecipeConfigProvider {
     pub editing: RecipeConfig,
     pub sender: MechanicSender<GenericItem, FactorioContext>,

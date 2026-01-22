@@ -114,6 +114,7 @@ impl FactoryInstance {
 
     fn flows_panel(&mut self, ui: &mut egui::Ui, ctx: &FactorioContext) {
         let mut delete_flow: Option<usize> = None;
+        let mut clone_flow: Option<usize> = None;
         let mut add_hint_flow: Option<usize> = None;
         ui.horizontal_wrapped(|ui| {
             for item in &self.total_flow_sorted_keys {
@@ -165,6 +166,9 @@ impl FactoryInstance {
                 ui.vertical(|ui| {
                     if ui.button("删除").clicked() {
                         delete_flow = Some(i);
+                    }
+                    if ui.button("test 复制").clicked() {
+                        clone_flow = Some(i);
                     }
                     if let Some(solution) = solution_val {
                         ui.add(CompactLabel::new(solution));
@@ -219,9 +223,13 @@ impl FactoryInstance {
                 });
             });
         }
+        if let Some(idx) = clone_flow {
+            self.flow_editors.push(self.flow_editors[idx].clone());
+        }
         if let Some(idx) = delete_flow {
             self.flow_editors.remove(idx);
         }
+
 
         if let Some(idx) = add_hint_flow {
             let hint_flow = self.hint_flows.remove(idx);
