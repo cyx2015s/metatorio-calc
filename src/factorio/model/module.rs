@@ -1,6 +1,3 @@
-use egui::Grid;
-use serde::Deserialize;
-
 use crate::{
     concept::SolveContext,
     factorio::{
@@ -9,7 +6,7 @@ use crate::{
     },
 };
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize)]
 pub struct ModulePrototype {
     #[serde(flatten)]
     pub base: PrototypeBase,
@@ -24,7 +21,7 @@ pub struct ModulePrototype {
     pub tier: f64,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize)]
 pub struct BeaconPrototype {
     #[serde(flatten)]
     pub base: EntityPrototype,
@@ -50,7 +47,7 @@ pub struct BeaconPrototype {
     pub beacon_counter: BeaconCounter,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, serde::Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum BeaconCounter {
     #[default]
@@ -129,7 +126,7 @@ impl<'a> ModuleConfigEditor<'a> {
 
 impl egui::Widget for ModuleConfigEditor<'_> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
-        Grid::new("插件加成").num_columns(2).show(ui, |_ui| {
+        egui::Grid::new("插件加成").num_columns(2).show(ui, |_ui| {
             // ui.label(form)
         });
         ui.response().clone()

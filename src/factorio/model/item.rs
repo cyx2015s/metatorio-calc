@@ -1,5 +1,3 @@
-use serde::Deserialize;
-
 use crate::factorio::common::*;
 
 pub const ITEM_TYPES: &[&str] = &[
@@ -27,7 +25,7 @@ pub const ITEM_TYPES: &[&str] = &[
 ];
 
 /// 仅存储物品的基础属性，插件属性另行收集
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize)]
 pub struct ItemPrototype {
     #[serde(flatten)]
     pub base: PrototypeBase,
@@ -77,13 +75,13 @@ impl HasPrototypeBase for ItemPrototype {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize)]
 pub struct SpoilProperty {
     pub spoil_ticks: f64,
     pub spoil_result: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize)]
 pub struct BurnProperty {
     pub fuel_value: EnergyAmount,
     pub burnt_result: Option<String>,
@@ -91,12 +89,12 @@ pub struct BurnProperty {
     pub fuel_emissions_multiplier: Option<f64>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize)]
 pub struct PlantProperty {
     pub plant_result: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize)]
 pub struct PlaceAsTileProperty {
     pub result: String,
 }

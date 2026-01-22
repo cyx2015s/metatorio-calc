@@ -1,7 +1,5 @@
 use std::fmt::Debug;
 
-use serde::Deserialize;
-
 use crate::{
     concept::*,
     factorio::{
@@ -22,7 +20,7 @@ use crate::{
 
 use crate::factorio::common::{as_vec_or_empty, option_as_vec_or_empty};
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize)]
 #[serde(default)]
 pub struct RecipePrototype {
     #[serde(flatten)]
@@ -107,7 +105,7 @@ impl Default for RecipePrototype {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize)]
 #[serde(tag = "type")]
 pub enum RecipeIngredient {
     /// 物品原料
@@ -118,13 +116,13 @@ pub enum RecipeIngredient {
     Fluid(FluidIngredient),
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize)]
 pub struct ItemIngredient {
     pub name: String,
     pub amount: f64,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize)]
 pub struct FluidIngredient {
     pub name: String,
     pub amount: f64,
@@ -134,7 +132,7 @@ pub struct FluidIngredient {
     pub fluidbox_index: Option<f64>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize)]
 #[serde(tag = "type")]
 pub enum RecipeResult {
     /// 物品产物
@@ -151,7 +149,7 @@ impl HasPrototypeBase for RecipePrototype {
     }
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 #[serde(default)]
 pub struct ItemResult {
     pub name: String,
@@ -253,7 +251,7 @@ impl ItemResult {
     }
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, serde::Deserialize)]
 #[serde(default)]
 pub struct FluidResult {
     pub name: String,
@@ -337,7 +335,7 @@ impl FluidResult {
 
 pub const CRAFTING_MACHINE_TYPES: &[&str] = &["assembling-machine", "furnace", "rocket-silo"];
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize)]
 pub struct CraftingMachinePrototype {
     #[serde(flatten)]
     pub base: EntityPrototype,

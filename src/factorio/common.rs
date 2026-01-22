@@ -6,7 +6,6 @@ use std::{
 };
 
 use indexmap::IndexMap;
-use serde::{Deserialize, Deserializer, de::DeserializeOwned};
 use serde_json::{Value, from_value};
 
 use crate::factorio::model::context::{FactorioContext, GenericItem};
@@ -72,12 +71,12 @@ impl From<Color> for egui::Color32 {
     }
 }
 
-impl<'de> Deserialize<'de> for Color {
+impl<'de> serde::Deserialize<'de> for Color {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: Deserializer<'de>,
+        D: serde::Deserializer<'de>,
     {
-        let value: Value = Deserialize::deserialize(deserializer)?;
+        let value: Value = serde::Deserialize::deserialize(deserializer)?;
         match value {
             Value::Array(vec) => {
                 if vec.len() < 3 {
@@ -136,12 +135,12 @@ impl<'de> Deserialize<'de> for Color {
 #[derive(Debug, Clone)]
 pub struct MapPosition(pub f64, pub f64);
 
-impl<'de> Deserialize<'de> for MapPosition {
+impl<'de> serde::Deserialize<'de> for MapPosition {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: Deserializer<'de>,
+        D: serde::Deserializer<'de>,
     {
-        let value: Value = Deserialize::deserialize(deserializer)?;
+        let value: Value = serde::Deserialize::deserialize(deserializer)?;
         match value {
             Value::Object(map) => {
                 let x = map.get("x").and_then(|v| v.as_f64()).ok_or_else(|| {
@@ -171,7 +170,7 @@ impl<'de> Deserialize<'de> for MapPosition {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize)]
 #[serde(untagged)]
 pub enum BoundingBox {
     Struct {
@@ -185,10 +184,10 @@ pub enum BoundingBox {
 
 pub fn as_vec_or_empty<'de, T, D>(deserializer: D) -> Result<Vec<T>, D::Error>
 where
-    D: Deserializer<'de>,
-    T: DeserializeOwned,
+    D: serde::Deserializer<'de>,
+    T: serde::de::DeserializeOwned,
 {
-    let value = Value::deserialize(deserializer)?;
+    let value = <Value as serde::Deserialize>::deserialize(deserializer)?;
     match value {
         Value::Array(vec) => Ok(from_value(Value::Array(vec)).map_err(serde::de::Error::custom)?),
         Value::Object(map) if map.is_empty() => Ok(Vec::new()),
@@ -198,8 +197,8 @@ where
 
 pub fn option_as_vec_or_empty<'de, T, D>(deserializer: D) -> Result<Option<Vec<T>>, D::Error>
 where
-    D: Deserializer<'de>,
-    T: DeserializeOwned,
+    D: serde::Deserializer<'de>,
+    T: serde::de::DeserializeOwned,
 {
     let value = as_vec_or_empty(deserializer);
     match value {
@@ -208,7 +207,7 @@ where
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize)]
 #[serde(default)]
 /// PrototypeBase 基类中我们关心的字段
 #[derive(Default)]
@@ -243,12 +242,12 @@ pub struct EnergyAmount {
     pub amount: f64,
 }
 
-impl<'de> Deserialize<'de> for EnergyAmount {
+impl<'de> serde::Deserialize<'de> for EnergyAmount {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
-        D: serde::Deserializer<'de>,
+        D: serde::de::Deserializer<'de>,
     {
-        let value: String = Deserialize::deserialize(deserializer)?;
+        let value: String = serde::Deserialize::deserialize(deserializer)?;
         let re = regex::Regex::new(r"^[\d|.]+[k|M|G|T|P|E|Z|Y|R|Q]?[J|W]?$")
             .map_err(serde::de::Error::custom)?;
         if re.is_match(&value) {
@@ -304,7 +303,7 @@ impl Display for EnergyAmount {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize)]
 #[serde(tag = "type")]
 pub enum EnergySource {
     #[serde(rename = "electric")]
@@ -319,7 +318,7 @@ pub enum EnergySource {
     Void(VoidEnergySource),
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize)]
 #[serde(default)]
 #[derive(Default)]
 pub struct ElectricEnergySource {
@@ -330,7 +329,7 @@ pub struct ElectricEnergySource {
     pub emissions_per_minute: Option<Emissions>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize)]
 #[serde(default)]
 pub struct BurnerEnergySource {
     pub burnt_inventory_size: f64,
@@ -350,14 +349,14 @@ impl Default for BurnerEnergySource {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, serde::Deserialize, Default)]
 #[serde(default)]
 pub struct HeatEnergySource {
     pub max_temperature: f64,
     pub emissions_per_minute: Option<Dict<f64>>,
 }
 
-#[derive(Debug, Deserialize, Clone, PartialEq, Default)]
+#[derive(Debug, serde::Deserialize, Clone, PartialEq, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum FluidIOMode {
     #[default]
@@ -367,7 +366,7 @@ pub enum FluidIOMode {
     Output,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize)]
 pub struct FluidBox {
     #[serde(default)]
     pub filter: Option<String>,
@@ -377,7 +376,7 @@ pub struct FluidBox {
     pub production_type: FluidIOMode,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize)]
 #[serde(default)]
 pub struct FluidEnergySource {
     pub effectivity: f64,
@@ -407,13 +406,13 @@ impl Default for FluidEnergySource {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, serde::Deserialize, Default)]
 #[serde(default)]
 pub struct VoidEnergySource {
     pub emissions_per_minute: Option<Dict<f64>>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize)]
 #[serde(default)]
 pub struct EffectReceiver {
     pub base_effect: Effect,
@@ -433,7 +432,7 @@ impl Default for EffectReceiver {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, serde::Deserialize, Default)]
 #[serde(default)]
 pub struct Effect {
     pub consumption: f64,
@@ -468,7 +467,7 @@ impl Effect {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize)]
 #[serde(untagged)]
 pub enum EffectTypeLimitation {
     Single(String),
@@ -540,7 +539,7 @@ fn test_energy_amount_deserialize() {
     println!("{}", EnergyAmount { amount: 150000.0 });
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize)]
 /// 子组
 pub struct ItemSubgroup {
     #[serde(flatten)]

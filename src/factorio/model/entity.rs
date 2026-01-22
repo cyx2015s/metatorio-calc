@@ -1,5 +1,3 @@
-use serde::Deserialize;
-
 use crate::factorio::{common::*, model::recipe::*};
 
 pub const ENTITY_TYPES: &[&str] = &[
@@ -138,7 +136,7 @@ pub const ENTITY_TYPES: &[&str] = &[
     // "tile-ghost",
 ];
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize)]
 pub struct EntityPrototype {
     #[serde(flatten)]
     pub base: PrototypeBase,
@@ -150,7 +148,7 @@ pub struct EntityPrototype {
     pub minable: Option<MiningProperty>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize)]
 pub struct MiningProperty {
     pub mining_time: f64,
 

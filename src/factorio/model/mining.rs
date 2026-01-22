@@ -1,5 +1,3 @@
-use serde::Deserialize;
-
 use crate::{
     concept::{AsFlow, Flow, SolveContext},
     factorio::{
@@ -8,7 +6,7 @@ use crate::{
     },
 };
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize)]
 pub struct ResourcePrototype {
     #[serde(flatten)]
     pub base: EntityPrototype,
@@ -25,7 +23,7 @@ impl HasPrototypeBase for ResourcePrototype {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize)]
 pub struct MiningDrillPrototype {
     #[serde(flatten)]
     pub base: EntityPrototype,
