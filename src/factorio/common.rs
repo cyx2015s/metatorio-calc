@@ -15,7 +15,7 @@ pub type Emissions = Dict<f64>;
 pub type OrderInfo = Vec<(String, Vec<(String, Vec<String>)>)>;
 pub type ReverseOrderInfo = HashMap<String, (usize, usize, usize)>;
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IdWithQuality(pub String, pub u8);
 
 impl From<String> for IdWithQuality {

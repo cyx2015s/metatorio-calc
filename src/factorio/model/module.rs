@@ -55,14 +55,14 @@ pub enum BeaconCounter {
     SameType,
 }
 
-#[derive(Debug, Clone, Default, serde::Serialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct ModuleConfig {
     pub modules: Vec<IdWithQuality>,
     pub beacons: Vec<BeaconConfig>,
     pub extra_effects: Effect,
 }
 
-#[derive(Debug, Clone, Default, serde::Serialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct BeaconConfig {
     pub modules: Vec<IdWithQuality>,
     pub count: usize,

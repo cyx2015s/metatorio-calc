@@ -1,7 +1,7 @@
 use indexmap::IndexMap;
 
 use crate::{
-    concept::{AsFlow, EditorView, Flow, MechanicProvider, MechanicSender, SolveContext},
+    concept::{AsFlow, EditorView, Flow, Mechanic, MechanicProvider, MechanicSender, SolveContext},
     factorio::{
         editor::{icon::GenericIcon, selector::simple_selector_with_filter},
         model::context::{FactorioContext, GenericItem},
@@ -9,8 +9,8 @@ use crate::{
 };
 
 /// 特殊：指代线性规划的无穷物体源
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(tag = "type")]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename = "factorio:source")]
 pub struct InfiniteSource {
     pub item: GenericItem,
 }
@@ -222,3 +222,9 @@ impl MechanicProvider for InfiniteSourceProvider {
         }
     }
 }
+
+crate::impl_register_deserializer!(
+    for InfiniteSource
+    as "factorio:source"
+    => dyn Mechanic<ItemIdentType = GenericItem, GameContext = FactorioContext>
+);

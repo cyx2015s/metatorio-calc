@@ -534,7 +534,7 @@ impl FactorioContext {
     }
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum GenericItem {
     Item {
         name: String,

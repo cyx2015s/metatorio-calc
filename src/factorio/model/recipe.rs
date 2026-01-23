@@ -384,8 +384,8 @@ impl HasPrototypeBase for CraftingMachinePrototype {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(tag = "type")]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename = "factorio:recipe")]
 pub struct RecipeConfig {
     pub recipe: IdWithQuality,
     pub machine: Option<IdWithQuality>,
@@ -821,3 +821,11 @@ impl EditorView for RecipeConfigProvider {
         }
     }
 }
+
+
+
+crate::impl_register_deserializer!(
+    for RecipeConfig
+    as "factorio:recipe"
+    => dyn Mechanic<ItemIdentType = GenericItem, GameContext = FactorioContext>
+);

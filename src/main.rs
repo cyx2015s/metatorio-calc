@@ -11,6 +11,7 @@ use egui::Id;
 use crate::concept::*;
 
 pub mod concept;
+pub mod dyn_deserialize;
 pub mod factorio;
 pub mod solver;
 
