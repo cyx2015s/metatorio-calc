@@ -7,18 +7,16 @@ use serde::Serialize;
 use crate::{
     concept::{
         EditorView, Flow, ItemIdent, Mechanic, MechanicProvider, MechanicSender, SolveContext,
-    },
-    factorio::{
+    }, dyn_deserialize::DynDeserializeRegistry, factorio::{
         common::{sort_generic_items, sort_generic_items_owned},
         editor::{icon::GenericIcon, selector::simple_selector_with_filter},
         format::{CompactLabel, SignedCompactLabel},
         model::{
             context::{FactorioContext, GenericItem},
             recipe::RecipeConfigProvider,
-            source::InfiniteSourceProvider,
+            source::{InfiniteSource, InfiniteSourceProvider},
         },
-    },
-    solver::{basic_solver, box_as_ptr, flow_add},
+    }, solver::{basic_solver, box_as_ptr, flow_add}
 };
 
 pub struct FactoryInstance {
@@ -117,7 +115,7 @@ impl FactoryInstance {
 
     fn flows_panel(&mut self, ui: &mut egui::Ui, ctx: &FactorioContext) {
         let mut delete_flow: Option<usize> = None;
-        let mut clone_flow: Option<usize> = None;
+        let mut cloned_flow = None;
         let mut add_hint_flow: Option<usize> = None;
         ui.horizontal_wrapped(|ui| {
             for item in &self.total_flow_sorted_keys {
@@ -171,7 +169,14 @@ impl FactoryInstance {
                         delete_flow = Some(i);
                     }
                     if ui.button("test 复制").clicked() {
-                        clone_flow = Some(i);
+                        let serialized = serde_json::to_value(&flow_config);
+                        let mut registry = DynDeserializeRegistry::default();
+                        InfiniteSource::register(&mut registry);
+                        RecipeConfig::register(&mut registry);
+                        let deserialized = registry.deserialize(serialized.unwrap());
+                        if let Some(deserialized) = deserialized {
+                            cloned_flow = Some(deserialized);
+                        }
                     }
                     if ui.button("test 序列化").clicked() {
                         let json_serializer = &mut serde_json::Serializer::new(io::stderr());
@@ -232,8 +237,8 @@ impl FactoryInstance {
                 });
             });
         }
-        if let Some(idx) = clone_flow {
-            self.flow_editors.push(self.flow_editors[idx].clone());
+        if let Some(cloned_flow) = cloned_flow {
+            self.flow_editors.push(cloned_flow);
         }
         if let Some(idx) = delete_flow {
             self.flow_editors.remove(idx);
