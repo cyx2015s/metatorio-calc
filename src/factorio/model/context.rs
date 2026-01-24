@@ -201,6 +201,7 @@ impl FactorioContext {
         let self_path = get_workding_directory();
         let config_path = self_path.join("tmp/config/config.ini");
         let tmp_mod_list_json_path = self_path.join("tmp/mods/mod-list.json");
+        log::info!("准备创建临时配置文件: {:?}", config_path);
         if tmp_mod_list_json_path.exists() {
             std::fs::remove_file(&tmp_mod_list_json_path).ok()?;
         }
@@ -385,11 +386,22 @@ impl FactorioContext {
         let self_path = get_workding_directory();
         let raw_path = self_path.join("tmp/script-output/data-raw-dump.json");
         let icon_path = self_path.join("tmp/script-output/");
+        let json_string = std::fs::read_to_string(&raw_path);
+        if json_string.is_err() {
+            log::error!("读取原始数据文件失败: {:?}", raw_path);
+            return None;
+        }
+        let json_value = serde_json::from_str::<Value>(&json_string.unwrap());
+        if json_value.is_err() {
+            log::error!("解析原始数据文件失败: {:?}", raw_path);
+            return None;
+        }
         let mut ctx = FactorioContext::load(
-            &(serde_json::from_str(&std::fs::read_to_string(&raw_path).ok()?)).ok()?,
+            &json_value.unwrap(),
         );
         ctx.icon_path = Some(icon_path);
         for locale_category in LOCALE_CATEGORIES.iter() {
+            log::info!("加载翻译类别 {}", locale_category);
             let locale_path =
                 self_path.join(format!("tmp/script-output/{}-locale.json", locale_category));
             if locale_path.exists() {
@@ -413,6 +425,7 @@ impl FactorioContext {
                     .insert(locale_category.to_string(), Dict::new());
                 ctx.localized_description
                     .insert(locale_category.to_string(), Dict::new());
+                log::warn!("翻译类别 {} 的文件不存在，跳过", locale_category);
             }
         }
         let mod_list_json_path = self_path.join("tmp/mods/mod-list.json");

@@ -162,8 +162,21 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                 },
             )
             .interact(egui::Sense::click());
-        
+
         // TODO: 嵌套的 Popup 交互有点复杂，过会做
+        // complex_popup(ui, self.ctx, &button, |ui, ctx| {
+        //     ui.label("一级");
+        //     let button = ui.button("菜单");
+        //     complex_popup(ui, ctx, &button, |ui, ctx| {
+        //         ui.add_sized([70.0, 70.0], egui::Label::new("你好"));
+        //     })
+        // });
+        // ui.menu_button("api 菜单", |ui| {
+        //     ui.label("测试菜单");
+        //     ui.menu_button("有一个菜单", |ui| {
+        //         ui.label("你好");
+        //     });
+        // });
         ui.response().clone()
     }
 }

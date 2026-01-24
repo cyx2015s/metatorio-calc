@@ -165,7 +165,7 @@ impl FactoryInstance {
                     if ui.button("删除").clicked() {
                         delete_flow = Some(i);
                     }
-                    if ui.button("test 复制").clicked() {
+                    if ui.button("复制").clicked() {
                         let serialized = serde_json::to_value(&flow_config);
                         let mut registry = DynDeserializeRegistry::default();
                         InfiniteSource::register(&mut registry);
@@ -175,12 +175,12 @@ impl FactoryInstance {
                             cloned_flow = Some(deserialized);
                         }
                     }
-                    if ui.button("test 序列化").clicked() {
-                        log::info!("=== 测试序列化");
-                        let serialize_json = serde_json::to_value(&flow_config);
-                        log::info!("序列化结果: {}", serialize_json.unwrap());
-                        log::info!("=== 序列化结束");
-                    }
+                    // if ui.button("test 序列化").clicked() {
+                    //     log::info!("=== 测试序列化");
+                    //     let serialize_json = serde_json::to_value(&flow_config);
+                    //     log::info!("序列化结果: {}", serialize_json.unwrap());
+                    //     log::info!("=== 序列化结束");
+                    // }
                     if let Some(solution) = solution_val {
                         ui.add(CompactLabel::new(solution));
                     } else {

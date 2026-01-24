@@ -188,7 +188,6 @@ pub fn complex_popup<Inner>(
     show_fn: impl FnOnce(&mut egui::Ui, &FactorioContext) -> Inner,
 ) {
     let popup_id = button.id.with("Popup");
-    
     let popup = egui::Popup::menu(button).id(popup_id)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .open_memory(None);
