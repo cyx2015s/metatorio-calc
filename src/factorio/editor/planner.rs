@@ -1,9 +1,6 @@
-use std::io;
 
 use egui::Vec2;
 use indexmap::IndexMap;
-use serde::Serialize;
-
 use crate::{
     concept::{
         EditorView, Flow, ItemIdent, Mechanic, MechanicProvider, MechanicSender, SolveContext,
@@ -179,9 +176,9 @@ impl FactoryInstance {
                         }
                     }
                     if ui.button("test 序列化").clicked() {
-                        let json_serializer = &mut serde_json::Serializer::new(io::stderr());
                         log::info!("=== 测试序列化");
-                        flow_config.serialize(json_serializer).ok();
+                        let serialize_json = serde_json::to_value(&flow_config);
+                        log::info!("序列化结果: {}", serialize_json.unwrap());
                         log::info!("=== 序列化结束");
                     }
                     if let Some(solution) = solution_val {

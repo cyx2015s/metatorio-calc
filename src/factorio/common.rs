@@ -467,11 +467,21 @@ impl Effect {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EffectType {
+    Consumption,
+    Speed,
+    Productivity,
+    Pollution,
+    Quality,
+}
+
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(untagged)]
 pub enum EffectTypeLimitation {
-    Single(String),
-    Multiple(Vec<String>),
+    Single(EffectType),
+    Multiple(Vec<EffectType>),
     Empty(HashMap<String, Value>),
 }
 
@@ -491,19 +501,19 @@ impl EffectTypeLimitation {
     ) -> Self {
         let mut ret = vec![];
         if allow_consumption {
-            ret.push("consumption".to_string());
+            ret.push(EffectType::Consumption);
         }
         if allow_speed {
-            ret.push("speed".to_string());
+            ret.push(EffectType::Speed);
         }
         if allow_productivity {
-            ret.push("productivity".to_string());
+            ret.push(EffectType::Productivity);
         }
         if allow_pollution {
-            ret.push("pollution".to_string());
+            ret.push(EffectType::Pollution);
         }
         if allow_quality {
-            ret.push("quality".to_string());
+            ret.push(EffectType::Quality);
         }
         EffectTypeLimitation::Multiple(ret)
     }
@@ -521,7 +531,7 @@ impl EffectTypeLimitation {
         let other_normalized = other.normalized();
         match (self_normalized, other_normalized) {
             (EffectTypeLimitation::Multiple(v1), EffectTypeLimitation::Multiple(v2)) => {
-                let intersection: Vec<String> =
+                let intersection: Vec<EffectType> =
                     v1.into_iter().filter(|item| v2.contains(item)).collect();
                 EffectTypeLimitation::Multiple(intersection)
             }

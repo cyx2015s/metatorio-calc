@@ -2,6 +2,10 @@ use crate::{
     concept::SolveContext,
     factorio::{
         common::*,
+        editor::{
+            icon::Icon,
+            selector::{ItemSelector, complex_popup},
+        },
         model::{context::*, entity::*},
     },
 };
@@ -124,11 +128,42 @@ impl<'a> ModuleConfigEditor<'a> {
     }
 }
 
+fn module_effects_allowed(
+    module: &ModulePrototype,
+    allowed_effects: &Option<EffectTypeLimitation>,
+) -> bool {
+    if let Some(allowed_effects) = allowed_effects {
+        if let EffectTypeLimitation::Multiple(normalized) = allowed_effects.normalized() {
+            (normalized.contains(&EffectType::Consumption) || module.effect.consumption >= 0.0) //  要么允许节能，要么模块本身不减少能耗
+                && (normalized.contains(&EffectType::Speed) || module.effect.speed <= 0.0) // 要么允许加速，要么模块本身不增加速度
+                && (normalized.contains(&EffectType::Productivity)
+                    || module.effect.productivity <= 0.0) // 要么允许产能，要么模块本身不增加产能
+                && (normalized.contains(&EffectType::Pollution) || module.effect.pollution <= 0.0) // 要么允许污染，要么模块本身不减少污染
+                && (normalized.contains(&EffectType::Quality) || module.effect.quality <= 0.0) // 要么允许品质，要么模块本身不增加品质
+        } else {
+            unreachable!();
+        }
+    } else {
+        module.effect.productivity <= 0.0
+    }
+}
+
 impl egui::Widget for ModuleConfigEditor<'_> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
-        egui::Grid::new("插件加成").num_columns(2).show(ui, |_ui| {
-            // ui.label(form)
-        });
+        let button = ui
+            .add_sized(
+                [35.0, 35.0],
+                Icon {
+                    ctx: self.ctx,
+                    type_name: &"item".to_string(),
+                    item_name: &"empty-module-slot".to_string(),
+                    size: 35.0,
+                    quality: 0,
+                },
+            )
+            .interact(egui::Sense::click());
+        
+        // TODO: 嵌套的 Popup 交互有点复杂，过会做
         ui.response().clone()
     }
 }

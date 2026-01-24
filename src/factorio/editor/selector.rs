@@ -181,27 +181,25 @@ impl egui::Widget for ItemSelector<'_> {
     }
 }
 
-pub fn complex_selector<T>(
+pub fn complex_popup<Inner>(
     ui: &mut egui::Ui,
     ctx: &FactorioContext,
     button: &egui::Response,
-    value: &mut T,
-    show_fn: impl FnOnce(&mut egui::Ui, &FactorioContext, &mut T) -> bool,
+    show_fn: impl FnOnce(&mut egui::Ui, &FactorioContext) -> Inner,
 ) {
-    let popup = egui::Popup::menu(button)
+    let popup_id = button.id.with("Popup");
+    
+    let popup = egui::Popup::menu(button).id(popup_id)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .open_memory(None);
-    let popup_id = popup.get_id();
+    
     if button.clicked() {
         egui::Popup::open_id(ui.ctx(), popup_id);
     }
-    let mut should_close = false;
+    
     popup.show(|ui| {
-        should_close = show_fn(ui, ctx, value);
+        show_fn(ui, ctx);
     });
-    if should_close {
-        egui::Popup::close_id(ui.ctx(), popup_id);
-    }
 }
 
 pub fn simple_selector_with_filter(
@@ -214,13 +212,12 @@ pub fn simple_selector_with_filter(
     let mut selecting_item = None;
 
     let id = ui.id();
-
-    complex_selector(
+    
+    complex_popup(
         ui,
         ctx,
         button,
-        &mut selecting_item,
-        |ui, ctx, selected_item| {
+        |ui, ctx| {
             let mut filter_string =
                 ui.memory(move |mem| mem.data.get_temp::<String>(id).unwrap_or_default());
             ui.label(label_str);
@@ -230,7 +227,7 @@ pub fn simple_selector_with_filter(
                 .auto_shrink(false)
                 .show(ui, |ui| {
                     ui.add(
-                        ItemSelector::new(ctx, &item_type.to_string(), selected_item).with_filter(
+                        ItemSelector::new(ctx, &item_type.to_string(), &mut selecting_item).with_filter(
                             |s, f| {
                                 if filter_string.is_empty() {
                                     return true;
@@ -246,7 +243,9 @@ pub fn simple_selector_with_filter(
             ui.memory_mut(|mem| {
                 mem.data.insert_temp(id, filter_string);
             });
-            selected_item.is_some()
+            if selecting_item.is_some() {
+                ui.close();
+            }
         },
     );
     selecting_item
