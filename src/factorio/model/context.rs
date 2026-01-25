@@ -235,8 +235,24 @@ impl FactorioContext {
         if !dump_raw_command.status.success() {
             return None;
         }
-
         log::info!("导出原始数据成功");
+        let dump_locale_command = Command::new(executable_path)
+            .arg("--dump-prototype-locale")
+            .arg("--config")
+            .arg(config_path.to_str().unwrap())
+            .args(if let Some(mod_path) = mod_path {
+                vec!["--mod-directory", mod_path.to_str().unwrap()]
+            } else {
+                vec![]
+            })
+            .stdout(Stdio::inherit())
+            .output()
+            .ok()?;
+        if !dump_locale_command.status.success() {
+            return None;
+        }
+        log::info!("导出翻译数据成功");
+        
         let dump_icon_sprites_command = Command::new(executable_path)
             .arg("--dump-icon-sprites")
             .arg("--disable-audio")
@@ -254,22 +270,6 @@ impl FactorioContext {
             return None;
         }
         log::info!("导出图标数据成功");
-        let dump_locale_command = Command::new(executable_path)
-            .arg("--dump-prototype-locale")
-            .arg("--config")
-            .arg(config_path.to_str().unwrap())
-            .args(if let Some(mod_path) = mod_path {
-                vec!["--mod-directory", mod_path.to_str().unwrap()]
-            } else {
-                vec![]
-            })
-            .stdout(Stdio::inherit())
-            .output()
-            .ok()?;
-        log::info!("导出翻译数据成功");
-        if !dump_locale_command.status.success() {
-            return None;
-        }
 
         if let Some(mod_path) = mod_path {
             // 把 mod-list.json 也复制过来
