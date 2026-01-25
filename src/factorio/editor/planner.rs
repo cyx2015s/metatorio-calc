@@ -5,7 +5,7 @@ use crate::{
     concept::{
         EditorView, Flow, ItemIdent, Mechanic, MechanicProvider, MechanicSender, SolveContext,
     }, dyn_deserialize::DynDeserializeRegistry, factorio::{
-        common::{sort_generic_items, sort_generic_items_owned},
+        common::{FactorioMechanic, FactorioMechanicProvider, sort_generic_items, sort_generic_items_owned},
         editor::{icon::GenericIcon, selector::simple_selector_with_filter},
         format::{CompactLabel, SignedCompactLabel},
         model::{
@@ -24,16 +24,16 @@ pub struct FactoryInstance {
     /// Cached sorted keys for total_flow to avoid sorting every frame
     pub total_flow_sorted_keys: Vec<GenericItem>,
     pub flow_editor_sources:
-        Vec<Box<dyn MechanicProvider<GameContext = FactorioContext, ItemIdentType = GenericItem>>>,
+        Vec<Box<FactorioMechanicProvider>>,
     pub flow_editors:
-        Vec<Box<dyn Mechanic<ItemIdentType = GenericItem, GameContext = FactorioContext>>>,
+        Vec<Box<FactorioMechanic>>,
     pub hint_flows:
-        Vec<Box<dyn Mechanic<ItemIdentType = GenericItem, GameContext = FactorioContext>>>,
+        Vec<Box<FactorioMechanic>>,
     pub flow_receiver: std::sync::mpsc::Receiver<
-        Box<dyn Mechanic<ItemIdentType = GenericItem, GameContext = FactorioContext>>,
+        Box<FactorioMechanic>,
     >,
     pub flow_sender: std::sync::mpsc::Sender<
-        Box<dyn Mechanic<ItemIdentType = GenericItem, GameContext = FactorioContext>>,
+        Box<FactorioMechanic>,
     >,
     pub solver_sender:
         std::sync::mpsc::Sender<(Flow<GenericItem>, IndexMap<usize, (Flow<GenericItem>, f64)>)>,
@@ -101,7 +101,7 @@ impl FactoryInstance {
         F: Fn(
             MechanicSender<GenericItem, FactorioContext>,
         )
-            -> Box<dyn MechanicProvider<GameContext = FactorioContext, ItemIdentType = GenericItem>>,
+            -> Box<FactorioMechanicProvider>,
     >(
         mut self,
         f: F,

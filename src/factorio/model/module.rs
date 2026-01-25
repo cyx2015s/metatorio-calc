@@ -2,10 +2,9 @@ use crate::{
     concept::SolveContext,
     factorio::{
         common::*,
-        editor::{
-            icon::Icon,
-            selector::{ItemSelector, complex_popup},
-        },
+        editor::
+            icon::Icon
+        ,
         model::{context::*, entity::*},
     },
 };

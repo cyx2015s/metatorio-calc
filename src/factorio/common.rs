@@ -8,13 +8,19 @@ use std::{
 use indexmap::IndexMap;
 use serde_json::{Value, from_value};
 
-use crate::factorio::model::context::{FactorioContext, GenericItem};
+use crate::{
+    concept::{Mechanic, MechanicProvider},
+    factorio::model::context::{FactorioContext, GenericItem},
+};
 
 pub type Dict<T> = HashMap<String, T>;
 pub type Emissions = Dict<f64>;
 pub type OrderInfo = Vec<(String, Vec<(String, Vec<String>)>)>;
 pub type ReverseOrderInfo = HashMap<String, (usize, usize, usize)>;
-
+pub type FactorioMechanic =
+    dyn Mechanic<ItemIdentType = GenericItem, GameContext = FactorioContext>;
+pub type FactorioMechanicProvider =
+    dyn MechanicProvider<ItemIdentType = GenericItem, GameContext = FactorioContext>;
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IdWithQuality(pub String, pub u8);
 
