@@ -2,8 +2,8 @@ use crate::{
     concept::SolveContext,
     factorio::{
         common::*,
-        editor::
-            icon::Icon
+        editor::{
+            icon::Icon, modal::show_modal}
         ,
         model::{context::*, entity::*},
     },
@@ -161,7 +161,18 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                 },
             )
             .interact(egui::Sense::click());
-
+        show_modal(button.id, button.clicked(), ui, |ui| {
+            let button = ui.button("hello!");
+            show_modal(button.id, button.clicked_by(egui::PointerButton::Secondary), ui, |ui| {
+                ui.label("Hello Again!");
+                if ui.button("关闭").clicked() {
+                    ui.close();
+                }
+            });
+            if ui.button("关闭").clicked() {
+                ui.close();
+            }
+        });
         // TODO: 嵌套的 Popup 交互有点复杂，过会做
         // complex_popup(ui, self.ctx, &button, |ui, ctx| {
         //     ui.label("一级");
