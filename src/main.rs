@@ -104,6 +104,9 @@ impl eframe::App for MainPage {
                             });
                         });
                 }
+                if ui.button("重新加载图标").clicked() {
+                    ui.ctx().forget_all_images();
+                }
                 ui.memory_mut(|mem| {
                     mem.data
                         .insert_temp(Id::new("字体与授权"), show_font_license);

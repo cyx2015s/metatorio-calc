@@ -252,7 +252,7 @@ impl FactorioContext {
             return None;
         }
         log::info!("导出翻译数据成功");
-        
+
         let dump_icon_sprites_command = Command::new(executable_path)
             .arg("--dump-icon-sprites")
             .arg("--disable-audio")
@@ -396,9 +396,7 @@ impl FactorioContext {
             log::error!("解析原始数据文件失败: {:?}", raw_path);
             return None;
         }
-        let mut ctx = FactorioContext::load(
-            &json_value.unwrap(),
-        );
+        let mut ctx = FactorioContext::load(&json_value.unwrap());
         ctx.icon_path = Some(icon_path);
         for locale_category in LOCALE_CATEGORIES.iter() {
             log::info!("加载翻译类别 {}", locale_category);
@@ -437,8 +435,13 @@ impl FactorioContext {
             if mod_info.get("enabled")?.as_bool()? {
                 let mod_name = mod_info.get("name")?.as_str()?.to_string();
                 log::info!("启用模组 {}", &mod_name);
-                ctx.mods
-                    .push((mod_name, mod_info.get("version")?.as_str()?.to_string()));
+                ctx.mods.push((
+                    mod_name,
+                    mod_info
+                        .get("version")
+                        .map_or("unknown", |v| v.as_str().unwrap_or("unknown"))
+                        .to_string(),
+                ));
             }
         }
         Some(ctx)
