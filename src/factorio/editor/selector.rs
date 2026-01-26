@@ -15,6 +15,11 @@ pub struct ItemSelectorStorage {
     pub selected_item: Option<String>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct QualitySelectorStorage {
+    pub selected_quality: Option<u8>,
+}
+
 pub struct ItemSelector<'a> {
     pub ctx: &'a FactorioContext,
     pub item_type: &'a str,
@@ -198,27 +203,31 @@ pub fn quality_selector_modal(
             .max_width(f32::INFINITY)
             .auto_shrink(false)
             .show(ui, |ui| {
-                for (idx, quality) in ctx.qualities.iter().enumerate() {
-                    let quality_button = ui
-                        .add(Icon {
-                            ctx,
-                            type_name: "quality",
-                            item_name: &quality.base.name,
-                            size: 32.0,
-                            quality: 0,
-                        })
-                        .on_hover_text(ctx.get_display_name("quality", &quality.base.name))
-                        .interact(egui::Sense::click());
-                    if quality_button.clicked() {
-                        selecting_quality = Some(idx as u8);
-                    }
-                }
+                quality_selector(ui, ctx, &mut selecting_quality);
             });
         if selecting_quality.is_some() {
             ui.close();
         }
     });
     selecting_quality
+}
+
+pub fn quality_selector(ui: &mut egui::Ui, ctx: &FactorioContext, selected_quality: &mut Option<u8>) {
+    for (idx, quality) in ctx.qualities.iter().enumerate() {
+        let quality_button = ui
+            .add_sized([32.0, 32.0] ,Icon {
+                ctx,
+                type_name: "quality",
+                item_name: &quality.base.name,
+                size: 32.0,
+                quality: 0,
+            })
+            .on_hover_text(ctx.get_display_name("quality", &quality.base.name))
+            .interact(egui::Sense::click());
+        if quality_button.clicked() {
+            *selected_quality = Some(idx as u8);
+        }
+    }
 }
 
 pub fn item_selector_modal(

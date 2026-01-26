@@ -1,8 +1,15 @@
+use indexmap::IndexMap;
+
 use crate::{
     concept::SolveContext,
     factorio::{
         common::*,
-        editor::{icon::Icon, modal::show_modal},
+        editor::{
+            icon::{GenericIcon, Icon},
+            modal::show_modal,
+            selector::{ItemSelector, quality_selector},
+        },
+        format::CompactLabel,
         model::{context::*, entity::*},
     },
 };
@@ -65,8 +72,9 @@ pub struct ModuleConfig {
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct BeaconConfig {
-    pub modules: Vec<IdWithQuality>,
-    pub count: usize,
+    pub modules: IndexMap<IdWithQuality, usize>, // 这种插件塔中，这个插件有多少个，不是每个插件塔中的插件！
+    pub beacon: IdWithQuality,                   // 插件塔本身
+    pub count: usize,                            // 插件塔的数量
 }
 
 impl ModuleConfig {
@@ -131,12 +139,12 @@ fn module_effects_allowed(
 ) -> bool {
     if let Some(allowed_effects) = allowed_effects {
         if let EffectTypeLimitation::Multiple(normalized) = allowed_effects.normalized() {
-            (normalized.contains(&EffectType::Consumption) || module.effect.consumption >= 0.0) //  要么允许节能，要么模块本身不减少能耗
-                && (normalized.contains(&EffectType::Speed) || module.effect.speed <= 0.0) // 要么允许加速，要么模块本身不增加速度
+            (normalized.contains(&EffectType::Consumption) || module.effect.consumption >= 0.0) //  要么允许节能，要么插件本身不减少能耗
+                && (normalized.contains(&EffectType::Speed) || module.effect.speed <= 0.0) // 要么允许加速，要么插件本身不增加速度
                 && (normalized.contains(&EffectType::Productivity)
-                    || module.effect.productivity <= 0.0) // 要么允许产能，要么模块本身不增加产能
-                && (normalized.contains(&EffectType::Pollution) || module.effect.pollution <= 0.0) // 要么允许污染，要么模块本身不减少污染
-                && (normalized.contains(&EffectType::Quality) || module.effect.quality <= 0.0) // 要么允许品质，要么模块本身不增加品质
+                    || module.effect.productivity <= 0.0) // 要么允许产能，要么插件本身不增加产能
+                && (normalized.contains(&EffectType::Pollution) || module.effect.pollution <= 0.0) // 要么允许污染，要么插件本身不减少污染
+                && (normalized.contains(&EffectType::Quality) || module.effect.quality <= 0.0) // 要么允许品质，要么插件本身不增加品质
         } else {
             unreachable!();
         }
@@ -148,20 +156,164 @@ fn module_effects_allowed(
 impl egui::Widget for ModuleConfigEditor<'_> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         let button = ui
-            .add_sized(
-                [35.0, 35.0],
-                Icon {
-                    ctx: self.ctx,
-                    type_name: "item",
-                    item_name: "empty-module-slot",
-                    size: 35.0,
-                    quality: 0,
-                },
-            )
-            .interact(egui::Sense::click());
+            .vertical(|ui| {
+                ui.label("插件");
+                ui.button("编辑")
+            })
+            .inner;
+        ui.horizontal(|ui| {
+            // 获取所有插件和信标的综合
+            let mut total = IndexMap::new();
+            for module in &self.module_config.modules {
+                index_map_update_entry(
+                    &mut total,
+                    GenericItem::Item {
+                        name: module.0.clone(),
+                        quality: module.1,
+                    },
+                    1,
+                );
+            }
+            for beacon_config in &self.module_config.beacons {
+                for (module, count) in &beacon_config.modules {
+                    index_map_update_entry(
+                        &mut total,
+                        GenericItem::Item {
+                            name: module.0.clone(),
+                            quality: module.1,
+                        },
+                        *count,
+                    );
+                }
+                index_map_update_entry(
+                    &mut total,
+                    GenericItem::Entity {
+                        name: beacon_config.beacon.0.clone(),
+                        quality: beacon_config.beacon.1,
+                    },
+                    beacon_config.count,
+                );
+            }
+            for (item, count) in total {
+                ui.vertical(|ui| {
+                    ui.add_sized(
+                        [35.0, 35.0],
+                        GenericIcon {
+                            ctx: self.ctx,
+                            item: &item,
+                            size: 32.0,
+                        },
+                    );
+                    ui.add_sized([35.0, 15.0], CompactLabel::new(count as f64));
+                });
+            }
+        });
         show_modal(button.id, button.clicked(), ui, |ui| {
-            
+            ui.label("编辑插件");
+
+            let mut delete_module = None;
+            ui.horizontal(|ui| {
+                for (idx, slot) in self.module_config.modules.iter_mut().enumerate() {
+                    let icon = ui
+                        .add_sized(
+                            [35.0, 35.0],
+                            Icon {
+                                ctx: self.ctx,
+                                type_name: "item",
+                                item_name: &slot.0,
+                                quality: slot.1,
+                                size: 32.0,
+                            },
+                        )
+                        .interact(egui::Sense::click());
+                    if icon.clicked_by(egui::PointerButton::Secondary) {
+                        delete_module = Some(idx);
+                    }
+                    show_modal(icon.id, icon.clicked(), ui, |ui| {
+                        let (selected_module, selected_quality) = single_module_selector(
+                            ui,
+                            self.ctx,
+                            self.allowed_effects,
+                            self.allowed_module_categories,
+                        );
+                        if let Some(module_name) = selected_module {
+                            slot.0 = module_name;
+                            ui.close();
+                        }
+                        if let Some(quality) = selected_quality {
+                            slot.1 = quality;
+                            ui.close();
+                        }
+                    });
+                }
+
+                for idx in self.module_config.modules.len()..self.module_slots {
+                    let icon = ui
+                        .add_sized(
+                            [35.0, 35.0],
+                            Icon {
+                                ctx: self.ctx,
+                                type_name: "item",
+                                item_name: "empty-module-slot",
+                                quality: 0,
+                                size: 32.0,
+                            },
+                        )
+                        .interact(egui::Sense::click());
+                    show_modal(icon.id, icon.clicked(), ui, |ui| {
+                        let (selected_module, selected_quality) = single_module_selector(
+                            ui,
+                            self.ctx,
+                            self.allowed_effects,
+                            self.allowed_module_categories,
+                        );
+                        if let Some(selected_module) = selected_module {
+                            let quality = selected_quality.unwrap_or(0);
+                            // FIXME: 需要重构所有同时选择品质和物品的函数，不然自动填充不能填充带品质的插件
+                            while self.module_config.modules.len() <= idx {
+                                self.module_config
+                                    .modules
+                                    .push(IdWithQuality(selected_module.clone(), quality));
+                            }
+                            ui.close();
+                        }
+                    });
+                }
+
+                if let Some(delete_module) = delete_module {
+                    self.module_config.modules.remove(delete_module);
+                }
+            });
         });
         ui.response().clone()
     }
+}
+
+fn single_module_selector(
+    ui: &mut egui::Ui,
+    ctx: &FactorioContext,
+    allowed_effects: &Option<EffectTypeLimitation>,
+    allowed_module_categories: &Option<Vec<String>>,
+) -> (Option<String>, Option<u8>) {
+    let mut selected_module: Option<String> = None;
+    let mut selected_quality: Option<u8> = None;
+    ui.label("选择插件");
+    ui.horizontal(|ui| {
+        quality_selector(ui, ctx, &mut selected_quality);
+    });
+    ui.add(
+        ItemSelector::new(ctx, "item", &mut selected_module).with_filter(|name, ctx| {
+            if let Some(module) = ctx.modules.get(name) {
+                module_effects_allowed(module, allowed_effects)
+                    && (allowed_module_categories.is_none()
+                        || allowed_module_categories
+                            .as_ref()
+                            .unwrap()
+                            .contains(&module.category))
+            } else {
+                false
+            }
+        }),
+    );
+    (selected_module, selected_quality)
 }
