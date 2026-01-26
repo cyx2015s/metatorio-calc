@@ -76,11 +76,11 @@ pub fn energy_source_as_flow(
                 let fuel_prototype = ctx
                     .items
                     .get(&actual_fuel.0)
-                    .expect("RecipeConfig 中的燃料在上下文中不存在");
+                    .expect("燃料在上下文中不存在");
                 let fuel_property = fuel_prototype
                     .burn
                     .as_ref()
-                    .expect("RecipeConfig 中的燃料在上下文中没有燃料值");
+                    .expect("燃料在上下文中没有燃料值");
                 let fuel_burn_speed = energy_usage / fuel_property.fuel_value.amount; // 一个物品的能量值
 
                 index_map_update_entry(
@@ -136,11 +136,11 @@ pub fn energy_source_as_flow(
                     let fuel_prototype = ctx
                         .fluids
                         .get(&actual_fuel.0)
-                        .expect("RecipeConfig 中的燃料在上下文中不存在");
+                        .expect("燃料在上下文中不存在");
                     let fuel_property = fuel_prototype
                         .fuel_value
                         .as_ref()
-                        .expect("RecipeConfig 中的燃料在上下文中没有燃料值");
+                        .expect("燃料在上下文中没有燃料值");
                     let mut fuel_burn_speed = energy_usage / fuel_property.amount; // 一个物品的能量值
                     if fuel_burn_speed > source.fluid_usage_per_tick * 60.0
                         && source.fluid_usage_per_tick > 0.0
@@ -182,11 +182,11 @@ pub fn energy_source_as_flow(
                     let fuel_prototype = ctx
                         .fluids
                         .get(&actual_fuel.0)
-                        .expect("RecipeConfig 中的燃料在上下文中不存在");
+                        .expect("燃料在上下文中不存在");
                     let fuel_property = fuel_prototype
                         .heat_capacity
                         .as_ref()
-                        .expect("RecipeConfig 中的燃料在上下文中没有比热容");
+                        .expect("燃料在上下文中没有比热容");
                     let mut temperature_diff =
                         actual_fuel.1 as f64 - fuel_prototype.default_temperature;
                     if !source.scale_fluid_usage

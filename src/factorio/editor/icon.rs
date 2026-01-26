@@ -46,7 +46,7 @@ impl<'a> egui::Widget for Icon<'a> {
                     ui.put(
                         icon.rect
                             .split_left_right_at_fraction(0.5)
-                            .1
+                            .0
                             .split_top_bottom_at_fraction(0.5)
                             .1,
                         egui::Image::new(format!(

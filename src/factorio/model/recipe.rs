@@ -108,13 +108,11 @@ impl Default for RecipePrototype {
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
-#[serde(tag = "type")]
+#[serde(tag = "type", rename_all = "lowercase")]
 pub enum RecipeIngredient {
     /// 物品原料
-    #[serde(rename = "item")]
     Item(ItemIngredient),
     /// 流体原料
-    #[serde(rename = "fluid")]
     Fluid(FluidIngredient),
 }
 
@@ -135,13 +133,11 @@ pub struct FluidIngredient {
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
-#[serde(tag = "type")]
+#[serde(tag = "type", rename_all = "lowercase")]
 pub enum RecipeResult {
     /// 物品产物
-    #[serde(rename = "item")]
     Item(ItemResult),
     /// 流体产物
-    #[serde(rename = "fluid")]
     Fluid(FluidResult),
 }
 
@@ -441,6 +437,26 @@ impl AsFlow for RecipeConfig {
                     .base_effect
                     .clone();
             base_speed = crafter.crafting_speed;
+            let quality_level = self
+                    .machine
+                    .as_ref()
+                    .unwrap()
+                    .1 as usize;
+            if crafter.crafting_speed_quality_multiplier.is_some() {
+                
+                let quality = &ctx.qualities[quality_level].base.name;
+                let speed_multiplier = crafter
+                    .crafting_speed_quality_multiplier
+                    .as_ref()
+                    .unwrap()
+                    .get(quality)
+                    .cloned()
+                    .unwrap_or(1.0);
+                base_speed *= speed_multiplier;
+            } else {
+                let quality = &ctx.qualities[quality_level];
+                base_speed *= quality.crafting_machine_speed_multiplier();
+            }
             let energy_related_flow = energy_source_as_flow(
                 ctx,
                 &crafter.energy_source,
@@ -792,7 +808,7 @@ impl MechanicProvider for RecipeConfigProvider {
             };
 
             if matches {
-                let mut recipe_config = RecipeConfig{
+                let mut recipe_config = RecipeConfig {
                     recipe: (recipe_proto.base.name.clone(), quality).into(),
                     ..Default::default()
                 };

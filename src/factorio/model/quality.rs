@@ -51,6 +51,66 @@ pub struct QualityPrototype {
     lab_module_slots_bonus: Option<f64>, // level
 }
 
+
+
+impl QualityPrototype {
+    pub fn beacon_power_usage_multiplier(&self) -> f64 {
+        self.beacon_power_usage_multiplier.unwrap_or(1.0)
+    }
+    pub fn mining_drill_resource_drain_multiplier(&self) -> f64 {
+        self.mining_drill_resource_drain_multiplier.unwrap_or(1.0)
+    }
+    pub fn science_pack_drain_multiplier(&self) -> f64 {
+        self.science_pack_drain_multiplier.unwrap_or(1.0)
+    }
+    pub fn default_multiplier(&self) -> f64 {
+        self.default_multiplier.unwrap_or(1.0 + 0.3 * self.level)
+    }   
+    pub fn inserter_speed_multiplier(&self) -> f64 {
+        self.inserter_speed_multiplier
+            .unwrap_or_else(|| self.default_multiplier())
+    }
+    pub fn fluid_wagon_capacity_multiplier(&self) -> f64 {
+        self.fluid_wagon_capacity_multiplier
+            .unwrap_or_else(|| self.default_multiplier())
+    }
+    pub fn inventory_size_multiplier(&self) -> f64 {
+        self.inventory_size_multiplier
+            .unwrap_or_else(|| self.default_multiplier())
+    }
+    pub fn lab_research_speed_multiplier(&self) -> f64 {
+        self.lab_research_speed_multiplier
+            .unwrap_or_else(|| self.default_multiplier())
+    }
+    pub fn crafting_machine_speed_multiplier(&self) -> f64 {
+        self.crafting_machine_speed_multiplier
+            .unwrap_or_else(|| self.default_multiplier())
+    }
+    pub fn crafting_machine_energy_usage_multiplier(&self) -> f64 {
+        self.crafting_machine_energy_usage_multiplier.unwrap_or(1.0)
+    }
+    pub fn tool_durability_multiplier(&self) -> f64 {
+        self.tool_durability_multiplier.unwrap_or(1.0 + self.level)
+    }
+    pub fn accumulator_capacity_multiplier(&self) -> f64 {
+        self.accumulator_capacity_multiplier.unwrap_or(1.0 + self.level)
+    }
+    pub fn beacon_module_slots_bonus(&self) -> f64 {
+        self.beacon_module_slots_bonus.unwrap_or(self.level)
+    }
+    pub fn crafting_machine_module_slots_bonus(&self) -> f64 {
+        self.crafting_machine_module_slots_bonus.unwrap_or(self.level)
+    }
+    pub fn mining_drill_module_slots_bonus(&self) -> f64 {
+        self.mining_drill_module_slots_bonus.unwrap_or(self.level)
+    }
+    pub fn lab_module_slots_bonus(&self) -> f64 {
+        self.lab_module_slots_bonus.unwrap_or(self.level)
+    }
+}
+
+impl QualityPrototype {}
+
 impl HasPrototypeBase for QualityPrototype {
     fn base(&self) -> &PrototypeBase {
         &self.base

@@ -55,6 +55,35 @@ pub struct BeaconPrototype {
     pub beacon_counter: BeaconCounter,
 }
 
+fn floor_to_percentage(value: f64) -> f64 {
+    (value * 100.0).trunc() / 100.0
+}
+
+pub fn effects_under_quality(effect: &Effect, multiplier: f64) -> Effect {
+    let mut effect = effect.clone();
+    if effect.consumption < 0.0 {
+        effect.consumption *= multiplier;
+        effect.consumption = floor_to_percentage(effect.consumption);
+    }
+    if effect.speed > 0.0 {
+        effect.speed *= multiplier;
+        effect.speed = floor_to_percentage(effect.speed);
+    }
+    if effect.productivity > 0.0 {
+        effect.productivity *= multiplier;
+        effect.productivity = floor_to_percentage(effect.productivity);
+    }
+    if effect.pollution < 0.0 {
+        effect.pollution *= multiplier;
+        effect.pollution = floor_to_percentage(effect.pollution);
+    }
+    if effect.quality > 0.0 {
+        effect.quality *= multiplier;
+        effect.quality = floor_to_percentage(effect.quality);
+    }
+    effect
+}
+
 #[derive(Debug, Clone, serde::Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum BeaconCounter {
@@ -67,7 +96,6 @@ pub enum BeaconCounter {
 pub struct ModuleConfig {
     pub modules: Vec<IdWithQuality>,
     pub beacons: Vec<BeaconConfig>,
-    pub extra_effects: Effect,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -82,15 +110,18 @@ impl ModuleConfig {
         Self {
             modules: vec![],
             beacons: vec![],
-            extra_effects: Effect::default(),
         }
     }
 
     pub fn get_effect(&self, ctx: &FactorioContext) -> Effect {
-        let mut total_effect = self.extra_effects.clone();
+        let mut total_effect = Effect::default();
         for module in &self.modules {
             if let Some(module_proto) = ctx.modules.get(&module.0) {
-                total_effect = total_effect + module_proto.effect.clone();
+                total_effect = total_effect
+                    + effects_under_quality(
+                        &module_proto.effect,
+                        ctx.qualities[module.1 as usize].default_multiplier(),
+                    );
             }
         }
         total_effect

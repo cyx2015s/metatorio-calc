@@ -310,17 +310,12 @@ impl Display for EnergyAmount {
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
-#[serde(tag = "type")]
+#[serde(tag = "type", rename_all = "lowercase")]
 pub enum EnergySource {
-    #[serde(rename = "electric")]
     Electric(ElectricEnergySource),
-    #[serde(rename = "burner")]
     Burner(BurnerEnergySource),
-    #[serde(rename = "heat")]
     Heat(HeatEnergySource),
-    #[serde(rename = "fluid")]
     Fluid(FluidEnergySource),
-    #[serde(rename = "void")]
     Void(VoidEnergySource),
 }
 

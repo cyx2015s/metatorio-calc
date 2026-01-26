@@ -20,7 +20,7 @@ use crate::{
             source::{InfiniteSource, InfiniteSourceProvider},
         },
     },
-    solver::{basic_solver, ref_as_usize, flow_add},
+    solver::{basic_solver, flow_add, ref_as_usize},
 };
 use egui::Vec2;
 use indexmap::IndexMap;
@@ -321,7 +321,8 @@ impl EditorView for FactoryInstance {
                     self.total_flow.clear();
                     self.solution = solution.clone();
                     for fe in self.flow_editors.iter_mut() {
-                        let var_value = self.solution.get(&ref_as_usize(fe)).cloned().unwrap_or(0.0);
+                        let var_value =
+                            self.solution.get(&ref_as_usize(fe)).cloned().unwrap_or(0.0);
                         let flow = fe.as_flow(ctx);
                         self.total_flow = flow_add(&self.total_flow, &flow, var_value);
                     }
