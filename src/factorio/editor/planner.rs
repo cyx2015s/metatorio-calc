@@ -1,20 +1,25 @@
-
-use egui::Vec2;
-use indexmap::IndexMap;
 use crate::{
     concept::{
         EditorView, Flow, ItemIdent, Mechanic, MechanicProvider, MechanicSender, SolveContext,
-    }, dyn_deserialize::DynDeserializeRegistry, factorio::{
-        common::{FactorioMechanic, FactorioMechanicProvider, sort_generic_items, sort_generic_items_owned},
-        editor::{icon::GenericIcon, selector::simple_selector_with_filter},
+    },
+    dyn_deserialize::DynDeserializeRegistry,
+    factorio::{
+        common::{
+            FactorioMechanic, FactorioMechanicProvider, sort_generic_items,
+            sort_generic_items_owned,
+        },
+        editor::{icon::GenericIcon, modal::show_modal, selector::item_selector_modal},
         format::{CompactLabel, SignedCompactLabel},
         model::{
             context::{FactorioContext, GenericItem},
             recipe::RecipeConfigProvider,
             source::{InfiniteSource, InfiniteSourceProvider},
         },
-    }, solver::{basic_solver, box_as_ptr, flow_add}
+    },
+    solver::{basic_solver, box_as_ptr, flow_add},
 };
+use egui::Vec2;
+use indexmap::IndexMap;
 
 pub struct FactoryInstance {
     pub name: String,
@@ -23,18 +28,11 @@ pub struct FactoryInstance {
     pub total_flow: Flow<GenericItem>,
     /// Cached sorted keys for total_flow to avoid sorting every frame
     pub total_flow_sorted_keys: Vec<GenericItem>,
-    pub flow_editor_sources:
-        Vec<Box<FactorioMechanicProvider>>,
-    pub flow_editors:
-        Vec<Box<FactorioMechanic>>,
-    pub hint_flows:
-        Vec<Box<FactorioMechanic>>,
-    pub flow_receiver: std::sync::mpsc::Receiver<
-        Box<FactorioMechanic>,
-    >,
-    pub flow_sender: std::sync::mpsc::Sender<
-        Box<FactorioMechanic>,
-    >,
+    pub flow_editor_sources: Vec<Box<FactorioMechanicProvider>>,
+    pub flow_editors: Vec<Box<FactorioMechanic>>,
+    pub hint_flows: Vec<Box<FactorioMechanic>>,
+    pub flow_receiver: std::sync::mpsc::Receiver<Box<FactorioMechanic>>,
+    pub flow_sender: std::sync::mpsc::Sender<Box<FactorioMechanic>>,
     pub solver_sender:
         std::sync::mpsc::Sender<(Flow<GenericItem>, IndexMap<usize, (Flow<GenericItem>, f64)>)>,
     pub solver_receiver: std::sync::mpsc::Receiver<Result<Flow<usize>, String>>,
@@ -98,10 +96,7 @@ impl FactoryInstance {
         }
     }
     pub fn add_flow_source<
-        F: Fn(
-            MechanicSender<GenericItem, FactorioContext>,
-        )
-            -> Box<FactorioMechanicProvider>,
+        F: Fn(MechanicSender<GenericItem, FactorioContext>) -> Box<FactorioMechanicProvider>,
     >(
         mut self,
         f: F,
@@ -136,7 +131,7 @@ impl FactoryInstance {
                         })
                         .inner;
 
-                    show_hint_popup(
+                    show_hint_modal(
                         ui,
                         ctx,
                         item,
@@ -215,7 +210,7 @@ impl FactoryInstance {
                                         },
                                     )
                                     .interact(egui::Sense::click());
-                                show_hint_popup(
+                                show_hint_modal(
                                     ui,
                                     ctx,
                                     item,
@@ -242,13 +237,12 @@ impl FactoryInstance {
         }
 
         if let Some(idx) = add_hint_flow {
-            let hint_flow = self.hint_flows.remove(idx);
-            self.flow_editors.push(hint_flow);
+            self.flow_editors.push(self.hint_flows[idx].clone());
         }
     }
 }
 
-fn show_hint_popup<I: ItemIdent, C>(
+fn show_hint_modal<I: ItemIdent, C>(
     ui: &mut egui::Ui,
     ctx: &C,
     item: &I,
@@ -258,20 +252,17 @@ fn show_hint_popup<I: ItemIdent, C>(
     hint_flows: &mut Vec<Box<dyn Mechanic<GameContext = C, ItemIdentType = I> + 'static>>,
     editor_sources: &[Box<dyn MechanicProvider<GameContext = C, ItemIdentType = I>>],
 ) {
-    let popup_id = icon.id.with("弹窗提示");
     if icon.clicked_by(egui::PointerButton::Secondary) {
-        egui::Popup::toggle_id(ui.ctx(), popup_id);
         hint_flows.clear();
         for source in editor_sources {
             hint_flows.extend(source.hint_populate(ctx, item, amount));
         }
     }
-    egui::Popup::menu(icon)
-        .id(popup_id)
-        .width(150.0)
-        .open_memory(None)
-        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-        .show(|ui| {
+    show_modal(
+        icon.id,
+        icon.clicked_by(egui::PointerButton::Secondary),
+        ui,
+        |ui| {
             ui.allocate_ui(Vec2 { x: 150.0, y: 300.0 }, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     ui.label("推荐配方");
@@ -280,7 +271,6 @@ fn show_hint_popup<I: ItemIdent, C>(
                     } else {
                         for (idx, hint_flow) in hint_flows.iter_mut().enumerate() {
                             ui.horizontal(|ui| {
-                                ui.disable();
                                 hint_flow.editor_view(ui, ctx);
                             });
                             if ui.button("添加").clicked() {
@@ -291,7 +281,8 @@ fn show_hint_popup<I: ItemIdent, C>(
                     }
                 })
             });
-        });
+        },
+    );
 }
 
 pub struct PlannerView {
@@ -367,6 +358,8 @@ impl EditorView for FactoryInstance {
         let err_info = ui.memory(|mem| mem.data.get_temp::<String>(id));
         if let Some(err_info) = err_info {
             ui.label(format!("求解错误: {}", err_info));
+        } else {
+            ui.label("求解成功");
         }
 
         let split_ratio = ui.memory(|mem| {
@@ -400,7 +393,7 @@ impl EditorView for FactoryInstance {
                                         )
                                         .interact(egui::Sense::click());
 
-                                    show_hint_popup(
+                                    show_hint_modal(
                                         ui,
                                         ctx,
                                         item,
@@ -448,7 +441,7 @@ impl EditorView for FactoryInstance {
                                     });
                                     match item {
                                         GenericItem::Item { name: _, quality } => {
-                                            if let Some(selected) = simple_selector_with_filter(
+                                            if let Some(selected) = item_selector_modal(
                                                 ui,
                                                 ctx,
                                                 "选择物品",
@@ -465,7 +458,7 @@ impl EditorView for FactoryInstance {
                                             name: _,
                                             temperature,
                                         } => {
-                                            if let Some(selected) = simple_selector_with_filter(
+                                            if let Some(selected) = item_selector_modal(
                                                 ui,
                                                 ctx,
                                                 "选择流体",
@@ -493,8 +486,7 @@ impl EditorView for FactoryInstance {
                                 self.target.remove(idx);
                             }
                             if let Some(idx) = add_hint_flow {
-                                let hint_flow = self.hint_flows.remove(idx);
-                                self.flow_editors.push(hint_flow);
+                                self.flow_editors.push(self.hint_flows[idx].clone());
                             }
                             if ui.button("添加目标产物").clicked() {
                                 self.target.push((

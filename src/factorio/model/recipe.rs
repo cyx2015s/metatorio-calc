@@ -7,7 +7,8 @@ use crate::{
         editor::{
             hover::PrototypeHover,
             icon::{GenericIcon, Icon},
-            selector::{ItemSelector, simple_selector_with_filter},
+            modal::show_modal,
+            selector::{ItemSelector, item_selector_modal},
         },
         model::{
             context::{FactorioContext, GenericItem},
@@ -607,7 +608,7 @@ impl EditorView for RecipeConfig {
                         });
                     });
                 if let Some(selected) =
-                    simple_selector_with_filter(ui, ctx, "选择配方", "recipe", &recipe_button)
+                    item_selector_modal(ui, ctx, "选择配方", "recipe", &recipe_button)
                 {
                     self.recipe = (selected, self.recipe.1).into();
                 }
@@ -632,15 +633,9 @@ impl EditorView for RecipeConfig {
                     ui.label("机器");
                     ui.add_sized([35.0, 35.0], egui::Label::new("空"))
                 };
-                let popup = egui::Popup::menu(&entity_button)
-                    .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                    .open_memory(None);
-                let popup_id = popup.get_id();
-                if entity_button.clicked() {
-                    egui::Popup::open_id(ui.ctx(), popup_id);
-                }
+
                 let mut selected_entity: Option<String> = None;
-                popup.show(|ui| {
+                show_modal(entity_button.id, entity_button.clicked(), ui, |ui| {
                     ui.label("选择机器");
                     egui::ScrollArea::vertical()
                         .max_width(f32::INFINITY)
@@ -670,10 +665,15 @@ impl EditorView for RecipeConfig {
                                     }),
                             );
                         });
+
+                    if selected_entity.is_some() {
+                        ui.close();
+                    }
                 });
-                if let Some(selected) = selected_entity {
-                    self.machine = Some((selected, 0).into());
-                    egui::Popup::close_id(ui.ctx(), popup_id);
+
+                if let Some(selected_entity) = selected_entity {
+                    self.machine =
+                        Some((selected_entity, self.machine.as_ref().map_or(0, |m| m.1)).into());
                 }
             });
 
@@ -821,8 +821,6 @@ impl EditorView for RecipeConfigProvider {
         }
     }
 }
-
-
 
 crate::impl_register_deserializer!(
     for RecipeConfig

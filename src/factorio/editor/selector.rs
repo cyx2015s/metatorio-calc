@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use egui::Vec2;
 
 use crate::factorio::{
-    editor::{hover::PrototypeHover, icon::Icon},
+    editor::{hover::PrototypeHover, icon::Icon, modal::show_modal},
     model::context::FactorioContext,
 };
 
@@ -181,27 +181,8 @@ impl egui::Widget for ItemSelector<'_> {
     }
 }
 
-pub fn complex_popup<Inner>(
-    ui: &mut egui::Ui,
-    ctx: &FactorioContext,
-    button: &egui::Response,
-    show_fn: impl FnOnce(&mut egui::Ui, &FactorioContext) -> Inner,
-) {
-    let popup_id = button.id.with("Popup");
-    let popup = egui::Popup::menu(button).id(popup_id)
-        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-        .open_memory(None);
-    
-    if button.clicked() {
-        egui::Popup::open_id(ui.ctx(), popup_id);
-    }
-    
-    popup.show(|ui| {
-        show_fn(ui, ctx);
-    });
-}
 
-pub fn simple_selector_with_filter(
+pub fn item_selector_modal(
     ui: &mut egui::Ui,
     ctx: &FactorioContext,
     label_str: &str,
@@ -211,41 +192,35 @@ pub fn simple_selector_with_filter(
     let mut selecting_item = None;
 
     let id = ui.id();
-    
-    complex_popup(
-        ui,
-        ctx,
-        button,
-        |ui, ctx| {
-            let mut filter_string =
-                ui.memory(move |mem| mem.data.get_temp::<String>(id).unwrap_or_default());
-            ui.label(label_str);
-            ui.add(egui::TextEdit::singleline(&mut filter_string).hint_text("筛选器……"));
-            egui::ScrollArea::vertical()
-                .max_width(f32::INFINITY)
-                .auto_shrink(false)
-                .show(ui, |ui| {
-                    ui.add(
-                        ItemSelector::new(ctx, &item_type.to_string(), &mut selecting_item).with_filter(
-                            |s, f| {
-                                if filter_string.is_empty() {
-                                    return true;
-                                }
-                                s.to_lowercase().contains(&filter_string.to_lowercase())
-                                    || f.get_display_name(item_type, s)
-                                        .to_lowercase()
-                                        .contains(&filter_string.to_lowercase())
-                            },
-                        ),
-                    );
-                });
-            ui.memory_mut(|mem| {
-                mem.data.insert_temp(id, filter_string);
+
+    show_modal(ui.id(), button.clicked(), ui, |ui| {
+        let mut filter_string =
+            ui.memory(move |mem| mem.data.get_temp::<String>(id).unwrap_or_default());
+        ui.label(label_str);
+        ui.add(egui::TextEdit::singleline(&mut filter_string).hint_text("筛选器……"));
+        egui::ScrollArea::vertical()
+            .max_width(f32::INFINITY)
+            .auto_shrink(false)
+            .show(ui, |ui| {
+                ui.add(
+                    ItemSelector::new(ctx, &item_type.to_string(), &mut selecting_item)
+                        .with_filter(|s, f| {
+                            if filter_string.is_empty() {
+                                return true;
+                            }
+                            s.to_lowercase().contains(&filter_string.to_lowercase())
+                                || f.get_display_name(item_type, s)
+                                    .to_lowercase()
+                                    .contains(&filter_string.to_lowercase())
+                        }),
+                );
             });
-            if selecting_item.is_some() {
-                ui.close();
-            }
-        },
-    );
+        ui.memory_mut(|mem| {
+            mem.data.insert_temp(id, filter_string);
+        });
+        if selecting_item.is_some() {
+            ui.close();
+        }
+    });
     selecting_item
 }
