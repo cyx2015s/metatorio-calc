@@ -217,24 +217,31 @@ pub fn quality_selector(
     ctx: &FactorioContext,
     selected_quality: &mut Option<u8>,
 ) {
-    for (idx, quality) in ctx.qualities.iter().enumerate() {
-        let quality_button = ui
-            .add_sized(
-                [32.0, 32.0],
-                Icon {
-                    ctx,
-                    type_name: "quality",
-                    item_name: &quality.base.name,
-                    size: 32.0,
-                    quality: 0,
-                },
-            )
-            .on_hover_text(ctx.get_display_name("quality", &quality.base.name))
-            .interact(egui::Sense::click());
-        if quality_button.clicked() {
-            *selected_quality = Some(idx as u8);
-        }
-    }
+    egui::Grid::new("QualityGrid")
+        .max_col_width(35.0)
+        .min_col_width(35.0)
+        .min_row_height(35.0)
+        .spacing(Vec2 { x: 0.0, y: 0.0 })
+        .show(ui, |ui| {
+            for (idx, quality) in ctx.qualities.iter().enumerate() {
+                let quality_button = ui
+                    .add_sized(
+                        [32.0, 32.0],
+                        Icon {
+                            ctx,
+                            type_name: "quality",
+                            item_name: &quality.base.name,
+                            size: 32.0,
+                            quality: 0,
+                        },
+                    )
+                    .on_hover_text(ctx.get_display_name("quality", &quality.base.name))
+                    .interact(egui::Sense::click());
+                if quality_button.clicked() {
+                    *selected_quality = Some(idx as u8);
+                }
+            }
+        });
 }
 
 pub fn item_selector_modal(
@@ -298,26 +305,32 @@ pub fn item_with_quality_selector_modal(
             .memory(move |mem| mem.data.get_temp::<FilterString>(id).unwrap_or_default())
             .0;
         ui.label(label_str);
-        ui.horizontal(|ui| {
-            for (idx, quality) in ctx.qualities.iter().enumerate() {
-                let quality_button = ui
-                    .add_sized(
-                        [32.0, 32.0],
-                        Icon {
-                            ctx,
-                            type_name: "quality",
-                            item_name: &quality.base.name,
-                            size: 32.0,
-                            quality: 0,
-                        },
-                    )
-                    .on_hover_text(ctx.get_display_name("quality", &quality.base.name))
-                    .interact(egui::Sense::click());
-                if quality_button.clicked() {
-                    selected_quality = Some(idx as u8);
+        egui::Grid::new("QualityGrid")
+            .max_col_width(35.0)
+            .min_col_width(35.0)
+            .min_row_height(35.0)
+            .spacing(Vec2 { x: 0.0, y: 0.0 })
+            .striped(true)
+            .show(ui, |ui| {
+                for (idx, quality) in ctx.qualities.iter().enumerate() {
+                    let quality_button = ui
+                        .add_sized(
+                            [32.0, 32.0],
+                            Icon {
+                                ctx,
+                                type_name: "quality",
+                                item_name: &quality.base.name,
+                                size: 32.0,
+                                quality: 0,
+                            },
+                        )
+                        .on_hover_text(ctx.get_display_name("quality", &quality.base.name))
+                        .interact(egui::Sense::click());
+                    if quality_button.clicked() {
+                        selected_quality = Some(idx as u8);
+                    }
                 }
-            }
-        });
+            });
         ui.add(egui::TextEdit::singleline(&mut filter_string).hint_text("筛选器……"));
         egui::ScrollArea::vertical()
             .max_width(f32::INFINITY)

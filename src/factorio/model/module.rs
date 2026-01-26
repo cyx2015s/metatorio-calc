@@ -227,8 +227,9 @@ impl egui::Widget for ModuleConfigEditor<'_> {
             }
             for (item, count) in total {
                 ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing = [3.0, 3.0].into();
                     ui.add_sized(
-                        [35.0, 35.0],
+                        [32.0, 32.0],
                         GenericIcon {
                             ctx: self.ctx,
                             item: &item,

@@ -28,7 +28,6 @@ impl<T: ?Sized> DynDeserializeRegistry<T> {
     pub fn deserialize(&self, value: serde_json::Value) -> Option<Box<T>> {
         let type_name = value.get("type")?.as_str()?;
         if let Some(deserializer) = self.deserializers.get(type_name) {
-            eprintln!("[DynDeserializeRegistry] Deserializing type: {}", type_name);
             (deserializer.deserialize)(value)
         } else {
             None
