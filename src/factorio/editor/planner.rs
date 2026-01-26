@@ -20,7 +20,7 @@ use crate::{
             source::{InfiniteSource, InfiniteSourceProvider},
         },
     },
-    solver::{basic_solver, box_as_ptr, flow_add},
+    solver::{basic_solver, ref_as_usize, flow_add},
 };
 use egui::Vec2;
 use indexmap::IndexMap;
@@ -157,7 +157,7 @@ impl FactoryInstance {
         for (i, flow_config) in flow_editors.iter_mut().enumerate() {
             ui.separator();
             ui.horizontal(|ui| {
-                let ptr = box_as_ptr(flow_config);
+                let ptr = ref_as_usize(flow_config);
                 let solution_val = self.solution.get(&ptr).cloned();
 
                 ui.vertical(|ui| {
@@ -321,7 +321,7 @@ impl EditorView for FactoryInstance {
                     self.total_flow.clear();
                     self.solution = solution.clone();
                     for fe in self.flow_editors.iter_mut() {
-                        let var_value = self.solution.get(&box_as_ptr(fe)).cloned().unwrap_or(0.0);
+                        let var_value = self.solution.get(&ref_as_usize(fe)).cloned().unwrap_or(0.0);
                         let flow = fe.as_flow(ctx);
                         self.total_flow = flow_add(&self.total_flow, &flow, var_value);
                     }
@@ -347,7 +347,7 @@ impl EditorView for FactoryInstance {
             let flows = self
                 .flow_editors
                 .iter()
-                .map(|fe| (box_as_ptr(fe), (fe.as_flow(ctx), fe.cost(ctx))))
+                .map(|fe| (ref_as_usize(fe), (fe.as_flow(ctx), fe.cost(ctx))))
                 .collect::<IndexMap<usize, (_, _)>>();
             let target = self
                 .target
@@ -376,7 +376,6 @@ impl EditorView for FactoryInstance {
         let (target_panel, source_panel) = left_panel.split_top_bottom_at_fraction(split_ratio.v);
 
         ui.put(target_panel.shrink(4.0), |ui: &mut egui::Ui| {
-            
             egui::ScrollArea::vertical()
                 .id_salt(1)
                 .show(ui, |ui| {

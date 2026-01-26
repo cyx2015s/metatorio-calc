@@ -713,7 +713,7 @@ pub fn sort_generic_items(keys: &mut Vec<&GenericItem>, ctx: &FactorioContext) {
 }
 
 /// Sort a vector of owned GenericItems in-place
-pub fn sort_generic_items_owned(keys: &mut Vec<GenericItem>, ctx: &FactorioContext) {
+pub fn sort_generic_items_owned(keys: &mut [GenericItem], ctx: &FactorioContext) {
     keys.sort_by(|a, b| {
         let a_key = get_generic_item_sort_key(a, ctx);
         let b_key = get_generic_item_sort_key(b, ctx);

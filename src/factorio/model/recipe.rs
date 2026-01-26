@@ -15,6 +15,7 @@ use crate::{
             energy::energy_source_as_flow,
             entity::EntityPrototype,
             module::{ModuleConfig, ModuleConfigEditor},
+            quality::calc_quality_distribution,
         },
     },
 };
@@ -489,26 +490,33 @@ impl AsFlow for RecipeConfig {
                 }
             }
         }
-
+        let quality_distribution = calc_quality_distribution(
+            &ctx.qualities,
+            module_effects.quality,
+            self.recipe.1 as usize,
+            ctx.qualities.len(),
+        );
         for result in &recipe.results {
             match result {
                 RecipeResult::Item(item) => {
-                    let key = GenericItem::Item {
-                        name: item.name.clone(),
-                        quality: self.recipe.1,
-                    };
                     let (base_yield, extra_yield) = item.normalized_output();
-                    index_map_update_entry(
-                        &mut map,
-                        key,
-                        (base_yield
-                            + extra_yield
-                                * module_effects
-                                    .productivity
-                                    .clamp(0.0, recipe.maximum_productivity))
-                            * (1.0 + module_effects.speed)
-                            * base_speed,
-                    );
+                    let total_yield = (base_yield
+                        + extra_yield
+                            * module_effects
+                                .productivity
+                                .clamp(0.0, recipe.maximum_productivity))
+                        * (1.0 + module_effects.speed)
+                        * base_speed;
+
+                    for (quality_level, &quality_prob) in quality_distribution.iter().enumerate() {
+                        if quality_prob > 0.0 {
+                            let qual_key = GenericItem::Item {
+                                name: item.name.clone(),
+                                quality: quality_level as u8,
+                            };
+                            index_map_update_entry(&mut map, qual_key, total_yield * quality_prob);
+                        }
+                    }
                 }
                 RecipeResult::Fluid(fluid) => {
                     let key = GenericItem::Fluid {
@@ -784,8 +792,10 @@ impl MechanicProvider for RecipeConfigProvider {
             };
 
             if matches {
-                let mut recipe_config = RecipeConfig::default();
-                recipe_config.recipe = (recipe_proto.base.name.clone(), quality).into();
+                let mut recipe_config = RecipeConfig{
+                    recipe: (recipe_proto.base.name.clone(), quality).into(),
+                    ..Default::default()
+                };
                 // Try to find a suitable machine
                 let category = recipe_proto
                     .category

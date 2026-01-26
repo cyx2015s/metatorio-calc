@@ -52,7 +52,7 @@ macro_rules! impl_register_deserializer {
             ) {
                 registry.register(
                     $tag,
-                    crate::dyn_deserialize::DynDeserializer::new(|value| {
+                    $crate::dyn_deserialize::DynDeserializer::new(|value| {
                         let this: $ty = serde_json::from_value(value).unwrap();
                         Some(Box::new(this))
                     }),

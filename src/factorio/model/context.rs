@@ -211,12 +211,12 @@ impl FactorioContext {
         // 配置配置文件：写入到自定义的文件夹中避免和运行中的游戏抢锁
         let mut config_file = std::fs::File::create(&config_path).ok()?;
 
-        config_file.write(b"[path]\nwrite-data=").ok()?;
+        config_file.write_all(b"[path]\nwrite-data=").ok()?;
         config_file
-            .write(self_path.join("tmp").as_os_str().as_encoded_bytes())
+            .write_all(self_path.join("tmp").as_os_str().as_encoded_bytes())
             .ok()?;
         config_file
-            .write(format!("\n[general]\nlocale={}", lang).as_bytes())
+            .write_all(format!("\n[general]\nlocale={}", lang).as_bytes())
             .ok()?;
 
         log::info!("创建 config.ini 成功");

@@ -9,7 +9,7 @@ pub trait Subview: Send {
     }
 }
 
-pub trait SolveContext: Send + Any{
+pub trait SolveContext: Send + Any {
     type GameContext;
     type ItemIdentType: ItemIdent;
 }

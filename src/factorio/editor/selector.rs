@@ -150,7 +150,7 @@ impl egui::Widget for ItemSelector<'_> {
                                 quality: 0,
                             })
                             .interact(egui::Sense::click());
-                        let button = if self.item_type == "recipe".to_string() {
+                        let button = if self.item_type == "recipe" {
                             let prototype = self.ctx.recipes.get(item_name).unwrap();
                             button.on_hover_ui(|ui| {
                                 ui.add(PrototypeHover {
@@ -212,16 +212,23 @@ pub fn quality_selector_modal(
     selecting_quality
 }
 
-pub fn quality_selector(ui: &mut egui::Ui, ctx: &FactorioContext, selected_quality: &mut Option<u8>) {
+pub fn quality_selector(
+    ui: &mut egui::Ui,
+    ctx: &FactorioContext,
+    selected_quality: &mut Option<u8>,
+) {
     for (idx, quality) in ctx.qualities.iter().enumerate() {
         let quality_button = ui
-            .add_sized([32.0, 32.0] ,Icon {
-                ctx,
-                type_name: "quality",
-                item_name: &quality.base.name,
-                size: 32.0,
-                quality: 0,
-            })
+            .add_sized(
+                [32.0, 32.0],
+                Icon {
+                    ctx,
+                    type_name: "quality",
+                    item_name: &quality.base.name,
+                    size: 32.0,
+                    quality: 0,
+                },
+            )
             .on_hover_text(ctx.get_display_name("quality", &quality.base.name))
             .interact(egui::Sense::click());
         if quality_button.clicked() {

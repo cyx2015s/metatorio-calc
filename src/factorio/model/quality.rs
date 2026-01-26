@@ -56,3 +56,43 @@ impl HasPrototypeBase for QualityPrototype {
         &self.base
     }
 }
+
+pub fn calc_quality_distribution(
+    qualities: &[QualityPrototype],
+    quality_bonus: f64,
+    base_quality: usize,
+    maximum_quality: usize,
+) -> Vec<f64> {
+    let mut result = vec![0.0; qualities.len()];
+    result[base_quality] = quality_bonus; // 有这么多能参与品质转移
+    for idx in base_quality..(maximum_quality.clamp(base_quality, qualities.len() - 1)) {
+        // idx，jdx，令人忍俊不禁
+        let jdx = idx + 1;
+        result[jdx] = result[idx] * qualities[idx].next_probability;
+    }
+    for idx in (base_quality + 1)..result.len() {
+        let hdx = idx - 1;
+        result[hdx] -= result[idx];
+    }
+    result[base_quality] += 1.0 - quality_bonus; // 剩下的都是基础品质
+    for idx in 0..(result.len() - 1) {
+        if result[idx] < 0.0 {
+            result[idx + 1] += result[idx];
+            result[idx] = 0.0;
+        }
+    }
+    result
+}
+
+#[test]
+fn test_calc_quality_distribution() {
+    use crate::factorio::model::context::FactorioContext;
+    let data = include_str!("../../../assets/data-raw-dump.json");
+    let value = serde_json::from_str(&data).unwrap();
+    let ctx = FactorioContext::load(&value);
+
+    dbg!(calc_quality_distribution(&ctx.qualities, 1.0, 0, 4));
+    dbg!(calc_quality_distribution(&ctx.qualities, 10.0, 0, 4));
+    dbg!(calc_quality_distribution(&ctx.qualities, 100.0, 0, 4));
+    dbg!(calc_quality_distribution(&ctx.qualities, 200.0, 0, 4));
+}

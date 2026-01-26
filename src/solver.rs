@@ -19,8 +19,8 @@ where
 }
 
 /// 返回值仅用作 AsFlowEditor 的唯一标识符
-pub fn box_as_ptr<T: ?Sized>(b: &Box<T>) -> usize {
-    &**b as *const T as *const () as usize
+pub fn ref_as_usize<T: ?Sized>(b: &T) -> usize {
+    b as *const T as *const () as usize
 }
 
 /// 求解流程：从所有的 AsFlow 配方收集 Flow 信息
