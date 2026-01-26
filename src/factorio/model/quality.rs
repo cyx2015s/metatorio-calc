@@ -51,8 +51,6 @@ pub struct QualityPrototype {
     lab_module_slots_bonus: Option<f64>, // level
 }
 
-
-
 impl QualityPrototype {
     pub fn beacon_power_usage_multiplier(&self) -> f64 {
         self.beacon_power_usage_multiplier.unwrap_or(1.0)
@@ -65,7 +63,7 @@ impl QualityPrototype {
     }
     pub fn default_multiplier(&self) -> f64 {
         self.default_multiplier.unwrap_or(1.0 + 0.3 * self.level)
-    }   
+    }
     pub fn inserter_speed_multiplier(&self) -> f64 {
         self.inserter_speed_multiplier
             .unwrap_or_else(|| self.default_multiplier())
@@ -93,13 +91,15 @@ impl QualityPrototype {
         self.tool_durability_multiplier.unwrap_or(1.0 + self.level)
     }
     pub fn accumulator_capacity_multiplier(&self) -> f64 {
-        self.accumulator_capacity_multiplier.unwrap_or(1.0 + self.level)
+        self.accumulator_capacity_multiplier
+            .unwrap_or(1.0 + self.level)
     }
     pub fn beacon_module_slots_bonus(&self) -> f64 {
         self.beacon_module_slots_bonus.unwrap_or(self.level)
     }
     pub fn crafting_machine_module_slots_bonus(&self) -> f64 {
-        self.crafting_machine_module_slots_bonus.unwrap_or(self.level)
+        self.crafting_machine_module_slots_bonus
+            .unwrap_or(self.level)
     }
     pub fn mining_drill_module_slots_bonus(&self) -> f64 {
         self.mining_drill_module_slots_bonus.unwrap_or(self.level)

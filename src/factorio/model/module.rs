@@ -242,10 +242,10 @@ impl egui::Widget for ModuleConfigEditor<'_> {
         });
         show_modal(button.id, button.clicked(), ui, |ui| {
             ui.label("编辑插件");
-
-            let mut delete_module = None;
+            let len = self.module_config.modules.len();
             ui.horizontal(|ui| {
-                for (idx, slot) in self.module_config.modules.iter_mut().enumerate() {
+                self.module_config.modules.retain_mut(|slot| {
+                    let mut deleted = false;
                     let icon = ui
                         .add_sized(
                             [35.0, 35.0],
@@ -259,7 +259,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                         )
                         .interact(egui::Sense::click());
                     if icon.clicked_by(egui::PointerButton::Secondary) {
-                        delete_module = Some(idx);
+                        deleted = true;
                     }
                     show_modal(icon.id, icon.clicked(), ui, |ui| {
                         let (selected_module, selected_quality) = single_module_selector(
@@ -277,9 +277,10 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                             ui.close();
                         }
                     });
-                }
+                    !deleted
+                });
 
-                for idx in self.module_config.modules.len()..self.module_slots {
+                for idx in len..self.module_slots {
                     let icon = ui
                         .add_sized(
                             [35.0, 35.0],
@@ -310,10 +311,6 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                             ui.close();
                         }
                     });
-                }
-
-                if let Some(delete_module) = delete_module {
-                    self.module_config.modules.remove(delete_module);
                 }
             });
         });

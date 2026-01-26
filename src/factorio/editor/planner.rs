@@ -110,9 +110,6 @@ impl FactoryInstance {
     }
 
     fn flows_panel(&mut self, ui: &mut egui::Ui, ctx: &FactorioContext) {
-        let mut delete_flow: Option<usize> = None;
-        let mut cloned_flow = None;
-        let mut add_hint_flow: Option<usize> = None;
         ui.horizontal_wrapped(|ui| {
             for item in &self.total_flow_sorted_keys {
                 let amount = self.total_flow.get(item).cloned().unwrap_or(0.0);
@@ -141,7 +138,7 @@ impl FactoryInstance {
                         item,
                         amount,
                         &icon,
-                        &mut add_hint_flow,
+                        &self.flow_sender,
                         &mut self.hint_flows,
                         &self.flow_editor_sources,
                     );
@@ -154,95 +151,101 @@ impl FactoryInstance {
 
         ui.heading("配方配置");
         let flow_editors = &mut self.flow_editors;
-        for (i, flow_config) in flow_editors.iter_mut().enumerate() {
+        flow_editors.retain_mut(|flow_config| {
+            let mut deleted = false;
             ui.separator();
-            ui.horizontal(|ui| {
-                let ptr = ref_as_usize(flow_config);
-                let solution_val = self.solution.get(&ptr).cloned();
-
-                ui.vertical(|ui| {
-                    if ui.button("删除").clicked() {
-                        delete_flow = Some(i);
-                    }
-                    if ui.button("复制").clicked() {
-                        let serialized = serde_json::to_value(&flow_config);
-                        let mut registry = DynDeserializeRegistry::default();
-                        InfiniteSource::register(&mut registry);
-                        RecipeConfig::register(&mut registry);
-                        let deserialized = registry.deserialize(serialized.unwrap());
-                        if let Some(deserialized) = deserialized {
-                            cloned_flow = Some(deserialized);
-                        }
-                    }
-                    // if ui.button("test 序列化").clicked() {
-                    //     log::info!("=== 测试序列化");
-                    //     let serialize_json = serde_json::to_value(&flow_config);
-                    //     log::info!("序列化结果: {}", serialize_json.unwrap());
-                    //     log::info!("=== 序列化结束");
-                    // }
-                    if let Some(solution) = solution_val {
-                        ui.add(CompactLabel::new(solution));
-                    } else {
-                        ui.label("待解");
-                    }
-                });
-
-                ui.separator();
-                ui.vertical(|ui| flow_config.editor_view(ui, ctx));
-
-                ui.separator();
-                let flow = flow_config.as_flow(ctx);
-                let mut keys = flow.keys().collect::<Vec<_>>();
-                sort_generic_items(&mut keys, ctx);
-                ui.horizontal_top(|ui| {
-                    ui.horizontal_wrapped(|ui| {
-                        for item in keys {
-                            let amount = flow.get(item).cloned().unwrap_or(0.0);
+            egui::Frame::group(ui.style())
+                .fill(ui.visuals().extreme_bg_color)
+                .corner_radius(8.0)
+                .stroke(egui::Stroke::new(
+                    1.0,
+                    ui.visuals().widgets.noninteractive.bg_stroke.color,
+                ))
+                .show(ui, {
+                    |ui| {
+                        ui.set_min_width(ui.available_width());
+                        ui.horizontal(|ui| {
+                            let ptr = ref_as_usize(flow_config);
+                            let solution_val = self.solution.get(&ptr).cloned();
 
                             ui.vertical(|ui| {
-                                ui.add_sized(
-                                    [35.0, 15.0],
-                                    SignedCompactLabel::new(amount * solution_val.unwrap_or(1.0)),
-                                );
-                                let icon = ui
-                                    .add_sized(
-                                        [35.0, 35.0],
-                                        GenericIcon {
-                                            ctx,
-                                            item,
-                                            size: 32.0,
-                                        },
-                                    )
-                                    .interact(egui::Sense::click());
-                                show_hint_modal(
-                                    ui,
-                                    ctx,
-                                    item,
-                                    amount,
-                                    &icon,
-                                    &mut add_hint_flow,
-                                    &mut self.hint_flows,
-                                    &self.flow_editor_sources,
-                                );
+                                if ui.button("删除").clicked() {
+                                    deleted = true;
+                                }
+                                if ui.button("复制").clicked() {
+                                    let serialized = serde_json::to_value(&flow_config);
+                                    let mut registry = DynDeserializeRegistry::default();
+                                    InfiniteSource::register(&mut registry);
+                                    RecipeConfig::register(&mut registry);
+                                    let deserialized = registry.deserialize(serialized.unwrap());
+                                    if let Some(deserialized) = deserialized {
+                                        self.flow_sender.send(deserialized).unwrap();
+                                    }
+                                }
+                                // if ui.button("test 序列化").clicked() {
+                                //     log::info!("=== 测试序列化");
+                                //     let serialize_json = serde_json::to_value(&flow_config);
+                                //     log::info!("序列化结果: {}", serialize_json.unwrap());
+                                //     log::info!("=== 序列化结束");
+                                // }
+                                if let Some(solution) = solution_val {
+                                    ui.add(CompactLabel::new(solution));
+                                } else {
+                                    ui.label("待解");
+                                }
                             });
-                            if ui.available_size_before_wrap().x < 35.0 {
-                                ui.end_row();
-                            }
-                        }
-                    });
-                });
-            });
-        }
-        if let Some(cloned_flow) = cloned_flow {
-            self.flow_editors.push(cloned_flow);
-        }
-        if let Some(idx) = delete_flow {
-            self.flow_editors.remove(idx);
-        }
 
-        if let Some(idx) = add_hint_flow {
-            self.flow_editors.push(self.hint_flows[idx].clone());
-        }
+                            ui.separator();
+                            ui.vertical(|ui| flow_config.editor_view(ui, ctx));
+
+                            ui.separator();
+                            let flow = flow_config.as_flow(ctx);
+                            let mut keys = flow.keys().collect::<Vec<_>>();
+                            sort_generic_items(&mut keys, ctx);
+                            ui.horizontal_top(|ui| {
+                                ui.horizontal_wrapped(|ui| {
+                                    for item in keys {
+                                        let amount = flow.get(item).cloned().unwrap_or(0.0);
+
+                                        ui.vertical(|ui| {
+                                            ui.add_sized(
+                                                [35.0, 15.0],
+                                                SignedCompactLabel::new(
+                                                    amount * solution_val.unwrap_or(1.0),
+                                                ),
+                                            );
+                                            let icon = ui
+                                                .add_sized(
+                                                    [35.0, 35.0],
+                                                    GenericIcon {
+                                                        ctx,
+                                                        item,
+                                                        size: 32.0,
+                                                    },
+                                                )
+                                                .interact(egui::Sense::click());
+                                            show_hint_modal(
+                                                ui,
+                                                ctx,
+                                                item,
+                                                amount,
+                                                &icon,
+                                                &self.flow_sender,
+                                                &mut self.hint_flows,
+                                                &self.flow_editor_sources,
+                                            );
+                                        });
+                                        if ui.available_size_before_wrap().x < 35.0 {
+                                            ui.end_row();
+                                        }
+                                    }
+                                });
+                            });
+                        })
+                    }
+                });
+            !deleted
+        });
     }
 }
 
@@ -252,7 +255,7 @@ fn show_hint_modal<I: ItemIdent, C: 'static>(
     item: &I,
     amount: f64,
     icon: &egui::Response,
-    add_hint_flow: &mut Option<usize>,
+    flow_sender: &MechanicSender<I, C>,
     hint_flows: &mut Vec<Box<dyn Mechanic<GameContext = C, ItemIdentType = I> + 'static>>,
     editor_sources: &[Box<dyn MechanicProvider<GameContext = C, ItemIdentType = I>>],
 ) {
@@ -273,12 +276,12 @@ fn show_hint_modal<I: ItemIdent, C: 'static>(
                     if hint_flows.is_empty() {
                         ui.label("无推荐配方");
                     } else {
-                        for (idx, hint_flow) in hint_flows.iter_mut().enumerate() {
+                        for hint_flow in hint_flows.iter_mut() {
                             ui.horizontal(|ui| {
                                 hint_flow.editor_view(ui, ctx);
                             });
                             if ui.button("添加").clicked() {
-                                *add_hint_flow = Some(idx);
+                                flow_sender.send(hint_flow.clone()).unwrap();
                             }
                             ui.separator();
                         }
@@ -382,10 +385,9 @@ impl EditorView for FactoryInstance {
                 .show(ui, |ui| {
                     ui.horizontal_top(|ui| {
                         ui.vertical(|ui| {
-                            let mut add_hint_flow = None;
                             ui.heading("优化目标");
-                            let mut delete_target: Option<usize> = None;
-                            for (idx, (item, amount)) in self.target.iter_mut().enumerate() {
+                            self.target.retain_mut(|(item, amount)| {
+                                let mut deleted = false;
                                 ui.horizontal_top(|ui| {
                                     let icon = ui
                                         .add_sized(
@@ -404,7 +406,7 @@ impl EditorView for FactoryInstance {
                                         item,
                                         -*amount,
                                         &icon,
-                                        &mut add_hint_flow,
+                                        &self.flow_sender,
                                         &mut self.hint_flows,
                                         &self.flow_editor_sources,
                                     );
@@ -485,16 +487,11 @@ impl EditorView for FactoryInstance {
                                         ui.add(egui::DragValue::new(amount).suffix("/s"));
                                     });
                                     if ui.button("删除").clicked() {
-                                        delete_target = Some(idx);
+                                        deleted = true;
                                     }
                                 });
-                            }
-                            if let Some(idx) = delete_target {
-                                self.target.remove(idx);
-                            }
-                            if let Some(idx) = add_hint_flow {
-                                self.flow_editors.push(self.hint_flows[idx].clone());
-                            }
+                                !deleted
+                            });
                             if ui.button("添加目标产物").clicked() {
                                 self.target.push((
                                     GenericItem::Item {

@@ -73,10 +73,7 @@ pub fn energy_source_as_flow(
                 energy_usage.amount * 60.0 * (1.0 + effects.consumption) / source.effectivity; // 每秒的能量消耗
             if let Some(actual_fuel) = instance_fuel {
                 // 使用具体燃料
-                let fuel_prototype = ctx
-                    .items
-                    .get(&actual_fuel.0)
-                    .expect("燃料在上下文中不存在");
+                let fuel_prototype = ctx.items.get(&actual_fuel.0).expect("燃料在上下文中不存在");
                 let fuel_property = fuel_prototype
                     .burn
                     .as_ref()

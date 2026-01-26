@@ -437,13 +437,8 @@ impl AsFlow for RecipeConfig {
                     .base_effect
                     .clone();
             base_speed = crafter.crafting_speed;
-            let quality_level = self
-                    .machine
-                    .as_ref()
-                    .unwrap()
-                    .1 as usize;
+            let quality_level = self.machine.as_ref().unwrap().1 as usize;
             if crafter.crafting_speed_quality_multiplier.is_some() {
-                
                 let quality = &ctx.qualities[quality_level].base.name;
                 let speed_multiplier = crafter
                     .crafting_speed_quality_multiplier
