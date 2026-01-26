@@ -19,7 +19,7 @@ pub struct MainPage {
     pub creators: Vec<(String, Box<dyn GameContextCreatorView>)>,
     pub subview_receiver: std::sync::mpsc::Receiver<Box<dyn Subview>>,
     pub subview_sender: std::sync::mpsc::Sender<Box<dyn Subview>>,
-    pub subviews: Vec<(String, Box<dyn Subview>)>,
+    pub subviews: Vec<Box<dyn Subview>>,
     pub selected: usize,
 }
 
@@ -47,7 +47,7 @@ impl MainPage {
 impl eframe::App for MainPage {
     fn update(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
         ctx.request_repaint_after_secs(0.1);
-        egui::SidePanel::left(egui::Id::new("LeftPanel"))
+        egui::SidePanel::left(egui::Id::new("side"))
             .width_range(200.0..=280.0)
             .show(ctx, |ui| {
                 ui.heading("切向量化");
@@ -66,18 +66,15 @@ impl eframe::App for MainPage {
                 }
 
                 while let Ok(subview) = self.subview_receiver.try_recv() {
-                    let name = format!("子视图 {}", self.subviews.len() + 1);
-                    self.subviews.push((name, subview));
+                    self.subviews.push(subview);
                 }
 
                 ui.separator();
 
                 for (i, subview) in self.subviews.iter().enumerate() {
                     if ui
-                        .selectable_label(
-                            self.selected == i + self.creators.len(),
-                            subview.0.to_string(),
-                        )
+                        .selectable_label(self.selected == i + self.creators.len(), subview.name())
+                        .on_hover_text(subview.description())
                         .clicked()
                     {
                         self.selected = i + self.creators.len();
@@ -86,17 +83,17 @@ impl eframe::App for MainPage {
                 ui.separator();
                 let mut show_font_license = ui.memory(|mem| {
                     mem.data
-                        .get_temp::<bool>(Id::new("字体与授权"))
+                        .get_temp::<bool>(Id::new("font"))
                         .unwrap_or(false)
                 });
-                if ui.checkbox(&mut show_font_license, "字体与授权").clicked() {
+                if ui.checkbox(&mut show_font_license, "字体协议").clicked() {
                     ui.memory_mut(|mem| {
                         mem.data
-                            .insert_temp::<bool>(Id::new("字体与授权"), !show_font_license);
+                            .insert_temp::<bool>(Id::new("font"), !show_font_license);
                     });
                 }
                 if show_font_license {
-                    egui::Window::new("字体与授权")
+                    egui::Window::new("font")
                         .open(&mut show_font_license)
                         .show(ctx, |ui| {
                             egui::ScrollArea::vertical().show(ui, |ui| {
@@ -109,7 +106,7 @@ impl eframe::App for MainPage {
                 }
                 ui.memory_mut(|mem| {
                     mem.data
-                        .insert_temp(Id::new("字体与授权"), show_font_license);
+                        .insert_temp(Id::new("font"), show_font_license);
                 })
             });
         if self.selected < self.creators.len() {
@@ -118,9 +115,7 @@ impl eframe::App for MainPage {
             });
         } else {
             egui::CentralPanel::default().show(ctx, |ui| {
-                self.subviews[self.selected - self.creators.len()]
-                    .1
-                    .view(ui);
+                self.subviews[self.selected - self.creators.len()].view(ui);
             });
         }
     }

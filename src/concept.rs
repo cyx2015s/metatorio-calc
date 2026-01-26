@@ -4,8 +4,13 @@ use indexmap::IndexMap;
 
 pub trait Subview: Send {
     fn view(&mut self, ui: &mut egui::Ui);
-    fn should_close(&self) -> bool {
-        false
+
+    fn name(&self) -> String {
+        "Subview".to_string()
+    }
+
+    fn description(&self) -> String {
+        String::new()
     }
 }
 

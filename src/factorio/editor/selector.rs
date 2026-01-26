@@ -85,7 +85,7 @@ impl egui::Widget for ItemSelector<'_> {
             return response;
         }
         let order_info = &self.ctx.ordered_entries[self.item_type];
-        egui::Grid::new("ItemGroupGrid")
+        egui::Grid::new("group")
             .min_row_height(64.0)
             .min_col_width(64.0)
             .max_col_width(64.0)
@@ -123,7 +123,7 @@ impl egui::Widget for ItemSelector<'_> {
                     }
                 }
             });
-        egui::Grid::new("ItemGrid")
+        egui::Grid::new("item")
             .num_columns(item_count)
             .max_col_width(35.0)
             .min_col_width(35.0)
@@ -217,7 +217,7 @@ pub fn quality_selector(
     ctx: &FactorioContext,
     selected_quality: &mut Option<u8>,
 ) {
-    egui::Grid::new("QualityGrid")
+    egui::Grid::new("quality")
         .max_col_width(35.0)
         .min_col_width(35.0)
         .min_row_height(35.0)
@@ -305,7 +305,7 @@ pub fn item_with_quality_selector_modal(
             .memory(move |mem| mem.data.get_temp::<FilterString>(id).unwrap_or_default())
             .0;
         ui.label(label_str);
-        egui::Grid::new("QualityGrid")
+        egui::Grid::new("quality")
             .max_col_width(35.0)
             .min_col_width(35.0)
             .min_row_height(35.0)

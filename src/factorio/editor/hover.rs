@@ -38,7 +38,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
                 if ingredients.is_empty() {
                     ui.label("无原料");
                 } else {
-                    egui::Grid::new("RecipePrototypeGrid")
+                    egui::Grid::new("recipe")
                         .min_col_width(35.0)
                         .max_col_width(105.0)
                         .min_row_height(35.0)
@@ -119,7 +119,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
                     ui.label("无产出");
                     ui.end_row();
                 } else {
-                    egui::Grid::new("RecipePrototypeResultGrid")
+                    egui::Grid::new("result")
                         .min_col_width(35.0)
                         .max_col_width(105.0)
                         .min_row_height(35.0)
