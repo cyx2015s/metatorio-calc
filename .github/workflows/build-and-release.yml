@@ -26,20 +26,20 @@ jobs:
       matrix:
         include:
           # Linux targets
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
-            name: metatorio-linux-x86_64
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
-            name: metatorio-linux-aarch64
+          # - target: x86_64-unknown-linux-gnu
+          #   os: ubuntu-latest
+          #   name: metatorio-linux-x86_64
+          # - target: aarch64-unknown-linux-gnu
+          #   os: ubuntu-latest
+          #   name: metatorio-linux-aarch64
 
           # macOS targets
-          - target: x86_64-apple-darwin
-            os: macos-latest
-            name: metatorio-macos-x86_64
-          - target: aarch64-apple-darwin
-            os: macos-latest
-            name: metatorio-macos-aarch64
+          # - target: x86_64-apple-darwin
+          #   os: macos-latest
+          #   name: metatorio-macos-x86_64
+          # - target: aarch64-apple-darwin
+          #   os: macos-latest
+          #   name: metatorio-macos-aarch64
 
           # Windows targets
           - target: x86_64-pc-windows-msvc

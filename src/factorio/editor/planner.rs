@@ -246,7 +246,7 @@ impl FactoryInstance {
     }
 }
 
-fn show_hint_modal<I: ItemIdent, C>(
+fn show_hint_modal<I: ItemIdent, C: 'static>(
     ui: &mut egui::Ui,
     ctx: &C,
     item: &I,
@@ -263,7 +263,7 @@ fn show_hint_modal<I: ItemIdent, C>(
         }
     }
     show_modal(
-        icon.id,
+        icon.id.with("hint"),
         icon.clicked_by(egui::PointerButton::Secondary),
         ui,
         |ui| {
@@ -376,6 +376,7 @@ impl EditorView for FactoryInstance {
         let (target_panel, source_panel) = left_panel.split_top_bottom_at_fraction(split_ratio.v);
 
         ui.put(target_panel.shrink(4.0), |ui: &mut egui::Ui| {
+            
             egui::ScrollArea::vertical()
                 .id_salt(1)
                 .show(ui, |ui| {

@@ -160,21 +160,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
             )
             .interact(egui::Sense::click());
         show_modal(button.id, button.clicked(), ui, |ui| {
-            let button = ui.button("hello!");
-            show_modal(
-                button.id,
-                button.clicked_by(egui::PointerButton::Secondary),
-                ui,
-                |ui| {
-                    ui.label("Hello Again!");
-                    if ui.button("关闭").clicked() {
-                        ui.close();
-                    }
-                },
-            );
-            if ui.button("关闭").clicked() {
-                ui.close();
-            }
+            
         });
         ui.response().clone()
     }

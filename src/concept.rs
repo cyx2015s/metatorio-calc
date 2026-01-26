@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Debug, hash::Hash};
+use std::{any::Any, collections::HashMap, fmt::Debug, hash::Hash};
 
 use indexmap::IndexMap;
 
@@ -9,7 +9,7 @@ pub trait Subview: Send {
     }
 }
 
-pub trait SolveContext: Send {
+pub trait SolveContext: Send + Any{
     type GameContext;
     type ItemIdentType: ItemIdent;
 }
@@ -32,7 +32,7 @@ pub trait AsFlow: SolveContext {
 pub type MechanicSender<I, C> =
     std::sync::mpsc::Sender<Box<dyn Mechanic<ItemIdentType = I, GameContext = C>>>;
 
-pub trait ItemIdent: Debug + Clone + Eq + Hash {}
+pub trait ItemIdent: Debug + Clone + Eq + Hash + 'static {}
 pub trait GameContextCreatorView: Subview {
     fn set_subview_sender(&mut self, sender: std::sync::mpsc::Sender<Box<dyn Subview>>);
 }

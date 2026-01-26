@@ -181,6 +181,9 @@ impl egui::Widget for ItemSelector<'_> {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+struct FilterString(pub String);
+
 pub fn quality_selector_modal(
     ui: &mut egui::Ui,
     ctx: &FactorioContext,
@@ -189,7 +192,7 @@ pub fn quality_selector_modal(
 ) -> Option<u8> {
     let mut selecting_quality: Option<u8> = None;
 
-    show_modal(ui.id(), button.clicked(), ui, |ui| {
+    show_modal(button.id, button.clicked(), ui, |ui| {
         ui.label(label_str);
         egui::ScrollArea::vertical()
             .max_width(f32::INFINITY)
@@ -227,11 +230,14 @@ pub fn item_selector_modal(
 ) -> Option<String> {
     let mut selecting_item = None;
 
-    let id = ui.id();
-
-    show_modal(ui.id(), button.clicked(), ui, |ui| {
-        let mut filter_string =
-            ui.memory(move |mem| mem.data.get_temp::<String>(id).unwrap_or_default());
+    show_modal(button.id, button.clicked(), ui, |ui| {
+        let mut filter_string = ui
+            .memory(move |mem| {
+                mem.data
+                    .get_temp::<FilterString>(button.id)
+                    .unwrap_or_default()
+            })
+            .0;
         ui.label(label_str);
         ui.add(egui::TextEdit::singleline(&mut filter_string).hint_text("筛选器……"));
         egui::ScrollArea::vertical()
@@ -251,7 +257,7 @@ pub fn item_selector_modal(
                 );
             });
         ui.memory_mut(|mem| {
-            mem.data.insert_temp(id, filter_string);
+            mem.data.insert_temp(button.id, FilterString(filter_string));
         });
         if selecting_item.is_some() {
             ui.close();
@@ -269,13 +275,14 @@ pub fn item_with_quality_selector_modal(
 ) -> (Option<String>, Option<u8>) {
     let mut selected_id = None;
     let mut selected_quality = None;
-    let id = ui.id();
+    let id = button.id;
 
-    show_modal(ui.id(), button.clicked(), ui, |ui| {
-        let mut filter_string =
-            ui.memory(move |mem| mem.data.get_temp::<String>(id).unwrap_or_default());
+    show_modal(id, button.clicked(), ui, |ui| {
+        let mut filter_string = ui
+            .memory(move |mem| mem.data.get_temp::<FilterString>(id).unwrap_or_default())
+            .0;
         ui.label(label_str);
-        ui.horizontal_wrapped(|ui| {
+        ui.horizontal(|ui| {
             for (idx, quality) in ctx.qualities.iter().enumerate() {
                 let quality_button = ui
                     .add_sized(
@@ -313,7 +320,7 @@ pub fn item_with_quality_selector_modal(
                 );
             });
         ui.memory_mut(|mem| {
-            mem.data.insert_temp(id, filter_string);
+            mem.data.insert_temp(id, FilterString(filter_string));
         });
         if selected_id.is_some() {
             ui.close();
