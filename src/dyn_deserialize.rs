@@ -47,7 +47,9 @@ macro_rules! impl_register_deserializer {
         => $trait:ty
     ) => {
         impl $ty {
-            pub fn register(registry: &mut crate::dyn_deserialize::DynDeserializeRegistry<$trait>) {
+            pub fn register(
+                registry: &mut $crate::dyn_deserialize::DynDeserializeRegistry<$trait>,
+            ) {
                 registry.register(
                     $tag,
                     crate::dyn_deserialize::DynDeserializer::new(|value| {

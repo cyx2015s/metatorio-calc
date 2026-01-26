@@ -49,7 +49,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
                                     RecipeIngredient::Item(i) => {
                                         let _icon = ui.add(Icon {
                                             ctx: self.ctx,
-                                            type_name: &"item".to_string(),
+                                            type_name: "item",
                                             item_name: &i.name,
                                             size: 32.0,
                                             quality: 0,
@@ -63,7 +63,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
                                     RecipeIngredient::Fluid(f) => {
                                         let _icon = ui.add(Icon {
                                             ctx: self.ctx,
-                                            type_name: &"fluid".to_string(),
+                                            type_name: "fluid",
                                             item_name: &f.name,
                                             size: 32.0,
                                             quality: 0,
@@ -130,7 +130,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
                                     RecipeResult::Item(i) => {
                                         let _icon = ui.add(Icon {
                                             ctx: self.ctx,
-                                            type_name: &"item".to_string(),
+                                            type_name: "item",
                                             item_name: &i.name,
                                             size: 32.0,
                                             quality: 0,
@@ -149,7 +149,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
                                     RecipeResult::Fluid(f) => {
                                         let _icon = ui.add(Icon {
                                             ctx: self.ctx,
-                                            type_name: &"fluid".to_string(),
+                                            type_name: "fluid",
                                             item_name: &f.name,
                                             size: 32.0,
                                             quality: 0,

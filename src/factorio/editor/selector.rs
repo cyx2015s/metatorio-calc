@@ -103,7 +103,7 @@ impl egui::Widget for ItemSelector<'_> {
                     if ui
                         .add(Icon {
                             ctx: self.ctx,
-                            type_name: &"item-group".to_string(),
+                            type_name: "item-group",
                             item_name: &group_name,
                             size: 64.0,
                             quality: 0,
@@ -145,7 +145,7 @@ impl egui::Widget for ItemSelector<'_> {
                                 quality: 0,
                             })
                             .interact(egui::Sense::click());
-                        let button = if self.item_type == &"recipe".to_string() {
+                        let button = if self.item_type == "recipe".to_string() {
                             let prototype = self.ctx.recipes.get(item_name).unwrap();
                             button.on_hover_ui(|ui| {
                                 ui.add(PrototypeHover {
@@ -181,6 +181,42 @@ impl egui::Widget for ItemSelector<'_> {
     }
 }
 
+pub fn quality_selector_modal(
+    ui: &mut egui::Ui,
+    ctx: &FactorioContext,
+    label_str: &str,
+    button: &egui::Response,
+) -> Option<u8> {
+    let mut selecting_quality: Option<u8> = None;
+
+    show_modal(ui.id(), button.clicked(), ui, |ui| {
+        ui.label(label_str);
+        egui::ScrollArea::vertical()
+            .max_width(f32::INFINITY)
+            .auto_shrink(false)
+            .show(ui, |ui| {
+                for (idx, quality) in ctx.qualities.iter().enumerate() {
+                    let quality_button = ui
+                        .add(Icon {
+                            ctx,
+                            type_name: "quality",
+                            item_name: &quality.base.name,
+                            size: 32.0,
+                            quality: 0,
+                        })
+                        .on_hover_text(ctx.get_display_name("quality", &quality.base.name))
+                        .interact(egui::Sense::click());
+                    if quality_button.clicked() {
+                        selecting_quality = Some(idx as u8);
+                    }
+                }
+            });
+        if selecting_quality.is_some() {
+            ui.close();
+        }
+    });
+    selecting_quality
+}
 
 pub fn item_selector_modal(
     ui: &mut egui::Ui,
@@ -203,16 +239,15 @@ pub fn item_selector_modal(
             .auto_shrink(false)
             .show(ui, |ui| {
                 ui.add(
-                    ItemSelector::new(ctx, &item_type.to_string(), &mut selecting_item)
-                        .with_filter(|s, f| {
-                            if filter_string.is_empty() {
-                                return true;
-                            }
-                            s.to_lowercase().contains(&filter_string.to_lowercase())
-                                || f.get_display_name(item_type, s)
-                                    .to_lowercase()
-                                    .contains(&filter_string.to_lowercase())
-                        }),
+                    ItemSelector::new(ctx, item_type, &mut selecting_item).with_filter(|s, f| {
+                        if filter_string.is_empty() {
+                            return true;
+                        }
+                        s.to_lowercase().contains(&filter_string.to_lowercase())
+                            || f.get_display_name(item_type, s)
+                                .to_lowercase()
+                                .contains(&filter_string.to_lowercase())
+                    }),
                 );
             });
         ui.memory_mut(|mem| {
@@ -223,4 +258,66 @@ pub fn item_selector_modal(
         }
     });
     selecting_item
+}
+
+pub fn item_with_quality_selector_modal(
+    ui: &mut egui::Ui,
+    ctx: &FactorioContext,
+    label_str: &str,
+    item_type: &str,
+    button: &egui::Response,
+) -> (Option<String>, Option<u8>) {
+    let mut selected_id = None;
+    let mut selected_quality = None;
+    let id = ui.id();
+
+    show_modal(ui.id(), button.clicked(), ui, |ui| {
+        let mut filter_string =
+            ui.memory(move |mem| mem.data.get_temp::<String>(id).unwrap_or_default());
+        ui.label(label_str);
+        ui.horizontal_wrapped(|ui| {
+            for (idx, quality) in ctx.qualities.iter().enumerate() {
+                let quality_button = ui
+                    .add_sized(
+                        [32.0, 32.0],
+                        Icon {
+                            ctx,
+                            type_name: "quality",
+                            item_name: &quality.base.name,
+                            size: 32.0,
+                            quality: 0,
+                        },
+                    )
+                    .on_hover_text(ctx.get_display_name("quality", &quality.base.name))
+                    .interact(egui::Sense::click());
+                if quality_button.clicked() {
+                    selected_quality = Some(idx as u8);
+                }
+            }
+        });
+        ui.add(egui::TextEdit::singleline(&mut filter_string).hint_text("筛选器……"));
+        egui::ScrollArea::vertical()
+            .max_width(f32::INFINITY)
+            .auto_shrink(false)
+            .show(ui, |ui| {
+                ui.add(
+                    ItemSelector::new(ctx, item_type, &mut selected_id).with_filter(|s, f| {
+                        if filter_string.is_empty() {
+                            return true;
+                        }
+                        s.to_lowercase().contains(&filter_string.to_lowercase())
+                            || f.get_display_name(item_type, s)
+                                .to_lowercase()
+                                .contains(&filter_string.to_lowercase())
+                    }),
+                );
+            });
+        ui.memory_mut(|mem| {
+            mem.data.insert_temp(id, filter_string);
+        });
+        if selected_id.is_some() {
+            ui.close();
+        }
+    });
+    (selected_id, selected_quality)
 }

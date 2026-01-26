@@ -3,7 +3,10 @@ use indexmap::IndexMap;
 use crate::{
     concept::{AsFlow, EditorView, Flow, Mechanic, MechanicProvider, MechanicSender, SolveContext},
     factorio::{
-        editor::{icon::GenericIcon, selector::item_selector_modal},
+        editor::{
+            icon::GenericIcon,
+            selector::{item_selector_modal, item_with_quality_selector_modal},
+        },
         model::context::{FactorioContext, GenericItem},
     },
 };
@@ -131,23 +134,22 @@ impl EditorView for InfiniteSource {
                     },
                 )
                 .interact(egui::Sense::click());
-            match &self.item {
-                GenericItem::Item { name: _, quality } => {
-                    if let Some(selected) =
-                        item_selector_modal(ui, ctx, "选择物体", "item", &icon)
-                    {
-                        self.item = GenericItem::Item {
-                            name: selected,
-                            quality: *quality,
-                        };
+            match &mut self.item {
+                GenericItem::Item { name, quality } => {
+                    let (selected_id, selected_quality) =
+                        item_with_quality_selector_modal(ui, ctx, "选择物品", "item", &icon);
+                    if let Some(selected_id) = selected_id {
+                        *name = selected_id;
+                    }
+                    if let Some(selected_quality) = selected_quality {
+                        *quality = selected_quality;
                     }
                 }
                 GenericItem::Fluid {
                     name: _,
                     temperature: _,
                 } => {
-                    if let Some(selected) =
-                        item_selector_modal(ui, ctx, "选择流体", "fluid", &icon)
+                    if let Some(selected) = item_selector_modal(ui, ctx, "选择流体", "fluid", &icon)
                     {
                         self.item = GenericItem::Fluid {
                             name: selected,

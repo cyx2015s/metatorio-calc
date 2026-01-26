@@ -2,9 +2,7 @@ use crate::{
     concept::SolveContext,
     factorio::{
         common::*,
-        editor::{
-            icon::Icon, modal::show_modal}
-        ,
+        editor::{icon::Icon, modal::show_modal},
         model::{context::*, entity::*},
     },
 };
@@ -154,8 +152,8 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                 [35.0, 35.0],
                 Icon {
                     ctx: self.ctx,
-                    type_name: &"item".to_string(),
-                    item_name: &"empty-module-slot".to_string(),
+                    type_name: "item",
+                    item_name: "empty-module-slot",
                     size: 35.0,
                     quality: 0,
                 },
@@ -163,12 +161,17 @@ impl egui::Widget for ModuleConfigEditor<'_> {
             .interact(egui::Sense::click());
         show_modal(button.id, button.clicked(), ui, |ui| {
             let button = ui.button("hello!");
-            show_modal(button.id, button.clicked_by(egui::PointerButton::Secondary), ui, |ui| {
-                ui.label("Hello Again!");
-                if ui.button("关闭").clicked() {
-                    ui.close();
-                }
-            });
+            show_modal(
+                button.id,
+                button.clicked_by(egui::PointerButton::Secondary),
+                ui,
+                |ui| {
+                    ui.label("Hello Again!");
+                    if ui.button("关闭").clicked() {
+                        ui.close();
+                    }
+                },
+            );
             if ui.button("关闭").clicked() {
                 ui.close();
             }

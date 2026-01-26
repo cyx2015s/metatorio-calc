@@ -8,7 +8,11 @@ use crate::{
             FactorioMechanic, FactorioMechanicProvider, sort_generic_items,
             sort_generic_items_owned,
         },
-        editor::{icon::GenericIcon, modal::show_modal, selector::item_selector_modal},
+        editor::{
+            icon::GenericIcon,
+            modal::show_modal,
+            selector::{item_selector_modal, item_with_quality_selector_modal},
+        },
         format::{CompactLabel, SignedCompactLabel},
         model::{
             context::{FactorioContext, GenericItem},
@@ -440,18 +444,20 @@ impl EditorView for FactoryInstance {
                                             });
                                     });
                                     match item {
-                                        GenericItem::Item { name: _, quality } => {
-                                            if let Some(selected) = item_selector_modal(
-                                                ui,
-                                                ctx,
-                                                "选择物品",
-                                                "item",
-                                                &icon,
-                                            ) {
-                                                *item = GenericItem::Item {
-                                                    name: selected,
-                                                    quality: *quality,
-                                                };
+                                        GenericItem::Item { name, quality } => {
+                                            let (selected_id, selected_quality) =
+                                                item_with_quality_selector_modal(
+                                                    ui,
+                                                    ctx,
+                                                    "选择物品",
+                                                    "item",
+                                                    &icon,
+                                                );
+                                            if let Some(selected_id) = selected_id {
+                                                *name = selected_id;
+                                            }
+                                            if let Some(selected_quality) = selected_quality {
+                                                *quality = selected_quality;
                                             }
                                         }
                                         GenericItem::Fluid {

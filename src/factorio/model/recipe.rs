@@ -8,7 +8,7 @@ use crate::{
             hover::PrototypeHover,
             icon::{GenericIcon, Icon},
             modal::show_modal,
-            selector::{ItemSelector, item_selector_modal},
+            selector::{ItemSelector, item_with_quality_selector_modal},
         },
         model::{
             context::{FactorioContext, GenericItem},
@@ -594,7 +594,7 @@ impl EditorView for RecipeConfig {
                         [35.0, 35.0],
                         Icon {
                             ctx,
-                            type_name: &"recipe".to_string(),
+                            type_name: "recipe",
                             item_name: &self.recipe.0,
                             quality: self.recipe.1,
                             size: 32.0,
@@ -607,10 +607,13 @@ impl EditorView for RecipeConfig {
                             prototype: ctx.recipes.get(&self.recipe.0).unwrap(),
                         });
                     });
-                if let Some(selected) =
-                    item_selector_modal(ui, ctx, "选择配方", "recipe", &recipe_button)
-                {
-                    self.recipe = (selected, self.recipe.1).into();
+                let (selected_id, selected_quality) =
+                    item_with_quality_selector_modal(ui, ctx, "选择配方", "recipe", &recipe_button);
+                if let Some(selected_id) = selected_id {
+                    self.recipe.0 = selected_id;
+                }
+                if let Some(selected_quality) = selected_quality {
+                    self.recipe.1 = selected_quality;
                 }
             });
             ui.separator();
@@ -642,8 +645,8 @@ impl EditorView for RecipeConfig {
                         .auto_shrink(false)
                         .show(ui, |ui| {
                             ui.add(
-                                ItemSelector::new(ctx, &"entity".to_string(), &mut selected_entity)
-                                    .with_filter(|crafter_name, ctx| {
+                                ItemSelector::new(ctx, "entity", &mut selected_entity).with_filter(
+                                    |crafter_name, ctx| {
                                         let recipe_prototype =
                                             ctx.recipes.get(self.recipe.0.as_str()).unwrap();
                                         if let Some(crafter) = ctx.crafters.get(crafter_name) {
@@ -662,7 +665,8 @@ impl EditorView for RecipeConfig {
                                             }
                                         }
                                         false
-                                    }),
+                                    },
+                                ),
                             );
                         });
 
@@ -752,6 +756,10 @@ impl MechanicProvider for RecipeConfigProvider {
             GenericItem::Fluid { name, .. } => name,
             _ => return vec![], // Not an item or fluid, do nothing.
         };
+        let quality = match item {
+            GenericItem::Item { quality, .. } => *quality,
+            _ => 0,
+        };
 
         let mut suggestions = Vec::new();
 
@@ -777,7 +785,7 @@ impl MechanicProvider for RecipeConfigProvider {
 
             if matches {
                 let mut recipe_config = RecipeConfig::default();
-                recipe_config.recipe = (recipe_proto.base.name.clone(), 0).into();
+                recipe_config.recipe = (recipe_proto.base.name.clone(), quality).into();
                 // Try to find a suitable machine
                 let category = recipe_proto
                     .category

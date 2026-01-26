@@ -84,7 +84,7 @@ where
         .with_all(targets)
         .with_all(constraints)
         .solve();
-    
+
     match solution {
         Ok(sol) => {
             let mut result = IndexMap::new();

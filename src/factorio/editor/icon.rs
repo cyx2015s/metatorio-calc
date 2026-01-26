@@ -78,7 +78,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                     [self.size, self.size],
                     Icon {
                         ctx: self.ctx,
-                        type_name: &"item".to_string(),
+                        type_name: "item",
                         item_name: name,
                         size: self.size,
                         quality: *quality,
@@ -93,7 +93,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                     [self.size, self.size],
                     Icon {
                         ctx: self.ctx,
-                        type_name: &"fluid".to_string(),
+                        type_name: "fluid",
                         item_name: name,
                         size: self.size,
                         quality: 0,
@@ -108,7 +108,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                     [self.size, self.size],
                     Icon {
                         ctx: self.ctx,
-                        type_name: &"entity".to_string(),
+                        type_name: "entity",
                         item_name: name,
                         size: self.size,
                         quality: *quality,
