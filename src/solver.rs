@@ -53,7 +53,7 @@ where
         self
     }
 
-    pub fn solve(&self) -> Result<Flow<R>, String> {
+    pub fn solve(&self) -> Result<(Flow<R>, f64), String> {
         let mut problem_variables = good_lp::ProblemVariables::new();
         let mut flow_vars = HashMap::new();
         let mut source_vars = HashMap::new();
@@ -126,8 +126,7 @@ where
                     let value = sol.value(var);
                     result.insert(recipe_id.clone(), value);
                 }
-                log::debug!("求解完成，代价函数结果为: {}", sol.eval(&optimization_expr));
-                Ok(result)
+                Ok((result, sol.eval(&optimization_expr)))
             }
             Err(err) => {
                 let err_string = match err {
@@ -155,7 +154,7 @@ where
 pub fn basic_solver<I, R>(
     target: Flow<I>,                    // 目标物品及其需求量
     flows: IndexMap<R, (Flow<I>, f64)>, // 配方标识符及其物品流和代价
-) -> Result<Flow<R>, String>
+) -> Result<(Flow<R>, f64), String>
 where
     I: ItemIdent,
     R: Eq + Hash + Clone + Debug,

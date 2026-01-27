@@ -15,7 +15,7 @@ use indexmap::IndexMap;
 pub struct FactoryInstance {
     pub name: String,
     pub target: Vec<(GenericItem, f64)>,
-    pub solution: Flow<usize>,
+    pub solution: (Flow<usize>, f64),
     pub total_flow: Flow<GenericItem>,
     /// Cached sorted keys for total_flow to avoid sorting every frame
     pub total_flow_sorted_keys: Vec<GenericItem>,
@@ -26,7 +26,7 @@ pub struct FactoryInstance {
     pub flow_sender: std::sync::mpsc::Sender<Box<FactorioMechanic>>,
     pub solver_sender:
         std::sync::mpsc::Sender<(Flow<GenericItem>, IndexMap<usize, (Flow<GenericItem>, f64)>)>,
-    pub solver_receiver: std::sync::mpsc::Receiver<Result<Flow<usize>, String>>,
+    pub solver_receiver: std::sync::mpsc::Receiver<Result<(Flow<usize>, f64), String>>,
 }
 
 impl Clone for FactoryInstance {
@@ -79,7 +79,7 @@ impl Default for FactoryInstance {
         FactoryInstance {
             name: "工厂".to_string(),
             target: Vec::new(),
-            solution: IndexMap::new(),
+            solution: (IndexMap::new(), f64::NAN),
             total_flow: IndexMap::new(),
             total_flow_sorted_keys: Vec::new(),
             flow_editor_sources: Vec::new(),
@@ -129,7 +129,7 @@ impl FactoryInstance {
     }
 
     fn flows_panel(&mut self, ui: &mut egui::Ui, ctx: &FactorioContext) {
-        ui.label("总物料流");
+        ui.label(format!("总代价: {:.2} | 总物料流", self.solution.1));
         ui.horizontal_wrapped(|ui| {
             card_frame(ui).show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
@@ -182,7 +182,7 @@ impl FactoryInstance {
                     ui.set_min_width(ui.available_width());
                     ui.horizontal(|ui| {
                         let ptr = box_as_ptr(flow_config);
-                        let solution_val = self.solution.get(&ptr).cloned();
+                        let solution_val = self.solution.0.get(&ptr).cloned();
 
                         ui.vertical(|ui| {
                             if ui.button("删除").clicked() {
@@ -345,9 +345,9 @@ impl EditorView for FactoryInstance {
             match result {
                 Ok(solution) => {
                     self.total_flow.clear();
-                    self.solution = solution.clone();
+                    self.solution = solution;
                     for fe in self.flow_editors.iter_mut() {
-                        let var_value = self.solution.get(&box_as_ptr(fe)).cloned().unwrap_or(0.0);
+                        let var_value = self.solution.0.get(&box_as_ptr(fe)).cloned().unwrap_or(0.0);
                         let flow = fe.as_flow(ctx);
                         self.total_flow = flow_add(&self.total_flow, &flow, var_value);
                     }
@@ -361,7 +361,8 @@ impl EditorView for FactoryInstance {
                 Err(err) => {
                     self.total_flow.clear();
                     self.total_flow_sorted_keys.clear();
-                    self.solution.clear();
+                    self.solution.0.clear();
+                    self.solution.1 = f64::NAN;
                     ui.memory_mut(|mem| {
                         mem.data.insert_temp(id, err);
                     });

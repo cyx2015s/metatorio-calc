@@ -293,7 +293,7 @@ impl AsFlow for MiningConfig {
 
 impl EditorView for MiningConfig {
     fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &Self::GameContext) {
-        ui.horizontal_top(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.vertical(|ui| {
                 ui.label("开采");
 
