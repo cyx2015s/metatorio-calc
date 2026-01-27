@@ -187,6 +187,21 @@ impl egui::Widget for ItemSelector<'_> {
     }
 }
 
+pub struct ItemWithQualitySelector<'a> {
+    pub ctx: &'a FactorioContext,
+    pub item_type: &'a str,
+    pub filter: Box<dyn Fn(&str, &FactorioContext) -> bool + 'a>,
+    pub selected_item: &'a mut Option<(String, u8)>,
+}
+
+pub struct ItemWithQualitySelectorStorage {
+    pub group: usize,
+    pub subgroup: usize,
+    pub index: usize,
+    pub selected_item: Option<String>,
+    pub selected_quality: Option<u8>,
+}
+
 #[derive(Debug, Clone, Default)]
 struct FilterString(pub String);
 

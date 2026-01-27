@@ -157,6 +157,7 @@ impl FactoryInstance {
                                 let mut registry = DynDeserializeRegistry::default();
                                 InfiniteSource::register(&mut registry);
                                 RecipeConfig::register(&mut registry);
+                                MiningConfig::register(&mut registry);
                                 let deserialized = registry.deserialize(serialized.unwrap());
                                 if let Some(deserialized) = deserialized {
                                     self.flow_sender.send(deserialized).unwrap();
@@ -301,6 +302,7 @@ impl EditorView for FactoryInstance {
         ui.add(
             egui::text_edit::TextEdit::singleline(&mut self.name).font(egui::TextStyle::Heading),
         );
+        ui.separator();
         let id = ui.id();
 
         while let Ok(result) = self.solver_receiver.try_recv() {
@@ -577,13 +579,15 @@ impl Subview for PlannerView {
                             self.factories.push(
                                 FactoryInstance::new(name)
                                     .add_flow_source(|s| {
-                                        Box::new(RecipeConfigProvider {
-                                            editing: RecipeConfig::default(),
-                                            sender: s,
-                                        })
+                                        Box::new(RecipeConfigProvider::new().set_mechanic_sender(s))
                                     })
                                     .add_flow_source(|s| {
-                                        Box::new(InfiniteSourceProvider { sender: s })
+                                        Box::new(
+                                            InfiniteSourceProvider::new().set_mechanic_sender(s),
+                                        )
+                                    })
+                                    .add_flow_source(|s| {
+                                        Box::new(MiningConfigProvider::new().set_mechanic_sender(s))
                                     }),
                             );
                             self.new_factory_name.clear();

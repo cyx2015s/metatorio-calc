@@ -176,7 +176,13 @@ impl EditorView for InfiniteSource {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct InfiniteSourceProvider {
     #[serde(skip)]
-    pub sender: MechanicSender<GenericItem, FactorioContext>,
+    pub sender: Option<MechanicSender<GenericItem, FactorioContext>>,
+}
+
+impl InfiniteSourceProvider {
+    pub fn new() -> Self {
+        Self { sender: None }
+    }
 }
 
 impl SolveContext for InfiniteSourceProvider {
@@ -193,14 +199,20 @@ impl EditorView for InfiniteSourceProvider {
                     quality: 0,
                 },
             };
-            self.sender.send(Box::new(source)).unwrap();
+            if let Some(sender) = &self.sender {
+                let _ = sender.send(Box::new(source));
+            }
         }
     }
 }
 
 impl MechanicProvider for InfiniteSourceProvider {
-    fn set_mechanic_sender(&mut self, sender: MechanicSender<GenericItem, FactorioContext>) {
-        self.sender = sender;
+    fn set_mechanic_sender(mut self, sender: MechanicSender<GenericItem, FactorioContext>) -> Self
+    where
+        Self: Sized,
+    {
+        self.sender = Some(sender);
+        self
     }
 
     fn hint_populate(

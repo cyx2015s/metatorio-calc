@@ -416,7 +416,7 @@ impl AsFlow for RecipeConfig {
     fn as_flow(&self, ctx: &FactorioContext) -> Flow<Self::ItemIdentType> {
         let mut map = Flow::new();
 
-        let mut module_effects = self.module_config.get_effect(ctx);
+        let mut module_effects = self.module_config.get_effect(ctx).clamped();
 
         let mut base_speed = 1.0;
 
@@ -425,8 +425,6 @@ impl AsFlow for RecipeConfig {
                 .get(&machine.0)
                 .expect("RecipeConfig 中的机器在上下文中不存在")
         });
-
-        module_effects = module_effects.clamped();
 
         if let Some(crafter) = crafter {
             module_effects = module_effects
@@ -655,7 +653,7 @@ impl EditorView for RecipeConfig {
                     ui.label("机器");
                     ui.add_sized([35.0, 35.0], egui::Label::new("空"))
                 };
-
+                let recipe_prototype = ctx.recipes.get(self.recipe.0.as_str()).unwrap();
                 let mut selected_entity: Option<String> = None;
                 show_modal(entity_button.id, entity_button.clicked(), ui, |ui| {
                     ui.label("选择机器");
@@ -666,14 +664,12 @@ impl EditorView for RecipeConfig {
                             ui.add(
                                 ItemSelector::new(ctx, "entity", &mut selected_entity).with_filter(
                                     |crafter_name, ctx| {
-                                        let recipe_prototype =
-                                            ctx.recipes.get(self.recipe.0.as_str()).unwrap();
                                         if let Some(crafter) = ctx.crafters.get(crafter_name) {
                                             if crafter.crafting_categories.contains(
                                                 recipe_prototype
                                                     .category
                                                     .as_ref()
-                                                    .map_or(&"crafting".to_string(), |v| v),
+                                                    .unwrap_or(&"crafting".to_string()),
                                             ) {
                                                 return true;
                                             }
@@ -701,34 +697,33 @@ impl EditorView for RecipeConfig {
             });
 
             ui.separator();
-            // TODO: 插件编辑界面
 
-            if let Some(machine_proto) = self
+            if let Some(crafter) = self
                 .machine
                 .as_ref()
                 .and_then(|machine| ctx.crafters.get(&machine.0))
-                && let Some(recipe_proto) = ctx.recipes.get(&self.recipe.0)
+                && let Some(recipe) = ctx.recipes.get(&self.recipe.0)
             {
                 let allowed_effects = EffectTypeLimitation::new(
-                    recipe_proto.allow_consumption,
-                    recipe_proto.allow_speed,
-                    recipe_proto.allow_productivity,
-                    recipe_proto.allow_pollution,
-                    recipe_proto.allow_quality,
+                    recipe.allow_consumption,
+                    recipe.allow_speed,
+                    recipe.allow_productivity,
+                    recipe.allow_pollution,
+                    recipe.allow_quality,
                 )
                 .intersect(
-                    machine_proto
+                    crafter
                         .allowed_effects
                         .as_ref()
                         .unwrap_or(&EffectTypeLimitation::default()),
                 );
                 let allowed_module_categories = match (
-                    machine_proto.allowed_module_categories.as_ref(),
-                    recipe_proto.allowed_module_categories.as_ref(),
+                    crafter.allowed_module_categories.as_ref(),
+                    recipe.allowed_module_categories.as_ref(),
                 ) {
                     (None, None) => &None,
-                    (None, Some(_)) => &recipe_proto.allowed_module_categories,
-                    (Some(_), None) => &machine_proto.allowed_module_categories,
+                    (None, Some(_)) => &recipe.allowed_module_categories,
+                    (Some(_), None) => &crafter.allowed_module_categories,
                     (Some(a), Some(b)) => {
                         &Some([a.to_vec().as_slice(), b.to_vec().as_slice()].concat())
                     }
@@ -737,7 +732,7 @@ impl EditorView for RecipeConfig {
                 ui.add(ModuleConfigEditor::new(
                     ctx,
                     &mut self.module_config,
-                    machine_proto.module_slots as usize,
+                    crafter.module_slots as usize,
                     &Some(allowed_effects),
                     allowed_module_categories,
                 ));
@@ -750,7 +745,16 @@ impl EditorView for RecipeConfig {
 pub struct RecipeConfigProvider {
     pub editing: RecipeConfig,
     #[serde(skip)]
-    pub sender: MechanicSender<GenericItem, FactorioContext>,
+    pub sender: Option<MechanicSender<GenericItem, FactorioContext>>,
+}
+
+impl RecipeConfigProvider {
+    pub fn new() -> Self {
+        Self {
+            sender: None,
+            editing: RecipeConfig::default(),
+        }
+    }
 }
 
 impl SolveContext for RecipeConfigProvider {
@@ -759,8 +763,9 @@ impl SolveContext for RecipeConfigProvider {
 }
 
 impl MechanicProvider for RecipeConfigProvider {
-    fn set_mechanic_sender(&mut self, sender: MechanicSender<GenericItem, FactorioContext>) {
-        self.sender = sender;
+    fn set_mechanic_sender(mut self, sender: MechanicSender<GenericItem, FactorioContext>) -> Self {
+        self.sender = Some(sender);
+        self
     }
 
     fn hint_populate(
@@ -844,9 +849,9 @@ impl EditorView for RecipeConfigProvider {
         if ui.button("添加配方").clicked() {
             let mut new_config = self.editing.clone();
             new_config.recipe = ("recipe-unknown".to_string(), 0).into();
-            self.sender
-                .send(Box::new(new_config))
-                .expect("RecipeConfigSource 发送配方失败");
+            if let Some(sender) = &self.sender {
+                let _ = sender.send(Box::new(new_config));
+            }
         }
     }
 }

@@ -39,7 +39,6 @@ pub type MechanicSender<I, C> =
 
 pub trait ItemIdent: Debug + Clone + Eq + Hash + 'static {}
 
-
 pub trait GameContextCreatorView: Subview {
     fn set_subview_sender(&mut self, sender: std::sync::mpsc::Sender<Box<dyn Subview>>);
 }
@@ -55,9 +54,11 @@ dyn_clone::clone_trait_object!(<C, I> Mechanic<GameContext = C, ItemIdentType = 
 pub trait MechanicProvider: EditorView + SolveContext + dyn_clone::DynClone {
     /// 传递创建的配方信息
     fn set_mechanic_sender(
-        &mut self,
+        self,
         sender: MechanicSender<Self::ItemIdentType, Self::GameContext>,
-    );
+    ) -> Self
+    where
+        Self: Sized;
 
     /// TODO
     /// 游戏机制提供器可选：自动填充逻辑
