@@ -179,6 +179,12 @@ pub struct InfiniteSourceProvider {
     pub sender: Option<MechanicSender<GenericItem, FactorioContext>>,
 }
 
+impl Default for InfiniteSourceProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl InfiniteSourceProvider {
     pub fn new() -> Self {
         Self { sender: None }

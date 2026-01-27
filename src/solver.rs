@@ -105,7 +105,7 @@ where
         }
         let mut optimization_expr = good_lp::Expression::from(0.0);
         for (flow, (_, cost)) in &self.flows {
-            let var = flow_vars.get(&flow).unwrap();
+            let var = flow_vars.get(flow).unwrap();
             optimization_expr += *cost * *var;
         }
         for (item_id, cost) in &self.external {

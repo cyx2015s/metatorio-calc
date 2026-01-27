@@ -436,15 +436,9 @@ impl AsFlow for RecipeConfig {
                     .clone();
             base_speed = crafter.crafting_speed;
             let quality_level = self.machine.as_ref().unwrap().1 as usize;
-            if crafter.crafting_speed_quality_multiplier.is_some() {
+            if let Some(multiplier) = &crafter.crafting_speed_quality_multiplier {
                 let quality = &ctx.qualities[quality_level].base.name;
-                let speed_multiplier = crafter
-                    .crafting_speed_quality_multiplier
-                    .as_ref()
-                    .unwrap()
-                    .get(quality)
-                    .cloned()
-                    .unwrap_or(1.0);
+                let speed_multiplier = multiplier.get(quality).cloned().unwrap_or(1.0);
                 base_speed *= speed_multiplier;
             } else {
                 let quality = &ctx.qualities[quality_level];
@@ -552,8 +546,8 @@ impl AsFlow for RecipeConfig {
     }
 
     fn cost(&self, ctx: &Self::GameContext) -> f64 {
-        if self.machine.is_some() {
-            let crafter = ctx.crafters.get(&self.machine.as_ref().unwrap().0).unwrap();
+        if let Some(machine) = &self.machine {
+            let crafter = ctx.crafters.get(&machine.0).unwrap();
             crafter
                 .base
                 .collision_box
@@ -746,6 +740,12 @@ pub struct RecipeConfigProvider {
     pub editing: RecipeConfig,
     #[serde(skip)]
     pub sender: Option<MechanicSender<GenericItem, FactorioContext>>,
+}
+
+impl Default for RecipeConfigProvider {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl RecipeConfigProvider {

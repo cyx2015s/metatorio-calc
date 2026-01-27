@@ -261,8 +261,8 @@ impl AsFlow for MiningConfig {
     }
 
     fn cost(&self, ctx: &Self::GameContext) -> f64 {
-        if self.machine.is_some() {
-            let miner = ctx.miners.get(&self.machine.as_ref().unwrap().0).unwrap();
+        if let Some(machine) = &self.machine {
+            let miner = ctx.miners.get(&machine.0).unwrap();
             miner
                 .base
                 .collision_box
@@ -321,15 +321,15 @@ impl EditorView for MiningConfig {
                         .show(ui, |ui| {
                             ui.add(
                                 ItemSelector::new(ctx, "entity", &mut selected_id)
-                                    .with_filter(|s: &str, f| f.resources.get(s).is_some()),
+                                    .with_filter(|s: &str, f| f.resources.contains_key(s)),
                             );
                             if selected_id.is_some() {
                                 ui.close();
                             }
                         });
                 });
-                if selected_id.is_some() {
-                    self.resource = selected_id.unwrap();
+                if let Some(selected_id) = selected_id {
+                    self.resource = selected_id;
                 }
             });
             ui.separator();
@@ -429,6 +429,12 @@ pub struct MiningConfigProvider {
     pub sender: Option<MechanicSender<GenericItem, FactorioContext>>,
 }
 
+impl Default for MiningConfigProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MiningConfigProvider {
     pub fn new() -> Self {
         Self { sender: None }
@@ -495,8 +501,8 @@ impl MechanicProvider for MiningConfigProvider {
                                 }
                             } else {
                                 for res in mining.results.as_ref().unwrap().iter() {
-                                    if let RecipeResult::Item(r) = res {
-                                        if &r.name == name {
+                                    if let RecipeResult::Item(r) = res
+                                        && &r.name == name {
                                             let mining_config = MiningConfig {
                                                 resource: resource.base.base.name.clone(),
                                                 machine: None,
@@ -511,7 +517,6 @@ impl MechanicProvider for MiningConfigProvider {
                                                         >,
                                                 >);
                                         }
-                                    }
                                 }
                             }
                         }
@@ -522,11 +527,11 @@ impl MechanicProvider for MiningConfigProvider {
                     temperature: _,
                 } => {
                     for resource in ctx.resources.values() {
-                        if let Some(mining) = resource.base.minable.as_ref() {
-                            if let Some(results) = &mining.results {
+                        if let Some(mining) = resource.base.minable.as_ref()
+                            && let Some(results) = &mining.results {
                                 for res in results.iter() {
-                                    if let RecipeResult::Fluid(r) = res {
-                                        if &r.name == name {
+                                    if let RecipeResult::Fluid(r) = res
+                                        && &r.name == name {
                                             let mining_config = MiningConfig {
                                                 resource: resource.base.base.name.clone(),
                                                 machine: None,
@@ -541,10 +546,8 @@ impl MechanicProvider for MiningConfigProvider {
                                                         >,
                                                 >);
                                         }
-                                    }
                                 }
                             }
-                        }
                     }
                 }
                 _ => {}

@@ -29,7 +29,7 @@ pub fn compact_number(num: f64) -> String {
 }
 fn format_with_unit(value: f64, unit: &str) -> String {
     let abs_value = value.abs();
-    if unit.len() == 0 {
+    if unit.is_empty() {
         if abs_value < 10.0 {
             // 对于小于10的值，最多保留3位小数
             let formatted = format!("{:.3}", value);
@@ -58,27 +58,25 @@ fn format_with_unit(value: f64, unit: &str) -> String {
             // 对于大于等于1000的值，取整
             format!("{}{}", value.round(), unit)
         }
+    } else if abs_value < 10.0 {
+        // 对于小于10的值，最多保留2位小数
+        let formatted = format!("{:.2}", value);
+        format!(
+            "{}{}",
+            formatted.trim_end_matches('0').trim_end_matches('.'),
+            unit
+        )
+    } else if abs_value < 100.0 {
+        // 对于10-100的值，最多保留1位小数
+        let formatted = format!("{:.1}", value);
+        format!(
+            "{}{}",
+            formatted.trim_end_matches('0').trim_end_matches('.'),
+            unit
+        )
     } else {
-        if abs_value < 10.0 {
-            // 对于小于10的值，最多保留2位小数
-            let formatted = format!("{:.2}", value);
-            format!(
-                "{}{}",
-                formatted.trim_end_matches('0').trim_end_matches('.'),
-                unit
-            )
-        } else if abs_value < 100.0 {
-            // 对于10-100的值，最多保留1位小数
-            let formatted = format!("{:.1}", value);
-            format!(
-                "{}{}",
-                formatted.trim_end_matches('0').trim_end_matches('.'),
-                unit
-            )
-        } else {
-            // 对于大于等于100的值，取整
-            format!("{}{}", value.round(), unit)
-        }
+        // 对于大于等于100的值，取整
+        format!("{}{}", value.round(), unit)
     }
 }
 #[derive(Debug, Clone)]
@@ -124,9 +122,8 @@ impl CompactLabel {
 impl egui::Widget for SignedCompactLabel {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         let text = signed_compact_number(self.value);
-        if self.format.is_some() {
-            let fmt = self.format.unwrap();
-            let formatted_text = fmt.replace("{}", &text);
+        if let Some(format) = self.format {
+            let formatted_text = format.replace("{}", &text);
             let label = ui.add(egui::Label::new(
                 egui::RichText::new(&formatted_text)
                     .strong()
@@ -164,9 +161,8 @@ impl egui::Widget for SignedCompactLabel {
 impl egui::Widget for CompactLabel {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         let text = compact_number(self.value);
-        if self.format.is_some() {
-            let fmt = self.format.unwrap();
-            let formatted_text = fmt.replace("{}", &text);
+        if let Some(format) = self.format {
+            let formatted_text = format.replace("{}", &text);
             let label = ui.add(egui::Label::new(
                 egui::RichText::new(&formatted_text)
                     .strong()
