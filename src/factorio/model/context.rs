@@ -28,6 +28,8 @@ pub const LOCALE_CATEGORIES: &[&str] = &[
     "tile",
 ];
 
+pub const RAW_JSON: &str = include_str!("../../../assets/data-raw-dump.json");
+
 #[derive(Debug, Clone, Default)]
 pub struct FactorioContext {
     /// 模组信息
@@ -643,9 +645,7 @@ pub fn make_located_generic_recipe(
 
 #[test]
 fn test_load_context() {
-    let data = include_str!("../../../assets/data-raw-dump.json");
-    let value: Value = serde_json::from_str(&data).unwrap();
-    let ctx = FactorioContext::load(&value);
+    let ctx = FactorioContext::default();
     assert!(ctx.items.contains_key("iron-plate"));
     assert!(ctx.entities.contains_key("stone-furnace"));
     assert!(ctx.fluids.contains_key("water"));

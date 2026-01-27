@@ -147,9 +147,7 @@ pub fn calc_quality_distribution(
 #[test]
 fn test_calc_quality_distribution() {
     use crate::factorio::model::context::FactorioContext;
-    let data = include_str!("../../../assets/data-raw-dump.json");
-    let value = serde_json::from_str(&data).unwrap();
-    let ctx = FactorioContext::load(&value);
+    let ctx = FactorioContext::default();
 
     dbg!(calc_quality_distribution(&ctx.qualities, 1.0, 0, 4));
     dbg!(calc_quality_distribution(&ctx.qualities, 10.0, 0, 4));

@@ -578,7 +578,7 @@ impl PlannerView {
 impl Default for PlannerView {
     fn default() -> Self {
         Self::new(FactorioContext::load(
-            &(serde_json::from_str(include_str!("../../../assets/data-raw-dump.json"))).unwrap(),
+            &(serde_json::from_str(RAW_JSON)).unwrap(),
         ))
     }
 }

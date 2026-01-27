@@ -560,9 +560,7 @@ impl MechanicProvider for MiningConfigProvider {
 
 #[test]
 fn test_mining_normalized() {
-    let ctx = FactorioContext::load(
-        &serde_json::from_str(include_str!("../../../assets/data-raw-dump.json")).unwrap(),
-    );
+    let ctx = FactorioContext::default();
     let mining_config = MiningConfig {
         resource: "uranium-ore".to_string(),
         machine: Some(("big-mining-drill".to_string(), 0).into()),

@@ -64,9 +64,7 @@ macro_rules! impl_register_deserializer {
 #[test]
 fn test_dyn_deserializer() {
     use crate::{concept::*, factorio::*};
-    let data = include_str!("../assets/data-raw-dump.json");
-    let value = serde_json::from_str(&data).unwrap();
-    let ctx = FactorioContext::load(&value);
+    let ctx = FactorioContext::default();
     let mut registry = DynDeserializeRegistry::<
         dyn Mechanic<ItemIdentType = GenericItem, GameContext = FactorioContext>,
     >::default();
