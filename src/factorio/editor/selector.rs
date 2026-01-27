@@ -3,8 +3,9 @@ use std::collections::HashMap;
 use egui::Vec2;
 
 use crate::factorio::{
-    editor::{hover::PrototypeHover, icon::Icon, modal::show_modal},
-    model::context::FactorioContext,
+    editor::{icon::*, modal::*},
+    hover::*,
+    model::*,
 };
 
 #[derive(Debug, Clone, Default)]

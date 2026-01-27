@@ -1,24 +1,11 @@
 use crate::{
-    concept::{
-        EditorView, Flow, ItemIdent, Mechanic, MechanicProvider, MechanicSender, SolveContext,
-    },
+    concept::*,
     dyn_deserialize::DynDeserializeRegistry,
     factorio::{
-        common::{
-            FactorioMechanic, FactorioMechanicProvider, sort_generic_items,
-            sort_generic_items_owned,
-        },
-        editor::{
-            icon::GenericIcon,
-            modal::show_modal,
-            selector::{item_selector_modal, item_with_quality_selector_modal},
-        },
-        format::{CompactLabel, SignedCompactLabel},
-        model::{
-            context::{FactorioContext, GenericItem},
-            recipe::RecipeConfigProvider,
-            source::{InfiniteSource, InfiniteSourceProvider},
-        },
+        common::*,
+        editor::{icon::*, modal::*, selector::*},
+        format::*,
+        model::*,
     },
     solver::{basic_solver, box_as_ptr, flow_add},
 };
@@ -529,10 +516,6 @@ impl EditorView for FactoryInstance {
         }
     }
 }
-
-use crate::{
-    concept::GameContextCreatorView, concept::Subview, factorio::model::recipe::RecipeConfig,
-};
 
 impl PlannerView {
     pub fn new(ctx: FactorioContext) -> Self {

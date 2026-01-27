@@ -1,14 +1,6 @@
 use egui::Vec2;
 
-use crate::factorio::{
-    common::HasPrototypeBase,
-    editor::icon::Icon,
-    format::{CompactLabel, SignedCompactLabel},
-    model::{
-        context::FactorioContext,
-        recipe::{RecipeIngredient, RecipePrototype, RecipeResult},
-    },
-};
+use crate::factorio::{icon::*, *};
 
 #[derive(Debug, Clone)]
 pub struct PrototypeHover<'a, T: HasPrototypeBase> {

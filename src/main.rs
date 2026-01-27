@@ -30,7 +30,7 @@ impl MainPage {
         let mut ret = Self {
             creators: vec![(
                 "异星工厂".to_string(),
-                Box::new(factorio::editor::planner::FactorioContextCreatorView::default()),
+                Box::new(factorio::planner::FactorioContextCreatorView::default()),
             )],
             subview_receiver: rx,
             subview_sender: tx,
@@ -81,11 +81,8 @@ impl eframe::App for MainPage {
                     }
                 }
                 ui.separator();
-                let mut show_font_license = ui.memory(|mem| {
-                    mem.data
-                        .get_temp::<bool>(Id::new("font"))
-                        .unwrap_or(false)
-                });
+                let mut show_font_license =
+                    ui.memory(|mem| mem.data.get_temp::<bool>(Id::new("font")).unwrap_or(false));
                 if ui.checkbox(&mut show_font_license, "字体协议").clicked() {
                     ui.memory_mut(|mem| {
                         mem.data
@@ -105,8 +102,7 @@ impl eframe::App for MainPage {
                     ui.ctx().forget_all_images();
                 }
                 ui.memory_mut(|mem| {
-                    mem.data
-                        .insert_temp(Id::new("font"), show_font_license);
+                    mem.data.insert_temp(Id::new("font"), show_font_license);
                 })
             });
         if self.selected < self.creators.len() {

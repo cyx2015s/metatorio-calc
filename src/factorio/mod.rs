@@ -1,5 +1,11 @@
-pub mod common;
-pub mod model;
+mod common;
+mod model;
 
-pub mod editor;
-pub mod format;
+mod editor;
+mod format;
+
+// 重导出 model 下的所有结构体
+pub use common::*;
+pub use editor::*;
+pub use format::*;
+pub use model::*;

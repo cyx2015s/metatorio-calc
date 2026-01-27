@@ -11,13 +11,7 @@ use std::{
 use indexmap::IndexMap;
 use serde_json::Value;
 
-use crate::{
-    concept::{Flow, ItemIdent},
-    factorio::{
-        common::*,
-        model::{entity::*, fluid::*, item::*, mining::*, module::*, quality::*, recipe::*},
-    },
-};
+use crate::{concept::*, factorio::*};
 
 pub const LOCALE_CATEGORIES: &[&str] = &[
     "airborne-pollutant",

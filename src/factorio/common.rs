@@ -8,10 +8,7 @@ use std::{
 use indexmap::IndexMap;
 use serde_json::{Value, from_value};
 
-use crate::{
-    concept::{Mechanic, MechanicProvider},
-    factorio::model::context::{FactorioContext, GenericItem},
-};
+use crate::{concept::*, factorio::*};
 
 pub type Dict<T> = HashMap<String, T>;
 pub type Emissions = Dict<f64>;
