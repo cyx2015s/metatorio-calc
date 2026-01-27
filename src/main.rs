@@ -46,7 +46,15 @@ impl MainPage {
 
 impl eframe::App for MainPage {
     fn update(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
-        ctx.request_repaint_after_secs(0.1);
+        let mut request_repaint = true;
+        ctx.input(|i| {
+            if i.viewport().minimized.unwrap_or_default() {
+                request_repaint = false;
+            }
+        });
+        if request_repaint {
+            ctx.request_repaint_after_secs(0.1);
+        }
         egui::SidePanel::left(egui::Id::new("side"))
             .width_range(200.0..=280.0)
             .show(ctx, |ui| {
