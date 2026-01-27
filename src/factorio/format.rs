@@ -17,9 +17,11 @@ pub fn compact_number(num: f64) -> String {
         n => {
             let mut unit_idx = 0;
             let mut n = n;
-            while n > 10000.0 {
-                unit_idx += 1;
-                n /= 1000.0;
+            if n > 10000.0 {
+                while n > 1000.0 && unit_idx < LARGE_UNITS.len() - 1 {
+                    unit_idx += 1;
+                    n /= 1000.0;
+                }
             }
             format_with_unit(n, LARGE_UNITS[unit_idx])
         }
@@ -27,33 +29,56 @@ pub fn compact_number(num: f64) -> String {
 }
 fn format_with_unit(value: f64, unit: &str) -> String {
     let abs_value = value.abs();
-    if abs_value < 1.0 {
-        // 对于小于1的值，最多保留3位小数
-        let formatted = format!("{:.3}", value);
-        format!(
-            "{}{}",
-            formatted.trim_end_matches('0').trim_end_matches('.'),
-            unit
-        )
-    } else if abs_value < 10.0 {
-        // 对于小于10的值，最多保留2位小数
-        let formatted = format!("{:.2}", value);
-        format!(
-            "{}{}",
-            formatted.trim_end_matches('0').trim_end_matches('.'),
-            unit
-        )
-    } else if abs_value < 100.0 {
-        // 对于10-100的值，最多保留1位小数
-        let formatted = format!("{:.1}", value);
-        format!(
-            "{}{}",
-            formatted.trim_end_matches('0').trim_end_matches('.'),
-            unit
-        )
+    if unit.len() == 0 {
+        if abs_value < 10.0 {
+            // 对于小于10的值，最多保留3位小数
+            let formatted = format!("{:.3}", value);
+            format!(
+                "{}{}",
+                formatted.trim_end_matches('0').trim_end_matches('.'),
+                unit
+            )
+        } else if abs_value < 100.0 {
+            // 对于10-100的值，最多保留2位小数
+            let formatted = format!("{:.2}", value);
+            format!(
+                "{}{}",
+                formatted.trim_end_matches('0').trim_end_matches('.'),
+                unit
+            )
+        } else if abs_value < 1000.0 {
+            // 对于大于100的值，最多保留1位小数
+            let formatted = format!("{:.1}", value);
+            format!(
+                "{}{}",
+                formatted.trim_end_matches('0').trim_end_matches('.'),
+                unit
+            )
+        } else {
+            // 对于大于等于1000的值，取整
+            format!("{}{}", value.round(), unit)
+        }
     } else {
-        // 对于大于100的值，取整数
-        format!("{:.0}{}", value, unit)
+        if abs_value < 10.0 {
+            // 对于小于10的值，最多保留2位小数
+            let formatted = format!("{:.2}", value);
+            format!(
+                "{}{}",
+                formatted.trim_end_matches('0').trim_end_matches('.'),
+                unit
+            )
+        } else if abs_value < 100.0 {
+            // 对于10-100的值，最多保留1位小数
+            let formatted = format!("{:.1}", value);
+            format!(
+                "{}{}",
+                formatted.trim_end_matches('0').trim_end_matches('.'),
+                unit
+            )
+        } else {
+            // 对于大于等于100的值，取整
+            format!("{}{}", value.round(), unit)
+        }
     }
 }
 #[derive(Debug, Clone)]

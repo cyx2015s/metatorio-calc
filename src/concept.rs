@@ -38,6 +38,8 @@ pub type MechanicSender<I, C> =
     std::sync::mpsc::Sender<Box<dyn Mechanic<ItemIdentType = I, GameContext = C>>>;
 
 pub trait ItemIdent: Debug + Clone + Eq + Hash + 'static {}
+
+
 pub trait GameContextCreatorView: Subview {
     fn set_subview_sender(&mut self, sender: std::sync::mpsc::Sender<Box<dyn Subview>>);
 }

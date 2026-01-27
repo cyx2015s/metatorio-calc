@@ -103,32 +103,34 @@ impl FactoryInstance {
                 if amount.abs() < 1e-6 {
                     continue;
                 }
-                ui.vertical(|ui| {
-                    ui.add_sized([35.0, 15.0], SignedCompactLabel::new(amount));
-                    let icon = ui
-                        .push_id(item, |ui| {
-                            ui.add_sized(
-                                [35.0, 35.0],
-                                GenericIcon {
-                                    ctx,
-                                    item,
-                                    size: 32.0,
-                                },
-                            )
-                            .interact(egui::Sense::click())
-                        })
-                        .inner;
+                card_frame(ui).show(ui, |ui| {
+                    ui.vertical(|ui| {
+                        ui.add_sized([35.0, 15.0], SignedCompactLabel::new(amount));
+                        let icon = ui
+                            .push_id(item, |ui| {
+                                ui.add_sized(
+                                    [35.0, 35.0],
+                                    GenericIcon {
+                                        ctx,
+                                        item,
+                                        size: 32.0,
+                                    },
+                                )
+                                .interact(egui::Sense::click())
+                            })
+                            .inner;
 
-                    show_hint_modal(
-                        ui,
-                        ctx,
-                        item,
-                        amount,
-                        &icon,
-                        &self.flow_sender,
-                        &mut self.hint_flows,
-                        &self.flow_editor_sources,
-                    );
+                        show_hint_modal(
+                            ui,
+                            ctx,
+                            item,
+                            amount,
+                            &icon,
+                            &self.flow_sender,
+                            &mut self.hint_flows,
+                            &self.flow_editor_sources,
+                        );
+                    });
                 });
                 if ui.available_size_before_wrap().x < 35.0 {
                     ui.end_row();
@@ -174,7 +176,7 @@ impl FactoryInstance {
                         });
 
                         ui.separator();
-                        ui.vertical(|ui| flow_config.editor_view(ui, ctx));
+                        ui.vertical(|ui: &mut egui::Ui| flow_config.editor_view(ui, ctx));
 
                         ui.separator();
                         let flow = flow_config.as_flow(ctx);

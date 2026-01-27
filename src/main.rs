@@ -90,7 +90,7 @@ impl eframe::App for MainPage {
                     });
                 }
                 if show_font_license {
-                    egui::Window::new("font")
+                    egui::Window::new("字体协议")
                         .open(&mut show_font_license)
                         .show(ctx, |ui| {
                             egui::ScrollArea::vertical().show(ui, |ui| {
