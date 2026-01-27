@@ -28,6 +28,38 @@ pub struct FactoryInstance {
         std::sync::mpsc::Sender<(Flow<GenericItem>, IndexMap<usize, (Flow<GenericItem>, f64)>)>,
     pub solver_receiver: std::sync::mpsc::Receiver<Result<Flow<usize>, String>>,
 }
+
+impl Clone for FactoryInstance {
+    fn clone(&self) -> Self {
+        let (param_tx, param_rx) = std::sync::mpsc::channel();
+        let (solution_tx, solution_rx) = std::sync::mpsc::channel();
+        let (flow_tx, flow_rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            while let Ok((target, flows)) = param_rx.recv() {
+                let result = basic_solver(target, flows);
+                if solution_tx.send(result).is_err() {
+                    break;
+                }
+            }
+        });
+        
+        FactoryInstance {
+            name: self.name.clone(),
+            target: self.target.clone(),
+            solution: self.solution.clone(),
+            total_flow: self.total_flow.clone(),
+            total_flow_sorted_keys: self.total_flow_sorted_keys.clone(),
+            flow_editor_sources: self.flow_editor_sources.clone(),
+            flow_editors: self.flow_editors.clone(),
+            hint_flows: self.hint_flows.clone(),
+            flow_receiver: flow_rx,
+            flow_sender: flow_tx,
+            solver_sender: param_tx,
+            solver_receiver: solution_rx,
+        }
+    }
+}
+
 impl Default for FactoryInstance {
     fn default() -> Self {
         let (tx, rx) = std::sync::mpsc::channel();
@@ -97,13 +129,16 @@ impl FactoryInstance {
     }
 
     fn flows_panel(&mut self, ui: &mut egui::Ui, ctx: &FactorioContext) {
+        ui.label("总物料流");
         ui.horizontal_wrapped(|ui| {
-            for item in &self.total_flow_sorted_keys {
-                let amount = self.total_flow.get(item).cloned().unwrap_or(0.0);
-                if amount.abs() < 1e-6 {
-                    continue;
-                }
-                card_frame(ui).show(ui, |ui| {
+            card_frame(ui).show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
+                ui.set_min_height(50.0);
+                for item in &self.total_flow_sorted_keys {
+                    let amount = self.total_flow.get(item).cloned().unwrap_or(0.0);
+                    if amount.abs() < 1e-6 {
+                        continue;
+                    }
                     ui.vertical(|ui| {
                         ui.add_sized([35.0, 15.0], SignedCompactLabel::new(amount));
                         let icon = ui
@@ -131,13 +166,14 @@ impl FactoryInstance {
                             &self.flow_editor_sources,
                         );
                     });
-                });
-                if ui.available_size_before_wrap().x < 35.0 {
-                    ui.end_row();
-                }
-            }
-        });
 
+                    if ui.available_size_before_wrap().x < 35.0 {
+                        ui.end_row();
+                    }
+                }
+            });
+        });
+        ui.separator();
         let flow_editors = &mut self.flow_editors;
         flow_editors.retain_mut(|flow_config| {
             let mut deleted = false;
@@ -354,156 +390,147 @@ impl EditorView for FactoryInstance {
         egui::SidePanel::new(egui::containers::panel::Side::Left, egui::Id::new("target"))
             .show_separator_line(true)
             .min_width(256.0)
+            .frame(egui::Frame::NONE.corner_radius(8.0).inner_margin(4.0))
             .show_inside(ui, |ui: &mut egui::Ui| {
-                egui::Frame::NONE
-                    .corner_radius(8.0)
-                    .inner_margin(4.0)
-                    .show(ui, |ui| {
-                        egui::ScrollArea::vertical().id_salt(1).show(ui, |ui| {
-                            ui.horizontal_top(|ui| {
-                                ui.vertical(|ui| {
-                                    ui.heading("优化目标");
-                                    self.target.retain_mut(|(item, amount)| {
-                                        let mut deleted = false;
-                                        ui.horizontal_top(|ui| {
-                                            let icon = ui
-                                                .add_sized(
-                                                    [35.0, 35.0],
-                                                    GenericIcon {
-                                                        ctx,
-                                                        item,
-                                                        size: 32.0,
-                                                    },
-                                                )
-                                                .interact(egui::Sense::click());
-
-                                            show_hint_modal(
-                                                ui,
+                egui::ScrollArea::vertical().id_salt(1).show(ui, |ui| {
+                    ui.horizontal_top(|ui| {
+                        ui.vertical(|ui| {
+                            ui.heading("优化目标");
+                            self.target.retain_mut(|(item, amount)| {
+                                let mut deleted = false;
+                                ui.horizontal_top(|ui| {
+                                    let icon = ui
+                                        .add_sized(
+                                            [35.0, 35.0],
+                                            GenericIcon {
                                                 ctx,
                                                 item,
-                                                -*amount,
-                                                &icon,
-                                                &self.flow_sender,
-                                                &mut self.hint_flows,
-                                                &self.flow_editor_sources,
-                                            );
-                                            ui.vertical(|ui| {
-                                                let label = ui.label("选择目标产物类型");
-                                                egui::ComboBox::from_id_salt(label.id)
-                                                    .selected_text(match item {
-                                                        GenericItem::Item { .. } => "物品",
-                                                        GenericItem::Fluid { .. } => "流体",
-                                                        GenericItem::Entity { .. } => "实体",
-                                                        GenericItem::Heat => "热量",
-                                                        GenericItem::Electricity => "电力",
-                                                        GenericItem::FluidHeat { .. } => "流体热量",
-                                                        GenericItem::FluidFuel { .. } => "流体燃料",
-                                                        GenericItem::ItemFuel { .. } => "物体燃料",
-                                                        GenericItem::RocketPayloadWeight => {
-                                                            "重量载荷"
-                                                        }
-                                                        GenericItem::RocketPayloadStack => {
-                                                            "堆叠载荷"
-                                                        }
-                                                        GenericItem::Pollution { .. } => "污染",
-                                                        _ => "特殊",
-                                                    })
-                                                    .show_ui(ui, |ui| {
-                                                        ui.selectable_value(
-                                                            item,
-                                                            GenericItem::Item {
-                                                                name: "item-unknown".to_string(),
-                                                                quality: 0,
-                                                            },
-                                                            "物品",
-                                                        );
-                                                        ui.selectable_value(
-                                                            item,
-                                                            GenericItem::Fluid {
-                                                                name: "fluid-unknown".to_string(),
-                                                                temperature: None,
-                                                            },
-                                                            "流体",
-                                                        );
-                                                    });
-                                            });
-                                            match item {
-                                                GenericItem::Item { name, quality } => {
-                                                    let (selected_id, selected_quality) =
-                                                        item_with_quality_selector_modal(
-                                                            ui,
-                                                            ctx,
-                                                            "选择物品",
-                                                            "item",
-                                                            &icon,
-                                                        );
-                                                    if let Some(selected_id) = selected_id {
-                                                        *name = selected_id;
-                                                    }
-                                                    if let Some(selected_quality) = selected_quality
-                                                    {
-                                                        *quality = selected_quality;
-                                                    }
-                                                }
-                                                GenericItem::Fluid {
-                                                    name: _,
-                                                    temperature,
-                                                } => {
-                                                    if let Some(selected) = item_selector_modal(
-                                                        ui,
-                                                        ctx,
-                                                        "选择流体",
-                                                        "fluid",
-                                                        &icon,
-                                                    ) {
-                                                        *item = GenericItem::Fluid {
-                                                            name: selected,
-                                                            temperature: *temperature,
-                                                        };
-                                                    }
-                                                }
-                                                _ => {}
-                                            }
-                                            ui.vertical(|ui| {
-                                                ui.label("目标产量");
-                                                ui.add(egui::DragValue::new(amount).suffix("/s"));
-                                            });
-                                            if ui.button("删除").clicked() {
-                                                deleted = true;
-                                            }
-                                        });
-                                        !deleted
-                                    });
-                                    if ui.button("添加目标产物").clicked() {
-                                        self.target.push((
-                                            GenericItem::Item {
-                                                name: "item-unknown".to_string(),
-                                                quality: 0,
+                                                size: 32.0,
                                             },
-                                            1.0,
-                                        ));
+                                        )
+                                        .interact(egui::Sense::click());
+
+                                    show_hint_modal(
+                                        ui,
+                                        ctx,
+                                        item,
+                                        -*amount,
+                                        &icon,
+                                        &self.flow_sender,
+                                        &mut self.hint_flows,
+                                        &self.flow_editor_sources,
+                                    );
+                                    ui.vertical(|ui| {
+                                        let label = ui.label("选择目标产物类型");
+                                        egui::ComboBox::from_id_salt(label.id)
+                                            .selected_text(match item {
+                                                GenericItem::Item { .. } => "物品",
+                                                GenericItem::Fluid { .. } => "流体",
+                                                GenericItem::Entity { .. } => "实体",
+                                                GenericItem::Heat => "热量",
+                                                GenericItem::Electricity => "电力",
+                                                GenericItem::FluidHeat { .. } => "流体热量",
+                                                GenericItem::FluidFuel { .. } => "流体燃料",
+                                                GenericItem::ItemFuel { .. } => "物体燃料",
+                                                GenericItem::RocketPayloadWeight => "重量载荷",
+                                                GenericItem::RocketPayloadStack => "堆叠载荷",
+                                                GenericItem::Pollution { .. } => "污染",
+                                                _ => "特殊",
+                                            })
+                                            .show_ui(ui, |ui| {
+                                                ui.selectable_value(
+                                                    item,
+                                                    GenericItem::Item {
+                                                        name: "item-unknown".to_string(),
+                                                        quality: 0,
+                                                    },
+                                                    "物品",
+                                                );
+                                                ui.selectable_value(
+                                                    item,
+                                                    GenericItem::Fluid {
+                                                        name: "fluid-unknown".to_string(),
+                                                        temperature: None,
+                                                    },
+                                                    "流体",
+                                                );
+                                            });
+                                    });
+                                    match item {
+                                        GenericItem::Item { name, quality } => {
+                                            let (selected_id, selected_quality) =
+                                                item_with_quality_selector_modal(
+                                                    ui,
+                                                    ctx,
+                                                    "选择物品",
+                                                    "item",
+                                                    &icon,
+                                                );
+                                            if let Some(selected_id) = selected_id {
+                                                *name = selected_id;
+                                            }
+                                            if let Some(selected_quality) = selected_quality {
+                                                *quality = selected_quality;
+                                            }
+                                        }
+                                        GenericItem::Fluid {
+                                            name: _,
+                                            temperature,
+                                        } => {
+                                            if let Some(selected) = item_selector_modal(
+                                                ui,
+                                                ctx,
+                                                "选择流体",
+                                                "fluid",
+                                                &icon,
+                                            ) {
+                                                *item = GenericItem::Fluid {
+                                                    name: selected,
+                                                    temperature: *temperature,
+                                                };
+                                            }
+                                        }
+                                        _ => {}
                                     }
-                                })
-                                .response
-                            })
-                            .inner
-                        });
-                        ui.separator();
-                        egui::ScrollArea::vertical().id_salt(2).show(ui, |ui| {
-                            ui.vertical(|ui| {
-                                ui.heading("游戏机制");
-                                for flow_source in &mut self.flow_editor_sources {
-                                    flow_source.editor_view(ui, ctx);
-                                    ui.separator();
-                                }
-                            })
-                            .response
-                        });
-                    });
+                                    ui.vertical(|ui| {
+                                        ui.label("目标产量");
+                                        ui.add(egui::DragValue::new(amount).suffix("/s"));
+                                    });
+                                    if ui.button("删除").clicked() {
+                                        deleted = true;
+                                    }
+                                });
+                                !deleted
+                            });
+                            if ui.button("添加目标产物").clicked() {
+                                self.target.push((
+                                    GenericItem::Item {
+                                        name: "item-unknown".to_string(),
+                                        quality: 0,
+                                    },
+                                    1.0,
+                                ));
+                            }
+                        })
+                        .response
+                    })
+                    .inner
+                });
+                ui.separator();
+                egui::ScrollArea::vertical().id_salt(2).show(ui, |ui| {
+                    ui.vertical(|ui| {
+                        ui.heading("游戏机制");
+                        for flow_source in &mut self.flow_editor_sources {
+                            flow_source.editor_view(ui, ctx);
+                            ui.separator();
+                        }
+                    })
+                    .response
+                });
             });
         egui::Frame::NONE
             .corner_radius(8.0)
-            .inner_margin(4.0)
+            .outer_margin(4.0)
             .show(ui, |ui| {
                 ui.heading("配方配置");
                 egui::ScrollArea::vertical().id_salt(3).show(ui, |ui| {
@@ -579,15 +606,19 @@ impl Subview for PlannerView {
                             self.factories.push(
                                 FactoryInstance::new(name)
                                     .add_flow_source(|s| {
-                                        Box::new(RecipeConfigProvider::new().set_mechanic_sender(s))
-                                    })
-                                    .add_flow_source(|s| {
                                         Box::new(
-                                            InfiniteSourceProvider::new().set_mechanic_sender(s),
+                                            RecipeConfigProvider::new().with_mechanic_sender(s),
                                         )
                                     })
                                     .add_flow_source(|s| {
-                                        Box::new(MiningConfigProvider::new().set_mechanic_sender(s))
+                                        Box::new(
+                                            InfiniteSourceProvider::new().with_mechanic_sender(s),
+                                        )
+                                    })
+                                    .add_flow_source(|s| {
+                                        Box::new(
+                                            MiningConfigProvider::new().with_mechanic_sender(s),
+                                        )
                                     }),
                             );
                             self.new_factory_name.clear();

@@ -54,11 +54,20 @@ dyn_clone::clone_trait_object!(<C, I> Mechanic<GameContext = C, ItemIdentType = 
 pub trait MechanicProvider: EditorView + SolveContext + dyn_clone::DynClone {
     /// 传递创建的配方信息
     fn set_mechanic_sender(
-        self,
+        &mut self,
+        sender: MechanicSender<Self::ItemIdentType, Self::GameContext>,
+    );
+
+    fn with_mechanic_sender(
+        mut self,
         sender: MechanicSender<Self::ItemIdentType, Self::GameContext>,
     ) -> Self
     where
-        Self: Sized;
+        Self: Sized,
+    {
+        self.set_mechanic_sender(sender);
+        self
+    }
 
     /// TODO
     /// 游戏机制提供器可选：自动填充逻辑

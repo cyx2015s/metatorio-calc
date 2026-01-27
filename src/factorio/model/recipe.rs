@@ -763,9 +763,8 @@ impl SolveContext for RecipeConfigProvider {
 }
 
 impl MechanicProvider for RecipeConfigProvider {
-    fn set_mechanic_sender(mut self, sender: MechanicSender<GenericItem, FactorioContext>) -> Self {
+    fn set_mechanic_sender(&mut self, sender: MechanicSender<GenericItem, FactorioContext>) {
         self.sender = Some(sender);
-        self
     }
 
     fn hint_populate(

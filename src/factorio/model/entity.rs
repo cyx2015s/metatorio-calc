@@ -146,6 +146,8 @@ pub struct EntityPrototype {
     pub collision_box: Option<BoundingBox>,
 
     pub minable: Option<MiningProperty>,
+    /// 具有 Autoplace 属性的原型实体可以自动看作无限源
+    pub autoplace: Option<AutoplaceSpecification>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -167,4 +169,11 @@ impl HasPrototypeBase for EntityPrototype {
     fn base(&self) -> &PrototypeBase {
         &self.base
     }
+}
+
+#[derive(Debug, Clone, serde::Deserialize, Default)]
+#[serde(default)]
+pub struct AutoplaceSpecification {
+    pub control: String,
+    pub default_enabled: bool,
 }

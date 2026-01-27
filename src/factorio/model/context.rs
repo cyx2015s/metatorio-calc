@@ -41,6 +41,9 @@ pub struct FactorioContext {
     pub groups: Dict<PrototypeBase>,
     pub subgroups: Dict<ItemSubgroup>,
 
+    /// 地点
+    pub planets: Dict<PlanetPrototype>,
+
     /// 品质
     pub qualities: Vec<QualityPrototype>,
 
@@ -62,6 +65,9 @@ pub struct FactorioContext {
     /// 采矿类型集合：资源本身和采矿机器
     pub resources: Dict<ResourcePrototype>,
     pub miners: Dict<MiningDrillPrototype>,
+
+    /// 地块
+    pub tiles: Dict<TilePrototype>,
 }
 
 pub fn get_workding_directory() -> PathBuf {
@@ -165,7 +171,29 @@ impl FactorioContext {
                 .get(quality.next.as_ref().unwrap_or(&"".to_string()))
                 .unwrap_or(&Value::Null)
         }
-        FactorioContext {
+        for entity in entities.values() {
+            if let Some(autoplace) = &entity.autoplace {
+                log::info!("自动生成的实体: {}", &entity.base.name);
+                if !autoplace.control.is_empty() {
+                    log::info!(" ↑ 对应的控制 ID 为 {}", &autoplace.control);
+                }
+            }
+        }
+        let planets: Dict<PlanetPrototype> = serde_json::from_value(
+            value
+                .get("planet")
+                .cloned()
+                .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
+        )
+        .unwrap();
+        let tiles: Dict<TilePrototype> = serde_json::from_value(
+            value
+                .get("tile")
+                .cloned()
+                .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
+        )
+        .unwrap();
+        let ret = FactorioContext {
             qualities,
             groups,
             subgroups,
@@ -179,9 +207,15 @@ impl FactorioContext {
             resources,
             miners,
             icon_path: None,
+            planets,
+            tiles,
             ..Default::default()
         }
-        .build_order_info()
+        .build_order_info();
+        ret.planets.iter().for_each(|(_, p)| {
+            dbg!(p.collect_autoplaced(&ret));
+        });
+        ret
     }
 
     pub fn load_from_executable_path(

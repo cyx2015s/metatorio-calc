@@ -459,14 +459,10 @@ impl EditorView for MiningConfigProvider {
 
 impl MechanicProvider for MiningConfigProvider {
     fn set_mechanic_sender(
-        mut self,
+        &mut self,
         sender: MechanicSender<Self::ItemIdentType, Self::GameContext>,
-    ) -> Self
-    where
-        Self: Sized,
-    {
+    ) {
         self.sender = Some(sender);
-        self
     }
 
     fn hint_populate(
@@ -502,21 +498,22 @@ impl MechanicProvider for MiningConfigProvider {
                             } else {
                                 for res in mining.results.as_ref().unwrap().iter() {
                                     if let RecipeResult::Item(r) = res
-                                        && &r.name == name {
-                                            let mining_config = MiningConfig {
-                                                resource: resource.base.base.name.clone(),
-                                                machine: None,
-                                                module_config: ModuleConfig::default(),
-                                                instance_fuel: None,
-                                            };
-                                            ret.push(Box::new(mining_config)
-                                                as Box<
-                                                    dyn Mechanic<
-                                                            ItemIdentType = GenericItem,
-                                                            GameContext = FactorioContext,
-                                                        >,
-                                                >);
-                                        }
+                                        && &r.name == name
+                                    {
+                                        let mining_config = MiningConfig {
+                                            resource: resource.base.base.name.clone(),
+                                            machine: None,
+                                            module_config: ModuleConfig::default(),
+                                            instance_fuel: None,
+                                        };
+                                        ret.push(Box::new(mining_config)
+                                            as Box<
+                                                dyn Mechanic<
+                                                        ItemIdentType = GenericItem,
+                                                        GameContext = FactorioContext,
+                                                    >,
+                                            >);
+                                    }
                                 }
                             }
                         }
@@ -528,26 +525,28 @@ impl MechanicProvider for MiningConfigProvider {
                 } => {
                     for resource in ctx.resources.values() {
                         if let Some(mining) = resource.base.minable.as_ref()
-                            && let Some(results) = &mining.results {
-                                for res in results.iter() {
-                                    if let RecipeResult::Fluid(r) = res
-                                        && &r.name == name {
-                                            let mining_config = MiningConfig {
-                                                resource: resource.base.base.name.clone(),
-                                                machine: None,
-                                                module_config: ModuleConfig::default(),
-                                                instance_fuel: None,
-                                            };
-                                            ret.push(Box::new(mining_config)
-                                                as Box<
-                                                    dyn Mechanic<
-                                                            ItemIdentType = GenericItem,
-                                                            GameContext = FactorioContext,
-                                                        >,
-                                                >);
-                                        }
+                            && let Some(results) = &mining.results
+                        {
+                            for res in results.iter() {
+                                if let RecipeResult::Fluid(r) = res
+                                    && &r.name == name
+                                {
+                                    let mining_config = MiningConfig {
+                                        resource: resource.base.base.name.clone(),
+                                        machine: None,
+                                        module_config: ModuleConfig::default(),
+                                        instance_fuel: None,
+                                    };
+                                    ret.push(Box::new(mining_config)
+                                        as Box<
+                                            dyn Mechanic<
+                                                    ItemIdentType = GenericItem,
+                                                    GameContext = FactorioContext,
+                                                >,
+                                        >);
                                 }
                             }
+                        }
                     }
                 }
                 _ => {}

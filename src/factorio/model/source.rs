@@ -213,12 +213,8 @@ impl EditorView for InfiniteSourceProvider {
 }
 
 impl MechanicProvider for InfiniteSourceProvider {
-    fn set_mechanic_sender(mut self, sender: MechanicSender<GenericItem, FactorioContext>) -> Self
-    where
-        Self: Sized,
-    {
+    fn set_mechanic_sender(&mut self, sender: MechanicSender<GenericItem, FactorioContext>) {
         self.sender = Some(sender);
-        self
     }
 
     fn hint_populate(
