@@ -9,8 +9,8 @@ use crate::{
             modal::show_modal,
         },
         format::CompactLabel,
+        modal::ItemWithQualitySelectorModal,
         model::{context::*, entity::*},
-        selector::item_with_quality_selector_modal,
     },
 };
 
@@ -198,10 +198,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
             for module in &self.module_config.modules {
                 index_map_update_entry(
                     &mut total,
-                    GenericItem::Item {
-                        name: module.0.clone(),
-                        quality: module.1,
-                    },
+                    GenericItem::Item(IdWithQuality(module.0.clone(), module.1)),
                     1,
                 );
             }
@@ -209,19 +206,16 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                 for (module, count) in &beacon_config.modules {
                     index_map_update_entry(
                         &mut total,
-                        GenericItem::Item {
-                            name: module.0.clone(),
-                            quality: module.1,
-                        },
+                        GenericItem::Item(IdWithQuality(module.0.clone(), module.1)),
                         *count,
                     );
                 }
                 index_map_update_entry(
                     &mut total,
-                    GenericItem::Entity {
-                        name: beacon_config.beacon.0.clone(),
-                        quality: beacon_config.beacon.1,
-                    },
+                    GenericItem::Entity(IdWithQuality(
+                        beacon_config.beacon.0.clone(),
+                        beacon_config.beacon.1,
+                    )),
                     beacon_config.count,
                 );
             }
@@ -261,30 +255,23 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                     if icon.clicked_by(egui::PointerButton::Secondary) {
                         deleted = true;
                     }
-                    let selected = item_with_quality_selector_modal(
-                        ui,
-                        self.ctx,
-                        "选择插件",
-                        "item",
-                        &icon,
-                        Some(&|s, f| {
-                            if let Some(module_proto) = f.modules.get(s) {
-                                // 过滤掉不符合要求的插件
-                                self.allowed_module_categories.as_ref().map_or(
-                                    true,
-                                    |allowed_categories| {
-                                        allowed_categories.contains(&module_proto.category)
-                                    },
-                                ) && module_effects_allowed(module_proto, self.allowed_effects)
-                            } else {
-                                false
-                            }
-                        }),
+                    ui.add(
+                        ItemWithQualitySelectorModal::new(self.ctx, "选择插件", "item", &icon)
+                            .with_current(slot)
+                            .with_filter(|s, f| {
+                                if let Some(module_proto) = f.modules.get(s) {
+                                    // 过滤掉不符合要求的插件
+                                    self.allowed_module_categories.as_ref().map_or(
+                                        true,
+                                        |allowed_categories| {
+                                            allowed_categories.contains(&module_proto.category)
+                                        },
+                                    ) && module_effects_allowed(module_proto, self.allowed_effects)
+                                } else {
+                                    false
+                                }
+                            }),
                     );
-                    if let Some(selected) = selected {
-                        slot.0 = selected.0;
-                        slot.1 = selected.1;
-                    }
                     !deleted
                 });
 
@@ -301,25 +288,23 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                             },
                         )
                         .interact(egui::Sense::click());
-                    let selected = item_with_quality_selector_modal(
-                        ui,
-                        self.ctx,
-                        "选择插件",
-                        "item",
-                        &icon,
-                        Some(&|s, f| {
-                            if let Some(module_proto) = f.modules.get(s) {
-                                // 过滤掉不符合要求的插件
-                                self.allowed_module_categories.as_ref().map_or(
-                                    true,
-                                    |allowed_categories| {
-                                        allowed_categories.contains(&module_proto.category)
-                                    },
-                                ) && module_effects_allowed(module_proto, self.allowed_effects)
-                            } else {
-                                false
-                            }
-                        }),
+                    let mut selected = None;
+                    ui.add(
+                        ItemWithQualitySelectorModal::new(self.ctx, "填充插件", "item", &icon)
+                            .with_output(&mut selected)
+                            .with_filter(|s, f| {
+                                if let Some(module_proto) = f.modules.get(s) {
+                                    // 过滤掉不符合要求的插件
+                                    self.allowed_module_categories.as_ref().map_or(
+                                        true,
+                                        |allowed_categories| {
+                                            allowed_categories.contains(&module_proto.category)
+                                        },
+                                    ) && module_effects_allowed(module_proto, self.allowed_effects)
+                                } else {
+                                    false
+                                }
+                            }),
                     );
                     if let Some(selected) = selected {
                         while self.module_config.modules.len() <= idx {

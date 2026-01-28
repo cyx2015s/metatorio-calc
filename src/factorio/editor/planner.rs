@@ -1,13 +1,13 @@
 use crate::{
     concept::*,
-    dyn_deserialize::DynDeserializeRegistry,
+    dyn_deserialize::*,
     factorio::{
         common::*,
-        editor::{icon::*, modal::*, selector::*},
+        editor::{icon::*, modal::*},
         format::*,
         model::*,
     },
-    solver::{basic_solver, box_as_ptr, flow_add},
+    solver::*,
 };
 
 use indexmap::IndexMap;
@@ -452,10 +452,10 @@ impl EditorView for FactoryInstance {
                                                 .show_ui(ui, |ui| {
                                                     ui.selectable_value(
                                                         item,
-                                                        GenericItem::Item {
-                                                            name: "item-unknown".to_string(),
-                                                            quality: 0,
-                                                        },
+                                                        GenericItem::Item(IdWithQuality(
+                                                            "item-unknown".to_string(),
+                                                            0,
+                                                        )),
                                                         "物品",
                                                     );
                                                     ui.selectable_value(
@@ -469,40 +469,30 @@ impl EditorView for FactoryInstance {
                                                 });
                                             ui.horizontal(|ui| {
                                                 match item {
-                                                    GenericItem::Item { .. } => {
-                                                        if let Some(selected) =
-                                                            item_with_quality_selector_modal(
-                                                                ui,
+                                                    GenericItem::Item(item_with_quality) => {
+                                                        ui.add(
+                                                            ItemWithQualitySelectorModal::new(
                                                                 ctx,
                                                                 "选择物品",
                                                                 "item",
                                                                 &icon,
-                                                                None,
                                                             )
-                                                        {
-                                                            *item = GenericItem::Item {
-                                                                name: selected.0,
-                                                                quality: selected.1,
-                                                            };
-                                                        }
+                                                            .with_current(item_with_quality),
+                                                        );
                                                     }
                                                     GenericItem::Fluid {
-                                                        name: _,
-                                                        temperature,
+                                                        name,
+                                                        temperature: _,
                                                     } => {
-                                                        if let Some(selected) = item_selector_modal(
-                                                            ui,
-                                                            ctx,
-                                                            "选择流体",
-                                                            "fluid",
-                                                            &icon,
-                                                            None,
-                                                        ) {
-                                                            *item = GenericItem::Fluid {
-                                                                name: selected,
-                                                                temperature: *temperature,
-                                                            };
-                                                        }
+                                                        ui.add(
+                                                            ItemSelectorModal::new(
+                                                                ctx,
+                                                                "选择流体",
+                                                                "fluid",
+                                                                &icon,
+                                                            )
+                                                            .with_current(name),
+                                                        );
                                                     }
                                                     _ => {}
                                                 }
@@ -520,10 +510,10 @@ impl EditorView for FactoryInstance {
                             });
                             if ui.button("添加目标产物").clicked() {
                                 self.target.push((
-                                    GenericItem::Item {
-                                        name: "item-unknown".to_string(),
-                                        quality: 0,
-                                    },
+                                    GenericItem::Item(IdWithQuality(
+                                        "item-unknown".to_string(),
+                                        0,
+                                    )),
                                     1.0,
                                 ));
                             }

@@ -5,6 +5,7 @@ use indexmap::IndexMap;
 use crate::{
     concept::Flow,
     factorio::{
+        IdWithQuality,
         common::{Effect, EnergyAmount, EnergySource, index_map_update_entry},
         model::context::{FactorioContext, GenericItem},
     },
@@ -82,19 +83,13 @@ pub fn energy_source_as_flow(
 
                 index_map_update_entry(
                     &mut map,
-                    GenericItem::Item {
-                        name: actual_fuel.0.clone(),
-                        quality: actual_fuel.1 as u8,
-                    },
+                    GenericItem::Item(IdWithQuality(actual_fuel.0.clone(), actual_fuel.1 as u8)),
                     -fuel_burn_speed,
                 );
                 if let Some(burnt_result) = &fuel_property.burnt_result {
                     index_map_update_entry(
                         &mut map,
-                        GenericItem::Item {
-                            name: burnt_result.clone(),
-                            quality: actual_fuel.1 as u8,
-                        },
+                        GenericItem::Item(IdWithQuality(burnt_result.clone(), actual_fuel.1 as u8)),
                         fuel_burn_speed,
                     );
                 }

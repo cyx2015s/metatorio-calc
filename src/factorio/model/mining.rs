@@ -4,9 +4,8 @@ use crate::{
         ModuleConfig, ModuleConfigEditor, calc_quality_distribution,
         common::*,
         icon::Icon,
-        modal::show_modal,
+        modal::{ItemSelectorModal, ItemWithQualitySelectorModal},
         model::{context::*, energy::*, entity::*, recipe::*},
-        selector::ItemSelector,
     },
 };
 
@@ -155,10 +154,7 @@ impl AsFlow for MiningConfig {
         // 计算矿物实体本身的消耗
         index_map_update_entry(
             &mut map,
-            GenericItem::Entity {
-                name: resource_ore.base.base.name.clone(),
-                quality: 0,
-            },
+            GenericItem::Entity(IdWithQuality(resource_ore.base.base.name.clone(), 0)),
             -base_speed * (1.0 + module_effects.speed) * drain_rate,
         );
 
@@ -193,10 +189,10 @@ impl AsFlow for MiningConfig {
         if let Some(results) = &mining_property.results {
             for result in results.iter() {
                 let item = match result {
-                    RecipeResult::Item(r) => GenericItem::Entity {
-                        name: r.name.clone(),
-                        quality: 0,
-                    },
+                    RecipeResult::Item(r) => GenericItem::Entity(IdWithQuality(
+                        r.name.clone(),
+                        0,
+                    )),
                     RecipeResult::Fluid(r) => GenericItem::Fluid {
                         name: r.name.clone(),
                         temperature: None,
@@ -213,10 +209,10 @@ impl AsFlow for MiningConfig {
                             if *quality_prob > 0.0 {
                                 index_map_update_entry(
                                     &mut map,
-                                    GenericItem::Item {
-                                        name: r.name.clone(),
-                                        quality: quality_level as u8,
-                                    },
+                                    GenericItem::Item(IdWithQuality(
+                                        r.name.clone(),
+                                        quality_level as u8,
+                                    )),
                                     total_yield * *quality_prob,
                                 );
                             }
@@ -248,10 +244,10 @@ impl AsFlow for MiningConfig {
                 if *quality_prob > 0.0 {
                     index_map_update_entry(
                         &mut map,
-                        GenericItem::Item {
-                            name: result.clone(),
-                            quality: quality_level as u8,
-                        },
+                        GenericItem::Item(IdWithQuality(
+                            result.clone(),
+                            quality_level as u8,
+                        )),
                         total_yield * *quality_prob,
                     );
                 }
@@ -313,18 +309,11 @@ impl EditorView for MiningConfig {
                         "矿物：{}",
                         ctx.get_display_name("entity", &self.resource)
                     ));
-                show_modal(resource_button.id, resource_button.clicked(), ui, |ui| {
-                    egui::ScrollArea::vertical()
-                        .max_width(f32::INFINITY)
-                        .auto_shrink(false)
-                        .show(ui, |ui| {
-                            ui.add(
-                                ItemSelector::new(ctx, "entity")
-                                    .with_current(&mut self.resource)
-                                    .with_filter(|s: &str, f| f.resources.contains_key(s)),
-                            );
-                        });
-                });
+                ui.add(
+                    ItemSelectorModal::new(ctx, "选择矿物", "entity", &resource_button)
+                        .with_current(&mut self.resource)
+                        .with_filter(|s, f| f.resources.contains_key(s)),
+                );
             });
             ui.separator();
             ui.vertical(|ui| {
@@ -359,41 +348,27 @@ impl EditorView for MiningConfig {
                     .resources
                     .get(&self.resource)
                     .expect("MiningConfig 中的矿物在上下文中不存在");
-                let mut selected_entity = None;
-                show_modal(entity_button.id, entity_button.clicked(), ui, |ui| {
-                    ui.label("选择机器");
-                    egui::ScrollArea::vertical()
-                        .max_width(f32::INFINITY)
-                        .auto_shrink(false)
-                        .show(ui, |ui| {
-                            ui.add(
-                                ItemSelector::new(ctx, "entity")
-                                    .with_output(&mut selected_entity)
-                                    .with_filter(|s, f| {
-                                        if let Some(miner) = f.miners.get(s) {
-                                            miner.resource_categories.contains(
-                                                resource_proto
-                                                    .category
-                                                    .as_ref()
-                                                    .unwrap_or(&"basic-solid".to_string()),
-                                            )
-                                        } else {
-                                            false
-                                        }
-                                    }),
-                            );
-                        });
-
-                    if selected_entity.is_some() {
-                        ui.close();
-                    }
-
-                    if let Some(selected_entity) = selected_entity {
-                        self.machine = Some(
-                            (selected_entity, self.machine.as_ref().map_or(0, |m| m.1)).into(),
-                        );
-                    }
-                });
+                ui.add(
+                    ItemWithQualitySelectorModal::new(
+                        ctx,
+                        "选择采矿设备",
+                        "entity",
+                        &entity_button,
+                    )
+                    .with_output(&mut self.machine)
+                    .with_filter(|s, f| {
+                        if let Some(miner) = f.miners.get(s) {
+                            miner.resource_categories.contains(
+                                resource_proto
+                                    .category
+                                    .as_ref()
+                                    .unwrap_or(&"basic-solid".to_string()),
+                            )
+                        } else {
+                            false
+                        }
+                    }),
+                );
             });
             ui.separator();
 
@@ -467,7 +442,7 @@ impl MechanicProvider for MiningConfigProvider {
         if value < 0.0 {
             // 提供生产方式
             match item {
-                GenericItem::Item { name, quality: _ } => {
+                GenericItem::Item(IdWithQuality(name, _)) => {
                     for resource in ctx.resources.values() {
                         if let Some(mining) = resource.base.minable.as_ref() {
                             if let Some(result) = &mining.result {

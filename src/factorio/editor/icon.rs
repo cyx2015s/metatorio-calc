@@ -73,7 +73,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         match self.item {
             GenericItem::Custom { name } => ui.label(format!("特殊: {}", name)),
-            GenericItem::Item { name, quality } => ui
+            GenericItem::Item(IdWithQuality(name, quality)) => ui
                 .add_sized(
                     [self.size, self.size],
                     Icon {
@@ -103,7 +103,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                     "流体: {}",
                     self.ctx.get_display_name("fluid", name)
                 )),
-            GenericItem::Entity { name, quality } => ui
+            GenericItem::Entity(IdWithQuality(name, quality)) => ui
                 .add_sized(
                     [self.size, self.size],
                     Icon {

@@ -39,6 +39,32 @@ impl From<(String, u8)> for IdWithQuality {
     }
 }
 
+impl TryFrom<&GenericItem> for IdWithQuality {
+    type Error = &'static str;
+    fn try_from(value: &GenericItem) -> Result<Self, Self::Error> {
+        match value {
+            GenericItem::Item(IdWithQuality(name, quality)) => {
+                Ok(IdWithQuality(name.clone(), *quality))
+            }
+            GenericItem::Entity(IdWithQuality(name, quality)) => {
+                Ok(IdWithQuality(name.clone(), *quality))
+            }
+            _ => Err("无法从非物品类型的 GenericItem 转换为 IdWithQuality"),
+        }
+    }
+}
+
+impl TryFrom<GenericItem> for IdWithQuality {
+    type Error = &'static str;
+    fn try_from(value: GenericItem) -> Result<Self, Self::Error> {
+        match value {
+            GenericItem::Item(IdWithQuality(name, quality)) => Ok(IdWithQuality(name, quality)),
+            GenericItem::Entity(IdWithQuality(name, quality)) => Ok(IdWithQuality(name, quality)),
+            _ => Err("无法从非物品类型的 GenericItem 转换为 IdWithQuality"),
+        }
+    }
+}
+
 pub fn index_map_update_entry<T, N>(map: &mut IndexMap<T, N>, key: T, value: N)
 where
     T: Hash + Eq,
@@ -646,7 +672,7 @@ fn get_generic_item_sort_key<'a>(
     ctx: &FactorioContext,
 ) -> (usize, (usize, usize, usize), &'a str) {
     match item {
-        GenericItem::Item { name, quality } => (
+        GenericItem::Item(IdWithQuality(name, quality)) => (
             *quality as usize,
             ctx.order_of_entries["item"]
                 .get(name)
@@ -665,7 +691,7 @@ fn get_generic_item_sort_key<'a>(
                 .unwrap_or((0, 0, 0)),
             "",
         ),
-        GenericItem::Entity { name, quality } => (
+        GenericItem::Entity(IdWithQuality(name, quality)) => (
             0x200usize + *quality as usize,
             ctx.order_of_entries["entity"]
                 .get(name)

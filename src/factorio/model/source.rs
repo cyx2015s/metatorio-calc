@@ -3,10 +3,9 @@ use indexmap::IndexMap;
 use crate::{
     concept::{AsFlow, EditorView, Flow, Mechanic, MechanicProvider, MechanicSender, SolveContext},
     factorio::{
-        editor::{
-            icon::GenericIcon,
-            selector::{item_selector_modal, item_with_quality_selector_modal},
-        },
+        IdWithQuality,
+        editor::icon::GenericIcon,
+        modal::{ItemSelectorModal, ItemWithQualitySelectorModal},
         model::context::{FactorioContext, GenericItem},
     },
 };
@@ -63,10 +62,7 @@ impl EditorView for InfiniteSource {
                     .show_ui(ui, |ui| {
                         ui.selectable_value(
                             &mut self.item,
-                            GenericItem::Item {
-                                name: "item-unknown".to_string(),
-                                quality: 0,
-                            },
+                            GenericItem::Item(IdWithQuality("item-unknown".to_string(), 0)),
                             "物品",
                         );
                         ui.selectable_value(
@@ -79,10 +75,7 @@ impl EditorView for InfiniteSource {
                         );
                         ui.selectable_value(
                             &mut self.item,
-                            GenericItem::Entity {
-                                name: "entity-unknown".to_string(),
-                                quality: 0,
-                            },
+                            GenericItem::Entity(IdWithQuality("entity-unknown".to_string(), 0)),
                             "实体",
                         );
                         ui.selectable_value(&mut self.item, GenericItem::Heat, "热量");
@@ -135,38 +128,30 @@ impl EditorView for InfiniteSource {
                 )
                 .interact(egui::Sense::click());
             match &mut self.item {
-                GenericItem::Item { .. } => {
-                    if let Some(selected) =
-                        item_with_quality_selector_modal(ui, ctx, "选择物品", "item", &icon, None)
-                    {
-                        self.item = GenericItem::Item {
-                            name: selected.0,
-                            quality: selected.1,
-                        };
-                    }
+                GenericItem::Item(current) => {
+                    ui.add(
+                        ItemWithQualitySelectorModal::new(ctx, "选择去皮", "item", &icon)
+                            .with_current(current),
+                    );
                 }
-                GenericItem::Fluid {
-                    name: _,
-                    temperature: _,
-                } => {
-                    if let Some(selected) =
-                        item_selector_modal(ui, ctx, "选择流体", "fluid", &icon, None)
-                    {
+                GenericItem::Fluid { .. } => {
+                    let mut sentiniel = None;
+                    ui.add(
+                        ItemSelectorModal::new(ctx, "选择流体", "fluid", &icon)
+                            .with_output(&mut sentiniel),
+                    );
+                    if let Some(name) = sentiniel {
                         self.item = GenericItem::Fluid {
-                            name: selected,
+                            name: name.clone(),
                             temperature: None,
                         };
                     }
                 }
-                GenericItem::Entity { name: _, quality } => {
-                    if let Some(selected) =
-                        item_selector_modal(ui, ctx, "选择实体", "entity", &icon, None)
-                    {
-                        self.item = GenericItem::Entity {
-                            name: selected,
-                            quality: *quality,
-                        };
-                    }
+                GenericItem::Entity(current) => {
+                    ui.add(
+                        ItemWithQualitySelectorModal::new(ctx, "选择实体", "entity", &icon)
+                            .with_current(current),
+                    );
                 }
                 _ => {}
             }
@@ -201,10 +186,7 @@ impl EditorView for InfiniteSourceProvider {
     fn editor_view(&mut self, ui: &mut egui::Ui, _ctx: &Self::GameContext) {
         if ui.button("添加无限源").clicked() {
             let source = InfiniteSource {
-                item: GenericItem::Item {
-                    name: "item-unknown".to_string(),
-                    quality: 0,
-                },
+                item: GenericItem::Item(IdWithQuality("item-unknown".to_string(), 0)),
             };
             if let Some(sender) = &self.sender {
                 let _ = sender.send(Box::new(source));

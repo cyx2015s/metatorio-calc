@@ -73,10 +73,7 @@ fn test_dyn_deserializer() {
     RecipeConfig::register(&mut registry);
 
     let source = InfiniteSource {
-        item: GenericItem::Item {
-            name: "iron-ore".to_string(),
-            quality: 0,
-        },
+        item: GenericItem::Item(IdWithQuality("iron-ore".to_string(), 0)),
     };
     let recipe = RecipeConfig {
         recipe: "iron-gear-wheel".into(),

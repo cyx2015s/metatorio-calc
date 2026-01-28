@@ -7,9 +7,8 @@ use crate::{
         editor::{
             hover::PrototypeHover,
             icon::{GenericIcon, Icon},
-            modal::show_modal,
-            selector::{ItemSelector, item_with_quality_selector_modal},
         },
+        modal::ItemWithQualitySelectorModal,
         model::{
             context::{FactorioContext, GenericItem},
             energy::energy_source_as_flow,
@@ -470,10 +469,7 @@ impl AsFlow for RecipeConfig {
         for ingredient in &recipe.ingredients {
             match ingredient {
                 RecipeIngredient::Item(item) => {
-                    let key = GenericItem::Item {
-                        name: item.name.clone(),
-                        quality: self.recipe.1,
-                    };
+                    let key = GenericItem::Item(IdWithQuality(item.name.clone(), self.recipe.1));
                     index_map_update_entry(
                         &mut map,
                         key,
@@ -513,11 +509,15 @@ impl AsFlow for RecipeConfig {
 
                     for (quality_level, &quality_prob) in quality_distribution.iter().enumerate() {
                         if quality_prob > 0.0 {
-                            let qual_key = GenericItem::Item {
-                                name: item.name.clone(),
-                                quality: quality_level as u8,
-                            };
-                            index_map_update_entry(&mut map, qual_key, total_yield * quality_prob);
+                            let quality_key = GenericItem::Item(IdWithQuality(
+                                item.name.clone(),
+                                quality_level as u8,
+                            ));
+                            index_map_update_entry(
+                                &mut map,
+                                quality_key,
+                                total_yield * quality_prob,
+                            );
                         }
                     }
                 }
@@ -616,16 +616,10 @@ impl EditorView for RecipeConfig {
                             prototype: ctx.recipes.get(&self.recipe.0).unwrap(),
                         });
                     });
-                if let Some(selected) = item_with_quality_selector_modal(
-                    ui,
-                    ctx,
-                    "选择配方",
-                    "recipe",
-                    &recipe_button,
-                    None,
-                ) {
-                    self.recipe = selected;
-                }
+                ui.add(
+                    ItemWithQualitySelectorModal::new(ctx, "选择配方", "recipe", &recipe_button)
+                        .with_current(&mut self.recipe),
+                );
             });
             ui.separator();
             ui.vertical(|ui| {
@@ -635,10 +629,7 @@ impl EditorView for RecipeConfig {
                         [35.0, 35.0],
                         GenericIcon {
                             ctx,
-                            item: &GenericItem::Entity {
-                                name: machine.0.clone(),
-                                quality: machine.1,
-                            },
+                            item: &GenericItem::Entity(IdWithQuality(machine.0.clone(), machine.1)),
                             size: 32.0,
                         },
                     )
@@ -648,46 +639,35 @@ impl EditorView for RecipeConfig {
                     ui.add_sized([35.0, 35.0], egui::Label::new("空"))
                 };
                 let recipe_prototype = ctx.recipes.get(self.recipe.0.as_str()).unwrap();
-                let mut selected_entity: Option<String> = None;
-                show_modal(entity_button.id, entity_button.clicked(), ui, |ui| {
-                    ui.label("选择机器");
-                    egui::ScrollArea::vertical()
-                        .max_width(f32::INFINITY)
-                        .auto_shrink(false)
-                        .show(ui, |ui| {
-                            ui.add(ItemSelector::new(ctx, "entity").with_filter(
-                                |crafter_name, ctx| {
-                                    if let Some(crafter) = ctx.crafters.get(crafter_name) {
-                                        if crafter.crafting_categories.contains(
-                                            recipe_prototype
-                                                .category
-                                                .as_ref()
-                                                .unwrap_or(&"crafting".to_string()),
-                                        ) {
-                                            return true;
-                                        }
-                                        if recipe_prototype
-                                            .additional_categories
-                                            .iter()
-                                            .any(|cat| crafter.crafting_categories.contains(cat))
-                                        {
-                                            return true;
-                                        }
-                                    }
-                                    false
-                                },
-                            ));
-                        });
-
-                    if selected_entity.is_some() {
-                        ui.close();
-                    }
-                });
-
-                if let Some(selected_entity) = selected_entity {
-                    self.machine =
-                        Some((selected_entity, self.machine.as_ref().map_or(0, |m| m.1)).into());
-                }
+                ui.add(
+                    ItemWithQualitySelectorModal::new(
+                        ctx,
+                        "选择制造设备",
+                        "entity",
+                        &entity_button,
+                    )
+                    .with_output(&mut self.machine)
+                    .with_filter(|crafter_name, ctx| {
+                        if let Some(crafter) = ctx.crafters.get(crafter_name) {
+                            if crafter.crafting_categories.contains(
+                                recipe_prototype
+                                    .category
+                                    .as_ref()
+                                    .unwrap_or(&"crafting".to_string()),
+                            ) {
+                                return true;
+                            }
+                            if recipe_prototype
+                                .additional_categories
+                                .iter()
+                                .any(|cat| crafter.crafting_categories.contains(cat))
+                            {
+                                return true;
+                            }
+                        }
+                        false
+                    }),
+                );
             });
 
             ui.separator();
@@ -775,12 +755,15 @@ impl MechanicProvider for RecipeConfigProvider {
     ) -> Vec<Box<dyn Mechanic<ItemIdentType = Self::ItemIdentType, GameContext = Self::GameContext>>>
     {
         let item_name = match item {
-            GenericItem::Item { name, .. } => name,
-            GenericItem::Fluid { name, .. } => name,
+            GenericItem::Item(IdWithQuality(name, _)) => name,
+            GenericItem::Fluid {
+                name,
+                temperature: _,
+            } => name,
             _ => return vec![], // Not an item or fluid, do nothing.
         };
         let quality = match item {
-            GenericItem::Item { quality, .. } => *quality,
+            GenericItem::Item(IdWithQuality(_, quality)) => *quality,
             _ => 0,
         };
 
