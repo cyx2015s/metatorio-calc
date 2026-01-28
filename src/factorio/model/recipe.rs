@@ -656,7 +656,13 @@ impl EditorView for RecipeConfig {
                         .auto_shrink(false)
                         .show(ui, |ui| {
                             ui.add(
-                                ItemSelector::new(ctx, "entity", &mut selected_entity).with_filter(
+                                ItemSelector::new(
+                                    entity_button.id.with("crafter-selector"),
+                                    ctx,
+                                    "entity",
+                                    &mut selected_entity,
+                                )
+                                .with_filter(
                                     |crafter_name, ctx| {
                                         if let Some(crafter) = ctx.crafters.get(crafter_name) {
                                             if crafter.crafting_categories.contains(

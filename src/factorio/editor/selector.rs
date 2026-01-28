@@ -23,6 +23,7 @@ pub struct QualitySelectorStorage {
 }
 
 pub struct ItemSelector<'a> {
+    pub id: egui::Id,
     pub ctx: &'a FactorioContext,
     pub item_type: &'a str,
     pub filter: Box<dyn Fn(&str, &FactorioContext) -> bool + 'a>,
@@ -31,11 +32,13 @@ pub struct ItemSelector<'a> {
 
 impl<'a> ItemSelector<'a> {
     pub fn new(
+        id: egui::Id,
         ctx: &'a FactorioContext,
         item_type: &'a str,
         selected_item: &'a mut Option<String>,
     ) -> Self {
         Self {
+            id,
             ctx,
             item_type,
             filter: Box::new(|_, _| true),
@@ -194,6 +197,7 @@ impl egui::Widget for ItemSelector<'_> {
 }
 
 pub struct ItemWithQualitySelector<'a> {
+    pub id: egui::Id,
     pub ctx: &'a FactorioContext,
     pub item_type: &'a str,
     pub filter: Box<dyn Fn(&str, &FactorioContext) -> bool + 'a>,
@@ -213,11 +217,13 @@ pub struct ItemWithQualitySelectorStorage {
 
 impl<'a> ItemWithQualitySelector<'a> {
     pub fn new(
+        id: egui::Id,
         ctx: &'a FactorioContext,
         item_type: &'a str,
         selected_item: &'a mut Option<IdWithQuality>,
     ) -> Self {
         Self {
+            id,
             ctx,
             item_type,
             filter: Box::new(|_, _| true),
@@ -245,14 +251,19 @@ impl<'a> ItemWithQualitySelector<'a> {
 
 impl<'a> egui::Widget for ItemWithQualitySelector<'a> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
-        let id = ui.id();
+        let id = self.id;
         let mut storage = ui
             .memory(|mem| mem.data.get_temp::<ItemWithQualitySelectorStorage>(id))
             .unwrap_or_default();
         quality_selector(ui, self.ctx, &mut storage.selected_quality);
         ui.add(
-            ItemSelector::new(self.ctx, self.item_type, &mut storage.selected_item)
-                .with_filter(self.filter),
+            ItemSelector::new(
+                self.id,
+                self.ctx,
+                self.item_type,
+                &mut storage.selected_item,
+            )
+            .with_filter(self.filter),
         );
 
         if let Some(item_name) = &storage.selected_item {
@@ -344,16 +355,21 @@ pub fn item_selector_modal<'a>(
             .0;
         ui.label(label_str);
         ui.add(egui::TextEdit::singleline(&mut filter_string).hint_text("筛选器……"));
-        let mut widget =
-            ItemSelector::new(ctx, item_type, &mut selecting_item).with_filter(|s, f| {
-                if filter_string.is_empty() {
-                    return true;
-                }
-                s.to_lowercase().contains(&filter_string.to_lowercase())
-                    || f.get_display_name(item_type, s)
-                        .to_lowercase()
-                        .contains(&filter_string.to_lowercase())
-            });
+        let mut widget = ItemSelector::new(
+            button.id.with("item-selector"),
+            ctx,
+            item_type,
+            &mut selecting_item,
+        )
+        .with_filter(|s, f| {
+            if filter_string.is_empty() {
+                return true;
+            }
+            s.to_lowercase().contains(&filter_string.to_lowercase())
+                || f.get_display_name(item_type, s)
+                    .to_lowercase()
+                    .contains(&filter_string.to_lowercase())
+        });
         if let Some(custom_filter) = filter {
             widget = widget.chain_filter(move |s, f| custom_filter(s, f));
         }
@@ -394,17 +410,22 @@ pub fn item_with_quality_selector_modal<'a>(
         ui.label(label_str);
         ui.add(egui::TextEdit::singleline(&mut filter_string).hint_text("筛选器……"));
         let closure_filter_string = filter_string.clone();
-        let mut widget = ItemWithQualitySelector::new(ctx, item_type, &mut selecting_item)
-            .with_filter(move |s, f| {
-                if closure_filter_string.is_empty() {
-                    return true;
-                }
-                s.to_lowercase()
+        let mut widget = ItemWithQualitySelector::new(
+            button.id.with("item-with-quality-selector"),
+            ctx,
+            item_type,
+            &mut selecting_item,
+        )
+        .with_filter(move |s, f| {
+            if closure_filter_string.is_empty() {
+                return true;
+            }
+            s.to_lowercase()
+                .contains(&closure_filter_string.to_lowercase())
+                || f.get_display_name(item_type, s)
+                    .to_lowercase()
                     .contains(&closure_filter_string.to_lowercase())
-                    || f.get_display_name(item_type, s)
-                        .to_lowercase()
-                        .contains(&closure_filter_string.to_lowercase())
-            });
+        });
         if let Some(custom_filter) = filter {
             widget = widget.chain_filter(move |s, f| custom_filter(s, f));
         }

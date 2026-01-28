@@ -320,8 +320,13 @@ impl EditorView for MiningConfig {
                         .auto_shrink(false)
                         .show(ui, |ui| {
                             ui.add(
-                                ItemSelector::new(ctx, "entity", &mut selected_id)
-                                    .with_filter(|s: &str, f| f.resources.contains_key(s)),
+                                ItemSelector::new(
+                                    resource_button.id.with("resource-selector"),
+                                    ctx,
+                                    "entity",
+                                    &mut selected_id,
+                                )
+                                .with_filter(|s: &str, f| f.resources.contains_key(s)),
                             );
                             if selected_id.is_some() {
                                 ui.close();
@@ -373,7 +378,7 @@ impl EditorView for MiningConfig {
                         .auto_shrink(false)
                         .show(ui, |ui| {
                             ui.add(
-                                ItemSelector::new(ctx, "entity", &mut selected_entity).with_filter(
+                                ItemSelector::new(entity_button.id.with("miner-selector"), ctx, "entity", &mut selected_entity).with_filter(
                                     |s, f| {
                                         if let Some(miner) = f.miners.get(s) {
                                             miner.resource_categories.contains(

@@ -1,9 +1,11 @@
+use egui::ModalResponse;
+
 pub fn show_modal<R>(
     id: egui::Id,
     toggle: bool,
     ui: &mut egui::Ui,
     contents: impl FnOnce(&mut egui::Ui) -> R,
-) -> Option<R> {
+) -> Option<ModalResponse<R>> {
     let modal_id = id.with("modal");
     if toggle {
         ui.memory_mut(|mem| {
@@ -19,7 +21,7 @@ pub fn show_modal<R>(
                 mem.data.insert_temp::<bool>(modal_id, false);
             });
         }
-        Some(modal.inner)
+        Some(modal)
     } else {
         None
     }
