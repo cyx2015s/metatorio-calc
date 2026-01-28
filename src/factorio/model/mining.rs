@@ -320,7 +320,7 @@ impl EditorView for MiningConfig {
                         .show(ui, |ui| {
                             ui.add(
                                 ItemSelector::new(ctx, "entity")
-                                    .set_current(&mut self.resource)
+                                    .with_current(&mut self.resource)
                                     .with_filter(|s: &str, f| f.resources.contains_key(s)),
                             );
                         });
@@ -368,7 +368,7 @@ impl EditorView for MiningConfig {
                         .show(ui, |ui| {
                             ui.add(
                                 ItemSelector::new(ctx, "entity")
-                                    .set_output(&mut selected_entity)
+                                    .with_output(&mut selected_entity)
                                     .with_filter(|s, f| {
                                         if let Some(miner) = f.miners.get(s) {
                                             miner.resource_categories.contains(

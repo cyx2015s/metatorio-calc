@@ -655,28 +655,28 @@ impl EditorView for RecipeConfig {
                         .max_width(f32::INFINITY)
                         .auto_shrink(false)
                         .show(ui, |ui| {
-                            ui.add(
-                                ItemSelector::new(ctx, "entity").with_filter(
-                                    |crafter_name, ctx| {
-                                        if let Some(crafter) = ctx.crafters.get(crafter_name) {
-                                            if crafter.crafting_categories.contains(
-                                                recipe_prototype
-                                                    .category
-                                                    .as_ref()
-                                                    .unwrap_or(&"crafting".to_string()),
-                                            ) {
-                                                return true;
-                                            }
-                                            if recipe_prototype.additional_categories.iter().any(
-                                                |cat| crafter.crafting_categories.contains(cat),
-                                            ) {
-                                                return true;
-                                            }
+                            ui.add(ItemSelector::new(ctx, "entity").with_filter(
+                                |crafter_name, ctx| {
+                                    if let Some(crafter) = ctx.crafters.get(crafter_name) {
+                                        if crafter.crafting_categories.contains(
+                                            recipe_prototype
+                                                .category
+                                                .as_ref()
+                                                .unwrap_or(&"crafting".to_string()),
+                                        ) {
+                                            return true;
                                         }
-                                        false
-                                    },
-                                ),
-                            );
+                                        if recipe_prototype
+                                            .additional_categories
+                                            .iter()
+                                            .any(|cat| crafter.crafting_categories.contains(cat))
+                                        {
+                                            return true;
+                                        }
+                                    }
+                                    false
+                                },
+                            ));
                         });
 
                     if selected_entity.is_some() {

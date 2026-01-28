@@ -323,9 +323,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                     );
                     if let Some(selected) = selected {
                         while self.module_config.modules.len() <= idx {
-                            self.module_config
-                                .modules
-                                .push(selected.clone());
+                            self.module_config.modules.push(selected.clone());
                         }
                     }
                 }
