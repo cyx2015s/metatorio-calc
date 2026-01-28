@@ -7,10 +7,10 @@ use crate::{
         editor::{
             icon::{GenericIcon, Icon},
             modal::show_modal,
-            selector::{ItemSelector, quality_selector},
         },
         format::CompactLabel,
         model::{context::*, entity::*},
+        selector::item_with_quality_selector_modal,
     },
 };
 
@@ -261,22 +261,30 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                     if icon.clicked_by(egui::PointerButton::Secondary) {
                         deleted = true;
                     }
-                    show_modal(icon.id, icon.clicked(), ui, |ui| {
-                        let (selected_module, selected_quality) = single_module_selector(
-                            ui,
-                            self.ctx,
-                            self.allowed_effects,
-                            self.allowed_module_categories,
-                        );
-                        if let Some(module_name) = selected_module {
-                            slot.0 = module_name;
-                            ui.close();
-                        }
-                        if let Some(quality) = selected_quality {
-                            slot.1 = quality;
-                            ui.close();
-                        }
-                    });
+                    let selected = item_with_quality_selector_modal(
+                        ui,
+                        self.ctx,
+                        "选择插件",
+                        "item",
+                        &icon,
+                        Some(&|s, f| {
+                            if let Some(module_proto) = f.modules.get(s) {
+                                // 过滤掉不符合要求的插件
+                                self.allowed_module_categories.as_ref().map_or(
+                                    true,
+                                    |allowed_categories| {
+                                        allowed_categories.contains(&module_proto.category)
+                                    },
+                                ) && module_effects_allowed(module_proto, self.allowed_effects)
+                            } else {
+                                false
+                            }
+                        }),
+                    );
+                    if let Some(selected) = selected {
+                        slot.0 = selected.0;
+                        slot.1 = selected.1;
+                    }
                     !deleted
                 });
 
@@ -293,56 +301,36 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                             },
                         )
                         .interact(egui::Sense::click());
-                    show_modal(icon.id, icon.clicked(), ui, |ui| {
-                        let (selected_module, selected_quality) = single_module_selector(
-                            ui,
-                            self.ctx,
-                            self.allowed_effects,
-                            self.allowed_module_categories,
-                        );
-                        if let Some(selected_module) = selected_module {
-                            let quality = selected_quality.unwrap_or(0);
-                            // FIXME: 需要重构所有同时选择品质和物品的函数，不然自动填充不能填充带品质的插件
-                            while self.module_config.modules.len() <= idx {
-                                self.module_config
-                                    .modules
-                                    .push(IdWithQuality(selected_module.clone(), quality));
+                    let selected = item_with_quality_selector_modal(
+                        ui,
+                        self.ctx,
+                        "选择插件",
+                        "item",
+                        &icon,
+                        Some(&|s, f| {
+                            if let Some(module_proto) = f.modules.get(s) {
+                                // 过滤掉不符合要求的插件
+                                self.allowed_module_categories.as_ref().map_or(
+                                    true,
+                                    |allowed_categories| {
+                                        allowed_categories.contains(&module_proto.category)
+                                    },
+                                ) && module_effects_allowed(module_proto, self.allowed_effects)
+                            } else {
+                                false
                             }
-                            ui.close();
+                        }),
+                    );
+                    if let Some(selected) = selected {
+                        while self.module_config.modules.len() <= idx {
+                            self.module_config
+                                .modules
+                                .push(selected.clone());
                         }
-                    });
+                    }
                 }
             });
         });
         ui.response().clone()
     }
-}
-
-fn single_module_selector(
-    ui: &mut egui::Ui,
-    ctx: &FactorioContext,
-    allowed_effects: &Option<EffectTypeLimitation>,
-    allowed_module_categories: &Option<Vec<String>>,
-) -> (Option<String>, Option<u8>) {
-    let mut selected_module: Option<String> = None;
-    let mut selected_quality: Option<u8> = None;
-    ui.label("选择插件");
-    ui.horizontal(|ui| {
-        quality_selector(ui, ctx, &mut selected_quality);
-    });
-    ui.add(
-        ItemSelector::new(ctx, "item", &mut selected_module).with_filter(|name, ctx| {
-            if let Some(module) = ctx.modules.get(name) {
-                module_effects_allowed(module, allowed_effects)
-                    && (allowed_module_categories.is_none()
-                        || allowed_module_categories
-                            .as_ref()
-                            .unwrap()
-                            .contains(&module.category))
-            } else {
-                false
-            }
-        }),
-    );
-    (selected_module, selected_quality)
 }

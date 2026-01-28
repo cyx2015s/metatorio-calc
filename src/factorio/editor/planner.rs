@@ -469,22 +469,21 @@ impl EditorView for FactoryInstance {
                                                 });
                                             ui.horizontal(|ui| {
                                                 match item {
-                                                    GenericItem::Item { name, quality } => {
-                                                        let (selected_id, selected_quality) =
+                                                    GenericItem::Item { .. } => {
+                                                        if let Some(selected) =
                                                             item_with_quality_selector_modal(
                                                                 ui,
                                                                 ctx,
                                                                 "选择物品",
                                                                 "item",
                                                                 &icon,
-                                                            );
-                                                        if let Some(selected_id) = selected_id {
-                                                            *name = selected_id;
-                                                        }
-                                                        if let Some(selected_quality) =
-                                                            selected_quality
+                                                                None,
+                                                            )
                                                         {
-                                                            *quality = selected_quality;
+                                                            *item = GenericItem::Item {
+                                                                name: selected.0,
+                                                                quality: selected.1,
+                                                            };
                                                         }
                                                     }
                                                     GenericItem::Fluid {
@@ -497,6 +496,7 @@ impl EditorView for FactoryInstance {
                                                             "选择流体",
                                                             "fluid",
                                                             &icon,
+                                                            None,
                                                         ) {
                                                             *item = GenericItem::Fluid {
                                                                 name: selected,

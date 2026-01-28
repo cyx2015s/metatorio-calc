@@ -616,13 +616,15 @@ impl EditorView for RecipeConfig {
                             prototype: ctx.recipes.get(&self.recipe.0).unwrap(),
                         });
                     });
-                let (selected_id, selected_quality) =
-                    item_with_quality_selector_modal(ui, ctx, "选择配方", "recipe", &recipe_button);
-                if let Some(selected_id) = selected_id {
-                    self.recipe.0 = selected_id;
-                }
-                if let Some(selected_quality) = selected_quality {
-                    self.recipe.1 = selected_quality;
+                if let Some(selected) = item_with_quality_selector_modal(
+                    ui,
+                    ctx,
+                    "选择配方",
+                    "recipe",
+                    &recipe_button,
+                    None,
+                ) {
+                    self.recipe = selected;
                 }
             });
             ui.separator();

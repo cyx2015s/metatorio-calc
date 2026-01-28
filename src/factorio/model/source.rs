@@ -135,21 +135,22 @@ impl EditorView for InfiniteSource {
                 )
                 .interact(egui::Sense::click());
             match &mut self.item {
-                GenericItem::Item { name, quality } => {
-                    let (selected_id, selected_quality) =
-                        item_with_quality_selector_modal(ui, ctx, "选择物品", "item", &icon);
-                    if let Some(selected_id) = selected_id {
-                        *name = selected_id;
-                    }
-                    if let Some(selected_quality) = selected_quality {
-                        *quality = selected_quality;
+                GenericItem::Item { .. } => {
+                    if let Some(selected) =
+                        item_with_quality_selector_modal(ui, ctx, "选择物品", "item", &icon, None)
+                    {
+                        self.item = GenericItem::Item {
+                            name: selected.0,
+                            quality: selected.1,
+                        };
                     }
                 }
                 GenericItem::Fluid {
                     name: _,
                     temperature: _,
                 } => {
-                    if let Some(selected) = item_selector_modal(ui, ctx, "选择流体", "fluid", &icon)
+                    if let Some(selected) =
+                        item_selector_modal(ui, ctx, "选择流体", "fluid", &icon, None)
                     {
                         self.item = GenericItem::Fluid {
                             name: selected,
@@ -159,7 +160,7 @@ impl EditorView for InfiniteSource {
                 }
                 GenericItem::Entity { name: _, quality } => {
                     if let Some(selected) =
-                        item_selector_modal(ui, ctx, "选择实体", "entity", &icon)
+                        item_selector_modal(ui, ctx, "选择实体", "entity", &icon, None)
                     {
                         self.item = GenericItem::Entity {
                             name: selected,
