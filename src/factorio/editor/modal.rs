@@ -119,7 +119,6 @@ impl egui::Widget for ItemSelectorModal<'_> {
                 .show(ui, |ui| {
                     ui.add(widget);
                 });
-            dbg!(&sentinel);
             if let Some(selected) = sentinel {
                 if let Some(&mut ref mut output) = self.output {
                     *output = Some(selected);
@@ -183,7 +182,30 @@ impl egui::Widget for ItemWithQualitySelectorModal<'_> {
         );
         let id = self.button.id;
         let mut sentinel = None;
-        let _modal = show_modal(id, self.button.clicked(), ui, |ui| {
+        let mut degenerated = None;
+        if self.ctx.qualities.len() == 1 {
+            // 回退到普通选择器
+
+            let mut widget =
+                ItemSelectorModal::new(self.ctx, self.label_str, self.item_type, self.button);
+            if let Some(custom_filter) = self.filter {
+                widget = widget.with_filter(custom_filter);
+            }
+            if let Some(current) = self.current {
+                widget = widget.with_current(&mut current.0);
+            }
+            if self.output.is_some() {
+                widget = widget.with_output(&mut degenerated);
+            }
+            let ret = widget.ui(ui);
+            if let Some(selected) = degenerated {
+                if let Some(&mut ref mut output) = self.output {
+                    *output = Some(IdWithQuality(selected, 0));
+                }
+            }
+            return ret;
+        }
+        show_modal(id, self.button.clicked(), ui, |ui| {
             let mut filter_string = ui
                 .memory(move |mem| mem.data.get_temp::<FilterString>(id).unwrap_or_default())
                 .0;

@@ -174,8 +174,7 @@ impl FactoryInstance {
             });
         });
         ui.separator();
-        let flow_editors = &mut self.flow_editors;
-        flow_editors.retain_mut(|flow_config| {
+        self.flow_editors.retain_mut(|flow_config| {
             let mut deleted = false;
             card_frame(ui).show(ui, {
                 |ui| {
@@ -703,10 +702,6 @@ impl Subview for FactorioContextCreatorView {
             let mut can_load_context = true;
             if self.path.is_none() {
                 ui.label("请选择游戏可执行文件以继续。");
-                can_load_context = false;
-            }
-            if self.thread.is_some() {
-                ui.label("有一个正在加载的游戏上下文了。");
                 can_load_context = false;
             }
             if let Some(mod_path) = self.mod_path.as_ref()
