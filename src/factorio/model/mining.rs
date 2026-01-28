@@ -313,28 +313,18 @@ impl EditorView for MiningConfig {
                         "矿物：{}",
                         ctx.get_display_name("entity", &self.resource)
                     ));
-                let mut selected_id = None;
                 show_modal(resource_button.id, resource_button.clicked(), ui, |ui| {
                     egui::ScrollArea::vertical()
                         .max_width(f32::INFINITY)
                         .auto_shrink(false)
                         .show(ui, |ui| {
                             ui.add(
-                                ItemSelector::new(
-                                    ctx,
-                                    "entity",
-                                    &mut selected_id,
-                                )
-                                .with_filter(|s: &str, f| f.resources.contains_key(s)),
+                                ItemSelector::new(ctx, "entity")
+                                    .set_current(&mut self.resource)
+                                    .with_filter(|s: &str, f| f.resources.contains_key(s)),
                             );
-                            if selected_id.is_some() {
-                                ui.close();
-                            }
                         });
                 });
-                if let Some(selected_id) = selected_id {
-                    self.resource = selected_id;
-                }
             });
             ui.separator();
             ui.vertical(|ui| {
@@ -377,8 +367,9 @@ impl EditorView for MiningConfig {
                         .auto_shrink(false)
                         .show(ui, |ui| {
                             ui.add(
-                                ItemSelector::new(ctx, "entity", &mut selected_entity).with_filter(
-                                    |s, f| {
+                                ItemSelector::new(ctx, "entity")
+                                    .set_output(&mut selected_entity)
+                                    .with_filter(|s, f| {
                                         if let Some(miner) = f.miners.get(s) {
                                             miner.resource_categories.contains(
                                                 resource_proto
@@ -389,12 +380,8 @@ impl EditorView for MiningConfig {
                                         } else {
                                             false
                                         }
-                                    },
-                                ),
+                                    }),
                             );
-                            if selected_entity.is_some() {
-                                ui.close();
-                            }
                         });
 
                     if selected_entity.is_some() {
