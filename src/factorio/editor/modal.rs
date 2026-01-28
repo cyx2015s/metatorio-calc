@@ -85,7 +85,7 @@ impl egui::Widget for ItemSelectorModal<'_> {
             "结果不要了吗，还回家吃饭吗？"
         );
         let id = self.button.id;
-        let mut sentiniel = None;
+        let mut sentinel = None;
         show_modal(id, self.button.clicked(), ui, |ui| {
             let mut filter_string = ui
                 .memory(move |mem| mem.data.get_temp::<FilterString>(id).unwrap_or_default())
@@ -105,7 +105,7 @@ impl egui::Widget for ItemSelectorModal<'_> {
                         .to_lowercase()
                         .contains(&filter_string.to_lowercase())
             });
-            widget = widget.with_output(&mut sentiniel);
+            widget = widget.with_output(&mut sentinel);
 
             if let Some(current) = self.current {
                 widget = widget.with_current(current);
@@ -119,12 +119,12 @@ impl egui::Widget for ItemSelectorModal<'_> {
                 .show(ui, |ui| {
                     ui.add(widget);
                 });
-
-            if let Some(selected) = sentiniel {
+            dbg!(&sentinel);
+            if let Some(selected) = sentinel {
                 if let Some(&mut ref mut output) = self.output {
                     *output = Some(selected);
-                    ui.close();
                 }
+                ui.close();
             }
         });
         ui.response().clone()
@@ -182,8 +182,8 @@ impl egui::Widget for ItemWithQualitySelectorModal<'_> {
             "结果不要了吗，还回家吃饭吗？"
         );
         let id = self.button.id;
-        let mut sentiniel = None;
-        show_modal(id, self.button.clicked(), ui, |ui| {
+        let mut sentinel = None;
+        let modal = show_modal(id, self.button.clicked(), ui, |ui| {
             let mut filter_string = ui
                 .memory(move |mem| mem.data.get_temp::<FilterString>(id).unwrap_or_default())
                 .0;
@@ -193,8 +193,8 @@ impl egui::Widget for ItemWithQualitySelectorModal<'_> {
                 mem.data
                     .insert_temp(id, FilterString(filter_string.clone()));
             });
-            let mut widget =
-                ItemWithQualitySelector::new(self.ctx, self.item_type).with_filter(|s, f| {
+            let mut widget = ItemWithQualitySelector::new(self.ctx, self.item_type)
+                .with_filter(|s, f| {
                     if filter_string.is_empty() {
                         return true;
                     }
@@ -202,8 +202,9 @@ impl egui::Widget for ItemWithQualitySelectorModal<'_> {
                         || f.get_display_name(self.item_type, s)
                             .to_lowercase()
                             .contains(&filter_string.to_lowercase())
-                });
-            widget = widget.with_output(&mut sentiniel);
+                })
+                .with_forget(self.button.clicked());
+            widget = widget.with_output(&mut sentinel);
 
             if let Some(current) = self.current {
                 widget = widget.with_current(current);
@@ -217,11 +218,11 @@ impl egui::Widget for ItemWithQualitySelectorModal<'_> {
                 .show(ui, |ui| {
                     ui.add(widget);
                 });
-            if let Some(selected) = sentiniel {
+            if let Some(selected) = sentinel {
                 if let Some(&mut ref mut output) = self.output {
                     *output = Some(selected);
-                    ui.close();
                 }
+                ui.close();
             }
         });
         ui.response().clone()

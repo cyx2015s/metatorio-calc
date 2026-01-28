@@ -135,12 +135,12 @@ impl EditorView for InfiniteSource {
                     );
                 }
                 GenericItem::Fluid { .. } => {
-                    let mut sentiniel = None;
+                    let mut sentinel = None;
                     ui.add(
                         ItemSelectorModal::new(ctx, "选择流体", "fluid", &icon)
-                            .with_output(&mut sentiniel),
+                            .with_output(&mut sentinel),
                     );
-                    if let Some(name) = sentiniel {
+                    if let Some(name) = sentinel {
                         self.item = GenericItem::Fluid {
                             name: name.clone(),
                             temperature: None,

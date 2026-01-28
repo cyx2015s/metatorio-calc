@@ -639,35 +639,41 @@ impl EditorView for RecipeConfig {
                     ui.add_sized([35.0, 35.0], egui::Label::new("空"))
                 };
                 let recipe_prototype = ctx.recipes.get(self.recipe.0.as_str()).unwrap();
-                ui.add(
-                    ItemWithQualitySelectorModal::new(
-                        ctx,
-                        "选择制造设备",
-                        "entity",
-                        &entity_button,
-                    )
-                    .with_output(&mut self.machine)
-                    .with_filter(|crafter_name, ctx| {
-                        if let Some(crafter) = ctx.crafters.get(crafter_name) {
-                            if crafter.crafting_categories.contains(
-                                recipe_prototype
-                                    .category
-                                    .as_ref()
-                                    .unwrap_or(&"crafting".to_string()),
-                            ) {
-                                return true;
-                            }
-                            if recipe_prototype
-                                .additional_categories
-                                .iter()
-                                .any(|cat| crafter.crafting_categories.contains(cat))
-                            {
-                                return true;
-                            }
+                let mut widget = ItemWithQualitySelectorModal::new(
+                    ctx,
+                    "选择制造设备",
+                    "entity",
+                    &entity_button,
+                )
+                .with_filter(|crafter_name, ctx| {
+                    if let Some(crafter) = ctx.crafters.get(crafter_name) {
+                        if crafter.crafting_categories.contains(
+                            recipe_prototype
+                                .category
+                                .as_ref()
+                                .unwrap_or(&"crafting".to_string()),
+                        ) {
+                            return true;
                         }
-                        false
-                    }),
-                );
+                        if recipe_prototype
+                            .additional_categories
+                            .iter()
+                            .any(|cat| crafter.crafting_categories.contains(cat))
+                        {
+                            return true;
+                        }
+                    }
+                    false
+                });
+                match self.machine {
+                    Some(ref mut machine) => {
+                        widget = widget.with_current(machine);
+                    }
+                    None => {
+                        widget = widget.with_output(&mut self.machine);
+                    }
+                }
+                ui.add(widget);
             });
 
             ui.separator();

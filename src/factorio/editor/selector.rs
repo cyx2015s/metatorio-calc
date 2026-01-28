@@ -2,12 +2,7 @@ use std::collections::HashMap;
 
 use egui::Vec2;
 
-use crate::factorio::{
-    IdWithQuality,
-    editor::icon::*,
-    hover::*,
-    model::*,
-};
+use crate::factorio::{IdWithQuality, editor::icon::*, hover::*, model::*};
 
 #[derive(Debug, Clone, Default)]
 pub struct ItemSelectorStorage {
@@ -257,57 +252,45 @@ impl<'a> egui::Widget for ItemWithQualitySelector<'a> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         let id = ui.id();
 
-        if let Some(&mut ref mut current) = self.current {
-            let mut selecting_quality = None;
-            quality_selector(ui, self.ctx, &mut selecting_quality);
-            if let Some(selected_quality) = selecting_quality {
+        let mut storage = if self.forget {
+            ItemWithQualitySelectorStorage::default()
+        } else {
+            ui.memory(|mem| mem.data.get_temp::<ItemWithQualitySelectorStorage>(id))
+                .unwrap_or_default()
+        };
+        let mut selecting_quality = None;
+        let mut selecting_item = None;
+        quality_selector(ui, self.ctx, &mut selecting_quality);
+        ui.add(
+            ItemSelector::new(self.ctx, self.item_type)
+                .with_output(&mut selecting_item)
+                .with_filter(self.filter),
+        );
+        if let Some(selected_item) = &selecting_item {
+            storage.selected_item = Some(selected_item.clone());
+            if let Some(&mut ref mut current) = self.current {
+                current.0 = selected_item.clone();
+            }
+        }
+        if let Some(selected_quality) = selecting_quality {
+            storage.selected_quality = Some(selected_quality);
+            if let Some(&mut ref mut current) = self.current {
                 current.1 = selected_quality;
             }
-            ui.add(
-                ItemSelector::new(self.ctx, self.item_type)
-                    .with_current(&mut current.0)
-                    .with_filter(self.filter),
-            );
-        } else {
-            let mut storage = if self.forget {
-                ItemWithQualitySelectorStorage::default()
-            } else {
-                ui.memory(|mem| mem.data.get_temp::<ItemWithQualitySelectorStorage>(id))
-                    .unwrap_or_default()
-            };
-            let mut selecting_quality = None;
-            let mut selecting_item = None;
-            quality_selector(ui, self.ctx, &mut selecting_quality);
-            ui.add(
-                ItemSelector::new(self.ctx, self.item_type)
-                    .with_output(&mut selecting_item)
-                    .with_filter(self.filter),
-            );
-            if let Some(selected_item) = &selecting_item {
-                storage.selected_item = Some(selected_item.clone());
-                if let Some(&mut ref mut current) = self.current {
-                    current.0 = selected_item.clone();
-                }
-            }
-            if let Some(selected_quality) = selecting_quality {
-                storage.selected_quality = Some(selected_quality);
-                if let Some(&mut ref mut current) = self.current {
-                    current.1 = selected_quality;
-                }
-            }
-            if let Some(&mut ref mut output) = self.output {
-                if let (Some(item), Some(quality)) =
-                    (storage.selected_item.clone(), storage.selected_quality)
-                {
-                    *output = Some(IdWithQuality(item, quality));
-                }
-            }
-
-            ui.memory_mut(|mem| {
-                mem.data
-                    .insert_temp::<ItemWithQualitySelectorStorage>(id, storage.clone());
-            });
         }
+        if let Some(&mut ref mut output) = self.output {
+            if let (Some(item), Some(quality)) =
+                (storage.selected_item.clone(), storage.selected_quality)
+            {
+                *output = Some(IdWithQuality(item, quality));
+            }
+        }
+
+        ui.memory_mut(|mem| {
+            mem.data
+                .insert_temp::<ItemWithQualitySelectorStorage>(id, storage.clone());
+        });
+
         ui.response().clone()
     }
 }
