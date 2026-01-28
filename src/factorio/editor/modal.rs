@@ -183,7 +183,7 @@ impl egui::Widget for ItemWithQualitySelectorModal<'_> {
         );
         let id = self.button.id;
         let mut sentinel = None;
-        let modal = show_modal(id, self.button.clicked(), ui, |ui| {
+        let _modal = show_modal(id, self.button.clicked(), ui, |ui| {
             let mut filter_string = ui
                 .memory(move |mem| mem.data.get_temp::<FilterString>(id).unwrap_or_default())
                 .0;

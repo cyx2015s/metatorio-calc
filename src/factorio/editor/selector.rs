@@ -278,13 +278,12 @@ impl<'a> egui::Widget for ItemWithQualitySelector<'a> {
                 current.1 = selected_quality;
             }
         }
-        if let Some(&mut ref mut output) = self.output {
-            if let (Some(item), Some(quality)) =
+        if let Some(&mut ref mut output) = self.output
+            && let (Some(item), Some(quality)) =
                 (storage.selected_item.clone(), storage.selected_quality)
             {
                 *output = Some(IdWithQuality(item, quality));
             }
-        }
 
         ui.memory_mut(|mem| {
             mem.data

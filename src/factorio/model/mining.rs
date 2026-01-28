@@ -189,10 +189,7 @@ impl AsFlow for MiningConfig {
         if let Some(results) = &mining_property.results {
             for result in results.iter() {
                 let item = match result {
-                    RecipeResult::Item(r) => GenericItem::Entity(IdWithQuality(
-                        r.name.clone(),
-                        0,
-                    )),
+                    RecipeResult::Item(r) => GenericItem::Entity(IdWithQuality(r.name.clone(), 0)),
                     RecipeResult::Fluid(r) => GenericItem::Fluid {
                         name: r.name.clone(),
                         temperature: None,
@@ -244,10 +241,7 @@ impl AsFlow for MiningConfig {
                 if *quality_prob > 0.0 {
                     index_map_update_entry(
                         &mut map,
-                        GenericItem::Item(IdWithQuality(
-                            result.clone(),
-                            quality_level as u8,
-                        )),
+                        GenericItem::Item(IdWithQuality(result.clone(), quality_level as u8)),
                         total_yield * *quality_prob,
                     );
                 }

@@ -510,10 +510,7 @@ impl EditorView for FactoryInstance {
                             });
                             if ui.button("添加目标产物").clicked() {
                                 self.target.push((
-                                    GenericItem::Item(IdWithQuality(
-                                        "item-unknown".to_string(),
-                                        0,
-                                    )),
+                                    GenericItem::Item(IdWithQuality("item-unknown".to_string(), 0)),
                                     1.0,
                                 ));
                             }

@@ -261,8 +261,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                             .with_filter(|s, f| {
                                 if let Some(module_proto) = f.modules.get(s) {
                                     // 过滤掉不符合要求的插件
-                                    self.allowed_module_categories.as_ref().map_or(
-                                        true,
+                                    self.allowed_module_categories.as_ref().is_none_or(
                                         |allowed_categories| {
                                             allowed_categories.contains(&module_proto.category)
                                         },
@@ -295,8 +294,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                             .with_filter(|s, f| {
                                 if let Some(module_proto) = f.modules.get(s) {
                                     // 过滤掉不符合要求的插件
-                                    self.allowed_module_categories.as_ref().map_or(
-                                        true,
+                                    self.allowed_module_categories.as_ref().is_none_or(
                                         |allowed_categories| {
                                             allowed_categories.contains(&module_proto.category)
                                         },
