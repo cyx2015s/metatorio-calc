@@ -23,7 +23,6 @@ pub struct QualitySelectorStorage {
 }
 
 pub struct ItemSelector<'a> {
-    pub id: egui::Id,
     pub ctx: &'a FactorioContext,
     pub item_type: &'a str,
     pub filter: Box<dyn Fn(&str, &FactorioContext) -> bool + 'a>,
@@ -32,13 +31,11 @@ pub struct ItemSelector<'a> {
 
 impl<'a> ItemSelector<'a> {
     pub fn new(
-        id: egui::Id,
         ctx: &'a FactorioContext,
         item_type: &'a str,
         selected_item: &'a mut Option<String>,
     ) -> Self {
         Self {
-            id,
             ctx,
             item_type,
             filter: Box::new(|_, _| true),
@@ -197,7 +194,6 @@ impl egui::Widget for ItemSelector<'_> {
 }
 
 pub struct ItemWithQualitySelector<'a> {
-    pub id: egui::Id,
     pub ctx: &'a FactorioContext,
     pub item_type: &'a str,
     pub filter: Box<dyn Fn(&str, &FactorioContext) -> bool + 'a>,
@@ -217,13 +213,11 @@ pub struct ItemWithQualitySelectorStorage {
 
 impl<'a> ItemWithQualitySelector<'a> {
     pub fn new(
-        id: egui::Id,
         ctx: &'a FactorioContext,
         item_type: &'a str,
         selected_item: &'a mut Option<IdWithQuality>,
     ) -> Self {
         Self {
-            id,
             ctx,
             item_type,
             filter: Box::new(|_, _| true),
@@ -251,21 +245,19 @@ impl<'a> ItemWithQualitySelector<'a> {
 
 impl<'a> egui::Widget for ItemWithQualitySelector<'a> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
-        let id = self.id;
+        let id = ui.id();
         let mut storage = ui
             .memory(|mem| mem.data.get_temp::<ItemWithQualitySelectorStorage>(id))
             .unwrap_or_default();
         quality_selector(ui, self.ctx, &mut storage.selected_quality);
         ui.add(
             ItemSelector::new(
-                self.id,
                 self.ctx,
                 self.item_type,
                 &mut storage.selected_item,
             )
             .with_filter(self.filter),
         );
-
         if let Some(item_name) = &storage.selected_item {
             if let Some(quality) = storage.selected_quality {
                 self.selected_item
@@ -276,24 +268,7 @@ impl<'a> egui::Widget for ItemWithQualitySelector<'a> {
                 storage.selected_quality = None;
             }
         }
-        if ui.should_close() {
-            if let Some(selected_item) = &storage.selected_item {
-                if storage.selected_quality.is_some() {
-                    // 上个分支处理过了，不处理了
-                } else if let Some(last_quality) = &storage.last_selected_quality {
-                    self.selected_item
-                        .replace((selected_item.clone(), *last_quality).into());
-                }
-            } else if let Some(last_item) = &storage.last_selected_item {
-                if let Some(selected_quality) = &storage.selected_quality {
-                    self.selected_item
-                        .replace((last_item.clone(), *selected_quality).into());
-                } else if let Some(last_quality) = &storage.last_selected_quality {
-                    self.selected_item
-                        .replace((last_item.clone(), *last_quality).into());
-                }
-            }
-        }
+
 
         ui.memory_mut(|mem| {
             mem.data
@@ -356,7 +331,6 @@ pub fn item_selector_modal<'a>(
         ui.label(label_str);
         ui.add(egui::TextEdit::singleline(&mut filter_string).hint_text("筛选器……"));
         let mut widget = ItemSelector::new(
-            button.id.with("item-selector"),
             ctx,
             item_type,
             &mut selecting_item,
@@ -411,7 +385,6 @@ pub fn item_with_quality_selector_modal<'a>(
         ui.add(egui::TextEdit::singleline(&mut filter_string).hint_text("筛选器……"));
         let closure_filter_string = filter_string.clone();
         let mut widget = ItemWithQualitySelector::new(
-            button.id.with("item-with-quality-selector"),
             ctx,
             item_type,
             &mut selecting_item,
