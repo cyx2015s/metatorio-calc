@@ -141,15 +141,8 @@ impl FactoryInstance {
                         ui.add_sized([35.0, 15.0], SignedCompactLabel::new(amount));
                         let icon = ui
                             .push_id(item, |ui| {
-                                ui.add_sized(
-                                    [35.0, 35.0],
-                                    GenericIcon {
-                                        ctx,
-                                        item,
-                                        size: 32.0,
-                                    },
-                                )
-                                .interact(egui::Sense::click())
+                                ui.add_sized([35.0, 35.0], GenericIcon::new(ctx, item))
+                                    .interact(egui::Sense::click())
                             })
                             .inner;
 
@@ -222,11 +215,8 @@ impl FactoryInstance {
                                         let icon = ui
                                             .add_sized(
                                                 [35.0, 35.0],
-                                                GenericIcon {
-                                                    ctx,
-                                                    item,
-                                                    size: 32.0,
-                                                },
+                                                GenericIcon::new(ctx, item)
+                                                    
                                             )
                                             .interact(egui::Sense::click());
                                         let toggle =
@@ -328,11 +318,8 @@ impl EditorView for FactoryInstance {
                                                 let icon = ui
                                                     .add_sized(
                                                         [35.0, 35.0],
-                                                        GenericIcon {
-                                                            ctx,
-                                                            item,
-                                                            size: 32.0,
-                                                        },
+                                                        GenericIcon::new(ctx, item)
+                                                            
                                                     )
                                                     .interact(egui::Sense::click());
                                                 if ui.button("删除").clicked() {

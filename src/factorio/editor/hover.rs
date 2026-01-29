@@ -39,13 +39,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
                             for ingredient in ingredients.iter() {
                                 match ingredient {
                                     RecipeIngredient::Item(i) => {
-                                        let _icon = ui.add(Icon {
-                                            ctx: self.ctx,
-                                            type_name: "item",
-                                            item_name: &i.name,
-                                            size: 32.0,
-                                            quality: 0,
-                                        });
+                                        let _icon = ui.add(Icon::new(self.ctx, "item", &i.name));
                                         ui.horizontal_top(|ui| {
                                             ui.vertical(|ui| {
                                                 ui.add(CompactLabel::new(i.amount));
@@ -53,13 +47,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
                                         });
                                     }
                                     RecipeIngredient::Fluid(f) => {
-                                        let _icon = ui.add(Icon {
-                                            ctx: self.ctx,
-                                            type_name: "fluid",
-                                            item_name: &f.name,
-                                            size: 32.0,
-                                            quality: 0,
-                                        });
+                                        let _icon = ui.add(Icon::new(self.ctx, "fluid", &f.name));
                                         ui.vertical(|ui| {
                                             ui.horizontal_top(|ui| {
                                                 ui.add(CompactLabel::new(f.amount));
@@ -120,13 +108,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
                             for result in results.iter() {
                                 match result {
                                     RecipeResult::Item(i) => {
-                                        let _icon = ui.add(Icon {
-                                            ctx: self.ctx,
-                                            type_name: "item",
-                                            item_name: &i.name,
-                                            size: 32.0,
-                                            quality: 0,
-                                        });
+                                        let _icon = ui.add(Icon::new(self.ctx, "item", &i.name));
                                         let output = i.normalized_output();
                                         ui.vertical(|ui| {
                                             ui.horizontal_top(|ui| {
@@ -139,13 +121,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
                                         });
                                     }
                                     RecipeResult::Fluid(f) => {
-                                        let _icon = ui.add(Icon {
-                                            ctx: self.ctx,
-                                            type_name: "fluid",
-                                            item_name: &f.name,
-                                            size: 32.0,
-                                            quality: 0,
-                                        });
+                                        let _icon = ui.add(Icon::new(self.ctx, "fluid", &f.name));
                                         let output = f.normalized_output();
                                         ui.vertical(|ui| {
                                             ui.horizontal_top(|ui| {

@@ -130,13 +130,7 @@ impl egui::Widget for ItemSelector<'_> {
                     }
                     idx += 1;
                     if ui
-                        .add(Icon {
-                            ctx: self.ctx,
-                            type_name: "item-group",
-                            item_name: &group_name,
-                            size: 64.0,
-                            quality: 0,
-                        })
+                        .add(Icon::new(self.ctx, "item-group", &group_name).with_size(64.0))
                         .interact(egui::Sense::click())
                         .clicked()
                     {
@@ -164,13 +158,10 @@ impl egui::Widget for ItemSelector<'_> {
                         }
                         idx += 1;
                         let button = ui
-                            .add(Icon {
-                                ctx: self.ctx,
-                                type_name: self.item_type,
-                                item_name: &item_name.to_string(),
-                                size: 32.0,
-                                quality: 0,
-                            })
+                            .add(
+                                Icon::new(self.ctx, self.item_type, &item_name.to_string())
+                                    .with_size(32.0),
+                            )
                             .interact(egui::Sense::click())
                             .on_hover_ui(|ui| {
                                 if let Some(hover) = &self.hover {
@@ -347,13 +338,7 @@ fn quality_selector(ui: &mut egui::Ui, ctx: &FactorioContext, selected_quality: 
                 let quality_button = ui
                     .add_sized(
                         [32.0, 32.0],
-                        Icon {
-                            ctx,
-                            type_name: "quality",
-                            item_name: &quality.base.name,
-                            size: 32.0,
-                            quality: 0,
-                        },
+                        Icon::new(ctx, "quality", &quality.base.name).with_size(32.0),
                     )
                     .on_hover_text(ctx.get_display_name("quality", &quality.base.name))
                     .interact(egui::Sense::click());

@@ -13,19 +13,57 @@ pub struct Icon<'a> {
 }
 
 impl<'a> Icon<'a> {
-    fn image(&'_ self) -> egui::Image<'_> {
-        let icon_path = format!(
-            "file://{}/{}/{}.png",
-            self.ctx.icon_path.as_ref().unwrap().to_string_lossy(),
-            self.type_name,
-            self.item_name
-        );
+    pub fn new(ctx: &'a FactorioContext, type_name: &'a str, item_name: &'a str) -> Self {
+        Self {
+            ctx,
+            type_name,
+            item_name,
+            quality: 0,
+            size: 32.0,
+        }
+    }
+
+    pub fn with_quality(mut self, quality: u8) -> Self {
+        self.quality = quality;
+        self
+    }
+
+    pub fn with_size(mut self, size: f32) -> Self {
+        self.size = size;
+        self
+    }
+
+    pub fn image(&'_ self) -> egui::Image<'_> {
+        let root_path = self.ctx.icon_path.as_ref().unwrap();
+        // 某个 type 的 order info 存在，但是没有对应的物品，视为物品不存在
+        // 某个 type 的 order info 不存在，当作存在
+        let icon_path = if self
+            .ctx
+            .order_of_entries
+            .get(self.type_name)
+            .is_some_and(|v| v.get(self.item_name).is_none())
+        {
+            format!(
+                "file://{}/{}/{}.png",
+                root_path.to_string_lossy(),
+                "item",
+                "item-unknown"
+            )
+        } else {
+            format!(
+                "file://{}/{}/{}.png",
+                root_path.to_string_lossy(),
+                self.type_name,
+                self.item_name
+            )
+        };
         egui::Image::new(icon_path)
     }
 }
 
 impl<'a> egui::Widget for Icon<'a> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+        let root_path = self.ctx.icon_path.as_ref().unwrap();
         egui::Frame::NONE
             .fill(egui::Color32::from_rgba_premultiplied(
                 0xaa, 0xaa, 0xaa, 0xcc,
@@ -51,7 +89,7 @@ impl<'a> egui::Widget for Icon<'a> {
                             .1,
                         egui::Image::new(format!(
                             "file://{}/{}/{}.png",
-                            self.ctx.icon_path.as_ref().unwrap().to_string_lossy(),
+                            root_path.to_string_lossy(),
                             "quality",
                             self.ctx.qualities[self.quality as usize].base.name
                         )),
@@ -69,6 +107,21 @@ pub struct GenericIcon<'a> {
     pub size: f32,
 }
 
+impl<'a> GenericIcon<'a> {
+    pub fn new(ctx: &'a FactorioContext, item: &'a GenericItem) -> Self {
+        Self {
+            ctx,
+            item,
+            size: 32.0,
+        }
+    }
+
+    pub fn with_size(mut self, size: f32) -> Self {
+        self.size = size;
+        self
+    }
+}
+
 impl<'a> egui::Widget for GenericIcon<'a> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         match self.item {
@@ -76,13 +129,9 @@ impl<'a> egui::Widget for GenericIcon<'a> {
             GenericItem::Item(IdWithQuality(name, quality)) => ui
                 .add_sized(
                     [self.size, self.size],
-                    Icon {
-                        ctx: self.ctx,
-                        type_name: "item",
-                        item_name: name,
-                        size: self.size,
-                        quality: *quality,
-                    },
+                    Icon::new(self.ctx, "item", name)
+                        .with_quality(*quality)
+                        .with_size(self.size),
                 )
                 .on_hover_text(format!("物品: {}", self.ctx.get_display_name("item", name))),
             GenericItem::Fluid {
@@ -91,13 +140,9 @@ impl<'a> egui::Widget for GenericIcon<'a> {
             } => ui
                 .add_sized(
                     [self.size, self.size],
-                    Icon {
-                        ctx: self.ctx,
-                        type_name: "fluid",
-                        item_name: name,
-                        size: self.size,
-                        quality: 0,
-                    },
+                    Icon::new(self.ctx, "fluid", name)
+                        .with_quality(0)
+                        .with_size(self.size),
                 )
                 .on_hover_text(format!(
                     "流体: {}",
@@ -106,13 +151,9 @@ impl<'a> egui::Widget for GenericIcon<'a> {
             GenericItem::Entity(IdWithQuality(name, quality)) => ui
                 .add_sized(
                     [self.size, self.size],
-                    Icon {
-                        ctx: self.ctx,
-                        type_name: "entity",
-                        item_name: name,
-                        size: self.size,
-                        quality: *quality,
-                    },
+                    Icon::new(self.ctx, "entity", name)
+                        .with_quality(*quality)
+                        .with_size(self.size),
                 )
                 .on_hover_text(format!(
                     "实体: {}",

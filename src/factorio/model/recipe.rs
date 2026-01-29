@@ -616,13 +616,7 @@ impl EditorView for RecipeConfig {
                 let recipe_button = ui
                     .add_sized(
                         [35.0, 35.0],
-                        Icon {
-                            ctx,
-                            type_name: "recipe",
-                            item_name: &self.recipe.0,
-                            quality: self.recipe.1,
-                            size: 32.0,
-                        },
+                        Icon::new(ctx, "recipe", &self.recipe.0).with_quality(self.recipe.1),
                     )
                     .interact(egui::Sense::click())
                     .on_hover_ui(|ui| {
@@ -658,33 +652,23 @@ impl EditorView for RecipeConfig {
             ui.separator();
             ui.vertical(|ui| {
                 ui.add_sized([35.0, 15.0], egui::Label::new("机器"));
-                let entity_button = if ctx.crafters.contains_key(&self.machine.0) {
-                    ui.add_sized(
+                let entity_button = ui
+                    .add_sized(
                         [35.0, 35.0],
-                        GenericIcon {
+                        GenericIcon::new(
                             ctx,
-                            item: &GenericItem::Entity(IdWithQuality(
+                            &GenericItem::Entity(IdWithQuality(
                                 self.machine.0.clone(),
                                 self.machine.1,
                             )),
-                            size: 32.0,
-                        },
+                        ),
                     )
                     .interact(egui::Sense::click())
-                } else {
-                    ui.add_sized(
-                        [35.0, 35.0],
-                        Icon {
-                            ctx,
-                            type_name: "entity",
-                            item_name: "entity-unknown",
-                            quality: 0,
-                            size: 32.0,
-                        },
-                    )
-                    .interact(egui::Sense::click())
-                    .on_hover_text("组装机：未选择")
-                };
+                    .on_hover_text(if ctx.crafters.contains_key(&self.machine.0) {
+                        ctx.get_display_name("entity", &self.machine.0)
+                    } else {
+                        "组装机：未选择".to_string()
+                    });
 
                 let recipe_prototype = ctx.recipes.get(self.recipe.0.as_str()).unwrap();
                 let widget = ItemWithQualitySelectorModal::new(

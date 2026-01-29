@@ -296,16 +296,7 @@ impl EditorView for MiningConfig {
                 ui.label("开采");
 
                 let resource_button = ui
-                    .add_sized(
-                        [35.0, 35.0],
-                        Icon {
-                            ctx,
-                            type_name: "entity",
-                            item_name: &self.resource,
-                            quality: 0,
-                            size: 32.0,
-                        },
-                    )
+                    .add_sized([35.0, 35.0], Icon::new(ctx, "entity", &self.resource))
                     .interact(egui::Sense::click())
                     .on_hover_text(format!(
                         "矿物：{}",
@@ -333,33 +324,15 @@ impl EditorView for MiningConfig {
             ui.separator();
             ui.vertical(|ui| {
                 ui.add_sized([35.0, 15.0], egui::Label::new("机器"));
-                let entity_button = if ctx.miners.contains_key(&self.machine.0) {
-                    ui.add_sized(
-                        [35.0, 35.0],
-                        Icon {
-                            ctx,
-                            type_name: "entity",
-                            item_name: &self.machine.0,
-                            quality: self.machine.1,
-                            size: 32.0,
-                        },
-                    )
+                let entity_button = ui
+                    .add_sized([35.0, 35.0], Icon::new(ctx, "entity", &self.machine.0))
                     .interact(egui::Sense::click())
-                    .on_hover_text(ctx.get_display_name("entity", &self.machine.0))
-                } else {
-                    ui.add_sized(
-                        [35.0, 35.0],
-                        Icon {
-                            ctx,
-                            type_name: "entity",
-                            item_name: "entity-unknown",
-                            quality: 0,
-                            size: 32.0,
-                        },
-                    )
-                    .interact(egui::Sense::click())
-                    .on_hover_text("采矿机：未选择")
-                };
+                    .on_hover_text(if ctx.miners.contains_key(&self.machine.0) {
+                        ctx.get_display_name("entity", &self.machine.0)
+                    } else {
+                        "采矿机: 未选择".into()
+                    });
+
                 if let Some(resource_proto) = ctx.resources.get(&self.resource) {
                     ui.add(
                         ItemWithQualitySelectorModal::new(

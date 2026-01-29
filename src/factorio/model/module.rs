@@ -306,14 +306,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
             for (item, count) in total {
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing = [3.0, 3.0].into();
-                    ui.add_sized(
-                        [32.0, 32.0],
-                        GenericIcon {
-                            ctx: self.ctx,
-                            item: &item,
-                            size: 32.0,
-                        },
-                    );
+                    ui.add_sized([32.0, 32.0], GenericIcon::new(self.ctx, &item));
                     ui.add_sized([35.0, 15.0], CompactLabel::new(count as f64));
                 });
             }
@@ -328,15 +321,10 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                         let icon = ui
                             .add_sized(
                                 [35.0, 35.0],
-                                Icon {
-                                    ctx: self.ctx,
-                                    type_name: "item",
-                                    item_name: &slot.0,
-                                    quality: slot.1,
-                                    size: 32.0,
-                                },
+                                Icon::new(self.ctx, "item", &slot.0).with_quality(slot.1),
                             )
                             .interact(egui::Sense::click());
+
                         if icon.clicked_by(egui::PointerButton::Secondary) {
                             deleted = true;
                         }
@@ -371,13 +359,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                         let icon = ui
                             .add_sized(
                                 [35.0, 35.0],
-                                Icon {
-                                    ctx: self.ctx,
-                                    type_name: "item",
-                                    item_name: "empty-module-slot",
-                                    quality: 0,
-                                    size: 32.0,
-                                },
+                                Icon::new(self.ctx, "item", "empty-module-slot"),
                             )
                             .interact(egui::Sense::click());
                         let mut selected = None;
@@ -432,36 +414,20 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                         });
                         ui.separator();
                         ui.vertical(|ui| {
-                            let icon = if let Some(_beacon_proto) =
-                                self.ctx.beacons.get(&beacon_config.beacon.0)
-                            {
-                                ui.add_sized(
+                            let icon = ui
+                                .add_sized(
                                     [35.0, 35.0],
-                                    Icon {
-                                        ctx: self.ctx,
-                                        type_name: "entity",
-                                        item_name: &beacon_config.beacon.0,
-                                        size: 32.0,
-                                        quality: beacon_config.beacon.1,
-                                    },
+                                    Icon::new(self.ctx, "entity", &beacon_config.beacon.0)
+                                        .with_quality(beacon_config.beacon.1),
                                 )
                                 .on_hover_text(
-                                    self.ctx.get_display_name("entity", &beacon_config.beacon.0),
-                                )
-                            } else {
-                                ui.add_sized(
-                                    [35.0, 35.0],
-                                    Icon {
-                                        ctx: self.ctx,
-                                        type_name: "entity",
-                                        item_name: "entity-unknown",
-                                        size: 32.0,
-                                        quality: 0,
+                                    if self.ctx.beacons.contains_key(&beacon_config.beacon.0) {
+                                        self.ctx.get_display_name("entity", &beacon_config.beacon.0)
+                                    } else {
+                                        "未选择插件塔".to_string()
                                     },
                                 )
-                                .on_hover_text("未选择插件塔")
-                            }
-                            .interact(egui::Sense::click());
+                                .interact(egui::Sense::click());
                             let mut widget = ItemWithQualitySelectorModal::new(
                                 icon.id,
                                 self.ctx,
@@ -483,32 +449,16 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                 let mut deleted = false;
 
                                 ui.vertical(|ui| {
-                                    let icon =
-                                        if let Some(_module_proto) = self.ctx.modules.get(&id.0) {
-                                            ui.add_sized(
-                                                [35.0, 35.0],
-                                                Icon {
-                                                    ctx: self.ctx,
-                                                    type_name: "item",
-                                                    item_name: &id.0,
-                                                    size: 32.0,
-                                                    quality: id.1,
-                                                },
-                                            )
-                                            .on_hover_text(self.ctx.get_display_name("item", &id.0))
+                                    let icon = ui
+                                        .add_sized(
+                                            [35.0, 35.0],
+                                            Icon::new(self.ctx, "item", &id.0).with_quality(id.1),
+                                        )
+                                        .on_hover_text(if self.ctx.modules.contains_key(&id.0) {
+                                            self.ctx.get_display_name("item", &id.0)
                                         } else {
-                                            ui.add_sized(
-                                                [35.0, 35.0],
-                                                Icon {
-                                                    ctx: self.ctx,
-                                                    type_name: "item",
-                                                    item_name: "item-unknown",
-                                                    size: 32.0,
-                                                    quality: 0,
-                                                },
-                                            )
-                                            .on_hover_text("未选择插件")
-                                        }
+                                            "未选择插件".to_string()
+                                        })
                                         .interact(egui::Sense::click());
                                     if icon.clicked_by(egui::PointerButton::Secondary) {
                                         deleted = true;
