@@ -174,8 +174,10 @@ impl FactorioContext {
                 .unwrap_or(&Value::Null)
         }
         for entity in entities.values() {
-            if let Some(autoplace) = &entity.autoplace {
-                log::info!("自动生成的实体: {}", &entity.base.name);
+            if let Some(autoplace) = &entity.autoplace
+                && (entity.base.r#type == "resource")
+            {
+                log::info!("自动生成的资源: {}", &entity.base.name);
                 if !autoplace.control.is_empty() {
                     log::info!(" ↑ 对应的控制 ID 为 {}", &autoplace.control);
                 }
@@ -258,7 +260,7 @@ impl FactorioContext {
             } else {
                 vec![]
             })
-            .stdout(Stdio::inherit())
+            .stdout(Stdio::null())
             .output()
             .ok()?;
         if !dump_raw_command.status.success() {
@@ -274,7 +276,7 @@ impl FactorioContext {
             } else {
                 vec![]
             })
-            .stdout(Stdio::inherit())
+            .stdout(Stdio::null())
             .output()
             .ok()?;
         if !dump_locale_command.status.success() {
@@ -292,7 +294,7 @@ impl FactorioContext {
             } else {
                 vec![]
             })
-            .stdout(Stdio::inherit())
+            .stdout(Stdio::null())
             .output()
             .ok()?;
         if !dump_icon_sprites_command.status.success() {
@@ -460,7 +462,7 @@ impl FactorioContext {
             serde_json::from_str::<Value>(&std::fs::read_to_string(&mod_list_json_path).ok()?)
                 .ok()?;
         for mod_info in mod_list_json_content.get_mut("mods")?.as_array_mut()? {
-            log::info!("加载模组信息 {:?}", mod_info);
+            // log::info!("加载模组信息 {:?}", mod_info);
             if mod_info.get("enabled")?.as_bool()? {
                 let mod_name = mod_info.get("name")?.as_str()?.to_string();
                 log::info!("启用模组 {}", &mod_name);
@@ -497,7 +499,9 @@ impl FactorioContext {
         // 没有 order 的 recipe 的 order 从 item 派生
         // md 长见识了，怎么还有不设置 group 和 subgroup 的配方
         for (recipe_name, recipe) in self.recipes.iter_mut() {
-            if (recipe.base.order.is_empty() || recipe.base.subgroup.is_empty()) && !recipe.base.hidden {
+            if (recipe.base.order.is_empty() || recipe.base.subgroup.is_empty())
+                && !recipe.base.hidden
+            {
                 if recipe.results.len() == 1 {
                     match recipe.results[0] {
                         RecipeResult::Item(ref r) => {

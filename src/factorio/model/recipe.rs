@@ -649,7 +649,7 @@ impl EditorView for RecipeConfig {
                         },
                     )
                     .interact(egui::Sense::click())
-                    .on_hover_text("采矿机：未选择")
+                    .on_hover_text("组装机：未选择")
                 };
 
                 let recipe_prototype = ctx.recipes.get(self.recipe.0.as_str()).unwrap();

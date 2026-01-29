@@ -586,8 +586,6 @@ impl Default for PlannerView {
 
 impl Subview for PlannerView {
     fn view(&mut self, ui: &mut egui::Ui) {
-        ui.heading("工厂规划器");
-        ui.separator();
         egui::Frame::group(ui.style())
             .corner_radius(8.0)
             .stroke(egui::Stroke::new(
