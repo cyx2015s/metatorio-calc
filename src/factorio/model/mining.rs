@@ -63,6 +63,18 @@ impl HasPrototypeBase for MiningDrillPrototype {
     }
 }
 
+pub fn machine_fits_for_resource(
+    miner: &MiningDrillPrototype,
+    resource: &ResourcePrototype,
+) -> bool {
+    miner.resource_categories.contains(
+        resource
+            .category
+            .as_ref()
+            .unwrap_or(&"basic-solid".to_string()),
+    )
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename = "factorio:mining")]
 pub struct MiningConfig {
@@ -308,9 +320,16 @@ impl EditorView for MiningConfig {
                 );
             });
             if changed {
-                self.module_config = ModuleConfig::default();
-                self.machine = "entity-unknown".into();
-                self.instance_fuel = None;
+                // TODO 读取用户设定的偏好
+                if let Some(miner) = ctx.miners.get(&self.machine.0) {
+                    if let Some(resource_proto) = ctx.resources.get(&self.resource) {
+                        if !machine_fits_for_resource(miner, resource_proto) {
+                            self.machine = "entity-unknown".into();
+                            self.instance_fuel = None;
+                            self.module_config = ModuleConfig::new();
+                        }
+                    }
+                }
             }
             ui.separator();
             ui.vertical(|ui| {
@@ -354,12 +373,7 @@ impl EditorView for MiningConfig {
                         .with_current(&mut self.machine)
                         .with_filter(|s, f| {
                             if let Some(miner) = f.miners.get(s) {
-                                miner.resource_categories.contains(
-                                    resource_proto
-                                        .category
-                                        .as_ref()
-                                        .unwrap_or(&"basic-solid".to_string()),
-                                )
+                                machine_fits_for_resource(miner, resource_proto)
                             } else {
                                 false
                             }

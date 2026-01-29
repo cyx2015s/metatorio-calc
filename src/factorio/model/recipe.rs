@@ -381,6 +381,26 @@ impl HasPrototypeBase for CraftingMachinePrototype {
     }
 }
 
+pub fn machine_fits_for_recipe(
+    crafter: &CraftingMachinePrototype,
+    recipe: &RecipePrototype,
+) -> bool {
+    if crafter
+        .crafting_categories
+        .contains(recipe.category.as_ref().unwrap_or(&"crafting".to_string()))
+    {
+        return true;
+    }
+    if recipe
+        .additional_categories
+        .iter()
+        .any(|cat| crafter.crafting_categories.contains(cat))
+    {
+        return true;
+    }
+    false
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename = "factorio:recipe")]
 pub struct RecipeConfig {
@@ -627,9 +647,13 @@ impl EditorView for RecipeConfig {
             });
             if changed {
                 // TODO 读取用户设定的偏好
-                self.module_config = ModuleConfig::default();
-                self.machine = "entity-unknown".into();
-                self.instance_fuel = None;
+                if let Some(crafter) = ctx.crafters.get(&self.machine.0) {
+                    if !machine_fits_for_recipe(crafter, ctx.recipes.get(&self.recipe.0).unwrap()) {
+                        self.machine = "entity-unknown".into();
+                        self.instance_fuel = None;
+                        self.module_config = ModuleConfig::new();
+                    }
+                }
             }
             ui.separator();
             ui.vertical(|ui| {
@@ -672,21 +696,7 @@ impl EditorView for RecipeConfig {
                 .with_toggle(entity_button.clicked())
                 .with_filter(|crafter_name, ctx| {
                     if let Some(crafter) = ctx.crafters.get(crafter_name) {
-                        if crafter.crafting_categories.contains(
-                            recipe_prototype
-                                .category
-                                .as_ref()
-                                .unwrap_or(&"crafting".to_string()),
-                        ) {
-                            return true;
-                        }
-                        if recipe_prototype
-                            .additional_categories
-                            .iter()
-                            .any(|cat| crafter.crafting_categories.contains(cat))
-                        {
-                            return true;
-                        }
+                        return machine_fits_for_recipe(crafter, recipe_prototype);
                     }
                     false
                 })

@@ -264,7 +264,17 @@ impl egui::Widget for ModuleConfigEditor<'_> {
             })
             .inner;
         if self.module_slots == 0 {
+            *self.module_config = ModuleConfig::default();
+            if let Some(changed) = &mut self.changed {
+                **changed = true;
+            }
             return ui.response().clone();
+        }
+        if self.module_slots < self.module_config.modules.len() {
+            self.module_config.modules.truncate(self.module_slots);
+            if let Some(changed) = &mut self.changed {
+                **changed = true;
+            }
         }
         ui.horizontal(|ui| {
             // 获取所有插件和信标的综合
