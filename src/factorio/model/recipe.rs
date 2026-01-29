@@ -647,12 +647,12 @@ impl EditorView for RecipeConfig {
             });
             if changed {
                 // TODO 读取用户设定的偏好
-                if let Some(crafter) = ctx.crafters.get(&self.machine.0) {
-                    if !machine_fits_for_recipe(crafter, ctx.recipes.get(&self.recipe.0).unwrap()) {
-                        self.machine = "entity-unknown".into();
-                        self.instance_fuel = None;
-                        self.module_config = ModuleConfig::new();
-                    }
+                if let Some(crafter) = ctx.crafters.get(&self.machine.0)
+                    && !machine_fits_for_recipe(crafter, ctx.recipes.get(&self.recipe.0).unwrap())
+                {
+                    self.machine = "entity-unknown".into();
+                    self.instance_fuel = None;
+                    self.module_config = ModuleConfig::new();
                 }
             }
             ui.separator();

@@ -162,7 +162,9 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
                                                     );
                                                 }
                                                 None => {
-                                                    if let Some(fluid) = self.ctx.fluids.get(&f.name) {
+                                                    if let Some(fluid) =
+                                                        self.ctx.fluids.get(&f.name)
+                                                    {
                                                         ui.add(
                                                             CompactLabel::new(
                                                                 fluid.default_temperature,

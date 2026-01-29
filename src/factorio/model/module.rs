@@ -424,15 +424,15 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                             let widget = egui::DragValue::new(&mut beacon_config.count)
                                 .range(1..=100)
                                 .clamp_existing_to_range(true);
-                            if ui.add(widget).changed() {
-                                if let Some(changed) = &mut self.changed {
-                                    **changed = true;
-                                }
+                            if ui.add(widget).changed()
+                                && let Some(changed) = &mut self.changed
+                            {
+                                **changed = true;
                             }
                         });
                         ui.separator();
                         ui.vertical(|ui| {
-                            let icon = if let Some(beacon_proto) =
+                            let icon = if let Some(_beacon_proto) =
                                 self.ctx.beacons.get(&beacon_config.beacon.0)
                             {
                                 ui.add_sized(
@@ -484,7 +484,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
 
                                 ui.vertical(|ui| {
                                     let icon =
-                                        if let Some(module_proto) = self.ctx.modules.get(&id.0) {
+                                        if let Some(_module_proto) = self.ctx.modules.get(&id.0) {
                                             ui.add_sized(
                                                 [35.0, 35.0],
                                                 Icon {
@@ -524,15 +524,17 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                     .with_filter(|s, f| {
                                         if let Some(module_proto) = f.modules.get(s) {
                                             // 过滤掉不符合要求的插件
-                                            beacon_proto.allowed_module_categories.as_ref().is_none_or(
-                                                |allowed_categories| {
+                                            beacon_proto
+                                                .allowed_module_categories
+                                                .as_ref()
+                                                .is_none_or(|allowed_categories| {
                                                     allowed_categories
                                                         .contains(&module_proto.category)
-                                                },
-                                            ) && module_effects_allowed(
-                                                module_proto,
-                                                &beacon_proto.allowed_effects,
-                                            )
+                                                })
+                                                && module_effects_allowed(
+                                                    module_proto,
+                                                    &beacon_proto.allowed_effects,
+                                                )
                                         } else {
                                             false
                                         }
@@ -554,17 +556,16 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                         [35.0, 15.0],
                                         egui::DragValue::new(amount)
                                             .range(
-                                                0..=(beacon_module_count
-                                                    * beacon_config.count as usize
+                                                0..=(beacon_module_count * beacon_config.count
                                                     - total_modules),
                                             )
                                             .clamp_existing_to_range(true)
                                             .speed(1),
                                     );
-                                    if amount_widget.changed() {
-                                        if let Some(changed) = &mut self.changed {
-                                            **changed = true;
-                                        }
+                                    if amount_widget.changed()
+                                        && let Some(changed) = &mut self.changed
+                                    {
+                                        **changed = true;
                                     }
 
                                     total_modules += *amount;

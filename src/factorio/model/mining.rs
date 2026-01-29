@@ -321,14 +321,13 @@ impl EditorView for MiningConfig {
             });
             if changed {
                 // TODO 读取用户设定的偏好
-                if let Some(miner) = ctx.miners.get(&self.machine.0) {
-                    if let Some(resource_proto) = ctx.resources.get(&self.resource) {
-                        if !machine_fits_for_resource(miner, resource_proto) {
-                            self.machine = "entity-unknown".into();
-                            self.instance_fuel = None;
-                            self.module_config = ModuleConfig::new();
-                        }
-                    }
+                if let Some(miner) = ctx.miners.get(&self.machine.0)
+                    && let Some(resource_proto) = ctx.resources.get(&self.resource)
+                    && !machine_fits_for_resource(miner, resource_proto)
+                {
+                    self.machine = "entity-unknown".into();
+                    self.instance_fuel = None;
+                    self.module_config = ModuleConfig::new();
                 }
             }
             ui.separator();
