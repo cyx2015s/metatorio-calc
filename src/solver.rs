@@ -32,10 +32,11 @@ where
 {
     target: Flow<I>,
     flows: IndexMap<R, (Flow<I>, f64)>,
-    external: IndexMap<I, f64>, //  输入以下物品消耗的价值
+    external: Flow<I>, //  输入特定物品消耗的价值
 }
 
 pub type BasicSolverArgs<I, R> = (Flow<I>, IndexMap<R, (Flow<I>, f64)>);
+pub type SolverArgs<I, R> = (Flow<I>, IndexMap<R, (Flow<I>, f64)>, Flow<I>);
 pub type SolverSolution<R> = Result<(Flow<R>, f64), String>;
 
 impl<I, R> SolverData<I, R>
@@ -51,7 +52,7 @@ where
         }
     }
 
-    pub fn with_external(mut self, external: IndexMap<I, f64>) -> Self {
+    pub fn with_external(mut self, external: Flow<I>) -> Self {
         self.external.extend(external);
         self
     }
@@ -90,6 +91,9 @@ where
                     no_providers.remove(item_id);
                 }
             }
+        }
+        for item in self.external.keys() {
+            no_providers.remove(item);
         }
         let mut targets = Vec::new();
         for (item_id, &amount) in &self.target {
@@ -163,6 +167,24 @@ where
             log::info!("求解线程启动");
             while let Ok((target, flows)) = arg_rx.recv() {
                 let solver_data = SolverData::new(target, flows);
+                // log::info!("收到了新的计算请求……");
+                if solution_tx.send(solver_data.solve()).is_err() {
+                    log::info!("求解线程退出");
+                    // 接收方已关闭，退出线程
+                    break;
+                }
+            }
+        });
+    }
+
+    pub fn make_solver_thread(
+        solution_tx: std::sync::mpsc::Sender<SolverSolution<R>>,
+        arg_rx: std::sync::mpsc::Receiver<SolverArgs<I, R>>,
+    ) {
+        std::thread::spawn(move || {
+            log::info!("求解线程启动");
+            while let Ok((target, flows, external)) = arg_rx.recv() {
+                let solver_data = SolverData::new(target, flows).with_external(external);
                 // log::info!("收到了新的计算请求……");
                 if solution_tx.send(solver_data.solve()).is_err() {
                     log::info!("求解线程退出");
