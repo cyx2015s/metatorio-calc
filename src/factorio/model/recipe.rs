@@ -623,8 +623,8 @@ impl EditorView for RecipeConfig {
             });
             ui.separator();
             ui.vertical(|ui| {
+                ui.add_sized([35.0, 15.0], egui::Label::new("机器"));
                 let entity_button = if ctx.crafters.contains_key(&self.machine.0) {
-                    ui.label("机器");
                     ui.add_sized(
                         [35.0, 35.0],
                         GenericIcon {
@@ -638,9 +638,20 @@ impl EditorView for RecipeConfig {
                     )
                     .interact(egui::Sense::click())
                 } else {
-                    ui.label("机器");
-                    ui.add_sized([35.0, 35.0], egui::Label::new("空"))
+                    ui.add_sized(
+                        [35.0, 35.0],
+                        Icon {
+                            ctx,
+                            type_name: "entity",
+                            item_name: "entity-unknown",
+                            quality: 0,
+                            size: 32.0,
+                        },
+                    )
+                    .interact(egui::Sense::click())
+                    .on_hover_text("采矿机：未选择")
                 };
+
                 let recipe_prototype = ctx.recipes.get(self.recipe.0.as_str()).unwrap();
                 let widget = ItemWithQualitySelectorModal::new(
                     ctx,

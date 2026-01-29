@@ -407,7 +407,6 @@ impl EditorView for FactoryInstance {
 
         egui::SidePanel::new(egui::containers::panel::Side::Left, egui::Id::new("target"))
             .show_separator_line(true)
-            .min_width(256.0)
             .frame(egui::Frame::NONE.corner_radius(8.0).inner_margin(4.0))
             .show_inside(ui, |ui: &mut egui::Ui| {
                 egui::ScrollArea::vertical().id_salt(1).show(ui, |ui| {

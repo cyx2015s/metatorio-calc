@@ -432,7 +432,22 @@ impl MechanicProvider for MiningConfigProvider {
                         if let Some(mining) = resource.base.minable.as_ref() {
                             if let Some(result) = &mining.result {
                                 if result == name {
-                                    let mining_config = MiningConfig::default();
+                                    let mut mining_config = MiningConfig {
+                                        resource: resource.base.base.name.clone(),
+                                        ..Default::default()
+                                    };
+                                    for miner in ctx.miners.values() {
+                                        if miner.resource_categories.contains(
+                                            resource
+                                                .category
+                                                .as_ref()
+                                                .unwrap_or(&"basic-solid".to_string()),
+                                        ) {
+                                            mining_config.machine =
+                                                (miner.base.base.name.clone(), 0).into();
+                                            break;
+                                        }
+                                    }
                                     ret.push(Box::new(mining_config)
                                         as Box<
                                             dyn Mechanic<
