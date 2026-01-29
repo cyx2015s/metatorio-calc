@@ -623,9 +623,6 @@ pub struct GenericItemWithLocation {
     location: u16,
 }
 
-impl ItemIdent for GenericItem {}
-impl ItemIdent for GenericItemWithLocation {}
-
 pub fn make_located_generic_recipe(
     original: Flow<GenericItem>,
     location: u16,

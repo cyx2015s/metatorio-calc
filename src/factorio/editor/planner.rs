@@ -51,18 +51,10 @@ pub struct FactoryInstance {
 
 impl Clone for FactoryInstance {
     fn clone(&self) -> Self {
-        let (param_tx, param_rx) = std::sync::mpsc::channel();
-        let (solution_tx, solution_rx) = std::sync::mpsc::channel();
         let (arg_tx, arg_rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            while let Ok((target, flows)) = param_rx.recv() {
-                log::info!("收到了新的计算请求……");
-                let result = basic_solver(target, flows);
-                if solution_tx.send(result).is_err() {
-                    break;
-                }
-            }
-        });
+        let (solution_tx, solution_rx) = std::sync::mpsc::channel();
+        let (mechanic_tx, mechanic_rx) = std::sync::mpsc::channel();
+        SolverData::make_basic_solver_thread(solution_tx, arg_rx);
 
         FactoryInstance {
             name: self.name.clone(),
@@ -73,9 +65,9 @@ impl Clone for FactoryInstance {
             flow_editor_sources: self.flow_editor_sources.clone(),
             flow_editors: self.flow_editors.clone(),
             hint_flows: self.hint_flows.clone(),
-            mechanic_receiver: arg_rx,
-            mechanic_sender: arg_tx,
-            arg_sender: param_tx,
+            mechanic_receiver: mechanic_rx,
+            mechanic_sender: mechanic_tx,
+            arg_sender: arg_tx,
             solution_receiver: solution_rx,
         }
     }
@@ -83,21 +75,14 @@ impl Clone for FactoryInstance {
 
 impl Default for FactoryInstance {
     fn default() -> Self {
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (mechanic_tx, mechanic_rx) = std::sync::mpsc::channel();
         let (arg_tx, arg_rx) = std::sync::mpsc::channel::<(
             Flow<GenericItem>,
             IndexMap<usize, (Flow<GenericItem>, f64)>,
         )>();
         let (solution_tx, solution_rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            while let Ok((target, flows)) = arg_rx.recv() {
-                log::info!("收到了新的计算请求……");
-                let result = basic_solver(target, flows);
-                if solution_tx.send(result).is_err() {
-                    break;
-                }
-            }
-        });
+        SolverData::make_basic_solver_thread(solution_tx, arg_rx);
+
         FactoryInstance {
             name: "工厂".to_string(),
             target: Vec::new(),
@@ -107,8 +92,8 @@ impl Default for FactoryInstance {
             flow_editor_sources: Vec::new(),
             flow_editors: Vec::new(),
             hint_flows: Vec::new(),
-            mechanic_receiver: rx,
-            mechanic_sender: tx,
+            mechanic_receiver: mechanic_rx,
+            mechanic_sender: mechanic_tx,
             arg_sender: arg_tx,
             solution_receiver: solution_rx,
         }
@@ -117,26 +102,8 @@ impl Default for FactoryInstance {
 
 impl FactoryInstance {
     pub fn new(name: String) -> Self {
-        let (tx, rx) = std::sync::mpsc::channel();
-        let (solver_sender, solver_receiver_internal) = std::sync::mpsc::channel::<(
-            Flow<GenericItem>,
-            IndexMap<usize, (Flow<GenericItem>, f64)>,
-        )>();
-        let (solver_sender_internal, solver_receiver) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            while let Ok((target, flows)) = solver_receiver_internal.recv() {
-                let result = basic_solver(target, flows);
-                if solver_sender_internal.send(result).is_err() {
-                    break;
-                }
-            }
-        });
         FactoryInstance {
             name,
-            mechanic_receiver: rx,
-            mechanic_sender: tx,
-            arg_sender: solver_sender,
-            solution_receiver: solver_receiver,
             ..Default::default()
         }
     }

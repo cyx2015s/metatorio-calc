@@ -28,7 +28,7 @@ pub fn box_as_ptr<T: ?Sized>(b: &Box<T>) -> usize {
 pub struct SolverData<I, R>
 where
     I: ItemIdent,
-    R: Eq + Hash + Clone + Debug,
+    R: ItemIdent,
 {
     target: Flow<I>,
     flows: IndexMap<R, (Flow<I>, f64)>,
@@ -38,7 +38,7 @@ where
 impl<I, R> SolverData<I, R>
 where
     I: ItemIdent,
-    R: Eq + Hash + Clone + Debug,
+    R: ItemIdent,
 {
     pub fn new(target: Flow<I>, flows: IndexMap<R, (Flow<I>, f64)>) -> Self {
         Self {
@@ -151,6 +151,24 @@ where
             }
         }
     }
+
+    pub fn make_basic_solver_thread(
+        solution_tx: std::sync::mpsc::Sender<Result<(Flow<R>, f64), String>>,
+        arg_rx: std::sync::mpsc::Receiver<(Flow<I>, IndexMap<R, (Flow<I>, f64)>)>,
+    ) {
+        std::thread::spawn(move || {
+            log::info!("求解线程启动");
+            while let Ok((target, flows)) = arg_rx.recv() {
+                let solver_data = SolverData::new(target, flows);
+                log::info!("收到了新的计算请求……");
+                if solution_tx.send(solver_data.solve()).is_err() {
+                    log::info!("求解线程退出");
+                    // 接收方已关闭，退出线程
+                    break;
+                }
+            }
+        });
+    }
 }
 
 /// 求解流程：从所有的 AsFlow 配方收集 Flow 信息
@@ -160,7 +178,7 @@ pub fn basic_solver<I, R>(
 ) -> Result<(Flow<R>, f64), String>
 where
     I: ItemIdent,
-    R: Eq + Hash + Clone + Debug,
+    R: ItemIdent,
 {
     SolverData::new(target, flows).solve()
 }

@@ -37,7 +37,7 @@ impl MainPage {
             subview_sender: tx,
             subviews: vec![],
             selected: 0,
-            exp_cpu_usage: 0.0
+            exp_cpu_usage: 0.0,
         };
         for creator in &mut ret.creators {
             creator.1.set_subview_sender(ret.subview_sender.clone());
@@ -64,7 +64,10 @@ impl eframe::App for MainPage {
             .show(ctx, |ui| {
                 ui.heading("切向量化");
                 ui.label(format!("[构建] Git 哈希: {}", GIT_HASH));
-                ui.label(format!("[性能] 帧生成时间: {:.2}ms", self.exp_cpu_usage * 1000.0));
+                ui.label(format!(
+                    "[性能] 帧生成时间: {:.2}ms",
+                    self.exp_cpu_usage * 1000.0
+                ));
                 ui.add(egui::Hyperlink::from_label_and_url(
                     "Github 仓库",
                     "https://github.com/cyx2015s/metatorio-calc",
@@ -87,7 +90,7 @@ impl eframe::App for MainPage {
                 for (i, subview) in self.subviews.iter().enumerate() {
                     if ui
                         .selectable_label(self.selected == i + self.creators.len(), subview.name())
-                        .on_hover_text(subview.description())
+                        .on_hover_text_at_pointer(subview.description())
                         .clicked()
                     {
                         self.selected = i + self.creators.len();
@@ -176,8 +179,8 @@ fn main() {
         Box::new(|cc| {
             egui_extras::install_image_loaders(&cc.egui_ctx);
             cc.egui_ctx.all_styles_mut(|style| {
-                style.interaction.tooltip_delay = 0.0;
-                style.interaction.tooltip_grace_time = 0.0;
+                style.interaction.tooltip_delay = 0.2;
+                style.interaction.tooltip_grace_time = 1.0;
                 style.interaction.show_tooltips_only_when_still = false;
             });
             Ok(Box::new(MainPage::new(cc)))
