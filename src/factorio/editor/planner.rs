@@ -11,7 +11,22 @@ use crate::{
 };
 
 use indexmap::IndexMap;
+use lazy_static::lazy_static;
 
+lazy_static! {
+    static ref MECHANIC_REGISTRY: DynDeserializeRegistry<FactorioMechanic> = {
+        let mut registry = DynDeserializeRegistry::default();
+        RecipeConfig::register(&mut registry);
+        MiningConfig::register(&mut registry);
+        registry
+    };
+    static ref MECHANIC_PROVIDER_REGISTRY: DynDeserializeRegistry<FactorioMechanicProvider> = {
+        let mut registry = DynDeserializeRegistry::default();
+        RecipeConfigProvider::register(&mut registry);
+        MiningConfigProvider::register(&mut registry);
+        registry
+    };
+}
 pub struct FactoryInstance {
     pub name: String,
     pub target: Vec<(GenericItem, f64)>,
@@ -189,11 +204,8 @@ impl FactoryInstance {
                             }
                             if ui.button("复制").clicked() {
                                 let serialized = serde_json::to_value(&flow_config);
-                                let mut registry = DynDeserializeRegistry::default();
-                                InfiniteSource::register(&mut registry);
-                                RecipeConfig::register(&mut registry);
-                                MiningConfig::register(&mut registry);
-                                let deserialized = registry.deserialize(serialized.unwrap());
+                                let deserialized =
+                                    MECHANIC_REGISTRY.deserialize(serialized.unwrap());
                                 if let Some(deserialized) = deserialized {
                                     self.flow_sender.send(deserialized).unwrap();
                                 }
@@ -610,11 +622,6 @@ impl Subview for PlannerView {
                                     .add_flow_source(|s| {
                                         Box::new(
                                             RecipeConfigProvider::new().with_mechanic_sender(s),
-                                        )
-                                    })
-                                    .add_flow_source(|s| {
-                                        Box::new(
-                                            InfiniteSourceProvider::new().with_mechanic_sender(s),
                                         )
                                     })
                                     .add_flow_source(|s| {

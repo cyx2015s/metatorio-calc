@@ -506,7 +506,7 @@ pub enum EffectType {
 pub enum EffectTypeLimitation {
     Single(EffectType),
     Multiple(Vec<EffectType>),
-    Empty(HashMap<String, Value>),
+    Empty(Value),
 }
 
 impl Default for EffectTypeLimitation {

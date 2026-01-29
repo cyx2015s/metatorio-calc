@@ -1,4 +1,4 @@
-use good_lp::{Solution, SolverModel, variable};
+use good_lp::{IntoAffineExpression, Solution, SolverModel, variable};
 use indexmap::IndexMap;
 
 use crate::concept::{Flow, ItemIdent};
@@ -102,6 +102,9 @@ where
             if !self.target.contains_key(item_id) && !no_providers.contains(item_id) {
                 constraints.push(expr.clone().geq(0.0));
             }
+        }
+        for source_var in source_vars.values() {
+            constraints.push(source_var.into_expression().geq(0.0));
         }
         let mut optimization_expr = good_lp::Expression::from(0.0);
         for (flow, (_, cost)) in &self.flows {

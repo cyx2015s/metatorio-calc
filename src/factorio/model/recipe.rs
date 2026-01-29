@@ -721,10 +721,10 @@ impl EditorView for RecipeConfig {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename = "factorio:recipe")]
 pub struct RecipeConfigProvider {
-    pub editing: RecipeConfig,
-    #[serde(skip)]
+    #[serde(skip, default)]
     pub sender: Option<MechanicSender<GenericItem, FactorioContext>>,
 }
 
@@ -738,7 +738,6 @@ impl RecipeConfigProvider {
     pub fn new() -> Self {
         Self {
             sender: None,
-            editing: RecipeConfig::default(),
         }
     }
 }
@@ -835,7 +834,7 @@ impl MechanicProvider for RecipeConfigProvider {
 impl EditorView for RecipeConfigProvider {
     fn editor_view(&mut self, ui: &mut egui::Ui, _ctx: &Self::GameContext) {
         if ui.button("添加配方").clicked() {
-            let mut new_config = self.editing.clone();
+            let mut new_config = RecipeConfig::default();
             new_config.recipe = ("recipe-unknown".to_string(), 0).into();
             if let Some(sender) = &self.sender {
                 let _ = sender.send(Box::new(new_config));
@@ -848,4 +847,10 @@ crate::impl_register_deserializer!(
     for RecipeConfig
     as "factorio:recipe"
     => dyn Mechanic<ItemIdentType = GenericItem, GameContext = FactorioContext>
+);
+
+crate::impl_register_deserializer!(
+    for RecipeConfigProvider
+    as "factorio:recipe"
+    => dyn MechanicProvider<ItemIdentType = GenericItem, GameContext = FactorioContext>
 );

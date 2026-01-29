@@ -383,7 +383,8 @@ impl EditorView for MiningConfig {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename = "factorio:mining")]
 pub struct MiningConfigProvider {
     #[serde(skip)]
     pub sender: Option<MechanicSender<GenericItem, FactorioContext>>,
@@ -539,4 +540,10 @@ crate::impl_register_deserializer!(
     for MiningConfig
     as "factorio:mining"
     => dyn Mechanic<ItemIdentType = GenericItem, GameContext = FactorioContext>
+);
+
+crate::impl_register_deserializer!(
+    for MiningConfigProvider
+    as "factorio:mining"
+    => dyn MechanicProvider<ItemIdentType = GenericItem, GameContext = FactorioContext>
 );

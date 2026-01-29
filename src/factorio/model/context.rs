@@ -495,7 +495,7 @@ impl FactorioContext {
             "item".into(),
             get_reverse_order_info(&self.ordered_entries["item"]),
         );
-        // 没有 order 的recipe 的 order 从 item 派生
+        // 没有 order 的 recipe 的 order 从 item 派生
         for (recipe_name, recipe) in self.recipes.iter_mut() {
             if recipe.base.order.is_empty() && !recipe.base.hidden {
                 if recipe.results.len() == 1 {

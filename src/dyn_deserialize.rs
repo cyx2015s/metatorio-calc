@@ -69,31 +69,33 @@ fn test_dyn_deserializer() {
         dyn Mechanic<ItemIdentType = GenericItem, GameContext = FactorioContext>,
     >::default();
 
-    InfiniteSource::register(&mut registry);
     RecipeConfig::register(&mut registry);
-
-    let source = InfiniteSource {
-        item: GenericItem::Item(IdWithQuality("iron-ore".to_string(), 0)),
-    };
+    MiningConfig::register(&mut registry);
     let recipe = RecipeConfig {
         recipe: "iron-gear-wheel".into(),
         machine: Some("assembling-machine-2".into()),
         module_config: ModuleConfig::new(),
         instance_fuel: None,
     };
-    dbg!(&source);
+    let mining = MiningConfig {
+        resource: "iron-ore".into(),
+        machine: Some("electric-mining-drill".into()),
+        module_config: ModuleConfig::new(),
+        instance_fuel: None,
+    };
     dbg!(&recipe);
-    let serialized_source = serde_json::to_value(&source).unwrap();
+    dbg!(&mining);
     let serialized_recipe = serde_json::to_value(&recipe).unwrap();
-    dbg!(&serialized_source);
+    let serialized_mining = serde_json::to_value(&mining).unwrap();
     dbg!(&serialized_recipe);
+    dbg!(&serialized_mining);
 
-    if let Some(source) = registry.deserialize(serialized_source.clone()) {
-        eprintln!("无限源反序列化成功");
-        eprintln!("{:?}", source.as_flow(&ctx));
-    }
     if let Some(recipe) = registry.deserialize(serialized_recipe.clone()) {
         eprintln!("配方反序列化成功");
         eprintln!("{:?}", recipe.as_flow(&ctx));
+    }
+    if let Some(mining) = registry.deserialize(serialized_mining.clone()) {
+        eprintln!("采矿反序列化成功");
+        eprintln!("{:?}", mining.as_flow(&ctx));
     }
 }
