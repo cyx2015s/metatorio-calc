@@ -652,7 +652,7 @@ impl Subview for PlannerView {
         self.ctx.mods.iter().fold(
             "使用以下模组: ".to_string(),
             |mut acc, (mod_name, mod_version)| {
-                acc.push_str(&format!("{} ({}), ", mod_name, mod_version));
+                acc.push_str(&format!("\n{} ({}), ", mod_name, mod_version));
                 acc
             },
         )

@@ -212,8 +212,7 @@ impl FactorioContext {
             planets,
             tiles,
             ..Default::default()
-        }
-        .build_order_info();
+        };
         ret.planets.iter().for_each(|(_, p)| {
             dbg!(p.collect_autoplaced(&ret));
         });
@@ -496,8 +495,9 @@ impl FactorioContext {
             get_reverse_order_info(&self.ordered_entries["item"]),
         );
         // 没有 order 的 recipe 的 order 从 item 派生
+        // md 长见识了，怎么还有不设置 group 和 subgroup 的配方
         for (recipe_name, recipe) in self.recipes.iter_mut() {
-            if recipe.base.order.is_empty() && !recipe.base.hidden {
+            if (recipe.base.order.is_empty() || recipe.base.subgroup == "" ) && !recipe.base.hidden {
                 if recipe.results.len() == 1 {
                     match recipe.results[0] {
                         RecipeResult::Item(ref r) => {
