@@ -28,11 +28,6 @@ lazy_static! {
         registry
     };
 }
-type SolverArguments = (
-    IndexMap<GenericItem, f64>,
-    IndexMap<usize, (IndexMap<GenericItem, f64>, f64)>,
-);
-
 pub struct FactoryInstance {
     pub name: String,
     pub target: Vec<(GenericItem, f64)>,
@@ -45,8 +40,8 @@ pub struct FactoryInstance {
     pub hint_flows: Vec<Box<FactorioMechanic>>,
     pub mechanic_receiver: std::sync::mpsc::Receiver<Box<FactorioMechanic>>,
     pub mechanic_sender: std::sync::mpsc::Sender<Box<FactorioMechanic>>,
-    pub arg_sender: std::sync::mpsc::Sender<SolverArguments>,
-    pub solution_receiver: std::sync::mpsc::Receiver<Result<(Flow<usize>, f64), String>>,
+    pub arg_sender: std::sync::mpsc::Sender<BasicSolverArgs<GenericItem, usize>>,
+    pub solution_receiver: std::sync::mpsc::Receiver<SolverSolution<usize>>,
 }
 
 impl Clone for FactoryInstance {
@@ -213,11 +208,7 @@ impl FactoryInstance {
                                             ),
                                         );
                                         let icon = ui
-                                            .add_sized(
-                                                [35.0, 35.0],
-                                                GenericIcon::new(ctx, item)
-                                                    
-                                            )
+                                            .add_sized([35.0, 35.0], GenericIcon::new(ctx, item))
                                             .interact(egui::Sense::click());
                                         let toggle =
                                             icon.clicked_by(egui::PointerButton::Secondary);
@@ -318,8 +309,7 @@ impl EditorView for FactoryInstance {
                                                 let icon = ui
                                                     .add_sized(
                                                         [35.0, 35.0],
-                                                        GenericIcon::new(ctx, item)
-                                                            
+                                                        GenericIcon::new(ctx, item),
                                                     )
                                                     .interact(egui::Sense::click());
                                                 if ui.button("删除").clicked() {

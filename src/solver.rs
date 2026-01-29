@@ -35,6 +35,9 @@ where
     external: IndexMap<I, f64>, //  输入以下物品消耗的价值
 }
 
+pub type BasicSolverArgs<I, R> = (Flow<I>, IndexMap<R, (Flow<I>, f64)>);
+pub type SolverSolution<R> = Result<(Flow<R>, f64), String>;
+
 impl<I, R> SolverData<I, R>
 where
     I: ItemIdent,
@@ -153,8 +156,8 @@ where
     }
 
     pub fn make_basic_solver_thread(
-        solution_tx: std::sync::mpsc::Sender<Result<(Flow<R>, f64), String>>,
-        arg_rx: std::sync::mpsc::Receiver<(Flow<I>, IndexMap<R, (Flow<I>, f64)>)>,
+        solution_tx: std::sync::mpsc::Sender<SolverSolution<R>>,
+        arg_rx: std::sync::mpsc::Receiver<BasicSolverArgs<I, R>>,
     ) {
         std::thread::spawn(move || {
             log::info!("求解线程启动");
