@@ -43,19 +43,20 @@ pub struct FactoryInstance {
     pub flow_editor_sources: Vec<Box<FactorioMechanicProvider>>,
     pub flow_editors: Vec<Box<FactorioMechanic>>,
     pub hint_flows: Vec<Box<FactorioMechanic>>,
-    pub flow_receiver: std::sync::mpsc::Receiver<Box<FactorioMechanic>>,
-    pub flow_sender: std::sync::mpsc::Sender<Box<FactorioMechanic>>,
-    pub solver_sender: std::sync::mpsc::Sender<SolverArguments>,
-    pub solver_receiver: std::sync::mpsc::Receiver<Result<(Flow<usize>, f64), String>>,
+    pub mechanic_receiver: std::sync::mpsc::Receiver<Box<FactorioMechanic>>,
+    pub mechanic_sender: std::sync::mpsc::Sender<Box<FactorioMechanic>>,
+    pub arg_sender: std::sync::mpsc::Sender<SolverArguments>,
+    pub solution_receiver: std::sync::mpsc::Receiver<Result<(Flow<usize>, f64), String>>,
 }
 
 impl Clone for FactoryInstance {
     fn clone(&self) -> Self {
         let (param_tx, param_rx) = std::sync::mpsc::channel();
         let (solution_tx, solution_rx) = std::sync::mpsc::channel();
-        let (flow_tx, flow_rx) = std::sync::mpsc::channel();
+        let (arg_tx, arg_rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             while let Ok((target, flows)) = param_rx.recv() {
+                log::info!("收到了新的计算请求……");
                 let result = basic_solver(target, flows);
                 if solution_tx.send(result).is_err() {
                     break;
@@ -72,10 +73,10 @@ impl Clone for FactoryInstance {
             flow_editor_sources: self.flow_editor_sources.clone(),
             flow_editors: self.flow_editors.clone(),
             hint_flows: self.hint_flows.clone(),
-            flow_receiver: flow_rx,
-            flow_sender: flow_tx,
-            solver_sender: param_tx,
-            solver_receiver: solution_rx,
+            mechanic_receiver: arg_rx,
+            mechanic_sender: arg_tx,
+            arg_sender: param_tx,
+            solution_receiver: solution_rx,
         }
     }
 }
@@ -83,15 +84,16 @@ impl Clone for FactoryInstance {
 impl Default for FactoryInstance {
     fn default() -> Self {
         let (tx, rx) = std::sync::mpsc::channel();
-        let (solver_sender, solver_receiver_internal) = std::sync::mpsc::channel::<(
+        let (arg_tx, arg_rx) = std::sync::mpsc::channel::<(
             Flow<GenericItem>,
             IndexMap<usize, (Flow<GenericItem>, f64)>,
         )>();
-        let (solver_sender_internal, solver_receiver) = std::sync::mpsc::channel();
+        let (solution_tx, solution_rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            while let Ok((target, flows)) = solver_receiver_internal.recv() {
+            while let Ok((target, flows)) = arg_rx.recv() {
+                log::info!("收到了新的计算请求……");
                 let result = basic_solver(target, flows);
-                if solver_sender_internal.send(result).is_err() {
+                if solution_tx.send(result).is_err() {
                     break;
                 }
             }
@@ -105,10 +107,10 @@ impl Default for FactoryInstance {
             flow_editor_sources: Vec::new(),
             flow_editors: Vec::new(),
             hint_flows: Vec::new(),
-            flow_receiver: rx,
-            flow_sender: tx,
-            solver_sender,
-            solver_receiver,
+            mechanic_receiver: rx,
+            mechanic_sender: tx,
+            arg_sender: arg_tx,
+            solution_receiver: solution_rx,
         }
     }
 }
@@ -131,10 +133,10 @@ impl FactoryInstance {
         });
         FactoryInstance {
             name,
-            flow_receiver: rx,
-            flow_sender: tx,
-            solver_sender,
-            solver_receiver,
+            mechanic_receiver: rx,
+            mechanic_sender: tx,
+            arg_sender: solver_sender,
+            solution_receiver: solver_receiver,
             ..Default::default()
         }
     }
@@ -144,11 +146,12 @@ impl FactoryInstance {
         mut self,
         f: F,
     ) -> Self {
-        self.flow_editor_sources.push(f(self.flow_sender.clone()));
+        self.flow_editor_sources
+            .push(f(self.mechanic_sender.clone()));
         self
     }
 
-    fn flows_panel(&mut self, ui: &mut egui::Ui, ctx: &FactorioContext) {
+    fn flows_panel(&mut self, ui: &mut egui::Ui, ctx: &FactorioContext, changed: &mut bool) {
         let label = ui.label(format!("总代价: {:.2} | 总物料流", self.solution.1));
         ui.horizontal_wrapped(|ui| {
             card_frame(ui).show(ui, |ui| {
@@ -157,7 +160,7 @@ impl FactoryInstance {
                 let mut modal = HintModal::new(
                     label.id,
                     ctx,
-                    &self.flow_sender,
+                    &self.mechanic_sender,
                     &mut self.hint_flows,
                     &self.flow_editor_sources,
                 );
@@ -210,14 +213,16 @@ impl FactoryInstance {
                         ui.vertical(|ui| {
                             if ui.button("删除").clicked() {
                                 deleted = true;
+                                *changed = true;
                             }
                             if ui.button("复制").clicked() {
                                 let serialized = serde_json::to_value(&flow_config);
                                 let deserialized =
                                     MECHANIC_REGISTRY.deserialize(serialized.unwrap());
                                 if let Some(deserialized) = deserialized {
-                                    self.flow_sender.send(deserialized).unwrap();
+                                    self.mechanic_sender.send(deserialized).unwrap();
                                 }
+                                *changed = true;
                             }
                             // if ui.button("test 序列化").clicked() {
                             //     log::info!("=== 测试序列化");
@@ -233,7 +238,9 @@ impl FactoryInstance {
                         });
 
                         ui.separator();
-                        ui.vertical(|ui: &mut egui::Ui| flow_config.editor_view(ui, ctx));
+                        ui.vertical(|ui: &mut egui::Ui| {
+                            *changed |= flow_config.editor_view(ui, ctx)
+                        });
 
                         ui.separator();
                         let flow = flow_config.as_flow(ctx);
@@ -267,7 +274,7 @@ impl FactoryInstance {
                                             HintModal::new(
                                                 icon.id,
                                                 ctx,
-                                                &self.flow_sender,
+                                                &self.mechanic_sender,
                                                 &mut self.hint_flows,
                                                 &self.flow_editor_sources,
                                             )
@@ -303,14 +310,15 @@ impl SolveContext for FactoryInstance {
 }
 
 impl EditorView for FactoryInstance {
-    fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &FactorioContext) {
+    fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &FactorioContext) -> bool {
         ui.add(
             egui::text_edit::TextEdit::singleline(&mut self.name).font(egui::TextStyle::Heading),
         );
         ui.separator();
         let id = ui.id();
+        let mut changed = false;
 
-        while let Ok(result) = self.solver_receiver.try_recv() {
+        while let Ok(result) = self.solution_receiver.try_recv() {
             match result {
                 Ok(solution) => {
                     self.total_flow.clear();
@@ -338,23 +346,6 @@ impl EditorView for FactoryInstance {
                     });
                 }
             }
-        }
-
-        if ui.ctx().cumulative_frame_nr().is_multiple_of(10) {
-            let flows = self
-                .flow_editors
-                .iter()
-                .map(|fe| (box_as_ptr(fe), (fe.as_flow(ctx), fe.cost(ctx))))
-                .collect::<IndexMap<usize, (_, _)>>();
-            let target = self
-                .target
-                .iter()
-                .map(|(item, amount)| (item.clone(), *amount))
-                .fold(IndexMap::new(), |mut acc, (item, amount)| {
-                    *acc.entry(item).or_insert(0.0) += amount;
-                    acc
-                });
-            let _ = self.solver_sender.send((target, flows));
         }
         // let err_info = ui.memory(|mem| mem.data.get_temp::<String>(id));
 
@@ -385,6 +376,7 @@ impl EditorView for FactoryInstance {
                                                     .interact(egui::Sense::click());
                                                 if ui.button("删除").clicked() {
                                                     deleted = true;
+                                                    changed = true;
                                                 }
                                                 icon
                                             })
@@ -395,7 +387,7 @@ impl EditorView for FactoryInstance {
                                             HintModal::new(
                                                 icon.id,
                                                 ctx,
-                                                &self.flow_sender,
+                                                &self.mechanic_sender,
                                                 &mut self.hint_flows,
                                                 &self.flow_editor_sources,
                                             )
@@ -446,7 +438,8 @@ impl EditorView for FactoryInstance {
                                                                 "item",
                                                             )
                                                             .with_toggle(icon.clicked())
-                                                            .with_current(item_with_quality),
+                                                            .with_current(item_with_quality)
+                                                            .notify_change(&mut changed),
                                                         );
                                                     }
                                                     GenericItem::Fluid {
@@ -463,17 +456,20 @@ impl EditorView for FactoryInstance {
                                                                 "fluid",
                                                             )
                                                             .with_toggle(icon.clicked())
-                                                            .with_current(name),
+                                                            .with_current(name)
+                                                            .notify_change(&mut changed),
                                                         );
                                                     }
                                                     _ => {}
                                                 }
+                                                let old_amount = *amount;
                                                 ui.vertical(|ui| {
                                                     ui.label("目标产量");
                                                     ui.add(
                                                         egui::DragValue::new(amount).suffix("/s"),
                                                     );
                                                 });
+                                                changed |= old_amount != *amount;
                                             });
                                         });
                                     });
@@ -485,6 +481,7 @@ impl EditorView for FactoryInstance {
                                     GenericItem::Item(IdWithQuality("item-unknown".to_string(), 0)),
                                     1.0,
                                 ));
+                                changed = true;
                             }
                         })
                         .response
@@ -496,13 +493,18 @@ impl EditorView for FactoryInstance {
                     ui.vertical(|ui| {
                         ui.heading("游戏机制");
                         for flow_source in &mut self.flow_editor_sources {
-                            flow_source.editor_view(ui, ctx);
+                            changed |= flow_source.editor_view(ui, ctx);
                             ui.separator();
                         }
                     })
                     .response
                 });
             });
+
+        while let Ok(flow_source) = self.mechanic_receiver.try_recv() {
+            self.flow_editors.push(flow_source);
+            changed = true;
+        }
         egui::Frame::NONE
             .corner_radius(8.0)
             .outer_margin(4.0)
@@ -511,15 +513,29 @@ impl EditorView for FactoryInstance {
                 egui::ScrollArea::vertical().id_salt(3).show(ui, |ui| {
                     ui.vertical(|ui| {
                         // Use cached sorted keys instead of sorting every frame
-                        self.flows_panel(ui, ctx);
+                        self.flows_panel(ui, ctx, &mut changed);
                     })
                     .response
                 });
             });
-
-        while let Ok(flow_source) = self.flow_receiver.try_recv() {
-            self.flow_editors.push(flow_source);
-        }
+        // 无关
+        if changed {
+            let flows = self
+                .flow_editors
+                .iter()
+                .map(|fe| (box_as_ptr(fe), (fe.as_flow(ctx), fe.cost(ctx))))
+                .collect::<IndexMap<usize, (_, _)>>();
+            let target = self
+                .target
+                .iter()
+                .map(|(item, amount)| (item.clone(), *amount))
+                .fold(IndexMap::new(), |mut acc, (item, amount)| {
+                    *acc.entry(item).or_insert(0.0) += amount;
+                    acc
+                });
+            let _ = self.arg_sender.send((target, flows));
+        };
+        changed
     }
 }
 

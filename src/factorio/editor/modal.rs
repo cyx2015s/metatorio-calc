@@ -46,6 +46,7 @@ pub struct ItemSelectorModal<'a> {
     current: Option<&'a mut String>,
     output: Option<&'a mut Option<String>>,
     hover: Option<Box<HoverUi<'a>>>,
+    changed: Option<&'a mut bool>,
 }
 
 impl<'a> ItemSelectorModal<'a> {
@@ -65,6 +66,7 @@ impl<'a> ItemSelectorModal<'a> {
             output: None,
             hover: None,
             toggle: false,
+            changed: None,
         }
     }
     pub fn with_toggle(mut self, toggle: bool) -> Self {
@@ -94,13 +96,18 @@ impl<'a> ItemSelectorModal<'a> {
         self.hover = Some(Box::new(hover));
         self
     }
+
+    pub fn notify_change(mut self, changed: &'a mut bool) -> Self {
+        self.changed = Some(changed);
+        self
+    }
 }
 #[derive(Debug, Clone, Default)]
 pub struct FilterString(pub String);
 
 impl egui::Widget for ItemSelectorModal<'_> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
-        assert!(
+        debug_assert!(
             self.output.is_some() || self.current.is_some(),
             "结果不要了吗，还回家吃饭吗？"
         );
@@ -139,6 +146,9 @@ impl egui::Widget for ItemSelectorModal<'_> {
             if let Some(hover) = self.hover {
                 widget = widget.with_hover(hover);
             }
+            if let Some(changed) = self.changed {
+                widget = widget.notify_change(changed);
+            }
             egui::ScrollArea::vertical()
                 .max_width(f32::INFINITY)
                 .auto_shrink(false)
@@ -166,6 +176,7 @@ pub struct ItemWithQualitySelectorModal<'a> {
     current: Option<&'a mut IdWithQuality>,
     output: Option<&'a mut Option<IdWithQuality>>,
     hover: Option<Box<HoverUi<'a>>>,
+    changed: Option<&'a mut bool>,
 }
 
 impl<'a> ItemWithQualitySelectorModal<'a> {
@@ -185,6 +196,7 @@ impl<'a> ItemWithQualitySelectorModal<'a> {
             current: None,
             output: None,
             hover: None,
+            changed: None,
         }
     }
 
@@ -214,11 +226,16 @@ impl<'a> ItemWithQualitySelectorModal<'a> {
         self.hover = Some(Box::new(hover));
         self
     }
+
+    pub fn notify_change(mut self, changed: &'a mut bool) -> Self {
+        self.changed = Some(changed);
+        self
+    }
 }
 
 impl egui::Widget for ItemWithQualitySelectorModal<'_> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
-        assert!(
+        debug_assert!(
             self.output.is_some() || self.current.is_some(),
             "结果不要了吗，还回家吃饭吗？"
         );
@@ -242,11 +259,14 @@ impl egui::Widget for ItemWithQualitySelectorModal<'_> {
             if self.output.is_some() {
                 widget = widget.with_output(&mut degenerated);
             }
-
+            if let Some(changed) = self.changed {
+                widget = widget.notify_change(changed);
+            }
             let ret = widget.ui(ui);
             if let Some(selected) = degenerated
                 && let Some(&mut ref mut output) = self.output {
                     *output = Some(IdWithQuality(selected, 0));
+                    
                 }
             return ret;
         }
@@ -285,6 +305,9 @@ impl egui::Widget for ItemWithQualitySelectorModal<'_> {
             }
             if let Some(hover) = self.hover {
                 widget = widget.with_hover(hover);
+            }
+            if let Some(changed) = self.changed {
+                widget = widget.notify_change(changed);
             }
             egui::ScrollArea::vertical()
                 .max_width(f32::INFINITY)

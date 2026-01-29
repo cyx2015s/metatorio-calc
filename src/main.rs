@@ -21,6 +21,7 @@ pub struct MainPage {
     pub subview_sender: std::sync::mpsc::Sender<Box<dyn Subview>>,
     pub subviews: Vec<Box<dyn Subview>>,
     pub selected: usize,
+    pub exp_cpu_usage: f32,
 }
 
 impl MainPage {
@@ -36,6 +37,7 @@ impl MainPage {
             subview_sender: tx,
             subviews: vec![],
             selected: 0,
+            exp_cpu_usage: 0.0
         };
         for creator in &mut ret.creators {
             creator.1.set_subview_sender(ret.subview_sender.clone());
@@ -45,7 +47,7 @@ impl MainPage {
 }
 
 impl eframe::App for MainPage {
-    fn update(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &eframe::egui::Context, frame: &mut eframe::Frame) {
         let mut request_repaint = true;
         ctx.input(|i| {
             if i.viewport().minimized.unwrap_or_default() {
@@ -55,11 +57,14 @@ impl eframe::App for MainPage {
         if request_repaint {
             ctx.request_repaint_after_secs(0.1);
         }
+        let cpu_usage = frame.info().cpu_usage.unwrap_or(0.0);
+        self.exp_cpu_usage = self.exp_cpu_usage * 31.0 / 32.0 + cpu_usage / 32.0;
         egui::SidePanel::left(egui::Id::new("side"))
             .width_range(200.0..=280.0)
             .show(ctx, |ui| {
                 ui.heading("切向量化");
-                ui.label(format!("构建哈希: {}", GIT_HASH));
+                ui.label(format!("[构建] Git 哈希: {}", GIT_HASH));
+                ui.label(format!("[性能] 帧生成时间: {:.2}ms", self.exp_cpu_usage * 1000.0));
                 ui.add(egui::Hyperlink::from_label_and_url(
                     "Github 仓库",
                     "https://github.com/cyx2015s/metatorio-calc",

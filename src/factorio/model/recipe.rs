@@ -587,7 +587,8 @@ fn test_recipe_normalized() {
 }
 
 impl EditorView for RecipeConfig {
-    fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &Self::GameContext) {
+    fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &Self::GameContext) -> bool {
+        let mut changed = false;
         ui.horizontal_top(|ui| {
             ui.vertical(|ui| {
                 ui.label("配方");
@@ -619,7 +620,8 @@ impl EditorView for RecipeConfig {
                                 ctx,
                                 prototype: ctx.recipes.get(name).unwrap(),
                             });
-                        }),
+                        })
+                        .notify_change(&mut changed),
                 );
             });
             ui.separator();
@@ -681,7 +683,8 @@ impl EditorView for RecipeConfig {
                     }
                     false
                 })
-                .with_current(&mut self.machine);
+                .with_current(&mut self.machine)
+                .notify_change(&mut changed);
                 ui.add(widget);
             });
 
@@ -715,15 +718,20 @@ impl EditorView for RecipeConfig {
                     }
                 };
 
-                ui.add(ModuleConfigEditor::new(
-                    ctx,
-                    &mut self.module_config,
-                    crafter.module_slots as usize,
-                    &Some(allowed_effects),
-                    allowed_module_categories,
-                ));
+                ui.add(
+                    ModuleConfigEditor::new(
+                        ctx,
+                        &mut self.module_config,
+                        crafter.module_slots as usize,
+                        &Some(allowed_effects),
+                        allowed_module_categories,
+                    )
+                    .notify_change(&mut changed),
+                );
             };
         });
+
+        changed
     }
 }
 
@@ -836,13 +844,15 @@ impl MechanicProvider for RecipeConfigProvider {
 }
 
 impl EditorView for RecipeConfigProvider {
-    fn editor_view(&mut self, ui: &mut egui::Ui, _ctx: &Self::GameContext) {
+    fn editor_view(&mut self, ui: &mut egui::Ui, _ctx: &Self::GameContext) -> bool {
         if ui.button("添加配方").clicked() {
             let new_config = RecipeConfig::default();
             if let Some(sender) = &self.sender {
                 let _ = sender.send(Box::new(new_config));
             }
+            return true;
         }
+        false
     }
 }
 

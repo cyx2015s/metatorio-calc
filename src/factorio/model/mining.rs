@@ -277,7 +277,8 @@ impl AsFlow for MiningConfig {
 }
 
 impl EditorView for MiningConfig {
-    fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &Self::GameContext) {
+    fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &Self::GameContext) -> bool {
+        let mut changed = false;
         ui.horizontal_wrapped(|ui| {
             ui.vertical(|ui| {
                 ui.label("开采");
@@ -302,7 +303,8 @@ impl EditorView for MiningConfig {
                     ItemSelectorModal::new(resource_button.id, ctx, "选择矿物", "entity")
                         .with_toggle(resource_button.clicked())
                         .with_current(&mut self.resource)
-                        .with_filter(|s, f| f.resources.contains_key(s)),
+                        .with_filter(|s, f| f.resources.contains_key(s))
+                        .notify_change(&mut changed),
                 );
             });
             ui.separator();
@@ -356,22 +358,28 @@ impl EditorView for MiningConfig {
                             } else {
                                 false
                             }
-                        }),
+                        })
+                        .notify_change(&mut changed),
                     );
                 }
             });
             ui.separator();
 
             if let Some(miner) = ctx.miners.get(&self.machine.0) {
-                ui.add(ModuleConfigEditor::new(
-                    ctx,
-                    &mut self.module_config,
-                    miner.module_slots as usize,
-                    &miner.allowed_effects,
-                    &miner.allowed_module_categories,
-                ));
+                ui.add(
+                    ModuleConfigEditor::new(
+                        ctx,
+                        &mut self.module_config,
+                        miner.module_slots as usize,
+                        &miner.allowed_effects,
+                        &miner.allowed_module_categories,
+                    )
+                    .notify_change(&mut changed),
+                );
             }
         });
+        // 先不判断
+        changed
     }
 }
 
@@ -400,13 +408,15 @@ impl SolveContext for MiningConfigProvider {
 }
 
 impl EditorView for MiningConfigProvider {
-    fn editor_view(&mut self, ui: &mut egui::Ui, _ctx: &Self::GameContext) {
+    fn editor_view(&mut self, ui: &mut egui::Ui, _ctx: &Self::GameContext) -> bool {
         if ui.button("添加采矿").clicked() {
             let mining_config = MiningConfig::default();
             if let Some(sender) = &self.sender {
                 let _ = sender.send(Box::new(mining_config));
             }
+            return true;
         }
+        false
     }
 }
 

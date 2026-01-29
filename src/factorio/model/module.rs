@@ -141,26 +141,30 @@ pub struct ModuleConfigEditor<'a> {
     pub allowed_module_categories: &'a Option<Vec<String>>,
 
     pub ctx: &'a FactorioContext,
+    pub changed: Option<&'a mut bool>,
 }
 
 impl<'a> ModuleConfigEditor<'a> {
-    pub fn new<'b>(
-        ctx: &'b FactorioContext,
-        module_config: &'b mut ModuleConfig,
+    pub fn new(
+        ctx: &'a FactorioContext,
+        module_config: &'a mut ModuleConfig,
         module_slots: usize,
-        allowed_effects: &'b Option<EffectTypeLimitation>,
-        allowed_module_categories: &'b Option<Vec<String>>,
-    ) -> Self
-    where
-        'b: 'a,
-    {
+        allowed_effects: &'a Option<EffectTypeLimitation>,
+        allowed_module_categories: &'a Option<Vec<String>>,
+    ) -> Self {
         Self {
             module_config,
             module_slots,
             allowed_effects,
             allowed_module_categories,
             ctx,
+            changed: None,
         }
+    }
+
+    pub fn notify_change(mut self, changed: &'a mut bool) -> Self {
+        self.changed = Some(changed);
+        self
     }
 }
 
@@ -185,7 +189,7 @@ fn module_effects_allowed(
 }
 
 impl egui::Widget for ModuleConfigEditor<'_> {
-    fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+    fn ui(mut self, ui: &mut egui::Ui) -> egui::Response {
         let button = ui
             .vertical(|ui| {
                 ui.label("插件");
@@ -255,7 +259,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                     if icon.clicked_by(egui::PointerButton::Secondary) {
                         deleted = true;
                     }
-                    ui.add(
+                    let mut widget =
                         ItemWithQualitySelectorModal::new(icon.id, self.ctx, "选择插件", "item")
                             .with_toggle(icon.clicked())
                             .with_current(slot)
@@ -270,8 +274,11 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                 } else {
                                     false
                                 }
-                            }),
-                    );
+                            });
+                    if let Some(changed) = &mut self.changed {
+                        widget = widget.notify_change(*changed);
+                    }
+                    ui.add(widget);
                     !deleted
                 });
 
@@ -289,7 +296,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                         )
                         .interact(egui::Sense::click());
                     let mut selected = None;
-                    ui.add(
+                    let mut widget =
                         ItemWithQualitySelectorModal::new(icon.id, self.ctx, "填充插件", "item")
                             .with_toggle(icon.clicked())
                             .with_output(&mut selected)
@@ -304,8 +311,11 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                 } else {
                                     false
                                 }
-                            }),
-                    );
+                            });
+                    if let Some(changed) = &mut self.changed {
+                        widget = widget.notify_change(*changed);
+                    }
+                    ui.add(widget);
                     if let Some(selected) = selected {
                         while self.module_config.modules.len() <= idx {
                             self.module_config.modules.push(selected.clone());

@@ -20,7 +20,8 @@ pub trait SolveContext: Send + Any {
 }
 
 pub trait EditorView: SolveContext {
-    fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &Self::GameContext);
+    // 返回值表示是否产生了需要重新计算的更改
+    fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &Self::GameContext) -> bool;
 }
 
 pub type Flow<I> = IndexMap<I, f64>;

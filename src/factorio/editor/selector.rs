@@ -20,6 +20,7 @@ pub struct ItemSelector<'a> {
     current: Option<&'a mut String>,
     output: Option<&'a mut Option<String>>,
     hover: Option<Box<HoverUi<'a>>>,
+    changed: Option<&'a mut bool>,
 }
 
 impl<'a> ItemSelector<'a> {
@@ -31,6 +32,7 @@ impl<'a> ItemSelector<'a> {
             current: None,
             output: None,
             hover: None,
+            changed: None,
         }
     }
 
@@ -66,6 +68,11 @@ impl<'a> ItemSelector<'a> {
         hover: impl Fn(&mut egui::Ui, &str, &FactorioContext) + 'a,
     ) -> Self {
         self.hover = Some(Box::new(hover));
+        self
+    }
+
+    pub fn notify_change(mut self, changed: &'a mut bool) -> Self {
+        self.changed = Some(changed);
         self
     }
 }
@@ -180,6 +187,9 @@ impl egui::Widget for ItemSelector<'_> {
                             if let Some(&mut ref mut output) = self.output {
                                 *output = Some(item_name.clone());
                             }
+                            if let Some(&mut ref mut changed) = self.changed {
+                                *changed = true;
+                            }
                         }
                     }
                     if idx != 0 {
@@ -203,6 +213,7 @@ pub struct ItemWithQualitySelector<'a> {
     output: Option<&'a mut Option<IdWithQuality>>,
     forget: bool,
     hover: Option<Box<HoverUi<'a>>>,
+    changed: Option<&'a mut bool>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -221,6 +232,7 @@ impl<'a> ItemWithQualitySelector<'a> {
             output: None,
             forget: false,
             hover: None,
+            changed: None,
         }
     }
 
@@ -263,6 +275,11 @@ impl<'a> ItemWithQualitySelector<'a> {
         self.hover = Some(Box::new(hover));
         self
     }
+
+    pub fn notify_change(mut self, changed: &'a mut bool) -> Self {
+        self.changed = Some(changed);
+        self
+    }
 }
 
 impl<'a> egui::Widget for ItemWithQualitySelector<'a> {
@@ -290,11 +307,17 @@ impl<'a> egui::Widget for ItemWithQualitySelector<'a> {
             if let Some(&mut ref mut current) = self.current {
                 current.0 = selected_item.clone();
             }
+            if let Some(&mut ref mut changed) = self.changed {
+                *changed = true;
+            }
         }
         if let Some(selected_quality) = selecting_quality {
             storage.selected_quality = Some(selected_quality);
             if let Some(&mut ref mut current) = self.current {
                 current.1 = selected_quality;
+            }
+            if let Some(&mut ref mut changed) = self.changed {
+                *changed = true;
             }
         }
         if let Some(&mut ref mut output) = self.output
