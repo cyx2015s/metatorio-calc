@@ -160,7 +160,7 @@ where
             log::info!("求解线程启动");
             while let Ok((target, flows)) = arg_rx.recv() {
                 let solver_data = SolverData::new(target, flows);
-                log::info!("收到了新的计算请求……");
+                // log::info!("收到了新的计算请求……");
                 if solution_tx.send(solver_data.solve()).is_err() {
                     log::info!("求解线程退出");
                     // 接收方已关闭，退出线程

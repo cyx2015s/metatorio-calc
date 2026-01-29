@@ -625,6 +625,12 @@ impl EditorView for RecipeConfig {
                         .notify_change(&mut changed),
                 );
             });
+            if changed {
+                // TODO 读取用户设定的偏好
+                self.module_config = ModuleConfig::default();
+                self.machine = "entity-unknown".into();
+                self.instance_fuel = None;
+            }
             ui.separator();
             ui.vertical(|ui| {
                 ui.add_sized([35.0, 15.0], egui::Label::new("机器"));

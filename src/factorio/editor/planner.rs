@@ -393,7 +393,7 @@ impl EditorView for FactoryInstance {
                                                     GenericItem::Item(item_with_quality) => {
                                                         ui.add(
                                                             ItemWithQualitySelectorModal::new(
-                                                                egui::Id::new("target-select-item"),
+                                                                icon.id.with("target-select-item"),
                                                                 ctx,
                                                                 "选择物品",
                                                                 "item",

@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     fmt::{Debug, Display},
     hash::Hash,
-    ops::Add,
+    ops::{Add, Mul},
 };
 
 use indexmap::IndexMap;
@@ -475,6 +475,19 @@ impl Add for Effect {
             productivity: self.productivity + rhs.productivity,
             pollution: self.pollution + rhs.pollution,
             quality: self.quality + rhs.quality,
+        }
+    }
+}
+
+impl Mul<f64> for Effect {
+    type Output = Effect;
+    fn mul(self, rhs: f64) -> Self::Output {
+        Effect {
+            consumption: self.consumption * rhs,
+            speed: self.speed * rhs,
+            productivity: self.productivity * rhs,
+            pollution: self.pollution * rhs,
+            quality: self.quality * rhs,
         }
     }
 }

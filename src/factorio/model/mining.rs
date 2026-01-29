@@ -307,6 +307,11 @@ impl EditorView for MiningConfig {
                         .notify_change(&mut changed),
                 );
             });
+            if changed {
+                self.module_config = ModuleConfig::default();
+                self.machine = "entity-unknown".into();
+                self.instance_fuel = None;
+            }
             ui.separator();
             ui.vertical(|ui| {
                 ui.add_sized([35.0, 15.0], egui::Label::new("机器"));
