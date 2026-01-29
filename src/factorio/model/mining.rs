@@ -299,7 +299,8 @@ impl EditorView for MiningConfig {
                         ctx.get_display_name("entity", &self.resource)
                     ));
                 ui.add(
-                    ItemSelectorModal::new(ctx, "选择矿物", "entity", &resource_button)
+                    ItemSelectorModal::new(resource_button.id, ctx, "选择矿物", "entity")
+                        .with_toggle(resource_button.clicked())
                         .with_current(&mut self.resource)
                         .with_filter(|s, f| f.resources.contains_key(s)),
                 );
@@ -337,11 +338,12 @@ impl EditorView for MiningConfig {
                 if let Some(resource_proto) = ctx.resources.get(&self.resource) {
                     ui.add(
                         ItemWithQualitySelectorModal::new(
+                            entity_button.id,
                             ctx,
                             "选择采矿设备",
                             "entity",
-                            &entity_button,
                         )
+                        .with_toggle(entity_button.clicked())
                         .with_current(&mut self.machine)
                         .with_filter(|s, f| {
                             if let Some(miner) = f.miners.get(s) {

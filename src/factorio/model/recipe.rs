@@ -611,7 +611,8 @@ impl EditorView for RecipeConfig {
                         });
                     });
                 ui.add(
-                    ItemWithQualitySelectorModal::new(ctx, "选择配方", "recipe", &recipe_button)
+                    ItemWithQualitySelectorModal::new(recipe_button.id, ctx, "选择配方", "recipe")
+                        .with_toggle(recipe_button.clicked())
                         .with_current(&mut self.recipe)
                         .with_hover(|ui, name, ctx| {
                             ui.add(PrototypeHover {
@@ -654,11 +655,12 @@ impl EditorView for RecipeConfig {
 
                 let recipe_prototype = ctx.recipes.get(self.recipe.0.as_str()).unwrap();
                 let widget = ItemWithQualitySelectorModal::new(
+                    entity_button.id,
                     ctx,
                     "选择制造设备",
                     "entity",
-                    &entity_button,
                 )
+                .with_toggle(entity_button.clicked())
                 .with_filter(|crafter_name, ctx| {
                     if let Some(crafter) = ctx.crafters.get(crafter_name) {
                         if crafter.crafting_categories.contains(

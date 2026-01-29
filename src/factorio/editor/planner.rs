@@ -6,6 +6,7 @@ use crate::{
         editor::{icon::*, modal::*},
         format::*,
         model::*,
+        style::card_frame,
     },
     solver::*,
 };
@@ -148,11 +149,19 @@ impl FactoryInstance {
     }
 
     fn flows_panel(&mut self, ui: &mut egui::Ui, ctx: &FactorioContext) {
-        ui.label(format!("总代价: {:.2} | 总物料流", self.solution.1));
+        let label = ui.label(format!("总代价: {:.2} | 总物料流", self.solution.1));
         ui.horizontal_wrapped(|ui| {
             card_frame(ui).show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
                 ui.set_min_height(50.0);
+                let mut modal = HintModal::new(
+                    label.id,
+                    ctx,
+                    &self.flow_sender,
+                    &mut self.hint_flows,
+                    &self.flow_editor_sources,
+                );
+                let mut final_clicked = None;
                 for item in &self.total_flow_sorted_keys {
                     let amount = self.total_flow.get(item).cloned().unwrap_or(0.0);
                     if amount.abs() < 1e-6 {
@@ -174,22 +183,18 @@ impl FactoryInstance {
                             })
                             .inner;
 
-                        show_hint_modal(
-                            ui,
-                            ctx,
-                            item,
-                            amount,
-                            &icon,
-                            &self.flow_sender,
-                            &mut self.hint_flows,
-                            &self.flow_editor_sources,
-                        );
+                        if icon.clicked_by(egui::PointerButton::Secondary) || icon.clicked() {
+                            final_clicked = Some((item, amount));
+                        }
                     });
-
                     if ui.available_size_before_wrap().x < 35.0 {
                         ui.end_row();
                     }
                 }
+                if let Some((item, amount)) = final_clicked {
+                    modal = modal.with_update(true, item, amount);
+                }
+                ui.add(modal);
             });
         });
         ui.separator();
@@ -256,15 +261,17 @@ impl FactoryInstance {
                                                 },
                                             )
                                             .interact(egui::Sense::click());
-                                        show_hint_modal(
-                                            ui,
-                                            ctx,
-                                            item,
-                                            amount,
-                                            &icon,
-                                            &self.flow_sender,
-                                            &mut self.hint_flows,
-                                            &self.flow_editor_sources,
+                                        let toggle =
+                                            icon.clicked_by(egui::PointerButton::Secondary);
+                                        ui.add(
+                                            HintModal::new(
+                                                icon.id,
+                                                ctx,
+                                                &self.flow_sender,
+                                                &mut self.hint_flows,
+                                                &self.flow_editor_sources,
+                                            )
+                                            .with_update(toggle, item, amount),
                                         );
                                     });
                                     if ui.available_size_before_wrap().x < 35.0 {
@@ -279,60 +286,6 @@ impl FactoryInstance {
             !deleted
         });
     }
-}
-
-fn card_frame(ui: &mut egui::Ui) -> egui::Frame {
-    egui::Frame::group(ui.style())
-        .fill(ui.visuals().extreme_bg_color)
-        .corner_radius(8.0)
-        .stroke(egui::Stroke::new(
-            1.0,
-            ui.visuals().widgets.noninteractive.bg_stroke.color,
-        ))
-}
-
-fn show_hint_modal<I: ItemIdent, C: 'static>(
-    ui: &mut egui::Ui,
-    ctx: &C,
-    item: &I,
-    amount: f64,
-    icon: &egui::Response,
-    flow_sender: &MechanicSender<I, C>,
-    hint_flows: &mut Vec<Box<dyn Mechanic<GameContext = C, ItemIdentType = I> + 'static>>,
-    editor_sources: &[Box<dyn MechanicProvider<GameContext = C, ItemIdentType = I>>],
-) {
-    if icon.clicked_by(egui::PointerButton::Secondary) {
-        hint_flows.clear();
-        for source in editor_sources {
-            hint_flows.extend(source.hint_populate(ctx, item, amount));
-        }
-    }
-    show_modal(
-        icon.id.with("hint"),
-        icon.clicked_by(egui::PointerButton::Secondary),
-        ui,
-        |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                ui.set_min_height(384.0);
-                ui.label("推荐配方");
-                if hint_flows.is_empty() {
-                    ui.label("无推荐配方");
-                } else {
-                    for hint_flow in hint_flows.iter_mut() {
-                        card_frame(ui).show(ui, |ui| {
-                            ui.set_min_width(ui.available_width());
-                            ui.horizontal(|ui| {
-                                hint_flow.editor_view(ui, ctx);
-                            });
-                            if ui.button("添加").clicked() {
-                                flow_sender.send(hint_flow.clone()).unwrap();
-                            }
-                        });
-                    }
-                }
-            });
-        },
-    );
 }
 
 pub struct PlannerView {
@@ -436,16 +389,17 @@ impl EditorView for FactoryInstance {
                                                 icon
                                             })
                                             .inner;
-
-                                        show_hint_modal(
-                                            ui,
-                                            ctx,
-                                            item,
-                                            -*amount,
-                                            &icon,
-                                            &self.flow_sender,
-                                            &mut self.hint_flows,
-                                            &self.flow_editor_sources,
+                                        let toggle =
+                                            icon.clicked_by(egui::PointerButton::Secondary);
+                                        ui.add(
+                                            HintModal::new(
+                                                icon.id,
+                                                ctx,
+                                                &self.flow_sender,
+                                                &mut self.hint_flows,
+                                                &self.flow_editor_sources,
+                                            )
+                                            .with_update(toggle, item, -*amount),
                                         );
                                         ui.vertical(|ui| {
                                             egui::ComboBox::new(icon.id, "")
@@ -486,11 +440,12 @@ impl EditorView for FactoryInstance {
                                                     GenericItem::Item(item_with_quality) => {
                                                         ui.add(
                                                             ItemWithQualitySelectorModal::new(
+                                                                egui::Id::new("target-select-item"),
                                                                 ctx,
                                                                 "选择物品",
                                                                 "item",
-                                                                &icon,
                                                             )
+                                                            .with_toggle(icon.clicked())
                                                             .with_current(item_with_quality),
                                                         );
                                                     }
@@ -500,11 +455,14 @@ impl EditorView for FactoryInstance {
                                                     } => {
                                                         ui.add(
                                                             ItemSelectorModal::new(
+                                                                egui::Id::new(
+                                                                    "target-selecte-fluid",
+                                                                ),
                                                                 ctx,
                                                                 "选择流体",
                                                                 "fluid",
-                                                                &icon,
                                                             )
+                                                            .with_toggle(icon.clicked())
                                                             .with_current(name),
                                                         );
                                                     }

@@ -256,7 +256,8 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                         deleted = true;
                     }
                     ui.add(
-                        ItemWithQualitySelectorModal::new(self.ctx, "选择插件", "item", &icon)
+                        ItemWithQualitySelectorModal::new(icon.id, self.ctx, "选择插件", "item")
+                            .with_toggle(icon.clicked())
                             .with_current(slot)
                             .with_filter(|s, f| {
                                 if let Some(module_proto) = f.modules.get(s) {
@@ -289,7 +290,8 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                         .interact(egui::Sense::click());
                     let mut selected = None;
                     ui.add(
-                        ItemWithQualitySelectorModal::new(self.ctx, "填充插件", "item", &icon)
+                        ItemWithQualitySelectorModal::new(icon.id, self.ctx, "填充插件", "item")
+                            .with_toggle(icon.clicked())
                             .with_output(&mut selected)
                             .with_filter(|s, f| {
                                 if let Some(module_proto) = f.modules.get(s) {

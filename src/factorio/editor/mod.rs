@@ -4,3 +4,4 @@ pub mod icon;
 pub mod modal;
 pub mod planner;
 pub mod selector;
+pub mod style;
