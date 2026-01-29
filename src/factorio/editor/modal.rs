@@ -205,7 +205,7 @@ impl egui::Widget for ItemWithQualitySelectorModal<'_> {
         );
         let id = self.button.id;
         let mut sentinel = None;
-        let mut degenerated = None;
+        let mut degenerated: Option<String> = None;
         if self.ctx.qualities.len() == 1 {
             // 回退到普通选择器
 

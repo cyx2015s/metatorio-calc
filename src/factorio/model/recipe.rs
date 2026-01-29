@@ -385,7 +385,7 @@ impl HasPrototypeBase for CraftingMachinePrototype {
 #[serde(tag = "type", rename = "factorio:recipe")]
 pub struct RecipeConfig {
     pub recipe: IdWithQuality,
-    pub machine: Option<IdWithQuality>,
+    pub machine: IdWithQuality,
     pub module_config: ModuleConfig,
 
     /// 当机器的能源类型为Fluid、Burner时，用统一的抽象能源还是用具体的燃料
@@ -404,7 +404,7 @@ impl Default for RecipeConfig {
     fn default() -> Self {
         RecipeConfig {
             recipe: ("recipe-unknown".to_string(), 0).into(),
-            machine: None,
+            machine: ("entity-unknown".to_string(), 0).into(),
             module_config: ModuleConfig::new(),
             instance_fuel: None,
         }
@@ -419,11 +419,7 @@ impl AsFlow for RecipeConfig {
 
         let mut base_speed = 1.0;
 
-        let crafter = self.machine.as_ref().map(|machine| {
-            ctx.crafters
-                .get(&machine.0)
-                .expect("RecipeConfig 中的机器在上下文中不存在")
-        });
+        let crafter = ctx.crafters.get(&self.machine.0);
 
         if let Some(crafter) = crafter {
             module_effects = module_effects
@@ -434,7 +430,7 @@ impl AsFlow for RecipeConfig {
                     .base_effect
                     .clone();
             base_speed = crafter.crafting_speed;
-            let quality_level = self.machine.as_ref().unwrap().1 as usize;
+            let quality_level = self.machine.1 as usize;
             if let Some(multiplier) = &crafter.crafting_speed_quality_multiplier {
                 let quality = &ctx.qualities[quality_level].base.name;
                 let speed_multiplier = multiplier.get(quality).cloned().unwrap_or(1.0);
@@ -459,95 +455,93 @@ impl AsFlow for RecipeConfig {
             }
         }
 
-        let recipe = ctx
-            .recipes
-            .get(&self.recipe.0)
-            .expect("RecipeConfig 中的配方在上下文中不存在");
+        if let Some(recipe) = ctx.recipes.get(&self.recipe.0) {
+            base_speed /= recipe.energy_required;
 
-        base_speed /= recipe.energy_required;
-
-        for ingredient in &recipe.ingredients {
-            match ingredient {
-                RecipeIngredient::Item(item) => {
-                    let key = GenericItem::Item(IdWithQuality(item.name.clone(), self.recipe.1));
-                    index_map_update_entry(
-                        &mut map,
-                        key,
-                        -item.amount * (1.0 + module_effects.speed) * base_speed,
-                    );
-                }
-                RecipeIngredient::Fluid(fluid) => {
-                    let key = GenericItem::Fluid {
-                        name: fluid.name.clone(),
-                        temperature: fluid.temperature.map(|x| x as i32),
-                    };
-                    index_map_update_entry(
-                        &mut map,
-                        key,
-                        -fluid.amount * (1.0 + module_effects.speed) * base_speed,
-                    );
-                }
-            }
-        }
-        let quality_distribution = calc_quality_distribution(
-            &ctx.qualities,
-            module_effects.quality,
-            self.recipe.1 as usize,
-            ctx.qualities.len(),
-        );
-        for result in &recipe.results {
-            match result {
-                RecipeResult::Item(item) => {
-                    let (base_yield, extra_yield) = item.normalized_output();
-                    let total_yield = (base_yield
-                        + extra_yield
-                            * module_effects
-                                .productivity
-                                .clamp(0.0, recipe.maximum_productivity))
-                        * (1.0 + module_effects.speed)
-                        * base_speed;
-
-                    for (quality_level, &quality_prob) in quality_distribution.iter().enumerate() {
-                        if quality_prob > 0.0 {
-                            let quality_key = GenericItem::Item(IdWithQuality(
-                                item.name.clone(),
-                                quality_level as u8,
-                            ));
-                            index_map_update_entry(
-                                &mut map,
-                                quality_key,
-                                total_yield * quality_prob,
-                            );
-                        }
+            for ingredient in &recipe.ingredients {
+                match ingredient {
+                    RecipeIngredient::Item(item) => {
+                        let key =
+                            GenericItem::Item(IdWithQuality(item.name.clone(), self.recipe.1));
+                        index_map_update_entry(
+                            &mut map,
+                            key,
+                            -item.amount * (1.0 + module_effects.speed) * base_speed,
+                        );
+                    }
+                    RecipeIngredient::Fluid(fluid) => {
+                        let key = GenericItem::Fluid {
+                            name: fluid.name.clone(),
+                            temperature: fluid.temperature.map(|x| x as i32),
+                        };
+                        index_map_update_entry(
+                            &mut map,
+                            key,
+                            -fluid.amount * (1.0 + module_effects.speed) * base_speed,
+                        );
                     }
                 }
-                RecipeResult::Fluid(fluid) => {
-                    let key = GenericItem::Fluid {
-                        name: fluid.name.clone(),
-                        temperature: fluid.temperature.map(|x| x as i32),
-                    };
-                    let (base_yield, extra_yield) = fluid.normalized_output();
-                    index_map_update_entry(
-                        &mut map,
-                        key,
-                        (base_yield
+            }
+            let quality_distribution = calc_quality_distribution(
+                &ctx.qualities,
+                module_effects.quality,
+                self.recipe.1 as usize,
+                ctx.qualities.len(),
+            );
+            for result in &recipe.results {
+                match result {
+                    RecipeResult::Item(item) => {
+                        let (base_yield, extra_yield) = item.normalized_output();
+                        let total_yield = (base_yield
                             + extra_yield
                                 * module_effects
                                     .productivity
                                     .clamp(0.0, recipe.maximum_productivity))
                             * (1.0 + module_effects.speed)
-                            * base_speed,
-                    );
+                            * base_speed;
+
+                        for (quality_level, &quality_prob) in
+                            quality_distribution.iter().enumerate()
+                        {
+                            if quality_prob > 0.0 {
+                                let quality_key = GenericItem::Item(IdWithQuality(
+                                    item.name.clone(),
+                                    quality_level as u8,
+                                ));
+                                index_map_update_entry(
+                                    &mut map,
+                                    quality_key,
+                                    total_yield * quality_prob,
+                                );
+                            }
+                        }
+                    }
+                    RecipeResult::Fluid(fluid) => {
+                        let key = GenericItem::Fluid {
+                            name: fluid.name.clone(),
+                            temperature: fluid.temperature.map(|x| x as i32),
+                        };
+                        let (base_yield, extra_yield) = fluid.normalized_output();
+                        index_map_update_entry(
+                            &mut map,
+                            key,
+                            (base_yield
+                                + extra_yield
+                                    * module_effects
+                                        .productivity
+                                        .clamp(0.0, recipe.maximum_productivity))
+                                * (1.0 + module_effects.speed)
+                                * base_speed,
+                        );
+                    }
                 }
             }
         }
-
         map
     }
 
     fn cost(&self, ctx: &Self::GameContext) -> f64 {
-        if let Some(machine) = &self.machine {
-            let crafter = ctx.crafters.get(&machine.0).unwrap();
+        if let Some(crafter) = ctx.crafters.get(&self.machine.0) {
             crafter
                 .base
                 .collision_box
@@ -581,7 +575,7 @@ fn test_recipe_normalized() {
     let ctx = FactorioContext::default();
     let recipe_config = RecipeConfig {
         recipe: ("iron-gear-wheel".to_string(), 0).into(),
-        machine: Some(("assembling-machine-1".to_string(), 0).into()),
+        machine: "assembling-machine-1".into(),
         module_config: ModuleConfig::new(),
         instance_fuel: Some(("nutrients".to_string(), 0).into()),
     };
@@ -629,13 +623,16 @@ impl EditorView for RecipeConfig {
             });
             ui.separator();
             ui.vertical(|ui| {
-                let entity_button = if let Some(machine) = &mut self.machine {
+                let entity_button = if ctx.crafters.contains_key(&self.machine.0) {
                     ui.label("机器");
                     ui.add_sized(
                         [35.0, 35.0],
                         GenericIcon {
                             ctx,
-                            item: &GenericItem::Entity(IdWithQuality(machine.0.clone(), machine.1)),
+                            item: &GenericItem::Entity(IdWithQuality(
+                                self.machine.0.clone(),
+                                self.machine.1,
+                            )),
                             size: 32.0,
                         },
                     )
@@ -645,7 +642,7 @@ impl EditorView for RecipeConfig {
                     ui.add_sized([35.0, 35.0], egui::Label::new("空"))
                 };
                 let recipe_prototype = ctx.recipes.get(self.recipe.0.as_str()).unwrap();
-                let mut widget = ItemWithQualitySelectorModal::new(
+                let widget = ItemWithQualitySelectorModal::new(
                     ctx,
                     "选择制造设备",
                     "entity",
@@ -670,24 +667,14 @@ impl EditorView for RecipeConfig {
                         }
                     }
                     false
-                });
-                match self.machine {
-                    Some(ref mut machine) => {
-                        widget = widget.with_current(machine);
-                    }
-                    None => {
-                        widget = widget.with_output(&mut self.machine);
-                    }
-                }
+                })
+                .with_current(&mut self.machine);
                 ui.add(widget);
             });
 
             ui.separator();
 
-            if let Some(crafter) = self
-                .machine
-                .as_ref()
-                .and_then(|machine| ctx.crafters.get(&machine.0))
+            if let Some(crafter) = ctx.crafters.get(&self.machine.0)
                 && let Some(recipe) = ctx.recipes.get(&self.recipe.0)
             {
                 let allowed_effects = EffectTypeLimitation::new(
@@ -813,7 +800,7 @@ impl MechanicProvider for RecipeConfigProvider {
                     .values()
                     .find(|crafter| crafter.crafting_categories.contains(&category.to_string()))
                 {
-                    recipe_config.machine = Some((machine.base.base.name.clone(), 0).into());
+                    recipe_config.machine = (machine.base.base.name.clone(), 0).into();
                 }
                 let actual_produce = recipe_config.as_flow(ctx).get(item).cloned().unwrap_or(0.0);
                 if (value < 0.0 && actual_produce <= 0.0) || (value > 0.0 && actual_produce >= 0.0)

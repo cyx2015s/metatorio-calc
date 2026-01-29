@@ -67,7 +67,7 @@ impl HasPrototypeBase for MiningDrillPrototype {
 #[serde(tag = "type", rename = "factorio:mining")]
 pub struct MiningConfig {
     pub resource: String,
-    pub machine: Option<IdWithQuality>,
+    pub machine: IdWithQuality,
     pub module_config: ModuleConfig,
     pub instance_fuel: Option<IdWithQuality>,
 }
@@ -76,8 +76,8 @@ impl Default for MiningConfig {
     fn default() -> Self {
         MiningConfig {
             // TODO 不能保证 iron-ore 一定存在
-            resource: "iron-ore".to_string(),
-            machine: None,
+            resource: "entity-unknown".to_string(),
+            machine: ("entity-unknown".to_string(), 0).into(),
             module_config: ModuleConfig::default(),
             instance_fuel: None,
         }
@@ -97,15 +97,11 @@ impl AsFlow for MiningConfig {
 
         let mut base_speed = 1.0;
 
-        let quality_level = self.machine.as_ref().map(|x| x.1).unwrap_or(0) as usize;
+        let quality_level = self.machine.1 as usize;
 
         let mut drain_rate = ctx.qualities[quality_level].mining_drill_resource_drain_multiplier();
 
-        let miner = self.machine.as_ref().map(|machine_name| {
-            ctx.miners
-                .get(&machine_name.0)
-                .expect("MiningConfig 中的机器在上下文中不存在")
-        });
+        let miner = ctx.miners.get(&self.machine.0);
 
         if let Some(miner) = miner {
             module_effects = module_effects
@@ -251,8 +247,7 @@ impl AsFlow for MiningConfig {
     }
 
     fn cost(&self, ctx: &Self::GameContext) -> f64 {
-        if let Some(machine) = &self.machine {
-            let miner = ctx.miners.get(&machine.0).unwrap();
+        if let Some(miner) = ctx.miners.get(&self.machine.0) {
             miner
                 .base
                 .collision_box
@@ -311,19 +306,20 @@ impl EditorView for MiningConfig {
             });
             ui.separator();
             ui.vertical(|ui| {
-                let entity_button = if let Some(machine) = &self.machine {
+                ui.add_sized([35.0, 15.0], egui::Label::new("机器"));
+                let entity_button = if ctx.miners.contains_key(&self.machine.0) {
                     ui.add_sized(
                         [35.0, 35.0],
                         Icon {
                             ctx,
                             type_name: "entity",
-                            item_name: &machine.0,
-                            quality: machine.1,
+                            item_name: &self.machine.0,
+                            quality: self.machine.1,
                             size: 32.0,
                         },
                     )
                     .interact(egui::Sense::click())
-                    .on_hover_text(ctx.get_display_name("entity", &machine.0))
+                    .on_hover_text(ctx.get_display_name("entity", &self.machine.0))
                 } else {
                     ui.add_sized(
                         [35.0, 35.0],
@@ -338,39 +334,33 @@ impl EditorView for MiningConfig {
                     .interact(egui::Sense::click())
                     .on_hover_text("采矿机：未选择")
                 };
-                let resource_proto = ctx
-                    .resources
-                    .get(&self.resource)
-                    .expect("MiningConfig 中的矿物在上下文中不存在");
-                ui.add(
-                    ItemWithQualitySelectorModal::new(
-                        ctx,
-                        "选择采矿设备",
-                        "entity",
-                        &entity_button,
-                    )
-                    .with_output(&mut self.machine)
-                    .with_filter(|s, f| {
-                        if let Some(miner) = f.miners.get(s) {
-                            miner.resource_categories.contains(
-                                resource_proto
-                                    .category
-                                    .as_ref()
-                                    .unwrap_or(&"basic-solid".to_string()),
-                            )
-                        } else {
-                            false
-                        }
-                    }),
-                );
+                if let Some(resource_proto) = ctx.resources.get(&self.resource) {
+                    ui.add(
+                        ItemWithQualitySelectorModal::new(
+                            ctx,
+                            "选择采矿设备",
+                            "entity",
+                            &entity_button,
+                        )
+                        .with_current(&mut self.machine)
+                        .with_filter(|s, f| {
+                            if let Some(miner) = f.miners.get(s) {
+                                miner.resource_categories.contains(
+                                    resource_proto
+                                        .category
+                                        .as_ref()
+                                        .unwrap_or(&"basic-solid".to_string()),
+                                )
+                            } else {
+                                false
+                            }
+                        }),
+                    );
+                }
             });
             ui.separator();
 
-            if let Some(miner) = self
-                .machine
-                .as_ref()
-                .and_then(|machine| ctx.miners.get(&machine.0))
-            {
+            if let Some(miner) = ctx.miners.get(&self.machine.0) {
                 ui.add(ModuleConfigEditor::new(
                     ctx,
                     &mut self.module_config,
@@ -442,12 +432,7 @@ impl MechanicProvider for MiningConfigProvider {
                         if let Some(mining) = resource.base.minable.as_ref() {
                             if let Some(result) = &mining.result {
                                 if result == name {
-                                    let mining_config = MiningConfig {
-                                        resource: resource.base.base.name.clone(),
-                                        machine: None,
-                                        module_config: ModuleConfig::default(),
-                                        instance_fuel: None,
-                                    };
+                                    let mining_config = MiningConfig::default();
                                     ret.push(Box::new(mining_config)
                                         as Box<
                                             dyn Mechanic<
@@ -463,7 +448,7 @@ impl MechanicProvider for MiningConfigProvider {
                                     {
                                         let mining_config = MiningConfig {
                                             resource: resource.base.base.name.clone(),
-                                            machine: None,
+                                            machine: "entity-unknown".into(),
                                             module_config: ModuleConfig::default(),
                                             instance_fuel: None,
                                         };
@@ -494,7 +479,7 @@ impl MechanicProvider for MiningConfigProvider {
                                 {
                                     let mining_config = MiningConfig {
                                         resource: resource.base.base.name.clone(),
-                                        machine: None,
+                                        machine: "entity-unknown".into(),
                                         module_config: ModuleConfig::default(),
                                         instance_fuel: None,
                                     };
@@ -524,7 +509,7 @@ fn test_mining_normalized() {
     let ctx = FactorioContext::default();
     let mining_config = MiningConfig {
         resource: "uranium-ore".to_string(),
-        machine: Some(("big-mining-drill".to_string(), 0).into()),
+        machine: "big-mining-drill".into(),
         module_config: ModuleConfig::default(),
         instance_fuel: None,
     };

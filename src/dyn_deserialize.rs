@@ -73,13 +73,13 @@ fn test_dyn_deserializer() {
     MiningConfig::register(&mut registry);
     let recipe = RecipeConfig {
         recipe: "iron-gear-wheel".into(),
-        machine: Some("assembling-machine-2".into()),
+        machine: "assembling-machine-2".into(),
         module_config: ModuleConfig::new(),
         instance_fuel: None,
     };
     let mining = MiningConfig {
         resource: "iron-ore".into(),
-        machine: Some("electric-mining-drill".into()),
+        machine: "electric-mining-drill".into(),
         module_config: ModuleConfig::new(),
         instance_fuel: None,
     };
