@@ -191,12 +191,6 @@ impl FactoryInstance {
                                 }
                                 *changed = true;
                             }
-                            // if ui.button("test 序列化").clicked() {
-                            //     log::info!("=== 测试序列化");
-                            //     let serialize_json = serde_json::to_value(&flow_config);
-                            //     log::info!("序列化结果: {}", serialize_json.unwrap());
-                            //     log::info!("=== 序列化结束");
-                            // }
                             if let Some(solution) = solution_val {
                                 ui.add(CompactLabel::new(solution));
                             } else {
@@ -665,7 +659,7 @@ impl Subview for FactorioContextCreatorView {
             }
 
             ui.separator();
-            
+
             if ui
                 .add_enabled(can_load_context, egui::Button::new("加载游戏上下文"))
                 .clicked()

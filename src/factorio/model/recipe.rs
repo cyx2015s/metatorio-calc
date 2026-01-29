@@ -616,10 +616,11 @@ impl EditorView for RecipeConfig {
                         .with_toggle(recipe_button.clicked())
                         .with_current(&mut self.recipe)
                         .with_hover(|ui, name, ctx| {
-                            ui.add(PrototypeHover {
-                                ctx,
-                                prototype: ctx.recipes.get(name).unwrap(),
-                            });
+                            if let Some(prototype) = ctx.recipes.get(name) {
+                                ui.add(PrototypeHover { ctx, prototype });
+                            } else {
+                                ui.label(format!("未知配方: {}", name));
+                            }
                         })
                         .notify_change(&mut changed),
                 );
