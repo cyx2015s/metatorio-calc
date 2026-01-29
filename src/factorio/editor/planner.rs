@@ -647,7 +647,6 @@ impl Subview for FactorioContextCreatorView {
                 ui.label("未选择Mod路径");
             }
 
-            ui.separator();
             let mut can_load_context = true;
             if self.path.is_none() {
                 ui.label("请选择游戏可执行文件以继续。");
@@ -659,6 +658,14 @@ impl Subview for FactorioContextCreatorView {
                 ui.label("模组文件夹下未找到 mod-list.json。");
                 can_load_context = false;
             }
+
+            if self.thread.is_some() {
+                ui.label("正在加载游戏上下文，请稍候...");
+                can_load_context = false;
+            }
+
+            ui.separator();
+            
             if ui
                 .add_enabled(can_load_context, egui::Button::new("加载游戏上下文"))
                 .clicked()

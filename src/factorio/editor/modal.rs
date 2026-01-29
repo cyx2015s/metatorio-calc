@@ -264,10 +264,10 @@ impl egui::Widget for ItemWithQualitySelectorModal<'_> {
             }
             let ret = widget.ui(ui);
             if let Some(selected) = degenerated
-                && let Some(&mut ref mut output) = self.output {
-                    *output = Some(IdWithQuality(selected, 0));
-                    
-                }
+                && let Some(&mut ref mut output) = self.output
+            {
+                *output = Some(IdWithQuality(selected, 0));
+            }
             return ret;
         }
         show_modal(self.id, self.toggle, ui, |ui| {
@@ -373,6 +373,7 @@ impl<'a, I: ItemIdent, C: 'static> egui::Widget for HintModal<'a, I, C> {
         show_modal(self.id, self.toggle, ui, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 ui.set_min_height(384.0);
+                ui.set_min_width(192.0);
                 ui.label("推荐配方");
                 if self.hint_flows.is_empty() {
                     ui.label("无推荐配方");

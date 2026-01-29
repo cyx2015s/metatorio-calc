@@ -276,7 +276,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                 }
                             });
                     if let Some(changed) = &mut self.changed {
-                        widget = widget.notify_change(*changed);
+                        widget = widget.notify_change(changed);
                     }
                     ui.add(widget);
                     !deleted
@@ -313,7 +313,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                 }
                             });
                     if let Some(changed) = &mut self.changed {
-                        widget = widget.notify_change(*changed);
+                        widget = widget.notify_change(changed);
                     }
                     ui.add(widget);
                     if let Some(selected) = selected {
