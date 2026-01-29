@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use egui::Vec2;
 
-use crate::factorio::{IdWithQuality, editor::icon::*, hover::*, model::*};
+use crate::factorio::{IdWithQuality, editor::icon::*, model::*};
 
 #[derive(Debug, Clone, Default)]
 pub struct ItemSelectorStorage {
@@ -10,12 +10,16 @@ pub struct ItemSelectorStorage {
     pub subgroup: usize,
 }
 
+pub type FilterFn<'a> = dyn Fn(&str, &FactorioContext) -> bool + 'a;
+pub type HoverUi<'a> = dyn Fn(&mut egui::Ui, &str, &FactorioContext) + 'a;
+
 pub struct ItemSelector<'a> {
-    pub ctx: &'a FactorioContext,
-    pub item_type: &'a str,
-    pub filter: Box<dyn Fn(&str, &FactorioContext) -> bool + 'a>,
-    pub current: Option<&'a mut String>,
-    pub output: Option<&'a mut Option<String>>,
+    ctx: &'a FactorioContext,
+    item_type: &'a str,
+    filter: Box<FilterFn<'a>>,
+    current: Option<&'a mut String>,
+    output: Option<&'a mut Option<String>>,
+    hover: Option<Box<HoverUi<'a>>>,
 }
 
 impl<'a> ItemSelector<'a> {
@@ -26,6 +30,7 @@ impl<'a> ItemSelector<'a> {
             filter: Box::new(|_, _| true),
             current: None,
             output: None,
+            hover: None,
         }
     }
 
@@ -53,6 +58,14 @@ impl<'a> ItemSelector<'a> {
     {
         let previous_filter = self.filter;
         self.filter = Box::new(move |s, ctx| previous_filter(s, ctx) && filter(s, ctx));
+        self
+    }
+
+    pub fn with_hover(
+        mut self,
+        hover: impl Fn(&mut egui::Ui, &str, &FactorioContext) + 'a,
+    ) -> Self {
+        self.hover = Some(Box::new(hover));
         self
     }
 }
@@ -151,20 +164,14 @@ impl egui::Widget for ItemSelector<'_> {
                                 size: 32.0,
                                 quality: 0,
                             })
-                            .interact(egui::Sense::click());
-                        let button = if self.item_type == "recipe" {
-                            let prototype = self.ctx.recipes.get(item_name).unwrap();
-                            button.on_hover_ui(|ui| {
-                                ui.add(PrototypeHover {
-                                    ctx: self.ctx,
-                                    prototype,
-                                });
-                            })
-                        } else {
-                            button
-                                .on_hover_text(self.ctx.get_display_name(self.item_type, item_name))
-                        };
-
+                            .interact(egui::Sense::click())
+                            .on_hover_ui(|ui| {
+                                if let Some(hover) = &self.hover {
+                                    (hover)(ui, item_name, self.ctx);
+                                } else {
+                                    ui.label(self.ctx.get_display_name(self.item_type, item_name));
+                                }
+                            });
                         if button.clicked() {
                             storage.subgroup = j;
                             if let Some(&mut ref mut selected_item) = self.current {
@@ -189,12 +196,13 @@ impl egui::Widget for ItemSelector<'_> {
 }
 
 pub struct ItemWithQualitySelector<'a> {
-    pub ctx: &'a FactorioContext,
-    pub item_type: &'a str,
-    pub filter: Box<dyn Fn(&str, &FactorioContext) -> bool + 'a>,
-    pub current: Option<&'a mut IdWithQuality>,
-    pub output: Option<&'a mut Option<IdWithQuality>>,
-    pub forget: bool,
+    ctx: &'a FactorioContext,
+    item_type: &'a str,
+    filter: Box<FilterFn<'a>>,
+    current: Option<&'a mut IdWithQuality>,
+    output: Option<&'a mut Option<IdWithQuality>>,
+    forget: bool,
+    hover: Option<Box<HoverUi<'a>>>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -212,6 +220,7 @@ impl<'a> ItemWithQualitySelector<'a> {
             current: None,
             output: None,
             forget: false,
+            hover: None,
         }
     }
 
@@ -246,6 +255,14 @@ impl<'a> ItemWithQualitySelector<'a> {
         self.filter = Box::new(move |s, ctx| previous_filter(s, ctx) && filter(s, ctx));
         self
     }
+
+    pub fn with_hover(
+        mut self,
+        hover: impl Fn(&mut egui::Ui, &str, &FactorioContext) + 'a,
+    ) -> Self {
+        self.hover = Some(Box::new(hover));
+        self
+    }
 }
 
 impl<'a> egui::Widget for ItemWithQualitySelector<'a> {
@@ -261,11 +278,13 @@ impl<'a> egui::Widget for ItemWithQualitySelector<'a> {
         let mut selecting_quality = None;
         let mut selecting_item = None;
         quality_selector(ui, self.ctx, &mut selecting_quality);
-        ui.add(
-            ItemSelector::new(self.ctx, self.item_type)
-                .with_output(&mut selecting_item)
-                .with_filter(self.filter),
-        );
+        let mut widget = ItemSelector::new(self.ctx, self.item_type)
+            .with_output(&mut selecting_item)
+            .with_filter(self.filter);
+        if let Some(hover) = self.hover {
+            widget = widget.with_hover(hover);
+        }
+        ui.add(widget);
         if let Some(selected_item) = &selecting_item {
             storage.selected_item = Some(selected_item.clone());
             if let Some(&mut ref mut current) = self.current {
@@ -281,9 +300,9 @@ impl<'a> egui::Widget for ItemWithQualitySelector<'a> {
         if let Some(&mut ref mut output) = self.output
             && let (Some(item), Some(quality)) =
                 (storage.selected_item.clone(), storage.selected_quality)
-            {
-                *output = Some(IdWithQuality(item, quality));
-            }
+        {
+            *output = Some(IdWithQuality(item, quality));
+        }
 
         ui.memory_mut(|mem| {
             mem.data

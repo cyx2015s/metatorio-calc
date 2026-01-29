@@ -618,7 +618,13 @@ impl EditorView for RecipeConfig {
                     });
                 ui.add(
                     ItemWithQualitySelectorModal::new(ctx, "选择配方", "recipe", &recipe_button)
-                        .with_current(&mut self.recipe),
+                        .with_current(&mut self.recipe)
+                        .with_hover(|ui, name, ctx| {
+                            ui.add(PrototypeHover {
+                                ctx,
+                                prototype: ctx.recipes.get(name).unwrap(),
+                            });
+                        }),
                 );
             });
             ui.separator();
@@ -736,9 +742,7 @@ impl Default for RecipeConfigProvider {
 
 impl RecipeConfigProvider {
     pub fn new() -> Self {
-        Self {
-            sender: None,
-        }
+        Self { sender: None }
     }
 }
 
@@ -834,8 +838,7 @@ impl MechanicProvider for RecipeConfigProvider {
 impl EditorView for RecipeConfigProvider {
     fn editor_view(&mut self, ui: &mut egui::Ui, _ctx: &Self::GameContext) {
         if ui.button("添加配方").clicked() {
-            let mut new_config = RecipeConfig::default();
-            new_config.recipe = ("recipe-unknown".to_string(), 0).into();
+            let new_config = RecipeConfig::default();
             if let Some(sender) = &self.sender {
                 let _ = sender.send(Box::new(new_config));
             }

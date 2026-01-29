@@ -27,6 +27,11 @@ lazy_static! {
         registry
     };
 }
+type SolverArguments = (
+    IndexMap<GenericItem, f64>,
+    IndexMap<usize, (IndexMap<GenericItem, f64>, f64)>,
+);
+
 pub struct FactoryInstance {
     pub name: String,
     pub target: Vec<(GenericItem, f64)>,
@@ -39,8 +44,7 @@ pub struct FactoryInstance {
     pub hint_flows: Vec<Box<FactorioMechanic>>,
     pub flow_receiver: std::sync::mpsc::Receiver<Box<FactorioMechanic>>,
     pub flow_sender: std::sync::mpsc::Sender<Box<FactorioMechanic>>,
-    pub solver_sender:
-        std::sync::mpsc::Sender<(Flow<GenericItem>, IndexMap<usize, (Flow<GenericItem>, f64)>)>,
+    pub solver_sender: std::sync::mpsc::Sender<SolverArguments>,
     pub solver_receiver: std::sync::mpsc::Receiver<Result<(Flow<usize>, f64), String>>,
 }
 

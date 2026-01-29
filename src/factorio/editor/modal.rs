@@ -2,7 +2,7 @@ use egui::ModalResponse;
 
 use crate::factorio::{
     FactorioContext, IdWithQuality,
-    selector::{ItemSelector, ItemWithQualitySelector},
+    selector::{FilterFn, HoverUi, ItemSelector, ItemWithQualitySelector},
 };
 
 pub fn show_modal<R>(
@@ -37,9 +37,10 @@ pub struct ItemSelectorModal<'a> {
     label_str: &'a str,
     item_type: &'a str,
     button: &'a egui::Response,
-    filter: Option<Box<dyn Fn(&str, &FactorioContext) -> bool + 'a>>,
+    filter: Option<Box<FilterFn<'a>>>,
     current: Option<&'a mut String>,
     output: Option<&'a mut Option<String>>,
+    hover: Option<Box<HoverUi<'a>>>,
 }
 
 impl<'a> ItemSelectorModal<'a> {
@@ -57,6 +58,7 @@ impl<'a> ItemSelectorModal<'a> {
             filter: None,
             current: None,
             output: None,
+            hover: None,
         }
     }
 
@@ -72,6 +74,14 @@ impl<'a> ItemSelectorModal<'a> {
 
     pub fn with_output(mut self, output: &'a mut Option<String>) -> Self {
         self.output = Some(output);
+        self
+    }
+
+    pub fn with_hover(
+        mut self,
+        hover: impl Fn(&mut egui::Ui, &str, &FactorioContext) + 'a,
+    ) -> Self {
+        self.hover = Some(Box::new(hover));
         self
     }
 }
@@ -113,6 +123,9 @@ impl egui::Widget for ItemSelectorModal<'_> {
             if let Some(custom_filter) = self.filter {
                 widget = widget.chain_filter(custom_filter);
             }
+            if let Some(hover) = self.hover {
+                widget = widget.with_hover(hover);
+            }
             egui::ScrollArea::vertical()
                 .max_width(f32::INFINITY)
                 .auto_shrink(false)
@@ -135,9 +148,10 @@ pub struct ItemWithQualitySelectorModal<'a> {
     label_str: &'a str,
     item_type: &'a str,
     button: &'a egui::Response,
-    filter: Option<Box<dyn Fn(&str, &FactorioContext) -> bool + 'a>>,
+    filter: Option<Box<FilterFn<'a>>>,
     current: Option<&'a mut IdWithQuality>,
     output: Option<&'a mut Option<IdWithQuality>>,
+    hover: Option<Box<HoverUi<'a>>>,
 }
 
 impl<'a> ItemWithQualitySelectorModal<'a> {
@@ -155,6 +169,7 @@ impl<'a> ItemWithQualitySelectorModal<'a> {
             filter: None,
             current: None,
             output: None,
+            hover: None,
         }
     }
 
@@ -170,6 +185,14 @@ impl<'a> ItemWithQualitySelectorModal<'a> {
 
     pub fn with_output(mut self, output: &'a mut Option<IdWithQuality>) -> Self {
         self.output = Some(output);
+        self
+    }
+
+    pub fn with_hover(
+        mut self,
+        hover: impl Fn(&mut egui::Ui, &str, &FactorioContext) + 'a,
+    ) -> Self {
+        self.hover = Some(Box::new(hover));
         self
     }
 }
@@ -194,9 +217,13 @@ impl egui::Widget for ItemWithQualitySelectorModal<'_> {
             if let Some(current) = self.current {
                 widget = widget.with_current(&mut current.0);
             }
+            if let Some(hover) = self.hover {
+                widget = widget.with_hover(hover);
+            }
             if self.output.is_some() {
                 widget = widget.with_output(&mut degenerated);
             }
+
             let ret = widget.ui(ui);
             if let Some(selected) = degenerated {
                 if let Some(&mut ref mut output) = self.output {
@@ -233,6 +260,9 @@ impl egui::Widget for ItemWithQualitySelectorModal<'_> {
             }
             if let Some(custom_filter) = self.filter {
                 widget = widget.chain_filter(custom_filter);
+            }
+            if let Some(hover) = self.hover {
+                widget = widget.with_hover(hover);
             }
             egui::ScrollArea::vertical()
                 .max_width(f32::INFINITY)
