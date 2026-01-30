@@ -34,7 +34,7 @@ impl<'a> Icon<'a> {
     }
 
     pub fn image(&'_ self) -> egui::Image<'_> {
-        let root_path = self.ctx.icon_path.as_ref().unwrap();
+        let root_path = &self.ctx.icon_path;
         // 某个 type 的 order info 存在，但是没有对应的物品，视为物品不存在
         // 某个 type 的 order info 不存在，当作存在
         let icon_path = if self
@@ -63,7 +63,7 @@ impl<'a> Icon<'a> {
 
 impl<'a> egui::Widget for Icon<'a> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
-        let root_path = self.ctx.icon_path.as_ref().unwrap();
+        let root_path = &self.ctx.icon_path;
         egui::Frame::NONE
             .fill(egui::Color32::from_rgba_premultiplied(
                 0xaa, 0xaa, 0xaa, 0xcc,

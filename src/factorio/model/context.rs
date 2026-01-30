@@ -35,7 +35,7 @@ pub struct FactorioContext {
     /// 模组信息
     pub mods: Vec<(String, String)>,
     /// 图标路径
-    pub icon_path: Option<std::path::PathBuf>,
+    pub icon_path: std::path::PathBuf,
     /// 翻译信息
     pub localized_name: Dict<Dict<String>>,
     pub localized_description: Dict<Dict<String>>,
@@ -210,7 +210,6 @@ impl FactorioContext {
             crafters,
             resources,
             miners,
-            icon_path: None,
             planets,
             tiles,
             ..Default::default()
@@ -428,7 +427,7 @@ impl FactorioContext {
             return None;
         }
         let mut ctx = FactorioContext::load(&json_value.unwrap());
-        ctx.icon_path = Some(icon_path);
+        ctx.icon_path = icon_path;
         for locale_category in LOCALE_CATEGORIES.iter() {
             log::info!("加载翻译类别 {}", locale_category);
             let locale_path =

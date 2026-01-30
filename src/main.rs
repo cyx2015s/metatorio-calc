@@ -72,29 +72,47 @@ impl eframe::App for MainPage {
                     "Github 仓库",
                     "https://github.com/cyx2015s/metatorio-calc",
                 ));
-                for (i, creator) in self.creators.iter_mut().enumerate() {
-                    if ui
-                        .selectable_label(self.selected == i, creator.0.to_string())
-                        .clicked()
-                    {
-                        self.selected = i;
-                    }
-                }
+                self.creators
+                    .iter_mut()
+                    .enumerate()
+                    .for_each(|(i, creator)| {
+                        if ui
+                            .selectable_label(self.selected == i, &creator.0)
+                            .on_hover_text_at_pointer("点击以选择该游戏环境")
+                            .clicked()
+                        {
+                            self.selected = i;
+                        }
+                    });
 
                 while let Ok(subview) = self.subview_receiver.try_recv() {
                     self.subviews.push(subview);
                 }
 
                 ui.separator();
-
-                for (i, subview) in self.subviews.iter().enumerate() {
-                    if ui
-                        .selectable_label(self.selected == i + self.creators.len(), subview.name())
-                        .on_hover_text_at_pointer(subview.description())
-                        .clicked()
-                    {
-                        self.selected = i + self.creators.len();
+                let mut idx = 0;
+                self.subviews.retain_mut(|subview| {
+                    let label = ui
+                        .selectable_label(
+                            self.selected == idx + self.creators.len(),
+                            subview.name(),
+                        )
+                        .on_hover_text_at_pointer(subview.description());
+                    if label.clicked() {
+                        self.selected = idx + self.creators.len();
                     }
+                    idx = idx + 1;
+                    let mut deleted = false;
+                    label.context_menu(|ui| {
+                        if ui.button("关闭").clicked() {
+                            deleted = true;
+                        }
+                    });
+
+                    !deleted
+                });
+                if self.selected >= self.creators.len() + self.subviews.len() {
+                    self.selected = 0;
                 }
                 ui.separator();
                 let mut show_font_license =

@@ -28,6 +28,7 @@ lazy_static! {
         registry
     };
 }
+
 pub struct FactoryInstance {
     pub name: String,
     pub target: Vec<(GenericItem, f64)>,
@@ -36,13 +37,63 @@ pub struct FactoryInstance {
     pub total_flow: Flow<GenericItem>,
     /// Cached sorted keys for total_flow to avoid sorting every frame
     pub total_flow_sorted_keys: Vec<GenericItem>,
-    pub flow_editor_sources: Vec<Box<FactorioMechanicProvider>>,
-    pub flow_editors: Vec<Box<FactorioMechanic>>,
-    pub hint_flows: Vec<Box<FactorioMechanic>>,
+    pub mechanic_providers: Vec<Box<FactorioMechanicProvider>>,
+    pub mechanics: Vec<Box<FactorioMechanic>>,
+    pub mechanic_suggestions: Vec<Box<FactorioMechanic>>,
     pub mechanic_receiver: std::sync::mpsc::Receiver<Box<FactorioMechanic>>,
     pub mechanic_sender: std::sync::mpsc::Sender<Box<FactorioMechanic>>,
     pub arg_sender: std::sync::mpsc::Sender<SolverArgs<GenericItem, usize>>,
     pub solution_receiver: std::sync::mpsc::Receiver<SolverSolution<usize>>,
+}
+
+impl serde::Serialize for FactoryInstance {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut state = serializer.serialize_struct("FactoryInstance", 5)?;
+        serde::ser::SerializeStruct::serialize_field(&mut state, "name", &self.name)?;
+        serde::ser::SerializeStruct::serialize_field(&mut state, "target", &self.target)?;
+        serde::ser::SerializeStruct::serialize_field(&mut state, "external", &self.external)?;
+        serde::ser::SerializeStruct::serialize_field(&mut state, "mechanics", &self.mechanics)?;
+        serde::ser::SerializeStruct::serialize_field(
+            &mut state,
+            "mechanic_providers",
+            &self.mechanic_providers,
+        )?;
+        Ok(serde::ser::SerializeStruct::end(state)?)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for FactoryInstance {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let mut factory_instance = FactoryInstance::default();
+        let value = serde_json::Value::deserialize(deserializer)?;
+        factory_instance.name =
+            serde_json::from_value(value["name"].clone()).map_err(serde::de::Error::custom)?;
+        factory_instance.target =
+            serde_json::from_value(value["target"].clone()).map_err(serde::de::Error::custom)?;
+        factory_instance.external =
+            serde_json::from_value(value["external"].clone()).map_err(serde::de::Error::custom)?;
+        for mechanic in value["mechanics"].as_array().unwrap_or(&vec![]) {
+            let mech = MECHANIC_REGISTRY
+                .deserialize(mechanic.clone())
+                .ok_or_else(|| serde::de::Error::custom("Failed to deserialize mechanic"))?;
+            factory_instance.mechanics.push(mech);
+        }
+        for mechanic_provider in value["mechanic_providers"].as_array().unwrap_or(&vec![]) {
+            let mech_provider = MECHANIC_PROVIDER_REGISTRY
+                .deserialize(mechanic_provider.clone())
+                .ok_or_else(|| {
+                    serde::de::Error::custom("Failed to deserialize mechanic provider")
+                })?;
+            factory_instance.mechanic_providers.push(mech_provider);
+        }
+        Ok(factory_instance)
+    }
 }
 
 impl Clone for FactoryInstance {
@@ -59,9 +110,9 @@ impl Clone for FactoryInstance {
             solution: self.solution.clone(),
             total_flow: self.total_flow.clone(),
             total_flow_sorted_keys: self.total_flow_sorted_keys.clone(),
-            flow_editor_sources: self.flow_editor_sources.clone(),
-            flow_editors: self.flow_editors.clone(),
-            hint_flows: self.hint_flows.clone(),
+            mechanic_providers: self.mechanic_providers.clone(),
+            mechanics: self.mechanics.clone(),
+            mechanic_suggestions: self.mechanic_suggestions.clone(),
             mechanic_receiver: mechanic_rx,
             mechanic_sender: mechanic_tx,
             arg_sender: arg_tx,
@@ -84,9 +135,9 @@ impl Default for FactoryInstance {
             solution: (IndexMap::new(), 0.0),
             total_flow: IndexMap::new(),
             total_flow_sorted_keys: Vec::new(),
-            flow_editor_sources: Vec::new(),
-            flow_editors: Vec::new(),
-            hint_flows: Vec::new(),
+            mechanic_providers: Vec::new(),
+            mechanics: Vec::new(),
+            mechanic_suggestions: Vec::new(),
             mechanic_receiver: mechanic_rx,
             mechanic_sender: mechanic_tx,
             arg_sender: arg_tx,
@@ -102,13 +153,39 @@ impl FactoryInstance {
             ..Default::default()
         }
     }
+
+    pub fn send_solve_request(&self, ctx: &FactorioContext) {
+        let flows = self
+            .mechanics
+            .iter()
+            .map(|fe| (box_as_ptr(fe), (fe.as_flow(ctx), fe.cost(ctx))))
+            .collect::<IndexMap<usize, (_, _)>>();
+        let target = self
+            .target
+            .iter()
+            .map(|(item, amount)| (item.clone(), *amount))
+            .fold(IndexMap::new(), |mut acc, (item, amount)| {
+                *acc.entry(item).or_insert(0.0) += amount;
+                acc
+            });
+        let external = self
+            .external
+            .iter()
+            .map(|(item, amount)| (item.clone(), *amount))
+            .fold(IndexMap::new(), |mut acc, (item, amount)| {
+                *acc.entry(item).or_insert(0.0) += amount;
+                acc
+            });
+        let _ = self.arg_sender.send((target, flows, external));
+    }
+
     pub fn add_flow_source<
         F: Fn(MechanicSender<GenericItem, FactorioContext>) -> Box<FactorioMechanicProvider>,
     >(
         mut self,
         f: F,
     ) -> Self {
-        self.flow_editor_sources
+        self.mechanic_providers
             .push(f(self.mechanic_sender.clone()));
         self
     }
@@ -123,8 +200,8 @@ impl FactoryInstance {
                     label.id,
                     ctx,
                     &self.mechanic_sender,
-                    &mut self.hint_flows,
-                    &self.flow_editor_sources,
+                    &mut self.mechanic_suggestions,
+                    &self.mechanic_providers,
                 );
                 let mut final_clicked = None;
                 for item in &self.total_flow_sorted_keys {
@@ -156,7 +233,7 @@ impl FactoryInstance {
             });
         });
         ui.separator();
-        self.flow_editors.retain_mut(|flow_config| {
+        self.mechanics.retain_mut(|flow_config| {
             let mut deleted = false;
             card_frame(ui).show(ui, {
                 |ui| {
@@ -217,8 +294,8 @@ impl FactoryInstance {
                                                 icon.id,
                                                 ctx,
                                                 &self.mechanic_sender,
-                                                &mut self.hint_flows,
-                                                &self.flow_editor_sources,
+                                                &mut self.mechanic_suggestions,
+                                                &self.mechanic_providers,
                                             )
                                             .with_update(toggle, item, amount),
                                         );
@@ -265,7 +342,7 @@ impl EditorView for FactoryInstance {
                 Ok(solution) => {
                     self.total_flow.clear();
                     self.solution = solution;
-                    for fe in self.flow_editors.iter_mut() {
+                    for fe in self.mechanics.iter_mut() {
                         let var_value =
                             self.solution.0.get(&box_as_ptr(fe)).cloned().unwrap_or(0.0);
                         let flow = fe.as_flow(ctx);
@@ -326,8 +403,8 @@ impl EditorView for FactoryInstance {
                                                 icon.id,
                                                 ctx,
                                                 &self.mechanic_sender,
-                                                &mut self.hint_flows,
-                                                &self.flow_editor_sources,
+                                                &mut self.mechanic_suggestions,
+                                                &self.mechanic_providers,
                                             )
                                             .with_update(toggle, item, -*amount),
                                         );
@@ -397,7 +474,6 @@ impl EditorView for FactoryInstance {
                                                     }
                                                     _ => {}
                                                 }
-                                                
                                                 if ui.vertical(|ui| {
                                                     ui.label("目标产量");
                                                     ui.add(
@@ -451,8 +527,8 @@ impl EditorView for FactoryInstance {
                                             icon.id,
                                             ctx,
                                             &self.mechanic_sender,
-                                            &mut self.hint_flows,
-                                            &self.flow_editor_sources,
+                                            &mut self.mechanic_suggestions,
+                                            &self.mechanic_providers,
                                         )
                                         .with_update(toggle, item, -*penalty),
                                     );
@@ -547,7 +623,6 @@ impl EditorView for FactoryInstance {
                                             if *penalty < 0.0 {
                                                 *penalty = 0.0
                                             }
-                                            
                                         });
                                     });
                                 });
@@ -563,7 +638,7 @@ impl EditorView for FactoryInstance {
                     ui.separator();
                     ui.vertical(|ui| {
                         ui.heading("游戏机制");
-                        for flow_source in &mut self.flow_editor_sources {
+                        for flow_source in &mut self.mechanic_providers {
                             changed |= flow_source.editor_view(ui, ctx);
                             ui.separator();
                         }
@@ -572,7 +647,7 @@ impl EditorView for FactoryInstance {
             });
 
         while let Ok(flow_source) = self.mechanic_receiver.try_recv() {
-            self.flow_editors.push(flow_source);
+            self.mechanics.push(flow_source);
             changed = true;
         }
         egui::Frame::NONE
@@ -590,28 +665,7 @@ impl EditorView for FactoryInstance {
             });
         // 无关
         if changed {
-            let flows = self
-                .flow_editors
-                .iter()
-                .map(|fe| (box_as_ptr(fe), (fe.as_flow(ctx), fe.cost(ctx))))
-                .collect::<IndexMap<usize, (_, _)>>();
-            let target = self
-                .target
-                .iter()
-                .map(|(item, amount)| (item.clone(), *amount))
-                .fold(IndexMap::new(), |mut acc, (item, amount)| {
-                    *acc.entry(item).or_insert(0.0) += amount;
-                    acc
-                });
-            let external = self
-                .external
-                .iter()
-                .map(|(item, amount)| (item.clone(), *amount))
-                .fold(IndexMap::new(), |mut acc, (item, amount)| {
-                    *acc.entry(item).or_insert(0.0) += amount;
-                    acc
-                });
-            let _ = self.arg_sender.send((target, flows, external));
+            self.send_solve_request(ctx);
         };
         changed
     }
@@ -646,29 +700,8 @@ impl Subview for PlannerView {
             ))
             .show(ui, |ui| {
                 egui::containers::menu::MenuBar::new().ui(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        for i in 0..self.factories.len() {
-                            if ui
-                                .add(
-                                    egui::Button::new(&self.factories[i].name)
-                                        .selected(self.selected_factory == i)
-                                        .stroke(egui::Stroke::new(
-                                            1.0,
-                                            ui.visuals().widgets.hovered.bg_stroke.color,
-                                        )),
-                                )
-                                .clicked()
-                            {
-                                self.selected_factory = i;
-                            }
-                        }
-                        if ui
-                            .add(egui::Button::new("添加工厂").stroke(egui::Stroke::new(
-                                1.0,
-                                ui.visuals().widgets.active.bg_stroke.color,
-                            )))
-                            .clicked()
-                        {
+                    ui.menu_button("文件", |ui| {
+                        if ui.button("新建工厂").clicked() {
                             let name = "新工厂".to_string();
                             self.factories.push(
                                 FactoryInstance::new(name)
@@ -683,14 +716,50 @@ impl Subview for PlannerView {
                                         )
                                     }),
                             );
-                            self.new_factory_name.clear();
+                        }
+                        if ui.button("保存选中工厂……").clicked() {
+                            // TODO 保存到文件
+                            log::info!(
+                                "保存工厂: {:?}",
+                                serde_json::to_value(&self.factories[self.selected_factory])
+                            );
+                        }
+                        if ui.button("从文件加载工厂……").clicked() {
+                            // TODO 从文件加载
                         }
                     });
                 });
                 ui.separator();
-                if self.selected_factory >= self.factories.len() {
-                    ui.set_min_height(ui.available_height());
-                    ui.label("没有工厂。");
+                egui::containers::menu::MenuBar::new().ui(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        for i in 0..self.factories.len() {
+                            let button = ui.add(
+                                egui::Button::new(&self.factories[i].name)
+                                    .selected(self.selected_factory == i),
+                            );
+                            if button.clicked() {
+                                self.selected_factory = i;
+                            }
+                        }
+                    });
+                });
+                ui.separator();
+                if self.factories.len() == 0 {
+                    let mut layout_job = egui::text::LayoutJob::default();
+                    egui::RichText::new("没有工厂\n").size(32.0).append_to(
+                        &mut layout_job,
+                        ui.style(),
+                        egui::FontSelection::Default,
+                        egui::Align::Center,
+                    );
+                    egui::RichText::new("点击上方的文件菜单新建工厂或加载一个工厂存档。")
+                        .append_to(
+                            &mut layout_job,
+                            ui.style(),
+                            egui::FontSelection::Default,
+                            egui::Align::Center,
+                        );
+                    ui.add_sized(ui.available_size(), egui::Label::new(layout_job));
                 } else {
                     self.factories[self.selected_factory].editor_view(ui, &self.ctx);
                 }
