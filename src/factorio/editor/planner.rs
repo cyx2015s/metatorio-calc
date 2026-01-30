@@ -717,15 +717,52 @@ impl Subview for PlannerView {
                                     }),
                             );
                         }
-                        if ui.button("保存选中工厂……").clicked() {
+
+                        if ui
+                            .add_enabled(
+                                self.factories.len() > 0,
+                                egui::Button::new("保存选中工厂……"),
+                            )
+                            .clicked()
+                        {
                             // TODO 保存到文件
-                            log::info!(
-                                "保存工厂: {:?}",
+                            // 保存不可能出错吧
+                            let value =
                                 serde_json::to_value(&self.factories[self.selected_factory])
-                            );
+                                    .unwrap();
+                            rfd::FileDialog::new()
+                                .set_file_name(&format!(
+                                    "{}.fpc",
+                                    self.factories[self.selected_factory].name
+                                ))
+                                .add_filter("异星工厂规划配置", &["fpc", "json"])
+                                .save_file()
+                                .map(|path| {
+                                    std::fs::write(
+                                        path,
+                                        serde_json::to_string_pretty(&value).unwrap(),
+                                    )
+                                    .unwrap();
+                                });
                         }
                         if ui.button("从文件加载工厂……").clicked() {
-                            // TODO 从文件加载
+                            rfd::FileDialog::new()
+                                .add_filter("异星工厂规划配置", &["fpc", "json"])
+                                .pick_file()
+                                .map(|path| {
+                                    if let Ok(content) = std::fs::read_to_string(&path) {
+                                        if let Ok(value) =
+                                            serde_json::from_str::<serde_json::Value>(&content)
+                                        {
+                                            if let Ok(factory) =
+                                                serde_json::from_value::<FactoryInstance>(value)
+                                            {
+                                                factory.send_solve_request(&self.ctx);
+                                                self.factories.push(factory);
+                                            }
+                                        }
+                                    }
+                                });
                         }
                     });
                 });
@@ -740,6 +777,15 @@ impl Subview for PlannerView {
                             if button.clicked() {
                                 self.selected_factory = i;
                             }
+                            button.context_menu(|ui| {
+                                if ui.button("删除").clicked() {
+                                    self.factories.remove(i);
+                                    if self.selected_factory >= i && self.selected_factory > 0 {
+                                        self.selected_factory -= 1;
+                                    }
+                                    ui.close();
+                                }
+                            });
                         }
                     });
                 });
