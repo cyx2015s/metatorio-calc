@@ -60,11 +60,11 @@ macro_rules! impl_register_deserializer {
     ) => {
         impl $ty {
             pub fn register(
-                registry: &mut $crate::dyn_deserialize::DynDeserializeRegistry<$trait>,
+                registry: &mut $crate::dyn_serde::DynDeserializeRegistry<$trait>,
             ) {
                 registry.register(
                     $tag,
-                    $crate::dyn_deserialize::DynDeserializer::new(|value| {
+                    $crate::dyn_serde::DynDeserializer::new(|value| {
                         let this = serde_json::from_value::<$ty>(value).map_err(|e| {
                             $crate::error::AppError::RegistryError(format!(
                                 "反序列化类型 {} 失败: {}",
@@ -116,4 +116,25 @@ fn test_dyn_deserializer() {
         eprintln!("采矿反序列化成功");
         eprintln!("{:?}", mining.as_flow(&ctx));
     }
+}
+
+pub fn save_to_file<T: serde::Serialize>(
+    value: &T,
+    path: &std::path::Path,
+) -> Result<(), AppError> {
+    let serialized = serde_json::to_string_pretty(value).map_err(|e| {
+        AppError::IOError(format!(
+            "序列化数据到 JSON 失败（准备写入 {}）：{}",
+            path.display(),
+            e
+        ))
+    })?;
+    std::fs::write(path, serialized).map_err(|e| {
+        AppError::IOError(format!(
+            "写入文件 {} 失败：{}",
+            path.display(),
+            e
+        ))
+    })?;
+    Ok(())
 }

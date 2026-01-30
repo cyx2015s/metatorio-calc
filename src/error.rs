@@ -3,6 +3,7 @@ pub enum AppError {
     ContextCreationError(String),
     SolverError(String),
     RegistryError(String),
+    IOError(String),
     Custom(String),
 }
 

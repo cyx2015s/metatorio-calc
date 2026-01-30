@@ -1,6 +1,6 @@
 use crate::{
     concept::*,
-    dyn_deserialize::*,
+    dyn_serde::*,
     factorio::{
         common::*,
         editor::{icon::*, modal::*},
@@ -724,42 +724,6 @@ impl Subview for PlannerView {
                                     .into(),
                             );
                         }
-
-                        if ui
-                            .add_enabled(
-                                !self.factories.is_empty(),
-                                egui::Button::new("另存为选中工厂……"),
-                            )
-                            .clicked()
-                        {
-                            // TODO 保存到文件
-                            // 保存不可能出错吧
-                            if let Some(path) = rfd::FileDialog::new()
-                                .set_file_name(format!(
-                                    "{}.fpc",
-                                    self.factories[self.selected_factory].factory.name
-                                ))
-                                .add_filter("异星工厂规划配置", &["fpc", "json"])
-                                .save_file()
-                            {
-                                if std::fs::write(
-                                    &path,
-                                    serde_json::to_string_pretty(
-                                        &self.factories[self.selected_factory].factory,
-                                    )
-                                    .unwrap(),
-                                )
-                                .is_ok()
-                                {
-                                    crate::toast::success(format!(
-                                        "工厂已保存到 {}",
-                                        &path.display()
-                                    ));
-                                    self.factories[self.selected_factory].saved = true;
-                                    self.factories[self.selected_factory].file_path = Some(path);
-                                }
-                            }
-                        }
                         if ui.button("从文件加载工厂……").clicked() {
                             if let Some(path) = rfd::FileDialog::new()
                                 .add_filter("异星工厂规划配置", &["fpc", "json"])
@@ -825,15 +789,8 @@ impl Subview for PlannerView {
                             button.context_menu(|ui| {
                                 let factory = &mut self.factories[i];
                                 if let Some(file_path) = factory.file_path.as_ref() {
-                                    if ui.button("保存").clicked() {
-                                        if std::fs::write(
-                                            file_path,
-                                            serde_json::to_string_pretty(&factory.factory)
-                                                .unwrap()
-                                                .as_bytes(),
-                                        )
-                                        .is_ok()
-                                        {
+                                    if ui.add(egui::Button::new("保存").shortcut_text("Ctrl+S")).clicked() {
+                                        if let Ok(()) = save_to_file(&factory.factory, file_path) {
                                             factory.saved = true;
                                             crate::toast::success(format!(
                                                 "工厂已保存到 {}",
@@ -843,6 +800,33 @@ impl Subview for PlannerView {
                                         ui.close();
                                     }
                                 }
+                                if ui
+                                    .add(if factory.file_path.is_some() {
+                                        egui::Button::new("另存为……")
+                                    } else {
+                                        egui::Button::new("保存……").shortcut_text("Ctrl+S")
+                                    })
+                                    .clicked()
+                                {
+                                    if let Some(path) = rfd::FileDialog::new()
+                                        .add_filter("异星工厂规划配置", &["fpc", "json"])
+                                        .set_file_name(
+                                            format!("{}.fpc", &factory.factory.name).as_str(),
+                                        )
+                                        .save_file()
+                                    {
+                                        if let Ok(()) = save_to_file(&factory.factory, &path) {
+                                            factory.saved = true;
+                                            factory.file_path = Some(path.clone());
+                                            crate::toast::success(format!(
+                                                "工厂已保存到 {}",
+                                                path.display()
+                                            ));
+                                        }
+                                    }
+                                    ui.close();
+                                }
+
                                 if ui.button("关闭").clicked() {
                                     self.factories.remove(i);
                                     if self.selected_factory >= i && self.selected_factory > 0 {
@@ -877,14 +861,17 @@ impl Subview for PlannerView {
                     if ui
                         .ctx()
                         .input(|input| input.modifiers.command && input.key_pressed(egui::Key::S))
+                        && !factory.saved
                     {
+                        if factory.file_path.is_none() {
+                            let file_path = rfd::FileDialog::new()
+                                .add_filter("异星工厂规划配置", &["fpc", "json"])
+                                .set_file_name(format!("{}.fpc", &factory.factory.name).as_str())
+                                .save_file();
+                            factory.file_path = file_path;
+                        }
                         if let Some(path) = factory.file_path.as_ref() {
-                            if std::fs::write(
-                                path,
-                                serde_json::to_string_pretty(&factory.factory).unwrap(),
-                            )
-                            .is_ok()
-                            {
+                            if let Ok(()) = save_to_file(&factory.factory, path) {
                                 crate::toast::success(format!("工厂已保存到 {}", path.display()));
                                 factory.saved = true;
                             }

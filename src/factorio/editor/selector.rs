@@ -157,19 +157,22 @@ impl egui::Widget for ItemSelector<'_> {
                             continue;
                         }
                         idx += 1;
-                        let button = ui
+                        let mut button = ui
                             .add(
                                 Icon::new(self.ctx, self.item_type, &item_name.to_string())
                                     .with_size(32.0),
                             )
-                            .interact(egui::Sense::click())
-                            .on_hover_ui(|ui| {
-                                if let Some(hover) = &self.hover {
-                                    (hover)(ui, item_name, self.ctx);
-                                } else {
-                                    ui.label(self.ctx.get_display_name(self.item_type, item_name));
-                                }
-                            });
+                            .interact(egui::Sense::click());
+                        if let Some(hover) = &self.hover {
+                            button = button.on_hover_ui(|ui| (hover)(ui, item_name, self.ctx));
+                        } else {
+                            button = button.on_hover_text(
+                                self.ctx
+                                    .get_display_name(self.item_type, item_name)
+                                    .to_string(),
+                            );
+                        }
+
                         if button.clicked() {
                             storage.subgroup = j;
                             if let Some(&mut ref mut selected_item) = self.current {

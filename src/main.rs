@@ -7,12 +7,12 @@ static GLOBAL: MiMalloc = MiMalloc;
 include!(concat!(env!("OUT_DIR"), "/git_hash.rs"));
 
 pub mod concept;
-pub mod dyn_deserialize;
+pub mod dyn_serde;
+pub mod error;
 pub mod factorio;
 pub mod solver;
 pub mod toast;
 pub mod update;
-pub mod error;
 
 pub struct MainPage {
     pub creators: Vec<(String, Box<dyn concept::GameContextCreatorView>)>,
@@ -69,10 +69,13 @@ impl eframe::App for MainPage {
                     "[性能] 帧生成时间: {:.2}ms",
                     self.exp_cpu_usage * 1000.0
                 ));
+                ui.separator();
+                ui.label(format!("当前版本: {}", self_update::cargo_crate_version!()));
                 ui.add(egui::Hyperlink::from_label_and_url(
                     "Github 仓库",
                     "https://github.com/cyx2015s/metatorio-calc",
                 ));
+                ui.separator();
                 self.creators
                     .iter_mut()
                     .enumerate()
@@ -116,8 +119,11 @@ impl eframe::App for MainPage {
                     self.selected = 0;
                 }
                 ui.separator();
-                let mut show_font_license =
-                    ui.memory(|mem| mem.data.get_temp::<bool>(egui::Id::new("font")).unwrap_or(false));
+                let mut show_font_license = ui.memory(|mem| {
+                    mem.data
+                        .get_temp::<bool>(egui::Id::new("font"))
+                        .unwrap_or(false)
+                });
                 if ui.checkbox(&mut show_font_license, "字体协议").clicked() {
                     ui.memory_mut(|mem| {
                         mem.data
@@ -137,7 +143,8 @@ impl eframe::App for MainPage {
                     ui.ctx().forget_all_images();
                 }
                 ui.memory_mut(|mem| {
-                    mem.data.insert_temp(egui::Id::new("font"), show_font_license);
+                    mem.data
+                        .insert_temp(egui::Id::new("font"), show_font_license);
                 })
             });
         if self.selected < self.creators.len() {
