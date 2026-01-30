@@ -68,6 +68,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 
+      - name: Run tests
+        run: cargo test --target ${{ matrix.target }}
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+
       - name: Build binary
         run: cargo build --release --target ${{ matrix.target }}
         env:
@@ -105,8 +110,8 @@ jobs:
           if-no-files-found: error
 
       - name: Upload to release
-        if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
+        if: github.ref_type == 'tag'
         with:
           files: target/${{ matrix.target }}/release/${{ matrix.name }}
         env:
