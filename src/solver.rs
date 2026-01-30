@@ -169,11 +169,11 @@ where
                 let solver_data = SolverData::new(target, flows);
                 // log::info!("收到了新的计算请求……");
                 if solution_tx.send(solver_data.solve()).is_err() {
-                    log::info!("求解线程退出");
                     // 接收方已关闭，退出线程
                     break;
                 }
             }
+            log::info!("求解线程退出");
         });
     }
 
@@ -187,11 +187,11 @@ where
                 let solver_data = SolverData::new(target, flows).with_external(external);
                 // log::info!("收到了新的计算请求……");
                 if solution_tx.send(solver_data.solve()).is_err() {
-                    log::info!("求解线程退出");
                     // 接收方已关闭，退出线程
                     break;
                 }
             }
+            log::info!("求解线程退出");
         });
     }
 }

@@ -17,10 +17,12 @@ pub mod solver;
 
 pub struct MainPage {
     pub creators: Vec<(String, Box<dyn GameContextCreatorView>)>,
-    pub subview_receiver: std::sync::mpsc::Receiver<Box<dyn Subview>>,
-    pub subview_sender: std::sync::mpsc::Sender<Box<dyn Subview>>,
     pub subviews: Vec<Box<dyn Subview>>,
     pub selected: usize,
+
+    pub subview_receiver: std::sync::mpsc::Receiver<Box<dyn Subview>>,
+    pub subview_sender: std::sync::mpsc::Sender<Box<dyn Subview>>,
+    
     pub exp_cpu_usage: f32,
 }
 

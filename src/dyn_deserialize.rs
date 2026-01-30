@@ -36,6 +36,9 @@ impl<T: ?Sized> DynDeserializeRegistry<T> {
     pub fn register(&mut self, type_name: &'static str, deserializer: DynDeserializer<T>) {
         self.deserializers.insert(type_name, deserializer);
     }
+    pub fn registered_types(&self) -> Vec<&'static str> {
+        self.deserializers.keys().cloned().collect()
+    }
 }
 
 #[macro_export]
