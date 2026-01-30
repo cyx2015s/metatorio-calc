@@ -477,7 +477,7 @@ impl EditorView for FactoryInstance {
                                                         ui.add(
                                                             ItemSelectorModal::new(
                                                                 egui::Id::new(
-                                                                    "target-selecte-fluid",
+                                                                    "target-select-fluid",
                                                                 ),
                                                                 ctx,
                                                                 "选择流体",
@@ -800,9 +800,9 @@ impl Subview for PlannerView {
                         for i in 0..self.factories.len() {
                             let button = ui.add(
                                 egui::Button::new(format!(
-                                    "{} {}",
+                                    "{}{}",
                                     &self.factories[i].factory.name,
-                                    if self.factories[i].saved { "" } else { "*" }
+                                    if self.factories[i].saved { "" } else { " *" }
                                 ))
                                 .selected(self.selected_factory == i),
                             );
@@ -810,37 +810,32 @@ impl Subview for PlannerView {
                                 self.selected_factory = i;
                             }
                             button.context_menu(|ui| {
+                                let factory = &mut self.factories[i];
+                                if let Some(file_path) = factory.file_path.as_ref() {
+                                    if ui.button("保存").clicked() {
+                                        if std::fs::write(
+                                            file_path,
+                                            serde_json::to_string_pretty(&factory.factory)
+                                                .unwrap()
+                                                .as_bytes(),
+                                        )
+                                        .is_ok()
+                                        {
+                                            factory.saved = true;
+                                            crate::toast::success(format!(
+                                                "工厂已保存到 {}",
+                                                file_path.display()
+                                            ));
+                                        }
+                                        ui.close();
+                                    }
+                                }
                                 if ui.button("关闭").clicked() {
                                     self.factories.remove(i);
                                     if self.selected_factory >= i && self.selected_factory > 0 {
                                         self.selected_factory -= 1;
                                     }
                                     ui.close();
-                                }
-                                if let Some(file_path) = &self.factories[i].file_path {
-                                    if ui
-                                        .button(format!("关闭并保存到 {}", file_path.display()))
-                                        .clicked()
-                                    {
-                                        if std::fs::write(
-                                            file_path,
-                                            serde_json::to_string_pretty(
-                                                &self.factories[self.selected_factory].factory,
-                                            )
-                                            .unwrap()
-                                            .as_bytes(),
-                                        )
-                                        .is_ok()
-                                        {
-                                            self.factories.remove(i);
-                                            if self.selected_factory >= i
-                                                && self.selected_factory > 0
-                                            {
-                                                self.selected_factory -= 1;
-                                            }
-                                        }
-                                        ui.close();
-                                    }
                                 }
                             });
                         }
@@ -866,6 +861,24 @@ impl Subview for PlannerView {
                 } else {
                     let factory = &mut self.factories[self.selected_factory];
                     factory.saved &= !factory.factory.editor_view(ui, &self.ctx);
+                    if ui.ctx().input(|input| {
+                        input.modifiers.command && input.key_pressed(egui::Key::S)
+                    }) {
+                        if let Some(path) = factory.file_path.as_ref() {
+                            if std::fs::write(
+                                path,
+                                serde_json::to_string_pretty(&factory.factory).unwrap(),
+                            )
+                            .is_ok()
+                            {
+                                crate::toast::success(format!(
+                                    "工厂已保存到 {}",
+                                    path.display()
+                                ));
+                                factory.saved = true;
+                            }
+                        }
+                    }
                 }
             });
     }
