@@ -248,11 +248,11 @@ impl FactorioContext {
         log::info!("准备创建临时配置文件: {:?}", config_path);
         if tmp_mod_list_json_path.exists() {
             std::fs::remove_file(&tmp_mod_list_json_path)
-                .map_err(|err| AppError::ContextCreationError(err.to_string()))?;
+                .map_err(|err| AppError::ContextCreation(err.to_string()))?;
         }
         if !config_path.exists() {
             std::fs::create_dir_all(config_path.parent().unwrap())
-                .map_err(|err| AppError::ContextCreationError(err.to_string()))?;
+                .map_err(|err| AppError::ContextCreation(err.to_string()))?;
         }
         // 配置配置文件：写入到自定义的文件夹中避免和运行中的游戏抢锁
         let mut config_file = std::fs::File::create(&config_path)?;
@@ -274,7 +274,7 @@ impl FactorioContext {
             .stdout(Stdio::null())
             .output()?;
         if !dump_raw_command.status.success() {
-            return Err(AppError::ContextCreationError(
+            return Err(AppError::ContextCreation(
                 "导出原始数据失败".to_string(),
             ));
         }
@@ -292,7 +292,7 @@ impl FactorioContext {
             .stdout(Stdio::null())
             .output()?;
         if !dump_locale_command.status.success() {
-            return Err(AppError::ContextCreationError(
+            return Err(AppError::ContextCreation(
                 "导出翻译数据失败".to_string(),
             ));
         }
@@ -312,7 +312,7 @@ impl FactorioContext {
             .stdout(Stdio::null())
             .output()?;
         if !dump_icon_sprites_command.status.success() {
-            return Err(AppError::ContextCreationError(
+            return Err(AppError::ContextCreation(
                 "导出图标数据失败".to_string(),
             ));
         }
@@ -332,7 +332,7 @@ impl FactorioContext {
         let mut mod_infos = serde_json::from_value::<Vec<ModInfo>>(
             mod_infos_json
                 .get("mods")
-                .ok_or(AppError::ContextCreationError(
+                .ok_or(AppError::ContextCreation(
                     "mod-list.json格式不正确".to_string(),
                 ))?
                 .clone(),
@@ -358,11 +358,11 @@ impl FactorioContext {
                         )?;
                         mod_info.version = info_json_content
                             .get("version")
-                            .ok_or(AppError::ContextCreationError(
+                            .ok_or(AppError::ContextCreation(
                                 "模组的info.json没有version字段".to_string(),
                             ))?
                             .as_str()
-                            .ok_or(AppError::ContextCreationError(
+                            .ok_or(AppError::ContextCreation(
                                 "模组的info.json的version字段不是字符串".to_string(),
                             ))?
                             .to_string();
@@ -418,11 +418,11 @@ impl FactorioContext {
                                 )?;
                                 let version = info_json_content
                                     .get("version")
-                                    .ok_or(AppError::ContextCreationError(
+                                    .ok_or(AppError::ContextCreation(
                                         "模组的info.json没有version字段".to_string(),
                                     ))?
                                     .as_str()
-                                    .ok_or(AppError::ContextCreationError(
+                                    .ok_or(AppError::ContextCreation(
                                         "模组的info.json的version字段不是字符串".to_string(),
                                     ))?;
                                 let new_version = version_string_to_triplet(&version);
@@ -456,11 +456,17 @@ impl FactorioContext {
         let raw_path = self_path.join("tmp/script-output/data-raw-dump.json");
         let icon_path = self_path.join("tmp/script-output/");
         let json_string = std::fs::read_to_string(&raw_path).map_err(|_| {
-            AppError::ContextCreationError(format!("读取原始数据文件失败: {:?}", raw_path))
+            AppError::ContextCreation(format!(
+                "读取原始数据文件失败: {:?}",
+                raw_path.to_string_lossy()
+            ))
         })?;
 
         let json_value = serde_json::from_str::<Value>(&json_string).map_err(|_| {
-            AppError::ContextCreationError(format!("解析原始数据文件失败: {:?}", raw_path))
+            AppError::ContextCreation(format!(
+                "解析原始数据文件失败: {:?}",
+                raw_path.to_string_lossy()
+            ))
         })?;
         let mut ctx = FactorioContext::load(&json_value);
         ctx.icon_path = icon_path;
@@ -473,7 +479,7 @@ impl FactorioContext {
                 // description: a => A desc, b => B desc
                 let locale_values: Dict<Dict<String>> = serde_json::from_str(
                     &std::fs::read_to_string(&locale_path).map_err(|_| {
-                        AppError::ContextCreationError(format!(
+                        AppError::ContextCreation(format!(
                             "读取翻译数据文件失败: {:?}",
                             locale_path
                         ))
@@ -504,7 +510,7 @@ impl FactorioContext {
         let mut mod_infos = serde_json::from_value::<Vec<ModInfo>>(
             mod_infos_json
                 .get("mods")
-                .ok_or(AppError::ContextCreationError(
+                .ok_or(AppError::ContextCreation(
                     "mod-list.json格式不正确".to_string(),
                 ))?
                 .clone(),

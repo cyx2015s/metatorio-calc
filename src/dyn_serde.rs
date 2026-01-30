@@ -30,13 +30,13 @@ impl<T: ?Sized> DynDeserializeRegistry<T> {
     pub fn deserialize(&self, value: serde_json::Value) -> Result<Box<T>, AppError> {
         let type_name = value
             .get("type")
-            .ok_or_else(|| AppError::RegistryError("缺少字段 type".to_string()))?
+            .ok_or_else(|| AppError::Registry("缺少字段 type".to_string()))?
             .as_str()
-            .ok_or_else(|| AppError::RegistryError("字段 type 不是字符串".to_string()))?;
+            .ok_or_else(|| AppError::Registry("字段 type 不是字符串".to_string()))?;
         if let Some(deserializer) = self.deserializers.get(type_name) {
             (deserializer.deserialize)(value)
         } else {
-            Err(AppError::RegistryError(format!(
+            Err(AppError::Registry(format!(
                 "未知的类型标识符：{}，已注册的类型有：{:?}",
                 type_name,
                 self.registered_types()
@@ -59,14 +59,12 @@ macro_rules! impl_register_deserializer {
         => $trait:ty
     ) => {
         impl $ty {
-            pub fn register(
-                registry: &mut $crate::dyn_serde::DynDeserializeRegistry<$trait>,
-            ) {
+            pub fn register(registry: &mut $crate::dyn_serde::DynDeserializeRegistry<$trait>) {
                 registry.register(
                     $tag,
                     $crate::dyn_serde::DynDeserializer::new(|value| {
                         let this = serde_json::from_value::<$ty>(value).map_err(|e| {
-                            $crate::error::AppError::RegistryError(format!(
+                            $crate::error::AppError::Registry(format!(
                                 "反序列化类型 {} 失败: {}",
                                 $tag, e
                             ))
@@ -123,18 +121,13 @@ pub fn save_to_file<T: serde::Serialize>(
     path: &std::path::Path,
 ) -> Result<(), AppError> {
     let serialized = serde_json::to_string_pretty(value).map_err(|e| {
-        AppError::IOError(format!(
+        AppError::IO(format!(
             "序列化数据到 JSON 失败（准备写入 {}）：{}",
             path.display(),
             e
         ))
     })?;
-    std::fs::write(path, serialized).map_err(|e| {
-        AppError::IOError(format!(
-            "写入文件 {} 失败：{}",
-            path.display(),
-            e
-        ))
-    })?;
+    std::fs::write(path, serialized)
+        .map_err(|e| AppError::IO(format!("写入文件 {} 失败：{}", path.display(), e)))?;
     Ok(())
 }

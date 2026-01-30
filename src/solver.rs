@@ -102,7 +102,10 @@ where
             if let Some(expr) = balance {
                 targets.push(expr.clone().eq(amount));
             } else {
-                return Err(AppError::SolverError(format!("这个物品没有相关配方： {:?}", item_id)));
+                return Err(AppError::Solver(format!(
+                    "这个物品没有相关配方： {:?}",
+                    item_id
+                )));
             }
         }
         let mut constraints = Vec::new();
@@ -155,7 +158,7 @@ where
                     no_providers.sort_by_key(|x| format!("{:?}", x));
                     // err_string += format!("此外，以下物品缺少生产来源：{:?}", no_providers).as_str();
                 }
-                Err(AppError::SolverError(err_string))
+                Err(AppError::Solver(err_string))
             }
         }
     }

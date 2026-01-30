@@ -789,7 +789,10 @@ impl Subview for PlannerView {
                             button.context_menu(|ui| {
                                 let factory = &mut self.factories[i];
                                 if let Some(file_path) = factory.file_path.as_ref() {
-                                    if ui.add(egui::Button::new("保存").shortcut_text("Ctrl+S")).clicked() {
+                                    if ui
+                                        .add(egui::Button::new("保存").shortcut_text("Ctrl+S"))
+                                        .clicked()
+                                    {
                                         if let Ok(()) = save_to_file(&factory.factory, file_path) {
                                             factory.saved = true;
                                             crate::toast::success(format!(
