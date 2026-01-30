@@ -80,15 +80,13 @@ impl<'de> serde::Deserialize<'de> for FactoryInstance {
         for mechanic in value["mechanics"].as_array().unwrap_or(&vec![]) {
             let mech = MECHANIC_REGISTRY
                 .deserialize(mechanic.clone())
-                .ok_or_else(|| serde::de::Error::custom("Failed to deserialize mechanic"))?;
+                .map_err(|_| serde::de::Error::custom("反序列化 Mechanic 失败"))?;
             factory_instance.mechanics.push(mech);
         }
         for mechanic_provider in value["mechanic_providers"].as_array().unwrap_or(&vec![]) {
             let mech_provider = MECHANIC_PROVIDER_REGISTRY
                 .deserialize(mechanic_provider.clone())
-                .ok_or_else(|| {
-                    serde::de::Error::custom("Failed to deserialize mechanic provider")
-                })?;
+                .map_err(|_| serde::de::Error::custom("反序列化 MechanicProvider 失败"))?;
             factory_instance.mechanic_providers.push(mech_provider);
         }
         Ok(factory_instance)
@@ -250,7 +248,7 @@ impl FactoryInstance {
                                 let serialized = serde_json::to_value(&flow_config);
                                 let deserialized =
                                     MECHANIC_REGISTRY.deserialize(serialized.unwrap());
-                                if let Some(deserialized) = deserialized {
+                                if let Ok(deserialized) = deserialized {
                                     self.mechanic_sender.send(deserialized).unwrap();
                                 }
                                 *changed = true;
@@ -767,28 +765,43 @@ impl Subview for PlannerView {
                                 .add_filter("异星工厂规划配置", &["fpc", "json"])
                                 .pick_file()
                             {
-                                if let Ok(content) = std::fs::read_to_string(&path)
-                                    && let Ok(value) =
-                                        serde_json::from_str::<serde_json::Value>(&content)
-                                    && let Ok(factory) =
-                                        serde_json::from_value::<FactoryInstance>(value)
-                                {
-                                    let thread_path = path.clone();
-                                    std::thread::spawn(move || {
-                                        std::thread::sleep(std::time::Duration::from_millis(500));
-                                        crate::toast::success(format!(
-                                            "从 {} 加载了新工厂",
-                                            thread_path.display()
+                                match std::fs::read_to_string(&path) {
+                                    Err(err) => {
+                                        crate::toast::error(format!(
+                                            "无法读取文件 {}: {}",
+                                            path.display(),
+                                            err
                                         ));
-                                    });
-                                    factory.send_solve_request(&self.ctx);
-                                    self.factories.push(StatefulFactoryInstance {
-                                        factory,
-                                        saved: true,
-                                        file_path: Some(path),
-                                    });
-                                } else {
-                                    crate::toast::error("加载工厂失败，请检查文件格式是否正确");
+                                    }
+                                    Ok(content) => {
+                                        match serde_json::from_str::<FactoryInstance>(&content) {
+                                            Err(err) => {
+                                                crate::toast::error(format!(
+                                                    "无法解析文件 {}: {}",
+                                                    path.display(),
+                                                    err
+                                                ));
+                                            }
+                                            Ok(factory) => {
+                                                let thread_path = path.clone();
+                                                std::thread::spawn(move || {
+                                                    std::thread::sleep(
+                                                        std::time::Duration::from_millis(500),
+                                                    );
+                                                    crate::toast::success(format!(
+                                                        "从 {} 加载了新工厂",
+                                                        thread_path.display()
+                                                    ));
+                                                });
+                                                factory.send_solve_request(&self.ctx);
+                                                self.factories.push(StatefulFactoryInstance {
+                                                    factory,
+                                                    saved: true,
+                                                    file_path: Some(path),
+                                                });
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -861,9 +874,10 @@ impl Subview for PlannerView {
                 } else {
                     let factory = &mut self.factories[self.selected_factory];
                     factory.saved &= !factory.factory.editor_view(ui, &self.ctx);
-                    if ui.ctx().input(|input| {
-                        input.modifiers.command && input.key_pressed(egui::Key::S)
-                    }) {
+                    if ui
+                        .ctx()
+                        .input(|input| input.modifiers.command && input.key_pressed(egui::Key::S))
+                    {
                         if let Some(path) = factory.file_path.as_ref() {
                             if std::fs::write(
                                 path,
@@ -871,10 +885,7 @@ impl Subview for PlannerView {
                             )
                             .is_ok()
                             {
-                                crate::toast::success(format!(
-                                    "工厂已保存到 {}",
-                                    path.display()
-                                ));
+                                crate::toast::success(format!("工厂已保存到 {}", path.display()));
                                 factory.saved = true;
                             }
                         }
@@ -973,17 +984,23 @@ impl Subview for FactorioContextCreatorView {
                 let exe_path = path.clone().as_path().to_owned();
                 let mod_path = self.mod_path.clone().map(|p| p.as_path().to_owned());
                 let sender = sender.clone();
-                self.thread = Some(std::thread::spawn(move || {
-                    if let Some(ctx) = FactorioContext::load_from_executable_path(
-                        &exe_path,
-                        mod_path.as_deref(),
-                        None,
-                    ) {
-                        sender
-                            .send(Box::new(PlannerView::new(ctx)))
-                            .expect("Failed to send subview");
-                    }
-                }));
+                self.thread =
+                    Some(std::thread::spawn(
+                        move || match FactorioContext::load_from_executable_path(
+                            &exe_path,
+                            mod_path.as_deref(),
+                            None,
+                        ) {
+                            Ok(ctx) => {
+                                sender
+                                    .send(Box::new(PlannerView::new(ctx)))
+                                    .expect("Failed to send subview");
+                            }
+                            Err(e) => {
+                                crate::toast::error(format!("加载游戏上下文失败: {:?}", e));
+                            }
+                        },
+                    ));
             }
 
             ui.separator();
@@ -995,19 +1012,23 @@ impl Subview for FactorioContextCreatorView {
                 && let None = self.thread
             {
                 let sender = sender.clone();
-                self.thread = Some(std::thread::spawn(move || {
-                    if let Some(ctx) = FactorioContext::load_from_tmp_no_dump() {
-                        sender
-                            .send(Box::new(PlannerView::new(ctx)))
-                            .expect("Failed to send subview");
-                    }
-                }));
+                self.thread =
+                    Some(std::thread::spawn(
+                        move || match FactorioContext::load_from_tmp_no_dump() {
+                            Ok(ctx) => {
+                                sender.send(Box::new(PlannerView::new(ctx))).unwrap();
+                            }
+                            Err(e) => {
+                                crate::toast::error(format!("加载缓存上下文失败: {:?}", e));
+                            }
+                        },
+                    ));
             }
             if let Some(ref thread) = self.thread
                 && thread.is_finished()
             {
                 let thread = self.thread.take().unwrap();
-                thread.join().expect("Failed to join thread");
+                thread.join().unwrap();
             }
         });
     }

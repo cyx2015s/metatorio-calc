@@ -11,6 +11,8 @@ pub mod dyn_deserialize;
 pub mod factorio;
 pub mod solver;
 pub mod toast;
+pub mod update;
+pub mod error;
 
 pub struct MainPage {
     pub creators: Vec<(String, Box<dyn concept::GameContextCreatorView>)>,

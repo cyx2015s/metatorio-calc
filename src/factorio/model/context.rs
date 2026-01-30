@@ -11,7 +11,7 @@ use std::{
 use indexmap::IndexMap;
 use serde_json::Value;
 
-use crate::{concept::*, factorio::*};
+use crate::{concept::*, error::AppError, factorio::*};
 
 pub const LOCALE_CATEGORIES: &[&str] = &[
     "airborne-pollutant",
@@ -70,6 +70,14 @@ pub struct FactorioContext {
     pub tiles: Dict<TilePrototype>,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ModInfo {
+    pub name: String,
+    pub version: String,
+    #[serde(default)]
+    pub enabled: bool,
+}
+
 pub fn get_workding_directory() -> PathBuf {
     env::current_exe().unwrap().parent().unwrap().to_path_buf()
 }
@@ -77,7 +85,9 @@ pub fn get_workding_directory() -> PathBuf {
 impl FactorioContext {
     pub fn test_load() -> Self {
         let value = serde_json::from_str::<Value>(
-            std::fs::read_to_string("assets/data-raw-dump.json").unwrap().as_str(),
+            std::fs::read_to_string("assets/data-raw-dump.json")
+                .unwrap()
+                .as_str(),
         );
         FactorioContext::load(&value.unwrap()).build_order_info()
     }
@@ -228,7 +238,7 @@ impl FactorioContext {
         executable_path: &std::path::Path,
         mod_path: Option<&std::path::Path>,
         lang: Option<&str>,
-    ) -> Option<FactorioContext> {
+    ) -> Result<FactorioContext, AppError> {
         // 此步较为复杂，调用方应该异步执行
         // 1. 在这个软件的数据文件夹下（秉持绿色原理，创建在这个项目程序本身的同级文件里），创建一个config.cfg
         let lang = lang.unwrap_or("zh-CN");
@@ -237,21 +247,19 @@ impl FactorioContext {
         let tmp_mod_list_json_path = self_path.join("tmp/mods/mod-list.json");
         log::info!("准备创建临时配置文件: {:?}", config_path);
         if tmp_mod_list_json_path.exists() {
-            std::fs::remove_file(&tmp_mod_list_json_path).ok()?;
+            std::fs::remove_file(&tmp_mod_list_json_path)
+                .map_err(|err| AppError::ContextCreationError(err.to_string()))?;
         }
         if !config_path.exists() {
-            std::fs::create_dir_all(config_path.parent()?).ok()?;
+            std::fs::create_dir_all(config_path.parent().unwrap())
+                .map_err(|err| AppError::ContextCreationError(err.to_string()))?;
         }
         // 配置配置文件：写入到自定义的文件夹中避免和运行中的游戏抢锁
-        let mut config_file = std::fs::File::create(&config_path).ok()?;
+        let mut config_file = std::fs::File::create(&config_path)?;
 
-        config_file.write_all(b"[path]\nwrite-data=").ok()?;
-        config_file
-            .write_all(self_path.join("tmp").as_os_str().as_encoded_bytes())
-            .ok()?;
-        config_file
-            .write_all(format!("\n[general]\nlocale={}", lang).as_bytes())
-            .ok()?;
+        config_file.write_all(b"[path]\nwrite-data=")?;
+        config_file.write_all(self_path.join("tmp").as_os_str().as_encoded_bytes())?;
+        config_file.write_all(format!("\n[general]\nlocale={}", lang).as_bytes())?;
 
         log::info!("创建 config.ini 成功");
         let dump_raw_command = Command::new(executable_path)
@@ -264,10 +272,11 @@ impl FactorioContext {
                 vec![]
             })
             .stdout(Stdio::null())
-            .output()
-            .ok()?;
+            .output()?;
         if !dump_raw_command.status.success() {
-            return None;
+            return Err(AppError::ContextCreationError(
+                "导出原始数据失败".to_string(),
+            ));
         }
         log::info!("导出原始数据成功");
         crate::toast::info("导出原始数据成功");
@@ -281,10 +290,11 @@ impl FactorioContext {
                 vec![]
             })
             .stdout(Stdio::null())
-            .output()
-            .ok()?;
+            .output()?;
         if !dump_locale_command.status.success() {
-            return None;
+            return Err(AppError::ContextCreationError(
+                "导出翻译数据失败".to_string(),
+            ));
         }
         log::info!("导出翻译数据成功");
         crate::toast::info("导出翻译数据成功");
@@ -300,10 +310,11 @@ impl FactorioContext {
                 vec![]
             })
             .stdout(Stdio::null())
-            .output()
-            .ok()?;
+            .output()?;
         if !dump_icon_sprites_command.status.success() {
-            return None;
+            return Err(AppError::ContextCreationError(
+                "导出图标数据失败".to_string(),
+            ));
         }
         log::info!("导出图标数据成功");
         crate::toast::info("导出图标数据成功");
@@ -312,18 +323,25 @@ impl FactorioContext {
             // 把 mod-list.json 也复制过来
             let mod_list_json_path = mod_path.join("mod-list.json");
             if mod_list_json_path.exists() {
-                std::fs::copy(&mod_list_json_path, &tmp_mod_list_json_path).ok()?;
+                std::fs::copy(&mod_list_json_path, &tmp_mod_list_json_path)?;
             }
         }
         // 扫描游戏可执行文件下，补充版本信息
-        let mut mod_list_json_content =
-            serde_json::from_str::<Value>(&std::fs::read_to_string(&tmp_mod_list_json_path).ok()?)
-                .ok()?;
-        for mod_info in mod_list_json_content.get_mut("mods")?.as_array_mut()? {
-            if mod_info.get("enabled")?.as_bool()? {
+        let mut mod_infos_json =
+            serde_json::from_str::<Value>(&std::fs::read_to_string(&tmp_mod_list_json_path)?)?;
+        let mut mod_infos = serde_json::from_value::<Vec<ModInfo>>(
+            mod_infos_json
+                .get("mods")
+                .ok_or(AppError::ContextCreationError(
+                    "mod-list.json格式不正确".to_string(),
+                ))?
+                .clone(),
+        )?;
+        for mod_info in &mut mod_infos {
+            if mod_info.enabled {
                 log::info!("处理模组信息 {:?}", mod_info);
-                let mod_name = mod_info.get("name")?.as_str()?.to_string();
-                if mod_info.get("version").is_none() {
+                let mod_name = mod_info.name.clone();
+                if mod_info.version.is_empty() {
                     log::info!("模组 {} 缺少版本信息，尝试补全", &mod_name);
 
                     if ["base", "space-age", "quality", "elevated-rails"]
@@ -336,10 +354,19 @@ impl FactorioContext {
                             .join(&mod_name)
                             .join("info.json");
                         let info_json_content = serde_json::from_str::<Value>(
-                            &std::fs::read_to_string(&info_json_path).ok()?,
-                        );
-                        mod_info["version"] = info_json_content.ok()?.get("version")?.clone();
-                        log::info!("模组 {} 的版本是 {}", &mod_name, &mod_info["version"]);
+                            &std::fs::read_to_string(&info_json_path)?,
+                        )?;
+                        mod_info.version = info_json_content
+                            .get("version")
+                            .ok_or(AppError::ContextCreationError(
+                                "模组的info.json没有version字段".to_string(),
+                            ))?
+                            .as_str()
+                            .ok_or(AppError::ContextCreationError(
+                                "模组的info.json的version字段不是字符串".to_string(),
+                            ))?
+                            .to_string();
+                        log::info!("模组 {} 的版本是 {}", &mod_name, &mod_info.version);
                     } else {
                         // 在模组路径下寻找info.json
                         log::info!("在模组路径下寻找 {} 的 info.json", mod_name);
@@ -347,9 +374,14 @@ impl FactorioContext {
                             continue;
                         }
                         // 可能是 zip 包
-                        for entry in std::fs::read_dir(mod_path.unwrap()).ok()? {
-                            let entry = entry.ok()?;
-                            let file_name = entry.file_name().into_string().ok()?;
+                        for entry in std::fs::read_dir(mod_path.unwrap())? {
+                            let entry = entry?;
+                            let file_name = entry.file_name().into_string().map_err(|os_err| {
+                                AppError::Custom(format!(
+                                    "操作系统错误: {}",
+                                    os_err.to_string_lossy()
+                                ))
+                            })?;
 
                             if file_name.starts_with(format!("{}_", &mod_name).as_str())
                                 && file_name.ends_with(".zip")
@@ -362,18 +394,17 @@ impl FactorioContext {
                                 let version_str = file_name.split("_").last();
                                 if let Some(version_str) = version_str {
                                     let version = version_str.trim_end_matches(".zip");
-                                    mod_info["version"] = Value::String(version.to_string());
+                                    mod_info.version = version.to_string();
                                     let new_version = version_string_to_triplet(version);
-                                    let old_version = version_string_to_triplet(
-                                        mod_info["version"].as_str().unwrap_or("0.0.0"),
-                                    );
+                                    let old_version =
+                                        version_string_to_triplet(mod_info.version.as_str());
                                     if old_version < new_version {
-                                        mod_info["version"] = Value::String(version.to_string());
+                                        mod_info.version = version.to_string();
                                     }
                                     log::info!(
                                         "压缩包模组 {} 的版本是 {}",
                                         &mod_name,
-                                        &mod_info["version"]
+                                        &mod_info.version
                                     );
                                 }
                             } else if file_name == mod_name {
@@ -383,26 +414,25 @@ impl FactorioContext {
                                     continue;
                                 }
                                 let info_json_content = serde_json::from_str::<Value>(
-                                    &std::fs::read_to_string(&info_json_path).ok()?,
-                                );
+                                    &std::fs::read_to_string(&info_json_path)?,
+                                )?;
                                 let version = info_json_content
-                                    .unwrap()
-                                    .get("version")?
-                                    .as_str()?
-                                    .to_owned();
+                                    .get("version")
+                                    .ok_or(AppError::ContextCreationError(
+                                        "模组的info.json没有version字段".to_string(),
+                                    ))?
+                                    .as_str()
+                                    .ok_or(AppError::ContextCreationError(
+                                        "模组的info.json的version字段不是字符串".to_string(),
+                                    ))?;
                                 let new_version = version_string_to_triplet(&version);
-                                let old_version = version_string_to_triplet(
-                                    mod_info["version"].as_str().unwrap_or("0.0.0"),
-                                );
+                                let old_version =
+                                    version_string_to_triplet(mod_info.version.as_str());
                                 if old_version <= new_version {
                                     // 同版本模组，文件优先
-                                    mod_info["version"] = Value::String(version.to_string());
+                                    mod_info.version = version.to_string();
                                 }
-                                log::info!(
-                                    "文件模组 {} 的版本是 {}",
-                                    &mod_name,
-                                    mod_info["version"]
-                                );
+                                log::info!("文件模组 {} 的版本是 {}", &mod_name, mod_info.version);
 
                                 break;
                             }
@@ -411,31 +441,28 @@ impl FactorioContext {
                 }
             }
         }
+        mod_infos_json
+            .get_mut("mods")
+            .replace(&mut serde_json::to_value(mod_infos)?);
         std::fs::write(
             &tmp_mod_list_json_path,
-            serde_json::to_string_pretty(&mod_list_json_content).ok()?,
-        )
-        .ok()?;
+            serde_json::to_string_pretty(&mod_infos_json)?,
+        )?;
         FactorioContext::load_from_tmp_no_dump()
     }
 
-    pub fn load_from_tmp_no_dump() -> Option<FactorioContext> {
+    pub fn load_from_tmp_no_dump() -> Result<FactorioContext, AppError> {
         let self_path = get_workding_directory();
         let raw_path = self_path.join("tmp/script-output/data-raw-dump.json");
         let icon_path = self_path.join("tmp/script-output/");
-        let json_string = std::fs::read_to_string(&raw_path);
-        if json_string.is_err() {
-            log::error!("读取原始数据文件失败: {:?}", raw_path);
-            crate::toast::error(format!("读取原始数据文件失败: {:?}", raw_path));
-            return None;
-        }
-        let json_value = serde_json::from_str::<Value>(&json_string.unwrap());
-        if json_value.is_err() {
-            log::error!("解析原始数据文件失败: {:?}", raw_path);
-            crate::toast::error(format!("解析原始数据文件失败: {:?}", raw_path));
-            return None;
-        }
-        let mut ctx = FactorioContext::load(&json_value.unwrap());
+        let json_string = std::fs::read_to_string(&raw_path).map_err(|_| {
+            AppError::ContextCreationError(format!("读取原始数据文件失败: {:?}", raw_path))
+        })?;
+
+        let json_value = serde_json::from_str::<Value>(&json_string).map_err(|_| {
+            AppError::ContextCreationError(format!("解析原始数据文件失败: {:?}", raw_path))
+        })?;
+        let mut ctx = FactorioContext::load(&json_value);
         ctx.icon_path = icon_path;
         for locale_category in LOCALE_CATEGORIES.iter() {
             log::info!("加载翻译类别 {}", locale_category);
@@ -444,8 +471,14 @@ impl FactorioContext {
             if locale_path.exists() {
                 // name: a => A, b => B
                 // description: a => A desc, b => B desc
-                let locale_values: Dict<Dict<String>> =
-                    serde_json::from_str(&std::fs::read_to_string(&locale_path).ok()?).ok()?;
+                let locale_values: Dict<Dict<String>> = serde_json::from_str(
+                    &std::fs::read_to_string(&locale_path).map_err(|_| {
+                        AppError::ContextCreationError(format!(
+                            "读取翻译数据文件失败: {:?}",
+                            locale_path
+                        ))
+                    })?,
+                )?;
                 ctx.localized_name.insert(
                     locale_category.to_string(),
                     locale_values.get("names").cloned().unwrap_or_default(),
@@ -466,25 +499,26 @@ impl FactorioContext {
             }
         }
         let mod_list_json_path = self_path.join("tmp/mods/mod-list.json");
-        let mut mod_list_json_content =
-            serde_json::from_str::<Value>(&std::fs::read_to_string(&mod_list_json_path).ok()?)
-                .ok()?;
-        for mod_info in mod_list_json_content.get_mut("mods")?.as_array_mut()? {
+        let mod_infos_json =
+            serde_json::from_str::<Value>(&std::fs::read_to_string(&mod_list_json_path)?)?;
+        let mut mod_infos = serde_json::from_value::<Vec<ModInfo>>(
+            mod_infos_json
+                .get("mods")
+                .ok_or(AppError::ContextCreationError(
+                    "mod-list.json格式不正确".to_string(),
+                ))?
+                .clone(),
+        )?;
+        for mod_info in &mut mod_infos {
             // log::info!("加载模组信息 {:?}", mod_info);
-            if mod_info.get("enabled")?.as_bool()? {
-                let mod_name = mod_info.get("name")?.as_str()?.to_string();
-                log::info!("启用模组 {}", &mod_name);
-                ctx.mods.push((
-                    mod_name,
-                    mod_info
-                        .get("version")
-                        .map_or("unknown", |v| v.as_str().unwrap_or("unknown"))
-                        .to_string(),
-                ));
+            if mod_info.enabled {
+                log::info!("启用模组 {}", &mod_info.name);
+                ctx.mods
+                    .push((mod_info.name.clone(), mod_info.version.clone()));
             }
         }
         crate::toast::success("加载数据完成");
-        Some(ctx)
+        Ok(ctx)
     }
 
     pub fn get_display_name(&self, category: &str, key: &str) -> String {

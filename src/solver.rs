@@ -2,6 +2,7 @@ use good_lp::{IntoAffineExpression, Solution, SolverModel, variable};
 use indexmap::IndexMap;
 
 use crate::concept::{Flow, ItemIdent};
+use crate::error::AppError;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::hash::Hash;
@@ -37,7 +38,7 @@ where
 
 pub type BasicSolverArgs<I, R> = (Flow<I>, IndexMap<R, (Flow<I>, f64)>);
 pub type SolverArgs<I, R> = (Flow<I>, IndexMap<R, (Flow<I>, f64)>, Flow<I>);
-pub type SolverSolution<R> = Result<(Flow<R>, f64), String>;
+pub type SolverSolution<R> = Result<(Flow<R>, f64), AppError>;
 
 impl<I, R> SolverData<I, R>
 where
@@ -57,7 +58,7 @@ where
         self
     }
 
-    pub fn solve(&self) -> Result<(Flow<R>, f64), String> {
+    pub fn solve(&self) -> Result<(Flow<R>, f64), AppError> {
         let mut problem_variables = good_lp::ProblemVariables::new();
         let mut flow_vars = HashMap::new();
         let mut source_vars = HashMap::new();
@@ -101,7 +102,7 @@ where
             if let Some(expr) = balance {
                 targets.push(expr.clone().eq(amount));
             } else {
-                return Err(format!("这个物品没有相关配方： {:?}", item_id));
+                return Err(AppError::SolverError(format!("这个物品没有相关配方： {:?}", item_id)));
             }
         }
         let mut constraints = Vec::new();
@@ -154,7 +155,7 @@ where
                     no_providers.sort_by_key(|x| format!("{:?}", x));
                     // err_string += format!("此外，以下物品缺少生产来源：{:?}", no_providers).as_str();
                 }
-                Err(err_string)
+                Err(AppError::SolverError(err_string))
             }
         }
     }
@@ -200,7 +201,7 @@ where
 pub fn basic_solver<I, R>(
     target: Flow<I>,                    // 目标物品及其需求量
     flows: IndexMap<R, (Flow<I>, f64)>, // 配方标识符及其物品流和代价
-) -> Result<(Flow<R>, f64), String>
+) -> Result<(Flow<R>, f64), AppError>
 where
     I: ItemIdent,
     R: ItemIdent,

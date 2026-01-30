@@ -1,12 +1,14 @@
 use std::collections::HashMap;
 
+use crate::error::AppError;
+
 #[derive(Debug)]
 pub struct DynDeserializer<T: ?Sized> {
-    deserialize: fn(serde_json::Value) -> Option<Box<T>>,
+    deserialize: fn(serde_json::Value) -> Result<Box<T>, AppError>,
 }
 
 impl<T: ?Sized> DynDeserializer<T> {
-    pub fn new(deserialize: fn(serde_json::Value) -> Option<Box<T>>) -> Self {
+    pub fn new(deserialize: fn(serde_json::Value) -> Result<Box<T>, AppError>) -> Self {
         Self { deserialize }
     }
 }
@@ -25,12 +27,20 @@ impl<T: ?Sized> Default for DynDeserializeRegistry<T> {
 }
 
 impl<T: ?Sized> DynDeserializeRegistry<T> {
-    pub fn deserialize(&self, value: serde_json::Value) -> Option<Box<T>> {
-        let type_name = value.get("type")?.as_str()?;
+    pub fn deserialize(&self, value: serde_json::Value) -> Result<Box<T>, AppError> {
+        let type_name = value
+            .get("type")
+            .ok_or_else(|| AppError::RegistryError("缺少字段 type".to_string()))?
+            .as_str()
+            .ok_or_else(|| AppError::RegistryError("字段 type 不是字符串".to_string()))?;
         if let Some(deserializer) = self.deserializers.get(type_name) {
             (deserializer.deserialize)(value)
         } else {
-            None
+            Err(AppError::RegistryError(format!(
+                "未知的类型标识符：{}，已注册的类型有：{:?}",
+                type_name,
+                self.registered_types()
+            )))
         }
     }
     pub fn register(&mut self, type_name: &'static str, deserializer: DynDeserializer<T>) {
@@ -55,8 +65,13 @@ macro_rules! impl_register_deserializer {
                 registry.register(
                     $tag,
                     $crate::dyn_deserialize::DynDeserializer::new(|value| {
-                        let this: $ty = serde_json::from_value(value).unwrap();
-                        Some(Box::new(this))
+                        let this = serde_json::from_value::<$ty>(value).map_err(|e| {
+                            $crate::error::AppError::RegistryError(format!(
+                                "反序列化类型 {} 失败: {}",
+                                $tag, e
+                            ))
+                        })?;
+                        Ok(Box::new(this))
                     }),
                 );
             }
@@ -93,11 +108,11 @@ fn test_dyn_deserializer() {
     dbg!(&serialized_recipe);
     dbg!(&serialized_mining);
 
-    if let Some(recipe) = registry.deserialize(serialized_recipe.clone()) {
+    if let Ok(recipe) = registry.deserialize(serialized_recipe.clone()) {
         eprintln!("配方反序列化成功");
         eprintln!("{:?}", recipe.as_flow(&ctx));
     }
-    if let Some(mining) = registry.deserialize(serialized_mining.clone()) {
+    if let Ok(mining) = registry.deserialize(serialized_mining.clone()) {
         eprintln!("采矿反序列化成功");
         eprintln!("{:?}", mining.as_flow(&ctx));
     }
