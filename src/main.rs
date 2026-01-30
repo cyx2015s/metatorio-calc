@@ -6,23 +6,20 @@ static GLOBAL: MiMalloc = MiMalloc;
 // Git 版本信息
 include!(concat!(env!("OUT_DIR"), "/git_hash.rs"));
 
-use egui::Id;
-
-use crate::concept::*;
-
 pub mod concept;
 pub mod dyn_deserialize;
 pub mod factorio;
 pub mod solver;
+pub mod toast;
 
 pub struct MainPage {
-    pub creators: Vec<(String, Box<dyn GameContextCreatorView>)>,
-    pub subviews: Vec<Box<dyn Subview>>,
+    pub creators: Vec<(String, Box<dyn concept::GameContextCreatorView>)>,
+    pub subviews: Vec<Box<dyn concept::Subview>>,
     pub selected: usize,
 
-    pub subview_receiver: std::sync::mpsc::Receiver<Box<dyn Subview>>,
-    pub subview_sender: std::sync::mpsc::Sender<Box<dyn Subview>>,
-    
+    pub subview_receiver: std::sync::mpsc::Receiver<Box<dyn concept::Subview>>,
+    pub subview_sender: std::sync::mpsc::Sender<Box<dyn concept::Subview>>,
+
     pub exp_cpu_usage: f32,
 }
 
@@ -118,11 +115,11 @@ impl eframe::App for MainPage {
                 }
                 ui.separator();
                 let mut show_font_license =
-                    ui.memory(|mem| mem.data.get_temp::<bool>(Id::new("font")).unwrap_or(false));
+                    ui.memory(|mem| mem.data.get_temp::<bool>(egui::Id::new("font")).unwrap_or(false));
                 if ui.checkbox(&mut show_font_license, "字体协议").clicked() {
                     ui.memory_mut(|mem| {
                         mem.data
-                            .insert_temp::<bool>(Id::new("font"), !show_font_license);
+                            .insert_temp::<bool>(egui::Id::new("font"), !show_font_license);
                     });
                 }
                 if show_font_license {
@@ -138,7 +135,7 @@ impl eframe::App for MainPage {
                     ui.ctx().forget_all_images();
                 }
                 ui.memory_mut(|mem| {
-                    mem.data.insert_temp(Id::new("font"), show_font_license);
+                    mem.data.insert_temp(egui::Id::new("font"), show_font_license);
                 })
             });
         if self.selected < self.creators.len() {
@@ -150,6 +147,7 @@ impl eframe::App for MainPage {
                 self.subviews[self.selected - self.creators.len()].view(ui);
             });
         }
+        toast::TOASTS.lock().unwrap().show(ctx);
     }
 }
 

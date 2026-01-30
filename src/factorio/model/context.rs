@@ -28,8 +28,6 @@ pub const LOCALE_CATEGORIES: &[&str] = &[
     "tile",
 ];
 
-pub const RAW_JSON: &str = include_str!("../../../assets/data-raw-dump.json");
-
 #[derive(Debug, Clone, Default)]
 pub struct FactorioContext {
     /// 模组信息
@@ -77,6 +75,12 @@ pub fn get_workding_directory() -> PathBuf {
 }
 
 impl FactorioContext {
+    pub fn test_load() -> Self {
+        let value = serde_json::from_str::<Value>(
+            std::fs::read_to_string("assets/data-raw-dump.json").unwrap().as_str(),
+        );
+        FactorioContext::load(&value.unwrap()).build_order_info()
+    }
     pub fn load(value: &Value) -> Self {
         let groups: Dict<PrototypeBase> = serde_json::from_value(
             value
@@ -266,6 +270,7 @@ impl FactorioContext {
             return None;
         }
         log::info!("导出原始数据成功");
+        crate::toast::info("导出原始数据成功");
         let dump_locale_command = Command::new(executable_path)
             .arg("--dump-prototype-locale")
             .arg("--config")
@@ -282,6 +287,7 @@ impl FactorioContext {
             return None;
         }
         log::info!("导出翻译数据成功");
+        crate::toast::info("导出翻译数据成功");
 
         let dump_icon_sprites_command = Command::new(executable_path)
             .arg("--dump-icon-sprites")
@@ -300,6 +306,7 @@ impl FactorioContext {
             return None;
         }
         log::info!("导出图标数据成功");
+        crate::toast::info("导出图标数据成功");
 
         if let Some(mod_path) = mod_path {
             // 把 mod-list.json 也复制过来
@@ -419,11 +426,13 @@ impl FactorioContext {
         let json_string = std::fs::read_to_string(&raw_path);
         if json_string.is_err() {
             log::error!("读取原始数据文件失败: {:?}", raw_path);
+            crate::toast::error(format!("读取原始数据文件失败: {:?}", raw_path));
             return None;
         }
         let json_value = serde_json::from_str::<Value>(&json_string.unwrap());
         if json_value.is_err() {
             log::error!("解析原始数据文件失败: {:?}", raw_path);
+            crate::toast::error(format!("解析原始数据文件失败: {:?}", raw_path));
             return None;
         }
         let mut ctx = FactorioContext::load(&json_value.unwrap());
@@ -474,6 +483,7 @@ impl FactorioContext {
                 ));
             }
         }
+        crate::toast::success("加载数据完成");
         Some(ctx)
     }
 
@@ -639,7 +649,7 @@ pub fn make_located_generic_recipe(
 
 #[test]
 fn test_load_context() {
-    let ctx = FactorioContext::default();
+    let ctx = FactorioContext::test_load();
     assert!(ctx.items.contains_key("iron-plate"));
     assert!(ctx.entities.contains_key("stone-furnace"));
     assert!(ctx.fluids.contains_key("water"));

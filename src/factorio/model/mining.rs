@@ -524,7 +524,7 @@ impl MechanicProvider for MiningConfigProvider {
 
 #[test]
 fn test_mining_normalized() {
-    let ctx = FactorioContext::default();
+    let ctx = FactorioContext::test_load();
     let mining_config = MiningConfig {
         resource: "uranium-ore".to_string(),
         machine: "big-mining-drill".into(),

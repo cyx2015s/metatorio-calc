@@ -67,7 +67,7 @@ macro_rules! impl_register_deserializer {
 #[test]
 fn test_dyn_deserializer() {
     use crate::{concept::*, factorio::*};
-    let ctx = FactorioContext::default();
+    let ctx = FactorioContext::test_load();
     let mut registry = DynDeserializeRegistry::<
         dyn Mechanic<ItemIdentType = GenericItem, GameContext = FactorioContext>,
     >::default();

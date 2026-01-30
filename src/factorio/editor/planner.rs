@@ -12,9 +12,8 @@ use crate::{
 };
 
 use indexmap::IndexMap;
-use lazy_static::lazy_static;
 
-lazy_static! {
+lazy_static::lazy_static! {
     static ref MECHANIC_REGISTRY: DynDeserializeRegistry<FactorioMechanic> = {
         let mut registry = DynDeserializeRegistry::default();
         RecipeConfig::register(&mut registry);
@@ -699,14 +698,6 @@ impl PlannerView {
     }
 }
 
-impl Default for PlannerView {
-    fn default() -> Self {
-        Self::new(FactorioContext::load(
-            &(serde_json::from_str(RAW_JSON)).unwrap(),
-        ))
-    }
-}
-
 impl Subview for PlannerView {
     fn view(&mut self, ui: &mut egui::Ui) {
         egui::Frame::group(ui.style())
@@ -762,6 +753,10 @@ impl Subview for PlannerView {
                                 )
                                 .is_ok()
                                 {
+                                    crate::toast::success(format!(
+                                        "工厂已保存到 {}",
+                                        &path.display()
+                                    ));
                                     self.factories[self.selected_factory].saved = true;
                                     self.factories[self.selected_factory].file_path = Some(path);
                                 }
@@ -778,12 +773,22 @@ impl Subview for PlannerView {
                                     && let Ok(factory) =
                                         serde_json::from_value::<FactoryInstance>(value)
                                 {
+                                    let thread_path = path.clone();
+                                    std::thread::spawn(move || {
+                                        std::thread::sleep(std::time::Duration::from_millis(500));
+                                        crate::toast::success(format!(
+                                            "从 {} 加载了新工厂",
+                                            thread_path.display()
+                                        ));
+                                    });
                                     factory.send_solve_request(&self.ctx);
                                     self.factories.push(StatefulFactoryInstance {
                                         factory,
                                         saved: true,
                                         file_path: Some(path),
                                     });
+                                } else {
+                                    crate::toast::error("加载工厂失败，请检查文件格式是否正确");
                                 }
                             }
                         }

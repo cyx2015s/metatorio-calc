@@ -592,7 +592,7 @@ impl AsFlow for RecipeConfig {
 
 #[test]
 fn test_recipe_normalized() {
-    let ctx = FactorioContext::default();
+    let ctx = FactorioContext::test_load();
     let recipe_config = RecipeConfig {
         recipe: ("iron-gear-wheel".to_string(), 0).into(),
         machine: "assembling-machine-1".into(),

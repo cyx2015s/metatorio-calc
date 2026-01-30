@@ -9,6 +9,7 @@ dotenv = "0.15.0"
 dyn-clone = "1.0.20"
 eframe = { version = "0.33.3", features = ["wgpu"] }
 egui = "0.33.3"
+egui-toast = "0.19.1"
 egui_dnd = "0.14.0"
 egui_extras = { version = "0.33.3", features = ["all_loaders"] }
 env_logger = "0.11.8"
