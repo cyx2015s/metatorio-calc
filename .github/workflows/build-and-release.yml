@@ -2,11 +2,8 @@ name: Build and Release Binaries
 
 on:
   push:
-    branches:
-      - master
-    paths-ignore:
-      - '**.md'
-      - 'LICENSE'
+    tags:
+      - 'v*.*.*'
   release:
     types: [created]
   workflow_dispatch:
@@ -111,7 +108,6 @@ jobs:
 
       - name: Upload to release
         uses: softprops/action-gh-release@v2
-        if: github.ref_type == 'tag'
         with:
           files: target/${{ matrix.target }}/release/${{ matrix.name }}
         env:
