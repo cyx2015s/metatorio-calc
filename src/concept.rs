@@ -52,7 +52,9 @@ erased_serde::serialize_trait_object!(<C, I> Mechanic<GameContext = C, ItemIdent
 
 dyn_clone::clone_trait_object!(<C, I> Mechanic<GameContext = C, ItemIdentType = I>);
 
-pub trait MechanicProvider: EditorView + SolveContext + dyn_clone::DynClone + erased_serde::Serialize {
+pub trait MechanicProvider:
+    EditorView + SolveContext + dyn_clone::DynClone + erased_serde::Serialize
+{
     /// 传递创建的配方信息
     fn set_mechanic_sender(
         &mut self,

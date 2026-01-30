@@ -101,7 +101,7 @@ impl eframe::App for MainPage {
                     if label.clicked() {
                         self.selected = idx + self.creators.len();
                     }
-                    idx = idx + 1;
+                    idx += 1;
                     let mut deleted = false;
                     label.context_menu(|ui| {
                         if ui.button("关闭").clicked() {

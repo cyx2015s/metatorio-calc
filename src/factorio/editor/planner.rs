@@ -61,7 +61,7 @@ impl serde::Serialize for FactoryInstance {
             "mechanic_providers",
             &self.mechanic_providers,
         )?;
-        Ok(serde::ser::SerializeStruct::end(state)?)
+        serde::ser::SerializeStruct::end(state)
     }
 }
 
@@ -720,7 +720,7 @@ impl Subview for PlannerView {
 
                         if ui
                             .add_enabled(
-                                self.factories.len() > 0,
+                                !self.factories.is_empty(),
                                 egui::Button::new("保存选中工厂……"),
                             )
                             .clicked()
@@ -730,39 +730,33 @@ impl Subview for PlannerView {
                             let value =
                                 serde_json::to_value(&self.factories[self.selected_factory])
                                     .unwrap();
-                            rfd::FileDialog::new()
-                                .set_file_name(&format!(
+                            if let Some(path) = rfd::FileDialog::new()
+                                .set_file_name(format!(
                                     "{}.fpc",
                                     self.factories[self.selected_factory].name
                                 ))
                                 .add_filter("异星工厂规划配置", &["fpc", "json"])
                                 .save_file()
-                                .map(|path| {
-                                    std::fs::write(
-                                        path,
-                                        serde_json::to_string_pretty(&value).unwrap(),
-                                    )
+                            {
+                                std::fs::write(path, serde_json::to_string_pretty(&value).unwrap())
                                     .unwrap();
-                                });
+                            }
                         }
                         if ui.button("从文件加载工厂……").clicked() {
-                            rfd::FileDialog::new()
+                            if let Some(path) = rfd::FileDialog::new()
                                 .add_filter("异星工厂规划配置", &["fpc", "json"])
                                 .pick_file()
-                                .map(|path| {
-                                    if let Ok(content) = std::fs::read_to_string(&path) {
-                                        if let Ok(value) =
-                                            serde_json::from_str::<serde_json::Value>(&content)
-                                        {
-                                            if let Ok(factory) =
-                                                serde_json::from_value::<FactoryInstance>(value)
-                                            {
-                                                factory.send_solve_request(&self.ctx);
-                                                self.factories.push(factory);
-                                            }
-                                        }
-                                    }
-                                });
+                            {
+                                if let Ok(content) = std::fs::read_to_string(&path)
+                                    && let Ok(value) =
+                                        serde_json::from_str::<serde_json::Value>(&content)
+                                    && let Ok(factory) =
+                                        serde_json::from_value::<FactoryInstance>(value)
+                                {
+                                    factory.send_solve_request(&self.ctx);
+                                    self.factories.push(factory);
+                                }
+                            }
                         }
                     });
                 });
@@ -790,7 +784,7 @@ impl Subview for PlannerView {
                     });
                 });
                 ui.separator();
-                if self.factories.len() == 0 {
+                if self.factories.is_empty() {
                     let mut layout_job = egui::text::LayoutJob::default();
                     egui::RichText::new("没有工厂\n").size(32.0).append_to(
                         &mut layout_job,
