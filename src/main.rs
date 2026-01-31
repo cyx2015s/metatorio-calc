@@ -1,5 +1,7 @@
 use mimalloc::MiMalloc;
 
+use crate::update::*;
+
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
 
@@ -23,22 +25,104 @@ pub struct MainPage {
     pub subview_sender: std::sync::mpsc::Sender<Box<dyn concept::Subview>>,
 
     pub exp_cpu_usage: f32,
+
+    pub suitable_release: Result<self_update::update::Release, error::AppError>,
+    pub response_receiver:
+        std::sync::mpsc::Receiver<Result<self_update::update::Release, error::AppError>>,
+    pub request_sender: std::sync::mpsc::Sender<NetworkRequest>,
+}
+
+pub enum NetworkRequest {
+    FetchReleases,
+    SelfUpdate,
+}
+
+impl Default for MainPage {
+    fn default() -> Self {
+        let (subview_sender, subview_receiver) = std::sync::mpsc::channel();
+        let (network_response_tx, network_response_rx) = std::sync::mpsc::channel();
+        let (network_request_tx, network_request_rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || -> Result<(), error::AppError> {
+            log::info!("网络线程已启动");
+            while let Ok(request) = network_request_rx.recv() {
+                let update_downloader = create_update_downloader()?;
+                match request {
+                    NetworkRequest::FetchReleases => {
+                        let release = self_update::update::ReleaseUpdate::get_latest_release(
+                            &update_downloader,
+                        );
+                        match release {
+                            Ok(release) => {
+                                if get_download_progress() != DownloadProgress::Pending {
+                                    if get_download_progress() == DownloadProgress::Completed {
+                                        network_response_tx
+                                            .send(Err(error::AppError::RestartRequired))?;
+                                    }
+                                    log::warn!("已有更新正在进行中，忽略新的更新请求");
+                                    continue;
+                                }
+
+                                if release.version != self_update::cargo_crate_version!() {
+                                    log::info!("获取到最新版本: {}", release.version);
+                                    network_response_tx.send(Ok(release)).unwrap();
+                                } else {
+                                    log::info!("当前已是最新版本");
+                                    network_response_tx.send(Err(error::AppError::UpToDate))?;
+                                }
+                            }
+                            Err(err) => {
+                                log::error!("获取最新版本失败: {:?}", err);
+                                network_response_tx.send(Err(error::AppError::Update(format!(
+                                    "获取最新版本失败: {:?}",
+                                    err
+                                ))))?;
+                            }
+                        }
+                    }
+                    NetworkRequest::SelfUpdate => {
+                        if get_download_progress() != DownloadProgress::Pending {
+                            log::warn!("已有更新正在进行中，忽略新的更新请求");
+                            continue;
+                        }
+                        set_download_progress(DownloadProgress::InProgress(0, 0));
+                        std::thread::spawn(|| update::update().unwrap());
+                    }
+                }
+            }
+            log::info!("网络线程已退出");
+            Ok(())
+        });
+        Self {
+            creators: vec![],
+            subview_receiver,
+            subview_sender,
+            selected: 0,
+            subviews: vec![],
+            exp_cpu_usage: 0.0,
+            suitable_release: Err(error::AppError::None),
+            request_sender: network_request_tx,
+            response_receiver: network_response_rx,
+        }
+    }
 }
 
 impl MainPage {
-    fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn add_creator(
+        &mut self,
+        name: &str,
+        mut creator: Box<dyn concept::GameContextCreatorView>,
+    ) {
+        creator.set_subview_sender(self.subview_sender.clone());
+        self.creators.push((name.to_string(), creator));
+    }
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         add_font(&cc.egui_ctx);
-        let (tx, rx) = std::sync::mpsc::channel();
         let mut ret = Self {
             creators: vec![(
                 "异星工厂".to_string(),
                 Box::new(factorio::planner::FactorioContextCreatorView::default()),
             )],
-            subview_receiver: rx,
-            subview_sender: tx,
-            subviews: vec![],
-            selected: 0,
-            exp_cpu_usage: 0.0,
+            ..Default::default()
         };
         for creator in &mut ret.creators {
             creator.1.set_subview_sender(ret.subview_sender.clone());
@@ -71,6 +155,68 @@ impl eframe::App for MainPage {
                 ));
                 ui.separator();
                 ui.label(format!("当前版本: {}", self_update::cargo_crate_version!()));
+                if ui.button("检查更新").clicked() {
+                    self.request_sender
+                        .send(NetworkRequest::FetchReleases)
+                        .unwrap();
+                }
+                let response = self.response_receiver.try_recv();
+                match response {
+                    Ok(response) => {
+                        self.suitable_release = response;
+                        match self.suitable_release {
+                            Ok(_) => {
+
+                            }
+                            Err(ref err) => match err {
+                                error::AppError::UpToDate => {
+                                    toast::success("当前已是最新版本。");
+                                }
+                                error::AppError::None => {
+                                    
+                                }
+                                err => {
+                                    toast::error(format!("更新检查失败: {:?}", err));
+                                }
+                            },
+                        }
+                    }
+                    _ => {}
+                }
+                match &mut self.suitable_release {
+                    Ok(release) => {
+                        ui.label(format!("可更新新版本: {}", release.version));
+                        if ui.button("更新").clicked() {
+                            self.request_sender
+                                .send(NetworkRequest::SelfUpdate)
+                                .unwrap();
+                        }
+                    }
+                    Err(err) => match err {
+                        error::AppError::None => {}
+                        error::AppError::UpToDate => {
+                            ui.label("当前已是最新版本。");
+                        }
+                        error::AppError::RestartRequired => {
+                            ui.colored_label(
+                                egui::Color32::YELLOW,
+                                "更新已下载完成，请重启应用以应用更新。",
+                            );
+                            if ui.button("重启应用").clicked() {
+                                std::process::Command::new(std::env::current_exe().unwrap())
+                                    .spawn()
+                                    .unwrap();
+                                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                            }
+                        }
+                        _err => {
+                            ui.colored_label(
+                                egui::Color32::RED,
+                                format!("更新检查失败"),
+                            );
+                        }
+                    },
+                }
                 ui.add(egui::Hyperlink::from_label_and_url(
                     "Github 仓库",
                     "https://github.com/cyx2015s/metatorio-calc",
@@ -82,7 +228,7 @@ impl eframe::App for MainPage {
                     .for_each(|(i, creator)| {
                         if ui
                             .selectable_label(self.selected == i, &creator.0)
-                            .on_hover_text_at_pointer("点击以选择该游戏环境")
+                            .on_hover_text_at_pointer("点击以选择该游戏环境，右键显示额外菜单")
                             .clicked()
                         {
                             self.selected = i;

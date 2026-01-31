@@ -121,13 +121,13 @@ pub fn save_to_file<T: serde::Serialize>(
     path: &std::path::Path,
 ) -> Result<(), AppError> {
     let serialized = serde_json::to_string_pretty(value).map_err(|e| {
-        AppError::IO(format!(
+        AppError::Io(format!(
             "序列化数据到 JSON 失败（准备写入 {}）：{}",
             path.display(),
             e
         ))
     })?;
     std::fs::write(path, serialized)
-        .map_err(|e| AppError::IO(format!("写入文件 {} 失败：{}", path.display(), e)))?;
+        .map_err(|e| AppError::Io(format!("写入文件 {} 失败：{}", path.display(), e)))?;
     Ok(())
 }

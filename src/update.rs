@@ -1,19 +1,23 @@
-use std::io::{BufRead, Write};
+use std::{
+    io::{BufRead, Write},
+    sync::Arc,
+};
 
-use self_update::update::ReleaseUpdate;
+use egui::mutex::Mutex;
 
-use crate::error::AppError;
+use crate::toast;
 
 const REPO_OWNER: &str = "cyx2015s";
 const REPO_NAME: &str = "metatorio-calc";
 const BIN_NAME: &str = "metatorio";
 
+// 包装一个 ReleaseUpdate 以添加下载进度回调功能
 pub struct UpdateWrapper<T>
 where
     T: self_update::update::ReleaseUpdate + ?Sized,
 {
     inner: Box<T>,
-    progress_callback: Option<Box<dyn Fn(u64, u64)>>,
+    progress_callback: Option<Box<dyn Fn(u64, u64) + 'static>>,
 }
 
 impl<T> UpdateWrapper<T>
@@ -118,7 +122,12 @@ impl<T: self_update::update::ReleaseUpdate + ?Sized> self_update::update::Releas
         self.inner.api_headers(auth_token)
     }
 
+    fn identifier(&self) -> Option<String> {
+        self.inner.identifier()
+    }
+
     // 复制过来改了一下
+    // https://github.com/jaemk/self_update/blob/master/src/update.rs
     fn update_extended(&self) -> self_update::errors::Result<self_update::update::UpdateStatus> {
         let bin_install_path = self.bin_install_path();
         let bin_name = self.bin_name();
@@ -164,15 +173,6 @@ impl<T: self_update::update::ReleaseUpdate + ?Sized> self_update::update::Releas
 
                 {
                     log::info!("发现新版本！v{} --> v{}", current_version, release.version);
-                    let qualifier = if self_update::version::bump_is_compatible(
-                        &current_version,
-                        &release.version,
-                    )? {
-                        ""
-                    } else {
-                        "不"
-                    };
-                    log::info!("新版本{}兼容的", qualifier);
                 }
 
                 release
@@ -192,20 +192,16 @@ impl<T: self_update::update::ReleaseUpdate + ?Sized> self_update::update::Releas
                 ))
             })?;
 
-        let prompt_confirmation = !self.no_confirm();
-        if self.show_output() || prompt_confirmation {
-            log::info!("\n{} 发布状态:", bin_name);
-            log::info!("  * 当前可执行文件: {:?}", bin_install_path);
-            log::info!("  * 新可执行文件版本: {:?}", target_asset.name);
-            log::info!("  * 新可执行文件下载地址: {:?}", target_asset.download_url);
-            log::info!("\n新版本将被下载/解压，现有的可执行文件文件将被替换。");
-        }
+        log::info!("  * 当前可执行文件: {:?}", bin_install_path);
+        log::info!("  * 新可执行文件版本: {:?}", target_asset.name);
+        log::info!("  * 新可执行文件下载地址: {:?}", target_asset.download_url);
+        log::info!("新版本将被下载/解压，现有的可执行文件文件将被替换。");
 
         let tmp_archive_dir = tempfile::TempDir::new()?;
         let tmp_archive_path = tmp_archive_dir.path().join(&target_asset.name);
         let tmp_archive = std::fs::File::create(&tmp_archive_path)?;
-
-        log::info!("下载中……");
+    
+        log::info!("下载中…… {}", tmp_archive_path.display());
 
         let download_url = &target_asset.download_url;
 
@@ -221,7 +217,10 @@ impl<T: self_update::update::ReleaseUpdate + ?Sized> self_update::update::Releas
                         format!("token {}", token).parse().unwrap(),
                     );
                 }
-                headers.insert(reqwest::header::ACCEPT, "application/octet-stream".parse().unwrap());
+                headers.insert(
+                    reqwest::header::ACCEPT,
+                    "application/octet-stream".parse().unwrap(),
+                );
                 headers.insert(
                     reqwest::header::USER_AGENT,
                     "metatorio-calc/self-update".parse().unwrap(),
@@ -252,8 +251,8 @@ impl<T: self_update::update::ReleaseUpdate + ?Sized> self_update::update::Releas
                 callback(downloaded, total_size);
             }
         }
-
-        log::info!("解压中……");
+        
+        drop(writer);
 
         let bin_path_str = std::borrow::Cow::Owned(self.bin_path_in_archive());
 
@@ -273,7 +272,10 @@ impl<T: self_update::update::ReleaseUpdate + ?Sized> self_update::update::Releas
         self_update::Extract::from_source(&tmp_archive_path)
             .extract_file(tmp_archive_dir.path(), bin_path_str)?;
         let new_exe = tmp_archive_dir.path().join(bin_path_str);
-
+        log::info!("解压的文件: {}", new_exe.display());
+        let new_exe_file = std::fs::File::open(&new_exe)?;
+        log::info!("新文件的大小是: {}", new_exe_file.metadata()?.len());
+        std::thread::sleep(std::time::Duration::from_secs(10));
         log::info!("完成");
 
         log::info!("替换可执行文件中……");
@@ -284,38 +286,65 @@ impl<T: self_update::update::ReleaseUpdate + ?Sized> self_update::update::Releas
     }
 }
 
-pub fn update() -> Result<(), AppError> {
-    let release_builder = self_update::backends::github::ReleaseList::configure()
-        .repo_owner(REPO_OWNER)
-        .repo_name(REPO_NAME)
-        .build()
-        .unwrap();
-
-    log::info!("发现的 release 列表: {:?}", release_builder.fetch()?);
-
-    let status_builder = self_update::backends::github::Update::configure()
+pub fn create_update_downloader()
+-> Result<UpdateWrapper<dyn self_update::update::ReleaseUpdate>, crate::error::AppError> {
+    let release_update = self_update::backends::github::Update::configure()
         .repo_owner(REPO_OWNER)
         .repo_name(REPO_NAME)
         .bin_name(BIN_NAME)
-        .show_download_progress(true)
-        .current_version("0.9.0")
+        .current_version(self_update::cargo_crate_version!())
         .build()?;
 
-    let updater = UpdateWrapper::new(status_builder).with_progress_callback(|current, total| {
-        if total > 0 {
-            eprintln!("下载进度: {}% ({:08}/{:08} bytes)\r", current * 100 / total, current, total);
-        } else {
-            eprintln!("下载进度: {:08} bytes\r", current);
-        }
-    });
+    Ok(UpdateWrapper::new(release_update))
+}
 
-    updater.update_extended()?;
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum DownloadProgress {
+    Pending,
+    InProgress(u64, u64),
+    Completed,
+}
+
+lazy_static::lazy_static!(
+    pub static ref DOWNLOAD_PROGRESS: Arc<Mutex<DownloadProgress>> = Arc::new(Mutex::new(DownloadProgress::Pending));
+);
+
+pub fn get_download_progress() -> DownloadProgress {
+    *DOWNLOAD_PROGRESS.lock()
+}
+
+pub fn set_download_progress(progress: DownloadProgress) {
+    *DOWNLOAD_PROGRESS.lock() = progress;
+}
+
+pub fn update() -> Result<(), crate::error::AppError> {
+    let mut updater = create_update_downloader()?;
+    updater = updater.with_progress_callback(move |current, total| {
+        set_download_progress(DownloadProgress::InProgress(current, total));
+    });
+    toast::download();
+    match self_update::update::ReleaseUpdate::update_extended(&updater) {
+        Ok(self_update::update::UpdateStatus::UpToDate) => {
+            log::info!("当前已是最新版本");
+            set_download_progress(DownloadProgress::Completed);
+            return Ok(());
+        }
+        Ok(self_update::update::UpdateStatus::Updated(release)) => {
+            log::info!("已更新到新版本 v{}", release.version);
+        }
+        Err(err) => {
+            log::error!("更新失败: {}", err);
+            set_download_progress(DownloadProgress::Pending);
+            return Err(crate::error::AppError::Update(err.to_string()));
+        }
+    }
+    set_download_progress(DownloadProgress::Completed);
 
     Ok(())
 }
 
 #[test]
-fn test_update() -> Result<(), AppError> {
+fn test_update() -> Result<(), crate::error::AppError> {
     env_logger::Builder::new()
         .filter_level(log::LevelFilter::Info)
         .try_init()

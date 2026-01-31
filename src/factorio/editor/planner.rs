@@ -95,11 +95,6 @@ impl<'de> serde::Deserialize<'de> for FactoryInstance {
 
 impl Clone for FactoryInstance {
     fn clone(&self) -> Self {
-        let (arg_tx, arg_rx) = std::sync::mpsc::channel();
-        let (solution_tx, solution_rx) = std::sync::mpsc::channel();
-        let (mechanic_tx, mechanic_rx) = std::sync::mpsc::channel();
-        SolverData::make_solver_thread(solution_tx, arg_rx);
-
         FactoryInstance {
             name: self.name.clone(),
             target: self.target.clone(),
@@ -110,10 +105,7 @@ impl Clone for FactoryInstance {
             mechanic_providers: self.mechanic_providers.clone(),
             mechanics: self.mechanics.clone(),
             mechanic_suggestions: self.mechanic_suggestions.clone(),
-            mechanic_receiver: mechanic_rx,
-            mechanic_sender: mechanic_tx,
-            arg_sender: arg_tx,
-            solution_receiver: solution_rx,
+            ..Default::default()
         }
     }
 }
