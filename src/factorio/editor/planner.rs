@@ -16,16 +16,10 @@ use crate::{
 use indexmap::IndexMap;
 
 lazy_static::lazy_static! {
-    static ref MECHANIC_REGISTRY: DynDeserializeRegistry<FactorioMechanicInstance> = {
+    static ref MECHANIC_REGISTRY: DynDeserializeRegistry<FactorioMechanic> = {
         let mut registry = DynDeserializeRegistry::default();
-        RecipeMechanicInstance::register(&mut registry);
-        MiningMechanicInstance::register(&mut registry);
-        registry
-    };
-    static ref MECHANIC_PROVIDER_REGISTRY: DynDeserializeRegistry<FactorioMechanicProvider> = {
-        let mut registry = DynDeserializeRegistry::default();
-        RecipeMechanicProvider::register(&mut registry);
-        MiningMechanicProvider::register(&mut registry);
+        RecipeMechanic::register(&mut registry);
+        MiningMechanic::register(&mut registry);
         registry
     };
 }
@@ -38,11 +32,7 @@ pub struct FactoryInstance {
     pub total_flow: Flow<GenericItem>,
     /// Cached sorted keys for total_flow to avoid sorting every frame
     pub total_flow_sorted_keys: Vec<GenericItem>,
-    pub mechanic_providers: Vec<Box<FactorioMechanicProvider>>,
-    pub mechanics: Vec<Box<FactorioMechanicInstance>>,
-    pub mechanic_suggestions: Vec<Box<FactorioMechanicInstance>>,
-    pub mechanic_receiver: std::sync::mpsc::Receiver<Box<FactorioMechanicInstance>>,
-    pub mechanic_sender: std::sync::mpsc::Sender<Box<FactorioMechanicInstance>>,
+    pub mechanics: Vec<Box<dyn Mechanic<FactorioContext, GenericItem>>>,
     pub arg_sender: std::sync::mpsc::Sender<SolverArgs<GenericItem, usize>>,
     pub solution_receiver: std::sync::mpsc::Receiver<SolverSolution<usize>>,
 }
@@ -52,16 +42,11 @@ impl serde::Serialize for FactoryInstance {
     where
         S: serde::Serializer,
     {
-        let mut state = serializer.serialize_struct("FactoryInstance", 5)?;
+        let mut state = serializer.serialize_struct("FactoryInstance", 4)?;
         serde::ser::SerializeStruct::serialize_field(&mut state, "name", &self.name)?;
         serde::ser::SerializeStruct::serialize_field(&mut state, "target", &self.target)?;
         serde::ser::SerializeStruct::serialize_field(&mut state, "external", &self.external)?;
         serde::ser::SerializeStruct::serialize_field(&mut state, "mechanics", &self.mechanics)?;
-        serde::ser::SerializeStruct::serialize_field(
-            &mut state,
-            "mechanic_providers",
-            &self.mechanic_providers,
-        )?;
         serde::ser::SerializeStruct::end(state)
     }
 }
@@ -79,33 +64,26 @@ impl<'de> serde::Deserialize<'de> for FactoryInstance {
             serde_json::from_value(value["target"].clone()).map_err(serde::de::Error::custom)?;
         factory_instance.external =
             serde_json::from_value(value["external"].clone()).map_err(serde::de::Error::custom)?;
-        for mechanic in value["mechanics"].as_array().unwrap_or(&vec![]) {
-            let mech = MECHANIC_REGISTRY
-                .deserialize(mechanic.clone())
-                .map_err(|_| serde::de::Error::custom("反序列化 Mechanic 失败"))?;
-            factory_instance.mechanics.push(mech);
-        }
-        let mut missing_mechanic_providers = MECHANIC_PROVIDER_REGISTRY
+        let not_deserialized_mechanics = MECHANIC_REGISTRY
             .registered_types()
             .into_iter()
             .collect::<HashSet<_>>();
-        for mechanic_provider in value["mechanic_providers"].as_array().unwrap_or(&vec![]) {
-            missing_mechanic_providers.remove(
-                mechanic_provider["type"]
-                    .as_str()
-                    .ok_or(serde::de::Error::custom("Missing type field"))?,
-            );
-            let mech_provider = MECHANIC_PROVIDER_REGISTRY
-                .deserialize(mechanic_provider.clone())
-                .map_err(|_| serde::de::Error::custom("反序列化 MechanicProvider 失败"))?;
-            factory_instance.mechanic_providers.push(mech_provider);
+        for mechanic in value["mechanics"].as_array().unwrap_or(&vec![]) {
+            if mechanic["type"]
+                .as_str()
+                .is_some_and(|t| not_deserialized_mechanics.contains(t))
+            {
+                let mech = MECHANIC_REGISTRY
+                    .deserialize(mechanic.clone())
+                    .map_err(|_| serde::de::Error::custom("反序列化 Mechanic 失败"))?;
+                factory_instance.mechanics.push(mech);
+            }
         }
-        for missing in missing_mechanic_providers {
-            log::info!("补全因为版本更新引入的 MechanicProvider: {}", missing);
-            let mech_provider = MECHANIC_PROVIDER_REGISTRY
-                .create_default(missing)
-                .map_err(|_| serde::de::Error::custom("创建默认 MechanicProvider 失败"))?;
-            factory_instance.mechanic_providers.push(mech_provider);
+        for not_deserialized_mechanic in not_deserialized_mechanics {
+            let mech = MECHANIC_REGISTRY
+                .create_default(not_deserialized_mechanic)
+                .unwrap();
+            factory_instance.mechanics.push(mech);
         }
         Ok(factory_instance)
     }
@@ -120,9 +98,7 @@ impl Clone for FactoryInstance {
             solution: self.solution.clone(),
             total_flow: self.total_flow.clone(),
             total_flow_sorted_keys: self.total_flow_sorted_keys.clone(),
-            mechanic_providers: self.mechanic_providers.clone(),
             mechanics: self.mechanics.clone(),
-            mechanic_suggestions: self.mechanic_suggestions.clone(),
             ..Default::default()
         }
     }
@@ -130,7 +106,6 @@ impl Clone for FactoryInstance {
 
 impl Default for FactoryInstance {
     fn default() -> Self {
-        let (mechanic_tx, mechanic_rx) = std::sync::mpsc::channel();
         let (arg_tx, arg_rx) = std::sync::mpsc::channel();
         let (solution_tx, solution_rx) = std::sync::mpsc::channel();
         SolverData::make_solver_thread(solution_tx, arg_rx);
@@ -142,11 +117,7 @@ impl Default for FactoryInstance {
             solution: (IndexMap::new(), 0.0),
             total_flow: IndexMap::new(),
             total_flow_sorted_keys: Vec::new(),
-            mechanic_providers: Vec::new(),
             mechanics: Vec::new(),
-            mechanic_suggestions: Vec::new(),
-            mechanic_receiver: mechanic_rx,
-            mechanic_sender: mechanic_tx,
             arg_sender: arg_tx,
             solution_receiver: solution_rx,
         }
@@ -161,11 +132,18 @@ impl FactoryInstance {
         }
     }
 
+    pub fn add_mechanic(mut self, mechanic: impl Mechanic<FactorioContext, GenericItem>) -> Self {
+        self.mechanics.push(Box::new(mechanic));
+        self
+    }
+
     pub fn send_solve_request(&self, ctx: &FactorioContext) {
         let flows = self
             .mechanics
             .iter()
-            .map(|fe| (box_as_ptr(fe), (fe.as_flow(ctx), fe.cost(ctx))))
+            .map(|mechanic| mechanic.instances())
+            .flatten()
+            .map(|fe| (ref_as_ptr(fe), (fe.as_flow(ctx), fe.cost(ctx))))
             .collect::<IndexMap<usize, (_, _)>>();
         let target = self
             .target
@@ -186,30 +164,12 @@ impl FactoryInstance {
         let _ = self.arg_sender.send((target, flows, external));
     }
 
-    pub fn add_flow_source<
-        F: Fn(MechanicSender<FactorioContext, GenericItem>) -> Box<FactorioMechanicProvider>,
-    >(
-        mut self,
-        f: F,
-    ) -> Self {
-        self.mechanic_providers
-            .push(f(self.mechanic_sender.clone()));
-        self
-    }
-
     fn flows_panel(&mut self, ui: &mut egui::Ui, ctx: &FactorioContext, changed: &mut bool) {
         let label = ui.label(format!("总代价: {:.2} | 总物料流", self.solution.1));
         ui.horizontal_wrapped(|ui| {
             card_frame(ui).show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
                 ui.set_min_height(50.0);
-                let mut modal = HintModal::new(
-                    label.id,
-                    ctx,
-                    &self.mechanic_sender,
-                    &mut self.mechanic_suggestions,
-                    &self.mechanic_providers,
-                );
                 let mut final_clicked = None;
                 for item in &self.total_flow_sorted_keys {
                     let amount = self.total_flow.get(item).cloned().unwrap_or(0.0);
@@ -233,90 +193,17 @@ impl FactoryInstance {
                         ui.end_row();
                     }
                 }
-                if let Some((item, amount)) = final_clicked {
-                    modal = modal.with_update(true, item, amount);
-                }
-                ui.add(modal);
             });
         });
         ui.separator();
-        self.mechanics.retain_mut(|flow_config| {
-            let mut deleted = false;
-            card_frame(ui).show(ui, {
-                |ui| {
-                    ui.set_min_width(ui.available_width());
-                    ui.horizontal(|ui| {
-                        let ptr = box_as_ptr(flow_config);
-                        let solution_val = self.solution.0.get(&ptr).cloned();
-
-                        ui.vertical(|ui| {
-                            if ui.button("删除").clicked() {
-                                deleted = true;
-                                *changed = true;
-                            }
-                            if ui.button("复制").clicked() {
-                                let serialized = serde_json::to_value(&flow_config);
-                                let deserialized =
-                                    MECHANIC_REGISTRY.deserialize(serialized.unwrap());
-                                if let Ok(deserialized) = deserialized {
-                                    self.mechanic_sender.send(deserialized).unwrap();
-                                }
-                                *changed = true;
-                            }
-                            if let Some(solution) = solution_val {
-                                ui.add(CompactLabel::new(solution));
-                            } else {
-                                ui.label("待解");
-                            }
-                        });
-
-                        ui.separator();
-                        ui.vertical(|ui: &mut egui::Ui| {
-                            *changed |= flow_config.editor_view(ui, ctx)
-                        });
-
-                        ui.separator();
-                        let flow = flow_config.as_flow(ctx);
-                        let mut keys = flow.keys().collect::<Vec<_>>();
-                        sort_generic_items(&mut keys, ctx);
-                        ui.horizontal_top(|ui| {
-                            ui.horizontal_wrapped(|ui| {
-                                for item in keys {
-                                    let amount = flow.get(item).cloned().unwrap_or(0.0);
-
-                                    ui.vertical(|ui| {
-                                        ui.add_sized(
-                                            [35.0, 15.0],
-                                            SignedCompactLabel::new(
-                                                amount * solution_val.unwrap_or(1.0),
-                                            ),
-                                        );
-                                        let icon = ui
-                                            .add_sized([35.0, 35.0], GenericIcon::new(ctx, item))
-                                            .interact(egui::Sense::click());
-                                        let toggle =
-                                            icon.clicked_by(egui::PointerButton::Secondary);
-                                        ui.add(
-                                            HintModal::new(
-                                                icon.id,
-                                                ctx,
-                                                &self.mechanic_sender,
-                                                &mut self.mechanic_suggestions,
-                                                &self.mechanic_providers,
-                                            )
-                                            .with_update(toggle, item, amount),
-                                        );
-                                    });
-                                    if ui.available_size_before_wrap().x < 35.0 {
-                                        ui.end_row();
-                                    }
-                                }
-                            });
-                        });
-                    })
-                }
+        self.mechanics.iter_mut().for_each(|mechanic| {
+            mechanic.instances_mut().into_iter().for_each(|instance| {
+                ui.horizontal_wrapped(|ui| {
+                    card_frame(ui).show(ui, |ui| {
+                        *changed |= instance.editor_view(ui, ctx);
+                    });
+                });
             });
-            !deleted
         });
     }
 }
@@ -366,11 +253,17 @@ impl EditorView for FactoryInstance {
                 Ok(solution) => {
                     self.total_flow.clear();
                     self.solution = solution;
-                    for fe in self.mechanics.iter_mut() {
-                        let var_value =
-                            self.solution.0.get(&box_as_ptr(fe)).cloned().unwrap_or(0.0);
-                        let flow = fe.as_flow(ctx);
-                        self.total_flow = flow_add(&self.total_flow, &flow, var_value);
+                    for mechanic in self.mechanics.iter_mut() {
+                        for instance in mechanic.instances() {
+                            let var_value = self
+                                .solution
+                                .0
+                                .get(&ref_as_ptr(mechanic))
+                                .cloned()
+                                .unwrap_or(0.0);
+                            let flow = instance.as_flow(ctx);
+                            self.total_flow = flow_add(&self.total_flow, &flow, var_value);
+                        }
                     }
                     // Update sorted keys cache when total_flow changes
                     self.total_flow_sorted_keys = self.total_flow.keys().cloned().collect();
@@ -422,16 +315,6 @@ impl EditorView for FactoryInstance {
                                             .inner;
                                         let toggle =
                                             icon.clicked_by(egui::PointerButton::Secondary);
-                                        ui.add(
-                                            HintModal::new(
-                                                icon.id,
-                                                ctx,
-                                                &self.mechanic_sender,
-                                                &mut self.mechanic_suggestions,
-                                                &self.mechanic_providers,
-                                            )
-                                            .with_update(toggle, item, -*amount),
-                                        );
                                         ui.vertical(|ui| {
                                             egui::ComboBox::new(icon.id, "")
                                                 .selected_text(match item {
@@ -546,16 +429,6 @@ impl EditorView for FactoryInstance {
                                         icon = icon.on_hover_text("⚠️ 指完成机制所消耗的实体资源（主要是矿物），不包括为了完成机制所需要收集的组装机、采矿机、插件塔等。")
                                     }
                                     let toggle = icon.clicked_by(egui::PointerButton::Secondary);
-                                    ui.add(
-                                        HintModal::new(
-                                            icon.id,
-                                            ctx,
-                                            &self.mechanic_sender,
-                                            &mut self.mechanic_suggestions,
-                                            &self.mechanic_providers,
-                                        )
-                                        .with_update(toggle, item, -*penalty),
-                                    );
                                     ui.vertical(|ui| {
                                         egui::ComboBox::new(icon.id, "")
                                             .selected_text(match item {
@@ -662,18 +535,13 @@ impl EditorView for FactoryInstance {
                     ui.separator();
                     ui.vertical(|ui| {
                         ui.heading("游戏机制");
-                        for flow_source in &mut self.mechanic_providers {
-                            changed |= flow_source.editor_view(ui, ctx);
-                            ui.separator();
+                        for mechanic in self.mechanics.iter_mut() {
+                            changed |= mechanic.editor_view(ui, ctx);
                         }
                     })
                 });
             });
 
-        while let Ok(flow_source) = self.mechanic_receiver.try_recv() {
-            self.mechanics.push(flow_source);
-            changed = true;
-        }
         egui::Frame::NONE
             .corner_radius(8.0)
             .outer_margin(4.0)
@@ -721,16 +589,8 @@ impl Subview for PlannerView {
                             let name = "新工厂".to_string();
                             self.factories.push(
                                 FactoryInstance::new(name)
-                                    .add_flow_source(|s| {
-                                        Box::new(
-                                            RecipeMechanicProvider::new().with_mechanic_sender(s),
-                                        )
-                                    })
-                                    .add_flow_source(|s| {
-                                        Box::new(
-                                            MiningMechanicProvider::new().with_mechanic_sender(s),
-                                        )
-                                    })
+                                    .add_mechanic(RecipeMechanic::default())
+                                    .add_mechanic(MiningMechanic::default())
                                     .into(),
                             );
                         }

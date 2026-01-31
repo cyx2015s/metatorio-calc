@@ -73,6 +73,7 @@ pub struct FactorioContext {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ModInfo {
     pub name: String,
+    #[serde(default)]
     pub version: String,
     #[serde(default)]
     pub enabled: bool,

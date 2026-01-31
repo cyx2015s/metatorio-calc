@@ -38,7 +38,8 @@ pub trait AsFlow: SolveContext {
 
 pub type MechanicSender<C, I> =
     std::sync::mpsc::Sender<Box<dyn MechanicInstance<GameContext = C, ItemIdentType = I>>>;
-
+pub type MechanicReceiver<C, I> =
+    std::sync::mpsc::Receiver<Box<dyn MechanicInstance<GameContext = C, ItemIdentType = I>>>;
 pub trait ItemIdent: Debug + Clone + Eq + Hash + Send + 'static {}
 impl<T> ItemIdent for T where T: Debug + Clone + Eq + Hash + Send + 'static {}
 pub trait GameContextCreatorView: Subview {
@@ -155,6 +156,13 @@ where
     ) {
         let _ = ctx;
         let _ = sender;
+    }
+
+    fn get_instance_sender(
+        &self,
+    ) -> Option<&MechanicSender<C, I>> {
+        let _ = self;
+        None
     }
 }
 

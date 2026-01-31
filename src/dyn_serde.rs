@@ -93,45 +93,6 @@ macro_rules! impl_register_deserializer {
     };
 }
 
-#[test]
-fn test_dyn_deserializer() {
-    use crate::{concept::*, factorio::*};
-    let ctx = FactorioContext::test_load();
-    let mut registry = DynDeserializeRegistry::<
-        dyn MechanicInstance<GameContext = FactorioContext, ItemIdentType = GenericItem>,
-    >::default();
-
-    RecipeMechanicInstance::register(&mut registry);
-    MiningMechanicInstance::register(&mut registry);
-    let recipe = RecipeMechanicInstance {
-        recipe: "iron-gear-wheel".into(),
-        machine: "assembling-machine-2".into(),
-        module_config: ModuleConfig::new(),
-        instance_fuel: None,
-    };
-    let mining = MiningMechanicInstance {
-        resource: "iron-ore".into(),
-        machine: "electric-mining-drill".into(),
-        module_config: ModuleConfig::new(),
-        instance_fuel: None,
-    };
-    dbg!(&recipe);
-    dbg!(&mining);
-    let serialized_recipe = serde_json::to_value(&recipe).unwrap();
-    let serialized_mining = serde_json::to_value(&mining).unwrap();
-    dbg!(&serialized_recipe);
-    dbg!(&serialized_mining);
-
-    if let Ok(recipe) = registry.deserialize(serialized_recipe.clone()) {
-        eprintln!("配方反序列化成功");
-        eprintln!("{:?}", recipe.as_flow(&ctx));
-    }
-    if let Ok(mining) = registry.deserialize(serialized_mining.clone()) {
-        eprintln!("采矿反序列化成功");
-        eprintln!("{:?}", mining.as_flow(&ctx));
-    }
-}
-
 pub fn save_to_file<T: serde::Serialize>(
     value: &T,
     path: &std::path::Path,
@@ -147,3 +108,4 @@ pub fn save_to_file<T: serde::Serialize>(
         .map_err(|e| AppError::Io(format!("写入文件 {} 失败：{}", path.display(), e)))?;
     Ok(())
 }
+

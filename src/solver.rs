@@ -25,6 +25,10 @@ pub fn box_as_ptr<T: ?Sized>(b: &Box<T>) -> usize {
     &**b as *const T as *const () as usize
 }
 
+pub fn ref_as_ptr<T: ?Sized>(r: &T) -> usize {
+    r as *const T as *const () as usize
+}
+
 #[derive(Debug, Clone)]
 pub struct SolverData<I, R>
 where
