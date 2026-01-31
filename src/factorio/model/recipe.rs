@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::{collections::VecDeque, fmt::Debug};
 
 use crate::{
     concept::*,
@@ -775,6 +775,33 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
             .iter_mut()
             .map(|m| m as &mut FactorioMechanicInstance)
             .collect()
+    }
+
+    fn instances_operate(
+        &mut self,
+        mut f: Box<dyn FnMut(&mut FactorioMechanicInstance) -> VecItemOp>,
+    ) {
+        let mut retain = VecDeque::new();
+        let mut new_items = Vec::new();
+        retain.reserve(self.instances.len() * 2);
+        for instance in &mut self.instances {
+            let op = f(instance as &mut FactorioMechanicInstance);
+            match op {
+                VecItemOp::None => {
+                    retain.push_back(true);
+                }
+                VecItemOp::Drop => {
+                    retain.push_back(false);
+                }
+                VecItemOp::Clone => {
+                    retain.push_back(true);
+                    new_items.push(instance.clone());
+                }
+            }
+        }
+        self.instances
+            .retain_mut(|_| retain.pop_front().unwrap_or(true));
+        self.instances.extend(new_items);
     }
 
     fn update_suggestion(&mut self, ctx: &FactorioContext, item: &GenericItem, amount: f64) {

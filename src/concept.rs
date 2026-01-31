@@ -1,7 +1,16 @@
-use std::{any::Any, collections::HashMap, fmt::Debug, hash::Hash};
+use std::{any::Any, fmt::Debug, hash::Hash};
 
 use indexmap::IndexMap;
 
+/// 对一个列表进行操作后，对这个项额外进行的操作，仅用作指示
+pub enum VecItemOp {
+    /// 无操作
+    None,
+    /// 删除当前项
+    Drop,
+    /// 复制当前项
+    Clone,
+}
 
 pub trait Subview: Send {
     fn view(&mut self, ui: &mut egui::Ui);
@@ -15,11 +24,13 @@ pub trait Subview: Send {
     }
 }
 
+/// 解决方案上下文，包含游戏相关的信息
 pub trait SolveContext: Send + Any {
     type GameContext;
     type ItemIdentType: ItemIdent;
 }
 
+/// 能够在编辑器中展示自己的视图
 pub trait EditorView: SolveContext {
     // 返回值表示是否产生了需要重新计算的更改
     fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &Self::GameContext) -> bool;
@@ -27,6 +38,7 @@ pub trait EditorView: SolveContext {
 
 pub type Flow<I> = IndexMap<I, f64>;
 
+/// 能够转化成流参与计算的方法
 pub trait AsFlow: SolveContext {
     /// 传递物品流信息
     fn as_flow(&self, ctx: &Self::GameContext) -> Flow<Self::ItemIdentType>;
@@ -46,6 +58,7 @@ pub trait GameContextCreatorView: Subview {
     fn set_subview_sender(&mut self, sender: std::sync::mpsc::Sender<Box<dyn Subview>>);
 }
 
+/// MechanicInstance:  机制实例
 pub trait MechanicInstance:
     AsFlow + EditorView + dyn_clone::DynClone + erased_serde::Serialize
 {
@@ -60,67 +73,8 @@ erased_serde::serialize_trait_object!(<C, I> MechanicInstance<GameContext = C, I
 
 dyn_clone::clone_trait_object!(<C, I> MechanicInstance<GameContext = C, ItemIdentType = I>);
 
-pub trait MechanicProvider:
-    EditorView + SolveContext + dyn_clone::DynClone + erased_serde::Serialize
-{
-    /// 传递创建的配方信息
-    fn set_mechanic_sender(
-        &mut self,
-        sender: MechanicSender<Self::GameContext, Self::ItemIdentType>,
-    );
-
-    fn with_mechanic_sender(
-        mut self,
-        sender: MechanicSender<Self::GameContext, Self::ItemIdentType>,
-    ) -> Self
-    where
-        Self: Sized,
-    {
-        self.set_mechanic_sender(sender);
-        self
-    }
-
-    /// TODO
-    /// 游戏机制提供器可选：自动填充逻辑
-    fn auto_populate(
-        &self,
-        _ctx: &Self::GameContext,
-        _flows: &HashMap<usize, Flow<Self::ItemIdentType>>,
-    ) -> Vec<
-        Box<
-            dyn MechanicInstance<
-                    ItemIdentType = Self::ItemIdentType,
-                    GameContext = Self::GameContext,
-                >,
-        >,
-    > {
-        // 默认不实现任何自动填充逻辑
-        vec![]
-    }
-
-    /// 在规划界面点击物品时，可以提供一些推荐配方
-    fn hint_populate(
-        &self,
-        _ctx: &Self::GameContext,
-        _item: &Self::ItemIdentType,
-        _value: f64,
-    ) -> Vec<
-        Box<
-            dyn MechanicInstance<
-                    ItemIdentType = Self::ItemIdentType,
-                    GameContext = Self::GameContext,
-                >,
-        >,
-    > {
-        vec![]
-    }
-}
-
-dyn_clone::clone_trait_object!(<C, I> MechanicProvider<GameContext = C, ItemIdentType = I>);
-
-erased_serde::serialize_trait_object!(<C, I> MechanicProvider<GameContext = C, ItemIdentType = I>);
-
 /// EditorView:  机制偏好编辑，而非机制实例编辑
+/// Mechanic:  机制，包含多个机制实例，且能够参与计算
 pub trait Mechanic<C, I>:
     EditorView<GameContext = C, ItemIdentType = I>
     + dyn_clone::DynClone
@@ -137,6 +91,12 @@ where
     fn instances_mut(
         &mut self,
     ) -> Vec<&mut dyn MechanicInstance<GameContext = C, ItemIdentType = I>>;
+
+    /// 对机制实例列表进行操作，同时返回额外的操作指示：无操作、复制、删除
+    fn instances_operate(
+        &mut self,
+        f: Box<dyn FnMut(&mut dyn MechanicInstance<GameContext = C, ItemIdentType = I>) -> VecItemOp>,
+    );
 
     /// 想要生产 amount 每秒数量的 item，有哪些方法？
     fn update_suggestion(&mut self, ctx: &C, item: &I, amount: f64);
@@ -158,9 +118,7 @@ where
         let _ = sender;
     }
 
-    fn get_instance_sender(
-        &self,
-    ) -> Option<&MechanicSender<C, I>> {
+    fn get_instance_sender(&self) -> Option<&MechanicSender<C, I>> {
         let _ = self;
         None
     }

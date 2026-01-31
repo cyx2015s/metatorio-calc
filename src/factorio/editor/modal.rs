@@ -1,13 +1,11 @@
 use egui::ModalResponse;
 
-use crate::{
-    concept::{ItemIdent, MechanicInstance, MechanicProvider, MechanicSender},
+use crate::
     factorio::{
         FactorioContext, IdWithQuality,
         selector::{FilterFn, HoverUi, ItemSelector, ItemWithQualitySelector},
-        style::card_frame,
-    },
-};
+    }
+;
 
 pub fn show_modal<R>(
     id: egui::Id,
@@ -322,77 +320,6 @@ impl egui::Widget for ItemWithQualitySelectorModal<'_> {
                 ui.close();
             }
         });
-        ui.response().clone()
-    }
-}
-
-pub struct HintModal<'a, C: 'static, I: ItemIdent> {
-    ctx: &'a C,
-    id: egui::Id,
-    toggle: bool,
-    flow_sender: &'a MechanicSender<C, I>,
-    hint_flows: &'a mut Vec<Box<dyn MechanicInstance<GameContext = C, ItemIdentType = I> + 'static>>,
-    editor_sources: &'a [Box<dyn MechanicProvider<GameContext = C, ItemIdentType = I>>],
-}
-
-impl<'a, C: 'static, I: ItemIdent> HintModal<'a, C, I> {
-    pub fn new(
-        id: egui::Id,
-        ctx: &'a C,
-        flow_sender: &'a MechanicSender<C, I>,
-        hint_flows: &'a mut Vec<Box<dyn MechanicInstance<GameContext = C, ItemIdentType = I> + 'static>>,
-        editor_sources: &'a [Box<dyn MechanicProvider<GameContext = C, ItemIdentType = I>>],
-    ) -> Self {
-        Self {
-            id,
-            ctx,
-            toggle: false,
-            flow_sender,
-            hint_flows,
-            editor_sources,
-        }
-    }
-
-    pub fn with_update(mut self, update: bool, item: &'a I, amount: f64) -> Self {
-        if update {
-            self.toggle = true;
-            self.hint_flows.clear();
-            for source in self.editor_sources {
-                self.hint_flows
-                    .extend(source.hint_populate(self.ctx, item, amount));
-            }
-        } else {
-            self.toggle = false;
-        }
-        self
-    }
-}
-
-impl<'a, C: 'static, I: ItemIdent> egui::Widget for HintModal<'a, C, I> {
-    fn ui(self, ui: &mut egui::Ui) -> egui::Response {
-        show_modal(self.id, self.toggle, ui, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                ui.set_min_height(384.0);
-                ui.set_min_width(192.0);
-                ui.label("推荐配方");
-                if self.hint_flows.is_empty() {
-                    ui.label("无推荐配方");
-                } else {
-                    for hint_flow in self.hint_flows.iter_mut() {
-                        card_frame(ui).show(ui, |ui| {
-                            ui.set_min_width(ui.available_width());
-                            ui.horizontal(|ui| {
-                                hint_flow.editor_view(ui, self.ctx);
-                            });
-                            if ui.button("添加").clicked() {
-                                self.flow_sender.send(hint_flow.clone()).unwrap();
-                            }
-                        });
-                    }
-                }
-            });
-        });
-
         ui.response().clone()
     }
 }

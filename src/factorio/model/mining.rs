@@ -1,7 +1,7 @@
+use std::collections::VecDeque;
+
 use crate::{
-    concept::{
-        AsFlow, EditorView, Flow, Mechanic, SolveContext,
-    },
+    concept::{AsFlow, EditorView, Flow, Mechanic, SolveContext, VecItemOp},
     factorio::{
         ModuleConfig, ModuleConfigEditor, calc_quality_distribution,
         common::*,
@@ -431,6 +431,33 @@ impl Mechanic<FactorioContext, GenericItem> for MiningMechanic {
             .iter_mut()
             .map(|instance| instance as &mut FactorioMechanicInstance)
             .collect()
+    }
+
+    fn instances_operate(
+        &mut self,
+        mut f: Box<dyn FnMut(&mut FactorioMechanicInstance) -> VecItemOp>,
+    ) {
+        let mut retain = VecDeque::new();
+        retain.reserve(self.instances.len());
+        let mut new_items = Vec::new();
+        for instance in self.instances.iter_mut() {
+            let op = f(instance as &mut FactorioMechanicInstance);
+            match op {
+                VecItemOp::None => {
+                    retain.push_back(true);
+                }
+                VecItemOp::Drop => {
+                    retain.push_back(false);
+                }
+                VecItemOp::Clone => {
+                    retain.push_back(true);
+                    new_items.push(instance.clone());
+                }
+            }
+        }
+        self.instances
+            .retain_mut(|_| retain.pop_front().unwrap_or(true));
+        self.instances.extend(new_items);
     }
 
     fn update_suggestion(&mut self, ctx: &FactorioContext, item: &GenericItem, amount: f64) {
