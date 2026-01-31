@@ -184,7 +184,7 @@ impl FactoryInstance {
                                     .interact(egui::Sense::click())
                             })
                             .inner;
-
+                        
                         if icon.clicked_by(egui::PointerButton::Secondary) || icon.clicked() {
                             final_clicked = Some((item, amount));
                         }
@@ -200,6 +200,7 @@ impl FactoryInstance {
             mechanic.instances_mut().into_iter().for_each(|instance| {
                 ui.horizontal_wrapped(|ui| {
                     card_frame(ui).show(ui, |ui| {
+                        ui.set_min_width(ui.available_width());
                         *changed |= instance.editor_view(ui, ctx);
                     });
                 });
@@ -249,16 +250,17 @@ impl EditorView for FactoryInstance {
         let mut changed = false;
 
         while let Ok(result) = self.solution_receiver.try_recv() {
+            log::info!("收到求解结果");
             match result {
                 Ok(solution) => {
                     self.total_flow.clear();
                     self.solution = solution;
-                    for mechanic in self.mechanics.iter_mut() {
+                    for mechanic in self.mechanics.iter() {
                         for instance in mechanic.instances() {
                             let var_value = self
                                 .solution
                                 .0
-                                .get(&ref_as_ptr(mechanic))
+                                .get(&ref_as_ptr(instance))
                                 .cloned()
                                 .unwrap_or(0.0);
                             let flow = instance.as_flow(ctx);
