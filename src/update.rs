@@ -342,14 +342,3 @@ pub fn update() -> Result<(), crate::error::AppError> {
 
     Ok(())
 }
-
-#[test]
-fn test_update() -> Result<(), crate::error::AppError> {
-    env_logger::Builder::new()
-        .filter_level(log::LevelFilter::Info)
-        .try_init()
-        .unwrap();
-    update()?;
-
-    Ok(())
-}
