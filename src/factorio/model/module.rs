@@ -9,8 +9,9 @@ use crate::{
             modal::show_modal,
         },
         format::CompactLabel,
-        modal::ItemWithQualitySelectorModal,
+        modal::SelectorModal,
         model::{context::*, entity::*},
+        selector::Selector,
     },
 };
 
@@ -265,15 +266,15 @@ impl egui::Widget for ModuleConfigEditor<'_> {
             .inner;
         if self.module_slots == 0 {
             *self.module_config = ModuleConfig::default();
-            if let Some(changed) = &mut self.changed {
-                **changed = true;
+            if let Some(&mut ref mut changed) = self.changed {
+                *changed = true;
             }
             return ui.response().clone();
         }
         if self.module_slots < self.module_config.modules.len() {
             self.module_config.modules.truncate(self.module_slots);
-            if let Some(changed) = &mut self.changed {
-                **changed = true;
+            if let Some(&mut ref mut changed) = self.changed {
+                *changed = true;
             }
         }
         ui.horizontal(|ui| {
@@ -328,29 +329,26 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                         if icon.clicked_by(egui::PointerButton::Secondary) {
                             deleted = true;
                         }
-                        let mut widget = ItemWithQualitySelectorModal::new(
-                            icon.id,
-                            self.ctx,
-                            "选择插件",
-                            "item",
-                        )
-                        .with_toggle(icon.clicked())
-                        .with_current(slot)
-                        .with_filter(|s, f| {
-                            if let Some(module_proto) = f.modules.get(s) {
-                                // 过滤掉不符合要求的插件
-                                self.allowed_module_categories.as_ref().is_none_or(
-                                    |allowed_categories| {
-                                        allowed_categories.contains(&module_proto.category)
-                                    },
-                                ) && module_effects_allowed(module_proto, self.allowed_effects)
-                            } else {
-                                false
-                            }
-                        });
-                        if let Some(changed) = &mut self.changed {
-                            widget = widget.notify_change(changed);
+                        let mut selector = Selector::new(self.ctx, "item")
+                            .with_current(slot)
+                            .with_filter(|s: &IdWithQuality, f: &FactorioContext| {
+                                if let Some(module_proto) = f.modules.get(&s.0) {
+                                    // 过滤掉不符合要求的插件
+                                    self.allowed_module_categories.as_ref().is_none_or(
+                                        |allowed_categories| {
+                                            allowed_categories.contains(&module_proto.category)
+                                        },
+                                    ) && module_effects_allowed(module_proto, self.allowed_effects)
+                                } else {
+                                    false
+                                }
+                            });
+                        if let Some(&mut ref mut changed) = self.changed {
+                            selector = selector.notify_change(changed);
                         }
+                        let mut widget = SelectorModal::new(icon.id, self.ctx, "选择插件")
+                            .with_toggle(icon.clicked())
+                            .with_selector(selector);
                         ui.add(widget);
                         !deleted
                     });
@@ -362,30 +360,28 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                 Icon::new(self.ctx, "item", "empty-module-slot"),
                             )
                             .interact(egui::Sense::click());
-                        let mut selected = None;
-                        let mut widget = ItemWithQualitySelectorModal::new(
-                            icon.id,
-                            self.ctx,
-                            "填充插件",
-                            "item",
-                        )
-                        .with_toggle(icon.clicked())
-                        .with_output(&mut selected)
-                        .with_filter(|s, f| {
-                            if let Some(module_proto) = f.modules.get(s) {
-                                // 过滤掉不符合要求的插件
-                                self.allowed_module_categories.as_ref().is_none_or(
-                                    |allowed_categories| {
-                                        allowed_categories.contains(&module_proto.category)
-                                    },
-                                ) && module_effects_allowed(module_proto, self.allowed_effects)
-                            } else {
-                                false
-                            }
-                        });
-                        if let Some(changed) = &mut self.changed {
-                            widget = widget.notify_change(changed);
+                        let mut selected: Option<IdWithQuality> = None;
+                        let mut selector = Selector::new(self.ctx, "item")
+                            .with_output(&mut selected)
+                            .with_filter(|s: &IdWithQuality, f: &FactorioContext| {
+                                if let Some(module_proto) = f.modules.get(&s.0) {
+                                    // 过滤掉不符合要求的插件
+                                    self.allowed_module_categories.as_ref().is_none_or(
+                                        |allowed_categories| {
+                                            allowed_categories.contains(&module_proto.category)
+                                        },
+                                    ) && module_effects_allowed(module_proto, self.allowed_effects)
+                                } else {
+                                    false
+                                }
+                            });
+                        if let Some(&mut ref mut changed) = self.changed {
+                            selector = selector.notify_change(changed);
                         }
+                        let mut widget = SelectorModal::new(icon.id, self.ctx, "填充插件")
+                            .with_toggle(icon.clicked())
+                            .with_selector(selector);
+
                         ui.add(widget);
                         if let Some(selected) = selected {
                             while self.module_config.modules.len() <= idx {
@@ -407,9 +403,9 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                 .range(1..=100)
                                 .clamp_existing_to_range(true);
                             if ui.add(widget).changed()
-                                && let Some(changed) = &mut self.changed
+                                && let Some(&mut ref mut changed) = self.changed
                             {
-                                **changed = true;
+                                *changed = true;
                             }
                         });
                         ui.separator();
@@ -428,18 +424,18 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                     },
                                 )
                                 .interact(egui::Sense::click());
-                            let mut widget = ItemWithQualitySelectorModal::new(
-                                icon.id,
-                                self.ctx,
-                                "选择插件塔",
-                                "entity",
-                            )
-                            .with_toggle(icon.clicked())
-                            .with_current(&mut beacon_config.beacon)
-                            .with_filter(|s, f| f.beacons.contains_key(s));
-                            if let Some(changed) = &mut self.changed {
-                                widget = widget.notify_change(changed);
+                            let mut selector = Selector::new(self.ctx, "entity")
+                                .with_current(&mut beacon_config.beacon)
+                                .with_filter(|s: &IdWithQuality, f: &FactorioContext| {
+                                    f.beacons.contains_key(&s.0)
+                                });
+                            if let Some(&mut ref mut changed) = self.changed {
+                                selector = selector.notify_change(changed);
                             }
+                            let mut widget = SelectorModal::new(icon.id, self.ctx, "选择插件塔")
+                                .with_toggle(icon.clicked())
+                                .with_selector(selector);
+
                             ui.add(widget);
                         });
                         ui.separator();
@@ -463,35 +459,33 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                     if icon.clicked_by(egui::PointerButton::Secondary) {
                                         deleted = true;
                                     }
-                                    let mut widget = ItemWithQualitySelectorModal::new(
-                                        icon.id,
-                                        self.ctx,
-                                        "选择插件",
-                                        "item",
-                                    )
-                                    .with_toggle(icon.clicked())
-                                    .with_current(id)
-                                    .with_filter(|s, f| {
-                                        if let Some(module_proto) = f.modules.get(s) {
-                                            // 过滤掉不符合要求的插件
-                                            beacon_proto
-                                                .allowed_module_categories
-                                                .as_ref()
-                                                .is_none_or(|allowed_categories| {
-                                                    allowed_categories
-                                                        .contains(&module_proto.category)
-                                                })
-                                                && module_effects_allowed(
-                                                    module_proto,
-                                                    &beacon_proto.allowed_effects,
-                                                )
-                                        } else {
-                                            false
-                                        }
-                                    });
-                                    if let Some(changed) = &mut self.changed {
-                                        widget = widget.notify_change(changed);
+                                    let mut selector = Selector::new(self.ctx, "item")
+                                        .with_current(id)
+                                        .with_filter(|s: &IdWithQuality, f: &FactorioContext| {
+                                            if let Some(module_proto) = f.modules.get(&s.0) {
+                                                // 过滤掉不符合要求的插件
+                                                beacon_proto
+                                                    .allowed_module_categories
+                                                    .as_ref()
+                                                    .is_none_or(|allowed_categories| {
+                                                        allowed_categories
+                                                            .contains(&module_proto.category)
+                                                    })
+                                                    && module_effects_allowed(
+                                                        module_proto,
+                                                        &beacon_proto.allowed_effects,
+                                                    )
+                                            } else {
+                                                false
+                                            }
+                                        });
+                                    if let Some(&mut ref mut changed) = self.changed {
+                                        selector = selector.notify_change(changed);
                                     }
+                                    let mut widget =
+                                        SelectorModal::new(icon.id, self.ctx, "选择插件")
+                                            .with_toggle(icon.clicked())
+                                            .with_selector(selector);
                                     ui.add(widget);
                                     let beacon_module_count = beacon_proto.module_slots as usize
                                         + if beacon_proto.quality_affects_module_slots {
@@ -513,9 +507,9 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                             .speed(1),
                                     );
                                     if amount_widget.changed()
-                                        && let Some(changed) = &mut self.changed
+                                        && let Some(&mut ref mut changed) = self.changed
                                     {
-                                        **changed = true;
+                                        *changed = true;
                                     }
 
                                     total_modules += *amount;

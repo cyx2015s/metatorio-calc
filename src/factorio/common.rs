@@ -20,6 +20,12 @@ pub type FactorioMechanic = dyn Mechanic<FactorioContext, GenericItem>;
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct IdWithQuality(pub String, pub u8);
 
+impl From<&IdWithQuality> for IdWithQuality {
+    fn from(id: &IdWithQuality) -> Self {
+        IdWithQuality(id.0.clone(), id.1)
+    }
+}
+
 impl From<String> for IdWithQuality {
     fn from(s: String) -> Self {
         IdWithQuality(s, 0)

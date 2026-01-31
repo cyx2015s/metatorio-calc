@@ -8,7 +8,7 @@ use crate::{
             hover::PrototypeHover,
             icon::{GenericIcon, Icon},
         },
-        modal::ItemWithQualitySelectorModal,
+        modal::SelectorModal,
         model::{
             context::{FactorioContext, GenericItem},
             energy::energy_source_as_flow,
@@ -16,6 +16,7 @@ use crate::{
             module::{ModuleConfig, ModuleConfigEditor},
             quality::calc_quality_distribution,
         },
+        selector::Selector,
     },
 };
 
@@ -626,17 +627,20 @@ impl EditorView for RecipeMechanicInstance {
                         });
                     });
                 ui.add(
-                    ItemWithQualitySelectorModal::new(recipe_button.id, ctx, "选择配方", "recipe")
+                    SelectorModal::new(recipe_button.id, ctx, "选择配方")
                         .with_toggle(recipe_button.clicked())
-                        .with_current(&mut self.recipe)
-                        .with_hover(|ui, name, ctx| {
-                            if let Some(prototype) = ctx.recipes.get(name) {
-                                ui.add(PrototypeHover { ctx, prototype });
-                            } else {
-                                ui.label(format!("未知配方: {}", name));
-                            }
-                        })
-                        .notify_change(&mut changed),
+                        .with_selector(
+                            Selector::new(ctx, "recipe")
+                                .with_current(&mut self.recipe)
+                                .with_hover(|ui, name: &IdWithQuality, ctx: &FactorioContext| {
+                                    if let Some(prototype) = ctx.recipes.get(name.0.as_str()) {
+                                        ui.add(PrototypeHover { ctx, prototype });
+                                    } else {
+                                        ui.label(format!("未知配方: {}", name.0));
+                                    }
+                                })
+                                .notify_change(&mut changed),
+                        ),
                 );
             });
             if changed {
@@ -671,21 +675,18 @@ impl EditorView for RecipeMechanicInstance {
                     });
 
                 let recipe_prototype = ctx.recipes.get(self.recipe.0.as_str()).unwrap();
-                let widget = ItemWithQualitySelectorModal::new(
-                    entity_button.id,
-                    ctx,
-                    "选择制造设备",
-                    "entity",
-                )
-                .with_toggle(entity_button.clicked())
-                .with_filter(|crafter_name, ctx| {
-                    if let Some(crafter) = ctx.crafters.get(crafter_name) {
-                        return machine_fits_for_recipe(crafter, recipe_prototype);
-                    }
-                    false
-                })
-                .with_current(&mut self.machine)
-                .notify_change(&mut changed);
+                let selector = Selector::new(ctx, "entity")
+                    .with_filter(|crafter_name: &IdWithQuality, ctx: &FactorioContext| {
+                        if let Some(crafter) = ctx.crafters.get(&crafter_name.0) {
+                            return machine_fits_for_recipe(crafter, recipe_prototype);
+                        }
+                        false
+                    })
+                    .with_current(&mut self.machine)
+                    .notify_change(&mut changed);
+                let widget = SelectorModal::new(entity_button.id, ctx, "选择制造设备")
+                    .with_toggle(entity_button.clicked())
+                    .with_selector(selector);
                 ui.add(widget);
             });
 

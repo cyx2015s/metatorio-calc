@@ -1,11 +1,10 @@
+
 use egui::ModalResponse;
 
-use crate::
-    factorio::{
-        FactorioContext, IdWithQuality,
-        selector::{FilterFn, HoverUi, ItemSelector, ItemWithQualitySelector},
-    }
-;
+use crate::factorio::{
+    FactorioContext, IdWithQuality,
+    selector::Selector,
+};
 
 pub fn show_modal<R>(
     id: egui::Id,
@@ -34,81 +33,51 @@ pub fn show_modal<R>(
     }
 }
 
-pub struct ItemSelectorModal<'a> {
+pub struct SelectorModal<'a, Input, Output>
+where
+    Output: From<&'a Input>,
+    Input: 'a + ?Sized,
+{
     ctx: &'a FactorioContext,
     label_str: &'a str,
-    item_type: &'a str,
     id: egui::Id,
     toggle: bool,
-    filter: Option<Box<FilterFn<'a>>>,
-    current: Option<&'a mut String>,
-    output: Option<&'a mut Option<String>>,
-    hover: Option<Box<HoverUi<'a>>>,
-    changed: Option<&'a mut bool>,
+    selector: Option<Selector<'a, Input, Output>>,
 }
 
-impl<'a> ItemSelectorModal<'a> {
-    pub fn new(
-        id: egui::Id,
-        ctx: &'a FactorioContext,
-        label_str: &'a str,
-        item_type: &'a str,
-    ) -> Self {
+impl<'a, Input, Output> SelectorModal<'a, Input, Output>
+where
+    Output: From<&'a Input>,
+    Input: 'a + ?Sized,
+{
+    pub fn new(id: egui::Id, ctx: &'a FactorioContext, label_str: &'a str) -> Self {
         Self {
             id,
             ctx,
             label_str,
-            item_type,
-            filter: None,
-            current: None,
-            output: None,
-            hover: None,
             toggle: false,
-            changed: None,
+            selector: None,
         }
     }
+
     pub fn with_toggle(mut self, toggle: bool) -> Self {
         self.toggle = toggle;
         self
     }
 
-    pub fn with_filter(mut self, filter: impl Fn(&str, &FactorioContext) -> bool + 'a) -> Self {
-        self.filter = Some(Box::new(filter));
-        self
-    }
-
-    pub fn with_current(mut self, current: &'a mut String) -> Self {
-        self.current = Some(current);
-        self
-    }
-
-    pub fn with_output(mut self, output: &'a mut Option<String>) -> Self {
-        self.output = Some(output);
-        self
-    }
-
-    pub fn with_hover(
-        mut self,
-        hover: impl Fn(&mut egui::Ui, &str, &FactorioContext) + 'a,
-    ) -> Self {
-        self.hover = Some(Box::new(hover));
-        self
-    }
-
-    pub fn notify_change(mut self, changed: &'a mut bool) -> Self {
-        self.changed = Some(changed);
+    pub fn with_selector(mut self, selector: Selector<'a, Input, Output>) -> Self {
+        self.selector = Some(selector);
         self
     }
 }
+
 #[derive(Debug, Clone, Default)]
 pub struct FilterString(pub String);
 
-impl egui::Widget for ItemSelectorModal<'_> {
-    fn ui(self, ui: &mut egui::Ui) -> egui::Response {
-        debug_assert!(
-            self.output.is_some() || self.current.is_some(),
-            "结果不要了吗，还回家吃饭吗？"
-        );
+impl egui::Widget for SelectorModal<'_, str, String> {
+    fn ui(mut self, ui: &mut egui::Ui) -> egui::Response {
+        assert!(self.selector.is_some(), "无法选中");
+        let mut widget = self.selector.take().unwrap();
         let mut sentinel = None;
         show_modal(self.id, self.toggle, ui, |ui| {
             let mut filter_string = ui
@@ -124,151 +93,66 @@ impl egui::Widget for ItemSelectorModal<'_> {
                 mem.data
                     .insert_temp(self.id, FilterString(filter_string.clone()));
             });
-            let mut widget = ItemSelector::new(self.ctx, self.item_type).with_filter(|s, f| {
-                if filter_string.is_empty() {
-                    return true;
-                }
+            let type_name = widget.type_name;
+            widget = widget.with_output(&mut sentinel).chain_filter(move |s, f| {
                 s.to_lowercase().contains(&filter_string.to_lowercase())
-                    || f.get_display_name(self.item_type, s)
+                    || f.get_display_name(type_name, s)
                         .to_lowercase()
                         .contains(&filter_string.to_lowercase())
             });
-            widget = widget.with_output(&mut sentinel);
 
-            if let Some(current) = self.current {
-                widget = widget.with_current(current);
-            }
-            if let Some(custom_filter) = self.filter {
-                widget = widget.chain_filter(custom_filter);
-            }
-            if let Some(hover) = self.hover {
-                widget = widget.with_hover(hover);
-            }
-            if let Some(changed) = self.changed {
-                widget = widget.notify_change(changed);
-            }
             egui::ScrollArea::vertical()
                 .max_width(f32::INFINITY)
                 .auto_shrink(false)
                 .show(ui, |ui| {
                     ui.add(widget);
                 });
-            if let Some(selected) = sentinel {
-                if let Some(&mut ref mut output) = self.output {
-                    *output = Some(selected);
-                }
-                ui.close();
-            }
         });
         ui.response().clone()
     }
 }
 
-pub struct ItemWithQualitySelectorModal<'a> {
-    ctx: &'a FactorioContext,
-    label_str: &'a str,
-    item_type: &'a str,
-    id: egui::Id,
-    toggle: bool,
-    filter: Option<Box<FilterFn<'a>>>,
-    current: Option<&'a mut IdWithQuality>,
-    output: Option<&'a mut Option<IdWithQuality>>,
-    hover: Option<Box<HoverUi<'a>>>,
-    changed: Option<&'a mut bool>,
-}
-
-impl<'a> ItemWithQualitySelectorModal<'a> {
-    pub fn new(
-        id: egui::Id,
-        ctx: &'a FactorioContext,
-        label_str: &'a str,
-        item_type: &'a str,
-    ) -> Self {
-        Self {
-            id,
-            ctx,
-            label_str,
-            item_type,
-            toggle: false,
-            filter: None,
-            current: None,
-            output: None,
-            hover: None,
-            changed: None,
-        }
-    }
-
-    pub fn with_toggle(mut self, toggle: bool) -> Self {
-        self.toggle = toggle;
-        self
-    }
-    pub fn with_filter(mut self, filter: impl Fn(&str, &FactorioContext) -> bool + 'a) -> Self {
-        self.filter = Some(Box::new(filter));
-        self
-    }
-
-    pub fn with_current(mut self, current: &'a mut IdWithQuality) -> Self {
-        self.current = Some(current);
-        self
-    }
-
-    pub fn with_output(mut self, output: &'a mut Option<IdWithQuality>) -> Self {
-        self.output = Some(output);
-        self
-    }
-
-    pub fn with_hover(
-        mut self,
-        hover: impl Fn(&mut egui::Ui, &str, &FactorioContext) + 'a,
-    ) -> Self {
-        self.hover = Some(Box::new(hover));
-        self
-    }
-
-    pub fn notify_change(mut self, changed: &'a mut bool) -> Self {
-        self.changed = Some(changed);
-        self
-    }
-}
-
-impl egui::Widget for ItemWithQualitySelectorModal<'_> {
-    fn ui(self, ui: &mut egui::Ui) -> egui::Response {
-        debug_assert!(
-            self.output.is_some() || self.current.is_some(),
-            "结果不要了吗，还回家吃饭吗？"
-        );
-        let mut sentinel = None;
-        let mut degenerated: Option<String> = None;
+impl egui::Widget for SelectorModal<'_, IdWithQuality, IdWithQuality> {
+    fn ui(mut self, ui: &mut egui::Ui) -> egui::Response {
+        assert!(self.selector.is_some(), "无法选中");
         if self.ctx.qualities.len() == 1 {
             // 回退到普通选择器
+            let mut degenerated: Option<String> = None;
 
-            let mut widget =
-                ItemSelectorModal::new(self.id, self.ctx, self.label_str, self.item_type)
-                    .with_toggle(self.toggle);
-            if let Some(custom_filter) = self.filter {
-                widget = widget.with_filter(custom_filter);
+            let old_selector = self.selector.take().unwrap();
+            let mut selector = Selector::new(self.ctx, old_selector.type_name);
+            if let Some(filter) = old_selector.filter {
+                selector = selector.with_filter(move |s: &str, f: &FactorioContext| {
+                    let id_with_quality = IdWithQuality(s.to_string(), 0);
+                    filter(&id_with_quality, f)
+                });
             }
-            if let Some(current) = self.current {
-                widget = widget.with_current(&mut current.0);
+            if let Some(hover) = old_selector.hover {
+                selector = selector.with_hover(move |ui, s, ctx| {
+                    let id_with_quality = IdWithQuality(s.to_string(), 0);
+                    hover(ui, &id_with_quality, ctx);
+                });
             }
-            if let Some(hover) = self.hover {
-                widget = widget.with_hover(hover);
+            if let Some(current) = old_selector.current {
+                selector = selector.with_current(&mut current.0);
             }
-            if self.output.is_some() {
-                widget = widget.with_output(&mut degenerated);
+            if let Some(changed) = old_selector.changed {
+                selector = selector.notify_change(changed);
             }
-            if let Some(changed) = self.changed {
-                widget = widget.notify_change(changed);
+            if let Some(&mut ref mut output) = old_selector.output {
+                selector = selector.with_output(&mut degenerated);
             }
-            let ret = widget.ui(ui);
+
+            let ret = selector.ui(ui);
             if let Some(selected) = degenerated
-                && let Some(&mut ref mut output) = self.output
+                && let Some(&mut ref mut output) = old_selector.output
             {
                 *output = Some(IdWithQuality(selected, 0));
             }
             return ret;
         }
         show_modal(self.id, self.toggle, ui, |ui| {
+            let mut widget = self.selector.take().unwrap();
             let mut filter_string = ui
                 .memory(move |mem| {
                     mem.data
@@ -282,43 +166,25 @@ impl egui::Widget for ItemWithQualitySelectorModal<'_> {
                 mem.data
                     .insert_temp(self.id, FilterString(filter_string.clone()));
             });
-            let mut widget = ItemWithQualitySelector::new(self.ctx, self.item_type)
-                .with_filter(|s, f| {
+            let type_name = widget.type_name;
+            widget = widget
+                .chain_filter(move |s, f| {
                     if filter_string.is_empty() {
                         return true;
                     }
-                    s.to_lowercase().contains(&filter_string.to_lowercase())
-                        || f.get_display_name(self.item_type, s)
+                    s.0.to_lowercase().contains(&filter_string.to_lowercase())
+                        || f.get_display_name(type_name, &s.0)
                             .to_lowercase()
                             .contains(&filter_string.to_lowercase())
                 })
                 .with_forget(self.toggle);
-            widget = widget.with_output(&mut sentinel);
 
-            if let Some(current) = self.current {
-                widget = widget.with_current(current);
-            }
-            if let Some(custom_filter) = self.filter {
-                widget = widget.chain_filter(custom_filter);
-            }
-            if let Some(hover) = self.hover {
-                widget = widget.with_hover(hover);
-            }
-            if let Some(changed) = self.changed {
-                widget = widget.notify_change(changed);
-            }
             egui::ScrollArea::vertical()
                 .max_width(f32::INFINITY)
                 .auto_shrink(false)
                 .show(ui, |ui| {
                     ui.add(widget);
                 });
-            if let Some(selected) = sentinel {
-                if let Some(&mut ref mut output) = self.output {
-                    *output = Some(selected);
-                }
-                ui.close();
-            }
         });
         ui.response().clone()
     }

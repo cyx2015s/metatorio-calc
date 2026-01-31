@@ -275,9 +275,7 @@ impl FactorioContext {
             .stdout(Stdio::null())
             .output()?;
         if !dump_raw_command.status.success() {
-            return Err(AppError::ContextCreation(
-                "导出原始数据失败".to_string(),
-            ));
+            return Err(AppError::ContextCreation("导出原始数据失败".to_string()));
         }
         log::info!("导出原始数据成功");
         crate::toast::info("导出原始数据成功");
@@ -293,9 +291,7 @@ impl FactorioContext {
             .stdout(Stdio::null())
             .output()?;
         if !dump_locale_command.status.success() {
-            return Err(AppError::ContextCreation(
-                "导出翻译数据失败".to_string(),
-            ));
+            return Err(AppError::ContextCreation("导出翻译数据失败".to_string()));
         }
         log::info!("导出翻译数据成功");
         crate::toast::info("导出翻译数据成功");
@@ -313,9 +309,7 @@ impl FactorioContext {
             .stdout(Stdio::null())
             .output()?;
         if !dump_icon_sprites_command.status.success() {
-            return Err(AppError::ContextCreation(
-                "导出图标数据失败".to_string(),
-            ));
+            return Err(AppError::ContextCreation("导出图标数据失败".to_string()));
         }
         log::info!("导出图标数据成功");
         crate::toast::info("导出图标数据成功");

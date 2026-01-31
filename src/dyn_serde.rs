@@ -43,7 +43,7 @@ impl<T: ?Sized> DynDeserializeRegistry<T> {
             )))
         }
     }
-    
+
     pub fn create_default(&self, type_name: &str) -> Result<Box<T>, AppError> {
         if let Some(deserializer) = self.deserializers.get(type_name) {
             (deserializer.deserialize)(serde_json::json!({ "type": type_name }))
@@ -56,11 +56,9 @@ impl<T: ?Sized> DynDeserializeRegistry<T> {
         }
     }
 
-    
     pub fn register(&mut self, type_name: &'static str, deserializer: DynDeserializer<T>) {
         self.deserializers.insert(type_name, deserializer);
     }
-    
 
     pub fn registered_types(&self) -> Vec<&'static str> {
         self.deserializers.keys().cloned().collect()
@@ -108,4 +106,3 @@ pub fn save_to_file<T: serde::Serialize>(
         .map_err(|e| AppError::Io(format!("写入文件 {} 失败：{}", path.display(), e)))?;
     Ok(())
 }
-

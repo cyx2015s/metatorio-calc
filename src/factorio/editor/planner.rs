@@ -8,6 +8,7 @@ use crate::{
         editor::{icon::*, modal::*},
         format::*,
         model::*,
+        selector::Selector,
         style::card_frame,
     },
     solver::*,
@@ -184,7 +185,7 @@ impl FactoryInstance {
                                     .interact(egui::Sense::click())
                             })
                             .inner;
-                        
+
                         if icon.clicked_by(egui::PointerButton::Secondary) || icon.clicked() {
                             final_clicked = Some((item, amount));
                         }
@@ -352,15 +353,14 @@ impl EditorView for FactoryInstance {
                                                 match item {
                                                     GenericItem::Item(item_with_quality) => {
                                                         ui.add(
-                                                            ItemWithQualitySelectorModal::new(
+                                                            SelectorModal::new(
                                                                 icon.id.with("target-select-item"),
                                                                 ctx,
                                                                 "选择物品",
-                                                                "item",
                                                             )
-                                                            .with_toggle(icon.clicked())
+                                                            .with_toggle(icon.clicked()).with_selector(Selector::new(ctx, "item")
                                                             .with_current(item_with_quality)
-                                                            .notify_change(&mut changed),
+                                                            .notify_change(&mut changed)),
                                                         );
                                                     }
                                                     GenericItem::Fluid {
@@ -368,17 +368,16 @@ impl EditorView for FactoryInstance {
                                                         temperature: _,
                                                     } => {
                                                         ui.add(
-                                                            ItemSelectorModal::new(
+                                                            SelectorModal::new(
                                                                 egui::Id::new(
                                                                     "target-select-fluid",
                                                                 ),
                                                                 ctx,
                                                                 "选择流体",
-                                                                "fluid",
                                                             )
-                                                            .with_toggle(icon.clicked())
+                                                            .with_toggle(icon.clicked()).with_selector(Selector::new(ctx, "fluid")
                                                             .with_current(name)
-                                                            .notify_change(&mut changed),
+                                                            .notify_change(&mut changed)),
                                                         );
                                                     }
                                                     _ => {}
@@ -471,15 +470,15 @@ impl EditorView for FactoryInstance {
                                             match item {
                                                 GenericItem::Item(item_with_quality) => {
                                                     ui.add(
-                                                        ItemWithQualitySelectorModal::new(
+                                                        SelectorModal::new(
                                                             icon.id.with("target-select-item"),
                                                             ctx,
                                                             "选择物品",
-                                                            "item",
                                                         )
                                                         .with_toggle(icon.clicked())
+                                                        .with_selector(Selector::new(ctx, "item")
                                                         .with_current(item_with_quality)
-                                                        .notify_change(&mut changed),
+                                                        .notify_change(&mut changed)),
                                                     );
                                                 }
                                                 GenericItem::Fluid {
@@ -487,28 +486,26 @@ impl EditorView for FactoryInstance {
                                                     temperature: _,
                                                 } => {
                                                     ui.add(
-                                                        ItemSelectorModal::new(
+                                                        SelectorModal::new(
                                                             egui::Id::new("target-selecte-fluid"),
                                                             ctx,
                                                             "选择流体",
-                                                            "fluid",
                                                         )
-                                                        .with_toggle(icon.clicked())
+                                                        .with_toggle(icon.clicked()).with_selector(Selector::new(ctx, "fluid")
                                                         .with_current(name)
-                                                        .notify_change(&mut changed),
+                                                        .notify_change(&mut changed)),
                                                     );
                                                 }
                                                 GenericItem::Entity(entity_with_quality) => {
                                                     ui.add(
-                                                        ItemWithQualitySelectorModal::new(
+                                                        SelectorModal::new(
                                                             icon.id.with("target-select-entity"),
                                                             ctx,
                                                             "选择实体",
-                                                            "entity",
                                                         )
-                                                        .with_toggle(icon.clicked())
+                                                        .with_toggle(icon.clicked()).with_selector(Selector::new(ctx, "entity")
                                                         .with_current(entity_with_quality)
-                                                        .notify_change(&mut changed),
+                                                        .notify_change(&mut changed)),
                                                     );
                                                 }
                                                 _ => {}

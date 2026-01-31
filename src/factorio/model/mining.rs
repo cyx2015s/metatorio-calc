@@ -6,8 +6,9 @@ use crate::{
         ModuleConfig, ModuleConfigEditor, calc_quality_distribution,
         common::*,
         icon::Icon,
-        modal::{ItemSelectorModal, ItemWithQualitySelectorModal},
+        modal::SelectorModal,
         model::{context::*, energy::*, entity::*, recipe::*},
+        selector::Selector,
     },
 };
 
@@ -305,11 +306,14 @@ impl EditorView for MiningMechanicInstance {
                         ctx.get_display_name("entity", &self.resource)
                     ));
                 ui.add(
-                    ItemSelectorModal::new(resource_button.id, ctx, "选择矿物", "entity")
+                    SelectorModal::new(resource_button.id, ctx, "选择矿物")
                         .with_toggle(resource_button.clicked())
-                        .with_current(&mut self.resource)
-                        .with_filter(|s, f| f.resources.contains_key(s))
-                        .notify_change(&mut changed),
+                        .with_selector(
+                            Selector::new(ctx, "entity")
+                                .with_current(&mut self.resource)
+                                .with_filter(|s, f| f.resources.contains_key(s))
+                                .notify_change(&mut changed),
+                        ),
                 );
             });
             if changed {
@@ -337,22 +341,20 @@ impl EditorView for MiningMechanicInstance {
 
                 if let Some(resource_proto) = ctx.resources.get(&self.resource) {
                     ui.add(
-                        ItemWithQualitySelectorModal::new(
-                            entity_button.id,
-                            ctx,
-                            "选择采矿设备",
-                            "entity",
-                        )
-                        .with_toggle(entity_button.clicked())
-                        .with_current(&mut self.machine)
-                        .with_filter(|s, f| {
-                            if let Some(miner) = f.miners.get(s) {
-                                machine_fits_for_resource(miner, resource_proto)
-                            } else {
-                                false
-                            }
-                        })
-                        .notify_change(&mut changed),
+                        SelectorModal::new(entity_button.id, ctx, "选择采矿设备")
+                            .with_toggle(entity_button.clicked())
+                            .with_selector(
+                                Selector::new(ctx, "entity")
+                                    .with_current(&mut self.machine)
+                                    .with_filter(|s: &IdWithQuality, f: &FactorioContext| {
+                                        if let Some(miner) = f.miners.get(&s.0) {
+                                            machine_fits_for_resource(miner, resource_proto)
+                                        } else {
+                                            false
+                                        }
+                                    })
+                                    .notify_change(&mut changed),
+                            ),
                     );
                 }
             });

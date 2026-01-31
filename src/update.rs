@@ -200,7 +200,7 @@ impl<T: self_update::update::ReleaseUpdate + ?Sized> self_update::update::Releas
         let tmp_archive_dir = tempfile::TempDir::new()?;
         let tmp_archive_path = tmp_archive_dir.path().join(&target_asset.name);
         let tmp_archive = std::fs::File::create(&tmp_archive_path)?;
-    
+
         log::info!("下载中…… {}", tmp_archive_path.display());
 
         let download_url = &target_asset.download_url;
@@ -251,7 +251,7 @@ impl<T: self_update::update::ReleaseUpdate + ?Sized> self_update::update::Releas
                 callback(downloaded, total_size);
             }
         }
-        
+
         drop(writer);
 
         let bin_path_str = std::borrow::Cow::Owned(self.bin_path_in_archive());

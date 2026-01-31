@@ -95,7 +95,9 @@ where
     /// 对机制实例列表进行操作，同时返回额外的操作指示：无操作、复制、删除
     fn instances_operate(
         &mut self,
-        f: Box<dyn FnMut(&mut dyn MechanicInstance<GameContext = C, ItemIdentType = I>) -> VecItemOp>,
+        f: Box<
+            dyn FnMut(&mut dyn MechanicInstance<GameContext = C, ItemIdentType = I>) -> VecItemOp,
+        >,
     );
 
     /// 想要生产 amount 每秒数量的 item，有哪些方法？
