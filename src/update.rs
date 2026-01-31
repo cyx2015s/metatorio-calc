@@ -275,7 +275,6 @@ impl<T: self_update::update::ReleaseUpdate + ?Sized> self_update::update::Releas
         log::info!("解压的文件: {}", new_exe.display());
         let new_exe_file = std::fs::File::open(&new_exe)?;
         log::info!("新文件的大小是: {}", new_exe_file.metadata()?.len());
-        std::thread::sleep(std::time::Duration::from_secs(10));
         log::info!("完成");
 
         log::info!("替换可执行文件中……");

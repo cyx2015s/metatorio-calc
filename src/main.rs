@@ -85,7 +85,13 @@ impl Default for MainPage {
                             continue;
                         }
                         set_download_progress(DownloadProgress::InProgress(0, 0));
-                        std::thread::spawn(|| update::update().unwrap());
+                        let thread_response_tx = network_response_tx.clone();
+                        std::thread::spawn(move || {
+                            update::update().unwrap();
+                            thread_response_tx
+                                .send(Err(error::AppError::RestartRequired))
+                                .unwrap();
+                        });
                     }
                 }
             }
@@ -165,16 +171,12 @@ impl eframe::App for MainPage {
                     Ok(response) => {
                         self.suitable_release = response;
                         match self.suitable_release {
-                            Ok(_) => {
-
-                            }
+                            Ok(_) => {}
                             Err(ref err) => match err {
                                 error::AppError::UpToDate => {
                                     toast::success("当前已是最新版本。");
                                 }
-                                error::AppError::None => {
-                                    
-                                }
+                                error::AppError::None => {}
                                 err => {
                                     toast::error(format!("更新检查失败: {:?}", err));
                                 }
@@ -198,10 +200,7 @@ impl eframe::App for MainPage {
                             ui.label("当前已是最新版本。");
                         }
                         error::AppError::RestartRequired => {
-                            ui.colored_label(
-                                egui::Color32::YELLOW,
-                                "更新已下载完成，请重启应用以应用更新。",
-                            );
+                            ui.label("重启以应用更新。");
                             if ui.button("重启应用").clicked() {
                                 std::process::Command::new(std::env::current_exe().unwrap())
                                     .spawn()
@@ -210,10 +209,7 @@ impl eframe::App for MainPage {
                             }
                         }
                         _err => {
-                            ui.colored_label(
-                                egui::Color32::RED,
-                                format!("更新检查失败"),
-                            );
+                            ui.label("更新检查失败");
                         }
                     },
                 }
