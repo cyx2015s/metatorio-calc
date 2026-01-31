@@ -770,8 +770,14 @@ impl MechanicProvider for RecipeMechanicProvider {
         ctx: &Self::GameContext,
         item: &Self::ItemIdentType,
         value: f64,
-    ) -> Vec<Box<dyn MechanicInstance<ItemIdentType = Self::ItemIdentType, GameContext = Self::GameContext>>>
-    {
+    ) -> Vec<
+        Box<
+            dyn MechanicInstance<
+                    ItemIdentType = Self::ItemIdentType,
+                    GameContext = Self::GameContext,
+                >,
+        >,
+    > {
         let item_name = match item {
             GenericItem::Item(IdWithQuality(name, _)) => name,
             GenericItem::Fluid {
@@ -857,14 +863,144 @@ impl EditorView for RecipeMechanicProvider {
     }
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RecipeMechanic {
+    pub instances: Vec<RecipeMechanicInstance>,
+
+    pub suggestions: Vec<RecipeMechanicInstance>,
+}
+
+impl SolveContext for RecipeMechanic {
+    type GameContext = FactorioContext;
+    type ItemIdentType = GenericItem;
+}
+
+impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
+    fn name(&self) -> String {
+        "配方".to_string()
+    }
+
+    fn instances(&self) -> Vec<&FactorioMechanicInstance> {
+        self.instances
+            .iter()
+            .map(|m| m as &FactorioMechanicInstance)
+            .collect()
+    }
+
+    fn instances_mut(&mut self) -> Vec<&mut FactorioMechanicInstance> {
+        self.instances
+            .iter_mut()
+            .map(|m| m as &mut FactorioMechanicInstance)
+            .collect()
+    }
+
+    fn update_suggestion(&mut self, ctx: &FactorioContext, item: &GenericItem, amount: f64) {
+        let item_name = match item {
+            GenericItem::Item(IdWithQuality(name, _)) => name,
+            GenericItem::Fluid {
+                name,
+                temperature: _,
+            } => name,
+            _ => return,
+        };
+        let quality = match item {
+            GenericItem::Item(IdWithQuality(_, quality)) => *quality,
+            _ => 0,
+        };
+
+        self.suggestions.clear();
+        let value = amount;
+
+        for recipe_proto in ctx.recipes.values() {
+            let matches = if recipe_proto.base.hidden {
+                false
+            } else if value < 0.0 {
+                // We have a deficit, need recipes that PRODUCE this item
+                recipe_proto.results.iter().any(|result| match result {
+                    RecipeResult::Item(r) => &r.name == item_name,
+                    RecipeResult::Fluid(r) => &r.name == item_name,
+                })
+            } else {
+                // We have a surplus, need recipes that CONSUME this item
+                recipe_proto
+                    .ingredients
+                    .iter()
+                    .any(|ingredient| match ingredient {
+                        RecipeIngredient::Item(i) => &i.name == item_name,
+                        RecipeIngredient::Fluid(i) => &i.name == item_name,
+                    })
+            };
+
+            if matches {
+                let mut recipe_config = RecipeMechanicInstance {
+                    recipe: (recipe_proto.base.name.clone(), quality).into(),
+                    ..Default::default()
+                };
+                // Try to find a suitable machine
+                let category = recipe_proto
+                    .category
+                    .as_ref()
+                    .map_or("crafting", |s| s.as_str());
+                if let Some(machine) = ctx
+                    .crafters
+                    .values()
+                    .find(|crafter| crafter.crafting_categories.contains(&category.to_string()))
+                {
+                    recipe_config.machine = (machine.base.base.name.clone(), 0).into();
+                }
+                let actual_produce = recipe_config.as_flow(ctx).get(item).cloned().unwrap_or(0.0);
+                if (value < 0.0 && actual_produce <= 0.0) || (value > 0.0 && actual_produce >= 0.0)
+                {
+                    // This recipe does not actually help with the deficit/surplus
+                    continue;
+                }
+                self.suggestions.push(recipe_config);
+            }
+        }
+    }
+
+    fn auto_populate(
+        &mut self,
+        ctx: &FactorioContext,
+        sender: MechanicSender<FactorioContext, GenericItem>, // 传递的所有物品流信息
+    ) {
+        let _ = ctx;
+        let _ = sender;
+    }
+
+    fn suggestion_view(&mut self, ui: &mut egui::Ui, ctx: &FactorioContext) -> bool {
+        let _ = ui;
+        let _ = ctx;
+        false
+    }
+}
+
+impl EditorView for RecipeMechanic {
+    fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &FactorioContext) -> bool {
+        let _ = ctx;
+        if ui.button("添加配方").clicked() {
+            let new_config = RecipeMechanicInstance::default();
+            self.instances.push(new_config);
+            return true;
+        }
+        false
+    }
+}
+
 crate::impl_register_deserializer!(
     for RecipeMechanicInstance
     as "factorio:recipe"
-    => dyn MechanicInstance<ItemIdentType = GenericItem, GameContext = FactorioContext>
+    => dyn MechanicInstance<GameContext = FactorioContext, ItemIdentType = GenericItem>
 );
 
 crate::impl_register_deserializer!(
     for RecipeMechanicProvider
     as "factorio:recipe"
-    => dyn MechanicProvider<ItemIdentType = GenericItem, GameContext = FactorioContext>
+    => dyn MechanicProvider<GameContext = FactorioContext, ItemIdentType = GenericItem>
+);
+
+crate::impl_register_deserializer!(
+    for RecipeMechanic
+    as "factorio:recipe"
+    => dyn Mechanic<FactorioContext, GenericItem>
 );

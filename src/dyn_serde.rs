@@ -98,7 +98,7 @@ fn test_dyn_deserializer() {
     use crate::{concept::*, factorio::*};
     let ctx = FactorioContext::test_load();
     let mut registry = DynDeserializeRegistry::<
-        dyn MechanicInstance<ItemIdentType = GenericItem, GameContext = FactorioContext>,
+        dyn MechanicInstance<GameContext = FactorioContext, ItemIdentType = GenericItem>,
     >::default();
 
     RecipeMechanicInstance::register(&mut registry);

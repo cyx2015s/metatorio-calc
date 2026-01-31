@@ -15,9 +15,9 @@ pub type Emissions = Dict<f64>;
 pub type OrderInfo = Vec<(String, Vec<(String, Vec<String>)>)>;
 pub type ReverseOrderInfo = HashMap<String, (usize, usize, usize)>;
 pub type FactorioMechanicInstance =
-    dyn MechanicInstance<ItemIdentType = GenericItem, GameContext = FactorioContext>;
+    dyn MechanicInstance<GameContext = FactorioContext, ItemIdentType = GenericItem>;
 pub type FactorioMechanicProvider =
-    dyn MechanicProvider<ItemIdentType = GenericItem, GameContext = FactorioContext>;
+    dyn MechanicProvider<GameContext = FactorioContext, ItemIdentType = GenericItem>;
 pub type FactorioMechanic = dyn Mechanic<FactorioContext, GenericItem>;
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct IdWithQuality(pub String, pub u8);

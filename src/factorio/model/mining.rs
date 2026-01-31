@@ -1,5 +1,8 @@
 use crate::{
-    concept::{AsFlow, EditorView, Flow, MechanicInstance, MechanicProvider, MechanicSender, SolveContext},
+    concept::{
+        AsFlow, EditorView, Flow, Mechanic, MechanicInstance, MechanicProvider, MechanicSender,
+        SolveContext,
+    },
     factorio::{
         ModuleConfig, ModuleConfigEditor, calc_quality_distribution,
         common::*,
@@ -424,8 +427,14 @@ impl MechanicProvider for MiningMechanicProvider {
         ctx: &Self::GameContext,
         item: &Self::ItemIdentType,
         value: f64,
-        ) -> Vec<Box<dyn MechanicInstance<ItemIdentType = Self::ItemIdentType, GameContext = Self::GameContext>>>
-    {
+    ) -> Vec<
+        Box<
+            dyn MechanicInstance<
+                    ItemIdentType = Self::ItemIdentType,
+                    GameContext = Self::GameContext,
+                >,
+        >,
+    > {
         let mut ret = vec![];
         if value < 0.0 {
             // 提供生产方式
@@ -539,14 +548,141 @@ fn test_mining_normalized() {
     println!("Mining Result with Location: {:?}", result_with_location);
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct MiningMechanic {
+    pub instances: Vec<MiningMechanicInstance>,
+    pub suggestions: Vec<MiningMechanicInstance>,
+}
+
+impl SolveContext for MiningMechanic {
+    type GameContext = FactorioContext;
+    type ItemIdentType = GenericItem;
+}
+
+impl Mechanic<FactorioContext, GenericItem> for MiningMechanic {
+    fn name(&self) -> String {
+        "采矿".to_string()
+    }
+
+    fn instances(&self) -> Vec<&FactorioMechanicInstance> {
+        self.instances
+            .iter()
+            .map(|instance| instance as &FactorioMechanicInstance)
+            .collect()
+    }
+
+    fn instances_mut(&mut self) -> Vec<&mut FactorioMechanicInstance> {
+        self.instances
+            .iter_mut()
+            .map(|instance| instance as &mut FactorioMechanicInstance)
+            .collect()
+    }
+
+    fn update_suggestion(&mut self, ctx: &FactorioContext, item: &GenericItem, amount: f64) {
+        self.suggestions.clear();
+        let value = amount;
+        if value < 0.0 {
+            // 提供生产方式
+            match item {
+                GenericItem::Item(IdWithQuality(name, _)) => {
+                    for resource in ctx.resources.values() {
+                        if let Some(mining) = resource.base.minable.as_ref() {
+                            if let Some(result) = &mining.result {
+                                if result == name {
+                                    let mut mining_config = MiningMechanicInstance {
+                                        resource: resource.base.base.name.clone(),
+                                        ..Default::default()
+                                    };
+                                    for miner in ctx.miners.values() {
+                                        if miner.resource_categories.contains(
+                                            resource
+                                                .category
+                                                .as_ref()
+                                                .unwrap_or(&"basic-solid".to_string()),
+                                        ) {
+                                            mining_config.machine =
+                                                (miner.base.base.name.clone(), 0).into();
+                                            break;
+                                        }
+                                    }
+                                    self.suggestions.push(mining_config);
+                                }
+                            } else {
+                                for res in mining.results.as_ref().unwrap().iter() {
+                                    if let RecipeResult::Item(r) = res
+                                        && &r.name == name
+                                    {
+                                        let mining_config = MiningMechanicInstance {
+                                            resource: resource.base.base.name.clone(),
+                                            machine: "entity-unknown".into(),
+                                            module_config: ModuleConfig::default(),
+                                            instance_fuel: None,
+                                        };
+                                        self.suggestions.push(mining_config);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                GenericItem::Fluid {
+                    name,
+                    temperature: _,
+                } => {
+                    for resource in ctx.resources.values() {
+                        if let Some(mining) = resource.base.minable.as_ref()
+                            && let Some(results) = &mining.results
+                        {
+                            for res in results.iter() {
+                                if let RecipeResult::Fluid(r) = res
+                                    && &r.name == name
+                                {
+                                    let mining_config = MiningMechanicInstance {
+                                        resource: resource.base.base.name.clone(),
+                                        machine: "entity-unknown".into(),
+                                        module_config: ModuleConfig::default(),
+                                        instance_fuel: None,
+                                    };
+                                    self.suggestions.push(mining_config);
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        } else {
+            // TODO 提供消耗方式
+        }
+    }
+}
+
+impl EditorView for MiningMechanic {
+    fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &Self::GameContext) -> bool {
+        let _ = ctx;
+        if ui.button("添加采矿").clicked() {
+            let mining_config = MiningMechanicInstance::default();
+            self.instances.push(mining_config);
+            return true;
+        }
+        false
+    }
+}
+
 crate::impl_register_deserializer!(
     for MiningMechanicInstance
     as "factorio:mining"
-    => dyn MechanicInstance<ItemIdentType = GenericItem, GameContext = FactorioContext>
+    => dyn MechanicInstance<GameContext = FactorioContext, ItemIdentType = GenericItem>
 );
 
 crate::impl_register_deserializer!(
     for MiningMechanicProvider
     as "factorio:mining"
-    => dyn MechanicProvider<ItemIdentType = GenericItem, GameContext = FactorioContext>
+    => dyn MechanicProvider<GameContext = FactorioContext, ItemIdentType = GenericItem>
+);
+
+crate::impl_register_deserializer!(
+    for MiningMechanic
+    as "factorio:mining"
+    => dyn Mechanic<FactorioContext, GenericItem>
 );

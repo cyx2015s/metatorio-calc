@@ -131,19 +131,19 @@ where
 {
     fn name(&self) -> String;
 
-    fn instances(&self) -> &[Box<dyn MechanicInstance<ItemIdentType = I, GameContext = C>>];
+    fn instances(&self) -> Vec<&dyn MechanicInstance<GameContext = C, ItemIdentType = I>>;
 
     fn instances_mut(
         &mut self,
-    ) -> &mut [Box<dyn MechanicInstance<ItemIdentType = I, GameContext = C>>];
+    ) -> Vec<&mut dyn MechanicInstance<GameContext = C, ItemIdentType = I>>;
 
     /// 想要生产 amount 每秒数量的 item，有哪些方法？
     fn update_suggestion(&mut self, ctx: &C, item: &I, amount: f64);
 
-    fn icon_widget(&self, ui: &mut egui::Ui, ctx: &C, item: &I) -> egui::Response;
-
     /// 返回值表示是否产生了需要重新计算的更改
     fn suggestion_view(&mut self, ui: &mut egui::Ui, ctx: &C) -> bool {
+        let _ = ui;
+        let _ = ctx;
         false
     }
 
@@ -152,7 +152,10 @@ where
         &mut self,
         ctx: &C,
         sender: MechanicSender<C, I>, // 传递的所有物品流信息
-    );
+    ) {
+        let _ = ctx;
+        let _ = sender;
+    }
 }
 
 dyn_clone::clone_trait_object!(<C, I> Mechanic<C, I> where C: Send + 'static, I : ItemIdent);
