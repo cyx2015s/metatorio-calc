@@ -1,7 +1,7 @@
 use egui::ModalResponse;
 
 use crate::{
-    concept::{ItemIdent, Mechanic, MechanicProvider, MechanicSender},
+    concept::{ItemIdent, MechanicInstance, MechanicProvider, MechanicSender},
     factorio::{
         FactorioContext, IdWithQuality,
         selector::{FilterFn, HoverUi, ItemSelector, ItemWithQualitySelector},
@@ -331,7 +331,7 @@ pub struct HintModal<'a, I: ItemIdent, C: 'static> {
     id: egui::Id,
     toggle: bool,
     flow_sender: &'a MechanicSender<I, C>,
-    hint_flows: &'a mut Vec<Box<dyn Mechanic<GameContext = C, ItemIdentType = I> + 'static>>,
+    hint_flows: &'a mut Vec<Box<dyn MechanicInstance<GameContext = C, ItemIdentType = I> + 'static>>,
     editor_sources: &'a [Box<dyn MechanicProvider<ItemIdentType = I, GameContext = C>>],
 }
 
@@ -340,7 +340,7 @@ impl<'a, I: ItemIdent, C: 'static> HintModal<'a, I, C> {
         id: egui::Id,
         ctx: &'a C,
         flow_sender: &'a MechanicSender<I, C>,
-        hint_flows: &'a mut Vec<Box<dyn Mechanic<GameContext = C, ItemIdentType = I> + 'static>>,
+        hint_flows: &'a mut Vec<Box<dyn MechanicInstance<GameContext = C, ItemIdentType = I> + 'static>>,
         editor_sources: &'a [Box<dyn MechanicProvider<ItemIdentType = I, GameContext = C>>],
     ) -> Self {
         Self {

@@ -43,9 +43,25 @@ impl<T: ?Sized> DynDeserializeRegistry<T> {
             )))
         }
     }
+    
+    pub fn create_default(&self, type_name: &str) -> Result<Box<T>, AppError> {
+        if let Some(deserializer) = self.deserializers.get(type_name) {
+            (deserializer.deserialize)(serde_json::json!({ "type": type_name }))
+        } else {
+            Err(AppError::Registry(format!(
+                "未知的类型标识符：{}，已注册的类型有：{:?}",
+                type_name,
+                self.registered_types()
+            )))
+        }
+    }
+
+    
     pub fn register(&mut self, type_name: &'static str, deserializer: DynDeserializer<T>) {
         self.deserializers.insert(type_name, deserializer);
     }
+    
+
     pub fn registered_types(&self) -> Vec<&'static str> {
         self.deserializers.keys().cloned().collect()
     }
@@ -82,18 +98,18 @@ fn test_dyn_deserializer() {
     use crate::{concept::*, factorio::*};
     let ctx = FactorioContext::test_load();
     let mut registry = DynDeserializeRegistry::<
-        dyn Mechanic<ItemIdentType = GenericItem, GameContext = FactorioContext>,
+        dyn MechanicInstance<ItemIdentType = GenericItem, GameContext = FactorioContext>,
     >::default();
 
-    RecipeConfig::register(&mut registry);
-    MiningConfig::register(&mut registry);
-    let recipe = RecipeConfig {
+    RecipeMechanicInstance::register(&mut registry);
+    MiningMechanicInstance::register(&mut registry);
+    let recipe = RecipeMechanicInstance {
         recipe: "iron-gear-wheel".into(),
         machine: "assembling-machine-2".into(),
         module_config: ModuleConfig::new(),
         instance_fuel: None,
     };
-    let mining = MiningConfig {
+    let mining = MiningMechanicInstance {
         resource: "iron-ore".into(),
         machine: "electric-mining-drill".into(),
         module_config: ModuleConfig::new(),

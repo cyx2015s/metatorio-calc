@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::{
     concept::*,
     dyn_serde::*,
@@ -14,16 +16,16 @@ use crate::{
 use indexmap::IndexMap;
 
 lazy_static::lazy_static! {
-    static ref MECHANIC_REGISTRY: DynDeserializeRegistry<FactorioMechanic> = {
+    static ref MECHANIC_REGISTRY: DynDeserializeRegistry<FactorioMechanicInstance> = {
         let mut registry = DynDeserializeRegistry::default();
-        RecipeConfig::register(&mut registry);
-        MiningConfig::register(&mut registry);
+        RecipeMechanicInstance::register(&mut registry);
+        MiningMechanicInstance::register(&mut registry);
         registry
     };
     static ref MECHANIC_PROVIDER_REGISTRY: DynDeserializeRegistry<FactorioMechanicProvider> = {
         let mut registry = DynDeserializeRegistry::default();
-        RecipeConfigProvider::register(&mut registry);
-        MiningConfigProvider::register(&mut registry);
+        RecipeMechanicProvider::register(&mut registry);
+        MiningMechanicProvider::register(&mut registry);
         registry
     };
 }
@@ -37,10 +39,10 @@ pub struct FactoryInstance {
     /// Cached sorted keys for total_flow to avoid sorting every frame
     pub total_flow_sorted_keys: Vec<GenericItem>,
     pub mechanic_providers: Vec<Box<FactorioMechanicProvider>>,
-    pub mechanics: Vec<Box<FactorioMechanic>>,
-    pub mechanic_suggestions: Vec<Box<FactorioMechanic>>,
-    pub mechanic_receiver: std::sync::mpsc::Receiver<Box<FactorioMechanic>>,
-    pub mechanic_sender: std::sync::mpsc::Sender<Box<FactorioMechanic>>,
+    pub mechanics: Vec<Box<FactorioMechanicInstance>>,
+    pub mechanic_suggestions: Vec<Box<FactorioMechanicInstance>>,
+    pub mechanic_receiver: std::sync::mpsc::Receiver<Box<FactorioMechanicInstance>>,
+    pub mechanic_sender: std::sync::mpsc::Sender<Box<FactorioMechanicInstance>>,
     pub arg_sender: std::sync::mpsc::Sender<SolverArgs<GenericItem, usize>>,
     pub solution_receiver: std::sync::mpsc::Receiver<SolverSolution<usize>>,
 }
@@ -83,10 +85,26 @@ impl<'de> serde::Deserialize<'de> for FactoryInstance {
                 .map_err(|_| serde::de::Error::custom("反序列化 Mechanic 失败"))?;
             factory_instance.mechanics.push(mech);
         }
+        let mut missing_mechanic_providers = MECHANIC_PROVIDER_REGISTRY
+            .registered_types()
+            .into_iter()
+            .collect::<HashSet<_>>();
         for mechanic_provider in value["mechanic_providers"].as_array().unwrap_or(&vec![]) {
+            missing_mechanic_providers.remove(
+                mechanic_provider["type"]
+                    .as_str()
+                    .ok_or(serde::de::Error::custom("Missing type field"))?,
+            );
             let mech_provider = MECHANIC_PROVIDER_REGISTRY
                 .deserialize(mechanic_provider.clone())
                 .map_err(|_| serde::de::Error::custom("反序列化 MechanicProvider 失败"))?;
+            factory_instance.mechanic_providers.push(mech_provider);
+        }
+        for missing in missing_mechanic_providers {
+            log::info!("补全因为版本更新引入的 MechanicProvider: {}", missing);
+            let mech_provider = MECHANIC_PROVIDER_REGISTRY
+                .create_default(missing)
+                .map_err(|_| serde::de::Error::custom("创建默认 MechanicProvider 失败"))?;
             factory_instance.mechanic_providers.push(mech_provider);
         }
         Ok(factory_instance)
@@ -705,12 +723,12 @@ impl Subview for PlannerView {
                                 FactoryInstance::new(name)
                                     .add_flow_source(|s| {
                                         Box::new(
-                                            RecipeConfigProvider::new().with_mechanic_sender(s),
+                                            RecipeMechanicProvider::new().with_mechanic_sender(s),
                                         )
                                     })
                                     .add_flow_source(|s| {
                                         Box::new(
-                                            MiningConfigProvider::new().with_mechanic_sender(s),
+                                            MiningMechanicProvider::new().with_mechanic_sender(s),
                                         )
                                     })
                                     .into(),

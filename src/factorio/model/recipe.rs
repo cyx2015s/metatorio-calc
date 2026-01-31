@@ -403,7 +403,7 @@ pub fn machine_fits_for_recipe(
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename = "factorio:recipe")]
-pub struct RecipeConfig {
+pub struct RecipeMechanicInstance {
     pub recipe: IdWithQuality,
     pub machine: IdWithQuality,
     pub module_config: ModuleConfig,
@@ -415,14 +415,14 @@ pub struct RecipeConfig {
     pub instance_fuel: Option<(String, i32)>,
 }
 
-impl SolveContext for RecipeConfig {
+impl SolveContext for RecipeMechanicInstance {
     type GameContext = FactorioContext;
     type ItemIdentType = GenericItem;
 }
 
-impl Default for RecipeConfig {
+impl Default for RecipeMechanicInstance {
     fn default() -> Self {
-        RecipeConfig {
+        RecipeMechanicInstance {
             recipe: ("recipe-unknown".to_string(), 0).into(),
             machine: ("entity-unknown".to_string(), 0).into(),
             module_config: ModuleConfig::new(),
@@ -431,7 +431,7 @@ impl Default for RecipeConfig {
     }
 }
 
-impl AsFlow for RecipeConfig {
+impl AsFlow for RecipeMechanicInstance {
     fn as_flow(&self, ctx: &FactorioContext) -> Flow<Self::ItemIdentType> {
         let mut map = Flow::new();
 
@@ -593,7 +593,7 @@ impl AsFlow for RecipeConfig {
 #[test]
 fn test_recipe_normalized() {
     let ctx = FactorioContext::test_load();
-    let recipe_config = RecipeConfig {
+    let recipe_config = RecipeMechanicInstance {
         recipe: ("iron-gear-wheel".to_string(), 0).into(),
         machine: "assembling-machine-1".into(),
         module_config: ModuleConfig::new(),
@@ -606,7 +606,7 @@ fn test_recipe_normalized() {
     println!("Recipe Result with Location: {:?}", result_with_location);
 }
 
-impl EditorView for RecipeConfig {
+impl EditorView for RecipeMechanicInstance {
     fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &Self::GameContext) -> bool {
         let mut changed = false;
         ui.horizontal_top(|ui| {
@@ -738,29 +738,29 @@ impl EditorView for RecipeConfig {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename = "factorio:recipe")]
-pub struct RecipeConfigProvider {
+pub struct RecipeMechanicProvider {
     #[serde(skip, default)]
     pub sender: Option<MechanicSender<GenericItem, FactorioContext>>,
 }
 
-impl Default for RecipeConfigProvider {
+impl Default for RecipeMechanicProvider {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl RecipeConfigProvider {
+impl RecipeMechanicProvider {
     pub fn new() -> Self {
         Self { sender: None }
     }
 }
 
-impl SolveContext for RecipeConfigProvider {
+impl SolveContext for RecipeMechanicProvider {
     type GameContext = FactorioContext;
     type ItemIdentType = GenericItem;
 }
 
-impl MechanicProvider for RecipeConfigProvider {
+impl MechanicProvider for RecipeMechanicProvider {
     fn set_mechanic_sender(&mut self, sender: MechanicSender<GenericItem, FactorioContext>) {
         self.sender = Some(sender);
     }
@@ -770,7 +770,7 @@ impl MechanicProvider for RecipeConfigProvider {
         ctx: &Self::GameContext,
         item: &Self::ItemIdentType,
         value: f64,
-    ) -> Vec<Box<dyn Mechanic<ItemIdentType = Self::ItemIdentType, GameContext = Self::GameContext>>>
+    ) -> Vec<Box<dyn MechanicInstance<ItemIdentType = Self::ItemIdentType, GameContext = Self::GameContext>>>
     {
         let item_name = match item {
             GenericItem::Item(IdWithQuality(name, _)) => name,
@@ -808,7 +808,7 @@ impl MechanicProvider for RecipeConfigProvider {
             };
 
             if matches {
-                let mut recipe_config = RecipeConfig {
+                let mut recipe_config = RecipeMechanicInstance {
                     recipe: (recipe_proto.base.name.clone(), quality).into(),
                     ..Default::default()
                 };
@@ -832,7 +832,7 @@ impl MechanicProvider for RecipeConfigProvider {
                 }
                 suggestions.push(Box::new(recipe_config)
                     as Box<
-                        dyn Mechanic<
+                        dyn MechanicInstance<
                                 ItemIdentType = Self::ItemIdentType,
                                 GameContext = Self::GameContext,
                             >,
@@ -844,10 +844,10 @@ impl MechanicProvider for RecipeConfigProvider {
     }
 }
 
-impl EditorView for RecipeConfigProvider {
+impl EditorView for RecipeMechanicProvider {
     fn editor_view(&mut self, ui: &mut egui::Ui, _ctx: &Self::GameContext) -> bool {
         if ui.button("添加配方").clicked() {
-            let new_config = RecipeConfig::default();
+            let new_config = RecipeMechanicInstance::default();
             if let Some(sender) = &self.sender {
                 let _ = sender.send(Box::new(new_config));
             }
@@ -858,13 +858,13 @@ impl EditorView for RecipeConfigProvider {
 }
 
 crate::impl_register_deserializer!(
-    for RecipeConfig
+    for RecipeMechanicInstance
     as "factorio:recipe"
-    => dyn Mechanic<ItemIdentType = GenericItem, GameContext = FactorioContext>
+    => dyn MechanicInstance<ItemIdentType = GenericItem, GameContext = FactorioContext>
 );
 
 crate::impl_register_deserializer!(
-    for RecipeConfigProvider
+    for RecipeMechanicProvider
     as "factorio:recipe"
     => dyn MechanicProvider<ItemIdentType = GenericItem, GameContext = FactorioContext>
 );

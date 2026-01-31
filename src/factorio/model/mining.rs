@@ -1,5 +1,5 @@
 use crate::{
-    concept::{AsFlow, EditorView, Flow, Mechanic, MechanicProvider, MechanicSender, SolveContext},
+    concept::{AsFlow, EditorView, Flow, MechanicInstance, MechanicProvider, MechanicSender, SolveContext},
     factorio::{
         ModuleConfig, ModuleConfigEditor, calc_quality_distribution,
         common::*,
@@ -77,16 +77,16 @@ pub fn machine_fits_for_resource(
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename = "factorio:mining")]
-pub struct MiningConfig {
+pub struct MiningMechanicInstance {
     pub resource: String,
     pub machine: IdWithQuality,
     pub module_config: ModuleConfig,
     pub instance_fuel: Option<IdWithQuality>,
 }
 
-impl Default for MiningConfig {
+impl Default for MiningMechanicInstance {
     fn default() -> Self {
-        MiningConfig {
+        MiningMechanicInstance {
             // TODO 不能保证 iron-ore 一定存在
             resource: "entity-unknown".to_string(),
             machine: ("entity-unknown".to_string(), 0).into(),
@@ -96,12 +96,12 @@ impl Default for MiningConfig {
     }
 }
 
-impl SolveContext for MiningConfig {
+impl SolveContext for MiningMechanicInstance {
     type GameContext = FactorioContext;
     type ItemIdentType = GenericItem;
 }
 
-impl AsFlow for MiningConfig {
+impl AsFlow for MiningMechanicInstance {
     fn as_flow(&self, ctx: &Self::GameContext) -> Flow<Self::ItemIdentType> {
         let mut map = Flow::new();
 
@@ -288,7 +288,7 @@ impl AsFlow for MiningConfig {
     }
 }
 
-impl EditorView for MiningConfig {
+impl EditorView for MiningMechanicInstance {
     fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &Self::GameContext) -> bool {
         let mut changed = false;
         ui.horizontal_wrapped(|ui| {
@@ -376,32 +376,32 @@ impl EditorView for MiningConfig {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename = "factorio:mining")]
-pub struct MiningConfigProvider {
+pub struct MiningMechanicProvider {
     #[serde(skip)]
     pub sender: Option<MechanicSender<GenericItem, FactorioContext>>,
 }
 
-impl Default for MiningConfigProvider {
+impl Default for MiningMechanicProvider {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl MiningConfigProvider {
+impl MiningMechanicProvider {
     pub fn new() -> Self {
         Self { sender: None }
     }
 }
 
-impl SolveContext for MiningConfigProvider {
+impl SolveContext for MiningMechanicProvider {
     type GameContext = FactorioContext;
     type ItemIdentType = GenericItem;
 }
 
-impl EditorView for MiningConfigProvider {
+impl EditorView for MiningMechanicProvider {
     fn editor_view(&mut self, ui: &mut egui::Ui, _ctx: &Self::GameContext) -> bool {
         if ui.button("添加采矿").clicked() {
-            let mining_config = MiningConfig::default();
+            let mining_config = MiningMechanicInstance::default();
             if let Some(sender) = &self.sender {
                 let _ = sender.send(Box::new(mining_config));
             }
@@ -411,7 +411,7 @@ impl EditorView for MiningConfigProvider {
     }
 }
 
-impl MechanicProvider for MiningConfigProvider {
+impl MechanicProvider for MiningMechanicProvider {
     fn set_mechanic_sender(
         &mut self,
         sender: MechanicSender<Self::ItemIdentType, Self::GameContext>,
@@ -424,7 +424,7 @@ impl MechanicProvider for MiningConfigProvider {
         ctx: &Self::GameContext,
         item: &Self::ItemIdentType,
         value: f64,
-    ) -> Vec<Box<dyn Mechanic<ItemIdentType = Self::ItemIdentType, GameContext = Self::GameContext>>>
+    ) -> Vec<Box<dyn MechanicInstance<ItemIdentType = Self::ItemIdentType, GameContext = Self::GameContext>>>
     {
         let mut ret = vec![];
         if value < 0.0 {
@@ -435,7 +435,7 @@ impl MechanicProvider for MiningConfigProvider {
                         if let Some(mining) = resource.base.minable.as_ref() {
                             if let Some(result) = &mining.result {
                                 if result == name {
-                                    let mut mining_config = MiningConfig {
+                                    let mut mining_config = MiningMechanicInstance {
                                         resource: resource.base.base.name.clone(),
                                         ..Default::default()
                                     };
@@ -453,7 +453,7 @@ impl MechanicProvider for MiningConfigProvider {
                                     }
                                     ret.push(Box::new(mining_config)
                                         as Box<
-                                            dyn Mechanic<
+                                            dyn MechanicInstance<
                                                     ItemIdentType = GenericItem,
                                                     GameContext = FactorioContext,
                                                 >,
@@ -464,7 +464,7 @@ impl MechanicProvider for MiningConfigProvider {
                                     if let RecipeResult::Item(r) = res
                                         && &r.name == name
                                     {
-                                        let mining_config = MiningConfig {
+                                        let mining_config = MiningMechanicInstance {
                                             resource: resource.base.base.name.clone(),
                                             machine: "entity-unknown".into(),
                                             module_config: ModuleConfig::default(),
@@ -472,7 +472,7 @@ impl MechanicProvider for MiningConfigProvider {
                                         };
                                         ret.push(Box::new(mining_config)
                                             as Box<
-                                                dyn Mechanic<
+                                                dyn MechanicInstance<
                                                         ItemIdentType = GenericItem,
                                                         GameContext = FactorioContext,
                                                     >,
@@ -495,7 +495,7 @@ impl MechanicProvider for MiningConfigProvider {
                                 if let RecipeResult::Fluid(r) = res
                                     && &r.name == name
                                 {
-                                    let mining_config = MiningConfig {
+                                    let mining_config = MiningMechanicInstance {
                                         resource: resource.base.base.name.clone(),
                                         machine: "entity-unknown".into(),
                                         module_config: ModuleConfig::default(),
@@ -503,7 +503,7 @@ impl MechanicProvider for MiningConfigProvider {
                                     };
                                     ret.push(Box::new(mining_config)
                                         as Box<
-                                            dyn Mechanic<
+                                            dyn MechanicInstance<
                                                     ItemIdentType = GenericItem,
                                                     GameContext = FactorioContext,
                                                 >,
@@ -525,7 +525,7 @@ impl MechanicProvider for MiningConfigProvider {
 #[test]
 fn test_mining_normalized() {
     let ctx = FactorioContext::test_load();
-    let mining_config = MiningConfig {
+    let mining_config = MiningMechanicInstance {
         resource: "uranium-ore".to_string(),
         machine: "big-mining-drill".into(),
         module_config: ModuleConfig::default(),
@@ -540,13 +540,13 @@ fn test_mining_normalized() {
 }
 
 crate::impl_register_deserializer!(
-    for MiningConfig
+    for MiningMechanicInstance
     as "factorio:mining"
-    => dyn Mechanic<ItemIdentType = GenericItem, GameContext = FactorioContext>
+    => dyn MechanicInstance<ItemIdentType = GenericItem, GameContext = FactorioContext>
 );
 
 crate::impl_register_deserializer!(
-    for MiningConfigProvider
+    for MiningMechanicProvider
     as "factorio:mining"
     => dyn MechanicProvider<ItemIdentType = GenericItem, GameContext = FactorioContext>
 );
