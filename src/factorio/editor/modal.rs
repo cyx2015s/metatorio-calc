@@ -326,22 +326,22 @@ impl egui::Widget for ItemWithQualitySelectorModal<'_> {
     }
 }
 
-pub struct HintModal<'a, I: ItemIdent, C: 'static> {
+pub struct HintModal<'a, C: 'static, I: ItemIdent> {
     ctx: &'a C,
     id: egui::Id,
     toggle: bool,
-    flow_sender: &'a MechanicSender<I, C>,
+    flow_sender: &'a MechanicSender<C, I>,
     hint_flows: &'a mut Vec<Box<dyn MechanicInstance<GameContext = C, ItemIdentType = I> + 'static>>,
-    editor_sources: &'a [Box<dyn MechanicProvider<ItemIdentType = I, GameContext = C>>],
+    editor_sources: &'a [Box<dyn MechanicProvider<GameContext = C, ItemIdentType = I>>],
 }
 
-impl<'a, I: ItemIdent, C: 'static> HintModal<'a, I, C> {
+impl<'a, C: 'static, I: ItemIdent> HintModal<'a, C, I> {
     pub fn new(
         id: egui::Id,
         ctx: &'a C,
-        flow_sender: &'a MechanicSender<I, C>,
+        flow_sender: &'a MechanicSender<C, I>,
         hint_flows: &'a mut Vec<Box<dyn MechanicInstance<GameContext = C, ItemIdentType = I> + 'static>>,
-        editor_sources: &'a [Box<dyn MechanicProvider<ItemIdentType = I, GameContext = C>>],
+        editor_sources: &'a [Box<dyn MechanicProvider<GameContext = C, ItemIdentType = I>>],
     ) -> Self {
         Self {
             id,
@@ -368,7 +368,7 @@ impl<'a, I: ItemIdent, C: 'static> HintModal<'a, I, C> {
     }
 }
 
-impl<'a, I: ItemIdent, C: 'static> egui::Widget for HintModal<'a, I, C> {
+impl<'a, C: 'static, I: ItemIdent> egui::Widget for HintModal<'a, C, I> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         show_modal(self.id, self.toggle, ui, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {

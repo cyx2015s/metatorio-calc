@@ -187,7 +187,7 @@ impl FactoryInstance {
     }
 
     pub fn add_flow_source<
-        F: Fn(MechanicSender<GenericItem, FactorioContext>) -> Box<FactorioMechanicProvider>,
+        F: Fn(MechanicSender<FactorioContext, GenericItem>) -> Box<FactorioMechanicProvider>,
     >(
         mut self,
         f: F,

@@ -740,7 +740,7 @@ impl EditorView for RecipeMechanicInstance {
 #[serde(tag = "type", rename = "factorio:recipe")]
 pub struct RecipeMechanicProvider {
     #[serde(skip, default)]
-    pub sender: Option<MechanicSender<GenericItem, FactorioContext>>,
+    pub sender: Option<MechanicSender<FactorioContext, GenericItem>>,
 }
 
 impl Default for RecipeMechanicProvider {
@@ -761,7 +761,7 @@ impl SolveContext for RecipeMechanicProvider {
 }
 
 impl MechanicProvider for RecipeMechanicProvider {
-    fn set_mechanic_sender(&mut self, sender: MechanicSender<GenericItem, FactorioContext>) {
+    fn set_mechanic_sender(&mut self, sender: MechanicSender<FactorioContext, GenericItem>) {
         self.sender = Some(sender);
     }
 

@@ -18,6 +18,7 @@ pub type FactorioMechanicInstance =
     dyn MechanicInstance<ItemIdentType = GenericItem, GameContext = FactorioContext>;
 pub type FactorioMechanicProvider =
     dyn MechanicProvider<ItemIdentType = GenericItem, GameContext = FactorioContext>;
+pub type FactorioMechanic = dyn Mechanic<FactorioContext, GenericItem>;
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct IdWithQuality(pub String, pub u8);
 

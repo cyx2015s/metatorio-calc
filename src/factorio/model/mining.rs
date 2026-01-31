@@ -378,7 +378,7 @@ impl EditorView for MiningMechanicInstance {
 #[serde(tag = "type", rename = "factorio:mining")]
 pub struct MiningMechanicProvider {
     #[serde(skip)]
-    pub sender: Option<MechanicSender<GenericItem, FactorioContext>>,
+    pub sender: Option<MechanicSender<FactorioContext, GenericItem>>,
 }
 
 impl Default for MiningMechanicProvider {
@@ -414,7 +414,7 @@ impl EditorView for MiningMechanicProvider {
 impl MechanicProvider for MiningMechanicProvider {
     fn set_mechanic_sender(
         &mut self,
-        sender: MechanicSender<Self::ItemIdentType, Self::GameContext>,
+        sender: MechanicSender<Self::GameContext, Self::ItemIdentType>,
     ) {
         self.sender = Some(sender);
     }
@@ -424,7 +424,7 @@ impl MechanicProvider for MiningMechanicProvider {
         ctx: &Self::GameContext,
         item: &Self::ItemIdentType,
         value: f64,
-    ) -> Vec<Box<dyn MechanicInstance<ItemIdentType = Self::ItemIdentType, GameContext = Self::GameContext>>>
+        ) -> Vec<Box<dyn MechanicInstance<ItemIdentType = Self::ItemIdentType, GameContext = Self::GameContext>>>
     {
         let mut ret = vec![];
         if value < 0.0 {

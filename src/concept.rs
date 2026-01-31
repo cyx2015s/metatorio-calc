@@ -35,8 +35,8 @@ pub trait AsFlow: SolveContext {
     }
 }
 
-pub type MechanicSender<I, C> =
-    std::sync::mpsc::Sender<Box<dyn MechanicInstance<ItemIdentType = I, GameContext = C>>>;
+pub type MechanicSender<C, I> =
+    std::sync::mpsc::Sender<Box<dyn MechanicInstance<GameContext = C, ItemIdentType = I>>>;
 
 pub trait ItemIdent: Debug + Clone + Eq + Hash + Send + 'static {}
 impl<T> ItemIdent for T where T: Debug + Clone + Eq + Hash + Send + 'static {}
@@ -44,9 +44,15 @@ pub trait GameContextCreatorView: Subview {
     fn set_subview_sender(&mut self, sender: std::sync::mpsc::Sender<Box<dyn Subview>>);
 }
 
-pub trait MechanicInstance: AsFlow + EditorView + dyn_clone::DynClone + erased_serde::Serialize {}
+pub trait MechanicInstance:
+    AsFlow + EditorView + dyn_clone::DynClone + erased_serde::Serialize
+{
+}
 
-impl<T> MechanicInstance for T where T: AsFlow + EditorView + dyn_clone::DynClone + erased_serde::Serialize {}
+impl<T> MechanicInstance for T where
+    T: AsFlow + EditorView + dyn_clone::DynClone + erased_serde::Serialize
+{
+}
 
 erased_serde::serialize_trait_object!(<C, I> MechanicInstance<GameContext = C, ItemIdentType = I>);
 
@@ -58,12 +64,12 @@ pub trait MechanicProvider:
     /// 传递创建的配方信息
     fn set_mechanic_sender(
         &mut self,
-        sender: MechanicSender<Self::ItemIdentType, Self::GameContext>,
+        sender: MechanicSender<Self::GameContext, Self::ItemIdentType>,
     );
 
     fn with_mechanic_sender(
         mut self,
-        sender: MechanicSender<Self::ItemIdentType, Self::GameContext>,
+        sender: MechanicSender<Self::GameContext, Self::ItemIdentType>,
     ) -> Self
     where
         Self: Sized,
@@ -78,8 +84,14 @@ pub trait MechanicProvider:
         &self,
         _ctx: &Self::GameContext,
         _flows: &HashMap<usize, Flow<Self::ItemIdentType>>,
-    ) -> Vec<Box<dyn MechanicInstance<ItemIdentType = Self::ItemIdentType, GameContext = Self::GameContext>>>
-    {
+    ) -> Vec<
+        Box<
+            dyn MechanicInstance<
+                    ItemIdentType = Self::ItemIdentType,
+                    GameContext = Self::GameContext,
+                >,
+        >,
+    > {
         // 默认不实现任何自动填充逻辑
         vec![]
     }
@@ -90,8 +102,14 @@ pub trait MechanicProvider:
         _ctx: &Self::GameContext,
         _item: &Self::ItemIdentType,
         _value: f64,
-    ) -> Vec<Box<dyn MechanicInstance<ItemIdentType = Self::ItemIdentType, GameContext = Self::GameContext>>>
-    {
+    ) -> Vec<
+        Box<
+            dyn MechanicInstance<
+                    ItemIdentType = Self::ItemIdentType,
+                    GameContext = Self::GameContext,
+                >,
+        >,
+    > {
         vec![]
     }
 }
@@ -99,3 +117,54 @@ pub trait MechanicProvider:
 dyn_clone::clone_trait_object!(<C, I> MechanicProvider<GameContext = C, ItemIdentType = I>);
 
 erased_serde::serialize_trait_object!(<C, I> MechanicProvider<GameContext = C, ItemIdentType = I>);
+
+pub trait Mechanic<C, I>
+where
+    C: Send + 'static,
+    I: ItemIdent,
+{
+    fn name(&self) -> String;
+
+    fn instances(
+        &self
+    ) -> &[Box<dyn MechanicInstance<ItemIdentType = I, GameContext = C>>];
+
+    fn instances_mut(
+        &mut self
+    ) -> &mut [Box<dyn MechanicInstance<ItemIdentType = I, GameContext = C>>];
+
+    fn suggest(
+        &mut self,
+        ctx: &C,
+        item: &I,
+        amount: f64,
+    );
+
+    // 返回值表示是否产生了需要重新计算的更改
+    fn provider_view(
+        &mut self,
+        ui: &mut egui::Ui,
+        ctx: &C,
+    ) -> bool;
+
+    // 返回值表示是否产生了需要重新计算的更改
+    fn instance_view(
+        &mut self,
+        ui: &mut egui::Ui,
+        ctx: &C,
+        idx: usize,
+    ) -> bool;
+
+    fn suggest_view(
+        &mut self,
+        ui: &mut egui::Ui,
+        ctx: &C,
+    ) -> bool {
+        false
+    }
+
+    fn auto_populate(
+        &mut self,
+        sender: MechanicSender<C, I>,
+    );
+}
