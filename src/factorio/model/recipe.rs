@@ -4,10 +4,7 @@ use crate::{
     concept::*,
     factorio::{
         common::*,
-        editor::{
-            hover::PrototypeHover,
-            icon::Icon,
-        },
+        editor::{hover::PrototypeHover, icon::Icon},
         modal::SelectorModal,
         model::{
             context::{FactorioContext, GenericItem},
@@ -792,6 +789,7 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
     }
 
     fn update_suggestion(&mut self, ctx: &FactorioContext, item: &GenericItem, amount: f64) {
+        self.suggestions.clear();
         let item_name = match item {
             GenericItem::Item(IdWithQuality(name, _)) => name,
             GenericItem::Fluid {
@@ -874,6 +872,7 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
                     changed = true;
                 }
                 ui.horizontal(|ui| {
+                    ui.set_min_width(ui.available_width());
                     instance.editor_view(ui, ctx);
                 });
             });

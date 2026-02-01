@@ -240,9 +240,9 @@ impl FactorioContext {
             tiles,
             ..Default::default()
         };
-        ret.planets.iter().for_each(|(_, p)| {
-            dbg!(p.collect_autoplaced(&ret));
-        });
+        // ret.planets.iter().for_each(|(_, p)| {
+        //     dbg!(p.collect_autoplaced(&ret));
+        // });
         ret
     }
 

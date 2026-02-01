@@ -551,6 +551,7 @@ impl Mechanic<FactorioContext, GenericItem> for MiningMechanic {
                     changed = true;
                 }
                 ui.horizontal(|ui| {
+                    ui.set_min_width(ui.available_width());
                     instance.editor_view(ui, ctx);
                 });
             });

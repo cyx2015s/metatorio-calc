@@ -69,7 +69,7 @@ impl<'de> serde::Deserialize<'de> for FactoryInstance {
             .registered_types()
             .into_iter()
             .collect::<HashSet<_>>();
-        dbg!(&not_deserialized_mechanics);
+        // dbg!(&not_deserialized_mechanics);
         for mechanic in value["mechanics"].as_array().unwrap_or(&vec![]) {
             if mechanic["type"]
                 .as_str()
@@ -168,13 +168,19 @@ impl FactoryInstance {
         let _ = self.arg_sender.send((target, flows, external));
     }
 
-    fn flows_panel(&mut self, ui: &mut egui::Ui, ctx: &FactorioContext, changed: &mut bool, need_suggestions: &mut bool) {
+    fn flows_panel(
+        &mut self,
+        ui: &mut egui::Ui,
+        ctx: &FactorioContext,
+        changed: &mut bool,
+        need_suggestions: &mut bool,
+    ) {
         ui.label(format!("总代价: {:.2} | 总物料流", self.solution.1));
         ui.horizontal_wrapped(|ui| {
             card_frame(ui).show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
                 ui.set_min_height(50.0);
-                
+
                 for item in &self.total_flow_sorted_keys {
                     let amount = self.total_flow.get(item).cloned().unwrap_or(0.0);
                     if amount.abs() < 1e-6 {
@@ -192,13 +198,9 @@ impl FactoryInstance {
 
                         if icon.clicked_by(egui::PointerButton::Secondary) || icon.clicked() {
                             *need_suggestions = true;
-                            self.mechanics.iter_mut().for_each(|mechanic| {
-                                mechanic.update_suggestion(
-                                    ctx,
-                                    item,
-                                    amount,
-                                )
-                            });
+                            self.mechanics
+                                .iter_mut()
+                                .for_each(|mechanic| mechanic.update_suggestion(ctx, item, amount));
                         }
                     });
                     if ui.available_size_before_wrap().x < 35.0 {
@@ -262,6 +264,8 @@ impl From<FactoryInstance> for StatefulFactoryInstance {
 pub struct PlannerView {
     /// 存储游戏逻辑数据的全部上下文
     pub ctx: FactorioContext,
+
+    pub intercept_close: bool,
 
     pub factories: Vec<StatefulFactoryInstance>,
 
@@ -583,9 +587,9 @@ impl EditorView for FactoryInstance {
             ui.set_max_width(640.0);
             egui::ScrollArea::vertical().show(ui, |ui| {
                 self.mechanics.iter_mut().for_each(|mechanic| {
-                    ui.collapsing(format!("{}(推荐)", mechanic.name()), |ui| {
-                        changed |= mechanic.suggestion_view(ui, ctx);
-                    });
+                    ui.heading(mechanic.name());
+                    changed |= mechanic.suggestion_view(ui, ctx);
+                    ui.separator();
                 });
             });
         });
@@ -601,6 +605,7 @@ impl PlannerView {
     pub fn new(ctx: FactorioContext) -> Self {
         PlannerView {
             ctx: ctx.build_order_info(),
+            intercept_close: true,
             factories: Vec::new(),
             selected_factory: 0,
             new_factory_name: String::new(),
@@ -610,6 +615,38 @@ impl PlannerView {
 
 impl Subview for PlannerView {
     fn view(&mut self, ui: &mut egui::Ui) {
+        let mut show_close_confirm = false;
+        if self.intercept_close && ui.ctx().input(|input| input.viewport().close_requested()) {
+            for factory in &self.factories {
+                if !factory.saved {
+                    ui.ctx()
+                        .send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                    show_close_confirm = true;
+                    break;
+                }
+            }
+        }
+        show_modal(
+            egui::Id::new("close-confirm"),
+            show_close_confirm,
+            ui,
+            |ui| {
+                ui.heading("有未保存的工厂，确认关闭吗？");
+                ui.vertical_centered(|ui| {
+                    ui.horizontal(|ui| {
+                        if ui.button("确认").clicked() {
+                            self.intercept_close = false;
+                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
+
+                        if ui.button("取消").clicked() {
+                            ui.close();
+                        }
+                    });
+                });
+            },
+        );
+
         egui::Frame::group(ui.style())
             .corner_radius(8.0)
             .stroke(egui::Stroke::new(

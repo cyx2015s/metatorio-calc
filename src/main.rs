@@ -334,7 +334,7 @@ fn main() {
             viewport: egui::ViewportBuilder::default()
                 .with_maximized(true)
                 .with_min_inner_size(egui::Vec2 { x: 800.0, y: 600.0 })
-                .with_title("切向量化 [内内内内测版]")
+                .with_title("切向量化")
                 .with_icon(egui::IconData {
                     rgba: icon_image.to_rgba8().into_raw(),
                     width: icon_image.width(),
