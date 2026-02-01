@@ -303,3 +303,4 @@ fn quality_selector(ui: &mut egui::Ui, ctx: &FactorioContext, selected_quality: 
             }
         });
 }
+

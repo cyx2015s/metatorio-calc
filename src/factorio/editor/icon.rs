@@ -163,24 +163,28 @@ impl<'a> egui::Widget for GenericIcon<'a> {
             GenericItem::Electricity => {
                 ui.add_sized([self.size, self.size], egui::Label::new("电力"))
             }
-            GenericItem::FluidHeat { filter } => ui
-                .add_sized([self.size, self.size], egui::Label::new("液热"))
-                .on_hover_text(format!(
-                    "过滤器: {}",
-                    filter
-                        .as_ref()
-                        .map(|f| self.ctx.get_display_name("fluid", f))
-                        .unwrap_or("无".to_string())
-                )),
-            GenericItem::FluidFuel { filter } => ui
-                .add_sized([self.size, self.size], egui::Label::new("液燃"))
-                .on_hover_text(format!(
-                    "过滤器: {}",
-                    filter
-                        .as_ref()
-                        .map(|f| self.ctx.get_display_name("fluid", f))
-                        .unwrap_or("无".to_string())
-                )),
+            GenericItem::FluidHeat { filter } => match filter {
+                Some(fluid) => ui
+                    .add_sized([self.size, self.size], Icon::new(self.ctx, "fluid", fluid))
+                    .on_hover_text(format!(
+                        "通过 {} 获得的热量",
+                        self.ctx.get_display_name("fluid", fluid)
+                    )),
+                None => ui
+                    .add_sized([self.size, self.size], egui::Label::new("液热"))
+                    .on_hover_text("任意来源的液体热量"),
+            },
+            GenericItem::FluidFuel { filter } => match filter {
+                Some(fluid) => ui
+                    .add_sized([self.size, self.size], Icon::new(self.ctx, "fluid", fluid))
+                    .on_hover_text(format!(
+                        "通过 {} 获得的燃烧能",
+                        self.ctx.get_display_name("fluid", fluid)
+                    )),
+                None => ui
+                    .add_sized([self.size, self.size], egui::Label::new("液燃"))
+                    .on_hover_text("任意来源的液体燃料"),
+            },
             GenericItem::ItemFuel { category } => ui
                 .add_sized([self.size, self.size], egui::Label::new("物燃".to_string()))
                 .on_hover_text(format!("类别: {}", category,)),

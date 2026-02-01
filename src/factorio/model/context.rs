@@ -661,7 +661,13 @@ pub enum GenericItem {
         name: String,
     },
 }
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+impl Default for GenericItem {
+    fn default() -> Self {
+        GenericItem::Item("item-unknown".into())
+    }
+}
+
+#[derive(Debug, Clone, Default, Hash, PartialEq, Eq)]
 pub struct GenericItemWithLocation {
     base: GenericItem,
     location: u16,
