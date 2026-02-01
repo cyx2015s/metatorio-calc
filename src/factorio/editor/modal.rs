@@ -1,10 +1,6 @@
-
 use egui::ModalResponse;
 
-use crate::factorio::{
-    FactorioContext, IdWithQuality,
-    selector::Selector,
-};
+use crate::factorio::{FactorioContext, IdWithQuality, selector::Selector};
 
 pub fn show_modal<R>(
     id: egui::Id,
@@ -35,7 +31,6 @@ pub fn show_modal<R>(
 
 pub struct SelectorModal<'a, Input, Output>
 where
-    Output: From<&'a Input>,
     Input: 'a + ?Sized,
 {
     ctx: &'a FactorioContext,
@@ -47,7 +42,6 @@ where
 
 impl<'a, Input, Output> SelectorModal<'a, Input, Output>
 where
-    Output: From<&'a Input>,
     Input: 'a + ?Sized,
 {
     pub fn new(id: egui::Id, ctx: &'a FactorioContext, label_str: &'a str) -> Self {
@@ -79,6 +73,7 @@ impl egui::Widget for SelectorModal<'_, str, String> {
         assert!(self.selector.is_some(), "无法选中");
         let mut widget = self.selector.take().unwrap();
         let mut sentinel = None;
+        let mut response = ui.response().clone();
         show_modal(self.id, self.toggle, ui, |ui| {
             let mut filter_string = ui
                 .memory(move |mem| {
@@ -105,16 +100,20 @@ impl egui::Widget for SelectorModal<'_, str, String> {
                 .max_width(f32::INFINITY)
                 .auto_shrink(false)
                 .show(ui, |ui| {
-                    ui.add(widget);
+                    response = response.union(ui.add(widget));
                 });
         });
-        ui.response().clone()
+        if response.should_close() {
+            ui.close();
+        }
+        response
     }
 }
 
 impl egui::Widget for SelectorModal<'_, IdWithQuality, IdWithQuality> {
     fn ui(mut self, ui: &mut egui::Ui) -> egui::Response {
         assert!(self.selector.is_some(), "无法选中");
+        let mut response = ui.response().clone();
         if self.ctx.qualities.len() == 1 {
             // 回退到普通选择器
             let mut degenerated: Option<String> = None;
@@ -136,20 +135,22 @@ impl egui::Widget for SelectorModal<'_, IdWithQuality, IdWithQuality> {
             if let Some(current) = old_selector.current {
                 selector = selector.with_current(&mut current.0);
             }
-            if let Some(changed) = old_selector.changed {
-                selector = selector.notify_change(changed);
-            }
             if let Some(&mut ref mut output) = old_selector.output {
                 selector = selector.with_output(&mut degenerated);
             }
 
-            let ret = selector.ui(ui);
+            response = response.union(selector.ui(ui));
+            
             if let Some(selected) = degenerated
                 && let Some(&mut ref mut output) = old_selector.output
             {
                 *output = Some(IdWithQuality(selected, 0));
             }
-            return ret;
+            if response.should_close() {
+                ui.close();
+            }
+
+            return response;
         }
         show_modal(self.id, self.toggle, ui, |ui| {
             let mut widget = self.selector.take().unwrap();
@@ -183,9 +184,12 @@ impl egui::Widget for SelectorModal<'_, IdWithQuality, IdWithQuality> {
                 .max_width(f32::INFINITY)
                 .auto_shrink(false)
                 .show(ui, |ui| {
-                    ui.add(widget);
+                    response = response.union(ui.add(widget));
                 });
         });
-        ui.response().clone()
+        if response.should_close() {
+            ui.close();
+        }
+        response
     }
 }

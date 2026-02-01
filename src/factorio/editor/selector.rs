@@ -15,7 +15,6 @@ pub type HoverUi<'a, T> = dyn Fn(&mut egui::Ui, &T, &FactorioContext) + 'a;
 
 pub struct Selector<'a, Input, Output>
 where
-    Output: From<&'a Input>,
     Input: 'a + ?Sized,
 {
     pub ctx: &'a FactorioContext,
@@ -24,13 +23,11 @@ where
     pub current: Option<&'a mut Output>,
     pub output: Option<&'a mut Option<Output>>,
     pub hover: Option<Box<HoverUi<'a, Input>>>,
-    pub changed: Option<&'a mut bool>,
     pub forget: bool,
 }
 
 impl<'a, Input, Output> Selector<'a, Input, Output>
 where
-    Output: From<&'a Input>,
     Input: 'a + ?Sized,
 {
     pub fn new(ctx: &'a FactorioContext, type_name: &'a str) -> Self {
@@ -41,7 +38,6 @@ where
             current: None,
             output: None,
             hover: None,
-            changed: None,
             forget: false,
         }
     }
@@ -95,15 +91,11 @@ where
         self.forget = forget;
         self
     }
-
-    pub fn notify_change(mut self, changed: &'a mut bool) -> Self {
-        self.changed = Some(changed);
-        self
-    }
 }
 
 impl<'a> egui::Widget for Selector<'a, str, String> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+        let mut response = ui.response().clone();
         let available_space = ui.available_size();
         let group_count = (available_space.x as usize / 70).max(4);
         let item_count = (available_space.x as usize / 35).max(8);
@@ -203,9 +195,8 @@ impl<'a> egui::Widget for Selector<'a, str, String> {
                             if let Some(&mut ref mut output) = self.output {
                                 *output = Some(item_name.clone());
                             }
-                            if let Some(&mut ref mut changed) = self.changed {
-                                *changed = true;
-                            }
+                            response.mark_changed();
+                            response.set_close();
                         }
                     }
                     if idx != 0 {
@@ -216,7 +207,7 @@ impl<'a> egui::Widget for Selector<'a, str, String> {
         ui.memory_mut(move |mem| {
             mem.data.insert_temp::<SelectorStorage>(id, storage.clone());
         });
-        ui.response().clone()
+        response
     }
 }
 
@@ -229,7 +220,7 @@ pub struct ItemWithQualitySelectorStorage {
 impl<'a> egui::Widget for Selector<'a, IdWithQuality, IdWithQuality> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         let id = ui.id();
-
+        let mut response = ui.response().clone();
         let mut storage = if self.forget {
             ItemWithQualitySelectorStorage::default()
         } else {
@@ -260,35 +251,34 @@ impl<'a> egui::Widget for Selector<'a, IdWithQuality, IdWithQuality> {
         ui.add(widget);
         if let Some(selected_item) = &selecting_item {
             storage.selected_item = Some(selected_item.clone());
+            response.mark_changed();
             if let Some(&mut ref mut current) = self.current {
                 current.0 = selected_item.clone();
-            }
-            if let Some(&mut ref mut changed) = self.changed {
-                *changed = true;
             }
         }
         if let Some(selected_quality) = selecting_quality {
             storage.selected_quality = Some(selected_quality);
+            response.mark_changed();
             if let Some(&mut ref mut current) = self.current {
                 current.1 = selected_quality;
             }
-            if let Some(&mut ref mut changed) = self.changed {
-                *changed = true;
-            }
         }
-        if let Some(&mut ref mut output) = self.output
-            && let (Some(item), Some(quality)) =
-                (storage.selected_item.clone(), storage.selected_quality)
+
+        if let (Some(item), Some(quality)) =
+            (storage.selected_item.clone(), storage.selected_quality)
         {
-            *output = Some(IdWithQuality(item, quality));
+            response.mark_changed();
+            response.set_close();
+            if let Some(&mut ref mut output) = self.output {
+                *output = Some(IdWithQuality(item, quality));
+            }
         }
 
         ui.memory_mut(|mem| {
             mem.data
                 .insert_temp::<ItemWithQualitySelectorStorage>(id, storage.clone());
         });
-
-        ui.response().clone()
+        response
     }
 }
 

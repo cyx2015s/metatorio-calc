@@ -206,7 +206,6 @@ pub struct ModuleConfigEditor<'a> {
     pub allowed_module_categories: &'a Option<Vec<String>>,
 
     pub ctx: &'a FactorioContext,
-    pub changed: Option<&'a mut bool>,
 }
 
 impl<'a> ModuleConfigEditor<'a> {
@@ -223,13 +222,7 @@ impl<'a> ModuleConfigEditor<'a> {
             allowed_effects,
             allowed_module_categories,
             ctx,
-            changed: None,
         }
-    }
-
-    pub fn notify_change(mut self, changed: &'a mut bool) -> Self {
-        self.changed = Some(changed);
-        self
     }
 }
 
@@ -254,7 +247,8 @@ fn module_effects_allowed(
 }
 
 impl egui::Widget for ModuleConfigEditor<'_> {
-    fn ui(mut self, ui: &mut egui::Ui) -> egui::Response {
+    fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+        let mut response = ui.response().clone();
         let button = ui
             .vertical(|ui| {
                 ui.label("插件");
@@ -265,17 +259,16 @@ impl egui::Widget for ModuleConfigEditor<'_> {
             })
             .inner;
         if self.module_slots == 0 {
-            *self.module_config = ModuleConfig::default();
-            if let Some(&mut ref mut changed) = self.changed {
-                *changed = true;
+            if self.module_config.modules.len() > 0 || self.module_config.beacons.len() > 0 {
+                response.mark_changed();
             }
-            return ui.response().clone();
+            *self.module_config = ModuleConfig::default();
+
+            return response;
         }
         if self.module_slots < self.module_config.modules.len() {
             self.module_config.modules.truncate(self.module_slots);
-            if let Some(&mut ref mut changed) = self.changed {
-                *changed = true;
-            }
+            response.mark_changed();
         }
         ui.horizontal(|ui| {
             // 获取所有插件和信标的综合
@@ -328,8 +321,9 @@ impl egui::Widget for ModuleConfigEditor<'_> {
 
                         if icon.clicked_by(egui::PointerButton::Secondary) {
                             deleted = true;
+                            response.mark_changed();
                         }
-                        let mut selector = Selector::new(self.ctx, "item")
+                        let selector = Selector::new(self.ctx, "item")
                             .with_current(slot)
                             .with_filter(|s: &IdWithQuality, f: &FactorioContext| {
                                 if let Some(module_proto) = f.modules.get(&s.0) {
@@ -343,13 +337,13 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                     false
                                 }
                             });
-                        if let Some(&mut ref mut changed) = self.changed {
-                            selector = selector.notify_change(changed);
-                        }
-                        let mut widget = SelectorModal::new(icon.id, self.ctx, "选择插件")
+
+                        let widget = SelectorModal::new(icon.id, self.ctx, "选择插件")
                             .with_toggle(icon.clicked())
                             .with_selector(selector);
-                        ui.add(widget);
+                        if ui.add(widget).changed() {
+                            response.mark_changed();
+                        }
                         !deleted
                     });
 
@@ -361,7 +355,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                             )
                             .interact(egui::Sense::click());
                         let mut selected: Option<IdWithQuality> = None;
-                        let mut selector = Selector::new(self.ctx, "item")
+                        let selector = Selector::new(self.ctx, "item")
                             .with_output(&mut selected)
                             .with_filter(|s: &IdWithQuality, f: &FactorioContext| {
                                 if let Some(module_proto) = f.modules.get(&s.0) {
@@ -375,15 +369,15 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                     false
                                 }
                             });
-                        if let Some(&mut ref mut changed) = self.changed {
-                            selector = selector.notify_change(changed);
-                        }
-                        let mut widget = SelectorModal::new(icon.id, self.ctx, "填充插件")
+
+                        let widget = SelectorModal::new(icon.id, self.ctx, "填充插件")
                             .with_toggle(icon.clicked())
                             .with_selector(selector);
 
-                        ui.add(widget);
+                        ui.add(widget).changed();
+
                         if let Some(selected) = selected {
+                            response.mark_changed();
                             while self.module_config.modules.len() <= idx {
                                 self.module_config.modules.push(selected.clone());
                             }
@@ -398,14 +392,13 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                         ui.vertical(|ui| {
                             if ui.button("删除").clicked() {
                                 deleted = true;
+                                response.mark_changed();
                             }
                             let widget = egui::DragValue::new(&mut beacon_config.count)
                                 .range(1..=100)
                                 .clamp_existing_to_range(true);
-                            if ui.add(widget).changed()
-                                && let Some(&mut ref mut changed) = self.changed
-                            {
-                                *changed = true;
+                            if ui.add(widget).changed() {
+                                response.mark_changed();
                             }
                         });
                         ui.separator();
@@ -424,19 +417,18 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                     },
                                 )
                                 .interact(egui::Sense::click());
-                            let mut selector = Selector::new(self.ctx, "entity")
+                            let selector = Selector::new(self.ctx, "entity")
                                 .with_current(&mut beacon_config.beacon)
                                 .with_filter(|s: &IdWithQuality, f: &FactorioContext| {
                                     f.beacons.contains_key(&s.0)
                                 });
-                            if let Some(&mut ref mut changed) = self.changed {
-                                selector = selector.notify_change(changed);
-                            }
-                            let mut widget = SelectorModal::new(icon.id, self.ctx, "选择插件塔")
+                            let widget = SelectorModal::new(icon.id, self.ctx, "选择插件塔")
                                 .with_toggle(icon.clicked())
                                 .with_selector(selector);
 
-                            ui.add(widget);
+                            if ui.add(widget).changed() {
+                                response.mark_changed();
+                            }
                         });
                         ui.separator();
                         if let Some(beacon_proto) = self.ctx.beacons.get(&beacon_config.beacon.0) {
@@ -458,8 +450,9 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                         .interact(egui::Sense::click());
                                     if icon.clicked_by(egui::PointerButton::Secondary) {
                                         deleted = true;
+                                        response.mark_changed();
                                     }
-                                    let mut selector = Selector::new(self.ctx, "item")
+                                    let selector = Selector::new(self.ctx, "item")
                                         .with_current(id)
                                         .with_filter(|s: &IdWithQuality, f: &FactorioContext| {
                                             if let Some(module_proto) = f.modules.get(&s.0) {
@@ -479,14 +472,13 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                                 false
                                             }
                                         });
-                                    if let Some(&mut ref mut changed) = self.changed {
-                                        selector = selector.notify_change(changed);
-                                    }
-                                    let mut widget =
+                                    let widget =
                                         SelectorModal::new(icon.id, self.ctx, "选择插件")
                                             .with_toggle(icon.clicked())
                                             .with_selector(selector);
-                                    ui.add(widget);
+                                    if ui.add(widget).changed() {
+                                        response.mark_changed();
+                                    }
                                     let beacon_module_count = beacon_proto.module_slots as usize
                                         + if beacon_proto.quality_affects_module_slots {
                                             let quality_bonus = self.ctx.qualities
@@ -506,10 +498,8 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                             .clamp_existing_to_range(true)
                                             .speed(1),
                                     );
-                                    if amount_widget.changed()
-                                        && let Some(&mut ref mut changed) = self.changed
-                                    {
-                                        *changed = true;
+                                    if amount_widget.changed() {
+                                        response.mark_changed();
                                     }
 
                                     total_modules += *amount;

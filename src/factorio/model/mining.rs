@@ -305,16 +305,17 @@ impl EditorView for MiningMechanicInstance {
                         "矿物：{}",
                         ctx.get_display_name("entity", &self.resource)
                     ));
-                ui.add(
-                    SelectorModal::new(resource_button.id, ctx, "选择矿物")
-                        .with_toggle(resource_button.clicked())
-                        .with_selector(
-                            Selector::new(ctx, "entity")
-                                .with_current(&mut self.resource)
-                                .with_filter(|s, f| f.resources.contains_key(s))
-                                .notify_change(&mut changed),
-                        ),
-                );
+                changed |= ui
+                    .add(
+                        SelectorModal::new(resource_button.id, ctx, "选择矿物")
+                            .with_toggle(resource_button.clicked())
+                            .with_selector(
+                                Selector::new(ctx, "entity")
+                                    .with_current(&mut self.resource)
+                                    .with_filter(|s, f| f.resources.contains_key(s)),
+                            ),
+                    )
+                    .changed();
             });
             if changed {
                 // TODO 读取用户设定的偏好
@@ -331,7 +332,10 @@ impl EditorView for MiningMechanicInstance {
             ui.vertical(|ui| {
                 ui.add_sized([35.0, 15.0], egui::Label::new("机器"));
                 let entity_button = ui
-                    .add_sized([35.0, 35.0], Icon::new(ctx, "entity", &self.machine.0))
+                    .add_sized(
+                        [35.0, 35.0],
+                        Icon::new(ctx, "entity", &self.machine.0).with_quality(self.machine.1),
+                    )
                     .interact(egui::Sense::click())
                     .on_hover_text(if ctx.miners.contains_key(&self.machine.0) {
                         ctx.get_display_name("entity", &self.machine.0)
@@ -340,37 +344,37 @@ impl EditorView for MiningMechanicInstance {
                     });
 
                 if let Some(resource_proto) = ctx.resources.get(&self.resource) {
-                    ui.add(
-                        SelectorModal::new(entity_button.id, ctx, "选择采矿设备")
-                            .with_toggle(entity_button.clicked())
-                            .with_selector(
-                                Selector::new(ctx, "entity")
-                                    .with_current(&mut self.machine)
-                                    .with_filter(|s: &IdWithQuality, f: &FactorioContext| {
-                                        if let Some(miner) = f.miners.get(&s.0) {
-                                            machine_fits_for_resource(miner, resource_proto)
-                                        } else {
-                                            false
-                                        }
-                                    })
-                                    .notify_change(&mut changed),
-                            ),
-                    );
+                    changed |= ui
+                        .add(
+                            SelectorModal::new(entity_button.id, ctx, "选择采矿设备")
+                                .with_toggle(entity_button.clicked())
+                                .with_selector(
+                                    Selector::new(ctx, "entity")
+                                        .with_current(&mut self.machine)
+                                        .with_filter(|s: &IdWithQuality, f: &FactorioContext| {
+                                            if let Some(miner) = f.miners.get(&s.0) {
+                                                machine_fits_for_resource(miner, resource_proto)
+                                            } else {
+                                                false
+                                            }
+                                        }),
+                                ),
+                        )
+                        .changed();
                 }
             });
             ui.separator();
 
             if let Some(miner) = ctx.miners.get(&self.machine.0) {
-                ui.add(
-                    ModuleConfigEditor::new(
+                changed |= ui
+                    .add(ModuleConfigEditor::new(
                         ctx,
                         &mut self.module_config,
                         miner.module_slots as usize,
                         &miner.allowed_effects,
                         &miner.allowed_module_categories,
-                    )
-                    .notify_change(&mut changed),
-                );
+                    ))
+                    .changed();
             }
         });
         // 先不判断

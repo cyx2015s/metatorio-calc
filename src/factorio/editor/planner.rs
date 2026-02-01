@@ -69,6 +69,7 @@ impl<'de> serde::Deserialize<'de> for FactoryInstance {
             .registered_types()
             .into_iter()
             .collect::<HashSet<_>>();
+        dbg!(&not_deserialized_mechanics);
         for mechanic in value["mechanics"].as_array().unwrap_or(&vec![]) {
             if mechanic["type"]
                 .as_str()
@@ -352,7 +353,7 @@ impl EditorView for FactoryInstance {
                                             ui.horizontal(|ui| {
                                                 match item {
                                                     GenericItem::Item(item_with_quality) => {
-                                                        ui.add(
+                                                        changed |= ui.add(
                                                             SelectorModal::new(
                                                                 icon.id.with("target-select-item"),
                                                                 ctx,
@@ -360,14 +361,13 @@ impl EditorView for FactoryInstance {
                                                             )
                                                             .with_toggle(icon.clicked()).with_selector(Selector::new(ctx, "item")
                                                             .with_current(item_with_quality)
-                                                            .notify_change(&mut changed)),
-                                                        );
+                                                        )).changed();
                                                     }
                                                     GenericItem::Fluid {
                                                         name,
                                                         temperature: _,
                                                     } => {
-                                                        ui.add(
+                                                        changed |= ui.add(
                                                             SelectorModal::new(
                                                                 egui::Id::new(
                                                                     "target-select-fluid",
@@ -377,8 +377,7 @@ impl EditorView for FactoryInstance {
                                                             )
                                                             .with_toggle(icon.clicked()).with_selector(Selector::new(ctx, "fluid")
                                                             .with_current(name)
-                                                            .notify_change(&mut changed)),
-                                                        );
+                                                        )).changed();
                                                     }
                                                     _ => {}
                                                 }
@@ -469,7 +468,7 @@ impl EditorView for FactoryInstance {
                                         ui.horizontal(|ui| {
                                             match item {
                                                 GenericItem::Item(item_with_quality) => {
-                                                    ui.add(
+                                                    changed |= ui.add(
                                                         SelectorModal::new(
                                                             icon.id.with("target-select-item"),
                                                             ctx,
@@ -478,14 +477,14 @@ impl EditorView for FactoryInstance {
                                                         .with_toggle(icon.clicked())
                                                         .with_selector(Selector::new(ctx, "item")
                                                         .with_current(item_with_quality)
-                                                        .notify_change(&mut changed)),
-                                                    );
+                                                        ),
+                                                    ).changed();
                                                 }
                                                 GenericItem::Fluid {
                                                     name,
                                                     temperature: _,
                                                 } => {
-                                                    ui.add(
+                                                    changed |= ui.add(
                                                         SelectorModal::new(
                                                             egui::Id::new("target-selecte-fluid"),
                                                             ctx,
@@ -493,11 +492,11 @@ impl EditorView for FactoryInstance {
                                                         )
                                                         .with_toggle(icon.clicked()).with_selector(Selector::new(ctx, "fluid")
                                                         .with_current(name)
-                                                        .notify_change(&mut changed)),
-                                                    );
+                                                        ),
+                                                    ).changed();
                                                 }
                                                 GenericItem::Entity(entity_with_quality) => {
-                                                    ui.add(
+                                                    changed |= ui.add(
                                                         SelectorModal::new(
                                                             icon.id.with("target-select-entity"),
                                                             ctx,
@@ -505,8 +504,8 @@ impl EditorView for FactoryInstance {
                                                         )
                                                         .with_toggle(icon.clicked()).with_selector(Selector::new(ctx, "entity")
                                                         .with_current(entity_with_quality)
-                                                        .notify_change(&mut changed)),
-                                                    );
+                                                        ),
+                                                    ).changed();
                                                 }
                                                 _ => {}
                                             }

@@ -626,7 +626,7 @@ impl EditorView for RecipeMechanicInstance {
                             prototype: ctx.recipes.get(&self.recipe.0).unwrap(),
                         });
                     });
-                ui.add(
+                changed |= ui.add(
                     SelectorModal::new(recipe_button.id, ctx, "选择配方")
                         .with_toggle(recipe_button.clicked())
                         .with_selector(
@@ -638,10 +638,9 @@ impl EditorView for RecipeMechanicInstance {
                                     } else {
                                         ui.label(format!("未知配方: {}", name.0));
                                     }
-                                })
-                                .notify_change(&mut changed),
+                                }),
                         ),
-                );
+                ).changed();
             });
             if changed {
                 // TODO 读取用户设定的偏好
@@ -667,12 +666,8 @@ impl EditorView for RecipeMechanicInstance {
                             )),
                         ),
                     )
-                    .interact(egui::Sense::click())
-                    .on_hover_text(if ctx.crafters.contains_key(&self.machine.0) {
-                        ctx.get_display_name("entity", &self.machine.0)
-                    } else {
-                        "组装机：未选择".to_string()
-                    });
+                    .interact(egui::Sense::click());
+                    
 
                 let recipe_prototype = ctx.recipes.get(self.recipe.0.as_str()).unwrap();
                 let selector = Selector::new(ctx, "entity")
@@ -682,12 +677,12 @@ impl EditorView for RecipeMechanicInstance {
                         }
                         false
                     })
-                    .with_current(&mut self.machine)
-                    .notify_change(&mut changed);
+                    .with_current(&mut self.machine);
+
                 let widget = SelectorModal::new(entity_button.id, ctx, "选择制造设备")
                     .with_toggle(entity_button.clicked())
                     .with_selector(selector);
-                ui.add(widget);
+                changed |= ui.add(widget).changed();
             });
 
             ui.separator();
@@ -720,16 +715,13 @@ impl EditorView for RecipeMechanicInstance {
                     }
                 };
 
-                ui.add(
-                    ModuleConfigEditor::new(
-                        ctx,
-                        &mut self.module_config,
-                        crafter.module_slots as usize,
-                        &Some(allowed_effects),
-                        allowed_module_categories,
-                    )
-                    .notify_change(&mut changed),
-                );
+                changed |= ui.add(ModuleConfigEditor::new(
+                    ctx,
+                    &mut self.module_config,
+                    crafter.module_slots as usize,
+                    &Some(allowed_effects),
+                    allowed_module_categories,
+                )).changed();
             };
         });
 
