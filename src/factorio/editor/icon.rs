@@ -158,15 +158,19 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                     .1;
                 ui.put(
                     right_bottom,
-                    egui::Label::new(egui::RichText::new("E").color(egui::Color32::WHITE).strong())
-                        .selectable(false),
+                    egui::Label::new(
+                        egui::RichText::new("E")
+                            .color(egui::Color32::WHITE)
+                            .strong(),
+                    )
+                    .selectable(false),
                 );
                 main
             }
 
             GenericItem::Heat => ui.add_sized([self.size, self.size], egui::Label::new("热量")),
             GenericItem::Electricity => {
-                ui.add_sized([self.size, self.size], egui::Label::new("电力"))
+                ui.add_sized([self.size, self.size], egui::Label::new("电能"))
             }
             GenericItem::FluidHeat { filter } => match filter {
                 Some(fluid) => {
@@ -227,14 +231,14 @@ impl Display for GenericIcon<'_> {
                 )
             }
             GenericItem::Heat => write!(f, "热量"),
-            GenericItem::Electricity => write!(f, "电力"),
+            GenericItem::Electricity => write!(f, "电能"),
             GenericItem::FluidHeat { filter } => match filter {
                 Some(fluid) => write!(
                     f,
                     "通过热交换 {} 获得能量",
                     self.ctx.get_display_name("fluid", fluid)
                 ),
-                None => write!(f, "任意来源的液体热量"),
+                None => write!(f, "任意来源的流体热量"),
             },
             GenericItem::FluidFuel { filter } => match filter {
                 Some(fluid) => write!(
@@ -242,7 +246,7 @@ impl Display for GenericIcon<'_> {
                     "通过燃烧 {} 获得的能量",
                     self.ctx.get_display_name("fluid", fluid)
                 ),
-                None => write!(f, "任意来源的液体燃料"),
+                None => write!(f, "任意来源的流体燃料"),
             },
             GenericItem::ItemFuel { category } => write!(f, "燃料类别: {}", category),
             GenericItem::RocketPayloadWeight => write!(f, "重量载荷"),

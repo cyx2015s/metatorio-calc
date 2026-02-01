@@ -14,7 +14,7 @@ pub fn setup_toasts() -> egui_toast::Toasts {
                 DownloadProgress::Pending => {
                     log::info!("更新下载等待中");
                     toast.close();
-                    return ui.response().clone();
+                    ui.response().clone()
                 }
                 DownloadProgress::InProgress(current, total) => {
                     let inner_margin = 10.0;
@@ -59,14 +59,14 @@ pub fn setup_toasts() -> egui_toast::Toasts {
                     ));
                     ui.painter().add(frame_shape);
 
-                    return response;
+                    response
                 }
                 DownloadProgress::Completed => {
                     log::info!("更新下载完成");
                     toast.kind = ToastKind::Success;
                     toast.text = "更新下载完成。".into();
                     toast.options.duration_in_seconds(3.0);
-                    return ui.response().clone();
+                    ui.response().clone()
                 }
             }
         })

@@ -725,19 +725,11 @@ impl EditorView for RecipeMechanicInstance {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename = "factorio:recipe", default)]
+#[derive(Default)]
 pub struct RecipeMechanic {
     pub instances: Vec<RecipeMechanicInstance>,
 
     pub suggestions: Vec<RecipeMechanicInstance>,
-}
-
-impl Default for RecipeMechanic {
-    fn default() -> Self {
-        RecipeMechanic {
-            instances: Vec::new(),
-            suggestions: Vec::new(),
-        }
-    }
 }
 
 impl SolveContext for RecipeMechanic {

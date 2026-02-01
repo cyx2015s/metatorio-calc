@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use egui::Vec2;
 
-use crate::factorio::{IdWithQuality, editor::icon::*, model::*};
+use crate::factorio::{IdWithQuality, editor::icon::*, modal::SelectorModal, model::*};
 
 #[derive(Debug, Clone, Default)]
 pub struct SelectorStorage {
@@ -312,5 +312,179 @@ fn quality_selector(
                 }
             }
         });
+    changed
+}
+
+pub fn generic_item_selector(
+    ui: &mut egui::Ui,
+    ctx: &FactorioContext,
+    selected: &mut GenericItem,
+    response: &egui::Response,
+    id: egui::Id,
+) -> bool {
+    let mut changed = false;
+    let toggle = response.clicked();
+    let clear = response.secondary_clicked();
+    ui.vertical(|ui| {
+        egui::ComboBox::from_id_salt(id)
+            .selected_text(selected.to_string())
+            .show_ui(ui, |ui| {
+                ui.selectable_value(selected, GenericItem::Item("item-unknown".into()), "物品");
+                ui.selectable_value(
+                    selected,
+                    GenericItem::Fluid {
+                        name: "fluid-unknown".to_string(),
+                        temperature: None,
+                    },
+                    "流体",
+                );
+                ui.selectable_value(
+                    selected,
+                    GenericItem::Entity("entity-unknown".into()),
+                    "实体",
+                );
+                ui.selectable_value(selected, GenericItem::Heat, "热能");
+                ui.selectable_value(selected, GenericItem::Electricity, "电能");
+                ui.selectable_value(
+                    selected,
+                    GenericItem::FluidHeat { filter: None },
+                    "流体热源",
+                );
+                ui.selectable_value(
+                    selected,
+                    GenericItem::FluidFuel { filter: None },
+                    "流体燃料",
+                );
+
+                ui.selectable_value(
+                    selected,
+                    GenericItem::ItemFuel {
+                        category: "chemical".to_string(),
+                    },
+                    "物体燃料",
+                );
+                ui.selectable_value(selected, GenericItem::RocketPayloadWeight, "重量载荷");
+                ui.selectable_value(selected, GenericItem::RocketPayloadStack, "堆叠载荷");
+                ui.selectable_value(
+                    selected,
+                    GenericItem::Pollution {
+                        name: "pollution".to_string(),
+                    },
+                    "污染物",
+                );
+            });
+        match selected {
+            GenericItem::Item(id_with_quality) => {
+                changed |= ui
+                    .add(
+                        SelectorModal::new(id.with("select-item"), ctx, "选择物品")
+                            .with_toggle(toggle)
+                            .with_selector(
+                                Selector::new(ctx, "item").with_current(id_with_quality),
+                            ),
+                    )
+                    .changed();
+            }
+            GenericItem::Fluid { name, temperature } => {
+                changed |= ui
+                    .add(
+                        SelectorModal::new(egui::Id::new("target-select-fluid"), ctx, "选择流体")
+                            .with_toggle(toggle)
+                            .with_selector(Selector::new(ctx, "fluid").with_current(name)),
+                    )
+                    .changed();
+                if let Some(temp) = temperature {
+                    let mut cur_temp = *temp;
+                    ui.horizontal(|ui| {
+                        changed |= ui
+                            .add(egui::DragValue::new(&mut cur_temp).speed(1))
+                            .changed();
+
+                        if ui.button("移除温度").clicked() {
+                            *temperature = None;
+                            changed = true;
+                        } else {
+                            *temperature = Some(cur_temp);
+                        }
+                    });
+                } else if ui.button("附加温度").clicked() {
+                    *temperature = Some(
+                        ctx.fluids
+                            .get(name)
+                            .map(|f| f.default_temperature)
+                            .unwrap_or(15.0) as i32,
+                    );
+                    changed = true;
+                }
+            }
+            GenericItem::Entity(id_with_quality) => {
+                changed |= ui
+                    .add(
+                        SelectorModal::new(id.with("select-entity"), ctx, "选择实体")
+                            .with_toggle(toggle)
+                            .with_selector(
+                                Selector::new(ctx, "entity").with_current(id_with_quality),
+                            ),
+                    )
+                    .changed();
+            }
+            GenericItem::Heat => {}
+            GenericItem::Electricity => {}
+            GenericItem::FluidHeat { filter } => {
+                changed |= ui
+                    .add(
+                        SelectorModal::new(id.with("select-fluid-heat"), ctx, "选择流体热源来源")
+                            .with_toggle(toggle)
+                            .with_selector(match filter {
+                                Some(fluid_name) => {
+                                    Selector::new(ctx, "fluid").with_current(fluid_name)
+                                }
+                                None => Selector::new(ctx, "fluid"),
+                            }),
+                    )
+                    .changed();
+                if clear {
+                    *filter = None;
+                    changed = true;
+                }
+            }
+            GenericItem::FluidFuel { filter } => {
+                if clear {
+                    *filter = None;
+                    changed = true;
+                }
+                changed |= ui
+                    .add(
+                        SelectorModal::new(id, ctx, "选择流体燃料")
+                            .with_toggle(toggle)
+                            .with_selector(Selector::new(ctx, "fluid").with_output(filter)),
+                    )
+                    .changed();
+            }
+            GenericItem::ItemFuel { category } => {
+                egui::ComboBox::from_id_salt(id.with("item-fuel-category"))
+                    .selected_text(category.clone())
+                    .show_ui(ui, |ui| {
+                        for cat in ctx.order_of_entries["fuel-category"].keys() {
+                            changed |= ui.selectable_value(category, cat.clone(), cat).clicked();
+                        }
+                    });
+            }
+            GenericItem::RocketPayloadWeight => {}
+            GenericItem::RocketPayloadStack => {}
+            GenericItem::Pollution { name } => {
+                egui::ComboBox::from_id_salt(id.with("pollution-type"))
+                    .selected_text(name.clone())
+                    .show_ui(ui, |ui| {
+                        for pollution in ctx.order_of_entries["airborne-pollutant"].keys() {
+                            changed |= ui
+                                .selectable_value(name, pollution.clone(), pollution)
+                                .clicked();
+                        }
+                    });
+            }
+            _ => {}
+        }
+    });
     changed
 }

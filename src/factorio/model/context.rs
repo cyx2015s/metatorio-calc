@@ -43,6 +43,7 @@ pub struct FactorioContext {
 
     /// 燃料类型
     pub fuel_categories: Dict<PrototypeBase>,
+    pub airborne_pollutants: Dict<PrototypeBase>,
 
     /// 地点
     pub planets: Dict<PlanetPrototype>,
@@ -113,6 +114,13 @@ impl FactorioContext {
         let fuel_categories = serde_json::from_value::<Dict<PrototypeBase>>(
             value
                 .get("fuel-category")
+                .cloned()
+                .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
+        )
+        .unwrap();
+        let airborne_pollutants = serde_json::from_value::<Dict<PrototypeBase>>(
+            value
+                .get("airborne-pollutant")
                 .cloned()
                 .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
         )
@@ -222,11 +230,16 @@ impl FactorioContext {
                 .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
         )
         .unwrap();
-        let ret = FactorioContext {
+
+        // ret.planets.iter().for_each(|(_, p)| {
+        //     dbg!(p.collect_autoplaced(&ret));
+        // });
+        FactorioContext {
             qualities,
             groups,
             subgroups,
             fuel_categories,
+            airborne_pollutants,
             items,
             modules,
             beacons,
@@ -239,11 +252,7 @@ impl FactorioContext {
             planets,
             tiles,
             ..Default::default()
-        };
-        // ret.planets.iter().for_each(|(_, p)| {
-        //     dbg!(p.collect_autoplaced(&ret));
-        // });
-        ret
+        }
     }
 
     pub fn load_from_executable_path(
@@ -431,7 +440,7 @@ impl FactorioContext {
                                     .ok_or(AppError::ContextCreation(
                                         "模组的info.json的version字段不是字符串".to_string(),
                                     ))?;
-                                let new_version = version_string_to_triplet(&version);
+                                let new_version = version_string_to_triplet(version);
                                 let old_version =
                                     version_string_to_triplet(mod_info.version.as_str());
                                 if old_version <= new_version {
@@ -543,6 +552,22 @@ impl FactorioContext {
     }
 
     pub fn build_order_info(mut self) -> Self {
+        self.ordered_entries.insert(
+            "fuel-category".to_string(),
+            get_order_info(&self.fuel_categories, &self.groups, &self.subgroups),
+        );
+        self.order_of_entries.insert(
+            "fuel-category".into(),
+            get_reverse_order_info(&self.ordered_entries["fuel-category"]),
+        );
+        self.ordered_entries.insert(
+            "airborne-pollutant".to_string(),
+            get_order_info(&self.airborne_pollutants, &self.groups, &self.subgroups),
+        );
+        self.order_of_entries.insert(
+            "airborne-pollutant".into(),
+            get_reverse_order_info(&self.ordered_entries["airborne-pollutant"]),
+        );
         self.ordered_entries.insert(
             "item".to_string(),
             get_order_info(&self.items, &self.groups, &self.subgroups),
@@ -688,7 +713,7 @@ impl Display for GenericItem {
             "{}",
             match self {
                 GenericItem::Item(..) => "物品",
-                GenericItem::Fluid {..} => "流体",
+                GenericItem::Fluid { .. } => "流体",
                 GenericItem::Entity(..) => "实体",
                 GenericItem::Heat => "热能",
                 GenericItem::Electricity => "电能",

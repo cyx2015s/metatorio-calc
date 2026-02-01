@@ -259,7 +259,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
             })
             .inner;
         if self.module_slots == 0 {
-            if self.module_config.modules.len() > 0 || self.module_config.beacons.len() > 0 {
+            if !self.module_config.modules.is_empty() || !self.module_config.beacons.is_empty() {
                 response.mark_changed();
             }
             *self.module_config = ModuleConfig::default();

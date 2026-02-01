@@ -167,23 +167,20 @@ impl eframe::App for MainPage {
                         .unwrap();
                 }
                 let response = self.response_receiver.try_recv();
-                match response {
-                    Ok(response) => {
-                        self.suitable_release = response;
-                        match self.suitable_release {
-                            Ok(_) => {}
-                            Err(ref err) => match err {
-                                error::AppError::UpToDate => {
-                                    toast::success("当前已是最新版本。");
-                                }
-                                error::AppError::None => {}
-                                err => {
-                                    toast::error(format!("更新检查失败: {:?}", err));
-                                }
-                            },
-                        }
+                if let Ok(response) = response {
+                    self.suitable_release = response;
+                    match self.suitable_release {
+                        Ok(_) => {}
+                        Err(ref err) => match err {
+                            error::AppError::UpToDate => {
+                                toast::success("当前已是最新版本。");
+                            }
+                            error::AppError::None => {}
+                            err => {
+                                toast::error(format!("更新检查失败: {:?}", err));
+                            }
+                        },
                     }
-                    _ => {}
                 }
                 match &mut self.suitable_release {
                     Ok(release) => {
@@ -204,6 +201,8 @@ impl eframe::App for MainPage {
                             if ui.button("重启应用").clicked() {
                                 std::process::Command::new(std::env::current_exe().unwrap())
                                     .spawn()
+                                    .unwrap()
+                                    .wait()
                                     .unwrap();
                                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                             }

@@ -169,7 +169,7 @@ pub fn energy_source_as_flow(
                 }
                 // 燃烧流体作为燃料
             } else {
-                // 利用流体热能
+                // 利用流体热源
                 if let Some(actual_fuel) = instance_fuel {
                     // 使用具体燃料
                     let fuel_prototype = ctx

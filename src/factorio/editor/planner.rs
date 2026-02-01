@@ -8,7 +8,7 @@ use crate::{
         editor::{icon::*, modal::*},
         format::*,
         model::*,
-        selector::Selector,
+        selector::generic_item_selector,
         style::card_frame,
     },
     solver::*,
@@ -145,8 +145,7 @@ impl FactoryInstance {
         let flows = self
             .mechanics
             .iter()
-            .map(|mechanic| mechanic.instances())
-            .flatten()
+            .flat_map(|mechanic| mechanic.instances())
             .map(|fe| (ref_as_ptr(fe), (fe.as_flow(ctx), fe.cost(ctx))))
             .collect::<IndexMap<usize, (_, _)>>();
         let target = self
@@ -323,249 +322,108 @@ impl EditorView for FactoryInstance {
                 }
             }
         }
-        // let err_info = ui.memory(|mem| mem.data.get_temp::<String>(id));
 
         egui::SidePanel::new(egui::containers::panel::Side::Left, egui::Id::new("target"))
             .show_separator_line(true)
             .frame(egui::Frame::NONE.corner_radius(8.0).inner_margin(4.0))
             .show_inside(ui, |ui: &mut egui::Ui| {
                 egui::ScrollArea::vertical().id_salt(1).show(ui, |ui| {
+                    ui.heading("优化目标");
+                    self.target.retain_mut(|(item, amount)| {
+                    let mut deleted = false;
                     ui.horizontal_top(|ui| {
-                        ui.vertical(|ui| {
-                            ui.heading("优化目标");
-                            self.target.retain_mut(|(item, amount)| {
-                                let mut deleted = false;
-                                card_frame(ui).show(ui, |ui| {
-                                    ui.set_min_width(ui.available_width());
-                                    ui.horizontal_wrapped(|ui| {
-                                        let icon = ui
-                                            .vertical(|ui| {
-                                                let icon = ui
-                                                    .add_sized(
-                                                        [35.0, 35.0],
-                                                        GenericIcon::new(ctx, item),
-                                                    )
-                                                    .interact(egui::Sense::click());
-                                                if ui.button("删除").clicked() {
-                                                    deleted = true;
-                                                    changed = true;
-                                                }
-                                                icon
-                                            })
-                                            .inner;
-                                        if icon.clicked_by(egui::PointerButton::Secondary) {
-                                            need_suggestions = true;
-                                            self.mechanics.iter_mut().for_each(|mechanic| {
-                                                mechanic.update_suggestion(
-                                                    ctx,
-                                                    item,
-                                                    -*amount, // 目标产量为正表示目前缺少对应数量的物品
-                                                )
-                                            });
-                                        }
-                                        ui.vertical(|ui| {
-                                            egui::ComboBox::new(icon.id, "")
-                                                .selected_text(item.to_string())
-                                                .show_ui(ui, |ui| {
-                                                    ui.selectable_value(
-                                                        item,
-                                                        GenericItem::Item("item-unknown".into()),
-                                                        "物品",
-                                                    );
-                                                    ui.selectable_value(
-                                                        item,
-                                                        GenericItem::Fluid {
-                                                            name: "fluid-unknown".to_string(),
-                                                            temperature: None,
-                                                        },
-                                                        "流体",
-                                                    );
-                                                });
-                                            ui.horizontal(|ui| {
-                                                match item {
-                                                    GenericItem::Item(item_with_quality) => {
-                                                        changed |= ui.add(
-                                                            SelectorModal::new(
-                                                                icon.id.with("target-select-item"),
-                                                                ctx,
-                                                                "选择物品",
-                                                            )
-                                                            .with_toggle(icon.clicked()).with_selector(Selector::new(ctx, "item")
-                                                            .with_current(item_with_quality)
-                                                        )).changed();
-                                                    }
-                                                    GenericItem::Fluid {
-                                                        name,
-                                                        temperature: _,
-                                                    } => {
-                                                        changed |= ui.add(
-                                                            SelectorModal::new(
-                                                                egui::Id::new(
-                                                                    "target-select-fluid",
-                                                                ),
-                                                                ctx,
-                                                                "选择流体",
-                                                            )
-                                                            .with_toggle(icon.clicked()).with_selector(Selector::new(ctx, "fluid")
-                                                            .with_current(name)
-                                                        )).changed();
-                                                    }
-                                                    _ => {}
-                                                }
-                                                if ui.vertical(|ui| {
-                                                    ui.label("目标产量");
-                                                    ui.add(
-                                                        egui::DragValue::new(amount).suffix("/秒"),
-                                                    )
-                                                }).inner.changed() {
-                                                    changed = true;
-                                                }
-                                            });
-                                        });
-                                    });
+                        card_frame(ui).show(ui, |ui| {
+                            ui.vertical(|ui| {
+                                ui.label("目标产量");
+                                changed |= ui.add(egui::DragValue::new(amount).suffix("/秒")).changed();
+                                if ui.button("删除").clicked() {
+                                    deleted = true;
+                                    changed = true;
+                                }
                                 });
-                                !deleted
                             });
-                            if ui.button("添加目标产物").clicked() {
-                                self.target
-                                    .push((GenericItem::Item("item-unknown".into()), 1.0));
+                        card_frame(ui).show(ui, |ui| {
+                            ui.set_min_width(ui.available_width());
+                            ui.horizontal_wrapped(|ui| {
+                            let icon = ui.add_sized([35.0, 35.0],GenericIcon::new(ctx, item)).interact(egui::Sense::click());
+                            if icon.clicked_by(egui::PointerButton::Secondary) {
+                                need_suggestions = true;
+                                self.mechanics.iter_mut().for_each(|mechanic| {
+                                    mechanic.update_suggestion(
+                                        ctx,
+                                        item,
+                                        -*amount, // 目标产量为正表示目前缺少对应数量的物品
+                                    )
+                                });
+                            }
+                            ui.vertical(|ui| {
+                                ui.horizontal(|ui| {
+                                    changed |= generic_item_selector(ui, ctx, item, &icon, icon.id.with("target"));
+                                });
+                            });
+                        });
+                    });});
+                    !deleted
+                });
+                if ui.button("添加目标产物").clicked() {
+                    self.target
+                        .push((GenericItem::Item("item-unknown".into()), 1.0));
+                    changed = true;
+                }
+                ui.separator();
+                ui.heading("额外输入");
+                self.external.retain_mut(|(item, penalty)| {
+                    let mut deleted = false;
+                    ui.horizontal_top(|ui| {
+                        card_frame(ui).show(ui, |ui| {
+                            ui.vertical(|ui| {
+                            ui.label("单位价值");
+                            changed |= ui.add(egui::DragValue::new(penalty).suffix("·秒")).changed();
+                            if ui.button("删除").clicked() {
+                                deleted = true;
                                 changed = true;
                             }
-                        })
+                        });
                     });
-                    ui.separator();
-                    ui.vertical(|ui| {
-                        ui.heading("额外输入");
-                        self.external.retain_mut(|(item, penalty)| {
-                            let mut deleted = false;
-                            card_frame(ui).show(ui, |ui| {
-                                ui.set_min_width(ui.available_width());
-                                ui.horizontal_wrapped(|ui| {
-                                    let mut icon = ui
-                                        .vertical(|ui| {
-                                            let icon = ui
-                                                .add_sized(
-                                                    [35.0, 35.0],
-                                                    GenericIcon::new(ctx, item),
-                                                )
-                                                .interact(egui::Sense::click());
-                                            if ui.button("删除").clicked() {
-                                                deleted = true;
-                                                changed = true;
-                                            }
-                                            icon
-                                        })
-                                        .inner;
-                                    if let GenericItem::Entity(..) = item {
-                                        icon = icon.on_hover_text("⚠️ 指完成机制所消耗的实体资源（主要是矿物），不包括为了完成机制所需要收集的组装机、采矿机、插件塔等。")
-                                    }
-                                    if icon.clicked_by(egui::PointerButton::Secondary) {
-                                        need_suggestions = true;
-                                        self.mechanics.iter_mut().for_each(|mechanic| {
-                                            mechanic.update_suggestion(
-                                                ctx,
-                                                item,
-                                                1.0, // 尝试消耗更多该物品
-                                            )
-                                        });
-                                    }
-                                    ui.vertical(|ui| {
-                                        egui::ComboBox::new(icon.id, "")
-                                            .selected_text(item.to_string())
-                                            .show_ui(ui, |ui| {
-                                                ui.selectable_value(
-                                                    item,
-                                                    GenericItem::Item("item-unknown".into()),
-                                                    "物品",
-                                                );
-                                                ui.selectable_value(
-                                                    item,
-                                                    GenericItem::Fluid {
-                                                        name: "fluid-unknown".to_string(),
-                                                        temperature: None,
-                                                    },
-                                                    "流体",
-                                                );
-                                                ui.selectable_value(
-                                                    item,
-                                                    GenericItem::Entity("entity-unknown".into()),
-                                                    "实体",
-                                                );
-                                            });
-                                        ui.horizontal(|ui| {
-                                            match item {
-                                                GenericItem::Item(item_with_quality) => {
-                                                    changed |= ui.add(
-                                                        SelectorModal::new(
-                                                            icon.id.with("target-select-item"),
-                                                            ctx,
-                                                            "选择物品",
-                                                        )
-                                                        .with_toggle(icon.clicked())
-                                                        .with_selector(Selector::new(ctx, "item")
-                                                        .with_current(item_with_quality)
-                                                        ),
-                                                    ).changed();
-                                                }
-                                                GenericItem::Fluid {
-                                                    name,
-                                                    temperature: _,
-                                                } => {
-                                                    changed |= ui.add(
-                                                        SelectorModal::new(
-                                                            egui::Id::new("target-selecte-fluid"),
-                                                            ctx,
-                                                            "选择流体",
-                                                        )
-                                                        .with_toggle(icon.clicked()).with_selector(Selector::new(ctx, "fluid")
-                                                        .with_current(name)
-                                                        ),
-                                                    ).changed();
-                                                }
-                                                GenericItem::Entity(entity_with_quality) => {
-                                                    changed |= ui.add(
-                                                        SelectorModal::new(
-                                                            icon.id.with("target-select-entity"),
-                                                            ctx,
-                                                            "选择实体",
-                                                        )
-                                                        .with_toggle(icon.clicked()).with_selector(Selector::new(ctx, "entity")
-                                                        .with_current(entity_with_quality)
-                                                        ),
-                                                    ).changed();
-                                                }
-                                                _ => {}
-                                            }
-                                            if ui.vertical(|ui| {
-                                                ui.label("单位价值");
-                                                ui.add(egui::DragValue::new(penalty).suffix("·秒"))
-                                            }).inner.changed() {
-                                                changed = true;
-                                            };
-                                            if *penalty < 0.0 {
-                                                *penalty = 0.0
-                                            }
-                                        });
-                                    });
+                    card_frame(ui).show(ui, |ui| {
+                        ui.set_min_width(ui.available_width());
+                        ui.horizontal_wrapped(|ui| {
+                            let mut icon = ui.add_sized([35.0, 35.0],GenericIcon::new(ctx, item)).interact(egui::Sense::click());
+                                        
+                            if let GenericItem::Entity(..) = item {
+                                icon = icon.on_hover_text("⚠️ 指完成机制所消耗的实体资源（主要是矿物），不包括为了完成机制所需要收集的组装机、采矿机、插件塔等。")
+                            }
+                            if icon.clicked_by(egui::PointerButton::Secondary) {
+                                need_suggestions = true;
+                                self.mechanics.iter_mut().for_each(|mechanic| {
+                                    mechanic.update_suggestion(
+                                        ctx,
+                                        item,
+                                        1.0, // 尝试消耗更多该物品
+                                    )
+                                });
+                            }
+                            ui.vertical(|ui| {
+                                ui.horizontal(|ui| {
+                                    changed |= generic_item_selector(ui, ctx, item, &icon, icon.id.with("external"));
                                 });
                             });
-                            !deleted
                         });
-                        if ui.button("添加外部输入").clicked() {
-                            self.external
-                                .push((GenericItem::Item("item-unknown".into()), 1.0));
-                            changed = true;
-                        }
-                    });
-                    ui.separator();
-                    ui.vertical(|ui| {
-                        ui.heading("游戏机制");
-                        for mechanic in self.mechanics.iter_mut() {
-                            changed |= mechanic.editor_view(ui, ctx);
-                        }
-                    })
+                    });});
+                    !deleted
                 });
+                if ui.button("添加外部输入").clicked() {
+                    self.external
+                        .push((GenericItem::Item("item-unknown".into()), 1.0));
+                    changed = true;
+                }
+                ui.separator();
+                ui.heading("游戏机制");
+                for mechanic in self.mechanics.iter_mut() {
+                    changed |= mechanic.editor_view(ui, ctx);
+                }
             });
+        });
 
         egui::Frame::NONE
             .corner_radius(8.0)
@@ -665,46 +523,45 @@ impl Subview for PlannerView {
                                     .into(),
                             );
                         }
-                        if ui.button("从文件加载工厂……").clicked() {
-                            if let Some(path) = rfd::FileDialog::new()
+                        if ui.button("从文件加载工厂……").clicked()
+                            && let Some(path) = rfd::FileDialog::new()
                                 .add_filter("异星工厂规划配置", &["fpc", "json"])
                                 .pick_file()
-                            {
-                                match std::fs::read_to_string(&path) {
-                                    Err(err) => {
-                                        crate::toast::error(format!(
-                                            "无法读取文件 {}: {}",
-                                            path.display(),
-                                            err
-                                        ));
-                                    }
-                                    Ok(content) => {
-                                        match serde_json::from_str::<FactoryInstance>(&content) {
-                                            Err(err) => {
-                                                crate::toast::error(format!(
-                                                    "无法解析文件 {}: {}",
-                                                    path.display(),
-                                                    err
+                        {
+                            match std::fs::read_to_string(&path) {
+                                Err(err) => {
+                                    crate::toast::error(format!(
+                                        "无法读取文件 {}: {}",
+                                        path.display(),
+                                        err
+                                    ));
+                                }
+                                Ok(content) => {
+                                    match serde_json::from_str::<FactoryInstance>(&content) {
+                                        Err(err) => {
+                                            crate::toast::error(format!(
+                                                "无法解析文件 {}: {}",
+                                                path.display(),
+                                                err
+                                            ));
+                                        }
+                                        Ok(factory) => {
+                                            let thread_path = path.clone();
+                                            std::thread::spawn(move || {
+                                                std::thread::sleep(
+                                                    std::time::Duration::from_millis(500),
+                                                );
+                                                crate::toast::success(format!(
+                                                    "从 {} 加载了新工厂",
+                                                    thread_path.display()
                                                 ));
-                                            }
-                                            Ok(factory) => {
-                                                let thread_path = path.clone();
-                                                std::thread::spawn(move || {
-                                                    std::thread::sleep(
-                                                        std::time::Duration::from_millis(500),
-                                                    );
-                                                    crate::toast::success(format!(
-                                                        "从 {} 加载了新工厂",
-                                                        thread_path.display()
-                                                    ));
-                                                });
-                                                factory.send_solve_request(&self.ctx);
-                                                self.factories.push(StatefulFactoryInstance {
-                                                    factory,
-                                                    saved: true,
-                                                    file_path: Some(path),
-                                                });
-                                            }
+                                            });
+                                            factory.send_solve_request(&self.ctx);
+                                            self.factories.push(StatefulFactoryInstance {
+                                                factory,
+                                                saved: true,
+                                                file_path: Some(path),
+                                            });
                                         }
                                     }
                                 }
@@ -730,20 +587,19 @@ impl Subview for PlannerView {
                                 self.selected_factory = idx;
                             }
                             button.context_menu(|ui| {
-                                if let Some(file_path) = factory.file_path.as_ref() {
-                                    if ui
+                                if let Some(file_path) = factory.file_path.as_ref()
+                                    && ui
                                         .add(egui::Button::new("保存").shortcut_text("Ctrl+S"))
                                         .clicked()
-                                    {
-                                        if let Ok(()) = save_to_file(&factory.factory, file_path) {
-                                            factory.saved = true;
-                                            crate::toast::success(format!(
-                                                "工厂已保存到 {}",
-                                                file_path.display()
-                                            ));
-                                        }
-                                        ui.close();
+                                {
+                                    if let Ok(()) = save_to_file(&factory.factory, file_path) {
+                                        factory.saved = true;
+                                        crate::toast::success(format!(
+                                            "工厂已保存到 {}",
+                                            file_path.display()
+                                        ));
                                     }
+                                    ui.close();
                                 }
                                 if ui
                                     .add(if factory.file_path.is_some() {
@@ -759,15 +615,14 @@ impl Subview for PlannerView {
                                             format!("{}.fpc", &factory.factory.name).as_str(),
                                         )
                                         .save_file()
+                                        && let Ok(()) = save_to_file(&factory.factory, &path)
                                     {
-                                        if let Ok(()) = save_to_file(&factory.factory, &path) {
-                                            factory.saved = true;
-                                            factory.file_path = Some(path.clone());
-                                            crate::toast::success(format!(
-                                                "工厂已保存到 {}",
-                                                path.display()
-                                            ));
-                                        }
+                                        factory.saved = true;
+                                        factory.file_path = Some(path.clone());
+                                        crate::toast::success(format!(
+                                            "工厂已保存到 {}",
+                                            path.display()
+                                        ));
                                     }
                                     ui.close();
                                 }
@@ -817,11 +672,11 @@ impl Subview for PlannerView {
                                 .save_file();
                             factory.file_path = file_path;
                         }
-                        if let Some(path) = factory.file_path.as_ref() {
-                            if let Ok(()) = save_to_file(&factory.factory, path) {
-                                crate::toast::success(format!("工厂已保存到 {}", path.display()));
-                                factory.saved = true;
-                            }
+                        if let Some(path) = factory.file_path.as_ref()
+                            && let Ok(()) = save_to_file(&factory.factory, path)
+                        {
+                            crate::toast::success(format!("工厂已保存到 {}", path.display()));
+                            factory.saved = true;
                         }
                     }
                 }

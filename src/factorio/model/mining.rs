@@ -170,7 +170,7 @@ impl AsFlow for MiningMechanicInstance {
             -base_speed * (1.0 + module_effects.speed) * drain_rate,
         );
 
-        // 计算开采液体的消耗
+        // 计算开采流体的消耗
         if let Some(fluid) = resource_ore
             .base
             .minable
@@ -402,18 +402,10 @@ fn test_mining_normalized() {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename = "factorio:recipe", default)]
+#[derive(Default)]
 pub struct MiningMechanic {
     pub instances: Vec<MiningMechanicInstance>,
     pub suggestions: Vec<MiningMechanicInstance>,
-}
-
-impl Default for MiningMechanic {
-    fn default() -> Self {
-        Self {
-            instances: vec![],
-            suggestions: vec![],
-        }
-    }
 }
 
 impl SolveContext for MiningMechanic {
