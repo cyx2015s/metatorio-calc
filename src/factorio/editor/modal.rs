@@ -102,10 +102,11 @@ impl egui::Widget for SelectorModal<'_, str, String> {
                 .show(ui, |ui| {
                     response = response.union(ui.add(widget));
                 });
+
+            if response.should_close() {
+                ui.close();
+            }
         });
-        if response.should_close() {
-            ui.close();
-        }
         response
     }
 }
@@ -135,7 +136,7 @@ impl egui::Widget for SelectorModal<'_, IdWithQuality, IdWithQuality> {
             if let Some(current) = old_selector.current {
                 selector = selector.with_current(&mut current.0);
             }
-            if let Some(&mut ref mut output) = old_selector.output {
+            if let Some(&mut ref mut _output) = old_selector.output {
                 selector = selector.with_output(&mut degenerated);
             }
 
@@ -186,10 +187,11 @@ impl egui::Widget for SelectorModal<'_, IdWithQuality, IdWithQuality> {
                 .show(ui, |ui| {
                     response = response.union(ui.add(widget));
                 });
+
+            if response.should_close() {
+                ui.close();
+            }
         });
-        if response.should_close() {
-            ui.close();
-        }
         response
     }
 }

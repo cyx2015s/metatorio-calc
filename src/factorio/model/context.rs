@@ -687,18 +687,18 @@ impl Display for GenericItem {
             f,
             "{}",
             match self {
-                GenericItem::Item(id_with_quality) => "物品",
-                GenericItem::Fluid { name, temperature } => "流体",
-                GenericItem::Entity(id_with_quality) => "实体",
+                GenericItem::Item(..) => "物品",
+                GenericItem::Fluid {..} => "流体",
+                GenericItem::Entity(..) => "实体",
                 GenericItem::Heat => "热能",
                 GenericItem::Electricity => "电能",
-                GenericItem::FluidHeat { filter } => "流体热源",
-                GenericItem::FluidFuel { filter } => "流体燃料",
-                GenericItem::ItemFuel { category } => "物品燃料",
+                GenericItem::FluidHeat { .. } => "流体热源",
+                GenericItem::FluidFuel { .. } => "流体燃料",
+                GenericItem::ItemFuel { .. } => "物品燃料",
                 GenericItem::RocketPayloadWeight => "火箭重量载荷",
                 GenericItem::RocketPayloadStack => "火箭堆叠载荷",
-                GenericItem::Pollution { name } => "污染",
-                GenericItem::Custom { name } => "特殊物品",
+                GenericItem::Pollution { .. } => "污染",
+                GenericItem::Custom { .. } => "特殊物品",
             }
         )
     }

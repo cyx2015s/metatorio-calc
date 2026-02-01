@@ -168,13 +168,13 @@ impl FactoryInstance {
         let _ = self.arg_sender.send((target, flows, external));
     }
 
-    fn flows_panel(&mut self, ui: &mut egui::Ui, ctx: &FactorioContext, changed: &mut bool) {
-        let label = ui.label(format!("总代价: {:.2} | 总物料流", self.solution.1));
+    fn flows_panel(&mut self, ui: &mut egui::Ui, ctx: &FactorioContext, changed: &mut bool, need_suggestions: &mut bool) {
+        ui.label(format!("总代价: {:.2} | 总物料流", self.solution.1));
         ui.horizontal_wrapped(|ui| {
             card_frame(ui).show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
                 ui.set_min_height(50.0);
-                let mut final_clicked = None;
+                
                 for item in &self.total_flow_sorted_keys {
                     let amount = self.total_flow.get(item).cloned().unwrap_or(0.0);
                     if amount.abs() < 1e-6 {
@@ -191,7 +191,14 @@ impl FactoryInstance {
                             .inner;
 
                         if icon.clicked_by(egui::PointerButton::Secondary) || icon.clicked() {
-                            final_clicked = Some((item, amount));
+                            *need_suggestions = true;
+                            self.mechanics.iter_mut().for_each(|mechanic| {
+                                mechanic.update_suggestion(
+                                    ctx,
+                                    item,
+                                    amount,
+                                )
+                            });
                         }
                     });
                     if ui.available_size_before_wrap().x < 35.0 {
@@ -564,17 +571,20 @@ impl EditorView for FactoryInstance {
                 egui::ScrollArea::vertical().id_salt(3).show(ui, |ui| {
                     ui.vertical(|ui| {
                         // Use cached sorted keys instead of sorting every frame
-                        self.flows_panel(ui, ctx, &mut changed);
+                        self.flows_panel(ui, ctx, &mut changed, &mut need_suggestions);
                     })
                     .response
                 });
             });
         show_modal(egui::Id::new("推荐"), need_suggestions, ui, |ui| {
-            ui.set_max_height(640.0);
+            ui.set_max_height(480.0);
+            ui.set_min_height(480.0);
+            ui.set_min_width(640.0);
+            ui.set_max_width(640.0);
             egui::ScrollArea::vertical().show(ui, |ui| {
                 self.mechanics.iter_mut().for_each(|mechanic| {
                     ui.collapsing(format!("{}(推荐)", mechanic.name()), |ui| {
-                        mechanic.suggestion_view(ui, ctx);
+                        changed |= mechanic.suggestion_view(ui, ctx);
                     });
                 });
             });
