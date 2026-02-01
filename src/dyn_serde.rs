@@ -46,6 +46,7 @@ impl<T: ?Sized> DynDeserializeRegistry<T> {
 
     pub fn create_default(&self, type_name: &str) -> Result<Box<T>, AppError> {
         if let Some(deserializer) = self.deserializers.get(type_name) {
+            log::info!("为类型 {} 创建默认实例", type_name);
             (deserializer.deserialize)(serde_json::json!({ "type": type_name }))
         } else {
             Err(AppError::Registry(format!(

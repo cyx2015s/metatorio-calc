@@ -472,10 +472,9 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                                 false
                                             }
                                         });
-                                    let widget =
-                                        SelectorModal::new(icon.id, self.ctx, "选择插件")
-                                            .with_toggle(icon.clicked())
-                                            .with_selector(selector);
+                                    let widget = SelectorModal::new(icon.id, self.ctx, "选择插件")
+                                        .with_toggle(icon.clicked())
+                                        .with_selector(selector);
                                     if ui.add(widget).changed() {
                                         response.mark_changed();
                                     }

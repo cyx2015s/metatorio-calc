@@ -65,7 +65,7 @@ impl<'de> serde::Deserialize<'de> for FactoryInstance {
             serde_json::from_value(value["target"].clone()).map_err(serde::de::Error::custom)?;
         factory_instance.external =
             serde_json::from_value(value["external"].clone()).map_err(serde::de::Error::custom)?;
-        let not_deserialized_mechanics = MECHANIC_REGISTRY
+        let mut not_deserialized_mechanics = MECHANIC_REGISTRY
             .registered_types()
             .into_iter()
             .collect::<HashSet<_>>();
@@ -79,6 +79,8 @@ impl<'de> serde::Deserialize<'de> for FactoryInstance {
                     .deserialize(mechanic.clone())
                     .map_err(|_| serde::de::Error::custom("反序列化 Mechanic 失败"))?;
                 factory_instance.mechanics.push(mech);
+                not_deserialized_mechanics.remove(mechanic["type"].as_str().unwrap());
+                dbg!(&not_deserialized_mechanics);
             }
         }
         for not_deserialized_mechanic in not_deserialized_mechanics {
@@ -178,6 +180,7 @@ impl FactoryInstance {
                     if amount.abs() < 1e-6 {
                         continue;
                     }
+
                     ui.vertical(|ui| {
                         ui.add_sized([35.0, 15.0], SignedCompactLabel::new(amount));
                         let icon = ui
@@ -199,13 +202,35 @@ impl FactoryInstance {
         });
         ui.separator();
         self.mechanics.iter_mut().for_each(|mechanic| {
-            mechanic.instances_mut().into_iter().for_each(|instance| {
+            mechanic.instances_operate(&mut |instance| {
+                let mut operation = VecItemOp::None;
                 ui.horizontal_wrapped(|ui| {
+                    card_frame(ui).show(ui, |ui| {
+                        ui.vertical(|ui| {
+                            if ui.button("删除").clicked() {
+                                operation = VecItemOp::Drop;
+                                *changed = true;
+                            }
+                            if ui.button("复制").clicked() {
+                                operation = VecItemOp::Clone;
+                                *changed = true;
+                            }
+                            let solution_value =
+                                self.solution.0.get(&ref_as_ptr(instance)).cloned();
+                            if let Some(value) = solution_value {
+                                ui.add(CompactLabel::new(value));
+                            } else {
+                                ui.label("无解");
+                            }
+                        })
+                    });
                     card_frame(ui).show(ui, |ui| {
                         ui.set_min_width(ui.available_width());
                         *changed |= instance.editor_view(ui, ctx);
                     });
                 });
+
+                operation
             });
         });
     }

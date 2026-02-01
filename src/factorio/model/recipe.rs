@@ -626,21 +626,27 @@ impl EditorView for RecipeMechanicInstance {
                             prototype: ctx.recipes.get(&self.recipe.0).unwrap(),
                         });
                     });
-                changed |= ui.add(
-                    SelectorModal::new(recipe_button.id, ctx, "选择配方")
-                        .with_toggle(recipe_button.clicked())
-                        .with_selector(
-                            Selector::new(ctx, "recipe")
-                                .with_current(&mut self.recipe)
-                                .with_hover(|ui, name: &IdWithQuality, ctx: &FactorioContext| {
-                                    if let Some(prototype) = ctx.recipes.get(name.0.as_str()) {
-                                        ui.add(PrototypeHover { ctx, prototype });
-                                    } else {
-                                        ui.label(format!("未知配方: {}", name.0));
-                                    }
-                                }),
-                        ),
-                ).changed();
+                changed |= ui
+                    .add(
+                        SelectorModal::new(recipe_button.id, ctx, "选择配方")
+                            .with_toggle(recipe_button.clicked())
+                            .with_selector(
+                                Selector::new(ctx, "recipe")
+                                    .with_current(&mut self.recipe)
+                                    .with_hover(
+                                        |ui, name: &IdWithQuality, ctx: &FactorioContext| {
+                                            if let Some(prototype) =
+                                                ctx.recipes.get(name.0.as_str())
+                                            {
+                                                ui.add(PrototypeHover { ctx, prototype });
+                                            } else {
+                                                ui.label(format!("未知配方: {}", name.0));
+                                            }
+                                        },
+                                    ),
+                            ),
+                    )
+                    .changed();
             });
             if changed {
                 // TODO 读取用户设定的偏好
@@ -667,7 +673,6 @@ impl EditorView for RecipeMechanicInstance {
                         ),
                     )
                     .interact(egui::Sense::click());
-                    
 
                 let recipe_prototype = ctx.recipes.get(self.recipe.0.as_str()).unwrap();
                 let selector = Selector::new(ctx, "entity")
@@ -715,13 +720,15 @@ impl EditorView for RecipeMechanicInstance {
                     }
                 };
 
-                changed |= ui.add(ModuleConfigEditor::new(
-                    ctx,
-                    &mut self.module_config,
-                    crafter.module_slots as usize,
-                    &Some(allowed_effects),
-                    allowed_module_categories,
-                )).changed();
+                changed |= ui
+                    .add(ModuleConfigEditor::new(
+                        ctx,
+                        &mut self.module_config,
+                        crafter.module_slots as usize,
+                        &Some(allowed_effects),
+                        allowed_module_categories,
+                    ))
+                    .changed();
             };
         });
 
@@ -770,10 +777,7 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
             .collect()
     }
 
-    fn instances_operate(
-        &mut self,
-        mut f: Box<dyn FnMut(&mut FactorioMechanicInstance) -> VecItemOp>,
-    ) {
+    fn instances_operate(&mut self, f: &mut dyn FnMut(&mut FactorioMechanicInstance) -> VecItemOp) {
         let mut retain = VecDeque::new();
         let mut new_items = Vec::new();
         retain.reserve(self.instances.len() * 2);
