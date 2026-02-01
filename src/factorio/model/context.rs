@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     env,
-    fmt::Debug,
+    fmt::{Debug, Display},
     hash::Hash,
     io::Write,
     path::PathBuf,
@@ -40,6 +40,9 @@ pub struct FactorioContext {
     /// 排序参考依据
     pub groups: Dict<PrototypeBase>,
     pub subgroups: Dict<ItemSubgroup>,
+
+    /// 燃料类型
+    pub fuel_categories: Dict<PrototypeBase>,
 
     /// 地点
     pub planets: Dict<PlanetPrototype>,
@@ -103,6 +106,13 @@ impl FactorioContext {
         let subgroups: Dict<ItemSubgroup> = serde_json::from_value(
             value
                 .get("item-subgroup")
+                .cloned()
+                .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
+        )
+        .unwrap();
+        let fuel_categories = serde_json::from_value::<Dict<PrototypeBase>>(
+            value
+                .get("fuel-category")
                 .cloned()
                 .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
         )
@@ -216,6 +226,7 @@ impl FactorioContext {
             qualities,
             groups,
             subgroups,
+            fuel_categories,
             items,
             modules,
             beacons,
@@ -629,6 +640,7 @@ impl FactorioContext {
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[repr(u8)]
 pub enum GenericItem {
     Item(IdWithQuality),
     Fluid {
@@ -661,9 +673,34 @@ pub enum GenericItem {
         name: String,
     },
 }
+
 impl Default for GenericItem {
     fn default() -> Self {
         GenericItem::Item("item-unknown".into())
+    }
+}
+
+impl Display for GenericItem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // 内部名称毫无意义，这里只显示类型
+        write!(
+            f,
+            "{}",
+            match self {
+                GenericItem::Item(id_with_quality) => "物品",
+                GenericItem::Fluid { name, temperature } => "流体",
+                GenericItem::Entity(id_with_quality) => "实体",
+                GenericItem::Heat => "热能",
+                GenericItem::Electricity => "电能",
+                GenericItem::FluidHeat { filter } => "流体热源",
+                GenericItem::FluidFuel { filter } => "流体燃料",
+                GenericItem::ItemFuel { category } => "物品燃料",
+                GenericItem::RocketPayloadWeight => "火箭重量载荷",
+                GenericItem::RocketPayloadStack => "火箭堆叠载荷",
+                GenericItem::Pollution { name } => "污染",
+                GenericItem::Custom { name } => "特殊物品",
+            }
+        )
     }
 }
 

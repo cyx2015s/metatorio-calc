@@ -17,6 +17,7 @@ use crate::{
             quality::calc_quality_distribution,
         },
         selector::Selector,
+        style::card_frame,
     },
 };
 
@@ -611,6 +612,7 @@ impl EditorView for RecipeMechanicInstance {
     fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &Self::GameContext) -> bool {
         let mut changed = false;
         ui.horizontal_top(|ui| {
+            ui.set_max_height(60.0);
             ui.vertical(|ui| {
                 ui.label("配方");
 
@@ -876,9 +878,17 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
     }
 
     fn suggestion_view(&mut self, ui: &mut egui::Ui, ctx: &FactorioContext) -> bool {
-        let _ = ui;
-        let _ = ctx;
-        false
+        let mut changed = false;
+        self.suggestions.iter_mut().for_each(|instance| {
+            card_frame(ui).show(ui, |ui| {
+                if ui.button("添加此配方").clicked() {
+                    self.instances.push(instance.clone());
+                    changed = true;
+                }
+                instance.editor_view(ui, ctx);
+            });
+        });
+        changed
     }
 }
 

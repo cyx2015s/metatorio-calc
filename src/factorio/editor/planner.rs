@@ -275,7 +275,7 @@ impl EditorView for FactoryInstance {
         ui.separator();
         let id = ui.id();
         let mut changed = false;
-
+        let mut need_suggestions = false;
         while let Ok(result) = self.solution_receiver.try_recv() {
             log::info!("收到求解结果");
             match result {
@@ -342,24 +342,19 @@ impl EditorView for FactoryInstance {
                                                 icon
                                             })
                                             .inner;
-                                        let toggle =
-                                            icon.clicked_by(egui::PointerButton::Secondary);
+                                        if icon.clicked_by(egui::PointerButton::Secondary) {
+                                            need_suggestions = true;
+                                            self.mechanics.iter_mut().for_each(|mechanic| {
+                                                mechanic.update_suggestion(
+                                                    ctx,
+                                                    item,
+                                                    -*amount, // 目标产量为正表示目前缺少对应数量的物品
+                                                )
+                                            });
+                                        }
                                         ui.vertical(|ui| {
                                             egui::ComboBox::new(icon.id, "")
-                                                .selected_text(match item {
-                                                    GenericItem::Item { .. } => "物品",
-                                                    GenericItem::Fluid { .. } => "流体",
-                                                    GenericItem::Entity { .. } => "实体",
-                                                    GenericItem::Heat => "热量",
-                                                    GenericItem::Electricity => "电力",
-                                                    GenericItem::FluidHeat { .. } => "流体热量",
-                                                    GenericItem::FluidFuel { .. } => "流体燃料",
-                                                    GenericItem::ItemFuel { .. } => "物体燃料",
-                                                    GenericItem::RocketPayloadWeight => "重量载荷",
-                                                    GenericItem::RocketPayloadStack => "堆叠载荷",
-                                                    GenericItem::Pollution { .. } => "污染",
-                                                    _ => "特殊",
-                                                })
+                                                .selected_text(item.to_string())
                                                 .show_ui(ui, |ui| {
                                                     ui.selectable_value(
                                                         item,
@@ -453,23 +448,19 @@ impl EditorView for FactoryInstance {
                                     if let GenericItem::Entity(..) = item {
                                         icon = icon.on_hover_text("⚠️ 指完成机制所消耗的实体资源（主要是矿物），不包括为了完成机制所需要收集的组装机、采矿机、插件塔等。")
                                     }
-                                    let toggle = icon.clicked_by(egui::PointerButton::Secondary);
+                                    if icon.clicked_by(egui::PointerButton::Secondary) {
+                                        need_suggestions = true;
+                                        self.mechanics.iter_mut().for_each(|mechanic| {
+                                            mechanic.update_suggestion(
+                                                ctx,
+                                                item,
+                                                1.0, // 尝试消耗更多该物品
+                                            )
+                                        });
+                                    }
                                     ui.vertical(|ui| {
                                         egui::ComboBox::new(icon.id, "")
-                                            .selected_text(match item {
-                                                GenericItem::Item { .. } => "物品",
-                                                GenericItem::Fluid { .. } => "流体",
-                                                GenericItem::Entity { .. } => "实体",
-                                                GenericItem::Heat => "热量",
-                                                GenericItem::Electricity => "电力",
-                                                GenericItem::FluidHeat { .. } => "流体热量",
-                                                GenericItem::FluidFuel { .. } => "流体燃料",
-                                                GenericItem::ItemFuel { .. } => "物体燃料",
-                                                GenericItem::RocketPayloadWeight => "重量载荷",
-                                                GenericItem::RocketPayloadStack => "堆叠载荷",
-                                                GenericItem::Pollution { .. } => "污染",
-                                                _ => "特殊",
-                                            })
+                                            .selected_text(item.to_string())
                                             .show_ui(ui, |ui| {
                                                 ui.selectable_value(
                                                     item,
@@ -578,6 +569,16 @@ impl EditorView for FactoryInstance {
                     .response
                 });
             });
+        show_modal(egui::Id::new("推荐"), need_suggestions, ui, |ui| {
+            ui.set_max_height(640.0);
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                self.mechanics.iter_mut().for_each(|mechanic| {
+                    ui.collapsing(format!("{}(推荐)", mechanic.name()), |ui| {
+                        mechanic.suggestion_view(ui, ctx);
+                    });
+                });
+            });
+        });
         // 无关
         if changed {
             self.send_solve_request(ctx);
