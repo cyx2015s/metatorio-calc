@@ -155,7 +155,9 @@ where
                         "无解。不存在能够满足目标物品需求的配方组合。".to_string()
                     }
                     good_lp::ResolutionError::Other(_) => "求解过程中发生未知错误。".to_string(),
-                    good_lp::ResolutionError::Str(s) => format!("求解过程中发生内部错误：{}", s),
+                    good_lp::ResolutionError::Str(s) => {
+                        format!("求解过程中发生内部错误：{}", s)
+                    }
                 };
                 if !no_providers.is_empty() {
                     let mut no_providers = no_providers.iter().collect::<Vec<_>>();

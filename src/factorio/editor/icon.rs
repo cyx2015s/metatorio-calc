@@ -248,14 +248,18 @@ impl Display for GenericIcon<'_> {
                 ),
                 None => write!(f, "任意来源的流体燃料"),
             },
-            GenericItem::ItemFuel { category } => write!(f, "燃料类别: {}", category),
+            GenericItem::ItemFuel { category } => {
+                write!(f, "燃料类别: {}", category)
+            }
             GenericItem::RocketPayloadWeight => write!(f, "重量载荷"),
             GenericItem::RocketPayloadStack => write!(f, "堆叠载荷"),
-            GenericItem::Pollution { name } => write!(
-                f,
-                "污染物: {}",
-                self.ctx.get_display_name("airborne-pollutant", name)
-            ),
+            GenericItem::Pollution { name } => {
+                write!(
+                    f,
+                    "污染物: {}",
+                    self.ctx.get_display_name("airborne-pollutant", name)
+                )
+            }
         }
     }
 }

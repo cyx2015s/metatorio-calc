@@ -389,7 +389,6 @@ impl EditorView for FactoryInstance {
                         ui.set_min_width(ui.available_width());
                         ui.horizontal_wrapped(|ui| {
                             let mut icon = ui.add_sized([35.0, 35.0],GenericIcon::new(ctx, item)).interact(egui::Sense::click());
-                                        
                             if let GenericItem::Entity(..) = item {
                                 icon = icon.on_hover_text("⚠️ 指完成机制所消耗的实体资源（主要是矿物），不包括为了完成机制所需要收集的组装机、采矿机、插件塔等。")
                             }
