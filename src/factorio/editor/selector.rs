@@ -229,7 +229,9 @@ impl<'a> egui::Widget for Selector<'a, IdWithQuality, IdWithQuality> {
         };
         let mut selecting_quality = None;
         let mut selecting_item = None;
-        quality_selector(ui, self.ctx, &mut selecting_quality);
+        if quality_selector(ui, self.ctx, &mut selecting_quality) {
+            response.mark_changed();
+        }
         let mut widget: Selector<'_, str, String> =
             Selector::new(self.ctx, self.type_name).with_output(&mut selecting_item);
         if let Some(filter) = self.filter {
@@ -248,7 +250,9 @@ impl<'a> egui::Widget for Selector<'a, IdWithQuality, IdWithQuality> {
                 hover(ui, &id_with_quality, ctx);
             });
         }
-        ui.add(widget);
+        if ui.add(widget).changed() {
+            response.mark_changed();
+        }
         if let Some(selected_item) = &selecting_item {
             storage.selected_item = Some(selected_item.clone());
             response.mark_changed();
@@ -282,7 +286,12 @@ impl<'a> egui::Widget for Selector<'a, IdWithQuality, IdWithQuality> {
     }
 }
 
-fn quality_selector(ui: &mut egui::Ui, ctx: &FactorioContext, selected_quality: &mut Option<u8>) {
+fn quality_selector(
+    ui: &mut egui::Ui,
+    ctx: &FactorioContext,
+    selected_quality: &mut Option<u8>,
+) -> bool {
+    let mut changed = false;
     egui::Grid::new("quality")
         .max_col_width(35.0)
         .min_col_width(35.0)
@@ -299,7 +308,9 @@ fn quality_selector(ui: &mut egui::Ui, ctx: &FactorioContext, selected_quality: 
                     .interact(egui::Sense::click());
                 if quality_button.clicked() {
                     *selected_quality = Some(idx as u8);
+                    changed = true;
                 }
             }
         });
+    changed
 }

@@ -715,20 +715,21 @@ impl Subview for PlannerView {
                 ui.separator();
                 egui::containers::menu::MenuBar::new().ui(ui, |ui| {
                     ui.horizontal(|ui| {
-                        for i in 0..self.factories.len() {
+                        let mut idx = 0usize;
+                        self.factories.retain_mut(|factory| {
+                            let mut deleted = false;
                             let button = ui.add(
                                 egui::Button::new(format!(
                                     "{}{}",
-                                    &self.factories[i].factory.name,
-                                    if self.factories[i].saved { "" } else { " *" }
+                                    factory.factory.name,
+                                    if factory.saved { "" } else { " *" }
                                 ))
-                                .selected(self.selected_factory == i),
+                                .selected(self.selected_factory == idx),
                             );
                             if button.clicked() {
-                                self.selected_factory = i;
+                                self.selected_factory = idx;
                             }
                             button.context_menu(|ui| {
-                                let factory = &mut self.factories[i];
                                 if let Some(file_path) = factory.file_path.as_ref() {
                                     if ui
                                         .add(egui::Button::new("保存").shortcut_text("Ctrl+S"))
@@ -772,14 +773,16 @@ impl Subview for PlannerView {
                                 }
 
                                 if ui.button("关闭").clicked() {
-                                    self.factories.remove(i);
-                                    if self.selected_factory >= i && self.selected_factory > 0 {
+                                    deleted = true;
+                                    if self.selected_factory >= idx && self.selected_factory > 0 {
                                         self.selected_factory -= 1;
                                     }
-                                    ui.close();
+                                    idx -= 1;
                                 }
                             });
-                        }
+                            idx += 1;
+                            !deleted
+                        })
                     });
                 });
                 ui.separator();

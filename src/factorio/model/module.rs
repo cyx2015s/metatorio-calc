@@ -374,7 +374,9 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                             .with_toggle(icon.clicked())
                             .with_selector(selector);
 
-                        ui.add(widget).changed();
+                        if ui.add(widget).changed() {
+                            response.mark_changed();
+                        }
 
                         if let Some(selected) = selected {
                             response.mark_changed();
@@ -519,6 +521,6 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                 }
             });
         });
-        ui.response().clone()
+        response
     }
 }
