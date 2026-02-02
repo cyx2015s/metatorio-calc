@@ -401,7 +401,7 @@ fn test_mining_normalized() {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "type", rename = "factorio:recipe", default)]
+#[serde(tag = "type", rename = "factorio:mining", default)]
 #[derive(Default)]
 pub struct MiningMechanic {
     pub instances: Vec<MiningMechanicInstance>,
