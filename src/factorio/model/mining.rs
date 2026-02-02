@@ -318,9 +318,10 @@ pub fn select_miner_for_resource(
     // 优先选择用户偏好
     for pref in preferences.iter() {
         if let Some(miner) = ctx.miners.get(&pref.0)
-            && machine_fits_for_resource(miner, resource) {
-                return pref.clone();
-            }
+            && machine_fits_for_resource(miner, resource)
+        {
+            return pref.clone();
+        }
     }
     let mut measure = 0.0;
     let mut selected = "entity-unknown".to_string();
@@ -335,7 +336,7 @@ pub fn select_miner_for_resource(
             score *= 1.0 + effect_receiver.base_effect.speed;
             score *= 1.0 + (effect_receiver.base_effect.productivity * 2.0);
         }
-        score *= 1.0 + miner.module_slots / 4.0 ;
+        score *= 1.0 + miner.module_slots / 4.0;
         score
     }
     // 找不到偏好设定的机器，找一个最好的的

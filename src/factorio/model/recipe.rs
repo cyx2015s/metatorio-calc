@@ -751,9 +751,10 @@ pub fn select_crafter_for_recipe(
     // 优先选择用户偏好
     for pref in preferences {
         if let Some(crafter) = ctx.crafters.get(&pref.0)
-            && machine_fits_for_recipe(crafter, recipe) {
-                return pref.clone();
-            }
+            && machine_fits_for_recipe(crafter, recipe)
+        {
+            return pref.clone();
+        }
     }
     let mut measure = 0.0;
     let mut selected = "entity-unknown".to_string();
@@ -768,7 +769,7 @@ pub fn select_crafter_for_recipe(
             score *= 1.0 + effect_receiver.base_effect.speed;
             score *= 1.0 + (effect_receiver.base_effect.productivity * 2.0);
         }
-        score *= 1.0 + crafter.module_slots / 4.0 ;
+        score *= 1.0 + crafter.module_slots / 4.0;
         score
     }
     // 找不到用户偏好时，选择最快的机器
@@ -840,14 +841,14 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
         });
         if changed
             && let Some(recipe) = ctx.recipes.get(&instance.recipe.0)
-                && ctx.crafters.get(&instance.machine.0).is_none_or(|crafter| {
-                    !machine_fits_for_recipe(crafter, ctx.recipes.get(&instance.recipe.0).unwrap())
-                }) {
-                    instance.machine =
-                        select_crafter_for_recipe(ctx, recipe, &self.machine_preferences);
-                    instance.instance_fuel = None;
-                    instance.module_config = ModuleConfig::new();
-                }
+            && ctx.crafters.get(&instance.machine.0).is_none_or(|crafter| {
+                !machine_fits_for_recipe(crafter, ctx.recipes.get(&instance.recipe.0).unwrap())
+            })
+        {
+            instance.machine = select_crafter_for_recipe(ctx, recipe, &self.machine_preferences);
+            instance.instance_fuel = None;
+            instance.module_config = ModuleConfig::new();
+        }
         ui.separator();
         ui.vertical(|ui| {
             ui.add_sized([35.0, 15.0], egui::Label::new("机器"));
@@ -948,15 +949,17 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
                     let mut total_yield = 0.0;
                     for ingredient in &recipe_proto.ingredients {
                         if let RecipeIngredient::Item(item_ingredient) = ingredient
-                            && item_ingredient.name == id_with_quality.0 {
-                                total_yield -= item_ingredient.amount;
-                            }
+                            && item_ingredient.name == id_with_quality.0
+                        {
+                            total_yield -= item_ingredient.amount;
+                        }
                     }
                     for result in &recipe_proto.results {
                         if let RecipeResult::Item(item_result) = result
-                            && item_result.name == id_with_quality.0 {
-                                total_yield += item_result.normalized_output().0;
-                            }
+                            && item_result.name == id_with_quality.0
+                        {
+                            total_yield += item_result.normalized_output().0;
+                        }
                     }
                     if total_yield * amount < 0.0 {
                         self.suggested_recipes
@@ -970,15 +973,17 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
                     let mut total_yield = 0.0;
                     for ingredient in &recipe_proto.ingredients {
                         if let RecipeIngredient::Fluid(fluid_ingredient) = ingredient
-                            && &fluid_ingredient.name == name {
-                                total_yield -= fluid_ingredient.amount;
-                            }
+                            && &fluid_ingredient.name == name
+                        {
+                            total_yield -= fluid_ingredient.amount;
+                        }
                     }
                     for result in &recipe_proto.results {
                         if let RecipeResult::Fluid(fluid_result) = result
-                            && &fluid_result.name == name {
-                                total_yield += fluid_result.normalized_output().0;
-                            }
+                            && &fluid_result.name == name
+                        {
+                            total_yield += fluid_result.normalized_output().0;
+                        }
                     }
                     if total_yield * amount < 0.0 {
                         self.suggested_recipes
