@@ -197,6 +197,82 @@ impl egui::Widget for CompactLabel {
     }
 }
 
+pub fn parse_number(n: &str) -> Option<f64> {
+    let re = regex::Regex::new(r"^[\d|.]+[k|M|G|T|P|E|Z|Y|R|Q|μ]?$").ok()?;
+    if re.is_match(n) {
+        let mut multiplier = match n.chars().rev().next() {
+            Some('μ') => 0.000_001,
+            Some('k') => 1_000.0,
+            Some('M') => 1_000_000.0,
+            Some('G') => 1_000_000_000.0,
+            Some('T') => 1_000_000_000_000.0,
+            Some('P') => 1_000_000_000_000_000.0,
+            Some('E') => 1_000_000_000_000_000_000.0,
+            Some('Z') => 1_000_000_000_000_000_000_000.0,
+            Some('Y') => 1_000_000_000_000_000_000_000_000.0,
+            Some('R') => 1_000_000_000_000_000_000_000_000_000.0,
+            Some('Q') => 1_000_000_000_000_000_000_000_000_000_000.0,
+            _ => 1.0,
+        };
+        let numeric_value: f64 = n
+            .trim_end_matches(|c: char| !c.is_ascii_digit())
+            .parse()
+            .ok()?;
+        Some(numeric_value * multiplier)
+    } else {
+        None
+    }
+}
+
+pub fn parse_energy(n: &str) -> Option<f64> {
+    let re = regex::Regex::new(r"^[\d|.]+[k|M|G|T|P|E|Z|Y|R|Q]?[J|W]?$").ok()?;
+    if re.is_match(n) {
+        let mut multiplier = match n.chars().rev().nth(1) {
+            Some('k') => 1_000.0,
+            Some('M') => 1_000_000.0,
+            Some('G') => 1_000_000_000.0,
+            Some('T') => 1_000_000_000_000.0,
+            Some('P') => 1_000_000_000_000_000.0,
+            Some('E') => 1_000_000_000_000_000_000.0,
+            Some('Z') => 1_000_000_000_000_000_000_000.0,
+            Some('Y') => 1_000_000_000_000_000_000_000_000.0,
+            Some('R') => 1_000_000_000_000_000_000_000_000_000.0,
+            Some('Q') => 1_000_000_000_000_000_000_000_000_000_000.0,
+            _ => 1.0,
+        };
+        let dimension_char = n.chars().last();
+        if let Some('W') = dimension_char {
+            multiplier /= 60.0
+        }
+        let numeric_value: f64 = n
+            .trim_end_matches(|c: char| !c.is_ascii_digit())
+            .parse()
+            .ok()?;
+        Some(numeric_value * multiplier)
+    } else {
+        None
+    }
+}
+
+pub fn drag_value<T>(val: &mut T) -> egui::DragValue<'_>
+where
+    T: egui::emath::Numeric,
+{
+    egui::DragValue::new(val)
+        .custom_parser(|s| parse_number(s))
+        .custom_formatter(|n, _| compact_number(n as f64))
+}
+
+pub fn drag_watt<T>(val: &mut T) -> egui::DragValue<'_>
+where
+    T: egui::emath::Numeric,
+{
+    egui::DragValue::new(val)
+        .suffix("W")
+        .custom_parser(|s| parse_energy(s).map(|x| x * 60.0))
+        .custom_formatter(|n, _| compact_number(n as f64))
+}
+
 #[test]
 fn test_compact_format() {
     dbg!(compact_number(1.1));

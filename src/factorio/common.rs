@@ -307,33 +307,8 @@ impl<'de> serde::Deserialize<'de> for EnergyAmount {
         D: serde::de::Deserializer<'de>,
     {
         let value: String = serde::Deserialize::deserialize(deserializer)?;
-        let re = regex::Regex::new(r"^[\d|.]+[k|M|G|T|P|E|Z|Y|R|Q]?[J|W]?$")
-            .map_err(serde::de::Error::custom)?;
-        if re.is_match(&value) {
-            let mut multiplier = match value.chars().rev().nth(1) {
-                Some('k') => 1_000.0,
-                Some('M') => 1_000_000.0,
-                Some('G') => 1_000_000_000.0,
-                Some('T') => 1_000_000_000_000.0,
-                Some('P') => 1_000_000_000_000_000.0,
-                Some('E') => 1_000_000_000_000_000_000.0,
-                Some('Z') => 1_000_000_000_000_000_000_000.0,
-                Some('Y') => 1_000_000_000_000_000_000_000_000.0,
-                Some('R') => 1_000_000_000_000_000_000_000_000_000.0,
-                Some('Q') => 1_000_000_000_000_000_000_000_000_000_000.0,
-                _ => 1.0,
-            };
-            let dimension_char = value.chars().last();
-            if let Some('W') = dimension_char {
-                multiplier /= 60.0
-            }
-            let numeric_value: f64 = value
-                .trim_end_matches(|c: char| !c.is_ascii_digit())
-                .parse()
-                .map_err(serde::de::Error::custom)?;
-            Ok(EnergyAmount {
-                amount: numeric_value * multiplier,
-            })
+        if let Some(amount) = parse_energy(&value) {
+            Ok(EnergyAmount { amount })
         } else {
             Err(serde::de::Error::custom(format!(
                 "不是有效的能量字符串: {}",
@@ -343,22 +318,9 @@ impl<'de> serde::Deserialize<'de> for EnergyAmount {
     }
 }
 
-const ENERGY_SUFFIX: &str = " kMGTPEZYRQ";
-
 impl Display for EnergyAmount {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut power = 0;
-        let mut divisor = 1.0;
-        while self.amount >= divisor * 1000.0 && power < ENERGY_SUFFIX.len() {
-            divisor *= 1000.0;
-            power += 1;
-        }
-        write!(
-            f,
-            "{}{}J",
-            f64::round(self.amount / divisor * 100.0) / 100.0,
-            ENERGY_SUFFIX.chars().nth(power).unwrap()
-        )
+        write!(f, "{}J", compact_number(self.amount))
     }
 }
 

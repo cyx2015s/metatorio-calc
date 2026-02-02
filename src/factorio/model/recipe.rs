@@ -1019,6 +1019,13 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
                                 .get_display_name("recipe", id)
                                 .to_lowercase()
                                 .contains(&self.suggested_recipes_filter.to_lowercase()))
+                })
+                .with_hover(|ui: &mut egui::Ui, name: &str, ctx: &FactorioContext| {
+                    if let Some(prototype) = ctx.recipes.get(name) {
+                        ui.add(PrototypeHover::new(ctx, prototype));
+                    } else {
+                        ui.label(format!("未知配方: {}", name));
+                    }
                 }),
         );
         if let Some(recipe) = &self.selected_suggested_recipe {

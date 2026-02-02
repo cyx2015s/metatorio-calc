@@ -4,6 +4,7 @@ use crate::{
     concept::SolveContext,
     factorio::{
         common::*,
+        drag_value,
         editor::{
             icon::{GenericIcon, Icon},
             modal::show_modal,
@@ -396,7 +397,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                 deleted = true;
                                 response.mark_changed();
                             }
-                            let widget = egui::DragValue::new(&mut beacon_config.count)
+                            let widget = drag_value(&mut beacon_config.count)
                                 .range(1..=100)
                                 .clamp_existing_to_range(true);
                             if ui.add(widget).changed() {
@@ -491,7 +492,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                         };
                                     let amount_widget = ui.add_sized(
                                         [35.0, 15.0],
-                                        egui::DragValue::new(amount)
+                                        drag_value(amount)
                                             .range(
                                                 0..=(beacon_module_count * beacon_config.count
                                                     - total_modules),

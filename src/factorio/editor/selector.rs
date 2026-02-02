@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use egui::Vec2;
 
-use crate::factorio::{IdWithQuality, editor::icon::*, modal::SelectorModal, model::*};
+use crate::factorio::{IdWithQuality, drag_value, editor::icon::*, modal::SelectorModal, model::*};
 
 #[derive(Debug, Clone, Default)]
 pub struct SelectorStorage {
@@ -414,9 +414,7 @@ pub fn generic_item_selector(
                 if let Some(temp) = temperature {
                     let mut cur_temp = *temp;
                     ui.horizontal(|ui| {
-                        changed |= ui
-                            .add(egui::DragValue::new(&mut cur_temp).speed(1))
-                            .changed();
+                        changed |= ui.add(drag_value(&mut cur_temp).speed(1)).changed();
 
                         if ui.button("移除温度").clicked() {
                             *temperature = None;
