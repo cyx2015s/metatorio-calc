@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     fmt::Debug,
 };
 
@@ -721,6 +721,9 @@ impl EditorView for RecipeMechanicInstance {
 #[serde(tag = "type", rename = "factorio:recipe", default)]
 #[derive(Default)]
 pub struct RecipeMechanic {
+    #[serde(skip)]
+    pub operations: HashMap<usize, EntryOperation>,
+
     pub instances: Vec<RecipeMechanicInstance>,
 
     pub machine_preferences: Vec<IdWithQuality>,
@@ -795,35 +798,15 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
             .collect()
     }
 
-    fn instances_mut(&mut self) -> Vec<&mut FactorioMechanicInstance> {
-        self.instances
-            .iter_mut()
-            .map(|m| m as &mut FactorioMechanicInstance)
-            .collect()
-    }
-
-    fn instances_operate(&mut self, f: &mut dyn FnMut(&mut FactorioMechanicInstance) -> VecItemOp) {
-        let mut retain = VecDeque::new();
-        let mut new_items = Vec::new();
-        retain.reserve(self.instances.len() * 2);
-        for instance in &mut self.instances {
-            let op = f(instance as &mut FactorioMechanicInstance);
-            match op {
-                VecItemOp::None => {
-                    retain.push_back(true);
-                }
-                VecItemOp::Drop => {
-                    retain.push_back(false);
-                }
-                VecItemOp::Clone => {
-                    retain.push_back(true);
-                    new_items.push(instance.clone());
-                }
-            }
+    fn instance_operate(
+        &mut self,
+        idx: usize,
+        f: &mut dyn FnMut(&mut FactorioMechanicInstance) -> EntryOperation,
+    ) {
+        let op = f(&mut self.instances[idx] as &mut FactorioMechanicInstance);
+        if !matches!(op, EntryOperation::None) {
+            self.operations.insert(idx, op);
         }
-        self.instances
-            .retain_mut(|_| retain.pop_front().unwrap_or(true));
-        self.instances.extend(new_items);
     }
 
     fn update_suggestion(&mut self, ctx: &FactorioContext, item: &GenericItem, amount: f64) {
@@ -932,6 +915,27 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
 impl EditorView for RecipeMechanic {
     fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &FactorioContext) -> bool {
         let mut changed = false;
+        for idx in 0..self.instances.len() {
+            if self
+                .operations
+                .get(&idx)
+                .is_some_and(|v| matches!(v, EntryOperation::Clone))
+            {
+                self.instances.push(self.instances[idx].clone());
+                changed = true;
+            }
+        }
+        for idx in (0..self.instances.len()).rev() {
+            if self
+                .operations
+                .get(&idx)
+                .is_some_and(|v| matches!(v, EntryOperation::Drop))
+            {
+                self.instances.remove(idx);
+                changed = true;
+            }
+        }
+        self.operations.clear();
         ui.collapsing("机器偏好", |ui| {
             let icon = Icon::new(ctx, "entity", "entity-unknown");
             let button = ui

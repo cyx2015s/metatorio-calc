@@ -3,7 +3,8 @@ use std::{any::Any, fmt::Debug, hash::Hash};
 use indexmap::IndexMap;
 
 /// 对一个列表进行操作后，对这个项额外进行的操作，仅用作指示
-pub enum VecItemOp {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EntryOperation {
     /// 无操作
     None,
     /// 删除当前项
@@ -73,7 +74,7 @@ erased_serde::serialize_trait_object!(<C, I> MechanicInstance<GameContext = C, I
 
 dyn_clone::clone_trait_object!(<C, I> MechanicInstance<GameContext = C, ItemIdentType = I>);
 
-/// EditorView:  机制偏好编辑，而非机制实例编辑
+/// EditorView:  机制偏好编辑，而非机制实例编辑，每帧必须调用，在这一帧更新上一帧的所有操作
 /// Mechanic:  机制，包含多个机制实例，且能够参与计算
 pub trait Mechanic<C, I>:
     EditorView<GameContext = C, ItemIdentType = I>
@@ -88,18 +89,27 @@ where
 
     fn instances(&self) -> Vec<&dyn MechanicInstance<GameContext = C, ItemIdentType = I>>;
 
-    fn instances_mut(
-        &mut self,
-    ) -> Vec<&mut dyn MechanicInstance<GameContext = C, ItemIdentType = I>>;
+    // 考虑提供一个更高效的实现。
+    fn instance_len(&self) -> usize {
+        self.instances().len()
+    }
 
-    /// 对机制实例列表进行操作，同时返回额外的操作指示：无操作、复制、删除
-    /// 返回值表示是否产生了需要重新计算的更改
-    fn instances_operate(
+    fn instance_operate(
         &mut self,
+        idx: usize,
         f: &mut dyn FnMut(
             &mut dyn MechanicInstance<GameContext = C, ItemIdentType = I>,
-        ) -> VecItemOp,
+        ) -> EntryOperation,
     );
+
+    fn instance_view(&mut self, idx: usize, ui: &mut egui::Ui, ctx: &C) -> bool {
+        let mut ret = false;
+        self.instance_operate(idx, &mut |instance| {
+            ret = instance.editor_view(ui, ctx);
+            EntryOperation::None
+        });
+        ret
+    }
 
     /// 想要生产 amount 每秒数量的 item，有哪些方法？
     fn update_suggestion(&mut self, ctx: &C, item: &I, amount: f64);

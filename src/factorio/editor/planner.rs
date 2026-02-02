@@ -224,36 +224,38 @@ impl FactoryInstance {
         });
         ui.separator();
         self.mechanics.iter_mut().for_each(|mechanic| {
-            mechanic.instances_operate(&mut |instance| {
-                let mut operation = VecItemOp::None;
+            for idx in 0..mechanic.instance_len() {
                 ui.horizontal_wrapped(|ui| {
-                    card_frame(ui).show(ui, |ui| {
-                        ui.vertical(|ui| {
-                            if ui.button("删除").clicked() {
-                                operation = VecItemOp::Drop;
-                                *changed = true;
-                            }
-                            if ui.button("复制").clicked() {
-                                operation = VecItemOp::Clone;
-                                *changed = true;
-                            }
-                            let solution_value =
-                                self.solution.0.get(&ref_as_ptr(instance)).cloned();
-                            if let Some(value) = solution_value {
-                                ui.add(CompactLabel::new(value));
-                            } else {
-                                ui.label("无解");
-                            }
-                        })
+                    mechanic.instance_operate(idx, &mut |instance| {
+                        let mut operation = EntryOperation::None;
+
+                        card_frame(ui).show(ui, |ui| {
+                            ui.vertical(|ui| {
+                                if ui.button("删除").clicked() {
+                                    operation = EntryOperation::Drop;
+                                }
+                                if ui.button("复制").clicked() {
+                                    operation = EntryOperation::Clone;
+                                }
+                                let solution_value =
+                                    self.solution.0.get(&ref_as_ptr(instance)).cloned();
+                                if let Some(value) = solution_value {
+                                    ui.add(CompactLabel::new(value));
+                                } else {
+                                    ui.label("无解");
+                                }
+                            })
+                        });
+
+                        operation
                     });
+
                     card_frame(ui).show(ui, |ui| {
                         ui.set_min_width(ui.available_width());
-                        *changed |= instance.editor_view(ui, ctx);
+                        *changed |= mechanic.instance_view(idx, ui, ctx);
                     });
                 });
-
-                operation
-            });
+            }
         });
     }
 }

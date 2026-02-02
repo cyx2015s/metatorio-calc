@@ -1,7 +1,7 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 use crate::{
-    concept::{AsFlow, EditorView, Flow, Mechanic, SolveContext, VecItemOp},
+    concept::{AsFlow, EditorView, EntryOperation, Flow, Mechanic, SolveContext},
     factorio::{
         ModuleConfig, ModuleConfigEditor, calc_quality_distribution,
         common::*,
@@ -387,6 +387,8 @@ fn test_mining_normalized() {
 #[serde(tag = "type", rename = "factorio:mining", default)]
 #[derive(Default)]
 pub struct MiningMechanic {
+    #[serde(skip)]
+    pub operations: HashMap<usize, EntryOperation>,
     pub instances: Vec<MiningMechanicInstance>,
     #[serde(skip)]
     pub suggestions: Vec<MiningMechanicInstance>,
@@ -447,35 +449,15 @@ impl Mechanic<FactorioContext, GenericItem> for MiningMechanic {
             .collect()
     }
 
-    fn instances_mut(&mut self) -> Vec<&mut FactorioMechanicInstance> {
-        self.instances
-            .iter_mut()
-            .map(|instance| instance as &mut FactorioMechanicInstance)
-            .collect()
-    }
-
-    fn instances_operate(&mut self, f: &mut dyn FnMut(&mut FactorioMechanicInstance) -> VecItemOp) {
-        let mut retain = VecDeque::new();
-        retain.reserve(self.instances.len());
-        let mut new_items = Vec::new();
-        for instance in self.instances.iter_mut() {
-            let op = f(instance as &mut FactorioMechanicInstance);
-            match op {
-                VecItemOp::None => {
-                    retain.push_back(true);
-                }
-                VecItemOp::Drop => {
-                    retain.push_back(false);
-                }
-                VecItemOp::Clone => {
-                    retain.push_back(true);
-                    new_items.push(instance.clone());
-                }
-            }
+    fn instance_operate(
+        &mut self,
+        idx: usize,
+        f: &mut dyn FnMut(&mut FactorioMechanicInstance) -> EntryOperation,
+    ) {
+        let op = f(&mut self.instances[idx] as &mut FactorioMechanicInstance);
+        if !matches!(op, EntryOperation::None) {
+            self.operations.insert(idx, op);
         }
-        self.instances
-            .retain_mut(|_| retain.pop_front().unwrap_or(true));
-        self.instances.extend(new_items);
     }
 
     fn update_suggestion(&mut self, ctx: &FactorioContext, item: &GenericItem, amount: f64) {
@@ -576,13 +558,37 @@ impl Mechanic<FactorioContext, GenericItem> for MiningMechanic {
 
 impl EditorView for MiningMechanic {
     fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &Self::GameContext) -> bool {
-        let _ = ctx;
+        let mut changed = false;
+
+        for idx in 0..self.instances.len() {
+            if self
+                .operations
+                .get(&idx)
+                .is_some_and(|v| matches!(v, EntryOperation::Clone))
+            {
+                self.instances.push(self.instances[idx].clone());
+                changed = true;
+            }
+        }
+
+        for idx in (0..self.instances.len()).rev() {
+            if self
+                .operations
+                .get(&idx)
+                .is_some_and(|v| matches!(v, EntryOperation::Drop))
+            {
+                self.instances.remove(idx);
+                changed = true;
+            }
+        }
+        self.operations.clear();
+
         if ui.button("添加采矿").clicked() {
             let mining_config = MiningMechanicInstance::default();
             self.instances.push(mining_config);
-            return true;
+            changed = true;
         }
-        false
+        changed
     }
 }
 
