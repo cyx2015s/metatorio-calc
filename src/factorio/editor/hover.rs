@@ -200,26 +200,31 @@ impl<'a> egui::Widget for PrototypeHover<'a, CraftingMachinePrototype> {
                 )
             ));
             if let Some(effect_receiver) = self.prototype.effect_receiver.as_ref() {
+                #[allow(irrefutable_let_patterns)]
                 if let val = effect_receiver.base_effect.consumption
                     && val != 0.0
                 {
                     ui.label(format!("基础能耗: {}%", (val * 100.0) as i32));
                 }
+                #[allow(irrefutable_let_patterns)]
                 if let val = effect_receiver.base_effect.speed
                     && val != 0.0
                 {
                     ui.label(format!("基础速度: {}%", (val * 100.0) as i32));
                 }
+                #[allow(irrefutable_let_patterns)]
                 if let val = effect_receiver.base_effect.productivity
                     && val != 0.0
                 {
                     ui.label(format!("基础产能: {}%", (val * 100.0) as i32));
                 }
+                #[allow(irrefutable_let_patterns)]
                 if let val = effect_receiver.base_effect.pollution
                     && val != 0.0
                 {
                     ui.label(format!("基础污染: {}%", (val * 100.0) as i32));
                 }
+                #[allow(irrefutable_let_patterns)]
                 if let val = effect_receiver.base_effect.quality
                     && val != 0.0
                 {

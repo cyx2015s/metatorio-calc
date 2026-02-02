@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet};
 
 use crate::{
     concept::{AsFlow, EditorView, EntryOperation, Flow, Mechanic, SolveContext},
@@ -9,7 +9,6 @@ use crate::{
         modal::SelectorModal,
         model::{context::*, energy::*, entity::*, recipe::*},
         selector::Selector,
-        style::card_frame,
     },
 };
 
@@ -275,97 +274,6 @@ impl AsFlow for MiningMechanicInstance {
     }
 }
 
-impl EditorView for MiningMechanicInstance {
-    fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &Self::GameContext) -> bool {
-        let mut changed = false;
-
-        ui.vertical(|ui| {
-            ui.label("开采");
-
-            let resource_button = ui
-                .add_sized([35.0, 35.0], Icon::new(ctx, "entity", &self.resource))
-                .interact(egui::Sense::click())
-                .on_hover_text(format!(
-                    "矿物：{}",
-                    ctx.get_display_name("entity", &self.resource)
-                ));
-            changed |= ui
-                .add(
-                    SelectorModal::new(resource_button.id, ctx, "选择矿物")
-                        .with_toggle(resource_button.clicked())
-                        .with_selector(
-                            Selector::new(ctx, "entity")
-                                .with_current(&mut self.resource)
-                                .with_filter(|s, f| f.resources.contains_key(s)),
-                        ),
-                )
-                .changed();
-        });
-        if changed {
-            // TODO 读取用户设定的偏好
-            if let Some(miner) = ctx.miners.get(&self.machine.0)
-                && let Some(resource_proto) = ctx.resources.get(&self.resource)
-                && !machine_fits_for_resource(miner, resource_proto)
-            {
-                self.machine = "entity-unknown".into();
-                self.instance_fuel = None;
-                self.module_config = ModuleConfig::new();
-            }
-        }
-        ui.separator();
-        ui.vertical(|ui| {
-            ui.add_sized([35.0, 15.0], egui::Label::new("机器"));
-            let entity_button = ui
-                .add_sized(
-                    [35.0, 35.0],
-                    Icon::new(ctx, "entity", &self.machine.0).with_quality(self.machine.1),
-                )
-                .interact(egui::Sense::click())
-                .on_hover_text(if ctx.miners.contains_key(&self.machine.0) {
-                    ctx.get_display_name("entity", &self.machine.0)
-                } else {
-                    "采矿机: 未选择".into()
-                });
-
-            if let Some(resource_proto) = ctx.resources.get(&self.resource) {
-                changed |= ui
-                    .add(
-                        SelectorModal::new(entity_button.id, ctx, "选择采矿设备")
-                            .with_toggle(entity_button.clicked())
-                            .with_selector(
-                                Selector::new(ctx, "entity")
-                                    .with_current(&mut self.machine)
-                                    .with_filter(|s: &IdWithQuality, f: &FactorioContext| {
-                                        if let Some(miner) = f.miners.get(&s.0) {
-                                            machine_fits_for_resource(miner, resource_proto)
-                                        } else {
-                                            false
-                                        }
-                                    }),
-                            ),
-                    )
-                    .changed();
-            }
-        });
-        ui.separator();
-
-        if let Some(miner) = ctx.miners.get(&self.machine.0) {
-            changed |= ui
-                .add(ModuleConfigEditor::new(
-                    ctx,
-                    &mut self.module_config,
-                    miner.module_slots as usize,
-                    &miner.allowed_effects,
-                    &miner.allowed_module_categories,
-                ))
-                .changed();
-        }
-
-        // 先不判断
-        changed
-    }
-}
-
 #[test]
 fn test_mining_normalized() {
     let ctx = FactorioContext::test_load();
@@ -391,7 +299,15 @@ pub struct MiningMechanic {
     pub operations: HashMap<usize, EntryOperation>,
     pub instances: Vec<MiningMechanicInstance>,
     #[serde(skip)]
-    pub suggestions: Vec<MiningMechanicInstance>,
+    pub suggestion_item: Option<GenericItem>,
+    #[serde(skip)]
+    pub suggestion_amount: f64,
+    #[serde(skip)]
+    pub suggested_resources: HashSet<String>,
+    #[serde(skip)]
+    pub selected_suggested_resource: Option<String>,
+    #[serde(skip)]
+    pub suggested_recipes_filter: String,
 }
 
 pub fn select_miner_for_resource(
@@ -401,11 +317,10 @@ pub fn select_miner_for_resource(
 ) -> IdWithQuality {
     // 优先选择用户偏好
     for pref in preferences.iter() {
-        if let Some(miner) = ctx.miners.get(&pref.0) {
-            if machine_fits_for_resource(miner, resource) {
+        if let Some(miner) = ctx.miners.get(&pref.0)
+            && machine_fits_for_resource(miner, resource) {
                 return pref.clone();
             }
-        }
     }
     let mut measure = 0.0;
     let mut selected = "entity-unknown".to_string();
@@ -418,8 +333,9 @@ pub fn select_miner_for_resource(
                 .map_or(25.0, |bb| bb.get_area());
         if let Some(effect_receiver) = &miner.effect_receiver {
             score *= 1.0 + effect_receiver.base_effect.speed;
-            score *= 1.0 + effect_receiver.base_effect.productivity;
+            score *= 1.0 + (effect_receiver.base_effect.productivity * 2.0);
         }
+        score *= 1.0 + miner.module_slots / 4.0 ;
         score
     }
     // 找不到偏好设定的机器，找一个最好的的
@@ -442,26 +358,123 @@ impl Mechanic<FactorioContext, GenericItem> for MiningMechanic {
         "采矿".to_string()
     }
 
-    fn instances(&self) -> Vec<&FactorioMechanicInstance> {
+    fn instances(&self) -> Vec<&AsFactorioFlow> {
         self.instances
             .iter()
-            .map(|instance| instance as &FactorioMechanicInstance)
+            .map(|instance| instance as &AsFactorioFlow)
             .collect()
+    }
+
+    fn instance_len(&self) -> usize {
+        self.instances.len()
+    }
+
+    fn instance_view(&mut self, idx: usize, ui: &mut egui::Ui, ctx: &FactorioContext) -> bool {
+        let mut changed = false;
+        let instance = &mut self.instances[idx];
+
+        ui.vertical(|ui| {
+            ui.label("开采");
+
+            let resource_button = ui
+                .add_sized([35.0, 35.0], Icon::new(ctx, "entity", &instance.resource))
+                .interact(egui::Sense::click())
+                .on_hover_text(format!(
+                    "矿物：{}",
+                    ctx.get_display_name("entity", &instance.resource)
+                ));
+            changed |= ui
+                .add(
+                    SelectorModal::new(resource_button.id, ctx, "选择矿物")
+                        .with_toggle(resource_button.clicked())
+                        .with_selector(
+                            Selector::new(ctx, "entity")
+                                .with_current(&mut instance.resource)
+                                .with_filter(|s, f| f.resources.contains_key(s)),
+                        ),
+                )
+                .changed();
+        });
+        if changed {
+            // TODO 读取用户设定的偏好
+            if let Some(resource) = ctx.resources.get(&instance.resource)
+                && ctx
+                    .miners
+                    .get(&instance.machine.0)
+                    .is_none_or(|miner| !machine_fits_for_resource(miner, resource))
+            {
+                instance.machine = select_miner_for_resource(ctx, resource, &[]);
+                instance.instance_fuel = None;
+                instance.module_config = ModuleConfig::new();
+            }
+        }
+        ui.separator();
+        ui.vertical(|ui| {
+            ui.add_sized([35.0, 15.0], egui::Label::new("机器"));
+            let entity_button = ui
+                .add_sized(
+                    [35.0, 35.0],
+                    Icon::new(ctx, "entity", &instance.machine.0).with_quality(instance.machine.1),
+                )
+                .interact(egui::Sense::click())
+                .on_hover_text(if ctx.miners.contains_key(&instance.machine.0) {
+                    ctx.get_display_name("entity", &instance.machine.0)
+                } else {
+                    "采矿机: 未选择".into()
+                });
+
+            if let Some(resource_proto) = ctx.resources.get(&instance.resource) {
+                changed |= ui
+                    .add(
+                        SelectorModal::new(entity_button.id, ctx, "选择采矿设备")
+                            .with_toggle(entity_button.clicked())
+                            .with_selector(
+                                Selector::new(ctx, "entity")
+                                    .with_current(&mut instance.machine)
+                                    .with_filter(|s: &IdWithQuality, f: &FactorioContext| {
+                                        if let Some(miner) = f.miners.get(&s.0) {
+                                            machine_fits_for_resource(miner, resource_proto)
+                                        } else {
+                                            false
+                                        }
+                                    }),
+                            ),
+                    )
+                    .changed();
+            }
+        });
+        ui.separator();
+
+        if let Some(miner) = ctx.miners.get(&instance.machine.0) {
+            changed |= ui
+                .add(ModuleConfigEditor::new(
+                    ctx,
+                    &mut instance.module_config,
+                    miner.module_slots as usize,
+                    &miner.allowed_effects,
+                    &miner.allowed_module_categories,
+                ))
+                .changed();
+        }
+
+        changed
     }
 
     fn instance_operate(
         &mut self,
         idx: usize,
-        f: &mut dyn FnMut(&mut FactorioMechanicInstance) -> EntryOperation,
+        f: &mut dyn FnMut(&mut AsFactorioFlow) -> EntryOperation,
     ) {
-        let op = f(&mut self.instances[idx] as &mut FactorioMechanicInstance);
+        let op = f(&mut self.instances[idx] as &mut AsFactorioFlow);
         if !matches!(op, EntryOperation::None) {
             self.operations.insert(idx, op);
         }
     }
 
     fn update_suggestion(&mut self, ctx: &FactorioContext, item: &GenericItem, amount: f64) {
-        self.suggestions.clear();
+        self.suggested_resources.clear();
+        self.suggestion_item = Some(item.clone());
+        self.suggestion_amount = amount;
         let value = amount;
         if value < 0.0 {
             // 提供生产方式
@@ -471,36 +484,16 @@ impl Mechanic<FactorioContext, GenericItem> for MiningMechanic {
                         if let Some(mining) = resource.base.minable.as_ref() {
                             if let Some(result) = &mining.result {
                                 if result == name {
-                                    let mut mining_config = MiningMechanicInstance {
-                                        resource: resource.base.base.name.clone(),
-                                        ..Default::default()
-                                    };
-                                    for miner in ctx.miners.values() {
-                                        if miner.resource_categories.contains(
-                                            resource
-                                                .category
-                                                .as_ref()
-                                                .unwrap_or(&"basic-solid".to_string()),
-                                        ) {
-                                            mining_config.machine =
-                                                (miner.base.base.name.clone(), 0).into();
-                                            break;
-                                        }
-                                    }
-                                    self.suggestions.push(mining_config);
+                                    self.suggested_resources
+                                        .insert(resource.base.base.name.clone());
                                 }
                             } else {
                                 for res in mining.results.as_ref().unwrap().iter() {
                                     if let RecipeResult::Item(r) = res
                                         && &r.name == name
                                     {
-                                        let mining_config = MiningMechanicInstance {
-                                            resource: resource.base.base.name.clone(),
-                                            machine: "entity-unknown".into(),
-                                            module_config: ModuleConfig::default(),
-                                            instance_fuel: None,
-                                        };
-                                        self.suggestions.push(mining_config);
+                                        self.suggested_resources
+                                            .insert(resource.base.base.name.clone());
                                     }
                                 }
                             }
@@ -519,13 +512,8 @@ impl Mechanic<FactorioContext, GenericItem> for MiningMechanic {
                                 if let RecipeResult::Fluid(r) = res
                                     && &r.name == name
                                 {
-                                    let mining_config = MiningMechanicInstance {
-                                        resource: resource.base.base.name.clone(),
-                                        machine: "entity-unknown".into(),
-                                        module_config: ModuleConfig::default(),
-                                        instance_fuel: None,
-                                    };
-                                    self.suggestions.push(mining_config);
+                                    self.suggested_resources
+                                        .insert(resource.base.base.name.clone());
                                 }
                             }
                         }
@@ -540,24 +528,36 @@ impl Mechanic<FactorioContext, GenericItem> for MiningMechanic {
 
     fn suggestion_view(&mut self, ui: &mut egui::Ui, ctx: &FactorioContext) -> bool {
         let mut changed = false;
-        self.suggestions.iter_mut().for_each(|instance| {
-            card_frame(ui).show(ui, |ui| {
-                if ui.button("添加此配方").clicked() {
-                    self.instances.push(instance.clone());
-                    changed = true;
-                }
-                ui.horizontal(|ui| {
-                    ui.set_min_width(ui.available_width());
-                    instance.editor_view(ui, ctx);
-                });
+        ui.add(egui::TextEdit::singleline(&mut self.suggested_recipes_filter).hint_text("筛选器"));
+        ui.add(
+            Selector::new(ctx, "entity")
+                .with_output(&mut self.selected_suggested_resource)
+                .with_filter(|id: &str, ctx| {
+                    self.suggested_resources.contains(id)
+                        && (id
+                            .to_lowercase()
+                            .contains(&self.suggested_recipes_filter.to_lowercase())
+                            || ctx
+                                .get_display_name("entity", id)
+                                .to_lowercase()
+                                .contains(&self.suggested_recipes_filter.to_lowercase()))
+                }),
+        );
+        if let Some(resource) = &self.selected_suggested_resource {
+            self.instances.push(MiningMechanicInstance {
+                resource: resource.clone(),
+                machine: select_miner_for_resource(ctx, ctx.resources.get(resource).unwrap(), &[]),
+                ..Default::default()
             });
-        });
+            self.selected_suggested_resource = None;
+            changed = true;
+        }
         changed
     }
 }
 
 impl EditorView for MiningMechanic {
-    fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &Self::GameContext) -> bool {
+    fn editor_view(&mut self, ui: &mut egui::Ui, _ctx: &Self::GameContext) -> bool {
         let mut changed = false;
 
         for idx in 0..self.instances.len() {

@@ -49,30 +49,15 @@ pub trait AsFlow: SolveContext {
     }
 }
 
-pub type MechanicSender<C, I> =
-    std::sync::mpsc::Sender<Box<dyn MechanicInstance<GameContext = C, ItemIdentType = I>>>;
-pub type MechanicReceiver<C, I> =
-    std::sync::mpsc::Receiver<Box<dyn MechanicInstance<GameContext = C, ItemIdentType = I>>>;
+pub type AsFlowSender<C, I> =
+    std::sync::mpsc::Sender<Box<dyn AsFlow<GameContext = C, ItemIdentType = I>>>;
+pub type AsFlowReceiver<C, I> =
+    std::sync::mpsc::Receiver<Box<dyn AsFlow<GameContext = C, ItemIdentType = I>>>;
 pub trait ItemIdent: Debug + Clone + Eq + Hash + Send + 'static {}
 impl<T> ItemIdent for T where T: Debug + Clone + Eq + Hash + Send + 'static {}
 pub trait GameContextCreatorView: Subview {
     fn set_subview_sender(&mut self, sender: std::sync::mpsc::Sender<Box<dyn Subview>>);
 }
-
-/// MechanicInstance:  机制实例
-pub trait MechanicInstance:
-    AsFlow + EditorView + dyn_clone::DynClone + erased_serde::Serialize
-{
-}
-
-impl<T> MechanicInstance for T where
-    T: AsFlow + EditorView + dyn_clone::DynClone + erased_serde::Serialize
-{
-}
-
-erased_serde::serialize_trait_object!(<C, I> MechanicInstance<GameContext = C, ItemIdentType = I>);
-
-dyn_clone::clone_trait_object!(<C, I> MechanicInstance<GameContext = C, ItemIdentType = I>);
 
 /// EditorView:  机制偏好编辑，而非机制实例编辑，每帧必须调用，在这一帧更新上一帧的所有操作
 /// Mechanic:  机制，包含多个机制实例，且能够参与计算
@@ -87,7 +72,7 @@ where
 {
     fn name(&self) -> String;
 
-    fn instances(&self) -> Vec<&dyn MechanicInstance<GameContext = C, ItemIdentType = I>>;
+    fn instances(&self) -> Vec<&dyn AsFlow<GameContext = C, ItemIdentType = I>>;
 
     // 考虑提供一个更高效的实现。
     fn instance_len(&self) -> usize {
@@ -97,19 +82,11 @@ where
     fn instance_operate(
         &mut self,
         idx: usize,
-        f: &mut dyn FnMut(
-            &mut dyn MechanicInstance<GameContext = C, ItemIdentType = I>,
-        ) -> EntryOperation,
+        f: &mut dyn FnMut(&mut dyn AsFlow<GameContext = C, ItemIdentType = I>) -> EntryOperation,
     );
 
-    fn instance_view(&mut self, idx: usize, ui: &mut egui::Ui, ctx: &C) -> bool {
-        let mut ret = false;
-        self.instance_operate(idx, &mut |instance| {
-            ret = instance.editor_view(ui, ctx);
-            EntryOperation::None
-        });
-        ret
-    }
+    /// 返回值表示是否产生了需要重新计算的更改
+    fn instance_view(&mut self, idx: usize, ui: &mut egui::Ui, ctx: &C) -> bool;
 
     /// 想要生产 amount 每秒数量的 item，有哪些方法？
     fn update_suggestion(&mut self, ctx: &C, item: &I, amount: f64);
@@ -125,13 +102,13 @@ where
     fn auto_populate(
         &mut self,
         ctx: &C,
-        sender: MechanicSender<C, I>, // 传递的所有物品流信息
+        sender: AsFlowSender<C, I>, // 传递的所有物品流信息
     ) {
         let _ = ctx;
         let _ = sender;
     }
 
-    fn get_instance_sender(&self) -> Option<&MechanicSender<C, I>> {
+    fn get_instance_sender(&self) -> Option<&AsFlowSender<C, I>> {
         let _ = self;
         None
     }

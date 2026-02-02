@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, HashSet},
     fmt::Debug,
 };
 
@@ -750,11 +750,10 @@ pub fn select_crafter_for_recipe(
 ) -> IdWithQuality {
     // 优先选择用户偏好
     for pref in preferences {
-        if let Some(crafter) = ctx.crafters.get(&pref.0) {
-            if machine_fits_for_recipe(crafter, recipe) {
+        if let Some(crafter) = ctx.crafters.get(&pref.0)
+            && machine_fits_for_recipe(crafter, recipe) {
                 return pref.clone();
             }
-        }
     }
     let mut measure = 0.0;
     let mut selected = "entity-unknown".to_string();
@@ -767,8 +766,9 @@ pub fn select_crafter_for_recipe(
                 .map_or(25.0, |bb| bb.get_area());
         if let Some(effect_receiver) = &crafter.effect_receiver {
             score *= 1.0 + effect_receiver.base_effect.speed;
-            score *= 1.0 + effect_receiver.base_effect.productivity;
+            score *= 1.0 + (effect_receiver.base_effect.productivity * 2.0);
         }
+        score *= 1.0 + crafter.module_slots / 4.0 ;
         score
     }
     // 找不到用户偏好时，选择最快的机器
@@ -791,19 +791,148 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
         "配方".to_string()
     }
 
-    fn instances(&self) -> Vec<&FactorioMechanicInstance> {
+    fn instances(&self) -> Vec<&AsFactorioFlow> {
         self.instances
             .iter()
-            .map(|m| m as &FactorioMechanicInstance)
+            .map(|m| m as &AsFactorioFlow)
             .collect()
+    }
+
+    fn instance_len(&self) -> usize {
+        self.instances.len()
+    }
+
+    fn instance_view(&mut self, idx: usize, ui: &mut egui::Ui, ctx: &FactorioContext) -> bool {
+        let mut changed = false;
+
+        let instance = self.instances.get_mut(idx).unwrap();
+        ui.vertical(|ui| {
+            ui.label("配方");
+            let recipe_button = ui
+                .add_sized(
+                    [35.0, 35.0],
+                    Icon::new(ctx, "recipe", &instance.recipe.0).with_quality(instance.recipe.1),
+                )
+                .interact(egui::Sense::click())
+                .on_hover_ui(|ui| {
+                    ui.add(PrototypeHover::new(
+                        ctx,
+                        ctx.recipes.get(&instance.recipe.0).unwrap(),
+                    ));
+                });
+            changed |= ui
+                .add(
+                    SelectorModal::new(recipe_button.id, ctx, "选择配方")
+                        .with_toggle(recipe_button.clicked())
+                        .with_selector(
+                            Selector::new(ctx, "recipe")
+                                .with_current(&mut instance.recipe)
+                                .with_hover(|ui, name: &IdWithQuality, ctx: &FactorioContext| {
+                                    if let Some(prototype) = ctx.recipes.get(name.0.as_str()) {
+                                        ui.add(PrototypeHover::new(ctx, prototype));
+                                    } else {
+                                        ui.label(format!("未知配方: {}", name.0));
+                                    }
+                                }),
+                        ),
+                )
+                .changed();
+        });
+        if changed
+            && let Some(recipe) = ctx.recipes.get(&instance.recipe.0)
+                && ctx.crafters.get(&instance.machine.0).is_none_or(|crafter| {
+                    !machine_fits_for_recipe(crafter, ctx.recipes.get(&instance.recipe.0).unwrap())
+                }) {
+                    instance.machine =
+                        select_crafter_for_recipe(ctx, recipe, &self.machine_preferences);
+                    instance.instance_fuel = None;
+                    instance.module_config = ModuleConfig::new();
+                }
+        ui.separator();
+        ui.vertical(|ui| {
+            ui.add_sized([35.0, 15.0], egui::Label::new("机器"));
+            let mut entity_button = ui
+                .add_sized(
+                    [35.0, 35.0],
+                    Icon::new(ctx, "entity", &instance.machine.0).with_quality(instance.machine.1),
+                )
+                .interact(egui::Sense::click());
+
+            if let Some(crafter) = ctx.crafters.get(&instance.machine.0) {
+                entity_button = entity_button.on_hover_ui(|ui| {
+                    ui.add(PrototypeHover::new(ctx, crafter));
+                });
+            }
+
+            let recipe_prototype = ctx.recipes.get(instance.recipe.0.as_str()).unwrap();
+            let selector = Selector::new(ctx, "entity")
+                .with_filter(|crafter_name: &IdWithQuality, ctx: &FactorioContext| {
+                    if let Some(crafter) = ctx.crafters.get(&crafter_name.0) {
+                        return machine_fits_for_recipe(crafter, recipe_prototype);
+                    }
+                    false
+                })
+                .with_current(&mut instance.machine)
+                .with_hover(|ui, name, ctx| {
+                    ui.add(PrototypeHover::new(ctx, &ctx.crafters[&name.0]));
+                });
+
+            let widget = SelectorModal::new(entity_button.id, ctx, "选择制造设备")
+                .with_toggle(entity_button.clicked())
+                .with_selector(selector);
+            changed |= ui.add(widget).changed();
+        });
+
+        ui.separator();
+
+        if let Some(crafter) = ctx.crafters.get(&instance.machine.0)
+            && let Some(recipe) = ctx.recipes.get(&instance.recipe.0)
+        {
+            let allowed_effects = EffectTypeLimitation::new(
+                recipe.allow_consumption,
+                recipe.allow_speed,
+                recipe.allow_productivity,
+                recipe.allow_pollution,
+                recipe.allow_quality,
+            )
+            .intersect(
+                crafter
+                    .allowed_effects
+                    .as_ref()
+                    .unwrap_or(&EffectTypeLimitation::default()),
+            );
+            let allowed_module_categories = match (
+                crafter.allowed_module_categories.as_ref(),
+                recipe.allowed_module_categories.as_ref(),
+            ) {
+                (None, None) => &None,
+                (None, Some(_)) => &recipe.allowed_module_categories,
+                (Some(_), None) => &crafter.allowed_module_categories,
+                (Some(a), Some(b)) => {
+                    &Some([a.to_vec().as_slice(), b.to_vec().as_slice()].concat())
+                }
+            };
+
+            changed |= ui
+                .add(ModuleConfigEditor::new(
+                    ctx,
+                    &mut instance.module_config,
+                    crafter.module_slots as usize,
+                    &Some(allowed_effects),
+                    allowed_module_categories,
+                ))
+                .changed();
+        };
+
+        changed
     }
 
     fn instance_operate(
         &mut self,
         idx: usize,
-        f: &mut dyn FnMut(&mut FactorioMechanicInstance) -> EntryOperation,
+        f: &mut dyn FnMut(&mut AsFactorioFlow) -> EntryOperation,
     ) {
-        let op = f(&mut self.instances[idx] as &mut FactorioMechanicInstance);
+        let op = f(&mut self.instances[idx] as &mut AsFactorioFlow);
         if !matches!(op, EntryOperation::None) {
             self.operations.insert(idx, op);
         }
@@ -818,18 +947,16 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
                 GenericItem::Item(id_with_quality) => {
                     let mut total_yield = 0.0;
                     for ingredient in &recipe_proto.ingredients {
-                        if let RecipeIngredient::Item(item_ingredient) = ingredient {
-                            if &item_ingredient.name == &id_with_quality.0 {
+                        if let RecipeIngredient::Item(item_ingredient) = ingredient
+                            && item_ingredient.name == id_with_quality.0 {
                                 total_yield -= item_ingredient.amount;
                             }
-                        }
                     }
                     for result in &recipe_proto.results {
-                        if let RecipeResult::Item(item_result) = result {
-                            if &item_result.name == &id_with_quality.0 {
+                        if let RecipeResult::Item(item_result) = result
+                            && item_result.name == id_with_quality.0 {
                                 total_yield += item_result.normalized_output().0;
                             }
-                        }
                     }
                     if total_yield * amount < 0.0 {
                         self.suggested_recipes
@@ -842,18 +969,16 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
                 } => {
                     let mut total_yield = 0.0;
                     for ingredient in &recipe_proto.ingredients {
-                        if let RecipeIngredient::Fluid(fluid_ingredient) = ingredient {
-                            if &fluid_ingredient.name == name {
+                        if let RecipeIngredient::Fluid(fluid_ingredient) = ingredient
+                            && &fluid_ingredient.name == name {
                                 total_yield -= fluid_ingredient.amount;
                             }
-                        }
                     }
                     for result in &recipe_proto.results {
-                        if let RecipeResult::Fluid(fluid_result) = result {
-                            if &fluid_result.name == name {
+                        if let RecipeResult::Fluid(fluid_result) = result
+                            && &fluid_result.name == name {
                                 total_yield += fluid_result.normalized_output().0;
                             }
-                        }
                     }
                     if total_yield * amount < 0.0 {
                         self.suggested_recipes
@@ -868,7 +993,7 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
     fn auto_populate(
         &mut self,
         ctx: &FactorioContext,
-        sender: MechanicSender<FactorioContext, GenericItem>, // 传递的所有物品流信息
+        sender: AsFlowSender<FactorioContext, GenericItem>, // 传递的所有物品流信息
     ) {
         let _ = ctx;
         let _ = sender;

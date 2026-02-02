@@ -176,7 +176,7 @@ impl<'a> egui::Widget for Selector<'a, str, String> {
                         }
                         idx += 1;
                         let mut icon =
-                            Icon::new(self.ctx, self.type_name, &item_name).with_size(32.0);
+                            Icon::new(self.ctx, self.type_name, item_name).with_size(32.0);
                         if self.current.as_ref().is_some_and(|x| x == &item_name) {
                             icon = icon.with_stroke(egui::Stroke::new(2.0, egui::Color32::GRAY));
                         } else if self
