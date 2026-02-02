@@ -6,6 +6,22 @@ use crate::factorio::{icon::*, *};
 pub struct PrototypeHover<'a, T: HasPrototypeBase> {
     pub ctx: &'a FactorioContext,
     pub prototype: &'a T,
+    pub quality: u8,
+}
+
+impl<'a, T: HasPrototypeBase> PrototypeHover<'a, T> {
+    pub fn new(ctx: &'a FactorioContext, prototype: &'a T) -> Self {
+        Self {
+            ctx,
+            prototype,
+            quality: 0,
+        }
+    }
+
+    pub fn with_quality(mut self, quality: u8) -> Self {
+        self.quality = quality;
+        self
+    }
 }
 
 impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
@@ -158,6 +174,58 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
                         });
                 }
             });
+        });
+
+        ui.response()
+    }
+}
+
+impl<'a> egui::Widget for PrototypeHover<'a, CraftingMachinePrototype> {
+    fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+        ui.vertical(|ui| {
+            ui.label(
+                self.ctx
+                    .get_display_name("entity", &self.prototype.base.base.name),
+            );
+            ui.label(format!("制造速度: {}", self.prototype.crafting_speed));
+            ui.label(format!("插件槽位: {}", self.prototype.module_slots));
+            ui.label(format!(
+                "因为运行而导致的能量消耗: {}W",
+                compact_number(
+                    self.prototype
+                        .energy_usage
+                        .as_ref()
+                        .map_or(0.0, |e| e.amount)
+                        * 60.0
+                )
+            ));
+            if let Some(effect_receiver) = self.prototype.effect_receiver.as_ref() {
+                if let val = effect_receiver.base_effect.consumption
+                    && val != 0.0
+                {
+                    ui.label(format!("基础能耗: {}%", (val * 100.0) as i32));
+                }
+                if let val = effect_receiver.base_effect.speed
+                    && val != 0.0
+                {
+                    ui.label(format!("基础速度: {}%", (val * 100.0) as i32));
+                }
+                if let val = effect_receiver.base_effect.productivity
+                    && val != 0.0
+                {
+                    ui.label(format!("基础产能: {}%", (val * 100.0) as i32));
+                }
+                if let val = effect_receiver.base_effect.pollution
+                    && val != 0.0
+                {
+                    ui.label(format!("基础污染: {}%", (val * 100.0) as i32));
+                }
+                if let val = effect_receiver.base_effect.quality
+                    && val != 0.0
+                {
+                    ui.label(format!("基础品质: {}%", (val * 100.0) as i32));
+                }
+            }
         });
 
         ui.response()

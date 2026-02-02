@@ -653,6 +653,14 @@ impl FactorioContext {
             get_reverse_order_info(&self.ordered_entries["recipe"]),
         );
         self.ordered_entries.insert(
+            "recipe-category".into(),
+            get_order_info(&self.recipe_categories, &self.groups, &self.subgroups),
+        );
+        self.order_of_entries.insert(
+            "recipe-category".into(),
+            get_reverse_order_info(&self.ordered_entries["recipe-category"]),
+        );
+        self.ordered_entries.insert(
             "fluid".into(),
             get_order_info(&self.fluids, &self.groups, &self.subgroups),
         );

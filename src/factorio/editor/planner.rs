@@ -442,6 +442,7 @@ impl EditorView for FactoryInstance {
                 ui.separator();
                 ui.heading("游戏机制");
                 for mechanic in self.mechanics.iter_mut() {
+                    ui.separator();
                     changed |= mechanic.editor_view(ui, ctx);
                 }
             });

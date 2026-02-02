@@ -621,10 +621,10 @@ impl EditorView for RecipeMechanicInstance {
                 )
                 .interact(egui::Sense::click())
                 .on_hover_ui(|ui| {
-                    ui.add(PrototypeHover {
+                    ui.add(PrototypeHover::new(
                         ctx,
-                        prototype: ctx.recipes.get(&self.recipe.0).unwrap(),
-                    });
+                        ctx.recipes.get(&self.recipe.0).unwrap(),
+                    ));
                 });
             changed |= ui
                 .add(
@@ -635,7 +635,7 @@ impl EditorView for RecipeMechanicInstance {
                                 .with_current(&mut self.recipe)
                                 .with_hover(|ui, name: &IdWithQuality, ctx: &FactorioContext| {
                                     if let Some(prototype) = ctx.recipes.get(name.0.as_str()) {
-                                        ui.add(PrototypeHover { ctx, prototype });
+                                        ui.add(PrototypeHover::new(ctx, prototype));
                                     } else {
                                         ui.label(format!("未知配方: {}", name.0));
                                     }
@@ -657,12 +657,18 @@ impl EditorView for RecipeMechanicInstance {
         ui.separator();
         ui.vertical(|ui| {
             ui.add_sized([35.0, 15.0], egui::Label::new("机器"));
-            let entity_button = ui
+            let mut entity_button = ui
                 .add_sized(
                     [35.0, 35.0],
                     Icon::new(ctx, "entity", &self.machine.0).with_quality(self.machine.1),
                 )
                 .interact(egui::Sense::click());
+
+            if let Some(crafter) = ctx.crafters.get(&self.machine.0) {
+                entity_button = entity_button.on_hover_ui(|ui| {
+                    ui.add(PrototypeHover::new(ctx, crafter));
+                });
+            }
 
             let recipe_prototype = ctx.recipes.get(self.recipe.0.as_str()).unwrap();
             let selector = Selector::new(ctx, "entity")
@@ -672,7 +678,10 @@ impl EditorView for RecipeMechanicInstance {
                     }
                     false
                 })
-                .with_current(&mut self.machine);
+                .with_current(&mut self.machine)
+                .with_hover(|ui, name, ctx| {
+                    ui.add(PrototypeHover::new(ctx, &ctx.crafters[&name.0]));
+                });
 
             let widget = SelectorModal::new(entity_button.id, ctx, "选择制造设备")
                 .with_toggle(entity_button.clicked())
@@ -730,6 +739,11 @@ impl EditorView for RecipeMechanicInstance {
 #[derive(Default)]
 pub struct RecipeMechanic {
     pub instances: Vec<RecipeMechanicInstance>,
+
+    pub machine_preferences: Vec<IdWithQuality>,
+
+    pub new_machine_preference: Option<IdWithQuality>,
+
     #[serde(skip)]
     pub suggestion_item: Option<GenericItem>,
     #[serde(skip)]
@@ -740,6 +754,26 @@ pub struct RecipeMechanic {
     pub selected_suggested_recipe: Option<String>,
     #[serde(skip)]
     pub suggested_recipes_filter: String,
+}
+
+pub fn select_machine_for_recipe(
+    ctx: &FactorioContext,
+    recipe: &RecipePrototype,
+    preferences: &[IdWithQuality],
+) -> IdWithQuality {
+    for preferred in preferences {
+        if let Some(crafter) = ctx.crafters.get(&preferred.0) {
+            if machine_fits_for_recipe(crafter, recipe) {
+                return preferred.clone();
+            }
+        }
+    }
+    for (crafter_name, crafter) in &ctx.crafters {
+        if machine_fits_for_recipe(crafter, recipe) {
+            return IdWithQuality(crafter_name.clone(), 0);
+        }
+    }
+    "entity-unknown".into()
 }
 
 impl SolveContext for RecipeMechanic {
@@ -879,6 +913,11 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
             };
             self.instances.push(RecipeMechanicInstance {
                 recipe: IdWithQuality(recipe.clone(), quality),
+                machine: select_machine_for_recipe(
+                    ctx,
+                    ctx.recipes.get(recipe.as_str()).unwrap(),
+                    &self.machine_preferences,
+                ),
                 ..Default::default()
             });
             self.selected_suggested_recipe = None;
@@ -890,13 +929,96 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
 
 impl EditorView for RecipeMechanic {
     fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &FactorioContext) -> bool {
-        let _ = ctx;
+        let mut changed = false;
+        ui.collapsing("机器偏好", |ui| {
+            let icon = Icon::new(ctx, "entity", "entity-unknown");
+            let button = ui
+                .add(icon)
+                .on_hover_text("选择新的机器顺序依据")
+                .interact(egui::Sense::click());
+            ui.add(
+                SelectorModal::new(button.id, ctx, "选择机器")
+                    .with_toggle(button.clicked())
+                    .with_selector(
+                        Selector::new(ctx, "entity")
+                            .with_output(&mut self.new_machine_preference)
+                            .with_filter(|s: &IdWithQuality, f: &FactorioContext| {
+                                f.crafters.contains_key(&s.0)
+                            }),
+                    ),
+            );
+            if self.new_machine_preference.is_some() {
+                let new_machine = self.new_machine_preference.take().unwrap();
+                // 移除已有的相同机器
+                self.machine_preferences.retain(|m| m.0 != new_machine.0);
+                // 插入到最前面
+                self.machine_preferences.insert(0, new_machine);
+                changed = true;
+            }
+            let mut move_ups = vec![];
+            let mut deletes = vec![];
+            let inital_len = self.machine_preferences.len();
+            for (idx, machine) in self.machine_preferences.iter_mut().enumerate() {
+                ui.horizontal_top(|ui| {
+                    ui.vertical(|ui| {
+                        if ui
+                            .add_enabled(idx > 0, egui::Button::new("↑").small())
+                            .clicked()
+                        {
+                            move_ups.push(idx);
+                            changed = true;
+                        }
+                        if ui
+                            .add_enabled(idx + 1 < inital_len, egui::Button::new("↓").small())
+                            .clicked()
+                        {
+                            move_ups.push(idx + 1);
+                            changed = true;
+                        }
+                    });
+
+                    let icon = Icon::new(ctx, "entity", &machine.0).with_quality(machine.1);
+                    let mut button = ui.add(icon).interact(egui::Sense::click());
+                    if let Some(crafter) = ctx.crafters.get(&machine.0) {
+                        button = button.on_hover_ui(|ui| {
+                            ui.add(PrototypeHover::new(ctx, crafter));
+                        });
+
+                        if button.secondary_clicked() {
+                            deletes.push(idx);
+                            changed = true;
+                        }
+                    } else {
+                        deletes.push(idx);
+                    }
+                    ui.add(
+                        SelectorModal::new(button.id, ctx, "选择机器")
+                            .with_toggle(button.clicked())
+                            .with_selector(
+                                Selector::new(ctx, "entity")
+                                    .with_current(machine)
+                                    .with_filter(|s: &IdWithQuality, f: &FactorioContext| {
+                                        f.crafters.contains_key(&s.0)
+                                    }),
+                            ),
+                    );
+                });
+            }
+            for idx in move_ups {
+                self.machine_preferences.swap(idx, idx - 1);
+            }
+            for idx in deletes.iter().rev() {
+                self.machine_preferences.remove(*idx);
+            }
+        });
+
         if ui.button("添加配方").clicked() {
             let new_config = RecipeMechanicInstance::default();
             self.instances.push(new_config);
-            return true;
+            changed = true;
         }
-        false
+
+        changed
     }
 }
 

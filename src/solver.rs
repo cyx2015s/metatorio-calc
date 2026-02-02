@@ -38,6 +38,7 @@ where
     target: Flow<I>,
     flows: IndexMap<R, (Flow<I>, f64)>,
     external: Flow<I>, //  输入特定物品消耗的价值
+    strict: bool,      // 禁止使用 external 以外的物品输入
 }
 
 pub type BasicSolverArgs<I, R> = (Flow<I>, IndexMap<R, (Flow<I>, f64)>);
@@ -54,11 +55,17 @@ where
             target,
             flows,
             external: IndexMap::new(),
+            strict: false,
         }
     }
 
     pub fn with_external(mut self, external: Flow<I>) -> Self {
         self.external.extend(external);
+        self
+    }
+
+    pub fn with_strict(mut self, strict: bool) -> Self {
+        self.strict = strict;
         self
     }
 
@@ -106,7 +113,10 @@ where
             if let Some(expr) = balance {
                 targets.push(expr.clone().eq(amount));
             } else {
-                log::warn!("这个物品没有相关配方： {:?}，求解器已忽略无意义的目标。", item_id);
+                log::warn!(
+                    "这个物品没有相关配方： {:?}，求解器已忽略无意义的目标。",
+                    item_id
+                );
             }
         }
         let mut constraints = Vec::new();
