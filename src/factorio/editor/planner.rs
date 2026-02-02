@@ -34,7 +34,7 @@ pub struct FactoryInstance {
     /// Cached sorted keys for total_flow to avoid sorting every frame
     pub total_flow_sorted_keys: Vec<GenericItem>,
     pub mechanics: Vec<Box<dyn Mechanic<FactorioContext, GenericItem>>>,
-    pub arg_sender: std::sync::mpsc::Sender<SolverArgs<GenericItem, usize>>,
+    pub arg_sender: std::sync::mpsc::Sender<SolverData<GenericItem, usize>>,
     pub solution_receiver: std::sync::mpsc::Receiver<SolverSolution<usize>>,
 }
 
@@ -164,7 +164,9 @@ impl FactoryInstance {
                 *acc.entry(item).or_insert(0.0) += amount;
                 acc
             });
-        let _ = self.arg_sender.send((target, flows, external));
+        let _ = self
+            .arg_sender
+            .send(SolverData::new(target, flows).with_sources(external));
     }
 
     fn flows_panel(
@@ -295,15 +297,14 @@ impl SolveContext for FactoryInstance {
 
 impl EditorView for FactoryInstance {
     fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &FactorioContext) -> bool {
-        ui.add(
+        let label = ui.add(
             egui::text_edit::TextEdit::singleline(&mut self.name).font(egui::TextStyle::Heading),
         );
         ui.separator();
-        let id = ui.id();
+        let id = label.id;
         let mut changed = false;
         let mut need_suggestions = false;
         while let Ok(result) = self.solution_receiver.try_recv() {
-            log::info!("收到求解结果");
             match result {
                 Ok(solution) => {
                     self.total_flow.clear();
@@ -404,6 +405,9 @@ impl EditorView for FactoryInstance {
                             ui.vertical(|ui| {
                             ui.label("单位价值");
                             changed |= ui.add(egui::DragValue::new(penalty).suffix("·秒")).changed();
+                            if *penalty < 0.0 {
+                                *penalty = 0.0;
+                            }
                             if ui.button("删除").clicked() {
                                 deleted = true;
                                 changed = true;
@@ -470,9 +474,11 @@ impl EditorView for FactoryInstance {
             ui.set_max_width(640.0);
             egui::ScrollArea::vertical().show(ui, |ui| {
                 self.mechanics.iter_mut().for_each(|mechanic| {
-                    ui.heading(mechanic.name());
-                    changed |= mechanic.suggestion_view(ui, ctx);
-                    ui.separator();
+                    ui.collapsing(mechanic.name(), |ui| {
+                        ui.heading(mechanic.name());
+                        changed |= mechanic.suggestion_view(ui, ctx);
+                        ui.separator();
+                    });
                 });
             });
         });

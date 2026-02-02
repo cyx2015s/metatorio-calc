@@ -1094,6 +1094,7 @@ impl EditorView for RecipeMechanic {
             let mut move_ups = vec![];
             let mut deletes = vec![];
             let inital_len = self.machine_preferences.len();
+            ui.separator();
             for (idx, machine) in self.machine_preferences.iter_mut().enumerate() {
                 ui.horizontal_top(|ui| {
                     ui.vertical(|ui| {

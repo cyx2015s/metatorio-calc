@@ -35,10 +35,13 @@ where
     I: ItemIdent,
     R: ItemIdent,
 {
-    target: Flow<I>,
-    flows: IndexMap<R, (Flow<I>, f64)>,
-    external: Flow<I>, //  输入特定物品消耗的价值
-    strict: bool,      // 禁止使用 external 以外的物品输入
+    pub target: Flow<I>,
+    pub flows: IndexMap<R, (Flow<I>, f64)>,
+    pub sources: Flow<I>, //  输入特定物品消耗的价值
+    pub sinks: Flow<I>,   //  产生额外物品的惩罚
+    // 我还不知道怎么称呼，目前规定如下：
+    // 如果是严格模式，相比普通模式有如下限制：不出现在target中的物品必须配平，只能使用来自external的输入
+    pub strict: bool,
 }
 
 pub type BasicSolverArgs<I, R> = (Flow<I>, IndexMap<R, (Flow<I>, f64)>);
@@ -54,13 +57,19 @@ where
         Self {
             target,
             flows,
-            external: IndexMap::new(),
+            sources: IndexMap::new(),
+            sinks: IndexMap::new(),
             strict: false,
         }
     }
 
-    pub fn with_external(mut self, external: Flow<I>) -> Self {
-        self.external.extend(external);
+    pub fn with_sources(mut self, sources: Flow<I>) -> Self {
+        self.sources.extend(sources);
+        self
+    }
+
+    pub fn with_sinks(mut self, sinks: Flow<I>) -> Self {
+        self.sinks.extend(sinks);
         self
     }
 
@@ -88,7 +97,7 @@ where
                 *entry += amount * *var;
             }
         }
-        for (item_id, _) in &self.external {
+        for (item_id, _) in &self.sources {
             let var = problem_variables.add(variable().min(0));
             source_vars.insert(item_id.clone(), var);
             let entry = item_balances
@@ -104,7 +113,7 @@ where
                 }
             }
         }
-        for item in self.external.keys() {
+        for item in self.sources.keys() {
             no_providers.remove(item);
         }
         let mut targets = Vec::new();
@@ -113,16 +122,22 @@ where
             if let Some(expr) = balance {
                 targets.push(expr.clone().eq(amount));
             } else {
-                log::warn!(
-                    "这个物品没有相关配方： {:?}，求解器已忽略无意义的目标。",
-                    item_id
-                );
+                if self.strict {
+                    return Err(AppError::Solver(format!(
+                        "物品 {:?} 没有相关配方，且处于严格模式，求解器无法继续。",
+                        item_id
+                    )));
+                }
             }
         }
         let mut constraints = Vec::new();
         for (item_id, expr) in &item_balances {
             if !self.target.contains_key(item_id) && !no_providers.contains(item_id) {
-                constraints.push(expr.clone().geq(0.0));
+                if self.strict {
+                    constraints.push(expr.clone().eq(0.0));
+                } else {
+                    constraints.push(expr.clone().geq(0.0));
+                }
             }
         }
         for source_var in source_vars.values() {
@@ -133,7 +148,7 @@ where
             let var = flow_vars.get(flow).unwrap();
             optimization_expr += *cost * *var;
         }
-        for (item_id, cost) in &self.external {
+        for (item_id, cost) in &self.sources {
             let var = source_vars.get(item_id).unwrap();
             optimization_expr += *cost * *var;
         }
@@ -176,34 +191,27 @@ where
         }
     }
 
-    pub fn make_basic_solver_thread(
-        solution_tx: std::sync::mpsc::Sender<SolverSolution<R>>,
-        arg_rx: std::sync::mpsc::Receiver<BasicSolverArgs<I, R>>,
-    ) {
-        std::thread::spawn(move || {
-            log::info!("求解线程启动");
-            while let Ok((target, flows)) = arg_rx.recv() {
-                let solver_data = SolverData::new(target, flows);
-                // log::info!("收到了新的计算请求……");
-                if solution_tx.send(solver_data.solve()).is_err() {
-                    // 接收方已关闭，退出线程
-                    break;
-                }
-            }
-            log::info!("求解线程退出");
-        });
-    }
-
     pub fn make_solver_thread(
         solution_tx: std::sync::mpsc::Sender<SolverSolution<R>>,
-        arg_rx: std::sync::mpsc::Receiver<SolverArgs<I, R>>,
+        arg_rx: std::sync::mpsc::Receiver<SolverData<I, R>>,
     ) {
         std::thread::spawn(move || {
             log::info!("求解线程启动");
-            while let Ok((target, flows, external)) = arg_rx.recv() {
-                let solver_data = SolverData::new(target, flows).with_external(external);
+            loop {
+                let mut last_req = match arg_rx.recv() {
+                    Ok(req) => req,
+                    Err(_) => break,
+                };
+                // 尽可能多地丢弃后续请求，只保留最新
+                while let Ok(req) = arg_rx.try_recv() {
+                    // 虽然不太可能，因为每次算都很快。
+                    log::info!("丢弃了一个过时的求解请求");
+
+                    last_req = req;
+                }
+
                 // log::info!("收到了新的计算请求……");
-                if solution_tx.send(solver_data.solve()).is_err() {
+                if solution_tx.send(last_req.solve()).is_err() {
                     // 接收方已关闭，退出线程
                     break;
                 }
