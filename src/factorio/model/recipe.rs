@@ -738,6 +738,8 @@ pub struct RecipeMechanic {
     pub suggested_recipes: HashSet<String>,
     #[serde(skip)]
     pub selected_suggested_recipe: Option<String>,
+    #[serde(skip)]
+    pub suggested_recipes_filter: String,
 }
 
 impl SolveContext for RecipeMechanic {
@@ -855,10 +857,20 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
 
     fn suggestion_view(&mut self, ui: &mut egui::Ui, ctx: &FactorioContext) -> bool {
         let mut changed = false;
+        ui.add(egui::TextEdit::singleline(&mut self.suggested_recipes_filter).hint_text("筛选器"));
         ui.add(
             Selector::new(ctx, "recipe")
                 .with_output(&mut self.selected_suggested_recipe)
-                .with_filter(|id: &str, _ctx| self.suggested_recipes.contains(id)),
+                .with_filter(|id: &str, ctx| {
+                    self.suggested_recipes.contains(id)
+                        && (id
+                            .to_lowercase()
+                            .contains(&self.suggested_recipes_filter.to_lowercase())
+                            || ctx
+                                .get_display_name("recipe", id)
+                                .to_lowercase()
+                                .contains(&self.suggested_recipes_filter.to_lowercase()))
+                }),
         );
         if let Some(recipe) = &self.selected_suggested_recipe {
             let quality = match self.suggestion_item {

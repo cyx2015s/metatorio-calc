@@ -1,3 +1,4 @@
+use egui::special_emojis::GITHUB;
 use mimalloc::MiMalloc;
 
 use crate::update::*;
@@ -213,7 +214,7 @@ impl eframe::App for MainPage {
                     },
                 }
                 ui.add(egui::Hyperlink::from_label_and_url(
-                    "Github 仓库",
+                    format!("{} Github 仓库", GITHUB),
                     "https://github.com/cyx2015s/metatorio-calc",
                 ));
                 ui.separator();

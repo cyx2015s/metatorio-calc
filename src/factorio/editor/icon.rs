@@ -115,6 +115,7 @@ pub struct GenericIcon<'a> {
     pub ctx: &'a FactorioContext,
     pub item: &'a GenericItem,
     pub size: f32,
+    pub stroke: egui::Stroke,
 }
 
 impl<'a> GenericIcon<'a> {
@@ -123,11 +124,17 @@ impl<'a> GenericIcon<'a> {
             ctx,
             item,
             size: 32.0,
+            stroke: egui::Stroke::NONE,
         }
     }
 
     pub fn with_size(mut self, size: f32) -> Self {
         self.size = size;
+        self
+    }
+
+    pub fn with_stroke(mut self, stroke: egui::Stroke) -> Self {
+        self.stroke = stroke;
         self
     }
 }
@@ -140,7 +147,8 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                 [self.size, self.size],
                 Icon::new(self.ctx, "item", name)
                     .with_quality(*quality)
-                    .with_size(self.size),
+                    .with_size(self.size)
+                    .with_stroke(self.stroke),
             ),
             GenericItem::Fluid {
                 name,
@@ -149,14 +157,16 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                 [self.size, self.size],
                 Icon::new(self.ctx, "fluid", name)
                     .with_quality(0)
-                    .with_size(self.size),
+                    .with_size(self.size)
+                    .with_stroke(self.stroke),
             ),
             GenericItem::Entity(IdWithQuality(name, quality)) => {
                 let main = ui.add_sized(
                     [self.size, self.size],
                     Icon::new(self.ctx, "entity", name)
                         .with_quality(*quality)
-                        .with_size(self.size),
+                        .with_size(self.size)
+                        .with_stroke(self.stroke),
                 );
                 let right_bottom = main
                     .rect

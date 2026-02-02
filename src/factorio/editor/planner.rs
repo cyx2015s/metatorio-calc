@@ -188,19 +188,33 @@ impl FactoryInstance {
 
                     ui.vertical(|ui| {
                         ui.add_sized([35.0, 15.0], SignedCompactLabel::new(amount));
-                        let icon = ui
-                            .push_id(item, |ui| {
-                                ui.add_sized([35.0, 35.0], GenericIcon::new(ctx, item))
-                                    .interact(egui::Sense::click())
-                            })
-                            .inner;
-
-                        if icon.clicked_by(egui::PointerButton::Secondary) || icon.clicked() {
-                            *need_suggestions = true;
-                            self.mechanics
-                                .iter_mut()
-                                .for_each(|mechanic| mechanic.update_suggestion(ctx, item, amount));
-                        }
+                        ui.push_id(item, |ui| {
+                            let button = ui
+                                .add_sized([35.0, 35.0], GenericIcon::new(ctx, item))
+                                .interact(egui::Sense::click());
+                            button.context_menu(|ui| {
+                                if ui.button("添加到优化目标").clicked() {
+                                    self.target.push((item.clone(), 0.0));
+                                    *changed = true;
+                                }
+                                if ui.button("添加到外部输入").clicked() {
+                                    self.external.push((item.clone(), 1.0));
+                                    *changed = true;
+                                }
+                                if ui.button("显示推荐配方").clicked() {
+                                    *need_suggestions = true;
+                                    self.mechanics.iter_mut().for_each(|mechanic| {
+                                        mechanic.update_suggestion(ctx, item, amount)
+                                    });
+                                }
+                            });
+                            if button.clicked() {
+                                *need_suggestions = true;
+                                self.mechanics.iter_mut().for_each(|mechanic| {
+                                    mechanic.update_suggestion(ctx, item, amount)
+                                });
+                            }
+                        })
                     });
                     if ui.available_size_before_wrap().x < 35.0 {
                         ui.end_row();
@@ -345,8 +359,17 @@ impl EditorView for FactoryInstance {
                         card_frame(ui).show(ui, |ui| {
                             ui.set_min_width(ui.available_width());
                             ui.horizontal_wrapped(|ui| {
-                            let icon = ui.add_sized([35.0, 35.0],GenericIcon::new(ctx, item)).interact(egui::Sense::click());
-                            if icon.clicked_by(egui::PointerButton::Secondary) {
+                            let mut icon = GenericIcon::new(ctx, item);
+                            let not_satisfied = self.total_flow.get(item).cloned().unwrap_or(0.0) != *amount;
+                            if not_satisfied {
+                                icon = icon.with_stroke(egui::Stroke::new(2.0, egui::Color32::RED));
+                            }
+
+                            let mut widget = ui.add_sized([35.0, 35.0],icon).interact(egui::Sense::click());
+                            if not_satisfied {
+                                widget = widget.on_hover_text("\u{26A0}目标已忽略");
+                            }
+                            if widget.clicked_by(egui::PointerButton::Secondary) {
                                 need_suggestions = true;
                                 self.mechanics.iter_mut().for_each(|mechanic| {
                                     mechanic.update_suggestion(
@@ -358,7 +381,7 @@ impl EditorView for FactoryInstance {
                             }
                             ui.vertical(|ui| {
                                 ui.horizontal(|ui| {
-                                    changed |= generic_item_selector(ui, ctx, item, &icon, icon.id.with("target"));
+                                    changed |= generic_item_selector(ui, ctx, item, &widget, widget.id.with("target"));
                                 });
                             });
                         });
@@ -390,7 +413,7 @@ impl EditorView for FactoryInstance {
                         ui.horizontal_wrapped(|ui| {
                             let mut icon = ui.add_sized([35.0, 35.0],GenericIcon::new(ctx, item)).interact(egui::Sense::click());
                             if let GenericItem::Entity(..) = item {
-                                icon = icon.on_hover_text("⚠️ 指完成机制所消耗的实体资源（主要是矿物），不包括为了完成机制所需要收集的组装机、采矿机、插件塔等。")
+                                icon = icon.on_hover_text("\u{26A0}指完成机制所消耗的实体资源（主要是矿物），不包括为了完成机制所需要收集的组装机、采矿机、插件塔等。")
                             }
                             if icon.clicked_by(egui::PointerButton::Secondary) {
                                 need_suggestions = true;
