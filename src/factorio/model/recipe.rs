@@ -567,24 +567,7 @@ impl AsFlow for RecipeMechanicInstance {
                 .base
                 .collision_box
                 .as_ref()
-                .map_or(1.0, |bounding_box| match bounding_box {
-                    BoundingBox::Struct {
-                        left_top,
-                        right_bottom,
-                        orientation: _,
-                    } => {
-                        f64::ceil(right_bottom.1 - left_top.1)
-                            * f64::ceil(right_bottom.0 - left_top.0)
-                    }
-                    BoundingBox::Pair(map_position, map_position1) => {
-                        f64::ceil(map_position1.1 - map_position.1)
-                            * f64::ceil(map_position1.0 - map_position.0)
-                    }
-                    BoundingBox::Triplet(map_position, map_position1, _) => {
-                        f64::ceil(map_position1.1 - map_position.1)
-                            * f64::ceil(map_position1.0 - map_position.0)
-                    }
-                })
+                .map_or(1.0, |bounding_box| bounding_box.get_area())
         } else {
             16.0
         }
@@ -742,6 +725,7 @@ pub struct RecipeMechanic {
 
     pub machine_preferences: Vec<IdWithQuality>,
 
+    #[serde(skip)]
     pub new_machine_preference: Option<IdWithQuality>,
 
     #[serde(skip)]
@@ -756,24 +740,42 @@ pub struct RecipeMechanic {
     pub suggested_recipes_filter: String,
 }
 
-pub fn select_machine_for_recipe(
+pub fn select_crafter_for_recipe(
     ctx: &FactorioContext,
     recipe: &RecipePrototype,
     preferences: &[IdWithQuality],
 ) -> IdWithQuality {
-    for preferred in preferences {
-        if let Some(crafter) = ctx.crafters.get(&preferred.0) {
+    // 优先选择用户偏好
+    for pref in preferences {
+        if let Some(crafter) = ctx.crafters.get(&pref.0) {
             if machine_fits_for_recipe(crafter, recipe) {
-                return preferred.clone();
+                return pref.clone();
             }
         }
     }
+    let mut measure = 0.0;
+    let mut selected = "entity-unknown".to_string();
+    fn measure_crafter(crafter: &CraftingMachinePrototype) -> f64 {
+        let mut score = crafter.crafting_speed
+            / crafter
+                .base
+                .collision_box
+                .as_ref()
+                .map_or(25.0, |bb| bb.get_area());
+        if let Some(effect_receiver) = &crafter.effect_receiver {
+            score *= 1.0 + effect_receiver.base_effect.speed;
+            score *= 1.0 + effect_receiver.base_effect.productivity;
+        }
+        score
+    }
+    // 找不到用户偏好时，选择最快的机器
     for (crafter_name, crafter) in &ctx.crafters {
-        if machine_fits_for_recipe(crafter, recipe) {
-            return IdWithQuality(crafter_name.clone(), 0);
+        if machine_fits_for_recipe(crafter, recipe) && measure_crafter(crafter) > measure {
+            measure = measure_crafter(crafter);
+            selected = crafter_name.clone();
         }
     }
-    "entity-unknown".into()
+    selected.into()
 }
 
 impl SolveContext for RecipeMechanic {
@@ -913,7 +915,7 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
             };
             self.instances.push(RecipeMechanicInstance {
                 recipe: IdWithQuality(recipe.clone(), quality),
-                machine: select_machine_for_recipe(
+                machine: select_crafter_for_recipe(
                     ctx,
                     ctx.recipes.get(recipe.as_str()).unwrap(),
                     &self.machine_preferences,

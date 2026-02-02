@@ -268,24 +268,7 @@ impl AsFlow for MiningMechanicInstance {
                 .base
                 .collision_box
                 .as_ref()
-                .map_or(1.0, |bounding_box| match bounding_box {
-                    BoundingBox::Struct {
-                        left_top,
-                        right_bottom,
-                        orientation: _,
-                    } => {
-                        f64::ceil(right_bottom.1 - left_top.1)
-                            * f64::ceil(right_bottom.0 - left_top.0)
-                    }
-                    BoundingBox::Pair(map_position, map_position1) => {
-                        f64::ceil(map_position1.1 - map_position.1)
-                            * f64::ceil(map_position1.0 - map_position.0)
-                    }
-                    BoundingBox::Triplet(map_position, map_position1, _) => {
-                        f64::ceil(map_position1.1 - map_position.1)
-                            * f64::ceil(map_position1.0 - map_position.0)
-                    }
-                })
+                .map_or(1.0, |bounding_box| bounding_box.get_area())
         } else {
             16.0
         }
@@ -407,6 +390,44 @@ pub struct MiningMechanic {
     pub instances: Vec<MiningMechanicInstance>,
     #[serde(skip)]
     pub suggestions: Vec<MiningMechanicInstance>,
+}
+
+pub fn select_miner_for_resource(
+    ctx: &FactorioContext,
+    resource: &ResourcePrototype,
+    preferences: &[IdWithQuality],
+) -> IdWithQuality {
+    // 优先选择用户偏好
+    for pref in preferences.iter() {
+        if let Some(miner) = ctx.miners.get(&pref.0) {
+            if machine_fits_for_resource(miner, resource) {
+                return pref.clone();
+            }
+        }
+    }
+    let mut measure = 0.0;
+    let mut selected = "entity-unknown".to_string();
+    fn measure_miner(miner: &MiningDrillPrototype) -> f64 {
+        let mut score = miner.mining_speed
+            / miner
+                .base
+                .collision_box
+                .as_ref()
+                .map_or(25.0, |bb| bb.get_area());
+        if let Some(effect_receiver) = &miner.effect_receiver {
+            score *= 1.0 + effect_receiver.base_effect.speed;
+            score *= 1.0 + effect_receiver.base_effect.productivity;
+        }
+        score
+    }
+    // 找不到偏好设定的机器，找一个最好的的
+    for miner in ctx.miners.values() {
+        if machine_fits_for_resource(miner, resource) && measure_miner(miner) > measure {
+            measure = measure_miner(miner);
+            selected = miner.base.base.name.clone();
+        }
+    }
+    selected.into()
 }
 
 impl SolveContext for MiningMechanic {

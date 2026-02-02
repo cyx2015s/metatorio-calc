@@ -216,6 +216,32 @@ pub enum BoundingBox {
     Triplet(MapPosition, MapPosition, f64),
 }
 
+impl BoundingBox {
+    pub fn get_area(&self) -> f64 {
+        match self {
+            BoundingBox::Struct {
+                left_top,
+                right_bottom,
+                ..
+            } => {
+                let width = right_bottom.0 - left_top.0;
+                let height = right_bottom.1 - left_top.1;
+                width.ceil() * height.ceil()
+            }
+            BoundingBox::Pair(left_top, right_bottom) => {
+                let width = right_bottom.0 - left_top.0;
+                let height = right_bottom.1 - left_top.1;
+                width.ceil() * height.ceil()
+            }
+            BoundingBox::Triplet(left_top, right_bottom, _) => {
+                let width = right_bottom.0 - left_top.0;
+                let height = right_bottom.1 - left_top.1;
+                width.ceil() * height.ceil()
+            }
+        }
+    }
+}
+
 pub fn as_vec_or_empty<'de, T, D>(deserializer: D) -> Result<Vec<T>, D::Error>
 where
     D: serde::Deserializer<'de>,
