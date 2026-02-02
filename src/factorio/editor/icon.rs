@@ -12,6 +12,7 @@ pub struct Icon<'a> {
     pub item_name: &'a str,
     pub quality: u8,
     pub size: f32,
+    pub stroke: egui::Stroke,
 }
 
 impl<'a> Icon<'a> {
@@ -22,6 +23,7 @@ impl<'a> Icon<'a> {
             item_name,
             quality: 0,
             size: 32.0,
+            stroke: egui::Stroke::NONE,
         }
     }
 
@@ -32,6 +34,11 @@ impl<'a> Icon<'a> {
 
     pub fn with_size(mut self, size: f32) -> Self {
         self.size = size;
+        self
+    }
+
+    pub fn with_stroke(mut self, stroke: egui::Stroke) -> Self {
+        self.stroke = stroke;
         self
     }
 
@@ -71,6 +78,7 @@ impl<'a> egui::Widget for Icon<'a> {
                 0xaa, 0xaa, 0xaa, 0xcc,
             ))
             .corner_radius(4.0)
+            .stroke(self.stroke)
             .show(ui, |ui| {
                 let icon = ui.add(
                     self.image()

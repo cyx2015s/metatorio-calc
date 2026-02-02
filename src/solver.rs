@@ -106,10 +106,7 @@ where
             if let Some(expr) = balance {
                 targets.push(expr.clone().eq(amount));
             } else {
-                return Err(AppError::Solver(format!(
-                    "这个物品没有相关配方： {:?}",
-                    item_id
-                )));
+                log::warn!("这个物品没有相关配方： {:?}，求解器已忽略无意义的目标。", item_id);
             }
         }
         let mut constraints = Vec::new();

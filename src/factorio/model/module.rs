@@ -270,7 +270,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
             self.module_config.modules.truncate(self.module_slots);
             response.mark_changed();
         }
-        ui.horizontal(|ui| {
+        ui.horizontal_top(|ui| {
             // 获取所有插件和信标的综合
             let mut total = IndexMap::new();
             for module in &self.module_config.modules {

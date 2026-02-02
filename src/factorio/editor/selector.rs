@@ -143,11 +143,15 @@ impl<'a> egui::Widget for Selector<'a, str, String> {
                         continue;
                     }
                     idx += 1;
-                    if ui
-                        .add(Icon::new(self.ctx, "item-group", &group_name).with_size(64.0))
-                        .interact(egui::Sense::click())
-                        .clicked()
-                    {
+                    let widget = Icon::new(self.ctx, "item-group", &group_name)
+                        .with_size(64.0)
+                        .with_stroke(if i == storage.group {
+                            egui::Stroke::new(2.0, egui::Color32::GRAY)
+                        } else {
+                            egui::Stroke::NONE
+                        });
+
+                    if ui.add(widget).interact(egui::Sense::click()).clicked() {
                         storage.group = i;
                         storage.subgroup = 0;
                     }
@@ -164,19 +168,25 @@ impl<'a> egui::Widget for Selector<'a, str, String> {
                 for (j, subgroup) in order_info[storage.group].1.iter().enumerate() {
                     let mut idx = 0;
                     for item_name in subgroup.1.iter() {
-                        if (idx % item_count) == 0 && idx != 0 {
-                            ui.end_row();
-                        }
                         if !self.filter.as_ref().is_none_or(|f| f(item_name, self.ctx)) {
                             continue;
                         }
+                        if (idx % item_count) == 0 && idx != 0 {
+                            ui.end_row();
+                        }
                         idx += 1;
-                        let mut button = ui
-                            .add(
-                                Icon::new(self.ctx, self.type_name, &item_name.to_string())
-                                    .with_size(32.0),
-                            )
-                            .interact(egui::Sense::click());
+                        let mut icon =
+                            Icon::new(self.ctx, self.type_name, &item_name).with_size(32.0);
+                        if self.current.as_ref().is_some_and(|x| x == &item_name) {
+                            icon = icon.with_stroke(egui::Stroke::new(2.0, egui::Color32::GRAY));
+                        } else if self
+                            .output
+                            .as_ref()
+                            .is_some_and(|x| x.as_ref().is_some_and(|y| y == item_name))
+                        {
+                            icon = icon.with_stroke(egui::Stroke::new(2.0, egui::Color32::GRAY));
+                        }
+                        let mut button = ui.add(icon).interact(egui::Sense::click());
                         if let Some(hover) = &self.hover {
                             button = button.on_hover_ui(|ui| (hover)(ui, item_name, self.ctx));
                         } else {
@@ -227,13 +237,13 @@ impl<'a> egui::Widget for Selector<'a, IdWithQuality, IdWithQuality> {
             ui.memory(|mem| mem.data.get_temp::<ItemWithQualitySelectorStorage>(id))
                 .unwrap_or_default()
         };
-        let mut selecting_quality = None;
-        let mut selecting_item = None;
-        if quality_selector(ui, self.ctx, &mut selecting_quality) {
+        let storage_quality_was_none = storage.selected_quality.is_none();
+        let storage_item_was_none = storage.selected_item.is_none();
+        if quality_selector(ui, self.ctx, &mut storage.selected_quality) {
             response.mark_changed();
         }
         let mut widget: Selector<'_, str, String> =
-            Selector::new(self.ctx, self.type_name).with_output(&mut selecting_item);
+            Selector::new(self.ctx, self.type_name).with_output(&mut storage.selected_item);
         if let Some(filter) = self.filter {
             widget = widget.with_filter(move |s, f| {
                 let id_with_quality =
@@ -253,18 +263,16 @@ impl<'a> egui::Widget for Selector<'a, IdWithQuality, IdWithQuality> {
         if ui.add(widget).changed() {
             response.mark_changed();
         }
-        if let Some(selected_item) = &selecting_item {
-            storage.selected_item = Some(selected_item.clone());
+        if storage_item_was_none && let Some(selected_item) = &storage.selected_item {
             response.mark_changed();
             if let Some(&mut ref mut current) = self.current {
                 current.0 = selected_item.clone();
             }
         }
-        if let Some(selected_quality) = selecting_quality {
-            storage.selected_quality = Some(selected_quality);
+        if storage_quality_was_none && let Some(selected_quality) = &storage.selected_quality {
             response.mark_changed();
             if let Some(&mut ref mut current) = self.current {
-                current.1 = selected_quality;
+                current.1 = *selected_quality;
             }
         }
 
@@ -302,7 +310,17 @@ fn quality_selector(
                 let quality_button = ui
                     .add_sized(
                         [32.0, 32.0],
-                        Icon::new(ctx, "quality", &quality.base.name).with_size(32.0),
+                        Icon::new(ctx, "quality", &quality.base.name)
+                            .with_size(32.0)
+                            .with_stroke(
+                                if let Some(quality) = selected_quality
+                                    && *quality == idx as u8
+                                {
+                                    egui::Stroke::new(2.0, egui::Color32::GRAY)
+                                } else {
+                                    egui::Stroke::NONE
+                                },
+                            ),
                     )
                     .on_hover_text(ctx.get_display_name("quality", &quality.base.name))
                     .interact(egui::Sense::click());

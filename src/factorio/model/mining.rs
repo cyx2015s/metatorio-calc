@@ -405,6 +405,7 @@ fn test_mining_normalized() {
 #[derive(Default)]
 pub struct MiningMechanic {
     pub instances: Vec<MiningMechanicInstance>,
+    #[serde(skip)]
     pub suggestions: Vec<MiningMechanicInstance>,
 }
 

@@ -65,11 +65,12 @@ pub struct FactorioContext {
     /// 配方类型集合：配方本身和制作配方的机器
     pub recipes: Dict<RecipePrototype>,
     pub crafters: Dict<CraftingMachinePrototype>,
+    pub recipe_categories: Dict<PrototypeBase>,
 
     /// 采矿类型集合：资源本身和采矿机器
     pub resources: Dict<ResourcePrototype>,
     pub miners: Dict<MiningDrillPrototype>,
-
+    pub resource_categories: Dict<PrototypeBase>,
     /// 地块
     pub tiles: Dict<TilePrototype>,
 }
@@ -166,6 +167,13 @@ impl FactorioContext {
                 );
             }
         }
+        let recipe_categories: Dict<PrototypeBase> = serde_json::from_value(
+            value
+                .get("recipe-category")
+                .cloned()
+                .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
+        )
+        .unwrap();
 
         let resources: Dict<ResourcePrototype> = serde_json::from_value(
             value
@@ -177,6 +185,13 @@ impl FactorioContext {
         let miners: Dict<MiningDrillPrototype> = serde_json::from_value(
             value
                 .get("mining-drill")
+                .cloned()
+                .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
+        )
+        .unwrap();
+        let resource_categories: Dict<PrototypeBase> = serde_json::from_value(
+            value
+                .get("resource-category")
                 .cloned()
                 .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
         )
@@ -247,8 +262,10 @@ impl FactorioContext {
             fluids,
             recipes,
             crafters,
+            recipe_categories,
             resources,
             miners,
+            resource_categories,
             planets,
             tiles,
             ..Default::default()

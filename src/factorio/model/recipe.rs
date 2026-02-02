@@ -1,4 +1,7 @@
-use std::{collections::VecDeque, fmt::Debug};
+use std::{
+    collections::{HashSet, VecDeque},
+    fmt::Debug,
+};
 
 use crate::{
     concept::*,
@@ -14,7 +17,6 @@ use crate::{
             quality::calc_quality_distribution,
         },
         selector::Selector,
-        style::card_frame,
     },
 };
 
@@ -728,8 +730,14 @@ impl EditorView for RecipeMechanicInstance {
 #[derive(Default)]
 pub struct RecipeMechanic {
     pub instances: Vec<RecipeMechanicInstance>,
-
-    pub suggestions: Vec<RecipeMechanicInstance>,
+    #[serde(skip)]
+    pub suggestion_item: Option<GenericItem>,
+    #[serde(skip)]
+    pub suggestion_amount: f64,
+    #[serde(skip)]
+    pub suggested_recipes: HashSet<String>,
+    #[serde(skip)]
+    pub selected_suggested_recipe: Option<String>,
 }
 
 impl SolveContext for RecipeMechanic {
@@ -781,67 +789,57 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
     }
 
     fn update_suggestion(&mut self, ctx: &FactorioContext, item: &GenericItem, amount: f64) {
-        self.suggestions.clear();
-        let item_name = match item {
-            GenericItem::Item(IdWithQuality(name, _)) => name,
-            GenericItem::Fluid {
-                name,
-                temperature: _,
-            } => name,
-            _ => return,
-        };
-        let quality = match item {
-            GenericItem::Item(IdWithQuality(_, quality)) => *quality,
-            _ => 0,
-        };
-
-        self.suggestions.clear();
-        let value = amount;
-
+        self.suggested_recipes.clear();
+        self.suggestion_item = Some(item.clone());
+        self.suggestion_amount = amount;
         for recipe_proto in ctx.recipes.values() {
-            let matches = if recipe_proto.base.hidden {
-                false
-            } else if value < 0.0 {
-                // We have a deficit, need recipes that PRODUCE this item
-                recipe_proto.results.iter().any(|result| match result {
-                    RecipeResult::Item(r) => &r.name == item_name,
-                    RecipeResult::Fluid(r) => &r.name == item_name,
-                })
-            } else {
-                // We have a surplus, need recipes that CONSUME this item
-                recipe_proto
-                    .ingredients
-                    .iter()
-                    .any(|ingredient| match ingredient {
-                        RecipeIngredient::Item(i) => &i.name == item_name,
-                        RecipeIngredient::Fluid(i) => &i.name == item_name,
-                    })
-            };
-
-            if matches {
-                let mut recipe_config = RecipeMechanicInstance {
-                    recipe: (recipe_proto.base.name.clone(), quality).into(),
-                    ..Default::default()
-                };
-                // Try to find a suitable machine
-                let category = recipe_proto
-                    .category
-                    .as_ref()
-                    .map_or("crafting", |s| s.as_str());
-                if let Some(machine) = ctx
-                    .crafters
-                    .values()
-                    .find(|crafter| crafter.crafting_categories.contains(&category.to_string()))
-                {
-                    recipe_config.machine = (machine.base.base.name.clone(), 0).into();
+            match item {
+                GenericItem::Item(id_with_quality) => {
+                    let mut total_yield = 0.0;
+                    for ingredient in &recipe_proto.ingredients {
+                        if let RecipeIngredient::Item(item_ingredient) = ingredient {
+                            if &item_ingredient.name == &id_with_quality.0 {
+                                total_yield -= item_ingredient.amount;
+                            }
+                        }
+                    }
+                    for result in &recipe_proto.results {
+                        if let RecipeResult::Item(item_result) = result {
+                            if &item_result.name == &id_with_quality.0 {
+                                total_yield += item_result.normalized_output().0;
+                            }
+                        }
+                    }
+                    if total_yield * amount < 0.0 {
+                        self.suggested_recipes
+                            .insert(recipe_proto.base.name.clone());
+                    }
                 }
-                let actual_produce = recipe_config.as_flow(ctx).get(item).cloned().unwrap_or(0.0);
-                if (value < 0.0 && actual_produce <= 0.0) || (value > 0.0 && actual_produce >= 0.0)
-                {
-                    // This recipe does not actually help with the deficit/surplus
-                    continue;
+                GenericItem::Fluid {
+                    name,
+                    temperature: _,
+                } => {
+                    let mut total_yield = 0.0;
+                    for ingredient in &recipe_proto.ingredients {
+                        if let RecipeIngredient::Fluid(fluid_ingredient) = ingredient {
+                            if &fluid_ingredient.name == name {
+                                total_yield -= fluid_ingredient.amount;
+                            }
+                        }
+                    }
+                    for result in &recipe_proto.results {
+                        if let RecipeResult::Fluid(fluid_result) = result {
+                            if &fluid_result.name == name {
+                                total_yield += fluid_result.normalized_output().0;
+                            }
+                        }
+                    }
+                    if total_yield * amount < 0.0 {
+                        self.suggested_recipes
+                            .insert(recipe_proto.base.name.clone());
+                    }
                 }
-                self.suggestions.push(recipe_config);
+                _ => {}
             }
         }
     }
@@ -857,18 +855,23 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
 
     fn suggestion_view(&mut self, ui: &mut egui::Ui, ctx: &FactorioContext) -> bool {
         let mut changed = false;
-        self.suggestions.iter_mut().for_each(|instance| {
-            card_frame(ui).show(ui, |ui| {
-                if ui.button("添加此配方").clicked() {
-                    self.instances.push(instance.clone());
-                    changed = true;
-                }
-                ui.horizontal(|ui| {
-                    ui.set_min_width(ui.available_width());
-                    instance.editor_view(ui, ctx);
-                });
+        ui.add(
+            Selector::new(ctx, "recipe")
+                .with_output(&mut self.selected_suggested_recipe)
+                .with_filter(|id: &str, _ctx| self.suggested_recipes.contains(id)),
+        );
+        if let Some(recipe) = &self.selected_suggested_recipe {
+            let quality = match self.suggestion_item {
+                Some(GenericItem::Item(ref id_with_quality)) => id_with_quality.1,
+                _ => 0,
+            };
+            self.instances.push(RecipeMechanicInstance {
+                recipe: IdWithQuality(recipe.clone(), quality),
+                ..Default::default()
             });
-        });
+            self.selected_suggested_recipe = None;
+            changed = true;
+        }
         changed
     }
 }
