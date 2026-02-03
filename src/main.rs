@@ -382,6 +382,7 @@ fn main() {
         },
         Box::new(|cc| {
             egui_extras::install_image_loaders(&cc.egui_ctx);
+            cc.egui_ctx.set_theme(egui::Theme::Light);
             cc.egui_ctx.all_styles_mut(|style| {
                 style.interaction.tooltip_delay = 0.2;
                 style.interaction.tooltip_grace_time = 1.0;
