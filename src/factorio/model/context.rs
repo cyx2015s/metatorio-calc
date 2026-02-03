@@ -5,7 +5,7 @@ use std::{
     hash::Hash,
     io::Write,
     path::PathBuf,
-    process::{Command, Stdio},
+    process::Command,
 };
 
 use indexmap::IndexMap;
@@ -309,7 +309,6 @@ impl FactorioContext {
             } else {
                 vec![]
             })
-            .stdout(Stdio::null())
             .output()?;
         if !dump_raw_command.status.success() {
             return Err(AppError::ContextCreation("导出原始数据失败".to_string()));
@@ -325,7 +324,6 @@ impl FactorioContext {
             } else {
                 vec![]
             })
-            .stdout(Stdio::null())
             .output()?;
         if !dump_locale_command.status.success() {
             return Err(AppError::ContextCreation("导出翻译数据失败".to_string()));
@@ -343,7 +341,6 @@ impl FactorioContext {
             } else {
                 vec![]
             })
-            .stdout(Stdio::null())
             .output()?;
         if !dump_icon_sprites_command.status.success() {
             return Err(AppError::ContextCreation("导出图标数据失败".to_string()));

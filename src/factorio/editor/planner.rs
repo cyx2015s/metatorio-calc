@@ -161,12 +161,10 @@ impl FactoryInstance {
             .iter()
             .map(|(item, amount)| (item.clone(), *amount))
             .fold(IndexMap::new(), |mut acc, (item, amount)| {
-                acc.entry(item).and_modify(|v| {
-                    if *v < amount {
-                        *v = amount
-                    }
-                });
-
+                let v = acc.entry(item.clone()).or_default();
+                if *v < amount {
+                    *v = amount;
+                }
                 acc
             })
             .into_iter()

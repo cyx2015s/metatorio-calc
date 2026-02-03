@@ -10,9 +10,13 @@ lazy_static::lazy_static!(
 );
 impl std::io::Write for MemoryLogger {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        let s = String::from_utf8_lossy(buf).to_string();
+        let s = String::from_utf8_lossy(buf)
+            .to_string()
+            .lines()
+            .map(|s| s.to_string())
+            .collect::<Vec<String>>();
         let mut vec = self.vec.lock().unwrap();
-        vec.push(s);
+        vec.extend(s.into_iter());
         Ok(buf.len())
     }
 
