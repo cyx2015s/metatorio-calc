@@ -20,6 +20,8 @@ pub fn factorio_auto_planner(
     for mechanic in &mut factory.mechanics {
         mechanic.auto_populate(&ctx);
     }
+
+    factory.strict_source = true;
     factory.send_solve_request(&ctx);
     match factory.solution_receiver.recv() {
         Ok(solution) => {
@@ -32,8 +34,6 @@ pub fn factorio_auto_planner(
                     factory.total_flow = flow_add(&factory.total_flow, &flow, var_value);
                 }
             }
-            // Update sorted keys cache when total_flow changes
-            factory.total_flow_sorted_keys = factory.total_flow.keys().cloned().collect();
             sort_generic_items_owned(&mut factory.total_flow_sorted_keys, &ctx);
         }
         Err(e) => {
@@ -41,19 +41,6 @@ pub fn factorio_auto_planner(
             return Err(AppError::Solver("无法从求解线程获得结果。".into()));
         }
     }
-
-    factory.total_flow.iter().for_each(|(item, amount)| {
-        if *amount < 0.0 {
-            // 虽然没有指定为外部输入，但实际上是外部输入
-            // 目前常见于因为游戏机制复刻不全导致没法实际生产的物品
-            // 燃料、电力、热量等等……
-            if !factory.external.iter().any(|(i, _)| i == item) {
-                factory.external.push((item.clone(), -*amount));
-            }
-        }
-    });
-
-    factory.strict_source = true;
 
     factory
         .mechanics

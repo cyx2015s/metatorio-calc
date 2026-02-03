@@ -47,11 +47,11 @@ where
 }
 
 pub enum SolverSolution<I, R> {
-    Solved{
+    Solved {
         prim: Flow<R>,
         dual: Option<Flow<I>>,
     },
-    NotSolved{
+    NotSolved {
         no_provider: Vec<I>,
         no_consumer: Vec<I>,
     },
@@ -144,6 +144,7 @@ where
         }
         let mut targets = Vec::new();
         for (item_id, &amount) in &self.target {
+            // 目标物品，严格相等
             let balance = item_balances.get(item_id);
             if let Some(expr) = balance {
                 targets.push(expr.clone().eq(amount));
@@ -153,13 +154,26 @@ where
         for (item_id, expr) in &item_balances {
             if !self.target.contains_key(item_id) {
                 // 严格模式下，不能凭空输入。非严格模式下，有来源的物品不能有凭空输入。
-                if self.strict_source || !no_providers.contains(item_id) {
+                // 非目标物品，不能为负
+                if self.strict_source {
+                    // 不能从外部借用
                     if self.strict_sink {
                         // 必须配平
                         constraints.push(expr.clone().eq(0.0));
                     } else {
                         // 不用配平
                         constraints.push(expr.clone().geq(0.0));
+                    }
+                } else {
+                    if no_providers.contains(item_id) {
+                    } else {
+                        if self.strict_sink {
+                            // 必须配平
+                            constraints.push(expr.clone().eq(0.0));
+                        } else {
+                            // 不用配平
+                            constraints.push(expr.clone().geq(0.0));
+                        }
                     }
                 }
             }
