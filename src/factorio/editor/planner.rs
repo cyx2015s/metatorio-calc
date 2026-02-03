@@ -29,13 +29,15 @@ pub struct FactoryInstance {
     pub name: String,
     pub target: Vec<(GenericItem, f64)>,
     pub external: Vec<(GenericItem, f64)>,
+    pub mechanics: Vec<Box<dyn Mechanic<FactorioContext, GenericItem>>>,
+
+    pub arg_sender: std::sync::mpsc::Sender<SolverData<GenericItem, (usize, usize)>>,
+    pub strict_source: bool,
+
     pub solution: (Flow<(usize, usize)>, f64),
     pub total_flow: Flow<GenericItem>,
-    /// Cached sorted keys for total_flow to avoid sorting every frame
     pub total_flow_sorted_keys: Vec<GenericItem>,
-    pub mechanics: Vec<Box<dyn Mechanic<FactorioContext, GenericItem>>>,
-    pub arg_sender: std::sync::mpsc::Sender<SolverData<GenericItem, (usize, usize)>>,
-    pub solution_receiver: std::sync::mpsc::Receiver<SolverSolution<(usize, usize)>>,
+    pub solution_receiver: std::sync::mpsc::Receiver<SolverSolutionTuple<(usize, usize)>>,
 }
 
 impl serde::Serialize for FactoryInstance {
@@ -43,11 +45,16 @@ impl serde::Serialize for FactoryInstance {
     where
         S: serde::Serializer,
     {
-        let mut state = serializer.serialize_struct("FactoryInstance", 4)?;
+        let mut state = serializer.serialize_struct("FactoryInstance", 5)?;
         serde::ser::SerializeStruct::serialize_field(&mut state, "name", &self.name)?;
         serde::ser::SerializeStruct::serialize_field(&mut state, "target", &self.target)?;
         serde::ser::SerializeStruct::serialize_field(&mut state, "external", &self.external)?;
         serde::ser::SerializeStruct::serialize_field(&mut state, "mechanics", &self.mechanics)?;
+        serde::ser::SerializeStruct::serialize_field(
+            &mut state,
+            "strict_source",
+            &self.strict_source,
+        )?;
         serde::ser::SerializeStruct::end(state)
     }
 }
@@ -65,6 +72,8 @@ impl<'de> serde::Deserialize<'de> for FactoryInstance {
             serde_json::from_value(value["target"].clone()).map_err(serde::de::Error::custom)?;
         factory_instance.external =
             serde_json::from_value(value["external"].clone()).map_err(serde::de::Error::custom)?;
+        factory_instance.strict_source = serde_json::from_value(value["strict_source"].clone())
+            .map_err(serde::de::Error::custom)?;
         let mut not_deserialized_mechanics = MECHANIC_REGISTRY
             .registered_types()
             .into_iter()
@@ -118,11 +127,12 @@ impl Default for FactoryInstance {
             name: "工厂".to_string(),
             target: Vec::new(),
             external: Vec::new(),
+            mechanics: Vec::new(),
+            arg_sender: arg_tx,
+            strict_source: false,
             solution: (IndexMap::new(), 0.0),
             total_flow: IndexMap::new(),
             total_flow_sorted_keys: Vec::new(),
-            mechanics: Vec::new(),
-            arg_sender: arg_tx,
             solution_receiver: solution_rx,
         }
     }
@@ -182,9 +192,11 @@ impl FactoryInstance {
             .into_iter()
             .map(|(item, amount)| (item, 1024.0 / amount))
             .collect();
-        let _ = self
-            .arg_sender
-            .send(SolverData::new(target, flows).with_sources(external));
+        let _ = self.arg_sender.send(
+            SolverData::new(target, flows)
+                .with_sources(external)
+                .with_strict_source(self.strict_source),
+        );
     }
 
     fn flows_panel(
@@ -195,6 +207,12 @@ impl FactoryInstance {
         need_suggestions: &mut bool,
     ) {
         ui.horizontal(|ui| {
+            *changed |= ui
+                .checkbox(
+                    &mut self.strict_source,
+                    "禁止使用定义在额外输入中以外的物品",
+                )
+                .changed();
             if ui.button("删除所有比例为 0 的机制").clicked() {
                 self.mechanics
                     .iter_mut()
@@ -500,6 +518,7 @@ impl EditorView for FactoryInstance {
                                         _ => 1.0
                                     }));
                                 }
+                                self.external.push((GenericItem::Electricity, 1048576.0));
                                 changed = true;
                             }
                         }

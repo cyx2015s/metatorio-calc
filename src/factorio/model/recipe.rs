@@ -769,7 +769,7 @@ pub fn select_crafter_for_recipe(
             score *= 1.0 + effect_receiver.base_effect.speed;
             score *= 1.0 + (effect_receiver.base_effect.productivity * 2.0);
         }
-        score *= 1.0 + crafter.module_slots / 4.0;
+        score *= 1.0 + crafter.module_slots;
         score
     }
     // 找不到用户偏好时，选择最快的机器

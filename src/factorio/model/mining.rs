@@ -336,7 +336,7 @@ pub fn select_miner_for_resource(
             score *= 1.0 + effect_receiver.base_effect.speed;
             score *= 1.0 + (effect_receiver.base_effect.productivity * 2.0);
         }
-        score *= 1.0 + miner.module_slots / 4.0;
+        score *= 1.0 + miner.module_slots;
         score
     }
     // 找不到偏好设定的机器，找一个最好的的

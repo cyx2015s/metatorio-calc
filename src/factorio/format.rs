@@ -199,7 +199,7 @@ impl egui::Widget for CompactLabel {
 }
 
 pub fn parse_number(n: &str) -> Option<f64> {
-    let re = regex::Regex::new(r"^[\d|.]+[k|M|G|T|P|E|Z|Y|R|Q|μ]?$").ok()?;
+    let re = regex::Regex::new(r"^-?[\d.]+[kMGTPEZYRQμ]?$").ok()?;
     if re.is_match(n) {
         let multiplier = match n.chars().rev().next() {
             Some('μ') => 0.000_001,
@@ -226,7 +226,7 @@ pub fn parse_number(n: &str) -> Option<f64> {
 }
 
 pub fn parse_energy(n: &str) -> Option<f64> {
-    let re = regex::Regex::new(r"^[\d|.]+[k|M|G|T|P|E|Z|Y|R|Q]?[J|W]?$").ok()?;
+    let re = regex::Regex::new(r"^-?[\d.]+[kMGTPEZYRQμ]?[JW]$").ok()?;
     if re.is_match(n) {
         let mut multiplier = match n.chars().rev().nth(1) {
             Some('k') => 1_000.0,

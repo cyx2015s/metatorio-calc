@@ -40,11 +40,24 @@ where
     pub sources: Flow<I>, //  输入特定物品消耗的价值
     pub sinks: Flow<I>,   //  产生额外物品的惩罚
     // 我还不知道怎么称呼，目前规定如下：
-    // 如果是严格模式，相比普通模式有如下限制：不出现在target中的物品必须配平，只能使用来自external的输入
-    pub strict: bool,
+    // 如果是严格模式，相比普通模式有如下限制：只能使用来自external的输入
+    pub strict_source: bool,
+    // 如果是严格模式，相比普通模式有如下限制：没有出现在target中的物品必须配平
+    pub strict_sink: bool,
 }
 
-pub type SolverSolution<R> = Result<(Flow<R>, f64), AppError>;
+pub enum SolverSolution<I, R> {
+    Solved{
+        prim: Flow<R>,
+        dual: Option<Flow<I>>,
+    },
+    NotSolved{
+        no_provider: Vec<I>,
+        no_consumer: Vec<I>,
+    },
+}
+
+pub type SolverSolutionTuple<R> = Result<(Flow<R>, f64), AppError>;
 
 impl<I, R> SolverData<I, R>
 where
@@ -57,7 +70,8 @@ where
             flows,
             sources: IndexMap::new(),
             sinks: IndexMap::new(),
-            strict: false,
+            strict_source: false,
+            strict_sink: false,
         }
     }
 
@@ -71,8 +85,13 @@ where
         self
     }
 
-    pub fn with_strict(mut self, strict: bool) -> Self {
-        self.strict = strict;
+    pub fn with_strict_source(mut self, strict: bool) -> Self {
+        self.strict_source = strict;
+        self
+    }
+
+    pub fn with_strict_sink(mut self, strict: bool) -> Self {
+        self.strict_sink = strict;
         self
     }
 
@@ -128,22 +147,20 @@ where
             let balance = item_balances.get(item_id);
             if let Some(expr) = balance {
                 targets.push(expr.clone().eq(amount));
-            } else {
-                if self.strict {
-                    return Err(AppError::Solver(format!(
-                        "物品 {:?} 没有相关配方，且处于严格模式，求解器无法继续。",
-                        item_id
-                    )));
-                }
             }
         }
         let mut constraints = Vec::new();
         for (item_id, expr) in &item_balances {
-            if !self.target.contains_key(item_id) && !no_providers.contains(item_id) {
-                if self.strict {
-                    constraints.push(expr.clone().eq(0.0));
-                } else {
-                    constraints.push(expr.clone().geq(0.0));
+            if !self.target.contains_key(item_id) {
+                // 严格模式下，不能凭空输入。非严格模式下，有来源的物品不能有凭空输入。
+                if self.strict_source || !no_providers.contains(item_id) {
+                    if self.strict_sink {
+                        // 必须配平
+                        constraints.push(expr.clone().eq(0.0));
+                    } else {
+                        // 不用配平
+                        constraints.push(expr.clone().geq(0.0));
+                    }
                 }
             }
         }
@@ -203,7 +220,7 @@ where
     }
 
     pub fn make_solver_thread(
-        solution_tx: std::sync::mpsc::Sender<SolverSolution<R>>,
+        solution_tx: std::sync::mpsc::Sender<SolverSolutionTuple<R>>,
         arg_rx: std::sync::mpsc::Receiver<SolverData<I, R>>,
     ) {
         std::thread::spawn(move || {

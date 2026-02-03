@@ -359,7 +359,7 @@ impl Default for BurnerEnergySource {
         BurnerEnergySource {
             burnt_inventory_size: 0.0,
             effectivity: 1.0,
-            burner_usage: "fuel".to_string(),
+            burner_usage: "chemical".to_string(),
             emissions_per_minute: None,
         }
     }
