@@ -29,13 +29,13 @@ pub struct FactoryInstance {
     pub name: String,
     pub target: Vec<(GenericItem, f64)>,
     pub external: Vec<(GenericItem, f64)>,
-    pub solution: (Flow<usize>, f64),
+    pub solution: (Flow<(usize, usize)>, f64),
     pub total_flow: Flow<GenericItem>,
     /// Cached sorted keys for total_flow to avoid sorting every frame
     pub total_flow_sorted_keys: Vec<GenericItem>,
     pub mechanics: Vec<Box<dyn Mechanic<FactorioContext, GenericItem>>>,
-    pub arg_sender: std::sync::mpsc::Sender<SolverData<GenericItem, usize>>,
-    pub solution_receiver: std::sync::mpsc::Receiver<SolverSolution<usize>>,
+    pub arg_sender: std::sync::mpsc::Sender<SolverData<GenericItem, (usize, usize)>>,
+    pub solution_receiver: std::sync::mpsc::Receiver<SolverSolution<(usize, usize)>>,
 }
 
 impl serde::Serialize for FactoryInstance {
@@ -145,9 +145,21 @@ impl FactoryInstance {
         let flows = self
             .mechanics
             .iter()
-            .flat_map(|mechanic| mechanic.instances())
-            .map(|fe| (ref_as_ptr(fe), (fe.as_flow(ctx), fe.cost(ctx))))
-            .collect::<IndexMap<usize, (_, _)>>();
+            .enumerate()
+            .map(move |(idx, mechanic)| {
+                mechanic
+                    .instances()
+                    .iter()
+                    .enumerate()
+                    .map(move |(jdx, fe)| ((idx, jdx), (fe.as_flow(ctx), fe.cost(ctx))))
+                    .collect::<Vec<_>>()
+            })
+            .flatten()
+            .collect();
+
+        // .flat_map(|mechanic| mechanic.instances())
+        // .map(|fe| (ref_as_ptr(fe), (fe.as_flow(ctx), fe.cost(ctx))))
+        // .collect::<IndexMap<usize, (_, _)>>();
         let target = self
             .target
             .iter()
@@ -182,6 +194,22 @@ impl FactoryInstance {
         changed: &mut bool,
         need_suggestions: &mut bool,
     ) {
+        ui.horizontal(|ui| {
+            if ui.button("删除所有比例为 0 的机制").clicked() {
+                self.mechanics
+                    .iter_mut()
+                    .enumerate()
+                    .for_each(|(idx, mechanic)| {
+                        for jdx in 0..mechanic.instance_len() {
+                            let solution_value =
+                                self.solution.0.get(&(idx, jdx)).cloned().unwrap_or(0.0);
+                            if float_cmp::approx_eq!(f64, solution_value, 0.0, ulps = 3) {
+                                mechanic.instance_operate(jdx, &mut |_| EntryOperation::Drop);
+                            }
+                        }
+                    });
+            }
+        });
         ui.label(format!("总代价: {:.2} | 总物料流", self.solution.1));
         ui.horizontal_wrapped(|ui| {
             card_frame(ui).show(ui, |ui| {
@@ -231,40 +259,42 @@ impl FactoryInstance {
             });
         });
         ui.separator();
-        self.mechanics.iter_mut().for_each(|mechanic| {
-            for idx in 0..mechanic.instance_len() {
-                ui.horizontal_wrapped(|ui| {
-                    mechanic.instance_operate(idx, &mut |instance| {
-                        let mut operation = EntryOperation::None;
+        self.mechanics
+            .iter_mut()
+            .enumerate()
+            .for_each(|(idx, mechanic)| {
+                for jdx in 0..mechanic.instance_len() {
+                    ui.horizontal_wrapped(|ui| {
+                        mechanic.instance_operate(jdx, &mut |_| {
+                            let mut operation = EntryOperation::None;
 
-                        card_frame(ui).show(ui, |ui| {
-                            ui.vertical(|ui| {
-                                if ui.button("删除").clicked() {
-                                    operation = EntryOperation::Drop;
-                                }
-                                if ui.button("复制").clicked() {
-                                    operation = EntryOperation::Clone;
-                                }
-                                let solution_value =
-                                    self.solution.0.get(&ref_as_ptr(instance)).cloned();
-                                if let Some(value) = solution_value {
-                                    ui.add(CompactLabel::new(value));
-                                } else {
-                                    ui.label("无解");
-                                }
-                            })
+                            card_frame(ui).show(ui, |ui| {
+                                ui.vertical(|ui| {
+                                    if ui.button("删除").clicked() {
+                                        operation = EntryOperation::Drop;
+                                    }
+                                    if ui.button("复制").clicked() {
+                                        operation = EntryOperation::Clone;
+                                    }
+                                    let solution_value = self.solution.0.get(&(idx, jdx)).cloned();
+                                    if let Some(value) = solution_value {
+                                        ui.add(CompactLabel::new(value));
+                                    } else {
+                                        ui.label("无解");
+                                    }
+                                })
+                            });
+
+                            operation
                         });
 
-                        operation
+                        card_frame(ui).show(ui, |ui| {
+                            ui.set_min_width(ui.available_width());
+                            *changed |= mechanic.instance_view(jdx, ui, ctx);
+                        });
                     });
-
-                    card_frame(ui).show(ui, |ui| {
-                        ui.set_min_width(ui.available_width());
-                        *changed |= mechanic.instance_view(idx, ui, ctx);
-                    });
-                });
-            }
-        });
+                }
+            });
     }
 }
 
@@ -315,14 +345,10 @@ impl EditorView for FactoryInstance {
                 Ok(solution) => {
                     self.total_flow.clear();
                     self.solution = solution;
-                    for mechanic in self.mechanics.iter() {
-                        for instance in mechanic.instances() {
-                            let var_value = self
-                                .solution
-                                .0
-                                .get(&ref_as_ptr(instance))
-                                .cloned()
-                                .unwrap_or(0.0);
+                    for (idx, mechanic) in self.mechanics.iter().enumerate() {
+                        for (jdx, instance) in mechanic.instances().iter().enumerate() {
+                            let var_value =
+                                self.solution.0.get(&(idx, jdx)).cloned().unwrap_or(0.0);
                             let flow = instance.as_flow(ctx);
                             self.total_flow = flow_add(&self.total_flow, &flow, var_value);
                         }
@@ -461,6 +487,23 @@ impl EditorView for FactoryInstance {
                         self.external.push((GenericItem::Item("item-unknown".into()), 1.0));
                         changed = true;
                     }
+                    ui.menu_button("从星球自动选择", |ui| {
+                        for planet in ctx.planets.values() {
+                            if ui.button(ctx.get_display_name("space-location", &planet.base.name)).clicked() {
+                                self.external.clear();
+                                let available = planet.collect_autoplaced(ctx);
+                                for item in &available {
+                                    self.external.push((item.clone(), match item {
+                                        GenericItem::Fluid {..} => 1048576.0,
+                                        GenericItem::Entity(..) => 16.0,
+                                        GenericItem::Item(..) => 16.0,
+                                        _ => 1.0
+                                    }));
+                                }
+                                changed = true;
+                            }
+                        }
+                    });
                     ui.separator();
                     ui.heading("游戏机制");
                     for mechanic in self.mechanics.iter_mut() {

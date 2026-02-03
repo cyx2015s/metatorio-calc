@@ -3,7 +3,7 @@ use indexmap::IndexMap;
 
 use crate::concept::{Flow, ItemIdent};
 use crate::error::AppError;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fmt::Debug;
 use std::hash::Hash;
 
@@ -44,8 +44,6 @@ where
     pub strict: bool,
 }
 
-pub type BasicSolverArgs<I, R> = (Flow<I>, IndexMap<R, (Flow<I>, f64)>);
-pub type SolverArgs<I, R> = (Flow<I>, IndexMap<R, (Flow<I>, f64)>, Flow<I>);
 pub type SolverSolution<R> = Result<(Flow<R>, f64), AppError>;
 
 impl<I, R> SolverData<I, R>
@@ -80,13 +78,14 @@ where
 
     pub fn solve(&self) -> Result<(Flow<R>, f64), AppError> {
         let mut problem_variables = good_lp::ProblemVariables::new();
-        let mut flow_vars = HashMap::new();
-        let mut source_vars = HashMap::new();
+        let mut flow_vars = IndexMap::new();
+        let mut source_vars = IndexMap::new();
+        let mut sink_vars = IndexMap::new();
         for recipe_id in self.flows.keys() {
             let var = problem_variables.add(variable().min(0));
             flow_vars.insert(recipe_id.clone(), var);
         }
-        let mut item_balances = HashMap::new();
+        let mut item_balances = IndexMap::new();
 
         for (recipe_id, flow) in &self.flows {
             let var = flow_vars.get(recipe_id).unwrap();
@@ -104,6 +103,14 @@ where
                 .entry(item_id.clone())
                 .or_insert(good_lp::Expression::from(0.0));
             *entry += 1.0 * var;
+        }
+        for (item_id, _) in &self.sinks {
+            let var = problem_variables.add(variable().min(0));
+            sink_vars.insert(item_id.clone(), var);
+            let entry = item_balances
+                .entry(item_id.clone())
+                .or_insert(good_lp::Expression::from(0.0));
+            *entry -= 1.0 * var;
         }
         let mut no_providers: HashSet<I> = item_balances.keys().cloned().collect();
         for flow in self.flows.values() {
@@ -150,6 +157,10 @@ where
         }
         for (item_id, cost) in &self.sources {
             let var = source_vars.get(item_id).unwrap();
+            optimization_expr += *cost * *var;
+        }
+        for (item_id, cost) in &self.sinks {
+            let var = sink_vars.get(item_id).unwrap();
             optimization_expr += *cost * *var;
         }
         let solution = problem_variables
@@ -219,16 +230,4 @@ where
             log::info!("求解线程退出");
         });
     }
-}
-
-/// 求解流程：从所有的 AsFlow 配方收集 Flow 信息
-pub fn basic_solver<I, R>(
-    target: Flow<I>,                    // 目标物品及其需求量
-    flows: IndexMap<R, (Flow<I>, f64)>, // 配方标识符及其物品流和代价
-) -> Result<(Flow<R>, f64), AppError>
-where
-    I: ItemIdent,
-    R: ItemIdent,
-{
-    SolverData::new(target, flows).solve()
 }

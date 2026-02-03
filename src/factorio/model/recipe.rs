@@ -995,15 +995,6 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
         }
     }
 
-    fn auto_populate(
-        &mut self,
-        ctx: &FactorioContext,
-        sender: AsFlowSender<FactorioContext, GenericItem>, // 传递的所有物品流信息
-    ) {
-        let _ = ctx;
-        let _ = sender;
-    }
-
     fn suggestion_view(&mut self, ui: &mut egui::Ui, ctx: &FactorioContext) -> bool {
         let mut changed = false;
         ui.add(egui::TextEdit::singleline(&mut self.suggested_recipes_filter).hint_text("筛选器"));

@@ -98,19 +98,11 @@ where
         false
     }
 
-    /// 自动填充功能，用于自动规划模式下生成所有可能的机制实例
+    /// 自动规划功能：枚举所有可能的配方组合，填充到instances中。
     fn auto_populate(
         &mut self,
         ctx: &C,
-        sender: AsFlowSender<C, I>, // 传递的所有物品流信息
     ) {
-        let _ = ctx;
-        let _ = sender;
-    }
-
-    fn get_instance_sender(&self) -> Option<&AsFlowSender<C, I>> {
-        let _ = self;
-        None
     }
 }
 
