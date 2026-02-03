@@ -218,8 +218,6 @@ impl eframe::App for MainPage {
                             if ui.button("重启应用").clicked() {
                                 std::process::Command::new(std::env::current_exe().unwrap())
                                     .spawn()
-                                    .unwrap()
-                                    .wait()
                                     .unwrap();
                                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                             }
