@@ -472,6 +472,34 @@ impl Mechanic<FactorioContext, GenericItem> for MiningMechanic {
         }
     }
 
+    fn submit_operations(&mut self) -> bool {
+        let mut changed = false;
+
+        for idx in 0..self.instances.len() {
+            if self
+                .operations
+                .get(&idx)
+                .is_some_and(|v| matches!(v, EntryOperation::Clone))
+            {
+                self.instances.push(self.instances[idx].clone());
+                changed = true;
+            }
+        }
+
+        for idx in (0..self.instances.len()).rev() {
+            if self
+                .operations
+                .get(&idx)
+                .is_some_and(|v| matches!(v, EntryOperation::Drop))
+            {
+                self.instances.remove(idx);
+                changed = true;
+            }
+        }
+        self.operations.clear();
+        changed
+    }
+
     fn update_suggestion(&mut self, ctx: &FactorioContext, item: &GenericItem, amount: f64) {
         self.suggested_resources.clear();
         self.suggestion_item = Some(item.clone());
@@ -555,34 +583,24 @@ impl Mechanic<FactorioContext, GenericItem> for MiningMechanic {
         }
         changed
     }
+    fn auto_populate(&mut self, ctx: &FactorioContext) {
+        self.instances.clear();
+        for resource in ctx.resources.values() {
+            if let Some(mining) = resource.base.minable.as_ref() {
+                let machine = select_miner_for_resource(ctx, resource, &[]);
+                self.instances.push(MiningMechanicInstance {
+                    resource: resource.base.base.name.clone(),
+                    machine,
+                    ..Default::default()
+                });
+            }
+        }
+    }
 }
 
 impl EditorView for MiningMechanic {
     fn editor_view(&mut self, ui: &mut egui::Ui, _ctx: &Self::GameContext) -> bool {
-        let mut changed = false;
-
-        for idx in 0..self.instances.len() {
-            if self
-                .operations
-                .get(&idx)
-                .is_some_and(|v| matches!(v, EntryOperation::Clone))
-            {
-                self.instances.push(self.instances[idx].clone());
-                changed = true;
-            }
-        }
-
-        for idx in (0..self.instances.len()).rev() {
-            if self
-                .operations
-                .get(&idx)
-                .is_some_and(|v| matches!(v, EntryOperation::Drop))
-            {
-                self.instances.remove(idx);
-                changed = true;
-            }
-        }
-        self.operations.clear();
+        let mut changed = self.submit_operations();
 
         if ui.button("添加采矿").clicked() {
             let mining_config = MiningMechanicInstance::default();

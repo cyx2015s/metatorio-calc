@@ -79,19 +79,24 @@ where
         self.instances().len()
     }
 
+    // 获取某个实例的可变引用，以便进行编辑
     fn instance_operate(
         &mut self,
         idx: usize,
         f: &mut dyn FnMut(&mut dyn AsFlow<GameContext = C, ItemIdentType = I>) -> EntryOperation,
     );
 
-    /// 返回值表示是否产生了需要重新计算的更改
+    // 提交所有instance_operate的更改
+    // 返回值表示是否产生了需要重新计算的更改
+    fn submit_operations(&mut self) -> bool;
+
+    // 返回值表示是否产生了需要重新计算的更改
     fn instance_view(&mut self, idx: usize, ui: &mut egui::Ui, ctx: &C) -> bool;
 
-    /// 想要生产 amount 每秒数量的 item，有哪些方法？
+    // 想要生产 amount 每秒数量的 item，有哪些方法？
     fn update_suggestion(&mut self, ctx: &C, item: &I, amount: f64);
 
-    /// 返回值表示是否产生了需要重新计算的更改
+    // 返回值表示是否产生了需要重新计算的更改
     fn suggestion_view(&mut self, ui: &mut egui::Ui, ctx: &C) -> bool {
         let _ = ui;
         let _ = ctx;
@@ -103,6 +108,7 @@ where
         &mut self,
         ctx: &C,
     ) {
+        let _ = ctx;
     }
 }
 

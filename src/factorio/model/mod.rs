@@ -9,6 +9,7 @@ mod planet;
 mod quality;
 mod recipe;
 mod tile;
+mod auto;
 
 pub use context::*;
 pub use energy::*;
@@ -21,3 +22,4 @@ pub use planet::*;
 pub use quality::*;
 pub use recipe::*;
 pub use tile::*;
+pub use auto::*;

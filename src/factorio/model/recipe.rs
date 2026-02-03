@@ -939,6 +939,32 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
         }
     }
 
+    fn submit_operations(&mut self) -> bool {
+        let mut changed = false;
+        for idx in 0..self.instances.len() {
+            if self
+                .operations
+                .get(&idx)
+                .is_some_and(|v| matches!(v, EntryOperation::Clone))
+            {
+                self.instances.push(self.instances[idx].clone());
+                changed = true;
+            }
+        }
+        for idx in (0..self.instances.len()).rev() {
+            if self
+                .operations
+                .get(&idx)
+                .is_some_and(|v| matches!(v, EntryOperation::Drop))
+            {
+                self.instances.remove(idx);
+                changed = true;
+            }
+        }
+        self.operations.clear();
+        changed
+    }
+
     fn update_suggestion(&mut self, ctx: &FactorioContext, item: &GenericItem, amount: f64) {
         self.suggested_recipes.clear();
         self.suggestion_item = Some(item.clone());
@@ -1038,32 +1064,28 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
         }
         changed
     }
+
+    fn auto_populate(&mut self, ctx: &FactorioContext) {
+        // TODO 品质
+        // TODO 插件
+        self.instances.clear();
+        for recipe in ctx.recipes.keys() {
+            self.instances.push(RecipeMechanicInstance {
+                recipe: IdWithQuality(recipe.clone(), 0),
+                machine: select_crafter_for_recipe(
+                    ctx,
+                    ctx.recipes.get(recipe.as_str()).unwrap(),
+                    &self.machine_preferences,
+                ),
+                ..Default::default()
+            });
+        }
+    }
 }
 
 impl EditorView for RecipeMechanic {
     fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &FactorioContext) -> bool {
-        let mut changed = false;
-        for idx in 0..self.instances.len() {
-            if self
-                .operations
-                .get(&idx)
-                .is_some_and(|v| matches!(v, EntryOperation::Clone))
-            {
-                self.instances.push(self.instances[idx].clone());
-                changed = true;
-            }
-        }
-        for idx in (0..self.instances.len()).rev() {
-            if self
-                .operations
-                .get(&idx)
-                .is_some_and(|v| matches!(v, EntryOperation::Drop))
-            {
-                self.instances.remove(idx);
-                changed = true;
-            }
-        }
-        self.operations.clear();
+        let mut changed = self.submit_operations();
         ui.collapsing("机器偏好", |ui| {
             let icon = Icon::new(ctx, "entity", "entity-unknown");
             let button = ui

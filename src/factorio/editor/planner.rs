@@ -38,6 +38,8 @@ pub struct FactoryInstance {
     pub total_flow: Flow<GenericItem>,
     pub total_flow_sorted_keys: Vec<GenericItem>,
     pub solution_receiver: std::sync::mpsc::Receiver<SolverSolutionTuple<(usize, usize)>>,
+
+    pub factory_sender: Option<std::sync::mpsc::Sender<FactoryInstance>>, // 告诉 planner view，有新工厂啦
 }
 
 impl serde::Serialize for FactoryInstance {
@@ -134,6 +136,8 @@ impl Default for FactoryInstance {
             total_flow: IndexMap::new(),
             total_flow_sorted_keys: Vec::new(),
             solution_receiver: solution_rx,
+
+            factory_sender: None,
         }
     }
 }
@@ -144,6 +148,11 @@ impl FactoryInstance {
             name,
             ..Default::default()
         }
+    }
+
+    pub fn set_sender(mut self, sender: std::sync::mpsc::Sender<FactoryInstance>) -> Self {
+        self.factory_sender = Some(sender);
+        self
     }
 
     pub fn add_mechanic(mut self, mechanic: impl Mechanic<FactorioContext, GenericItem>) -> Self {
@@ -213,7 +222,7 @@ impl FactoryInstance {
                     "禁止使用定义在额外输入中以外的物品",
                 )
                 .changed();
-            if ui.button("删除所有比例为 0 的机制").clicked() {
+            if ui.button("删除所有没用到的配方").clicked() {
                 self.mechanics
                     .iter_mut()
                     .enumerate()
@@ -221,11 +230,34 @@ impl FactoryInstance {
                         for jdx in 0..mechanic.instance_len() {
                             let solution_value =
                                 self.solution.0.get(&(idx, jdx)).cloned().unwrap_or(0.0);
-                            if float_cmp::approx_eq!(f64, solution_value, 0.0, ulps = 3) {
+                            if solution_value.abs() < 1e-12 {
                                 mechanic.instance_operate(jdx, &mut |_| EntryOperation::Drop);
                             }
                         }
                     });
+            }
+            if ui
+                .button("\u{26A0}自动规划")
+                .on_hover_text("\u{26A0}新工厂会出现在一个新页面中")
+                .clicked()
+            {
+                let ctx_cloned = ctx.clone();
+                let factory_cloned = self.clone();
+                let factory_sender = self.factory_sender.clone();
+                std::thread::spawn(move || {
+                    if let Some(sender) = factory_sender {
+                        let auto_planned_factory =
+                            factorio_auto_planner(factory_cloned, ctx_cloned);
+                        match auto_planned_factory {
+                            Ok(factory) => {
+                                let _ = sender.send(factory);
+                            }
+                            Err(e) => {
+                                log::error!("自动规划工厂失败: {:?}", e);
+                            }
+                        }
+                    }
+                });
             }
         });
         ui.label(format!("总代价: {:.2} | 总物料流", self.solution.1));
@@ -342,6 +374,9 @@ pub struct PlannerView {
 
     pub selected_factory: usize,
     pub new_factory_name: String,
+
+    pub factory_receiver: std::sync::mpsc::Receiver<FactoryInstance>,
+    pub factory_sender: std::sync::mpsc::Sender<FactoryInstance>,
 }
 
 impl SolveContext for FactoryInstance {
@@ -572,10 +607,22 @@ impl PlannerView {
     pub fn new(ctx: FactorioContext) -> Self {
         PlannerView {
             ctx: ctx.build_order_info(),
+            ..Default::default()
+        }
+    }
+}
+
+impl Default for PlannerView {
+    fn default() -> Self {
+        let (factory_tx, factory_rx) = std::sync::mpsc::channel();
+        PlannerView {
+            ctx: FactorioContext::default().build_order_info(),
             intercept_close: true,
             factories: Vec::new(),
             selected_factory: 0,
             new_factory_name: String::new(),
+            factory_receiver: factory_rx,
+            factory_sender: factory_tx,
         }
     }
 }
@@ -592,6 +639,13 @@ impl Subview for PlannerView {
                     break;
                 }
             }
+        }
+        if let Some(factory) = self.factory_receiver.try_recv().ok() {
+            self.factories.push(StatefulFactoryInstance {
+                factory,
+                saved: false,
+                file_path: None,
+            });
         }
         show_modal(
             egui::Id::new("close-confirm"),
@@ -629,6 +683,7 @@ impl Subview for PlannerView {
                                 FactoryInstance::new(name)
                                     .add_mechanic(RecipeMechanic::default())
                                     .add_mechanic(MiningMechanic::default())
+                                    .set_sender(self.factory_sender.clone())
                                     .into(),
                             );
                         }
@@ -830,7 +885,7 @@ impl Subview for FactorioContextCreatorView {
             if let Some(path) = &self.path {
                 ui.label(format!("已选择路径: {}", path.display()));
                 if path.to_string_lossy().contains("steam") {
-                    ui.label("若为 Steam 版本的游戏，请启动 Steam 再执行加载游戏上下文");
+                    ui.label("若为 Steam 版本的游戏，请关闭正在运行中的异星工厂并且启动 Steam 再执行加载游戏上下文");
                 }
             } else {
                 ui.label("未选择路径");
