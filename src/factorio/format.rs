@@ -13,7 +13,7 @@ pub fn compact_number(num: f64) -> String {
 
     match abs_num {
         n if n < 1e-9 => String::from("0"),
-        n if n < 0.01 => format_with_unit(n * 1e6, "μ"),
+        n if n < 0.01 => format_with_unit(num * 1e6, "μ"),
         n => {
             let mut unit_idx = 0;
             let mut n = n;
@@ -23,10 +23,11 @@ pub fn compact_number(num: f64) -> String {
                     n /= 1000.0;
                 }
             }
-            format_with_unit(n, LARGE_UNITS[unit_idx])
+            format_with_unit(n * num.signum(), LARGE_UNITS[unit_idx])
         }
     }
 }
+
 fn format_with_unit(value: f64, unit: &str) -> String {
     let abs_value = value.abs();
     if unit.is_empty() {
@@ -200,7 +201,7 @@ impl egui::Widget for CompactLabel {
 pub fn parse_number(n: &str) -> Option<f64> {
     let re = regex::Regex::new(r"^[\d|.]+[k|M|G|T|P|E|Z|Y|R|Q|μ]?$").ok()?;
     if re.is_match(n) {
-        let mut multiplier = match n.chars().rev().next() {
+        let multiplier = match n.chars().rev().next() {
             Some('μ') => 0.000_001,
             Some('k') => 1_000.0,
             Some('M') => 1_000_000.0,

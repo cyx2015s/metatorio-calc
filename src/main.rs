@@ -1,3 +1,6 @@
+#![windows_subsystem = "windows"]
+
+
 use egui::special_emojis::GITHUB;
 use mimalloc::MiMalloc;
 
@@ -13,14 +16,24 @@ pub mod concept;
 pub mod dyn_serde;
 pub mod error;
 pub mod factorio;
+pub mod memlog;
 pub mod solver;
 pub mod toast;
 pub mod update;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectedSubview {
+    Title,
+    Creator(usize),
+    Planner(usize),
+    FontLicense,
+    Logs,
+}
+
 pub struct MainPage {
     pub creators: Vec<(String, Box<dyn concept::GameContextCreatorView>)>,
-    pub subviews: Vec<Box<dyn concept::Subview>>,
-    pub selected: usize,
+    pub planners: Vec<Box<dyn concept::Subview>>,
+    pub selected: SelectedSubview,
 
     pub subview_receiver: std::sync::mpsc::Receiver<Box<dyn concept::Subview>>,
     pub subview_sender: std::sync::mpsc::Sender<Box<dyn concept::Subview>>,
@@ -103,8 +116,8 @@ impl Default for MainPage {
             creators: vec![],
             subview_receiver,
             subview_sender,
-            selected: 0,
-            subviews: vec![],
+            selected: SelectedSubview::Title,
+            planners: vec![],
             exp_cpu_usage: 0.0,
             suitable_release: Err(error::AppError::None),
             request_sender: network_request_tx,
@@ -154,7 +167,10 @@ impl eframe::App for MainPage {
         egui::SidePanel::left(egui::Id::new("side"))
             .width_range(200.0..=280.0)
             .show(ctx, |ui| {
-                ui.heading("切向量化");
+                let heading = ui.heading("切向量化").interact(egui::Sense::click());
+                if heading.clicked() {
+                    self.selected = SelectedSubview::Title;
+                }
                 ui.label(format!("[构建] Git 哈希: {}", GIT_HASH));
                 ui.label(format!(
                     "[性能] 帧生成时间: {:.2}ms",
@@ -223,31 +239,33 @@ impl eframe::App for MainPage {
                     .enumerate()
                     .for_each(|(i, creator)| {
                         if ui
-                            .selectable_label(self.selected == i, &creator.0)
-                            .on_hover_text_at_pointer("点击以选择该游戏环境，右键显示额外菜单")
+                            .selectable_label(
+                                self.selected == SelectedSubview::Creator(i),
+                                &creator.0,
+                            )
                             .clicked()
                         {
-                            self.selected = i;
+                            self.selected = SelectedSubview::Creator(i);
                         }
                     });
 
                 while let Ok(subview) = self.subview_receiver.try_recv() {
-                    self.subviews.push(subview);
+                    self.planners.push(subview);
                 }
 
                 ui.separator();
-                let mut idx = 0;
-                self.subviews.retain_mut(|subview| {
+                let mut i = 0;
+                self.planners.retain_mut(|subview| {
                     let label = ui
                         .selectable_label(
-                            self.selected == idx + self.creators.len(),
+                            self.selected == SelectedSubview::Planner(i),
                             subview.name(),
                         )
                         .on_hover_text_at_pointer(subview.description());
                     if label.clicked() {
-                        self.selected = idx + self.creators.len();
+                        self.selected = SelectedSubview::Planner(i);
                     }
-                    idx += 1;
+                    i += 1;
                     let mut deleted = false;
                     label.context_menu(|ui| {
                         if ui.button("关闭").clicked() {
@@ -257,47 +275,63 @@ impl eframe::App for MainPage {
 
                     !deleted
                 });
-                if self.selected >= self.creators.len() + self.subviews.len() {
-                    self.selected = 0;
+                if let SelectedSubview::Planner(n) = self.selected {
+                    if n >= self.planners.len() {
+                        self.selected = SelectedSubview::Title;
+                    }
                 }
                 ui.separator();
-                let mut show_font_license = ui.memory(|mem| {
-                    mem.data
-                        .get_temp::<bool>(egui::Id::new("font"))
-                        .unwrap_or(false)
-                });
-                if ui.checkbox(&mut show_font_license, "字体协议").clicked() {
-                    ui.memory_mut(|mem| {
-                        mem.data
-                            .insert_temp::<bool>(egui::Id::new("font"), !show_font_license);
-                    });
-                }
-                if show_font_license {
-                    egui::Window::new("字体协议")
-                        .open(&mut show_font_license)
-                        .show(ctx, |ui| {
-                            egui::ScrollArea::vertical().show(ui, |ui| {
-                                ui.label(include_str!("../assets/LICENSE"));
-                            });
-                        });
-                }
                 if ui.button("重新加载图标").clicked() {
                     ui.ctx().forget_all_images();
                 }
-                ui.memory_mut(|mem| {
-                    mem.data
-                        .insert_temp(egui::Id::new("font"), show_font_license);
-                })
+                if ui.button("字体").clicked() {
+                    self.selected = SelectedSubview::FontLicense;
+                }
+                if ui.button("日志").clicked() {
+                    self.selected = SelectedSubview::Logs;
+                }
             });
-        if self.selected < self.creators.len() {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                self.creators[self.selected].1.view(ui);
-            });
-        } else {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                self.subviews[self.selected - self.creators.len()].view(ui);
-            });
-        }
+        egui::CentralPanel::default().show(ctx, |ui| match self.selected {
+            SelectedSubview::Title => {
+                ui.label("快速开始: ");
+                ui.label("从左侧选择一个游戏环境以开始使用。");
+                ui.label("以异星工厂为例：选择游戏的可执行文件路径后点击加载游戏上下文，之后选择左侧的异星工厂 - 游戏规划器，在文件栏创建新工厂，编辑生产目标，右键点击物品图标快速添加配方、采矿等生产方式。");
+            },
+            SelectedSubview::Creator(n) => self.creators[n].1.view(ui),
+            SelectedSubview::Planner(n) => self.planners[n].view(ui),
+            SelectedSubview::FontLicense => {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    ui.set_min_width(ui.available_width());
+                    ui.label(include_str!("../assets/LICENSE"));
+                });
+            }
+            SelectedSubview::Logs => {
+                let logger= memlog::MEMLOG.vec.lock().unwrap();
+                let len = logger.len();
+                let text_style = egui::TextStyle::Monospace;
+                egui::Frame::group(ui.style())
+                    .fill(ui.visuals().extreme_bg_color)
+                    .corner_radius(8.0)
+                    .stroke(egui::Stroke::new(
+                        1.0,
+                        ui.visuals().widgets.inactive.bg_stroke.color,
+                    )).show(ui, |ui| {    
+                        ui.set_min_height(ui.available_height());
+                        egui::ScrollArea::vertical().show_rows(
+                            ui, 
+                            ui.text_style_height(&text_style), 
+                            len,
+                            |ui, range| {
+                                ui.set_min_width(ui.available_width());
+                                for i in range {
+                                    ui.label(egui::RichText::new(logger[i].trim()).text_style(text_style.clone()));
+                                }
+                            }
+                        );
+                    }
+                );
+            },
+        });
         toast::TOASTS.lock().unwrap().show(ctx);
     }
 }
@@ -325,6 +359,7 @@ fn main() {
         .format_target(false)
         .format_file(false)
         .format_line_number(true)
+        .target(env_logger::Target::Pipe(Box::new(memlog::MEMLOG.clone())))
         .init();
     log::info!("应用程序启动");
     let icon_image = image::load_from_memory(include_bytes!("../assets/icon.png")).unwrap();

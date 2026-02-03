@@ -347,49 +347,70 @@ pub fn generic_item_selector(
         egui::ComboBox::from_id_salt(id)
             .selected_text(selected.to_string())
             .show_ui(ui, |ui| {
-                ui.selectable_value(selected, GenericItem::Item("item-unknown".into()), "物品");
-                ui.selectable_value(
-                    selected,
-                    GenericItem::Fluid {
-                        name: "fluid-unknown".to_string(),
-                        temperature: None,
-                    },
-                    "流体",
-                );
-                ui.selectable_value(
-                    selected,
-                    GenericItem::Entity("entity-unknown".into()),
-                    "实体",
-                );
-                ui.selectable_value(selected, GenericItem::Heat, "热能");
-                ui.selectable_value(selected, GenericItem::Electricity, "电能");
-                ui.selectable_value(
-                    selected,
-                    GenericItem::FluidHeat { filter: None },
-                    "流体热源",
-                );
-                ui.selectable_value(
-                    selected,
-                    GenericItem::FluidFuel { filter: None },
-                    "流体燃料",
-                );
-
-                ui.selectable_value(
-                    selected,
-                    GenericItem::ItemFuel {
-                        category: "chemical".to_string(),
-                    },
-                    "物体燃料",
-                );
-                ui.selectable_value(selected, GenericItem::RocketPayloadWeight, "重量载荷");
-                ui.selectable_value(selected, GenericItem::RocketPayloadStack, "堆叠载荷");
-                ui.selectable_value(
-                    selected,
-                    GenericItem::Pollution {
-                        name: "pollution".to_string(),
-                    },
-                    "污染物",
-                );
+                changed |= ui
+                    .selectable_value(selected, GenericItem::Item("item-unknown".into()), "物品")
+                    .changed();
+                changed |= ui
+                    .selectable_value(
+                        selected,
+                        GenericItem::Fluid {
+                            name: "fluid-unknown".to_string(),
+                            temperature: None,
+                        },
+                        "流体",
+                    )
+                    .changed();
+                changed |= ui
+                    .selectable_value(
+                        selected,
+                        GenericItem::Entity("entity-unknown".into()),
+                        "实体",
+                    )
+                    .changed();
+                changed |= ui
+                    .selectable_value(selected, GenericItem::Heat, "热能")
+                    .changed();
+                changed |= ui
+                    .selectable_value(selected, GenericItem::Electricity, "电能")
+                    .changed();
+                changed |= ui
+                    .selectable_value(
+                        selected,
+                        GenericItem::FluidHeat { filter: None },
+                        "流体热源",
+                    )
+                    .changed();
+                changed |= ui
+                    .selectable_value(
+                        selected,
+                        GenericItem::FluidFuel { filter: None },
+                        "流体燃料",
+                    )
+                    .changed();
+                changed |= ui
+                    .selectable_value(
+                        selected,
+                        GenericItem::ItemFuel {
+                            category: "chemical".to_string(),
+                        },
+                        "物体燃料",
+                    )
+                    .changed();
+                changed |= ui
+                    .selectable_value(selected, GenericItem::RocketPayloadWeight, "重量载荷")
+                    .changed();
+                changed |= ui
+                    .selectable_value(selected, GenericItem::RocketPayloadStack, "堆叠载荷")
+                    .changed();
+                changed |= ui
+                    .selectable_value(
+                        selected,
+                        GenericItem::Pollution {
+                            name: "pollution".to_string(),
+                        },
+                        "污染物",
+                    )
+                    .changed();
             });
         match selected {
             GenericItem::Item(id_with_quality) => {
