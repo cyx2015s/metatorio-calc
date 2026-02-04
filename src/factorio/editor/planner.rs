@@ -346,6 +346,141 @@ impl FactoryInstance {
                 }
             });
     }
+    
+    fn side_panel(&mut self, ui: &mut egui::Ui, ctx: &FactorioContext, changed: &mut bool, need_suggestions: &mut bool) {
+        ui.heading("目标产量/消耗");
+        self.target.retain_mut(|(item, amount)| {
+            let mut deleted = false;
+            ui.horizontal_top(|ui| {
+                card_frame(ui).show(ui, |ui| {
+                    ui.vertical(|ui| {
+                        if matches!(
+                            item,
+                            GenericItem::Electricity | GenericItem::Heat | GenericItem::ItemFuel { .. } | GenericItem::FluidFuel { .. } | GenericItem::FluidHeat { .. }
+                        ) {
+                            *changed |= ui.add(drag_watt(amount).speed(10_000.0)).changed();
+                        } else {
+                            *changed |= ui.add(drag_value(amount).suffix("/秒")).changed();
+                        }
+                        if ui.button("删除").clicked() {
+                            deleted = true;
+                            *changed = true;
+                        }
+                    });
+                });
+                card_frame(ui).show(ui, |ui| {
+                    ui.set_min_width(ui.available_width());
+                    ui.horizontal_wrapped(|ui| {
+                        let mut icon = GenericIcon::new(ctx, item);
+                        let solution_of_target = self.total_flow.get(item).cloned().unwrap_or(0.0);
+                        let not_satisfied = float_cmp::approx_eq!(f64, solution_of_target, *amount, ulps = 3) == false;
+                        if not_satisfied {
+                            icon = icon.with_stroke(egui::Stroke::new(2.0, egui::Color32::RED));
+                        }
+    
+                        let mut widget = ui.add_sized([35.0, 35.0], icon).interact(egui::Sense::click());
+                        if not_satisfied {
+                            widget = widget.on_hover_text("\u{26A0}目标已忽略");
+                        }
+                        if widget.clicked_by(egui::PointerButton::Secondary) {
+                            *need_suggestions = true;
+                            self.mechanics.iter_mut().for_each(|mechanic| {
+                                mechanic.update_suggestion(
+                                    ctx, item, -*amount, // 目标产量为正表示目前缺少对应数量的物品
+                                )
+                            });
+                        }
+                        ui.vertical(|ui| {
+                            ui.horizontal(|ui| {
+                                *changed |= generic_item_selector(ui, ctx, item, &widget, widget.id.with("target"));
+                            });
+                        });
+                    });
+                });
+            });
+            !deleted
+        });
+        if ui.button("添加指定产物").clicked() {
+            self.target.push((GenericItem::Item("item-unknown".into()), 1.0));
+            *changed = true;
+        }
+        ui.separator();
+        ui.heading("额外输入代价");
+        ui.label("* 每区块的产量");
+        self.external.retain_mut(|(item, amount)| {
+            let mut deleted = false;
+            ui.horizontal_top(|ui| {
+                card_frame(ui).show(ui, |ui| {
+                    ui.vertical(|ui| {
+                        if matches!(
+                            item,
+                            GenericItem::Electricity | GenericItem::Heat | GenericItem::ItemFuel { .. } | GenericItem::FluidFuel { .. } | GenericItem::FluidHeat { .. }
+                        ) {
+                            *changed |= ui.add(drag_watt(amount).speed(10_000.0)).changed();
+                        } else {
+                            *changed |= ui.add(drag_value(amount).suffix("/秒")).changed();
+                        }
+                        if ui.button("删除").clicked() {
+                            deleted = true;
+                            *changed = true;
+                        }
+                    });
+                });
+    
+                card_frame(ui).show(ui, |ui| {
+                    ui.set_min_width(ui.available_width());
+                    ui.horizontal_wrapped(|ui| {
+                        let mut icon = ui.add_sized([35.0, 35.0], GenericIcon::new(ctx, item)).interact(egui::Sense::click());
+                        if let GenericItem::Entity(..) = item {
+                            icon = icon.on_hover_text("\u{26A0}指完成机制所消耗的实体资源（主要是矿物），不包括为了完成机制所需要收集的组装机、采矿机、插件塔等。")
+                        }
+                        if icon.clicked_by(egui::PointerButton::Secondary) {
+                            *need_suggestions = true;
+                            self.mechanics.iter_mut().for_each(|mechanic| {
+                                mechanic.update_suggestion(
+                                    ctx, item, 1.0, // 尝试消耗更多该物品
+                                )
+                            });
+                        }
+                        ui.vertical(|ui| {
+                            ui.horizontal(|ui| {
+                                *changed |= generic_item_selector(ui, ctx, item, &icon, icon.id.with("external"));
+                            });
+                        });
+                    });
+                });
+            });
+            !deleted
+        });
+        if ui.button("添加外部输入").clicked() {
+            self.external.push((GenericItem::Item("item-unknown".into()), 1.0));
+            *changed = true;
+        }
+        ui.menu_button("从星球自动选择", |ui| {
+            for planet in ctx.planets.values() {
+                if ui.button(ctx.get_display_name("space-location", &planet.base.name)).clicked() {
+                    self.external.clear();
+                    let available = planet.collect_autoplaced(ctx);
+                    for item in &available {
+                        self.external.push((item.clone(), match item {
+                            GenericItem::Fluid {..} => 1048576.0,
+                            GenericItem::Entity(..) => 16.0,
+                            GenericItem::Item(..) => 16.0,
+                            _ => 1.0
+                        }));
+                    }
+                    self.external.push((GenericItem::Electricity, 1048576.0));
+                    *changed = true;
+                }
+            }
+        });
+        ui.separator();
+        ui.heading("游戏机制");
+        for mechanic in self.mechanics.iter_mut() {
+            ui.separator();
+            *changed |= mechanic.editor_view(ui, ctx);
+        }
+    }
 }
 
 pub struct StatefulFactoryInstance {
@@ -432,138 +567,7 @@ impl EditorView for FactoryInstance {
             .frame(egui::Frame::NONE.corner_radius(8.0).inner_margin(4.0))
             .show_inside(ui, |ui: &mut egui::Ui| {
                 egui::ScrollArea::vertical().id_salt(1).show(ui, |ui| {
-                    ui.heading("目标产量/消耗");
-                    self.target.retain_mut(|(item, amount)| {
-                        let mut deleted = false;
-                        ui.horizontal_top(|ui| {
-                            card_frame(ui).show(ui, |ui| {
-                                ui.vertical(|ui| {
-                                    if matches!(
-                                        item,
-                                        GenericItem::Electricity | GenericItem::Heat | GenericItem::ItemFuel { .. } | GenericItem::FluidFuel { .. } | GenericItem::FluidHeat { .. }
-                                    ) {
-                                        changed |= ui.add(drag_watt(amount).speed(10_000.0)).changed();
-                                    } else {
-                                        changed |= ui.add(drag_value(amount).suffix("/秒")).changed();
-                                    }
-                                    if ui.button("删除").clicked() {
-                                        deleted = true;
-                                        changed = true;
-                                    }
-                                });
-                            });
-                            card_frame(ui).show(ui, |ui| {
-                                ui.set_min_width(ui.available_width());
-                                ui.horizontal_wrapped(|ui| {
-                                    let mut icon = GenericIcon::new(ctx, item);
-                                    let solution_of_target = self.total_flow.get(item).cloned().unwrap_or(0.0);
-                                    let not_satisfied = float_cmp::approx_eq!(f64, solution_of_target, *amount, ulps = 3) == false;
-                                    if not_satisfied {
-                                        icon = icon.with_stroke(egui::Stroke::new(2.0, egui::Color32::RED));
-                                    }
-
-                                    let mut widget = ui.add_sized([35.0, 35.0], icon).interact(egui::Sense::click());
-                                    if not_satisfied {
-                                        widget = widget.on_hover_text("\u{26A0}目标已忽略");
-                                    }
-                                    if widget.clicked_by(egui::PointerButton::Secondary) {
-                                        need_suggestions = true;
-                                        self.mechanics.iter_mut().for_each(|mechanic| {
-                                            mechanic.update_suggestion(
-                                                ctx, item, -*amount, // 目标产量为正表示目前缺少对应数量的物品
-                                            )
-                                        });
-                                    }
-                                    ui.vertical(|ui| {
-                                        ui.horizontal(|ui| {
-                                            changed |= generic_item_selector(ui, ctx, item, &widget, widget.id.with("target"));
-                                        });
-                                    });
-                                });
-                            });
-                        });
-                        !deleted
-                    });
-                    if ui.button("添加指定产物").clicked() {
-                        self.target.push((GenericItem::Item("item-unknown".into()), 1.0));
-                        changed = true;
-                    }
-                    ui.separator();
-                    ui.heading("额外输入代价");
-                    ui.label("* 每区块的产量");
-                    self.external.retain_mut(|(item, amount)| {
-                        let mut deleted = false;
-                        ui.horizontal_top(|ui| {
-                            card_frame(ui).show(ui, |ui| {
-                                ui.vertical(|ui| {
-                                    if matches!(
-                                        item,
-                                        GenericItem::Electricity | GenericItem::Heat | GenericItem::ItemFuel { .. } | GenericItem::FluidFuel { .. } | GenericItem::FluidHeat { .. }
-                                    ) {
-                                        changed |= ui.add(drag_watt(amount).speed(10_000.0)).changed();
-                                    } else {
-                                        changed |= ui.add(drag_value(amount).suffix("/秒")).changed();
-                                    }
-                                    if ui.button("删除").clicked() {
-                                        deleted = true;
-                                        changed = true;
-                                    }
-                                });
-                            });
-
-                            card_frame(ui).show(ui, |ui| {
-                                ui.set_min_width(ui.available_width());
-                                ui.horizontal_wrapped(|ui| {
-                                    let mut icon = ui.add_sized([35.0, 35.0], GenericIcon::new(ctx, item)).interact(egui::Sense::click());
-                                    if let GenericItem::Entity(..) = item {
-                                        icon = icon.on_hover_text("\u{26A0}指完成机制所消耗的实体资源（主要是矿物），不包括为了完成机制所需要收集的组装机、采矿机、插件塔等。")
-                                    }
-                                    if icon.clicked_by(egui::PointerButton::Secondary) {
-                                        need_suggestions = true;
-                                        self.mechanics.iter_mut().for_each(|mechanic| {
-                                            mechanic.update_suggestion(
-                                                ctx, item, 1.0, // 尝试消耗更多该物品
-                                            )
-                                        });
-                                    }
-                                    ui.vertical(|ui| {
-                                        ui.horizontal(|ui| {
-                                            changed |= generic_item_selector(ui, ctx, item, &icon, icon.id.with("external"));
-                                        });
-                                    });
-                                });
-                            });
-                        });
-                        !deleted
-                    });
-                    if ui.button("添加外部输入").clicked() {
-                        self.external.push((GenericItem::Item("item-unknown".into()), 1.0));
-                        changed = true;
-                    }
-                    ui.menu_button("从星球自动选择", |ui| {
-                        for planet in ctx.planets.values() {
-                            if ui.button(ctx.get_display_name("space-location", &planet.base.name)).clicked() {
-                                self.external.clear();
-                                let available = planet.collect_autoplaced(ctx);
-                                for item in &available {
-                                    self.external.push((item.clone(), match item {
-                                        GenericItem::Fluid {..} => 1048576.0,
-                                        GenericItem::Entity(..) => 16.0,
-                                        GenericItem::Item(..) => 16.0,
-                                        _ => 1.0
-                                    }));
-                                }
-                                self.external.push((GenericItem::Electricity, 1048576.0));
-                                changed = true;
-                            }
-                        }
-                    });
-                    ui.separator();
-                    ui.heading("游戏机制");
-                    for mechanic in self.mechanics.iter_mut() {
-                        ui.separator();
-                        changed |= mechanic.editor_view(ui, ctx);
-                    }
+                    self.side_panel(ui, ctx, &mut changed, &mut need_suggestions);
                 });
             });
 

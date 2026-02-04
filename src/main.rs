@@ -1,4 +1,4 @@
-#![windows_subsystem = "windows"]
+#![cfg_attr(not(test), windows_subsystem = "windows")]
 
 
 use egui::special_emojis::GITHUB;
@@ -20,6 +20,7 @@ pub mod memlog;
 pub mod solver;
 pub mod toast;
 pub mod update;
+pub mod comb;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SelectedSubview {

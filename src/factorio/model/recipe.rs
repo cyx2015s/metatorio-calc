@@ -1070,15 +1070,27 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
         // TODO 插件
         self.instances.clear();
         for recipe in ctx.recipes.keys() {
-            self.instances.push(RecipeMechanicInstance {
-                recipe: IdWithQuality(recipe.clone(), 0),
-                machine: select_crafter_for_recipe(
+            for quality in 0..ctx.qualities.len() {
+                let machine = select_crafter_for_recipe(
                     ctx,
                     ctx.recipes.get(recipe.as_str()).unwrap(),
                     &self.machine_preferences,
-                ),
-                ..Default::default()
-            });
+                );
+                self.instances.push(RecipeMechanicInstance {
+                    recipe: IdWithQuality(recipe.clone(), quality as u8),
+                    machine: machine.clone(),
+                    module_config: ModuleConfig {
+                        modules: vec![
+                            IdWithQuality("quality-module-3".to_string(), 4);
+                            ctx.crafters
+                                .get(&machine.0)
+                                .map_or(0, |c| c.module_slots as usize)
+                        ],
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                });
+            }
         }
     }
 }
