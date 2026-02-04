@@ -237,8 +237,8 @@ impl<'a> egui::Widget for Selector<'a, IdWithQuality, IdWithQuality> {
             ui.memory(|mem| mem.data.get_temp::<ItemWithQualitySelectorStorage>(id))
                 .unwrap_or_default()
         };
-        let storage_quality_was_none = storage.selected_quality.is_none();
-        let storage_item_was_none = storage.selected_item.is_none();
+        let prev_storage_quality = storage.selected_quality;
+        let prev_storage_item = storage.selected_item.clone();
         if quality_selector(ui, self.ctx, &mut storage.selected_quality) {
             response.mark_changed();
         }
@@ -263,13 +263,13 @@ impl<'a> egui::Widget for Selector<'a, IdWithQuality, IdWithQuality> {
         if ui.add(widget).changed() {
             response.mark_changed();
         }
-        if storage_item_was_none && let Some(selected_item) = &storage.selected_item {
+        if prev_storage_item != storage.selected_item && let Some(selected_item) = &storage.selected_item {
             response.mark_changed();
             if let Some(&mut ref mut current) = self.current {
                 current.0 = selected_item.clone();
             }
         }
-        if storage_quality_was_none && let Some(selected_quality) = &storage.selected_quality {
+        if prev_storage_quality != storage.selected_quality && let Some(selected_quality) = &storage.selected_quality {
             response.mark_changed();
             if let Some(&mut ref mut current) = self.current {
                 current.1 = *selected_quality;

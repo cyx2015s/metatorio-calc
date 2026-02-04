@@ -586,7 +586,7 @@ impl Mechanic<FactorioContext, GenericItem> for MiningMechanic {
     fn auto_populate(&mut self, ctx: &FactorioContext) {
         self.instances.clear();
         for resource in ctx.resources.values() {
-            if let Some(mining) = resource.base.minable.as_ref() {
+            if let Some(_mining) = resource.base.minable.as_ref() {
                 let machine = select_miner_for_resource(ctx, resource, &[]);
                 self.instances.push(MiningMechanicInstance {
                     resource: resource.base.base.name.clone(),
