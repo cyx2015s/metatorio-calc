@@ -374,7 +374,7 @@ impl FactoryInstance {
                     ui.horizontal_wrapped(|ui| {
                         let mut icon = GenericIcon::new(ctx, item);
                         let solution_of_target = self.total_flow.get(item).cloned().unwrap_or(0.0);
-                        let not_satisfied = float_cmp::approx_eq!(f64, solution_of_target, *amount, ulps = 3) == false;
+                        let not_satisfied = float_cmp::approx_eq!(f64, solution_of_target, *amount, ulps = 6) == false;
                         if not_satisfied {
                             icon = icon.with_stroke(egui::Stroke::new(2.0, egui::Color32::RED));
                         }
@@ -725,6 +725,7 @@ impl Subview for PlannerView {
                                                     thread_path.display()
                                                 ));
                                             });
+                                            let factory = factory.set_sender(self.factory_sender.clone());
                                             factory.send_solve_request(&self.ctx);
                                             self.factories.push(StatefulFactoryInstance {
                                                 factory,

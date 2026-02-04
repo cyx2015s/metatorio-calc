@@ -615,7 +615,7 @@ pub struct RecipeMechanic {
     pub instances: Vec<RecipeMechanicInstance>,
 
     pub machine_preferences: Vec<IdWithQuality>,
-
+    pub alternative_count: usize,
     #[serde(skip)]
     pub new_machine_preference: Option<IdWithQuality>,
 
@@ -640,6 +640,7 @@ pub fn select_crafter_for_recipe(
     ctx: &FactorioContext,
     recipe: &RecipePrototype,
     preferences: &[IdWithQuality],
+    excluding: &[IdWithQuality],
 ) -> IdWithQuality {
     // 优先选择用户偏好
     for pref in preferences {
@@ -667,7 +668,10 @@ pub fn select_crafter_for_recipe(
     }
     // 找不到用户偏好时，选择最快的机器
     for (crafter_name, crafter) in &ctx.crafters {
-        if machine_fits_for_recipe(crafter, recipe) && measure_crafter(crafter) > measure {
+        if machine_fits_for_recipe(crafter, recipe)
+            && measure_crafter(crafter) > measure
+            && !excluding.iter().any(|ex| ex.0 == *crafter_name)
+        {
             measure = measure_crafter(crafter);
             selected = crafter_name.clone();
         }
@@ -738,7 +742,8 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
                 !machine_fits_for_recipe(crafter, ctx.recipes.get(&instance.recipe.0).unwrap())
             })
         {
-            instance.machine = select_crafter_for_recipe(ctx, recipe, &self.machine_preferences);
+            instance.machine =
+                select_crafter_for_recipe(ctx, recipe, &self.machine_preferences, &[]);
             instance.instance_fuel = None;
             instance.module_config = ModuleConfig::new();
         }
@@ -927,6 +932,7 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
                     ctx,
                     ctx.recipes.get(recipe.as_str()).unwrap(),
                     &self.machine_preferences,
+                    &[],
                 ),
                 ..Default::default()
             });
@@ -950,54 +956,64 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
             } else {
                 1
             };
-            let machine_name = select_crafter_for_recipe(
-                ctx,
-                ctx.recipes.get(recipe_name.as_str()).unwrap(),
-                &self.machine_preferences,
-            );
-            if let Some(machine_proto) = ctx.crafters.get(&machine_name.0) {
-                let (allowed_effects, option_allowed_modules) =
-                    collect_module_limitations(machine_proto, recipe_proto);
-                let allowed_effects = Some(allowed_effects);
-                let allowed_modules = self
-                    .enumerate_modules
-                    .clone()
-                    .into_iter()
-                    .filter(|module_name| {
-                        if let Some(module) = ctx.modules.get(&module_name.0) {
-                            option_allowed_modules.as_ref().is_none_or(
-                                |allowed_module_categories| {
-                                    allowed_module_categories.contains(&module_name.0)
-                                },
-                            ) && module_effects_allowed(module, &allowed_effects)
-                        } else {
-                            false
-                        }
-                    })
-                    .collect::<Vec<_>>();
-                for comb in Compositions::new(
-                    allowed_modules.len() + 1,
-                    machine_proto.module_slots as usize,
-                ) {
-                    for quality in 0..quality_range {
-                        let mut modules = vec![];
-                        for module_id in 0..allowed_modules.len() {
-                            for _ in 0..comb[module_id] {
-                                modules.push(allowed_modules[module_id].clone());
+            let mut machines = vec![];
+            for _ in 0..self.alternative_count {
+                let machine_name = select_crafter_for_recipe(
+                    ctx,
+                    recipe_proto,
+                    &self.machine_preferences,
+                    &machines,
+                );
+                if &machine_name.0 == "entity-unknown" {
+                    break;
+                }
+                machines.push(machine_name);
+            }
+            machines.iter().for_each(|machine_name| {
+                if let Some(machine_proto) = ctx.crafters.get(&machine_name.0) {
+                    let (allowed_effects, option_allowed_modules) =
+                        collect_module_limitations(machine_proto, recipe_proto);
+                    let allowed_effects = Some(allowed_effects);
+                    let allowed_modules = self
+                        .enumerate_modules
+                        .clone()
+                        .into_iter()
+                        .filter(|module_name| {
+                            if let Some(module) = ctx.modules.get(&module_name.0) {
+                                option_allowed_modules.as_ref().is_none_or(
+                                    |allowed_module_categories| {
+                                        allowed_module_categories.contains(&module_name.0)
+                                    },
+                                ) && module_effects_allowed(module, &allowed_effects)
+                            } else {
+                                false
                             }
-                        }
-                        self.instances.push(RecipeMechanicInstance {
-                            recipe: IdWithQuality(recipe_name.clone(), quality as u8),
-                            machine: machine_name.clone(),
-                            module_config: ModuleConfig {
-                                modules,
+                        })
+                        .collect::<Vec<_>>();
+                    for comb in Compositions::new(
+                        allowed_modules.len() + 1,
+                        machine_proto.module_slots as usize,
+                    ) {
+                        for quality in 0..quality_range {
+                            let mut modules = vec![];
+                            for module_id in 0..allowed_modules.len() {
+                                for _ in 0..comb[module_id] {
+                                    modules.push(allowed_modules[module_id].clone());
+                                }
+                            }
+                            self.instances.push(RecipeMechanicInstance {
+                                recipe: IdWithQuality(recipe_name.clone(), quality as u8),
+                                machine: machine_name.clone(),
+                                module_config: ModuleConfig {
+                                    modules,
+                                    ..Default::default()
+                                },
                                 ..Default::default()
-                            },
-                            ..Default::default()
-                        });
+                            });
+                        }
                     }
                 }
-            }
+            });
         }
     }
 }
@@ -1042,6 +1058,13 @@ impl EditorView for RecipeMechanic {
         }
         ui.collapsing("[自动/手动]机器偏好", |ui| {
             let icon = Icon::new(ctx, "entity", "entity-unknown");
+            ui.add(
+                egui::DragValue::new(&mut self.alternative_count)
+                    .speed(1)
+                    .range(1..=3)
+                    .clamp_existing_to_range(true),
+            );
+
             let button = ui
                 .add_sized([35.0, 35.0], icon)
                 .on_hover_text("选择新的机器顺序依据")

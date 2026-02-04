@@ -427,7 +427,7 @@ pub fn generic_item_selector(
             GenericItem::Fluid { name, temperature } => {
                 changed |= ui
                     .add(
-                        SelectorModal::new(egui::Id::new("target-select-fluid"), ctx, "选择流体")
+                        SelectorModal::new(id.with("target-select-fluid"), ctx, "选择流体")
                             .with_toggle(toggle)
                             .with_selector(Selector::new(ctx, "fluid").with_current(name)),
                     )

@@ -219,6 +219,9 @@ where
             let var = sink_vars.get(item_id).unwrap();
             optimization_expr += *cost / get_multiplier(item_id) * *var;
         }
+        if no_providers.len() > 0 {
+            log::warn!("没有来源的物品：{:?}", &no_providers);
+        }
         let solution = problem_variables
             .minimise(&optimization_expr)
             .using(good_lp::default_solver)
