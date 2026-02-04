@@ -237,13 +237,13 @@ pub fn module_effects_allowed(
                 && (normalized.contains(&EffectType::Speed) || module.effect.speed <= 0.0) // 要么允许加速，要么插件本身不增加速度
                 && (normalized.contains(&EffectType::Productivity)
                     || module.effect.productivity <= 0.0) // 要么允许产能，要么插件本身不增加产能
-                && (normalized.contains(&EffectType::Pollution) || module.effect.pollution <= 0.0) // 要么允许污染，要么插件本身不减少污染
+                && (normalized.contains(&EffectType::Pollution) || module.effect.pollution >= 0.0) // 要么允许污染，要么插件本身不减少污染
                 && (normalized.contains(&EffectType::Quality) || module.effect.quality <= 0.0) // 要么允许品质，要么插件本身不增加品质
         } else {
             unreachable!()
         }
     } else {
-        true
+        module.effect.productivity <= 0.0
     }
 }
 

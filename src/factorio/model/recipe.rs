@@ -24,6 +24,14 @@ use crate::{
 
 use crate::factorio::common::{as_vec_or_empty, option_as_vec_or_empty};
 
+fn always_true() -> bool {
+    true
+}
+
+fn always_false() -> bool {
+    false
+}
+
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(default)]
 pub struct RecipePrototype {
@@ -63,18 +71,23 @@ pub struct RecipePrototype {
     pub result_is_always_fresh: bool,
 
     /// 是否允许使用降低能耗的插件
+    #[serde(default = "always_true")]
     pub allow_consumption: bool,
 
     /// 是否允许使用增加速度的插件
+    #[serde(default = "always_true")]
     pub allow_speed: bool,
 
     /// 是否允许使用增加产能的插件
+    #[serde(default = "always_false")]
     pub allow_productivity: bool,
 
     /// 是否允许使用降低污染的插件
+    #[serde(default = "always_true")]
     pub allow_pollution: bool,
 
     /// 是否允许使用增加品质的插件
+    #[serde(default = "always_true")]
     pub allow_quality: bool,
 }
 
@@ -928,7 +941,6 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
         // TODO 插件
         self.instances.clear();
         for (recipe_name, recipe_proto) in &ctx.recipes {
-            log::info!("Auto populating recipe {:?}", recipe_name);
             let quality_range = if recipe_proto
                 .ingredients
                 .iter()
@@ -938,36 +950,49 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
             } else {
                 1
             };
-            for quality in 0..quality_range {
-                let machine_name = select_crafter_for_recipe(
-                    ctx,
-                    ctx.recipes.get(recipe_name.as_str()).unwrap(),
-                    &self.machine_preferences,
+            let machine_name = select_crafter_for_recipe(
+                ctx,
+                ctx.recipes.get(recipe_name.as_str()).unwrap(),
+                &self.machine_preferences,
+            );
+            if let Some(machine_proto) = ctx.crafters.get(&machine_name.0) {
+                let (allowed_effects, option_allowed_modules) =
+                    collect_module_limitations(machine_proto, recipe_proto);
+                log::info!(
+                    "为配方 {} 在机器 {} 上自动生成实例，允许的效果: {:?}，允许的插件类别: {:?}",
+                    recipe_name,
+                    machine_name.0,
+                    allowed_effects,
+                    option_allowed_modules
                 );
-                if let Some(machine_proto) = ctx.crafters.get(&machine_name.0) {
-                    let (allowed_effects, option_allowed_modules) =
-                        collect_module_limitations(machine_proto, recipe_proto);
-                    let allowed_effects = Some(allowed_effects);
-                    let allowed_modules = self
-                        .enumerate_modules
-                        .clone()
-                        .into_iter()
-                        .filter(|module_name| {
-                            if let Some(module) = ctx.modules.get(&module_name.0) {
-                                option_allowed_modules.as_ref().is_none_or(
-                                    |allowed_module_categories| {
-                                        allowed_module_categories.contains(&module_name.0)
-                                    },
-                                ) && module_effects_allowed(module, &allowed_effects)
-                            } else {
-                                false
-                            }
-                        })
-                        .collect::<Vec<_>>();
-                    for comb in Compositions::new(
-                        allowed_modules.len() + 1,
-                        machine_proto.module_slots as usize,
-                    ) {
+                let allowed_effects = Some(allowed_effects);
+                let allowed_modules = self
+                    .enumerate_modules
+                    .clone()
+                    .into_iter()
+                    .filter(|module_name| {
+                        if let Some(module) = ctx.modules.get(&module_name.0) {
+                            option_allowed_modules.as_ref().is_none_or(
+                                |allowed_module_categories| {
+                                    allowed_module_categories.contains(&module_name.0)
+                                },
+                            ) && module_effects_allowed(module, &allowed_effects)
+                        } else {
+                            false
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                log::info!(
+                    "配方 {} 在机器 {} 上允许的插件有: {:?}",
+                    recipe_name,
+                    machine_name.0,
+                    &allowed_modules
+                );
+                for comb in Compositions::new(
+                    allowed_modules.len() + 1,
+                    machine_proto.module_slots as usize,
+                ) {
+                    for quality in 0..quality_range {
                         let mut modules = vec![];
                         for module_id in 0..allowed_modules.len() {
                             for _ in 0..comb[module_id] {
@@ -1016,7 +1041,7 @@ fn collect_module_limitations(
         (Some(_), None) => crafter.allowed_module_categories.clone(),
         (Some(a), Some(b)) => Some([a.to_vec().as_slice(), b.to_vec().as_slice()].concat()),
     };
-    (allowed_effects, allowed_module_categories.clone())
+    (allowed_effects, allowed_module_categories)
 }
 
 impl EditorView for RecipeMechanic {
