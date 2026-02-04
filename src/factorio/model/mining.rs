@@ -48,6 +48,7 @@ pub struct MiningDrillPrototype {
     #[serde(default)]
     pub quality_affects_module_slots: bool,
 
+    #[serde(default)]
     pub allowed_effects: Option<EffectTypeLimitation>,
 
     #[serde(deserialize_with = "option_as_vec_or_empty")]
@@ -447,12 +448,18 @@ impl Mechanic<FactorioContext, GenericItem> for MiningMechanic {
         ui.separator();
 
         if let Some(miner) = ctx.miners.get(&instance.machine.0) {
+            let allowed_effects = Some(
+                miner
+                    .allowed_effects
+                    .clone()
+                    .unwrap_or(EffectTypeLimitation::new(true, true, true, true, true)),
+            );
             changed |= ui
                 .add(ModuleConfigEditor::new(
                     ctx,
                     &mut instance.module_config,
                     miner.module_slots as usize,
-                    &miner.allowed_effects,
+                    &allowed_effects,
                     &miner.allowed_module_categories,
                 ))
                 .changed();

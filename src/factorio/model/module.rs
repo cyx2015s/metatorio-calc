@@ -240,10 +240,10 @@ fn module_effects_allowed(
                 && (normalized.contains(&EffectType::Pollution) || module.effect.pollution <= 0.0) // 要么允许污染，要么插件本身不减少污染
                 && (normalized.contains(&EffectType::Quality) || module.effect.quality <= 0.0) // 要么允许品质，要么插件本身不增加品质
         } else {
-            unreachable!();
+            unreachable!()
         }
     } else {
-        module.effect.productivity <= 0.0
+        true
     }
 }
 
