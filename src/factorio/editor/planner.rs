@@ -470,7 +470,7 @@ impl FactoryInstance {
                             _ => 1.0
                         }));
                     }
-                    self.external.push((GenericItem::Electricity, 1048576.0));
+                    self.external.push((GenericItem::Electricity, 2.0_f64.powi(24)));
                     *changed = true;
                 }
             }

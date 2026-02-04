@@ -134,7 +134,7 @@ impl egui::Widget for SignedCompactLabel {
             if parsed_number.is_err() {
                 label.on_hover_text(self.value.to_string())
             } else if let Ok(n) = parsed_number
-                && f64::abs(n - self.value) > 1e-6
+                && (f64::abs(n - self.value) > 1e-6 || self.value.abs() < 1e-5)
             {
                 label.on_hover_text(self.value.to_string())
             } else {
@@ -149,7 +149,7 @@ impl egui::Widget for SignedCompactLabel {
             if parsed_number.is_err() {
                 label.on_hover_text(self.value.to_string())
             } else if let Ok(n) = parsed_number
-                && f64::abs(n - self.value) > 1e-6
+                && (f64::abs(n - self.value) > 1e-6 || self.value.abs() < 1e-5)
             {
                 label.on_hover_text(self.value.to_string())
             } else {
@@ -173,7 +173,7 @@ impl egui::Widget for CompactLabel {
             if parsed_number.is_err() {
                 label.on_hover_text(self.value.to_string())
             } else if let Ok(n) = parsed_number
-                && f64::abs(n - self.value) > 1e-6
+                && (f64::abs(n - self.value) > 1e-6 || self.value.abs() < 1e-5)
             {
                 label.on_hover_text(self.value.to_string())
             } else {
@@ -188,7 +188,7 @@ impl egui::Widget for CompactLabel {
             if parsed_number.is_err() {
                 label.on_hover_text(self.value.to_string())
             } else if let Ok(n) = parsed_number
-                && f64::abs(n - self.value) > 1e-6
+                && (f64::abs(n - self.value) > 1e-6 || self.value.abs() < 1e-5)
             {
                 label.on_hover_text(self.value.to_string())
             } else {
