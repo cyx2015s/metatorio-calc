@@ -2666,7 +2666,7 @@ dependencies = [
 
 [[package]]
 name = "metatorio"
-version = "1.1.4-514"
+version = "1.1.5"
 dependencies = [
  "dirs",
  "dotenv",
