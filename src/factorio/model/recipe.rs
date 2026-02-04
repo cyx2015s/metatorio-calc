@@ -958,13 +958,6 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
             if let Some(machine_proto) = ctx.crafters.get(&machine_name.0) {
                 let (allowed_effects, option_allowed_modules) =
                     collect_module_limitations(machine_proto, recipe_proto);
-                log::info!(
-                    "为配方 {} 在机器 {} 上自动生成实例，允许的效果: {:?}，允许的插件类别: {:?}",
-                    recipe_name,
-                    machine_name.0,
-                    allowed_effects,
-                    option_allowed_modules
-                );
                 let allowed_effects = Some(allowed_effects);
                 let allowed_modules = self
                     .enumerate_modules
@@ -982,12 +975,6 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
                         }
                     })
                     .collect::<Vec<_>>();
-                log::info!(
-                    "配方 {} 在机器 {} 上允许的插件有: {:?}",
-                    recipe_name,
-                    machine_name.0,
-                    &allowed_modules
-                );
                 for comb in Compositions::new(
                     allowed_modules.len() + 1,
                     machine_proto.module_slots as usize,
