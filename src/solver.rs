@@ -157,15 +157,22 @@ where
             *entry -= 1.0 * var;
         }
         let mut no_providers: HashSet<I> = item_balances.keys().cloned().collect();
+        let mut no_consumers: HashSet<I> = item_balances.keys().cloned().collect();
         for flow in self.flows.values() {
             for (item_id, &amount) in &flow.0 {
                 if amount > 0.0 {
                     no_providers.remove(item_id);
                 }
+                if amount < 0.0 {
+                    no_consumers.remove(item_id);
+                }
             }
         }
         for item in self.sources.keys() {
             no_providers.remove(item);
+        }
+        for item in self.sinks.keys() {
+            no_consumers.remove(item);
         }
         let mut targets = Vec::new();
         for (item_id, &amount) in &self.target {
@@ -221,6 +228,9 @@ where
         }
         if no_providers.len() > 0 {
             log::warn!("没有来源的物品：{:?}", &no_providers);
+        }
+        if no_consumers.len() > 0 {
+            log::warn!("没有去处的物品：{:?}", &no_consumers);
         }
         let solution = problem_variables
             .minimise(&optimization_expr)

@@ -508,7 +508,8 @@ impl AsFlow for RecipeMechanicInstance {
                     RecipeIngredient::Fluid(fluid) => {
                         let key = GenericItem::Fluid {
                             name: fluid.name.clone(),
-                            temperature: fluid.temperature.map(|x| x as i32),
+                            // temperature: fluid.temperature.map(|x| x as i32),
+                            temperature: None,
                         };
                         index_map_update_entry(
                             &mut map,
@@ -555,7 +556,8 @@ impl AsFlow for RecipeMechanicInstance {
                     RecipeResult::Fluid(fluid) => {
                         let key = GenericItem::Fluid {
                             name: fluid.name.clone(),
-                            temperature: fluid.temperature.map(|x| x as i32),
+                            // temperature: fluid.temperature.map(|x| x as i32),
+                            temperature: None,
                         };
                         let (base_yield, extra_yield) = fluid.normalized_output();
                         index_map_update_entry(
