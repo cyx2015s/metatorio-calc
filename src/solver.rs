@@ -126,7 +126,10 @@ where
             flow_vars.insert(recipe_id.clone(), var);
         }
         let mut item_balances = IndexMap::new();
-        log::info!("求解器：开始构建物品平衡表达式：一共有 {} 个配方变量", self.flows.len());
+        log::info!(
+            "求解器：开始构建物品平衡表达式：一共有 {} 个配方变量",
+            self.flows.len()
+        );
         for (recipe_id, flow) in &self.flows {
             let var = flow_vars.get(recipe_id).unwrap();
             for (item_id, &amount) in &flow.0 {
@@ -143,7 +146,7 @@ where
             let entry = item_balances
                 .entry(item_id.clone())
                 .or_insert(good_lp::Expression::from(0.0));
-            *entry += get_multiplier(item_id) * var;
+            *entry += 1.0 * var;
         }
         for (item_id, _) in &self.sinks {
             let var = problem_variables.add(variable().min(0));
@@ -151,7 +154,7 @@ where
             let entry = item_balances
                 .entry(item_id.clone())
                 .or_insert(good_lp::Expression::from(0.0));
-            *entry -= get_multiplier(item_id) * var;
+            *entry -= 1.0 * var;
         }
         let mut no_providers: HashSet<I> = item_balances.keys().cloned().collect();
         for flow in self.flows.values() {
@@ -210,11 +213,11 @@ where
         }
         for (item_id, cost) in &self.sources {
             let var = source_vars.get(item_id).unwrap();
-            optimization_expr += *cost * *var;
+            optimization_expr += *cost / get_multiplier(item_id) * *var;
         }
         for (item_id, cost) in &self.sinks {
             let var = sink_vars.get(item_id).unwrap();
-            optimization_expr += *cost * *var;
+            optimization_expr += *cost / get_multiplier(item_id) * *var;
         }
         let solution = problem_variables
             .minimise(&optimization_expr)

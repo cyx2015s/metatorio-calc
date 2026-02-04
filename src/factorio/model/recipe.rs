@@ -983,7 +983,7 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
                         let mut modules = vec![];
                         for module_id in 0..allowed_modules.len() {
                             for _ in 0..comb[module_id] {
-                                modules.push(self.enumerate_modules[module_id].clone());
+                                modules.push(allowed_modules[module_id].clone());
                             }
                         }
                         self.instances.push(RecipeMechanicInstance {
