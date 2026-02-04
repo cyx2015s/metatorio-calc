@@ -230,7 +230,7 @@ impl FactoryInstance {
                         for jdx in 0..mechanic.instance_len() {
                             let solution_value =
                                 self.solution.0.get(&(idx, jdx)).cloned().unwrap_or(0.0);
-                            if solution_value.abs() < 1e-12 {
+                            if solution_value.abs() < 1e-10 {
                                 mechanic.instance_operate(jdx, &mut |_| EntryOperation::Drop);
                             }
                         }
