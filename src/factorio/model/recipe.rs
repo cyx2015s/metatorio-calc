@@ -4,6 +4,7 @@ use std::{
 };
 
 use crate::{
+    comb::Compositions,
     concept::*,
     factorio::{
         common::*,
@@ -16,6 +17,7 @@ use crate::{
             module::{ModuleConfig, ModuleConfigEditor},
             quality::calc_quality_distribution,
         },
+        module_effects_allowed,
         selector::Selector,
     },
 };
@@ -590,133 +592,6 @@ fn test_recipe_normalized() {
     println!("Recipe Result with Location: {:?}", result_with_location);
 }
 
-impl EditorView for RecipeMechanicInstance {
-    fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &Self::GameContext) -> bool {
-        let mut changed = false;
-
-        ui.vertical(|ui| {
-            ui.label("配方");
-
-            let recipe_button = ui
-                .add_sized(
-                    [35.0, 35.0],
-                    Icon::new(ctx, "recipe", &self.recipe.0).with_quality(self.recipe.1),
-                )
-                .interact(egui::Sense::click())
-                .on_hover_ui(|ui| {
-                    ui.add(PrototypeHover::new(
-                        ctx,
-                        ctx.recipes.get(&self.recipe.0).unwrap(),
-                    ));
-                });
-            changed |= ui
-                .add(
-                    SelectorModal::new(recipe_button.id, ctx, "选择配方")
-                        .with_toggle(recipe_button.clicked())
-                        .with_selector(
-                            Selector::new(ctx, "recipe")
-                                .with_current(&mut self.recipe)
-                                .with_hover(|ui, name: &IdWithQuality, ctx: &FactorioContext| {
-                                    if let Some(prototype) = ctx.recipes.get(name.0.as_str()) {
-                                        ui.add(PrototypeHover::new(ctx, prototype));
-                                    } else {
-                                        ui.label(format!("未知配方: {}", name.0));
-                                    }
-                                }),
-                        ),
-                )
-                .changed();
-        });
-        if changed {
-            // TODO 读取用户设定的偏好
-            if let Some(crafter) = ctx.crafters.get(&self.machine.0)
-                && !machine_fits_for_recipe(crafter, ctx.recipes.get(&self.recipe.0).unwrap())
-            {
-                self.machine = "entity-unknown".into();
-                self.instance_fuel = None;
-                self.module_config = ModuleConfig::new();
-            }
-        }
-        ui.separator();
-        ui.vertical(|ui| {
-            ui.add_sized([35.0, 15.0], egui::Label::new("机器"));
-            let mut entity_button = ui
-                .add_sized(
-                    [35.0, 35.0],
-                    Icon::new(ctx, "entity", &self.machine.0).with_quality(self.machine.1),
-                )
-                .interact(egui::Sense::click());
-
-            if let Some(crafter) = ctx.crafters.get(&self.machine.0) {
-                entity_button = entity_button.on_hover_ui(|ui| {
-                    ui.add(PrototypeHover::new(ctx, crafter));
-                });
-            }
-
-            let recipe_prototype = ctx.recipes.get(self.recipe.0.as_str()).unwrap();
-            let selector = Selector::new(ctx, "entity")
-                .with_filter(|crafter_name: &IdWithQuality, ctx: &FactorioContext| {
-                    if let Some(crafter) = ctx.crafters.get(&crafter_name.0) {
-                        return machine_fits_for_recipe(crafter, recipe_prototype);
-                    }
-                    false
-                })
-                .with_current(&mut self.machine)
-                .with_hover(|ui, name, ctx| {
-                    ui.add(PrototypeHover::new(ctx, &ctx.crafters[&name.0]));
-                });
-
-            let widget = SelectorModal::new(entity_button.id, ctx, "选择制造设备")
-                .with_toggle(entity_button.clicked())
-                .with_selector(selector);
-            changed |= ui.add(widget).changed();
-        });
-
-        ui.separator();
-
-        if let Some(crafter) = ctx.crafters.get(&self.machine.0)
-            && let Some(recipe) = ctx.recipes.get(&self.recipe.0)
-        {
-            let allowed_effects = EffectTypeLimitation::new(
-                recipe.allow_consumption,
-                recipe.allow_speed,
-                recipe.allow_productivity,
-                recipe.allow_pollution,
-                recipe.allow_quality,
-            )
-            .intersect(
-                crafter
-                    .allowed_effects
-                    .as_ref()
-                    .unwrap_or(&EffectTypeLimitation::default()),
-            );
-            let allowed_module_categories = match (
-                crafter.allowed_module_categories.as_ref(),
-                recipe.allowed_module_categories.as_ref(),
-            ) {
-                (None, None) => &None,
-                (None, Some(_)) => &recipe.allowed_module_categories,
-                (Some(_), None) => &crafter.allowed_module_categories,
-                (Some(a), Some(b)) => {
-                    &Some([a.to_vec().as_slice(), b.to_vec().as_slice()].concat())
-                }
-            };
-
-            changed |= ui
-                .add(ModuleConfigEditor::new(
-                    ctx,
-                    &mut self.module_config,
-                    crafter.module_slots as usize,
-                    &Some(allowed_effects),
-                    allowed_module_categories,
-                ))
-                .changed();
-        };
-
-        changed
-    }
-}
-
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename = "factorio:recipe", default)]
 #[derive(Default)]
@@ -730,6 +605,11 @@ pub struct RecipeMechanic {
 
     #[serde(skip)]
     pub new_machine_preference: Option<IdWithQuality>,
+
+    pub enumerate_modules: Vec<IdWithQuality>,
+
+    #[serde(skip)]
+    pub new_enumerate_module: Option<IdWithQuality>,
 
     #[serde(skip)]
     pub suggestion_item: Option<GenericItem>,
@@ -889,30 +769,8 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
         if let Some(crafter) = ctx.crafters.get(&instance.machine.0)
             && let Some(recipe) = ctx.recipes.get(&instance.recipe.0)
         {
-            let allowed_effects = EffectTypeLimitation::new(
-                recipe.allow_consumption,
-                recipe.allow_speed,
-                recipe.allow_productivity,
-                recipe.allow_pollution,
-                recipe.allow_quality,
-            )
-            .intersect(
-                crafter
-                    .allowed_effects
-                    .as_ref()
-                    .unwrap_or(&EffectTypeLimitation::default()),
-            );
-            let allowed_module_categories = match (
-                crafter.allowed_module_categories.as_ref(),
-                recipe.allowed_module_categories.as_ref(),
-            ) {
-                (None, None) => &None,
-                (None, Some(_)) => &recipe.allowed_module_categories,
-                (Some(_), None) => &crafter.allowed_module_categories,
-                (Some(a), Some(b)) => {
-                    &Some([a.to_vec().as_slice(), b.to_vec().as_slice()].concat())
-                }
-            };
+            let (allowed_effects, allowed_module_categories) =
+                collect_module_limitations(crafter, recipe);
 
             changed |= ui
                 .add(ModuleConfigEditor::new(
@@ -920,7 +778,7 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
                     &mut instance.module_config,
                     crafter.module_slots as usize,
                     &Some(allowed_effects),
-                    allowed_module_categories,
+                    &allowed_module_categories,
                 ))
                 .changed();
         };
@@ -1070,6 +928,7 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
         // TODO 插件
         self.instances.clear();
         for (recipe_name, recipe_proto) in &ctx.recipes {
+            log::info!("Auto populating recipe {:?}", recipe_name);
             let quality_range = if recipe_proto
                 .ingredients
                 .iter()
@@ -1080,37 +939,99 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
                 1
             };
             for quality in 0..quality_range {
-                let machine = select_crafter_for_recipe(
+                let machine_name = select_crafter_for_recipe(
                     ctx,
                     ctx.recipes.get(recipe_name.as_str()).unwrap(),
                     &self.machine_preferences,
                 );
-                self.instances.push(RecipeMechanicInstance {
-                    recipe: IdWithQuality(recipe_name.clone(), quality as u8),
-                    machine: machine.clone(),
-                    module_config: ModuleConfig {
-                        modules: vec![
-                            IdWithQuality("quality-module-3".to_string(), 4);
-                            ctx.crafters
-                                .get(&machine.0)
-                                .map_or(0, |c| c.module_slots as usize)
-                        ],
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                });
+                if let Some(machine_proto) = ctx.crafters.get(&machine_name.0) {
+                    let (allowed_effects, option_allowed_modules) =
+                        collect_module_limitations(machine_proto, recipe_proto);
+                    let allowed_effects = Some(allowed_effects);
+                    let allowed_modules = self
+                        .enumerate_modules
+                        .clone()
+                        .into_iter()
+                        .filter(|module_name| {
+                            if let Some(module) = ctx.modules.get(&module_name.0) {
+                                option_allowed_modules.as_ref().is_none_or(
+                                    |allowed_module_categories| {
+                                        allowed_module_categories.contains(&module_name.0)
+                                    },
+                                ) && module_effects_allowed(module, &allowed_effects)
+                            } else {
+                                false
+                            }
+                        })
+                        .collect::<Vec<_>>();
+                    for comb in Compositions::new(
+                        allowed_modules.len() + 1,
+                        machine_proto.module_slots as usize,
+                    ) {
+                        let mut modules = vec![];
+                        for module_id in 0..allowed_modules.len() {
+                            for _ in 0..comb[module_id] {
+                                modules.push(self.enumerate_modules[module_id].clone());
+                            }
+                        }
+                        self.instances.push(RecipeMechanicInstance {
+                            recipe: IdWithQuality(recipe_name.clone(), quality as u8),
+                            machine: machine_name.clone(),
+                            module_config: ModuleConfig {
+                                modules,
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        });
+                    }
+                }
             }
         }
     }
 }
 
+fn collect_module_limitations(
+    crafter: &CraftingMachinePrototype,
+    recipe: &RecipePrototype,
+) -> (EffectTypeLimitation, Option<Vec<String>>) {
+    let allowed_effects = EffectTypeLimitation::new(
+        recipe.allow_consumption,
+        recipe.allow_speed,
+        recipe.allow_productivity,
+        recipe.allow_pollution,
+        recipe.allow_quality,
+    )
+    .intersect(
+        crafter
+            .allowed_effects
+            .as_ref()
+            .unwrap_or(&EffectTypeLimitation::default()),
+    );
+    let allowed_module_categories = match (
+        crafter.allowed_module_categories.as_ref(),
+        recipe.allowed_module_categories.as_ref(),
+    ) {
+        (None, None) => None,
+        (None, Some(_)) => recipe.allowed_module_categories.clone(),
+        (Some(_), None) => crafter.allowed_module_categories.clone(),
+        (Some(a), Some(b)) => Some([a.to_vec().as_slice(), b.to_vec().as_slice()].concat()),
+    };
+    (allowed_effects, allowed_module_categories.clone())
+}
+
 impl EditorView for RecipeMechanic {
     fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &FactorioContext) -> bool {
         let mut changed = self.submit_operations();
-        ui.collapsing("机器偏好", |ui| {
+
+        if ui.button("添加配方").clicked() {
+            let new_config = RecipeMechanicInstance::default();
+            self.instances.push(new_config);
+            changed = true;
+        }
+        ui.collapsing("[自动/手动]机器偏好", |ui| {
             let icon = Icon::new(ctx, "entity", "entity-unknown");
             let button = ui
-                .add(icon)
+                .add_sized([35.0, 35.0], icon)
                 .on_hover_text("选择新的机器顺序依据")
                 .interact(egui::Sense::click());
             ui.add(
@@ -1190,11 +1111,51 @@ impl EditorView for RecipeMechanic {
             }
         });
 
-        if ui.button("添加配方").clicked() {
-            let new_config = RecipeMechanicInstance::default();
-            self.instances.push(new_config);
-            changed = true;
-        }
+        ui.collapsing("[自动]枚举插件", |ui| {
+            let icon = Icon::new(ctx, "item", "empty-module-slot");
+            let button = ui
+                .add_sized([35.0, 35.0], icon)
+                .on_hover_text("选择新的枚举插件。修改插件请先删除。")
+                .interact(egui::Sense::click());
+            ui.add(
+                SelectorModal::new(button.id, ctx, "选择枚举插件")
+                    .with_toggle(button.clicked())
+                    .with_selector(
+                        Selector::new(ctx, "item")
+                            .with_output(&mut self.new_enumerate_module)
+                            .with_filter(|item: &IdWithQuality, ctx: &FactorioContext| {
+                                ctx.modules.contains_key(&item.0)
+                            }),
+                    ),
+            );
+            if self.new_enumerate_module.is_some() {
+                let new_module = self.new_enumerate_module.take().unwrap();
+                // 移除已有的相同插件
+                self.enumerate_modules.retain(|m| m.0 != new_module.0);
+                // 插入到最前面
+                self.enumerate_modules.insert(0, new_module);
+                changed = true;
+            }
+            // 插件顺序无关，所以不提供相对移动操作
+            let mut delele_module = None;
+            ui.separator();
+            for module in &self.enumerate_modules {
+                let button = ui
+                    .add_sized(
+                        [35.0, 35.0],
+                        Icon::new(ctx, "item", &module.0).with_quality(module.1),
+                    )
+                    .on_hover_text("无法编辑，右键可删除。")
+                    .interact(egui::Sense::click());
+                if button.secondary_clicked() {
+                    delele_module = Some(module.clone());
+                    changed = true;
+                }
+            }
+            if let Some(module) = delele_module {
+                self.enumerate_modules.retain(|m| m != &module);
+            }
+        });
 
         changed
     }

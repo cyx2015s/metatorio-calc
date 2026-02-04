@@ -19,6 +19,14 @@ pub fn factorio_auto_planner(
     let instant = Instant::now();
     for mechanic in &mut factory.mechanics {
         mechanic.auto_populate(&ctx);
+        log::info!("机制 {} 填充了 {} 个实例", mechanic.name(), mechanic.instance_len());
+        if mechanic.instance_len() > 1000 {
+            log::warn!(
+                "机制 {} 实例过多 ({} 个)，可能导致求解时间过长、内存占用过大。",
+                mechanic.name(),
+                mechanic.instance_len()
+            );
+        }
     }
 
     factory.strict_source = true;

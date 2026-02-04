@@ -227,7 +227,7 @@ impl<'a> ModuleConfigEditor<'a> {
     }
 }
 
-fn module_effects_allowed(
+pub fn module_effects_allowed(
     module: &ModulePrototype,
     allowed_effects: &Option<EffectTypeLimitation>,
 ) -> bool {

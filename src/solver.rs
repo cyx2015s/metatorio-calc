@@ -98,6 +98,7 @@ where
     pub fn solve(&self) -> Result<(Flow<R>, f64), AppError> {
         // 先做一步数值稳定性处理，将出现的流系数全部统一到1附近。
         let mut magnitude_and_counts = HashMap::new();
+        log::info!("求解器：开始分析流量数量级");
         for recipe in self.flows.values() {
             for (item_id, &amount) in &recipe.0 {
                 let entry = magnitude_and_counts
@@ -111,26 +112,11 @@ where
         let magnitude_factors: HashMap<I, i32> = magnitude_and_counts
             .into_iter()
             .map(|(item, (total_maginitude, count))| {
-                log::info!(
-                    "物品 {:?} 的流系数总数量级为 {}，出现次数为 {}，平均数量级为 {}",
-                    item,
-                    total_maginitude,
-                    count,
-                    total_maginitude / count as f64
-                );
                 (item, (-total_maginitude / count as f64) as i32)
             })
             .collect();
         let get_multiplier =
             |item_id: &I| -> f64 { (2.0_f64).powi(*magnitude_factors.get(item_id).unwrap_or(&0)) };
-        magnitude_factors.iter().for_each(|(i, f)| {
-            log::info!(
-                "物品 {:?} 的流系数数量级调整为 {}，乘数为 {}",
-                i,
-                f,
-                (2.0_f64).powi(*f)
-            );
-        });
         let mut problem_variables = good_lp::ProblemVariables::new();
         let mut flow_vars = IndexMap::new();
         let mut source_vars = IndexMap::new();
@@ -140,7 +126,7 @@ where
             flow_vars.insert(recipe_id.clone(), var);
         }
         let mut item_balances = IndexMap::new();
-
+        log::info!("求解器：开始构建物品平衡表达式：一共有 {} 个配方变量", self.flows.len());
         for (recipe_id, flow) in &self.flows {
             let var = flow_vars.get(recipe_id).unwrap();
             for (item_id, &amount) in &flow.0 {
@@ -150,6 +136,7 @@ where
                 *entry += amount * get_multiplier(item_id) * *var;
             }
         }
+        log::info!("求解器：一共有 {} 个物品需要平衡", item_balances.len());
         for (item_id, _) in &self.sources {
             let var = problem_variables.add(variable().min(0));
             source_vars.insert(item_id.clone(), var);
