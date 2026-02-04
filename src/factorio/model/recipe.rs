@@ -1069,15 +1069,24 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
         // TODO 品质
         // TODO 插件
         self.instances.clear();
-        for recipe in ctx.recipes.keys() {
-            for quality in 0..ctx.qualities.len() {
+        for (recipe_name, recipe_proto) in &ctx.recipes {
+            let quality_range = if recipe_proto
+                .ingredients
+                .iter()
+                .any(|ingredient| matches!(ingredient, RecipeIngredient::Item(..)))
+            {
+                ctx.qualities.len()
+            } else {
+                1
+            };
+            for quality in 0..quality_range {
                 let machine = select_crafter_for_recipe(
                     ctx,
-                    ctx.recipes.get(recipe.as_str()).unwrap(),
+                    ctx.recipes.get(recipe_name.as_str()).unwrap(),
                     &self.machine_preferences,
                 );
                 self.instances.push(RecipeMechanicInstance {
-                    recipe: IdWithQuality(recipe.clone(), quality as u8),
+                    recipe: IdWithQuality(recipe_name.clone(), quality as u8),
                     machine: machine.clone(),
                     module_config: ModuleConfig {
                         modules: vec![

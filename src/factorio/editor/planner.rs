@@ -114,6 +114,7 @@ impl Clone for FactoryInstance {
             total_flow: self.total_flow.clone(),
             total_flow_sorted_keys: self.total_flow_sorted_keys.clone(),
             mechanics: self.mechanics.clone(),
+            factory_sender: self.factory_sender.clone(),
             ..Default::default()
         }
     }

@@ -3,7 +3,7 @@ use indexmap::IndexMap;
 
 use crate::concept::{Flow, ItemIdent};
 use crate::error::AppError;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::hash::Hash;
 
@@ -96,6 +96,41 @@ where
     }
 
     pub fn solve(&self) -> Result<(Flow<R>, f64), AppError> {
+        // 先做一步数值稳定性处理，将出现的流系数全部统一到1附近。
+        let mut magnitude_and_counts = HashMap::new();
+        for recipe in self.flows.values() {
+            for (item_id, &amount) in &recipe.0 {
+                let entry = magnitude_and_counts
+                    .entry(item_id.clone())
+                    .or_insert((0.0, 0));
+                entry.0 += amount.abs().log2().max(-32.0);
+                entry.1 += 1;
+            }
+        }
+        // total_magnitude / count 是这些数据的几何平均数的数量级
+        let magnitude_factors: HashMap<I, i32> = magnitude_and_counts
+            .into_iter()
+            .map(|(item, (total_maginitude, count))| {
+                log::info!(
+                    "物品 {:?} 的流系数总数量级为 {}，出现次数为 {}，平均数量级为 {}",
+                    item,
+                    total_maginitude,
+                    count,
+                    total_maginitude / count as f64
+                );
+                (item, (-total_maginitude / count as f64) as i32)
+            })
+            .collect();
+        let get_multiplier =
+            |item_id: &I| -> f64 { (2.0_f64).powi(*magnitude_factors.get(item_id).unwrap_or(&0)) };
+        magnitude_factors.iter().for_each(|(i, f)| {
+            log::info!(
+                "物品 {:?} 的流系数数量级调整为 {}，乘数为 {}",
+                i,
+                f,
+                (2.0_f64).powi(*f)
+            );
+        });
         let mut problem_variables = good_lp::ProblemVariables::new();
         let mut flow_vars = IndexMap::new();
         let mut source_vars = IndexMap::new();
@@ -112,7 +147,7 @@ where
                 let entry = item_balances
                     .entry(item_id.clone())
                     .or_insert(good_lp::Expression::from(0.0));
-                *entry += amount * *var;
+                *entry += amount * get_multiplier(item_id) * *var;
             }
         }
         for (item_id, _) in &self.sources {
@@ -121,7 +156,7 @@ where
             let entry = item_balances
                 .entry(item_id.clone())
                 .or_insert(good_lp::Expression::from(0.0));
-            *entry += 1.0 * var;
+            *entry += get_multiplier(item_id) * var;
         }
         for (item_id, _) in &self.sinks {
             let var = problem_variables.add(variable().min(0));
@@ -129,7 +164,7 @@ where
             let entry = item_balances
                 .entry(item_id.clone())
                 .or_insert(good_lp::Expression::from(0.0));
-            *entry -= 1.0 * var;
+            *entry -= get_multiplier(item_id) * var;
         }
         let mut no_providers: HashSet<I> = item_balances.keys().cloned().collect();
         for flow in self.flows.values() {
@@ -147,7 +182,7 @@ where
             // 目标物品，严格相等
             let balance = item_balances.get(item_id);
             if let Some(expr) = balance {
-                targets.push(expr.clone().eq(amount));
+                targets.push(expr.clone().eq(amount * get_multiplier(item_id)));
             }
         }
         let mut constraints = Vec::new();
