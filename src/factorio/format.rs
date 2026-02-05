@@ -201,7 +201,7 @@ impl egui::Widget for CompactLabel {
 pub fn parse_number(n: &str) -> Option<f64> {
     let re = regex::Regex::new(r"^-?[\d.]+[kMGTPEZYRQμ]?$").ok()?;
     if re.is_match(n) {
-        let multiplier = match n.chars().rev().next() {
+        let multiplier = match n.chars().next_back() {
             Some('μ') => 0.000_001,
             Some('k') => 1_000.0,
             Some('M') => 1_000_000.0,
@@ -260,8 +260,8 @@ where
     T: egui::emath::Numeric,
 {
     egui::DragValue::new(val)
-        .custom_parser(|s| parse_number(s))
-        .custom_formatter(|n, _| compact_number(n as f64))
+        .custom_parser(parse_number)
+        .custom_formatter(|n, _| compact_number(n))
 }
 
 pub fn drag_watt<T>(val: &mut T) -> egui::DragValue<'_>
@@ -271,7 +271,7 @@ where
     egui::DragValue::new(val)
         .suffix("W")
         .custom_parser(|s| parse_energy(s).map(|x| x * 60.0))
-        .custom_formatter(|n, _| compact_number(n as f64))
+        .custom_formatter(|n, _| compact_number(n))
 }
 
 #[test]

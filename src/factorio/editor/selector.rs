@@ -177,12 +177,11 @@ impl<'a> egui::Widget for Selector<'a, str, String> {
                         idx += 1;
                         let mut icon =
                             Icon::new(self.ctx, self.type_name, item_name).with_size(32.0);
-                        if self.current.as_ref().is_some_and(|x| x == &item_name) {
-                            icon = icon.with_stroke(egui::Stroke::new(2.0, egui::Color32::GRAY));
-                        } else if self
-                            .output
-                            .as_ref()
-                            .is_some_and(|x| x.as_ref().is_some_and(|y| y == item_name))
+                        if self.current.as_ref().is_some_and(|x| x == &item_name)
+                            || self
+                                .output
+                                .as_ref()
+                                .is_some_and(|x| x.as_ref().is_some_and(|y| y == item_name))
                         {
                             icon = icon.with_stroke(egui::Stroke::new(2.0, egui::Color32::GRAY));
                         }
@@ -263,13 +262,17 @@ impl<'a> egui::Widget for Selector<'a, IdWithQuality, IdWithQuality> {
         if ui.add(widget).changed() {
             response.mark_changed();
         }
-        if prev_storage_item != storage.selected_item && let Some(selected_item) = &storage.selected_item {
+        if prev_storage_item != storage.selected_item
+            && let Some(selected_item) = &storage.selected_item
+        {
             response.mark_changed();
             if let Some(&mut ref mut current) = self.current {
                 current.0 = selected_item.clone();
             }
         }
-        if prev_storage_quality != storage.selected_quality && let Some(selected_quality) = &storage.selected_quality {
+        if prev_storage_quality != storage.selected_quality
+            && let Some(selected_quality) = &storage.selected_quality
+        {
             response.mark_changed();
             if let Some(&mut ref mut current) = self.current {
                 current.1 = *selected_quality;

@@ -104,10 +104,7 @@ where
     }
 
     /// 自动规划功能：枚举所有可能的配方组合，填充到instances中。
-    fn auto_populate(
-        &mut self,
-        ctx: &C,
-    ) {
+    fn auto_populate(&mut self, ctx: &C) {
         let _ = ctx;
     }
 }

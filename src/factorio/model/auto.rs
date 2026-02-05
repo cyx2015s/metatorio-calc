@@ -67,7 +67,7 @@ pub fn factorio_auto_planner(
                     jdx,
                     &mut |_| match factory.solution.0.get(&(idx, jdx)) {
                         Some(n) => {
-                            if n.abs() < 1e-10 {
+                            if *n < 1e-10 {
                                 EntryOperation::Drop
                             } else {
                                 EntryOperation::None
@@ -80,7 +80,7 @@ pub fn factorio_auto_planner(
             mechanic.submit_operations();
         });
     factory.send_solve_request(&ctx);
-    factory.name = factory.name + " (自动规划)";
+    factory.name += " (自动规划)";
     log::info!("自动规划完成: {}", factory.name);
     log::info!("自动规划用时: {:.2?}", instant.elapsed());
     Ok(factory)

@@ -1,6 +1,5 @@
 #![cfg_attr(not(test), windows_subsystem = "windows")]
 
-
 use egui::special_emojis::GITHUB;
 use mimalloc::MiMalloc;
 
@@ -12,6 +11,7 @@ static GLOBAL: MiMalloc = MiMalloc;
 // Git 版本信息
 include!(concat!(env!("OUT_DIR"), "/git_hash.rs"));
 
+pub mod comb;
 pub mod concept;
 pub mod dyn_serde;
 pub mod error;
@@ -20,7 +20,6 @@ pub mod memlog;
 pub mod solver;
 pub mod toast;
 pub mod update;
-pub mod comb;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SelectedSubview {
@@ -217,6 +216,7 @@ impl eframe::App for MainPage {
                         error::AppError::RestartRequired => {
                             ui.label("重启以应用更新。");
                             if ui.button("重启应用").clicked() {
+                                #[allow(clippy::zombie_processes)]
                                 std::process::Command::new(std::env::current_exe().unwrap())
                                     .spawn()
                                     .unwrap();
@@ -274,10 +274,10 @@ impl eframe::App for MainPage {
 
                     !deleted
                 });
-                if let SelectedSubview::Planner(n) = self.selected {
-                    if n >= self.planners.len() {
-                        self.selected = SelectedSubview::Title;
-                    }
+                if let SelectedSubview::Planner(n) = self.selected
+                    && n >= self.planners.len()
+                {
+                    self.selected = SelectedSubview::Title;
                 }
                 ui.separator();
                 if ui.button("重新加载图标").clicked() {
@@ -314,11 +314,11 @@ impl eframe::App for MainPage {
                     .stroke(egui::Stroke::new(
                         1.0,
                         ui.visuals().widgets.inactive.bg_stroke.color,
-                    )).show(ui, |ui| {    
+                    )).show(ui, |ui| {
                         ui.set_min_height(ui.available_height());
                         egui::ScrollArea::vertical().show_rows(
-                            ui, 
-                            ui.text_style_height(&text_style), 
+                            ui,
+                            ui.text_style_height(&text_style),
                             len,
                             |ui, range| {
                                 ui.set_min_width(ui.available_width());

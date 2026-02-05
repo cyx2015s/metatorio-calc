@@ -16,7 +16,7 @@ impl std::io::Write for MemoryLogger {
             .map(|s| s.to_string())
             .collect::<Vec<String>>();
         let mut vec = self.vec.lock().unwrap();
-        vec.extend(s.into_iter());
+        vec.extend(s);
         Ok(buf.len())
     }
 

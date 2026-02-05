@@ -254,17 +254,13 @@ where
                         // 不用配平
                         constraints.push(expr.clone().geq(0.0));
                     }
+                } else if no_providers.contains(item_id) {
+                } else if self.strict_sink {
+                    // 必须配平
+                    constraints.push(expr.clone().eq(0.0));
                 } else {
-                    if no_providers.contains(item_id) {
-                    } else {
-                        if self.strict_sink {
-                            // 必须配平
-                            constraints.push(expr.clone().eq(0.0));
-                        } else {
-                            // 不用配平
-                            constraints.push(expr.clone().geq(0.0));
-                        }
-                    }
+                    // 不用配平
+                    constraints.push(expr.clone().geq(0.0));
                 }
             }
         }
@@ -284,10 +280,10 @@ where
             let var = sink_vars.get(item_id).unwrap();
             optimization_expr += *cost / get_multiplier(item_id) * *var;
         }
-        if no_providers.len() > 0 {
+        if !no_providers.is_empty() {
             log::warn!("没有来源的物品：{:?}", &no_providers);
         }
-        if no_consumers.len() > 0 {
+        if !no_consumers.is_empty() {
             log::warn!("没有去处的物品：{:?}", &no_consumers);
         }
         let solution = problem_variables
