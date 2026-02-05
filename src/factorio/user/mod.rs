@@ -1,10 +1,8 @@
-use std::sync::Arc;
-
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct FactorioPreferences {
     pub time_scale: TimeScale,
 
-    pub milestones: Vec<DependencyId>,
+    pub milestones: Vec<DependencyItem>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -17,7 +15,8 @@ pub enum TimeScale {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub enum DependencyId {
+#[non_exhaustive]
+pub enum DependencyItem {
     Item(String),
     Fluid(String),
     Entity(String),
@@ -26,14 +25,13 @@ pub enum DependencyId {
     Recipe(String),
 }
 
-pub struct DependencyNode {
-    pub id: DependencyId,
-    pub link: DependencyLink,
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub enum Relation {
+    UnlockedByTechnology,
+    RequiredByMachine,
+    RequiredAsIngredient,
+    ProducedAsResult,
 }
 
-#[derive(Debug, Clone)]
-pub enum DependencyLink {
-    Phony,                           // 总是可用
-    AnyOf(Vec<Arc<DependencyLink>>), // 任意一个可用，自身可用
-    AllOf(Vec<Arc<DependencyLink>>), // 全部都可用，自身才可用
-}
+pub type DependencyGraph = petgraph::Graph<DependencyItem, ()>;

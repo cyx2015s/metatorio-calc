@@ -1,4 +1,4 @@
-#![cfg_attr(not(test), windows_subsystem = "windows")]
+#![cfg_attr(all(not(test), not(debug_assertions)), windows_subsystem = "windows")]
 
 use egui::special_emojis::GITHUB;
 use mimalloc::MiMalloc;
@@ -16,6 +16,7 @@ pub mod concept;
 pub mod dyn_serde;
 pub mod error;
 pub mod factorio;
+pub mod math;
 pub mod memlog;
 pub mod solver;
 pub mod toast;

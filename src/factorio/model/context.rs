@@ -37,9 +37,13 @@ pub struct FactorioContext {
     /// 翻译信息
     pub localized_name: Dict<Dict<String>>,
     pub localized_description: Dict<Dict<String>>,
+
     /// 排序参考依据
     pub groups: Dict<PrototypeBase>,
     pub subgroups: Dict<ItemSubgroup>,
+
+    /// 科技
+    pub technologies: Dict<TechnologyPrototype>,
 
     /// 燃料类型
     pub fuel_categories: Dict<PrototypeBase>,
@@ -88,6 +92,19 @@ pub fn get_workding_directory() -> PathBuf {
     env::current_exe().unwrap().parent().unwrap().to_path_buf()
 }
 
+fn deserialize_type<T>(value: &Value, type_name: &str) -> T
+where
+    T: serde::de::DeserializeOwned,
+{
+    serde_json::from_value(
+        value
+            .get(type_name)
+            .cloned()
+            .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
+    )
+    .unwrap()
+}
+
 impl FactorioContext {
     pub fn test_load() -> Self {
         let value = serde_json::from_str::<Value>(
@@ -98,34 +115,11 @@ impl FactorioContext {
         FactorioContext::load(&value.unwrap()).build_order_info()
     }
     pub fn load(value: &Value) -> Self {
-        let groups: Dict<PrototypeBase> = serde_json::from_value(
-            value
-                .get("item-group")
-                .cloned()
-                .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
-        )
-        .unwrap();
-        let subgroups: Dict<ItemSubgroup> = serde_json::from_value(
-            value
-                .get("item-subgroup")
-                .cloned()
-                .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
-        )
-        .unwrap();
-        let fuel_categories = serde_json::from_value::<Dict<PrototypeBase>>(
-            value
-                .get("fuel-category")
-                .cloned()
-                .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
-        )
-        .unwrap();
-        let airborne_pollutants = serde_json::from_value::<Dict<PrototypeBase>>(
-            value
-                .get("airborne-pollutant")
-                .cloned()
-                .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
-        )
-        .unwrap();
+        let groups = deserialize_type(value, "item-group");
+        let subgroups = deserialize_type(value, "item-subgroup");
+        let technologies = deserialize_type(value, "technology");
+        let fuel_categories = deserialize_type(value, "fuel-category");
+        let airborne_pollutants = deserialize_type(value, "airborne-pollutant");
         let mut items = Dict::<ItemPrototype>::new();
         for item_type in ITEM_TYPES.iter() {
             if let Some(item_values) = value.get(item_type) {
@@ -142,20 +136,8 @@ impl FactorioContext {
                 );
             }
         }
-        let fluids: Dict<FluidPrototype> = serde_json::from_value(
-            value
-                .get("fluid")
-                .cloned()
-                .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
-        )
-        .unwrap();
-        let recipes: Dict<RecipePrototype> = serde_json::from_value(
-            value
-                .get("recipe")
-                .cloned()
-                .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
-        )
-        .unwrap();
+        let fluids = deserialize_type(value, "fluid");
+        let recipes = deserialize_type(value, "recipe");
         let mut crafters = Dict::<CraftingMachinePrototype>::new();
         for crafter_type in CRAFTING_MACHINE_TYPES.iter() {
             if let Some(crafter_values) = value.get(crafter_type) {
@@ -167,49 +149,14 @@ impl FactorioContext {
                 );
             }
         }
-        let recipe_categories: Dict<PrototypeBase> = serde_json::from_value(
-            value
-                .get("recipe-category")
-                .cloned()
-                .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
-        )
-        .unwrap();
+        let recipe_categories = deserialize_type(value, "recipe-category");
 
-        let resources: Dict<ResourcePrototype> = serde_json::from_value(
-            value
-                .get("resource")
-                .cloned()
-                .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
-        )
-        .unwrap();
-        let miners: Dict<MiningDrillPrototype> = serde_json::from_value(
-            value
-                .get("mining-drill")
-                .cloned()
-                .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
-        )
-        .unwrap();
-        let resource_categories: Dict<PrototypeBase> = serde_json::from_value(
-            value
-                .get("resource-category")
-                .cloned()
-                .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
-        )
-        .unwrap();
-        let modules: Dict<ModulePrototype> = serde_json::from_value(
-            value
-                .get("module")
-                .cloned()
-                .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
-        )
-        .unwrap();
-        let beacons: Dict<BeaconPrototype> = serde_json::from_value(
-            value
-                .get("beacon")
-                .cloned()
-                .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
-        )
-        .unwrap();
+        let resources = deserialize_type(value, "resource");
+        let miners = deserialize_type(value, "mining-drill");
+        let resource_categories = deserialize_type(value, "resource-category");
+        let modules = deserialize_type(value, "module");
+
+        let beacons = deserialize_type(value, "beacon");
         let mut qualities = vec![];
         let mut cur_quality = value.get("quality").unwrap().get("normal").unwrap();
         while !cur_quality.is_null() {
@@ -231,21 +178,10 @@ impl FactorioContext {
                 }
             }
         }
-        let planets: Dict<PlanetPrototype> = serde_json::from_value(
-            value
-                .get("planet")
-                .cloned()
-                .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
-        )
-        .unwrap();
-        let tiles: Dict<TilePrototype> = serde_json::from_value(
-            value
-                .get("tile")
-                .cloned()
-                .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
-        )
-        .unwrap();
-
+        let planets = deserialize_type(value, "planet");
+        let tiles = deserialize_type(value, "tile");
+        log::info!("数据加载完成");
+        log::info!("{:?}", &technologies);
         // ret.planets.iter().for_each(|(_, p)| {
         //     dbg!(p.collect_autoplaced(&ret));
         // });
@@ -253,6 +189,7 @@ impl FactorioContext {
             qualities,
             groups,
             subgroups,
+            technologies,
             fuel_categories,
             airborne_pollutants,
             items,

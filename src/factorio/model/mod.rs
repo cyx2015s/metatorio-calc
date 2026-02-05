@@ -10,6 +10,7 @@ mod planet;
 mod quality;
 mod recipe;
 mod tile;
+mod technology;
 
 pub use auto::*;
 pub use context::*;
@@ -23,3 +24,4 @@ pub use planet::*;
 pub use quality::*;
 pub use recipe::*;
 pub use tile::*;
+pub use technology::*;
