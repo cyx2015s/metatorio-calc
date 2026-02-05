@@ -16,6 +16,7 @@ pub fn factorio_auto_planner(
     ctx: FactorioContext,
 ) -> Result<FactoryInstance, AppError> {
     log::info!("开始自动规划工厂实例: {}", factory.name);
+
     let instant = Instant::now();
     for mechanic in &mut factory.mechanics {
         mechanic.auto_populate(&ctx);
@@ -51,6 +52,7 @@ pub fn factorio_auto_planner(
         }
         Err(e) => {
             log::error!("自动规划失败: {}", e);
+            crate::toast::error("自动规划失败。");
             return Err(AppError::Solver("无法从求解线程获得结果。".into()));
         }
     }

@@ -95,9 +95,67 @@ where
         self
     }
 
-    pub fn solve(&self) -> Result<(Flow<R>, f64), AppError> {
+    pub fn trim_flows(&mut self) -> bool {
+        let mut changed = false;
+        if self.strict_source {
+            // 在strict_source模式下，移除所有无法使用的配方
+
+            let mut no_providers: HashSet<I> = HashSet::new();
+
+            for flow in self.flows.values() {
+                for (item_id, _) in &flow.0 {
+                    no_providers.insert(item_id.clone());
+                }
+            }
+
+            for flow in self.flows.values() {
+                for (item_id, &amount) in &flow.0 {
+                    if amount > 0.0 {
+                        no_providers.remove(item_id);
+                    }
+                }
+            }
+
+            for item in self.sources.keys() {
+                no_providers.remove(item);
+            }
+            let before = self.flows.len();
+
+            self.flows.retain(|_, v: &mut (IndexMap<I, f64>, f64)| {
+                if v.0
+                    .iter()
+                    .any(|(item_id, &amount)| no_providers.contains(item_id) && amount < 0.0)
+                {
+                    // 有任一物品出现在了这个流中，并且是消耗的，说明这个流无法使用
+                    changed = true;
+                    false
+                } else {
+                    true
+                }
+            });
+            let after = self.flows.len();
+            if before != after {
+                log::info!(
+                    "求解器：移除了 {} 个无法使用的配方 ({} -> {})",
+                    before - after,
+                    before,
+                    after
+                );
+            }
+        }
+        changed
+    }
+
+    pub fn solve(&mut self) -> Result<(Flow<R>, f64), AppError> {
+        if self.flows.is_empty() {
+            return Err(AppError::Solver("没有可用的配方，求解无意义。".to_string()));
+        }
+        if self.target.is_empty() {
+            return Err(AppError::Solver("没有目标物品，求解无意义。".to_string()));
+        }
         // 先做一步数值稳定性处理，将出现的流系数全部统一到1附近。
         let mut magnitude_and_counts = HashMap::new();
+        while self.trim_flows() {}
         log::info!("求解器：开始分析流量数量级");
         for recipe in self.flows.values() {
             for (item_id, &amount) in &recipe.0 {
@@ -234,7 +292,7 @@ where
         }
         let solution = problem_variables
             .minimise(&optimization_expr)
-            .using(good_lp::default_solver)
+            .using(good_lp::microlp)
             .with_all(targets)
             .with_all(constraints)
             .solve();

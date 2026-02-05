@@ -231,7 +231,7 @@ impl FactoryInstance {
                         for jdx in 0..mechanic.instance_len() {
                             let solution_value =
                                 self.solution.0.get(&(idx, jdx)).cloned().unwrap_or(0.0);
-                            if solution_value.abs() < 1e-10 {
+                            if solution_value < 1e-10 {
                                 mechanic.instance_operate(jdx, &mut |_| EntryOperation::Drop);
                             }
                         }
@@ -251,10 +251,12 @@ impl FactoryInstance {
                             factorio_auto_planner(factory_cloned, ctx_cloned);
                         match auto_planned_factory {
                             Ok(factory) => {
+                                crate::toast::info("自动规划工厂完成。");
                                 let _ = sender.send(factory);
                             }
                             Err(e) => {
-                                log::error!("自动规划工厂失败: {:?}", e);
+                                crate::toast::error(format!("自动规划工厂失败：{:?}", &e));
+                                log::error!("自动规划工厂失败: {:?}", &e);
                             }
                         }
                     }
