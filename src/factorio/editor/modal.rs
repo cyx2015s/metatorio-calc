@@ -140,7 +140,13 @@ impl egui::Widget for SelectorModal<'_, IdWithQuality, IdWithQuality> {
                 selector = selector.with_output(&mut degenerated);
             }
 
-            response = response.union(selector.ui(ui));
+            response = response.union(
+                ui.add(
+                    SelectorModal::new(self.id, self.factorio, self.label_str)
+                        .with_selector(selector)
+                        .with_toggle(self.toggle),
+                ),
+            );
 
             if let Some(selected) = degenerated
                 && let Some(&mut ref mut output) = old_selector.output

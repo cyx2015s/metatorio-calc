@@ -32,10 +32,12 @@ pub struct TechnologyUnit {
 pub struct ResearchIngredient(String, f64);
 
 #[derive(Debug, Clone, Default, PartialEq, serde::Deserialize)]
-#[serde(rename_all = "kebab-case")]
 pub enum MaxLevel {
     #[default]
+    None,
+    #[serde(rename = "infinite")]
     Infinite,
+    #[serde(untagged)]
     Finite(f64),
 }
 

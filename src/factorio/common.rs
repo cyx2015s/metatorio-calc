@@ -6,7 +6,7 @@ use std::{
 };
 
 use indexmap::IndexMap;
-use serde_json::{Value, from_value};
+use serde_json::Value;
 
 use crate::{concept::*, factorio::*};
 

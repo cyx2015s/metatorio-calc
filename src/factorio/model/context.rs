@@ -11,7 +11,7 @@ use std::{
 use indexmap::IndexMap;
 use serde_json::Value;
 
-use crate::{concept::*, error::AppError, factorio::*};
+use crate::{concept::*, error::AppError, factorio::{model::technology, *}};
 
 pub const LOCALE_CATEGORIES: &[&str] = &[
     "airborne-pollutant",
@@ -96,13 +96,13 @@ fn deserialize_type<T>(value: &Value, type_name: &str) -> T
 where
     T: serde::de::DeserializeOwned,
 {
-    serde_json::from_value(
-        value
-            .get(type_name)
-            .cloned()
-            .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
-    )
-    .unwrap()
+    let value = value
+        .get(type_name)
+        .cloned()
+        .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
+
+    serde_json::from_value(value.clone())
+        .expect(format!("Failed to deserialize content {}", value).as_str())
 }
 
 impl FactorioContext {
@@ -181,7 +181,6 @@ impl FactorioContext {
         let planets = deserialize_type(value, "planet");
         let tiles = deserialize_type(value, "tile");
         log::info!("数据加载完成");
-        log::info!("{:?}", &technologies);
         // ret.planets.iter().for_each(|(_, p)| {
         //     dbg!(p.collect_autoplaced(&ret));
         // });

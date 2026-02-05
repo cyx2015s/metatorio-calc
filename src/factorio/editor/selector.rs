@@ -103,10 +103,17 @@ impl<'a> egui::Widget for Selector<'a, str, String> {
         let mut storage: SelectorStorage =
             ui.memory(move |mem| mem.data.get_temp::<SelectorStorage>(id).unwrap_or_default());
         let mut filtered_group = HashMap::new();
-        for (i, group) in self.factorio.ordered_entries[self.type_name].iter().enumerate() {
+        for (i, group) in self.factorio.ordered_entries[self.type_name]
+            .iter()
+            .enumerate()
+        {
             for subgroup in group.1.iter() {
                 for item_name in subgroup.1.iter() {
-                    if !self.filter.as_ref().is_none_or(|f| f(item_name, self.factorio)) {
+                    if !self
+                        .filter
+                        .as_ref()
+                        .is_none_or(|f| f(item_name, self.factorio))
+                    {
                         continue;
                     }
                     filtered_group.insert(i, true);
@@ -130,7 +137,10 @@ impl<'a> egui::Widget for Selector<'a, str, String> {
             .spacing(Vec2 { x: 6.0, y: 6.0 })
             .show(ui, |ui| {
                 let mut idx = 0;
-                for (i, group) in self.factorio.ordered_entries[self.type_name].iter().enumerate() {
+                for (i, group) in self.factorio.ordered_entries[self.type_name]
+                    .iter()
+                    .enumerate()
+                {
                     if (idx % group_count) == 0 && idx != 0 {
                         ui.end_row();
                     }
@@ -168,7 +178,11 @@ impl<'a> egui::Widget for Selector<'a, str, String> {
                 for (j, subgroup) in order_info[storage.group].1.iter().enumerate() {
                     let mut idx = 0;
                     for item_name in subgroup.1.iter() {
-                        if !self.filter.as_ref().is_none_or(|f| f(item_name, self.factorio)) {
+                        if !self
+                            .filter
+                            .as_ref()
+                            .is_none_or(|f| f(item_name, self.factorio))
+                        {
                             continue;
                         }
                         if (idx % item_count) == 0 && idx != 0 {
@@ -430,7 +444,7 @@ pub fn generic_item_selector(
             GenericItem::Fluid { name, temperature } => {
                 changed |= ui
                     .add(
-                        SelectorModal::new(id.with("target-select-fluid"), factorio, "选择流体")
+                        SelectorModal::new(id.with("select-fluid"), factorio, "选择流体")
                             .with_toggle(toggle)
                             .with_selector(Selector::new(factorio, "fluid").with_current(name)),
                     )
@@ -449,7 +463,8 @@ pub fn generic_item_selector(
                     });
                 } else if ui.button("附加温度").clicked() {
                     *temperature = Some(
-                        factorio.fluids
+                        factorio
+                            .fluids
                             .get(name)
                             .map(|f| f.default_temperature)
                             .unwrap_or(15.0) as i32,
@@ -473,14 +488,18 @@ pub fn generic_item_selector(
             GenericItem::FluidHeat { filter } => {
                 changed |= ui
                     .add(
-                        SelectorModal::new(id.with("select-fluid-heat"), factorio, "选择流体热源来源")
-                            .with_toggle(toggle)
-                            .with_selector(match filter {
-                                Some(fluid_name) => {
-                                    Selector::new(factorio, "fluid").with_current(fluid_name)
-                                }
-                                None => Selector::new(factorio, "fluid"),
-                            }),
+                        SelectorModal::new(
+                            id.with("select-fluid-heat"),
+                            factorio,
+                            "选择流体热源来源",
+                        )
+                        .with_toggle(toggle)
+                        .with_selector(match filter {
+                            Some(fluid_name) => {
+                                Selector::new(factorio, "fluid").with_current(fluid_name)
+                            }
+                            None => Selector::new(factorio, "fluid"),
+                        }),
                     )
                     .changed();
                 if clear {
