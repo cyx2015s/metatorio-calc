@@ -15,7 +15,7 @@ egui_extras = { version = "0.33.3", features = ["all_loaders"] }
 env_logger = "0.11.8"
 erased-serde = "0.4.9"
 float-cmp = "0.10.0"
-good_lp = { "version" = "1.14.2", default-features = false, features = ["clarabel", "microlp"] }
+good_lp = { "version" = "1.14.2", default-features = false, features = ["microlp"] }
 image = { version = "0.25.9", features = ["png"] }
 indexmap = { version = "2.13.0", features = ["serde"] }
 lazy_static = "1.5.0"
