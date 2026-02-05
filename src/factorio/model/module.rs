@@ -1,4 +1,5 @@
 use indexmap::IndexMap;
+use serde_with::{serde_as, DefaultOnError};
 
 use crate::{
     concept::SolveContext,
@@ -31,6 +32,8 @@ pub struct ModulePrototype {
     pub tier: f64,
 }
 
+
+#[serde_as]
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct BeaconPrototype {
     #[serde(flatten)]
@@ -49,14 +52,13 @@ pub struct BeaconPrototype {
     #[serde(default)]
     pub allowed_effects: Option<EffectTypeLimitation>,
 
-    #[serde(deserialize_with = "option_as_vec_or_empty")]
     #[serde(default)]
     pub allowed_module_categories: Option<Vec<String>>,
 
     #[serde(default)]
     pub beacon_counter: BeaconCounter,
 
-    #[serde(default, deserialize_with = "option_as_vec_or_empty")]
+    #[serde_as(deserialize_as = "DefaultOnError")]
     pub profile: Option<Vec<f64>>,
 }
 

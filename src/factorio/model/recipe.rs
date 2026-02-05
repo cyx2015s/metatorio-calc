@@ -3,6 +3,8 @@ use std::{
     fmt::Debug,
 };
 
+use serde_with::{DefaultOnError, serde_as};
+
 use crate::{
     comb::Compositions,
     concept::*,
@@ -22,7 +24,6 @@ use crate::{
     },
 };
 
-use crate::factorio::common::{as_vec_or_empty, option_as_vec_or_empty};
 
 fn always_true() -> bool {
     true
@@ -32,6 +33,7 @@ fn always_false() -> bool {
     false
 }
 
+#[serde_as]
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(default)]
 pub struct RecipePrototype {
@@ -39,19 +41,18 @@ pub struct RecipePrototype {
     pub base: PrototypeBase,
 
     category: Option<String>,
-    #[serde(deserialize_with = "as_vec_or_empty")]
+    #[serde_as(deserialize_as = "DefaultOnError")]
     additional_categories: Vec<String>,
 
-    #[serde(deserialize_with = "as_vec_or_empty")]
+    #[serde_as(deserialize_as = "DefaultOnError")]
     #[serde(default)]
     pub ingredients: Vec<RecipeIngredient>,
 
-    #[serde(deserialize_with = "as_vec_or_empty")]
+    #[serde_as(deserialize_as = "DefaultOnError")]
     #[serde(default)]
     pub results: Vec<RecipeResult>,
     pub main_product: Option<String>,
 
-    #[serde(deserialize_with = "option_as_vec_or_empty")]
     #[serde(default)]
     pub allowed_module_categories: Option<Vec<String>>,
 
@@ -348,6 +349,7 @@ impl FluidResult {
 
 pub const CRAFTING_MACHINE_TYPES: &[&str] = &["assembling-machine", "furnace", "rocket-silo"];
 
+#[serde_as]
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct CraftingMachinePrototype {
     #[serde(flatten)]
@@ -359,7 +361,7 @@ pub struct CraftingMachinePrototype {
     #[serde(default)]
     pub crafting_speed: f64,
 
-    #[serde(deserialize_with = "as_vec_or_empty")]
+    #[serde_as(deserialize_as = "DefaultOnError")]
     pub crafting_categories: Vec<String>,
 
     pub energy_source: EnergySource,
@@ -373,7 +375,6 @@ pub struct CraftingMachinePrototype {
     #[serde(default)]
     pub allowed_effects: Option<EffectTypeLimitation>,
 
-    #[serde(deserialize_with = "option_as_vec_or_empty")]
     #[serde(default)]
     pub allowed_module_categories: Option<Vec<String>>,
     #[serde(default)]
@@ -711,7 +712,8 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
             let recipe_button = ui
                 .add_sized(
                     [35.0, 35.0],
-                    Icon::new(factorio, "recipe", &instance.recipe.0).with_quality(instance.recipe.1),
+                    Icon::new(factorio, "recipe", &instance.recipe.0)
+                        .with_quality(instance.recipe.1),
                 )
                 .interact(egui::Sense::click())
                 .on_hover_ui(|ui| {
@@ -727,22 +729,32 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
                         .with_selector(
                             Selector::new(factorio, "recipe")
                                 .with_current(&mut instance.recipe)
-                                .with_hover(|ui, name: &IdWithQuality, factorio: &FactorioContext| {
-                                    if let Some(prototype) = factorio.recipes.get(name.0.as_str()) {
-                                        ui.add(PrototypeHover::new(factorio, prototype));
-                                    } else {
-                                        ui.label(format!("未知配方: {}", name.0));
-                                    }
-                                }),
+                                .with_hover(
+                                    |ui, name: &IdWithQuality, factorio: &FactorioContext| {
+                                        if let Some(prototype) =
+                                            factorio.recipes.get(name.0.as_str())
+                                        {
+                                            ui.add(PrototypeHover::new(factorio, prototype));
+                                        } else {
+                                            ui.label(format!("未知配方: {}", name.0));
+                                        }
+                                    },
+                                ),
                         ),
                 )
                 .changed();
         });
         if changed
             && let Some(recipe) = factorio.recipes.get(&instance.recipe.0)
-            && factorio.crafters.get(&instance.machine.0).is_none_or(|crafter| {
-                !machine_fits_for_recipe(crafter, factorio.recipes.get(&instance.recipe.0).unwrap())
-            })
+            && factorio
+                .crafters
+                .get(&instance.machine.0)
+                .is_none_or(|crafter| {
+                    !machine_fits_for_recipe(
+                        crafter,
+                        factorio.recipes.get(&instance.recipe.0).unwrap(),
+                    )
+                })
         {
             instance.machine =
                 select_crafter_for_recipe(factorio, recipe, &self.machine_preferences, &[]);
@@ -755,7 +767,8 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
             let mut entity_button = ui
                 .add_sized(
                     [35.0, 35.0],
-                    Icon::new(factorio, "entity", &instance.machine.0).with_quality(instance.machine.1),
+                    Icon::new(factorio, "entity", &instance.machine.0)
+                        .with_quality(instance.machine.1),
                 )
                 .interact(egui::Sense::click());
 
@@ -915,13 +928,15 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
                                 .to_lowercase()
                                 .contains(&self.suggested_recipes_filter.to_lowercase()))
                 })
-                .with_hover(|ui: &mut egui::Ui, name: &str, factorio: &FactorioContext| {
-                    if let Some(prototype) = factorio.recipes.get(name) {
-                        ui.add(PrototypeHover::new(factorio, prototype));
-                    } else {
-                        ui.label(format!("未知配方: {}", name));
-                    }
-                }),
+                .with_hover(
+                    |ui: &mut egui::Ui, name: &str, factorio: &FactorioContext| {
+                        if let Some(prototype) = factorio.recipes.get(name) {
+                            ui.add(PrototypeHover::new(factorio, prototype));
+                        } else {
+                            ui.label(format!("未知配方: {}", name));
+                        }
+                    },
+                ),
         );
         if let Some(recipe) = &self.selected_suggested_recipe {
             let quality = match self.suggestion_item {

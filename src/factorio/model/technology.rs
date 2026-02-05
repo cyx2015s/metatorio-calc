@@ -1,5 +1,8 @@
-use crate::factorio::{PrototypeBase, option_as_vec_or_empty};
+use serde_with::{DefaultOnError, serde_as};
 
+use crate::factorio::PrototypeBase;
+
+#[serde_as]
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct TechnologyPrototype {
     #[serde(flatten)]
@@ -13,8 +16,9 @@ pub struct TechnologyPrototype {
     #[serde(default)]
     pub research_trigger: Option<ResearchTrigger>,
 
-    #[serde(default, deserialize_with = "option_as_vec_or_empty")]
-    pub effects: Option<Vec<Modifier>>,
+    #[serde_as(deserialize_as = "DefaultOnError")]
+    #[serde(default)]
+    pub effects: Vec<Modifier>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, serde::Deserialize)]
@@ -38,7 +42,9 @@ pub enum MaxLevel {
 #[derive(Debug, Clone, PartialEq, serde::Deserialize)]
 #[serde(rename_all = "kebab-case", tag = "type")]
 pub enum ResearchTrigger {
-    MineEntity { entity: String },
+    MineEntity {
+        entity: String,
+    },
     CraftItem {
         item: String,
     },
@@ -48,14 +54,19 @@ pub enum ResearchTrigger {
     SendItemToOrbit {
         item: String,
     },
-    CaptureSpawner { entity: Option<String> },
-    BuildEntity { entity: String },
+    CaptureSpawner {
+        entity: Option<String>,
+    },
+    BuildEntity {
+        entity: String,
+    },
     CreateSpacePlatform,
     #[serde(other)]
     Unknown,
 }
 
-#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
+#[serde_as]
+#[derive(Debug, Clone, Default, PartialEq, serde::Deserialize)]
 #[non_exhaustive]
 #[serde(rename_all = "kebab-case", tag = "type")]
 pub enum Modifier {
@@ -81,6 +92,7 @@ pub enum Modifier {
     BeaconDistribution(SimpleModifier),
     BeltStackSizeBonus(SimpleModifier),
     #[serde(other)]
+    #[default]
     Unknown,
 }
 

@@ -1,5 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
+use serde_with::{serde_as};
+
 use crate::{
     concept::{AsFlow, EditorView, EntryOperation, Flow, Mechanic, SolveContext},
     factorio::{
@@ -29,6 +31,7 @@ impl HasPrototypeBase for ResourcePrototype {
     }
 }
 
+#[serde_as]
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct MiningDrillPrototype {
     #[serde(flatten)]
@@ -51,7 +54,6 @@ pub struct MiningDrillPrototype {
     #[serde(default)]
     pub allowed_effects: Option<EffectTypeLimitation>,
 
-    #[serde(deserialize_with = "option_as_vec_or_empty")]
     #[serde(default)]
     pub allowed_module_categories: Option<Vec<String>>,
 
@@ -115,7 +117,8 @@ impl AsFlow for MiningMechanicInstance {
 
         let quality_level = self.machine.1 as usize;
 
-        let mut drain_rate = factorio.qualities[quality_level].mining_drill_resource_drain_multiplier();
+        let mut drain_rate =
+            factorio.qualities[quality_level].mining_drill_resource_drain_multiplier();
 
         let miner = factorio.miners.get(&self.machine.0);
 
@@ -198,64 +201,65 @@ impl AsFlow for MiningMechanicInstance {
             0,
             factorio.qualities.len(),
         );
-        if let Some(results) = &mining_property.results {
-            for result in results.iter() {
-                let item = match result {
-                    RecipeResult::Item(r) => GenericItem::Entity(IdWithQuality(r.name.clone(), 0)),
-                    RecipeResult::Fluid(r) => GenericItem::Fluid {
-                        name: r.name.clone(),
-                        temperature: None,
-                    },
-                };
-                match result {
-                    RecipeResult::Item(r) => {
-                        let (base_yield, extra_yield) = r.normalized_output();
-                        let total_yield = base_speed
-                            * (1.0 + module_effects.speed)
-                            * (base_yield + extra_yield * module_effects.productivity);
-                        for (quality_level, quality_prob) in quality_distribution.iter().enumerate()
-                        {
-                            if *quality_prob > 0.0 {
-                                index_map_update_entry(
-                                    &mut map,
-                                    GenericItem::Item(IdWithQuality(
-                                        r.name.clone(),
-                                        quality_level as u8,
-                                    )),
-                                    total_yield * *quality_prob,
-                                );
-                            }
-                        }
-                    }
-                    RecipeResult::Fluid(r) => {
-                        let (base_yield, extra_yield) = r.normalized_output();
+        {
+            if let Some(result) = &mining_property.result {
+                let count = mining_property.count.unwrap_or(1.0);
+                let total_yield = base_speed
+                    * (1.0 + module_effects.speed)
+                    * count
+                    * (1.0 + module_effects.productivity);
+                for (quality_level, quality_prob) in quality_distribution.iter().enumerate() {
+                    if *quality_prob > 0.0 {
                         index_map_update_entry(
                             &mut map,
-                            item,
-                            base_speed
-                                * (1.0 + module_effects.speed)
-                                * (base_yield + extra_yield * module_effects.productivity),
+                            GenericItem::Item(IdWithQuality(result.clone(), quality_level as u8)),
+                            total_yield * *quality_prob,
                         );
                     }
-                };
-            }
-        } else {
-            let result = mining_property
-                .result
-                .as_ref()
-                .expect("results or result must exist");
-            let count = mining_property.count.unwrap_or(1.0);
-            let total_yield = base_speed
-                * (1.0 + module_effects.speed)
-                * count
-                * (1.0 + module_effects.productivity);
-            for (quality_level, quality_prob) in quality_distribution.iter().enumerate() {
-                if *quality_prob > 0.0 {
-                    index_map_update_entry(
-                        &mut map,
-                        GenericItem::Item(IdWithQuality(result.clone(), quality_level as u8)),
-                        total_yield * *quality_prob,
-                    );
+                }
+            } else {
+                for result in &mining_property.results {
+                    let item = match result {
+                        RecipeResult::Item(r) => {
+                            GenericItem::Entity(IdWithQuality(r.name.clone(), 0))
+                        }
+                        RecipeResult::Fluid(r) => GenericItem::Fluid {
+                            name: r.name.clone(),
+                            temperature: None,
+                        },
+                    };
+                    match result {
+                        RecipeResult::Item(r) => {
+                            let (base_yield, extra_yield) = r.normalized_output();
+                            let total_yield = base_speed
+                                * (1.0 + module_effects.speed)
+                                * (base_yield + extra_yield * module_effects.productivity);
+                            for (quality_level, quality_prob) in
+                                quality_distribution.iter().enumerate()
+                            {
+                                if *quality_prob > 0.0 {
+                                    index_map_update_entry(
+                                        &mut map,
+                                        GenericItem::Item(IdWithQuality(
+                                            r.name.clone(),
+                                            quality_level as u8,
+                                        )),
+                                        total_yield * *quality_prob,
+                                    );
+                                }
+                            }
+                        }
+                        RecipeResult::Fluid(r) => {
+                            let (base_yield, extra_yield) = r.normalized_output();
+                            index_map_update_entry(
+                                &mut map,
+                                item,
+                                base_speed
+                                    * (1.0 + module_effects.speed)
+                                    * (base_yield + extra_yield * module_effects.productivity),
+                            );
+                        }
+                    };
                 }
             }
         }
@@ -379,7 +383,10 @@ impl Mechanic<FactorioContext, GenericItem> for MiningMechanic {
             ui.label("开采");
 
             let resource_button = ui
-                .add_sized([35.0, 35.0], Icon::new(factorio, "entity", &instance.resource))
+                .add_sized(
+                    [35.0, 35.0],
+                    Icon::new(factorio, "entity", &instance.resource),
+                )
                 .interact(egui::Sense::click())
                 .on_hover_text(format!(
                     "矿物：{}",
@@ -416,7 +423,8 @@ impl Mechanic<FactorioContext, GenericItem> for MiningMechanic {
             let entity_button = ui
                 .add_sized(
                     [35.0, 35.0],
-                    Icon::new(factorio, "entity", &instance.machine.0).with_quality(instance.machine.1),
+                    Icon::new(factorio, "entity", &instance.machine.0)
+                        .with_quality(instance.machine.1),
                 )
                 .interact(egui::Sense::click())
                 .on_hover_text(if factorio.miners.contains_key(&instance.machine.0) {
@@ -524,7 +532,7 @@ impl Mechanic<FactorioContext, GenericItem> for MiningMechanic {
                                         .insert(resource.base.base.name.clone());
                                 }
                             } else {
-                                for res in mining.results.as_ref().unwrap().iter() {
+                                for res in &mining.results {
                                     if let RecipeResult::Item(r) = res
                                         && &r.name == name
                                     {
@@ -541,10 +549,8 @@ impl Mechanic<FactorioContext, GenericItem> for MiningMechanic {
                     temperature: _,
                 } => {
                     for resource in factorio.resources.values() {
-                        if let Some(mining) = resource.base.minable.as_ref()
-                            && let Some(results) = &mining.results
-                        {
-                            for res in results.iter() {
+                        if let Some(mining) = resource.base.minable.as_ref() {
+                            for res in &mining.results {
                                 if let RecipeResult::Fluid(r) = res
                                     && &r.name == name
                                 {
@@ -582,7 +588,11 @@ impl Mechanic<FactorioContext, GenericItem> for MiningMechanic {
         if let Some(resource) = &self.selected_suggested_resource {
             self.instances.push(MiningMechanicInstance {
                 resource: resource.clone(),
-                machine: select_miner_for_resource(factorio, factorio.resources.get(resource).unwrap(), &[]),
+                machine: select_miner_for_resource(
+                    factorio,
+                    factorio.resources.get(resource).unwrap(),
+                    &[],
+                ),
                 ..Default::default()
             });
             self.selected_suggested_resource = None;

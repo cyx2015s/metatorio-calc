@@ -1,3 +1,5 @@
+use serde_with::serde_as;
+
 use crate::factorio::{common::*, model::recipe::*};
 
 pub const ENTITY_TYPES: &[&str] = &[
@@ -150,13 +152,14 @@ pub struct EntityPrototype {
     pub autoplace: Option<AutoplaceSpecification>,
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
+#[serde_as]
+#[derive(Debug, Clone, Default, serde::Deserialize)]
 pub struct MiningProperty {
     pub mining_time: f64,
 
-    #[serde(deserialize_with = "option_as_vec_or_empty")]
     #[serde(default)]
-    pub results: Option<Vec<RecipeResult>>,
+    #[serde_as(deserialize_as = "serde_with::DefaultOnError")]
+    pub results: Vec<RecipeResult>,
 
     pub result: Option<String>,
     pub count: Option<f64>,
@@ -171,6 +174,7 @@ impl HasPrototypeBase for EntityPrototype {
     }
 }
 
+#[serde_as]
 #[derive(Debug, Clone, serde::Deserialize, Default)]
 #[serde(default)]
 pub struct AutoplaceSpecification {

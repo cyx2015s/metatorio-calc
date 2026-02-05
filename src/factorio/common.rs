@@ -241,30 +241,6 @@ impl BoundingBox {
     }
 }
 
-pub fn as_vec_or_empty<'de, T, D>(deserializer: D) -> Result<Vec<T>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: serde::de::DeserializeOwned,
-{
-    let value = <Value as serde::Deserialize>::deserialize(deserializer)?;
-    match value {
-        Value::Array(vec) => Ok(from_value(Value::Array(vec)).map_err(serde::de::Error::custom)?),
-        Value::Object(map) if map.is_empty() => Ok(Vec::new()),
-        _ => Err(serde::de::Error::custom("不是数组或空对象。")),
-    }
-}
-
-pub fn option_as_vec_or_empty<'de, T, D>(deserializer: D) -> Result<Option<Vec<T>>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: serde::de::DeserializeOwned,
-{
-    let value = as_vec_or_empty(deserializer);
-    match value {
-        Ok(vec) => Ok(Some(vec)),
-        Err(_) => Ok(None),
-    }
-}
 
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(default)]
