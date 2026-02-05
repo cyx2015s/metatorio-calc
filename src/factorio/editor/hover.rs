@@ -4,15 +4,15 @@ use crate::factorio::{icon::*, *};
 
 #[derive(Debug, Clone)]
 pub struct PrototypeHover<'a, T: HasPrototypeBase> {
-    pub ctx: &'a FactorioContext,
+    pub factorio: &'a FactorioContext,
     pub prototype: &'a T,
     pub quality: u8,
 }
 
 impl<'a, T: HasPrototypeBase> PrototypeHover<'a, T> {
-    pub fn new(ctx: &'a FactorioContext, prototype: &'a T) -> Self {
+    pub fn new(factorio: &'a FactorioContext, prototype: &'a T) -> Self {
         Self {
-            ctx,
+            factorio,
             prototype,
             quality: 0,
         }
@@ -28,17 +28,17 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         let mut ingredients: Vec<&RecipeIngredient> = self.prototype.ingredients.iter().collect();
         ingredients.sort_by_key(|ingredient| match ingredient {
-            RecipeIngredient::Item(i) => (0, &self.ctx.order_of_entries["item"][&i.name]),
-            RecipeIngredient::Fluid(f) => (1, &self.ctx.order_of_entries["fluid"][&f.name]),
+            RecipeIngredient::Item(i) => (0, &self.factorio.order_of_entries["item"][&i.name]),
+            RecipeIngredient::Fluid(f) => (1, &self.factorio.order_of_entries["fluid"][&f.name]),
         });
         let mut results: Vec<&RecipeResult> = self.prototype.results.iter().collect();
         results.sort_by_key(|result| match result {
-            RecipeResult::Item(i) => (0, &self.ctx.order_of_entries["item"][&i.name]),
-            RecipeResult::Fluid(f) => (1, &self.ctx.order_of_entries["fluid"][&f.name]),
+            RecipeResult::Item(i) => (0, &self.factorio.order_of_entries["item"][&i.name]),
+            RecipeResult::Fluid(f) => (1, &self.factorio.order_of_entries["fluid"][&f.name]),
         });
         ui.vertical(|ui| {
             ui.label(
-                self.ctx
+                self.factorio
                     .get_display_name("recipe", &self.prototype.base.name),
             );
             ui.add(CompactLabel::new(self.prototype.energy_required).with_format("{}s"));
@@ -55,7 +55,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
                             for ingredient in ingredients.iter() {
                                 match ingredient {
                                     RecipeIngredient::Item(i) => {
-                                        let _icon = ui.add(Icon::new(self.ctx, "item", &i.name));
+                                        let _icon = ui.add(Icon::new(self.factorio, "item", &i.name));
                                         ui.horizontal_top(|ui| {
                                             ui.vertical(|ui| {
                                                 ui.add(CompactLabel::new(i.amount));
@@ -63,7 +63,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
                                         });
                                     }
                                     RecipeIngredient::Fluid(f) => {
-                                        let _icon = ui.add(Icon::new(self.ctx, "fluid", &f.name));
+                                        let _icon = ui.add(Icon::new(self.factorio, "fluid", &f.name));
                                         ui.vertical(|ui| {
                                             ui.horizontal_top(|ui| {
                                                 ui.add(CompactLabel::new(f.amount));
@@ -124,7 +124,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
                             for result in results.iter() {
                                 match result {
                                     RecipeResult::Item(i) => {
-                                        let _icon = ui.add(Icon::new(self.ctx, "item", &i.name));
+                                        let _icon = ui.add(Icon::new(self.factorio, "item", &i.name));
                                         let output = i.normalized_output();
                                         ui.vertical(|ui| {
                                             ui.horizontal_top(|ui| {
@@ -137,7 +137,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
                                         });
                                     }
                                     RecipeResult::Fluid(f) => {
-                                        let _icon = ui.add(Icon::new(self.ctx, "fluid", &f.name));
+                                        let _icon = ui.add(Icon::new(self.factorio, "fluid", &f.name));
                                         let output = f.normalized_output();
                                         ui.vertical(|ui| {
                                             ui.horizontal_top(|ui| {
@@ -155,7 +155,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
                                                 }
                                                 None => {
                                                     if let Some(fluid) =
-                                                        self.ctx.fluids.get(&f.name)
+                                                        self.factorio.fluids.get(&f.name)
                                                     {
                                                         ui.add(
                                                             CompactLabel::new(
@@ -184,7 +184,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, CraftingMachinePrototype> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         ui.vertical(|ui| {
             ui.label(
-                self.ctx
+                self.factorio
                     .get_display_name("entity", &self.prototype.base.base.name),
             );
             ui.label(format!("制造速度: {}", self.prototype.crafting_speed));

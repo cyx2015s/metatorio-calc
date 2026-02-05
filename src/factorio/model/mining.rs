@@ -101,23 +101,23 @@ impl Default for MiningMechanicInstance {
 }
 
 impl SolveContext for MiningMechanicInstance {
-    type GameContext = FactorioContext;
-    type ItemIdentType = GenericItem;
+    type Game = FactorioContext;
+    type Item = GenericItem;
 }
 
 impl AsFlow for MiningMechanicInstance {
-    fn as_flow(&self, ctx: &Self::GameContext) -> Flow<Self::ItemIdentType> {
+    fn as_flow(&self, factorio: &Self::Game) -> Flow<Self::Item> {
         let mut map = Flow::new();
 
-        let mut module_effects = self.module_config.get_effect(ctx).clamped();
+        let mut module_effects = self.module_config.get_effect(factorio).clamped();
 
         let mut base_speed = 1.0;
 
         let quality_level = self.machine.1 as usize;
 
-        let mut drain_rate = ctx.qualities[quality_level].mining_drill_resource_drain_multiplier();
+        let mut drain_rate = factorio.qualities[quality_level].mining_drill_resource_drain_multiplier();
 
-        let miner = ctx.miners.get(&self.machine.0);
+        let miner = factorio.miners.get(&self.machine.0);
 
         if let Some(miner) = miner {
             module_effects = module_effects
@@ -132,7 +132,7 @@ impl AsFlow for MiningMechanicInstance {
             drain_rate *= miner.resource_drain_rate_percent.unwrap_or(100.0) / 100.0;
 
             let energy_related_flow = energy_source_as_flow(
-                ctx,
+                factorio,
                 &miner.energy_source,
                 miner
                     .energy_usage
@@ -150,7 +150,7 @@ impl AsFlow for MiningMechanicInstance {
             }
         }
 
-        let resource_ore = match ctx.resources.get(&self.resource) {
+        let resource_ore = match factorio.resources.get(&self.resource) {
             Some(r) => r,
             None => return map,
         };
@@ -193,10 +193,10 @@ impl AsFlow for MiningMechanicInstance {
             index_map_update_entry(&mut map, fluid_item, -amount);
         }
         let quality_distribution = calc_quality_distribution(
-            &ctx.qualities,
+            &factorio.qualities,
             module_effects.quality,
             0,
-            ctx.qualities.len(),
+            factorio.qualities.len(),
         );
         if let Some(results) = &mining_property.results {
             for result in results.iter() {
@@ -262,8 +262,8 @@ impl AsFlow for MiningMechanicInstance {
         map
     }
 
-    fn cost(&self, ctx: &Self::GameContext) -> f64 {
-        if let Some(miner) = ctx.miners.get(&self.machine.0) {
+    fn cost(&self, factorio: &Self::Game) -> f64 {
+        if let Some(miner) = factorio.miners.get(&self.machine.0) {
             miner
                 .base
                 .collision_box
@@ -277,7 +277,7 @@ impl AsFlow for MiningMechanicInstance {
 
 #[test]
 fn test_mining_normalized() {
-    let ctx = FactorioContext::test_load();
+    let factorio = FactorioContext::test_load();
     let mining_config = MiningMechanicInstance {
         resource: "uranium-ore".to_string(),
         machine: "big-mining-drill".into(),
@@ -285,7 +285,7 @@ fn test_mining_normalized() {
         instance_fuel: None,
     };
 
-    let result = mining_config.as_flow(&ctx);
+    let result = mining_config.as_flow(&factorio);
     println!("Mining Result: {:?}", result);
     let result_with_location =
         crate::factorio::model::context::make_located_generic_recipe(result.clone(), 42);
@@ -312,13 +312,13 @@ pub struct MiningMechanic {
 }
 
 pub fn select_miner_for_resource(
-    ctx: &FactorioContext,
+    factorio: &FactorioContext,
     resource: &ResourcePrototype,
     preferences: &[IdWithQuality],
 ) -> IdWithQuality {
     // 优先选择用户偏好
     for pref in preferences.iter() {
-        if let Some(miner) = ctx.miners.get(&pref.0)
+        if let Some(miner) = factorio.miners.get(&pref.0)
             && machine_fits_for_resource(miner, resource)
         {
             return pref.clone();
@@ -341,7 +341,7 @@ pub fn select_miner_for_resource(
         score
     }
     // 找不到偏好设定的机器，找一个最好的的
-    for miner in ctx.miners.values() {
+    for miner in factorio.miners.values() {
         if machine_fits_for_resource(miner, resource) && measure_miner(miner) > measure {
             measure = measure_miner(miner);
             selected = miner.base.base.name.clone();
@@ -351,8 +351,8 @@ pub fn select_miner_for_resource(
 }
 
 impl SolveContext for MiningMechanic {
-    type GameContext = FactorioContext;
-    type ItemIdentType = GenericItem;
+    type Game = FactorioContext;
+    type Item = GenericItem;
 }
 
 impl Mechanic<FactorioContext, GenericItem> for MiningMechanic {
@@ -371,7 +371,7 @@ impl Mechanic<FactorioContext, GenericItem> for MiningMechanic {
         self.instances.len()
     }
 
-    fn instance_view(&mut self, idx: usize, ui: &mut egui::Ui, ctx: &FactorioContext) -> bool {
+    fn instance_view(&mut self, idx: usize, ui: &mut egui::Ui, factorio: &FactorioContext) -> bool {
         let mut changed = false;
         let instance = &mut self.instances[idx];
 
@@ -379,18 +379,18 @@ impl Mechanic<FactorioContext, GenericItem> for MiningMechanic {
             ui.label("开采");
 
             let resource_button = ui
-                .add_sized([35.0, 35.0], Icon::new(ctx, "entity", &instance.resource))
+                .add_sized([35.0, 35.0], Icon::new(factorio, "entity", &instance.resource))
                 .interact(egui::Sense::click())
                 .on_hover_text(format!(
                     "矿物：{}",
-                    ctx.get_display_name("entity", &instance.resource)
+                    factorio.get_display_name("entity", &instance.resource)
                 ));
             changed |= ui
                 .add(
-                    SelectorModal::new(resource_button.id, ctx, "选择矿物")
+                    SelectorModal::new(resource_button.id, factorio, "选择矿物")
                         .with_toggle(resource_button.clicked())
                         .with_selector(
-                            Selector::new(ctx, "entity")
+                            Selector::new(factorio, "entity")
                                 .with_current(&mut instance.resource)
                                 .with_filter(|s, f| f.resources.contains_key(s)),
                         ),
@@ -399,13 +399,13 @@ impl Mechanic<FactorioContext, GenericItem> for MiningMechanic {
         });
         if changed {
             // TODO 读取用户设定的偏好
-            if let Some(resource) = ctx.resources.get(&instance.resource)
-                && ctx
+            if let Some(resource) = factorio.resources.get(&instance.resource)
+                && factorio
                     .miners
                     .get(&instance.machine.0)
                     .is_none_or(|miner| !machine_fits_for_resource(miner, resource))
             {
-                instance.machine = select_miner_for_resource(ctx, resource, &[]);
+                instance.machine = select_miner_for_resource(factorio, resource, &[]);
                 instance.instance_fuel = None;
                 instance.module_config = ModuleConfig::new();
             }
@@ -416,22 +416,22 @@ impl Mechanic<FactorioContext, GenericItem> for MiningMechanic {
             let entity_button = ui
                 .add_sized(
                     [35.0, 35.0],
-                    Icon::new(ctx, "entity", &instance.machine.0).with_quality(instance.machine.1),
+                    Icon::new(factorio, "entity", &instance.machine.0).with_quality(instance.machine.1),
                 )
                 .interact(egui::Sense::click())
-                .on_hover_text(if ctx.miners.contains_key(&instance.machine.0) {
-                    ctx.get_display_name("entity", &instance.machine.0)
+                .on_hover_text(if factorio.miners.contains_key(&instance.machine.0) {
+                    factorio.get_display_name("entity", &instance.machine.0)
                 } else {
                     "采矿机: 未选择".into()
                 });
 
-            if let Some(resource_proto) = ctx.resources.get(&instance.resource) {
+            if let Some(resource_proto) = factorio.resources.get(&instance.resource) {
                 changed |= ui
                     .add(
-                        SelectorModal::new(entity_button.id, ctx, "选择采矿设备")
+                        SelectorModal::new(entity_button.id, factorio, "选择采矿设备")
                             .with_toggle(entity_button.clicked())
                             .with_selector(
-                                Selector::new(ctx, "entity")
+                                Selector::new(factorio, "entity")
                                     .with_current(&mut instance.machine)
                                     .with_filter(|s: &IdWithQuality, f: &FactorioContext| {
                                         if let Some(miner) = f.miners.get(&s.0) {
@@ -447,7 +447,7 @@ impl Mechanic<FactorioContext, GenericItem> for MiningMechanic {
         });
         ui.separator();
 
-        if let Some(miner) = ctx.miners.get(&instance.machine.0) {
+        if let Some(miner) = factorio.miners.get(&instance.machine.0) {
             let allowed_effects = Some(
                 miner
                     .allowed_effects
@@ -456,7 +456,7 @@ impl Mechanic<FactorioContext, GenericItem> for MiningMechanic {
             );
             changed |= ui
                 .add(ModuleConfigEditor::new(
-                    ctx,
+                    factorio,
                     &mut instance.module_config,
                     miner.module_slots as usize,
                     &allowed_effects,
@@ -507,7 +507,7 @@ impl Mechanic<FactorioContext, GenericItem> for MiningMechanic {
         changed
     }
 
-    fn update_suggestion(&mut self, ctx: &FactorioContext, item: &GenericItem, amount: f64) {
+    fn update_suggestion(&mut self, factorio: &FactorioContext, item: &GenericItem, amount: f64) {
         self.suggested_resources.clear();
         self.suggestion_item = Some(item.clone());
         self.suggestion_amount = amount;
@@ -516,7 +516,7 @@ impl Mechanic<FactorioContext, GenericItem> for MiningMechanic {
             // 提供生产方式
             match item {
                 GenericItem::Item(IdWithQuality(name, _)) => {
-                    for resource in ctx.resources.values() {
+                    for resource in factorio.resources.values() {
                         if let Some(mining) = resource.base.minable.as_ref() {
                             if let Some(result) = &mining.result {
                                 if result == name {
@@ -540,7 +540,7 @@ impl Mechanic<FactorioContext, GenericItem> for MiningMechanic {
                     name,
                     temperature: _,
                 } => {
-                    for resource in ctx.resources.values() {
+                    for resource in factorio.resources.values() {
                         if let Some(mining) = resource.base.minable.as_ref()
                             && let Some(results) = &mining.results
                         {
@@ -562,18 +562,18 @@ impl Mechanic<FactorioContext, GenericItem> for MiningMechanic {
         }
     }
 
-    fn suggestion_view(&mut self, ui: &mut egui::Ui, ctx: &FactorioContext) -> bool {
+    fn suggestion_view(&mut self, ui: &mut egui::Ui, factorio: &FactorioContext) -> bool {
         let mut changed = false;
         ui.add(egui::TextEdit::singleline(&mut self.suggested_recipes_filter).hint_text("筛选器"));
         ui.add(
-            Selector::new(ctx, "entity")
+            Selector::new(factorio, "entity")
                 .with_output(&mut self.selected_suggested_resource)
-                .with_filter(|id: &str, ctx| {
+                .with_filter(|id: &str, factorio| {
                     self.suggested_resources.contains(id)
                         && (id
                             .to_lowercase()
                             .contains(&self.suggested_recipes_filter.to_lowercase())
-                            || ctx
+                            || factorio
                                 .get_display_name("entity", id)
                                 .to_lowercase()
                                 .contains(&self.suggested_recipes_filter.to_lowercase()))
@@ -582,7 +582,7 @@ impl Mechanic<FactorioContext, GenericItem> for MiningMechanic {
         if let Some(resource) = &self.selected_suggested_resource {
             self.instances.push(MiningMechanicInstance {
                 resource: resource.clone(),
-                machine: select_miner_for_resource(ctx, ctx.resources.get(resource).unwrap(), &[]),
+                machine: select_miner_for_resource(factorio, factorio.resources.get(resource).unwrap(), &[]),
                 ..Default::default()
             });
             self.selected_suggested_resource = None;
@@ -590,11 +590,11 @@ impl Mechanic<FactorioContext, GenericItem> for MiningMechanic {
         }
         changed
     }
-    fn auto_populate(&mut self, ctx: &FactorioContext) {
+    fn auto_populate(&mut self, factorio: &FactorioContext) {
         self.instances.clear();
-        for resource in ctx.resources.values() {
+        for resource in factorio.resources.values() {
             if let Some(_mining) = resource.base.minable.as_ref() {
-                let machine = select_miner_for_resource(ctx, resource, &[]);
+                let machine = select_miner_for_resource(factorio, resource, &[]);
                 self.instances.push(MiningMechanicInstance {
                     resource: resource.base.base.name.clone(),
                     machine,
@@ -606,7 +606,7 @@ impl Mechanic<FactorioContext, GenericItem> for MiningMechanic {
 }
 
 impl EditorView for MiningMechanic {
-    fn editor_view(&mut self, ui: &mut egui::Ui, _ctx: &Self::GameContext) -> bool {
+    fn editor_view(&mut self, ui: &mut egui::Ui, _factorio: &Self::Game) -> bool {
         let mut changed = self.submit_operations();
 
         if ui.button("添加采矿").clicked() {

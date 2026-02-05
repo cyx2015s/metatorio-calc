@@ -497,8 +497,8 @@ impl FactorioContext {
                 raw_path.to_string_lossy()
             ))
         })?;
-        let mut ctx = FactorioContext::load(&json_value);
-        ctx.icon_path = icon_path;
+        let mut factorio = FactorioContext::load(&json_value);
+        factorio.icon_path = icon_path;
         for locale_category in LOCALE_CATEGORIES.iter() {
             log::info!("加载翻译类别 {}", locale_category);
             let locale_path =
@@ -514,11 +514,11 @@ impl FactorioContext {
                         ))
                     })?,
                 )?;
-                ctx.localized_name.insert(
+                factorio.localized_name.insert(
                     locale_category.to_string(),
                     locale_values.get("names").cloned().unwrap_or_default(),
                 );
-                ctx.localized_description.insert(
+                factorio.localized_description.insert(
                     locale_category.to_string(),
                     locale_values
                         .get("descriptions")
@@ -526,9 +526,11 @@ impl FactorioContext {
                         .unwrap_or_default(),
                 );
             } else {
-                ctx.localized_name
+                factorio
+                    .localized_name
                     .insert(locale_category.to_string(), Dict::new());
-                ctx.localized_description
+                factorio
+                    .localized_description
                     .insert(locale_category.to_string(), Dict::new());
                 log::warn!("翻译类别 {} 的文件不存在，跳过", locale_category);
             }
@@ -548,12 +550,13 @@ impl FactorioContext {
             // log::info!("加载模组信息 {:?}", mod_info);
             if mod_info.enabled {
                 log::info!("启用模组 {}", &mod_info.name);
-                ctx.mods
+                factorio
+                    .mods
                     .push((mod_info.name.clone(), mod_info.version.clone()));
             }
         }
         crate::toast::success("加载数据完成");
-        Ok(ctx)
+        Ok(factorio)
     }
 
     pub fn get_display_name(&self, category: &str, key: &str) -> String {
@@ -774,12 +777,12 @@ pub fn make_located_generic_recipe(
 
 #[test]
 fn test_load_context() {
-    let ctx = FactorioContext::test_load();
-    assert!(ctx.items.contains_key("iron-plate"));
-    assert!(ctx.entities.contains_key("stone-furnace"));
-    assert!(ctx.fluids.contains_key("water"));
-    assert!(ctx.recipes.contains_key("iron-gear-wheel"));
-    assert!(ctx.crafters.contains_key("assembling-machine-1"));
-    dbg!(ctx.recipes.get("electronic-circuit"));
-    dbg!(ctx.crafters.get("oil-refinery"));
+    let factorio = FactorioContext::test_load();
+    assert!(factorio.items.contains_key("iron-plate"));
+    assert!(factorio.entities.contains_key("stone-furnace"));
+    assert!(factorio.fluids.contains_key("water"));
+    assert!(factorio.recipes.contains_key("iron-gear-wheel"));
+    assert!(factorio.crafters.contains_key("assembling-machine-1"));
+    dbg!(factorio.recipes.get("electronic-circuit"));
+    dbg!(factorio.crafters.get("oil-refinery"));
 }

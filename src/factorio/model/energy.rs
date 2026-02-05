@@ -12,7 +12,7 @@ use crate::{
 };
 
 pub fn energy_source_as_flow(
-    ctx: &FactorioContext,
+    factorio: &FactorioContext,
     energy_source: &EnergySource,
     energy_usage: &EnergyAmount,
     effects: &Effect,
@@ -73,7 +73,7 @@ pub fn energy_source_as_flow(
             let energy_usage =
                 energy_usage.amount * 60.0 * (1.0 + effects.consumption) / source.effectivity; // 每秒的能量消耗
             if let Some(actual_fuel) = instance_fuel
-                && let Some(fuel_prototype) = ctx.items.get(&actual_fuel.0)
+                && let Some(fuel_prototype) = factorio.items.get(&actual_fuel.0)
             {
                 // 使用具体燃料
                 let fuel_property = fuel_prototype
@@ -126,7 +126,7 @@ pub fn energy_source_as_flow(
             if source.burns_fluid {
                 if let Some(actual_fuel) = instance_fuel {
                     // 使用具体燃料
-                    let fuel_prototype = ctx
+                    let fuel_prototype = factorio
                         .fluids
                         .get(&actual_fuel.0)
                         .expect("燃料在上下文中不存在");
@@ -172,7 +172,7 @@ pub fn energy_source_as_flow(
                 // 利用流体热源
                 if let Some(actual_fuel) = instance_fuel {
                     // 使用具体燃料
-                    let fuel_prototype = ctx
+                    let fuel_prototype = factorio
                         .fluids
                         .get(&actual_fuel.0)
                         .expect("燃料在上下文中不存在");

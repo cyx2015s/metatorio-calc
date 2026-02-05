@@ -7,7 +7,7 @@ use crate::factorio::*;
 #[derive(Debug)]
 
 pub struct Icon<'a> {
-    pub ctx: &'a FactorioContext,
+    pub factorio: &'a FactorioContext,
     pub type_name: &'a str,
     pub item_name: &'a str,
     pub quality: u8,
@@ -16,9 +16,9 @@ pub struct Icon<'a> {
 }
 
 impl<'a> Icon<'a> {
-    pub fn new(ctx: &'a FactorioContext, type_name: &'a str, item_name: &'a str) -> Self {
+    pub fn new(factorio: &'a FactorioContext, type_name: &'a str, item_name: &'a str) -> Self {
         Self {
-            ctx,
+            factorio,
             type_name,
             item_name,
             quality: 0,
@@ -43,11 +43,11 @@ impl<'a> Icon<'a> {
     }
 
     pub fn image(&'_ self) -> egui::Image<'_> {
-        let root_path = &self.ctx.icon_path;
+        let root_path = &self.factorio.icon_path;
         // 某个 type 的 order info 存在，但是没有对应的物品，视为物品不存在
         // 某个 type 的 order info 不存在，当作存在
         let icon_path = if self
-            .ctx
+            .factorio
             .order_of_entries
             .get(self.type_name)
             .is_some_and(|v| v.get(self.item_name).is_none())
@@ -72,7 +72,7 @@ impl<'a> Icon<'a> {
 
 impl<'a> egui::Widget for Icon<'a> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
-        let root_path = &self.ctx.icon_path;
+        let root_path = &self.factorio.icon_path;
         egui::Frame::NONE
             .fill(egui::Color32::from_rgba_premultiplied(
                 0xaa, 0xaa, 0xaa, 0xcc,
@@ -101,7 +101,7 @@ impl<'a> egui::Widget for Icon<'a> {
                             "file://{}/{}/{}.png",
                             root_path.to_string_lossy(),
                             "quality",
-                            self.ctx.qualities[self.quality as usize].base.name
+                            self.factorio.qualities[self.quality as usize].base.name
                         )),
                     );
                 }
@@ -112,16 +112,16 @@ impl<'a> egui::Widget for Icon<'a> {
 
 #[derive(Debug)]
 pub struct GenericIcon<'a> {
-    pub ctx: &'a FactorioContext,
+    pub factorio: &'a FactorioContext,
     pub item: &'a GenericItem,
     pub size: f32,
     pub stroke: egui::Stroke,
 }
 
 impl<'a> GenericIcon<'a> {
-    pub fn new(ctx: &'a FactorioContext, item: &'a GenericItem) -> Self {
+    pub fn new(factorio: &'a FactorioContext, item: &'a GenericItem) -> Self {
         Self {
-            ctx,
+            factorio,
             item,
             size: 32.0,
             stroke: egui::Stroke::NONE,
@@ -145,7 +145,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
             GenericItem::Custom { name } => ui.label(format!("特殊: {}", name)),
             GenericItem::Item(IdWithQuality(name, quality)) => ui.add_sized(
                 [self.size, self.size],
-                Icon::new(self.ctx, "item", name)
+                Icon::new(self.factorio, "item", name)
                     .with_quality(*quality)
                     .with_size(self.size)
                     .with_stroke(self.stroke),
@@ -155,7 +155,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                 temperature: _,
             } => ui.add_sized(
                 [self.size, self.size],
-                Icon::new(self.ctx, "fluid", name)
+                Icon::new(self.factorio, "fluid", name)
                     .with_quality(0)
                     .with_size(self.size)
                     .with_stroke(self.stroke),
@@ -163,7 +163,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
             GenericItem::Entity(IdWithQuality(name, quality)) => {
                 let main = ui.add_sized(
                     [self.size, self.size],
-                    Icon::new(self.ctx, "entity", name)
+                    Icon::new(self.factorio, "entity", name)
                         .with_quality(*quality)
                         .with_size(self.size)
                         .with_stroke(self.stroke),
@@ -192,13 +192,13 @@ impl<'a> egui::Widget for GenericIcon<'a> {
             }
             GenericItem::FluidHeat { filter } => match filter {
                 Some(fluid) => {
-                    ui.add_sized([self.size, self.size], Icon::new(self.ctx, "fluid", fluid))
+                    ui.add_sized([self.size, self.size], Icon::new(self.factorio, "fluid", fluid))
                 }
                 None => ui.add_sized([self.size, self.size], egui::Label::new("液热")),
             },
             GenericItem::FluidFuel { filter } => match filter {
                 Some(fluid) => {
-                    ui.add_sized([self.size, self.size], Icon::new(self.ctx, "fluid", fluid))
+                    ui.add_sized([self.size, self.size], Icon::new(self.factorio, "fluid", fluid))
                 }
                 None => ui.add_sized([self.size, self.size], egui::Label::new("液燃")),
             },
@@ -213,7 +213,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
             }
             GenericItem::Pollution { name } => ui.add_sized(
                 [self.size, self.size],
-                egui::Label::new(self.ctx.get_display_name("airborne-pollutant", name)),
+                egui::Label::new(self.factorio.get_display_name("airborne-pollutant", name)),
             ),
         }
     }
@@ -227,24 +227,24 @@ impl Display for GenericIcon<'_> {
                 write!(
                     f,
                     "物品: {}({})",
-                    self.ctx.get_display_name("item", name),
-                    self.ctx.get_display_name(
+                    self.factorio.get_display_name("item", name),
+                    self.factorio.get_display_name(
                         "quality",
-                        &self.ctx.qualities[*quality as usize].base.name
+                        &self.factorio.qualities[*quality as usize].base.name
                     )
                 )
             }
             GenericItem::Fluid { name, .. } => {
-                write!(f, "流体: {}", self.ctx.get_display_name("fluid", name))
+                write!(f, "流体: {}", self.factorio.get_display_name("fluid", name))
             }
             GenericItem::Entity(IdWithQuality(name, quality)) => {
                 write!(
                     f,
                     "实体: {}({})",
-                    self.ctx.get_display_name("entity", name),
-                    self.ctx.get_display_name(
+                    self.factorio.get_display_name("entity", name),
+                    self.factorio.get_display_name(
                         "quality",
-                        &self.ctx.qualities[*quality as usize].base.name
+                        &self.factorio.qualities[*quality as usize].base.name
                     )
                 )
             }
@@ -254,7 +254,7 @@ impl Display for GenericIcon<'_> {
                 Some(fluid) => write!(
                     f,
                     "通过热交换 {} 获得能量",
-                    self.ctx.get_display_name("fluid", fluid)
+                    self.factorio.get_display_name("fluid", fluid)
                 ),
                 None => write!(f, "任意来源的流体热量"),
             },
@@ -262,7 +262,7 @@ impl Display for GenericIcon<'_> {
                 Some(fluid) => write!(
                     f,
                     "通过燃烧 {} 获得的能量",
-                    self.ctx.get_display_name("fluid", fluid)
+                    self.factorio.get_display_name("fluid", fluid)
                 ),
                 None => write!(f, "任意来源的流体燃料"),
             },
@@ -275,7 +275,7 @@ impl Display for GenericIcon<'_> {
                 write!(
                     f,
                     "污染物: {}",
-                    self.ctx.get_display_name("airborne-pollutant", name)
+                    self.factorio.get_display_name("airborne-pollutant", name)
                 )
             }
         }

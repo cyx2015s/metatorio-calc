@@ -72,9 +72,9 @@ pub struct AutoplaceSettings {
 }
 
 impl PlanetPrototype {
-    pub fn collect_autoplaced(&self, ctx: &FactorioContext) -> HashSet<GenericItem> {
+    pub fn collect_autoplaced(&self, factorio: &FactorioContext) -> HashSet<GenericItem> {
         let mut items = HashSet::new();
-        for entity in ctx.entities.values() {
+        for entity in factorio.entities.values() {
             if entity.base.r#type != "resource" && entity.base.r#type != "asteroid-chunk" {
                 continue;
             }
@@ -109,7 +109,7 @@ impl PlanetPrototype {
                 }
             }
         }
-        for tile in ctx.tiles.values() {
+        for tile in factorio.tiles.values() {
             if let Some(autoplace) = &tile.autoplace
                 && let Some(fluid) = &tile.fluid
             {

@@ -14,7 +14,7 @@ pub type Dict<T> = HashMap<String, T>;
 pub type Emissions = Dict<f64>;
 pub type OrderInfo = Vec<(String, Vec<(String, Vec<String>)>)>;
 pub type ReverseOrderInfo = HashMap<String, (usize, usize, usize)>;
-pub type AsFactorioFlow = dyn AsFlow<GameContext = FactorioContext, ItemIdentType = GenericItem>;
+pub type AsFactorioFlow = dyn AsFlow<Game = FactorioContext, Item = GenericItem>;
 pub type FactorioMechanic = dyn Mechanic<FactorioContext, GenericItem>;
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct IdWithQuality(pub String, pub u8);
@@ -674,12 +674,12 @@ pub fn get_reverse_order_info(order_info: &OrderInfo) -> ReverseOrderInfo {
 /// Returns (category, order_info, name) tuple for sorting
 fn get_generic_item_sort_key<'a>(
     item: &'a GenericItem,
-    ctx: &FactorioContext,
+    factorio: &FactorioContext,
 ) -> (usize, (usize, usize, usize), &'a str) {
     match item {
         GenericItem::Item(IdWithQuality(name, quality)) => (
             *quality as usize,
-            ctx.order_of_entries["item"]
+            factorio.order_of_entries["item"]
                 .get(name)
                 .copied()
                 .unwrap_or((0, 0, 0)),
@@ -690,7 +690,7 @@ fn get_generic_item_sort_key<'a>(
             temperature: _,
         } => (
             0x100usize,
-            ctx.order_of_entries["fluid"]
+            factorio.order_of_entries["fluid"]
                 .get(name)
                 .copied()
                 .unwrap_or((0, 0, 0)),
@@ -698,7 +698,7 @@ fn get_generic_item_sort_key<'a>(
         ),
         GenericItem::Entity(IdWithQuality(name, quality)) => (
             0x200usize + *quality as usize,
-            ctx.order_of_entries["entity"]
+            factorio.order_of_entries["entity"]
                 .get(name)
                 .copied()
                 .unwrap_or((0, 0, 0)),
@@ -726,20 +726,20 @@ fn get_generic_item_sort_key<'a>(
     }
 }
 
-pub fn sort_generic_items(keys: &mut Vec<&GenericItem>, ctx: &FactorioContext) {
+pub fn sort_generic_items(keys: &mut Vec<&GenericItem>, factorio: &FactorioContext) {
     // Use sort_by instead of sort_by_key to avoid cloning strings during comparison
     keys.sort_by(|a, b| {
-        let a_key = get_generic_item_sort_key(a, ctx);
-        let b_key = get_generic_item_sort_key(b, ctx);
+        let a_key = get_generic_item_sort_key(a, factorio);
+        let b_key = get_generic_item_sort_key(b, factorio);
         a_key.cmp(&b_key)
     });
 }
 
 /// Sort a vector of owned GenericItems in-place
-pub fn sort_generic_items_owned(keys: &mut [GenericItem], ctx: &FactorioContext) {
+pub fn sort_generic_items_owned(keys: &mut [GenericItem], factorio: &FactorioContext) {
     keys.sort_by(|a, b| {
-        let a_key = get_generic_item_sort_key(a, ctx);
-        let b_key = get_generic_item_sort_key(b, ctx);
+        let a_key = get_generic_item_sort_key(a, factorio);
+        let b_key = get_generic_item_sort_key(b, factorio);
         a_key.cmp(&b_key)
     });
 }

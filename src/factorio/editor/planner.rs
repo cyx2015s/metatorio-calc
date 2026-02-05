@@ -161,7 +161,7 @@ impl FactoryInstance {
         self
     }
 
-    pub fn send_solve_request(&self, ctx: &FactorioContext) {
+    pub fn send_solve_request(&self, factorio: &FactorioContext) {
         let flows = self
             .mechanics
             .iter()
@@ -171,13 +171,13 @@ impl FactoryInstance {
                     .instances()
                     .iter()
                     .enumerate()
-                    .map(move |(jdx, fe)| ((idx, jdx), (fe.as_flow(ctx), fe.cost(ctx))))
+                    .map(move |(jdx, fe)| ((idx, jdx), (fe.as_flow(factorio), fe.cost(factorio))))
                     .collect::<Vec<_>>()
             })
             .collect();
 
         // .flat_map(|mechanic| mechanic.instances())
-        // .map(|fe| (ref_as_ptr(fe), (fe.as_flow(ctx), fe.cost(ctx))))
+        // .map(|fe| (ref_as_ptr(fe), (fe.as_flow(factorio), fe.cost(factorio))))
         // .collect::<IndexMap<usize, (_, _)>>();
         let target = self
             .target
@@ -211,7 +211,7 @@ impl FactoryInstance {
     fn flows_panel(
         &mut self,
         ui: &mut egui::Ui,
-        ctx: &FactorioContext,
+        factorio: &FactorioContext,
         changed: &mut bool,
         need_suggestions: &mut bool,
     ) {
@@ -241,13 +241,13 @@ impl FactoryInstance {
                 .on_hover_text("\u{26A0}新工厂会出现在一个新页面中")
                 .clicked()
             {
-                let ctx_cloned = ctx.clone();
+                let factorio_cloned = factorio.clone();
                 let factory_cloned = self.clone();
                 let factory_sender = self.factory_sender.clone();
                 std::thread::spawn(move || {
                     if let Some(sender) = factory_sender {
                         let auto_planned_factory =
-                            factorio_auto_planner(factory_cloned, ctx_cloned);
+                            factorio_auto_planner(factory_cloned, factorio_cloned);
                         match auto_planned_factory {
                             Ok(factory) => {
                                 crate::toast::info("自动规划工厂完成。");
@@ -278,7 +278,7 @@ impl FactoryInstance {
                         ui.add_sized([35.0, 15.0], SignedCompactLabel::new(amount));
                         ui.push_id(item, |ui| {
                             let button = ui
-                                .add_sized([35.0, 35.0], GenericIcon::new(ctx, item))
+                                .add_sized([35.0, 35.0], GenericIcon::new(factorio, item))
                                 .interact(egui::Sense::click());
                             button.context_menu(|ui| {
                                 if ui.button("添加到产量目标").clicked() {
@@ -292,14 +292,14 @@ impl FactoryInstance {
                                 if ui.button("显示推荐配方").clicked() {
                                     *need_suggestions = true;
                                     self.mechanics.iter_mut().for_each(|mechanic| {
-                                        mechanic.update_suggestion(ctx, item, amount)
+                                        mechanic.update_suggestion(factorio, item, amount)
                                     });
                                 }
                             });
                             if button.clicked() {
                                 *need_suggestions = true;
                                 self.mechanics.iter_mut().for_each(|mechanic| {
-                                    mechanic.update_suggestion(ctx, item, amount)
+                                    mechanic.update_suggestion(factorio, item, amount)
                                 });
                             }
                         })
@@ -342,7 +342,7 @@ impl FactoryInstance {
 
                         card_frame(ui).show(ui, |ui| {
                             ui.set_min_width(ui.available_width());
-                            *changed |= mechanic.instance_view(jdx, ui, ctx);
+                            *changed |= mechanic.instance_view(jdx, ui, factorio);
                         });
                     });
                 }
@@ -352,7 +352,7 @@ impl FactoryInstance {
     fn side_panel(
         &mut self,
         ui: &mut egui::Ui,
-        ctx: &FactorioContext,
+        factorio: &FactorioContext,
         changed: &mut bool,
         need_suggestions: &mut bool,
     ) {
@@ -383,7 +383,7 @@ impl FactoryInstance {
                 card_frame(ui).show(ui, |ui| {
                     ui.set_min_width(ui.available_width());
                     ui.horizontal_wrapped(|ui| {
-                        let mut icon = GenericIcon::new(ctx, item);
+                        let mut icon = GenericIcon::new(factorio, item);
                         let solution_of_target = self.total_flow.get(item).cloned().unwrap_or(0.0);
                         let not_satisfied =
                             !float_cmp::approx_eq!(f64, solution_of_target, *amount, ulps = 6);
@@ -401,7 +401,7 @@ impl FactoryInstance {
                             *need_suggestions = true;
                             self.mechanics.iter_mut().for_each(|mechanic| {
                                 mechanic.update_suggestion(
-                                    ctx, item,
+                                    factorio, item,
                                     -*amount, // 目标产量为正表示目前缺少对应数量的物品
                                 )
                             });
@@ -410,7 +410,7 @@ impl FactoryInstance {
                             ui.horizontal(|ui| {
                                 *changed |= generic_item_selector(
                                     ui,
-                                    ctx,
+                                    factorio,
                                     item,
                                     &widget,
                                     widget.id.with("target"),
@@ -452,7 +452,7 @@ impl FactoryInstance {
                 card_frame(ui).show(ui, |ui| {
                     ui.set_min_width(ui.available_width());
                     ui.horizontal_wrapped(|ui| {
-                        let mut icon = ui.add_sized([35.0, 35.0], GenericIcon::new(ctx, item)).interact(egui::Sense::click());
+                        let mut icon = ui.add_sized([35.0, 35.0], GenericIcon::new(factorio, item)).interact(egui::Sense::click());
                         if let GenericItem::Entity(..) = item {
                             icon = icon.on_hover_text("\u{26A0}指完成机制所消耗的实体资源（主要是矿物），不包括为了完成机制所需要收集的组装机、采矿机、插件塔等。")
                         }
@@ -460,13 +460,13 @@ impl FactoryInstance {
                             *need_suggestions = true;
                             self.mechanics.iter_mut().for_each(|mechanic| {
                                 mechanic.update_suggestion(
-                                    ctx, item, 1.0, // 尝试消耗更多该物品
+                                    factorio, item, 1.0, // 尝试消耗更多该物品
                                 )
                             });
                         }
                         ui.vertical(|ui| {
                             ui.horizontal(|ui| {
-                                *changed |= generic_item_selector(ui, ctx, item, &icon, icon.id.with("external"));
+                                *changed |= generic_item_selector(ui, factorio, item, &icon, icon.id.with("external"));
                             });
                         });
                     });
@@ -480,13 +480,13 @@ impl FactoryInstance {
             *changed = true;
         }
         ui.menu_button("从星球自动选择", |ui| {
-            for planet in ctx.planets.values() {
+            for planet in factorio.planets.values() {
                 if ui
-                    .button(ctx.get_display_name("space-location", &planet.base.name))
+                    .button(factorio.get_display_name("space-location", &planet.base.name))
                     .clicked()
                 {
                     self.external.clear();
-                    let available = planet.collect_autoplaced(ctx);
+                    let available = planet.collect_autoplaced(factorio);
                     for item in &available {
                         self.external.push((
                             item.clone(),
@@ -508,7 +508,7 @@ impl FactoryInstance {
         ui.heading("游戏机制");
         for mechanic in self.mechanics.iter_mut() {
             ui.separator();
-            *changed |= mechanic.editor_view(ui, ctx);
+            *changed |= mechanic.editor_view(ui, factorio);
         }
     }
 }
@@ -531,7 +531,7 @@ impl From<FactoryInstance> for StatefulFactoryInstance {
 
 pub struct PlannerView {
     /// 存储游戏逻辑数据的全部上下文
-    pub ctx: FactorioContext,
+    pub factorio: FactorioContext,
 
     pub intercept_close: bool,
 
@@ -545,12 +545,12 @@ pub struct PlannerView {
 }
 
 impl SolveContext for FactoryInstance {
-    type GameContext = FactorioContext;
-    type ItemIdentType = GenericItem;
+    type Game = FactorioContext;
+    type Item = GenericItem;
 }
 
 impl EditorView for FactoryInstance {
-    fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &FactorioContext) -> bool {
+    fn editor_view(&mut self, ui: &mut egui::Ui, factorio: &FactorioContext) -> bool {
         let label = ui.add(
             egui::text_edit::TextEdit::singleline(&mut self.name).font(egui::TextStyle::Heading),
         );
@@ -567,13 +567,13 @@ impl EditorView for FactoryInstance {
                         for (jdx, instance) in mechanic.instances().iter().enumerate() {
                             let var_value =
                                 self.solution.0.get(&(idx, jdx)).cloned().unwrap_or(0.0);
-                            let flow = instance.as_flow(ctx);
+                            let flow = instance.as_flow(factorio);
                             self.total_flow = flow_add(&self.total_flow, &flow, var_value);
                         }
                     }
                     // Update sorted keys cache when total_flow changes
                     self.total_flow_sorted_keys = self.total_flow.keys().cloned().collect();
-                    sort_generic_items_owned(&mut self.total_flow_sorted_keys, ctx);
+                    sort_generic_items_owned(&mut self.total_flow_sorted_keys, factorio);
                     ui.memory_mut(|mem| {
                         mem.data.remove::<String>(id);
                     })
@@ -597,7 +597,7 @@ impl EditorView for FactoryInstance {
             .frame(egui::Frame::NONE.corner_radius(8.0).inner_margin(4.0))
             .show_inside(ui, |ui: &mut egui::Ui| {
                 egui::ScrollArea::vertical().id_salt(1).show(ui, |ui| {
-                    self.side_panel(ui, ctx, &mut changed, &mut need_suggestions);
+                    self.side_panel(ui, factorio, &mut changed, &mut need_suggestions);
                 });
             });
 
@@ -609,7 +609,7 @@ impl EditorView for FactoryInstance {
                 egui::ScrollArea::vertical().id_salt(3).show(ui, |ui| {
                     ui.vertical(|ui| {
                         // Use cached sorted keys instead of sorting every frame
-                        self.flows_panel(ui, ctx, &mut changed, &mut need_suggestions);
+                        self.flows_panel(ui, factorio, &mut changed, &mut need_suggestions);
                     })
                     .response
                 });
@@ -623,7 +623,7 @@ impl EditorView for FactoryInstance {
                 self.mechanics.iter_mut().for_each(|mechanic| {
                     ui.collapsing(mechanic.name(), |ui| {
                         ui.heading(mechanic.name());
-                        changed |= mechanic.suggestion_view(ui, ctx);
+                        changed |= mechanic.suggestion_view(ui, factorio);
                         ui.separator();
                     });
                 });
@@ -631,16 +631,16 @@ impl EditorView for FactoryInstance {
         });
         // 无关
         if changed {
-            self.send_solve_request(ctx);
+            self.send_solve_request(factorio);
         };
         changed
     }
 }
 
 impl PlannerView {
-    pub fn new(ctx: FactorioContext) -> Self {
+    pub fn new(factorio: FactorioContext) -> Self {
         PlannerView {
-            ctx: ctx.build_order_info(),
+            factorio: factorio.build_order_info(),
             ..Default::default()
         }
     }
@@ -650,7 +650,7 @@ impl Default for PlannerView {
     fn default() -> Self {
         let (factory_tx, factory_rx) = std::sync::mpsc::channel();
         PlannerView {
-            ctx: FactorioContext::default().build_order_info(),
+            factorio: FactorioContext::default().build_order_info(),
             intercept_close: true,
             factories: Vec::new(),
             selected_factory: 0,
@@ -756,7 +756,7 @@ impl Subview for PlannerView {
                                             });
                                             let factory =
                                                 factory.set_sender(self.factory_sender.clone());
-                                            factory.send_solve_request(&self.ctx);
+                                            factory.send_solve_request(&self.factorio);
                                             self.factories.push(StatefulFactoryInstance {
                                                 factory,
                                                 saved: true,
@@ -859,7 +859,7 @@ impl Subview for PlannerView {
                     ui.add_sized(ui.available_size(), egui::Label::new(layout_job));
                 } else {
                     let factory = &mut self.factories[self.selected_factory];
-                    factory.saved &= !factory.factory.editor_view(ui, &self.ctx);
+                    factory.saved &= !factory.factory.editor_view(ui, &self.factorio);
                     if ui
                         .ctx()
                         .input(|input| input.modifiers.command && input.key_pressed(egui::Key::S))
@@ -888,7 +888,7 @@ impl Subview for PlannerView {
     }
 
     fn description(&self) -> String {
-        self.ctx.mods.iter().fold(
+        self.factorio.mods.iter().fold(
             "使用以下模组: ".to_string(),
             |mut acc, (mod_name, mod_version)| {
                 acc.push_str(&format!("\n{} ({}), ", mod_name, mod_version));
@@ -980,9 +980,9 @@ impl Subview for FactorioContextCreatorView {
                             mod_path.as_deref(),
                             None,
                         ) {
-                            Ok(ctx) => {
+                            Ok(factorio) => {
                                 sender
-                                    .send(Box::new(PlannerView::new(ctx)))
+                                    .send(Box::new(PlannerView::new(factorio)))
                                     .expect("Failed to send subview");
                             }
                             Err(e) => {
@@ -1004,8 +1004,8 @@ impl Subview for FactorioContextCreatorView {
                 self.thread =
                     Some(std::thread::spawn(
                         move || match FactorioContext::load_from_tmp_no_dump() {
-                            Ok(ctx) => {
-                                sender.send(Box::new(PlannerView::new(ctx))).unwrap();
+                            Ok(factorio) => {
+                                sender.send(Box::new(PlannerView::new(factorio))).unwrap();
                             }
                             Err(e) => {
                                 crate::toast::error(format!("加载缓存上下文失败: {:?}", e));

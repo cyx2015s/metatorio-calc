@@ -118,28 +118,28 @@ impl ModuleConfig {
         }
     }
 
-    pub fn get_effect(&self, ctx: &FactorioContext) -> Effect {
+    pub fn get_effect(&self, factorio: &FactorioContext) -> Effect {
         let mut total_effect = Effect::default();
         for module in &self.modules {
-            if let Some(module_proto) = ctx.modules.get(&module.0) {
+            if let Some(module_proto) = factorio.modules.get(&module.0) {
                 total_effect = total_effect
                     + effects_under_quality(
                         &module_proto.effect,
-                        ctx.qualities[module.1 as usize].default_multiplier(),
+                        factorio.qualities[module.1 as usize].default_multiplier(),
                     );
             }
         }
         let mut beacon_count = 0;
         for beacon_config in &self.beacons {
-            if ctx.beacons.contains_key(&beacon_config.beacon.0) {
+            if factorio.beacons.contains_key(&beacon_config.beacon.0) {
                 beacon_count += beacon_config.count;
             }
         }
         for beacon_config in &self.beacons {
-            if let Some(beacon_proto) = ctx.beacons.get(&beacon_config.beacon.0) {
+            if let Some(beacon_proto) = factorio.beacons.get(&beacon_config.beacon.0) {
                 let effective_module_slots = if beacon_proto.quality_affects_module_slots {
                     let quality_bonus =
-                        ctx.qualities[beacon_config.beacon.1 as usize].beacon_module_slots_bonus();
+                        factorio.qualities[beacon_config.beacon.1 as usize].beacon_module_slots_bonus();
                     beacon_proto.module_slots as usize + quality_bonus as usize
                 } else {
                     beacon_proto.module_slots as usize
@@ -173,12 +173,12 @@ impl ModuleConfig {
                 };
                 let base_efficiency = beacon_proto.distribution_effectivity
                     + beacon_proto.distribution_effectivity_bonus_per_quality_level
-                        * ctx.qualities[beacon_config.beacon.1 as usize].level;
+                        * factorio.qualities[beacon_config.beacon.1 as usize].level;
                 for (module, count) in &beacon_config.modules {
-                    if let Some(module_proto) = ctx.modules.get(&module.0) {
+                    if let Some(module_proto) = factorio.modules.get(&module.0) {
                         let module_effect = effects_under_quality(
                             &module_proto.effect,
-                            ctx.qualities[module.1 as usize].default_multiplier(),
+                            factorio.qualities[module.1 as usize].default_multiplier(),
                         );
                         let total_module_effect = module_effect
                             * (*count as f64)
@@ -195,8 +195,8 @@ impl ModuleConfig {
 }
 
 impl SolveContext for ModuleConfig {
-    type GameContext = FactorioContext;
-    type ItemIdentType = GenericItem;
+    type Game = FactorioContext;
+    type Item = GenericItem;
 }
 
 pub struct ModuleConfigEditor<'a> {
@@ -206,12 +206,12 @@ pub struct ModuleConfigEditor<'a> {
     pub allowed_effects: &'a Option<EffectTypeLimitation>,
     pub allowed_module_categories: &'a Option<Vec<String>>,
 
-    pub ctx: &'a FactorioContext,
+    pub factorio: &'a FactorioContext,
 }
 
 impl<'a> ModuleConfigEditor<'a> {
     pub fn new(
-        ctx: &'a FactorioContext,
+        factorio: &'a FactorioContext,
         module_config: &'a mut ModuleConfig,
         module_slots: usize,
         allowed_effects: &'a Option<EffectTypeLimitation>,
@@ -222,7 +222,7 @@ impl<'a> ModuleConfigEditor<'a> {
             module_slots,
             allowed_effects,
             allowed_module_categories,
-            ctx,
+            factorio,
         }
     }
 }
@@ -301,7 +301,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
             for (item, count) in total {
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing = [3.0, 3.0].into();
-                    ui.add_sized([32.0, 32.0], GenericIcon::new(self.ctx, &item));
+                    ui.add_sized([32.0, 32.0], GenericIcon::new(self.factorio, &item));
                     ui.add_sized([35.0, 15.0], CompactLabel::new(count as f64));
                 });
             }
@@ -316,7 +316,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                         let icon = ui
                             .add_sized(
                                 [35.0, 35.0],
-                                Icon::new(self.ctx, "item", &slot.0).with_quality(slot.1),
+                                Icon::new(self.factorio, "item", &slot.0).with_quality(slot.1),
                             )
                             .interact(egui::Sense::click());
 
@@ -324,7 +324,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                             deleted = true;
                             response.mark_changed();
                         }
-                        let selector = Selector::new(self.ctx, "item")
+                        let selector = Selector::new(self.factorio, "item")
                             .with_current(slot)
                             .with_filter(|s: &IdWithQuality, f: &FactorioContext| {
                                 if let Some(module_proto) = f.modules.get(&s.0) {
@@ -339,7 +339,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                 }
                             });
 
-                        let widget = SelectorModal::new(icon.id, self.ctx, "选择插件")
+                        let widget = SelectorModal::new(icon.id, self.factorio, "选择插件")
                             .with_toggle(icon.clicked())
                             .with_selector(selector);
                         if ui.add(widget).changed() {
@@ -352,11 +352,11 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                         let icon = ui
                             .add_sized(
                                 [35.0, 35.0],
-                                Icon::new(self.ctx, "item", "empty-module-slot"),
+                                Icon::new(self.factorio, "item", "empty-module-slot"),
                             )
                             .interact(egui::Sense::click());
                         let mut selected: Option<IdWithQuality> = None;
-                        let selector = Selector::new(self.ctx, "item")
+                        let selector = Selector::new(self.factorio, "item")
                             .with_output(&mut selected)
                             .with_filter(|s: &IdWithQuality, f: &FactorioContext| {
                                 if let Some(module_proto) = f.modules.get(&s.0) {
@@ -371,7 +371,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                 }
                             });
 
-                        let widget = SelectorModal::new(icon.id, self.ctx, "填充插件")
+                        let widget = SelectorModal::new(icon.id, self.factorio, "填充插件")
                             .with_toggle(icon.clicked())
                             .with_selector(selector);
 
@@ -409,23 +409,23 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                             let icon = ui
                                 .add_sized(
                                     [35.0, 35.0],
-                                    Icon::new(self.ctx, "entity", &beacon_config.beacon.0)
+                                    Icon::new(self.factorio, "entity", &beacon_config.beacon.0)
                                         .with_quality(beacon_config.beacon.1),
                                 )
                                 .on_hover_text(
-                                    if self.ctx.beacons.contains_key(&beacon_config.beacon.0) {
-                                        self.ctx.get_display_name("entity", &beacon_config.beacon.0)
+                                    if self.factorio.beacons.contains_key(&beacon_config.beacon.0) {
+                                        self.factorio.get_display_name("entity", &beacon_config.beacon.0)
                                     } else {
                                         "未选择插件塔".to_string()
                                     },
                                 )
                                 .interact(egui::Sense::click());
-                            let selector = Selector::new(self.ctx, "entity")
+                            let selector = Selector::new(self.factorio, "entity")
                                 .with_current(&mut beacon_config.beacon)
                                 .with_filter(|s: &IdWithQuality, f: &FactorioContext| {
                                     f.beacons.contains_key(&s.0)
                                 });
-                            let widget = SelectorModal::new(icon.id, self.ctx, "选择插件塔")
+                            let widget = SelectorModal::new(icon.id, self.factorio, "选择插件塔")
                                 .with_toggle(icon.clicked())
                                 .with_selector(selector);
 
@@ -434,7 +434,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                             }
                         });
                         ui.separator();
-                        if let Some(beacon_proto) = self.ctx.beacons.get(&beacon_config.beacon.0) {
+                        if let Some(beacon_proto) = self.factorio.beacons.get(&beacon_config.beacon.0) {
                             let mut total_modules = 0;
                             beacon_config.modules.retain_mut(|(id, amount)| {
                                 let mut deleted = false;
@@ -443,10 +443,10 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                     let icon = ui
                                         .add_sized(
                                             [35.0, 35.0],
-                                            Icon::new(self.ctx, "item", &id.0).with_quality(id.1),
+                                            Icon::new(self.factorio, "item", &id.0).with_quality(id.1),
                                         )
-                                        .on_hover_text(if self.ctx.modules.contains_key(&id.0) {
-                                            self.ctx.get_display_name("item", &id.0)
+                                        .on_hover_text(if self.factorio.modules.contains_key(&id.0) {
+                                            self.factorio.get_display_name("item", &id.0)
                                         } else {
                                             "未选择插件".to_string()
                                         })
@@ -455,7 +455,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                         deleted = true;
                                         response.mark_changed();
                                     }
-                                    let selector = Selector::new(self.ctx, "item")
+                                    let selector = Selector::new(self.factorio, "item")
                                         .with_current(id)
                                         .with_filter(|s: &IdWithQuality, f: &FactorioContext| {
                                             if let Some(module_proto) = f.modules.get(&s.0) {
@@ -475,7 +475,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                                 false
                                             }
                                         });
-                                    let widget = SelectorModal::new(icon.id, self.ctx, "选择插件")
+                                    let widget = SelectorModal::new(icon.id, self.factorio, "选择插件")
                                         .with_toggle(icon.clicked())
                                         .with_selector(selector);
                                     if ui.add(widget).changed() {
@@ -483,7 +483,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                     }
                                     let beacon_module_count = beacon_proto.module_slots as usize
                                         + if beacon_proto.quality_affects_module_slots {
-                                            let quality_bonus = self.ctx.qualities
+                                            let quality_bonus = self.factorio.qualities
                                                 [beacon_config.beacon.1 as usize]
                                                 .beacon_module_slots_bonus();
                                             quality_bonus as usize

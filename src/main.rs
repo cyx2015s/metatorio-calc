@@ -152,21 +152,21 @@ impl MainPage {
 }
 
 impl eframe::App for MainPage {
-    fn update(&mut self, ctx: &eframe::egui::Context, frame: &mut eframe::Frame) {
+    fn update(&mut self, factorio: &eframe::egui::Context, frame: &mut eframe::Frame) {
         let mut request_repaint = true;
-        ctx.input(|i| {
+        factorio.input(|i| {
             if i.viewport().minimized.unwrap_or_default() {
                 request_repaint = false;
             }
         });
         if request_repaint {
-            ctx.request_repaint_after_secs(0.1);
+            factorio.request_repaint_after_secs(0.1);
         }
         let cpu_usage = frame.info().cpu_usage.unwrap_or(0.0);
         self.exp_cpu_usage = self.exp_cpu_usage * 31.0 / 32.0 + cpu_usage / 32.0;
         egui::SidePanel::left(egui::Id::new("side"))
             .width_range(200.0..=280.0)
-            .show(ctx, |ui| {
+            .show(factorio, |ui| {
                 let heading = ui.heading("切向量化").interact(egui::Sense::click());
                 if heading.clicked() {
                     self.selected = SelectedSubview::Title;
@@ -220,7 +220,7 @@ impl eframe::App for MainPage {
                                 std::process::Command::new(std::env::current_exe().unwrap())
                                     .spawn()
                                     .unwrap();
-                                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                                factorio.send_viewport_cmd(egui::ViewportCommand::Close);
                             }
                         }
                         _err => {
@@ -290,7 +290,7 @@ impl eframe::App for MainPage {
                     self.selected = SelectedSubview::Logs;
                 }
             });
-        egui::CentralPanel::default().show(ctx, |ui| match self.selected {
+        egui::CentralPanel::default().show(factorio, |ui| match self.selected {
             SelectedSubview::Title => {
                 ui.label("快速开始: ");
                 ui.label("从左侧选择一个游戏环境以开始使用。");
@@ -331,12 +331,12 @@ impl eframe::App for MainPage {
                 );
             },
         });
-        toast::TOASTS.lock().unwrap().show(ctx);
+        toast::TOASTS.lock().unwrap().show(factorio);
     }
 }
 
-fn add_font(ctx: &egui::Context) {
-    ctx.add_font(egui::epaint::text::FontInsert::new(
+fn add_font(factorio: &egui::Context) {
+    factorio.add_font(egui::epaint::text::FontInsert::new(
         "LXGW",
         egui::FontData::from_static(include_bytes!("../assets/font.ttf")),
         vec![

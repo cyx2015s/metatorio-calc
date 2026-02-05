@@ -33,7 +33,7 @@ pub struct SelectorModal<'a, Input, Output>
 where
     Input: 'a + ?Sized,
 {
-    ctx: &'a FactorioContext,
+    factorio: &'a FactorioContext,
     label_str: &'a str,
     id: egui::Id,
     toggle: bool,
@@ -44,10 +44,10 @@ impl<'a, Input, Output> SelectorModal<'a, Input, Output>
 where
     Input: 'a + ?Sized,
 {
-    pub fn new(id: egui::Id, ctx: &'a FactorioContext, label_str: &'a str) -> Self {
+    pub fn new(id: egui::Id, factorio: &'a FactorioContext, label_str: &'a str) -> Self {
         Self {
             id,
-            ctx,
+            factorio,
             label_str,
             toggle: false,
             selector: None,
@@ -115,12 +115,12 @@ impl egui::Widget for SelectorModal<'_, IdWithQuality, IdWithQuality> {
     fn ui(mut self, ui: &mut egui::Ui) -> egui::Response {
         assert!(self.selector.is_some(), "无法选中");
         let mut response = ui.response().clone();
-        if self.ctx.qualities.len() == 1 {
+        if self.factorio.qualities.len() == 1 {
             // 回退到普通选择器
             let mut degenerated: Option<String> = None;
 
             let old_selector = self.selector.take().unwrap();
-            let mut selector = Selector::new(self.ctx, old_selector.type_name);
+            let mut selector = Selector::new(self.factorio, old_selector.type_name);
             if let Some(filter) = old_selector.filter {
                 selector = selector.with_filter(move |s: &str, f: &FactorioContext| {
                     let id_with_quality = IdWithQuality(s.to_string(), 0);
@@ -128,9 +128,9 @@ impl egui::Widget for SelectorModal<'_, IdWithQuality, IdWithQuality> {
                 });
             }
             if let Some(hover) = old_selector.hover {
-                selector = selector.with_hover(move |ui, s, ctx| {
+                selector = selector.with_hover(move |ui, s, factorio| {
                     let id_with_quality = IdWithQuality(s.to_string(), 0);
-                    hover(ui, &id_with_quality, ctx);
+                    hover(ui, &id_with_quality, factorio);
                 });
             }
             if let Some(current) = old_selector.current {

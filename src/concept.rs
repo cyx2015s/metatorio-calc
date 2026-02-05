@@ -27,14 +27,14 @@ pub trait Subview: Send {
 
 /// 解决方案上下文，包含游戏相关的信息
 pub trait SolveContext: Send + Any {
-    type GameContext;
-    type ItemIdentType: ItemIdent;
+    type Game: Send + 'static;
+    type Item: ItemIdent;
 }
 
 /// 能够在编辑器中展示自己的视图
 pub trait EditorView: SolveContext {
     // 返回值表示是否产生了需要重新计算的更改
-    fn editor_view(&mut self, ui: &mut egui::Ui, ctx: &Self::GameContext) -> bool;
+    fn editor_view(&mut self, ui: &mut egui::Ui, factorio: &Self::Game) -> bool;
 }
 
 pub type Flow<I> = IndexMap<I, f64>;
@@ -42,17 +42,15 @@ pub type Flow<I> = IndexMap<I, f64>;
 /// 能够转化成流参与计算的方法
 pub trait AsFlow: SolveContext {
     /// 传递物品流信息
-    fn as_flow(&self, ctx: &Self::GameContext) -> Flow<Self::ItemIdentType>;
+    fn as_flow(&self, factorio: &Self::Game) -> Flow<Self::Item>;
     /// 执行成本，默认返回 1.0
-    fn cost(&self, _ctx: &Self::GameContext) -> f64 {
+    fn cost(&self, _factorio: &Self::Game) -> f64 {
         1.0
     }
 }
 
-pub type AsFlowSender<C, I> =
-    std::sync::mpsc::Sender<Box<dyn AsFlow<GameContext = C, ItemIdentType = I>>>;
-pub type AsFlowReceiver<C, I> =
-    std::sync::mpsc::Receiver<Box<dyn AsFlow<GameContext = C, ItemIdentType = I>>>;
+pub type AsFlowSender<G, I> = std::sync::mpsc::Sender<Box<dyn AsFlow<Game = G, Item = I>>>;
+pub type AsFlowReceiver<G, I> = std::sync::mpsc::Receiver<Box<dyn AsFlow<Game = G, Item = I>>>;
 pub trait ItemIdent: Debug + Clone + Eq + Hash + Send + 'static {}
 impl<T> ItemIdent for T where T: Debug + Clone + Eq + Hash + Send + 'static {}
 pub trait GameContextCreatorView: Subview {
@@ -61,18 +59,15 @@ pub trait GameContextCreatorView: Subview {
 
 /// EditorView:  机制偏好编辑，而非机制实例编辑，每帧必须调用，在这一帧更新上一帧的所有操作
 /// Mechanic:  机制，包含多个机制实例，且能够参与计算
-pub trait Mechanic<C, I>:
-    EditorView<GameContext = C, ItemIdentType = I>
-    + dyn_clone::DynClone
-    + erased_serde::Serialize
-    + Send
+pub trait Mechanic<G, I>:
+    EditorView<Game = G, Item = I> + dyn_clone::DynClone + erased_serde::Serialize + Send
 where
-    C: Send + 'static,
+    G: Send + 'static,
     I: ItemIdent,
 {
     fn name(&self) -> String;
 
-    fn instances(&self) -> Vec<&dyn AsFlow<GameContext = C, ItemIdentType = I>>;
+    fn instances(&self) -> Vec<&dyn AsFlow<Game = G, Item = I>>;
 
     // 考虑提供一个更高效的实现。
     fn instance_len(&self) -> usize {
@@ -83,63 +78,77 @@ where
     fn instance_operate(
         &mut self,
         idx: usize,
-        f: &mut dyn FnMut(&mut dyn AsFlow<GameContext = C, ItemIdentType = I>) -> EntryOperation,
-    );
+        f: &mut dyn FnMut(&mut dyn AsFlow<Game = G, Item = I>) -> EntryOperation,
+    ) {
+        let _ = idx;
+        let _ = f;
+    }
 
     // 提交所有instance_operate的更改
     // 返回值表示是否产生了需要重新计算的更改
     fn submit_operations(&mut self) -> bool;
 
     // 返回值表示是否产生了需要重新计算的更改
-    fn instance_view(&mut self, idx: usize, ui: &mut egui::Ui, ctx: &C) -> bool;
+    fn instance_view(&mut self, idx: usize, ui: &mut egui::Ui, factorio: &G) -> bool {
+        let _ = idx;
+        let _ = ui;
+        let _ = factorio;
+        false
+    }
 
     // 想要生产 amount 每秒数量的 item，有哪些方法？
-    fn update_suggestion(&mut self, ctx: &C, item: &I, amount: f64);
+    fn update_suggestion(&mut self, factorio: &G, item: &I, amount: f64) {
+        let _ = factorio;
+        let _ = item;
+        let _ = amount;
+    }
 
     // 返回值表示是否产生了需要重新计算的更改
-    fn suggestion_view(&mut self, ui: &mut egui::Ui, ctx: &C) -> bool {
+    fn suggestion_view(&mut self, ui: &mut egui::Ui, factorio: &G) -> bool {
         let _ = ui;
-        let _ = ctx;
+        let _ = factorio;
         false
     }
 
     /// 自动规划功能：枚举所有可能的配方组合，填充到instances中。
-    fn auto_populate(&mut self, ctx: &C) {
-        let _ = ctx;
+    fn auto_populate(&mut self, factorio: &G) {
+        let _ = factorio;
     }
 }
 
-dyn_clone::clone_trait_object!(<C, I> Mechanic<C, I> where C: Send + 'static, I : ItemIdent);
-erased_serde::serialize_trait_object!(<C, I> Mechanic<C, I> where C: Send + 'static, I : ItemIdent);
-
-pub trait PlannerView<C, I>: erased_serde::Serialize + dyn_clone::DynClone
-where
-    C: Send + 'static,
-    I: ItemIdent,
-{
-    /// 所有的游戏机制，偏好设置和实例化结果
-    fn mechanics(&self) -> &[Box<dyn Mechanic<C, I>>];
-
-    fn mechanics_mut(&mut self) -> &mut [Box<dyn Mechanic<C, I>>];
-
-    /// 所有游戏机制展示时的顺序
-    fn mechanics_index(&self) -> &[(usize, usize)]; // (mechanic_idx, instance_idx)
-
-    fn mechanics_index_mut(&mut self) -> &mut [(usize, usize)];
-
-    /// 规划目标和产量
-    fn targets(&self) -> &[(I, f64)];
-
-    fn targets_mut(&mut self) -> &mut [(I, f64)];
-
-    /// 外界输入和代价
-    fn externals(&self) -> &[(I, f64)];
-
-    fn externals_mut(&mut self) -> &mut [(I, f64)];
-
-    /// 返回值表示是否产生了需要重新计算的更改，用于保存
-    fn planner_view(&mut self, ui: &mut egui::Ui, ctx: &C) -> bool;
+pub trait WithUser {
+    type User: Send + 'static;
 }
 
-dyn_clone::clone_trait_object!(<C, I> PlannerView<C, I> where C: Send + 'static, I : ItemIdent);
-erased_serde::serialize_trait_object!(<C, I> PlannerView<C, I> where C: Send + 'static, I : ItemIdent);
+pub trait MechanicWithUser<G, U, I>: Mechanic<G, I> + WithUser<User = U>
+where
+    G: Send + 'static,
+    U: Send + 'static,
+    I: ItemIdent,
+{
+    // 返回值表示是否产生了需要重新计算的更改
+    fn instance_view_ext(&mut self, idx: usize, ui: &mut egui::Ui, factorio: &G, user: &U) -> bool {
+        // 默认实现忽视 user
+        let _ = user;
+        self.instance_view(idx, ui, factorio)
+    }
+
+    // 返回值表示是否产生了需要重新计算的更改
+    fn suggestion_view_ext(&mut self, ui: &mut egui::Ui, factorio: &G, user: &U) -> bool {
+        // 默认实现忽视 user
+        let _ = user;
+        self.suggestion_view(ui, factorio)
+    }
+
+    fn update_suggestion_ext(&mut self, factorio: &G, user: &mut U, item: &I, amount: f64) {
+        // 默认实现忽视 user
+        let _ = user;
+        self.update_suggestion(factorio, item, amount);
+    }
+}
+
+dyn_clone::clone_trait_object!(<G, I> Mechanic<G, I> where G: Send + 'static, I : ItemIdent);
+erased_serde::serialize_trait_object!(<G, I> Mechanic<G, I> where G: Send + 'static, I : ItemIdent);
+
+dyn_clone::clone_trait_object!(<G, U, I> MechanicWithUser<G, U, I> where G: Send + 'static, U: Send + 'static, I : ItemIdent);
+erased_serde::serialize_trait_object!(<G, U, I> MechanicWithUser<G, U, I> where G: Send + 'static, U: Send + 'static, I : ItemIdent);
