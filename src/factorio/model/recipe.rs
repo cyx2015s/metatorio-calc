@@ -24,7 +24,6 @@ use crate::{
     },
 };
 
-
 fn always_true() -> bool {
     true
 }
@@ -974,7 +973,7 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
                 1
             };
             let mut machines = vec![];
-            for _ in 0..self.alternative_count {
+            for _ in 0..self.alternative_count.clamp(1, 3) {
                 let machine_name = select_crafter_for_recipe(
                     factorio,
                     recipe_proto,
@@ -999,7 +998,7 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
                             if let Some(module) = factorio.modules.get(&module_name.0) {
                                 option_allowed_modules.as_ref().is_none_or(
                                     |allowed_module_categories| {
-                                        allowed_module_categories.contains(&module_name.0)
+                                        allowed_module_categories.contains(&module.category)
                                     },
                                 ) && module_effects_allowed(module, &allowed_effects)
                             } else {

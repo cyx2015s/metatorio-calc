@@ -11,7 +11,7 @@ use std::{
 use indexmap::IndexMap;
 use serde_json::Value;
 
-use crate::{concept::*, error::AppError, factorio::{model::technology, *}};
+use crate::{concept::*, error::AppError, factorio::*};
 
 pub const LOCALE_CATEGORIES: &[&str] = &[
     "airborne-pollutant",

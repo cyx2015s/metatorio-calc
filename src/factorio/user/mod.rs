@@ -34,4 +34,4 @@ pub enum Relation {
     ProducedAsResult,
 }
 
-pub type DependencyGraph = petgraph::Graph<DependencyItem, ()>;
+pub type DependencyGraph = petgraph::Graph<DependencyItem, Relation>;

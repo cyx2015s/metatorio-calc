@@ -72,7 +72,6 @@ impl egui::Widget for SelectorModal<'_, str, String> {
     fn ui(mut self, ui: &mut egui::Ui) -> egui::Response {
         assert!(self.selector.is_some(), "无法选中");
         let mut widget = self.selector.take().unwrap();
-        let mut sentinel = None;
         let mut response = ui.response().clone();
         show_modal(self.id, self.toggle, ui, |ui| {
             let mut filter_string = ui
@@ -89,7 +88,7 @@ impl egui::Widget for SelectorModal<'_, str, String> {
                     .insert_temp(self.id, FilterString(filter_string.clone()));
             });
             let type_name = widget.type_name;
-            widget = widget.with_output(&mut sentinel).chain_filter(move |s, f| {
+            widget = widget.chain_filter(move |s, f| {
                 s.to_lowercase().contains(&filter_string.to_lowercase())
                     || f.get_display_name(type_name, s)
                         .to_lowercase()
@@ -136,25 +135,19 @@ impl egui::Widget for SelectorModal<'_, IdWithQuality, IdWithQuality> {
             if let Some(current) = old_selector.current {
                 selector = selector.with_current(&mut current.0);
             }
-            if let Some(&mut ref mut _output) = old_selector.output {
-                selector = selector.with_output(&mut degenerated);
-            }
-
-            response = response.union(
-                ui.add(
-                    SelectorModal::new(self.id, self.factorio, self.label_str)
-                        .with_selector(selector)
-                        .with_toggle(self.toggle),
-                ),
+            selector = selector.with_output(&mut degenerated);
+            ui.add(
+                SelectorModal::new(self.id.with("degenerated"), self.factorio, self.label_str)
+                    .with_selector(selector)
+                    .with_toggle(self.toggle),
             );
 
-            if let Some(selected) = degenerated
-                && let Some(&mut ref mut output) = old_selector.output
-            {
-                *output = Some(IdWithQuality(selected, 0));
-            }
-            if response.should_close() {
-                ui.close();
+            if let Some(selected) = degenerated {
+                if let Some(&mut ref mut output) = old_selector.output {
+                    *output = Some(IdWithQuality(selected, 0));
+                    // response.mark_changed();
+                    // response.set_close();
+                }
             }
 
             return response;
