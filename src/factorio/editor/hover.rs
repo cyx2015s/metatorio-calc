@@ -55,7 +55,8 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
                             for ingredient in ingredients.iter() {
                                 match ingredient {
                                     RecipeIngredient::Item(i) => {
-                                        let _icon = ui.add(Icon::new(self.factorio, "item", &i.name));
+                                        let _icon =
+                                            ui.add(Icon::new(self.factorio, "item", &i.name));
                                         ui.horizontal_top(|ui| {
                                             ui.vertical(|ui| {
                                                 ui.add(CompactLabel::new(i.amount));
@@ -63,7 +64,8 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
                                         });
                                     }
                                     RecipeIngredient::Fluid(f) => {
-                                        let _icon = ui.add(Icon::new(self.factorio, "fluid", &f.name));
+                                        let _icon =
+                                            ui.add(Icon::new(self.factorio, "fluid", &f.name));
                                         ui.vertical(|ui| {
                                             ui.horizontal_top(|ui| {
                                                 ui.add(CompactLabel::new(f.amount));
@@ -124,7 +126,8 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
                             for result in results.iter() {
                                 match result {
                                     RecipeResult::Item(i) => {
-                                        let _icon = ui.add(Icon::new(self.factorio, "item", &i.name));
+                                        let _icon =
+                                            ui.add(Icon::new(self.factorio, "item", &i.name));
                                         let output = i.normalized_output();
                                         ui.vertical(|ui| {
                                             ui.horizontal_top(|ui| {
@@ -137,7 +140,8 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
                                         });
                                     }
                                     RecipeResult::Fluid(f) => {
-                                        let _icon = ui.add(Icon::new(self.factorio, "fluid", &f.name));
+                                        let _icon =
+                                            ui.add(Icon::new(self.factorio, "fluid", &f.name));
                                         let output = f.normalized_output();
                                         ui.vertical(|ui| {
                                             ui.horizontal_top(|ui| {

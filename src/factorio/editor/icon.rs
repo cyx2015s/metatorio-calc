@@ -191,15 +191,17 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                 ui.add_sized([self.size, self.size], egui::Label::new("电能"))
             }
             GenericItem::FluidHeat { filter } => match filter {
-                Some(fluid) => {
-                    ui.add_sized([self.size, self.size], Icon::new(self.factorio, "fluid", fluid))
-                }
+                Some(fluid) => ui.add_sized(
+                    [self.size, self.size],
+                    Icon::new(self.factorio, "fluid", fluid),
+                ),
                 None => ui.add_sized([self.size, self.size], egui::Label::new("液热")),
             },
             GenericItem::FluidFuel { filter } => match filter {
-                Some(fluid) => {
-                    ui.add_sized([self.size, self.size], Icon::new(self.factorio, "fluid", fluid))
-                }
+                Some(fluid) => ui.add_sized(
+                    [self.size, self.size],
+                    Icon::new(self.factorio, "fluid", fluid),
+                ),
                 None => ui.add_sized([self.size, self.size], egui::Label::new("液燃")),
             },
             GenericItem::ItemFuel { category } => ui

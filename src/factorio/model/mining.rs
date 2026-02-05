@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use serde_with::{serde_as};
+use serde_with::serde_as;
 
 use crate::{
     concept::{AsFlow, EditorView, EntryOperation, Flow, Mechanic, SolveContext},

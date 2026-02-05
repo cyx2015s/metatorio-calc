@@ -142,13 +142,12 @@ impl egui::Widget for SelectorModal<'_, IdWithQuality, IdWithQuality> {
                     .with_toggle(self.toggle),
             );
 
-            if let Some(selected) = degenerated {
-                if let Some(&mut ref mut output) = old_selector.output {
+            if let Some(selected) = degenerated
+                && let Some(&mut ref mut output) = old_selector.output {
                     *output = Some(IdWithQuality(selected, 0));
                     // response.mark_changed();
                     // response.set_close();
                 }
-            }
 
             return response;
         }

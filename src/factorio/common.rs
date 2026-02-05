@@ -241,7 +241,6 @@ impl BoundingBox {
     }
 }
 
-
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(default)]
 /// PrototypeBase 基类中我们关心的字段

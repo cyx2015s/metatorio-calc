@@ -1,5 +1,5 @@
 use indexmap::IndexMap;
-use serde_with::{serde_as, DefaultOnError};
+use serde_with::{DefaultOnError, serde_as};
 
 use crate::{
     concept::SolveContext,
@@ -31,7 +31,6 @@ pub struct ModulePrototype {
     /// 等级
     pub tier: f64,
 }
-
 
 #[serde_as]
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -140,8 +139,8 @@ impl ModuleConfig {
         for beacon_config in &self.beacons {
             if let Some(beacon_proto) = factorio.beacons.get(&beacon_config.beacon.0) {
                 let effective_module_slots = if beacon_proto.quality_affects_module_slots {
-                    let quality_bonus =
-                        factorio.qualities[beacon_config.beacon.1 as usize].beacon_module_slots_bonus();
+                    let quality_bonus = factorio.qualities[beacon_config.beacon.1 as usize]
+                        .beacon_module_slots_bonus();
                     beacon_proto.module_slots as usize + quality_bonus as usize
                 } else {
                     beacon_proto.module_slots as usize
@@ -416,7 +415,8 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                 )
                                 .on_hover_text(
                                     if self.factorio.beacons.contains_key(&beacon_config.beacon.0) {
-                                        self.factorio.get_display_name("entity", &beacon_config.beacon.0)
+                                        self.factorio
+                                            .get_display_name("entity", &beacon_config.beacon.0)
                                     } else {
                                         "未选择插件塔".to_string()
                                     },
@@ -436,7 +436,9 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                             }
                         });
                         ui.separator();
-                        if let Some(beacon_proto) = self.factorio.beacons.get(&beacon_config.beacon.0) {
+                        if let Some(beacon_proto) =
+                            self.factorio.beacons.get(&beacon_config.beacon.0)
+                        {
                             let mut total_modules = 0;
                             beacon_config.modules.retain_mut(|(id, amount)| {
                                 let mut deleted = false;
@@ -445,13 +447,16 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                     let icon = ui
                                         .add_sized(
                                             [35.0, 35.0],
-                                            Icon::new(self.factorio, "item", &id.0).with_quality(id.1),
+                                            Icon::new(self.factorio, "item", &id.0)
+                                                .with_quality(id.1),
                                         )
-                                        .on_hover_text(if self.factorio.modules.contains_key(&id.0) {
-                                            self.factorio.get_display_name("item", &id.0)
-                                        } else {
-                                            "未选择插件".to_string()
-                                        })
+                                        .on_hover_text(
+                                            if self.factorio.modules.contains_key(&id.0) {
+                                                self.factorio.get_display_name("item", &id.0)
+                                            } else {
+                                                "未选择插件".to_string()
+                                            },
+                                        )
                                         .interact(egui::Sense::click());
                                     if icon.clicked_by(egui::PointerButton::Secondary) {
                                         deleted = true;
@@ -477,9 +482,10 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                                 false
                                             }
                                         });
-                                    let widget = SelectorModal::new(icon.id, self.factorio, "选择插件")
-                                        .with_toggle(icon.clicked())
-                                        .with_selector(selector);
+                                    let widget =
+                                        SelectorModal::new(icon.id, self.factorio, "选择插件")
+                                            .with_toggle(icon.clicked())
+                                            .with_selector(selector);
                                     if ui.add(widget).changed() {
                                         response.mark_changed();
                                     }

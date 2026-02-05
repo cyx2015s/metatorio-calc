@@ -102,7 +102,7 @@ where
         .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
 
     serde_json::from_value(value.clone())
-        .expect(format!("Failed to deserialize content {}", value).as_str())
+        .unwrap_or_else(|_| panic!("Failed to deserialize content {}", value))
 }
 
 impl FactorioContext {
