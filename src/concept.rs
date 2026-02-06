@@ -1,4 +1,4 @@
-use std::{any::Any, fmt::Debug, hash::Hash};
+use std::{any::Any, fmt::Debug, hash::Hash, sync::mpsc::*};
 
 use indexmap::IndexMap;
 
@@ -50,12 +50,12 @@ pub trait AsFlow: SolveContext {
     }
 }
 
-pub type AsFlowSender<G, I> = std::sync::mpsc::Sender<Box<dyn AsFlow<Game = G, Item = I>>>;
-pub type AsFlowReceiver<G, I> = std::sync::mpsc::Receiver<Box<dyn AsFlow<Game = G, Item = I>>>;
+pub type AsFlowSender<G, I> = Sender<Box<dyn AsFlow<Game = G, Item = I>>>;
+pub type AsFlowReceiver<G, I> = Receiver<Box<dyn AsFlow<Game = G, Item = I>>>;
 pub trait ItemIdent: Debug + Clone + Eq + Hash + Send + 'static {}
 impl<T> ItemIdent for T where T: Debug + Clone + Eq + Hash + Send + 'static {}
 pub trait GameContextCreatorView: Subview {
-    fn set_subview_sender(&mut self, sender: std::sync::mpsc::Sender<Box<dyn Subview>>);
+    fn set_subview_sender(&mut self, sender: Sender<Box<dyn Subview>>);
 }
 
 /// EditorView:  机制偏好编辑，而非机制实例编辑，每帧必须调用，在这一帧更新上一帧的所有操作

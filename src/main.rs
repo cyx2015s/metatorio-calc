@@ -1,4 +1,6 @@
-// #![cfg_attr(all(not(test), not(debug_assertions)), windows_subsystem = "windows")]
+#![cfg_attr(all(not(test), not(debug_assertions)), windows_subsystem = "windows")]
+
+use std::sync::mpsc::*;
 
 use egui::special_emojis::GITHUB;
 use mimalloc::MiMalloc;
@@ -36,15 +38,14 @@ pub struct MainPage {
     pub planners: Vec<Box<dyn concept::Subview>>,
     pub selected: SelectedSubview,
 
-    pub subview_receiver: std::sync::mpsc::Receiver<Box<dyn concept::Subview>>,
-    pub subview_sender: std::sync::mpsc::Sender<Box<dyn concept::Subview>>,
+    pub subview_receiver: Receiver<Box<dyn concept::Subview>>,
+    pub subview_sender: Sender<Box<dyn concept::Subview>>,
 
     pub exp_cpu_usage: f32,
 
     pub suitable_release: Result<self_update::update::Release, error::AppError>,
-    pub response_receiver:
-        std::sync::mpsc::Receiver<Result<self_update::update::Release, error::AppError>>,
-    pub request_sender: std::sync::mpsc::Sender<NetworkRequest>,
+    pub response_receiver: Receiver<Result<self_update::update::Release, error::AppError>>,
+    pub request_sender: Sender<NetworkRequest>,
 }
 
 pub enum NetworkRequest {
@@ -54,9 +55,9 @@ pub enum NetworkRequest {
 
 impl Default for MainPage {
     fn default() -> Self {
-        let (subview_sender, subview_receiver) = std::sync::mpsc::channel();
-        let (network_response_tx, network_response_rx) = std::sync::mpsc::channel();
-        let (network_request_tx, network_request_rx) = std::sync::mpsc::channel();
+        let (subview_sender, subview_receiver) = channel();
+        let (network_response_tx, network_response_rx) = channel();
+        let (network_request_tx, network_request_rx) = channel();
         std::thread::spawn(move || -> Result<(), error::AppError> {
             log::info!("网络线程已启动");
             while let Ok(request) = network_request_rx.recv() {

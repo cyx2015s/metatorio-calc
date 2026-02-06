@@ -6,6 +6,7 @@ use crate::error::AppError;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::hash::Hash;
+use std::sync::mpsc::*;
 
 pub fn flow_add<T>(a: &Flow<T>, b: &Flow<T>, c: f64) -> Flow<T>
 where
@@ -326,8 +327,8 @@ where
     }
 
     pub fn make_solver_thread(
-        solution_tx: std::sync::mpsc::Sender<SolverSolutionTuple<R>>,
-        arg_rx: std::sync::mpsc::Receiver<SolverData<I, R>>,
+        solution_tx: Sender<SolverSolutionTuple<R>>,
+        arg_rx: Receiver<SolverData<I, R>>,
     ) {
         std::thread::spawn(move || {
             log::info!("求解线程启动");

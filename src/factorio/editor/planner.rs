@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::mpsc::*};
 
 use crate::{
     concept::*,
@@ -32,15 +32,15 @@ pub struct FactoryInstance {
     pub external: Vec<(GenericItem, f64)>,
     pub mechanics: Vec<Box<dyn Mechanic<FactorioContext, GenericItem>>>,
 
-    pub arg_sender: std::sync::mpsc::Sender<SolverData<GenericItem, (usize, usize)>>,
+    pub arg_sender: Sender<SolverData<GenericItem, (usize, usize)>>,
     pub strict_source: bool,
 
     pub solution: (Flow<(usize, usize)>, f64),
     pub total_flow: Flow<GenericItem>,
     pub total_flow_sorted_keys: Vec<GenericItem>,
-    pub solution_receiver: std::sync::mpsc::Receiver<SolverSolutionTuple<(usize, usize)>>,
+    pub solution_receiver: Receiver<SolverSolutionTuple<(usize, usize)>>,
 
-    pub factory_sender: Option<std::sync::mpsc::Sender<FactoryInstance>>, // 告诉 planner view，有新工厂啦
+    pub factory_sender: Option<Sender<FactoryInstance>>, // 告诉 planner view，有新工厂啦
 }
 
 impl serde::Serialize for FactoryInstance {
@@ -123,8 +123,8 @@ impl Clone for FactoryInstance {
 
 impl Default for FactoryInstance {
     fn default() -> Self {
-        let (arg_tx, arg_rx) = std::sync::mpsc::channel();
-        let (solution_tx, solution_rx) = std::sync::mpsc::channel();
+        let (arg_tx, arg_rx) = channel();
+        let (solution_tx, solution_rx) = channel();
         SolverData::make_solver_thread(solution_tx, arg_rx);
 
         FactoryInstance {
@@ -152,7 +152,7 @@ impl FactoryInstance {
         }
     }
 
-    pub fn set_sender(mut self, sender: std::sync::mpsc::Sender<FactoryInstance>) -> Self {
+    pub fn set_sender(mut self, sender: Sender<FactoryInstance>) -> Self {
         self.factory_sender = Some(sender);
         self
     }
@@ -541,8 +541,8 @@ pub struct PlannerView {
     pub selected_factory: usize,
     pub new_factory_name: String,
 
-    pub factory_receiver: std::sync::mpsc::Receiver<FactoryInstance>,
-    pub factory_sender: std::sync::mpsc::Sender<FactoryInstance>,
+    pub factory_receiver: Receiver<FactoryInstance>,
+    pub factory_sender: Sender<FactoryInstance>,
 }
 
 impl SolveContext for FactoryInstance {
@@ -649,7 +649,7 @@ impl PlannerView {
 
 impl Default for PlannerView {
     fn default() -> Self {
-        let (factory_tx, factory_rx) = std::sync::mpsc::channel();
+        let (factory_tx, factory_rx) = channel();
         PlannerView {
             factorio: FactorioContext::default().build_order_info(),
             intercept_close: true,
@@ -903,7 +903,7 @@ impl Subview for PlannerView {
 pub struct FactorioContextCreatorView {
     path: Option<std::path::PathBuf>,
     mod_path: Option<std::path::PathBuf>,
-    subview_sender: Option<std::sync::mpsc::Sender<Box<dyn Subview>>>,
+    subview_sender: Option<Sender<Box<dyn Subview>>>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -1025,7 +1025,7 @@ impl Subview for FactorioContextCreatorView {
 }
 
 impl GameContextCreatorView for FactorioContextCreatorView {
-    fn set_subview_sender(&mut self, sender: std::sync::mpsc::Sender<Box<dyn Subview>>) {
+    fn set_subview_sender(&mut self, sender: Sender<Box<dyn Subview>>) {
         self.subview_sender = Some(sender);
     }
 }

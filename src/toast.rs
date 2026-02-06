@@ -1,9 +1,11 @@
+use std::sync::Mutex;
+
 use egui_toast::ToastKind;
 
 use crate::update::{DownloadProgress, get_download_progress};
 
 lazy_static::lazy_static! {
-    pub static ref TOASTS: std::sync::Mutex<egui_toast::Toasts> = std::sync::Mutex::new(setup_toasts());
+    pub static ref TOASTS: Mutex<egui_toast::Toasts> = Mutex::new(setup_toasts());
 }
 
 pub fn setup_toasts() -> egui_toast::Toasts {
