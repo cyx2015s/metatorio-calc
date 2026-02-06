@@ -2,7 +2,9 @@ use std::collections::HashMap;
 
 use egui::Vec2;
 
-use crate::factorio::{IdWithQuality, drag_value, editor::icon::*, modal::SelectorModal, model::*};
+use crate::factorio::{
+    FactorioContext, IdWithQuality, drag_value, editor::icon::*, modal::SelectorModal, model::*,
+};
 
 #[derive(Debug, Clone, Default)]
 pub struct SelectorStorage {
@@ -95,6 +97,7 @@ where
 
 impl<'a> egui::Widget for Selector<'a, str, String> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+        let data = &self.factorio.data;
         let mut response = ui.response().clone();
         let available_space = ui.available_size();
         let group_count = (available_space.x as usize / 70).max(4);
@@ -103,10 +106,7 @@ impl<'a> egui::Widget for Selector<'a, str, String> {
         let mut storage: SelectorStorage =
             ui.memory(move |mem| mem.data.get_temp::<SelectorStorage>(id).unwrap_or_default());
         let mut filtered_group = HashMap::new();
-        for (i, group) in self.factorio.ordered_entries[self.type_name]
-            .iter()
-            .enumerate()
-        {
+        for (i, group) in data.ordered_entries[self.type_name].iter().enumerate() {
             for subgroup in group.1.iter() {
                 for item_name in subgroup.1.iter() {
                     if !self
@@ -129,7 +129,7 @@ impl<'a> egui::Widget for Selector<'a, str, String> {
             ui.label("无满足条件的选项。");
             return ui.response().clone();
         }
-        let order_info = &self.factorio.ordered_entries[self.type_name];
+        let order_info = &data.ordered_entries[self.type_name];
         egui::Grid::new("group")
             .min_row_height(64.0)
             .min_col_width(64.0)
@@ -137,10 +137,7 @@ impl<'a> egui::Widget for Selector<'a, str, String> {
             .spacing(Vec2 { x: 6.0, y: 6.0 })
             .show(ui, |ui| {
                 let mut idx = 0;
-                for (i, group) in self.factorio.ordered_entries[self.type_name]
-                    .iter()
-                    .enumerate()
-                {
+                for (i, group) in order_info.iter().enumerate() {
                     if (idx % group_count) == 0 && idx != 0 {
                         ui.end_row();
                     }
@@ -204,19 +201,17 @@ impl<'a> egui::Widget for Selector<'a, str, String> {
                             button = button.on_hover_ui(|ui| (hover)(ui, item_name, self.factorio));
                         } else {
                             button = button.on_hover_text(
-                                self.factorio
-                                    .get_display_name(self.type_name, item_name)
-                                    .to_string(),
+                                data.get_display_name(self.type_name, item_name).to_string(),
                             );
                         }
 
                         if button.clicked() {
                             storage.subgroup = j;
                             if let Some(&mut ref mut selected_item) = self.current {
-                                *selected_item = item_name.clone();
+                                *selected_item = item_name.to_string();
                             }
                             if let Some(&mut ref mut output) = self.output {
-                                *output = Some(item_name.clone());
+                                *output = Some(item_name.to_string());
                             }
                             response.mark_changed();
                             response.set_close();
@@ -317,13 +312,14 @@ fn quality_selector(
     selected_quality: &mut Option<u8>,
 ) -> bool {
     let mut changed = false;
+    let data = &factorio.data;
     egui::Grid::new("quality")
         .max_col_width(35.0)
         .min_col_width(35.0)
         .min_row_height(35.0)
         .spacing(Vec2 { x: 0.0, y: 0.0 })
         .show(ui, |ui| {
-            for (idx, quality) in factorio.qualities.iter().enumerate() {
+            for (idx, quality) in data.qualities.iter().enumerate() {
                 let quality_button = ui
                     .add_sized(
                         [32.0, 32.0],
@@ -339,7 +335,7 @@ fn quality_selector(
                                 },
                             ),
                     )
-                    .on_hover_text(factorio.get_display_name("quality", &quality.base.name))
+                    .on_hover_text(data.get_display_name("quality", &quality.base.name))
                     .interact(egui::Sense::click());
                 if quality_button.clicked() {
                     *selected_quality = Some(idx as u8);
@@ -358,6 +354,7 @@ pub fn generic_item_selector(
     id: egui::Id,
 ) -> bool {
     let mut changed = false;
+    let data = &factorio.data;
     let toggle = response.clicked();
     let clear = response.secondary_clicked();
     ui.vertical(|ui| {
@@ -463,8 +460,7 @@ pub fn generic_item_selector(
                     });
                 } else if ui.button("附加温度").clicked() {
                     *temperature = Some(
-                        factorio
-                            .fluids
+                        data.fluids
                             .get(name)
                             .map(|f| f.default_temperature)
                             .unwrap_or(15.0) as i32,
@@ -524,7 +520,7 @@ pub fn generic_item_selector(
                 egui::ComboBox::from_id_salt(id.with("item-fuel-category"))
                     .selected_text(category.clone())
                     .show_ui(ui, |ui| {
-                        for cat in factorio.order_of_entries["fuel-category"].keys() {
+                        for cat in data.order_of_entries["fuel-category"].keys() {
                             changed |= ui.selectable_value(category, cat.clone(), cat).clicked();
                         }
                     });
@@ -535,7 +531,7 @@ pub fn generic_item_selector(
                 egui::ComboBox::from_id_salt(id.with("pollution-type"))
                     .selected_text(name.clone())
                     .show_ui(ui, |ui| {
-                        for pollution in factorio.order_of_entries["airborne-pollutant"].keys() {
+                        for pollution in data.order_of_entries["airborne-pollutant"].keys() {
                             changed |= ui
                                 .selectable_value(name, pollution.clone(), pollution)
                                 .clicked();

@@ -30,21 +30,19 @@ impl<'a, T: HasPrototypeBase> PrototypeHover<'a, T> {
 
 impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+        let data = &self.factorio.data;
         let mut ingredients: Vec<&RecipeIngredient> = self.prototype.ingredients.iter().collect();
         ingredients.sort_by_key(|ingredient| match ingredient {
-            RecipeIngredient::Item(i) => (0, &self.factorio.order_of_entries["item"][&i.name]),
-            RecipeIngredient::Fluid(f) => (1, &self.factorio.order_of_entries["fluid"][&f.name]),
+            RecipeIngredient::Item(i) => (0, data.order_of_entries["item"][&i.name]),
+            RecipeIngredient::Fluid(f) => (1, data.order_of_entries["fluid"][&f.name]),
         });
         let mut results: Vec<&RecipeResult> = self.prototype.results.iter().collect();
         results.sort_by_key(|result| match result {
-            RecipeResult::Item(i) => (0, &self.factorio.order_of_entries["item"][&i.name]),
-            RecipeResult::Fluid(f) => (1, &self.factorio.order_of_entries["fluid"][&f.name]),
+            RecipeResult::Item(i) => (0, data.order_of_entries["item"][&i.name]),
+            RecipeResult::Fluid(f) => (1, data.order_of_entries["fluid"][&f.name]),
         });
         ui.vertical(|ui| {
-            ui.label(
-                self.factorio
-                    .get_display_name("recipe", &self.prototype.base.name),
-            );
+            ui.label(data.get_display_name("recipe", &self.prototype.base.name));
             ui.add(CompactLabel::new(self.prototype.energy_required).with_format("{}s"));
             ui.horizontal_top(|ui| {
                 if ingredients.is_empty() {
@@ -163,7 +161,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
                                                 }
                                                 None => {
                                                     if let Some(fluid) =
-                                                        self.factorio.fluids.get(&f.name)
+                                                        data.fluids.get(&f.name)
                                                     {
                                                         ui.add(
                                                             CompactLabel::new(
@@ -190,10 +188,10 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
 
 impl<'a> egui::Widget for PrototypeHover<'a, CraftingMachinePrototype> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+        let data = &self.factorio.data;
         ui.vertical(|ui| {
             ui.label(
-                self.factorio
-                    .get_display_name("entity", &self.prototype.base.base.name),
+                data.get_display_name("entity", &self.prototype.base.base.name),
             );
             ui.label(format!("制造速度: {}", self.prototype.crafting_speed));
             ui.label(format!("插件槽位: {}", self.prototype.module_slots));

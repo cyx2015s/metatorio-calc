@@ -65,6 +65,14 @@ where
     }
 }
 
+pub fn str_filter(s: &str, f: &FactorioContext, type_name: &str, filter_string: &str) -> bool {
+    s.to_lowercase().contains(&filter_string.to_lowercase())
+        || f.data
+            .get_display_name(type_name, s)
+            .to_lowercase()
+            .contains(&filter_string.to_lowercase())
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct FilterString(pub String);
 
@@ -88,12 +96,7 @@ impl egui::Widget for SelectorModal<'_, str, String> {
                     .insert_temp(self.id, FilterString(filter_string.clone()));
             });
             let type_name = widget.type_name;
-            widget = widget.chain_filter(move |s, f| {
-                s.to_lowercase().contains(&filter_string.to_lowercase())
-                    || f.get_display_name(type_name, s)
-                        .to_lowercase()
-                        .contains(&filter_string.to_lowercase())
-            });
+            widget = widget.chain_filter(move |s, f| str_filter(s, f, type_name, &filter_string));
 
             egui::ScrollArea::vertical()
                 .max_width(f32::INFINITY)
@@ -113,8 +116,9 @@ impl egui::Widget for SelectorModal<'_, str, String> {
 impl egui::Widget for SelectorModal<'_, IdWithQuality, IdWithQuality> {
     fn ui(mut self, ui: &mut egui::Ui) -> egui::Response {
         assert!(self.selector.is_some(), "无法选中");
+        let data = &self.factorio.data;
         let mut response = ui.response().clone();
-        if self.factorio.qualities.len() == 1 {
+        if data.qualities.len() == 1 {
             // 回退到普通选择器
             let mut degenerated: Option<String> = None;
 
@@ -169,15 +173,7 @@ impl egui::Widget for SelectorModal<'_, IdWithQuality, IdWithQuality> {
             });
             let type_name = widget.type_name;
             widget = widget
-                .chain_filter(move |s, f| {
-                    if filter_string.is_empty() {
-                        return true;
-                    }
-                    s.0.to_lowercase().contains(&filter_string.to_lowercase())
-                        || f.get_display_name(type_name, &s.0)
-                            .to_lowercase()
-                            .contains(&filter_string.to_lowercase())
-                })
+                .chain_filter(move |s, f| str_filter(&s.0, f, type_name, &filter_string))
                 .with_forget(self.toggle);
 
             egui::ScrollArea::vertical()

@@ -29,7 +29,7 @@ pub const LOCALE_CATEGORIES: &[&str] = &[
 ];
 
 #[derive(Debug, Clone, Default)]
-pub struct FactorioContext {
+pub struct DataContext {
     /// 模组信息
     pub mods: Vec<(String, String)>,
     /// 图标路径
@@ -105,14 +105,14 @@ where
         .unwrap_or_else(|_| panic!("Failed to deserialize content {}", value))
 }
 
-impl FactorioContext {
+impl DataContext {
     pub fn test_load() -> Self {
         let value = serde_json::from_str::<Value>(
             std::fs::read_to_string("assets/data-raw-dump.json")
                 .unwrap()
                 .as_str(),
         );
-        FactorioContext::load(&value.unwrap()).build_order_info()
+        DataContext::load(&value.unwrap()).build_order_info()
     }
     pub fn load(value: &Value) -> Self {
         let groups = deserialize_type(value, "item-group");
@@ -184,7 +184,7 @@ impl FactorioContext {
         // ret.planets.iter().for_each(|(_, p)| {
         //     dbg!(p.collect_autoplaced(&ret));
         // });
-        FactorioContext {
+        DataContext {
             qualities,
             groups,
             subgroups,
@@ -212,7 +212,7 @@ impl FactorioContext {
         executable_path: &std::path::Path,
         mod_path: Option<&std::path::Path>,
         lang: Option<&str>,
-    ) -> Result<FactorioContext, AppError> {
+    ) -> Result<DataContext, AppError> {
         // 此步较为复杂，调用方应该异步执行
         // 1. 在这个软件的数据文件夹下（秉持绿色原理，创建在这个项目程序本身的同级文件里），创建一个config.cfg
         let lang = lang.unwrap_or("zh-CN");
@@ -413,10 +413,10 @@ impl FactorioContext {
             &tmp_mod_list_json_path,
             serde_json::to_string_pretty(&mod_infos_json)?,
         )?;
-        FactorioContext::load_from_tmp_no_dump()
+        DataContext::load_from_tmp_no_dump()
     }
 
-    pub fn load_from_tmp_no_dump() -> Result<FactorioContext, AppError> {
+    pub fn load_from_tmp_no_dump() -> Result<DataContext, AppError> {
         let self_path = get_workding_directory();
         let raw_path = self_path.join("tmp/script-output/data-raw-dump.json");
         let icon_path = self_path.join("tmp/script-output/");
@@ -433,7 +433,7 @@ impl FactorioContext {
                 raw_path.to_string_lossy()
             ))
         })?;
-        let mut factorio = FactorioContext::load(&json_value);
+        let mut factorio = DataContext::load(&json_value);
         factorio.icon_path = icon_path;
         for locale_category in LOCALE_CATEGORIES.iter() {
             log::info!("加载翻译类别 {}", locale_category);
@@ -713,7 +713,7 @@ pub fn make_located_generic_recipe(
 
 #[test]
 fn test_load_context() {
-    let factorio = FactorioContext::test_load();
+    let factorio = DataContext::test_load();
     assert!(factorio.items.contains_key("iron-plate"));
     assert!(factorio.entities.contains_key("stone-furnace"));
     assert!(factorio.fluids.contains_key("water"));

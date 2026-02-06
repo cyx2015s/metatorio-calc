@@ -1,5 +1,5 @@
 mod auto;
-mod context;
+mod data;
 mod energy;
 mod entity;
 mod fluid;
@@ -13,7 +13,7 @@ mod technology;
 mod tile;
 
 pub use auto::*;
-pub use context::*;
+pub use data::*;
 pub use energy::*;
 pub use entity::*;
 pub use fluid::*;

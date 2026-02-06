@@ -4,6 +4,7 @@ use crate::{
     concept::*,
     dyn_serde::*,
     factorio::{
+        UserContext,
         common::*,
         editor::{icon::*, modal::*},
         format::*,
@@ -357,6 +358,7 @@ impl FactoryInstance {
         changed: &mut bool,
         need_suggestions: &mut bool,
     ) {
+        let data = &factorio.data;
         ui.heading("目标产量/消耗");
         self.target.retain_mut(|(item, amount)| {
             let mut deleted = false;
@@ -481,9 +483,9 @@ impl FactoryInstance {
             *changed = true;
         }
         ui.menu_button("从星球自动选择", |ui| {
-            for planet in factorio.planets.values() {
+            for planet in factorio.data.planets.values() {
                 if ui
-                    .button(factorio.get_display_name("space-location", &planet.base.name))
+                    .button(data.get_display_name("space-location", &planet.base.name))
                     .clicked()
                 {
                     self.external.clear();
@@ -639,9 +641,12 @@ impl EditorView for FactoryInstance {
 }
 
 impl PlannerView {
-    pub fn new(factorio: FactorioContext) -> Self {
+    pub fn new(data: DataContext) -> Self {
         PlannerView {
-            factorio: factorio.build_order_info(),
+            factorio: FactorioContext {
+                data: data.build_order_info(),
+                user: UserContext::default(),
+            },
             ..Default::default()
         }
     }
@@ -651,7 +656,10 @@ impl Default for PlannerView {
     fn default() -> Self {
         let (factory_tx, factory_rx) = channel();
         PlannerView {
-            factorio: FactorioContext::default().build_order_info(),
+            factorio: FactorioContext {
+                data: DataContext::default().build_order_info(),
+                user: UserContext::default(),
+            },
             intercept_close: true,
             factories: Vec::new(),
             selected_factory: 0,
@@ -889,7 +897,7 @@ impl Subview for PlannerView {
     }
 
     fn description(&self) -> String {
-        self.factorio.mods.iter().fold(
+        self.factorio.data.mods.iter().fold(
             "使用以下模组: ".to_string(),
             |mut acc, (mod_name, mod_version)| {
                 acc.push_str(&format!("\n{} ({}), ", mod_name, mod_version));
@@ -976,14 +984,14 @@ impl Subview for FactorioContextCreatorView {
                 let sender = sender.clone();
                 self.thread =
                     Some(std::thread::spawn(
-                        move || match FactorioContext::load_from_executable_path(
+                        move || match DataContext::load_from_executable_path(
                             &exe_path,
                             mod_path.as_deref(),
                             None,
                         ) {
-                            Ok(factorio) => {
+                            Ok(data) => {
                                 sender
-                                    .send(Box::new(PlannerView::new(factorio)))
+                                    .send(Box::new(PlannerView::new(data)))
                                     .expect("Failed to send subview");
                             }
                             Err(e) => {
@@ -1004,9 +1012,9 @@ impl Subview for FactorioContextCreatorView {
                 let sender = sender.clone();
                 self.thread =
                     Some(std::thread::spawn(
-                        move || match FactorioContext::load_from_tmp_no_dump() {
-                            Ok(factorio) => {
-                                sender.send(Box::new(PlannerView::new(factorio))).unwrap();
+                        move || match DataContext::load_from_tmp_no_dump() {
+                            Ok(data) => {
+                                sender.send(Box::new(PlannerView::new(data))).unwrap();
                             }
                             Err(e) => {
                                 crate::toast::error(format!("加载缓存上下文失败: {:?}", e));

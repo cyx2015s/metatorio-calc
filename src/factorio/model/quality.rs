@@ -146,11 +146,11 @@ pub fn calc_quality_distribution(
 
 #[test]
 fn test_calc_quality_distribution() {
-    use crate::factorio::model::context::FactorioContext;
-    let factorio = FactorioContext::test_load();
+    use crate::factorio::DataContext;
+    let data = DataContext::test_load();
 
-    dbg!(calc_quality_distribution(&factorio.qualities, 1.0, 0, 4));
-    dbg!(calc_quality_distribution(&factorio.qualities, 10.0, 0, 4));
-    dbg!(calc_quality_distribution(&factorio.qualities, 100.0, 0, 4));
-    dbg!(calc_quality_distribution(&factorio.qualities, 200.0, 0, 4));
+    dbg!(calc_quality_distribution(&data.qualities, 1.0, 0, 4));
+    dbg!(calc_quality_distribution(&data.qualities, 10.0, 0, 4));
+    dbg!(calc_quality_distribution(&data.qualities, 100.0, 0, 4));
+    dbg!(calc_quality_distribution(&data.qualities, 200.0, 0, 4));
 }

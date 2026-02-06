@@ -43,11 +43,11 @@ impl<'a> Icon<'a> {
     }
 
     pub fn image(&'_ self) -> egui::Image<'_> {
-        let root_path = &self.factorio.icon_path;
+        let data = &self.factorio.data;
+        let root_path = &data.icon_path;
         // 某个 type 的 order info 存在，但是没有对应的物品，视为物品不存在
         // 某个 type 的 order info 不存在，当作存在
-        let icon_path = if self
-            .factorio
+        let icon_path = if data
             .order_of_entries
             .get(self.type_name)
             .is_some_and(|v| v.get(self.item_name).is_none())
@@ -72,7 +72,8 @@ impl<'a> Icon<'a> {
 
 impl<'a> egui::Widget for Icon<'a> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
-        let root_path = &self.factorio.icon_path;
+        let data = &self.factorio.data;
+        let root_path = &data.icon_path;
         egui::Frame::NONE
             .fill(egui::Color32::from_rgba_premultiplied(
                 0xaa, 0xaa, 0xaa, 0xcc,
@@ -101,7 +102,7 @@ impl<'a> egui::Widget for Icon<'a> {
                             "file://{}/{}/{}.png",
                             root_path.to_string_lossy(),
                             "quality",
-                            self.factorio.qualities[self.quality as usize].base.name
+                            data.qualities[self.quality as usize].base.name
                         )),
                     );
                 }
@@ -141,6 +142,7 @@ impl<'a> GenericIcon<'a> {
 
 impl<'a> egui::Widget for GenericIcon<'a> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+        let data = &self.factorio.data;
         match self.item {
             GenericItem::Custom { name } => ui.label(format!("特殊: {}", name)),
             GenericItem::Item(IdWithQuality(name, quality)) => ui.add_sized(
@@ -215,7 +217,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
             }
             GenericItem::Pollution { name } => ui.add_sized(
                 [self.size, self.size],
-                egui::Label::new(self.factorio.get_display_name("airborne-pollutant", name)),
+                egui::Label::new(data.get_display_name("airborne-pollutant", name)),
             ),
         }
     }
@@ -223,30 +225,28 @@ impl<'a> egui::Widget for GenericIcon<'a> {
 
 impl Display for GenericIcon<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let data = &self.factorio.data;
         match self.item {
             GenericItem::Custom { name } => write!(f, "特殊: {}", name),
             GenericItem::Item(IdWithQuality(name, quality)) => {
                 write!(
                     f,
                     "物品: {}({})",
-                    self.factorio.get_display_name("item", name),
-                    self.factorio.get_display_name(
-                        "quality",
-                        &self.factorio.qualities[*quality as usize].base.name
-                    )
+                    data.get_display_name("item", name),
+                    data.get_display_name("quality", &data.qualities[*quality as usize].base.name)
                 )
             }
             GenericItem::Fluid { name, .. } => {
-                write!(f, "流体: {}", self.factorio.get_display_name("fluid", name))
+                write!(f, "流体: {}", data.get_display_name("fluid", name))
             }
             GenericItem::Entity(IdWithQuality(name, quality)) => {
                 write!(
                     f,
                     "实体: {}({})",
-                    self.factorio.get_display_name("entity", name),
-                    self.factorio.get_display_name(
+                    data.get_display_name("entity", name),
+                    data.get_display_name(
                         "quality",
-                        &self.factorio.qualities[*quality as usize].base.name
+                        &data.qualities[*quality as usize].base.name
                     )
                 )
             }
@@ -256,7 +256,7 @@ impl Display for GenericIcon<'_> {
                 Some(fluid) => write!(
                     f,
                     "通过热交换 {} 获得能量",
-                    self.factorio.get_display_name("fluid", fluid)
+                    data.get_display_name("fluid", fluid)
                 ),
                 None => write!(f, "任意来源的流体热量"),
             },
@@ -264,7 +264,7 @@ impl Display for GenericIcon<'_> {
                 Some(fluid) => write!(
                     f,
                     "通过燃烧 {} 获得的能量",
-                    self.factorio.get_display_name("fluid", fluid)
+                    data.get_display_name("fluid", fluid)
                 ),
                 None => write!(f, "任意来源的流体燃料"),
             },
@@ -277,7 +277,7 @@ impl Display for GenericIcon<'_> {
                 write!(
                     f,
                     "污染物: {}",
-                    self.factorio.get_display_name("airborne-pollutant", name)
+                    data.get_display_name("airborne-pollutant", name)
                 )
             }
         }

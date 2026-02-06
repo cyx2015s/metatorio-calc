@@ -1,5 +1,5 @@
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-pub struct FactorioPreferences {
+pub struct UserContext {
     pub time_scale: TimeScale,
 
     pub milestones: Vec<DependencyItem>,

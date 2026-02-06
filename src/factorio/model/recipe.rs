@@ -9,11 +9,12 @@ use crate::{
     comb::Compositions,
     concept::*,
     factorio::{
+        DataContext, FactorioContext,
         common::*,
         editor::{hover::PrototypeHover, icon::Icon},
         modal::SelectorModal,
         model::{
-            context::{FactorioContext, GenericItem},
+            data::GenericItem,
             energy::energy_source_as_flow,
             entity::EntityPrototype,
             module::{ModuleConfig, ModuleConfigEditor},
@@ -449,13 +450,15 @@ impl Default for RecipeMechanicInstance {
 
 impl AsFlow for RecipeMechanicInstance {
     fn as_flow(&self, factorio: &FactorioContext) -> Flow<Self::Item> {
+        let data = &factorio.data;
+
         let mut map = Flow::new();
 
         let mut module_effects = self.module_config.get_effect(factorio).clamped();
 
         let mut base_speed = 1.0;
 
-        let crafter = factorio.crafters.get(&self.machine.0);
+        let crafter = data.crafters.get(&self.machine.0);
 
         if let Some(crafter) = crafter {
             module_effects = module_effects
@@ -468,11 +471,11 @@ impl AsFlow for RecipeMechanicInstance {
             base_speed = crafter.crafting_speed;
             let quality_level = self.machine.1 as usize;
             if let Some(multiplier) = &crafter.crafting_speed_quality_multiplier {
-                let quality = &factorio.qualities[quality_level].base.name;
+                let quality = &data.qualities[quality_level].base.name;
                 let speed_multiplier = multiplier.get(quality).cloned().unwrap_or(1.0);
                 base_speed *= speed_multiplier;
             } else {
-                let quality = &factorio.qualities[quality_level];
+                let quality = &data.qualities[quality_level];
                 base_speed *= quality.crafting_machine_speed_multiplier();
             }
             let energy_related_flow = energy_source_as_flow(
@@ -491,7 +494,7 @@ impl AsFlow for RecipeMechanicInstance {
             }
         }
 
-        if let Some(recipe) = factorio.recipes.get(&self.recipe.0) {
+        if let Some(recipe) = data.recipes.get(&self.recipe.0) {
             base_speed /= recipe.energy_required;
 
             for ingredient in &recipe.ingredients {
@@ -520,10 +523,10 @@ impl AsFlow for RecipeMechanicInstance {
                 }
             }
             let quality_distribution = calc_quality_distribution(
-                &factorio.qualities,
+                &data.qualities,
                 module_effects.quality,
                 self.recipe.1 as usize,
-                factorio.qualities.len(),
+                data.qualities.len(),
             );
             for result in &recipe.results {
                 match result {
@@ -579,7 +582,8 @@ impl AsFlow for RecipeMechanicInstance {
     }
 
     fn cost(&self, factorio: &Self::Game) -> f64 {
-        if let Some(crafter) = factorio.crafters.get(&self.machine.0) {
+        let data = &factorio.data;
+        if let Some(crafter) = data.crafters.get(&self.machine.0) {
             crafter
                 .base
                 .collision_box
@@ -593,7 +597,11 @@ impl AsFlow for RecipeMechanicInstance {
 
 #[test]
 fn test_recipe_normalized() {
-    let factorio = FactorioContext::test_load();
+    let data = DataContext::test_load();
+    let factorio = FactorioContext {
+        data,
+        ..Default::default()
+    };
     let recipe_config = RecipeMechanicInstance {
         recipe: ("iron-gear-wheel".to_string(), 0).into(),
         machine: "assembling-machine-1".into(),
@@ -603,7 +611,7 @@ fn test_recipe_normalized() {
     let result = recipe_config.as_flow(&factorio);
     println!("Recipe Result: {:?}", result);
     let result_with_location =
-        crate::factorio::model::context::make_located_generic_recipe(result.clone(), 1);
+        crate::factorio::model::data::make_located_generic_recipe(result.clone(), 1);
     println!("Recipe Result with Location: {:?}", result_with_location);
 }
 
@@ -645,8 +653,9 @@ pub fn select_crafter_for_recipe(
     excluding: &[IdWithQuality],
 ) -> IdWithQuality {
     // 优先选择用户偏好
+    let data = &factorio.data;
     for pref in preferences {
-        if let Some(crafter) = factorio.crafters.get(&pref.0)
+        if let Some(crafter) = data.crafters.get(&pref.0)
             && machine_fits_for_recipe(crafter, recipe)
         {
             return pref.clone();
@@ -669,7 +678,7 @@ pub fn select_crafter_for_recipe(
         score
     }
     // 找不到用户偏好时，选择最快的机器
-    for (crafter_name, crafter) in &factorio.crafters {
+    for (crafter_name, crafter) in &data.crafters {
         if machine_fits_for_recipe(crafter, recipe)
             && measure_crafter(crafter) > measure
             && !excluding.iter().any(|ex| ex.0 == *crafter_name)
@@ -703,6 +712,7 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
     }
 
     fn instance_view(&mut self, idx: usize, ui: &mut egui::Ui, factorio: &FactorioContext) -> bool {
+        let data = &factorio.data;
         let mut changed = false;
 
         let instance = self.instances.get_mut(idx).unwrap();
@@ -718,7 +728,7 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
                 .on_hover_ui(|ui| {
                     ui.add(PrototypeHover::new(
                         factorio,
-                        factorio.recipes.get(&instance.recipe.0).unwrap(),
+                        data.recipes.get(&instance.recipe.0).unwrap(),
                     ));
                 });
             changed |= ui
@@ -731,7 +741,7 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
                                 .with_hover(
                                     |ui, name: &IdWithQuality, factorio: &FactorioContext| {
                                         if let Some(prototype) =
-                                            factorio.recipes.get(name.0.as_str())
+                                            factorio.data.recipes.get(name.0.as_str())
                                         {
                                             ui.add(PrototypeHover::new(factorio, prototype));
                                         } else {
@@ -744,15 +754,12 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
                 .changed();
         });
         if changed
-            && let Some(recipe) = factorio.recipes.get(&instance.recipe.0)
-            && factorio
+            && let Some(recipe) = data.recipes.get(&instance.recipe.0)
+            && data
                 .crafters
                 .get(&instance.machine.0)
                 .is_none_or(|crafter| {
-                    !machine_fits_for_recipe(
-                        crafter,
-                        factorio.recipes.get(&instance.recipe.0).unwrap(),
-                    )
+                    !machine_fits_for_recipe(crafter, data.recipes.get(&instance.recipe.0).unwrap())
                 })
         {
             instance.machine =
@@ -771,23 +778,26 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
                 )
                 .interact(egui::Sense::click());
 
-            if let Some(crafter) = factorio.crafters.get(&instance.machine.0) {
+            if let Some(crafter) = data.crafters.get(&instance.machine.0) {
                 entity_button = entity_button.on_hover_ui(|ui| {
                     ui.add(PrototypeHover::new(factorio, crafter));
                 });
             }
 
-            let recipe_prototype = factorio.recipes.get(instance.recipe.0.as_str()).unwrap();
+            let recipe_prototype = data.recipes.get(instance.recipe.0.as_str()).unwrap();
             let selector = Selector::new(factorio, "entity")
                 .with_filter(|crafter_name: &IdWithQuality, factorio: &FactorioContext| {
-                    if let Some(crafter) = factorio.crafters.get(&crafter_name.0) {
+                    if let Some(crafter) = data.crafters.get(&crafter_name.0) {
                         return machine_fits_for_recipe(crafter, recipe_prototype);
                     }
                     false
                 })
                 .with_current(&mut instance.machine)
                 .with_hover(|ui, name, factorio| {
-                    ui.add(PrototypeHover::new(factorio, &factorio.crafters[&name.0]));
+                    ui.add(PrototypeHover::new(
+                        factorio,
+                        &factorio.data.crafters[&name.0],
+                    ));
                 });
 
             let widget = SelectorModal::new(entity_button.id, factorio, "选择制造设备")
@@ -798,8 +808,8 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
 
         ui.separator();
 
-        if let Some(crafter) = factorio.crafters.get(&instance.machine.0)
-            && let Some(recipe) = factorio.recipes.get(&instance.recipe.0)
+        if let Some(crafter) = data.crafters.get(&instance.machine.0)
+            && let Some(recipe) = data.recipes.get(&instance.recipe.0)
         {
             let (allowed_effects, allowed_module_categories) =
                 collect_module_limitations(crafter, recipe);
@@ -856,10 +866,11 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
     }
 
     fn update_suggestion(&mut self, factorio: &FactorioContext, item: &GenericItem, amount: f64) {
+        let data = &factorio.data;
         self.suggested_recipes.clear();
         self.suggestion_item = Some(item.clone());
         self.suggestion_amount = amount;
-        for recipe_proto in factorio.recipes.values() {
+        for recipe_proto in data.recipes.values() {
             match item {
                 GenericItem::Item(id_with_quality) => {
                     let mut total_yield = 0.0;
@@ -923,13 +934,14 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
                             .to_lowercase()
                             .contains(&self.suggested_recipes_filter.to_lowercase())
                             || factorio
+                                .data
                                 .get_display_name("recipe", id)
                                 .to_lowercase()
                                 .contains(&self.suggested_recipes_filter.to_lowercase()))
                 })
                 .with_hover(
                     |ui: &mut egui::Ui, name: &str, factorio: &FactorioContext| {
-                        if let Some(prototype) = factorio.recipes.get(name) {
+                        if let Some(prototype) = factorio.data.recipes.get(name) {
                             ui.add(PrototypeHover::new(factorio, prototype));
                         } else {
                             ui.label(format!("未知配方: {}", name));
@@ -946,7 +958,7 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
                 recipe: IdWithQuality(recipe.clone(), quality),
                 machine: select_crafter_for_recipe(
                     factorio,
-                    factorio.recipes.get(recipe.as_str()).unwrap(),
+                    factorio.data.recipes.get(recipe.as_str()).unwrap(),
                     &self.machine_preferences,
                     &[],
                 ),
@@ -961,14 +973,15 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
     fn auto_populate(&mut self, factorio: &FactorioContext) {
         // TODO 品质
         // TODO 插件
+        let data = &factorio.data;
         self.instances.clear();
-        for (recipe_name, recipe_proto) in &factorio.recipes {
+        for (recipe_name, recipe_proto) in &data.recipes {
             let quality_range = if recipe_proto
                 .ingredients
                 .iter()
                 .any(|ingredient| matches!(ingredient, RecipeIngredient::Item(..)))
             {
-                factorio.qualities.len()
+                data.qualities.len()
             } else {
                 1
             };
@@ -986,7 +999,7 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
                 machines.push(machine_name);
             }
             machines.iter().for_each(|machine_name| {
-                if let Some(machine_proto) = factorio.crafters.get(&machine_name.0) {
+                if let Some(machine_proto) = factorio.data.crafters.get(&machine_name.0) {
                     let (allowed_effects, option_allowed_modules) =
                         collect_module_limitations(machine_proto, recipe_proto);
                     let allowed_effects = Some(allowed_effects);
@@ -995,7 +1008,7 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
                         .clone()
                         .into_iter()
                         .filter(|module_name| {
-                            if let Some(module) = factorio.modules.get(&module_name.0) {
+                            if let Some(module) = factorio.data.modules.get(&module_name.0) {
                                 option_allowed_modules.as_ref().is_none_or(
                                     |allowed_module_categories| {
                                         allowed_module_categories.contains(&module.category)
@@ -1065,6 +1078,7 @@ fn collect_module_limitations(
 
 impl EditorView for RecipeMechanic {
     fn editor_view(&mut self, ui: &mut egui::Ui, factorio: &FactorioContext) -> bool {
+        let data = &factorio.data;
         let mut changed = self.submit_operations();
 
         if ui.button("添加配方").clicked() {
@@ -1092,7 +1106,7 @@ impl EditorView for RecipeMechanic {
                         Selector::new(factorio, "entity")
                             .with_output(&mut self.new_machine_preference)
                             .with_filter(|s: &IdWithQuality, f: &FactorioContext| {
-                                f.crafters.contains_key(&s.0)
+                                f.data.crafters.contains_key(&s.0)
                             }),
                     ),
             );
@@ -1129,7 +1143,7 @@ impl EditorView for RecipeMechanic {
 
                     let icon = Icon::new(factorio, "entity", &machine.0).with_quality(machine.1);
                     let mut button = ui.add(icon).interact(egui::Sense::click());
-                    if let Some(crafter) = factorio.crafters.get(&machine.0) {
+                    if let Some(crafter) = data.crafters.get(&machine.0) {
                         button = button.on_hover_ui(|ui| {
                             ui.add(PrototypeHover::new(factorio, crafter));
                         });
@@ -1148,7 +1162,7 @@ impl EditorView for RecipeMechanic {
                                 Selector::new(factorio, "entity")
                                     .with_current(machine)
                                     .with_filter(|s: &IdWithQuality, f: &FactorioContext| {
-                                        f.crafters.contains_key(&s.0)
+                                        f.data.crafters.contains_key(&s.0)
                                     }),
                             ),
                     );
@@ -1175,7 +1189,7 @@ impl EditorView for RecipeMechanic {
                         Selector::new(factorio, "item")
                             .with_output(&mut self.new_enumerate_module)
                             .with_filter(|item: &IdWithQuality, factorio: &FactorioContext| {
-                                factorio.modules.contains_key(&item.0)
+                                factorio.data.modules.contains_key(&item.0)
                             }),
                     ),
             );

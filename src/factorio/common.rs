@@ -10,6 +10,13 @@ use serde_json::Value;
 
 use crate::{concept::*, factorio::*};
 
+
+#[derive(Debug, Clone, Default)]
+pub struct FactorioContext {
+    pub data: DataContext,
+    pub user: UserContext,
+}
+
 pub type Dict<T> = HashMap<String, T>;
 pub type Emissions = Dict<f64>;
 pub type OrderInfo = Vec<(String, Vec<(String, Vec<String>)>)>;
@@ -649,12 +656,13 @@ pub fn get_reverse_order_info(order_info: &OrderInfo) -> ReverseOrderInfo {
 /// Returns (category, order_info, name) tuple for sorting
 fn get_generic_item_sort_key<'a>(
     item: &'a GenericItem,
-    factorio: &FactorioContext,
+    ctx: &'a FactorioContext,
 ) -> (usize, (usize, usize, usize), &'a str) {
+    let data = &ctx.data;
     match item {
         GenericItem::Item(IdWithQuality(name, quality)) => (
             *quality as usize,
-            factorio.order_of_entries["item"]
+            data.order_of_entries["item"]
                 .get(name)
                 .copied()
                 .unwrap_or((0, 0, 0)),
@@ -665,7 +673,7 @@ fn get_generic_item_sort_key<'a>(
             temperature: _,
         } => (
             0x100usize,
-            factorio.order_of_entries["fluid"]
+            data.order_of_entries["fluid"]
                 .get(name)
                 .copied()
                 .unwrap_or((0, 0, 0)),
@@ -673,7 +681,7 @@ fn get_generic_item_sort_key<'a>(
         ),
         GenericItem::Entity(IdWithQuality(name, quality)) => (
             0x200usize + *quality as usize,
-            factorio.order_of_entries["entity"]
+            data.order_of_entries["entity"]
                 .get(name)
                 .copied()
                 .unwrap_or((0, 0, 0)),
