@@ -105,6 +105,7 @@ where
         .unwrap_or_else(|_| panic!("Failed to deserialize content {}", value))
 }
 
+/// 创建 DataContext 的方法
 impl DataContext {
     pub fn test_load() -> Self {
         let value = serde_json::from_str::<Value>(

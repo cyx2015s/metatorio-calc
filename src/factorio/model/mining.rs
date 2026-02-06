@@ -283,7 +283,7 @@ impl AsFlow for MiningMechanicInstance {
 fn test_mining_normalized() {
     let data = DataContext::test_load();
     let factorio = FactorioContext {
-        data,
+        data: std::sync::Arc::new(data),
         ..Default::default()
     };
     let mining_config = MiningMechanicInstance {

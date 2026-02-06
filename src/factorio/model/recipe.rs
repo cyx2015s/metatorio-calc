@@ -9,7 +9,7 @@ use crate::{
     comb::Compositions,
     concept::*,
     factorio::{
-        DataContext, FactorioContext,
+        FactorioContext,
         common::*,
         editor::{hover::PrototypeHover, icon::Icon},
         modal::SelectorModal,
@@ -597,9 +597,9 @@ impl AsFlow for RecipeMechanicInstance {
 
 #[test]
 fn test_recipe_normalized() {
-    let data = DataContext::test_load();
+    let data = crate::factorio::DataContext::test_load();
     let factorio = FactorioContext {
-        data,
+        data: std::sync::Arc::new(data),
         ..Default::default()
     };
     let recipe_config = RecipeMechanicInstance {

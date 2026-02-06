@@ -3,6 +3,7 @@ use std::{
     fmt::{Debug, Display},
     hash::Hash,
     ops::{Add, Mul},
+    sync::Arc,
 };
 
 use indexmap::IndexMap;
@@ -10,10 +11,9 @@ use serde_json::Value;
 
 use crate::{concept::*, factorio::*};
 
-
 #[derive(Debug, Clone, Default)]
 pub struct FactorioContext {
-    pub data: DataContext,
+    pub data: Arc<DataContext>,
     pub user: UserContext,
 }
 
@@ -725,4 +725,13 @@ pub fn sort_generic_items_owned(keys: &mut [GenericItem], factorio: &FactorioCon
         let b_key = get_generic_item_sort_key(b, factorio);
         a_key.cmp(&b_key)
     });
+}
+
+#[test]
+fn test_arc_field() {
+    struct A {
+        b: i32,
+    }
+    let data = Arc::new(A { b: 42 });
+    println!("{}", data.b);
 }

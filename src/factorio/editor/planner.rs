@@ -1,4 +1,4 @@
-use std::{collections::HashSet, sync::mpsc::*};
+use std::{collections::HashSet, sync::{Arc, mpsc::*}};
 
 use crate::{
     concept::*,
@@ -644,7 +644,7 @@ impl PlannerView {
     pub fn new(data: DataContext) -> Self {
         PlannerView {
             factorio: FactorioContext {
-                data: data.build_order_info(),
+                data: Arc::new(data.build_order_info()),
                 user: UserContext::default(),
             },
             ..Default::default()
@@ -657,7 +657,7 @@ impl Default for PlannerView {
         let (factory_tx, factory_rx) = channel();
         PlannerView {
             factorio: FactorioContext {
-                data: DataContext::default().build_order_info(),
+                data: Arc::new(DataContext::default().build_order_info()),
                 user: UserContext::default(),
             },
             intercept_close: true,
