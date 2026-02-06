@@ -8,6 +8,7 @@ use crate::{
         editor::{icon::*, modal::*},
         format::*,
         model::*,
+        number::{CompactLabel, SignedCompactLabel},
         selector::generic_item_selector,
         style::card_frame,
     },

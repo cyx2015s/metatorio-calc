@@ -34,7 +34,7 @@ pub trait SolveContext: Send + Any {
 /// 能够在编辑器中展示自己的视图
 pub trait EditorView: SolveContext {
     // 返回值表示是否产生了需要重新计算的更改
-    fn editor_view(&mut self, ui: &mut egui::Ui, factorio: &Self::Game) -> bool;
+    fn editor_view(&mut self, ui: &mut egui::Ui, game: &Self::Game) -> bool;
 }
 
 pub type Flow<I> = IndexMap<I, f64>;
@@ -42,9 +42,10 @@ pub type Flow<I> = IndexMap<I, f64>;
 /// 能够转化成流参与计算的方法
 pub trait AsFlow: SolveContext {
     /// 传递物品流信息
-    fn as_flow(&self, factorio: &Self::Game) -> Flow<Self::Item>;
+    fn as_flow(&self, game: &Self::Game) -> Flow<Self::Item>;
     /// 执行成本，默认返回 1.0
-    fn cost(&self, _factorio: &Self::Game) -> f64 {
+    fn cost(&self, game: &Self::Game) -> f64 {
+        let _ = game;
         1.0
     }
 }
@@ -89,30 +90,30 @@ where
     fn submit_operations(&mut self) -> bool;
 
     // 返回值表示是否产生了需要重新计算的更改
-    fn instance_view(&mut self, idx: usize, ui: &mut egui::Ui, factorio: &G) -> bool {
+    fn instance_view(&mut self, idx: usize, ui: &mut egui::Ui, game: &G) -> bool {
         let _ = idx;
         let _ = ui;
-        let _ = factorio;
+        let _ = game;
         false
     }
 
     // 想要生产 amount 每秒数量的 item，有哪些方法？
-    fn update_suggestion(&mut self, factorio: &G, item: &I, amount: f64) {
-        let _ = factorio;
+    fn update_suggestion(&mut self, game: &G, item: &I, amount: f64) {
+        let _ = game;
         let _ = item;
         let _ = amount;
     }
 
     // 返回值表示是否产生了需要重新计算的更改
-    fn suggestion_view(&mut self, ui: &mut egui::Ui, factorio: &G) -> bool {
+    fn suggestion_view(&mut self, ui: &mut egui::Ui, game: &G) -> bool {
         let _ = ui;
-        let _ = factorio;
+        let _ = game;
         false
     }
 
     /// 自动规划功能：枚举所有可能的配方组合，填充到instances中。
-    fn auto_populate(&mut self, factorio: &G) {
-        let _ = factorio;
+    fn auto_populate(&mut self, game: &G) {
+        let _ = game;
     }
 }
 
@@ -127,23 +128,23 @@ where
     I: ItemIdent,
 {
     // 返回值表示是否产生了需要重新计算的更改
-    fn instance_view_ext(&mut self, idx: usize, ui: &mut egui::Ui, factorio: &G, user: &U) -> bool {
+    fn instance_view_ext(&mut self, idx: usize, ui: &mut egui::Ui, game: &G, user: &U) -> bool {
         // 默认实现忽视 user
         let _ = user;
-        self.instance_view(idx, ui, factorio)
+        self.instance_view(idx, ui, game)
     }
 
     // 返回值表示是否产生了需要重新计算的更改
-    fn suggestion_view_ext(&mut self, ui: &mut egui::Ui, factorio: &G, user: &U) -> bool {
+    fn suggestion_view_ext(&mut self, ui: &mut egui::Ui, game: &G, user: &U) -> bool {
         // 默认实现忽视 user
         let _ = user;
-        self.suggestion_view(ui, factorio)
+        self.suggestion_view(ui, game)
     }
 
-    fn update_suggestion_ext(&mut self, factorio: &G, user: &mut U, item: &I, amount: f64) {
+    fn update_suggestion_ext(&mut self, game: &G, user: &mut U, item: &I, amount: f64) {
         // 默认实现忽视 user
         let _ = user;
-        self.update_suggestion(factorio, item, amount);
+        self.update_suggestion(game, item, amount);
     }
 }
 

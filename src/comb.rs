@@ -51,7 +51,7 @@ impl Iterator for Compositions {
         let result = Some(self.state.clone());
 
         // 生成下一个组合（字典序）
-        // 算法：从右向左找到第一个可以"进位"的位置
+        // 算法：从右向左找到第一个可以「进位」的位置
         let mut sum_right = 0;
         let mut found = false;
 

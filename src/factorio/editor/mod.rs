@@ -2,6 +2,7 @@ pub mod clipboard;
 pub mod hover;
 pub mod icon;
 pub mod modal;
+pub mod number;
 pub mod planner;
 pub mod selector;
 pub mod style;

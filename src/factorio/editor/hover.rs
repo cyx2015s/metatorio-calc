@@ -1,6 +1,10 @@
 use egui::Vec2;
 
-use crate::factorio::{icon::*, *};
+use crate::factorio::{
+    icon::*,
+    number::{CompactLabel, SignedCompactLabel},
+    *,
+};
 
 #[derive(Debug, Clone)]
 pub struct PrototypeHover<'a, T: HasPrototypeBase> {

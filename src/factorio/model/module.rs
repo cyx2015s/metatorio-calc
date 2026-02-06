@@ -10,9 +10,9 @@ use crate::{
             icon::{GenericIcon, Icon},
             modal::show_modal,
         },
-        format::CompactLabel,
         modal::SelectorModal,
         model::{context::*, entity::*},
+        number::CompactLabel,
         selector::Selector,
     },
 };
