@@ -686,6 +686,10 @@ impl ProjectInstance {
 
 impl SubView for ProjectInstance {
     fn view(&mut self, ui: &mut egui::Ui) {
+        while let Ok(new_factory) = self.factory_receiver.try_recv() {
+            self.factories.push(new_factory);
+            self.saved = false;
+        }
         ui.add(egui::text_edit::TextEdit::singleline(&mut self.name));
         ui.separator();
         egui::Frame::group(ui.style())
@@ -770,6 +774,7 @@ pub struct ProjectView {
     pub data: Arc<DataContext>,
     pub selected: Option<usize>,
     pub projects: Vec<ProjectInstance>,
+    pub project_idx: Vec<usize>,
     pub ignore_close: bool,
     pub delete_request: DeleteRequest,
 }
@@ -781,6 +786,7 @@ impl ProjectView {
             ignore_close: false,
             selected: None,
             projects: Vec::new(),
+            project_idx: Vec::new(),
             delete_request: DeleteRequest::None,
         }
     }
@@ -790,11 +796,13 @@ impl SubView for ProjectView {
     fn view(&mut self, ui: &mut egui::Ui) {
         let mut show_close_confirm = false;
         if ui.input(|i| i.viewport().close_requested())
-            && !self.ignore_close && self.projects.iter().any(|p| !p.saved) {
-                show_close_confirm = true;
-                ui.ctx()
-                    .send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            }
+            && !self.ignore_close
+            && self.projects.iter().any(|p| !p.saved)
+        {
+            show_close_confirm = true;
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        }
 
         show_modal(egui::Id::new("关闭确认"), show_close_confirm, ui, |ui| {
             ui.label("确定要关闭程序吗？未保存的项目将会丢失。");
@@ -823,66 +831,98 @@ impl SubView for ProjectView {
             });
         });
 
-        if let Some(selected) = self.selected {
-            egui::MenuBar::new().ui(ui, |ui| {
-                if ui.button("返回项目列表").clicked() {
-                    self.selected = None;
-                }
-            });
-            self.projects[selected].view(ui);
-        } else {
-            ui.vertical_centered(|ui| {
-                ui.heading("选择一个项目");
-                ui.separator();
-                let button =
-                    ui.add(egui::Button::new("新建一个项目").min_size(egui::vec2(200.0, 28.0)));
-                if button.clicked() {
+        egui::containers::menu::MenuBar::new().ui(ui, |ui| {
+            ui.menu_button("文件", |ui| {
+                if ui.button("新建项目").clicked() {
                     self.projects
                         .push(ProjectInstance::new_arc(self.data.clone()));
                     self.selected = Some(self.projects.len() - 1);
+                    ui.close();
                 }
-                ui.separator();
-                let mut toggle = false;
-                for (idx, project) in self.projects.iter().enumerate() {
-                    let button =
-                        ui.add(egui::Button::new(&project.name).min_size(egui::vec2(200.0, 28.0)));
-                    if button.clicked() {
-                        self.selected = Some(idx);
+                if ui.button("加载项目").clicked() {
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("异星工厂规划项目文件", &["fpp"])
+                        .set_title("打开项目文件")
+                        .pick_file()
+                    {
+                        if let Some(mut project) = load_project(&path) {
+                            project.set_data(self.data.clone());
+                            project.saved = true;
+                            project.file_path = Some(path);
+                            self.projects.push(project);
+                            self.selected = Some(self.projects.len() - 1);
+                        }
                     }
-                    button.context_menu(|ui| {
-                        if ui.button("删除").clicked() {
-                            if project.saved {
-                                self.delete_request = DeleteRequest::Confirmed(idx);
-                            } else {
-                                toggle = true;
-                                self.delete_request = DeleteRequest::Pending(idx);
-                            }
+                    ui.close();
+                }
+            })
+        });
+        let mut toggle = false;
+        if self.project_idx.len() < self.projects.len() {
+            self.project_idx.retain(|&idx| idx < self.projects.len());
+            for idx in 0..self.projects.len() {
+                if !self.project_idx.contains(&idx) {
+                    self.project_idx.push(idx);
+                }
+            }
+        }
+        if self.project_idx.len() > self.projects.len() {
+            self.project_idx.retain(|&idx| idx < self.projects.len());
+        }
+        egui::containers::menu::MenuBar::new().ui(ui, |ui| {
+            ui.label("项目列表:");
+
+            egui_dnd::dnd(ui, "files").show_vec(&mut self.project_idx, |ui, idx, handle, state| {
+                ui.horizontal(|ui| {
+                    handle.ui(ui, |ui| {
+                        ui.label("≡");
+                    });
+                    let project = &self.projects[*idx];
+                    let button = ui.add(
+                        egui::Button::new(&project.name)
+                            .selected(matches!(self.selected, Some(idx))),
+                    );
+                    if button.clicked() {
+                        self.selected = Some(*idx);
+                    }
+                    if ui.button("×").clicked() {
+                        if project.saved == false {
+                            toggle = true;
+                            self.delete_request = DeleteRequest::Pending(*idx);
+                        } else {
+                            self.delete_request = DeleteRequest::Confirmed(*idx);
+                        }
+                        ui.close();
+                    }
+                });
+            });
+        });
+
+        if let Some(selected) = self.selected {
+            self.projects[selected].view(ui);
+        }
+        match self.delete_request {
+            DeleteRequest::Pending(idx) => {
+                show_modal(egui::Id::new("删除确认"), toggle, ui, |ui| {
+                    ui.label("确定要删除该项目吗？此操作无法撤销。");
+                    ui.horizontal(|ui| {
+                        if ui.button("取消").clicked() {
+                            self.delete_request = DeleteRequest::None;
+                            ui.close();
+                        }
+                        if ui.button("删除项目").clicked() {
+                            self.delete_request = DeleteRequest::Confirmed(idx);
+                            ui.close();
                         }
                     });
-                }
-                match self.delete_request {
-                    DeleteRequest::Pending(idx) => {
-                        show_modal(egui::Id::new("删除确认"), toggle, ui, |ui| {
-                            ui.label("确定要删除该项目吗？此操作无法撤销。");
-                            ui.horizontal(|ui| {
-                                if ui.button("取消").clicked() {
-                                    self.delete_request = DeleteRequest::None;
-                                    ui.close();
-                                }
-                                if ui.button("删除项目").clicked() {
-                                    self.delete_request = DeleteRequest::Confirmed(idx);
-                                    ui.close();
-                                }
-                            });
-                        });
-                    }
-                    DeleteRequest::Confirmed(idx) => {
-                        self.projects.remove(idx);
-                        self.delete_request = DeleteRequest::None;
-                    }
-                    DeleteRequest::None => {}
-                }
-            });
+                });
+            }
+            DeleteRequest::Confirmed(idx) => {
+                self.projects.remove(idx);
+                self.selected = None;
+                self.delete_request = DeleteRequest::None;
+            }
+            DeleteRequest::None => {}
         }
     }
 }
