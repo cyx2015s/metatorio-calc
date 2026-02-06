@@ -160,12 +160,16 @@ impl FactoryInstance {
         }
     }
 
-    pub fn set_sender(mut self, sender: Sender<FactoryInstance>) -> Self {
+    pub fn set_sender(&mut self, sender: Sender<FactoryInstance>) {
+        self.factory_sender = Some(sender);
+    }
+
+    pub fn with_sender(mut self, sender: Sender<FactoryInstance>) -> Self {
         self.factory_sender = Some(sender);
         self
     }
 
-    pub fn add_mechanic(mut self, mechanic: impl Mechanic<FactorioContext, GenericItem>) -> Self {
+    pub fn with_mechanic(mut self, mechanic: impl Mechanic<FactorioContext, GenericItem>) -> Self {
         self.mechanics.push(Box::new(mechanic));
         self
     }
@@ -279,7 +283,7 @@ impl FactoryInstance {
 
                 for item in &self.total_flow_sorted_keys {
                     let amount = self.total_flow.get(item).cloned().unwrap_or(0.0);
-                    if amount.abs() < 1e-6 {
+                    if amount.abs() < 1e-8 {
                         continue;
                     }
 
@@ -707,9 +711,9 @@ impl SubView for ProjectInstance {
                         let name = "新工厂".to_string();
                         self.factories.push(
                             FactoryInstance::new(name)
-                                .add_mechanic(RecipeMechanic::default())
-                                .add_mechanic(MiningMechanic::default())
-                                .set_sender(self.factory_sender.clone()),
+                                .with_mechanic(RecipeMechanic::default())
+                                .with_mechanic(MiningMechanic::default())
+                                .with_sender(self.factory_sender.clone()),
                         );
                     }
                     ui.separator();
@@ -867,14 +871,31 @@ impl SubView for ProjectView {
                             project.set_data(self.data.clone());
                             project.saved = true;
                             project.file_path = Some(path);
-                            project.factories.iter().for_each(|f| {
+                            project.factories.iter_mut().for_each(|f| {
                                 f.send_solve_request(&project.factorio);
+                                f.set_sender(project.factory_sender.clone());
                             });
                             self.projects.push(project);
                             self.selected = Some(self.projects.len() - 1);
                         }
                     }
                     ui.close();
+                }
+                if let Some(selected) = self.selected {
+                    ui.separator();
+                    let project = &mut self.projects[selected];
+                    if ui.button("保存项目").clicked() {
+                        if let Some(path) = &project.file_path.clone() {
+                            save_project(project, path);
+                        } else {
+                            save_project_as(project);
+                        }
+                        ui.close();
+                    }
+                    if ui.button("另存为...").clicked() {
+                        save_project_as(project);
+                        ui.close();
+                    }
                 }
             })
         });
