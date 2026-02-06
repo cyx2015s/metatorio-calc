@@ -1,6 +1,7 @@
 use std::{
     collections::HashSet,
-    path::PathBuf,
+    io::BufReader,
+    path::{Path, PathBuf},
     sync::{Arc, mpsc::*},
 };
 
@@ -529,9 +530,7 @@ impl SolveContext for FactoryInstance {
 
 impl EditorView for FactoryInstance {
     fn editor_view(&mut self, ui: &mut egui::Ui, factorio: &FactorioContext) -> bool {
-        let label = ui.add(
-            egui::text_edit::TextEdit::singleline(&mut self.name).font(egui::TextStyle::Heading),
-        );
+        let label = ui.add(egui::text_edit::TextEdit::singleline(&mut self.name));
         ui.separator();
         let id = label.id;
         let mut changed = false;
@@ -619,12 +618,16 @@ impl EditorView for FactoryInstance {
 #[serde(default)]
 pub struct ProjectInstance {
     /// 存储游戏逻辑数据的全部上下文
+    /// 包含一个 Arc<DataContext>，只读的游戏原型上下文
+    /// 另外包含 UserContext，用户的自定义偏好
     pub factorio: FactorioContext,
 
-    pub intercept_close: bool,
+    pub name: String,
 
     pub factories: Vec<FactoryInstance>,
+    #[serde(skip)]
     pub saved: bool,
+    #[serde(skip)]
     pub file_path: Option<PathBuf>,
 
     pub selected_factory: usize,
@@ -643,9 +646,9 @@ impl Default for ProjectInstance {
                 data: Arc::new(DataContext::default()),
                 user: UserContext::default(),
             },
+            name: "未命名项目".to_string(),
             saved: true,
             file_path: None,
-            intercept_close: true,
             factories: Vec::new(),
             selected_factory: 0,
             new_factory_name: String::new(),
@@ -681,40 +684,10 @@ impl ProjectInstance {
     }
 }
 
-impl Subview for ProjectInstance {
+impl SubView for ProjectInstance {
     fn view(&mut self, ui: &mut egui::Ui) {
-        let mut show_close_confirm = false;
-        if self.intercept_close && ui.ctx().input(|input| input.viewport().close_requested()) {
-            if !self.saved {
-                ui.ctx()
-                    .send_viewport_cmd(egui::ViewportCommand::CancelClose);
-                show_close_confirm = true;
-            }
-        }
-        if let Ok(factory) = self.factory_receiver.try_recv() {
-            self.factories.push(factory);
-        }
-        show_modal(
-            egui::Id::new("close-confirm"),
-            show_close_confirm,
-            ui,
-            |ui| {
-                ui.heading("有未保存的工厂，确认关闭吗？");
-                ui.vertical_centered(|ui| {
-                    ui.horizontal(|ui| {
-                        if ui.button("确认").clicked() {
-                            self.intercept_close = false;
-                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
-                        }
-
-                        if ui.button("取消").clicked() {
-                            ui.close();
-                        }
-                    });
-                });
-            },
-        );
-
+        ui.add(egui::text_edit::TextEdit::singleline(&mut self.name));
+        ui.separator();
         egui::Frame::group(ui.style())
             .corner_radius(8.0)
             .stroke(egui::Stroke::new(
@@ -723,124 +696,36 @@ impl Subview for ProjectInstance {
             ))
             .show(ui, |ui| {
                 egui::containers::menu::MenuBar::new().ui(ui, |ui| {
-                    ui.menu_button("文件", |ui| {
-                        if ui.button("新建工厂").clicked() {
-                            let name = "新工厂".to_string();
-                            self.factories.push(
-                                FactoryInstance::new(name)
-                                    .add_mechanic(RecipeMechanic::default())
-                                    .add_mechanic(MiningMechanic::default())
-                                    .set_sender(self.factory_sender.clone())
-                                    .into(),
-                            );
+                    if ui.button("+ 新建工厂").clicked() {
+                        let name = "新工厂".to_string();
+                        self.factories.push(
+                            FactoryInstance::new(name)
+                                .add_mechanic(RecipeMechanic::default())
+                                .add_mechanic(MiningMechanic::default())
+                                .set_sender(self.factory_sender.clone()),
+                        );
+                    }
+                    ui.separator();
+                    let mut idx = 0usize;
+                    self.factories.retain_mut(|factory| {
+                        let mut deleted = false;
+                        let button = ui.add(
+                            egui::Button::new(&factory.name).selected(self.selected_factory == idx),
+                        );
+                        if button.clicked() {
+                            self.selected_factory = idx;
                         }
-                        if ui.button("从文件加载工厂……").clicked()
-                            && let Some(path) = rfd::FileDialog::new()
-                                .add_filter("异星工厂规划配置", &["fpc", "json"])
-                                .pick_file()
-                        {
-                            match std::fs::read_to_string(&path) {
-                                Err(err) => {
-                                    crate::toast::error(format!(
-                                        "无法读取文件 {}: {}",
-                                        path.display(),
-                                        err
-                                    ));
+                        button.context_menu(|ui| {
+                            if ui.button("删除").clicked() {
+                                deleted = true;
+                                if self.selected_factory >= idx && self.selected_factory > 0 {
+                                    self.selected_factory -= 1;
                                 }
-                                Ok(content) => {
-                                    match serde_json::from_str::<FactoryInstance>(&content) {
-                                        Err(err) => {
-                                            crate::toast::error(format!(
-                                                "无法解析文件 {}: {}",
-                                                path.display(),
-                                                err
-                                            ));
-                                        }
-                                        Ok(factory) => {
-                                            let thread_path = path.clone();
-                                            std::thread::spawn(move || {
-                                                std::thread::sleep(
-                                                    std::time::Duration::from_millis(500),
-                                                );
-                                                crate::toast::success(format!(
-                                                    "从 {} 加载了新工厂",
-                                                    thread_path.display()
-                                                ));
-                                            });
-                                            let factory =
-                                                factory.set_sender(self.factory_sender.clone());
-                                            factory.send_solve_request(&self.factorio);
-                                            self.factories.push(factory);
-                                        }
-                                    }
-                                }
+                                idx -= 1;
                             }
-                        }
-                    });
-                });
-                ui.separator();
-                egui::containers::menu::MenuBar::new().ui(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        let mut idx = 0usize;
-                        self.factories.retain_mut(|factory| {
-                            let mut deleted = false;
-                            let button = ui.add(
-                                egui::Button::new(&factory.name)
-                                    .selected(self.selected_factory == idx),
-                            );
-                            if button.clicked() {
-                                self.selected_factory = idx;
-                            }
-                            button.context_menu(|ui| {
-                                // if let Some(file_path) = factory.file_path.as_ref()
-                                //     && ui
-                                //         .add(egui::Button::new("保存").shortcut_text("Ctrl+S"))
-                                //         .clicked()
-                                // {
-                                //     if let Ok(()) = save_to_file(&factory, file_path) {
-                                //         factory.saved = true;
-                                //         crate::toast::success(format!(
-                                //             "工厂已保存到 {}",
-                                //             file_path.display()
-                                //         ));
-                                //     }
-                                //     ui.close();
-                                // }
-                                // if ui
-                                //     .add(if factory.file_path.is_some() {
-                                //         egui::Button::new("另存为……")
-                                //     } else {
-                                //         egui::Button::new("保存……").shortcut_text("Ctrl+S")
-                                //     })
-                                //     .clicked()
-                                // {
-                                //     if let Some(path) = rfd::FileDialog::new()
-                                //         .add_filter("异星工厂规划配置", &["fpc", "json"])
-                                //         .set_file_name(format!("{}.fpc", &factory.name).as_str())
-                                //         .save_file()
-                                //         && let Ok(()) = save_to_file(&factory, &path)
-                                //     {
-                                //         factory.saved = true;
-                                //         factory.file_path = Some(path.clone());
-                                //         crate::toast::success(format!(
-                                //             "工厂已保存到 {}",
-                                //             path.display()
-                                //         ));
-                                //     }
-                                //     ui.close();
-                                // }
-
-                                if ui.button("删除").clicked() {
-                                    deleted = true;
-                                    if self.selected_factory >= idx && self.selected_factory > 0 {
-                                        self.selected_factory -= 1;
-                                    }
-                                    idx -= 1;
-                                }
-                            });
-                            idx += 1;
-                            !deleted
-                        })
+                        });
+                        idx += 1;
+                        !deleted
                     });
                 });
                 ui.separator();
@@ -852,42 +737,22 @@ impl Subview for ProjectInstance {
                         egui::FontSelection::Default,
                         egui::Align::Center,
                     );
-                    egui::RichText::new("点击上方的文件菜单新建工厂或加载一个工厂存档。")
-                        .append_to(
-                            &mut layout_job,
-                            ui.style(),
-                            egui::FontSelection::Default,
-                            egui::Align::Center,
-                        );
+                    egui::RichText::new("点击上方的新建工厂按钮创建一个新工厂。").append_to(
+                        &mut layout_job,
+                        ui.style(),
+                        egui::FontSelection::Default,
+                        egui::Align::Center,
+                    );
                     ui.add_sized(ui.available_size(), egui::Label::new(layout_job));
                 } else {
-                    let factory = &mut self.factories[self.selected_factory];
-                    self.saved &= !factory.editor_view(ui, &self.factorio);
-                    // if ui
-                    //     .ctx()
-                    //     .input(|input| input.modifiers.command && input.key_pressed(egui::Key::S))
-                    //     && !factory.saved
-                    // {
-                    //     if factory.file_path.is_none() {
-                    //         let file_path = rfd::FileDialog::new()
-                    //             .add_filter("异星工厂规划配置", &["fpc", "json"])
-                    //             .set_file_name(format!("{}.fpc", &factory.name).as_str())
-                    //             .save_file();
-                    //         factory.file_path = file_path;
-                    //     }
-                    //     if let Some(path) = factory.file_path.as_ref()
-                    //         && let Ok(()) = save_to_file(&factory, path)
-                    //     {
-                    //         crate::toast::success(format!("工厂已保存到 {}", path.display()));
-                    //         factory.saved = true;
-                    //     }
-                    // }
+                    self.saved &=
+                        !self.factories[self.selected_factory].editor_view(ui, &self.factorio);
                 }
             });
     }
 
     fn name(&self) -> String {
-        "异星工厂 - 工厂规划器".to_string()
+        self.name.clone()
     }
 
     fn description(&self) -> String {
@@ -901,15 +766,187 @@ impl Subview for ProjectInstance {
     }
 }
 
+pub struct ProjectView {
+    pub data: Arc<DataContext>,
+    pub selected: Option<usize>,
+    pub projects: Vec<ProjectInstance>,
+    pub ignore_close: bool,
+    pub delete_request: DeleteRequest,
+}
+
+impl ProjectView {
+    pub fn new(data: DataContext) -> Self {
+        ProjectView {
+            data: Arc::new(data.build_order_info()),
+            ignore_close: false,
+            selected: None,
+            projects: Vec::new(),
+            delete_request: DeleteRequest::None,
+        }
+    }
+}
+
+impl SubView for ProjectView {
+    fn view(&mut self, ui: &mut egui::Ui) {
+        let mut show_close_confirm = false;
+        if ui.input(|i| i.viewport().close_requested())
+            && !self.ignore_close && self.projects.iter().any(|p| !p.saved) {
+                show_close_confirm = true;
+                ui.ctx()
+                    .send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            }
+
+        show_modal(egui::Id::new("关闭确认"), show_close_confirm, ui, |ui| {
+            ui.label("确定要关闭程序吗？未保存的项目将会丢失。");
+            ui.horizontal(|ui| {
+                if ui.button("取消").clicked() {
+                    ui.close();
+                }
+                if ui.button("关闭程序").clicked() {
+                    self.ignore_close = true;
+                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+                if ui.button("关闭前保存").clicked() {
+                    for project in self.projects.iter_mut() {
+                        if !project.saved {
+                            if let Some(path) = &project.file_path.clone() {
+                                save_project(project, path);
+                            } else {
+                                save_project_as(project);
+                            }
+                            project.saved = true;
+                        }
+                    }
+                    self.ignore_close = true;
+                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+            });
+        });
+
+        if let Some(selected) = self.selected {
+            egui::MenuBar::new().ui(ui, |ui| {
+                if ui.button("返回项目列表").clicked() {
+                    self.selected = None;
+                }
+            });
+            self.projects[selected].view(ui);
+        } else {
+            ui.vertical_centered(|ui| {
+                ui.heading("选择一个项目");
+                ui.separator();
+                let button =
+                    ui.add(egui::Button::new("新建一个项目").min_size(egui::vec2(200.0, 28.0)));
+                if button.clicked() {
+                    self.projects
+                        .push(ProjectInstance::new_arc(self.data.clone()));
+                    self.selected = Some(self.projects.len() - 1);
+                }
+                ui.separator();
+                let mut toggle = false;
+                for (idx, project) in self.projects.iter().enumerate() {
+                    let button =
+                        ui.add(egui::Button::new(&project.name).min_size(egui::vec2(200.0, 28.0)));
+                    if button.clicked() {
+                        self.selected = Some(idx);
+                    }
+                    button.context_menu(|ui| {
+                        if ui.button("删除").clicked() {
+                            if project.saved {
+                                self.delete_request = DeleteRequest::Confirmed(idx);
+                            } else {
+                                toggle = true;
+                                self.delete_request = DeleteRequest::Pending(idx);
+                            }
+                        }
+                    });
+                }
+                match self.delete_request {
+                    DeleteRequest::Pending(idx) => {
+                        show_modal(egui::Id::new("删除确认"), toggle, ui, |ui| {
+                            ui.label("确定要删除该项目吗？此操作无法撤销。");
+                            ui.horizontal(|ui| {
+                                if ui.button("取消").clicked() {
+                                    self.delete_request = DeleteRequest::None;
+                                    ui.close();
+                                }
+                                if ui.button("删除项目").clicked() {
+                                    self.delete_request = DeleteRequest::Confirmed(idx);
+                                    ui.close();
+                                }
+                            });
+                        });
+                    }
+                    DeleteRequest::Confirmed(idx) => {
+                        self.projects.remove(idx);
+                        self.delete_request = DeleteRequest::None;
+                    }
+                    DeleteRequest::None => {}
+                }
+            });
+        }
+    }
+}
+
+pub enum DeleteRequest {
+    None,
+    Pending(usize),
+    Confirmed(usize),
+}
+
+pub fn save_project_as(proj: &mut ProjectInstance) {
+    let path = rfd::FileDialog::new()
+        .add_filter("异星工厂规划项目文件", &["fpp"])
+        .set_title("另存为项目文件")
+        .set_file_name(format!("{}.fpp", proj.name))
+        .save_file();
+    if let Some(path) = path {
+        save_project(proj, &path);
+    }
+}
+
+pub fn save_project(proj: &mut ProjectInstance, path: &Path) {
+    match std::fs::File::create(path) {
+        Ok(file) => match serde_json::to_writer_pretty(&file, &proj) {
+            Ok(_) => {
+                proj.saved = true;
+                proj.file_path = Some(path.to_path_buf());
+                crate::toast::info("项目已保存");
+            }
+            Err(e) => {
+                crate::toast::error(format!("保存项目失败: {:?}", e));
+            }
+        },
+        Err(e) => {
+            crate::toast::error(format!("创建文件失败: {:?}", e));
+        }
+    }
+}
+
+pub fn load_project(path: &Path) -> Option<ProjectInstance> {
+    match std::fs::File::open(path) {
+        Ok(file) => match serde_json::from_reader(BufReader::new(file)) {
+            Ok(proj) => Some(proj),
+            Err(e) => {
+                crate::toast::error(format!("加载项目失败: {:?}", e));
+                None
+            }
+        },
+        Err(e) => {
+            crate::toast::error(format!("打开文件失败: {:?}", e));
+            None
+        }
+    }
+}
+
 #[derive(Default, Debug)]
 pub struct FactorioContextCreatorView {
     path: Option<std::path::PathBuf>,
     mod_path: Option<std::path::PathBuf>,
-    subview_sender: Option<Sender<Box<dyn Subview>>>,
+    subview_sender: Option<Sender<Box<dyn SubView>>>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
-impl Subview for FactorioContextCreatorView {
+impl SubView for FactorioContextCreatorView {
     fn view(&mut self, ui: &mut egui::Ui) {
         ui.vertical_centered(|ui| {
             ui.heading("创建游戏上下文");
@@ -985,7 +1022,7 @@ impl Subview for FactorioContextCreatorView {
                         ) {
                             Ok(data) => {
                                 sender
-                                    .send(Box::new(ProjectInstance::new(data)))
+                                    .send(Box::new(ProjectView::new(data)))
                                     .expect("Failed to send subview");
                             }
                             Err(e) => {
@@ -1008,7 +1045,7 @@ impl Subview for FactorioContextCreatorView {
                     Some(std::thread::spawn(
                         move || match DataContext::load_from_tmp_no_dump() {
                             Ok(data) => {
-                                sender.send(Box::new(ProjectInstance::new(data))).unwrap();
+                                sender.send(Box::new(ProjectView::new(data))).unwrap();
                             }
                             Err(e) => {
                                 crate::toast::error(format!("加载缓存上下文失败: {:?}", e));
@@ -1027,7 +1064,7 @@ impl Subview for FactorioContextCreatorView {
 }
 
 impl GameContextCreatorView for FactorioContextCreatorView {
-    fn set_subview_sender(&mut self, sender: Sender<Box<dyn Subview>>) {
+    fn set_subview_sender(&mut self, sender: Sender<Box<dyn SubView>>) {
         self.subview_sender = Some(sender);
     }
 }

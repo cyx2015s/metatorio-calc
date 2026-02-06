@@ -160,9 +160,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
                                                     );
                                                 }
                                                 None => {
-                                                    if let Some(fluid) =
-                                                        data.fluids.get(&f.name)
-                                                    {
+                                                    if let Some(fluid) = data.fluids.get(&f.name) {
                                                         ui.add(
                                                             CompactLabel::new(
                                                                 fluid.default_temperature,
@@ -190,9 +188,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, CraftingMachinePrototype> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         let data = &self.factorio.data;
         ui.vertical(|ui| {
-            ui.label(
-                data.get_display_name("entity", &self.prototype.base.base.name),
-            );
+            ui.label(data.get_display_name("entity", &self.prototype.base.base.name));
             ui.label(format!("制造速度: {}", self.prototype.crafting_speed));
             ui.label(format!("插件槽位: {}", self.prototype.module_slots));
             ui.label(format!(

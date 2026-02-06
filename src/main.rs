@@ -35,11 +35,11 @@ pub enum SelectedSubview {
 
 pub struct MainPage {
     pub creators: Vec<(String, Box<dyn concept::GameContextCreatorView>)>,
-    pub planners: Vec<Box<dyn concept::Subview>>,
+    pub planners: Vec<Box<dyn concept::SubView>>,
     pub selected: SelectedSubview,
 
-    pub subview_receiver: Receiver<Box<dyn concept::Subview>>,
-    pub subview_sender: Sender<Box<dyn concept::Subview>>,
+    pub subview_receiver: Receiver<Box<dyn concept::SubView>>,
+    pub subview_sender: Sender<Box<dyn concept::SubView>>,
 
     pub exp_cpu_usage: f32,
 

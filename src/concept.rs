@@ -13,7 +13,7 @@ pub enum EntryOperation {
     Clone,
 }
 
-pub trait Subview: Send {
+pub trait SubView: Send {
     fn view(&mut self, ui: &mut egui::Ui);
 
     fn name(&self) -> String {
@@ -54,8 +54,8 @@ pub type AsFlowSender<G, I> = Sender<Box<dyn AsFlow<Game = G, Item = I>>>;
 pub type AsFlowReceiver<G, I> = Receiver<Box<dyn AsFlow<Game = G, Item = I>>>;
 pub trait ItemIdent: Debug + Clone + Eq + Hash + Send + 'static {}
 impl<T> ItemIdent for T where T: Debug + Clone + Eq + Hash + Send + 'static {}
-pub trait GameContextCreatorView: Subview {
-    fn set_subview_sender(&mut self, sender: Sender<Box<dyn Subview>>);
+pub trait GameContextCreatorView: SubView {
+    fn set_subview_sender(&mut self, sender: Sender<Box<dyn SubView>>);
 }
 
 /// EditorView:  机制偏好编辑，而非机制实例编辑，每帧必须调用，在这一帧更新上一帧的所有操作
