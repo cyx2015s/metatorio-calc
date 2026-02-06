@@ -620,7 +620,7 @@ fn test_recipe_normalized() {
 #[derive(Default)]
 pub struct RecipeMechanic {
     #[serde(skip)]
-    pub operations: HashMap<usize, EntryOperation>,
+    pub operations: HashMap<usize, EntryOpRequest>,
 
     pub instances: Vec<RecipeMechanicInstance>,
 
@@ -831,10 +831,10 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
     fn instance_operate(
         &mut self,
         idx: usize,
-        f: &mut dyn FnMut(&mut AsFactorioFlow) -> EntryOperation,
+        f: &mut dyn FnMut(&mut AsFactorioFlow) -> EntryOpRequest,
     ) {
         let op = f(&mut self.instances[idx] as &mut AsFactorioFlow);
-        if !matches!(op, EntryOperation::None) {
+        if !matches!(op, EntryOpRequest::None) {
             self.operations.insert(idx, op);
         }
     }
@@ -845,7 +845,7 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
             if self
                 .operations
                 .get(&idx)
-                .is_some_and(|v| matches!(v, EntryOperation::Clone))
+                .is_some_and(|v| matches!(v, EntryOpRequest::Clone))
             {
                 self.instances.push(self.instances[idx].clone());
                 changed = true;
@@ -855,7 +855,7 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
             if self
                 .operations
                 .get(&idx)
-                .is_some_and(|v| matches!(v, EntryOperation::Drop))
+                .is_some_and(|v| matches!(v, EntryOpRequest::Drop))
             {
                 self.instances.remove(idx);
                 changed = true;

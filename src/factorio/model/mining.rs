@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use serde_with::serde_as;
 
 use crate::{
-    concept::{AsFlow, EditorView, EntryOperation, Flow, Mechanic, SolveContext},
+    concept::{AsFlow, EditorView, EntryOpRequest, Flow, Mechanic, SolveContext},
     factorio::{
         ModuleConfig, ModuleConfigEditor, calc_quality_distribution,
         common::*,
@@ -305,7 +305,7 @@ fn test_mining_normalized() {
 #[derive(Default)]
 pub struct MiningMechanic {
     #[serde(skip)]
-    pub operations: HashMap<usize, EntryOperation>,
+    pub operations: HashMap<usize, EntryOpRequest>,
     pub instances: Vec<MiningMechanicInstance>,
     #[serde(skip)]
     pub suggestion_item: Option<GenericItem>,
@@ -484,10 +484,10 @@ impl Mechanic<FactorioContext, GenericItem> for MiningMechanic {
     fn instance_operate(
         &mut self,
         idx: usize,
-        f: &mut dyn FnMut(&mut AsFactorioFlow) -> EntryOperation,
+        f: &mut dyn FnMut(&mut AsFactorioFlow) -> EntryOpRequest,
     ) {
         let op = f(&mut self.instances[idx] as &mut AsFactorioFlow);
-        if !matches!(op, EntryOperation::None) {
+        if !matches!(op, EntryOpRequest::None) {
             self.operations.insert(idx, op);
         }
     }
@@ -499,7 +499,7 @@ impl Mechanic<FactorioContext, GenericItem> for MiningMechanic {
             if self
                 .operations
                 .get(&idx)
-                .is_some_and(|v| matches!(v, EntryOperation::Clone))
+                .is_some_and(|v| matches!(v, EntryOpRequest::Clone))
             {
                 self.instances.push(self.instances[idx].clone());
                 changed = true;
@@ -510,7 +510,7 @@ impl Mechanic<FactorioContext, GenericItem> for MiningMechanic {
             if self
                 .operations
                 .get(&idx)
-                .is_some_and(|v| matches!(v, EntryOperation::Drop))
+                .is_some_and(|v| matches!(v, EntryOpRequest::Drop))
             {
                 self.instances.remove(idx);
                 changed = true;

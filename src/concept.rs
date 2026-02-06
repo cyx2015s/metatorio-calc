@@ -4,13 +4,19 @@ use indexmap::IndexMap;
 
 /// 对一个列表进行操作后，对这个项额外进行的操作，仅用作指示
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EntryOperation {
+pub enum EntryOpRequest {
     /// 无操作
     None,
     /// 删除当前项
     Drop,
     /// 复制当前项
     Clone,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EntryOpResult {
+    Dropped(usize), // 被删除的项*原本*的id
+    Cloned(usize, usize) // 被复制的项*原本*的id，和新项的id
 }
 
 pub trait SubView: Send {
@@ -79,7 +85,7 @@ where
     fn instance_operate(
         &mut self,
         idx: usize,
-        f: &mut dyn FnMut(&mut dyn AsFlow<Game = G, Item = I>) -> EntryOperation,
+        f: &mut dyn FnMut(&mut dyn AsFlow<Game = G, Item = I>) -> EntryOpRequest,
     ) {
         let _ = idx;
         let _ = f;

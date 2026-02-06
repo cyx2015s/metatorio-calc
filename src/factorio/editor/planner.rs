@@ -100,7 +100,7 @@ impl<'de> serde::Deserialize<'de> for FactoryInstance {
                     .map_err(|_| serde::de::Error::custom("反序列化 Mechanic 失败"))?;
                 factory_instance.mechanics.push(mech);
                 not_deserialized_mechanics.remove(mechanic["type"].as_str().unwrap());
-                dbg!(&not_deserialized_mechanics);
+                // dbg!(&not_deserialized_mechanics);
             }
         }
         for not_deserialized_mechanic in not_deserialized_mechanics {
@@ -240,7 +240,7 @@ impl FactoryInstance {
                             let solution_value =
                                 self.solution.0.get(&(idx, jdx)).cloned().unwrap_or(0.0);
                             if solution_value < 1e-10 {
-                                mechanic.instance_operate(jdx, &mut |_| EntryOperation::Drop);
+                                mechanic.instance_operate(jdx, &mut |_| EntryOpRequest::Drop);
                             }
                         }
                     });
@@ -327,15 +327,15 @@ impl FactoryInstance {
                 for jdx in 0..mechanic.instance_len() {
                     ui.horizontal_wrapped(|ui| {
                         mechanic.instance_operate(jdx, &mut |_| {
-                            let mut operation = EntryOperation::None;
+                            let mut operation = EntryOpRequest::None;
 
                             card_frame(ui).show(ui, |ui| {
                                 ui.vertical(|ui| {
-                                    if ui.button("删除").clicked() {
-                                        operation = EntryOperation::Drop;
+                                    if ui.button("🗑").clicked() {
+                                        operation = EntryOpRequest::Drop;
                                     }
-                                    if ui.button("复制").clicked() {
-                                        operation = EntryOperation::Clone;
+                                    if ui.button("📋").clicked() {
+                                        operation = EntryOpRequest::Clone;
                                     }
                                     let solution_value = self.solution.0.get(&(idx, jdx)).cloned();
                                     if let Some(value) = solution_value {
@@ -384,7 +384,7 @@ impl FactoryInstance {
                         } else {
                             *changed |= ui.add(drag_value(amount).suffix("/秒")).changed();
                         }
-                        if ui.button("删除").clicked() {
+                        if ui.button("×").clicked() {
                             deleted = true;
                             *changed = true;
                         }
@@ -453,7 +453,7 @@ impl FactoryInstance {
                         } else {
                             *changed |= ui.add(drag_value(amount).suffix("/秒")).changed();
                         }
-                        if ui.button("删除").clicked() {
+                        if ui.button("×").clicked() {
                             deleted = true;
                             *changed = true;
                         }
@@ -625,6 +625,8 @@ pub struct ProjectInstance {
     pub name: String,
 
     pub factories: Vec<FactoryInstance>,
+    pub factory_idx: Vec<usize>,
+
     #[serde(skip)]
     pub saved: bool,
     #[serde(skip)]
@@ -650,6 +652,7 @@ impl Default for ProjectInstance {
             saved: true,
             file_path: None,
             factories: Vec::new(),
+            factory_idx: Vec::new(),
             selected_factory: 0,
             new_factory_name: String::new(),
             factory_receiver: factory_rx,
@@ -699,7 +702,7 @@ impl SubView for ProjectInstance {
                 ui.visuals().widgets.noninteractive.fg_stroke.color,
             ))
             .show(ui, |ui| {
-                egui::containers::menu::MenuBar::new().ui(ui, |ui| {
+                egui::containers::menu::MenuBar::new().ui(ui, |ui: &mut egui::Ui| {
                     if ui.button("+ 新建工厂").clicked() {
                         let name = "新工厂".to_string();
                         self.factories.push(
@@ -793,6 +796,21 @@ impl ProjectView {
 }
 
 impl SubView for ProjectView {
+    fn name(&self) -> String {
+        "异星工厂规划器".to_string()
+    }
+    fn description(&self) -> String {
+        format!(
+            "使用的模组和版本：{}",
+            self.data
+                .mods
+                .iter()
+                .fold("".to_string(), |mut acc, (mod_name, mod_version)| {
+                    acc.push_str(&format!("\n{} ({}), ", mod_name, mod_version));
+                    acc
+                },)
+        )
+    }
     fn view(&mut self, ui: &mut egui::Ui) {
         let mut show_close_confirm = false;
         if ui.input(|i| i.viewport().close_requested())
@@ -849,6 +867,9 @@ impl SubView for ProjectView {
                             project.set_data(self.data.clone());
                             project.saved = true;
                             project.file_path = Some(path);
+                            project.factories.iter().for_each(|f| {
+                                f.send_solve_request(&project.factorio);
+                            });
                             self.projects.push(project);
                             self.selected = Some(self.projects.len() - 1);
                         }
@@ -857,6 +878,7 @@ impl SubView for ProjectView {
                 }
             })
         });
+        ui.separator();
         let mut toggle = false;
         if self.project_idx.len() < self.projects.len() {
             self.project_idx.retain(|&idx| idx < self.projects.len());
@@ -872,32 +894,40 @@ impl SubView for ProjectView {
         egui::containers::menu::MenuBar::new().ui(ui, |ui| {
             ui.label("项目列表:");
 
-            egui_dnd::dnd(ui, "files").show_vec(&mut self.project_idx, |ui, idx, handle, state| {
-                ui.horizontal(|ui| {
-                    handle.ui(ui, |ui| {
-                        ui.label("≡");
-                    });
-                    let project = &self.projects[*idx];
-                    let button = ui.add(
-                        egui::Button::new(&project.name)
-                            .selected(matches!(self.selected, Some(idx))),
+            ui.style_mut().spacing.scroll = egui::style::ScrollStyle::solid();
+            egui::ScrollArea::horizontal()
+                .id_salt("projects")
+                .show(ui, |ui| {
+                    egui_dnd::dnd(ui, "files").show_vec(
+                        &mut self.project_idx,
+                        |ui, idx, handle, state| {
+                            ui.horizontal(|ui| {
+                                handle.ui(ui, |ui| {
+                                    ui.label("≡");
+                                });
+                                let project = &self.projects[*idx];
+                                let button = ui.add(
+                                    egui::Button::new(&project.name)
+                                        .selected(self.selected == Some(*idx)),
+                                );
+                                if button.clicked() {
+                                    self.selected = Some(*idx);
+                                }
+                                if ui.button("×").clicked() {
+                                    if project.saved == false {
+                                        toggle = true;
+                                        self.delete_request = DeleteRequest::Pending(*idx);
+                                    } else {
+                                        self.delete_request = DeleteRequest::Confirmed(*idx);
+                                    }
+                                    ui.close();
+                                }
+                            });
+                        },
                     );
-                    if button.clicked() {
-                        self.selected = Some(*idx);
-                    }
-                    if ui.button("×").clicked() {
-                        if project.saved == false {
-                            toggle = true;
-                            self.delete_request = DeleteRequest::Pending(*idx);
-                        } else {
-                            self.delete_request = DeleteRequest::Confirmed(*idx);
-                        }
-                        ui.close();
-                    }
                 });
-            });
         });
-
+        ui.separator();
         if let Some(selected) = self.selected {
             self.projects[selected].view(ui);
         }

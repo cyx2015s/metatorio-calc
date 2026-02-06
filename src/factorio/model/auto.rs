@@ -1,7 +1,7 @@
 use std::time::Instant;
 
 use crate::{
-    concept::EntryOperation,
+    concept::EntryOpRequest,
     error::AppError,
     factorio::{FactorioContext, planner::FactoryInstance, sort_generic_items_owned},
     solver::flow_add,
@@ -68,12 +68,12 @@ pub fn factorio_auto_planner(
                     &mut |_| match factory.solution.0.get(&(idx, jdx)) {
                         Some(n) => {
                             if *n < 1e-10 {
-                                EntryOperation::Drop
+                                EntryOpRequest::Drop
                             } else {
-                                EntryOperation::None
+                                EntryOpRequest::None
                             }
                         }
-                        None => EntryOperation::Drop,
+                        None => EntryOpRequest::Drop,
                     },
                 );
             }
