@@ -1,4 +1,8 @@
-use std::{collections::HashSet, sync::{Arc, mpsc::*}};
+use std::{
+    collections::HashSet,
+    path::PathBuf,
+    sync::{Arc, mpsc::*},
+};
 
 use crate::{
     concept::*,
@@ -27,6 +31,7 @@ lazy_static::lazy_static! {
     };
 }
 
+#[derive(Debug)]
 pub struct FactoryInstance {
     pub name: String,
     pub target: Vec<(GenericItem, f64)>,
@@ -39,9 +44,10 @@ pub struct FactoryInstance {
     pub solution: (Flow<(usize, usize)>, f64),
     pub total_flow: Flow<GenericItem>,
     pub total_flow_sorted_keys: Vec<GenericItem>,
+
     pub solution_receiver: Receiver<SolverSolutionTuple<(usize, usize)>>,
 
-    pub factory_sender: Option<Sender<FactoryInstance>>, // 告诉 planner view，有新工厂啦
+    pub factory_sender: Option<Sender<FactoryInstance>>, // 往外通知，有新工厂啦
 }
 
 impl serde::Serialize for FactoryInstance {
@@ -516,37 +522,6 @@ impl FactoryInstance {
     }
 }
 
-pub struct StatefulFactoryInstance {
-    pub factory: FactoryInstance,
-    pub saved: bool,
-    pub file_path: Option<std::path::PathBuf>,
-}
-
-impl From<FactoryInstance> for StatefulFactoryInstance {
-    fn from(factory: FactoryInstance) -> Self {
-        Self {
-            factory,
-            saved: false,
-            file_path: None,
-        }
-    }
-}
-
-pub struct PlannerView {
-    /// 存储游戏逻辑数据的全部上下文
-    pub factorio: FactorioContext,
-
-    pub intercept_close: bool,
-
-    pub factories: Vec<StatefulFactoryInstance>,
-
-    pub selected_factory: usize,
-    pub new_factory_name: String,
-
-    pub factory_receiver: Receiver<FactoryInstance>,
-    pub factory_sender: Sender<FactoryInstance>,
-}
-
 impl SolveContext for FactoryInstance {
     type Game = FactorioContext;
     type Item = GenericItem;
@@ -640,26 +615,36 @@ impl EditorView for FactoryInstance {
     }
 }
 
-impl PlannerView {
-    pub fn new(data: DataContext) -> Self {
-        PlannerView {
-            factorio: FactorioContext {
-                data: Arc::new(data.build_order_info()),
-                user: UserContext::default(),
-            },
-            ..Default::default()
-        }
-    }
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct ProjectInstance {
+    /// 存储游戏逻辑数据的全部上下文
+    pub factorio: FactorioContext,
+
+    pub intercept_close: bool,
+
+    pub factories: Vec<FactoryInstance>,
+    pub saved: bool,
+    pub file_path: Option<PathBuf>,
+
+    pub selected_factory: usize,
+    pub new_factory_name: String,
+    #[serde(skip)]
+    pub factory_receiver: Receiver<FactoryInstance>,
+    #[serde(skip)]
+    pub factory_sender: Sender<FactoryInstance>,
 }
 
-impl Default for PlannerView {
+impl Default for ProjectInstance {
     fn default() -> Self {
         let (factory_tx, factory_rx) = channel();
-        PlannerView {
+        ProjectInstance {
             factorio: FactorioContext {
-                data: Arc::new(DataContext::default().build_order_info()),
+                data: Arc::new(DataContext::default()),
                 user: UserContext::default(),
             },
+            saved: true,
+            file_path: None,
             intercept_close: true,
             factories: Vec::new(),
             selected_factory: 0,
@@ -670,25 +655,44 @@ impl Default for PlannerView {
     }
 }
 
-impl Subview for PlannerView {
+impl ProjectInstance {
+    pub fn new(data: DataContext) -> Self {
+        ProjectInstance {
+            factorio: FactorioContext {
+                data: Arc::new(data.build_order_info()),
+                user: UserContext::default(),
+            },
+            ..Default::default()
+        }
+    }
+
+    pub fn new_arc(data: Arc<DataContext>) -> Self {
+        ProjectInstance {
+            factorio: FactorioContext {
+                data,
+                user: UserContext::default(),
+            },
+            ..Default::default()
+        }
+    }
+
+    pub fn set_data(&mut self, data: Arc<DataContext>) {
+        self.factorio.data = data;
+    }
+}
+
+impl Subview for ProjectInstance {
     fn view(&mut self, ui: &mut egui::Ui) {
         let mut show_close_confirm = false;
         if self.intercept_close && ui.ctx().input(|input| input.viewport().close_requested()) {
-            for factory in &self.factories {
-                if !factory.saved {
-                    ui.ctx()
-                        .send_viewport_cmd(egui::ViewportCommand::CancelClose);
-                    show_close_confirm = true;
-                    break;
-                }
+            if !self.saved {
+                ui.ctx()
+                    .send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                show_close_confirm = true;
             }
         }
         if let Ok(factory) = self.factory_receiver.try_recv() {
-            self.factories.push(StatefulFactoryInstance {
-                factory,
-                saved: false,
-                file_path: None,
-            });
+            self.factories.push(factory);
         }
         show_modal(
             egui::Id::new("close-confirm"),
@@ -766,11 +770,7 @@ impl Subview for PlannerView {
                                             let factory =
                                                 factory.set_sender(self.factory_sender.clone());
                                             factory.send_solve_request(&self.factorio);
-                                            self.factories.push(StatefulFactoryInstance {
-                                                factory,
-                                                saved: true,
-                                                file_path: Some(path),
-                                            });
+                                            self.factories.push(factory);
                                         }
                                     }
                                 }
@@ -785,58 +785,52 @@ impl Subview for PlannerView {
                         self.factories.retain_mut(|factory| {
                             let mut deleted = false;
                             let button = ui.add(
-                                egui::Button::new(format!(
-                                    "{}{}",
-                                    factory.factory.name,
-                                    if factory.saved { "" } else { " *" }
-                                ))
-                                .selected(self.selected_factory == idx),
+                                egui::Button::new(&factory.name)
+                                    .selected(self.selected_factory == idx),
                             );
                             if button.clicked() {
                                 self.selected_factory = idx;
                             }
                             button.context_menu(|ui| {
-                                if let Some(file_path) = factory.file_path.as_ref()
-                                    && ui
-                                        .add(egui::Button::new("保存").shortcut_text("Ctrl+S"))
-                                        .clicked()
-                                {
-                                    if let Ok(()) = save_to_file(&factory.factory, file_path) {
-                                        factory.saved = true;
-                                        crate::toast::success(format!(
-                                            "工厂已保存到 {}",
-                                            file_path.display()
-                                        ));
-                                    }
-                                    ui.close();
-                                }
-                                if ui
-                                    .add(if factory.file_path.is_some() {
-                                        egui::Button::new("另存为……")
-                                    } else {
-                                        egui::Button::new("保存……").shortcut_text("Ctrl+S")
-                                    })
-                                    .clicked()
-                                {
-                                    if let Some(path) = rfd::FileDialog::new()
-                                        .add_filter("异星工厂规划配置", &["fpc", "json"])
-                                        .set_file_name(
-                                            format!("{}.fpc", &factory.factory.name).as_str(),
-                                        )
-                                        .save_file()
-                                        && let Ok(()) = save_to_file(&factory.factory, &path)
-                                    {
-                                        factory.saved = true;
-                                        factory.file_path = Some(path.clone());
-                                        crate::toast::success(format!(
-                                            "工厂已保存到 {}",
-                                            path.display()
-                                        ));
-                                    }
-                                    ui.close();
-                                }
+                                // if let Some(file_path) = factory.file_path.as_ref()
+                                //     && ui
+                                //         .add(egui::Button::new("保存").shortcut_text("Ctrl+S"))
+                                //         .clicked()
+                                // {
+                                //     if let Ok(()) = save_to_file(&factory, file_path) {
+                                //         factory.saved = true;
+                                //         crate::toast::success(format!(
+                                //             "工厂已保存到 {}",
+                                //             file_path.display()
+                                //         ));
+                                //     }
+                                //     ui.close();
+                                // }
+                                // if ui
+                                //     .add(if factory.file_path.is_some() {
+                                //         egui::Button::new("另存为……")
+                                //     } else {
+                                //         egui::Button::new("保存……").shortcut_text("Ctrl+S")
+                                //     })
+                                //     .clicked()
+                                // {
+                                //     if let Some(path) = rfd::FileDialog::new()
+                                //         .add_filter("异星工厂规划配置", &["fpc", "json"])
+                                //         .set_file_name(format!("{}.fpc", &factory.name).as_str())
+                                //         .save_file()
+                                //         && let Ok(()) = save_to_file(&factory, &path)
+                                //     {
+                                //         factory.saved = true;
+                                //         factory.file_path = Some(path.clone());
+                                //         crate::toast::success(format!(
+                                //             "工厂已保存到 {}",
+                                //             path.display()
+                                //         ));
+                                //     }
+                                //     ui.close();
+                                // }
 
-                                if ui.button("关闭").clicked() {
+                                if ui.button("删除").clicked() {
                                     deleted = true;
                                     if self.selected_factory >= idx && self.selected_factory > 0 {
                                         self.selected_factory -= 1;
@@ -868,26 +862,26 @@ impl Subview for PlannerView {
                     ui.add_sized(ui.available_size(), egui::Label::new(layout_job));
                 } else {
                     let factory = &mut self.factories[self.selected_factory];
-                    factory.saved &= !factory.factory.editor_view(ui, &self.factorio);
-                    if ui
-                        .ctx()
-                        .input(|input| input.modifiers.command && input.key_pressed(egui::Key::S))
-                        && !factory.saved
-                    {
-                        if factory.file_path.is_none() {
-                            let file_path = rfd::FileDialog::new()
-                                .add_filter("异星工厂规划配置", &["fpc", "json"])
-                                .set_file_name(format!("{}.fpc", &factory.factory.name).as_str())
-                                .save_file();
-                            factory.file_path = file_path;
-                        }
-                        if let Some(path) = factory.file_path.as_ref()
-                            && let Ok(()) = save_to_file(&factory.factory, path)
-                        {
-                            crate::toast::success(format!("工厂已保存到 {}", path.display()));
-                            factory.saved = true;
-                        }
-                    }
+                    self.saved &= !factory.editor_view(ui, &self.factorio);
+                    // if ui
+                    //     .ctx()
+                    //     .input(|input| input.modifiers.command && input.key_pressed(egui::Key::S))
+                    //     && !factory.saved
+                    // {
+                    //     if factory.file_path.is_none() {
+                    //         let file_path = rfd::FileDialog::new()
+                    //             .add_filter("异星工厂规划配置", &["fpc", "json"])
+                    //             .set_file_name(format!("{}.fpc", &factory.name).as_str())
+                    //             .save_file();
+                    //         factory.file_path = file_path;
+                    //     }
+                    //     if let Some(path) = factory.file_path.as_ref()
+                    //         && let Ok(()) = save_to_file(&factory, path)
+                    //     {
+                    //         crate::toast::success(format!("工厂已保存到 {}", path.display()));
+                    //         factory.saved = true;
+                    //     }
+                    // }
                 }
             });
     }
@@ -991,7 +985,7 @@ impl Subview for FactorioContextCreatorView {
                         ) {
                             Ok(data) => {
                                 sender
-                                    .send(Box::new(PlannerView::new(data)))
+                                    .send(Box::new(ProjectInstance::new(data)))
                                     .expect("Failed to send subview");
                             }
                             Err(e) => {
@@ -1014,7 +1008,7 @@ impl Subview for FactorioContextCreatorView {
                     Some(std::thread::spawn(
                         move || match DataContext::load_from_tmp_no_dump() {
                             Ok(data) => {
-                                sender.send(Box::new(PlannerView::new(data))).unwrap();
+                                sender.send(Box::new(ProjectInstance::new(data))).unwrap();
                             }
                             Err(e) => {
                                 crate::toast::error(format!("加载缓存上下文失败: {:?}", e));

@@ -26,7 +26,7 @@ pub trait Subview: Send {
 }
 
 /// 解决方案上下文，包含游戏相关的信息
-pub trait SolveContext: Send + Any {
+pub trait SolveContext: Debug + Send + Any {
     type Game: Send + 'static;
     type Item: ItemIdent;
 }

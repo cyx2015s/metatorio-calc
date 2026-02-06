@@ -91,7 +91,7 @@ impl<'a> egui::Widget for Icon<'a> {
                         .shrink_to_fit()
                         .show_loading_spinner(true),
                 );
-                if self.quality > 0 {
+                if self.quality > 0 && (self.quality as usize) < data.qualities.len() {
                     ui.put(
                         icon.rect
                             .split_left_right_at_fraction(0.5)
@@ -233,7 +233,12 @@ impl Display for GenericIcon<'_> {
                     f,
                     "物品: {}({})",
                     data.get_display_name("item", name),
-                    data.get_display_name("quality", &data.qualities[*quality as usize].base.name)
+                    data.get_display_name(
+                        "quality",
+                        data.qualities
+                            .get(*quality as usize)
+                            .map_or("unknown", |q| &q.base.name)
+                    )
                 )
             }
             GenericItem::Fluid { name, .. } => {
@@ -246,7 +251,9 @@ impl Display for GenericIcon<'_> {
                     data.get_display_name("entity", name),
                     data.get_display_name(
                         "quality",
-                        &data.qualities[*quality as usize].base.name
+                        data.qualities
+                            .get(*quality as usize)
+                            .map_or("unknown", |q| &q.base.name)
                     )
                 )
             }

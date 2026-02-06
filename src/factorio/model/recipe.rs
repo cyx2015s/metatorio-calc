@@ -783,11 +783,11 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
                     ui.add(PrototypeHover::new(factorio, crafter));
                 });
             }
-
+            
             let recipe_prototype = data.recipes.get(instance.recipe.0.as_str()).unwrap();
             let selector = Selector::new(factorio, "entity")
                 .with_filter(|crafter_name: &IdWithQuality, factorio: &FactorioContext| {
-                    if let Some(crafter) = data.crafters.get(&crafter_name.0) {
+                    if let Some(crafter) = factorio.data.crafters.get(&crafter_name.0) {
                         return machine_fits_for_recipe(crafter, recipe_prototype);
                     }
                     false

@@ -11,8 +11,9 @@ use serde_json::Value;
 
 use crate::{concept::*, factorio::*};
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct FactorioContext {
+    #[serde(skip)]
     pub data: Arc<DataContext>,
     pub user: UserContext,
 }

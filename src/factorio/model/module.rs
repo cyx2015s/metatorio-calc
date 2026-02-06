@@ -127,7 +127,8 @@ impl ModuleConfig {
                 total_effect = total_effect
                     + effects_under_quality(
                         &module_proto.effect,
-                        data.qualities[module.1 as usize].default_multiplier(),
+                        data.qualities[(module.1 as usize).min(data.qualities.len() - 1)]
+                            .default_multiplier(),
                     );
             }
         }
@@ -327,8 +328,9 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                             deleted = true;
                             response.mark_changed();
                         }
-                        let selector = Selector::new(self.factorio, "item").with_current(slot).with_filter(
-                            |s: &IdWithQuality, f: &FactorioContext| {
+                        let selector = Selector::new(self.factorio, "item")
+                            .with_current(slot)
+                            .with_filter(|s: &IdWithQuality, f: &FactorioContext| {
                                 if let Some(module_proto) = f.data.modules.get(&s.0) {
                                     // 过滤掉不符合要求的插件
                                     self.allowed_module_categories.as_ref().is_none_or(
@@ -339,8 +341,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                 } else {
                                     false
                                 }
-                            },
-                        );
+                            });
 
                         let widget = SelectorModal::new(icon.id, self.factorio, "选择插件")
                             .with_toggle(icon.clicked())
@@ -353,7 +354,10 @@ impl egui::Widget for ModuleConfigEditor<'_> {
 
                     for idx in len..self.module_slots {
                         let icon = ui
-                            .add_sized([35.0, 35.0], Icon::new(self.factorio, "item", "empty-module-slot"))
+                            .add_sized(
+                                [35.0, 35.0],
+                                Icon::new(self.factorio, "item", "empty-module-slot"),
+                            )
                             .interact(egui::Sense::click());
                         let mut selected: Option<IdWithQuality> = None;
                         let selector = Selector::new(self.factorio, "item")
@@ -443,7 +447,8 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                     let icon = ui
                                         .add_sized(
                                             [35.0, 35.0],
-                                            Icon::new(self.factorio, "item", &id.0).with_quality(id.1),
+                                            Icon::new(self.factorio, "item", &id.0)
+                                                .with_quality(id.1),
                                         )
                                         .on_hover_text(if data.modules.contains_key(&id.0) {
                                             data.get_display_name("item", &id.0)
@@ -475,9 +480,10 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                                 false
                                             }
                                         });
-                                    let widget = SelectorModal::new(icon.id, self.factorio, "选择插件")
-                                        .with_toggle(icon.clicked())
-                                        .with_selector(selector);
+                                    let widget =
+                                        SelectorModal::new(icon.id, self.factorio, "选择插件")
+                                            .with_toggle(icon.clicked())
+                                            .with_selector(selector);
                                     if ui.add(widget).changed() {
                                         response.mark_changed();
                                     }

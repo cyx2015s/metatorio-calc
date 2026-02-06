@@ -7,8 +7,9 @@ fn main() {
     let git_hash = Command::new("git")
         .args(["rev-parse", "--short", "HEAD"])
         .output()
-        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
-        .unwrap_or_else(|_| "unknown".to_string());
+        .map_or("unknown".to_string(), |output| {
+            String::from_utf8_lossy(&output.stdout).trim().to_string()
+        });
 
     // Write the Git hash to a file
     let out_dir = std::env::var("OUT_DIR").unwrap();

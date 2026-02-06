@@ -137,8 +137,10 @@ impl egui::Widget for SelectorModal<'_, IdWithQuality, IdWithQuality> {
                 });
             }
             if let Some(current) = old_selector.current {
+                current.1 = 0;
                 selector = selector.with_current(&mut current.0);
             }
+            
             selector = selector.with_output(&mut degenerated);
             ui.add(
                 SelectorModal::new(self.id.with("degenerated"), self.factorio, self.label_str)
