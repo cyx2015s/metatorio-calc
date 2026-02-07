@@ -15,8 +15,14 @@ pub enum EntryOpRequest {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EntryOpResult {
-    Dropped(usize), // 被删除的项*原本*的id
-    Cloned(usize, usize) // 被复制的项*原本*的id，和新项的id
+    Drop {
+        removed: usize,
+        replaced_by: Option<usize>,
+    },
+    Clone {
+        original: usize,
+        new: usize,
+    },
 }
 
 pub trait SubView: Send {

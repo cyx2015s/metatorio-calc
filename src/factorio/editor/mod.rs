@@ -6,3 +6,4 @@ pub mod number;
 pub mod planner;
 pub mod selector;
 pub mod style;
+pub mod drag;

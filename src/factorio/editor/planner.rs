@@ -38,6 +38,7 @@ pub struct FactoryInstance {
     pub target: Vec<(GenericItem, f64)>,
     pub external: Vec<(GenericItem, f64)>,
     pub mechanics: Vec<Box<dyn Mechanic<FactorioContext, GenericItem>>>,
+    pub instances: Vec<(usize, usize)>,
 
     pub arg_sender: Sender<SolverData<GenericItem, (usize, usize)>>,
     pub strict_source: bool,
@@ -56,11 +57,12 @@ impl serde::Serialize for FactoryInstance {
     where
         S: serde::Serializer,
     {
-        let mut state = serializer.serialize_struct("FactoryInstance", 5)?;
+        let mut state = serializer.serialize_struct("FactoryInstance", 6)?;
         serde::ser::SerializeStruct::serialize_field(&mut state, "name", &self.name)?;
         serde::ser::SerializeStruct::serialize_field(&mut state, "target", &self.target)?;
         serde::ser::SerializeStruct::serialize_field(&mut state, "external", &self.external)?;
         serde::ser::SerializeStruct::serialize_field(&mut state, "mechanics", &self.mechanics)?;
+        serde::ser::SerializeStruct::serialize_field(&mut state, "instances", &self.instances)?;
         serde::ser::SerializeStruct::serialize_field(
             &mut state,
             "strict_source",
@@ -77,14 +79,15 @@ impl<'de> serde::Deserialize<'de> for FactoryInstance {
     {
         let mut factory_instance = FactoryInstance::default();
         let value = serde_json::Value::deserialize(deserializer)?;
-        factory_instance.name =
-            serde_json::from_value(value["name"].clone()).map_err(serde::de::Error::custom)?;
+        factory_instance.name = serde_json::from_value(value["name"].clone()).unwrap_or_default();
         factory_instance.target =
-            serde_json::from_value(value["target"].clone()).map_err(serde::de::Error::custom)?;
+            serde_json::from_value(value["target"].clone()).unwrap_or_default();
         factory_instance.external =
-            serde_json::from_value(value["external"].clone()).map_err(serde::de::Error::custom)?;
-        factory_instance.strict_source = serde_json::from_value(value["strict_source"].clone())
-            .map_err(serde::de::Error::custom)?;
+            serde_json::from_value(value["external"].clone()).unwrap_or_default();
+        factory_instance.strict_source =
+            serde_json::from_value(value["strict_source"].clone()).unwrap_or_default();
+        factory_instance.instances =
+            serde_json::from_value(value["instances"].clone()).unwrap_or_default();
         let mut not_deserialized_mechanics = MECHANIC_REGISTRY
             .registered_types()
             .into_iter()
@@ -95,9 +98,7 @@ impl<'de> serde::Deserialize<'de> for FactoryInstance {
                 .as_str()
                 .is_some_and(|t| not_deserialized_mechanics.contains(t))
             {
-                let mech = MECHANIC_REGISTRY
-                    .deserialize(mechanic.clone())
-                    .map_err(|_| serde::de::Error::custom("反序列化 Mechanic 失败"))?;
+                let mech = MECHANIC_REGISTRY.deserialize(mechanic.clone()).unwrap();
                 factory_instance.mechanics.push(mech);
                 not_deserialized_mechanics.remove(mechanic["type"].as_str().unwrap());
                 // dbg!(&not_deserialized_mechanics);
@@ -123,6 +124,7 @@ impl Clone for FactoryInstance {
             total_flow: self.total_flow.clone(),
             total_flow_sorted_keys: self.total_flow_sorted_keys.clone(),
             mechanics: self.mechanics.clone(),
+            instances: self.instances.clone(),
             factory_sender: self.factory_sender.clone(),
             ..Default::default()
         }
@@ -140,6 +142,7 @@ impl Default for FactoryInstance {
             target: Vec::new(),
             external: Vec::new(),
             mechanics: Vec::new(),
+            instances: Vec::new(),
             arg_sender: arg_tx,
             strict_source: false,
             solution: (IndexMap::new(), 0.0),
@@ -172,6 +175,25 @@ impl FactoryInstance {
     pub fn with_mechanic(mut self, mechanic: impl Mechanic<FactorioContext, GenericItem>) -> Self {
         self.mechanics.push(Box::new(mechanic));
         self
+    }
+
+    pub fn reset_instances(&mut self) {
+        self.instances.retain(|(idx, jdx)| {
+            if *idx >= self.mechanics.len() {
+                return false;
+            }
+            if *jdx >= self.mechanics[*idx].instance_len() {
+                return false;
+            }
+            true
+        });
+        for (idx, mechanic) in self.mechanics.iter().enumerate() {
+            for jdx in 0..mechanic.instance_len() {
+                if !self.instances.contains(&(idx, jdx)) {
+                    self.instances.push((idx, jdx));
+                }
+            }
+        }
     }
 
     pub fn send_solve_request(&self, factorio: &FactorioContext) {
@@ -324,42 +346,49 @@ impl FactoryInstance {
             });
         });
         ui.separator();
-        self.mechanics
-            .iter_mut()
-            .enumerate()
-            .for_each(|(idx, mechanic)| {
-                for jdx in 0..mechanic.instance_len() {
-                    ui.horizontal_wrapped(|ui| {
-                        mechanic.instance_operate(jdx, &mut |_| {
-                            let mut operation = EntryOpRequest::None;
-
-                            card_frame(ui).show(ui, |ui| {
-                                ui.vertical(|ui| {
-                                    if ui.button("🗑").clicked() {
-                                        operation = EntryOpRequest::Drop;
-                                    }
-                                    if ui.button("📋").clicked() {
-                                        operation = EntryOpRequest::Clone;
-                                    }
-                                    let solution_value = self.solution.0.get(&(idx, jdx)).cloned();
-                                    if let Some(value) = solution_value {
-                                        ui.add(CompactLabel::new(value));
-                                    } else {
-                                        ui.label("无解");
-                                    }
-                                })
-                            });
-
-                            operation
+        if self
+            .mechanics
+            .iter()
+            .map(|m| m.instance_len())
+            .sum::<usize>()
+            != self.instances.len()
+        {
+            self.reset_instances();
+        }
+        egui_dnd::dnd(ui, "instances").show_vec(
+            &mut self.instances,
+            |ui, &mut (idx, jdx), handle, _| {
+                ui.horizontal_wrapped(|ui| {
+                    card_frame(ui).show(ui, |ui| {
+                        handle.ui(ui, |ui| {
+                            ui.heading("≡");
                         });
-
-                        card_frame(ui).show(ui, |ui| {
-                            ui.set_min_width(ui.available_width());
-                            *changed |= mechanic.instance_view(jdx, ui, factorio);
+                        ui.vertical(|ui| {
+                            let button = ui.add_sized([28.0, 14.0], egui::Button::new("❐"));
+                            if button.clicked() {
+                                self.mechanics[idx]
+                                    .instance_operate(jdx, &mut |_| EntryOpRequest::Clone);
+                            }
+                            let button = ui.add_sized([28.0, 14.0], egui::Button::new("🗑"));
+                            if button.clicked() {
+                                self.mechanics[idx]
+                                    .instance_operate(jdx, &mut |_| EntryOpRequest::Drop);
+                            }
+                            let solution_value = self.solution.0.get(&(idx, jdx)).cloned();
+                            if let Some(value) = solution_value {
+                                ui.add(CompactLabel::new(value));
+                            } else {
+                                ui.label("无解");
+                            }
                         });
                     });
-                }
-            });
+                    card_frame(ui).show(ui, |ui| {
+                        ui.set_min_width(ui.available_width());
+                        *changed |= self.mechanics[idx].instance_view(jdx, ui, factorio);
+                    });
+                });
+            },
+        );
     }
 
     fn side_panel(
@@ -921,7 +950,7 @@ impl SubView for ProjectView {
                 .show(ui, |ui| {
                     egui_dnd::dnd(ui, "files").show_vec(
                         &mut self.project_idx,
-                        |ui, idx, handle, state| {
+                        |ui, idx, handle, _| {
                             ui.horizontal(|ui| {
                                 handle.ui(ui, |ui| {
                                     ui.label("≡");
