@@ -1,3 +1,4 @@
+use serde::ser::SerializeSeq;
 
 use crate::concept::{EntryOpRequest, EntryOpResult};
 
@@ -56,35 +57,211 @@ impl<T> ElemVec<T> for Vec<T> {
     }
 }
 
-pub fn update_indexes(results: Vec<EntryOpResult>, indexes: &mut Vec<usize>) -> bool {
-    let mut changed = false;
-    for result in results {
-        match result {
-            EntryOpResult::Drop {
-                removed,
-                replaced_by,
-            } => {
-                changed = true;
-                indexes.retain_mut(|i| {
-                    if *i == removed {
-                        return false;
-                    }
-                    if Some(*i) == replaced_by {
-                        *i = removed;
-                    }
-                    return true;
-                });
-            }
-            EntryOpResult::Clone { original, new } => {
-                changed = true;
-                for i in (0..indexes.len()).rev() {
-                    if indexes[i] == original {
-                        indexes.insert(i + 1, new);
-                        break;
-                    }
-                }
+#[derive(Debug)]
+pub struct IndexedVec<T> {
+    pub vec: Vec<T>,
+    pub idx: Vec<usize>,
+}
+
+impl<T> Clone for IndexedVec<T>
+where
+    T: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            vec: self.vec.clone(),
+            idx: self.idx.clone(),
+        }
+    }
+}
+
+impl<T> IndexedVec<T> {
+    pub fn new() -> Self {
+        Self {
+            vec: Vec::new(),
+            idx: Vec::new(),
+        }
+    }
+    pub fn push(&mut self, value: T) {
+        self.vec.push(value);
+        self.idx.push(self.vec.len() - 1);
+    }
+
+    pub fn remove(&mut self, index: usize) -> T {
+        debug_assert!(index < self.idx.len());
+        let swap_target = self.idx.len() - 1;
+        let swap_index = self
+            .idx
+            .iter()
+            .enumerate()
+            .find(|(_, b)| **b == swap_target)
+            .unwrap()
+            .0;
+        self.idx.swap(index, swap_index);
+        let ret = self.vec.swap_remove(self.idx[swap_index]);
+        self.idx.remove(index);
+        ret
+    }
+
+    pub fn len(&self) -> usize {
+        self.idx.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.idx.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
+        IndexedVecIter {
+            indexed_vec: self,
+            current: 0,
+        }
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut T> {
+        IndexedVecIterMut {
+            indexed_vec: self,
+            current: 0,
+        }
+    }
+}
+
+struct IndexedVecIter<'a, T> {
+    indexed_vec: &'a IndexedVec<T>,
+    current: usize,
+}
+
+impl<'a, T> Iterator for IndexedVecIter<'a, T> {
+    type Item = &'a T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current >= self.indexed_vec.idx.len() {
+            None
+        } else {
+            let item = &self.indexed_vec.vec[self.indexed_vec.idx[self.current]];
+            self.current += 1;
+            Some(item)
+        }
+    }
+}
+
+
+struct IndexedVecIterMut<'a, T> {
+    indexed_vec: &'a mut IndexedVec<T>,
+    current: usize,
+}
+
+impl<'a, T> Iterator for IndexedVecIterMut<'a, T> {
+    type Item = &'a mut T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current >= self.indexed_vec.idx.len() {
+            None
+        } else {
+            // This is a bit tricky due to mutable borrowing rules.
+            let idx = self.indexed_vec.idx[self.current];
+            self.current += 1;
+
+            // SAFETY: We ensure that we only yield each element once.
+            unsafe {
+                let ptr = self.indexed_vec.vec.as_mut_ptr().add(idx);
+                Some(&mut *ptr)
             }
         }
     }
-    changed
+}
+
+impl<T> std::ops::Index<usize> for IndexedVec<T> {
+    type Output = T;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        let real_index = self.idx[index];
+        &self.vec[real_index]
+    }
+}
+
+impl<T> std::ops::IndexMut<usize> for IndexedVec<T> {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        let real_index = self.idx[index];
+        &mut self.vec[real_index]
+    }
+}
+
+impl<T> From<Vec<T>> for IndexedVec<T> {
+    fn from(value: Vec<T>) -> Self {
+        let idx = (0..value.len()).collect();
+        Self { vec: value, idx }
+    }
+}
+
+impl<T> From<IndexedVec<T>> for Vec<T> {
+    fn from(value: IndexedVec<T>) -> Self {
+        value.vec
+    }
+}
+
+impl<T> serde::Serialize for IndexedVec<T>
+where
+    T: serde::Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut seq = serializer.serialize_seq(Some(self.idx.len()))?;
+        for &i in &self.idx {
+            seq.serialize_element(&self.vec[i])?;
+        }
+        seq.end()
+    }
+}
+
+impl<'a, T> serde::Deserialize<'a> for IndexedVec<T>
+where
+    T: serde::Deserialize<'a>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'a>,
+    {
+        let vec: Vec<T> = serde::Deserialize::deserialize(deserializer)?;
+        let idx = (0..vec.len()).collect();
+        Ok(IndexedVec { vec, idx })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn test_indexed_vec_serialize() {
+        let mut indexed_vec = IndexedVec::new();
+        indexed_vec.push(10);
+        indexed_vec.push(20);
+        indexed_vec.push(30);
+        indexed_vec.idx.swap(0, 2); // 改变索引顺序
+
+        let serialized = serde_json::to_string(&indexed_vec).unwrap();
+        assert_eq!(serialized, "[30,20,10]");
+
+        let deserialized: IndexedVec<i32> = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized.vec, vec![30, 20, 10]);
+        assert_eq!(deserialized.idx, vec![0, 1, 2]);
+    }
+    #[test]
+    fn test_vec_behavior() {
+        let mut plain_vec: Vec<i32> = (10..20).collect();
+        let mut indexed_vec = IndexedVec::from(plain_vec.clone());
+        indexed_vec.remove(2);
+        plain_vec.remove(2);
+        assert_eq!(indexed_vec.iter().cloned().collect::<Vec<_>>(), plain_vec);
+
+        indexed_vec.push(100);
+        plain_vec.push(100);
+        assert_eq!(indexed_vec.iter().cloned().collect::<Vec<_>>(), plain_vec);
+
+        indexed_vec.remove(0);
+        plain_vec.remove(0);
+        assert_eq!(indexed_vec.iter().cloned().collect::<Vec<_>>(), plain_vec);
+    }
 }

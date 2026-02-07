@@ -18,6 +18,7 @@ use crate::{
         selector::generic_item_selector,
         style::card_frame,
     },
+    math::IndexedVec,
     solver::*,
 };
 
@@ -591,7 +592,6 @@ impl FactoryInstance {
                 }
             }
         }
-        
     }
 }
 
@@ -696,8 +696,7 @@ pub struct ProjectInstance {
 
     pub name: String,
 
-    pub factories: Vec<FactoryInstance>,
-    pub factory_idx: Vec<usize>,
+    pub factories: IndexedVec<FactoryInstance>,
 
     #[serde(skip)]
     pub saved: bool,
@@ -723,8 +722,7 @@ impl Default for ProjectInstance {
             name: "未命名项目".to_string(),
             saved: true,
             file_path: None,
-            factories: Vec::new(),
-            factory_idx: Vec::new(),
+            factories: IndexedVec::new(),
             selected_factory: 0,
             new_factory_name: String::new(),
             factory_receiver: factory_rx,
@@ -789,47 +787,37 @@ impl SubView for ProjectInstance {
                                 );
                             }
                             ui.separator();
-                            if self.factory_idx.len() != self.factories.len() {
-                                self.factory_idx.retain(|&x| x < self.factories.len());
-                                for idx in 0..self.factories.len() {
-                                    if !self.factory_idx.contains(&idx) {
-                                        self.factory_idx.push(idx);
-                                    }
-                                }
-                            }
                             let mut delete_factory = None;
+                            let mut virtual_idx = 0;
                             egui_dnd::dnd(ui, "factories").show_vec(
-                                &mut self.factory_idx,
-                                |ui, idx, handle, _| {
+                                &mut self.factories.idx,
+                                |ui, real_idx, handle, _| {
                                     ui.horizontal(|ui| {
                                         handle.ui(ui, |ui| {
                                             ui.label("≡");
                                         });
                                         let button = ui.add(
-                                            egui::Button::new(&self.factories[*idx].name)
-                                                .selected(self.selected_factory == *idx),
+                                            egui::Button::new(&self.factories.vec[*real_idx].name)
+                                                .selected(self.selected_factory == *real_idx),
                                         );
                                         if button.clicked() {
-                                            self.selected_factory = *idx;
+                                            self.selected_factory = *real_idx;
                                         }
                                         if ui.button("×").clicked() {
-                                            delete_factory = Some(*idx);
+                                            delete_factory = Some(virtual_idx);
                                         }
                                     });
+                                    virtual_idx += 1;
                                 },
                             );
                             if let Some(delete_factory) = delete_factory {
                                 self.factories.remove(delete_factory);
-                                self.factory_idx.retain(|&x| x != delete_factory);
-                                for idx in self.factory_idx.iter_mut() {
-                                    if *idx > delete_factory {
-                                        *idx -= 1;
+                                if self.selected_factory >= self.factories.len() {
+                                    if self.factories.is_empty() {
+                                        self.selected_factory = 0;
+                                    } else {
+                                        self.selected_factory = self.factories.len() - 1;
                                     }
-                                }
-                                if self.selected_factory >= self.factories.len()
-                                    && !self.factories.is_empty()
-                                {
-                                    self.selected_factory = self.factories.len() - 1;
                                 }
                                 self.saved = false;
                             }
@@ -853,7 +841,7 @@ impl SubView for ProjectInstance {
                     ui.add_sized(ui.available_size(), egui::Label::new(layout_job));
                 } else {
                     self.saved &=
-                        !self.factories[self.selected_factory].editor_view(ui, &self.factorio);
+                        !self.factories.vec[self.selected_factory].editor_view(ui, &self.factorio);
                 }
             });
     }
@@ -876,8 +864,7 @@ impl SubView for ProjectInstance {
 pub struct ProjectView {
     pub data: Arc<DataContext>,
     pub selected: Option<usize>,
-    pub projects: Vec<ProjectInstance>,
-    pub project_idx: Vec<usize>,
+    pub projects: IndexedVec<ProjectInstance>,
     pub ignore_close: bool,
     pub delete_request: DeleteRequest,
 }
@@ -888,8 +875,7 @@ impl ProjectView {
             data: Arc::new(data.build_order_info()),
             ignore_close: false,
             selected: None,
-            projects: Vec::new(),
-            project_idx: Vec::new(),
+            projects: IndexedVec::new(),
             delete_request: DeleteRequest::None,
         }
     }
@@ -997,17 +983,7 @@ impl SubView for ProjectView {
         });
         ui.separator();
         let mut toggle = false;
-        if self.project_idx.len() < self.projects.len() {
-            self.project_idx.retain(|&idx| idx < self.projects.len());
-            for idx in 0..self.projects.len() {
-                if !self.project_idx.contains(&idx) {
-                    self.project_idx.push(idx);
-                }
-            }
-        }
-        if self.project_idx.len() > self.projects.len() {
-            self.project_idx.retain(|&idx| idx < self.projects.len());
-        }
+
         egui::containers::menu::MenuBar::new().ui(ui, |ui| {
             ui.label("项目列表");
 
@@ -1017,38 +993,40 @@ impl SubView for ProjectView {
             egui::ScrollArea::horizontal()
                 .id_salt("projects")
                 .show(ui, |ui| {
+                    let mut virtual_idx = 0;
                     egui_dnd::dnd(ui, "files").show_vec(
-                        &mut self.project_idx,
-                        |ui, idx, handle, _| {
+                        &mut self.projects.idx,
+                        |ui, real_idx, handle, _| {
                             ui.horizontal(|ui| {
                                 handle.ui(ui, |ui| {
                                     ui.label("≡");
                                 });
-                                let project = &self.projects[*idx];
+                                let project = &self.projects.vec[*real_idx];
                                 let button = ui.add(
                                     egui::Button::new(&project.name)
-                                        .selected(self.selected == Some(*idx)),
+                                        .selected(self.selected == Some(*real_idx)),
                                 );
                                 if button.clicked() {
-                                    self.selected = Some(*idx);
+                                    self.selected = Some(*real_idx);
                                 }
                                 if ui.button("×").clicked() {
                                     if project.saved == false {
                                         toggle = true;
-                                        self.delete_request = DeleteRequest::Pending(*idx);
+                                        self.delete_request = DeleteRequest::Pending(virtual_idx);
                                     } else {
-                                        self.delete_request = DeleteRequest::Confirmed(*idx);
+                                        self.delete_request = DeleteRequest::Confirmed(virtual_idx);
                                     }
                                     ui.close();
                                 }
                             });
+                            virtual_idx += 1;
                         },
                     );
                 });
         });
         ui.separator();
         if let Some(selected) = self.selected {
-            self.projects[selected].view(ui);
+            self.projects.vec[selected].view(ui);
         }
         match self.delete_request {
             DeleteRequest::Pending(idx) => {
