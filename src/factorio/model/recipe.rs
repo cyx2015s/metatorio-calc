@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     fmt::Debug,
 };
 
@@ -23,6 +23,7 @@ use crate::{
         module_effects_allowed,
         selector::Selector,
     },
+    math::ElemVec,
 };
 
 fn always_true() -> bool {
@@ -620,7 +621,7 @@ fn test_recipe_normalized() {
 #[derive(Default)]
 pub struct RecipeMechanic {
     #[serde(skip)]
-    pub operations: HashMap<usize, EntryOpRequest>,
+    pub operations: Vec<(usize, EntryOpRequest)>,
 
     pub instances: Vec<RecipeMechanicInstance>,
 
@@ -784,10 +785,11 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
                 });
             }
 
-            let recipe_prototype = data.recipes.get(instance.recipe.0.as_str()).unwrap();
             let selector = Selector::new(factorio, "entity")
                 .with_filter(|crafter_name: &IdWithQuality, factorio: &FactorioContext| {
-                    if let Some(crafter) = factorio.data.crafters.get(&crafter_name.0) {
+                    if let Some(crafter) = factorio.data.crafters.get(&crafter_name.0)
+                        && let Some(recipe_prototype) = data.recipes.get(instance.recipe.0.as_str())
+                    {
                         return machine_fits_for_recipe(crafter, recipe_prototype);
                     }
                     false
@@ -835,34 +837,12 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
     ) {
         let op = f(&mut self.instances[idx] as &mut AsFactorioFlow);
         if !matches!(op, EntryOpRequest::None) {
-            self.operations.insert(idx, op);
+            self.operations.push((idx, op));
         }
     }
 
-    fn submit_operations(&mut self) -> bool {
-        let mut changed = false;
-        for idx in 0..self.instances.len() {
-            if self
-                .operations
-                .get(&idx)
-                .is_some_and(|v| matches!(v, EntryOpRequest::Clone))
-            {
-                self.instances.push(self.instances[idx].clone());
-                changed = true;
-            }
-        }
-        for idx in (0..self.instances.len()).rev() {
-            if self
-                .operations
-                .get(&idx)
-                .is_some_and(|v| matches!(v, EntryOpRequest::Drop))
-            {
-                self.instances.remove(idx);
-                changed = true;
-            }
-        }
-        self.operations.clear();
-        changed
+    fn submit_operations(&mut self) -> Vec<EntryOpResult> {
+        self.instances.update_elements(&mut self.operations)
     }
 
     fn update_suggestion(&mut self, factorio: &FactorioContext, item: &GenericItem, amount: f64) {
@@ -1079,8 +1059,7 @@ fn collect_module_limitations(
 impl EditorView for RecipeMechanic {
     fn editor_view(&mut self, ui: &mut egui::Ui, factorio: &FactorioContext) -> bool {
         let data = &factorio.data;
-        let mut changed = self.submit_operations();
-
+        let mut changed = false;
         if ui.button("添加配方").clicked() {
             let new_config = RecipeMechanicInstance::default();
             self.instances.push(new_config);

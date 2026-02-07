@@ -196,24 +196,25 @@ impl FactoryInstance {
         }
     }
 
-    pub fn send_solve_request(&self, factorio: &FactorioContext) {
-        let flows = self
+    pub fn send_solve_request(&mut self, factorio: &FactorioContext) {
+        if self
             .mechanics
             .iter()
-            .enumerate()
-            .flat_map(move |(idx, mechanic)| {
-                mechanic
-                    .instances()
-                    .iter()
-                    .enumerate()
-                    .map(move |(jdx, fe)| ((idx, jdx), (fe.as_flow(factorio), fe.cost(factorio))))
-                    .collect::<Vec<_>>()
+            .map(|m| m.instance_len())
+            .sum::<usize>()
+            != self.instances.len()
+        {
+            self.reset_instances();
+        }
+        let flows = self
+            .instances
+            .iter()
+            .map(|(idx, jdx)| {
+                let fe = &self.mechanics[*idx].instances()[*jdx];
+                ((*idx, *jdx), (fe.as_flow(factorio), fe.cost(factorio)))
             })
             .collect();
 
-        // .flat_map(|mechanic| mechanic.instances())
-        // .map(|fe| (ref_as_ptr(fe), (fe.as_flow(factorio), fe.cost(factorio))))
-        // .collect::<IndexMap<usize, (_, _)>>();
         let target = self
             .target
             .iter()
@@ -364,7 +365,7 @@ impl FactoryInstance {
                             ui.heading("≡");
                         });
                         ui.vertical(|ui| {
-                            let button = ui.add_sized([28.0, 14.0], egui::Button::new("❐"));
+                            let button = ui.add_sized([28.0, 14.0], egui::Button::new("⧉"));
                             if button.clicked() {
                                 self.mechanics[idx]
                                     .instance_operate(jdx, &mut |_| EntryOpRequest::Clone);
@@ -553,6 +554,44 @@ impl FactoryInstance {
             ui.separator();
             *changed |= mechanic.editor_view(ui, factorio);
         }
+        let mut results = Vec::new();
+        for mechanic in self.mechanics.iter_mut() {
+            results.push(mechanic.submit_operations());
+        }
+        for (idx, results) in results.into_iter().enumerate() {
+            for result in results {
+                match result {
+                    EntryOpResult::Drop {
+                        removed,
+                        replaced_by,
+                    } => {
+                        *changed = true;
+                        self.instances.retain_mut(|(m_idx, jdx)| {
+                            if *m_idx != idx {
+                                return true;
+                            }
+                            if *jdx == removed {
+                                return false;
+                            }
+                            if Some(*jdx) == replaced_by {
+                                *jdx = removed;
+                            }
+                            true
+                        });
+                    }
+                    EntryOpResult::Clone { original, new } => {
+                        *changed = true;
+                        for i in (0..self.instances.len()).rev() {
+                            if self.instances[i] == (idx, original) {
+                                self.instances.insert(i + 1, (idx, new));
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
     }
 }
 
@@ -736,37 +775,65 @@ impl SubView for ProjectInstance {
             ))
             .show(ui, |ui| {
                 egui::containers::menu::MenuBar::new().ui(ui, |ui: &mut egui::Ui| {
-                    if ui.button("+ 新建工厂").clicked() {
-                        let name = "新工厂".to_string();
-                        self.factories.push(
-                            FactoryInstance::new(name)
-                                .with_mechanic(RecipeMechanic::default())
-                                .with_mechanic(MiningMechanic::default())
-                                .with_sender(self.factory_sender.clone()),
-                        );
-                    }
-                    ui.separator();
-                    let mut idx = 0usize;
-                    self.factories.retain_mut(|factory| {
-                        let mut deleted = false;
-                        let button = ui.add(
-                            egui::Button::new(&factory.name).selected(self.selected_factory == idx),
-                        );
-                        if button.clicked() {
-                            self.selected_factory = idx;
-                        }
-                        button.context_menu(|ui| {
-                            if ui.button("删除").clicked() {
-                                deleted = true;
-                                if self.selected_factory >= idx && self.selected_factory > 0 {
-                                    self.selected_factory -= 1;
+                    ui.style_mut().spacing.scroll = egui::style::ScrollStyle::solid();
+                    egui::ScrollArea::horizontal()
+                        .id_salt("factories_button")
+                        .show(ui, |ui| {
+                            if ui.button("+ 新建工厂").clicked() {
+                                let name = "新工厂".to_string();
+                                self.factories.push(
+                                    FactoryInstance::new(name)
+                                        .with_mechanic(RecipeMechanic::default())
+                                        .with_mechanic(MiningMechanic::default())
+                                        .with_sender(self.factory_sender.clone()),
+                                );
+                            }
+                            ui.separator();
+                            if self.factory_idx.len() != self.factories.len() {
+                                self.factory_idx.retain(|&x| x < self.factories.len());
+                                for idx in 0..self.factories.len() {
+                                    if !self.factory_idx.contains(&idx) {
+                                        self.factory_idx.push(idx);
+                                    }
                                 }
-                                idx -= 1;
+                            }
+                            let mut delete_factory = None;
+                            egui_dnd::dnd(ui, "factories").show_vec(
+                                &mut self.factory_idx,
+                                |ui, idx, handle, _| {
+                                    ui.horizontal(|ui| {
+                                        handle.ui(ui, |ui| {
+                                            ui.label("≡");
+                                        });
+                                        let button = ui.add(
+                                            egui::Button::new(&self.factories[*idx].name)
+                                                .selected(self.selected_factory == *idx),
+                                        );
+                                        if button.clicked() {
+                                            self.selected_factory = *idx;
+                                        }
+                                        if ui.button("×").clicked() {
+                                            delete_factory = Some(*idx);
+                                        }
+                                    });
+                                },
+                            );
+                            if let Some(delete_factory) = delete_factory {
+                                self.factories.remove(delete_factory);
+                                self.factory_idx.retain(|&x| x != delete_factory);
+                                for idx in self.factory_idx.iter_mut() {
+                                    if *idx > delete_factory {
+                                        *idx -= 1;
+                                    }
+                                }
+                                if self.selected_factory >= self.factories.len()
+                                    && !self.factories.is_empty()
+                                {
+                                    self.selected_factory = self.factories.len() - 1;
+                                }
+                                self.saved = false;
                             }
                         });
-                        idx += 1;
-                        !deleted
-                    });
                 });
                 ui.separator();
                 if self.factories.is_empty() {
@@ -942,7 +1009,9 @@ impl SubView for ProjectView {
             self.project_idx.retain(|&idx| idx < self.projects.len());
         }
         egui::containers::menu::MenuBar::new().ui(ui, |ui| {
-            ui.label("项目列表:");
+            ui.label("项目列表");
+
+            ui.separator();
 
             ui.style_mut().spacing.scroll = egui::style::ScrollStyle::solid();
             egui::ScrollArea::horizontal()

@@ -1,9 +1,9 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use serde_with::serde_as;
 
 use crate::{
-    concept::{AsFlow, EditorView, EntryOpRequest, Flow, Mechanic, SolveContext},
+    concept::{AsFlow, EditorView, EntryOpRequest, EntryOpResult, Flow, Mechanic, SolveContext},
     factorio::{
         ModuleConfig, ModuleConfigEditor, calc_quality_distribution,
         common::*,
@@ -12,6 +12,7 @@ use crate::{
         model::{data::*, energy::*, entity::*, recipe::*},
         selector::Selector,
     },
+    math::ElemVec,
 };
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -305,7 +306,7 @@ fn test_mining_normalized() {
 #[derive(Default)]
 pub struct MiningMechanic {
     #[serde(skip)]
-    pub operations: HashMap<usize, EntryOpRequest>,
+    pub operations: Vec<(usize, EntryOpRequest)>,
     pub instances: Vec<MiningMechanicInstance>,
     #[serde(skip)]
     pub suggestion_item: Option<GenericItem>,
@@ -488,36 +489,12 @@ impl Mechanic<FactorioContext, GenericItem> for MiningMechanic {
     ) {
         let op = f(&mut self.instances[idx] as &mut AsFactorioFlow);
         if !matches!(op, EntryOpRequest::None) {
-            self.operations.insert(idx, op);
+            self.operations.push((idx, op));
         }
     }
 
-    fn submit_operations(&mut self) -> bool {
-        let mut changed = false;
-
-        for idx in 0..self.instances.len() {
-            if self
-                .operations
-                .get(&idx)
-                .is_some_and(|v| matches!(v, EntryOpRequest::Clone))
-            {
-                self.instances.push(self.instances[idx].clone());
-                changed = true;
-            }
-        }
-
-        for idx in (0..self.instances.len()).rev() {
-            if self
-                .operations
-                .get(&idx)
-                .is_some_and(|v| matches!(v, EntryOpRequest::Drop))
-            {
-                self.instances.remove(idx);
-                changed = true;
-            }
-        }
-        self.operations.clear();
-        changed
+    fn submit_operations(&mut self) -> Vec<EntryOpResult> {
+        self.instances.update_elements(&mut self.operations)
     }
 
     fn update_suggestion(&mut self, factorio: &FactorioContext, item: &GenericItem, amount: f64) {
@@ -626,8 +603,7 @@ impl Mechanic<FactorioContext, GenericItem> for MiningMechanic {
 
 impl EditorView for MiningMechanic {
     fn editor_view(&mut self, ui: &mut egui::Ui, _factorio: &Self::Game) -> bool {
-        let mut changed = self.submit_operations();
-
+        let mut changed = false;
         if ui.button("添加采矿").clicked() {
             let mining_config = MiningMechanicInstance::default();
             self.instances.push(mining_config);

@@ -1,6 +1,6 @@
 mod comb;
-mod diff_vec;
+mod vec_ext;
 mod solver;
 pub use comb::*;
-pub use diff_vec::*;
+pub use vec_ext::*;
 pub use solver::*;

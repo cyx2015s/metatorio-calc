@@ -98,8 +98,8 @@ where
     }
 
     // 提交所有instance_operate的更改
-    // 返回值表示是否产生了需要重新计算的更改
-    fn submit_operations(&mut self) -> bool;
+    // 返回值表示索引变化情况
+    fn submit_operations(&mut self) -> Vec<EntryOpResult>;
 
     // 返回值表示是否产生了需要重新计算的更改
     fn instance_view(&mut self, idx: usize, ui: &mut egui::Ui, game: &G) -> bool {
