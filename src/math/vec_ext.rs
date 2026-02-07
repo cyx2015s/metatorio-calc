@@ -57,7 +57,8 @@ impl<T> ElemVec<T> for Vec<T> {
     }
 }
 
-#[derive(Debug)]
+// 物品本身不方便移动的时候，用索引来移动
+#[derive(Debug, Default)]
 pub struct IndexedVec<T> {
     pub vec: Vec<T>,
     pub idx: Vec<usize>,
@@ -82,6 +83,18 @@ impl<T> IndexedVec<T> {
             idx: Vec::new(),
         }
     }
+
+    pub fn clear(&mut self) {
+        self.vec.clear();
+        self.idx.clear();
+    }
+
+    pub fn insert(&mut self, index: usize, value: T) {
+        self.vec.push(value);
+        let new_idx = self.vec.len() - 1;
+        self.idx.insert(index, new_idx);
+    }
+
     pub fn push(&mut self, value: T) {
         self.vec.push(value);
         self.idx.push(self.vec.len() - 1);
@@ -144,7 +157,6 @@ impl<'a, T> Iterator for IndexedVecIter<'a, T> {
         }
     }
 }
-
 
 struct IndexedVecIterMut<'a, T> {
     indexed_vec: &'a mut IndexedVec<T>,

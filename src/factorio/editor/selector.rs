@@ -451,7 +451,7 @@ pub fn generic_item_selector(
                     ui.horizontal(|ui| {
                         changed |= ui.add(drag_value(&mut cur_temp).speed(1)).changed();
 
-                        if ui.button("移除温度").clicked() {
+                        if ui.button("无温度").clicked() {
                             *temperature = None;
                             changed = true;
                         } else {

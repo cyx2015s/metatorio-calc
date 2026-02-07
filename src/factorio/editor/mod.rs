@@ -1,4 +1,5 @@
 pub mod clipboard;
+pub mod drag;
 pub mod hover;
 pub mod icon;
 pub mod modal;
@@ -6,4 +7,3 @@ pub mod number;
 pub mod planner;
 pub mod selector;
 pub mod style;
-pub mod drag;

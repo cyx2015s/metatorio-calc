@@ -1,7 +1,4 @@
-use std::{
-    collections::HashSet,
-    fmt::Debug,
-};
+use std::{collections::HashSet, fmt::Debug};
 
 use serde_with::{DefaultOnError, serde_as};
 
