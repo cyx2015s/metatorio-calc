@@ -162,9 +162,11 @@ where
             for (item_id, &amount) in &recipe.0 {
                 let entry = magnitude_and_counts
                     .entry(item_id.clone())
-                    .or_insert((0.0, 0));
-                entry.0 += amount.abs().log2().max(-32.0);
-                entry.1 += 1;
+                    .or_insert((0.0, 1));
+                if amount.abs() > 1e-12 {
+                    entry.0 += amount.abs().log2().max(-32.0);
+                    entry.1 += 1;
+                }
             }
         }
         // total_magnitude / count 是这些数据的几何平均数的数量级
@@ -174,6 +176,7 @@ where
                 (item, (-total_maginitude / count as f64) as i32)
             })
             .collect();
+        log::info!("{:?}", &magnitude_factors);
         let get_multiplier =
             |item_id: &I| -> f64 { (2.0_f64).powi(*magnitude_factors.get(item_id).unwrap_or(&0)) };
         let mut problem_variables = good_lp::ProblemVariables::new();
@@ -195,7 +198,17 @@ where
                 let entry = item_balances
                     .entry(item_id.clone())
                     .or_insert(good_lp::Expression::from(0.0));
-                *entry += amount * get_multiplier(item_id) * *var;
+                let val = get_multiplier(item_id) * amount;
+                if val.abs() > 1.5 || val.abs() < 0.8 {
+                    log::info!(
+                        "求解器：物品 {:?} 在配方 {:?} 中的流量系数过大：{}，调整为 {} 仍然过大",
+                        item_id,
+                        recipe_id,
+                        amount,
+                        val
+                    );
+                }
+                *entry += val * *var;
             }
         }
         log::info!("求解器：一共有 {} 个物品需要平衡", item_balances.len());

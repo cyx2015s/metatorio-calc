@@ -129,39 +129,6 @@ where
     }
 }
 
-pub trait WithUser {
-    type User: Send + 'static;
-}
-
-pub trait MechanicWithUser<G, U, I>: Mechanic<G, I> + WithUser<User = U>
-where
-    G: Send + 'static,
-    U: Send + 'static,
-    I: ItemIdent,
-{
-    // 返回值表示是否产生了需要重新计算的更改
-    fn instance_view_ext(&mut self, idx: usize, ui: &mut egui::Ui, game: &G, user: &U) -> bool {
-        // 默认实现忽视 user
-        let _ = user;
-        self.instance_view(idx, ui, game)
-    }
-
-    // 返回值表示是否产生了需要重新计算的更改
-    fn suggestion_view_ext(&mut self, ui: &mut egui::Ui, game: &G, user: &U) -> bool {
-        // 默认实现忽视 user
-        let _ = user;
-        self.suggestion_view(ui, game)
-    }
-
-    fn update_suggestion_ext(&mut self, game: &G, user: &mut U, item: &I, amount: f64) {
-        // 默认实现忽视 user
-        let _ = user;
-        self.update_suggestion(game, item, amount);
-    }
-}
-
 dyn_clone::clone_trait_object!(<G, I> Mechanic<G, I> where G: Send + 'static, I : ItemIdent);
 erased_serde::serialize_trait_object!(<G, I> Mechanic<G, I> where G: Send + 'static, I : ItemIdent);
 
-dyn_clone::clone_trait_object!(<G, U, I> MechanicWithUser<G, U, I> where G: Send + 'static, U: Send + 'static, I : ItemIdent);
-erased_serde::serialize_trait_object!(<G, U, I> MechanicWithUser<G, U, I> where G: Send + 'static, U: Send + 'static, I : ItemIdent);

@@ -21,7 +21,13 @@ impl<T> ElemVec<T> for Vec<T> {
     {
         operations.sort_by_key(|(idx, _)| *idx);
         let mut results = Vec::new();
+        let mut last_idx = None;
         for (idx, op) in operations.iter().rev() {
+            if let Some(last_idx) = last_idx && *idx >= last_idx {
+                // 已经被删除或克隆过，跳过
+                continue;
+            }
+            last_idx = Some(*idx);
             match op {
                 EntryOpRequest::None => {}
                 EntryOpRequest::Clone => {
@@ -34,9 +40,8 @@ impl<T> ElemVec<T> for Vec<T> {
                     });
                 }
                 EntryOpRequest::Drop => {
-                    let replaced_by = self.len();
                     self.swap_remove(*idx);
-                    if replaced_by > self.len() {
+                    if *idx >= self.len() {
                         // 没有被替换，删掉的是最后一个元素
                         results.push(EntryOpResult::Drop {
                             removed: *idx,
@@ -46,7 +51,7 @@ impl<T> ElemVec<T> for Vec<T> {
                         // 被替换了，记录替换者的索引
                         results.push(EntryOpResult::Drop {
                             removed: *idx,
-                            replaced_by: Some(replaced_by),
+                            replaced_by: Some(self.len()),
                         });
                     }
                 }

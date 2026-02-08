@@ -195,7 +195,8 @@ where
                 let entry = item_balances
                     .entry(item_id.clone())
                     .or_insert(good_lp::Expression::from(0.0));
-                *entry += amount * get_multiplier(item_id) * *var;
+                let val = amount * get_multiplier(item_id);
+                *entry += val * *var;
             }
         }
         log::info!("求解器：一共有 {} 个物品需要平衡", item_balances.len());

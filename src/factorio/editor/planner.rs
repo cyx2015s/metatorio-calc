@@ -348,15 +348,6 @@ impl FactoryInstance {
             });
         });
         ui.separator();
-        if self
-            .mechanics
-            .iter()
-            .map(|m| m.instance_len())
-            .sum::<usize>()
-            != self.instances.len()
-        {
-            self.reset_instances();
-        }
         egui_dnd::dnd(ui, "instances").show_vec(
             &mut self.instances,
             |ui, &mut (idx, jdx), handle, _| {
@@ -426,17 +417,19 @@ impl FactoryInstance {
                         replaced_by,
                     } => {
                         *changed = true;
+                        
                         self.instances.retain_mut(|(m_idx, jdx)| {
-                            if *m_idx != idx {
-                                return true;
+                            let mut keep = true;
+                            if *m_idx == idx {
+                                if *jdx == removed {
+                                    keep = false;
+                                }
+                                if Some(*jdx) == replaced_by {
+                                    *jdx = removed;
+                                }
+                                
                             }
-                            if *jdx == removed {
-                                return false;
-                            }
-                            if Some(*jdx) == replaced_by {
-                                *jdx = removed;
-                            }
-                            true
+                            keep
                         });
                     }
                     EntryOpResult::Clone { original, new } => {
@@ -450,6 +443,15 @@ impl FactoryInstance {
                     }
                 }
             }
+        }
+        if self
+            .mechanics
+            .iter()
+            .map(|m| m.instance_len())
+            .sum::<usize>()
+            != self.instances.len()
+        {
+            self.reset_instances();
         }
     }
 

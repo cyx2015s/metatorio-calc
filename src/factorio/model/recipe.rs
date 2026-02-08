@@ -713,7 +713,7 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
         let data = &factorio.data;
         let mut changed = false;
 
-        let instance = self.instances.get_mut(idx).unwrap();
+        let instance = &mut self.instances[idx];
         ui.vertical(|ui| {
             ui.label("配方");
             let recipe_button = ui
