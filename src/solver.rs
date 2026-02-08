@@ -167,6 +167,15 @@ where
                 entry.1 += 1;
             }
         }
+        for (item_id, &amount) in &self.target {
+            let entry = magnitude_and_counts
+                .entry(item_id.clone())
+                .or_insert((0.0, 0));
+            if amount.abs() > 1e-12 {
+                entry.0 += amount.abs().log2().max(-32.0);
+                entry.1 += 1;
+            }
+        }
         // total_magnitude / count 是这些数据的几何平均数的数量级
         let magnitude_factors: HashMap<I, i32> = magnitude_and_counts
             .into_iter()

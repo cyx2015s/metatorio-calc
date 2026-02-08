@@ -721,7 +721,7 @@ impl EditorView for FactoryInstance {
 #[serde(default)]
 pub struct ProjectInstance {
     /// 存储游戏逻辑数据的全部上下文
-    /// 包含一个 Arc<DataContext>，只读的游戏原型上下文
+    /// 包含一个 `Arc<DataContext>`，只读的游戏原型上下文
     /// 另外包含 UserContext，用户的自定义偏好
     pub factorio: FactorioContext,
 
