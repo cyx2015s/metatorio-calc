@@ -19,6 +19,14 @@ pub struct TechnologyPrototype {
     #[serde_as(deserialize_as = "DefaultOnError")]
     #[serde(default)]
     pub effects: Vec<Modifier>,
+
+    #[serde_as(deserialize_as = "DefaultOnError")]
+    #[serde(default)]
+    pub prerequisites: Vec<String>,
+
+    #[serde_as(deserialize_as = "DefaultOnError")]
+    #[serde(default)]
+    pub unit: TechnologyUnit,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, serde::Deserialize)]
@@ -29,7 +37,7 @@ pub struct TechnologyUnit {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, serde::Deserialize)]
-pub struct ResearchIngredient(String, f64);
+pub struct ResearchIngredient(pub String, pub f64);
 
 #[derive(Debug, Clone, Default, PartialEq, serde::Deserialize)]
 pub enum MaxLevel {

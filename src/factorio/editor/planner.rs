@@ -291,7 +291,7 @@ impl FactoryInstance {
                                 let _ = sender.send(factory);
                             }
                             Err(e) => {
-                                crate::toast::error(format!("自动规划工厂失败：{:?}", &e));
+                                crate::toast::error(format!("自动规划工厂失败：{:?}\n", &e));
                                 log::error!("自动规划工厂失败: {:?}", &e);
                             }
                         }
@@ -733,8 +733,10 @@ pub struct ProjectInstance {
     pub saved: bool,
     #[serde(skip)]
     pub file_path: Option<PathBuf>,
-
+    #[serde(skip)]
     pub selected_factory: usize,
+    #[serde(skip)]
+    pub selected_user: bool,
     pub new_factory_name: String,
     #[serde(skip)]
     pub factory_receiver: Receiver<FactoryInstance>,
@@ -755,6 +757,7 @@ impl Default for ProjectInstance {
             file_path: None,
             factories: IndexedVec::new(),
             selected_factory: 0,
+            selected_user: false,
             new_factory_name: String::new(),
             factory_receiver: factory_rx,
             factory_sender: factory_tx,
@@ -766,7 +769,7 @@ impl ProjectInstance {
     pub fn new(data: DataContext) -> Self {
         ProjectInstance {
             factorio: FactorioContext {
-                data: Arc::new(data.build_order_info()),
+                data: Arc::new(data.build_order_info().build_dependency_graph()),
                 user: UserContext::default(),
             },
             ..Default::default()
@@ -899,7 +902,7 @@ pub struct ProjectView {
 impl ProjectView {
     pub fn new(data: DataContext) -> Self {
         ProjectView {
-            data: Arc::new(data.build_order_info()),
+            data: Arc::new(data.build_order_info().build_dependency_graph()),
             ignore_close: false,
             selected: None,
             projects: IndexedVec::new(),

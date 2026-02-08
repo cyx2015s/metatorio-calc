@@ -42,6 +42,9 @@ pub struct DataContext {
     pub groups: Dict<PrototypeBase>,
     pub subgroups: Dict<ItemSubgroup>,
 
+    /// 依赖关系
+    pub dependency_graph: DependencyGraph<DependencyItem, Relation>,
+
     /// 科技
     pub technologies: Dict<TechnologyPrototype>,
 
@@ -624,6 +627,124 @@ impl DataContext {
         );
         self
     }
+
+    pub fn build_dependency_graph(mut self) -> Self {
+        let mut graph = DependencyGraph::new();
+        // Add nodes
+        for (item_name, _) in &self.items {
+            graph.add_node(DependencyItem::new(item_name, DependencyType::Item));
+        }
+        for (fluid_name, _) in &self.fluids {
+            graph.add_node(DependencyItem::new(fluid_name, DependencyType::Fluid));
+        }
+        for (entity_name, _) in &self.entities {
+            graph.add_node(DependencyItem::new(entity_name, DependencyType::Entity));
+        }
+        for (recipe_name, _) in &self.recipes {
+            graph.add_node(DependencyItem::new(recipe_name, DependencyType::Recipe));
+        }
+        for (tech_name, _) in &self.technologies {
+            graph.add_node(DependencyItem::new(tech_name, DependencyType::Technology));
+        }
+        for (planet_name, _) in &self.planets {
+            graph.add_node(DependencyItem::new(planet_name, DependencyType::Location));
+        }
+        for quality in &self.qualities {
+            graph.add_node(DependencyItem::new(
+                quality.base.name.clone(),
+                DependencyType::Quality,
+            ));
+        }
+
+        // Add edges
+
+        // 科技依赖关系
+        for (tech_name, tech) in &self.technologies {
+            let tech_node = DependencyItem::new(tech_name, DependencyType::Technology);
+            for unit in &tech.unit.ingredients {
+                let item_node = DependencyItem::new(&unit.0, DependencyType::Item);
+                graph.add_edge(&tech_node, &item_node, Relation::AllOfSame);
+            }
+            for prereq in &tech.prerequisites {
+                let prereq_node = DependencyItem::new(prereq, DependencyType::Technology);
+                graph.add_edge(&prereq_node, &tech_node, Relation::AllOfSame);
+            }
+            for effect in &tech.effects {
+                match effect {
+                    Modifier::UnlockRecipe { recipe } => {
+                        let recipe_node = DependencyItem::new(recipe, DependencyType::Recipe);
+                        graph.add_edge(&tech_node, &recipe_node, Relation::OneOfSame);
+                    }
+                    Modifier::UnlockSpaceLocation { space_location } => {
+                        let location_node =
+                            DependencyItem::new(space_location, DependencyType::Location);
+                        graph.add_edge(&tech_node, &location_node, Relation::OneOfSame);
+                    }
+                    Modifier::UnlockQuality { quality } => {
+                        let quality_node = DependencyItem::new(quality, DependencyType::Quality);
+                        graph.add_edge(&tech_node, &quality_node, Relation::OneOfSame);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        for (recipe_name, recipe) in &self.recipes {
+            let recipe_node = DependencyItem::new(recipe_name, DependencyType::Recipe);
+            // 先计算这个是净产出的还是净消耗的。
+            let mut flow = Flow::new();
+            for ingredient in &recipe.ingredients {
+                let key = match ingredient {
+                    RecipeIngredient::Item(i) => DependencyItem::new(&i.name, DependencyType::Item),
+                    RecipeIngredient::Fluid(f) => {
+                        DependencyItem::new(&f.name, DependencyType::Fluid)
+                    }
+                };
+                *flow.entry(key).or_insert(0.0) -= match ingredient {
+                    RecipeIngredient::Item(i) => i.amount,
+                    RecipeIngredient::Fluid(f) => f.amount,
+                };
+            }
+            for result in &recipe.results {
+                let key = match result {
+                    RecipeResult::Item(i) => DependencyItem::new(&i.name, DependencyType::Item),
+                    RecipeResult::Fluid(f) => DependencyItem::new(&f.name, DependencyType::Fluid),
+                };
+                *flow.entry(key).or_insert(0.0) += match result {
+                    RecipeResult::Item(i) => i.normalized_output().0,
+                    RecipeResult::Fluid(f) => f.normalized_output().1,
+                };
+            }
+            for (key, amount) in flow.into_iter() {
+                if amount > 0.0 {
+                    // 净产出，这个配方可以作为物品的产出方法之一
+                    graph.add_edge(&recipe_node, &key, Relation::OneOfSame);
+                } else if amount < 0.0 {
+                    // 净消耗，配方必须拥有全部的同类物品才能运行
+                    graph.add_edge(&key, &recipe_node, Relation::AllOfSame);
+                }
+            }
+            // 计算所需要的机器
+            for (crafter_name, crafter) in &self.crafters {
+                if machine_fits_for_recipe(crafter, recipe) {
+                    // 有任意一个机器即可
+                    let entity_node = DependencyItem::new(crafter_name, DependencyType::Entity);
+                    graph.add_edge(&entity_node, &recipe_node, Relation::OneOfSame);
+                }
+            }
+        }
+
+        for (item_name, item) in &self.items {
+            if let Some(place_result) = &item.place_result {
+                let item_node = DependencyItem::new(item_name, DependencyType::Item);
+                let entity_node = DependencyItem::new(place_result, DependencyType::Entity);
+                graph.add_edge(&item_node, &entity_node, Relation::OneOfSame);
+            }
+        }
+
+        self.dependency_graph = graph;
+
+        self
+    }
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -727,7 +848,9 @@ pub fn make_located_generic_recipe(
 
 #[test]
 fn test_load_context() {
-    let factorio = DataContext::test_load();
+    let factorio = DataContext::test_load()
+        .build_order_info()
+        .build_dependency_graph();
     assert!(factorio.items.contains_key("iron-plate"));
     assert!(factorio.entities.contains_key("stone-furnace"));
     assert!(factorio.fluids.contains_key("water"));
@@ -735,4 +858,61 @@ fn test_load_context() {
     assert!(factorio.crafters.contains_key("assembling-machine-1"));
     dbg!(factorio.recipes.get("electronic-circuit"));
     dbg!(factorio.crafters.get("oil-refinery"));
+
+    let graph = &factorio.dependency_graph;
+    let mut file = std::fs::File::create("dependency-graph.dot").unwrap();
+    write!(
+        file,
+        "{:?}",
+        petgraph::dot::Dot::with_config(&graph.graph, &[])
+    )
+    .unwrap();
+
+    let item = DependencyItem::new("electromagnetic-plant", DependencyType::Technology);
+    let item_idx = graph.indices.get(&item).unwrap();
+    for neighbor in graph
+        .graph
+        .neighbors_directed(*item_idx, petgraph::Direction::Outgoing)
+    {
+        eprintln!(
+            "{:?} 的出边节点: {:?}",
+            &item,
+            graph
+                .graph
+                .raw_nodes()
+                .get(neighbor.index())
+                .unwrap()
+                .weight
+        );
+        eprintln!(
+            "边的关系: {:?}",
+            graph
+                .graph
+                .edge_weight(graph.graph.find_edge(*item_idx, neighbor).unwrap())
+                .unwrap()
+        );
+    }
+
+    for neighbor in graph
+        .graph
+        .neighbors_directed(*item_idx, petgraph::Direction::Incoming)
+    {
+        eprintln!(
+            "{:?} 的入边节点: {:?}",
+            &item,
+            graph
+                .graph
+                .raw_nodes()
+                .get(neighbor.index())
+                .unwrap()
+                .weight
+        );
+        eprintln!(
+            "边的关系: {:?}",
+            graph
+                .graph
+                .edge_weight(graph.graph.find_edge(neighbor, *item_idx).unwrap())
+                .unwrap()
+        );
+    }
 }

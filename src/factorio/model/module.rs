@@ -183,9 +183,9 @@ impl ModuleConfig {
                             &module_proto.effect,
                             data.qualities[module.1 as usize].default_multiplier(),
                         );
+                        let count = (*count).min(effective_module_slots * beacon_count);
                         let total_module_effect = module_effect
-                            * (*count as f64)
-                            * (effective_module_slots as f64)
+                            * count as f64
                             * base_efficiency
                             * profile_multiplier;
                         total_effect = total_effect + total_module_effect;
