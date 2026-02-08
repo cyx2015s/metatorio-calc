@@ -496,7 +496,8 @@ pub fn generic_item_selector(
                                 .with_filter(|s, f| {
                                     f.data.fluids[s]
                                         .heat_capacity
-                                        .as_ref().is_none_or(|c| c.amount > 0.0)
+                                        .as_ref()
+                                        .is_none_or(|c| c.amount > 0.0)
                                 }),
                         ),
                     )
@@ -519,7 +520,10 @@ pub fn generic_item_selector(
                                 Selector::new(factorio, "fluid")
                                     .with_output(filter)
                                     .with_filter(|s, f| {
-                                        f.data.fluids[s].fuel_value.as_ref().is_some_and(|c| c.amount > 0.0)
+                                        f.data.fluids[s]
+                                            .fuel_value
+                                            .as_ref()
+                                            .is_some_and(|c| c.amount > 0.0)
                                     }),
                             ),
                     )

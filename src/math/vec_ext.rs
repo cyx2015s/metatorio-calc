@@ -23,7 +23,9 @@ impl<T> ElemVec<T> for Vec<T> {
         let mut results = Vec::new();
         let mut last_idx = None;
         for (idx, op) in operations.iter().rev() {
-            if let Some(last_idx) = last_idx && *idx >= last_idx {
+            if let Some(last_idx) = last_idx
+                && *idx >= last_idx
+            {
                 // 已经被删除或克隆过，跳过
                 continue;
             }

@@ -661,6 +661,19 @@ pub enum GenericItem {
     },
 }
 
+impl GenericItem {
+    pub fn is_energy(&self) -> bool {
+        matches!(
+            self,
+            GenericItem::Heat
+                | GenericItem::Electricity
+                | GenericItem::FluidFuel { .. }
+                | GenericItem::ItemFuel { .. }
+                | GenericItem::FluidHeat { .. }
+        )
+    }
+}
+
 impl Default for GenericItem {
     fn default() -> Self {
         GenericItem::Item("item-unknown".into())

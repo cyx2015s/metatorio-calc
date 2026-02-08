@@ -131,4 +131,3 @@ where
 
 dyn_clone::clone_trait_object!(<G, I> Mechanic<G, I> where G: Send + 'static, I : ItemIdent);
 erased_serde::serialize_trait_object!(<G, I> Mechanic<G, I> where G: Send + 'static, I : ItemIdent);
-

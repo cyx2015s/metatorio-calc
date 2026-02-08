@@ -348,6 +348,7 @@ impl FactoryInstance {
             });
         });
         ui.separator();
+
         egui_dnd::dnd(ui, "instances").show_vec(
             &mut self.instances,
             |ui, &mut (idx, jdx), handle, _| {
@@ -417,7 +418,7 @@ impl FactoryInstance {
                         replaced_by,
                     } => {
                         *changed = true;
-                        
+
                         self.instances.retain_mut(|(m_idx, jdx)| {
                             let mut keep = true;
                             if *m_idx == idx {
@@ -427,7 +428,6 @@ impl FactoryInstance {
                                 if Some(*jdx) == replaced_by {
                                     *jdx = removed;
                                 }
-                                
                             }
                             keep
                         });
@@ -465,60 +465,54 @@ impl FactoryInstance {
         let data = &factorio.data;
         ui.heading("额外输入代价");
         ui.label("* 每区块的产量");
-        let mut delete_external = None;
-        let mut virtual_external_idx = 0;
-
-        egui_dnd::dnd(ui, "external").show_vec(&mut self.external.idx, |ui, idx, handle, _| {
-            let (item, amount) = &mut self.external.vec[*idx];
-            ui.horizontal_top(|ui| {
-                card_frame(ui).show(ui, |ui| {
-                    handle.ui(ui, |ui| {
-                        ui.heading("≡");
-                    });
-                    ui.vertical(|ui| {
-                        if matches!(
-                            item,
-                            GenericItem::Electricity | GenericItem::Heat | GenericItem::ItemFuel { .. } | GenericItem::FluidFuel { .. } | GenericItem::FluidHeat { .. }
-                        ) {
-                            *changed |= ui.add(drag_watt(amount).speed(10_000.0)).changed();
-                        } else {
-                            *changed |= ui.add(drag_value(amount).suffix("/秒")).changed();
-                        }
-                        if ui.button("×").clicked() {
-                            delete_external = Some(virtual_external_idx);
-                            *changed = true;
-                        }
-                    });
-                });
-                card_frame(ui).show(ui, |ui| {
-                    ui.set_min_width(ui.available_width());
-                    ui.horizontal_wrapped(|ui| {
-                        let mut icon = ui.add_sized([35.0, 35.0], GenericIcon::new(factorio, item)).interact(egui::Sense::click());
-                        if let GenericItem::Entity(..) = item {
-                            icon = icon.on_hover_text("\u{26A0}指完成机制所消耗的实体资源（主要是矿物），不包括为了完成机制所需要收集的组装机、采矿机、插件塔等。")
-                        }
-                        if icon.clicked_by(egui::PointerButton::Secondary) {
-                            *need_suggestions = true;
-                            self.mechanics.iter_mut().for_each(|mechanic| {
-                                mechanic.update_suggestion(
-                                    factorio, item, 1.0, // 尝试消耗更多该物品
-                                )
-                            });
-                        }
+        self.external
+            .dnd(ui, "external", |ui, _, (item, amount), handle, _, op| {
+                ui.horizontal_top(|ui| {
+                    card_frame(ui).show(ui, |ui| {
+                        handle.ui(ui, |ui| {
+                            ui.heading("≡");
+                        });
                         ui.vertical(|ui| {
-                            ui.horizontal(|ui| {
-                                *changed |= generic_item_selector(ui, factorio, item, &icon, icon.id.with("external"));
+                            if item.is_energy() {
+                                *changed |= ui.add(drag_watt(amount).speed(10_000.0)).changed();
+                            } else {
+                                *changed |= ui.add(drag_value(amount).suffix("/秒")).changed();
+                            }
+                            if ui.button("×").clicked() {
+                                *op = EntryOpRequest::Drop;
+                                *changed = true;
+                            }
+                        });
+                    });
+                    card_frame(ui).show(ui, |ui| {
+                        ui.set_min_width(ui.available_width());
+                        ui.horizontal_wrapped(|ui| {
+                            let icon = ui
+                                .add_sized([35.0, 35.0], GenericIcon::new(factorio, item))
+                                .interact(egui::Sense::click());
+                            if icon.clicked_by(egui::PointerButton::Secondary) {
+                                *need_suggestions = true;
+                                self.mechanics.iter_mut().for_each(|mechanic| {
+                                    mechanic.update_suggestion(
+                                        factorio, item, 1.0, // 尝试消耗更多该物品
+                                    )
+                                });
+                            }
+                            ui.vertical(|ui| {
+                                ui.horizontal(|ui| {
+                                    *changed |= generic_item_selector(
+                                        ui,
+                                        factorio,
+                                        item,
+                                        &icon,
+                                        icon.id.with("external"),
+                                    );
+                                });
                             });
                         });
                     });
                 });
             });
-            virtual_external_idx += 1;
-        });
-        if let Some(idx) = delete_external {
-            self.external.remove(idx);
-            *changed = true;
-        }
         if ui.button("添加外部输入").clicked() {
             self.external
                 .push((GenericItem::Item("item-unknown".into()), 1.0));
@@ -560,79 +554,67 @@ impl FactoryInstance {
     ) {
         ui.heading("目标产量/消耗");
 
-        let mut delete_target = None;
-        let mut virtual_target_idx = 0;
-        egui_dnd::dnd(ui, "target").show_vec(&mut self.target.idx, |ui, idx, handle, _| {
-            let (item, amount) = &mut self.target.vec[*idx];
-            ui.horizontal_top(|ui| {
-                card_frame(ui).show(ui, |ui| {
-                    handle.ui(ui, |ui| {
-                        ui.heading("≡");
-                    });
-                    ui.vertical(|ui| {
-                        if matches!(
-                            item,
-                            GenericItem::Electricity
-                                | GenericItem::Heat
-                                | GenericItem::ItemFuel { .. }
-                                | GenericItem::FluidFuel { .. }
-                                | GenericItem::FluidHeat { .. }
-                        ) {
-                            *changed |= ui.add(drag_watt(amount).speed(10_000.0)).changed();
-                        } else {
-                            *changed |= ui.add(drag_value(amount).suffix("/秒")).changed();
-                        }
-                        if ui.button("×").clicked() {
-                            delete_target = Some(virtual_target_idx);
-                            *changed = true;
-                        }
-                    });
-                });
-                card_frame(ui).show(ui, |ui| {
-                    ui.set_min_width(ui.available_width());
-                    ui.horizontal_wrapped(|ui| {
-                        let mut icon = GenericIcon::new(factorio, item);
-                        let solution_of_target = self.total_flow.get(item).cloned().unwrap_or(0.0);
-                        let not_satisfied =
-                            !float_cmp::approx_eq!(f64, solution_of_target, *amount, ulps = 6);
-                        if not_satisfied {
-                            icon = icon.with_stroke(egui::Stroke::new(2.0, egui::Color32::RED));
-                        }
-
-                        let mut widget = ui
-                            .add_sized([35.0, 35.0], icon)
-                            .interact(egui::Sense::click());
-                        if not_satisfied {
-                            widget = widget.on_hover_text("\u{26A0}目标已忽略");
-                        }
-                        if widget.clicked_by(egui::PointerButton::Secondary) {
-                            *need_suggestions = true;
-                            self.mechanics.iter_mut().for_each(|mechanic| {
-                                mechanic.update_suggestion(
-                                    factorio, item,
-                                    -*amount, // 目标产量为正表示目前缺少对应数量的物品
-                                )
-                            });
-                        }
+        self.target
+            .dnd(ui, "target", |ui, _, (item, amount), handle, _, op| {
+                ui.horizontal_top(|ui| {
+                    card_frame(ui).show(ui, |ui| {
+                        handle.ui(ui, |ui| {
+                            ui.heading("≡");
+                        });
                         ui.vertical(|ui| {
-                            ui.horizontal(|ui| {
-                                *changed |= generic_item_selector(
-                                    ui,
-                                    factorio,
-                                    item,
-                                    &widget,
-                                    widget.id.with("target"),
-                                );
+                            if item.is_energy() {
+                                *changed |= ui.add(drag_watt(amount).speed(10_000.0)).changed();
+                            } else {
+                                *changed |= ui.add(drag_value(amount).suffix("/秒")).changed();
+                            }
+                            if ui.button("×").clicked() {
+                                *op = EntryOpRequest::Drop;
+                                *changed = true;
+                            }
+                        });
+                    });
+                    card_frame(ui).show(ui, |ui| {
+                        ui.set_min_width(ui.available_width());
+                        ui.horizontal_wrapped(|ui| {
+                            let mut icon = GenericIcon::new(factorio, item);
+                            let solution_of_target =
+                                self.total_flow.get(item).cloned().unwrap_or(0.0);
+                            let not_satisfied =
+                                !float_cmp::approx_eq!(f64, solution_of_target, *amount, ulps = 6);
+                            if not_satisfied {
+                                icon = icon.with_stroke(egui::Stroke::new(2.0, egui::Color32::RED));
+                            }
+
+                            let mut widget = ui
+                                .add_sized([35.0, 35.0], icon)
+                                .interact(egui::Sense::click());
+                            if not_satisfied {
+                                widget = widget.on_hover_text("\u{26A0}目标已忽略");
+                            }
+                            if widget.clicked_by(egui::PointerButton::Secondary) {
+                                *need_suggestions = true;
+                                self.mechanics.iter_mut().for_each(|mechanic| {
+                                    mechanic.update_suggestion(
+                                        factorio, item,
+                                        -*amount, // 目标产量为正表示目前缺少对应数量的物品
+                                    )
+                                });
+                            }
+                            ui.vertical(|ui| {
+                                ui.horizontal(|ui| {
+                                    *changed |= generic_item_selector(
+                                        ui,
+                                        factorio,
+                                        item,
+                                        &widget,
+                                        widget.id.with("target"),
+                                    );
+                                });
                             });
                         });
                     });
                 });
-                virtual_target_idx += 1;
             });
-        });
-        if let Some(idx) = delete_target {
-            self.target.remove(idx);
-        }
         if ui.button("添加指定产物").clicked() {
             self.target
                 .push((GenericItem::Item("item-unknown".into()), 1.0));
@@ -836,43 +818,36 @@ impl SubView for ProjectInstance {
                                 );
                             }
                             ui.separator();
-                            let mut delete_factory = None;
-                            let mut virtual_idx = 0;
-                            egui_dnd::dnd(ui, "factories").show_vec(
-                                &mut self.factories.idx,
-                                |ui, real_idx, handle, _| {
+                            self.factories.dnd(
+                                ui,
+                                "factories",
+                                |ui, real_idx, factory, handle, _, op| {
                                     ui.horizontal(|ui| {
                                         handle.ui(ui, |ui| {
                                             ui.label("≡");
                                         });
                                         let button = ui.add(
-                                            egui::Button::new(&self.factories.vec[*real_idx].name)
-                                                .selected(self.selected_factory == *real_idx),
+                                            egui::Button::new(&factory.name)
+                                                .selected(self.selected_factory == real_idx),
                                         );
                                         if button.clicked() {
-                                            self.selected_factory = *real_idx;
+                                            self.selected_factory = real_idx;
                                         }
                                         if ui.button("×").clicked() {
-                                            delete_factory = Some(virtual_idx);
+                                            *op = EntryOpRequest::Drop;
+                                            if self.selected_factory >= real_idx
+                                                && self.selected_factory > 0
+                                            {
+                                                self.selected_factory -= 1;
+                                            }
                                         }
                                     });
-                                    virtual_idx += 1;
                                 },
                             );
-                            if let Some(delete_factory) = delete_factory {
-                                self.factories.remove(delete_factory);
-                                if self.selected_factory >= self.factories.len() {
-                                    if self.factories.is_empty() {
-                                        self.selected_factory = 0;
-                                    } else {
-                                        self.selected_factory = self.factories.len() - 1;
-                                    }
-                                }
-                                self.saved = false;
-                            }
                         });
                 });
                 ui.separator();
+
                 if self.factories.is_empty() {
                     let mut layout_job = egui::text::LayoutJob::default();
                     egui::RichText::new("没有工厂\n").size(32.0).append_to(
@@ -889,6 +864,9 @@ impl SubView for ProjectInstance {
                     );
                     ui.add_sized(ui.available_size(), egui::Label::new(layout_job));
                 } else {
+                    if self.selected_factory >= self.factories.len() {
+                        self.selected_factory = 0;
+                    }
                     self.saved &=
                         !self.factories.vec[self.selected_factory].editor_view(ui, &self.factorio);
                 }
@@ -997,18 +975,17 @@ impl SubView for ProjectView {
                         .add_filter("异星工厂规划项目文件", &["fpp"])
                         .set_title("打开项目文件")
                         .pick_file()
+                        && let Some(mut project) = load_project(&path)
                     {
-                        if let Some(mut project) = load_project(&path) {
-                            project.set_data(self.data.clone());
-                            project.saved = true;
-                            project.file_path = Some(path);
-                            project.factories.iter_mut().for_each(|f| {
-                                f.send_solve_request(&project.factorio);
-                                f.set_sender(project.factory_sender.clone());
-                            });
-                            self.projects.push(project);
-                            self.selected = Some(self.projects.len() - 1);
-                        }
+                        project.set_data(self.data.clone());
+                        project.saved = true;
+                        project.file_path = Some(path);
+                        project.factories.iter_mut().for_each(|f| {
+                            f.send_solve_request(&project.factorio);
+                            f.set_sender(project.factory_sender.clone());
+                        });
+                        self.projects.push(project);
+                        self.selected = Some(self.projects.len() - 1);
                     }
                     ui.close();
                 }
@@ -1059,7 +1036,7 @@ impl SubView for ProjectView {
                                     self.selected = Some(*real_idx);
                                 }
                                 if ui.button("×").clicked() {
-                                    if project.saved == false {
+                                    if !project.saved {
                                         toggle = true;
                                         self.delete_request = DeleteRequest::Pending(virtual_idx);
                                     } else {
@@ -1177,7 +1154,9 @@ impl SubView for FactorioContextCreatorView {
             if let Some(path) = &self.path {
                 ui.label(format!("已选择路径: {}", path.display()));
                 if path.to_string_lossy().contains("steam") {
-                    ui.label("若为 Steam 版本的游戏，请关闭正在运行中的异星工厂并且启动 Steam 再执行加载游戏上下文");
+                    ui.label(
+            "若为 Steam 版本的游戏，请关闭正在运行中的异星工厂并且启动 Steam 再执行加载游戏上下文",
+          );
                 }
             } else {
                 ui.label("未选择路径");
