@@ -490,12 +490,15 @@ pub fn generic_item_selector(
                             "选择流体热源来源",
                         )
                         .with_toggle(toggle)
-                        .with_selector(match filter {
-                            Some(fluid_name) => {
-                                Selector::new(factorio, "fluid").with_current(fluid_name)
-                            }
-                            None => Selector::new(factorio, "fluid"),
-                        }),
+                        .with_selector(
+                            Selector::new(factorio, "fluid")
+                                .with_output(filter)
+                                .with_filter(|s, f| {
+                                    f.data.fluids[s]
+                                        .heat_capacity
+                                        .as_ref().is_none_or(|c| c.amount > 0.0)
+                                }),
+                        ),
                     )
                     .changed();
                 if clear {
@@ -512,7 +515,13 @@ pub fn generic_item_selector(
                     .add(
                         SelectorModal::new(id, factorio, "选择流体燃料")
                             .with_toggle(toggle)
-                            .with_selector(Selector::new(factorio, "fluid").with_output(filter)),
+                            .with_selector(
+                                Selector::new(factorio, "fluid")
+                                    .with_output(filter)
+                                    .with_filter(|s, f| {
+                                        f.data.fluids[s].fuel_value.as_ref().is_some_and(|c| c.amount > 0.0)
+                                    }),
+                            ),
                     )
                     .changed();
             }
