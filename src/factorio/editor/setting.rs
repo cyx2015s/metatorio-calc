@@ -4,16 +4,22 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
-pub struct UserContextEditor {}
-
-impl SolveContext for UserContextEditor {
-    type Game = FactorioContext;
-    type Item = GenericItem;
+pub struct UserContextEditor<'a> {
+    pub game: &'a FactorioContext,
 }
 
-impl EditorView for UserContextEditor {
-    fn editor_view(&mut self, ui: &mut egui::Ui, _game: &Self::Game) -> bool {
-        ui.label("用户设置编辑器");
-        false
+impl<'a> UserContextEditor<'a> {
+    pub fn new(game: &'a FactorioContext) -> Self {
+        Self { game }
+    }
+}
+
+
+impl egui::Widget for UserContextEditor<'_> {
+    fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+        let response = ui.response();
+
+
+        response
     }
 }

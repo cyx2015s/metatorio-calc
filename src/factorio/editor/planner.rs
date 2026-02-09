@@ -16,6 +16,7 @@ use crate::{
         model::*,
         number::{CompactLabel, SignedCompactLabel},
         selector::generic_item_selector,
+        setting::UserContextEditor,
         style::card_frame,
     },
     math::IndexedVec,
@@ -255,6 +256,7 @@ impl FactoryInstance {
         egui_dnd::dnd(ui, "instances").show_vec(
             &mut self.instances,
             |ui, &mut (idx, jdx), handle, _| {
+                let solution_value = self.solution.0.get(&(idx, jdx)).cloned();
                 ui.horizontal_wrapped(|ui| {
                     card_frame(ui).show(ui, |ui| {
                         handle.ui(ui, |ui| {
@@ -271,7 +273,6 @@ impl FactoryInstance {
                                 self.mechanics[idx]
                                     .instance_operate(jdx, &mut |_| EntryOpRequest::Drop);
                             }
-                            let solution_value = self.solution.0.get(&(idx, jdx)).cloned();
                             if let Some(value) = solution_value {
                                 ui.add(CompactLabel::new(value));
                             } else {
@@ -280,9 +281,49 @@ impl FactoryInstance {
                         });
                     });
                     card_frame(ui).show(ui, |ui| {
-                        ui.set_min_width(ui.available_width());
+                        
+                        ui.set_min_width(ui.available_width() * 0.4);
                         *changed |= self.mechanics[idx].instance_view(jdx, ui, factorio);
                     });
+                    card_frame(ui).show(ui, |ui| {
+                        ui.set_min_width(ui.available_width());
+                        ui.horizontal(|ui| {
+                            ui.set_min_width(ui.available_width());
+                            let flow = self.mechanics[idx].instances()[jdx].as_flow(factorio);
+                            let mut flow_keys = flow.keys().cloned().collect::<Vec<_>>();
+                            sort_generic_items_owned(&mut flow_keys, factorio);
+                            // 先展示输入，再展示输出
+                            for item in &flow_keys {
+                                let amount = flow.get(item).cloned().unwrap_or(0.0);
+                                if amount.abs() < 1e-8 {
+                                    continue;
+                                }
+                                ui.vertical(|ui| {
+                                    ui.set_min_width(35.0);
+                                    ui.set_max_width(35.0);
+                                    let icon = ui
+                                        .add_sized([25.0, 25.0], GenericIcon::new(factorio, item))
+                                        .interact(egui::Sense::click());
+                                    if icon.clicked_by(egui::PointerButton::Secondary) {
+                                        *need_suggestions = true;
+                                        self.mechanics.iter_mut().for_each(|mechanic| {
+                                            mechanic.update_suggestion(
+                                                factorio, item,
+                                                -amount, // 流出表示目前缺少对应数量的物品
+                                            )
+                                        });
+                                    }
+
+                                    ui.add(SignedCompactLabel::new(
+                                        amount * solution_value.unwrap_or(1.0),
+                                    ));
+                                });
+                                // if ui.available_size_before_wrap().x < 35.0 {
+                                //     ui.end_row();
+                                // }
+                            }
+                        });
+                    })
                 });
             },
         );
@@ -876,7 +917,10 @@ impl SubView for ProjectInstance {
                     ui.add_sized(ui.available_size(), egui::Label::new(layout_job));
                 } else {
                     match self.selected_page {
-                        ProjectPage::UserContext => {}
+                        ProjectPage::UserContext => {
+                            self.saved &=
+                                !ui.add(UserContextEditor::new(&mut self.factorio)).changed();
+                        }
                         ProjectPage::Index(page) => {
                             if page >= self.factories.len() {
                                 self.selected_page = ProjectPage::Index(0);
