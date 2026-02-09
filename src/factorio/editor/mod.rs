@@ -6,5 +6,5 @@ pub mod modal;
 pub mod number;
 pub mod planner;
 pub mod selector;
-pub mod style;
 pub mod setting;
+pub mod style;

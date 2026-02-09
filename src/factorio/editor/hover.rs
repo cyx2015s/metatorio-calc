@@ -2,7 +2,7 @@ use egui::Vec2;
 
 use crate::factorio::{
     icon::*,
-    number::{CompactLabel, SignedCompactLabel},
+    number::{AmountLabel, CompactLabel},
     *,
 };
 
@@ -61,7 +61,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
                                             ui.add(Icon::new(self.factorio, "item", &i.name));
                                         ui.horizontal_top(|ui| {
                                             ui.vertical(|ui| {
-                                                ui.add(CompactLabel::new(i.amount));
+                                                ui.add(AmountLabel::new(i.amount));
                                             });
                                         });
                                     }
@@ -70,7 +70,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
                                             ui.add(Icon::new(self.factorio, "fluid", &f.name));
                                         ui.vertical(|ui| {
                                             ui.horizontal_top(|ui| {
-                                                ui.add(CompactLabel::new(f.amount));
+                                                ui.add(AmountLabel::new(f.amount));
                                             });
                                             match f.temperature {
                                                 Some(t) => {
@@ -135,9 +135,11 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
                                             ui.horizontal_top(|ui| {
                                                 ui.style_mut().spacing.item_spacing.x = 0.0;
 
-                                                ui.add(CompactLabel::new(output.0 - output.1));
+                                                ui.add(AmountLabel::new(output.0 - output.1));
 
-                                                ui.add(SignedCompactLabel::new(output.1));
+                                                ui.add(
+                                                    AmountLabel::new(output.1).with_is_signed(true),
+                                                );
                                             });
                                         });
                                     }
@@ -148,10 +150,10 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
                                         ui.vertical(|ui| {
                                             ui.horizontal_top(|ui| {
                                                 ui.style_mut().spacing.item_spacing.x = 0.0;
-                                                ui.add(SignedCompactLabel::new(
-                                                    output.0 - output.1,
-                                                ));
-                                                ui.add(SignedCompactLabel::new(output.1));
+                                                ui.add(AmountLabel::new(output.0 - output.1));
+                                                ui.add(
+                                                    AmountLabel::new(output.1).with_is_signed(true),
+                                                );
                                             });
                                             match f.temperature {
                                                 Some(t) => {

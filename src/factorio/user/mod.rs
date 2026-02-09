@@ -7,8 +7,9 @@ pub struct UserContext {
     pub milestones: Vec<DependencyItem>,
 }
 
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum TimeScale {
     #[default]
     Seconds,

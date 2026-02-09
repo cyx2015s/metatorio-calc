@@ -631,22 +631,22 @@ impl DataContext {
     pub fn build_dependency_graph(mut self) -> Self {
         let mut graph = DependencyGraph::new();
         // Add nodes
-        for (item_name, _) in &self.items {
+        for item_name in self.items.keys() {
             graph.add_node(DependencyItem::new(item_name, DependencyType::Item));
         }
-        for (fluid_name, _) in &self.fluids {
+        for fluid_name in self.fluids.keys() {
             graph.add_node(DependencyItem::new(fluid_name, DependencyType::Fluid));
         }
-        for (entity_name, _) in &self.entities {
+        for entity_name in self.entities.keys() {
             graph.add_node(DependencyItem::new(entity_name, DependencyType::Entity));
         }
-        for (recipe_name, _) in &self.recipes {
+        for recipe_name in self.recipes.keys() {
             graph.add_node(DependencyItem::new(recipe_name, DependencyType::Recipe));
         }
-        for (tech_name, _) in &self.technologies {
+        for tech_name in self.technologies.keys() {
             graph.add_node(DependencyItem::new(tech_name, DependencyType::Technology));
         }
-        for (planet_name, _) in &self.planets {
+        for planet_name in self.planets.keys() {
             graph.add_node(DependencyItem::new(planet_name, DependencyType::Location));
         }
         for quality in &self.qualities {

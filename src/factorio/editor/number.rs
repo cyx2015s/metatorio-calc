@@ -1,4 +1,4 @@
-use crate::factorio::{compact_number, signed_compact_number};
+use crate::factorio::{TimeScale, compact_number, signed_compact_number};
 
 #[derive(Debug, Clone)]
 
@@ -48,7 +48,7 @@ impl egui::Widget for SignedCompactLabel {
             let label = ui.add(egui::Label::new(
                 egui::RichText::new(&formatted_text)
                     .strong()
-                    .size(ui.style().text_styles[&egui::TextStyle::Body].size * 0.9),
+                    .size(ui.style().text_styles[&egui::TextStyle::Body].size * 0.875),
             ));
             let parsed_number = text.parse::<f64>();
             if parsed_number.is_err() {
@@ -63,7 +63,7 @@ impl egui::Widget for SignedCompactLabel {
         } else {
             let label =
                 ui.add(egui::Label::new(egui::RichText::new(&text).strong().size(
-                    ui.style().text_styles[&egui::TextStyle::Body].size * 0.9,
+                    ui.style().text_styles[&egui::TextStyle::Body].size * 0.875,
                 )));
             let parsed_number = text.parse::<f64>();
             if parsed_number.is_err() {
@@ -87,7 +87,7 @@ impl egui::Widget for CompactLabel {
             let label = ui.add(egui::Label::new(
                 egui::RichText::new(&formatted_text)
                     .strong()
-                    .size(ui.style().text_styles[&egui::TextStyle::Body].size * 0.9),
+                    .size(ui.style().text_styles[&egui::TextStyle::Body].size * 0.875),
             ));
             let parsed_number = text.parse::<f64>();
             if parsed_number.is_err() {
@@ -102,7 +102,7 @@ impl egui::Widget for CompactLabel {
         } else {
             let label =
                 ui.add(egui::Label::new(egui::RichText::new(&text).strong().size(
-                    ui.style().text_styles[&egui::TextStyle::Body].size * 0.9,
+                    ui.style().text_styles[&egui::TextStyle::Body].size * 0.875,
                 )));
             let parsed_number = text.parse::<f64>();
             if parsed_number.is_err() {
@@ -114,6 +114,66 @@ impl egui::Widget for CompactLabel {
             } else {
                 label
             }
+        }
+    }
+}
+
+pub struct AmountLabel {
+    amount: f64,
+    time_scale: TimeScale,
+    is_energy: bool,
+    is_signed: bool,
+}
+
+impl AmountLabel {
+    pub fn new(amount: f64) -> Self {
+        Self {
+            amount,
+            time_scale: TimeScale::Seconds,
+            is_energy: false,
+            is_signed: false,
+        }
+    }
+
+    pub fn with_time_scale(mut self, time_scale: TimeScale) -> Self {
+        self.time_scale = time_scale;
+        self
+    }
+    pub fn with_is_energy(mut self, is_energy: bool) -> Self {
+        self.is_energy = is_energy;
+        self
+    }
+    pub fn with_is_signed(mut self, is_signed: bool) -> Self {
+        self.is_signed = is_signed;
+        self
+    }
+}
+
+impl egui::Widget for AmountLabel {
+    fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+        let scaled_amount = if self.is_energy {
+            self.amount
+        } else {
+            match self.time_scale {
+                TimeScale::Seconds => self.amount,
+                TimeScale::Minutes => self.amount * 60.0,
+                TimeScale::Hours => self.amount * 3600.0,
+            }
+        };
+        if self.is_signed {
+            let label = if self.is_energy {
+                SignedCompactLabel::new(scaled_amount).with_format("{}W")
+            } else {
+                SignedCompactLabel::new(scaled_amount)
+            };
+            label.ui(ui)
+        } else {
+            let label = if self.is_energy {
+                CompactLabel::new(scaled_amount).with_format("{}W")
+            } else {
+                CompactLabel::new(scaled_amount)
+            };
+            label.ui(ui)
         }
     }
 }

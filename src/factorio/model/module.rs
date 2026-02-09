@@ -12,7 +12,7 @@ use crate::{
         },
         modal::SelectorModal,
         model::{data::*, entity::*},
-        number::CompactLabel,
+        number::AmountLabel,
         selector::Selector,
     },
 };
@@ -184,10 +184,8 @@ impl ModuleConfig {
                             data.qualities[module.1 as usize].default_multiplier(),
                         );
                         let count = (*count).min(effective_module_slots * beacon_count);
-                        let total_module_effect = module_effect
-                            * count as f64
-                            * base_efficiency
-                            * profile_multiplier;
+                        let total_module_effect =
+                            module_effect * count as f64 * base_efficiency * profile_multiplier;
                         total_effect = total_effect + total_module_effect;
                     }
                 }
@@ -306,7 +304,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing = [3.0, 3.0].into();
                     ui.add_sized([32.0, 32.0], GenericIcon::new(self.factorio, &item));
-                    ui.add_sized([35.0, 15.0], CompactLabel::new(count as f64));
+                    ui.add_sized([35.0, 15.0], AmountLabel::new(count as f64));
                 });
             }
         });

@@ -14,7 +14,7 @@ use crate::{
         editor::{icon::*, modal::*},
         format::*,
         model::*,
-        number::{CompactLabel, SignedCompactLabel},
+        number::AmountLabel,
         selector::generic_item_selector,
         setting::UserContextEditor,
         style::card_frame,
@@ -274,7 +274,7 @@ impl FactoryInstance {
                                     .instance_operate(jdx, &mut |_| EntryOpRequest::Drop);
                             }
                             if let Some(value) = solution_value {
-                                ui.add(CompactLabel::new(value));
+                                ui.add(AmountLabel::new(value));
                             } else {
                                 ui.label("无解");
                             }
@@ -300,8 +300,8 @@ impl FactoryInstance {
                                 continue;
                             }
                             ui.vertical(|ui| {
-                                ui.set_min_width(35.0);
-                                ui.set_max_width(35.0);
+                                ui.set_min_width(40.0);
+                                ui.set_max_width(40.0);
                                 let icon = ui
                                     .add_sized([25.0, 25.0], GenericIcon::new(factorio, item))
                                     .interact(egui::Sense::click());
@@ -315,9 +315,12 @@ impl FactoryInstance {
                                     });
                                 }
 
-                                ui.add(SignedCompactLabel::new(
-                                    amount * solution_value.unwrap_or(1.0),
-                                ));
+                                ui.add(
+                                    AmountLabel::new(amount * solution_value.unwrap_or(1.0))
+                                        .with_time_scale(factorio.user.time_scale)
+                                        .with_is_energy(item.is_energy())
+                                        .with_is_signed(true),
+                                );
                             });
                             if ui.available_size_before_wrap().x < 35.0 {
                                 ui.end_row();
@@ -398,7 +401,13 @@ impl FactoryInstance {
                     }
 
                     ui.vertical(|ui| {
-                        ui.add_sized([35.0, 15.0], SignedCompactLabel::new(amount));
+                        ui.set_min_width(40.0);
+                        ui.add(
+                            AmountLabel::new(amount)
+                                .with_time_scale(factorio.user.time_scale)
+                                .with_is_energy(item.is_energy())
+                                .with_is_signed(true),
+                        );
                         ui.push_id(item, |ui| {
                             let button = ui
                                 .add_sized([35.0, 35.0], GenericIcon::new(factorio, item))
@@ -714,8 +723,8 @@ impl EditorView for FactoryInstance {
             egui::Id::new("boundary"),
         )
         .show_separator_line(true)
-        .min_width(128.0)
-        .max_width(256.0)
+        .min_width(196.0)
+        .max_width(196.0)
         .frame(egui::Frame::NONE.corner_radius(8.0).inner_margin(4.0))
         .show_inside(ui, |ui: &mut egui::Ui| {
             egui::ScrollArea::vertical().id_salt(1).show(ui, |ui| {
@@ -732,7 +741,7 @@ impl EditorView for FactoryInstance {
                 self.summary_panel(ui, factorio, &mut changed, &mut need_suggestions);
                 egui::ScrollArea::vertical().id_salt(3).show(ui, |ui| {
                     ui.vertical(|ui| {
-                        // Use cached sorted keys instead of sorting every frame
+                        ui.style_mut().spacing.scroll = egui::style::ScrollStyle::solid();
                         self.flows_panel(ui, factorio, &mut changed, &mut need_suggestions);
                     })
                     .response
@@ -902,28 +911,28 @@ impl SubView for ProjectInstance {
                 });
                 ui.separator();
 
-                if self.factories.is_empty() {
-                    let mut layout_job = egui::text::LayoutJob::default();
-                    egui::RichText::new("没有工厂\n").size(32.0).append_to(
-                        &mut layout_job,
-                        ui.style(),
-                        egui::FontSelection::Default,
-                        egui::Align::Center,
-                    );
-                    egui::RichText::new("点击上方的新建工厂按钮创建一个新工厂。").append_to(
-                        &mut layout_job,
-                        ui.style(),
-                        egui::FontSelection::Default,
-                        egui::Align::Center,
-                    );
-                    ui.add_sized(ui.available_size(), egui::Label::new(layout_job));
-                } else {
-                    match self.selected_page {
-                        ProjectPage::UserContext => {
-                            self.saved &=
-                                !ui.add(UserContextEditor::new(&mut self.factorio)).changed();
-                        }
-                        ProjectPage::Index(page) => {
+                match self.selected_page {
+                    ProjectPage::UserContext => {
+                        self.saved &= !ui.add(UserContextEditor::new(&mut self.factorio)).changed();
+                    }
+                    ProjectPage::Index(page) => {
+                        if self.factories.is_empty() {
+                            let mut layout_job = egui::text::LayoutJob::default();
+                            egui::RichText::new("没有工厂\n").size(32.0).append_to(
+                                &mut layout_job,
+                                ui.style(),
+                                egui::FontSelection::Default,
+                                egui::Align::Center,
+                            );
+                            egui::RichText::new("点击上方的新建工厂按钮创建一个新工厂。")
+                                .append_to(
+                                    &mut layout_job,
+                                    ui.style(),
+                                    egui::FontSelection::Default,
+                                    egui::Align::Center,
+                                );
+                            ui.add_sized(ui.available_size(), egui::Label::new(layout_job));
+                        } else {
                             if page >= self.factories.len() {
                                 self.selected_page = ProjectPage::Index(0);
                             }
