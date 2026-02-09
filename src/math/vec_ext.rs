@@ -137,13 +137,6 @@ impl<T> IndexedVec<T> {
             current: 0,
         }
     }
-
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut T> {
-        IndexedVecIterMut {
-            indexed_vec: self,
-            current: 0,
-        }
-    }
 }
 
 struct IndexedVecIter<'a, T> {
@@ -161,31 +154,6 @@ impl<'a, T> Iterator for IndexedVecIter<'a, T> {
             let item = &self.indexed_vec.vec[self.indexed_vec.idx[self.current]];
             self.current += 1;
             Some(item)
-        }
-    }
-}
-
-struct IndexedVecIterMut<'a, T> {
-    indexed_vec: &'a mut IndexedVec<T>,
-    current: usize,
-}
-
-impl<'a, T> Iterator for IndexedVecIterMut<'a, T> {
-    type Item = &'a mut T;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.current >= self.indexed_vec.idx.len() {
-            None
-        } else {
-            // This is a bit tricky due to mutable borrowing rules.
-            let idx = self.indexed_vec.idx[self.current];
-            self.current += 1;
-
-            // SAFETY: We ensure that we only yield each element once.
-            unsafe {
-                let ptr = self.indexed_vec.vec.as_mut_ptr().add(idx);
-                Some(&mut *ptr)
-            }
         }
     }
 }

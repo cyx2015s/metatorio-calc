@@ -1094,64 +1094,50 @@ impl EditorView for RecipeMechanic {
                 self.machine_preferences.insert(0, new_machine);
                 changed = true;
             }
-            let mut move_ups = vec![];
-            let mut deletes = vec![];
-            let inital_len = self.machine_preferences.len();
             ui.separator();
-            for (idx, machine) in self.machine_preferences.iter_mut().enumerate() {
-                ui.horizontal_top(|ui| {
-                    ui.vertical(|ui| {
-                        if ui
-                            .add_enabled(idx > 0, egui::Button::new("↑").small())
-                            .clicked()
-                        {
-                            move_ups.push(idx);
-                            changed = true;
-                        }
-                        if ui
-                            .add_enabled(idx + 1 < inital_len, egui::Button::new("↓").small())
-                            .clicked()
-                        {
-                            move_ups.push(idx + 1);
-                            changed = true;
-                        }
-                    });
-
-                    let icon = Icon::new(factorio, "entity", &machine.0).with_quality(machine.1);
-                    let mut button = ui.add(icon).interact(egui::Sense::click());
-                    if let Some(crafter) = data.crafters.get(&machine.0) {
-                        button = button.on_hover_ui(|ui| {
-                            ui.add(PrototypeHover::new(factorio, crafter));
+            let mut delete_target = None;
+            egui_dnd::dnd(ui, "machine-preferences").show_vec(
+                &mut self.machine_preferences,
+                |ui, machine, handle, _| {
+                    ui.horizontal_top(|ui| {
+                        handle.ui_sized(ui, [15.0, 35.0].into(), |ui| {
+                            ui.heading("☰");
                         });
+                        let icon =
+                            Icon::new(factorio, "entity", &machine.0).with_quality(machine.1);
+                        let mut button = ui.add(icon).interact(egui::Sense::click());
+                        if let Some(crafter) = data.crafters.get(&machine.0) {
+                            button = button.on_hover_ui(|ui| {
+                                ui.add(PrototypeHover::new(factorio, crafter));
+                            });
 
-                        if button.secondary_clicked() {
-                            deletes.push(idx);
+                            if button.secondary_clicked() {
+                                delete_target = Some(machine.clone());
+                                changed = true;
+                            }
+                        } else {
+                            delete_target = Some(machine.clone());
                             changed = true;
                         }
-                    } else {
-                        deletes.push(idx);
-                    }
-                    ui.add(
-                        SelectorModal::new(button.id, factorio, "选择机器")
-                            .with_toggle(button.clicked())
-                            .with_selector(
-                                Selector::new(factorio, "entity")
-                                    .with_current(machine)
-                                    .with_filter(|s: &IdWithQuality, f: &FactorioContext| {
-                                        f.data.crafters.contains_key(&s.0)
-                                    }),
-                            ),
-                    );
-                });
-            }
-            for idx in move_ups {
-                self.machine_preferences.swap(idx, idx - 1);
-            }
-            for idx in deletes.iter().rev() {
-                self.machine_preferences.remove(*idx);
+                        ui.add(
+                            SelectorModal::new(button.id, factorio, "选择机器")
+                                .with_toggle(button.clicked())
+                                .with_selector(
+                                    Selector::new(factorio, "entity")
+                                        .with_current(machine)
+                                        .with_filter(|s: &IdWithQuality, f: &FactorioContext| {
+                                            f.data.crafters.contains_key(&s.0)
+                                        }),
+                                ),
+                        );
+                    });
+                },
+            );
+            if let Some(machine) = delete_target {
+                self.machine_preferences.retain(|m| m != &machine);
             }
         });
-
+        ui.separator();
         ui.collapsing("[自动]枚举插件", |ui| {
             let icon = Icon::new(factorio, "item", "empty-module-slot");
             let button = ui
@@ -1172,7 +1158,7 @@ impl EditorView for RecipeMechanic {
             if self.new_enumerate_module.is_some() {
                 let new_module = self.new_enumerate_module.take().unwrap();
                 // 移除已有的相同插件
-                self.enumerate_modules.retain(|m| m.0 != new_module.0);
+                self.enumerate_modules.retain(|m| m != &new_module);
                 // 插入到最前面
                 self.enumerate_modules.insert(0, new_module);
                 changed = true;

@@ -252,6 +252,49 @@ impl FactoryInstance {
         changed: &mut bool,
         need_suggestions: &mut bool,
     ) {
+        egui_dnd::dnd(ui, "instances").show_vec(
+            &mut self.instances,
+            |ui, &mut (idx, jdx), handle, _| {
+                ui.horizontal_wrapped(|ui| {
+                    card_frame(ui).show(ui, |ui| {
+                        handle.ui(ui, |ui| {
+                            ui.heading("≡");
+                        });
+                        ui.vertical(|ui| {
+                            let button = ui.add_sized([28.0, 14.0], egui::Button::new("⧉"));
+                            if button.clicked() {
+                                self.mechanics[idx]
+                                    .instance_operate(jdx, &mut |_| EntryOpRequest::Clone);
+                            }
+                            let button = ui.add_sized([28.0, 14.0], egui::Button::new("🗑"));
+                            if button.clicked() {
+                                self.mechanics[idx]
+                                    .instance_operate(jdx, &mut |_| EntryOpRequest::Drop);
+                            }
+                            let solution_value = self.solution.0.get(&(idx, jdx)).cloned();
+                            if let Some(value) = solution_value {
+                                ui.add(CompactLabel::new(value));
+                            } else {
+                                ui.label("无解");
+                            }
+                        });
+                    });
+                    card_frame(ui).show(ui, |ui| {
+                        ui.set_min_width(ui.available_width());
+                        *changed |= self.mechanics[idx].instance_view(jdx, ui, factorio);
+                    });
+                });
+            },
+        );
+    }
+
+    fn summary_panel(
+        &mut self,
+        ui: &mut egui::Ui,
+        factorio: &FactorioContext,
+        changed: &mut bool,
+        need_suggestions: &mut bool,
+    ) {
         ui.horizontal(|ui| {
             *changed |= ui
                 .checkbox(
@@ -347,42 +390,6 @@ impl FactoryInstance {
                 }
             });
         });
-        ui.separator();
-
-        egui_dnd::dnd(ui, "instances").show_vec(
-            &mut self.instances,
-            |ui, &mut (idx, jdx), handle, _| {
-                ui.horizontal_wrapped(|ui| {
-                    card_frame(ui).show(ui, |ui| {
-                        handle.ui(ui, |ui| {
-                            ui.heading("≡");
-                        });
-                        ui.vertical(|ui| {
-                            let button = ui.add_sized([28.0, 14.0], egui::Button::new("⧉"));
-                            if button.clicked() {
-                                self.mechanics[idx]
-                                    .instance_operate(jdx, &mut |_| EntryOpRequest::Clone);
-                            }
-                            let button = ui.add_sized([28.0, 14.0], egui::Button::new("🗑"));
-                            if button.clicked() {
-                                self.mechanics[idx]
-                                    .instance_operate(jdx, &mut |_| EntryOpRequest::Drop);
-                            }
-                            let solution_value = self.solution.0.get(&(idx, jdx)).cloned();
-                            if let Some(value) = solution_value {
-                                ui.add(CompactLabel::new(value));
-                            } else {
-                                ui.label("无解");
-                            }
-                        });
-                    });
-                    card_frame(ui).show(ui, |ui| {
-                        ui.set_min_width(ui.available_width());
-                        *changed |= self.mechanics[idx].instance_view(jdx, ui, factorio);
-                    });
-                });
-            },
-        );
     }
 
     fn side_panel(
@@ -464,50 +471,47 @@ impl FactoryInstance {
     ) {
         let data = &factorio.data;
         ui.heading("额外输入代价");
-        ui.label("* 每区块的产量");
         self.external
             .dnd(ui, "external", |ui, _, (item, amount), handle, _, op| {
-                ui.horizontal_top(|ui| {
-                    card_frame(ui).show(ui, |ui| {
+                card_frame(ui).show(ui, |ui| {
+                    ui.horizontal_top(|ui| {
+                        ui.set_min_width(ui.available_width());
+
                         handle.ui(ui, |ui| {
                             ui.heading("≡");
                         });
-                        ui.vertical(|ui| {
-                            if item.is_energy() {
-                                *changed |= ui.add(drag_watt(amount).speed(10_000.0)).changed();
-                            } else {
-                                *changed |= ui.add(drag_value(amount).suffix("/秒")).changed();
-                            }
-                            if ui.button("×").clicked() {
-                                *op = EntryOpRequest::Drop;
-                                *changed = true;
-                            }
-                        });
+                        if item.is_energy() {
+                            *changed |= ui.add(drag_watt(amount).speed(10_000.0)).changed();
+                        } else {
+                            *changed |= ui.add(drag_value(amount).suffix("/秒")).changed();
+                        }
+
+                        if ui.button("×").clicked() {
+                            *op = EntryOpRequest::Drop;
+                            *changed = true;
+                        }
                     });
-                    card_frame(ui).show(ui, |ui| {
-                        ui.set_min_width(ui.available_width());
-                        ui.horizontal_wrapped(|ui| {
-                            let icon = ui
-                                .add_sized([35.0, 35.0], GenericIcon::new(factorio, item))
-                                .interact(egui::Sense::click());
-                            if icon.clicked_by(egui::PointerButton::Secondary) {
-                                *need_suggestions = true;
-                                self.mechanics.iter_mut().for_each(|mechanic| {
-                                    mechanic.update_suggestion(
-                                        factorio, item, 1.0, // 尝试消耗更多该物品
-                                    )
-                                });
-                            }
-                            ui.vertical(|ui| {
-                                ui.horizontal(|ui| {
-                                    *changed |= generic_item_selector(
-                                        ui,
-                                        factorio,
-                                        item,
-                                        &icon,
-                                        icon.id.with("external"),
-                                    );
-                                });
+                    ui.horizontal_wrapped(|ui| {
+                        let icon = ui
+                            .add_sized([35.0, 35.0], GenericIcon::new(factorio, item))
+                            .interact(egui::Sense::click());
+                        if icon.clicked_by(egui::PointerButton::Secondary) {
+                            *need_suggestions = true;
+                            self.mechanics.iter_mut().for_each(|mechanic| {
+                                mechanic.update_suggestion(
+                                    factorio, item, 1.0, // 尝试消耗更多该物品
+                                )
+                            });
+                        }
+                        ui.vertical(|ui| {
+                            ui.horizontal(|ui| {
+                                *changed |= generic_item_selector(
+                                    ui,
+                                    factorio,
+                                    item,
+                                    &icon,
+                                    icon.id.with("external"),
+                                );
                             });
                         });
                     });
@@ -556,60 +560,55 @@ impl FactoryInstance {
 
         self.target
             .dnd(ui, "target", |ui, _, (item, amount), handle, _, op| {
-                ui.horizontal_top(|ui| {
-                    card_frame(ui).show(ui, |ui| {
+                card_frame(ui).show(ui, |ui| {
+                    ui.horizontal_top(|ui| {
+                        ui.set_min_width(ui.available_width());
                         handle.ui(ui, |ui| {
                             ui.heading("≡");
                         });
-                        ui.vertical(|ui| {
-                            if item.is_energy() {
-                                *changed |= ui.add(drag_watt(amount).speed(10_000.0)).changed();
-                            } else {
-                                *changed |= ui.add(drag_value(amount).suffix("/秒")).changed();
-                            }
-                            if ui.button("×").clicked() {
-                                *op = EntryOpRequest::Drop;
-                                *changed = true;
-                            }
-                        });
+                        if item.is_energy() {
+                            *changed |= ui.add(drag_watt(amount).speed(10_000.0)).changed();
+                        } else {
+                            *changed |= ui.add(drag_value(amount).suffix("/秒")).changed();
+                        }
+                        if ui.button("×").clicked() {
+                            *op = EntryOpRequest::Drop;
+                            *changed = true;
+                        }
                     });
-                    card_frame(ui).show(ui, |ui| {
-                        ui.set_min_width(ui.available_width());
-                        ui.horizontal_wrapped(|ui| {
-                            let mut icon = GenericIcon::new(factorio, item);
-                            let solution_of_target =
-                                self.total_flow.get(item).cloned().unwrap_or(0.0);
-                            let not_satisfied =
-                                !float_cmp::approx_eq!(f64, solution_of_target, *amount, ulps = 6);
-                            if not_satisfied {
-                                icon = icon.with_stroke(egui::Stroke::new(2.0, egui::Color32::RED));
-                            }
+                    ui.horizontal_wrapped(|ui| {
+                        let mut icon = GenericIcon::new(factorio, item);
+                        let solution_of_target = self.total_flow.get(item).cloned().unwrap_or(0.0);
+                        let not_satisfied =
+                            !float_cmp::approx_eq!(f64, solution_of_target, *amount, ulps = 6);
+                        if not_satisfied {
+                            icon = icon.with_stroke(egui::Stroke::new(2.0, egui::Color32::RED));
+                        }
 
-                            let mut widget = ui
-                                .add_sized([35.0, 35.0], icon)
-                                .interact(egui::Sense::click());
-                            if not_satisfied {
-                                widget = widget.on_hover_text("\u{26A0}目标已忽略");
-                            }
-                            if widget.clicked_by(egui::PointerButton::Secondary) {
-                                *need_suggestions = true;
-                                self.mechanics.iter_mut().for_each(|mechanic| {
-                                    mechanic.update_suggestion(
-                                        factorio, item,
-                                        -*amount, // 目标产量为正表示目前缺少对应数量的物品
-                                    )
-                                });
-                            }
-                            ui.vertical(|ui| {
-                                ui.horizontal(|ui| {
-                                    *changed |= generic_item_selector(
-                                        ui,
-                                        factorio,
-                                        item,
-                                        &widget,
-                                        widget.id.with("target"),
-                                    );
-                                });
+                        let mut widget = ui
+                            .add_sized([35.0, 35.0], icon)
+                            .interact(egui::Sense::click());
+                        if not_satisfied {
+                            widget = widget.on_hover_text("\u{26A0}目标已忽略");
+                        }
+                        if widget.clicked_by(egui::PointerButton::Secondary) {
+                            *need_suggestions = true;
+                            self.mechanics.iter_mut().for_each(|mechanic| {
+                                mechanic.update_suggestion(
+                                    factorio, item,
+                                    -*amount, // 目标产量为正表示目前缺少对应数量的物品
+                                )
+                            });
+                        }
+                        ui.vertical(|ui| {
+                            ui.horizontal(|ui| {
+                                *changed |= generic_item_selector(
+                                    ui,
+                                    factorio,
+                                    item,
+                                    &widget,
+                                    widget.id.with("target"),
+                                );
                             });
                         });
                     });
@@ -686,6 +685,8 @@ impl EditorView for FactoryInstance {
             .outer_margin(4.0)
             .show(ui, |ui| {
                 ui.heading("配方配置");
+
+                self.summary_panel(ui, factorio, &mut changed, &mut need_suggestions);
                 egui::ScrollArea::vertical().id_salt(3).show(ui, |ui| {
                     ui.vertical(|ui| {
                         // Use cached sorted keys instead of sorting every frame
@@ -734,14 +735,19 @@ pub struct ProjectInstance {
     #[serde(skip)]
     pub file_path: Option<PathBuf>,
     #[serde(skip)]
-    pub selected_factory: usize,
-    #[serde(skip)]
-    pub selected_user: bool,
-    pub new_factory_name: String,
+    pub selected_page: ProjectPage,
+
     #[serde(skip)]
     pub factory_receiver: Receiver<FactoryInstance>,
     #[serde(skip)]
     pub factory_sender: Sender<FactoryInstance>,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ProjectPage {
+    Index(usize), // 工厂设置页面
+    #[default]
+    UserContext, // 偏好设置页面
 }
 
 impl Default for ProjectInstance {
@@ -756,9 +762,7 @@ impl Default for ProjectInstance {
             saved: true,
             file_path: None,
             factories: IndexedVec::new(),
-            selected_factory: 0,
-            selected_user: false,
-            new_factory_name: String::new(),
+            selected_page: ProjectPage::default(),
             factory_receiver: factory_rx,
             factory_sender: factory_tx,
         }
@@ -811,6 +815,9 @@ impl SubView for ProjectInstance {
                     egui::ScrollArea::horizontal()
                         .id_salt("factories_button")
                         .show(ui, |ui| {
+                            if ui.button("⚙ 偏好设置").clicked() {
+                                self.selected_page = ProjectPage::UserContext;
+                            }
                             if ui.button("+ 新建工厂").clicked() {
                                 let name = "新工厂".to_string();
                                 self.factories.push(
@@ -829,19 +836,20 @@ impl SubView for ProjectInstance {
                                         handle.ui(ui, |ui| {
                                             ui.label("≡");
                                         });
-                                        let button = ui.add(
-                                            egui::Button::new(&factory.name)
-                                                .selected(self.selected_factory == real_idx),
-                                        );
+                                        let button =
+                                            ui.add(egui::Button::new(&factory.name).selected(
+                                                self.selected_page == ProjectPage::Index(real_idx),
+                                            ));
                                         if button.clicked() {
-                                            self.selected_factory = real_idx;
+                                            self.selected_page = ProjectPage::Index(real_idx);
                                         }
                                         if ui.button("×").clicked() {
                                             *op = EntryOpRequest::Drop;
-                                            if self.selected_factory >= real_idx
-                                                && self.selected_factory > 0
+                                            if let ProjectPage::Index(page) = self.selected_page
+                                                && page >= real_idx
+                                                && page > 0
                                             {
-                                                self.selected_factory -= 1;
+                                                self.selected_page = ProjectPage::Index(page - 1);
                                             }
                                         }
                                     });
@@ -867,11 +875,15 @@ impl SubView for ProjectInstance {
                     );
                     ui.add_sized(ui.available_size(), egui::Label::new(layout_job));
                 } else {
-                    if self.selected_factory >= self.factories.len() {
-                        self.selected_factory = 0;
+                    match self.selected_page {
+                        ProjectPage::UserContext => {}
+                        ProjectPage::Index(page) => {
+                            if page >= self.factories.len() {
+                                self.selected_page = ProjectPage::Index(0);
+                            }
+                            self.saved &= !self.factories.vec[page].editor_view(ui, &self.factorio);
+                        }
                     }
-                    self.saved &=
-                        !self.factories.vec[self.selected_factory].editor_view(ui, &self.factorio);
                 }
             });
     }
@@ -949,7 +961,7 @@ impl SubView for ProjectView {
                     ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                 }
                 if ui.button("关闭前保存").clicked() {
-                    for project in self.projects.iter_mut() {
+                    for project in self.projects.vec.iter_mut() {
                         if !project.saved {
                             if let Some(path) = &project.file_path.clone() {
                                 save_project(project, path);
@@ -983,7 +995,7 @@ impl SubView for ProjectView {
                         project.set_data(self.data.clone());
                         project.saved = true;
                         project.file_path = Some(path);
-                        project.factories.iter_mut().for_each(|f| {
+                        project.factories.vec.iter_mut().for_each(|f| {
                             f.send_solve_request(&project.factorio);
                             f.set_sender(project.factory_sender.clone());
                         });
