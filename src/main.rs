@@ -269,7 +269,7 @@ impl eframe::App for MainPage {
                     i += 1;
                     let mut deleted = false;
                     label.context_menu(|ui| {
-                        if ui.button("关闭").clicked() {
+                        if ui.button("关闭（\u{26A0}不会出现保存确认！）").clicked() {
                             deleted = true;
                         }
                     });

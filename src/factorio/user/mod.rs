@@ -17,6 +17,16 @@ pub enum TimeScale {
     Hours,
 }
 
+impl TimeScale {
+    pub fn multiplier(&self) -> f64 {
+        match self {
+            TimeScale::Seconds => 1.0,
+            TimeScale::Minutes => 60.0,
+            TimeScale::Hours => 3600.0,
+        }
+    }
+}
+
 #[derive(
     Debug,
     Clone,

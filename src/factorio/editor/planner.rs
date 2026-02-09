@@ -222,22 +222,19 @@ impl FactoryInstance {
             .iter()
             .map(|(item, amount)| (item.clone(), *amount))
             .fold(IndexMap::new(), |mut acc, (item, amount)| {
-                *acc.entry(item).or_insert(0.0) += amount;
+                *acc.entry(item).or_insert(0.0) +=
+                    amount * (if item.is_energy() { 1e6 } else { 1.0 });
                 acc
             });
         let external = self
             .external
             .iter()
-            .map(|(item, amount)| (item.clone(), *amount))
-            .fold(IndexMap::new(), |mut acc, (item, amount)| {
-                let v = acc.entry(item.clone()).or_default();
-                if *v < amount {
-                    *v = amount;
-                }
-                acc
+            .map(|(item, penalty)| {
+                (
+                    item.clone(),
+                    if item.is_energy() { 1e-6 } else { 1.0 } * penalty,
+                )
             })
-            .into_iter()
-            .map(|(item, amount)| (item, 1024.0 / amount))
             .collect();
         let _ = self.arg_sender.send(
             SolverData::new(target, flows)
@@ -290,6 +287,7 @@ impl FactoryInstance {
                         let target_width = ui.available_width();
                         ui.set_min_width(target_width);
                         ui.set_max_width(target_width);
+                        ui.set_min_height(50.0);
                         let flow = self.mechanics[idx].instances()[jdx].as_flow(factorio);
                         let mut flow_keys = flow.keys().cloned().collect::<Vec<_>>();
                         sort_generic_items_owned(&mut flow_keys, factorio);
@@ -302,16 +300,29 @@ impl FactoryInstance {
                             ui.vertical(|ui| {
                                 ui.set_min_width(40.0);
                                 ui.set_max_width(40.0);
-                                let icon = ui
+                                let button = ui
                                     .add_sized([25.0, 25.0], GenericIcon::new(factorio, item))
                                     .interact(egui::Sense::click());
-                                if icon.clicked() || icon.secondary_clicked() {
+                                button.context_menu(|ui| {
+                                    if ui.button("添加到产量目标").clicked() {
+                                        self.target.push((item.clone(), 0.0));
+                                        *changed = true;
+                                    }
+                                    if ui.button("添加到外部输入").clicked() {
+                                        self.external.push((item.clone(), 1.0));
+                                        *changed = true;
+                                    }
+                                    if ui.button("显示推荐配方").clicked() {
+                                        *need_suggestions = true;
+                                        self.mechanics.iter_mut().for_each(|mechanic| {
+                                            mechanic.update_suggestion(factorio, item, amount)
+                                        });
+                                    }
+                                });
+                                if button.clicked() {
                                     *need_suggestions = true;
                                     self.mechanics.iter_mut().for_each(|mechanic| {
-                                        mechanic.update_suggestion(
-                                            factorio, item,
-                                            -amount, // 流出表示目前缺少对应数量的物品
-                                        )
+                                        mechanic.update_suggestion(factorio, item, amount)
                                     });
                                 }
 
@@ -402,7 +413,8 @@ impl FactoryInstance {
 
                     ui.vertical(|ui| {
                         ui.set_min_width(40.0);
-                        ui.add(
+                        ui.add_sized(
+                            [40.0, 15.0],
                             AmountLabel::new(amount)
                                 .with_time_scale(factorio.user.time_scale)
                                 .with_is_energy(item.is_energy())
@@ -523,8 +535,9 @@ impl FactoryInstance {
     ) {
         let data = &factorio.data;
         ui.heading("额外输入代价");
+        ui.label("对物品和流体而言，每秒产出1个所消耗的地格；对能量而言，产出1MW所消耗的地格");
         self.external
-            .dnd(ui, "external", |ui, _, (item, amount), handle, _, op| {
+            .dnd(ui, "external", |ui, _, (item, penalty), handle, _, op| {
                 card_frame(ui).show(ui, |ui| {
                     ui.horizontal_top(|ui| {
                         ui.set_min_width(ui.available_width());
@@ -532,11 +545,8 @@ impl FactoryInstance {
                         handle.ui(ui, |ui| {
                             ui.heading("≡");
                         });
-                        if item.is_energy() {
-                            *changed |= ui.add(drag_watt(amount).speed(10_000.0)).changed();
-                        } else {
-                            *changed |= ui.add(drag_value(amount).suffix("/秒")).changed();
-                        }
+
+                        *changed |= ui.add(drag_value(penalty)).changed();
 
                         if ui.button("×").clicked() {
                             *op = EntryOpRequest::Drop;
@@ -586,15 +596,14 @@ impl FactoryInstance {
                         self.external.push((
                             item.clone(),
                             match item {
-                                GenericItem::Fluid { .. } => 1048576.0,
-                                GenericItem::Entity(..) => 16.0,
-                                GenericItem::Item(..) => 16.0,
+                                GenericItem::Fluid { .. } => 1.0 / 50.0,
+                                GenericItem::Entity(..) => 64.0,
+                                GenericItem::Item(..) => 64.0,
                                 _ => 1.0,
                             },
                         ));
                     }
-                    self.external
-                        .push((GenericItem::Electricity, 2.0_f64.powi(24)));
+                    self.external.push((GenericItem::Electricity, 200.0));
                     *changed = true;
                 }
             }
@@ -618,11 +627,17 @@ impl FactoryInstance {
                         handle.ui(ui, |ui| {
                             ui.heading("≡");
                         });
+
                         if item.is_energy() {
-                            *changed |= ui.add(drag_watt(amount).speed(10_000.0)).changed();
+                            let mut display_value = *amount / 1e6;
+                            *changed |= ui.add(drag_watt(&mut display_value)).changed();
+                            *amount = display_value * 1e6;
                         } else {
-                            *changed |= ui.add(drag_value(amount).suffix("/秒")).changed();
+                            let mut display_value = *amount * factorio.user.time_scale.multiplier();
+                            *changed |= ui.add(drag_value(&mut display_value)).changed();
+                            *amount = display_value / factorio.user.time_scale.multiplier();
                         }
+
                         if ui.button("×").clicked() {
                             *op = EntryOpRequest::Drop;
                             *changed = true;
