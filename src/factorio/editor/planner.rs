@@ -1,7 +1,7 @@
 use std::{
     collections::HashSet,
     io::BufReader,
-    path::{Path, PathBuf},
+    path::Path,
     sync::{Arc, mpsc::*},
 };
 
@@ -9,15 +9,7 @@ use crate::{
     concept::*,
     dyn_serde::*,
     factorio::{
-        UserContext,
-        common::*,
-        editor::{icon::*, modal::*},
-        format::*,
-        model::*,
-        number::AmountLabel,
-        selector::generic_item_selector,
-        setting::UserContextEditor,
-        style::card_frame,
+        ProjectPage, UserContext, common::*, editor::{icon::*, modal::*}, format::*, model::*, number::AmountLabel, selector::generic_item_selector, setting::UserContextEditor, style::card_frame
     },
     math::IndexedVec,
     solver::*,
@@ -798,24 +790,11 @@ pub struct ProjectInstance {
     pub factories: IndexedVec<FactoryInstance>,
 
     #[serde(skip)]
-    pub saved: bool,
-    #[serde(skip)]
-    pub file_path: Option<PathBuf>,
-    #[serde(skip)]
-    pub selected_page: ProjectPage,
-
-    #[serde(skip)]
     pub factory_receiver: Receiver<FactoryInstance>,
     #[serde(skip)]
     pub factory_sender: Sender<FactoryInstance>,
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum ProjectPage {
-    Index(usize), // 工厂设置页面
-    #[default]
-    UserContext, // 偏好设置页面
-}
 
 impl Default for ProjectInstance {
     fn default() -> Self {
@@ -826,10 +805,7 @@ impl Default for ProjectInstance {
                 user: UserContext::default(),
             },
             name: "未命名项目".to_string(),
-            saved: true,
-            file_path: None,
             factories: IndexedVec::new(),
-            selected_page: ProjectPage::default(),
             factory_receiver: factory_rx,
             factory_sender: factory_tx,
         }
@@ -866,7 +842,7 @@ impl SubView for ProjectInstance {
     fn view(&mut self, ui: &mut egui::Ui) {
         while let Ok(new_factory) = self.factory_receiver.try_recv() {
             self.factories.push(new_factory);
-            self.saved = false;
+            self.factorio.user.saved = false;
         }
         ui.add(egui::text_edit::TextEdit::singleline(&mut self.name));
         ui.separator();
@@ -883,7 +859,7 @@ impl SubView for ProjectInstance {
                         .id_salt("factories_button")
                         .show(ui, |ui| {
                             if ui.button("⚙ 偏好设置").clicked() {
-                                self.selected_page = ProjectPage::UserContext;
+                                self.factorio.user.selected_page = ProjectPage::UserContext;
                             }
                             if ui.button("+ 新建工厂").clicked() {
                                 let name = "新工厂".to_string();
@@ -905,18 +881,18 @@ impl SubView for ProjectInstance {
                                         });
                                         let button =
                                             ui.add(egui::Button::new(&factory.name).selected(
-                                                self.selected_page == ProjectPage::Index(real_idx),
+                                                self.factorio.user.selected_page == ProjectPage::Index(real_idx),
                                             ));
                                         if button.clicked() {
-                                            self.selected_page = ProjectPage::Index(real_idx);
+                                            self.factorio.user.selected_page = ProjectPage::Index(real_idx);
                                         }
                                         if ui.button("×").clicked() {
                                             *op = EntryOpRequest::Drop;
-                                            if let ProjectPage::Index(page) = self.selected_page
+                                            if let ProjectPage::Index(page) = self.factorio.user.selected_page
                                                 && page >= real_idx
                                                 && page > 0
                                             {
-                                                self.selected_page = ProjectPage::Index(page - 1);
+                                                self.factorio.user.selected_page = ProjectPage::Index(page - 1);
                                             }
                                         }
                                     });
@@ -926,9 +902,9 @@ impl SubView for ProjectInstance {
                 });
                 ui.separator();
 
-                match self.selected_page {
+                match self.factorio.user.selected_page {
                     ProjectPage::UserContext => {
-                        self.saved &= !ui.add(UserContextEditor::new(&mut self.factorio)).changed();
+                        self.factorio.user.saved &= !ui.add(UserContextEditor::new(&mut self.factorio)).changed();
                     }
                     ProjectPage::Index(page) => {
                         if self.factories.is_empty() {
@@ -949,9 +925,9 @@ impl SubView for ProjectInstance {
                             ui.add_sized(ui.available_size(), egui::Label::new(layout_job));
                         } else {
                             if page >= self.factories.len() {
-                                self.selected_page = ProjectPage::Index(0);
+                                self.factorio.user.selected_page = ProjectPage::Index(0);
                             }
-                            self.saved &= !self.factories.vec[page].editor_view(ui, &self.factorio);
+                            self.factorio.user.saved &= !self.factories.vec[page].editor_view(ui, &self.factorio);
                         }
                     }
                 }
@@ -1013,7 +989,7 @@ impl SubView for ProjectView {
         let mut show_close_confirm = false;
         if ui.input(|i| i.viewport().close_requested())
             && !self.ignore_close
-            && self.projects.iter().any(|p| !p.saved)
+            && self.projects.iter().any(|p| !p.factorio.user.saved)
         {
             show_close_confirm = true;
             ui.ctx()
@@ -1032,13 +1008,13 @@ impl SubView for ProjectView {
                 }
                 if ui.button("关闭前保存").clicked() {
                     for project in self.projects.vec.iter_mut() {
-                        if !project.saved {
-                            if let Some(path) = &project.file_path.clone() {
+                        if !project.factorio.user.saved {
+                            if let Some(path) = &project.factorio.user.file_path.clone() {
                                 save_project(project, path);
                             } else {
                                 save_project_as(project);
                             }
-                            project.saved = true;
+                            project.factorio.user.saved = true;
                         }
                     }
                     self.ignore_close = true;
@@ -1063,8 +1039,8 @@ impl SubView for ProjectView {
                         && let Some(mut project) = load_project(&path)
                     {
                         project.set_data(self.data.clone());
-                        project.saved = true;
-                        project.file_path = Some(path);
+                        project.factorio.user.saved = true;
+                        project.factorio.user.file_path = Some(path);
                         project.factories.vec.iter_mut().for_each(|f| {
                             f.send_solve_request(&project.factorio);
                             f.set_sender(project.factory_sender.clone());
@@ -1078,7 +1054,7 @@ impl SubView for ProjectView {
                     ui.separator();
                     let project = &mut self.projects[selected];
                     if ui.button("保存项目").clicked() {
-                        if let Some(path) = &project.file_path.clone() {
+                        if let Some(path) = &project.factorio.user.file_path.clone() {
                             save_project(project, path);
                         } else {
                             save_project_as(project);
@@ -1121,7 +1097,7 @@ impl SubView for ProjectView {
                                     self.selected = Some(*real_idx);
                                 }
                                 if ui.button("×").clicked() {
-                                    if !project.saved {
+                                    if !project.factorio.user.saved {
                                         toggle = true;
                                         self.delete_request = DeleteRequest::Pending(virtual_idx);
                                     } else {
@@ -1186,8 +1162,8 @@ pub fn save_project(proj: &mut ProjectInstance, path: &Path) {
     match std::fs::File::create(path) {
         Ok(file) => match serde_json::to_writer_pretty(&file, &proj) {
             Ok(_) => {
-                proj.saved = true;
-                proj.file_path = Some(path.to_path_buf());
+                proj.factorio.user.saved = true;
+                proj.factorio.user.file_path = Some(path.to_path_buf());
                 crate::toast::info("项目已保存");
             }
             Err(e) => {

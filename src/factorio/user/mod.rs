@@ -1,10 +1,17 @@
-use std::{collections::HashMap, hash::Hash};
+use std::{collections::HashMap, hash::Hash, path::PathBuf};
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct UserContext {
     pub time_scale: TimeScale,
 
     pub milestones: Vec<DependencyItem>,
+
+    #[serde(skip)]
+    pub saved: bool,
+    #[serde(skip)]
+    pub file_path: Option<PathBuf>,
+    #[serde(skip)]
+    pub selected_page: ProjectPage,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
@@ -25,6 +32,13 @@ impl TimeScale {
             TimeScale::Hours => 3600.0,
         }
     }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ProjectPage {
+    Index(usize), // 工厂设置页面
+    #[default]
+    UserContext, // 偏好设置页面
 }
 
 #[derive(
