@@ -49,21 +49,6 @@ pub trait EditorView: SolveContext {
     fn editor_view(&mut self, ui: &mut egui::Ui, game: &Self::Game) -> bool;
 }
 
-/// 关联于特定工厂的编辑视图
-pub trait FactoryEditorView: EditorView {
-    type FactorySettings: Send + 'static;
-    // 返回值表示是否产生了需要重新计算的更改
-    fn factory_editor_view(
-        &mut self,
-        ui: &mut egui::Ui,
-        factory: &Self::FactorySettings,
-        game: &Self::Game,
-    ) -> bool {
-        let _ = factory;
-        self.editor_view(ui, game)
-    }
-}
-
 pub type Flow<I> = IndexMap<I, f64>;
 
 /// 能够转化成流参与计算的方法
@@ -95,7 +80,7 @@ where
 {
     fn name(&self) -> String;
 
-    fn instances(&self) -> Vec<&dyn AsFlow<Game = G, Item = I>>;
+    fn instances(&self) -> Vec<&dyn AsFlow<Game = Self::Game, Item = Self::Item>>;
 
     // 考虑提供一个更高效的实现。
     fn instance_len(&self) -> usize {
@@ -106,7 +91,7 @@ where
     fn instance_operate(
         &mut self,
         idx: usize,
-        f: &mut dyn FnMut(&mut dyn AsFlow<Game = G, Item = I>) -> EntryOpRequest,
+        f: &mut dyn FnMut(&mut dyn AsFlow<Game = Self::Game, Item = Self::Item>) -> EntryOpRequest,
     ) {
         let _ = idx;
         let _ = f;
@@ -117,7 +102,7 @@ where
     fn submit_operations(&mut self) -> Vec<EntryOpResult>;
 
     // 返回值表示是否产生了需要重新计算的更改
-    fn instance_view(&mut self, idx: usize, ui: &mut egui::Ui, game: &G) -> bool {
+    fn instance_view(&mut self, idx: usize, ui: &mut egui::Ui, game: &Self::Game) -> bool {
         let _ = idx;
         let _ = ui;
         let _ = game;

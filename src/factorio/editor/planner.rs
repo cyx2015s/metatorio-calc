@@ -9,7 +9,15 @@ use crate::{
     concept::*,
     dyn_serde::*,
     factorio::{
-        ProjectPage, UserContext, common::*, editor::{icon::*, modal::*}, format::*, model::*, number::AmountLabel, selector::generic_item_selector, setting::UserContextEditor, style::card_frame
+        ProjectPage, UserContext,
+        common::*,
+        editor::{icon::*, modal::*},
+        format::*,
+        model::*,
+        number::AmountLabel,
+        selector::generic_item_selector,
+        setting::UserContextEditor,
+        style::card_frame,
     },
     math::DndVec,
     solver::*,
@@ -795,7 +803,6 @@ pub struct ProjectInstance {
     pub factory_sender: Sender<FactoryInstance>,
 }
 
-
 impl Default for ProjectInstance {
     fn default() -> Self {
         let (factory_tx, factory_rx) = channel();
@@ -881,18 +888,22 @@ impl SubView for ProjectInstance {
                                         });
                                         let button =
                                             ui.add(egui::Button::new(&factory.name).selected(
-                                                self.factorio.user.selected_page == ProjectPage::Index(real_idx),
+                                                self.factorio.user.selected_page
+                                                    == ProjectPage::Index(real_idx),
                                             ));
                                         if button.clicked() {
-                                            self.factorio.user.selected_page = ProjectPage::Index(real_idx);
+                                            self.factorio.user.selected_page =
+                                                ProjectPage::Index(real_idx);
                                         }
                                         if ui.button("×").clicked() {
                                             *op = EntryOpRequest::Drop;
-                                            if let ProjectPage::Index(page) = self.factorio.user.selected_page
+                                            if let ProjectPage::Index(page) =
+                                                self.factorio.user.selected_page
                                                 && page >= real_idx
                                                 && page > 0
                                             {
-                                                self.factorio.user.selected_page = ProjectPage::Index(page - 1);
+                                                self.factorio.user.selected_page =
+                                                    ProjectPage::Index(page - 1);
                                             }
                                         }
                                     });
@@ -904,7 +915,8 @@ impl SubView for ProjectInstance {
 
                 match self.factorio.user.selected_page {
                     ProjectPage::UserContext => {
-                        self.factorio.user.saved &= !ui.add(UserContextEditor::new(&mut self.factorio)).changed();
+                        self.factorio.user.saved &=
+                            !ui.add(UserContextEditor::new(&mut self.factorio)).changed();
                     }
                     ProjectPage::Index(page) => {
                         if self.factories.is_empty() {
@@ -927,7 +939,8 @@ impl SubView for ProjectInstance {
                             if page >= self.factories.len() {
                                 self.factorio.user.selected_page = ProjectPage::Index(0);
                             }
-                            self.factorio.user.saved &= !self.factories.vec[page].editor_view(ui, &self.factorio);
+                            self.factorio.user.saved &=
+                                !self.factories.vec[page].editor_view(ui, &self.factorio);
                         }
                     }
                 }
