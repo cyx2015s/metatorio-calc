@@ -66,12 +66,12 @@ impl<T> ElemVec<T> for Vec<T> {
 
 // 物品本身不方便移动的时候，用索引来移动
 #[derive(Debug, Default)]
-pub struct IndexedVec<T> {
+pub struct DndVec<T> {
     pub vec: Vec<T>,
     pub idx: Vec<usize>,
 }
 
-impl<T> Clone for IndexedVec<T>
+impl<T> Clone for DndVec<T>
 where
     T: Clone,
 {
@@ -83,7 +83,7 @@ where
     }
 }
 
-impl<T> IndexedVec<T> {
+impl<T> DndVec<T> {
     pub fn new() -> Self {
         Self {
             vec: Vec::new(),
@@ -140,7 +140,7 @@ impl<T> IndexedVec<T> {
 }
 
 struct IndexedVecIter<'a, T> {
-    indexed_vec: &'a IndexedVec<T>,
+    indexed_vec: &'a DndVec<T>,
     current: usize,
 }
 
@@ -158,7 +158,7 @@ impl<'a, T> Iterator for IndexedVecIter<'a, T> {
     }
 }
 
-impl<T> std::ops::Index<usize> for IndexedVec<T> {
+impl<T> std::ops::Index<usize> for DndVec<T> {
     type Output = T;
 
     fn index(&self, index: usize) -> &Self::Output {
@@ -167,27 +167,27 @@ impl<T> std::ops::Index<usize> for IndexedVec<T> {
     }
 }
 
-impl<T> std::ops::IndexMut<usize> for IndexedVec<T> {
+impl<T> std::ops::IndexMut<usize> for DndVec<T> {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         let real_index = self.idx[index];
         &mut self.vec[real_index]
     }
 }
 
-impl<T> From<Vec<T>> for IndexedVec<T> {
+impl<T> From<Vec<T>> for DndVec<T> {
     fn from(value: Vec<T>) -> Self {
         let idx = (0..value.len()).collect();
         Self { vec: value, idx }
     }
 }
 
-impl<T> From<IndexedVec<T>> for Vec<T> {
-    fn from(value: IndexedVec<T>) -> Self {
+impl<T> From<DndVec<T>> for Vec<T> {
+    fn from(value: DndVec<T>) -> Self {
         value.vec
     }
 }
 
-impl<T> serde::Serialize for IndexedVec<T>
+impl<T> serde::Serialize for DndVec<T>
 where
     T: serde::Serialize,
 {
@@ -203,7 +203,7 @@ where
     }
 }
 
-impl<'a, T> serde::Deserialize<'a> for IndexedVec<T>
+impl<'a, T> serde::Deserialize<'a> for DndVec<T>
 where
     T: serde::Deserialize<'a>,
 {
@@ -213,7 +213,7 @@ where
     {
         let vec: Vec<T> = serde::Deserialize::deserialize(deserializer)?;
         let idx = (0..vec.len()).collect();
-        Ok(IndexedVec { vec, idx })
+        Ok(DndVec { vec, idx })
     }
 }
 
@@ -222,7 +222,7 @@ mod tests {
     use super::*;
     #[test]
     fn test_indexed_vec_serialize() {
-        let mut indexed_vec = IndexedVec::new();
+        let mut indexed_vec = DndVec::new();
         indexed_vec.push(10);
         indexed_vec.push(20);
         indexed_vec.push(30);
@@ -231,14 +231,14 @@ mod tests {
         let serialized = serde_json::to_string(&indexed_vec).unwrap();
         assert_eq!(serialized, "[30,20,10]");
 
-        let deserialized: IndexedVec<i32> = serde_json::from_str(&serialized).unwrap();
+        let deserialized: DndVec<i32> = serde_json::from_str(&serialized).unwrap();
         assert_eq!(deserialized.vec, vec![30, 20, 10]);
         assert_eq!(deserialized.idx, vec![0, 1, 2]);
     }
     #[test]
     fn test_vec_behavior() {
         let mut plain_vec: Vec<i32> = (10..20).collect();
-        let mut indexed_vec = IndexedVec::from(plain_vec.clone());
+        let mut indexed_vec = DndVec::from(plain_vec.clone());
         indexed_vec.remove(2);
         plain_vec.remove(2);
         assert_eq!(indexed_vec.iter().cloned().collect::<Vec<_>>(), plain_vec);

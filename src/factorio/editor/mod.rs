@@ -1,4 +1,4 @@
-pub mod clipboard;
+pub mod history;
 pub mod drag;
 pub mod hover;
 pub mod icon;

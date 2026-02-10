@@ -43,10 +43,25 @@ pub trait SolveContext: Debug + Send + Any {
     type Item: ItemIdent;
 }
 
-/// 能够在编辑器中展示自己的视图
+/// 能够在编辑器中展示自己的视图，项目级别通用（每个项目有自己的偏好设置，内部可以关联独有的上下文或公用的Arc上下文）
 pub trait EditorView: SolveContext {
     // 返回值表示是否产生了需要重新计算的更改
     fn editor_view(&mut self, ui: &mut egui::Ui, game: &Self::Game) -> bool;
+}
+
+/// 关联于特定工厂的编辑视图
+pub trait FactoryEditorView: EditorView {
+    type FactorySettings: Send + 'static;
+    // 返回值表示是否产生了需要重新计算的更改
+    fn factory_editor_view(
+        &mut self,
+        ui: &mut egui::Ui,
+        factory: &Self::FactorySettings,
+        game: &Self::Game,
+    ) -> bool {
+        let _ = factory;
+        self.editor_view(ui, game)
+    }
 }
 
 pub type Flow<I> = IndexMap<I, f64>;

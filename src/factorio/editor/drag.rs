@@ -1,8 +1,8 @@
 use std::hash::Hash;
 
-use crate::{concept::EntryOpRequest, math::IndexedVec};
+use crate::{concept::EntryOpRequest, math::DndVec};
 
-impl<T> IndexedVec<T>
+impl<T> DndVec<T>
 where
     T: Clone,
 {

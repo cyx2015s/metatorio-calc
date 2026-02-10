@@ -11,7 +11,7 @@ use crate::{
     factorio::{
         ProjectPage, UserContext, common::*, editor::{icon::*, modal::*}, format::*, model::*, number::AmountLabel, selector::generic_item_selector, setting::UserContextEditor, style::card_frame
     },
-    math::IndexedVec,
+    math::DndVec,
     solver::*,
 };
 
@@ -29,8 +29,8 @@ lazy_static::lazy_static! {
 #[derive(Debug)]
 pub struct FactoryInstance {
     pub name: String,
-    pub target: IndexedVec<(GenericItem, f64)>,
-    pub external: IndexedVec<(GenericItem, f64)>,
+    pub target: DndVec<(GenericItem, f64)>,
+    pub external: DndVec<(GenericItem, f64)>,
     pub mechanics: Vec<Box<dyn Mechanic<FactorioContext, GenericItem>>>,
     pub instances: Vec<(usize, usize)>,
 
@@ -133,8 +133,8 @@ impl Default for FactoryInstance {
 
         FactoryInstance {
             name: "工厂".to_string(),
-            target: IndexedVec::new(),
-            external: IndexedVec::new(),
+            target: DndVec::new(),
+            external: DndVec::new(),
             mechanics: Vec::new(),
             instances: Vec::new(),
             arg_sender: arg_tx,
@@ -787,7 +787,7 @@ pub struct ProjectInstance {
 
     pub name: String,
 
-    pub factories: IndexedVec<FactoryInstance>,
+    pub factories: DndVec<FactoryInstance>,
 
     #[serde(skip)]
     pub factory_receiver: Receiver<FactoryInstance>,
@@ -805,7 +805,7 @@ impl Default for ProjectInstance {
                 user: UserContext::default(),
             },
             name: "未命名项目".to_string(),
-            factories: IndexedVec::new(),
+            factories: DndVec::new(),
             factory_receiver: factory_rx,
             factory_sender: factory_tx,
         }
@@ -952,7 +952,7 @@ impl SubView for ProjectInstance {
 pub struct ProjectView {
     pub data: Arc<DataContext>,
     pub selected: Option<usize>,
-    pub projects: IndexedVec<ProjectInstance>,
+    pub projects: DndVec<ProjectInstance>,
     pub ignore_close: bool,
     pub delete_request: DeleteRequest,
 }
@@ -963,7 +963,7 @@ impl ProjectView {
             data: Arc::new(data.build_order_info().build_dependency_graph()),
             ignore_close: false,
             selected: None,
-            projects: IndexedVec::new(),
+            projects: DndVec::new(),
             delete_request: DeleteRequest::None,
         }
     }
