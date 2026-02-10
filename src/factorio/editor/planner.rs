@@ -816,7 +816,7 @@ impl ProjectInstance {
     pub fn new(data: DataContext) -> Self {
         ProjectInstance {
             factorio: FactorioContext {
-                data: Arc::new(data.build_order_info().build_dependency_graph()),
+                data: Arc::new(data.build_order_info()),
                 user: UserContext::default(),
             },
             ..Default::default()
@@ -960,7 +960,7 @@ pub struct ProjectView {
 impl ProjectView {
     pub fn new(data: DataContext) -> Self {
         ProjectView {
-            data: Arc::new(data.build_order_info().build_dependency_graph()),
+            data: Arc::new(data.build_order_info()),
             ignore_close: false,
             selected: None,
             projects: DndVec::new(),

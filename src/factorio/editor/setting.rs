@@ -1,4 +1,6 @@
-use crate::factorio::{FactorioContext, TimeScale};
+use crate::factorio::{
+    FactorioContext, TimeScale,
+};
 
 #[derive(Debug)]
 pub struct UserContextEditor<'a> {
@@ -16,7 +18,8 @@ impl egui::Widget for UserContextEditor<'_> {
         let response = ui.response();
         ui.set_min_width(ui.available_width());
         ui.set_min_height(ui.available_height());
-        egui::ComboBox::new("time-scale", "时间标度")
+        ui.heading("时间尺度");
+        egui::ComboBox::new("time-scale", "时间尺度")
             .selected_text(match self.game.user.time_scale {
                 TimeScale::Hours => "小时",
                 TimeScale::Minutes => "分钟",
@@ -28,6 +31,7 @@ impl egui::Widget for UserContextEditor<'_> {
                 ui.selectable_value(&mut self.game.user.time_scale, TimeScale::Minutes, "分钟");
                 ui.selectable_value(&mut self.game.user.time_scale, TimeScale::Seconds, "秒");
             });
+
         response
     }
 }
