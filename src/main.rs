@@ -20,7 +20,6 @@ pub mod error;
 pub mod factorio;
 pub mod math;
 pub mod memlog;
-pub mod solver;
 pub mod toast;
 pub mod update;
 

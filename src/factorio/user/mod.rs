@@ -1,8 +1,13 @@
-use std::path::PathBuf;
+use std::{
+    path::PathBuf,
+    sync::mpsc::Sender,
+};
 
-use crate::factorio::Dict;
+use crate::
+    factorio::{Dict, planner::FactoryInstance}
+;
 
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct UserContext {
     pub time_scale: TimeScale,
@@ -19,6 +24,45 @@ pub struct UserContext {
     pub file_path: Option<PathBuf>,
     #[serde(skip)]
     pub selected_page: ProjectPage,
+
+    #[serde(skip)]
+    pub factory_sender: Option<Sender<FactoryInstance>>,
+}
+
+impl Default for UserContext {
+    fn default() -> Self {
+        Self {
+            time_scale: TimeScale::Seconds,
+            tech_milestones: Vec::new(),
+            accessible_prototypes: Dict::new(),
+            saved: true,
+            file_path: None,
+            selected_page: ProjectPage::default(),
+            factory_sender: None,
+        }
+    }
+}
+
+impl Clone for UserContext {
+    fn clone(&self) -> Self {
+        Self {
+            time_scale: self.time_scale,
+            tech_milestones: self.tech_milestones.clone(),
+            accessible_prototypes: self.accessible_prototypes.clone(),
+            saved: self.saved,
+            file_path: self.file_path.clone(),
+            selected_page: self.selected_page,
+            factory_sender: self.factory_sender.clone(),
+            ..Default::default()
+        }
+    }
+}
+
+impl UserContext {
+    pub fn with_factory_sender(mut self, sender: Sender<FactoryInstance>) -> Self {
+        self.factory_sender = Some(sender);
+        self
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]

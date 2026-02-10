@@ -4,7 +4,7 @@ use crate::{
     concept::EntryOpRequest,
     error::AppError,
     factorio::{FactorioContext, planner::FactoryInstance, sort_generic_items_owned},
-    solver::flow_add,
+    math::flow_add,
 };
 
 /// 持有初始工厂实例和游戏上下文，返回一个新的工厂实例
@@ -36,11 +36,12 @@ pub fn factorio_auto_planner(
     log::info!("自动填充机制实例完成，用时: {:.2?}", instant.elapsed());
     let instant = Instant::now();
     factory.strict_source = true;
-    factory.send_solve_request(&factorio);
-    match factory.solution_receiver.recv() {
+    let mut problem = factory.as_problem(&factorio);
+    let solution = problem.solve();
+    match solution {
         Ok(solution) => {
             factory.total_flow.clear();
-            factory.solution = solution?;
+            factory.solution = solution;
             for (idx, mechanic) in factory.mechanics.iter().enumerate() {
                 for (jdx, instance) in mechanic.instances().iter().enumerate() {
                     let var_value = factory.solution.0.get(&(idx, jdx)).cloned().unwrap_or(0.0);
@@ -51,9 +52,9 @@ pub fn factorio_auto_planner(
             sort_generic_items_owned(&mut factory.total_flow_sorted_keys, &factorio);
         }
         Err(e) => {
-            log::error!("自动规划失败: {}", e);
-            crate::toast::error("自动规划失败。");
-            return Err(AppError::Solver("无法从求解线程获得结果。".into()));
+            log::error!("自动规划失败: {:?}", e);
+            crate::toast::error(format!("自动规划失败。{:?}", e));
+            return Err(AppError::Solver("无法获得结果".into()));
         }
     }
 
@@ -79,7 +80,7 @@ pub fn factorio_auto_planner(
             }
             mechanic.submit_operations();
         });
-    factory.send_solve_request(&factorio);
+    
     factory.name += " (自动规划)";
     log::info!("自动规划完成: {}", factory.name);
     log::info!("自动规划用时: {:.2?}", instant.elapsed());

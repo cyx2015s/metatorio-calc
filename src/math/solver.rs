@@ -162,11 +162,18 @@ where
             for (item_id, &amount) in &recipe.0 {
                 let entry = magnitude_and_counts
                     .entry(item_id.clone())
-                    .or_insert((0.0, 1));
-                if amount.abs() > 1e-12 {
-                    entry.0 += amount.abs().log2().max(-32.0);
-                    entry.1 += 1;
-                }
+                    .or_insert((0.0, 0));
+                entry.0 += amount.abs().log2().max(-32.0);
+                entry.1 += 1;
+            }
+        }
+        for (item_id, &amount) in &self.target {
+            let entry = magnitude_and_counts
+                .entry(item_id.clone())
+                .or_insert((0.0, 0));
+            if amount.abs() > 1e-12 {
+                entry.0 += amount.abs().log2().max(-32.0);
+                entry.1 += 1;
             }
         }
         // total_magnitude / count 是这些数据的几何平均数的数量级
@@ -176,7 +183,6 @@ where
                 (item, (-total_maginitude / count as f64) as i32)
             })
             .collect();
-        log::info!("{:?}", &magnitude_factors);
         let get_multiplier =
             |item_id: &I| -> f64 { (2.0_f64).powi(*magnitude_factors.get(item_id).unwrap_or(&0)) };
         let mut problem_variables = good_lp::ProblemVariables::new();
@@ -198,16 +204,7 @@ where
                 let entry = item_balances
                     .entry(item_id.clone())
                     .or_insert(good_lp::Expression::from(0.0));
-                let val = get_multiplier(item_id) * amount;
-                if val.abs() > 1.5 || val.abs() < 0.8 {
-                    log::info!(
-                        "求解器：物品 {:?} 在配方 {:?} 中的流量系数过大：{}，调整为 {} 仍然过大",
-                        item_id,
-                        recipe_id,
-                        amount,
-                        val
-                    );
-                }
+                let val = amount * get_multiplier(item_id);
                 *entry += val * *var;
             }
         }
@@ -339,19 +336,19 @@ where
         }
     }
 
-    pub fn make_solver_thread(
+    pub fn make_dedicated_solver_thread(
         solution_tx: Sender<SolverSolutionTuple<R>>,
-        arg_rx: Receiver<SolverData<I, R>>,
+        problem_rx: Receiver<SolverData<I, R>>,
     ) {
         std::thread::spawn(move || {
             log::info!("求解线程启动");
             loop {
-                let mut last_req = match arg_rx.recv() {
+                let mut last_req = match problem_rx.recv() {
                     Ok(req) => req,
                     Err(_) => break,
                 };
                 // 尽可能多地丢弃后续请求，只保留最新
-                while let Ok(req) = arg_rx.try_recv() {
+                while let Ok(req) = problem_rx.try_recv() {
                     // 虽然不太可能，因为每次算都很快。
                     log::info!("丢弃了一个过时的求解请求");
 
@@ -360,6 +357,24 @@ where
 
                 // log::info!("收到了新的计算请求……");
                 if solution_tx.send(last_req.solve()).is_err() {
+                    // 接收方已关闭，退出线程
+                    break;
+                }
+            }
+            log::info!("求解线程退出");
+        });
+    }
+
+    pub fn make_solver_thread(
+        solution_tx: Sender<(usize, SolverSolutionTuple<R>)>,
+        problem_rx: Receiver<(usize, SolverData<I, R>)>,
+    ) {
+        std::thread::spawn(move || {
+            log::info!("求解线程启动");
+            while let Ok((req_id, mut req)) = problem_rx.recv() {
+                // log::info!("收到了新的计算请求……");
+                let result = req.solve();
+                if solution_tx.send((req_id, result)).is_err() {
                     // 接收方已关闭，退出线程
                     break;
                 }

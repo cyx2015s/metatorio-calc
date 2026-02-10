@@ -19,8 +19,7 @@ use crate::{
         setting::UserContextEditor,
         style::card_frame,
     },
-    math::DndVec,
-    solver::*,
+    math::*,
 };
 
 use indexmap::IndexMap;
@@ -42,16 +41,11 @@ pub struct FactoryInstance {
     pub mechanics: Vec<Box<dyn Mechanic<FactorioContext, GenericItem>>>,
     pub instances: Vec<(usize, usize)>,
 
-    pub arg_sender: Sender<SolverData<GenericItem, (usize, usize)>>,
     pub strict_source: bool,
 
     pub solution: (Flow<(usize, usize)>, f64),
     pub total_flow: Flow<GenericItem>,
     pub total_flow_sorted_keys: Vec<GenericItem>,
-
-    pub solution_receiver: Receiver<SolverSolutionTuple<(usize, usize)>>,
-
-    pub factory_sender: Option<Sender<FactoryInstance>>, // 往外通知，有新工厂啦
 }
 
 impl serde::Serialize for FactoryInstance {
@@ -127,7 +121,6 @@ impl Clone for FactoryInstance {
             total_flow_sorted_keys: self.total_flow_sorted_keys.clone(),
             mechanics: self.mechanics.clone(),
             instances: self.instances.clone(),
-            factory_sender: self.factory_sender.clone(),
             ..Default::default()
         }
     }
@@ -135,24 +128,17 @@ impl Clone for FactoryInstance {
 
 impl Default for FactoryInstance {
     fn default() -> Self {
-        let (arg_tx, arg_rx) = channel();
-        let (solution_tx, solution_rx) = channel();
-        SolverData::make_solver_thread(solution_tx, arg_rx);
-
         FactoryInstance {
             name: "工厂".to_string(),
             target: DndVec::new(),
             external: DndVec::new(),
             mechanics: Vec::new(),
             instances: Vec::new(),
-            arg_sender: arg_tx,
+
             strict_source: false,
             solution: (IndexMap::new(), 0.0),
             total_flow: IndexMap::new(),
             total_flow_sorted_keys: Vec::new(),
-            solution_receiver: solution_rx,
-
-            factory_sender: None,
         }
     }
 }
@@ -163,15 +149,6 @@ impl FactoryInstance {
             name,
             ..Default::default()
         }
-    }
-
-    pub fn set_sender(&mut self, sender: Sender<FactoryInstance>) {
-        self.factory_sender = Some(sender);
-    }
-
-    pub fn with_sender(mut self, sender: Sender<FactoryInstance>) -> Self {
-        self.factory_sender = Some(sender);
-        self
     }
 
     pub fn with_mechanic(mut self, mechanic: impl Mechanic<FactorioContext, GenericItem>) -> Self {
@@ -198,7 +175,10 @@ impl FactoryInstance {
         }
     }
 
-    pub fn send_solve_request(&mut self, factorio: &FactorioContext) {
+    pub fn as_problem(
+        &mut self,
+        factorio: &FactorioContext,
+    ) -> SolverData<GenericItem, (usize, usize)> {
         if self
             .mechanics
             .iter()
@@ -236,11 +216,9 @@ impl FactoryInstance {
                 )
             })
             .collect();
-        let _ = self.arg_sender.send(
-            SolverData::new(target, flows)
-                .with_sources(external)
-                .with_strict_source(self.strict_source),
-        );
+        SolverData::new(target, flows)
+            .with_sources(external)
+            .with_strict_source(self.strict_source)
     }
 
     fn flows_panel(
@@ -380,20 +358,19 @@ impl FactoryInstance {
             {
                 let factorio_cloned = factorio.clone();
                 let factory_cloned = self.clone();
-                let factory_sender = self.factory_sender.clone();
                 std::thread::spawn(move || {
-                    if let Some(sender) = factory_sender {
-                        let auto_planned_factory =
-                            factorio_auto_planner(factory_cloned, factorio_cloned);
-                        match auto_planned_factory {
-                            Ok(factory) => {
-                                crate::toast::info("自动规划工厂完成。");
-                                let _ = sender.send(factory);
-                            }
-                            Err(e) => {
-                                crate::toast::error(format!("自动规划工厂失败：{:?}\n", &e));
-                                log::error!("自动规划工厂失败: {:?}", &e);
-                            }
+                    let sender = factorio_cloned.user.factory_sender.clone();
+
+                    let auto_planned_factory =
+                        factorio_auto_planner(factory_cloned, factorio_cloned);
+                    match auto_planned_factory {
+                        Ok(factory) => {
+                            sender.unwrap().send(factory).unwrap();
+                            crate::toast::info("自动规划工厂已添加到项目中。");
+                        }
+                        Err(e) => {
+                            crate::toast::error(format!("自动规划工厂失败：{:?}\n", &e));
+                            log::error!("自动规划工厂失败: {:?}", &e);
                         }
                     }
                 });
@@ -596,7 +573,7 @@ impl FactoryInstance {
                         self.external.push((
                             item.clone(),
                             match item {
-                                GenericItem::Fluid { .. } => 1.0 / 50.0,
+                                GenericItem::Fluid { .. } => 1.0 / 200.0,
                                 GenericItem::Entity(..) => 64.0,
                                 GenericItem::Item(..) => 64.0,
                                 _ => 1.0,
@@ -696,42 +673,10 @@ impl SolveContext for FactoryInstance {
 
 impl EditorView for FactoryInstance {
     fn editor_view(&mut self, ui: &mut egui::Ui, factorio: &FactorioContext) -> bool {
-        let label = ui.add(egui::text_edit::TextEdit::singleline(&mut self.name));
+        ui.add(egui::text_edit::TextEdit::singleline(&mut self.name));
         ui.separator();
-        let id = label.id;
         let mut changed = false;
         let mut need_suggestions = false;
-        while let Ok(result) = self.solution_receiver.try_recv() {
-            match result {
-                Ok(solution) => {
-                    self.total_flow.clear();
-                    self.solution = solution;
-                    for (idx, mechanic) in self.mechanics.iter().enumerate() {
-                        for (jdx, instance) in mechanic.instances().iter().enumerate() {
-                            let var_value =
-                                self.solution.0.get(&(idx, jdx)).cloned().unwrap_or(0.0);
-                            let flow = instance.as_flow(factorio);
-                            self.total_flow = flow_add(&self.total_flow, &flow, var_value);
-                        }
-                    }
-                    // Update sorted keys cache when total_flow changes
-                    self.total_flow_sorted_keys = self.total_flow.keys().cloned().collect();
-                    sort_generic_items_owned(&mut self.total_flow_sorted_keys, factorio);
-                    ui.memory_mut(|mem| {
-                        mem.data.remove::<String>(id);
-                    })
-                }
-                Err(err) => {
-                    self.total_flow.clear();
-                    self.total_flow_sorted_keys.clear();
-                    self.solution.0.clear();
-                    self.solution.1 = f64::NAN;
-                    ui.memory_mut(|mem| {
-                        mem.data.insert_temp(id, err);
-                    });
-                }
-            }
-        }
 
         egui::SidePanel::new(
             egui::containers::panel::Side::Left,
@@ -779,7 +724,7 @@ impl EditorView for FactoryInstance {
         });
         // 无关
         if changed {
-            self.send_solve_request(factorio);
+            self.as_problem(factorio);
         };
         changed
     }
@@ -799,43 +744,57 @@ pub struct ProjectInstance {
 
     #[serde(skip)]
     pub factory_receiver: Receiver<FactoryInstance>,
+
     #[serde(skip)]
-    pub factory_sender: Sender<FactoryInstance>,
+    pub problem_sender: Sender<(usize, SolverData<GenericItem, (usize, usize)>)>,
+    #[serde(skip)]
+    pub solution_receiver: Receiver<(usize, SolverSolutionTuple<(usize, usize)>)>,
 }
 
 impl Default for ProjectInstance {
     fn default() -> Self {
         let (factory_tx, factory_rx) = channel();
+        let (problem_tx, problem_rx) = channel();
+        let (solution_tx, solution_rx) = channel();
+        SolverData::make_solver_thread(solution_tx, problem_rx);
+        log::info!("Default::default() for ProjectInstance called.");
         ProjectInstance {
             factorio: FactorioContext {
                 data: Arc::new(DataContext::default()),
-                user: UserContext::default(),
+                user: UserContext::default().with_factory_sender(factory_tx),
             },
             name: "未命名项目".to_string(),
             factories: DndVec::new(),
             factory_receiver: factory_rx,
-            factory_sender: factory_tx,
+            problem_sender: problem_tx,
+            solution_receiver: solution_rx,
         }
     }
 }
 
 impl ProjectInstance {
     pub fn new(data: DataContext) -> Self {
+        let (factory_tx, factory_rx) = channel();
+        log::info!("ProjectInstance::new() called.");
         ProjectInstance {
             factorio: FactorioContext {
                 data: Arc::new(data.build_order_info()),
-                user: UserContext::default(),
+                user: UserContext::default().with_factory_sender(factory_tx),
             },
+            factory_receiver: factory_rx,
             ..Default::default()
         }
     }
 
     pub fn new_arc(data: Arc<DataContext>) -> Self {
+        let (factory_tx, factory_rx) = channel();
+        log::info!("ProjectInstance::new_arc() called.");
         ProjectInstance {
             factorio: FactorioContext {
                 data,
-                user: UserContext::default(),
+                user: UserContext::default().with_factory_sender(factory_tx),
             },
+            factory_receiver: factory_rx,
             ..Default::default()
         }
     }
@@ -843,13 +802,52 @@ impl ProjectInstance {
     pub fn set_data(&mut self, data: Arc<DataContext>) {
         self.factorio.data = data;
     }
+
+    pub fn reset_factory_channel(&mut self) {
+        let (factory_tx, factory_rx) = channel();
+        self.factorio.user.factory_sender = Some(factory_tx);
+        self.factory_receiver = factory_rx;
+    }
 }
 
 impl SubView for ProjectInstance {
     fn view(&mut self, ui: &mut egui::Ui) {
         while let Ok(new_factory) = self.factory_receiver.try_recv() {
+            let new_idx = self.factories.len();
             self.factories.push(new_factory);
+            self.problem_sender
+                .send((
+                    new_idx,
+                    self.factories.vec[new_idx].as_problem(&self.factorio),
+                ))
+                .unwrap();
             self.factorio.user.saved = false;
+        }
+        while let Ok((req_id, result)) = self.solution_receiver.try_recv() {
+            let factory = &mut self.factories.vec[req_id];
+            match result {
+                Ok(solution) => {
+                    factory.total_flow.clear();
+                    factory.solution = solution;
+                    for (idx, mechanic) in factory.mechanics.iter().enumerate() {
+                        for (jdx, instance) in mechanic.instances().iter().enumerate() {
+                            let var_value =
+                                factory.solution.0.get(&(idx, jdx)).cloned().unwrap_or(0.0);
+                            let flow = instance.as_flow(&self.factorio);
+                            factory.total_flow = flow_add(&factory.total_flow, &flow, var_value);
+                        }
+                    }
+                    // Update sorted keys cache when total_flow changes
+                    factory.total_flow_sorted_keys = factory.total_flow.keys().cloned().collect();
+                    sort_generic_items_owned(&mut factory.total_flow_sorted_keys, &self.factorio);
+                }
+                Err(err) => {
+                    factory.total_flow.clear();
+                    factory.total_flow_sorted_keys.clear();
+                    factory.solution.0.clear();
+                    factory.solution.1 = f64::NAN;
+                }
+            }
         }
         ui.add(egui::text_edit::TextEdit::singleline(&mut self.name));
         ui.separator();
@@ -873,8 +871,7 @@ impl SubView for ProjectInstance {
                                 self.factories.push(
                                     FactoryInstance::new(name)
                                         .with_mechanic(RecipeMechanic::default())
-                                        .with_mechanic(MiningMechanic::default())
-                                        .with_sender(self.factory_sender.clone()),
+                                        .with_mechanic(MiningMechanic::default()),
                                 );
                             }
                             ui.separator();
@@ -939,8 +936,15 @@ impl SubView for ProjectInstance {
                             if page >= self.factories.len() {
                                 self.factorio.user.selected_page = ProjectPage::Index(0);
                             }
-                            self.factorio.user.saved &=
-                                !self.factories.vec[page].editor_view(ui, &self.factorio);
+                            if self.factories.vec[page].editor_view(ui, &self.factorio) {
+                                self.factorio.user.saved = false;
+                                self.problem_sender
+                                    .send((
+                                        page,
+                                        self.factories.vec[page].as_problem(&self.factorio),
+                                    ))
+                                    .unwrap();
+                            }
                         }
                     }
                 }
@@ -1051,13 +1055,20 @@ impl SubView for ProjectView {
                         .pick_file()
                         && let Some(mut project) = load_project(&path)
                     {
+                        project.reset_factory_channel();
                         project.set_data(self.data.clone());
                         project.factorio.user.saved = true;
                         project.factorio.user.file_path = Some(path);
-                        project.factories.vec.iter_mut().for_each(|f| {
-                            f.send_solve_request(&project.factorio);
-                            f.set_sender(project.factory_sender.clone());
-                        });
+                        project
+                            .factories
+                            .vec
+                            .iter_mut()
+                            .enumerate()
+                            .for_each(|(idx, f)| {
+                                let _ = project
+                                    .problem_sender
+                                    .send((idx, f.as_problem(&project.factorio)));
+                            });
                         self.projects.push(project);
                         self.selected = Some(self.projects.len() - 1);
                     }
