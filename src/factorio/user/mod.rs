@@ -13,6 +13,7 @@ pub struct UserContext {
     pub time_scale: TimeScale,
 
     // 指定的科技里程碑关闭时，这个节点的科技将被视为未解锁（即使它的前置科技都已解锁了），以此来模拟不同的科技树分支
+    #[serde(skip)]
     pub tech_milestones: Vec<(String, bool)>,
 
     #[serde(skip)]

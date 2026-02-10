@@ -622,6 +622,14 @@ impl DataContext {
             "entity".into(),
             get_reverse_order_info(&self.ordered_entries["entity"]),
         );
+        self.ordered_entries.insert(
+            "technology".into(),
+            get_order_info(&self.technologies, &self.groups, &self.subgroups),
+        );
+        self.order_of_entries.insert(
+            "technology".into(),
+            get_reverse_order_info(&self.ordered_entries["technology"]),
+        );
         self
     }
 }

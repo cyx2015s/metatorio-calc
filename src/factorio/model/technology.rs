@@ -1,6 +1,6 @@
 use serde_with::{DefaultOnError, serde_as};
 
-use crate::factorio::PrototypeBase;
+use crate::factorio::{HasPrototypeBase, PrototypeBase};
 
 #[serde_as]
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -114,4 +114,10 @@ pub struct SimpleModifier {
 #[derive(Debug, Clone, PartialEq, serde::Deserialize)]
 pub struct BoolModifier {
     pub modifier: bool,
+}
+
+impl HasPrototypeBase for TechnologyPrototype {
+    fn base(&self) -> &PrototypeBase {
+        &self.base
+    }
 }
