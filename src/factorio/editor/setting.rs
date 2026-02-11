@@ -1,6 +1,6 @@
 use crate::factorio::{
-    FactorioContext, Modifier, RecipeResult, TimeScale, icon::Icon, modal::SelectorModal,
-    selector::Selector,
+    FactorioContext, TimeScale, icon::Icon,
+    modal::SelectorModal, selector::Selector, update_accessibles,
 };
 
 #[derive(Debug)]
@@ -86,123 +86,10 @@ impl egui::Widget for UserContextEditor<'_> {
             self.game.user.tech_milestones.remove(idx);
         }
         if recalc_accessible {
-            self.game.user.accessible_technologies = crate::factorio::user::resolve_dependency(
-                &self.game.data.technologies,
-                &self.game.user.tech_milestones,
-            );
-            self.game.user.accessible_prototypes.clear();
-            for tech_name in &self.game.user.accessible_technologies {
-                if let Some(tech) = self.game.data.technologies.get(tech_name) {
-                    for modifier in &tech.effects {
-                        match modifier {
-                            Modifier::UnlockRecipe { recipe } => {
-                                if let Some(recipe_proto) = self.game.data.recipes.get(recipe) {
-                                    self.game
-                                        .user
-                                        .accessible_prototypes
-                                        .entry("recipe".to_string())
-                                        .or_default()
-                                        .insert(recipe.clone(), true);
-                                    for result in &recipe_proto.results {
-                                        match result {
-                                            RecipeResult::Item(item) => {
-                                                self.game
-                                                    .user
-                                                    .accessible_prototypes
-                                                    .entry("item".to_string())
-                                                    .or_default()
-                                                    .insert(item.name.clone(), true);
-                                            }
-                                            RecipeResult::Fluid(fluid) => {
-                                                self.game
-                                                    .user
-                                                    .accessible_prototypes
-                                                    .entry("fluid".to_string())
-                                                    .or_default()
-                                                    .insert(fluid.name.clone(), true);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            Modifier::UnlockSpaceLocation { space_location } => {
-                                self.game
-                                    .user
-                                    .accessible_prototypes
-                                    .entry("space-location".to_string())
-                                    .or_default()
-                                    .insert(space_location.clone(), true);
-                            }
-                            Modifier::UnlockQuality { quality } => {
-                                self.game
-                                    .user
-                                    .accessible_prototypes
-                                    .entry("quality".to_string())
-                                    .or_default()
-                                    .insert(quality.clone(), true);
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-            }
-
-            for (_, resource) in &self.game.data.resources {
-                if let Some(mining) = resource.base.minable.as_ref() {
-                    for result in &mining.results {
-                        match result {
-                            RecipeResult::Item(item) => {
-                                self.game
-                                    .user
-                                    .accessible_prototypes
-                                    .entry("item".to_string())
-                                    .or_default()
-                                    .insert(item.name.clone(), true);
-                            }
-                            RecipeResult::Fluid(fluid) => {
-                                self.game
-                                    .user
-                                    .accessible_prototypes
-                                    .entry("fluid".to_string())
-                                    .or_default()
-                                    .insert(fluid.name.clone(), true);
-                            }
-                        }
-                    }
-                    if let Some(result) = &mining.result {
-                        self.game
-                            .user
-                            .accessible_prototypes
-                            .entry("item".to_string())
-                            .or_default()
-                            .insert(result.clone(), true);
-                    }
-                }
-            }
-
-            for (item_name, item) in &self.game.data.items {
-                if let Some(place_result) = &item.place_result {
-                    if self
-                        .game
-                        .user
-                        .accessible_prototypes
-                        .get("item")
-                        .map_or(false, |items| items.contains_key(item_name))
-                    {
-                        self.game
-                            .user
-                            .accessible_prototypes
-                            .entry("entity".to_string())
-                            .or_default()
-                            .insert(place_result.clone(), true);
-                    }
-                }
-            }
+            let user = &mut self.game.user;
+            let data = &self.game.data;
+            update_accessibles(user, data);
         }
-        ui.label(format!(
-            "解锁的科技有: {:?}",
-            &self.game.user.accessible_technologies,
-        ));
         let button = ui.button("查看解锁的配方");
         ui.add(
             SelectorModal::new(button.id, self.game, "已解锁的配方")

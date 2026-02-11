@@ -111,6 +111,7 @@ impl SolveContext for MiningMechanicInstance {
 impl AsFlow for MiningMechanicInstance {
     fn as_flow(&self, factorio: &Self::Game) -> Flow<Self::Item> {
         let data = &factorio.data;
+        let user = &factorio.user;
         let mut map = Flow::new();
 
         let mut module_effects = self.module_config.get_effect(factorio).clamped();
@@ -200,7 +201,7 @@ impl AsFlow for MiningMechanicInstance {
             &data.qualities,
             module_effects.quality,
             0,
-            data.qualities.len(),
+            user.max_quality_level as usize,
         );
         {
             if let Some(result) = &mining_property.result {

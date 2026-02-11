@@ -6,13 +6,12 @@ use std::{path::PathBuf, sync::mpsc::Sender};
 
 use crate::factorio::{Dict, planner::FactoryInstance};
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct UserContext {
     pub time_scale: TimeScale,
 
     // 指定的科技里程碑关闭时，这个节点的科技将被视为未解锁（即使它的前置科技都已解锁了），以此来模拟不同的科技树分支
-    #[serde(skip)]
     pub tech_milestones: Vec<(String, bool)>,
 
     #[serde(skip)]
@@ -20,6 +19,9 @@ pub struct UserContext {
 
     #[serde(skip)]
     pub accessible_prototypes: Dict<Dict<bool>>,
+
+    #[serde(skip)]
+    pub max_quality_level: u8,
 
     #[serde(skip)]
     pub saved: bool,
@@ -39,6 +41,7 @@ impl Default for UserContext {
             tech_milestones: Vec::new(),
             accessible_technologies: Vec::new(),
             accessible_prototypes: Dict::new(),
+            max_quality_level: 0,
             saved: true,
             file_path: None,
             selected_page: ProjectPage::default(),
@@ -47,21 +50,6 @@ impl Default for UserContext {
     }
 }
 
-impl Clone for UserContext {
-    fn clone(&self) -> Self {
-        Self {
-            time_scale: self.time_scale,
-            tech_milestones: self.tech_milestones.clone(),
-            accessible_technologies: self.accessible_technologies.clone(),
-            accessible_prototypes: self.accessible_prototypes.clone(),
-            saved: self.saved,
-            file_path: self.file_path.clone(),
-            selected_page: self.selected_page,
-            factory_sender: self.factory_sender.clone(),
-            ..Default::default()
-        }
-    }
-}
 
 impl UserContext {
     pub fn with_factory_sender(mut self, sender: Sender<FactoryInstance>) -> Self {

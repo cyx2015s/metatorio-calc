@@ -25,13 +25,6 @@ pub fn factorio_auto_planner(
             mechanic.name(),
             mechanic.instance_len()
         );
-        if mechanic.instance_len() > 1000 {
-            log::warn!(
-                "机制 {} 实例过多 ({} 个)，可能导致求解时间过长、内存占用过大。",
-                mechanic.name(),
-                mechanic.instance_len()
-            );
-        }
     }
     log::info!("自动填充机制实例完成，用时: {:.2?}", instant.elapsed());
     let instant = Instant::now();
@@ -80,7 +73,7 @@ pub fn factorio_auto_planner(
             }
             mechanic.submit_operations();
         });
-    
+
     factory.name += " (自动规划)";
     log::info!("自动规划完成: {}", factory.name);
     log::info!("自动规划用时: {:.2?}", instant.elapsed());

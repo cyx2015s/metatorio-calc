@@ -18,6 +18,7 @@ use crate::{
         selector::generic_item_selector,
         setting::UserContextEditor,
         style::card_frame,
+        update_accessibles,
     },
     math::*,
 };
@@ -369,7 +370,7 @@ impl FactoryInstance {
                             crate::toast::info("自动规划工厂已添加到项目中。");
                         }
                         Err(e) => {
-                            crate::toast::error(format!("自动规划工厂失败：{:?}\n", &e));
+                            // crate::toast::error(format!("自动规划工厂失败：{:?}\n", &e));
                             log::error!("自动规划工厂失败: {:?}", &e);
                         }
                     }
@@ -803,6 +804,19 @@ impl ProjectInstance {
         self.factorio.data = data;
     }
 
+    pub fn with_default_milestones(mut self) -> Self {
+        for (tech_name, tech) in &self.factorio.data.technologies {
+            if tech.essential {
+                self.factorio
+                    .user
+                    .tech_milestones
+                    .push((tech_name.clone(), true));
+            }
+        }
+        update_accessibles(&mut self.factorio.user, &self.factorio.data);
+        self
+    }
+
     pub fn reset_factory_channel(&mut self) {
         let (factory_tx, factory_rx) = channel();
         self.factorio.user.factory_sender = Some(factory_tx);
@@ -912,8 +926,13 @@ impl SubView for ProjectInstance {
 
                 match self.factorio.user.selected_page {
                     ProjectPage::UserContext => {
-                        self.factorio.user.saved &=
-                            !ui.add(UserContextEditor::new(&mut self.factorio)).changed();
+                        egui::ScrollArea::vertical().show(ui, |ui| {
+                            ui.style_mut().spacing.scroll = egui::style::ScrollStyle::solid();
+                            ui.heading("偏好设置");
+                            ui.separator();
+                            self.factorio.user.saved &=
+                                !ui.add(UserContextEditor::new(&mut self.factorio)).changed();
+                        });
                     }
                     ProjectPage::Index(page) => {
                         if self.factories.is_empty() {
@@ -1043,8 +1062,9 @@ impl SubView for ProjectView {
         egui::containers::menu::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("文件", |ui| {
                 if ui.button("新建项目").clicked() {
-                    self.projects
-                        .push(ProjectInstance::new_arc(self.data.clone()));
+                    self.projects.push(
+                        ProjectInstance::new_arc(self.data.clone()).with_default_milestones(),
+                    );
                     self.selected = Some(self.projects.len() - 1);
                     ui.close();
                 }
@@ -1057,6 +1077,7 @@ impl SubView for ProjectView {
                     {
                         project.reset_factory_channel();
                         project.set_data(self.data.clone());
+                        update_accessibles(&mut project.factorio.user, &project.factorio.data);
                         project.factorio.user.saved = true;
                         project.factorio.user.file_path = Some(path);
                         project

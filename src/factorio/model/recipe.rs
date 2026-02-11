@@ -19,6 +19,7 @@ use crate::{
         },
         module_effects_allowed,
         selector::Selector,
+        user,
     },
     math::ElemVec,
 };
@@ -449,6 +450,7 @@ impl Default for RecipeMechanicInstance {
 impl AsFlow for RecipeMechanicInstance {
     fn as_flow(&self, factorio: &FactorioContext) -> Flow<Self::Item> {
         let data = &factorio.data;
+        let user = &factorio.user;
 
         let mut map = Flow::new();
 
@@ -524,7 +526,7 @@ impl AsFlow for RecipeMechanicInstance {
                 &data.qualities,
                 module_effects.quality,
                 self.recipe.1 as usize,
-                data.qualities.len(),
+                user.max_quality_level as usize,
             );
             for result in &recipe.results {
                 match result {
@@ -655,6 +657,7 @@ pub fn select_crafter_for_recipe(
     for pref in preferences {
         if let Some(crafter) = data.crafters.get(&pref.0)
             && machine_fits_for_recipe(crafter, recipe)
+            && factorio.user.is_prototype_accessible("entity", &pref.0)
         {
             return pref.clone();
         }
@@ -948,17 +951,20 @@ impl Mechanic<FactorioContext, GenericItem> for RecipeMechanic {
     }
 
     fn auto_populate(&mut self, factorio: &FactorioContext) {
-        // TODO 品质
-        // TODO 插件
         let data = &factorio.data;
         self.instances.clear();
         for (recipe_name, recipe_proto) in &data.recipes {
+            if !factorio.user.is_prototype_accessible("recipe", recipe_name)
+                && !recipe_proto.enabled
+            {
+                continue;
+            }
             let quality_range = if recipe_proto
                 .ingredients
                 .iter()
                 .any(|ingredient| matches!(ingredient, RecipeIngredient::Item(..)))
             {
-                data.qualities.len()
+                factorio.user.max_quality_level as usize + 1
             } else {
                 1
             };

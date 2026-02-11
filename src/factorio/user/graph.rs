@@ -1,6 +1,8 @@
 use std::collections::{HashSet, VecDeque};
 
-use crate::factorio::{Dict, TechnologyPrototype};
+use crate::factorio::{
+    DataContext, Dict, Modifier, RecipeResult, TechnologyPrototype, UserContext,
+};
 
 // milestone 格式: (technology name, is unlocked)，true表示解锁，false表示未解锁（就算是true，如果因为其他科技的false 导致无法解锁，也会被视为未解锁）
 // 返回值：一系列可用科技名称。
@@ -47,4 +49,110 @@ pub fn resolve_dependency(
         .into_iter()
         .filter_map(|(name, is_unlocked)| if is_unlocked { Some(name) } else { None })
         .collect()
+}
+
+pub fn update_accessibles(user: &mut UserContext, data: &DataContext) {
+    user.accessible_technologies = resolve_dependency(&data.technologies, &user.tech_milestones);
+    user.accessible_prototypes.clear();
+    for tech_name in &user.accessible_technologies {
+        if let Some(tech) = data.technologies.get(tech_name) {
+            for modifier in &tech.effects {
+                match modifier {
+                    Modifier::UnlockRecipe { recipe } => {
+                        if let Some(recipe_proto) = data.recipes.get(recipe) {
+                            user.accessible_prototypes
+                                .entry("recipe".to_string())
+                                .or_default()
+                                .insert(recipe.clone(), true);
+                            for result in &recipe_proto.results {
+                                match result {
+                                    RecipeResult::Item(item) => {
+                                        user.accessible_prototypes
+                                            .entry("item".to_string())
+                                            .or_default()
+                                            .insert(item.name.clone(), true);
+                                    }
+                                    RecipeResult::Fluid(fluid) => {
+                                        user.accessible_prototypes
+                                            .entry("fluid".to_string())
+                                            .or_default()
+                                            .insert(fluid.name.clone(), true);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Modifier::UnlockSpaceLocation { space_location } => {
+                        user.accessible_prototypes
+                            .entry("space-location".to_string())
+                            .or_default()
+                            .insert(space_location.clone(), true);
+                    }
+                    Modifier::UnlockQuality { quality } => {
+                        user.accessible_prototypes
+                            .entry("quality".to_string())
+                            .or_default()
+                            .insert(quality.clone(), true);
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    for (_, resource) in &data.resources {
+        if let Some(mining) = resource.base.minable.as_ref() {
+            for result in &mining.results {
+                match result {
+                    RecipeResult::Item(item) => {
+                        user.accessible_prototypes
+                            .entry("item".to_string())
+                            .or_default()
+                            .insert(item.name.clone(), true);
+                    }
+                    RecipeResult::Fluid(fluid) => {
+                        user.accessible_prototypes
+                            .entry("fluid".to_string())
+                            .or_default()
+                            .insert(fluid.name.clone(), true);
+                    }
+                }
+            }
+            if let Some(result) = &mining.result {
+                user.accessible_prototypes
+                    .entry("item".to_string())
+                    .or_default()
+                    .insert(result.clone(), true);
+            }
+        }
+    }
+
+    for (item_name, item) in &data.items {
+        if let Some(place_result) = &item.place_result {
+            if user
+                .accessible_prototypes
+                .get("item")
+                .map_or(false, |items| items.contains_key(item_name))
+            {
+                user.accessible_prototypes
+                    .entry("entity".to_string())
+                    .or_default()
+                    .insert(place_result.clone(), true);
+            }
+        }
+    }
+    for i in 1..data.qualities.len() {
+        let quality = &data.qualities[i];
+        if user
+            .accessible_prototypes
+            .get("quality")
+            .map_or(true, |qualities| {
+                qualities.get(&quality.base.name).cloned().unwrap_or(false)
+            })
+        {
+            user.max_quality_level = i as u8;
+        } else {
+            break;
+        }
+    }
 }
