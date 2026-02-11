@@ -1,11 +1,10 @@
-use std::{
-    path::PathBuf,
-    sync::mpsc::Sender,
-};
+mod graph;
 
-use crate::
-    factorio::{Dict, planner::FactoryInstance}
-;
+pub use graph::*;
+
+use std::{path::PathBuf, sync::mpsc::Sender};
+
+use crate::factorio::{Dict, planner::FactoryInstance};
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
@@ -15,6 +14,9 @@ pub struct UserContext {
     // 指定的科技里程碑关闭时，这个节点的科技将被视为未解锁（即使它的前置科技都已解锁了），以此来模拟不同的科技树分支
     #[serde(skip)]
     pub tech_milestones: Vec<(String, bool)>,
+
+    #[serde(skip)]
+    pub accessible_technologies: Vec<String>,
 
     #[serde(skip)]
     pub accessible_prototypes: Dict<Dict<bool>>,
@@ -35,6 +37,7 @@ impl Default for UserContext {
         Self {
             time_scale: TimeScale::Seconds,
             tech_milestones: Vec::new(),
+            accessible_technologies: Vec::new(),
             accessible_prototypes: Dict::new(),
             saved: true,
             file_path: None,
@@ -49,6 +52,7 @@ impl Clone for UserContext {
         Self {
             time_scale: self.time_scale,
             tech_milestones: self.tech_milestones.clone(),
+            accessible_technologies: self.accessible_technologies.clone(),
             accessible_prototypes: self.accessible_prototypes.clone(),
             saved: self.saved,
             file_path: self.file_path.clone(),
@@ -63,6 +67,18 @@ impl UserContext {
     pub fn with_factory_sender(mut self, sender: Sender<FactoryInstance>) -> Self {
         self.factory_sender = Some(sender);
         self
+    }
+
+    pub fn is_prototype_accessible(&self, category: &str, name: &str) -> bool {
+        if let Some(category_dict) = self.accessible_prototypes.get(category) {
+            if let Some(accessible) = category_dict.get(name) {
+                *accessible
+            } else {
+                false
+            }
+        } else {
+            true
+        }
     }
 }
 
