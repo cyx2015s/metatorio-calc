@@ -352,7 +352,12 @@ pub fn select_miner_for_resource(
     }
     // 找不到偏好设定的机器，找一个最好的的
     for miner in factorio.data.miners.values() {
-        if machine_fits_for_resource(miner, resource) && measure_miner(miner) > measure {
+        if machine_fits_for_resource(miner, resource)
+            && measure_miner(miner) > measure
+            && factorio
+                .user
+                .is_prototype_accessible("entity", &miner.base.base.name)
+        {
             measure = measure_miner(miner);
             selected = miner.base.base.name.clone();
         }

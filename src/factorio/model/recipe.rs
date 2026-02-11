@@ -657,7 +657,6 @@ pub fn select_crafter_for_recipe(
     for pref in preferences {
         if let Some(crafter) = data.crafters.get(&pref.0)
             && machine_fits_for_recipe(crafter, recipe)
-            && factorio.user.is_prototype_accessible("entity", &pref.0)
         {
             return pref.clone();
         }
@@ -683,6 +682,7 @@ pub fn select_crafter_for_recipe(
         if machine_fits_for_recipe(crafter, recipe)
             && measure_crafter(crafter) > measure
             && !excluding.iter().any(|ex| ex.0 == *crafter_name)
+            && factorio.user.is_prototype_accessible("entity", crafter_name)
         {
             measure = measure_crafter(crafter);
             selected = crafter_name.clone();
