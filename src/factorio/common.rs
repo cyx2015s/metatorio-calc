@@ -16,7 +16,7 @@ use crate::{
 
 #[typetag::serde(tag = "type")]
 pub trait FactorioMechanic:
-    SolveContext<Game = DataContext, Item = GenericItem> + dyn_clone::DynClone + erased_serde::Serialize
+    SolveContext<Game = DataContext, Item = GenericItem> + dyn_clone::DynClone
 {
     fn name(&self) -> String;
 

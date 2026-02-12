@@ -2790,7 +2790,6 @@ dependencies = [
  "egui_dnd",
  "egui_extras",
  "env_logger",
- "erased-serde",
  "float-cmp 0.10.0",
  "good_lp",
  "image",

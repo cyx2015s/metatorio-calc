@@ -15,7 +15,7 @@ include!(concat!(env!("OUT_DIR"), "/git_hash.rs"));
 
 pub mod comb;
 pub mod concept;
-pub mod dyn_serde;
+
 pub mod error;
 pub mod factorio;
 pub mod math;
