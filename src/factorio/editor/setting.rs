@@ -1,6 +1,8 @@
+use egui::DragValue;
+
 use crate::factorio::{
-    FactorioContext, TimeScale, icon::Icon,
-    modal::SelectorModal, selector::Selector, update_accessibles,
+    FactorioContext, TimeScale, icon::Icon, modal::SelectorModal, selector::Selector,
+    update_accessibles,
 };
 
 #[derive(Debug)]
@@ -90,6 +92,7 @@ impl egui::Widget for UserContextEditor<'_> {
             let data = &self.game.data;
             update_accessibles(user, data);
         }
+
         let button = ui.button("查看解锁的配方");
         ui.add(
             SelectorModal::new(button.id, self.game, "已解锁的配方")
@@ -113,7 +116,29 @@ impl egui::Widget for UserContextEditor<'_> {
                     },
                 )),
         );
+        ui.separator();
+        ui.heading("采矿产能");
+        let mut mining_productivity = self.game.user.mining_productivity * 100.0;
+        ui.add(
+            DragValue::new(&mut mining_productivity)
+                .suffix("%")
+                .speed(1.0),
+        );
+        self.game.user.mining_productivity = mining_productivity.floor() / 100.0;
+        ui.heading("配方产能");
 
+        self.game
+            .user
+            .recipe_productivity
+            .iter_mut()
+            .for_each(|(recipe_name, productivity)| {
+                ui.horizontal(|ui| {
+                    ui.label(self.game.data.get_display_name("recipe", recipe_name));
+                    let mut value = *productivity * 100.0;
+                    ui.add(DragValue::new(&mut value).suffix("%").speed(1.0));
+                    *productivity = value.floor() / 100.0;
+                });
+            });
         response
     }
 }

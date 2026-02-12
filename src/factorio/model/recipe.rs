@@ -19,7 +19,6 @@ use crate::{
         },
         module_effects_allowed,
         selector::Selector,
-        user,
     },
     math::ElemVec,
 };
@@ -454,7 +453,11 @@ impl AsFlow for RecipeMechanicInstance {
 
         let mut map = Flow::new();
 
-        let mut module_effects = self.module_config.get_effect(factorio).clamped();
+        let mut module_effects = self.module_config.get_effect(factorio);
+
+        if let Some(productivity_bonus) = user.recipe_productivity.get(&self.recipe.0) {
+            module_effects.productivity += *productivity_bonus;
+        }
 
         let mut base_speed = 1.0;
 
@@ -493,10 +496,12 @@ impl AsFlow for RecipeMechanicInstance {
                 index_map_update_entry(&mut map, key, value);
             }
         }
-
         if let Some(recipe) = data.recipes.get(&self.recipe.0) {
             base_speed /= recipe.energy_required;
-
+            module_effects.productivity = module_effects
+                .productivity
+                .clamp(0.0, recipe.maximum_productivity);
+            module_effects = module_effects.clamped();
             for ingredient in &recipe.ingredients {
                 match ingredient {
                     RecipeIngredient::Item(item) => {
@@ -682,7 +687,9 @@ pub fn select_crafter_for_recipe(
         if machine_fits_for_recipe(crafter, recipe)
             && measure_crafter(crafter) > measure
             && !excluding.iter().any(|ex| ex.0 == *crafter_name)
-            && factorio.user.is_prototype_accessible("entity", crafter_name)
+            && factorio
+                .user
+                .is_prototype_accessible("entity", crafter_name)
         {
             measure = measure_crafter(crafter);
             selected = crafter_name.clone();

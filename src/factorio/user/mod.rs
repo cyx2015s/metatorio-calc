@@ -1,6 +1,7 @@
 mod graph;
 
 pub use graph::*;
+use indexmap::IndexMap;
 
 use std::{path::PathBuf, sync::mpsc::Sender};
 
@@ -13,6 +14,10 @@ pub struct UserContext {
 
     // 指定的科技里程碑关闭时，这个节点的科技将被视为未解锁（即使它的前置科技都已解锁了），以此来模拟不同的科技树分支
     pub tech_milestones: Vec<(String, bool)>,
+
+    pub recipe_productivity: IndexMap<String, f64>,
+
+    pub mining_productivity: f64,
 
     #[serde(skip)]
     pub accessible_technologies: Vec<String>,
@@ -41,15 +46,16 @@ impl Default for UserContext {
             tech_milestones: Vec::new(),
             accessible_technologies: Vec::new(),
             accessible_prototypes: Dict::new(),
+            recipe_productivity: IndexMap::new(),
             max_quality_level: 0,
             saved: true,
             file_path: None,
             selected_page: ProjectPage::default(),
             factory_sender: None,
+            mining_productivity: 0.0,
         }
     }
 }
-
 
 impl UserContext {
     pub fn with_factory_sender(mut self, sender: Sender<FactoryInstance>) -> Self {

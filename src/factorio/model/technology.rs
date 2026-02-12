@@ -108,7 +108,7 @@ pub enum Modifier {
 
 #[derive(Debug, Clone, PartialEq, serde::Deserialize)]
 pub struct SimpleModifier {
-    modifier: f64,
+    pub modifier: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Deserialize)]

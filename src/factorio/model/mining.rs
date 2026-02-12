@@ -114,7 +114,7 @@ impl AsFlow for MiningMechanicInstance {
         let user = &factorio.user;
         let mut map = Flow::new();
 
-        let mut module_effects = self.module_config.get_effect(factorio).clamped();
+        let mut module_effects = self.module_config.get_effect(factorio);
 
         let mut base_speed = 1.0;
 
@@ -132,6 +132,13 @@ impl AsFlow for MiningMechanicInstance {
                     .unwrap_or_default()
                     .base_effect
                     .clone();
+
+            module_effects.productivity += if miner.uses_force_mining_productivity_bonus {
+                user.mining_productivity
+            } else {
+                0.0
+            };
+            module_effects = module_effects.clamped();
             base_speed = miner.mining_speed;
             // TODO: 确认游戏内的舍入方式
             drain_rate *= miner.resource_drain_rate_percent.unwrap_or(100.0) / 100.0;

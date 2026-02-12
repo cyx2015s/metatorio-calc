@@ -54,6 +54,8 @@ pub fn resolve_dependency(
 pub fn update_accessibles(user: &mut UserContext, data: &DataContext) {
     user.accessible_technologies = resolve_dependency(&data.technologies, &user.tech_milestones);
     user.accessible_prototypes.clear();
+    user.recipe_productivity.clear();
+    user.mining_productivity = 0.0;
     for tech_name in &user.accessible_technologies {
         if let Some(tech) = data.technologies.get(tech_name) {
             for modifier in &tech.effects {
@@ -93,6 +95,16 @@ pub fn update_accessibles(user: &mut UserContext, data: &DataContext) {
                             .entry("quality".to_string())
                             .or_default()
                             .insert(quality.clone(), true);
+                    }
+                    Modifier::ChangeRecipeProductivity { recipe, change } => {
+                        let entry = user
+                            .recipe_productivity
+                            .entry(recipe.clone())
+                            .or_insert(0.0);
+                        *entry += *change;
+                    }
+                    Modifier::MiningDrillProductivityBonus(modifier) => {
+                        user.mining_productivity += modifier.modifier;
                     }
                     _ => {}
                 }
