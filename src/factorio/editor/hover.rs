@@ -8,15 +8,15 @@ use crate::factorio::{
 
 #[derive(Debug, Clone)]
 pub struct PrototypeHover<'a, T: HasPrototypeBase> {
-    pub factorio: &'a FactorioContext,
+    pub data: &'a DataContext,
     pub prototype: &'a T,
     pub quality: u8,
 }
 
 impl<'a, T: HasPrototypeBase> PrototypeHover<'a, T> {
-    pub fn new(factorio: &'a FactorioContext, prototype: &'a T) -> Self {
+    pub fn new(data: &'a DataContext, prototype: &'a T) -> Self {
         Self {
-            factorio,
+            data,
             prototype,
             quality: 0,
         }
@@ -30,7 +30,7 @@ impl<'a, T: HasPrototypeBase> PrototypeHover<'a, T> {
 
 impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
-        let data = &self.factorio.data;
+        let data = &self.data;
         let mut ingredients: Vec<&RecipeIngredient> = self.prototype.ingredients.iter().collect();
         ingredients.sort_by_key(|ingredient| match ingredient {
             RecipeIngredient::Item(i) => (0, data.order_of_entries["item"][&i.name]),
@@ -57,8 +57,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
                             for ingredient in ingredients.iter() {
                                 match ingredient {
                                     RecipeIngredient::Item(i) => {
-                                        let _icon =
-                                            ui.add(Icon::new(self.factorio, "item", &i.name));
+                                        let _icon = ui.add(Icon::new(self.data, "item", &i.name));
                                         ui.horizontal_top(|ui| {
                                             ui.vertical(|ui| {
                                                 ui.add(AmountLabel::new(i.amount));
@@ -66,8 +65,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
                                         });
                                     }
                                     RecipeIngredient::Fluid(f) => {
-                                        let _icon =
-                                            ui.add(Icon::new(self.factorio, "fluid", &f.name));
+                                        let _icon = ui.add(Icon::new(self.data, "fluid", &f.name));
                                         ui.vertical(|ui| {
                                             ui.horizontal_top(|ui| {
                                                 ui.add(AmountLabel::new(f.amount));
@@ -128,8 +126,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
                             for result in results.iter() {
                                 match result {
                                     RecipeResult::Item(i) => {
-                                        let _icon =
-                                            ui.add(Icon::new(self.factorio, "item", &i.name));
+                                        let _icon = ui.add(Icon::new(self.data, "item", &i.name));
                                         let output = i.normalized_output();
                                         ui.vertical(|ui| {
                                             ui.horizontal_top(|ui| {
@@ -144,8 +141,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
                                         });
                                     }
                                     RecipeResult::Fluid(f) => {
-                                        let _icon =
-                                            ui.add(Icon::new(self.factorio, "fluid", &f.name));
+                                        let _icon = ui.add(Icon::new(self.data, "fluid", &f.name));
                                         let output = f.normalized_output();
                                         ui.vertical(|ui| {
                                             ui.horizontal_top(|ui| {
@@ -188,7 +184,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
 
 impl<'a> egui::Widget for PrototypeHover<'a, CraftingMachinePrototype> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
-        let data = &self.factorio.data;
+        let data = &self.data;
         ui.vertical(|ui| {
             ui.label(data.get_display_name("entity", &self.prototype.base.base.name));
             ui.label(format!("制造速度: {}", self.prototype.crafting_speed));

@@ -3,27 +3,117 @@ use std::{
     fmt::{Debug, Display},
     hash::Hash,
     ops::{Add, Mul},
-    sync::Arc,
+    sync::{
+        Arc,
+        mpsc::{Receiver, Sender},
+    },
 };
 
 use indexmap::IndexMap;
 use serde_json::Value;
 
-use crate::{concept::*, factorio::*};
+use crate::{
+    concept::*,
+    factorio::{planner::FactoryContext, *},
+};
 
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-pub struct FactorioContext {
-    #[serde(skip)]
-    pub data: Arc<DataContext>,
-    pub user: UserContext,
+#[typetag::serde(tag = "type")]
+pub trait FactorioMechanic:
+    SolveContext<Game = DataContext, Item = GenericItem> + dyn_clone::DynClone + erased_serde::Serialize
+{
+    fn name(&self) -> String;
+
+    fn instances(&self) -> Vec<&dyn AsFlow>;
+
+    fn instance_len(&self) -> usize;
+
+    fn editor_view(
+        &mut self,
+        ui: &mut egui::Ui,
+        data: &DataContext,
+        proj: &ProjectContext,
+        factory: &FactoryContext,
+    ) -> bool;
+
+    fn instance_view(
+        &mut self,
+        idx: usize,
+        ui: &mut egui::Ui,
+        data: &DataContext,
+        proj: &ProjectContext,
+        factory: &FactoryContext,
+    ) -> bool;
+
+    #[allow(unused_variables)]
+    fn instance_operate(
+        &mut self,
+        idx: usize,
+        f: &mut dyn FnMut(&mut dyn AsFlow) -> EntryOpRequest,
+    ) {
+    }
+    fn submit_operations(&mut self) -> Vec<EntryOpResult>;
+
+    #[allow(unused_variables)]
+    fn update_suggestion(
+        &mut self,
+        data: &DataContext,
+        proj: &ProjectContext,
+        factory: &FactoryContext,
+        item: &GenericItem,
+        amount: f64,
+    ) {
+    }
+
+    // 返回值表示是否产生了需要重新计算的更改
+
+    #[allow(unused_variables)]
+    fn suggestion_view(
+        &mut self,
+        ui: &mut egui::Ui,
+        data: &DataContext,
+        proj: &ProjectContext,
+        factory: &FactoryContext,
+    ) -> bool {
+        false
+    }
+
+    /// 自动规划功能：枚举所有可能的配方组合，填充到instances中。
+    ///
+    #[allow(unused_variables)]
+    fn auto_populate(
+        &mut self,
+        data: &DataContext,
+        proj: &ProjectContext,
+        factory: &FactoryContext,
+    ) {
+    }
 }
+
+dyn_clone::clone_trait_object!(FactorioMechanic);
 
 pub type Dict<T> = HashMap<String, T>;
 pub type Emissions = Dict<f64>;
 pub type OrderInfo = Vec<(String, Vec<(String, Vec<String>)>)>;
 pub type ReverseOrderInfo = HashMap<String, (usize, usize, usize)>;
-pub type AsFactorioFlow = dyn AsFlow<Game = FactorioContext, Item = GenericItem>;
-pub type FactorioMechanic = dyn Mechanic<FactorioContext, GenericItem>;
+
+/// 能够转化成流参与计算的方法
+pub trait AsFlow: SolveContext<Game = DataContext, Item = GenericItem> {
+    /// 传递物品流信息
+    fn as_flow(
+        &self,
+        data: &DataContext,
+        proj: &ProjectContext,
+        factory: &FactoryContext,
+    ) -> Flow<Self::Item>;
+    /// 执行成本，默认返回 1.0
+    fn cost(&self, data: &DataContext, proj: &ProjectContext, factory: &FactoryContext) -> f64 {
+        1.0
+    }
+}
+
+pub type AsFlowSender = Sender<Box<dyn AsFlow>>;
+pub type AsFlowReceiver = Receiver<Box<dyn AsFlow>>;
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct IdWithQuality(pub String, pub u8);
 
@@ -657,9 +747,8 @@ pub fn get_reverse_order_info(order_info: &OrderInfo) -> ReverseOrderInfo {
 /// Returns (category, order_info, name) tuple for sorting
 fn get_generic_item_sort_key<'a>(
     item: &'a GenericItem,
-    ctx: &'a FactorioContext,
+    data: &'a DataContext,
 ) -> (usize, (usize, usize, usize), &'a str) {
-    let data = &ctx.data;
     match item {
         GenericItem::Item(IdWithQuality(name, quality)) => (
             *quality as usize,
@@ -710,20 +799,20 @@ fn get_generic_item_sort_key<'a>(
     }
 }
 
-pub fn sort_generic_items(keys: &mut Vec<&GenericItem>, factorio: &FactorioContext) {
+pub fn sort_generic_items(keys: &mut Vec<&GenericItem>, data: &DataContext) {
     // Use sort_by instead of sort_by_key to avoid cloning strings during comparison
     keys.sort_by(|a, b| {
-        let a_key = get_generic_item_sort_key(a, factorio);
-        let b_key = get_generic_item_sort_key(b, factorio);
+        let a_key = get_generic_item_sort_key(a, data);
+        let b_key = get_generic_item_sort_key(b, data);
         a_key.cmp(&b_key)
     });
 }
 
 /// Sort a vector of owned GenericItems in-place
-pub fn sort_generic_items_owned(keys: &mut [GenericItem], factorio: &FactorioContext) {
+pub fn sort_generic_items_owned(keys: &mut [GenericItem], data: &DataContext) {
     keys.sort_by(|a, b| {
-        let a_key = get_generic_item_sort_key(a, factorio);
-        let b_key = get_generic_item_sort_key(b, factorio);
+        let a_key = get_generic_item_sort_key(a, data);
+        let b_key = get_generic_item_sort_key(b, data);
         a_key.cmp(&b_key)
     });
 }

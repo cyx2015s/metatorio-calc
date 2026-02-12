@@ -1,6 +1,6 @@
 use egui::ModalResponse;
 
-use crate::factorio::{FactorioContext, IdWithQuality, selector::Selector};
+use crate::factorio::{DataContext, IdWithQuality, selector::Selector};
 
 pub fn show_modal<R>(
     id: egui::Id,
@@ -33,7 +33,7 @@ pub struct SelectorModal<'a, Input, Output>
 where
     Input: 'a + ?Sized,
 {
-    factorio: &'a FactorioContext,
+    data: &'a DataContext,
     label_str: &'a str,
     id: egui::Id,
     toggle: bool,
@@ -44,10 +44,10 @@ impl<'a, Input, Output> SelectorModal<'a, Input, Output>
 where
     Input: 'a + ?Sized,
 {
-    pub fn new(id: egui::Id, factorio: &'a FactorioContext, label_str: &'a str) -> Self {
+    pub fn new(id: egui::Id, data: &'a DataContext, label_str: &'a str) -> Self {
         Self {
             id,
-            factorio,
+            data,
             label_str,
             toggle: false,
             selector: None,
@@ -65,10 +65,9 @@ where
     }
 }
 
-pub fn str_filter(s: &str, f: &FactorioContext, type_name: &str, filter_string: &str) -> bool {
+pub fn str_filter(s: &str, f: &DataContext, type_name: &str, filter_string: &str) -> bool {
     s.to_lowercase().contains(&filter_string.to_lowercase())
-        || f.data
-            .get_display_name(type_name, s)
+        || f.get_display_name(type_name, s)
             .to_lowercase()
             .contains(&filter_string.to_lowercase())
 }
@@ -116,16 +115,16 @@ impl egui::Widget for SelectorModal<'_, str, String> {
 impl egui::Widget for SelectorModal<'_, IdWithQuality, IdWithQuality> {
     fn ui(mut self, ui: &mut egui::Ui) -> egui::Response {
         assert!(self.selector.is_some(), "无法选中");
-        let data = &self.factorio.data;
+        let data = &self.data;
         let mut response = ui.response().clone();
         if data.qualities.len() == 1 {
             // 回退到普通选择器
             let mut degenerated: Option<String> = None;
 
             let old_selector = self.selector.take().unwrap();
-            let mut selector = Selector::new(self.factorio, old_selector.type_name);
+            let mut selector = Selector::new(self.data, old_selector.type_name);
             if let Some(filter) = old_selector.filter {
-                selector = selector.with_filter(move |s: &str, f: &FactorioContext| {
+                selector = selector.with_filter(move |s: &str, f: &DataContext| {
                     let id_with_quality = IdWithQuality(s.to_string(), 0);
                     filter(&id_with_quality, f)
                 });
@@ -143,7 +142,7 @@ impl egui::Widget for SelectorModal<'_, IdWithQuality, IdWithQuality> {
 
             selector = selector.with_output(&mut degenerated);
             ui.add(
-                SelectorModal::new(self.id.with("degenerated"), self.factorio, self.label_str)
+                SelectorModal::new(self.id.with("degenerated"), self.data, self.label_str)
                     .with_selector(selector)
                     .with_toggle(self.toggle),
             );

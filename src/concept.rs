@@ -43,91 +43,10 @@ pub trait SolveContext: Debug + Send + Any {
     type Item: ItemIdent;
 }
 
-/// 能够在编辑器中展示自己的视图，项目级别通用（每个项目有自己的偏好设置，内部可以关联独有的上下文或公用的Arc上下文）
-pub trait EditorView: SolveContext {
-    // 返回值表示是否产生了需要重新计算的更改
-    fn editor_view(&mut self, ui: &mut egui::Ui, game: &Self::Game) -> bool;
-}
-
 pub type Flow<I> = IndexMap<I, f64>;
 
-/// 能够转化成流参与计算的方法
-pub trait AsFlow: SolveContext {
-    /// 传递物品流信息
-    fn as_flow(&self, game: &Self::Game) -> Flow<Self::Item>;
-    /// 执行成本，默认返回 1.0
-    fn cost(&self, game: &Self::Game) -> f64 {
-        let _ = game;
-        1.0
-    }
-}
-
-pub type AsFlowSender<G, I> = Sender<Box<dyn AsFlow<Game = G, Item = I>>>;
-pub type AsFlowReceiver<G, I> = Receiver<Box<dyn AsFlow<Game = G, Item = I>>>;
 pub trait ItemIdent: Debug + Clone + Eq + Hash + Send + 'static {}
 impl<T> ItemIdent for T where T: Debug + Clone + Eq + Hash + Send + 'static {}
 pub trait GameContextCreatorView: SubView {
     fn set_subview_sender(&mut self, sender: Sender<Box<dyn SubView>>);
 }
-
-/// EditorView:  机制偏好编辑，而非机制实例编辑，每帧必须调用，在这一帧更新上一帧的所有操作
-/// Mechanic:  机制，包含多个机制实例，且能够参与计算
-pub trait Mechanic<G, I>:
-    EditorView<Game = G, Item = I> + dyn_clone::DynClone + erased_serde::Serialize + Send
-where
-    G: Send + 'static,
-    I: ItemIdent,
-{
-    fn name(&self) -> String;
-
-    fn instances(&self) -> Vec<&dyn AsFlow<Game = Self::Game, Item = Self::Item>>;
-
-    // 考虑提供一个更高效的实现。
-    fn instance_len(&self) -> usize {
-        self.instances().len()
-    }
-
-    // 获取某个实例的可变引用，以便进行编辑
-    fn instance_operate(
-        &mut self,
-        idx: usize,
-        f: &mut dyn FnMut(&mut dyn AsFlow<Game = Self::Game, Item = Self::Item>) -> EntryOpRequest,
-    ) {
-        let _ = idx;
-        let _ = f;
-    }
-
-    // 提交所有instance_operate的更改
-    // 返回值表示索引变化情况
-    fn submit_operations(&mut self) -> Vec<EntryOpResult>;
-
-    // 返回值表示是否产生了需要重新计算的更改
-    fn instance_view(&mut self, idx: usize, ui: &mut egui::Ui, game: &Self::Game) -> bool {
-        let _ = idx;
-        let _ = ui;
-        let _ = game;
-        false
-    }
-
-    // 想要生产 amount 每秒数量的 item，有哪些方法？
-    fn update_suggestion(&mut self, game: &G, item: &I, amount: f64) {
-        let _ = game;
-        let _ = item;
-        let _ = amount;
-    }
-
-    // 返回值表示是否产生了需要重新计算的更改
-    fn suggestion_view(&mut self, ui: &mut egui::Ui, game: &G) -> bool {
-        let _ = ui;
-        let _ = game;
-        false
-    }
-
-    /// 自动规划功能：枚举所有可能的配方组合，填充到instances中。
-    fn auto_populate(&mut self, game: &G) {
-        let _ = game;
-    }
-}
-
-dyn_clone::clone_trait_object!(<G, I> Mechanic<G, I> where G: Send + 'static, I : ItemIdent);
-erased_serde::serialize_trait_object!(<G, I> Mechanic<G, I> where G: Send + 'static, I : ItemIdent);

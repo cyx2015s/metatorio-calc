@@ -9,7 +9,7 @@ use crate::factorio::{Dict, planner::FactoryInstance};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
-pub struct UserContext {
+pub struct ProjectContext {
     pub time_scale: TimeScale,
 
     // 指定的科技里程碑关闭时，这个节点的科技将被视为未解锁（即使它的前置科技都已解锁了），以此来模拟不同的科技树分支
@@ -39,7 +39,7 @@ pub struct UserContext {
     pub factory_sender: Option<Sender<FactoryInstance>>,
 }
 
-impl Default for UserContext {
+impl Default for ProjectContext {
     fn default() -> Self {
         Self {
             time_scale: TimeScale::Seconds,
@@ -57,7 +57,7 @@ impl Default for UserContext {
     }
 }
 
-impl UserContext {
+impl ProjectContext {
     pub fn with_factory_sender(mut self, sender: Sender<FactoryInstance>) -> Self {
         self.factory_sender = Some(sender);
         self

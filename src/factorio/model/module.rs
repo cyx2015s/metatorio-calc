@@ -119,8 +119,7 @@ impl ModuleConfig {
         }
     }
 
-    pub fn get_effect(&self, factorio: &FactorioContext) -> Effect {
-        let data = &factorio.data;
+    pub fn get_effect(&self, data: &DataContext) -> Effect {
         let mut total_effect = Effect::default();
         for module in &self.modules {
             if let Some(module_proto) = data.modules.get(&module.0) {
@@ -196,7 +195,7 @@ impl ModuleConfig {
 }
 
 impl SolveContext for ModuleConfig {
-    type Game = FactorioContext;
+    type Game = DataContext;
     type Item = GenericItem;
 }
 
@@ -207,12 +206,12 @@ pub struct ModuleConfigEditor<'a> {
     pub allowed_effects: &'a Option<EffectTypeLimitation>,
     pub allowed_module_categories: &'a Option<Vec<String>>,
 
-    pub factorio: &'a FactorioContext,
+    pub data: &'a DataContext,
 }
 
 impl<'a> ModuleConfigEditor<'a> {
     pub fn new(
-        factorio: &'a FactorioContext,
+        data: &'a DataContext,
         module_config: &'a mut ModuleConfig,
         module_slots: usize,
         allowed_effects: &'a Option<EffectTypeLimitation>,
@@ -223,7 +222,7 @@ impl<'a> ModuleConfigEditor<'a> {
             module_slots,
             allowed_effects,
             allowed_module_categories,
-            factorio,
+            data,
         }
     }
 }
@@ -251,7 +250,7 @@ pub fn module_effects_allowed(
 impl egui::Widget for ModuleConfigEditor<'_> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         let mut response = ui.response().clone();
-        let _data = &self.factorio.data;
+
         let button = ui
             .vertical(|ui| {
                 ui.label("插件");
@@ -303,7 +302,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
             for (item, count) in total {
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing = [3.0, 3.0].into();
-                    ui.add_sized([32.0, 32.0], GenericIcon::new(self.factorio, &item));
+                    ui.add_sized([32.0, 32.0], GenericIcon::new(self.data, &item));
                     ui.add_sized([35.0, 15.0], AmountLabel::new(count as f64));
                 });
             }
@@ -318,7 +317,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                         let icon = ui
                             .add_sized(
                                 [35.0, 35.0],
-                                Icon::new(self.factorio, "item", &slot.0).with_quality(slot.1),
+                                Icon::new(self.data, "item", &slot.0).with_quality(slot.1),
                             )
                             .interact(egui::Sense::click());
 
@@ -326,10 +325,10 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                             deleted = true;
                             response.mark_changed();
                         }
-                        let selector = Selector::new(self.factorio, "item")
+                        let selector = Selector::new(self.data, "item")
                             .with_current(slot)
-                            .with_filter(|s: &IdWithQuality, f: &FactorioContext| {
-                                if let Some(module_proto) = f.data.modules.get(&s.0) {
+                            .with_filter(|s: &IdWithQuality, f: &DataContext| {
+                                if let Some(module_proto) = f.modules.get(&s.0) {
                                     // 过滤掉不符合要求的插件
                                     self.allowed_module_categories.as_ref().is_none_or(
                                         |allowed_categories| {
@@ -341,7 +340,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                 }
                             });
 
-                        let widget = SelectorModal::new(icon.id, self.factorio, "选择插件")
+                        let widget = SelectorModal::new(icon.id, self.data, "选择插件")
                             .with_toggle(icon.clicked())
                             .with_selector(selector);
                         if ui.add(widget).changed() {
@@ -354,14 +353,14 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                         let icon = ui
                             .add_sized(
                                 [35.0, 35.0],
-                                Icon::new(self.factorio, "item", "empty-module-slot"),
+                                Icon::new(self.data, "item", "empty-module-slot"),
                             )
                             .interact(egui::Sense::click());
                         let mut selected: Option<IdWithQuality> = None;
-                        let selector = Selector::new(self.factorio, "item")
+                        let selector = Selector::new(self.data, "item")
                             .with_output(&mut selected)
-                            .with_filter(|s: &IdWithQuality, f: &FactorioContext| {
-                                if let Some(module_proto) = f.data.modules.get(&s.0) {
+                            .with_filter(|s: &IdWithQuality, f: &DataContext| {
+                                if let Some(module_proto) = f.modules.get(&s.0) {
                                     // 过滤掉不符合要求的插件
                                     self.allowed_module_categories.as_ref().is_none_or(
                                         |allowed_categories| {
@@ -373,7 +372,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                 }
                             });
 
-                        let widget = SelectorModal::new(icon.id, self.factorio, "填充插件")
+                        let widget = SelectorModal::new(icon.id, self.data, "填充插件")
                             .with_toggle(icon.clicked())
                             .with_selector(selector);
 
@@ -393,7 +392,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                 ui.label("插件塔");
                 self.module_config.beacons.retain_mut(|beacon_config| {
                     let mut deleted = false;
-                    let factorio = self.factorio;
+                    let factorio = self.data;
                     beacon_config_ui(ui, factorio, beacon_config, &mut response, &mut deleted);
                     !deleted
                 });
@@ -408,12 +407,11 @@ impl egui::Widget for ModuleConfigEditor<'_> {
 
 pub fn beacon_config_ui(
     ui: &mut egui::Ui,
-    factorio: &FactorioContext,
+    data: &DataContext,
     beacon_config: &mut BeaconConfig,
     response: &mut egui::Response,
     deleted: &mut bool,
 ) {
-    let data = &factorio.data;
     ui.horizontal(|ui| {
         ui.vertical(|ui| {
             if ui.button("删除").clicked() {
@@ -432,7 +430,7 @@ pub fn beacon_config_ui(
             let icon = ui
                 .add_sized(
                     [35.0, 35.0],
-                    Icon::new(factorio, "entity", &beacon_config.beacon.0)
+                    Icon::new(data, "entity", &beacon_config.beacon.0)
                         .with_quality(beacon_config.beacon.1),
                 )
                 .on_hover_text(if data.beacons.contains_key(&beacon_config.beacon.0) {
@@ -441,12 +439,12 @@ pub fn beacon_config_ui(
                     "未选择插件塔".to_string()
                 })
                 .interact(egui::Sense::click());
-            let selector = Selector::new(factorio, "entity")
+            let selector = Selector::new(data, "entity")
                 .with_current(&mut beacon_config.beacon)
-                .with_filter(|s: &IdWithQuality, f: &FactorioContext| {
-                    f.data.beacons.contains_key(&s.0)
+                .with_filter(|s: &IdWithQuality, f: &DataContext| {
+                    f.beacons.contains_key(&s.0)
                 });
-            let widget = SelectorModal::new(icon.id, factorio, "选择插件塔")
+            let widget = SelectorModal::new(icon.id, data, "选择插件塔")
                 .with_toggle(icon.clicked())
                 .with_selector(selector);
 
@@ -464,7 +462,7 @@ pub fn beacon_config_ui(
                     let icon = ui
                         .add_sized(
                             [35.0, 35.0],
-                            Icon::new(factorio, "item", &id.0).with_quality(id.1),
+                            Icon::new(data, "item", &id.0).with_quality(id.1),
                         )
                         .on_hover_text(if data.modules.contains_key(&id.0) {
                             data.get_display_name("item", &id.0)
@@ -476,10 +474,10 @@ pub fn beacon_config_ui(
                         deleted = true;
                         response.mark_changed();
                     }
-                    let selector = Selector::new(factorio, "item")
+                    let selector = Selector::new(data, "item")
                         .with_current(id)
-                        .with_filter(|s: &IdWithQuality, f: &FactorioContext| {
-                            if let Some(module_proto) = f.data.modules.get(&s.0) {
+                        .with_filter(|s: &IdWithQuality, f: &DataContext| {
+                            if let Some(module_proto) = f.modules.get(&s.0) {
                                 // 过滤掉不符合要求的插件
                                 beacon_proto.allowed_module_categories.as_ref().is_none_or(
                                     |allowed_categories| {
@@ -493,7 +491,7 @@ pub fn beacon_config_ui(
                                 false
                             }
                         });
-                    let widget = SelectorModal::new(icon.id, factorio, "选择插件")
+                    let widget = SelectorModal::new(icon.id, data, "选择插件")
                         .with_toggle(icon.clicked())
                         .with_selector(selector);
                     if ui.add(widget).changed() {

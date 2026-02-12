@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use egui::Vec2;
 
 use crate::factorio::{
-    FactorioContext, IdWithQuality, drag_value, editor::icon::*, modal::SelectorModal, model::*,
+    DataContext, IdWithQuality, drag_value, editor::icon::*, modal::SelectorModal, model::*,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -12,14 +12,14 @@ pub struct SelectorStorage {
     pub subgroup: usize,
 }
 
-pub type FilterFn<'a, T> = dyn Fn(&T, &FactorioContext) -> bool + 'a;
-pub type HoverUi<'a, T> = dyn Fn(&mut egui::Ui, &T, &FactorioContext) + 'a;
+pub type FilterFn<'a, T> = dyn Fn(&T, &DataContext) -> bool + 'a;
+pub type HoverUi<'a, T> = dyn Fn(&mut egui::Ui, &T, &DataContext) + 'a;
 
 pub struct Selector<'a, Input, Output>
 where
     Input: 'a + ?Sized,
 {
-    pub factorio: &'a FactorioContext,
+    pub data: &'a DataContext,
     pub type_name: &'a str,
     pub filter: Option<Box<FilterFn<'a, Input>>>,
     pub current: Option<&'a mut Output>,
@@ -32,9 +32,9 @@ impl<'a, Input, Output> Selector<'a, Input, Output>
 where
     Input: 'a + ?Sized,
 {
-    pub fn new(factorio: &'a FactorioContext, type_name: &'a str) -> Self {
+    pub fn new(data: &'a DataContext, type_name: &'a str) -> Self {
         Self {
-            factorio,
+            data,
             type_name,
             filter: None,
             current: None,
@@ -56,7 +56,7 @@ where
 
     pub fn with_filter<F>(mut self, filter: F) -> Self
     where
-        F: Fn(&Input, &FactorioContext) -> bool + 'a,
+        F: Fn(&Input, &DataContext) -> bool + 'a,
     {
         self.filter = Some(Box::new(filter));
         self
@@ -69,11 +69,11 @@ where
 
     pub fn chain_filter<F>(mut self, filter: F) -> Self
     where
-        F: Fn(&Input, &FactorioContext) -> bool + 'a,
+        F: Fn(&Input, &DataContext) -> bool + 'a,
     {
         if let Some(prev_filter) = self.filter.take() {
-            self.filter = Some(Box::new(move |s, factorio| {
-                prev_filter(s, factorio) && filter(s, factorio)
+            self.filter = Some(Box::new(move |s, data| {
+                prev_filter(s, data) && filter(s, data)
             }));
             return self;
         }
@@ -81,10 +81,7 @@ where
         self
     }
 
-    pub fn with_hover(
-        mut self,
-        hover: impl Fn(&mut egui::Ui, &Input, &FactorioContext) + 'a,
-    ) -> Self {
+    pub fn with_hover(mut self, hover: impl Fn(&mut egui::Ui, &Input, &DataContext) + 'a) -> Self {
         self.hover = Some(Box::new(hover));
         self
     }
@@ -97,7 +94,6 @@ where
 
 impl<'a> egui::Widget for Selector<'a, str, String> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
-        let data = &self.factorio.data;
         let mut response = ui.response().clone();
         let available_space = ui.available_size();
         let group_count = (available_space.x as usize / 70).max(4);
@@ -106,14 +102,10 @@ impl<'a> egui::Widget for Selector<'a, str, String> {
         let mut storage: SelectorStorage =
             ui.memory(move |mem| mem.data.get_temp::<SelectorStorage>(id).unwrap_or_default());
         let mut filtered_group = HashMap::new();
-        for (i, group) in data.ordered_entries[self.type_name].iter().enumerate() {
+        for (i, group) in self.data.ordered_entries[self.type_name].iter().enumerate() {
             for subgroup in group.1.iter() {
                 for item_name in subgroup.1.iter() {
-                    if !self
-                        .filter
-                        .as_ref()
-                        .is_none_or(|f| f(item_name, self.factorio))
-                    {
+                    if !self.filter.as_ref().is_none_or(|f| f(item_name, self.data)) {
                         continue;
                     }
                     filtered_group.insert(i, true);
@@ -129,7 +121,7 @@ impl<'a> egui::Widget for Selector<'a, str, String> {
             ui.label("无满足条件的选项。");
             return ui.response().clone();
         }
-        let order_info = &data.ordered_entries[self.type_name];
+        let order_info = &self.data.ordered_entries[self.type_name];
         egui::Grid::new("group")
             .min_row_height(64.0)
             .min_col_width(64.0)
@@ -150,7 +142,7 @@ impl<'a> egui::Widget for Selector<'a, str, String> {
                         continue;
                     }
                     idx += 1;
-                    let widget = Icon::new(self.factorio, "item-group", &group_name)
+                    let widget = Icon::new(self.data, "item-group", &group_name)
                         .with_size(64.0)
                         .with_stroke(if i == storage.group {
                             egui::Stroke::new(2.0, egui::Color32::GRAY)
@@ -175,11 +167,7 @@ impl<'a> egui::Widget for Selector<'a, str, String> {
                 for (j, subgroup) in order_info[storage.group].1.iter().enumerate() {
                     let mut idx = 0;
                     for item_name in subgroup.1.iter() {
-                        if !self
-                            .filter
-                            .as_ref()
-                            .is_none_or(|f| f(item_name, self.factorio))
-                        {
+                        if !self.filter.as_ref().is_none_or(|f| f(item_name, self.data)) {
                             continue;
                         }
                         if (idx % item_count) == 0 && idx != 0 {
@@ -187,7 +175,7 @@ impl<'a> egui::Widget for Selector<'a, str, String> {
                         }
                         idx += 1;
                         let mut icon =
-                            Icon::new(self.factorio, self.type_name, item_name).with_size(32.0);
+                            Icon::new(self.data, self.type_name, item_name).with_size(32.0);
                         if self.current.as_ref().is_some_and(|x| x == &item_name)
                             || self
                                 .output
@@ -198,10 +186,12 @@ impl<'a> egui::Widget for Selector<'a, str, String> {
                         }
                         let mut button = ui.add(icon).interact(egui::Sense::click());
                         if let Some(hover) = &self.hover {
-                            button = button.on_hover_ui(|ui| (hover)(ui, item_name, self.factorio));
+                            button = button.on_hover_ui(|ui| (hover)(ui, item_name, self.data));
                         } else {
                             button = button.on_hover_text(
-                                data.get_display_name(self.type_name, item_name).to_string(),
+                                self.data
+                                    .get_display_name(self.type_name, item_name)
+                                    .to_string(),
                             );
                         }
 
@@ -247,11 +237,11 @@ impl<'a> egui::Widget for Selector<'a, IdWithQuality, IdWithQuality> {
         };
         let prev_storage_quality = storage.selected_quality;
         let prev_storage_item = storage.selected_item.clone();
-        if quality_selector(ui, self.factorio, &mut storage.selected_quality) {
+        if quality_selector(ui, self.data, &mut storage.selected_quality) {
             response.mark_changed();
         }
         let mut widget: Selector<'_, str, String> =
-            Selector::new(self.factorio, self.type_name).with_output(&mut storage.selected_item);
+            Selector::new(self.data, self.type_name).with_output(&mut storage.selected_item);
         if let Some(filter) = self.filter {
             widget = widget.with_filter(move |s, f| {
                 let id_with_quality =
@@ -261,11 +251,11 @@ impl<'a> egui::Widget for Selector<'a, IdWithQuality, IdWithQuality> {
         }
 
         if let Some(hover) = self.hover {
-            widget = widget.with_hover(move |ui, s, factorio| {
+            widget = widget.with_hover(move |ui, s, data| {
                 let id_with_quality =
                     IdWithQuality(s.to_string(), storage.selected_quality.unwrap_or(0));
 
-                hover(ui, &id_with_quality, factorio);
+                hover(ui, &id_with_quality, data);
             });
         }
         if ui.add(widget).changed() {
@@ -308,11 +298,10 @@ impl<'a> egui::Widget for Selector<'a, IdWithQuality, IdWithQuality> {
 
 fn quality_selector(
     ui: &mut egui::Ui,
-    factorio: &FactorioContext,
+    data: &DataContext,
     selected_quality: &mut Option<u8>,
 ) -> bool {
     let mut changed = false;
-    let data = &factorio.data;
     egui::Grid::new("quality")
         .max_col_width(35.0)
         .min_col_width(35.0)
@@ -323,7 +312,7 @@ fn quality_selector(
                 let quality_button = ui
                     .add_sized(
                         [32.0, 32.0],
-                        Icon::new(factorio, "quality", &quality.base.name)
+                        Icon::new(data, "quality", &quality.base.name)
                             .with_size(32.0)
                             .with_stroke(
                                 if let Some(quality) = selected_quality
@@ -348,13 +337,12 @@ fn quality_selector(
 
 pub fn generic_item_selector(
     ui: &mut egui::Ui,
-    factorio: &FactorioContext,
+    data: &DataContext,
     selected: &mut GenericItem,
     response: &egui::Response,
     id: egui::Id,
 ) -> bool {
     let mut changed = false;
-    let data = &factorio.data;
     let toggle = response.clicked();
     let clear = response.secondary_clicked();
     ui.vertical(|ui| {
@@ -430,10 +418,10 @@ pub fn generic_item_selector(
             GenericItem::Item(id_with_quality) => {
                 changed |= ui
                     .add(
-                        SelectorModal::new(id.with("select-item"), factorio, "选择物品")
+                        SelectorModal::new(id.with("select-item"), data, "选择物品")
                             .with_toggle(toggle)
                             .with_selector(
-                                Selector::new(factorio, "item").with_current(id_with_quality),
+                                Selector::new(data, "item").with_current(id_with_quality),
                             ),
                     )
                     .changed();
@@ -441,9 +429,9 @@ pub fn generic_item_selector(
             GenericItem::Fluid { name, temperature } => {
                 changed |= ui
                     .add(
-                        SelectorModal::new(id.with("select-fluid"), factorio, "选择流体")
+                        SelectorModal::new(id.with("select-fluid"), data, "选择流体")
                             .with_toggle(toggle)
-                            .with_selector(Selector::new(factorio, "fluid").with_current(name)),
+                            .with_selector(Selector::new(data, "fluid").with_current(name)),
                     )
                     .changed();
                 if let Some(temp) = temperature {
@@ -471,10 +459,10 @@ pub fn generic_item_selector(
             GenericItem::Entity(id_with_quality) => {
                 changed |= ui
                     .add(
-                        SelectorModal::new(id.with("select-entity"), factorio, "选择实体")
+                        SelectorModal::new(id.with("select-entity"), data, "选择实体")
                             .with_toggle(toggle)
                             .with_selector(
-                                Selector::new(factorio, "entity").with_current(id_with_quality),
+                                Selector::new(data, "entity").with_current(id_with_quality),
                             ),
                     )
                     .changed();
@@ -484,22 +472,18 @@ pub fn generic_item_selector(
             GenericItem::FluidHeat { filter } => {
                 changed |= ui
                     .add(
-                        SelectorModal::new(
-                            id.with("select-fluid-heat"),
-                            factorio,
-                            "选择流体热源来源",
-                        )
-                        .with_toggle(toggle)
-                        .with_selector(
-                            Selector::new(factorio, "fluid")
-                                .with_output(filter)
-                                .with_filter(|s, f| {
-                                    f.data.fluids[s]
-                                        .heat_capacity
-                                        .as_ref()
-                                        .is_none_or(|c| c.amount > 0.0)
-                                }),
-                        ),
+                        SelectorModal::new(id.with("select-fluid-heat"), data, "选择流体热源来源")
+                            .with_toggle(toggle)
+                            .with_selector(
+                                Selector::new(data, "fluid")
+                                    .with_output(filter)
+                                    .with_filter(|s, f| {
+                                        f.fluids[s]
+                                            .heat_capacity
+                                            .as_ref()
+                                            .is_none_or(|c| c.amount > 0.0)
+                                    }),
+                            ),
                     )
                     .changed();
                 if clear {
@@ -514,13 +498,13 @@ pub fn generic_item_selector(
                 }
                 changed |= ui
                     .add(
-                        SelectorModal::new(id, factorio, "选择流体燃料")
+                        SelectorModal::new(id, data, "选择流体燃料")
                             .with_toggle(toggle)
                             .with_selector(
-                                Selector::new(factorio, "fluid")
+                                Selector::new(data, "fluid")
                                     .with_output(filter)
                                     .with_filter(|s, f| {
-                                        f.data.fluids[s]
+                                        f.fluids[s]
                                             .fuel_value
                                             .as_ref()
                                             .is_some_and(|c| c.amount > 0.0)

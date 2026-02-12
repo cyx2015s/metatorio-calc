@@ -1,7 +1,7 @@
 use std::{collections::HashSet, fmt::Debug};
 
 use crate::factorio::{
-    Dict, FactorioContext, GenericItem, HasPrototypeBase, IdWithQuality, PrototypeBase,
+    DataContext, Dict, GenericItem, HasPrototypeBase, IdWithQuality, PrototypeBase,
 };
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -72,9 +72,8 @@ pub struct AutoplaceSettings {
 }
 
 impl PlanetPrototype {
-    pub fn collect_autoplaced(&self, factorio: &FactorioContext) -> HashSet<GenericItem> {
+    pub fn collect_autoplaced(&self, data: &DataContext) -> HashSet<GenericItem> {
         let mut items = HashSet::new();
-        let data = &factorio.data;
         for entity in data.entities.values() {
             if entity.base.r#type != "resource" && entity.base.r#type != "asteroid-chunk" {
                 continue;

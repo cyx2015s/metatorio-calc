@@ -1,7 +1,7 @@
 use std::collections::{HashSet, VecDeque};
 
 use crate::factorio::{
-    DataContext, Dict, Modifier, RecipeResult, TechnologyPrototype, UserContext,
+    DataContext, Dict, Modifier, RecipeResult, TechnologyPrototype, ProjectContext,
 };
 
 // milestone 格式: (technology name, is unlocked)，true表示解锁，false表示未解锁（就算是true，如果因为其他科技的false 导致无法解锁，也会被视为未解锁）
@@ -51,7 +51,7 @@ pub fn resolve_dependency(
         .collect()
 }
 
-pub fn update_accessibles(user: &mut UserContext, data: &DataContext) {
+pub fn update_accessibles(user: &mut ProjectContext, data: &DataContext) {
     user.accessible_technologies = resolve_dependency(&data.technologies, &user.tech_milestones);
     user.accessible_prototypes.clear();
     user.recipe_productivity.clear();

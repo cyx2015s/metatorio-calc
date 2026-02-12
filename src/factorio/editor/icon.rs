@@ -7,7 +7,7 @@ use crate::factorio::*;
 #[derive(Debug)]
 
 pub struct Icon<'a> {
-    pub factorio: &'a FactorioContext,
+    pub data: &'a DataContext,
     pub type_name: &'a str,
     pub item_name: &'a str,
     pub quality: u8,
@@ -16,9 +16,9 @@ pub struct Icon<'a> {
 }
 
 impl<'a> Icon<'a> {
-    pub fn new(factorio: &'a FactorioContext, type_name: &'a str, item_name: &'a str) -> Self {
+    pub fn new(data: &'a DataContext, type_name: &'a str, item_name: &'a str) -> Self {
         Self {
-            factorio,
+            data,
             type_name,
             item_name,
             quality: 0,
@@ -43,7 +43,7 @@ impl<'a> Icon<'a> {
     }
 
     pub fn image(&'_ self) -> egui::Image<'_> {
-        let data = &self.factorio.data;
+        let data = &self.data;
         let root_path = &data.icon_path;
         // 某个 type 的 order info 存在，但是没有对应的物品，视为物品不存在
         // 某个 type 的 order info 不存在，当作存在
@@ -72,7 +72,7 @@ impl<'a> Icon<'a> {
 
 impl<'a> egui::Widget for Icon<'a> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
-        let data = &self.factorio.data;
+        let data = &self.data;
         let root_path = &data.icon_path;
         egui::Frame::NONE
             .fill(egui::Color32::from_rgba_premultiplied(
@@ -113,16 +113,16 @@ impl<'a> egui::Widget for Icon<'a> {
 
 #[derive(Debug)]
 pub struct GenericIcon<'a> {
-    pub factorio: &'a FactorioContext,
+    pub data: &'a DataContext,
     pub item: &'a GenericItem,
     pub size: f32,
     pub stroke: egui::Stroke,
 }
 
 impl<'a> GenericIcon<'a> {
-    pub fn new(factorio: &'a FactorioContext, item: &'a GenericItem) -> Self {
+    pub fn new(data: &'a DataContext, item: &'a GenericItem) -> Self {
         Self {
-            factorio,
+            data,
             item,
             size: 32.0,
             stroke: egui::Stroke::NONE,
@@ -142,12 +142,12 @@ impl<'a> GenericIcon<'a> {
 
 impl<'a> egui::Widget for GenericIcon<'a> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
-        let data = &self.factorio.data;
+        let data = &self.data;
         match self.item {
             GenericItem::Custom { name } => ui.label(format!("特殊: {}", name)),
             GenericItem::Item(IdWithQuality(name, quality)) => ui.add_sized(
                 [self.size, self.size],
-                Icon::new(self.factorio, "item", name)
+                Icon::new(self.data, "item", name)
                     .with_quality(*quality)
                     .with_size(self.size)
                     .with_stroke(self.stroke),
@@ -157,7 +157,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                 temperature: _,
             } => ui.add_sized(
                 [self.size, self.size],
-                Icon::new(self.factorio, "fluid", name)
+                Icon::new(self.data, "fluid", name)
                     .with_quality(0)
                     .with_size(self.size)
                     .with_stroke(self.stroke),
@@ -165,7 +165,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
             GenericItem::Entity(IdWithQuality(name, quality)) => {
                 let main = ui.add_sized(
                     [self.size, self.size],
-                    Icon::new(self.factorio, "entity", name)
+                    Icon::new(self.data, "entity", name)
                         .with_quality(*quality)
                         .with_size(self.size)
                         .with_stroke(self.stroke),
@@ -193,17 +193,15 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                 ui.add_sized([self.size, self.size], egui::Label::new("电能"))
             }
             GenericItem::FluidHeat { filter } => match filter {
-                Some(fluid) => ui.add_sized(
-                    [self.size, self.size],
-                    Icon::new(self.factorio, "fluid", fluid),
-                ),
+                Some(fluid) => {
+                    ui.add_sized([self.size, self.size], Icon::new(self.data, "fluid", fluid))
+                }
                 None => ui.add_sized([self.size, self.size], egui::Label::new("液热")),
             },
             GenericItem::FluidFuel { filter } => match filter {
-                Some(fluid) => ui.add_sized(
-                    [self.size, self.size],
-                    Icon::new(self.factorio, "fluid", fluid),
-                ),
+                Some(fluid) => {
+                    ui.add_sized([self.size, self.size], Icon::new(self.data, "fluid", fluid))
+                }
                 None => ui.add_sized([self.size, self.size], egui::Label::new("液燃")),
             },
             GenericItem::ItemFuel { category } => ui
@@ -225,7 +223,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
 
 impl Display for GenericIcon<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let data = &self.factorio.data;
+        let data = &self.data;
         match self.item {
             GenericItem::Custom { name } => write!(f, "特殊: {}", name),
             GenericItem::Item(IdWithQuality(name, quality)) => {

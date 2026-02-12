@@ -141,7 +141,7 @@ impl MainPage {
         let mut ret = Self {
             creators: vec![(
                 "异星工厂".to_string(),
-                Box::new(factorio::planner::FactorioContextCreatorView::default()),
+                Box::new(factorio::planner::ContextCreatorView::default()),
             )],
             ..Default::default()
         };

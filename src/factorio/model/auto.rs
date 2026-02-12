@@ -3,7 +3,7 @@ use std::time::Instant;
 use crate::{
     concept::EntryOpRequest,
     error::AppError,
-    factorio::{FactorioContext, planner::FactoryInstance, sort_generic_items_owned},
+    factorio::{DataContext, ProjectContext, planner::FactoryInstance, sort_generic_items_owned},
     math::flow_add,
 };
 
@@ -13,13 +13,14 @@ use crate::{
 /// 2. 规划本身才是耗时的
 pub fn factorio_auto_planner(
     mut factory: FactoryInstance,
-    factorio: FactorioContext,
+    data: DataContext,
+    proj: ProjectContext,
 ) -> Result<FactoryInstance, AppError> {
     log::info!("开始自动规划工厂实例: {}", factory.name);
 
     let instant = Instant::now();
     for mechanic in &mut factory.mechanics {
-        mechanic.auto_populate(&factorio);
+        mechanic.auto_populate(&data, &proj, &factory.factory);
         log::info!(
             "机制 {} 填充了 {} 个实例",
             mechanic.name(),
@@ -29,7 +30,7 @@ pub fn factorio_auto_planner(
     log::info!("自动填充机制实例完成，用时: {:.2?}", instant.elapsed());
     let instant = Instant::now();
     factory.strict_source = true;
-    let mut problem = factory.as_problem(&factorio);
+    let mut problem = factory.as_problem(&data, &proj);
     let solution = problem.solve();
     match solution {
         Ok(solution) => {
@@ -38,11 +39,11 @@ pub fn factorio_auto_planner(
             for (idx, mechanic) in factory.mechanics.iter().enumerate() {
                 for (jdx, instance) in mechanic.instances().iter().enumerate() {
                     let var_value = factory.solution.0.get(&(idx, jdx)).cloned().unwrap_or(0.0);
-                    let flow = instance.as_flow(&factorio);
+                    let flow = instance.as_flow(&data, &proj, &factory.factory);
                     factory.total_flow = flow_add(&factory.total_flow, &flow, var_value);
                 }
             }
-            sort_generic_items_owned(&mut factory.total_flow_sorted_keys, &factorio);
+            sort_generic_items_owned(&mut factory.total_flow_sorted_keys, &data);
         }
         Err(e) => {
             log::error!("自动规划失败: {:?}", e);

@@ -9,7 +9,7 @@ use crate::{
     concept::*,
     dyn_serde::*,
     factorio::{
-        ProjectPage, UserContext,
+        ProjectContext, ProjectPage,
         common::*,
         editor::{icon::*, modal::*},
         format::*,
@@ -24,22 +24,29 @@ use crate::{
 };
 
 use indexmap::IndexMap;
+use serde::{Deserialize, Serialize};
 
-lazy_static::lazy_static! {
-    static ref MECHANIC_REGISTRY: DynDeserializeRegistry<FactorioMechanic> = {
-        let mut registry = DynDeserializeRegistry::default();
-        RecipeMechanic::register(&mut registry);
-        MiningMechanic::register(&mut registry);
-        registry
-    };
-}
+// lazy_static::lazy_static! {
+//     static ref MECHANIC_REGISTRY: DynDeserializeRegistry<dyn FactorioMechanic> = {
+//         let mut registry = DynDeserializeRegistry::default();
+//         RecipeMechanic::register(&mut registry);
+//         MiningMechanic::register(&mut registry);
+//         registry
+//     };
+// }
 
-#[derive(Debug)]
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct FactoryContext {}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct FactoryInstance {
+    pub factory: FactoryContext,
+
     pub name: String,
     pub target: DndVec<(GenericItem, f64)>,
     pub external: DndVec<(GenericItem, f64)>,
-    pub mechanics: Vec<Box<dyn Mechanic<FactorioContext, GenericItem>>>,
+    pub mechanics: Vec<Box<dyn FactorioMechanic>>,
     pub instances: Vec<(usize, usize)>,
 
     pub strict_source: bool,
@@ -49,67 +56,67 @@ pub struct FactoryInstance {
     pub total_flow_sorted_keys: Vec<GenericItem>,
 }
 
-impl serde::Serialize for FactoryInstance {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let mut state = serializer.serialize_struct("FactoryInstance", 6)?;
-        serde::ser::SerializeStruct::serialize_field(&mut state, "name", &self.name)?;
-        serde::ser::SerializeStruct::serialize_field(&mut state, "target", &self.target)?;
-        serde::ser::SerializeStruct::serialize_field(&mut state, "external", &self.external)?;
-        serde::ser::SerializeStruct::serialize_field(&mut state, "mechanics", &self.mechanics)?;
-        serde::ser::SerializeStruct::serialize_field(&mut state, "instances", &self.instances)?;
-        serde::ser::SerializeStruct::serialize_field(
-            &mut state,
-            "strict_source",
-            &self.strict_source,
-        )?;
-        serde::ser::SerializeStruct::end(state)
-    }
-}
+// impl serde::Serialize for FactoryInstance {
+//     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+//     where
+//         S: serde::Serializer,
+//     {
+//         let mut state = serializer.serialize_struct("FactoryInstance", 6)?;
+//         serde::ser::SerializeStruct::serialize_field(&mut state, "name", &self.name)?;
+//         serde::ser::SerializeStruct::serialize_field(&mut state, "target", &self.target)?;
+//         serde::ser::SerializeStruct::serialize_field(&mut state, "external", &self.external)?;
+//         serde::ser::SerializeStruct::serialize_field(&mut state, "mechanics", &self.mechanics)?;
+//         serde::ser::SerializeStruct::serialize_field(&mut state, "instances", &self.instances)?;
+//         serde::ser::SerializeStruct::serialize_field(
+//             &mut state,
+//             "strict_source",
+//             &self.strict_source,
+//         )?;
+//         serde::ser::SerializeStruct::end(state)
+//     }
+// }
 
-impl<'de> serde::Deserialize<'de> for FactoryInstance {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let mut factory_instance = FactoryInstance::default();
-        let value = serde_json::Value::deserialize(deserializer)?;
-        factory_instance.name = serde_json::from_value(value["name"].clone()).unwrap_or_default();
-        factory_instance.target =
-            serde_json::from_value(value["target"].clone()).unwrap_or_default();
-        factory_instance.external =
-            serde_json::from_value(value["external"].clone()).unwrap_or_default();
-        factory_instance.strict_source =
-            serde_json::from_value(value["strict_source"].clone()).unwrap_or_default();
-        factory_instance.instances =
-            serde_json::from_value(value["instances"].clone()).unwrap_or_default();
-        let mut not_deserialized_mechanics = MECHANIC_REGISTRY
-            .registered_types()
-            .into_iter()
-            .collect::<HashSet<_>>();
-        // dbg!(&not_deserialized_mechanics);
-        for mechanic in value["mechanics"].as_array().unwrap_or(&vec![]) {
-            if mechanic["type"]
-                .as_str()
-                .is_some_and(|t| not_deserialized_mechanics.contains(t))
-            {
-                let mech = MECHANIC_REGISTRY.deserialize(mechanic.clone()).unwrap();
-                factory_instance.mechanics.push(mech);
-                not_deserialized_mechanics.remove(mechanic["type"].as_str().unwrap());
-                // dbg!(&not_deserialized_mechanics);
-            }
-        }
-        for not_deserialized_mechanic in not_deserialized_mechanics {
-            let mech = MECHANIC_REGISTRY
-                .create_default(not_deserialized_mechanic)
-                .unwrap();
-            factory_instance.mechanics.push(mech);
-        }
-        Ok(factory_instance)
-    }
-}
+// impl<'de> serde::Deserialize<'de> for FactoryInstance {
+//     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+//     where
+//         D: serde::Deserializer<'de>,
+//     {
+//         let mut factory_instance = FactoryInstance::default();
+//         let value = serde_json::Value::deserialize(deserializer)?;
+//         factory_instance.name = serde_json::from_value(value["name"].clone()).unwrap_or_default();
+//         factory_instance.target =
+//             serde_json::from_value(value["target"].clone()).unwrap_or_default();
+//         factory_instance.external =
+//             serde_json::from_value(value["external"].clone()).unwrap_or_default();
+//         factory_instance.strict_source =
+//             serde_json::from_value(value["strict_source"].clone()).unwrap_or_default();
+//         factory_instance.instances =
+//             serde_json::from_value(value["instances"].clone()).unwrap_or_default();
+//         let mut not_deserialized_mechanics = MECHANIC_REGISTRY
+//             .registered_types()
+//             .into_iter()
+//             .collect::<HashSet<_>>();
+//         // dbg!(&not_deserialized_mechanics);
+//         for mechanic in value["mechanics"].as_array().unwrap_or(&vec![]) {
+//             if mechanic["type"]
+//                 .as_str()
+//                 .is_some_and(|t| not_deserialized_mechanics.contains(t))
+//             {
+//                 let mech = MECHANIC_REGISTRY.deserialize(mechanic.clone()).unwrap();
+//                 factory_instance.mechanics.push(mech);
+//                 not_deserialized_mechanics.remove(mechanic["type"].as_str().unwrap());
+//                 // dbg!(&not_deserialized_mechanics);
+//             }
+//         }
+//         for not_deserialized_mechanic in not_deserialized_mechanics {
+//             let mech = MECHANIC_REGISTRY
+//                 .create_default(not_deserialized_mechanic)
+//                 .unwrap();
+//             factory_instance.mechanics.push(mech);
+//         }
+//         Ok(factory_instance)
+//     }
+// }
 
 impl Clone for FactoryInstance {
     fn clone(&self) -> Self {
@@ -130,6 +137,8 @@ impl Clone for FactoryInstance {
 impl Default for FactoryInstance {
     fn default() -> Self {
         FactoryInstance {
+            factory: FactoryContext::default(),
+
             name: "工厂".to_string(),
             target: DndVec::new(),
             external: DndVec::new(),
@@ -152,7 +161,7 @@ impl FactoryInstance {
         }
     }
 
-    pub fn with_mechanic(mut self, mechanic: impl Mechanic<FactorioContext, GenericItem>) -> Self {
+    pub fn with_mechanic(mut self, mechanic: impl FactorioMechanic) -> Self {
         self.mechanics.push(Box::new(mechanic));
         self
     }
@@ -178,7 +187,8 @@ impl FactoryInstance {
 
     pub fn as_problem(
         &mut self,
-        factorio: &FactorioContext,
+        data: &DataContext,
+        proj: &ProjectContext,
     ) -> SolverData<GenericItem, (usize, usize)> {
         if self
             .mechanics
@@ -194,7 +204,13 @@ impl FactoryInstance {
             .iter()
             .map(|(idx, jdx)| {
                 let fe = &self.mechanics[*idx].instances()[*jdx];
-                ((*idx, *jdx), (fe.as_flow(factorio), fe.cost(factorio)))
+                (
+                    (*idx, *jdx),
+                    (
+                        fe.as_flow(data, proj, &self.factory),
+                        fe.cost(data, proj, &self.factory),
+                    ),
+                )
             })
             .collect();
 
@@ -225,7 +241,8 @@ impl FactoryInstance {
     fn flows_panel(
         &mut self,
         ui: &mut egui::Ui,
-        factorio: &FactorioContext,
+        data: &DataContext,
+        proj: &ProjectContext,
         changed: &mut bool,
         need_suggestions: &mut bool,
     ) {
@@ -260,16 +277,18 @@ impl FactoryInstance {
                         let target_width = ui.available_width() * 0.3;
                         ui.set_min_width(target_width);
                         ui.set_max_width(target_width);
-                        *changed |= self.mechanics[idx].instance_view(jdx, ui, factorio);
+                        *changed |=
+                            self.mechanics[idx].instance_view(jdx, ui, data, proj, &self.factory);
                     });
                     card_frame(ui).show(ui, |ui| {
                         let target_width = ui.available_width();
                         ui.set_min_width(target_width);
                         ui.set_max_width(target_width);
                         ui.set_min_height(50.0);
-                        let flow = self.mechanics[idx].instances()[jdx].as_flow(factorio);
+                        let flow =
+                            self.mechanics[idx].instances()[jdx].as_flow(data, proj, &self.factory);
                         let mut flow_keys = flow.keys().cloned().collect::<Vec<_>>();
-                        sort_generic_items_owned(&mut flow_keys, factorio);
+                        sort_generic_items_owned(&mut flow_keys, data);
                         // 先展示输入，再展示输出
                         for item in &flow_keys {
                             let amount = flow.get(item).cloned().unwrap_or(0.0);
@@ -280,7 +299,7 @@ impl FactoryInstance {
                                 ui.set_min_width(40.0);
                                 ui.set_max_width(40.0);
                                 let button = ui
-                                    .add_sized([25.0, 25.0], GenericIcon::new(factorio, item))
+                                    .add_sized([25.0, 25.0], GenericIcon::new(data, item))
                                     .interact(egui::Sense::click());
                                 button.context_menu(|ui| {
                                     if ui.button("添加到产量目标").clicked() {
@@ -294,20 +313,32 @@ impl FactoryInstance {
                                     if ui.button("显示推荐配方").clicked() {
                                         *need_suggestions = true;
                                         self.mechanics.iter_mut().for_each(|mechanic| {
-                                            mechanic.update_suggestion(factorio, item, amount)
+                                            mechanic.update_suggestion(
+                                                data,
+                                                proj,
+                                                &self.factory,
+                                                item,
+                                                amount,
+                                            )
                                         });
                                     }
                                 });
                                 if button.clicked() {
                                     *need_suggestions = true;
                                     self.mechanics.iter_mut().for_each(|mechanic| {
-                                        mechanic.update_suggestion(factorio, item, amount)
+                                        mechanic.update_suggestion(
+                                            data,
+                                            proj,
+                                            &self.factory,
+                                            item,
+                                            amount,
+                                        )
                                     });
                                 }
 
                                 ui.add(
                                     AmountLabel::new(amount * solution_value.unwrap_or(1.0))
-                                        .with_time_scale(factorio.user.time_scale)
+                                        .with_time_scale(proj.time_scale)
                                         .with_is_energy(item.is_energy())
                                         .with_is_signed(true),
                                 );
@@ -327,7 +358,8 @@ impl FactoryInstance {
     fn summary_panel(
         &mut self,
         ui: &mut egui::Ui,
-        factorio: &FactorioContext,
+        data: &DataContext,
+        proj: &ProjectContext,
         changed: &mut bool,
         need_suggestions: &mut bool,
     ) {
@@ -357,13 +389,14 @@ impl FactoryInstance {
                 .on_hover_text("\u{26A0}新工厂会出现在一个新页面中")
                 .clicked()
             {
-                let factorio_cloned = factorio.clone();
+                let data_cloned = data.clone();
+                let proj_cloned = proj.clone();
                 let factory_cloned = self.clone();
                 std::thread::spawn(move || {
-                    let sender = factorio_cloned.user.factory_sender.clone();
+                    let sender = proj_cloned.factory_sender.clone();
 
                     let auto_planned_factory =
-                        factorio_auto_planner(factory_cloned, factorio_cloned);
+                        factorio_auto_planner(factory_cloned, data_cloned, proj_cloned);
                     match auto_planned_factory {
                         Ok(factory) => {
                             sender.unwrap().send(factory).unwrap();
@@ -394,13 +427,13 @@ impl FactoryInstance {
                         ui.add_sized(
                             [40.0, 15.0],
                             AmountLabel::new(amount)
-                                .with_time_scale(factorio.user.time_scale)
+                                .with_time_scale(proj.time_scale)
                                 .with_is_energy(item.is_energy())
                                 .with_is_signed(true),
                         );
                         ui.push_id(item, |ui| {
                             let button = ui
-                                .add_sized([35.0, 35.0], GenericIcon::new(factorio, item))
+                                .add_sized([35.0, 35.0], GenericIcon::new(data, item))
                                 .interact(egui::Sense::click());
                             button.context_menu(|ui| {
                                 if ui.button("添加到产量目标").clicked() {
@@ -414,14 +447,26 @@ impl FactoryInstance {
                                 if ui.button("显示推荐配方").clicked() {
                                     *need_suggestions = true;
                                     self.mechanics.iter_mut().for_each(|mechanic| {
-                                        mechanic.update_suggestion(factorio, item, amount)
+                                        mechanic.update_suggestion(
+                                            data,
+                                            proj,
+                                            &self.factory,
+                                            item,
+                                            amount,
+                                        )
                                     });
                                 }
                             });
                             if button.clicked() {
                                 *need_suggestions = true;
                                 self.mechanics.iter_mut().for_each(|mechanic| {
-                                    mechanic.update_suggestion(factorio, item, amount)
+                                    mechanic.update_suggestion(
+                                        data,
+                                        proj,
+                                        &self.factory,
+                                        item,
+                                        amount,
+                                    )
                                 });
                             }
                         })
@@ -437,23 +482,24 @@ impl FactoryInstance {
     fn side_panel(
         &mut self,
         ui: &mut egui::Ui,
-        factorio: &FactorioContext,
+        data: &DataContext,
+        proj: &ProjectContext,
         changed: &mut bool,
         need_suggestions: &mut bool,
     ) {
         ui.scope(|ui| {
-            self.target_editor(ui, factorio, changed, need_suggestions);
+            self.target_editor(ui, data, proj, changed, need_suggestions);
         });
 
         ui.separator();
         ui.scope(|ui| {
-            self.external_editor(ui, factorio, changed, need_suggestions);
+            self.external_editor(ui, data, proj, changed, need_suggestions);
         });
         ui.separator();
         ui.heading("游戏机制");
         for mechanic in self.mechanics.iter_mut() {
             ui.separator();
-            *changed |= mechanic.editor_view(ui, factorio);
+            *changed |= mechanic.editor_view(ui, data, proj, &self.factory);
         }
         let mut results = Vec::new();
         for mechanic in self.mechanics.iter_mut() {
@@ -507,11 +553,12 @@ impl FactoryInstance {
     fn external_editor(
         &mut self,
         ui: &mut egui::Ui,
-        factorio: &FactorioContext,
+        data: &DataContext,
+        proj: &ProjectContext,
         changed: &mut bool,
         need_suggestions: &mut bool,
     ) {
-        let data = &factorio.data;
+        let data = &data;
         ui.heading("额外输入代价");
         ui.label("对物品和流体而言，每秒产出1个所消耗的地格；对能量而言，产出1MW所消耗的地格");
         self.external
@@ -533,13 +580,17 @@ impl FactoryInstance {
                     });
                     ui.horizontal_wrapped(|ui| {
                         let icon = ui
-                            .add_sized([35.0, 35.0], GenericIcon::new(factorio, item))
+                            .add_sized([35.0, 35.0], GenericIcon::new(data, item))
                             .interact(egui::Sense::click());
                         if icon.clicked_by(egui::PointerButton::Secondary) {
                             *need_suggestions = true;
                             self.mechanics.iter_mut().for_each(|mechanic| {
                                 mechanic.update_suggestion(
-                                    factorio, item, 1.0, // 尝试消耗更多该物品
+                                    data,
+                                    proj,
+                                    &self.factory,
+                                    item,
+                                    1.0, // 尝试消耗更多该物品
                                 )
                             });
                         }
@@ -547,7 +598,7 @@ impl FactoryInstance {
                             ui.horizontal(|ui| {
                                 *changed |= generic_item_selector(
                                     ui,
-                                    factorio,
+                                    data,
                                     item,
                                     &icon,
                                     icon.id.with("external"),
@@ -563,13 +614,13 @@ impl FactoryInstance {
             *changed = true;
         }
         ui.menu_button("从星球自动选择", |ui| {
-            for planet in factorio.data.planets.values() {
+            for planet in data.planets.values() {
                 if ui
                     .button(data.get_display_name("space-location", &planet.base.name))
                     .clicked()
                 {
                     self.external.clear();
-                    let available = planet.collect_autoplaced(factorio);
+                    let available = planet.collect_autoplaced(data);
                     for item in &available {
                         self.external.push((
                             item.clone(),
@@ -591,7 +642,8 @@ impl FactoryInstance {
     fn target_editor(
         &mut self,
         ui: &mut egui::Ui,
-        factorio: &FactorioContext,
+        data: &DataContext,
+        proj: &ProjectContext,
         changed: &mut bool,
         need_suggestions: &mut bool,
     ) {
@@ -611,9 +663,9 @@ impl FactoryInstance {
                             *changed |= ui.add(drag_watt(&mut display_value)).changed();
                             *amount = display_value * 1e6;
                         } else {
-                            let mut display_value = *amount * factorio.user.time_scale.multiplier();
+                            let mut display_value = *amount * proj.time_scale.multiplier();
                             *changed |= ui.add(drag_value(&mut display_value)).changed();
-                            *amount = display_value / factorio.user.time_scale.multiplier();
+                            *amount = display_value / proj.time_scale.multiplier();
                         }
 
                         if ui.button("×").clicked() {
@@ -622,7 +674,7 @@ impl FactoryInstance {
                         }
                     });
                     ui.horizontal_wrapped(|ui| {
-                        let mut icon = GenericIcon::new(factorio, item);
+                        let mut icon = GenericIcon::new(data, item);
                         let solution_of_target = self.total_flow.get(item).cloned().unwrap_or(0.0);
                         let not_satisfied =
                             !float_cmp::approx_eq!(f64, solution_of_target, *amount, ulps = 6);
@@ -640,7 +692,10 @@ impl FactoryInstance {
                             *need_suggestions = true;
                             self.mechanics.iter_mut().for_each(|mechanic| {
                                 mechanic.update_suggestion(
-                                    factorio, item,
+                                    data,
+                                    proj,
+                                    &self.factory,
+                                    item,
                                     -*amount, // 目标产量为正表示目前缺少对应数量的物品
                                 )
                             });
@@ -649,7 +704,7 @@ impl FactoryInstance {
                             ui.horizontal(|ui| {
                                 *changed |= generic_item_selector(
                                     ui,
-                                    factorio,
+                                    data,
                                     item,
                                     &widget,
                                     widget.id.with("target"),
@@ -668,12 +723,12 @@ impl FactoryInstance {
 }
 
 impl SolveContext for FactoryInstance {
-    type Game = FactorioContext;
+    type Game = DataContext;
     type Item = GenericItem;
 }
 
-impl EditorView for FactoryInstance {
-    fn editor_view(&mut self, ui: &mut egui::Ui, factorio: &FactorioContext) -> bool {
+impl FactoryInstance {
+    fn view(&mut self, ui: &mut egui::Ui, data: &DataContext, proj: &ProjectContext) -> bool {
         ui.add(egui::text_edit::TextEdit::singleline(&mut self.name));
         ui.separator();
         let mut changed = false;
@@ -689,7 +744,7 @@ impl EditorView for FactoryInstance {
         .frame(egui::Frame::NONE.corner_radius(8.0).inner_margin(4.0))
         .show_inside(ui, |ui: &mut egui::Ui| {
             egui::ScrollArea::vertical().id_salt(1).show(ui, |ui| {
-                self.side_panel(ui, factorio, &mut changed, &mut need_suggestions);
+                self.side_panel(ui, data, proj, &mut changed, &mut need_suggestions);
             });
         });
 
@@ -699,11 +754,11 @@ impl EditorView for FactoryInstance {
             .show(ui, |ui| {
                 ui.heading("配方配置");
 
-                self.summary_panel(ui, factorio, &mut changed, &mut need_suggestions);
+                self.summary_panel(ui, data, proj, &mut changed, &mut need_suggestions);
                 egui::ScrollArea::vertical().id_salt(3).show(ui, |ui| {
                     ui.vertical(|ui| {
                         ui.style_mut().spacing.scroll = egui::style::ScrollStyle::solid();
-                        self.flows_panel(ui, factorio, &mut changed, &mut need_suggestions);
+                        self.flows_panel(ui, data, proj, &mut changed, &mut need_suggestions);
                     })
                     .response
                 });
@@ -717,7 +772,7 @@ impl EditorView for FactoryInstance {
                 self.mechanics.iter_mut().for_each(|mechanic| {
                     ui.collapsing(mechanic.name(), |ui| {
                         ui.heading(mechanic.name());
-                        changed |= mechanic.suggestion_view(ui, factorio);
+                        changed |= mechanic.suggestion_view(ui, data, proj, &self.factory);
                         ui.separator();
                     });
                 });
@@ -725,7 +780,7 @@ impl EditorView for FactoryInstance {
         });
         // 无关
         if changed {
-            self.as_problem(factorio);
+            self.as_problem(data, proj);
         };
         changed
     }
@@ -734,10 +789,10 @@ impl EditorView for FactoryInstance {
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct ProjectInstance {
-    /// 存储游戏逻辑数据的全部上下文
-    /// 包含一个 `Arc<DataContext>`，只读的游戏原型上下文
-    /// 另外包含 UserContext，用户的自定义偏好
-    pub factorio: FactorioContext,
+    #[serde(skip)]
+    pub data: Arc<DataContext>,
+
+    pub proj: ProjectContext,
 
     pub name: String,
 
@@ -760,10 +815,9 @@ impl Default for ProjectInstance {
         SolverData::make_solver_thread(solution_tx, problem_rx);
         log::info!("Default::default() for ProjectInstance called.");
         ProjectInstance {
-            factorio: FactorioContext {
-                data: Arc::new(DataContext::default()),
-                user: UserContext::default().with_factory_sender(factory_tx),
-            },
+            data: Arc::new(DataContext::default()),
+            proj: ProjectContext::default().with_factory_sender(factory_tx),
+
             name: "未命名项目".to_string(),
             factories: DndVec::new(),
             factory_receiver: factory_rx,
@@ -778,10 +832,8 @@ impl ProjectInstance {
         let (factory_tx, factory_rx) = channel();
         log::info!("ProjectInstance::new() called.");
         ProjectInstance {
-            factorio: FactorioContext {
-                data: Arc::new(data.build_order_info()),
-                user: UserContext::default().with_factory_sender(factory_tx),
-            },
+            data: Arc::new(data.build_order_info()),
+            proj: ProjectContext::default().with_factory_sender(factory_tx),
             factory_receiver: factory_rx,
             ..Default::default()
         }
@@ -791,35 +843,30 @@ impl ProjectInstance {
         let (factory_tx, factory_rx) = channel();
         log::info!("ProjectInstance::new_arc() called.");
         ProjectInstance {
-            factorio: FactorioContext {
-                data,
-                user: UserContext::default().with_factory_sender(factory_tx),
-            },
+            data,
+            proj: ProjectContext::default().with_factory_sender(factory_tx),
             factory_receiver: factory_rx,
             ..Default::default()
         }
     }
 
     pub fn set_data(&mut self, data: Arc<DataContext>) {
-        self.factorio.data = data;
+        self.data = data;
     }
 
     pub fn with_default_milestones(mut self) -> Self {
-        for (tech_name, tech) in &self.factorio.data.technologies {
+        for (tech_name, tech) in &self.data.technologies {
             if tech.essential {
-                self.factorio
-                    .user
-                    .tech_milestones
-                    .push((tech_name.clone(), true));
+                self.proj.tech_milestones.push((tech_name.clone(), true));
             }
         }
-        update_accessibles(&mut self.factorio.user, &self.factorio.data);
+        update_accessibles(&mut self.proj, &self.data);
         self
     }
 
     pub fn reset_factory_channel(&mut self) {
         let (factory_tx, factory_rx) = channel();
-        self.factorio.user.factory_sender = Some(factory_tx);
+        self.proj.factory_sender = Some(factory_tx);
         self.factory_receiver = factory_rx;
     }
 }
@@ -832,10 +879,10 @@ impl SubView for ProjectInstance {
             self.problem_sender
                 .send((
                     new_idx,
-                    self.factories.vec[new_idx].as_problem(&self.factorio),
+                    self.factories.vec[new_idx].as_problem(&self.data, &self.proj),
                 ))
                 .unwrap();
-            self.factorio.user.saved = false;
+            self.proj.saved = false;
         }
         while let Ok((req_id, result)) = self.solution_receiver.try_recv() {
             let factory = &mut self.factories.vec[req_id];
@@ -847,13 +894,13 @@ impl SubView for ProjectInstance {
                         for (jdx, instance) in mechanic.instances().iter().enumerate() {
                             let var_value =
                                 factory.solution.0.get(&(idx, jdx)).cloned().unwrap_or(0.0);
-                            let flow = instance.as_flow(&self.factorio);
+                            let flow = instance.as_flow(&self.data, &self.proj, &factory.factory);
                             factory.total_flow = flow_add(&factory.total_flow, &flow, var_value);
                         }
                     }
                     // Update sorted keys cache when total_flow changes
                     factory.total_flow_sorted_keys = factory.total_flow.keys().cloned().collect();
-                    sort_generic_items_owned(&mut factory.total_flow_sorted_keys, &self.factorio);
+                    sort_generic_items_owned(&mut factory.total_flow_sorted_keys, &self.data);
                 }
                 Err(_) => {
                     factory.total_flow.clear();
@@ -878,7 +925,7 @@ impl SubView for ProjectInstance {
                         .id_salt("factories_button")
                         .show(ui, |ui| {
                             if ui.button("⚙ 偏好设置").clicked() {
-                                self.factorio.user.selected_page = ProjectPage::UserContext;
+                                self.proj.selected_page = ProjectPage::UserContext;
                             }
                             if ui.button("+ 新建工厂").clicked() {
                                 let name = "新工厂".to_string();
@@ -899,21 +946,20 @@ impl SubView for ProjectInstance {
                                         });
                                         let button =
                                             ui.add(egui::Button::new(&factory.name).selected(
-                                                self.factorio.user.selected_page
+                                                self.proj.selected_page
                                                     == ProjectPage::Index(real_idx),
                                             ));
                                         if button.clicked() {
-                                            self.factorio.user.selected_page =
-                                                ProjectPage::Index(real_idx);
+                                            self.proj.selected_page = ProjectPage::Index(real_idx);
                                         }
                                         if ui.button("×").clicked() {
                                             *op = EntryOpRequest::Drop;
                                             if let ProjectPage::Index(page) =
-                                                self.factorio.user.selected_page
+                                                self.proj.selected_page
                                                 && page >= real_idx
                                                 && page > 0
                                             {
-                                                self.factorio.user.selected_page =
+                                                self.proj.selected_page =
                                                     ProjectPage::Index(page - 1);
                                             }
                                         }
@@ -924,14 +970,15 @@ impl SubView for ProjectInstance {
                 });
                 ui.separator();
 
-                match self.factorio.user.selected_page {
+                match self.proj.selected_page {
                     ProjectPage::UserContext => {
                         egui::ScrollArea::vertical().show(ui, |ui| {
                             ui.style_mut().spacing.scroll = egui::style::ScrollStyle::solid();
                             ui.heading("偏好设置");
                             ui.separator();
-                            self.factorio.user.saved &=
-                                !ui.add(UserContextEditor::new(&mut self.factorio)).changed();
+                            self.proj.saved &= !ui
+                                .add(UserContextEditor::new(&self.data, &mut self.proj))
+                                .changed();
                         });
                     }
                     ProjectPage::Index(page) => {
@@ -953,14 +1000,14 @@ impl SubView for ProjectInstance {
                             ui.add_sized(ui.available_size(), egui::Label::new(layout_job));
                         } else {
                             if page >= self.factories.len() {
-                                self.factorio.user.selected_page = ProjectPage::Index(0);
+                                self.proj.selected_page = ProjectPage::Index(0);
                             }
-                            if self.factories.vec[page].editor_view(ui, &self.factorio) {
-                                self.factorio.user.saved = false;
+                            if self.factories.vec[page].view(ui, &self.data, &self.proj) {
+                                self.proj.saved = false;
                                 self.problem_sender
                                     .send((
                                         page,
-                                        self.factories.vec[page].as_problem(&self.factorio),
+                                        self.factories.vec[page].as_problem(&self.data, &self.proj),
                                     ))
                                     .unwrap();
                             }
@@ -975,7 +1022,7 @@ impl SubView for ProjectInstance {
     }
 
     fn description(&self) -> String {
-        self.factorio.data.mods.iter().fold(
+        self.data.mods.iter().fold(
             "使用以下模组: ".to_string(),
             |mut acc, (mod_name, mod_version)| {
                 acc.push_str(&format!("\n{} ({}), ", mod_name, mod_version));
@@ -1025,7 +1072,7 @@ impl SubView for ProjectView {
         let mut show_close_confirm = false;
         if ui.input(|i| i.viewport().close_requested())
             && !self.ignore_close
-            && self.projects.iter().any(|p| !p.factorio.user.saved)
+            && self.projects.iter().any(|p| !p.proj.saved)
         {
             show_close_confirm = true;
             ui.ctx()
@@ -1044,13 +1091,13 @@ impl SubView for ProjectView {
                 }
                 if ui.button("关闭前保存").clicked() {
                     for project in self.projects.vec.iter_mut() {
-                        if !project.factorio.user.saved {
-                            if let Some(path) = &project.factorio.user.file_path.clone() {
+                        if !project.proj.saved {
+                            if let Some(path) = &project.proj.file_path.clone() {
                                 save_project(project, path);
                             } else {
                                 save_project_as(project);
                             }
-                            project.factorio.user.saved = true;
+                            project.proj.saved = true;
                         }
                     }
                     self.ignore_close = true;
@@ -1077,9 +1124,9 @@ impl SubView for ProjectView {
                     {
                         project.reset_factory_channel();
                         project.set_data(self.data.clone());
-                        update_accessibles(&mut project.factorio.user, &project.factorio.data);
-                        project.factorio.user.saved = true;
-                        project.factorio.user.file_path = Some(path);
+                        update_accessibles(&mut project.proj, &project.data);
+                        project.proj.saved = true;
+                        project.proj.file_path = Some(path);
                         project
                             .factories
                             .vec
@@ -1088,7 +1135,7 @@ impl SubView for ProjectView {
                             .for_each(|(idx, f)| {
                                 let _ = project
                                     .problem_sender
-                                    .send((idx, f.as_problem(&project.factorio)));
+                                    .send((idx, f.as_problem(&project.data, &project.proj)));
                             });
                         self.projects.push(project);
                         self.selected = Some(self.projects.len() - 1);
@@ -1099,7 +1146,7 @@ impl SubView for ProjectView {
                     ui.separator();
                     let project = &mut self.projects[selected];
                     if ui.button("保存项目").clicked() {
-                        if let Some(path) = &project.factorio.user.file_path.clone() {
+                        if let Some(path) = &project.proj.file_path.clone() {
                             save_project(project, path);
                         } else {
                             save_project_as(project);
@@ -1142,7 +1189,7 @@ impl SubView for ProjectView {
                                     self.selected = Some(*real_idx);
                                 }
                                 if ui.button("×").clicked() {
-                                    if !project.factorio.user.saved {
+                                    if !project.proj.saved {
                                         toggle = true;
                                         self.delete_request = DeleteRequest::Pending(virtual_idx);
                                     } else {
@@ -1207,8 +1254,8 @@ pub fn save_project(proj: &mut ProjectInstance, path: &Path) {
     match std::fs::File::create(path) {
         Ok(file) => match serde_json::to_writer_pretty(&file, &proj) {
             Ok(_) => {
-                proj.factorio.user.saved = true;
-                proj.factorio.user.file_path = Some(path.to_path_buf());
+                proj.proj.saved = true;
+                proj.proj.file_path = Some(path.to_path_buf());
                 crate::toast::info("项目已保存");
             }
             Err(e) => {
@@ -1238,14 +1285,14 @@ pub fn load_project(path: &Path) -> Option<ProjectInstance> {
 }
 
 #[derive(Default, Debug)]
-pub struct FactorioContextCreatorView {
+pub struct ContextCreatorView {
     path: Option<std::path::PathBuf>,
     mod_path: Option<std::path::PathBuf>,
     subview_sender: Option<Sender<Box<dyn SubView>>>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
-impl SubView for FactorioContextCreatorView {
+impl SubView for ContextCreatorView {
     fn view(&mut self, ui: &mut egui::Ui) {
         ui.vertical_centered(|ui| {
             ui.heading("创建游戏上下文");
@@ -1364,7 +1411,7 @@ impl SubView for FactorioContextCreatorView {
     }
 }
 
-impl GameContextCreatorView for FactorioContextCreatorView {
+impl GameContextCreatorView for ContextCreatorView {
     fn set_subview_sender(&mut self, sender: Sender<Box<dyn SubView>>) {
         self.subview_sender = Some(sender);
     }

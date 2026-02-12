@@ -5,14 +5,14 @@ use indexmap::IndexMap;
 use crate::{
     concept::Flow,
     factorio::{
-        FactorioContext, IdWithQuality,
+        DataContext, IdWithQuality,
         common::{Effect, EnergyAmount, EnergySource, index_map_update_entry},
         model::data::GenericItem,
     },
 };
 
 pub fn energy_source_as_flow(
-    factorio: &FactorioContext,
+    data: &DataContext,
     energy_source: &EnergySource,
     energy_usage: &EnergyAmount,
     effects: &Effect,
@@ -20,7 +20,7 @@ pub fn energy_source_as_flow(
     fulfillment: &mut f64,
 ) -> Flow<GenericItem> {
     let mut map = IndexMap::new();
-    let data = &factorio.data;
+
     match energy_source {
         EnergySource::Electric(source) => {
             let energy_usage = energy_usage.amount * 60.0 * (1.0 + effects.consumption);
