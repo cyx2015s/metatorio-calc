@@ -1,7 +1,7 @@
 use std::collections::{HashSet, VecDeque};
 
 use crate::factorio::{
-    DataContext, Dict, Modifier, RecipeResult, TechnologyPrototype, ProjectContext,
+    DataContext, Dict, Modifier, ProjectContext, RecipeResult, TechnologyPrototype,
 };
 
 // milestone 格式: (technology name, is unlocked)，true表示解锁，false表示未解锁（就算是true，如果因为其他科技的false 导致无法解锁，也会被视为未解锁）
@@ -145,21 +145,19 @@ pub fn update_accessibles(user: &mut ProjectContext, data: &DataContext) {
                 .accessible_prototypes
                 .get("item")
                 .is_some_and(|items| items.contains_key(item_name))
-            {
-                user.accessible_prototypes
-                    .entry("entity".to_string())
-                    .or_default()
-                    .insert(place_result.clone(), true);
-            }
+        {
+            user.accessible_prototypes
+                .entry("entity".to_string())
+                .or_default()
+                .insert(place_result.clone(), true);
+        }
     }
     for i in 1..data.qualities.len() {
         let quality = &data.qualities[i];
         if user
             .accessible_prototypes
             .get("quality")
-            .is_none_or(|qualities| {
-                qualities.get(&quality.base.name).cloned().unwrap_or(false)
-            })
+            .is_none_or(|qualities| qualities.get(&quality.base.name).cloned().unwrap_or(false))
         {
             user.max_quality_level = i as u8;
         } else {

@@ -103,7 +103,7 @@ pub trait AsFlow: SolveContext<Game = DataContext, Item = GenericItem> {
         factory: &FactoryContext,
     ) -> Flow<Self::Item>;
     /// 执行成本，默认返回 1.0
-    fn cost(&self, data: &DataContext, proj: &ProjectContext, factory: &FactoryContext) -> f64 {
+    fn cost(&self, _data: &DataContext, _proj: &ProjectContext, _factory: &FactoryContext) -> f64 {
         1.0
     }
 }

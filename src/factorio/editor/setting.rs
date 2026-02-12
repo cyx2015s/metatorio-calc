@@ -1,3 +1,5 @@
+use std::collections::{HashSet, VecDeque};
+
 use egui::DragValue;
 
 use crate::factorio::{
@@ -53,66 +55,95 @@ impl egui::Widget for UserContextEditor<'_> {
             self.proj.tech_milestones.push((tech_name, true));
             recalc_accessible = true;
         }
-        let mut delete_target = None;
-        for idx in 0..self.proj.tech_milestones.len() {
-            let (tech_name, unlocked) = &self.proj.tech_milestones[idx];
-
+        let mut recursively_unlock = None;
+        self.proj.tech_milestones.retain_mut(|(name, unlocked)| {
             let mut selected_tech: Option<String> = None;
-            let mut new_unlocked = *unlocked;
+
+            let mut deleted = false;
             ui.horizontal(|ui| {
                 let icon = ui
-                    .add(Icon::new(self.data, "technology", tech_name))
+                    .add(Icon::new(self.data, "technology", name))
                     .interact(egui::Sense::click());
-                ui.label(self.data.get_display_name("technology", tech_name));
+                ui.label(self.data.get_display_name("technology", name));
                 ui.add(
                     SelectorModal::new(icon.id, self.data, "选择科技").with_selector(
                         Selector::new(self.data, "technology").with_output(&mut selected_tech),
                     ),
                 );
-                if ui.checkbox(&mut new_unlocked, "解锁").changed() {
+                if ui.checkbox(unlocked, "解锁").changed() {
+                    if *unlocked {
+                        // 切换为解锁时，遍历前置科技并解锁
+                        recursively_unlock = Some(name.clone());
+                    }
                     recalc_accessible = true;
                 }
                 if ui.button("删除").clicked() {
                     recalc_accessible = true;
-                    delete_target = Some(idx);
+                    deleted = true;
                 }
             });
             if let Some(new_tech_name) = selected_tech {
-                self.proj.tech_milestones[idx].0 = new_tech_name;
+                *name = new_tech_name;
                 recalc_accessible = true;
             }
-            self.proj.tech_milestones[idx].1 = new_unlocked;
-        }
-        if let Some(idx) = delete_target {
-            recalc_accessible = true;
-            self.proj.tech_milestones.remove(idx);
+            !deleted
+        });
+        if let Some(unlocked_tech) = recursively_unlock {
+            let mut queue = VecDeque::new();
+            let mut visited = HashSet::new();
+            queue.push_back(unlocked_tech);
+            while let Some(tech_name) = queue.pop_front() {
+                if visited.contains(&tech_name) {
+                    continue;
+                }
+                visited.insert(tech_name.clone());
+                if let Some(tech) = self.data.technologies.get(&tech_name) {
+                    for prereq in &tech.prerequisites {
+                        if let Some((_, unlocked)) = self
+                            .proj
+                            .tech_milestones
+                            .iter_mut()
+                            .find(|(name, _)| name == prereq)
+                        {
+                            if !*unlocked {
+                                *unlocked = true;
+                            }
+                        }
+
+                        queue.push_back(prereq.clone());
+                    }
+                }
+            }
         }
         if recalc_accessible {
-            update_accessibles(self.proj, &self.data);
+            update_accessibles(self.proj, self.data);
+            for (tech, unlocked) in self.proj.tech_milestones.iter_mut() {
+                *unlocked = self.proj.accessible_technologies.contains(tech);
+            }
         }
 
         let button = ui.button("查看解锁的配方");
         ui.add(
             SelectorModal::new(button.id, self.data, "已解锁的配方")
                 .with_toggle(button.clicked())
-                .with_selector(Selector::new(self.data, "recipe").with_filter(
-                    |s: &str, f: &DataContext| {
+                .with_selector(
+                    Selector::new(self.data, "recipe").with_filter(|s: &str, f| {
                         !self.proj.accessible_prototypes.contains_key("recipe")
-                            || self.data.recipes[s].enabled
+                            || f.recipes[s].enabled
                             || self.proj.accessible_prototypes["recipe"].contains_key(s)
-                    },
-                )),
+                    }),
+                ),
         );
         let button = ui.button("查看解锁的实体");
         ui.add(
             SelectorModal::new(button.id, self.data, "已解锁的实体")
                 .with_toggle(button.clicked())
-                .with_selector(Selector::new(self.data, "entity").with_filter(
-                    |s: &str, f: &DataContext| {
+                .with_selector(
+                    Selector::new(self.data, "entity").with_filter(|s: &str, _| {
                         !self.proj.accessible_prototypes.contains_key("entity")
                             || self.proj.accessible_prototypes["entity"].contains_key(s)
-                    },
-                )),
+                    }),
+                ),
         );
         ui.separator();
         ui.heading("采矿产能");
@@ -125,18 +156,14 @@ impl egui::Widget for UserContextEditor<'_> {
         self.proj.mining_productivity = mining_productivity.floor() / 100.0;
         ui.heading("配方产能");
 
-        for idx in 0..self.proj.recipe_productivity.len() {
-            let (recipe_name, productivity) =
-                self.proj.recipe_productivity.iter().nth(idx).unwrap();
+        for (recipe_name, productivity) in self.proj.recipe_productivity.iter_mut() {
             let mut value = *productivity * 100.0;
             ui.horizontal(|ui| {
                 ui.add(Icon::new(self.data, "recipe", recipe_name));
                 ui.label(self.data.get_display_name("recipe", recipe_name));
                 ui.add(DragValue::new(&mut value).suffix("%").speed(1.0));
             });
-            self.proj
-                .recipe_productivity
-                .insert(recipe_name.clone(), (value / 100.0).max(0.0));
+            *productivity = value.floor() / 100.0;
         }
         response
     }

@@ -114,7 +114,7 @@ impl AsFlow for MiningMechanicInstance {
         &self,
         data: &DataContext,
         proj: &ProjectContext,
-        factory: &FactoryContext,
+        _factory: &FactoryContext,
     ) -> Flow<Self::Item> {
         let mut map = Flow::new();
 
@@ -279,7 +279,7 @@ impl AsFlow for MiningMechanicInstance {
         map
     }
 
-    fn cost(&self, data: &DataContext, proj: &ProjectContext, factory: &FactoryContext) -> f64 {
+    fn cost(&self, data: &DataContext, _proj: &ProjectContext, _factory: &FactoryContext) -> f64 {
         if let Some(miner) = data.miners.get(&self.machine.0) {
             miner
                 .base
@@ -333,7 +333,7 @@ pub struct MiningMechanic {
 pub fn select_miner_for_resource(
     data: &DataContext,
     proj: &ProjectContext,
-    factory: &FactoryContext,
+    _factory: &FactoryContext,
     resource: &ResourcePrototype,
     preferences: &[IdWithQuality],
 ) -> IdWithQuality {
@@ -399,9 +399,9 @@ impl FactorioMechanic for MiningMechanic {
     fn editor_view(
         &mut self,
         ui: &mut egui::Ui,
-        data: &DataContext,
-        proj: &ProjectContext,
-        factory: &FactoryContext,
+        _data: &DataContext,
+        _proj: &ProjectContext,
+        _factory: &FactoryContext,
     ) -> bool {
         let mut changed = false;
         if ui.button("添加采矿").clicked() {
@@ -534,8 +534,8 @@ impl FactorioMechanic for MiningMechanic {
     fn update_suggestion(
         &mut self,
         data: &DataContext,
-        proj: &ProjectContext,
-        factory: &FactoryContext,
+        _proj: &ProjectContext,
+        _factory: &FactoryContext,
         item: &GenericItem,
         amount: f64,
     ) {

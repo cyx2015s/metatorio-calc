@@ -441,9 +441,7 @@ pub fn beacon_config_ui(
                 .interact(egui::Sense::click());
             let selector = Selector::new(data, "entity")
                 .with_current(&mut beacon_config.beacon)
-                .with_filter(|s: &IdWithQuality, f: &DataContext| {
-                    f.beacons.contains_key(&s.0)
-                });
+                .with_filter(|s: &IdWithQuality, f: &DataContext| f.beacons.contains_key(&s.0));
             let widget = SelectorModal::new(icon.id, data, "选择插件塔")
                 .with_toggle(icon.clicked())
                 .with_selector(selector);
@@ -474,9 +472,8 @@ pub fn beacon_config_ui(
                         deleted = true;
                         response.mark_changed();
                     }
-                    let selector = Selector::new(data, "item")
-                        .with_current(id)
-                        .with_filter(|s: &IdWithQuality, f: &DataContext| {
+                    let selector = Selector::new(data, "item").with_current(id).with_filter(
+                        |s: &IdWithQuality, f: &DataContext| {
                             if let Some(module_proto) = f.modules.get(&s.0) {
                                 // 过滤掉不符合要求的插件
                                 beacon_proto.allowed_module_categories.as_ref().is_none_or(
@@ -490,7 +487,8 @@ pub fn beacon_config_ui(
                             } else {
                                 false
                             }
-                        });
+                        },
+                    );
                     let widget = SelectorModal::new(icon.id, data, "选择插件")
                         .with_toggle(icon.clicked())
                         .with_selector(selector);

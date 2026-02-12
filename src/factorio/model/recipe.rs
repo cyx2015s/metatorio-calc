@@ -452,7 +452,7 @@ impl AsFlow for RecipeMechanicInstance {
         &self,
         data: &DataContext,
         proj: &ProjectContext,
-        factory: &FactoryContext,
+        _factory: &FactoryContext,
     ) -> Flow<Self::Item> {
         let mut map = Flow::new();
 
@@ -589,7 +589,7 @@ impl AsFlow for RecipeMechanicInstance {
         map
     }
 
-    fn cost(&self, data: &DataContext, proj: &ProjectContext, factory: &FactoryContext) -> f64 {
+    fn cost(&self, data: &DataContext, _proj: &ProjectContext, _factory: &FactoryContext) -> f64 {
         if let Some(crafter) = data.crafters.get(&self.machine.0) {
             crafter
                 .base
@@ -657,7 +657,7 @@ pub struct RecipeMechanic {
 pub fn select_crafter_for_recipe(
     data: &DataContext,
     proj: &ProjectContext,
-    factory: &FactoryContext,
+    _factory: &FactoryContext,
     recipe: &RecipePrototype,
     preferences: &[IdWithQuality],
     excluding: &[IdWithQuality],
@@ -715,8 +715,8 @@ impl FactorioMechanic for RecipeMechanic {
         &mut self,
         ui: &mut egui::Ui,
         data: &DataContext,
-        proj: &ProjectContext,
-        factory: &FactoryContext,
+        _proj: &ProjectContext,
+        _factory: &FactoryContext,
     ) -> bool {
         let mut changed = false;
         if ui.button("添加配方").clicked() {
@@ -996,8 +996,8 @@ impl FactorioMechanic for RecipeMechanic {
     fn update_suggestion(
         &mut self,
         data: &DataContext,
-        proj: &ProjectContext,
-        factory: &FactoryContext,
+        _proj: &ProjectContext,
+        _factory: &FactoryContext,
         item: &GenericItem,
         amount: f64,
     ) {
