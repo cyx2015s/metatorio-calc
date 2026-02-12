@@ -3,10 +3,7 @@ use std::{
     fmt::{Debug, Display},
     hash::Hash,
     ops::{Add, Mul},
-    sync::{
-        Arc,
-        mpsc::{Receiver, Sender},
-    },
+    sync::mpsc::{Receiver, Sender},
 };
 
 use indexmap::IndexMap;
@@ -815,13 +812,4 @@ pub fn sort_generic_items_owned(keys: &mut [GenericItem], data: &DataContext) {
         let b_key = get_generic_item_sort_key(b, data);
         a_key.cmp(&b_key)
     });
-}
-
-#[test]
-fn test_arc_field() {
-    struct A {
-        b: i32,
-    }
-    let data = Arc::new(A { b: 42 });
-    println!("{}", data.b);
 }

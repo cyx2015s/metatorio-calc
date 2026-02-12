@@ -24,16 +24,6 @@ use crate::{
 };
 
 use indexmap::IndexMap;
-use serde::{Deserialize, Serialize};
-
-// lazy_static::lazy_static! {
-//     static ref MECHANIC_REGISTRY: DynDeserializeRegistry<dyn FactorioMechanic> = {
-//         let mut registry = DynDeserializeRegistry::default();
-//         RecipeMechanic::register(&mut registry);
-//         MiningMechanic::register(&mut registry);
-//         registry
-//     };
-// }
 
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct FactoryContext {}
@@ -55,68 +45,6 @@ pub struct FactoryInstance {
     pub total_flow: Flow<GenericItem>,
     pub total_flow_sorted_keys: Vec<GenericItem>,
 }
-
-// impl serde::Serialize for FactoryInstance {
-//     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-//     where
-//         S: serde::Serializer,
-//     {
-//         let mut state = serializer.serialize_struct("FactoryInstance", 6)?;
-//         serde::ser::SerializeStruct::serialize_field(&mut state, "name", &self.name)?;
-//         serde::ser::SerializeStruct::serialize_field(&mut state, "target", &self.target)?;
-//         serde::ser::SerializeStruct::serialize_field(&mut state, "external", &self.external)?;
-//         serde::ser::SerializeStruct::serialize_field(&mut state, "mechanics", &self.mechanics)?;
-//         serde::ser::SerializeStruct::serialize_field(&mut state, "instances", &self.instances)?;
-//         serde::ser::SerializeStruct::serialize_field(
-//             &mut state,
-//             "strict_source",
-//             &self.strict_source,
-//         )?;
-//         serde::ser::SerializeStruct::end(state)
-//     }
-// }
-
-// impl<'de> serde::Deserialize<'de> for FactoryInstance {
-//     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-//     where
-//         D: serde::Deserializer<'de>,
-//     {
-//         let mut factory_instance = FactoryInstance::default();
-//         let value = serde_json::Value::deserialize(deserializer)?;
-//         factory_instance.name = serde_json::from_value(value["name"].clone()).unwrap_or_default();
-//         factory_instance.target =
-//             serde_json::from_value(value["target"].clone()).unwrap_or_default();
-//         factory_instance.external =
-//             serde_json::from_value(value["external"].clone()).unwrap_or_default();
-//         factory_instance.strict_source =
-//             serde_json::from_value(value["strict_source"].clone()).unwrap_or_default();
-//         factory_instance.instances =
-//             serde_json::from_value(value["instances"].clone()).unwrap_or_default();
-//         let mut not_deserialized_mechanics = MECHANIC_REGISTRY
-//             .registered_types()
-//             .into_iter()
-//             .collect::<HashSet<_>>();
-//         // dbg!(&not_deserialized_mechanics);
-//         for mechanic in value["mechanics"].as_array().unwrap_or(&vec![]) {
-//             if mechanic["type"]
-//                 .as_str()
-//                 .is_some_and(|t| not_deserialized_mechanics.contains(t))
-//             {
-//                 let mech = MECHANIC_REGISTRY.deserialize(mechanic.clone()).unwrap();
-//                 factory_instance.mechanics.push(mech);
-//                 not_deserialized_mechanics.remove(mechanic["type"].as_str().unwrap());
-//                 // dbg!(&not_deserialized_mechanics);
-//             }
-//         }
-//         for not_deserialized_mechanic in not_deserialized_mechanics {
-//             let mech = MECHANIC_REGISTRY
-//                 .create_default(not_deserialized_mechanic)
-//                 .unwrap();
-//             factory_instance.mechanics.push(mech);
-//         }
-//         Ok(factory_instance)
-//     }
-// }
 
 impl Clone for FactoryInstance {
     fn clone(&self) -> Self {
