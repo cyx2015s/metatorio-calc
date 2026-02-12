@@ -207,6 +207,9 @@ pub struct ModuleConfigEditor<'a> {
     pub allowed_module_categories: &'a Option<Vec<String>>,
 
     pub data: &'a DataContext,
+    pub edit_modules: bool,
+    pub edit_beacons: bool,
+    pub show_summary: bool,
 }
 
 impl<'a> ModuleConfigEditor<'a> {
@@ -223,7 +226,25 @@ impl<'a> ModuleConfigEditor<'a> {
             allowed_effects,
             allowed_module_categories,
             data,
+            edit_modules: true,
+            edit_beacons: true,
+            show_summary: true,
         }
+    }
+
+    pub fn with_edit_modules(mut self, edit: bool) -> Self {
+        self.edit_modules = edit;
+        self
+    }
+
+    pub fn with_edit_beacons(mut self, edit: bool) -> Self {
+        self.edit_beacons = edit;
+        self
+    }
+
+    pub fn with_show_summary(mut self, show: bool) -> Self {
+        self.show_summary = show;
+        self
     }
 }
 
@@ -260,7 +281,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                 ui.button("编辑")
             })
             .inner;
-        if self.module_slots == 0 {
+        if self.module_slots == 0 && self.edit_modules {
             if !self.module_config.modules.is_empty() || !self.module_config.beacons.is_empty() {
                 response.mark_changed();
             }
@@ -272,6 +293,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
             self.module_config.modules.truncate(self.module_slots);
             response.mark_changed();
         }
+
         ui.horizontal_top(|ui| {
             // 获取所有插件和信标的综合
             let mut total = IndexMap::new();
@@ -299,105 +321,118 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                     beacon_config.count,
                 );
             }
-            for (item, count) in total {
-                ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing = [3.0, 3.0].into();
-                    ui.add_sized([32.0, 32.0], GenericIcon::new(self.data, &item));
-                    ui.add_sized([35.0, 15.0], AmountLabel::new(count as f64));
-                });
+            if self.show_summary {
+                for (item, count) in total {
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing = [3.0, 3.0].into();
+                        ui.add_sized([32.0, 32.0], GenericIcon::new(self.data, &item));
+                        ui.add_sized([35.0, 15.0], AmountLabel::new(count as f64));
+                    });
+                }
             }
         });
         show_modal(button.id, button.clicked(), ui, |ui| {
             ui.label("编辑插件");
+
             let len = self.module_config.modules.len();
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
-                    self.module_config.modules.retain_mut(|slot| {
-                        let mut deleted = false;
-                        let icon = ui
-                            .add_sized(
-                                [35.0, 35.0],
-                                Icon::new(self.data, "item", &slot.0).with_quality(slot.1),
-                            )
-                            .interact(egui::Sense::click());
+                    if self.edit_modules {
+                        self.module_config.modules.retain_mut(|slot| {
+                            let mut deleted = false;
+                            let icon = ui
+                                .add_sized(
+                                    [35.0, 35.0],
+                                    Icon::new(self.data, "item", &slot.0).with_quality(slot.1),
+                                )
+                                .interact(egui::Sense::click());
 
-                        if icon.clicked_by(egui::PointerButton::Secondary) {
-                            deleted = true;
-                            response.mark_changed();
-                        }
-                        let selector = Selector::new(self.data, "item")
-                            .with_current(slot)
-                            .with_filter(|s: &IdWithQuality, f: &DataContext| {
-                                if let Some(module_proto) = f.modules.get(&s.0) {
-                                    // 过滤掉不符合要求的插件
-                                    self.allowed_module_categories.as_ref().is_none_or(
-                                        |allowed_categories| {
-                                            allowed_categories.contains(&module_proto.category)
-                                        },
-                                    ) && module_effects_allowed(module_proto, self.allowed_effects)
-                                } else {
-                                    false
+                            if icon.clicked_by(egui::PointerButton::Secondary) {
+                                deleted = true;
+                                response.mark_changed();
+                            }
+                            let selector = Selector::new(self.data, "item")
+                                .with_current(slot)
+                                .with_filter(|s: &IdWithQuality, f: &DataContext| {
+                                    if let Some(module_proto) = f.modules.get(&s.0) {
+                                        // 过滤掉不符合要求的插件
+                                        self.allowed_module_categories.as_ref().is_none_or(
+                                            |allowed_categories| {
+                                                allowed_categories.contains(&module_proto.category)
+                                            },
+                                        ) && module_effects_allowed(
+                                            module_proto,
+                                            self.allowed_effects,
+                                        )
+                                    } else {
+                                        false
+                                    }
+                                });
+
+                            let widget = SelectorModal::new(icon.id, self.data, "选择插件")
+                                .with_toggle(icon.clicked())
+                                .with_selector(selector);
+                            if ui.add(widget).changed() {
+                                response.mark_changed();
+                            }
+                            !deleted
+                        });
+
+                        for idx in len..self.module_slots {
+                            let icon = ui
+                                .add_sized(
+                                    [35.0, 35.0],
+                                    Icon::new(self.data, "item", "empty-module-slot"),
+                                )
+                                .interact(egui::Sense::click());
+                            let mut selected: Option<IdWithQuality> = None;
+                            let selector = Selector::new(self.data, "item")
+                                .with_output(&mut selected)
+                                .with_filter(|s: &IdWithQuality, f: &DataContext| {
+                                    if let Some(module_proto) = f.modules.get(&s.0) {
+                                        // 过滤掉不符合要求的插件
+                                        self.allowed_module_categories.as_ref().is_none_or(
+                                            |allowed_categories| {
+                                                allowed_categories.contains(&module_proto.category)
+                                            },
+                                        ) && module_effects_allowed(
+                                            module_proto,
+                                            self.allowed_effects,
+                                        )
+                                    } else {
+                                        false
+                                    }
+                                });
+
+                            let widget = SelectorModal::new(icon.id, self.data, "填充插件")
+                                .with_toggle(icon.clicked())
+                                .with_selector(selector);
+
+                            if ui.add(widget).changed() {
+                                response.mark_changed();
+                            }
+
+                            if let Some(selected) = selected {
+                                response.mark_changed();
+                                while self.module_config.modules.len() <= idx {
+                                    self.module_config.modules.push(selected.clone());
                                 }
-                            });
-
-                        let widget = SelectorModal::new(icon.id, self.data, "选择插件")
-                            .with_toggle(icon.clicked())
-                            .with_selector(selector);
-                        if ui.add(widget).changed() {
-                            response.mark_changed();
-                        }
-                        !deleted
-                    });
-
-                    for idx in len..self.module_slots {
-                        let icon = ui
-                            .add_sized(
-                                [35.0, 35.0],
-                                Icon::new(self.data, "item", "empty-module-slot"),
-                            )
-                            .interact(egui::Sense::click());
-                        let mut selected: Option<IdWithQuality> = None;
-                        let selector = Selector::new(self.data, "item")
-                            .with_output(&mut selected)
-                            .with_filter(|s: &IdWithQuality, f: &DataContext| {
-                                if let Some(module_proto) = f.modules.get(&s.0) {
-                                    // 过滤掉不符合要求的插件
-                                    self.allowed_module_categories.as_ref().is_none_or(
-                                        |allowed_categories| {
-                                            allowed_categories.contains(&module_proto.category)
-                                        },
-                                    ) && module_effects_allowed(module_proto, self.allowed_effects)
-                                } else {
-                                    false
-                                }
-                            });
-
-                        let widget = SelectorModal::new(icon.id, self.data, "填充插件")
-                            .with_toggle(icon.clicked())
-                            .with_selector(selector);
-
-                        if ui.add(widget).changed() {
-                            response.mark_changed();
-                        }
-
-                        if let Some(selected) = selected {
-                            response.mark_changed();
-                            while self.module_config.modules.len() <= idx {
-                                self.module_config.modules.push(selected.clone());
                             }
                         }
                     }
                 });
                 ui.separator();
-                ui.label("插件塔");
-                self.module_config.beacons.retain_mut(|beacon_config| {
-                    let mut deleted = false;
-                    let factorio = self.data;
-                    beacon_config_ui(ui, factorio, beacon_config, &mut response, &mut deleted);
-                    !deleted
-                });
-                if ui.button("添加插件塔").clicked() {
-                    self.module_config.beacons.push(BeaconConfig::default());
+                if self.edit_beacons {
+                    ui.label("插件塔");
+                    self.module_config.beacons.retain_mut(|beacon_config| {
+                        let mut deleted = false;
+                        let factorio = self.data;
+                        beacon_config_ui(ui, factorio, beacon_config, &mut response, &mut deleted);
+                        !deleted
+                    });
+                    if ui.button("添加插件塔").clicked() {
+                        self.module_config.beacons.push(BeaconConfig::default());
+                    }
                 }
             });
         });

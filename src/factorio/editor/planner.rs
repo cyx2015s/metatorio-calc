@@ -38,9 +38,11 @@ pub struct FactoryInstance {
     pub instances: Vec<(usize, usize)>,
 
     pub strict_source: bool,
-
+    #[serde(skip)]
     pub solution: (Flow<(usize, usize)>, f64),
+    #[serde(skip)]
     pub total_flow: Flow<GenericItem>,
+    #[serde(skip)]
     pub total_flow_sorted_keys: Vec<GenericItem>,
 }
 

@@ -845,6 +845,10 @@ impl FactorioMechanic for RecipeMechanic {
             }
             ui.separator();
         });
+        ui.collapsing("[自动/手动]插件塔", |ui| {
+            ui.label("添加新建筑时，会选取第一个满足条件的插件塔配置。");
+            
+        });
 
         changed
     }
