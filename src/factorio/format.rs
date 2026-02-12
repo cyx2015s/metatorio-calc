@@ -145,6 +145,7 @@ where
     egui::DragValue::new(val)
         .custom_parser(parse_number)
         .custom_formatter(|n, _| compact_number(n))
+        .update_while_editing(false)
 }
 
 pub fn drag_watt<T>(val: &mut T) -> egui::DragValue<'_>
@@ -155,6 +156,7 @@ where
         .suffix("W")
         .custom_parser(|s| parse_energy(s).map(|x| x * 60.0))
         .custom_formatter(|n, _| compact_number(n))
+        .update_while_editing(false)
 }
 
 #[test]

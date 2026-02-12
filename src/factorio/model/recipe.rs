@@ -636,6 +636,8 @@ pub struct RecipeMechanic {
 
     pub enumerate_modules: Vec<IdWithQuality>,
 
+    pub enumerate_beacons: Vec<ModuleConfig>,
+
     #[serde(skip)]
     pub new_enumerate_module: Option<IdWithQuality>,
 
@@ -1195,6 +1197,7 @@ impl EditorView for RecipeMechanic {
             if let Some(module) = delele_module {
                 self.enumerate_modules.retain(|m| m != &module);
             }
+            ui.separator();
         });
 
         changed

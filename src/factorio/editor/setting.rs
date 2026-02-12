@@ -27,7 +27,6 @@ impl egui::Widget for UserContextEditor<'_> {
                 TimeScale::Hours => "小时",
                 TimeScale::Minutes => "分钟",
                 TimeScale::Seconds => "秒",
-                _ => "未知",
             })
             .show_ui(ui, |ui| {
                 ui.selectable_value(&mut self.game.user.time_scale, TimeScale::Hours, "小时");
@@ -61,7 +60,7 @@ impl egui::Widget for UserContextEditor<'_> {
             let mut new_unlocked = *unlocked;
             ui.horizontal(|ui| {
                 let icon = ui
-                    .add(Icon::new(self.game, "technology", &tech_name))
+                    .add(Icon::new(self.game, "technology", tech_name))
                     .interact(egui::Sense::click());
                 ui.label(self.game.data.get_display_name("technology", tech_name));
                 ui.add(
@@ -127,18 +126,20 @@ impl egui::Widget for UserContextEditor<'_> {
         self.game.user.mining_productivity = mining_productivity.floor() / 100.0;
         ui.heading("配方产能");
 
-        self.game
-            .user
-            .recipe_productivity
-            .iter_mut()
-            .for_each(|(recipe_name, productivity)| {
-                ui.horizontal(|ui| {
-                    ui.label(self.game.data.get_display_name("recipe", recipe_name));
-                    let mut value = *productivity * 100.0;
-                    ui.add(DragValue::new(&mut value).suffix("%").speed(1.0));
-                    *productivity = value.floor() / 100.0;
-                });
+        for idx in 0..self.game.user.recipe_productivity.len() {
+            let (recipe_name, productivity) =
+                self.game.user.recipe_productivity.iter().nth(idx).unwrap();
+            let mut value = *productivity * 100.0;
+            ui.horizontal(|ui| {
+                ui.add(Icon::new(self.game, "recipe", recipe_name));
+                ui.label(self.game.data.get_display_name("recipe", recipe_name));
+                ui.add(DragValue::new(&mut value).suffix("%").speed(1.0));
             });
+            self.game
+                .user
+                .recipe_productivity
+                .insert(recipe_name.clone(), (value / 100.0).max(0.0));
+        }
         response
     }
 }

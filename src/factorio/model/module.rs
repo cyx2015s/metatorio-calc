@@ -251,7 +251,7 @@ pub fn module_effects_allowed(
 impl egui::Widget for ModuleConfigEditor<'_> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         let mut response = ui.response().clone();
-        let data = &self.factorio.data;
+        let _data = &self.factorio.data;
         let button = ui
             .vertical(|ui| {
                 ui.label("插件");
@@ -393,132 +393,8 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                 ui.label("插件塔");
                 self.module_config.beacons.retain_mut(|beacon_config| {
                     let mut deleted = false;
-                    ui.horizontal(|ui| {
-                        ui.vertical(|ui| {
-                            if ui.button("删除").clicked() {
-                                deleted = true;
-                                response.mark_changed();
-                            }
-                            let widget = drag_value(&mut beacon_config.count)
-                                .range(1..=100)
-                                .clamp_existing_to_range(true);
-                            if ui.add(widget).changed() {
-                                response.mark_changed();
-                            }
-                        });
-                        ui.separator();
-                        ui.vertical(|ui| {
-                            let icon = ui
-                                .add_sized(
-                                    [35.0, 35.0],
-                                    Icon::new(self.factorio, "entity", &beacon_config.beacon.0)
-                                        .with_quality(beacon_config.beacon.1),
-                                )
-                                .on_hover_text(
-                                    if data.beacons.contains_key(&beacon_config.beacon.0) {
-                                        data.get_display_name("entity", &beacon_config.beacon.0)
-                                    } else {
-                                        "未选择插件塔".to_string()
-                                    },
-                                )
-                                .interact(egui::Sense::click());
-                            let selector = Selector::new(self.factorio, "entity")
-                                .with_current(&mut beacon_config.beacon)
-                                .with_filter(|s: &IdWithQuality, f: &FactorioContext| {
-                                    f.data.beacons.contains_key(&s.0)
-                                });
-                            let widget = SelectorModal::new(icon.id, self.factorio, "选择插件塔")
-                                .with_toggle(icon.clicked())
-                                .with_selector(selector);
-
-                            if ui.add(widget).changed() {
-                                response.mark_changed();
-                            }
-                        });
-                        ui.separator();
-                        if let Some(beacon_proto) = data.beacons.get(&beacon_config.beacon.0) {
-                            let mut total_modules = 0;
-                            beacon_config.modules.retain_mut(|(id, amount)| {
-                                let mut deleted = false;
-
-                                ui.vertical(|ui| {
-                                    let icon = ui
-                                        .add_sized(
-                                            [35.0, 35.0],
-                                            Icon::new(self.factorio, "item", &id.0)
-                                                .with_quality(id.1),
-                                        )
-                                        .on_hover_text(if data.modules.contains_key(&id.0) {
-                                            data.get_display_name("item", &id.0)
-                                        } else {
-                                            "未选择插件".to_string()
-                                        })
-                                        .interact(egui::Sense::click());
-                                    if icon.clicked_by(egui::PointerButton::Secondary) {
-                                        deleted = true;
-                                        response.mark_changed();
-                                    }
-                                    let selector = Selector::new(self.factorio, "item")
-                                        .with_current(id)
-                                        .with_filter(|s: &IdWithQuality, f: &FactorioContext| {
-                                            if let Some(module_proto) = f.data.modules.get(&s.0) {
-                                                // 过滤掉不符合要求的插件
-                                                beacon_proto
-                                                    .allowed_module_categories
-                                                    .as_ref()
-                                                    .is_none_or(|allowed_categories| {
-                                                        allowed_categories
-                                                            .contains(&module_proto.category)
-                                                    })
-                                                    && module_effects_allowed(
-                                                        module_proto,
-                                                        &beacon_proto.allowed_effects,
-                                                    )
-                                            } else {
-                                                false
-                                            }
-                                        });
-                                    let widget =
-                                        SelectorModal::new(icon.id, self.factorio, "选择插件")
-                                            .with_toggle(icon.clicked())
-                                            .with_selector(selector);
-                                    if ui.add(widget).changed() {
-                                        response.mark_changed();
-                                    }
-                                    let beacon_module_count = beacon_proto.module_slots as usize
-                                        + if beacon_proto.quality_affects_module_slots {
-                                            let quality_bonus = data.qualities
-                                                [beacon_config.beacon.1 as usize]
-                                                .beacon_module_slots_bonus();
-                                            quality_bonus as usize
-                                        } else {
-                                            0
-                                        };
-                                    let amount_widget = ui.add_sized(
-                                        [35.0, 15.0],
-                                        drag_value(amount)
-                                            .range(
-                                                0..=(beacon_module_count * beacon_config.count
-                                                    - total_modules),
-                                            )
-                                            .clamp_existing_to_range(true)
-                                            .speed(1),
-                                    );
-                                    if amount_widget.changed() {
-                                        response.mark_changed();
-                                    }
-
-                                    total_modules += *amount;
-                                });
-                                !deleted
-                            });
-                            if ui.button("添加插件").clicked() {
-                                beacon_config
-                                    .modules
-                                    .push((IdWithQuality("empty-module-slot".to_string(), 0), 0));
-                            }
-                        }
-                    });
+                    let factorio = self.factorio;
+                    beacon_config_ui(ui, factorio, beacon_config, &mut response, &mut deleted);
                     !deleted
                 });
                 if ui.button("添加插件塔").clicked() {
@@ -528,4 +404,129 @@ impl egui::Widget for ModuleConfigEditor<'_> {
         });
         response
     }
+}
+
+pub fn beacon_config_ui(
+    ui: &mut egui::Ui,
+    factorio: &FactorioContext,
+    beacon_config: &mut BeaconConfig,
+    response: &mut egui::Response,
+    deleted: &mut bool,
+) {
+    let data = &factorio.data;
+    ui.horizontal(|ui| {
+        ui.vertical(|ui| {
+            if ui.button("删除").clicked() {
+                *deleted = true;
+                response.mark_changed();
+            }
+            let widget = drag_value(&mut beacon_config.count)
+                .range(1..=100)
+                .clamp_existing_to_range(true);
+            if ui.add(widget).changed() {
+                response.mark_changed();
+            }
+        });
+        ui.separator();
+        ui.vertical(|ui| {
+            let icon = ui
+                .add_sized(
+                    [35.0, 35.0],
+                    Icon::new(factorio, "entity", &beacon_config.beacon.0)
+                        .with_quality(beacon_config.beacon.1),
+                )
+                .on_hover_text(if data.beacons.contains_key(&beacon_config.beacon.0) {
+                    data.get_display_name("entity", &beacon_config.beacon.0)
+                } else {
+                    "未选择插件塔".to_string()
+                })
+                .interact(egui::Sense::click());
+            let selector = Selector::new(factorio, "entity")
+                .with_current(&mut beacon_config.beacon)
+                .with_filter(|s: &IdWithQuality, f: &FactorioContext| {
+                    f.data.beacons.contains_key(&s.0)
+                });
+            let widget = SelectorModal::new(icon.id, factorio, "选择插件塔")
+                .with_toggle(icon.clicked())
+                .with_selector(selector);
+
+            if ui.add(widget).changed() {
+                response.mark_changed();
+            }
+        });
+        ui.separator();
+        if let Some(beacon_proto) = data.beacons.get(&beacon_config.beacon.0) {
+            let mut total_modules = 0;
+            beacon_config.modules.retain_mut(|(id, amount)| {
+                let mut deleted = false;
+
+                ui.vertical(|ui| {
+                    let icon = ui
+                        .add_sized(
+                            [35.0, 35.0],
+                            Icon::new(factorio, "item", &id.0).with_quality(id.1),
+                        )
+                        .on_hover_text(if data.modules.contains_key(&id.0) {
+                            data.get_display_name("item", &id.0)
+                        } else {
+                            "未选择插件".to_string()
+                        })
+                        .interact(egui::Sense::click());
+                    if icon.clicked_by(egui::PointerButton::Secondary) {
+                        deleted = true;
+                        response.mark_changed();
+                    }
+                    let selector = Selector::new(factorio, "item")
+                        .with_current(id)
+                        .with_filter(|s: &IdWithQuality, f: &FactorioContext| {
+                            if let Some(module_proto) = f.data.modules.get(&s.0) {
+                                // 过滤掉不符合要求的插件
+                                beacon_proto.allowed_module_categories.as_ref().is_none_or(
+                                    |allowed_categories| {
+                                        allowed_categories.contains(&module_proto.category)
+                                    },
+                                ) && module_effects_allowed(
+                                    module_proto,
+                                    &beacon_proto.allowed_effects,
+                                )
+                            } else {
+                                false
+                            }
+                        });
+                    let widget = SelectorModal::new(icon.id, factorio, "选择插件")
+                        .with_toggle(icon.clicked())
+                        .with_selector(selector);
+                    if ui.add(widget).changed() {
+                        response.mark_changed();
+                    }
+                    let beacon_module_count = beacon_proto.module_slots as usize
+                        + if beacon_proto.quality_affects_module_slots {
+                            let quality_bonus = data.qualities[beacon_config.beacon.1 as usize]
+                                .beacon_module_slots_bonus();
+                            quality_bonus as usize
+                        } else {
+                            0
+                        };
+                    let amount_widget = ui.add_sized(
+                        [35.0, 15.0],
+                        drag_value(amount)
+                            .range(0..=(beacon_module_count * beacon_config.count - total_modules))
+                            .clamp_existing_to_range(true)
+                            .speed(1),
+                    );
+                    if amount_widget.changed() {
+                        response.mark_changed();
+                    }
+
+                    total_modules += *amount;
+                });
+                !deleted
+            });
+            if ui.button("添加插件").clicked() {
+                beacon_config
+                    .modules
+                    .push((IdWithQuality("empty-module-slot".to_string(), 0), 0));
+            }
+        }
+    });
 }

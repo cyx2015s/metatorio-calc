@@ -855,7 +855,7 @@ impl SubView for ProjectInstance {
                     factory.total_flow_sorted_keys = factory.total_flow.keys().cloned().collect();
                     sort_generic_items_owned(&mut factory.total_flow_sorted_keys, &self.factorio);
                 }
-                Err(err) => {
+                Err(_) => {
                     factory.total_flow.clear();
                     factory.total_flow_sorted_keys.clear();
                     factory.solution.0.clear();

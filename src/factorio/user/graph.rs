@@ -29,7 +29,7 @@ pub fn resolve_dependency(
         }
         unlocked.insert(
             tech_name.clone(),
-            !appeared_in_milestones(&tech_name, milestones),
+            !appeared_in_milestones(tech_name, milestones),
         );
     }
     for (tech_name, unlocked) in milestones {
@@ -112,7 +112,7 @@ pub fn update_accessibles(user: &mut UserContext, data: &DataContext) {
         }
     }
 
-    for (_, resource) in &data.resources {
+    for resource in data.resources.values() {
         if let Some(mining) = resource.base.minable.as_ref() {
             for result in &mining.results {
                 match result {
@@ -140,25 +140,24 @@ pub fn update_accessibles(user: &mut UserContext, data: &DataContext) {
     }
 
     for (item_name, item) in &data.items {
-        if let Some(place_result) = &item.place_result {
-            if user
+        if let Some(place_result) = &item.place_result
+            && user
                 .accessible_prototypes
                 .get("item")
-                .map_or(false, |items| items.contains_key(item_name))
+                .is_some_and(|items| items.contains_key(item_name))
             {
                 user.accessible_prototypes
                     .entry("entity".to_string())
                     .or_default()
                     .insert(place_result.clone(), true);
             }
-        }
     }
     for i in 1..data.qualities.len() {
         let quality = &data.qualities[i];
         if user
             .accessible_prototypes
             .get("quality")
-            .map_or(true, |qualities| {
+            .is_none_or(|qualities| {
                 qualities.get(&quality.base.name).cloned().unwrap_or(false)
             })
         {
