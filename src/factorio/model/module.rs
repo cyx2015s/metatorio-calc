@@ -1,9 +1,12 @@
+use std::collections::HashMap;
+
 use indexmap::IndexMap;
 use serde_with::{DefaultOnError, serde_as};
 
 use crate::{
     concept::SolveContext,
     factorio::{
+        ProjectContext,
         common::*,
         drag_value,
         editor::{
@@ -109,6 +112,7 @@ pub struct BeaconConfig {
     pub modules: Vec<(IdWithQuality, usize)>, // 这种插件塔中，这个插件有多少个，不是每个插件塔中的插件！
     pub beacon: IdWithQuality,                // 插件塔本身
     pub count: usize,                         // 插件塔的数量
+    pub share: f64, // 插件塔共享比例，值为x时，表示平均一个插件塔能覆盖到x个机器，计算插件塔的耗电时需要除以相应的数量
 }
 
 impl ModuleConfig {
@@ -132,9 +136,14 @@ impl ModuleConfig {
             }
         }
         let mut beacon_count = 0;
+        let mut beacon_count_by_type = HashMap::new();
         for beacon_config in &self.beacons {
             if data.beacons.contains_key(&beacon_config.beacon.0) {
                 beacon_count += beacon_config.count;
+                beacon_count_by_type
+                    .entry(beacon_config.beacon.0.clone())
+                    .and_modify(|e| *e += beacon_config.count)
+                    .or_insert(beacon_config.count);
             }
         }
         for beacon_config in &self.beacons {
@@ -149,10 +158,14 @@ impl ModuleConfig {
                 let profile_multiplier = match beacon_proto.beacon_counter {
                     BeaconCounter::SameType => {
                         let profile = &beacon_proto.profile;
+                        let count = beacon_count_by_type
+                            .get(&beacon_config.beacon.0)
+                            .cloned()
+                            .unwrap_or(0);
                         match profile {
                             Some(profile) => {
-                                if beacon_config.count - 1 < profile.len() {
-                                    profile[beacon_config.count - 1]
+                                if count - 1 < profile.len() {
+                                    profile[count - 1]
                                 } else {
                                     *profile.last().unwrap_or(&1.0)
                                 }
@@ -192,6 +205,21 @@ impl ModuleConfig {
         }
         total_effect
     }
+
+    // 计算插件塔的耗电量，考虑均摊倍数，单位为W
+    pub fn get_consumption(&self, data: &DataContext) -> f64 {
+        let mut total_consumption = 0.0;
+        for beacon_config in &self.beacons {
+            if let Some(beacon_proto) = data.beacons.get(&beacon_config.beacon.0) {
+                let energy_usage = match &beacon_proto.energy_usage {
+                    EnergyAmount { amount } => *amount,
+                } * 60.0; // 每tick耗电量转换为每秒耗电量
+                let consumption_per_beacon = energy_usage / beacon_config.share.max(1.0); // 耗电量根据共享比例均摊
+                total_consumption += consumption_per_beacon * beacon_config.count as f64;
+            }
+        }
+        total_consumption
+    }
 }
 
 impl SolveContext for ModuleConfig {
@@ -207,6 +235,7 @@ pub struct ModuleConfigEditor<'a> {
     pub allowed_module_categories: &'a Option<Vec<String>>,
 
     pub data: &'a DataContext,
+    pub proj: Option<&'a ProjectContext>,
     pub edit_modules: bool,
     pub edit_beacons: bool,
     pub show_summary: bool,
@@ -229,7 +258,13 @@ impl<'a> ModuleConfigEditor<'a> {
             edit_modules: true,
             edit_beacons: true,
             show_summary: true,
+            proj: None,
         }
+    }
+
+    pub fn with_project_context(mut self, proj: &'a ProjectContext) -> Self {
+        self.proj = Some(proj);
+        self
     }
 
     pub fn with_edit_modules(mut self, edit: bool) -> Self {
@@ -363,7 +398,9 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                         ) && module_effects_allowed(
                                             module_proto,
                                             self.allowed_effects,
-                                        )
+                                        ) && self
+                                            .proj
+                                            .is_none_or(|p| p.is_prototype_accessible("item", &s.0))
                                     } else {
                                         false
                                     }
@@ -398,7 +435,9 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                         ) && module_effects_allowed(
                                             module_proto,
                                             self.allowed_effects,
-                                        )
+                                        ) && self
+                                            .proj
+                                            .is_none_or(|p| p.is_prototype_accessible("item", &s.0))
                                     } else {
                                         false
                                     }
@@ -426,8 +465,14 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                     ui.label("插件塔");
                     self.module_config.beacons.retain_mut(|beacon_config| {
                         let mut deleted = false;
-                        let factorio = self.data;
-                        beacon_config_ui(ui, factorio, beacon_config, &mut response, &mut deleted);
+                        beacon_config_ui(
+                            ui,
+                            self.data,
+                            self.proj,
+                            beacon_config,
+                            &mut response,
+                            &mut deleted,
+                        );
                         !deleted
                     });
                     if ui.button("添加插件塔").clicked() {
@@ -443,6 +488,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
 pub fn beacon_config_ui(
     ui: &mut egui::Ui,
     data: &DataContext,
+    proj: Option<&ProjectContext>,
     beacon_config: &mut BeaconConfig,
     response: &mut egui::Response,
     deleted: &mut bool,
@@ -453,8 +499,9 @@ pub fn beacon_config_ui(
                 *deleted = true;
                 response.mark_changed();
             }
-            let widget = drag_value(&mut beacon_config.count)
-                .range(1..=100)
+            ui.label("每插件塔的机器数");
+            let widget = drag_value(&mut beacon_config.share)
+                .range(1.0..=100.0)
                 .clamp_existing_to_range(true);
             if ui.add(widget).changed() {
                 response.mark_changed();
@@ -477,6 +524,13 @@ pub fn beacon_config_ui(
             let selector = Selector::new(data, "entity")
                 .with_current(&mut beacon_config.beacon)
                 .with_filter(|s: &IdWithQuality, f: &DataContext| f.beacons.contains_key(&s.0));
+            ui.label("每机器的插件塔数");
+            let widget = drag_value(&mut beacon_config.count)
+                .range(1..=100)
+                .clamp_existing_to_range(true);
+            if ui.add(widget).changed() {
+                response.mark_changed();
+            }
             let widget = SelectorModal::new(icon.id, data, "选择插件塔")
                 .with_toggle(icon.clicked())
                 .with_selector(selector);
@@ -518,7 +572,7 @@ pub fn beacon_config_ui(
                                 ) && module_effects_allowed(
                                     module_proto,
                                     &beacon_proto.allowed_effects,
-                                )
+                                ) && proj.is_none_or(|p| p.is_prototype_accessible("item", &s.0))
                             } else {
                                 false
                             }

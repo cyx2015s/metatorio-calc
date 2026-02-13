@@ -19,6 +19,7 @@ pub struct ProjectContext {
 
     pub mining_productivity: f64,
 
+    pub all_accessible: bool,
     #[serde(skip)]
     pub accessible_technologies: Vec<String>,
 
@@ -44,6 +45,7 @@ impl Default for ProjectContext {
         Self {
             time_scale: TimeScale::Seconds,
             tech_milestones: Vec::new(),
+            all_accessible: true,
             accessible_technologies: Vec::new(),
             accessible_prototypes: Dict::new(),
             recipe_productivity: IndexMap::new(),
@@ -64,6 +66,9 @@ impl ProjectContext {
     }
 
     pub fn is_prototype_accessible(&self, category: &str, name: &str) -> bool {
+        if self.all_accessible {
+            return true;
+        }
         if let Some(category_dict) = self.accessible_prototypes.get(category) {
             if let Some(accessible) = category_dict.get(name) {
                 *accessible

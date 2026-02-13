@@ -186,6 +186,12 @@ impl AsFlow for MiningMechanicInstance {
             -base_speed * (1.0 + module_effects.speed) * drain_rate,
         );
 
+        index_map_update_entry(
+            &mut map,
+            GenericItem::Electricity,
+            -self.module_config.get_consumption(&data),
+        );
+
         // 计算开采流体的消耗
         if let Some(fluid) = resource_ore
             .base
@@ -484,6 +490,7 @@ impl FactorioMechanic for MiningMechanic {
                                     .with_filter(|s: &IdWithQuality, f: &DataContext| {
                                         if let Some(miner) = f.miners.get(&s.0) {
                                             machine_fits_for_resource(miner, resource_proto)
+                                                && proj.is_prototype_accessible("entity", &s.0)
                                         } else {
                                             false
                                         }
@@ -503,13 +510,16 @@ impl FactorioMechanic for MiningMechanic {
                     .unwrap_or(EffectTypeLimitation::new(true, true, true, true, true)),
             );
             changed |= ui
-                .add(ModuleConfigEditor::new(
-                    data,
-                    &mut instance.module_config,
-                    miner.module_slots as usize,
-                    &allowed_effects,
-                    &miner.allowed_module_categories,
-                ))
+                .add(
+                    ModuleConfigEditor::new(
+                        data,
+                        &mut instance.module_config,
+                        miner.module_slots as usize,
+                        &allowed_effects,
+                        &miner.allowed_module_categories,
+                    )
+                    .with_project_context(proj),
+                )
                 .changed();
         }
 

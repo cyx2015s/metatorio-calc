@@ -37,6 +37,7 @@ impl egui::Widget for UserContextEditor<'_> {
                 ui.selectable_value(&mut self.proj.time_scale, TimeScale::Seconds, "秒");
             });
         ui.heading("科技里程碑");
+        ui.checkbox(&mut self.proj.all_accessible, "选择物品时无视里程碑限制");
         let icon = ui
             .add(Icon::new(self.data, "entity", "entity-unknown"))
             .interact(egui::Sense::click());

@@ -163,8 +163,10 @@ where
                 let entry = magnitude_and_counts
                     .entry(item_id.clone())
                     .or_insert((0.0, 0));
-                entry.0 += amount.abs().log2().max(-32.0);
-                entry.1 += 1;
+                if amount.abs() > 1e-12 {
+                    entry.0 += amount.abs().log2().max(-32.0);
+                    entry.1 += 1;
+                }
             }
         }
         for (item_id, &amount) in &self.target {

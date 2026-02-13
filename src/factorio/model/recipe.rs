@@ -474,6 +474,7 @@ impl AsFlow for RecipeMechanicInstance {
                     .unwrap_or_default()
                     .base_effect
                     .clone();
+            module_effects = module_effects.clamped();
             base_speed = crafter.crafting_speed;
             let quality_level = self.machine.1 as usize;
             if let Some(multiplier) = &crafter.crafting_speed_quality_multiplier {
@@ -505,6 +506,11 @@ impl AsFlow for RecipeMechanicInstance {
                 .productivity
                 .clamp(0.0, recipe.maximum_productivity);
             module_effects = module_effects.clamped();
+            index_map_update_entry(
+                &mut map,
+                GenericItem::Electricity,
+                -self.module_config.get_consumption(&data),
+            );
             for ingredient in &recipe.ingredients {
                 match ingredient {
                     RecipeIngredient::Item(item) => {
@@ -637,7 +643,7 @@ pub struct RecipeMechanic {
 
     pub enumerate_modules: Vec<IdWithQuality>,
 
-    pub enumerate_beacons: Vec<ModuleConfig>,
+    pub enumerate_beacons: Vec<(ModuleConfig, [usize; 2])>,
 
     #[serde(skip)]
     pub new_enumerate_module: Option<IdWithQuality>,
@@ -715,7 +721,7 @@ impl FactorioMechanic for RecipeMechanic {
         &mut self,
         ui: &mut egui::Ui,
         data: &DataContext,
-        _proj: &ProjectContext,
+        proj: &ProjectContext,
         _factory: &FactoryContext,
     ) -> bool {
         let mut changed = false;
@@ -745,6 +751,7 @@ impl FactorioMechanic for RecipeMechanic {
                             .with_output(&mut self.new_machine_preference)
                             .with_filter(|s: &IdWithQuality, f: &DataContext| {
                                 f.crafters.contains_key(&s.0)
+                                    && proj.is_prototype_accessible("entity", &s.0)
                             }),
                     ),
             );
@@ -788,6 +795,7 @@ impl FactorioMechanic for RecipeMechanic {
                                         .with_current(machine)
                                         .with_filter(|s: &IdWithQuality, f: &DataContext| {
                                             f.crafters.contains_key(&s.0)
+                                                && proj.is_prototype_accessible("entity", &s.0)
                                         }),
                                 ),
                         );
@@ -813,6 +821,7 @@ impl FactorioMechanic for RecipeMechanic {
                             .with_output(&mut self.new_enumerate_module)
                             .with_filter(|item: &IdWithQuality, data: &DataContext| {
                                 data.modules.contains_key(&item.0)
+                                    && proj.is_prototype_accessible("item", &item.0)
                             }),
                     ),
             );
@@ -843,11 +852,32 @@ impl FactorioMechanic for RecipeMechanic {
             if let Some(module) = delele_module {
                 self.enumerate_modules.retain(|m| m != &module);
             }
-            ui.separator();
         });
+        ui.separator();
         ui.collapsing("[自动/手动]插件塔", |ui| {
             ui.label("添加新建筑时，会选取第一个满足条件的插件塔配置。");
-            
+            self.enumerate_beacons
+                .retain_mut(|(config, [width, height])| {
+                    let mut deleted = false;
+                    if ui.button("删除").clicked() {
+                        deleted = true;
+                        changed = true;
+                    }
+                    ui.add(egui::DragValue::new(width).speed(1).range(1..=16));
+                    ui.add(egui::DragValue::new(height).speed(1).range(1..=16));
+                    ui.add(
+                        ModuleConfigEditor::new(
+                            data,
+                            config,
+                            0,
+                            &Some(EffectTypeLimitation::new(true, true, true, true, true)),
+                            &None,
+                        )
+                        .with_edit_modules(false)
+                        .with_project_context(proj),
+                    );
+                    !deleted
+                });
         });
 
         changed
@@ -899,7 +929,8 @@ impl FactorioMechanic for RecipeMechanic {
                                     } else {
                                         ui.label(format!("未知配方: {}", name.0));
                                     }
-                                }),
+                                })
+                                .with_filter(|s, _f| proj.is_prototype_accessible("recipe", &s.0)),
                         ),
                 )
                 .changed();
@@ -944,6 +975,7 @@ impl FactorioMechanic for RecipeMechanic {
                 .with_filter(|crafter_name: &IdWithQuality, data: &DataContext| {
                     if let Some(crafter) = data.crafters.get(&crafter_name.0)
                         && let Some(recipe_prototype) = data.recipes.get(instance.recipe.0.as_str())
+                        && proj.is_prototype_accessible("entity", &crafter_name.0)
                     {
                         return machine_fits_for_recipe(crafter, recipe_prototype);
                     }
@@ -969,13 +1001,16 @@ impl FactorioMechanic for RecipeMechanic {
                 collect_module_limitations(crafter, recipe);
 
             changed |= ui
-                .add(ModuleConfigEditor::new(
-                    data,
-                    &mut instance.module_config,
-                    crafter.module_slots as usize,
-                    &Some(allowed_effects),
-                    &allowed_module_categories,
-                ))
+                .add(
+                    ModuleConfigEditor::new(
+                        data,
+                        &mut instance.module_config,
+                        crafter.module_slots as usize,
+                        &Some(allowed_effects),
+                        &allowed_module_categories,
+                    )
+                    .with_project_context(proj),
+                )
                 .changed();
         };
 
@@ -1000,7 +1035,7 @@ impl FactorioMechanic for RecipeMechanic {
     fn update_suggestion(
         &mut self,
         data: &DataContext,
-        _proj: &ProjectContext,
+        proj: &ProjectContext,
         _factory: &FactoryContext,
         item: &GenericItem,
         amount: f64,
@@ -1009,6 +1044,9 @@ impl FactorioMechanic for RecipeMechanic {
         self.suggestion_item = Some(item.clone());
         self.suggestion_amount = amount;
         for recipe_proto in data.recipes.values() {
+            if !proj.is_prototype_accessible("recipe", &recipe_proto.base.name) {
+                continue;
+            }
             match item {
                 GenericItem::Item(id_with_quality) => {
                     let mut total_yield = 0.0;
