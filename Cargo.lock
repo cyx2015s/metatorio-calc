@@ -2779,7 +2779,7 @@ dependencies = [
 
 [[package]]
 name = "metatorio"
-version = "1.2.8"
+version = "1.2.9"
 dependencies = [
  "dirs",
  "dotenv",
