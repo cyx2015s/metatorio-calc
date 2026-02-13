@@ -856,15 +856,24 @@ impl FactorioMechanic for RecipeMechanic {
         ui.separator();
         ui.collapsing("[自动/手动]插件塔", |ui| {
             ui.label("添加新建筑时，会选取第一个满足条件的插件塔配置。");
+            if ui.button("添加插件塔").clicked() {
+                self.enumerate_beacons.push((ModuleConfig::new(), [3, 3]));
+                changed = true;
+            }
             self.enumerate_beacons
                 .retain_mut(|(config, [width, height])| {
+                    ui.separator();
                     let mut deleted = false;
                     if ui.button("删除").clicked() {
                         deleted = true;
                         changed = true;
                     }
-                    ui.add(egui::DragValue::new(width).speed(1).range(1..=16));
-                    ui.add(egui::DragValue::new(height).speed(1).range(1..=16));
+                    ui.horizontal(|ui| {
+                        ui.label("机器面积上限");
+                        ui.add(egui::DragValue::new(width).speed(1).range(1..=16));
+                        ui.label("x");
+                        ui.add(egui::DragValue::new(height).speed(1).range(1..=16));
+                    });
                     ui.add(
                         ModuleConfigEditor::new(
                             data,

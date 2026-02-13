@@ -310,7 +310,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
         let button = ui
             .vertical(|ui| {
                 ui.label("插件");
-                if self.module_slots == 0 {
+                if self.module_slots == 0 && self.edit_modules{
                     ui.disable();
                 }
                 ui.button("编辑")
@@ -499,7 +499,7 @@ pub fn beacon_config_ui(
                 *deleted = true;
                 response.mark_changed();
             }
-            ui.label("每插件塔的机器数");
+            ui.label("每插件塔\n的机器数");
             let widget = drag_value(&mut beacon_config.share)
                 .range(1.0..=100.0)
                 .clamp_existing_to_range(true);
@@ -524,7 +524,7 @@ pub fn beacon_config_ui(
             let selector = Selector::new(data, "entity")
                 .with_current(&mut beacon_config.beacon)
                 .with_filter(|s: &IdWithQuality, f: &DataContext| f.beacons.contains_key(&s.0));
-            ui.label("每机器的插件塔数");
+            ui.label("每机器的\n插件塔数");
             let widget = drag_value(&mut beacon_config.count)
                 .range(1..=100)
                 .clamp_existing_to_range(true);
