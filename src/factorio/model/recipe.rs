@@ -643,7 +643,7 @@ pub struct RecipeMechanic {
 
     pub enumerate_modules: Vec<IdWithQuality>,
 
-    pub enumerate_beacons: Vec<(ModuleConfig, [usize; 2])>,
+    pub enumerate_beacons: Vec<AutoBeaconConfig>,
 
     #[serde(skip)]
     pub new_enumerate_module: Option<IdWithQuality>,
@@ -658,6 +658,12 @@ pub struct RecipeMechanic {
     pub selected_suggested_recipe: Option<String>,
     #[serde(skip)]
     pub suggested_recipes_filter: String,
+}
+
+// 不排除我会往自动插件塔枚举添加更多功能，先包一层……
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AutoBeaconConfig {
+    pub module_config: ModuleConfig,
 }
 
 pub fn select_crafter_for_recipe(
@@ -857,36 +863,31 @@ impl FactorioMechanic for RecipeMechanic {
         ui.collapsing("[自动/手动]插件塔", |ui| {
             ui.label("添加新建筑时，会选取第一个满足条件的插件塔配置。");
             if ui.button("添加插件塔").clicked() {
-                self.enumerate_beacons.push((ModuleConfig::new(), [3, 3]));
+                self.enumerate_beacons.push(AutoBeaconConfig {
+                    module_config: ModuleConfig::new(),
+                });
                 changed = true;
             }
-            self.enumerate_beacons
-                .retain_mut(|(config, [width, height])| {
-                    ui.separator();
-                    let mut deleted = false;
-                    if ui.button("删除").clicked() {
-                        deleted = true;
-                        changed = true;
-                    }
-                    ui.horizontal(|ui| {
-                        ui.label("机器面积上限");
-                        ui.add(egui::DragValue::new(width).speed(1).range(1..=16));
-                        ui.label("x");
-                        ui.add(egui::DragValue::new(height).speed(1).range(1..=16));
-                    });
-                    ui.add(
-                        ModuleConfigEditor::new(
-                            data,
-                            config,
-                            0,
-                            &Some(EffectTypeLimitation::new(true, true, true, true, true)),
-                            &None,
-                        )
-                        .with_edit_modules(false)
-                        .with_project_context(proj),
-                    );
-                    !deleted
-                });
+            self.enumerate_beacons.retain_mut(|config| {
+                ui.separator();
+                let mut deleted = false;
+                if ui.button("删除").clicked() {
+                    deleted = true;
+                    changed = true;
+                }
+                ui.add(
+                    ModuleConfigEditor::new(
+                        data,
+                        &mut config.module_config,
+                        0,
+                        &Some(EffectTypeLimitation::new(true, true, true, true, true)),
+                        &None,
+                    )
+                    .with_edit_modules(false)
+                    .with_project_context(proj),
+                );
+                !deleted
+            });
         });
 
         changed
@@ -1231,11 +1232,22 @@ impl FactorioMechanic for RecipeMechanic {
                                 recipe: IdWithQuality(recipe_name.clone(), quality as u8),
                                 machine: machine_name.clone(),
                                 module_config: ModuleConfig {
-                                    modules,
+                                    modules: modules.clone(),
                                     ..Default::default()
                                 },
                                 ..Default::default()
                             });
+                            for auto_beacon_config in &self.enumerate_beacons {
+                                self.instances.push(RecipeMechanicInstance {
+                                    recipe: IdWithQuality(recipe_name.clone(), quality as u8),
+                                    machine: machine_name.clone(),
+                                    module_config: ModuleConfig {
+                                        modules: modules.clone(),
+                                        ..auto_beacon_config.module_config.clone()
+                                    },
+                                    ..Default::default()
+                                });
+                            }
                         }
                     }
                 }

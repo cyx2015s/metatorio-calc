@@ -1,5 +1,7 @@
 use std::collections::{HashSet, VecDeque};
 
+use indexmap::IndexMap;
+
 use crate::factorio::{
     DataContext, Dict, Modifier, ProjectContext, RecipeResult, TechnologyPrototype,
 };
@@ -54,8 +56,52 @@ pub fn resolve_dependency(
 pub fn update_accessibles(user: &mut ProjectContext, data: &DataContext) {
     user.accessible_technologies = resolve_dependency(&data.technologies, &user.tech_milestones);
     user.accessible_prototypes.clear();
-    user.recipe_productivity.clear();
-    user.mining_productivity = 0.0;
+
+    let mut new_recipe_productivity = user
+        .accessible_technologies
+        .iter()
+        .filter_map(|tech_name| data.technologies.get(tech_name))
+        .flat_map(|tech| &tech.effects)
+        .filter_map(|effect| {
+            if let Modifier::ChangeRecipeProductivity { recipe, change } = effect {
+                Some((recipe.clone(), *change))
+            } else {
+                None
+            }
+        })
+        .fold(IndexMap::new(), |mut acc, (recipe, change)| {
+            acc.entry(recipe)
+                .and_modify(|c| *c += change)
+                .or_insert(change);
+            acc
+        });
+    // 将recipe_productivity和new_productivity取较大值，除非显式重置。
+    for (recipe, change) in &mut user.recipe_productivity {
+        if new_recipe_productivity.contains_key(recipe) {
+            // 切换科技树后，如果对应的产能科技存在，保存最高的产能。
+            new_recipe_productivity
+                .entry(recipe.clone())
+                .and_modify(|c| *c = (*c).max(*change))
+                .or_insert(*change);
+        }
+    }
+    user.recipe_productivity = new_recipe_productivity;
+
+    let new_mining_productivity = user
+        .accessible_technologies
+        .iter()
+        .filter_map(|tech_name| data.technologies.get(tech_name))
+        .flat_map(|tech| &tech.effects)
+        .filter_map(|effect| {
+            if let Modifier::MiningDrillProductivityBonus(change) = effect {
+                Some(change.modifier)
+            } else {
+                None
+            }
+        })
+        .sum::<f64>();
+    user.mining_productivity = new_mining_productivity.max(user.mining_productivity);
+
     for tech_name in &user.accessible_technologies {
         if let Some(tech) = data.technologies.get(tech_name) {
             for modifier in &tech.effects {
@@ -95,16 +141,6 @@ pub fn update_accessibles(user: &mut ProjectContext, data: &DataContext) {
                             .entry("quality".to_string())
                             .or_default()
                             .insert(quality.clone(), true);
-                    }
-                    Modifier::ChangeRecipeProductivity { recipe, change } => {
-                        let entry = user
-                            .recipe_productivity
-                            .entry(recipe.clone())
-                            .or_insert(0.0);
-                        *entry += *change;
-                    }
-                    Modifier::MiningDrillProductivityBonus(modifier) => {
-                        user.mining_productivity += modifier.modifier;
                     }
                     _ => {}
                 }

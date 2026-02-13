@@ -220,6 +220,21 @@ impl ModuleConfig {
         }
         total_consumption
     }
+
+    pub fn get_area(&self, data: &DataContext) -> f64 {
+        let mut area = 0.0;
+        for beacon_config in &self.beacons {
+            if let Some(beacon_proto) = data.beacons.get(&beacon_config.beacon.0) {
+                let beacon_area = beacon_proto
+                    .base
+                    .collision_box
+                    .as_ref()
+                    .map_or(0.0, |collision_box| collision_box.get_area());
+                area += beacon_area * beacon_config.count as f64 / beacon_config.share.max(1.0);
+            }
+        }
+        area
+    }
 }
 
 impl SolveContext for ModuleConfig {
@@ -310,7 +325,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
         let button = ui
             .vertical(|ui| {
                 ui.label("插件");
-                if self.module_slots == 0 && self.edit_modules{
+                if self.module_slots == 0 && self.edit_modules {
                     ui.disable();
                 }
                 ui.button("编辑")

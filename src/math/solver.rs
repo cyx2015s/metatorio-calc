@@ -100,7 +100,7 @@ where
         let mut changed = false;
         if self.strict_source {
             // 在strict_source模式下，移除所有无法使用的配方
-
+            let instant = std::time::Instant::now();
             let mut no_providers: HashSet<I> = HashSet::new();
 
             for flow in self.flows.values() {
@@ -143,6 +143,10 @@ where
                     after
                 );
             }
+            log::info!(
+                "求解器：移除无法使用的配方耗时 {} ms",
+                instant.elapsed().as_millis()
+            );
         }
         changed
     }
@@ -217,7 +221,7 @@ where
             let entry = item_balances
                 .entry(item_id.clone())
                 .or_insert(good_lp::Expression::from(0.0));
-            *entry += 1.0 * var;
+            *entry += 1.0 * var * get_multiplier(item_id);
         }
         for (item_id, _) in &self.sinks {
             let var = problem_variables.add(variable().min(0));
@@ -225,7 +229,7 @@ where
             let entry = item_balances
                 .entry(item_id.clone())
                 .or_insert(good_lp::Expression::from(0.0));
-            *entry -= 1.0 * var;
+            *entry -= 1.0 * var * get_multiplier(item_id);
         }
         let mut no_providers: HashSet<I> = item_balances.keys().cloned().collect();
         let mut no_consumers: HashSet<I> = item_balances.keys().cloned().collect();
