@@ -167,39 +167,63 @@ where
                 description: "没有目标物品。".to_string(),
             };
         }
-        // 先做一步数值稳定性处理，将出现的流系数全部统一到1附近。
-        let mut magnitude_and_counts = HashMap::new();
+        // 调整配方的系数，使得其中出现的数量级最大的物品的数量级在1附近，避免数值不稳定。
+        let mut flow_multipliers = HashMap::new();
+        for (flow_id, flow) in &self.flows {
+            flow_multipliers.insert(flow_id.clone(), 1.0_f64);
+            // for (item, &amount) in &flow.0 {
+            //     if amount.abs() > flow_multipliers[flow_id] {
+            //         log::info!(
+            //             "求解器：配方 {:?} 中物品 {:?} 的数量级 {} 大于当前最大数量级 {}, 更新最大数量级",
+            //             flow_id,
+            //             item,
+            //             amount.abs(),
+            //             flow_multipliers[flow_id]
+            //         );
+            //         flow_multipliers.insert(flow_id.clone(), amount.abs());
+            //     }
+            // }
+        }
+        for (flow_id, multiplier) in &flow_multipliers {
+            if *multiplier > 1e-6 {
+                let flow = self.flows.get_mut(flow_id).unwrap();
+                for (_, amount) in &mut flow.0 {
+                    *amount /= *multiplier;
+                }
+                flow.1 /= *multiplier;
+            }
+        }
+        // 再做一步数值稳定性处理，将物品中出现的流系数全部统一到1附近。
+        let mut item_magnitude_and_counts = HashMap::new();
         while self.trim_flows() {}
         log::info!("求解器：开始分析流量数量级");
         for recipe in self.flows.values() {
             for (item_id, &amount) in &recipe.0 {
-                let entry = magnitude_and_counts
+                let entry = item_magnitude_and_counts
                     .entry(item_id.clone())
                     .or_insert((0.0, 0));
-                if amount.abs() > 1e-12 {
-                    entry.0 += amount.abs().log2().max(-32.0);
-                    entry.1 += 1;
-                }
-            }
-        }
-        for (item_id, &amount) in &self.target {
-            let entry = magnitude_and_counts
-                .entry(item_id.clone())
-                .or_insert((0.0, 0));
-            if amount.abs() > 1e-12 {
-                entry.0 += amount.abs().log2().max(-32.0);
+
+                entry.0 += amount.abs().log2().max(-96.0);
                 entry.1 += 1;
             }
         }
+        for (item_id, &amount) in &self.target {
+            let entry = item_magnitude_and_counts
+                .entry(item_id.clone())
+                .or_insert((0.0, 0));
+
+            entry.0 += amount.abs().log2().max(-96.0);
+            entry.1 += 1;
+        }
         // total_magnitude / count 是这些数据的几何平均数的数量级
-        let magnitude_factors: HashMap<I, i32> = magnitude_and_counts
+        let item_multipliers: HashMap<I, i32> = item_magnitude_and_counts
             .into_iter()
             .map(|(item, (total_maginitude, count))| {
                 (item, (-total_maginitude / count as f64) as i32)
             })
             .collect();
         let get_multiplier =
-            |item_id: &I| -> f64 { (2.0_f64).powi(*magnitude_factors.get(item_id).unwrap_or(&0)) };
+            |item_id: &I| -> f64 { (2.0_f64).powi(*item_multipliers.get(item_id).unwrap_or(&0)) };
         let mut problem_variables = good_lp::ProblemVariables::new();
         let mut flow_vars = IndexMap::new();
         let mut source_vars = IndexMap::new();
@@ -321,11 +345,12 @@ where
 
         match solution {
             Ok(sol) => {
+                log::info!("求解器：求解成功，开始构建结果");
                 let mut result = IndexMap::new();
                 let mut sum = Flow::new();
                 for (recipe_id, var) in flow_vars {
                     let value = sol.value(var);
-                    result.insert(recipe_id.clone(), value);
+                    result.insert(recipe_id.clone(), value / flow_multipliers[&recipe_id]);
                     for (item_id, &amount) in &self.flows[&recipe_id].0 {
                         let entry = sum.entry(item_id.clone()).or_insert(0.0);
                         *entry += amount * value;
@@ -339,6 +364,7 @@ where
                 }
             }
             Err(err) => {
+                log::error!("求解器：求解失败，错误信息: {:?}", err);
                 let err_string = match err {
                     good_lp::ResolutionError::Unbounded => {
                         "无界。存在能够无限产生目标物品且不增加消耗的配方组合。".to_string()

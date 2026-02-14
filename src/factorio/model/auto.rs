@@ -4,7 +4,7 @@ use crate::{
     concept::EntryOpRequest,
     error::AppError,
     factorio::{DataContext, ProjectContext, planner::FactoryInstance, sort_generic_items_owned},
-    math::{SolverSolution, flow_add},
+    math::SolverSolution,
 };
 
 /// 持有初始工厂实例和游戏上下文，返回一个新的工厂实例

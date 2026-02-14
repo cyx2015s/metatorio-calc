@@ -633,7 +633,7 @@ impl FactoryInstance {
                             GenericItem::Pollution {
                                 name: pollution.clone(),
                             },
-                            1.0,
+                            1024.0,
                         ));
                     }
                     *changed = true;
