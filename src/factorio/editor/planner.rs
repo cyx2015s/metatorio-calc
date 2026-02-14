@@ -860,7 +860,8 @@ impl SubView for ProjectInstance {
                                 self.factories.push(
                                     FactoryInstance::new(name)
                                         .with_mechanic(RecipeMechanic::default())
-                                        .with_mechanic(MiningMechanic::default()),
+                                        .with_mechanic(MiningMechanic::default())
+                                        .with_mechanic(ItemFuelMechanic::default()),
                                 );
                             }
                             ui.separator();

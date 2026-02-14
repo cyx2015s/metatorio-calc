@@ -4,7 +4,6 @@ use indexmap::IndexMap;
 
 use crate::factorio::{
     DataContext, Dict, Modifier, ProjectContext, RecipeResult, TechnologyPrototype,
-    get_generic_item_sort_key, sort_generic_items,
 };
 
 // milestone 格式: (technology name, is unlocked)，true表示解锁，false表示未解锁（就算是true，如果因为其他科技的false 导致无法解锁，也会被视为未解锁）
@@ -87,8 +86,7 @@ pub fn update_accessibles(user: &mut ProjectContext, data: &DataContext) {
         }
     }
     user.recipe_productivity = new_recipe_productivity;
-    user.recipe_productivity
-        .sort_by(|ak, _, bk, _| ak.cmp(bk));
+    user.recipe_productivity.sort_by(|ak, _, bk, _| ak.cmp(bk));
 
     let new_mining_productivity = user
         .accessible_technologies

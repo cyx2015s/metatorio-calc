@@ -11,6 +11,7 @@ mod quality;
 mod recipe;
 mod technology;
 mod tile;
+mod fuel;
 
 pub use auto::*;
 pub use data::*;
@@ -25,3 +26,4 @@ pub use quality::*;
 pub use recipe::*;
 pub use technology::*;
 pub use tile::*;
+pub use fuel::*;
