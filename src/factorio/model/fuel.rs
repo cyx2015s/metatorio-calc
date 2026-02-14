@@ -31,8 +31,8 @@ impl AsFlow for ItemFuelInstance {
     fn as_flow(
         &self,
         data: &super::DataContext,
-        proj: &crate::factorio::ProjectContext,
-        factory: &crate::factorio::planner::FactoryContext,
+        _proj: &crate::factorio::ProjectContext,
+        _factory: &crate::factorio::planner::FactoryContext,
     ) -> crate::concept::Flow<Self::Item> {
         let mut flow = crate::concept::Flow::new();
         if let Some(item) = data.items.get(&self.item.0) {
@@ -74,11 +74,11 @@ impl FactorioMechanic for ItemFuelMechanic {
 
     fn update_suggestion(
         &mut self,
-        data: &DataContext,
-        proj: &ProjectContext,
-        factory: &FactoryContext,
-        item: &GenericItem,
-        amount: f64,
+        _data: &DataContext,
+        _proj: &ProjectContext,
+        _factory: &FactoryContext,
+        _item: &GenericItem,
+        _amount: f64,
     ) {
     }
 
@@ -129,9 +129,9 @@ impl FactorioMechanic for ItemFuelMechanic {
     fn editor_view(
         &mut self,
         ui: &mut egui::Ui,
-        data: &DataContext,
-        proj: &ProjectContext,
-        factory: &FactoryContext,
+        _data: &DataContext,
+        _proj: &ProjectContext,
+        _factory: &FactoryContext,
     ) -> bool {
         let mut changed = false;
 
@@ -150,8 +150,8 @@ impl FactorioMechanic for ItemFuelMechanic {
         idx: usize,
         ui: &mut egui::Ui,
         data: &DataContext,
-        proj: &ProjectContext,
-        factory: &FactoryContext,
+        _proj: &ProjectContext,
+        _factory: &FactoryContext,
     ) -> bool {
         let mut changed = false;
         let instance = &mut self.instances[idx];

@@ -1,4 +1,4 @@
-use std::{collections::HashSet, fmt::Debug, i32};
+use std::{collections::HashSet, fmt::Debug};
 
 use serde_with::{DefaultOnError, serde_as};
 
@@ -509,7 +509,7 @@ impl AsFlow for RecipeMechanicInstance {
             index_map_update_entry(
                 &mut map,
                 GenericItem::Electricity,
-                -self.module_config.get_consumption(&data),
+                -self.module_config.get_consumption(data),
             );
             for ingredient in &recipe.ingredients {
                 match ingredient {

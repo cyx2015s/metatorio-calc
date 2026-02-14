@@ -105,11 +105,9 @@ impl egui::Widget for UserContextEditor<'_> {
                             .tech_milestones
                             .iter_mut()
                             .find(|(name, _)| name == prereq)
-                        {
-                            if !*unlocked {
+                            && !*unlocked {
                                 *unlocked = true;
                             }
-                        }
 
                         queue.push_back(prereq.clone());
                     }

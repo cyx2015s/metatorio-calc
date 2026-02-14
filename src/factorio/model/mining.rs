@@ -189,7 +189,7 @@ impl AsFlow for MiningMechanicInstance {
         index_map_update_entry(
             &mut map,
             GenericItem::Electricity,
-            -self.module_config.get_consumption(&data),
+            -self.module_config.get_consumption(data),
         );
 
         // 计算开采流体的消耗

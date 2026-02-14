@@ -2,7 +2,6 @@ use good_lp::{IntoAffineExpression, Solution, SolverModel, variable};
 use indexmap::IndexMap;
 
 use crate::concept::{Flow, ItemIdent};
-use crate::error::AppError;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::hash::Hash;
@@ -169,7 +168,7 @@ where
         }
         // 调整配方的系数，使得其中出现的数量级最大的物品的数量级在1附近，避免数值不稳定。
         let mut flow_multipliers = HashMap::new();
-        for (flow_id, flow) in &self.flows {
+        for (flow_id, _flow) in &self.flows {
             flow_multipliers.insert(flow_id.clone(), 1.0_f64);
             // for (item, &amount) in &flow.0 {
             //     if amount.abs() > flow_multipliers[flow_id] {

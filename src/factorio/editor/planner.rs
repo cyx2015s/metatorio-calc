@@ -169,37 +169,28 @@ impl FactoryInstance {
         let mut fluids = HashMap::new();
         for (flow, _) in flows.values() {
             for (item, _) in flow {
-                match item {
-                    GenericItem::Fluid { name, temperature } => {
-                        fluids
-                            .entry(name.clone())
-                            .or_insert(HashSet::new())
-                            .insert(temperature.clone());
-                    }
-                    _ => {}
+                if let GenericItem::Fluid { name, temperature } = item {
+                    fluids
+                        .entry(name.clone())
+                        .or_insert(HashSet::new())
+                        .insert(*temperature);
                 }
             }
         }
         for (source, _) in &self.external.vec {
-            match source {
-                GenericItem::Fluid { name, temperature } => {
-                    fluids
-                        .entry(name.clone())
-                        .or_insert(HashSet::new())
-                        .insert(temperature.clone());
-                }
-                _ => {}
+            if let GenericItem::Fluid { name, temperature } = source {
+                fluids
+                    .entry(name.clone())
+                    .or_insert(HashSet::new())
+                    .insert(*temperature);
             }
         }
         for target in &self.target.vec {
-            match &target.0 {
-                GenericItem::Fluid { name, temperature } => {
-                    fluids
-                        .entry(name.clone())
-                        .or_insert(HashSet::new())
-                        .insert(temperature.clone());
-                }
-                _ => {}
+            if let GenericItem::Fluid { name, temperature } = &target.0 {
+                fluids
+                    .entry(name.clone())
+                    .or_insert(HashSet::new())
+                    .insert(*temperature);
             }
         }
         let mut aux_idx = 0;
@@ -212,14 +203,14 @@ impl FactoryInstance {
                         flow.insert(
                             GenericItem::Fluid {
                                 name: fluid.clone(),
-                                temperature: narrow.clone(),
+                                temperature: *narrow,
                             },
                             -1.0,
                         );
                         flow.insert(
                             GenericItem::Fluid {
                                 name: fluid.clone(),
-                                temperature: broad.clone(),
+                                temperature: *broad,
                             },
                             1.0,
                         );
@@ -631,7 +622,7 @@ impl FactoryInstance {
                         ));
                     }
                     self.external.push((GenericItem::Electricity, 16.0));
-                    for (pollution, _) in &data.airborne_pollutants {
+                    for pollution in data.airborne_pollutants.keys() {
                         self.external.push((
                             GenericItem::Pollution {
                                 name: pollution.clone(),
