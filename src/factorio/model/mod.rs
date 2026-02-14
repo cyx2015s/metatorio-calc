@@ -12,6 +12,7 @@ mod recipe;
 mod technology;
 mod tile;
 mod fuel;
+mod plant;
 
 pub use auto::*;
 pub use data::*;
@@ -27,3 +28,4 @@ pub use recipe::*;
 pub use technology::*;
 pub use tile::*;
 pub use fuel::*;
+pub use plant::*;

@@ -561,6 +561,14 @@ impl FactoryInstance {
                         ));
                     }
                     self.external.push((GenericItem::Electricity, 200.0));
+                    for (pollution, _) in &data.airborne_pollutants {
+                        self.external.push((
+                            GenericItem::Pollution {
+                                name: pollution.clone(),
+                            },
+                            1.0,
+                        ));
+                    }
                     *changed = true;
                 }
             }
