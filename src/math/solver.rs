@@ -51,14 +51,15 @@ pub enum SolverSolution<I, R> {
     Solved {
         prim: Flow<R>,
         dual: Option<Flow<I>>,
+        sum: Flow<I>,
+        cost: f64,
     },
     NotSolved {
         no_provider: Vec<I>,
         no_consumer: Vec<I>,
+        description: String,
     },
 }
-
-pub type SolverSolutionTuple<R> = Result<(Flow<R>, f64), AppError>;
 
 impl<I, R> SolverData<I, R>
 where
@@ -151,12 +152,20 @@ where
         changed
     }
 
-    pub fn solve(&mut self) -> Result<(Flow<R>, f64), AppError> {
+    pub fn solve(&mut self) -> SolverSolution<I, R> {
         if self.flows.is_empty() {
-            return Err(AppError::Solver("没有可用的配方，求解无意义。".to_string()));
+            return SolverSolution::NotSolved {
+                no_provider: vec![],
+                no_consumer: vec![],
+                description: "没有可用的配方".to_string(),
+            };
         }
         if self.target.is_empty() {
-            return Err(AppError::Solver("没有目标物品，求解无意义。".to_string()));
+            return SolverSolution::NotSolved {
+                no_provider: vec![],
+                no_consumer: vec![],
+                description: "没有目标物品。".to_string(),
+            };
         }
         // 先做一步数值稳定性处理，将出现的流系数全部统一到1附近。
         let mut magnitude_and_counts = HashMap::new();
@@ -313,11 +322,21 @@ where
         match solution {
             Ok(sol) => {
                 let mut result = IndexMap::new();
+                let mut sum = Flow::new();
                 for (recipe_id, var) in flow_vars {
                     let value = sol.value(var);
                     result.insert(recipe_id.clone(), value);
+                    for (item_id, &amount) in &self.flows[&recipe_id].0 {
+                        let entry = sum.entry(item_id.clone()).or_insert(0.0);
+                        *entry += amount * value;
+                    }
                 }
-                Ok((result, sol.eval(&optimization_expr)))
+                SolverSolution::Solved {
+                    prim: result,
+                    dual: None,
+                    sum,
+                    cost: sol.eval(optimization_expr),
+                }
             }
             Err(err) => {
                 let err_string = match err {
@@ -332,18 +351,17 @@ where
                         format!("求解过程中发生内部错误：{}", s)
                     }
                 };
-                if !no_providers.is_empty() {
-                    let mut no_providers = no_providers.iter().collect::<Vec<_>>();
-                    no_providers.sort_by_key(|x| format!("{:?}", x));
-                    // err_string += format!("此外，以下物品缺少生产来源：{:?}", no_providers).as_str();
+                SolverSolution::NotSolved {
+                    no_provider: no_providers.iter().cloned().collect(),
+                    no_consumer: no_consumers.iter().cloned().collect(),
+                    description: err_string,
                 }
-                Err(AppError::Solver(err_string))
             }
         }
     }
 
     pub fn make_dedicated_solver_thread(
-        solution_tx: Sender<SolverSolutionTuple<R>>,
+        solution_tx: Sender<SolverSolution<I, R>>,
         problem_rx: Receiver<SolverData<I, R>>,
     ) {
         std::thread::spawn(move || {
@@ -372,7 +390,7 @@ where
     }
 
     pub fn make_solver_thread(
-        solution_tx: Sender<(usize, SolverSolutionTuple<R>)>,
+        solution_tx: Sender<(usize, SolverSolution<I, R>)>,
         problem_rx: Receiver<(usize, SolverData<I, R>)>,
     ) {
         std::thread::spawn(move || {

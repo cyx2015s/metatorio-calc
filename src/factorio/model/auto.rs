@@ -4,7 +4,7 @@ use crate::{
     concept::EntryOpRequest,
     error::AppError,
     factorio::{DataContext, ProjectContext, planner::FactoryInstance, sort_generic_items_owned},
-    math::flow_add,
+    math::{SolverSolution, flow_add},
 };
 
 /// 持有初始工厂实例和游戏上下文，返回一个新的工厂实例
@@ -39,21 +39,28 @@ pub fn factorio_auto_planner(
     let instant = Instant::now();
     let solution = problem.solve();
     match solution {
-        Ok(solution) => {
-            factory.total_flow.clear();
-            factory.solution = solution;
-            for (idx, mechanic) in factory.mechanics.iter().enumerate() {
-                for (jdx, instance) in mechanic.instances().iter().enumerate() {
-                    let var_value = factory.solution.0.get(&(idx, jdx)).cloned().unwrap_or(0.0);
-                    let flow = instance.as_flow(&data, &proj, &factory.factory);
-                    factory.total_flow = flow_add(&factory.total_flow, &flow, var_value);
-                }
-            }
+        SolverSolution::Solved {
+            prim,
+            dual: _,
+            sum,
+            cost,
+        } => {
+            factory.total_flow = sum;
+            factory.solution = (prim, cost);
+
             sort_generic_items_owned(&mut factory.total_flow_sorted_keys, &data);
         }
-        Err(e) => {
-            log::error!("自动规划失败: {:?}", e);
-            crate::toast::error(format!("自动规划失败。{:?}", e));
+        SolverSolution::NotSolved {
+            no_provider,
+            no_consumer,
+            description,
+        } => {
+            log::error!(
+                "自动规划失败: no_provider={:?}, no_consumer={:?}",
+                no_provider,
+                no_consumer
+            );
+            crate::toast::error(format!("自动规划失败。{}", description));
             return Err(AppError::Solver("无法获得结果".into()));
         }
     }

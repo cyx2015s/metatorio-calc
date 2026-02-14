@@ -177,7 +177,7 @@ impl FactoryInstance {
                 }
             }
         }
-        for (source, penalty) in &self.external.vec {
+        for (source, _) in &self.external.vec {
             match source {
                 GenericItem::Fluid { name, temperature } => {
                     fluids
@@ -804,7 +804,7 @@ pub struct ProjectInstance {
     #[serde(skip)]
     pub problem_sender: Sender<(usize, SolverData<GenericItem, (usize, usize)>)>,
     #[serde(skip)]
-    pub solution_receiver: Receiver<(usize, SolverSolutionTuple<(usize, usize)>)>,
+    pub solution_receiver: Receiver<(usize, SolverSolution<GenericItem, (usize, usize)>)>,
 }
 
 impl Default for ProjectInstance {
@@ -887,22 +887,20 @@ impl SubView for ProjectInstance {
         while let Ok((req_id, result)) = self.solution_receiver.try_recv() {
             let factory = &mut self.factories.vec[req_id];
             match result {
-                Ok(solution) => {
-                    factory.total_flow.clear();
-                    factory.solution = solution;
-                    for (idx, mechanic) in factory.mechanics.iter().enumerate() {
-                        for (jdx, instance) in mechanic.instances().iter().enumerate() {
-                            let var_value =
-                                factory.solution.0.get(&(idx, jdx)).cloned().unwrap_or(0.0);
-                            let flow = instance.as_flow(&self.data, &self.proj, &factory.factory);
-                            factory.total_flow = flow_add(&factory.total_flow, &flow, var_value);
-                        }
-                    }
+                SolverSolution::Solved {
+                    prim,
+                    dual: _,
+                    sum,
+                    cost,
+                } => {
+                    factory.total_flow = sum;
+                    factory.solution = (prim, cost);
+
                     // Update sorted keys cache when total_flow changes
                     factory.total_flow_sorted_keys = factory.total_flow.keys().cloned().collect();
                     sort_generic_items_owned(&mut factory.total_flow_sorted_keys, &self.data);
                 }
-                Err(_) => {
+                SolverSolution::NotSolved { .. } => {
                     factory.total_flow.clear();
                     factory.total_flow_sorted_keys.clear();
                     factory.solution.0.clear();
