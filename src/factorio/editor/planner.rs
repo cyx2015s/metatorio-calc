@@ -162,16 +162,12 @@ impl FactoryInstance {
                 )
             })
             .collect();
+
         let mut fluids = HashMap::new();
         for (flow, _) in flows.values() {
             for (item, _) in flow {
                 match item {
                     GenericItem::Fluid { name, temperature } => {
-                        // log::info!(
-                        //     "检测到流体 {}，温度范围: {:?}",
-                        //     name,
-                        //     temperature
-                        // );
                         fluids
                             .entry(name.clone())
                             .or_insert(HashSet::new())
@@ -181,11 +177,34 @@ impl FactoryInstance {
                 }
             }
         }
+        for (source, penalty) in &self.external.vec {
+            match source {
+                GenericItem::Fluid { name, temperature } => {
+                    fluids
+                        .entry(name.clone())
+                        .or_insert(HashSet::new())
+                        .insert(temperature.clone());
+                }
+                _ => {}
+            }
+        }
+        for target in &self.target.vec {
+            match &target.0 {
+                GenericItem::Fluid { name, temperature } => {
+                    fluids
+                        .entry(name.clone())
+                        .or_insert(HashSet::new())
+                        .insert(temperature.clone());
+                }
+                _ => {}
+            }
+        }
+        let mut aux_idx = 0;
         for (fluid, temperatures) in &fluids {
             // 添加将限定更严格的温度转换为更宽松的温度的流
             for narrow in temperatures {
                 for broad in temperatures {
-                    if narrow[0] > broad[0] && narrow[1] < broad[1] {
+                    if narrow[0] >= broad[0] && narrow[1] <= broad[1] && narrow != broad {
                         let mut flow = Flow::new();
                         flow.insert(
                             GenericItem::Fluid {
@@ -201,16 +220,10 @@ impl FactoryInstance {
                             },
                             1.0,
                         );
-                        // log::info!(
-                        //     "添加温度转换流: {} {}~{} -> {}~{}",
-                        //     fluid,
-                        //     narrow[0],
-                        //     narrow[1],
-                        //     broad[0],
-                        //     broad[1]
-                        // );
+                        log::info!("添加温度转换流 {}：{:?} -> {:?}", fluid, narrow, broad);
                         // 温度转换代价为 0
-                        flows.insert((usize::MAX, usize::MAX), (flow, 0.0));
+                        flows.insert((usize::MAX, aux_idx), (flow, 0.0));
+                        aux_idx += 1;
                     }
                 }
             }
@@ -614,7 +627,7 @@ impl FactoryInstance {
                             },
                         ));
                     }
-                    self.external.push((GenericItem::Electricity, 200.0));
+                    self.external.push((GenericItem::Electricity, 16.0));
                     for (pollution, _) in &data.airborne_pollutants {
                         self.external.push((
                             GenericItem::Pollution {
@@ -769,9 +782,6 @@ impl FactoryInstance {
             });
         });
         // 无关
-        if changed {
-            self.as_problem(data, proj);
-        };
         changed
     }
 }

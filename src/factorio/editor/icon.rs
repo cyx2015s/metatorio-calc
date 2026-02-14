@@ -152,16 +152,63 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                     .with_size(self.size)
                     .with_stroke(self.stroke),
             ),
-            GenericItem::Fluid {
-                name,
-                temperature: _,
-            } => ui.add_sized(
-                [self.size, self.size],
-                Icon::new(self.data, "fluid", name)
-                    .with_quality(0)
-                    .with_size(self.size)
-                    .with_stroke(self.stroke),
-            ),
+            GenericItem::Fluid { name, temperature } => {
+                let main = ui.add_sized(
+                    [self.size, self.size],
+                    Icon::new(self.data, "fluid", name)
+                        .with_quality(0)
+                        .with_size(self.size)
+                        .with_stroke(self.stroke),
+                );
+                let bottom = main.rect.split_top_bottom_at_fraction(0.5).1;
+                match temperature {
+                    [i32::MIN, i32::MAX] => {}
+                    [min, i32::MAX] => {
+                        ui.put(
+                            bottom,
+                            egui::Label::new(
+                                egui::RichText::new(format!(">={min}°C"))
+                                    .color(egui::Color32::WHITE)
+                                    .small(),
+                            ),
+                        );
+                    }
+                    [i32::MIN, max] => {
+                        ui.put(
+                            bottom,
+                            egui::Label::new(
+                                egui::RichText::new(format!("<={max}°C"))
+                                    .color(egui::Color32::WHITE)
+                                    .small(),
+                            ),
+                        );
+                    }
+                    [min, max] => {
+                        if min == max {
+                            ui.put(
+                                bottom,
+                                egui::Label::new(
+                                    egui::RichText::new(format!("{min}°C"))
+                                        .color(egui::Color32::WHITE)
+                                        .small(),
+                                )
+                                .selectable(false),
+                            );
+                        } else {
+                            ui.put(
+                                bottom,
+                                egui::Label::new(
+                                    egui::RichText::new(format!("{min}~\n{max}°C"))
+                                        .color(egui::Color32::WHITE)
+                                        .small(),
+                                )
+                                .selectable(false),
+                            );
+                        }
+                    }
+                }
+                main
+            }
             GenericItem::Entity(IdWithQuality(name, quality)) => {
                 let main = ui.add_sized(
                     [self.size, self.size],
