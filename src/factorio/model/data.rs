@@ -10,6 +10,7 @@ use std::{
 
 use indexmap::IndexMap;
 use serde_json::Value;
+use serde_with::{DefaultOnError, serde_as};
 
 use crate::{concept::*, error::AppError, factorio::*};
 
@@ -634,6 +635,11 @@ impl DataContext {
     }
 }
 
+fn i32_inf_range() -> [i32; 2] {
+    [i32::MIN, i32::MAX]
+}
+
+#[serde_as]
 #[derive(Debug, Clone, Hash, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(u8)]
 pub enum GenericItem {
@@ -641,6 +647,8 @@ pub enum GenericItem {
     Fluid {
         name: String,
         /// f64 不可 Hash，近似为 i32 表示温度，
+        #[serde_as(deserialize_as = "DefaultOnError")]
+        #[serde(default = "i32_inf_range")]
         temperature: [i32; 2],
     },
     Entity(IdWithQuality),

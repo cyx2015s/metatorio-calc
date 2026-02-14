@@ -79,6 +79,9 @@ impl Default for FactoryInstance {
             total_flow: IndexMap::new(),
             total_flow_sorted_keys: Vec::new(),
         }
+        .with_mechanic(RecipeMechanic::default())
+        .with_mechanic(MiningMechanic::default())
+        .with_mechanic(ItemFuelMechanic::default())
     }
 }
 
@@ -927,12 +930,7 @@ impl SubView for ProjectInstance {
                             }
                             if ui.button("+ 新建工厂").clicked() {
                                 let name = "新工厂".to_string();
-                                self.factories.push(
-                                    FactoryInstance::new(name)
-                                        .with_mechanic(RecipeMechanic::default())
-                                        .with_mechanic(MiningMechanic::default())
-                                        .with_mechanic(ItemFuelMechanic::default()),
-                                );
+                                self.factories.push(FactoryInstance::new(name));
                             }
                             ui.separator();
                             self.factories.dnd(
@@ -1121,6 +1119,18 @@ impl SubView for ProjectView {
                         .pick_file()
                         && let Some(mut project) = load_project(&path)
                     {
+                        let makeup_factory = FactoryInstance::default();
+                        for factory in &mut project.factories.vec {
+                            for mechanic in &makeup_factory.mechanics {
+                                if !factory
+                                    .mechanics
+                                    .iter()
+                                    .any(|m| m.typetag_name() == mechanic.typetag_name())
+                                {
+                                    factory.mechanics.push(mechanic.clone());
+                                }
+                            }
+                        }
                         project.reset_factory_channel();
                         project.set_data(self.data.clone());
                         update_accessibles(&mut project.proj, &project.data);

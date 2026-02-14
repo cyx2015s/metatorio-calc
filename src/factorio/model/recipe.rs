@@ -648,6 +648,7 @@ fn test_recipe_normalized() {
     println!("Recipe Result with Location: {:?}", result_with_location);
 }
 
+#[serde_as]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename = "factorio:recipe", default)]
 #[derive(Default)]
@@ -663,7 +664,7 @@ pub struct RecipeMechanic {
     pub new_machine_preference: Option<IdWithQuality>,
 
     pub enumerate_modules: Vec<IdWithQuality>,
-
+    #[serde_with(DefaultOnError)]
     pub enumerate_beacons: Vec<AutoBeaconConfig>,
 
     #[serde(skip)]
