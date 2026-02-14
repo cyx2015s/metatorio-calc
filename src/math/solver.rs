@@ -291,11 +291,11 @@ where
         }
         for (item_id, cost) in &self.sources {
             let var = source_vars.get(item_id).unwrap();
-            optimization_expr += *cost / get_multiplier(item_id) * *var;
+            optimization_expr += *cost * *var;
         }
         for (item_id, cost) in &self.sinks {
             let var = sink_vars.get(item_id).unwrap();
-            optimization_expr += *cost / get_multiplier(item_id) * *var;
+            optimization_expr += *cost * *var;
         }
         if !no_providers.is_empty() {
             log::warn!("没有来源的物品：{:?}", &no_providers);

@@ -31,6 +31,12 @@ pub fn factorio_auto_planner(
     let instant = Instant::now();
     factory.strict_source = true;
     let mut problem = factory.as_problem(&data, &proj);
+    log::info!(
+        "构建求解器问题完成，变量数量: {}, 用时: {:.2?}",
+        problem.flows.len(),
+        instant.elapsed()
+    );
+    let instant = Instant::now();
     let solution = problem.solve();
     match solution {
         Ok(solution) => {
