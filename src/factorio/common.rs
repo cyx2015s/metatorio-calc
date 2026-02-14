@@ -742,7 +742,7 @@ pub fn get_reverse_order_info(order_info: &OrderInfo) -> ReverseOrderInfo {
 
 /// Helper function to generate sort key for a GenericItem
 /// Returns (category, order_info, name) tuple for sorting
-fn get_generic_item_sort_key<'a>(
+pub fn get_generic_item_sort_key<'a>(
     item: &'a GenericItem,
     data: &'a DataContext,
 ) -> (usize, (usize, usize, usize), &'a str) {

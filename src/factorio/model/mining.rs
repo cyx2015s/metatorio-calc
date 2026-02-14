@@ -648,7 +648,6 @@ impl FactorioMechanic for MiningMechanic {
         proj: &ProjectContext,
         factory: &FactoryContext,
     ) {
-        self.instances.clear();
         for resource in data.resources.values() {
             if let Some(_mining) = resource.base.minable.as_ref() {
                 let machine = select_miner_for_resource(data, proj, factory, resource, &[]);

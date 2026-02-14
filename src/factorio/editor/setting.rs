@@ -77,8 +77,6 @@ impl egui::Widget for UserContextEditor<'_> {
                         recursively_unlock = Some(name.clone());
                     }
                     recalc_accessible = true;
-                } else {
-                    recalc_accessible = true;
                 }
                 if ui.button("删除").clicked() {
                     recalc_accessible = true;

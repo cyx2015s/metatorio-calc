@@ -1167,7 +1167,6 @@ impl FactorioMechanic for RecipeMechanic {
         proj: &ProjectContext,
         factory: &FactoryContext,
     ) {
-        self.instances.clear();
         for (recipe_name, recipe_proto) in &data.recipes {
             if !proj.is_prototype_accessible("recipe", recipe_name) && !recipe_proto.enabled {
                 continue;
