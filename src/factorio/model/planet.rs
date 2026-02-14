@@ -121,9 +121,11 @@ impl PlanetPrototype {
                     .contains_key(&autoplace.control)
                 {
                     // 别判断密度了，认为启用就行了
+                    let fluid_prototype = data.fluids.get(fluid).unwrap();
+                    let default_temperature = fluid_prototype.default_temperature as i32;
                     items.insert(GenericItem::Fluid {
                         name: fluid.clone(),
-                        temperature: None,
+                        temperature: [default_temperature, default_temperature],
                     });
                 } else {
                     // TODO
@@ -135,9 +137,11 @@ impl PlanetPrototype {
                         .settings
                         .contains_key(tile.base.name.as_str())
                     {
+                        let fluid_prototype = data.fluids.get(fluid).unwrap();
+                        let default_temperature = fluid_prototype.default_temperature as i32;
                         items.insert(GenericItem::Fluid {
                             name: fluid.clone(),
-                            temperature: None,
+                            temperature: [default_temperature, default_temperature],
                         });
                     }
                 }

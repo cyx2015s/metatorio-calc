@@ -641,7 +641,7 @@ pub enum GenericItem {
     Fluid {
         name: String,
         /// f64 不可 Hash，近似为 i32 表示温度，
-        temperature: Option<i32>,
+        temperature: [i32; 2],
     },
     Entity(IdWithQuality),
     Heat,

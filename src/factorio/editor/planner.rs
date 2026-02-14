@@ -1,4 +1,5 @@
 use std::{
+    collections::{HashMap, HashSet},
     io::BufReader,
     path::Path,
     sync::{Arc, mpsc::*},
@@ -127,7 +128,7 @@ impl FactoryInstance {
         {
             self.reset_instances();
         }
-        let flows = self
+        let mut flows = self
             .instances
             .iter()
             .map(|(idx, jdx)| {
@@ -140,7 +141,7 @@ impl FactoryInstance {
                     ),
                 )
             })
-            .collect();
+            .collect::<IndexMap<_, _>>();
 
         let target = self
             .target
@@ -161,6 +162,59 @@ impl FactoryInstance {
                 )
             })
             .collect();
+        let mut fluids = HashMap::new();
+        for (flow, _) in flows.values() {
+            for (item, _) in flow {
+                match item {
+                    GenericItem::Fluid { name, temperature } => {
+                        // log::info!(
+                        //     "检测到流体 {}，温度范围: {:?}",
+                        //     name,
+                        //     temperature
+                        // );
+                        fluids
+                            .entry(name.clone())
+                            .or_insert(HashSet::new())
+                            .insert(temperature.clone());
+                    }
+                    _ => {}
+                }
+            }
+        }
+        for (fluid, temperatures) in &fluids {
+            // 添加将限定更严格的温度转换为更宽松的温度的流
+            for narrow in temperatures {
+                for broad in temperatures {
+                    if narrow[0] > broad[0] && narrow[1] < broad[1] {
+                        let mut flow = Flow::new();
+                        flow.insert(
+                            GenericItem::Fluid {
+                                name: fluid.clone(),
+                                temperature: narrow.clone(),
+                            },
+                            -1.0,
+                        );
+                        flow.insert(
+                            GenericItem::Fluid {
+                                name: fluid.clone(),
+                                temperature: broad.clone(),
+                            },
+                            1.0,
+                        );
+                        // log::info!(
+                        //     "添加温度转换流: {} {}~{} -> {}~{}",
+                        //     fluid,
+                        //     narrow[0],
+                        //     narrow[1],
+                        //     broad[0],
+                        //     broad[1]
+                        // );
+                        // 温度转换代价为 0
+                        flows.insert((usize::MAX, usize::MAX), (flow, 0.0));
+                    }
+                }
+            }
+        }
         SolverData::new(target, flows)
             .with_sources(external)
             .with_strict_source(self.strict_source)

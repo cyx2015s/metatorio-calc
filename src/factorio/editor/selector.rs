@@ -357,7 +357,7 @@ pub fn generic_item_selector(
                         selected,
                         GenericItem::Fluid {
                             name: "fluid-unknown".to_string(),
-                            temperature: None,
+                            temperature: [i32::MIN, i32::MAX],
                         },
                         "流体",
                     )
@@ -434,25 +434,26 @@ pub fn generic_item_selector(
                             .with_selector(Selector::new(data, "fluid").with_current(name)),
                     )
                     .changed();
-                if let Some(temp) = temperature {
-                    let mut cur_temp = *temp;
+                let [min, max] = temperature;
+                if min == max {
+                    let mut cur_temp = *min;
                     ui.horizontal(|ui| {
                         changed |= ui.add(drag_value(&mut cur_temp).speed(1)).changed();
 
                         if ui.button("无温度").clicked() {
-                            *temperature = None;
+                            *temperature = [i32::MIN, i32::MAX];
                             changed = true;
                         } else {
-                            *temperature = Some(cur_temp);
+                            *temperature = [cur_temp, cur_temp];
                         }
                     });
                 } else if ui.button("附加温度").clicked() {
-                    *temperature = Some(
-                        data.fluids
-                            .get(name)
-                            .map(|f| f.default_temperature)
-                            .unwrap_or(15.0) as i32,
-                    );
+                    let default = data
+                        .fluids
+                        .get(name)
+                        .map(|f| f.default_temperature)
+                        .unwrap_or(15.0) as i32;
+                    *temperature = [default, default];
                     changed = true;
                 }
             }

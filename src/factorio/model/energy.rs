@@ -154,7 +154,7 @@ pub fn energy_source_as_flow(
                         &mut map,
                         GenericItem::Fluid {
                             name: actual_fuel.0.clone(),
-                            temperature: None,
+                            temperature: [actual_fuel.1, actual_fuel.1],
                         },
                         -fuel_burn_speed,
                     );
@@ -210,7 +210,7 @@ pub fn energy_source_as_flow(
                         &mut map,
                         GenericItem::Fluid {
                             name: actual_fuel.0.clone(),
-                            temperature: None,
+                            temperature: [actual_fuel.1, actual_fuel.1],
                         },
                         -fuel_burn_speed,
                     );

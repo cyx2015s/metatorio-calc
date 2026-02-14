@@ -201,7 +201,7 @@ impl AsFlow for MiningMechanicInstance {
         {
             let fluid_item = GenericItem::Fluid {
                 name: fluid,
-                temperature: None,
+                temperature: [i32::MIN, i32::MAX],
             };
             // TODO: 流体消耗受 drain_rate 影响吗？
             // 实际值还要除以 10
@@ -242,10 +242,17 @@ impl AsFlow for MiningMechanicInstance {
                         RecipeResult::Item(r) => {
                             GenericItem::Entity(IdWithQuality(r.name.clone(), 0))
                         }
-                        RecipeResult::Fluid(r) => GenericItem::Fluid {
-                            name: r.name.clone(),
-                            temperature: None,
-                        },
+                        RecipeResult::Fluid(r) => {
+                            let default_temperature =
+                                data.fluids
+                                    .get(&r.name)
+                                    .map(|f| f.default_temperature)
+                                    .unwrap_or(15.0) as i32;
+                            GenericItem::Fluid {
+                                name: r.name.clone(),
+                                temperature: [default_temperature, default_temperature],
+                            }
+                        }
                     };
                     match result {
                         RecipeResult::Item(r) => {

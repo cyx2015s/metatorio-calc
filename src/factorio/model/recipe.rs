@@ -1,4 +1,4 @@
-use std::{collections::HashSet, fmt::Debug};
+use std::{collections::HashSet, fmt::Debug, i32};
 
 use serde_with::{DefaultOnError, serde_as};
 
@@ -523,10 +523,20 @@ impl AsFlow for RecipeMechanicInstance {
                         );
                     }
                     RecipeIngredient::Fluid(fluid) => {
+                        let min_temperature = fluid
+                            .temperature
+                            .or(fluid.min_temperature)
+                            .map_or(i32::MIN, |t| t as i32);
+
+                        let max_temperature = fluid
+                            .temperature
+                            .or(fluid.max_temperature)
+                            .map_or(i32::MAX, |t| t as i32);
+
                         let key = GenericItem::Fluid {
                             name: fluid.name.clone(),
                             // temperature: fluid.temperature.map(|x| x as i32),
-                            temperature: None,
+                            temperature: [min_temperature, max_temperature],
                         };
                         index_map_update_entry(
                             &mut map,
@@ -571,10 +581,21 @@ impl AsFlow for RecipeMechanicInstance {
                         }
                     }
                     RecipeResult::Fluid(fluid) => {
+                        let default_temperature = fluid
+                            .temperature
+                            .or(fluid.min_temperature)
+                            .or(fluid.max_temperature)
+                            .unwrap_or(
+                                data.fluids
+                                    .get(&fluid.name)
+                                    .as_ref()
+                                    .unwrap()
+                                    .default_temperature,
+                            );
                         let key = GenericItem::Fluid {
                             name: fluid.name.clone(),
                             // temperature: fluid.temperature.map(|x| x as i32),
-                            temperature: None,
+                            temperature: [default_temperature as i32, default_temperature as i32],
                         };
                         let (base_yield, extra_yield) = fluid.normalized_output();
                         index_map_update_entry(
