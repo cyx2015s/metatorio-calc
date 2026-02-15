@@ -202,7 +202,7 @@ impl FactoryInstance {
                 }
             }
         }
-        for (source, _) in &self.external.vec {
+        for (source, _) in &external {
             if let GenericItem::Fluid { name, temperature } = source {
                 fluids
                     .entry(name.clone())
@@ -210,7 +210,7 @@ impl FactoryInstance {
                     .insert(*temperature);
             }
         }
-        for target in &self.target.vec {
+        for target in &target {
             if let GenericItem::Fluid { name, temperature } = &target.0 {
                 fluids
                     .entry(name.clone())
