@@ -1203,6 +1203,7 @@ impl FactorioMechanic for RecipeMechanic {
                 && !surface_condition_satisfied(
                     &recipe_proto.surface_conditions,
                     &planet.surface_properties,
+                    &data.surface_properties,
                 )
             {
                 continue;
@@ -1238,6 +1239,7 @@ impl FactorioMechanic for RecipeMechanic {
                         && !surface_condition_satisfied(
                             &machine_proto.base.surface_conditions,
                             &planet.surface_properties,
+                            &data.surface_properties
                         )
                     {
                         return;

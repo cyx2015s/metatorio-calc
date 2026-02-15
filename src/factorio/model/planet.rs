@@ -178,11 +178,15 @@ pub struct SurfaceCondition {
 pub fn surface_condition_satisfied(
     conditions: &[SurfaceCondition],
     properties: &Dict<f64>,
+    prototypes: &Dict<SurfacePropertyPrototype>,
 ) -> bool {
     for condition in conditions {
         let value = match properties.get(&condition.property) {
             Some(v) => *v,
-            None => continue, // 没有这个属性，跳过
+            None => prototypes
+                .get(&condition.property)
+                .map(|proto| proto.default_value)
+                .unwrap_or(0.0),
         };
         if let Some(min) = condition.min {
             if value < min {
