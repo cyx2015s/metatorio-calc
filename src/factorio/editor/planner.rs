@@ -158,7 +158,7 @@ impl FactoryInstance {
                     amount * (if item.is_energy() { 1e6 } else { 1.0 });
                 acc
             });
-        let external = self
+        let mut external = self
             .external
             .iter()
             .map(|(item, penalty)| {
@@ -167,7 +167,29 @@ impl FactoryInstance {
                     if item.is_energy() { 1e-6 } else { 1.0 } * penalty,
                 )
             })
-            .collect();
+            .collect::<IndexMap<_, _>>();
+
+        if let Some(planet_name) = &self.factory.planet
+            && let Some(planet) = data.planets.get(planet_name)
+        {
+            let autoplaced = planet.collect_autoplaced(data);
+            for item in &autoplaced {
+                if !external.contains_key(item) {
+                    external.insert(item.clone(), 0.0);
+                }
+            }
+            if !external.contains_key(&GenericItem::Electricity) {
+                external.insert(GenericItem::Electricity, 1e-6);
+            }
+            for pollutant in data.airborne_pollutants.keys() {
+                let key = GenericItem::Pollution {
+                    name: pollutant.clone(),
+                };
+                if !external.contains_key(&key) {
+                    external.insert(key, 1.0);
+                }
+            }
+        }
 
         let mut fluids = HashMap::new();
         for (flow, _) in flows.values() {
@@ -638,23 +660,15 @@ impl FactoryInstance {
                     self.external.clear();
                     let available = planet.collect_autoplaced(data);
                     for item in &available {
-                        self.external.push((
-                            item.clone(),
-                            match item {
-                                GenericItem::Fluid { .. } => 1.0 / 200.0,
-                                GenericItem::Entity(..) => 64.0,
-                                GenericItem::Item(..) => 64.0,
-                                _ => 1.0,
-                            },
-                        ));
+                        self.external.push((item.clone(), 0.0));
                     }
-                    self.external.push((GenericItem::Electricity, 16.0));
+                    self.external.push((GenericItem::Electricity, 1.0));
                     for pollution in data.airborne_pollutants.keys() {
                         self.external.push((
                             GenericItem::Pollution {
                                 name: pollution.clone(),
                             },
-                            1024.0,
+                            0.0,
                         ));
                     }
                     *changed = true;
