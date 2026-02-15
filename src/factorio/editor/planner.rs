@@ -24,8 +24,10 @@ use crate::{
 
 use indexmap::IndexMap;
 
-#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
-pub struct FactoryContext {}
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct FactoryContext {
+    pub planet: Option<String>,
+}
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
@@ -58,6 +60,7 @@ impl Clone for FactoryInstance {
             total_flow_sorted_keys: self.total_flow_sorted_keys.clone(),
             mechanics: self.mechanics.clone(),
             instances: self.instances.clone(),
+            factory: self.factory.clone(),
             ..Default::default()
         }
     }
@@ -485,6 +488,30 @@ impl FactoryInstance {
             self.external_editor(ui, data, proj, changed, need_suggestions);
         });
         ui.separator();
+        ui.heading("环境");
+        ui.horizontal_wrapped(|ui| {
+            let mut planet_name = self.factory.planet.clone();
+
+            egui::ComboBox::from_label("星球")
+                .selected_text(
+                    planet_name
+                        .as_ref()
+                        .map(|name| data.get_display_name("space-location", name))
+                        .unwrap_or("无".into()),
+                )
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut planet_name, None, "无");
+                    for (name, _) in &data.planets {
+                        ui.selectable_value(
+                            &mut planet_name,
+                            Some(name.clone()),
+                            data.get_display_name("space-location", name),
+                        );
+                    }
+                });
+            self.factory.planet = planet_name;
+        });
+
         ui.heading("游戏机制");
         for mechanic in self.mechanics.iter_mut() {
             ui.separator();

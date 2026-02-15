@@ -52,6 +52,7 @@ pub struct DataContext {
 
     /// 地点
     pub planets: Dict<PlanetPrototype>,
+    pub surface_properties: Dict<SurfacePropertyPrototype>,
 
     /// 品质
     pub qualities: Vec<QualityPrototype>,

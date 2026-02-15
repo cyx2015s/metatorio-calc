@@ -16,6 +16,8 @@ pub struct PlanetPrototype {
     pub pollutant_type: Option<String>,
     #[serde(default)]
     pub map_gen_settings: PlanetPrototypeMapGenSettings,
+    #[serde(default)]
+    pub surface_properties: Dict<f64>,
 }
 
 impl HasPrototypeBase for PlanetPrototype {
@@ -150,4 +152,48 @@ impl PlanetPrototype {
 
         items
     }
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct SurfacePropertyPrototype {
+    #[serde(flatten)]
+    pub base: PrototypeBase,
+
+    pub default_value: f64,
+}
+
+impl HasPrototypeBase for SurfacePropertyPrototype {
+    fn base(&self) -> &PrototypeBase {
+        &self.base
+    }
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct SurfaceCondition {
+    pub property: String,
+    pub min: Option<f64>,
+    pub max: Option<f64>,
+}
+
+pub fn surface_condition_satisfied(
+    conditions: &[SurfaceCondition],
+    properties: &Dict<f64>,
+) -> bool {
+    for condition in conditions {
+        let value = match properties.get(&condition.property) {
+            Some(v) => *v,
+            None => continue, // 没有这个属性，跳过
+        };
+        if let Some(min) = condition.min {
+            if value < min {
+                return false;
+            }
+        }
+        if let Some(max) = condition.max {
+            if value > max {
+                return false;
+            }
+        }
+    }
+    true
 }

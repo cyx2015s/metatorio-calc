@@ -1,6 +1,6 @@
-use serde_with::serde_as;
+use serde_with::{DefaultOnError, serde_as};
 
-use crate::factorio::{common::*, model::recipe::*};
+use crate::factorio::{SurfaceCondition, common::*, model::recipe::*};
 
 pub const ENTITY_TYPES: &[&str] = &[
     // "arrow",
@@ -138,7 +138,9 @@ pub const ENTITY_TYPES: &[&str] = &[
     // "tile-ghost",
 ];
 
-#[derive(Debug, Clone, serde::Deserialize)]
+#[serde_as]
+#[derive(Debug, Default, Clone, serde::Deserialize)]
+#[serde(default)]
 pub struct EntityPrototype {
     #[serde(flatten)]
     pub base: PrototypeBase,
@@ -150,6 +152,9 @@ pub struct EntityPrototype {
     pub minable: Option<MiningProperty>,
     /// 具有 Autoplace 属性的原型实体可以自动看作无限源
     pub autoplace: Option<AutoplaceSpecification>,
+
+    #[serde_as(deserialize_as = "DefaultOnError")]
+    pub surface_conditions: Vec<SurfaceCondition>,
 }
 
 #[serde_as]

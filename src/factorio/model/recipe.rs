@@ -6,7 +6,7 @@ use crate::{
     comb::Compositions,
     concept::*,
     factorio::{
-        DataContext, ProjectContext,
+        DataContext, ProjectContext, SurfaceCondition,
         common::*,
         editor::{hover::PrototypeHover, icon::Icon},
         modal::SelectorModal,
@@ -20,6 +20,7 @@ use crate::{
         module_effects_allowed,
         planner::FactoryContext,
         selector::Selector,
+        surface_condition_satisfied,
     },
     math::ElemVec,
 };
@@ -40,6 +41,9 @@ pub struct RecipePrototype {
     pub base: PrototypeBase,
 
     category: Option<String>,
+    #[serde_as(deserialize_as = "DefaultOnError")]
+    surface_conditions: Vec<SurfaceCondition>,
+
     #[serde_as(deserialize_as = "DefaultOnError")]
     additional_categories: Vec<String>,
 
@@ -102,6 +106,7 @@ impl Default for RecipePrototype {
                 hidden: false,
                 parameter: false,
             },
+            surface_conditions: Vec::new(),
             main_product: None,
             category: None,
             additional_categories: Vec::new(),
@@ -1193,6 +1198,15 @@ impl FactorioMechanic for RecipeMechanic {
             if !proj.is_prototype_accessible("recipe", recipe_name) && !recipe_proto.enabled {
                 continue;
             }
+            if let Some(planet_name) = &factory.planet
+                && let Some(planet) = data.planets.get(planet_name)
+                && !surface_condition_satisfied(
+                    &recipe_proto.surface_conditions,
+                    &planet.surface_properties,
+                )
+            {
+                continue;
+            }
             let quality_range = if recipe_proto
                 .ingredients
                 .iter()
@@ -1219,6 +1233,16 @@ impl FactorioMechanic for RecipeMechanic {
             }
             machines.iter().for_each(|machine_name| {
                 if let Some(machine_proto) = data.crafters.get(&machine_name.0) {
+                    if let Some(planet_name) = &factory.planet
+                        && let Some(planet) = data.planets.get(planet_name)
+                        && !surface_condition_satisfied(
+                            &machine_proto.base.surface_conditions,
+                            &planet.surface_properties,
+                        )
+                    {
+                        return;
+                    }
+
                     let (allowed_effects, option_allowed_modules) =
                         collect_module_limitations(machine_proto, recipe_proto);
                     let allowed_effects = Some(allowed_effects);
