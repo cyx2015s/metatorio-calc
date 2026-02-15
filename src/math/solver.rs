@@ -19,16 +19,6 @@ where
     result
 }
 
-/// 返回值仅用作 AsFlowEditor 的唯一标识符
-#[allow(clippy::borrowed_box)]
-pub fn box_as_ptr<T: ?Sized>(b: &Box<T>) -> usize {
-    &**b as *const T as *const () as usize
-}
-
-pub fn ref_as_ptr<T: ?Sized>(r: &T) -> usize {
-    r as *const T as *const () as usize
-}
-
 #[derive(Debug, Clone)]
 pub struct SolverData<I, R>
 where
@@ -170,18 +160,7 @@ where
         let mut flow_multipliers = HashMap::new();
         for (flow_id, _flow) in &self.flows {
             flow_multipliers.insert(flow_id.clone(), 1.0_f64);
-            // for (item, &amount) in &flow.0 {
-            //     if amount.abs() > flow_multipliers[flow_id] {
-            //         log::info!(
-            //             "求解器：配方 {:?} 中物品 {:?} 的数量级 {} 大于当前最大数量级 {}, 更新最大数量级",
-            //             flow_id,
-            //             item,
-            //             amount.abs(),
-            //             flow_multipliers[flow_id]
-            //         );
-            //         flow_multipliers.insert(flow_id.clone(), amount.abs());
-            //     }
-            // }
+            // TODO
         }
         for (flow_id, multiplier) in &flow_multipliers {
             if *multiplier > 1e-6 {
