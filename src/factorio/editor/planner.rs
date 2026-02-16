@@ -86,6 +86,7 @@ impl Default for FactoryInstance {
         .with_mechanic(MiningMechanic::default())
         .with_mechanic(ItemFuelMechanic::default())
         .with_mechanic(GeneratorMechanic::default())
+        .with_mechanic(BoilerMechanic::default())
     }
 }
 
@@ -178,11 +179,6 @@ impl FactoryInstance {
                 if !external.contains_key(item) && !target.contains_key(item) {
                     external.insert(item.clone(), 0.0);
                 }
-            }
-            if !external.contains_key(&GenericItem::Electricity)
-                && !target.contains_key(&GenericItem::Electricity)
-            {
-                external.insert(GenericItem::Electricity, 1e-6);
             }
             for pollutant in data.airborne_pollutants.keys() {
                 let key = GenericItem::Pollution {
@@ -665,7 +661,6 @@ impl FactoryInstance {
                     for item in &available {
                         self.external.push((item.clone(), 0.0));
                     }
-                    self.external.push((GenericItem::Electricity, 1.0));
                     for pollution in data.airborne_pollutants.keys() {
                         self.external.push((
                             GenericItem::Pollution {
