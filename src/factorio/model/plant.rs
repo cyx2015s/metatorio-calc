@@ -145,17 +145,14 @@ impl FactorioMechanic for PlantMechanic {
             if let Some(plant_property) = item.plant.as_ref() {
                 let plant = data.plants.get(&plant_property.plant_result).unwrap();
                 if let Some(planet) = factory.planet.as_ref()
-                    && let Some(planet_prototype) = data.planets.get(planet)
+                    && item
+                        .default_import_location
+                        .as_ref()
+                        .is_some_and(|loc| loc == planet)
                 {
-                    if surface_condition_satisfied(
-                        &plant.base.surface_conditions,
-                        &planet_prototype.surface_properties,
-                        &data.surface_properties,
-                    ) {
-                        self.instances.push(PlantMechanicInstance {
-                            seed: item.base.name.clone().into(),
-                        });
-                    }
+                    self.instances.push(PlantMechanicInstance {
+                        seed: item.base.name.clone().into(),
+                    });
                 }
             }
         }

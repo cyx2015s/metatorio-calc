@@ -50,6 +50,9 @@ pub struct ItemPrototype {
 
     /// Entity
     pub place_result: Option<String>,
+
+    ///
+    pub default_import_location: Option<String>,
 }
 
 impl Default for ItemPrototype {
@@ -65,6 +68,7 @@ impl Default for ItemPrototype {
             plant: None,
             place_as_tile: None,
             place_result: None,
+            default_import_location: None,
         }
     }
 }
