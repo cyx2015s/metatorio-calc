@@ -969,6 +969,7 @@ impl SubView for ProjectInstance {
                                 ui,
                                 "factories",
                                 |ui, real_idx, factory, handle, _, op| {
+                                    
                                     ui.horizontal(|ui| {
                                         handle.ui(ui, |ui| {
                                             ui.label("≡");

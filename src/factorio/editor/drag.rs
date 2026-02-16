@@ -23,7 +23,7 @@ where
         egui_dnd::dnd(ui, id_source).show_vec(&mut self.idx, |ui, real_idx, handle, state| {
             let mut op_request = EntryOpRequest::None;
             let item = &mut self.vec[*real_idx];
-            f(ui, virtual_idx, item, handle, state, &mut op_request);
+            f(ui, *real_idx, item, handle, state, &mut op_request);
             if let EntryOpRequest::Drop = op_request {
                 delete_target = Some(virtual_idx);
             }
