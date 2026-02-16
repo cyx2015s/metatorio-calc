@@ -1,7 +1,5 @@
 use std::collections::HashMap;
 
-use indexmap::IndexMap;
-
 use crate::{
     concept::Flow,
     factorio::{
@@ -16,10 +14,12 @@ pub fn energy_source_as_flow(
     energy_source: &EnergySource,
     energy_usage: &EnergyAmount,
     effects: &Effect,
+    // 如果是物品，第一个是内部名称，第二个是品质等级
+    // 如果是流体，第一个是内部名称，第二个是温度
     instance_fuel: &Option<(String, i32)>,
     fulfillment: &mut f64,
 ) -> Flow<GenericItem> {
-    let mut map = IndexMap::new();
+    let mut map = Flow::new();
 
     match energy_source {
         EnergySource::Electric(source) => {
@@ -32,7 +32,7 @@ pub fn energy_source_as_flow(
                     .drain
                     .as_ref()
                     .map(|d| d.amount * 60.0)
-                    .unwrap_or(energy_usage / 30.0),
+                    .unwrap_or_default(),
             );
             for (pollutant, emmision) in source
                 .emissions_per_minute

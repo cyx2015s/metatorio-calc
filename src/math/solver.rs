@@ -7,6 +7,7 @@ use std::fmt::Debug;
 use std::hash::Hash;
 use std::sync::mpsc::*;
 
+#[must_use]
 pub fn flow_add<T>(a: &Flow<T>, b: &Flow<T>, c: f64) -> Flow<T>
 where
     T: Eq + Hash + Clone,
@@ -227,9 +228,7 @@ where
             for (i_id, (sum_log, count)) in item_stats {
                 item_scales.insert(i_id, -(sum_log / count as f64));
             }
-            log::info!(
-                "第{i}轮数量级平衡完成。",
-            );
+            log::info!("第{i}轮数量级平衡完成。",);
             log::info!("target = {:?}, target_scale = {target_scale}", &self.target);
         }
         log::info!("数量级平衡完成",);
@@ -267,7 +266,11 @@ where
                 *entry += val * *var;
             }
         }
-        log::info!("求解器：一共有 {} 个物品需要平衡，矩阵元素的最大数量级为 {:.2}", item_balances.len(), extreme);
+        log::info!(
+            "求解器：一共有 {} 个物品需要平衡，矩阵元素的最大数量级为 {:.2}",
+            item_balances.len(),
+            extreme
+        );
         for (item_id, _) in &self.sources {
             let var = problem_variables.add(variable().min(0));
             source_vars.insert(item_id.clone(), var);
@@ -307,7 +310,10 @@ where
             // 目标物品，严格相等
             let balance = item_balances.get(item_id);
             if let Some(expr) = balance {
-                targets.push(expr.clone().eq(amount * get_item_scale(item_id) * target_scale));
+                targets.push(
+                    expr.clone()
+                        .eq(amount * get_item_scale(item_id) * target_scale),
+                );
             }
         }
         let mut constraints = Vec::new();

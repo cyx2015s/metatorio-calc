@@ -490,17 +490,29 @@ impl AsFlow for RecipeMechanicInstance {
                 let quality = &data.qualities[quality_level];
                 base_speed *= quality.crafting_machine_speed_multiplier();
             }
+            let energy_usage = crafter
+                .energy_usage
+                .as_ref()
+                .expect("CraftingMachinePrototype 中的机器没有能量消耗");
+
             let energy_related_flow = energy_source_as_flow(
                 data,
                 &crafter.energy_source,
-                crafter
-                    .energy_usage
-                    .as_ref()
-                    .expect("CraftingMachinePrototype 中的机器没有能量消耗"),
+                energy_usage,
                 &module_effects,
                 &self.instance_fuel,
                 &mut base_speed,
             );
+            if let EnergySource::Electric(e) = &crafter.energy_source {
+                if e.drain.is_none() {
+                    // 没有写drain的组装机，按照常态能量消耗的1/30计算drain
+                    index_map_update_entry(
+                        &mut map,
+                        GenericItem::Electricity,
+                        -energy_usage.amount * 60.0 / 30.0,
+                    );
+                }
+            }
             for (key, value) in energy_related_flow.into_iter() {
                 index_map_update_entry(&mut map, key, value);
             }
@@ -1239,7 +1251,7 @@ impl FactorioMechanic for RecipeMechanic {
                         && !surface_condition_satisfied(
                             &machine_proto.base.surface_conditions,
                             &planet.surface_properties,
-                            &data.surface_properties
+                            &data.surface_properties,
                         )
                     {
                         return;

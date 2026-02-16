@@ -79,6 +79,7 @@ pub struct DataContext {
     pub resource_categories: Dict<PrototypeBase>,
 
     /// 流体相关
+    pub boilers: Dict<BoilerPrototype>,
     pub generators: Dict<GeneratorPrototype>,
     /// 地块
     pub tiles: Dict<TilePrototype>,
@@ -125,7 +126,7 @@ impl DataContext {
                 .unwrap()
                 .as_str(),
         );
-        DataContext::load(&value.unwrap()).build_order_info()
+        DataContext::load(&value.unwrap()).build_utility_info()
     }
     pub fn load(value: &Value) -> Self {
         let groups = deserialize_type(value, "item-group");
@@ -193,6 +194,7 @@ impl DataContext {
         }
         let planets = deserialize_type(value, "planet");
         let tiles = deserialize_type(value, "tile");
+        let boilers = deserialize_type(value, "boiler");
         let generators = deserialize_type(value, "generator");
         log::info!("数据加载完成");
         // ret.planets.iter().for_each(|(_, p)| {
@@ -218,6 +220,7 @@ impl DataContext {
             resource_categories,
             planets,
             tiles,
+            boilers,
             generators,
             ..Default::default()
         }
@@ -519,6 +522,10 @@ impl DataContext {
             .to_string()
     }
 
+    pub fn build_utility_info(self) -> Self {
+        self.build_order_info()
+    }
+
     pub fn build_order_info(mut self) -> Self {
         self.ordered_entries.insert(
             "fuel-category".to_string(),
@@ -756,7 +763,7 @@ pub fn make_located_generic_recipe(
 
 #[test]
 fn test_load_context() {
-    let factorio = DataContext::test_load().build_order_info();
+    let factorio = DataContext::test_load().build_utility_info();
     assert!(factorio.items.contains_key("iron-plate"));
     assert!(factorio.entities.contains_key("stone-furnace"));
     assert!(factorio.fluids.contains_key("water"));
@@ -765,14 +772,28 @@ fn test_load_context() {
     dbg!(factorio.recipes.get("electronic-circuit"));
     dbg!(factorio.crafters.get("oil-refinery"));
 
+    let water = factorio.fluids.get("water").unwrap();
     let steam = factorio.fluids.get("steam").unwrap();
     let steam_engine = factorio.generators.get("steam-engine").unwrap();
-
+    let steam_turbine = factorio.generators.get("steam-turbine").unwrap();
+    let boiler = factorio.boilers.get("boiler").unwrap();
+    let heat_exchanger = factorio.boilers.get("heat-exchanger").unwrap();
+    dbg!(&boiler);
     dbg!(steam_engine.get_output(steam, 100.0));
     assert!(dbg!(steam_engine.get_output(steam, 165.0)) == (30.0, 900_000.0));
     assert!(dbg!(steam_engine.get_output(steam, 500.0)).0 == 30.0);
-    let steam_turbine = factorio.generators.get("steam-turbine").unwrap();
     dbg!(steam_turbine.get_output(steam, 165.0));
     dbg!(steam_turbine.get_output(steam, 500.0));
     dbg!(steam_turbine.get_output(steam, 100.0));
+    dbg!(boiler.get_flow(&factorio, &water.base.name, 100.0, &None));
+    dbg!(boiler.get_flow(&factorio, &water.base.name, 15.0, &None));
+    dbg!(boiler.get_flow(
+        &factorio,
+        &water.base.name,
+        15.0,
+        &Some(("coal".to_string(), 0))
+    ));
+    dbg!(heat_exchanger.get_flow(&factorio, &water.base.name, 15.0, &None));
+    dbg!(heat_exchanger.get_flow(&factorio, &water.base.name, 50.0, &None));
+    assert!(dbg!(heat_exchanger.get_flow(&factorio, &steam.base.name, 15.0, &None)).is_empty());
 }

@@ -189,13 +189,15 @@ pub fn surface_condition_satisfied(
                 .unwrap_or(0.0),
         };
         if let Some(min) = condition.min
-            && value < min {
-                return false;
-            }
+            && value < min
+        {
+            return false;
+        }
         if let Some(max) = condition.max
-            && value > max {
-                return false;
-            }
+            && value > max
+        {
+            return false;
+        }
     }
     true
 }

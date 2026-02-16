@@ -867,7 +867,7 @@ impl ProjectInstance {
         let (factory_tx, factory_rx) = channel();
         log::info!("ProjectInstance::new() called.");
         ProjectInstance {
-            data: Arc::new(data.build_order_info()),
+            data: Arc::new(data.build_utility_info()),
             proj: ProjectContext::default().with_factory_sender(factory_tx),
             factory_receiver: factory_rx,
             ..Default::default()
@@ -969,7 +969,6 @@ impl SubView for ProjectInstance {
                                 ui,
                                 "factories",
                                 |ui, real_idx, factory, handle, _, op| {
-                                    
                                     ui.horizontal(|ui| {
                                         handle.ui(ui, |ui| {
                                             ui.label("≡");
@@ -1073,7 +1072,7 @@ pub struct ProjectView {
 impl ProjectView {
     pub fn new(data: DataContext) -> Self {
         ProjectView {
-            data: Arc::new(data.build_order_info()),
+            data: Arc::new(data.build_utility_info()),
             ignore_close: false,
             selected: None,
             projects: DndVec::new(),
