@@ -50,7 +50,7 @@ impl AsFlow for ItemFuelInstance {
     }
 
     fn cost(&self, _data: &DataContext, _proj: &ProjectContext, _factory: &FactoryContext) -> f64 {
-        0.25
+        0.0
     }
 }
 

@@ -147,23 +147,29 @@ impl egui::Widget for UserContextEditor<'_> {
         );
         ui.separator();
         ui.heading("采矿产能");
-        let mut mining_productivity = self.proj.mining_productivity * 100.0;
+        let mut mining_productivity = (self.proj.mining_productivity * 100.0) as i32;
         ui.add(
             DragValue::new(&mut mining_productivity)
                 .suffix("%")
-                .speed(1.0),
+                .speed(1)
+                .range(0..=100000),
         );
-        self.proj.mining_productivity = mining_productivity.floor() / 100.0;
+        self.proj.mining_productivity = mining_productivity as f64 / 100.0;
         ui.heading("配方产能");
 
         for (recipe_name, productivity) in self.proj.recipe_productivity.iter_mut() {
-            let mut value = *productivity * 100.0;
+            let mut value = (*productivity * 100.0) as i32;
             ui.horizontal(|ui| {
                 ui.add(Icon::new(self.data, "recipe", recipe_name));
                 ui.label(self.data.get_display_name("recipe", recipe_name));
-                ui.add(DragValue::new(&mut value).suffix("%").speed(1.0));
+                ui.add(
+                    DragValue::new(&mut value)
+                        .suffix("%")
+                        .speed(1)
+                        .range(0..=32770),
+                );
             });
-            *productivity = value.floor() / 100.0;
+            *productivity = value as f64 / 100.0;
         }
         response
     }

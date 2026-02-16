@@ -1,6 +1,199 @@
-use crate::factorio::Dict;
+use crate::{
+    concept::{EntryOpRequest, Flow, SolveContext},
+    factorio::{
+        AsFlow, DataContext, Dict, EntityPrototype, FactorioMechanic, GenericItem, IdWithQuality,
+        ProjectContext, RecipeResult, icon::Icon, index_map_update_entry, modal::SelectorModal,
+        planner::FactoryContext, selector::Selector, surface_condition_satisfied,
+    },
+    math::ElemVec,
+};
 
+#[derive(Debug, Clone, Default, serde::Deserialize)]
 pub struct PlantPrototype {
+    #[serde(flatten)]
+    pub base: EntityPrototype,
+
     pub growth_ticks: f64,
+    #[serde(default)]
     pub harvest_emmisions: Dict<f64>,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct PlantMechanic {
+    #[serde(skip)]
+    pub operations: Vec<(usize, EntryOpRequest)>,
+
+    pub instances: Vec<PlantMechanicInstance>,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct PlantMechanicInstance {
+    pub seed: IdWithQuality,
+}
+
+impl SolveContext for PlantMechanic {
+    type Game = DataContext;
+    type Item = GenericItem;
+}
+
+impl SolveContext for PlantMechanicInstance {
+    type Game = DataContext;
+    type Item = GenericItem;
+}
+
+impl AsFlow for PlantMechanicInstance {
+    fn as_flow(
+        &self,
+        data: &DataContext,
+        proj: &crate::factorio::ProjectContext,
+        factory: &crate::factorio::planner::FactoryContext,
+    ) -> crate::concept::Flow<Self::Item> {
+        let mut flow = Flow::new();
+        if let Some(item) = data.items.get(&self.seed.0) {
+            if let Some(plant) = item.plant.as_ref() {
+                let plant_result = &plant.plant_result;
+                if let Some(plant) = data.plants.get(plant_result) {
+                    index_map_update_entry(
+                        &mut flow,
+                        GenericItem::Item(self.seed.clone().into()),
+                        -1.0 / plant.growth_ticks * 60.0,
+                    );
+                    if let Some(minable) = plant.base.minable.as_ref() {
+                        if let Some(result) = &minable.result {
+                            index_map_update_entry(
+                                &mut flow,
+                                GenericItem::Item(result.clone().into()),
+                                1.0 / plant.growth_ticks * 60.0,
+                            );
+                        } else {
+                            for result in &minable.results {
+                                match result {
+                                    RecipeResult::Item(item) => {
+                                        index_map_update_entry(
+                                            &mut flow,
+                                            GenericItem::Item(item.name.clone().into()),
+                                            item.normalized_output().0 / plant.growth_ticks * 60.0,
+                                        );
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        flow
+    }
+
+    fn cost(&self, _data: &DataContext, _proj: &ProjectContext, _factory: &FactoryContext) -> f64 {
+        16.0
+    }
+}
+
+#[typetag::serde(name = "factorio:plant")]
+impl FactorioMechanic for PlantMechanic {
+    fn name(&self) -> String {
+        "种植".into()
+    }
+
+    fn editor_view(
+        &mut self,
+        ui: &mut egui::Ui,
+        data: &DataContext,
+        proj: &ProjectContext,
+        factory: &FactoryContext,
+    ) -> bool {
+        let mut changed = false;
+        if ui.button("添加种树").clicked() {
+            self.instances.push(PlantMechanicInstance::default());
+            changed = true;
+        }
+        changed
+    }
+
+    fn instances(&self) -> Vec<&dyn AsFlow> {
+        self.instances.iter().map(|i| i as &dyn AsFlow).collect()
+    }
+
+    fn instance_len(&self) -> usize {
+        self.instances.len()
+    }
+
+    fn instance_operate(
+        &mut self,
+        idx: usize,
+        f: &mut dyn FnMut(&mut dyn AsFlow) -> EntryOpRequest,
+    ) {
+        let op = f(&mut self.instances[idx] as &mut dyn AsFlow);
+        if !matches!(op, EntryOpRequest::None) {
+            self.operations.push((idx, op));
+        }
+    }
+
+    fn submit_operations(&mut self) -> Vec<crate::concept::EntryOpResult> {
+        self.instances.update_elements(&mut self.operations)
+    }
+
+    fn auto_populate(
+        &mut self,
+        data: &DataContext,
+        proj: &ProjectContext,
+        factory: &FactoryContext,
+    ) {
+        for item in data.items.values() {
+            if let Some(plant_property) = item.plant.as_ref() {
+                let plant = data.plants.get(&plant_property.plant_result).unwrap();
+                if let Some(planet) = factory.planet.as_ref()
+                    && let Some(planet_prototype) = data.planets.get(planet)
+                {
+                    if surface_condition_satisfied(
+                        &plant.base.surface_conditions,
+                        &planet_prototype.surface_properties,
+                        &data.surface_properties,
+                    ) {
+                        self.instances.push(PlantMechanicInstance {
+                            seed: item.base.name.clone().into(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    fn instance_view(
+        &mut self,
+        idx: usize,
+        ui: &mut egui::Ui,
+        data: &DataContext,
+        proj: &ProjectContext,
+        factory: &FactoryContext,
+    ) -> bool {
+        let mut changed = false;
+        let instance = &mut self.instances[idx];
+        ui.vertical(|ui| {
+            ui.label("种子");
+            let button = ui
+                .add_sized(
+                    [35.0, 35.0],
+                    Icon::new(data, "item", &instance.seed.0).with_quality(instance.seed.1),
+                )
+                .interact(egui::Sense::click());
+            changed |= ui
+                .add(
+                    SelectorModal::new(button.id, data, "选择种子")
+                        .with_toggle(button.clicked())
+                        .with_selector(
+                            Selector::new(data, "item")
+                                .with_filter(|s: &IdWithQuality, f| {
+                                    let item = f.items.get(&s.0);
+                                    item.is_some_and(|i| i.plant.is_some())
+                                })
+                                .with_current(&mut instance.seed),
+                        ),
+                )
+                .changed();
+        });
+        changed
+    }
 }

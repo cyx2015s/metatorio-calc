@@ -82,6 +82,9 @@ pub struct DataContext {
     pub boilers: Dict<BoilerPrototype>,
     pub generators: Dict<GeneratorPrototype>,
     pub temperatures: Dict<HashSet<i32>>, // 所有流体的*常见*温度列表（出现在filter中指定温度的）
+
+    pub plants: Dict<PlantPrototype>,
+
     /// 地块
     pub tiles: Dict<TilePrototype>,
 }
@@ -197,6 +200,7 @@ impl DataContext {
         let tiles = deserialize_type(value, "tile");
         let boilers = deserialize_type(value, "boiler");
         let generators = deserialize_type(value, "generator");
+        let plants = deserialize_type(value, "plant");
         log::info!("数据加载完成");
         // ret.planets.iter().for_each(|(_, p)| {
         //     dbg!(p.collect_autoplaced(&ret));
@@ -223,6 +227,7 @@ impl DataContext {
             tiles,
             boilers,
             generators,
+            plants,
             ..Default::default()
         }
     }
@@ -667,21 +672,23 @@ impl DataContext {
             // 忽视输入流体时要求区间范围的配方，这种通常是其他温度协变出来的
             for ingredient in &recipe.ingredients {
                 if let RecipeIngredient::Fluid(fluid) = ingredient
-                    && let Some(temperature) = fluid.temperature {
-                        self.temperatures
-                            .entry(fluid.name.clone())
-                            .or_default()
-                            .insert(temperature as i32);
-                    }
+                    && let Some(temperature) = fluid.temperature
+                {
+                    self.temperatures
+                        .entry(fluid.name.clone())
+                        .or_default()
+                        .insert(temperature as i32);
+                }
             }
             for result in &recipe.results {
                 if let RecipeResult::Fluid(fluid) = result
-                    && let Some(temperature) = fluid.temperature {
-                        self.temperatures
-                            .entry(fluid.name.clone())
-                            .or_default()
-                            .insert(temperature as i32);
-                    }
+                    && let Some(temperature) = fluid.temperature
+                {
+                    self.temperatures
+                        .entry(fluid.name.clone())
+                        .or_default()
+                        .insert(temperature as i32);
+                }
             }
         }
         // 机器消耗的带温度筛选的流体，通常应该是其他建筑产生的，不对其做检测了

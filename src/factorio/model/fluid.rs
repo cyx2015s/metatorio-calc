@@ -221,14 +221,6 @@ impl BoilerPrototype {
             ),
             1.0,
         );
-        if fulfillment != 0.0 {
-            log::warn!(
-                "锅炉 {} 的能量需求没有完全满足，满足度为 {}",
-                self.base.base.name,
-                fulfillment
-            );
-            log::warn!("使用的燃料是 {:?}", fuel);
-        }
         match self.mode {
             BoilerMode::HeatFluidInside => {
                 // TODO 在锅炉内部将流体加热
@@ -345,6 +337,18 @@ impl AsFlow for GeneratorMechanicInstance {
             }
         }
         flow
+    }
+
+    fn cost(&self, _data: &DataContext, _proj: &ProjectContext, _factory: &FactoryContext) -> f64 {
+        if let Some(generator) = _data.generators.get(&self.generator.0) {
+            generator
+                .base
+                .collision_box
+                .as_ref()
+                .map_or(16.0, |b| b.get_area())
+        } else {
+            16.0
+        }
     }
 }
 
@@ -501,18 +505,18 @@ impl FactorioMechanic for GeneratorMechanic {
             if let Some(filter) = &generator.fluid_box.filter {
                 if let Some(fluid) = data.fluids.get(filter)
                     && proj.is_prototype_accessible("entity", &generator.base.base.name)
-                        && ((generator.burns_fluid && fluid.fuel_value.is_some())
-                            || (!generator.burns_fluid
-                                && fluid.heat_capacity.is_none_or(|x| x.amount > 0.0)))
-                    {
-                        for quality in 0..proj.max_quality_level {
-                            self.instances.push(GeneratorMechanicInstance {
-                                generator: (generator.base.base.name.clone(), quality).into(),
-                                fluid: filter.clone(),
-                                temperature: generator.maximum_temperature as i32,
-                            });
-                        }
+                    && ((generator.burns_fluid && fluid.fuel_value.is_some())
+                        || (!generator.burns_fluid
+                            && fluid.heat_capacity.is_none_or(|x| x.amount > 0.0)))
+                {
+                    for quality in 0..proj.max_quality_level {
+                        self.instances.push(GeneratorMechanicInstance {
+                            generator: (generator.base.base.name.clone(), quality).into(),
+                            fluid: filter.clone(),
+                            temperature: generator.maximum_temperature as i32,
+                        });
                     }
+                }
             } else {
                 // 如果发电机没有指定输入流体，则尝试用所有可用
                 for (fluid_name, fluid) in &data.fluids {
@@ -633,14 +637,15 @@ impl FactorioMechanic for BoilerMechanic {
             {
                 changed = true;
                 if let Some(boiler) = data.boilers.get(&instance.boiler.0)
-                    && let Some(filter) = &boiler.fluid_box.filter {
-                        instance.fluid = filter.clone();
-                        instance.temperature = data
-                            .fluids
-                            .get(&instance.fluid)
-                            .map(|f| f.default_temperature as i32)
-                            .unwrap_or(25);
-                    }
+                    && let Some(filter) = &boiler.fluid_box.filter
+                {
+                    instance.fluid = filter.clone();
+                    instance.temperature = data
+                        .fluids
+                        .get(&instance.fluid)
+                        .map(|f| f.default_temperature as i32)
+                        .unwrap_or(25);
+                }
             }
         });
         ui.separator();
@@ -700,21 +705,21 @@ impl FactorioMechanic for BoilerMechanic {
             if let Some(filter) = &boiler.fluid_box.filter {
                 if let Some(fluid) = data.fluids.get(filter)
                     && proj.is_prototype_accessible("entity", &boiler.base.base.name)
-                        && fluid.heat_capacity.is_none_or(|x| x.amount > 0.0)
-                    {
-                        for quality in 0..proj.max_quality_level {
-                            self.instances.push(BoilerMechanicInstance {
-                                boiler: (boiler.base.base.name.clone(), quality).into(),
-                                fluid: filter.clone(),
-                                temperature: data
-                                    .fluids
-                                    .get(filter)
-                                    .map(|f| f.default_temperature as i32)
-                                    .unwrap_or(25),
-                                fuel: None,
-                            });
-                        }
+                    && fluid.heat_capacity.is_none_or(|x| x.amount > 0.0)
+                {
+                    for quality in 0..proj.max_quality_level {
+                        self.instances.push(BoilerMechanicInstance {
+                            boiler: (boiler.base.base.name.clone(), quality).into(),
+                            fluid: filter.clone(),
+                            temperature: data
+                                .fluids
+                                .get(filter)
+                                .map(|f| f.default_temperature as i32)
+                                .unwrap_or(25),
+                            fuel: None,
+                        });
                     }
+                }
             } else {
                 // 如果锅炉没有指定输入流体，则尝试用所有可用的流体
                 for (fluid_name, fluid) in &data.fluids {
@@ -770,5 +775,17 @@ impl AsFlow for BoilerMechanicInstance {
             );
         }
         flow
+    }
+
+    fn cost(&self, _data: &DataContext, _proj: &ProjectContext, _factory: &FactoryContext) -> f64 {
+        if let Some(boiler) = _data.boilers.get(&self.boiler.0) {
+            boiler
+                .base
+                .collision_box
+                .as_ref()
+                .map_or(16.0, |b| b.get_area())
+        } else {
+            16.0
+        }
     }
 }
