@@ -312,8 +312,8 @@ impl AsFlow for GeneratorMechanicInstance {
     fn as_flow(
         &self,
         data: &DataContext,
-        proj: &ProjectContext,
-        factory: &FactoryContext,
+        _proj: &ProjectContext,
+        _factory: &FactoryContext,
     ) -> Flow<GenericItem> {
         let mut flow = Flow::new();
         if let Some(generator) = data.generators.get(&self.generator.0) {
@@ -362,9 +362,9 @@ impl FactorioMechanic for GeneratorMechanic {
     fn editor_view(
         &mut self,
         ui: &mut egui::Ui,
-        data: &DataContext,
-        proj: &ProjectContext,
-        factory: &FactoryContext,
+        _data: &DataContext,
+        _proj: &ProjectContext,
+        _factory: &FactoryContext,
     ) -> bool {
         let mut changed = false;
         if ui.button("添加流体发电").clicked() {
@@ -397,7 +397,7 @@ impl FactorioMechanic for GeneratorMechanic {
         ui: &mut egui::Ui,
         data: &DataContext,
         proj: &ProjectContext,
-        factory: &FactoryContext,
+        _factory: &FactoryContext,
     ) -> bool {
         let mut changed = false;
         let instance = &mut self.instances[idx];
@@ -495,12 +495,12 @@ impl FactorioMechanic for GeneratorMechanic {
         &mut self,
         data: &DataContext,
         proj: &ProjectContext,
-        factory: &FactoryContext,
+        _factory: &FactoryContext,
     ) {
         for generator in data.generators.values() {
             if let Some(filter) = &generator.fluid_box.filter {
-                if let Some(fluid) = data.fluids.get(filter) {
-                    if proj.is_prototype_accessible("entity", &generator.base.base.name)
+                if let Some(fluid) = data.fluids.get(filter)
+                    && proj.is_prototype_accessible("entity", &generator.base.base.name)
                         && ((generator.burns_fluid && fluid.fuel_value.is_some())
                             || (!generator.burns_fluid
                                 && fluid.heat_capacity.is_none_or(|x| x.amount > 0.0)))
@@ -513,7 +513,6 @@ impl FactorioMechanic for GeneratorMechanic {
                             });
                         }
                     }
-                }
             } else {
                 // 如果发电机没有指定输入流体，则尝试用所有可用
                 for (fluid_name, fluid) in &data.fluids {
@@ -558,9 +557,9 @@ impl FactorioMechanic for BoilerMechanic {
     fn editor_view(
         &mut self,
         ui: &mut egui::Ui,
-        data: &DataContext,
-        proj: &ProjectContext,
-        factory: &FactoryContext,
+        _data: &DataContext,
+        _proj: &ProjectContext,
+        _factory: &FactoryContext,
     ) -> bool {
         let mut changed = false;
         if ui.button("添加锅炉").clicked() {
@@ -605,7 +604,7 @@ impl FactorioMechanic for BoilerMechanic {
         ui: &mut egui::Ui,
         data: &DataContext,
         proj: &ProjectContext,
-        factory: &FactoryContext,
+        _factory: &FactoryContext,
     ) -> bool {
         let mut changed = false;
         let instance = &mut self.instances[idx];
@@ -633,8 +632,8 @@ impl FactorioMechanic for BoilerMechanic {
                 .changed()
             {
                 changed = true;
-                if let Some(boiler) = data.boilers.get(&instance.boiler.0) {
-                    if let Some(filter) = &boiler.fluid_box.filter {
+                if let Some(boiler) = data.boilers.get(&instance.boiler.0)
+                    && let Some(filter) = &boiler.fluid_box.filter {
                         instance.fluid = filter.clone();
                         instance.temperature = data
                             .fluids
@@ -642,7 +641,6 @@ impl FactorioMechanic for BoilerMechanic {
                             .map(|f| f.default_temperature as i32)
                             .unwrap_or(25);
                     }
-                }
             }
         });
         ui.separator();
@@ -696,12 +694,12 @@ impl FactorioMechanic for BoilerMechanic {
         &mut self,
         data: &DataContext,
         proj: &ProjectContext,
-        factory: &FactoryContext,
+        _factory: &FactoryContext,
     ) {
         for boiler in data.boilers.values() {
             if let Some(filter) = &boiler.fluid_box.filter {
-                if let Some(fluid) = data.fluids.get(filter) {
-                    if proj.is_prototype_accessible("entity", &boiler.base.base.name)
+                if let Some(fluid) = data.fluids.get(filter)
+                    && proj.is_prototype_accessible("entity", &boiler.base.base.name)
                         && fluid.heat_capacity.is_none_or(|x| x.amount > 0.0)
                     {
                         for quality in 0..proj.max_quality_level {
@@ -717,7 +715,6 @@ impl FactorioMechanic for BoilerMechanic {
                             });
                         }
                     }
-                }
             } else {
                 // 如果锅炉没有指定输入流体，则尝试用所有可用的流体
                 for (fluid_name, fluid) in &data.fluids {
@@ -759,8 +756,8 @@ impl AsFlow for BoilerMechanicInstance {
     fn as_flow(
         &self,
         data: &DataContext,
-        proj: &ProjectContext,
-        factory: &FactoryContext,
+        _proj: &ProjectContext,
+        _factory: &FactoryContext,
     ) -> Flow<GenericItem> {
         let mut flow = Flow::new();
         if let Some(boiler) = data.boilers.get(&self.boiler.0) {

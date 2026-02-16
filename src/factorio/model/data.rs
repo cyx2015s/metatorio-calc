@@ -666,24 +666,22 @@ impl DataContext {
             // 收集配方中所有带定点温度的流体，构建温度信息
             // 忽视输入流体时要求区间范围的配方，这种通常是其他温度协变出来的
             for ingredient in &recipe.ingredients {
-                if let RecipeIngredient::Fluid(fluid) = ingredient {
-                    if let Some(temperature) = fluid.temperature {
+                if let RecipeIngredient::Fluid(fluid) = ingredient
+                    && let Some(temperature) = fluid.temperature {
                         self.temperatures
                             .entry(fluid.name.clone())
                             .or_default()
                             .insert(temperature as i32);
                     }
-                }
             }
             for result in &recipe.results {
-                if let RecipeResult::Fluid(fluid) = result {
-                    if let Some(temperature) = fluid.temperature {
+                if let RecipeResult::Fluid(fluid) = result
+                    && let Some(temperature) = fluid.temperature {
                         self.temperatures
                             .entry(fluid.name.clone())
                             .or_default()
                             .insert(temperature as i32);
                     }
-                }
             }
         }
         // 机器消耗的带温度筛选的流体，通常应该是其他建筑产生的，不对其做检测了
