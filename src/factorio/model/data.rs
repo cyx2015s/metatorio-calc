@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     env,
     fmt::{Debug, Display},
     hash::Hash,
@@ -81,6 +81,7 @@ pub struct DataContext {
     /// 流体相关
     pub boilers: Dict<BoilerPrototype>,
     pub generators: Dict<GeneratorPrototype>,
+    pub temperatures: Dict<HashSet<i32>>, // 所有流体的*常见*温度列表（出现在filter中指定温度的）
     /// 地块
     pub tiles: Dict<TilePrototype>,
 }
@@ -114,7 +115,7 @@ where
             eprintln!("原始数据: {}", value);
             panic!("解析数据失败");
         }
-        Ok(val) => return val,
+        Ok(val) => val,
     }
 }
 
@@ -523,7 +524,7 @@ impl DataContext {
     }
 
     pub fn build_utility_info(self) -> Self {
-        self.build_order_info()
+        self.build_order_info().build_temperature_info()
     }
 
     pub fn build_order_info(mut self) -> Self {
@@ -653,6 +654,52 @@ impl DataContext {
         );
         self
     }
+
+    pub fn build_temperature_info(mut self) -> Self {
+        for fluid in self.fluids.values() {
+            self.temperatures
+                .entry(fluid.base.name.clone())
+                .or_default()
+                .insert(fluid.default_temperature as i32);
+        }
+        for recipe in self.recipes.values() {
+            // 收集配方中所有带定点温度的流体，构建温度信息
+            // 忽视输入流体时要求区间范围的配方，这种通常是其他温度协变出来的
+            for ingredient in &recipe.ingredients {
+                if let RecipeIngredient::Fluid(fluid) = ingredient {
+                    if let Some(temperature) = fluid.temperature {
+                        self.temperatures
+                            .entry(fluid.name.clone())
+                            .or_default()
+                            .insert(temperature as i32);
+                    }
+                }
+            }
+            for result in &recipe.results {
+                if let RecipeResult::Fluid(fluid) = result {
+                    if let Some(temperature) = fluid.temperature {
+                        self.temperatures
+                            .entry(fluid.name.clone())
+                            .or_default()
+                            .insert(temperature as i32);
+                    }
+                }
+            }
+        }
+        // 机器消耗的带温度筛选的流体，通常应该是其他建筑产生的，不对其做检测了
+        // 检测锅炉的目标输出温度即可
+        for boiler in self.boilers.values() {
+            if let Some(filter) = boiler.output_fluid_box.filter.as_ref()
+                && boiler.mode == BoilerMode::OutputToSeparatePipe
+            {
+                self.temperatures
+                    .entry(filter.clone())
+                    .or_default()
+                    .insert(boiler.target_temperature.unwrap() as i32);
+            }
+        }
+        self
+    }
 }
 
 fn i32_inf_range() -> [i32; 2] {
@@ -764,6 +811,7 @@ pub fn make_located_generic_recipe(
 #[test]
 fn test_load_context() {
     let factorio = DataContext::test_load().build_utility_info();
+    dbg!(&factorio.temperatures);
     assert!(factorio.items.contains_key("iron-plate"));
     assert!(factorio.entities.contains_key("stone-furnace"));
     assert!(factorio.fluids.contains_key("water"));
@@ -795,5 +843,6 @@ fn test_load_context() {
     ));
     dbg!(heat_exchanger.get_flow(&factorio, &water.base.name, 15.0, &None));
     dbg!(heat_exchanger.get_flow(&factorio, &water.base.name, 50.0, &None));
+    dbg!(heat_exchanger.get_flow(&factorio, &water.base.name, 325.0, &None));
     assert!(dbg!(heat_exchanger.get_flow(&factorio, &steam.base.name, 15.0, &None)).is_empty());
 }

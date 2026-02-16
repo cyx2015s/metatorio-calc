@@ -503,8 +503,8 @@ impl AsFlow for RecipeMechanicInstance {
                 &self.instance_fuel,
                 &mut base_speed,
             );
-            if let EnergySource::Electric(e) = &crafter.energy_source {
-                if e.drain.is_none() {
+            if let EnergySource::Electric(e) = &crafter.energy_source
+                && e.drain.is_none() {
                     // 没有写drain的组装机，按照常态能量消耗的1/30计算drain
                     index_map_update_entry(
                         &mut map,
@@ -512,7 +512,6 @@ impl AsFlow for RecipeMechanicInstance {
                         -energy_usage.amount * 60.0 / 30.0,
                     );
                 }
-            }
             for (key, value) in energy_related_flow.into_iter() {
                 index_map_update_entry(&mut map, key, value);
             }

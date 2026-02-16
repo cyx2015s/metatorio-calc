@@ -1,7 +1,11 @@
 use crate::{
-    concept::Flow,
-    factorio::{DataContext, EntityPrototype, GenericItem, common::*, energy_source_as_flow},
-    math::flow_add,
+    concept::{EntryOpRequest, EntryOpResult, Flow, SolveContext},
+    factorio::{
+        DataContext, EntityPrototype, GenericItem, ProjectContext, common::*,
+        energy_source_as_flow, icon::Icon, modal::SelectorModal, planner::FactoryContext,
+        selector::Selector,
+    },
+    math::{ElemVec, flow_add},
 };
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -163,11 +167,6 @@ impl GeneratorPrototype {
     }
 }
 
-impl HasPrototypeBase for GeneratorPrototype {
-    fn base(&self) -> &PrototypeBase {
-        &self.base.base
-    }
-}
 #[derive(Debug, Clone, serde::Deserialize)]
 
 pub struct BoilerPrototype {
@@ -188,7 +187,7 @@ pub struct BoilerPrototype {
     pub mode: BoilerMode,
 }
 
-#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum BoilerMode {
     #[default]
@@ -283,5 +282,256 @@ impl BoilerPrototype {
             }
         }
         flow
+    }
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct GeneratorMechanic {
+    #[serde(skip)]
+    pub operations: Vec<(usize, EntryOpRequest)>,
+
+    pub instances: Vec<GeneratorMechanicInstance>,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct GeneratorMechanicInstance {
+    pub generator: IdWithQuality,
+
+    pub fluid: String,
+
+    pub temperature: i32,
+}
+
+impl SolveContext for GeneratorMechanicInstance {
+    type Game = DataContext;
+    type Item = GenericItem;
+}
+
+impl AsFlow for GeneratorMechanicInstance {
+    fn as_flow(
+        &self,
+        data: &DataContext,
+        proj: &ProjectContext,
+        factory: &FactoryContext,
+    ) -> Flow<GenericItem> {
+        let mut flow = Flow::new();
+        if let Some(generator) = data.generators.get(&self.generator.0) {
+            if let Some(filter) = generator.fluid_box.filter.as_ref() {
+                let fluid = data.fluids.get(filter).expect("发电机输入的流体不存在");
+                let (fluid_usage, power_output) =
+                    generator.get_output(fluid, self.temperature as f64);
+                index_map_update_entry(
+                    &mut flow,
+                    GenericItem::Fluid {
+                        name: filter.clone(),
+                        temperature: [self.temperature, self.temperature],
+                    },
+                    -fluid_usage,
+                );
+                index_map_update_entry(&mut flow, GenericItem::Electricity, power_output);
+            } else if let Some(fluid) = data.fluids.get(&self.fluid) {
+                let (fluid_usage, power_output) =
+                    generator.get_output(fluid, self.temperature as f64);
+                index_map_update_entry(
+                    &mut flow,
+                    GenericItem::Fluid {
+                        name: self.fluid.clone(),
+                        temperature: [self.temperature, self.temperature],
+                    },
+                    -fluid_usage,
+                );
+                index_map_update_entry(&mut flow, GenericItem::Electricity, power_output);
+            }
+        }
+        flow
+    }
+}
+
+impl SolveContext for GeneratorMechanic {
+    type Game = DataContext;
+    type Item = GenericItem;
+}
+
+#[typetag::serde(name = "factorio:generator")]
+impl FactorioMechanic for GeneratorMechanic {
+    fn name(&self) -> String {
+        "流体发电".to_string()
+    }
+
+    fn editor_view(
+        &mut self,
+        ui: &mut egui::Ui,
+        data: &DataContext,
+        proj: &ProjectContext,
+        factory: &FactoryContext,
+    ) -> bool {
+        let mut changed = false;
+        if ui.button("添加流体发电").clicked() {
+            let new_config = GeneratorMechanicInstance {
+                generator: "entity-unknown".into(),
+
+                fluid: "fluid-unknown".to_string(),
+                temperature: 25,
+            };
+            self.instances.push(new_config);
+            changed = true;
+        }
+        changed
+    }
+
+    fn instances(&self) -> Vec<&dyn AsFlow> {
+        self.instances
+            .iter()
+            .map(|instance| instance as &dyn AsFlow)
+            .collect()
+    }
+
+    fn instance_len(&self) -> usize {
+        self.instances.len()
+    }
+
+    fn instance_view(
+        &mut self,
+        idx: usize,
+        ui: &mut egui::Ui,
+        data: &DataContext,
+        proj: &ProjectContext,
+        factory: &FactoryContext,
+    ) -> bool {
+        let mut changed = false;
+        let instance = &mut self.instances[idx];
+        ui.vertical(|ui| {
+            ui.label("机器");
+            let entity_button = ui
+                .add_sized(
+                    [35.0, 35.0],
+                    Icon::new(data, "entity", &instance.generator.0)
+                        .with_quality(instance.generator.1),
+                )
+                .interact(egui::Sense::click());
+            if ui
+                .add(
+                    SelectorModal::new(entity_button.id, data, "选择发电机")
+                        .with_toggle(entity_button.clicked())
+                        .with_selector(
+                            Selector::new(data, "entity")
+                                .with_current(&mut instance.generator)
+                                .with_filter(|s: &IdWithQuality, f| {
+                                    f.generators.contains_key(&s.0)
+                                        && proj.is_prototype_accessible("entity", &s.0)
+                                }),
+                        ),
+                )
+                .changed()
+            {
+                changed = true;
+                instance.temperature =
+                    data.generators[&instance.generator.0].maximum_temperature as i32;
+            }
+        });
+        ui.separator();
+        if let Some(generator) = data.generators.get(&instance.generator.0) {
+            if let Some(filter) = &generator.fluid_box.filter {
+                // 如果发电机指定了输入流体，则显示这个流体
+                ui.vertical(|ui| {
+                    ui.label("固定输入");
+                    ui.add_sized([35.0, 35.0], Icon::new(data, "fluid", filter));
+                });
+            } else {
+                // 如果发电机没有指定输入流体，则允许用户选择输入流体
+                ui.vertical(|ui| {
+                    ui.label("编辑输入");
+                    let fluid_button = ui
+                        .add_sized([35.0, 35.0], Icon::new(data, "fluid", &instance.fluid))
+                        .interact(egui::Sense::click());
+                    if ui
+                        .add(
+                            SelectorModal::new(fluid_button.id, data, "选择输入流体")
+                                .with_toggle(fluid_button.clicked())
+                                .with_selector(
+                                    Selector::new(data, "fluid")
+                                        .with_current(&mut instance.fluid)
+                                        .with_filter(|s: &str, f| {
+                                            if let Some(fluid_prototype) = f.fluids.get(s) {
+                                                return proj.is_prototype_accessible("fluid", s)
+                                                    && ((generator.burns_fluid
+                                                        && fluid_prototype.fuel_value.is_some())
+                                                        || (!generator.burns_fluid
+                                                            && fluid_prototype
+                                                                .heat_capacity
+                                                                .is_none_or(|x| x.amount > 0.0)));
+                                            }
+                                            false
+                                        }),
+                                ),
+                        )
+                        .changed()
+                    {
+                        changed = true;
+                        instance.temperature = generator.maximum_temperature as i32;
+                    }
+                });
+            }
+        }
+        changed
+    }
+
+    fn instance_operate(
+        &mut self,
+        idx: usize,
+        f: &mut dyn FnMut(&mut dyn AsFlow) -> EntryOpRequest,
+    ) {
+        let op = f(&mut self.instances[idx] as &mut dyn AsFlow);
+        if !matches!(op, EntryOpRequest::None) {
+            self.operations.push((idx, op));
+        }
+    }
+    fn submit_operations(&mut self) -> Vec<EntryOpResult> {
+        self.instances.update_elements(&mut self.operations)
+    }
+
+    fn auto_populate(
+        &mut self,
+        data: &DataContext,
+        proj: &ProjectContext,
+        factory: &FactoryContext,
+    ) {
+        for generator in data.generators.values() {
+            if let Some(filter) = &generator.fluid_box.filter {
+                if let Some(fluid) = data.fluids.get(filter) {
+                    if proj.is_prototype_accessible("entity", &generator.base.base.name)
+                        && ((generator.burns_fluid && fluid.fuel_value.is_some())
+                            || (!generator.burns_fluid
+                                && fluid.heat_capacity.is_none_or(|x| x.amount > 0.0)))
+                    {
+                        for quality in 0..proj.max_quality_level {
+                            self.instances.push(GeneratorMechanicInstance {
+                                generator: (generator.base.base.name.clone(), quality).into(),
+                                fluid: filter.clone(),
+                                temperature: generator.maximum_temperature as i32,
+                            });
+                        }
+                    }
+                }
+            } else {
+                // 如果发电机没有指定输入流体，则尝试用所有可用
+                for (fluid_name, fluid) in &data.fluids {
+                    if proj.is_prototype_accessible("entity", &generator.base.base.name)
+                        && ((generator.burns_fluid && fluid.fuel_value.is_some())
+                            || (!generator.burns_fluid
+                                && fluid.heat_capacity.is_none_or(|x| x.amount > 0.0)))
+                    {
+                        for quality in 0..proj.max_quality_level {
+                            self.instances.push(GeneratorMechanicInstance {
+                                generator: (generator.base.base.name.clone(), quality).into(),
+                                fluid: fluid_name.clone(),
+                                temperature: generator.maximum_temperature as i32,
+                            });
+                        }
+                    }
+                }
+            }
+        }
     }
 }

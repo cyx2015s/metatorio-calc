@@ -135,7 +135,7 @@ impl FactorioMechanic for ItemFuelMechanic {
     ) -> bool {
         let mut changed = false;
 
-        if ui.button("添加燃烧").clicked() {
+        if ui.button("添加物品燃烧").clicked() {
             let new_config = ItemFuelInstance {
                 item: IdWithQuality("".to_string(), 0),
             };

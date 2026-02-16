@@ -85,6 +85,7 @@ impl Default for FactoryInstance {
         .with_mechanic(RecipeMechanic::default())
         .with_mechanic(MiningMechanic::default())
         .with_mechanic(ItemFuelMechanic::default())
+        .with_mechanic(GeneratorMechanic::default())
     }
 }
 
@@ -174,18 +175,20 @@ impl FactoryInstance {
         {
             let autoplaced = planet.collect_autoplaced(data);
             for item in &autoplaced {
-                if !external.contains_key(item) {
+                if !external.contains_key(item) && !target.contains_key(item) {
                     external.insert(item.clone(), 0.0);
                 }
             }
-            if !external.contains_key(&GenericItem::Electricity) {
+            if !external.contains_key(&GenericItem::Electricity)
+                && !target.contains_key(&GenericItem::Electricity)
+            {
                 external.insert(GenericItem::Electricity, 1e-6);
             }
             for pollutant in data.airborne_pollutants.keys() {
                 let key = GenericItem::Pollution {
                     name: pollutant.clone(),
                 };
-                if !external.contains_key(&key) {
+                if !external.contains_key(&key) && !target.contains_key(&key) {
                     external.insert(key, 1.0);
                 }
             }
@@ -697,9 +700,9 @@ impl FactoryInstance {
                         });
 
                         if item.is_energy() {
-                            let mut display_value = *amount / 1e6;
+                            let mut display_value = *amount * 1e6;
                             *changed |= ui.add(drag_watt(&mut display_value)).changed();
-                            *amount = display_value * 1e6;
+                            *amount = display_value / 1e6;
                         } else {
                             let mut display_value = *amount * proj.time_scale.multiplier();
                             *changed |= ui.add(drag_value(&mut display_value)).changed();
