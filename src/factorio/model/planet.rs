@@ -188,16 +188,14 @@ pub fn surface_condition_satisfied(
                 .map(|proto| proto.default_value)
                 .unwrap_or(0.0),
         };
-        if let Some(min) = condition.min {
-            if value < min {
+        if let Some(min) = condition.min
+            && value < min {
                 return false;
             }
-        }
-        if let Some(max) = condition.max {
-            if value > max {
+        if let Some(max) = condition.max
+            && value > max {
                 return false;
             }
-        }
     }
     true
 }

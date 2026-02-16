@@ -523,7 +523,7 @@ impl FactoryInstance {
                 )
                 .show_ui(ui, |ui| {
                     ui.selectable_value(&mut planet_name, None, "无");
-                    for (name, _) in &data.planets {
+                    for name in data.planets.keys() {
                         ui.selectable_value(
                             &mut planet_name,
                             Some(name.clone()),

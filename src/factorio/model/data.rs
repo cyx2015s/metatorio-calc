@@ -77,6 +77,9 @@ pub struct DataContext {
     pub resources: Dict<ResourcePrototype>,
     pub miners: Dict<MiningDrillPrototype>,
     pub resource_categories: Dict<PrototypeBase>,
+
+    /// 流体相关
+    pub generators: Dict<GeneratorPrototype>,
     /// 地块
     pub tiles: Dict<TilePrototype>,
 }
@@ -103,8 +106,15 @@ where
         .cloned()
         .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
 
-    serde_json::from_value(value.clone())
-        .unwrap_or_else(|_| panic!("Failed to deserialize content {}", value))
+    let ret = serde_json::from_value(value.clone());
+    match ret {
+        Err(err) => {
+            eprintln!("解析数据类型 {} 失败: {}", type_name, err);
+            eprintln!("原始数据: {}", value);
+            panic!("解析数据失败");
+        }
+        Ok(val) => return val,
+    }
 }
 
 /// 创建 DataContext 的方法
@@ -183,6 +193,7 @@ impl DataContext {
         }
         let planets = deserialize_type(value, "planet");
         let tiles = deserialize_type(value, "tile");
+        let generators = deserialize_type(value, "generator");
         log::info!("数据加载完成");
         // ret.planets.iter().for_each(|(_, p)| {
         //     dbg!(p.collect_autoplaced(&ret));
@@ -207,6 +218,7 @@ impl DataContext {
             resource_categories,
             planets,
             tiles,
+            generators,
             ..Default::default()
         }
     }
@@ -752,4 +764,15 @@ fn test_load_context() {
     assert!(factorio.crafters.contains_key("assembling-machine-1"));
     dbg!(factorio.recipes.get("electronic-circuit"));
     dbg!(factorio.crafters.get("oil-refinery"));
+
+    let steam = factorio.fluids.get("steam").unwrap();
+    let steam_engine = factorio.generators.get("steam-engine").unwrap();
+
+    dbg!(steam_engine.get_output(steam, 100.0));
+    assert!(dbg!(steam_engine.get_output(steam, 165.0)) == (30.0, 900_000.0));
+    assert!(dbg!(steam_engine.get_output(steam, 500.0)).0 == 30.0);
+    let steam_turbine = factorio.generators.get("steam-turbine").unwrap();
+    dbg!(steam_turbine.get_output(steam, 165.0));
+    dbg!(steam_turbine.get_output(steam, 500.0));
+    dbg!(steam_turbine.get_output(steam, 100.0));
 }

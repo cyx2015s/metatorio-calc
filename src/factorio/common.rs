@@ -365,7 +365,7 @@ impl HasPrototypeBase for PrototypeBase {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default, Copy, PartialEq, PartialOrd)]
 /// 能量数量，单位为焦耳（J），如果是功率则为焦耳每刻（J/tick）
 pub struct EnergyAmount {
     pub amount: f64,
@@ -452,13 +452,12 @@ pub enum FluidIOMode {
     Output,
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(default)]
 pub struct FluidBox {
-    #[serde(default)]
     pub filter: Option<String>,
     pub minimum_temperature: Option<f64>,
     pub maximum_temperature: Option<f64>,
-    #[serde(default)]
     pub production_type: FluidIOMode,
 }
 
