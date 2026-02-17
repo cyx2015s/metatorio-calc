@@ -378,8 +378,8 @@ pub struct CraftingMachinePrototype {
 
     #[serde(default)]
     pub allowed_effects: Option<EffectTypeLimitation>,
-
     #[serde(default)]
+    #[serde_as(deserialize_as = "DefaultOnError")]
     pub allowed_module_categories: Option<Vec<String>>,
     #[serde(default)]
     pub crafting_speed_quality_multiplier: Option<Dict<f64>>,
