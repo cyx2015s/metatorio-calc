@@ -1270,6 +1270,28 @@ impl SubView for ProjectView {
             }
             DeleteRequest::None => {}
         }
+
+        if ui.input_mut(|i| {
+            i.consume_key(
+                egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+                egui::Key::S,
+            )
+        }) {
+            if let Some(selected) = self.selected {
+                let project = &mut self.projects.vec[selected];
+                save_project_as(project);
+            }
+        }
+        if ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::S)) {
+            if let Some(selected) = self.selected {
+                let project = &mut self.projects.vec[selected];
+                if let Some(path) = &project.proj.file_path.clone() {
+                    save_project(project, path);
+                } else {
+                    save_project_as(project);
+                }
+            }
+        }
     }
 }
 
@@ -1421,7 +1443,12 @@ impl SubView for ContextCreatorView {
             {
                 let exe_path = path.clone().as_path().to_owned();
                 let mod_path = self.mod_path.clone().map(|p| p.as_path().to_owned());
-                let lang = self.lang.clone();
+                let lang = if self.lang.is_empty() {
+                    "zh-CN".to_string()
+                } else {
+                    self.lang.clone()
+                };
+
                 let sender = sender.clone();
                 self.thread =
                     Some(std::thread::spawn(
