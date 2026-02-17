@@ -431,8 +431,6 @@ where
 
                     last_req = req;
                 }
-
-                // log::info!("收到了新的计算请求……");
                 if solution_tx.send(last_req.solve()).is_err() {
                     // 接收方已关闭，退出线程
                     break;
@@ -449,7 +447,6 @@ where
         std::thread::spawn(move || {
             log::info!("求解线程启动");
             while let Ok((req_id, mut req)) = problem_rx.recv() {
-                // log::info!("收到了新的计算请求……");
                 let result = req.solve();
                 if solution_tx.send((req_id, result)).is_err() {
                     // 接收方已关闭，退出线程

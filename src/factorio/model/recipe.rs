@@ -978,7 +978,10 @@ impl FactorioMechanic for RecipeMechanic {
                                         ui.label(format!("未知配方: {}", name.0));
                                     }
                                 })
-                                .with_filter(|s, _f| proj.is_prototype_accessible("recipe", &s.0)),
+                                .with_filter(|s, _f| {
+                                    proj.is_prototype_accessible("recipe", &s.0)
+                                        || data.recipes.get(&s.0).is_some_and(|r| r.enabled)
+                                }),
                         ),
                 )
                 .changed();

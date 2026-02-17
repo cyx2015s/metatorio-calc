@@ -1,4 +1,7 @@
-// #![cfg_attr(all(not(test), not(debug_assertions)), windows_subsystem = "windows")]
+#![cfg_attr(all(not(test), not(debug_assertions)), windows_subsystem = "windows")]
+
+#[macro_use]
+extern crate rust_i18n;
 
 use std::sync::mpsc::*;
 
@@ -18,11 +21,11 @@ pub mod concept;
 
 pub mod error;
 pub mod factorio;
+pub mod locale;
 pub mod math;
 pub mod memlog;
 pub mod toast;
 pub mod update;
-pub mod locale;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SelectedSubview {

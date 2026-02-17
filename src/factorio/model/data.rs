@@ -507,7 +507,6 @@ impl DataContext {
                 .clone(),
         )?;
         for mod_info in &mut mod_infos {
-            // log::info!("加载模组信息 {:?}", mod_info);
             if mod_info.enabled {
                 log::info!("启用模组 {}", &mod_info.name);
                 factorio

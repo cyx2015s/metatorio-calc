@@ -1394,23 +1394,6 @@ impl SubView for ContextCreatorView {
             } else {
                 ui.label("未选择Mod路径");
             }
-            // ui.separator();
-            // ui.label("选择游戏语言:");
-            // egui::ComboBox::from_label("选择导出语言")
-            //     .selected_text(
-            //         LANG_CODES
-            //             .iter()
-            //             .find(|(code, _)| *code == self.lang)
-            //             .map(|(_, name)| *name)
-            //             .unwrap_or("未知"),
-            //     )
-            //     .show_ui(ui, |ui| {
-            //         for (code, name) in LANG_CODES {
-            //             if ui.selectable_label(self.lang == *code, *name).clicked() {
-            //                 self.lang = code.to_string();
-            //             }
-            //         }
-            //     });
             ui.separator();
             let mut can_load_context = true;
             if self.path.is_none() {
@@ -1440,11 +1423,7 @@ impl SubView for ContextCreatorView {
             {
                 let exe_path = path.clone().as_path().to_owned();
                 let mod_path = self.mod_path.clone().map(|p| p.as_path().to_owned());
-                let lang = if self.lang.is_empty() {
-                    "zh-CN".to_string()
-                } else {
-                    self.lang.clone()
-                };
+                let lang = "zh-CN".to_string();
 
                 let sender = sender.clone();
                 self.thread =

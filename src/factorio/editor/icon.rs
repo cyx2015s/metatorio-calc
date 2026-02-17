@@ -235,24 +235,104 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                 main
             }
 
-            GenericItem::Heat => ui.add_sized([self.size, self.size], egui::Label::new("热量")),
+            GenericItem::Heat => {
+                egui::Frame::NONE
+                    .fill(egui::Color32::from_rgba_premultiplied(
+                        0xaa, 0xaa, 0xaa, 0xcc,
+                    ))
+                    .corner_radius(4.0)
+                    .stroke(self.stroke)
+                    .show(ui, |ui| {
+                        ui.add_sized(
+                            [self.size, self.size],
+                            egui::Image::new(egui::include_image!(
+                                "../../../assets/icons/heat.png"
+                            ))
+                            .max_size([self.size, self.size].into()),
+                        )
+                    })
+                    .inner
+            }
             GenericItem::Electricity => {
-                ui.add_sized([self.size, self.size], egui::Label::new("电能"))
+                egui::Frame::NONE
+                    .fill(egui::Color32::from_rgba_premultiplied(
+                        0xaa, 0xaa, 0xaa, 0xcc,
+                    ))
+                    .corner_radius(4.0)
+                    .stroke(self.stroke)
+                    .show(ui, |ui| {
+                        ui.add_sized(
+                            [self.size, self.size],
+                            egui::Image::new(egui::include_image!(
+                                "../../../assets/icons/electricity.png"
+                            ))
+                            .max_size([self.size, self.size].into()),
+                        )
+                    })
+                    .inner
             }
             GenericItem::FluidHeat { filter } => match filter {
                 Some(fluid) => {
                     ui.add_sized([self.size, self.size], Icon::new(self.data, "fluid", fluid))
                 }
-                None => ui.add_sized([self.size, self.size], egui::Label::new("液热")),
+                None => {
+                    egui::Frame::NONE
+                        .fill(egui::Color32::from_rgba_premultiplied(
+                            0xaa, 0xaa, 0xaa, 0xcc,
+                        ))
+                        .corner_radius(4.0)
+                        .stroke(self.stroke)
+                        .show(ui, |ui| {
+                            ui.add_sized(
+                                [self.size, self.size],
+                                egui::Image::new(egui::include_image!(
+                                    "../../../assets/icons/fluid-heat.png"
+                                ))
+                                .max_size([self.size, self.size].into()),
+                            )
+                        })
+                        .inner
+                }
             },
             GenericItem::FluidFuel { filter } => match filter {
                 Some(fluid) => {
                     ui.add_sized([self.size, self.size], Icon::new(self.data, "fluid", fluid))
                 }
-                None => ui.add_sized([self.size, self.size], egui::Label::new("液燃")),
+                None => {
+                    egui::Frame::NONE
+                        .fill(egui::Color32::from_rgba_premultiplied(
+                            0xaa, 0xaa, 0xaa, 0xcc,
+                        ))
+                        .corner_radius(4.0)
+                        .stroke(self.stroke)
+                        .show(ui, |ui| {
+                            ui.add_sized(
+                                [self.size, self.size],
+                                egui::Image::new(egui::include_image!(
+                                    "../../../assets/icons/fluid-fuel.png"
+                                ))
+                                .max_size([self.size, self.size].into()),
+                            )
+                        })
+                        .inner
+                }
             },
-            GenericItem::ItemFuel { category } => ui
-                .add_sized([self.size, self.size], egui::Label::new("物燃".to_string()))
+            GenericItem::ItemFuel { category } => egui::Frame::NONE
+                .fill(egui::Color32::from_rgba_premultiplied(
+                    0xaa, 0xaa, 0xaa, 0xcc,
+                ))
+                .corner_radius(4.0)
+                .stroke(self.stroke)
+                .show(ui, |ui| {
+                    ui.add_sized(
+                        [self.size, self.size],
+                        egui::Image::new(egui::include_image!(
+                            "../../../assets/icons/item-fuel.png"
+                        ))
+                        .max_size([self.size, self.size].into()),
+                    )
+                })
+                .inner
                 .on_hover_text(format!("类别: {}", category,)),
             GenericItem::RocketPayloadWeight => {
                 ui.add_sized([self.size, self.size], egui::Label::new("重量"))
