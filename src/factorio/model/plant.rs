@@ -45,17 +45,17 @@ impl AsFlow for PlantMechanicInstance {
     fn as_flow(
         &self,
         data: &DataContext,
-        proj: &crate::factorio::ProjectContext,
-        factory: &crate::factorio::planner::FactoryContext,
+        _proj: &crate::factorio::ProjectContext,
+        _factory: &crate::factorio::planner::FactoryContext,
     ) -> crate::concept::Flow<Self::Item> {
         let mut flow = Flow::new();
-        if let Some(item) = data.items.get(&self.seed.0) {
-            if let Some(plant) = item.plant.as_ref() {
+        if let Some(item) = data.items.get(&self.seed.0)
+            && let Some(plant) = item.plant.as_ref() {
                 let plant_result = &plant.plant_result;
                 if let Some(plant) = data.plants.get(plant_result) {
                     index_map_update_entry(
                         &mut flow,
-                        GenericItem::Item(self.seed.clone().into()),
+                        GenericItem::Item(self.seed.clone()),
                         -1.0 / plant.growth_ticks * 60.0,
                     );
                     if let Some(minable) = plant.base.minable.as_ref() {
@@ -67,22 +67,18 @@ impl AsFlow for PlantMechanicInstance {
                             );
                         } else {
                             for result in &minable.results {
-                                match result {
-                                    RecipeResult::Item(item) => {
-                                        index_map_update_entry(
-                                            &mut flow,
-                                            GenericItem::Item(item.name.clone().into()),
-                                            item.normalized_output().0 / plant.growth_ticks * 60.0,
-                                        );
-                                    }
-                                    _ => {}
+                                if let RecipeResult::Item(item) = result {
+                                    index_map_update_entry(
+                                        &mut flow,
+                                        GenericItem::Item(item.name.clone().into()),
+                                        item.normalized_output().0 / plant.growth_ticks * 60.0,
+                                    );
                                 }
                             }
                         }
                     }
                 }
             }
-        }
         flow
     }
 
@@ -100,9 +96,9 @@ impl FactorioMechanic for PlantMechanic {
     fn editor_view(
         &mut self,
         ui: &mut egui::Ui,
-        data: &DataContext,
-        proj: &ProjectContext,
-        factory: &FactoryContext,
+        _data: &DataContext,
+        _proj: &ProjectContext,
+        _factory: &FactoryContext,
     ) -> bool {
         let mut changed = false;
         if ui.button("添加种树").clicked() {
@@ -138,12 +134,12 @@ impl FactorioMechanic for PlantMechanic {
     fn auto_populate(
         &mut self,
         data: &DataContext,
-        proj: &ProjectContext,
+        _proj: &ProjectContext,
         factory: &FactoryContext,
     ) {
         for item in data.items.values() {
             if let Some(plant_property) = item.plant.as_ref() {
-                let plant = data.plants.get(&plant_property.plant_result).unwrap();
+                let _plant = data.plants.get(&plant_property.plant_result).unwrap();
                 if let Some(planet) = factory.planet.as_ref()
                     && item
                         .default_import_location
@@ -163,8 +159,8 @@ impl FactorioMechanic for PlantMechanic {
         idx: usize,
         ui: &mut egui::Ui,
         data: &DataContext,
-        proj: &ProjectContext,
-        factory: &FactoryContext,
+        _proj: &ProjectContext,
+        _factory: &FactoryContext,
     ) -> bool {
         let mut changed = false;
         let instance = &mut self.instances[idx];

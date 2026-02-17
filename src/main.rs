@@ -1,8 +1,5 @@
 #![cfg_attr(all(not(test), not(debug_assertions)), windows_subsystem = "windows")]
 
-#[macro_use]
-extern crate rust_i18n;
-
 use std::sync::mpsc::*;
 
 use egui::special_emojis::GITHUB;

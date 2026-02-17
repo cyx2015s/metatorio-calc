@@ -1276,14 +1276,13 @@ impl SubView for ProjectView {
                 egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
                 egui::Key::S,
             )
-        }) {
-            if let Some(selected) = self.selected {
+        })
+            && let Some(selected) = self.selected {
                 let project = &mut self.projects.vec[selected];
                 save_project_as(project);
             }
-        }
-        if ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::S)) {
-            if let Some(selected) = self.selected {
+        if ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::S))
+            && let Some(selected) = self.selected {
                 let project = &mut self.projects.vec[selected];
                 if let Some(path) = &project.proj.file_path.clone() {
                     save_project(project, path);
@@ -1291,7 +1290,6 @@ impl SubView for ProjectView {
                     save_project_as(project);
                 }
             }
-        }
     }
 }
 

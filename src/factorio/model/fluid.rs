@@ -656,7 +656,7 @@ impl FactorioMechanic for BoilerMechanic {
                     instance.temperature = data
                         .fluids
                         .get(&instance.fluid)
-                        .expect(format!("锅炉输入的流体 {} 不存在", &instance.fluid).as_str())
+                        .unwrap_or_else(|| panic!("锅炉输入的流体 {} 不存在", &instance.fluid))
                         .default_temperature as i32;
                 }
             }
