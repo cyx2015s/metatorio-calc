@@ -147,8 +147,8 @@ pub struct FluidIngredient {
     pub name: String,
     pub amount: f64,
     pub temperature: Option<f64>,
-    pub min_temperature: Option<f64>,
-    pub max_temperature: Option<f64>,
+    pub minimum_temperature: Option<f64>,
+    pub maximum_temperature: Option<f64>,
     pub fluidbox_index: Option<f64>,
 }
 
@@ -542,17 +542,16 @@ impl AsFlow for RecipeMechanicInstance {
                     RecipeIngredient::Fluid(fluid) => {
                         let min_temperature = fluid
                             .temperature
-                            .or(fluid.min_temperature)
+                            .or(fluid.minimum_temperature)
                             .map_or(i32::MIN, |t| t as i32);
 
                         let max_temperature = fluid
                             .temperature
-                            .or(fluid.max_temperature)
+                            .or(fluid.maximum_temperature)
                             .map_or(i32::MAX, |t| t as i32);
 
                         let key = GenericItem::Fluid {
                             name: fluid.name.clone(),
-                            // temperature: fluid.temperature.map(|x| x as i32),
                             temperature: [min_temperature, max_temperature],
                         };
                         index_map_update_entry(

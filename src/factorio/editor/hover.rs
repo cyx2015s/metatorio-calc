@@ -75,7 +75,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
                                                     ui.label(format!("{}℃", t));
                                                 }
                                                 None => {
-                                                    match (f.min_temperature, f.max_temperature) {
+                                                    match (f.minimum_temperature, f.maximum_temperature) {
                                                         (Some(min_t), Some(max_t)) => {
                                                             ui.horizontal_top(|ui| {
                                                                 ui.add(
