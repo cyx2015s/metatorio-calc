@@ -134,7 +134,7 @@ pub fn update_accessibles(user: &mut ProjectContext, data: &DataContext) {
     }
 
     for recipe in data.recipes.values() {
-        if recipe.enabled
+        if recipe.enabled && !recipe.base.hidden
             || user
                 .accessible_prototypes
                 .get("recipe")
@@ -193,6 +193,7 @@ pub fn update_accessibles(user: &mut ProjectContext, data: &DataContext) {
                 .get("item")
                 .is_some_and(|items| items.contains_key(item_name)))
         {
+            log::info!("物品 {} 可放置，放置结果 {} 已解锁，添加到可访问原型中", item_name, place_result);
             user.accessible_prototypes
                 .entry("entity".to_string())
                 .or_default()
