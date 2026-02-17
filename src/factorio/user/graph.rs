@@ -113,22 +113,6 @@ pub fn update_accessibles(user: &mut ProjectContext, data: &DataContext) {
                                 .entry("recipe".to_string())
                                 .or_default()
                                 .insert(recipe.clone(), true);
-                            for result in &recipe_proto.results {
-                                match result {
-                                    RecipeResult::Item(item) => {
-                                        user.accessible_prototypes
-                                            .entry("item".to_string())
-                                            .or_default()
-                                            .insert(item.name.clone(), true);
-                                    }
-                                    RecipeResult::Fluid(fluid) => {
-                                        user.accessible_prototypes
-                                            .entry("fluid".to_string())
-                                            .or_default()
-                                            .insert(fluid.name.clone(), true);
-                                    }
-                                }
-                            }
                         }
                     }
                     Modifier::UnlockSpaceLocation { space_location } => {
@@ -144,6 +128,32 @@ pub fn update_accessibles(user: &mut ProjectContext, data: &DataContext) {
                             .insert(quality.clone(), true);
                     }
                     _ => {}
+                }
+            }
+        }
+    }
+
+    for recipe in data.recipes.values() {
+        if recipe.enabled
+            || user
+                .accessible_prototypes
+                .get("recipe")
+                .is_some_and(|recipes| recipes.contains_key(&recipe.base.name))
+        {
+            for result in &recipe.results {
+                match result {
+                    RecipeResult::Item(item) => {
+                        user.accessible_prototypes
+                            .entry("item".to_string())
+                            .or_default()
+                            .insert(item.name.clone(), true);
+                    }
+                    RecipeResult::Fluid(fluid) => {
+                        user.accessible_prototypes
+                            .entry("fluid".to_string())
+                            .or_default()
+                            .insert(fluid.name.clone(), true);
+                    }
                 }
             }
         }
@@ -178,10 +188,10 @@ pub fn update_accessibles(user: &mut ProjectContext, data: &DataContext) {
 
     for (item_name, item) in &data.items {
         if let Some(place_result) = &item.place_result
-            && user
+            && (user
                 .accessible_prototypes
                 .get("item")
-                .is_some_and(|items| items.contains_key(item_name))
+                .is_some_and(|items| items.contains_key(item_name)))
         {
             user.accessible_prototypes
                 .entry("entity".to_string())
@@ -189,6 +199,7 @@ pub fn update_accessibles(user: &mut ProjectContext, data: &DataContext) {
                 .insert(place_result.clone(), true);
         }
     }
+    user.max_quality_level = 0;
     for i in 1..data.qualities.len() {
         let quality = &data.qualities[i];
         if user

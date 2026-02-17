@@ -158,7 +158,8 @@ where
             };
         }
         // 调整配方的系数，使得其中出现的数量级最大的物品的数量级在1附近，避免数值不稳定。
-        // while self.trim_flows() {}
+        log::info!("求解器：开始剪枝");
+        while self.trim_flows() {}
         let mut item_scales: HashMap<I, f64> = HashMap::new();
         for flow in self.flows.values() {
             for (item_id, _) in &flow.0 {

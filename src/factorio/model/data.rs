@@ -703,6 +703,7 @@ impl DataContext {
                     .insert(boiler.target_temperature.unwrap() as i32);
             }
         }
+        log::info!("构建温度信息完成，包含以下流体的温度信息{:?}", &self.temperatures);
         self
     }
 }

@@ -100,7 +100,7 @@ impl FactorioMechanic for ItemFuelMechanic {
         proj: &ProjectContext,
         factory: &FactoryContext,
     ) {
-        for q in 0..proj.max_quality_level {
+        for q in 0..=proj.max_quality_level {
             for i in data.items.values() {
                 if i.burn.is_some() {
                     self.instances.push(ItemFuelInstance {
