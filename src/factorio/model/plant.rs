@@ -3,7 +3,7 @@ use crate::{
     factorio::{
         AsFlow, DataContext, Dict, EntityPrototype, FactorioMechanic, GenericItem, IdWithQuality,
         ProjectContext, RecipeResult, icon::Icon, index_map_update_entry, modal::SelectorModal,
-        planner::FactoryContext, selector::Selector, surface_condition_satisfied,
+        planner::FactoryContext, selector::Selector,
     },
     math::ElemVec,
 };

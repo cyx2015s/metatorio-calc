@@ -1324,10 +1324,13 @@ pub fn load_project(path: &Path) -> Option<ProjectInstance> {
     }
 }
 
+const LANG_CODES: &[(&str, &str)] = &[("en", "English"), ("zh-CN", "简体中文")];
+
 #[derive(Default, Debug)]
 pub struct ContextCreatorView {
     path: Option<std::path::PathBuf>,
     mod_path: Option<std::path::PathBuf>,
+    lang: String,
     subview_sender: Option<Sender<Box<dyn SubView>>>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
@@ -1348,8 +1351,9 @@ impl SubView for ContextCreatorView {
                 ui.label(format!("已选择路径: {}", path.display()));
                 if path.to_string_lossy().contains("steam") {
                     ui.label(
-            "若为 Steam 版本的游戏，请关闭正在运行中的异星工厂并且启动 Steam 再执行加载游戏上下文",
-          );
+                        "若为 Steam 版本的游戏，请关闭正在运行中\
+的异星工厂并且启动 Steam 再执行加载游戏上下文",
+                    );
                 }
             } else {
                 ui.label("未选择路径");
@@ -1371,7 +1375,24 @@ impl SubView for ContextCreatorView {
             } else {
                 ui.label("未选择Mod路径");
             }
-
+            ui.separator();
+            ui.label("选择游戏语言:");
+            egui::ComboBox::from_label("选择导出语言")
+                .selected_text(
+                    LANG_CODES
+                        .iter()
+                        .find(|(code, _)| *code == self.lang)
+                        .map(|(_, name)| *name)
+                        .unwrap_or("未知"),
+                )
+                .show_ui(ui, |ui| {
+                    for (code, name) in LANG_CODES {
+                        if ui.selectable_label(self.lang == *code, *name).clicked() {
+                            self.lang = code.to_string();
+                        }
+                    }
+                });
+            ui.separator();
             let mut can_load_context = true;
             if self.path.is_none() {
                 ui.label("请选择游戏可执行文件以继续。");
@@ -1400,13 +1421,14 @@ impl SubView for ContextCreatorView {
             {
                 let exe_path = path.clone().as_path().to_owned();
                 let mod_path = self.mod_path.clone().map(|p| p.as_path().to_owned());
+                let lang = self.lang.clone();
                 let sender = sender.clone();
                 self.thread =
                     Some(std::thread::spawn(
                         move || match DataContext::load_from_executable_path(
                             &exe_path,
                             mod_path.as_deref(),
-                            None,
+                            Some(&lang),
                         ) {
                             Ok(data) => {
                                 sender

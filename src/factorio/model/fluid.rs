@@ -502,6 +502,9 @@ impl FactorioMechanic for GeneratorMechanic {
         _factory: &FactoryContext,
     ) {
         for generator in data.generators.values() {
+            if !proj.is_prototype_accessible("entity", &generator.base.base.name) {
+                continue;
+            }
             if let Some(filter) = &generator.fluid_box.filter {
                 if let Some(fluid) = data.fluids.get(filter)
                     && proj.is_prototype_accessible("entity", &generator.base.base.name)
@@ -702,6 +705,9 @@ impl FactorioMechanic for BoilerMechanic {
         _factory: &FactoryContext,
     ) {
         for boiler in data.boilers.values() {
+            if !proj.is_prototype_accessible("entity", &boiler.base.base.name) {
+                continue;
+            }
             if let Some(filter) = &boiler.fluid_box.filter {
                 if let Some(fluid) = data.fluids.get(filter)
                     && proj.is_prototype_accessible("entity", &boiler.base.base.name)
