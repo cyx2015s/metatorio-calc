@@ -1346,13 +1346,10 @@ pub fn load_project(path: &Path) -> Option<ProjectInstance> {
     }
 }
 
-const LANG_CODES: &[(&str, &str)] = &[("en", "English"), ("zh-CN", "简体中文")];
-
 #[derive(Default, Debug)]
 pub struct ContextCreatorView {
     path: Option<std::path::PathBuf>,
     mod_path: Option<std::path::PathBuf>,
-    lang: String,
     subview_sender: Option<Sender<Box<dyn SubView>>>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
@@ -1397,23 +1394,23 @@ impl SubView for ContextCreatorView {
             } else {
                 ui.label("未选择Mod路径");
             }
-            ui.separator();
-            ui.label("选择游戏语言:");
-            egui::ComboBox::from_label("选择导出语言")
-                .selected_text(
-                    LANG_CODES
-                        .iter()
-                        .find(|(code, _)| *code == self.lang)
-                        .map(|(_, name)| *name)
-                        .unwrap_or("未知"),
-                )
-                .show_ui(ui, |ui| {
-                    for (code, name) in LANG_CODES {
-                        if ui.selectable_label(self.lang == *code, *name).clicked() {
-                            self.lang = code.to_string();
-                        }
-                    }
-                });
+            // ui.separator();
+            // ui.label("选择游戏语言:");
+            // egui::ComboBox::from_label("选择导出语言")
+            //     .selected_text(
+            //         LANG_CODES
+            //             .iter()
+            //             .find(|(code, _)| *code == self.lang)
+            //             .map(|(_, name)| *name)
+            //             .unwrap_or("未知"),
+            //     )
+            //     .show_ui(ui, |ui| {
+            //         for (code, name) in LANG_CODES {
+            //             if ui.selectable_label(self.lang == *code, *name).clicked() {
+            //                 self.lang = code.to_string();
+            //             }
+            //         }
+            //     });
             ui.separator();
             let mut can_load_context = true;
             if self.path.is_none() {

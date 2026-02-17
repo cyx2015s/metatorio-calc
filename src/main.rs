@@ -22,6 +22,7 @@ pub mod math;
 pub mod memlog;
 pub mod toast;
 pub mod update;
+pub mod locale;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SelectedSubview {
