@@ -59,10 +59,14 @@ pub struct MiningDrillPrototype {
     #[serde(default)]
     pub allowed_module_categories: Option<Vec<String>>,
 
-    #[serde(default)]
+    #[serde(default = "always_true")]
     pub uses_force_mining_productivity_bonus: bool,
 
     pub resource_drain_rate_percent: Option<f64>,
+}
+
+fn always_true() -> bool {
+    true
 }
 
 impl HasPrototypeBase for MiningDrillPrototype {
