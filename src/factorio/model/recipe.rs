@@ -29,8 +29,16 @@ fn always_true() -> bool {
     true
 }
 
-fn always_false() -> bool {
-    false
+fn always_half() -> f64 {
+    0.5
+}
+
+fn always_one() -> f64 {
+    1.0
+}
+
+fn always_three() -> f64 {
+    3.0
 }
 
 #[serde_as]
@@ -56,19 +64,24 @@ pub struct RecipePrototype {
     pub results: Vec<RecipeResult>,
     pub main_product: Option<String>,
 
+    #[serde_as(deserialize_as = "DefaultOnError")]
     #[serde(default)]
     pub allowed_module_categories: Option<Vec<String>>,
 
     /// 制作时间（秒）
+    #[serde(default = "always_half")]
     pub energy_required: f64,
 
     /// 配方污染倍数
+    #[serde(default = "always_one")]
     pub emissions_multiplier: f64,
 
     /// 最大产能加成
+    #[serde(default = "always_three")]
     pub maximum_productivity: f64,
 
     /// 开局是否可用
+    #[serde(default = "always_true")]
     pub enabled: bool,
 
     /// 产物若为可变质，是否永远新鲜
@@ -83,7 +96,6 @@ pub struct RecipePrototype {
     pub allow_speed: bool,
 
     /// 是否允许使用增加产能的插件
-    #[serde(default = "always_false")]
     pub allow_productivity: bool,
 
     /// 是否允许使用降低污染的插件
@@ -93,38 +105,6 @@ pub struct RecipePrototype {
     /// 是否允许使用增加品质的插件
     #[serde(default = "always_true")]
     pub allow_quality: bool,
-}
-
-impl Default for RecipePrototype {
-    fn default() -> Self {
-        RecipePrototype {
-            base: PrototypeBase {
-                r#type: "recipe".to_string(),
-                name: "recipe-unknown".to_string(),
-                order: String::new(),
-                subgroup: String::new(),
-                hidden: false,
-                parameter: false,
-            },
-            surface_conditions: Vec::new(),
-            main_product: None,
-            category: None,
-            additional_categories: Vec::new(),
-            ingredients: Vec::new(),
-            results: Vec::new(),
-            allowed_module_categories: None,
-            energy_required: 0.5,
-            emissions_multiplier: 1.0,
-            maximum_productivity: 3.0,
-            enabled: true,
-            result_is_always_fresh: false,
-            allow_consumption: true,
-            allow_speed: true,
-            allow_productivity: false,
-            allow_pollution: true,
-            allow_quality: true,
-        }
-    }
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
