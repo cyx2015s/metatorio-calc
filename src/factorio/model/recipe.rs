@@ -1005,7 +1005,7 @@ impl FactorioMechanic for RecipeMechanic {
         }
         ui.separator();
         ui.vertical(|ui| {
-            ui.add_sized([35.0, 15.0], egui::Label::new("机器"));
+            ui.label("机器");
             let mut entity_button = ui
                 .add_sized(
                     [35.0, 35.0],
