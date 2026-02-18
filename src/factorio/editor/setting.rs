@@ -127,10 +127,8 @@ impl egui::Widget for UserContextEditor<'_> {
             SelectorModal::new(button.id, self.data, "已解锁的配方")
                 .with_toggle(button.clicked())
                 .with_selector(
-                    Selector::new(self.data, "recipe").with_filter(|s: &str, f| {
-                        !self.proj.accessible_prototypes.contains_key("recipe")
-                            || f.recipes[s].enabled
-                            || self.proj.accessible_prototypes["recipe"].contains_key(s)
+                    Selector::new(self.data, "recipe").with_filter(|s: &str, _f| {
+                        self.proj.accessible_prototypes["recipe"].contains_key(s)
                     }),
                 ),
         );

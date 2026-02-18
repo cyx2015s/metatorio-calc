@@ -134,8 +134,14 @@ pub fn update_accessibles(user: &mut ProjectContext, data: &DataContext) {
     }
 
     for recipe in data.recipes.values() {
-        if recipe.enabled && !recipe.base.hidden
-            || user
+        if recipe.enabled {
+            user.accessible_prototypes
+                .entry("recipe".to_string())
+                .or_default()
+                .insert(recipe.base.name.clone(), true);
+        }
+        if !recipe.base.hidden
+            && user
                 .accessible_prototypes
                 .get("recipe")
                 .is_some_and(|recipes| recipes.contains_key(&recipe.base.name))
