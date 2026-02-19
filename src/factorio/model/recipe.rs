@@ -986,7 +986,7 @@ impl FactorioMechanic for RecipeMechanic {
         }
         ui.separator();
         ui.vertical(|ui| {
-            ui.label("机器");
+            ui.label("组装机");
             let mut entity_button = ui
                 .add_sized(
                     [35.0, 35.0],

@@ -478,7 +478,7 @@ impl FactorioMechanic for MiningMechanic {
         }
         ui.separator();
         ui.vertical(|ui| {
-            ui.label("机器");
+            ui.label("采矿机");
             let entity_button = ui
                 .add_sized(
                     [35.0, 35.0],

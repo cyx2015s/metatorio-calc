@@ -15,7 +15,7 @@ use serde_with::{DefaultOnError, serde_as};
 use crate::{
     concept::*,
     error::AppError,
-    factorio::*,
+    factorio::{planner::FactoryContext, *},
 };
 
 pub const LOCALE_CATEGORIES: &[&str] = &[
@@ -867,7 +867,7 @@ fn test_load_context() {
         fuel: None,
     };
     let proj = ProjectContext::default();
-    let factory = FactoryContext::default();
+    let factory = crate::factorio::planner::FactoryContext::default();
     let flow = reactor_instance.as_flow(&factorio, &proj, &factory);
     dbg!(flow);
 }

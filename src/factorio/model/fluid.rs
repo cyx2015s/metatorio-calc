@@ -409,7 +409,7 @@ impl FactorioMechanic for GeneratorMechanic {
         let mut changed = false;
         let instance = &mut self.instances[idx];
         ui.vertical(|ui| {
-            ui.label("机器");
+            ui.label("发电机");
             let entity_button = ui
                 .add_sized(
                     [35.0, 35.0],
@@ -629,7 +629,7 @@ impl FactorioMechanic for BoilerMechanic {
         let mut changed = false;
         let instance = &mut self.instances[idx];
         ui.vertical(|ui| {
-            ui.label("机器");
+            ui.label("锅炉");
             let entity_button = ui
                 .add_sized(
                     [35.0, 35.0],
