@@ -42,7 +42,7 @@ fn always_three() -> f64 {
 }
 
 #[serde_as]
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Deserialize)]
 #[serde(default)]
 pub struct RecipePrototype {
     #[serde(flatten)]
@@ -404,6 +404,7 @@ pub fn machine_fits_for_recipe(
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename = "factorio:recipe")]
+#[serde(default)]
 pub struct RecipeMechanicInstance {
     pub recipe: IdWithQuality,
     pub machine: IdWithQuality,
@@ -413,7 +414,7 @@ pub struct RecipeMechanicInstance {
     /// 类型为Electric、Heat、Void时无效
     /// 类型为Fluid时，值为(流体名, 流体温度)
     /// 类型为Burner时，值为(物品名, 物品品质)
-    pub instance_fuel: Option<(String, i32)>,
+    pub fuel: Option<(String, i32)>,
 }
 
 impl SolveContext for RecipeMechanicInstance {
@@ -427,7 +428,7 @@ impl Default for RecipeMechanicInstance {
             recipe: ("recipe-unknown".to_string(), 0).into(),
             machine: ("entity-unknown".to_string(), 0).into(),
             module_config: ModuleConfig::new(),
-            instance_fuel: None,
+            fuel: None,
         }
     }
 }
@@ -480,7 +481,7 @@ impl AsFlow for RecipeMechanicInstance {
                 &crafter.energy_source,
                 energy_usage,
                 &module_effects,
-                &self.instance_fuel,
+                &self.fuel,
                 &mut base_speed,
             );
             if let EnergySource::Electric(e) = &crafter.energy_source
@@ -635,7 +636,7 @@ fn test_recipe_normalized() {
         recipe: ("iron-gear-wheel".to_string(), 0).into(),
         machine: "assembling-machine-1".into(),
         module_config: ModuleConfig::new(),
-        instance_fuel: Some(("nutrients".to_string(), 0).into()),
+        fuel: Some(("nutrients".to_string(), 0).into()),
     };
     let result = recipe_config.as_flow(&data, &proj, &factory);
     println!("Recipe Result: {:?}", result);
@@ -980,7 +981,7 @@ impl FactorioMechanic for RecipeMechanic {
                 &self.machine_preferences,
                 &[],
             );
-            instance.instance_fuel = None;
+            instance.fuel = None;
             instance.module_config = ModuleConfig::new();
         }
         ui.separator();

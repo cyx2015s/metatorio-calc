@@ -8,6 +8,7 @@ use std::{
 
 use indexmap::IndexMap;
 use serde_json::Value;
+use serde_with::serde_as;
 
 use crate::{
     concept::*,
@@ -414,12 +415,14 @@ pub struct ElectricEnergySource {
     pub emissions_per_minute: Option<Emissions>,
 }
 
+#[serde_as]
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(default)]
 pub struct BurnerEnergySource {
     pub burnt_inventory_size: f64,
+    #[serde(default)]
+    pub fuel_categories: Vec<String>,
     pub effectivity: f64,
-    pub burner_usage: String,
     pub emissions_per_minute: Option<Dict<f64>>,
 }
 
@@ -428,7 +431,7 @@ impl Default for BurnerEnergySource {
         BurnerEnergySource {
             burnt_inventory_size: 0.0,
             effectivity: 1.0,
-            burner_usage: "chemical".to_string(),
+            fuel_categories: vec!["chemical".into()],
             emissions_per_minute: None,
         }
     }

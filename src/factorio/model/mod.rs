@@ -13,6 +13,7 @@ mod quality;
 mod recipe;
 mod technology;
 mod tile;
+mod reactor;
 
 pub use auto::*;
 pub use data::*;
@@ -29,3 +30,4 @@ pub use quality::*;
 pub use recipe::*;
 pub use technology::*;
 pub use tile::*;
+pub use reactor::*;

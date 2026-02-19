@@ -89,11 +89,12 @@ pub fn machine_fits_for_resource(
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename = "factorio:mining")]
+#[serde(default)]
 pub struct MiningMechanicInstance {
     pub resource: String,
     pub machine: IdWithQuality,
     pub module_config: ModuleConfig,
-    pub instance_fuel: Option<IdWithQuality>,
+    pub fuel: Option<IdWithQuality>,
 }
 
 impl Default for MiningMechanicInstance {
@@ -103,7 +104,7 @@ impl Default for MiningMechanicInstance {
             resource: "entity-unknown".to_string(),
             machine: ("entity-unknown".to_string(), 0).into(),
             module_config: ModuleConfig::default(),
-            instance_fuel: None,
+            fuel: None,
         }
     }
 }
@@ -160,7 +161,7 @@ impl AsFlow for MiningMechanicInstance {
                     .expect("MiningDrillPrototype 中的机器没有能量消耗"),
                 &module_effects,
                 &self
-                    .instance_fuel
+                    .fuel
                     .as_ref()
                     .map(|id_with_quality| (id_with_quality.0.clone(), id_with_quality.1 as i32)),
                 &mut base_speed,
@@ -318,7 +319,7 @@ fn test_mining_normalized() {
         resource: "uranium-ore".to_string(),
         machine: "big-mining-drill".into(),
         module_config: ModuleConfig::default(),
-        instance_fuel: None,
+        fuel: None,
     };
 
     let result = mining_config.as_flow(&data, &proj, &factory);
@@ -471,7 +472,7 @@ impl FactorioMechanic for MiningMechanic {
                     .is_none_or(|miner| !machine_fits_for_resource(miner, resource))
             {
                 instance.machine = select_miner_for_resource(data, proj, factory, resource, &[]);
-                instance.instance_fuel = None;
+                instance.fuel = None;
                 instance.module_config = ModuleConfig::new();
             }
         }

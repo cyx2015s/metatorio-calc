@@ -12,7 +12,11 @@ use indexmap::IndexMap;
 use serde_json::Value;
 use serde_with::{DefaultOnError, serde_as};
 
-use crate::{concept::*, error::AppError, factorio::*};
+use crate::{
+    concept::*,
+    error::AppError,
+    factorio::{planner::FactoryContext, *},
+};
 
 pub const LOCALE_CATEGORIES: &[&str] = &[
     "airborne-pollutant",
@@ -81,6 +85,7 @@ pub struct DataContext {
     /// 流体相关
     pub boilers: Dict<BoilerPrototype>,
     pub generators: Dict<GeneratorPrototype>,
+    pub reactors: Dict<ReactorPrototype>,
     pub temperatures: Dict<HashSet<i32>>, // 所有流体的*常见*温度列表（出现在filter中指定温度的）
 
     pub plants: Dict<PlantPrototype>,
@@ -200,6 +205,7 @@ impl DataContext {
         let tiles = deserialize_type(value, "tile");
         let boilers = deserialize_type(value, "boiler");
         let generators = deserialize_type(value, "generator");
+        let reactors = deserialize_type(value, "reactor");
         let plants = deserialize_type(value, "plant");
         log::info!("数据加载完成");
         // ret.planets.iter().for_each(|(_, p)| {
@@ -227,6 +233,7 @@ impl DataContext {
             tiles,
             boilers,
             generators,
+            reactors,
             plants,
             ..Default::default()
         }
@@ -853,4 +860,14 @@ fn test_load_context() {
     dbg!(heat_exchanger.get_flow(&factorio, &water.base.name, 50.0, &None));
     dbg!(heat_exchanger.get_flow(&factorio, &water.base.name, 325.0, &None));
     assert!(dbg!(heat_exchanger.get_flow(&factorio, &steam.base.name, 15.0, &None)).is_empty());
+
+    let reactor_instance = ReactorMechanicInstance {
+        neighbours: 3,
+        reactor: "nuclear-reactor".into(),
+        fuel: None,
+    };
+    let proj = ProjectContext::default();
+    let factory = FactoryContext::default();
+    let flow = reactor_instance.as_flow(&factorio, &proj, &factory);
+    dbg!(flow);
 }

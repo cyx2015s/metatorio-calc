@@ -16,7 +16,7 @@ pub fn energy_source_as_flow(
     effects: &Effect,
     // 如果是物品，第一个是内部名称，第二个是品质等级
     // 如果是流体，第一个是内部名称，第二个是温度
-    instance_fuel: &Option<(String, i32)>,
+    fuel: &Option<(String, i32)>,
     fulfillment: &mut f64,
 ) -> Flow<GenericItem> {
     let mut map = Flow::new();
@@ -73,7 +73,7 @@ pub fn energy_source_as_flow(
         EnergySource::Burner(source) => {
             let energy_usage =
                 energy_usage.amount * 60.0 * (1.0 + effects.consumption) / source.effectivity; // 每秒的能量消耗
-            if let Some(actual_fuel) = instance_fuel
+            if let Some(actual_fuel) = fuel
                 && let Some(fuel_prototype) = data.items.get(&actual_fuel.0)
             {
                 // 使用具体燃料
@@ -99,7 +99,8 @@ pub fn energy_source_as_flow(
                 index_map_update_entry(
                     &mut map,
                     GenericItem::ItemFuel {
-                        category: source.burner_usage.clone(),
+                        // TODO: 只使用了第一个燃料类别，支持多个燃料类别需要修改ui设计太麻烦了，之前设计有误，把burner_usage当成燃料类别了
+                        category: source.fuel_categories[0].clone(),
                     },
                     -energy_usage,
                 );
@@ -125,7 +126,7 @@ pub fn energy_source_as_flow(
             let energy_usage =
                 energy_usage.amount * 60.0 * (1.0 + effects.consumption) / source.effectivity; // 每秒的能量消耗
             if source.burns_fluid {
-                if let Some(actual_fuel) = instance_fuel {
+                if let Some(actual_fuel) = fuel {
                     // 使用具体燃料
                     let fuel_prototype = data
                         .fluids
@@ -171,7 +172,7 @@ pub fn energy_source_as_flow(
                 // 燃烧流体作为燃料
             } else {
                 // 利用流体热源
-                if let Some(actual_fuel) = instance_fuel {
+                if let Some(actual_fuel) = fuel {
                     // 使用具体燃料
                     let fuel_prototype = data
                         .fluids

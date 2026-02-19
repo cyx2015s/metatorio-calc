@@ -336,6 +336,9 @@ impl AsFlow for GeneratorMechanicInstance {
                 index_map_update_entry(&mut flow, GenericItem::Electricity, power_output);
             }
         }
+        let idx = (self.generator.1 as usize).max(data.qualities.len() - 1);
+        let multiplier = data.qualities[idx].default_multiplier();
+        flow.iter_mut().for_each(|v| *v.1 *= multiplier);
         flow
     }
 
@@ -764,6 +767,7 @@ impl FactorioMechanic for BoilerMechanic {
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct BoilerMechanicInstance {
     pub boiler: IdWithQuality,
 
@@ -796,6 +800,9 @@ impl AsFlow for BoilerMechanicInstance {
                 1.0,
             );
         }
+        let idx = (self.boiler.1 as usize).max(data.qualities.len() - 1);
+        let multiplier = data.qualities[idx].default_multiplier();
+        flow.iter_mut().for_each(|v| *v.1 *= multiplier);
         flow
     }
 
