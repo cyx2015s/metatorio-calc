@@ -336,14 +336,14 @@ impl AsFlow for GeneratorInstance {
                 index_map_update_entry(&mut flow, GenericItem::Electricity, power_output);
             }
         }
-        let idx = (self.generator.1 as usize).max(data.qualities.len() - 1);
+        let idx = (self.generator.1 as usize).min(data.qualities.len() - 1);
         let multiplier = data.qualities[idx].default_multiplier();
         flow.iter_mut().for_each(|v| *v.1 *= multiplier);
         flow
     }
 
-    fn cost(&self, _data: &DataContext, _proj: &ProjectContext, _factory: &FactoryContext) -> f64 {
-        if let Some(generator) = _data.generators.get(&self.generator.0) {
+    fn cost(&self, data: &DataContext, _proj: &ProjectContext, _factory: &FactoryContext) -> f64 {
+        if let Some(generator) = data.generators.get(&self.generator.0) {
             generator
                 .base
                 .collision_box
@@ -515,17 +515,16 @@ impl FactorioMechanic for GeneratorMechanic {
                         || (!generator.burns_fluid
                             && fluid.heat_capacity.is_none_or(|x| x.amount > 0.0)))
                 {
-                    for quality in 0..=proj.max_quality_level {
-                        for temperature in
-                            data.temperatures.get(filter).expect("未初始化流体温度数据")
-                        {
-                            self.instances.push(GeneratorInstance {
-                                generator: (generator.base.base.name.clone(), quality).into(),
-                                fluid: filter.clone(),
-                                temperature: *temperature,
-                            });
-                        }
+                    // for quality in 0..=proj.max_quality_level {
+                    for temperature in data.temperatures.get(filter).expect("未初始化流体温度数据")
+                    {
+                        self.instances.push(GeneratorInstance {
+                            generator: (generator.base.base.name.clone(), 0).into(),
+                            fluid: filter.clone(),
+                            temperature: *temperature,
+                        });
                     }
+                    // }
                 }
             } else {
                 // 如果发电机没有指定输入流体，则尝试用所有可用
@@ -535,19 +534,19 @@ impl FactorioMechanic for GeneratorMechanic {
                             || (!generator.burns_fluid
                                 && fluid.heat_capacity.is_none_or(|x| x.amount > 0.0)))
                     {
-                        for quality in 0..=proj.max_quality_level {
-                            for temperature in data
-                                .temperatures
-                                .get(fluid_name)
-                                .expect("未初始化流体温度数据")
-                            {
-                                self.instances.push(GeneratorInstance {
-                                    generator: (generator.base.base.name.clone(), quality).into(),
-                                    fluid: fluid_name.clone(),
-                                    temperature: *temperature,
-                                });
-                            }
+                        // for quality in 0..=proj.max_quality_level {
+                        for temperature in data
+                            .temperatures
+                            .get(fluid_name)
+                            .expect("未初始化流体温度数据")
+                        {
+                            self.instances.push(GeneratorInstance {
+                                generator: (generator.base.base.name.clone(), 0).into(),
+                                fluid: fluid_name.clone(),
+                                temperature: *temperature,
+                            });
                         }
+                        // }
                     }
                 }
             }
@@ -726,18 +725,17 @@ impl FactorioMechanic for BoilerMechanic {
                     && proj.is_prototype_accessible("entity", &boiler.base.base.name)
                     && fluid.heat_capacity.is_none_or(|x| x.amount > 0.0)
                 {
-                    for quality in 0..=proj.max_quality_level {
-                        for temperature in
-                            data.temperatures.get(filter).expect("未初始化流体温度数据")
-                        {
-                            self.instances.push(BoilerInstance {
-                                boiler: (boiler.base.base.name.clone(), quality).into(),
-                                fluid: filter.clone(),
-                                temperature: *temperature,
-                                fuel: None,
-                            });
-                        }
+                    // for quality in 0..=proj.max_quality_level {
+                    for temperature in data.temperatures.get(filter).expect("未初始化流体温度数据")
+                    {
+                        self.instances.push(BoilerInstance {
+                            boiler: (boiler.base.base.name.clone(), 0).into(),
+                            fluid: filter.clone(),
+                            temperature: *temperature,
+                            fuel: None,
+                        });
                     }
+                    // }
                 }
             } else {
                 // 如果锅炉没有指定输入流体，则尝试用所有可用的流体
@@ -745,20 +743,20 @@ impl FactorioMechanic for BoilerMechanic {
                     if proj.is_prototype_accessible("entity", &boiler.base.base.name)
                         && fluid.heat_capacity.is_none_or(|x| x.amount > 0.0)
                     {
-                        for quality in 0..=proj.max_quality_level {
-                            for temperature in data
-                                .temperatures
-                                .get(fluid_name)
-                                .expect("未初始化流体温度数据")
-                            {
-                                self.instances.push(BoilerInstance {
-                                    boiler: (boiler.base.base.name.clone(), quality).into(),
-                                    fluid: fluid_name.clone(),
-                                    temperature: *temperature,
-                                    fuel: None,
-                                });
-                            }
+                        // for quality in 0..=proj.max_quality_level {
+                        for temperature in data
+                            .temperatures
+                            .get(fluid_name)
+                            .expect("未初始化流体温度数据")
+                        {
+                            self.instances.push(BoilerInstance {
+                                boiler: (boiler.base.base.name.clone(), 0).into(),
+                                fluid: fluid_name.clone(),
+                                temperature: *temperature,
+                                fuel: None,
+                            });
                         }
+                        // }
                     }
                 }
             }
@@ -800,7 +798,7 @@ impl AsFlow for BoilerInstance {
                 1.0,
             );
         }
-        let idx = (self.boiler.1 as usize).max(data.qualities.len() - 1);
+        let idx = (self.boiler.1 as usize).min(data.qualities.len() - 1);
         let multiplier = data.qualities[idx].default_multiplier();
         flow.iter_mut().for_each(|v| *v.1 *= multiplier);
         flow

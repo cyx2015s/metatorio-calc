@@ -15,7 +15,7 @@ pub struct PlantPrototype {
 
     pub growth_ticks: f64,
     #[serde(default)]
-    pub harvest_emmisions: Dict<f64>,
+    pub harvest_emissions: Dict<f64>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -59,6 +59,15 @@ impl AsFlow for PlantInstance {
                     GenericItem::Item(self.seed.clone()),
                     -1.0 / plant.growth_ticks * 60.0,
                 );
+                for harvest_emmision in &plant.harvest_emissions {
+                    index_map_update_entry(
+                        &mut flow,
+                        GenericItem::Pollution {
+                            name: harvest_emmision.0.clone(),
+                        },
+                        harvest_emmision.1 / plant.growth_ticks * 60.0,
+                    );
+                }
                 if let Some(minable) = plant.base.minable.as_ref() {
                     if let Some(result) = &minable.result {
                         index_map_update_entry(

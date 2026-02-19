@@ -124,13 +124,13 @@ impl FactorioMechanic for ReactorMechanic {
         _factory: &FactoryContext,
     ) {
         for reactor in data.reactors.values() {
-            for quality in 0..=proj.max_quality_level {
+            // for quality in 0..=proj.max_quality_level {
                 self.instances.push(ReactorInstance {
-                    reactor: IdWithQuality(reactor.base.base.name.clone(), quality),
+                    reactor: IdWithQuality(reactor.base.base.name.clone(), 0),
                     neighbours: 3,
                     fuel: None,
                 });
-            }
+            // }
         }
     }
 }
@@ -179,6 +179,9 @@ impl AsFlow for ReactorInstance {
                     * 60.0,
             );
         }
+        let quality = (self.reactor.1 as usize).min(data.qualities.len() - 1);
+        let multiplier = data.qualities[quality].default_multiplier();
+        flow.iter_mut().for_each(|v| *v.1 *= multiplier);
         flow
     }
 
