@@ -282,12 +282,12 @@ pub struct GeneratorMechanic {
     #[serde(skip)]
     pub operations: Vec<(usize, EntryOpRequest)>,
 
-    pub instances: Vec<GeneratorMechanicInstance>,
+    pub instances: Vec<GeneratorInstance>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
-pub struct GeneratorMechanicInstance {
+pub struct GeneratorInstance {
     pub generator: IdWithQuality,
 
     pub fluid: String,
@@ -295,12 +295,12 @@ pub struct GeneratorMechanicInstance {
     pub temperature: i32,
 }
 
-impl SolveContext for GeneratorMechanicInstance {
+impl SolveContext for GeneratorInstance {
     type Game = DataContext;
     type Item = GenericItem;
 }
 
-impl AsFlow for GeneratorMechanicInstance {
+impl AsFlow for GeneratorInstance {
     fn as_flow(
         &self,
         data: &DataContext,
@@ -375,7 +375,7 @@ impl FactorioMechanic for GeneratorMechanic {
     ) -> bool {
         let mut changed = false;
         if ui.button("添加流体发电").clicked() {
-            let new_config = GeneratorMechanicInstance {
+            let new_config = GeneratorInstance {
                 generator: "entity-unknown".into(),
 
                 fluid: "fluid-unknown".to_string(),
@@ -519,7 +519,7 @@ impl FactorioMechanic for GeneratorMechanic {
                         for temperature in
                             data.temperatures.get(filter).expect("未初始化流体温度数据")
                         {
-                            self.instances.push(GeneratorMechanicInstance {
+                            self.instances.push(GeneratorInstance {
                                 generator: (generator.base.base.name.clone(), quality).into(),
                                 fluid: filter.clone(),
                                 temperature: *temperature,
@@ -541,7 +541,7 @@ impl FactorioMechanic for GeneratorMechanic {
                                 .get(fluid_name)
                                 .expect("未初始化流体温度数据")
                             {
-                                self.instances.push(GeneratorMechanicInstance {
+                                self.instances.push(GeneratorInstance {
                                     generator: (generator.base.base.name.clone(), quality).into(),
                                     fluid: fluid_name.clone(),
                                     temperature: *temperature,
@@ -560,7 +560,7 @@ pub struct BoilerMechanic {
     #[serde(skip)]
     pub operations: Vec<(usize, EntryOpRequest)>,
 
-    pub instances: Vec<BoilerMechanicInstance>,
+    pub instances: Vec<BoilerInstance>,
 }
 
 impl SolveContext for BoilerMechanic {
@@ -583,7 +583,7 @@ impl FactorioMechanic for BoilerMechanic {
     ) -> bool {
         let mut changed = false;
         if ui.button("添加锅炉").clicked() {
-            let new_config = BoilerMechanicInstance {
+            let new_config = BoilerInstance {
                 boiler: "entity-unknown".into(),
 
                 fluid: "fluid-unknown".to_string(),
@@ -730,7 +730,7 @@ impl FactorioMechanic for BoilerMechanic {
                         for temperature in
                             data.temperatures.get(filter).expect("未初始化流体温度数据")
                         {
-                            self.instances.push(BoilerMechanicInstance {
+                            self.instances.push(BoilerInstance {
                                 boiler: (boiler.base.base.name.clone(), quality).into(),
                                 fluid: filter.clone(),
                                 temperature: *temperature,
@@ -751,7 +751,7 @@ impl FactorioMechanic for BoilerMechanic {
                                 .get(fluid_name)
                                 .expect("未初始化流体温度数据")
                             {
-                                self.instances.push(BoilerMechanicInstance {
+                                self.instances.push(BoilerInstance {
                                     boiler: (boiler.base.base.name.clone(), quality).into(),
                                     fluid: fluid_name.clone(),
                                     temperature: *temperature,
@@ -768,7 +768,7 @@ impl FactorioMechanic for BoilerMechanic {
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
-pub struct BoilerMechanicInstance {
+pub struct BoilerInstance {
     pub boiler: IdWithQuality,
 
     pub fluid: String,
@@ -778,12 +778,12 @@ pub struct BoilerMechanicInstance {
     pub fuel: Option<(String, i32)>,
 }
 
-impl SolveContext for BoilerMechanicInstance {
+impl SolveContext for BoilerInstance {
     type Game = DataContext;
     type Item = GenericItem;
 }
 
-impl AsFlow for BoilerMechanicInstance {
+impl AsFlow for BoilerInstance {
     fn as_flow(
         &self,
         data: &DataContext,

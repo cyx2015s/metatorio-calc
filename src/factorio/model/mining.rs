@@ -90,16 +90,16 @@ pub fn machine_fits_for_resource(
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename = "factorio:mining")]
 #[serde(default)]
-pub struct MiningMechanicInstance {
+pub struct MiningInstance {
     pub resource: String,
     pub machine: IdWithQuality,
     pub module_config: ModuleConfig,
     pub fuel: Option<IdWithQuality>,
 }
 
-impl Default for MiningMechanicInstance {
+impl Default for MiningInstance {
     fn default() -> Self {
-        MiningMechanicInstance {
+        MiningInstance {
             // TODO 不能保证 iron-ore 一定存在
             resource: "entity-unknown".to_string(),
             machine: ("entity-unknown".to_string(), 0).into(),
@@ -109,12 +109,12 @@ impl Default for MiningMechanicInstance {
     }
 }
 
-impl SolveContext for MiningMechanicInstance {
+impl SolveContext for MiningInstance {
     type Game = DataContext;
     type Item = GenericItem;
 }
 
-impl AsFlow for MiningMechanicInstance {
+impl AsFlow for MiningInstance {
     fn as_flow(
         &self,
         data: &DataContext,
@@ -315,7 +315,7 @@ fn test_mining_normalized() {
     let data = DataContext::test_load();
     let proj = ProjectContext::default();
     let factory = FactoryContext::default();
-    let mining_config = MiningMechanicInstance {
+    let mining_config = MiningInstance {
         resource: "uranium-ore".to_string(),
         machine: "big-mining-drill".into(),
         module_config: ModuleConfig::default(),
@@ -335,7 +335,7 @@ fn test_mining_normalized() {
 pub struct MiningMechanic {
     #[serde(skip)]
     pub operations: Vec<(usize, EntryOpRequest)>,
-    pub instances: Vec<MiningMechanicInstance>,
+    pub instances: Vec<MiningInstance>,
     #[serde(skip)]
     pub suggestion_item: Option<GenericItem>,
     #[serde(skip)]
@@ -423,7 +423,7 @@ impl FactorioMechanic for MiningMechanic {
     ) -> bool {
         let mut changed = false;
         if ui.button("添加采矿").clicked() {
-            let mining_config = MiningMechanicInstance::default();
+            let mining_config = MiningInstance::default();
             self.instances.push(mining_config);
             changed = true;
         }
@@ -638,7 +638,7 @@ impl FactorioMechanic for MiningMechanic {
                 }),
         );
         if let Some(resource) = &self.selected_suggested_resource {
-            self.instances.push(MiningMechanicInstance {
+            self.instances.push(MiningInstance {
                 resource: resource.clone(),
                 machine: select_miner_for_resource(
                     data,
@@ -663,7 +663,7 @@ impl FactorioMechanic for MiningMechanic {
         for resource in data.resources.values() {
             if let Some(_mining) = resource.base.minable.as_ref() {
                 let machine = select_miner_for_resource(data, proj, factory, resource, &[]);
-                self.instances.push(MiningMechanicInstance {
+                self.instances.push(MiningInstance {
                     resource: resource.base.base.name.clone(),
                     machine,
                     ..Default::default()

@@ -861,7 +861,7 @@ fn test_load_context() {
     dbg!(heat_exchanger.get_flow(&factorio, &water.base.name, 325.0, &None));
     assert!(dbg!(heat_exchanger.get_flow(&factorio, &steam.base.name, 15.0, &None)).is_empty());
 
-    let reactor_instance = ReactorMechanicInstance {
+    let reactor_instance = ReactorInstance {
         neighbours: 3,
         reactor: "nuclear-reactor".into(),
         fuel: None,

@@ -25,7 +25,7 @@ pub struct ReactorMechanic {
     #[serde(skip)]
     pub operations: Vec<(usize, EntryOpRequest)>,
 
-    pub instances: Vec<ReactorMechanicInstance>,
+    pub instances: Vec<ReactorInstance>,
 }
 
 impl SolveContext for ReactorMechanic {
@@ -44,7 +44,7 @@ impl FactorioMechanic for ReactorMechanic {
     ) -> bool {
         let mut changed = false;
         if ui.button("添加反应堆").clicked() {
-            self.instances.push(ReactorMechanicInstance::default());
+            self.instances.push(ReactorInstance::default());
             changed = true;
         }
         changed
@@ -125,7 +125,7 @@ impl FactorioMechanic for ReactorMechanic {
     ) {
         for reactor in data.reactors.values() {
             for quality in 0..=proj.max_quality_level {
-                self.instances.push(ReactorMechanicInstance {
+                self.instances.push(ReactorInstance {
                     reactor: IdWithQuality(reactor.base.base.name.clone(), quality),
                     neighbours: 3,
                     fuel: None,
@@ -137,7 +137,7 @@ impl FactorioMechanic for ReactorMechanic {
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
-pub struct ReactorMechanicInstance {
+pub struct ReactorInstance {
     pub reactor: IdWithQuality,
 
     pub neighbours: u8,
@@ -145,12 +145,12 @@ pub struct ReactorMechanicInstance {
     pub fuel: Option<(String, i32)>,
 }
 
-impl SolveContext for ReactorMechanicInstance {
+impl SolveContext for ReactorInstance {
     type Game = DataContext;
     type Item = GenericItem;
 }
 
-impl AsFlow for ReactorMechanicInstance {
+impl AsFlow for ReactorInstance {
     fn as_flow(
         &self,
         data: &DataContext,

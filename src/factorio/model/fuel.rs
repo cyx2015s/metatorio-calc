@@ -9,12 +9,9 @@ use crate::{
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct ItemFuelMechanic {
-    pub fuel_category: String,
-    pub fuel_amount: f64,
-    pub instances: Vec<ItemFuelInstance>,
-
     #[serde(skip)]
     pub operations: Vec<(usize, EntryOpRequest)>,
+    pub instances: Vec<ItemFuelInstance>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

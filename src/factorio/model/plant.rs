@@ -23,11 +23,11 @@ pub struct PlantMechanic {
     #[serde(skip)]
     pub operations: Vec<(usize, EntryOpRequest)>,
 
-    pub instances: Vec<PlantMechanicInstance>,
+    pub instances: Vec<PlantInstance>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-pub struct PlantMechanicInstance {
+pub struct PlantInstance {
     pub seed: IdWithQuality,
 }
 
@@ -36,12 +36,12 @@ impl SolveContext for PlantMechanic {
     type Item = GenericItem;
 }
 
-impl SolveContext for PlantMechanicInstance {
+impl SolveContext for PlantInstance {
     type Game = DataContext;
     type Item = GenericItem;
 }
 
-impl AsFlow for PlantMechanicInstance {
+impl AsFlow for PlantInstance {
     fn as_flow(
         &self,
         data: &DataContext,
@@ -103,7 +103,7 @@ impl FactorioMechanic for PlantMechanic {
     ) -> bool {
         let mut changed = false;
         if ui.button("添加种树").clicked() {
-            self.instances.push(PlantMechanicInstance::default());
+            self.instances.push(PlantInstance::default());
             changed = true;
         }
         changed
@@ -147,7 +147,7 @@ impl FactorioMechanic for PlantMechanic {
                         .as_ref()
                         .is_some_and(|loc| loc == planet)
                 {
-                    self.instances.push(PlantMechanicInstance {
+                    self.instances.push(PlantInstance {
                         seed: item.base.name.clone().into(),
                     });
                 }

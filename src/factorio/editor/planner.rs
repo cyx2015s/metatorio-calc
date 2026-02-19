@@ -89,6 +89,7 @@ impl Default for FactoryInstance {
         .with_mechanic(BoilerMechanic::default())
         .with_mechanic(ReactorMechanic::default())
         .with_mechanic(PlantMechanic::default())
+        .with_mechanic(SpoilMechanic::default())
     }
 }
 

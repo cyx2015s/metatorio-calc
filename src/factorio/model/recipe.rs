@@ -405,7 +405,7 @@ pub fn machine_fits_for_recipe(
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename = "factorio:recipe")]
 #[serde(default)]
-pub struct RecipeMechanicInstance {
+pub struct RecipeInstance {
     pub recipe: IdWithQuality,
     pub machine: IdWithQuality,
     pub module_config: ModuleConfig,
@@ -417,14 +417,14 @@ pub struct RecipeMechanicInstance {
     pub fuel: Option<(String, i32)>,
 }
 
-impl SolveContext for RecipeMechanicInstance {
+impl SolveContext for RecipeInstance {
     type Game = DataContext;
     type Item = GenericItem;
 }
 
-impl Default for RecipeMechanicInstance {
+impl Default for RecipeInstance {
     fn default() -> Self {
-        RecipeMechanicInstance {
+        RecipeInstance {
             recipe: ("recipe-unknown".to_string(), 0).into(),
             machine: ("entity-unknown".to_string(), 0).into(),
             module_config: ModuleConfig::new(),
@@ -433,7 +433,7 @@ impl Default for RecipeMechanicInstance {
     }
 }
 
-impl AsFlow for RecipeMechanicInstance {
+impl AsFlow for RecipeInstance {
     fn as_flow(
         &self,
         data: &DataContext,
@@ -632,7 +632,7 @@ fn test_recipe_normalized() {
     let proj = crate::factorio::ProjectContext::default();
     let factory = crate::factorio::planner::FactoryContext::default();
 
-    let recipe_config = RecipeMechanicInstance {
+    let recipe_config = RecipeInstance {
         recipe: ("iron-gear-wheel".to_string(), 0).into(),
         machine: "assembling-machine-1".into(),
         module_config: ModuleConfig::new(),
@@ -653,7 +653,7 @@ pub struct RecipeMechanic {
     #[serde(skip)]
     pub operations: Vec<(usize, EntryOpRequest)>,
 
-    pub instances: Vec<RecipeMechanicInstance>,
+    pub instances: Vec<RecipeInstance>,
 
     pub machine_preferences: Vec<IdWithQuality>,
     pub alternative_count: usize,
@@ -751,7 +751,7 @@ impl FactorioMechanic for RecipeMechanic {
     ) -> bool {
         let mut changed = false;
         if ui.button("添加配方").clicked() {
-            let new_config = RecipeMechanicInstance::default();
+            let new_config = RecipeInstance::default();
             self.instances.push(new_config);
             changed = true;
         }
@@ -1162,7 +1162,7 @@ impl FactorioMechanic for RecipeMechanic {
                 Some(GenericItem::Item(ref id_with_quality)) => id_with_quality.1,
                 _ => 0,
             };
-            self.instances.push(RecipeMechanicInstance {
+            self.instances.push(RecipeInstance {
                 recipe: IdWithQuality(recipe.clone(), quality),
                 machine: select_crafter_for_recipe(
                     data,
@@ -1267,7 +1267,7 @@ impl FactorioMechanic for RecipeMechanic {
                                     modules.push(allowed_modules[module_id].clone());
                                 }
                             }
-                            self.instances.push(RecipeMechanicInstance {
+                            self.instances.push(RecipeInstance {
                                 recipe: IdWithQuality(recipe_name.clone(), quality as u8),
                                 machine: machine_name.clone(),
                                 module_config: ModuleConfig {
@@ -1277,7 +1277,7 @@ impl FactorioMechanic for RecipeMechanic {
                                 ..Default::default()
                             });
                             for auto_beacon_config in &self.enumerate_beacons {
-                                self.instances.push(RecipeMechanicInstance {
+                                self.instances.push(RecipeInstance {
                                     recipe: IdWithQuality(recipe_name.clone(), quality as u8),
                                     machine: machine_name.clone(),
                                     module_config: ModuleConfig {
