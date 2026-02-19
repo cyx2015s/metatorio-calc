@@ -150,15 +150,16 @@ impl FactorioMechanic for PlantMechanic {
         for item in data.items.values() {
             if let Some(plant_property) = item.plant.as_ref() {
                 let _plant = data.plants.get(&plant_property.plant_result).unwrap();
-                if let Some(planet) = factory.planet.as_ref()
-                    && item
-                        .default_import_location
-                        .as_ref()
-                        .is_some_and(|loc| loc == planet)
-                {
-                    self.instances.push(PlantInstance {
-                        seed: item.base.name.clone().into(),
-                    });
+                if let Some(planet) = factory.planet.as_ref() {
+                    match &item.default_import_location {
+                        Some(loc) if loc == planet => self.instances.push(PlantInstance {
+                            seed: item.base.name.clone().into(),
+                        }),
+                        None if planet == "nauvis" => self.instances.push(PlantInstance {
+                            seed: item.base.name.clone().into(),
+                        }),
+                        _ => {}
+                    }
                 }
             }
         }

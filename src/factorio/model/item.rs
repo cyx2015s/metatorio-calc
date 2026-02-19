@@ -149,7 +149,7 @@ impl SolveContext for SpoilMechanic {
     type Item = GenericItem;
 }
 
-#[typetag::serde(name = "factorio:item-fuel")]
+#[typetag::serde(name = "factorio:spoil")]
 impl FactorioMechanic for SpoilMechanic {
     fn instance_operate(
         &mut self,
