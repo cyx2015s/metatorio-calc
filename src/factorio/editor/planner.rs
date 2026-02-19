@@ -240,7 +240,7 @@ impl FactoryInstance {
                             },
                             1.0,
                         );
-                        log::info!("添加温度转换流 {}：{:?} -> {:?}", fluid, narrow, broad);
+                        // log::info!("添加温度转换流 {}：{:?} -> {:?}", fluid, narrow, broad);
                         // 温度转换代价为 0
                         flows.insert((usize::MAX, aux_idx), (flow, 0.0));
                         aux_idx += 1;
@@ -848,7 +848,7 @@ impl Default for ProjectInstance {
         let (problem_tx, problem_rx) = channel();
         let (solution_tx, solution_rx) = channel();
         SolverData::make_solver_thread(solution_tx, problem_rx);
-        log::info!("Default::default() for ProjectInstance called.");
+        // log::info!("Default::default() for ProjectInstance called.");
         ProjectInstance {
             data: Arc::new(DataContext::default()),
             proj: ProjectContext::default().with_factory_sender(factory_tx),

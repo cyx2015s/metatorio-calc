@@ -1,6 +1,6 @@
 [package]
 name = "metatorio"
-version = "1.2.22"
+version = "1.2.23"
 edition = "2024"
 
 [dependencies]
@@ -8,12 +8,13 @@ dirs = "6.0.0"
 dotenv = "0.15.0"
 dyn-clone = "1.0.20"
 eframe = { version = "0.33.3", features = ["wgpu"] }
-egui = "0.33.3"
+egui = { version = "0.33.3", features = ["rayon"] }
 egui-toast = "0.19.1"
 egui_dnd = "0.14.0"
 egui_extras = { version = "0.33.3", features = ["all_loaders"] }
 env_logger = "0.11.8"
 float-cmp = "0.10.0"
+fontdb = "0.23.0"
 good_lp = { "version" = "1.14.2", default-features = false, features = ["microlp"] }
 image = { version = "0.25.9", features = ["png"] }
 indexmap = { version = "2.13.0", features = ["serde"] }

@@ -13,7 +13,7 @@ pub fn compact_number(num: f64) -> String {
 
     match abs_num {
         n if n < 1e-9 => String::from("0"),
-        n if n < 0.001 => format_with_unit(num * 1e6, "μ"),
+        n if n < 0.01 => format_with_unit(num * 1e6, "μ"),
         n => {
             let mut unit_idx = 0;
             let mut n = n;
@@ -32,15 +32,7 @@ fn format_with_unit(value: f64, unit: &str) -> String {
     let abs_value = value.abs();
     if unit.is_empty() {
         if abs_value < 10.0 {
-            // 对于小于10的值，最多保留3位小数
-            let formatted = format!("{:.3}", value);
-            format!(
-                "{}{}",
-                formatted.trim_end_matches('0').trim_end_matches('.'),
-                unit
-            )
-        } else if abs_value < 100.0 {
-            // 对于10-100的值，最多保留2位小数
+            // 对于小于10的值，最多保留2位小数
             let formatted = format!("{:.2}", value);
             format!(
                 "{}{}",
@@ -48,7 +40,7 @@ fn format_with_unit(value: f64, unit: &str) -> String {
                 unit
             )
         } else if abs_value < 1000.0 {
-            // 对于大于100的值，最多保留1位小数
+            // 对于大于10的值，最多保留1位小数
             let formatted = format!("{:.1}", value);
             format!(
                 "{}{}",

@@ -15,7 +15,7 @@ use serde_with::{DefaultOnError, serde_as};
 use crate::{
     concept::*,
     error::AppError,
-    factorio::{planner::FactoryContext, *},
+    factorio::*,
 };
 
 pub const LOCALE_CATEGORIES: &[&str] = &[

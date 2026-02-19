@@ -29,7 +29,6 @@ pub enum SelectedSubview {
     Title,
     Creator(usize),
     Planner(usize),
-    FontLicense,
     Logs,
 }
 
@@ -46,6 +45,8 @@ pub struct MainPage {
     pub suitable_release: Result<self_update::update::Release, error::AppError>,
     pub response_receiver: Receiver<Result<self_update::update::Release, error::AppError>>,
     pub request_sender: Sender<NetworkRequest>,
+
+    pub font_filter: String,
 }
 
 pub enum NetworkRequest {
@@ -124,6 +125,7 @@ impl Default for MainPage {
             suitable_release: Err(error::AppError::None),
             request_sender: network_request_tx,
             response_receiver: network_response_rx,
+            font_filter: String::new(),
         }
     }
 }
@@ -137,8 +139,7 @@ impl MainPage {
         creator.set_subview_sender(self.subview_sender.clone());
         self.creators.push((name.to_string(), creator));
     }
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        add_font(&cc.egui_ctx);
+    pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let mut ret = Self {
             creators: vec![(
                 "异星工厂".to_string(),
@@ -151,6 +152,14 @@ impl MainPage {
         }
         ret
     }
+}
+
+lazy_static::lazy_static! {
+    pub static ref FONT_DB : fontdb::Database = {
+        let mut db = fontdb::Database::new();
+        db.load_system_fonts();
+        db
+    };
 }
 
 impl eframe::App for MainPage {
@@ -285,9 +294,48 @@ impl eframe::App for MainPage {
                 if ui.button("重新加载图标").clicked() {
                     ui.ctx().forget_all_images();
                 }
-                if ui.button("字体").clicked() {
-                    self.selected = SelectedSubview::FontLicense;
-                }
+                ui.separator();
+                ui.text_edit_singleline(&mut self.font_filter);
+                ui.menu_button("选择字体", |ui| {
+                    egui::ScrollArea::vertical()
+                        .max_height(480.0)
+                        .max_width(480.0)
+                        .show(ui, |ui| {
+                            for font in FONT_DB.faces() {
+                                let name = &font.post_script_name;
+                                if !name
+                                    .to_lowercase()
+                                    .contains(&self.font_filter.to_lowercase())
+                                {
+                                    continue;
+                                }
+                                let is_mono = font.monospaced;
+                                let languages = font
+                                    .families
+                                    .iter()
+                                    .map(|(_, lang)| lang.primary_language())
+                                    .collect::<Vec<_>>();
+                                let label = format!(
+                                    "{} {} {:?}",
+                                    name,
+                                    if is_mono { " [monospace]" } else { "" },
+                                    languages,
+                                );
+                                if ui.selectable_label(false, label).clicked() {
+                                    let font_data = FONT_DB.face(font.id).unwrap().source.clone();
+                                    let buf = match font_data {
+                                        fontdb::Source::Binary(buf) => (*buf).as_ref().to_owned(),
+                                        fontdb::Source::File(path) => std::fs::read(path).unwrap(),
+                                        fontdb::Source::SharedFile(_, buf) => {
+                                            (*buf).as_ref().to_owned()
+                                        }
+                                    };
+                                    update_font(ui.ctx(), buf);
+                                }
+                            }
+                        })
+                });
+                ui.separator();
                 if ui.button("日志").clicked() {
                     self.selected = SelectedSubview::Logs;
                 }
@@ -300,12 +348,6 @@ impl eframe::App for MainPage {
             },
             SelectedSubview::Creator(n) => self.creators[n].1.view(ui),
             SelectedSubview::Planner(n) => self.planners[n].view(ui),
-            SelectedSubview::FontLicense => {
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    ui.set_min_width(ui.available_width());
-                    ui.label(include_str!("../assets/LICENSE"));
-                });
-            }
             SelectedSubview::Logs => {
                 let logger= memlog::MEMLOG.vec.lock().unwrap();
                 let len = logger.len();
@@ -337,23 +379,6 @@ impl eframe::App for MainPage {
     }
 }
 
-fn add_font(factorio: &egui::Context) {
-    factorio.add_font(egui::epaint::text::FontInsert::new(
-        "LXGW",
-        egui::FontData::from_static(include_bytes!("../assets/font.ttf")),
-        vec![
-            egui::epaint::text::InsertFontFamily {
-                family: egui::FontFamily::Monospace,
-                priority: egui::epaint::text::FontPriority::Highest,
-            },
-            egui::epaint::text::InsertFontFamily {
-                family: egui::FontFamily::Proportional,
-                priority: egui::epaint::text::FontPriority::Highest,
-            },
-        ],
-    ));
-}
-
 fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .format_module_path(true)
@@ -383,6 +408,51 @@ fn main() {
         },
         Box::new(|cc| {
             egui_extras::install_image_loaders(&cc.egui_ctx);
+
+            let mut query = None;
+            let names = ["sarasa", "noto-sans", "noto", "simhei", ""];
+            let mut matched = vec![None; names.len()];
+            for face in FONT_DB.faces() {
+                log::info!(
+                    "系统字体: {}, 等宽: {}, 语言: {:?}",
+                    face.post_script_name,
+                    face.monospaced,
+                    face.families
+                        .iter()
+                        .map(|(_, lang)| lang.primary_language())
+                        .collect::<Vec<_>>(),
+                );
+                if query.is_none()
+                    && face.monospaced
+                    && face.style == fontdb::Style::Normal
+                    && face.weight == fontdb::Weight::NORMAL
+                    || face.weight == fontdb::Weight::SEMIBOLD
+                {
+                    for (_, lang) in &face.families {
+                        if lang.primary_language() == "Chinese" {
+                            // log::info!("找到系统字体: {}", face.post_script_name);
+                            matched[names
+                                .iter()
+                                .position(|n| face.post_script_name.to_lowercase().contains(n))
+                                .unwrap()] = Some(face.id);
+                        }
+                    }
+                }
+            }
+            query = matched.into_iter().find(|q| q.is_some()).unwrap();
+            if let Some(id) = query {
+                let font_data = FONT_DB.face(id).unwrap().source.clone();
+                let buf = match font_data {
+                    fontdb::Source::Binary(buf) => (*buf).as_ref().to_owned(),
+                    fontdb::Source::File(path) => std::fs::read(path).unwrap(),
+                    fontdb::Source::SharedFile(_, buf) => (*buf).as_ref().to_owned(),
+                };
+                log::info!("加载系统字体成功");
+                update_font(&cc.egui_ctx, buf);
+            } else {
+                log::warn!("未找到系统等宽字体，使用默认字体");
+            }
+
             cc.egui_ctx.set_theme(egui::Theme::Light);
             cc.egui_ctx.all_styles_mut(|style| {
                 style.interaction.tooltip_delay = 0.2;
@@ -393,4 +463,36 @@ fn main() {
         }),
     )
     .unwrap();
+}
+
+fn update_font(ctx: &egui::Context, buf: Vec<u8>) {
+    let mut fonts = egui::FontDefinitions::default();
+    fonts
+        .font_data
+        .insert("main".into(), egui::FontData::from_owned(buf).into());
+    fonts.font_data.insert(
+        "symbol".into(),
+        egui::FontData::from_static(include_bytes!("../assets/font.ttf")).into(),
+    );
+    fonts
+        .families
+        .entry(egui::FontFamily::Monospace)
+        .or_default()
+        .insert(0, "main".into());
+    fonts
+        .families
+        .entry(egui::FontFamily::Monospace)
+        .or_default()
+        .insert(0, "symbol".into());
+    fonts
+        .families
+        .entry(egui::FontFamily::Proportional)
+        .or_default()
+        .insert(0, "main".into());
+    fonts
+        .families
+        .entry(egui::FontFamily::Proportional)
+        .or_default()
+        .insert(0, "symbol".into());
+    ctx.set_fonts(fonts);
 }
