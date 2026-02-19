@@ -42,9 +42,7 @@ pub struct FactoryInstance {
 
     pub strict_source: bool,
     #[serde(skip)]
-    pub solution: (Flow<(usize, usize)>, f64),
-    #[serde(skip)]
-    pub total_flow: Flow<GenericItem>,
+    pub solution: SolverSolution<GenericItem, (usize, usize)>,
     #[serde(skip)]
     pub total_flow_sorted_keys: Vec<GenericItem>,
 }
@@ -56,7 +54,6 @@ impl Clone for FactoryInstance {
             target: self.target.clone(),
             external: self.external.clone(),
             solution: self.solution.clone(),
-            total_flow: self.total_flow.clone(),
             total_flow_sorted_keys: self.total_flow_sorted_keys.clone(),
             mechanics: self.mechanics.clone(),
             instances: self.instances.clone(),
@@ -78,8 +75,11 @@ impl Default for FactoryInstance {
             instances: Vec::new(),
 
             strict_source: false,
-            solution: (IndexMap::new(), 0.0),
-            total_flow: IndexMap::new(),
+            solution: SolverSolution::NotSolved {
+                no_provider: vec![],
+                no_consumer: vec![],
+                description: "未求解".to_string(),
+            },
             total_flow_sorted_keys: Vec::new(),
         }
         .with_mechanic(RecipeMechanic::default())
@@ -265,7 +265,7 @@ impl FactoryInstance {
         egui_dnd::dnd(ui, "instances").show_vec(
             &mut self.instances,
             |ui, &mut (idx, jdx), handle, _| {
-                let solution_value = self.solution.0.get(&(idx, jdx)).cloned();
+                let solution_value = self.solution.get_prim_of(&(idx, jdx));
                 ui.horizontal_wrapped(|ui| {
                     card_frame(ui).show(ui, |ui| {
                         handle.ui(ui, |ui| {
@@ -311,6 +311,7 @@ impl FactoryInstance {
                             if amount.abs() < 1e-8 {
                                 continue;
                             }
+                            
                             ui.vertical(|ui| {
                                 ui.set_min_width(40.0);
                                 ui.set_max_width(40.0);
@@ -393,8 +394,8 @@ impl FactoryInstance {
                     .for_each(|(idx, mechanic)| {
                         for jdx in 0..mechanic.instance_len() {
                             let solution_value =
-                                self.solution.0.get(&(idx, jdx)).cloned().unwrap_or(0.0);
-                            if solution_value < 1e-10 {
+                                self.solution.get_prim_raw_of(&(idx, jdx)).unwrap_or(0.0);
+                            if solution_value < 1e-8 {
                                 mechanic.instance_operate(jdx, &mut |_| EntryOpRequest::Drop);
                             }
                         }
@@ -426,17 +427,21 @@ impl FactoryInstance {
                 });
             }
         });
-        ui.label(format!("总代价: {:.2} | 总物料流", self.solution.1));
+        ui.label(format!(
+            "总代价: {:.2} | 总物料流",
+            self.solution.get_cost().unwrap_or(f64::NAN)
+        ));
         ui.horizontal_wrapped(|ui| {
             card_frame(ui).show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
                 ui.set_min_height(50.0);
 
                 for item in &self.total_flow_sorted_keys {
-                    let amount = self.total_flow.get(item).cloned().unwrap_or(0.0);
-                    if amount.abs() < 1e-8 {
+                    let amount = self.solution.get_sum_raw_of(item).unwrap_or(0.0);
+                    if amount.abs() < 0.001 {
                         continue;
                     }
+                    let amount = self.solution.get_sum_of(item).unwrap_or(0.0);
 
                     ui.vertical(|ui| {
                         ui.set_min_width(40.0);
@@ -714,7 +719,7 @@ impl FactoryInstance {
                     });
                     ui.horizontal_wrapped(|ui| {
                         let mut icon = GenericIcon::new(data, item);
-                        let solution_of_target = self.total_flow.get(item).cloned().unwrap_or(0.0);
+                        let solution_of_target = self.solution.get_sum_of(item).unwrap_or(0.0);
                         let not_satisfied =
                             !float_cmp::approx_eq!(f64, solution_of_target, *amount, ulps = 6);
                         if not_satisfied {
@@ -923,24 +928,16 @@ impl SubView for ProjectInstance {
         while let Ok((req_id, result)) = self.solution_receiver.try_recv() {
             let factory = &mut self.factories.vec[req_id];
             match result {
-                SolverSolution::Solved {
-                    prim,
-                    dual: _,
-                    sum,
-                    cost,
-                } => {
-                    factory.total_flow = sum;
-                    factory.solution = (prim, cost);
-
+                SolverSolution::Solved { ref sum, .. } => {
                     // Update sorted keys cache when total_flow changes
-                    factory.total_flow_sorted_keys = factory.total_flow.keys().cloned().collect();
+                    factory.total_flow_sorted_keys = sum.keys().cloned().collect::<Vec<_>>();
+                    factory.solution = result;
+
                     sort_generic_items_owned(&mut factory.total_flow_sorted_keys, &self.data);
                 }
                 SolverSolution::NotSolved { .. } => {
-                    factory.total_flow.clear();
                     factory.total_flow_sorted_keys.clear();
-                    factory.solution.0.clear();
-                    factory.solution.1 = f64::NAN;
+                    factory.solution = result;
                 }
             }
         }

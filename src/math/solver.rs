@@ -37,11 +37,15 @@ where
     pub strict_sink: bool,
 }
 
+#[derive(Debug, Clone)]
 pub enum SolverSolution<I, R> {
     Solved {
         prim: Flow<R>,
         dual: Option<Flow<I>>,
+        prim_scale: Flow<R>,
+        dual_scale: Flow<I>,
         sum: Flow<I>,
+        target_scale: f64,
         cost: f64,
     },
     NotSolved {
@@ -49,6 +53,109 @@ pub enum SolverSolution<I, R> {
         no_consumer: Vec<I>,
         description: String,
     },
+}
+
+impl<I, R> SolverSolution<I, R>
+where
+    I: ItemIdent,
+    R: ItemIdent,
+{
+    pub fn get_prim_of(&self, i: &R) -> Option<f64> {
+        match self {
+            SolverSolution::Solved {
+                prim,
+                prim_scale,
+                target_scale,
+                ..
+            } => match (prim.get(i), prim_scale.get(i)) {
+                (Some(v), Some(s)) => Some(*v * s / target_scale),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    pub fn get_prim_raw(&self) -> Option<&Flow<R>> {
+        match self {
+            SolverSolution::Solved { prim, .. } => Some(prim),
+            _ => None,
+        }
+    }
+
+    pub fn get_prim_raw_of(&self, i: &R) -> Option<f64> {
+        match self {
+            SolverSolution::Solved { prim, .. } => prim.get(i).cloned(),
+            _ => None,
+        }
+    }
+
+    pub fn get_dual_of(&self, i: &I) -> Option<f64> {
+        match self {
+            SolverSolution::Solved {
+                dual: Some(dual),
+                dual_scale,
+                ..
+            } => dual
+                .get(i)
+                .cloned()
+                .map(|v| v * dual_scale.get(i).cloned().unwrap_or(1.0)),
+
+            _ => None,
+        }
+    }
+
+    pub fn get_dual_raw(&self) -> Option<&Flow<I>> {
+        match self {
+            SolverSolution::Solved {
+                dual: Some(dual), ..
+            } => Some(dual),
+            _ => None,
+        }
+    }
+
+    pub fn get_dual_raw_of(&self, i: &I) -> Option<f64> {
+        match self {
+            SolverSolution::Solved {
+                dual: Some(dual), ..
+            } => dual.get(i).cloned(),
+            _ => None,
+        }
+    }
+
+    pub fn get_cost(&self) -> Option<f64> {
+        match self {
+            SolverSolution::Solved { cost, .. } => Some(*cost),
+            _ => None,
+        }
+    }
+
+    pub fn get_sum(&self) -> Option<&Flow<I>> {
+        match self {
+            SolverSolution::Solved { sum, .. } => Some(sum),
+            _ => None,
+        }
+    }
+
+    pub fn get_sum_of(&self, i: &I) -> Option<f64> {
+        match self {
+            SolverSolution::Solved { sum, .. } => sum.get(i).cloned(),
+            _ => None,
+        }
+    }
+
+    pub fn get_sum_raw_of(&self, i: &I) -> Option<f64> {
+        match self {
+            SolverSolution::Solved {
+                sum,
+                dual_scale,
+                target_scale,
+                ..
+            } => sum
+                .get(i)
+                .map(|v| *v / dual_scale.get(i).cloned().unwrap_or(1.0) * target_scale),
+            _ => None,
+        }
+    }
 }
 
 impl<I, R> SolverData<I, R>
@@ -373,20 +480,29 @@ where
         match solution {
             Ok(sol) => {
                 log::info!("求解器：求解成功，开始构建结果");
-                let mut result = IndexMap::new();
                 let mut sum = Flow::new();
-                for (f_id, var) in flow_vars {
-                    let value = sol.value(var) * get_flow_scale(&f_id) / target_scale;
-                    result.insert(f_id.clone(), value);
-                    for (item_id, &amount) in &self.flows[&f_id].0 {
+                let mut prim = Flow::new();
+                let mut prim_scale = Flow::new();
+                for (f_id, var) in &flow_vars {
+                    let value = sol.value(*var);
+                    prim.insert(f_id.clone(), value);
+
+                    prim_scale.insert(f_id.clone(), get_flow_scale(f_id));
+                    for (item_id, &amount) in &self.flows[f_id].0 {
                         let entry = sum.entry(item_id.clone()).or_insert(0.0);
-                        *entry += amount * value;
+                        *entry += amount * value / target_scale * get_flow_scale(f_id);
                     }
                 }
                 SolverSolution::Solved {
-                    prim: result,
+                    prim,
+                    prim_scale,
                     dual: None,
+                    dual_scale: sum
+                        .iter()
+                        .map(|(i_id, _)| (i_id.clone(), get_item_scale(i_id)))
+                        .collect(),
                     sum,
+                    target_scale,
                     cost: sol.eval(optimization_expr) / target_scale,
                 }
             }

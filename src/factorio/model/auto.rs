@@ -39,14 +39,8 @@ pub fn factorio_auto_planner(
     let instant = Instant::now();
     let solution = problem.solve();
     match solution {
-        SolverSolution::Solved {
-            prim,
-            dual: _,
-            sum,
-            cost,
-        } => {
-            factory.total_flow = sum;
-            factory.solution = (prim, cost);
+        SolverSolution::Solved { ref sum, .. } => {
+            factory.total_flow_sorted_keys = sum.keys().cloned().collect();
 
             sort_generic_items_owned(&mut factory.total_flow_sorted_keys, &data);
         }
@@ -65,25 +59,33 @@ pub fn factorio_auto_planner(
         }
     }
 
+    factory.solution = solution;
+
     factory
         .mechanics
         .iter_mut()
         .enumerate()
         .for_each(|(idx, mechanic)| {
             for jdx in 0..mechanic.instance_len() {
-                mechanic.instance_operate(
-                    jdx,
-                    &mut |_| match factory.solution.0.get(&(idx, jdx)) {
-                        Some(n) => {
-                            if *n < 1e-10 {
-                                EntryOpRequest::Drop
-                            } else {
-                                EntryOpRequest::None
-                            }
+                mechanic.instance_operate(jdx, &mut |_| match factory
+                    .solution
+                    .get_prim_raw_of(&(idx, jdx))
+                {
+                    Some(n) => {
+                        log::info!(
+                            "机制 {} 实例 {} 的矫正流量为 {:.6}",
+                            idx,
+                            jdx,
+                            n
+                        );
+                        if n < 1e-8 {
+                            EntryOpRequest::Drop
+                        } else {
+                            EntryOpRequest::None
                         }
-                        None => EntryOpRequest::Drop,
-                    },
-                );
+                    }
+                    None => EntryOpRequest::Drop,
+                });
             }
             mechanic.submit_operations();
         });
