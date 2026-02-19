@@ -413,15 +413,15 @@ fn main() {
             let names = ["sarasa", "noto-sans", "noto", "simhei", ""];
             let mut matched = vec![None; names.len()];
             for face in FONT_DB.faces() {
-                log::info!(
-                    "系统字体: {}, 等宽: {}, 语言: {:?}",
-                    face.post_script_name,
-                    face.monospaced,
-                    face.families
-                        .iter()
-                        .map(|(_, lang)| lang.primary_language())
-                        .collect::<Vec<_>>(),
-                );
+                // log::info!(
+                //     "系统字体: {}, 等宽: {}, 语言: {:?}",
+                //     face.post_script_name,
+                //     face.monospaced,
+                //     face.families
+                //         .iter()
+                //         .map(|(_, lang)| lang.primary_language())
+                //         .collect::<Vec<_>>(),
+                // );
                 if query.is_none()
                     && face.monospaced
                     && face.style == fontdb::Style::Normal

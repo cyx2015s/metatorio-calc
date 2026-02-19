@@ -262,9 +262,9 @@ where
                 description: "没有目标物品。".to_string(),
             };
         }
+        // log::info!("求解器：开始剪枝");
+        // while self.trim_flows() {}
         // 调整配方的系数，使得其中出现的数量级最大的物品的数量级在1附近，避免数值不稳定。
-        log::info!("求解器：开始剪枝");
-        while self.trim_flows() {}
         let mut item_scales: HashMap<I, f64> = HashMap::new();
         for flow in self.flows.values() {
             for (item_id, _) in &flow.0 {
@@ -463,10 +463,10 @@ where
             optimization_expr += *cost * *var;
         }
         if !no_providers.is_empty() {
-            log::warn!("没有来源的物品：{:?}", &no_providers);
+            log::warn!("没有来源的物品：{:?}个", &no_providers.len());
         }
         if !no_consumers.is_empty() {
-            log::warn!("没有去处的物品：{:?}", &no_consumers);
+            log::warn!("没有去处的物品：{:?}个", &no_consumers.len());
         }
         let solution = problem_variables
             .minimise(&optimization_expr)

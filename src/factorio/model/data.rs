@@ -203,6 +203,7 @@ impl DataContext {
         let generators = deserialize_type(value, "generator");
         let reactors = deserialize_type(value, "reactor");
         let plants = deserialize_type(value, "plant");
+        let surface_properties = deserialize_type(value, "surface-property");
         log::info!("数据加载完成");
         // ret.planets.iter().for_each(|(_, p)| {
         //     dbg!(p.collect_autoplaced(&ret));
@@ -226,6 +227,7 @@ impl DataContext {
             miners,
             resource_categories,
             planets,
+            surface_properties,
             tiles,
             boilers,
             generators,

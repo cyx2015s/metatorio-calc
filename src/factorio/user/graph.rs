@@ -216,7 +216,7 @@ pub fn update_accessibles(user: &mut ProjectContext, data: &DataContext) {
         if user
             .accessible_prototypes
             .get("quality")
-            .is_none_or(|qualities| qualities.get(&quality.base.name).cloned().unwrap_or(false))
+            .is_some_and(|qualities| qualities.get(&quality.base.name).cloned().unwrap_or(false))
         {
             user.max_quality_level = i as u8;
         } else {

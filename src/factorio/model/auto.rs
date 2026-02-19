@@ -50,9 +50,9 @@ pub fn factorio_auto_planner(
             description,
         } => {
             log::error!(
-                "自动规划失败: no_provider={:?}, no_consumer={:?}",
-                no_provider,
-                no_consumer
+                "自动规划失败: no_provider={:?}..., no_consumer={:?}...",
+                format!("{:?}", no_provider).truncate(100),
+                format!("{:?}", no_consumer).truncate(100)
             );
             crate::toast::error(format!("自动规划失败。{}", description));
             return Err(AppError::Solver("无法获得结果".into()));
@@ -72,7 +72,6 @@ pub fn factorio_auto_planner(
                     .get_prim_raw_of(&(idx, jdx))
                 {
                     Some(n) => {
-                        log::info!("机制 {} 实例 {} 的矫正流量为 {:.6}", idx, jdx, n);
                         if n < 1e-8 {
                             EntryOpRequest::Drop
                         } else {
