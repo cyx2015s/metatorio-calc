@@ -311,7 +311,7 @@ impl FactoryInstance {
                             if amount.abs() < 1e-8 {
                                 continue;
                             }
-                            
+
                             ui.vertical(|ui| {
                                 ui.set_min_width(40.0);
                                 ui.set_max_width(40.0);
@@ -438,7 +438,7 @@ impl FactoryInstance {
 
                 for item in &self.total_flow_sorted_keys {
                     let amount = self.solution.get_sum_raw_of(item).unwrap_or(0.0);
-                    if amount.abs() < 0.001 {
+                    if amount.abs() < 1e-8 {
                         continue;
                     }
                     let amount = self.solution.get_sum_of(item).unwrap_or(0.0);

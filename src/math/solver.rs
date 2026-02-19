@@ -148,11 +148,10 @@ where
             SolverSolution::Solved {
                 sum,
                 dual_scale,
-                target_scale,
                 ..
             } => sum
                 .get(i)
-                .map(|v| *v / dual_scale.get(i).cloned().unwrap_or(1.0) * target_scale),
+                .map(|v| *v * dual_scale.get(i).cloned().unwrap_or(1.0)),
             _ => None,
         }
     }
