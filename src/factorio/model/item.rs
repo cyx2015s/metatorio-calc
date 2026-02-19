@@ -260,7 +260,8 @@ impl FactorioMechanic for SpoilMechanic {
                     {
                         ui.label(format!(
                             "变质时间: {}\n变质产物: {}",
-                            spoil.spoil_ticks, data.get_display_name("item", &spoil_result)
+                            spoil.spoil_ticks,
+                            data.get_display_name("item", spoil_result)
                         ));
                     } else {
                         ui.label("无变质属性");
@@ -280,7 +281,8 @@ impl FactorioMechanic for SpoilMechanic {
                                     {
                                         ui.label(format!(
                                             "变质时间: {}\n变质产物: {}",
-                                            spoil.spoil_ticks, data.get_display_name("item", &spoil_result)
+                                            spoil.spoil_ticks,
+                                            data.get_display_name("item", spoil_result)
                                         ));
                                     } else {
                                         ui.label("无变质属性");

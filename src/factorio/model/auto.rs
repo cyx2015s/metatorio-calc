@@ -72,12 +72,7 @@ pub fn factorio_auto_planner(
                     .get_prim_raw_of(&(idx, jdx))
                 {
                     Some(n) => {
-                        log::info!(
-                            "机制 {} 实例 {} 的矫正流量为 {:.6}",
-                            idx,
-                            jdx,
-                            n
-                        );
+                        log::info!("机制 {} 实例 {} 的矫正流量为 {:.6}", idx, jdx, n);
                         if n < 1e-8 {
                             EntryOpRequest::Drop
                         } else {

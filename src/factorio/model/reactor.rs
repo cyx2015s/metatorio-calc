@@ -120,16 +120,16 @@ impl FactorioMechanic for ReactorMechanic {
     fn auto_populate(
         &mut self,
         data: &DataContext,
-        proj: &ProjectContext,
+        _proj: &ProjectContext,
         _factory: &FactoryContext,
     ) {
         for reactor in data.reactors.values() {
             // for quality in 0..=proj.max_quality_level {
-                self.instances.push(ReactorInstance {
-                    reactor: IdWithQuality(reactor.base.base.name.clone(), 0),
-                    neighbours: 3,
-                    fuel: None,
-                });
+            self.instances.push(ReactorInstance {
+                reactor: IdWithQuality(reactor.base.base.name.clone(), 0),
+                neighbours: 3,
+                fuel: None,
+            });
             // }
         }
     }

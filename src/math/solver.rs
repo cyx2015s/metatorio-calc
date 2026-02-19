@@ -37,6 +37,7 @@ where
     pub strict_sink: bool,
 }
 
+// TODO: warning: large size difference between variants
 #[derive(Debug, Clone)]
 pub enum SolverSolution<I, R> {
     Solved {
@@ -146,9 +147,7 @@ where
     pub fn get_sum_raw_of(&self, i: &I) -> Option<f64> {
         match self {
             SolverSolution::Solved {
-                sum,
-                dual_scale,
-                ..
+                sum, dual_scale, ..
             } => sum
                 .get(i)
                 .map(|v| *v * dual_scale.get(i).cloned().unwrap_or(1.0)),

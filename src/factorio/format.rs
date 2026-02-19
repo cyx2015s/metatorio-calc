@@ -74,7 +74,7 @@ fn format_with_unit(value: f64, unit: &str) -> String {
 }
 
 pub fn parse_number(n: &str) -> Option<f64> {
-    let re = regex::Regex::new(r"^-?[\d.e]+[kMGTPEZYRQμ]?$").ok()?;
+    let re = regex::Regex::new(r"^-?[\d.e-]+[kMGTPEZYRQμ]?$").ok()?;
     if re.is_match(n) {
         let multiplier = match n.chars().next_back() {
             Some('μ') => 0.000_001,
@@ -101,7 +101,7 @@ pub fn parse_number(n: &str) -> Option<f64> {
 }
 
 pub fn parse_energy(n: &str) -> Option<f64> {
-    let re = regex::Regex::new(r"^-?[\d.e]+[kMGTPEZYRQμ]?[JW]$").ok()?;
+    let re = regex::Regex::new(r"^-?[\d.e-]+[kMGTPEZYRQμ]?[JW]$").ok()?;
     if re.is_match(n) {
         let mut multiplier = match n.chars().rev().nth(1) {
             Some('k') => 1_000.0,
