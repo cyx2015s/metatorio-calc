@@ -38,9 +38,9 @@ impl FactorioMechanic for ReactorMechanic {
     fn editor_view(
         &mut self,
         ui: &mut egui::Ui,
-        data: &DataContext,
-        proj: &ProjectContext,
-        factory: &FactoryContext,
+        _data: &DataContext,
+        _proj: &ProjectContext,
+        _factory: &FactoryContext,
     ) -> bool {
         let mut changed = false;
         if ui.button("添加反应堆").clicked() {
@@ -82,8 +82,8 @@ impl FactorioMechanic for ReactorMechanic {
         idx: usize,
         ui: &mut egui::Ui,
         data: &DataContext,
-        proj: &ProjectContext,
-        factory: &FactoryContext,
+        _proj: &ProjectContext,
+        _factory: &FactoryContext,
     ) -> bool {
         let mut changed = false;
         let instance = &mut self.instances[idx];
@@ -121,7 +121,7 @@ impl FactorioMechanic for ReactorMechanic {
         &mut self,
         data: &DataContext,
         proj: &ProjectContext,
-        factory: &FactoryContext,
+        _factory: &FactoryContext,
     ) {
         for reactor in data.reactors.values() {
             for quality in 0..=proj.max_quality_level {
@@ -154,8 +154,8 @@ impl AsFlow for ReactorMechanicInstance {
     fn as_flow(
         &self,
         data: &DataContext,
-        proj: &ProjectContext,
-        factory: &FactoryContext,
+        _proj: &ProjectContext,
+        _factory: &FactoryContext,
     ) -> Flow<GenericItem> {
         let mut flow = Flow::new();
         if let Some(reactor) = data.reactors.get(&self.reactor.0) {

@@ -51,7 +51,7 @@ pub struct ItemPrototype {
     /// Entity
     pub place_result: Option<String>,
 
-    ///
+    /// 默认导入位置，辅助种植机制判断是否适合种植种子
     pub default_import_location: Option<String>,
 }
 

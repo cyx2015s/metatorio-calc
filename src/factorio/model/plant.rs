@@ -50,35 +50,36 @@ impl AsFlow for PlantMechanicInstance {
     ) -> crate::concept::Flow<Self::Item> {
         let mut flow = Flow::new();
         if let Some(item) = data.items.get(&self.seed.0)
-            && let Some(plant) = item.plant.as_ref() {
-                let plant_result = &plant.plant_result;
-                if let Some(plant) = data.plants.get(plant_result) {
-                    index_map_update_entry(
-                        &mut flow,
-                        GenericItem::Item(self.seed.clone()),
-                        -1.0 / plant.growth_ticks * 60.0,
-                    );
-                    if let Some(minable) = plant.base.minable.as_ref() {
-                        if let Some(result) = &minable.result {
-                            index_map_update_entry(
-                                &mut flow,
-                                GenericItem::Item(result.clone().into()),
-                                1.0 / plant.growth_ticks * 60.0,
-                            );
-                        } else {
-                            for result in &minable.results {
-                                if let RecipeResult::Item(item) = result {
-                                    index_map_update_entry(
-                                        &mut flow,
-                                        GenericItem::Item(item.name.clone().into()),
-                                        item.normalized_output().0 / plant.growth_ticks * 60.0,
-                                    );
-                                }
+            && let Some(plant) = item.plant.as_ref()
+        {
+            let plant_result = &plant.plant_result;
+            if let Some(plant) = data.plants.get(plant_result) {
+                index_map_update_entry(
+                    &mut flow,
+                    GenericItem::Item(self.seed.clone()),
+                    -1.0 / plant.growth_ticks * 60.0,
+                );
+                if let Some(minable) = plant.base.minable.as_ref() {
+                    if let Some(result) = &minable.result {
+                        index_map_update_entry(
+                            &mut flow,
+                            GenericItem::Item(result.clone().into()),
+                            1.0 / plant.growth_ticks * 60.0,
+                        );
+                    } else {
+                        for result in &minable.results {
+                            if let RecipeResult::Item(item) = result {
+                                index_map_update_entry(
+                                    &mut flow,
+                                    GenericItem::Item(item.name.clone().into()),
+                                    item.normalized_output().0 / plant.growth_ticks * 60.0,
+                                );
                             }
                         }
                     }
                 }
             }
+        }
         flow
     }
 
