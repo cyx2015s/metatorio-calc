@@ -197,39 +197,72 @@ where
         if self.strict_source {
             // 在strict_source模式下，移除所有无法使用的配方
             let instant = std::time::Instant::now();
-            let mut no_providers: HashSet<I> = HashSet::new();
-
-            for flow in self.flows.values() {
-                for (item_id, _) in &flow.0 {
-                    no_providers.insert(item_id.clone());
-                }
+            let mut status = HashMap::new();
+            enum ItemStatus<R> {
+                Pending {
+                    providers: HashSet<R>,
+                    consumers: HashSet<R>,
+                },
+                Usable,
             }
 
-            for flow in self.flows.values() {
+            for (f_id, flow) in &self.flows {
                 for (item_id, &amount) in &flow.0 {
+                    let entry =
+                        status
+                            .entry(item_id.clone())
+                            .or_insert_with(|| ItemStatus::Pending {
+                                providers: HashSet::new(),
+                                consumers: HashSet::new(),
+                            });
                     if amount > 0.0 {
-                        no_providers.remove(item_id);
+                        // 生产这个物品的配方
+                        match entry {
+                            ItemStatus::Pending { providers, .. } => {
+                                providers.insert(f_id.clone());
+                            }
+                            ItemStatus::Usable => {}
+                        }
+                    }
+                    if amount < 0.0 {
+                        // 消耗这个物品的配方
+                        match entry {
+                            ItemStatus::Pending { consumers, .. } => {
+                                consumers.insert(f_id.clone());
+                            }
+                            ItemStatus::Usable => {}
+                        }
+                    }
+                    match entry {
+                        ItemStatus::Pending {
+                            providers,
+                            consumers,
+                        } if !providers.is_empty() && !consumers.is_empty() => {
+                            *entry = ItemStatus::Usable;
+                        }
+                        _ => {}
                     }
                 }
             }
 
-            for item in self.sources.keys() {
-                no_providers.remove(item);
-            }
             let before = self.flows.len();
 
-            self.flows.retain(|_, v: &mut (IndexMap<I, f64>, f64)| {
-                if v.0
-                    .iter()
-                    .any(|(item_id, &amount)| no_providers.contains(item_id) && amount < 0.0)
+            for (i_id, entry) in &status {
+                if let ItemStatus::Pending {
+                    providers,
+                    consumers,
+                } = entry
                 {
-                    // 有任一物品出现在了这个流中，并且是消耗的，说明这个流无法使用
-                    changed = true;
-                    false
-                } else {
-                    true
+                    if providers.is_empty() && !self.sources.contains_key(i_id) {
+                        // 没有生产这个物品的配方，也没有出现在外部源中，移除所有消耗这个物品的配方
+                        for f_id in consumers {
+                            self.flows.swap_remove(f_id);
+                            changed = true;
+                        }
+                    }
                 }
-            });
+            }
+
             let after = self.flows.len();
             if before != after {
                 log::info!(

@@ -51,8 +51,8 @@ pub fn factorio_auto_planner(
         } => {
             log::error!(
                 "自动规划失败: no_provider={:?}..., no_consumer={:?}...",
-                &format!("{:?}", &no_provider)[..100.min(no_provider.len())],
-                &format!("{:?}", &no_consumer)[..100.min(no_consumer.len())]
+                &no_provider,
+                &no_consumer
             );
             crate::toast::error(format!("自动规划失败。{}", description));
             return Err(AppError::Solver("无法获得结果".into()));
