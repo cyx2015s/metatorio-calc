@@ -94,6 +94,8 @@ impl Default for FactoryInstance {
         .with_mechanic(ReactorMechanic::default())
         .with_mechanic(PlantMechanic::default())
         .with_mechanic(SpoilMechanic::default())
+        .with_mechanic(FluidFuelMechanic::default())
+        .with_mechanic(FluidHeatMechanic::default())
     }
 }
 
@@ -197,20 +199,35 @@ impl FactoryInstance {
             }
         }
 
-        let mut fluids = HashMap::new();
+        let mut fluid_temperaturess = HashMap::new();
+        let mut fluid_fuels = HashSet::new();
+        let mut fluid_heats = HashSet::new();
         for (flow, _) in flows.values() {
             for (item, _) in flow {
-                if let GenericItem::Fluid { name, temperature } = item {
-                    fluids
-                        .entry(name.clone())
-                        .or_insert(HashSet::new())
-                        .insert(*temperature);
+                match item {
+                    GenericItem::Fluid { name, temperature } => {
+                        fluid_temperaturess
+                            .entry(name.clone())
+                            .or_insert(HashSet::new())
+                            .insert(*temperature);
+                    }
+                    GenericItem::FluidFuel {
+                        filter: Some(filter),
+                    } => {
+                        fluid_fuels.insert(filter.clone());
+                    }
+                    GenericItem::FluidHeat {
+                        filter: Some(filter),
+                    } => {
+                        fluid_heats.insert(filter.clone());
+                    }
+                    _ => {}
                 }
             }
         }
         for (source, _) in &external {
             if let GenericItem::Fluid { name, temperature } = source {
-                fluids
+                fluid_temperaturess
                     .entry(name.clone())
                     .or_insert(HashSet::new())
                     .insert(*temperature);
@@ -218,14 +235,14 @@ impl FactoryInstance {
         }
         for target in &target {
             if let GenericItem::Fluid { name, temperature } = &target.0 {
-                fluids
+                fluid_temperaturess
                     .entry(name.clone())
                     .or_insert(HashSet::new())
                     .insert(*temperature);
             }
         }
         let mut aux_idx = 0;
-        for (fluid, temperatures) in &fluids {
+        for (fluid, temperatures) in &fluid_temperaturess {
             // 添加将限定更严格的温度转换为更宽松的温度的流
             for narrow in temperatures {
                 for broad in temperatures {
@@ -253,6 +270,32 @@ impl FactoryInstance {
                 }
             }
         }
+        fluid_fuels.into_iter().for_each(|fluid| {
+            let mut flow = Flow::new();
+            flow.insert(
+                GenericItem::FluidFuel {
+                    filter: fluid.into(),
+                },
+                -1.0,
+            );
+            flow.insert(GenericItem::FluidFuel { filter: None }, 1.0);
+            // 燃料转换代价为 0
+            flows.insert((usize::MAX, aux_idx), (flow, 0.0));
+            aux_idx += 1;
+        });
+        fluid_heats.into_iter().for_each(|fluid| {
+            let mut flow = Flow::new();
+            flow.insert(
+                GenericItem::FluidHeat {
+                    filter: fluid.into(),
+                },
+                -1.0,
+            );
+            flow.insert(GenericItem::FluidHeat { filter: None }, 1.0);
+            // 热量转换代价为 0
+            flows.insert((usize::MAX, aux_idx), (flow, 0.0));
+            aux_idx += 1;
+        });
         SolverData::new(target, flows)
             .with_sources(external)
             .with_strict_source(self.strict_source)
@@ -862,8 +905,10 @@ impl FactoryInstance {
             .outer_margin(4.0)
             .show(ui, |ui| {
                 ui.heading("配方配置");
-
-                self.summary_panel(ui, data, proj, &mut changed, &mut need_suggestions);
+                egui::ScrollArea::vertical().id_salt(2).show(ui, |ui| {
+                    ui.set_max_height(105.0);
+                    self.summary_panel(ui, data, proj, &mut changed, &mut need_suggestions);
+                });
                 egui::ScrollArea::vertical().id_salt(3).show(ui, |ui| {
                     ui.vertical(|ui| {
                         ui.style_mut().spacing.scroll = egui::style::ScrollStyle::solid();
@@ -962,10 +1007,40 @@ impl ProjectInstance {
 
     pub fn with_default_milestones(mut self) -> Self {
         for (tech_name, tech) in &self.data.technologies {
-            if tech.essential {
+            let mut is_essential = false;
+            for effect in &tech.effects {
+                match effect {
+                    Modifier::UnlockQuality { .. } => {
+                        is_essential = true;
+                    }
+                    Modifier::UnlockSpaceLocation { .. } => {
+                        is_essential = true;
+                    }
+                    Modifier::UnlockRecipe { recipe } => {
+                        if let Some(recipe) = self.data.recipes.get(recipe) {
+                            for result in &recipe.results {
+                                match result {
+                                    RecipeResult::Item(item) => {
+                                        if let Some(item) = self.data.items.get(&item.name) {
+                                            if item.base.r#type == "tool" {
+                                                is_essential = true;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            if is_essential {
                 self.proj.tech_milestones.push((tech_name.clone(), true));
             }
         }
+
         update_accessibles(&mut self.proj, &self.data);
         self
     }
