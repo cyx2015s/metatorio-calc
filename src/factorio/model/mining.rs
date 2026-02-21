@@ -666,11 +666,13 @@ impl FactorioMechanic for MiningMechanic {
         for resource in data.resources.values() {
             if let Some(_mining) = resource.base.minable.as_ref() {
                 let machine = select_miner_for_resource(data, proj, factory, resource, &[]);
-                self.instances.push(MiningInstance {
-                    resource: resource.base.base.name.clone(),
-                    machine,
-                    ..Default::default()
-                });
+                if machine.0 != "entity-unknown" {
+                    self.instances.push(MiningInstance {
+                        resource: resource.base.base.name.clone(),
+                        machine,
+                        ..Default::default()
+                    });
+                }
             }
         }
     }
