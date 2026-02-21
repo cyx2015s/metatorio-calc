@@ -252,6 +252,9 @@ impl DataContext {
         if tmp_mod_list_json_path.exists() {
             std::fs::remove_file(&tmp_mod_list_json_path)
                 .map_err(|err| AppError::ContextCreation(err.to_string()))?;
+        } else {
+            std::fs::create_dir_all(tmp_mod_list_json_path.parent().unwrap())
+                .map_err(|err| AppError::ContextCreation(err.to_string()))?;
         }
         if !config_path.exists() {
             std::fs::create_dir_all(config_path.parent().unwrap())
@@ -321,7 +324,7 @@ impl DataContext {
             }
         }
         // 扫描游戏可执行文件下，补充版本信息
-        if let Some(mod_infos_json) =
+        if let Ok(mut mod_infos_json) =
             serde_json::from_str::<Value>(&std::fs::read_to_string(&tmp_mod_list_json_path)?)
         {
             let mut mod_infos = serde_json::from_value::<Vec<ModInfo>>(
@@ -441,9 +444,8 @@ impl DataContext {
                     }
                 }
             }
-            mod_infos_json
-                .get_mut("mods")
-                .replace(&mut serde_json::to_value(mod_infos)?);
+            mod_infos_json["mods"] = serde_json::to_value(mod_infos)?;
+            log::info!("补全模组版本信息完成，写入临时文件({:?}", &mod_infos_json);
             std::fs::write(
                 &tmp_mod_list_json_path,
                 serde_json::to_string_pretty(&mod_infos_json)?,
