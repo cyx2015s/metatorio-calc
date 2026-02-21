@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use egui::Vec2;
 
-use crate::factorio::*;
+use crate::factorio::{hover::PrototypeHover, *};
 
 #[derive(Debug)]
 
@@ -145,13 +145,18 @@ impl<'a> egui::Widget for GenericIcon<'a> {
         let data = &self.data;
         match self.item {
             GenericItem::Custom { name } => ui.label(format!("特殊: {}", name)),
-            GenericItem::Item(IdWithQuality(name, quality)) => ui.add_sized(
-                [self.size, self.size],
-                Icon::new(self.data, "item", name)
-                    .with_quality(*quality)
-                    .with_size(self.size)
-                    .with_stroke(self.stroke),
-            ),
+            GenericItem::Item(IdWithQuality(name, quality)) => ui
+                .add_sized(
+                    [self.size, self.size],
+                    Icon::new(self.data, "item", name)
+                        .with_quality(*quality)
+                        .with_size(self.size)
+                        .with_stroke(self.stroke),
+                )
+                .on_hover_ui(|ui| {
+                    let item = data.items.get(name).unwrap();
+                    ui.add(PrototypeHover::new(data, item).with_quality(*quality));
+                }),
             GenericItem::Fluid { name, temperature } => {
                 let main = ui.add_sized(
                     [self.size, self.size],

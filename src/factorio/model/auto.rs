@@ -60,7 +60,7 @@ pub fn factorio_auto_planner(
     }
 
     factory.solution = solution;
-
+    
     factory
         .mechanics
         .iter_mut()
@@ -72,7 +72,7 @@ pub fn factorio_auto_planner(
                     .get_prim_raw_of(&(idx, jdx))
                 {
                     Some(n) => {
-                        if n < 1e-8 {
+                        if n < 1e-12 {
                             EntryOpRequest::Drop
                         } else {
                             EntryOpRequest::None

@@ -269,109 +269,141 @@ impl FactoryInstance {
         egui_dnd::dnd(ui, "instances").show_vec(
             &mut self.instances,
             |ui, &mut (idx, jdx), handle, _| {
-                let solution_value = self.solution.get_prim_of(&(idx, jdx));
-                ui.horizontal_wrapped(|ui| {
-                    card_frame(ui).show(ui, |ui| {
-                        handle.ui(ui, |ui| {
-                            ui.heading("≡");
-                        });
-                        ui.vertical(|ui| {
-                            let button = ui.add_sized([28.0, 14.0], egui::Button::new("⧉"));
-                            if button.clicked() {
-                                self.mechanics[idx]
-                                    .instance_operate(jdx, &mut |_| EntryOpRequest::Clone);
-                            }
-                            let button = ui.add_sized([28.0, 14.0], egui::Button::new("🗑"));
-                            if button.clicked() {
-                                self.mechanics[idx]
-                                    .instance_operate(jdx, &mut |_| EntryOpRequest::Drop);
-                            }
-                            if let Some(value) = solution_value {
-                                ui.add(AmountLabel::new(value));
-                            } else {
-                                ui.label("无解");
-                            }
-                        });
-                    });
-                    card_frame(ui).show(ui, |ui| {
-                        let target_width = ui.available_width() * 0.3;
-                        ui.set_min_width(target_width);
-                        ui.set_max_width(target_width);
-                        *changed |=
-                            self.mechanics[idx].instance_view(jdx, ui, data, proj, &self.factory);
-                    });
-                    card_frame(ui).show(ui, |ui| {
-                        let target_width = ui.available_width();
-                        ui.set_min_width(target_width);
-                        ui.set_max_width(target_width);
-                        ui.set_min_height(50.0);
-                        let flow =
-                            self.mechanics[idx].instances()[jdx].as_flow(data, proj, &self.factory);
-                        let mut flow_keys = flow.keys().cloned().collect::<Vec<_>>();
-                        sort_generic_items_owned(&mut flow_keys, data);
-                        // 先展示输入，再展示输出
-                        for item in &flow_keys {
-                            let amount = flow.get(item).cloned().unwrap_or(0.0);
-                            if amount.abs() < 1e-8 {
-                                continue;
-                            }
+                let item_id = ui.make_persistent_id(("dnd_item", idx, jdx));
+                // 从 egui 存储中获取上一帧的高度，默认为估算值 100.0
+                let last_frame_height =
+                    ui.data_mut(|d| d.get_temp::<f32>(item_id).unwrap_or(100.0));
 
-                            ui.vertical(|ui| {
-                                ui.set_min_width(40.0);
-                                ui.set_max_width(40.0);
-                                let button = ui
-                                    .add_sized([25.0, 25.0], GenericIcon::new(data, item))
-                                    .interact(egui::Sense::click());
-                                button.context_menu(|ui| {
-                                    if ui.button("添加到产量目标").clicked() {
-                                        self.target.push((item.clone(), 0.0));
-                                        *changed = true;
+                let clip_rect = ui.clip_rect(); // 当前可见屏幕范围
+                let current_cursor = ui.cursor(); // 当前绘制光标位置
+
+                if current_cursor.min.y > clip_rect.max.y || current_cursor.min.y + last_frame_height < clip_rect.min.y {
+                    // 占位：跳过这块区域，不执行内部复杂的 UI 逻辑
+                    let (rect, _) = ui.allocate_at_least(
+                        egui::vec2(ui.available_width(), last_frame_height),
+                        egui::Sense::hover(),
+                    );
+                    return;
+                }
+                let solution_value = self.solution.get_prim_of(&(idx, jdx));
+                let response = ui
+                    .scope(|ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            card_frame(ui).show(ui, |ui| {
+                                handle.ui(ui, |ui| {
+                                    ui.heading("≡");
+                                });
+                                ui.vertical(|ui| {
+                                    let button = ui.add_sized([28.0, 14.0], egui::Button::new("⧉"));
+                                    if button.clicked() {
+                                        self.mechanics[idx]
+                                            .instance_operate(jdx, &mut |_| EntryOpRequest::Clone);
                                     }
-                                    if ui.button("添加到外部输入").clicked() {
-                                        self.external.push((item.clone(), 1.0));
-                                        *changed = true;
+                                    let button = ui.add_sized([28.0, 14.0], egui::Button::new("🗑"));
+                                    if button.clicked() {
+                                        self.mechanics[idx]
+                                            .instance_operate(jdx, &mut |_| EntryOpRequest::Drop);
                                     }
-                                    if ui.button("显示推荐配方").clicked() {
-                                        *need_suggestions = true;
-                                        self.mechanics.iter_mut().for_each(|mechanic| {
-                                            mechanic.update_suggestion(
-                                                data,
-                                                proj,
-                                                &self.factory,
-                                                item,
-                                                amount,
-                                            )
-                                        });
+                                    if let Some(value) = solution_value {
+                                        ui.add(AmountLabel::new(value));
+                                    } else {
+                                        ui.label("无解");
                                     }
                                 });
-                                if button.clicked() {
-                                    *need_suggestions = true;
-                                    self.mechanics.iter_mut().for_each(|mechanic| {
-                                        mechanic.update_suggestion(
-                                            data,
-                                            proj,
-                                            &self.factory,
-                                            item,
-                                            amount,
-                                        )
-                                    });
-                                }
-
-                                ui.add(
-                                    AmountLabel::new(amount * solution_value.unwrap_or(1.0))
-                                        .with_time_scale(proj.time_scale)
-                                        .with_is_energy(item.is_energy())
-                                        .with_is_signed(true),
+                            });
+                            card_frame(ui).show(ui, |ui| {
+                                let target_width = ui.available_width() * 0.3;
+                                ui.set_min_width(target_width);
+                                ui.set_max_width(target_width);
+                                *changed |= self.mechanics[idx].instance_view(
+                                    jdx,
+                                    ui,
+                                    data,
+                                    proj,
+                                    &self.factory,
                                 );
                             });
-                            if ui.available_size_before_wrap().x < 35.0 {
-                                ui.end_row();
-                                ui.add_space(4.0);
-                            }
-                        }
-                        // });
+                            card_frame(ui).show(ui, |ui| {
+                                let target_width = ui.available_width();
+                                ui.set_min_width(target_width);
+                                ui.set_max_width(target_width);
+                                ui.set_min_height(50.0);
+                                let flow = self.mechanics[idx].instances()[jdx].as_flow(
+                                    data,
+                                    proj,
+                                    &self.factory,
+                                );
+                                let mut flow_keys = flow.keys().cloned().collect::<Vec<_>>();
+                                sort_generic_items_owned(&mut flow_keys, data);
+                                // 先展示输入，再展示输出
+                                for item in &flow_keys {
+                                    let amount = flow.get(item).cloned().unwrap_or(0.0);
+                                    if amount.abs() < 1e-8 {
+                                        continue;
+                                    }
+
+                                    ui.vertical(|ui| {
+                                        ui.set_min_width(40.0);
+                                        ui.set_max_width(40.0);
+                                        let button = ui
+                                            .add_sized([25.0, 25.0], GenericIcon::new(data, item))
+                                            .interact(egui::Sense::click());
+                                        button.context_menu(|ui| {
+                                            if ui.button("添加到产量目标").clicked() {
+                                                self.target.push((item.clone(), 0.0));
+                                                *changed = true;
+                                            }
+                                            if ui.button("添加到外部输入").clicked() {
+                                                self.external.push((item.clone(), 1.0));
+                                                *changed = true;
+                                            }
+                                            if ui.button("显示推荐配方").clicked() {
+                                                *need_suggestions = true;
+                                                self.mechanics.iter_mut().for_each(|mechanic| {
+                                                    mechanic.update_suggestion(
+                                                        data,
+                                                        proj,
+                                                        &self.factory,
+                                                        item,
+                                                        amount,
+                                                    )
+                                                });
+                                            }
+                                        });
+                                        if button.clicked() {
+                                            *need_suggestions = true;
+                                            self.mechanics.iter_mut().for_each(|mechanic| {
+                                                mechanic.update_suggestion(
+                                                    data,
+                                                    proj,
+                                                    &self.factory,
+                                                    item,
+                                                    amount,
+                                                )
+                                            });
+                                        }
+
+                                        ui.add(
+                                            AmountLabel::new(
+                                                amount * solution_value.unwrap_or(1.0),
+                                            )
+                                            .with_time_scale(proj.time_scale)
+                                            .with_is_energy(item.is_energy())
+                                            .with_is_signed(true),
+                                        );
+                                    });
+                                    if ui.available_size_before_wrap().x < 35.0 {
+                                        ui.end_row();
+                                        ui.add_space(4.0);
+                                    }
+                                }
+                                // });
+                            })
+                        });
                     })
-                });
+                    .response;
+                let actual_height = response.rect.height();
+                ui.data_mut(|d| d.insert_temp(item_id, actual_height));
             },
         );
     }
@@ -399,7 +431,7 @@ impl FactoryInstance {
                         for jdx in 0..mechanic.instance_len() {
                             let solution_value =
                                 self.solution.get_prim_raw_of(&(idx, jdx)).unwrap_or(0.0);
-                            if solution_value < 1e-8 {
+                            if solution_value < 1e-12 {
                                 mechanic.instance_operate(jdx, &mut |_| EntryOpRequest::Drop);
                             }
                         }

@@ -28,6 +28,49 @@ impl<'a, T: HasPrototypeBase> PrototypeHover<'a, T> {
     }
 }
 
+impl<'a> egui::Widget for PrototypeHover<'a, ItemPrototype> {
+    fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+        let data = &self.data;
+        ui.vertical(|ui| {
+            ui.label(data.get_display_name("item", &self.prototype.base.name));
+
+            ui.label(format!("单组堆叠: {}", self.prototype.stack_size));
+
+            if let Some(mine) = &self.prototype.burn {
+                ui.label(format!("燃料: {}", mine.fuel_value));
+            }
+            if let Some(place_result) = &self.prototype.place_result {
+                ui.label("放置结果: ");
+                ui.horizontal(|ui| {
+                    ui.label(data.get_display_name("entity", place_result));
+                    ui.add_sized([35.0, 35.0], Icon::new(self.data, "entity", place_result));
+                });
+            }
+            if let Some(plant) = &self.prototype.plant {
+                ui.label("种植结果: ");
+                ui.horizontal(|ui| {
+                    ui.label(data.get_display_name("entity", &plant.plant_result));
+                    ui.add_sized(
+                        [35.0, 35.0],
+                        Icon::new(self.data, "entity", &plant.plant_result),
+                    );
+                });
+            }
+            if let Some(spoil) = &self.prototype.spoil
+                && let Some(spoil_result) = &spoil.spoil_result
+            {
+                ui.label("变质结果: ");
+                ui.horizontal(|ui| {
+                    ui.label(data.get_display_name("item", &spoil_result));
+                    ui.add_sized([35.0, 35.0], Icon::new(self.data, "item", &spoil_result));
+                });
+            }
+        });
+
+        ui.response()
+    }
+}
+
 impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         let data = &self.data;
