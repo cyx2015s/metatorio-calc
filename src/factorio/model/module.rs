@@ -61,7 +61,12 @@ pub struct BeaconPrototype {
     pub beacon_counter: BeaconCounter,
 
     #[serde_as(deserialize_as = "DefaultOnError")]
+    #[serde(default = "default_beacon_profile")]
     pub profile: Option<Vec<f64>>,
+}
+
+fn default_beacon_profile() -> Option<Vec<f64>> {
+    Some(vec![1.0])
 }
 
 fn floor_to_percentage(value: f64) -> f64 {

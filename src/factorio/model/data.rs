@@ -115,8 +115,8 @@ where
     let ret = serde_json::from_value(value.clone());
     match ret {
         Err(err) => {
-            eprintln!("解析数据类型 {} 失败: {}", type_name, err);
             eprintln!("原始数据: {}", value);
+            eprintln!("解析数据类型 {} 失败: {}", type_name, err);
             panic!("解析数据失败");
         }
         Ok(val) => val,

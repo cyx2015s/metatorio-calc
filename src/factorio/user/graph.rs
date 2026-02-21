@@ -39,7 +39,12 @@ pub fn resolve_dependency(
             queue.push_back(tech_name.clone());
         }
     }
+    let mut visited = HashSet::new();
     while let Some(tech_name) = queue.pop_front() {
+        if visited.contains(&tech_name) {
+            continue;
+        }
+        visited.insert(tech_name.clone());
         if let Some(dependents) = dependents.get(&tech_name) {
             for dependent in dependents {
                 queue.push_back(dependent.clone());

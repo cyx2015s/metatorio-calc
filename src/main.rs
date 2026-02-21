@@ -1,4 +1,4 @@
-#![cfg_attr(all(not(test), not(debug_assertions)), windows_subsystem = "windows")]
+// #![cfg_attr(all(not(test), not(debug_assertions)), windows_subsystem = "windows")]
 
 use std::sync::mpsc::*;
 
