@@ -376,6 +376,9 @@ pub fn select_miner_for_resource(
             score *= 1.0 + effect_receiver.base_effect.speed;
             score *= 1.0 + (effect_receiver.base_effect.productivity * 2.0);
         }
+        if matches!(miner.energy_source, EnergySource::Electric(_)) {
+            score *= 8.0;
+        }
         score *= 1.0 + miner.module_slots;
         score
     }
