@@ -661,6 +661,23 @@ impl DataContext {
             "technology".into(),
             get_reverse_order_info(&self.ordered_entries["technology"]),
         );
+
+        self.ordered_entries.insert(
+            "quality".into(),
+            get_order_info(
+                &self
+                    .qualities
+                    .iter()
+                    .map(|q| (q.base.name.clone(), q.clone()))
+                    .collect(),
+                &self.groups,
+                &self.subgroups,
+            ),
+        );
+        self.order_of_entries.insert(
+            "quality".into(),
+            get_reverse_order_info(&self.ordered_entries["quality"]),
+        );
         self
     }
 

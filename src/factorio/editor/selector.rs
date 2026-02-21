@@ -296,7 +296,7 @@ impl<'a> egui::Widget for Selector<'a, IdWithQuality, IdWithQuality> {
     }
 }
 
-fn quality_selector(
+pub fn quality_selector(
     ui: &mut egui::Ui,
     data: &DataContext,
     selected_quality: &mut Option<u8>,

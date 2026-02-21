@@ -121,12 +121,12 @@ impl FactorioMechanic for ReactorMechanic {
         &mut self,
         data: &DataContext,
         _proj: &ProjectContext,
-        _factory: &FactoryContext,
+        factory: &FactoryContext,
     ) {
         for reactor in data.reactors.values() {
             // for quality in 0..=proj.max_quality_level {
             self.instances.push(ReactorInstance {
-                reactor: IdWithQuality(reactor.base.base.name.clone(), 0),
+                reactor: IdWithQuality(reactor.base.base.name.clone(), factory.major_quality),
                 neighbours: 3,
                 fuel: None,
             });

@@ -502,7 +502,7 @@ impl FactorioMechanic for GeneratorMechanic {
         &mut self,
         data: &DataContext,
         proj: &ProjectContext,
-        _factory: &FactoryContext,
+        factory: &FactoryContext,
     ) {
         for generator in data.generators.values() {
             if !proj.is_prototype_accessible("entity", &generator.base.base.name) {
@@ -519,7 +519,7 @@ impl FactorioMechanic for GeneratorMechanic {
                     for temperature in data.temperatures.get(filter).expect("未初始化流体温度数据")
                     {
                         self.instances.push(GeneratorInstance {
-                            generator: (generator.base.base.name.clone(), 0).into(),
+                            generator: (generator.base.base.name.clone(), factory.major_quality).into(),
                             fluid: filter.clone(),
                             temperature: *temperature,
                         });
@@ -541,7 +541,7 @@ impl FactorioMechanic for GeneratorMechanic {
                             .expect("未初始化流体温度数据")
                         {
                             self.instances.push(GeneratorInstance {
-                                generator: (generator.base.base.name.clone(), 0).into(),
+                                generator: (generator.base.base.name.clone(), factory.major_quality).into(),
                                 fluid: fluid_name.clone(),
                                 temperature: *temperature,
                             });
@@ -714,7 +714,7 @@ impl FactorioMechanic for BoilerMechanic {
         &mut self,
         data: &DataContext,
         proj: &ProjectContext,
-        _factory: &FactoryContext,
+        factory: &FactoryContext,
     ) {
         for boiler in data.boilers.values() {
             if !proj.is_prototype_accessible("entity", &boiler.base.base.name) {
@@ -729,7 +729,7 @@ impl FactorioMechanic for BoilerMechanic {
                     for temperature in data.temperatures.get(filter).expect("未初始化流体温度数据")
                     {
                         self.instances.push(BoilerInstance {
-                            boiler: (boiler.base.base.name.clone(), 0).into(),
+                            boiler: (boiler.base.base.name.clone(), factory.major_quality).into(),
                             fluid: filter.clone(),
                             temperature: *temperature,
                             fuel: None,
@@ -750,7 +750,8 @@ impl FactorioMechanic for BoilerMechanic {
                             .expect("未初始化流体温度数据")
                         {
                             self.instances.push(BoilerInstance {
-                                boiler: (boiler.base.base.name.clone(), 0).into(),
+                                boiler: (boiler.base.base.name.clone(), factory.major_quality)
+                                    .into(),
                                 fluid: fluid_name.clone(),
                                 temperature: *temperature,
                                 fuel: None,

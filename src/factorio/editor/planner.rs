@@ -14,7 +14,7 @@ use crate::{
         format::*,
         model::*,
         number::AmountLabel,
-        selector::generic_item_selector,
+        selector::{Selector, generic_item_selector},
         setting::UserContextEditor,
         style::card_frame,
         update_accessibles,
@@ -25,8 +25,12 @@ use crate::{
 use indexmap::IndexMap;
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct FactoryContext {
     pub planet: Option<String>,
+
+    // 自动和手动填充时，优先使用的机器的品质等级
+    pub major_quality: u8,
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -539,6 +543,38 @@ impl FactoryInstance {
                     }
                 });
             self.factory.planet = planet_name;
+        });
+        ui.horizontal_wrapped(|ui| {
+            let button = ui
+                .add_sized(
+                    [35.0, 35.0],
+                    Icon::new(
+                        data,
+                        "quality",
+                        &data.qualities[self.factory.major_quality as usize]
+                            .base
+                            .name,
+                    ),
+                )
+                .interact(egui::Sense::click());
+            ui.label("优先使用的机器品质");
+            let mut quality: Option<String> = None;
+            ui.add(
+                SelectorModal::new(button.id, data, "选择偏好品质")
+                    .with_toggle(button.clicked())
+                    .with_selector(Selector::new(data, "quality").with_output(&mut quality)),
+            );
+            if let Some(quality_name) = quality {
+                for (idx, q) in data.qualities.iter().enumerate() {
+                    if q.base.name == quality_name {
+                        self.factory.major_quality = idx as u8;
+                        break;
+                    }
+                }
+            }
+            if self.factory.major_quality > data.qualities.len() as u8 - 1 {
+                self.factory.major_quality = data.qualities.len() as u8 - 1;
+            }
         });
 
         ui.heading("游戏机制");

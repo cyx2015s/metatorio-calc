@@ -688,7 +688,7 @@ pub struct AutoBeaconConfig {
 pub fn select_crafter_for_recipe(
     data: &DataContext,
     proj: &ProjectContext,
-    _factory: &FactoryContext,
+    factory: &FactoryContext,
     recipe: &RecipePrototype,
     preferences: &[IdWithQuality],
     excluding: &[IdWithQuality],
@@ -728,7 +728,7 @@ pub fn select_crafter_for_recipe(
             selected = crafter_name.clone();
         }
     }
-    selected.into()
+    (selected, factory.major_quality).into()
 }
 
 impl SolveContext for RecipeMechanic {
@@ -757,6 +757,7 @@ impl FactorioMechanic for RecipeMechanic {
         }
         ui.collapsing("[自动/手动]机器偏好", |ui| {
             let icon = Icon::new(data, "entity", "entity-unknown");
+            ui.label("[自动]备选机器数量");
             ui.add(
                 egui::DragValue::new(&mut self.alternative_count)
                     .speed(1)

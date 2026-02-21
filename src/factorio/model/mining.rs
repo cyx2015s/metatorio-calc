@@ -351,7 +351,7 @@ pub struct MiningMechanic {
 pub fn select_miner_for_resource(
     data: &DataContext,
     proj: &ProjectContext,
-    _factory: &FactoryContext,
+    factory: &FactoryContext,
     resource: &ResourcePrototype,
     preferences: &[IdWithQuality],
 ) -> IdWithQuality {
@@ -389,7 +389,7 @@ pub fn select_miner_for_resource(
             selected = miner.base.base.name.clone();
         }
     }
-    selected.into()
+    (selected, factory.major_quality).into()
 }
 
 impl SolveContext for MiningMechanic {
