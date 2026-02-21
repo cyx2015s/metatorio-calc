@@ -321,127 +321,134 @@ impl DataContext {
             }
         }
         // 扫描游戏可执行文件下，补充版本信息
-        let mut mod_infos_json =
-            serde_json::from_str::<Value>(&std::fs::read_to_string(&tmp_mod_list_json_path)?)?;
-        let mut mod_infos = serde_json::from_value::<Vec<ModInfo>>(
-            mod_infos_json
-                .get("mods")
-                .ok_or(AppError::ContextCreation(
-                    "mod-list.json格式不正确".to_string(),
-                ))?
-                .clone(),
-        )?;
-        for mod_info in &mut mod_infos {
-            if mod_info.enabled {
-                log::info!("处理模组信息 {:?}", mod_info);
-                let mod_name = mod_info.name.clone();
-                if mod_info.version.is_empty() {
-                    log::info!("模组 {} 缺少版本信息，尝试补全", &mod_name);
+        if let Some(mod_infos_json) =
+            serde_json::from_str::<Value>(&std::fs::read_to_string(&tmp_mod_list_json_path)?)
+        {
+            let mut mod_infos = serde_json::from_value::<Vec<ModInfo>>(
+                mod_infos_json
+                    .get("mods")
+                    .ok_or(AppError::ContextCreation(
+                        "mod-list.json格式不正确".to_string(),
+                    ))?
+                    .clone(),
+            )?;
+            for mod_info in &mut mod_infos {
+                if mod_info.enabled {
+                    log::info!("处理模组信息 {:?}", mod_info);
+                    let mod_name = mod_info.name.clone();
+                    if mod_info.version.is_empty() {
+                        log::info!("模组 {} 缺少版本信息，尝试补全", &mod_name);
 
-                    if ["base", "space-age", "quality", "elevated-rails"]
-                        .contains(&mod_name.as_str())
-                    {
-                        // 在游戏可执行文件附近寻找info.json
-                        log::info!("在游戏可执行文件附近寻找info.json");
-                        let info_json_path = executable_path
-                            .join("../../../data")
-                            .join(&mod_name)
-                            .join("info.json");
-                        let info_json_content = serde_json::from_str::<Value>(
-                            &std::fs::read_to_string(&info_json_path)?,
-                        )?;
-                        mod_info.version = info_json_content
-                            .get("version")
-                            .ok_or(AppError::ContextCreation(
-                                "模组的info.json没有version字段".to_string(),
-                            ))?
-                            .as_str()
-                            .ok_or(AppError::ContextCreation(
-                                "模组的info.json的version字段不是字符串".to_string(),
-                            ))?
-                            .to_string();
-                        log::info!("模组 {} 的版本是 {}", &mod_name, &mod_info.version);
-                    } else {
-                        // 在模组路径下寻找info.json
-                        log::info!("在模组路径下寻找 {} 的 info.json", mod_name);
-                        if mod_path.is_none() {
-                            continue;
-                        }
-                        // 可能是 zip 包
-                        for entry in std::fs::read_dir(mod_path.unwrap())? {
-                            let entry = entry?;
-                            let file_name = entry.file_name().into_string().map_err(|os_err| {
-                                AppError::Custom(format!(
-                                    "操作系统错误: {}",
-                                    os_err.to_string_lossy()
-                                ))
-                            })?;
+                        if ["base", "space-age", "quality", "elevated-rails"]
+                            .contains(&mod_name.as_str())
+                        {
+                            // 在游戏可执行文件附近寻找info.json
+                            log::info!("在游戏可执行文件附近寻找info.json");
+                            let info_json_path = executable_path
+                                .join("../../../data")
+                                .join(&mod_name)
+                                .join("info.json");
+                            let info_json_content = serde_json::from_str::<Value>(
+                                &std::fs::read_to_string(&info_json_path)?,
+                            )?;
+                            mod_info.version = info_json_content
+                                .get("version")
+                                .ok_or(AppError::ContextCreation(
+                                    "模组的info.json没有version字段".to_string(),
+                                ))?
+                                .as_str()
+                                .ok_or(AppError::ContextCreation(
+                                    "模组的info.json的version字段不是字符串".to_string(),
+                                ))?
+                                .to_string();
+                            log::info!("模组 {} 的版本是 {}", &mod_name, &mod_info.version);
+                        } else {
+                            // 在模组路径下寻找info.json
+                            log::info!("在模组路径下寻找 {} 的 info.json", mod_name);
+                            if mod_path.is_none() {
+                                continue;
+                            }
+                            // 可能是 zip 包
+                            for entry in std::fs::read_dir(mod_path.unwrap())? {
+                                let entry = entry?;
+                                let file_name =
+                                    entry.file_name().into_string().map_err(|os_err| {
+                                        AppError::Custom(format!(
+                                            "操作系统错误: {}",
+                                            os_err.to_string_lossy()
+                                        ))
+                                    })?;
 
-                            if file_name.starts_with(format!("{}_", &mod_name).as_str())
-                                && file_name.ends_with(".zip")
-                            {
-                                log::info!("可能匹配的文件：{}", file_name);
-                                log::info!(
-                                    "模组 {} 是压缩包，尝试从压缩包文件名读取版本",
-                                    &mod_name
-                                );
-                                let version_str = file_name.split("_").last();
-                                if let Some(version_str) = version_str {
-                                    let version = version_str.trim_end_matches(".zip");
-                                    mod_info.version = version.to_string();
+                                if file_name.starts_with(format!("{}_", &mod_name).as_str())
+                                    && file_name.ends_with(".zip")
+                                {
+                                    log::info!("可能匹配的文件：{}", file_name);
+                                    log::info!(
+                                        "模组 {} 是压缩包，尝试从压缩包文件名读取版本",
+                                        &mod_name
+                                    );
+                                    let version_str = file_name.split("_").last();
+                                    if let Some(version_str) = version_str {
+                                        let version = version_str.trim_end_matches(".zip");
+                                        mod_info.version = version.to_string();
+                                        let new_version = version_string_to_triplet(version);
+                                        let old_version =
+                                            version_string_to_triplet(mod_info.version.as_str());
+                                        if old_version < new_version {
+                                            mod_info.version = version.to_string();
+                                        }
+                                        log::info!(
+                                            "压缩包模组 {} 的版本是 {}",
+                                            &mod_name,
+                                            &mod_info.version
+                                        );
+                                    }
+                                } else if file_name == mod_name {
+                                    let info_json_path = entry.path().join("info.json");
+                                    if !info_json_path.exists() {
+                                        // 垃圾文件夹，不用管
+                                        continue;
+                                    }
+                                    let info_json_content = serde_json::from_str::<Value>(
+                                        &std::fs::read_to_string(&info_json_path)?,
+                                    )?;
+                                    let version = info_json_content
+                                        .get("version")
+                                        .ok_or(AppError::ContextCreation(
+                                            "模组的info.json没有version字段".to_string(),
+                                        ))?
+                                        .as_str()
+                                        .ok_or(AppError::ContextCreation(
+                                            "模组的info.json的version字段不是字符串".to_string(),
+                                        ))?;
                                     let new_version = version_string_to_triplet(version);
                                     let old_version =
                                         version_string_to_triplet(mod_info.version.as_str());
-                                    if old_version < new_version {
+                                    if old_version <= new_version {
+                                        // 同版本模组，文件优先
                                         mod_info.version = version.to_string();
                                     }
                                     log::info!(
-                                        "压缩包模组 {} 的版本是 {}",
+                                        "文件模组 {} 的版本是 {}",
                                         &mod_name,
-                                        &mod_info.version
+                                        mod_info.version
                                     );
-                                }
-                            } else if file_name == mod_name {
-                                let info_json_path = entry.path().join("info.json");
-                                if !info_json_path.exists() {
-                                    // 垃圾文件夹，不用管
-                                    continue;
-                                }
-                                let info_json_content = serde_json::from_str::<Value>(
-                                    &std::fs::read_to_string(&info_json_path)?,
-                                )?;
-                                let version = info_json_content
-                                    .get("version")
-                                    .ok_or(AppError::ContextCreation(
-                                        "模组的info.json没有version字段".to_string(),
-                                    ))?
-                                    .as_str()
-                                    .ok_or(AppError::ContextCreation(
-                                        "模组的info.json的version字段不是字符串".to_string(),
-                                    ))?;
-                                let new_version = version_string_to_triplet(version);
-                                let old_version =
-                                    version_string_to_triplet(mod_info.version.as_str());
-                                if old_version <= new_version {
-                                    // 同版本模组，文件优先
-                                    mod_info.version = version.to_string();
-                                }
-                                log::info!("文件模组 {} 的版本是 {}", &mod_name, mod_info.version);
 
-                                break;
+                                    break;
+                                }
                             }
                         }
                     }
                 }
             }
+            mod_infos_json
+                .get_mut("mods")
+                .replace(&mut serde_json::to_value(mod_infos)?);
+            std::fs::write(
+                &tmp_mod_list_json_path,
+                serde_json::to_string_pretty(&mod_infos_json)?,
+            )?;
         }
-        mod_infos_json
-            .get_mut("mods")
-            .replace(&mut serde_json::to_value(mod_infos)?);
-        std::fs::write(
-            &tmp_mod_list_json_path,
-            serde_json::to_string_pretty(&mod_infos_json)?,
-        )?;
         DataContext::load_from_tmp_no_dump()
     }
 
@@ -501,22 +508,24 @@ impl DataContext {
             }
         }
         let mod_list_json_path = self_path.join("tmp/mods/mod-list.json");
-        let mod_infos_json =
-            serde_json::from_str::<Value>(&std::fs::read_to_string(&mod_list_json_path)?)?;
-        let mut mod_infos = serde_json::from_value::<Vec<ModInfo>>(
-            mod_infos_json
-                .get("mods")
-                .ok_or(AppError::ContextCreation(
-                    "mod-list.json格式不正确".to_string(),
-                ))?
-                .clone(),
-        )?;
-        for mod_info in &mut mod_infos {
-            if mod_info.enabled {
-                log::info!("启用模组 {}", &mod_info.name);
-                factorio
-                    .mods
-                    .push((mod_info.name.clone(), mod_info.version.clone()));
+        if let Ok(mod_infos_json) =
+            serde_json::from_str::<Value>(&std::fs::read_to_string(&mod_list_json_path)?)
+        {
+            let mut mod_infos = serde_json::from_value::<Vec<ModInfo>>(
+                mod_infos_json
+                    .get("mods")
+                    .ok_or(AppError::ContextCreation(
+                        "mod-list.json格式不正确".to_string(),
+                    ))?
+                    .clone(),
+            )?;
+            for mod_info in &mut mod_infos {
+                if mod_info.enabled {
+                    log::info!("启用模组 {}", &mod_info.name);
+                    factorio
+                        .mods
+                        .push((mod_info.name.clone(), mod_info.version.clone()));
+                }
             }
         }
         crate::toast::success("加载数据完成");
