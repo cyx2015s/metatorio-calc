@@ -317,7 +317,7 @@ where
                 let mut sum_log = 0.0;
                 let mut count = 0;
                 for (i_id, amount) in &flow.0 {
-                    if amount.abs() > 1e-12 {
+                    if amount.abs() > 0.0 {
                         // 当前值 = 原始值 * 物品缩放
                         let current_val =
                             amount.abs() * 2.0_f64.powf(*item_scales.get(i_id).unwrap());
@@ -333,7 +333,7 @@ where
             let mut target_sum_log = 0.0;
             let mut target_count = 0;
             for (i_id, &amount) in &self.target {
-                if amount.abs() > 1e-12 {
+                if amount.abs() > 0.0 {
                     let current_val = amount.abs() * 2.0_f64.powf(*item_scales.get(i_id).unwrap());
                     target_sum_log += current_val.log2();
                     target_count += 1;

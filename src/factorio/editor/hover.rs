@@ -71,6 +71,25 @@ impl<'a> egui::Widget for PrototypeHover<'a, ItemPrototype> {
     }
 }
 
+impl<'a> egui::Widget for PrototypeHover<'a, FluidPrototype> {
+    fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+        let data = &self.data;
+        ui.vertical(|ui| {
+            ui.label(data.get_display_name("fluid", &self.prototype.base.name));
+            ui.label(format!("默认温度: {}℃", self.prototype.default_temperature));
+            ui.label(format!("最大温度: {}℃", self.prototype.max_temperature.unwrap_or(self.prototype.default_temperature)));
+            if let Some(fuel_value) = self.prototype.fuel_value {
+                ui.label(format!("每单位燃料值: {}", fuel_value));
+            }
+            if let Some(heat_capacity) = self.prototype.heat_capacity {
+                ui.label(format!("每单位比热容: {}/℃", heat_capacity));
+            }
+        });
+
+        ui.response()
+    }
+}
+
 impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         let data = &self.data;

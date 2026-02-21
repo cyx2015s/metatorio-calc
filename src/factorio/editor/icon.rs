@@ -154,17 +154,24 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                         .with_stroke(self.stroke),
                 )
                 .on_hover_ui(|ui| {
-                    let item = data.items.get(name).unwrap();
-                    ui.add(PrototypeHover::new(data, item).with_quality(*quality));
+                    if let Some(item) = data.items.get(name) {
+                        ui.add(PrototypeHover::new(data, item).with_quality(*quality));
+                    }
                 }),
             GenericItem::Fluid { name, temperature } => {
-                let main = ui.add_sized(
-                    [self.size, self.size],
-                    Icon::new(self.data, "fluid", name)
-                        .with_quality(0)
-                        .with_size(self.size)
-                        .with_stroke(self.stroke),
-                );
+                let main = ui
+                    .add_sized(
+                        [self.size, self.size],
+                        Icon::new(self.data, "fluid", name)
+                            .with_quality(0)
+                            .with_size(self.size)
+                            .with_stroke(self.stroke),
+                    )
+                    .on_hover_ui(|ui| {
+                        if let Some(fluid) = data.fluids.get(name) {
+                            ui.add(PrototypeHover::new(data, fluid));
+                        }
+                    });
                 let bottom = main.rect.split_top_bottom_at_fraction(0.5).1;
                 match temperature {
                     [i32::MIN, i32::MAX] => {}
@@ -212,6 +219,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                         }
                     }
                 }
+
                 main
             }
             GenericItem::Entity(IdWithQuality(name, quality)) => {
