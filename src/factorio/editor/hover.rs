@@ -31,7 +31,9 @@ impl<'a, T: HasPrototypeBase> PrototypeHover<'a, T> {
 impl<'a> egui::Widget for PrototypeHover<'a, ItemPrototype> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         let data = &self.data;
+
         ui.vertical(|ui| {
+            ui.set_min_width(140.0);
             ui.label(data.get_display_name("item", &self.prototype.base.name));
 
             ui.label(format!("单组堆叠: {}", self.prototype.stack_size));
@@ -75,6 +77,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, FluidPrototype> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         let data = &self.data;
         ui.vertical(|ui| {
+            ui.set_min_width(140.0);
             ui.label(data.get_display_name("fluid", &self.prototype.base.name));
             ui.label(format!("默认温度: {}℃", self.prototype.default_temperature));
             ui.label(format!("最大温度: {}℃", self.prototype.max_temperature.unwrap_or(self.prototype.default_temperature)));
@@ -253,6 +256,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, CraftingMachinePrototype> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         let data = &self.data;
         ui.vertical(|ui| {
+            ui.set_min_width(140.0);
             ui.label(data.get_display_name("entity", &self.prototype.base.base.name));
             ui.label(format!("制造速度: {}", self.prototype.crafting_speed));
             ui.label(format!("插件槽位: {}", self.prototype.module_slots));
