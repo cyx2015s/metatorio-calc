@@ -277,14 +277,8 @@ impl FactoryInstance {
                 let clip_rect = ui.clip_rect(); // 当前可见屏幕范围
                 let current_cursor = ui.cursor(); // 当前绘制光标位置
 
-                if current_cursor.min.y > clip_rect.max.y || current_cursor.min.y + last_frame_height < clip_rect.min.y {
-                    // 占位：跳过这块区域，不执行内部复杂的 UI 逻辑
-                    let (rect, _) = ui.allocate_at_least(
-                        egui::vec2(ui.available_width(), last_frame_height),
-                        egui::Sense::hover(),
-                    );
-                    return;
-                }
+                let visible = !(current_cursor.min.y > clip_rect.max.y
+                    || current_cursor.min.y + last_frame_height < clip_rect.min.y);
                 let solution_value = self.solution.get_prim_of(&(idx, jdx));
                 let response = ui
                     .scope(|ui| {
@@ -328,6 +322,9 @@ impl FactoryInstance {
                                 ui.set_min_width(target_width);
                                 ui.set_max_width(target_width);
                                 ui.set_min_height(50.0);
+                                if !visible {
+                                    return;
+                                }
                                 let flow = self.mechanics[idx].instances()[jdx].as_flow(
                                     data,
                                     proj,
