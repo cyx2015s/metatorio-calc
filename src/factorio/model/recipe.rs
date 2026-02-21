@@ -1,4 +1,7 @@
-use std::{collections::HashSet, fmt::Debug};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Debug,
+};
 
 use serde_with::{DefaultOnError, serde_as};
 
@@ -6,7 +9,7 @@ use crate::{
     comb::Compositions,
     concept::*,
     factorio::{
-        DataContext, ProjectContext, SurfaceCondition,
+        DataContext, ModulePrototype, ProjectContext, SurfaceCondition,
         common::*,
         editor::{hover::PrototypeHover, icon::Icon},
         modal::SelectorModal,
@@ -750,7 +753,7 @@ impl FactorioMechanic for RecipeMechanic {
         ui: &mut egui::Ui,
         data: &DataContext,
         proj: &ProjectContext,
-        _factory: &FactoryContext,
+        factory: &FactoryContext,
     ) -> bool {
         let mut changed = false;
         if ui.button("添加配方").clicked() {
@@ -837,6 +840,30 @@ impl FactorioMechanic for RecipeMechanic {
         });
         ui.separator();
         ui.collapsing("[自动]枚举插件", |ui| {
+            if ui
+                .button("使用最佳插件")
+                .on_hover_text("根据当前科技等级，选择每个类别的最佳插件加入枚举。")
+                .clicked()
+            {
+                let mut modules_by_category: HashMap<String, &ModulePrototype> = HashMap::new();
+                for module in data.modules.values() {
+                    if proj.is_prototype_accessible("item", &module.base.name) {
+                        let category = module.category.clone();
+                        modules_by_category
+                            .entry(category.clone())
+                            .and_modify(|m| {
+                                if module.tier > m.tier {
+                                    *m = &module;
+                                }
+                            })
+                            .or_insert(&module);
+                    }
+                }
+                self.enumerate_modules = modules_by_category
+                    .values()
+                    .map(|m| (m.base.name.clone(), factory.major_quality).into())
+                    .collect();
+            }
             let icon = Icon::new(data, "item", "empty-module-slot");
             let button = ui
                 .add_sized([35.0, 35.0], icon)
@@ -883,7 +910,7 @@ impl FactorioMechanic for RecipeMechanic {
             }
         });
         ui.separator();
-        ui.collapsing("[自动/手动]插件塔", |ui| {
+        ui.collapsing("[自动]插件塔", |ui| {
             ui.label("添加新建筑时，会选取第一个满足条件的插件塔配置。");
             if ui.button("添加插件塔").clicked() {
                 self.enumerate_beacons.push(AutoBeaconConfig {
