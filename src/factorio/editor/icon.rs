@@ -179,7 +179,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                         ui.put(
                             bottom,
                             egui::Label::new(
-                                egui::RichText::new(format!(">={min}°C"))
+                                egui::RichText::new(format!(">={min}℃"))
                                     .color(egui::Color32::WHITE)
                                     .small(),
                             ),
@@ -189,7 +189,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                         ui.put(
                             bottom,
                             egui::Label::new(
-                                egui::RichText::new(format!("<={max}°C"))
+                                egui::RichText::new(format!("<={max}℃"))
                                     .color(egui::Color32::WHITE)
                                     .small(),
                             ),
@@ -200,7 +200,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                             ui.put(
                                 bottom,
                                 egui::Label::new(
-                                    egui::RichText::new(format!("{min}°C"))
+                                    egui::RichText::new(format!("{min}℃"))
                                         .color(egui::Color32::WHITE)
                                         .small(),
                                 )
@@ -210,7 +210,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                             ui.put(
                                 bottom,
                                 egui::Label::new(
-                                    egui::RichText::new(format!("{min}~\n{max}°C"))
+                                    egui::RichText::new(format!("{min}~\n{max}℃"))
                                         .color(egui::Color32::WHITE)
                                         .small(),
                                 )

@@ -83,6 +83,8 @@ impl<'a> egui::Widget for PrototypeHover<'a, FluidPrototype> {
             }
             if let Some(heat_capacity) = self.prototype.heat_capacity {
                 ui.label(format!("每单位比热容: {}/℃", heat_capacity));
+            } else {
+                ui.label("每单位比热容: 1kJ/℃");
             }
         });
 
@@ -219,7 +221,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
                                             match f.temperature {
                                                 Some(t) => {
                                                     ui.add(
-                                                        CompactLabel::new(t).with_format("@{}°C"),
+                                                        CompactLabel::new(t).with_format("@{}℃"),
                                                     );
                                                 }
                                                 None => {
@@ -228,7 +230,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
                                                             CompactLabel::new(
                                                                 fluid.default_temperature,
                                                             )
-                                                            .with_format("@{}°C"),
+                                                            .with_format("@{}℃"),
                                                         );
                                                     }
                                                 }

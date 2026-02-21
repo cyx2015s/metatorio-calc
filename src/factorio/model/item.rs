@@ -536,6 +536,12 @@ impl AsFlow for ItemFuelInstance {
                 },
                 item.burn.as_ref().map_or(0.0, |b| b.fuel_value.amount),
             );
+            if let Some(burnt_result) = &item.burn.as_ref().and_then(|b| b.burnt_result.clone()) {
+                flow.insert(
+                    GenericItem::Item(burnt_result.clone().into()),
+                    1.0,
+                );
+            }
         }
         flow
     }
