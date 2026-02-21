@@ -576,7 +576,7 @@ impl FactoryInstance {
                 self.factory.major_quality = data.qualities.len() as u8 - 1;
             }
         });
-
+        ui.separator();
         ui.heading("游戏机制");
         for mechanic in self.mechanics.iter_mut() {
             ui.separator();
