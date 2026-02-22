@@ -2,6 +2,7 @@ use good_lp::{IntoAffineExpression, Solution, SolverModel, variable};
 use indexmap::{IndexMap, IndexSet};
 
 use crate::concept::{Flow, ItemIdent};
+use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::hash::Hash;
@@ -338,26 +339,27 @@ where
         let mut target_scale: f64 = 1.0;
         log::info!("开始平衡数量级");
         // Ruiz 算法
-        for i in 0..16 {
-            // 1. 计算 flow_scales (列缩放)
-            for (f_id, (flow, _)) in &self.flows {
+        let instant = Instant::now();
+        for i in 0..32 {
+            // flows
+            flow_scales.par_iter_mut().for_each(|(f_id, f_scale)| {
                 let mut sum_x2 = 0.0;
                 let mut count = 0;
-                let f_scale = *flow_scales.get(f_id).unwrap();
-                for (i_id, amount) in flow {
+                for (i_id, amount) in &self.flows[f_id].0 {
                     if *amount == 0.0 {
                         continue;
                     }
-                    let val = amount * item_scales.get(i_id).cloned().unwrap_or(1.0) * f_scale;
+                    let val = amount * item_scales.get(i_id).cloned().unwrap_or(1.0) * *f_scale;
                     sum_x2 += val * val;
                     count += 1;
                 }
                 if count > 0 {
                     let delta_scale = ((count as f64) / sum_x2).sqrt().clamp(1e-3, 1e3);
-                    let new_scale = f_scale * delta_scale;
-                    flow_scales.insert(f_id.clone(), new_scale);
+                    *f_scale *= delta_scale;
                 }
-            }
+            });
+
+            // target
             let mut target_sum_x2 = 0.0;
             let mut target_count = 0;
             for (i_id, &amount) in &self.target {
@@ -373,20 +375,35 @@ where
             .clamp(1e-3, 1e3);
             target_scale = target_scale * delta_scale;
 
-            // 2. 计算 item_scales (行缩放)
-            let mut item_stats: HashMap<I, (f64, usize)> = HashMap::new();
-            for (f_id, (flow, _)) in &self.flows {
-                let f_scale = *flow_scales.get(f_id).unwrap();
-                for (i_id, amount) in flow {
-                    if *amount == 0.0 {
-                        continue;
+            // items
+            let mut item_stats: HashMap<I, (f64, usize)> = self
+                .flows
+                .par_iter()
+                .fold(
+                    HashMap::<I, (f64, usize)>::new,
+                    |mut local_stats, (f_id, (flow, _))| {
+                        let f_scale = *flow_scales.get(f_id).unwrap();
+                        for (i_id, amount) in flow {
+                            if *amount == 0.0 {
+                                continue;
+                            }
+                            let val =
+                                amount * f_scale * item_scales.get(i_id).cloned().unwrap_or(1.0);
+                            let entry = local_stats.entry(i_id.clone()).or_insert((0.0, 0));
+                            entry.0 += val * val;
+                            entry.1 += 1;
+                        }
+                        local_stats
+                    },
+                )
+                .reduce(HashMap::<I, (f64, usize)>::new, |mut acc, local| {
+                    for (i_id, (sum_x2, count)) in local {
+                        let entry = acc.entry(i_id).or_insert((0.0, 0));
+                        entry.0 += sum_x2;
+                        entry.1 += count;
                     }
-                    let val = amount * f_scale * item_scales.get(i_id).cloned().unwrap_or(1.0);
-                    let entry = item_stats.entry(i_id.clone()).or_insert((0.0, 0));
-                    entry.0 += val * val;
-                    entry.1 += 1;
-                }
-            }
+                    acc
+                });
             for (i_id, target) in &self.target {
                 if *target == 0.0 {
                     continue;
@@ -408,10 +425,12 @@ where
 
                 item_scales.insert(i_id, new_scale);
             }
-            log::info!("第{i}轮数量级平衡完成。",);
-            log::info!("target = {:?}, target_scale = {target_scale}", &self.target);
+            if i % 8 == 7 {
+                log::info!("第{i}轮数量级平衡完成。",);
+                log::info!("target = {:?}, target_scale = {target_scale}", &self.target);
+            }
         }
-        log::info!("数量级平衡完成",);
+        log::info!("求解器：数量级平衡完成，耗时 {:.2?}", instant.elapsed());
         // 应用
 
         let get_item_scale = |item_id: &I| -> f64 { *item_scales.get(item_id).unwrap_or(&1.0) };
