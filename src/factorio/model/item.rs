@@ -1,5 +1,6 @@
 use crate::concept::Flow;
-use crate::factorio::{EntityPrototype, RecipeResult, common::*};
+use crate::factorio::hover::PrototypeHover;
+use crate::factorio::{EntityPrototype, ItemResult, RecipeResult, common::*};
 
 use crate::{
     concept::{EntryOpRequest, EntryOpResult, SolveContext},
@@ -55,6 +56,9 @@ pub struct ItemPrototype {
     /// 所有考虑种植机制时，将植株本身存储为类配方，农业塔视作机器
     #[serde(flatten)]
     pub plant: Option<PlantProperty>,
+
+    #[serde(default)]
+    pub rocket_launch_products: Vec<ItemResult>,
 
     /// Tile
     pub place_as_tile: Option<PlaceAsTileProperty>,
@@ -255,17 +259,10 @@ impl FactorioMechanic for SpoilMechanic {
                 )
                 .interact(egui::Sense::click())
                 .on_hover_ui(|ui| {
-                    if let Some(item_prototype) = data.items.get(&instance.item.0)
-                        && let Some(spoil) = &item_prototype.spoil
-                        && let Some(spoil_result) = &spoil.spoil_result
-                    {
-                        ui.label(format!(
-                            "变质时间: {}\n变质产物: {}",
-                            spoil.spoil_ticks,
-                            data.get_display_name("item", spoil_result)
-                        ));
-                    } else {
-                        ui.label("无变质属性");
+                    if let Some(item_prototype) = data.items.get(&instance.item.0) {
+                        ui.add(
+                            PrototypeHover::new(data, item_prototype).with_quality(instance.item.1),
+                        );
                     }
                 });
             changed |= ui
@@ -276,17 +273,11 @@ impl FactorioMechanic for SpoilMechanic {
                             Selector::new(data, "item")
                                 .with_current(&mut instance.item)
                                 .with_hover(|ui, name: &IdWithQuality, data| {
-                                    if let Some(item_prototype) = data.items.get(&name.0)
-                                        && let Some(spoil) = &item_prototype.spoil
-                                        && let Some(spoil_result) = &spoil.spoil_result
-                                    {
-                                        ui.label(format!(
-                                            "变质时间: {}\n变质产物: {}",
-                                            spoil.spoil_ticks,
-                                            data.get_display_name("item", spoil_result)
-                                        ));
-                                    } else {
-                                        ui.label("无变质属性");
+                                    if let Some(item_prototype) = data.items.get(&name.0) {
+                                        ui.add(
+                                            PrototypeHover::new(data, item_prototype)
+                                                .with_quality(name.1),
+                                        );
                                     }
                                 })
                                 .with_filter(|s, f| {
@@ -305,7 +296,6 @@ impl FactorioMechanic for SpoilMechanic {
         self.instances.update_elements(&mut self.operations)
     }
 }
-
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 pub struct PlantPrototype {
@@ -537,10 +527,7 @@ impl AsFlow for ItemFuelInstance {
                 item.burn.as_ref().map_or(0.0, |b| b.fuel_value.amount),
             );
             if let Some(burnt_result) = &item.burn.as_ref().and_then(|b| b.burnt_result.clone()) {
-                flow.insert(
-                    GenericItem::Item(burnt_result.clone().into()),
-                    1.0,
-                );
+                flow.insert(GenericItem::Item(burnt_result.clone().into()), 1.0);
             }
         }
         flow
@@ -661,38 +648,244 @@ impl FactorioMechanic for ItemFuelMechanic {
                 )
                 .interact(egui::Sense::click())
                 .on_hover_ui(|ui| {
-                    if let Some(item_prototype) = data.items.get(&instance.item.0)
-                        && let Some(burn) = &item_prototype.burn
-                    {
-                        ui.label(format!(
-                            "燃料热值: {}\n燃料类别: {}",
-                            burn.fuel_value,
-                            burn.fuel_category.clone().unwrap_or("chemical".to_string())
-                        ));
+                    if let Some(item_prototype) = data.items.get(&instance.item.0) {
+                        ui.add(
+                            PrototypeHover::new(data, item_prototype).with_quality(instance.item.1),
+                        );
                     }
                 });
             changed |= ui
                 .add(
-                    SelectorModal::new(item_button.id, data, "选择燃料")
+                    SelectorModal::new(item_button.id, data, "选择发射物")
                         .with_toggle(item_button.clicked())
                         .with_selector(
                             Selector::new(data, "item")
                                 .with_current(&mut instance.item)
                                 .with_hover(|ui, name: &IdWithQuality, data| {
-                                    if let Some(item_prototype) = data.items.get(&name.0)
-                                        && let Some(burn) = &item_prototype.burn
-                                    {
-                                        ui.label(format!(
-                                            "燃料热值: {}\n燃料类别: {}",
-                                            burn.fuel_value,
-                                            burn.fuel_category
-                                                .clone()
-                                                .unwrap_or("chemical".to_string())
-                                        ));
+                                    if let Some(item_prototype) = data.items.get(&name.0) {
+                                        ui.add(
+                                            PrototypeHover::new(data, item_prototype)
+                                                .with_quality(name.1),
+                                        );
                                     }
                                 })
                                 .with_filter(|s, f| {
                                     f.items.get(&s.0).is_some_and(|i| i.burn.is_some())
+                                }),
+                        ),
+                )
+                .changed();
+        });
+        changed
+    }
+
+    fn submit_operations(&mut self) -> Vec<EntryOpResult> {
+        self.instances.update_elements(&mut self.operations)
+    }
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct ItemLaunchMechanic {
+    #[serde(skip)]
+    pub operations: Vec<(usize, EntryOpRequest)>,
+    pub instances: Vec<ItemLaunchInstance>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ItemLaunchInstance {
+    pub item: IdWithQuality,
+    pub rocket: (u16, bool), // 目前只支持按堆叠数限制的。
+}
+
+impl SolveContext for ItemLaunchInstance {
+    type Game = DataContext;
+    type Item = GenericItem;
+}
+
+impl AsFlow for ItemLaunchInstance {
+    fn as_flow(
+        &self,
+        data: &super::DataContext,
+        _proj: &crate::factorio::ProjectContext,
+        _factory: &crate::factorio::planner::FactoryContext,
+    ) -> crate::concept::Flow<Self::Item> {
+        let mut flow = crate::concept::Flow::new();
+
+        if let Some(item) = data.items.get(&self.item.0) {
+            let multiplier = item.stack_size * self.rocket.0 as f64;
+            index_map_update_entry(&mut flow, GenericItem::Item(self.item.clone()), -multiplier);
+            index_map_update_entry(
+                &mut flow,
+                GenericItem::RocketCapacity {
+                    stacks: self.rocket.0,
+                    by_weight: self.rocket.1,
+                },
+                -1.0,
+            );
+            for result in &item.rocket_launch_products {
+                let total_yield = result.normalized_output();
+                index_map_update_entry(
+                    &mut flow,
+                    GenericItem::Item((result.name.clone(), self.item.1).into()),
+                    (total_yield.0 + total_yield.1) * multiplier,
+                );
+            }
+        }
+        flow
+    }
+
+    fn cost(&self, _data: &DataContext, _proj: &ProjectContext, _factory: &FactoryContext) -> f64 {
+        0.0
+    }
+}
+
+impl SolveContext for ItemLaunchMechanic {
+    type Game = DataContext;
+    type Item = GenericItem;
+}
+
+#[typetag::serde(name = "factorio:item-launch")]
+impl FactorioMechanic for ItemLaunchMechanic {
+    fn instance_operate(
+        &mut self,
+        idx: usize,
+        f: &mut dyn FnMut(&mut dyn AsFlow) -> EntryOpRequest,
+    ) {
+        let op = f(&mut self.instances[idx] as &mut dyn AsFlow);
+        if !matches!(op, EntryOpRequest::None) {
+            self.operations.push((idx, op));
+        }
+    }
+
+    fn update_suggestion(
+        &mut self,
+        _data: &DataContext,
+        _proj: &ProjectContext,
+        _factory: &FactoryContext,
+        _item: &GenericItem,
+        _amount: f64,
+    ) {
+    }
+
+    #[allow(unused_variables)]
+    fn suggestion_view(
+        &mut self,
+        ui: &mut egui::Ui,
+        data: &DataContext,
+        proj: &ProjectContext,
+        factory: &FactoryContext,
+    ) -> bool {
+        false
+    }
+
+    #[allow(unused_variables)]
+    fn auto_populate(
+        &mut self,
+        data: &DataContext,
+        proj: &ProjectContext,
+        factory: &FactoryContext,
+    ) {
+        for q in 0..=proj.max_quality_level {
+            for i in data.items.values() {
+                if i.rocket_launch_products.len() > 0 {
+                    for rocket in data.rocket_types.values() {
+                        self.instances.push(ItemLaunchInstance {
+                            item: IdWithQuality(i.base.name.clone(), q),
+                            rocket: *rocket,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    fn name(&self) -> String {
+        "燃烧物品".to_string()
+    }
+
+    fn instances(&self) -> Vec<&dyn AsFlow> {
+        self.instances
+            .iter()
+            .map(|instance| instance as &dyn AsFlow)
+            .collect()
+    }
+
+    fn instance_len(&self) -> usize {
+        self.instances.len()
+    }
+
+    fn editor_view(
+        &mut self,
+        ui: &mut egui::Ui,
+        data: &DataContext,
+        _proj: &ProjectContext,
+        _factory: &FactoryContext,
+    ) -> bool {
+        let mut changed = false;
+        // 堆叠数大于 0，并且是按堆叠数限制的
+        if data.rocket_types.iter().any(|(_, r)| r.0 > 0 && !r.1) {
+            if ui.button("添加物品发射").clicked() {
+                let new_config = ItemLaunchInstance {
+                    item: IdWithQuality("".to_string(), 0),
+                    rocket: data
+                        .rocket_types
+                        .iter()
+                        .find(|(_, r)| r.0 > 0 && !r.1)
+                        .unwrap()
+                        .1
+                        .clone(),
+                };
+                self.instances.push(new_config);
+                changed = true;
+            }
+        } else {
+            ui.label("无可用的火箭类型");
+        }
+        changed
+    }
+
+    fn instance_view(
+        &mut self,
+        idx: usize,
+        ui: &mut egui::Ui,
+        data: &DataContext,
+        _proj: &ProjectContext,
+        _factory: &FactoryContext,
+    ) -> bool {
+        let mut changed = false;
+        let instance = &mut self.instances[idx];
+        ui.vertical(|ui| {
+            ui.label("发射物品");
+            let item_button = ui
+                .add_sized(
+                    [35.0, 35.0],
+                    Icon::new(data, "item", &instance.item.0).with_quality(instance.item.1),
+                )
+                .interact(egui::Sense::click())
+                .on_hover_ui(|ui| {
+                    if let Some(item_prototype) = data.items.get(&instance.item.0) {
+                        ui.add(
+                            PrototypeHover::new(data, item_prototype).with_quality(instance.item.1),
+                        );
+                    }
+                });
+            changed |= ui
+                .add(
+                    SelectorModal::new(item_button.id, data, "选择发射物品")
+                        .with_toggle(item_button.clicked())
+                        .with_selector(
+                            Selector::new(data, "item")
+                                .with_current(&mut instance.item)
+                                .with_hover(|ui, name: &IdWithQuality, data| {
+                                    if let Some(item_prototype) = data.items.get(&name.0) {
+                                        ui.add(
+                                            PrototypeHover::new(data, item_prototype)
+                                                .with_quality(name.1),
+                                        );
+                                    }
+                                })
+                                .with_filter(|s, f| {
+                                    f.items.get(&s.0).is_some_and(|i| !i.rocket_launch_products.is_empty())
                                 }),
                         ),
                 )

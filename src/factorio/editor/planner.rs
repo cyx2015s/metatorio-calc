@@ -96,6 +96,7 @@ impl Default for FactoryInstance {
         .with_mechanic(SpoilMechanic::default())
         .with_mechanic(FluidFuelMechanic::default())
         .with_mechanic(FluidHeatMechanic::default())
+        .with_mechanic(ItemLaunchMechanic::default())
     }
 }
 

@@ -40,6 +40,10 @@ impl<'a> egui::Widget for PrototypeHover<'a, ItemPrototype> {
 
             if let Some(mine) = &self.prototype.burn {
                 ui.label(format!("燃料: {}", mine.fuel_value));
+                ui.label(format!(
+                    "燃料类别: {}",
+                    mine.fuel_category.clone().unwrap_or("chemical".to_string())
+                ));
             }
             if let Some(place_result) = &self.prototype.place_result {
                 ui.label("放置结果: ");
@@ -67,6 +71,15 @@ impl<'a> egui::Widget for PrototypeHover<'a, ItemPrototype> {
                     ui.add_sized([35.0, 35.0], Icon::new(self.data, "item", &spoil_result));
                 });
             }
+            if !self.prototype.rocket_launch_products.is_empty() {
+                ui.label("火箭发射产物: ");
+                for product in &self.prototype.rocket_launch_products {
+                    ui.horizontal(|ui| {
+                        ui.label(data.get_display_name("item", &product.name));
+                        ui.add_sized([35.0, 35.0], Icon::new(self.data, "item", &product.name));
+                    });
+                }
+            }
         });
 
         ui.response()
@@ -80,7 +93,12 @@ impl<'a> egui::Widget for PrototypeHover<'a, FluidPrototype> {
             ui.set_min_width(140.0);
             ui.label(data.get_display_name("fluid", &self.prototype.base.name));
             ui.label(format!("默认温度: {}℃", self.prototype.default_temperature));
-            ui.label(format!("最大温度: {}℃", self.prototype.max_temperature.unwrap_or(self.prototype.default_temperature)));
+            ui.label(format!(
+                "最大温度: {}℃",
+                self.prototype
+                    .max_temperature
+                    .unwrap_or(self.prototype.default_temperature)
+            ));
             if let Some(fuel_value) = self.prototype.fuel_value {
                 ui.label(format!("每单位燃料值: {}", fuel_value));
             }
