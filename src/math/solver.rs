@@ -1,5 +1,5 @@
 use good_lp::{IntoAffineExpression, Solution, SolverModel, variable};
-use indexmap::IndexMap;
+use indexmap::{IndexMap, IndexSet};
 
 use crate::concept::{Flow, ItemIdent};
 use std::collections::{HashMap, HashSet};
@@ -255,7 +255,8 @@ where
                 {
                     if providers.is_empty() // 没有生产这个物品的配方
                         && !self.sources.contains_key(i_id) // 外部也不能提供
-                        && self.target.get(i_id).as_ref().is_none_or(|v| **v > 0.0) // 目标是生产而非消耗这个物品
+                        && self.target.get(i_id).as_ref().is_none_or(|v| **v > 0.0)
+                    // 目标是生产而非消耗这个物品
                     {
                         for f_id in consumers {
                             self.flows.swap_remove(f_id);
@@ -394,9 +395,10 @@ where
             self.flows.len()
         );
         let mut extreme = 0.0;
-        for (f_id, flow) in &self.flows {
+        let mut force_zero_items = IndexSet::new();
+        for (f_id, (flow, cost)) in &self.flows {
             let var = flow_vars.get(f_id).unwrap();
-            for (item_id, &amount) in &flow.0 {
+            for (item_id, &amount) in flow {
                 let entry = item_balances
                     .entry(item_id.clone())
                     .or_insert(good_lp::Expression::from(0.0));
@@ -405,6 +407,9 @@ where
                     extreme = val.abs().log2();
                 }
                 *entry += val * *var;
+                if *cost == 0.0 && amount > 0.0 {
+                    force_zero_items.insert(item_id.clone());
+                }
             }
         }
         log::info!(
@@ -412,6 +417,7 @@ where
             item_balances.len(),
             extreme
         );
+
         for (item_id, _) in &self.sources {
             let var = problem_variables.add(variable().min(0));
             source_vars.insert(item_id.clone(), var);
@@ -462,6 +468,10 @@ where
             if !self.target.contains_key(item_id) {
                 // 严格模式下，不能凭空输入。非严格模式下，有来源的物品不能有凭空输入。
                 // 非目标物品，不能为负
+                if force_zero_items.contains(item_id) {
+                    constraints.push(expr.clone().eq(0.0));
+                    continue;
+                }
                 if self.strict_source {
                     // 不能从外部借用
                     if self.strict_sink {
@@ -472,6 +482,7 @@ where
                         constraints.push(expr.clone().geq(0.0));
                     }
                 } else if no_providers.contains(item_id) {
+                    // 需要借用，不用限制
                 } else if self.strict_sink {
                     // 必须配平
                     constraints.push(expr.clone().eq(0.0));

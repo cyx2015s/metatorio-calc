@@ -33,7 +33,7 @@ pub struct FactoryContext {
     pub major_quality: u8,
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct FactoryInstance {
     pub factory: FactoryContext,
@@ -50,22 +50,6 @@ pub struct FactoryInstance {
     pub solution: SolverSolution<GenericItem, (usize, usize)>,
     #[serde(skip)]
     pub total_flow_sorted_keys: Vec<GenericItem>,
-}
-
-impl Clone for FactoryInstance {
-    fn clone(&self) -> Self {
-        FactoryInstance {
-            name: self.name.clone(),
-            target: self.target.clone(),
-            external: self.external.clone(),
-            solution: self.solution.clone(),
-            total_flow_sorted_keys: self.total_flow_sorted_keys.clone(),
-            mechanics: self.mechanics.clone(),
-            instances: self.instances.clone(),
-            factory: self.factory.clone(),
-            ..Default::default()
-        }
-    }
 }
 
 impl Default for FactoryInstance {
@@ -221,14 +205,6 @@ impl FactoryInstance {
                 &mut fluid_fuels,
                 &mut fluid_heats,
                 source,
-            );
-        }
-        for target in &target {
-            update_fluid_metainfo(
-                &mut fluid_temperaturess,
-                &mut fluid_fuels,
-                &mut fluid_heats,
-                &target.0,
             );
         }
         let mut aux_idx = 0;

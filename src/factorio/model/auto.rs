@@ -1,6 +1,5 @@
 use std::time::Instant;
 
-
 use crate::{
     concept::EntryOpRequest,
     error::AppError,
@@ -31,19 +30,16 @@ pub fn factorio_auto_planner(
     log::info!("自动填充机制实例完成，用时: {:.2?}", instant.elapsed());
     let instant = Instant::now();
 
-    let mut problem = factory
-        .as_problem(&data, &proj)
-        .with_strict_sink(true)
-        .with_strict_source(true);
-
     factory.strict_source = true;
-    factory.strict_sink = true;
+
+    let mut problem = factory.as_problem(&data, &proj);
 
     log::info!(
         "构建求解器问题完成，变量数量: {}, 用时: {:.2?}",
         problem.flows.len(),
         instant.elapsed()
     );
+
     let instant = Instant::now();
     let solution = problem.solve();
     match solution {

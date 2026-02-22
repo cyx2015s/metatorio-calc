@@ -1178,25 +1178,26 @@ impl AsFlow for FluidHeatInstance {
     ) -> Flow<GenericItem> {
         let mut flow = Flow::new();
         if let Some(fluid) = data.fluids.get(&self.fluid) {
-            if let Some(heat_capacity) = fluid.heat_capacity {
-                index_map_update_entry(
-                    &mut flow,
-                    GenericItem::Fluid {
-                        name: self.fluid.clone(),
-                        temperature: [self.temperature, self.temperature],
-                    },
-                    -1.0,
-                );
-                index_map_update_entry(
-                    &mut flow,
-                    GenericItem::FluidHeat {
-                        filter: self.fluid.clone().into(),
-                    },
-                    heat_capacity.amount
-                        * 60.0
-                        * (self.temperature - fluid.default_temperature as i32) as f64,
-                );
-            }
+            let heat_capacity = fluid
+                .heat_capacity
+                .unwrap_or(EnergyAmount { amount: 1000.0 });
+            index_map_update_entry(
+                &mut flow,
+                GenericItem::Fluid {
+                    name: self.fluid.clone(),
+                    temperature: [self.temperature, self.temperature],
+                },
+                -1.0,
+            );
+            index_map_update_entry(
+                &mut flow,
+                GenericItem::FluidHeat {
+                    filter: self.fluid.clone().into(),
+                },
+                heat_capacity.amount
+                    * 60.0
+                    * (self.temperature - fluid.default_temperature as i32) as f64,
+            );
         }
         flow
     }

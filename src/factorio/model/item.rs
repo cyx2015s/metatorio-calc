@@ -802,7 +802,7 @@ impl FactorioMechanic for ItemLaunchMechanic {
     }
 
     fn name(&self) -> String {
-        "燃烧物品".to_string()
+        "物品发射".to_string()
     }
 
     fn instances(&self) -> Vec<&dyn AsFlow> {
