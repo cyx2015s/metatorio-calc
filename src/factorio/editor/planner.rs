@@ -322,12 +322,14 @@ impl FactoryInstance {
             2.0_f64.powf(prim_raw_log_max)
         );
         // let threshold = 2.0_f64.powf(prim_raw_log_avg - 6.0);
-        let threshold = 2.0_f64.powf(
-            (prim_raw_log_avg - 15.0)
-                .min(prim_raw_log_max - 30.0)
-                .min(prim_raw_log_min + 15.0)
-                .min(prim_raw_log_max - (prim_raw_log_max - prim_raw_log_avg) * 2.0),
-        ).max(1e-12);
+        let threshold = 2.0_f64
+            .powf(
+                (prim_raw_log_avg - 15.0)
+                    .min(prim_raw_log_max - 30.0)
+                    .min(prim_raw_log_min + 15.0)
+                    .min(prim_raw_log_max - (prim_raw_log_max - prim_raw_log_avg) * 2.0),
+            )
+            .max(1e-12);
         let mut changed = false;
         self.mechanics
             .iter_mut()
@@ -589,8 +591,9 @@ impl FactoryInstance {
                     ui.set_min_height(50.0);
 
                     for item in &self.total_flow_sorted_keys {
-                        let amount = self.solution.get_sum_raw_of(item).unwrap_or(0.0);
-                        if amount.abs() < 1e-8 {
+                        let raw_amount = self.solution.get_sum_raw_of(item).unwrap_or(0.0);
+
+                        if raw_amount.abs() < 1e-6 {
                             continue;
                         }
                         let amount = self.solution.get_sum_of(item).unwrap_or(0.0);
@@ -600,6 +603,13 @@ impl FactoryInstance {
                             ui.add_sized(
                                 [40.0, 15.0],
                                 AmountLabel::new(amount)
+                                    .with_time_scale(proj.time_scale)
+                                    .with_is_energy(item.is_energy())
+                                    .with_is_signed(true),
+                            );
+                            ui.add_sized(
+                                [40.0, 15.0],
+                                AmountLabel::new(raw_amount)
                                     .with_time_scale(proj.time_scale)
                                     .with_is_energy(item.is_energy())
                                     .with_is_signed(true),

@@ -259,6 +259,11 @@ where
                         && self.target.get(i_id).as_ref().is_none_or(|v| **v > 0.0)
                     // 目标是生产而非消耗这个物品
                     {
+                        // log::info!(
+                        //     "求解器：物品 {:?} 无法获得，移除相关配方 {} 个",
+                        //     i_id,
+                        //     providers.len() + consumers.len()
+                        // );
                         for f_id in consumers {
                             self.flows.swap_remove(f_id);
                             changed = true;
@@ -319,71 +324,75 @@ where
         let mut item_scales: HashMap<I, f64> = HashMap::new();
         for flow in self.flows.values() {
             for (item_id, _) in &flow.0 {
-                item_scales.insert(item_id.clone(), 0.0);
+                item_scales.insert(item_id.clone(), 1.0);
             }
         }
         for (item_id, _) in &self.target {
-            item_scales.insert(item_id.clone(), 0.0);
+            item_scales.insert(item_id.clone(), 1.0);
         }
         let mut flow_scales: HashMap<R, f64> =
-            self.flows.keys().map(|id| (id.clone(), 0.0)).collect();
-        let mut target_scale: f64 = 0.0;
+            self.flows.keys().map(|id| (id.clone(), 1.0)).collect();
+        let mut target_scale: f64 = 1.0;
         log::info!("开始平衡数量级");
+        // Ruiz 算法
         for i in 0..8 {
             // 1. 计算 flow_scales (列缩放)
             for (f_id, flow) in &self.flows {
-                let mut sum_log = 0.0;
+                let mut sum_x2 = 0.0;
                 let mut count = 0;
+                let f_scale = *flow_scales.get(f_id).unwrap();
                 for (i_id, amount) in &flow.0 {
-                    if amount.abs() > 1e-12 {
-                        // 当前值 = 原始值 * 物品缩放
-                        let current_val =
-                            amount.abs() * 2.0_f64.powf(*item_scales.get(i_id).unwrap());
-                        sum_log += current_val.log2();
-                        count += 1;
+                    if *amount == 0.0 {
+                        continue;
                     }
+                    let val = amount * item_scales.get(i_id).cloned().unwrap_or(1.0) * f_scale;
+                    sum_x2 += val * val;
+                    count += 1;
                 }
                 if count > 0 {
-                    // 目标是让 sum_log + log2(flow_multiplier) 趋近于 0
-                    flow_scales.insert(f_id.clone(), -(sum_log / count as f64));
+                    flow_scales.insert(f_id.clone(), f_scale * ((count as f64) / sum_x2).sqrt());
                 }
             }
-            let mut target_sum_log = 0.0;
+            let mut target_sum_x2 = 0.0;
             let mut target_count = 0;
             for (i_id, &amount) in &self.target {
-                if amount.abs() > 1e-12 {
-                    let current_val = amount.abs() * 2.0_f64.powf(*item_scales.get(i_id).unwrap());
-                    target_sum_log += current_val.log2();
-                    target_count += 1;
-                }
-                if target_count > 0 {
-                    target_scale = -(target_sum_log / target_count as f64);
-                }
+                let val = amount * item_scales.get(i_id).cloned().unwrap_or(1.0) * target_scale;
+                target_sum_x2 += val * val;
+                target_count += 1;
             }
+            target_scale = target_scale
+                * if target_count > 0 {
+                    ((target_count as f64) / target_sum_x2).sqrt()
+                } else {
+                    1.0
+                };
 
             // 2. 计算 item_scales (行缩放)
             let mut item_stats: HashMap<I, (f64, usize)> = HashMap::new();
             for (f_id, flow) in &self.flows {
                 let f_scale = *flow_scales.get(f_id).unwrap();
                 for (i_id, amount) in &flow.0 {
-                    if amount.abs() > 1e-12 {
-                        let current_val = amount.abs() * 2.0_f64.powf(f_scale);
-                        let entry = item_stats.entry(i_id.clone()).or_insert((0.0, 0));
-                        entry.0 += current_val.log2();
-                        entry.1 += 1;
+                    if *amount == 0.0 {
+                        continue;
                     }
-                }
-            }
-            for (i_id, target) in &self.target {
-                if target.abs() > 1e-12 {
-                    let current_val = target.abs() * 2.0_f64.powf(target_scale);
+                    let val = amount * f_scale * item_scales.get(i_id).cloned().unwrap_or(1.0);
                     let entry = item_stats.entry(i_id.clone()).or_insert((0.0, 0));
-                    entry.0 += current_val.log2();
+                    entry.0 += val * val;
                     entry.1 += 1;
                 }
             }
-            for (i_id, (sum_log, count)) in item_stats {
-                item_scales.insert(i_id, -(sum_log / count as f64));
+            for (i_id, target) in &self.target {
+                if *target == 0.0 {
+                    continue;
+                }
+                let val = target * target_scale * item_scales.get(i_id).cloned().unwrap_or(1.0);
+                let entry = item_stats.entry(i_id.clone()).or_insert((0.0, 0));
+                entry.0 += val * val;
+                entry.1 += 1;
+            }
+            for (i_id, (sum_x2, count)) in item_stats {
+                let old_scale = item_scales.get(&i_id).cloned().unwrap_or(1.0);
+                item_scales.insert(i_id, old_scale * (count as f64 / sum_x2).sqrt());
             }
             log::info!("第{i}轮数量级平衡完成。",);
             log::info!("target = {:?}, target_scale = {target_scale}", &self.target);
@@ -391,11 +400,9 @@ where
         log::info!("数量级平衡完成",);
         // 应用
 
-        let get_item_scale =
-            |item_id: &I| -> f64 { (2.0_f64).powf(*item_scales.get(item_id).unwrap_or(&0.0)) };
-        let get_flow_scale =
-            |flow_id: &R| -> f64 { (2.0_f64).powf(*flow_scales.get(flow_id).unwrap_or(&0.0)) };
-        let target_scale = (2.0_f64).powf(target_scale);
+        let get_item_scale = |item_id: &I| -> f64 { *item_scales.get(item_id).unwrap_or(&1.0) };
+        let get_flow_scale = |flow_id: &R| -> f64 { *flow_scales.get(flow_id).unwrap_or(&1.0) };
+
         let mut problem_variables = good_lp::ProblemVariables::new();
         let mut flow_vars = IndexMap::new();
         let mut source_vars = IndexMap::new();
