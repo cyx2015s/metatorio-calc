@@ -399,12 +399,6 @@ pub fn generic_item_selector(
                     )
                     .changed();
                 changed |= ui
-                    .selectable_value(selected, GenericItem::RocketPayloadWeight, "重量载荷")
-                    .changed();
-                changed |= ui
-                    .selectable_value(selected, GenericItem::RocketPayloadStack, "堆叠载荷")
-                    .changed();
-                changed |= ui
                     .selectable_value(
                         selected,
                         GenericItem::Pollution {
@@ -523,8 +517,6 @@ pub fn generic_item_selector(
                         }
                     });
             }
-            GenericItem::RocketPayloadWeight => {}
-            GenericItem::RocketPayloadStack => {}
             GenericItem::Pollution { name } => {
                 egui::ComboBox::from_id_salt(id.with("pollution-type"))
                     .selected_text(name.clone())

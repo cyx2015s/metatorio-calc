@@ -72,6 +72,7 @@ pub struct DataContext {
     pub recipes: Dict<RecipePrototype>,
     pub crafters: Dict<CraftingMachinePrototype>,
     pub recipe_categories: Dict<PrototypeBase>,
+    pub rocket_types: Dict<(u16, bool)>, // 火箭类型，value为 (堆叠数, 是否按重量限制)，key为火箭类型 ID
 
     /// 采矿类型集合：资源本身和采矿机器
     pub resources: Dict<ResourcePrototype>,
@@ -544,7 +545,9 @@ impl DataContext {
     }
 
     pub fn build_utility_info(self) -> Self {
-        self.build_order_info().build_temperature_info()
+        self.build_order_info()
+            .build_temperature_info()
+            .build_rocket_info()
     }
 
     pub fn build_order_info(mut self) -> Self {
@@ -741,6 +744,21 @@ impl DataContext {
         });
         self
     }
+
+    pub fn build_rocket_info(mut self) -> Self {
+        for crafter in self.crafters.values() {
+            if &crafter.base.base.r#type == "rocket-silo" {
+                self.rocket_types.insert(
+                    crafter.base.base.name.clone(),
+                    (
+                        crafter.to_be_inserted_to_rocket_inventory_size as u16,
+                        crafter.launch_to_space_platforms,
+                    ),
+                );
+            }
+        }
+        self
+    }
 }
 
 fn i32_inf_range() -> [i32; 2] {
@@ -775,8 +793,11 @@ pub enum GenericItem {
     ItemFuel {
         category: String,
     },
-    RocketPayloadWeight,
-    RocketPayloadStack,
+    /// 一次完整火箭发射的载荷，包括堆叠数上限和是否按重量限制
+    RocketCapacity {
+        stacks: u16,
+        by_weight: bool,
+    },
     Pollution {
         name: String,
     },
@@ -819,8 +840,7 @@ impl Display for GenericItem {
                 GenericItem::FluidHeat { .. } => "流体热源",
                 GenericItem::FluidFuel { .. } => "流体燃料",
                 GenericItem::ItemFuel { .. } => "物品燃料",
-                GenericItem::RocketPayloadWeight => "火箭重量载荷",
-                GenericItem::RocketPayloadStack => "火箭堆叠载荷",
+                GenericItem::RocketCapacity { .. } => "火箭载荷",
                 GenericItem::Pollution { .. } => "污染",
                 GenericItem::Custom { .. } => "特殊物品",
             }

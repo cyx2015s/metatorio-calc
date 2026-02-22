@@ -790,10 +790,11 @@ pub fn get_generic_item_sort_key<'a>(
         GenericItem::ItemFuel { category } => {
             (0x700usize, (0usize, 0usize, 0usize), category.as_str())
         }
-        GenericItem::RocketPayloadWeight => (0x800usize, (0usize, 0usize, 0usize), ""),
-        GenericItem::RocketPayloadStack => (0x900usize, (0usize, 0usize, 0usize), ""),
-        GenericItem::Pollution { name } => (0xa00usize, (0usize, 0usize, 0usize), name.as_str()),
-        GenericItem::Custom { name } => (0xb00usize, (0usize, 0usize, 0usize), name.as_str()),
+        GenericItem::Pollution { name } => (0x800usize, (0usize, 0usize, 0usize), name.as_str()),
+        GenericItem::Custom { name } => (0x900usize, (0usize, 0usize, 0usize), name.as_str()),
+        GenericItem::RocketCapacity { stacks, by_weight } => {
+            (0xA00usize, (0usize, *stacks as usize, *by_weight as usize), "")
+        }
     }
 }
 

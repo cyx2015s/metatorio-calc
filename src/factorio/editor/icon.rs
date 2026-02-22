@@ -347,16 +347,31 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                 })
                 .inner
                 .on_hover_text(format!("类别: {}", category,)),
-            GenericItem::RocketPayloadWeight => {
-                ui.add_sized([self.size, self.size], egui::Label::new("重量"))
-            }
-            GenericItem::RocketPayloadStack => {
-                ui.add_sized([self.size, self.size], egui::Label::new("堆叠"))
-            }
-            GenericItem::Pollution { name } => ui.add_sized(
-                [self.size, self.size],
-                egui::Label::new(data.get_display_name("airborne-pollutant", name)),
-            ),
+            GenericItem::RocketCapacity { stacks, by_weight } => ui
+                .add_sized(
+                    [self.size, self.size],
+                    egui::Image::new(egui::include_image!(
+                        "../../../assets/icons/rocket-capacity.png"
+                    )),
+                )
+                .on_hover_ui(|ui| {
+                    ui.vertical(|ui| {
+                        ui.label(format!("堆叠数: {}", stacks));
+                        if *by_weight {
+                            ui.label("按重量限制");
+                        }
+                    });
+                }),
+            GenericItem::Pollution { name } => ui
+                .add_sized(
+                    [self.size, self.size],
+                    Icon::new(self.data, "airborne-pollutant", name)
+                        .with_size(self.size)
+                        .with_stroke(self.stroke),
+                )
+                .on_hover_ui(|ui| {
+                    ui.label(data.get_display_name("airborne-pollutant", name));
+                }),
         }
     }
 }
@@ -416,8 +431,13 @@ impl Display for GenericIcon<'_> {
             GenericItem::ItemFuel { category } => {
                 write!(f, "燃料类别: {}", category)
             }
-            GenericItem::RocketPayloadWeight => write!(f, "重量载荷"),
-            GenericItem::RocketPayloadStack => write!(f, "堆叠载荷"),
+            GenericItem::RocketCapacity { stacks, by_weight } => {
+                if *by_weight {
+                    write!(f, "火箭载荷: {} 堆叠，按重量限制", stacks)
+                } else {
+                    write!(f, "火箭载荷: {} 堆叠", stacks)
+                }
+            }
             GenericItem::Pollution { name } => {
                 write!(
                     f,

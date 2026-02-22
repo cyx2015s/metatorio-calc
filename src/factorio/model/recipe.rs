@@ -377,6 +377,13 @@ pub struct CraftingMachinePrototype {
     pub input_limit: Option<f64>,
     #[serde(alias = "result_inventory_size", alias = "max_item_product_count")]
     pub output_limit: Option<f64>,
+
+    #[serde(default)]
+    pub launch_to_space_platforms: bool,
+    #[serde(default)]
+    pub to_be_inserted_to_rocket_inventory_size: f64,
+    #[serde(default)]
+    pub rocket_parts_required: f64,
 }
 
 impl HasPrototypeBase for CraftingMachinePrototype {
@@ -453,9 +460,21 @@ impl AsFlow for RecipeInstance {
 
         let mut base_speed = 1.0;
 
+        let mut is_rocket = false;
+        let mut by_weight = false;
+        let mut stacks = 0;
+        let mut rocket_parts_required = 0.0;
         let crafter = data.crafters.get(&self.machine.0);
 
         if let Some(crafter) = crafter {
+            if &crafter.base.base.r#type == "rocket-silo" {
+                is_rocket = true;
+                stacks = crafter.to_be_inserted_to_rocket_inventory_size as u16;
+                rocket_parts_required = crafter.rocket_parts_required as u32 as f64;
+                if crafter.launch_to_space_platforms {
+                    by_weight = true;
+                }
+            }
             module_effects = module_effects
                 + crafter
                     .effect_receiver
@@ -552,63 +571,74 @@ impl AsFlow for RecipeInstance {
                 self.recipe.1 as usize,
                 proj.max_quality_level as usize,
             );
-            for result in &recipe.results {
-                match result {
-                    RecipeResult::Item(item) => {
-                        let (base_yield, extra_yield) = item.normalized_output();
-                        let total_yield = (base_yield
-                            + extra_yield
-                                * module_effects
-                                    .productivity
-                                    .clamp(0.0, recipe.maximum_productivity))
-                            * (1.0 + module_effects.speed)
-                            * base_speed;
-
-                        for (quality_level, &quality_prob) in
-                            quality_distribution.iter().enumerate()
-                        {
-                            if quality_prob > 0.0 {
-                                let quality_key = GenericItem::Item(IdWithQuality(
-                                    item.name.clone(),
-                                    quality_level as u8,
-                                ));
-                                index_map_update_entry(
-                                    &mut map,
-                                    quality_key,
-                                    total_yield * quality_prob,
-                                );
-                            }
-                        }
-                    }
-                    RecipeResult::Fluid(fluid) => {
-                        let default_temperature = fluid
-                            .temperature
-                            .or(fluid.min_temperature)
-                            .or(fluid.max_temperature)
-                            .unwrap_or(
-                                data.fluids
-                                    .get(&fluid.name)
-                                    .as_ref()
-                                    .unwrap()
-                                    .default_temperature,
-                            );
-                        let key = GenericItem::Fluid {
-                            name: fluid.name.clone(),
-                            // temperature: fluid.temperature.map(|x| x as i32),
-                            temperature: [default_temperature as i32, default_temperature as i32],
-                        };
-                        let (base_yield, extra_yield) = fluid.normalized_output();
-                        index_map_update_entry(
-                            &mut map,
-                            key,
-                            (base_yield
+            if is_rocket {
+                index_map_update_entry(
+                    &mut map,
+                    GenericItem::RocketCapacity { stacks, by_weight },
+                    1.0 / rocket_parts_required as f64,
+                );
+            } else {
+                for result in &recipe.results {
+                    match result {
+                        RecipeResult::Item(item) => {
+                            let (base_yield, extra_yield) = item.normalized_output();
+                            let total_yield = (base_yield
                                 + extra_yield
                                     * module_effects
                                         .productivity
                                         .clamp(0.0, recipe.maximum_productivity))
                                 * (1.0 + module_effects.speed)
-                                * base_speed,
-                        );
+                                * base_speed;
+
+                            for (quality_level, &quality_prob) in
+                                quality_distribution.iter().enumerate()
+                            {
+                                if quality_prob > 0.0 {
+                                    let quality_key = GenericItem::Item(IdWithQuality(
+                                        item.name.clone(),
+                                        quality_level as u8,
+                                    ));
+                                    index_map_update_entry(
+                                        &mut map,
+                                        quality_key,
+                                        total_yield * quality_prob,
+                                    );
+                                }
+                            }
+                        }
+                        RecipeResult::Fluid(fluid) => {
+                            let default_temperature = fluid
+                                .temperature
+                                .or(fluid.min_temperature)
+                                .or(fluid.max_temperature)
+                                .unwrap_or(
+                                    data.fluids
+                                        .get(&fluid.name)
+                                        .as_ref()
+                                        .unwrap()
+                                        .default_temperature,
+                                );
+                            let key = GenericItem::Fluid {
+                                name: fluid.name.clone(),
+                                // temperature: fluid.temperature.map(|x| x as i32),
+                                temperature: [
+                                    default_temperature as i32,
+                                    default_temperature as i32,
+                                ],
+                            };
+                            let (base_yield, extra_yield) = fluid.normalized_output();
+                            index_map_update_entry(
+                                &mut map,
+                                key,
+                                (base_yield
+                                    + extra_yield
+                                        * module_effects
+                                            .productivity
+                                            .clamp(0.0, recipe.maximum_productivity))
+                                    * (1.0 + module_effects.speed)
+                                    * base_speed,
+                            );
+                        }
                     }
                 }
             }
@@ -1264,6 +1294,13 @@ impl FactorioMechanic for RecipeMechanic {
                             &planet.surface_properties,
                             &data.surface_properties,
                         )
+                    {
+                        return;
+                    }
+                    if machine_proto
+                        .fixed_recipe
+                        .as_ref()
+                        .is_some_and(|fixed_recipe| fixed_recipe != recipe_name)
                     {
                         return;
                     }
