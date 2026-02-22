@@ -286,6 +286,77 @@ impl FactoryInstance {
             .with_sinks(sinks)
     }
 
+    pub fn trim_flows(&mut self) -> bool {
+        let mut prim_raw_log_sum = 0.0;
+        let mut prim_raw_log_min = f64::INFINITY;
+        let mut prim_raw_log_max = f64::NEG_INFINITY;
+        let mut prim_raw_count = 0;
+        for (idx, mechanic) in self.mechanics.iter_mut().enumerate() {
+            for jdx in 0..mechanic.instance_len() {
+                if let Some(cur_prim_raw) = self.solution.get_prim_raw_of(&(idx, jdx))
+                    && cur_prim_raw > 0.0
+                {
+                    let cur_log = cur_prim_raw.log2().max(-1024.0);
+                    prim_raw_log_sum += cur_log;
+                    prim_raw_log_min = prim_raw_log_min.min(cur_log);
+                    prim_raw_log_max = prim_raw_log_max.max(cur_log);
+                    prim_raw_count += 1;
+                }
+            }
+        }
+        let prim_raw_log_avg = if prim_raw_count > 0 {
+            prim_raw_log_sum / prim_raw_count as f64
+        } else {
+            0.0
+        };
+        log::info!(
+            "平均原始流量的 log2 值为 {:.2}, 约为 ({:e})",
+            prim_raw_log_avg,
+            2.0_f64.powf(prim_raw_log_avg)
+        );
+        log::info!(
+            "原始流量的 log2 值范围为 [{:.2}, {:.2}], 约为 [{:e}, {:e}]",
+            prim_raw_log_min,
+            prim_raw_log_max,
+            2.0_f64.powf(prim_raw_log_min),
+            2.0_f64.powf(prim_raw_log_max)
+        );
+        // let threshold = 2.0_f64.powf(prim_raw_log_avg - 6.0);
+        let threshold = 2.0_f64.powf(
+            (prim_raw_log_avg - 15.0)
+                .min(prim_raw_log_max - 30.0)
+                .min(prim_raw_log_min + 15.0)
+                .min(prim_raw_log_max - (prim_raw_log_max - prim_raw_log_avg) * 2.0),
+        ).max(1e-12);
+        let mut changed = false;
+        self.mechanics
+            .iter_mut()
+            .enumerate()
+            .for_each(|(idx, mechanic)| {
+                for jdx in 0..mechanic.instance_len() {
+                    mechanic.instance_operate(jdx, &mut |_| match self
+                        .solution
+                        .get_prim_raw_of(&(idx, jdx))
+                    {
+                        Some(n) => {
+                            if n < threshold {
+                                changed = true;
+                                EntryOpRequest::Drop
+                            } else {
+                                EntryOpRequest::None
+                            }
+                        }
+                        None => {
+                            changed = true;
+                            EntryOpRequest::Drop
+                        }
+                    });
+                }
+                mechanic.submit_operations();
+            });
+        changed
+    }
+
     fn flows_panel(
         &mut self,
         ui: &mut egui::Ui,
@@ -294,9 +365,11 @@ impl FactoryInstance {
         changed: &mut bool,
         need_suggestions: &mut bool,
     ) {
+        let mut display_idx = 0usize;
         egui_dnd::dnd(ui, "instances").show_vec(
             &mut self.instances,
             |ui, &mut (idx, jdx), handle, _| {
+                display_idx += 1;
                 let item_id = ui.make_persistent_id(("dnd_item", idx, jdx));
                 // 从 egui 存储中获取上一帧的高度，默认为估算值 100.0
                 let last_frame_height =
@@ -312,22 +385,32 @@ impl FactoryInstance {
                     .scope(|ui| {
                         ui.horizontal_wrapped(|ui| {
                             card_frame(ui).show(ui, |ui| {
-                                handle.ui(ui, |ui| {
-                                    ui.heading("≡");
-                                });
                                 ui.vertical(|ui| {
-                                    let button = ui.add_sized([28.0, 14.0], egui::Button::new("⧉"));
-                                    if button.clicked() {
-                                        self.mechanics[idx]
-                                            .instance_operate(jdx, &mut |_| EntryOpRequest::Clone);
-                                    }
-                                    let button = ui.add_sized([28.0, 14.0], egui::Button::new("🗑"));
-                                    if button.clicked() {
-                                        self.mechanics[idx]
-                                            .instance_operate(jdx, &mut |_| EntryOpRequest::Drop);
-                                    }
+                                    ui.horizontal(|ui| {
+                                        handle.ui(ui, |ui| {
+                                            ui.heading("≡");
+                                            ui.label(format!("#{display_idx:05}"));
+                                        });
+                                    });
+                                    ui.horizontal(|ui| {
+                                        let button =
+                                            ui.add_sized([28.0, 14.0], egui::Button::new("⧉"));
+                                        if button.clicked() {
+                                            self.mechanics[idx].instance_operate(jdx, &mut |_| {
+                                                EntryOpRequest::Clone
+                                            });
+                                        }
+                                        let button =
+                                            ui.add_sized([28.0, 14.0], egui::Button::new("🗑"));
+                                        if button.clicked() {
+                                            self.mechanics[idx].instance_operate(jdx, &mut |_| {
+                                                EntryOpRequest::Drop
+                                            });
+                                        }
+                                    });
                                     if let Some(value) = solution_value {
                                         ui.add(AmountLabel::new(value));
+                                        // ui.add(AmountLabel::new(solution_raw_value.unwrap()));
                                     } else {
                                         ui.label("无解");
                                     }
@@ -446,19 +529,27 @@ impl FactoryInstance {
                 .checkbox(&mut self.strict_source, "禁止无端引入原料")
                 .changed();
             *changed |= ui.checkbox(&mut self.strict_sink, "禁止副产物").changed();
-            if ui.button("删除所有没用到的配方").clicked() {
-                self.mechanics
-                    .iter_mut()
-                    .enumerate()
-                    .for_each(|(idx, mechanic)| {
-                        for jdx in 0..mechanic.instance_len() {
-                            let solution_value =
-                                self.solution.get_prim_raw_of(&(idx, jdx)).unwrap_or(0.0);
-                            if solution_value < 1e-12 {
-                                mechanic.instance_operate(jdx, &mut |_| EntryOpRequest::Drop);
-                            }
-                        }
-                    });
+            if ui.button("删除无用配方").clicked() {
+                *changed |= self.trim_flows();
+                if self
+                    .mechanics
+                    .iter()
+                    .map(|m| m.instance_len())
+                    .sum::<usize>()
+                    != self.instances.len()
+                {
+                    self.reset_instances();
+                }
+            }
+            if ui.button("按比例排序").clicked() {
+                self.instances.sort_by(|a, b| {
+                    let prim_raw_a = self.solution.get_prim_raw_of(&a).unwrap_or(0.0);
+                    let prim_raw_b = self.solution.get_prim_raw_of(&b).unwrap_or(0.0);
+                    // 取负号使得流量大的排在前面
+                    prim_raw_b
+                        .partial_cmp(&prim_raw_a)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
             }
             if ui
                 .button("\u{26A0}自动规划")
@@ -490,41 +581,56 @@ impl FactoryInstance {
             "总代价: {:.2} | 总物料流",
             self.solution.get_cost().unwrap_or(f64::NAN)
         ));
-        ui.horizontal_wrapped(|ui| {
-            card_frame(ui).show(ui, |ui| {
-                ui.set_min_width(ui.available_width());
-                ui.set_min_height(50.0);
+        egui::ScrollArea::vertical().id_salt(4).show(ui, |ui| {
+            ui.set_max_height(200.0);
+            ui.horizontal_wrapped(|ui| {
+                card_frame(ui).show(ui, |ui| {
+                    ui.set_min_width(ui.available_width());
+                    ui.set_min_height(50.0);
 
-                for item in &self.total_flow_sorted_keys {
-                    let amount = self.solution.get_sum_raw_of(item).unwrap_or(0.0);
-                    if amount.abs() < 1e-8 {
-                        continue;
-                    }
-                    let amount = self.solution.get_sum_of(item).unwrap_or(0.0);
+                    for item in &self.total_flow_sorted_keys {
+                        let amount = self.solution.get_sum_raw_of(item).unwrap_or(0.0);
+                        if amount.abs() < 1e-8 {
+                            continue;
+                        }
+                        let amount = self.solution.get_sum_of(item).unwrap_or(0.0);
 
-                    ui.vertical(|ui| {
-                        ui.set_min_width(40.0);
-                        ui.add_sized(
-                            [40.0, 15.0],
-                            AmountLabel::new(amount)
-                                .with_time_scale(proj.time_scale)
-                                .with_is_energy(item.is_energy())
-                                .with_is_signed(true),
-                        );
-                        ui.push_id(item, |ui| {
-                            let button = ui
-                                .add_sized([35.0, 35.0], GenericIcon::new(data, item))
-                                .interact(egui::Sense::click());
-                            button.context_menu(|ui| {
-                                if ui.button("添加到产量目标").clicked() {
-                                    self.target.push((item.clone(), 0.0));
-                                    *changed = true;
-                                }
-                                if ui.button("添加到外部输入").clicked() {
-                                    self.external.push((item.clone(), 1.0));
-                                    *changed = true;
-                                }
-                                if ui.button("显示推荐配方").clicked() {
+                        ui.vertical(|ui| {
+                            ui.set_min_width(40.0);
+                            ui.add_sized(
+                                [40.0, 15.0],
+                                AmountLabel::new(amount)
+                                    .with_time_scale(proj.time_scale)
+                                    .with_is_energy(item.is_energy())
+                                    .with_is_signed(true),
+                            );
+                            ui.push_id(item, |ui| {
+                                let button = ui
+                                    .add_sized([35.0, 35.0], GenericIcon::new(data, item))
+                                    .interact(egui::Sense::click());
+                                button.context_menu(|ui| {
+                                    if ui.button("添加到产量目标").clicked() {
+                                        self.target.push((item.clone(), 0.0));
+                                        *changed = true;
+                                    }
+                                    if ui.button("添加到外部输入").clicked() {
+                                        self.external.push((item.clone(), 1.0));
+                                        *changed = true;
+                                    }
+                                    if ui.button("显示推荐配方").clicked() {
+                                        *need_suggestions = true;
+                                        self.mechanics.iter_mut().for_each(|mechanic| {
+                                            mechanic.update_suggestion(
+                                                data,
+                                                proj,
+                                                &self.factory,
+                                                item,
+                                                amount,
+                                            )
+                                        });
+                                    }
+                                });
+                                if button.clicked() {
                                     *need_suggestions = true;
                                     self.mechanics.iter_mut().for_each(|mechanic| {
                                         mechanic.update_suggestion(
@@ -536,25 +642,13 @@ impl FactoryInstance {
                                         )
                                     });
                                 }
-                            });
-                            if button.clicked() {
-                                *need_suggestions = true;
-                                self.mechanics.iter_mut().for_each(|mechanic| {
-                                    mechanic.update_suggestion(
-                                        data,
-                                        proj,
-                                        &self.factory,
-                                        item,
-                                        amount,
-                                    )
-                                });
-                            }
-                        })
-                    });
-                    if ui.available_size_before_wrap().x < 35.0 {
-                        ui.end_row();
+                            })
+                        });
+                        if ui.available_size_before_wrap().x < 35.0 {
+                            ui.end_row();
+                        }
                     }
-                }
+                });
             });
         });
     }
@@ -916,7 +1010,7 @@ impl FactoryInstance {
             .show(ui, |ui| {
                 ui.heading("配方配置");
                 egui::ScrollArea::vertical().id_salt(2).show(ui, |ui| {
-                    ui.set_max_height(105.0);
+                    ui.set_max_height(150.0);
                     self.summary_panel(ui, data, proj, &mut changed, &mut need_suggestions);
                 });
                 egui::ScrollArea::vertical().id_salt(3).show(ui, |ui| {

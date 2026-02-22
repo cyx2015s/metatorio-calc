@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::sync::mpsc::*;
+use std::time::Instant;
 
 #[must_use]
 pub fn flow_add<T>(a: &Flow<T>, b: &Flow<T>, c: f64) -> Flow<T>
@@ -196,7 +197,7 @@ where
         let mut changed = false;
         if self.strict_source {
             // 在strict_source模式下，移除所有无法使用的配方
-            let instant = std::time::Instant::now();
+            // let instant = std::time::Instant::now();
             let mut status = HashMap::new();
             enum ItemStatus<R> {
                 Pending {
@@ -245,7 +246,7 @@ where
                 }
             }
 
-            let before = self.flows.len();
+            // let before = self.flows.len();
 
             for (i_id, entry) in &status {
                 if let ItemStatus::Pending {
@@ -266,19 +267,19 @@ where
                 }
             }
 
-            let after = self.flows.len();
-            if before != after {
-                log::info!(
-                    "求解器：移除了 {} 个无法使用的配方 ({} -> {})",
-                    before - after,
-                    before,
-                    after
-                );
-            }
-            log::info!(
-                "求解器：移除无法使用的配方耗时 {} ms",
-                instant.elapsed().as_millis()
-            );
+            // let after = self.flows.len();
+            // if before != after {
+            //     log::info!(
+            //         "求解器：移除了 {} 个无法使用的配方 ({} -> {})",
+            //         before - after,
+            //         before,
+            //         after
+            //     );
+            // }
+            // log::info!(
+            //     "求解器：移除无法使用的配方耗时 {} ms",
+            //     instant.elapsed().as_millis()
+            // );
         }
         changed
     }
@@ -299,7 +300,21 @@ where
             };
         }
         log::info!("求解器：开始剪枝");
-        while self.trim_flows() {}
+        let mut count = 0;
+        let instant = Instant::now();
+        let len_before = self.flows.len();
+        while self.trim_flows() {
+            count += 1;
+        }
+        let len_after = self.flows.len();
+        log::info!(
+            "求解器：剪枝完成，共执行了 {} 次剪枝操作，移除了 {} 个配方 ({} -> {})，耗时 {:.2?}",
+            count,
+            len_before - len_after,
+            len_before,
+            len_after,
+            instant.elapsed()
+        );
         // 调整配方的系数，使得其中出现的数量级最大的物品的数量级在1附近，避免数值不稳定。
         let mut item_scales: HashMap<I, f64> = HashMap::new();
         for flow in self.flows.values() {

@@ -35,6 +35,12 @@ pub struct ModulePrototype {
     pub tier: f64,
 }
 
+impl HasPrototypeBase for ModulePrototype {
+    fn base(&self) -> &PrototypeBase {
+        &self.base
+    }
+}
+
 #[serde_as]
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct BeaconPrototype {

@@ -1,7 +1,6 @@
 use std::time::Instant;
 
 use crate::{
-    concept::EntryOpRequest,
     error::AppError,
     factorio::{DataContext, ProjectContext, planner::FactoryInstance, sort_generic_items_owned},
     math::SolverSolution,
@@ -65,28 +64,7 @@ pub fn factorio_auto_planner(
 
     factory.solution = solution;
 
-    factory
-        .mechanics
-        .iter_mut()
-        .enumerate()
-        .for_each(|(idx, mechanic)| {
-            for jdx in 0..mechanic.instance_len() {
-                mechanic.instance_operate(jdx, &mut |_| match factory
-                    .solution
-                    .get_prim_raw_of(&(idx, jdx))
-                {
-                    Some(n) => {
-                        if n < 1e-12 {
-                            EntryOpRequest::Drop
-                        } else {
-                            EntryOpRequest::None
-                        }
-                    }
-                    None => EntryOpRequest::Drop,
-                });
-            }
-            mechanic.submit_operations();
-        });
+    factory.trim_flows();
 
     factory.name += " (自动规划)";
     log::info!("自动规划完成: {}", factory.name);

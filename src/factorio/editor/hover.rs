@@ -38,6 +38,9 @@ impl<'a> egui::Widget for PrototypeHover<'a, ItemPrototype> {
 
             ui.label(format!("单组堆叠: {}", self.prototype.stack_size));
 
+            if let Some(module) = data.modules.get(&self.prototype.base.name) {
+                ui.add(PrototypeHover::new(data, module).with_quality(self.quality));
+            }
             if let Some(mine) = &self.prototype.burn {
                 ui.label(format!("燃料: {}", mine.fuel_value));
                 ui.label(format!(
@@ -80,6 +83,28 @@ impl<'a> egui::Widget for PrototypeHover<'a, ItemPrototype> {
                     });
                 }
             }
+        });
+
+        ui.response()
+    }
+}
+
+impl<'a> egui::Widget for PrototypeHover<'a, ModulePrototype> {
+    fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+        let data = &self.data;
+
+        ui.vertical(|ui| {
+            ui.set_min_width(140.0);
+
+            let effect = effects_under_quality(
+                &self.prototype.effect,
+                data.qualities[self.quality.min(data.qualities.len() as u8 - 1) as usize].default_multiplier(),
+            );
+            ui.label(format!("能耗: {:}%", effect.consumption * 100.0));
+            ui.label(format!("速度: {:}%", effect.speed * 100.0));
+            ui.label(format!("产能: {:}%", effect.productivity * 100.0));
+            ui.label(format!("污染: {:}%", effect.pollution * 100.0));
+            ui.label(format!("品质: {:}%", effect.quality * 100.0));
         });
 
         ui.response()
