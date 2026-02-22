@@ -534,7 +534,7 @@ impl AsFlow for ItemFuelInstance {
     }
 
     fn cost(&self, _data: &DataContext, _proj: &ProjectContext, _factory: &FactoryContext) -> f64 {
-        0.0
+        1.0 / 1024.0 // 几乎无成本
     }
 }
 
@@ -735,7 +735,7 @@ impl AsFlow for ItemLaunchInstance {
     }
 
     fn cost(&self, _data: &DataContext, _proj: &ProjectContext, _factory: &FactoryContext) -> f64 {
-        0.0
+        1.0 / 1024.0 // 几乎无成本
     }
 }
 

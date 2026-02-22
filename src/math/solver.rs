@@ -311,7 +311,7 @@ where
             self.flows.keys().map(|id| (id.clone(), 0.0)).collect();
         let mut target_scale: f64 = 0.0;
         log::info!("开始平衡数量级");
-        for i in 0..4 {
+        for i in 0..8 {
             // 1. 计算 flow_scales (列缩放)
             for (f_id, flow) in &self.flows {
                 let mut sum_log = 0.0;

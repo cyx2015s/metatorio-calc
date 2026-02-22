@@ -205,42 +205,29 @@ impl FactoryInstance {
         let mut fluid_heats = HashSet::new();
         for (flow, _) in flows.values() {
             for (item, _) in flow {
-                match item {
-                    GenericItem::Fluid { name, temperature } => {
-                        fluid_temperaturess
-                            .entry(name.clone())
-                            .or_insert(HashSet::new())
-                            .insert(*temperature);
-                    }
-                    GenericItem::FluidFuel {
-                        filter: Some(filter),
-                    } => {
-                        fluid_fuels.insert(filter.clone());
-                    }
-                    GenericItem::FluidHeat {
-                        filter: Some(filter),
-                    } => {
-                        fluid_heats.insert(filter.clone());
-                    }
-                    _ => {}
-                }
+                update_fluid_metainfo(
+                    &mut fluid_temperaturess,
+                    &mut fluid_fuels,
+                    &mut fluid_heats,
+                    item,
+                );
             }
         }
         for (source, _) in &external {
-            if let GenericItem::Fluid { name, temperature } = source {
-                fluid_temperaturess
-                    .entry(name.clone())
-                    .or_insert(HashSet::new())
-                    .insert(*temperature);
-            }
+            update_fluid_metainfo(
+                &mut fluid_temperaturess,
+                &mut fluid_fuels,
+                &mut fluid_heats,
+                source,
+            );
         }
         for target in &target {
-            if let GenericItem::Fluid { name, temperature } = &target.0 {
-                fluid_temperaturess
-                    .entry(name.clone())
-                    .or_insert(HashSet::new())
-                    .insert(*temperature);
-            }
+            update_fluid_metainfo(
+                &mut fluid_temperaturess,
+                &mut fluid_fuels,
+                &mut fluid_heats,
+                &target.0,
+            );
         }
         let mut aux_idx = 0;
         for (fluid, temperatures) in &fluid_temperaturess {
@@ -872,6 +859,33 @@ impl FactoryInstance {
                 .push((GenericItem::Item("item-unknown".into()), 1.0));
             *changed = true;
         }
+    }
+}
+
+fn update_fluid_metainfo(
+    fluid_temperaturess: &mut HashMap<String, HashSet<[i32; 2]>>,
+    fluid_fuels: &mut HashSet<String>,
+    fluid_heats: &mut HashSet<String>,
+    item: &GenericItem,
+) {
+    match item {
+        GenericItem::Fluid { name, temperature } => {
+            fluid_temperaturess
+                .entry(name.clone())
+                .or_insert(HashSet::new())
+                .insert(*temperature);
+        }
+        GenericItem::FluidFuel {
+            filter: Some(filter),
+        } => {
+            fluid_fuels.insert(filter.clone());
+        }
+        GenericItem::FluidHeat {
+            filter: Some(filter),
+        } => {
+            fluid_heats.insert(filter.clone());
+        }
+        _ => {}
     }
 }
 

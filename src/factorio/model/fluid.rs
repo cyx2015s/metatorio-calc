@@ -2,8 +2,8 @@ use crate::{
     concept::{EntryOpRequest, EntryOpResult, Flow, SolveContext},
     factorio::{
         DataContext, EntityPrototype, GenericItem, ProjectContext, common::*,
-        energy_source_as_flow, icon::Icon, modal::SelectorModal, planner::FactoryContext,
-        selector::Selector,
+        energy_source_as_flow, hover::PrototypeHover, icon::Icon, modal::SelectorModal,
+        planner::FactoryContext, selector::Selector,
     },
     math::{ElemVec, flow_add},
 };
@@ -470,6 +470,11 @@ impl FactorioMechanic for GeneratorMechanic {
                                                                 .is_none_or(|x| x.amount > 0.0)));
                                             }
                                             false
+                                        })
+                                        .with_hover(|ui, name, data| {
+                                            if let Some(fluid) = data.fluids.get(name) {
+                                                ui.add(PrototypeHover::new(data, fluid));
+                                            }
                                         }),
                                 ),
                         )
@@ -698,6 +703,11 @@ impl FactorioMechanic for BoilerMechanic {
                                                         .is_none_or(|x| x.amount > 0.0);
                                             }
                                             false
+                                        })
+                                        .with_hover(|ui, name, data| {
+                                            if let Some(fluid) = data.fluids.get(name) {
+                                                ui.add(PrototypeHover::new(data, fluid));
+                                            }
                                         }),
                                 ),
                         )
@@ -913,6 +923,11 @@ impl FactorioMechanic for FluidFuelMechanic {
                                                 .is_some_and(|x| x.amount > 0.0);
                                     }
                                     false
+                                })
+                                .with_hover(|ui, name, data| {
+                                    if let Some(fluid) = data.fluids.get(name) {
+                                        ui.add(PrototypeHover::new(data, fluid));
+                                    }
                                 }),
                         ),
                 )
@@ -988,7 +1003,9 @@ impl AsFlow for FluidFuelInstance {
                 );
                 index_map_update_entry(
                     &mut flow,
-                    GenericItem::FluidFuel { filter: self.fluid.clone().into() },
+                    GenericItem::FluidFuel {
+                        filter: self.fluid.clone().into(),
+                    },
                     fuel_value.amount * 60.0,
                 );
             }
@@ -997,10 +1014,9 @@ impl AsFlow for FluidFuelInstance {
     }
 
     fn cost(&self, _data: &DataContext, _proj: &ProjectContext, _factory: &FactoryContext) -> f64 {
-        0.0
+        1.0 / 10240.0 // 几乎无成本
     }
 }
-
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct FluidHeatMechanic {
@@ -1092,6 +1108,11 @@ impl FactorioMechanic for FluidHeatMechanic {
                                                 .is_none_or(|x| x.amount > 0.0);
                                     }
                                     false
+                                })
+                                .with_hover(|ui, name, data| {
+                                    if let Some(fluid) = data.fluids.get(name) {
+                                        ui.add(PrototypeHover::new(data, fluid));
+                                    }
                                 }),
                         ),
                 )
@@ -1167,8 +1188,12 @@ impl AsFlow for FluidHeatInstance {
                 );
                 index_map_update_entry(
                     &mut flow,
-                    GenericItem::FluidHeat { filter: self.fluid.clone().into() },
-                    heat_capacity.amount * 60.0 * (self.temperature - fluid.default_temperature as i32) as f64,
+                    GenericItem::FluidHeat {
+                        filter: self.fluid.clone().into(),
+                    },
+                    heat_capacity.amount
+                        * 60.0
+                        * (self.temperature - fluid.default_temperature as i32) as f64,
                 );
             }
         }
@@ -1176,6 +1201,6 @@ impl AsFlow for FluidHeatInstance {
     }
 
     fn cost(&self, _data: &DataContext, _proj: &ProjectContext, _factory: &FactoryContext) -> f64 {
-        0.0
+        1.0 / 10240.0 // 几乎无成本
     }
 }
