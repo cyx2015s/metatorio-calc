@@ -1101,6 +1101,10 @@ impl SubView for ProjectInstance {
             self.proj.saved = false;
         }
         while let Ok((req_id, result)) = self.solution_receiver.try_recv() {
+            if req_id > self.factories.len() {
+                log::error!("棍母求解");
+                continue;
+            }
             let factory = &mut self.factories.vec[req_id];
             match result {
                 SolverSolution::Solved { ref sum, .. } => {

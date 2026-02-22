@@ -1014,7 +1014,8 @@ impl AsFlow for FluidFuelInstance {
     }
 
     fn cost(&self, _data: &DataContext, _proj: &ProjectContext, _factory: &FactoryContext) -> f64 {
-        1.0 / 10240.0 // 几乎无成本
+        // 1.0 / 10240.0 // 几乎无成本
+        0.0
     }
 }
 
@@ -1201,6 +1202,7 @@ impl AsFlow for FluidHeatInstance {
     }
 
     fn cost(&self, _data: &DataContext, _proj: &ProjectContext, _factory: &FactoryContext) -> f64 {
-        1.0 / 10240.0 // 几乎无成本
+        // 1.0 / 10240.0 // 几乎无成本
+        0.0
     }
 }
