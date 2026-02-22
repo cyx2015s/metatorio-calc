@@ -1027,6 +1027,26 @@ impl ProjectInstance {
                                                 is_essential = true;
                                                 break;
                                             }
+                                            if let Some(place_result) = &item.place_result {
+                                                if let Some(entity) =
+                                                    self.data.entities.get(place_result)
+                                                {
+                                                    if entity.base.r#type == "rocket-silo" {
+                                                        is_essential = true;
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                            for launch_result in &item.rocket_launch_products {
+                                                if let Some(launch_result) =
+                                                    self.data.items.get(&launch_result.name)
+                                                {
+                                                    if launch_result.base.r#type == "tool" {
+                                                        is_essential = true;
+                                                        break;
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                     _ => {}
