@@ -45,6 +45,7 @@ pub struct FactoryInstance {
     pub instances: Vec<(usize, usize)>,
 
     pub strict_source: bool,
+    pub strict_sink: bool,
     #[serde(skip)]
     pub solution: SolverSolution<GenericItem, (usize, usize)>,
     #[serde(skip)]
@@ -79,6 +80,7 @@ impl Default for FactoryInstance {
             instances: Vec::new(),
 
             strict_source: false,
+            strict_sink: false,
             solution: SolverSolution::NotSolved {
                 no_provider: vec![],
                 no_consumer: vec![],
@@ -284,9 +286,20 @@ impl FactoryInstance {
             flows.insert((usize::MAX, aux_idx), (flow, 0.0));
             aux_idx += 1;
         });
+        let mut sinks = IndexMap::new();
+        for pollutant in &data.airborne_pollutants {
+            sinks.insert(
+                crate::factorio::GenericItem::Pollution {
+                    name: pollutant.0.clone(),
+                },
+                0.0,
+            );
+        }
         SolverData::new(target, flows)
             .with_sources(external)
             .with_strict_source(self.strict_source)
+            .with_strict_sink(self.strict_sink)
+            .with_sinks(sinks)
     }
 
     fn flows_panel(
@@ -446,11 +459,9 @@ impl FactoryInstance {
     ) {
         ui.horizontal(|ui| {
             *changed |= ui
-                .checkbox(
-                    &mut self.strict_source,
-                    "禁止使用定义在额外输入中以外的物品",
-                )
+                .checkbox(&mut self.strict_source, "禁止无端引入原料")
                 .changed();
+            *changed |= ui.checkbox(&mut self.strict_sink, "禁止副产物").changed();
             if ui.button("删除所有没用到的配方").clicked() {
                 self.mechanics
                     .iter_mut()

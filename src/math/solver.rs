@@ -253,8 +253,10 @@ where
                     consumers,
                 } = entry
                 {
-                    if providers.is_empty() && !self.sources.contains_key(i_id) {
-                        // 没有生产这个物品的配方，也没有出现在外部源中，移除所有消耗这个物品的配方
+                    if providers.is_empty() // 没有生产这个物品的配方
+                        && !self.sources.contains_key(i_id) // 外部也不能提供
+                        && self.target.get(i_id).as_ref().is_none_or(|v| **v > 0.0) // 目标是生产而非消耗这个物品
+                    {
                         for f_id in consumers {
                             self.flows.swap_remove(f_id);
                             changed = true;
