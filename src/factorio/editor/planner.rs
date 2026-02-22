@@ -207,6 +207,14 @@ impl FactoryInstance {
                 source,
             );
         }
+        for (target, _) in &target {
+            update_fluid_metainfo(
+                &mut fluid_temperaturess,
+                &mut fluid_fuels,
+                &mut fluid_heats,
+                target,
+            );
+        }
         let mut aux_idx = 0;
         for (fluid, temperatures) in &fluid_temperaturess {
             // 添加将限定更严格的温度转换为更宽松的温度的流
