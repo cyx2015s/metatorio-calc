@@ -1178,6 +1178,10 @@ impl AsFlow for FluidHeatInstance {
     ) -> Flow<GenericItem> {
         let mut flow = Flow::new();
         if let Some(fluid) = data.fluids.get(&self.fluid) {
+            if self.temperature <= fluid.default_temperature as i32 {
+                // 如果温度不高于默认温度，则不产生热量，也不消耗液体
+                return flow;
+            }
             let heat_capacity = fluid
                 .heat_capacity
                 .unwrap_or(EnergyAmount { amount: 1000.0 });
