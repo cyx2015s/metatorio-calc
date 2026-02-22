@@ -148,10 +148,13 @@ where
     pub fn get_sum_raw_of(&self, i: &I) -> Option<f64> {
         match self {
             SolverSolution::Solved {
-                sum, dual_scale, ..
+                sum,
+                dual_scale,
+                target_scale,
+                ..
             } => sum
                 .get(i)
-                .map(|v| *v * dual_scale.get(i).cloned().unwrap_or(1.0)),
+                .map(|v| *v * dual_scale.get(i).cloned().unwrap_or(1.0) * target_scale),
             _ => None,
         }
     }
@@ -207,8 +210,8 @@ where
                 Usable,
             }
 
-            for (f_id, flow) in &self.flows {
-                for (item_id, &amount) in &flow.0 {
+            for (f_id, (flow, _)) in &self.flows {
+                for (item_id, &amount) in flow {
                     let entry =
                         status
                             .entry(item_id.clone())
@@ -322,8 +325,8 @@ where
         );
         // 调整配方的系数，使得其中出现的数量级最大的物品的数量级在1附近，避免数值不稳定。
         let mut item_scales: HashMap<I, f64> = HashMap::new();
-        for flow in self.flows.values() {
-            for (item_id, _) in &flow.0 {
+        for (flow, _) in self.flows.values() {
+            for (item_id, _) in flow {
                 item_scales.insert(item_id.clone(), 1.0);
             }
         }
@@ -335,13 +338,13 @@ where
         let mut target_scale: f64 = 1.0;
         log::info!("开始平衡数量级");
         // Ruiz 算法
-        for i in 0..8 {
+        for i in 0..16 {
             // 1. 计算 flow_scales (列缩放)
-            for (f_id, flow) in &self.flows {
+            for (f_id, (flow, _)) in &self.flows {
                 let mut sum_x2 = 0.0;
                 let mut count = 0;
                 let f_scale = *flow_scales.get(f_id).unwrap();
-                for (i_id, amount) in &flow.0 {
+                for (i_id, amount) in flow {
                     if *amount == 0.0 {
                         continue;
                     }
@@ -350,7 +353,9 @@ where
                     count += 1;
                 }
                 if count > 0 {
-                    flow_scales.insert(f_id.clone(), f_scale * ((count as f64) / sum_x2).sqrt());
+                    let delta_scale = ((count as f64) / sum_x2).sqrt().clamp(1e-3, 1e3);
+                    let new_scale = f_scale * delta_scale;
+                    flow_scales.insert(f_id.clone(), new_scale);
                 }
             }
             let mut target_sum_x2 = 0.0;
@@ -360,18 +365,19 @@ where
                 target_sum_x2 += val * val;
                 target_count += 1;
             }
-            target_scale = target_scale
-                * if target_count > 0 {
-                    ((target_count as f64) / target_sum_x2).sqrt()
-                } else {
-                    1.0
-                };
+            let delta_scale = if target_count > 0 {
+                ((target_count as f64) / target_sum_x2).sqrt()
+            } else {
+                1.0
+            }
+            .clamp(1e-3, 1e3);
+            target_scale = target_scale * delta_scale;
 
             // 2. 计算 item_scales (行缩放)
             let mut item_stats: HashMap<I, (f64, usize)> = HashMap::new();
-            for (f_id, flow) in &self.flows {
+            for (f_id, (flow, _)) in &self.flows {
                 let f_scale = *flow_scales.get(f_id).unwrap();
-                for (i_id, amount) in &flow.0 {
+                for (i_id, amount) in flow {
                     if *amount == 0.0 {
                         continue;
                     }
@@ -392,7 +398,15 @@ where
             }
             for (i_id, (sum_x2, count)) in item_stats {
                 let old_scale = item_scales.get(&i_id).cloned().unwrap_or(1.0);
-                item_scales.insert(i_id, old_scale * (count as f64 / sum_x2).sqrt());
+                let delta_scale = if count > 0 {
+                    ((count as f64) / sum_x2).sqrt()
+                } else {
+                    1.0
+                }
+                .clamp(1e-3, 1e3);
+                let new_scale = old_scale * delta_scale;
+
+                item_scales.insert(i_id, new_scale);
             }
             log::info!("第{i}轮数量级平衡完成。",);
             log::info!("target = {:?}, target_scale = {target_scale}", &self.target);
@@ -458,8 +472,8 @@ where
         }
         let mut no_providers: HashSet<I> = item_balances.keys().cloned().collect();
         let mut no_consumers: HashSet<I> = item_balances.keys().cloned().collect();
-        for flow in self.flows.values() {
-            for (item_id, &amount) in &flow.0 {
+        for (flow, _) in self.flows.values() {
+            for (item_id, &amount) in flow {
                 if amount > 0.0 {
                     no_providers.remove(item_id);
                 }
