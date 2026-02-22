@@ -66,10 +66,6 @@ pub fn factorio_auto_planner(
 
     factory.trim_flows();
 
-    factory.solution = factory.as_problem(&data, &proj).solve();
-
-    factory.trim_flows();
-
     factory.name += " (自动规划)";
     log::info!("自动规划完成: {}", factory.name);
     log::info!("自动规划用时: {:.2?}", instant.elapsed());

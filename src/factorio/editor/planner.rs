@@ -383,6 +383,7 @@ impl FactoryInstance {
                 let visible = !(current_cursor.min.y > clip_rect.max.y
                     || current_cursor.min.y + last_frame_height < clip_rect.min.y);
                 let solution_value = self.solution.get_prim_of(&(idx, jdx));
+                let solution_raw_value = self.solution.get_prim_raw_of(&(idx, jdx));
                 let response = ui
                     .scope(|ui| {
                         ui.horizontal_wrapped(|ui| {
@@ -412,7 +413,7 @@ impl FactoryInstance {
                                     });
                                     if let Some(value) = solution_value {
                                         ui.add(AmountLabel::new(value));
-                                        // ui.add(AmountLabel::new(solution_raw_value.unwrap()));
+                                        ui.add(AmountLabel::new(solution_raw_value.unwrap()));
                                     } else {
                                         ui.label("无解");
                                     }
@@ -611,7 +612,6 @@ impl FactoryInstance {
                                 [40.0, 15.0],
                                 AmountLabel::new(raw_amount)
                                     .with_time_scale(proj.time_scale)
-                                    .with_is_energy(item.is_energy())
                                     .with_is_signed(true),
                             );
                             ui.push_id(item, |ui| {
@@ -899,7 +899,7 @@ impl FactoryInstance {
 
                         if item.is_energy() {
                             let mut display_value = *amount * 1e6;
-                            *changed |= ui.add(drag_watt(&mut display_value)).changed();
+                            *changed |= ui.add(drag_watt(&mut display_value).speed(1e6)).changed();
                             *amount = display_value / 1e6;
                         } else {
                             let mut display_value = *amount * proj.time_scale.multiplier();
