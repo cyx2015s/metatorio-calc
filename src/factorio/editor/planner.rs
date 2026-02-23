@@ -31,6 +31,8 @@ pub struct FactoryContext {
 
     // 自动和手动填充时，优先使用的机器的品质等级
     pub major_quality: u8,
+
+    pub debug: bool,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -328,7 +330,8 @@ impl FactoryInstance {
                     .min(prim_raw_log_max - 30.0)
                     .min(prim_raw_log_min + 15.0)
                     .min(prim_raw_log_max - (prim_raw_log_max - prim_raw_log_avg) * 2.0),
-            );
+            )
+            .min(1e-12);
         let mut changed = false;
         self.mechanics
             .iter_mut()
@@ -355,6 +358,7 @@ impl FactoryInstance {
                 }
                 mechanic.submit_operations();
             });
+
         changed
     }
 
@@ -412,7 +416,9 @@ impl FactoryInstance {
                                     });
                                     if let Some(value) = solution_value {
                                         ui.add(AmountLabel::new(value));
-                                        ui.add(AmountLabel::new(solution_raw_value.unwrap()));
+                                        if self.factory.debug {
+                                            ui.add(AmountLabel::new(solution_raw_value.unwrap()));
+                                        }
                                     } else {
                                         ui.label("无解");
                                     }
@@ -531,6 +537,7 @@ impl FactoryInstance {
                 .checkbox(&mut self.strict_source, "禁止无端引入原料")
                 .changed();
             *changed |= ui.checkbox(&mut self.strict_sink, "禁止副产物").changed();
+            ui.checkbox(&mut self.factory.debug, "显示调试数据");
             if ui.button("删除无用配方").clicked() {
                 *changed |= self.trim_flows();
                 if self
@@ -540,6 +547,33 @@ impl FactoryInstance {
                     .sum::<usize>()
                     != self.instances.len()
                 {
+                    self.reset_instances();
+                }
+            }
+            if ui.button("删除无解配方").clicked() {
+                self.mechanics
+                    .iter_mut()
+                    .enumerate()
+                    .for_each(|(idx, mechanic)| {
+                        for jdx in 0..mechanic.instance_len() {
+                            mechanic.instance_operate(jdx, &mut |_| match self
+                                .solution
+                                .get_prim_of(&(idx, jdx))
+                            {
+                                Some(_) => EntryOpRequest::None,
+                                None => EntryOpRequest::Drop,
+                            });
+                        }
+                        mechanic.submit_operations();
+                    });
+                if self
+                    .mechanics
+                    .iter()
+                    .map(|m| m.instance_len())
+                    .sum::<usize>()
+                    != self.instances.len()
+                {
+                    *changed = true;
                     self.reset_instances();
                 }
             }
@@ -607,12 +641,14 @@ impl FactoryInstance {
                                     .with_is_energy(item.is_energy())
                                     .with_is_signed(true),
                             );
-                            ui.add_sized(
-                                [40.0, 15.0],
-                                AmountLabel::new(raw_amount)
-                                    .with_time_scale(proj.time_scale)
-                                    .with_is_signed(true),
-                            );
+                            if self.factory.debug {
+                                ui.add_sized(
+                                    [40.0, 15.0],
+                                    AmountLabel::new(raw_amount)
+                                        .with_time_scale(proj.time_scale)
+                                        .with_is_signed(true),
+                                );
+                            }
                             ui.push_id(item, |ui| {
                                 let button = ui
                                     .add_sized([35.0, 35.0], GenericIcon::new(data, item))
@@ -1199,7 +1235,7 @@ impl SubView for ProjectInstance {
             self.proj.saved = false;
         }
         while let Ok((req_id, result)) = self.solution_receiver.try_recv() {
-            if req_id > self.factories.len() {
+            if req_id >= self.factories.len() {
                 log::error!("棍母求解");
                 continue;
             }
