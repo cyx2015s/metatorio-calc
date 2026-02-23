@@ -457,7 +457,14 @@ pub fn generic_item_selector(
                         SelectorModal::new(id.with("select-entity"), data, "选择实体")
                             .with_toggle(toggle)
                             .with_selector(
-                                Selector::new(data, "entity").with_current(id_with_quality),
+                                Selector::new(data, "entity")
+                                    .with_current(id_with_quality)
+                                    .with_filter(|s: &IdWithQuality, f| {
+                                        f.entities.get(&s.0).is_some_and(|e| {
+                                            e.base.r#type == "resource"
+                                                || e.base.r#type == "asteroid-chunk"
+                                        })
+                                    }),
                             ),
                     )
                     .changed();
