@@ -257,8 +257,7 @@ where
                     providers,
                     consumers,
                 } = entry
-                {
-                    if providers.is_empty() // 没有生产这个物品的配方
+                    && providers.is_empty() // 没有生产这个物品的配方
                         && !self.sources.contains_key(i_id) // 外部也不能提供
                         && self.target.get(i_id).as_ref().is_none_or(|v| **v > 0.0)
                     // 目标是生产而非消耗这个物品
@@ -273,7 +272,6 @@ where
                             changed = true;
                         }
                     }
-                }
             }
 
             // let after = self.flows.len();
@@ -395,7 +393,7 @@ where
             } else if delta_scale < 1.0 && 1.0 / delta_scale > max_delta_scale {
                 max_delta_scale = 1.0 / delta_scale;
             }
-            target_scale = target_scale * delta_scale;
+            target_scale *= delta_scale;
 
             // items
             let mut item_stats: HashMap<I, (f64, usize)> = self

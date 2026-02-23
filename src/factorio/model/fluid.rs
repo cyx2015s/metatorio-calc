@@ -952,8 +952,8 @@ impl FactorioMechanic for FluidFuelMechanic {
     fn auto_populate(
         &mut self,
         data: &DataContext,
-        proj: &ProjectContext,
-        factory: &FactoryContext,
+        _proj: &ProjectContext,
+        _factory: &FactoryContext,
     ) {
         for (fluid, temperatures) in &data.temperatures {
             if let Some(fluid_prototype) = data.fluids.get(fluid)
@@ -991,8 +991,8 @@ impl AsFlow for FluidFuelInstance {
         _factory: &FactoryContext,
     ) -> Flow<GenericItem> {
         let mut flow = Flow::new();
-        if let Some(fluid) = data.fluids.get(&self.fluid) {
-            if let Some(fuel_value) = fluid.fuel_value {
+        if let Some(fluid) = data.fluids.get(&self.fluid)
+            && let Some(fuel_value) = fluid.fuel_value {
                 index_map_update_entry(
                     &mut flow,
                     GenericItem::Fluid {
@@ -1009,7 +1009,6 @@ impl AsFlow for FluidFuelInstance {
                     fuel_value.amount * 60.0,
                 );
             }
-        }
         flow
     }
 
@@ -1138,8 +1137,8 @@ impl FactorioMechanic for FluidHeatMechanic {
     fn auto_populate(
         &mut self,
         data: &DataContext,
-        proj: &ProjectContext,
-        factory: &FactoryContext,
+        _proj: &ProjectContext,
+        _factory: &FactoryContext,
     ) {
         for (fluid, temperatures) in &data.temperatures {
             if let Some(fluid_prototype) = data.fluids.get(fluid)

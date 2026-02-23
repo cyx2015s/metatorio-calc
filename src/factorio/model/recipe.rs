@@ -575,7 +575,7 @@ impl AsFlow for RecipeInstance {
                 index_map_update_entry(
                     &mut map,
                     GenericItem::RocketCapacity { stacks, by_weight },
-                    1.0 / rocket_parts_required as f64,
+                    1.0 / rocket_parts_required,
                 );
             } else {
                 for result in &recipe.results {
@@ -883,10 +883,10 @@ impl FactorioMechanic for RecipeMechanic {
                             .entry(category.clone())
                             .and_modify(|m| {
                                 if module.tier > m.tier {
-                                    *m = &module;
+                                    *m = module;
                                 }
                             })
-                            .or_insert(&module);
+                            .or_insert(module);
                     }
                 }
                 self.enumerate_modules = modules_by_category

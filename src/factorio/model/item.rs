@@ -789,7 +789,7 @@ impl FactorioMechanic for ItemLaunchMechanic {
     ) {
         for q in 0..=proj.max_quality_level {
             for i in data.items.values() {
-                if i.rocket_launch_products.len() > 0 {
+                if !i.rocket_launch_products.is_empty() {
                     for rocket in data.rocket_types.values() {
                         self.instances.push(ItemLaunchInstance {
                             item: IdWithQuality(i.base.name.clone(), q),
@@ -829,13 +829,12 @@ impl FactorioMechanic for ItemLaunchMechanic {
             if ui.button("添加物品发射").clicked() {
                 let new_config = ItemLaunchInstance {
                     item: IdWithQuality("".to_string(), 0),
-                    rocket: data
+                    rocket: *data
                         .rocket_types
                         .iter()
                         .find(|(_, r)| r.0 > 0 && !r.1)
                         .unwrap()
-                        .1
-                        .clone(),
+                        .1,
                 };
                 self.instances.push(new_config);
                 changed = true;
@@ -887,7 +886,9 @@ impl FactorioMechanic for ItemLaunchMechanic {
                                     }
                                 })
                                 .with_filter(|s, f| {
-                                    f.items.get(&s.0).is_some_and(|i| !i.rocket_launch_products.is_empty())
+                                    f.items
+                                        .get(&s.0)
+                                        .is_some_and(|i| !i.rocket_launch_products.is_empty())
                                 }),
                         ),
                 )

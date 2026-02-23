@@ -579,8 +579,8 @@ impl FactoryInstance {
             }
             if ui.button("按比例排序").clicked() {
                 self.instances.sort_by(|a, b| {
-                    let prim_raw_a = self.solution.get_prim_raw_of(&a).unwrap_or(0.0);
-                    let prim_raw_b = self.solution.get_prim_raw_of(&b).unwrap_or(0.0);
+                    let prim_raw_a = self.solution.get_prim_raw_of(a).unwrap_or(0.0);
+                    let prim_raw_b = self.solution.get_prim_raw_of(b).unwrap_or(0.0);
                     // 取负号使得流量大的排在前面
                     prim_raw_b
                         .partial_cmp(&prim_raw_a)
@@ -1006,7 +1006,7 @@ fn update_fluid_metainfo(
         GenericItem::Fluid { name, temperature } => {
             fluid_temperaturess
                 .entry(name.clone())
-                .or_insert(HashSet::new())
+                .or_default()
                 .insert(*temperature);
         }
         GenericItem::FluidFuel {
@@ -1168,36 +1168,28 @@ impl ProjectInstance {
                     Modifier::UnlockRecipe { recipe } => {
                         if let Some(recipe) = self.data.recipes.get(recipe) {
                             for result in &recipe.results {
-                                match result {
-                                    RecipeResult::Item(item) => {
-                                        if let Some(item) = self.data.items.get(&item.name) {
-                                            if item.base.r#type == "tool" {
-                                                is_essential = true;
-                                                break;
-                                            }
-                                            if let Some(place_result) = &item.place_result {
-                                                if let Some(entity) =
-                                                    self.data.entities.get(place_result)
-                                                {
-                                                    if entity.base.r#type == "rocket-silo" {
-                                                        is_essential = true;
-                                                        break;
-                                                    }
+                                if let RecipeResult::Item(item) = result {
+                                    if let Some(item) = self.data.items.get(&item.name) {
+                                        if item.base.r#type == "tool" {
+                                            is_essential = true;
+                                            break;
+                                        }
+                                        if let Some(place_result) = &item.place_result
+                                            && let Some(entity) =
+                                                self.data.entities.get(place_result)
+                                                && entity.base.r#type == "rocket-silo" {
+                                                    is_essential = true;
+                                                    break;
                                                 }
-                                            }
-                                            for launch_result in &item.rocket_launch_products {
-                                                if let Some(launch_result) =
-                                                    self.data.items.get(&launch_result.name)
-                                                {
-                                                    if launch_result.base.r#type == "tool" {
-                                                        is_essential = true;
-                                                        break;
-                                                    }
+                                        for launch_result in &item.rocket_launch_products {
+                                            if let Some(launch_result) =
+                                                self.data.items.get(&launch_result.name)
+                                                && launch_result.base.r#type == "tool" {
+                                                    is_essential = true;
+                                                    break;
                                                 }
-                                            }
                                         }
                                     }
-                                    _ => {}
                                 }
                             }
                         }

@@ -70,8 +70,8 @@ impl<'a> egui::Widget for PrototypeHover<'a, ItemPrototype> {
             {
                 ui.label("变质结果: ");
                 ui.horizontal(|ui| {
-                    ui.label(data.get_display_name("item", &spoil_result));
-                    ui.add_sized([35.0, 35.0], Icon::new(self.data, "item", &spoil_result));
+                    ui.label(data.get_display_name("item", spoil_result));
+                    ui.add_sized([35.0, 35.0], Icon::new(self.data, "item", spoil_result));
                 });
             }
             if !self.prototype.rocket_launch_products.is_empty() {
@@ -98,7 +98,8 @@ impl<'a> egui::Widget for PrototypeHover<'a, ModulePrototype> {
 
             let effect = effects_under_quality(
                 &self.prototype.effect,
-                data.qualities[self.quality.min(data.qualities.len() as u8 - 1) as usize].default_multiplier(),
+                data.qualities[self.quality.min(data.qualities.len() as u8 - 1) as usize]
+                    .default_multiplier(),
             );
             ui.label(format!("能耗: {:}%", effect.consumption * 100.0));
             ui.label(format!("速度: {:}%", effect.speed * 100.0));

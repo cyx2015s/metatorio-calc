@@ -792,9 +792,11 @@ pub fn get_generic_item_sort_key<'a>(
         }
         GenericItem::Pollution { name } => (0x800usize, (0usize, 0usize, 0usize), name.as_str()),
         GenericItem::Custom { name } => (0x900usize, (0usize, 0usize, 0usize), name.as_str()),
-        GenericItem::RocketCapacity { stacks, by_weight } => {
-            (0xA00usize, (0usize, *stacks as usize, *by_weight as usize), "")
-        }
+        GenericItem::RocketCapacity { stacks, by_weight } => (
+            0xA00usize,
+            (0usize, *stacks as usize, *by_weight as usize),
+            "",
+        ),
     }
 }
 
