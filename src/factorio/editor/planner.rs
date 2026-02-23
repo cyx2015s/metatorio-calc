@@ -328,8 +328,7 @@ impl FactoryInstance {
                     .min(prim_raw_log_max - 30.0)
                     .min(prim_raw_log_min + 15.0)
                     .min(prim_raw_log_max - (prim_raw_log_max - prim_raw_log_avg) * 2.0),
-            )
-            .max(1e-12);
+            );
         let mut changed = false;
         self.mechanics
             .iter_mut()

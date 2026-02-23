@@ -340,24 +340,41 @@ where
         log::info!("开始平衡数量级");
         // Ruiz 算法
         let instant = Instant::now();
-        for i in 0..32 {
+        for i in 0..256 {
             // flows
-            flow_scales.par_iter_mut().for_each(|(f_id, f_scale)| {
-                let mut sum_x2 = 0.0;
-                let mut count = 0;
-                for (i_id, amount) in &self.flows[f_id].0 {
-                    if *amount == 0.0 {
-                        continue;
-                    }
-                    let val = amount * item_scales.get(i_id).cloned().unwrap_or(1.0) * *f_scale;
-                    sum_x2 += val * val;
-                    count += 1;
-                }
-                if count > 0 {
-                    let delta_scale = ((count as f64) / sum_x2).sqrt().clamp(1e-3, 1e3);
-                    *f_scale *= delta_scale;
-                }
-            });
+            let mut max_delta_scale = flow_scales
+                .par_iter_mut()
+                .fold(
+                    || 1.0,
+                    |local_max, (f_id, f_scale)| {
+                        let mut sum_x2 = 0.0;
+                        let mut count = 0;
+                        for (i_id, amount) in &self.flows[f_id].0 {
+                            if *amount == 0.0 {
+                                continue;
+                            }
+                            let val =
+                                amount * item_scales.get(i_id).cloned().unwrap_or(1.0) * *f_scale;
+                            sum_x2 += val * val;
+                            count += 1;
+                        }
+                        if count > 0 {
+                            let delta_scale = ((count as f64) / sum_x2).sqrt().clamp(1e-3, 1e3);
+                            *f_scale *= delta_scale;
+
+                            if delta_scale > 1.0 && delta_scale > local_max {
+                                delta_scale
+                            } else if delta_scale < 1.0 && 1.0 / delta_scale > local_max {
+                                1.0 / delta_scale
+                            } else {
+                                local_max
+                            }
+                        } else {
+                            1.0
+                        }
+                    },
+                )
+                .reduce(|| 1.0, f64::max);
 
             // target
             let mut target_sum_x2 = 0.0;
@@ -373,6 +390,11 @@ where
                 1.0
             }
             .clamp(1e-3, 1e3);
+            if delta_scale > 1.0 && delta_scale > max_delta_scale {
+                max_delta_scale = delta_scale;
+            } else if delta_scale < 1.0 && 1.0 / delta_scale > max_delta_scale {
+                max_delta_scale = 1.0 / delta_scale;
+            }
             target_scale = target_scale * delta_scale;
 
             // items
@@ -413,21 +435,40 @@ where
                 entry.0 += val * val;
                 entry.1 += 1;
             }
-            for (i_id, (sum_x2, count)) in item_stats {
-                let old_scale = item_scales.get(&i_id).cloned().unwrap_or(1.0);
-                let delta_scale = if count > 0 {
-                    ((count as f64) / sum_x2).sqrt()
-                } else {
-                    1.0
-                }
-                .clamp(1e-3, 1e3);
-                let new_scale = old_scale * delta_scale;
+            max_delta_scale = max_delta_scale.max(
+                item_scales
+                    .par_iter_mut()
+                    .fold(
+                        || 1.0,
+                        |local_max, (i_id, i_scale)| {
+                            let (sum_x2, count) = item_stats.get(i_id).cloned().unwrap_or((0.0, 0));
+                            let delta_scale = if count > 0 {
+                                ((count as f64) / sum_x2).sqrt()
+                            } else {
+                                1.0
+                            }
+                            .clamp(1e-3, 1e3);
+                            let new_scale = *i_scale * delta_scale;
 
-                item_scales.insert(i_id, new_scale);
-            }
+                            *i_scale = new_scale;
+                            if delta_scale > 1.0 && delta_scale > local_max {
+                                delta_scale
+                            } else if delta_scale < 1.0 && 1.0 / delta_scale > local_max {
+                                1.0 / delta_scale
+                            } else {
+                                local_max
+                            }
+                        },
+                    )
+                    .reduce(|| 1.0, f64::max),
+            );
             if i % 8 == 7 {
                 log::info!("第{i}轮数量级平衡完成。",);
                 log::info!("target = {:?}, target_scale = {target_scale}", &self.target);
+                if max_delta_scale < 1.01 {
+                    log::info!("数量级平衡已收敛，提前结束。");
+                    break;
+                }
             }
         }
         log::info!("求解器：数量级平衡完成，耗时 {:.2?}", instant.elapsed());
