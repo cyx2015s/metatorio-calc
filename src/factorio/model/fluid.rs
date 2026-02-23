@@ -338,10 +338,28 @@ impl AsFlow for GeneratorInstance {
                 );
                 index_map_update_entry(&mut flow, GenericItem::Electricity, power_output);
             }
+
+            let idx = (self.generator.1 as usize).min(data.qualities.len() - 1);
+            let multiplier = data.qualities[idx].default_multiplier();
+            flow.iter_mut().for_each(|v| *v.1 *= multiplier);
+
+            generator
+                .energy_source
+                .emissions_per_minute
+                .as_ref()
+                .inspect(|map| {
+                    for (pollutant, amount) in map.iter() {
+                        index_map_update_entry(
+                            &mut flow,
+                            GenericItem::Pollution {
+                                name: pollutant.clone(),
+                            },
+                            amount / 60.0,
+                        );
+                    }
+                });
         }
-        let idx = (self.generator.1 as usize).min(data.qualities.len() - 1);
-        let multiplier = data.qualities[idx].default_multiplier();
-        flow.iter_mut().for_each(|v| *v.1 *= multiplier);
+
         flow
     }
 
@@ -816,10 +834,27 @@ impl AsFlow for BoilerInstance {
                 &boiler.get_flow(data, fluid, self.temperature as f64, &self.fuel),
                 1.0,
             );
+
+            let idx = (self.boiler.1 as usize).min(data.qualities.len() - 1);
+            let multiplier = data.qualities[idx].default_multiplier();
+            flow.iter_mut().for_each(|v| *v.1 *= multiplier);
+
+            boiler
+                .energy_source
+                .emissions_per_minute()
+                .as_ref()
+                .inspect(|map| {
+                    for (pollutant, amount) in map.iter() {
+                        index_map_update_entry(
+                            &mut flow,
+                            GenericItem::Pollution {
+                                name: pollutant.clone(),
+                            },
+                            amount / 60.0,
+                        );
+                    }
+                });
         }
-        let idx = (self.boiler.1 as usize).min(data.qualities.len() - 1);
-        let multiplier = data.qualities[idx].default_multiplier();
-        flow.iter_mut().for_each(|v| *v.1 *= multiplier);
         flow
     }
 
@@ -995,23 +1030,24 @@ impl AsFlow for FluidFuelInstance {
     ) -> Flow<GenericItem> {
         let mut flow = Flow::new();
         if let Some(fluid) = data.fluids.get(&self.fluid)
-            && let Some(fuel_value) = fluid.fuel_value {
-                index_map_update_entry(
-                    &mut flow,
-                    GenericItem::Fluid {
-                        name: self.fluid.clone(),
-                        temperature: [self.temperature, self.temperature],
-                    },
-                    -1.0,
-                );
-                index_map_update_entry(
-                    &mut flow,
-                    GenericItem::FluidFuel {
-                        filter: self.fluid.clone().into(),
-                    },
-                    fuel_value.amount * 60.0,
-                );
-            }
+            && let Some(fuel_value) = fluid.fuel_value
+        {
+            index_map_update_entry(
+                &mut flow,
+                GenericItem::Fluid {
+                    name: self.fluid.clone(),
+                    temperature: [self.temperature, self.temperature],
+                },
+                -1.0,
+            );
+            index_map_update_entry(
+                &mut flow,
+                GenericItem::FluidFuel {
+                    filter: self.fluid.clone().into(),
+                },
+                fuel_value.amount * 60.0,
+            );
+        }
         flow
     }
 

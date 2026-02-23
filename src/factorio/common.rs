@@ -404,6 +404,18 @@ pub enum EnergySource {
     Void(VoidEnergySource),
 }
 
+impl EnergySource {
+    pub fn emissions_per_minute(&self) -> Option<&Emissions> {
+        match self {
+            EnergySource::Electric(e) => e.emissions_per_minute.as_ref(),
+            EnergySource::Burner(b) => b.emissions_per_minute.as_ref(),
+            EnergySource::Heat(h) => h.emissions_per_minute.as_ref(),
+            EnergySource::Fluid(f) => f.emissions_per_minute.as_ref(),
+            EnergySource::Void(v) => v.emissions_per_minute.as_ref(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(default)]
 #[derive(Default)]
