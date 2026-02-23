@@ -331,7 +331,7 @@ impl FactoryInstance {
                     .min(prim_raw_log_min + 15.0)
                     .min(prim_raw_log_max - (prim_raw_log_max - prim_raw_log_avg) * 2.0),
             )
-            .min(1e-12);
+            .max(1e-12);
         let mut changed = false;
         self.mechanics
             .iter_mut()
@@ -449,12 +449,13 @@ impl FactoryInstance {
                                     proj,
                                     &self.factory,
                                 );
+
                                 let mut flow_keys = flow.keys().cloned().collect::<Vec<_>>();
                                 sort_generic_items_owned(&mut flow_keys, data);
                                 // 先展示输入，再展示输出
                                 for item in &flow_keys {
                                     let amount = flow.get(item).cloned().unwrap_or(0.0);
-                                    if amount.abs() < 1e-8 {
+                                    if amount.abs() < 1e-8 && !self.factory.debug {
                                         continue;
                                     }
 
@@ -627,7 +628,7 @@ impl FactoryInstance {
                     for item in &self.total_flow_sorted_keys {
                         let raw_amount = self.solution.get_sum_raw_of(item).unwrap_or(0.0);
 
-                        if raw_amount.abs() < 1e-6 {
+                        if raw_amount.abs() < 1e-12 {
                             continue;
                         }
                         let amount = self.solution.get_sum_of(item).unwrap_or(0.0);
@@ -1177,17 +1178,19 @@ impl ProjectInstance {
                                         if let Some(place_result) = &item.place_result
                                             && let Some(entity) =
                                                 self.data.entities.get(place_result)
-                                                && entity.base.r#type == "rocket-silo" {
-                                                    is_essential = true;
-                                                    break;
-                                                }
+                                            && entity.base.r#type == "rocket-silo"
+                                        {
+                                            is_essential = true;
+                                            break;
+                                        }
                                         for launch_result in &item.rocket_launch_products {
                                             if let Some(launch_result) =
                                                 self.data.items.get(&launch_result.name)
-                                                && launch_result.base.r#type == "tool" {
-                                                    is_essential = true;
-                                                    break;
-                                                }
+                                                && launch_result.base.r#type == "tool"
+                                            {
+                                                is_essential = true;
+                                                break;
+                                            }
                                         }
                                     }
                                 }

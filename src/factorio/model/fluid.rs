@@ -248,6 +248,9 @@ impl BoilerPrototype {
                     .unwrap_or(EnergyAmount { amount: 1000.0 });
                 let target_fluid_temperature =
                     self.target_temperature.expect("锅炉没有指定目标温度");
+                if target_fluid_temperature - temperature == 0.0 {
+                    return flow;
+                }
                 let amount = self.energy_consumption.amount * 60.0 // 功率
                     / source_heat_capacity.amount // 输入流体的比热容
                     / (target_fluid_temperature - temperature); // 温度差
