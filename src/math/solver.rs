@@ -260,18 +260,18 @@ where
                     && providers.is_empty() // 没有生产这个物品的配方
                         && !self.sources.contains_key(i_id) // 外部也不能提供
                         && self.target.get(i_id).as_ref().is_none_or(|v| **v > 0.0)
-                    // 目标是生产而非消耗这个物品
-                    {
-                        // log::info!(
-                        //     "求解器：物品 {:?} 无法获得，移除相关配方 {} 个",
-                        //     i_id,
-                        //     providers.len() + consumers.len()
-                        // );
-                        for f_id in consumers {
-                            self.flows.swap_remove(f_id);
-                            changed = true;
-                        }
+                // 目标是生产而非消耗这个物品
+                {
+                    // log::info!(
+                    //     "求解器：物品 {:?} 无法获得，移除相关配方 {} 个",
+                    //     i_id,
+                    //     providers.len() + consumers.len()
+                    // );
+                    for f_id in consumers {
+                        self.flows.swap_remove(f_id);
+                        changed = true;
                     }
+                }
             }
 
             // let after = self.flows.len();

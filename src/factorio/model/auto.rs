@@ -70,6 +70,9 @@ pub fn factorio_auto_planner(
     let end_time = Instant::now();
     log::info!("自动规划完成: {}", factory.name);
     log::info!("线性规划用时: {:.2?}", instant.elapsed());
-    log::info!("自动规划总用时: {:.2?}", end_time.duration_since(start_time));
+    log::info!(
+        "自动规划总用时: {:.2?}",
+        end_time.duration_since(start_time)
+    );
     Ok(factory)
 }

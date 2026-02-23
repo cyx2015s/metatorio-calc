@@ -1172,8 +1172,8 @@ impl ProjectInstance {
                     Modifier::UnlockRecipe { recipe } => {
                         if let Some(recipe) = self.data.recipes.get(recipe) {
                             for result in &recipe.results {
-                                if let RecipeResult::Item(item) = result {
-                                    if let Some(item) = self.data.items.get(&item.name) {
+                                if let RecipeResult::Item(item) = result
+                                    && let Some(item) = self.data.items.get(&item.name) {
                                         if item.base.r#type == "tool" {
                                             is_essential = true;
                                             break;
@@ -1196,7 +1196,6 @@ impl ProjectInstance {
                                             }
                                         }
                                     }
-                                }
                             }
                         }
                     }
