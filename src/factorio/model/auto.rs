@@ -16,7 +16,7 @@ pub fn factorio_auto_planner(
     proj: ProjectContext,
 ) -> Result<FactoryInstance, AppError> {
     log::info!("开始自动规划工厂实例: {}", factory.name);
-
+    let start_time = Instant::now();
     let instant = Instant::now();
     for mechanic in &mut factory.mechanics {
         mechanic.auto_populate(&data, &proj, &factory.factory);
@@ -67,7 +67,9 @@ pub fn factorio_auto_planner(
     factory.trim_flows();
 
     factory.name += " (自动规划)";
+    let end_time = Instant::now();
     log::info!("自动规划完成: {}", factory.name);
-    log::info!("自动规划用时: {:.2?}", instant.elapsed());
+    log::info!("线性规划用时: {:.2?}", instant.elapsed());
+    log::info!("自动规划总用时: {:.2?}", end_time.duration_since(start_time));
     Ok(factory)
 }

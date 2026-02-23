@@ -461,8 +461,8 @@ where
                     .reduce(|| 1.0, f64::max),
             );
             if i % 8 == 7 {
-                log::info!("第{i}轮数量级平衡完成。",);
-                log::info!("target = {:?}, target_scale = {target_scale}", &self.target);
+                // log::info!("第{i}轮数量级平衡完成。",);
+                // log::info!("target = {:?}, target_scale = {target_scale}", &self.target);
                 if max_delta_scale < 1.0 + 1e-6 {
                     log::info!("数量级平衡已收敛，提前结束。");
                     break;

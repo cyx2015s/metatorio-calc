@@ -5,6 +5,8 @@ use std::{
     sync::{Arc, mpsc::*},
 };
 
+use rayon::prelude::*;
+
 use crate::{
     concept::*,
     factorio::{
@@ -134,9 +136,10 @@ impl FactoryInstance {
         {
             self.reset_instances();
         }
+
         let mut flows = self
             .instances
-            .iter()
+            .par_iter()
             .map(|(idx, jdx)| {
                 let fe = &self.mechanics[*idx].instances()[*jdx];
                 (

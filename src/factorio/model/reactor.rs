@@ -181,13 +181,7 @@ impl AsFlow for ReactorInstance {
         }
         let quality = (self.reactor.1 as usize).min(data.qualities.len() - 1);
         let multiplier = data.qualities[quality].default_multiplier();
-        flow.iter_mut().for_each(|v| {
-            if !matches!(v.0, GenericItem::Pollution { .. }) {
-                *v.1 *= multiplier
-            } else {
-                ()
-            }
-        });
+        flow.iter_mut().for_each(|v| *v.1 *= multiplier);
         flow
     }
 

@@ -338,11 +338,6 @@ impl AsFlow for GeneratorInstance {
                 );
                 index_map_update_entry(&mut flow, GenericItem::Electricity, power_output);
             }
-
-            let idx = (self.generator.1 as usize).min(data.qualities.len() - 1);
-            let multiplier = data.qualities[idx].default_multiplier();
-            flow.iter_mut().for_each(|v| *v.1 *= multiplier);
-
             generator
                 .energy_source
                 .emissions_per_minute
@@ -358,6 +353,10 @@ impl AsFlow for GeneratorInstance {
                         );
                     }
                 });
+
+            let idx = (self.generator.1 as usize).min(data.qualities.len() - 1);
+            let multiplier = data.qualities[idx].default_multiplier();
+            flow.iter_mut().for_each(|v| *v.1 *= multiplier);
         }
 
         flow
@@ -835,10 +834,6 @@ impl AsFlow for BoilerInstance {
                 1.0,
             );
 
-            let idx = (self.boiler.1 as usize).min(data.qualities.len() - 1);
-            let multiplier = data.qualities[idx].default_multiplier();
-            flow.iter_mut().for_each(|v| *v.1 *= multiplier);
-
             boiler
                 .energy_source
                 .emissions_per_minute()
@@ -854,6 +849,10 @@ impl AsFlow for BoilerInstance {
                         );
                     }
                 });
+
+            let idx = (self.boiler.1 as usize).min(data.qualities.len() - 1);
+            let multiplier = data.qualities[idx].default_multiplier();
+            flow.iter_mut().for_each(|v| *v.1 *= multiplier);
         }
         flow
     }
