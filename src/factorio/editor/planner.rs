@@ -1173,29 +1173,29 @@ impl ProjectInstance {
                         if let Some(recipe) = self.data.recipes.get(recipe) {
                             for result in &recipe.results {
                                 if let RecipeResult::Item(item) = result
-                                    && let Some(item) = self.data.items.get(&item.name) {
-                                        if item.base.r#type == "tool" {
-                                            is_essential = true;
-                                            break;
-                                        }
-                                        if let Some(place_result) = &item.place_result
-                                            && let Some(entity) =
-                                                self.data.entities.get(place_result)
-                                            && entity.base.r#type == "rocket-silo"
+                                    && let Some(item) = self.data.items.get(&item.name)
+                                {
+                                    if item.base.r#type == "tool" {
+                                        is_essential = true;
+                                        break;
+                                    }
+                                    if let Some(place_result) = &item.place_result
+                                        && let Some(entity) = self.data.entities.get(place_result)
+                                        && entity.base.r#type == "rocket-silo"
+                                    {
+                                        is_essential = true;
+                                        break;
+                                    }
+                                    for launch_result in &item.rocket_launch_products {
+                                        if let Some(launch_result) =
+                                            self.data.items.get(&launch_result.name)
+                                            && launch_result.base.r#type == "tool"
                                         {
                                             is_essential = true;
                                             break;
                                         }
-                                        for launch_result in &item.rocket_launch_products {
-                                            if let Some(launch_result) =
-                                                self.data.items.get(&launch_result.name)
-                                                && launch_result.base.r#type == "tool"
-                                            {
-                                                is_essential = true;
-                                                break;
-                                            }
-                                        }
                                     }
+                                }
                             }
                         }
                     }
@@ -1278,16 +1278,36 @@ impl SubView for ProjectInstance {
                                 "factories",
                                 |ui, real_idx, factory, handle, _, op| {
                                     ui.horizontal(|ui| {
-                                        handle.ui(ui, |ui| {
-                                            ui.label("≡");
-                                        });
-                                        let button =
-                                            ui.add(egui::Button::new(&factory.name).selected(
-                                                self.proj.selected_page
-                                                    == ProjectPage::Index(real_idx),
-                                            ));
-                                        if button.clicked() {
+                                        if handle
+                                            .ui(ui, |ui| {
+                                                ui.label(
+                                                    egui::RichText::new(&factory.name)
+                                                        .background_color(
+                                                            if self.proj.selected_page
+                                                                == ProjectPage::Index(real_idx)
+                                                            {
+                                                                ui.visuals().selection.bg_fill
+                                                            } else {
+                                                                ui.visuals()
+                                                                    .widgets
+                                                                    .noninteractive
+                                                                    .bg_fill
+                                                            },
+                                                        ),
+                                                );
+                                            })
+                                            .interact(egui::Sense::click())
+                                            .clicked()
+                                        {
                                             self.proj.selected_page = ProjectPage::Index(real_idx);
+                                        }
+                                        if ui.button("⧉").clicked() {
+                                            self.proj
+                                                .factory_sender
+                                                .as_ref()
+                                                .unwrap()
+                                                .send(factory.clone())
+                                                .unwrap();
                                         }
                                         if ui.button("×").clicked() {
                                             *op = EntryOpRequest::Drop;
