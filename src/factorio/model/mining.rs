@@ -223,7 +223,7 @@ impl AsFlow for MiningInstance {
             &data.qualities,
             module_effects.quality,
             0,
-            proj.max_quality_level as usize,
+            proj.cur_max_quality_level as usize,
         );
         {
             if let Some(result) = &mining_property.result {

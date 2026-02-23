@@ -98,7 +98,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, ModulePrototype> {
 
             let effect = effects_under_quality(
                 &self.prototype.effect,
-                data.qualities[self.quality.min(data.qualities.len() as u8 - 1) as usize]
+                data.qualities[self.quality.min((data.qualities.len() - 1) as u8) as usize]
                     .default_multiplier(),
             );
             ui.label(format!("能耗: {:}%", effect.consumption * 100.0));

@@ -195,7 +195,7 @@ impl FactorioMechanic for SpoilMechanic {
         proj: &ProjectContext,
         factory: &FactoryContext,
     ) {
-        for q in 0..=proj.max_quality_level {
+        for q in 0..=proj.max_quality() {
             for i in data.items.values() {
                 if i.spoil.is_some() && i.spoil.as_ref().unwrap().spoil_result.is_some() {
                     self.instances.push(SpoilInstance {
@@ -585,7 +585,7 @@ impl FactorioMechanic for ItemFuelMechanic {
         proj: &ProjectContext,
         factory: &FactoryContext,
     ) {
-        for q in 0..=proj.max_quality_level {
+        for q in 0..=proj.cur_max_quality_level {
             for i in data.items.values() {
                 if i.burn.is_some() {
                     self.instances.push(ItemFuelInstance {
@@ -787,7 +787,7 @@ impl FactorioMechanic for ItemLaunchMechanic {
         proj: &ProjectContext,
         factory: &FactoryContext,
     ) {
-        for q in 0..=proj.max_quality_level {
+        for q in 0..=proj.cur_max_quality_level {
             for i in data.items.values() {
                 if !i.rocket_launch_products.is_empty() {
                     for rocket in data.rocket_types.values() {

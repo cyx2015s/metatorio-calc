@@ -215,7 +215,7 @@ pub fn update_accessibles(user: &mut ProjectContext, data: &DataContext) {
                 .insert(place_result.clone(), true);
         }
     }
-    user.max_quality_level = 0;
+    user.cur_max_quality_level = 0;
     for i in 1..data.qualities.len() {
         let quality = &data.qualities[i];
         if user
@@ -223,9 +223,10 @@ pub fn update_accessibles(user: &mut ProjectContext, data: &DataContext) {
             .get("quality")
             .is_some_and(|qualities| qualities.get(&quality.base.name).cloned().unwrap_or(false))
         {
-            user.max_quality_level = i as u8;
+            user.cur_max_quality_level = i as u8;
         } else {
             break;
         }
     }
+    user.max_quality_level = (data.qualities.len() - 1) as u8;
 }

@@ -569,7 +569,7 @@ impl AsFlow for RecipeInstance {
                 &data.qualities,
                 module_effects.quality,
                 self.recipe.1 as usize,
-                proj.max_quality_level as usize,
+                proj.max_quality() as usize,
             );
             if is_rocket {
                 index_map_update_entry(
@@ -1266,7 +1266,7 @@ impl FactorioMechanic for RecipeMechanic {
                 .iter()
                 .any(|ingredient| matches!(ingredient, RecipeIngredient::Item(..)))
             {
-                proj.max_quality_level as usize + 1
+                proj.max_quality() as usize + 1
             } else {
                 1
             };

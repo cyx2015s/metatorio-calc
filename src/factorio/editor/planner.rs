@@ -770,8 +770,8 @@ impl FactoryInstance {
                     }
                 }
             }
-            if self.factory.major_quality > data.qualities.len() as u8 - 1 {
-                self.factory.major_quality = data.qualities.len() as u8 - 1;
+            if self.factory.major_quality > (data.qualities.len() - 1) as u8 {
+                self.factory.major_quality = (data.qualities.len() - 1) as u8;
             }
         });
         ui.separator();

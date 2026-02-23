@@ -540,7 +540,6 @@ impl FactorioMechanic for GeneratorMechanic {
                         || (!generator.burns_fluid
                             && fluid.heat_capacity.is_none_or(|x| x.amount > 0.0)))
                 {
-                    // for quality in 0..=proj.max_quality_level {
                     for temperature in data.temperatures.get(filter).expect("未初始化流体温度数据")
                     {
                         self.instances.push(GeneratorInstance {
@@ -550,7 +549,6 @@ impl FactorioMechanic for GeneratorMechanic {
                             temperature: *temperature,
                         });
                     }
-                    // }
                 }
             } else {
                 // 如果发电机没有指定输入流体，则尝试用所有可用
@@ -560,7 +558,6 @@ impl FactorioMechanic for GeneratorMechanic {
                             || (!generator.burns_fluid
                                 && fluid.heat_capacity.is_none_or(|x| x.amount > 0.0)))
                     {
-                        // for quality in 0..=proj.max_quality_level {
                         for temperature in data
                             .temperatures
                             .get(fluid_name)
@@ -576,7 +573,6 @@ impl FactorioMechanic for GeneratorMechanic {
                                 temperature: *temperature,
                             });
                         }
-                        // }
                     }
                 }
             }
@@ -760,7 +756,6 @@ impl FactorioMechanic for BoilerMechanic {
                     && proj.is_prototype_accessible("entity", &boiler.base.base.name)
                     && fluid.heat_capacity.is_none_or(|x| x.amount > 0.0)
                 {
-                    // for quality in 0..=proj.max_quality_level {
                     for temperature in data.temperatures.get(filter).expect("未初始化流体温度数据")
                     {
                         self.instances.push(BoilerInstance {
@@ -770,7 +765,6 @@ impl FactorioMechanic for BoilerMechanic {
                             fuel: None,
                         });
                     }
-                    // }
                 }
             } else {
                 // 如果锅炉没有指定输入流体，则尝试用所有可用的流体

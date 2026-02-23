@@ -27,6 +27,9 @@ pub struct ProjectContext {
     pub accessible_prototypes: Dict<Dict<bool>>,
 
     #[serde(skip)]
+    pub cur_max_quality_level: u8,
+
+    #[serde(skip)]
     pub max_quality_level: u8,
 
     #[serde(skip)]
@@ -49,6 +52,7 @@ impl Default for ProjectContext {
             accessible_technologies: Vec::new(),
             accessible_prototypes: Dict::new(),
             recipe_productivity: IndexMap::new(),
+            cur_max_quality_level: 0,
             max_quality_level: 0,
             saved: true,
             file_path: None,
@@ -77,6 +81,14 @@ impl ProjectContext {
             }
         } else {
             true
+        }
+    }
+
+    pub fn max_quality(&self) -> u8 {
+        if self.all_accessible {
+            self.max_quality_level
+        } else {
+            self.cur_max_quality_level
         }
     }
 }
