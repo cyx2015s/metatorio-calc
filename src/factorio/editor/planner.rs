@@ -241,8 +241,7 @@ impl FactoryInstance {
                             },
                             1.0,
                         );
-                        // log::info!("添加温度转换流 {}：{:?} -> {:?}", fluid, narrow, broad);
-                        // 温度转换代价为 0
+                        log::debug!("添加温度转换流 {}：{:?} -> {:?}", fluid, narrow, broad);
                         flows.insert((usize::MAX, aux_idx), (flow, 0.0));
                         aux_idx += 1;
                     }
@@ -314,12 +313,12 @@ impl FactoryInstance {
         } else {
             0.0
         };
-        log::info!(
+        log::debug!(
             "平均原始流量的 log2 值为 {:.2}, 约为 ({:e})",
             prim_raw_log_avg,
             2.0_f64.powf(prim_raw_log_avg)
         );
-        log::info!(
+        log::debug!(
             "原始流量的 log2 值范围为 [{:.2}, {:.2}], 约为 [{:e}, {:e}]",
             prim_raw_log_min,
             prim_raw_log_max,
@@ -1117,7 +1116,6 @@ impl Default for ProjectInstance {
         let (problem_tx, problem_rx) = channel();
         let (solution_tx, solution_rx) = channel();
         SolverData::make_solver_thread(solution_tx, problem_rx);
-        // log::info!("Default::default() for ProjectInstance called.");
         ProjectInstance {
             data: Arc::new(DataContext::default()),
             proj: ProjectContext::default().with_factory_sender(factory_tx),
@@ -1134,7 +1132,7 @@ impl Default for ProjectInstance {
 impl ProjectInstance {
     pub fn new(data: DataContext) -> Self {
         let (factory_tx, factory_rx) = channel();
-        log::info!("ProjectInstance::new() called.");
+        log::debug!("ProjectInstance::new() called.");
         ProjectInstance {
             data: Arc::new(data.build_utility_info()),
             proj: ProjectContext::default().with_factory_sender(factory_tx),
@@ -1145,7 +1143,7 @@ impl ProjectInstance {
 
     pub fn new_arc(data: Arc<DataContext>) -> Self {
         let (factory_tx, factory_rx) = channel();
-        log::info!("ProjectInstance::new_arc() called.");
+        log::debug!("ProjectInstance::new_arc() called.");
         ProjectInstance {
             data,
             proj: ProjectContext::default().with_factory_sender(factory_tx),

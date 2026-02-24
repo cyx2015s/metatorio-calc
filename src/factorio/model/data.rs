@@ -192,9 +192,9 @@ impl DataContext {
             if let Some(autoplace) = &entity.autoplace
                 && (entity.base.r#type == "resource")
             {
-                log::info!("自动生成的资源: {}", &entity.base.name);
+                log::debug!("自动生成的资源: {}", &entity.base.name);
                 if !autoplace.control.is_empty() {
-                    log::info!(" ↑ 对应的控制 ID 为 {}", &autoplace.control);
+                    log::debug!(" ↑ 对应的控制 ID 为 {}", &autoplace.control);
                 }
             }
         }
@@ -338,16 +338,16 @@ impl DataContext {
             )?;
             for mod_info in &mut mod_infos {
                 if mod_info.enabled {
-                    log::info!("处理模组信息 {:?}", mod_info);
+                    log::debug!("处理模组信息 {:?}", mod_info);
                     let mod_name = mod_info.name.clone();
                     if mod_info.version.is_empty() {
-                        log::info!("模组 {} 缺少版本信息，尝试补全", &mod_name);
+                        log::debug!("模组 {} 缺少版本信息，尝试补全", &mod_name);
 
                         if ["base", "space-age", "quality", "elevated-rails"]
                             .contains(&mod_name.as_str())
                         {
                             // 在游戏可执行文件附近寻找info.json
-                            log::info!("在游戏可执行文件附近寻找info.json");
+                            log::debug!("在游戏可执行文件附近寻找info.json");
                             let info_json_path = executable_path
                                 .join("../../../data")
                                 .join(&mod_name)
@@ -368,7 +368,7 @@ impl DataContext {
                             log::info!("模组 {} 的版本是 {}", &mod_name, &mod_info.version);
                         } else {
                             // 在模组路径下寻找info.json
-                            log::info!("在模组路径下寻找 {} 的 info.json", mod_name);
+                            log::debug!("在模组路径下寻找 {} 的 info.json", mod_name);
                             if mod_path.is_none() {
                                 continue;
                             }
@@ -386,8 +386,8 @@ impl DataContext {
                                 if file_name.starts_with(format!("{}_", &mod_name).as_str())
                                     && file_name.ends_with(".zip")
                                 {
-                                    log::info!("可能匹配的文件：{}", file_name);
-                                    log::info!(
+                                    log::debug!("可能匹配的文件：{}", file_name);
+                                    log::debug!(
                                         "模组 {} 是压缩包，尝试从压缩包文件名读取版本",
                                         &mod_name
                                     );
@@ -738,9 +738,9 @@ impl DataContext {
                     .insert(boiler.target_temperature.unwrap() as i32);
             }
         }
-        log::info!("构建温度信息完成，包含以下流体的温度信息：",);
+        log::debug!("构建温度信息完成，包含以下流体的温度信息：",);
         self.temperatures.iter().for_each(|(fluid, temperatures)| {
-            log::info!(" - {}: {:?}", fluid, temperatures);
+            log::debug!(" - {}: {:?}", fluid, temperatures);
         });
         self
     }

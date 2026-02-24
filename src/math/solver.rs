@@ -201,7 +201,7 @@ where
         let mut changed = false;
         if self.strict_source {
             // 在strict_source模式下，移除所有无法使用的配方
-            // let instant = std::time::Instant::now();
+            let instant = std::time::Instant::now();
             let mut status = HashMap::new();
             enum ItemStatus<R> {
                 Pending {
@@ -250,7 +250,7 @@ where
                 }
             }
 
-            // let before = self.flows.len();
+            let before = self.flows.len();
 
             for (i_id, entry) in &status {
                 if let ItemStatus::Pending {
@@ -260,13 +260,13 @@ where
                     && providers.is_empty() // 没有生产这个物品的配方
                         && !self.sources.contains_key(i_id) // 外部也不能提供
                         && self.target.get(i_id).as_ref().is_none_or(|v| **v > 0.0)
-                // 目标是生产而非消耗这个物品
+                
                 {
-                    // log::info!(
-                    //     "求解器：物品 {:?} 无法获得，移除相关配方 {} 个",
-                    //     i_id,
-                    //     providers.len() + consumers.len()
-                    // );
+                    log::debug!(
+                        "求解器：物品 {:?} 无法获得，移除相关配方 {} 个",
+                        i_id,
+                        providers.len() + consumers.len()
+                    );
                     for f_id in consumers {
                         self.flows.swap_remove(f_id);
                         changed = true;
@@ -274,19 +274,19 @@ where
                 }
             }
 
-            // let after = self.flows.len();
-            // if before != after {
-            //     log::info!(
-            //         "求解器：移除了 {} 个无法使用的配方 ({} -> {})",
-            //         before - after,
-            //         before,
-            //         after
-            //     );
-            // }
-            // log::info!(
-            //     "求解器：移除无法使用的配方耗时 {} ms",
-            //     instant.elapsed().as_millis()
-            // );
+            let after = self.flows.len();
+            if before != after {
+                log::debug!(
+                    "求解器：移除了 {} 个无法使用的配方 ({} -> {})",
+                    before - after,
+                    before,
+                    after
+                );
+            }
+            log::debug!(
+                "求解器：移除无法使用的配方耗时 {} ms",
+                instant.elapsed().as_millis()
+            );
         }
         changed
     }
@@ -461,8 +461,9 @@ where
                     .reduce(|| 1.0, f64::max),
             );
             if i % 8 == 7 {
-                // log::info!("第{i}轮数量级平衡完成。",);
-                // log::info!("target = {:?}, target_scale = {target_scale}", &self.target);
+                log::debug!("第{i}轮数量级平衡完成。");
+                log::debug!("target = {:?}, target_scale = {target_scale}", &self.target);
+                log::debug!("max_delta_scale = {:?}", max_delta_scale);
                 if max_delta_scale < 1.0 + 1e-6 {
                     log::info!("数量级平衡已收敛，提前结束。");
                     break;

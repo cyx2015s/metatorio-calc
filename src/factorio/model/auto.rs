@@ -20,7 +20,7 @@ pub fn factorio_auto_planner(
     let instant = Instant::now();
     for mechanic in &mut factory.mechanics {
         mechanic.auto_populate(&data, &proj, &factory.factory);
-        log::info!(
+        log::debug!(
             "机制 {} 填充了 {} 个实例",
             mechanic.name(),
             mechanic.instance_len()

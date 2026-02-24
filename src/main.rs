@@ -20,7 +20,6 @@ pub mod error;
 pub mod factorio;
 pub mod locale;
 pub mod math;
-pub mod memlog;
 pub mod toast;
 pub mod update;
 
@@ -349,30 +348,7 @@ impl eframe::App for MainPage {
             SelectedSubview::Creator(n) => self.creators[n].1.view(ui),
             SelectedSubview::Planner(n) => self.planners[n].view(ui),
             SelectedSubview::Logs => {
-                let logger= memlog::MEMLOG.vec.lock().unwrap();
-                let len = logger.len();
-                let text_style = egui::TextStyle::Monospace;
-                egui::Frame::group(ui.style())
-                    .fill(ui.visuals().extreme_bg_color)
-                    .corner_radius(8.0)
-                    .stroke(egui::Stroke::new(
-                        1.0,
-                        ui.visuals().widgets.inactive.bg_stroke.color,
-                    )).show(ui, |ui| {
-                        ui.set_min_height(ui.available_height());
-                        egui::ScrollArea::vertical().show_rows(
-                            ui,
-                            ui.text_style_height(&text_style),
-                            len,
-                            |ui, range| {
-                                ui.set_min_width(ui.available_width());
-                                for i in range {
-                                    ui.label(egui::RichText::new(logger[i].trim()).text_style(text_style.clone()));
-                                }
-                            }
-                        );
-                    }
-                );
+                egui_logger::logger_ui().error_color(egui::Color32::DARK_RED).warn_color(egui::Color32::ORANGE).show(ui);
             },
         });
         toast::TOASTS.lock().unwrap().show(factorio);
@@ -380,13 +356,10 @@ impl eframe::App for MainPage {
 }
 
 fn main() {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
-        .format_module_path(true)
-        .format_target(false)
-        .format_file(false)
-        .format_line_number(true)
-        .target(env_logger::Target::Pipe(Box::new(memlog::MEMLOG.clone())))
-        .init();
+    egui_logger::builder()
+        .max_level(log::LevelFilter::Debug)
+        .init()
+        .unwrap();
     log::info!("应用程序启动");
     let icon_image = image::load_from_memory(include_bytes!("../assets/icon.png")).unwrap();
     eframe::run_native(
