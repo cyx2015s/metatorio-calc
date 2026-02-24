@@ -88,7 +88,6 @@ pub fn machine_fits_for_resource(
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "type", rename = "factorio:mining")]
 #[serde(default)]
 pub struct MiningInstance {
     pub resource: String,
@@ -330,7 +329,6 @@ fn test_mining_normalized() {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "type", rename = "factorio:mining", default)]
 #[derive(Default)]
 pub struct MiningMechanic {
     #[serde(skip)]

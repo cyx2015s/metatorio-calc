@@ -413,7 +413,6 @@ pub fn machine_fits_for_recipe(
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "type", rename = "factorio:recipe")]
 #[serde(default)]
 pub struct RecipeInstance {
     pub recipe: IdWithQuality,
@@ -680,7 +679,6 @@ fn test_recipe_normalized() {
 
 #[serde_as]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "type", rename = "factorio:recipe", default)]
 #[derive(Default)]
 pub struct RecipeMechanic {
     #[serde(skip)]
