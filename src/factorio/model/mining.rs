@@ -608,16 +608,17 @@ impl FactorioMechanic for MiningMechanic {
                     for resource in data.resources.values() {
                         if let Some(mining) = resource.base.minable.as_ref()
                             && let Some(required_fluid) = &mining.required_fluid
-                                && required_fluid == name {
-                                    self.suggested_resources
-                                        .insert(resource.base.base.name.clone());
-                                }
+                            && required_fluid == name
+                        {
+                            self.suggested_resources
+                                .insert(resource.base.base.name.clone());
+                        }
                     }
                 }
                 GenericItem::Entity(name) => {
                     if let Some(entity) = data.entities.get(&name.0)
-                    && entity.base.r#type == "resource"
-                    && let Some(_mining) = entity.minable.as_ref()
+                        && entity.base.r#type == "resource"
+                        && let Some(_mining) = entity.minable.as_ref()
                     {
                         self.suggested_resources.insert(entity.base.name.clone());
                     }

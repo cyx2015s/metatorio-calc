@@ -868,17 +868,18 @@ fn temperature_editor(
             ui.horizontal(|ui| {
                 ui.menu_button("选择预设温度", |ui| {
                     for &temp in temperatures {
-                        if temp >= default_temp && temp <= max_temp
+                        if temp >= default_temp
+                            && temp <= max_temp
                             && ui
                                 .selectable_label(
                                     *editing_temperature == temp,
                                     format!("{}℃", temp),
                                 )
                                 .clicked()
-                            {
-                                *editing_temperature = temp;
-                                *changed = true;
-                            }
+                        {
+                            *editing_temperature = temp;
+                            *changed = true;
+                        }
                     }
                 });
             });

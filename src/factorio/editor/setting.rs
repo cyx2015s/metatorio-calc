@@ -62,11 +62,9 @@ impl egui::Widget for UserContextEditor<'_> {
             ui.horizontal(|ui| {
                 let icon = ui.add(Icon::new(self.data, "technology", name));
                 ui.label(self.data.get_display_name("technology", name));
-                ui.add(
-                    SelectorModal::new(icon.id, "选择科技").with_selector(
-                        Selector::new(self.data, "technology").with_output(&mut selected_tech),
-                    ),
-                );
+                ui.add(SelectorModal::new(icon.id, "选择科技").with_selector(
+                    Selector::new(self.data, "technology").with_output(&mut selected_tech),
+                ));
                 if ui.checkbox(unlocked, "解锁").changed() {
                     if *unlocked {
                         // 切换为解锁时，遍历前置科技并解锁
