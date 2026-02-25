@@ -441,7 +441,7 @@ impl FactorioMechanic for GeneratorMechanic {
             );
             if ui
                 .add(
-                    SelectorModal::new(entity_button.id, data, "选择发电机")
+                    SelectorModal::new(entity_button.id, "选择发电机")
                         .with_toggle(entity_button.clicked())
                         .with_selector(
                             Selector::new(data, "entity")
@@ -475,7 +475,7 @@ impl FactorioMechanic for GeneratorMechanic {
                         ui.add_sized([35.0, 35.0], Icon::new(data, "fluid", &instance.fluid));
                     if ui
                         .add(
-                            SelectorModal::new(fluid_button.id, data, "选择输入流体")
+                            SelectorModal::new(fluid_button.id, "选择输入流体")
                                 .with_toggle(fluid_button.clicked())
                                 .with_selector(
                                     Selector::new(data, "fluid")
@@ -720,7 +720,7 @@ impl FactorioMechanic for BoilerMechanic {
             );
             if ui
                 .add(
-                    SelectorModal::new(entity_button.id, data, "选择锅炉")
+                    SelectorModal::new(entity_button.id, "选择锅炉")
                         .with_toggle(entity_button.clicked())
                         .with_selector(
                             Selector::new(data, "entity")
@@ -762,7 +762,7 @@ impl FactorioMechanic for BoilerMechanic {
                         ui.add_sized([35.0, 35.0], Icon::new(data, "fluid", &instance.fluid));
                     if ui
                         .add(
-                            SelectorModal::new(fluid_button.id, data, "选择输入流体")
+                            SelectorModal::new(fluid_button.id, "选择输入流体")
                                 .with_toggle(fluid_button.clicked())
                                 .with_selector(
                                     Selector::new(data, "fluid")
@@ -1050,7 +1050,7 @@ impl FactorioMechanic for FluidFuelMechanic {
                 ui.add_sized([35.0, 35.0], Icon::new(data, "fluid", &instance.fluid));
             if ui
                 .add(
-                    SelectorModal::new(fluid_button.id, data, "选择流体")
+                    SelectorModal::new(fluid_button.id, "选择流体")
                         .with_toggle(fluid_button.clicked())
                         .with_selector(
                             Selector::new(data, "fluid")
@@ -1234,7 +1234,7 @@ impl FactorioMechanic for FluidHeatMechanic {
                 ui.add_sized([35.0, 35.0], Icon::new(data, "fluid", &instance.fluid));
             if ui
                 .add(
-                    SelectorModal::new(fluid_button.id, data, "选择流体")
+                    SelectorModal::new(fluid_button.id, "选择流体")
                         .with_toggle(fluid_button.clicked())
                         .with_selector(
                             Selector::new(data, "fluid")

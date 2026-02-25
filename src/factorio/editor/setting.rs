@@ -44,7 +44,7 @@ impl egui::Widget for UserContextEditor<'_> {
 
         let mut recalc_accessible = false;
         ui.add(
-            SelectorModal::new(icon.id, self.data, "选择科技")
+            SelectorModal::new(icon.id, "选择科技")
                 .with_selector(
                     Selector::new(self.data, "technology").with_output(&mut new_tech_milestone),
                 )
@@ -63,7 +63,7 @@ impl egui::Widget for UserContextEditor<'_> {
                 let icon = ui.add(Icon::new(self.data, "technology", name));
                 ui.label(self.data.get_display_name("technology", name));
                 ui.add(
-                    SelectorModal::new(icon.id, self.data, "选择科技").with_selector(
+                    SelectorModal::new(icon.id, "选择科技").with_selector(
                         Selector::new(self.data, "technology").with_output(&mut selected_tech),
                     ),
                 );
@@ -120,7 +120,7 @@ impl egui::Widget for UserContextEditor<'_> {
 
         let button = ui.button("查看解锁的配方");
         ui.add(
-            SelectorModal::new(button.id, self.data, "已解锁的配方")
+            SelectorModal::new(button.id, "已解锁的配方")
                 .with_toggle(button.clicked())
                 .with_selector(
                     Selector::new(self.data, "recipe").with_filter(|s: &str, _f| {
@@ -130,7 +130,7 @@ impl egui::Widget for UserContextEditor<'_> {
         );
         let button = ui.button("查看解锁的实体");
         ui.add(
-            SelectorModal::new(button.id, self.data, "已解锁的实体")
+            SelectorModal::new(button.id, "已解锁的实体")
                 .with_toggle(button.clicked())
                 .with_selector(
                     Selector::new(self.data, "entity").with_filter(|s: &str, _| {

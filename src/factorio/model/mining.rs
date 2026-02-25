@@ -449,7 +449,7 @@ impl FactorioMechanic for MiningMechanic {
                 ui.add_sized([35.0, 35.0], Icon::new(data, "entity", &instance.resource));
             changed |= ui
                 .add(
-                    SelectorModal::new(resource_button.id, data, "选择矿物")
+                    SelectorModal::new(resource_button.id, "选择矿物")
                         .with_toggle(resource_button.clicked())
                         .with_selector(
                             Selector::new(data, "entity")
@@ -483,7 +483,7 @@ impl FactorioMechanic for MiningMechanic {
             if let Some(resource_proto) = data.resources.get(&instance.resource) {
                 changed |= ui
                     .add(
-                        SelectorModal::new(entity_button.id, data, "选择采矿设备")
+                        SelectorModal::new(entity_button.id, "选择采矿设备")
                             .with_toggle(entity_button.clicked())
                             .with_selector(
                                 Selector::new(data, "entity")

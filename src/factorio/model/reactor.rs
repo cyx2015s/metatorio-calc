@@ -98,7 +98,7 @@ impl FactorioMechanic for ReactorMechanic {
             );
             changed |= ui
                 .add(
-                    SelectorModal::new(entity_button.id, data, "选择反应堆")
+                    SelectorModal::new(entity_button.id, "选择反应堆")
                         .with_toggle(entity_button.clicked())
                         .with_selector(
                             Selector::new(data, "entity")

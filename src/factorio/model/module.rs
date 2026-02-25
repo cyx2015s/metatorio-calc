@@ -431,7 +431,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                     }
                                 });
 
-                            let widget = SelectorModal::new(icon.id, self.data, "选择插件")
+                            let widget = SelectorModal::new(icon.id, "选择插件")
                                 .with_toggle(icon.clicked())
                                 .with_selector(selector);
                             if ui.add(widget).changed() {
@@ -466,7 +466,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                     }
                                 });
 
-                            let widget = SelectorModal::new(icon.id, self.data, "填充插件")
+                            let widget = SelectorModal::new(icon.id, "填充插件")
                                 .with_toggle(icon.clicked())
                                 .with_selector(selector);
 
@@ -547,7 +547,7 @@ pub fn beacon_config_ui(
             if ui.add(widget).changed() {
                 response.mark_changed();
             }
-            let widget = SelectorModal::new(icon.id, data, "选择插件塔")
+            let widget = SelectorModal::new(icon.id, "选择插件塔")
                 .with_toggle(icon.clicked())
                 .with_selector(selector);
 
@@ -587,7 +587,7 @@ pub fn beacon_config_ui(
                             }
                         },
                     );
-                    let widget = SelectorModal::new(icon.id, data, "选择插件")
+                    let widget = SelectorModal::new(icon.id, "选择插件")
                         .with_toggle(icon.clicked())
                         .with_selector(selector);
                     if ui.add(widget).changed() {

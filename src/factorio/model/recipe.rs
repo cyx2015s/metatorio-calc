@@ -806,7 +806,7 @@ impl FactorioMechanic for RecipeMechanic {
                 .add_sized([35.0, 35.0], icon)
                 .on_hover_text("选择新的机器顺序依据");
             ui.add(
-                SelectorModal::new(button.id, data, "选择机器")
+                SelectorModal::new(button.id, "选择机器")
                     .with_toggle(button.clicked())
                     .with_selector(
                         Selector::new(data, "entity")
@@ -846,7 +846,7 @@ impl FactorioMechanic for RecipeMechanic {
                             changed = true;
                         }
                         ui.add(
-                            SelectorModal::new(button.id, data, "选择机器")
+                            SelectorModal::new(button.id, "选择机器")
                                 .with_toggle(button.clicked())
                                 .with_selector(
                                     Selector::new(data, "entity")
@@ -895,7 +895,7 @@ impl FactorioMechanic for RecipeMechanic {
                 .add_sized([35.0, 35.0], icon)
                 .on_hover_text("选择新的枚举插件。修改插件请先删除。");
             ui.add(
-                SelectorModal::new(button.id, data, "选择枚举插件")
+                SelectorModal::new(button.id, "选择枚举插件")
                     .with_toggle(button.clicked())
                     .with_selector(
                         Selector::new(data, "item")
@@ -994,7 +994,7 @@ impl FactorioMechanic for RecipeMechanic {
             );
             changed |= ui
                 .add(
-                    SelectorModal::new(recipe_button.id, data, "选择配方")
+                    SelectorModal::new(recipe_button.id, "选择配方")
                         .with_toggle(recipe_button.clicked())
                         .with_selector(
                             Selector::new(data, "recipe")
@@ -1046,7 +1046,7 @@ impl FactorioMechanic for RecipeMechanic {
                 })
                 .with_current(&mut instance.machine);
 
-            let widget = SelectorModal::new(entity_button.id, data, "选择制造设备")
+            let widget = SelectorModal::new(entity_button.id, "选择制造设备")
                 .with_toggle(entity_button.clicked())
                 .with_selector(selector);
             changed |= ui.add(widget).changed();

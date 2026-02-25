@@ -410,7 +410,7 @@ pub fn generic_item_selector(
             GenericItem::Item(id_with_quality) => {
                 changed |= ui
                     .add(
-                        SelectorModal::new(id.with("select-item"), data, "选择物品")
+                        SelectorModal::new(id.with("select-item"), "选择物品")
                             .with_toggle(toggle)
                             .with_selector(
                                 Selector::new(data, "item").with_current(id_with_quality),
@@ -421,7 +421,7 @@ pub fn generic_item_selector(
             GenericItem::Fluid { name, temperature } => {
                 changed |= ui
                     .add(
-                        SelectorModal::new(id.with("select-fluid"), data, "选择流体")
+                        SelectorModal::new(id.with("select-fluid"), "选择流体")
                             .with_toggle(toggle)
                             .with_selector(Selector::new(data, "fluid").with_current(name)),
                     )
@@ -452,7 +452,7 @@ pub fn generic_item_selector(
             GenericItem::Entity(id_with_quality) => {
                 changed |= ui
                     .add(
-                        SelectorModal::new(id.with("select-entity"), data, "选择实体")
+                        SelectorModal::new(id.with("select-entity"), "选择实体")
                             .with_toggle(toggle)
                             .with_selector(
                                 Selector::new(data, "entity")
@@ -472,7 +472,7 @@ pub fn generic_item_selector(
             GenericItem::FluidHeat { filter } => {
                 changed |= ui
                     .add(
-                        SelectorModal::new(id.with("select-fluid-heat"), data, "选择流体热源来源")
+                        SelectorModal::new(id.with("select-fluid-heat"), "选择流体热源来源")
                             .with_toggle(toggle)
                             .with_selector(
                                 Selector::new(data, "fluid")
@@ -498,7 +498,7 @@ pub fn generic_item_selector(
                 }
                 changed |= ui
                     .add(
-                        SelectorModal::new(id, data, "选择流体燃料")
+                        SelectorModal::new(id, "选择流体燃料")
                             .with_toggle(toggle)
                             .with_selector(
                                 Selector::new(data, "fluid")

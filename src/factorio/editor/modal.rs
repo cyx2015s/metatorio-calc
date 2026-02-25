@@ -33,7 +33,6 @@ pub struct SelectorModal<'a, Input, Output>
 where
     Input: 'a + ?Sized,
 {
-    data: &'a DataContext,
     label_str: &'a str,
     id: egui::Id,
     toggle: bool,
@@ -44,10 +43,9 @@ impl<'a, Input, Output> SelectorModal<'a, Input, Output>
 where
     Input: 'a + ?Sized,
 {
-    pub fn new(id: egui::Id, data: &'a DataContext, label_str: &'a str) -> Self {
+    pub fn new(id: egui::Id, label_str: &'a str) -> Self {
         Self {
             id,
-            data,
             label_str,
             toggle: false,
             selector: None,

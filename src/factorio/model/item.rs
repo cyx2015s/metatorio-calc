@@ -290,7 +290,7 @@ impl FactorioMechanic for SpoilMechanic {
 
             changed |= ui
                 .add(
-                    SelectorModal::new(item_button.id, data, "选择变质物品")
+                    SelectorModal::new(item_button.id, "选择变质物品")
                         .with_toggle(item_button.clicked())
                         .with_selector(
                             Selector::new(data, "item")
@@ -490,7 +490,7 @@ impl FactorioMechanic for PlantMechanic {
             );
             changed |= ui
                 .add(
-                    SelectorModal::new(button.id, data, "选择种子")
+                    SelectorModal::new(button.id, "选择种子")
                         .with_toggle(button.clicked())
                         .with_selector(
                             Selector::new(data, "item")
@@ -710,7 +710,7 @@ impl FactorioMechanic for ItemFuelMechanic {
             );
             changed |= ui
                 .add(
-                    SelectorModal::new(item_button.id, data, "选择发射物")
+                    SelectorModal::new(item_button.id, "选择发射物")
                         .with_toggle(item_button.clicked())
                         .with_selector(
                             Selector::new(data, "item")
@@ -909,7 +909,7 @@ impl FactorioMechanic for ItemLaunchMechanic {
             );
             changed |= ui
                 .add(
-                    SelectorModal::new(item_button.id, data, "选择发射物品")
+                    SelectorModal::new(item_button.id, "选择发射物品")
                         .with_toggle(item_button.clicked())
                         .with_selector(
                             Selector::new(data, "item")

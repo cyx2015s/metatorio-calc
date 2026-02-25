@@ -738,7 +738,7 @@ impl FactoryInstance {
             ui.label("优先使用的机器品质");
             let mut quality: Option<String> = None;
             ui.add(
-                SelectorModal::new(button.id, data, "选择偏好品质")
+                SelectorModal::new(button.id, "选择偏好品质")
                     .with_toggle(button.clicked())
                     .with_selector(Selector::new(data, "quality").with_output(&mut quality)),
             );
