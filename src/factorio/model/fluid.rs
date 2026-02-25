@@ -501,6 +501,10 @@ impl FactorioMechanic for GeneratorMechanic {
                     }
                 });
             }
+            if let Some(fluid) = data.fluids.get(&instance.fluid) {
+                ui.separator();
+                temperature_editor(ui, data, &mut changed, &mut instance.temperature, fluid);
+            }
         }
         changed
     }
@@ -779,6 +783,12 @@ impl FactorioMechanic for BoilerMechanic {
                         changed = true;
                     }
                 });
+
+                // 添加温度选择
+                if let Some(fluid) = data.fluids.get(&instance.fluid) {
+                    ui.separator();
+                    temperature_editor(ui, data, &mut changed, &mut instance.temperature, fluid);
+                }
             }
         }
         changed
@@ -833,12 +843,64 @@ impl FactorioMechanic for BoilerMechanic {
                                 fuel: None,
                             });
                         }
-                        // }
                     }
                 }
             }
         }
     }
+}
+
+fn temperature_editor(
+    ui: &mut egui::Ui,
+    data: &DataContext,
+    changed: &mut bool,
+    editing_temperature: &mut i32,
+    fluid: &FluidPrototype,
+) {
+    ui.vertical(|ui| {
+        let default_temp = fluid.default_temperature as i32;
+        let max_temp = fluid
+            .max_temperature
+            .map(|v| v as i32)
+            .unwrap_or(default_temp);
+        // 从data.temperatures中选择固定温度
+        if let Some(temperatures) = data.temperatures.get(&fluid.base.name) {
+            ui.horizontal(|ui| {
+                ui.menu_button("选择预设温度", |ui| {
+                    for &temp in temperatures {
+                        if temp >= default_temp && temp <= max_temp
+                            && ui
+                                .selectable_label(
+                                    *editing_temperature == temp,
+                                    format!("{}℃", temp),
+                                )
+                                .clicked()
+                            {
+                                *editing_temperature = temp;
+                                *changed = true;
+                            }
+                    }
+                });
+            });
+        }
+
+        // 允许手动输入温度
+        ui.horizontal(|ui| {
+            ui.label("编辑温度:");
+            if ui
+                .add(
+                    egui::DragValue::new(editing_temperature)
+                        .speed(1)
+                        .range(default_temp..=max_temp)
+                        .suffix("℃")
+                        .clamp_existing_to_range(true),
+                )
+                .changed()
+            {
+                *changed = true;
+            }
+        });
+    });
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -1014,7 +1076,10 @@ impl FactorioMechanic for FluidFuelMechanic {
                     .default_temperature as i32;
             }
         });
-        ui.separator();
+        if let Some(fluid) = data.fluids.get(&instance.fluid) {
+            ui.separator();
+            temperature_editor(ui, data, &mut changed, &mut instance.temperature, fluid);
+        }
         changed
     }
 
@@ -1195,7 +1260,11 @@ impl FactorioMechanic for FluidHeatMechanic {
                     .default_temperature as i32;
             }
         });
-        ui.separator();
+
+        if let Some(fluid) = data.fluids.get(&instance.fluid) {
+            ui.separator();
+            temperature_editor(ui, data, &mut changed, &mut instance.temperature, fluid);
+        }
         changed
     }
 

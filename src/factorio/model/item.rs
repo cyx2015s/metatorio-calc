@@ -104,6 +104,8 @@ pub struct SpoilMechanic {
     #[serde(skip)]
     pub operations: Vec<(usize, EntryOpRequest)>,
     pub instances: Vec<SpoilInstance>,
+    #[serde(skip)]
+    pub suggestion_item: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -169,12 +171,28 @@ impl FactorioMechanic for SpoilMechanic {
 
     fn update_suggestion(
         &mut self,
-        _data: &DataContext,
+        data: &DataContext,
         _proj: &ProjectContext,
         _factory: &FactoryContext,
-        _item: &GenericItem,
-        _amount: f64,
+        item: &GenericItem,
+        amount: f64,
     ) {
+        if let GenericItem::Item(item) = item {
+            if amount < 0.0 {
+                self.suggestion_item = Some(item.0.clone());
+            } else if amount > 0.0 {
+                for item in data.items.values() {
+                    if item
+                        .spoil
+                        .as_ref()
+                        .is_some_and(|s| s.spoil_result.as_ref() == Some(&item.base.name))
+                    {
+                        self.suggestion_item = Some(item.base.name.clone());
+                        break;
+                    }
+                }
+            }
+        }
     }
 
     #[allow(unused_variables)]
@@ -185,7 +203,20 @@ impl FactorioMechanic for SpoilMechanic {
         proj: &ProjectContext,
         factory: &FactoryContext,
     ) -> bool {
-        false
+        let mut new_item = None;
+        ui.add(
+            Selector::new(data, "item")
+                .with_output(&mut new_item)
+                .with_filter(|s: &IdWithQuality, f| {
+                    self.suggestion_item.as_ref().is_some_and(|t| t == &s.0)
+                }),
+        );
+        if let Some(new_item) = new_item {
+            self.instances.push(SpoilInstance { item: new_item });
+            true
+        } else {
+            false
+        }
     }
 
     #[allow(unused_variables)]
@@ -481,6 +512,11 @@ pub struct ItemFuelMechanic {
     #[serde(skip)]
     pub operations: Vec<(usize, EntryOpRequest)>,
     pub instances: Vec<ItemFuelInstance>,
+
+    #[serde(skip)]
+    pub suggested_category: Option<String>,
+    #[serde(skip)]
+    pub suggested_item: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -548,9 +584,24 @@ impl FactorioMechanic for ItemFuelMechanic {
         _data: &DataContext,
         _proj: &ProjectContext,
         _factory: &FactoryContext,
-        _item: &GenericItem,
+        item: &GenericItem,
         _amount: f64,
     ) {
+        match item {
+            GenericItem::ItemFuel { category } => {
+                if _amount > 0.0 {
+                    self.suggested_category = Some(category.clone());
+                    self.suggested_item = None;
+                }
+            }
+            GenericItem::Item(item) => {
+                if _amount < 0.0 {
+                    self.suggested_item = Some(item.0.clone());
+                    self.suggested_category = None;
+                }
+            }
+            _ => {}
+        }
     }
 
     #[allow(unused_variables)]
@@ -561,7 +612,32 @@ impl FactorioMechanic for ItemFuelMechanic {
         proj: &ProjectContext,
         factory: &FactoryContext,
     ) -> bool {
-        false
+        let mut new_fuel = None;
+        ui.add(
+            Selector::new(data, "item")
+                .with_output(&mut new_fuel)
+                .with_filter(|s: &IdWithQuality, f| {
+                    if let Some(item) = f.items.get(&s.0) {
+                        item.burn.as_ref().is_some_and(|b| {
+                            match (self.suggested_category.as_ref(), b.fuel_category.as_ref()) {
+                                (Some(suggested), Some(fuel_cat)) => suggested == fuel_cat,
+                                (Some(suggested), None) => suggested == "chemical", // 默认类别为 chemical
+                                (None, _) => {
+                                    self.suggested_item.as_ref().is_some_and(|t| t == &s.0)
+                                }
+                            }
+                        })
+                    } else {
+                        false
+                    }
+                }),
+        );
+        if let Some(new_fuel) = new_fuel {
+            self.instances.push(ItemFuelInstance { item: new_fuel });
+            true
+        } else {
+            false
+        }
     }
 
     #[allow(unused_variables)]

@@ -83,7 +83,7 @@ pub struct DataContext {
     pub boilers: Dict<BoilerPrototype>,
     pub generators: Dict<GeneratorPrototype>,
     pub reactors: Dict<ReactorPrototype>,
-    pub temperatures: Dict<HashSet<i32>>, // 所有流体的*常见*温度列表（出现在filter中指定温度的）
+    pub temperatures: Dict<Vec<i32>>, // 所有流体的*常见*温度列表（出现在filter中指定温度的）
 
     pub plants: Dict<PlantPrototype>,
 
@@ -696,8 +696,9 @@ impl DataContext {
     }
 
     pub fn build_temperature_info(mut self) -> Self {
+        let mut temperatures: Dict<HashSet<i32>> = Dict::new();
         for fluid in self.fluids.values() {
-            self.temperatures
+            temperatures
                 .entry(fluid.base.name.clone())
                 .or_default()
                 .insert(fluid.default_temperature as i32);
@@ -709,7 +710,7 @@ impl DataContext {
                 if let RecipeIngredient::Fluid(fluid) = ingredient
                     && let Some(temperature) = fluid.temperature
                 {
-                    self.temperatures
+                    temperatures
                         .entry(fluid.name.clone())
                         .or_default()
                         .insert(temperature as i32);
@@ -719,7 +720,7 @@ impl DataContext {
                 if let RecipeResult::Fluid(fluid) = result
                     && let Some(temperature) = fluid.temperature
                 {
-                    self.temperatures
+                    temperatures
                         .entry(fluid.name.clone())
                         .or_default()
                         .insert(temperature as i32);
@@ -732,16 +733,24 @@ impl DataContext {
             if let Some(filter) = boiler.output_fluid_box.filter.as_ref()
                 && boiler.mode == BoilerMode::OutputToSeparatePipe
             {
-                self.temperatures
+                temperatures
                     .entry(filter.clone())
                     .or_default()
                     .insert(boiler.target_temperature.unwrap() as i32);
             }
         }
         log::debug!("构建温度信息完成，包含以下流体的温度信息：",);
-        self.temperatures.iter().for_each(|(fluid, temperatures)| {
-            log::debug!(" - {}: {:?}", fluid, temperatures);
-        });
+        self.temperatures = temperatures
+            .into_iter()
+            .map(|(fluid, temps)| (fluid, temps.into_iter().collect()))
+            .collect();
+        self.temperatures
+            .iter_mut()
+            .for_each(|(fluid, temperatures)| {
+                temperatures.sort_unstable();
+                log::debug!(" - {}: {:?}", fluid, temperatures);
+            });
+
         self
     }
 
