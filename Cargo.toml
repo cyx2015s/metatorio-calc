@@ -10,7 +10,7 @@ eframe = { version = "0.33.3", features = ["wgpu"] }
 egui = { version = "0.33.3", features = ["rayon"] }
 egui-toast = "0.19.1"
 egui_dnd = "0.14.0"
-egui_extras = { version = "0.33.3", features = ["all_loaders"] }
+egui_extras = { version = "0.33.3", features = ["file", "image"] }
 egui_logger = { version = "0.1.0", path = "egui_logger" }
 fontdb = "0.23.0"
 good_lp = { "version" = "1.14.2", default-features = false, features = ["microlp"] }
@@ -20,7 +20,7 @@ log = "0.4.29"
 mimalloc = "0.1.48"
 rayon = "1.11.0"
 regex = "1.12.2"
-reqwest = { version = "0.13.1", features = ["blocking"] }
+reqwest = { version = "0.13.1", default-features = false, features = ["blocking", "rustls"] }
 rfd = "0.16.0"
 self_update = "0.42.0"
 serde = { version = "1.0.228", features = ["derive"] }
