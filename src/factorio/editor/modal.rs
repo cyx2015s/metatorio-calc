@@ -115,50 +115,9 @@ impl egui::Widget for SelectorModal<'_, str, String> {
 impl egui::Widget for SelectorModal<'_, IdWithQuality, IdWithQuality> {
     fn ui(mut self, ui: &mut egui::Ui) -> egui::Response {
         assert!(self.selector.is_some(), "无法选中");
-        let data = &self.data;
         let mut response = ui.response().clone();
-        if data.qualities.len() == 1 {
-            // 回退到普通选择器
-            let mut degenerated: Option<String> = None;
-
-            let old_selector = self.selector.take().unwrap();
-            let mut selector = Selector::new(self.data, old_selector.type_name);
-            if let Some(filter) = old_selector.filter {
-                selector = selector.with_filter(move |s: &str, f: &DataContext| {
-                    let id_with_quality = IdWithQuality(s.to_string(), 0);
-                    filter(&id_with_quality, f)
-                });
-            }
-            if let Some(hover) = old_selector.hover {
-                selector = selector.with_hover(move |ui, s, factorio| {
-                    let id_with_quality = IdWithQuality(s.to_string(), 0);
-                    hover(ui, &id_with_quality, factorio);
-                });
-            }
-            if let Some(current) = old_selector.current {
-                current.1 = 0;
-                selector = selector.with_current(&mut current.0);
-            }
-
-            selector = selector.with_output(&mut degenerated);
-            response = response.union(
-                ui.add(
-                    SelectorModal::new(self.id.with("degenerated"), self.data, self.label_str)
-                        .with_selector(selector)
-                        .with_toggle(self.toggle),
-                ),
-            );
-
-            if let Some(selected) = degenerated
-                && let Some(&mut ref mut output) = old_selector.output
-            {
-                *output = Some(IdWithQuality(selected, 0));
-            }
-
-            return response;
-        }
+        let mut widget = self.selector.take().unwrap();
         show_modal(self.id, self.toggle, ui, |ui| {
-            let mut widget = self.selector.take().unwrap();
             let mut filter_string = ui
                 .memory(move |mem| {
                     mem.data

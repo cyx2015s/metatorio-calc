@@ -231,8 +231,10 @@ impl<'a> egui::Widget for Selector<'a, IdWithQuality, IdWithQuality> {
         };
         let prev_storage_quality = storage.selected_quality;
         let prev_storage_item = storage.selected_item.clone();
-        if quality_selector(ui, self.data, &mut storage.selected_quality) {
-            response.mark_changed();
+        if self.data.qualities.len() > 1 {
+            if quality_selector(ui, self.data, &mut storage.selected_quality) {
+                response.mark_changed();
+            }
         }
         let mut widget: Selector<'_, str, String> =
             Selector::new(self.data, self.type_name).with_output(&mut storage.selected_item);
@@ -272,16 +274,21 @@ impl<'a> egui::Widget for Selector<'a, IdWithQuality, IdWithQuality> {
             }
         }
 
-        if let (Some(item), Some(quality)) =
-            (storage.selected_item.clone(), storage.selected_quality)
-        {
-            response.mark_changed();
-            response.set_close();
-            if let Some(&mut ref mut output) = self.output {
-                *output = Some(IdWithQuality(item, quality));
+        if let Some(item) = &storage.selected_item {
+            if let Some(quality) = storage.selected_quality {
+                response.mark_changed();
+                response.set_close();
+                if let Some(&mut ref mut output) = self.output {
+                    *output = Some(IdWithQuality(item.clone(), quality));
+                }
+            } else if self.data.qualities.len() == 1 {
+                response.mark_changed();
+                response.set_close();
+                if let Some(&mut ref mut output) = self.output {
+                    *output = Some(IdWithQuality(item.clone(), 0));
+                }
             }
         }
-
         ui.memory_mut(|mem| {
             mem.data
                 .insert_temp::<ItemWithQualitySelectorStorage>(id, storage.clone());
