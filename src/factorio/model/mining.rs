@@ -328,8 +328,7 @@ fn test_mining_normalized() {
     println!("Mining Result with Location: {:?}", result_with_location);
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
 pub struct MiningMechanic {
     #[serde(skip)]
     pub operations: Vec<(usize, EntryOpRequest)>,
@@ -447,11 +446,7 @@ impl FactorioMechanic for MiningMechanic {
 
             let resource_button = ui
                 .add_sized([35.0, 35.0], Icon::new(data, "entity", &instance.resource))
-                .interact(egui::Sense::click())
-                .on_hover_text(format!(
-                    "矿物：{}",
-                    data.get_display_name("entity", &instance.resource)
-                ));
+                .interact(egui::Sense::click());
             changed |= ui
                 .add(
                     SelectorModal::new(resource_button.id, data, "选择矿物")
@@ -485,12 +480,7 @@ impl FactorioMechanic for MiningMechanic {
                     [35.0, 35.0],
                     Icon::new(data, "entity", &instance.machine.0).with_quality(instance.machine.1),
                 )
-                .interact(egui::Sense::click())
-                .on_hover_text(if data.miners.contains_key(&instance.machine.0) {
-                    data.get_display_name("entity", &instance.machine.0)
-                } else {
-                    "采矿机: 未选择".into()
-                });
+                .interact(egui::Sense::click());
 
             if let Some(resource_proto) = data.resources.get(&instance.resource) {
                 changed |= ui

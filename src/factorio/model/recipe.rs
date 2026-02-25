@@ -11,7 +11,7 @@ use crate::{
     factorio::{
         DataContext, ModulePrototype, ProjectContext, SurfaceCondition,
         common::*,
-        editor::{hover::PrototypeHover, icon::Icon},
+        editor::icon::Icon,
         modal::SelectorModal,
         model::{
             data::GenericItem,
@@ -678,8 +678,7 @@ fn test_recipe_normalized() {
 }
 
 #[serde_as]
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
 pub struct RecipeMechanic {
     #[serde(skip)]
     pub operations: Vec<(usize, EntryOpRequest)>,
@@ -833,12 +832,8 @@ impl FactorioMechanic for RecipeMechanic {
                             ui.heading("☰");
                         });
                         let icon = Icon::new(data, "entity", &machine.0).with_quality(machine.1);
-                        let mut button = ui.add(icon).interact(egui::Sense::click());
-                        if let Some(crafter) = data.crafters.get(&machine.0) {
-                            button = button.on_hover_ui(|ui| {
-                                ui.add(PrototypeHover::new(data, crafter));
-                            });
-
+                        let button = ui.add(icon).interact(egui::Sense::click());
+                        if data.crafters.contains_key(&machine.0) {
                             if button.secondary_clicked() {
                                 delete_target = Some(machine.clone());
                                 changed = true;
@@ -997,13 +992,7 @@ impl FactorioMechanic for RecipeMechanic {
                     [35.0, 35.0],
                     Icon::new(data, "recipe", &instance.recipe.0).with_quality(instance.recipe.1),
                 )
-                .interact(egui::Sense::click())
-                .on_hover_ui(|ui| {
-                    ui.add(PrototypeHover::new(
-                        data,
-                        data.recipes.get(&instance.recipe.0).unwrap(),
-                    ));
-                });
+                .interact(egui::Sense::click());
             changed |= ui
                 .add(
                     SelectorModal::new(recipe_button.id, data, "选择配方")
@@ -1011,14 +1000,9 @@ impl FactorioMechanic for RecipeMechanic {
                         .with_selector(
                             Selector::new(data, "recipe")
                                 .with_current(&mut instance.recipe)
-                                .with_hover(|ui, name: &IdWithQuality, data: &DataContext| {
-                                    if let Some(prototype) = data.recipes.get(name.0.as_str()) {
-                                        ui.add(PrototypeHover::new(data, prototype));
-                                    } else {
-                                        ui.label(format!("未知配方: {}", name.0));
-                                    }
-                                })
-                                .with_filter(|s, _f| proj.is_prototype_accessible("recipe", &s.0)),
+                                .with_filter(|s: &IdWithQuality, _f| {
+                                    proj.is_prototype_accessible("recipe", &s.0)
+                                }),
                         ),
                 )
                 .changed();
@@ -1046,18 +1030,12 @@ impl FactorioMechanic for RecipeMechanic {
         ui.separator();
         ui.vertical(|ui| {
             ui.label("组装机");
-            let mut entity_button = ui
+            let entity_button = ui
                 .add_sized(
                     [35.0, 35.0],
                     Icon::new(data, "entity", &instance.machine.0).with_quality(instance.machine.1),
                 )
                 .interact(egui::Sense::click());
-
-            if let Some(crafter) = data.crafters.get(&instance.machine.0) {
-                entity_button = entity_button.on_hover_ui(|ui| {
-                    ui.add(PrototypeHover::new(data, crafter));
-                });
-            }
 
             let selector = Selector::new(data, "entity")
                 .with_filter(|crafter_name: &IdWithQuality, data: &DataContext| {
@@ -1069,10 +1047,7 @@ impl FactorioMechanic for RecipeMechanic {
                     }
                     false
                 })
-                .with_current(&mut instance.machine)
-                .with_hover(|ui, name, data| {
-                    ui.add(PrototypeHover::new(data, &data.crafters[&name.0]));
-                });
+                .with_current(&mut instance.machine);
 
             let widget = SelectorModal::new(entity_button.id, data, "选择制造设备")
                 .with_toggle(entity_button.clicked())
@@ -1207,13 +1182,6 @@ impl FactorioMechanic for RecipeMechanic {
                                 .get_display_name("recipe", id)
                                 .to_lowercase()
                                 .contains(&self.suggested_recipes_filter.to_lowercase()))
-                })
-                .with_hover(|ui: &mut egui::Ui, name: &str, data: &DataContext| {
-                    if let Some(prototype) = data.recipes.get(name) {
-                        ui.add(PrototypeHover::new(data, prototype));
-                    } else {
-                        ui.label(format!("未知配方: {}", name));
-                    }
                 }),
         );
         if let Some(recipe) = &self.selected_suggested_recipe {

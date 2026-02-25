@@ -542,11 +542,6 @@ pub fn beacon_config_ui(
                     Icon::new(data, "entity", &beacon_config.beacon.0)
                         .with_quality(beacon_config.beacon.1),
                 )
-                .on_hover_text(if data.beacons.contains_key(&beacon_config.beacon.0) {
-                    data.get_display_name("entity", &beacon_config.beacon.0)
-                } else {
-                    "未选择插件塔".to_string()
-                })
                 .interact(egui::Sense::click());
             let selector = Selector::new(data, "entity")
                 .with_current(&mut beacon_config.beacon)
@@ -578,11 +573,6 @@ pub fn beacon_config_ui(
                             [35.0, 35.0],
                             Icon::new(data, "item", &id.0).with_quality(id.1),
                         )
-                        .on_hover_text(if data.modules.contains_key(&id.0) {
-                            data.get_display_name("item", &id.0)
-                        } else {
-                            "未选择插件".to_string()
-                        })
                         .interact(egui::Sense::click());
                     if icon.clicked_by(egui::PointerButton::Secondary) {
                         deleted = true;

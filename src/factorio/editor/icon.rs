@@ -81,16 +81,18 @@ impl<'a> egui::Widget for Icon<'a> {
             .corner_radius(4.0)
             .stroke(self.stroke)
             .show(ui, |ui| {
-                let icon = ui.add(
-                    self.image()
-                        .max_size(Vec2 {
-                            x: self.size,
-                            y: self.size,
-                        })
-                        .maintain_aspect_ratio(true)
-                        .shrink_to_fit()
-                        .show_loading_spinner(true),
-                );
+                let mut icon = ui
+                    .add(
+                        self.image()
+                            .max_size(Vec2 {
+                                x: self.size,
+                                y: self.size,
+                            })
+                            .maintain_aspect_ratio(true)
+                            .shrink_to_fit()
+                            .show_loading_spinner(true),
+                    )
+                    .interact(egui::Sense::hover());
                 if self.quality > 0 && (self.quality as usize) < data.qualities.len() {
                     ui.put(
                         icon.rect
@@ -106,6 +108,40 @@ impl<'a> egui::Widget for Icon<'a> {
                         )),
                     );
                 }
+                match self.type_name {
+                    "item" => {
+                        if let Some(item) = data.items.get(self.item_name) {
+                            icon = icon.on_hover_ui(|ui| {
+                                ui.add(PrototypeHover::new(data, item).with_quality(self.quality));
+                            });
+                        }
+                    }
+                    "fluid" => {
+                        if let Some(fluid) = data.fluids.get(self.item_name) {
+                            icon = icon.on_hover_ui(|ui| {
+                                ui.add(PrototypeHover::new(data, fluid));
+                            });
+                        }
+                    }
+                    "entity" => {
+                        if let Some(entity) = data.entities.get(self.item_name) {
+                            icon = icon.on_hover_ui(|ui| {
+                                ui.add(
+                                    PrototypeHover::new(data, entity).with_quality(self.quality),
+                                );
+                            });
+                        }
+                    }
+                    "recipe" => {
+                        if let Some(recipe) = data.recipes.get(self.item_name) {
+                            icon = icon.on_hover_ui(|ui| {
+                                ui.add(PrototypeHover::new(data, recipe));
+                            });
+                        }
+                    }
+                    _ => {}
+                }
+                icon
             })
             .response
     }
@@ -223,13 +259,19 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                 main
             }
             GenericItem::Entity(IdWithQuality(name, quality)) => {
-                let main = ui.add_sized(
-                    [self.size, self.size],
-                    Icon::new(self.data, "entity", name)
-                        .with_quality(*quality)
-                        .with_size(self.size)
-                        .with_stroke(self.stroke),
-                );
+                let main = ui
+                    .add_sized(
+                        [self.size, self.size],
+                        Icon::new(self.data, "entity", name)
+                            .with_quality(*quality)
+                            .with_size(self.size)
+                            .with_stroke(self.stroke),
+                    )
+                    .on_hover_ui(|ui| {
+                        if let Some(entity) = data.entities.get(name) {
+                            ui.add(PrototypeHover::new(data, entity).with_quality(*quality));
+                        }
+                    });
                 let right_bottom = main
                     .rect
                     .split_left_right_at_fraction(0.5)
@@ -263,6 +305,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                             ))
                             .max_size([self.size, self.size].into()),
                         )
+                        .on_hover_text("热能")
                     })
                     .inner
             }
@@ -281,6 +324,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                             ))
                             .max_size([self.size, self.size].into()),
                         )
+                        .on_hover_text("电能")
                     })
                     .inner
             }
@@ -303,6 +347,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                                 ))
                                 .max_size([self.size, self.size].into()),
                             )
+                            .on_hover_text("流体热能")
                         })
                         .inner
                 }
@@ -326,6 +371,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                                 ))
                                 .max_size([self.size, self.size].into()),
                             )
+                            .on_hover_text("流体燃料")
                         })
                         .inner
                 }

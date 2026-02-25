@@ -1,5 +1,4 @@
 use crate::concept::Flow;
-use crate::factorio::hover::PrototypeHover;
 use crate::factorio::{EntityPrototype, ItemResult, RecipeResult, common::*};
 
 use crate::{
@@ -257,14 +256,8 @@ impl FactorioMechanic for SpoilMechanic {
                     [35.0, 35.0],
                     Icon::new(data, "item", &instance.item.0).with_quality(instance.item.1),
                 )
-                .interact(egui::Sense::click())
-                .on_hover_ui(|ui| {
-                    if let Some(item_prototype) = data.items.get(&instance.item.0) {
-                        ui.add(
-                            PrototypeHover::new(data, item_prototype).with_quality(instance.item.1),
-                        );
-                    }
-                });
+                .interact(egui::Sense::click());
+                
             changed |= ui
                 .add(
                     SelectorModal::new(item_button.id, data, "选择变质物品")
@@ -272,15 +265,7 @@ impl FactorioMechanic for SpoilMechanic {
                         .with_selector(
                             Selector::new(data, "item")
                                 .with_current(&mut instance.item)
-                                .with_hover(|ui, name: &IdWithQuality, data| {
-                                    if let Some(item_prototype) = data.items.get(&name.0) {
-                                        ui.add(
-                                            PrototypeHover::new(data, item_prototype)
-                                                .with_quality(name.1),
-                                        );
-                                    }
-                                })
-                                .with_filter(|s, f| {
+                                .with_filter(|s: &IdWithQuality, f| {
                                     f.items.get(&s.0).is_some_and(|i| {
                                         i.spoil.as_ref().is_some_and(|s| s.spoil_result.is_some())
                                     })
@@ -649,14 +634,7 @@ impl FactorioMechanic for ItemFuelMechanic {
                     [35.0, 35.0],
                     Icon::new(data, "item", &instance.item.0).with_quality(instance.item.1),
                 )
-                .interact(egui::Sense::click())
-                .on_hover_ui(|ui| {
-                    if let Some(item_prototype) = data.items.get(&instance.item.0) {
-                        ui.add(
-                            PrototypeHover::new(data, item_prototype).with_quality(instance.item.1),
-                        );
-                    }
-                });
+                .interact(egui::Sense::click());
             changed |= ui
                 .add(
                     SelectorModal::new(item_button.id, data, "选择发射物")
@@ -664,15 +642,7 @@ impl FactorioMechanic for ItemFuelMechanic {
                         .with_selector(
                             Selector::new(data, "item")
                                 .with_current(&mut instance.item)
-                                .with_hover(|ui, name: &IdWithQuality, data| {
-                                    if let Some(item_prototype) = data.items.get(&name.0) {
-                                        ui.add(
-                                            PrototypeHover::new(data, item_prototype)
-                                                .with_quality(name.1),
-                                        );
-                                    }
-                                })
-                                .with_filter(|s, f| {
+                                .with_filter(|s: &IdWithQuality, f| {
                                     f.items.get(&s.0).is_some_and(|i| i.burn.is_some())
                                 }),
                         ),
@@ -864,14 +834,7 @@ impl FactorioMechanic for ItemLaunchMechanic {
                     [35.0, 35.0],
                     Icon::new(data, "item", &instance.item.0).with_quality(instance.item.1),
                 )
-                .interact(egui::Sense::click())
-                .on_hover_ui(|ui| {
-                    if let Some(item_prototype) = data.items.get(&instance.item.0) {
-                        ui.add(
-                            PrototypeHover::new(data, item_prototype).with_quality(instance.item.1),
-                        );
-                    }
-                });
+                .interact(egui::Sense::click());
             changed |= ui
                 .add(
                     SelectorModal::new(item_button.id, data, "选择发射物品")
@@ -879,15 +842,7 @@ impl FactorioMechanic for ItemLaunchMechanic {
                         .with_selector(
                             Selector::new(data, "item")
                                 .with_current(&mut instance.item)
-                                .with_hover(|ui, name: &IdWithQuality, data| {
-                                    if let Some(item_prototype) = data.items.get(&name.0) {
-                                        ui.add(
-                                            PrototypeHover::new(data, item_prototype)
-                                                .with_quality(name.1),
-                                        );
-                                    }
-                                })
-                                .with_filter(|s, f| {
+                                .with_filter(|s: &IdWithQuality, f| {
                                     f.items
                                         .get(&s.0)
                                         .is_some_and(|i| !i.rocket_launch_products.is_empty())

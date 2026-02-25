@@ -7,13 +7,13 @@ use crate::factorio::{
 };
 
 #[derive(Debug, Clone)]
-pub struct PrototypeHover<'a, T: HasPrototypeBase> {
+pub struct PrototypeHover<'a, T> {
     pub data: &'a DataContext,
     pub prototype: &'a T,
     pub quality: u8,
 }
 
-impl<'a, T: HasPrototypeBase> PrototypeHover<'a, T> {
+impl<'a, T> PrototypeHover<'a, T> {
     pub fn new(data: &'a DataContext, prototype: &'a T) -> Self {
         Self {
             data,
@@ -101,11 +101,11 @@ impl<'a> egui::Widget for PrototypeHover<'a, ModulePrototype> {
                 data.qualities[self.quality.min((data.qualities.len() - 1) as u8) as usize]
                     .default_multiplier(),
             );
-            ui.label(format!("能耗: {:}%", effect.consumption * 100.0));
-            ui.label(format!("速度: {:}%", effect.speed * 100.0));
-            ui.label(format!("产能: {:}%", effect.productivity * 100.0));
-            ui.label(format!("污染: {:}%", effect.pollution * 100.0));
-            ui.label(format!("品质: {:}%", effect.quality * 100.0));
+            ui.label(format!("能耗: {:.0}%", effect.consumption * 100.0));
+            ui.label(format!("速度: {:.0}%", effect.speed * 100.0));
+            ui.label(format!("产能: {:.0}%", effect.productivity * 100.0));
+            ui.label(format!("污染: {:.0}%", effect.pollution * 100.0));
+            ui.label(format!("品质: {:.0}%", effect.quality * 100.0));
         });
 
         ui.response()
@@ -296,6 +296,64 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
     }
 }
 
+impl<'a> egui::Widget for PrototypeHover<'a, EntityPrototype> {
+    fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+        let data = &self.data;
+        ui.vertical(|ui| {
+            ui.set_min_width(140.0);
+            ui.label(data.get_display_name("entity", &self.prototype.base.name));
+            if let Some(miner) = data.miners.get(&self.prototype.base.name) {
+                ui.add(PrototypeHover::new(data, miner).with_quality(self.quality));
+            }
+            if let Some(crafter) = data.crafters.get(&self.prototype.base.name) {
+                ui.add(PrototypeHover::new(data, crafter).with_quality(self.quality));
+            }
+            if let Some(generator) = data.generators.get(&self.prototype.base.name) {
+                ui.add(PrototypeHover::new(data, generator).with_quality(self.quality));
+            }
+        });
+
+        ui.response()
+    }
+}
+
+impl<'a> egui::Widget for PrototypeHover<'a, MiningDrillPrototype> {
+    fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+        let data = &self.data;
+        ui.vertical(|ui| {
+            ui.set_min_width(140.0);
+            ui.label(data.get_display_name("entity", &self.prototype.base.base.name));
+            ui.label(format!("挖掘速度: {}", self.prototype.mining_speed));
+            ui.label(format!(
+                "资源消耗: {}",
+                (self
+                    .prototype
+                    .resource_drain_rate_percent
+                    .unwrap_or(100.0)
+                    .floor()
+                    * data.qualities[self.quality.min((data.qualities.len() - 1) as u8) as usize]
+                        .mining_drill_resource_drain_multiplier()) as i32
+            ));
+            ui.label(format!("插件槽位: {}", self.prototype.module_slots));
+            ui.label(format!(
+                "因为运行而导致的能量消耗: {}W",
+                compact_number(
+                    self.prototype
+                        .energy_usage
+                        .as_ref()
+                        .map_or(0.0, |e| e.amount)
+                        * 60.0
+                )
+            ));
+            if let Some(effect_receiver) = self.prototype.effect_receiver.as_ref() {
+                effect_receiver_ui(ui, effect_receiver);
+            }
+        });
+
+        ui.response()
+    }
+}
+
 impl<'a> egui::Widget for PrototypeHover<'a, CraftingMachinePrototype> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         let data = &self.data;
@@ -315,35 +373,64 @@ impl<'a> egui::Widget for PrototypeHover<'a, CraftingMachinePrototype> {
                 )
             ));
             if let Some(effect_receiver) = self.prototype.effect_receiver.as_ref() {
-                #[allow(irrefutable_let_patterns)]
-                if let val = effect_receiver.base_effect.consumption
-                    && val != 0.0
-                {
-                    ui.label(format!("基础能耗: {}%", (val * 100.0) as i32));
-                }
-                #[allow(irrefutable_let_patterns)]
-                if let val = effect_receiver.base_effect.speed
-                    && val != 0.0
-                {
-                    ui.label(format!("基础速度: {}%", (val * 100.0) as i32));
-                }
-                #[allow(irrefutable_let_patterns)]
-                if let val = effect_receiver.base_effect.productivity
-                    && val != 0.0
-                {
-                    ui.label(format!("基础产能: {}%", (val * 100.0) as i32));
-                }
-                #[allow(irrefutable_let_patterns)]
-                if let val = effect_receiver.base_effect.pollution
-                    && val != 0.0
-                {
-                    ui.label(format!("基础污染: {}%", (val * 100.0) as i32));
-                }
-                #[allow(irrefutable_let_patterns)]
-                if let val = effect_receiver.base_effect.quality
-                    && val != 0.0
-                {
-                    ui.label(format!("基础品质: {}%", (val * 100.0) as i32));
+                effect_receiver_ui(ui, effect_receiver);
+            }
+        });
+
+        ui.response()
+    }
+}
+
+fn effect_receiver_ui(ui: &mut egui::Ui, effect_receiver: &EffectReceiver) {
+    #[allow(irrefutable_let_patterns)]
+    if let val = effect_receiver.base_effect.consumption
+        && val != 0.0
+    {
+        ui.label(format!("基础能耗: {}%", (val * 100.0) as i32));
+    }
+    #[allow(irrefutable_let_patterns)]
+    if let val = effect_receiver.base_effect.speed
+        && val != 0.0
+    {
+        ui.label(format!("基础速度: {}%", (val * 100.0) as i32));
+    }
+    #[allow(irrefutable_let_patterns)]
+    if let val = effect_receiver.base_effect.productivity
+        && val != 0.0
+    {
+        ui.label(format!("基础产能: {}%", (val * 100.0) as i32));
+    }
+    #[allow(irrefutable_let_patterns)]
+    if let val = effect_receiver.base_effect.pollution
+        && val != 0.0
+    {
+        ui.label(format!("基础污染: {}%", (val * 100.0) as i32));
+    }
+    #[allow(irrefutable_let_patterns)]
+    if let val = effect_receiver.base_effect.quality
+        && val != 0.0
+    {
+        ui.label(format!("基础品质: {}%", (val * 100.0) as i32));
+    }
+}
+
+impl<'a> egui::Widget for PrototypeHover<'a, GeneratorPrototype> {
+    fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+        let data = &self.data;
+        ui.vertical(|ui| {
+            ui.label(format!(
+                "效率: {}%",
+                (self.prototype.effectivity * 100.0) as i32
+            ));
+            if let Some(filter) = &self.prototype.fluid_box.filter {
+                ui.add(Icon::new(data, "fluid", filter));
+                ui.label(data.get_display_name("fluid", filter));
+                if let Some(fluid) = data.fluids.get(filter) {
+                    let flow = self
+                        .prototype
+                        .get_output(fluid, self.prototype.maximum_temperature);
+                    ui.label(format!("流体消耗: {}/s", flow.0));
+                    ui.label(format!("电量输出: {}", EnergyAmount { amount: flow.1 }));
                 }
             }
         });

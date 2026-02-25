@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use egui::Vec2;
 
 use crate::factorio::{
-    DataContext, IdWithQuality, drag_value, editor::icon::*, modal::SelectorModal, model::*,
+    DataContext, IdWithQuality, drag_value, editor::icon::*, hover::PrototypeHover,
+    modal::SelectorModal, model::*,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -188,11 +189,43 @@ impl<'a> egui::Widget for Selector<'a, str, String> {
                         if let Some(hover) = &self.hover {
                             button = button.on_hover_ui(|ui| (hover)(ui, item_name, self.data));
                         } else {
-                            button = button.on_hover_text(
-                                self.data
-                                    .get_display_name(self.type_name, item_name)
-                                    .to_string(),
-                            );
+                            match self.type_name {
+                                "entity" => {
+                                    button = button.on_hover_ui(|ui| {
+                                        if let Some(entity) = self.data.entities.get(item_name) {
+                                            ui.add(PrototypeHover::new(self.data, entity));
+                                        }
+                                    });
+                                }
+                                "item" => {
+                                    button = button.on_hover_ui(|ui| {
+                                        if let Some(item) = self.data.items.get(item_name) {
+                                            ui.add(PrototypeHover::new(self.data, item));
+                                        }
+                                    });
+                                }
+                                "fluid" => {
+                                    button = button.on_hover_ui(|ui| {
+                                        if let Some(fluid) = self.data.fluids.get(item_name) {
+                                            ui.add(PrototypeHover::new(self.data, fluid));
+                                        }
+                                    });
+                                }
+                                "recipe" => {
+                                    button = button.on_hover_ui(|ui| {
+                                        if let Some(recipe) = self.data.recipes.get(item_name) {
+                                            ui.add(PrototypeHover::new(self.data, recipe));
+                                        }
+                                    });
+                                }
+                                _ => {
+                                    button = button.on_hover_text(
+                                        self.data
+                                            .get_display_name(self.type_name, item_name)
+                                            .to_string(),
+                                    );
+                                }
+                            }
                         }
 
                         if button.clicked() {
@@ -257,6 +290,48 @@ impl<'a> egui::Widget for Selector<'a, IdWithQuality, IdWithQuality> {
 
                 hover(ui, &id_with_quality, data);
             });
+        } else {
+            match self.type_name {
+                "entity" => {
+                    widget = widget.with_hover(|ui, s, data| {
+                        if let Some(entity) = data.entities.get(s) {
+                            ui.add(
+                                PrototypeHover::new(data, entity)
+                                    .with_quality(storage.selected_quality.unwrap_or(0)),
+                            );
+                        }
+                    });
+                }
+                "item" => {
+                    widget = widget.with_hover(|ui, s, data| {
+                        if let Some(item) = data.items.get(s) {
+                            ui.add(
+                                PrototypeHover::new(data, item)
+                                    .with_quality(storage.selected_quality.unwrap_or(0)),
+                            );
+                        }
+                    });
+                }
+                "fluid" => {
+                    widget = widget.with_hover(|ui, s, data| {
+                        if let Some(fluid) = data.fluids.get(s) {
+                            ui.add(PrototypeHover::new(data, fluid));
+                        }
+                    });
+                }
+                "recipe" => {
+                    widget = widget.with_hover(|ui, s, data| {
+                        if let Some(recipe) = data.recipes.get(s) {
+                            ui.add(PrototypeHover::new(data, recipe));
+                        }
+                    });
+                }
+                _ => {
+                    widget = widget.with_hover(|ui, s, data| {
+                        ui.label(data.get_display_name(self.type_name, s));
+                    })
+                }
+            }
         }
         if ui.add(widget).changed() {
             response.mark_changed();
@@ -324,7 +399,6 @@ pub fn quality_selector(
                                 },
                             ),
                     )
-                    .on_hover_text(data.get_display_name("quality", &quality.base.name))
                     .interact(egui::Sense::click());
                 if quality_button.clicked() {
                     *selected_quality = Some(idx as u8);
@@ -464,7 +538,7 @@ pub fn generic_item_selector(
                                             e.base.r#type == "resource"
                                                 || e.base.r#type == "asteroid-chunk"
                                         })
-                                    }),
+                                    })
                             ),
                     )
                     .changed();

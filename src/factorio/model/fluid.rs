@@ -2,7 +2,7 @@ use crate::{
     concept::{EntryOpRequest, EntryOpResult, Flow, SolveContext},
     factorio::{
         DataContext, EntityPrototype, GenericItem, ProjectContext, common::*,
-        energy_source_as_flow, hover::PrototypeHover, icon::Icon, modal::SelectorModal,
+        energy_source_as_flow, icon::Icon, modal::SelectorModal,
         planner::FactoryContext, selector::Selector,
     },
     math::{ElemVec, flow_add},
@@ -64,8 +64,8 @@ pub struct GeneratorPrototype {
 }
 
 impl GeneratorPrototype {
-    // 输入指定温度的流体时，流体的消耗量和电量产出
-    // 返回：(每秒消耗的流体量, 每秒产生的电量)
+    /// 输入指定温度的流体时，流体的消耗量和电量产出
+    /// 返回：(每秒消耗的流体量, 每秒产生的电量)
     pub fn get_output(&self, fluid: &FluidPrototype, temperature: f64) -> (f64, f64) {
         let mut scale = 1.0;
         if self.burns_fluid {
@@ -286,6 +286,8 @@ pub struct GeneratorMechanic {
     pub operations: Vec<(usize, EntryOpRequest)>,
 
     pub instances: Vec<GeneratorInstance>,
+
+    pub show_suggestion: bool,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -491,11 +493,6 @@ impl FactorioMechanic for GeneratorMechanic {
                                             }
                                             false
                                         })
-                                        .with_hover(|ui, name, data| {
-                                            if let Some(fluid) = data.fluids.get(name) {
-                                                ui.add(PrototypeHover::new(data, fluid));
-                                            }
-                                        }),
                                 ),
                         )
                         .changed()
@@ -577,6 +574,68 @@ impl FactorioMechanic for GeneratorMechanic {
                 }
             }
         }
+    }
+
+    fn update_suggestion(
+        &mut self,
+        _data: &DataContext,
+        _proj: &ProjectContext,
+        _factory: &FactoryContext,
+        item: &GenericItem,
+        amount: f64,
+    ) {
+        if item == &GenericItem::Electricity && amount > 0.0 {
+            self.show_suggestion = true;
+        } else {
+            self.show_suggestion = false;
+        }
+    }
+
+    fn suggestion_view(
+        &mut self,
+        ui: &mut egui::Ui,
+        data: &DataContext,
+        proj: &ProjectContext,
+        _factory: &FactoryContext,
+    ) -> bool {
+        let mut changed = false;
+        let mut output = None;
+        changed |= ui
+            .add(
+                Selector::new(data, "entity")
+                    .with_filter(|s: &IdWithQuality, f| {
+                        f.generators.contains_key(&s.0)
+                            && proj.is_prototype_accessible("entity", &s.0)
+                    })
+                    .with_output(&mut output)
+            )
+            .changed();
+        if let Some(output) = output
+            && let Some(generator) = data.generators.get(&output.0)
+        {
+            if let Some(filter) = &generator.fluid_box.filter {
+                if let Some(fluid) = data.fluids.get(filter)
+                    && proj.is_prototype_accessible("entity", &generator.base.base.name)
+                    && ((generator.burns_fluid && fluid.fuel_value.is_some())
+                        || (!generator.burns_fluid
+                            && fluid.heat_capacity.is_none_or(|x| x.amount > 0.0)))
+                {
+                    self.instances.push(GeneratorInstance {
+                        generator: output,
+                        fluid: filter.clone(),
+                        temperature: generator.maximum_temperature as i32,
+                    });
+                }
+            } else {
+                self.instances.push(GeneratorInstance {
+                    generator: output,
+                    fluid: "fluid-unknown".to_string(),
+                    temperature: 25,
+                });
+            }
+        }
+
+        changed
     }
 }
 
@@ -720,11 +779,6 @@ impl FactorioMechanic for BoilerMechanic {
                                             }
                                             false
                                         })
-                                        .with_hover(|ui, name, data| {
-                                            if let Some(fluid) = data.fluids.get(name) {
-                                                ui.add(PrototypeHover::new(data, fluid));
-                                            }
-                                        }),
                                 ),
                         )
                         .changed()
@@ -955,11 +1009,6 @@ impl FactorioMechanic for FluidFuelMechanic {
                                     }
                                     false
                                 })
-                                .with_hover(|ui, name, data| {
-                                    if let Some(fluid) = data.fluids.get(name) {
-                                        ui.add(PrototypeHover::new(data, fluid));
-                                    }
-                                }),
                         ),
                 )
                 .changed()
@@ -1141,11 +1190,6 @@ impl FactorioMechanic for FluidHeatMechanic {
                                     }
                                     false
                                 })
-                                .with_hover(|ui, name, data| {
-                                    if let Some(fluid) = data.fluids.get(name) {
-                                        ui.add(PrototypeHover::new(data, fluid));
-                                    }
-                                }),
                         ),
                 )
                 .changed()
