@@ -371,7 +371,7 @@ fn main() {
                     width: icon_image.width(),
                     height: icon_image.height(),
                 }),
-
+            #[cfg(feature = "wgpu")]
             renderer: eframe::Renderer::Wgpu,
 
             ..Default::default()
