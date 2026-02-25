@@ -287,6 +287,7 @@ pub struct GeneratorMechanic {
 
     pub instances: Vec<GeneratorInstance>,
 
+    #[serde(skip)]
     pub show_suggestion: bool,
 }
 
@@ -383,6 +384,8 @@ impl SolveContext for GeneratorMechanic {
 }
 
 #[typetag::serde(name = "factorio:generator")]
+impl SerdeFactorioMechanic for GeneratorMechanic {}
+
 impl FactorioMechanic for GeneratorMechanic {
     fn name(&self) -> String {
         "流体发电".to_string()
@@ -432,12 +435,10 @@ impl FactorioMechanic for GeneratorMechanic {
         let instance = &mut self.instances[idx];
         ui.vertical(|ui| {
             ui.label("发电机");
-            let entity_button = ui
-                .add_sized(
-                    [35.0, 35.0],
-                    Icon::new(data, "entity", &instance.generator.0)
-                        .with_quality(instance.generator.1),
-                );
+            let entity_button = ui.add_sized(
+                [35.0, 35.0],
+                Icon::new(data, "entity", &instance.generator.0).with_quality(instance.generator.1),
+            );
             if ui
                 .add(
                     SelectorModal::new(entity_button.id, data, "选择发电机")
@@ -470,9 +471,8 @@ impl FactorioMechanic for GeneratorMechanic {
                 // 如果发电机没有指定输入流体，则允许用户选择输入流体
                 ui.vertical(|ui| {
                     ui.label("编辑输入");
-                    let fluid_button = ui
-                        .add_sized([35.0, 35.0], Icon::new(data, "fluid", &instance.fluid))
-                        ;
+                    let fluid_button =
+                        ui.add_sized([35.0, 35.0], Icon::new(data, "fluid", &instance.fluid));
                     if ui
                         .add(
                             SelectorModal::new(fluid_button.id, data, "选择输入流体")
@@ -606,7 +606,7 @@ impl FactorioMechanic for GeneratorMechanic {
                         f.generators.contains_key(&s.0)
                             && proj.is_prototype_accessible("entity", &s.0)
                     })
-                    .with_output(&mut output)
+                    .with_output(&mut output),
             )
             .changed();
         if let Some(output) = output
@@ -652,7 +652,7 @@ impl SolveContext for BoilerMechanic {
 }
 
 #[typetag::serde(name = "factorio:boiler")]
-impl FactorioMechanic for BoilerMechanic {
+impl SerdeFactorioMechanic for BoilerMechanic{} impl FactorioMechanic for BoilerMechanic {
     fn name(&self) -> String {
         "锅炉".to_string()
     }
@@ -713,12 +713,10 @@ impl FactorioMechanic for BoilerMechanic {
         let instance = &mut self.instances[idx];
         ui.vertical(|ui| {
             ui.label("锅炉");
-            let entity_button = ui
-                .add_sized(
-                    [35.0, 35.0],
-                    Icon::new(data, "entity", &instance.boiler.0).with_quality(instance.boiler.1),
-                )
-                ;
+            let entity_button = ui.add_sized(
+                [35.0, 35.0],
+                Icon::new(data, "entity", &instance.boiler.0).with_quality(instance.boiler.1),
+            );
             if ui
                 .add(
                     SelectorModal::new(entity_button.id, data, "选择锅炉")
@@ -759,9 +757,8 @@ impl FactorioMechanic for BoilerMechanic {
                 // 如果锅炉没有指定输入流体，则允许用户选择输入流体
                 ui.vertical(|ui| {
                     ui.label("编辑输入");
-                    let fluid_button = ui
-                        .add_sized([35.0, 35.0], Icon::new(data, "fluid", &instance.fluid))
-                        ;
+                    let fluid_button =
+                        ui.add_sized([35.0, 35.0], Icon::new(data, "fluid", &instance.fluid));
                     if ui
                         .add(
                             SelectorModal::new(fluid_button.id, data, "选择输入流体")
@@ -931,7 +928,7 @@ impl SolveContext for FluidFuelMechanic {
 }
 
 #[typetag::serde(name = "factorio:fluid-fuel")]
-impl FactorioMechanic for FluidFuelMechanic {
+impl SerdeFactorioMechanic for FluidFuelMechanic{} impl FactorioMechanic for FluidFuelMechanic {
     fn name(&self) -> String {
         "流体燃烧".to_string()
     }
@@ -989,9 +986,8 @@ impl FactorioMechanic for FluidFuelMechanic {
         let instance = &mut self.instances[idx];
         ui.vertical(|ui| {
             ui.label("流体燃烧");
-            let fluid_button = ui
-                .add_sized([35.0, 35.0], Icon::new(data, "fluid", &instance.fluid))
-                ;
+            let fluid_button =
+                ui.add_sized([35.0, 35.0], Icon::new(data, "fluid", &instance.fluid));
             if ui
                 .add(
                     SelectorModal::new(fluid_button.id, data, "选择流体")
@@ -1112,7 +1108,7 @@ impl SolveContext for FluidHeatMechanic {
 }
 
 #[typetag::serde(name = "factorio:fluid-heat")]
-impl FactorioMechanic for FluidHeatMechanic {
+impl SerdeFactorioMechanic for FluidHeatMechanic{} impl FactorioMechanic for FluidHeatMechanic {
     fn name(&self) -> String {
         "流体供热".to_string()
     }
@@ -1170,9 +1166,8 @@ impl FactorioMechanic for FluidHeatMechanic {
         let instance = &mut self.instances[idx];
         ui.vertical(|ui| {
             ui.label("流体供热");
-            let fluid_button = ui
-                .add_sized([35.0, 35.0], Icon::new(data, "fluid", &instance.fluid))
-                ;
+            let fluid_button =
+                ui.add_sized([35.0, 35.0], Icon::new(data, "fluid", &instance.fluid));
             if ui
                 .add(
                     SelectorModal::new(fluid_button.id, data, "选择流体")

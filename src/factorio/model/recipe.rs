@@ -684,13 +684,16 @@ pub struct RecipeMechanic {
     pub operations: Vec<(usize, EntryOpRequest)>,
 
     pub instances: Vec<RecipeInstance>,
-
+    #[serde(default)]
     pub machine_preferences: Vec<IdWithQuality>,
+    #[serde(default)]
     pub alternative_count: usize,
     #[serde(skip)]
     pub new_machine_preference: Option<IdWithQuality>,
 
     pub enumerate_modules: Vec<IdWithQuality>,
+
+    #[serde(default)]
     #[serde_with(DefaultOnError)]
     pub enumerate_beacons: Vec<AutoBeaconConfig>,
 
@@ -770,7 +773,7 @@ impl SolveContext for RecipeMechanic {
 }
 
 #[typetag::serde(name = "factorio:recipe")]
-impl FactorioMechanic for RecipeMechanic {
+impl SerdeFactorioMechanic for RecipeMechanic{} impl FactorioMechanic for RecipeMechanic {
     fn name(&self) -> String {
         "配方".to_string()
     }

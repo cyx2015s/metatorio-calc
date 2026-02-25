@@ -398,7 +398,7 @@ impl SolveContext for MiningMechanic {
 }
 
 #[typetag::serde(name = "factorio:mining")]
-impl FactorioMechanic for MiningMechanic {
+impl SerdeFactorioMechanic for MiningMechanic{} impl FactorioMechanic for MiningMechanic {
     fn name(&self) -> String {
         "采矿".to_string()
     }

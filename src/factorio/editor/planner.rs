@@ -45,7 +45,7 @@ pub struct FactoryInstance {
     pub name: String,
     pub target: DndVec<(GenericItem, f64)>,
     pub external: DndVec<(GenericItem, f64)>,
-    pub mechanics: Vec<Box<dyn FactorioMechanic>>,
+    pub mechanics: Vec<Box<dyn SerdeFactorioMechanic>>,
     pub instances: Vec<(usize, usize)>,
 
     pub strict_source: bool,
@@ -67,7 +67,7 @@ impl FactoryInstance {
         }
     }
 
-    pub fn with_mechanic(mut self, mechanic: impl FactorioMechanic) -> Self {
+    pub fn with_mechanic(mut self, mechanic: impl SerdeFactorioMechanic) -> Self {
         self.mechanics.push(Box::new(mechanic));
         self
     }

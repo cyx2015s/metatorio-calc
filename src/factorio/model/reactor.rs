@@ -1,9 +1,7 @@
 use crate::{
     concept::{EntryOpRequest, EntryOpResult, Flow, SolveContext},
     factorio::{
-        AsFlow, DataContext, Effect, EnergyAmount, EnergySource, EntityPrototype, FactorioMechanic,
-        GenericItem, IdWithQuality, ProjectContext, energy_source_as_flow, icon::Icon,
-        index_map_update_entry, modal::SelectorModal, planner::FactoryContext, selector::Selector,
+        AsFlow, DataContext, Effect, EnergyAmount, EnergySource, EntityPrototype, FactorioMechanic, GenericItem, IdWithQuality, ProjectContext, SerdeFactorioMechanic, energy_source_as_flow, icon::Icon, index_map_update_entry, modal::SelectorModal, planner::FactoryContext, selector::Selector
     },
     math::{ElemVec, flow_add},
 };
@@ -34,6 +32,8 @@ impl SolveContext for ReactorMechanic {
 }
 
 #[typetag::serde(name = "factorio:reactor")]
+impl SerdeFactorioMechanic for ReactorMechanic {}
+
 impl FactorioMechanic for ReactorMechanic {
     fn editor_view(
         &mut self,
@@ -89,12 +89,10 @@ impl FactorioMechanic for ReactorMechanic {
         let instance = &mut self.instances[idx];
         ui.vertical(|ui| {
             ui.label("反应堆");
-            let entity_button = ui
-                .add_sized(
-                    [35.0, 35.0],
-                    Icon::new(data, "entity", &instance.reactor.0).with_quality(instance.reactor.1),
-                )
-                ;
+            let entity_button = ui.add_sized(
+                [35.0, 35.0],
+                Icon::new(data, "entity", &instance.reactor.0).with_quality(instance.reactor.1),
+            );
             changed |= ui
                 .add(
                     SelectorModal::new(entity_button.id, data, "选择反应堆")

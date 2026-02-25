@@ -154,7 +154,7 @@ impl SolveContext for SpoilMechanic {
 }
 
 #[typetag::serde(name = "factorio:spoil")]
-impl FactorioMechanic for SpoilMechanic {
+impl SerdeFactorioMechanic for SpoilMechanic{} impl FactorioMechanic for SpoilMechanic {
     fn instance_operate(
         &mut self,
         idx: usize,
@@ -372,7 +372,7 @@ impl AsFlow for PlantInstance {
 }
 
 #[typetag::serde(name = "factorio:plant")]
-impl FactorioMechanic for PlantMechanic {
+impl SerdeFactorioMechanic for PlantMechanic{} impl FactorioMechanic for PlantMechanic {
     fn name(&self) -> String {
         "种植".into()
     }
@@ -532,7 +532,7 @@ impl SolveContext for ItemFuelMechanic {
 }
 
 #[typetag::serde(name = "factorio:item-fuel")]
-impl FactorioMechanic for ItemFuelMechanic {
+impl SerdeFactorioMechanic for ItemFuelMechanic{} impl FactorioMechanic for ItemFuelMechanic {
     fn instance_operate(
         &mut self,
         idx: usize,
@@ -719,7 +719,7 @@ impl SolveContext for ItemLaunchMechanic {
 }
 
 #[typetag::serde(name = "factorio:item-launch")]
-impl FactorioMechanic for ItemLaunchMechanic {
+impl SerdeFactorioMechanic for ItemLaunchMechanic{} impl FactorioMechanic for ItemLaunchMechanic {
     fn instance_operate(
         &mut self,
         idx: usize,

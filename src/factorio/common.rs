@@ -16,9 +16,9 @@ use crate::{
 };
 
 #[typetag::serde(tag = "type")]
-pub trait FactorioMechanic:
-    SolveContext<Game = DataContext, Item = GenericItem> + dyn_clone::DynClone
-{
+pub trait SerdeFactorioMechanic: FactorioMechanic + dyn_clone::DynClone {}
+
+pub trait FactorioMechanic: SolveContext<Game = DataContext, Item = GenericItem> {
     fn name(&self) -> String;
 
     fn instances(&self) -> Vec<&dyn AsFlow>;
@@ -87,7 +87,7 @@ pub trait FactorioMechanic:
     }
 }
 
-dyn_clone::clone_trait_object!(FactorioMechanic);
+dyn_clone::clone_trait_object!(SerdeFactorioMechanic);
 
 pub type Dict<T> = HashMap<String, T>;
 pub type Emissions = Dict<f64>;
