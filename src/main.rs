@@ -1,6 +1,6 @@
 #![cfg_attr(all(not(test), not(debug_assertions)), windows_subsystem = "windows")]
 
-use std::sync::mpsc::*;
+use std::sync::{LazyLock, mpsc::*};
 
 use egui::special_emojis::GITHUB;
 use mimalloc::MiMalloc;
@@ -18,7 +18,6 @@ pub mod concept;
 
 pub mod error;
 pub mod factorio;
-pub mod locale;
 pub mod math;
 pub mod toast;
 pub mod update;
@@ -153,13 +152,11 @@ impl MainPage {
     }
 }
 
-lazy_static::lazy_static! {
-    pub static ref FONT_DB : fontdb::Database = {
-        let mut db = fontdb::Database::new();
-        db.load_system_fonts();
-        db
-    };
-}
+pub static FONT_DB: LazyLock<fontdb::Database> = LazyLock::new(|| {
+    let mut db = fontdb::Database::new();
+    db.load_system_fonts();
+    db
+});
 
 impl eframe::App for MainPage {
     fn update(&mut self, factorio: &eframe::egui::Context, frame: &mut eframe::Frame) {

@@ -1,6 +1,6 @@
 use std::{
     io::{BufRead, Write},
-    sync::Arc,
+    sync::{Arc, LazyLock},
 };
 
 use egui::mutex::Mutex;
@@ -304,9 +304,8 @@ pub enum DownloadProgress {
     Completed,
 }
 
-lazy_static::lazy_static!(
-    pub static ref DOWNLOAD_PROGRESS: Arc<Mutex<DownloadProgress>> = Arc::new(Mutex::new(DownloadProgress::Pending));
-);
+pub static DOWNLOAD_PROGRESS: LazyLock<Arc<Mutex<DownloadProgress>>> =
+    LazyLock::new(|| Arc::new(Mutex::new(DownloadProgress::Pending)));
 
 pub fn get_download_progress() -> DownloadProgress {
     *DOWNLOAD_PROGRESS.lock()

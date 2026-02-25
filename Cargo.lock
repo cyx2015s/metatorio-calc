@@ -2520,12 +2520,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lazy_static"
-version = "1.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
-
-[[package]]
 name = "lebe"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2723,7 +2717,6 @@ dependencies = [
  "good_lp",
  "image",
  "indexmap 2.13.0",
- "lazy_static",
  "log",
  "mimalloc",
  "rayon",

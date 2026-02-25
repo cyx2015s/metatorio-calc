@@ -1276,48 +1276,48 @@ impl SubView for ProjectInstance {
                                 "factories",
                                 |ui, real_idx, factory, handle, _, op| {
                                     ui.horizontal(|ui| {
-                                        if handle
-                                            .ui(ui, |ui| {
-                                                ui.label(
-                                                    egui::RichText::new(&factory.name)
-                                                        .background_color(
-                                                            if self.proj.selected_page
-                                                                == ProjectPage::Index(real_idx)
-                                                            {
-                                                                ui.visuals().selection.bg_fill
-                                                            } else {
-                                                                ui.visuals()
-                                                                    .widgets
-                                                                    .noninteractive
-                                                                    .bg_fill
-                                                            },
-                                                        ),
-                                                );
-                                            })
-                                            .interact(egui::Sense::click())
-                                            .clicked()
-                                        {
-                                            self.proj.selected_page = ProjectPage::Index(real_idx);
-                                        }
-                                        if ui.button("⧉").clicked() {
-                                            self.proj
-                                                .factory_sender
-                                                .as_ref()
-                                                .unwrap()
-                                                .send(factory.clone())
-                                                .unwrap();
-                                        }
-                                        if ui.button("×").clicked() {
-                                            *op = EntryOpRequest::Drop;
-                                            if let ProjectPage::Index(page) =
-                                                self.proj.selected_page
-                                                && page >= real_idx
-                                                && page > 0
-                                            {
-                                                self.proj.selected_page =
-                                                    ProjectPage::Index(page - 1);
-                                            }
-                                        }
+                                        egui::Frame::NONE
+                                            .fill(
+                                                if self.proj.selected_page
+                                                    == ProjectPage::Index(real_idx)
+                                                {
+                                                    ui.visuals().selection.bg_fill
+                                                } else {
+                                                    ui.visuals().widgets.noninteractive.bg_fill
+                                                },
+                                            )
+                                            .corner_radius(4.0)
+                                            .show(ui, |ui| {
+                                                if handle
+                                                    .ui(ui, |ui| {
+                                                        ui.label(&factory.name);
+                                                    })
+                                                    .interact(egui::Sense::click())
+                                                    .clicked()
+                                                {
+                                                    self.proj.selected_page =
+                                                        ProjectPage::Index(real_idx);
+                                                }
+                                                if ui.button("⧉").clicked() {
+                                                    self.proj
+                                                        .factory_sender
+                                                        .as_ref()
+                                                        .unwrap()
+                                                        .send(factory.clone())
+                                                        .unwrap();
+                                                }
+                                                if ui.button("×").clicked() {
+                                                    *op = EntryOpRequest::Drop;
+                                                    if let ProjectPage::Index(page) =
+                                                        self.proj.selected_page
+                                                        && page >= real_idx
+                                                        && page > 0
+                                                    {
+                                                        self.proj.selected_page =
+                                                            ProjectPage::Index(page - 1);
+                                                    }
+                                                }
+                                            });
                                     });
                                 },
                             );
