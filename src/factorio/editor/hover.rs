@@ -302,6 +302,57 @@ impl<'a> egui::Widget for PrototypeHover<'a, EntityPrototype> {
         ui.vertical(|ui| {
             ui.set_min_width(140.0);
             ui.label(data.get_display_name("entity", &self.prototype.base.name));
+            if let Some(mining) = &self.prototype.minable {
+                if let Some(result) = &mining.result {
+                    ui.label("挖掘返还: ");
+                    ui.horizontal(|ui| {
+                        ui.label(data.get_display_name("item", result));
+                        ui.add_sized([35.0, 35.0], Icon::new(self.data, "item", result));
+                        ui.label(format!("×{}", mining.count.unwrap_or(1.0)));
+                    });
+                } else if !mining.results.is_empty() {
+                    ui.label("挖掘返还");
+                    for result in &mining.results {
+                        match result {
+                            RecipeResult::Item(i) => {
+                                ui.horizontal(|ui| {
+                                    ui.label(data.get_display_name("item", &i.name));
+                                    ui.add_sized(
+                                        [35.0, 35.0],
+                                        Icon::new(self.data, "item", &i.name),
+                                    );
+                                    let output = i.normalized_output();
+                                    ui.label(format!("×{}", output.0 + output.1));
+                                });
+                            }
+                            RecipeResult::Fluid(f) => {
+                                ui.horizontal(|ui| {
+                                    ui.label(data.get_display_name("fluid", &f.name));
+                                    ui.add_sized(
+                                        [35.0, 35.0],
+                                        Icon::new(self.data, "fluid", &f.name),
+                                    );
+                                    let output = f.normalized_output();
+                                    ui.label(format!("×{}", output.0 + output.1));
+                                });
+                            }
+                        }
+                    }
+                }
+                if let Some(required_fluid) = &mining.required_fluid {
+                    ui.label("开采流体: ");
+                    ui.horizontal(|ui| {
+                        ui.label(data.get_display_name("fluid", required_fluid));
+                        ui.add_sized([35.0, 35.0], Icon::new(self.data, "fluid", required_fluid));
+                        ui.label(format!("×{}", mining.fluid_amount.unwrap() / 10.0));
+                    });
+                }
+                if self.prototype.base.r#type == "resource" {
+                    ui.label(format!("挖掘工时: {}%", mining.mining_time * 100.0));
+                } else {
+                    ui.label(format!("挖掘时间: {}s", mining.mining_time));
+                }
+            }
             if let Some(miner) = data.miners.get(&self.prototype.base.name) {
                 ui.add(PrototypeHover::new(data, miner).with_quality(self.quality));
             }
@@ -357,8 +408,25 @@ impl<'a> egui::Widget for PrototypeHover<'a, CraftingMachinePrototype> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         ui.vertical(|ui| {
             ui.set_min_width(140.0);
-            ui.label(format!("制造速度: {}", self.prototype.crafting_speed));
-            ui.label(format!("插件槽位: {}", self.prototype.module_slots));
+            let quality = self.quality.min((self.data.qualities.len() - 1) as u8) as usize;
+            ui.label(format!(
+                "制造速度: {}",
+                self.prototype.crafting_speed
+                    * if let Some(mul) = &self.prototype.crafting_speed_quality_multiplier {
+                        mul[&self.data.qualities[quality].base.name]
+                    } else {
+                        self.data.qualities[quality].crafting_machine_speed_multiplier()
+                    }
+            ));
+            ui.label(format!(
+                "插件槽位: {}",
+                self.prototype.module_slots as i32
+                    + if self.prototype.quality_affects_module_slots {
+                        self.data.qualities[quality].crafting_machine_module_slots_bonus() as i32
+                    } else {
+                        0
+                    }
+            ));
             ui.label(format!(
                 "因为运行而导致的能量消耗: {}W",
                 compact_number(
@@ -367,6 +435,16 @@ impl<'a> egui::Widget for PrototypeHover<'a, CraftingMachinePrototype> {
                         .as_ref()
                         .map_or(0.0, |e| e.amount)
                         * 60.0
+                        * (if self.prototype.quality_affects_energy_usage {
+                            if let Some(mul) = &self.prototype.energy_usage_quality_multiplier {
+                                mul[&self.data.qualities[quality].base.name]
+                            } else {
+                                self.data.qualities[quality]
+                                    .crafting_machine_energy_usage_multiplier()
+                            }
+                        } else {
+                            1.0
+                        })
                 )
             ));
             if let Some(effect_receiver) = self.prototype.effect_receiver.as_ref() {

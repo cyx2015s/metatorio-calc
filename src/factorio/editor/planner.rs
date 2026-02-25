@@ -450,7 +450,7 @@ impl FactoryInstance {
                                         ui.set_max_width(40.0);
                                         let button = ui
                                             .add_sized([25.0, 25.0], GenericIcon::new(data, item));
-                                            
+
                                         button.context_menu(|ui| {
                                             if ui.button("添加到产量目标").clicked() {
                                                 self.target.push((item.clone(), 0.0));
@@ -637,9 +637,8 @@ impl FactoryInstance {
                                 );
                             }
                             ui.push_id(item, |ui| {
-                                let button = ui
-                                    .add_sized([35.0, 35.0], GenericIcon::new(data, item))
-                                    ;
+                                let button =
+                                    ui.add_sized([35.0, 35.0], GenericIcon::new(data, item));
                                 button.context_menu(|ui| {
                                     if ui.button("添加到产量目标").clicked() {
                                         self.target.push((item.clone(), 0.0));
@@ -726,18 +725,16 @@ impl FactoryInstance {
             self.factory.planet = planet_name;
         });
         ui.horizontal_wrapped(|ui| {
-            let button = ui
-                .add_sized(
-                    [35.0, 35.0],
-                    Icon::new(
-                        data,
-                        "quality",
-                        &data.qualities[self.factory.major_quality as usize]
-                            .base
-                            .name,
-                    ),
-                )
-                ;
+            let button = ui.add_sized(
+                [35.0, 35.0],
+                Icon::new(
+                    data,
+                    "quality",
+                    &data.qualities[self.factory.major_quality as usize]
+                        .base
+                        .name,
+                ),
+            );
             ui.label("优先使用的机器品质");
             let mut quality: Option<String> = None;
             ui.add(
@@ -841,9 +838,7 @@ impl FactoryInstance {
                         }
                     });
                     ui.horizontal_wrapped(|ui| {
-                        let icon = ui
-                            .add_sized([35.0, 35.0], GenericIcon::new(data, item))
-                            ;
+                        let icon = ui.add_sized([35.0, 35.0], GenericIcon::new(data, item));
                         if icon.clicked_by(egui::PointerButton::Secondary) {
                             *need_suggestions = true;
                             self.mechanics.iter_mut().for_each(|mechanic| {
@@ -937,9 +932,7 @@ impl FactoryInstance {
                     ui.horizontal_wrapped(|ui| {
                         let icon = GenericIcon::new(data, item);
 
-                        let widget = ui
-                            .add_sized([35.0, 35.0], icon)
-                            ;
+                        let widget = ui.add_sized([35.0, 35.0], icon);
 
                         if widget.clicked_by(egui::PointerButton::Secondary) {
                             *need_suggestions = true;
@@ -1272,7 +1265,7 @@ impl SubView for ProjectInstance {
                                                     .ui(ui, |ui| {
                                                         ui.label(&factory.name);
                                                     })
-                                                    
+                                                    .interact(egui::Sense::click())
                                                     .clicked()
                                                 {
                                                     self.proj.selected_page =
