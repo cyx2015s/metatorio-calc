@@ -951,20 +951,12 @@ impl FactoryInstance {
                         }
                     });
                     ui.horizontal_wrapped(|ui| {
-                        let mut icon = GenericIcon::new(data, item);
-                        let solution_of_target = self.solution.get_sum_of(item).unwrap_or(0.0);
-                        let not_satisfied =
-                            !float_cmp::approx_eq!(f64, solution_of_target, *amount, ulps = 6);
-                        if not_satisfied {
-                            icon = icon.with_stroke(egui::Stroke::new(2.0, egui::Color32::RED));
-                        }
+                        let icon = GenericIcon::new(data, item);
 
-                        let mut widget = ui
+                        let widget = ui
                             .add_sized([35.0, 35.0], icon)
                             .interact(egui::Sense::click());
-                        if not_satisfied {
-                            widget = widget.on_hover_text("\u{26A0}目标已忽略");
-                        }
+
                         if widget.clicked_by(egui::PointerButton::Secondary) {
                             *need_suggestions = true;
                             self.mechanics.iter_mut().for_each(|mechanic| {

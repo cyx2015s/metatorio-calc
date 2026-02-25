@@ -346,7 +346,10 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                     )
                 })
                 .inner
-                .on_hover_text(format!("类别: {}", category,)),
+                .on_hover_text(format!(
+                    "类别: {}",
+                    data.get_display_name("fuel-category", category)
+                )),
             GenericItem::RocketCapacity { stacks, by_weight } => ui
                 .add_sized(
                     [self.size, self.size],

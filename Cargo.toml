@@ -12,7 +12,6 @@ egui-toast = "0.19.1"
 egui_dnd = "0.14.0"
 egui_extras = { version = "0.33.3", features = ["all_loaders"] }
 egui_logger = { version = "0.1.0", path = "egui_logger" }
-float-cmp = "0.10.0"
 fontdb = "0.23.0"
 good_lp = { "version" = "1.14.2", default-features = false, features = ["microlp"] }
 image = { version = "0.25.9", features = ["png"] }

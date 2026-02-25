@@ -517,20 +517,30 @@ pub fn generic_item_selector(
             }
             GenericItem::ItemFuel { category } => {
                 egui::ComboBox::from_id_salt(id.with("item-fuel-category"))
-                    .selected_text(category.clone())
+                    .selected_text(data.get_display_name("fuel-category", category))
                     .show_ui(ui, |ui| {
                         for cat in data.order_of_entries["fuel-category"].keys() {
-                            changed |= ui.selectable_value(category, cat.clone(), cat).clicked();
+                            changed |= ui
+                                .selectable_value(
+                                    category,
+                                    cat.clone(),
+                                    data.get_display_name("fuel-category", cat),
+                                )
+                                .clicked();
                         }
                     });
             }
             GenericItem::Pollution { name } => {
                 egui::ComboBox::from_id_salt(id.with("pollution-type"))
-                    .selected_text(name.clone())
+                    .selected_text(data.get_display_name("airborne-pollutant", name))
                     .show_ui(ui, |ui| {
                         for pollution in data.order_of_entries["airborne-pollutant"].keys() {
                             changed |= ui
-                                .selectable_value(name, pollution.clone(), pollution)
+                                .selectable_value(
+                                    name,
+                                    pollution.clone(),
+                                    data.get_display_name("airborne-pollutant", pollution),
+                                )
                                 .clicked();
                         }
                     });
