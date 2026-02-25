@@ -14,7 +14,7 @@ egui_extras = { version = "0.33.3", features = ["file", "image"] }
 egui_logger = { version = "0.1.0", path = "egui_logger" }
 fontdb = "0.23.0"
 good_lp = { "version" = "1.14.2", default-features = false, features = ["microlp"] }
-image = { version = "0.25.9", features = ["png"] }
+image = { version = "0.25.9", default-features = false, features = ["png", "rayon"] }
 indexmap = { version = "2.13.0", features = ["rayon", "serde"] }
 log = "0.4.29"
 mimalloc = "0.1.48"
