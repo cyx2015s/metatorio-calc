@@ -58,6 +58,20 @@ pub enum SolverSolution<I, R> {
     },
 }
 
+impl<I, R> Default for SolverSolution<I, R>
+where
+    I: ItemIdent,
+    R: ItemIdent,
+{
+    fn default() -> Self {
+        SolverSolution::NotSolved {
+            no_provider: vec![],
+            no_consumer: vec![],
+            description: "未求解".to_string(),
+        }
+    }
+}
+
 impl<I, R> SolverSolution<I, R>
 where
     I: ItemIdent,
@@ -260,7 +274,6 @@ where
                     && providers.is_empty() // 没有生产这个物品的配方
                         && !self.sources.contains_key(i_id) // 外部也不能提供
                         && self.target.get(i_id).as_ref().is_none_or(|v| **v > 0.0)
-                
                 {
                     log::debug!(
                         "求解器：物品 {:?} 无法获得，移除相关配方 {} 个",

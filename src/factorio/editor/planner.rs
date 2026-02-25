@@ -37,7 +37,7 @@ pub struct FactoryContext {
     pub debug: bool,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct FactoryInstance {
     pub factory: FactoryContext,
@@ -51,43 +51,12 @@ pub struct FactoryInstance {
     pub strict_source: bool,
     pub strict_sink: bool,
     #[serde(skip)]
+    pub suggesting_mechanic: usize,
+
+    #[serde(skip)]
     pub solution: SolverSolution<GenericItem, (usize, usize)>,
     #[serde(skip)]
     pub total_flow_sorted_keys: Vec<GenericItem>,
-}
-
-impl Default for FactoryInstance {
-    fn default() -> Self {
-        FactoryInstance {
-            factory: FactoryContext::default(),
-
-            name: "工厂".to_string(),
-            target: DndVec::new(),
-            external: DndVec::new(),
-            mechanics: Vec::new(),
-            instances: Vec::new(),
-
-            strict_source: false,
-            strict_sink: false,
-            solution: SolverSolution::NotSolved {
-                no_provider: vec![],
-                no_consumer: vec![],
-                description: "未求解".to_string(),
-            },
-            total_flow_sorted_keys: Vec::new(),
-        }
-        .with_mechanic(RecipeMechanic::default())
-        .with_mechanic(MiningMechanic::default())
-        .with_mechanic(ItemFuelMechanic::default())
-        .with_mechanic(GeneratorMechanic::default())
-        .with_mechanic(BoilerMechanic::default())
-        .with_mechanic(ReactorMechanic::default())
-        .with_mechanic(PlantMechanic::default())
-        .with_mechanic(SpoilMechanic::default())
-        .with_mechanic(FluidFuelMechanic::default())
-        .with_mechanic(FluidHeatMechanic::default())
-        .with_mechanic(ItemLaunchMechanic::default())
-    }
 }
 
 impl FactoryInstance {
@@ -101,6 +70,21 @@ impl FactoryInstance {
     pub fn with_mechanic(mut self, mechanic: impl FactorioMechanic) -> Self {
         self.mechanics.push(Box::new(mechanic));
         self
+    }
+
+    pub fn with_default_mechanics(mut self) -> Self {
+        self.mechanics.clear();
+        self.with_mechanic(RecipeMechanic::default())
+            .with_mechanic(MiningMechanic::default())
+            .with_mechanic(ItemFuelMechanic::default())
+            .with_mechanic(GeneratorMechanic::default())
+            .with_mechanic(BoilerMechanic::default())
+            .with_mechanic(ReactorMechanic::default())
+            .with_mechanic(PlantMechanic::default())
+            .with_mechanic(SpoilMechanic::default())
+            .with_mechanic(FluidFuelMechanic::default())
+            .with_mechanic(FluidHeatMechanic::default())
+            .with_mechanic(ItemLaunchMechanic::default())
     }
 
     pub fn reset_instances(&mut self) {
@@ -1067,13 +1051,16 @@ impl FactoryInstance {
             ui.set_min_width(640.0);
             ui.set_max_width(640.0);
             egui::ScrollArea::vertical().show(ui, |ui| {
-                self.mechanics.iter_mut().for_each(|mechanic| {
-                    ui.collapsing(mechanic.name(), |ui| {
-                        ui.heading(mechanic.name());
-                        changed |= mechanic.suggestion_view(ui, data, proj, &self.factory);
-                        ui.separator();
+                egui::containers::menu::MenuBar::new().ui(ui, |ui| {
+                    self.mechanics.iter().enumerate().for_each(|(id, m)| {
+                        ui.selectable_value(&mut self.suggesting_mechanic, id, m.name());
                     });
                 });
+                ui.separator();
+                if let Some(mechanic) = self.mechanics.get_mut(self.suggesting_mechanic) {
+                    ui.heading(mechanic.name());
+                    changed |= mechanic.suggestion_view(ui, data, proj, &self.factory);
+                }
             });
         });
         // 无关
@@ -1260,7 +1247,8 @@ impl SubView for ProjectInstance {
                             }
                             if ui.button("+ 新建工厂").clicked() {
                                 let name = "新工厂".to_string();
-                                self.factories.push(FactoryInstance::new(name));
+                                self.factories
+                                    .push(FactoryInstance::new(name).with_default_mechanics());
                             }
                             ui.separator();
                             self.factories.dnd(
