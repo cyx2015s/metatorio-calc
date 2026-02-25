@@ -3,8 +3,7 @@ use std::collections::HashMap;
 use egui::Vec2;
 
 use crate::factorio::{
-    DataContext, IdWithQuality, drag_value, editor::icon::*,
-    modal::SelectorModal, model::*,
+    DataContext, IdWithQuality, drag_value, editor::icon::*, modal::SelectorModal, model::*,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -188,7 +187,7 @@ impl<'a> egui::Widget for Selector<'a, str, String> {
                         let mut button = ui.add(icon);
                         if let Some(hover) = &self.hover {
                             button = button.on_hover_ui(|ui| (hover)(ui, item_name, self.data));
-                        } 
+                        }
 
                         if button.clicked() {
                             storage.subgroup = j;
@@ -252,7 +251,7 @@ impl<'a> egui::Widget for Selector<'a, IdWithQuality, IdWithQuality> {
 
                 hover(ui, &id_with_quality, data);
             });
-        } 
+        }
         if ui.add(widget).changed() {
             response.mark_changed();
         }

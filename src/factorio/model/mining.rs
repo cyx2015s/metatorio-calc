@@ -398,7 +398,8 @@ impl SolveContext for MiningMechanic {
 }
 
 #[typetag::serde(name = "factorio:mining")]
-impl SerdeFactorioMechanic for MiningMechanic{} impl FactorioMechanic for MiningMechanic {
+impl SerdeFactorioMechanic for MiningMechanic {}
+impl FactorioMechanic for MiningMechanic {
     fn name(&self) -> String {
         "采矿".to_string()
     }
@@ -444,9 +445,8 @@ impl SerdeFactorioMechanic for MiningMechanic{} impl FactorioMechanic for Mining
         ui.vertical(|ui| {
             ui.label("开采");
 
-            let resource_button = ui
-                .add_sized([35.0, 35.0], Icon::new(data, "entity", &instance.resource))
-                ;
+            let resource_button =
+                ui.add_sized([35.0, 35.0], Icon::new(data, "entity", &instance.resource));
             changed |= ui
                 .add(
                     SelectorModal::new(resource_button.id, data, "选择矿物")
@@ -475,12 +475,10 @@ impl SerdeFactorioMechanic for MiningMechanic{} impl FactorioMechanic for Mining
         ui.separator();
         ui.vertical(|ui| {
             ui.label("采矿机");
-            let entity_button = ui
-                .add_sized(
-                    [35.0, 35.0],
-                    Icon::new(data, "entity", &instance.machine.0).with_quality(instance.machine.1),
-                )
-                ;
+            let entity_button = ui.add_sized(
+                [35.0, 35.0],
+                Icon::new(data, "entity", &instance.machine.0).with_quality(instance.machine.1),
+            );
 
             if let Some(resource_proto) = data.resources.get(&instance.resource) {
                 changed |= ui

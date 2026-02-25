@@ -154,7 +154,8 @@ impl SolveContext for SpoilMechanic {
 }
 
 #[typetag::serde(name = "factorio:spoil")]
-impl SerdeFactorioMechanic for SpoilMechanic{} impl FactorioMechanic for SpoilMechanic {
+impl SerdeFactorioMechanic for SpoilMechanic {}
+impl FactorioMechanic for SpoilMechanic {
     fn instance_operate(
         &mut self,
         idx: usize,
@@ -251,13 +252,11 @@ impl SerdeFactorioMechanic for SpoilMechanic{} impl FactorioMechanic for SpoilMe
         let instance = &mut self.instances[idx];
         ui.vertical(|ui| {
             ui.label("变质物品");
-            let item_button = ui
-                .add_sized(
-                    [35.0, 35.0],
-                    Icon::new(data, "item", &instance.item.0).with_quality(instance.item.1),
-                )
-                ;
-                
+            let item_button = ui.add_sized(
+                [35.0, 35.0],
+                Icon::new(data, "item", &instance.item.0).with_quality(instance.item.1),
+            );
+
             changed |= ui
                 .add(
                     SelectorModal::new(item_button.id, data, "选择变质物品")
@@ -372,7 +371,8 @@ impl AsFlow for PlantInstance {
 }
 
 #[typetag::serde(name = "factorio:plant")]
-impl SerdeFactorioMechanic for PlantMechanic{} impl FactorioMechanic for PlantMechanic {
+impl SerdeFactorioMechanic for PlantMechanic {}
+impl FactorioMechanic for PlantMechanic {
     fn name(&self) -> String {
         "种植".into()
     }
@@ -453,12 +453,10 @@ impl SerdeFactorioMechanic for PlantMechanic{} impl FactorioMechanic for PlantMe
         let instance = &mut self.instances[idx];
         ui.vertical(|ui| {
             ui.label("种子");
-            let button = ui
-                .add_sized(
-                    [35.0, 35.0],
-                    Icon::new(data, "item", &instance.seed.0).with_quality(instance.seed.1),
-                )
-                ;
+            let button = ui.add_sized(
+                [35.0, 35.0],
+                Icon::new(data, "item", &instance.seed.0).with_quality(instance.seed.1),
+            );
             changed |= ui
                 .add(
                     SelectorModal::new(button.id, data, "选择种子")
@@ -532,7 +530,8 @@ impl SolveContext for ItemFuelMechanic {
 }
 
 #[typetag::serde(name = "factorio:item-fuel")]
-impl SerdeFactorioMechanic for ItemFuelMechanic{} impl FactorioMechanic for ItemFuelMechanic {
+impl SerdeFactorioMechanic for ItemFuelMechanic {}
+impl FactorioMechanic for ItemFuelMechanic {
     fn instance_operate(
         &mut self,
         idx: usize,
@@ -629,12 +628,10 @@ impl SerdeFactorioMechanic for ItemFuelMechanic{} impl FactorioMechanic for Item
         let instance = &mut self.instances[idx];
         ui.vertical(|ui| {
             ui.label("燃料");
-            let item_button = ui
-                .add_sized(
-                    [35.0, 35.0],
-                    Icon::new(data, "item", &instance.item.0).with_quality(instance.item.1),
-                )
-                ;
+            let item_button = ui.add_sized(
+                [35.0, 35.0],
+                Icon::new(data, "item", &instance.item.0).with_quality(instance.item.1),
+            );
             changed |= ui
                 .add(
                     SelectorModal::new(item_button.id, data, "选择发射物")
@@ -719,7 +716,8 @@ impl SolveContext for ItemLaunchMechanic {
 }
 
 #[typetag::serde(name = "factorio:item-launch")]
-impl SerdeFactorioMechanic for ItemLaunchMechanic{} impl FactorioMechanic for ItemLaunchMechanic {
+impl SerdeFactorioMechanic for ItemLaunchMechanic {}
+impl FactorioMechanic for ItemLaunchMechanic {
     fn instance_operate(
         &mut self,
         idx: usize,
@@ -829,12 +827,10 @@ impl SerdeFactorioMechanic for ItemLaunchMechanic{} impl FactorioMechanic for It
         let instance = &mut self.instances[idx];
         ui.vertical(|ui| {
             ui.label("发射物品");
-            let item_button = ui
-                .add_sized(
-                    [35.0, 35.0],
-                    Icon::new(data, "item", &instance.item.0).with_quality(instance.item.1),
-                )
-                ;
+            let item_button = ui.add_sized(
+                [35.0, 35.0],
+                Icon::new(data, "item", &instance.item.0).with_quality(instance.item.1),
+            );
             changed |= ui
                 .add(
                     SelectorModal::new(item_button.id, data, "选择发射物品")

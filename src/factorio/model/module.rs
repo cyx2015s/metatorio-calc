@@ -402,12 +402,10 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                     if self.edit_modules {
                         self.module_config.modules.retain_mut(|slot| {
                             let mut deleted = false;
-                            let icon = ui
-                                .add_sized(
-                                    [35.0, 35.0],
-                                    Icon::new(self.data, "item", &slot.0).with_quality(slot.1),
-                                )
-                                ;
+                            let icon = ui.add_sized(
+                                [35.0, 35.0],
+                                Icon::new(self.data, "item", &slot.0).with_quality(slot.1),
+                            );
 
                             if icon.clicked_by(egui::PointerButton::Secondary) {
                                 deleted = true;
@@ -443,12 +441,10 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                         });
 
                         for idx in len..self.module_slots {
-                            let icon = ui
-                                .add_sized(
-                                    [35.0, 35.0],
-                                    Icon::new(self.data, "item", "empty-module-slot"),
-                                )
-                                ;
+                            let icon = ui.add_sized(
+                                [35.0, 35.0],
+                                Icon::new(self.data, "item", "empty-module-slot"),
+                            );
                             let mut selected: Option<IdWithQuality> = None;
                             let selector = Selector::new(self.data, "item")
                                 .with_output(&mut selected)
@@ -536,13 +532,11 @@ pub fn beacon_config_ui(
         });
         ui.separator();
         ui.vertical(|ui| {
-            let icon = ui
-                .add_sized(
-                    [35.0, 35.0],
-                    Icon::new(data, "entity", &beacon_config.beacon.0)
-                        .with_quality(beacon_config.beacon.1),
-                )
-                ;
+            let icon = ui.add_sized(
+                [35.0, 35.0],
+                Icon::new(data, "entity", &beacon_config.beacon.0)
+                    .with_quality(beacon_config.beacon.1),
+            );
             let selector = Selector::new(data, "entity")
                 .with_current(&mut beacon_config.beacon)
                 .with_filter(|s: &IdWithQuality, f: &DataContext| f.beacons.contains_key(&s.0));
@@ -568,12 +562,10 @@ pub fn beacon_config_ui(
                 let mut deleted = false;
 
                 ui.vertical(|ui| {
-                    let icon = ui
-                        .add_sized(
-                            [35.0, 35.0],
-                            Icon::new(data, "item", &id.0).with_quality(id.1),
-                        )
-                        ;
+                    let icon = ui.add_sized(
+                        [35.0, 35.0],
+                        Icon::new(data, "item", &id.0).with_quality(id.1),
+                    );
                     if icon.clicked_by(egui::PointerButton::Secondary) {
                         deleted = true;
                         response.mark_changed();

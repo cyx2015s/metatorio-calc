@@ -583,11 +583,7 @@ impl FactorioMechanic for GeneratorMechanic {
         item: &GenericItem,
         amount: f64,
     ) {
-        if item == &GenericItem::Electricity && amount > 0.0 {
-            self.show_suggestion = true;
-        } else {
-            self.show_suggestion = false;
-        }
+        self.show_suggestion = item == &GenericItem::Electricity && amount > 0.0;
     }
 
     fn suggestion_view(
@@ -652,7 +648,8 @@ impl SolveContext for BoilerMechanic {
 }
 
 #[typetag::serde(name = "factorio:boiler")]
-impl SerdeFactorioMechanic for BoilerMechanic{} impl FactorioMechanic for BoilerMechanic {
+impl SerdeFactorioMechanic for BoilerMechanic {}
+impl FactorioMechanic for BoilerMechanic {
     fn name(&self) -> String {
         "锅炉".to_string()
     }
@@ -928,7 +925,8 @@ impl SolveContext for FluidFuelMechanic {
 }
 
 #[typetag::serde(name = "factorio:fluid-fuel")]
-impl SerdeFactorioMechanic for FluidFuelMechanic{} impl FactorioMechanic for FluidFuelMechanic {
+impl SerdeFactorioMechanic for FluidFuelMechanic {}
+impl FactorioMechanic for FluidFuelMechanic {
     fn name(&self) -> String {
         "流体燃烧".to_string()
     }
@@ -1108,7 +1106,8 @@ impl SolveContext for FluidHeatMechanic {
 }
 
 #[typetag::serde(name = "factorio:fluid-heat")]
-impl SerdeFactorioMechanic for FluidHeatMechanic{} impl FactorioMechanic for FluidHeatMechanic {
+impl SerdeFactorioMechanic for FluidHeatMechanic {}
+impl FactorioMechanic for FluidHeatMechanic {
     fn name(&self) -> String {
         "流体供热".to_string()
     }

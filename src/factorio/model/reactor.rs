@@ -1,7 +1,10 @@
 use crate::{
     concept::{EntryOpRequest, EntryOpResult, Flow, SolveContext},
     factorio::{
-        AsFlow, DataContext, Effect, EnergyAmount, EnergySource, EntityPrototype, FactorioMechanic, GenericItem, IdWithQuality, ProjectContext, SerdeFactorioMechanic, energy_source_as_flow, icon::Icon, index_map_update_entry, modal::SelectorModal, planner::FactoryContext, selector::Selector
+        AsFlow, DataContext, Effect, EnergyAmount, EnergySource, EntityPrototype, FactorioMechanic,
+        GenericItem, IdWithQuality, ProjectContext, SerdeFactorioMechanic, energy_source_as_flow,
+        icon::Icon, index_map_update_entry, modal::SelectorModal, planner::FactoryContext,
+        selector::Selector,
     },
     math::{ElemVec, flow_add},
 };

@@ -773,7 +773,8 @@ impl SolveContext for RecipeMechanic {
 }
 
 #[typetag::serde(name = "factorio:recipe")]
-impl SerdeFactorioMechanic for RecipeMechanic{} impl FactorioMechanic for RecipeMechanic {
+impl SerdeFactorioMechanic for RecipeMechanic {}
+impl FactorioMechanic for RecipeMechanic {
     fn name(&self) -> String {
         "配方".to_string()
     }
