@@ -783,12 +783,12 @@ impl FactorioMechanic for BoilerMechanic {
                         changed = true;
                     }
                 });
+            }
 
-                // 添加温度选择
-                if let Some(fluid) = data.fluids.get(&instance.fluid) {
-                    ui.separator();
-                    temperature_editor(ui, data, &mut changed, &mut instance.temperature, fluid);
-                }
+            // 添加温度选择
+            if let Some(fluid) = data.fluids.get(&instance.fluid) {
+                ui.separator();
+                temperature_editor(ui, data, &mut changed, &mut instance.temperature, fluid);
             }
         }
         changed
