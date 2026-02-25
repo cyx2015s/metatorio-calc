@@ -2,8 +2,8 @@ use crate::{
     concept::{EntryOpRequest, EntryOpResult, Flow, SolveContext},
     factorio::{
         DataContext, EntityPrototype, GenericItem, ProjectContext, common::*,
-        energy_source_as_flow, icon::Icon, modal::SelectorModal,
-        planner::FactoryContext, selector::Selector,
+        energy_source_as_flow, icon::Icon, modal::SelectorModal, planner::FactoryContext,
+        selector::Selector,
     },
     math::{ElemVec, flow_add},
 };
@@ -437,8 +437,7 @@ impl FactorioMechanic for GeneratorMechanic {
                     [35.0, 35.0],
                     Icon::new(data, "entity", &instance.generator.0)
                         .with_quality(instance.generator.1),
-                )
-                .interact(egui::Sense::click());
+                );
             if ui
                 .add(
                     SelectorModal::new(entity_button.id, data, "选择发电机")
@@ -473,7 +472,7 @@ impl FactorioMechanic for GeneratorMechanic {
                     ui.label("编辑输入");
                     let fluid_button = ui
                         .add_sized([35.0, 35.0], Icon::new(data, "fluid", &instance.fluid))
-                        .interact(egui::Sense::click());
+                        ;
                     if ui
                         .add(
                             SelectorModal::new(fluid_button.id, data, "选择输入流体")
@@ -492,7 +491,7 @@ impl FactorioMechanic for GeneratorMechanic {
                                                                 .is_none_or(|x| x.amount > 0.0)));
                                             }
                                             false
-                                        })
+                                        }),
                                 ),
                         )
                         .changed()
@@ -719,7 +718,7 @@ impl FactorioMechanic for BoilerMechanic {
                     [35.0, 35.0],
                     Icon::new(data, "entity", &instance.boiler.0).with_quality(instance.boiler.1),
                 )
-                .interact(egui::Sense::click());
+                ;
             if ui
                 .add(
                     SelectorModal::new(entity_button.id, data, "选择锅炉")
@@ -762,7 +761,7 @@ impl FactorioMechanic for BoilerMechanic {
                     ui.label("编辑输入");
                     let fluid_button = ui
                         .add_sized([35.0, 35.0], Icon::new(data, "fluid", &instance.fluid))
-                        .interact(egui::Sense::click());
+                        ;
                     if ui
                         .add(
                             SelectorModal::new(fluid_button.id, data, "选择输入流体")
@@ -778,7 +777,7 @@ impl FactorioMechanic for BoilerMechanic {
                                                         .is_none_or(|x| x.amount > 0.0);
                                             }
                                             false
-                                        })
+                                        }),
                                 ),
                         )
                         .changed()
@@ -992,7 +991,7 @@ impl FactorioMechanic for FluidFuelMechanic {
             ui.label("流体燃烧");
             let fluid_button = ui
                 .add_sized([35.0, 35.0], Icon::new(data, "fluid", &instance.fluid))
-                .interact(egui::Sense::click());
+                ;
             if ui
                 .add(
                     SelectorModal::new(fluid_button.id, data, "选择流体")
@@ -1008,7 +1007,7 @@ impl FactorioMechanic for FluidFuelMechanic {
                                                 .is_some_and(|x| x.amount > 0.0);
                                     }
                                     false
-                                })
+                                }),
                         ),
                 )
                 .changed()
@@ -1173,7 +1172,7 @@ impl FactorioMechanic for FluidHeatMechanic {
             ui.label("流体供热");
             let fluid_button = ui
                 .add_sized([35.0, 35.0], Icon::new(data, "fluid", &instance.fluid))
-                .interact(egui::Sense::click());
+                ;
             if ui
                 .add(
                     SelectorModal::new(fluid_button.id, data, "选择流体")
@@ -1189,7 +1188,7 @@ impl FactorioMechanic for FluidHeatMechanic {
                                                 .is_none_or(|x| x.amount > 0.0);
                                     }
                                     false
-                                })
+                                }),
                         ),
                 )
                 .changed()

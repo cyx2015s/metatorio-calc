@@ -256,7 +256,7 @@ impl FactorioMechanic for SpoilMechanic {
                     [35.0, 35.0],
                     Icon::new(data, "item", &instance.item.0).with_quality(instance.item.1),
                 )
-                .interact(egui::Sense::click());
+                ;
                 
             changed |= ui
                 .add(
@@ -458,7 +458,7 @@ impl FactorioMechanic for PlantMechanic {
                     [35.0, 35.0],
                     Icon::new(data, "item", &instance.seed.0).with_quality(instance.seed.1),
                 )
-                .interact(egui::Sense::click());
+                ;
             changed |= ui
                 .add(
                     SelectorModal::new(button.id, data, "选择种子")
@@ -634,7 +634,7 @@ impl FactorioMechanic for ItemFuelMechanic {
                     [35.0, 35.0],
                     Icon::new(data, "item", &instance.item.0).with_quality(instance.item.1),
                 )
-                .interact(egui::Sense::click());
+                ;
             changed |= ui
                 .add(
                     SelectorModal::new(item_button.id, data, "选择发射物")
@@ -834,7 +834,7 @@ impl FactorioMechanic for ItemLaunchMechanic {
                     [35.0, 35.0],
                     Icon::new(data, "item", &instance.item.0).with_quality(instance.item.1),
                 )
-                .interact(egui::Sense::click());
+                ;
             changed |= ui
                 .add(
                     SelectorModal::new(item_button.id, data, "选择发射物品")

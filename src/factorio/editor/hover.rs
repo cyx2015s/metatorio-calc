@@ -322,7 +322,6 @@ impl<'a> egui::Widget for PrototypeHover<'a, MiningDrillPrototype> {
         let data = &self.data;
         ui.vertical(|ui| {
             ui.set_min_width(140.0);
-            ui.label(data.get_display_name("entity", &self.prototype.base.base.name));
             ui.label(format!("挖掘速度: {}", self.prototype.mining_speed));
             ui.label(format!(
                 "资源消耗: {}",
@@ -356,10 +355,8 @@ impl<'a> egui::Widget for PrototypeHover<'a, MiningDrillPrototype> {
 
 impl<'a> egui::Widget for PrototypeHover<'a, CraftingMachinePrototype> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
-        let data = &self.data;
         ui.vertical(|ui| {
             ui.set_min_width(140.0);
-            ui.label(data.get_display_name("entity", &self.prototype.base.base.name));
             ui.label(format!("制造速度: {}", self.prototype.crafting_speed));
             ui.label(format!("插件槽位: {}", self.prototype.module_slots));
             ui.label(format!(

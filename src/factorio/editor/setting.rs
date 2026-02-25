@@ -38,9 +38,7 @@ impl egui::Widget for UserContextEditor<'_> {
             });
         ui.heading("科技里程碑");
         ui.checkbox(&mut self.proj.all_accessible, "选择物品时无视里程碑限制");
-        let icon = ui
-            .add(Icon::new(self.data, "entity", "entity-unknown"))
-            .interact(egui::Sense::click());
+        let icon = ui.add(Icon::new(self.data, "entity", "entity-unknown"));
 
         let mut new_tech_milestone = None;
 
@@ -62,9 +60,7 @@ impl egui::Widget for UserContextEditor<'_> {
 
             let mut deleted = false;
             ui.horizontal(|ui| {
-                let icon = ui
-                    .add(Icon::new(self.data, "technology", name))
-                    .interact(egui::Sense::click());
+                let icon = ui.add(Icon::new(self.data, "technology", name));
                 ui.label(self.data.get_display_name("technology", name));
                 ui.add(
                     SelectorModal::new(icon.id, self.data, "选择科技").with_selector(

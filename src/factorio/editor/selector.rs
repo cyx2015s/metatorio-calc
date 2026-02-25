@@ -151,7 +151,7 @@ impl<'a> egui::Widget for Selector<'a, str, String> {
                             egui::Stroke::NONE
                         });
 
-                    if ui.add(widget).interact(egui::Sense::click()).clicked() {
+                    if ui.add(widget).clicked() {
                         storage.group = i;
                         storage.subgroup = 0;
                     }
@@ -185,7 +185,7 @@ impl<'a> egui::Widget for Selector<'a, str, String> {
                         {
                             icon = icon.with_stroke(egui::Stroke::new(2.0, egui::Color32::GRAY));
                         }
-                        let mut button = ui.add(icon).interact(egui::Sense::click());
+                        let mut button = ui.add(icon);
                         if let Some(hover) = &self.hover {
                             button = button.on_hover_ui(|ui| (hover)(ui, item_name, self.data));
                         } else {
@@ -384,22 +384,20 @@ pub fn quality_selector(
         .spacing(Vec2 { x: 0.0, y: 0.0 })
         .show(ui, |ui| {
             for (idx, quality) in data.qualities.iter().enumerate() {
-                let quality_button = ui
-                    .add_sized(
-                        [32.0, 32.0],
-                        Icon::new(data, "quality", &quality.base.name)
-                            .with_size(32.0)
-                            .with_stroke(
-                                if let Some(quality) = selected_quality
-                                    && *quality == idx as u8
-                                {
-                                    egui::Stroke::new(2.0, egui::Color32::GRAY)
-                                } else {
-                                    egui::Stroke::NONE
-                                },
-                            ),
-                    )
-                    .interact(egui::Sense::click());
+                let quality_button = ui.add_sized(
+                    [32.0, 32.0],
+                    Icon::new(data, "quality", &quality.base.name)
+                        .with_size(32.0)
+                        .with_stroke(
+                            if let Some(quality) = selected_quality
+                                && *quality == idx as u8
+                            {
+                                egui::Stroke::new(2.0, egui::Color32::GRAY)
+                            } else {
+                                egui::Stroke::NONE
+                            },
+                        ),
+                );
                 if quality_button.clicked() {
                     *selected_quality = Some(idx as u8);
                     changed = true;
@@ -538,7 +536,7 @@ pub fn generic_item_selector(
                                             e.base.r#type == "resource"
                                                 || e.base.r#type == "asteroid-chunk"
                                         })
-                                    })
+                                    }),
                             ),
                     )
                     .changed();

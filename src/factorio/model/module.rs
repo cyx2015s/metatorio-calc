@@ -407,7 +407,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                     [35.0, 35.0],
                                     Icon::new(self.data, "item", &slot.0).with_quality(slot.1),
                                 )
-                                .interact(egui::Sense::click());
+                                ;
 
                             if icon.clicked_by(egui::PointerButton::Secondary) {
                                 deleted = true;
@@ -448,7 +448,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                     [35.0, 35.0],
                                     Icon::new(self.data, "item", "empty-module-slot"),
                                 )
-                                .interact(egui::Sense::click());
+                                ;
                             let mut selected: Option<IdWithQuality> = None;
                             let selector = Selector::new(self.data, "item")
                                 .with_output(&mut selected)
@@ -542,7 +542,7 @@ pub fn beacon_config_ui(
                     Icon::new(data, "entity", &beacon_config.beacon.0)
                         .with_quality(beacon_config.beacon.1),
                 )
-                .interact(egui::Sense::click());
+                ;
             let selector = Selector::new(data, "entity")
                 .with_current(&mut beacon_config.beacon)
                 .with_filter(|s: &IdWithQuality, f: &DataContext| f.beacons.contains_key(&s.0));
@@ -573,7 +573,7 @@ pub fn beacon_config_ui(
                             [35.0, 35.0],
                             Icon::new(data, "item", &id.0).with_quality(id.1),
                         )
-                        .interact(egui::Sense::click());
+                        ;
                     if icon.clicked_by(egui::PointerButton::Secondary) {
                         deleted = true;
                         response.mark_changed();

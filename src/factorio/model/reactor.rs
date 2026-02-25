@@ -94,7 +94,7 @@ impl FactorioMechanic for ReactorMechanic {
                     [35.0, 35.0],
                     Icon::new(data, "entity", &instance.reactor.0).with_quality(instance.reactor.1),
                 )
-                .interact(egui::Sense::click());
+                ;
             changed |= ui
                 .add(
                     SelectorModal::new(entity_button.id, data, "选择反应堆")

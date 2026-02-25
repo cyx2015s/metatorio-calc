@@ -92,7 +92,7 @@ impl<'a> egui::Widget for Icon<'a> {
                             .shrink_to_fit()
                             .show_loading_spinner(true),
                     )
-                    .interact(egui::Sense::hover());
+                    .interact(egui::Sense::click());
                 if self.quality > 0 && (self.quality as usize) < data.qualities.len() {
                     ui.put(
                         icon.rect
@@ -143,7 +143,7 @@ impl<'a> egui::Widget for Icon<'a> {
                 }
                 icon
             })
-            .response
+            .inner
     }
 }
 

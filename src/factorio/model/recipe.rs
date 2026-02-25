@@ -800,8 +800,7 @@ impl FactorioMechanic for RecipeMechanic {
 
             let button = ui
                 .add_sized([35.0, 35.0], icon)
-                .on_hover_text("选择新的机器顺序依据")
-                .interact(egui::Sense::click());
+                .on_hover_text("选择新的机器顺序依据");
             ui.add(
                 SelectorModal::new(button.id, data, "选择机器")
                     .with_toggle(button.clicked())
@@ -832,7 +831,7 @@ impl FactorioMechanic for RecipeMechanic {
                             ui.heading("☰");
                         });
                         let icon = Icon::new(data, "entity", &machine.0).with_quality(machine.1);
-                        let button = ui.add(icon).interact(egui::Sense::click());
+                        let button = ui.add(icon);
                         if data.crafters.contains_key(&machine.0) {
                             if button.secondary_clicked() {
                                 delete_target = Some(machine.clone());
@@ -890,8 +889,7 @@ impl FactorioMechanic for RecipeMechanic {
             let icon = Icon::new(data, "item", "empty-module-slot");
             let button = ui
                 .add_sized([35.0, 35.0], icon)
-                .on_hover_text("选择新的枚举插件。修改插件请先删除。")
-                .interact(egui::Sense::click());
+                .on_hover_text("选择新的枚举插件。修改插件请先删除。");
             ui.add(
                 SelectorModal::new(button.id, data, "选择枚举插件")
                     .with_toggle(button.clicked())
@@ -921,8 +919,7 @@ impl FactorioMechanic for RecipeMechanic {
                         [35.0, 35.0],
                         Icon::new(data, "item", &module.0).with_quality(module.1),
                     )
-                    .on_hover_text("无法编辑，右键可删除。")
-                    .interact(egui::Sense::click());
+                    .on_hover_text("无法编辑，右键可删除。");
                 if button.secondary_clicked() {
                     delele_module = Some(module.clone());
                     changed = true;
@@ -987,12 +984,10 @@ impl FactorioMechanic for RecipeMechanic {
         let instance = &mut self.instances[idx];
         ui.vertical(|ui| {
             ui.label("配方");
-            let recipe_button = ui
-                .add_sized(
-                    [35.0, 35.0],
-                    Icon::new(data, "recipe", &instance.recipe.0).with_quality(instance.recipe.1),
-                )
-                .interact(egui::Sense::click());
+            let recipe_button = ui.add_sized(
+                [35.0, 35.0],
+                Icon::new(data, "recipe", &instance.recipe.0).with_quality(instance.recipe.1),
+            );
             changed |= ui
                 .add(
                     SelectorModal::new(recipe_button.id, data, "选择配方")
@@ -1030,12 +1025,10 @@ impl FactorioMechanic for RecipeMechanic {
         ui.separator();
         ui.vertical(|ui| {
             ui.label("组装机");
-            let entity_button = ui
-                .add_sized(
-                    [35.0, 35.0],
-                    Icon::new(data, "entity", &instance.machine.0).with_quality(instance.machine.1),
-                )
-                .interact(egui::Sense::click());
+            let entity_button = ui.add_sized(
+                [35.0, 35.0],
+                Icon::new(data, "entity", &instance.machine.0).with_quality(instance.machine.1),
+            );
 
             let selector = Selector::new(data, "entity")
                 .with_filter(|crafter_name: &IdWithQuality, data: &DataContext| {
