@@ -1,17 +1,107 @@
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use indexmap::IndexMap;
 
-use crate::factorio::{
-    DataContext, Dict, Modifier, ProjectContext, RecipeResult, TechnologyPrototype,
-};
+use crate::factorio::{DataContext, Dict, Modifier, ProjectContext, RecipeResult};
+
+#[derive(Debug, Clone, Default)]
+pub struct MilestoneNode {
+    pub depth: usize,              // depth表示到这个里程碑的最深科技深度
+    pub name: String,              // 里程碑名称
+    pub dependencies: Vec<String>, // 里程碑直接依赖的里程碑名称列表
+}
+
+pub fn resolve_milestone_graph(
+    data: &DataContext,
+    milestones: &[(String, bool)],
+) -> IndexMap<String, MilestoneNode> {
+    let mut ret = IndexMap::new();
+
+    let mut queue = data
+        .technologies
+        .iter()
+        .filter_map(|(name, proto)| {
+            if proto.prerequisites.is_empty() {
+                Some(name.as_str())
+            } else {
+                None
+            }
+        })
+        .collect::<VecDeque<_>>();
+
+    let mut visited: HashSet<&str> = HashSet::new();
+
+    #[derive(Debug, Clone, Default)]
+    struct NodeInfo<'a> {
+        indeg: usize,
+        deps: HashSet<&'a str>,
+    }
+
+    let mut node_infos = data
+        .technology_dependents
+        .iter()
+        .map(|(tech, dependents)| {
+            (
+                tech.as_str(),
+                NodeInfo {
+                    indeg: dependents.len(),
+                    deps: HashSet::new(),
+                },
+            )
+        })
+        .collect::<HashMap<&str, NodeInfo>>();
+
+    while let Some(tech) = queue.pop_front() {
+        if visited.contains(tech) {
+            continue;
+        }
+        visited.insert(tech);
+        let depth = data.technologies.get(tech).map_or(0, |t| {
+            t.prerequisites
+                .iter()
+                .filter_map(|prereq| {
+                    ret.get(prereq.as_str())
+                        .map(|node: &MilestoneNode| node.depth)
+                })
+                .max()
+                .unwrap_or(0)
+                + 1
+        });
+        let dependencies = data
+            .technologies
+            .get(tech)
+            .map_or(Vec::new(), |t| t.prerequisites.clone());
+        if milestones.iter().any(|(name, _)| name == tech) {
+            // 只有出现在里程碑中的科技才会被加入到里程碑图中。
+            ret.insert(
+                tech.to_string(),
+                MilestoneNode {
+                    depth,
+                    name: tech.to_string(),
+                    dependencies,
+                },
+            );
+        }
+        if let Some(dependents) = data.technology_dependents.get(tech) {
+            for dependent in dependents {
+                let current_node = node_infos.get(tech).cloned().unwrap_or_default();
+                if let Some(NodeInfo { indeg, deps }) = node_infos.get_mut(dependent.as_str()) {
+                    *indeg -= 1;
+                    deps.extend(current_node.deps);
+                    if *indeg == 0 {
+                        queue.push_back(dependent.as_str());
+                    }
+                }
+            }
+        }
+    }
+
+    ret
+}
 
 // milestone 格式: (technology name, is unlocked)，true表示解锁，false表示未解锁（就算是true，如果因为其他科技的false 导致无法解锁，也会被视为未解锁）
 // 返回值：一系列可用科技名称。
-pub fn resolve_dependency(
-    techs: &Dict<TechnologyPrototype>,
-    milestones: &[(String, bool)],
-) -> Vec<String> {
+pub fn resolve_dependency(data: &DataContext, milestones: &[(String, bool)]) -> Vec<String> {
     // 表示科技是否出现在里程碑中并且未解锁。未解锁状态会扩散到所有依赖它的科技上。
 
     fn appeared_in_milestones(tech_name: &str, milestones: &[(String, bool)]) -> bool {
@@ -19,16 +109,9 @@ pub fn resolve_dependency(
             .iter()
             .any(|(name, unlocked)| *name == tech_name && !*unlocked)
     }
-    let mut dependents = Dict::<HashSet<String>>::new();
     let mut unlocked = Dict::new();
     let mut queue = VecDeque::new(); // 传播队列
-    for (tech_name, tech) in techs {
-        for prereq in &tech.prerequisites {
-            dependents
-                .entry(prereq.clone())
-                .or_default()
-                .insert(tech_name.clone());
-        }
+    for (tech_name, tech) in &data.technologies {
         unlocked.insert(
             tech_name.clone(),
             !appeared_in_milestones(tech_name, milestones),
@@ -45,7 +128,7 @@ pub fn resolve_dependency(
             continue;
         }
         visited.insert(tech_name.clone());
-        if let Some(dependents) = dependents.get(&tech_name) {
+        if let Some(dependents) = data.technology_dependents.get(&tech_name) {
             for dependent in dependents {
                 queue.push_back(dependent.clone());
                 unlocked.insert(dependent.clone(), false);
@@ -59,7 +142,7 @@ pub fn resolve_dependency(
 }
 
 pub fn update_accessibles(user: &mut ProjectContext, data: &DataContext) {
-    user.accessible_technologies = resolve_dependency(&data.technologies, &user.tech_milestones);
+    user.accessible_technologies = resolve_dependency(data, &user.tech_milestones);
     user.accessible_prototypes.clear();
 
     let mut new_recipe_productivity = user

@@ -9,6 +9,7 @@ use std::{
 };
 
 use indexmap::IndexMap;
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use serde_json::Value;
 use serde_with::{DefaultOnError, serde_as};
 
@@ -45,6 +46,7 @@ pub struct DataContext {
 
     /// 科技
     pub technologies: Dict<TechnologyPrototype>,
+    pub technology_dependents: Dict<HashSet<String>>,
 
     /// 燃料类型
     pub fuel_categories: Dict<PrototypeBase>,
@@ -538,7 +540,7 @@ impl DataContext {
     pub fn get_display_name(&self, category: &str, key: &str) -> String {
         self.localized_name
             .get(category)
-            .unwrap()
+            .expect(category)
             .get(key)
             .unwrap_or(&format!("{} (unlocalized)", key))
             .to_string()
@@ -548,6 +550,7 @@ impl DataContext {
         self.build_order_info()
             .build_temperature_info()
             .build_rocket_info()
+            .build_dependent_info()
     }
 
     pub fn build_order_info(mut self) -> Self {
@@ -766,6 +769,29 @@ impl DataContext {
                 );
             }
         }
+        self
+    }
+
+    pub fn build_dependent_info(mut self) -> Self {
+        let dependents = self
+            .technologies
+            .par_iter()
+            .fold(Dict::new, |mut acc, (name, proto)| {
+                proto.prerequisites.iter().for_each(|prerequisite| {
+                    acc.entry(prerequisite.clone())
+                        .or_insert_with(HashSet::new)
+                        .insert(name.clone());
+                });
+                acc
+            })
+            .reduce(Dict::new, |mut acc, other| {
+                for (k, v) in other.into_iter() {
+                    acc.entry(k).or_insert_with(HashSet::new).extend(v);
+                }
+                acc
+            });
+
+        self.technology_dependents = dependents;
         self
     }
 }

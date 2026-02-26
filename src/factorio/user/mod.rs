@@ -7,7 +7,7 @@ use std::{path::PathBuf, sync::mpsc::Sender};
 
 use crate::factorio::{Dict, planner::FactoryInstance};
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct ProjectContext {
     pub time_scale: TimeScale,
@@ -41,26 +41,9 @@ pub struct ProjectContext {
 
     #[serde(skip)]
     pub factory_sender: Option<Sender<FactoryInstance>>,
-}
 
-impl Default for ProjectContext {
-    fn default() -> Self {
-        Self {
-            time_scale: TimeScale::Seconds,
-            tech_milestones: Vec::new(),
-            all_accessible: true,
-            accessible_technologies: Vec::new(),
-            accessible_prototypes: Dict::new(),
-            recipe_productivity: IndexMap::new(),
-            cur_max_quality_level: 0,
-            max_quality_level: 0,
-            saved: true,
-            file_path: None,
-            selected_page: ProjectPage::default(),
-            factory_sender: None,
-            mining_productivity: 0.0,
-        }
-    }
+    #[serde(skip)]
+    pub milestone_graph: IndexMap<String, MilestoneNode>,
 }
 
 impl ProjectContext {

@@ -16,6 +16,7 @@ use crate::{
         format::*,
         model::*,
         number::AmountLabel,
+        resolve_milestone_graph,
         selector::{Selector, generic_item_selector},
         setting::UserContextEditor,
         style::card_frame,
@@ -1186,6 +1187,35 @@ impl ProjectInstance {
         self.proj.factory_sender = Some(factory_tx);
         self.factory_receiver = factory_rx;
     }
+
+    pub fn post_load(mut self) -> Self {
+        let makeup_factory = FactoryInstance::default();
+        for factory in &mut self.factories.vec {
+            for mechanic in &makeup_factory.mechanics {
+                if !factory
+                    .mechanics
+                    .iter()
+                    .any(|m| m.typetag_name() == mechanic.typetag_name())
+                {
+                    factory.mechanics.push(mechanic.clone());
+                }
+            }
+        }
+        self.reset_factory_channel();
+        update_accessibles(&mut self.proj, &self.data);
+        self.proj.milestone_graph = resolve_milestone_graph(&self.data, &self.proj.tech_milestones);
+        log::debug!("{:?}", &self.proj.milestone_graph);
+        self.factories
+            .vec
+            .iter_mut()
+            .enumerate()
+            .for_each(|(idx, f)| {
+                let _ = self
+                    .problem_sender
+                    .send((idx, f.as_problem(&self.data, &self.proj)));
+            });
+        self
+    }
 }
 
 impl SubView for ProjectInstance {
@@ -1450,33 +1480,10 @@ impl SubView for ProjectView {
                         .pick_file()
                         && let Some(mut project) = load_project(&path)
                     {
-                        let makeup_factory = FactoryInstance::default();
-                        for factory in &mut project.factories.vec {
-                            for mechanic in &makeup_factory.mechanics {
-                                if !factory
-                                    .mechanics
-                                    .iter()
-                                    .any(|m| m.typetag_name() == mechanic.typetag_name())
-                                {
-                                    factory.mechanics.push(mechanic.clone());
-                                }
-                            }
-                        }
-                        project.reset_factory_channel();
                         project.set_data(self.data.clone());
-                        update_accessibles(&mut project.proj, &project.data);
+                        project = project.post_load();
                         project.proj.saved = true;
                         project.proj.file_path = Some(path);
-                        project
-                            .factories
-                            .vec
-                            .iter_mut()
-                            .enumerate()
-                            .for_each(|(idx, f)| {
-                                let _ = project
-                                    .problem_sender
-                                    .send((idx, f.as_problem(&project.data, &project.proj)));
-                            });
                         self.projects.push(project);
                         self.selected = Some(self.projects.len() - 1);
                     }
