@@ -1285,10 +1285,27 @@ impl FactorioMechanic for RecipeMechanic {
                             }
                         })
                         .collect::<Vec<_>>();
-                    for comb in Compositions::new(
-                        allowed_modules.len() + 1,
-                        machine_proto.module_slots as usize,
-                    ) {
+                    let module_slots = machine_proto.module_slots as usize;
+                    let comb_iter = Compositions::new(allowed_modules.len() + 1, module_slots);
+                    let comb_iter = if module_slots > 8 || allowed_modules.len() > 2 {
+                        // 插件过多时不枚举空插件配置，避免状态空间爆炸
+                        Compositions::new(allowed_modules.len(), module_slots)
+                    } else {
+                        comb_iter
+                    };
+                    let comb_iter = if allowed_modules.len() > 2 && module_slots > 16 {
+                        // 只看前16个插件槽位组合
+                        Compositions::new(allowed_modules.len(), 16)
+                    } else {
+                        comb_iter
+                    };
+                    let comb_iter = if allowed_modules.len() > 1 && module_slots > 24 {
+                        // 插件过多时只看前24个插件槽位组合，避免状态空间爆炸
+                        Compositions::new(allowed_modules.len(), 24)
+                    } else {
+                        comb_iter
+                    };
+                    for comb in comb_iter {
                         for quality in 0..quality_range {
                             let mut modules = vec![];
                             for module_id in 0..allowed_modules.len() {

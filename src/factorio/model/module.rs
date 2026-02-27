@@ -331,7 +331,7 @@ pub fn module_effects_allowed(
 }
 
 impl egui::Widget for ModuleConfigEditor<'_> {
-    fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+    fn ui(mut self, ui: &mut egui::Ui) -> egui::Response {
         let mut response = ui.response().clone();
 
         let button = ui
@@ -350,6 +350,9 @@ impl egui::Widget for ModuleConfigEditor<'_> {
             *self.module_config = ModuleConfig::default();
 
             return response;
+        }
+        if self.module_slots > 24 {
+            self.module_slots = 24;
         }
         if self.module_slots < self.module_config.modules.len() {
             self.module_config.modules.truncate(self.module_slots);
