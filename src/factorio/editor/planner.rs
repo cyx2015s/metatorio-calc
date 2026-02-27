@@ -38,6 +38,23 @@ pub struct FactoryContext {
     pub debug: bool,
 }
 
+impl FactoryContext {
+    pub fn get_current_surface_properties<'a>(
+        &self,
+        data: &'a DataContext,
+    ) -> Option<&'a Dict<f64>> {
+        if let Some(planet) = &self.planet {
+            if let Some(planet) = data.planets.get(planet) {
+                Some(&planet.surface_properties)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct FactoryInstance {
@@ -704,26 +721,22 @@ impl FactoryInstance {
         ui.separator();
         ui.heading("环境");
         ui.horizontal_wrapped(|ui| {
-            let mut planet_name = self.factory.planet.clone();
-
-            egui::ComboBox::from_label("星球")
-                .selected_text(
-                    planet_name
-                        .as_ref()
-                        .map(|name| data.get_display_name("space-location", name))
-                        .unwrap_or("无".into()),
-                )
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut planet_name, None, "无");
-                    for name in data.planets.keys() {
-                        ui.selectable_value(
-                            &mut planet_name,
-                            Some(name.clone()),
-                            data.get_display_name("space-location", name),
-                        );
-                    }
-                });
-            self.factory.planet = planet_name;
+            let button = if let Some(planet) = &self.factory.planet {
+                ui.add_sized([35.0, 35.0], Icon::new(data, "space-location", &planet))
+            } else {
+                ui.add_sized([35.0, 35.0], Icon::new(data, "item", "unknown"))
+            };
+            ui.add(
+                SelectorModal::new(button.id, "选择星球")
+                    .with_toggle(button.clicked())
+                    .with_selector(
+                        Selector::new(data, "space-location").with_output(&mut self.factory.planet),
+                    ),
+            );
+            if button.secondary_clicked() {
+                self.factory.planet.take();
+            }
+            ui.label("星球");
         });
         ui.horizontal_wrapped(|ui| {
             let button = ui.add_sized(

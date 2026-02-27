@@ -692,14 +692,14 @@ impl HasPrototypeBase for ItemSubgroup {
 }
 
 pub fn get_order_info<T: HasPrototypeBase + Clone>(
-    vec: &HashMap<String, T>,
+    map: &HashMap<String, T>,
     groups: &Dict<PrototypeBase>,
     subgroups: &Dict<ItemSubgroup>,
 ) -> OrderInfo {
     let mut grouped: HashMap<&String, HashMap<&String, Vec<&T>>> = HashMap::new();
     let other = &"other".to_string();
     let empty = &"".to_string();
-    for prototype in vec.values() {
+    for prototype in map.values() {
         let subgroup_name = &prototype.base().subgroup;
         if let Some(subgroup) = subgroups.get(subgroup_name) {
             let group_name = &subgroup.group;

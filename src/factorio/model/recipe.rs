@@ -1214,11 +1214,10 @@ impl FactorioMechanic for RecipeMechanic {
             if !proj.is_prototype_accessible("recipe", recipe_name) {
                 continue;
             }
-            if let Some(planet_name) = &factory.planet
-                && let Some(planet) = data.planets.get(planet_name)
+            if let Some(surface_properties) = factory.get_current_surface_properties(data)
                 && !surface_condition_satisfied(
                     &recipe_proto.surface_conditions,
-                    &planet.surface_properties,
+                    surface_properties,
                     &data.surface_properties,
                 )
             {
@@ -1250,11 +1249,10 @@ impl FactorioMechanic for RecipeMechanic {
             }
             machines.iter().for_each(|machine_name| {
                 if let Some(machine_proto) = data.crafters.get(&machine_name.0) {
-                    if let Some(planet_name) = &factory.planet
-                        && let Some(planet) = data.planets.get(planet_name)
+                    if let Some(surface_properties) = &factory.get_current_surface_properties(data)
                         && !surface_condition_satisfied(
                             &machine_proto.base.surface_conditions,
-                            &planet.surface_properties,
+                            surface_properties,
                             &data.surface_properties,
                         )
                     {

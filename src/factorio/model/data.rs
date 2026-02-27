@@ -695,6 +695,14 @@ impl DataContext {
             "quality".into(),
             get_reverse_order_info(&self.ordered_entries["quality"]),
         );
+        self.ordered_entries.insert(
+            "space-location".into(),
+            get_order_info(&self.planets, &self.groups, &self.subgroups),
+        );
+        self.order_of_entries.insert(
+            "space-location".into(),
+            get_reverse_order_info(&self.ordered_entries["space-location"]),
+        );
         self
     }
 
