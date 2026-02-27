@@ -1285,7 +1285,22 @@ impl FactorioMechanic for RecipeMechanic {
                             }
                         })
                         .collect::<Vec<_>>();
-                    let module_slots = machine_proto.module_slots as usize;
+                    let module_slots = machine_proto.module_slots as usize
+                        // + if machine_proto.quality_affects_module_slots {
+                        //     if let Some(quality_proto) = data.qualities.get(machine_name.1 as usize)
+                        //     {
+                        //         machine_proto
+                        //             .module_slots_quality_bonus
+                        //             .as_ref()
+                        //             .map(|m| m[&quality_proto.base.name])
+                        //             .unwrap_or(quality_proto.crafting_machine_module_slots_bonus())
+                        //     } else {
+                        //         0.0
+                        //     }
+                        // } else {
+                        //     0.0
+                        // } as usize
+                        ;
                     let comb_iter = Compositions::new(allowed_modules.len() + 1, module_slots);
                     let comb_iter = if module_slots > 8 || allowed_modules.len() > 2 {
                         // 插件过多时不枚举空插件配置，避免状态空间爆炸
