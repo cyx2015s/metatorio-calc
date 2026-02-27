@@ -142,7 +142,7 @@ impl AsFlow for MiningInstance {
                     .clone();
 
             module_effects.productivity += if miner.uses_force_mining_productivity_bonus {
-                proj.mining_productivity
+                proj.get_mining_productivity()
             } else {
                 0.0
             };

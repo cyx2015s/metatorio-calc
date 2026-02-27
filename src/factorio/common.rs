@@ -551,6 +551,7 @@ impl Add for Effect {
             pollution: self.pollution + rhs.pollution,
             quality: self.quality + rhs.quality,
         }
+        .aligned_to_u16()
     }
 }
 
@@ -577,6 +578,20 @@ impl Effect {
             quality: self.quality.clamp(0.0, 327.67),
         }
     }
+
+    pub fn aligned_to_u16(&self) -> Effect {
+        Effect {
+            consumption: align_to_u16(self.consumption),
+            speed: align_to_u16(self.speed),
+            productivity: align_to_u16(self.productivity),
+            pollution: align_to_u16(self.pollution),
+            quality: align_to_u16(self.quality),
+        }
+    }
+}
+
+fn align_to_u16(num: f64) -> f64 {
+    (num * 100.0) as i32 as f64 / 100.0
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Deserialize)]

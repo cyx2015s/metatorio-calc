@@ -1177,8 +1177,6 @@ impl ProjectInstance {
                 self.proj.tech_milestones.push((tech_name.clone(), true));
             }
         }
-
-        update_accessibles(&mut self.proj, &self.data);
         self
     }
 
@@ -1204,7 +1202,9 @@ impl ProjectInstance {
         self.reset_factory_channel();
         update_accessibles(&mut self.proj, &self.data);
         self.proj.milestone_graph = resolve_milestone_graph(&self.data, &self.proj.tech_milestones);
-        log::debug!("{:?}", &self.proj.milestone_graph);
+        self.proj
+            .tech_milestones
+            .sort_by_cached_key(|v| (self.proj.milestone_graph[v.0.as_str()].depth, v.0.clone()));
         self.factories
             .vec
             .iter_mut()
@@ -1468,7 +1468,9 @@ impl SubView for ProjectView {
             ui.menu_button("文件", |ui| {
                 if ui.button("新建项目").clicked() {
                     self.projects.push(
-                        ProjectInstance::new_arc(self.data.clone()).with_default_milestones(),
+                        ProjectInstance::new_arc(self.data.clone())
+                            .with_default_milestones()
+                            .post_load(),
                     );
                     self.selected = Some(self.projects.len() - 1);
                     ui.close();

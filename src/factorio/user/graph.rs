@@ -31,6 +31,8 @@ pub fn resolve_milestone_graph(
 
     let mut visited: HashSet<&str> = HashSet::new();
 
+    log::debug!("初始科技起点: {:?}", queue);
+    log::debug!("里程碑: {:?}", milestones);
     #[derive(Debug, Clone, Default)]
     struct NodeInfo<'a> {
         indeg: usize,
@@ -38,25 +40,26 @@ pub fn resolve_milestone_graph(
     }
 
     let mut node_infos = data
-        .technology_dependents
+        .technologies
         .iter()
-        .map(|(tech, dependents)| {
+        .map(|(name, tech)| {
             (
-                tech.as_str(),
+                name.as_str(),
                 NodeInfo {
-                    indeg: dependents.len(),
+                    indeg: tech.prerequisites.len(),
                     deps: HashSet::new(),
                 },
             )
         })
         .collect::<HashMap<&str, NodeInfo>>();
 
-    while let Some(tech) = queue.pop_front() {
-        if visited.contains(tech) {
+    while let Some(current_tech) = queue.pop_front() {
+        if visited.contains(current_tech) {
             continue;
         }
-        visited.insert(tech);
-        let depth = data.technologies.get(tech).map_or(0, |t| {
+        log::debug!("处理科技 {}", current_tech);
+        visited.insert(current_tech);
+        let depth = data.technologies.get(current_tech).map_or(0, |t| {
             t.prerequisites
                 .iter()
                 .filter_map(|prereq| {
@@ -67,36 +70,145 @@ pub fn resolve_milestone_graph(
                 .unwrap_or(0)
                 + 1
         });
-        let dependencies = data
-            .technologies
-            .get(tech)
-            .map_or(Vec::new(), |t| t.prerequisites.clone());
-        if milestones.iter().any(|(name, _)| name == tech) {
+
+        let current_node = node_infos.get(current_tech).cloned().unwrap_or_default();
+        let current_is_milestone = milestones.iter().any(|(name, _)| name == current_tech);
+        if current_is_milestone {
             // 只有出现在里程碑中的科技才会被加入到里程碑图中。
+            log::debug!(
+                "科技 {} 是里程碑，添加到里程碑图中，深度 {}, 可能依赖 {:?}",
+                current_tech,
+                depth,
+                current_node.deps
+            );
             ret.insert(
-                tech.to_string(),
+                current_tech.to_string(),
                 MilestoneNode {
                     depth,
-                    name: tech.to_string(),
-                    dependencies,
+                    name: current_tech.to_string(),
+                    dependencies: current_node.deps.iter().map(|v| v.to_string()).collect(),
                 },
             );
         }
-        if let Some(dependents) = data.technology_dependents.get(tech) {
+        if let Some(dependents) = data.technology_dependents.get(current_tech) {
             for dependent in dependents {
-                let current_node = node_infos.get(tech).cloned().unwrap_or_default();
+                log::debug!(
+                    "科技 {} 的后续科技 {}，降低入度，剩余入度 {}",
+                    current_tech,
+                    dependent,
+                    node_infos
+                        .get(dependent.as_str())
+                        .map_or(0, |info| info.indeg.saturating_sub(1))
+                );
                 if let Some(NodeInfo { indeg, deps }) = node_infos.get_mut(dependent.as_str()) {
                     *indeg -= 1;
-                    deps.extend(current_node.deps);
+                    deps.extend(current_node.deps.clone());
                     if *indeg == 0 {
                         queue.push_back(dependent.as_str());
+                    }
+                    if current_is_milestone {
+                        deps.insert(current_tech);
                     }
                 }
             }
         }
     }
 
-    ret
+    // 从半成品依赖图中推算真实依赖图
+
+    transitive_reduction_and_build_depth(&ret)
+}
+
+pub fn transitive_reduction_and_build_depth(
+    graph: &IndexMap<String, MilestoneNode>,
+) -> IndexMap<String, MilestoneNode> {
+    // 建立名称到索引的映射
+    let mut name_to_idx: HashMap<&str, usize> = HashMap::new();
+    let mut idx_to_name: Vec<&str> = Vec::new();
+    for name in graph.keys() {
+        name_to_idx.insert(name, idx_to_name.len());
+        idx_to_name.push(name);
+    }
+    let n = name_to_idx.len();
+
+    // 构建原始邻接矩阵
+    let mut adj = vec![vec![false; n]; n];
+    for (name, node) in graph {
+        let i = name_to_idx[name.as_str()];
+        for dep in &node.dependencies {
+            if let Some(&j) = name_to_idx.get(dep.as_str()) {
+                adj[i][j] = true;
+            } else {
+                log::error!("依赖项 {} 不存在", dep);
+            }
+        }
+    }
+
+    // Floyd-Warshall 计算传递闭包
+    let mut closure = adj.clone();
+    for k in 0..n {
+        for i in 0..n {
+            for j in 0..n {
+                if closure[i][k] && closure[k][j] {
+                    closure[i][j] = true;
+                }
+            }
+        }
+    }
+
+    // 构建约简后的图
+    let mut reduced = IndexMap::new();
+    for (name, node) in graph {
+        let i = name_to_idx[name.as_str()];
+        let mut new_deps = Vec::new();
+        for dep in &node.dependencies {
+            if let Some(&j) = name_to_idx.get(dep.as_str()) {
+                // 检查是否存在中间节点 k (k != i, k != j) 使得 i -> k 且 k -> j
+                let mut redundant = false;
+                for k in 0..n {
+                    if k != i && k != j && closure[i][k] && closure[k][j] {
+                        redundant = true;
+                        break;
+                    }
+                }
+                if !redundant {
+                    new_deps.push(dep.clone());
+                }
+            } else {
+                // 保留不在图中的依赖（可能为外部节点）
+                new_deps.push(dep.clone());
+            }
+        }
+        let mut new_node = node.clone();
+
+        new_node.dependencies = new_deps;
+        reduced.insert(name.clone(), new_node);
+    }
+
+    let mut tech_depth = graph
+        .values()
+        .map(|t| (t.name.as_str(), 0))
+        .collect::<HashMap<_, _>>();
+
+    for _ in 0..reduced.len() {
+        // ……我不想优化了，循环N次总能得到深度的
+        for tech_name in graph.keys() {
+            let tech = graph.get(tech_name).unwrap();
+            for dep in &tech.dependencies {
+                let dep_depth = tech_depth.get(dep.as_str()).cloned().unwrap_or(0);
+                tech_depth
+                    .entry(&tech_name)
+                    .and_modify(|d| *d = (*d).max(dep_depth + 1))
+                    .or_insert(0);
+            }
+        }
+    }
+
+    for (_, node) in &mut reduced {
+        node.depth = *tech_depth.get(&node.name.as_str()).unwrap_or(&0);
+    }
+
+    reduced
 }
 
 // milestone 格式: (technology name, is unlocked)，true表示解锁，false表示未解锁（就算是true，如果因为其他科技的false 导致无法解锁，也会被视为未解锁）
@@ -143,6 +255,7 @@ pub fn resolve_dependency(data: &DataContext, milestones: &[(String, bool)]) -> 
 
 pub fn update_accessibles(user: &mut ProjectContext, data: &DataContext) {
     user.accessible_technologies = resolve_dependency(data, &user.tech_milestones);
+    log::debug!("更新可访问科技: {:?}", &user.milestone_graph);
     user.accessible_prototypes.clear();
 
     let mut new_recipe_productivity = user

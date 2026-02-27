@@ -17,6 +17,8 @@ pub struct ProjectContext {
 
     pub recipe_productivity: IndexMap<String, f64>,
 
+    pub ignore_productivity: bool,
+
     pub mining_productivity: f64,
 
     pub all_accessible: bool,
@@ -44,6 +46,9 @@ pub struct ProjectContext {
 
     #[serde(skip)]
     pub milestone_graph: IndexMap<String, MilestoneNode>,
+
+    #[serde(skip)]
+    pub hovered_tech: Option<String>,
 }
 
 impl ProjectContext {
@@ -65,6 +70,17 @@ impl ProjectContext {
         } else {
             true
         }
+    }
+
+    pub fn get_recipe_productivity(&self, recipe_name: &str) -> Option<f64> {
+        if self.ignore_productivity {
+            return None;
+        }
+        self.recipe_productivity.get(recipe_name).cloned()
+    }
+
+    pub fn get_mining_productivity(&self) -> f64 {
+        self.mining_productivity
     }
 
     pub fn max_quality(&self) -> u8 {

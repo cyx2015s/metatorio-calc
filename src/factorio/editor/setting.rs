@@ -3,8 +3,8 @@ use std::collections::{HashSet, VecDeque};
 use egui::DragValue;
 
 use crate::factorio::{
-    DataContext, ProjectContext, TimeScale, icon::Icon, modal::SelectorModal, selector::Selector,
-    update_accessibles,
+    DataContext, ProjectContext, TimeScale, icon::Icon, modal::SelectorModal,
+    resolve_milestone_graph, selector::Selector, style::card_frame, update_accessibles,
 };
 
 #[derive(Debug)]
@@ -55,33 +55,61 @@ impl egui::Widget for UserContextEditor<'_> {
             recalc_accessible = true;
         }
         let mut recursively_unlock = None;
-        self.proj.tech_milestones.retain_mut(|(name, unlocked)| {
-            let mut selected_tech: Option<String> = None;
+        let mut last_depth = 0;
+        egui::Grid::new("tech-tree").show(ui, |ui| {
+            ui.style_mut().spacing.interact_size.y = 0.0;
+            self.proj.tech_milestones.retain_mut(|(name, unlocked)| {
+                let mut selected_tech: Option<String> = None;
+                if !self.proj.milestone_graph.contains_key(name.as_str()) {
+                    return true;
+                }
+                let cur_depth = self.proj.milestone_graph[name.as_str()].depth;
+                if cur_depth != last_depth {
+                    ui.end_row();
+                }
+                last_depth = cur_depth;
 
-            let mut deleted = false;
-            ui.horizontal(|ui| {
-                let icon = ui.add(Icon::new(self.data, "technology", name));
-                ui.label(self.data.get_display_name("technology", name));
-                ui.add(SelectorModal::new(icon.id, "选择科技").with_selector(
-                    Selector::new(self.data, "technology").with_output(&mut selected_tech),
-                ));
-                if ui.checkbox(unlocked, "解锁").changed() {
-                    if *unlocked {
-                        // 切换为解锁时，遍历前置科技并解锁
-                        recursively_unlock = Some(name.clone());
-                    }
+                let mut deleted = false;
+
+                card_frame(ui)
+                    .fill(if *unlocked {
+                        egui::Color32::GREEN
+                    } else {
+                        egui::Color32::GRAY
+                    })
+                    .show(ui, |ui| {
+                        ui.horizontal_top(|ui| {
+                            let icon = ui
+                                .add_sized([48.0, 48.0], Icon::new(self.data, "technology", name));
+
+                            ui.add(
+                                SelectorModal::new(icon.id, "选择科技").with_selector(
+                                    Selector::new(self.data, "technology")
+                                        .with_output(&mut selected_tech),
+                                ),
+                            );
+                            ui.vertical(|ui| {
+                                ui.set_min_width(48.0);
+                                if ui.checkbox(unlocked, "解锁").changed() {
+                                    if *unlocked {
+                                        // 切换为解锁时，遍历前置科技并解锁
+                                        recursively_unlock = Some(name.clone());
+                                    }
+                                    recalc_accessible = true;
+                                }
+                                if ui.button("删除").clicked() {
+                                    recalc_accessible = true;
+                                    deleted = true;
+                                }
+                            });
+                        });
+                    });
+                if let Some(new_tech_name) = selected_tech {
+                    *name = new_tech_name;
                     recalc_accessible = true;
                 }
-                if ui.button("删除").clicked() {
-                    recalc_accessible = true;
-                    deleted = true;
-                }
+                !deleted
             });
-            if let Some(new_tech_name) = selected_tech {
-                *name = new_tech_name;
-                recalc_accessible = true;
-            }
-            !deleted
         });
         if let Some(unlocked_tech) = recursively_unlock {
             let mut queue = VecDeque::new();
@@ -114,6 +142,11 @@ impl egui::Widget for UserContextEditor<'_> {
             for (tech, unlocked) in self.proj.tech_milestones.iter_mut() {
                 *unlocked = self.proj.accessible_technologies.contains(tech);
             }
+            self.proj.milestone_graph =
+                resolve_milestone_graph(self.data, &self.proj.tech_milestones);
+            self.proj.tech_milestones.sort_by_cached_key(|v| {
+                (self.proj.milestone_graph[v.0.as_str()].depth, v.0.clone())
+            });
         }
 
         let button = ui.button("查看解锁的配方");
@@ -149,20 +182,26 @@ impl egui::Widget for UserContextEditor<'_> {
         self.proj.mining_productivity = mining_productivity as f64 / 100.0;
         ui.heading("配方产能");
 
-        for (recipe_name, productivity) in self.proj.recipe_productivity.iter_mut() {
-            let mut value = (*productivity * 100.0) as i32;
-            ui.horizontal(|ui| {
-                ui.add(Icon::new(self.data, "recipe", recipe_name));
-                ui.label(self.data.get_display_name("recipe", recipe_name));
-                ui.add(
-                    DragValue::new(&mut value)
-                        .suffix("%")
-                        .speed(1)
-                        .range(0..=32770),
-                );
-            });
-            *productivity = value as f64 / 100.0;
-        }
+        ui.checkbox(&mut self.proj.ignore_productivity, "忽略配方产能");
+        egui::Grid::new("recipe-productivity").show(ui, |ui| {
+            for (recipe_name, productivity) in self.proj.recipe_productivity.iter_mut() {
+                let mut value = (*productivity * 100.0) as i32;
+
+                ui.vertical(|ui| {
+                    ui.add_sized([35.0, 35.0], Icon::new(self.data, "recipe", recipe_name));
+                    ui.add(
+                        DragValue::new(&mut value)
+                            .suffix("%")
+                            .speed(1)
+                            .range(0..=32770),
+                    );
+                });
+                *productivity = value as f64 / 100.0;
+                if ui.available_size().x < 40.0 {
+                    ui.end_row();
+                }
+            }
+        });
         response
     }
 }

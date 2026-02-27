@@ -375,7 +375,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, MiningDrillPrototype> {
             ui.set_min_width(140.0);
             ui.label(format!("挖掘速度: {}", self.prototype.mining_speed));
             ui.label(format!(
-                "资源消耗: {}",
+                "资源消耗: {}%",
                 (self
                     .prototype
                     .resource_drain_rate_percent

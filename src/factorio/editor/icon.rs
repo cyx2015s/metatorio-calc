@@ -139,6 +139,12 @@ impl<'a> egui::Widget for Icon<'a> {
                             });
                         }
                     }
+                    "technology" => {
+                        if let Some(technology) = data.technologies.get(self.item_name) {
+                            icon = icon
+                                .on_hover_text(data.get_display_name("technology", self.item_name))
+                        }
+                    }
                     _ => {}
                 }
                 icon

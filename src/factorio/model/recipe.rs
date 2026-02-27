@@ -453,8 +453,8 @@ impl AsFlow for RecipeInstance {
 
         let mut module_effects = self.module_config.get_effect(data);
 
-        if let Some(productivity_bonus) = proj.recipe_productivity.get(&self.recipe.0) {
-            module_effects.productivity += *productivity_bonus;
+        if let Some(productivity_bonus) = proj.get_recipe_productivity(&self.recipe.0) {
+            module_effects.productivity += productivity_bonus;
         }
 
         let mut base_speed = 1.0;
