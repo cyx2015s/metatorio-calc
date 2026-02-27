@@ -232,9 +232,10 @@ impl<'a> egui::Widget for Selector<'a, IdWithQuality, IdWithQuality> {
         let prev_storage_quality = storage.selected_quality;
         let prev_storage_item = storage.selected_item.clone();
         if self.data.qualities.len() > 1
-            && quality_selector(ui, self.data, &mut storage.selected_quality) {
-                response.mark_changed();
-            }
+            && quality_selector(ui, self.data, &mut storage.selected_quality)
+        {
+            response.mark_changed();
+        }
         let mut widget: Selector<'_, str, String> =
             Selector::new(self.data, self.type_name).with_output(&mut storage.selected_item);
         if let Some(filter) = self.filter {

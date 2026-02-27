@@ -197,7 +197,7 @@ pub fn transitive_reduction_and_build_depth(
             for dep in &tech.dependencies {
                 let dep_depth = tech_depth.get(dep.as_str()).cloned().unwrap_or(0);
                 tech_depth
-                    .entry(&tech_name)
+                    .entry(tech_name)
                     .and_modify(|d| *d = (*d).max(dep_depth + 1))
                     .or_insert(0);
             }
@@ -223,7 +223,7 @@ pub fn resolve_dependency(data: &DataContext, milestones: &[(String, bool)]) -> 
     }
     let mut unlocked = Dict::new();
     let mut queue = VecDeque::new(); // 传播队列
-    for (tech_name, tech) in &data.technologies {
+    for (tech_name, _tech) in &data.technologies {
         unlocked.insert(
             tech_name.clone(),
             !appeared_in_milestones(tech_name, milestones),
