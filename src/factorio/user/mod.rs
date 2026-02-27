@@ -5,7 +5,7 @@ use indexmap::IndexMap;
 
 use std::{path::PathBuf, sync::mpsc::Sender};
 
-use crate::factorio::{DataContext, Dict, planner::FactoryInstance};
+use crate::factorio::{Dict, planner::FactoryInstance};
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default)]

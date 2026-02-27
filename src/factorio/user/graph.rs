@@ -223,7 +223,7 @@ pub fn resolve_dependency(data: &DataContext, milestones: &[(String, bool)]) -> 
     }
     let mut unlocked = Dict::new();
     let mut queue = VecDeque::new(); // 传播队列
-    for (tech_name, _tech) in &data.technologies {
+    for tech_name in data.technologies.keys() {
         unlocked.insert(
             tech_name.clone(),
             !appeared_in_milestones(tech_name, milestones),

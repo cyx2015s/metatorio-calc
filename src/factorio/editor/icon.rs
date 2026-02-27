@@ -146,7 +146,7 @@ impl<'a> egui::Widget for Icon<'a> {
                         }
                     }
                     "space-location" => {
-                        if let Some(planet) = data.planets.get(self.item_name) {
+                        if let Some(_planet) = data.planets.get(self.item_name) {
                             icon = icon.on_hover_text(
                                 data.get_display_name("space-location", self.item_name),
                             )

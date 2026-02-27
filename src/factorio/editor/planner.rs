@@ -722,7 +722,7 @@ impl FactoryInstance {
         ui.heading("环境");
         ui.horizontal_wrapped(|ui| {
             let button = if let Some(planet) = &self.factory.planet {
-                ui.add_sized([35.0, 35.0], Icon::new(data, "space-location", &planet))
+                ui.add_sized([35.0, 35.0], Icon::new(data, "space-location", planet))
             } else {
                 ui.add_sized([35.0, 35.0], Icon::new(data, "item", "unknown"))
             };
