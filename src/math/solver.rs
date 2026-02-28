@@ -668,9 +668,8 @@ where
             flow_vars.insert(f_id.clone(), var);
         }
         for (t_idx, target) in self.target.iter().enumerate() {
-            for (i_id, _) in target.coefficients.iter() {
-                // 不用限制值域，目标条件能够限制
-                let var = problem_variables.add(variable());
+            for (i_id, coef) in target.coefficients.iter() {
+                let var = problem_variables.add(variable().min(0));
                 flow_target_vars.insert((t_idx, i_id.clone()), var);
             }
         }

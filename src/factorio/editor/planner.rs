@@ -25,7 +25,7 @@ use crate::{
     math::*,
 };
 
-use indexmap::IndexMap;
+use indexmap::{IndexMap, map::MutableKeys};
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
@@ -286,11 +286,15 @@ impl FactoryInstance {
                 0.0,
             );
         }
-        SolverData::new_simple(target, flows)
+        let mut ret = SolverData::new_simple(target, flows)
             .with_sources(external)
             .with_strict_source(self.strict_source)
             .with_strict_sink(self.strict_sink)
-            .with_sinks(sinks)
+            .with_sinks(sinks);
+
+        ret.target.extend(self.target_group.vec.iter().cloned());
+
+        ret
     }
 
     pub fn trim_flows(&mut self) -> bool {
@@ -920,66 +924,131 @@ impl FactoryInstance {
     ) {
         ui.heading("目标产量/消耗");
 
-        self.target
-            .dnd(ui, "target", |ui, _, (item, amount), handle, _, op| {
-                card_frame(ui).show(ui, |ui| {
-                    ui.horizontal_top(|ui| {
-                        ui.set_min_width(ui.available_width());
-                        handle.ui(ui, |ui| {
-                            ui.heading("≡");
-                        });
-
-                        if item.is_energy() {
-                            let mut display_value = *amount * 1e6;
-                            *changed |= ui.add(drag_watt(&mut display_value).speed(1e6)).changed();
-                            *amount = display_value / 1e6;
-                        } else {
-                            let mut display_value = *amount * proj.time_scale.multiplier();
-                            *changed |= ui.add(drag_value(&mut display_value)).changed();
-                            *amount = display_value / proj.time_scale.multiplier();
-                        }
-
-                        if ui.button("×").clicked() {
-                            *op = EntryOpRequest::Drop;
-                            *changed = true;
-                        }
-                    });
-                    ui.horizontal_wrapped(|ui| {
-                        let icon = GenericIcon::new(data, item);
-
-                        let widget = ui.add_sized([35.0, 35.0], icon);
-
-                        if widget.clicked_by(egui::PointerButton::Secondary) {
-                            *need_suggestions = true;
-                            self.mechanics.iter_mut().for_each(|mechanic| {
-                                mechanic.update_suggestion(
-                                    data,
-                                    proj,
-                                    &self.factory,
-                                    item,
-                                    -*amount, // 目标产量为正表示目前缺少对应数量的物品
-                                )
+        ui.scope(|ui| {
+            self.target
+                .dnd(ui, "target", |ui, _, (item, amount), handle, _, op| {
+                    card_frame(ui).show(ui, |ui| {
+                        ui.horizontal_top(|ui| {
+                            ui.set_min_width(ui.available_width());
+                            handle.ui(ui, |ui| {
+                                ui.heading("≡");
                             });
-                        }
-                        ui.vertical(|ui| {
-                            ui.horizontal(|ui| {
-                                *changed |= generic_item_selector(
-                                    ui,
-                                    data,
-                                    item,
-                                    &widget,
-                                    widget.id.with("target"),
-                                );
+
+                            if item.is_energy() {
+                                let mut display_value = *amount * 1e6;
+                                *changed |=
+                                    ui.add(drag_watt(&mut display_value).speed(1e6)).changed();
+                                *amount = display_value / 1e6;
+                            } else {
+                                let mut display_value = *amount * proj.time_scale.multiplier();
+                                *changed |= ui.add(drag_value(&mut display_value)).changed();
+                                *amount = display_value / proj.time_scale.multiplier();
+                            }
+
+                            if ui.button("×").clicked() {
+                                *op = EntryOpRequest::Drop;
+                                *changed = true;
+                            }
+                        });
+                        ui.horizontal_wrapped(|ui| {
+                            let icon = GenericIcon::new(data, item);
+
+                            let widget = ui.add_sized([35.0, 35.0], icon);
+
+                            if widget.clicked_by(egui::PointerButton::Secondary) {
+                                *need_suggestions = true;
+                                self.mechanics.iter_mut().for_each(|mechanic| {
+                                    mechanic.update_suggestion(
+                                        data,
+                                        proj,
+                                        &self.factory,
+                                        item,
+                                        -*amount, // 目标产量为正表示目前缺少对应数量的物品
+                                    )
+                                });
+                            }
+                            ui.vertical(|ui| {
+                                ui.horizontal(|ui| {
+                                    *changed |= generic_item_selector(
+                                        ui,
+                                        data,
+                                        item,
+                                        &widget,
+                                        widget.id.with("target"),
+                                    );
+                                });
                             });
                         });
                     });
                 });
-            });
-        if ui.button("添加指定产物").clicked() {
-            self.target
-                .push((DualVar::Item("item-unknown".into()), 1.0));
-            *changed = true;
-        }
+            if ui.button("添加指定产物").clicked() {
+                self.target
+                    .push((DualVar::Item("item-unknown".into()), 1.0));
+                *changed = true;
+            }
+        });
+        ui.separator();
+        ui.scope(|ui| {
+            self.target_group.dnd(
+                ui,
+                "target-group",
+                |ui,
+                 _,
+                 TargetSpec {
+                     constant,
+                     coefficients,
+                 },
+                 handle,
+                 _,
+                 op| {
+                    card_frame(ui).show(ui, |ui| {
+                        ui.horizontal_top(|ui| {
+                            ui.set_min_width(ui.available_width());
+                            handle.ui(ui, |ui| {
+                                ui.heading("≡");
+                                ui.label("表达式");
+                            });
+
+                            if ui.button("×").clicked() {
+                                *op = EntryOpRequest::Drop;
+                                *changed = true;
+                            }
+                        });
+                        ui.separator();
+                        ui.label("常数项");
+                        *changed |= ui.add(drag_value(constant)).changed();
+                        ui.separator();
+                        ui.label("线性项");
+                        coefficients.retain2(|item_id, coef| {
+                            let mut deleted = false;
+                            ui.horizontal(|ui| {
+                                let response =
+                                    ui.add_sized([35.0, 35.0], GenericIcon::new(data, item_id));
+                                *changed |= generic_item_selector(ui, data, item_id, &response, response.id);
+                                ui.vertical(|ui| {
+                                    *changed |= ui.add(drag_value(coef).prefix("× ")).changed();
+                                    if ui.button("删除").clicked() {
+                                        deleted = true;
+                                        *changed = true;
+                                    }
+                                })
+                            });
+                            !deleted
+                        });
+                        if ui.button("添加项").clicked() {
+                            coefficients.insert(DualVar::Item("item-unknown".into()), 0.0);
+                            *changed = true;
+                        }
+                    });
+                },
+            );
+            if ui.button("添加产物表达式").clicked() {
+                self.target_group.push(TargetSpec {
+                    constant: 1.0,
+                    coefficients: IndexMap::new(),
+                });
+            }
+        });
     }
 }
 

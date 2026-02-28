@@ -333,6 +333,7 @@ pub fn quality_selector(
     changed
 }
 
+#[must_use]
 pub fn generic_item_selector(
     ui: &mut egui::Ui,
     data: &DataContext,

@@ -428,7 +428,9 @@ fn main() {
                 style.interaction.tooltip_delay = 0.2;
                 style.interaction.tooltip_grace_time = 1.0;
                 style.interaction.show_tooltips_only_when_still = false;
+                style.spacing.combo_width *= 0.75;
             });
+
             Ok(Box::new(MainPage::new(cc)))
         }),
     )
