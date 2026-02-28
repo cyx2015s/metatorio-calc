@@ -31,7 +31,7 @@ pub fn factorio_auto_planner(
 
     factory.strict_source = true;
 
-    let mut problem = factory.as_problem(&data, &proj);
+    let problem = factory.as_problem(&data, &proj);
 
     log::info!(
         "构建求解器问题完成，变量数量: {}, 用时: {:.2?}",

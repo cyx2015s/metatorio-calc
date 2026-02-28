@@ -285,7 +285,7 @@ impl FactoryInstance {
                 0.0,
             );
         }
-        SolverData::new(target, flows)
+        SolverData::new_simple(target, flows)
             .with_sources(external)
             .with_strict_source(self.strict_source)
             .with_strict_sink(self.strict_sink)

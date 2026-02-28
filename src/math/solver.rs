@@ -23,13 +23,26 @@ where
 }
 
 #[derive(Debug, Clone)]
+pub struct TargetSpec<I: ItemIdent> {
+    pub constant: f64,
+    pub coefficients: Flow<I>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FlowSpec<I: ItemIdent> {
+    pub coefficients: Flow<I>,
+    pub cost: f64,
+    pub fixed: Option<f64>, // 如果是Some(v)，表示这个原始变量必须是v
+}
+
+#[derive(Debug, Clone)]
 pub struct SolverData<I, R>
 where
     I: ItemIdent,
     R: ItemIdent,
 {
-    pub target: Flow<I>,
-    pub flows: IndexMap<R, (Flow<I>, f64)>,
+    pub target: Vec<TargetSpec<I>>,
+    pub flows: IndexMap<R, FlowSpec<I>>,
     pub sources: Flow<I>, //  输入特定物品消耗的价值
     pub sinks: Flow<I>,   //  产生额外物品的惩罚
     // 我还不知道怎么称呼，目前规定如下：
@@ -48,7 +61,6 @@ pub enum SolverSolution<I, R> {
         prim_scale: Flow<R>,
         dual_scale: Flow<I>,
         sum: Flow<I>,
-        target_scale: f64,
         cost: f64,
     },
     NotSolved {
@@ -80,12 +92,9 @@ where
     pub fn get_prim_of(&self, i: &R) -> Option<f64> {
         match self {
             SolverSolution::Solved {
-                prim,
-                prim_scale,
-                target_scale,
-                ..
+                prim, prim_scale, ..
             } => match (prim.get(i), prim_scale.get(i)) {
-                (Some(v), Some(s)) => Some(*v * s / target_scale),
+                (Some(v), Some(s)) => Some(*v * s),
                 _ => None,
             },
             _ => None,
@@ -163,13 +172,10 @@ where
     pub fn get_sum_raw_of(&self, i: &I) -> Option<f64> {
         match self {
             SolverSolution::Solved {
-                sum,
-                dual_scale,
-                target_scale,
-                ..
+                sum, dual_scale, ..
             } => sum
                 .get(i)
-                .map(|v| *v * dual_scale.get(i).cloned().unwrap_or(1.0) * target_scale),
+                .map(|v| *v * dual_scale.get(i).cloned().unwrap_or(1.0)),
             _ => None,
         }
     }
@@ -180,10 +186,28 @@ where
     I: ItemIdent,
     R: ItemIdent,
 {
-    pub fn new(target: Flow<I>, flows: IndexMap<R, (Flow<I>, f64)>) -> Self {
+    pub fn new_simple(target: Flow<I>, flows: IndexMap<R, (Flow<I>, f64)>) -> Self {
         Self {
-            target,
-            flows,
+            target: target
+                .into_iter()
+                .map(|(item_id, constant)| TargetSpec {
+                    constant,
+                    coefficients: [(item_id, 1.0)].into_iter().collect(),
+                })
+                .collect(),
+            flows: flows
+                .into_iter()
+                .map(|(flow_id, (coefficients, cost))| {
+                    (
+                        flow_id,
+                        FlowSpec {
+                            coefficients,
+                            cost,
+                            fixed: None,
+                        },
+                    )
+                })
+                .collect(),
             sources: IndexMap::new(),
             sinks: IndexMap::new(),
             strict_source: false,
@@ -225,8 +249,16 @@ where
                 Usable,
             }
 
-            for (f_id, (flow, _)) in &self.flows {
-                for (item_id, &amount) in flow {
+            for (
+                f_id,
+                FlowSpec {
+                    coefficients,
+                    cost: _,
+                    fixed: _,
+                },
+            ) in &self.flows
+            {
+                for (item_id, &amount) in coefficients {
                     let entry =
                         status
                             .entry(item_id.clone())
@@ -266,6 +298,23 @@ where
 
             let before = self.flows.len();
 
+            let needed_by_target = self.target.iter().fold(
+                HashSet::new(),
+                |mut acc,
+                 TargetSpec {
+                     constant,
+                     coefficients,
+                 }| {
+                    for (i_id, coef) in coefficients {
+                        if *coef * constant > 0.0 {
+                            // 系数与常数同号，说明目标需要这个物品
+                            acc.insert(i_id.clone());
+                        }
+                    }
+                    acc
+                },
+            );
+
             for (i_id, entry) in &status {
                 if let ItemStatus::Pending {
                     providers,
@@ -273,7 +322,9 @@ where
                 } = entry
                     && providers.is_empty() // 没有生产这个物品的配方
                         && !self.sources.contains_key(i_id) // 外部也不能提供
-                        && self.target.get(i_id).as_ref().is_none_or(|v| **v > 0.0)
+                        && needed_by_target.contains(i_id)
+                // 目标需要这个物品
+                // 目标也不需要
                 {
                     log::debug!(
                         "求解器：物品 {:?} 无法获得，移除相关配方 {} 个",
@@ -304,7 +355,7 @@ where
         changed
     }
 
-    pub fn solve(&mut self) -> SolverSolution<I, R> {
+    pub fn solve(mut self) -> SolverSolution<I, R> {
         if self.flows.is_empty() {
             return SolverSolution::NotSolved {
                 no_provider: vec![],
@@ -319,6 +370,31 @@ where
                 description: "没有目标物品。".to_string(),
             };
         }
+
+        let needed_by_target = self.target.iter().fold(
+            HashSet::new(),
+            |mut acc,
+             TargetSpec {
+                 constant,
+                 coefficients,
+             }| {
+                for (i_id, coef) in coefficients {
+                    if *coef * constant > 0.0 {
+                        // 系数与常数同号，说明目标需要这个物品
+                        acc.insert(i_id.clone());
+                    }
+                }
+                acc
+            },
+        );
+
+        let appeared_in_target = self
+            .target
+            .iter()
+            .flat_map(|t| t.coefficients.keys())
+            .cloned()
+            .collect::<HashSet<I>>();
+
         log::info!("求解器：开始剪枝");
         let mut count = 0;
         let instant = Instant::now();
@@ -336,18 +412,37 @@ where
             instant.elapsed()
         );
         // 调整配方的系数，使得其中出现的数量级最大的物品的数量级在1附近，避免数值不稳定。
+
         let mut item_scales: HashMap<I, f64> = HashMap::new();
-        for (flow, _) in self.flows.values() {
-            for (item_id, _) in flow {
+
+        // target视为虚拟物品
+        let mut item_target_scales: Vec<f64> = vec![1.0; self.target.len()];
+
+        // 按比例贡献target的物品视为虚拟流
+        let mut flow_target_scales: HashMap<(usize, I), f64> = self
+            .target
+            .iter()
+            .enumerate()
+            .flat_map(|(t_idx, t)| {
+                t.coefficients
+                    .iter()
+                    .map(move |(i_id, _)| ((t_idx, i_id.clone()), 1.0))
+            })
+            .collect();
+
+        for FlowSpec {
+            coefficients,
+            cost,
+            fixed,
+        } in self.flows.values()
+        {
+            for (item_id, _) in coefficients {
                 item_scales.insert(item_id.clone(), 1.0);
             }
         }
-        for (item_id, _) in &self.target {
-            item_scales.insert(item_id.clone(), 1.0);
-        }
         let mut flow_scales: HashMap<R, f64> =
             self.flows.keys().map(|id| (id.clone(), 1.0)).collect();
-        let mut target_scale: f64 = 1.0;
+
         log::info!("开始平衡数量级");
         // Ruiz 算法
         let instant = Instant::now();
@@ -360,7 +455,7 @@ where
                     |local_max, (f_id, f_scale)| {
                         let mut sum_x2 = 0.0;
                         let mut count = 0;
-                        for (i_id, amount) in &self.flows[f_id].0 {
+                        for (i_id, amount) in &self.flows[f_id].coefficients {
                             if *amount == 0.0 {
                                 continue;
                             }
@@ -387,36 +482,58 @@ where
                 )
                 .reduce(|| 1.0, f64::max);
 
-            // target
-            let mut target_sum_x2 = 0.0;
-            let mut target_count = 0;
-            for (i_id, &amount) in &self.target {
-                let val = amount * item_scales.get(i_id).cloned().unwrap_or(1.0) * target_scale;
-                target_sum_x2 += val * val;
-                target_count += 1;
-            }
-            let delta_scale = if target_count > 0 {
-                ((target_count as f64) / target_sum_x2).sqrt()
-            } else {
-                1.0
-            }
-            .clamp(1e-3, 1e3);
-            if delta_scale > 1.0 && delta_scale > max_delta_scale {
-                max_delta_scale = delta_scale;
-            } else if delta_scale < 1.0 && 1.0 / delta_scale > max_delta_scale {
-                max_delta_scale = 1.0 / delta_scale;
-            }
-            target_scale *= delta_scale;
+            max_delta_scale = max_delta_scale.max(
+                flow_target_scales
+                    .par_iter_mut()
+                    .fold(
+                        || 1.0,
+                        |local_max, (f_t_id, f_t_scale)| {
+                            let mut sum_x2 = 0.0;
+                            let mut count = 0;
+                            // 梳理中……
+                            // flow_target_scales的key是(usize, I)，其中usize是target的索引，I是物品ID，表示物品ID产生target的流
+                            // I的系数应该是target中系数的倒数（价值越高，消耗越少），target的结果是1.
+                            if let Some(&coeff) = self.target[f_t_id.0].coefficients.get(&f_t_id.1)
+                            {
+                                if coeff == 0.0 {
+                                    // 系数为0，需要消耗无穷大的物品才能贡献，相当于无法贡献
+                                    return 1.0;
+                                }
+                                // 物品的消耗量（如果coeff > 0）
+                                let amount = -1.0 / coeff;
+                                let val = amount
+                                    * item_scales.get(&f_t_id.1).cloned().unwrap_or(1.0)
+                                    * *f_t_scale;
+                                sum_x2 += val * val;
+                                count += 1;
+                            }
+                            if count > 0 {
+                                let delta_scale = ((count as f64) / sum_x2).sqrt().clamp(1e-3, 1e3);
+                                *f_t_scale *= delta_scale;
 
-            // items
+                                if delta_scale > 1.0 && delta_scale > local_max {
+                                    delta_scale
+                                } else if delta_scale < 1.0 && 1.0 / delta_scale > local_max {
+                                    1.0 / delta_scale
+                                } else {
+                                    local_max
+                                }
+                            } else {
+                                1.0
+                            }
+                        },
+                    )
+                    .reduce(|| 1.0, f64::max),
+            );
+
             let mut item_stats: HashMap<I, (f64, usize)> = self
                 .flows
                 .par_iter()
                 .fold(
                     HashMap::<I, (f64, usize)>::new,
-                    |mut local_stats, (f_id, (flow, _))| {
+                    |mut local_stats, (f_id, flow_spec)| {
                         let f_scale = *flow_scales.get(f_id).unwrap();
-                        for (i_id, amount) in flow {
+                        for (i_id, amount) in &flow_spec.coefficients {
                             if *amount == 0.0 {
                                 continue;
                             }
@@ -426,6 +543,7 @@ where
                             entry.0 += val * val;
                             entry.1 += 1;
                         }
+                        // 每个物品在每个流中的系数
                         local_stats
                     },
                 )
@@ -437,15 +555,24 @@ where
                     }
                     acc
                 });
-            for (i_id, target) in &self.target {
-                if *target == 0.0 {
-                    continue;
+
+            // target flow中的真实物品也参与真实物品的系数计算
+            self.target.iter().enumerate().for_each(|(t_idx, t)| {
+                for (i_id, &coef) in &t.coefficients {
+                    if coef == 0.0 {
+                        continue;
+                    }
+                    let amount = -1.0 / coef;
+                    let val = amount
+                        * item_scales.get(i_id).cloned().unwrap_or(1.0)
+                        * item_target_scales[t_idx];
+                    let entry = item_stats.get(i_id).cloned().unwrap_or((0.0, 0));
+                    let sum_x2 = entry.0 + val * val;
+                    let count = entry.1 + 1;
+                    item_stats.insert(i_id.clone(), (sum_x2, count));
                 }
-                let val = target * target_scale * item_scales.get(i_id).cloned().unwrap_or(1.0);
-                let entry = item_stats.entry(i_id.clone()).or_insert((0.0, 0));
-                entry.0 += val * val;
-                entry.1 += 1;
-            }
+            });
+
             max_delta_scale = max_delta_scale.max(
                 item_scales
                     .par_iter_mut()
@@ -473,9 +600,49 @@ where
                     )
                     .reduce(|| 1.0, f64::max),
             );
+            // Vec每一项内容：第几个target，sum_x2，count
+            let item_target_stats = self
+                .target
+                .iter()
+                .enumerate()
+                .map(|(t_idx, t)| {
+                    let mut sum_x2 = 0.0;
+                    let mut count = 0;
+                    for (i_id, &coef) in &t.coefficients {
+                        if coef == 0.0 {
+                            continue;
+                        }
+                        // 计算平方和，不考虑正负号，正负号在之后构建表达式时再考虑
+                        let amount = 1.0 / coef;
+                        let val = amount
+                            * item_scales.get(i_id).cloned().unwrap_or(1.0)
+                            * item_target_scales[t_idx];
+                        sum_x2 += val * val;
+                        count += 1;
+                    }
+                    (t_idx, sum_x2, count)
+                })
+                .collect::<Vec<_>>();
+            item_target_scales
+                .iter_mut()
+                .enumerate()
+                .for_each(|(t_idx, t_scale)| {
+                    let (t_idx, sum_x2, count) = item_target_stats[t_idx];
+                    let delta_scale = if count > 0 {
+                        ((count as f64) / sum_x2).sqrt()
+                    } else {
+                        1.0
+                    }
+                    .clamp(1e-3, 1e3);
+                    *t_scale *= delta_scale;
+                    if delta_scale > 1.0 && delta_scale > max_delta_scale {
+                        max_delta_scale = delta_scale;
+                    } else if delta_scale < 1.0 && 1.0 / delta_scale > max_delta_scale {
+                        max_delta_scale = 1.0 / delta_scale;
+                    }
+                });
             if i % 8 == 7 {
                 log::debug!("第{i}轮数量级平衡完成。");
-                log::debug!("target = {:?}, target_scale = {target_scale}", &self.target);
                 log::debug!("max_delta_scale = {:?}", max_delta_scale);
                 if max_delta_scale < 1.0 + 1e-6 {
                     log::info!("数量级平衡已收敛，提前结束。");
@@ -487,44 +654,77 @@ where
         // 应用
 
         let get_item_scale = |item_id: &I| -> f64 { *item_scales.get(item_id).unwrap_or(&1.0) };
+        let get_item_target_scale =
+            |t_idx: usize| -> f64 { item_target_scales.get(t_idx).cloned().unwrap_or(1.0) };
         let get_flow_scale = |flow_id: &R| -> f64 { *flow_scales.get(flow_id).unwrap_or(&1.0) };
+        let get_flow_target_scale = |t_idx: usize, item_id: &I| -> f64 {
+            flow_target_scales
+                .get(&(t_idx, item_id.clone()))
+                .cloned()
+                .unwrap_or(1.0)
+        };
 
         let mut problem_variables = good_lp::ProblemVariables::new();
+        // 用户提供的流编号 -> 变量的映射
         let mut flow_vars = IndexMap::new();
+        // 目标辅助流编号 -> 变量的映射
+        let mut flow_target_vars = HashMap::new();
+        // 物品源变量
         let mut source_vars = IndexMap::new();
+        // 物品汇变量
         let mut sink_vars = IndexMap::new();
         for f_id in self.flows.keys() {
             let var = problem_variables.add(variable().min(0));
             flow_vars.insert(f_id.clone(), var);
         }
+        for (t_idx, target) in self.target.iter().enumerate() {
+            for (i_id, _) in target.coefficients.iter() {
+                let var = problem_variables.add(variable().min(0));
+                flow_target_vars.insert((t_idx, i_id.clone()), var);
+            }
+        }
         let mut item_balances = IndexMap::new();
+
         log::info!(
             "求解器：开始构建物品平衡表达式：一共有 {} 个配方变量",
             self.flows.len()
         );
-        let mut extreme = 0.0;
+
         let mut force_zero_items = IndexSet::new();
-        for (f_id, (flow, cost)) in &self.flows {
+        for (f_id, flow_spec) in &self.flows {
             let var = flow_vars.get(f_id).unwrap();
-            for (item_id, &amount) in flow {
+            for (item_id, &amount) in &flow_spec.coefficients {
                 let entry = item_balances
                     .entry(item_id.clone())
                     .or_insert(good_lp::Expression::from(0.0));
                 let val = amount * get_item_scale(item_id) * get_flow_scale(f_id);
-                if val.abs().log2().abs() > extreme {
-                    extreme = val.abs().log2();
-                }
+
                 *entry += val * *var;
-                if *cost == 0.0 && amount > 0.0 {
+                if flow_spec.cost == 0.0 && amount > 0.0 {
                     force_zero_items.insert(item_id.clone());
                 }
             }
         }
-        log::info!(
-            "求解器：一共有 {} 个物品需要平衡，矩阵元素的最大数量级为 {:.2}",
-            item_balances.len(),
-            extreme
-        );
+        for (f_idx, target) in self.target.iter().enumerate() {
+            for (item_id, &coef) in &target.coefficients {
+                if coef == 0.0 {
+                    continue;
+                }
+                let var = flow_target_vars.get(&(f_idx, item_id.clone())).unwrap();
+                // 使用.abs()保证总是消耗这个物品的产量
+                // 此外，如果目标为正，要求消耗这个物品；如果目标为负，要求生产这个物品
+                let val = -(1.0 / coef).abs()
+                    * target.constant.signum()
+                    * get_item_scale(item_id)
+                    * get_flow_target_scale(f_idx, item_id);
+
+                let entry = item_balances
+                    .entry(item_id.clone())
+                    .or_insert(good_lp::Expression::from(0.0));
+                *entry += val * *var;
+            }
+        }
+        log::info!("求解器：一共有 {} 个物品需要平衡", item_balances.len(),);
 
         for (item_id, _) in &self.sources {
             let var = problem_variables.add(variable().min(0));
@@ -544,8 +744,8 @@ where
         }
         let mut no_providers: HashSet<I> = item_balances.keys().cloned().collect();
         let mut no_consumers: HashSet<I> = item_balances.keys().cloned().collect();
-        for (flow, _) in self.flows.values() {
-            for (item_id, &amount) in flow {
+        for (flow, flow_spec) in &self.flows {
+            for (item_id, &amount) in &flow_spec.coefficients {
                 if amount > 0.0 {
                     no_providers.remove(item_id);
                 }
@@ -560,20 +760,11 @@ where
         for item in self.sinks.keys() {
             no_consumers.remove(item);
         }
-        let mut targets = Vec::new();
-        for (item_id, &amount) in &self.target {
-            // 目标物品，严格相等
-            let balance = item_balances.get(item_id);
-            if let Some(expr) = balance {
-                targets.push(
-                    expr.clone()
-                        .eq(amount * get_item_scale(item_id) * target_scale),
-                );
-            }
-        }
         let mut constraints = Vec::new();
+
         for (item_id, expr) in &item_balances {
-            if !self.target.contains_key(item_id) {
+            // 所有目标都间接转移了，不再在此处做判断
+            {
                 // 严格模式下，不能凭空输入。非严格模式下，有来源的物品不能有凭空输入。
                 // 非目标物品，不能为负
                 if force_zero_items.contains(item_id) {
@@ -603,10 +794,30 @@ where
         for source_var in source_vars.values() {
             constraints.push(source_var.into_expression().geq(0.0));
         }
+        // 添加求解目标的限制
+        for (f_t_id, target) in self.target.iter().enumerate() {
+            let mut target_expr = good_lp::Expression::from(0.0);
+            for (item_id, &coef) in &target.coefficients {
+                if coef == 0.0 {
+                    continue;
+                }
+                // 在前面设置虚拟流时，总是认为目标为正要求这个流消耗；目标为负要求这个流生产，且已经根据系数调整输入物品的系数
+                // 此处只要根据符号确定增加还是消耗
+                // 例：系数为正，目标为正，增加贡献
+                // 系数为负，目标为正，减少贡献
+                target_expr += coef.signum()
+                    * get_flow_target_scale(f_t_id, item_id)
+                    * flow_target_vars
+                        .get(&(f_t_id, item_id.clone()))
+                        .cloned()
+                        .unwrap();
+            }
+            constraints.push(target_expr.eq(target.constant));
+        }
         let mut optimization_expr = good_lp::Expression::from(0.0);
-        for (flow, (_, cost)) in &self.flows {
-            let var = flow_vars.get(flow).unwrap();
-            optimization_expr += *cost * *var * get_flow_scale(flow);
+        for (flow_id, flow_spec) in &self.flows {
+            let var = flow_vars.get(flow_id).unwrap();
+            optimization_expr += flow_spec.cost * *var * get_flow_scale(flow_id);
         }
         for (item_id, cost) in &self.sources {
             let var = source_vars.get(item_id).unwrap();
@@ -625,7 +836,6 @@ where
         let solution = problem_variables
             .minimise(&optimization_expr)
             .using(good_lp::microlp)
-            .with_all(targets)
             .with_all(constraints)
             .solve();
 
@@ -640,9 +850,9 @@ where
                     prim.insert(f_id.clone(), value);
 
                     prim_scale.insert(f_id.clone(), get_flow_scale(f_id));
-                    for (item_id, &amount) in &self.flows[f_id].0 {
+                    for (item_id, &amount) in &self.flows[f_id].coefficients {
                         let entry = sum.entry(item_id.clone()).or_insert(0.0);
-                        *entry += amount * value / target_scale * get_flow_scale(f_id);
+                        *entry += amount * value * get_flow_scale(f_id);
                     }
                 }
                 SolverSolution::Solved {
@@ -654,8 +864,7 @@ where
                         .map(|(i_id, _)| (i_id.clone(), get_item_scale(i_id)))
                         .collect(),
                     sum,
-                    target_scale,
-                    cost: sol.eval(optimization_expr) / target_scale,
+                    cost: sol.eval(optimization_expr),
                 }
             }
             Err(err) => {
@@ -714,7 +923,7 @@ where
     ) {
         std::thread::spawn(move || {
             log::info!("求解线程启动");
-            while let Ok((req_id, mut req)) = problem_rx.recv() {
+            while let Ok((req_id, req)) = problem_rx.recv() {
                 let result = req.solve();
                 if solution_tx.send((req_id, result)).is_err() {
                     // 接收方已关闭，退出线程
