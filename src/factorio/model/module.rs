@@ -251,7 +251,7 @@ impl ModuleConfig {
 
 impl SolveContext for ModuleConfig {
     type Game = DataContext;
-    type Item = GenericItem;
+    type Item = DualVar;
 }
 
 pub struct ModuleConfigEditor<'a> {
@@ -365,7 +365,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
             for module in &self.module_config.modules {
                 index_map_update_entry(
                     &mut total,
-                    GenericItem::Item(IdWithQuality(module.0.clone(), module.1)),
+                    DualVar::Item(IdWithQuality(module.0.clone(), module.1)),
                     1,
                 );
             }
@@ -373,13 +373,13 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                 for (module, count) in &beacon_config.modules {
                     index_map_update_entry(
                         &mut total,
-                        GenericItem::Item(IdWithQuality(module.0.clone(), module.1)),
+                        DualVar::Item(IdWithQuality(module.0.clone(), module.1)),
                         *count,
                     );
                 }
                 index_map_update_entry(
                     &mut total,
-                    GenericItem::Entity(IdWithQuality(
+                    DualVar::Entity(IdWithQuality(
                         beacon_config.beacon.0.clone(),
                         beacon_config.beacon.1,
                     )),

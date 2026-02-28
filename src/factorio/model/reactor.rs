@@ -2,7 +2,7 @@ use crate::{
     concept::{EntryOpRequest, EntryOpResult, Flow, SolveContext},
     factorio::{
         AsFlow, DataContext, Effect, EnergyAmount, EnergySource, EntityPrototype, FactorioMechanic,
-        GenericItem, IdWithQuality, ProjectContext, SerdeFactorioMechanic, energy_source_as_flow,
+        DualVar, IdWithQuality, ProjectContext, SerdeFactorioMechanic, energy_source_as_flow,
         icon::Icon, index_map_update_entry, modal::SelectorModal, planner::FactoryContext,
         selector::Selector,
     },
@@ -31,7 +31,7 @@ pub struct ReactorMechanic {
 
 impl SolveContext for ReactorMechanic {
     type Game = DataContext;
-    type Item = GenericItem;
+    type Item = DualVar;
 }
 
 #[typetag::serde(name = "factorio:reactor")]
@@ -148,7 +148,7 @@ pub struct ReactorInstance {
 
 impl SolveContext for ReactorInstance {
     type Game = DataContext;
-    type Item = GenericItem;
+    type Item = DualVar;
 }
 
 impl AsFlow for ReactorInstance {
@@ -157,7 +157,7 @@ impl AsFlow for ReactorInstance {
         data: &DataContext,
         _proj: &ProjectContext,
         _factory: &FactoryContext,
-    ) -> Flow<GenericItem> {
+    ) -> Flow<DualVar> {
         let mut flow = Flow::new();
         if let Some(reactor) = data.reactors.get(&self.reactor.0) {
             flow = flow_add(
@@ -174,7 +174,7 @@ impl AsFlow for ReactorInstance {
             );
             index_map_update_entry(
                 &mut flow,
-                GenericItem::Heat,
+                DualVar::Heat,
                 reactor.consumption.amount
                     * (1.0 + self.neighbours as f64 * reactor.neighbour_bonus)
                     * 60.0,

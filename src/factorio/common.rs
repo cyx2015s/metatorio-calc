@@ -18,7 +18,7 @@ use crate::{
 #[typetag::serde(tag = "type")]
 pub trait SerdeFactorioMechanic: FactorioMechanic + dyn_clone::DynClone {}
 
-pub trait FactorioMechanic: SolveContext<Game = DataContext, Item = GenericItem> {
+pub trait FactorioMechanic: SolveContext<Game = DataContext, Item = DualVar> {
     fn name(&self) -> String;
 
     fn instances(&self) -> Vec<&dyn AsFlow>;
@@ -57,7 +57,7 @@ pub trait FactorioMechanic: SolveContext<Game = DataContext, Item = GenericItem>
         data: &DataContext,
         proj: &ProjectContext,
         factory: &FactoryContext,
-        item: &GenericItem,
+        item: &DualVar,
         amount: f64,
     ) {
     }
@@ -95,7 +95,7 @@ pub type OrderInfo = Vec<(String, Vec<(String, Vec<String>)>)>;
 pub type ReverseOrderInfo = HashMap<String, (usize, usize, usize)>;
 
 /// 能够转化成流参与计算的方法
-pub trait AsFlow: SolveContext<Game = DataContext, Item = GenericItem> {
+pub trait AsFlow: SolveContext<Game = DataContext, Item = DualVar> {
     /// 传递物品流信息
     fn as_flow(
         &self,
@@ -138,14 +138,14 @@ impl From<(String, u8)> for IdWithQuality {
     }
 }
 
-impl TryFrom<&GenericItem> for IdWithQuality {
+impl TryFrom<&DualVar> for IdWithQuality {
     type Error = &'static str;
-    fn try_from(value: &GenericItem) -> Result<Self, Self::Error> {
+    fn try_from(value: &DualVar) -> Result<Self, Self::Error> {
         match value {
-            GenericItem::Item(IdWithQuality(name, quality)) => {
+            DualVar::Item(IdWithQuality(name, quality)) => {
                 Ok(IdWithQuality(name.clone(), *quality))
             }
-            GenericItem::Entity(IdWithQuality(name, quality)) => {
+            DualVar::Entity(IdWithQuality(name, quality)) => {
                 Ok(IdWithQuality(name.clone(), *quality))
             }
             _ => Err("无法从非物品类型的 GenericItem 转换为 IdWithQuality"),
@@ -153,12 +153,12 @@ impl TryFrom<&GenericItem> for IdWithQuality {
     }
 }
 
-impl TryFrom<GenericItem> for IdWithQuality {
+impl TryFrom<DualVar> for IdWithQuality {
     type Error = &'static str;
-    fn try_from(value: GenericItem) -> Result<Self, Self::Error> {
+    fn try_from(value: DualVar) -> Result<Self, Self::Error> {
         match value {
-            GenericItem::Item(IdWithQuality(name, quality)) => Ok(IdWithQuality(name, quality)),
-            GenericItem::Entity(IdWithQuality(name, quality)) => Ok(IdWithQuality(name, quality)),
+            DualVar::Item(IdWithQuality(name, quality)) => Ok(IdWithQuality(name, quality)),
+            DualVar::Entity(IdWithQuality(name, quality)) => Ok(IdWithQuality(name, quality)),
             _ => Err("无法从非物品类型的 GenericItem 转换为 IdWithQuality"),
         }
     }
@@ -771,11 +771,11 @@ pub fn get_reverse_order_info(order_info: &OrderInfo) -> ReverseOrderInfo {
 /// Helper function to generate sort key for a GenericItem
 /// Returns (category, order_info, name) tuple for sorting
 pub fn get_generic_item_sort_key<'a>(
-    item: &'a GenericItem,
+    item: &'a DualVar,
     data: &'a DataContext,
 ) -> (usize, (usize, usize, usize), &'a str) {
     match item {
-        GenericItem::Item(IdWithQuality(name, quality)) => (
+        DualVar::Item(IdWithQuality(name, quality)) => (
             *quality as usize,
             data.order_of_entries["item"]
                 .get(name)
@@ -783,7 +783,7 @@ pub fn get_generic_item_sort_key<'a>(
                 .unwrap_or((0, 0, 0)),
             "",
         ),
-        GenericItem::Fluid {
+        DualVar::Fluid {
             name,
             temperature: _,
         } => (
@@ -794,7 +794,7 @@ pub fn get_generic_item_sort_key<'a>(
                 .unwrap_or((0, 0, 0)),
             "",
         ),
-        GenericItem::Entity(IdWithQuality(name, quality)) => (
+        DualVar::Entity(IdWithQuality(name, quality)) => (
             0x200usize + *quality as usize,
             data.order_of_entries["entity"]
                 .get(name)
@@ -802,32 +802,33 @@ pub fn get_generic_item_sort_key<'a>(
                 .unwrap_or((0, 0, 0)),
             "",
         ),
-        GenericItem::Heat => (0x300usize, (0usize, 0usize, 0usize), ""),
-        GenericItem::Electricity => (0x400usize, (0usize, 0usize, 0usize), ""),
-        GenericItem::FluidHeat { filter } => (
+        DualVar::Heat => (0x300usize, (0usize, 0usize, 0usize), ""),
+        DualVar::Electricity => (0x400usize, (0usize, 0usize, 0usize), ""),
+        DualVar::FluidHeat { filter } => (
             0x500usize,
             (0usize, 0usize, 0usize),
             filter.as_deref().unwrap_or(""),
         ),
-        GenericItem::FluidFuel { filter } => (
+        DualVar::FluidFuel { filter } => (
             0x600usize,
             (0usize, 0usize, 0usize),
             filter.as_deref().unwrap_or(""),
         ),
-        GenericItem::ItemFuel { category } => {
+        DualVar::ItemFuel { category } => {
             (0x700usize, (0usize, 0usize, 0usize), category.as_str())
         }
-        GenericItem::Pollution { name } => (0x800usize, (0usize, 0usize, 0usize), name.as_str()),
-        GenericItem::Custom { name } => (0x900usize, (0usize, 0usize, 0usize), name.as_str()),
-        GenericItem::RocketCapacity { stacks, by_weight } => (
+        DualVar::Pollution { name } => (0x800usize, (0usize, 0usize, 0usize), name.as_str()),
+        DualVar::Custom { name } => (0x900usize, (0usize, 0usize, 0usize), name.as_str()),
+        DualVar::RocketCapacity { stacks, by_weight } => (
             0xA00usize,
             (0usize, *stacks as usize, *by_weight as usize),
             "",
         ),
+        
     }
 }
 
-pub fn sort_generic_items(keys: &mut Vec<&GenericItem>, data: &DataContext) {
+pub fn sort_generic_items(keys: &mut Vec<&DualVar>, data: &DataContext) {
     // Use sort_by instead of sort_by_key to avoid cloning strings during comparison
     keys.sort_by(|a, b| {
         let a_key = get_generic_item_sort_key(a, data);
@@ -837,7 +838,7 @@ pub fn sort_generic_items(keys: &mut Vec<&GenericItem>, data: &DataContext) {
 }
 
 /// Sort a vector of owned GenericItems in-place
-pub fn sort_generic_items_owned(keys: &mut [GenericItem], data: &DataContext) {
+pub fn sort_generic_items_owned(keys: &mut [DualVar], data: &DataContext) {
     keys.sort_by(|a, b| {
         let a_key = get_generic_item_sort_key(a, data);
         let b_key = get_generic_item_sort_key(b, data);

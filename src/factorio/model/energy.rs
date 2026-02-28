@@ -5,7 +5,7 @@ use crate::{
     factorio::{
         DataContext, IdWithQuality,
         common::{Effect, EnergyAmount, EnergySource, index_map_update_entry},
-        model::data::GenericItem,
+        model::data::DualVar,
     },
 };
 
@@ -18,16 +18,16 @@ pub fn energy_source_as_flow(
     // 如果是流体，第一个是内部名称，第二个是温度
     fuel: &Option<(String, i32)>,
     fulfillment: &mut f64,
-) -> Flow<GenericItem> {
+) -> Flow<DualVar> {
     let mut map = Flow::new();
 
     match energy_source {
         EnergySource::Electric(source) => {
             let energy_usage = energy_usage.amount * 60.0 * (1.0 + effects.consumption);
-            index_map_update_entry(&mut map, GenericItem::Electricity, -energy_usage);
+            index_map_update_entry(&mut map, DualVar::Electricity, -energy_usage);
             index_map_update_entry(
                 &mut map,
-                GenericItem::Electricity,
+                DualVar::Electricity,
                 -source
                     .drain
                     .as_ref()
@@ -42,7 +42,7 @@ pub fn energy_source_as_flow(
             {
                 index_map_update_entry(
                     &mut map,
-                    GenericItem::Pollution {
+                    DualVar::Pollution {
                         name: pollutant.clone(),
                     },
                     *emmision * (1.0 + effects.pollution) * (1.0 + effects.consumption) / 60.0,
@@ -52,7 +52,7 @@ pub fn energy_source_as_flow(
         EnergySource::Heat(source) => {
             index_map_update_entry(
                 &mut map,
-                GenericItem::Heat,
+                DualVar::Heat,
                 -energy_usage.amount * 60.0 * (1.0 + effects.consumption),
             );
             for (pollutant, emmision) in source
@@ -63,7 +63,7 @@ pub fn energy_source_as_flow(
             {
                 index_map_update_entry(
                     &mut map,
-                    GenericItem::Pollution {
+                    DualVar::Pollution {
                         name: pollutant.clone(),
                     },
                     *emmision * (1.0 + effects.pollution) * (1.0 + effects.consumption) / 60.0,
@@ -85,20 +85,20 @@ pub fn energy_source_as_flow(
 
                 index_map_update_entry(
                     &mut map,
-                    GenericItem::Item(IdWithQuality(actual_fuel.0.clone(), actual_fuel.1 as u8)),
+                    DualVar::Item(IdWithQuality(actual_fuel.0.clone(), actual_fuel.1 as u8)),
                     -fuel_burn_speed,
                 );
                 if let Some(burnt_result) = &fuel_property.burnt_result {
                     index_map_update_entry(
                         &mut map,
-                        GenericItem::Item(IdWithQuality(burnt_result.clone(), actual_fuel.1 as u8)),
+                        DualVar::Item(IdWithQuality(burnt_result.clone(), actual_fuel.1 as u8)),
                         fuel_burn_speed,
                     );
                 }
             } else {
                 index_map_update_entry(
                     &mut map,
-                    GenericItem::ItemFuel {
+                    DualVar::ItemFuel {
                         // TODO: 只使用了第一个燃料类别，支持多个燃料类别需要修改ui设计太麻烦了，之前设计有误，把burner_usage当成燃料类别了
                         category: source.fuel_categories[0].clone(),
                     },
@@ -114,7 +114,7 @@ pub fn energy_source_as_flow(
             {
                 index_map_update_entry(
                     &mut map,
-                    GenericItem::Pollution {
+                    DualVar::Pollution {
                         name: pollutant.clone(),
                     },
                     *emmision * (1.0 + effects.pollution) * (1.0 + effects.consumption) / 60.0,
@@ -153,7 +153,7 @@ pub fn energy_source_as_flow(
 
                     index_map_update_entry(
                         &mut map,
-                        GenericItem::Fluid {
+                        DualVar::Fluid {
                             name: actual_fuel.0.clone(),
                             temperature: [actual_fuel.1, actual_fuel.1],
                         },
@@ -163,7 +163,7 @@ pub fn energy_source_as_flow(
                     // 假定不会受到功率限制（流体热值太低且流量限制太小的情形）
                     index_map_update_entry(
                         &mut map,
-                        GenericItem::FluidFuel {
+                        DualVar::FluidFuel {
                             filter: source.fluid_box.filter.clone(),
                         },
                         -energy_usage,
@@ -209,7 +209,7 @@ pub fn energy_source_as_flow(
 
                     index_map_update_entry(
                         &mut map,
-                        GenericItem::Fluid {
+                        DualVar::Fluid {
                             name: actual_fuel.0.clone(),
                             temperature: [actual_fuel.1, actual_fuel.1],
                         },
@@ -219,7 +219,7 @@ pub fn energy_source_as_flow(
                     // 假定不会受到功率限制（流体热值太低且流量限制太小的情形）
                     index_map_update_entry(
                         &mut map,
-                        GenericItem::FluidHeat {
+                        DualVar::FluidHeat {
                             filter: source.fluid_box.filter.clone(),
                         },
                         -energy_usage,
@@ -235,7 +235,7 @@ pub fn energy_source_as_flow(
             {
                 index_map_update_entry(
                     &mut map,
-                    GenericItem::Pollution {
+                    DualVar::Pollution {
                         name: pollutant.clone(),
                     },
                     *emmision * (1.0 + effects.pollution) * (1.0 + effects.consumption) / 60.0,
@@ -251,7 +251,7 @@ pub fn energy_source_as_flow(
             {
                 index_map_update_entry(
                     &mut map,
-                    GenericItem::Pollution {
+                    DualVar::Pollution {
                         name: pollutant.clone(),
                     },
                     *emmision * (1.0 + effects.pollution) * (1.0 + effects.consumption) / 60.0,

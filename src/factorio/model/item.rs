@@ -4,7 +4,7 @@ use crate::factorio::{EntityPrototype, ItemResult, RecipeResult, common::*};
 use crate::{
     concept::{EntryOpRequest, EntryOpResult, SolveContext},
     factorio::{
-        AsFlow, DataContext, FactorioMechanic, GenericItem, IdWithQuality, ProjectContext,
+        AsFlow, DataContext, FactorioMechanic, DualVar, IdWithQuality, ProjectContext,
         icon::Icon, modal::SelectorModal, planner::FactoryContext, selector::Selector,
     },
     math::ElemVec,
@@ -115,7 +115,7 @@ pub struct SpoilInstance {
 
 impl SolveContext for SpoilInstance {
     type Game = DataContext;
-    type Item = GenericItem;
+    type Item = DualVar;
 }
 
 impl AsFlow for SpoilInstance {
@@ -130,9 +130,9 @@ impl AsFlow for SpoilInstance {
             && let Some(spoil) = &item.spoil
             && let Some(spoil_result) = &spoil.spoil_result
         {
-            flow.insert(GenericItem::Item(self.item.clone()), -1.0);
+            flow.insert(DualVar::Item(self.item.clone()), -1.0);
             flow.insert(
-                GenericItem::Item((spoil_result.clone(), self.item.1).into()),
+                DualVar::Item((spoil_result.clone(), self.item.1).into()),
                 1.0,
             );
         }
@@ -152,7 +152,7 @@ impl AsFlow for SpoilInstance {
 
 impl SolveContext for SpoilMechanic {
     type Game = DataContext;
-    type Item = GenericItem;
+    type Item = DualVar;
 }
 
 #[typetag::serde(name = "factorio:spoil")]
@@ -174,10 +174,10 @@ impl FactorioMechanic for SpoilMechanic {
         data: &DataContext,
         _proj: &ProjectContext,
         _factory: &FactoryContext,
-        item: &GenericItem,
+        item: &DualVar,
         amount: f64,
     ) {
-        if let GenericItem::Item(item) = item {
+        if let DualVar::Item(item) = item {
             if amount < 0.0 {
                 self.suggestion_item = Some(item.0.clone());
             } else if amount > 0.0 {
@@ -337,12 +337,12 @@ pub struct PlantInstance {
 
 impl SolveContext for PlantMechanic {
     type Game = DataContext;
-    type Item = GenericItem;
+    type Item = DualVar;
 }
 
 impl SolveContext for PlantInstance {
     type Game = DataContext;
-    type Item = GenericItem;
+    type Item = DualVar;
 }
 
 impl AsFlow for PlantInstance {
@@ -360,13 +360,13 @@ impl AsFlow for PlantInstance {
             if let Some(plant) = data.plants.get(plant_result) {
                 index_map_update_entry(
                     &mut flow,
-                    GenericItem::Item(self.seed.clone()),
+                    DualVar::Item(self.seed.clone()),
                     -1.0 / plant.growth_ticks * 60.0,
                 );
                 for harvest_emmision in &plant.harvest_emissions {
                     index_map_update_entry(
                         &mut flow,
-                        GenericItem::Pollution {
+                        DualVar::Pollution {
                             name: harvest_emmision.0.clone(),
                         },
                         harvest_emmision.1 / plant.growth_ticks * 60.0,
@@ -376,7 +376,7 @@ impl AsFlow for PlantInstance {
                     if let Some(result) = &minable.result {
                         index_map_update_entry(
                             &mut flow,
-                            GenericItem::Item(result.clone().into()),
+                            DualVar::Item(result.clone().into()),
                             1.0 / plant.growth_ticks * 60.0,
                         );
                     } else {
@@ -384,7 +384,7 @@ impl AsFlow for PlantInstance {
                             if let RecipeResult::Item(item) = result {
                                 index_map_update_entry(
                                     &mut flow,
-                                    GenericItem::Item(item.name.clone().into()),
+                                    DualVar::Item(item.name.clone().into()),
                                     item.normalized_output().0 / plant.growth_ticks * 60.0,
                                 );
                             }
@@ -526,7 +526,7 @@ pub struct ItemFuelInstance {
 
 impl SolveContext for ItemFuelInstance {
     type Game = DataContext;
-    type Item = GenericItem;
+    type Item = DualVar;
 }
 
 impl AsFlow for ItemFuelInstance {
@@ -538,9 +538,9 @@ impl AsFlow for ItemFuelInstance {
     ) -> crate::concept::Flow<Self::Item> {
         let mut flow = crate::concept::Flow::new();
         if let Some(item) = data.items.get(&self.item.0) {
-            flow.insert(GenericItem::Item(self.item.clone()), -1.0);
+            flow.insert(DualVar::Item(self.item.clone()), -1.0);
             flow.insert(
-                GenericItem::ItemFuel {
+                DualVar::ItemFuel {
                     category: item.burn.as_ref().map_or("chemical".to_string(), |b| {
                         b.fuel_category.clone().unwrap_or("chemical".to_string())
                     }),
@@ -548,7 +548,7 @@ impl AsFlow for ItemFuelInstance {
                 item.burn.as_ref().map_or(0.0, |b| b.fuel_value.amount),
             );
             if let Some(burnt_result) = &item.burn.as_ref().and_then(|b| b.burnt_result.clone()) {
-                flow.insert(GenericItem::Item(burnt_result.clone().into()), 1.0);
+                flow.insert(DualVar::Item(burnt_result.clone().into()), 1.0);
             }
         }
         flow
@@ -562,7 +562,7 @@ impl AsFlow for ItemFuelInstance {
 
 impl SolveContext for ItemFuelMechanic {
     type Game = DataContext;
-    type Item = GenericItem;
+    type Item = DualVar;
 }
 
 #[typetag::serde(name = "factorio:item-fuel")]
@@ -584,17 +584,17 @@ impl FactorioMechanic for ItemFuelMechanic {
         _data: &DataContext,
         _proj: &ProjectContext,
         _factory: &FactoryContext,
-        item: &GenericItem,
+        item: &DualVar,
         _amount: f64,
     ) {
         match item {
-            GenericItem::ItemFuel { category } => {
+            DualVar::ItemFuel { category } => {
                 if _amount > 0.0 {
                     self.suggested_category = Some(category.clone());
                     self.suggested_item = None;
                 }
             }
-            GenericItem::Item(item) => {
+            DualVar::Item(item) => {
                 if _amount < 0.0 {
                     self.suggested_item = Some(item.0.clone());
                     self.suggested_category = None;
@@ -745,7 +745,7 @@ pub struct ItemLaunchInstance {
 
 impl SolveContext for ItemLaunchInstance {
     type Game = DataContext;
-    type Item = GenericItem;
+    type Item = DualVar;
 }
 
 impl AsFlow for ItemLaunchInstance {
@@ -759,10 +759,10 @@ impl AsFlow for ItemLaunchInstance {
 
         if let Some(item) = data.items.get(&self.item.0) {
             let multiplier = item.stack_size * self.rocket.0 as f64;
-            index_map_update_entry(&mut flow, GenericItem::Item(self.item.clone()), -multiplier);
+            index_map_update_entry(&mut flow, DualVar::Item(self.item.clone()), -multiplier);
             index_map_update_entry(
                 &mut flow,
-                GenericItem::RocketCapacity {
+                DualVar::RocketCapacity {
                     stacks: self.rocket.0,
                     by_weight: self.rocket.1,
                 },
@@ -772,7 +772,7 @@ impl AsFlow for ItemLaunchInstance {
                 let total_yield = result.normalized_output();
                 index_map_update_entry(
                     &mut flow,
-                    GenericItem::Item((result.name.clone(), self.item.1).into()),
+                    DualVar::Item((result.name.clone(), self.item.1).into()),
                     (total_yield.0 + total_yield.1) * multiplier,
                 );
             }
@@ -788,7 +788,7 @@ impl AsFlow for ItemLaunchInstance {
 
 impl SolveContext for ItemLaunchMechanic {
     type Game = DataContext;
-    type Item = GenericItem;
+    type Item = DualVar;
 }
 
 #[typetag::serde(name = "factorio:item-launch")]
@@ -810,7 +810,7 @@ impl FactorioMechanic for ItemLaunchMechanic {
         _data: &DataContext,
         _proj: &ProjectContext,
         _factory: &FactoryContext,
-        _item: &GenericItem,
+        _item: &DualVar,
         _amount: f64,
     ) {
     }

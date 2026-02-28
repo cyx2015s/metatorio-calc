@@ -1,7 +1,7 @@
 use std::{collections::HashSet, fmt::Debug};
 
 use crate::factorio::{
-    DataContext, Dict, GenericItem, HasPrototypeBase, IdWithQuality, PrototypeBase,
+    DataContext, Dict, DualVar, HasPrototypeBase, IdWithQuality, PrototypeBase,
 };
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -74,7 +74,7 @@ pub struct AutoplaceSettings {
 }
 
 impl PlanetPrototype {
-    pub fn collect_autoplaced(&self, data: &DataContext) -> HashSet<GenericItem> {
+    pub fn collect_autoplaced(&self, data: &DataContext) -> HashSet<DualVar> {
         let mut items = HashSet::new();
         for entity in data.entities.values() {
             if entity.base.r#type != "resource" && entity.base.r#type != "asteroid-chunk" {
@@ -89,7 +89,7 @@ impl PlanetPrototype {
                     .contains_key(&autoplace.control)
                 {
                     // 别判断密度了，认为启用就行了
-                    items.insert(GenericItem::Entity(IdWithQuality(
+                    items.insert(DualVar::Entity(IdWithQuality(
                         entity.base.name.clone(),
                         0,
                     )));
@@ -103,7 +103,7 @@ impl PlanetPrototype {
                         .settings
                         .contains_key(entity.base.name.as_str())
                     {
-                        items.insert(GenericItem::Entity(IdWithQuality(
+                        items.insert(DualVar::Entity(IdWithQuality(
                             entity.base.name.clone(),
                             0,
                         )));
@@ -125,7 +125,7 @@ impl PlanetPrototype {
                     // 别判断密度了，认为启用就行了
                     let fluid_prototype = data.fluids.get(fluid).unwrap();
                     let default_temperature = fluid_prototype.default_temperature as i32;
-                    items.insert(GenericItem::Fluid {
+                    items.insert(DualVar::Fluid {
                         name: fluid.clone(),
                         temperature: [default_temperature, default_temperature],
                     });
@@ -141,7 +141,7 @@ impl PlanetPrototype {
                     {
                         let fluid_prototype = data.fluids.get(fluid).unwrap();
                         let default_temperature = fluid_prototype.default_temperature as i32;
-                        items.insert(GenericItem::Fluid {
+                        items.insert(DualVar::Fluid {
                             name: fluid.clone(),
                             temperature: [default_temperature, default_temperature],
                         });

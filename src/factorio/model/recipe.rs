@@ -14,7 +14,7 @@ use crate::{
         editor::icon::Icon,
         modal::SelectorModal,
         model::{
-            data::GenericItem,
+            data::DualVar,
             energy::energy_source_as_flow,
             entity::EntityPrototype,
             module::{ModuleConfig, ModuleConfigEditor},
@@ -428,7 +428,7 @@ pub struct RecipeInstance {
 
 impl SolveContext for RecipeInstance {
     type Game = DataContext;
-    type Item = GenericItem;
+    type Item = DualVar;
 }
 
 impl Default for RecipeInstance {
@@ -511,7 +511,7 @@ impl AsFlow for RecipeInstance {
                 // 没有写drain的组装机，按照常态能量消耗的1/30计算drain
                 index_map_update_entry(
                     &mut map,
-                    GenericItem::Electricity,
+                    DualVar::Electricity,
                     -energy_usage.amount * 60.0 / 30.0,
                 );
             }
@@ -527,14 +527,14 @@ impl AsFlow for RecipeInstance {
             module_effects = module_effects.clamped();
             index_map_update_entry(
                 &mut map,
-                GenericItem::Electricity,
+                DualVar::Electricity,
                 -self.module_config.get_consumption(data),
             );
             for ingredient in &recipe.ingredients {
                 match ingredient {
                     RecipeIngredient::Item(item) => {
                         let key =
-                            GenericItem::Item(IdWithQuality(item.name.clone(), self.recipe.1));
+                            DualVar::Item(IdWithQuality(item.name.clone(), self.recipe.1));
                         index_map_update_entry(
                             &mut map,
                             key,
@@ -552,7 +552,7 @@ impl AsFlow for RecipeInstance {
                             .or(fluid.maximum_temperature)
                             .map_or(i32::MAX, |t| t as i32);
 
-                        let key = GenericItem::Fluid {
+                        let key = DualVar::Fluid {
                             name: fluid.name.clone(),
                             temperature: [min_temperature, max_temperature],
                         };
@@ -573,7 +573,7 @@ impl AsFlow for RecipeInstance {
             if is_rocket {
                 index_map_update_entry(
                     &mut map,
-                    GenericItem::RocketCapacity { stacks, by_weight },
+                    DualVar::RocketCapacity { stacks, by_weight },
                     1.0 / rocket_parts_required,
                 );
             } else {
@@ -593,7 +593,7 @@ impl AsFlow for RecipeInstance {
                                 quality_distribution.iter().enumerate()
                             {
                                 if quality_prob > 0.0 {
-                                    let quality_key = GenericItem::Item(IdWithQuality(
+                                    let quality_key = DualVar::Item(IdWithQuality(
                                         item.name.clone(),
                                         quality_level as u8,
                                     ));
@@ -617,7 +617,7 @@ impl AsFlow for RecipeInstance {
                                         .unwrap()
                                         .default_temperature,
                                 );
-                            let key = GenericItem::Fluid {
+                            let key = DualVar::Fluid {
                                 name: fluid.name.clone(),
                                 // temperature: fluid.temperature.map(|x| x as i32),
                                 temperature: [
@@ -701,7 +701,7 @@ pub struct RecipeMechanic {
     pub new_enumerate_module: Option<IdWithQuality>,
 
     #[serde(skip)]
-    pub suggestion_item: Option<GenericItem>,
+    pub suggestion_item: Option<DualVar>,
     #[serde(skip)]
     pub suggestion_amount: f64,
     #[serde(skip)]
@@ -769,7 +769,7 @@ pub fn select_crafter_for_recipe(
 
 impl SolveContext for RecipeMechanic {
     type Game = DataContext;
-    type Item = GenericItem;
+    type Item = DualVar;
 }
 
 #[typetag::serde(name = "factorio:recipe")]
@@ -1097,7 +1097,7 @@ impl FactorioMechanic for RecipeMechanic {
         data: &DataContext,
         proj: &ProjectContext,
         _factory: &FactoryContext,
-        item: &GenericItem,
+        item: &DualVar,
         amount: f64,
     ) {
         self.suggested_recipes.clear();
@@ -1108,7 +1108,7 @@ impl FactorioMechanic for RecipeMechanic {
                 continue;
             }
             match item {
-                GenericItem::Item(id_with_quality) => {
+                DualVar::Item(id_with_quality) => {
                     let mut total_yield = 0.0;
                     for ingredient in &recipe_proto.ingredients {
                         if let RecipeIngredient::Item(item_ingredient) = ingredient
@@ -1129,7 +1129,7 @@ impl FactorioMechanic for RecipeMechanic {
                             .insert(recipe_proto.base.name.clone());
                     }
                 }
-                GenericItem::Fluid {
+                DualVar::Fluid {
                     name,
                     temperature: _,
                 } => {
@@ -1183,7 +1183,7 @@ impl FactorioMechanic for RecipeMechanic {
         );
         if let Some(recipe) = &self.selected_suggested_recipe {
             let quality = match self.suggestion_item {
-                Some(GenericItem::Item(ref id_with_quality)) => id_with_quality.1,
+                Some(DualVar::Item(ref id_with_quality)) => id_with_quality.1,
                 _ => 0,
             };
             self.instances.push(RecipeInstance {

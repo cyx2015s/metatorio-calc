@@ -163,13 +163,13 @@ impl<'a> egui::Widget for Icon<'a> {
 #[derive(Debug)]
 pub struct GenericIcon<'a> {
     pub data: &'a DataContext,
-    pub item: &'a GenericItem,
+    pub item: &'a DualVar,
     pub size: f32,
     pub stroke: egui::Stroke,
 }
 
 impl<'a> GenericIcon<'a> {
-    pub fn new(data: &'a DataContext, item: &'a GenericItem) -> Self {
+    pub fn new(data: &'a DataContext, item: &'a DualVar) -> Self {
         Self {
             data,
             item,
@@ -193,15 +193,15 @@ impl<'a> egui::Widget for GenericIcon<'a> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         let data = &self.data;
         match self.item {
-            GenericItem::Custom { name } => ui.label(format!("特殊: {}", name)),
-            GenericItem::Item(IdWithQuality(name, quality)) => ui.add_sized(
+            DualVar::Custom { name } => ui.label(format!("特殊: {}", name)),
+            DualVar::Item(IdWithQuality(name, quality)) => ui.add_sized(
                 [self.size, self.size],
                 Icon::new(self.data, "item", name)
                     .with_quality(*quality)
                     .with_size(self.size)
                     .with_stroke(self.stroke),
             ),
-            GenericItem::Fluid { name, temperature } => {
+            DualVar::Fluid { name, temperature } => {
                 let main = ui.add_sized(
                     [self.size, self.size],
                     Icon::new(self.data, "fluid", name)
@@ -259,7 +259,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
 
                 main
             }
-            GenericItem::Entity(IdWithQuality(name, quality)) => {
+            DualVar::Entity(IdWithQuality(name, quality)) => {
                 let main = ui.add_sized(
                     [self.size, self.size],
                     Icon::new(self.data, "entity", name)
@@ -285,7 +285,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                 main
             }
 
-            GenericItem::Heat => {
+            DualVar::Heat => {
                 egui::Frame::NONE
                     .fill(egui::Color32::from_rgba_premultiplied(
                         0xaa, 0xaa, 0xaa, 0xcc,
@@ -304,7 +304,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                     })
                     .inner
             }
-            GenericItem::Electricity => {
+            DualVar::Electricity => {
                 egui::Frame::NONE
                     .fill(egui::Color32::from_rgba_premultiplied(
                         0xaa, 0xaa, 0xaa, 0xcc,
@@ -323,7 +323,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                     })
                     .inner
             }
-            GenericItem::FluidHeat { filter } => match filter {
+            DualVar::FluidHeat { filter } => match filter {
                 Some(fluid) => {
                     ui.add_sized([self.size, self.size], Icon::new(self.data, "fluid", fluid))
                 }
@@ -347,7 +347,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                         .inner
                 }
             },
-            GenericItem::FluidFuel { filter } => match filter {
+            DualVar::FluidFuel { filter } => match filter {
                 Some(fluid) => {
                     ui.add_sized([self.size, self.size], Icon::new(self.data, "fluid", fluid))
                 }
@@ -371,7 +371,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                         .inner
                 }
             },
-            GenericItem::ItemFuel { category } => egui::Frame::NONE
+            DualVar::ItemFuel { category } => egui::Frame::NONE
                 .fill(egui::Color32::from_rgba_premultiplied(
                     0xaa, 0xaa, 0xaa, 0xcc,
                 ))
@@ -391,7 +391,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                     "类别: {}",
                     data.get_display_name("fuel-category", category)
                 )),
-            GenericItem::RocketCapacity { stacks, by_weight } => ui
+            DualVar::RocketCapacity { stacks, by_weight } => ui
                 .add_sized(
                     [self.size, self.size],
                     egui::Image::new(egui::include_image!(
@@ -406,7 +406,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                         }
                     });
                 }),
-            GenericItem::Pollution { name } => ui
+            DualVar::Pollution { name } => ui
                 .add_sized(
                     [self.size, self.size],
                     Icon::new(self.data, "airborne-pollutant", name)
@@ -424,8 +424,8 @@ impl Display for GenericIcon<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let data = &self.data;
         match self.item {
-            GenericItem::Custom { name } => write!(f, "特殊: {}", name),
-            GenericItem::Item(IdWithQuality(name, quality)) => {
+            DualVar::Custom { name } => write!(f, "特殊: {}", name),
+            DualVar::Item(IdWithQuality(name, quality)) => {
                 write!(
                     f,
                     "物品: {}({})",
@@ -438,10 +438,10 @@ impl Display for GenericIcon<'_> {
                     )
                 )
             }
-            GenericItem::Fluid { name, .. } => {
+            DualVar::Fluid { name, .. } => {
                 write!(f, "流体: {}", data.get_display_name("fluid", name))
             }
-            GenericItem::Entity(IdWithQuality(name, quality)) => {
+            DualVar::Entity(IdWithQuality(name, quality)) => {
                 write!(
                     f,
                     "实体: {}({})",
@@ -454,9 +454,9 @@ impl Display for GenericIcon<'_> {
                     )
                 )
             }
-            GenericItem::Heat => write!(f, "热量"),
-            GenericItem::Electricity => write!(f, "电能"),
-            GenericItem::FluidHeat { filter } => match filter {
+            DualVar::Heat => write!(f, "热量"),
+            DualVar::Electricity => write!(f, "电能"),
+            DualVar::FluidHeat { filter } => match filter {
                 Some(fluid) => write!(
                     f,
                     "通过热交换 {} 获得能量",
@@ -464,7 +464,7 @@ impl Display for GenericIcon<'_> {
                 ),
                 None => write!(f, "任意来源的流体热量"),
             },
-            GenericItem::FluidFuel { filter } => match filter {
+            DualVar::FluidFuel { filter } => match filter {
                 Some(fluid) => write!(
                     f,
                     "通过燃烧 {} 获得的能量",
@@ -472,17 +472,17 @@ impl Display for GenericIcon<'_> {
                 ),
                 None => write!(f, "任意来源的流体燃料"),
             },
-            GenericItem::ItemFuel { category } => {
+            DualVar::ItemFuel { category } => {
                 write!(f, "燃料类别: {}", category)
             }
-            GenericItem::RocketCapacity { stacks, by_weight } => {
+            DualVar::RocketCapacity { stacks, by_weight } => {
                 if *by_weight {
                     write!(f, "火箭载荷: {} 堆叠，按重量限制", stacks)
                 } else {
                     write!(f, "火箭载荷: {} 堆叠", stacks)
                 }
             }
-            GenericItem::Pollution { name } => {
+            DualVar::Pollution { name } => {
                 write!(
                     f,
                     "污染物: {}",

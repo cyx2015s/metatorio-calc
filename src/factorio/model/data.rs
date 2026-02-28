@@ -811,7 +811,7 @@ fn i32_inf_range() -> [i32; 2] {
 #[serde_as]
 #[derive(Debug, Clone, Hash, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[repr(u8)]
-pub enum GenericItem {
+pub enum DualVar {
     Item(IdWithQuality),
     Fluid {
         name: String,
@@ -849,43 +849,43 @@ pub enum GenericItem {
     },
 }
 
-impl GenericItem {
+impl DualVar {
     pub fn is_energy(&self) -> bool {
         matches!(
             self,
-            GenericItem::Heat
-                | GenericItem::Electricity
-                | GenericItem::FluidFuel { .. }
-                | GenericItem::ItemFuel { .. }
-                | GenericItem::FluidHeat { .. }
+            DualVar::Heat
+                | DualVar::Electricity
+                | DualVar::FluidFuel { .. }
+                | DualVar::ItemFuel { .. }
+                | DualVar::FluidHeat { .. }
         )
     }
 }
 
-impl Default for GenericItem {
+impl Default for DualVar {
     fn default() -> Self {
-        GenericItem::Item("item-unknown".into())
+        DualVar::Item("item-unknown".into())
     }
 }
 
-impl Display for GenericItem {
+impl Display for DualVar {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // 内部名称毫无意义，这里只显示类型
         write!(
             f,
             "{}",
             match self {
-                GenericItem::Item(..) => "物品",
-                GenericItem::Fluid { .. } => "流体",
-                GenericItem::Entity(..) => "实体",
-                GenericItem::Heat => "热能",
-                GenericItem::Electricity => "电能",
-                GenericItem::FluidHeat { .. } => "流体热源",
-                GenericItem::FluidFuel { .. } => "流体燃料",
-                GenericItem::ItemFuel { .. } => "物品燃料",
-                GenericItem::RocketCapacity { .. } => "火箭载荷",
-                GenericItem::Pollution { .. } => "污染",
-                GenericItem::Custom { .. } => "特殊物品",
+                DualVar::Item(..) => "物品",
+                DualVar::Fluid { .. } => "流体",
+                DualVar::Entity(..) => "实体",
+                DualVar::Heat => "热能",
+                DualVar::Electricity => "电能",
+                DualVar::FluidHeat { .. } => "流体热源",
+                DualVar::FluidFuel { .. } => "流体燃料",
+                DualVar::ItemFuel { .. } => "物品燃料",
+                DualVar::RocketCapacity { .. } => "火箭载荷",
+                DualVar::Pollution { .. } => "污染",
+                DualVar::Custom { .. } => "特殊物品",
             }
         )
     }
@@ -893,12 +893,12 @@ impl Display for GenericItem {
 
 #[derive(Debug, Clone, Default, Hash, PartialEq, Eq)]
 pub struct GenericItemWithLocation {
-    base: GenericItem,
+    base: DualVar,
     location: u16,
 }
 
 pub fn make_located_generic_recipe(
-    original: Flow<GenericItem>,
+    original: Flow<DualVar>,
     location: u16,
 ) -> Flow<GenericItemWithLocation> {
     let mut located = IndexMap::new();

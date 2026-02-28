@@ -61,8 +61,8 @@ pub struct FactoryInstance {
     pub factory: FactoryContext,
 
     pub name: String,
-    pub target: DndVec<(GenericItem, f64)>,
-    pub external: DndVec<(GenericItem, f64)>,
+    pub target: DndVec<(DualVar, f64)>,
+    pub external: DndVec<(DualVar, f64)>,
     pub mechanics: Vec<Box<dyn SerdeFactorioMechanic>>,
     pub instances: Vec<(usize, usize)>,
 
@@ -72,9 +72,9 @@ pub struct FactoryInstance {
     pub suggesting_mechanic: usize,
 
     #[serde(skip)]
-    pub solution: SolverSolution<GenericItem, (usize, usize)>,
+    pub solution: SolverSolution<DualVar, (usize, usize)>,
     #[serde(skip)]
-    pub total_flow_sorted_keys: Vec<GenericItem>,
+    pub total_flow_sorted_keys: Vec<DualVar>,
 }
 
 impl FactoryInstance {
@@ -128,7 +128,7 @@ impl FactoryInstance {
         &mut self,
         data: &DataContext,
         proj: &ProjectContext,
-    ) -> SolverData<GenericItem, (usize, usize)> {
+    ) -> SolverData<DualVar, (usize, usize)> {
         if self
             .mechanics
             .iter()
@@ -184,7 +184,7 @@ impl FactoryInstance {
                 }
             }
             for pollutant in data.airborne_pollutants.keys() {
-                let key = GenericItem::Pollution {
+                let key = DualVar::Pollution {
                     name: pollutant.clone(),
                 };
                 if !external.contains_key(&key) && !target.contains_key(&key) {
@@ -230,14 +230,14 @@ impl FactoryInstance {
                     if narrow[0] >= broad[0] && narrow[1] <= broad[1] && narrow != broad {
                         let mut flow = Flow::new();
                         flow.insert(
-                            GenericItem::Fluid {
+                            DualVar::Fluid {
                                 name: fluid.clone(),
                                 temperature: *narrow,
                             },
                             -1.0,
                         );
                         flow.insert(
-                            GenericItem::Fluid {
+                            DualVar::Fluid {
                                 name: fluid.clone(),
                                 temperature: *broad,
                             },
@@ -253,12 +253,12 @@ impl FactoryInstance {
         fluid_fuels.into_iter().for_each(|fluid| {
             let mut flow = Flow::new();
             flow.insert(
-                GenericItem::FluidFuel {
+                DualVar::FluidFuel {
                     filter: fluid.into(),
                 },
                 -1.0,
             );
-            flow.insert(GenericItem::FluidFuel { filter: None }, 1.0);
+            flow.insert(DualVar::FluidFuel { filter: None }, 1.0);
             // 燃料转换代价为 0
             flows.insert((usize::MAX, aux_idx), (flow, 0.0));
             aux_idx += 1;
@@ -266,12 +266,12 @@ impl FactoryInstance {
         fluid_heats.into_iter().for_each(|fluid| {
             let mut flow = Flow::new();
             flow.insert(
-                GenericItem::FluidHeat {
+                DualVar::FluidHeat {
                     filter: fluid.into(),
                 },
                 -1.0,
             );
-            flow.insert(GenericItem::FluidHeat { filter: None }, 1.0);
+            flow.insert(DualVar::FluidHeat { filter: None }, 1.0);
             // 热量转换代价为 0
             flows.insert((usize::MAX, aux_idx), (flow, 0.0));
             aux_idx += 1;
@@ -279,7 +279,7 @@ impl FactoryInstance {
         let mut sinks = IndexMap::new();
         for pollutant in &data.airborne_pollutants {
             sinks.insert(
-                crate::factorio::GenericItem::Pollution {
+                crate::factorio::DualVar::Pollution {
                     name: pollutant.0.clone(),
                 },
                 0.0,
@@ -881,7 +881,7 @@ impl FactoryInstance {
             });
         if ui.button("添加外部输入").clicked() {
             self.external
-                .push((GenericItem::Item("item-unknown".into()), 1.0));
+                .push((DualVar::Item("item-unknown".into()), 1.0));
             *changed = true;
         }
         ui.menu_button("从星球自动选择", |ui| {
@@ -897,7 +897,7 @@ impl FactoryInstance {
                     }
                     for pollution in data.airborne_pollutants.keys() {
                         self.external.push((
-                            GenericItem::Pollution {
+                            DualVar::Pollution {
                                 name: pollution.clone(),
                             },
                             0.0,
@@ -976,7 +976,7 @@ impl FactoryInstance {
             });
         if ui.button("添加指定产物").clicked() {
             self.target
-                .push((GenericItem::Item("item-unknown".into()), 1.0));
+                .push((DualVar::Item("item-unknown".into()), 1.0));
             *changed = true;
         }
     }
@@ -986,21 +986,21 @@ fn update_fluid_metainfo(
     fluid_temperaturess: &mut HashMap<String, HashSet<[i32; 2]>>,
     fluid_fuels: &mut HashSet<String>,
     fluid_heats: &mut HashSet<String>,
-    item: &GenericItem,
+    item: &DualVar,
 ) {
     match item {
-        GenericItem::Fluid { name, temperature } => {
+        DualVar::Fluid { name, temperature } => {
             fluid_temperaturess
                 .entry(name.clone())
                 .or_default()
                 .insert(*temperature);
         }
-        GenericItem::FluidFuel {
+        DualVar::FluidFuel {
             filter: Some(filter),
         } => {
             fluid_fuels.insert(filter.clone());
         }
-        GenericItem::FluidHeat {
+        DualVar::FluidHeat {
             filter: Some(filter),
         } => {
             fluid_heats.insert(filter.clone());
@@ -1011,7 +1011,7 @@ fn update_fluid_metainfo(
 
 impl SolveContext for FactoryInstance {
     type Game = DataContext;
-    type Item = GenericItem;
+    type Item = DualVar;
 }
 
 impl FactoryInstance {
@@ -1091,9 +1091,9 @@ pub struct ProjectInstance {
     pub factory_receiver: Receiver<FactoryInstance>,
 
     #[serde(skip)]
-    pub problem_sender: Sender<(usize, SolverData<GenericItem, (usize, usize)>)>,
+    pub problem_sender: Sender<(usize, SolverData<DualVar, (usize, usize)>)>,
     #[serde(skip)]
-    pub solution_receiver: Receiver<(usize, SolverSolution<GenericItem, (usize, usize)>)>,
+    pub solution_receiver: Receiver<(usize, SolverSolution<DualVar, (usize, usize)>)>,
 }
 
 impl Default for ProjectInstance {

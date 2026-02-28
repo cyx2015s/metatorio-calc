@@ -336,7 +336,7 @@ pub fn quality_selector(
 pub fn generic_item_selector(
     ui: &mut egui::Ui,
     data: &DataContext,
-    selected: &mut GenericItem,
+    selected: &mut DualVar,
     response: &egui::Response,
     id: egui::Id,
 ) -> bool {
@@ -348,12 +348,12 @@ pub fn generic_item_selector(
             .selected_text(selected.to_string())
             .show_ui(ui, |ui| {
                 changed |= ui
-                    .selectable_value(selected, GenericItem::Item("item-unknown".into()), "物品")
+                    .selectable_value(selected, DualVar::Item("item-unknown".into()), "物品")
                     .changed();
                 changed |= ui
                     .selectable_value(
                         selected,
-                        GenericItem::Fluid {
+                        DualVar::Fluid {
                             name: "fluid-unknown".to_string(),
                             temperature: [i32::MIN, i32::MAX],
                         },
@@ -363,34 +363,34 @@ pub fn generic_item_selector(
                 changed |= ui
                     .selectable_value(
                         selected,
-                        GenericItem::Entity("entity-unknown".into()),
+                        DualVar::Entity("entity-unknown".into()),
                         "实体",
                     )
                     .changed();
                 changed |= ui
-                    .selectable_value(selected, GenericItem::Heat, "热能")
+                    .selectable_value(selected, DualVar::Heat, "热能")
                     .changed();
                 changed |= ui
-                    .selectable_value(selected, GenericItem::Electricity, "电能")
+                    .selectable_value(selected, DualVar::Electricity, "电能")
                     .changed();
                 changed |= ui
                     .selectable_value(
                         selected,
-                        GenericItem::FluidHeat { filter: None },
+                        DualVar::FluidHeat { filter: None },
                         "流体热源",
                     )
                     .changed();
                 changed |= ui
                     .selectable_value(
                         selected,
-                        GenericItem::FluidFuel { filter: None },
+                        DualVar::FluidFuel { filter: None },
                         "流体燃料",
                     )
                     .changed();
                 changed |= ui
                     .selectable_value(
                         selected,
-                        GenericItem::ItemFuel {
+                        DualVar::ItemFuel {
                             category: "chemical".to_string(),
                         },
                         "物体燃料",
@@ -399,7 +399,7 @@ pub fn generic_item_selector(
                 changed |= ui
                     .selectable_value(
                         selected,
-                        GenericItem::Pollution {
+                        DualVar::Pollution {
                             name: "pollution".to_string(),
                         },
                         "污染物",
@@ -407,7 +407,7 @@ pub fn generic_item_selector(
                     .changed();
             });
         match selected {
-            GenericItem::Item(id_with_quality) => {
+            DualVar::Item(id_with_quality) => {
                 changed |= ui
                     .add(
                         SelectorModal::new(id.with("select-item"), "选择物品")
@@ -418,7 +418,7 @@ pub fn generic_item_selector(
                     )
                     .changed();
             }
-            GenericItem::Fluid { name, temperature } => {
+            DualVar::Fluid { name, temperature } => {
                 changed |= ui
                     .add(
                         SelectorModal::new(id.with("select-fluid"), "选择流体")
@@ -449,7 +449,7 @@ pub fn generic_item_selector(
                     changed = true;
                 }
             }
-            GenericItem::Entity(id_with_quality) => {
+            DualVar::Entity(id_with_quality) => {
                 changed |= ui
                     .add(
                         SelectorModal::new(id.with("select-entity"), "选择实体")
@@ -467,9 +467,9 @@ pub fn generic_item_selector(
                     )
                     .changed();
             }
-            GenericItem::Heat => {}
-            GenericItem::Electricity => {}
-            GenericItem::FluidHeat { filter } => {
+            DualVar::Heat => {}
+            DualVar::Electricity => {}
+            DualVar::FluidHeat { filter } => {
                 changed |= ui
                     .add(
                         SelectorModal::new(id.with("select-fluid-heat"), "选择流体热源来源")
@@ -491,7 +491,7 @@ pub fn generic_item_selector(
                     changed = true;
                 }
             }
-            GenericItem::FluidFuel { filter } => {
+            DualVar::FluidFuel { filter } => {
                 if clear {
                     *filter = None;
                     changed = true;
@@ -513,7 +513,7 @@ pub fn generic_item_selector(
                     )
                     .changed();
             }
-            GenericItem::ItemFuel { category } => {
+            DualVar::ItemFuel { category } => {
                 egui::ComboBox::from_id_salt(id.with("item-fuel-category"))
                     .selected_text(data.get_display_name("fuel-category", category))
                     .show_ui(ui, |ui| {
@@ -528,7 +528,7 @@ pub fn generic_item_selector(
                         }
                     });
             }
-            GenericItem::Pollution { name } => {
+            DualVar::Pollution { name } => {
                 egui::ComboBox::from_id_salt(id.with("pollution-type"))
                     .selected_text(data.get_display_name("airborne-pollutant", name))
                     .show_ui(ui, |ui| {

@@ -1,7 +1,7 @@
 use crate::{
     concept::{EntryOpRequest, EntryOpResult, Flow, SolveContext},
     factorio::{
-        DataContext, EntityPrototype, GenericItem, ProjectContext, common::*,
+        DataContext, EntityPrototype, DualVar, ProjectContext, common::*,
         energy_source_as_flow, icon::Icon, modal::SelectorModal, planner::FactoryContext,
         selector::Selector,
     },
@@ -203,7 +203,7 @@ impl BoilerPrototype {
         fluid: &String,
         temperature: f64,
         fuel: &Option<(String, i32)>,
-    ) -> Flow<GenericItem> {
+    ) -> Flow<DualVar> {
         let mut flow = Flow::new();
         let mut fulfillment = 1.0;
         if self.fluid_box.filter.as_ref().is_some_and(|f| f != fluid) {
@@ -256,7 +256,7 @@ impl BoilerPrototype {
                     / (target_fluid_temperature - temperature); // 温度差
                 index_map_update_entry(
                     &mut flow,
-                    GenericItem::Fluid {
+                    DualVar::Fluid {
                         name: fluid.clone(),
                         temperature: [temperature as i32, temperature as i32],
                     },
@@ -264,7 +264,7 @@ impl BoilerPrototype {
                 );
                 index_map_update_entry(
                     &mut flow,
-                    GenericItem::Fluid {
+                    DualVar::Fluid {
                         name: target_fluid_name,
                         temperature: [
                             target_fluid_temperature as i32,
@@ -303,7 +303,7 @@ pub struct GeneratorInstance {
 
 impl SolveContext for GeneratorInstance {
     type Game = DataContext;
-    type Item = GenericItem;
+    type Item = DualVar;
 }
 
 impl AsFlow for GeneratorInstance {
@@ -312,7 +312,7 @@ impl AsFlow for GeneratorInstance {
         data: &DataContext,
         _proj: &ProjectContext,
         _factory: &FactoryContext,
-    ) -> Flow<GenericItem> {
+    ) -> Flow<DualVar> {
         let mut flow = Flow::new();
         if let Some(generator) = data.generators.get(&self.generator.0) {
             if let Some(filter) = generator.fluid_box.filter.as_ref() {
@@ -321,25 +321,25 @@ impl AsFlow for GeneratorInstance {
                     generator.get_output(fluid, self.temperature as f64);
                 index_map_update_entry(
                     &mut flow,
-                    GenericItem::Fluid {
+                    DualVar::Fluid {
                         name: filter.clone(),
                         temperature: [self.temperature, self.temperature],
                     },
                     -fluid_usage,
                 );
-                index_map_update_entry(&mut flow, GenericItem::Electricity, power_output);
+                index_map_update_entry(&mut flow, DualVar::Electricity, power_output);
             } else if let Some(fluid) = data.fluids.get(&self.fluid) {
                 let (fluid_usage, power_output) =
                     generator.get_output(fluid, self.temperature as f64);
                 index_map_update_entry(
                     &mut flow,
-                    GenericItem::Fluid {
+                    DualVar::Fluid {
                         name: self.fluid.clone(),
                         temperature: [self.temperature, self.temperature],
                     },
                     -fluid_usage,
                 );
-                index_map_update_entry(&mut flow, GenericItem::Electricity, power_output);
+                index_map_update_entry(&mut flow, DualVar::Electricity, power_output);
             }
             generator
                 .energy_source
@@ -349,7 +349,7 @@ impl AsFlow for GeneratorInstance {
                     for (pollutant, amount) in map.iter() {
                         index_map_update_entry(
                             &mut flow,
-                            GenericItem::Pollution {
+                            DualVar::Pollution {
                                 name: pollutant.clone(),
                             },
                             amount / 60.0,
@@ -380,7 +380,7 @@ impl AsFlow for GeneratorInstance {
 
 impl SolveContext for GeneratorMechanic {
     type Game = DataContext;
-    type Item = GenericItem;
+    type Item = DualVar;
 }
 
 #[typetag::serde(name = "factorio:generator")]
@@ -584,10 +584,10 @@ impl FactorioMechanic for GeneratorMechanic {
         _data: &DataContext,
         _proj: &ProjectContext,
         _factory: &FactoryContext,
-        item: &GenericItem,
+        item: &DualVar,
         amount: f64,
     ) {
-        self.show_suggestion = item == &GenericItem::Electricity && amount > 0.0;
+        self.show_suggestion = item == &DualVar::Electricity && amount > 0.0;
     }
 
     fn suggestion_view(
@@ -648,7 +648,7 @@ pub struct BoilerMechanic {
 
 impl SolveContext for BoilerMechanic {
     type Game = DataContext;
-    type Item = GenericItem;
+    type Item = DualVar;
 }
 
 #[typetag::serde(name = "factorio:boiler")]
@@ -918,7 +918,7 @@ pub struct BoilerInstance {
 
 impl SolveContext for BoilerInstance {
     type Game = DataContext;
-    type Item = GenericItem;
+    type Item = DualVar;
 }
 
 impl AsFlow for BoilerInstance {
@@ -927,7 +927,7 @@ impl AsFlow for BoilerInstance {
         data: &DataContext,
         _proj: &ProjectContext,
         _factory: &FactoryContext,
-    ) -> Flow<GenericItem> {
+    ) -> Flow<DualVar> {
         let mut flow = Flow::new();
         if let Some(boiler) = data.boilers.get(&self.boiler.0) {
             let fluid = boiler.fluid_box.filter.as_ref().unwrap_or(&self.fluid);
@@ -946,7 +946,7 @@ impl AsFlow for BoilerInstance {
                     for (pollutant, amount) in map.iter() {
                         index_map_update_entry(
                             &mut flow,
-                            GenericItem::Pollution {
+                            DualVar::Pollution {
                                 name: pollutant.clone(),
                             },
                             amount / 60.0,
@@ -984,7 +984,7 @@ pub struct FluidFuelMechanic {
 
 impl SolveContext for FluidFuelMechanic {
     type Game = DataContext;
-    type Item = GenericItem;
+    type Item = DualVar;
 }
 
 #[typetag::serde(name = "factorio:fluid-fuel")]
@@ -1119,7 +1119,7 @@ pub struct FluidFuelInstance {
 
 impl SolveContext for FluidFuelInstance {
     type Game = DataContext;
-    type Item = GenericItem;
+    type Item = DualVar;
 }
 
 impl AsFlow for FluidFuelInstance {
@@ -1128,14 +1128,14 @@ impl AsFlow for FluidFuelInstance {
         data: &DataContext,
         _proj: &ProjectContext,
         _factory: &FactoryContext,
-    ) -> Flow<GenericItem> {
+    ) -> Flow<DualVar> {
         let mut flow = Flow::new();
         if let Some(fluid) = data.fluids.get(&self.fluid)
             && let Some(fuel_value) = fluid.fuel_value
         {
             index_map_update_entry(
                 &mut flow,
-                GenericItem::Fluid {
+                DualVar::Fluid {
                     name: self.fluid.clone(),
                     temperature: [self.temperature, self.temperature],
                 },
@@ -1143,7 +1143,7 @@ impl AsFlow for FluidFuelInstance {
             );
             index_map_update_entry(
                 &mut flow,
-                GenericItem::FluidFuel {
+                DualVar::FluidFuel {
                     filter: self.fluid.clone().into(),
                 },
                 fuel_value.amount * 60.0,
@@ -1168,7 +1168,7 @@ pub struct FluidHeatMechanic {
 
 impl SolveContext for FluidHeatMechanic {
     type Game = DataContext;
-    type Item = GenericItem;
+    type Item = DualVar;
 }
 
 #[typetag::serde(name = "factorio:fluid-heat")]
@@ -1304,7 +1304,7 @@ pub struct FluidHeatInstance {
 
 impl SolveContext for FluidHeatInstance {
     type Game = DataContext;
-    type Item = GenericItem;
+    type Item = DualVar;
 }
 
 impl AsFlow for FluidHeatInstance {
@@ -1313,7 +1313,7 @@ impl AsFlow for FluidHeatInstance {
         data: &DataContext,
         _proj: &ProjectContext,
         _factory: &FactoryContext,
-    ) -> Flow<GenericItem> {
+    ) -> Flow<DualVar> {
         let mut flow = Flow::new();
         if let Some(fluid) = data.fluids.get(&self.fluid) {
             if self.temperature <= fluid.default_temperature as i32 {
@@ -1325,7 +1325,7 @@ impl AsFlow for FluidHeatInstance {
                 .unwrap_or(EnergyAmount { amount: 1000.0 });
             index_map_update_entry(
                 &mut flow,
-                GenericItem::Fluid {
+                DualVar::Fluid {
                     name: self.fluid.clone(),
                     temperature: [self.temperature, self.temperature],
                 },
@@ -1333,7 +1333,7 @@ impl AsFlow for FluidHeatInstance {
             );
             index_map_update_entry(
                 &mut flow,
-                GenericItem::FluidHeat {
+                DualVar::FluidHeat {
                     filter: self.fluid.clone().into(),
                 },
                 heat_capacity.amount

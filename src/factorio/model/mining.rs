@@ -110,7 +110,7 @@ impl Default for MiningInstance {
 
 impl SolveContext for MiningInstance {
     type Game = DataContext;
-    type Item = GenericItem;
+    type Item = DualVar;
 }
 
 impl AsFlow for MiningInstance {
@@ -186,13 +186,13 @@ impl AsFlow for MiningInstance {
         // 计算矿物实体本身的消耗
         index_map_update_entry(
             &mut map,
-            GenericItem::Entity(IdWithQuality(resource_ore.base.base.name.clone(), 0)),
+            DualVar::Entity(IdWithQuality(resource_ore.base.base.name.clone(), 0)),
             -base_speed * (1.0 + module_effects.speed) * drain_rate,
         );
 
         index_map_update_entry(
             &mut map,
-            GenericItem::Electricity,
+            DualVar::Electricity,
             -self.module_config.get_consumption(data),
         );
 
@@ -203,7 +203,7 @@ impl AsFlow for MiningInstance {
             .as_ref()
             .and_then(|m| m.required_fluid.clone())
         {
-            let fluid_item = GenericItem::Fluid {
+            let fluid_item = DualVar::Fluid {
                 name: fluid,
                 temperature: [i32::MIN, i32::MAX],
             };
@@ -235,7 +235,7 @@ impl AsFlow for MiningInstance {
                     if *quality_prob > 0.0 {
                         index_map_update_entry(
                             &mut map,
-                            GenericItem::Item(IdWithQuality(result.clone(), quality_level as u8)),
+                            DualVar::Item(IdWithQuality(result.clone(), quality_level as u8)),
                             total_yield * *quality_prob,
                         );
                     }
@@ -244,7 +244,7 @@ impl AsFlow for MiningInstance {
                 for result in &mining_property.results {
                     let item = match result {
                         RecipeResult::Item(r) => {
-                            GenericItem::Entity(IdWithQuality(r.name.clone(), 0))
+                            DualVar::Entity(IdWithQuality(r.name.clone(), 0))
                         }
                         RecipeResult::Fluid(r) => {
                             let default_temperature =
@@ -252,7 +252,7 @@ impl AsFlow for MiningInstance {
                                     .get(&r.name)
                                     .map(|f| f.default_temperature)
                                     .unwrap_or(15.0) as i32;
-                            GenericItem::Fluid {
+                            DualVar::Fluid {
                                 name: r.name.clone(),
                                 temperature: [default_temperature, default_temperature],
                             }
@@ -270,7 +270,7 @@ impl AsFlow for MiningInstance {
                                 if *quality_prob > 0.0 {
                                     index_map_update_entry(
                                         &mut map,
-                                        GenericItem::Item(IdWithQuality(
+                                        DualVar::Item(IdWithQuality(
                                             r.name.clone(),
                                             quality_level as u8,
                                         )),
@@ -334,7 +334,7 @@ pub struct MiningMechanic {
     pub operations: Vec<(usize, EntryOpRequest)>,
     pub instances: Vec<MiningInstance>,
     #[serde(skip)]
-    pub suggestion_item: Option<GenericItem>,
+    pub suggestion_item: Option<DualVar>,
     #[serde(skip)]
     pub suggestion_amount: f64,
     #[serde(skip)]
@@ -394,7 +394,7 @@ pub fn select_miner_for_resource(
 
 impl SolveContext for MiningMechanic {
     type Game = DataContext;
-    type Item = GenericItem;
+    type Item = DualVar;
 }
 
 #[typetag::serde(name = "factorio:mining")]
@@ -547,7 +547,7 @@ impl FactorioMechanic for MiningMechanic {
         data: &DataContext,
         _proj: &ProjectContext,
         _factory: &FactoryContext,
-        item: &GenericItem,
+        item: &DualVar,
         amount: f64,
     ) {
         self.suggested_resources.clear();
@@ -558,7 +558,7 @@ impl FactorioMechanic for MiningMechanic {
         if value < 0.0 {
             // 提供生产方式
             match item {
-                GenericItem::Item(IdWithQuality(name, _)) => {
+                DualVar::Item(IdWithQuality(name, _)) => {
                     for resource in data.resources.values() {
                         if let Some(mining) = resource.base.minable.as_ref() {
                             if let Some(result) = &mining.result {
@@ -579,7 +579,7 @@ impl FactorioMechanic for MiningMechanic {
                         }
                     }
                 }
-                GenericItem::Fluid {
+                DualVar::Fluid {
                     name,
                     temperature: _,
                 } => {
@@ -601,7 +601,7 @@ impl FactorioMechanic for MiningMechanic {
         } else {
             // 提供消耗方式 - 检查哪些资源可以被消耗
             match item {
-                GenericItem::Fluid {
+                DualVar::Fluid {
                     name,
                     temperature: _,
                 } => {
@@ -615,7 +615,7 @@ impl FactorioMechanic for MiningMechanic {
                         }
                     }
                 }
-                GenericItem::Entity(name) => {
+                DualVar::Entity(name) => {
                     if let Some(entity) = data.entities.get(&name.0)
                         && entity.base.r#type == "resource"
                         && let Some(_mining) = entity.minable.as_ref()
