@@ -417,8 +417,8 @@ where
 
         for FlowSpec {
             coefficients,
-            cost,
-            fixed,
+            cost: _,
+            fixed: _,
         } in self.flows.values()
         {
             for (item_id, _) in coefficients {
@@ -611,7 +611,7 @@ where
                 .iter_mut()
                 .enumerate()
                 .for_each(|(t_idx, t_scale)| {
-                    let (t_idx, sum_x2, count) = item_target_stats[t_idx];
+                    let (_t_idx, sum_x2, count) = item_target_stats[t_idx];
                     let delta_scale = if count > 0 {
                         ((count as f64) / sum_x2).sqrt()
                     } else {
@@ -668,7 +668,7 @@ where
             flow_vars.insert(f_id.clone(), var);
         }
         for (t_idx, target) in self.target.iter().enumerate() {
-            for (i_id, coef) in target.coefficients.iter() {
+            for (i_id, _coef) in target.coefficients.iter() {
                 let var = problem_variables.add(variable().min(0));
                 flow_target_vars.insert((t_idx, i_id.clone()), var);
             }
@@ -735,7 +735,7 @@ where
         }
         let mut no_providers: HashSet<I> = item_balances.keys().cloned().collect();
         let mut no_consumers: HashSet<I> = item_balances.keys().cloned().collect();
-        for (flow, flow_spec) in &self.flows {
+        for (_flow, flow_spec) in &self.flows {
             for (item_id, &amount) in &flow_spec.coefficients {
                 if amount > 0.0 {
                     no_providers.remove(item_id);

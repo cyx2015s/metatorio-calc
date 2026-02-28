@@ -1,9 +1,8 @@
 use crate::{
     concept::{EntryOpRequest, EntryOpResult, Flow, SolveContext},
     factorio::{
-        DataContext, EntityPrototype, DualVar, ProjectContext, common::*,
-        energy_source_as_flow, icon::Icon, modal::SelectorModal, planner::FactoryContext,
-        selector::Selector,
+        DataContext, DualVar, EntityPrototype, ProjectContext, common::*, energy_source_as_flow,
+        icon::Icon, modal::SelectorModal, planner::FactoryContext, selector::Selector,
     },
     math::{ElemVec, flow_add},
 };

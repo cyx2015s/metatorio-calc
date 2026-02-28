@@ -533,8 +533,7 @@ impl AsFlow for RecipeInstance {
             for ingredient in &recipe.ingredients {
                 match ingredient {
                     RecipeIngredient::Item(item) => {
-                        let key =
-                            DualVar::Item(IdWithQuality(item.name.clone(), self.recipe.1));
+                        let key = DualVar::Item(IdWithQuality(item.name.clone(), self.recipe.1));
                         index_map_update_entry(
                             &mut map,
                             key,

@@ -25,7 +25,7 @@ use crate::{
     math::*,
 };
 
-use indexmap::{IndexMap, map::MutableKeys};
+use indexmap::IndexMap;
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
@@ -55,6 +55,21 @@ impl FactoryContext {
     }
 }
 
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct TargetSpecVec<I: ItemIdent> {
+    pub constant: f64,
+    pub coefficients: Vec<(I, f64)>,
+}
+
+impl<T: ItemIdent> From<TargetSpecVec<T>> for TargetSpec<T> {
+    fn from(value: TargetSpecVec<T>) -> Self {
+        TargetSpec {
+            constant: value.constant,
+            coefficients: value.coefficients.into_iter().collect(),
+        }
+    }
+}
+
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct FactoryInstance {
@@ -62,7 +77,7 @@ pub struct FactoryInstance {
 
     pub name: String,
     pub target: DndVec<(DualVar, f64)>,
-    pub target_group: DndVec<TargetSpec<DualVar>>,
+    pub target_group: DndVec<TargetSpecVec<DualVar>>,
     pub external: DndVec<(DualVar, f64)>,
     pub mechanics: Vec<Box<dyn SerdeFactorioMechanic>>,
     pub instances: Vec<(usize, usize)>,
@@ -292,7 +307,13 @@ impl FactoryInstance {
             .with_strict_sink(self.strict_sink)
             .with_sinks(sinks);
 
-        ret.target.extend(self.target_group.vec.iter().cloned());
+        ret.target.extend(
+            self.target_group
+                .vec
+                .iter()
+                .cloned()
+                .map(TargetSpecVec::into),
+        );
 
         ret
     }
@@ -994,7 +1015,7 @@ impl FactoryInstance {
                 "target-group",
                 |ui,
                  _,
-                 TargetSpec {
+                 TargetSpecVec {
                      constant,
                      coefficients,
                  },
@@ -1019,12 +1040,18 @@ impl FactoryInstance {
                         *changed |= ui.add(drag_value(constant)).changed();
                         ui.separator();
                         ui.label("线性项");
-                        coefficients.retain2(|item_id, coef| {
+                        coefficients.retain_mut(|(item_id, coef)| {
                             let mut deleted = false;
                             ui.horizontal(|ui| {
                                 let response =
                                     ui.add_sized([35.0, 35.0], GenericIcon::new(data, item_id));
-                                *changed |= generic_item_selector(ui, data, item_id, &response, response.id);
+                                *changed |= generic_item_selector(
+                                    ui,
+                                    data,
+                                    item_id,
+                                    &response,
+                                    response.id,
+                                );
                                 ui.vertical(|ui| {
                                     *changed |= ui.add(drag_value(coef).prefix("× ")).changed();
                                     if ui.button("删除").clicked() {
@@ -1036,16 +1063,16 @@ impl FactoryInstance {
                             !deleted
                         });
                         if ui.button("添加项").clicked() {
-                            coefficients.insert(DualVar::Item("item-unknown".into()), 0.0);
+                            coefficients.push((DualVar::Item("item-unknown".into()), 1.0));
                             *changed = true;
                         }
                     });
                 },
             );
             if ui.button("添加产物表达式").clicked() {
-                self.target_group.push(TargetSpec {
+                self.target_group.push(TargetSpecVec {
                     constant: 1.0,
-                    coefficients: IndexMap::new(),
+                    coefficients: Vec::new(),
                 });
             }
         });

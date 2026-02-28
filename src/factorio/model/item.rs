@@ -4,8 +4,8 @@ use crate::factorio::{EntityPrototype, ItemResult, RecipeResult, common::*};
 use crate::{
     concept::{EntryOpRequest, EntryOpResult, SolveContext},
     factorio::{
-        AsFlow, DataContext, FactorioMechanic, DualVar, IdWithQuality, ProjectContext,
-        icon::Icon, modal::SelectorModal, planner::FactoryContext, selector::Selector,
+        AsFlow, DataContext, DualVar, FactorioMechanic, IdWithQuality, ProjectContext, icon::Icon,
+        modal::SelectorModal, planner::FactoryContext, selector::Selector,
     },
     math::ElemVec,
 };

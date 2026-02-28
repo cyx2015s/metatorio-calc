@@ -243,9 +243,7 @@ impl AsFlow for MiningInstance {
             } else {
                 for result in &mining_property.results {
                     let item = match result {
-                        RecipeResult::Item(r) => {
-                            DualVar::Entity(IdWithQuality(r.name.clone(), 0))
-                        }
+                        RecipeResult::Item(r) => DualVar::Entity(IdWithQuality(r.name.clone(), 0)),
                         RecipeResult::Fluid(r) => {
                             let default_temperature =
                                 data.fluids

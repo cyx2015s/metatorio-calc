@@ -362,11 +362,7 @@ pub fn generic_item_selector(
                     )
                     .changed();
                 changed |= ui
-                    .selectable_value(
-                        selected,
-                        DualVar::Entity("entity-unknown".into()),
-                        "实体",
-                    )
+                    .selectable_value(selected, DualVar::Entity("entity-unknown".into()), "实体")
                     .changed();
                 changed |= ui
                     .selectable_value(selected, DualVar::Heat, "热能")
@@ -375,18 +371,10 @@ pub fn generic_item_selector(
                     .selectable_value(selected, DualVar::Electricity, "电能")
                     .changed();
                 changed |= ui
-                    .selectable_value(
-                        selected,
-                        DualVar::FluidHeat { filter: None },
-                        "流体热源",
-                    )
+                    .selectable_value(selected, DualVar::FluidHeat { filter: None }, "流体热源")
                     .changed();
                 changed |= ui
-                    .selectable_value(
-                        selected,
-                        DualVar::FluidFuel { filter: None },
-                        "流体燃料",
-                    )
+                    .selectable_value(selected, DualVar::FluidFuel { filter: None }, "流体燃料")
                     .changed();
                 changed |= ui
                     .selectable_value(

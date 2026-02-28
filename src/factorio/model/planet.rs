@@ -1,8 +1,6 @@
 use std::{collections::HashSet, fmt::Debug};
 
-use crate::factorio::{
-    DataContext, Dict, DualVar, HasPrototypeBase, IdWithQuality, PrototypeBase,
-};
+use crate::factorio::{DataContext, Dict, DualVar, HasPrototypeBase, IdWithQuality, PrototypeBase};
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct PlanetPrototype {
@@ -89,10 +87,7 @@ impl PlanetPrototype {
                     .contains_key(&autoplace.control)
                 {
                     // 别判断密度了，认为启用就行了
-                    items.insert(DualVar::Entity(IdWithQuality(
-                        entity.base.name.clone(),
-                        0,
-                    )));
+                    items.insert(DualVar::Entity(IdWithQuality(entity.base.name.clone(), 0)));
                 } else {
                     // TODO
                     // 如果 default_enabled 为 true，则认为启用
@@ -103,10 +98,7 @@ impl PlanetPrototype {
                         .settings
                         .contains_key(entity.base.name.as_str())
                     {
-                        items.insert(DualVar::Entity(IdWithQuality(
-                            entity.base.name.clone(),
-                            0,
-                        )));
+                        items.insert(DualVar::Entity(IdWithQuality(entity.base.name.clone(), 0)));
                     }
                 }
             }
