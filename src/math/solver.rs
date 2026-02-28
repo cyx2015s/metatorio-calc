@@ -23,7 +23,7 @@ where
     result
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct TargetSpec<I: ItemIdent> {
     pub constant: f64,
     pub coefficients: Flow<I>,
@@ -478,14 +478,13 @@ where
                             // 梳理中……
                             // flow_target_scales的key是(usize, I)，其中usize是target的索引，I是物品ID，表示物品ID产生target的流
                             // I的系数应该是target中系数的倒数（价值越高，消耗越少），target的结果是1.
-                            if let Some(&coeff) = self.target[f_t_id.0].coefficients.get(&f_t_id.1)
-                            {
-                                if coeff == 0.0 {
+                            if let Some(&coef) = self.target[f_t_id.0].coefficients.get(&f_t_id.1) {
+                                if coef == 0.0 {
                                     // 系数为0，需要消耗无穷大的物品才能贡献，相当于无法贡献
                                     return 1.0;
                                 }
                                 // 物品的消耗量（如果coeff > 0）
-                                let amount = -1.0 / coeff;
+                                let amount = -1.0 / coef;
                                 let val = amount
                                     * item_scales.get(&f_t_id.1).cloned().unwrap_or(1.0)
                                     * *f_t_scale;
@@ -598,7 +597,7 @@ where
                             continue;
                         }
                         // 计算平方和，不考虑正负号，正负号在之后构建表达式时再考虑
-                        let amount = 1.0 / coef;
+                        let amount = -1.0 / coef;
                         let val = amount
                             * item_scales.get(i_id).cloned().unwrap_or(1.0)
                             * item_target_scales[t_idx];
@@ -670,7 +669,8 @@ where
         }
         for (t_idx, target) in self.target.iter().enumerate() {
             for (i_id, _) in target.coefficients.iter() {
-                let var = problem_variables.add(variable().min(0));
+                // 不用限制值域，目标条件能够限制
+                let var = problem_variables.add(variable());
                 flow_target_vars.insert((t_idx, i_id.clone()), var);
             }
         }
@@ -696,19 +696,20 @@ where
                 }
             }
         }
+
         for (f_idx, target) in self.target.iter().enumerate() {
             for (item_id, &coef) in &target.coefficients {
                 if coef == 0.0 {
                     continue;
                 }
                 let var = flow_target_vars.get(&(f_idx, item_id.clone())).unwrap();
-                // 使用.abs()保证总是消耗这个物品的产量
-                // 此外，如果目标为正，要求消耗这个物品；如果目标为负，要求生产这个物品
-                let val = -(1.0 / coef).abs()
-                    * target.constant.signum()
-                    * get_item_scale(item_id)
-                    * get_flow_target_scale(f_idx, item_id);
-
+                // 不担心产量溢出， target等式会帮忙限制
+                let val =
+                    -(1.0 / coef) * get_item_scale(item_id) * get_flow_target_scale(f_idx, item_id);
+                if coef * target.constant < 0.0 {
+                    // 这个是负的，必须配平对应的物品
+                    force_zero_items.insert(item_id.clone());
+                }
                 let entry = item_balances
                     .entry(item_id.clone())
                     .or_insert(good_lp::Expression::from(0.0));
@@ -796,8 +797,7 @@ where
                 // 此处只要根据符号确定增加还是消耗
                 // 例：系数为正，目标为正，增加贡献
                 // 系数为负，目标为正，减少贡献
-                target_expr += coef.signum()
-                    * get_flow_target_scale(f_t_id, item_id)
+                target_expr += get_flow_target_scale(f_t_id, item_id)
                     * flow_target_vars
                         .get(&(f_t_id, item_id.clone()))
                         .cloned()

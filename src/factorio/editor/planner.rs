@@ -62,6 +62,7 @@ pub struct FactoryInstance {
 
     pub name: String,
     pub target: DndVec<(DualVar, f64)>,
+    pub target_group: DndVec<TargetSpec<DualVar>>,
     pub external: DndVec<(DualVar, f64)>,
     pub mechanics: Vec<Box<dyn SerdeFactorioMechanic>>,
     pub instances: Vec<(usize, usize)>,
