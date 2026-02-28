@@ -2,6 +2,7 @@ use good_lp::{IntoAffineExpression, Solution, SolverModel, variable};
 use indexmap::{IndexMap, IndexSet};
 
 use crate::concept::{Flow, ItemIdent};
+use core::f64;
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
@@ -60,6 +61,8 @@ pub enum SolverSolution<I, R> {
         dual: Option<Flow<I>>,
         prim_scale: Flow<R>,
         dual_scale: Flow<I>,
+        // 为了保证数值稳定性，给问题添加的全局倍率
+        global_scale: f64,
         sum: Flow<I>,
         cost: f64,
     },
@@ -92,9 +95,12 @@ where
     pub fn get_prim_of(&self, i: &R) -> Option<f64> {
         match self {
             SolverSolution::Solved {
-                prim, prim_scale, ..
+                prim,
+                prim_scale,
+                global_scale,
+                ..
             } => match (prim.get(i), prim_scale.get(i)) {
-                (Some(v), Some(s)) => Some(*v * s),
+                (Some(v), Some(s)) => Some(*v * s / global_scale),
                 _ => None,
             },
             _ => None,
@@ -172,10 +178,13 @@ where
     pub fn get_sum_raw_of(&self, i: &I) -> Option<f64> {
         match self {
             SolverSolution::Solved {
-                sum, dual_scale, ..
+                sum,
+                dual_scale,
+                global_scale,
+                ..
             } => sum
                 .get(i)
-                .map(|v| *v * dual_scale.get(i).cloned().unwrap_or(1.0)),
+                .map(|v| *v * dual_scale.get(i).cloned().unwrap_or(1.0) * global_scale),
             _ => None,
         }
     }
@@ -322,7 +331,7 @@ where
                 } = entry
                     && providers.is_empty() // 没有生产这个物品的配方
                         && !self.sources.contains_key(i_id) // 外部也不能提供
-                        && needed_by_target.contains(i_id)
+                        && !needed_by_target.contains(i_id)
                 // 目标需要这个物品
                 // 目标也不需要
                 {
@@ -370,30 +379,6 @@ where
                 description: "没有目标物品。".to_string(),
             };
         }
-
-        let needed_by_target = self.target.iter().fold(
-            HashSet::new(),
-            |mut acc,
-             TargetSpec {
-                 constant,
-                 coefficients,
-             }| {
-                for (i_id, coef) in coefficients {
-                    if *coef * constant > 0.0 {
-                        // 系数与常数同号，说明目标需要这个物品
-                        acc.insert(i_id.clone());
-                    }
-                }
-                acc
-            },
-        );
-
-        let appeared_in_target = self
-            .target
-            .iter()
-            .flat_map(|t| t.coefficients.keys())
-            .cloned()
-            .collect::<HashSet<I>>();
 
         log::info!("求解器：开始剪枝");
         let mut count = 0;
@@ -651,6 +636,7 @@ where
             }
         }
         log::info!("求解器：数量级平衡完成，耗时 {:.2?}", instant.elapsed());
+        log::info!("item_target_scales: {:?}", &item_target_scales);
         // 应用
 
         let get_item_scale = |item_id: &I| -> f64 { *item_scales.get(item_id).unwrap_or(&1.0) };
@@ -663,6 +649,11 @@ where
                 .cloned()
                 .unwrap_or(1.0)
         };
+        let global_scale = (0..self.target.len()).fold(f64::MAX, |acc, cur_idx| {
+            let item_target_scale = get_item_target_scale(cur_idx);
+            let constant = self.target[cur_idx].constant;
+            acc.min((item_target_scale / constant).abs())
+        });
 
         let mut problem_variables = good_lp::ProblemVariables::new();
         // 用户提供的流编号 -> 变量的映射
@@ -812,7 +803,7 @@ where
                         .cloned()
                         .unwrap();
             }
-            constraints.push(target_expr.eq(target.constant));
+            constraints.push(target_expr.eq(target.constant * global_scale));
         }
         let mut optimization_expr = good_lp::Expression::from(0.0);
         for (flow_id, flow_spec) in &self.flows {
@@ -852,7 +843,7 @@ where
                     prim_scale.insert(f_id.clone(), get_flow_scale(f_id));
                     for (item_id, &amount) in &self.flows[f_id].coefficients {
                         let entry = sum.entry(item_id.clone()).or_insert(0.0);
-                        *entry += amount * value * get_flow_scale(f_id);
+                        *entry += amount * value * get_flow_scale(f_id) / global_scale;
                     }
                 }
                 SolverSolution::Solved {
@@ -864,7 +855,8 @@ where
                         .map(|(i_id, _)| (i_id.clone(), get_item_scale(i_id)))
                         .collect(),
                     sum,
-                    cost: sol.eval(optimization_expr),
+                    global_scale,
+                    cost: sol.eval(optimization_expr) / global_scale,
                 }
             }
             Err(err) => {
@@ -923,14 +915,22 @@ where
     ) {
         std::thread::spawn(move || {
             log::info!("求解线程启动");
-            while let Ok((req_id, req)) = problem_rx.recv() {
-                let result = req.solve();
-                if solution_tx.send((req_id, result)).is_err() {
-                    // 接收方已关闭，退出线程
-                    break;
+            loop {
+                let mut reqs = HashMap::new();
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                while let Ok((req_id, req)) = problem_rx.try_recv() {
+                    reqs.insert(req_id, req);
+                }
+                for (req_id, req) in reqs.into_iter() {
+                    let result = req.solve();
+
+                    if solution_tx.send((req_id, result)).is_err() {
+                        // 接收方已关闭，退出线程
+                        log::info!("求解线程退出");
+                        break;
+                    }
                 }
             }
-            log::info!("求解线程退出");
         });
     }
 }
