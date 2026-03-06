@@ -2,12 +2,11 @@ use crate::concept::Flow;
 use crate::factorio::{EntityPrototype, ItemResult, RecipeResult, common::*};
 
 use crate::{
-    concept::{EntryOpRequest, EntryOpResult, SolveContext},
+    concept::SolveContext,
     factorio::{
         AsFlow, DataContext, DualVar, FactorioMechanic, IdWithQuality, ProjectContext, icon::Icon,
         modal::SelectorModal, planner::FactoryContext, selector::Selector,
     },
-    math::UpdateVec,
 };
 
 pub const ITEM_TYPES: &[&str] = &[
@@ -533,7 +532,6 @@ impl SolveContext for ItemFuelMechanic {
 impl SerdeFactorioMechanic for ItemFuelMechanic {}
 
 impl FactorioMechanic for ItemFuelMechanic {
-
     fn instances_proxy(&self) -> &dyn FlowProxy {
         &self.instances as &dyn FlowProxy
     }

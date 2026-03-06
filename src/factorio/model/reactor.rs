@@ -1,9 +1,12 @@
 use crate::{
-    concept::{EntryOpRequest, EntryOpResult, Flow, SolveContext},
+    concept::{Flow, SolveContext},
     factorio::{
-        AsFlow, DataContext, DualVar, Effect, EnergyAmount, EnergySource, EntityPrototype, FactorioMechanic, FlowProxy, ReactVec, IdWithQuality, ProjectContext, SerdeFactorioMechanic, energy_source_as_flow, icon::Icon, index_map_update_entry, modal::SelectorModal, planner::FactoryContext, selector::Selector
+        AsFlow, DataContext, DualVar, Effect, EnergyAmount, EnergySource, EntityPrototype,
+        FactorioMechanic, FlowProxy, IdWithQuality, ProjectContext, ReactVec,
+        SerdeFactorioMechanic, energy_source_as_flow, icon::Icon, index_map_update_entry,
+        modal::SelectorModal, planner::FactoryContext, selector::Selector,
     },
-    math::{UpdateVec, flow_add},
+    math::flow_add,
 };
 
 #[derive(Debug, Clone, serde::Deserialize)]

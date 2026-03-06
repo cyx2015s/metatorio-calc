@@ -1,10 +1,10 @@
 use crate::{
-    concept::{EntryOpRequest, EntryOpResult, Flow, SolveContext},
+    concept::{Flow, SolveContext},
     factorio::{
         DataContext, DualVar, EntityPrototype, ProjectContext, common::*, energy_source_as_flow,
         icon::Icon, modal::SelectorModal, planner::FactoryContext, selector::Selector,
     },
-    math::{UpdateVec, flow_add},
+    math::flow_add,
 };
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -384,8 +384,6 @@ impl SolveContext for GeneratorMechanic {
 impl SerdeFactorioMechanic for GeneratorMechanic {}
 
 impl FactorioMechanic for GeneratorMechanic {
-
-
     fn name(&self) -> String {
         "流体发电".to_string()
     }
@@ -1030,7 +1028,6 @@ impl FactorioMechanic for FluidFuelMechanic {
         }
         changed
     }
-
 
     fn auto_populate(
         &mut self,

@@ -37,7 +37,7 @@ impl<T> DerefMut for ReactVec<T> {
     }
 }
 
-pub unsafe trait VecProxy<I: ?Sized>: Send {
+pub  trait VecProxy<I: ?Sized>: Send {
     fn len(&self) -> usize;
 
     fn iter(&self) -> Box<dyn Iterator<Item = &I> + '_> {
@@ -45,6 +45,7 @@ pub unsafe trait VecProxy<I: ?Sized>: Send {
     }
     fn get(&self, idx: usize) -> Option<&I>;
     fn get_mut(&mut self, idx: usize) -> Option<&mut I>;
+
     fn operate(&mut self, idx: usize, f: &mut dyn FnMut(&mut I) -> EntryOpRequest);
     fn submit(&mut self) -> Vec<EntryOpResult>;
 }
@@ -52,7 +53,7 @@ pub unsafe trait VecProxy<I: ?Sized>: Send {
 #[macro_export]
 macro_rules! impl_vec_proxy_dyn {
     ($U:tt) => {
-        unsafe impl<T> VecProxy<dyn $U> for ReactVec<T>
+         impl<T> VecProxy<dyn $U> for ReactVec<T>
         where
             T: $U + Clone,
         {
@@ -61,9 +62,7 @@ macro_rules! impl_vec_proxy_dyn {
             }
 
             fn get(&self, idx: usize) -> Option<&dyn $U> {
-                self.instances
-                    .get(idx)
-                    .map(|instance| instance as &dyn $U)
+                self.instances.get(idx).map(|instance| instance as &dyn $U)
             }
 
             fn get_mut(&mut self, idx: usize) -> Option<&mut dyn $U> {
@@ -72,11 +71,7 @@ macro_rules! impl_vec_proxy_dyn {
                     .map(|instance| instance as &mut dyn $U)
             }
 
-            fn operate(
-                &mut self,
-                idx: usize,
-                f: &mut dyn FnMut(&mut dyn $U) -> EntryOpRequest,
-            ) {
+            fn operate(&mut self, idx: usize, f: &mut dyn FnMut(&mut dyn $U) -> EntryOpRequest) {
                 let op = f(&mut self.instances[idx]);
                 if !matches!(op, EntryOpRequest::None) {
                     self.operations.push((idx, op));

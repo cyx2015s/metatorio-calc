@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use serde_with::serde_as;
 
 use crate::{
-    concept::{EntryOpRequest, EntryOpResult, Flow, SolveContext},
+    concept::{Flow, SolveContext},
     factorio::{
         ModuleConfig, ModuleConfigEditor, ProjectContext, calc_quality_distribution,
         common::*,
@@ -13,7 +13,6 @@ use crate::{
         planner::FactoryContext,
         selector::Selector,
     },
-    math::UpdateVec,
 };
 
 #[derive(Debug, Clone, serde::Deserialize)]
