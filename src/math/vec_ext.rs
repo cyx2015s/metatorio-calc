@@ -2,7 +2,7 @@ use serde::ser::SerializeSeq;
 
 use crate::concept::{EntryOpRequest, EntryOpResult};
 
-pub trait ElemVec<T> {
+pub trait UpdateVec<T> {
     fn update_elements(
         &mut self,
         operations: &mut Vec<(usize, EntryOpRequest)>,
@@ -11,7 +11,7 @@ pub trait ElemVec<T> {
         T: Clone;
 }
 
-impl<T> ElemVec<T> for Vec<T> {
+impl<T> UpdateVec<T> for Vec<T> {
     fn update_elements(
         &mut self,
         operations: &mut Vec<(usize, EntryOpRequest)>,

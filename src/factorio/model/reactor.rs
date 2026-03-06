@@ -1,12 +1,9 @@
 use crate::{
     concept::{EntryOpRequest, EntryOpResult, Flow, SolveContext},
     factorio::{
-        AsFlow, DataContext, DualVar, Effect, EnergyAmount, EnergySource, EntityPrototype,
-        FactorioMechanic, IdWithQuality, ProjectContext, SerdeFactorioMechanic,
-        energy_source_as_flow, icon::Icon, index_map_update_entry, modal::SelectorModal,
-        planner::FactoryContext, selector::Selector,
+        AsFlow, DataContext, DualVar, Effect, EnergyAmount, EnergySource, EntityPrototype, FactorioMechanic, FlowProxy, ReactVec, IdWithQuality, ProjectContext, SerdeFactorioMechanic, energy_source_as_flow, icon::Icon, index_map_update_entry, modal::SelectorModal, planner::FactoryContext, selector::Selector
     },
-    math::{ElemVec, flow_add},
+    math::{UpdateVec, flow_add},
 };
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -23,10 +20,8 @@ pub struct ReactorPrototype {
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct ReactorMechanic {
-    #[serde(skip)]
-    pub operations: Vec<(usize, EntryOpRequest)>,
-
-    pub instances: Vec<ReactorInstance>,
+    #[serde(flatten)]
+    pub instances: ReactVec<ReactorInstance>,
 }
 
 impl SolveContext for ReactorMechanic {
@@ -38,6 +33,14 @@ impl SolveContext for ReactorMechanic {
 impl SerdeFactorioMechanic for ReactorMechanic {}
 
 impl FactorioMechanic for ReactorMechanic {
+    fn instances_proxy(&self) -> &dyn FlowProxy {
+        &self.instances as &dyn FlowProxy
+    }
+
+    fn instances_proxy_mut(&mut self) -> &mut dyn FlowProxy {
+        &mut self.instances as &mut dyn FlowProxy
+    }
+
     fn editor_view(
         &mut self,
         ui: &mut egui::Ui,
@@ -55,29 +58,6 @@ impl FactorioMechanic for ReactorMechanic {
 
     fn name(&self) -> String {
         "反应堆".into()
-    }
-
-    fn instances(&self) -> Vec<&dyn AsFlow> {
-        self.instances.iter().map(|i| i as &dyn AsFlow).collect()
-    }
-
-    fn instance_len(&self) -> usize {
-        self.instances.len()
-    }
-
-    fn instance_operate(
-        &mut self,
-        idx: usize,
-        f: &mut dyn FnMut(&mut dyn AsFlow) -> EntryOpRequest,
-    ) {
-        let op = f(&mut self.instances[idx] as &mut dyn AsFlow);
-        if !matches!(op, EntryOpRequest::None) {
-            self.operations.push((idx, op));
-        }
-    }
-
-    fn submit_operations(&mut self) -> Vec<EntryOpResult> {
-        self.instances.update_elements(&mut self.operations)
     }
 
     fn instance_view(

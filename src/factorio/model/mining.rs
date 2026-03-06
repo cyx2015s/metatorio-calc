@@ -13,7 +13,7 @@ use crate::{
         planner::FactoryContext,
         selector::Selector,
     },
-    math::ElemVec,
+    math::UpdateVec,
 };
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -328,9 +328,8 @@ fn test_mining_normalized() {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
 pub struct MiningMechanic {
-    #[serde(skip)]
-    pub operations: Vec<(usize, EntryOpRequest)>,
-    pub instances: Vec<MiningInstance>,
+    #[serde(flatten)]
+    pub instances: ReactVec<MiningInstance>,
     #[serde(skip)]
     pub suggestion_item: Option<DualVar>,
     #[serde(skip)]
@@ -402,15 +401,12 @@ impl FactorioMechanic for MiningMechanic {
         "采矿".to_string()
     }
 
-    fn instances(&self) -> Vec<&dyn AsFlow> {
-        self.instances
-            .iter()
-            .map(|instance| instance as &dyn AsFlow)
-            .collect()
+    fn instances_proxy(&self) -> &dyn FlowProxy {
+        &self.instances as &dyn FlowProxy
     }
 
-    fn instance_len(&self) -> usize {
-        self.instances.len()
+    fn instances_proxy_mut(&mut self) -> &mut dyn FlowProxy {
+        &mut self.instances as &mut dyn FlowProxy
     }
 
     fn editor_view(
@@ -523,21 +519,6 @@ impl FactorioMechanic for MiningMechanic {
         }
 
         changed
-    }
-
-    fn instance_operate(
-        &mut self,
-        idx: usize,
-        f: &mut dyn FnMut(&mut dyn AsFlow) -> EntryOpRequest,
-    ) {
-        let op = f(&mut self.instances[idx] as &mut dyn AsFlow);
-        if !matches!(op, EntryOpRequest::None) {
-            self.operations.push((idx, op));
-        }
-    }
-
-    fn submit_operations(&mut self) -> Vec<EntryOpResult> {
-        self.instances.update_elements(&mut self.operations)
     }
 
     fn update_suggestion(

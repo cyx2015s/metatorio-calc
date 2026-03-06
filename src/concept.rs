@@ -47,6 +47,10 @@ pub type Flow<I> = IndexMap<I, f64>;
 
 pub trait ItemIdent: Debug + Clone + Eq + Hash + Send + Sync + 'static {}
 impl<T> ItemIdent for T where T: Debug + Clone + Eq + Hash + Send + Sync + 'static {}
+
+
+
+
 pub trait GameContextCreatorView: SubView {
     fn set_subview_sender(&mut self, sender: Sender<Box<dyn SubView>>);
 }

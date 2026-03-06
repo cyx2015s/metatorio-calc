@@ -25,7 +25,6 @@ use crate::{
         selector::Selector,
         surface_condition_satisfied,
     },
-    math::ElemVec,
 };
 
 fn always_true() -> bool {
@@ -679,10 +678,8 @@ fn test_recipe_normalized() {
 #[serde_as]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
 pub struct RecipeMechanic {
-    #[serde(skip)]
-    pub operations: Vec<(usize, EntryOpRequest)>,
-
-    pub instances: Vec<RecipeInstance>,
+    #[serde(flatten)]
+    pub instances: ReactVec<RecipeInstance>,
     #[serde(default)]
     pub machine_preferences: Vec<IdWithQuality>,
     #[serde(default)]
@@ -776,6 +773,14 @@ impl SerdeFactorioMechanic for RecipeMechanic {}
 impl FactorioMechanic for RecipeMechanic {
     fn name(&self) -> String {
         "配方".to_string()
+    }
+
+    fn instances_proxy(&self) -> &dyn FlowProxy {
+        &self.instances as &dyn FlowProxy
+    }
+
+    fn instances_proxy_mut(&mut self) -> &mut dyn FlowProxy {
+        &mut self.instances as &mut dyn FlowProxy
     }
 
     fn editor_view(
@@ -966,14 +971,6 @@ impl FactorioMechanic for RecipeMechanic {
         changed
     }
 
-    fn instances(&self) -> Vec<&dyn AsFlow> {
-        self.instances.iter().map(|m| m as &dyn AsFlow).collect()
-    }
-
-    fn instance_len(&self) -> usize {
-        self.instances.len()
-    }
-
     fn instance_view(
         &mut self,
         idx: usize,
@@ -1074,21 +1071,6 @@ impl FactorioMechanic for RecipeMechanic {
         };
 
         changed
-    }
-
-    fn instance_operate(
-        &mut self,
-        idx: usize,
-        f: &mut dyn FnMut(&mut dyn AsFlow) -> EntryOpRequest,
-    ) {
-        let op = f(&mut self.instances[idx] as &mut dyn AsFlow);
-        if !matches!(op, EntryOpRequest::None) {
-            self.operations.push((idx, op));
-        }
-    }
-
-    fn submit_operations(&mut self) -> Vec<EntryOpResult> {
-        self.instances.update_elements(&mut self.operations)
     }
 
     fn update_suggestion(

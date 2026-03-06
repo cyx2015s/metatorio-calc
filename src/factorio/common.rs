@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     fmt::{Debug, Display},
     hash::Hash,
-    ops::{Add, Mul},
+    ops::{Add, Deref, DerefMut, Mul},
     sync::mpsc::{Receiver, Sender},
 };
 
@@ -13,7 +13,87 @@ use serde_with::serde_as;
 use crate::{
     concept::*,
     factorio::{planner::FactoryContext, *},
+    math::UpdateVec,
 };
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct ReactVec<T> {
+    #[serde(skip)]
+    operations: Vec<(usize, EntryOpRequest)>,
+    instances: Vec<T>,
+}
+
+impl<T> Deref for ReactVec<T> {
+    type Target = Vec<T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.instances
+    }
+}
+
+impl<T> DerefMut for ReactVec<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.instances
+    }
+}
+
+pub unsafe trait VecProxy<I: ?Sized>: Send {
+    fn len(&self) -> usize;
+
+    fn iter(&self) -> Box<dyn Iterator<Item = &I> + '_> {
+        Box::new((0..self.len()).filter_map(move |idx| self.get(idx)))
+    }
+    fn get(&self, idx: usize) -> Option<&I>;
+    fn get_mut(&mut self, idx: usize) -> Option<&mut I>;
+    fn operate(&mut self, idx: usize, f: &mut dyn FnMut(&mut I) -> EntryOpRequest);
+    fn submit(&mut self) -> Vec<EntryOpResult>;
+}
+
+#[macro_export]
+macro_rules! impl_vec_proxy_dyn {
+    ($U:tt) => {
+        unsafe impl<T> VecProxy<dyn $U> for ReactVec<T>
+        where
+            T: $U + Clone,
+        {
+            fn len(&self) -> usize {
+                self.instances.len()
+            }
+
+            fn get(&self, idx: usize) -> Option<&dyn $U> {
+                self.instances
+                    .get(idx)
+                    .map(|instance| instance as &dyn $U)
+            }
+
+            fn get_mut(&mut self, idx: usize) -> Option<&mut dyn $U> {
+                self.instances
+                    .get_mut(idx)
+                    .map(|instance| instance as &mut dyn $U)
+            }
+
+            fn operate(
+                &mut self,
+                idx: usize,
+                f: &mut dyn FnMut(&mut dyn $U) -> EntryOpRequest,
+            ) {
+                let op = f(&mut self.instances[idx]);
+                if !matches!(op, EntryOpRequest::None) {
+                    self.operations.push((idx, op));
+                }
+            }
+
+            fn submit(&mut self) -> Vec<EntryOpResult> {
+                self.instances.update_elements(&mut self.operations)
+            }
+        }
+    };
+}
+
+impl_vec_proxy_dyn!(AsFlow);
+
+pub trait FlowProxy: VecProxy<dyn AsFlow> {}
+impl<T: VecProxy<dyn AsFlow>> FlowProxy for T {}
 
 #[typetag::serde(tag = "type")]
 pub trait SerdeFactorioMechanic: FactorioMechanic + dyn_clone::DynClone {}
@@ -21,9 +101,17 @@ pub trait SerdeFactorioMechanic: FactorioMechanic + dyn_clone::DynClone {}
 pub trait FactorioMechanic: SolveContext<Game = DataContext, Item = DualVar> {
     fn name(&self) -> String;
 
-    fn instances(&self) -> Vec<&dyn AsFlow>;
+    fn instances_proxy(&self) -> &dyn FlowProxy;
 
-    fn instance_len(&self) -> usize;
+    fn instances_proxy_mut(&mut self) -> &mut dyn FlowProxy;
+
+    fn instances(&self) -> Vec<&dyn AsFlow> {
+        self.instances_proxy().iter().collect()
+    }
+
+    fn instance_len(&self) -> usize {
+        self.instances_proxy().len()
+    }
 
     fn editor_view(
         &mut self,
@@ -48,8 +136,11 @@ pub trait FactorioMechanic: SolveContext<Game = DataContext, Item = DualVar> {
         idx: usize,
         f: &mut dyn FnMut(&mut dyn AsFlow) -> EntryOpRequest,
     ) {
+        self.instances_proxy_mut().operate(idx, f);
     }
-    fn submit_operations(&mut self) -> Vec<EntryOpResult>;
+    fn submit_operations(&mut self) -> Vec<EntryOpResult> {
+        self.instances_proxy_mut().submit()
+    }
 
     #[allow(unused_variables)]
     fn update_suggestion(

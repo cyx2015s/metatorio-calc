@@ -4,7 +4,7 @@ use crate::{
         DataContext, DualVar, EntityPrototype, ProjectContext, common::*, energy_source_as_flow,
         icon::Icon, modal::SelectorModal, planner::FactoryContext, selector::Selector,
     },
-    math::{ElemVec, flow_add},
+    math::{UpdateVec, flow_add},
 };
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -281,10 +281,8 @@ impl BoilerPrototype {
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct GeneratorMechanic {
-    #[serde(skip)]
-    pub operations: Vec<(usize, EntryOpRequest)>,
-
-    pub instances: Vec<GeneratorInstance>,
+    #[serde(flatten)]
+    pub instances: ReactVec<GeneratorInstance>,
 
     #[serde(skip)]
     pub show_suggestion: bool,
@@ -386,8 +384,18 @@ impl SolveContext for GeneratorMechanic {
 impl SerdeFactorioMechanic for GeneratorMechanic {}
 
 impl FactorioMechanic for GeneratorMechanic {
+
+
     fn name(&self) -> String {
         "流体发电".to_string()
+    }
+
+    fn instances_proxy(&self) -> &dyn FlowProxy {
+        &self.instances as &dyn FlowProxy
+    }
+
+    fn instances_proxy_mut(&mut self) -> &mut dyn FlowProxy {
+        &mut self.instances as &mut dyn FlowProxy
     }
 
     fn editor_view(
@@ -409,17 +417,6 @@ impl FactorioMechanic for GeneratorMechanic {
             changed = true;
         }
         changed
-    }
-
-    fn instances(&self) -> Vec<&dyn AsFlow> {
-        self.instances
-            .iter()
-            .map(|instance| instance as &dyn AsFlow)
-            .collect()
-    }
-
-    fn instance_len(&self) -> usize {
-        self.instances.len()
     }
 
     fn instance_view(
@@ -506,20 +503,6 @@ impl FactorioMechanic for GeneratorMechanic {
             }
         }
         changed
-    }
-
-    fn instance_operate(
-        &mut self,
-        idx: usize,
-        f: &mut dyn FnMut(&mut dyn AsFlow) -> EntryOpRequest,
-    ) {
-        let op = f(&mut self.instances[idx] as &mut dyn AsFlow);
-        if !matches!(op, EntryOpRequest::None) {
-            self.operations.push((idx, op));
-        }
-    }
-    fn submit_operations(&mut self) -> Vec<EntryOpResult> {
-        self.instances.update_elements(&mut self.operations)
     }
 
     fn auto_populate(
@@ -639,10 +622,8 @@ impl FactorioMechanic for GeneratorMechanic {
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct BoilerMechanic {
-    #[serde(skip)]
-    pub operations: Vec<(usize, EntryOpRequest)>,
-
-    pub instances: Vec<BoilerInstance>,
+    #[serde(flatten)]
+    pub instances: ReactVec<BoilerInstance>,
 }
 
 impl SolveContext for BoilerMechanic {
@@ -655,6 +636,14 @@ impl SerdeFactorioMechanic for BoilerMechanic {}
 impl FactorioMechanic for BoilerMechanic {
     fn name(&self) -> String {
         "锅炉".to_string()
+    }
+
+    fn instances_proxy(&self) -> &dyn FlowProxy {
+        &self.instances as &dyn FlowProxy
+    }
+
+    fn instances_proxy_mut(&mut self) -> &mut dyn FlowProxy {
+        &mut self.instances as &mut dyn FlowProxy
     }
 
     fn editor_view(
@@ -677,28 +666,6 @@ impl FactorioMechanic for BoilerMechanic {
             changed = true;
         }
         changed
-    }
-
-    fn instances(&self) -> Vec<&dyn AsFlow> {
-        self.instances
-            .iter()
-            .map(|instance| instance as &dyn AsFlow)
-            .collect()
-    }
-
-    fn instance_len(&self) -> usize {
-        self.instances.len()
-    }
-
-    fn instance_operate(
-        &mut self,
-        idx: usize,
-        f: &mut dyn FnMut(&mut dyn AsFlow) -> EntryOpRequest,
-    ) {
-        let op = f(&mut self.instances[idx] as &mut dyn AsFlow);
-        if !matches!(op, EntryOpRequest::None) {
-            self.operations.push((idx, op));
-        }
     }
 
     fn instance_view(
@@ -791,10 +758,6 @@ impl FactorioMechanic for BoilerMechanic {
             }
         }
         changed
-    }
-
-    fn submit_operations(&mut self) -> Vec<EntryOpResult> {
-        self.instances.update_elements(&mut self.operations)
     }
 
     fn auto_populate(
@@ -975,10 +938,8 @@ impl AsFlow for BoilerInstance {
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct FluidFuelMechanic {
-    #[serde(skip)]
-    pub operations: Vec<(usize, EntryOpRequest)>,
-
-    pub instances: Vec<FluidFuelInstance>,
+    #[serde(flatten)]
+    pub instances: ReactVec<FluidFuelInstance>,
 }
 
 impl SolveContext for FluidFuelMechanic {
@@ -988,9 +949,18 @@ impl SolveContext for FluidFuelMechanic {
 
 #[typetag::serde(name = "factorio:fluid-fuel")]
 impl SerdeFactorioMechanic for FluidFuelMechanic {}
+
 impl FactorioMechanic for FluidFuelMechanic {
     fn name(&self) -> String {
         "流体燃烧".to_string()
+    }
+
+    fn instances_proxy(&self) -> &dyn FlowProxy {
+        &self.instances as &dyn FlowProxy
+    }
+
+    fn instances_proxy_mut(&mut self) -> &mut dyn FlowProxy {
+        &mut self.instances as &mut dyn FlowProxy
     }
 
     fn editor_view(
@@ -1010,28 +980,6 @@ impl FactorioMechanic for FluidFuelMechanic {
             changed = true;
         }
         changed
-    }
-
-    fn instances(&self) -> Vec<&dyn AsFlow> {
-        self.instances
-            .iter()
-            .map(|instance| instance as &dyn AsFlow)
-            .collect()
-    }
-
-    fn instance_len(&self) -> usize {
-        self.instances.len()
-    }
-
-    fn instance_operate(
-        &mut self,
-        idx: usize,
-        f: &mut dyn FnMut(&mut dyn AsFlow) -> EntryOpRequest,
-    ) {
-        let op = f(&mut self.instances[idx] as &mut dyn AsFlow);
-        if !matches!(op, EntryOpRequest::None) {
-            self.operations.push((idx, op));
-        }
     }
 
     fn instance_view(
@@ -1083,9 +1031,6 @@ impl FactorioMechanic for FluidFuelMechanic {
         changed
     }
 
-    fn submit_operations(&mut self) -> Vec<EntryOpResult> {
-        self.instances.update_elements(&mut self.operations)
-    }
 
     fn auto_populate(
         &mut self,
@@ -1159,10 +1104,8 @@ impl AsFlow for FluidFuelInstance {
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct FluidHeatMechanic {
-    #[serde(skip)]
-    pub operations: Vec<(usize, EntryOpRequest)>,
-
-    pub instances: Vec<FluidHeatInstance>,
+    #[serde(flatten)]
+    pub instances: ReactVec<FluidHeatInstance>,
 }
 
 impl SolveContext for FluidHeatMechanic {
@@ -1175,6 +1118,14 @@ impl SerdeFactorioMechanic for FluidHeatMechanic {}
 impl FactorioMechanic for FluidHeatMechanic {
     fn name(&self) -> String {
         "流体供热".to_string()
+    }
+
+    fn instances_proxy(&self) -> &dyn FlowProxy {
+        &self.instances as &dyn FlowProxy
+    }
+
+    fn instances_proxy_mut(&mut self) -> &mut dyn FlowProxy {
+        &mut self.instances as &mut dyn FlowProxy
     }
 
     fn editor_view(
@@ -1194,28 +1145,6 @@ impl FactorioMechanic for FluidHeatMechanic {
             changed = true;
         }
         changed
-    }
-
-    fn instances(&self) -> Vec<&dyn AsFlow> {
-        self.instances
-            .iter()
-            .map(|instance| instance as &dyn AsFlow)
-            .collect()
-    }
-
-    fn instance_len(&self) -> usize {
-        self.instances.len()
-    }
-
-    fn instance_operate(
-        &mut self,
-        idx: usize,
-        f: &mut dyn FnMut(&mut dyn AsFlow) -> EntryOpRequest,
-    ) {
-        let op = f(&mut self.instances[idx] as &mut dyn AsFlow);
-        if !matches!(op, EntryOpRequest::None) {
-            self.operations.push((idx, op));
-        }
     }
 
     fn instance_view(
@@ -1266,10 +1195,6 @@ impl FactorioMechanic for FluidHeatMechanic {
             temperature_editor(ui, data, &mut changed, &mut instance.temperature, fluid);
         }
         changed
-    }
-
-    fn submit_operations(&mut self) -> Vec<EntryOpResult> {
-        self.instances.update_elements(&mut self.operations)
     }
 
     fn auto_populate(

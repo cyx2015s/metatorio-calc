@@ -7,7 +7,7 @@ use crate::{
         AsFlow, DataContext, DualVar, FactorioMechanic, IdWithQuality, ProjectContext, icon::Icon,
         modal::SelectorModal, planner::FactoryContext, selector::Selector,
     },
-    math::ElemVec,
+    math::UpdateVec,
 };
 
 pub const ITEM_TYPES: &[&str] = &[
@@ -101,14 +101,13 @@ pub struct PlaceAsTileProperty {
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct SpoilMechanic {
-    #[serde(skip)]
-    pub operations: Vec<(usize, EntryOpRequest)>,
-    pub instances: Vec<SpoilInstance>,
+    #[serde(flatten)]
+    pub instances: ReactVec<SpoilInstance>,
     #[serde(skip)]
     pub suggestion_item: Option<String>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct SpoilInstance {
     pub item: IdWithQuality,
 }
@@ -157,16 +156,14 @@ impl SolveContext for SpoilMechanic {
 
 #[typetag::serde(name = "factorio:spoil")]
 impl SerdeFactorioMechanic for SpoilMechanic {}
+
 impl FactorioMechanic for SpoilMechanic {
-    fn instance_operate(
-        &mut self,
-        idx: usize,
-        f: &mut dyn FnMut(&mut dyn AsFlow) -> EntryOpRequest,
-    ) {
-        let op = f(&mut self.instances[idx] as &mut dyn AsFlow);
-        if !matches!(op, EntryOpRequest::None) {
-            self.operations.push((idx, op));
-        }
+    fn instances_proxy(&self) -> &dyn FlowProxy {
+        &self.instances as &dyn FlowProxy
+    }
+
+    fn instances_proxy_mut(&mut self) -> &mut dyn FlowProxy {
+        &mut self.instances as &mut dyn FlowProxy
     }
 
     fn update_suggestion(
@@ -241,17 +238,6 @@ impl FactorioMechanic for SpoilMechanic {
         "物品变质".to_string()
     }
 
-    fn instances(&self) -> Vec<&dyn AsFlow> {
-        self.instances
-            .iter()
-            .map(|instance| instance as &dyn AsFlow)
-            .collect()
-    }
-
-    fn instance_len(&self) -> usize {
-        self.instances.len()
-    }
-
     fn editor_view(
         &mut self,
         ui: &mut egui::Ui,
@@ -306,10 +292,6 @@ impl FactorioMechanic for SpoilMechanic {
         });
         changed
     }
-
-    fn submit_operations(&mut self) -> Vec<EntryOpResult> {
-        self.instances.update_elements(&mut self.operations)
-    }
 }
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
@@ -324,10 +306,8 @@ pub struct PlantPrototype {
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct PlantMechanic {
-    #[serde(skip)]
-    pub operations: Vec<(usize, EntryOpRequest)>,
-
-    pub instances: Vec<PlantInstance>,
+    #[serde(flatten)]
+    pub instances: ReactVec<PlantInstance>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -408,6 +388,14 @@ impl FactorioMechanic for PlantMechanic {
         "种植".into()
     }
 
+    fn instances_proxy(&self) -> &dyn FlowProxy {
+        &self.instances as &dyn FlowProxy
+    }
+
+    fn instances_proxy_mut(&mut self) -> &mut dyn FlowProxy {
+        &mut self.instances as &mut dyn FlowProxy
+    }
+
     fn editor_view(
         &mut self,
         ui: &mut egui::Ui,
@@ -421,29 +409,6 @@ impl FactorioMechanic for PlantMechanic {
             changed = true;
         }
         changed
-    }
-
-    fn instances(&self) -> Vec<&dyn AsFlow> {
-        self.instances.iter().map(|i| i as &dyn AsFlow).collect()
-    }
-
-    fn instance_len(&self) -> usize {
-        self.instances.len()
-    }
-
-    fn instance_operate(
-        &mut self,
-        idx: usize,
-        f: &mut dyn FnMut(&mut dyn AsFlow) -> EntryOpRequest,
-    ) {
-        let op = f(&mut self.instances[idx] as &mut dyn AsFlow);
-        if !matches!(op, EntryOpRequest::None) {
-            self.operations.push((idx, op));
-        }
-    }
-
-    fn submit_operations(&mut self) -> Vec<crate::concept::EntryOpResult> {
-        self.instances.update_elements(&mut self.operations)
     }
 
     fn auto_populate(
@@ -509,9 +474,8 @@ impl FactorioMechanic for PlantMechanic {
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct ItemFuelMechanic {
-    #[serde(skip)]
-    pub operations: Vec<(usize, EntryOpRequest)>,
-    pub instances: Vec<ItemFuelInstance>,
+    #[serde(flatten)]
+    pub instances: ReactVec<ItemFuelInstance>,
 
     #[serde(skip)]
     pub suggested_category: Option<String>,
@@ -519,7 +483,7 @@ pub struct ItemFuelMechanic {
     pub suggested_item: Option<String>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct ItemFuelInstance {
     pub item: IdWithQuality,
 }
@@ -567,16 +531,15 @@ impl SolveContext for ItemFuelMechanic {
 
 #[typetag::serde(name = "factorio:item-fuel")]
 impl SerdeFactorioMechanic for ItemFuelMechanic {}
+
 impl FactorioMechanic for ItemFuelMechanic {
-    fn instance_operate(
-        &mut self,
-        idx: usize,
-        f: &mut dyn FnMut(&mut dyn AsFlow) -> EntryOpRequest,
-    ) {
-        let op = f(&mut self.instances[idx] as &mut dyn AsFlow);
-        if !matches!(op, EntryOpRequest::None) {
-            self.operations.push((idx, op));
-        }
+
+    fn instances_proxy(&self) -> &dyn FlowProxy {
+        &self.instances as &dyn FlowProxy
+    }
+
+    fn instances_proxy_mut(&mut self) -> &mut dyn FlowProxy {
+        &mut self.instances as &mut dyn FlowProxy
     }
 
     fn update_suggestion(
@@ -662,17 +625,6 @@ impl FactorioMechanic for ItemFuelMechanic {
         "燃烧物品".to_string()
     }
 
-    fn instances(&self) -> Vec<&dyn AsFlow> {
-        self.instances
-            .iter()
-            .map(|instance| instance as &dyn AsFlow)
-            .collect()
-    }
-
-    fn instance_len(&self) -> usize {
-        self.instances.len()
-    }
-
     fn editor_view(
         &mut self,
         ui: &mut egui::Ui,
@@ -724,20 +676,15 @@ impl FactorioMechanic for ItemFuelMechanic {
         });
         changed
     }
-
-    fn submit_operations(&mut self) -> Vec<EntryOpResult> {
-        self.instances.update_elements(&mut self.operations)
-    }
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct ItemLaunchMechanic {
-    #[serde(skip)]
-    pub operations: Vec<(usize, EntryOpRequest)>,
-    pub instances: Vec<ItemLaunchInstance>,
+    #[serde(flatten)]
+    pub instances: ReactVec<ItemLaunchInstance>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct ItemLaunchInstance {
     pub item: IdWithQuality,
     pub rocket: (u16, bool), // 目前只支持按堆叠数限制的。
@@ -794,15 +741,12 @@ impl SolveContext for ItemLaunchMechanic {
 #[typetag::serde(name = "factorio:item-launch")]
 impl SerdeFactorioMechanic for ItemLaunchMechanic {}
 impl FactorioMechanic for ItemLaunchMechanic {
-    fn instance_operate(
-        &mut self,
-        idx: usize,
-        f: &mut dyn FnMut(&mut dyn AsFlow) -> EntryOpRequest,
-    ) {
-        let op = f(&mut self.instances[idx] as &mut dyn AsFlow);
-        if !matches!(op, EntryOpRequest::None) {
-            self.operations.push((idx, op));
-        }
+    fn instances_proxy(&self) -> &dyn FlowProxy {
+        &self.instances as &dyn FlowProxy
+    }
+
+    fn instances_proxy_mut(&mut self) -> &mut dyn FlowProxy {
+        &mut self.instances as &mut dyn FlowProxy
     }
 
     fn update_suggestion(
@@ -849,17 +793,6 @@ impl FactorioMechanic for ItemLaunchMechanic {
 
     fn name(&self) -> String {
         "物品发射".to_string()
-    }
-
-    fn instances(&self) -> Vec<&dyn AsFlow> {
-        self.instances
-            .iter()
-            .map(|instance| instance as &dyn AsFlow)
-            .collect()
-    }
-
-    fn instance_len(&self) -> usize {
-        self.instances.len()
     }
 
     fn editor_view(
@@ -924,9 +857,5 @@ impl FactorioMechanic for ItemLaunchMechanic {
                 .changed();
         });
         changed
-    }
-
-    fn submit_operations(&mut self) -> Vec<EntryOpResult> {
-        self.instances.update_elements(&mut self.operations)
     }
 }
