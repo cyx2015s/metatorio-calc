@@ -1,5 +1,7 @@
 use std::{collections::HashSet, fmt::Debug};
 
+use serde_with::{serde_as, DefaultOnError};
+
 use crate::factorio::{DataContext, Dict, DualVar, HasPrototypeBase, IdWithQuality, PrototypeBase};
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -40,11 +42,15 @@ pub struct TypedAutoplaceSettings {
     // pub decorative: AutoplaceSettings,
 }
 
+#[serde_as]
 #[derive(Clone, serde::Deserialize, Default)]
 #[serde(default)]
 pub struct FrequencySizeRichness {
+    #[serde_as(deserialize_as = "DefaultOnError")]
     pub frequency: Option<f64>,
+    #[serde_as(deserialize_as = "DefaultOnError")]
     pub size: Option<f64>,
+    #[serde_as(deserialize_as = "DefaultOnError")]
     pub richness: Option<f64>,
 }
 

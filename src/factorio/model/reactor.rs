@@ -17,7 +17,7 @@ pub struct ReactorPrototype {
     pub energy_source: EnergySource,
 
     pub consumption: EnergyAmount,
-
+    #[serde(default)]
     pub neighbour_bonus: f64,
 }
 
