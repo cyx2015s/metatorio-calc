@@ -2,7 +2,7 @@ use crate::{
     concept::{Flow, SolveContext},
     factorio::{
         DataContext, DualVar, EntityPrototype, ProjectContext, common::*, energy_source_as_flow,
-        icon::Icon, modal::SelectorModal, planner::FactoryContext, selector::Selector,
+        icon::Icon, modal::SelectorModal, planner::FactoryContext, selector::Selector, surface_condition_satisfied,
     },
     math::flow_add,
 };
@@ -513,6 +513,15 @@ impl FactorioMechanic for GeneratorMechanic {
             if !proj.is_prototype_accessible("entity", &generator.base.base.name) {
                 continue;
             }
+            if let Some(surface_properties) = factory.get_current_surface_properties(data)
+                && !surface_condition_satisfied(
+                    &generator.base.surface_conditions,
+                    surface_properties,
+                    &data.surface_properties,
+                )
+            {
+                continue;
+            }
             if let Some(filter) = &generator.fluid_box.filter {
                 if let Some(fluid) = data.fluids.get(filter)
                     && proj.is_prototype_accessible("entity", &generator.base.base.name)
@@ -766,6 +775,15 @@ impl FactorioMechanic for BoilerMechanic {
     ) {
         for boiler in data.boilers.values() {
             if !proj.is_prototype_accessible("entity", &boiler.base.base.name) {
+                continue;
+            }
+            if let Some(surface_properties) = factory.get_current_surface_properties(data)
+                && !surface_condition_satisfied(
+                    &boiler.base.surface_conditions,
+                    surface_properties,
+                    &data.surface_properties,
+                )
+            {
                 continue;
             }
             if let Some(filter) = &boiler.fluid_box.filter {

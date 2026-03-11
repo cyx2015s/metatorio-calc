@@ -52,7 +52,7 @@ pub struct RecipePrototype {
 
     category: Option<String>,
     #[serde_as(deserialize_as = "DefaultOnError")]
-    surface_conditions: Vec<SurfaceCondition>,
+    pub surface_conditions: Vec<SurfaceCondition>,
 
     #[serde_as(deserialize_as = "DefaultOnError")]
     additional_categories: Vec<String>,

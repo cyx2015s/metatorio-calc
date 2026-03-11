@@ -26,6 +26,7 @@ pub const LOCALE_CATEGORIES: &[&str] = &[
     "quality",
     "recipe",
     "space-location",
+    "surface-property",
     "technology",
     "tile",
 ];

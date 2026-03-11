@@ -4,7 +4,7 @@ use crate::{
         AsFlow, DataContext, DualVar, Effect, EnergyAmount, EnergySource, EntityPrototype,
         FactorioMechanic, FlowProxy, IdWithQuality, ProjectContext, ReactVec,
         SerdeFactorioMechanic, energy_source_as_flow, icon::Icon, index_map_update_entry,
-        modal::SelectorModal, planner::FactoryContext, selector::Selector,
+        modal::SelectorModal, planner::FactoryContext, selector::Selector, surface_condition_satisfied,
     },
     math::flow_add,
 };
@@ -104,21 +104,40 @@ impl FactorioMechanic for ReactorMechanic {
     fn auto_populate(
         &mut self,
         data: &DataContext,
-        _proj: &ProjectContext,
+        proj: &ProjectContext,
         factory: &FactoryContext,
     ) {
         for reactor in data.reactors.values() {
-            // for quality in 0..=proj.max_quality_level {
-            self.instances.push(ReactorInstance {
-                reactor: IdWithQuality(reactor.base.base.name.clone(), factory.major_quality),
-                neighbours: 3,
-                fuel: None,
-            });
-            // }
+            if let Some(surface_properties) = factory.get_current_surface_properties(data)
+                && !surface_condition_satisfied(
+                    &reactor.base.surface_conditions,
+                    surface_properties,
+                    &data.surface_properties,
+                )
+            {
+                continue;
+            }
+            if proj.is_prototype_accessible("entity", &reactor.base.base.name) {
+                // for quality in 0..=proj.max_quality_level {
+                self.instances.push(ReactorInstance {
+                    reactor: IdWithQuality(reactor.base.base.name.clone(), factory.major_quality),
+                    neighbours: 3,
+                    fuel: None,
+                });
+                // }
+                
+            }
         }
     }
 }
 
+
+#[test]
+fn test_func() {
+    let vec = [1,2,3,4,5,6,7,8,9];
+    let ignore_4 = vec.into_iter().rev().skip(4).rev().collect::<Vec<_>>();
+    dbg!(ignore_4);
+}
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct ReactorInstance {

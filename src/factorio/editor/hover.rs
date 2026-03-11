@@ -154,6 +154,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
         });
         ui.vertical(|ui| {
             ui.label(data.get_display_name("recipe", &self.prototype.base.name));
+            surface_condition_ui(ui, &self.prototype.surface_conditions, &data);
             ui.add(CompactLabel::new(self.prototype.energy_required).with_format("{}s"));
             ui.horizontal_top(|ui| {
                 if ingredients.is_empty() {
@@ -302,6 +303,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, EntityPrototype> {
         ui.vertical(|ui| {
             ui.set_min_width(140.0);
             ui.label(data.get_display_name("entity", &self.prototype.base.name));
+            surface_condition_ui(ui, &self.prototype.surface_conditions, &data);
             if let Some(mining) = &self.prototype.minable {
                 if let Some(result) = &mining.result {
                     ui.label("挖掘返还: ");
@@ -489,6 +491,48 @@ fn effect_receiver_ui(ui: &mut egui::Ui, effect_receiver: &EffectReceiver) {
     }
 }
 
+fn surface_condition_ui(
+    ui: &mut egui::Ui,
+    surface_conditions: &[SurfaceCondition],
+    data: &DataContext,
+) {
+    if surface_conditions.is_empty() {
+        return;
+    }
+    ui.vertical(|ui| {
+        ui.label(format!("表面属性限制"));
+        ui.horizontal(|ui| {
+            for condition in surface_conditions {
+                match (condition.min, condition.max) {
+                    (Some(min), Some(max)) => {
+                        ui.label(format!(
+                            "{}: {} ~ {}",
+                            data.get_display_name("surface-property", &condition.property),
+                            min,
+                            max
+                        ));
+                    }
+                    (Some(min), None) => {
+                        ui.label(format!(
+                            "{}: >={}",
+                            data.get_display_name("surface-property", &condition.property),
+                            min
+                        ));
+                    }
+                    (None, Some(max)) => {
+                        ui.label(format!(
+                            "{}: <={}",
+                            data.get_display_name("surface-property", &condition.property),
+                            max
+                        ));
+                    }
+                    (None, None) => {}
+                }
+            }
+        });
+    });
+}
+
 impl<'a> egui::Widget for PrototypeHover<'a, GeneratorPrototype> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         let data = &self.data;
@@ -510,6 +554,32 @@ impl<'a> egui::Widget for PrototypeHover<'a, GeneratorPrototype> {
             }
         });
 
+        ui.response()
+    }
+}
+
+impl<'a> egui::Widget for PrototypeHover<'a, PlanetPrototype> {
+    fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+        let planet = self.prototype;
+        ui.label(
+            self.data
+                .get_display_name("space-location", &planet.base.name),
+        );
+        for property in &self.data.surface_properties {
+            if let Some(value) = planet.surface_properties.get(property.0) {
+                ui.label(format!(
+                    "{}: {}",
+                    self.data.get_display_name("surface-property", &property.0),
+                    value
+                ));
+            } else {
+                ui.label(format!(
+                    "{}: {}",
+                    self.data.get_display_name("surface-property", &property.0),
+                    property.1.default_value
+                ));
+            }
+        }
         ui.response()
     }
 }
