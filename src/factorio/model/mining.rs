@@ -1,17 +1,21 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use serde_with::serde_as;
 
 use crate::{
+    comb::Compositions,
     concept::{Flow, SolveContext},
     factorio::{
-        ModuleConfig, ModuleConfigEditor, ProjectContext, calc_quality_distribution,
+        ModuleConfig, ModuleConfigEditor, ModulePrototype, ProjectContext,
+        calc_quality_distribution,
         common::*,
         icon::Icon,
         modal::SelectorModal,
         model::{data::*, energy::*, entity::*, recipe::*},
+        module_effects_allowed,
         planner::FactoryContext,
         selector::Selector,
+        surface_condition_satisfied,
     },
 };
 
@@ -325,6 +329,7 @@ fn test_mining_normalized() {
     println!("Mining Result with Location: {:?}", result_with_location);
 }
 
+#[serde_as]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
 pub struct MiningMechanic {
     #[serde(flatten)]
@@ -339,6 +344,18 @@ pub struct MiningMechanic {
     pub selected_suggested_resource: Option<String>,
     #[serde(skip)]
     pub suggested_recipes_filter: String,
+
+    #[serde(default)]
+    pub alternative_count: usize,
+
+    pub enumerate_modules: Vec<IdWithQuality>,
+
+    #[serde(default)]
+    #[serde_with(DefaultOnError)]
+    pub enumerate_beacons: Vec<AutoBeaconConfig>,
+
+    #[serde(skip)]
+    pub new_enumerate_module: Option<IdWithQuality>,
 }
 
 pub fn select_miner_for_resource(
@@ -347,6 +364,7 @@ pub fn select_miner_for_resource(
     factory: &FactoryContext,
     resource: &ResourcePrototype,
     preferences: &[IdWithQuality],
+    excluding: &[IdWithQuality],
 ) -> IdWithQuality {
     // 优先选择用户偏好
     for pref in preferences.iter() {
@@ -379,6 +397,7 @@ pub fn select_miner_for_resource(
     for miner in data.miners.values() {
         if machine_fits_for_resource(miner, resource)
             && measure_miner(miner) > measure
+            && !excluding.iter().any(|e| e.0 == miner.base.base.name)
             && proj.is_prototype_accessible("entity", &miner.base.base.name)
         {
             measure = measure_miner(miner);
@@ -411,16 +430,124 @@ impl FactorioMechanic for MiningMechanic {
     fn editor_view(
         &mut self,
         ui: &mut egui::Ui,
-        _data: &DataContext,
-        _proj: &ProjectContext,
-        _factory: &FactoryContext,
+        data: &DataContext,
+        proj: &ProjectContext,
+        factory: &FactoryContext,
     ) -> bool {
         let mut changed = false;
+
         if ui.button("添加采矿").clicked() {
             let mining_config = MiningInstance::default();
             self.instances.push(mining_config);
             changed = true;
         }
+        ui.label("[自动]备选机器数量");
+        ui.add(
+            egui::DragValue::new(&mut self.alternative_count)
+                .speed(1)
+                .range(1..=3)
+                .clamp_existing_to_range(true),
+        );
+
+        ui.separator();
+        ui.collapsing("[自动]枚举插件", |ui| {
+            if ui
+                .button("使用最佳插件")
+                .on_hover_text("根据当前科技等级，选择每个类别的最佳插件加入枚举。")
+                .clicked()
+            {
+                let mut modules_by_category: HashMap<String, &ModulePrototype> = HashMap::new();
+                for module in data.modules.values() {
+                    if proj.is_prototype_accessible("item", &module.base.name) {
+                        let category = module.category.clone();
+                        modules_by_category
+                            .entry(category.clone())
+                            .and_modify(|m| {
+                                if module.tier > m.tier {
+                                    *m = module;
+                                }
+                            })
+                            .or_insert(module);
+                    }
+                }
+                self.enumerate_modules = modules_by_category
+                    .values()
+                    .map(|m| (m.base.name.clone(), factory.major_quality).into())
+                    .collect();
+            }
+            let icon = Icon::new(data, "item", "empty-module-slot");
+            let button = ui
+                .add_sized([35.0, 35.0], icon)
+                .on_hover_text("选择新的枚举插件。修改插件请先删除。");
+            ui.add(
+                SelectorModal::new(button.id, "选择枚举插件")
+                    .with_toggle(button.clicked())
+                    .with_selector(
+                        Selector::new(data, "item")
+                            .with_output(&mut self.new_enumerate_module)
+                            .with_filter(|item: &IdWithQuality, data: &DataContext| {
+                                data.modules.contains_key(&item.0)
+                                    && proj.is_prototype_accessible("item", &item.0)
+                            }),
+                    ),
+            );
+            if self.new_enumerate_module.is_some() {
+                let new_module = self.new_enumerate_module.take().unwrap();
+                // 移除已有的相同插件
+                self.enumerate_modules.retain(|m| m != &new_module);
+                // 插入到最前面
+                self.enumerate_modules.insert(0, new_module);
+                changed = true;
+            }
+            // 插件顺序无关，所以不提供相对移动操作
+            let mut delele_module = None;
+            ui.separator();
+            for module in &self.enumerate_modules {
+                let button = ui
+                    .add_sized(
+                        [35.0, 35.0],
+                        Icon::new(data, "item", &module.0).with_quality(module.1),
+                    )
+                    .on_hover_text("无法编辑，右键可删除。");
+                if button.secondary_clicked() {
+                    delele_module = Some(module.clone());
+                    changed = true;
+                }
+            }
+            if let Some(module) = delele_module {
+                self.enumerate_modules.retain(|m| m != &module);
+            }
+        });
+        ui.separator();
+        ui.collapsing("[自动]插件塔", |ui| {
+            ui.label("添加新建筑时，会选取第一个满足条件的插件塔配置。");
+            if ui.button("添加插件塔").clicked() {
+                self.enumerate_beacons.push(AutoBeaconConfig {
+                    module_config: ModuleConfig::new(),
+                });
+                changed = true;
+            }
+            self.enumerate_beacons.retain_mut(|config| {
+                ui.separator();
+                let mut deleted = false;
+                if ui.button("删除").clicked() {
+                    deleted = true;
+                    changed = true;
+                }
+                ui.add(
+                    ModuleConfigEditor::new(
+                        data,
+                        &mut config.module_config,
+                        0,
+                        &Some(EffectTypeLimitation::new(true, true, true, true, true)),
+                        &None,
+                    )
+                    .with_edit_modules(false)
+                    .with_project_context(proj),
+                );
+                !deleted
+            });
+        });
         changed
     }
 
@@ -460,7 +587,8 @@ impl FactorioMechanic for MiningMechanic {
                     .get(&instance.machine.0)
                     .is_none_or(|miner| !machine_fits_for_resource(miner, resource))
             {
-                instance.machine = select_miner_for_resource(data, proj, factory, resource, &[]);
+                instance.machine =
+                    select_miner_for_resource(data, proj, factory, resource, &[], &[]);
                 instance.fuel = None;
                 instance.module_config = ModuleConfig::new();
             }
@@ -638,6 +766,7 @@ impl FactorioMechanic for MiningMechanic {
                     factory,
                     data.resources.get(resource).unwrap(),
                     &[],
+                    &[],
                 ),
                 ..Default::default()
             });
@@ -654,13 +783,101 @@ impl FactorioMechanic for MiningMechanic {
     ) {
         for resource in data.resources.values() {
             if let Some(_mining) = resource.base.minable.as_ref() {
-                let machine = select_miner_for_resource(data, proj, factory, resource, &[]);
-                if machine.0 != "entity-unknown" {
-                    self.instances.push(MiningInstance {
-                        resource: resource.base.base.name.clone(),
-                        machine,
-                        ..Default::default()
-                    });
+                let mut miners = Vec::new();
+                for i in 0..(self.alternative_count.clamp(1, 3)) {
+                    let miner =
+                        select_miner_for_resource(data, proj, factory, resource, &[], &miners);
+                    if miner.0 != "entity-unknown" {
+                        miners.push(miner);
+                    } else {
+                        break;
+                    }
+                }
+                for miner in &miners {
+                    if let Some(machine_proto) = data.miners.get(&miner.0) {
+                        if let Some(surface_properties) =
+                            factory.get_current_surface_properties(data)
+                            && !surface_condition_satisfied(
+                                &machine_proto.base.surface_conditions,
+                                surface_properties,
+                                &data.surface_properties,
+                            )
+                        {
+                            continue;
+                        }
+                        let allowed_effects = machine_proto
+                            .allowed_effects
+                            .clone()
+                            .unwrap_or(EffectTypeLimitation::new(true, true, true, true, true));
+                        let allowed_effects = Some(allowed_effects);
+                        let option_allowed_modules =
+                            machine_proto.allowed_module_categories.clone();
+                        let allowed_modules = self
+                            .enumerate_modules
+                            .clone()
+                            .into_iter()
+                            .filter(|module_name| {
+                                if let Some(module) = data.modules.get(&module_name.0) {
+                                    option_allowed_modules.as_ref().is_none_or(
+                                        |allowed_module_categories| {
+                                            allowed_module_categories.contains(&module.category)
+                                        },
+                                    ) && module_effects_allowed(module, &allowed_effects)
+                                } else {
+                                    false
+                                }
+                            })
+                            .collect::<Vec<_>>();
+                        let module_slots = machine_proto.module_slots as usize;
+                        let comb_iter = Compositions::new(allowed_modules.len() + 1, module_slots);
+                        let comb_iter = if module_slots > 8 || allowed_modules.len() > 2 {
+                            // 插件过多时不枚举空插件配置，避免状态空间爆炸
+                            Compositions::new(allowed_modules.len(), module_slots)
+                        } else {
+                            comb_iter
+                        };
+                        let comb_iter = if allowed_modules.len() > 2 && module_slots > 16 {
+                            // 只看前16个插件槽位组合
+                            Compositions::new(allowed_modules.len(), 16)
+                        } else {
+                            comb_iter
+                        };
+                        let comb_iter = if allowed_modules.len() > 1 && module_slots > 24 {
+                            // 插件过多时只看前24个插件槽位组合，避免状态空间爆炸
+                            Compositions::new(allowed_modules.len(), 24)
+                        } else {
+                            comb_iter
+                        };
+
+                        for comb in comb_iter {
+                            let mut modules = vec![];
+                            for module_id in 0..allowed_modules.len() {
+                                for _ in 0..comb[module_id] {
+                                    modules.push(allowed_modules[module_id].clone());
+                                }
+                            }
+                            self.instances.push(MiningInstance {
+                                resource: resource.base.base.name.clone(),
+                                machine: miner.clone(),
+                                module_config: ModuleConfig {
+                                    modules: modules.clone(),
+                                    ..Default::default()
+                                },
+                                ..Default::default()
+                            });
+                            for auto_beacon_config in &self.enumerate_beacons {
+                                self.instances.push(MiningInstance {
+                                    resource: resource.base.base.name.clone(),
+                                    machine: miner.clone(),
+                                    module_config: ModuleConfig {
+                                        modules: modules.clone(),
+                                        ..auto_beacon_config.module_config.clone()
+                                    },
+                                    ..Default::default()
+                                });
+                            }
+                        }
+                    }
                 }
             }
         }

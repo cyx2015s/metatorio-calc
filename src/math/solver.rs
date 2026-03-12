@@ -705,10 +705,9 @@ where
                 // 不担心产量溢出， target等式会帮忙限制
                 let val =
                     -(1.0 / coef) * get_item_scale(item_id) * get_flow_target_scale(f_idx, item_id);
-                if coef * target.constant < 0.0 {
-                    // 这个是负的，必须配平对应的物品
-                    force_zero_items.insert(item_id.clone());
-                }
+
+                force_zero_items.insert(item_id.clone());
+
                 let entry = item_balances
                     .entry(item_id.clone())
                     .or_insert(good_lp::Expression::from(0.0));

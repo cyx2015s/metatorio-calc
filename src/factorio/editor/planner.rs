@@ -796,9 +796,11 @@ impl FactoryInstance {
         });
         ui.separator();
         ui.heading("游戏机制");
-        for mechanic in self.mechanics.iter_mut() {
+        for (idx, mechanic) in self.mechanics.iter_mut().enumerate() {
             ui.separator();
-            *changed |= mechanic.editor_view(ui, data, proj, &self.factory);
+            ui.scope_builder(egui::UiBuilder::new().id_salt(idx), |ui| {
+                *changed |= mechanic.editor_view(ui, data, proj, &self.factory);
+            });
         }
         let mut results = Vec::new();
         for mechanic in self.mechanics.iter_mut() {
