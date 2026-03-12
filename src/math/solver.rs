@@ -403,7 +403,7 @@ where
         // target视为虚拟物品
         let mut item_target_scales: Vec<f64> = vec![1.0; self.target.len()];
 
-        // 按比例贡献target的物品视为虚拟流
+        // 需要修复一个物品出现在多个表达式中时的求解问题。
         let mut flow_target_scales: HashMap<(usize, I), f64> = self
             .target
             .iter()
@@ -680,6 +680,8 @@ where
             self.flows.len()
         );
 
+        // 因为存在0开销转换流，必须限制产物为0.
+        // 目前约定的0开销转换流都表示其转换在其他建筑中隐式完成，所以不消耗代价，同理也必须完全配平，不允许有剩余。
         let mut force_zero_items = IndexSet::new();
         for (f_id, flow_spec) in &self.flows {
             let var = flow_vars.get(f_id).unwrap();
@@ -706,8 +708,10 @@ where
                 let val =
                     -(1.0 / coef) * get_item_scale(item_id) * get_flow_target_scale(f_idx, item_id);
 
+                // 不用担心溢出，构造结果时会帮忙限制
                 force_zero_items.insert(item_id.clone());
 
+                // 不能直接影响原物品流数据。
                 let entry = item_balances
                     .entry(item_id.clone())
                     .or_insert(good_lp::Expression::from(0.0));

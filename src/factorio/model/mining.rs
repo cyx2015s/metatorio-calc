@@ -784,7 +784,7 @@ impl FactorioMechanic for MiningMechanic {
         for resource in data.resources.values() {
             if let Some(_mining) = resource.base.minable.as_ref() {
                 let mut miners = Vec::new();
-                for i in 0..(self.alternative_count.clamp(1, 3)) {
+                for _ in 0..(self.alternative_count.clamp(1, 3)) {
                     let miner =
                         select_miner_for_resource(data, proj, factory, resource, &[], &miners);
                     if miner.0 != "entity-unknown" {
