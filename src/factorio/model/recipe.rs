@@ -6,7 +6,7 @@ use std::{
 use serde_with::{DefaultOnError, serde_as};
 
 use crate::{
-    comb::Compositions,
+    math::Compositions,
     concept::*,
     factorio::{
         DataContext, ModulePrototype, ProjectContext, SurfaceCondition,

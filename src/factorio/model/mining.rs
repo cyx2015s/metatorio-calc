@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use serde_with::serde_as;
 
 use crate::{
-    comb::Compositions,
+    math::Compositions,
     concept::{Flow, SolveContext},
     factorio::{
         ModuleConfig, ModuleConfigEditor, ModulePrototype, ProjectContext,

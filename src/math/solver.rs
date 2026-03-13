@@ -484,8 +484,7 @@ where
                                     if coef == 0.0 {
                                         continue;
                                     }
-                                    let amount = coef;
-                                    let val = amount * item_target_scales[target_idx] * *f_scale;
+                                    let val = coef * item_target_scales[target_idx] * *f_scale;
                                     sum_x2 += val * val;
                                     count += 1;
                                 }
@@ -591,8 +590,7 @@ where
                             continue;
                         }
                         // 计算平方和，不考虑正负号，正负号在之后构建表达式时再考虑
-                        let amount = coef;
-                        let val = amount
+                        let val = coef
                             * item_target_scales[idx]
                             * flow_target_scales.get(i_id).cloned().unwrap_or(1.0);
                         sum_x2 += val * val;
@@ -690,24 +688,14 @@ where
             }
         }
 
-        for target in &self.target {
-            for (item_id, &coef) in &target.coefficients {
-                if coef == 0.0 {
-                    continue;
-                }
-                let var = flow_target_vars.get(&item_id).unwrap();
-                // 不担心产量溢出， target等式会帮忙限制
-                let val = -(1.0 / coef) * get_item_scale(item_id) * get_flow_target_scale(item_id);
-
-                // 不用担心溢出，构造结果时会帮忙限制
-                force_zero_items.insert(item_id.clone());
-
-                // 不能直接影响原物品流数据。
-                let entry = item_balances
-                    .entry(item_id.clone())
-                    .or_insert(good_lp::Expression::from(0.0));
-                *entry += val * *var;
-            }
+        for item in flow_target_scales.keys() {
+            let var = flow_target_vars.get(item).cloned().unwrap();
+            let entry = item_balances
+                .entry(item.clone())
+                .or_insert(good_lp::Expression::from(0.0));
+            // 产生虚拟目标消耗虚拟物品，本身是消耗一个真实物品
+            let val = (-1.0) * get_item_scale(item) * get_flow_target_scale(item);
+            *entry += val * var;
         }
         log::info!("求解器：一共有 {} 个物品需要平衡", item_balances.len(),);
 
@@ -792,8 +780,10 @@ where
                     // 此处只要根据符号确定增加还是消耗
                     // 例：系数为正，目标为正，增加贡献
                     // 系数为负，目标为正，减少贡献
-                    target_exprs[target_idx] += flow_target_vars.get(item).cloned().unwrap()
-                        * get_flow_target_scale(item);
+                    target_exprs[target_idx] += coef
+                        * flow_target_vars.get(item).cloned().unwrap()
+                        * get_item_target_scale(target_idx)
+                        * get_flow_target_scale(item)
                 }
             }
         }

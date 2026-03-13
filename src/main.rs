@@ -13,7 +13,6 @@ static GLOBAL: MiMalloc = MiMalloc;
 // Git 版本信息
 include!(concat!(env!("OUT_DIR"), "/git_hash.rs"));
 
-pub mod comb;
 pub mod concept;
 
 pub mod error;
@@ -353,10 +352,12 @@ impl eframe::App for MainPage {
 }
 
 fn main() {
+
     egui_logger::builder()
-        .max_level(log::LevelFilter::Debug)
+        .max_level(log::LevelFilter::Debug)    
         .init()
         .unwrap();
+    
     log::info!("应用程序启动");
     let icon_image = image::load_from_memory(include_bytes!("../assets/icon.png")).unwrap();
     eframe::run_native(
