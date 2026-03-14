@@ -1,8 +1,8 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, time::Instant};
 
 use good_lp::{
-    Constraint, Expression, IntoAffineExpression, ProblemVariables, ResolutionError, SolverModel,
-    Variable, VariableDefinition, microlp, solvers::microlp::MicroLpSolution,
+    Constraint, Expression, IntoAffineExpression, ProblemVariables, ResolutionError, Solution,
+    SolverModel, Variable, VariableDefinition, microlp, solvers::microlp::MicroLpSolution,
 };
 use rayon::prelude::*;
 
@@ -16,7 +16,9 @@ pub struct RuizSolution {
     pub inner: MicroLpSolution,              // 原始结果
     pub prim_scales: HashMap<Variable, f64>, // 原始变量的系数分别乘了这些系数
     pub dual_scales: Vec<f64>,               // 原始约束的系数分别乘了这些系数
-    // 考察结果时建议的缩放系数
+    pub cost: f64,                           // 原问题的目标值，应该没有获取原始值的需求吧……
+    // 实际求解的问题是原问题的 global_scale 倍，
+    // 因此原始变量需要除以 global_scale 才是原问题的结果
     pub global_scale: f64,
 }
 
@@ -37,6 +39,7 @@ impl RuizSolver {
 
     pub fn solve(self) -> Result<RuizSolution, ResolutionError> {
         // 每个变量，在每个约束中的系数
+        let instant = Instant::now();
         let prim_coeffs = self
             .constraints
             .par_iter()
@@ -67,43 +70,72 @@ impl RuizSolver {
             .collect::<HashMap<Variable, f64>>();
         let mut dual_scales = vec![1.0; self.constraints.len()];
 
+        // 随手计算一个停止阈值，理论上应该是 1.0，但考虑到数值误差，放宽一点
+        let stop_threshold = 1.0 + 1.0 / (self.constraints.len() as f64).max(100.0);
         // 每次修改变量的系数和约束的系数，使得系数的均方根接近1
-        for i in 0..32 {
+        for i in 0..1024 {
             // 交替修改 prim 和 dual
             // 统计每次更新的最大变化，小于一定值视为收敛
 
-            prim_scales.par_iter_mut().for_each(|(var, prim_scale)| {
-                let mut sum_x2 = 0.0;
-                let mut count = 0;
-                for (&idx, &coeff) in prim_coeffs.get(var).unwrap_or(&HashMap::new()) {
-                    let dual_scale = dual_scales[idx];
-                    sum_x2 += (coeff * dual_scale * *prim_scale).powi(2);
-                    count += 1;
-                }
-                let delta_scale = (sum_x2 / count as f64)
-                    .sqrt()
-                    .recip()
-                    .clamp(MAGIC_INV, MAGIC);
-                *prim_scale *= delta_scale;
-            });
-
-            dual_scales
+            let mut max_delta_scale = prim_scales
                 .par_iter_mut()
-                .enumerate()
-                .for_each(|(idx, dual_scale)| {
+                .map(|(var, prim_scale)| {
                     let mut sum_x2 = 0.0;
                     let mut count = 0;
-                    for (var, coeff) in self.constraints[idx].expression().linear_coefficients() {
-                        let prim_scale = prim_scales.get(&var).cloned().unwrap_or(1.0);
-                        sum_x2 += (coeff * prim_scale * *dual_scale).powi(2);
+                    for (&idx, &coeff) in prim_coeffs.get(var).unwrap_or(&HashMap::new()) {
+                        if coeff == 0.0 {
+                            continue;
+                        }
+                        let dual_scale = dual_scales[idx];
+                        sum_x2 += (coeff * dual_scale * *prim_scale).powi(2);
                         count += 1;
                     }
-                    let delta_scale = (sum_x2 / count as f64)
-                        .sqrt()
-                        .recip()
-                        .clamp(MAGIC_INV, MAGIC);
-                    *dual_scale *= delta_scale;
-                });
+                    let delta_scale = if count == 0 {
+                        1.0
+                    } else {
+                        (sum_x2 / count as f64)
+                            .sqrt()
+                            .recip()
+                            .clamp(MAGIC_INV, MAGIC)
+                    };
+                    *prim_scale *= delta_scale;
+                    delta_scale.max(delta_scale.recip())
+                })
+                .reduce(|| 1.0, f64::max); // 计算最大值
+            max_delta_scale = max_delta_scale.max(
+                dual_scales
+                    .par_iter_mut()
+                    .enumerate()
+                    .map(|(idx, dual_scale)| {
+                        let mut sum_x2 = 0.0;
+                        let mut count = 0;
+                        for (var, coeff) in self.constraints[idx].expression().linear_coefficients()
+                        {
+                            if coeff == 0.0 {
+                                continue;
+                            }
+                            let prim_scale = prim_scales.get(&var).cloned().unwrap_or(1.0);
+                            sum_x2 += (coeff * prim_scale * *dual_scale).powi(2);
+                            count += 1;
+                        }
+
+                        let delta_scale = if count == 0 {
+                            1.0
+                        } else {
+                            (sum_x2 / count as f64)
+                                .sqrt()
+                                .recip()
+                                .clamp(MAGIC_INV, MAGIC)
+                        };
+                        *dual_scale *= delta_scale;
+                        delta_scale.max(delta_scale.recip())
+                    })
+                    .reduce(|| 1.0, f64::max),
+            ); // 计算最大值
+            if max_delta_scale < stop_threshold {
+                log::debug!("Ruiz 预处理在第 {} 轮收敛", i);
+                break;
+            }
         }
 
         let new_variables_defs = self
@@ -118,12 +150,23 @@ impl RuizSolver {
             .collect::<Vec<VariableDefinition>>();
         let mut new_variables = ProblemVariables::new();
         let _: Vec<Variable> = new_variables.add_all(new_variables_defs);
+        let mut global_scale = 0.0;
+        for (idx, constraint) in self.constraints.iter().enumerate() {
+            global_scale = f64::max(
+                global_scale,
+                constraint.expression().constant().abs() * dual_scales[idx],
+            );
+        }
+        if global_scale == 0.0 {
+            global_scale = 1.0;
+        }
+        global_scale = global_scale.recip();
         let new_minimise = self
             .minimise
             .linear_coefficients()
             .map(|(var, coeff)| {
                 let prim_scale = prim_scales.get(&var).cloned().unwrap_or(1.0);
-                var * coeff * prim_scale
+                var * coeff * prim_scale / global_scale
             })
             .fold(Expression::from(0.0), |acc, term| acc + term);
         let new_constraints = self
@@ -143,19 +186,12 @@ impl RuizSolver {
                     .fold(Expression::from(0.0), |acc, term| acc + term);
                 let dual_scale = dual_scales[idx];
                 match is_equality {
-                    true => (new_expr * dual_scale).eq(-constant * dual_scale),
-                    false => (new_expr * dual_scale).leq(-constant * dual_scale),
+                    true => (new_expr * dual_scale).eq(-constant * dual_scale * global_scale),
+                    false => (new_expr * dual_scale).leq(-constant * dual_scale * global_scale),
                 }
             })
             .collect::<Vec<_>>();
-        let mut global_scale = 0.0;
-        for constraint in &new_constraints {
-            global_scale = f64::max(global_scale, constraint.expression().constant().abs());
-        }
-        if global_scale == 0.0 {
-            global_scale = 1.0;
-        }
-        global_scale = global_scale.recip();
+
         log::debug!("global_scale: {}", global_scale);
         if new_constraints.len() < 8 {
             log::debug!("prim_scales: {:?}", prim_scales);
@@ -166,16 +202,19 @@ impl RuizSolver {
                 log::debug!("  {}: {:?}", idx, constraint);
             }
         }
-
+        log::debug!("Ruiz 预处理耗时: {:?}", instant.elapsed());
+        let solution = new_variables
+            .minimise(new_minimise.clone())
+            .using(microlp)
+            .with_all(new_constraints)
+            .solve()?;
+        let cost = solution.eval(new_minimise);
         Ok(RuizSolution {
-            inner: new_variables
-                .minimise(new_minimise)
-                .using(microlp)
-                .with_all(new_constraints)
-                .solve()?,
+            inner: solution,
             prim_scales,
             dual_scales,
             global_scale,
+            cost,
         })
     }
 }

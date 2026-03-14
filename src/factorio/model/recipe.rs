@@ -6,7 +6,6 @@ use std::{
 use serde_with::{DefaultOnError, serde_as};
 
 use crate::{
-    math::Compositions,
     concept::*,
     factorio::{
         DataContext, ModulePrototype, ProjectContext, SurfaceCondition,
@@ -25,6 +24,7 @@ use crate::{
         selector::Selector,
         surface_condition_satisfied,
     },
+    math::Compositions,
 };
 
 fn always_true() -> bool {
@@ -524,11 +524,11 @@ impl AsFlow for RecipeInstance {
                 .productivity
                 .clamp(0.0, recipe.maximum_productivity);
             module_effects = module_effects.clamped();
-            index_map_update_entry(
-                &mut map,
-                DualVar::Electricity,
-                -self.module_config.get_consumption(data),
-            );
+
+            let electric = self.module_config.get_consumption(data);
+            if electric > 0.0 {
+                index_map_update_entry(&mut map, DualVar::Electricity, -electric);
+            }
             for ingredient in &recipe.ingredients {
                 match ingredient {
                     RecipeIngredient::Item(item) => {

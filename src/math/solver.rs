@@ -100,7 +100,7 @@ where
                 global_scale,
                 ..
             } => match (prim.get(i), prim_scale.get(i)) {
-                (Some(v), Some(s)) => Some(*v * s * global_scale),
+                (Some(v), Some(s)) => Some(*v / s * global_scale),
                 _ => None,
             },
             _ => None,
@@ -316,14 +316,13 @@ where
                     && providers.is_empty() // 没有生产这个物品的配方
                         && !self.sources.contains_key(i_id) // 外部也不能提供
                         && !needed_by_target.contains(i_id)
-                // 目标需要这个物品
                 // 目标也不需要
                 {
-                    log::debug!(
-                        "求解器：物品 {:?} 无法获得，移除相关配方 {} 个",
-                        i_id,
-                        providers.len() + consumers.len()
-                    );
+                    // log::debug!(
+                    //     "求解器：物品 {:?} 无法获得，移除相关配方 {} 个",
+                    //     i_id,
+                    //     providers.len() + consumers.len()
+                    // );
                     for f_id in consumers {
                         self.flows.swap_remove(f_id);
                         changed = true;
@@ -390,8 +389,6 @@ where
         }
         // 用户提供的流编号 -> 变量的映射
         let mut flow_vars = IndexMap::new();
-        // 目标辅助流编号 -> 变量的映射
-        let mut flow_target_vars = HashMap::new();
         // 物品源变量
         let mut source_vars = IndexMap::new();
         // 物品汇变量
@@ -400,14 +397,7 @@ where
             let var = problem_variables.add(variable().min(0));
             flow_vars.insert(f_id.clone(), var);
         }
-        for target in &self.target {
-            for (i_id, _coef) in target.coefficients.iter() {
-                if !flow_target_vars.contains_key(i_id) {
-                    let var = problem_variables.add(variable().min(0));
-                    flow_target_vars.insert(i_id.clone(), var);
-                }
-            }
-        }
+
         let mut item_balances = IndexMap::new();
 
         log::info!(
@@ -431,16 +421,6 @@ where
                     force_zero_items.insert(item_id.clone());
                 }
             }
-        }
-
-        for item in &item_in_targets {
-            let var = flow_target_vars.get(item).cloned().unwrap();
-            let entry = item_balances
-                .entry(item.clone())
-                .or_insert(good_lp::Expression::from(0.0));
-            // 产生虚拟目标消耗虚拟物品，本身是消耗一个真实物品
-            let val = -1.0;
-            *entry += val * var;
         }
         log::info!("求解器：一共有 {} 个物品需要平衡", item_balances.len(),);
 
@@ -525,11 +505,12 @@ where
                     if coef == 0.0 {
                         continue;
                     }
-                    // 在前面设置虚拟流时，总是认为目标为正要求这个流消耗；目标为负要求这个流生产，且已经根据系数调整输入物品的系数
-                    // 此处只要根据符号确定增加还是消耗
-                    // 例：系数为正，目标为正，增加贡献
-                    // 系数为负，目标为正，减少贡献
-                    target_exprs[target_idx] += coef * flow_target_vars.get(item).cloned().unwrap();
+                    // 分离数量级平衡和问题构造后就成平凡的了
+                    target_exprs[target_idx] += coef
+                        * item_balances
+                            .get(item)
+                            .cloned()
+                            .unwrap_or(good_lp::Expression::from(0.0));
                 }
             }
         }
@@ -568,13 +549,14 @@ where
         match solution {
             Ok(sol) => {
                 log::info!("求解器：求解成功，开始构建结果");
+                let global_scale = sol.global_scale;
                 let mut sum = Flow::new();
                 let mut prim = Flow::new();
                 let mut prim_scale = Flow::new();
 
                 for (f_id, var) in &flow_vars {
                     let cur_prim_scale = sol.prim_scales.get(var).cloned().unwrap_or(1.0);
-                    let value = sol.inner.value(*var) * cur_prim_scale;
+                    let value = sol.inner.value(*var) * cur_prim_scale / global_scale;
 
                     prim.insert(f_id.clone(), value);
 
@@ -596,8 +578,8 @@ where
                         })
                         .collect(),
                     sum,
-                    cost: sol.inner.eval(optimization_expr),
-                    global_scale: sol.global_scale,
+                    cost: sol.cost,
+                    global_scale,
                 }
             }
             Err(err) => {

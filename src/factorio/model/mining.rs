@@ -3,7 +3,6 @@ use std::collections::{HashMap, HashSet};
 use serde_with::serde_as;
 
 use crate::{
-    math::Compositions,
     concept::{Flow, SolveContext},
     factorio::{
         ModuleConfig, ModuleConfigEditor, ModulePrototype, ProjectContext,
@@ -17,6 +16,7 @@ use crate::{
         selector::Selector,
         surface_condition_satisfied,
     },
+    math::Compositions,
 };
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -193,11 +193,10 @@ impl AsFlow for MiningInstance {
             -base_speed * (1.0 + module_effects.speed) * drain_rate,
         );
 
-        index_map_update_entry(
-            &mut map,
-            DualVar::Electricity,
-            -self.module_config.get_consumption(data),
-        );
+        let electric = self.module_config.get_consumption(data);
+        if electric > 0.0 {
+            index_map_update_entry(&mut map, DualVar::Electricity, -electric);
+        }
 
         // 计算开采流体的消耗
         if let Some(fluid) = resource_ore
@@ -347,7 +346,7 @@ pub struct MiningMechanic {
 
     #[serde(default)]
     pub alternative_count: usize,
-
+    #[serde(default)]
     pub enumerate_modules: Vec<IdWithQuality>,
 
     #[serde(default)]
