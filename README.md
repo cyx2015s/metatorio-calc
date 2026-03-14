@@ -63,7 +63,9 @@
 
 目前的结论为，原版+SA下只有粉瓶值得生产精良以上品质的：不到一带废料可以生产一带的科研容量。涉及到物流瓶颈另算。
 
-
+更复杂的表达式可以模拟规划器无法理解的机制。如在后期的太空探索游戏中，制造铁锭运输再解压缩相比制造铁板成铁板运输可以节省约50%的成本。
+![alt text](example/iron-ingot.png)
+![alt text](example/iron-plate.png)
 # 关于模组支持
 
 我已经测试过了[太空探索](https://mods.factorio.com/mod/space-exploration)、 [K2](https://mods.factorio.com/mod/Krastorio2)和[Py](https://mods.factorio.com/mod/pymodpack)系列，游戏数据应该会正常加载，大部分功能都可正常使用。自动规划功能在原版+品质、DLC、太空探索+品质下尝试求解传说物品的生产流程时可能失败，在里程碑靠后或默认使用全部配方时，求解Py系列的物品可能失败，在状态空间较多时可能会内存超出，谨慎考虑添加枚举插件、枚举插件塔的数量！
