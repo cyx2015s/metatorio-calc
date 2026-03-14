@@ -1,7 +1,8 @@
-use good_lp::{IntoAffineExpression, Solution, SolverModel, variable};
+use good_lp::{IntoAffineExpression, Solution, variable};
 use indexmap::{IndexMap, IndexSet};
 
 use crate::concept::{Flow, ItemIdent};
+use crate::math::RuizSolver;
 use core::f64;
 
 use std::collections::{HashMap, HashSet};
@@ -61,7 +62,6 @@ pub enum SolverSolution<I, R> {
         dual: Option<Flow<I>>,
         prim_scale: Flow<R>,
         dual_scale: Flow<I>,
-        // 为了保证数值稳定性，给问题添加的全局倍率
         global_scale: f64,
         sum: Flow<I>,
         cost: f64,
@@ -92,7 +92,7 @@ where
     I: ItemIdent,
     R: ItemIdent,
 {
-    pub fn get_prim_of(&self, i: &R) -> Option<f64> {
+    pub fn get_prim_raw_of(&self, i: &R) -> Option<f64> {
         match self {
             SolverSolution::Solved {
                 prim,
@@ -100,28 +100,21 @@ where
                 global_scale,
                 ..
             } => match (prim.get(i), prim_scale.get(i)) {
-                (Some(v), Some(s)) => Some(*v * s / global_scale),
+                (Some(v), Some(s)) => Some(*v * s * global_scale),
                 _ => None,
             },
             _ => None,
         }
     }
 
-    pub fn get_prim_raw(&self) -> Option<&Flow<R>> {
-        match self {
-            SolverSolution::Solved { prim, .. } => Some(prim),
-            _ => None,
-        }
-    }
-
-    pub fn get_prim_raw_of(&self, i: &R) -> Option<f64> {
+    pub fn get_prim_of(&self, i: &R) -> Option<f64> {
         match self {
             SolverSolution::Solved { prim, .. } => prim.get(i).cloned(),
             _ => None,
         }
     }
 
-    pub fn get_dual_of(&self, i: &I) -> Option<f64> {
+    pub fn get_dual_raw_of_of(&self, i: &I) -> Option<f64> {
         match self {
             SolverSolution::Solved {
                 dual: Some(dual),
@@ -136,16 +129,7 @@ where
         }
     }
 
-    pub fn get_dual_raw(&self) -> Option<&Flow<I>> {
-        match self {
-            SolverSolution::Solved {
-                dual: Some(dual), ..
-            } => Some(dual),
-            _ => None,
-        }
-    }
-
-    pub fn get_dual_raw_of(&self, i: &I) -> Option<f64> {
+    pub fn get_dual_of(&self, i: &I) -> Option<f64> {
         match self {
             SolverSolution::Solved {
                 dual: Some(dual), ..
@@ -495,33 +479,37 @@ where
             no_consumers.remove(item);
         }
         let mut constraints = Vec::new();
-
+        let mut item_to_constraint = HashMap::new();
+        let mut add_constraint = |item_id: &I, constraint: good_lp::Constraint| {
+            constraints.push(constraint);
+            item_to_constraint.insert(item_id.clone(), constraints.len() - 1);
+        };
         for (item_id, expr) in &item_balances {
             // 所有目标都间接转移了，不再在此处做判断
             {
                 // 严格模式下，不能凭空输入。非严格模式下，有来源的物品不能有凭空输入。
                 // 非目标物品，不能为负
                 if force_zero_items.contains(item_id) {
-                    constraints.push(expr.clone().eq(0.0));
+                    add_constraint(item_id, expr.clone().eq(0.0));
                     continue;
                 }
                 if self.strict_source {
                     // 不能从外部借用
                     if self.strict_sink {
                         // 必须配平
-                        constraints.push(expr.clone().eq(0.0));
+                        add_constraint(item_id, expr.clone().eq(0.0));
                     } else {
                         // 不用配平
-                        constraints.push(expr.clone().geq(0.0));
+                        add_constraint(item_id, expr.clone().geq(0.0));
                     }
                 } else if no_providers.contains(item_id) {
                     // 需要借用，不用限制
                 } else if self.strict_sink {
                     // 必须配平
-                    constraints.push(expr.clone().eq(0.0));
+                    add_constraint(item_id, expr.clone().eq(0.0));
                 } else {
                     // 不用配平
-                    constraints.push(expr.clone().geq(0.0));
+                    add_constraint(item_id, expr.clone().geq(0.0));
                 }
             }
         }
@@ -574,11 +562,8 @@ where
 
             log::debug!("求解器：对应流变量: {:?}", &flow_vars);
         }
-        let solution = problem_variables
-            .minimise(&optimization_expr)
-            .using(good_lp::microlp)
-            .with_all(constraints)
-            .solve();
+        let solution =
+            RuizSolver::new(optimization_expr.clone(), constraints, problem_variables).solve();
 
         match solution {
             Ok(sol) => {
@@ -586,11 +571,14 @@ where
                 let mut sum = Flow::new();
                 let mut prim = Flow::new();
                 let mut prim_scale = Flow::new();
+
                 for (f_id, var) in &flow_vars {
-                    let value = sol.value(*var);
+                    let cur_prim_scale = sol.prim_scales.get(var).cloned().unwrap_or(1.0);
+                    let value = sol.inner.value(*var) * cur_prim_scale;
+
                     prim.insert(f_id.clone(), value);
 
-                    prim_scale.insert(f_id.clone(), 1.0);
+                    prim_scale.insert(f_id.clone(), cur_prim_scale);
                     for (item_id, &amount) in &self.flows[f_id].coefficients {
                         let entry = sum.entry(item_id.clone()).or_insert(0.0);
                         *entry += amount * value;
@@ -600,13 +588,16 @@ where
                     prim,
                     prim_scale,
                     dual: None,
-                    dual_scale: sum
+                    dual_scale: item_to_constraint
                         .iter()
-                        .map(|(i_id, _)| (i_id.clone(), 1.0))
+                        .map(|(item_id, &c_idx)| {
+                            let dual_scale = sol.dual_scales[c_idx];
+                            (item_id.clone(), dual_scale)
+                        })
                         .collect(),
                     sum,
-                    global_scale: 1.0,
-                    cost: sol.eval(optimization_expr),
+                    cost: sol.inner.eval(optimization_expr),
+                    global_scale: sol.global_scale,
                 }
             }
             Err(err) => {

@@ -4,16 +4,16 @@ version = "1.2.46"
 edition = "2024"
 
 [dependencies]
-dirs = "6.0.0"
-dyn-clone = "1.0.20"
-eframe = { version = "0.33.3" }
-egui = { version = "0.33.3", features = ["rayon"] }
-egui-toast = "0.19.1"
-egui_dnd = "0.14.0"
-egui_extras = { version = "0.33.3", features = ["file", "image"] }
+dirs = "6"
+dyn-clone = "1"
+eframe = { version = "0.33" }
+egui = { version = "0.33", features = ["rayon"] }
+egui-toast = "0.19"
+egui_dnd = "0.14"
+egui_extras = { version = "0.33", features = ["file", "image"] }
 egui_logger = { version = "0.1.0", path = "egui_logger" }
 fontdb = "0.23.0"
-good_lp = { "version" = "1.14.2", default-features = false, features = ["microlp"] }
+good_lp = { git = "https://github.com/cyx2015s/good_lp", branch = "inspect_constraint", default-features = false, features = ["microlp"] }
 image = { version = "0.25.9", default-features = false, features = ["png", "rayon"] }
 indexmap = { version = "2.13.0", features = ["rayon", "serde"] }
 log = "0.4.29"

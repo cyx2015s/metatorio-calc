@@ -1863,8 +1863,7 @@ dependencies = [
 [[package]]
 name = "good_lp"
 version = "1.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c071f15f0c38eb6445a8100660c5806f4c597b611f24442de1b31b87d41da5c"
+source = "git+https://github.com/cyx2015s/good_lp?branch=inspect_constraint#a843c6ca43ba64db9cfb73b3cfc566a862e7c3e5"
 dependencies = [
  "fnv",
  "microlp",
