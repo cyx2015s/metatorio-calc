@@ -3,7 +3,7 @@ use indexmap::{IndexMap, IndexSet};
 
 use crate::concept::{Flow, ItemIdent};
 use core::f64;
-use rayon::prelude::*;
+
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::hash::Hash;
