@@ -1518,6 +1518,7 @@ pub struct ProjectView {
     pub data: Arc<DataContext>,
     pub selected: Option<usize>,
     pub projects: DndVec<ProjectInstance>,
+    pub example_factory: Option<FactoryInstance>,
     pub ignore_close: bool,
     pub delete_request: DeleteRequest,
 }
@@ -1529,6 +1530,7 @@ impl ProjectView {
             ignore_close: false,
             selected: None,
             projects: DndVec::new(),
+            example_factory: None,
             delete_request: DeleteRequest::None,
         }
     }
@@ -1594,30 +1596,37 @@ impl SubView for ProjectView {
                     let mut project = ProjectInstance::new_arc(self.data.clone())
                         .with_default_milestones()
                         .post_load();
-                    // 从 data 中随机选一个物品
-                    for (item, prototype) in self.data.items.iter() {
-                        if prototype.base.hidden || prototype.base.parameter {
-                            continue;
-                        }
-                        let mut factory =
-                            FactoryInstance::new("示例工厂".to_string()).with_default_mechanics();
-                        factory
-                            .target
-                            .push((DualVar::Item(item.clone().into()), 1.0));
-                        let planet = self.data.planets.keys().next().unwrap();
-                        factory.factory.planet = Some(planet.clone());
+                    if let Some(example_factory) = self.example_factory.as_ref() {
+                        let factory = example_factory.clone();
+                        project.factories.push(factory);
+                        project.proj.selected_page = ProjectPage::Index(0);
+                    } else {
+                        // 从 data 中随机选一个物品
+                        for (item, prototype) in self.data.items.iter() {
+                            if prototype.base.hidden || prototype.base.parameter {
+                                continue;
+                            }
+                            let mut factory = FactoryInstance::new("示例工厂".to_string())
+                                .with_default_mechanics();
+                            factory
+                                .target
+                                .push((DualVar::Item(item.clone().into()), 1.0));
+                            let planet = self.data.planets.keys().next().unwrap();
+                            factory.factory.planet = Some(planet.clone());
 
-                        let auto_planned =
-                            auto_planner_ref_silent(factory.clone(), &self.data, &project.proj);
-                        if let Ok(auto_planned) = auto_planned {
-                            project.factories.push(auto_planned);
-                            break;
+                            let auto_planned =
+                                auto_planner_ref_silent(factory.clone(), &self.data, &project.proj);
+                            if let Ok(auto_planned) = auto_planned {
+                                self.example_factory = Some(auto_planned.clone());
+                                project.factories.push(auto_planned);
+                                break;
+                            }
                         }
                     }
-                    project.proj.selected_page = ProjectPage::Index(0);
-                    project.request_solution();
-                    self.projects.push(project);
 
+                    project.request_solution();
+                    project.proj.selected_page = ProjectPage::Index(0);
+                    self.projects.push(project);
                     self.selected = Some(self.projects.len() - 1);
                     ui.close();
                 }
