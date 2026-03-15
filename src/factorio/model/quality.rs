@@ -124,8 +124,10 @@ pub fn calc_quality_distribution(
     maximum_quality: usize,
 ) -> Vec<f64> {
     let mut result = vec![0.0; qualities.len()];
+    let base_quality = base_quality.clamp(0, qualities.len() - 1);
+    let maximum_quality = maximum_quality.clamp(base_quality, qualities.len() - 1);
     result[base_quality] = quality_bonus; // 有这么多能参与品质转移
-    for idx in base_quality..(maximum_quality.clamp(base_quality, qualities.len() - 1)) {
+    for idx in base_quality..maximum_quality {
         // idx，jdx，令人忍俊不禁
         let jdx = idx + 1;
         result[jdx] = result[idx] * qualities[idx].next_probability;

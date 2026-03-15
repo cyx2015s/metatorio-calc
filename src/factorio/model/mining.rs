@@ -129,7 +129,7 @@ impl AsFlow for MiningInstance {
 
         let mut base_speed = 1.0;
 
-        let quality_level = self.machine.1 as usize;
+        let quality_level = (self.machine.1 as usize).clamp(0, data.qualities.len() - 1);
 
         let mut drain_rate = data.qualities[quality_level].mining_drill_resource_drain_multiplier();
 

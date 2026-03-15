@@ -3,6 +3,7 @@ use std::{
     io::BufReader,
     path::Path,
     sync::{Arc, mpsc::*},
+    time::Instant,
 };
 
 use rayon::prelude::*;
@@ -630,7 +631,7 @@ impl FactoryInstance {
                     let sender = proj_cloned.factory_sender.clone();
 
                     let auto_planned_factory =
-                        factorio_auto_planner(factory_cloned, data_cloned, proj_cloned);
+                        auto_planner(factory_cloned, data_cloned, proj_cloned);
                     match auto_planned_factory {
                         Ok(factory) => {
                             sender.unwrap().send(factory).unwrap();
@@ -1241,7 +1242,7 @@ impl ProjectInstance {
         self.data = data;
     }
 
-    pub fn with_default_milestones(mut self) -> Self {
+    pub fn set_default_milestones(&mut self) {
         for (tech_name, tech) in &self.data.technologies {
             let mut is_essential = false;
             for effect in &tech.effects {
@@ -1289,6 +1290,10 @@ impl ProjectInstance {
                 self.proj.tech_milestones.push((tech_name.clone(), true));
             }
         }
+    }
+
+    pub fn with_default_milestones(mut self) -> Self {
+        self.set_default_milestones();
         self
     }
 
@@ -1312,11 +1317,19 @@ impl ProjectInstance {
             }
         }
         self.reset_factory_channel();
+        self.proj
+            .tech_milestones
+            .retain(|(tech_name, _)| self.data.technologies.contains_key(tech_name));
         update_accessibles(&mut self.proj, &self.data);
         self.proj.milestone_graph = resolve_milestone_graph(&self.data, &self.proj.tech_milestones);
         self.proj
             .tech_milestones
             .sort_by_cached_key(|v| (self.proj.milestone_graph[v.0.as_str()].depth, v.0.clone()));
+        self.request_solution();
+        self
+    }
+
+    pub fn request_solution(&mut self) {
         self.factories
             .vec
             .iter_mut()
@@ -1326,7 +1339,6 @@ impl ProjectInstance {
                     .problem_sender
                     .send((idx, f.as_problem(&self.data, &self.proj)));
             });
-        self
     }
 }
 
@@ -1579,11 +1591,33 @@ impl SubView for ProjectView {
         egui::containers::menu::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("文件", |ui| {
                 if ui.button("新建项目").clicked() {
-                    self.projects.push(
-                        ProjectInstance::new_arc(self.data.clone())
-                            .with_default_milestones()
-                            .post_load(),
-                    );
+                    let mut project = ProjectInstance::new_arc(self.data.clone())
+                        .with_default_milestones()
+                        .post_load();
+                    // 从 data 中随机选一个物品
+                    for (item, prototype) in self.data.items.iter() {
+                        if prototype.base.hidden || prototype.base.parameter {
+                            continue;
+                        }
+                        let mut factory =
+                            FactoryInstance::new("示例工厂".to_string()).with_default_mechanics();
+                        factory
+                            .target
+                            .push((DualVar::Item(item.clone().into()), 1.0));
+                        let planet = self.data.planets.keys().next().unwrap();
+                        factory.factory.planet = Some(planet.clone());
+
+                        let auto_planned =
+                            auto_planner_ref_silent(factory.clone(), &self.data, &project.proj);
+                        if let Ok(auto_planned) = auto_planned {
+                            project.factories.push(auto_planned);
+                            break;
+                        }
+                    }
+                    project.proj.selected_page = ProjectPage::Index(0);
+                    project.request_solution();
+                    self.projects.push(project);
+
                     self.selected = Some(self.projects.len() - 1);
                     ui.close();
                 }
@@ -1603,10 +1637,10 @@ impl SubView for ProjectView {
                     }
                     ui.close();
                 }
-                if let Some(selected) = self.selected {
+                ui.add_enabled_ui(self.selected.is_some(), |ui| {
                     ui.separator();
-                    let project = &mut self.projects[selected];
                     if ui.button("保存项目").clicked() {
+                        let project = &mut self.projects[self.selected.unwrap()];
                         if let Some(path) = &project.proj.file_path.clone() {
                             save_project(project, path);
                         } else {
@@ -1615,10 +1649,23 @@ impl SubView for ProjectView {
                         ui.close();
                     }
                     if ui.button("另存为...").clicked() {
+                        let project = &mut self.projects[self.selected.unwrap()];
                         save_project_as(project);
                         ui.close();
                     }
-                }
+                    if ui.button("[测试]序列化与反序列化性能").clicked() {
+                        let project = &mut self.projects[self.selected.unwrap()];
+                        let instant = Instant::now();
+                        let serialized = serde_json::to_string(project).unwrap();
+                        log::info!(
+                            "序列化耗时: {}ms, 大小: {}B",
+                            instant.elapsed().as_millis(),
+                            serialized.len()
+                        );
+                        let _: ProjectContext = serde_json::from_str(&serialized).unwrap();
+                        log::info!("反序列化耗时: {}ms", instant.elapsed().as_millis());
+                    }
+                });
             })
         });
         ui.separator();

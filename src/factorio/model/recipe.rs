@@ -482,7 +482,7 @@ impl AsFlow for RecipeInstance {
                     .clone();
             module_effects = module_effects.clamped();
             base_speed = crafter.crafting_speed;
-            let quality_level = self.machine.1 as usize;
+            let quality_level = (self.machine.1 as usize).clamp(0, data.qualities.len() - 1);
             if let Some(multiplier) = &crafter.crafting_speed_quality_multiplier {
                 let quality = &data.qualities[quality_level].base.name;
                 let speed_multiplier = multiplier.get(quality).cloned().unwrap_or(1.0);

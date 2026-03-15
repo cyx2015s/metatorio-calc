@@ -159,9 +159,10 @@ impl ModuleConfig {
         }
         for beacon_config in &self.beacons {
             if let Some(beacon_proto) = data.beacons.get(&beacon_config.beacon.0) {
+                let beacon_quality =
+                    (beacon_config.beacon.1 as usize).clamp(0, data.qualities.len() - 1);
                 let effective_module_slots = if beacon_proto.quality_affects_module_slots {
-                    let quality_bonus =
-                        data.qualities[beacon_config.beacon.1 as usize].beacon_module_slots_bonus();
+                    let quality_bonus = data.qualities[beacon_quality].beacon_module_slots_bonus();
                     beacon_proto.module_slots as usize + quality_bonus as usize
                 } else {
                     beacon_proto.module_slots as usize
@@ -197,14 +198,18 @@ impl ModuleConfig {
                         }
                     }
                 };
+                let beacon_quality =
+                    (beacon_config.beacon.1 as usize).clamp(0, data.qualities.len() - 1);
+
                 let base_efficiency = beacon_proto.distribution_effectivity
                     + beacon_proto.distribution_effectivity_bonus_per_quality_level
-                        * data.qualities[beacon_config.beacon.1 as usize].level;
+                        * data.qualities[beacon_quality].level;
                 for (module, count) in &beacon_config.modules {
                     if let Some(module_proto) = data.modules.get(&module.0) {
+                        let module_quality = (module.1 as usize).clamp(0, data.qualities.len() - 1);
                         let module_effect = effects_under_quality(
                             &module_proto.effect,
-                            data.qualities[module.1 as usize].default_multiplier(),
+                            data.qualities[module_quality].default_multiplier(),
                         );
                         let count = (*count).min(effective_module_slots * beacon_count);
                         let total_module_effect =
@@ -596,10 +601,12 @@ pub fn beacon_config_ui(
                     if ui.add(widget).changed() {
                         response.mark_changed();
                     }
+                    let beacon_quality =
+                        (beacon_config.beacon.1 as usize).clamp(0, data.qualities.len() - 1);
                     let beacon_module_count = beacon_proto.module_slots as usize
                         + if beacon_proto.quality_affects_module_slots {
-                            let quality_bonus = data.qualities[beacon_config.beacon.1 as usize]
-                                .beacon_module_slots_bonus();
+                            let quality_bonus =
+                                data.qualities[beacon_quality].beacon_module_slots_bonus();
                             quality_bonus as usize
                         } else {
                             0

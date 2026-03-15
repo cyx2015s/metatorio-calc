@@ -263,6 +263,9 @@ impl<'a> egui::Widget for Selector<'a, IdWithQuality, IdWithQuality> {
             response.mark_changed();
             if let Some(&mut ref mut current) = self.current {
                 current.0 = selected_item.clone();
+                if current.1 > self.data.qualities.len() as u8 - 1 {
+                    current.1 = self.data.qualities.len() as u8 - 1;
+                }
             }
         }
         if prev_storage_quality != storage.selected_quality
@@ -271,6 +274,9 @@ impl<'a> egui::Widget for Selector<'a, IdWithQuality, IdWithQuality> {
             response.mark_changed();
             if let Some(&mut ref mut current) = self.current {
                 current.1 = *selected_quality;
+                if current.1 > self.data.qualities.len() as u8 - 1 {
+                    current.1 = self.data.qualities.len() as u8 - 1;
+                }
             }
         }
 
