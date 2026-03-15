@@ -37,7 +37,7 @@ impl<T> DerefMut for ReactVec<T> {
     }
 }
 
-pub  trait VecProxy<I: ?Sized>: Send {
+pub trait VecProxy<I: ?Sized>: Send {
     fn len(&self) -> usize;
 
     fn iter(&self) -> Box<dyn Iterator<Item = &I> + '_> {
@@ -53,7 +53,7 @@ pub  trait VecProxy<I: ?Sized>: Send {
 #[macro_export]
 macro_rules! impl_vec_proxy_dyn {
     ($U:tt) => {
-         impl<T> VecProxy<dyn $U> for ReactVec<T>
+        impl<T> VecProxy<dyn $U> for ReactVec<T>
         where
             T: $U + Clone,
         {

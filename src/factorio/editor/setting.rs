@@ -1,6 +1,4 @@
-use std::{
-    collections::{HashSet, VecDeque},
-};
+use std::collections::{HashSet, VecDeque};
 
 use egui::DragValue;
 
@@ -26,7 +24,7 @@ impl egui::Widget for UserContextEditor<'_> {
         let response = ui.response();
         ui.set_min_width(ui.available_width());
         ui.set_min_height(ui.available_height());
-        
+
         ui.heading("时间尺度");
         egui::ComboBox::new("time-scale", "时间尺度")
             .selected_text(match self.proj.time_scale {

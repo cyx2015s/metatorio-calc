@@ -154,7 +154,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
         });
         ui.vertical(|ui| {
             ui.label(data.get_display_name("recipe", &self.prototype.base.name));
-            surface_condition_ui(ui, &self.prototype.surface_conditions, &data);
+            surface_condition_ui(ui, &self.prototype.surface_conditions, data);
             ui.add(CompactLabel::new(self.prototype.energy_required).with_format("{}s"));
             ui.horizontal_top(|ui| {
                 if ingredients.is_empty() {
@@ -303,7 +303,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, EntityPrototype> {
         ui.vertical(|ui| {
             ui.set_min_width(140.0);
             ui.label(data.get_display_name("entity", &self.prototype.base.name));
-            surface_condition_ui(ui, &self.prototype.surface_conditions, &data);
+            surface_condition_ui(ui, &self.prototype.surface_conditions, data);
             if let Some(mining) = &self.prototype.minable {
                 if let Some(result) = &mining.result {
                     ui.label("挖掘返还: ");
@@ -500,7 +500,7 @@ fn surface_condition_ui(
         return;
     }
     ui.vertical(|ui| {
-        ui.label(format!("表面属性限制"));
+        ui.label("表面属性限制".to_string());
         ui.horizontal(|ui| {
             for condition in surface_conditions {
                 match (condition.min, condition.max) {
@@ -569,13 +569,13 @@ impl<'a> egui::Widget for PrototypeHover<'a, PlanetPrototype> {
             if let Some(value) = planet.surface_properties.get(property.0) {
                 ui.label(format!(
                     "{}: {}",
-                    self.data.get_display_name("surface-property", &property.0),
+                    self.data.get_display_name("surface-property", property.0),
                     value
                 ));
             } else {
                 ui.label(format!(
                     "{}: {}",
-                    self.data.get_display_name("surface-property", &property.0),
+                    self.data.get_display_name("surface-property", property.0),
                     property.1.default_value
                 ));
             }

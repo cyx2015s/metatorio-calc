@@ -11,12 +11,11 @@ pub fn auto_planner_ref_silent(
     data: &DataContext,
     proj: &ProjectContext,
 ) -> Result<FactoryInstance, AppError> {
-    
     log::info!("开始自动规划工厂实例: {}", factory.name);
     let start_time = Instant::now();
     let instant = Instant::now();
     for mechanic in &mut factory.mechanics {
-        mechanic.auto_populate(&data, &proj, &factory.factory);
+        mechanic.auto_populate(data, proj, &factory.factory);
         log::debug!(
             "机制 {} 填充了 {} 个实例",
             mechanic.name(),
@@ -28,7 +27,7 @@ pub fn auto_planner_ref_silent(
 
     factory.strict_source = true;
 
-    let problem = factory.as_problem(&data, &proj);
+    let problem = factory.as_problem(data, proj);
 
     log::info!(
         "构建求解器问题完成，变量数量: {}, 用时: {:.2?}",
@@ -42,7 +41,7 @@ pub fn auto_planner_ref_silent(
         SolverSolution::Solved { ref sum, .. } => {
             factory.total_flow_sorted_keys = sum.keys().cloned().collect();
 
-            sort_generic_items_owned(&mut factory.total_flow_sorted_keys, &data);
+            sort_generic_items_owned(&mut factory.total_flow_sorted_keys, data);
         }
         _ => {
             return Err(AppError::Solver("无解。".into()));
@@ -73,7 +72,7 @@ pub fn auto_planner_ref(
     let start_time = Instant::now();
     let instant = Instant::now();
     for mechanic in &mut factory.mechanics {
-        mechanic.auto_populate(&data, &proj, &factory.factory);
+        mechanic.auto_populate(data, proj, &factory.factory);
         log::debug!(
             "机制 {} 填充了 {} 个实例",
             mechanic.name(),
@@ -85,7 +84,7 @@ pub fn auto_planner_ref(
 
     factory.strict_source = true;
 
-    let problem = factory.as_problem(&data, &proj);
+    let problem = factory.as_problem(data, proj);
 
     log::info!(
         "构建求解器问题完成，变量数量: {}, 用时: {:.2?}",
@@ -99,7 +98,7 @@ pub fn auto_planner_ref(
         SolverSolution::Solved { ref sum, .. } => {
             factory.total_flow_sorted_keys = sum.keys().cloned().collect();
 
-            sort_generic_items_owned(&mut factory.total_flow_sorted_keys, &data);
+            sort_generic_items_owned(&mut factory.total_flow_sorted_keys, data);
         }
         SolverSolution::NotSolved {
             no_provider,
@@ -129,7 +128,6 @@ pub fn auto_planner_ref(
         end_time.duration_since(start_time)
     );
     Ok(factory)
-
 }
 
 /// 持有初始工厂实例和游戏上下文，返回一个新的工厂实例

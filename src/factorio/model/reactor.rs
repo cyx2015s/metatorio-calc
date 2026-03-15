@@ -4,7 +4,8 @@ use crate::{
         AsFlow, DataContext, DualVar, Effect, EnergyAmount, EnergySource, EntityPrototype,
         FactorioMechanic, FlowProxy, IdWithQuality, ProjectContext, ReactVec,
         SerdeFactorioMechanic, energy_source_as_flow, icon::Icon, index_map_update_entry,
-        modal::SelectorModal, planner::FactoryContext, selector::Selector, surface_condition_satisfied,
+        modal::SelectorModal, planner::FactoryContext, selector::Selector,
+        surface_condition_satisfied,
     },
     math::flow_add,
 };
@@ -125,16 +126,14 @@ impl FactorioMechanic for ReactorMechanic {
                     fuel: None,
                 });
                 // }
-                
             }
         }
     }
 }
 
-
 #[test]
 fn test_func() {
-    let vec = [1,2,3,4,5,6,7,8,9];
+    let vec = [1, 2, 3, 4, 5, 6, 7, 8, 9];
     let ignore_4 = vec.into_iter().rev().skip(4).rev().collect::<Vec<_>>();
     dbg!(ignore_4);
 }

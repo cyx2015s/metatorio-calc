@@ -1,6 +1,6 @@
 use std::{collections::HashSet, fmt::Debug};
 
-use serde_with::{serde_as, DefaultOnError};
+use serde_with::{DefaultOnError, serde_as};
 
 use crate::factorio::{DataContext, Dict, DualVar, HasPrototypeBase, IdWithQuality, PrototypeBase};
 

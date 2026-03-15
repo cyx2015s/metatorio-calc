@@ -2,7 +2,8 @@ use crate::{
     concept::{Flow, SolveContext},
     factorio::{
         DataContext, DualVar, EntityPrototype, ProjectContext, common::*, energy_source_as_flow,
-        icon::Icon, modal::SelectorModal, planner::FactoryContext, selector::Selector, surface_condition_satisfied,
+        icon::Icon, modal::SelectorModal, planner::FactoryContext, selector::Selector,
+        surface_condition_satisfied,
     },
     math::flow_add,
 };

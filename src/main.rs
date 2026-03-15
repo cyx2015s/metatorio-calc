@@ -352,12 +352,11 @@ impl eframe::App for MainPage {
 }
 
 fn main() {
-
     egui_logger::builder()
-        .max_level(log::LevelFilter::Debug)    
+        .max_level(log::LevelFilter::Debug)
         .init()
         .unwrap();
-    
+
     log::info!("应用程序启动");
     let icon_image = image::load_from_memory(include_bytes!("../assets/icon.png")).unwrap();
     eframe::run_native(
