@@ -574,68 +574,65 @@ impl AsFlow for RecipeInstance {
                     DualVar::RocketCapacity { stacks, by_weight },
                     1.0 / rocket_parts_required,
                 );
-            } else {
-                for result in &recipe.results {
-                    match result {
-                        RecipeResult::Item(item) => {
-                            let (base_yield, extra_yield) = item.normalized_output();
-                            let total_yield = (base_yield
+            }
+
+            for result in &recipe.results {
+                match result {
+                    RecipeResult::Item(item) => {
+                        let (base_yield, extra_yield) = item.normalized_output();
+                        let total_yield = (base_yield
+                            + extra_yield
+                                * module_effects
+                                    .productivity
+                                    .clamp(0.0, recipe.maximum_productivity))
+                            * (1.0 + module_effects.speed)
+                            * base_speed;
+
+                        for (quality_level, &quality_prob) in
+                            quality_distribution.iter().enumerate()
+                        {
+                            if quality_prob > 0.0 {
+                                let quality_key = DualVar::Item(IdWithQuality(
+                                    item.name.clone(),
+                                    quality_level as u8,
+                                ));
+                                index_map_update_entry(
+                                    &mut map,
+                                    quality_key,
+                                    total_yield * quality_prob,
+                                );
+                            }
+                        }
+                    }
+                    RecipeResult::Fluid(fluid) => {
+                        let default_temperature = fluid
+                            .temperature
+                            .or(fluid.min_temperature)
+                            .or(fluid.max_temperature)
+                            .unwrap_or(
+                                data.fluids
+                                    .get(&fluid.name)
+                                    .as_ref()
+                                    .unwrap()
+                                    .default_temperature,
+                            );
+                        let key = DualVar::Fluid {
+                            name: fluid.name.clone(),
+                            // temperature: fluid.temperature.map(|x| x as i32),
+                            temperature: [default_temperature as i32, default_temperature as i32],
+                        };
+                        let (base_yield, extra_yield) = fluid.normalized_output();
+                        index_map_update_entry(
+                            &mut map,
+                            key,
+                            (base_yield
                                 + extra_yield
                                     * module_effects
                                         .productivity
                                         .clamp(0.0, recipe.maximum_productivity))
                                 * (1.0 + module_effects.speed)
-                                * base_speed;
-
-                            for (quality_level, &quality_prob) in
-                                quality_distribution.iter().enumerate()
-                            {
-                                if quality_prob > 0.0 {
-                                    let quality_key = DualVar::Item(IdWithQuality(
-                                        item.name.clone(),
-                                        quality_level as u8,
-                                    ));
-                                    index_map_update_entry(
-                                        &mut map,
-                                        quality_key,
-                                        total_yield * quality_prob,
-                                    );
-                                }
-                            }
-                        }
-                        RecipeResult::Fluid(fluid) => {
-                            let default_temperature = fluid
-                                .temperature
-                                .or(fluid.min_temperature)
-                                .or(fluid.max_temperature)
-                                .unwrap_or(
-                                    data.fluids
-                                        .get(&fluid.name)
-                                        .as_ref()
-                                        .unwrap()
-                                        .default_temperature,
-                                );
-                            let key = DualVar::Fluid {
-                                name: fluid.name.clone(),
-                                // temperature: fluid.temperature.map(|x| x as i32),
-                                temperature: [
-                                    default_temperature as i32,
-                                    default_temperature as i32,
-                                ],
-                            };
-                            let (base_yield, extra_yield) = fluid.normalized_output();
-                            index_map_update_entry(
-                                &mut map,
-                                key,
-                                (base_yield
-                                    + extra_yield
-                                        * module_effects
-                                            .productivity
-                                            .clamp(0.0, recipe.maximum_productivity))
-                                    * (1.0 + module_effects.speed)
-                                    * base_speed,
-                            );
-                        }
+                                * base_speed,
+                        );
                     }
                 }
             }

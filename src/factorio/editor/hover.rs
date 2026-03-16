@@ -324,7 +324,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, EntityPrototype> {
                                         Icon::new(self.data, "item", &i.name),
                                     );
                                     let output = i.normalized_output();
-                                    ui.label(format!("×{}", output.0 + output.1));
+                                    ui.label(format!("×{}", output.0));
                                 });
                             }
                             RecipeResult::Fluid(f) => {
@@ -335,7 +335,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, EntityPrototype> {
                                         Icon::new(self.data, "fluid", &f.name),
                                     );
                                     let output = f.normalized_output();
-                                    ui.label(format!("×{}", output.0 + output.1));
+                                    ui.label(format!("×{}", output.0));
                                 });
                             }
                         }
