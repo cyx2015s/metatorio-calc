@@ -260,7 +260,7 @@ impl FactoryInstance {
                             },
                             1.0,
                         );
-                        log::debug!("添加温度转换流 {}：{:?} -> {:?}", fluid, narrow, broad);
+                        // log::debug!("添加温度转换流 {}：{:?} -> {:?}", fluid, narrow, broad);
                         flows.insert((usize::MAX, aux_idx), (flow, 0.0));
                         aux_idx += 1;
                     }
@@ -320,49 +320,7 @@ impl FactoryInstance {
     }
 
     pub fn trim_flows(&mut self) -> bool {
-        let mut prim_raw_log_sum = 0.0;
-        let mut prim_raw_log_min = f64::INFINITY;
-        let mut prim_raw_log_max = f64::NEG_INFINITY;
-        let mut prim_raw_count = 0;
-        for (idx, mechanic) in self.mechanics.iter_mut().enumerate() {
-            for jdx in 0..mechanic.instance_len() {
-                if let Some(cur_prim_raw) = self.solution.get_prim_raw_of(&(idx, jdx))
-                    && cur_prim_raw > 0.0
-                {
-                    let cur_log = cur_prim_raw.log2().max(-1024.0);
-                    prim_raw_log_sum += cur_log;
-                    prim_raw_log_min = prim_raw_log_min.min(cur_log);
-                    prim_raw_log_max = prim_raw_log_max.max(cur_log);
-                    prim_raw_count += 1;
-                }
-            }
-        }
-        let prim_raw_log_avg = if prim_raw_count > 0 {
-            prim_raw_log_sum / prim_raw_count as f64
-        } else {
-            0.0
-        };
-        log::debug!(
-            "平均原始流量的 log2 值为 {:.2}, 约为 ({:e})",
-            prim_raw_log_avg,
-            2.0_f64.powf(prim_raw_log_avg)
-        );
-        log::debug!(
-            "原始流量的 log2 值范围为 [{:.2}, {:.2}], 约为 [{:e}, {:e}]",
-            prim_raw_log_min,
-            prim_raw_log_max,
-            2.0_f64.powf(prim_raw_log_min),
-            2.0_f64.powf(prim_raw_log_max)
-        );
-        // let threshold = 2.0_f64.powf(prim_raw_log_avg - 6.0);
-        let threshold = 2.0_f64
-            .powf(
-                (prim_raw_log_avg - 15.0)
-                    .min(prim_raw_log_max - 30.0)
-                    .min(prim_raw_log_min + 15.0)
-                    .min(prim_raw_log_max - (prim_raw_log_max - prim_raw_log_avg) * 2.0),
-            )
-            .max(1e-12);
+        let threshold = 1e-15;
         let mut changed = false;
         self.mechanics
             .iter_mut()

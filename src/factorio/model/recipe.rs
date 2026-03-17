@@ -1263,31 +1263,46 @@ impl FactorioMechanic for RecipeMechanic {
                             }
                         })
                         .collect::<Vec<_>>();
+                    let mut quality_involved = false;
+                    for module in &allowed_modules {
+                        if let Some(prototype) = data.modules.get(&module.0) {
+                            if prototype.effect.quality > 0.0 {
+                                quality_involved = true;
+                                break;
+                            }
+                        }
+                    }
                     let module_slots = machine_proto.module_slots as usize;
-                    let comb_iter = Compositions::new(allowed_modules.len() + 1, module_slots);
-                    let comb_iter = if module_slots > 8 || allowed_modules.len() > 2 {
-                        // 插件过多时不枚举空插件配置，避免状态空间爆炸
-                        Compositions::new(allowed_modules.len(), module_slots)
+
+                    let mut comb_iter = if quality_involved {
+                        Compositions::new(allowed_modules.len() + 1, module_slots)
                     } else {
-                        comb_iter
+                        Compositions::new(allowed_modules.len().max(1), module_slots)
                     };
-                    let comb_iter = if allowed_modules.len() > 2 && module_slots > 16 {
-                        // 只看前16个插件槽位组合
-                        Compositions::new(allowed_modules.len(), 16)
+                    let mut dup = 1;
+                    if allowed_modules.len() > 5 {
+                        comb_iter = Compositions::new(allowed_modules.len(), 1);
+                        // 只枚举单一插件的重复配置，避免状态空间爆炸
+                        dup = module_slots.min(24);
                     } else {
-                        comb_iter
-                    };
-                    let comb_iter = if allowed_modules.len() > 1 && module_slots > 24 {
-                        // 插件过多时只看前24个插件槽位组合，避免状态空间爆炸
-                        Compositions::new(allowed_modules.len(), 24)
-                    } else {
-                        comb_iter
-                    };
+                        if module_slots > 8 || allowed_modules.len() > 2 {
+                            // 插件过多时不枚举空插件配置，避免状态空间爆炸
+                            comb_iter = Compositions::new(allowed_modules.len(), module_slots)
+                        }
+                        if allowed_modules.len() > 2 && module_slots > 16 {
+                            // 只看前16个插件槽位组合
+                            comb_iter = Compositions::new(allowed_modules.len(), 16)
+                        }
+                        if allowed_modules.len() > 1 && module_slots > 24 {
+                            // 插件过多时只看前24个插件槽位组合，避免状态空间爆炸
+                            comb_iter = Compositions::new(allowed_modules.len(), 24)
+                        }
+                    }
                     for comb in comb_iter {
                         for quality in 0..quality_range {
                             let mut modules = vec![];
                             for module_id in 0..allowed_modules.len() {
-                                for _ in 0..comb[module_id] {
+                                for _ in 0..(comb[module_id] * dup) {
                                     modules.push(allowed_modules[module_id].clone());
                                 }
                             }

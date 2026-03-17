@@ -12,7 +12,7 @@ pub fn compact_number(num: f64) -> String {
     let abs_num = num.abs();
 
     match abs_num {
-        n if n < 1e-9 => String::from("0"),
+        n if n < 1e-9 => format_with_unit(num * 1e12, "p"),
         n if n < 0.01 => format_with_unit(num * 1e6, "μ"),
         n => {
             let mut unit_idx = 0;
@@ -74,9 +74,10 @@ fn format_with_unit(value: f64, unit: &str) -> String {
 }
 
 pub fn parse_number(n: &str) -> Option<f64> {
-    let re = regex::Regex::new(r"^-?[\d.e-]+[kMGTPEZYRQμ]?$").ok()?;
+    let re = regex::Regex::new(r"^-?[\d.e-]+[kMGTPEZYRQμp]?$").ok()?;
     if re.is_match(n) {
         let multiplier = match n.chars().next_back() {
+            Some('p') => 0.000_000_000_001,
             Some('μ') => 0.000_001,
             Some('k') => 1_000.0,
             Some('M') => 1_000_000.0,

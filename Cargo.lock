@@ -2672,7 +2672,7 @@ dependencies = [
 
 [[package]]
 name = "metatorio"
-version = "1.2.48"
+version = "1.2.49"
 dependencies = [
  "dirs",
  "dyn-clone",

@@ -71,7 +71,7 @@ impl RuizSolver {
         let mut dual_scales = vec![1.0; self.constraints.len()];
 
         // 随手计算一个停止阈值，理论上应该是 1.0，但考虑到数值误差，放宽一点
-        let stop_threshold = 1.0 + 1.0 / (self.constraints.len() as f64).max(100.0);
+        let stop_threshold = 1.0 + 1.0 / (self.constraints.len() as f64 * 16.0 + 1.0);
         // 每次修改变量的系数和约束的系数，使得系数的均方根接近1
         for i in 0..1024 {
             // 交替修改 prim 和 dual

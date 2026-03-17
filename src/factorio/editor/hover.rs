@@ -101,6 +101,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, ModulePrototype> {
                 data.qualities[self.quality.min((data.qualities.len() - 1) as u8) as usize]
                     .default_multiplier(),
             );
+            ui.label(format!("插件类别: {}", &self.prototype.category));
             ui.label(format!("能耗: {:.0}%", effect.consumption * 100.0));
             ui.label(format!("速度: {:.0}%", effect.speed * 100.0));
             ui.label(format!("产能: {:.0}%", effect.productivity * 100.0));
@@ -428,6 +429,13 @@ impl<'a> egui::Widget for PrototypeHover<'a, CraftingMachinePrototype> {
                     } else {
                         0
                     }
+            ));
+            ui.label(format!(
+                "插件类型: {:?}",
+                self.prototype
+                    .allowed_module_categories
+                    .as_ref()
+                    .map_or("全部".to_string(), |x| format!("{:?}", x))
             ));
             ui.label(format!(
                 "因为运行而导致的能量消耗: {}W",
