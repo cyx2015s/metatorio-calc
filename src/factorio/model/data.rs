@@ -145,13 +145,13 @@ impl DataContext {
         let airborne_pollutants = deserialize_type(value, "airborne-pollutant");
         let mut items = Dict::<ItemPrototype>::new();
         for item_type in ITEM_TYPES.iter() {
-            items.extend(deserialize_type::<Dict<ItemPrototype>>(value, *item_type));
+            items.extend(deserialize_type::<Dict<ItemPrototype>>(value, item_type));
         }
         let mut entities = Dict::<EntityPrototype>::new();
         for entity_type in ENTITY_TYPES.iter() {
             entities.extend(deserialize_type::<Dict<EntityPrototype>>(
                 value,
-                *entity_type,
+                entity_type,
             ));
         }
         let fluids = deserialize_type(value, "fluid");
@@ -160,7 +160,7 @@ impl DataContext {
         for crafter_type in CRAFTING_MACHINE_TYPES.iter() {
             crafters.extend(deserialize_type::<Dict<CraftingMachinePrototype>>(
                 value,
-                *crafter_type,
+                crafter_type,
             ));
         }
         let recipe_categories = deserialize_type(value, "recipe-category");

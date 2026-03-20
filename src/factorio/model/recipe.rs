@@ -376,7 +376,6 @@ pub struct CraftingMachinePrototype {
     // pub input_limit: Option<f64>,
     // #[serde(alias = "result_inventory_size", alias = "max_item_product_count")]
     // pub output_limit: Option<f64>,
-
     #[serde(default)]
     pub launch_to_space_platforms: bool,
     #[serde(default)]
@@ -1265,12 +1264,11 @@ impl FactorioMechanic for RecipeMechanic {
                         .collect::<Vec<_>>();
                     let mut quality_involved = false;
                     for module in &allowed_modules {
-                        if let Some(prototype) = data.modules.get(&module.0) {
-                            if prototype.effect.quality > 0.0 {
+                        if let Some(prototype) = data.modules.get(&module.0)
+                            && prototype.effect.quality > 0.0 {
                                 quality_involved = true;
                                 break;
                             }
-                        }
                     }
                     let module_slots = machine_proto.module_slots as usize;
 
