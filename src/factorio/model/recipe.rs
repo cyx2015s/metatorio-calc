@@ -372,10 +372,10 @@ pub struct CraftingMachinePrototype {
 
     pub fixed_recipe: Option<String>,
     pub fixed_quality: Option<String>,
-    #[serde(alias = "source_inventory_size", alias = "ingredient_count")]
-    pub input_limit: Option<f64>,
-    #[serde(alias = "result_inventory_size", alias = "max_item_product_count")]
-    pub output_limit: Option<f64>,
+    // #[serde(alias = "source_inventory_size", alias = "ingredient_count")]
+    // pub input_limit: Option<f64>,
+    // #[serde(alias = "result_inventory_size", alias = "max_item_product_count")]
+    // pub output_limit: Option<f64>,
 
     #[serde(default)]
     pub launch_to_space_platforms: bool,

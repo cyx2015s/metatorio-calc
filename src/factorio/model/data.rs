@@ -145,32 +145,23 @@ impl DataContext {
         let airborne_pollutants = deserialize_type(value, "airborne-pollutant");
         let mut items = Dict::<ItemPrototype>::new();
         for item_type in ITEM_TYPES.iter() {
-            if let Some(item_values) = value.get(item_type) {
-                items.extend(
-                    serde_json::from_value::<Dict<ItemPrototype>>(item_values.clone()).unwrap(),
-                );
-            }
+            items.extend(deserialize_type::<Dict<ItemPrototype>>(value, *item_type));
         }
         let mut entities = Dict::<EntityPrototype>::new();
         for entity_type in ENTITY_TYPES.iter() {
-            if let Some(entity_values) = value.get(entity_type) {
-                entities.extend(
-                    serde_json::from_value::<Dict<EntityPrototype>>(entity_values.clone()).unwrap(),
-                );
-            }
+            entities.extend(deserialize_type::<Dict<EntityPrototype>>(
+                value,
+                *entity_type,
+            ));
         }
         let fluids = deserialize_type(value, "fluid");
         let recipes = deserialize_type(value, "recipe");
         let mut crafters = Dict::<CraftingMachinePrototype>::new();
         for crafter_type in CRAFTING_MACHINE_TYPES.iter() {
-            if let Some(crafter_values) = value.get(crafter_type) {
-                crafters.extend(
-                    serde_json::from_value::<Dict<CraftingMachinePrototype>>(
-                        crafter_values.clone(),
-                    )
-                    .unwrap(),
-                );
-            }
+            crafters.extend(deserialize_type::<Dict<CraftingMachinePrototype>>(
+                value,
+                *crafter_type,
+            ));
         }
         let recipe_categories = deserialize_type(value, "recipe-category");
 

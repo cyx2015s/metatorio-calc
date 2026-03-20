@@ -12,6 +12,7 @@ pub fn compact_number(num: f64) -> String {
     let abs_num = num.abs();
 
     match abs_num {
+        n if n < 1e-15 => String::from("0"),
         n if n < 1e-9 => format_with_unit(num * 1e12, "p"),
         n if n < 0.01 => format_with_unit(num * 1e6, "μ"),
         n => {

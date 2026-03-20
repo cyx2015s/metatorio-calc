@@ -617,7 +617,7 @@ impl FactoryInstance {
                     for item in &self.total_flow_sorted_keys {
                         let raw_amount = self.solution.get_sum_raw_of(item).unwrap_or(0.0);
 
-                        if raw_amount.abs() < 1e-12 {
+                        if raw_amount.abs() < 1e-8 && !self.factory.debug {
                             continue;
                         }
                         let amount = self.solution.get_sum_of(item).unwrap_or(0.0);
