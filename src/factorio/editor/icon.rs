@@ -152,6 +152,13 @@ impl<'a> egui::Widget for Icon<'a> {
                             })
                         }
                     }
+                    "surface" => {
+                        if let Some(surface) = data.surfaces.get(self.item_name) {
+                            icon = icon.on_hover_ui(|ui| {
+                                ui.add(PrototypeHover::new(data, surface));
+                            })
+                        }
+                    }
                     _ => {}
                 }
                 icon

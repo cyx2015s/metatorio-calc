@@ -1,4 +1,4 @@
-use std::{collections::HashSet, fmt::Debug};
+use std::{collections::HashMap, fmt::Debug};
 
 use serde_with::{DefaultOnError, serde_as};
 
@@ -20,7 +20,28 @@ pub struct PlanetPrototype {
     pub surface_properties: Dict<f64>,
 }
 
+impl PlanetPrototype {
+    pub fn has_surface(&self) -> bool {
+        self.base.r#type == "planet"
+    }
+}
+
 impl HasPrototypeBase for PlanetPrototype {
+    fn base(&self) -> &PrototypeBase {
+        &self.base
+    }
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct SurfacePrototype {
+    #[serde(flatten)]
+    pub base: PrototypeBase,
+
+    #[serde(default)]
+    pub surface_properties: Dict<f64>,
+}
+
+impl HasPrototypeBase for SurfacePrototype {
     fn base(&self) -> &PrototypeBase {
         &self.base
     }
@@ -78,8 +99,8 @@ pub struct AutoplaceSettings {
 }
 
 impl PlanetPrototype {
-    pub fn collect_autoplaced(&self, data: &DataContext) -> HashSet<DualVar> {
-        let mut items = HashSet::new();
+    pub fn collect_autoplaced(&self, data: &DataContext) -> HashMap<DualVar, f64> {
+        let mut items = HashMap::new();
         for entity in data.entities.values() {
             if entity.base.r#type != "resource" && entity.base.r#type != "asteroid-chunk" {
                 continue;
@@ -93,7 +114,10 @@ impl PlanetPrototype {
                     .contains_key(&autoplace.control)
                 {
                     // 别判断密度了，认为启用就行了
-                    items.insert(DualVar::Entity(IdWithQuality(entity.base.name.clone(), 0)));
+                    items.insert(
+                        DualVar::Entity(IdWithQuality(entity.base.name.clone(), 0)),
+                        0.0,
+                    );
                 } else {
                     // TODO
                     // 如果 default_enabled 为 true，则认为启用
@@ -104,7 +128,10 @@ impl PlanetPrototype {
                         .settings
                         .contains_key(entity.base.name.as_str())
                     {
-                        items.insert(DualVar::Entity(IdWithQuality(entity.base.name.clone(), 0)));
+                        items.insert(
+                            DualVar::Entity(IdWithQuality(entity.base.name.clone(), 0)),
+                            0.0,
+                        );
                     }
                 }
             }
@@ -123,10 +150,13 @@ impl PlanetPrototype {
                     // 别判断密度了，认为启用就行了
                     let fluid_prototype = data.fluids.get(fluid).unwrap();
                     let default_temperature = fluid_prototype.default_temperature as i32;
-                    items.insert(DualVar::Fluid {
-                        name: fluid.clone(),
-                        temperature: [default_temperature, default_temperature],
-                    });
+                    items.insert(
+                        DualVar::Fluid {
+                            name: fluid.clone(),
+                            temperature: [default_temperature, default_temperature],
+                        },
+                        0.0,
+                    );
                 } else {
                     // TODO
                     // 如果 default_enabled 为 true，则认为启用
@@ -139,16 +169,23 @@ impl PlanetPrototype {
                     {
                         let fluid_prototype = data.fluids.get(fluid).unwrap();
                         let default_temperature = fluid_prototype.default_temperature as i32;
-                        items.insert(DualVar::Fluid {
-                            name: fluid.clone(),
-                            temperature: [default_temperature, default_temperature],
-                        });
+                        items.insert(
+                            DualVar::Fluid {
+                                name: fluid.clone(),
+                                temperature: [default_temperature, default_temperature],
+                            },
+                            0.0,
+                        );
                     }
                 }
             }
         }
 
         items
+    }
+
+    pub fn collect_asteroids(&self, data: &DataContext) -> HashMap<DualVar, f64> {
+        todo!()
     }
 }
 

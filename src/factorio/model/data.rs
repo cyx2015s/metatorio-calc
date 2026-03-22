@@ -18,6 +18,7 @@ use crate::{concept::*, error::AppError, factorio::*};
 pub const LOCALE_CATEGORIES: &[&str] = &[
     "airborne-pollutant",
     "asteroid-chunk",
+    "asteroid",
     "entity",
     "fluid",
     "fuel-category",
@@ -26,6 +27,7 @@ pub const LOCALE_CATEGORIES: &[&str] = &[
     "quality",
     "recipe",
     "space-location",
+    "surface",
     "surface-property",
     "technology",
     "tile",
@@ -55,6 +57,7 @@ pub struct DataContext {
 
     /// 地点
     pub planets: Dict<PlanetPrototype>,
+    pub surfaces: Dict<SurfacePrototype>,
     pub surface_properties: Dict<SurfacePropertyPrototype>,
 
     /// 品质
@@ -192,7 +195,13 @@ impl DataContext {
                 }
             }
         }
-        let planets = deserialize_type(value, "planet");
+        let mut planets: HashMap<String, PlanetPrototype> = deserialize_type(value, "planet");
+        planets.extend(deserialize_type::<HashMap<String, PlanetPrototype>>(
+            value,
+            "space-location",
+        ));
+
+        let surfaces = deserialize_type(value, "surface");
         let tiles = deserialize_type(value, "tile");
         let boilers = deserialize_type(value, "boiler");
         let generators = deserialize_type(value, "generator");
@@ -222,6 +231,7 @@ impl DataContext {
             miners,
             resource_categories,
             planets,
+            surfaces,
             surface_properties,
             tiles,
             boilers,
@@ -694,6 +704,15 @@ impl DataContext {
         self.order_of_entries.insert(
             "space-location".into(),
             get_reverse_order_info(&self.ordered_entries["space-location"]),
+        );
+        
+        self.ordered_entries.insert(
+            "surface".into(),
+            get_order_info(&self.surfaces, &self.groups, &self.subgroups),
+        );
+        self.order_of_entries.insert(
+            "surface".into(),
+            get_reverse_order_info(&self.ordered_entries["surface"]),
         );
         self
     }

@@ -17,6 +17,7 @@ pub const ENTITY_TYPES: &[&str] = &[
     "agricultural-tower",
     "artillery-turret",
     "asteroid-collector",
+    "asteroid-chunk",
     "asteroid",
     "beacon",
     "boiler",

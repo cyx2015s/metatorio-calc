@@ -573,8 +573,33 @@ impl<'a> egui::Widget for PrototypeHover<'a, PlanetPrototype> {
             self.data
                 .get_display_name("space-location", &planet.base.name),
         );
+        if planet.has_surface() {
+            for property in &self.data.surface_properties {
+                if let Some(value) = planet.surface_properties.get(property.0) {
+                    ui.label(format!(
+                        "{}: {}",
+                        self.data.get_display_name("surface-property", property.0),
+                        value
+                    ));
+                } else {
+                    ui.label(format!(
+                        "{}: {}",
+                        self.data.get_display_name("surface-property", property.0),
+                        property.1.default_value
+                    ));
+                }
+            }
+        }
+        ui.response()
+    }
+}
+
+impl<'a> egui::Widget for PrototypeHover<'a, SurfacePrototype> {
+    fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+        let surface = self.prototype;
+        ui.label(self.data.get_display_name("surface", &surface.base.name));
         for property in &self.data.surface_properties {
-            if let Some(value) = planet.surface_properties.get(property.0) {
+            if let Some(value) = surface.surface_properties.get(property.0) {
                 ui.label(format!(
                     "{}: {}",
                     self.data.get_display_name("surface-property", property.0),
@@ -588,6 +613,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, PlanetPrototype> {
                 ));
             }
         }
+
         ui.response()
     }
 }

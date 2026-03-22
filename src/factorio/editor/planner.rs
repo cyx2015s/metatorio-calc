@@ -33,6 +33,8 @@ use indexmap::IndexMap;
 pub struct FactoryContext {
     pub planet: Option<String>,
 
+    pub surface: Option<String>,
+
     // 自动和手动填充时，优先使用的机器的品质等级
     pub major_quality: u8,
 
@@ -44,14 +46,19 @@ impl FactoryContext {
         &self,
         data: &'a DataContext,
     ) -> Option<&'a Dict<f64>> {
-        if let Some(planet) = &self.planet {
-            if let Some(planet) = data.planets.get(planet) {
+        if let Some(surface) = &self.surface
+            && let Some(surface) = data.surfaces.get(surface)
+        {
+            Some(&surface.surface_properties)
+        } else {
+            if let Some(planet) = &self.planet
+                && let Some(planet) = data.planets.get(planet)
+                && planet.has_surface()
+            {
                 Some(&planet.surface_properties)
             } else {
                 None
             }
-        } else {
-            None
         }
     }
 }
@@ -193,9 +200,10 @@ impl FactoryInstance {
 
         if let Some(planet_name) = &self.factory.planet
             && let Some(planet) = data.planets.get(planet_name)
+            && self.factory.surface.is_none()
         {
             let autoplaced = planet.collect_autoplaced(data);
-            for item in &autoplaced {
+            for (item, cost) in &autoplaced {
                 if !external.contains_key(item) && !target.contains_key(item) {
                     external.insert(item.clone(), 0.0);
                 }
@@ -305,8 +313,9 @@ impl FactoryInstance {
         let mut ret = SolverData::new_simple(target, flows)
             .with_sources(external)
             .with_strict_source(self.strict_source)
-            .with_strict_sink(self.strict_sink)
-            .with_sinks(sinks);
+            // .with_strict_sink(self.strict_sink)
+            // .with_sinks(sinks)
+            ;
 
         ret.target.extend(
             self.target_group
@@ -320,7 +329,7 @@ impl FactoryInstance {
     }
 
     pub fn trim_flows(&mut self) -> bool {
-        let threshold = 1e-15;
+        let threshold = 1e-12;
         let mut changed = false;
         self.mechanics
             .iter_mut()
@@ -526,7 +535,7 @@ impl FactoryInstance {
             *changed |= ui
                 .checkbox(&mut self.strict_source, "禁止无端引入原料")
                 .changed();
-            *changed |= ui.checkbox(&mut self.strict_sink, "禁止副产物").changed();
+            // *changed |= ui.checkbox(&mut self.strict_sink, "禁止副产物").changed();
             ui.checkbox(&mut self.factory.debug, "显示调试数据");
             if ui.button("删除无用配方").clicked() {
                 *changed |= self.trim_flows();
@@ -705,6 +714,9 @@ impl FactoryInstance {
         });
         ui.separator();
         ui.heading("环境");
+        if data.surfaces.len() > 0 {
+            ui.label("环境设置为太空平台时，请从上方手动加入星岩资源，无法估算星岩面积成本。");
+        }
         ui.horizontal_wrapped(|ui| {
             let button = if let Some(planet) = &self.factory.planet {
                 ui.add_sized([35.0, 35.0], Icon::new(data, "space-location", planet))
@@ -723,6 +735,26 @@ impl FactoryInstance {
             }
             ui.label("星球");
         });
+        if data.surfaces.len() > 0 {
+            ui.horizontal_wrapped(|ui| {
+                let button = if let Some(surface) = &self.factory.surface {
+                    ui.add_sized([35.0, 35.0], Icon::new(data, "surface", surface))
+                } else {
+                    ui.add_sized([35.0, 35.0], Icon::new(data, "item", "unknown"))
+                };
+                ui.add(
+                    SelectorModal::new(button.id, "选择表面")
+                        .with_toggle(button.clicked())
+                        .with_selector(
+                            Selector::new(data, "surface").with_output(&mut self.factory.surface),
+                        ),
+                );
+                if button.secondary_clicked() {
+                    self.factory.surface.take();
+                }
+                ui.label("表面");
+            });
+        }
         ui.horizontal_wrapped(|ui| {
             let button = ui.add_sized(
                 [35.0, 35.0],
@@ -871,26 +903,51 @@ impl FactoryInstance {
                 .push((DualVar::Item("item-unknown".into()), 1.0));
             *changed = true;
         }
-        ui.menu_button("从星球自动选择", |ui| {
+        ui.menu_button("从地点自动选择", |ui| {
             for planet in data.planets.values() {
-                if ui
-                    .button(data.get_display_name("space-location", &planet.base.name))
-                    .clicked()
+                if planet.has_surface()
+                    && ui
+                        .button(data.get_display_name("space-location", &planet.base.name))
+                        .clicked()
                 {
                     self.external.clear();
                     let available = planet.collect_autoplaced(data);
-                    for item in &available {
-                        self.external.push((item.clone(), 0.0));
-                    }
-                    for pollution in data.airborne_pollutants.keys() {
-                        self.external.push((
-                            DualVar::Pollution {
-                                name: pollution.clone(),
-                            },
-                            0.0,
-                        ));
+                    for (item, &cost) in &available {
+                        self.external.push((item.clone(), cost));
                     }
                     *changed = true;
+                }
+            }
+            for surface in data.surfaces.values() {
+                if ui
+                    .button(data.get_display_name("surface", &surface.base.name))
+                    .clicked()
+                {
+                    self.external.clear();
+                    self.external.push((DualVar::Electricity, 1.0));
+                    for entity in data.entities.values() {
+                        if entity.base.r#type != "asteroid-chunk" {
+                            continue;
+                        }
+                        if let Some(minable) = entity.minable.as_ref() {
+                            if let Some(result) = &minable.result {
+                                self.external
+                                    .push((DualVar::Item(result.clone().into()), 1.0));
+                            } else {
+                                for res in &minable.results {
+                                    match res {
+                                        RecipeResult::Item(item) => {
+                                            self.external.push((
+                                                DualVar::Item(item.name.clone().into()),
+                                                1.0,
+                                            ));
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         });
@@ -1560,6 +1617,7 @@ impl SubView for ProjectView {
                         project.proj.selected_page = ProjectPage::Index(0);
                     } else {
                         // 从 data 中随机选一个物品
+                        let mut loop_count = 0;
                         for (item, prototype) in self.data.items.iter() {
                             if prototype.base.hidden || prototype.base.parameter {
                                 continue;
@@ -1569,7 +1627,13 @@ impl SubView for ProjectView {
                             factory
                                 .target
                                 .push((DualVar::Item(item.clone().into()), 1.0));
-                            let planet = self.data.planets.keys().next().unwrap();
+                            let planet = self
+                                .data
+                                .planets
+                                .keys()
+                                .nth(loop_count % self.data.planets.len())
+                                .cloned()
+                                .unwrap();
                             factory.factory.planet = Some(planet.clone());
 
                             let auto_planned =
@@ -1579,6 +1643,10 @@ impl SubView for ProjectView {
                                 project.factories.push(auto_planned);
                                 break;
                             }
+                            if loop_count > 8 {
+                                break;
+                            }
+                            loop_count += 1;
                         }
                     }
 
