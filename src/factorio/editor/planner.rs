@@ -205,7 +205,7 @@ impl FactoryInstance {
             let autoplaced = planet.collect_autoplaced(data);
             for (item, cost) in &autoplaced {
                 if !external.contains_key(item) && !target.contains_key(item) {
-                    external.insert(item.clone(), 0.0);
+                    external.insert(item.clone(), *cost);
                 }
             }
             for pollutant in data.airborne_pollutants.keys() {
