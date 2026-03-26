@@ -1,7 +1,6 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::VecDeque;
 
-use indexmap::IndexMap;
-
+use crate::concept::{AIndexMap, AIndexSet};
 use crate::factorio::{DataContext, Dict, Modifier, ProjectContext, RecipeResult};
 
 #[derive(Debug, Clone, Default)]
@@ -14,8 +13,8 @@ pub struct MilestoneNode {
 pub fn resolve_milestone_graph(
     data: &DataContext,
     milestones: &[(String, bool)],
-) -> IndexMap<String, MilestoneNode> {
-    let mut ret = IndexMap::new();
+) -> AIndexMap<String, MilestoneNode> {
+    let mut ret = AIndexMap::default();
 
     let mut queue = data
         .technologies
@@ -29,14 +28,14 @@ pub fn resolve_milestone_graph(
         })
         .collect::<VecDeque<_>>();
 
-    let mut visited: HashSet<&str> = HashSet::new();
+    let mut visited: AIndexSet<&str> = AIndexSet::default();
 
     log::debug!("初始科技起点: {:?}", queue);
     log::debug!("里程碑: {:?}", milestones);
     #[derive(Debug, Clone, Default)]
     struct NodeInfo<'a> {
         indeg: usize,
-        deps: HashSet<&'a str>,
+        deps: AIndexSet<&'a str>,
     }
 
     let mut node_infos = data
@@ -47,11 +46,11 @@ pub fn resolve_milestone_graph(
                 name.as_str(),
                 NodeInfo {
                     indeg: tech.prerequisites.len(),
-                    deps: HashSet::new(),
+                    deps: AIndexSet::default(),
                 },
             )
         })
-        .collect::<HashMap<&str, NodeInfo>>();
+        .collect::<AIndexMap<&str, NodeInfo>>();
 
     while let Some(current_tech) = queue.pop_front() {
         if visited.contains(current_tech) {
@@ -120,10 +119,10 @@ pub fn resolve_milestone_graph(
 }
 
 pub fn transitive_reduction_and_build_depth(
-    graph: &IndexMap<String, MilestoneNode>,
-) -> IndexMap<String, MilestoneNode> {
+    graph: &AIndexMap<String, MilestoneNode>,
+) -> AIndexMap<String, MilestoneNode> {
     // 建立名称到索引的映射
-    let mut name_to_idx: HashMap<&str, usize> = HashMap::new();
+    let mut name_to_idx: AIndexMap<&str, usize> = AIndexMap::default();
     let mut idx_to_name: Vec<&str> = Vec::new();
     for name in graph.keys() {
         name_to_idx.insert(name, idx_to_name.len());
@@ -157,7 +156,7 @@ pub fn transitive_reduction_and_build_depth(
     }
 
     // 构建约简后的图
-    let mut reduced = IndexMap::new();
+    let mut reduced = AIndexMap::default();
     for (name, node) in graph {
         let i = name_to_idx[name.as_str()];
         let mut new_deps = Vec::new();
@@ -188,7 +187,7 @@ pub fn transitive_reduction_and_build_depth(
     let mut tech_depth = graph
         .values()
         .map(|t| (t.name.as_str(), 0))
-        .collect::<HashMap<_, _>>();
+        .collect::<AIndexMap<_, _>>();
 
     for _ in 0..reduced.len() {
         // ……我不想优化了，循环N次总能得到深度的
@@ -221,7 +220,7 @@ pub fn resolve_dependency(data: &DataContext, milestones: &[(String, bool)]) -> 
             .iter()
             .any(|(name, unlocked)| *name == tech_name && !*unlocked)
     }
-    let mut unlocked = Dict::new();
+    let mut unlocked = Dict::default();
     let mut queue = VecDeque::new(); // 传播队列
     for tech_name in data.technologies.keys() {
         unlocked.insert(
@@ -234,7 +233,7 @@ pub fn resolve_dependency(data: &DataContext, milestones: &[(String, bool)]) -> 
             queue.push_back(tech_name.clone());
         }
     }
-    let mut visited = HashSet::new();
+    let mut visited = AIndexSet::default();
     while let Some(tech_name) = queue.pop_front() {
         if visited.contains(&tech_name) {
             continue;
@@ -270,7 +269,7 @@ pub fn update_accessibles(user: &mut ProjectContext, data: &DataContext) {
                 None
             }
         })
-        .fold(IndexMap::new(), |mut acc, (recipe, change)| {
+        .fold(AIndexMap::default(), |mut acc, (recipe, change)| {
             acc.entry(recipe)
                 .and_modify(|c| *c += change)
                 .or_insert(change);

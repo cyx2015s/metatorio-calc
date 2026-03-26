@@ -123,7 +123,7 @@ impl AsFlow for SpoilInstance {
         _proj: &crate::factorio::ProjectContext,
         _factory: &crate::factorio::planner::FactoryContext,
     ) -> crate::concept::Flow<Self::Item> {
-        let mut flow = crate::concept::Flow::new();
+        let mut flow = crate::concept::Flow::default();
         if let Some(item) = data.items.get(&self.item.0)
             && let Some(spoil) = &item.spoil
             && let Some(spoil_result) = &spoil.spoil_result
@@ -331,7 +331,7 @@ impl AsFlow for PlantInstance {
         _proj: &crate::factorio::ProjectContext,
         _factory: &crate::factorio::planner::FactoryContext,
     ) -> crate::concept::Flow<Self::Item> {
-        let mut flow = Flow::new();
+        let mut flow = Flow::default();
         if let Some(item) = data.items.get(&self.seed.0)
             && let Some(plant) = item.plant.as_ref()
         {
@@ -499,7 +499,7 @@ impl AsFlow for ItemFuelInstance {
         _proj: &crate::factorio::ProjectContext,
         _factory: &crate::factorio::planner::FactoryContext,
     ) -> crate::concept::Flow<Self::Item> {
-        let mut flow = crate::concept::Flow::new();
+        let mut flow = crate::concept::Flow::default();
         if let Some(item) = data.items.get(&self.item.0) {
             flow.insert(DualVar::Item(self.item.clone()), -1.0);
             flow.insert(
@@ -700,7 +700,7 @@ impl AsFlow for ItemLaunchInstance {
         _proj: &crate::factorio::ProjectContext,
         _factory: &crate::factorio::planner::FactoryContext,
     ) -> crate::concept::Flow<Self::Item> {
-        let mut flow = crate::concept::Flow::new();
+        let mut flow = crate::concept::Flow::default();
 
         if let Some(item) = data.items.get(&self.item.0) {
             let multiplier = item.stack_size * self.rocket.0 as f64;

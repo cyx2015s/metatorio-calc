@@ -204,7 +204,7 @@ impl BoilerPrototype {
         temperature: f64,
         fuel: &Option<(String, i32)>,
     ) -> Flow<DualVar> {
-        let mut flow = Flow::new();
+        let mut flow = Flow::default();
         let mut fulfillment = 1.0;
         if self.fluid_box.filter.as_ref().is_some_and(|f| f != fluid) {
             return flow;
@@ -311,7 +311,7 @@ impl AsFlow for GeneratorInstance {
         _proj: &ProjectContext,
         _factory: &FactoryContext,
     ) -> Flow<DualVar> {
-        let mut flow = Flow::new();
+        let mut flow = Flow::default();
         if let Some(generator) = data.generators.get(&self.generator.0) {
             if let Some(filter) = generator.fluid_box.filter.as_ref() {
                 let fluid = data.fluids.get(filter).expect("发电机输入的流体不存在");
@@ -907,7 +907,7 @@ impl AsFlow for BoilerInstance {
         _proj: &ProjectContext,
         _factory: &FactoryContext,
     ) -> Flow<DualVar> {
-        let mut flow = Flow::new();
+        let mut flow = Flow::default();
         if let Some(boiler) = data.boilers.get(&self.boiler.0) {
             let fluid = boiler.fluid_box.filter.as_ref().unwrap_or(&self.fluid);
 
@@ -1089,7 +1089,7 @@ impl AsFlow for FluidFuelInstance {
         _proj: &ProjectContext,
         _factory: &FactoryContext,
     ) -> Flow<DualVar> {
-        let mut flow = Flow::new();
+        let mut flow = Flow::default();
         if let Some(fluid) = data.fluids.get(&self.fluid)
             && let Some(fuel_value) = fluid.fuel_value
         {
@@ -1254,7 +1254,7 @@ impl AsFlow for FluidHeatInstance {
         _proj: &ProjectContext,
         _factory: &FactoryContext,
     ) -> Flow<DualVar> {
-        let mut flow = Flow::new();
+        let mut flow = Flow::default();
         if let Some(fluid) = data.fluids.get(&self.fluid) {
             if self.temperature <= fluid.default_temperature as i32 {
                 // 如果温度不高于默认温度，则不产生热量，也不消耗液体

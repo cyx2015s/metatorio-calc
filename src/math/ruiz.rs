@@ -1,4 +1,6 @@
-use std::{collections::HashMap, time::Instant};
+use std::time::Instant;
+
+use crate::concept::AIndexMap;
 
 use good_lp::{
     Constraint, Expression, IntoAffineExpression, ProblemVariables, ResolutionError, Solution,
@@ -13,10 +15,10 @@ pub struct RuizSolver {
 }
 
 pub struct RuizSolution {
-    pub inner: MicroLpSolution,              // 原始结果
-    pub prim_scales: HashMap<Variable, f64>, // 原始变量的系数分别乘了这些系数
-    pub dual_scales: Vec<f64>,               // 原始约束的系数分别乘了这些系数
-    pub cost: f64,                           // 原问题的目标值，应该没有获取原始值的需求吧……
+    pub inner: MicroLpSolution,                // 原始结果
+    pub prim_scales: AIndexMap<Variable, f64>, // 原始变量的系数分别乘了这些系数
+    pub dual_scales: Vec<f64>,                 // 原始约束的系数分别乘了这些系数
+    pub cost: f64,                             // 原问题的目标值，应该没有获取原始值的需求吧……
     // 实际求解的问题是原问题的 global_scale 倍，
     // 因此原始变量需要除以 global_scale 才是原问题的结果
     pub global_scale: f64,
@@ -44,18 +46,18 @@ impl RuizSolver {
             .constraints
             .par_iter()
             .enumerate()
-            .fold(HashMap::new, |mut acc, (idx, constraint)| {
+            .fold(AIndexMap::default, |mut acc, (idx, constraint)| {
                 constraint
                     .expression()
                     .linear_coefficients()
                     .for_each(|(var, coeff)| {
                         acc.entry(var)
-                            .or_insert_with(HashMap::new)
+                            .or_insert_with(AIndexMap::default)
                             .insert(idx, coeff);
                     });
                 acc
             })
-            .reduce(HashMap::new, |mut map1, map2| {
+            .reduce(AIndexMap::default, |mut map1, map2| {
                 // 合并两个局部的反查表
                 for (key, inner_map) in map2 {
                     map1.entry(key).or_default().extend(inner_map);
@@ -67,7 +69,7 @@ impl RuizSolver {
             .variables
             .iter_variables_with_def()
             .map(|(var, _)| (var, 1.0))
-            .collect::<HashMap<Variable, f64>>();
+            .collect::<AIndexMap<Variable, f64>>();
         let mut dual_scales = vec![1.0; self.constraints.len()];
 
         // 随手计算一个停止阈值，理论上应该是 1.0，但考虑到数值误差，放宽一点
@@ -82,7 +84,7 @@ impl RuizSolver {
                 .map(|(var, prim_scale)| {
                     let mut sum_x2 = 0.0;
                     let mut count = 0;
-                    for (&idx, &coeff) in prim_coeffs.get(var).unwrap_or(&HashMap::new()) {
+                    for (&idx, &coeff) in prim_coeffs.get(var).unwrap_or(&AIndexMap::default()) {
                         if coeff == 0.0 {
                             continue;
                         }

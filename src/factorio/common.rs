@@ -1,12 +1,10 @@
 use std::{
-    collections::HashMap,
     fmt::{Debug, Display},
     hash::Hash,
     ops::{Add, Deref, DerefMut, Mul},
     sync::mpsc::{Receiver, Sender},
 };
 
-use indexmap::IndexMap;
 use serde_json::Value;
 use serde_with::serde_as;
 
@@ -175,10 +173,10 @@ pub trait FactorioMechanic: SolveContext<Game = DataContext, Item = DualVar> {
 
 dyn_clone::clone_trait_object!(SerdeFactorioMechanic);
 
-pub type Dict<T> = HashMap<String, T>;
+pub type Dict<T> = AIndexMap<String, T>;
 pub type Emissions = Dict<f64>;
 pub type OrderInfo = Vec<(String, Vec<(String, Vec<String>)>)>;
-pub type ReverseOrderInfo = HashMap<String, (usize, usize, usize)>;
+pub type ReverseOrderInfo = AIndexMap<String, (usize, usize, usize)>;
 
 /// 能够转化成流参与计算的方法
 pub trait AsFlow: SolveContext<Game = DataContext, Item = DualVar> {
@@ -250,7 +248,7 @@ impl TryFrom<DualVar> for IdWithQuality {
     }
 }
 
-pub fn index_map_update_entry<T, N>(map: &mut IndexMap<T, N>, key: T, value: N)
+pub fn index_map_update_entry<T, N>(map: &mut AIndexMap<T, N>, key: T, value: N)
 where
     T: Hash + Eq,
     N: Add<Output = N> + Copy + Default,
@@ -778,11 +776,11 @@ impl HasPrototypeBase for ItemSubgroup {
 }
 
 pub fn get_order_info<T: HasPrototypeBase + Clone>(
-    map: &HashMap<String, T>,
+    map: &AIndexMap<String, T>,
     groups: &Dict<PrototypeBase>,
     subgroups: &Dict<ItemSubgroup>,
 ) -> OrderInfo {
-    let mut grouped: HashMap<&String, HashMap<&String, Vec<&T>>> = HashMap::new();
+    let mut grouped: AIndexMap<&String, AIndexMap<&String, Vec<&T>>> = AIndexMap::default();
     let other = &"other".to_string();
     let empty = &"".to_string();
     for prototype in map.values() {
@@ -843,7 +841,7 @@ pub fn get_order_info<T: HasPrototypeBase + Clone>(
 }
 
 pub fn get_reverse_order_info(order_info: &OrderInfo) -> ReverseOrderInfo {
-    let mut reverse_map: ReverseOrderInfo = HashMap::new();
+    let mut reverse_map: ReverseOrderInfo = AIndexMap::default();
     for (group_index, group) in order_info.iter().enumerate() {
         for (subgroup_index, subgroup) in group.1.iter().enumerate() {
             for (item_index, item_name) in subgroup.1.iter().enumerate() {

@@ -1,10 +1,7 @@
-use std::collections::HashMap;
-
-use indexmap::IndexMap;
 use serde_with::{DefaultOnError, serde_as};
 
 use crate::{
-    concept::SolveContext,
+    concept::{AIndexMap, SolveContext},
     factorio::{
         ProjectContext,
         common::*,
@@ -147,7 +144,7 @@ impl ModuleConfig {
             }
         }
         let mut beacon_count = 0;
-        let mut beacon_count_by_type = HashMap::new();
+        let mut beacon_count_by_type = AIndexMap::default();
         for beacon_config in &self.beacons {
             if data.beacons.contains_key(&beacon_config.beacon.0) {
                 beacon_count += beacon_config.count;
@@ -366,7 +363,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
 
         ui.horizontal_top(|ui| {
             // 获取所有插件和信标的综合
-            let mut total = IndexMap::new();
+            let mut total = AIndexMap::default();
             for module in &self.module_config.modules {
                 index_map_update_entry(
                     &mut total,

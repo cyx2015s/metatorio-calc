@@ -1,11 +1,9 @@
 use good_lp::{IntoAffineExpression, Solution, variable};
-use indexmap::{IndexMap, IndexSet};
 
-use crate::concept::{Flow, ItemIdent};
+use crate::concept::{AIndexMap, AIndexSet, Flow, ItemIdent};
 use crate::math::RuizSolver;
 use core::f64;
 
-use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::sync::mpsc::*;
@@ -44,7 +42,7 @@ where
     R: ItemIdent,
 {
     pub target: Vec<TargetSpec<I>>,
-    pub flows: IndexMap<R, FlowSpec<I>>,
+    pub flows: AIndexMap<R, FlowSpec<I>>,
     pub sources: Flow<I>, //  输入特定物品消耗的价值
     pub sinks: Flow<I>,   //  产生额外物品的惩罚
     // 我还不知道怎么称呼，目前规定如下：
@@ -179,7 +177,7 @@ where
     I: ItemIdent,
     R: ItemIdent,
 {
-    pub fn new_simple(target: Flow<I>, flows: IndexMap<R, (Flow<I>, f64)>) -> Self {
+    pub fn new_simple(target: Flow<I>, flows: AIndexMap<R, (Flow<I>, f64)>) -> Self {
         Self {
             target: target
                 .into_iter()
@@ -201,8 +199,8 @@ where
                     )
                 })
                 .collect(),
-            sources: IndexMap::new(),
-            sinks: IndexMap::new(),
+            sources: AIndexMap::default(),
+            sinks: AIndexMap::default(),
             strict_source: false,
             strict_sink: false,
         }
@@ -233,11 +231,11 @@ where
         if self.strict_source {
             // 在strict_source模式下，移除所有无法使用的配方
             let instant = std::time::Instant::now();
-            let mut status = HashMap::new();
+            let mut status = AIndexMap::default();
             enum ItemStatus<R> {
                 Pending {
-                    providers: HashSet<R>,
-                    consumers: HashSet<R>,
+                    providers: AIndexSet<R>,
+                    consumers: AIndexSet<R>,
                 },
                 Usable,
             }
@@ -256,8 +254,8 @@ where
                         status
                             .entry(item_id.clone())
                             .or_insert_with(|| ItemStatus::Pending {
-                                providers: HashSet::new(),
-                                consumers: HashSet::new(),
+                                providers: AIndexSet::default(),
+                                consumers: AIndexSet::default(),
                             });
                     if amount > 0.0 {
                         // 生产这个物品的配方
@@ -292,7 +290,7 @@ where
             let before = self.flows.len();
 
             let needed_by_target = self.target.iter().fold(
-                HashSet::new(),
+                AIndexSet::default(),
                 |mut acc,
                  TargetSpec {
                      constant,
@@ -381,24 +379,24 @@ where
         );
 
         let mut problem_variables = good_lp::ProblemVariables::new();
-        let mut item_in_targets = HashSet::new();
+        let mut item_in_targets = AIndexSet::default();
         for target in &self.target {
             for (i_id, _coef) in target.coefficients.iter() {
                 item_in_targets.insert(i_id.clone());
             }
         }
         // 用户提供的流编号 -> 变量的映射
-        let mut flow_vars = IndexMap::new();
+        let mut flow_vars = AIndexMap::default();
         // 物品源变量
-        let mut source_vars = IndexMap::new();
+        let mut source_vars = AIndexMap::default();
         // 物品汇变量
-        let mut sink_vars = IndexMap::new();
+        let mut sink_vars = AIndexMap::default();
         for f_id in self.flows.keys() {
             let var = problem_variables.add(variable().min(0));
             flow_vars.insert(f_id.clone(), var);
         }
 
-        let mut item_balances = IndexMap::new();
+        let mut item_balances = AIndexMap::default();
 
         log::info!(
             "求解器：开始构建物品平衡表达式：一共有 {} 个配方变量",
@@ -407,7 +405,7 @@ where
 
         // 因为存在0开销转换流，必须限制产物为0.
         // 目前约定的0开销转换流都表示其转换在其他建筑中隐式完成，所以不消耗代价，同理也必须完全配平，不允许有剩余。
-        let mut force_zero_items = IndexSet::new();
+        let mut force_zero_items = AIndexSet::default();
         for (f_id, flow_spec) in &self.flows {
             let var = flow_vars.get(f_id).unwrap();
             for (item_id, &amount) in &flow_spec.coefficients {
@@ -440,26 +438,26 @@ where
                 .or_insert(good_lp::Expression::from(0.0));
             *entry -= 1.0 * var;
         }
-        let mut no_providers: HashSet<I> = item_balances.keys().cloned().collect();
-        let mut no_consumers: HashSet<I> = item_balances.keys().cloned().collect();
+        let mut no_providers: AIndexSet<I> = item_balances.keys().cloned().collect();
+        let mut no_consumers: AIndexSet<I> = item_balances.keys().cloned().collect();
         for (_flow, flow_spec) in &self.flows {
             for (item_id, &amount) in &flow_spec.coefficients {
                 if amount > 0.0 {
-                    no_providers.remove(item_id);
+                    no_providers.swap_remove(item_id);
                 }
                 if amount < 0.0 {
-                    no_consumers.remove(item_id);
+                    no_consumers.swap_remove(item_id);
                 }
             }
         }
         for item in self.sources.keys() {
-            no_providers.remove(item);
+            no_providers.swap_remove(item);
         }
         for item in self.sinks.keys() {
-            no_consumers.remove(item);
+            no_consumers.swap_remove(item);
         }
         let mut constraints = Vec::new();
-        let mut item_to_constraint = HashMap::new();
+        let mut item_to_constraint = AIndexMap::default();
         let mut add_constraint = |item_id: &I, constraint: good_lp::Constraint| {
             constraints.push(constraint);
             item_to_constraint.insert(item_id.clone(), constraints.len() - 1);
@@ -550,9 +548,9 @@ where
             Ok(sol) => {
                 log::info!("求解器：求解成功，开始构建结果");
                 let global_scale = sol.global_scale;
-                let mut sum = Flow::new();
-                let mut prim = Flow::new();
-                let mut prim_scale = Flow::new();
+                let mut sum = Flow::default();
+                let mut prim = Flow::default();
+                let mut prim_scale = Flow::default();
 
                 for (f_id, var) in &flow_vars {
                     let cur_prim_scale = sol.prim_scales.get(var).cloned().unwrap_or(1.0);
@@ -639,7 +637,7 @@ where
         std::thread::spawn(move || {
             log::info!("求解线程启动");
             loop {
-                let mut reqs = HashMap::new();
+                let mut reqs = AIndexMap::default();
                 std::thread::sleep(std::time::Duration::from_millis(50));
                 while let Ok((req_id, req)) = problem_rx.try_recv() {
                     reqs.insert(req_id, req);

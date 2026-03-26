@@ -1,7 +1,5 @@
-use std::collections::HashMap;
-
 use crate::{
-    concept::Flow,
+    concept::{AIndexMap, Flow},
     factorio::{
         DataContext, IdWithQuality,
         common::{Effect, EnergyAmount, EnergySource, index_map_update_entry},
@@ -19,7 +17,7 @@ pub fn energy_source_as_flow(
     fuel: &Option<(String, i32)>,
     fulfillment: &mut f64,
 ) -> Flow<DualVar> {
-    let mut map = Flow::new();
+    let mut map = Flow::default();
 
     match energy_source {
         EnergySource::Electric(source) => {
@@ -37,7 +35,7 @@ pub fn energy_source_as_flow(
             for (pollutant, emmision) in source
                 .emissions_per_minute
                 .as_ref()
-                .unwrap_or(&HashMap::new())
+                .unwrap_or(&AIndexMap::default())
                 .iter()
             {
                 index_map_update_entry(
@@ -58,7 +56,7 @@ pub fn energy_source_as_flow(
             for (pollutant, emmision) in source
                 .emissions_per_minute
                 .as_ref()
-                .unwrap_or(&HashMap::new())
+                .unwrap_or(&AIndexMap::default())
                 .iter()
             {
                 index_map_update_entry(
@@ -109,7 +107,7 @@ pub fn energy_source_as_flow(
             for (pollutant, emmision) in source
                 .emissions_per_minute
                 .as_ref()
-                .unwrap_or(&HashMap::new())
+                .unwrap_or(&AIndexMap::default())
                 .iter()
             {
                 index_map_update_entry(
@@ -230,7 +228,7 @@ pub fn energy_source_as_flow(
             for (pollutant, emmision) in source
                 .emissions_per_minute
                 .as_ref()
-                .unwrap_or(&HashMap::new())
+                .unwrap_or(&AIndexMap::default())
                 .iter()
             {
                 index_map_update_entry(
@@ -246,7 +244,7 @@ pub fn energy_source_as_flow(
             for (pollutant, emmision) in source
                 .emissions_per_minute
                 .as_ref()
-                .unwrap_or(&HashMap::new())
+                .unwrap_or(&AIndexMap::default())
                 .iter()
             {
                 index_map_update_entry(

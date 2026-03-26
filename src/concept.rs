@@ -1,6 +1,6 @@
 use std::{any::Any, fmt::Debug, hash::Hash, sync::mpsc::*};
 
-use indexmap::IndexMap;
+use indexmap::{IndexMap, IndexSet};
 
 /// 对一个列表进行操作后，对这个项额外进行的操作，仅用作指示
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,7 +43,10 @@ pub trait SolveContext: Debug + Send + Sync + Any {
     type Item: ItemIdent;
 }
 
-pub type Flow<I> = IndexMap<I, f64>;
+pub type AIndexMap<K, V> = IndexMap<K, V, ahash::RandomState>;
+pub type AIndexSet<K> = IndexSet<K, ahash::RandomState>;
+
+pub type Flow<I> = AIndexMap<I, f64>;
 
 pub trait ItemIdent: Debug + Clone + Eq + Hash + Send + Sync + 'static {}
 impl<T> ItemIdent for T where T: Debug + Clone + Eq + Hash + Send + Sync + 'static {}

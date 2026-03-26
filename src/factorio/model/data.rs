@@ -1,5 +1,4 @@
 use std::{
-    collections::{HashMap, HashSet},
     env,
     fmt::{Debug, Display},
     hash::Hash,
@@ -8,7 +7,6 @@ use std::{
     process::Command,
 };
 
-use indexmap::IndexMap;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use serde_json::Value;
 use serde_with::{DefaultOnError, serde_as};
@@ -49,7 +47,7 @@ pub struct DataContext {
 
     /// 科技
     pub technologies: Dict<TechnologyPrototype>,
-    pub technology_dependents: Dict<HashSet<String>>,
+    pub technology_dependents: Dict<AIndexSet<String>>,
 
     /// 燃料类型
     pub fuel_categories: Dict<PrototypeBase>,
@@ -63,8 +61,8 @@ pub struct DataContext {
     /// 品质
     pub qualities: Vec<QualityPrototype>,
 
-    pub ordered_entries: HashMap<String, OrderInfo>,
-    pub order_of_entries: HashMap<String, ReverseOrderInfo>,
+    pub ordered_entries: AIndexMap<String, OrderInfo>,
+    pub order_of_entries: AIndexMap<String, ReverseOrderInfo>,
 
     /// 被转化的物品集合
     pub items: Dict<ItemPrototype>,
@@ -146,11 +144,11 @@ impl DataContext {
         let technologies = deserialize_type(value, "technology");
         let fuel_categories = deserialize_type(value, "fuel-category");
         let airborne_pollutants = deserialize_type(value, "airborne-pollutant");
-        let mut items = Dict::<ItemPrototype>::new();
+        let mut items = Dict::<ItemPrototype>::default();
         for item_type in ITEM_TYPES.iter() {
             items.extend(deserialize_type::<Dict<ItemPrototype>>(value, item_type));
         }
-        let mut entities = Dict::<EntityPrototype>::new();
+        let mut entities = Dict::<EntityPrototype>::default();
         for entity_type in ENTITY_TYPES.iter() {
             entities.extend(deserialize_type::<Dict<EntityPrototype>>(
                 value,
@@ -159,7 +157,7 @@ impl DataContext {
         }
         let fluids = deserialize_type(value, "fluid");
         let recipes = deserialize_type(value, "recipe");
-        let mut crafters = Dict::<CraftingMachinePrototype>::new();
+        let mut crafters = Dict::<CraftingMachinePrototype>::default();
         for crafter_type in CRAFTING_MACHINE_TYPES.iter() {
             crafters.extend(deserialize_type::<Dict<CraftingMachinePrototype>>(
                 value,
@@ -195,8 +193,8 @@ impl DataContext {
                 }
             }
         }
-        let mut planets: HashMap<String, PlanetPrototype> = deserialize_type(value, "planet");
-        planets.extend(deserialize_type::<HashMap<String, PlanetPrototype>>(
+        let mut planets: AIndexMap<String, PlanetPrototype> = deserialize_type(value, "planet");
+        planets.extend(deserialize_type::<AIndexMap<String, PlanetPrototype>>(
             value,
             "space-location",
         ));
@@ -507,10 +505,10 @@ impl DataContext {
             } else {
                 factorio
                     .localized_name
-                    .insert(locale_category.to_string(), Dict::new());
+                    .insert(locale_category.to_string(), Dict::default());
                 factorio
                     .localized_description
-                    .insert(locale_category.to_string(), Dict::new());
+                    .insert(locale_category.to_string(), Dict::default());
                 log::warn!("翻译类别 {} 的文件不存在，跳过", locale_category);
             }
         }
@@ -705,7 +703,7 @@ impl DataContext {
             "space-location".into(),
             get_reverse_order_info(&self.ordered_entries["space-location"]),
         );
-        
+
         self.ordered_entries.insert(
             "surface".into(),
             get_order_info(&self.surfaces, &self.groups, &self.subgroups),
@@ -718,7 +716,7 @@ impl DataContext {
     }
 
     pub fn build_temperature_info(mut self) -> Self {
-        let mut temperatures: Dict<HashSet<i32>> = Dict::new();
+        let mut temperatures: Dict<AIndexSet<i32>> = Dict::default();
         for fluid in self.fluids.values() {
             temperatures
                 .entry(fluid.base.name.clone())
@@ -795,17 +793,17 @@ impl DataContext {
         let dependents = self
             .technologies
             .par_iter()
-            .fold(Dict::new, |mut acc, (name, proto)| {
+            .fold(Dict::default, |mut acc, (name, proto)| {
                 proto.prerequisites.iter().for_each(|prerequisite| {
                     acc.entry(prerequisite.clone())
-                        .or_insert_with(HashSet::new)
+                        .or_insert_with(AIndexSet::default)
                         .insert(name.clone());
                 });
                 acc
             })
-            .reduce(Dict::new, |mut acc, other| {
+            .reduce(Dict::default, |mut acc, other| {
                 for (k, v) in other.into_iter() {
-                    acc.entry(k).or_insert_with(HashSet::new).extend(v);
+                    acc.entry(k).or_insert_with(AIndexSet::default).extend(v);
                 }
                 acc
             });
@@ -912,7 +910,7 @@ pub fn make_located_generic_recipe(
     original: Flow<DualVar>,
     location: u16,
 ) -> Flow<GenericItemWithLocation> {
-    let mut located = IndexMap::new();
+    let mut located = AIndexMap::default();
     for (key, value) in original.into_iter() {
         let located_key = GenericItemWithLocation {
             base: key,

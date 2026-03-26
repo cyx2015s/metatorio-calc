@@ -1,7 +1,7 @@
 mod graph;
 
+use crate::concept::AIndexMap;
 pub use graph::*;
-use indexmap::IndexMap;
 
 use std::{path::PathBuf, sync::mpsc::Sender};
 
@@ -15,7 +15,7 @@ pub struct ProjectContext {
     // 指定的科技里程碑关闭时，这个节点的科技将被视为未解锁（即使它的前置科技都已解锁了），以此来模拟不同的科技树分支
     pub tech_milestones: Vec<(String, bool)>,
 
-    pub recipe_productivity: IndexMap<String, f64>,
+    pub recipe_productivity: AIndexMap<String, f64>,
 
     pub ignore_productivity: bool,
 
@@ -45,7 +45,7 @@ pub struct ProjectContext {
     pub factory_sender: Option<Sender<FactoryInstance>>,
 
     #[serde(skip)]
-    pub milestone_graph: IndexMap<String, MilestoneNode>,
+    pub milestone_graph: AIndexMap<String, MilestoneNode>,
 
     #[serde(skip)]
     pub hovered_tech: Option<String>,

@@ -1,8 +1,11 @@
-use std::{collections::HashMap, fmt::Debug};
+use std::fmt::Debug;
 
 use serde_with::{DefaultOnError, serde_as};
 
-use crate::factorio::{DataContext, Dict, DualVar, HasPrototypeBase, IdWithQuality, PrototypeBase};
+use crate::{
+    concept::AIndexMap,
+    factorio::{DataContext, Dict, DualVar, HasPrototypeBase, IdWithQuality, PrototypeBase},
+};
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct PlanetPrototype {
@@ -99,8 +102,8 @@ pub struct AutoplaceSettings {
 }
 
 impl PlanetPrototype {
-    pub fn collect_autoplaced(&self, data: &DataContext) -> HashMap<DualVar, f64> {
-        let mut items = HashMap::new();
+    pub fn collect_autoplaced(&self, data: &DataContext) -> AIndexMap<DualVar, f64> {
+        let mut items = AIndexMap::default();
         for entity in data.entities.values() {
             if entity.base.r#type != "resource" && entity.base.r#type != "asteroid-chunk" {
                 continue;
@@ -184,7 +187,7 @@ impl PlanetPrototype {
         items
     }
 
-    pub fn collect_asteroids(&self, data: &DataContext) -> HashMap<DualVar, f64> {
+    pub fn collect_asteroids(&self, data: &DataContext) -> AIndexMap<DualVar, f64> {
         todo!()
     }
 }

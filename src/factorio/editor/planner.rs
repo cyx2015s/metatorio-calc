@@ -1,5 +1,4 @@
 use std::{
-    collections::{HashMap, HashSet},
     io::BufReader,
     path::Path,
     sync::{Arc, mpsc::*},
@@ -25,8 +24,6 @@ use crate::{
     },
     math::*,
 };
-
-use indexmap::IndexMap;
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
@@ -176,13 +173,13 @@ impl FactoryInstance {
                     ),
                 )
             })
-            .collect::<IndexMap<_, _>>();
+            .collect::<AIndexMap<_, _>>();
 
         let target = self
             .target
             .iter()
             .map(|(item, amount)| (item.clone(), *amount))
-            .fold(IndexMap::new(), |mut acc, (item, amount)| {
+            .fold(AIndexMap::default(), |mut acc, (item, amount)| {
                 *acc.entry(item).or_insert(0.0) +=
                     amount * (if item.is_energy() { 1e6 } else { 1.0 });
                 acc
@@ -196,7 +193,7 @@ impl FactoryInstance {
                     if item.is_energy() { 1e-6 } else { 1.0 } * penalty,
                 )
             })
-            .collect::<IndexMap<_, _>>();
+            .collect::<AIndexMap<_, _>>();
 
         if let Some(planet_name) = &self.factory.planet
             && let Some(planet) = data.planets.get(planet_name)
@@ -218,9 +215,9 @@ impl FactoryInstance {
             }
         }
 
-        let mut fluid_temperaturess = HashMap::new();
-        let mut fluid_fuels = HashSet::new();
-        let mut fluid_heats = HashSet::new();
+        let mut fluid_temperaturess = AIndexMap::default();
+        let mut fluid_fuels = AIndexSet::default();
+        let mut fluid_heats = AIndexSet::default();
         for (flow, _) in flows.values() {
             for (item, _) in flow {
                 update_fluid_metainfo(
@@ -253,7 +250,7 @@ impl FactoryInstance {
             for narrow in temperatures {
                 for broad in temperatures {
                     if narrow[0] >= broad[0] && narrow[1] <= broad[1] && narrow != broad {
-                        let mut flow = Flow::new();
+                        let mut flow = Flow::default();
                         flow.insert(
                             DualVar::Fluid {
                                 name: fluid.clone(),
@@ -276,7 +273,7 @@ impl FactoryInstance {
             }
         }
         fluid_fuels.into_iter().for_each(|fluid| {
-            let mut flow = Flow::new();
+            let mut flow = Flow::default();
             flow.insert(
                 DualVar::FluidFuel {
                     filter: fluid.into(),
@@ -289,7 +286,7 @@ impl FactoryInstance {
             aux_idx += 1;
         });
         fluid_heats.into_iter().for_each(|fluid| {
-            let mut flow = Flow::new();
+            let mut flow = Flow::default();
             flow.insert(
                 DualVar::FluidHeat {
                     filter: fluid.into(),
@@ -301,7 +298,7 @@ impl FactoryInstance {
             flows.insert((usize::MAX, aux_idx), (flow, 0.0));
             aux_idx += 1;
         });
-        let mut sinks = IndexMap::new();
+        let mut sinks = AIndexMap::default();
         for pollutant in &data.airborne_pollutants {
             sinks.insert(
                 crate::factorio::DualVar::Pollution {
@@ -1098,9 +1095,9 @@ impl FactoryInstance {
 }
 
 fn update_fluid_metainfo(
-    fluid_temperaturess: &mut HashMap<String, HashSet<[i32; 2]>>,
-    fluid_fuels: &mut HashSet<String>,
-    fluid_heats: &mut HashSet<String>,
+    fluid_temperaturess: &mut AIndexMap<String, AIndexSet<[i32; 2]>>,
+    fluid_fuels: &mut AIndexSet<String>,
+    fluid_heats: &mut AIndexSet<String>,
     item: &DualVar,
 ) {
     match item {

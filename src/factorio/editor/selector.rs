@@ -1,6 +1,6 @@
-use std::collections::HashMap;
-
 use egui::Vec2;
+
+use crate::concept::AIndexMap;
 
 use crate::factorio::{
     DataContext, IdWithQuality, drag_value, editor::icon::*, modal::SelectorModal, model::*,
@@ -101,7 +101,7 @@ impl<'a> egui::Widget for Selector<'a, str, String> {
         let id = ui.id();
         let mut storage: SelectorStorage =
             ui.memory(move |mem| mem.data.get_temp::<SelectorStorage>(id).unwrap_or_default());
-        let mut filtered_group = HashMap::new();
+        let mut filtered_group = AIndexMap::default();
         for (i, group) in self.data.ordered_entries[self.type_name].iter().enumerate() {
             for subgroup in group.1.iter() {
                 for item_name in subgroup.1.iter() {

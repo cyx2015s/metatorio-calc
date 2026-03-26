@@ -4,6 +4,7 @@ version = "1.2.51"
 edition = "2024"
 
 [dependencies]
+ahash = { version = "0.8", features = ["serde"] }
 dirs = "6"
 dyn-clone = "1"
 eframe = { version = "0.33" }

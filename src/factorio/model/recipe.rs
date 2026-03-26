@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    fmt::Debug,
-};
+use std::fmt::Debug;
 
 use serde_with::{DefaultOnError, serde_as};
 
@@ -447,7 +444,7 @@ impl AsFlow for RecipeInstance {
         proj: &ProjectContext,
         _factory: &FactoryContext,
     ) -> Flow<Self::Item> {
-        let mut map = Flow::new();
+        let mut map = Flow::default();
 
         let mut module_effects = self.module_config.get_effect(data);
 
@@ -697,7 +694,7 @@ pub struct RecipeMechanic {
     #[serde(skip)]
     pub suggestion_amount: f64,
     #[serde(skip)]
-    pub suggested_recipes: HashSet<String>,
+    pub suggested_recipes: AIndexSet<String>,
     #[serde(skip)]
     pub selected_suggested_recipe: Option<String>,
     #[serde(skip)]
@@ -871,7 +868,8 @@ impl FactorioMechanic for RecipeMechanic {
                 .on_hover_text("根据当前科技等级，选择每个类别的最佳插件加入枚举。")
                 .clicked()
             {
-                let mut modules_by_category: HashMap<String, &ModulePrototype> = HashMap::new();
+                let mut modules_by_category: AIndexMap<String, &ModulePrototype> =
+                    AIndexMap::default();
                 for module in data.modules.values() {
                     if proj.is_prototype_accessible("item", &module.base.name) {
                         let category = module.category.clone();
@@ -1265,10 +1263,11 @@ impl FactorioMechanic for RecipeMechanic {
                     let mut quality_involved = false;
                     for module in &allowed_modules {
                         if let Some(prototype) = data.modules.get(&module.0)
-                            && prototype.effect.quality > 0.0 {
-                                quality_involved = true;
-                                break;
-                            }
+                            && prototype.effect.quality > 0.0
+                        {
+                            quality_involved = true;
+                            break;
+                        }
                     }
                     let module_slots = machine_proto.module_slots as usize;
 

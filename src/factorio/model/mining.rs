@@ -1,9 +1,7 @@
-use std::collections::{HashMap, HashSet};
-
 use serde_with::serde_as;
 
 use crate::{
-    concept::{Flow, SolveContext},
+    concept::{AIndexMap, AIndexSet, Flow, SolveContext},
     factorio::{
         ModuleConfig, ModuleConfigEditor, ModulePrototype, ProjectContext,
         calc_quality_distribution,
@@ -123,7 +121,7 @@ impl AsFlow for MiningInstance {
         proj: &ProjectContext,
         _factory: &FactoryContext,
     ) -> Flow<Self::Item> {
-        let mut map = Flow::new();
+        let mut map = Flow::default();
 
         let mut module_effects = self.module_config.get_effect(data);
 
@@ -338,7 +336,7 @@ pub struct MiningMechanic {
     #[serde(skip)]
     pub suggestion_amount: f64,
     #[serde(skip)]
-    pub suggested_resources: HashSet<String>,
+    pub suggested_resources: AIndexSet<String>,
     #[serde(skip)]
     pub selected_suggested_resource: Option<String>,
     #[serde(skip)]
@@ -455,7 +453,8 @@ impl FactorioMechanic for MiningMechanic {
                 .on_hover_text("根据当前科技等级，选择每个类别的最佳插件加入枚举。")
                 .clicked()
             {
-                let mut modules_by_category: HashMap<String, &ModulePrototype> = HashMap::new();
+                let mut modules_by_category: AIndexMap<String, &ModulePrototype> =
+                    AIndexMap::default();
                 for module in data.modules.values() {
                     if proj.is_prototype_accessible("item", &module.base.name) {
                         let category = module.category.clone();

@@ -1,11 +1,11 @@
-use std::collections::{HashSet, VecDeque};
+use std::collections::{VecDeque};
 
 use egui::DragValue;
 
-use crate::factorio::{
+use crate::{concept::AIndexSet, factorio::{
     DataContext, ProjectContext, TimeScale, icon::Icon, modal::SelectorModal,
     resolve_milestone_graph, selector::Selector, style::card_frame, update_accessibles,
-};
+}};
 
 #[derive(Debug)]
 pub struct UserContextEditor<'a> {
@@ -114,7 +114,7 @@ impl egui::Widget for UserContextEditor<'_> {
         });
         if let Some(unlocked_tech) = recursively_unlock {
             let mut queue = VecDeque::new();
-            let mut visited = HashSet::new();
+            let mut visited = AIndexSet::default();
             queue.push_back(unlocked_tech);
             while let Some(tech_name) = queue.pop_front() {
                 if visited.contains(&tech_name) {

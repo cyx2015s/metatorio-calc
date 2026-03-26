@@ -159,7 +159,7 @@ impl AsFlow for ReactorInstance {
         _proj: &ProjectContext,
         _factory: &FactoryContext,
     ) -> Flow<DualVar> {
-        let mut flow = Flow::new();
+        let mut flow = Flow::default();
         if let Some(reactor) = data.reactors.get(&self.reactor.0) {
             flow = flow_add(
                 &flow,
