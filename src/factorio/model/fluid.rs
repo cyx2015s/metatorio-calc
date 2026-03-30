@@ -857,7 +857,7 @@ fn temperature_editor(
         // 从data.temperatures中选择固定温度
         if let Some(temperatures) = data.temperatures.get(&fluid.base.name) {
             ui.horizontal(|ui| {
-                ui.menu_button("选择预设温度", |ui| {
+                ui.menu_button(t!("metatorio.select-preset-temperature"), |ui| {
                     for &temp in temperatures {
                         if temp >= default_temp
                             && temp <= max_temp

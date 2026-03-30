@@ -52,7 +52,7 @@ pub fn auto_planner_ref_silent(
 
     factory.trim_flows();
 
-    factory.name += " (自动规划)";
+    factory.name += "[+]";
     let end_time = Instant::now();
     log::info!("自动规划完成: {}", factory.name);
     log::info!("线性规划用时: {:.2?}", instant.elapsed());
@@ -119,7 +119,7 @@ pub fn auto_planner_ref(
 
     factory.trim_flows();
 
-    factory.name += " (自动规划)";
+    factory.name += "[+]";
     let end_time = Instant::now();
     log::info!("自动规划完成: {}", factory.name);
     log::info!("线性规划用时: {:.2?}", instant.elapsed());

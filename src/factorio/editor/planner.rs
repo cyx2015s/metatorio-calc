@@ -1585,7 +1585,7 @@ impl ProjectView {
 
 impl SubView for ProjectView {
     fn name(&self) -> String {
-        t!("metatorio.projects").to_string()
+        "Factorio".to_string()
     }
     fn description(&self) -> String {
         t!(
@@ -1974,7 +1974,6 @@ impl SubView for ContextCreatorView {
             {
                 let exe_path = path.clone().as_path().to_owned();
                 let mod_path = self.mod_path.clone().map(|p| p.as_path().to_owned());
-                let lang = "zh-CN".to_string();
 
                 let sender = sender.clone();
                 self.thread =
@@ -1982,7 +1981,7 @@ impl SubView for ContextCreatorView {
                         move || match DataContext::load_from_executable_path(
                             &exe_path,
                             mod_path.as_deref(),
-                            Some(&lang),
+                            Some(&fust_i18n::get_locale()),
                         ) {
                             Ok(data) => {
                                 sender

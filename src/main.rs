@@ -350,8 +350,15 @@ impl eframe::App for MainPage {
                 if ui.button(t!("metatorio.logs")).clicked() {
                     self.selected = SelectedSubview::Logs;
                 }
-                if ui.button(t!("metatorio.dump-locale")).clicked() {
-                    eprintln!("{:#?}", get_missing_keys());
+                // if ui.button(t!("metatorio.dump-locale")).clicked() {
+                //     eprintln!("{:#?}", get_missing_keys());
+                // }
+                ui.separator();
+                ui.heading("🌐");
+                for locale in ["en", "zh-CN"] {
+                    if ui.button(locale).clicked() {
+                        fust_i18n::set_locale(locale);
+                    }
                 }
             });
         egui::CentralPanel::default().show(factorio, |ui| match self.selected {
@@ -380,10 +387,29 @@ fn main() {
         .unwrap();
 
     log::info!("应用程序启动");
+    match current_locale::current_locale() {
+        Ok(loc) => {
+            if loc.contains("zh") {
+                fust_i18n::set_locale("zh-CN");
+            } else {
+                fust_i18n::set_locale("en");
+            }
+        }
+        Err(_) => {
+            // 不管了，看中文去吧
+            fust_i18n::set_locale("zh-CN");
+        }
+    }
     update_i18n_ini(
         "zh-CN",
         std::io::Cursor::new(include_str!("../locales/zh-CN.cfg")),
-    ).unwrap();
+    )
+    .unwrap();
+    update_i18n_ini(
+        "en",
+        std::io::Cursor::new(include_str!("../locales/en.cfg")),
+    )
+    .unwrap();
     let icon_image = image::load_from_memory(include_bytes!("../assets/icon.png")).unwrap();
     eframe::run_native(
         "metatorio",

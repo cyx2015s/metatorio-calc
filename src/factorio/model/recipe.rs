@@ -941,7 +941,7 @@ impl FactorioMechanic for RecipeMechanic {
             }
         });
         ui.separator();
-        ui.collapsing("[自动]插件塔", |ui| {
+        ui.collapsing(t!("metatorio.enumerate-beacons"), |ui| {
             if ui.button(t!("metatorio.add-beacon")).clicked() {
                 self.enumerate_beacons.push(AutoBeaconConfig {
                     module_config: ModuleConfig::new(),
