@@ -53,7 +53,7 @@ impl FactorioMechanic for ReactorMechanic {
         _factory: &FactoryContext,
     ) -> bool {
         let mut changed = false;
-        if ui.button("添加反应堆").clicked() {
+        if ui.button(t!("metatorio.add-reactor")).clicked() {
             self.instances.push(ReactorInstance::default());
             changed = true;
         }
@@ -61,7 +61,7 @@ impl FactorioMechanic for ReactorMechanic {
     }
 
     fn name(&self) -> String {
-        "反应堆".into()
+        t!("metatorio.reactor").to_string()
     }
 
     fn instance_view(
@@ -75,26 +75,29 @@ impl FactorioMechanic for ReactorMechanic {
         let mut changed = false;
         let instance = &mut self.instances[idx];
         ui.vertical(|ui| {
-            ui.label("反应堆");
+            ui.label(t!("metatorio.reactor"));
             let entity_button = ui.add_sized(
                 [35.0, 35.0],
                 Icon::new(data, "entity", &instance.reactor.0).with_quality(instance.reactor.1),
             );
             changed |= ui
                 .add(
-                    SelectorModal::new(entity_button.id, "选择反应堆")
-                        .with_toggle(entity_button.clicked())
-                        .with_selector(
-                            Selector::new(data, "entity")
-                                .with_current(&mut instance.reactor)
-                                .chain_filter(|s: &IdWithQuality, f| f.reactors.contains_key(&s.0)),
-                        ),
+                    SelectorModal::new(
+                        entity_button.id,
+                        t!("metatorio.select-reactor").to_string().as_str(),
+                    )
+                    .with_toggle(entity_button.clicked())
+                    .with_selector(
+                        Selector::new(data, "entity")
+                            .with_current(&mut instance.reactor)
+                            .chain_filter(|s: &IdWithQuality, f| f.reactors.contains_key(&s.0)),
+                    ),
                 )
                 .changed();
         });
         ui.separator();
         ui.vertical(|ui| {
-            ui.label("邻居数量");
+            ui.label(t!("metatorio.neighbours"));
             changed |= ui
                 .add(egui::DragValue::new(&mut instance.neighbours).range(0..=3))
                 .changed();

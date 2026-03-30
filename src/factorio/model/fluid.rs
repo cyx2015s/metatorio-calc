@@ -386,7 +386,7 @@ impl SerdeFactorioMechanic for GeneratorMechanic {}
 
 impl FactorioMechanic for GeneratorMechanic {
     fn name(&self) -> String {
-        "流体发电".to_string()
+        t!("metatorio.fluid-generator").to_string()
     }
 
     fn instances_proxy(&self) -> &dyn FlowProxy {
@@ -405,7 +405,10 @@ impl FactorioMechanic for GeneratorMechanic {
         _factory: &FactoryContext,
     ) -> bool {
         let mut changed = false;
-        if ui.button("添加流体发电").clicked() {
+        if ui
+            .button(t!("metatorio.add-fluid-generator").to_string().as_str())
+            .clicked()
+        {
             let new_config = GeneratorInstance {
                 generator: "entity-unknown".into(),
 
@@ -429,7 +432,7 @@ impl FactorioMechanic for GeneratorMechanic {
         let mut changed = false;
         let instance = &mut self.instances[idx];
         ui.vertical(|ui| {
-            ui.label("发电机");
+            ui.label(t!("metatorio.generator").to_string());
             let entity_button = ui.add_sized(
                 [35.0, 35.0],
                 Icon::new(data, "entity", &instance.generator.0).with_quality(instance.generator.1),
@@ -459,13 +462,13 @@ impl FactorioMechanic for GeneratorMechanic {
             if let Some(filter) = &generator.fluid_box.filter {
                 // 如果发电机指定了输入流体，则显示这个流体
                 ui.vertical(|ui| {
-                    ui.label("固定输入");
+                    ui.label(t!("metatorio.fixed-input").to_string());
                     ui.add_sized([35.0, 35.0], Icon::new(data, "fluid", filter));
                 });
             } else {
                 // 如果发电机没有指定输入流体，则允许用户选择输入流体
                 ui.vertical(|ui| {
-                    ui.label("编辑输入");
+                    ui.label(t!("metatorio.edit-input").to_string());
                     let fluid_button =
                         ui.add_sized([35.0, 35.0], Icon::new(data, "fluid", &instance.fluid));
                     if ui
@@ -643,7 +646,7 @@ impl SolveContext for BoilerMechanic {
 impl SerdeFactorioMechanic for BoilerMechanic {}
 impl FactorioMechanic for BoilerMechanic {
     fn name(&self) -> String {
-        "锅炉".to_string()
+        t!("metatorio.boiler").to_string()
     }
 
     fn instances_proxy(&self) -> &dyn FlowProxy {
@@ -662,7 +665,10 @@ impl FactorioMechanic for BoilerMechanic {
         _factory: &FactoryContext,
     ) -> bool {
         let mut changed = false;
-        if ui.button("添加锅炉").clicked() {
+        if ui
+            .button(t!("metatorio.add-boiler").to_string().as_str())
+            .clicked()
+        {
             let new_config = BoilerInstance {
                 boiler: "entity-unknown".into(),
 
@@ -687,23 +693,26 @@ impl FactorioMechanic for BoilerMechanic {
         let mut changed = false;
         let instance = &mut self.instances[idx];
         ui.vertical(|ui| {
-            ui.label("锅炉");
+            ui.label(t!("metatorio.boiler"));
             let entity_button = ui.add_sized(
                 [35.0, 35.0],
                 Icon::new(data, "entity", &instance.boiler.0).with_quality(instance.boiler.1),
             );
             if ui
                 .add(
-                    SelectorModal::new(entity_button.id, "选择锅炉")
-                        .with_toggle(entity_button.clicked())
-                        .with_selector(
-                            Selector::new(data, "entity")
-                                .with_current(&mut instance.boiler)
-                                .with_filter(|s: &IdWithQuality, f| {
-                                    f.boilers.contains_key(&s.0)
-                                        && proj.is_prototype_accessible("entity", &s.0)
-                                }),
-                        ),
+                    SelectorModal::new(
+                        entity_button.id,
+                        t!("metatorio.select-boiler").to_string().as_str(),
+                    )
+                    .with_toggle(entity_button.clicked())
+                    .with_selector(
+                        Selector::new(data, "entity")
+                            .with_current(&mut instance.boiler)
+                            .with_filter(|s: &IdWithQuality, f| {
+                                f.boilers.contains_key(&s.0)
+                                    && proj.is_prototype_accessible("entity", &s.0)
+                            }),
+                    ),
                 )
                 .changed()
             {
@@ -725,32 +734,35 @@ impl FactorioMechanic for BoilerMechanic {
             if let Some(filter) = &boiler.fluid_box.filter {
                 // 如果锅炉指定了输入流体，则显示这个流体
                 ui.vertical(|ui| {
-                    ui.label("固定输入");
+                    ui.label(t!("metatorio.fixed-input"));
                     ui.add_sized([35.0, 35.0], Icon::new(data, "fluid", filter));
                 });
             } else {
                 // 如果锅炉没有指定输入流体，则允许用户选择输入流体
                 ui.vertical(|ui| {
-                    ui.label("编辑输入");
+                    ui.label(t!("metatorio.edit-input"));
                     let fluid_button =
                         ui.add_sized([35.0, 35.0], Icon::new(data, "fluid", &instance.fluid));
                     if ui
                         .add(
-                            SelectorModal::new(fluid_button.id, "选择输入流体")
-                                .with_toggle(fluid_button.clicked())
-                                .with_selector(
-                                    Selector::new(data, "fluid")
-                                        .with_current(&mut instance.fluid)
-                                        .with_filter(|s: &str, f| {
-                                            if let Some(fluid_prototype) = f.fluids.get(s) {
-                                                return proj.is_prototype_accessible("fluid", s)
-                                                    && fluid_prototype
-                                                        .heat_capacity
-                                                        .is_none_or(|x| x.amount > 0.0);
-                                            }
-                                            false
-                                        }),
-                                ),
+                            SelectorModal::new(
+                                fluid_button.id,
+                                t!("metatorio.select-fluid").to_string().as_str(),
+                            )
+                            .with_toggle(fluid_button.clicked())
+                            .with_selector(
+                                Selector::new(data, "fluid")
+                                    .with_current(&mut instance.fluid)
+                                    .with_filter(|s: &str, f| {
+                                        if let Some(fluid_prototype) = f.fluids.get(s) {
+                                            return proj.is_prototype_accessible("fluid", s)
+                                                && fluid_prototype
+                                                    .heat_capacity
+                                                    .is_none_or(|x| x.amount > 0.0);
+                                        }
+                                        false
+                                    }),
+                            ),
                         )
                         .changed()
                     {
@@ -866,7 +878,7 @@ fn temperature_editor(
 
         // 允许手动输入温度
         ui.horizontal(|ui| {
-            ui.label("编辑温度:");
+            ui.label(t!("metatorio.edit-temperature").to_string());
             if ui
                 .add(
                     egui::DragValue::new(editing_temperature)
@@ -969,7 +981,7 @@ impl SerdeFactorioMechanic for FluidFuelMechanic {}
 
 impl FactorioMechanic for FluidFuelMechanic {
     fn name(&self) -> String {
-        "流体燃烧".to_string()
+        t!("metatorio.fluid-fuel").to_string()
     }
 
     fn instances_proxy(&self) -> &dyn FlowProxy {
@@ -988,7 +1000,7 @@ impl FactorioMechanic for FluidFuelMechanic {
         _factory: &FactoryContext,
     ) -> bool {
         let mut changed = false;
-        if ui.button("添加流体燃烧").clicked() {
+        if ui.button(t!("metatorio.add-fluid-fuel")).clicked() {
             let new_config = FluidFuelInstance {
                 fluid: "fluid-unknown".to_string(),
                 temperature: 25,
@@ -1010,26 +1022,29 @@ impl FactorioMechanic for FluidFuelMechanic {
         let mut changed = false;
         let instance = &mut self.instances[idx];
         ui.vertical(|ui| {
-            ui.label("流体燃烧");
+            ui.label(t!("metatorio.fluid-fuel").to_string());
             let fluid_button =
                 ui.add_sized([35.0, 35.0], Icon::new(data, "fluid", &instance.fluid));
             if ui
                 .add(
-                    SelectorModal::new(fluid_button.id, "选择流体")
-                        .with_toggle(fluid_button.clicked())
-                        .with_selector(
-                            Selector::new(data, "fluid")
-                                .with_current(&mut instance.fluid)
-                                .with_filter(|s: &str, f| {
-                                    if let Some(fluid_prototype) = f.fluids.get(s) {
-                                        return proj.is_prototype_accessible("fluid", s)
-                                            && fluid_prototype
-                                                .fuel_value
-                                                .is_some_and(|x| x.amount > 0.0);
-                                    }
-                                    false
-                                }),
-                        ),
+                    SelectorModal::new(
+                        fluid_button.id,
+                        t!("metatorio.select-fluid").to_string().as_str(),
+                    )
+                    .with_toggle(fluid_button.clicked())
+                    .with_selector(
+                        Selector::new(data, "fluid")
+                            .with_current(&mut instance.fluid)
+                            .with_filter(|s: &str, f| {
+                                if let Some(fluid_prototype) = f.fluids.get(s) {
+                                    return proj.is_prototype_accessible("fluid", s)
+                                        && fluid_prototype
+                                            .fuel_value
+                                            .is_some_and(|x| x.amount > 0.0);
+                                }
+                                false
+                            }),
+                    ),
                 )
                 .changed()
             {
@@ -1133,7 +1148,7 @@ impl SolveContext for FluidHeatMechanic {
 impl SerdeFactorioMechanic for FluidHeatMechanic {}
 impl FactorioMechanic for FluidHeatMechanic {
     fn name(&self) -> String {
-        "流体供热".to_string()
+        t!("metatorio.fluid-heat").to_string()
     }
 
     fn instances_proxy(&self) -> &dyn FlowProxy {
@@ -1152,7 +1167,7 @@ impl FactorioMechanic for FluidHeatMechanic {
         _factory: &FactoryContext,
     ) -> bool {
         let mut changed = false;
-        if ui.button("添加流体供热").clicked() {
+        if ui.button(t!("metatorio.add-fluid-heat")).clicked() {
             let new_config = FluidHeatInstance {
                 fluid: "fluid-unknown".to_string(),
                 temperature: 25,
@@ -1174,26 +1189,29 @@ impl FactorioMechanic for FluidHeatMechanic {
         let mut changed = false;
         let instance = &mut self.instances[idx];
         ui.vertical(|ui| {
-            ui.label("流体供热");
+            ui.label(t!("metatorio.fluid-heat"));
             let fluid_button =
                 ui.add_sized([35.0, 35.0], Icon::new(data, "fluid", &instance.fluid));
             if ui
                 .add(
-                    SelectorModal::new(fluid_button.id, "选择流体")
-                        .with_toggle(fluid_button.clicked())
-                        .with_selector(
-                            Selector::new(data, "fluid")
-                                .with_current(&mut instance.fluid)
-                                .with_filter(|s: &str, f| {
-                                    if let Some(fluid_prototype) = f.fluids.get(s) {
-                                        return proj.is_prototype_accessible("fluid", s)
-                                            && fluid_prototype
-                                                .heat_capacity
-                                                .is_none_or(|x| x.amount > 0.0);
-                                    }
-                                    false
-                                }),
-                        ),
+                    SelectorModal::new(
+                        fluid_button.id,
+                        t!("metatorio.select-fluid").to_string().as_str(),
+                    )
+                    .with_toggle(fluid_button.clicked())
+                    .with_selector(
+                        Selector::new(data, "fluid")
+                            .with_current(&mut instance.fluid)
+                            .with_filter(|s: &str, f| {
+                                if let Some(fluid_prototype) = f.fluids.get(s) {
+                                    return proj.is_prototype_accessible("fluid", s)
+                                        && fluid_prototype
+                                            .heat_capacity
+                                            .is_none_or(|x| x.amount > 0.0);
+                                }
+                                false
+                            }),
+                    ),
                 )
                 .changed()
             {

@@ -2,10 +2,12 @@
 
 use std::sync::{LazyLock, mpsc::*};
 
-use egui::special_emojis::GITHUB;
+use fust_i18n::{get_missing_keys, update_i18n_ini};
 use mimalloc::MiMalloc;
 
 use crate::update::*;
+#[macro_use]
+extern crate fust_i18n;
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
@@ -86,10 +88,8 @@ impl Default for MainPage {
                             }
                             Err(err) => {
                                 log::error!("获取最新版本失败: {:?}", err);
-                                network_response_tx.send(Err(error::AppError::Update(format!(
-                                    "获取最新版本失败: {:?}",
-                                    err
-                                ))))?;
+                                network_response_tx
+                                    .send(Err(error::AppError::Update(err.to_string())))?;
                             }
                         }
                     }
@@ -139,7 +139,7 @@ impl MainPage {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let mut ret = Self {
             creators: vec![(
-                "异星工厂".to_string(),
+                t!("metatorio.factorio").to_string(),
                 Box::new(factorio::planner::ContextCreatorView::default()),
             )],
             ..Default::default()
@@ -173,18 +173,30 @@ impl eframe::App for MainPage {
         egui::SidePanel::left(egui::Id::new("side"))
             .width_range(200.0..=280.0)
             .show(factorio, |ui| {
-                let heading = ui.heading("切向量化").interact(egui::Sense::click());
+                let heading = ui.heading(t!("metatorio.title").to_string());
                 if heading.clicked() {
                     self.selected = SelectedSubview::Title;
                 }
-                ui.label(format!("[构建] Git 哈希: {}", GIT_HASH));
-                ui.label(format!(
-                    "[性能] 帧生成时间: {:.2}ms",
-                    self.exp_cpu_usage * 1000.0
-                ));
+                ui.label(t!("metatorio.build-hash", GIT_HASH).to_string());
+                ui.label(
+                    t!(
+                        "metatorio.cpu-usage",
+                        format!("{:.2}", self.exp_cpu_usage * 1000.0)
+                    )
+                    .to_string(),
+                );
                 ui.separator();
-                ui.label(format!("当前版本: {}", self_update::cargo_crate_version!()));
-                if ui.button("检查更新").clicked() {
+                ui.label(
+                    t!(
+                        "metatorio.current-version",
+                        self_update::cargo_crate_version!()
+                    )
+                    .to_string(),
+                );
+                if ui
+                    .button(t!("metatorio.check-update").to_string())
+                    .clicked()
+                {
                     self.request_sender
                         .send(NetworkRequest::FetchReleases)
                         .unwrap();
@@ -196,19 +208,21 @@ impl eframe::App for MainPage {
                         Ok(_) => {}
                         Err(ref err) => match err {
                             error::AppError::UpToDate => {
-                                toast::success("当前已是最新版本。");
+                                toast::success(t!("metatorio.up-to-date").to_string());
                             }
                             error::AppError::None => {}
                             err => {
-                                toast::error(format!("更新检查失败: {:?}", err));
+                                toast::error(
+                                    t!("metatorio.update-failed", format!("{:?}", err)).to_string(),
+                                );
                             }
                         },
                     }
                 }
                 match &mut self.suitable_release {
                     Ok(release) => {
-                        ui.label(format!("可更新新版本: {}", release.version));
-                        if ui.button("更新").clicked() {
+                        ui.label(t!("metatorio.new-version-available", &release.version));
+                        if ui.button(t!("metatorio.update").to_string()).clicked() {
                             self.request_sender
                                 .send(NetworkRequest::SelfUpdate)
                                 .unwrap();
@@ -217,11 +231,11 @@ impl eframe::App for MainPage {
                     Err(err) => match err {
                         error::AppError::None => {}
                         error::AppError::UpToDate => {
-                            ui.label("当前已是最新版本。");
+                            ui.label(t!("metatorio.up-to-date").to_string());
                         }
                         error::AppError::RestartRequired => {
-                            ui.label("重启以应用更新。");
-                            if ui.button("重启应用").clicked() {
+                            ui.label(t!("metatorio.restart-required").to_string());
+                            if ui.button(t!("metatorio.restart-app").to_string()).clicked() {
                                 #[allow(clippy::zombie_processes)]
                                 std::process::Command::new(std::env::current_exe().unwrap())
                                     .spawn()
@@ -230,12 +244,14 @@ impl eframe::App for MainPage {
                             }
                         }
                         _err => {
-                            ui.label("更新检查失败");
+                            ui.label(
+                                t!("metatorio.update-failed", format!("{:?}", _err)).to_string(),
+                            );
                         }
                     },
                 }
                 ui.add(egui::Hyperlink::from_label_and_url(
-                    format!("{} Github 仓库", GITHUB),
+                    t!("metatorio.github-repo").to_string(),
                     "https://github.com/cyx2015s/metatorio-calc",
                 ));
                 ui.separator();
@@ -273,7 +289,7 @@ impl eframe::App for MainPage {
                     i += 1;
                     let mut deleted = false;
                     label.context_menu(|ui| {
-                        if ui.button("关闭（\u{26A0}不会出现保存确认！）").clicked() {
+                        if ui.button(t!("metatorio.close-planner")).clicked() {
                             deleted = true;
                         }
                     });
@@ -286,12 +302,12 @@ impl eframe::App for MainPage {
                     self.selected = SelectedSubview::Title;
                 }
                 ui.separator();
-                if ui.button("重新加载图标").clicked() {
+                if ui.button(t!("metatorio.reload-icons")).clicked() {
                     ui.ctx().forget_all_images();
                 }
                 ui.separator();
                 ui.text_edit_singleline(&mut self.font_filter);
-                ui.menu_button("选择字体", |ui| {
+                ui.menu_button(t!("metatorio.select-font"), |ui| {
                     egui::ScrollArea::vertical()
                         .max_height(480.0)
                         .max_width(480.0)
@@ -331,21 +347,27 @@ impl eframe::App for MainPage {
                         })
                 });
                 ui.separator();
-                if ui.button("日志").clicked() {
+                if ui.button(t!("metatorio.logs")).clicked() {
                     self.selected = SelectedSubview::Logs;
+                }
+                if ui.button(t!("metatorio.dump-locale")).clicked() {
+                    eprintln!("{:#?}", get_missing_keys());
                 }
             });
         egui::CentralPanel::default().show(factorio, |ui| match self.selected {
             SelectedSubview::Title => {
-                ui.label("快速开始: ");
-                ui.label("从左侧选择一个游戏环境以开始使用。");
-                ui.label("以异星工厂为例：选择游戏的可执行文件路径后点击加载游戏上下文，之后选择左侧的异星工厂 - 游戏规划器，在文件栏创建新工厂，编辑生产目标，右键点击物品图标快速添加配方、采矿等生产方式。");
-            },
+                ui.label(t!("metatorio.welcome").to_string());
+                ui.label(t!("metatorio.welcome-description").to_string());
+                ui.label(t!("metatorio.welcome-instructions").to_string());
+            }
             SelectedSubview::Creator(n) => self.creators[n].1.view(ui),
             SelectedSubview::Planner(n) => self.planners[n].view(ui),
             SelectedSubview::Logs => {
-                egui_logger::logger_ui().error_color(egui::Color32::DARK_RED).warn_color(egui::Color32::ORANGE).show(ui);
-            },
+                egui_logger::logger_ui()
+                    .error_color(egui::Color32::DARK_RED)
+                    .warn_color(egui::Color32::ORANGE)
+                    .show(ui);
+            }
         });
         toast::TOASTS.lock().unwrap().show(factorio);
     }
@@ -358,14 +380,18 @@ fn main() {
         .unwrap();
 
     log::info!("应用程序启动");
+    update_i18n_ini(
+        "zh-CN",
+        std::io::Cursor::new(include_str!("../locales/zh-CN.cfg")),
+    ).unwrap();
     let icon_image = image::load_from_memory(include_bytes!("../assets/icon.png")).unwrap();
     eframe::run_native(
-        "Demo App",
+        "metatorio",
         eframe::NativeOptions {
             viewport: egui::ViewportBuilder::default()
                 .with_maximized(true)
                 .with_min_inner_size(egui::Vec2 { x: 800.0, y: 600.0 })
-                .with_title("切向量化")
+                .with_title(t!("metatorio.title").to_string())
                 .with_icon(egui::IconData {
                     rgba: icon_image.to_rgba8().into_raw(),
                     width: icon_image.width(),

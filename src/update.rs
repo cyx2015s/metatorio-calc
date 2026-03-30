@@ -185,12 +185,7 @@ impl<T: self_update::update::ReleaseUpdate + ?Sized> self_update::update::Releas
 
         let target_asset = release
             .asset_for(&target, self.identifier().as_deref())
-            .ok_or_else(|| {
-                self_update::errors::Error::Release(format!(
-                    "没有找到适合 `{}` 架构的可执行文件",
-                    target
-                ))
-            })?;
+            .ok_or_else(|| self_update::errors::Error::Release(target.to_string()))?;
 
         log::info!("  * 当前可执行文件: {:?}", bin_install_path);
         log::info!("  * 新可执行文件版本: {:?}", target_asset.name);

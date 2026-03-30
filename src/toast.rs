@@ -31,7 +31,7 @@ pub fn setup_toasts() -> egui_toast::Toasts {
                                     current as f32 / total as f32
                                 };
                                 ui.vertical_centered(|ui| {
-                                    ui.label("正在下载更新...");
+                                    ui.label(t!("metatorio.downloading").to_string());
                                     ui.add(
                                         egui::ProgressBar::new(progress)
                                             .fill(if current == total && total != 0 {

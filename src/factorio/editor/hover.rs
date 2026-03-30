@@ -36,27 +36,30 @@ impl<'a> egui::Widget for PrototypeHover<'a, ItemPrototype> {
             ui.set_min_width(140.0);
             ui.label(data.get_display_name("item", &self.prototype.base.name));
 
-            ui.label(format!("单组堆叠: {}", self.prototype.stack_size));
+            ui.label(t!(
+                "metatorio.stack-size",
+                self.prototype.stack_size.to_string()
+            ));
 
             if let Some(module) = data.modules.get(&self.prototype.base.name) {
                 ui.add(PrototypeHover::new(data, module).with_quality(self.quality));
             }
             if let Some(mine) = &self.prototype.burn {
-                ui.label(format!("燃料: {}", mine.fuel_value));
-                ui.label(format!(
-                    "燃料类别: {}",
+                ui.label(t!("metatorio.fuel", mine.fuel_value.to_string()));
+                ui.label(t!(
+                    "metatorio.fuel-category",
                     mine.fuel_category.clone().unwrap_or("chemical".to_string())
                 ));
             }
             if let Some(place_result) = &self.prototype.place_result {
-                ui.label("放置结果: ");
+                ui.label(t!("metatorio.place-result"));
                 ui.horizontal(|ui| {
                     ui.label(data.get_display_name("entity", place_result));
                     ui.add_sized([35.0, 35.0], Icon::new(self.data, "entity", place_result));
                 });
             }
             if let Some(plant) = &self.prototype.plant {
-                ui.label("种植结果: ");
+                ui.label(t!("metatorio.plant-result"));
                 ui.horizontal(|ui| {
                     ui.label(data.get_display_name("entity", &plant.plant_result));
                     ui.add_sized(
@@ -68,14 +71,14 @@ impl<'a> egui::Widget for PrototypeHover<'a, ItemPrototype> {
             if let Some(spoil) = &self.prototype.spoil
                 && let Some(spoil_result) = &spoil.spoil_result
             {
-                ui.label("变质结果: ");
+                ui.label(t!("metatorio.spoil-result"));
                 ui.horizontal(|ui| {
                     ui.label(data.get_display_name("item", spoil_result));
                     ui.add_sized([35.0, 35.0], Icon::new(self.data, "item", spoil_result));
                 });
             }
             if !self.prototype.rocket_launch_products.is_empty() {
-                ui.label("火箭发射产物: ");
+                ui.label(t!("metatorio.rocket-launch-products"));
                 for product in &self.prototype.rocket_launch_products {
                     ui.horizontal(|ui| {
                         ui.label(data.get_display_name("item", &product.name));
@@ -101,12 +104,42 @@ impl<'a> egui::Widget for PrototypeHover<'a, ModulePrototype> {
                 data.qualities[self.quality.min((data.qualities.len() - 1) as u8) as usize]
                     .default_multiplier(),
             );
-            ui.label(format!("插件类别: {}", &self.prototype.category));
-            ui.label(format!("能耗: {:.0}%", effect.consumption * 100.0));
-            ui.label(format!("速度: {:.0}%", effect.speed * 100.0));
-            ui.label(format!("产能: {:.0}%", effect.productivity * 100.0));
-            ui.label(format!("污染: {:.0}%", effect.pollution * 100.0));
-            ui.label(format!("品质: {:.0}%", effect.quality * 100.0));
+            ui.label(t!("metatorio.module-category", &self.prototype.category).to_string());
+            ui.label(
+                t!(
+                    "metatorio.consumption",
+                    ((effect.consumption * 100.0) as i32).to_string()
+                )
+                .to_string(),
+            );
+            ui.label(
+                t!(
+                    "metatorio.speed",
+                    ((effect.speed * 100.0) as i32).to_string()
+                )
+                .to_string(),
+            );
+            ui.label(
+                t!(
+                    "metatorio.productivity",
+                    ((effect.productivity * 100.0) as i32).to_string()
+                )
+                .to_string(),
+            );
+            ui.label(
+                t!(
+                    "metatorio.pollution",
+                    ((effect.pollution * 100.0) as i32).to_string()
+                )
+                .to_string(),
+            );
+            ui.label(
+                t!(
+                    "metatorio.quality",
+                    ((effect.quality * 100.0) as i32).to_string()
+                )
+                .to_string(),
+            );
         });
 
         ui.response()
@@ -119,20 +152,24 @@ impl<'a> egui::Widget for PrototypeHover<'a, FluidPrototype> {
         ui.vertical(|ui| {
             ui.set_min_width(140.0);
             ui.label(data.get_display_name("fluid", &self.prototype.base.name));
-            ui.label(format!("默认温度: {}℃", self.prototype.default_temperature));
-            ui.label(format!(
-                "最大温度: {}℃",
+            ui.label(t!(
+                "metatorio.default-temperature",
+                self.prototype.default_temperature.to_string()
+            ));
+            ui.label(t!(
+                "metatorio.max-temperature",
                 self.prototype
                     .max_temperature
                     .unwrap_or(self.prototype.default_temperature)
+                    .to_string()
             ));
             if let Some(fuel_value) = self.prototype.fuel_value {
-                ui.label(format!("每单位燃料值: {}", fuel_value));
+                ui.label(t!("metatorio.fuel-value", fuel_value.to_string()));
             }
             if let Some(heat_capacity) = self.prototype.heat_capacity {
-                ui.label(format!("每单位比热容: {}/℃", heat_capacity));
+                ui.label(t!("metatorio.heat-capacity", heat_capacity.to_string()));
             } else {
-                ui.label("每单位比热容: 1kJ/℃");
+                ui.label(t!("metatorio.heat-capacity", "1kJ"));
             }
         });
 
@@ -159,7 +196,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
             ui.add(CompactLabel::new(self.prototype.energy_required).with_format("{}s"));
             ui.horizontal_top(|ui| {
                 if ingredients.is_empty() {
-                    ui.label("无原料");
+                    ui.label(t!("metatorio.no-ingredients").to_string());
                 } else {
                     egui::Grid::new("recipe")
                         .min_col_width(35.0)
@@ -230,7 +267,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, RecipePrototype> {
                 }
                 ui.label("→");
                 if results.is_empty() {
-                    ui.label("无产出");
+                    ui.label(t!("metatorio.no-results").to_string());
                     ui.end_row();
                 } else {
                     egui::Grid::new("result")
@@ -307,14 +344,14 @@ impl<'a> egui::Widget for PrototypeHover<'a, EntityPrototype> {
             surface_condition_ui(ui, &self.prototype.surface_conditions, data);
             if let Some(mining) = &self.prototype.minable {
                 if let Some(result) = &mining.result {
-                    ui.label("挖掘返还: ");
+                    ui.label(t!("metatorio.mining-result").to_string());
                     ui.horizontal(|ui| {
                         ui.label(data.get_display_name("item", result));
                         ui.add_sized([35.0, 35.0], Icon::new(self.data, "item", result));
                         ui.label(format!("×{}", mining.count.unwrap_or(1.0)));
                     });
                 } else if !mining.results.is_empty() {
-                    ui.label("挖掘返还");
+                    ui.label(t!("metatorio.mining-result").to_string());
                     for result in &mining.results {
                         match result {
                             RecipeResult::Item(i) => {
@@ -343,7 +380,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, EntityPrototype> {
                     }
                 }
                 if let Some(required_fluid) = &mining.required_fluid {
-                    ui.label("开采流体: ");
+                    ui.label(t!("metatorio.mining-fluid").to_string());
                     ui.horizontal(|ui| {
                         ui.label(data.get_display_name("fluid", required_fluid));
                         ui.add_sized([35.0, 35.0], Icon::new(self.data, "fluid", required_fluid));
@@ -351,9 +388,12 @@ impl<'a> egui::Widget for PrototypeHover<'a, EntityPrototype> {
                     });
                 }
                 if self.prototype.base.r#type == "resource" {
-                    ui.label(format!("挖掘工时: {}%", mining.mining_time * 100.0));
+                    ui.label(t!(
+                        "metatorio.mining-time-percent",
+                        (mining.mining_time * 100.0).to_string()
+                    ));
                 } else {
-                    ui.label(format!("挖掘时间: {}s", mining.mining_time));
+                    ui.label(t!("metatorio.mining-time", mining.mining_time.to_string()));
                 }
             }
             if let Some(miner) = data.miners.get(&self.prototype.base.name) {
@@ -376,20 +416,27 @@ impl<'a> egui::Widget for PrototypeHover<'a, MiningDrillPrototype> {
         let data = &self.data;
         ui.vertical(|ui| {
             ui.set_min_width(140.0);
-            ui.label(format!("挖掘速度: {}", self.prototype.mining_speed));
-            ui.label(format!(
-                "资源消耗: {}%",
-                (self
+            ui.label(t!(
+                "metatorio.mining-speed",
+                self.prototype.mining_speed.to_string()
+            ));
+            ui.label(t!(
+                "metatorio.resource-drain-rate",
+                ((self
                     .prototype
                     .resource_drain_rate_percent
                     .unwrap_or(100.0)
                     .floor()
                     * data.qualities[self.quality.min((data.qualities.len() - 1) as u8) as usize]
-                        .mining_drill_resource_drain_multiplier()) as i32
+                        .mining_drill_resource_drain_multiplier()) as i32)
+                    .to_string()
             ));
-            ui.label(format!("插件槽位: {}", self.prototype.module_slots));
-            ui.label(format!(
-                "因为运行而导致的能量消耗: {}W",
+            ui.label(t!(
+                "metatorio.module-slots",
+                self.prototype.module_slots.to_string()
+            ));
+            ui.label(t!(
+                "metatorio.energy-usage",
                 compact_number(
                     self.prototype
                         .energy_usage
@@ -412,33 +459,35 @@ impl<'a> egui::Widget for PrototypeHover<'a, CraftingMachinePrototype> {
         ui.vertical(|ui| {
             ui.set_min_width(140.0);
             let quality = self.quality.min((self.data.qualities.len() - 1) as u8) as usize;
-            ui.label(format!(
-                "制造速度: {}",
-                self.prototype.crafting_speed
+            ui.label(t!(
+                "metatorio.crafting-speed",
+                (self.prototype.crafting_speed
                     * if let Some(mul) = &self.prototype.crafting_speed_quality_multiplier {
                         mul[&self.data.qualities[quality].base.name]
                     } else {
                         self.data.qualities[quality].crafting_machine_speed_multiplier()
-                    }
+                    })
+                .to_string()
             ));
-            ui.label(format!(
-                "插件槽位: {}",
-                self.prototype.module_slots as i32
+            ui.label(t!(
+                "metatorio.module-slots",
+                (self.prototype.module_slots as i32
                     + if self.prototype.quality_affects_module_slots {
                         self.data.qualities[quality].crafting_machine_module_slots_bonus() as i32
                     } else {
                         0
-                    }
+                    })
+                .to_string()
             ));
-            ui.label(format!(
-                "插件类型: {:?}",
+            ui.label(t!(
+                "metatorio.allowed-module-categories",
                 self.prototype
                     .allowed_module_categories
                     .as_ref()
-                    .map_or("全部".to_string(), |x| format!("{:?}", x))
+                    .map_or("metatorio.all".to_string(), |x| format!("{:?}", x))
             ));
-            ui.label(format!(
-                "因为运行而导致的能量消耗: {}W",
+            ui.label(t!(
+                "metatorio.energy-usage",
                 compact_number(
                     self.prototype
                         .energy_usage
@@ -471,31 +520,46 @@ fn effect_receiver_ui(ui: &mut egui::Ui, effect_receiver: &EffectReceiver) {
     if let val = effect_receiver.base_effect.consumption
         && val != 0.0
     {
-        ui.label(format!("基础能耗: {}%", (val * 100.0) as i32));
+        ui.label(t!(
+            "metatorio.base-consumption",
+            ((val * 100.0) as i32).to_string()
+        ));
     }
     #[allow(irrefutable_let_patterns)]
     if let val = effect_receiver.base_effect.speed
         && val != 0.0
     {
-        ui.label(format!("基础速度: {}%", (val * 100.0) as i32));
+        ui.label(t!(
+            "metatorio.base-speed",
+            ((val * 100.0) as i32).to_string()
+        ));
     }
     #[allow(irrefutable_let_patterns)]
     if let val = effect_receiver.base_effect.productivity
         && val != 0.0
     {
-        ui.label(format!("基础产能: {}%", (val * 100.0) as i32));
+        ui.label(t!(
+            "metatorio.base-productivity",
+            ((val * 100.0) as i32).to_string()
+        ));
     }
     #[allow(irrefutable_let_patterns)]
     if let val = effect_receiver.base_effect.pollution
         && val != 0.0
     {
-        ui.label(format!("基础污染: {}%", (val * 100.0) as i32));
+        ui.label(t!(
+            "metatorio.base-pollution",
+            ((val * 100.0) as i32).to_string()
+        ));
     }
     #[allow(irrefutable_let_patterns)]
     if let val = effect_receiver.base_effect.quality
         && val != 0.0
     {
-        ui.label(format!("基础品质: {}%", (val * 100.0) as i32));
+        ui.label(t!(
+            "metatorio.base-quality",
+            ((val * 100.0) as i32).to_string()
+        ));
     }
 }
 
@@ -508,7 +572,7 @@ fn surface_condition_ui(
         return;
     }
     ui.vertical(|ui| {
-        ui.label("表面属性限制".to_string());
+        ui.label(t!("metatorio.surface-conditions"));
         ui.horizontal(|ui| {
             for condition in surface_conditions {
                 match (condition.min, condition.max) {
@@ -545,9 +609,9 @@ impl<'a> egui::Widget for PrototypeHover<'a, GeneratorPrototype> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         let data = &self.data;
         ui.vertical(|ui| {
-            ui.label(format!(
-                "效率: {}%",
-                (self.prototype.effectivity * 100.0) as i32
+            ui.label(t!(
+                "metatorio.effectivity",
+                ((self.prototype.effectivity * 100.0) as i32).to_string()
             ));
             if let Some(filter) = &self.prototype.fluid_box.filter {
                 ui.add(Icon::new(data, "fluid", filter));
@@ -556,8 +620,11 @@ impl<'a> egui::Widget for PrototypeHover<'a, GeneratorPrototype> {
                     let flow = self
                         .prototype
                         .get_output(fluid, self.prototype.maximum_temperature);
-                    ui.label(format!("流体消耗: {}/s", flow.0));
-                    ui.label(format!("电量输出: {}", EnergyAmount { amount: flow.1 }));
+                    ui.label(t!("metatorio.fluid-usage", flow.0.to_string()));
+                    ui.label(t!(
+                        "metatorio.energy-output",
+                        EnergyAmount { amount: flow.1 }.to_string()
+                    ));
                 }
             }
         });

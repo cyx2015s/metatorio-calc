@@ -14,7 +14,7 @@ egui_dnd = "0.14"
 egui_extras = { version = "0.33", features = ["file", "image"] }
 egui_logger = { version = "0.1.0", path = "egui_logger" }
 fontdb = "0.23"
-fust-i18n = { git = "https://github.com/cyx2015s/fust-i18n", branch = "master" }
+fust-i18n = { git = "https://github.com/cyx2015s/fust-i18n", branch = "master", features = ["egui"] }
 good_lp = { git = "https://github.com/cyx2015s/good_lp", branch = "inspect_constraint", default-features = false, features = ["microlp"] }
 image = { version = "0.25", default-features = false, features = ["png", "rayon"] }
 indexmap = { version = "2", features = ["rayon", "serde"] }

@@ -234,7 +234,7 @@ impl FactorioMechanic for SpoilMechanic {
     }
 
     fn name(&self) -> String {
-        "物品变质".to_string()
+        t!("metatorio.spoil").to_string()
     }
 
     fn editor_view(
@@ -246,7 +246,10 @@ impl FactorioMechanic for SpoilMechanic {
     ) -> bool {
         let mut changed = false;
 
-        if ui.button("添加物品变质").clicked() {
+        if ui
+            .button(t!("metatorio.add-spoil").to_string().as_str())
+            .clicked()
+        {
             let new_config = SpoilInstance {
                 item: IdWithQuality("".to_string(), 0),
             };
@@ -267,7 +270,7 @@ impl FactorioMechanic for SpoilMechanic {
         let mut changed = false;
         let instance = &mut self.instances[idx];
         ui.vertical(|ui| {
-            ui.label("变质物品");
+            ui.label(t!("metatorio.spoil-item"));
             let item_button = ui.add_sized(
                 [35.0, 35.0],
                 Icon::new(data, "item", &instance.item.0).with_quality(instance.item.1),
@@ -275,17 +278,20 @@ impl FactorioMechanic for SpoilMechanic {
 
             changed |= ui
                 .add(
-                    SelectorModal::new(item_button.id, "选择变质物品")
-                        .with_toggle(item_button.clicked())
-                        .with_selector(
-                            Selector::new(data, "item")
-                                .with_current(&mut instance.item)
-                                .with_filter(|s: &IdWithQuality, f| {
-                                    f.items.get(&s.0).is_some_and(|i| {
-                                        i.spoil.as_ref().is_some_and(|s| s.spoil_result.is_some())
-                                    })
-                                }),
-                        ),
+                    SelectorModal::new(
+                        item_button.id,
+                        t!("metatorio.select-item").to_string().as_str(),
+                    )
+                    .with_toggle(item_button.clicked())
+                    .with_selector(
+                        Selector::new(data, "item")
+                            .with_current(&mut instance.item)
+                            .with_filter(|s: &IdWithQuality, f| {
+                                f.items.get(&s.0).is_some_and(|i| {
+                                    i.spoil.as_ref().is_some_and(|s| s.spoil_result.is_some())
+                                })
+                            }),
+                    ),
                 )
                 .changed();
         });
@@ -384,7 +390,7 @@ impl AsFlow for PlantInstance {
 impl SerdeFactorioMechanic for PlantMechanic {}
 impl FactorioMechanic for PlantMechanic {
     fn name(&self) -> String {
-        "种植".into()
+        t!("metatorio.plant").to_string()
     }
 
     fn instances_proxy(&self) -> &dyn FlowProxy {
@@ -403,7 +409,7 @@ impl FactorioMechanic for PlantMechanic {
         _factory: &FactoryContext,
     ) -> bool {
         let mut changed = false;
-        if ui.button("添加种树").clicked() {
+        if ui.button(t!("metatorio.add-plant")).clicked() {
             self.instances.push(PlantInstance::default());
             changed = true;
         }
@@ -447,14 +453,14 @@ impl FactorioMechanic for PlantMechanic {
         let mut changed = false;
         let instance = &mut self.instances[idx];
         ui.vertical(|ui| {
-            ui.label("种子");
+            ui.label(t!("metatorio.plant-seed"));
             let button = ui.add_sized(
                 [35.0, 35.0],
                 Icon::new(data, "item", &instance.seed.0).with_quality(instance.seed.1),
             );
             changed |= ui
                 .add(
-                    SelectorModal::new(button.id, "选择种子")
+                    SelectorModal::new(button.id, t!("metatorio.select-item").to_string().as_str())
                         .with_toggle(button.clicked())
                         .with_selector(
                             Selector::new(data, "item")
@@ -620,7 +626,7 @@ impl FactorioMechanic for ItemFuelMechanic {
     }
 
     fn name(&self) -> String {
-        "燃烧物品".to_string()
+        t!("metatorio.fuel-item").to_string()
     }
 
     fn editor_view(
@@ -632,7 +638,7 @@ impl FactorioMechanic for ItemFuelMechanic {
     ) -> bool {
         let mut changed = false;
 
-        if ui.button("添加物品燃烧").clicked() {
+        if ui.button(t!("metatorio.add-fuel-item")).clicked() {
             let new_config = ItemFuelInstance {
                 item: IdWithQuality("".to_string(), 0),
             };
@@ -653,22 +659,25 @@ impl FactorioMechanic for ItemFuelMechanic {
         let mut changed = false;
         let instance = &mut self.instances[idx];
         ui.vertical(|ui| {
-            ui.label("燃料");
+            ui.label(t!("metatorio.fuel-item"));
             let item_button = ui.add_sized(
                 [35.0, 35.0],
                 Icon::new(data, "item", &instance.item.0).with_quality(instance.item.1),
             );
             changed |= ui
                 .add(
-                    SelectorModal::new(item_button.id, "选择发射物")
-                        .with_toggle(item_button.clicked())
-                        .with_selector(
-                            Selector::new(data, "item")
-                                .with_current(&mut instance.item)
-                                .with_filter(|s: &IdWithQuality, f| {
-                                    f.items.get(&s.0).is_some_and(|i| i.burn.is_some())
-                                }),
-                        ),
+                    SelectorModal::new(
+                        item_button.id,
+                        t!("metatorio.select-item").to_string().as_str(),
+                    )
+                    .with_toggle(item_button.clicked())
+                    .with_selector(
+                        Selector::new(data, "item")
+                            .with_current(&mut instance.item)
+                            .with_filter(|s: &IdWithQuality, f| {
+                                f.items.get(&s.0).is_some_and(|i| i.burn.is_some())
+                            }),
+                    ),
                 )
                 .changed();
         });
@@ -790,7 +799,7 @@ impl FactorioMechanic for ItemLaunchMechanic {
     }
 
     fn name(&self) -> String {
-        "物品发射".to_string()
+        t!("metatorio.item-launch").to_string()
     }
 
     fn editor_view(
@@ -803,7 +812,7 @@ impl FactorioMechanic for ItemLaunchMechanic {
         let mut changed = false;
         // 堆叠数大于 0，并且是按堆叠数限制的
         if data.rocket_types.iter().any(|(_, r)| r.0 > 0 && !r.1) {
-            if ui.button("添加物品发射").clicked() {
+            if ui.button(t!("metatorio.add-item-launch")).clicked() {
                 let new_config = ItemLaunchInstance {
                     item: IdWithQuality("".to_string(), 0),
                     rocket: *data
@@ -817,7 +826,7 @@ impl FactorioMechanic for ItemLaunchMechanic {
                 changed = true;
             }
         } else {
-            ui.label("无可用的火箭类型");
+            ui.label(t!("metatorio.no-available-rocket-types"));
         }
         changed
     }
@@ -833,24 +842,27 @@ impl FactorioMechanic for ItemLaunchMechanic {
         let mut changed = false;
         let instance = &mut self.instances[idx];
         ui.vertical(|ui| {
-            ui.label("发射物品");
+            ui.label(t!("metatorio.launch-item"));
             let item_button = ui.add_sized(
                 [35.0, 35.0],
                 Icon::new(data, "item", &instance.item.0).with_quality(instance.item.1),
             );
             changed |= ui
                 .add(
-                    SelectorModal::new(item_button.id, "选择发射物品")
-                        .with_toggle(item_button.clicked())
-                        .with_selector(
-                            Selector::new(data, "item")
-                                .with_current(&mut instance.item)
-                                .with_filter(|s: &IdWithQuality, f| {
-                                    f.items
-                                        .get(&s.0)
-                                        .is_some_and(|i| !i.rocket_launch_products.is_empty())
-                                }),
-                        ),
+                    SelectorModal::new(
+                        item_button.id,
+                        t!("metatorio.select-item").to_string().as_str(),
+                    )
+                    .with_toggle(item_button.clicked())
+                    .with_selector(
+                        Selector::new(data, "item")
+                            .with_current(&mut instance.item)
+                            .with_filter(|s: &IdWithQuality, f| {
+                                f.items
+                                    .get(&s.0)
+                                    .is_some_and(|i| !i.rocket_launch_products.is_empty())
+                            }),
+                    ),
                 )
                 .changed();
         });

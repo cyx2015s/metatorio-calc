@@ -765,7 +765,7 @@ impl SolveContext for RecipeMechanic {
 impl SerdeFactorioMechanic for RecipeMechanic {}
 impl FactorioMechanic for RecipeMechanic {
     fn name(&self) -> String {
-        "配方".to_string()
+        t!("metatorio.recipe").to_string()
     }
 
     fn instances_proxy(&self) -> &dyn FlowProxy {
@@ -784,14 +784,14 @@ impl FactorioMechanic for RecipeMechanic {
         factory: &FactoryContext,
     ) -> bool {
         let mut changed = false;
-        if ui.button("添加配方").clicked() {
+        if ui.button(t!("metatorio.add-recipe")).clicked() {
             let new_config = RecipeInstance::default();
             self.instances.push(new_config);
             changed = true;
         }
-        ui.collapsing("[自动/手动]机器偏好", |ui| {
+        ui.collapsing(t!("metatorio.machine-preferences"), |ui| {
             let icon = Icon::new(data, "entity", "entity-unknown");
-            ui.label("[自动]备选机器数量");
+            ui.label(t!("metatorio.alternative_count"));
             ui.add(
                 egui::DragValue::new(&mut self.alternative_count)
                     .speed(1)
@@ -801,18 +801,21 @@ impl FactorioMechanic for RecipeMechanic {
 
             let button = ui
                 .add_sized([35.0, 35.0], icon)
-                .on_hover_text("选择新的机器顺序依据");
+                .on_hover_text(t!("metatorio.select-new-machine-preference"));
             ui.add(
-                SelectorModal::new(button.id, "选择机器")
-                    .with_toggle(button.clicked())
-                    .with_selector(
-                        Selector::new(data, "entity")
-                            .with_output(&mut self.new_machine_preference)
-                            .with_filter(|s: &IdWithQuality, f: &DataContext| {
-                                f.crafters.contains_key(&s.0)
-                                    && proj.is_prototype_accessible("entity", &s.0)
-                            }),
-                    ),
+                SelectorModal::new(
+                    button.id,
+                    t!("metatorio.select-machine").to_string().as_str(),
+                )
+                .with_toggle(button.clicked())
+                .with_selector(
+                    Selector::new(data, "entity")
+                        .with_output(&mut self.new_machine_preference)
+                        .with_filter(|s: &IdWithQuality, f: &DataContext| {
+                            f.crafters.contains_key(&s.0)
+                                && proj.is_prototype_accessible("entity", &s.0)
+                        }),
+                ),
             );
             if self.new_machine_preference.is_some() {
                 let new_machine = self.new_machine_preference.take().unwrap();
@@ -843,16 +846,19 @@ impl FactorioMechanic for RecipeMechanic {
                             changed = true;
                         }
                         ui.add(
-                            SelectorModal::new(button.id, "选择机器")
-                                .with_toggle(button.clicked())
-                                .with_selector(
-                                    Selector::new(data, "entity")
-                                        .with_current(machine)
-                                        .with_filter(|s: &IdWithQuality, f: &DataContext| {
-                                            f.crafters.contains_key(&s.0)
-                                                && proj.is_prototype_accessible("entity", &s.0)
-                                        }),
-                                ),
+                            SelectorModal::new(
+                                button.id,
+                                t!("metatorio.select-machine").to_string().as_str(),
+                            )
+                            .with_toggle(button.clicked())
+                            .with_selector(
+                                Selector::new(data, "entity")
+                                    .with_current(machine)
+                                    .with_filter(|s: &IdWithQuality, f: &DataContext| {
+                                        f.crafters.contains_key(&s.0)
+                                            && proj.is_prototype_accessible("entity", &s.0)
+                                    }),
+                            ),
                         );
                     });
                 },
@@ -862,10 +868,10 @@ impl FactorioMechanic for RecipeMechanic {
             }
         });
         ui.separator();
-        ui.collapsing("[自动]枚举插件", |ui| {
+        ui.collapsing(t!("metatorio.enumerate-modules"), |ui| {
             if ui
-                .button("使用最佳插件")
-                .on_hover_text("根据当前科技等级，选择每个类别的最佳插件加入枚举。")
+                .button(t!("metatorio.use-best-modules"))
+                .on_hover_text(t!("metatorio.use-best-modules-tooltip"))
                 .clicked()
             {
                 let mut modules_by_category: AIndexMap<String, &ModulePrototype> =
@@ -891,18 +897,21 @@ impl FactorioMechanic for RecipeMechanic {
             let icon = Icon::new(data, "item", "empty-module-slot");
             let button = ui
                 .add_sized([35.0, 35.0], icon)
-                .on_hover_text("选择新的枚举插件。修改插件请先删除。");
+                .on_hover_text(t!("metatorio.select-new-enumerate-module"));
             ui.add(
-                SelectorModal::new(button.id, "选择枚举插件")
-                    .with_toggle(button.clicked())
-                    .with_selector(
-                        Selector::new(data, "item")
-                            .with_output(&mut self.new_enumerate_module)
-                            .with_filter(|item: &IdWithQuality, data: &DataContext| {
-                                data.modules.contains_key(&item.0)
-                                    && proj.is_prototype_accessible("item", &item.0)
-                            }),
-                    ),
+                SelectorModal::new(
+                    button.id,
+                    t!("metatorio.select-enumerate-module").to_string().as_str(),
+                )
+                .with_toggle(button.clicked())
+                .with_selector(
+                    Selector::new(data, "item")
+                        .with_output(&mut self.new_enumerate_module)
+                        .with_filter(|item: &IdWithQuality, data: &DataContext| {
+                            data.modules.contains_key(&item.0)
+                                && proj.is_prototype_accessible("item", &item.0)
+                        }),
+                ),
             );
             if self.new_enumerate_module.is_some() {
                 let new_module = self.new_enumerate_module.take().unwrap();
@@ -921,7 +930,7 @@ impl FactorioMechanic for RecipeMechanic {
                         [35.0, 35.0],
                         Icon::new(data, "item", &module.0).with_quality(module.1),
                     )
-                    .on_hover_text("无法编辑，右键可删除。");
+                    .on_hover_text(t!("metatorio.cannot-edit-module"));
                 if button.secondary_clicked() {
                     delele_module = Some(module.clone());
                     changed = true;
@@ -933,8 +942,7 @@ impl FactorioMechanic for RecipeMechanic {
         });
         ui.separator();
         ui.collapsing("[自动]插件塔", |ui| {
-            ui.label("添加新建筑时，会选取第一个满足条件的插件塔配置。");
-            if ui.button("添加插件塔").clicked() {
+            if ui.button(t!("metatorio.add-beacon")).clicked() {
                 self.enumerate_beacons.push(AutoBeaconConfig {
                     module_config: ModuleConfig::new(),
                 });
@@ -943,7 +951,7 @@ impl FactorioMechanic for RecipeMechanic {
             self.enumerate_beacons.retain_mut(|config| {
                 ui.separator();
                 let mut deleted = false;
-                if ui.button("删除").clicked() {
+                if ui.button(t!("metatorio.delete")).clicked() {
                     deleted = true;
                     changed = true;
                 }
@@ -977,22 +985,25 @@ impl FactorioMechanic for RecipeMechanic {
 
         let instance = &mut self.instances[idx];
         ui.vertical(|ui| {
-            ui.label("配方");
+            ui.label(t!("metatorio.recipe"));
             let recipe_button = ui.add_sized(
                 [35.0, 35.0],
                 Icon::new(data, "recipe", &instance.recipe.0).with_quality(instance.recipe.1),
             );
             changed |= ui
                 .add(
-                    SelectorModal::new(recipe_button.id, "选择配方")
-                        .with_toggle(recipe_button.clicked())
-                        .with_selector(
-                            Selector::new(data, "recipe")
-                                .with_current(&mut instance.recipe)
-                                .with_filter(|s: &IdWithQuality, _f| {
-                                    proj.is_prototype_accessible("recipe", &s.0)
-                                }),
-                        ),
+                    SelectorModal::new(
+                        recipe_button.id,
+                        t!("metatorio.select-recipe").to_string().as_str(),
+                    )
+                    .with_toggle(recipe_button.clicked())
+                    .with_selector(
+                        Selector::new(data, "recipe")
+                            .with_current(&mut instance.recipe)
+                            .with_filter(|s: &IdWithQuality, _f| {
+                                proj.is_prototype_accessible("recipe", &s.0)
+                            }),
+                    ),
                 )
                 .changed();
         });
@@ -1018,7 +1029,7 @@ impl FactorioMechanic for RecipeMechanic {
         }
         ui.separator();
         ui.vertical(|ui| {
-            ui.label("组装机");
+            ui.label(t!("metatorio.crafter"));
             let entity_button = ui.add_sized(
                 [35.0, 35.0],
                 Icon::new(data, "entity", &instance.machine.0).with_quality(instance.machine.1),
@@ -1036,10 +1047,16 @@ impl FactorioMechanic for RecipeMechanic {
                 })
                 .with_current(&mut instance.machine);
 
-            let widget = SelectorModal::new(entity_button.id, "选择制造设备")
-                .with_toggle(entity_button.clicked())
-                .with_selector(selector);
-            changed |= ui.add(widget).changed();
+            changed |= ui
+                .add(
+                    SelectorModal::new(
+                        entity_button.id,
+                        t!("metatorio.select-machine").to_string().as_str(),
+                    )
+                    .with_toggle(entity_button.clicked())
+                    .with_selector(selector),
+                )
+                .changed();
         });
 
         ui.separator();
@@ -1141,7 +1158,10 @@ impl FactorioMechanic for RecipeMechanic {
         factory: &FactoryContext,
     ) -> bool {
         let mut changed = false;
-        ui.add(egui::TextEdit::singleline(&mut self.suggested_recipes_filter).hint_text("筛选器"));
+        ui.add(
+            egui::TextEdit::singleline(&mut self.suggested_recipes_filter)
+                .hint_text(t!("metatorio.filter")),
+        );
         ui.add(
             Selector::new(data, "recipe")
                 .with_output(&mut self.selected_suggested_recipe)

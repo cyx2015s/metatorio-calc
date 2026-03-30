@@ -285,7 +285,7 @@ impl DataContext {
             return Err(AppError::ContextCreation("导出原始数据失败".to_string()));
         }
         log::info!("导出原始数据成功");
-        crate::toast::info("导出原始数据成功");
+        crate::toast::info(t!("metatorio.export-raw-data-success"));
         let dump_locale_command = Command::new(executable_path)
             .arg("--dump-prototype-locale")
             .arg("--config")
@@ -300,7 +300,7 @@ impl DataContext {
             return Err(AppError::ContextCreation("导出翻译数据失败".to_string()));
         }
         log::info!("导出翻译数据成功");
-        crate::toast::info("导出翻译数据成功");
+        crate::toast::info(t!("metatorio.export-locale-data-success"));
 
         let dump_icon_sprites_command = Command::new(executable_path)
             .arg("--dump-icon-sprites")
@@ -317,7 +317,7 @@ impl DataContext {
             return Err(AppError::ContextCreation("导出图标数据失败".to_string()));
         }
         log::info!("导出图标数据成功");
-        crate::toast::info("导出图标数据成功");
+        crate::toast::info(t!("metatorio.export-icon-sprites-success"));
 
         if let Some(mod_path) = mod_path {
             // 把 mod-list.json 也复制过来
@@ -334,7 +334,7 @@ impl DataContext {
                 mod_infos_json
                     .get("mods")
                     .ok_or(AppError::ContextCreation(
-                        "mod-list.json格式不正确".to_string(),
+                        "mod-list.json".to_string(),
                     ))?
                     .clone(),
             )?;
@@ -379,10 +379,7 @@ impl DataContext {
                                 let entry = entry?;
                                 let file_name =
                                     entry.file_name().into_string().map_err(|os_err| {
-                                        AppError::Custom(format!(
-                                            "操作系统错误: {}",
-                                            os_err.to_string_lossy()
-                                        ))
+                                        AppError::Custom(os_err.to_string_lossy().to_string())
                                     })?;
 
                                 if file_name.starts_with(format!("{}_", &mod_name).as_str())
@@ -462,17 +459,23 @@ impl DataContext {
         let raw_path = self_path.join("tmp/script-output/data-raw-dump.json");
         let icon_path = self_path.join("tmp/script-output/");
         let json_string = std::fs::read_to_string(&raw_path).map_err(|_| {
-            AppError::ContextCreation(format!(
-                "读取原始数据文件失败: {:?}",
-                raw_path.to_string_lossy()
-            ))
+            AppError::ContextCreation(
+                t!(
+                    "metatorio.load-raw-data-failed",
+                    raw_path.to_string_lossy().to_string()
+                )
+                .to_string(),
+            )
         })?;
 
         let json_value = serde_json::from_str::<Value>(&json_string).map_err(|_| {
-            AppError::ContextCreation(format!(
-                "解析原始数据文件失败: {:?}",
-                raw_path.to_string_lossy()
-            ))
+            AppError::ContextCreation(
+                t!(
+                    "metatorio.parse-raw-data-failed",
+                    raw_path.to_string_lossy().to_string()
+                )
+                .to_string(),
+            )
         })?;
         let mut factorio = DataContext::load(&json_value);
         factorio.icon_path = icon_path;
@@ -485,10 +488,13 @@ impl DataContext {
                 // description: a => A desc, b => B desc
                 let locale_values: Dict<Dict<String>> = serde_json::from_str(
                     &std::fs::read_to_string(&locale_path).map_err(|_| {
-                        AppError::ContextCreation(format!(
-                            "读取翻译数据文件失败: {:?}",
-                            locale_path
-                        ))
+                        AppError::ContextCreation(
+                            t!(
+                                "metatorio.load-locale-data-failed",
+                                locale_path.to_string_lossy().to_string()
+                            )
+                            .to_string(),
+                        )
                     })?,
                 )?;
                 factorio.localized_name.insert(
@@ -533,7 +539,7 @@ impl DataContext {
                 }
             }
         }
-        crate::toast::success("加载数据完成");
+        crate::toast::success(t!("metatorio.load-data-complete"));
         Ok(factorio)
     }
 
@@ -884,17 +890,17 @@ impl Display for DualVar {
             f,
             "{}",
             match self {
-                DualVar::Item(..) => "物品",
-                DualVar::Fluid { .. } => "流体",
-                DualVar::Entity(..) => "实体",
-                DualVar::Heat => "热能",
-                DualVar::Electricity => "电能",
-                DualVar::FluidHeat { .. } => "流体热源",
-                DualVar::FluidFuel { .. } => "流体燃料",
-                DualVar::ItemFuel { .. } => "物品燃料",
-                DualVar::RocketCapacity { .. } => "火箭载荷",
-                DualVar::Pollution { .. } => "污染",
-                DualVar::Custom { .. } => "特殊物品",
+                DualVar::Item(..) => t!("metatorio.item"),
+                DualVar::Fluid { .. } => t!("metatorio.fluid"),
+                DualVar::Entity(..) => t!("metatorio.entity"),
+                DualVar::Heat => t!("metatorio.heat"),
+                DualVar::Electricity => t!("metatorio.electricity"),
+                DualVar::FluidHeat { .. } => t!("metatorio.fluid-heat"),
+                DualVar::FluidFuel { .. } => t!("metatorio.fluid-fuel"),
+                DualVar::ItemFuel { .. } => t!("metatorio.item-fuel"),
+                DualVar::RocketCapacity { .. } => t!("metatorio.rocket-capacity"),
+                DualVar::Pollution { .. } => t!("metatorio.pollution"),
+                DualVar::Custom { .. } => t!("metatorio.custom"),
             }
         )
     }

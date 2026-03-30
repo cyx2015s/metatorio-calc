@@ -200,7 +200,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         let data = &self.data;
         match self.item {
-            DualVar::Custom { name } => ui.label(format!("特殊: {}", name)),
+            DualVar::Custom { name } => ui.label(t!("metatorio.custom", name)),
             DualVar::Item(IdWithQuality(name, quality)) => ui.add_sized(
                 [self.size, self.size],
                 Icon::new(self.data, "item", name)
@@ -307,7 +307,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                             ))
                             .max_size([self.size, self.size].into()),
                         )
-                        .on_hover_text("热能")
+                        .on_hover_text(t!("metatorio.heat"))
                     })
                     .inner
             }
@@ -326,7 +326,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                             ))
                             .max_size([self.size, self.size].into()),
                         )
-                        .on_hover_text("电能")
+                        .on_hover_text(t!("metatorio.electricity"))
                     })
                     .inner
             }
@@ -349,7 +349,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                                 ))
                                 .max_size([self.size, self.size].into()),
                             )
-                            .on_hover_text("流体热能")
+                            .on_hover_text(t!("metatorio.fluid-heat"))
                         })
                         .inner
                 }
@@ -373,7 +373,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                                 ))
                                 .max_size([self.size, self.size].into()),
                             )
-                            .on_hover_text("流体燃料")
+                            .on_hover_text(t!("metatorio.fluid-fuel"))
                         })
                         .inner
                 }
@@ -394,8 +394,8 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                     )
                 })
                 .inner
-                .on_hover_text(format!(
-                    "类别: {}",
+                .on_hover_text(t!(
+                    "metatorio.fuel-category",
                     data.get_display_name("fuel-category", category)
                 )),
             DualVar::RocketCapacity { stacks, by_weight } => ui
@@ -407,9 +407,9 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                 )
                 .on_hover_ui(|ui| {
                     ui.vertical(|ui| {
-                        ui.label(format!("堆叠数: {}", stacks));
+                        ui.label(t!("metatorio.rocket-stacks", stacks.to_string()));
                         if *by_weight {
-                            ui.label("按重量限制");
+                            ui.label(t!("metatorio.by-weight"));
                         }
                     });
                 }),
@@ -431,11 +431,12 @@ impl Display for GenericIcon<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let data = &self.data;
         match self.item {
-            DualVar::Custom { name } => write!(f, "特殊: {}", name),
+            DualVar::Custom { name } => write!(f, "{}: {}", t!("metatorio.custom"), name),
             DualVar::Item(IdWithQuality(name, quality)) => {
                 write!(
                     f,
-                    "物品: {}({})",
+                    "{}: {}({})",
+                    t!("metatorio.item"),
                     data.get_display_name("item", name),
                     data.get_display_name(
                         "quality",
@@ -446,12 +447,18 @@ impl Display for GenericIcon<'_> {
                 )
             }
             DualVar::Fluid { name, .. } => {
-                write!(f, "流体: {}", data.get_display_name("fluid", name))
+                write!(
+                    f,
+                    "{}: {}",
+                    t!("metatorio.fluid"),
+                    data.get_display_name("fluid", name)
+                )
             }
             DualVar::Entity(IdWithQuality(name, quality)) => {
                 write!(
                     f,
-                    "实体: {}({})",
+                    "{}: {}({})",
+                    t!("metatorio.entity"),
                     data.get_display_name("entity", name),
                     data.get_display_name(
                         "quality",
@@ -461,41 +468,56 @@ impl Display for GenericIcon<'_> {
                     )
                 )
             }
-            DualVar::Heat => write!(f, "热量"),
-            DualVar::Electricity => write!(f, "电能"),
+            DualVar::Heat => f.write_str(t!("metatorio.heat").to_string().as_str()),
+            DualVar::Electricity => f.write_str(t!("metatorio.electricity").to_string().as_str()),
             DualVar::FluidHeat { filter } => match filter {
-                Some(fluid) => write!(
-                    f,
-                    "通过热交换 {} 获得能量",
-                    data.get_display_name("fluid", fluid)
+                Some(fluid) => f.write_str(
+                    t!(
+                        "metatorio.fluid-heat-by",
+                        data.get_display_name("fluid", fluid)
+                    )
+                    .to_string()
+                    .as_str(),
                 ),
-                None => write!(f, "任意来源的流体热量"),
+                None => f.write_str(t!("metatorio.fluid-heat-none").to_string().as_str()),
             },
             DualVar::FluidFuel { filter } => match filter {
-                Some(fluid) => write!(
-                    f,
-                    "通过燃烧 {} 获得的能量",
-                    data.get_display_name("fluid", fluid)
+                Some(fluid) => f.write_str(
+                    t!(
+                        "metatorio.fluid-fuel-by",
+                        data.get_display_name("fluid", fluid)
+                    )
+                    .to_string()
+                    .as_str(),
                 ),
-                None => write!(f, "任意来源的流体燃料"),
+                None => f.write_str(t!("metatorio.fluid-fuel-none").to_string().as_str()),
             },
             DualVar::ItemFuel { category } => {
-                write!(f, "燃料类别: {}", category)
+                f.write_str(t!("metatorio.fuel-category", category).to_string().as_str())
             }
             DualVar::RocketCapacity { stacks, by_weight } => {
                 if *by_weight {
-                    write!(f, "火箭载荷: {} 堆叠，按重量限制", stacks)
+                    f.write_str(
+                        t!("metatorio.rocket-capacity-by-weight", stacks.to_string())
+                            .to_string()
+                            .as_str(),
+                    )
                 } else {
-                    write!(f, "火箭载荷: {} 堆叠", stacks)
+                    f.write_str(
+                        t!("metatorio.rocket-capacity", stacks.to_string())
+                            .to_string()
+                            .as_str(),
+                    )
                 }
             }
-            DualVar::Pollution { name } => {
-                write!(
-                    f,
-                    "污染物: {}",
+            DualVar::Pollution { name } => f.write_str(
+                t!(
+                    "metatorio.pollution",
                     data.get_display_name("airborne-pollutant", name)
                 )
-            }
+                .to_string()
+                .as_str(),
+            ),
         }
     }
 }

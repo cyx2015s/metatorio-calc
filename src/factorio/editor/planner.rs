@@ -354,7 +354,9 @@ impl FactoryInstance {
                 }
                 mechanic.submit_operations();
             });
-
+        if changed {
+            self.solution = SolverSolution::default();
+        }
         changed
     }
 
@@ -416,7 +418,7 @@ impl FactoryInstance {
                                             ui.add(AmountLabel::new(solution_raw_value.unwrap()));
                                         }
                                     } else {
-                                        ui.label("无解");
+                                        ui.label(t!("metatorio.no-solution").to_string());
                                     }
                                 });
                             });
@@ -462,15 +464,24 @@ impl FactoryInstance {
                                             .add_sized([25.0, 25.0], GenericIcon::new(data, item));
 
                                         button.context_menu(|ui| {
-                                            if ui.button("添加到产量目标").clicked() {
+                                            if ui
+                                                .button(t!("metatorio.add-to-production-target"))
+                                                .clicked()
+                                            {
                                                 self.target.push((item.clone(), 0.0));
                                                 *changed = true;
                                             }
-                                            if ui.button("添加到外部输入").clicked() {
+                                            if ui
+                                                .button(t!("metatorio.add-to-external-input"))
+                                                .clicked()
+                                            {
                                                 self.external.push((item.clone(), 1.0));
                                                 *changed = true;
                                             }
-                                            if ui.button("显示推荐配方").clicked() {
+                                            if ui
+                                                .button(t!("metatorio.show-recommended-recipes"))
+                                                .clicked()
+                                            {
                                                 *need_suggestions = true;
                                                 self.mechanics.iter_mut().for_each(|mechanic| {
                                                     mechanic.update_suggestion(
@@ -531,11 +542,11 @@ impl FactoryInstance {
     ) {
         ui.horizontal(|ui| {
             *changed |= ui
-                .checkbox(&mut self.strict_source, "禁止无端引入原料")
+                .checkbox(&mut self.strict_source, t!("metatorio.strict-source"))
                 .changed();
-            // *changed |= ui.checkbox(&mut self.strict_sink, "禁止副产物").changed();
-            ui.checkbox(&mut self.factory.debug, "显示调试数据");
-            if ui.button("删除无用配方").clicked() {
+            // *changed |= ui.checkbox(&mut self.strict_sink, t!("metatorio.strict-sink")).changed();
+            ui.checkbox(&mut self.factory.debug, t!("metatorio.debug"));
+            if ui.button(t!("metatorio.remove-unused-recipes")).clicked() {
                 *changed |= self.trim_flows();
                 if self
                     .mechanics
@@ -547,7 +558,10 @@ impl FactoryInstance {
                     self.reset_instances();
                 }
             }
-            if ui.button("删除无解配方").clicked() {
+            if ui
+                .button(t!("metatorio.remove-unsolvable-recipes"))
+                .clicked()
+            {
                 self.mechanics
                     .iter_mut()
                     .enumerate()
@@ -574,7 +588,7 @@ impl FactoryInstance {
                     self.reset_instances();
                 }
             }
-            if ui.button("按比例排序").clicked() {
+            if ui.button(t!("metatorio.sort-by-ratio")).clicked() {
                 self.instances.sort_by(|a, b| {
                     let prim_raw_a = self.solution.get_prim_raw_of(a).unwrap_or(0.0);
                     let prim_raw_b = self.solution.get_prim_raw_of(b).unwrap_or(0.0);
@@ -585,8 +599,8 @@ impl FactoryInstance {
                 });
             }
             if ui
-                .button("\u{26A0}自动规划")
-                .on_hover_text("\u{26A0}新工厂会出现在一个新页面中")
+                .button(t!("metatorio.auto-plan"))
+                .on_hover_text(t!("metatorio.auto-plan-tooltip"))
                 .clicked()
             {
                 let data_cloned = data.clone();
@@ -600,19 +614,18 @@ impl FactoryInstance {
                     match auto_planned_factory {
                         Ok(factory) => {
                             sender.unwrap().send(factory).unwrap();
-                            crate::toast::info("自动规划工厂已添加到项目中。");
+                            crate::toast::info(t!("metatorio.auto-plan-success"));
                         }
                         Err(e) => {
-                            // crate::toast::error(format!("自动规划工厂失败：{:?}\n", &e));
                             log::error!("自动规划工厂失败: {:?}", &e);
                         }
                     }
                 });
             }
         });
-        ui.label(format!(
-            "总代价: {:.2} | 总物料流",
-            self.solution.get_cost().unwrap_or(f64::NAN)
+        ui.label(t!(
+            "metatorio.total-cost",
+            self.solution.get_cost().unwrap_or(f64::NAN).to_string()
         ));
         egui::ScrollArea::vertical().id_salt(4).show(ui, |ui| {
             ui.set_max_height(200.0);
@@ -650,15 +663,21 @@ impl FactoryInstance {
                                 let button =
                                     ui.add_sized([35.0, 35.0], GenericIcon::new(data, item));
                                 button.context_menu(|ui| {
-                                    if ui.button("添加到产量目标").clicked() {
+                                    if ui
+                                        .button(t!("metatorio.add-to-production-target"))
+                                        .clicked()
+                                    {
                                         self.target.push((item.clone(), 0.0));
                                         *changed = true;
                                     }
-                                    if ui.button("添加到外部输入").clicked() {
+                                    if ui.button(t!("metatorio.add-to-external-input")).clicked() {
                                         self.external.push((item.clone(), 1.0));
                                         *changed = true;
                                     }
-                                    if ui.button("显示推荐配方").clicked() {
+                                    if ui
+                                        .button(t!("metatorio.show-recommended-recipes"))
+                                        .clicked()
+                                    {
                                         *need_suggestions = true;
                                         self.mechanics.iter_mut().for_each(|mechanic| {
                                             mechanic.update_suggestion(
@@ -711,9 +730,9 @@ impl FactoryInstance {
             self.external_editor(ui, data, proj, changed, need_suggestions);
         });
         ui.separator();
-        ui.heading("环境");
+        ui.heading(t!("metatorio.environment").to_string());
         if data.surfaces.len() > 0 {
-            ui.label("环境设置为太空平台时，请从上方手动加入星岩资源，无法估算星岩面积成本。");
+            ui.label(t!("metatorio.environment-warning").to_string());
         }
         ui.horizontal_wrapped(|ui| {
             let button = if let Some(planet) = &self.factory.planet {
@@ -722,16 +741,19 @@ impl FactoryInstance {
                 ui.add_sized([35.0, 35.0], Icon::new(data, "item", "unknown"))
             };
             ui.add(
-                SelectorModal::new(button.id, "选择星球")
-                    .with_toggle(button.clicked())
-                    .with_selector(
-                        Selector::new(data, "space-location").with_output(&mut self.factory.planet),
-                    ),
+                SelectorModal::new(
+                    button.id,
+                    t!("metatorio.select-planet").to_string().as_str(),
+                )
+                .with_toggle(button.clicked())
+                .with_selector(
+                    Selector::new(data, "space-location").with_output(&mut self.factory.planet),
+                ),
             );
             if button.secondary_clicked() {
                 self.factory.planet.take();
             }
-            ui.label("星球");
+            ui.label(t!("metatorio.planet").to_string());
         });
         if data.surfaces.len() > 0 {
             ui.horizontal_wrapped(|ui| {
@@ -741,16 +763,19 @@ impl FactoryInstance {
                     ui.add_sized([35.0, 35.0], Icon::new(data, "item", "unknown"))
                 };
                 ui.add(
-                    SelectorModal::new(button.id, "选择表面")
-                        .with_toggle(button.clicked())
-                        .with_selector(
-                            Selector::new(data, "surface").with_output(&mut self.factory.surface),
-                        ),
+                    SelectorModal::new(
+                        button.id,
+                        t!("metatorio.select-surface").to_string().as_str(),
+                    )
+                    .with_toggle(button.clicked())
+                    .with_selector(
+                        Selector::new(data, "surface").with_output(&mut self.factory.surface),
+                    ),
                 );
                 if button.secondary_clicked() {
                     self.factory.surface.take();
                 }
-                ui.label("表面");
+                ui.label(t!("metatorio.surface").to_string());
             });
         }
         ui.horizontal_wrapped(|ui| {
@@ -764,12 +789,15 @@ impl FactoryInstance {
                         .name,
                 ),
             );
-            ui.label("优先使用的机器品质");
+            ui.label(t!("metatorio.major-quality").to_string());
             let mut quality: Option<String> = None;
             ui.add(
-                SelectorModal::new(button.id, "选择偏好品质")
-                    .with_toggle(button.clicked())
-                    .with_selector(Selector::new(data, "quality").with_output(&mut quality)),
+                SelectorModal::new(
+                    button.id,
+                    t!("metatorio.select-quality").to_string().as_str(),
+                )
+                .with_toggle(button.clicked())
+                .with_selector(Selector::new(data, "quality").with_output(&mut quality)),
             );
             if let Some(quality_name) = quality {
                 for (idx, q) in data.qualities.iter().enumerate() {
@@ -784,7 +812,7 @@ impl FactoryInstance {
             }
         });
         ui.separator();
-        ui.heading("游戏机制");
+        ui.heading(t!("metatorio.mechanics").to_string());
         for (idx, mechanic) in self.mechanics.iter_mut().enumerate() {
             ui.separator();
             ui.scope_builder(egui::UiBuilder::new().id_salt(idx), |ui| {
@@ -849,8 +877,8 @@ impl FactoryInstance {
         need_suggestions: &mut bool,
     ) {
         let data = &data;
-        ui.heading("额外输入代价");
-        ui.label("对物品和流体而言，每秒产出1个所消耗的地格；对能量而言，产出1MW所消耗的地格");
+        ui.heading(t!("metatorio.external-input-cost").to_string());
+        ui.label(t!("metatorio.external-input-cost-description").to_string());
         self.external
             .dnd(ui, "external", |ui, _, (item, penalty), handle, _, op| {
                 card_frame(ui).show(ui, |ui| {
@@ -896,12 +924,12 @@ impl FactoryInstance {
                     });
                 });
             });
-        if ui.button("添加外部输入").clicked() {
+        if ui.button(t!("metatorio.add-external-input")).clicked() {
             self.external
                 .push((DualVar::Item("item-unknown".into()), 1.0));
             *changed = true;
         }
-        ui.menu_button("从地点自动选择", |ui| {
+        ui.menu_button(t!("metatorio.auto-select-from-locations"), |ui| {
             for planet in data.planets.values() {
                 if planet.has_surface()
                     && ui
@@ -959,7 +987,7 @@ impl FactoryInstance {
         changed: &mut bool,
         need_suggestions: &mut bool,
     ) {
-        ui.heading("目标产量/消耗");
+        ui.heading(t!("metatorio.production-target").to_string());
 
         ui.scope(|ui| {
             self.target
@@ -1018,7 +1046,7 @@ impl FactoryInstance {
                         });
                     });
                 });
-            if ui.button("添加指定产物").clicked() {
+            if ui.button(t!("metatorio.add-specific-target")).clicked() {
                 self.target
                     .push((DualVar::Item("item-unknown".into()), 1.0));
                 *changed = true;
@@ -1043,7 +1071,7 @@ impl FactoryInstance {
                             ui.set_min_width(ui.available_width());
                             handle.ui(ui, |ui| {
                                 ui.heading("≡");
-                                ui.label("表达式");
+                                ui.label(t!("metatorio.target-expression"));
                             });
 
                             if ui.button("×").clicked() {
@@ -1052,10 +1080,10 @@ impl FactoryInstance {
                             }
                         });
                         ui.separator();
-                        ui.label("常数项");
+                        ui.label(t!("metatorio.constant-term"));
                         *changed |= ui.add(drag_value(constant)).changed();
                         ui.separator();
-                        ui.label("线性项");
+                        ui.label(t!("metatorio.linear-terms"));
                         coefficients.retain_mut(|(item_id, coef)| {
                             let mut deleted = false;
                             ui.horizontal(|ui| {
@@ -1070,7 +1098,7 @@ impl FactoryInstance {
                                 );
                                 ui.vertical(|ui| {
                                     *changed |= ui.add(drag_value(coef).prefix("× ")).changed();
-                                    if ui.button("删除").clicked() {
+                                    if ui.button(t!("metatorio.delete")).clicked() {
                                         deleted = true;
                                         *changed = true;
                                     }
@@ -1078,14 +1106,14 @@ impl FactoryInstance {
                             });
                             !deleted
                         });
-                        if ui.button("添加项").clicked() {
+                        if ui.button(t!("metatorio.add-item")).clicked() {
                             coefficients.push((DualVar::Item("item-unknown".into()), 1.0));
                             *changed = true;
                         }
                     });
                 },
             );
-            if ui.button("添加产物表达式").clicked() {
+            if ui.button(t!("metatorio.add-target-expression")).clicked() {
                 self.target_group.push(TargetSpecVec {
                     constant: 1.0,
                     coefficients: Vec::new(),
@@ -1152,7 +1180,7 @@ impl FactoryInstance {
             .corner_radius(8.0)
             .outer_margin(4.0)
             .show(ui, |ui| {
-                ui.heading("配方配置");
+                ui.heading(t!("metatorio.recipe-config").to_string());
                 egui::ScrollArea::vertical().id_salt(2).show(ui, |ui| {
                     ui.set_max_height(150.0);
                     self.summary_panel(ui, data, proj, &mut changed, &mut need_suggestions);
@@ -1219,7 +1247,7 @@ impl Default for ProjectInstance {
             data: Arc::new(DataContext::default()),
             proj: ProjectContext::default().with_factory_sender(factory_tx),
 
-            name: "未命名项目".to_string(),
+            name: t!("metatorio.unnamed-project").to_string(),
             factories: DndVec::new(),
             factory_receiver: factory_rx,
             problem_sender: problem_tx,
@@ -1402,11 +1430,11 @@ impl SubView for ProjectInstance {
                     egui::ScrollArea::horizontal()
                         .id_salt("factories_button")
                         .show(ui, |ui| {
-                            if ui.button("⚙ 偏好设置").clicked() {
+                            if ui.button(t!("metatorio.preferences")).clicked() {
                                 self.proj.selected_page = ProjectPage::UserContext;
                             }
-                            if ui.button("+ 新建工厂").clicked() {
-                                let name = "新工厂".to_string();
+                            if ui.button(t!("metatorio.new-factory")).clicked() {
+                                let name = t!("metatorio.new-factory-name").to_string();
                                 self.factories
                                     .push(FactoryInstance::new(name).with_default_mechanics());
                             }
@@ -1469,7 +1497,7 @@ impl SubView for ProjectInstance {
                     ProjectPage::UserContext => {
                         egui::ScrollArea::vertical().show(ui, |ui| {
                             ui.style_mut().spacing.scroll = egui::style::ScrollStyle::solid();
-                            ui.heading("偏好设置");
+                            ui.heading(t!("metatorio.preference").to_string());
                             ui.separator();
                             self.proj.saved &= !ui
                                 .add(UserContextEditor::new(&self.data, &mut self.proj))
@@ -1479,13 +1507,15 @@ impl SubView for ProjectInstance {
                     ProjectPage::Index(page) => {
                         if self.factories.is_empty() {
                             let mut layout_job = egui::text::LayoutJob::default();
-                            egui::RichText::new("没有工厂\n").size(32.0).append_to(
-                                &mut layout_job,
-                                ui.style(),
-                                egui::FontSelection::Default,
-                                egui::Align::Center,
-                            );
-                            egui::RichText::new("点击上方的新建工厂按钮创建一个新工厂。")
+                            egui::RichText::new(t!("metatorio.no-factories").to_string())
+                                .size(32.0)
+                                .append_to(
+                                    &mut layout_job,
+                                    ui.style(),
+                                    egui::FontSelection::Default,
+                                    egui::Align::Center,
+                                );
+                            egui::RichText::new(t!("metatorio.create-factory-tooltip").to_string())
                                 .append_to(
                                     &mut layout_job,
                                     ui.style(),
@@ -1518,7 +1548,7 @@ impl SubView for ProjectInstance {
 
     fn description(&self) -> String {
         self.data.mods.iter().fold(
-            "使用以下模组: ".to_string(),
+            t!("metatorio.used-mods").to_string(),
             |mut acc, (mod_name, mod_version)| {
                 acc.push_str(&format!("\n{} ({}), ", mod_name, mod_version));
                 acc
@@ -1551,11 +1581,11 @@ impl ProjectView {
 
 impl SubView for ProjectView {
     fn name(&self) -> String {
-        "异星工厂规划器".to_string()
+        t!("metatorio.projects").to_string()
     }
     fn description(&self) -> String {
-        format!(
-            "使用的模组和版本：{}",
+        t!(
+            "metatorio.used-mods",
             self.data
                 .mods
                 .iter()
@@ -1564,6 +1594,7 @@ impl SubView for ProjectView {
                     acc
                 },)
         )
+        .to_string()
     }
     fn view(&mut self, ui: &mut egui::Ui) {
         let mut show_close_confirm = false;
@@ -1577,16 +1608,22 @@ impl SubView for ProjectView {
         }
 
         show_modal(egui::Id::new("关闭确认"), show_close_confirm, ui, |ui| {
-            ui.label("确定要关闭程序吗？未保存的项目将会丢失。");
+            ui.label(t!("metatorio.confirm-close").to_string());
             ui.horizontal(|ui| {
-                if ui.button("取消").clicked() {
+                if ui.button(t!("metatorio.cancel").to_string()).clicked() {
                     ui.close();
                 }
-                if ui.button("关闭程序").clicked() {
+                if ui
+                    .button(t!("metatorio.close-program").to_string())
+                    .clicked()
+                {
                     self.ignore_close = true;
                     ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                 }
-                if ui.button("关闭前保存").clicked() {
+                if ui
+                    .button(t!("metatorio.save-before-close").to_string())
+                    .clicked()
+                {
                     for project in self.projects.vec.iter_mut() {
                         if !project.proj.saved {
                             if let Some(path) = &project.proj.file_path.clone() {
@@ -1604,8 +1641,8 @@ impl SubView for ProjectView {
         });
 
         egui::containers::menu::MenuBar::new().ui(ui, |ui| {
-            ui.menu_button("文件", |ui| {
-                if ui.button("新建项目").clicked() {
+            ui.menu_button(t!("metatorio.file"), |ui| {
+                if ui.button(t!("metatorio.new-project")).clicked() {
                     let mut project = ProjectInstance::new_arc(self.data.clone())
                         .with_default_milestones()
                         .post_load();
@@ -1620,8 +1657,9 @@ impl SubView for ProjectView {
                             if prototype.base.hidden || prototype.base.parameter {
                                 continue;
                             }
-                            let mut factory = FactoryInstance::new("示例工厂".to_string())
-                                .with_default_mechanics();
+                            let mut factory =
+                                FactoryInstance::new(t!("metatorio.example-factory").to_string())
+                                    .with_default_mechanics();
                             factory
                                 .target
                                 .push((DualVar::Item(item.clone().into()), 1.0));
@@ -1654,10 +1692,10 @@ impl SubView for ProjectView {
                     self.selected = Some(self.projects.len() - 1);
                     ui.close();
                 }
-                if ui.button("加载项目").clicked() {
+                if ui.button(t!("metatorio.load-project")).clicked() {
                     if let Some(path) = rfd::FileDialog::new()
-                        .add_filter("异星工厂规划项目文件", &["fpp"])
-                        .set_title("打开项目文件")
+                        .add_filter(t!("metatorio.project-file").to_string(), &["fpp"])
+                        .set_title(t!("metatorio.open-project-file").to_string())
                         .pick_file()
                         && let Some(mut project) = load_project(&path)
                     {
@@ -1672,7 +1710,7 @@ impl SubView for ProjectView {
                 }
                 ui.add_enabled_ui(self.selected.is_some(), |ui| {
                     ui.separator();
-                    if ui.button("保存项目").clicked() {
+                    if ui.button(t!("metatorio.save-project")).clicked() {
                         let project = &mut self.projects[self.selected.unwrap()];
                         if let Some(path) = &project.proj.file_path.clone() {
                             save_project(project, path);
@@ -1681,12 +1719,15 @@ impl SubView for ProjectView {
                         }
                         ui.close();
                     }
-                    if ui.button("另存为...").clicked() {
+                    if ui.button(t!("metatorio.save-as")).clicked() {
                         let project = &mut self.projects[self.selected.unwrap()];
                         save_project_as(project);
                         ui.close();
                     }
-                    if ui.button("[测试]序列化与反序列化性能").clicked() {
+                    if ui
+                        .button(t!("metatorio.test-serialization-performance"))
+                        .clicked()
+                    {
                         let project = &mut self.projects[self.selected.unwrap()];
                         let instant = Instant::now();
                         let serialized = serde_json::to_string(project).unwrap();
@@ -1705,7 +1746,7 @@ impl SubView for ProjectView {
         let mut toggle = false;
 
         egui::containers::menu::MenuBar::new().ui(ui, |ui| {
-            ui.label("项目列表");
+            ui.label(t!("metatorio.project-list").to_string());
 
             ui.separator();
 
@@ -1751,13 +1792,16 @@ impl SubView for ProjectView {
         match self.delete_request {
             DeleteRequest::Pending(idx) => {
                 show_modal(egui::Id::new("删除确认"), toggle, ui, |ui| {
-                    ui.label("确定要删除该项目吗？此操作无法撤销。");
+                    ui.label(t!("metatorio.confirm-delete").to_string());
                     ui.horizontal(|ui| {
-                        if ui.button("取消").clicked() {
+                        if ui.button(t!("metatorio.cancel").to_string()).clicked() {
                             self.delete_request = DeleteRequest::None;
                             ui.close();
                         }
-                        if ui.button("删除项目").clicked() {
+                        if ui
+                            .button(t!("metatorio.delete-project").to_string())
+                            .clicked()
+                        {
                             self.delete_request = DeleteRequest::Confirmed(idx);
                             ui.close();
                         }
@@ -1803,8 +1847,8 @@ pub enum DeleteRequest {
 
 pub fn save_project_as(proj: &mut ProjectInstance) {
     let path = rfd::FileDialog::new()
-        .add_filter("异星工厂规划项目文件", &["fpp"])
-        .set_title("另存为项目文件")
+        .add_filter(t!("metatorio.project-file").to_string(), &["fpp"])
+        .set_title(t!("metatorio.save-project").to_string())
         .set_file_name(format!("{}.fpp", proj.name))
         .save_file();
     if let Some(path) = path {
@@ -1818,14 +1862,14 @@ pub fn save_project(proj: &mut ProjectInstance, path: &Path) {
             Ok(_) => {
                 proj.proj.saved = true;
                 proj.proj.file_path = Some(path.to_path_buf());
-                crate::toast::info("项目已保存");
+                crate::toast::info(t!("metatorio.project-saved"));
             }
             Err(e) => {
-                crate::toast::error(format!("保存项目失败: {:?}", e));
+                crate::toast::error(t!("metatorio.save-failed", e.to_string()));
             }
         },
         Err(e) => {
-            crate::toast::error(format!("创建文件失败: {:?}", e));
+            crate::toast::error(t!("metatorio.create-failed", e.to_string()));
         }
     }
 }
@@ -1835,12 +1879,12 @@ pub fn load_project(path: &Path) -> Option<ProjectInstance> {
         Ok(file) => match serde_json::from_reader(BufReader::new(file)) {
             Ok(proj) => Some(proj),
             Err(e) => {
-                crate::toast::error(format!("加载项目失败: {:?}", e));
+                crate::toast::error(t!("metatorio.load-failed", e.to_string()));
                 None
             }
         },
         Err(e) => {
-            crate::toast::error(format!("打开文件失败: {:?}", e));
+            crate::toast::error(t!("metatorio.open-failed", e.to_string()));
             None
         }
     }
@@ -1857,31 +1901,28 @@ pub struct ContextCreatorView {
 impl SubView for ContextCreatorView {
     fn view(&mut self, ui: &mut egui::Ui) {
         ui.vertical_centered(|ui| {
-            ui.heading("创建游戏上下文");
+            ui.heading(t!("metatorio.create-context").to_string());
             ui.separator();
 
-            ui.label("选择游戏路径:");
-            if ui.button("浏览...").clicked()
+            ui.label(t!("metatorio.select-game-path"));
+            if ui.button(t!("metatorio.browse")).clicked()
                 && let Some(path) = rfd::FileDialog::new().pick_file()
             {
                 self.path = Some(path);
             }
             if let Some(path) = &self.path {
-                ui.label(format!("已选择路径: {}", path.display()));
+                ui.label(t!("metatorio.selected-path", path.display().to_string()));
                 if path.to_string_lossy().contains("steam") {
-                    ui.label(
-                        "若为 Steam 版本的游戏，请关闭正在运行中\
-的异星工厂并且启动 Steam 再执行加载游戏上下文",
-                    );
+                    ui.label(t!("metatorio.steam-version-warning"));
                 }
             } else {
-                ui.label("未选择路径");
+                ui.label(t!("metatorio.no-path-selected"));
             }
 
             ui.separator();
 
-            ui.label("选择Mod路径 (可选):");
-            if ui.button("浏览...").clicked() {
+            ui.label(t!("metatorio.select-mod-path"));
+            if ui.button(t!("metatorio.browse")).clicked() {
                 if let Some(mod_path) = rfd::FileDialog::new().pick_folder() {
                     self.mod_path = Some(mod_path);
                 } else {
@@ -1890,32 +1931,38 @@ impl SubView for ContextCreatorView {
             }
 
             if let Some(mod_path) = &self.mod_path {
-                ui.label(format!("已选择Mod路径: {}", mod_path.display()));
+                ui.label(t!(
+                    "metatorio.selected-mod-path",
+                    mod_path.display().to_string()
+                ));
             } else {
-                ui.label("未选择Mod路径");
+                ui.label(t!("metatorio.no-mod-path-selected"));
             }
             ui.separator();
             let mut can_load_context = true;
             if self.path.is_none() {
-                ui.label("请选择游戏可执行文件以继续。");
+                ui.label(t!("metatorio.no-game-path-selected"));
                 can_load_context = false;
             }
             if let Some(mod_path) = self.mod_path.as_ref()
                 && !mod_path.join("mod-list.json").exists()
             {
-                ui.label("模组文件夹下未找到 mod-list.json。");
+                ui.label(t!("metatorio.mod-list-not-found"));
                 can_load_context = false;
             }
 
             if self.thread.is_some() {
-                ui.label("正在加载游戏上下文，请稍候...");
+                ui.label(t!("metatorio.loading-context"));
                 can_load_context = false;
             }
 
             ui.separator();
 
             if ui
-                .add_enabled(can_load_context, egui::Button::new("加载游戏上下文"))
+                .add_enabled(
+                    can_load_context,
+                    egui::Button::new(t!("metatorio.load-game-context")),
+                )
                 .clicked()
                 && let Some(path) = &self.path
                 && let Some(sender) = &self.subview_sender
@@ -1939,7 +1986,10 @@ impl SubView for ContextCreatorView {
                                     .expect("Failed to send subview");
                             }
                             Err(e) => {
-                                crate::toast::error(format!("加载游戏上下文失败: {:?}", e));
+                                crate::toast::error(t!(
+                                    "metatorio.load-game-context-failed",
+                                    format!("{:?}", e)
+                                ));
                             }
                         },
                     ));
@@ -1948,7 +1998,10 @@ impl SubView for ContextCreatorView {
             ui.separator();
 
             if ui
-                .add_enabled(self.thread.is_none(), egui::Button::new("加载缓存上下文"))
+                .add_enabled(
+                    self.thread.is_none(),
+                    egui::Button::new(t!("metatorio.load-cache-context")),
+                )
                 .clicked()
                 && let Some(sender) = &self.subview_sender
                 && let None = self.thread
@@ -1961,7 +2014,10 @@ impl SubView for ContextCreatorView {
                                 sender.send(Box::new(ProjectView::new(data))).unwrap();
                             }
                             Err(e) => {
-                                crate::toast::error(format!("加载缓存上下文失败: {:?}", e));
+                                crate::toast::error(t!(
+                                    "metatorio.load-cache-context-failed",
+                                    format!("{:?}", e)
+                                ));
                             }
                         },
                     ));

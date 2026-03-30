@@ -338,11 +338,11 @@ impl egui::Widget for ModuleConfigEditor<'_> {
 
         let button = ui
             .vertical(|ui| {
-                ui.label("插件");
+                ui.label(t!("metatorio.modules"));
                 if self.module_slots == 0 && self.edit_modules {
                     ui.disable();
                 }
-                ui.button("编辑")
+                ui.button(t!("metatorio.edit"))
             })
             .inner;
         if self.module_slots == 0 && self.edit_modules {
@@ -399,7 +399,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
             }
         });
         show_modal(button.id, button.clicked(), ui, |ui| {
-            ui.label("编辑插件");
+            ui.label(t!("metatorio.edit-modules"));
 
             let len = self.module_config.modules.len();
             ui.vertical(|ui| {
@@ -436,10 +436,17 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                     }
                                 });
 
-                            let widget = SelectorModal::new(icon.id, "选择插件")
-                                .with_toggle(icon.clicked())
-                                .with_selector(selector);
-                            if ui.add(widget).changed() {
+                            if ui
+                                .add(
+                                    SelectorModal::new(
+                                        icon.id,
+                                        t!("metatorio.select-module").to_string().as_str(),
+                                    )
+                                    .with_toggle(icon.clicked())
+                                    .with_selector(selector),
+                                )
+                                .changed()
+                            {
                                 response.mark_changed();
                             }
                             !deleted
@@ -471,11 +478,17 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                                     }
                                 });
 
-                            let widget = SelectorModal::new(icon.id, "填充插件")
-                                .with_toggle(icon.clicked())
-                                .with_selector(selector);
-
-                            if ui.add(widget).changed() {
+                            if ui
+                                .add(
+                                    SelectorModal::new(
+                                        icon.id,
+                                        t!("metatorio.fill-module").to_string().as_str(),
+                                    )
+                                    .with_toggle(icon.clicked())
+                                    .with_selector(selector),
+                                )
+                                .changed()
+                            {
                                 response.mark_changed();
                             }
 
@@ -490,7 +503,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                 });
                 ui.separator();
                 if self.edit_beacons {
-                    ui.label("插件塔");
+                    ui.label(t!("metatorio.beacons"));
                     self.module_config.beacons.retain_mut(|beacon_config| {
                         let mut deleted = false;
                         beacon_config_ui(
@@ -503,7 +516,7 @@ impl egui::Widget for ModuleConfigEditor<'_> {
                         );
                         !deleted
                     });
-                    if ui.button("添加插件塔").clicked() {
+                    if ui.button(t!("metatorio.add-beacon")).clicked() {
                         self.module_config.beacons.push(BeaconConfig::default());
                     }
                 }
@@ -523,11 +536,11 @@ pub fn beacon_config_ui(
 ) {
     ui.horizontal(|ui| {
         ui.vertical(|ui| {
-            if ui.button("删除").clicked() {
+            if ui.button(t!("metatorio.delete")).clicked() {
                 *deleted = true;
                 response.mark_changed();
             }
-            ui.label("每插件塔\n的机器数");
+            ui.label(t!("metatorio.machines-per-beacon"));
             let widget = drag_value(&mut beacon_config.share)
                 .range(1.0..=100.0)
                 .clamp_existing_to_range(true);
@@ -545,18 +558,22 @@ pub fn beacon_config_ui(
             let selector = Selector::new(data, "entity")
                 .with_current(&mut beacon_config.beacon)
                 .with_filter(|s: &IdWithQuality, f: &DataContext| f.beacons.contains_key(&s.0));
-            ui.label("每机器的\n插件塔数");
+            ui.label(t!("metatorio.beacons-per-machine"));
             let widget = drag_value(&mut beacon_config.count)
                 .range(1..=100)
                 .clamp_existing_to_range(true);
             if ui.add(widget).changed() {
                 response.mark_changed();
             }
-            let widget = SelectorModal::new(icon.id, "选择插件塔")
-                .with_toggle(icon.clicked())
-                .with_selector(selector);
 
-            if ui.add(widget).changed() {
+            if ui
+                .add(
+                    SelectorModal::new(icon.id, t!("metatorio.select-beacon").to_string().as_str())
+                        .with_toggle(icon.clicked())
+                        .with_selector(selector),
+                )
+                .changed()
+            {
                 response.mark_changed();
             }
         });
@@ -592,10 +609,17 @@ pub fn beacon_config_ui(
                             }
                         },
                     );
-                    let widget = SelectorModal::new(icon.id, "选择插件")
-                        .with_toggle(icon.clicked())
-                        .with_selector(selector);
-                    if ui.add(widget).changed() {
+                    if ui
+                        .add(
+                            SelectorModal::new(
+                                icon.id,
+                                t!("metatorio.select-module").to_string().as_str(),
+                            )
+                            .with_toggle(icon.clicked())
+                            .with_selector(selector),
+                        )
+                        .changed()
+                    {
                         response.mark_changed();
                     }
                     let beacon_quality =
@@ -623,7 +647,7 @@ pub fn beacon_config_ui(
                 });
                 !deleted
             });
-            if ui.button("添加插件").clicked() {
+            if ui.button(t!("metatorio.add-module")).clicked() {
                 beacon_config
                     .modules
                     .push((IdWithQuality("empty-module-slot".to_string(), 0), 0));

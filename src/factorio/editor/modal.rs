@@ -87,7 +87,10 @@ impl egui::Widget for SelectorModal<'_, str, String> {
                 })
                 .0;
             ui.label(self.label_str);
-            ui.add(egui::widgets::TextEdit::singleline(&mut filter_string).hint_text("筛选器……"));
+            ui.add(
+                egui::widgets::TextEdit::singleline(&mut filter_string)
+                    .hint_text(t!("metatorio.filter")),
+            );
             ui.memory_mut(|mem| {
                 mem.data
                     .insert_temp(self.id, FilterString(filter_string.clone()));
@@ -124,7 +127,10 @@ impl egui::Widget for SelectorModal<'_, IdWithQuality, IdWithQuality> {
                 })
                 .0;
             ui.label(self.label_str);
-            ui.add(egui::widgets::TextEdit::singleline(&mut filter_string).hint_text("筛选器……"));
+            ui.add(
+                egui::widgets::TextEdit::singleline(&mut filter_string)
+                    .hint_text(t!("metatorio.filter")),
+            );
             ui.memory_mut(|mem| {
                 mem.data
                     .insert_temp(self.id, FilterString(filter_string.clone()));

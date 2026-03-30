@@ -584,15 +584,13 @@ where
                 log::error!("求解器：求解失败，错误信息: {:?}", err);
                 let err_string = match err {
                     good_lp::ResolutionError::Unbounded => {
-                        "无界。存在能够无限产生目标物品且不增加消耗的配方组合。".to_string()
+                        t!("metatorio.solver-unbounded").to_string()
                     }
                     good_lp::ResolutionError::Infeasible => {
-                        "无解。不存在能够满足目标物品需求的配方组合。".to_string()
+                        t!("metatorio.solver-infeasible").to_string()
                     }
-                    good_lp::ResolutionError::Other(_) => "求解过程中发生未知错误。".to_string(),
-                    good_lp::ResolutionError::Str(s) => {
-                        format!("求解过程中发生内部错误：{}", s)
-                    }
+                    good_lp::ResolutionError::Other(_) => t!("metatorio.solver-other").to_string(),
+                    good_lp::ResolutionError::Str(s) => t!("metatorio.solver-str", s).to_string(),
                 };
                 SolverSolution::NotSolved {
                     no_provider: no_providers.iter().cloned().collect(),

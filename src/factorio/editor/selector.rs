@@ -118,7 +118,7 @@ impl<'a> egui::Widget for Selector<'a, str, String> {
             storage.subgroup = 0;
         }
         if filtered_group.is_empty() {
-            ui.label("无满足条件的选项。");
+            ui.label(t!("metatorio.no-items").to_string());
             return ui.response().clone();
         }
         let order_info = &self.data.ordered_entries[self.type_name];
@@ -355,7 +355,11 @@ pub fn generic_item_selector(
             .selected_text(selected.to_string())
             .show_ui(ui, |ui| {
                 changed |= ui
-                    .selectable_value(selected, DualVar::Item("item-unknown".into()), "物品")
+                    .selectable_value(
+                        selected,
+                        DualVar::Item("item-unknown".into()),
+                        t!("metatorio.item"),
+                    )
                     .changed();
                 changed |= ui
                     .selectable_value(
@@ -364,23 +368,35 @@ pub fn generic_item_selector(
                             name: "fluid-unknown".to_string(),
                             temperature: [i32::MIN, i32::MAX],
                         },
-                        "流体",
+                        t!("metatorio.fluid"),
                     )
                     .changed();
                 changed |= ui
-                    .selectable_value(selected, DualVar::Entity("entity-unknown".into()), "实体")
+                    .selectable_value(
+                        selected,
+                        DualVar::Entity("entity-unknown".into()),
+                        t!("metatorio.entity"),
+                    )
                     .changed();
                 changed |= ui
-                    .selectable_value(selected, DualVar::Heat, "热能")
+                    .selectable_value(selected, DualVar::Heat, t!("metatorio.heat"))
                     .changed();
                 changed |= ui
-                    .selectable_value(selected, DualVar::Electricity, "电能")
+                    .selectable_value(selected, DualVar::Electricity, t!("metatorio.electricity"))
                     .changed();
                 changed |= ui
-                    .selectable_value(selected, DualVar::FluidHeat { filter: None }, "流体热源")
+                    .selectable_value(
+                        selected,
+                        DualVar::FluidHeat { filter: None },
+                        t!("metatorio.fluid-heat"),
+                    )
                     .changed();
                 changed |= ui
-                    .selectable_value(selected, DualVar::FluidFuel { filter: None }, "流体燃料")
+                    .selectable_value(
+                        selected,
+                        DualVar::FluidFuel { filter: None },
+                        t!("metatorio.fluid-fuel"),
+                    )
                     .changed();
                 changed |= ui
                     .selectable_value(
@@ -388,7 +404,7 @@ pub fn generic_item_selector(
                         DualVar::ItemFuel {
                             category: "chemical".to_string(),
                         },
-                        "物体燃料",
+                        t!("metatorio.item-fuel"),
                     )
                     .changed();
                 changed |= ui
@@ -397,7 +413,7 @@ pub fn generic_item_selector(
                         DualVar::Pollution {
                             name: "pollution".to_string(),
                         },
-                        "污染物",
+                        t!("metatorio.pollution"),
                     )
                     .changed();
             });
@@ -405,20 +421,24 @@ pub fn generic_item_selector(
             DualVar::Item(id_with_quality) => {
                 changed |= ui
                     .add(
-                        SelectorModal::new(id.with("select-item"), "选择物品")
-                            .with_toggle(toggle)
-                            .with_selector(
-                                Selector::new(data, "item").with_current(id_with_quality),
-                            ),
+                        SelectorModal::new(
+                            id.with("select-item"),
+                            t!("metatorio.select-item").to_string().as_str(),
+                        )
+                        .with_toggle(toggle)
+                        .with_selector(Selector::new(data, "item").with_current(id_with_quality)),
                     )
                     .changed();
             }
             DualVar::Fluid { name, temperature } => {
                 changed |= ui
                     .add(
-                        SelectorModal::new(id.with("select-fluid"), "选择流体")
-                            .with_toggle(toggle)
-                            .with_selector(Selector::new(data, "fluid").with_current(name)),
+                        SelectorModal::new(
+                            id.with("select-fluid"),
+                            t!("metatorio.select-fluid").to_string().as_str(),
+                        )
+                        .with_toggle(toggle)
+                        .with_selector(Selector::new(data, "fluid").with_current(name)),
                     )
                     .changed();
                 let [min, max] = temperature;
@@ -427,14 +447,14 @@ pub fn generic_item_selector(
                     ui.horizontal(|ui| {
                         changed |= ui.add(drag_value(&mut cur_temp).speed(1)).changed();
 
-                        if ui.button("无温度").clicked() {
+                        if ui.button(t!("metatorio.no-temperature")).clicked() {
                             *temperature = [i32::MIN, i32::MAX];
                             changed = true;
                         } else {
                             *temperature = [cur_temp, cur_temp];
                         }
                     });
-                } else if ui.button("附加温度").clicked() {
+                } else if ui.button(t!("metatorio.add-temperature")).clicked() {
                     let default = data
                         .fluids
                         .get(name)
@@ -447,18 +467,21 @@ pub fn generic_item_selector(
             DualVar::Entity(id_with_quality) => {
                 changed |= ui
                     .add(
-                        SelectorModal::new(id.with("select-entity"), "选择实体")
-                            .with_toggle(toggle)
-                            .with_selector(
-                                Selector::new(data, "entity")
-                                    .with_current(id_with_quality)
-                                    .with_filter(|s: &IdWithQuality, f| {
-                                        f.entities.get(&s.0).is_some_and(|e| {
-                                            e.base.r#type == "resource"
-                                                || e.base.r#type == "asteroid-chunk"
-                                        })
-                                    }),
-                            ),
+                        SelectorModal::new(
+                            id.with("select-entity"),
+                            t!("metatorio.select-entity").to_string().as_str(),
+                        )
+                        .with_toggle(toggle)
+                        .with_selector(
+                            Selector::new(data, "entity")
+                                .with_current(id_with_quality)
+                                .with_filter(|s: &IdWithQuality, f| {
+                                    f.entities.get(&s.0).is_some_and(|e| {
+                                        e.base.r#type == "resource"
+                                            || e.base.r#type == "asteroid-chunk"
+                                    })
+                                }),
+                        ),
                     )
                     .changed();
             }
@@ -467,18 +490,21 @@ pub fn generic_item_selector(
             DualVar::FluidHeat { filter } => {
                 changed |= ui
                     .add(
-                        SelectorModal::new(id.with("select-fluid-heat"), "选择流体热源来源")
-                            .with_toggle(toggle)
-                            .with_selector(
-                                Selector::new(data, "fluid")
-                                    .with_output(filter)
-                                    .with_filter(|s, f| {
-                                        f.fluids[s]
-                                            .heat_capacity
-                                            .as_ref()
-                                            .is_none_or(|c| c.amount > 0.0)
-                                    }),
-                            ),
+                        SelectorModal::new(
+                            id.with("select-fluid-heat"),
+                            t!("metatorio.select-fluid-heat").to_string().as_str(),
+                        )
+                        .with_toggle(toggle)
+                        .with_selector(
+                            Selector::new(data, "fluid")
+                                .with_output(filter)
+                                .with_filter(|s, f| {
+                                    f.fluids[s]
+                                        .heat_capacity
+                                        .as_ref()
+                                        .is_none_or(|c| c.amount > 0.0)
+                                }),
+                        ),
                     )
                     .changed();
                 if clear {
@@ -493,18 +519,21 @@ pub fn generic_item_selector(
                 }
                 changed |= ui
                     .add(
-                        SelectorModal::new(id, "选择流体燃料")
-                            .with_toggle(toggle)
-                            .with_selector(
-                                Selector::new(data, "fluid")
-                                    .with_output(filter)
-                                    .with_filter(|s, f| {
-                                        f.fluids[s]
-                                            .fuel_value
-                                            .as_ref()
-                                            .is_some_and(|c| c.amount > 0.0)
-                                    }),
-                            ),
+                        SelectorModal::new(
+                            id,
+                            t!("metatorio.select-fluid-fuel").to_string().as_str(),
+                        )
+                        .with_toggle(toggle)
+                        .with_selector(
+                            Selector::new(data, "fluid")
+                                .with_output(filter)
+                                .with_filter(|s, f| {
+                                    f.fluids[s]
+                                        .fuel_value
+                                        .as_ref()
+                                        .is_some_and(|c| c.amount > 0.0)
+                                }),
+                        ),
                     )
                     .changed();
             }

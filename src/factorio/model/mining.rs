@@ -413,7 +413,7 @@ impl SolveContext for MiningMechanic {
 impl SerdeFactorioMechanic for MiningMechanic {}
 impl FactorioMechanic for MiningMechanic {
     fn name(&self) -> String {
-        "采矿".to_string()
+        t!("metatorio.mining").to_string()
     }
 
     fn instances_proxy(&self) -> &dyn FlowProxy {
@@ -433,12 +433,12 @@ impl FactorioMechanic for MiningMechanic {
     ) -> bool {
         let mut changed = false;
 
-        if ui.button("添加采矿").clicked() {
+        if ui.button(t!("metatorio.add-mining")).clicked() {
             let mining_config = MiningInstance::default();
             self.instances.push(mining_config);
             changed = true;
         }
-        ui.label("[自动]备选机器数量");
+        ui.label(t!("metatorio.alternative-count"));
         ui.add(
             egui::DragValue::new(&mut self.alternative_count)
                 .speed(1)
@@ -447,10 +447,10 @@ impl FactorioMechanic for MiningMechanic {
         );
 
         ui.separator();
-        ui.collapsing("[自动]枚举插件", |ui| {
+        ui.collapsing(t!("metatorio.enumerate-modules"), |ui| {
             if ui
-                .button("使用最佳插件")
-                .on_hover_text("根据当前科技等级，选择每个类别的最佳插件加入枚举。")
+                .button(t!("metatorio.use-best-modules"))
+                .on_hover_text(t!("metatorio.use-best-modules-tooltip"))
                 .clicked()
             {
                 let mut modules_by_category: AIndexMap<String, &ModulePrototype> =
@@ -476,18 +476,21 @@ impl FactorioMechanic for MiningMechanic {
             let icon = Icon::new(data, "item", "empty-module-slot");
             let button = ui
                 .add_sized([35.0, 35.0], icon)
-                .on_hover_text("选择新的枚举插件。修改插件请先删除。");
+                .on_hover_text(t!("metatorio.select-enumerate-module"));
             ui.add(
-                SelectorModal::new(button.id, "选择枚举插件")
-                    .with_toggle(button.clicked())
-                    .with_selector(
-                        Selector::new(data, "item")
-                            .with_output(&mut self.new_enumerate_module)
-                            .with_filter(|item: &IdWithQuality, data: &DataContext| {
-                                data.modules.contains_key(&item.0)
-                                    && proj.is_prototype_accessible("item", &item.0)
-                            }),
-                    ),
+                SelectorModal::new(
+                    button.id,
+                    t!("metatorio.select-enumerate-module").to_string().as_str(),
+                )
+                .with_toggle(button.clicked())
+                .with_selector(
+                    Selector::new(data, "item")
+                        .with_output(&mut self.new_enumerate_module)
+                        .with_filter(|item: &IdWithQuality, data: &DataContext| {
+                            data.modules.contains_key(&item.0)
+                                && proj.is_prototype_accessible("item", &item.0)
+                        }),
+                ),
             );
             if self.new_enumerate_module.is_some() {
                 let new_module = self.new_enumerate_module.take().unwrap();
@@ -506,7 +509,7 @@ impl FactorioMechanic for MiningMechanic {
                         [35.0, 35.0],
                         Icon::new(data, "item", &module.0).with_quality(module.1),
                     )
-                    .on_hover_text("无法编辑，右键可删除。");
+                    .on_hover_text(t!("metatorio.cannot-edit-module"));
                 if button.secondary_clicked() {
                     delele_module = Some(module.clone());
                     changed = true;
@@ -517,9 +520,8 @@ impl FactorioMechanic for MiningMechanic {
             }
         });
         ui.separator();
-        ui.collapsing("[自动]插件塔", |ui| {
-            ui.label("添加新建筑时，会选取第一个满足条件的插件塔配置。");
-            if ui.button("添加插件塔").clicked() {
+        ui.collapsing(t!("metatorio.enumerate-beacons"), |ui| {
+            if ui.button(t!("metatorio.add-beacon")).clicked() {
                 self.enumerate_beacons.push(AutoBeaconConfig {
                     module_config: ModuleConfig::new(),
                 });
@@ -528,7 +530,7 @@ impl FactorioMechanic for MiningMechanic {
             self.enumerate_beacons.retain_mut(|config| {
                 ui.separator();
                 let mut deleted = false;
-                if ui.button("删除").clicked() {
+                if ui.button(t!("metatorio.delete")).clicked() {
                     deleted = true;
                     changed = true;
                 }
@@ -561,19 +563,22 @@ impl FactorioMechanic for MiningMechanic {
         let instance = &mut self.instances[idx];
 
         ui.vertical(|ui| {
-            ui.label("开采");
+            ui.label(t!("metatorio.mine"));
 
             let resource_button =
                 ui.add_sized([35.0, 35.0], Icon::new(data, "entity", &instance.resource));
             changed |= ui
                 .add(
-                    SelectorModal::new(resource_button.id, "选择矿物")
-                        .with_toggle(resource_button.clicked())
-                        .with_selector(
-                            Selector::new(data, "entity")
-                                .with_current(&mut instance.resource)
-                                .with_filter(|s, f| f.resources.contains_key(s)),
-                        ),
+                    SelectorModal::new(
+                        resource_button.id,
+                        t!("metatorio.select-ore").to_string().as_str(),
+                    )
+                    .with_toggle(resource_button.clicked())
+                    .with_selector(
+                        Selector::new(data, "entity")
+                            .with_current(&mut instance.resource)
+                            .with_filter(|s, f| f.resources.contains_key(s)),
+                    ),
                 )
                 .changed();
         });
@@ -593,7 +598,7 @@ impl FactorioMechanic for MiningMechanic {
         }
         ui.separator();
         ui.vertical(|ui| {
-            ui.label("采矿机");
+            ui.label(t!("metatorio.mining-machine"));
             let entity_button = ui.add_sized(
                 [35.0, 35.0],
                 Icon::new(data, "entity", &instance.machine.0).with_quality(instance.machine.1),
@@ -602,20 +607,23 @@ impl FactorioMechanic for MiningMechanic {
             if let Some(resource_proto) = data.resources.get(&instance.resource) {
                 changed |= ui
                     .add(
-                        SelectorModal::new(entity_button.id, "选择采矿设备")
-                            .with_toggle(entity_button.clicked())
-                            .with_selector(
-                                Selector::new(data, "entity")
-                                    .with_current(&mut instance.machine)
-                                    .with_filter(|s: &IdWithQuality, f: &DataContext| {
-                                        if let Some(miner) = f.miners.get(&s.0) {
-                                            machine_fits_for_resource(miner, resource_proto)
-                                                && proj.is_prototype_accessible("entity", &s.0)
-                                        } else {
-                                            false
-                                        }
-                                    }),
-                            ),
+                        SelectorModal::new(
+                            entity_button.id,
+                            t!("metatorio.select-mining-machine").to_string().as_str(),
+                        )
+                        .with_toggle(entity_button.clicked())
+                        .with_selector(
+                            Selector::new(data, "entity")
+                                .with_current(&mut instance.machine)
+                                .with_filter(|s: &IdWithQuality, f: &DataContext| {
+                                    if let Some(miner) = f.miners.get(&s.0) {
+                                        machine_fits_for_resource(miner, resource_proto)
+                                            && proj.is_prototype_accessible("entity", &s.0)
+                                    } else {
+                                        false
+                                    }
+                                }),
+                        ),
                     )
                     .changed();
             }
@@ -740,7 +748,10 @@ impl FactorioMechanic for MiningMechanic {
         factory: &FactoryContext,
     ) -> bool {
         let mut changed = false;
-        ui.add(egui::TextEdit::singleline(&mut self.suggested_recipes_filter).hint_text("筛选器"));
+        ui.add(
+            egui::TextEdit::singleline(&mut self.suggested_recipes_filter)
+                .hint_text(t!("metatorio.filter")),
+        );
         ui.add(
             Selector::new(data, "entity")
                 .with_output(&mut self.selected_suggested_resource)

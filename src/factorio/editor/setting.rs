@@ -1,11 +1,14 @@
-use std::collections::{VecDeque};
+use std::collections::VecDeque;
 
 use egui::DragValue;
 
-use crate::{concept::AIndexSet, factorio::{
-    DataContext, ProjectContext, TimeScale, icon::Icon, modal::SelectorModal,
-    resolve_milestone_graph, selector::Selector, style::card_frame, update_accessibles,
-}};
+use crate::{
+    concept::AIndexSet,
+    factorio::{
+        DataContext, ProjectContext, TimeScale, icon::Icon, modal::SelectorModal,
+        resolve_milestone_graph, selector::Selector, style::card_frame, update_accessibles,
+    },
+};
 
 #[derive(Debug)]
 pub struct UserContextEditor<'a> {
@@ -25,31 +28,49 @@ impl egui::Widget for UserContextEditor<'_> {
         ui.set_min_width(ui.available_width());
         ui.set_min_height(ui.available_height());
 
-        ui.heading("时间尺度");
-        egui::ComboBox::new("time-scale", "时间尺度")
+        ui.heading(t!("metatorio.time-scale").to_string());
+        egui::ComboBox::new("time-scale", t!("metatorio.time-scale"))
             .selected_text(match self.proj.time_scale {
-                TimeScale::Hours => "小时",
-                TimeScale::Minutes => "分钟",
-                TimeScale::Seconds => "秒",
+                TimeScale::Hours => t!("metatorio.hours"),
+                TimeScale::Minutes => t!("metatorio.minutes"),
+                TimeScale::Seconds => t!("metatorio.seconds"),
             })
             .show_ui(ui, |ui| {
-                ui.selectable_value(&mut self.proj.time_scale, TimeScale::Hours, "小时");
-                ui.selectable_value(&mut self.proj.time_scale, TimeScale::Minutes, "分钟");
-                ui.selectable_value(&mut self.proj.time_scale, TimeScale::Seconds, "秒");
+                ui.selectable_value(
+                    &mut self.proj.time_scale,
+                    TimeScale::Hours,
+                    t!("metatorio.hours"),
+                );
+                ui.selectable_value(
+                    &mut self.proj.time_scale,
+                    TimeScale::Minutes,
+                    t!("metatorio.minutes"),
+                );
+                ui.selectable_value(
+                    &mut self.proj.time_scale,
+                    TimeScale::Seconds,
+                    t!("metatorio.seconds"),
+                );
             });
-        ui.heading("科技里程碑");
-        ui.checkbox(&mut self.proj.all_accessible, "选择物品时无视里程碑限制");
+        ui.heading(t!("metatorio.tech-milestones").to_string());
+        ui.checkbox(
+            &mut self.proj.all_accessible,
+            t!("metatorio.ignore-milestone-limit"),
+        );
         let icon = ui.add(Icon::new(self.data, "entity", "entity-unknown"));
 
         let mut new_tech_milestone = None;
 
         let mut recalc_accessible = false;
         ui.add(
-            SelectorModal::new(icon.id, "选择科技")
-                .with_selector(
-                    Selector::new(self.data, "technology").with_output(&mut new_tech_milestone),
-                )
-                .with_toggle(icon.clicked()),
+            SelectorModal::new(
+                icon.id,
+                t!("metatorio.select-technology").to_string().as_str(),
+            )
+            .with_selector(
+                Selector::new(self.data, "technology").with_output(&mut new_tech_milestone),
+            )
+            .with_toggle(icon.clicked()),
         );
         if let Some(tech_name) = new_tech_milestone {
             self.proj.tech_milestones.push((tech_name, true));
@@ -84,21 +105,25 @@ impl egui::Widget for UserContextEditor<'_> {
                                 .add_sized([48.0, 48.0], Icon::new(self.data, "technology", name));
 
                             ui.add(
-                                SelectorModal::new(icon.id, "选择科技").with_selector(
+                                SelectorModal::new(
+                                    icon.id,
+                                    t!("metatorio.select-technology").to_string().as_str(),
+                                )
+                                .with_selector(
                                     Selector::new(self.data, "technology")
                                         .with_output(&mut selected_tech),
                                 ),
                             );
                             ui.vertical(|ui| {
                                 ui.set_min_width(48.0);
-                                if ui.checkbox(unlocked, "解锁").changed() {
+                                if ui.checkbox(unlocked, t!("metatorio.unlock")).changed() {
                                     if *unlocked {
                                         // 切换为解锁时，遍历前置科技并解锁
                                         recursively_unlock = Some(name.clone());
                                     }
                                     recalc_accessible = true;
                                 }
-                                if ui.button("删除").clicked() {
+                                if ui.button(t!("metatorio.delete")).clicked() {
                                     recalc_accessible = true;
                                     deleted = true;
                                 }
@@ -150,29 +175,35 @@ impl egui::Widget for UserContextEditor<'_> {
             });
         }
 
-        let button = ui.button("查看解锁的配方");
+        let button = ui.button(t!("metatorio.view-unlocked-recipes"));
         ui.add(
-            SelectorModal::new(button.id, "已解锁的配方")
-                .with_toggle(button.clicked())
-                .with_selector(
-                    Selector::new(self.data, "recipe").with_filter(|s: &str, _f| {
-                        self.proj.accessible_prototypes["recipe"].contains_key(s)
-                    }),
-                ),
+            SelectorModal::new(
+                button.id,
+                t!("metatorio.unlocked-recipes").to_string().as_str(),
+            )
+            .with_toggle(button.clicked())
+            .with_selector(
+                Selector::new(self.data, "recipe").with_filter(|s: &str, _f| {
+                    self.proj.accessible_prototypes["recipe"].contains_key(s)
+                }),
+            ),
         );
-        let button = ui.button("查看解锁的实体");
+        let button = ui.button(t!("metatorio.view-unlocked-entities"));
         ui.add(
-            SelectorModal::new(button.id, "已解锁的实体")
-                .with_toggle(button.clicked())
-                .with_selector(
-                    Selector::new(self.data, "entity").with_filter(|s: &str, _| {
-                        !self.proj.accessible_prototypes.contains_key("entity")
-                            || self.proj.accessible_prototypes["entity"].contains_key(s)
-                    }),
-                ),
+            SelectorModal::new(
+                button.id,
+                t!("metatorio.unlocked-entities").to_string().as_str(),
+            )
+            .with_toggle(button.clicked())
+            .with_selector(
+                Selector::new(self.data, "entity").with_filter(|s: &str, _| {
+                    !self.proj.accessible_prototypes.contains_key("entity")
+                        || self.proj.accessible_prototypes["entity"].contains_key(s)
+                }),
+            ),
         );
         ui.separator();
-        ui.heading("采矿产能");
+        ui.heading(t!("metatorio.mining-productivity").to_string());
         let mut mining_productivity = (self.proj.mining_productivity * 100.0) as i32;
         ui.add(
             DragValue::new(&mut mining_productivity)
@@ -181,9 +212,12 @@ impl egui::Widget for UserContextEditor<'_> {
                 .range(0..=100000),
         );
         self.proj.mining_productivity = mining_productivity as f64 / 100.0;
-        ui.heading("配方产能");
+        ui.heading(t!("metatorio.recipe-productivity").to_string());
 
-        ui.checkbox(&mut self.proj.ignore_productivity, "忽略配方产能");
+        ui.checkbox(
+            &mut self.proj.ignore_productivity,
+            t!("metatorio.ignore-recipe-productivity"),
+        );
         egui::Grid::new("recipe-productivity").show(ui, |ui| {
             for (recipe_name, productivity) in self.proj.recipe_productivity.iter_mut() {
                 let mut value = (*productivity * 100.0) as i32;
