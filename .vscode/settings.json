@@ -1,7 +1,0 @@
-{
-  "i18n-ally.localesPaths": ["locales"],
-  "i18n-ally.parsers.extendFileExtensions": { "ini": ["cfg"] },
-  "i18n-ally.enabledParsers": ["ini"],
-  "i18n-ally.displayLanguage": "zh-CN",
-  "i18n-ally.extract.keyMaxLength": 36
-}

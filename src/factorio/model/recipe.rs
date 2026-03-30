@@ -791,7 +791,7 @@ impl FactorioMechanic for RecipeMechanic {
         }
         ui.collapsing(t!("metatorio.machine-preferences"), |ui| {
             let icon = Icon::new(data, "entity", "entity-unknown");
-            ui.label(t!("metatorio.alternative_count"));
+            ui.label(t!("metatorio.alternative-count"));
             ui.add(
                 egui::DragValue::new(&mut self.alternative_count)
                     .speed(1)

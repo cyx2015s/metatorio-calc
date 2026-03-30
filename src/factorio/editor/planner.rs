@@ -625,7 +625,7 @@ impl FactoryInstance {
         });
         ui.label(t!(
             "metatorio.total-cost",
-            self.solution.get_cost().unwrap_or(f64::NAN).to_string()
+            format!("{:.2}", self.solution.get_cost().unwrap_or(f64::NAN))
         ));
         egui::ScrollArea::vertical().id_salt(4).show(ui, |ui| {
             ui.set_max_height(200.0);
@@ -1547,13 +1547,17 @@ impl SubView for ProjectInstance {
     }
 
     fn description(&self) -> String {
-        self.data.mods.iter().fold(
-            t!("metatorio.used-mods").to_string(),
-            |mut acc, (mod_name, mod_version)| {
-                acc.push_str(&format!("\n{} ({}), ", mod_name, mod_version));
-                acc
-            },
+        t!(
+            "metatorio.used-mods",
+            self.data
+                .mods
+                .iter()
+                .fold("".to_string(), |mut acc, (mod_name, mod_version)| {
+                    acc.push_str(&format!("\n{} ({}), ", mod_name, mod_version));
+                    acc
+                },)
         )
+        .to_string()
     }
 }
 

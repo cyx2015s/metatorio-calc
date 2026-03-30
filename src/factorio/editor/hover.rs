@@ -45,7 +45,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, ItemPrototype> {
                 ui.add(PrototypeHover::new(data, module).with_quality(self.quality));
             }
             if let Some(mine) = &self.prototype.burn {
-                ui.label(t!("metatorio.fuel", mine.fuel_value.to_string()));
+                ui.label(t!("metatorio.fuel0value", mine.fuel_value.to_string()));
                 ui.label(t!(
                     "metatorio.fuel-category",
                     mine.fuel_category.clone().unwrap_or("chemical".to_string())
@@ -484,7 +484,7 @@ impl<'a> egui::Widget for PrototypeHover<'a, CraftingMachinePrototype> {
                 self.prototype
                     .allowed_module_categories
                     .as_ref()
-                    .map_or("metatorio.all".to_string(), |x| format!("{:?}", x))
+                    .map_or(t!("metatorio.all").to_string(), |x| format!("{:?}", x))
             ));
             ui.label(t!(
                 "metatorio.energy-usage",
