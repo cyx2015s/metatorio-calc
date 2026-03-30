@@ -205,13 +205,14 @@ impl FactoryInstance {
                     external.insert(item.clone(), *cost);
                 }
             }
-            for pollutant in data.airborne_pollutants.keys() {
-                let key = DualVar::Pollution {
-                    name: pollutant.clone(),
-                };
-                if !external.contains_key(&key) && !target.contains_key(&key) {
-                    external.insert(key, 1.0);
-                }
+        }
+
+        for pollutant in data.airborne_pollutants.keys() {
+            let key = DualVar::Pollution {
+                name: pollutant.clone(),
+            };
+            if !external.contains_key(&key) && !target.contains_key(&key) {
+                external.insert(key, 1.0);
             }
         }
 
