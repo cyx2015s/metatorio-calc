@@ -450,6 +450,10 @@ impl FactoryInstance {
 
                                 let mut flow_keys = flow.keys().cloned().collect::<Vec<_>>();
                                 sort_generic_items_owned(&mut flow_keys, data);
+                                flow_keys.sort_by(|ka,kb| {
+                                    flow[ka].signum().partial_cmp(&flow[kb].signum()).unwrap()
+                                });
+                                
                                 // 先展示输入，再展示输出
                                 for item in &flow_keys {
                                     let amount = flow.get(item).cloned().unwrap_or(0.0);
@@ -1406,9 +1410,13 @@ impl SubView for ProjectInstance {
                 SolverSolution::Solved { ref sum, .. } => {
                     // Update sorted keys cache when total_flow changes
                     factory.total_flow_sorted_keys = sum.keys().cloned().collect::<Vec<_>>();
-                    factory.solution = result;
 
                     sort_generic_items_owned(&mut factory.total_flow_sorted_keys, &self.data);
+                    factory.total_flow_sorted_keys.sort_by(|ka, kb| {
+                        sum[ka].signum().partial_cmp(&sum[kb].signum()).unwrap()
+                    });
+
+                    factory.solution = result;
                 }
                 SolverSolution::NotSolved { .. } => {
                     factory.total_flow_sorted_keys.clear();
