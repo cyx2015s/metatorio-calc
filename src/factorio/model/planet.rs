@@ -186,10 +186,6 @@ impl PlanetPrototype {
 
         items
     }
-
-    pub fn collect_asteroids(&self, data: &DataContext) -> AIndexMap<DualVar, f64> {
-        todo!()
-    }
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]

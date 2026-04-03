@@ -148,7 +148,7 @@ impl DataContext {
         for item_type in ITEM_TYPES.iter() {
             items.extend(deserialize_type::<Dict<ItemPrototype>>(value, item_type));
         }
-        let mut entities = Dict::<EntityPrototype>::default();
+        let mut entities: indexmap::IndexMap<String, EntityPrototype, ahash::RandomState> = Dict::<EntityPrototype>::default();
         for entity_type in ENTITY_TYPES.iter() {
             entities.extend(deserialize_type::<Dict<EntityPrototype>>(
                 value,
@@ -333,9 +333,7 @@ impl DataContext {
             let mut mod_infos = serde_json::from_value::<Vec<ModInfo>>(
                 mod_infos_json
                     .get("mods")
-                    .ok_or(AppError::ContextCreation(
-                        "mod-list.json".to_string(),
-                    ))?
+                    .ok_or(AppError::ContextCreation("mod-list.json".to_string()))?
                     .clone(),
             )?;
             for mod_info in &mut mod_infos {

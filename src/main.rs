@@ -2,7 +2,7 @@
 
 use std::sync::{LazyLock, mpsc::*};
 
-use fust_i18n::{get_missing_keys, update_i18n_ini};
+use fust_i18n::{update_i18n_ini};
 use mimalloc::MiMalloc;
 
 use crate::update::*;
