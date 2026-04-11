@@ -1593,7 +1593,7 @@ impl ProjectView {
 
 impl SubView for ProjectView {
     fn name(&self) -> String {
-        "Factorio".to_string()
+        t!("metatorio.factorio").to_string()
     }
     fn description(&self) -> String {
         t!(
@@ -1911,6 +1911,9 @@ pub struct ContextCreatorView {
 }
 
 impl SubView for ContextCreatorView {
+    fn name(&self) -> String {
+        t!("metatorio.factorio-planner").to_string()
+    }
     fn view(&mut self, ui: &mut egui::Ui) {
         ui.vertical_centered(|ui| {
             ui.heading(t!("metatorio.create-context").to_string());

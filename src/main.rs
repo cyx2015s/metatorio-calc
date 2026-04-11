@@ -2,7 +2,7 @@
 
 use std::sync::{LazyLock, mpsc::*};
 
-use fust_i18n::{update_i18n_ini};
+use fust_i18n::update_i18n_ini;
 use mimalloc::MiMalloc;
 
 use crate::update::*;
@@ -32,7 +32,7 @@ pub enum SelectedSubview {
 }
 
 pub struct MainPage {
-    pub creators: Vec<(String, Box<dyn concept::GameContextCreatorView>)>,
+    pub creators: Vec<Box<dyn concept::GameContextCreatorView>>,
     pub planners: Vec<Box<dyn concept::SubView>>,
     pub selected: SelectedSubview,
 
@@ -128,24 +128,17 @@ impl Default for MainPage {
 }
 
 impl MainPage {
-    pub fn add_creator(
-        &mut self,
-        name: &str,
-        mut creator: Box<dyn concept::GameContextCreatorView>,
-    ) {
+    pub fn add_creator(&mut self, mut creator: Box<dyn concept::GameContextCreatorView>) {
         creator.set_subview_sender(self.subview_sender.clone());
-        self.creators.push((name.to_string(), creator));
+        self.creators.push(creator);
     }
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let mut ret = Self {
-            creators: vec![(
-                t!("metatorio.factorio").to_string(),
-                Box::new(factorio::planner::ContextCreatorView::default()),
-            )],
+            creators: vec![Box::new(factorio::planner::ContextCreatorView::default())],
             ..Default::default()
         };
         for creator in &mut ret.creators {
-            creator.1.set_subview_sender(ret.subview_sender.clone());
+            creator.set_subview_sender(ret.subview_sender.clone());
         }
         ret
     }
@@ -262,7 +255,7 @@ impl eframe::App for MainPage {
                         if ui
                             .selectable_label(
                                 self.selected == SelectedSubview::Creator(i),
-                                &creator.0,
+                                &creator.name(),
                             )
                             .clicked()
                         {
@@ -367,7 +360,7 @@ impl eframe::App for MainPage {
                 ui.label(t!("metatorio.welcome-description").to_string());
                 ui.label(t!("metatorio.welcome-instructions").to_string());
             }
-            SelectedSubview::Creator(n) => self.creators[n].1.view(ui),
+            SelectedSubview::Creator(n) => self.creators[n].view(ui),
             SelectedSubview::Planner(n) => self.planners[n].view(ui),
             SelectedSubview::Logs => {
                 egui_logger::logger_ui()
