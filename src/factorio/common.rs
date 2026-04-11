@@ -38,6 +38,10 @@ impl<T> DerefMut for ReactVec<T> {
 pub trait VecProxy<I: ?Sized>: Send {
     fn len(&self) -> usize;
 
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     fn iter(&self) -> Box<dyn Iterator<Item = &I> + '_> {
         Box::new((0..self.len()).filter_map(move |idx| self.get(idx)))
     }

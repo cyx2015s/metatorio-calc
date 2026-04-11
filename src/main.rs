@@ -255,7 +255,7 @@ impl eframe::App for MainPage {
                         if ui
                             .selectable_label(
                                 self.selected == SelectedSubview::Creator(i),
-                                &creator.name(),
+                                creator.name(),
                             )
                             .clicked()
                         {

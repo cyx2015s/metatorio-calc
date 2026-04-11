@@ -54,6 +54,7 @@ where
 
 // TODO: warning: large size difference between variants
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum SolverSolution<I, R> {
     Solved {
         prim: Flow<R>,

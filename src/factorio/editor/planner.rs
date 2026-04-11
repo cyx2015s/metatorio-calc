@@ -735,7 +735,7 @@ impl FactoryInstance {
         });
         ui.separator();
         ui.heading(t!("metatorio.environment").to_string());
-        if data.surfaces.len() > 0 {
+        if !data.surfaces.is_empty() {
             ui.label(t!("metatorio.environment-warning").to_string());
         }
         ui.horizontal_wrapped(|ui| {
@@ -759,7 +759,7 @@ impl FactoryInstance {
             }
             ui.label(t!("metatorio.planet").to_string());
         });
-        if data.surfaces.len() > 0 {
+        if !data.surfaces.is_empty() {
             ui.horizontal_wrapped(|ui| {
                 let button = if let Some(surface) = &self.factory.surface {
                     ui.add_sized([35.0, 35.0], Icon::new(data, "surface", surface))
@@ -965,14 +965,9 @@ impl FactoryInstance {
                                     .push((DualVar::Item(result.clone().into()), 1.0));
                             } else {
                                 for res in &minable.results {
-                                    match res {
-                                        RecipeResult::Item(item) => {
-                                            self.external.push((
-                                                DualVar::Item(item.name.clone().into()),
-                                                1.0,
-                                            ));
-                                        }
-                                        _ => {}
+                                    if let RecipeResult::Item(item) = res {
+                                        self.external
+                                            .push((DualVar::Item(item.name.clone().into()), 1.0));
                                     }
                                 }
                             }
@@ -1593,7 +1588,7 @@ impl ProjectView {
 
 impl SubView for ProjectView {
     fn name(&self) -> String {
-        t!("metatorio.factorio").to_string()
+        t!("metatorio.factorio-planner").to_string()
     }
     fn description(&self) -> String {
         t!(
@@ -1912,8 +1907,9 @@ pub struct ContextCreatorView {
 
 impl SubView for ContextCreatorView {
     fn name(&self) -> String {
-        t!("metatorio.factorio-planner").to_string()
+        t!("metatorio.factorio").to_string()
     }
+
     fn view(&mut self, ui: &mut egui::Ui) {
         ui.vertical_centered(|ui| {
             ui.heading(t!("metatorio.create-context").to_string());

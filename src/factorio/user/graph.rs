@@ -164,6 +164,7 @@ pub fn transitive_reduction_and_build_depth(
             if let Some(&j) = name_to_idx.get(dep.as_str()) {
                 // 检查是否存在中间节点 k (k != i, k != j) 使得 i -> k 且 k -> j
                 let mut redundant = false;
+                #[allow(clippy::needless_range_loop)]
                 for k in 0..n {
                     if k != i && k != j && closure[i][k] && closure[k][j] {
                         redundant = true;

@@ -148,7 +148,8 @@ impl DataContext {
         for item_type in ITEM_TYPES.iter() {
             items.extend(deserialize_type::<Dict<ItemPrototype>>(value, item_type));
         }
-        let mut entities: indexmap::IndexMap<String, EntityPrototype, ahash::RandomState> = Dict::<EntityPrototype>::default();
+        let mut entities: indexmap::IndexMap<String, EntityPrototype, ahash::RandomState> =
+            Dict::<EntityPrototype>::default();
         for entity_type in ENTITY_TYPES.iter() {
             entities.extend(deserialize_type::<Dict<EntityPrototype>>(
                 value,
