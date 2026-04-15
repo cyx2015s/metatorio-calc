@@ -37,5 +37,5 @@ winresource = "0.1"
 # build.rs
 
 [features]
-default = []
+default = ["wgpu"]
 wgpu = ["eframe/wgpu"]
