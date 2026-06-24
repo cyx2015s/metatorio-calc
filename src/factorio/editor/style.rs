@@ -4,7 +4,7 @@ pub fn card_frame(ui: &mut egui::Ui) -> egui::Frame {
         .corner_radius(8.0)
         .inner_margin(4.0)
         .stroke(egui::Stroke::new(
-            1.0,
+            1.0_f32,
             ui.visuals().widgets.noninteractive.bg_stroke.color,
         ))
 }

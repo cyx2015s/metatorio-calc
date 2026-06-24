@@ -1424,7 +1424,7 @@ impl SubView for ProjectInstance {
         egui::Frame::group(ui.style())
             .corner_radius(8.0)
             .stroke(egui::Stroke::new(
-                1.0,
+                1.0_f32,
                 ui.visuals().widgets.noninteractive.fg_stroke.color,
             ))
             .show(ui, |ui| {

@@ -52,25 +52,25 @@ pub enum MaxLevel {
 #[derive(Debug, Clone, PartialEq, serde::Deserialize)]
 #[serde(rename_all = "kebab-case", tag = "type")]
 pub enum ResearchTrigger {
-    MineEntity {
-        entity: String,
-    },
-    CraftItem {
-        item: String,
-    },
-    CraftFluid {
-        fluid: String,
-    },
-    SendItemToOrbit {
-        item: String,
-    },
-    CaptureSpawner {
-        entity: Option<String>,
-    },
-    BuildEntity {
-        entity: String,
-    },
-    CreateSpacePlatform,
+    // MineEntity {
+    //     entity: String,
+    // },
+    // CraftItem {
+    //     item: String,
+    // },
+    // CraftFluid {
+    //     fluid: String,
+    // },
+    // SendItemToOrbit {
+    //     item: String,
+    // },
+    // CaptureSpawner {
+    //     entity: Option<String>,
+    // },
+    // BuildEntity {
+    //     entity: String,
+    // },
+    // CreateSpacePlatform,
     #[serde(other)]
     Unknown,
 }

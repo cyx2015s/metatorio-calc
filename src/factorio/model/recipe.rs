@@ -153,7 +153,8 @@ pub struct ItemResult {
     pub amount: Option<f64>,
     pub amount_min: Option<f64>,
     pub amount_max: Option<f64>,
-    pub probability: f64,
+    pub independent_probability: f64,
+    pub shared_probability: SharedProbability,
     pub ignored_by_stats: Option<f64>,
     pub ignored_by_productivity: Option<f64>,
     pub extra_count_fraction: f64,
@@ -167,7 +168,8 @@ impl Default for ItemResult {
             amount: None,
             amount_min: None,
             amount_max: None,
-            probability: 1.0,
+            independent_probability: 1.0,
+            shared_probability: SharedProbability::default(),
             ignored_by_stats: None,
             ignored_by_productivity: None,
             extra_count_fraction: 0.0,
@@ -192,7 +194,7 @@ impl ItemResult {
     /// 计算当前配方的实际单次产量和每次结算产能加成时的额外产量
     pub fn normalized_output(&self) -> (f64, f64) {
         let extra = self.extra_count_fraction;
-        let prob = self.probability;
+        let prob = self.independent_probability * (self.shared_probability.max - self.shared_probability.min);
         let ignore = match self.ignored_by_productivity {
             Some(value) => value,
             None => self.ignored_by_stats.unwrap_or(0.0),
@@ -255,7 +257,8 @@ pub struct FluidResult {
     pub amount: Option<f64>,
     pub amount_min: Option<f64>,
     pub amount_max: Option<f64>,
-    pub probability: f64,
+    pub independent_probability: f64,
+    pub shared_probability: SharedProbability,
     pub ignored_by_stats: Option<f64>,
     pub ignored_by_productivity: Option<f64>,
     pub temperature: Option<f64>,
@@ -264,6 +267,7 @@ pub struct FluidResult {
     pub fluidbox_index: f64,
 }
 
+
 impl Default for FluidResult {
     fn default() -> Self {
         FluidResult {
@@ -271,7 +275,8 @@ impl Default for FluidResult {
             amount: None,
             amount_min: None,
             amount_max: None,
-            probability: 1.0,
+            independent_probability: 1.0,
+            shared_probability: SharedProbability::default(),
             ignored_by_stats: None,
             ignored_by_productivity: None,
             temperature: None,
@@ -297,7 +302,7 @@ impl Debug for FluidResult {
 impl FluidResult {
     /// 计算当前配方的实际单词产量和每次结算产能加成时的额外产量
     pub fn normalized_output(&self) -> (f64, f64) {
-        let prob = self.probability;
+        let prob = self.independent_probability * (self.shared_probability.max - self.shared_probability.min);
         let ignore = match self.ignored_by_productivity {
             Some(value) => value,
             None => self.ignored_by_stats.unwrap_or(0.0),
@@ -327,6 +332,19 @@ impl FluidResult {
                 (((max + min) / 2.0) * prob, productivity)
             }
         }
+    }
+}
+
+
+#[derive(Clone, serde::Deserialize)]
+pub struct SharedProbability {
+    pub min: f64,
+    pub max: f64,
+}
+
+impl Default for SharedProbability {
+    fn default() -> Self {
+        SharedProbability { min: 0.0, max: 1.0 }
     }
 }
 

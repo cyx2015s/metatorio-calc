@@ -457,7 +457,7 @@ impl DataContext {
         let self_path = get_workding_directory();
         let raw_path = self_path.join("tmp/script-output/data-raw-dump.json");
         let icon_path = self_path.join("tmp/script-output/");
-        let json_string = std::fs::read_to_string(&raw_path).map_err(|_| {
+        let json_string = std::fs::read_to_string(&raw_path).map_err(|e| {
             AppError::ContextCreation(
                 t!(
                     "metatorio.load-raw-data-failed",

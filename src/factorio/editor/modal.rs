@@ -102,7 +102,7 @@ impl egui::Widget for SelectorModal<'_, str, String> {
                 .max_width(f32::INFINITY)
                 .auto_shrink(false)
                 .show(ui, |ui| {
-                    response = response.union(ui.add(widget));
+                    ui.add(widget);
                 });
 
             if response.should_close() {
@@ -144,7 +144,7 @@ impl egui::Widget for SelectorModal<'_, IdWithQuality, IdWithQuality> {
                 .max_width(f32::INFINITY)
                 .auto_shrink(false)
                 .show(ui, |ui| {
-                    response = response.union(ui.add(widget));
+                    ui.add(widget);
                 });
 
             if response.should_close() {

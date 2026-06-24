@@ -145,7 +145,7 @@ impl<'a> egui::Widget for Selector<'a, str, String> {
                     let widget = Icon::new(self.data, "item-group", &group_name)
                         .with_size(64.0)
                         .with_stroke(if i == storage.group {
-                            egui::Stroke::new(2.0, egui::Color32::GRAY)
+                            egui::Stroke::new(2.0_f32, egui::Color32::GRAY)
                         } else {
                             egui::Stroke::NONE
                         });
@@ -182,7 +182,7 @@ impl<'a> egui::Widget for Selector<'a, str, String> {
                                 .as_ref()
                                 .is_some_and(|x| x.as_ref().is_some_and(|y| y == item_name))
                         {
-                            icon = icon.with_stroke(egui::Stroke::new(2.0, egui::Color32::GRAY));
+                            icon = icon.with_stroke(egui::Stroke::new(2.0_f32, egui::Color32::GRAY));
                         }
                         let mut button = ui.add(icon);
                         if let Some(hover) = &self.hover {
@@ -324,7 +324,7 @@ pub fn quality_selector(
                             if let Some(quality) = selected_quality
                                 && *quality == idx as u8
                             {
-                                egui::Stroke::new(2.0, egui::Color32::GRAY)
+                                egui::Stroke::new(2.0_f32, egui::Color32::GRAY)
                             } else {
                                 egui::Stroke::NONE
                             },

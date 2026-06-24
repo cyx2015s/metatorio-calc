@@ -17,6 +17,14 @@ pub struct QualityPrototype {
 
     #[serde(default)]
     pub next_probability: f64, // 0
+
+    #[serde(default)]
+    pub chain_probability: Option<f64>, // 0.1
+    #[serde(default)]
+    pub previous_probability: f64, // 0
+    #[serde(default)]
+    pub previous_chain_probability: Option<f64>, // 0.1
+
     #[serde(default)]
     beacon_power_usage_multiplier: Option<f64>, // 1
     #[serde(default)]
@@ -52,6 +60,15 @@ pub struct QualityPrototype {
 }
 
 impl QualityPrototype {
+    pub fn chain_probability(&self) -> f64 {
+        self.chain_probability
+            .unwrap_or((self.next_probability * 0.1).clamp(0.0, 1.0))
+    }
+
+    pub fn previous_chain_probability(&self) -> f64 {
+        self.previous_chain_probability
+            .unwrap_or((self.previous_probability * 0.1).clamp(0.0, 1.0))
+    }
     pub fn beacon_power_usage_multiplier(&self) -> f64 {
         self.beacon_power_usage_multiplier.unwrap_or(1.0)
     }
@@ -126,24 +143,53 @@ pub fn calc_quality_distribution(
     let mut result = vec![0.0; qualities.len()];
     let base_quality = base_quality.clamp(0, qualities.len() - 1);
     let maximum_quality = maximum_quality.clamp(base_quality, qualities.len() - 1);
-    result[base_quality] = quality_bonus; // 有这么多能参与品质转移
-    for idx in base_quality..maximum_quality {
-        // idx，jdx，令人忍俊不禁
-        let jdx = idx + 1;
-        result[jdx] = result[idx] * qualities[idx].next_probability;
-    }
-    for idx in (base_quality + 1)..result.len() {
-        let hdx = idx - 1;
-        result[hdx] -= result[idx];
-    }
-    result[base_quality] += 1.0 - quality_bonus; // 剩下的都是基础品质
-    for idx in 0..(result.len() - 1) {
-        if result[idx] < 0.0 {
-            result[idx + 1] += result[idx];
-            result[idx] = 0.0;
+    if quality_bonus > 0.0 {
+        let mut multiplier = qualities[base_quality].next_probability * quality_bonus * qualities[base_quality].chain_probability();
+        result[base_quality] = quality_bonus; // 有这么多能参与品质转移
+        for idx in base_quality..maximum_quality {
+            // idx，jdx，令人忍俊不禁
+            let jdx = idx + 1;
+            result[jdx] = result[idx] * multiplier;
+            multiplier = qualities[jdx].chain_probability();
         }
+        for idx in (base_quality + 1)..result.len() {
+            let hdx = idx - 1;
+            result[hdx] -= result[idx];
+        }
+        let mut sum = 0.0;
+        for idx in 0..(result.len() - 1) {
+            if result[idx] < 0.0 {
+                result[idx + 1] += result[idx];
+                result[idx] = 0.0;
+            } else {
+                sum += result[idx];
+            }
+        }
+        result[base_quality] = 1.0 - sum;
+        result
+    } else {
+        let mut multiplier = qualities[base_quality].previous_probability * qualities[base_quality].previous_chain_probability() * quality_bonus.abs();
+        for idx in (base_quality + 1..=maximum_quality).rev() {
+            let jdx = idx - 1;
+            result[jdx] = result[idx] * multiplier;
+            multiplier = qualities[jdx].previous_chain_probability();
+        }
+        for idx in (base_quality + 1..result.len()).rev() {
+            let hdx = idx - 1;
+            result[hdx] -= result[idx];
+        }
+        let mut sum = 0.0;
+        for idx in 0..(result.len() - 1) {
+            if result[idx] < 0.0 {
+                result[idx + 1] += result[idx];
+                result[idx] = 0.0;
+            } else {
+                sum += result[idx];
+            }
+        }
+        result[base_quality] = 1.0 - sum;
+        result
     }
-    result
 }
 
 #[test]
