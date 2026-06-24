@@ -144,13 +144,13 @@ pub fn calc_quality_distribution(
     let base_quality = base_quality.clamp(0, qualities.len() - 1);
     let maximum_quality = maximum_quality.clamp(base_quality, qualities.len() - 1);
     if quality_bonus > 0.0 {
-        let mut multiplier = qualities[base_quality].next_probability * quality_bonus * qualities[base_quality].chain_probability();
+        let mut multiplier = qualities[base_quality].next_probability * quality_bonus;
         result[base_quality] = quality_bonus; // 有这么多能参与品质转移
         for idx in base_quality..maximum_quality {
             // idx，jdx，令人忍俊不禁
             let jdx = idx + 1;
             result[jdx] = result[idx] * multiplier;
-            multiplier = qualities[jdx].chain_probability();
+            multiplier = qualities[idx].chain_probability();
         }
         for idx in (base_quality + 1)..result.len() {
             let hdx = idx - 1;
@@ -168,11 +168,11 @@ pub fn calc_quality_distribution(
         result[base_quality] = 1.0 - sum;
         result
     } else {
-        let mut multiplier = qualities[base_quality].previous_probability * qualities[base_quality].previous_chain_probability() * quality_bonus.abs();
+        let mut multiplier = qualities[base_quality].previous_probability * quality_bonus.abs();
         for idx in (base_quality + 1..=maximum_quality).rev() {
             let jdx = idx - 1;
             result[jdx] = result[idx] * multiplier;
-            multiplier = qualities[jdx].previous_chain_probability();
+            multiplier = qualities[idx].previous_chain_probability();
         }
         for idx in (base_quality + 1..result.len()).rev() {
             let hdx = idx - 1;
