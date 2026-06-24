@@ -146,6 +146,7 @@ pub fn calc_quality_distribution(
     if quality_bonus > 0.0 {
         let mut multiplier = qualities[base_quality].next_probability * quality_bonus;
         result[base_quality] = multiplier; // 有这么多能参与品质转移
+        multiplier = 1.0;
         for idx in base_quality..maximum_quality {
             // idx，jdx，令人忍俊不禁
             let jdx = idx + 1;
@@ -181,12 +182,13 @@ pub fn calc_quality_distribution(
     } else {
         let mut multiplier = qualities[base_quality].previous_probability * quality_bonus.abs();
         result[base_quality] = multiplier; // 有这么多能参与品质转移
-        for idx in (base_quality + 1..=maximum_quality).rev() {
+        multiplier = 1.0;
+        for idx in (1..=base_quality).rev() {
             let jdx = idx - 1;
             result[jdx] = result[idx] * multiplier;
             multiplier = qualities[idx].previous_chain_probability();
         }
-        for idx in (base_quality + 1..result.len()).rev() {
+        for idx in (1..=base_quality).rev() {
             let hdx = idx - 1;
             result[hdx] -= result[idx];
         }
@@ -220,8 +222,7 @@ fn test_calc_quality_distribution() {
     use crate::factorio::DataContext;
     let data = DataContext::test_load();
     dbg!(&data.qualities);
-    dbg!(calc_quality_distribution(&data.qualities, 1.0, 0, 4));
-    dbg!(calc_quality_distribution(&data.qualities, 10.0, 0, 4));
-    dbg!(calc_quality_distribution(&data.qualities, 100.0, 0, 4));
-    dbg!(calc_quality_distribution(&data.qualities, 200.0, 0, 4));
+    dbg!(calc_quality_distribution(&data.qualities, 0.0625, 0, 4));
+    dbg!(calc_quality_distribution(&data.qualities, 0.125, 0, 4));
+    dbg!(calc_quality_distribution(&data.qualities, 1.25, 0, 4));
 }
