@@ -145,7 +145,7 @@ pub fn calc_quality_distribution(
     let maximum_quality = maximum_quality.clamp(base_quality, qualities.len() - 1);
     if quality_bonus > 0.0 {
         let mut multiplier = qualities[base_quality].next_probability * quality_bonus;
-        result[base_quality] = quality_bonus; // 有这么多能参与品质转移
+        result[base_quality] = multiplier; // 有这么多能参与品质转移
         for idx in base_quality..maximum_quality {
             // idx，jdx，令人忍俊不禁
             let jdx = idx + 1;
@@ -161,14 +161,26 @@ pub fn calc_quality_distribution(
             if result[idx] < 0.0 {
                 result[idx + 1] += result[idx];
                 result[idx] = 0.0;
-            } else {
-                sum += result[idx];
+            }
+
+            sum += result[idx];
+        }
+        sum += result[result.len() - 1];
+        if sum > 1.0 {
+            let mut sum_alt = 0.0;
+            for idx in (0..result.len()).rev() {
+                sum_alt += result[idx];
+                if sum_alt > 1.0 {
+                    result[idx] -= sum_alt - 1.0;
+                    sum_alt = 1.0;
+                }
             }
         }
-        result[base_quality] = 1.0 - sum;
+        result[base_quality] += (1.0 - sum).clamp(0.0, 1.0);
         result
     } else {
         let mut multiplier = qualities[base_quality].previous_probability * quality_bonus.abs();
+        result[base_quality] = multiplier; // 有这么多能参与品质转移
         for idx in (base_quality + 1..=maximum_quality).rev() {
             let jdx = idx - 1;
             result[jdx] = result[idx] * multiplier;
@@ -179,15 +191,26 @@ pub fn calc_quality_distribution(
             result[hdx] -= result[idx];
         }
         let mut sum = 0.0;
-        for idx in 0..(result.len() - 1) {
+        for idx in (1..result.len()).rev() {
             if result[idx] < 0.0 {
-                result[idx + 1] += result[idx];
+                result[idx - 1] += result[idx];
                 result[idx] = 0.0;
             } else {
                 sum += result[idx];
             }
         }
-        result[base_quality] = 1.0 - sum;
+        sum += result[0];
+        if sum > 1.0 {
+            let mut sum_alt = 0.0;
+            for idx in 0..result.len() {
+                sum_alt += result[idx];
+                if sum_alt > 1.0 {
+                    result[idx] -= sum_alt - 1.0;
+                    sum_alt = 1.0;
+                }
+            }
+        }
+        result[base_quality] += (1.0 - sum).clamp(0.0, 1.0);
         result
     }
 }
@@ -196,7 +219,7 @@ pub fn calc_quality_distribution(
 fn test_calc_quality_distribution() {
     use crate::factorio::DataContext;
     let data = DataContext::test_load();
-
+    dbg!(&data.qualities);
     dbg!(calc_quality_distribution(&data.qualities, 1.0, 0, 4));
     dbg!(calc_quality_distribution(&data.qualities, 10.0, 0, 4));
     dbg!(calc_quality_distribution(&data.qualities, 100.0, 0, 4));

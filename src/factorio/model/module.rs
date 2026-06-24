@@ -72,31 +72,22 @@ fn default_beacon_profile() -> Option<Vec<f64>> {
     Some(vec![1.0])
 }
 
-fn floor_to_percentage(value: f64) -> f64 {
-    (value * 100.0).trunc() / 100.0
-}
-
 pub fn effects_under_quality(effect: &Effect, multiplier: f64) -> Effect {
     let mut effect = effect.clone();
     if effect.consumption < 0.0 {
         effect.consumption *= multiplier;
-        effect.consumption = floor_to_percentage(effect.consumption);
     }
     if effect.speed > 0.0 {
         effect.speed *= multiplier;
-        effect.speed = floor_to_percentage(effect.speed);
     }
     if effect.productivity > 0.0 {
         effect.productivity *= multiplier;
-        effect.productivity = floor_to_percentage(effect.productivity);
     }
     if effect.pollution < 0.0 {
         effect.pollution *= multiplier;
-        effect.pollution = floor_to_percentage(effect.pollution);
     }
     if effect.quality > 0.0 {
         effect.quality *= multiplier;
-        effect.quality = floor_to_percentage(effect.quality);
     }
     effect
 }

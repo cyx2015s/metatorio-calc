@@ -104,42 +104,12 @@ impl<'a> egui::Widget for PrototypeHover<'a, ModulePrototype> {
                 data.qualities[self.quality.min((data.qualities.len() - 1) as u8) as usize]
                     .default_multiplier(),
             );
-            ui.label(t!("metatorio.module-category", &self.prototype.category).to_string());
-            ui.label(
-                t!(
-                    "metatorio.consumption",
-                    ((effect.consumption * 100.0) as i32).to_string()
-                )
-                .to_string(),
-            );
-            ui.label(
-                t!(
-                    "metatorio.speed",
-                    ((effect.speed * 100.0) as i32).to_string()
-                )
-                .to_string(),
-            );
-            ui.label(
-                t!(
-                    "metatorio.productivity",
-                    ((effect.productivity * 100.0) as i32).to_string()
-                )
-                .to_string(),
-            );
-            ui.label(
-                t!(
-                    "metatorio.pollution",
-                    ((effect.pollution * 100.0) as i32).to_string()
-                )
-                .to_string(),
-            );
-            ui.label(
-                t!(
-                    "metatorio.quality",
-                    ((effect.quality * 100.0) as i32).to_string()
-                )
-                .to_string(),
-            );
+            ui.label(format!("{}: {}", t!("metatorio.module-category"), self.prototype.category));
+            ui.label(format!("{}: {}%", t!("metatorio.consumption"), effect.consumption * 100.0));
+            ui.label(format!("{}: {}%", t!("metatorio.speed"), effect.speed * 100.0));
+            ui.label(format!("{}: {}%", t!("metatorio.productivity"), effect.productivity * 100.0));
+            ui.label(format!("{}: {}%", t!("metatorio.pollution"), effect.pollution * 100.0));
+            ui.label(format!("{}: {}%", t!("metatorio.quality"), effect.quality * 100.0));
         });
 
         ui.response()
