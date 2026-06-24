@@ -40,6 +40,10 @@ fn always_three() -> f64 {
     3.0
 }
 
+fn crafting() -> Vec<String> {
+    vec!["crafting".to_string()]
+}
+
 #[serde_as]
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 #[serde(default)]
@@ -47,12 +51,12 @@ pub struct RecipePrototype {
     #[serde(flatten)]
     pub base: PrototypeBase,
 
-    category: Option<String>,
     #[serde_as(deserialize_as = "DefaultOnError")]
     pub surface_conditions: Vec<SurfaceCondition>,
 
     #[serde_as(deserialize_as = "DefaultOnError")]
-    additional_categories: Vec<String>,
+    #[serde(default = "crafting")]
+    categories: Vec<String>,
 
     #[serde_as(deserialize_as = "DefaultOnError")]
     #[serde(default)]
@@ -409,14 +413,8 @@ pub fn machine_fits_for_recipe(
     crafter: &CraftingMachinePrototype,
     recipe: &RecipePrototype,
 ) -> bool {
-    if crafter
-        .crafting_categories
-        .contains(recipe.category.as_ref().unwrap_or(&"crafting".to_string()))
-    {
-        return true;
-    }
     if recipe
-        .additional_categories
+        .categories
         .iter()
         .any(|cat| crafter.crafting_categories.contains(cat))
     {
