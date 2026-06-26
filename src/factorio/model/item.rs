@@ -699,7 +699,9 @@ pub struct ItemLaunchMechanic {
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct ItemLaunchInstance {
     pub item: IdWithQuality,
-    pub rocket: (u16, bool), // 目前只支持按堆叠数限制的。
+    /// true = 重量火箭（RocketWeightCapacity），false = 堆叠火箭（RocketSlotCapacity）
+    #[serde(default)]
+    pub weight_mode: bool,
 }
 
 impl SolveContext for ItemLaunchInstance {
@@ -717,19 +719,14 @@ impl AsFlow for ItemLaunchInstance {
         let mut flow = crate::concept::Flow::default();
 
         if let Some(item) = data.items.get(&self.item.0) {
-            let (multiplier, capacity_var, capacity_cost) = if self.rocket.1 {
+            let (multiplier, capacity_var, capacity_cost) = if self.weight_mode {
                 // 重量火箭：装载量 = 火箭抬升重量 / 物品重量
                 let item_weight = item.weight.unwrap_or(data.default_item_weight);
                 let lift = data.rocket_lift_weight;
                 (lift / item_weight, DualVar::RocketWeightCapacity, lift)
             } else {
-                // 堆叠火箭：装载量 = 槽数 * 每槽堆叠数
-                let stacks = self.rocket.0;
-                (
-                    item.stack_size * stacks as f64,
-                    DualVar::RocketSlotCapacity,
-                    stacks as f64,
-                )
+                // 堆叠火箭：装载量 = 堆叠大小 * 1 槽
+                (item.stack_size, DualVar::RocketSlotCapacity, 1.0)
             };
             index_map_update_entry(&mut flow, DualVar::Item(self.item.clone()), -multiplier);
             index_map_update_entry(
@@ -799,23 +796,23 @@ impl FactorioMechanic for ItemLaunchMechanic {
         proj: &ProjectContext,
         factory: &FactoryContext,
     ) {
-        let rocket_types: Vec<(u16, bool)> = data.crafters.values()
-            .filter(|c| &c.base.base.r#type == "rocket-silo")
-            .map(|c| {
-                if c.launch_to_space_platforms {
-                    (0u16, true)
-                } else {
-                    (c.to_be_inserted_to_rocket_inventory_size as u16, false)
-                }
-            })
-            .collect();
+        let has_stacks_rocket = data.crafters.values()
+            .any(|c| &c.base.base.r#type == "rocket-silo" && !c.launch_to_space_platforms);
+        let has_weight_rocket = data.crafters.values()
+            .any(|c| &c.base.base.r#type == "rocket-silo" && c.launch_to_space_platforms);
         for q in 0..=proj.cur_max_quality_level {
             for i in data.items.values() {
                 if !i.rocket_launch_products.is_empty() {
-                    for rocket in &rocket_types {
+                    if has_stacks_rocket {
                         self.instances.push(ItemLaunchInstance {
                             item: IdWithQuality(i.base.name.clone(), q),
-                            rocket: *rocket,
+                            weight_mode: false,
+                        });
+                    }
+                    if has_weight_rocket {
+                        self.instances.push(ItemLaunchInstance {
+                            item: IdWithQuality(i.base.name.clone(), q),
+                            weight_mode: true,
                         });
                     }
                 }
@@ -835,22 +832,19 @@ impl FactorioMechanic for ItemLaunchMechanic {
         _factory: &FactoryContext,
     ) -> bool {
         let mut changed = false;
-        let rocket_types: Vec<(u16, bool)> = data.crafters.values()
-            .filter(|c| &c.base.base.r#type == "rocket-silo")
-            .map(|c| {
-                if c.launch_to_space_platforms {
-                    (0u16, true)
-                } else {
-                    (c.to_be_inserted_to_rocket_inventory_size as u16, false)
-                }
-            })
-            .collect();
+        let has_any_rocket = data.crafters.values()
+            .any(|c| &c.base.base.r#type == "rocket-silo");
         
-        if !rocket_types.is_empty() {
+        if has_any_rocket {
             if ui.button(t!("metatorio.add-item-launch")).clicked() {
+                // 默认选择第一个可用的火箭类型
+                let weight_mode = data.crafters.values()
+                    .find(|c| &c.base.base.r#type == "rocket-silo")
+                    .map(|c| c.launch_to_space_platforms)
+                    .unwrap_or(false);
                 let new_config = ItemLaunchInstance {
                     item: IdWithQuality("".to_string(), 0),
-                    rocket: rocket_types[0],
+                    weight_mode,
                 };
                 self.instances.push(new_config);
                 changed = true;
