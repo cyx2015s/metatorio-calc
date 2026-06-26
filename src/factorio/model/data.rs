@@ -76,7 +76,10 @@ pub struct DataContext {
     pub recipes: Dict<RecipePrototype>,
     pub crafters: Dict<CraftingMachinePrototype>,
     pub recipe_categories: Dict<PrototypeBase>,
-    pub rocket_types: Dict<(u16, bool)>, // 火箭类型，value为 (堆叠数, 是否按重量限制)，key为火箭类型 ID
+
+    /// 全局默认值，从 utility-constants 读取
+    pub default_item_weight: f64,
+    pub rocket_lift_weight: f64,
 
     /// 采矿类型集合：资源本身和采矿机器
     pub resources: Dict<ResourcePrototype>,
@@ -237,6 +240,8 @@ impl DataContext {
             generators,
             reactors,
             plants,
+            default_item_weight: 100.0,
+            rocket_lift_weight: 1_000_000.0,
             ..Default::default()
         }
     }
@@ -554,7 +559,6 @@ impl DataContext {
     pub fn build_utility_info(self) -> Self {
         self.build_order_info()
             .build_temperature_info()
-            .build_rocket_info()
             .build_dependent_info()
     }
 
@@ -779,21 +783,6 @@ impl DataContext {
         self
     }
 
-    pub fn build_rocket_info(mut self) -> Self {
-        for crafter in self.crafters.values() {
-            if &crafter.base.base.r#type == "rocket-silo" {
-                self.rocket_types.insert(
-                    crafter.base.base.name.clone(),
-                    (
-                        crafter.to_be_inserted_to_rocket_inventory_size as u16,
-                        crafter.launch_to_space_platforms,
-                    ),
-                );
-            }
-        }
-        self
-    }
-
     pub fn build_dependent_info(mut self) -> Self {
         let dependents = self
             .technologies
@@ -850,11 +839,10 @@ pub enum DualVar {
     ItemFuel {
         category: String,
     },
-    /// 一次完整火箭发射的载荷，包括堆叠数上限和是否按重量限制
-    RocketCapacity {
-        stacks: u16,
-        by_weight: bool,
-    },
+    /// 按堆叠数限制的火箭运力，1 单位 = 1 个槽位
+    RocketSlotCapacity,
+    /// 按重量限制的火箭运力，1 单位 = 1 重量单位
+    RocketWeightCapacity,
     Pollution {
         name: String,
     },
@@ -897,7 +885,8 @@ impl Display for DualVar {
                 DualVar::FluidHeat { .. } => t!("metatorio.fluid-heat"),
                 DualVar::FluidFuel { .. } => t!("metatorio.fluid-fuel"),
                 DualVar::ItemFuel { .. } => t!("metatorio.item-fuel"),
-                DualVar::RocketCapacity { .. } => t!("metatorio.rocket-capacity"),
+                DualVar::RocketSlotCapacity { .. } => t!("metatorio.rocket-slot-capacity"),
+                DualVar::RocketWeightCapacity => t!("metatorio.rocket-weight-capacity"),
                 DualVar::Pollution { .. } => t!("metatorio.pollution"),
                 DualVar::Custom { .. } => t!("metatorio.custom"),
             }

@@ -401,6 +401,8 @@ pub struct CraftingMachinePrototype {
     pub to_be_inserted_to_rocket_inventory_size: f64,
     #[serde(default)]
     pub rocket_parts_required: f64,
+    #[serde(default)]
+    pub lift_weight: Option<f64>,
 }
 
 impl HasPrototypeBase for CraftingMachinePrototype {
@@ -471,18 +473,20 @@ impl AsFlow for RecipeInstance {
         let mut base_speed = 1.0;
 
         let mut is_rocket = false;
-        let mut by_weight = false;
+        let mut is_weight_rocket = false;
         let mut stacks = 0;
-        let mut rocket_parts_required = 0.0;
+        let mut lift_weight = 0.0_f64;
         let crafter = data.crafters.get(&self.machine.0);
 
         if let Some(crafter) = crafter {
             if &crafter.base.base.r#type == "rocket-silo" {
                 is_rocket = true;
-                stacks = crafter.to_be_inserted_to_rocket_inventory_size as u16;
-                rocket_parts_required = crafter.rocket_parts_required as u32 as f64;
+                
                 if crafter.launch_to_space_platforms {
-                    by_weight = true;
+                    is_weight_rocket = true;
+                    lift_weight = crafter.lift_weight.unwrap_or(data.rocket_lift_weight);
+                } else {
+                stacks = crafter.to_be_inserted_to_rocket_inventory_size as u16;
                 }
             }
             module_effects = module_effects
@@ -583,8 +587,12 @@ impl AsFlow for RecipeInstance {
             if is_rocket {
                 index_map_update_entry(
                     &mut map,
-                    DualVar::RocketCapacity { stacks, by_weight },
-                    1.0 / rocket_parts_required,
+                    if is_weight_rocket {
+                        DualVar::RocketWeightCapacity
+                    } else {
+                        DualVar::RocketSlotCapacity
+                    },
+                    if is_weight_rocket { lift_weight } else { stacks as f64 },
                 );
             }
 

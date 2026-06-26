@@ -398,7 +398,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                     "metatorio.fuel-category",
                     data.get_display_name("fuel-category", category)
                 )),
-            DualVar::RocketCapacity { stacks, by_weight } => ui
+            DualVar::RocketSlotCapacity => ui
                 .add_sized(
                     [self.size, self.size],
                     egui::Image::new(egui::include_image!(
@@ -406,12 +406,17 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                     )),
                 )
                 .on_hover_ui(|ui| {
-                    ui.vertical(|ui| {
-                        ui.label(t!("metatorio.rocket-stacks", stacks.to_string()));
-                        if *by_weight {
-                            ui.label(t!("metatorio.by-weight"));
-                        }
-                    });
+                    ui.label(t!("metatorio.rocket-stacks"));
+                }),
+            DualVar::RocketWeightCapacity => ui
+                .add_sized(
+                    [self.size, self.size],
+                    egui::Image::new(egui::include_image!(
+                        "../../../assets/icons/rocket-capacity.png"
+                    )),
+                )
+                .on_hover_ui(|ui| {
+                    ui.label(t!("metatorio.by-weight"));
                 }),
             DualVar::Pollution { name } => ui
                 .add_sized(
@@ -495,20 +500,11 @@ impl Display for GenericIcon<'_> {
             DualVar::ItemFuel { category } => {
                 f.write_str(t!("metatorio.fuel-category", category).to_string().as_str())
             }
-            DualVar::RocketCapacity { stacks, by_weight } => {
-                if *by_weight {
-                    f.write_str(
-                        t!("metatorio.rocket-capacity-by-weight", stacks.to_string())
-                            .to_string()
-                            .as_str(),
-                    )
-                } else {
-                    f.write_str(
-                        t!("metatorio.rocket-capacity", stacks.to_string())
-                            .to_string()
-                            .as_str(),
-                    )
-                }
+            DualVar::RocketSlotCapacity => {
+                f.write_str(t!("metatorio.rocket-slot-capacity").to_string().as_str())
+            }
+            DualVar::RocketWeightCapacity => {
+                f.write_str(t!("metatorio.rocket-weight-capacity").to_string().as_str())
             }
             DualVar::Pollution { name } => f.write_str(
                 t!(

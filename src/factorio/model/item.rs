@@ -66,6 +66,11 @@ pub struct ItemPrototype {
 
     /// 默认导入位置，辅助种植机制判断是否适合种植种子
     pub default_import_location: Option<String>,
+
+    /// 物品重量，用于计算火箭运力。如果未设置，使用 default_item_weight (100)
+    pub weight: Option<f64>,
+    /// 物品的 ingredient_to_weight_coefficient，如果未设置，默认为 0.5
+    pub ingredient_to_weight_coefficient: Option<f64>,
 }
 
 impl HasPrototypeBase for ItemPrototype {
@@ -712,15 +717,25 @@ impl AsFlow for ItemLaunchInstance {
         let mut flow = crate::concept::Flow::default();
 
         if let Some(item) = data.items.get(&self.item.0) {
-            let multiplier = item.stack_size * self.rocket.0 as f64;
+            let (multiplier, capacity_var, capacity_cost) = if self.rocket.1 {
+                // 重量火箭：装载量 = 火箭抬升重量 / 物品重量
+                let item_weight = item.weight.unwrap_or(data.default_item_weight);
+                let lift = data.rocket_lift_weight;
+                (lift / item_weight, DualVar::RocketWeightCapacity, lift)
+            } else {
+                // 堆叠火箭：装载量 = 槽数 * 每槽堆叠数
+                let stacks = self.rocket.0;
+                (
+                    item.stack_size * stacks as f64,
+                    DualVar::RocketSlotCapacity,
+                    stacks as f64,
+                )
+            };
             index_map_update_entry(&mut flow, DualVar::Item(self.item.clone()), -multiplier);
             index_map_update_entry(
                 &mut flow,
-                DualVar::RocketCapacity {
-                    stacks: self.rocket.0,
-                    by_weight: self.rocket.1,
-                },
-                -1.0,
+                capacity_var,
+                -capacity_cost,
             );
             for result in &item.rocket_launch_products {
                 let total_yield = result.normalized_output();
@@ -784,10 +799,20 @@ impl FactorioMechanic for ItemLaunchMechanic {
         proj: &ProjectContext,
         factory: &FactoryContext,
     ) {
+        let rocket_types: Vec<(u16, bool)> = data.crafters.values()
+            .filter(|c| &c.base.base.r#type == "rocket-silo")
+            .map(|c| {
+                if c.launch_to_space_platforms {
+                    (0u16, true)
+                } else {
+                    (c.to_be_inserted_to_rocket_inventory_size as u16, false)
+                }
+            })
+            .collect();
         for q in 0..=proj.cur_max_quality_level {
             for i in data.items.values() {
                 if !i.rocket_launch_products.is_empty() {
-                    for rocket in data.rocket_types.values() {
+                    for rocket in &rocket_types {
                         self.instances.push(ItemLaunchInstance {
                             item: IdWithQuality(i.base.name.clone(), q),
                             rocket: *rocket,
@@ -810,17 +835,22 @@ impl FactorioMechanic for ItemLaunchMechanic {
         _factory: &FactoryContext,
     ) -> bool {
         let mut changed = false;
-        // 堆叠数大于 0，并且是按堆叠数限制的
-        if data.rocket_types.iter().any(|(_, r)| r.0 > 0 && !r.1) {
+        let rocket_types: Vec<(u16, bool)> = data.crafters.values()
+            .filter(|c| &c.base.base.r#type == "rocket-silo")
+            .map(|c| {
+                if c.launch_to_space_platforms {
+                    (0u16, true)
+                } else {
+                    (c.to_be_inserted_to_rocket_inventory_size as u16, false)
+                }
+            })
+            .collect();
+        
+        if !rocket_types.is_empty() {
             if ui.button(t!("metatorio.add-item-launch")).clicked() {
                 let new_config = ItemLaunchInstance {
                     item: IdWithQuality("".to_string(), 0),
-                    rocket: *data
-                        .rocket_types
-                        .iter()
-                        .find(|(_, r)| r.0 > 0 && !r.1)
-                        .unwrap()
-                        .1,
+                    rocket: rocket_types[0],
                 };
                 self.instances.push(new_config);
                 changed = true;
