@@ -5,3 +5,6 @@
 /tmp
 
 .codewhale
+.deepseek
+
+rustc-ice-*.txt
