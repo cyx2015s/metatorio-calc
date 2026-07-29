@@ -8,15 +8,15 @@ ahash = { version = "0.8", features = ["serde"] }
 current_locale = "0.1.1"
 dirs = "6"
 dyn-clone = "1"
-eframe = { version = "0.33" }
-egui = { version = "0.33", features = ["rayon"] }
-egui-toast = "0.19"
-egui_dnd = "0.14"
-egui_extras = { version = "0.33", features = ["file", "image"] }
+eframe = { version = "0.35" }
+egui = { version = "0.35", features = ["rayon"] }
+egui-toast = "0.21"
+egui_dnd = "0.16"
+egui_extras = { version = "0.35", features = ["file", "image"] }
 egui_logger = { version = "0.1.0", path = "egui_logger" }
 fontdb = "0.23"
 fust-i18n = { git = "https://github.com/cyx2015s/fust-i18n", branch = "master", features = ["egui"] }
-good_lp = { git = "https://github.com/cyx2015s/good_lp", branch = "inspect_constraint", default-features = false, features = ["microlp"] }
+good_lp = { version = "1.15", default-features = false, features = ["microlp"] }
 image = { version = "0.25", default-features = false, features = ["png", "rayon"] }
 indexmap = { version = "2", features = ["rayon", "serde"] }
 log = "0.4"
