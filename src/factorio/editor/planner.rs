@@ -1161,19 +1161,16 @@ impl FactoryInstance {
         let mut changed = false;
         let mut need_suggestions = false;
 
-        egui::SidePanel::new(
-            egui::containers::panel::Side::Left,
-            egui::Id::new("boundary"),
-        )
-        .show_separator_line(true)
-        .min_width(196.0)
-        .max_width(196.0)
-        .frame(egui::Frame::NONE.corner_radius(8.0).inner_margin(4.0))
-        .show_inside(ui, |ui: &mut egui::Ui| {
-            egui::ScrollArea::vertical().id_salt(1).show(ui, |ui| {
-                self.side_panel(ui, data, proj, &mut changed, &mut need_suggestions);
+        egui::Panel::left("boundary")
+            .show_separator_line(true)
+            .min_size(196.0)
+            .max_size(196.0)
+            .frame(egui::Frame::NONE.corner_radius(8.0).inner_margin(4.0))
+            .show(ui, |ui: &mut egui::Ui| {
+                egui::ScrollArea::vertical().id_salt(1).show(ui, |ui| {
+                    self.side_panel(ui, data, proj, &mut changed, &mut need_suggestions);
+                });
             });
-        });
 
         egui::Frame::NONE
             .corner_radius(8.0)

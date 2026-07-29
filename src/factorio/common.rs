@@ -890,16 +890,8 @@ pub fn get_generic_item_sort_key<'a>(
         DualVar::ItemFuel { category } => (0x700usize, (0usize, 0usize, 0usize), category.as_str()),
         DualVar::Pollution { name } => (0x800usize, (0usize, 0usize, 0usize), name.as_str()),
         DualVar::Custom { name } => (0x900usize, (0usize, 0usize, 0usize), name.as_str()),
-        DualVar::RocketSlotCapacity => (
-            0xA00usize,
-            (0usize, 0usize, 0usize),
-            "",
-        ),
-        DualVar::RocketWeightCapacity => (
-            0xA10usize,
-            (0usize, 0usize, 0usize),
-            "",
-        ),
+        DualVar::RocketSlotCapacity => (0xA00usize, (0usize, 0usize, 0usize), ""),
+        DualVar::RocketWeightCapacity => (0xA10usize, (0usize, 0usize, 0usize), ""),
     }
 }
 

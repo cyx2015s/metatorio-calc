@@ -52,21 +52,39 @@ impl<'a> Icon<'a> {
             .get(self.type_name)
             .is_some_and(|v| v.get(self.item_name).is_none())
         {
-            format!(
-                "file://{}/{}/{}.png",
-                root_path.to_string_lossy(),
-                "item",
-                "item-unknown"
-            )
+            if cfg!(windows) {
+                format!(
+                    "file:///{}/{}/{}.png",
+                    root_path.display(),
+                    "item",
+                    "item-unknown"
+                )
+            } else {
+                format!(
+                    "file://{}/{}/{}.png",
+                    root_path.display(),
+                    "item",
+                    "item-unknown"
+                )
+            }
         } else {
-            format!(
-                "file://{}/{}/{}.png",
-                root_path.to_string_lossy(),
-                self.type_name,
-                self.item_name
-            )
+            if cfg!(windows) {
+                format!(
+                    "file:///{}/{}/{}.png",
+                    root_path.display(),
+                    self.type_name,
+                    self.item_name
+                )
+            } else {
+                format!(
+                    "file://{}/{}/{}.png",
+                    root_path.display(),
+                    self.type_name,
+                    self.item_name
+                )
+            }
         };
-        egui::Image::new(icon_path)
+        egui::Image::from_uri(icon_path)
     }
 }
 
@@ -100,12 +118,22 @@ impl<'a> egui::Widget for Icon<'a> {
                             .0
                             .split_top_bottom_at_fraction(0.5)
                             .1,
-                        egui::Image::new(format!(
-                            "file://{}/{}/{}.png",
-                            root_path.to_string_lossy(),
-                            "quality",
-                            data.qualities[self.quality as usize].base.name
-                        )),
+                        egui::Image::from_uri(
+                            if cfg!(windows) {
+                                format!(
+                                    "file:///{}/{}/{}.png",
+                                    root_path.display(),
+                                    "quality",
+                                    data.qualities[self.quality as usize].base.name
+                                )
+                            } else {
+                                format!(
+                                    "file://{}/{}/{}.png",
+                                    root_path.display(),
+                                    "quality",
+                                    data.qualities[self.quality as usize].base.name
+                                )
+                            },),
                     );
                 }
                 match self.type_name {

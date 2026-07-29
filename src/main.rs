@@ -151,21 +151,22 @@ pub static FONT_DB: LazyLock<fontdb::Database> = LazyLock::new(|| {
 });
 
 impl eframe::App for MainPage {
-    fn update(&mut self, factorio: &eframe::egui::Context, frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let mut request_repaint = true;
-        factorio.input(|i| {
+        ui.input(|i| {
             if i.viewport().minimized.unwrap_or_default() {
                 request_repaint = false;
             }
         });
         if request_repaint {
-            factorio.request_repaint_after_secs(0.1);
+            ui.request_repaint_after_secs(0.1);
         }
         let cpu_usage = frame.info().cpu_usage.unwrap_or(0.0);
         self.exp_cpu_usage = self.exp_cpu_usage * 31.0 / 32.0 + cpu_usage / 32.0;
-        egui::SidePanel::left(egui::Id::new("side"))
-            .width_range(200.0..=280.0)
-            .show(factorio, |ui| {
+        egui::Panel::left("side")
+            .min_size(200.0)
+            .max_size(280.0)
+            .show(ui, |ui| {
                 let heading = ui.heading(t!("metatorio.title").to_string());
                 if heading.clicked() {
                     self.selected = SelectedSubview::Title;
@@ -233,7 +234,7 @@ impl eframe::App for MainPage {
                                 std::process::Command::new(std::env::current_exe().unwrap())
                                     .spawn()
                                     .unwrap();
-                                factorio.send_viewport_cmd(egui::ViewportCommand::Close);
+                                ui.send_viewport_cmd(egui::ViewportCommand::Close);
                             }
                         }
                         _err => {
@@ -354,7 +355,7 @@ impl eframe::App for MainPage {
                     }
                 }
             });
-        egui::CentralPanel::default().show(factorio, |ui| match self.selected {
+        egui::CentralPanel::default().show(ui, |ui| match self.selected {
             SelectedSubview::Title => {
                 ui.label(t!("metatorio.welcome").to_string());
                 ui.label(t!("metatorio.welcome-description").to_string());
@@ -369,7 +370,7 @@ impl eframe::App for MainPage {
                     .show(ui);
             }
         });
-        toast::TOASTS.lock().unwrap().show(factorio);
+        toast::TOASTS.lock().unwrap().show(ui);
     }
 }
 

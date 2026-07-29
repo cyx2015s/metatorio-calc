@@ -182,7 +182,8 @@ impl<'a> egui::Widget for Selector<'a, str, String> {
                                 .as_ref()
                                 .is_some_and(|x| x.as_ref().is_some_and(|y| y == item_name))
                         {
-                            icon = icon.with_stroke(egui::Stroke::new(2.0_f32, egui::Color32::GRAY));
+                            icon =
+                                icon.with_stroke(egui::Stroke::new(2.0_f32, egui::Color32::GRAY));
                         }
                         let mut button = ui.add(icon);
                         if let Some(hover) = &self.hover {

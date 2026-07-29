@@ -1,12 +1,10 @@
-use std::hash::Hash;
-
 use crate::{concept::EntryOpRequest, math::DndVec};
 
 impl<T> DndVec<T>
 where
     T: Clone,
 {
-    pub fn dnd<F>(&mut self, ui: &mut egui::Ui, id_source: impl Hash, mut f: F)
+    pub fn dnd<F>(&mut self, ui: &mut egui::Ui, id_source: impl egui::AsId, mut f: F)
     where
         F: FnMut(
             &mut egui::Ui,

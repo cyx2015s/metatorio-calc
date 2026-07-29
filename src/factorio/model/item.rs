@@ -729,11 +729,7 @@ impl AsFlow for ItemLaunchInstance {
                 (item.stack_size, DualVar::RocketSlotCapacity, 1.0)
             };
             index_map_update_entry(&mut flow, DualVar::Item(self.item.clone()), -multiplier);
-            index_map_update_entry(
-                &mut flow,
-                capacity_var,
-                -capacity_cost,
-            );
+            index_map_update_entry(&mut flow, capacity_var, -capacity_cost);
             for result in &item.rocket_launch_products {
                 let total_yield = result.normalized_output();
                 index_map_update_entry(
@@ -796,9 +792,13 @@ impl FactorioMechanic for ItemLaunchMechanic {
         proj: &ProjectContext,
         factory: &FactoryContext,
     ) {
-        let has_stacks_rocket = data.crafters.values()
+        let has_stacks_rocket = data
+            .crafters
+            .values()
             .any(|c| &c.base.base.r#type == "rocket-silo" && !c.launch_to_space_platforms);
-        let has_weight_rocket = data.crafters.values()
+        let has_weight_rocket = data
+            .crafters
+            .values()
             .any(|c| &c.base.base.r#type == "rocket-silo" && c.launch_to_space_platforms);
         for q in 0..=proj.cur_max_quality_level {
             for i in data.items.values() {
@@ -832,13 +832,17 @@ impl FactorioMechanic for ItemLaunchMechanic {
         _factory: &FactoryContext,
     ) -> bool {
         let mut changed = false;
-        let has_any_rocket = data.crafters.values()
+        let has_any_rocket = data
+            .crafters
+            .values()
             .any(|c| &c.base.base.r#type == "rocket-silo");
-        
+
         if has_any_rocket {
             if ui.button(t!("metatorio.add-item-launch")).clicked() {
                 // 默认选择第一个可用的火箭类型
-                let weight_mode = data.crafters.values()
+                let weight_mode = data
+                    .crafters
+                    .values()
                     .find(|c| &c.base.base.r#type == "rocket-silo")
                     .map(|c| c.launch_to_space_platforms)
                     .unwrap_or(false);

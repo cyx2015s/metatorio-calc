@@ -383,7 +383,7 @@ impl DataContext {
                                 let entry = entry?;
                                 let file_name =
                                     entry.file_name().into_string().map_err(|os_err| {
-                                        AppError::Custom(os_err.to_string_lossy().to_string())
+                                        AppError::Custom(os_err.display().to_string())
                                     })?;
 
                                 if file_name.starts_with(format!("{}_", &mod_name).as_str())
@@ -461,12 +461,12 @@ impl DataContext {
     pub fn load_from_tmp_no_dump() -> Result<DataContext, AppError> {
         let self_path = get_workding_directory();
         let raw_path = self_path.join("tmp/script-output/data-raw-dump.json");
-        let icon_path = self_path.join("tmp/script-output/");
+        let icon_path = self_path.join("tmp/script-output");
         let json_string = std::fs::read_to_string(&raw_path).map_err(|_| {
             AppError::ContextCreation(
                 t!(
                     "metatorio.load-raw-data-failed",
-                    raw_path.to_string_lossy().to_string()
+                    raw_path.display().to_string()
                 )
                 .to_string(),
             )
@@ -476,7 +476,7 @@ impl DataContext {
             AppError::ContextCreation(
                 t!(
                     "metatorio.parse-raw-data-failed",
-                    raw_path.to_string_lossy().to_string()
+                    raw_path.display().to_string()
                 )
                 .to_string(),
             )

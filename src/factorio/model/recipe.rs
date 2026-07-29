@@ -198,7 +198,8 @@ impl ItemResult {
     /// 计算当前配方的实际单次产量和每次结算产能加成时的额外产量
     pub fn normalized_output(&self) -> (f64, f64) {
         let extra = self.extra_count_fraction;
-        let prob = self.independent_probability * (self.shared_probability.max - self.shared_probability.min);
+        let prob = self.independent_probability
+            * (self.shared_probability.max - self.shared_probability.min);
         let ignore = match self.ignored_by_productivity {
             Some(value) => value,
             None => self.ignored_by_stats.unwrap_or(0.0),
@@ -271,7 +272,6 @@ pub struct FluidResult {
     pub fluidbox_index: f64,
 }
 
-
 impl Default for FluidResult {
     fn default() -> Self {
         FluidResult {
@@ -306,7 +306,8 @@ impl Debug for FluidResult {
 impl FluidResult {
     /// 计算当前配方的实际单词产量和每次结算产能加成时的额外产量
     pub fn normalized_output(&self) -> (f64, f64) {
-        let prob = self.independent_probability * (self.shared_probability.max - self.shared_probability.min);
+        let prob = self.independent_probability
+            * (self.shared_probability.max - self.shared_probability.min);
         let ignore = match self.ignored_by_productivity {
             Some(value) => value,
             None => self.ignored_by_stats.unwrap_or(0.0),
@@ -338,7 +339,6 @@ impl FluidResult {
         }
     }
 }
-
 
 #[derive(Clone, serde::Deserialize)]
 pub struct SharedProbability {
@@ -481,12 +481,12 @@ impl AsFlow for RecipeInstance {
         if let Some(crafter) = crafter {
             if &crafter.base.base.r#type == "rocket-silo" {
                 is_rocket = true;
-                
+
                 if crafter.launch_to_space_platforms {
                     is_weight_rocket = true;
                     lift_weight = crafter.lift_weight.unwrap_or(data.rocket_lift_weight);
                 } else {
-                stacks = crafter.to_be_inserted_to_rocket_inventory_size as u16;
+                    stacks = crafter.to_be_inserted_to_rocket_inventory_size as u16;
                 }
             }
             module_effects = module_effects
@@ -592,7 +592,11 @@ impl AsFlow for RecipeInstance {
                     } else {
                         DualVar::RocketSlotCapacity
                     },
-                    if is_weight_rocket { lift_weight } else { stacks as f64 },
+                    if is_weight_rocket {
+                        lift_weight
+                    } else {
+                        stacks as f64
+                    },
                 );
             }
 
