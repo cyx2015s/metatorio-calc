@@ -1607,7 +1607,7 @@ impl SubView for ProjectView {
             && self.projects.iter().any(|p| !p.proj.saved)
         {
             show_close_confirm = true;
-            ui.ctx()
+            ui
                 .send_viewport_cmd(egui::ViewportCommand::CancelClose);
         }
 
@@ -1622,7 +1622,7 @@ impl SubView for ProjectView {
                     .clicked()
                 {
                     self.ignore_close = true;
-                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                    ui.send_viewport_cmd(egui::ViewportCommand::Close);
                 }
                 if ui
                     .button(t!("metatorio.save-before-close").to_string())
@@ -1639,7 +1639,7 @@ impl SubView for ProjectView {
                         }
                     }
                     self.ignore_close = true;
-                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                    ui.send_viewport_cmd(egui::ViewportCommand::Close);
                 }
             });
         });

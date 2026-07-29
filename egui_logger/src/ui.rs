@@ -475,7 +475,7 @@ impl LoggerUi {
                             });
 
                             if ui.button("复制").clicked() {
-                                ui.ctx().copy_text(layout_job.text.clone());
+                                ui.copy_text(layout_job.text.clone());
                             }
                         });
                     }
@@ -501,7 +501,7 @@ impl LoggerUi {
                                 );
                                 out_string.push_str(" \n");
                             });
-                        ui.ctx().copy_text(out_string);
+                        ui.copy_text(out_string);
                     }
                 });
             }

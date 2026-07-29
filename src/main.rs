@@ -297,7 +297,7 @@ impl eframe::App for MainPage {
                 }
                 ui.separator();
                 if ui.button(t!("metatorio.reload-icons")).clicked() {
-                    ui.ctx().forget_all_images();
+                    ui.forget_all_images();
                 }
                 ui.separator();
                 ui.text_edit_singleline(&mut self.font_filter);
@@ -335,7 +335,7 @@ impl eframe::App for MainPage {
                                             (*buf).as_ref().to_owned()
                                         }
                                     };
-                                    update_font(ui.ctx(), buf);
+                                    update_font(ui, buf);
                                 }
                             }
                         })
