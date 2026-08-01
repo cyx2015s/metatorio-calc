@@ -63,7 +63,8 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
             }
         }
     }
-    let struct_types = type_map::collect_struct_types(schema, config, type_roots.iter().map(|s| s.as_str()));
+    let struct_types =
+        type_map::collect_struct_types(schema, config, type_roots.iter().map(|s| s.as_str()));
 
     // 3. 死类型修剪：只生成"被实际生成字段引用"的嵌套类型。
     //    收集阶段（collect_struct_types）会包含被忽略字段引用的类型
@@ -74,12 +75,26 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
         for layer in schema.prototype_chain(p) {
             refs.insert(type_map::component_name(&layer.base.name));
             // 链上组件字段引用的嵌套类型也要收集（如 minable → MinableProperties）
-            collect_refs(schema, config, &layer.properties, &mut refs);
+            collect_refs(
+                schema,
+                config,
+                &layer.base.name,
+                &layer.properties,
+                &mut refs,
+            );
         }
     }
     for name in &struct_types {
-        let Some(t) = schema.type_def(name) else { continue };
-        collect_refs(schema, config, t.properties.as_deref().unwrap_or(&[]), &mut refs);
+        let Some(t) = schema.type_def(name) else {
+            continue;
+        };
+        collect_refs(
+            schema,
+            config,
+            name,
+            t.properties.as_deref().unwrap_or(&[]),
+            &mut refs,
+        );
     }
     let live_types: Vec<&String> = struct_types
         .iter()
@@ -90,7 +105,9 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
     // 4. 生成嵌套 struct 类型（仅活类型）
     let mut emitted: HashSet<String> = HashSet::new();
     for name in &live_types {
-        let Some(t) = schema.type_def(name) else { continue };
+        let Some(t) = schema.type_def(name) else {
+            continue;
+        };
         let struct_name = type_map::component_name(name);
         if !emitted.insert(struct_name.clone()) {
             continue;
@@ -98,6 +115,7 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
         out.push_str(&emit_struct(
             schema,
             config,
+            name,
             &struct_name,
             t.properties.as_deref().unwrap_or(&[]),
             &mut stats,
@@ -113,6 +131,7 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
                 out.push_str(&emit_struct(
                     schema,
                     config,
+                    &layer.base.name,
                     &layer_name,
                     &layer.properties,
                     &mut stats,
@@ -135,7 +154,11 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
             .collect();
         out.push_str(&format!(
             "    ({tn:?}, &[{}]),\n",
-            names.iter().map(|n| format!("{n:?}")).collect::<Vec<_>>().join(", ")
+            names
+                .iter()
+                .map(|n| format!("{n:?}"))
+                .collect::<Vec<_>>()
+                .join(", ")
         ));
     }
     out.push_str("];\n");
@@ -153,9 +176,23 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
 }
 
 /// 从字段映射结果收集组件引用（死类型修剪的核心）。
-/// 只收集"实际生成"的字段——被忽略的类型不会产生引用。
-fn collect_refs(schema: &Schema, config: &Config, props: &[Property], refs: &mut HashSet<String>) {
+/// 只收集"实际生成"的字段——被忽略的类型不会产生引用；
+/// 字段级 Skip 规则的字段也不产生引用。
+fn collect_refs(
+    schema: &Schema,
+    config: &Config,
+    schema_name: &str,
+    props: &[Property],
+    refs: &mut HashSet<String>,
+) {
     for prop in props {
+        // 字段级覆盖：Skip 不产生引用；Type 引用手写类型（不在此收集）
+        if let Some(action) = config.field_rule(schema_name, &prop.base.name) {
+            match action {
+                crate::config::FieldAction::Skip => continue,
+                crate::config::FieldAction::Type(_) => continue,
+            }
+        }
         let mapped = type_map::map(schema, config, &prop.type_);
         collect_refs_from_mapped(&mapped, refs);
     }
@@ -214,10 +251,11 @@ fn collect_type_names(t: &TypeRef, out: &mut Vec<String>) {
     }
 }
 
-/// 生成一个完整结构体（字段 + 附属函数：默认值函数 / 宽松数组内联函数）。
+/// 生成一个完整结构体（字段 + 附属函数：默认值函数）。
 fn emit_struct(
     schema: &Schema,
     config: &Config,
+    schema_name: &str,
     struct_name: &str,
     props: &[Property],
     stats: &mut GenStats,
@@ -239,6 +277,27 @@ fn emit_struct(
             }
         }
 
+        // 字段级覆盖规则（优先于类型级映射与忽略集）
+        if let Some(action) = config.field_rule(schema_name, &prop.base.name) {
+            match action {
+                crate::config::FieldAction::Type(ty) => {
+                    let field_name = rust_field_name(&prop.base.name);
+                    let field_ty = if prop.optional {
+                        format!("Option<{ty}>")
+                    } else {
+                        ty.to_string()
+                    };
+                    fields.push_str(&format!("{doc}    pub {field_name}: {field_ty},\n"));
+                    stats.fields += 1;
+                    continue;
+                }
+                crate::config::FieldAction::Skip => {
+                    stats.skipped_fields += 1;
+                    continue;
+                }
+            }
+        }
+
         // 数组字段（含 array 类型别名展开）：宽松 Vec 处理
         let mapped = type_map::map(schema, config, &prop.type_);
         if let Mapped::Array(elem) = &mapped {
@@ -253,9 +312,9 @@ fn emit_struct(
                 // 整数元素数组：泛型宽松整数 Vec（serde 字面量替换）
                 Mapped::LenientInt(ty) => {
                     let fn_name = if prop.optional {
-                        format!("crate::lenient::de_opt_vec_int")
+                        "crate::lenient::de_opt_vec_int"
                     } else {
-                        format!("crate::lenient::de_vec_int")
+                        "crate::lenient::de_vec_int"
                     };
                     let field_ty = ty_str(&mapped, prop.optional);
                     fields.push_str(&format!(
@@ -265,11 +324,10 @@ fn emit_struct(
                 }
                 // 嵌套数组（Vec<Vec<X>>）或普通元素：泛型宽松 Vec（serde 字面量替换）
                 _ => {
-                    let elem_ty = type_map::ty_str_of(elem);
                     let fn_name = if prop.optional {
-                        format!("crate::lenient::de_opt_vec_lenient")
+                        "crate::lenient::de_opt_vec_lenient"
                     } else {
-                        format!("crate::lenient::de_vec_lenient")
+                        "crate::lenient::de_vec_lenient"
                     };
                     let field_ty = ty_str(&mapped, prop.optional);
                     fields.push_str(&format!(
@@ -292,9 +350,9 @@ fn emit_struct(
             Mapped::LenientInt(ty) => {
                 let field_name = rust_field_name(&prop.base.name);
                 let fn_name = if prop.optional {
-                    format!("crate::lenient::de_opt_int")
+                    "crate::lenient::de_opt_int"
                 } else {
-                    format!("crate::lenient::de_int")
+                    "crate::lenient::de_int"
                 };
                 let field_ty = if prop.optional {
                     format!("Option<{ty}>")
@@ -317,12 +375,14 @@ fn emit_struct(
                     fields.push_str(&format!(
                         "{doc}    #[serde(default = \"{default_fn}\")]\n    pub {field_name}: {ty},\n"
                     ));
-                    helpers.push_str(&format!(
-                        "fn {default_fn}() -> {ty} {{ {expr} }}\n"
-                    ));
+                    helpers.push_str(&format!("fn {default_fn}() -> {ty} {{ {expr} }}\n"));
                     stats.locked_defaults += 1;
                 } else {
-                    let field_ty = if prop.optional { format!("Option<{ty}>") } else { ty };
+                    let field_ty = if prop.optional {
+                        format!("Option<{ty}>")
+                    } else {
+                        ty
+                    };
                     fields.push_str(&format!("{doc}    pub {field_name}: {field_ty},\n"));
                 }
                 stats.fields += 1;
@@ -382,7 +442,9 @@ fn default_expr(v: &Value, ty: &str) -> Option<String> {
     match (v, ty) {
         (Value::Bool(b), "serde_json::Value") => Some(format!("serde_json::Value::Bool({b})")),
         (Value::Number(n), "serde_json::Value") => Some(format!("serde_json::Value::from({n})")),
-        (Value::String(s), "serde_json::Value") => Some(format!("serde_json::Value::String({s:?}.into())")),
+        (Value::String(s), "serde_json::Value") => {
+            Some(format!("serde_json::Value::String({s:?}.into())"))
+        }
         // 仅对原生标量类型锁定默认值；自定义/嵌套类型保持 Option
         (Value::Bool(b), "bool") => Some(b.to_string()),
         // 数字默认值：JSON 的 0 是整数，需要类型后缀才能作为 f64/f32 返回
@@ -396,13 +458,12 @@ fn default_expr(v: &Value, ty: &str) -> Option<String> {
 /// 字段名 → Rust 合法标识符（Rust 关键字加 r#）。
 fn rust_field_name(name: &str) -> String {
     match name {
-        "type" => "r#type".to_string(),
-        "match" | "mod" | "ref" | "move" | "loop" | "use" | "fn" | "in" | "as" | "impl"
-        | "let" | "mut" | "pub" | "self" | "Self" | "super" | "where" | "while" | "return"
-        | "static" | "struct" | "enum" | "trait" | "true" | "false" | "break" | "continue"
-        | "const" | "crate" | "dyn" | "else" | "extern" | "for" | "if" | "async" | "await"
-        | "box" | "do" | "abstract" | "final" | "override" | "priv" | "typeof" | "unsized"
-        | "virtual" | "yield" | "try" | "macro_rules" | "union" | "unsafe" => {
+        "match" | "mod" | "ref" | "move" | "loop" | "use" | "fn" | "in" | "as" | "impl" | "let"
+        | "mut" | "pub" | "self" | "Self" | "super" | "where" | "while" | "return" | "static"
+        | "struct" | "enum" | "trait" | "true" | "false" | "break" | "continue" | "const"
+        | "crate" | "dyn" | "else" | "extern" | "for" | "if" | "async" | "await" | "box" | "do"
+        | "abstract" | "final" | "override" | "priv" | "typeof" | "unsized" | "virtual"
+        | "yield" | "try" | "macro_rules" | "union" | "unsafe" | "type" => {
             format!("r#{name}")
         }
         _ => name.to_string(),

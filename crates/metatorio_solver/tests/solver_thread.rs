@@ -40,11 +40,10 @@ fn dedicated_solver_thread_solves_and_returns() {
         .expect("10s 内未收到求解结果");
 
     match solution {
-        SolverSolution::Solved { prim, sum, cost, .. } => {
-            assert!(
-                (prim["smelt"] - 1.0).abs() < 1e-5,
-                "prim: {prim:?}"
-            );
+        SolverSolution::Solved {
+            prim, sum, cost, ..
+        } => {
+            assert!((prim["smelt"] - 1.0).abs() < 1e-5, "prim: {prim:?}");
             assert!((sum["iron-plate"] - 1.0).abs() < 1e-5, "sum: {sum:?}");
             assert!((cost - 1.0).abs() < 1e-5, "cost: {cost}");
         }

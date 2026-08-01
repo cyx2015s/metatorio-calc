@@ -101,17 +101,23 @@ impl<'de> serde::Deserialize<'de> for Color {
         D: Deserializer<'de>,
     {
         let value: Value = serde::Deserialize::deserialize(deserializer)?;
-        let to_u8 = |v: &Value| -> Option<u8> {
-            v.as_f64().map(|f| (f * 255.0).round() as u8)
-        };
+        let to_u8 = |v: &Value| -> Option<u8> { v.as_f64().map(|f| (f * 255.0).round() as u8) };
         match value {
             Value::Array(vec) => {
                 // mod 数据可能给空数组/短数组（Lua 空 table 导出 {} 的另一种形态）——通道补 0
                 let mut c = Color(0, 0, 0, 255);
-                if vec.len() >= 1 { c.0 = to_u8(&vec[0]).unwrap_or(0); }
-                if vec.len() >= 2 { c.1 = to_u8(&vec[1]).unwrap_or(0); }
-                if vec.len() >= 3 { c.2 = to_u8(&vec[2]).unwrap_or(0); }
-                if vec.len() >= 4 { c.3 = to_u8(&vec[3]).unwrap_or(255); }
+                if vec.len() >= 1 {
+                    c.0 = to_u8(&vec[0]).unwrap_or(0);
+                }
+                if vec.len() >= 2 {
+                    c.1 = to_u8(&vec[1]).unwrap_or(0);
+                }
+                if vec.len() >= 3 {
+                    c.2 = to_u8(&vec[2]).unwrap_or(0);
+                }
+                if vec.len() >= 4 {
+                    c.3 = to_u8(&vec[3]).unwrap_or(255);
+                }
                 Ok(c)
             }
             Value::Object(object) => {
@@ -152,8 +158,12 @@ impl<'de> serde::Deserialize<'de> for MapPosition {
                 Ok(MapPosition(x, y))
             }
             Value::Array(vec) if vec.len() >= 2 => {
-                let x = vec[0].as_f64().ok_or_else(|| D::Error::custom("MapPosition 数组首元素类型错误"))?;
-                let y = vec[1].as_f64().ok_or_else(|| D::Error::custom("MapPosition 数组第二元素类型错误"))?;
+                let x = vec[0]
+                    .as_f64()
+                    .ok_or_else(|| D::Error::custom("MapPosition 数组首元素类型错误"))?;
+                let y = vec[1]
+                    .as_f64()
+                    .ok_or_else(|| D::Error::custom("MapPosition 数组第二元素类型错误"))?;
                 Ok(MapPosition(x, y))
             }
             _ => Err(D::Error::custom("MapPosition 不是对象或长度 ≥2 的数组")),
@@ -161,6 +171,57 @@ impl<'de> serde::Deserialize<'de> for MapPosition {
     }
 }
 
+// ── 锅炉模式（BoilerMode）────────────────────────────────────────
+
+/// 锅炉工作模式。
+///
+/// schema 中是**内联 union**（`"heat-fluid-inside" | "output-to-separate-pipe"`），
+/// 无法命名 → 由字段级覆盖规则（FieldRule）指定为本类型。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BoilerMode {
+    /// 流体在流体箱内直接加热（默认）。
+    HeatFluidInside,
+    /// 加热后转移到独立输出管道（可设置过滤器转换流体）。
+    OutputToSeparatePipe,
+}
+
+impl BoilerMode {
+    pub fn parse(s: &str) -> Option<BoilerMode> {
+        match s {
+            "heat-fluid-inside" => Some(BoilerMode::HeatFluidInside),
+            "output-to-separate-pipe" => Some(BoilerMode::OutputToSeparatePipe),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            BoilerMode::HeatFluidInside => "heat-fluid-inside",
+            BoilerMode::OutputToSeparatePipe => "output-to-separate-pipe",
+        }
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for BoilerMode {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value: Value = serde::Deserialize::deserialize(deserializer)?;
+        match value {
+            Value::String(s) => {
+                BoilerMode::parse(&s).ok_or_else(|| D::Error::custom(format!("未知锅炉模式: {s}")))
+            }
+            _ => Err(D::Error::custom("锅炉模式应为字符串")),
+        }
+    }
+}
+
+impl serde::Serialize for BoilerMode {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.name())
+    }
+}
 
 // ── 效果类型（EffectTypeLimitation）──────────────────────────────
 
@@ -216,9 +277,8 @@ impl<'de> serde::Deserialize<'de> for EffectTypeLimitation {
         let mut allowed = Vec::new();
         match value {
             Value::String(s) => {
-                let t = EffectType::parse(&s).ok_or_else(|| {
-                    D::Error::custom(format!("未知效果类型: {s}"))
-                })?;
+                let t = EffectType::parse(&s)
+                    .ok_or_else(|| D::Error::custom(format!("未知效果类型: {s}")))?;
                 allowed.push(t);
             }
             Value::Array(items) => {
@@ -314,12 +374,32 @@ mod tests {
     }
 
     #[test]
+    fn boiler_mode_parses() {
+        assert_eq!(
+            serde_json::from_str::<BoilerMode>(r#""heat-fluid-inside""#).unwrap(),
+            BoilerMode::HeatFluidInside
+        );
+        assert_eq!(
+            serde_json::from_str::<BoilerMode>(r#""output-to-separate-pipe""#).unwrap(),
+            BoilerMode::OutputToSeparatePipe
+        );
+        assert!(serde_json::from_str::<BoilerMode>(r#""unknown""#).is_err());
+        // 空表（Lua 空 table）不是合法模式 → 报错（由冒烟测试暴露 mod 污染）
+        assert!(serde_json::from_str::<BoilerMode>(r#"{}"#).is_err());
+    }
+
+    #[test]
     fn effect_type_limitation_parses() {
         // 数组形态（dump 最常见）
-        let e: EffectTypeLimitation = serde_json::from_str(r#"["speed", "consumption", "pollution"]"#).unwrap();
+        let e: EffectTypeLimitation =
+            serde_json::from_str(r#"["speed", "consumption", "pollution"]"#).unwrap();
         assert_eq!(
             e.allowed,
-            vec![EffectType::Speed, EffectType::Consumption, EffectType::Pollution]
+            vec![
+                EffectType::Speed,
+                EffectType::Consumption,
+                EffectType::Pollution
+            ]
         );
         // 单值形态（union 的第一分支）
         let e: EffectTypeLimitation = serde_json::from_str(r#""quality""#).unwrap();

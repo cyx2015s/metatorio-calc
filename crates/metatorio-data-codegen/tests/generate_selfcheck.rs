@@ -31,9 +31,17 @@ fn schema_version_is_pinned() {
 #[test]
 fn schema_has_expected_shape() {
     let schema = load_schema();
-    assert!(schema.prototypes.len() > 200, "prototypes: {}", schema.prototypes.len());
+    assert!(
+        schema.prototypes.len() > 200,
+        "prototypes: {}",
+        schema.prototypes.len()
+    );
     assert!(schema.types.len() > 500, "types: {}", schema.types.len());
-    assert!(schema.defines.len() > 20, "defines: {}", schema.defines.len());
+    assert!(
+        schema.defines.len() > 20,
+        "defines: {}",
+        schema.defines.len()
+    );
 }
 
 #[test]
@@ -76,18 +84,29 @@ fn generation_stats_are_reasonable() {
     // 关注类型数（DEFAULT_CONCERNED_TYPENAMES 的数量）
     assert_eq!(stats.concerned_typenames, DEFAULT_CONCERNED_TYPENAMES.len());
     // 组件数：原型继承链组件 + 嵌套 struct 组件（死类型修剪后显著小于全量）
-    assert!(stats.component_structs > 70, "组件数: {}", stats.component_structs);
+    assert!(
+        stats.component_structs > 70,
+        "组件数: {}",
+        stats.component_structs
+    );
     // 字段数：足以覆盖计算所需（死类型修剪后为实际引用字段）
     assert!(stats.fields > 500, "字段数: {}", stats.fields);
     // 忽略集生效：视觉/音频字段被跳过
-    assert!(stats.skipped_fields > 150, "忽略字段数: {}", stats.skipped_fields);
+    assert!(
+        stats.skipped_fields > 150,
+        "忽略字段数: {}",
+        stats.skipped_fields
+    );
     // 生成代码包含关键组件
     assert!(code.contains("pub struct CraftingMachineComponent"));
     assert!(code.contains("pub struct EntityComponent"));
     assert!(code.contains("pub struct ItemComponent"));
     assert!(code.contains("pub struct RecipeComponent"));
     // 自定义类型（Energy → crate::EnergyAmount）被使用
-    assert!(code.contains("crate::types::EnergyAmount"), "自定义类型映射缺失");
+    assert!(
+        code.contains("crate::types::EnergyAmount"),
+        "自定义类型映射缺失"
+    );
 }
 
 #[test]
@@ -97,18 +116,30 @@ fn crafting_machine_fields_are_correct() {
 
     // CraftingMachineComponent 的关键字段（schema 的 CraftingMachinePrototype 属性）
     // crafting_speed: double, optional: false → f64（非 Option）
-    assert!(code.contains("pub crafting_speed: f64"), "crafting_speed 应为非 Option f64");
+    assert!(
+        code.contains("pub crafting_speed: f64"),
+        "crafting_speed 应为非 Option f64"
+    );
     // crafting_categories: array of RecipeCategoryID → Vec<String>
     assert!(
         code.contains("pub crafting_categories: Vec<String>"),
         "crafting_categories 应为 Vec<String>"
     );
     // module_slots: ItemStackIndex（uint32 别名）optional → Option<u32>
-    assert!(code.contains("pub module_slots: Option<u16>"), "module_slots 应为 Option<u16>（ItemStackIndex→uint16）");
+    assert!(
+        code.contains("pub module_slots: Option<u16>"),
+        "module_slots 应为 Option<u16>（ItemStackIndex→uint16）"
+    );
     // fixed_recipe: RecipeID（string 别名）optional，但 schema 有 Literal 默认 "" → 锁定为非 Option
-    assert!(code.contains("pub fixed_recipe: String"), "fixed_recipe 应被默认值锁定为 String（Literal 默认空串）");
+    assert!(
+        code.contains("pub fixed_recipe: String"),
+        "fixed_recipe 应被默认值锁定为 String（Literal 默认空串）"
+    );
     // allowed_effects: EffectTypeLimitation（struct 类型）→ 生成的组件
-    assert!(code.contains("pub allowed_effects: Option<crate::types::EffectTypeLimitation>"), "allowed_effects 应映射到手写 EffectTypeLimitation");
+    assert!(
+        code.contains("pub allowed_effects: Option<crate::types::EffectTypeLimitation>"),
+        "allowed_effects 应映射到手写 EffectTypeLimitation"
+    );
 }
 
 #[test]
@@ -121,5 +152,8 @@ fn prototype_chains_registry_is_complete() {
     assert!(code.contains(r#"("assembling-machine", &["#));
     // 注册表条目数与关注类型数一致（所有关注 typename 都有对应原型）
     let entries = code.matches("&[").count();
-    assert!(entries >= stats.concerned_typenames, "注册表条目: {entries}");
+    assert!(
+        entries >= stats.concerned_typenames,
+        "注册表条目: {entries}"
+    );
 }

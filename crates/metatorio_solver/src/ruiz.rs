@@ -268,5 +268,9 @@ fn test_ruiz() {
     assert!((x1v - 1.0).abs() < 1e-5, "x1: {x1v}");
     assert!((x2v - 0.375).abs() < 1e-5, "x2: {x2v}");
     assert!((x3v).abs() < 1e-5, "x3: {x3v}");
-    assert!(((x1v + x2v + x3v) - 1.375).abs() < 1e-5, "目标: {}", x1v + x2v + x3v);
+    assert!(
+        ((x1v + x2v + x3v) - 1.375).abs() < 1e-5,
+        "目标: {}",
+        x1v + x2v + x3v
+    );
 }

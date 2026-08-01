@@ -159,9 +159,7 @@ fn map_complex(schema: &Schema, config: &Config, c: &ComplexType) -> Mapped {
             }
         }
         // Phase 2 剩余：union 保持 Value 保真（需要语义的类型走 custom_type_map 手写注册）
-        "union" | "type" | "literal" => {
-            Mapped::Rust("serde_json::Value".to_string())
-        }
+        "union" | "type" | "literal" => Mapped::Rust("serde_json::Value".to_string()),
         other => {
             eprintln!("metatorio-data-codegen: 未知 complex_type: {other}");
             Mapped::Rust("serde_json::Value".to_string())
@@ -210,7 +208,8 @@ pub fn collect_struct_types<'a>(
                 let Some(td) = schema.type_def(&name) else {
                     continue;
                 };
-                let is_struct = matches!(&td.type_, TypeRef::Complex(c) if c.complex_type == "struct");
+                let is_struct =
+                    matches!(&td.type_, TypeRef::Complex(c) if c.complex_type == "struct");
                 if !is_struct {
                     continue;
                 }
@@ -278,8 +277,6 @@ fn enqueue_complex(
 
 /// 类型名 → Rust 组件/结构体名（去掉 Prototype 后缀，加 Component 后缀）。
 pub fn component_name(schema_name: &str) -> String {
-    let stem = schema_name
-        .strip_suffix("Prototype")
-        .unwrap_or(schema_name);
+    let stem = schema_name.strip_suffix("Prototype").unwrap_or(schema_name);
     format!("{stem}Component")
 }

@@ -629,9 +629,8 @@ impl FactoryInstance {
                     let sender = proj_cloned.factory_sender.clone();
 
                     // 专用池中执行：限制并行度，避免饿死 UI 线程
-                    let auto_planned_factory = AUTO_PLANNER_POOL.install(|| {
-                        auto_planner(factory_cloned, data_cloned, proj_cloned)
-                    });
+                    let auto_planned_factory = AUTO_PLANNER_POOL
+                        .install(|| auto_planner(factory_cloned, data_cloned, proj_cloned));
                     match auto_planned_factory {
                         Ok(factory) => {
                             sender.unwrap().send(factory).unwrap();
@@ -1630,8 +1629,7 @@ impl SubView for ProjectView {
             && self.projects.iter().any(|p| !p.proj.saved)
         {
             show_close_confirm = true;
-            ui
-                .send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            ui.send_viewport_cmd(egui::ViewportCommand::CancelClose);
         }
 
         show_modal(egui::Id::new("关闭确认"), show_close_confirm, ui, |ui| {

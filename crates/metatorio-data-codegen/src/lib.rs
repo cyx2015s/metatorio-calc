@@ -8,5 +8,5 @@ pub mod schema;
 pub mod type_map;
 
 pub use config::Config;
-pub use emit::{generate, GenStats};
+pub use emit::{GenStats, generate};
 pub use schema::Schema;

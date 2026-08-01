@@ -980,6 +980,28 @@ pub const DEFAULT_CONCERNED_TYPENAMES: &[&str] = &[
     // "wall",
 ];
 
+/// 字段级覆盖动作。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FieldAction {
+    /// 强制该字段反序列化为指定 Rust 类型。
+    /// 用于内联声明的类型（schema 中无法命名的 union/tuple 等）——
+    /// 在 metatorio-data 手写具名类型（实现 Deserialize）后在此指定。
+    Type(&'static str),
+    /// 完全跳过该字段（不生成、不反序列化）。
+    Skip,
+}
+
+/// 字段级覆盖规则：优先于类型级映射与忽略集。
+///
+/// `struct_name` 用 **schema 类型名**（如 `"CraftingMachinePrototype"`、
+/// `"RecipePrototype"`），`field_name` 用 schema 字段名。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FieldRule {
+    pub struct_name: &'static str,
+    pub field_name: &'static str,
+    pub action: FieldAction,
+}
+
 /// 生成配置。
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -990,6 +1012,8 @@ pub struct Config {
     /// schema 类型名 → 自定义 Rust 类型名（生成时直接使用该类型）。
     /// 例如 "Energy" → "metatorio_data::energy::EnergyAmount"
     pub custom_type_map: Vec<(String, String)>,
+    /// 字段级覆盖规则（优先于类型级映射与忽略集）。
+    pub field_rules: Vec<FieldRule>,
 }
 
 impl Default for Config {
@@ -999,6 +1023,7 @@ impl Default for Config {
                 .iter()
                 .map(|s| s.to_string())
                 .collect(),
+            field_rules: DEFAULT_FIELD_RULES.to_vec(),
             ignored_types: DEFAULT_IGNORED_TYPES
                 .iter()
                 .map(|s| s.to_string())
@@ -1030,10 +1055,36 @@ impl Default for Config {
     }
 }
 
+/// 默认字段级覆盖规则。
+///
+/// 示例：BoilerPrototype.mode 是内联 union（"heat-fluid-inside"|"output-to-separate-pipe"），
+/// 无法在 schema 中命名 → 由手写类型 `crate::types::BoilerMode` 解析；
+/// fire_flicker_enabled 与计算无关 → 完全跳过。
+pub const DEFAULT_FIELD_RULES: &[FieldRule] = &[
+    FieldRule {
+        struct_name: "BoilerPrototype",
+        field_name: "mode",
+        action: FieldAction::Type("crate::types::BoilerMode"),
+    },
+    FieldRule {
+        struct_name: "BoilerPrototype",
+        field_name: "fire_flicker_enabled",
+        action: FieldAction::Skip,
+    },
+];
+
 impl Config {
     /// 该类型是否被忽略。
     pub fn is_ignored_type(&self, type_name: &str) -> bool {
         self.ignored_types.iter().any(|t| t == type_name)
+    }
+
+    /// 查询字段级覆盖规则（schema 类型名 + 字段名）。
+    pub fn field_rule(&self, struct_name: &str, field_name: &str) -> Option<&FieldAction> {
+        self.field_rules
+            .iter()
+            .find(|r| r.struct_name == struct_name && r.field_name == field_name)
+            .map(|r| &r.action)
     }
 
     /// 查自定义类型映射。

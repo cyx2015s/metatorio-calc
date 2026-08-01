@@ -161,10 +161,7 @@ pub fn de_vec_int<'de, T: LenientInt, D: Deserializer<'de>>(d: D) -> Result<Vec<
             struct Elem<T>(PhantomData<T>);
             impl<'de, T: LenientInt> serde::de::DeserializeSeed<'de> for Elem<T> {
                 type Value = T;
-                fn deserialize<D: Deserializer<'de>>(
-                    self,
-                    d: D,
-                ) -> Result<T, D::Error> {
+                fn deserialize<D: Deserializer<'de>>(self, d: D) -> Result<T, D::Error> {
                     de_int(d)
                 }
             }
@@ -220,13 +217,19 @@ mod tests {
     fn float_truncates_toward_zero() {
         assert_eq!(de_int::<u16, _>(serde_json::Value::from(2.75)).unwrap(), 2);
         assert_eq!(de_int::<u16, _>(serde_json::Value::from(-2.75)).unwrap(), 0);
-        assert_eq!(de_int::<i16, _>(serde_json::Value::from(-2.75)).unwrap(), -2);
+        assert_eq!(
+            de_int::<i16, _>(serde_json::Value::from(-2.75)).unwrap(),
+            -2
+        );
         assert_eq!(de_int::<u16, _>(serde_json::Value::from(7)).unwrap(), 7);
     }
 
     #[test]
     fn integer_accepts_plain_and_float() {
-        assert_eq!(de_int::<u32, _>(serde_json::Value::from(15u32)).unwrap(), 15);
+        assert_eq!(
+            de_int::<u32, _>(serde_json::Value::from(15u32)).unwrap(),
+            15
+        );
         assert_eq!(de_int::<u32, _>(serde_json::Value::from(15.0)).unwrap(), 15);
         // 15/4 = 3.75（mod 常见的不规范写法）
         assert_eq!(de_int::<u32, _>(serde_json::Value::from(3.75)).unwrap(), 3);
@@ -235,7 +238,10 @@ mod tests {
     #[test]
     fn opt_handles_null() {
         assert_eq!(de_opt_int::<u16, _>(serde_json::Value::Null).unwrap(), None);
-        assert_eq!(de_opt_int::<u16, _>(serde_json::Value::from(2.75)).unwrap(), Some(2));
+        assert_eq!(
+            de_opt_int::<u16, _>(serde_json::Value::from(2.75)).unwrap(),
+            Some(2)
+        );
     }
 
     #[test]
@@ -257,10 +263,8 @@ mod tests {
     #[test]
     fn vec_lenient_parses_sequence() {
         assert_eq!(
-            de_vec_lenient::<String, _>(serde_json::Value::Array(
-                vec!["a".into(), "b".into()]
-            ))
-            .unwrap(),
+            de_vec_lenient::<String, _>(serde_json::Value::Array(vec!["a".into(), "b".into()]))
+                .unwrap(),
             vec!["a".to_string(), "b".to_string()]
         );
     }
@@ -268,8 +272,7 @@ mod tests {
     #[test]
     fn vec_int_truncates_elements() {
         assert_eq!(
-            de_vec_int::<u16, _>(serde_json::Value::Array(vec![1.0.into(), 2.75.into()]))
-                .unwrap(),
+            de_vec_int::<u16, _>(serde_json::Value::Array(vec![1.0.into(), 2.75.into()])).unwrap(),
             vec![1, 2]
         );
         // 空 map → 空 Vec（整数元素同样兼容 Lua 空表）
@@ -292,8 +295,9 @@ mod tests {
             #[serde(deserialize_with = "crate::lenient::de_vec_int")]
             amounts: Vec<i32>,
         }
-        let s: Sample = serde_json::from_str(r#"{"count": 3.75, "names": {}, "amounts": [1.9, -2.9]}"#)
-            .unwrap();
+        let s: Sample =
+            serde_json::from_str(r#"{"count": 3.75, "names": {}, "amounts": [1.9, -2.9]}"#)
+                .unwrap();
         assert_eq!(s.count, 3);
         assert_eq!(s.names, Some(vec![]));
         assert_eq!(s.amounts, vec![1, -2]);

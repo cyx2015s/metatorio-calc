@@ -31,7 +31,9 @@ fn chain_problem(stages: usize, target_amount: f64) -> SolverData<String, String
 fn solve_20_stage_chain_propagates_amount() {
     let solution = chain_problem(20, 3.0).solve();
     match solution {
-        SolverSolution::Solved { prim, sum, cost, .. } => {
+        SolverSolution::Solved {
+            prim, sum, cost, ..
+        } => {
             // 每级配方都必须运行 3 次（逐级传递目标量）
             for i in 0..20 {
                 let key = format!("step-{i}");
@@ -49,7 +51,10 @@ fn solve_20_stage_chain_propagates_amount() {
             assert!((sum["item-20"] - 3.0).abs() < 1e-4, "sum: {sum:?}");
             // 成本 = Σ (1 + 0.1*i) * 3
             let expected_cost: f64 = (0..20).map(|i| (1.0 + i as f64 * 0.1) * 3.0).sum();
-            assert!((cost - expected_cost).abs() < 1e-3, "cost: {cost} vs {expected_cost}");
+            assert!(
+                (cost - expected_cost).abs() < 1e-3,
+                "cost: {cost} vs {expected_cost}"
+            );
         }
         SolverSolution::NotSolved { description, .. } => panic!("求解失败: {description}"),
     }
@@ -97,7 +102,9 @@ fn solve_branching_network_with_shared_input() {
 
     let solution = SolverData::new_simple(target, flows).solve();
     match solution {
-        SolverSolution::Solved { prim, sum, cost, .. } => {
+        SolverSolution::Solved {
+            prim, sum, cost, ..
+        } => {
             assert!((prim["make-gear"] - 1.0).abs() < 1e-4, "prim: {prim:?}");
             assert!((prim["make-stick"] - 1.0).abs() < 1e-4, "prim: {prim:?}");
             assert!((prim["smelt"] - 3.0).abs() < 1e-4, "共需 3 plate: {prim:?}");
@@ -109,7 +116,6 @@ fn solve_branching_network_with_shared_input() {
         SolverSolution::NotSolved { description, .. } => panic!("求解失败: {description}"),
     }
 }
-
 
 #[test]
 fn solve_recycling_loop_without_external_input_is_infeasible() {
@@ -154,9 +160,13 @@ fn solve_recycling_loop_with_external_supply() {
     let mut sources = AIndexMap::default();
     sources.insert("a", 1.0);
 
-    let solution = SolverData::new_simple(target, flows).with_sources(sources).solve();
+    let solution = SolverData::new_simple(target, flows)
+        .with_sources(sources)
+        .solve();
     match solution {
-        SolverSolution::Solved { prim, sum, cost, .. } => {
+        SolverSolution::Solved {
+            prim, sum, cost, ..
+        } => {
             assert!((prim["lossy"] - 1.0).abs() < 1e-5, "lossy: {prim:?}");
             assert!((prim["recycle"]).abs() < 1e-5, "recycle: {prim:?}");
             assert!((sum["a"] + 2.0).abs() < 1e-5, "sum[a]: {sum:?}");

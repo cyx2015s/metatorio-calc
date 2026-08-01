@@ -13,7 +13,8 @@ fn load_dump() -> Value {
         env!("CARGO_MANIFEST_DIR"),
         "/../../assets/data-raw-dump-heavily-modded.json"
     );
-    let text = std::fs::read_to_string(path).expect("modded dump 不存在（assets/data-raw-dump-heavily-modded.json）");
+    let text = std::fs::read_to_string(path)
+        .expect("modded dump 不存在（assets/data-raw-dump-heavily-modded.json）");
     serde_json::from_str(&text).expect("modded dump 解析失败")
 }
 
@@ -24,8 +25,12 @@ fn heavily_modded_dump_deserializes_all_concerned_prototypes() {
     let mut failures: Vec<(String, String, String)> = Vec::new(); // (typename, name, error)
 
     for (typename, chain) in PROTOTYPE_CHAINS {
-        let Some(entries) = dump.get(*typename) else { continue };
-        let Some(entries_obj) = entries.as_object() else { continue };
+        let Some(entries) = dump.get(*typename) else {
+            continue;
+        };
+        let Some(entries_obj) = entries.as_object() else {
+            continue;
+        };
         for (name, value) in entries_obj {
             total += 1;
             for layer in *chain {
@@ -39,7 +44,10 @@ fn heavily_modded_dump_deserializes_all_concerned_prototypes() {
         }
     }
 
-    eprintln!("modded dump 冒烟：共 {total} 个原型（{} 个关注类型）", PROTOTYPE_CHAINS.len());
+    eprintln!(
+        "modded dump 冒烟：共 {total} 个原型（{} 个关注类型）",
+        PROTOTYPE_CHAINS.len()
+    );
     assert!(
         failures.is_empty(),
         "{} 个原型反序列化失败:\n{}",
@@ -65,45 +73,82 @@ fn try_deserialize_layer(layer: &str, value: &Value) -> Result<(), String> {
         };
     }
     match layer {
-        "AirbornePollutantComponent" => try_comp!(metatorio_data::generated_components::AirbornePollutantComponent),
-        "AssemblingMachineComponent" => try_comp!(metatorio_data::generated_components::AssemblingMachineComponent),
-        "AsteroidChunkComponent" => try_comp!(metatorio_data::generated_components::AsteroidChunkComponent),
+        "AirbornePollutantComponent" => {
+            try_comp!(metatorio_data::generated_components::AirbornePollutantComponent)
+        }
+        "AssemblingMachineComponent" => {
+            try_comp!(metatorio_data::generated_components::AssemblingMachineComponent)
+        }
+        "AsteroidChunkComponent" => {
+            try_comp!(metatorio_data::generated_components::AsteroidChunkComponent)
+        }
         "BeaconComponent" => try_comp!(metatorio_data::generated_components::BeaconComponent),
         "BoilerComponent" => try_comp!(metatorio_data::generated_components::BoilerComponent),
-        "BurnerGeneratorComponent" => try_comp!(metatorio_data::generated_components::BurnerGeneratorComponent),
-        "CraftingMachineComponent" => try_comp!(metatorio_data::generated_components::CraftingMachineComponent),
+        "BurnerGeneratorComponent" => {
+            try_comp!(metatorio_data::generated_components::BurnerGeneratorComponent)
+        }
+        "CraftingMachineComponent" => {
+            try_comp!(metatorio_data::generated_components::CraftingMachineComponent)
+        }
         "EntityComponent" => try_comp!(metatorio_data::generated_components::EntityComponent),
-        "EntityWithHealthComponent" => try_comp!(metatorio_data::generated_components::EntityWithHealthComponent),
-        "EntityWithOwnerComponent" => try_comp!(metatorio_data::generated_components::EntityWithOwnerComponent),
+        "EntityWithHealthComponent" => {
+            try_comp!(metatorio_data::generated_components::EntityWithHealthComponent)
+        }
+        "EntityWithOwnerComponent" => {
+            try_comp!(metatorio_data::generated_components::EntityWithOwnerComponent)
+        }
         "FluidComponent" => try_comp!(metatorio_data::generated_components::FluidComponent),
-        "FuelCategoryComponent" => try_comp!(metatorio_data::generated_components::FuelCategoryComponent),
+        "FuelCategoryComponent" => {
+            try_comp!(metatorio_data::generated_components::FuelCategoryComponent)
+        }
         "FurnaceComponent" => try_comp!(metatorio_data::generated_components::FurnaceComponent),
-        "FusionReactorComponent" => try_comp!(metatorio_data::generated_components::FusionReactorComponent),
+        "FusionReactorComponent" => {
+            try_comp!(metatorio_data::generated_components::FusionReactorComponent)
+        }
         "GeneratorComponent" => try_comp!(metatorio_data::generated_components::GeneratorComponent),
         "ItemComponent" => try_comp!(metatorio_data::generated_components::ItemComponent),
         "ItemGroupComponent" => try_comp!(metatorio_data::generated_components::ItemGroupComponent),
-        "ItemSubGroupComponent" => try_comp!(metatorio_data::generated_components::ItemSubGroupComponent),
+        "ItemSubGroupComponent" => {
+            try_comp!(metatorio_data::generated_components::ItemSubGroupComponent)
+        }
         "LabComponent" => try_comp!(metatorio_data::generated_components::LabComponent),
-        "MiningDrillComponent" => try_comp!(metatorio_data::generated_components::MiningDrillComponent),
-        "ModuleCategoryComponent" => try_comp!(metatorio_data::generated_components::ModuleCategoryComponent),
+        "MiningDrillComponent" => {
+            try_comp!(metatorio_data::generated_components::MiningDrillComponent)
+        }
+        "ModuleCategoryComponent" => {
+            try_comp!(metatorio_data::generated_components::ModuleCategoryComponent)
+        }
         "ModuleComponent" => try_comp!(metatorio_data::generated_components::ModuleComponent),
         "PlanetComponent" => try_comp!(metatorio_data::generated_components::PlanetComponent),
         "PlantComponent" => try_comp!(metatorio_data::generated_components::PlantComponent),
-        "PrototypeBaseComponent" => try_comp!(metatorio_data::generated_components::PrototypeBaseComponent),
+        "PrototypeBaseComponent" => {
+            try_comp!(metatorio_data::generated_components::PrototypeBaseComponent)
+        }
         "QualityComponent" => try_comp!(metatorio_data::generated_components::QualityComponent),
         "ReactorComponent" => try_comp!(metatorio_data::generated_components::ReactorComponent),
-        "RecipeCategoryComponent" => try_comp!(metatorio_data::generated_components::RecipeCategoryComponent),
+        "RecipeCategoryComponent" => {
+            try_comp!(metatorio_data::generated_components::RecipeCategoryComponent)
+        }
         "RecipeComponent" => try_comp!(metatorio_data::generated_components::RecipeComponent),
-        "ResourceCategoryComponent" => try_comp!(metatorio_data::generated_components::ResourceCategoryComponent),
-        "ResourceEntityComponent" => try_comp!(metatorio_data::generated_components::ResourceEntityComponent),
-        "SpaceLocationComponent" => try_comp!(metatorio_data::generated_components::SpaceLocationComponent),
+        "ResourceCategoryComponent" => {
+            try_comp!(metatorio_data::generated_components::ResourceCategoryComponent)
+        }
+        "ResourceEntityComponent" => {
+            try_comp!(metatorio_data::generated_components::ResourceEntityComponent)
+        }
+        "SpaceLocationComponent" => {
+            try_comp!(metatorio_data::generated_components::SpaceLocationComponent)
+        }
         "SurfaceComponent" => try_comp!(metatorio_data::generated_components::SurfaceComponent),
-        "SurfacePropertyComponent" => try_comp!(metatorio_data::generated_components::SurfacePropertyComponent),
-        "TechnologyComponent" => try_comp!(metatorio_data::generated_components::TechnologyComponent),
+        "SurfacePropertyComponent" => {
+            try_comp!(metatorio_data::generated_components::SurfacePropertyComponent)
+        }
+        "TechnologyComponent" => {
+            try_comp!(metatorio_data::generated_components::TechnologyComponent)
+        }
         "ThrusterComponent" => try_comp!(metatorio_data::generated_components::ThrusterComponent),
         "TileComponent" => try_comp!(metatorio_data::generated_components::TileComponent),
         "TreeComponent" => try_comp!(metatorio_data::generated_components::TreeComponent),
         _ => Ok(()),
     }
 }
-

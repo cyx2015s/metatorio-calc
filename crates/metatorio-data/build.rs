@@ -15,8 +15,7 @@ fn main() {
     let (code, stats) = metatorio_data_codegen::generate(&schema, &config);
 
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR 未设置");
-    std::fs::write(Path::new(&out_dir).join("generated.rs"), code)
-        .expect("写入 generated.rs 失败");
+    std::fs::write(Path::new(&out_dir).join("generated.rs"), code).expect("写入 generated.rs 失败");
 
     println!(
         "cargo:warning=metatorio-data codegen: schema {}, {} 个关注类型, {} 个组件, {} 个字段, {} 个字段被忽略",

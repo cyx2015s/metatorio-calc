@@ -656,8 +656,6 @@ where
     }
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -680,7 +678,9 @@ mod tests {
     fn solve_simple_recipe() {
         let solution = smelting_problem().solve();
         match solution {
-            SolverSolution::Solved { prim, sum, cost, .. } => {
+            SolverSolution::Solved {
+                prim, sum, cost, ..
+            } => {
                 assert!((prim["smelt"] - 1.0).abs() < 1e-6, "prim: {prim:?}");
                 assert!((sum["iron-plate"] - 1.0).abs() < 1e-6, "sum: {sum:?}");
                 assert!((sum["iron-ore"] + 1.0).abs() < 1e-6, "sum: {sum:?}");
@@ -734,8 +734,14 @@ mod tests {
         let solution = SolverData::new_simple(target, flows).solve();
         match solution {
             SolverSolution::Solved { prim, cost, .. } => {
-                assert!((prim["cheap"] - 1.0).abs() < 1e-5, "应选择低成本配方: {prim:?}");
-                assert!((prim["expensive"]).abs() < 1e-5, "不应选择高成本配方: {prim:?}");
+                assert!(
+                    (prim["cheap"] - 1.0).abs() < 1e-5,
+                    "应选择低成本配方: {prim:?}"
+                );
+                assert!(
+                    (prim["expensive"]).abs() < 1e-5,
+                    "不应选择高成本配方: {prim:?}"
+                );
                 assert!((cost - 1.0).abs() < 1e-5, "总成本应为 1: {cost}");
             }
             SolverSolution::NotSolved { description, .. } => panic!("求解失败: {description}"),
@@ -874,7 +880,9 @@ mod tests {
     fn solve_accessors_consistent_with_fields() {
         let solution = smelting_problem().solve();
         match &solution {
-            SolverSolution::Solved { prim, sum, cost, .. } => {
+            SolverSolution::Solved {
+                prim, sum, cost, ..
+            } => {
                 assert_eq!(solution.get_prim_of(&"smelt"), prim.get(&"smelt").copied());
                 assert_eq!(
                     solution.get_sum_of(&"iron-plate"),
@@ -902,7 +910,7 @@ mod tests {
         flows.insert("miner", (miner, 1.0));
         let mut orphan = AIndexMap::default();
         orphan.insert("uranium", -1.0); // 无法获得
-        orphan.insert("waste", 1.0);    // 目标不需要
+        orphan.insert("waste", 1.0); // 目标不需要
         flows.insert("react", (orphan, 1.0));
 
         let mut sources = AIndexMap::default();

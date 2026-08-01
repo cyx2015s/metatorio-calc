@@ -140,11 +140,8 @@ impl DataContext {
             env!("CARGO_MANIFEST_DIR"),
             "/../../assets/data-raw-dump.json"
         );
-        let value = serde_json::from_str::<Value>(
-            std::fs::read_to_string(dump_path)
-                .unwrap()
-                .as_str(),
-        );
+        let value =
+            serde_json::from_str::<Value>(std::fs::read_to_string(dump_path).unwrap().as_str());
         DataContext::load(&value.unwrap()).build_utility_info()
     }
     pub fn load(value: &Value) -> Self {
