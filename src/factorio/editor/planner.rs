@@ -1,11 +1,26 @@
 use std::{
     io::BufReader,
     path::Path,
-    sync::{Arc, mpsc::*},
+    sync::{Arc, LazyLock, mpsc::*},
     time::Instant,
 };
 
 use rayon::prelude::*;
+
+/// 自动规划专用 rayon 线程池：auto_planner 的 `as_problem`/Ruiz 缩放
+/// 会执行 CPU 密集的 `par_iter`，若使用全局线程池（默认占满所有核心）
+/// 会饿死 UI 渲染线程，表现为"点自动规划后界面卡住"。
+/// 限制并行度后 UI 保持流畅，自动规划在后台慢慢完成。
+static AUTO_PLANNER_POOL: LazyLock<rayon::ThreadPool> = LazyLock::new(|| {
+    let threads = std::thread::available_parallelism()
+        .map(|n| (n.get() / 2).max(2))
+        .unwrap_or(2);
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(threads)
+        .thread_name(|i| format!("auto-planner-{i}"))
+        .build()
+        .unwrap()
+});
 
 use crate::{
     concept::*,
@@ -613,8 +628,10 @@ impl FactoryInstance {
                 std::thread::spawn(move || {
                     let sender = proj_cloned.factory_sender.clone();
 
-                    let auto_planned_factory =
-                        auto_planner(factory_cloned, data_cloned, proj_cloned);
+                    // 专用池中执行：限制并行度，避免饿死 UI 线程
+                    let auto_planned_factory = AUTO_PLANNER_POOL.install(|| {
+                        auto_planner(factory_cloned, data_cloned, proj_cloned)
+                    });
                     match auto_planned_factory {
                         Ok(factory) => {
                             sender.unwrap().send(factory).unwrap();
@@ -1383,13 +1400,19 @@ impl SubView for ProjectInstance {
     fn view(&mut self, ui: &mut egui::Ui) {
         while let Ok(new_factory) = self.factory_receiver.try_recv() {
             let new_idx = self.factories.len();
+            // auto_planner 回传的工厂已自带解（复制工厂克隆的解也有效），
+            // 无需在 UI 线程重复构建问题并重新求解——这是"点自动规划后
+            // 过一段时间卡一下"的根因（as_problem 是昂贵的 LP 构建）。
+            let has_solution = matches!(&new_factory.solution, SolverSolution::Solved { .. });
             self.factories.push(new_factory);
-            self.problem_sender
-                .send((
-                    new_idx,
-                    self.factories.vec[new_idx].as_problem(&self.data, &self.proj),
-                ))
-                .unwrap();
+            if !has_solution {
+                self.problem_sender
+                    .send((
+                        new_idx,
+                        self.factories.vec[new_idx].as_problem(&self.data, &self.proj),
+                    ))
+                    .unwrap();
+            }
             self.proj.saved = false;
         }
         while let Ok((req_id, result)) = self.solution_receiver.try_recv() {
