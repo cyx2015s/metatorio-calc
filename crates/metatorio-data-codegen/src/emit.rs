@@ -1,8 +1,9 @@
 //! Rust 代码生成：组件结构体 + 原型注册表。
 
 use crate::config::Config;
-use crate::schema::{Prototype, Schema, TypeRef};
+use crate::schema::{ComplexValue, DefaultValue, Property, Prototype, Schema, TypeRef};
 use crate::type_map::{self, Mapped};
+use serde_json::Value;
 use std::collections::{BTreeMap, HashSet};
 
 /// 生成统计（供自检测试断言）。
@@ -14,12 +15,18 @@ pub struct GenStats {
     pub nested_structs: usize,
     /// 生成的字段总数。
     pub fields: usize,
-    /// 跳过的字段数（忽略类型 / literal / 无法映射）。
+    /// 跳过的字段数（忽略类型 / literal 常量 / 无法映射）。
     pub skipped_fields: usize,
     /// 关注的原型类型数（dump 顶层键）。
     pub concerned_typenames: usize,
     /// 生成时依赖的自定义类型名集合（如 EnergyAmount）。
     pub custom_types_used: Vec<String>,
+    /// 锁定默认值的字段数（Literal 标量默认 → 非 Option）。
+    pub locked_defaults: usize,
+    /// 使用宽松反序列化的整数字段数。
+    pub lenient_int_fields: usize,
+    /// 使用宽松 Vec（内联函数或宏函数）的数组字段数。
+    pub lenient_vec_fields: usize,
 }
 
 /// 生成器入口：返回生成的 Rust 代码文本与统计。
@@ -59,7 +66,6 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
     stats.nested_structs = struct_types.len();
 
     // 3. 生成嵌套 struct 类型
-    // 按依赖排序（简单的拓扑：重复生成直到稳定——Phase 1 用两遍法：先收集所有名字，再生成）
     let mut emitted: HashSet<String> = HashSet::new();
     for name in &struct_types {
         let Some(t) = schema.type_def(name) else { continue };
@@ -67,26 +73,29 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
         if !emitted.insert(struct_name.clone()) {
             continue;
         }
-        let fields = emit_struct_fields(schema, config, t.properties.as_deref().unwrap_or(&[]), &mut stats);
-        out.push_str(&format!(
-            "#[derive(Debug, Clone, Default, Serialize, Deserialize)]\n#[serde(default)]\npub struct {struct_name} {{\n{fields}}}\n\n"
+        out.push_str(&emit_struct(
+            schema,
+            config,
+            &struct_name,
+            t.properties.as_deref().unwrap_or(&[]),
+            &mut stats,
         ));
     }
 
     // 4. 生成原型组件（每个原型继承链的每一层）
-    let mut layer_names: Vec<String> = Vec::new();
     for p in &concerned {
         let chain = schema.prototype_chain(p);
-        // 链：自身 → ... → PrototypeBase
         for layer in chain.iter().rev() {
             let layer_name = type_map::component_name(&layer.base.name);
             if emitted.insert(layer_name.clone()) {
-                let fields = emit_struct_fields(schema, config, &layer.properties, &mut stats);
-                out.push_str(&format!(
-                    "#[derive(Debug, Clone, Default, Serialize, Deserialize)]\n#[serde(default)]\npub struct {layer_name} {{\n{fields}}}\n\n"
+                out.push_str(&emit_struct(
+                    schema,
+                    config,
+                    &layer_name,
+                    &layer.properties,
+                    &mut stats,
                 ));
             }
-            layer_names.push(layer_name);
         }
     }
     stats.component_structs = emitted.len();
@@ -109,13 +118,12 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
     }
     out.push_str("];\n");
 
-    // 6. 自定义类型使用清单（供依赖方生成辅助代码）
+    // 6. 自定义类型使用清单
     let mut custom_used: BTreeMap<String, ()> = BTreeMap::new();
-    for (k, v) in &config.custom_type_map {
+    for (_, v) in &config.custom_type_map {
         if v != "serde_json::Value" {
             custom_used.insert(v.clone(), ());
         }
-        let _ = k;
     }
     stats.custom_types_used = custom_used.into_keys().collect();
 
@@ -127,7 +135,7 @@ fn collect_type_names(t: &TypeRef, out: &mut Vec<String>) {
     match t {
         TypeRef::Simple(name) => out.push(name.clone()),
         TypeRef::Complex(c) => {
-            if let Some(crate::schema::ComplexValue::TypeRef(v)) = &c.value {
+            if let Some(ComplexValue::TypeRef(v)) = &c.value {
                 collect_type_names(v, out);
             }
             if let Some(k) = &c.key {
@@ -147,36 +155,224 @@ fn collect_type_names(t: &TypeRef, out: &mut Vec<String>) {
     }
 }
 
-/// 生成结构体字段列表。
-fn emit_struct_fields(
+/// 生成一个完整结构体（字段 + 附属函数：默认值函数 / 宽松数组内联函数）。
+fn emit_struct(
     schema: &Schema,
     config: &Config,
-    props: &[crate::schema::Property],
+    struct_name: &str,
+    props: &[Property],
     stats: &mut GenStats,
 ) -> String {
     let mut fields = String::new();
+    let mut helpers = String::new();
+
     for prop in props {
+        // 文档注释（描述第一行 + schema 默认说明）
+        let mut doc = String::new();
+        let desc_first = prop.base.description.lines().next().unwrap_or("").trim();
+        if !desc_first.is_empty() {
+            doc.push_str(&format!("    /// {desc_first}\n"));
+        }
+        if let Some(DefaultValue::Text(text)) = &prop.default {
+            let t = text.lines().next().unwrap_or("").trim();
+            if !t.is_empty() {
+                doc.push_str(&format!("    /// 默认(schema): {t}\n"));
+            }
+        }
+
+        // 数组字段（含 array 类型别名展开）：宽松 Vec 处理
         let mapped = type_map::map(schema, config, &prop.type_);
+        if let Mapped::Array(elem) = &mapped {
+            let field_name = rust_field_name(&prop.base.name);
+            let elem: &Mapped = elem;
+            match elem {
+                // 元素被忽略 → 整个字段跳过
+                Mapped::Skipped => {
+                    stats.skipped_fields += 1;
+                    continue;
+                }
+                // 整数元素数组：使用宏生成的宽松 Vec 函数
+                Mapped::LenientInt(ty) => {
+                    let fn_name = if prop.optional {
+                        format!("crate::lenient::de_opt_vec_{ty}")
+                    } else {
+                        format!("crate::lenient::de_vec_{ty}")
+                    };
+                    let field_ty = ty_str(&mapped, prop.optional);
+                    fields.push_str(&format!(
+                        "{doc}    #[serde(deserialize_with = \"{fn_name}\")]\n    pub {field_name}: {field_ty},\n"
+                    ));
+                    stats.lenient_vec_fields += 1;
+                }
+                // 嵌套数组（Vec<Vec<X>>）或普通元素：内联宽松函数
+                _ => {
+                    let field_ty = ty_str(&mapped, prop.optional);
+                    let plain = field_name.trim_start_matches("r#");
+                    let helper_name = format!("deserialize_{struct_name}_{plain}");
+                    fields.push_str(&format!(
+                        "{doc}    #[serde(deserialize_with = \"{helper_name}\")]\n    pub {field_name}: {field_ty},\n"
+                    ));
+                    helpers.push_str(&emit_vec_helper(
+                        struct_name,
+                        &field_name,
+                        &field_ty,
+                        prop.optional,
+                    ));
+                    stats.lenient_vec_fields += 1;
+                }
+            }
+            continue;
+        }
+
+        // 非数组字段
         match mapped {
             Mapped::Skipped => {
                 stats.skipped_fields += 1;
                 continue;
             }
+            Mapped::Array(_) => unreachable!("数组字段已在上方 Array 分支处理"),
+            // 整数：宽松反序列化
+            Mapped::LenientInt(ty) => {
+                let field_name = rust_field_name(&prop.base.name);
+                let fn_name = if prop.optional {
+                    format!("crate::lenient::de_opt_{ty}")
+                } else {
+                    format!("crate::lenient::de_{ty}")
+                };
+                let field_ty = if prop.optional {
+                    format!("Option<{ty}>")
+                } else {
+                    ty.clone()
+                };
+                fields.push_str(&format!(
+                    "{doc}    #[serde(deserialize_with = \"{fn_name}\")]\n    pub {field_name}: {field_ty},\n"
+                ));
+                stats.lenient_int_fields += 1;
+            }
             Mapped::Rust(ty) => {
                 let field_name = rust_field_name(&prop.base.name);
-                let ty = if prop.optional { format!("Option<{ty}>") } else { ty };
-                // alt_name 支持
-                let alias = prop
-                    .alt_name
-                    .as_ref()
-                    .map(|a| format!("    #[serde(alias = {a:?})]\n"))
-                    .unwrap_or_default();
-                fields.push_str(&format!("    {alias}    pub {field_name}: {ty},\n"));
+                // Literal 标量默认 → 锁定为非 Option + serde(default=fn)
+                if let Some((v, _)) = literal_default(prop)
+                    && let Some(expr) = default_expr(&v, &ty)
+                {
+                    let plain = field_name.trim_start_matches("r#");
+                    let default_fn = format!("default_{struct_name}_{plain}");
+                    fields.push_str(&format!(
+                        "{doc}    #[serde(default = \"{default_fn}\")]\n    pub {field_name}: {ty},\n"
+                    ));
+                    helpers.push_str(&format!(
+                        "fn {default_fn}() -> {ty} {{ {expr} }}\n"
+                    ));
+                    stats.locked_defaults += 1;
+                } else {
+                    let field_ty = if prop.optional { format!("Option<{ty}>") } else { ty };
+                    fields.push_str(&format!("{doc}    pub {field_name}: {field_ty},\n"));
+                }
                 stats.fields += 1;
             }
         }
     }
-    fields
+
+    let mut out = String::new();
+    out.push_str(&format!(
+        "#[derive(Debug, Clone, Default, Serialize, Deserialize)]\n#[serde(default)]\npub struct {struct_name} {{\n{fields}}}\n"
+    ));
+    if !helpers.is_empty() {
+        out.push_str(&helpers);
+    }
+    out.push('\n');
+    out
+}
+
+/// 字段类型字符串（考虑 Option）。
+fn ty_str(mapped: &Mapped, optional: bool) -> String {
+    if let Mapped::Array(elem) = mapped {
+        let inner = ty_str(elem, false);
+        return if optional {
+            format!("Option<Vec<{inner}>>")
+        } else {
+            format!("Vec<{inner}>")
+        };
+    }
+    let ty = match mapped {
+        Mapped::Rust(t) => t.clone(),
+        Mapped::LenientInt(t) => t.clone(),
+        Mapped::Skipped => "serde_json::Value".to_string(),
+        Mapped::Array(_) => unreachable!("Array 已在上方处理"),
+    };
+    if optional {
+        format!("Option<{ty}>")
+    } else {
+        ty
+    }
+}
+
+/// 生成宽松数组的内联反序列化函数（非整数元素）。
+fn emit_vec_helper(struct_name: &str, field_name: &str, field_ty: &str, optional: bool) -> String {
+    let fn_name = format!("deserialize_{struct_name}_{field_name}");
+    let inner = field_ty
+        .strip_prefix("Option<")
+        .and_then(|s| s.strip_suffix('>'))
+        .unwrap_or(field_ty);
+    // 元素类型 = 去掉最外层一层 Vec<>（支持 Vec<Vec<T>> 嵌套）
+    let elem_ty = inner
+        .strip_prefix("Vec<")
+        .and_then(|s| s.strip_suffix('>'))
+        .unwrap_or(inner);
+    if optional {
+        format!(
+            "fn {fn_name}<'de, D: serde::Deserializer<'de>>(d: D) -> Result<{field_ty}, D::Error> {{\n\
+             \x20   struct V;\n\
+             \x20   impl<'de> serde::de::Visitor<'de> for V {{\n\
+             \x20       type Value = {field_ty};\n\
+             \x20       fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {{\n\
+             \x20           f.write_str(\"an optional sequence or an empty map (Lua empty table)\")\n\
+             \x20       }}\n\
+             \x20       fn visit_unit<E: serde::de::Error>(self) -> Result<{field_ty}, E> {{ Ok(None) }}\n\
+             \x20       fn visit_none<E: serde::de::Error>(self) -> Result<{field_ty}, E> {{ Ok(None) }}\n\
+             \x20       fn visit_some<D2: serde::Deserializer<'de>>(self, d: D2) -> Result<{field_ty}, D2::Error> {{\n\
+             \x20           crate::lenient::de_vec_lenient::<{elem_ty}, _>(d).map(Some)\n\
+             \x20       }}\n\
+             \x20   }}\n\
+             \x20   d.deserialize_option(V)\n\
+             }}\n"
+        )
+    } else {
+        format!(
+            "fn {fn_name}<'de, D: serde::Deserializer<'de>>(d: D) -> Result<{field_ty}, D::Error> {{\n\
+             \x20   crate::lenient::de_vec_lenient::<{elem_ty}, _>(d)\n\
+             }}\n"
+        )
+    }
+}
+
+/// 提取 Literal 标量默认值 → (Rust 表达式, 描述)。
+/// 复杂字面值（null/数组/对象）返回 None（保持 Option）。
+fn literal_default(prop: &Property) -> Option<(Value, String)> {
+    let Some(DefaultValue::Literal(lit)) = &prop.default else {
+        return None;
+    };
+    let v = lit.value.clone()?;
+    match v {
+        Value::Bool(_) | Value::Number(_) | Value::String(_) => Some((v.clone(), v.to_string())),
+        _ => None,
+    }
+}
+
+/// 按字段类型生成默认值表达式。
+fn default_expr(v: &Value, ty: &str) -> Option<String> {
+    match (v, ty) {
+        (Value::Bool(b), "serde_json::Value") => Some(format!("serde_json::Value::Bool({b})")),
+        (Value::Number(n), "serde_json::Value") => Some(format!("serde_json::Value::from({n})")),
+        (Value::String(s), "serde_json::Value") => Some(format!("serde_json::Value::String({s:?}.into())")),
+        // 仅对原生标量类型锁定默认值；自定义/嵌套类型保持 Option
+        (Value::Bool(b), "bool") => Some(b.to_string()),
+        // 数字默认值：JSON 的 0 是整数，需要类型后缀才能作为 f64/f32 返回
+        (Value::Number(n), "f64") => Some(format!("{n}f64")),
+        (Value::Number(n), "f32") => Some(format!("{n}f32")),
+        (Value::String(s), "String") => Some(format!("{s:?}.to_string()")),
+        _ => None,
+    }
 }
 
 /// 字段名 → Rust 合法标识符（Rust 关键字加 r#）。

@@ -87,7 +87,7 @@ fn generation_stats_are_reasonable() {
     assert!(code.contains("pub struct ItemComponent"));
     assert!(code.contains("pub struct RecipeComponent"));
     // 自定义类型（Energy → crate::EnergyAmount）被使用
-    assert!(code.contains("crate::EnergyAmount"), "自定义类型映射缺失");
+    assert!(code.contains("crate::types::EnergyAmount"), "自定义类型映射缺失");
 }
 
 #[test]
@@ -105,8 +105,8 @@ fn crafting_machine_fields_are_correct() {
     );
     // module_slots: ItemStackIndex（uint32 别名）optional → Option<u32>
     assert!(code.contains("pub module_slots: Option<u16>"), "module_slots 应为 Option<u16>（ItemStackIndex→uint16）");
-    // fixed_recipe: RecipeID（string 别名）optional → Option<String>
-    assert!(code.contains("pub fixed_recipe: Option<String>"), "fixed_recipe 应为 Option<String>");
+    // fixed_recipe: RecipeID（string 别名）optional，但 schema 有 Literal 默认 "" → 锁定为非 Option
+    assert!(code.contains("pub fixed_recipe: String"), "fixed_recipe 应被默认值锁定为 String（Literal 默认空串）");
     // allowed_effects: EffectTypeLimitation（struct 类型）→ 生成的组件
     assert!(code.contains("pub allowed_effects: Option<serde_json::Value>"), "allowed_effects 应为 union 保真 Value（Phase 2 细化）");
 }

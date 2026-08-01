@@ -136,10 +136,13 @@ impl Default for Config {
                 .collect(),
             ignored_types: DEFAULT_IGNORED_TYPES.iter().map(|s| s.to_string()).collect(),
             custom_type_map: vec![
-                // 能量字符串（"5MJ"、"300kW"）→ 自定义解析类型
-                ("Energy".to_string(), "crate::EnergyAmount".to_string()),
-                ("EnergyAmount".to_string(), "crate::EnergyAmount".to_string()),
-                // ID 类直接映射为 String（schema 中本来就是 string 别名，此处留作扩展）
+                // 能量字符串（"5MJ"、"300kW"）→ 预定义解析类型（自定义 Deserialize）
+                ("Energy".to_string(), "crate::types::EnergyAmount".to_string()),
+                ("EnergyAmount".to_string(), "crate::types::EnergyAmount".to_string()),
+                // 颜色：数组/对象 → 预定义类型
+                ("Color".to_string(), "crate::types::Color".to_string()),
+                // 地图位置：对象/数组 → 预定义类型
+                ("MapPosition".to_string(), "crate::types::MapPosition".to_string()),
             ],
         }
     }

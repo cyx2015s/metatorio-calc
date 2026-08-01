@@ -9,15 +9,17 @@
 //! 生成代码由 build.rs 在编译期从 `schema/prototype-api.json` 生成，
 //! 生成器位于 `metatorio-data-codegen`。
 
+/// 宽松反序列化：整数向 0 舍入、空 map 视为空 Vec（Lua→JSON 兼容）。
+pub mod lenient;
+
+/// 预定义类型：schema 中需要自定义反序列化的类型（codegen 的 custom_type_map 引用）。
+pub mod types;
+
 /// 生成代码的模块容器（避免与手写代码命名冲突）。
+#[allow(clippy::all, dead_code, non_snake_case)]
 pub mod generated_components {
     include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 }
 
 pub use generated_components::*;
-
-/// 能量值（游戏内为字符串，如 "5MJ"、"300kW"、"1.2MW"）。
-///
-/// 保留原始字符串，解析为数值由消费方按需进行（或后续 Phase 在此补充解析器）。
-#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct EnergyAmount(pub String);
+pub use types::{Color, EnergyAmount, MapPosition};

@@ -13,6 +13,13 @@ use std::collections::{HashSet, VecDeque};
 pub enum Mapped {
     /// 具体的 Rust 类型。
     Rust(String),
+    /// 整数类型（需要宽松反序列化：float 向 0 舍入）。
+    /// 携带 Rust 类型名（如 "u16"）。
+    LenientInt(String),
+    /// 数组（元素映射）：需要宽松 Vec 反序列化（Lua 空 table → 空 Vec）。
+    /// 元素可能是 LenientInt（整数数组 → 宏函数）、Rust（内联函数）、
+    /// Array（嵌套数组）或 Skipped（整体跳过）。
+    Array(Box<Mapped>),
     /// 字段应跳过（类型被忽略 / literal 常量 / 无法映射）。
     Skipped,
 }
@@ -23,6 +30,13 @@ fn scalar(name: &str) -> Option<&'static str> {
         "string" => Some("String"),
         "boolean" => Some("bool"),
         "double" | "float" | "number" => Some("f64"),
+        _ => None,
+    }
+}
+
+/// 整数标量类型名 → Rust 类型（需要宽松反序列化）。
+fn int_scalar(name: &str) -> Option<&'static str> {
+    match name {
         "uint8" => Some("u8"),
         "uint16" => Some("u16"),
         "uint32" => Some("u32"),
@@ -37,9 +51,12 @@ fn scalar(name: &str) -> Option<&'static str> {
 
 /// 把简单类型名映射为 Rust 类型。
 fn map_simple(schema: &Schema, config: &Config, name: &str) -> Mapped {
-    // 1. 标量
+    // 1. 标量（整数需要宽松反序列化：Lua 的 float 可能放进整数字段）
     if let Some(ty) = scalar(name) {
         return Mapped::Rust(ty.to_string());
+    }
+    if let Some(ty) = int_scalar(name) {
+        return Mapped::LenientInt(ty.to_string());
     }
     // 2. 自定义映射（如 Energy → EnergyAmount）
     if let Some(ty) = config.custom_type(name) {
@@ -58,6 +75,9 @@ fn map_simple(schema: &Schema, config: &Config, name: &str) -> Mapped {
                     if let Some(ty) = scalar(&t.base.name) {
                         return Mapped::Rust(ty.to_string());
                     }
+                    if let Some(ty) = int_scalar(&t.base.name) {
+                        return Mapped::LenientInt(ty.to_string());
+                    }
                     // 未知 builtin：保真
                     return Mapped::Rust("serde_json::Value".to_string());
                 }
@@ -74,7 +94,11 @@ fn map_simple(schema: &Schema, config: &Config, name: &str) -> Mapped {
                 if c.complex_type == "struct" {
                     return Mapped::Rust(component_name(&t.base.name));
                 }
-                // 其他复杂类型（union/array...）：递归处理
+                // array 别名（如 ItemPrototypeFlags）：展开为 Array 变体
+                if c.complex_type == "array" {
+                    return Mapped::Array(Box::new(array_elem(schema, config, c)));
+                }
+                // 其他复杂类型（union/tuple/dictionary...）：递归处理
                 return map_complex(schema, config, c);
             }
         }
@@ -83,16 +107,19 @@ fn map_simple(schema: &Schema, config: &Config, name: &str) -> Mapped {
     Mapped::Rust("serde_json::Value".to_string())
 }
 
+/// 数组元素映射：从 array 的 value 取元素类型并映射；
+/// 缺失/非类型引用 → Value 保真。
+fn array_elem(schema: &Schema, config: &Config, c: &ComplexType) -> Mapped {
+    match &c.value {
+        Some(crate::schema::ComplexValue::TypeRef(v)) => map(schema, config, v),
+        _ => Mapped::Rust("serde_json::Value".to_string()),
+    }
+}
+
 /// 映射复杂类型。
 fn map_complex(schema: &Schema, config: &Config, c: &ComplexType) -> Mapped {
     match c.complex_type.as_str() {
-        "array" => match &c.value {
-            Some(crate::schema::ComplexValue::TypeRef(v)) => match map(schema, config, v) {
-                Mapped::Rust(ty) => Mapped::Rust(format!("Vec<{ty}>")),
-                Mapped::Skipped => Mapped::Skipped,
-            },
-            _ => Mapped::Rust("Vec<serde_json::Value>".to_string()),
-        },
+        "array" => Mapped::Array(Box::new(array_elem(schema, config, c))),
         "struct" => Mapped::Rust("serde_json::Value".to_string()), // 内联 struct：保真
         // Phase 2：union/tuple/dictionary 细化
         "union" | "tuple" | "dictionary" | "type" | "literal" => {

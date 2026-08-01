@@ -52,7 +52,7 @@ fn assembling_machine_has_three_roles() {
     // 组装机特有层（AssemblingMachineComponent：fixed_recipe 等）
     let am: AssemblingMachineComponent =
         serde_json::from_value(machine_json.clone()).expect("AssemblingMachineComponent 反序列化失败");
-    assert_eq!(am.fixed_recipe, None, "组装机无固定配方");
+    assert_eq!(am.fixed_recipe, "", "组装机无固定配方（Literal 默认空串锁定）");
 }
 
 #[test]
@@ -81,7 +81,7 @@ fn entity_health_layer_parses_physical_fields() {
     // max_health 属于继承链的 EntityWithHealth 层
     let entity: EntityWithHealthComponent =
         serde_json::from_value(machine_json.clone()).expect("EntityWithHealthComponent 反序列化失败");
-    assert_eq!(entity.max_health, Some(300.0), "组装机1 血量");
+    assert_eq!(entity.max_health, 300.0, "组装机1 血量");
 
     let entity_base: EntityComponent =
         serde_json::from_value(machine_json.clone()).expect("EntityComponent 反序列化失败");
@@ -108,7 +108,7 @@ fn fluid_parses_temperature_and_heat_capacity() {
     // heat_capacity 是 Energy 类型 → 自定义 EnergyAmount（原始字符串保真）
     assert!(fluid.heat_capacity.is_some(), "水应有热容");
     let cap = fluid.heat_capacity.unwrap();
-    assert!(!cap.0.is_empty(), "热容字符串非空");
+    assert!(cap.amount > 0.0, "水热容应为正值: {:?}", cap.amount);
 }
 
 #[test]
