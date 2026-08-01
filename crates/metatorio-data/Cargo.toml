@@ -1,0 +1,16 @@
+[package]
+name = "metatorio-data"
+version = "0.1.0"
+edition = "2024"
+description = "Factorio 原型数据：从游戏 dump 反序列化为组件化原型仓库（忠实层 + 语义层）"
+license = "MIT"
+
+[dependencies]
+ahash = { version = "0.8", features = ["serde"] }
+indexmap = { version = "2", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[build-dependencies]
+metatorio-data-codegen = { path = "../metatorio-data-codegen" }
+serde_json = "1"

@@ -3087,6 +3087,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "metatorio-data"
+version = "0.1.0"
+dependencies = [
+ "ahash",
+ "indexmap 2.14.0",
+ "metatorio-data-codegen",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "metatorio-data-codegen"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "metatorio-solver"
 version = "0.1.0"
 dependencies = [

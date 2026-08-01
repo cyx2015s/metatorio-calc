@@ -1,0 +1,10 @@
+[package]
+name = "metatorio-data-codegen"
+version = "0.1.0"
+edition = "2024"
+description = "从 Factorio prototype-api.json 生成 metatorio-data 的组件结构体（build 期代码生成器）"
+license = "MIT"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

@@ -134,8 +134,14 @@ where
 /// 创建 DataContext 的方法
 impl DataContext {
     pub fn test_load() -> Self {
+        // 注意：cargo test 的 cwd 是 package 根（crates/metatorio_egui/），
+        // 用 CARGO_MANIFEST_DIR 定位 workspace 根的 assets/
+        let dump_path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/data-raw-dump.json"
+        );
         let value = serde_json::from_str::<Value>(
-            std::fs::read_to_string("assets/data-raw-dump.json")
+            std::fs::read_to_string(dump_path)
                 .unwrap()
                 .as_str(),
         );

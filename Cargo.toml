@@ -4,6 +4,8 @@ members = [
     "crates/metatorio_solver",
     "crates/metatorio_egui",
     "crates/egui_logger",
+    "crates/metatorio-data",
+    "crates/metatorio-data-codegen",
 ]
 default-members = [
     "crates/metatorio_egui",
