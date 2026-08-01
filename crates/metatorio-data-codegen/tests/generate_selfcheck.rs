@@ -75,10 +75,10 @@ fn generation_stats_are_reasonable() {
 
     // 关注类型数（DEFAULT_CONCERNED_TYPENAMES 的数量）
     assert_eq!(stats.concerned_typenames, DEFAULT_CONCERNED_TYPENAMES.len());
-    // 组件数：原型继承链组件 + 嵌套 struct 组件
-    assert!(stats.component_structs > 100, "组件数: {}", stats.component_structs);
-    // 字段数：足以覆盖计算所需
-    assert!(stats.fields > 800, "字段数: {}", stats.fields);
+    // 组件数：原型继承链组件 + 嵌套 struct 组件（死类型修剪后显著小于全量）
+    assert!(stats.component_structs > 70, "组件数: {}", stats.component_structs);
+    // 字段数：足以覆盖计算所需（死类型修剪后为实际引用字段）
+    assert!(stats.fields > 500, "字段数: {}", stats.fields);
     // 忽略集生效：视觉/音频字段被跳过
     assert!(stats.skipped_fields > 150, "忽略字段数: {}", stats.skipped_fields);
     // 生成代码包含关键组件

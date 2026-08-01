@@ -3093,7 +3093,6 @@ dependencies = [
  "ahash",
  "indexmap 2.14.0",
  "metatorio-data-codegen",
- "paste",
  "serde",
  "serde_json",
  "serde_path_to_error",

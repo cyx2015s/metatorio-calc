@@ -64,11 +64,32 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
         }
     }
     let struct_types = type_map::collect_struct_types(schema, config, type_roots.iter().map(|s| s.as_str()));
-    stats.nested_structs = struct_types.len();
 
-    // 3. 生成嵌套 struct 类型
-    let mut emitted: HashSet<String> = HashSet::new();
+    // 3. 死类型修剪：只生成"被实际生成字段引用"的嵌套类型。
+    //    收集阶段（collect_struct_types）会包含被忽略字段引用的类型
+    //    （如 graphics_set 里的 GraphicsSet 家族、union 的 struct 变体），
+    //    这里按字段映射结果（忽略的字段不产生引用）做引用传播。
+    let mut refs: HashSet<String> = HashSet::new();
+    for p in &concerned {
+        for layer in schema.prototype_chain(p) {
+            refs.insert(type_map::component_name(&layer.base.name));
+            // 链上组件字段引用的嵌套类型也要收集（如 minable → MinableProperties）
+            collect_refs(schema, config, &layer.properties, &mut refs);
+        }
+    }
     for name in &struct_types {
+        let Some(t) = schema.type_def(name) else { continue };
+        collect_refs(schema, config, t.properties.as_deref().unwrap_or(&[]), &mut refs);
+    }
+    let live_types: Vec<&String> = struct_types
+        .iter()
+        .filter(|name| refs.contains(&type_map::component_name(name)))
+        .collect();
+    stats.nested_structs = live_types.len();
+
+    // 4. 生成嵌套 struct 类型（仅活类型）
+    let mut emitted: HashSet<String> = HashSet::new();
+    for name in &live_types {
         let Some(t) = schema.type_def(name) else { continue };
         let struct_name = type_map::component_name(name);
         if !emitted.insert(struct_name.clone()) {
@@ -83,7 +104,7 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
         ));
     }
 
-    // 4. 生成原型组件（每个原型继承链的每一层）
+    // 5. 生成原型组件（每个原型继承链的每一层）
     for p in &concerned {
         let chain = schema.prototype_chain(p);
         for layer in chain.iter().rev() {
@@ -129,6 +150,43 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
     stats.custom_types_used = custom_used.into_keys().collect();
 
     (out, stats)
+}
+
+/// 从字段映射结果收集组件引用（死类型修剪的核心）。
+/// 只收集"实际生成"的字段——被忽略的类型不会产生引用。
+fn collect_refs(schema: &Schema, config: &Config, props: &[Property], refs: &mut HashSet<String>) {
+    for prop in props {
+        let mapped = type_map::map(schema, config, &prop.type_);
+        collect_refs_from_mapped(&mapped, refs);
+    }
+}
+
+/// 从 Mapped 中提取组件名引用（Rust 类型字符串里找 `XxxComponent`）。
+fn collect_refs_from_mapped(mapped: &type_map::Mapped, refs: &mut HashSet<String>) {
+    match mapped {
+        type_map::Mapped::Rust(ty) => extract_component_names(ty, refs),
+        type_map::Mapped::LenientInt(_) => {}
+        type_map::Mapped::Array(inner) => collect_refs_from_mapped(inner, refs),
+        type_map::Mapped::Skipped => {}
+    }
+}
+
+/// 从类型字符串提取 `XxxComponent` 引用（含 Vec<X>/BTreeMap<String, X>/元组）。
+fn extract_component_names(ty: &str, refs: &mut HashSet<String>) {
+    let mut current = String::new();
+    for ch in ty.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            current.push(ch);
+        } else {
+            if current.ends_with("Component") {
+                refs.insert(current.clone());
+            }
+            current.clear();
+        }
+    }
+    if current.ends_with("Component") {
+        refs.insert(current);
+    }
 }
 
 /// 收集类型引用中的简单类型名（用于 struct 可达性收集）。
@@ -192,12 +250,12 @@ fn emit_struct(
                     stats.skipped_fields += 1;
                     continue;
                 }
-                // 整数元素数组：使用宏生成的宽松 Vec 函数
+                // 整数元素数组：泛型宽松整数 Vec（serde 字面量替换）
                 Mapped::LenientInt(ty) => {
                     let fn_name = if prop.optional {
-                        format!("crate::lenient::de_opt_vec_{ty}")
+                        format!("crate::lenient::de_opt_vec_int")
                     } else {
-                        format!("crate::lenient::de_vec_{ty}")
+                        format!("crate::lenient::de_vec_int")
                     };
                     let field_ty = ty_str(&mapped, prop.optional);
                     fields.push_str(&format!(
@@ -205,19 +263,17 @@ fn emit_struct(
                     ));
                     stats.lenient_vec_fields += 1;
                 }
-                // 嵌套数组（Vec<Vec<X>>）或普通元素：内联宽松函数
+                // 嵌套数组（Vec<Vec<X>>）或普通元素：泛型宽松 Vec（serde 字面量替换）
                 _ => {
+                    let elem_ty = type_map::ty_str_of(elem);
+                    let fn_name = if prop.optional {
+                        format!("crate::lenient::de_opt_vec_lenient")
+                    } else {
+                        format!("crate::lenient::de_vec_lenient")
+                    };
                     let field_ty = ty_str(&mapped, prop.optional);
-                    let plain = field_name.trim_start_matches("r#");
-                    let helper_name = format!("deserialize_{struct_name}_{plain}");
                     fields.push_str(&format!(
-                        "{doc}    #[serde(deserialize_with = \"{helper_name}\")]\n    pub {field_name}: {field_ty},\n"
-                    ));
-                    helpers.push_str(&emit_vec_helper(
-                        struct_name,
-                        &field_name,
-                        &field_ty,
-                        prop.optional,
+                        "{doc}    #[serde(deserialize_with = \"{fn_name}\")]\n    pub {field_name}: {field_ty},\n"
                     ));
                     stats.lenient_vec_fields += 1;
                 }
@@ -232,13 +288,13 @@ fn emit_struct(
                 continue;
             }
             Mapped::Array(_) => unreachable!("数组字段已在上方 Array 分支处理"),
-            // 整数：宽松反序列化
+            // 整数：宽松反序列化（serde 字面量替换泛型路径）
             Mapped::LenientInt(ty) => {
                 let field_name = rust_field_name(&prop.base.name);
                 let fn_name = if prop.optional {
-                    format!("crate::lenient::de_opt_{ty}")
+                    format!("crate::lenient::de_opt_int")
                 } else {
-                    format!("crate::lenient::de_{ty}")
+                    format!("crate::lenient::de_int")
                 };
                 let field_ty = if prop.optional {
                     format!("Option<{ty}>")
@@ -305,45 +361,6 @@ fn ty_str(mapped: &Mapped, optional: bool) -> String {
         format!("Option<{ty}>")
     } else {
         ty
-    }
-}
-
-/// 生成宽松数组的内联反序列化函数（非整数元素）。
-fn emit_vec_helper(struct_name: &str, field_name: &str, field_ty: &str, optional: bool) -> String {
-    let fn_name = format!("deserialize_{struct_name}_{field_name}");
-    let inner = field_ty
-        .strip_prefix("Option<")
-        .and_then(|s| s.strip_suffix('>'))
-        .unwrap_or(field_ty);
-    // 元素类型 = 去掉最外层一层 Vec<>（支持 Vec<Vec<T>> 嵌套）
-    let elem_ty = inner
-        .strip_prefix("Vec<")
-        .and_then(|s| s.strip_suffix('>'))
-        .unwrap_or(inner);
-    if optional {
-        format!(
-            "fn {fn_name}<'de, D: serde::Deserializer<'de>>(d: D) -> Result<{field_ty}, D::Error> {{\n\
-             \x20   struct V;\n\
-             \x20   impl<'de> serde::de::Visitor<'de> for V {{\n\
-             \x20       type Value = {field_ty};\n\
-             \x20       fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {{\n\
-             \x20           f.write_str(\"an optional sequence or an empty map (Lua empty table)\")\n\
-             \x20       }}\n\
-             \x20       fn visit_unit<E: serde::de::Error>(self) -> Result<{field_ty}, E> {{ Ok(None) }}\n\
-             \x20       fn visit_none<E: serde::de::Error>(self) -> Result<{field_ty}, E> {{ Ok(None) }}\n\
-             \x20       fn visit_some<D2: serde::Deserializer<'de>>(self, d: D2) -> Result<{field_ty}, D2::Error> {{\n\
-             \x20           crate::lenient::de_vec_lenient::<{elem_ty}, _>(d).map(Some)\n\
-             \x20       }}\n\
-             \x20   }}\n\
-             \x20   d.deserialize_option(V)\n\
-             }}\n"
-        )
-    } else {
-        format!(
-            "fn {fn_name}<'de, D: serde::Deserializer<'de>>(d: D) -> Result<{field_ty}, D::Error> {{\n\
-             \x20   crate::lenient::de_vec_lenient::<{elem_ty}, _>(d)\n\
-             }}\n"
-        )
     }
 }
 

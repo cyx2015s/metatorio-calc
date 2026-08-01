@@ -108,7 +108,7 @@ fn map_simple(schema: &Schema, config: &Config, name: &str) -> Mapped {
 }
 
 /// Mapped → 类型字符串（Array 递归展开为 Vec<...>）。
-fn ty_str_of(m: &Mapped) -> String {
+pub fn ty_str_of(m: &Mapped) -> String {
     match m {
         Mapped::Rust(t) => t.clone(),
         Mapped::LenientInt(t) => t.clone(),
