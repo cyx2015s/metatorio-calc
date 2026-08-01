@@ -1734,7 +1734,7 @@ checksum = "42703706b716c37f96a77aea830392ad231f44c9e9a67872fa5548707e11b11c"
 [[package]]
 name = "fust-i18n"
 version = "0.1.0"
-source = "git+https://github.com/cyx2015s/fust-i18n?branch=master#2401512dfb31b17e26f23869788923f3eda0a2d4"
+source = "git+https://github.com/cyx2015s/fust-i18n?branch=master#26c6590708808cb8c796f4eb67e2ad69f6f116c9"
 dependencies = [
  "ahash",
  "egui",
@@ -2781,10 +2781,10 @@ dependencies = [
  "egui_logger",
  "fontdb",
  "fust-i18n",
- "good_lp",
  "image",
  "indexmap 2.14.0",
  "log",
+ "metatorio-solver",
  "mimalloc",
  "rayon",
  "regex",
@@ -2797,6 +2797,19 @@ dependencies = [
  "tempfile",
  "typetag",
  "winresource",
+]
+
+[[package]]
+name = "metatorio-solver"
+version = "0.1.0"
+dependencies = [
+ "ahash",
+ "fust-i18n",
+ "good_lp",
+ "indexmap 2.14.0",
+ "log",
+ "rayon",
+ "serde",
 ]
 
 [[package]]

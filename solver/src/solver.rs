@@ -1,8 +1,9 @@
 use good_lp::{IntoAffineExpression, Solution, variable};
 
 use crate::concept::{AIndexMap, AIndexSet, Flow, ItemIdent};
-use crate::math::RuizSolver;
+use crate::ruiz::RuizSolver;
 use core::f64;
+use fust_i18n::t;
 
 use std::fmt::Debug;
 use std::hash::Hash;
@@ -652,5 +653,282 @@ where
                 }
             }
         });
+    }
+}
+
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 最简单的冶炼：1 铁矿 → 1 铁板，成本 1；目标产出 1 铁板
+    fn smelting_problem() -> SolverData<&'static str, &'static str> {
+        let mut target = AIndexMap::default();
+        target.insert("iron-plate", 1.0);
+
+        let mut flows = AIndexMap::default();
+        let mut smelt = AIndexMap::default();
+        smelt.insert("iron-ore", -1.0);
+        smelt.insert("iron-plate", 1.0);
+        flows.insert("smelt", (smelt, 1.0));
+
+        SolverData::new_simple(target, flows)
+    }
+
+    #[test]
+    fn solve_simple_recipe() {
+        let solution = smelting_problem().solve();
+        match solution {
+            SolverSolution::Solved { prim, sum, cost, .. } => {
+                assert!((prim["smelt"] - 1.0).abs() < 1e-6, "prim: {prim:?}");
+                assert!((sum["iron-plate"] - 1.0).abs() < 1e-6, "sum: {sum:?}");
+                assert!((sum["iron-ore"] + 1.0).abs() < 1e-6, "sum: {sum:?}");
+                assert!((cost - 1.0).abs() < 1e-6, "cost: {cost}");
+            }
+            SolverSolution::NotSolved { description, .. } => {
+                panic!("求解失败: {description}")
+            }
+        }
+    }
+
+    #[test]
+    fn flow_add_combines_with_scale() {
+        let mut a = AIndexMap::default();
+        a.insert("x", 1.0);
+        a.insert("y", 2.0);
+        let mut b = AIndexMap::default();
+        b.insert("y", 3.0);
+        b.insert("z", 1.0);
+        let r = flow_add(&a, &b, 2.0);
+        assert_eq!(r.len(), 3);
+        assert!((r["x"] - 1.0).abs() < 1e-9);
+        assert!((r["y"] - 8.0).abs() < 1e-9);
+        assert!((r["z"] - 2.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn flow_add_empty_base_and_negative_scale() {
+        let a = AIndexMap::default();
+        let mut b = AIndexMap::default();
+        b.insert("x", 4.0);
+        let r = flow_add(&a, &b, -0.5);
+        assert!((r["x"] + 2.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn solve_chooses_cheapest_recipe() {
+        // 两条配方产出同一物品，成本不同：求解器应选择成本低的
+        let mut target = AIndexMap::default();
+        target.insert("iron-plate", 1.0);
+        let mut flows = AIndexMap::default();
+        let mut cheap = AIndexMap::default();
+        cheap.insert("iron-ore", -1.0);
+        cheap.insert("iron-plate", 1.0);
+        let mut expensive = AIndexMap::default();
+        expensive.insert("iron-ore", -2.0);
+        expensive.insert("iron-plate", 1.0);
+        flows.insert("cheap", (cheap, 1.0));
+        flows.insert("expensive", (expensive, 5.0));
+
+        let solution = SolverData::new_simple(target, flows).solve();
+        match solution {
+            SolverSolution::Solved { prim, cost, .. } => {
+                assert!((prim["cheap"] - 1.0).abs() < 1e-5, "应选择低成本配方: {prim:?}");
+                assert!((prim["expensive"]).abs() < 1e-5, "不应选择高成本配方: {prim:?}");
+                assert!((cost - 1.0).abs() < 1e-5, "总成本应为 1: {cost}");
+            }
+            SolverSolution::NotSolved { description, .. } => panic!("求解失败: {description}"),
+        }
+    }
+
+    #[test]
+    fn solve_with_sources_provides_missing_input() {
+        // ore 无配方生产，由外部 source 提供；source 变量计入成本
+        let mut target = AIndexMap::default();
+        target.insert("iron-plate", 1.0);
+        let mut flows = AIndexMap::default();
+        let mut smelt = AIndexMap::default();
+        smelt.insert("iron-ore", -1.0);
+        smelt.insert("iron-plate", 1.0);
+        flows.insert("smelt", (smelt, 1.0));
+
+        let mut sources = AIndexMap::default();
+        sources.insert("iron-ore", 2.0); // 每单位 ore 输入价值 2
+
+        let solution = SolverData::new_simple(target, flows)
+            .with_sources(sources)
+            .solve();
+        match solution {
+            SolverSolution::Solved { sum, cost, .. } => {
+                assert!((sum["iron-ore"] + 1.0).abs() < 1e-5, "消耗 1 ore: {sum:?}");
+                assert!((cost - 3.0).abs() < 1e-5, "成本 = 1 ore * 3: {cost}");
+            }
+            SolverSolution::NotSolved { description, .. } => panic!("求解失败: {description}"),
+        }
+    }
+
+    #[test]
+    fn solve_negative_target_means_consume() {
+        // target 为负 = 必须净消耗该物品（等式约束）
+        let mut target = AIndexMap::default();
+        target.insert("iron-plate", -1.0);
+        let mut flows = AIndexMap::default();
+        let mut burn = AIndexMap::default();
+        burn.insert("iron-plate", -1.0);
+        flows.insert("burn", (burn, 2.0));
+
+        let solution = SolverData::new_simple(target, flows).solve();
+        match solution {
+            SolverSolution::Solved { sum, cost, .. } => {
+                assert!((sum["iron-plate"] + 1.0).abs() < 1e-5, "净消耗 1: {sum:?}");
+                assert!((cost - 2.0).abs() < 1e-5, "成本 2: {cost}");
+            }
+            SolverSolution::NotSolved { description, .. } => panic!("求解失败: {description}"),
+        }
+    }
+
+    #[test]
+    fn solve_unreachable_target_reports_not_solved() {
+        // 目标物品没有任何配方可以生产（也无 sources），LP 不可行
+        let mut target = AIndexMap::default();
+        target.insert("mystery", 1.0);
+        let mut flows = AIndexMap::default();
+        let mut smelt = AIndexMap::default();
+        smelt.insert("iron-ore", -1.0);
+        smelt.insert("iron-plate", 1.0);
+        flows.insert("smelt", (smelt, 1.0));
+        let solution = SolverData::new_simple(target, flows).solve();
+        assert!(matches!(solution, SolverSolution::NotSolved { .. }));
+    }
+
+    #[test]
+    fn solve_empty_flows_reports_no_recipe() {
+        let mut target = AIndexMap::default();
+        target.insert("iron-plate", 1.0);
+        let flows: AIndexMap<&'static str, (AIndexMap<&'static str, f64>, f64)> =
+            AIndexMap::default();
+        let solution = SolverData::<&'static str, &'static str>::new_simple(target, flows).solve();
+        assert!(matches!(solution, SolverSolution::NotSolved { .. }));
+    }
+
+    #[test]
+    fn solve_empty_target_reports_no_target() {
+        let target: AIndexMap<&'static str, f64> = AIndexMap::default();
+        let flows: AIndexMap<&'static str, (AIndexMap<&'static str, f64>, f64)> =
+            AIndexMap::default();
+        let solution = SolverData::<&'static str, &'static str>::new_simple(target, flows).solve();
+        assert!(matches!(solution, SolverSolution::NotSolved { .. }));
+    }
+
+    #[test]
+    fn solve_zero_cost_flow_must_balance() {
+        // 0 成本转换流的产出物必须完全配平：不能凭空产出目标
+        let mut target = AIndexMap::default();
+        target.insert("plate", 1.0);
+        let mut flows = AIndexMap::default();
+        let mut conv = AIndexMap::default();
+        conv.insert("ore", -1.0);
+        conv.insert("plate", 1.0);
+        flows.insert("conv", (conv, 0.0)); // 0 成本
+        let mut prod = AIndexMap::default();
+        prod.insert("raw", -1.0);
+        prod.insert("ore", 1.0);
+        flows.insert("prod", (prod, 1.0));
+        let solution = SolverData::new_simple(target, flows).solve();
+        assert!(
+            matches!(solution, SolverSolution::NotSolved { .. }),
+            "0 成本转换流产出目标物品应不可行"
+        );
+    }
+
+    #[test]
+    fn solve_two_stage_recipe_chain() {
+        // 两级配方：raw → ore → plate，中间物应配平
+        let mut target = AIndexMap::default();
+        target.insert("iron-plate", 1.0);
+        let mut flows = AIndexMap::default();
+        let mut mine = AIndexMap::default();
+        mine.insert("raw-ore", -1.0);
+        mine.insert("iron-ore", 1.0);
+        flows.insert("mine", (mine, 1.0));
+        let mut smelt = AIndexMap::default();
+        smelt.insert("iron-ore", -1.0);
+        smelt.insert("iron-plate", 1.0);
+        flows.insert("smelt", (smelt, 2.0));
+
+        let solution = SolverData::new_simple(target, flows).solve();
+        match solution {
+            SolverSolution::Solved { prim, sum, .. } => {
+                assert!((prim["mine"] - 1.0).abs() < 1e-5, "prim: {prim:?}");
+                assert!((prim["smelt"] - 1.0).abs() < 1e-5, "prim: {prim:?}");
+                assert!((sum["raw-ore"] + 1.0).abs() < 1e-5, "sum: {sum:?}");
+                assert!((sum["iron-ore"]).abs() < 1e-5, "中间物应配平: {sum:?}");
+                assert!((sum["iron-plate"] - 1.0).abs() < 1e-5, "sum: {sum:?}");
+            }
+            SolverSolution::NotSolved { description, .. } => panic!("求解失败: {description}"),
+        }
+    }
+
+    #[test]
+    fn solve_accessors_consistent_with_fields() {
+        let solution = smelting_problem().solve();
+        match &solution {
+            SolverSolution::Solved { prim, sum, cost, .. } => {
+                assert_eq!(solution.get_prim_of(&"smelt"), prim.get(&"smelt").copied());
+                assert_eq!(
+                    solution.get_sum_of(&"iron-plate"),
+                    sum.get(&"iron-plate").copied()
+                );
+                assert_eq!(solution.get_cost(), Some(*cost));
+            }
+            SolverSolution::NotSolved { description, .. } => panic!("求解失败: {description}"),
+        }
+    }
+
+    #[test]
+    fn trim_flows_removes_unusable_recipes_in_strict_mode() {
+        // strict_source：孤立配方（消耗无法获得的物品且目标不需要）被剪掉
+        let mut target = AIndexMap::default();
+        target.insert("plate", 1.0);
+        let mut flows = AIndexMap::default();
+        let mut usable = AIndexMap::default();
+        usable.insert("ore", -1.0);
+        usable.insert("plate", 1.0);
+        flows.insert("smelt", (usable, 1.0));
+        let mut miner = AIndexMap::default();
+        miner.insert("rock", -1.0);
+        miner.insert("ore", 1.0);
+        flows.insert("miner", (miner, 1.0));
+        let mut orphan = AIndexMap::default();
+        orphan.insert("uranium", -1.0); // 无法获得
+        orphan.insert("waste", 1.0);    // 目标不需要
+        flows.insert("react", (orphan, 1.0));
+
+        let mut sources = AIndexMap::default();
+        sources.insert("rock", 1.0); // 叶子输入由外部提供
+
+        let mut data = SolverData::new_simple(target, flows)
+            .with_sources(sources)
+            .with_strict_source(true);
+        assert!(data.trim_flows());
+        assert!(!data.flows.contains_key("react"));
+        assert!(data.flows.contains_key("smelt"));
+        assert!(data.flows.contains_key("miner"));
+    }
+
+    #[test]
+    fn trim_flows_noop_without_strict_source() {
+        // 非严格模式下 trim_flows 不剪枝
+        let mut target = AIndexMap::default();
+        target.insert("plate", 1.0);
+        let mut flows = AIndexMap::default();
+        let mut orphan = AIndexMap::default();
+        orphan.insert("uranium", -1.0);
+        orphan.insert("waste", 1.0);
+        flows.insert("react", (orphan, 1.0));
+        let mut data = SolverData::new_simple(target, flows);
+        assert!(!data.trim_flows());
+        assert!(data.flows.contains_key("react"));
     }
 }

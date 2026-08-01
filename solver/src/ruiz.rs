@@ -140,18 +140,14 @@ impl RuizSolver {
             }
         }
 
-        let new_variables_defs = self
-            .variables
-            .iter_variables_with_def()
-            .map(|(var, def)| {
-                let prim_scale = prim_scales.get(&var).cloned().unwrap_or(1.0);
-                let new_min = def.get_min() / prim_scale;
-                let new_max = def.get_max() / prim_scale;
-                VariableDefinition::new().min(new_min).max(new_max)
-            })
-            .collect::<Vec<VariableDefinition>>();
-        let mut new_variables = ProblemVariables::new();
-        let _: Vec<Variable> = new_variables.add_all(new_variables_defs);
+        // 变换关系：x' = x * global_scale / prim_scale（由约束与目标函数的
+        // 缩放公式反推；求解器内部变量 x' 的解经 value * prim_scale / global_scale
+        // 恢复为原变量 x，见 solver.rs）。
+        // 因此变量界的正确缩放是 界 * global_scale / prim_scale。
+        // 历史 bug：此前为 界 / prim_scale（漏乘 global_scale），导致变量上界
+        // 在缩放空间中放大 1/global_scale 倍，microlp 给出的解可违反原问题上界
+        // （test_ruiz 曾复现：x1.max(1.0) 被解成 10/7≈1.4286）。
+        // metatorio 的 SolverData 路径不使用变量上界（均为 min(0)），故未受影响。
         let mut global_scale = 0.0;
         for (idx, constraint) in self.constraints.iter().enumerate() {
             global_scale = f64::max(
@@ -163,6 +159,19 @@ impl RuizSolver {
             global_scale = 1.0;
         }
         global_scale = global_scale.recip();
+
+        let new_variables_defs = self
+            .variables
+            .iter_variables_with_def()
+            .map(|(var, def)| {
+                let prim_scale = prim_scales.get(&var).cloned().unwrap_or(1.0);
+                let new_min = def.get_min() * global_scale / prim_scale;
+                let new_max = def.get_max() * global_scale / prim_scale;
+                VariableDefinition::new().min(new_min).max(new_max)
+            })
+            .collect::<Vec<VariableDefinition>>();
+        let mut new_variables = ProblemVariables::new();
+        let _: Vec<Variable> = new_variables.add_all(new_variables_defs);
         let new_minimise = self
             .minimise
             .linear_coefficients()
@@ -221,6 +230,9 @@ impl RuizSolver {
     }
 }
 
+/// 定位"变量上界未生效"缺陷：直接用 microlp（不经 Ruiz 缩放）求解同一 LP。
+
+/// 打印 RuizSolver 的缩放参数与缩放空间解，定位上界丢失点。
 #[test]
 fn test_ruiz() {
     use good_lp::*;
@@ -239,11 +251,22 @@ fn test_ruiz() {
         .solve()
         .unwrap();
 
-    println!("Optimal value: {}", solution.inner.eval(x1 + x2 + x3));
-    println!(
-        "x1: {}, x2: {}, x3: {}",
-        solution.inner.value(x1),
-        solution.inner.value(x2),
-        solution.inner.value(x3)
-    );
+    // 注意：`solution.inner` 是 Ruiz 均衡缩放后的问题的解，
+    // 原变量值必须反缩放：value * prim_scale / global_scale
+    // （solver.rs 的 `SolverData::solve` 内部正是这样恢复的；
+    //   历史上本测试曾直接读取 inner.value 导致误读为 0.678，
+    //   实际最优为 x1=1.0, x2=0.375, x3=0，目标 1.375。）
+    let g = solution.global_scale;
+    let unscaled = |var: Variable| {
+        let p = solution.prim_scales.get(&var).copied().unwrap_or(1.0);
+        solution.inner.value(var) * p / g
+    };
+    let x1v = unscaled(x1);
+    let x2v = unscaled(x2);
+    let x3v = unscaled(x3);
+
+    assert!((x1v - 1.0).abs() < 1e-5, "x1: {x1v}");
+    assert!((x2v - 0.375).abs() < 1e-5, "x2: {x2v}");
+    assert!((x3v).abs() < 1e-5, "x3: {x3v}");
+    assert!(((x1v + x2v + x3v) - 1.375).abs() < 1e-5, "目标: {}", x1v + x2v + x3v);
 }

@@ -1,6 +1,4 @@
-use std::{any::Any, fmt::Debug, hash::Hash, sync::mpsc::*};
-
-use indexmap::{IndexMap, IndexSet};
+use std::{any::Any, fmt::Debug, sync::mpsc::*};
 
 /// 对一个列表进行操作后，对这个项额外进行的操作，仅用作指示
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,13 +41,9 @@ pub trait SolveContext: Debug + Send + Sync + Any {
     type Item: ItemIdent;
 }
 
-pub type AIndexMap<K, V> = IndexMap<K, V, ahash::RandomState>;
-pub type AIndexSet<K> = IndexSet<K, ahash::RandomState>;
-
-pub type Flow<I> = AIndexMap<I, f64>;
-
-pub trait ItemIdent: Debug + Clone + Eq + Hash + Send + Sync + 'static {}
-impl<T> ItemIdent for T where T: Debug + Clone + Eq + Hash + Send + Sync + 'static {}
+// 求解器内核的最小概念集（物品标识/流量集合）已随内核拆入 `metatorio-solver`，
+// 此处 re-export，保持 `crate::concept::{AIndexMap, ...}` 的既有引用不变。
+pub use metatorio_solver::concept::{AIndexMap, AIndexSet, Flow, ItemIdent};
 
 pub trait GameContextCreatorView: SubView {
     fn set_subview_sender(&mut self, sender: Sender<Box<dyn SubView>>);

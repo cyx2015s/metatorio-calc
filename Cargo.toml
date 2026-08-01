@@ -16,11 +16,11 @@ egui_extras = { version = "0.35", features = ["file", "image"] }
 egui_logger = { version = "0.1.0", path = "egui_logger" }
 fontdb = "0.23"
 fust-i18n = { git = "https://github.com/cyx2015s/fust-i18n", branch = "master", features = ["egui"] }
-good_lp = { version = "1.15", default-features = false, features = ["microlp"] }
 image = { version = "0.25", default-features = false, features = ["png", "rayon"] }
 indexmap = { version = "2", features = ["rayon", "serde"] }
 log = "0.4"
 mimalloc = "0.1"
+metatorio-solver = { path = "solver" }
 rayon = "1"
 regex = "1"
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls"] }

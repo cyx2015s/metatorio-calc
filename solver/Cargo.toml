@@ -1,0 +1,15 @@
+[package]
+name = "metatorio-solver"
+version = "0.1.0"
+edition = "2024"
+description = "Metatorio 求解器内核：线性规划求解与组合枚举，无 UI 依赖"
+license = "MIT"
+
+[dependencies]
+ahash = { version = "0.8", features = ["serde"] }
+fust-i18n = { git = "https://github.com/cyx2015s/fust-i18n", branch = "master" }
+good_lp = { version = "1.15", default-features = false, features = ["microlp"] }
+indexmap = { version = "2", features = ["rayon", "serde"] }
+log = "0.4"
+rayon = "1"
+serde = { version = "1", features = ["derive"] }
