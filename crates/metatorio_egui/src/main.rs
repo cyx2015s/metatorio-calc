@@ -396,15 +396,15 @@ fn main() {
     }
     update_i18n_ini(
         "zh-CN",
-        std::io::Cursor::new(include_str!("../locales/zh-CN.cfg")),
+        std::io::Cursor::new(include_str!("../../../locales/zh-CN.cfg")),
     )
     .unwrap();
     update_i18n_ini(
         "en",
-        std::io::Cursor::new(include_str!("../locales/en.cfg")),
+        std::io::Cursor::new(include_str!("../../../locales/en.cfg")),
     )
     .unwrap();
-    let icon_image = image::load_from_memory(include_bytes!("../assets/icon.png")).unwrap();
+    let icon_image = image::load_from_memory(include_bytes!("../../../assets/icon.png")).unwrap();
     eframe::run_native(
         "metatorio",
         eframe::NativeOptions {
@@ -490,7 +490,7 @@ fn update_font(ctx: &egui::Context, buf: Vec<u8>) {
         .insert("main".into(), egui::FontData::from_owned(buf).into());
     fonts.font_data.insert(
         "symbol".into(),
-        egui::FontData::from_static(include_bytes!("../assets/font.ttf")).into(),
+        egui::FontData::from_static(include_bytes!("../../../assets/font.ttf")).into(),
     );
     fonts
         .families

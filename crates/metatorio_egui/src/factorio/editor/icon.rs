@@ -118,22 +118,21 @@ impl<'a> egui::Widget for Icon<'a> {
                             .0
                             .split_top_bottom_at_fraction(0.5)
                             .1,
-                        egui::Image::from_uri(
-                            if cfg!(windows) {
-                                format!(
-                                    "file:///{}/{}/{}.png",
-                                    root_path.display(),
-                                    "quality",
-                                    data.qualities[self.quality as usize].base.name
-                                )
-                            } else {
-                                format!(
-                                    "file://{}/{}/{}.png",
-                                    root_path.display(),
-                                    "quality",
-                                    data.qualities[self.quality as usize].base.name
-                                )
-                            },),
+                        egui::Image::from_uri(if cfg!(windows) {
+                            format!(
+                                "file:///{}/{}/{}.png",
+                                root_path.display(),
+                                "quality",
+                                data.qualities[self.quality as usize].base.name
+                            )
+                        } else {
+                            format!(
+                                "file://{}/{}/{}.png",
+                                root_path.display(),
+                                "quality",
+                                data.qualities[self.quality as usize].base.name
+                            )
+                        }),
                     );
                 }
                 match self.type_name {
@@ -331,7 +330,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                         ui.add_sized(
                             [self.size, self.size],
                             egui::Image::new(egui::include_image!(
-                                "../../../assets/icons/heat.png"
+                                "../../../../../assets/icons/heat.png"
                             ))
                             .max_size([self.size, self.size].into()),
                         )
@@ -350,7 +349,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                         ui.add_sized(
                             [self.size, self.size],
                             egui::Image::new(egui::include_image!(
-                                "../../../assets/icons/electricity.png"
+                                "../../../../../assets/icons/electricity.png"
                             ))
                             .max_size([self.size, self.size].into()),
                         )
@@ -373,7 +372,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                             ui.add_sized(
                                 [self.size, self.size],
                                 egui::Image::new(egui::include_image!(
-                                    "../../../assets/icons/fluid-heat.png"
+                                    "../../../../../assets/icons/fluid-heat.png"
                                 ))
                                 .max_size([self.size, self.size].into()),
                             )
@@ -397,7 +396,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                             ui.add_sized(
                                 [self.size, self.size],
                                 egui::Image::new(egui::include_image!(
-                                    "../../../assets/icons/fluid-fuel.png"
+                                    "../../../../../assets/icons/fluid-fuel.png"
                                 ))
                                 .max_size([self.size, self.size].into()),
                             )
@@ -416,7 +415,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                     ui.add_sized(
                         [self.size, self.size],
                         egui::Image::new(egui::include_image!(
-                            "../../../assets/icons/item-fuel.png"
+                            "../../../../../assets/icons/item-fuel.png"
                         ))
                         .max_size([self.size, self.size].into()),
                     )
@@ -430,7 +429,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                 .add_sized(
                     [self.size, self.size],
                     egui::Image::new(egui::include_image!(
-                        "../../../assets/icons/rocket-capacity.png"
+                        "../../../../../assets/icons/rocket-capacity.png"
                     )),
                 )
                 .on_hover_ui(|ui| {
@@ -440,7 +439,7 @@ impl<'a> egui::Widget for GenericIcon<'a> {
                 .add_sized(
                     [self.size, self.size],
                     egui::Image::new(egui::include_image!(
-                        "../../../assets/icons/rocket-capacity.png"
+                        "../../../../../assets/icons/rocket-capacity.png"
                     )),
                 )
                 .on_hover_ui(|ui| {
