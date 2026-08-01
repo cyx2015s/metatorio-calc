@@ -40,7 +40,8 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
     out.push_str(", api_version ");
     out.push_str(&schema.api_version.to_string());
     out.push_str(")\n\n");
-    out.push_str("use serde::{Deserialize, Serialize};\n\n");
+    out.push_str("use serde::{Deserialize, Serialize};\n");
+    out.push_str("use std::collections::BTreeMap;\n\n");
 
     // 1. 收集关注原型（按 typename）
     let mut concerned: Vec<&Prototype> = Vec::new();

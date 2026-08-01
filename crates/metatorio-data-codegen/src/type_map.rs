@@ -107,6 +107,16 @@ fn map_simple(schema: &Schema, config: &Config, name: &str) -> Mapped {
     Mapped::Rust("serde_json::Value".to_string())
 }
 
+/// Mapped → 类型字符串（Array 递归展开为 Vec<...>）。
+fn ty_str_of(m: &Mapped) -> String {
+    match m {
+        Mapped::Rust(t) => t.clone(),
+        Mapped::LenientInt(t) => t.clone(),
+        Mapped::Array(inner) => format!("Vec<{}>", ty_str_of(inner)),
+        Mapped::Skipped => "serde_json::Value".to_string(),
+    }
+}
+
 /// 数组元素映射：从 array 的 value 取元素类型并映射；
 /// 缺失/非类型引用 → Value 保真。
 fn array_elem(schema: &Schema, config: &Config, c: &ComplexType) -> Mapped {
@@ -121,8 +131,35 @@ fn map_complex(schema: &Schema, config: &Config, c: &ComplexType) -> Mapped {
     match c.complex_type.as_str() {
         "array" => Mapped::Array(Box::new(array_elem(schema, config, c))),
         "struct" => Mapped::Rust("serde_json::Value".to_string()), // 内联 struct：保真
-        // Phase 2：union/tuple/dictionary 细化
-        "union" | "tuple" | "dictionary" | "type" | "literal" => {
+        // dictionary：{ key: string/ID → String, value: 递归映射 }
+        "dictionary" => {
+            let Some(crate::schema::ComplexValue::TypeRef(v)) = &c.value else {
+                return Mapped::Rust("serde_json::Value".to_string());
+            };
+            match map(schema, config, v) {
+                Mapped::Skipped => Mapped::Skipped,
+                m => Mapped::Rust(format!("BTreeMap<String, {}>", ty_str_of(&m))),
+            }
+        }
+        // tuple：values → (A, B, C)
+        "tuple" => {
+            let mut parts = Vec::new();
+            if let Some(values) = &c.values {
+                for v in values {
+                    match map(schema, config, v) {
+                        Mapped::Skipped => return Mapped::Skipped,
+                        m => parts.push(ty_str_of(&m)),
+                    }
+                }
+            }
+            if parts.is_empty() {
+                Mapped::Rust("serde_json::Value".to_string())
+            } else {
+                Mapped::Rust(format!("({})", parts.join(", ")))
+            }
+        }
+        // Phase 2 剩余：union 保持 Value 保真（需要语义的类型走 custom_type_map 手写注册）
+        "union" | "type" | "literal" => {
             Mapped::Rust("serde_json::Value".to_string())
         }
         other => {

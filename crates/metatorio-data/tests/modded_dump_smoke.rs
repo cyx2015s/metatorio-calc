@@ -71,7 +71,6 @@ fn try_deserialize_layer(layer: &str, value: &Value) -> Result<(), String> {
         "BeaconComponent" => try_comp!(metatorio_data::generated_components::BeaconComponent),
         "BoilerComponent" => try_comp!(metatorio_data::generated_components::BoilerComponent),
         "BurnerGeneratorComponent" => try_comp!(metatorio_data::generated_components::BurnerGeneratorComponent),
-        "CargoLandingPadComponent" => try_comp!(metatorio_data::generated_components::CargoLandingPadComponent),
         "CraftingMachineComponent" => try_comp!(metatorio_data::generated_components::CraftingMachineComponent),
         "EntityComponent" => try_comp!(metatorio_data::generated_components::EntityComponent),
         "EntityWithHealthComponent" => try_comp!(metatorio_data::generated_components::EntityWithHealthComponent),

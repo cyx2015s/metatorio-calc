@@ -5,7 +5,7 @@
 //! - 继承链：关键原型（组装机/电炉/模块）的链结构符合游戏类层次
 //! - 类型映射：关键字段的 Rust 类型映射正确（标量、Option、自定义类型）
 
-use metatorio_data_codegen::{Config, Schema, generate};
+use metatorio_data_codegen::{Config, Schema, config::DEFAULT_CONCERNED_TYPENAMES, generate};
 
 /// schema 文件路径（相对 codegen crate 的 workspace 布局）。
 fn schema_path() -> std::path::PathBuf {
@@ -74,7 +74,7 @@ fn generation_stats_are_reasonable() {
     let (code, stats) = generate(&schema, &Config::default());
 
     // 关注类型数（DEFAULT_CONCERNED_TYPENAMES 的数量）
-    assert_eq!(stats.concerned_typenames, 33);
+    assert_eq!(stats.concerned_typenames, DEFAULT_CONCERNED_TYPENAMES.len());
     // 组件数：原型继承链组件 + 嵌套 struct 组件
     assert!(stats.component_structs > 100, "组件数: {}", stats.component_structs);
     // 字段数：足以覆盖计算所需
@@ -108,7 +108,7 @@ fn crafting_machine_fields_are_correct() {
     // fixed_recipe: RecipeID（string 别名）optional，但 schema 有 Literal 默认 "" → 锁定为非 Option
     assert!(code.contains("pub fixed_recipe: String"), "fixed_recipe 应被默认值锁定为 String（Literal 默认空串）");
     // allowed_effects: EffectTypeLimitation（struct 类型）→ 生成的组件
-    assert!(code.contains("pub allowed_effects: Option<serde_json::Value>"), "allowed_effects 应为 union 保真 Value（Phase 2 细化）");
+    assert!(code.contains("pub allowed_effects: Option<crate::types::EffectTypeLimitation>"), "allowed_effects 应映射到手写 EffectTypeLimitation");
 }
 
 #[test]

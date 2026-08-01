@@ -162,6 +162,94 @@ impl<'de> serde::Deserialize<'de> for MapPosition {
 }
 
 
+// ── 效果类型（EffectTypeLimitation）──────────────────────────────
+
+/// 模块/信标效果类型（schema 的 union 成员是固定的 5 个字面值）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum EffectType {
+    Speed,
+    Productivity,
+    Consumption,
+    Pollution,
+    Quality,
+}
+
+impl EffectType {
+    pub fn parse(s: &str) -> Option<EffectType> {
+        match s {
+            "speed" => Some(EffectType::Speed),
+            "productivity" => Some(EffectType::Productivity),
+            "consumption" => Some(EffectType::Consumption),
+            "pollution" => Some(EffectType::Pollution),
+            "quality" => Some(EffectType::Quality),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            EffectType::Speed => "speed",
+            EffectType::Productivity => "productivity",
+            EffectType::Consumption => "consumption",
+            EffectType::Pollution => "pollution",
+            EffectType::Quality => "quality",
+        }
+    }
+}
+
+/// 允许的效果类型集合（模块/信标机器）。
+///
+/// schema 形态（手写建模示范——自动化无法推断语义）：
+/// `union[ union[literal × 5] | array[union[literal × 5]] ]`，
+/// 即"单一效果类型"或"效果类型列表"。dump 中还可能出现空表（`{}`/`[]`）。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EffectTypeLimitation {
+    pub allowed: Vec<EffectType>,
+}
+
+impl<'de> serde::Deserialize<'de> for EffectTypeLimitation {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value: Value = serde::Deserialize::deserialize(deserializer)?;
+        let mut allowed = Vec::new();
+        match value {
+            Value::String(s) => {
+                let t = EffectType::parse(&s).ok_or_else(|| {
+                    D::Error::custom(format!("未知效果类型: {s}"))
+                })?;
+                allowed.push(t);
+            }
+            Value::Array(items) => {
+                for item in items {
+                    if let Value::String(s) = item {
+                        if let Some(t) = EffectType::parse(&s) {
+                            allowed.push(t);
+                        }
+                        // 非字符串元素：容错跳过（mod 数据不规范）
+                    }
+                }
+            }
+            // 空表/空对象 → 空集
+            Value::Object(_) | Value::Null => {}
+            _ => return Err(D::Error::custom("EffectTypeLimitation 形态不合法")),
+        }
+        Ok(EffectTypeLimitation { allowed })
+    }
+}
+
+impl serde::Serialize for EffectTypeLimitation {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeSeq;
+        let mut seq = s.serialize_seq(Some(self.allowed.len()))?;
+        for t in &self.allowed {
+            seq.serialize_element(t.name())?;
+        }
+        seq.end()
+    }
+}
+
 // ── Serialize（生成的组件 derive Serialize，这里按 JSON 兼容格式输出）──
 
 impl serde::Serialize for EnergyAmount {
@@ -223,6 +311,26 @@ mod tests {
         assert_eq!(c, Color(255, 128, 0, 255));
         let c: Color = serde_json::from_str(r#"{"r": 1.0, "g": 0.0, "b": 0.0, "a": 0.5}"#).unwrap();
         assert_eq!(c, Color(255, 0, 0, 128));
+    }
+
+    #[test]
+    fn effect_type_limitation_parses() {
+        // 数组形态（dump 最常见）
+        let e: EffectTypeLimitation = serde_json::from_str(r#"["speed", "consumption", "pollution"]"#).unwrap();
+        assert_eq!(
+            e.allowed,
+            vec![EffectType::Speed, EffectType::Consumption, EffectType::Pollution]
+        );
+        // 单值形态（union 的第一分支）
+        let e: EffectTypeLimitation = serde_json::from_str(r#""quality""#).unwrap();
+        assert_eq!(e.allowed, vec![EffectType::Quality]);
+        // 空表 → 空集
+        let e: EffectTypeLimitation = serde_json::from_str(r#"{}"#).unwrap();
+        assert!(e.allowed.is_empty());
+        let e: EffectTypeLimitation = serde_json::from_str(r#"[]"#).unwrap();
+        assert!(e.allowed.is_empty());
+        // 未知类型报错（引擎固定 5 种，mod 自定义应暴露）
+        assert!(serde_json::from_str::<EffectTypeLimitation>(r#""unknown""#).is_err());
     }
 
     #[test]
