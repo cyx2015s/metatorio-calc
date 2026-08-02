@@ -637,7 +637,7 @@ impl FactoryInstance {
                             crate::toast::info(t!("metatorio.auto-plan-success"));
                         }
                         Err(e) => {
-                            log::error!("自动规划工厂失败: {:?}", &e);
+                            log::error!("自动规划工厂失败: {:?}", e);
                         }
                     }
                 });
@@ -1244,8 +1244,10 @@ pub struct ProjectInstance {
     pub factory_receiver: Receiver<FactoryInstance>,
 
     #[serde(skip)]
+    #[allow(clippy::complexity)]
     pub problem_sender: Sender<(usize, SolverData<DualVar, (usize, usize)>)>,
     #[serde(skip)]
+    #[allow(clippy::complexity)]
     pub solution_receiver: Receiver<(usize, SolverSolution<DualVar, (usize, usize)>)>,
 }
 

@@ -204,10 +204,10 @@ pub fn calc_quality_distribution(
         sum += result[0];
         if sum > 1.0 {
             let mut sum_alt = 0.0;
-            for idx in 0..result.len() {
-                sum_alt += result[idx];
+            for item in &mut result {
+                sum_alt += *item;
                 if sum_alt > 1.0 {
-                    result[idx] -= sum_alt - 1.0;
+                    *item -= sum_alt - 1.0;
                     sum_alt = 1.0;
                 }
             }

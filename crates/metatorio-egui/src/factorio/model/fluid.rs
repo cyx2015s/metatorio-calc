@@ -724,7 +724,7 @@ impl FactorioMechanic for BoilerMechanic {
                     instance.temperature = data
                         .fluids
                         .get(&instance.fluid)
-                        .unwrap_or_else(|| panic!("锅炉输入的流体 {} 不存在", &instance.fluid))
+                        .unwrap_or_else(|| panic!("锅炉输入的流体 {} 不存在", instance.fluid))
                         .default_temperature as i32;
                 }
             }
@@ -1052,7 +1052,7 @@ impl FactorioMechanic for FluidFuelMechanic {
                 instance.temperature = data
                     .fluids
                     .get(&instance.fluid)
-                    .unwrap_or_else(|| panic!("流体燃烧的流体 {} 不存在", &instance.fluid))
+                    .unwrap_or_else(|| panic!("流体燃烧的流体 {} 不存在", instance.fluid))
                     .default_temperature as i32;
             }
         });
@@ -1219,7 +1219,7 @@ impl FactorioMechanic for FluidHeatMechanic {
                 instance.temperature = data
                     .fluids
                     .get(&instance.fluid)
-                    .unwrap_or_else(|| panic!("流体燃烧的流体 {} 不存在", &instance.fluid))
+                    .unwrap_or_else(|| panic!("流体燃烧的流体 {} 不存在", instance.fluid))
                     .default_temperature as i32;
             }
         });

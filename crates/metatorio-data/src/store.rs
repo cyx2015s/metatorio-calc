@@ -149,7 +149,7 @@ impl PrototypeStore {
                 let record = PrototypeRecord {
                     name: name.clone(),
                     type_: (*typename).to_string(),
-                    group: group.clone(),
+                    group,
                     components,
                 };
                 match records.entry((group, name.clone())) {
@@ -192,7 +192,7 @@ impl PrototypeStore {
     }
 
     /// 遍历某组的所有记录。
-    pub fn group<'a>(&'a self, group: PrototypeGroup) -> impl Iterator<Item = &'a PrototypeRecord> {
+    pub fn group(&self, group: PrototypeGroup) -> impl Iterator<Item = &PrototypeRecord> {
         self.records
             .iter()
             .filter(move |((g, _), _)| *g == group)

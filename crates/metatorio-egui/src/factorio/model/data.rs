@@ -194,9 +194,9 @@ impl DataContext {
             if let Some(autoplace) = &entity.autoplace
                 && (entity.base.r#type == "resource")
             {
-                log::debug!("自动生成的资源: {}", &entity.base.name);
+                log::debug!("自动生成的资源: {}", entity.base.name);
                 if !autoplace.control.is_empty() {
-                    log::debug!(" ↑ 对应的控制 ID 为 {}", &autoplace.control);
+                    log::debug!(" ↑ 对应的控制 ID 为 {}", autoplace.control);
                 }
             }
         }
@@ -350,7 +350,7 @@ impl DataContext {
                     log::debug!("处理模组信息 {:?}", mod_info);
                     let mod_name = mod_info.name.clone();
                     if mod_info.version.is_empty() {
-                        log::debug!("模组 {} 缺少版本信息，尝试补全", &mod_name);
+                        log::debug!("模组 {} 缺少版本信息，尝试补全", mod_name);
 
                         if ["base", "space-age", "quality", "elevated-rails"]
                             .contains(&mod_name.as_str())
@@ -374,7 +374,7 @@ impl DataContext {
                                     "模组的info.json的version字段不是字符串".to_string(),
                                 ))?
                                 .to_string();
-                            log::info!("模组 {} 的版本是 {}", &mod_name, &mod_info.version);
+                            log::info!("模组 {} 的版本是 {}", mod_name, mod_info.version);
                         } else {
                             // 在模组路径下寻找info.json
                             log::debug!("在模组路径下寻找 {} 的 info.json", mod_name);
@@ -389,13 +389,13 @@ impl DataContext {
                                         AppError::Custom(os_err.display().to_string())
                                     })?;
 
-                                if file_name.starts_with(format!("{}_", &mod_name).as_str())
+                                if file_name.starts_with(format!("{}_", mod_name).as_str())
                                     && file_name.ends_with(".zip")
                                 {
                                     log::debug!("可能匹配的文件：{}", file_name);
                                     log::debug!(
                                         "模组 {} 是压缩包，尝试从压缩包文件名读取版本",
-                                        &mod_name
+                                        mod_name
                                     );
                                     let version_str = file_name.split("_").last();
                                     if let Some(version_str) = version_str {
@@ -409,8 +409,8 @@ impl DataContext {
                                         }
                                         log::info!(
                                             "压缩包模组 {} 的版本是 {}",
-                                            &mod_name,
-                                            &mod_info.version
+                                            mod_name,
+                                            mod_info.version
                                         );
                                     }
                                 } else if file_name == mod_name {
@@ -440,7 +440,7 @@ impl DataContext {
                                     }
                                     log::info!(
                                         "文件模组 {} 的版本是 {}",
-                                        &mod_name,
+                                        mod_name,
                                         mod_info.version
                                     );
 
@@ -452,7 +452,7 @@ impl DataContext {
                 }
             }
             mod_infos_json["mods"] = serde_json::to_value(mod_infos)?;
-            log::info!("补全模组版本信息完成，写入临时文件({:?}", &mod_infos_json);
+            log::info!("补全模组版本信息完成，写入临时文件({:?}", mod_infos_json);
             std::fs::write(
                 &tmp_mod_list_json_path,
                 serde_json::to_string_pretty(&mod_infos_json)?,
@@ -539,7 +539,7 @@ impl DataContext {
             )?;
             for mod_info in &mut mod_infos {
                 if mod_info.enabled {
-                    log::info!("启用模组 {}", &mod_info.name);
+                    log::info!("启用模组 {}", mod_info.name);
                     factorio
                         .mods
                         .push((mod_info.name.clone(), mod_info.version.clone()));
@@ -888,7 +888,7 @@ impl Display for DualVar {
                 DualVar::FluidHeat { .. } => t!("metatorio.fluid-heat"),
                 DualVar::FluidFuel { .. } => t!("metatorio.fluid-fuel"),
                 DualVar::ItemFuel { .. } => t!("metatorio.item-fuel"),
-                DualVar::RocketSlotCapacity { .. } => t!("metatorio.rocket-slot-capacity"),
+                DualVar::RocketSlotCapacity => t!("metatorio.rocket-slot-capacity"),
                 DualVar::RocketWeightCapacity => t!("metatorio.rocket-weight-capacity"),
                 DualVar::Pollution { .. } => t!("metatorio.pollution"),
                 DualVar::Custom { .. } => t!("metatorio.custom"),

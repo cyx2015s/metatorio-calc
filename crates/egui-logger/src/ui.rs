@@ -318,13 +318,13 @@ impl LoggerUi {
             if self.style.enable_categories_button {
                 ui.menu_button("分类", |ui| {
                     if ui.button("全选").clicked() {
-                        for (_, enabled) in logger.categories.iter_mut() {
+                        for enabled in logger.categories.values_mut() {
                             *enabled = true;
                         }
                     }
 
                     if ui.button("取消全选").clicked() {
-                        for (_, enabled) in logger.categories.iter_mut() {
+                        for enabled in logger.categories.values_mut() {
                             *enabled = false;
                         }
                     }

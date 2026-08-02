@@ -107,8 +107,8 @@ pub fn auto_planner_ref(
         } => {
             log::error!(
                 "自动规划失败: no_provider={:?}..., no_consumer={:?}...",
-                &no_provider,
-                &no_consumer
+                no_provider,
+                no_consumer
             );
             crate::toast::error(t!("metatorio.auto-planner-failed", description));
             return Err(AppError::Solver(String::new()));

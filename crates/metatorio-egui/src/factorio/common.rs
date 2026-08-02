@@ -470,7 +470,7 @@ impl<'de> serde::Deserialize<'de> for EnergyAmount {
         } else {
             Err(serde::de::Error::custom(format!(
                 "不是有效的能量字符串: {}",
-                &value
+                value
             )))
         }
     }

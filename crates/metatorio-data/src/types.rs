@@ -110,7 +110,7 @@ impl<'de> serde::Deserialize<'de> for Color {
             Value::Array(vec) => {
                 // mod 数据可能给空数组/短数组（Lua 空 table 导出 {} 的另一种形态）——通道补 0
                 let mut c = Color(0, 0, 0, 255);
-                if vec.len() >= 1 {
+                if !vec.is_empty() {
                     c.0 = to_u8(&vec[0]).unwrap_or(0);
                 }
                 if vec.len() >= 2 {
@@ -759,8 +759,7 @@ impl<'de> serde::Deserialize<'de> for IDFilter {
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
                 let comparator = map
-                    .get("comparator")
-                    .map(Clone::clone)
+                    .get("comparator").cloned()
                     .map(serde_json::from_value)
                     .transpose()
                     .map_err(|_| D::Error::custom("Comparator 反序列化失败"))?;

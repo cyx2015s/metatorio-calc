@@ -533,15 +533,15 @@ where
             optimization_expr += *cost * *var;
         }
         if !no_providers.is_empty() {
-            log::warn!("没有来源的物品：{:?}个", &no_providers.len());
+            log::warn!("没有来源的物品：{:?}个", no_providers.len());
         }
         if !no_consumers.is_empty() {
-            log::warn!("没有去处的物品：{:?}个", &no_consumers.len());
+            log::warn!("没有去处的物品：{:?}个", no_consumers.len());
         }
         if constraints.len() < 8 {
-            log::debug!("求解器：构建的约束表达式: {:?}", &constraints);
+            log::debug!("求解器：构建的约束表达式: {:?}", constraints);
 
-            log::debug!("求解器：对应流变量: {:?}", &flow_vars);
+            log::debug!("求解器：对应流变量: {:?}", flow_vars);
         }
         let solution =
             RuizSolver::new(optimization_expr.clone(), constraints, problem_variables).solve();

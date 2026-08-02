@@ -255,7 +255,7 @@ pub fn resolve_dependency(data: &DataContext, milestones: &[(String, bool)]) -> 
 
 pub fn update_accessibles(user: &mut ProjectContext, data: &DataContext) {
     user.accessible_technologies = resolve_dependency(data, &user.tech_milestones);
-    log::debug!("更新可访问科技: {:?}", &user.milestone_graph);
+    log::debug!("更新可访问科技: {:?}", user.milestone_graph);
     user.accessible_prototypes.clear();
 
     let mut new_recipe_productivity = user
