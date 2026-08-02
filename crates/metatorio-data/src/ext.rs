@@ -215,6 +215,17 @@ impl BeaconComponent {
     pub fn allowed_module_categories(&self) -> Option<&[String]> {
         self.allowed_module_categories.as_deref()
     }
+
+    pub fn get_profile(&self, beacon_count: usize) -> f64 {
+        if self.profile.is_empty() {
+            return 1.0;
+        }
+        if beacon_count < self.profile.len() {
+            self.profile[beacon_count]
+        } else {
+            *self.profile.last().unwrap()
+        }
+    }
 }
 
 impl LabComponent {

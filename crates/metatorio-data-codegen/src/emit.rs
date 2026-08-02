@@ -439,6 +439,7 @@ fn collect_refs_from_mapped(
         type_map::Mapped::Rust(ty) => extract_type_names(ty, candidates, refs),
         type_map::Mapped::LenientInt(_) => {}
         type_map::Mapped::Array(inner) => collect_refs_from_mapped(inner, candidates, refs),
+        type_map::Mapped::Dict(inner) => collect_refs_from_mapped(inner, candidates, refs),
         type_map::Mapped::Skipped => {}
     }
 }
@@ -573,6 +574,9 @@ fn emit_struct(
         if let Mapped::Array(elem) = &mapped {
             let field_name = rust_field_name(&prop.base.name);
             let elem: &Mapped = elem;
+            // 无 default 描述的数组字段：None 无语义（未设置 = 空数组），降为 Vec；
+            // 有 default 描述（如 categories 默认 {"crafting"}）保留 Option 供 ext 回落。
+            let optional = prop.optional && prop.default.is_some();
             match elem {
                 // 元素被忽略 → 整个字段跳过
                 Mapped::Skipped => {
@@ -581,12 +585,12 @@ fn emit_struct(
                 }
                 // 整数元素数组：泛型宽松整数 Vec（serde 字面量替换）
                 Mapped::LenientInt(_) => {
-                    let fn_name = if prop.optional {
+                    let fn_name = if optional {
                         "crate::lenient::de_opt_vec_int"
                     } else {
                         "crate::lenient::de_vec_int"
                     };
-                    let field_ty = ty_str(&mapped, prop.optional);
+                    let field_ty = ty_str(&mapped, optional);
                     fields.push_str(&format!(
                         "{doc}    #[serde(deserialize_with = \"{fn_name}\")]\n    pub {field_name}: {field_ty},\n"
                     ));
@@ -594,12 +598,12 @@ fn emit_struct(
                 }
                 // 嵌套数组（Vec<Vec<X>>）或普通元素：泛型宽松 Vec（serde 字面量替换）
                 _ => {
-                    let fn_name = if prop.optional {
+                    let fn_name = if optional {
                         "crate::lenient::de_opt_vec_lenient"
                     } else {
                         "crate::lenient::de_vec_lenient"
                     };
-                    let field_ty = ty_str(&mapped, prop.optional);
+                    let field_ty = ty_str(&mapped, optional);
                     fields.push_str(&format!(
                         "{doc}    #[serde(deserialize_with = \"{fn_name}\")]\n    pub {field_name}: {field_ty},\n"
                     ));
@@ -616,6 +620,16 @@ fn emit_struct(
                 continue;
             }
             Mapped::Array(_) => unreachable!("数组字段已在上方 Array 分支处理"),
+            // 字典字段：BTreeMap<String, V>。无 default 描述的字典 None 无语义
+            // （未设置 = 空 map，struct 级 #[serde(default)] 兜底），降为非 Option；
+            // 有 default 描述保留 Option 供 ext 回落。
+            Mapped::Dict(_) => {
+                let field_name = rust_field_name(&prop.base.name);
+                let optional = prop.optional && prop.default.is_some();
+                let field_ty = ty_str(&mapped, optional);
+                fields.push_str(&format!("{doc}    pub {field_name}: {field_ty},\n"));
+                stats.fields += 1;
+            }
             // 整数：宽松反序列化（serde 字面量替换泛型路径）
             Mapped::LenientInt(ty) => {
                 let field_name = rust_field_name(&prop.base.name);
@@ -653,6 +667,12 @@ fn emit_struct(
                     } else {
                         ty
                     };
+                    if matches!(prop.default, Some(DefaultValue::Literal(_))) {
+                        doc.push_str(&format!(
+                            "    /// 默认(literal): {:?}\n",
+                            prop.default.as_ref()
+                        ));
+                    }
                     fields.push_str(&format!("{doc}    pub {field_name}: {field_ty},\n"));
                 }
                 stats.fields += 1;
@@ -696,6 +716,7 @@ fn ty_str(mapped: &Mapped, optional: bool) -> String {
         Mapped::LenientInt(t) => t.clone(),
         Mapped::Skipped => "serde_json::Value".to_string(),
         Mapped::Array(_) => unreachable!("Array 已在上方处理"),
+        Mapped::Dict(inner) => format!("BTreeMap<String, {}>", ty_str(inner, false)),
     };
     if optional {
         format!("Option<{ty}>")

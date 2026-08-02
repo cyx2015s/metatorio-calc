@@ -20,6 +20,10 @@ pub enum Mapped {
     /// 元素可能是 LenientInt（整数数组 → 宏函数）、Rust（内联函数）、
     /// Array（嵌套数组）或 Skipped（整体跳过）。
     Array(Box<Mapped>),
+    /// 字典（key 固定 String，value 递归映射）：BTreeMap<String, V>。
+    /// 与 Rust 分开成独立变体，便于字段生成时独立决定 Option 降级
+    /// （无 default 描述的字典 None 无语义 → 非 Option）。
+    Dict(Box<Mapped>),
     /// 字段应跳过（类型被忽略 / literal 常量 / 无法映射）。
     Skipped,
 }
@@ -113,6 +117,7 @@ pub fn ty_str_of(m: &Mapped) -> String {
         Mapped::Rust(t) => t.clone(),
         Mapped::LenientInt(t) => t.clone(),
         Mapped::Array(inner) => format!("Vec<{}>", ty_str_of(inner)),
+        Mapped::Dict(inner) => format!("BTreeMap<String, {}>", ty_str_of(inner)),
         Mapped::Skipped => "serde_json::Value".to_string(),
     }
 }
@@ -138,7 +143,7 @@ fn map_complex(schema: &Schema, config: &Config, c: &ComplexType) -> Mapped {
             };
             match map(schema, config, v) {
                 Mapped::Skipped => Mapped::Skipped,
-                m => Mapped::Rust(format!("BTreeMap<String, {}>", ty_str_of(&m))),
+                m => Mapped::Dict(Box::new(m)),
             }
         }
         // tuple：values → (A, B, C)

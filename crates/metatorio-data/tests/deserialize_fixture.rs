@@ -42,7 +42,7 @@ fn assembling_machine_has_three_roles() {
     let recipe: RecipeComponent =
         serde_json::from_value(recipe_json.clone()).expect("RecipeComponent 反序列化失败");
     assert!(
-        recipe.ingredients.as_ref().is_some_and(|i| !i.is_empty()),
+        !recipe.ingredients.is_empty(),
         "配方应有原料"
     );
     // 2.0 的组装机配方 JSON 无 energy_required（走默认值），仅断言原料/产物
@@ -135,11 +135,11 @@ fn recipe_categories_and_results_parse() {
     let recipe: RecipeComponent =
         serde_json::from_value(recipe_json.clone()).expect("反序列化失败");
     assert!(
-        recipe.ingredients.as_ref().is_some_and(|i| !i.is_empty()),
+        !recipe.ingredients.is_empty(),
         "铁板配方应有原料"
     );
     assert!(
-        recipe.results.as_ref().is_some_and(|r| !r.is_empty()),
+        !recipe.results.is_empty(),
         "铁板配方应有产物"
     );
     // 2.0 起配方支持多类别（categories 复数）

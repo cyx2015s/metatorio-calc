@@ -1208,7 +1208,7 @@ pub const DEFAULT_FIELD_RULES: &[FieldRule] = &[
     skip!("ItemPrototype", "random_tint_color"),
     skip!("ItemWithLabelPrototype", "default_label_color"),
     skip!("SpaceLocationPrototype", "parked_platforms_orientation"),
-    skip!("PlanePrototype", "map_seed_offset"),
+    skip!("PlanetPrototype", "map_seed_offset"),
     skip!("PumpPrototype", "fluid_wagon_connector_speed"),
     skip!("ReactorPrototype", "default_fuel_glow_color"),
     skip!("SurfacePropertyPrototype", "localised_unit_key"),
