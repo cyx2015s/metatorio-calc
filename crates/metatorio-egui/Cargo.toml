@@ -13,7 +13,7 @@ egui = { version = "0.35", features = ["rayon"] }
 egui-toast = "0.21"
 egui_dnd = "0.16"
 egui_extras = { version = "0.35", features = ["file", "image"] }
-egui_logger = { version = "0.1.0", path = "../egui_logger" }
+egui_logger = { version = "0.1.0", path = "../egui-logger" }
 fontdb = "0.23"
 fust-i18n = { git = "https://github.com/cyx2015s/fust-i18n", branch = "master", features = ["egui"] }
 image = { version = "0.25", default-features = false, features = ["png", "rayon"] }
