@@ -369,6 +369,33 @@ pub enum Product {
     Fluid(FluidProduct),
 }
 
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ItemIngredient {
+    pub name: String,
+    #[serde(deserialize_with = "crate::lenient::de_int")]
+    pub amount: u16,
+    pub quality_min: Option<String>,
+    pub quality_max: Option<String>,
+    #[serde(deserialize_with = "crate::lenient::de_int")]
+    pub quality_change: i8,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct FluidIngredient {
+    pub name: String,
+    pub amount: f64,
+    pub temperature: Option<f64>,
+    pub minimum_temperature: Option<f64>,
+    pub maximum_temperature: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+pub enum Ingredient {
+    Item(ItemIngredient),
+    Fluid(FluidIngredient),
+}
+
 // ── 能量源（EnergySource：tag 枚举，type 字段判别）───────────────
 
 /// 电力能量源数据（`type = "electric"`）。

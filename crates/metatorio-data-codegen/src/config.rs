@@ -1049,6 +1049,10 @@ impl Default for Config {
                 map_type!("FluidEnergySource", "crate::types::FluidEnergySource"),
                 map_type!("VoidEnergySource", "crate::types::VoidEnergySource"),
                 map_type!("HeatEnergySource", "crate::types::HeatEnergySource"),
+                map_type!("BoundingBox", "crate::types::BoundingBox"),
+                map_type!("IngredientPrototype", "crate::types::Ingredient"),
+                map_type!("FluidIngredientPrototype", "crate::types::FluidIngredient"),
+                map_type!("ItemIngredientPrototype", "crate::types::ItemIngredient"),
             ],
         }
     }
@@ -1127,6 +1131,9 @@ pub const DEFAULT_FIELD_RULES: &[FieldRule] = &[
     skip!("AgriculturalTowerPrototype", "planting_procedure_points"),
     skip!("CraftingMachinePrototype", "vector_to_place_result"),
     skip!("MiningDrillPrototype", "resource_searching_offset"),
+    skip!("EntityWithOwnerPrototype", "quality_indicator_shift"),
+    skip!("EntityWithOwnerPrototype", "quality_indicator_scale"),
+    ty!("TechnologyPrototype", "max_level", "crate::types::TechnologyMaxLevel"),
 ];
 
 impl Config {
