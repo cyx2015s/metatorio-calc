@@ -20,7 +20,7 @@ image = { version = "0.25", default-features = false, features = ["png", "rayon"
 indexmap = { version = "2", features = ["rayon", "serde"] }
 log = "0.4"
 mimalloc = "0.1"
-metatorio-solver = { path = "../metatorio_solver" }
+metatorio-solver = { path = "../metatorio-solver" }
 rayon = "1"
 regex = "1"
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls"] }

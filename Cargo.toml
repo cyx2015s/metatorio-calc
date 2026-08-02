@@ -1,12 +1,12 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/metatorio_solver",
-    "crates/metatorio_egui",
-    "crates/egui_logger",
+    "crates/metatorio-solver",
+    "crates/metatorio-egui",
+    "crates/egui-logger",
     "crates/metatorio-data",
     "crates/metatorio-data-codegen",
 ]
 default-members = [
-    "crates/metatorio_egui",
+    "crates/metatorio-egui",
 ]
