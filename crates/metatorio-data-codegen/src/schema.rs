@@ -179,6 +179,13 @@ impl Schema {
         self.types.iter().find(|t| t.base.name == name)
     }
 
+    /// 该名字是否是一个原型类型（prototypes 列表成员，含抽象层）。
+    /// 用于区分"原型继承链层"（生成组件，带 Component 后缀）与
+    /// "types 里的普通 struct"（生成原名，不带后缀）。
+    pub fn is_prototype_type(&self, name: &str) -> bool {
+        self.prototype(name).is_some()
+    }
+
     /// 某原型的继承链（自身在前，根在最后），按名字返回。
     pub fn prototype_chain<'a>(&'a self, prototype: &'a Prototype) -> Vec<&'a Prototype> {
         let mut chain = vec![prototype];

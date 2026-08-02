@@ -92,7 +92,7 @@ fn map_simple(schema: &Schema, config: &Config, name: &str) -> Mapped {
             TypeRef::Complex(c) => {
                 // struct 类型：类型名作为 Rust struct 名（生成器负责生成该类型）
                 if c.complex_type == "struct" {
-                    return Mapped::Rust(component_name(&t.base.name));
+                    return Mapped::Rust(component_name(schema, &t.base.name));
                 }
                 // array 别名（如 ItemPrototypeFlags）：展开为 Array 变体
                 if c.complex_type == "array" {
@@ -275,8 +275,16 @@ fn enqueue_complex(
     }
 }
 
-/// 类型名 → Rust 组件/结构体名（去掉 Prototype 后缀，加 Component 后缀）。
-pub fn component_name(schema_name: &str) -> String {
-    let stem = schema_name.strip_suffix("Prototype").unwrap_or(schema_name);
-    format!("{stem}Component")
+/// 类型名 → Rust 组件/结构体名。
+///
+/// **原型继承链层**（prototypes 列表中的类型，含抽象层）→ 去 Prototype 后缀 + Component
+/// （如 CraftingMachinePrototype → CraftingMachineComponent，是真正的组件，进 COMPONENT_LIST）；
+/// **types 里的普通 struct**（如 Effect、Resistance——只是字段的组成部分）→ 原名，不带后缀。
+pub fn component_name(schema: &Schema, schema_name: &str) -> String {
+    if schema.is_prototype_type(schema_name) {
+        let stem = schema_name.strip_suffix("Prototype").unwrap_or(schema_name);
+        format!("{stem}Component")
+    } else {
+        schema_name.to_string()
+    }
 }

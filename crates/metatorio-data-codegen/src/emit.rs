@@ -136,16 +136,27 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
     //    （如 graphics_set 里的 GraphicsSet 家族、union 的 struct 变体），
     //    这里按字段映射结果（忽略的字段不产生引用）做引用传播。
     let composites = detect_composites(schema, config);
+    // 候选集：全部潜在生成类型名（链层组件 + types struct 的生成名）
+    let mut candidates: HashSet<String> = HashSet::new();
+    for p in &concerned {
+        for layer in schema.prototype_chain(p) {
+            candidates.insert(type_map::component_name(schema, &layer.base.name));
+        }
+    }
+    for name in &struct_types {
+        candidates.insert(type_map::component_name(schema, name));
+    }
     let mut refs: HashSet<String> = HashSet::new();
     for p in &concerned {
         for layer in schema.prototype_chain(p) {
-            refs.insert(type_map::component_name(&layer.base.name));
+            refs.insert(type_map::component_name(schema, &layer.base.name));
             // 链上组件字段引用的嵌套类型也要收集（如 minable → MinableProperties）
             collect_refs(
                 schema,
                 config,
                 &layer.base.name,
                 &layer.properties,
+                &candidates,
                 &mut refs,
             );
         }
@@ -153,7 +164,7 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
     // 组合组件（如 IconComponent）及其字段引用的类型必须存活
     for c in &composites {
         refs.insert(format!("{}Component", c.name));
-        collect_refs(schema, config, &c.name, &c.properties, &mut refs);
+        collect_refs(schema, config, &c.name, &c.properties, &candidates, &mut refs);
     }
     for name in &struct_types {
         let Some(t) = schema.type_def(name) else {
@@ -164,12 +175,13 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
             config,
             name,
             t.properties.as_deref().unwrap_or(&[]),
+            &candidates,
             &mut refs,
         );
     }
     let live_types: Vec<&String> = struct_types
         .iter()
-        .filter(|name| refs.contains(&type_map::component_name(name)))
+        .filter(|name| refs.contains(&type_map::component_name(schema, name)))
         .collect();
     stats.nested_structs = live_types.len();
 
@@ -179,7 +191,7 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
         let Some(t) = schema.type_def(name) else {
             continue;
         };
-        let struct_name = type_map::component_name(name);
+        let struct_name = type_map::component_name(schema, name);
         if !emitted.insert(struct_name.clone()) {
             continue;
         }
@@ -198,7 +210,7 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
     for p in &concerned {
         let chain = schema.prototype_chain(p);
         for layer in chain.iter().rev() {
-            let layer_name = type_map::component_name(&layer.base.name);
+            let layer_name = type_map::component_name(schema, &layer.base.name);
             if emitted.insert(layer_name.clone()) {
                 out.push_str(&emit_struct(
                     schema,
@@ -240,7 +252,7 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
         let mut names: Vec<String> = chain
             .iter()
             .rev()
-            .map(|l| type_map::component_name(&l.base.name))
+            .map(|l| type_map::component_name(schema, &l.base.name))
             .collect();
         // 命中的组合组件追加到末尾（按配置顺序、去重）
         for c in &composites {
@@ -277,11 +289,16 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
 /// 从字段映射结果收集组件引用（死类型修剪的核心）。
 /// 只收集"实际生成"的字段——被忽略的类型不会产生引用；
 /// 字段级 Skip 规则的字段也不产生引用。
+///
+/// `candidates` 是全部潜在生成类型名（链层组件 + types struct），
+/// 字段类型字符串中的词与候选集做交集——不能靠 "Component" 后缀判断
+/// （types 里的普通 struct 生成原名，无后缀）。
 fn collect_refs(
     schema: &Schema,
     config: &Config,
     schema_name: &str,
     props: &[Property],
+    candidates: &HashSet<String>,
     refs: &mut HashSet<String>,
 ) {
     for prop in props {
@@ -293,34 +310,38 @@ fn collect_refs(
             }
         }
         let mapped = type_map::map(schema, config, &prop.type_);
-        collect_refs_from_mapped(&mapped, refs);
+        collect_refs_from_mapped(&mapped, candidates, refs);
     }
 }
 
-/// 从 Mapped 中提取组件名引用（Rust 类型字符串里找 `XxxComponent`）。
-fn collect_refs_from_mapped(mapped: &type_map::Mapped, refs: &mut HashSet<String>) {
+/// 从 Mapped 中提取生成类型引用（与候选集交集）。
+fn collect_refs_from_mapped(
+    mapped: &type_map::Mapped,
+    candidates: &HashSet<String>,
+    refs: &mut HashSet<String>,
+) {
     match mapped {
-        type_map::Mapped::Rust(ty) => extract_component_names(ty, refs),
+        type_map::Mapped::Rust(ty) => extract_type_names(ty, candidates, refs),
         type_map::Mapped::LenientInt(_) => {}
-        type_map::Mapped::Array(inner) => collect_refs_from_mapped(inner, refs),
+        type_map::Mapped::Array(inner) => collect_refs_from_mapped(inner, candidates, refs),
         type_map::Mapped::Skipped => {}
     }
 }
 
-/// 从类型字符串提取 `XxxComponent` 引用（含 Vec<X>/BTreeMap<String, X>/元组）。
-fn extract_component_names(ty: &str, refs: &mut HashSet<String>) {
+/// 从类型字符串提取生成类型名（与候选集交集，含 Vec<X>/BTreeMap<String, X>/元组）。
+fn extract_type_names(ty: &str, candidates: &HashSet<String>, refs: &mut HashSet<String>) {
     let mut current = String::new();
     for ch in ty.chars() {
         if ch.is_ascii_alphanumeric() || ch == '_' {
             current.push(ch);
         } else {
-            if current.ends_with("Component") {
+            if candidates.contains(&current) {
                 refs.insert(current.clone());
             }
             current.clear();
         }
     }
-    if current.ends_with("Component") {
+    if candidates.contains(&current) {
         refs.insert(current);
     }
 }

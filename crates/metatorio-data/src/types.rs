@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 use serde::de::{Deserializer, Error as _};
 use serde_json::Value;
 
-use crate::{FluidBoxComponent, SpentFluidSpecificationComponent};
+use crate::{FluidBox, SpentFluidSpecification};
 
 // ── 能量 ────────────────────────────────────────────────────────────
 
@@ -454,15 +454,15 @@ pub struct HeatEnergySource {
 #[serde(default)]
 pub struct FluidEnergySource {
     pub emissions_per_minute: BTreeMap<String, f64>,
-    pub fluid_box: FluidBoxComponent,
-    pub output_fluid_box: Option<FluidBoxComponent>,
+    pub fluid_box: FluidBox,
+    pub output_fluid_box: Option<FluidBox>,
     #[serde(default = "default_effectivity")]
     pub effectivity: f64,
     pub scale_fluid_usage: Option<bool>,
     pub fluid_usage_per_tick: f64,
     pub maximum_temperature: f64,
     pub burns_fluid: Option<bool>,
-    pub spent_fluid: SpentFluidSpecificationComponent,
+    pub spent_fluid: SpentFluidSpecification,
 }
 
 /// 能量源（schema 的 `EnergySource`：union[type × 5]）。
