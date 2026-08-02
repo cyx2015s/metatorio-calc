@@ -241,7 +241,7 @@ pub const DEFAULT_IGNORED_TYPES: &[&str] = &[
     "FastBeltBendTipTrigger",
     "FastReplaceTipTrigger",
     // "FeatureFlags",
-    "FileName",
+    // "FileName", // 图标路径（组合提取 IconComponent 需要）
     "FlipEntityTipTrigger",
     "FlowStyleSpecification",
     // "FluidAmount",
@@ -293,7 +293,7 @@ pub const DEFAULT_IGNORED_TYPES: &[&str] = &[
     "HorizontalAlign",
     "HorizontalFlowStyleSpecification",
     "HorizontalScrollBarStyleSpecification",
-    "IconData",
+    // "IconData", // 图标项（组合提取 IconComponent 需要）
     "IconDrawSpecification",
     "IconSequencePositioning",
     "ImageStyleSpecification",
@@ -561,7 +561,7 @@ pub const DEFAULT_IGNORED_TYPES: &[&str] = &[
     "SpriteParameters",
     "SpritePriority",
     "SpriteSheet",
-    "SpriteSizeType",
+    // "SpriteSizeType", // 图标尺寸（组合提取 IconComponent 需要）
     "SpriteSource",
     "SpriteUsageHint",
     "SpriteUsageSurfaceHint",
@@ -1014,6 +1014,12 @@ pub struct Config {
     pub custom_type_map: Vec<(String, String)>,
     /// 字段级覆盖规则（优先于类型级映射与忽略集）。
     pub field_rules: Vec<FieldRule>,
+    /// 组合字段组：当多个原型链层同时声明整组字段且类型一致时，
+    /// 提取为独立 Component（如 IconComponent），命中层的对应字段
+    /// 替换为 `#[serde(flatten)]`（保持 dump 平铺解析，语义层可统一访问）。
+    pub composite_field_groups: Vec<(String, Vec<String>)>,
+    /// 提取阈值：同时声明该字段组的层数 ≥ 此值才提取。
+    pub composite_min_layers: usize,
 }
 
 macro_rules! map_type {
@@ -1025,6 +1031,11 @@ macro_rules! map_type {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            composite_field_groups: vec![(
+                "Icon".to_string(),
+                vec!["icon".to_string(), "icon_size".to_string(), "icons".to_string()],
+            )],
+            composite_min_layers: 3,
             concerned_typenames: DEFAULT_CONCERNED_TYPENAMES
                 .iter()
                 .map(|s| s.to_string())

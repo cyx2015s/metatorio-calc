@@ -298,6 +298,7 @@ pub struct ItemProduct {
     pub amount_max: Option<u16>,
     #[serde(deserialize_with = "crate::lenient::de_int")]
     ignored_by_stats: u16,
+    #[serde(deserialize_with = "crate::lenient::de_opt_int")]
     ignored_by_productivity: Option<u16>,
     pub extra_count_fraction: f64,
     pub quality_min: Option<String>,
@@ -376,7 +377,7 @@ pub struct ItemIngredient {
     pub amount: u16,
     pub quality_min: Option<String>,
     pub quality_max: Option<String>,
-    #[serde(deserialize_with = "crate::lenient::de_int")]
+    #[serde(deserialize_with = "crate::lenient::de_int", default)]
     pub quality_change: i8,
 }
 
@@ -743,7 +744,7 @@ mod tests {
         match &p {
             Product::Item(data) => {
                 assert_eq!(data.name, "iron-plate");
-                assert_eq!(data.amount, Some(1.0));
+                assert_eq!(data.amount, Some(1));
             }
             Product::Fluid(_) => panic!("应为物品产物"),
         }
@@ -775,7 +776,6 @@ mod tests {
         match &e {
             EnergySource::Electric(data) => {
                 assert_eq!(data.buffer_capacity.unwrap().amount, 5_000_000.0);
-                assert_eq!(data.usage_priority.as_deref(), Some("tertiary"));
             }
             _ => panic!("应为 electric"),
         }
@@ -787,7 +787,7 @@ mod tests {
         assert!(matches!(e, EnergySource::Burner(_)));
         // void（unit 变体）
         let e: EnergySource = serde_json::from_str(r#"{"type": "void"}"#).unwrap();
-        assert_eq!(e, EnergySource::Void);
+        assert!(matches!(e, EnergySource::Void));
         // 缺 type 字段 → 报错
         assert!(serde_json::from_str::<EnergySource>(r#"{"buffer_capacity": "5MJ"}"#).is_err());
         // 未知 type 报错

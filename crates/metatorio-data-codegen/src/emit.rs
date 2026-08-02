@@ -29,6 +29,68 @@ pub struct GenStats {
     pub lenient_vec_fields: usize,
 }
 
+/// 组合字段组：多个原型链层重复声明的整组字段，提取为独立 Component。
+#[derive(Debug, Clone)]
+pub struct Composite {
+    /// 组件名（如 "Icon" → IconComponent）。
+    pub name: String,
+    /// 组内字段名。
+    pub fields: Vec<String>,
+    /// 命中层（schema 类型名）：这些层用 `#[serde(flatten)]` 引用该组件。
+    pub layers: HashSet<String>,
+    /// 组内字段的 Property（取自第一个命中层，类型已跨层一致性校验）。
+    pub properties: Vec<Property>,
+}
+
+/// 检测组合字段组：遍历所有原型（含抽象层）的**自身**属性，
+/// 找出同时声明整组字段且映射类型一致的层；层数 ≥ 阈值则提取。
+fn detect_composites(schema: &Schema, config: &Config) -> Vec<Composite> {
+    let mut out = Vec::new();
+    for (name, fields) in &config.composite_field_groups {
+        let mut candidates: Vec<(&Prototype, Vec<Mapped>, Vec<Property>)> = Vec::new();
+        for p in &schema.prototypes {
+            let all_present = fields.iter().all(|f| {
+                p.properties
+                    .iter()
+                    .any(|pr| &pr.base.name == f && config.field_rule(&p.base.name, f).is_none())
+            });
+            if all_present {
+                let props: Vec<Property> = fields
+                    .iter()
+                    .map(|f| {
+                        p.properties
+                            .iter()
+                            .find(|pr| &pr.base.name == f)
+                            .cloned()
+                            .expect("字段存在性已校验")
+                    })
+                    .collect();
+                let mappings: Vec<Mapped> = props
+                    .iter()
+                    .map(|pr| type_map::map(schema, config, &pr.type_))
+                    .collect();
+                candidates.push((p, mappings, props));
+            }
+        }
+        // 类型一致性：映射结果跨层必须一致（Mapped 的 Debug 作为键）
+        let first_key = candidates.first().map(|(_, m, _)| format!("{m:?}"));
+        let consistent: Vec<_> = candidates
+            .into_iter()
+            .filter(|(_, m, _)| Some(format!("{m:?}")) == first_key)
+            .collect();
+        if consistent.len() >= config.composite_min_layers {
+            let (_, _, props) = &consistent[0];
+            out.push(Composite {
+                name: name.clone(),
+                fields: fields.clone(),
+                layers: consistent.iter().map(|(p, _, _)| p.base.name.clone()).collect(),
+                properties: props.clone(),
+            });
+        }
+    }
+    out
+}
+
 /// 生成器入口：返回生成的 Rust 代码文本与统计。
 pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
     let mut stats = GenStats::default();
@@ -70,6 +132,7 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
     //    收集阶段（collect_struct_types）会包含被忽略字段引用的类型
     //    （如 graphics_set 里的 GraphicsSet 家族、union 的 struct 变体），
     //    这里按字段映射结果（忽略的字段不产生引用）做引用传播。
+    let composites = detect_composites(schema, config);
     let mut refs: HashSet<String> = HashSet::new();
     for p in &concerned {
         for layer in schema.prototype_chain(p) {
@@ -83,6 +146,11 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
                 &mut refs,
             );
         }
+    }
+    // 组合组件（如 IconComponent）及其字段引用的类型必须存活
+    for c in &composites {
+        refs.insert(format!("{}Component", c.name));
+        collect_refs(schema, config, &c.name, &c.properties, &mut refs);
     }
     for name in &struct_types {
         let Some(t) = schema.type_def(name) else {
@@ -118,6 +186,7 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
             name,
             &struct_name,
             t.properties.as_deref().unwrap_or(&[]),
+            &composites,
             &mut stats,
         ));
     }
@@ -134,9 +203,25 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
                     &layer.base.name,
                     &layer_name,
                     &layer.properties,
+                    &composites,
                     &mut stats,
                 ));
             }
+        }
+    }
+    // 6. 生成组合组件（如 IconComponent：由 detect_composites 检测出的重复字段组）
+    for c in &composites {
+        let comp_name = format!("{}Component", c.name);
+        if emitted.insert(comp_name.clone()) {
+            out.push_str(&emit_struct(
+                schema,
+                config,
+                &c.name,
+                &comp_name,
+                &c.properties,
+                &composites,
+                &mut stats,
+            ));
         }
     }
     stats.component_structs = emitted.len();
@@ -258,12 +343,23 @@ fn emit_struct(
     schema_name: &str,
     struct_name: &str,
     props: &[Property],
+    composites: &[Composite],
     stats: &mut GenStats,
 ) -> String {
     let mut fields = String::new();
     let mut helpers = String::new();
 
+    // 组合字段组命中：组内字段被替换为 flatten 引用
+    let composite = composites.iter().find(|c| c.layers.contains(schema_name));
+
     for prop in props {
+        // 组合字段组的组内字段：不单独生成（由 flatten 的 Component 承载）
+        if let Some(c) = &composite
+            && c.fields.contains(&prop.base.name)
+        {
+            stats.skipped_fields += 1;
+            continue;
+        }
         // 文档注释（描述第一行 + schema 默认说明）
         let mut doc = String::new();
         let desc_first = prop.base.description.lines().next().unwrap_or("").trim();
@@ -388,6 +484,15 @@ fn emit_struct(
                 stats.fields += 1;
             }
         }
+    }
+
+    // 组合字段组：命中层以 flatten 引用组合 Component（保持 dump 平铺解析）
+    if let Some(c) = &composite {
+        let field_name = c.name.to_lowercase();
+        fields.push_str(&format!(
+            "    #[serde(flatten)]\n    pub {field_name}: {}Component,\n",
+            c.name
+        ));
     }
 
     let mut out = String::new();
