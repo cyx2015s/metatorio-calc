@@ -18,6 +18,9 @@ pub mod types;
 /// Phase 3：原型仓库（按 (group, name) 索引的组件化原型记录）。
 pub mod store;
 
+/// Phase 4：扩展方法，默认值 getter、辅助
+pub mod ext;
+
 /// 生成代码的模块容器（避免与手写代码命名冲突）。
 #[allow(clippy::all, dead_code, non_snake_case)]
 pub mod generated_components {

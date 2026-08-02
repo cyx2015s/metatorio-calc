@@ -186,6 +186,15 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
             &mut refs,
         );
     }
+    // 自定义类型覆盖：从候选集剔除（crate::types::X 由手写代码提供，不生成）。
+    // 否则 extract_type_names 会从 "crate::types::BurnerEnergySource" 路径中
+    // 词法提取出 BurnerEnergySource（∈ candidates）→ 误判为 live → 生成死类型。
+    for (_, custom) in &config.custom_type_map {
+        if let Some(tail) = custom.rsplit("::").next() {
+            refs.remove(tail);
+            candidates.remove(tail);
+        }
+    }
     let live_types: Vec<&String> = struct_types
         .iter()
         .filter(|name| refs.contains(&type_map::component_name(schema, name)))
