@@ -1189,6 +1189,12 @@ pub const DEFAULT_FIELD_RULES: &[FieldRule] = &[
         "crate::types::TechnologyMaxLevel"
     ),
     ty!("IconData", "shift", "crate::types::Vector"),
+    skip!("FluidBox", "enable_working_visualisations"),
+    skip!("FluidBox", "draw_only_when_connected"),
+    skip!("FluidBox", "max_pipeline_extent"),
+    skip!("FluidBox", "secondary_draw_order"),
+    skip!("FluidBox", "volume_reservation_fraction"),
+    skip!("FluidBox", "volume"),
 ];
 
 impl Config {

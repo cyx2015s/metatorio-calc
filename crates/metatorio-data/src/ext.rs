@@ -44,9 +44,6 @@ const MINING_EFFECTS: EffectTypeLimitation = EffectTypeLimitation { allowed: [tr
 /// 默认(schema): `{"crafting"}`（String 元素不可 const，惰性初始化）
 static CRAFTING_CATEGORIES: LazyLock<Vec<String>> = LazyLock::new(|| vec!["crafting".to_string()]);
 
-/// 默认(schema): {{1, 1, 1}}
-const ARM_COLOR_GRADIENT: [Color; 1] = [WHITE];
-
 // ── EffectReceiver ────────────────────────────────────────────────
 
 pub struct EffectValueRange {
