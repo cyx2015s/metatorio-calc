@@ -542,9 +542,42 @@ pub enum EffectType {
 /// schema 形态（手写建模示范——自动化无法推断语义）：
 /// `union[ union[literal × 5] | array[union[literal × 5]] ]`，
 /// 即"单一效果类型"或"效果类型列表"。dump 中还可能出现空表（`{}`/`[]`）。
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// speed, productivity, consumption, pollution, quality 对应 allowed[0..4]。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct EffectTypeLimitation {
-    pub allowed: Vec<EffectType>,
+    pub(crate) allowed: [bool; 5],
+}
+
+impl std::ops::Deref for EffectTypeLimitation {
+    type Target = [bool; 5];
+    fn deref(&self) -> &Self::Target {
+        &self.allowed
+    }
+}
+
+impl std::ops::Index<EffectType> for EffectTypeLimitation {
+    type Output = bool;
+    fn index(&self, index: EffectType) -> &Self::Output {
+        match index {
+            EffectType::Speed => &self.allowed[0],
+            EffectType::Productivity => &self.allowed[1],
+            EffectType::Consumption => &self.allowed[2],
+            EffectType::Pollution => &self.allowed[3],
+            EffectType::Quality => &self.allowed[4],
+        }
+    }
+}
+
+impl std::ops::IndexMut<EffectType> for EffectTypeLimitation {
+    fn index_mut(&mut self, index: EffectType) -> &mut Self::Output {
+        match index {
+            EffectType::Speed => &mut self.allowed[0],
+            EffectType::Productivity => &mut self.allowed[1],
+            EffectType::Consumption => &mut self.allowed[2],
+            EffectType::Pollution => &mut self.allowed[3],
+            EffectType::Quality => &mut self.allowed[4],
+        }
+    }
 }
 
 impl<'de> serde::Deserialize<'de> for EffectTypeLimitation {
@@ -553,19 +586,19 @@ impl<'de> serde::Deserialize<'de> for EffectTypeLimitation {
         D: Deserializer<'de>,
     {
         let value: Value = serde::Deserialize::deserialize(deserializer)?;
-        let mut allowed = Vec::new();
+        let mut allowed_effects = Vec::new();
         match value {
             Value::String(s) => {
                 let t = serde_json::from_value::<EffectType>(Value::String(s))
                     .map_err(|_| D::Error::custom("未知效果类型"))?;
-                allowed.push(t);
+                allowed_effects.push(t);
             }
             Value::Array(items) => {
                 for item in items {
                     if let Value::String(s) = item {
                         // 未知效果类型：容错跳过（mod 数据不规范）
                         if let Ok(t) = serde_json::from_value::<EffectType>(Value::String(s)) {
-                            allowed.push(t);
+                            allowed_effects.push(t);
                         }
                     }
                 }
@@ -574,6 +607,13 @@ impl<'de> serde::Deserialize<'de> for EffectTypeLimitation {
             Value::Object(_) | Value::Null => {}
             _ => return Err(D::Error::custom("EffectTypeLimitation 形态不合法")),
         }
+        let allowed = [
+            allowed_effects.contains(&EffectType::Speed),
+            allowed_effects.contains(&EffectType::Productivity),
+            allowed_effects.contains(&EffectType::Consumption),
+            allowed_effects.contains(&EffectType::Pollution),
+            allowed_effects.contains(&EffectType::Quality),
+        ];
         Ok(EffectTypeLimitation { allowed })
     }
 }
@@ -582,12 +622,38 @@ impl serde::Serialize for EffectTypeLimitation {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeSeq;
         let mut seq = s.serialize_seq(Some(self.allowed.len()))?;
-        for t in &self.allowed {
-            seq.serialize_element(t)?;
+        for effect_type in [
+            EffectType::Speed,
+            EffectType::Productivity,
+            EffectType::Consumption,
+            EffectType::Pollution,
+            EffectType::Quality,
+        ] {
+            if self[effect_type] {
+                seq.serialize_element(&effect_type)?;
+            }
         }
         seq.end()
     }
 }
+
+#[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct EffectValueRangeOpt {
+    pub high: Option<f64>,
+    pub low: Option<f64>,
+}
+
+#[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct Effect {
+    pub speed: EffectValueRangeOpt,
+    pub productivity: EffectValueRangeOpt,
+    pub consumption: EffectValueRangeOpt,
+    pub pollution: EffectValueRangeOpt,
+    pub quality: EffectValueRangeOpt,
+}
+
 
 // ── Serialize（生成的组件 derive Serialize，这里按 JSON 兼容格式输出）──
 
@@ -853,20 +919,16 @@ mod tests {
             serde_json::from_str(r#"["speed", "consumption", "pollution"]"#).unwrap();
         assert_eq!(
             e.allowed,
-            vec![
-                EffectType::Speed,
-                EffectType::Consumption,
-                EffectType::Pollution
-            ]
+            [true, false, true, true, false]
         );
         // 单值形态（union 的第一分支）
         let e: EffectTypeLimitation = serde_json::from_str(r#""quality""#).unwrap();
-        assert_eq!(e.allowed, vec![EffectType::Quality]);
+        assert_eq!(e.allowed, [false, false, false, false, true]);
         // 空表 → 空集
         let e: EffectTypeLimitation = serde_json::from_str(r#"{}"#).unwrap();
-        assert!(e.allowed.is_empty());
+        assert!(e.allowed == [false; 5]);
         let e: EffectTypeLimitation = serde_json::from_str(r#"[]"#).unwrap();
-        assert!(e.allowed.is_empty());
+        assert!(e.allowed == [false; 5]);
         // 未知类型报错（引擎固定 5 种，mod 自定义应暴露）
         assert!(serde_json::from_str::<EffectTypeLimitation>(r#""unknown""#).is_err());
     }

@@ -3087,6 +3087,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "metatorio-core"
+version = "0.1.0"
+
+[[package]]
 name = "metatorio-data"
 version = "0.1.0"
 dependencies = [
