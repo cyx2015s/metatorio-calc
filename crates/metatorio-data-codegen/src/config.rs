@@ -1199,7 +1199,10 @@ pub const DEFAULT_FIELD_RULES: &[FieldRule] = &[
     skip!("AsteroidChunkPrototype", "hide_from_signal_gui"),
     skip!("AsteroidCollectorPrototype", "arm_color_gradient"),
     skip!("AsteroidCollectorPrototype", "arm_angular_speed_cap_base"),
-    skip!("AsteroidCollectorPrototype", "arm_angular_speed_cap_quality_scaling"),
+    skip!(
+        "AsteroidCollectorPrototype",
+        "arm_angular_speed_cap_quality_scaling"
+    ),
     skip!("FluidPrototype", "gas_temperature"),
     skip!("ItemGroup", "order_in_recipe"),
     skip!("ItemPrototype", "random_tint_color"),
@@ -1212,7 +1215,6 @@ pub const DEFAULT_FIELD_RULES: &[FieldRule] = &[
     skip!("TilePrototype", "effect_color"),
     skip!("TilePrototype", "effect_is_opaque"),
     skip!("TilePrototype", "tint"),
-
 ];
 
 impl Config {

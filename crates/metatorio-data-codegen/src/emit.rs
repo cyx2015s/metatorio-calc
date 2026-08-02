@@ -112,9 +112,10 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
     let mut concerned: Vec<&Prototype> = Vec::new();
     for tn in &config.concerned_typenames {
         if let Some(p) = schema.prototype_by_typename(tn)
-            && !concerned.iter().any(|x| x.base.name == p.base.name) {
-                concerned.push(p);
-            }
+            && !concerned.iter().any(|x| x.base.name == p.base.name)
+        {
+            concerned.push(p);
+        }
     }
     stats.concerned_typenames = concerned.len();
 

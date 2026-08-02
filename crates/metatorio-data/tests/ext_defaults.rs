@@ -78,7 +78,6 @@ fn base_hidden_default() {
     assert_eq!(b.hidden_in_factoriopedia(), true);
 }
 
-
 #[test]
 fn effect_receiver_limits() {
     let r = EffectReceiver::default();

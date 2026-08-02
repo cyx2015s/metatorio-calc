@@ -566,11 +566,10 @@ impl FactorioMechanic for ItemFuelMechanic {
                     self.suggested_item = None;
                 }
             }
-            DualVar::Item(item)
-                if _amount < 0.0 => {
-                    self.suggested_item = Some(item.0.clone());
-                    self.suggested_category = None;
-                }
+            DualVar::Item(item) if _amount < 0.0 => {
+                self.suggested_item = Some(item.0.clone());
+                self.suggested_category = None;
+            }
             _ => {}
         }
     }

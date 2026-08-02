@@ -241,9 +241,9 @@ impl MiningDrillComponent {
     }
 }
 
-
 // ── FluidComponent ────────────────────────────────────────────────
-impl FluidComponent {    /// 默认(schema): value of `default_temperature`
+impl FluidComponent {
+    /// 默认(schema): value of `default_temperature`
     pub fn max_temperature(&self) -> f64 {
         self.max_temperature.unwrap_or(self.default_temperature)
     }
@@ -257,7 +257,6 @@ impl TransportBeltConnectableComponent {
         self.collision_box.unwrap_or(EMPTY_BOUNDING_BOX)
     }
 }
-
 
 // ── QualityComponent ──────────────────────────────────────────────
 // 公式见 schema 注释；`level` 默认 0，`next_probability`/`previous_probability`
@@ -466,7 +465,6 @@ impl QualityComponent {
             .unwrap_or(1.0 + self.level as f64)
     }
 }
-
 
 // ── Recipe ────────────────────────────────────────────────────────
 

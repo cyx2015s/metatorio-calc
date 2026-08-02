@@ -759,7 +759,8 @@ impl<'de> serde::Deserialize<'de> for IDFilter {
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
                 let comparator = map
-                    .get("comparator").cloned()
+                    .get("comparator")
+                    .cloned()
                     .map(serde_json::from_value)
                     .transpose()
                     .map_err(|_| D::Error::custom("Comparator 反序列化失败"))?;
