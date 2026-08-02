@@ -53,6 +53,7 @@ impl PrototypeRecord {
     }
 
     /// 类型安全地取组件，缺失时 panic（带记录名与组件名）。
+    #[track_caller]
     pub fn component_required<T: Component>(&self) -> &T {
         match self.components.get(T::TYPENAME) {
             Some(cv) => T::as_ref(cv),

@@ -320,6 +320,7 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
     out.push_str("    /// 组件名（COMPONENT_LIST 条目，也是 components map 的键）。\n");
     out.push_str("    const TYPENAME: &'static str;\n");
     out.push_str("    /// 从 ComponentValue 按引用提取（类型不匹配时 panic——插入时已保证正确）。\n");
+    out.push_str("    #[track_caller]\n");
     out.push_str("    fn as_ref(cv: &ComponentValue) -> &Self;\n");
     out.push_str("    /// 从 ComponentValue 按引用提取（Option 版本）。\n");
     out.push_str("    fn as_ref_opt(cv: &ComponentValue) -> Option<&Self>;\n");
