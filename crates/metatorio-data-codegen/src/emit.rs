@@ -335,16 +335,29 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
     out.push_str("pub mod prototype_groups {\n");
     out.push_str("/// 聚合组（LuaPrototypes 的 entity/item 聚合语义）。\n");
     out.push_str("/// 关注类型各有独立变体；未知类型 → Unknown(原始 typename)。\n");
-    out.push_str("#[derive(Debug, Clone, PartialEq, Eq, Hash)]\npub enum PrototypeGroup {\n");
+    out.push_str("#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]\npub enum PrototypeGroup {\n");
     out.push_str("    /// 含 EntityComponent 的原型。\n    Entity,\n");
     out.push_str("    /// 含 ItemComponent 的原型。\n    Item,\n");
     let mut group_variants: Vec<(&str, String)> = Vec::new(); // (typename, variant)
     for p in &concerned {
         let Some(tn) = &p.typename else { continue };
         let variant = typename_to_variant(tn);
-        // 跳过聚合变体名（Entity/Item 已由组件推导，避免与枚举变体冲突）
-        if variant == "Entity" || variant == "Item" {
-            continue;
+        // 跳过聚合组及子类：Entity/Item 由组件推导；其子类（继承链含
+        // EntityPrototype/ItemPrototype）实际归入 Entity/Item 组，不生成变体。
+        if let Some(proto) = schema.prototype_by_typename(tn) {
+            let chain_has = |name: &str| {
+                schema
+                    .prototype_chain(proto)
+                    .iter()
+                    .any(|l| l.base.name == name)
+            };
+            if variant == "Entity"
+                || variant == "Item"
+                || chain_has("EntityPrototype")
+                || chain_has("ItemPrototype")
+            {
+                continue;
+            }
         }
         if !group_variants.iter().any(|(t, _)| t == tn) {
             group_variants.push((tn, variant));
@@ -353,7 +366,7 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
     for (_, variant) in &group_variants {
         out.push_str(&format!("    {variant},\n"));
     }
-    out.push_str("    /// 未知类型（关注清单外或 mod 新增）。\n    Unknown(String),\n}\n\n");
+    out.push_str("}\n\n");
     out.push_str("/// typename（dump 键名）→ PrototypeGroup（未知类型 → Unknown）。\n");
     out.push_str("pub fn prototype_group_from_type(typename: &str) -> PrototypeGroup {\n    match typename {\n");
     // 聚合键：entity/item 顶层键直接归入聚合变体（与 derive_group 的组件判断一致）
@@ -361,7 +374,7 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
     for (tn, variant) in &group_variants {
         out.push_str(&format!("        {tn:?} => PrototypeGroup::{variant},\n"));
     }
-    out.push_str("        _ => PrototypeGroup::Unknown(typename.to_string()),\n    }\n}\n");
+    out.push_str("        // 不可达：store 只加载关注类型（COMPONENT_LIST 键）\n        _ => panic!(\"prototype_group_from_type: 未知 typename {typename:?}\"),\n    }\n}\n");
     out.push_str("} // mod prototype_groups\n\n");
 
     // 6. 自定义类型使用清单

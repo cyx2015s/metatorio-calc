@@ -180,20 +180,19 @@ impl PrototypeStore {
         self.records.get(&(PrototypeGroup::Item, name.to_string()))
     }
 
-    /// 按 (type_, name) 查非聚合组记录（关注类型 → 强类型变体，未知 → Unknown）。
-    pub fn other(&self, type_: &str, name: &str) -> Option<&PrototypeRecord> {
-        let group = prototype_group_from_type(type_);
+    /// 按 (组变体, name) 查记录（统一入口：`get(&PrototypeGroup::Recipe, "iron-plate")`）。
+    pub fn get(&self, group: PrototypeGroup, name: &str) -> Option<&PrototypeRecord> {
         self.records.get(&(group, name.to_string()))
     }
 
     /// 遍历某组的所有记录。
     pub fn group<'a>(
         &'a self,
-        group: &'a PrototypeGroup,
+        group: PrototypeGroup,
     ) -> impl Iterator<Item = &'a PrototypeRecord> {
         self.records
             .iter()
-            .filter(move |((g, _), _)| g == group)
+            .filter(move |((g, _), _)| *g == group)
             .map(|(_, r)| r)
     }
 
@@ -255,11 +254,7 @@ mod tests {
             derive_group("recipe", &comp("RecipeComponent")),
             PrototypeGroup::Recipe
         );
-        // 关注清单外 → Unknown 兜底
-        assert_eq!(
-            derive_group("custom-mod-type", &comp("RecipeComponent")),
-            PrototypeGroup::Unknown("custom-mod-type".to_string())
-        );
+
         // 同时含 Entity 与 Item（物品实体）→ Entity 优先（LuaPrototypes 语义）
         let mut m = comp("EntityComponent");
         m.insert(

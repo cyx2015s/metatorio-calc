@@ -56,13 +56,13 @@ fn speed_module_is_three_records() {
     // "speed-module" 是三个不同原型：recipe / module / technology
     // （module 是 ItemPrototype 子类 → 聚合到 Item 组，LuaPrototypes 语义）
     let recipe = store
-        .other("recipe", "speed-module")
+        .get(PrototypeGroup::Recipe, "speed-module")
         .expect("recipe 组记录");
     let module = store
         .item("speed-module")
         .expect("module 键原型聚合到 Item 组");
     let technology = store
-        .other("technology", "speed-module")
+        .get(PrototypeGroup::Technology, "speed-module")
         .expect("technology 组记录");
     assert!(recipe.has("RecipeComponent"));
     assert!(
@@ -81,10 +81,10 @@ fn group_iteration_and_length() {
     let store = PrototypeStore::load(&load_fixture()).expect("fixture 加载失败");
     assert!(!store.is_empty());
 
-    let entity_count = store.group(&PrototypeGroup::Entity).count();
-    let item_count = store.group(&PrototypeGroup::Item).count();
+    let entity_count = store.group(PrototypeGroup::Entity).count();
+    let item_count = store.group(PrototypeGroup::Item).count();
     let other_count = store
-        .group(&PrototypeGroup::Recipe)
+        .group(PrototypeGroup::Recipe)
         .count();
     assert!(entity_count > 0, "应有实体记录");
     assert!(item_count > 0, "应有物品记录");
