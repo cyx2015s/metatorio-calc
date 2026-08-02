@@ -747,7 +747,6 @@ pub enum TechnologyTrigger {
     Other,
 }
 
-
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum Modifier {
@@ -774,7 +773,6 @@ pub struct SimpleModifier {
     pub modifier: f64,
 }
 
-
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BoolModifer {
     pub modifier: bool,
@@ -800,8 +798,6 @@ pub struct UnlockRecipeModifier {
 pub struct UnlockSpaceLocationModifier {
     pub space_location: String,
 }
-
-
 
 #[cfg(test)]
 mod tests {

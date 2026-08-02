@@ -15,6 +15,9 @@ pub mod lenient;
 /// 预定义类型：schema 中需要自定义反序列化的类型（codegen 的 custom_type_map 引用）。
 pub mod types;
 
+/// Phase 3：原型仓库（按 (group, name) 索引的组件化原型记录）。
+pub mod store;
+
 /// 生成代码的模块容器（避免与手写代码命名冲突）。
 #[allow(clippy::all, dead_code, non_snake_case)]
 pub mod generated_components {

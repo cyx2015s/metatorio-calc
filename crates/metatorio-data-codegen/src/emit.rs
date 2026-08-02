@@ -164,7 +164,14 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
     // 组合组件（如 IconComponent）及其字段引用的类型必须存活
     for c in &composites {
         refs.insert(format!("{}Component", c.name));
-        collect_refs(schema, config, &c.name, &c.properties, &candidates, &mut refs);
+        collect_refs(
+            schema,
+            config,
+            &c.name,
+            &c.properties,
+            &candidates,
+            &mut refs,
+        );
     }
     for name in &struct_types {
         let Some(t) = schema.type_def(name) else {
@@ -273,6 +280,39 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
         ));
     }
     out.push_str("];\n");
+
+    // 5.5 生成 ComponentValue 枚举 + deserialize_component 分发（Phase 3）
+    let mut all_components: Vec<String> = Vec::new();
+    for p in &concerned {
+        for layer in schema.prototype_chain(p) {
+            let n = type_map::component_name(schema, &layer.base.name);
+            if !all_components.contains(&n) {
+                all_components.push(n);
+            }
+        }
+    }
+    for c in &composites {
+        let n = format!("{}Component", c.name);
+        if !all_components.contains(&n) {
+            all_components.push(n);
+        }
+    }
+    out.push_str("/// 全部组件变体（原型继承链层 + 组合组件）。\n");
+    out.push_str("#[derive(Debug, Clone)]\npub enum ComponentValue {\n");
+    for n in &all_components {
+        out.push_str(&format!("    {n}({n}),\n"));
+    }
+    out.push_str("}\n\n");
+    out.push_str("/// 按组件名反序列化（Phase 3 分发表）。\n");
+    out.push_str(
+        "pub fn deserialize_component(\n    name: &str,\n    value: &serde_json::Value,\n) -> Result<ComponentValue, serde_json::Error> {\n    match name {\n",
+    );
+    for n in &all_components {
+        out.push_str(&format!(
+            "        {n:?} => serde_json::from_value(value.clone()).map(ComponentValue::{n}),\n"
+        ));
+    }
+    out.push_str("        _ => Err(serde::de::Error::custom(format!(\"未知组件名: {name}\"))),\n    }\n}\n\n");
 
     // 6. 自定义类型使用清单
     let mut custom_used: BTreeMap<String, ()> = BTreeMap::new();
