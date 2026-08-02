@@ -118,10 +118,6 @@ impl SurfaceCondition {
 // ── IconData ──────────────────────────────────────────────────────
 
 impl IconData {
-    // NOT_NEEDED(defaults): 默认(schema): `true` for the first layer, `false` otherwise
-    // 依赖图标层序号（IconComponent.icons 中的位置），组件外数据。
-    // pub fn draw_background(&self) -> Option<bool> { ... }
-
     /// 默认(schema): `{0, 0}`
     pub fn shift(&self) -> Vector {
         self.shift.unwrap_or(Vector(0.0, 0.0))
@@ -131,14 +127,6 @@ impl IconData {
     pub fn tint(&self) -> Color {
         self.tint.unwrap_or(WHITE)
     }
-}
-
-// ── FluidBox ──────────────────────────────────────────────────────
-
-impl FluidBox {
-    // NOT_NEEDED(defaults): 默认(schema): Value of `UtilityConstants::default_pipeline_extent`
-    // 游戏内部常量（组件外数据）。
-    // pub fn max_pipeline_extent(&self) -> Option<u32> { ... }
 }
 
 // ── PrototypeBaseComponent ────────────────────────────────────────
@@ -253,52 +241,12 @@ impl MiningDrillComponent {
     }
 }
 
-// ── AsteroidChunk / AsteroidCollector ─────────────────────────────
-impl AsteroidChunkComponent {
-    // NOT_NEEDED(default): 默认(schema): unset
-    // pub fn hide_from_signal_gui(&self) -> Option<bool> {
-    //     self.hide_from_signal_gui
-    // }
-}
-
-impl AsteroidCollectorComponent {
-    // NOT_NEEDED(default): 默认(schema): {{1, 1, 1}}
-    // pub fn arm_color_gradient(&self) -> &[Color] {
-    //     self.arm_color_gradient.as_deref().unwrap_or(&ARM_COLOR_GRADIENT)
-    // }
-}
 
 // ── FluidComponent ────────────────────────────────────────────────
-impl FluidComponent {
-    // NOT_NEEDED(default): 默认(schema): max value of float
-    // pub fn gas_temperature(&self) -> f64 {
-    //     self.gas_temperature.unwrap_or(f32::MAX as f64)
-    // }
-
-    /// 默认(schema): value of `default_temperature`
+impl FluidComponent {    /// 默认(schema): value of `default_temperature`
     pub fn max_temperature(&self) -> f64 {
         self.max_temperature.unwrap_or(self.default_temperature)
     }
-}
-
-// ── ItemGroup / Item / ItemWithLabel ──────────────────────────────
-
-impl ItemGroupComponent {
-    // NOT_NEEDED(defaults): 默认(schema): The `order` of this item group.
-    // 依赖 PrototypeBaseComponent.order（本组件无 order 字段）。
-    // pub fn order_in_recipe(&self) -> Option<String> { ... }
-}
-
-impl ItemComponent {
-    // NOT_NEEDED(defaults): 默认(schema): Value of UtilityConstants::item_default_random_tint_strength
-    // 游戏内部常量（组件外数据）。
-    // pub fn random_tint_color(&self) -> Option<Color> { ... }
-}
-
-impl ItemWithLabelComponent {
-    // NOT_NEEDED(defaults): 默认(schema): Default item text color
-    // 游戏内部常量（组件外数据）。
-    // pub fn default_label_color(&self) -> Option<Color> { ... }
 }
 
 // ── TransportBeltConnectable ──────────────────────────────────────
@@ -310,29 +258,6 @@ impl TransportBeltConnectableComponent {
     }
 }
 
-// ── SpaceLocation / Planet ────────────────────────────────────────
-
-impl SpaceLocationComponent {
-    // NOT_NEEDED(default): 默认(schema): same as orientation
-    // pub fn parked_platforms_orientation(&self) -> Option<f64> {
-    //     self.parked_platforms_orientation.or(Some(self.orientation))
-    // }
-}
-
-impl PlanetComponent {
-    // NOT_NEEDED(defaults): 默认(schema): CRC checksum of `name`
-    // 依赖 PrototypeBaseComponent.name（本组件无 name 字段）。
-    // pub fn map_seed_offset(&self) -> Option<u32> { ... }
-}
-
-// ── Pump ──────────────────────────────────────────────────────────
-
-impl PumpComponent {
-    // NOT_NEEDED(default) 默认(schema): 1 / 64.0
-    // pub fn fluid_wagon_connector_speed(&self) -> Option<f64> {
-    //     self.fluid_wagon_connector_speed.or(Some(1.0 / 64.0))
-    // }
-}
 
 // ── QualityComponent ──────────────────────────────────────────────
 // 公式见 schema 注释；`level` 默认 0，`next_probability`/`previous_probability`
@@ -542,15 +467,6 @@ impl QualityComponent {
     }
 }
 
-// ── Reactor ───────────────────────────────────────────────────────
-
-impl ReactorComponent {
-    // NOT_NEEDED(default) 默认(schema): `{1, 1, 1, 1} (white)`
-    //
-    // pub fn default_fuel_glow_color(&self) -> Color {
-    //     self.default_fuel_glow_color.unwrap_or(WHITE)
-    // }
-}
 
 // ── Recipe ────────────────────────────────────────────────────────
 
@@ -582,32 +498,4 @@ impl RocketSiloComponent {
         self.rocket_parts_storage_cap
             .unwrap_or(self.rocket_parts_required)
     }
-}
-
-// ── SurfaceProperty ───────────────────────────────────────────────
-
-impl SurfacePropertyComponent {
-    // NOT_NEEDED(defaults): 默认(schema): surface-property-unit.[prototype name]
-    // 依赖 PrototypeBaseComponent.name（本组件无 name 字段）。
-    // pub fn localised_unit_key(&self) -> Option<String> { ... }
-}
-
-// ── Tile ──────────────────────────────────────────────────────────
-
-impl TileComponent {
-    // NOT_NEEDED(default) 默认(schema): `{r=1, g=1, b=1, a=1} (white)`
-    // pub fn effect_color(&self) -> Option<Color> {
-    //     self.effect_color.or(Some(WHITE))
-    // }
-
-    // NOT_NEEDED(default) 默认(schema): true if `effect_color` alpha equals 1
-    // pub fn effect_is_opaque(&self) -> Option<bool> {
-    //     self.effect_is_opaque
-    //         .or_else(|| Some(self.effect_color.map_or(true, |c| c.3 == 255)))
-    // }
-
-    // NOT_NEEDED(default) 默认(schema): `{r=1, g=1, b=1, a=1} (white)`
-    // pub fn tint(&self) -> Option<Color> {
-    //     self.tint.or(Some(WHITE))
-    // }
 }

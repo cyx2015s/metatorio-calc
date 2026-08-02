@@ -1195,6 +1195,24 @@ pub const DEFAULT_FIELD_RULES: &[FieldRule] = &[
     skip!("FluidBox", "secondary_draw_order"),
     skip!("FluidBox", "volume_reservation_fraction"),
     skip!("FluidBox", "volume"),
+    skip!("IconData", "draw_background"),
+    skip!("AsteroidChunkPrototype", "hide_from_signal_gui"),
+    skip!("AsteroidCollectorPrototype", "arm_color_gradient"),
+    skip!("AsteroidCollectorPrototype", "arm_angular_speed_cap_base"),
+    skip!("AsteroidCollectorPrototype", "arm_angular_speed_cap_quality_scaling"),
+    skip!("FluidPrototype", "gas_temperature"),
+    skip!("ItemGroup", "order_in_recipe"),
+    skip!("ItemPrototype", "random_tint_color"),
+    skip!("ItemWithLabelPrototype", "default_label_color"),
+    skip!("SpaceLocationPrototype", "parked_platforms_orientation"),
+    skip!("PlanePrototype", "map_seed_offset"),
+    skip!("PumpPrototype", "fluid_wagon_connector_speed"),
+    skip!("ReactorPrototype", "default_fuel_glow_color"),
+    skip!("SurfacePropertyPrototype", "localised_unit_key"),
+    skip!("TilePrototype", "effect_color"),
+    skip!("TilePrototype", "effect_is_opaque"),
+    skip!("TilePrototype", "tint"),
+
 ];
 
 impl Config {
