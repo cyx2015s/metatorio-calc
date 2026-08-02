@@ -9,10 +9,10 @@
 //!   （如 "assembling-machine-1" 的 item 与 entity 是两条记录；"speed-module" 的
 //!   recipe/module/technology 是三条记录）
 
+use crate::generated_components::prototype_groups::prototype_group_from_type;
 use crate::generated_components::{
     COMPONENT_LIST, Component, ComponentValue, deserialize_component,
 };
-use crate::generated_components::prototype_groups::prototype_group_from_type;
 use serde_json::Value;
 use std::fmt;
 
@@ -57,7 +57,12 @@ impl PrototypeRecord {
     pub fn component_required<T: Component>(&self) -> &T {
         match self.components.get(T::TYPENAME) {
             Some(cv) => T::as_ref(cv),
-            None => panic!("原型 {} ({}) 缺少组件 {}", self.name, self.type_, T::TYPENAME),
+            None => panic!(
+                "原型 {} ({}) 缺少组件 {}",
+                self.name,
+                self.type_,
+                T::TYPENAME
+            ),
         }
     }
 }
@@ -187,10 +192,7 @@ impl PrototypeStore {
     }
 
     /// 遍历某组的所有记录。
-    pub fn group<'a>(
-        &'a self,
-        group: PrototypeGroup,
-    ) -> impl Iterator<Item = &'a PrototypeRecord> {
+    pub fn group<'a>(&'a self, group: PrototypeGroup) -> impl Iterator<Item = &'a PrototypeRecord> {
         self.records
             .iter()
             .filter(move |((g, _), _)| *g == group)

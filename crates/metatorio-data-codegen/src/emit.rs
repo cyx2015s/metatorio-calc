@@ -328,7 +328,9 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
     out.push_str("pub trait Component: Sized {\n");
     out.push_str("    /// 组件名（COMPONENT_LIST 条目，也是 components map 的键）。\n");
     out.push_str("    const TYPENAME: &'static str;\n");
-    out.push_str("    /// 从 ComponentValue 按引用提取（类型不匹配时 panic——插入时已保证正确）。\n");
+    out.push_str(
+        "    /// 从 ComponentValue 按引用提取（类型不匹配时 panic——插入时已保证正确）。\n",
+    );
     out.push_str("    #[track_caller]\n");
     out.push_str("    fn as_ref(cv: &ComponentValue) -> &Self;\n");
     out.push_str("    /// 从 ComponentValue 按引用提取（Option 版本）。\n");
@@ -458,7 +460,6 @@ fn extract_type_names(ty: &str, candidates: &HashSet<String>, refs: &mut HashSet
         refs.insert(current);
     }
 }
-
 
 /// typename（dump 键名，kebab-case）→ PrototypeGroup 变体名（PascalCase）。
 fn typename_to_variant(typename: &str) -> String {

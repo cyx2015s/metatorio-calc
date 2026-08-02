@@ -5,7 +5,10 @@
 //! 与自定义类型的真实样本（float→int、空 map、0-255 与 0-1 混用的颜色等）。
 //! 加载失败的条目会汇总在 `LoadError` 中并断言为空——新增 mod 污染形态时在此暴露。
 
-use metatorio_data::{CraftingMachineComponent, store::{PrototypeGroup, PrototypeStore}};
+use metatorio_data::{
+    CraftingMachineComponent,
+    store::{PrototypeGroup, PrototypeStore},
+};
 use serde_json::Value;
 
 fn load_dump() -> Value {
@@ -45,7 +48,11 @@ fn heavily_modded_dump_loads_all_concerned_prototypes() {
     );
 
     assert!(
-        store.entity("stone-furnace").unwrap().component::<CraftingMachineComponent>().is_some(),
+        store
+            .entity("stone-furnace")
+            .unwrap()
+            .component::<CraftingMachineComponent>()
+            .is_some(),
         "原版炉子应有 Crafter 组件"
     );
 

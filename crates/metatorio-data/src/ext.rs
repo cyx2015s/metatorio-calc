@@ -29,7 +29,9 @@ const WHITE: Color = Color(255, 255, 255, 255);
 const EMPTY_BOUNDING_BOX: BoundingBox = BoundingBox(Vector(0.0, 0.0), Vector(0.0, 0.0));
 
 /// 默认(schema): No effects are allowed（含 Vec 有 Drop，const 不可提升为 `&'static`，用 static）
-const NO_EFFECTS: EffectTypeLimitation = EffectTypeLimitation { allowed: [false; 5] };
+const NO_EFFECTS: EffectTypeLimitation = EffectTypeLimitation {
+    allowed: [false; 5],
+};
 
 /// 默认(schema): All effects except quality are allowed
 const LAB_EFFECTS: EffectTypeLimitation = EffectTypeLimitation {
@@ -37,13 +39,10 @@ const LAB_EFFECTS: EffectTypeLimitation = EffectTypeLimitation {
 };
 
 /// 默认(schema): All effects are allowed
-const MINING_EFFECTS: EffectTypeLimitation = EffectTypeLimitation {
-    allowed: [true; 5],
-};
+const MINING_EFFECTS: EffectTypeLimitation = EffectTypeLimitation { allowed: [true; 5] };
 
 /// 默认(schema): `{"crafting"}`（String 元素不可 const，惰性初始化）
-static CRAFTING_CATEGORIES: LazyLock<Vec<String>> =
-    LazyLock::new(|| vec!["crafting".to_string()]);
+static CRAFTING_CATEGORIES: LazyLock<Vec<String>> = LazyLock::new(|| vec!["crafting".to_string()]);
 
 /// 默认(schema): {{1, 1, 1}}
 const ARM_COLOR_GRADIENT: [Color; 1] = [WHITE];
@@ -64,7 +63,7 @@ const DEFAULT_QUALITY_VALUE_RANGE: EffectValueRange = EffectValueRange {
     low: 0.0,
     high: 1000.0,
 };
-pub trait EffectValueRangeExt {
+trait EffectValueRangeExt {
     fn update(&self, other: EffectValueRange) -> EffectValueRange;
 }
 impl EffectValueRangeExt for Option<EffectValueRangeOpt> {
@@ -77,7 +76,6 @@ impl EffectValueRangeExt for Option<EffectValueRangeOpt> {
             .unwrap_or(other)
     }
 }
-
 
 impl EffectReceiver {
     /// 默认(schema): `{ low = -0.8, high = 1000 }`
@@ -110,13 +108,13 @@ impl EffectReceiver {
 
 impl SurfaceCondition {
     /// 默认(schema): Max double
-    pub fn max(&self) -> Option<f64> {
-        self.max.or(Some(f64::MAX))
+    pub fn max(&self) -> f64 {
+        self.max.unwrap_or(f64::MAX)
     }
 
     /// 默认(schema): Lowest double
-    pub fn min(&self) -> Option<f64> {
-        self.min.or(Some(f64::MIN))
+    pub fn min(&self) -> f64 {
+        self.min.unwrap_or(f64::MIN)
     }
 }
 
@@ -128,13 +126,13 @@ impl IconData {
     // pub fn draw_background(&self) -> Option<bool> { ... }
 
     /// 默认(schema): `{0, 0}`
-    pub fn shift(&self) -> Option<Vector> {
-        self.shift.or(Some(Vector(0.0, 0.0)))
+    pub fn shift(&self) -> Vector {
+        self.shift.unwrap_or(Vector(0.0, 0.0))
     }
 
     /// 默认(schema): `{r=1, g=1, b=1, a=1}`
-    pub fn tint(&self) -> Option<Color> {
-        self.tint.or(Some(WHITE))
+    pub fn tint(&self) -> Color {
+        self.tint.unwrap_or(WHITE)
     }
 }
 
@@ -150,8 +148,8 @@ impl FluidBox {
 
 impl PrototypeBaseComponent {
     /// 默认(schema): Value of `hidden`
-    pub fn hidden_in_factoriopedia(&self) -> Option<bool> {
-        self.hidden_in_factoriopedia.or(Some(self.hidden))
+    pub fn hidden_in_factoriopedia(&self) -> bool {
+        self.hidden_in_factoriopedia.unwrap_or(self.hidden)
     }
 }
 
@@ -174,24 +172,24 @@ impl EntityComponent {
     }
 
     /// 默认(schema): calculated by the collision box height rounded up.
-    pub fn tile_height(&self) -> Option<i32> {
-        self.tile_height.or_else(|| {
+    pub fn tile_height(&self) -> i32 {
+        self.tile_height.unwrap_or_else(|| {
             let height = self
                 .collision_box
                 .as_ref()
                 .map_or(0.0, |b| (b.1).1 - (b.0).1);
-            Some(height.ceil() as i32)
+            height.ceil() as i32
         })
     }
 
     /// 默认(schema): calculated by the collision box width rounded up.
-    pub fn tile_width(&self) -> Option<i32> {
-        self.tile_width.or_else(|| {
+    pub fn tile_width(&self) -> i32 {
+        self.tile_width.unwrap_or_else(|| {
             let width = self
                 .collision_box
                 .as_ref()
                 .map_or(0.0, |b| (b.1).0 - (b.0).0);
-            Some(width.ceil() as i32)
+            width.ceil() as i32
         })
     }
 }
@@ -259,32 +257,30 @@ impl MiningDrillComponent {
 }
 
 // ── AsteroidChunk / AsteroidCollector ─────────────────────────────
-
 impl AsteroidChunkComponent {
-    /// 默认(schema): unset
-    pub fn hide_from_signal_gui(&self) -> Option<bool> {
-        self.hide_from_signal_gui
-    }
+    // NOT_NEEDED(default): 默认(schema): unset
+    // pub fn hide_from_signal_gui(&self) -> Option<bool> {
+    //     self.hide_from_signal_gui
+    // }
 }
 
 impl AsteroidCollectorComponent {
-    /// 默认(schema): {{1, 1, 1}}
-    pub fn arm_color_gradient(&self) -> &[Color] {
-        self.arm_color_gradient.as_deref().unwrap_or(&ARM_COLOR_GRADIENT)
-    }
+    // NOT_NEEDED(default): 默认(schema): {{1, 1, 1}}
+    // pub fn arm_color_gradient(&self) -> &[Color] {
+    //     self.arm_color_gradient.as_deref().unwrap_or(&ARM_COLOR_GRADIENT)
+    // }
 }
 
 // ── FluidComponent ────────────────────────────────────────────────
-
 impl FluidComponent {
-    /// 默认(schema): max value of float
-    pub fn gas_temperature(&self) -> Option<f64> {
-        self.gas_temperature.or(Some(f32::MAX as f64))
-    }
+    // NOT_NEEDED(default): 默认(schema): max value of float
+    // pub fn gas_temperature(&self) -> f64 {
+    //     self.gas_temperature.unwrap_or(f32::MAX as f64)
+    // }
 
     /// 默认(schema): value of `default_temperature`
-    pub fn max_temperature(&self) -> Option<f64> {
-        self.max_temperature.or(Some(self.default_temperature))
+    pub fn max_temperature(&self) -> f64 {
+        self.max_temperature.unwrap_or(self.default_temperature)
     }
 }
 
@@ -320,10 +316,10 @@ impl TransportBeltConnectableComponent {
 // ── SpaceLocation / Planet ────────────────────────────────────────
 
 impl SpaceLocationComponent {
-    /// 默认(schema): same as orientation
-    pub fn parked_platforms_orientation(&self) -> Option<f64> {
-        self.parked_platforms_orientation.or(Some(self.orientation))
-    }
+    // NOT_NEEDED(default): 默认(schema): same as orientation
+    // pub fn parked_platforms_orientation(&self) -> Option<f64> {
+    //     self.parked_platforms_orientation.or(Some(self.orientation))
+    // }
 }
 
 impl PlanetComponent {
@@ -335,10 +331,10 @@ impl PlanetComponent {
 // ── Pump ──────────────────────────────────────────────────────────
 
 impl PumpComponent {
-    /// 默认(schema): 1 / 64.0
-    pub fn fluid_wagon_connector_speed(&self) -> Option<f64> {
-        self.fluid_wagon_connector_speed.or(Some(1.0 / 64.0))
-    }
+    // NOT_NEEDED(default) 默认(schema): 1 / 64.0
+    // pub fn fluid_wagon_connector_speed(&self) -> Option<f64> {
+    //     self.fluid_wagon_connector_speed.or(Some(1.0 / 64.0))
+    // }
 }
 
 // ── QualityComponent ──────────────────────────────────────────────
@@ -348,208 +344,215 @@ impl PumpComponent {
 
 impl QualityComponent {
     /// 默认(schema): 1 + `level`
-    pub fn accumulator_capacity_multiplier(&self) -> Option<f64> {
-        self.accumulator_capacity_multiplier.or(Some(1.0 + self.level as f64))
+    pub fn accumulator_capacity_multiplier(&self) -> f64 {
+        self.accumulator_capacity_multiplier
+            .unwrap_or(1.0 + self.level as f64)
     }
 
     /// 默认(schema): Value of `level`
-    pub fn asteroid_collector_collection_radius_bonus(&self) -> Option<f64> {
+    pub fn asteroid_collector_collection_radius_bonus(&self) -> f64 {
         self.asteroid_collector_collection_radius_bonus
-            .or(Some(self.level as f64))
+            .unwrap_or(self.level as f64)
     }
 
     /// 默认(schema): Value of `level`
-    pub fn beacon_module_slots_bonus(&self) -> Option<u16> {
-        self.beacon_module_slots_bonus.or(Some(self.level as u16))
+    pub fn beacon_module_slots_bonus(&self) -> u16 {
+        self.beacon_module_slots_bonus.unwrap_or(self.level as u16)
     }
 
     /// 默认(schema): clamp(`level`, 0, 64)
-    pub fn beacon_supply_area_distance_bonus(&self) -> Option<f64> {
+    pub fn beacon_supply_area_distance_bonus(&self) -> f64 {
         self.beacon_supply_area_distance_bonus
-            .or(Some((self.level as f64).clamp(0.0, 64.0)))
+            .unwrap_or_else(|| (self.level as f64).clamp(0.0, 64.0))
     }
 
     /// 默认(schema): Value of `inventory_size_multiplier`
-    pub fn cargo_wagon_inventory_size_multiplier(&self) -> Option<f64> {
+    pub fn cargo_wagon_inventory_size_multiplier(&self) -> f64 {
         self.cargo_wagon_inventory_size_multiplier
-            .or_else(|| self.inventory_size_multiplier())
+            .unwrap_or_else(|| self.inventory_size_multiplier())
     }
 
     /// 默认(schema): clamp(`next_probability * 0.1, 0, 1)`
-    pub fn chain_probability(&self) -> Option<f64> {
+    pub fn chain_probability(&self) -> f64 {
         self.chain_probability
-            .or(Some((self.next_probability * 0.1).clamp(0.0, 1.0)))
+            .unwrap_or_else(|| (self.next_probability * 0.1).clamp(0.0, 1.0))
     }
 
     /// 默认(schema): Value of `level`
-    pub fn crafting_machine_module_slots_bonus(&self) -> Option<u16> {
+    pub fn crafting_machine_module_slots_bonus(&self) -> u16 {
         self.crafting_machine_module_slots_bonus
-            .or(Some(self.level as u16))
+            .unwrap_or(self.level as u16)
     }
 
     /// 默认(schema): Value of `default_multiplier`
-    pub fn crafting_machine_speed_multiplier(&self) -> Option<f64> {
+    pub fn crafting_machine_speed_multiplier(&self) -> f64 {
         self.crafting_machine_speed_multiplier
-            .or_else(|| self.default_multiplier())
+            .unwrap_or_else(|| self.default_multiplier())
     }
 
     /// 默认(schema): 1 + 0.3 * `level`
-    pub fn default_multiplier(&self) -> Option<f64> {
-        self.default_multiplier.or(Some(1.0 + 0.3 * self.level as f64))
+    pub fn default_multiplier(&self) -> f64 {
+        self.default_multiplier
+            .unwrap_or(1.0 + 0.3 * self.level as f64)
     }
 
     /// 默认(schema): Value of `level`
-    pub fn electric_pole_supply_area_distance_bonus(&self) -> Option<f64> {
+    pub fn electric_pole_supply_area_distance_bonus(&self) -> f64 {
         self.electric_pole_supply_area_distance_bonus
-            .or(Some(self.level as f64))
+            .unwrap_or(self.level as f64)
     }
 
     /// 默认(schema): 2 * `level`
-    pub fn electric_pole_wire_reach_bonus(&self) -> Option<f64> {
+    pub fn electric_pole_wire_reach_bonus(&self) -> f64 {
         self.electric_pole_wire_reach_bonus
-            .or(Some(2.0 * self.level as f64))
+            .unwrap_or(2.0 * self.level as f64)
     }
 
     /// 默认(schema): Value of `level`
-    pub fn equipment_grid_height_bonus(&self) -> Option<i16> {
-        self.equipment_grid_height_bonus.or(Some(self.level as i16))
+    pub fn equipment_grid_height_bonus(&self) -> i16 {
+        self.equipment_grid_height_bonus
+            .unwrap_or(self.level as i16)
     }
 
     /// 默认(schema): Value of `level`
-    pub fn equipment_grid_width_bonus(&self) -> Option<i16> {
-        self.equipment_grid_width_bonus.or(Some(self.level as i16))
+    pub fn equipment_grid_width_bonus(&self) -> i16 {
+        self.equipment_grid_width_bonus.unwrap_or(self.level as i16)
     }
 
     /// 默认(schema): Value of `default_multiplier`
-    pub fn fluid_wagon_capacity_multiplier(&self) -> Option<f64> {
+    pub fn fluid_wagon_capacity_multiplier(&self) -> f64 {
         self.fluid_wagon_capacity_multiplier
-            .or_else(|| self.default_multiplier())
+            .unwrap_or_else(|| self.default_multiplier())
     }
 
     /// 默认(schema): 1 + `level`
-    pub fn flying_robot_max_energy_multiplier(&self) -> Option<f64> {
+    pub fn flying_robot_max_energy_multiplier(&self) -> f64 {
         self.flying_robot_max_energy_multiplier
-            .or(Some(1.0 + self.level as f64))
+            .unwrap_or(1.0 + self.level as f64)
     }
 
     /// 默认(schema): Value of `default_multiplier`
-    pub fn inserter_speed_multiplier(&self) -> Option<f64> {
+    pub fn inserter_speed_multiplier(&self) -> f64 {
         self.inserter_speed_multiplier
-            .or_else(|| self.default_multiplier())
+            .unwrap_or_else(|| self.default_multiplier())
     }
 
     /// 默认(schema): Value of `default_multiplier`
-    pub fn inventory_size_multiplier(&self) -> Option<f64> {
+    pub fn inventory_size_multiplier(&self) -> f64 {
         self.inventory_size_multiplier
-            .or_else(|| self.default_multiplier())
+            .unwrap_or_else(|| self.default_multiplier())
     }
 
     /// 默认(schema): Value of `level`
-    pub fn lab_module_slots_bonus(&self) -> Option<u16> {
-        self.lab_module_slots_bonus.or(Some(self.level as u16))
+    pub fn lab_module_slots_bonus(&self) -> u16 {
+        self.lab_module_slots_bonus.unwrap_or(self.level as u16)
     }
 
     /// 默认(schema): Value of `default_multiplier`
-    pub fn lab_research_speed_multiplier(&self) -> Option<f64> {
+    pub fn lab_research_speed_multiplier(&self) -> f64 {
         self.lab_research_speed_multiplier
-            .or_else(|| self.default_multiplier())
+            .unwrap_or_else(|| self.default_multiplier())
     }
 
     /// 默认(schema): 1 + 0.01 * `level`
-    pub fn locomotive_power_multiplier(&self) -> Option<f64> {
+    pub fn locomotive_power_multiplier(&self) -> f64 {
         self.locomotive_power_multiplier
-            .or(Some(1.0 + 0.01 * self.level as f64))
+            .unwrap_or(1.0 + 0.01 * self.level as f64)
     }
 
     /// 默认(schema): Value of `default_multiplier`
-    pub fn logistic_cell_charging_energy_multiplier(&self) -> Option<f64> {
+    pub fn logistic_cell_charging_energy_multiplier(&self) -> f64 {
         self.logistic_cell_charging_energy_multiplier
-            .or_else(|| self.default_multiplier())
+            .unwrap_or_else(|| self.default_multiplier())
     }
 
     /// 默认(schema): Value of `level`
-    pub fn logistic_cell_charging_station_count_bonus(&self) -> Option<u32> {
+    pub fn logistic_cell_charging_station_count_bonus(&self) -> u32 {
         self.logistic_cell_charging_station_count_bonus
-            .or(Some(self.level))
+            .unwrap_or(self.level)
     }
 
     /// 默认(schema): Value of `level`
-    pub fn mining_drill_mining_radius_bonus(&self) -> Option<f64> {
+    pub fn mining_drill_mining_radius_bonus(&self) -> f64 {
         self.mining_drill_mining_radius_bonus
-            .or(Some(self.level as f64))
+            .unwrap_or(self.level as f64)
     }
 
     /// 默认(schema): Value of `level`
-    pub fn mining_drill_module_slots_bonus(&self) -> Option<u16> {
-        self.mining_drill_module_slots_bonus.or(Some(self.level as u16))
+    pub fn mining_drill_module_slots_bonus(&self) -> u16 {
+        self.mining_drill_module_slots_bonus
+            .unwrap_or(self.level as u16)
     }
 
     /// 默认(schema): Value of `default_multiplier`
-    pub fn module_consumption_multiplier(&self) -> Option<f64> {
+    pub fn module_consumption_multiplier(&self) -> f64 {
         self.module_consumption_multiplier
-            .or_else(|| self.default_multiplier())
+            .unwrap_or_else(|| self.default_multiplier())
     }
 
     /// 默认(schema): Value of `default_multiplier`
-    pub fn module_pollution_multiplier(&self) -> Option<f64> {
+    pub fn module_pollution_multiplier(&self) -> f64 {
         self.module_pollution_multiplier
-            .or_else(|| self.default_multiplier())
+            .unwrap_or_else(|| self.default_multiplier())
     }
 
     /// 默认(schema): Value of `default_multiplier`
-    pub fn module_productivity_multiplier(&self) -> Option<f64> {
+    pub fn module_productivity_multiplier(&self) -> f64 {
         self.module_productivity_multiplier
-            .or_else(|| self.default_multiplier())
+            .unwrap_or_else(|| self.default_multiplier())
     }
 
     /// 默认(schema): Value of `default_multiplier`
-    pub fn module_quality_multiplier(&self) -> Option<f64> {
+    pub fn module_quality_multiplier(&self) -> f64 {
         self.module_quality_multiplier
-            .or_else(|| self.default_multiplier())
+            .unwrap_or_else(|| self.default_multiplier())
     }
 
     /// 默认(schema): Value of `default_multiplier`
-    pub fn module_speed_multiplier(&self) -> Option<f64> {
+    pub fn module_speed_multiplier(&self) -> f64 {
         self.module_speed_multiplier
-            .or_else(|| self.default_multiplier())
+            .unwrap_or_else(|| self.default_multiplier())
     }
 
     /// 默认(schema): clamp(`previous_probability * 0.1, 0, 1)`
-    pub fn previous_chain_probability(&self) -> Option<f64> {
+    pub fn previous_chain_probability(&self) -> f64 {
         self.previous_chain_probability
-            .or(Some((self.previous_probability * 0.1).clamp(0.0, 1.0)))
+            .unwrap_or((self.previous_probability * 0.1).clamp(0.0, 1.0))
     }
 
     /// 默认(schema): min(1 + 0.1 * `level`, 3)
-    pub fn range_multiplier(&self) -> Option<f64> {
+    pub fn range_multiplier(&self) -> f64 {
         self.range_multiplier
-            .or(Some((1.0 + 0.1 * self.level as f64).min(3.0)))
+            .unwrap_or((1.0 + 0.1 * self.level as f64).min(3.0))
     }
 
     /// 默认(schema): 1 + 0.01 * `level`
-    pub fn rolling_stock_max_speed_multiplier(&self) -> Option<f64> {
+    pub fn rolling_stock_max_speed_multiplier(&self) -> f64 {
         self.rolling_stock_max_speed_multiplier
-            .or(Some(1.0 + 0.01 * self.level as f64))
+            .unwrap_or(1.0 + 0.01 * self.level as f64)
     }
 
     /// 默认(schema): Value of `default_multiplier`
-    pub fn spoil_ticks_multiplier(&self) -> Option<f64> {
-        self.spoil_ticks_multiplier.or_else(|| self.default_multiplier())
+    pub fn spoil_ticks_multiplier(&self) -> f64 {
+        self.spoil_ticks_multiplier
+            .unwrap_or_else(|| self.default_multiplier())
     }
 
     /// 默认(schema): 1 + `level`
-    pub fn tool_durability_multiplier(&self) -> Option<f64> {
-        self.tool_durability_multiplier.or(Some(1.0 + self.level as f64))
+    pub fn tool_durability_multiplier(&self) -> f64 {
+        self.tool_durability_multiplier
+            .unwrap_or(1.0 + self.level as f64)
     }
 }
 
 // ── Reactor ───────────────────────────────────────────────────────
 
 impl ReactorComponent {
-    /// 默认(schema): `{1, 1, 1, 1} (white)`
-    pub fn default_fuel_glow_color(&self) -> Option<Color> {
-        self.default_fuel_glow_color.or(Some(WHITE))
-    }
+    // NOT_NEEDED(default) 默认(schema): `{1, 1, 1, 1} (white)`
+    //
+    // pub fn default_fuel_glow_color(&self) -> Color {
+    //     self.default_fuel_glow_color.unwrap_or(WHITE)
+    // }
 }
 
 // ── Recipe ────────────────────────────────────────────────────────
@@ -562,12 +565,15 @@ impl RecipeComponent {
 
     /// 默认(schema): `{"crafting"}`
     pub fn categories(&self) -> &[String] {
-        self.categories.as_deref().unwrap_or(&CRAFTING_CATEGORIES[..])
+        self.categories
+            .as_deref()
+            .unwrap_or(&CRAFTING_CATEGORIES[..])
     }
 
     /// 默认(schema): Value of `hidden`
-    pub fn requires_ingredients_to_unlock_results(&self) -> Option<bool> {
-        self.requires_ingredients_to_unlock_results.or(Some(self.hidden))
+    pub fn requires_ingredients_to_unlock_results(&self) -> bool {
+        self.requires_ingredients_to_unlock_results
+            .unwrap_or(self.hidden)
     }
 }
 
@@ -575,8 +581,9 @@ impl RecipeComponent {
 
 impl RocketSiloComponent {
     /// 默认(schema): Value of `rocket_parts_required`
-    pub fn rocket_parts_storage_cap(&self) -> Option<u32> {
-        self.rocket_parts_storage_cap.or(Some(self.rocket_parts_required))
+    pub fn rocket_parts_storage_cap(&self) -> u32 {
+        self.rocket_parts_storage_cap
+            .unwrap_or(self.rocket_parts_required)
     }
 }
 
@@ -591,20 +598,19 @@ impl SurfacePropertyComponent {
 // ── Tile ──────────────────────────────────────────────────────────
 
 impl TileComponent {
-    /// 默认(schema): `{r=1, g=1, b=1, a=1} (white)`
-    pub fn effect_color(&self) -> Option<Color> {
-        self.effect_color.or(Some(WHITE))
-    }
+    // NOT_NEEDED(default) 默认(schema): `{r=1, g=1, b=1, a=1} (white)`
+    // pub fn effect_color(&self) -> Option<Color> {
+    //     self.effect_color.or(Some(WHITE))
+    // }
 
-    /// 默认(schema): true if `effect_color` alpha equals 1
-    pub fn effect_is_opaque(&self) -> Option<bool> {
-        self.effect_is_opaque.or_else(|| {
-            Some(self.effect_color.map_or(true, |c| c.3 == 255))
-        })
-    }
+    // NOT_NEEDED(default) 默认(schema): true if `effect_color` alpha equals 1
+    // pub fn effect_is_opaque(&self) -> Option<bool> {
+    //     self.effect_is_opaque
+    //         .or_else(|| Some(self.effect_color.map_or(true, |c| c.3 == 255)))
+    // }
 
-    /// 默认(schema): `{r=1, g=1, b=1, a=1} (white)`
-    pub fn tint(&self) -> Option<Color> {
-        self.tint.or(Some(WHITE))
-    }
+    // NOT_NEEDED(default) 默认(schema): `{r=1, g=1, b=1, a=1} (white)`
+    // pub fn tint(&self) -> Option<Color> {
+    //     self.tint.or(Some(WHITE))
+    // }
 }

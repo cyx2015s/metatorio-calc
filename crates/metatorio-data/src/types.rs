@@ -654,7 +654,6 @@ pub struct Effect {
     pub quality: EffectValueRangeOpt,
 }
 
-
 // ── Serialize（生成的组件 derive Serialize，这里按 JSON 兼容格式输出）──
 
 impl serde::Serialize for EnergyAmount {
@@ -917,10 +916,7 @@ mod tests {
         // 数组形态（dump 最常见）
         let e: EffectTypeLimitation =
             serde_json::from_str(r#"["speed", "consumption", "pollution"]"#).unwrap();
-        assert_eq!(
-            e.allowed,
-            [true, false, true, true, false]
-        );
+        assert_eq!(e.allowed, [true, false, true, true, false]);
         // 单值形态（union 的第一分支）
         let e: EffectTypeLimitation = serde_json::from_str(r#""quality""#).unwrap();
         assert_eq!(e.allowed, [false, false, false, false, true]);

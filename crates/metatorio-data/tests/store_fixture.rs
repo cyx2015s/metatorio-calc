@@ -29,8 +29,13 @@ fn assembling_machine_is_two_records() {
         entity.has("CraftingMachineComponent"),
         "entity 记录应含 Crafter 组件"
     );
-    let crafter = entity.component::<CraftingMachineComponent>().expect("Crafter 组件");
-    assert!((crafter.crafting_speed - 0.5).abs() < 1e-9, "组装机1 速度 0.5");
+    let crafter = entity
+        .component::<CraftingMachineComponent>()
+        .expect("Crafter 组件");
+    assert!(
+        (crafter.crafting_speed - 0.5).abs() < 1e-9,
+        "组装机1 速度 0.5"
+    );
     match entity.get("CraftingMachineComponent") {
         Some(ComponentValue::CraftingMachineComponent(_)) => {}
         _ => panic!("ComponentValue 变体不匹配"),
@@ -42,7 +47,10 @@ fn assembling_machine_is_two_records() {
         .expect("应有 item 组记录");
     assert_eq!(item.type_, "item");
     assert!(item.has("ItemComponent"));
-    assert!(item.component::<ItemComponent>().is_some(), "item 记录应含 Item 组件");
+    assert!(
+        item.component::<ItemComponent>().is_some(),
+        "item 记录应含 Item 组件"
+    );
 
     // 两条记录必须不同（主键 (group, name)）
     assert_ne!(entity.group, item.group);
@@ -83,9 +91,7 @@ fn group_iteration_and_length() {
 
     let entity_count = store.group(PrototypeGroup::Entity).count();
     let item_count = store.group(PrototypeGroup::Item).count();
-    let other_count = store
-        .group(PrototypeGroup::Recipe)
-        .count();
+    let other_count = store.group(PrototypeGroup::Recipe).count();
     assert!(entity_count > 0, "应有实体记录");
     assert!(item_count > 0, "应有物品记录");
     assert!(other_count > 0, "应有配方记录");

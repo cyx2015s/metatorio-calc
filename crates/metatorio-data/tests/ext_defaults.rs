@@ -71,11 +71,11 @@ fn entity_tile_size_from_collision_box() {
 #[test]
 fn base_hidden_default() {
     let b = PrototypeBaseComponent::default();
-    assert_eq!(b.hidden_in_factoriopedia(), Some(false));
+    assert_eq!(b.hidden_in_factoriopedia(), false);
 
     let mut b = PrototypeBaseComponent::default();
     b.hidden_in_factoriopedia = Some(true);
-    assert_eq!(b.hidden_in_factoriopedia(), Some(true));
+    assert_eq!(b.hidden_in_factoriopedia(), true);
 }
 
 #[test]
