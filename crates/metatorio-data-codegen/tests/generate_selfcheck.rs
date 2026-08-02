@@ -143,11 +143,11 @@ fn crafting_machine_fields_are_correct() {
 }
 
 #[test]
-fn prototype_chains_registry_is_complete() {
+fn component_list_registry_is_complete() {
     let schema = load_schema();
     let (code, stats) = generate(&schema, &Config::default());
 
-    assert!(code.contains("PROTOTYPE_CHAINS"));
+    assert!(code.contains("COMPONENT_LIST"));
     // 组装机在注册表中
     assert!(code.contains(r#"("assembling-machine", &["#));
     // 注册表条目数与关注类型数一致（所有关注 typename 都有对应原型）

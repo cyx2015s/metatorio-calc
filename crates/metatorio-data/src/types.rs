@@ -347,7 +347,7 @@ pub struct SharedProbabilityInfo {
     #[serde(default = "default_probability_min")]
     min: f64,
     #[serde(default = "default_probability_max")]
-    max: f64
+    max: f64,
 }
 
 fn default_probability_min() -> f64 {
@@ -414,7 +414,10 @@ pub struct ElectricEnergySource {
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct BurnerEnergySource {
-    #[serde(deserialize_with = "crate::lenient::de_vec_lenient", default = "default_fuel_categories")]
+    #[serde(
+        deserialize_with = "crate::lenient::de_vec_lenient",
+        default = "default_fuel_categories"
+    )]
     pub fuel_categories: Vec<String>,
     #[serde(default = "default_burner_usage")]
     pub burner_usage: String,
@@ -457,7 +460,7 @@ pub struct FluidEnergySource {
     pub effectivity: f64,
     pub scale_fluid_usage: Option<bool>,
     pub fluid_usage_per_tick: f64,
-    pub maximum_temperature : f64,
+    pub maximum_temperature: f64,
     pub burns_fluid: Option<bool>,
     pub spent_fluid: SpentFluidSpecificationComponent,
 }
@@ -636,6 +639,170 @@ pub enum BeaconCounter {
     SameType,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+pub struct MineEntityTechnologyTrigger {
+    #[serde(deserialize_with = "crate::lenient::de_vec_lenient", default)]
+    entities: Vec<String>,
+}
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+pub struct CraftItemTechnologyTrigger {
+    item: IDFilter,
+}
+
+#[derive(Debug, Clone, serde::Serialize, Default)]
+pub struct IDFilter {
+    name: String,
+    quality: Option<String>,
+    comparator: Option<Comparator>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum Comparator {
+    #[serde(rename = "=")]
+    Equal,
+    #[serde(rename = "!=", alias = "≠")]
+    NotEqual,
+    #[serde(rename = ">")]
+    GreaterThan,
+    #[serde(rename = "<")]
+    LessThan,
+    #[serde(rename = ">=", alias = "≥")]
+    GreaterThanOrEqual,
+    #[serde(rename = "<=", alias = "≤")]
+    LessThanOrEqual,
+}
+
+impl<'de> serde::Deserialize<'de> for IDFilter {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        match Value::deserialize(deserializer)? {
+            Value::String(s) => Ok(IDFilter {
+                name: s,
+                quality: None,
+                comparator: None,
+            }),
+            Value::Object(map) => {
+                let name = map
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| D::Error::custom("ItemIDFilter 缺少 name"))?
+                    .to_string();
+                let quality = map
+                    .get("quality")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                let comparator = map
+                    .get("comparator")
+                    .map(Clone::clone)
+                    .map(serde_json::from_value)
+                    .transpose()
+                    .map_err(|_| D::Error::custom("Comparator 反序列化失败"))?;
+                Ok(IDFilter {
+                    name,
+                    quality,
+                    comparator,
+                })
+            }
+            _ => Err(D::Error::custom("ItemIDFilter 不是字符串或对象")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+pub struct CraftFluidTechnologyTrigger {
+    fluid: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+pub struct SendItemToOrbitTechnologyTrigger {
+    item: IDFilter,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+pub struct CaptureSpawnerTechnologyTrigger {
+    entity: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+pub struct BuildEntityTechnologyTrigger {
+    entity: IDFilter,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+pub struct CreateSpacePlatformTechnologyTrigger {}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+pub enum TechnologyTrigger {
+    MineEntity(MineEntityTechnologyTrigger),
+    CraftItem(CraftItemTechnologyTrigger),
+    CraftFluid(CraftFluidTechnologyTrigger),
+    SendItemToOrbit(SendItemToOrbitTechnologyTrigger),
+    CaptureSpawner(CaptureSpawnerTechnologyTrigger),
+    BuildEntity(BuildEntityTechnologyTrigger),
+    CreateSpacePlatform(CreateSpacePlatformTechnologyTrigger),
+    #[serde(other)]
+    Other,
+}
+
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+pub enum Modifier {
+    MiningWithFluid(BoolModifer),
+    SpacePlatforms(BoolModifer),
+    ChangeRecipeProductivity(ChangeRecipeProductivityModifier),
+    BeaconDistribution(SimpleModifier),
+    BeltStackSizeBonus(SimpleModifier),
+    BulkInserterCapacityBonus(SimpleModifier),
+    InserterStackSizeBonus(SimpleModifier),
+    LaboratoryProductivity(SimpleModifier),
+    LaboratorySpeed(SimpleModifier),
+    MaxCargoBayUnloadingDistance(SimpleModifier),
+    MiningDrillProductivityBonus(SimpleModifier),
+    UnlockQuality(UnlockQualityModifier),
+    UnlockRecipe(UnlockRecipeModifier),
+    UnlockSpaceLocation(UnlockSpaceLocationModifier),
+    #[serde(other)]
+    Other,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SimpleModifier {
+    pub modifier: f64,
+}
+
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BoolModifer {
+    pub modifier: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ChangeRecipeProductivityModifier {
+    pub change: f64,
+    pub recipe: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct UnlockQualityModifier {
+    pub quality: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct UnlockRecipeModifier {
+    pub recipe: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct UnlockSpaceLocationModifier {
+    pub space_location: String,
+}
+
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -739,8 +906,7 @@ mod tests {
     fn product_tag_enum_parses() {
         // 物品产物（tag = "item"，平铺）
         let p: Product =
-            serde_json::from_str(r#"{"type": "item", "name": "iron-plate", "amount": 1}"#)
-                .unwrap();
+            serde_json::from_str(r#"{"type": "item", "name": "iron-plate", "amount": 1}"#).unwrap();
         match &p {
             Product::Item(data) => {
                 assert_eq!(data.name, "iron-plate");
@@ -749,9 +915,10 @@ mod tests {
             Product::Fluid(_) => panic!("应为物品产物"),
         }
         // 流体原料（带温度字段）
-        let p: Product =
-            serde_json::from_str(r#"{"type": "fluid", "name": "water", "amount": 10, "temperature": 15}"#)
-                .unwrap();
+        let p: Product = serde_json::from_str(
+            r#"{"type": "fluid", "name": "water", "amount": 10, "temperature": 15}"#,
+        )
+        .unwrap();
         match &p {
             Product::Fluid(data) => {
                 assert_eq!(data.name, "water");

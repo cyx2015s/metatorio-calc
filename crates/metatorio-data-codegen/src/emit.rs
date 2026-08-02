@@ -83,7 +83,10 @@ fn detect_composites(schema: &Schema, config: &Config) -> Vec<Composite> {
             out.push(Composite {
                 name: name.clone(),
                 fields: fields.clone(),
-                layers: consistent.iter().map(|(p, _, _)| p.base.name.clone()).collect(),
+                layers: consistent
+                    .iter()
+                    .map(|(p, _, _)| p.base.name.clone())
+                    .collect(),
                 properties: props.clone(),
             });
         }
@@ -226,17 +229,28 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
     }
     stats.component_structs = emitted.len();
 
-    // 5. 生成"原型 → 继承链组件"注册表
-    out.push_str("/// 关注原型（dump 顶层键）→ 其继承链组件名（根在前）。\n");
-    out.push_str("pub const PROTOTYPE_CHAINS: &[(&str, &[&str])] = &[\n");
+    // 5. 生成"原型 → 组件清单"注册表（COMPONENT_LIST）：
+    //    继承链组件（根在前）+ 命中的组合组件（如 IconComponent，追加在末尾）。
+    //    语义层可按清单统一遍历（如提取图标时只需找 IconComponent）。
+    out.push_str("/// 关注原型（dump 顶层键）→ 其组件清单（继承链组件 + 组合组件，根在前）。\n");
+    out.push_str("pub const COMPONENT_LIST: &[(&str, &[&str])] = &[\n");
     for p in &concerned {
         let Some(tn) = &p.typename else { continue };
         let chain = schema.prototype_chain(p);
-        let names: Vec<String> = chain
+        let mut names: Vec<String> = chain
             .iter()
             .rev()
             .map(|l| type_map::component_name(&l.base.name))
             .collect();
+        // 命中的组合组件追加到末尾（按配置顺序、去重）
+        for c in &composites {
+            if chain.iter().any(|l| c.layers.contains(&l.base.name)) {
+                let comp_name = format!("{}Component", c.name);
+                if !names.contains(&comp_name) {
+                    names.push(comp_name);
+                }
+            }
+        }
         out.push_str(&format!(
             "    ({tn:?}, &[{}]),\n",
             names
@@ -487,13 +501,14 @@ fn emit_struct(
     }
 
     // 组合字段组：命中层以 flatten 引用组合 Component（保持 dump 平铺解析）
-    if let Some(c) = &composite {
-        let field_name = c.name.to_lowercase();
-        fields.push_str(&format!(
-            "    #[serde(flatten)]\n    pub {field_name}: {}Component,\n",
-            c.name
-        ));
-    }
+    // 暂时禁用，功能转移到单独的 Component 上
+    // if let Some(c) = &composite {
+    //     let field_name = c.name.to_lowercase();
+    //     fields.push_str(&format!(
+    //         "    #[serde(flatten)]\n    pub {field_name}: {}Component,\n",
+    //         c.name
+    //     ));
+    // }
 
     let mut out = String::new();
     out.push_str(&format!(

@@ -1033,7 +1033,11 @@ impl Default for Config {
         Self {
             composite_field_groups: vec![(
                 "Icon".to_string(),
-                vec!["icon".to_string(), "icon_size".to_string(), "icons".to_string()],
+                vec![
+                    "icon".to_string(),
+                    "icon_size".to_string(),
+                    "icons".to_string(),
+                ],
             )],
             composite_min_layers: 3,
             concerned_typenames: DEFAULT_CONCERNED_TYPENAMES
@@ -1064,11 +1068,12 @@ impl Default for Config {
                 map_type!("IngredientPrototype", "crate::types::Ingredient"),
                 map_type!("FluidIngredientPrototype", "crate::types::FluidIngredient"),
                 map_type!("ItemIngredientPrototype", "crate::types::ItemIngredient"),
+                map_type!("TechnologyTrigger", "crate::types::TechnologyTrigger"),
+                map_type!("Modifier", "crate::types::Modifier"),
             ],
         }
     }
 }
-
 
 macro_rules! skip {
     ($struct:expr, $field:expr) => {
@@ -1113,30 +1118,63 @@ pub const DEFAULT_FIELD_RULES: &[FieldRule] = &[
     skip!("EntityWithHealthPrototype", "attack_reaction"),
     skip!("EntityWithHealthPrototype", "corpse"),
     skip!("EntityWithHealthPrototype", "dying_explosion"),
-    ty!("ContainerPrototype", "inventory_type", "crate::types::InventoryType"),
+    ty!(
+        "ContainerPrototype",
+        "inventory_type",
+        "crate::types::InventoryType"
+    ),
     skip!("FluidBox", "pipe_connections"),
     skip!("AutoplaceControl", "category"),
-    ty!("BeaconPrototype", "beacon_counter", "crate::types::BeaconCounter"),
+    ty!(
+        "BeaconPrototype",
+        "beacon_counter",
+        "crate::types::BeaconCounter"
+    ),
     skip!("LinkedContainerPrototype", "gui_mode"),
-    ty!("LinkedContainerPrototype", "inventory_type", "crate::types::InventoryType"),
+    ty!(
+        "LinkedContainerPrototype",
+        "inventory_type",
+        "crate::types::InventoryType"
+    ),
     skip!("TilePrototype", "ambient_sounds"),
     skip!("TilePrototype", "bound_decoratives"),
     skip!("TilePrototype", "build_sound"),
     skip!("TilePrototype", "dying_explosion"),
     skip!("TilePrototype", "placeable_by"),
-    ty!("LoaderPrototype", "energy_source", "crate::types::EnergySource"),
-    ty!("BeaconPrototype", "energy_source", "crate::types::EnergySource"),
+    ty!(
+        "LoaderPrototype",
+        "energy_source",
+        "crate::types::EnergySource"
+    ),
+    ty!(
+        "BeaconPrototype",
+        "energy_source",
+        "crate::types::EnergySource"
+    ),
     skip!("MiningDrillPrototype", "vector_to_place_result"),
     skip!("OffshorePumpPrototype", "fluid_source_offset"),
     skip!("RocketSiloPrototype", "door_back_open_offset"),
     skip!("RocketSiloPrototype", "door_front_open_offset"),
     skip!("RocketSiloPrototype", "hole_clipping_box"),
     skip!("RocketSiloPrototype", "window_bounding_box"),
-    skip!("SimpleEntityPrototype", "stateless_visualisation_variations"),
-    skip!("SimpleEntityWithOwnerPrototype", "stateless_visualisation_variations"),
-    skip!("SimpleEntityWithForcePrototype", "stateless_visualisation_variations"),
+    skip!(
+        "SimpleEntityPrototype",
+        "stateless_visualisation_variations"
+    ),
+    skip!(
+        "SimpleEntityWithOwnerPrototype",
+        "stateless_visualisation_variations"
+    ),
+    skip!(
+        "SimpleEntityWithForcePrototype",
+        "stateless_visualisation_variations"
+    ),
     skip!("TreePrototype", "stateless_visualisation_variations"),
-    ty!("AsteroidCollectorPrototype", "energy_source", "crate::types::EnergySource"),
+    ty!(
+        "AsteroidCollectorPrototype",
+        "energy_source",
+        "crate::types::EnergySource"
+    ),
     ty!("AutoplaceSpecification", "force", "String"),
     skip!("AgriculturalTowerPrototype", "harvesting_procedure_points"),
     skip!("AgriculturalTowerPrototype", "planting_procedure_points"),
@@ -1144,7 +1182,12 @@ pub const DEFAULT_FIELD_RULES: &[FieldRule] = &[
     skip!("MiningDrillPrototype", "resource_searching_offset"),
     skip!("EntityWithOwnerPrototype", "quality_indicator_shift"),
     skip!("EntityWithOwnerPrototype", "quality_indicator_scale"),
-    ty!("TechnologyPrototype", "max_level", "crate::types::TechnologyMaxLevel"),
+    ty!(
+        "TechnologyPrototype",
+        "max_level",
+        "crate::types::TechnologyMaxLevel"
+    ),
+    ty!("IconData", "shift", "crate::types::Vector"),
 ];
 
 impl Config {

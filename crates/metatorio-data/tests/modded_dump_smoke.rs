@@ -5,7 +5,7 @@
 //! 与自定义类型的真实样本（float→int、空 map、0-255 与 0-1 混用的颜色等）。
 //! 反序列化失败的条目会被收集并断言为空——新增 mod 污染形态时在此暴露。
 
-use metatorio_data::generated_components::PROTOTYPE_CHAINS;
+use metatorio_data::generated_components::COMPONENT_LIST;
 use serde_json::Value;
 
 fn load_dump() -> Value {
@@ -24,7 +24,7 @@ fn heavily_modded_dump_deserializes_all_concerned_prototypes() {
     let mut total = 0usize;
     let mut failures: Vec<(String, String, String)> = Vec::new(); // (typename, name, error)
 
-    for (typename, chain) in PROTOTYPE_CHAINS {
+    for (typename, chain) in COMPONENT_LIST {
         let Some(entries) = dump.get(*typename) else {
             continue;
         };
@@ -46,7 +46,7 @@ fn heavily_modded_dump_deserializes_all_concerned_prototypes() {
 
     eprintln!(
         "modded dump 冒烟：共 {total} 个原型（{} 个关注类型）",
-        PROTOTYPE_CHAINS.len()
+        COMPONENT_LIST.len()
     );
     assert!(
         failures.is_empty(),
@@ -60,7 +60,7 @@ fn heavily_modded_dump_deserializes_all_concerned_prototypes() {
     );
 }
 
-/// 按组件层名反序列化（分发到生成的组件类型，覆盖 PROTOTYPE_CHAINS 全部 39 层）。
+/// 按组件层名反序列化（分发到生成的组件类型，覆盖 COMPONENT_LIST 全部组件）。
 /// 失败时经 serde_path_to_error 给出字段路径（如 ingredients[0].amount）。
 fn try_deserialize_layer(layer: &str, value: &Value) -> Result<(), String> {
     let json = serde_json::to_string(value).unwrap_or_default();
@@ -149,6 +149,7 @@ fn try_deserialize_layer(layer: &str, value: &Value) -> Result<(), String> {
         "ThrusterComponent" => try_comp!(metatorio_data::generated_components::ThrusterComponent),
         "TileComponent" => try_comp!(metatorio_data::generated_components::TileComponent),
         "TreeComponent" => try_comp!(metatorio_data::generated_components::TreeComponent),
+        "IconComponent" => try_comp!(metatorio_data::generated_components::IconComponent),
         _ => Ok(()),
     }
 }
