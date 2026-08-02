@@ -840,7 +840,7 @@ pub const DEFAULT_CONCERNED_TYPENAMES: &[&str] = &[
     // "infinity-pipe",
     // "inserter",
     // "inventory-bonus-equipment",
-    "item-entity",
+    // "item-entity",
     "item-group",
     "item",
     // "item-request-proxy",
@@ -1016,6 +1016,12 @@ pub struct Config {
     pub field_rules: Vec<FieldRule>,
 }
 
+macro_rules! map_type {
+    ($from:expr, $to:expr) => {
+        (String::from($from), String::from($to))
+    };
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -1030,29 +1036,43 @@ impl Default for Config {
                 .collect(),
             custom_type_map: vec![
                 // 能量字符串（"5MJ"、"300kW"）→ 预定义解析类型（自定义 Deserialize）
-                (
-                    "Energy".to_string(),
-                    "crate::types::EnergyAmount".to_string(),
-                ),
-                (
-                    "EnergyAmount".to_string(),
-                    "crate::types::EnergyAmount".to_string(),
-                ),
-                // 颜色：数组/对象 → 预定义类型
-                ("Color".to_string(), "crate::types::Color".to_string()),
-                // 地图位置：对象/数组 → 预定义类型
-                (
-                    "MapPosition".to_string(),
-                    "crate::types::MapPosition".to_string(),
-                ),
-                // 效果类型限制：union[literal|array] → 手写具名类型（语义建模）
-                (
-                    "EffectTypeLimitation".to_string(),
-                    "crate::types::EffectTypeLimitation".to_string(),
-                ),
+                map_type!("Energy", "crate::types::EnergyAmount"),
+                map_type!("Color", "crate::types::Color"),
+                map_type!("MapPosition", "crate::types::MapPosition"),
+                map_type!("EffectTypeLimitation", "crate::types::EffectTypeLimitation"),
+                map_type!("EnergySource", "crate::types::EnergySource"),
+                map_type!("ItemProductPrototype", "crate::types::ItemProduct"),
+                map_type!("FluidProductPrototype", "crate::types::FluidProduct"),
+                map_type!("ProductPrototype", "crate::types::Product"),
+                map_type!("ElectricEnergySource", "crate::types::ElectricEnergySource"),
+                map_type!("BurnerEnergySource", "crate::types::BurnerEnergySource"),
+                map_type!("FluidEnergySource", "crate::types::FluidEnergySource"),
+                map_type!("VoidEnergySource", "crate::types::VoidEnergySource"),
+                map_type!("HeatEnergySource", "crate::types::HeatEnergySource"),
             ],
         }
     }
+}
+
+
+macro_rules! skip {
+    ($struct:expr, $field:expr) => {
+        FieldRule {
+            struct_name: $struct,
+            field_name: $field,
+            action: FieldAction::Skip,
+        }
+    };
+}
+
+macro_rules! ty {
+    ($struct:expr, $field:expr, $ty:expr) => {
+        FieldRule {
+            struct_name: $struct,
+            field_name: $field,
+            action: FieldAction::Type($ty),
+        }
+    };
 }
 
 /// 默认字段级覆盖规则。
@@ -1061,16 +1081,52 @@ impl Default for Config {
 /// 无法在 schema 中命名 → 由手写类型 `crate::types::BoilerMode` 解析；
 /// fire_flicker_enabled 与计算无关 → 完全跳过。
 pub const DEFAULT_FIELD_RULES: &[FieldRule] = &[
-    FieldRule {
-        struct_name: "BoilerPrototype",
-        field_name: "mode",
-        action: FieldAction::Type("crate::types::BoilerMode"),
-    },
-    FieldRule {
-        struct_name: "BoilerPrototype",
-        field_name: "fire_flicker_enabled",
-        action: FieldAction::Skip,
-    },
+    ty!("BoilerPrototype", "mode", "crate::types::BoilerMode"),
+    skip!("BoilerPrototype", "fire_flicker_enabled"),
+    skip!("EntityPrototype", "map_color"),
+    skip!("EntityPrototype", "remove_decoratives"),
+    skip!("EntityPrototype", "placeable_by"),
+    skip!("EntityPrototype", "alert_icon_scale"),
+    skip!("EntityPrototype", "alert_icon_shift"),
+    skip!("EntityPrototype", "ambient_sounds"),
+    skip!("EntityPrototype", "hit_visualization_box"),
+    skip!("EntityPrototype", "map_generator_bounding_box"),
+    skip!("EntityPrototype", "selection_box"),
+    skip!("EntityPrototype", "stateless_visualisation"),
+    skip!("EntityPrototype", "sticker_box"),
+    skip!("EntityPrototype", "remains_when_mined"),
+    skip!("EntityWithHealthPrototype", "attack_reaction"),
+    skip!("EntityWithHealthPrototype", "corpse"),
+    skip!("EntityWithHealthPrototype", "dying_explosion"),
+    ty!("ContainerPrototype", "inventory_type", "crate::types::InventoryType"),
+    skip!("FluidBox", "pipe_connections"),
+    skip!("AutoplaceControl", "category"),
+    ty!("BeaconPrototype", "beacon_counter", "crate::types::BeaconCounter"),
+    skip!("LinkedContainerPrototype", "gui_mode"),
+    ty!("LinkedContainerPrototype", "inventory_type", "crate::types::InventoryType"),
+    skip!("TilePrototype", "ambient_sounds"),
+    skip!("TilePrototype", "bound_decoratives"),
+    skip!("TilePrototype", "build_sound"),
+    skip!("TilePrototype", "dying_explosion"),
+    skip!("TilePrototype", "placeable_by"),
+    ty!("LoaderPrototype", "energy_source", "crate::types::EnergySource"),
+    ty!("BeaconPrototype", "energy_source", "crate::types::EnergySource"),
+    skip!("MiningDrillPrototype", "vector_to_place_result"),
+    skip!("OffshorePumpPrototype", "fluid_source_offset"),
+    skip!("RocketSiloPrototype", "door_back_open_offset"),
+    skip!("RocketSiloPrototype", "door_front_open_offset"),
+    skip!("RocketSiloPrototype", "hole_clipping_box"),
+    skip!("RocketSiloPrototype", "window_bounding_box"),
+    skip!("SimpleEntityPrototype", "stateless_visualisation_variations"),
+    skip!("SimpleEntityWithOwnerPrototype", "stateless_visualisation_variations"),
+    skip!("SimpleEntityWithForcePrototype", "stateless_visualisation_variations"),
+    skip!("TreePrototype", "stateless_visualisation_variations"),
+    ty!("AsteroidCollectorPrototype", "energy_source", "crate::types::EnergySource"),
+    ty!("AutoplaceSpecification", "force", "String"),
+    skip!("AgriculturalTowerPrototype", "harvesting_procedure_points"),
+    skip!("AgriculturalTowerPrototype", "planting_procedure_points"),
+    skip!("CraftingMachinePrototype", "vector_to_place_result"),
+    skip!("MiningDrillPrototype", "resource_searching_offset"),
 ];
 
 impl Config {

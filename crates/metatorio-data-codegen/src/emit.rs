@@ -310,7 +310,7 @@ fn emit_struct(
                     continue;
                 }
                 // 整数元素数组：泛型宽松整数 Vec（serde 字面量替换）
-                Mapped::LenientInt(ty) => {
+                Mapped::LenientInt(_) => {
                     let fn_name = if prop.optional {
                         "crate::lenient::de_opt_vec_int"
                     } else {

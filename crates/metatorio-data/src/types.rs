@@ -9,8 +9,12 @@
 //! 从 metatorio_egui 的 `factorio/common.rs` 与 `format.rs` 迁移而来，
 //! 去掉了 egui 依赖（egui::Color32 的转换留在 UI crate）。
 
+use std::collections::BTreeMap;
+
 use serde::de::{Deserializer, Error as _};
 use serde_json::Value;
+
+use crate::{FluidBoxComponent, SpentFluidSpecificationComponent};
 
 // ── 能量 ────────────────────────────────────────────────────────────
 
@@ -171,91 +175,335 @@ impl<'de> serde::Deserialize<'de> for MapPosition {
     }
 }
 
-// ── 锅炉模式（BoilerMode）────────────────────────────────────────
+// ── 向量与包围盒 ────────────────────────────────────────────────
 
-/// 锅炉工作模式。
-///
-/// schema 中是**内联 union**（`"heat-fluid-inside" | "output-to-separate-pipe"`），
-/// 无法命名 → 由字段级覆盖规则（FieldRule）指定为本类型。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BoilerMode {
-    /// 流体在流体箱内直接加热（默认）。
-    HeatFluidInside,
-    /// 加热后转移到独立输出管道（可设置过滤器转换流体）。
-    OutputToSeparatePipe,
-}
+/// 二维向量（schema 的 `Vector`：union[struct, tuple]，即 `{x,y}` 或 `[x,y]`）。
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize)]
+pub struct Vector(pub f64, pub f64);
 
-impl BoilerMode {
-    pub fn parse(s: &str) -> Option<BoilerMode> {
-        match s {
-            "heat-fluid-inside" => Some(BoilerMode::HeatFluidInside),
-            "output-to-separate-pipe" => Some(BoilerMode::OutputToSeparatePipe),
-            _ => None,
-        }
-    }
-
-    pub fn name(self) -> &'static str {
-        match self {
-            BoilerMode::HeatFluidInside => "heat-fluid-inside",
-            BoilerMode::OutputToSeparatePipe => "output-to-separate-pipe",
-        }
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for BoilerMode {
+impl<'de> serde::Deserialize<'de> for Vector {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
         let value: Value = serde::Deserialize::deserialize(deserializer)?;
         match value {
-            Value::String(s) => {
-                BoilerMode::parse(&s).ok_or_else(|| D::Error::custom(format!("未知锅炉模式: {s}")))
+            Value::Object(map) => {
+                let x = map.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                let y = map.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                Ok(Vector(x, y))
             }
-            _ => Err(D::Error::custom("锅炉模式应为字符串")),
+            Value::Array(vec) if vec.len() >= 2 => {
+                let x = vec[0].as_f64().unwrap_or(0.0);
+                let y = vec[1].as_f64().unwrap_or(0.0);
+                Ok(Vector(x, y))
+            }
+            _ => Err(D::Error::custom("Vector 不是对象或长度 ≥2 的数组")),
         }
     }
 }
 
-impl serde::Serialize for BoilerMode {
-    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        s.serialize_str(self.name())
+/// 三维向量（schema 的 `Vector3D`）。
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize)]
+pub struct Vector3D(pub f64, pub f64, pub f64);
+
+impl<'de> serde::Deserialize<'de> for Vector3D {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value: Value = serde::Deserialize::deserialize(deserializer)?;
+        match value {
+            Value::Object(map) => {
+                let x = map.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                let y = map.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                let z = map.get("z").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                Ok(Vector3D(x, y, z))
+            }
+            Value::Array(vec) if vec.len() >= 3 => {
+                let x = vec[0].as_f64().unwrap_or(0.0);
+                let y = vec[1].as_f64().unwrap_or(0.0);
+                let z = vec[2].as_f64().unwrap_or(0.0);
+                Ok(Vector3D(x, y, z))
+            }
+            _ => Err(D::Error::custom("Vector3D 不是对象或长度 ≥3 的数组")),
+        }
     }
+}
+
+/// 包围盒（schema 的 `BoundingBox`：union[struct, tuple, tuple]）。
+///
+/// 游戏 dump 形态：`[[-0.9, -0.9], [0.9, 0.9]]`（嵌套数组）；
+/// 也支持对象形态 `{left_top: {x,y}, right_bottom: {x,y}}` 与平铺 `[x1,y1,x2,y2]`。
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize)]
+pub struct BoundingBox(pub Vector, pub Vector);
+
+impl<'de> serde::Deserialize<'de> for BoundingBox {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value: Value = serde::Deserialize::deserialize(deserializer)?;
+        match value {
+            Value::Array(vec) if vec.len() == 2 => {
+                // 嵌套形态 [[x1,y1],[x2,y2]]
+                let min = serde_json::from_value::<Vector>(vec[0].clone())
+                    .map_err(|_| D::Error::custom("BoundingBox 第一个顶点非法"))?;
+                let max = serde_json::from_value::<Vector>(vec[1].clone())
+                    .map_err(|_| D::Error::custom("BoundingBox 第二个顶点非法"))?;
+                Ok(BoundingBox(min, max))
+            }
+            Value::Array(vec) if vec.len() >= 4 => {
+                // 平铺形态 [x1, y1, x2, y2]
+                Ok(BoundingBox(
+                    Vector(
+                        vec[0].as_f64().unwrap_or(0.0),
+                        vec[1].as_f64().unwrap_or(0.0),
+                    ),
+                    Vector(
+                        vec[2].as_f64().unwrap_or(0.0),
+                        vec[3].as_f64().unwrap_or(0.0),
+                    ),
+                ))
+            }
+            Value::Object(map) => {
+                let lt = map
+                    .get("left_top")
+                    .and_then(|v| serde_json::from_value::<Vector>(v.clone()).ok())
+                    .unwrap_or_default();
+                let rb = map
+                    .get("right_bottom")
+                    .and_then(|v| serde_json::from_value::<Vector>(v.clone()).ok())
+                    .unwrap_or_default();
+                Ok(BoundingBox(lt, rb))
+            }
+            _ => Err(D::Error::custom("BoundingBox 形态不合法")),
+        }
+    }
+}
+
+// ── 配方产物/原料（Product：tag 枚举，type: "item"|"fluid"）──────
+
+/// 物品产物/原料数据（`Product::Item`）。
+/// 字段全宽松（覆盖 IngredientPrototype / ProductPrototype / ItemProductPrototype）。
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct ItemProduct {
+    pub name: String,
+    #[serde(deserialize_with = "crate::lenient::de_opt_int")]
+    pub amount: Option<u16>,
+    #[serde(deserialize_with = "crate::lenient::de_opt_int")]
+    pub amount_min: Option<u16>,
+    #[serde(deserialize_with = "crate::lenient::de_opt_int")]
+    pub amount_max: Option<u16>,
+    #[serde(deserialize_with = "crate::lenient::de_int")]
+    ignored_by_stats: u16,
+    ignored_by_productivity: Option<u16>,
+    pub extra_count_fraction: f64,
+    pub quality_min: Option<String>,
+    pub quality_max: Option<String>,
+    #[serde(deserialize_with = "crate::lenient::de_int")]
+    pub quality_change: u8,
+    #[serde(default = "default_affected_by_quality")]
+    pub affected_by_quality: bool,
+    #[serde(default, flatten)]
+    pub probability_info: ProbabilityInfo,
+}
+
+fn default_affected_by_quality() -> bool {
+    true
+}
+
+/// 流体产物/原料数据（`Product::Fluid`）。
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct FluidProduct {
+    pub name: String,
+    pub amount: Option<f64>,
+    pub amount_min: Option<f64>,
+    pub amount_max: Option<f64>,
+    pub temperature: Option<f64>,
+    ignored_by_stats: f64,
+    ignored_by_productivity: Option<f64>,
+    #[serde(default, flatten)]
+    pub probability_info: ProbabilityInfo,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ProbabilityInfo {
+    #[serde(default = "default_independent_probability")]
+    independent_probability: f64,
+    #[serde(default)]
+    shared_probability: SharedProbabilityInfo,
+}
+
+fn default_independent_probability() -> f64 {
+    1.0
+}
+
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SharedProbabilityInfo {
+    #[serde(default = "default_probability_min")]
+    min: f64,
+    #[serde(default = "default_probability_max")]
+    max: f64
+}
+
+fn default_probability_min() -> f64 {
+    0.0
+}
+
+fn default_probability_max() -> f64 {
+    1.0
+}
+
+/// 配方产物/原料（schema 的 `IngredientPrototype`/`ProductPrototype`/`ItemProductPrototype`，
+/// 均为 prototypes 类——由 custom_type_map 注册）。
+///
+/// serde **内部标记枚举**：dump 的 `{"type": "item", "name": ..., "amount": ...}` 平铺匹配。
+/// 参考 metatorio_egui `recipe.rs` 的 RecipeIngredient/RecipeResult 设计。
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+pub enum Product {
+    Item(ItemProduct),
+    Fluid(FluidProduct),
+}
+
+// ── 能量源（EnergySource：tag 枚举，type 字段判别）───────────────
+
+/// 电力能量源数据（`type = "electric"`）。
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct ElectricEnergySource {
+    pub buffer_capacity: Option<EnergyAmount>,
+    pub input_flow_limit: Option<EnergyAmount>,
+    pub output_flow_limit: Option<EnergyAmount>,
+    pub drain: Option<EnergyAmount>,
+    pub emissions_per_minute: BTreeMap<String, f64>,
+}
+
+/// 燃烧能量源数据（`type = "burner"`）。
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct BurnerEnergySource {
+    #[serde(deserialize_with = "crate::lenient::de_vec_lenient", default = "default_fuel_categories")]
+    pub fuel_categories: Vec<String>,
+    #[serde(default = "default_burner_usage")]
+    pub burner_usage: String,
+    #[serde(default = "default_effectivity")]
+    pub effectivity: f64,
+    pub fuel_inventory_size: Option<u32>,
+    pub burnt_inventory_size: Option<u32>,
+    pub emissions_per_minute: BTreeMap<String, f64>,
+}
+
+fn default_fuel_categories() -> Vec<String> {
+    vec!["chemical".to_string()]
+}
+
+fn default_burner_usage() -> String {
+    "fuel".to_string()
+}
+
+fn default_effectivity() -> f64 {
+    1.0
+}
+
+/// 热量能量源数据（`type = "heat"`，核反应堆等）。
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct HeatEnergySource {
+    pub max_temperature: f64,
+    pub specific_heat: EnergyAmount,
+    pub emissions_per_minute: BTreeMap<String, f64>,
+}
+
+/// 流体能量源数据（`type = "fluid"`，2.0 新能量源）。
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct FluidEnergySource {
+    pub emissions_per_minute: BTreeMap<String, f64>,
+    pub fluid_box: FluidBoxComponent,
+    pub output_fluid_box: Option<FluidBoxComponent>,
+    #[serde(default = "default_effectivity")]
+    pub effectivity: f64,
+    pub scale_fluid_usage: Option<bool>,
+    pub fluid_usage_per_tick: f64,
+    pub maximum_temperature : f64,
+    pub burns_fluid: Option<bool>,
+    pub spent_fluid: SpentFluidSpecificationComponent,
+}
+
+/// 能量源（schema 的 `EnergySource`：union[type × 5]）。
+///
+/// 机器/发电机/反应堆的能量输入方式，metatorio 计算（`energy_source_as_flow`）的核心。
+/// serde **内部标记枚举**：`{"type": "electric", ...}` 直接平铺到变体数据，
+/// 参考 metatorio_egui `common.rs` 的 EnergySource 设计。
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+pub enum EnergySource {
+    #[default]
+    Void,
+    Electric(ElectricEnergySource),
+    Burner(BurnerEnergySource),
+    Heat(HeatEnergySource),
+    Fluid(FluidEnergySource),
+}
+
+// ── 科技等级上限（max_level：uint | "infinite"）──────────────────
+
+/// 科技等级上限（schema：`union[uint32, literal "infinite"]`）。
+/// 非 tag 形态（数字与字符串混用），保留自定义反序列化。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub enum TechnologyMaxLevel {
+    U32(u32),
+    Infinite,
+}
+
+impl<'de> serde::Deserialize<'de> for TechnologyMaxLevel {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value: Value = serde::Deserialize::deserialize(deserializer)?;
+        match value {
+            Value::Number(n) => n
+                .as_u64()
+                .map(|v| TechnologyMaxLevel::U32(v as u32))
+                .ok_or_else(|| D::Error::custom("max_level 数字解析失败")),
+            Value::String(s) if s == "infinite" => Ok(TechnologyMaxLevel::Infinite),
+            _ => Err(D::Error::custom("max_level 应为数字或 \"infinite\"")),
+        }
+    }
+}
+
+// ── 锅炉模式（BoilerMode）────────────────────────────────────────
+
+/// 锅炉工作模式。
+///
+/// schema 中是**内联 union**（`"heat-fluid-inside" | "output-to-separate-pipe"`），
+/// 无法命名 → 由字段级覆盖规则（FieldRule）指定为本类型。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum BoilerMode {
+    /// 流体在流体箱内直接加热（默认）。
+    #[default]
+    HeatFluidInside,
+    /// 加热后转移到独立输出管道（可设置过滤器转换流体）。
+    OutputToSeparatePipe,
 }
 
 // ── 效果类型（EffectTypeLimitation）──────────────────────────────
 
 /// 模块/信标效果类型（schema 的 union 成员是固定的 5 个字面值）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum EffectType {
     Speed,
     Productivity,
     Consumption,
     Pollution,
     Quality,
-}
-
-impl EffectType {
-    pub fn parse(s: &str) -> Option<EffectType> {
-        match s {
-            "speed" => Some(EffectType::Speed),
-            "productivity" => Some(EffectType::Productivity),
-            "consumption" => Some(EffectType::Consumption),
-            "pollution" => Some(EffectType::Pollution),
-            "quality" => Some(EffectType::Quality),
-            _ => None,
-        }
-    }
-
-    pub fn name(self) -> &'static str {
-        match self {
-            EffectType::Speed => "speed",
-            EffectType::Productivity => "productivity",
-            EffectType::Consumption => "consumption",
-            EffectType::Pollution => "pollution",
-            EffectType::Quality => "quality",
-        }
-    }
 }
 
 /// 允许的效果类型集合（模块/信标机器）。
@@ -277,17 +525,17 @@ impl<'de> serde::Deserialize<'de> for EffectTypeLimitation {
         let mut allowed = Vec::new();
         match value {
             Value::String(s) => {
-                let t = EffectType::parse(&s)
-                    .ok_or_else(|| D::Error::custom(format!("未知效果类型: {s}")))?;
+                let t = serde_json::from_value::<EffectType>(Value::String(s))
+                    .map_err(|_| D::Error::custom("未知效果类型"))?;
                 allowed.push(t);
             }
             Value::Array(items) => {
                 for item in items {
                     if let Value::String(s) = item {
-                        if let Some(t) = EffectType::parse(&s) {
+                        // 未知效果类型：容错跳过（mod 数据不规范）
+                        if let Ok(t) = serde_json::from_value::<EffectType>(Value::String(s)) {
                             allowed.push(t);
                         }
-                        // 非字符串元素：容错跳过（mod 数据不规范）
                     }
                 }
             }
@@ -304,7 +552,7 @@ impl serde::Serialize for EffectTypeLimitation {
         use serde::ser::SerializeSeq;
         let mut seq = s.serialize_seq(Some(self.allowed.len()))?;
         for t in &self.allowed {
-            seq.serialize_element(t.name())?;
+            seq.serialize_element(t)?;
         }
         seq.end()
     }
@@ -339,6 +587,25 @@ impl serde::Serialize for MapPosition {
         st.serialize_field("y", &self.1)?;
         st.end()
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum InventoryType {
+    Normal,
+    #[default]
+    WithBar,
+    WithFiltersAndBar,
+    WithCustomStackSize,
+    WithWeightLimit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum BeaconCounter {
+    #[default]
+    Total,
+    SameType,
 }
 
 #[cfg(test)]
@@ -419,5 +686,97 @@ mod tests {
         assert_eq!(m, MapPosition(1.5, -2.0));
         let m: MapPosition = serde_json::from_str(r#"[3.0, 4.0]"#).unwrap();
         assert_eq!(m, MapPosition(3.0, 4.0));
+    }
+
+    #[test]
+    fn vector_and_bounding_box_parse() {
+        // Vector：对象/数组双形态
+        let v: Vector = serde_json::from_str(r#"{"x": 1.5, "y": -2.0}"#).unwrap();
+        assert_eq!(v, Vector(1.5, -2.0));
+        let v: Vector = serde_json::from_str(r#"[3.0, 4.0]"#).unwrap();
+        assert_eq!(v, Vector(3.0, 4.0));
+        // BoundingBox：嵌套数组（dump 形态）/平铺/对象
+        let b: BoundingBox = serde_json::from_str(r#"[[-0.9, -0.9], [0.9, 0.9]]"#).unwrap();
+        assert_eq!(b, BoundingBox(Vector(-0.9, -0.9), Vector(0.9, 0.9)));
+        let b: BoundingBox = serde_json::from_str(r#"[0.0, 0.0, 2.0, 2.0]"#).unwrap();
+        assert_eq!(b, BoundingBox(Vector(0.0, 0.0), Vector(2.0, 2.0)));
+        let b: BoundingBox = serde_json::from_str(
+            r#"{"left_top": {"x": 0.0, "y": 0.0}, "right_bottom": {"x": 1.0, "y": 1.0}}"#,
+        )
+        .unwrap();
+        assert_eq!(b, BoundingBox(Vector(0.0, 0.0), Vector(1.0, 1.0)));
+    }
+
+    #[test]
+    fn product_tag_enum_parses() {
+        // 物品产物（tag = "item"，平铺）
+        let p: Product =
+            serde_json::from_str(r#"{"type": "item", "name": "iron-plate", "amount": 1}"#)
+                .unwrap();
+        match &p {
+            Product::Item(data) => {
+                assert_eq!(data.name, "iron-plate");
+                assert_eq!(data.amount, Some(1.0));
+            }
+            Product::Fluid(_) => panic!("应为物品产物"),
+        }
+        // 流体原料（带温度字段）
+        let p: Product =
+            serde_json::from_str(r#"{"type": "fluid", "name": "water", "amount": 10, "temperature": 15}"#)
+                .unwrap();
+        match &p {
+            Product::Fluid(data) => {
+                assert_eq!(data.name, "water");
+                assert_eq!(data.temperature, Some(15.0));
+            }
+            Product::Item(_) => panic!("应为流体原料"),
+        }
+        // 缺字段容错（#[serde(default)]）
+        let p: Product = serde_json::from_str(r#"{"type": "item", "name": "x"}"#).unwrap();
+        assert!(matches!(p, Product::Item(_)));
+        // 未知 type 报错
+        assert!(serde_json::from_str::<Product>(r#"{"type": "unknown", "name": "x"}"#).is_err());
+    }
+
+    #[test]
+    fn energy_source_tag_enum_parses() {
+        // electric：平铺
+        let e: EnergySource = serde_json::from_str(
+            r#"{"type": "electric", "buffer_capacity": "5MJ", "usage_priority": "tertiary"}"#,
+        )
+        .unwrap();
+        match &e {
+            EnergySource::Electric(data) => {
+                assert_eq!(data.buffer_capacity.unwrap().amount, 5_000_000.0);
+                assert_eq!(data.usage_priority.as_deref(), Some("tertiary"));
+            }
+            _ => panic!("应为 electric"),
+        }
+        // burner
+        let e: EnergySource = serde_json::from_str(
+            r#"{"type": "burner", "fuel_categories": ["chemical"], "effectivity": 1.0}"#,
+        )
+        .unwrap();
+        assert!(matches!(e, EnergySource::Burner(_)));
+        // void（unit 变体）
+        let e: EnergySource = serde_json::from_str(r#"{"type": "void"}"#).unwrap();
+        assert_eq!(e, EnergySource::Void);
+        // 缺 type 字段 → 报错
+        assert!(serde_json::from_str::<EnergySource>(r#"{"buffer_capacity": "5MJ"}"#).is_err());
+        // 未知 type 报错
+        assert!(serde_json::from_str::<EnergySource>(r#"{"type": "nuclear"}"#).is_err());
+    }
+
+    #[test]
+    fn technology_max_level_parses() {
+        assert_eq!(
+            serde_json::from_str::<TechnologyMaxLevel>("5").unwrap(),
+            TechnologyMaxLevel::U32(5)
+        );
+        assert_eq!(
+            serde_json::from_str::<TechnologyMaxLevel>(r#""infinite""#).unwrap(),
+            TechnologyMaxLevel::Infinite
+        );
+        assert!(serde_json::from_str::<TechnologyMaxLevel>(r#""5""#).is_err());
     }
 }
