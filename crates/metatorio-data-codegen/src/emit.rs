@@ -314,6 +314,56 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
     }
     out.push_str("        _ => Err(serde::de::Error::custom(format!(\"未知组件名: {name}\"))),\n    }\n}\n\n");
 
+    // 5.6 Component trait：组件类型安全的类型名 + 提取（Phase 3 强类型索引）
+    out.push_str("/// 组件 trait：类型安全的组件名（&'static str）与提取。\n");
+    out.push_str("pub trait Component: Sized {\n");
+    out.push_str("    /// 组件名（COMPONENT_LIST 条目，也是 components map 的键）。\n");
+    out.push_str("    const TYPENAME: &'static str;\n");
+    out.push_str("    /// 从 ComponentValue 按引用提取（类型不匹配时 panic——插入时已保证正确）。\n");
+    out.push_str("    fn as_ref(cv: &ComponentValue) -> &Self;\n");
+    out.push_str("    /// 从 ComponentValue 按引用提取（Option 版本）。\n");
+    out.push_str("    fn as_ref_opt(cv: &ComponentValue) -> Option<&Self>;\n");
+    out.push_str("}\n\n");
+    for n in &all_components {
+        out.push_str(&format!(
+            "impl Component for {n} {{\n    const TYPENAME: &'static str = {n:?};\n    fn as_ref(cv: &ComponentValue) -> &Self {{\n        match cv {{\n            ComponentValue::{n}(c) => c,\n            _ => panic!(\"ComponentValue 类型不匹配: 期望 {n}\"),\n        }}\n    }}\n    fn as_ref_opt(cv: &ComponentValue) -> Option<&Self> {{\n        match cv {{\n            ComponentValue::{n}(c) => Some(c),\n            _ => None,\n        }}\n    }}\n}}\n\n"
+        ));
+    }
+
+    // 5.7 PrototypeGroup 强类型枚举（关注类型 → 变体）+ 映射函数
+    // 包进 pub mod 隔离：types 里可能有同名 struct（如 "Item"），顶层会撞名
+    out.push_str("pub mod prototype_groups {\n");
+    out.push_str("/// 聚合组（LuaPrototypes 的 entity/item 聚合语义）。\n");
+    out.push_str("/// 关注类型各有独立变体；未知类型 → Unknown(原始 typename)。\n");
+    out.push_str("#[derive(Debug, Clone, PartialEq, Eq, Hash)]\npub enum PrototypeGroup {\n");
+    out.push_str("    /// 含 EntityComponent 的原型。\n    Entity,\n");
+    out.push_str("    /// 含 ItemComponent 的原型。\n    Item,\n");
+    let mut group_variants: Vec<(&str, String)> = Vec::new(); // (typename, variant)
+    for p in &concerned {
+        let Some(tn) = &p.typename else { continue };
+        let variant = typename_to_variant(tn);
+        // 跳过聚合变体名（Entity/Item 已由组件推导，避免与枚举变体冲突）
+        if variant == "Entity" || variant == "Item" {
+            continue;
+        }
+        if !group_variants.iter().any(|(t, _)| t == tn) {
+            group_variants.push((tn, variant));
+        }
+    }
+    for (_, variant) in &group_variants {
+        out.push_str(&format!("    {variant},\n"));
+    }
+    out.push_str("    /// 未知类型（关注清单外或 mod 新增）。\n    Unknown(String),\n}\n\n");
+    out.push_str("/// typename（dump 键名）→ PrototypeGroup（未知类型 → Unknown）。\n");
+    out.push_str("pub fn prototype_group_from_type(typename: &str) -> PrototypeGroup {\n    match typename {\n");
+    // 聚合键：entity/item 顶层键直接归入聚合变体（与 derive_group 的组件判断一致）
+    out.push_str("        \"entity\" => PrototypeGroup::Entity,\n        \"item\" => PrototypeGroup::Item,\n");
+    for (tn, variant) in &group_variants {
+        out.push_str(&format!("        {tn:?} => PrototypeGroup::{variant},\n"));
+    }
+    out.push_str("        _ => PrototypeGroup::Unknown(typename.to_string()),\n    }\n}\n");
+    out.push_str("} // mod prototype_groups\n\n");
+
     // 6. 自定义类型使用清单
     let mut custom_used: BTreeMap<String, ()> = BTreeMap::new();
     for (_, v) in &config.custom_type_map {
@@ -383,6 +433,31 @@ fn extract_type_names(ty: &str, candidates: &HashSet<String>, refs: &mut HashSet
     }
     if candidates.contains(&current) {
         refs.insert(current);
+    }
+}
+
+
+/// typename（dump 键名，kebab-case）→ PrototypeGroup 变体名（PascalCase）。
+fn typename_to_variant(typename: &str) -> String {
+    let mut out = String::new();
+    for part in typename.split('-') {
+        let mut chars = part.chars();
+        if let Some(first) = chars.next() {
+            out.push(first.to_ascii_uppercase());
+            out.extend(chars);
+        }
+    }
+    if out.is_empty() {
+        out.push_str("Unknown");
+    }
+    // Rust 关键字/非法标识符兜底（罕见）
+    match out.as_str() {
+        "Type" | "Match" | "Mod" | "Ref" | "Loop" | "Move" | "Use" | "Fn" | "In" | "As"
+        | "Impl" | "Let" | "Mut" | "Pub" | "Self" | "Super" | "Where" | "While" | "Return"
+        | "Static" | "Struct" | "Enum" | "Trait" | "True" | "False" | "Break" | "Continue"
+        | "Const" | "Crate" | "Dyn" | "Else" | "Extern" | "For" | "If" | "Async" | "Await"
+        | "Union" | "Unsafe" => format!("{out}_"),
+        _ => out,
     }
 }
 

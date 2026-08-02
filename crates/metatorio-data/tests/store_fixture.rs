@@ -1,7 +1,9 @@
 //! Phase 3 集成测试：PrototypeStore 加载 fixture dump，
 //! 验证 (group, name) 主键、聚合标签与跨键分组。
 
-use metatorio_data::generated_components::ComponentValue;
+use metatorio_data::generated_components::{
+    ComponentValue, CraftingMachineComponent, ItemComponent,
+};
 use metatorio_data::store::{PrototypeGroup, PrototypeStore};
 use serde_json::Value;
 
@@ -27,11 +29,11 @@ fn assembling_machine_is_two_records() {
         entity.has("CraftingMachineComponent"),
         "entity 记录应含 Crafter 组件"
     );
+    let crafter = entity.component::<CraftingMachineComponent>().expect("Crafter 组件");
+    assert!((crafter.crafting_speed - 0.5).abs() < 1e-9, "组装机1 速度 0.5");
     match entity.get("CraftingMachineComponent") {
-        Some(ComponentValue::CraftingMachineComponent(c)) => {
-            assert!((c.crafting_speed - 0.5).abs() < 1e-9, "组装机1 速度 0.5");
-        }
-        _ => panic!("CraftingMachineComponent 类型不匹配"),
+        Some(ComponentValue::CraftingMachineComponent(_)) => {}
+        _ => panic!("ComponentValue 变体不匹配"),
     }
 
     // Item 组：item 键 → 含物品组件（同名不同组 = 不同原型）
@@ -40,9 +42,11 @@ fn assembling_machine_is_two_records() {
         .expect("应有 item 组记录");
     assert_eq!(item.type_, "item");
     assert!(item.has("ItemComponent"));
+    assert!(item.component::<ItemComponent>().is_some(), "item 记录应含 Item 组件");
 
     // 两条记录必须不同（主键 (group, name)）
     assert_ne!(entity.group, item.group);
+    dbg!(item);
 }
 
 #[test]
@@ -80,15 +84,13 @@ fn group_iteration_and_length() {
     let entity_count = store.group(&PrototypeGroup::Entity).count();
     let item_count = store.group(&PrototypeGroup::Item).count();
     let other_count = store
-        .group(&PrototypeGroup::Other("recipe".to_string()))
+        .group(&PrototypeGroup::Recipe)
         .count();
     assert!(entity_count > 0, "应有实体记录");
     assert!(item_count > 0, "应有物品记录");
     assert!(other_count > 0, "应有配方记录");
 
     // 总数 = 各组之和（Entity + Item + 全部 Other）
-    let other_total: usize = store.group(&PrototypeGroup::Other("".to_string())).count();
-    let _ = other_total; // group() 按组过滤，上面仅示例；总数用 len 验证即可
     assert!(store.len() >= entity_count + item_count);
 
     dbg!(

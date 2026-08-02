@@ -283,7 +283,12 @@ fn enqueue_complex(
 pub fn component_name(schema: &Schema, schema_name: &str) -> String {
     if schema.is_prototype_type(schema_name) {
         let stem = schema_name.strip_suffix("Prototype").unwrap_or(schema_name);
-        format!("{stem}Component")
+        if stem.is_empty() {
+            // 虚类 "Prototype" 去后缀后为空 → 保留原名（避免空名字/与 trait 撞名）
+            format!("{schema_name}Component")
+        } else {
+            format!("{stem}Component")
+        }
     } else {
         schema_name.to_string()
     }

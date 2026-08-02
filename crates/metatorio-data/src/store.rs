@@ -9,33 +9,18 @@
 //!   （如 "assembling-machine-1" 的 item 与 entity 是两条记录；"speed-module" 的
 //!   recipe/module/technology 是三条记录）
 
-use crate::generated_components::{COMPONENT_LIST, ComponentValue, deserialize_component};
+use crate::generated_components::{
+    COMPONENT_LIST, Component, ComponentValue, deserialize_component,
+};
+use crate::generated_components::prototype_groups::prototype_group_from_type;
 use serde_json::Value;
 use std::fmt;
 
 /// 带 ahash 的索引 Map（与 metatorio_egui 的 AIndexMap 同构）。
 pub type AIndexMap<K, V> = indexmap::IndexMap<K, V, ahash::RandomState>;
 
-/// 聚合组（LuaPrototypes 的 entity/item 聚合语义）。
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum PrototypeGroup {
-    /// 含 EntityComponent 的原型（assembling-machine/furnace/mining-drill 等全部实体子类型）。
-    Entity,
-    /// 含 ItemComponent 的原型。
-    Item,
-    /// 其他：按原始 dump 键名（type_）记录。
-    Other(String),
-}
-
-impl fmt::Display for PrototypeGroup {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            PrototypeGroup::Entity => write!(f, "entity"),
-            PrototypeGroup::Item => write!(f, "item"),
-            PrototypeGroup::Other(t) => write!(f, "{t}"),
-        }
-    }
-}
+/// 聚合组（生成器生成：Entity/Item + 每个关注类型一个变体 + Unknown 兜底）。
+pub use crate::generated_components::prototype_groups::PrototypeGroup;
 
 /// 单个原型记录：组件集合 + 聚合标签。
 #[derive(Debug, Clone)]
@@ -47,7 +32,7 @@ pub struct PrototypeRecord {
     /// 聚合标签（组件推导）。
     pub group: PrototypeGroup,
     /// 组件集合：组件名（COMPONENT_LIST 条目）→ 反序列化后的组件。
-    pub components: AIndexMap<String, ComponentValue>,
+    pub components: AIndexMap<&'static str, ComponentValue>,
 }
 
 impl PrototypeRecord {
@@ -59,6 +44,20 @@ impl PrototypeRecord {
     /// 取组件（按组件名）。
     pub fn get(&self, component: &str) -> Option<&ComponentValue> {
         self.components.get(component)
+    }
+
+    /// 类型安全地取组件（`component::<CraftingMachineComponent>()`）。
+    /// 组件缺失 → None；类型不匹配 → panic（插入时已保证变体正确）。
+    pub fn component<T: Component>(&self) -> Option<&T> {
+        self.components.get(T::TYPENAME).and_then(T::as_ref_opt)
+    }
+
+    /// 类型安全地取组件，缺失时 panic（带记录名与组件名）。
+    pub fn component_required<T: Component>(&self) -> &T {
+        match self.components.get(T::TYPENAME) {
+            Some(cv) => T::as_ref(cv),
+            None => panic!("原型 {} ({}) 缺少组件 {}", self.name, self.type_, T::TYPENAME),
+        }
     }
 }
 
@@ -118,13 +117,13 @@ impl PrototypeStore {
             };
             for (name, value) in entries_obj {
                 total += 1;
-                let mut components: AIndexMap<String, ComponentValue> =
+                let mut components: AIndexMap<&'static str, ComponentValue> =
                     AIndexMap::with_hasher(ahash::RandomState::default());
                 let mut ok = true;
                 for comp in *component_list {
                     match deserialize_component(comp, value) {
                         Ok(cv) => {
-                            components.insert(comp.to_string(), cv);
+                            components.insert(comp, cv);
                         }
                         Err(e) => {
                             failures.push((
@@ -181,10 +180,10 @@ impl PrototypeStore {
         self.records.get(&(PrototypeGroup::Item, name.to_string()))
     }
 
-    /// 按 (type_, name) 查 Other 组记录。
+    /// 按 (type_, name) 查非聚合组记录（关注类型 → 强类型变体，未知 → Unknown）。
     pub fn other(&self, type_: &str, name: &str) -> Option<&PrototypeRecord> {
-        self.records
-            .get(&(PrototypeGroup::Other(type_.to_string()), name.to_string()))
+        let group = prototype_group_from_type(type_);
+        self.records.get(&(group, name.to_string()))
     }
 
     /// 遍历某组的所有记录。
@@ -213,13 +212,16 @@ impl PrototypeStore {
 ///
 /// 含 EntityComponent → Entity；含 ItemComponent → Item；
 /// 否则 → Other(原始 type_)。与游戏 `LuaPrototypes` 的聚合一致。
-pub fn derive_group(type_: &str, components: &AIndexMap<String, ComponentValue>) -> PrototypeGroup {
+pub fn derive_group(
+    type_: &str,
+    components: &AIndexMap<&'static str, ComponentValue>,
+) -> PrototypeGroup {
     if components.contains_key("EntityComponent") {
         PrototypeGroup::Entity
     } else if components.contains_key("ItemComponent") {
         PrototypeGroup::Item
     } else {
-        PrototypeGroup::Other(type_.to_string())
+        prototype_group_from_type(type_)
     }
 }
 
@@ -227,10 +229,10 @@ pub fn derive_group(type_: &str, components: &AIndexMap<String, ComponentValue>)
 mod tests {
     use super::*;
 
-    fn comp(name: &str) -> AIndexMap<String, ComponentValue> {
+    fn comp(name: &'static str) -> AIndexMap<&'static str, ComponentValue> {
         let mut m = AIndexMap::with_hasher(ahash::RandomState::default());
         m.insert(
-            name.to_string(),
+            name,
             deserialize_component(name, &serde_json::json!({})).unwrap(),
         );
         m
@@ -248,15 +250,20 @@ mod tests {
             derive_group("item", &comp("ItemComponent")),
             PrototypeGroup::Item
         );
-        // 无 Entity/Item 组件 → Other(原始 type_)
+        // 无 Entity/Item 组件 → 强类型变体（关注类型）
         assert_eq!(
             derive_group("recipe", &comp("RecipeComponent")),
-            PrototypeGroup::Other("recipe".to_string())
+            PrototypeGroup::Recipe
+        );
+        // 关注清单外 → Unknown 兜底
+        assert_eq!(
+            derive_group("custom-mod-type", &comp("RecipeComponent")),
+            PrototypeGroup::Unknown("custom-mod-type".to_string())
         );
         // 同时含 Entity 与 Item（物品实体）→ Entity 优先（LuaPrototypes 语义）
         let mut m = comp("EntityComponent");
         m.insert(
-            "ItemComponent".to_string(),
+            "ItemComponent",
             deserialize_component("ItemComponent", &serde_json::json!({})).unwrap(),
         );
         assert_eq!(derive_group("item", &m), PrototypeGroup::Entity);
