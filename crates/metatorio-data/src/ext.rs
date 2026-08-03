@@ -18,7 +18,9 @@
 
 use std::sync::LazyLock;
 
-use crate::types::{BoundingBox, Color, EffectTypeLimitation, EffectValueRangeOpt, Vector};
+use crate::types::{
+    BoundingBox, Color, EffectTypeLimitation, EffectValueRangeOpt, EnergyAmount, Vector,
+};
 
 pub use crate::generated_components::*;
 
@@ -533,5 +535,212 @@ impl ModuleComponent {
     pub fn quality_quality_multiplier(&self) -> f64 {
         self.quality_quality_multiplier
             .unwrap_or(if self.effect.quality > 0.0 {1.0} else {0.0})
+    }
+}
+
+// ── literal 默认值（schema literal 默认；初扫只扫 Text 注释，这些被漏掉）──
+
+const ZERO_ENERGY: EnergyAmount = EnergyAmount { amount: 0.0 };
+/// 1kJ = 1000 J（一单位流体上升一摄氏度所需的能量）。
+const KILOJOUL: EnergyAmount = EnergyAmount { amount: 1000.0 };
+
+impl EntityComponent {
+    /// 默认(literal): "0W"——该实体冻结需要的加热能量，0 表示不可冻结。
+    pub fn heating_energy(&self) -> EnergyAmount {
+        self.heating_energy.unwrap_or(ZERO_ENERGY)
+    }
+}
+
+impl FluidComponent {
+    /// 默认(literal): "0J"——不作为燃料。
+    pub fn fuel_value(&self) -> EnergyAmount {
+        self.fuel_value.unwrap_or(ZERO_ENERGY)
+    }
+
+    /// 默认(literal): "1kJ"——每单位流体每摄氏度。
+    pub fn heat_capacity(&self) -> EnergyAmount {
+        self.heat_capacity.unwrap_or(KILOJOUL)
+    }
+}
+
+impl ItemComponent {
+    /// 默认(literal): "0J"——不作为燃料。
+    pub fn fuel_value(&self) -> EnergyAmount {
+        self.fuel_value.unwrap_or(ZERO_ENERGY)
+    }
+}
+
+impl LoaderComponent {
+    /// 默认(literal): 0——每件物品所需能量。
+    pub fn energy_per_item(&self) -> EnergyAmount {
+        self.energy_per_item.unwrap_or(ZERO_ENERGY)
+    }
+}
+
+// ── 发电机：流体 → 电量（迁移自 metatorio-egui GeneratorPrototype::get_output）──
+
+/// 发电机的每秒输出。
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct GeneratorOutput {
+    /// 每秒消耗的流体量。
+    pub fluid_used_per_second: f64,
+    /// 每秒产生的电量（焦耳）。
+    pub power_per_second: f64,
+}
+
+impl GeneratorComponent {
+    /// 输入指定温度的流体时，流体的消耗量和电量产出（每秒）。
+    ///
+    /// `fluid_name` 用于与 `fluid_box.filter` 匹配（Component 不含 name，name 在 record 层）。
+    pub fn get_output(
+        &self,
+        fluid_name: &str,
+        fluid: &FluidComponent,
+        temperature: f64,
+    ) -> GeneratorOutput {
+        let mut scale = 1.0;
+        if self.burns_fluid {
+            // 直接燃烧流体产生电力的发电机
+            let fuel_value = fluid.fuel_value();
+            let actual_power_output = EnergyAmount {
+                amount: self.fluid_usage_per_tick * fuel_value.amount * self.effectivity,
+            };
+            if self.scale_fluid_usage
+                && let Some(max_power_output) = self.max_power_output
+            {
+                if actual_power_output > max_power_output {
+                    scale = max_power_output.amount / actual_power_output.amount;
+                    return GeneratorOutput {
+                        fluid_used_per_second: self.fluid_usage_per_tick * scale * 60.0,
+                        power_per_second: max_power_output.amount * 60.0,
+                    };
+                }
+                GeneratorOutput {
+                    fluid_used_per_second: self.fluid_usage_per_tick * scale * 60.0,
+                    power_per_second: actual_power_output.amount * 60.0,
+                }
+            } else {
+                if let Some(max_power_output) = self.max_power_output
+                    && actual_power_output > max_power_output
+                {
+                    return GeneratorOutput {
+                        fluid_used_per_second: self.fluid_usage_per_tick * 60.0,
+                        power_per_second: max_power_output.amount * 60.0,
+                    };
+                }
+                GeneratorOutput {
+                    fluid_used_per_second: self.fluid_usage_per_tick * 60.0,
+                    power_per_second: actual_power_output.amount * 60.0,
+                }
+            }
+        } else {
+            // 靠热量差产生电力的发电机
+            let heat_capacity = fluid.heat_capacity();
+            let max_power_output = if let Some(max_power_output) = self.max_power_output {
+                max_power_output
+            } else {
+                let filter = self.fluid_box.filter.as_ref().unwrap();
+                if fluid_name != filter {
+                    // 如果流体不符合过滤条件，则不产生电力
+                    if self.destroy_non_fuel_fluid {
+                        return GeneratorOutput {
+                            fluid_used_per_second: self.fluid_usage_per_tick * 60.0,
+                            power_per_second: 0.0,
+                        };
+                    } else {
+                        return GeneratorOutput {
+                            fluid_used_per_second: 0.0,
+                            power_per_second: 0.0,
+                        };
+                    }
+                }
+                let max_temperature = if let Some(max_temperature) = fluid.max_temperature {
+                    max_temperature.min(self.maximum_temperature)
+                } else {
+                    self.maximum_temperature
+                };
+                let temperature_diff = max_temperature - fluid.default_temperature;
+                EnergyAmount {
+                    amount: temperature_diff
+                        * self.fluid_usage_per_tick
+                        * heat_capacity.amount
+                        * self.effectivity,
+                }
+            };
+            let actual_power_output = EnergyAmount {
+                amount: (temperature - fluid.default_temperature)
+                    * self.fluid_usage_per_tick
+                    * heat_capacity.amount
+                    * self.effectivity,
+            };
+
+            if self.scale_fluid_usage {
+                if actual_power_output > max_power_output {
+                    scale = max_power_output.amount / actual_power_output.amount;
+                    return GeneratorOutput {
+                        fluid_used_per_second: self.fluid_usage_per_tick * scale * 60.0,
+                        power_per_second: max_power_output.amount * 60.0,
+                    };
+                }
+                GeneratorOutput {
+                    fluid_used_per_second: self.fluid_usage_per_tick * scale * 60.0,
+                    power_per_second: actual_power_output.amount * 60.0,
+                }
+            } else {
+                if actual_power_output > max_power_output {
+                    return GeneratorOutput {
+                        fluid_used_per_second: self.fluid_usage_per_tick * 60.0,
+                        power_per_second: max_power_output.amount * 60.0,
+                    };
+                }
+                GeneratorOutput {
+                    fluid_used_per_second: self.fluid_usage_per_tick * 60.0,
+                    power_per_second: actual_power_output.amount * 60.0,
+                }
+            }
+        }
+    }
+}
+
+// ── 锅炉：加热输出量（不与流类型绑定，调用方手动转换为流）──
+
+/// 锅炉加热输出（`output-to-separate-pipe` 模式）。
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct FluidHeatingOutput {
+    /// 输入流体每秒消耗量（转换为流时为负向）。
+    pub input_amount_per_second: f64,
+    /// 输出流体每秒产出量（转换为流时为正向）。
+    pub output_amount_per_second: f64,
+    /// 输出流体温度。
+    pub output_temperature: f64,
+}
+
+impl BoilerComponent {
+    /// `output-to-separate-pipe` 模式：每秒加热的流体量。
+    ///
+    /// 输入/输出流体名与 `output_fluid_box.filter` 逻辑由调用方决定（数据层只做计算）。
+    /// 迁移自 metatorio-egui BoilerPrototype::get_flow 的核心公式。
+    /// 实际使用时，需要给流体温度添加对应流体类型的虚拟温度流
+    /// heat-fluid-inside 模式则是始终产生同种流体的对应温度流，不需要特殊处理
+    pub fn heating_output(
+        &self,
+        input_fluid: &FluidComponent,
+        output_fluid: &FluidComponent,
+        input_temperature: f64,
+    ) -> Option<FluidHeatingOutput> {
+        let target_temperature = self.target_temperature?;
+        if target_temperature - input_temperature == 0.0 {
+            return None;
+        }
+        let source_capacity = input_fluid.heat_capacity().amount;
+        let target_capacity = output_fluid.heat_capacity().amount;
+        let amount = self.energy_consumption.amount * 60.0 // 功率
+            / source_capacity // 输入流体的比热容
+            / (target_temperature - input_temperature); // 温度差
+        Some(FluidHeatingOutput {
+            input_amount_per_second: amount,
+            output_amount_per_second: amount * source_capacity / target_capacity,
+            output_temperature: target_temperature,
+        })
     }
 }

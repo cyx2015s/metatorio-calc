@@ -297,9 +297,9 @@ pub struct ItemProduct {
     #[serde(deserialize_with = "crate::lenient::de_opt_int")]
     pub amount_max: Option<u16>,
     #[serde(deserialize_with = "crate::lenient::de_int")]
-    ignored_by_stats: u16,
+    pub ignored_by_stats: u16,
     #[serde(deserialize_with = "crate::lenient::de_opt_int")]
-    ignored_by_productivity: Option<u16>,
+    pub ignored_by_productivity: Option<u16>,
     pub extra_count_fraction: f64,
     pub quality_min: Option<String>,
     pub quality_max: Option<String>,
@@ -324,30 +324,47 @@ pub struct FluidProduct {
     pub amount_min: Option<f64>,
     pub amount_max: Option<f64>,
     pub temperature: Option<f64>,
-    ignored_by_stats: f64,
-    ignored_by_productivity: Option<f64>,
+    pub ignored_by_stats: f64,
+    pub ignored_by_productivity: Option<f64>,
     #[serde(default, flatten)]
     pub probability_info: ProbabilityInfo,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ProbabilityInfo {
     #[serde(default = "default_independent_probability")]
-    independent_probability: f64,
+    pub independent_probability: f64,
     #[serde(default)]
-    shared_probability: SharedProbabilityInfo,
+    pub shared_probability: SharedProbabilityInfo,
+}
+
+// 注意：必须与 serde default fn 一致（derive Default 的独立概率 0.0 会让配方概率恒为 0）。
+impl Default for ProbabilityInfo {
+    fn default() -> Self {
+        Self {
+            independent_probability: 1.0,
+            shared_probability: SharedProbabilityInfo::default(),
+        }
+    }
 }
 
 fn default_independent_probability() -> f64 {
     1.0
 }
 
-#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SharedProbabilityInfo {
     #[serde(default = "default_probability_min")]
-    min: f64,
+    pub min: f64,
     #[serde(default = "default_probability_max")]
-    max: f64,
+    pub max: f64,
+}
+
+// 注意：必须与 serde default fn 一致（derive Default 的 max=0.0 会让概率恒为 0）。
+impl Default for SharedProbabilityInfo {
+    fn default() -> Self {
+        Self { min: 0.0, max: 1.0 }
+    }
 }
 
 fn default_probability_min() -> f64 {
@@ -368,6 +385,127 @@ fn default_probability_max() -> f64 {
 pub enum Product {
     Item(ItemProduct),
     Fluid(FluidProduct),
+}
+
+/// 配方产物归一化输出：实际单次产量与每次结算产能加成时的额外产量。
+#[derive(Debug, Clone, Copy, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Production {
+    /// 实际单次产量（含概率期望）。
+    pub base: f64,
+    /// 每次结算产能加成时的额外产量。
+    pub productivity: f64,
+}
+
+impl ItemProduct {
+    /// 计算当前配方的实际单次产量和每次结算产能加成时的额外产量。
+    pub fn normalized_output(&self) -> Production {
+        let extra = self.extra_count_fraction;
+        let prob = self.probability_info.independent_probability
+            * (self.probability_info.shared_probability.max
+                - self.probability_info.shared_probability.min);
+        let ignore = match self.ignored_by_productivity {
+            Some(value) => f64::from(value),
+            None => f64::from(self.ignored_by_stats),
+        }
+        .floor();
+        match self.amount {
+            Some(amount) => {
+                // 产出分别为：
+                // amount (prob * (1 - extra))
+                // amount + 1 (prob * extra)
+                // 1 (1 - prob * extra)
+                let base = f64::from(amount);
+                let productivity = f64::max((base - ignore) * prob * (1.0 - extra), 0.0)
+                    + f64::max((base + 1.0 - ignore) * prob * extra, 0.0)
+                    + f64::max((1.0 - ignore) * (1.0 - prob) * extra, 0.0);
+                Production {
+                    base: base * prob + extra,
+                    productivity,
+                }
+            }
+            None => {
+                // 产出分别为：
+                // min ~ max (prob * (1 - extra))
+                // (min ~ max) + 1 (prob * extra)
+                // 1 (1 - prob * extra)
+                // 减去 ignore 前要先判断范围，还要求平均
+                let min = f64::from(self.amount_min.unwrap_or(0)).floor();
+                let max = match self.amount_max {
+                    Some(value) => f64::from(value),
+                    None => min,
+                }
+                .floor();
+                let max = f64::max(max, min);
+
+                let productivity = f64::max(
+                    // 首项加末项乘项数除以状态数乘概率除以二
+                    (max - ignore + f64::max(min - ignore, 0.0))
+                        * (max - f64::max(min - ignore, 0.0) + 1.0)
+                        / (max - min + 1.0)
+                        / 2.0
+                        * prob
+                        * (1.0 - extra),
+                    0.0,
+                ) + f64::max(
+                    (max + 1.0 - ignore + f64::max(min + 1.0 - ignore, 0.0))
+                        * (max - f64::max(min + 1.0 - ignore, 0.0) + 1.0)
+                        / (max - min + 1.0)
+                        / 2.0
+                        * prob
+                        * extra,
+                    0.0,
+                ) + f64::max((extra - ignore) * (1.0 - prob) * extra, 0.0);
+                Production {
+                    base: ((max + min) / 2.0) * prob + extra,
+                    productivity,
+                }
+            }
+        }
+    }
+}
+
+impl FluidProduct {
+    /// 计算当前配方的实际单次产量和每次结算产能加成时的额外产量。
+    pub fn normalized_output(&self) -> Production {
+        let prob = self.probability_info.independent_probability
+            * (self.probability_info.shared_probability.max
+                - self.probability_info.shared_probability.min);
+        let ignore = match self.ignored_by_productivity {
+            Some(value) => value,
+            None => self.ignored_by_stats,
+        };
+        match self.amount {
+            Some(amount) => {
+                let base = amount;
+                let productivity = f64::max((base - ignore) * prob, 0.0);
+                Production {
+                    base: base * prob,
+                    productivity,
+                }
+            }
+            None => {
+                let min = self.amount_min.unwrap_or(0.0);
+                let max = match self.amount_max {
+                    Some(value) => value,
+                    None => min,
+                };
+                let max = f64::max(max, min);
+                let productivity = f64::max(
+                    // 积分均值
+                    (max - ignore + f64::max(min - ignore, 0.0))
+                        * (max - f64::max(min - ignore, 0.0))
+                        / 2.0
+                        / (max - min)
+                        * prob,
+                    0.0,
+                );
+                Production {
+                    base: ((max + min) / 2.0) * prob,
+                    productivity,
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
