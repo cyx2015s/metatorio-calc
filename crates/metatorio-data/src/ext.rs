@@ -508,3 +508,30 @@ impl RocketSiloComponent {
             .unwrap_or(self.rocket_parts_required)
     }
 }
+
+impl ModuleComponent {
+    pub fn consumption_quality_multiplier(&self) -> f64 {
+        self.consumption_quality_multiplier
+            .unwrap_or(if self.effect.consumption < 0.0 {1.0} else {0.0})
+    }
+
+    pub fn pollution_quality_multiplier(&self) -> f64 {
+        self.pollution_quality_multiplier
+            .unwrap_or(if self.effect.pollution < 0.0 {1.0} else {0.0})
+    }
+
+    pub fn productivity_quality_multiplier(&self) -> f64 {
+        self.productivity_quality_multiplier
+            .unwrap_or(if self.effect.productivity > 0.0 {1.0} else {0.0})
+    }
+
+    pub fn speed_quality_multiplier(&self) -> f64 {
+        self.speed_quality_multiplier
+            .unwrap_or(if self.effect.speed > 0.0 {1.0} else {0.0})
+    }
+
+    pub fn quality_quality_multiplier(&self) -> f64 {
+        self.quality_quality_multiplier
+            .unwrap_or(if self.effect.quality > 0.0 {1.0} else {0.0})
+    }
+}

@@ -1071,6 +1071,7 @@ impl Default for Config {
                 map_type!("TechnologyTrigger", "crate::types::TechnologyTrigger"),
                 map_type!("Modifier", "crate::types::Modifier"),
                 map_type!("EffectValueRange", "crate::types::EffectValueRangeOpt"),
+                map_type!("Effect", "crate::types::Effect"),
             ],
         }
     }

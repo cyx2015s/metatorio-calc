@@ -644,16 +644,6 @@ pub struct EffectValueRangeOpt {
     pub low: Option<f64>,
 }
 
-#[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize)]
-#[serde(default)]
-pub struct Effect {
-    pub speed: EffectValueRangeOpt,
-    pub productivity: EffectValueRangeOpt,
-    pub consumption: EffectValueRangeOpt,
-    pub pollution: EffectValueRangeOpt,
-    pub quality: EffectValueRangeOpt,
-}
-
 // ── Serialize（生成的组件 derive Serialize，这里按 JSON 兼容格式输出）──
 
 impl serde::Serialize for EnergyAmount {
@@ -863,6 +853,23 @@ pub struct UnlockRecipeModifier {
 pub struct UnlockSpaceLocationModifier {
     pub space_location: String,
 }
+
+
+#[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct Effect {
+    /// Multiplier to energy used during operation (not idle/drain use). The minimum possible sum is -80%.
+    pub consumption: f64,
+    /// Multiplier to the pollution factor of an entity's pollution during use. The minimum possible sum is -80%.
+    pub pollution: f64,
+    /// Multiplied against work completed, adds to the bonus results of operating. E.g. an extra crafted recipe or immediate research bonus. The minimum possible sum is 0%.
+    pub productivity: f64,
+    /// Adds a bonus chance to increase a product's quality. The minimum possible sum is 0%.
+    pub quality: f64,
+    /// Modifier to crafting speed, research speed, etc. The minimum possible sum is -80%.
+    pub speed: f64,
+}
+
 
 #[cfg(test)]
 mod tests {
