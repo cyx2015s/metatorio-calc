@@ -88,8 +88,6 @@ pub enum Mechanic {
     ItemLaunch(ItemLaunchMechanic),
     Generator(GeneratorMechanic),
     Boiler(BoilerMechanic),
-    FluidFuel(FluidFuelMechanic),
-    FluidHeat(FluidHeatMechanic),
     Reactor(ReactorMechanic),
 }
 
@@ -165,20 +163,6 @@ pub struct BoilerMechanic {
     pub fluid: String,
     /// 流体燃料名（FluidID）；None = 自动选择/无需燃料。
     pub fuel: Option<String>,
-}
-
-/// 流体燃料组件。
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct FluidFuelMechanic {
-    pub fluid: String,
-}
-
-/// 流体热源组件。
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct FluidHeatMechanic {
-    pub fluid: String,
 }
 
 /// 反应堆组件。
