@@ -58,9 +58,6 @@ fn heavily_modded_dump_loads_all_concerned_prototypes() {
 
     dbg!(
         store
-            .records
-            .keys()
-            .map(|x| x.0.clone())
-            .collect::<std::collections::HashSet<_>>()
+            .groups.keys().cloned().collect::<std::collections::HashSet<_>>()
     );
 }

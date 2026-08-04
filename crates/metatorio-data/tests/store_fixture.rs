@@ -2,7 +2,7 @@
 //! 验证 (group, name) 主键、聚合标签与跨键分组。
 
 use metatorio_data::generated_components::{
-    ComponentValue, CraftingMachineComponent, ItemComponent,
+    ComponentValue, CraftingMachineComponent, ItemComponent, PrototypeBaseComponent,
 };
 use metatorio_data::store::{PrototypeGroup, PrototypeStore};
 use serde_json::Value;
@@ -101,10 +101,7 @@ fn group_iteration_and_length() {
 
     dbg!(
         store
-            .records
-            .keys()
-            .map(|x| x.0.clone())
-            .collect::<std::collections::HashSet<_>>()
+            .groups.keys().cloned().collect::<std::collections::HashSet<_>>()
     );
 }
 
@@ -125,4 +122,77 @@ fn load_error_reports_failures() {
     );
     assert_eq!(err.total, 1);
     assert_eq!(err.succeeded, 0);
+}
+
+#[test]
+fn order_info_three_levels() {
+    let store = PrototypeStore::load(&load_fixture()).expect("fixture 加载失败");
+    let order_info = store.order_info();
+    let reverse = store.reverse_order_info();
+    // 三层结构：大组 → 小组 → 条目名
+    let item_order = order_info
+        .get(&PrototypeGroup::Item)
+        .expect("Item 组应有排序信息");
+    assert!(!item_order.is_empty(), "Item 组排序信息不应为空");
+    for (group_name, subgroups) in item_order {
+        assert!(!group_name.is_empty(), "大组名不应为空");
+        for (subgroup_name, items) in subgroups {
+            assert!(!items.is_empty(), "小组 {subgroup_name} 不应为空");
+        }
+    }
+
+    // 反查索引：所有条目名都能查到三层索引，且索引与正查一致
+    for (group, order) in order_info {
+        let rev = &reverse[group];
+        for (gi, (_, subgroups)) in order.iter().enumerate() {
+            for (si, (_, items)) in subgroups.iter().enumerate() {
+                for (ii, name) in items.iter().enumerate() {
+                    assert_eq!(
+                        rev.get(name),
+                        Some(&(gi, si, ii)),
+                        "反查索引与正查不一致：{name}"
+                    );
+                }
+            }
+        }
+    }
+
+    // 组内条目按 (order, name) 排序：取 Item 组第一个小组验证
+    let first_subgroup = item_order.values().next().expect("有小组");
+    let names = first_subgroup.values().next().expect("有条目");
+    let orders: Vec<String> = names
+        .iter()
+        .map(|n| {
+            store
+                .item(n)
+                .and_then(|r| r.component::<PrototypeBaseComponent>())
+                .map(|b| b.order.clone())
+                .unwrap_or_default()
+        })
+        .collect();
+    assert!(
+        orders.array_windows::<2>().all(|w| w[0] <= w[1]),
+        "小组内条目应按 order 非降序排序"
+    );
+}
+
+#[test]
+fn technology_dependents_derivation() {
+    let store = PrototypeStore::load(&load_fixture()).expect("fixture 加载失败");
+    let dependents = store.technology_dependents();
+
+    // 科技只声明 prerequisites；反向依赖应被预处理出来
+    assert_eq!(
+        dependents.get("automation-science-pack").map(|v| v.as_slice()),
+        Some(&["automation".to_string(), "logistics".to_string()][..])
+    );
+    assert_eq!(
+        dependents.get("modules").map(|v| v.as_slice()),
+        Some(&["speed-module".to_string()][..])
+    );
+    // 惰性：再次调用返回同一实例
+    assert!(std::ptr::eq(
+        store.technology_dependents(),
+        store.technology_dependents()
+    ));
 }
