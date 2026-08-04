@@ -6,7 +6,7 @@ use metatorio_core::{
 };
 
 fn id(s: &str) -> IdWithQuality {
-    IdWithQuality(s.to_string(), NORMAL_QUALITY.to_string())
+    IdWithQuality::new(s, NORMAL_QUALITY)
 }
 
 #[test]
@@ -24,7 +24,7 @@ fn recipe_mechanic_serde_roundtrip() {
     let json = serde_json::to_string(&m).unwrap();
     // tag = "type"，变体名 kebab-case："recipe"
     assert!(json.contains(r#""type":"recipe""#), "json: {json}");
-    assert!(json.contains(r#""recipe":["iron-plate","normal"]"#), "json: {json}");
+    assert!(json.contains(r#""recipe":{"id":"iron-plate","quality":"normal"}"#), "json: {json}");
     let back: Mechanic = serde_json::from_str(&json).unwrap();
     assert_eq!(m, back);
 }
@@ -34,7 +34,6 @@ fn generator_mechanic_serde_roundtrip() {
     let m = Mechanic::Generator(GeneratorMechanic {
         generator: id("steam-engine"),
         fluid: "steam".to_string(),
-        temperature: 165,
     });
     let json = serde_json::to_string(&m).unwrap();
     assert!(json.contains(r#""type":"generator""#), "json: {json}");
@@ -55,8 +54,7 @@ fn missing_fields_default() {
         _ => panic!("expected mining"),
     }
     // 组件级缺字段容错
-    let b: BoilerMechanic = serde_json::from_str(r#"{"boiler": ["boiler", "normal"]}"#).unwrap();
-    assert_eq!(b.temperature, 0);
+    let b: BoilerMechanic = serde_json::from_str(r#"{"boiler": {"id": "boiler", "quality": "normal"}}"#).unwrap();
     assert!(b.fuel.is_none());
 }
 
@@ -82,14 +80,14 @@ fn non_exhaustive_requires_wildcard() {
 
 #[test]
 fn id_with_quality_uses_string() {
-    let a = IdWithQuality("iron-ore".to_string(), "uncommon".to_string());
+    let a = IdWithQuality::new("iron-ore", "uncommon");
     let json = serde_json::to_string(&a).unwrap();
-    assert_eq!(json, r#"["iron-ore","uncommon"]"#);
+    assert_eq!(json, r#"{"id":"iron-ore","quality":"uncommon"}"#);
     let back: IdWithQuality = serde_json::from_str(&json).unwrap();
     assert_eq!(back, a);
     // From<&str> 默认 normal 品质
     let n: IdWithQuality = "copper-ore".into();
-    assert_eq!(n, IdWithQuality("copper-ore".to_string(), "normal".to_string()));
+    assert_eq!(n, IdWithQuality::new("copper-ore", "normal"));
 }
 
 #[test]

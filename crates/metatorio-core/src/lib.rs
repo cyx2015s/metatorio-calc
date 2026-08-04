@@ -18,20 +18,32 @@ use serde::{Deserialize, Serialize};
 /// 第二元素是品质的**字符串名**（如 `"normal"`/`"uncommon"`），而非 u8 索引——
 /// 跨模组迁移时自定义品质名无法映射到固定索引，故弃用 `(String, u8)` 形态。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct IdWithQuality(pub String, pub String);
+pub struct IdWithQuality{
+    pub id: String,
+    pub quality: String,
+}
+
+impl IdWithQuality {
+    pub fn new(id: impl Into<String>, quality: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            quality: quality.into(),
+        }
+    }
+}
 
 /// 常规品质名。
 pub const NORMAL_QUALITY: &str = "normal";
 
 impl From<&str> for IdWithQuality {
     fn from(s: &str) -> Self {
-        IdWithQuality(s.to_string(), NORMAL_QUALITY.to_string())
+        IdWithQuality::new(s, NORMAL_QUALITY)
     }
 }
 
 impl From<String> for IdWithQuality {
     fn from(s: String) -> Self {
-        IdWithQuality(s, NORMAL_QUALITY.to_string())
+        IdWithQuality::new(s, NORMAL_QUALITY)
     }
 }
 
@@ -90,9 +102,10 @@ pub struct RecipeMechanic {
     pub recipe: IdWithQuality,
     pub machine: IdWithQuality,
     pub module_config: ModuleConfig,
-    /// 燃料：机器能源为 Fluid 时是 (流体名, 温度)；Burner 时是物品燃料；
+    /// 流体燃料名（FluidID）。只有流体供能的机器会因温度低/热值低导致速率跑不满，
+    /// 需要用户指定燃料流体；物品燃料无此问题（求解时自动选择最优），
     /// Electric/Heat/Void 时无效（None）。
-    pub fuel: Option<(String, i32)>,
+    pub fuel: Option<String>,
 }
 
 /// 采矿组件。
@@ -102,7 +115,8 @@ pub struct MiningMechanic {
     pub resource: String,
     pub machine: IdWithQuality,
     pub module_config: ModuleConfig,
-    pub fuel: Option<IdWithQuality>,
+    /// 流体燃料名（FluidID）；None = 自动选择/无需燃料。
+    pub fuel: Option<String>,
 }
 
 /// 腐坏组件。
@@ -141,7 +155,6 @@ pub struct ItemLaunchMechanic {
 pub struct GeneratorMechanic {
     pub generator: IdWithQuality,
     pub fluid: String,
-    pub temperature: i32,
 }
 
 /// 锅炉组件。
@@ -150,8 +163,8 @@ pub struct GeneratorMechanic {
 pub struct BoilerMechanic {
     pub boiler: IdWithQuality,
     pub fluid: String,
-    pub temperature: i32,
-    pub fuel: Option<(String, i32)>,
+    /// 流体燃料名（FluidID）；None = 自动选择/无需燃料。
+    pub fuel: Option<String>,
 }
 
 /// 流体燃料组件。
@@ -159,7 +172,6 @@ pub struct BoilerMechanic {
 #[serde(default)]
 pub struct FluidFuelMechanic {
     pub fluid: String,
-    pub temperature: i32,
 }
 
 /// 流体热源组件。
@@ -167,7 +179,6 @@ pub struct FluidFuelMechanic {
 #[serde(default)]
 pub struct FluidHeatMechanic {
     pub fluid: String,
-    pub temperature: i32,
 }
 
 /// 反应堆组件。
@@ -176,5 +187,6 @@ pub struct FluidHeatMechanic {
 pub struct ReactorMechanic {
     pub reactor: IdWithQuality,
     pub neighbours: u8,
-    pub fuel: Option<(String, i32)>,
+    /// 流体燃料名（FluidID）；None = 自动选择/无需燃料。
+    pub fuel: Option<String>,
 }
