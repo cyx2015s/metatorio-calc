@@ -17,9 +17,12 @@ use crate::id::IdWithQuality;
 /// 流标识。
 ///
 /// `Flow<DualVar>` 中每个键代表一种流，值为流量。
-#[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(u8)]
+#[non_exhaustive]
 pub enum DualVar {
+    #[default]
+    Unknown,
     Item(IdWithQuality),
     /// 流体本体（不含温度；温度由配对的 `FluidHeat` 流隐式推导）。
     Fluid {
@@ -67,11 +70,5 @@ impl DualVar {
                 | DualVar::FluidHeat { .. }
                 | DualVar::ItemFuel { .. }
         )
-    }
-}
-
-impl Default for DualVar {
-    fn default() -> Self {
-        DualVar::Item("item-unknown".into())
     }
 }

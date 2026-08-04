@@ -1,8 +1,7 @@
 //! Mechanic 枚举的集成测试（外部 crate 视角：验证 non_exhaustive 与 serde 行为）。
 
 use metatorio_core::{
-    BeaconConfig, BoilerMechanic, GeneratorMechanic, IdWithQuality, Mechanic, MiningMechanic,
-    ModuleConfig, NORMAL_QUALITY, RecipeMechanic,
+    BeaconConfig, BoilerMechanic, GeneratorMechanic, IdWithQuality, Mechanic, ModuleConfig, NORMAL_QUALITY, RecipeMechanic,
 };
 
 fn id(s: &str) -> IdWithQuality {
