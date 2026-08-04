@@ -42,7 +42,7 @@ pub enum DualVar {
     /// 带燃尽产物物品栏的机器只接受 `true` 的燃料流；`false`（无燃尽产物）
     /// 可隐式转换为 `true`——子类型提升。
     ItemFuel {
-        category: String,
+        category: Vec<String>,
         #[serde(default)]
         has_burnt_result: bool,
     },

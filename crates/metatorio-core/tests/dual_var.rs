@@ -31,7 +31,7 @@ fn fluid_heat_pure_filter() {
 #[test]
 fn item_fuel_has_burnt_result() {
     let f = DualVar::ItemFuel {
-        category: "chemical".to_string(),
+        category: vec!["chemical".to_string()],
         has_burnt_result: true,
     };
     let json = serde_json::to_string(&f).unwrap();
@@ -40,11 +40,11 @@ fn item_fuel_has_burnt_result() {
     assert_eq!(f, back);
 
     // 缺 has_burnt_result → false（serde default）
-    let f: DualVar = serde_json::from_str(r#"{"ItemFuel": {"category": "chemical"}}"#).unwrap();
+    let f: DualVar = serde_json::from_str(r#"{"ItemFuel": {"category": ["chemical"]}}"#).unwrap();
     assert_eq!(
         f,
         DualVar::ItemFuel {
-            category: "chemical".to_string(),
+            category: vec!["chemical".to_string()],
             has_burnt_result: false
         }
     );
@@ -62,7 +62,7 @@ fn is_energy() {
     );
     assert!(
         DualVar::ItemFuel {
-            category: "chemical".to_string(),
+            category: vec!["chemical".to_string()],
             has_burnt_result: false
         }
         .is_energy()
