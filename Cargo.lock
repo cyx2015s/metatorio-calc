@@ -3089,6 +3089,10 @@ dependencies = [
 [[package]]
 name = "metatorio-core"
 version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "metatorio-data"
