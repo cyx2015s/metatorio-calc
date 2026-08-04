@@ -992,7 +992,6 @@ pub struct UnlockSpaceLocationModifier {
     pub space_location: String,
 }
 
-
 #[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct Effect {
@@ -1007,7 +1006,6 @@ pub struct Effect {
     /// Modifier to crafting speed, research speed, etc. The minimum possible sum is -80%.
     pub speed: f64,
 }
-
 
 #[cfg(test)]
 mod tests {

@@ -24,7 +24,10 @@ fn recipe_mechanic_serde_roundtrip() {
     let json = serde_json::to_string(&m).unwrap();
     // tag = "type"，变体名 kebab-case："recipe"
     assert!(json.contains(r#""type":"recipe""#), "json: {json}");
-    assert!(json.contains(r#""recipe":{"id":"iron-plate","quality":"normal"}"#), "json: {json}");
+    assert!(
+        json.contains(r#""recipe":{"id":"iron-plate","quality":"normal"}"#),
+        "json: {json}"
+    );
     let back: Mechanic = serde_json::from_str(&json).unwrap();
     assert_eq!(m, back);
 }
@@ -54,7 +57,8 @@ fn missing_fields_default() {
         _ => panic!("expected mining"),
     }
     // 组件级缺字段容错
-    let b: BoilerMechanic = serde_json::from_str(r#"{"boiler": {"id": "boiler", "quality": "normal"}}"#).unwrap();
+    let b: BoilerMechanic =
+        serde_json::from_str(r#"{"boiler": {"id": "boiler", "quality": "normal"}}"#).unwrap();
     assert!(b.fuel.is_none());
 }
 

@@ -2,9 +2,7 @@
 //! 公式迁移自 metatorio-egui（ItemResult::normalized_output、GeneratorPrototype::get_output、
 //! BoilerPrototype::get_flow 核心公式）。
 
-use metatorio_data::types::{
-    EnergyAmount, FluidProduct, ItemProduct, ProbabilityInfo, Production,
-};
+use metatorio_data::types::{EnergyAmount, FluidProduct, ItemProduct, ProbabilityInfo, Production};
 use metatorio_data::*;
 
 fn energy(j: f64) -> EnergyAmount {
@@ -29,7 +27,13 @@ fn item_product_normalized_output() {
     };
     let o = p.normalized_output();
     // productivity 与 metatorio-egui 公式一致：prob=1 时 = base（忠实迁移，语义待用户评估）
-    assert_eq!(o, Production { base: 2.0, productivity: 2.0 });
+    assert_eq!(
+        o,
+        Production {
+            base: 2.0,
+            productivity: 2.0
+        }
+    );
 
     // 概率 50%：base = 2 * 0.5 = 1.0，productivity = 2*0.5*1 = 1.0
     let p = ItemProduct {
@@ -41,7 +45,13 @@ fn item_product_normalized_output() {
         ..Default::default()
     };
     let o = p.normalized_output();
-    assert_eq!(o, Production { base: 1.0, productivity: 1.0 });
+    assert_eq!(
+        o,
+        Production {
+            base: 1.0,
+            productivity: 1.0
+        }
+    );
 
     // extra_count_fraction：amount=2、prob=1、extra=0.5
     let p = ItemProduct {
@@ -50,7 +60,13 @@ fn item_product_normalized_output() {
         ..Default::default()
     };
     let o = p.normalized_output();
-    assert_eq!(o, Production { base: 2.5, productivity: 2.5 });
+    assert_eq!(
+        o,
+        Production {
+            base: 2.5,
+            productivity: 2.5
+        }
+    );
 
     // 数量区间 [2, 4]、概率 1：base = 3.0
     let p = ItemProduct {
@@ -60,7 +76,13 @@ fn item_product_normalized_output() {
         ..Default::default()
     };
     let o = p.normalized_output();
-    assert_eq!(o, Production { base: 3.0, productivity: 3.0 });
+    assert_eq!(
+        o,
+        Production {
+            base: 3.0,
+            productivity: 3.0
+        }
+    );
 }
 
 #[test]
@@ -70,7 +92,13 @@ fn fluid_product_normalized_output() {
         ..Default::default()
     };
     let o = p.normalized_output();
-    assert_eq!(o, Production { base: 3.0, productivity: 3.0 });
+    assert_eq!(
+        o,
+        Production {
+            base: 3.0,
+            productivity: 3.0
+        }
+    );
 
     // 区间 [1, 5]：base = 3.0，productivity = 6*4/2/4 = 3.0
     let p = FluidProduct {
@@ -80,7 +108,13 @@ fn fluid_product_normalized_output() {
         ..Default::default()
     };
     let o = p.normalized_output();
-    assert_eq!(o, Production { base: 3.0, productivity: 3.0 });
+    assert_eq!(
+        o,
+        Production {
+            base: 3.0,
+            productivity: 3.0
+        }
+    );
 }
 
 #[test]
