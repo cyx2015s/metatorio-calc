@@ -71,9 +71,7 @@ fn non_exhaustive_requires_wildcard() {
         Mechanic::ItemLaunch(_) => 6,
         Mechanic::Generator(_) => 7,
         Mechanic::Boiler(_) => 8,
-        Mechanic::FluidFuel(_) => 9,
-        Mechanic::FluidHeat(_) => 10,
-        Mechanic::Reactor(_) => 11,
+        Mechanic::Reactor(_) => 9,
         _ => 99, // non_exhaustive：未来新增变体
     };
 }
