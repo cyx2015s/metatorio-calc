@@ -101,7 +101,10 @@ fn group_iteration_and_length() {
 
     dbg!(
         store
-            .groups.keys().cloned().collect::<std::collections::HashSet<_>>()
+            .groups
+            .keys()
+            .cloned()
+            .collect::<std::collections::HashSet<_>>()
     );
 }
 
@@ -183,7 +186,9 @@ fn technology_dependents_derivation() {
 
     // 科技只声明 prerequisites；反向依赖应被预处理出来
     assert_eq!(
-        dependents.get("automation-science-pack").map(|v| v.as_slice()),
+        dependents
+            .get("automation-science-pack")
+            .map(|v| v.as_slice()),
         Some(&["automation".to_string(), "logistics".to_string()][..])
     );
     assert_eq!(

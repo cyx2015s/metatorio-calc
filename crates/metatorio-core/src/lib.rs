@@ -3,13 +3,13 @@
 //! 方向 B：Mechanic 组件枚举（工厂的单个生产单元）+ DualVar（流标识）。
 //! 纯数据层：UI 状态、求解逻辑（AsFlow）、偏好配置均不在此层。
 
+pub mod context;
 pub mod dual_var;
+pub mod expand;
 pub mod id;
 pub mod mechanic;
-
-pub mod context;
 pub mod prim_var;
-pub mod expand;
+pub mod temp_flow;
 
 pub use dual_var::DualVar;
 pub use id::{IdWithQuality, NORMAL_QUALITY};
@@ -18,4 +18,3 @@ pub use mechanic::{
     Mechanic, MiningMechanic, ModuleConfig, PlantMechanic, ReactorMechanic, RecipeMechanic,
     SpoilMechanic,
 };
-

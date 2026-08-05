@@ -143,8 +143,7 @@ impl PrototypeStore {
             };
             for (name, value) in entries_obj {
                 total += 1;
-                let mut components: AIndexMap<&'static str, ComponentValue> =
-                    AIndexMap::default();
+                let mut components: AIndexMap<&'static str, ComponentValue> = AIndexMap::default();
                 let mut ok = true;
                 for comp in *component_list {
                     match deserialize_component(comp, value) {
@@ -178,15 +177,17 @@ impl PrototypeStore {
                         inner.insert(name.clone(), record);
                         v.insert(inner);
                     }
-                    indexmap::map::Entry::Occupied(mut o) => match o.get_mut().entry(name.clone()) {
-                        indexmap::map::Entry::Vacant(v) => {
-                            v.insert(record);
+                    indexmap::map::Entry::Occupied(mut o) => {
+                        match o.get_mut().entry(name.clone()) {
+                            indexmap::map::Entry::Vacant(v) => {
+                                v.insert(record);
+                            }
+                            indexmap::map::Entry::Occupied(mut e) => {
+                                // 同 (group, name) 重复（罕见）：组件并集（后到覆盖）
+                                e.get_mut().components.extend(record.components);
+                            }
                         }
-                        indexmap::map::Entry::Occupied(mut e) => {
-                            // 同 (group, name) 重复（罕见）：组件并集（后到覆盖）
-                            e.get_mut().components.extend(record.components);
-                        }
-                    },
+                    }
                 }
             }
         }
@@ -223,10 +224,7 @@ impl PrototypeStore {
     }
 
     /// 取某组的 name → 记录 map（按组分类的直接入口）。
-    pub fn group_map(
-        &self,
-        group: PrototypeGroup,
-    ) -> Option<&AIndexMap<String, PrototypeRecord>> {
+    pub fn group_map(&self, group: PrototypeGroup) -> Option<&AIndexMap<String, PrototypeRecord>> {
         self.groups.get(&group)
     }
 
@@ -238,8 +236,7 @@ impl PrototypeStore {
     /// 惰性派生：每组的排序信息（大组 → 小组 → 条目，均按 order 排序）。
     pub fn order_info(&self) -> &AIndexMap<PrototypeGroup, OrderInfo> {
         self.order_info.get_or_init(|| {
-            let mut out: AIndexMap<PrototypeGroup, OrderInfo> =
-                AIndexMap::default();
+            let mut out: AIndexMap<PrototypeGroup, OrderInfo> = AIndexMap::default();
             for (group, _) in &self.groups {
                 out.insert(*group, self.build_order_info(*group));
             }
@@ -250,11 +247,9 @@ impl PrototypeStore {
     /// 惰性派生：每组的反查索引（条目名 → (大组, 小组, 条目) 三层索引）。
     pub fn reverse_order_info(&self) -> &AIndexMap<PrototypeGroup, ReverseOrderInfo> {
         self.reverse_order_info.get_or_init(|| {
-            let mut out: AIndexMap<PrototypeGroup, ReverseOrderInfo> =
-                AIndexMap::default();
+            let mut out: AIndexMap<PrototypeGroup, ReverseOrderInfo> = AIndexMap::default();
             for (group, order) in self.order_info() {
-                let mut rev: ReverseOrderInfo =
-                    AIndexMap::default();
+                let mut rev: ReverseOrderInfo = AIndexMap::default();
                 for (gi, (_, subgroups)) in order.iter().enumerate() {
                     for (si, (_, items)) in subgroups.iter().enumerate() {
                         for (ii, name) in items.iter().enumerate() {
@@ -271,10 +266,8 @@ impl PrototypeStore {
     /// 构建某组的排序信息（参考原始 get_order_info 的三层结构）。
     fn build_order_info(&self, group: PrototypeGroup) -> OrderInfo {
         // 小组 → 大组 映射、小组 order、大组 order（原型数据）
-        let mut subgroup_group: AIndexMap<String, String> =
-            AIndexMap::default();
-        let mut subgroup_order: AIndexMap<String, String> =
-            AIndexMap::default();
+        let mut subgroup_group: AIndexMap<String, String> = AIndexMap::default();
+        let mut subgroup_order: AIndexMap<String, String> = AIndexMap::default();
         if let Some(sgs) = self.groups.get(&PrototypeGroup::ItemSubgroup) {
             for (name, r) in sgs {
                 let group_name = r
@@ -289,8 +282,7 @@ impl PrototypeStore {
                 subgroup_order.insert(name.clone(), order);
             }
         }
-        let mut group_order: AIndexMap<String, String> =
-            AIndexMap::default();
+        let mut group_order: AIndexMap<String, String> = AIndexMap::default();
         if let Some(gs) = self.groups.get(&PrototypeGroup::ItemGroup) {
             for (name, r) in gs {
                 let order = r
@@ -342,8 +334,7 @@ impl PrototypeStore {
             let subgroups = &grouped[&gk];
             let mut sg_keys: Vec<String> = subgroups.keys().cloned().collect();
             sg_keys.sort_by(|a, b| subgroup_order.get(a).cmp(&subgroup_order.get(b)));
-            let mut sg_map: AIndexMap<String, Vec<String>> =
-                AIndexMap::default();
+            let mut sg_map: AIndexMap<String, Vec<String>> = AIndexMap::default();
             for sk in sg_keys {
                 let mut items = subgroups[&sk].clone();
                 items.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
@@ -357,8 +348,7 @@ impl PrototypeStore {
     /// 惰性派生：科技反向依赖（科技只声明 `prerequisites`，这里预处理"谁依赖我"）。
     pub fn technology_dependents(&self) -> &AIndexMap<String, Vec<String>> {
         self.technology_dependents.get_or_init(|| {
-            let mut out: AIndexMap<String, Vec<String>> =
-                AIndexMap::default();
+            let mut out: AIndexMap<String, Vec<String>> = AIndexMap::default();
             if let Some(techs) = self.groups.get(&PrototypeGroup::Technology) {
                 for (tech_name, record) in techs {
                     if let Some(tech) = record.component::<TechnologyComponent>() {
