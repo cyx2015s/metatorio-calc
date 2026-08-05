@@ -5,10 +5,12 @@
 
 pub mod context;
 pub mod dual_var;
+pub mod energy;
 pub mod expand;
 pub mod id;
 pub mod mechanic;
 pub mod prim_var;
+pub mod quality;
 pub mod temp_flow;
 
 pub use dual_var::DualVar;

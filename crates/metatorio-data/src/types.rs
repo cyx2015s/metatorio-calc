@@ -1007,6 +1007,47 @@ pub struct Effect {
     pub speed: f64,
 }
 
+impl std::ops::Mul<f64> for Effect {
+    type Output = Effect;
+
+    fn mul(self, rhs: f64) -> Effect {
+        Effect {
+            consumption: self.consumption * rhs,
+            pollution: self.pollution * rhs,
+            productivity: self.productivity * rhs,
+            quality: self.quality * rhs,
+            speed: self.speed * rhs,
+        }
+    }
+}
+
+impl std::ops::Add for Effect {
+    type Output = Effect;
+
+    fn add(self, rhs: Effect) -> Effect {
+        Effect {
+            consumption: self.consumption + rhs.consumption,
+            pollution: self.pollution + rhs.pollution,
+            productivity: self.productivity + rhs.productivity,
+            quality: self.quality + rhs.quality,
+            speed: self.speed + rhs.speed,
+        }
+    }
+}
+
+impl Effect {
+    /// 钳制到游戏允许的取值域：
+    /// speed/consumption/pollution ≥ -0.8，productivity/quality ≥ 0。
+    pub fn clamped(mut self) -> Effect {
+        self.speed = self.speed.max(-0.8);
+        self.consumption = self.consumption.max(-0.8);
+        self.pollution = self.pollution.max(-0.8);
+        self.productivity = self.productivity.max(0.0);
+        self.quality = self.quality.max(0.0);
+        self
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

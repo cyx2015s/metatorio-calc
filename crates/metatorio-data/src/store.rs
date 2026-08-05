@@ -14,7 +14,7 @@
 use crate::generated_components::prototype_groups::prototype_group_from_type;
 use crate::generated_components::{
     COMPONENT_LIST, Component, ComponentValue, ItemSubGroupComponent, PrototypeBaseComponent,
-    TechnologyComponent, deserialize_component,
+    QualityComponent, TechnologyComponent, deserialize_component,
 };
 use serde_json::Value;
 use std::{fmt, sync::OnceLock};
@@ -118,6 +118,8 @@ pub struct PrototypeStore {
     order_info: OnceLock<AIndexMap<PrototypeGroup, OrderInfo>>,
     /// 惰性派生：每组的反查索引（条目名 → 三层索引）。
     reverse_order_info: OnceLock<AIndexMap<PrototypeGroup, ReverseOrderInfo>>,
+    /// 惰性派生：按 order 排序的品质名列表（0 = normal；品质等级 ↔ 名字映射）。
+    quality_order: OnceLock<Vec<String>>,
     /// 惰性派生：科技反向依赖（科技原型只声明 prerequisites，这里预处理"谁依赖我"）。
     technology_dependents: OnceLock<AIndexMap<String, Vec<String>>>,
 }
@@ -197,6 +199,7 @@ impl PrototypeStore {
                 groups: records,
                 order_info: OnceLock::new(),
                 reverse_order_info: OnceLock::new(),
+                quality_order: OnceLock::new(),
                 technology_dependents: OnceLock::new(),
             })
         } else {
@@ -343,6 +346,69 @@ impl PrototypeStore {
             out.insert(gk, sg_map);
         }
         out
+    }
+
+    /// 按 order 排序的品质名列表（0 = normal）。
+    ///
+    /// 品质等级 ↔ 名字的稳定映射（品质原型加载后不可变），供
+    /// 品质分布计算与品质倍率查询复用——避免每次调用重复排序。
+    pub fn quality_order(&self) -> &[String] {
+        self.quality_order.get_or_init(|| {
+            let qualities = self.groups.get(&PrototypeGroup::Quality);
+            let Some(qualities) = qualities else {
+                return Vec::new();
+            };
+            // name → next 链映射（品质等级顺序由 next 链定义，非 order）
+            let next_of: AIndexMap<String, String> = qualities
+                .iter()
+                .filter_map(|(name, record)| {
+                    record
+                        .component::<QualityComponent>()
+                        .and_then(|q| q.next.clone())
+                        .map(|next| (name.clone(), next))
+                })
+                .collect();
+            // 链头：内置 "normal"；否则第一个不是任何 next 目标的品质
+            let head = qualities
+                .keys()
+                .find(|n| *n == "normal")
+                .cloned()
+                .or_else(|| {
+                    qualities
+                        .keys()
+                        .find(|n| !next_of.values().any(|v| v == *n))
+                        .cloned()
+                });
+            let Some(mut current) = head else {
+                return Vec::new();
+            };
+            let mut order = Vec::new();
+            let mut visited: std::collections::HashSet<String> = Default::default();
+            // 沿 next 链遍历（visited 防 mod 数据成环）
+            while visited.insert(current.clone()) {
+                order.push(current.clone());
+                match next_of.get(&current) {
+                    Some(next) => current = next.clone(),
+                    None => break,
+                }
+            }
+            // 链外品质（无 next 关系的独立品质不用管）
+            // let mut extra: Vec<(String, String)> = qualities
+            //     .keys()
+            //     .filter(|n| !visited.contains(*n))
+            //     .map(|name| {
+            //         let order = qualities
+            //             .get(name)
+            //             .and_then(|r| r.component::<PrototypeBaseComponent>())
+            //             .map(|b| b.order.clone())
+            //             .unwrap_or_default();
+            //         (order, name.clone())
+            //     })
+            //     .collect();
+            // extra.sort_by(|a, b| a.0.cmp(&b.0));
+            // order.extend(extra.into_iter().map(|(_, n)| n));
+            order
+        })
     }
 
     /// 惰性派生：科技反向依赖（科技只声明 `prerequisites`，这里预处理"谁依赖我"）。

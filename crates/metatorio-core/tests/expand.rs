@@ -21,10 +21,12 @@ fn fluid_dump() -> Value {
         },
         "recipe": {
             "iron-plate": {
+                "energy_required": 1.0,
                 "ingredients": [{ "type": "item", "name": "iron-ore", "amount": 1 }],
                 "results": [{ "type": "item", "name": "iron-plate", "amount": 1 }]
             },
             "heat-water": {
+                "energy_required": 1.0,
                 "ingredients": [{ "type": "fluid", "name": "water", "amount": 10,
                                   "minimum_temperature": 15, "maximum_temperature": 500 }],
                 "results": [{ "type": "fluid", "name": "steam", "amount": 10, "temperature": 165 }]
