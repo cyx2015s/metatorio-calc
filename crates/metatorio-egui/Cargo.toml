@@ -25,7 +25,7 @@ rayon = "1"
 regex = "1"
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls"] }
 rfd = "0.16"
-self_update = "0.42"
+self_update = { version = "0.44", default-features = false, features = ["rustls", "reqwest" ] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_with = "3"
