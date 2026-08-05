@@ -3095,6 +3095,9 @@ dependencies = [
 name = "metatorio-core"
 version = "0.1.0"
 dependencies = [
+ "ahash",
+ "indexmap 2.14.0",
+ "metatorio-data",
  "serde",
  "serde_json",
 ]

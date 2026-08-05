@@ -364,7 +364,7 @@ impl PrototypeStore {
                     if let Some(tech) = record.component::<TechnologyComponent>() {
                         for prereq in &tech.prerequisites {
                             out.entry(prereq.clone())
-                                .or_insert_with(Vec::new)
+                                .or_default()
                                 .push(tech_name.clone());
                         }
                     }

@@ -7,6 +7,10 @@ pub mod dual_var;
 pub mod id;
 pub mod mechanic;
 
+pub mod context;
+pub mod prim_var;
+pub mod expand;
+
 pub use dual_var::DualVar;
 pub use id::{IdWithQuality, NORMAL_QUALITY};
 pub use mechanic::{
@@ -14,3 +18,4 @@ pub use mechanic::{
     Mechanic, MiningMechanic, ModuleConfig, PlantMechanic, ReactorMechanic, RecipeMechanic,
     SpoilMechanic,
 };
+
