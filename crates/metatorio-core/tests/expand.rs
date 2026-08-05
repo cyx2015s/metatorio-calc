@@ -1,9 +1,10 @@
-//! 配置 → 虚拟流展开测试：物品配方、流体插值 2 端、顺序无关。
+//! 配置 → 虚拟流展开测试：物品配方、流体插值 2 端、调用方稳定键序。
 
 use metatorio_core::context::{Context, GameState};
 use metatorio_core::dual_var::DualVar;
 use metatorio_core::expand::expand;
 use metatorio_core::mechanic::{Mechanic, RecipeMechanic};
+use metatorio_core::prim_var::AIndexMap;
 use metatorio_data::store::PrototypeStore;
 use serde_json::{Value, json};
 
@@ -46,11 +47,16 @@ fn item_recipe_expands_single_variable() {
     let store = load(fluid_dump());
     let game = GameState::default();
     let ctx = Context::new(&store, &game);
-    let expansion = expand(&[recipe_mechanic("iron-plate")], &ctx);
+    let expansion = expand(
+        [("iron-plate".to_string(), recipe_mechanic("iron-plate"))]
+            .iter()
+            .map(|(c, m)| (c.clone(), m)),
+        &ctx,
+    );
 
     assert_eq!(expansion.len(), 1);
     let v = &expansion.variables[0];
-    assert_eq!(v.prim_var.config, 0);
+    assert_eq!(v.prim_var.inner, "iron-plate");
     assert_eq!(v.flow.get(&DualVar::Item("iron-ore".into())), Some(&-1.0));
     assert_eq!(v.flow.get(&DualVar::Item("iron-plate".into())), Some(&1.0));
 }
@@ -60,15 +66,19 @@ fn fluid_recipe_expands_two_interpolation_ends() {
     let store = load(fluid_dump());
     let game = GameState::default();
     let ctx = Context::new(&store, &game);
-    let expansion = expand(&[recipe_mechanic("heat-water")], &ctx);
+    let expansion = expand(
+        [("heat-water".to_string(), recipe_mechanic("heat-water"))]
+            .iter()
+            .map(|(c, m)| (c.clone(), m)),
+        &ctx,
+    );
 
     // k=1 个流体输入 → 2 个插值端
     assert_eq!(expansion.len(), 2);
     let low = &expansion.variables[0];
     let high = &expansion.variables[1];
-
     assert_eq!(
-        low.prim_var.config, high.prim_var.config,
+        low.prim_var.inner, high.prim_var.inner,
         "同配置共享 config 标识"
     );
 
@@ -114,31 +124,27 @@ fn fluid_recipe_expands_two_interpolation_ends() {
 }
 
 #[test]
-fn expansion_is_order_independent() {
+fn stable_key_order_from_caller() {
     let store = load(fluid_dump());
     let game = GameState::default();
     let ctx = Context::new(&store, &game);
 
-    let a = expand(
-        &[recipe_mechanic("iron-plate"), recipe_mechanic("heat-water")],
-        &ctx,
-    );
-    let b = expand(
-        &[recipe_mechanic("heat-water"), recipe_mechanic("iron-plate")],
-        &ctx,
-    );
+    // 调用方持久结构：AIndexMap<config ID, Mechanic> 键序 = 稳定标识（UI 拖动不改变键序）
+    let mut configs: AIndexMap<String, Mechanic> =
+        AIndexMap::with_hasher(ahash::RandomState::default());
+    configs.insert("iron-plate".to_string(), recipe_mechanic("iron-plate"));
+    configs.insert("heat-water".to_string(), recipe_mechanic("heat-water"));
 
-    // 顺序交换 → 展开结果完全一致（config 编号与列表顺序无关）
+    let a = expand(configs.iter().map(|(k, m)| (k.clone(), m)), &ctx);
+    // 同一键序再次展开 → 完全一致（求解结果可缓存不重算）
+    let b = expand(configs.iter().map(|(k, m)| (k.clone(), m)), &ctx);
     assert_eq!(a, b);
-    // 每个配置都有稳定的 config 标识；编号按稳定键排序（heat-water < iron-plate 字典序）
-    let configs: Vec<usize> = a.variables.iter().map(|v| v.prim_var.config).collect();
+
+    // config 标识 = 调用方的 ID：iron-plate 与 heat-water 各自独立
+    let configs_used: Vec<&String> = a.variables.iter().map(|v| &v.prim_var.inner).collect();
+    assert_eq!(configs_used, vec!["iron-plate", "heat-water", "heat-water"]);
     assert_eq!(
-        configs,
-        vec![0, 0, 1],
-        "heat-water=0（两个插值端共享），iron-plate=1"
-    );
-    assert_eq!(
-        a.variables[0].prim_var.config, a.variables[1].prim_var.config,
+        a.variables[1].prim_var.inner, a.variables[2].prim_var.inner,
         "两个插值端共享 config"
     );
 }

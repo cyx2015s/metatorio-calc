@@ -6,8 +6,6 @@ use metatorio_core::dual_var::DualVar;
 use metatorio_core::temp_flow::TempFlow;
 use metatorio_data::store::PrototypeStore;
 use serde_json::{Value, json};
-
-fn _ctx_unused() {}
 // （各测试内局部构造 Context）
 
 fn store() -> PrototypeStore {
@@ -146,10 +144,20 @@ fn add_dual_expresses_correlation() {
     let mut t = TempFlow::new();
     // 锅炉场景：水温不同 → 燃料消耗不同（相关性：lo 端水温 15°C 需更多煤，hi 端 500°C 少煤）
     let mut lo: metatorio_core::prim_var::Flow = Default::default();
-    lo.insert(DualVar::Fluid { name: "water".into() }, -10.0);
+    lo.insert(
+        DualVar::Fluid {
+            name: "water".into(),
+        },
+        -10.0,
+    );
     lo.insert(DualVar::Item("coal".into()), -2.0);
     let mut hi: metatorio_core::prim_var::Flow = Default::default();
-    hi.insert(DualVar::Fluid { name: "water".into() }, -10.0);
+    hi.insert(
+        DualVar::Fluid {
+            name: "water".into(),
+        },
+        -10.0,
+    );
     hi.insert(DualVar::Item("coal".into()), -1.0);
     t.add_dual(&lo, &hi);
     let vars = t.into_variables(0);
@@ -160,6 +168,11 @@ fn add_dual_expresses_correlation() {
     assert_eq!(vars[1].flow.get(&DualVar::Item("coal".into())), Some(&-1.0));
     // 两端共享的水量
     for v in &vars {
-        assert_eq!(v.flow.get(&DualVar::Fluid { name: "water".into() }), Some(&-10.0));
+        assert_eq!(
+            v.flow.get(&DualVar::Fluid {
+                name: "water".into()
+            }),
+            Some(&-10.0)
+        );
     }
 }

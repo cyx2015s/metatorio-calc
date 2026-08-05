@@ -10,7 +10,7 @@
 
 use crate::context::Context;
 use crate::dual_var::DualVar;
-use crate::prim_var::{ConfigId, ExpandedVariable, Flow, PrimVar};
+use crate::prim_var::{ExpandedVariable, Flow, PrimVar};
 use metatorio_data::generated_components::FluidComponent;
 use metatorio_data::store::PrototypeGroup;
 
@@ -49,7 +49,7 @@ pub struct TempFlow {
     /// 每个副本的流系数；副本索引低 k 位 = 各变温流体的端点选择。
     copies: Vec<Flow>,
     /// 变温流体数（单点温度不计入；副本数 = 2^k，k ≤ 8）。
-    fluid_count: usize,
+    split_count: usize,
 }
 
 impl Default for TempFlow {
@@ -63,7 +63,7 @@ impl TempFlow {
     pub fn new() -> Self {
         Self {
             copies: vec![Flow::default()],
-            fluid_count: 0,
+            split_count: 0,
         }
     }
 
@@ -113,7 +113,7 @@ impl TempFlow {
     /// 汽轮机输入不同温度的蒸汽 → 发电量不同。两个 Flow 的差异就是相关性。
     pub fn add_dual(&mut self, lo: &Flow, hi: &Flow) {
         assert!(
-            self.fluid_count < 8,
+            self.split_count < 8,
             "分裂次数超过 8（2^k 组合爆炸），当前实现不支持"
         );
         let mut next = Vec::with_capacity(self.copies.len() * 2);
@@ -126,16 +126,18 @@ impl TempFlow {
             next.push(high);
         }
         self.copies = next;
-        self.fluid_count += 1;
+        self.split_count += 1;
     }
 
     /// 收尾：副本 → 展开变量。变量顺序 = 副本顺序（同一 config 连续排列，
     /// 相对位置即温度组合端序号，由求解器以 (config, position) 定位）。
-    pub fn into_variables(self, config: ConfigId) -> Vec<ExpandedVariable> {
+    pub fn into_variables<C: Clone>(self, config: C) -> Vec<ExpandedVariable<C>> {
         self.copies
             .into_iter()
             .map(|flow| ExpandedVariable {
-                prim_var: PrimVar { config },
+                prim_var: PrimVar {
+                    inner: config.clone(),
+                },
                 flow,
             })
             .collect()
