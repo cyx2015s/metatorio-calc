@@ -121,12 +121,12 @@ fn test_calc_quality_distribution() {
             .expect("modded dump 不存在（assets/data-raw-dump-heavily-modded.json）");
         serde_json::from_str(&text).expect("modded dump 解析失败")
     }
-    fn store() -> PrototypeStore {
+    fn store() -> metatorio_data::store::PrototypeStore {
         let dump = load_dump();
-        PrototypeStore::load(&dump).expect("dump 加载失败")
+        metatorio_data::store::PrototypeStore::load(&dump).expect("dump 加载失败")
     }
     let s = store();
-    let game = GameState::default();
+    let game = crate::context::GameState::default();
     let ctx = Context::new(&s, &game);
     let qualities = sorted_qualities(&ctx);
     assert!(!qualities.is_empty());

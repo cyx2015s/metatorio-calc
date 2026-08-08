@@ -23,7 +23,7 @@ fn schema_version_is_pinned() {
     let schema = load_schema();
     // 版本锚定：游戏升级或 schema 格式变化时，此测试失败提醒重新审视生成代码
     assert_eq!(schema.application, "factorio");
-    assert_eq!(schema.application_version, "2.1.11");
+    assert_eq!(schema.application_version, "2.1.14");
     assert_eq!(schema.api_version, 6);
     assert_eq!(schema.stage, "prototype");
 }
