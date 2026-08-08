@@ -23,7 +23,6 @@ pub(crate) fn sorted_qualities<'a>(ctx: &'a Context<'a>) -> Vec<&'a QualityCompo
 ///
 /// `quality_bonus > 0`：正向升级（沿 next 链，chain_probability）；
 /// `quality_bonus < 0`：降级（沿 previous 链）。`maximum_quality` 钳制升级上限。
-#[allow(clippy::needless_range_loop)] // 公式结构忠实迁移自 egui，索引访问保持可读性
 pub fn calc_quality_distribution(
     ctx: &Context,
     quality_bonus: f64,
@@ -38,75 +37,107 @@ pub fn calc_quality_distribution(
     let mut result = vec![0.0; qualities.len()];
     let base_quality = base_quality.min(qualities.len() - 1);
     let maximum_quality = maximum_quality.clamp(base_quality, qualities.len() - 1);
-    if quality_bonus > 0.0 {
-        let mut multiplier = qualities[base_quality].next_probability * quality_bonus;
-        result[base_quality] = multiplier; // 有这么多能参与品质转移
-        multiplier = 1.0;
-        for idx in base_quality..maximum_quality {
-            let jdx = idx + 1;
-            result[jdx] = result[idx] * multiplier;
-            multiplier = qualities[idx].chain_probability();
+    if quality_bonus == 0.0 || !quality_bonus.is_finite() {
+        result[base_quality] = 1.0;
+        return result;
+    }
+
+    if quality_bonus > 0.0 && maximum_quality > base_quality {
+        // Do not clamp this probability. Factorio lets the excess borrow
+        // lower-quality results and pays that debt back from the bottom.
+        let initial = qualities[base_quality].next_probability * quality_bonus;
+        let mut cumulative = vec![0.0; qualities.len()];
+        cumulative[base_quality] = initial;
+        let mut chain = 1.0;
+        for level in base_quality..maximum_quality {
+            cumulative[level + 1] = cumulative[level] * chain;
+            chain = qualities[level].chain_probability();
         }
-        for idx in (base_quality + 1)..result.len() {
-            let hdx = idx - 1;
-            result[hdx] -= result[idx];
+        result.copy_from_slice(&cumulative);
+        for level in base_quality + 1..qualities.len() {
+            result[level - 1] -= result[level];
         }
-        let mut sum = 0.0;
-        for idx in 0..(result.len() - 1) {
-            if result[idx] < 0.0 {
-                result[idx + 1] += result[idx];
-                result[idx] = 0.0;
-            }
-            sum += result[idx];
+        settle_upgrade_distribution(&mut result, base_quality);
+    } else if quality_bonus < 0.0 && base_quality > 0 {
+        let initial = qualities[base_quality].previous_probability * quality_bonus.abs();
+        let mut cumulative = vec![0.0; qualities.len()];
+        cumulative[base_quality] = initial;
+        let mut chain = 1.0;
+        for level in (1..=base_quality).rev() {
+            cumulative[level - 1] = cumulative[level] * chain;
+            chain = qualities[level].previous_chain_probability();
         }
-        sum += result[result.len() - 1];
-        if sum > 1.0 {
-            let mut sum_alt = 0.0;
-            for idx in (0..result.len()).rev() {
-                sum_alt += result[idx];
-                if sum_alt > 1.0 {
-                    result[idx] -= sum_alt - 1.0;
-                    sum_alt = 1.0;
-                }
-            }
+        result.copy_from_slice(&cumulative);
+        for level in (1..=base_quality).rev() {
+            result[level] -= result[level - 1];
         }
-        result[base_quality] += (1.0 - sum).clamp(0.0, 1.0);
-        result
+        settle_downgrade_distribution(&mut result, base_quality);
     } else {
-        let mut multiplier = qualities[base_quality].previous_probability * quality_bonus.abs();
-        result[base_quality] = multiplier; // 有这么多能参与品质转移
-        multiplier = 1.0;
-        for idx in (1..=base_quality).rev() {
-            let jdx = idx - 1;
-            result[jdx] = result[idx] * multiplier;
-            multiplier = qualities[idx].previous_chain_probability();
+        result[base_quality] = 1.0;
+    }
+    result
+}
+
+/// Settle an upgrade distribution.
+///
+/// An upgrade overflow borrows low-quality items. The game pays that debt
+/// back from low to high, so high-quality results are retained first.
+fn settle_upgrade_distribution(result: &mut [f64], base_quality: usize) {
+    let mut sum = 0.0;
+    for level in 0..result.len() {
+        if result[level] < 0.0 {
+            let deficit = result[level];
+            if let Some(next) = result.get_mut(level + 1) {
+                *next += deficit;
+            }
+            result[level] = 0.0;
         }
-        for idx in (1..=base_quality).rev() {
-            let hdx = idx - 1;
-            result[hdx] -= result[idx];
-        }
-        let mut sum = 0.0;
-        for idx in (1..result.len()).rev() {
-            if result[idx] < 0.0 {
-                result[idx - 1] += result[idx];
-                result[idx] = 0.0;
-            } else {
-                sum += result[idx];
+        sum += result[level];
+    }
+
+    if sum > 1.0 {
+        let mut tail = 0.0;
+        for level in (0..result.len()).rev() {
+            tail += result[level];
+            if tail > 1.0 {
+                result[level] -= tail - 1.0;
+                tail = 1.0;
             }
         }
-        sum += result[0];
-        if sum > 1.0 {
-            let mut sum_alt = 0.0;
-            for idx in 0..result.len() {
-                sum_alt += result[idx];
-                if sum_alt > 1.0 {
-                    result[idx] -= sum_alt - 1.0;
-                    sum_alt = 1.0;
-                }
-            }
-        }
+    } else {
         result[base_quality] += (1.0 - sum).clamp(0.0, 1.0);
-        result
+    }
+}
+
+/// Settle a downgrade distribution.
+///
+/// A downgrade overflow borrows high-quality items. Unlike an upgrade, the
+/// excess must therefore be removed from high to low, retaining the lower
+/// quality results first.
+fn settle_downgrade_distribution(result: &mut [f64], base_quality: usize) {
+    let mut sum = 0.0;
+    for level in (0..result.len()).rev() {
+        if result[level] < 0.0 {
+            let deficit = result[level];
+            if let Some(previous) = level.checked_sub(1).and_then(|level| result.get_mut(level)) {
+                *previous += deficit;
+            }
+            result[level] = 0.0;
+        }
+        sum += result[level];
+    }
+
+    if sum > 1.0 {
+        let mut retained = 0.0;
+        for amount in result {
+            retained += *amount;
+            if retained > 1.0 {
+                *amount -= retained - 1.0;
+                retained = 1.0;
+            }
+        }
+    } else {
+        result[base_quality] += (1.0 - sum).clamp(0.0, 1.0);
     }
 }
 
@@ -130,14 +161,71 @@ fn test_calc_quality_distribution() {
     let ctx = Context::new(&s, &game);
     let qualities = sorted_qualities(&ctx);
     assert!(!qualities.is_empty());
-    assert_eq!(
-        calc_quality_distribution(&ctx, 0.5, 0, 4),
-        vec![
-            0.5,
-            0.45,
-            0.045,
-            0.0045000000000000005,
-            0.0005000000000000001
-        ]
-    );
+    let distribution = calc_quality_distribution(&ctx, 0.5, 0, 4);
+    let expected = [0.5, 0.45, 0.045, 0.0045, 0.0005];
+    assert_eq!(distribution.len(), expected.len());
+    for (actual, expected) in distribution.iter().zip(expected) {
+        assert!(
+            (actual - expected).abs() < 1e-12,
+            "distribution: {distribution:?}"
+        );
+    }
+
+    let overflow = calc_quality_distribution(&ctx, 20.0, 0, 4);
+    let expected_overflow = [0.0, 0.0, 0.8, 0.18, 0.02];
+    for (actual, expected) in overflow.iter().zip(expected_overflow) {
+        assert!((actual - expected).abs() < 1e-12, "overflow: {overflow:?}");
+    }
+}
+
+#[test]
+fn downgrade_overflow_keeps_lower_qualities_first() {
+    let mut qualities = serde_json::Map::new();
+    for level in 0..5 {
+        let name = if level == 0 {
+            "normal".to_string()
+        } else {
+            format!("quality-{level}")
+        };
+        qualities.insert(
+            name.clone(),
+            serde_json::json!({
+                "name": name,
+                "level": level,
+                "next": if level < 4 {
+                    Some(format!("quality-{}", level + 1))
+                } else {
+                    None
+                },
+                "next_probability": 1.0,
+                "chain_probability": 0.1,
+                "previous_probability": 1.0,
+                "previous_chain_probability": 0.1
+            }),
+        );
+    }
+    let store = metatorio_data::store::PrototypeStore::load(&serde_json::json!({
+        "quality": qualities
+    }))
+    .unwrap();
+    let game = crate::context::GameState {
+        qualities: vec![
+            "normal".to_string(),
+            "quality-1".to_string(),
+            "quality-2".to_string(),
+            "quality-3".to_string(),
+            "quality-4".to_string(),
+        ],
+        max_quality: 4,
+        ..Default::default()
+    };
+    let ctx = Context::new(&store, &game);
+    let distribution = calc_quality_distribution(&ctx, -20.0, 4, 4);
+    let expected = [0.02, 0.18, 0.8, 0.0, 0.0];
+    for (actual, expected) in distribution.iter().zip(expected) {
+        assert!(
+            (actual - expected).abs() < 1e-12,
+            "distribution: {distribution:?}"
+        );
+    }
 }

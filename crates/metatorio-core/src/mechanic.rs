@@ -24,8 +24,8 @@ pub struct ModuleConfig {
 // 模块/插件塔效果与耗电（迁移自 metatorio-egui ModuleConfig::get_effect/get_consumption）
 
 use crate::context::Context;
-use metatorio_data::generated_components::{BeaconComponent, ModuleComponent};
-use metatorio_data::types::{BeaconCounter, Effect};
+use metatorio_data::generated_components::{BeaconComponent, ModuleComponent, QualityComponent};
+use metatorio_data::types::{BeaconCounter, Effect, EnergySource};
 
 fn module_prototype<'a>(
     ctx: &'a Context,
@@ -48,42 +48,47 @@ pub(crate) fn quality_by_level<'a>(
     ctx: &'a Context,
     level: usize,
 ) -> Option<&'a metatorio_data::generated_components::QualityComponent> {
-    crate::quality::sorted_qualities(ctx).into_iter().nth(level)
+    let name = ctx.prototype.quality_order().get(level)?;
+    ctx.prototype
+        .get(metatorio_data::store::PrototypeGroup::Quality, name)
+        .and_then(|record| record.component::<QualityComponent>())
 }
 
-pub fn module_effects_under_quality(module: &ModuleComponent, level: u32) -> Effect {
+pub fn module_effect_at_quality(
+    module: &ModuleComponent,
+    quality: &QualityComponent,
+) -> Effect {
     let raw_effect = module.effect;
-    let mul = level as f64;
+    let scale = |value: f64, module_factor: f64, quality_factor: f64| {
+        value * (1.0 - module_factor + quality_factor * module_factor)
+    };
     Effect {
-        consumption: raw_effect.consumption * (1.0 + module.consumption_quality_multiplier() * mul),
-        pollution: raw_effect.pollution * (1.0 + module.pollution_quality_multiplier() * mul),
-        productivity: raw_effect.productivity
-            * (1.0 + module.productivity_quality_multiplier() * mul),
-        quality: raw_effect.quality + (1.0 + module.quality_quality_multiplier() * mul),
-        speed: raw_effect.speed * (1.0 + module.speed_quality_multiplier() * mul),
+        consumption: scale(
+            raw_effect.consumption,
+            module.consumption_quality_multiplier(),
+            quality.module_consumption_multiplier(),
+        ),
+        pollution: scale(
+            raw_effect.pollution,
+            module.pollution_quality_multiplier(),
+            quality.module_pollution_multiplier(),
+        ),
+        productivity: scale(
+            raw_effect.productivity,
+            module.productivity_quality_multiplier(),
+            quality.module_productivity_multiplier(),
+        ),
+        quality: scale(
+            raw_effect.quality,
+            module.quality_quality_multiplier(),
+            quality.module_quality_multiplier(),
+        ),
+        speed: scale(
+            raw_effect.speed,
+            module.speed_quality_multiplier(),
+            quality.module_speed_multiplier(),
+        ),
     }
-}
-
-/// 效果按品质缩放：负向效果（consumption/pollution）与正向效果（speed/productivity/quality）
-/// 分别乘品质倍率（迁移自 egui effects_under_quality）。
-pub fn effects_under_quality(effect: &Effect, multiplier: f64) -> Effect {
-    let mut effect = *effect;
-    if effect.consumption < 0.0 {
-        effect.consumption *= multiplier;
-    }
-    if effect.speed > 0.0 {
-        effect.speed *= multiplier;
-    }
-    if effect.productivity > 0.0 {
-        effect.productivity *= multiplier;
-    }
-    if effect.pollution < 0.0 {
-        effect.pollution *= multiplier;
-    }
-    if effect.quality > 0.0 {
-        effect.quality *= multiplier;
-    }
-    effect
 }
 
 impl ModuleConfig {
@@ -95,23 +100,30 @@ impl ModuleConfig {
                 && let Some(module_proto) = record.component::<ModuleComponent>()
             {
                 let quality = ctx.game.quality_level(&module.quality);
-                let multiplier = quality_by_level(ctx, quality)
-                    .map(|q| q.default_multiplier())
-                    .unwrap_or(1.0);
-                total_effect =
-                    total_effect + effects_under_quality(&module_proto.effect, multiplier);
+                let effect = quality_by_level(ctx, quality)
+                    .map(|q| module_effect_at_quality(module_proto, q))
+                    .unwrap_or(module_proto.effect);
+                total_effect = total_effect + effect;
             }
         }
         let mut beacon_count = 0usize;
         let mut beacon_count_by_type: crate::prim_var::AIndexMap<String, usize> =
             Default::default();
         for bc in &self.beacons {
-            beacon_count += bc.count;
-            *beacon_count_by_type
-                .entry(bc.beacon.id.clone())
-                .or_insert(0) += bc.count;
+            if beacon_prototype(ctx, &bc.beacon.id)
+                .and_then(|record| record.component::<BeaconComponent>())
+                .is_some()
+            {
+                beacon_count += bc.count;
+                *beacon_count_by_type
+                    .entry(bc.beacon.id.clone())
+                    .or_insert(0) += bc.count;
+            }
         }
         for bc in &self.beacons {
+            if bc.count == 0 || beacon_count == 0 {
+                continue;
+            }
             if let Some(record) = beacon_prototype(ctx, &bc.beacon.id)
                 && let Some(bp) = record.component::<BeaconComponent>()
             {
@@ -145,10 +157,9 @@ impl ModuleConfig {
                         && let Some(module_proto) = record.component::<ModuleComponent>()
                     {
                         let module_quality = ctx.game.quality_level(&module.quality);
-                        let multiplier = quality_by_level(ctx, module_quality)
-                            .map(|q| q.default_multiplier())
-                            .unwrap_or(1.0);
-                        let module_effect = effects_under_quality(&module_proto.effect, multiplier);
+                        let module_effect = quality_by_level(ctx, module_quality)
+                            .map(|q| module_effect_at_quality(module_proto, q))
+                            .unwrap_or(module_proto.effect);
                         let count = (*count).min(effective_module_slots * beacon_count);
                         let total_module_effect =
                             module_effect * count as f64 * base_efficiency * profile_multiplier;
@@ -167,9 +178,17 @@ impl ModuleConfig {
             if let Some(record) = beacon_prototype(ctx, &bc.beacon.id)
                 && let Some(bp) = record.component::<BeaconComponent>()
             {
-                let energy_usage = bp.energy_usage.amount * 60.0; // 每 tick → 每秒
+                let energy_usage = match &bp.energy_source {
+                    EnergySource::Electric(_) => bp.energy_usage.amount * 60.0,
+                    EnergySource::Void => 0.0,
+                    _ => 0.0,
+                };
+                let quality = ctx.game.quality_level(&bc.beacon.quality);
+                let quality_multiplier = quality_by_level(ctx, quality)
+                    .map(|q| q.beacon_power_usage_multiplier)
+                    .unwrap_or(1.0);
                 let consumption_per_beacon = energy_usage / bc.share.max(1.0);
-                total_consumption += consumption_per_beacon * bc.count as f64;
+                total_consumption += consumption_per_beacon * bc.count as f64 * quality_multiplier;
             }
         }
         total_consumption
@@ -219,10 +238,11 @@ pub struct RecipeMechanic {
     pub recipe: IdWithQuality,
     pub machine: IdWithQuality,
     pub module_config: ModuleConfig,
-    /// 流体燃料名（FluidID）。只有流体供能的机器会因温度低/热值低导致速率跑不满，
-    /// 需要用户指定燃料流体；物品燃料无此问题（求解时自动选择最优），
+    /// 明确燃料 ID。流体能量源使用流体，Burner 能量源使用物品；
     /// Electric/Heat/Void 时无效（None）。
     pub fuel: Option<String>,
+    /// 指定流体燃料温度；None 使用该流体的默认温度。
+    pub fuel_temperature: Option<i32>,
 }
 
 /// 采矿组件。
@@ -232,8 +252,10 @@ pub struct MiningMechanic {
     pub resource: String,
     pub machine: IdWithQuality,
     pub module_config: ModuleConfig,
-    /// 流体燃料名（FluidID）；None = 自动选择/无需燃料。
+    /// 明确燃料 ID；None = 自动选择/无需燃料。
     pub fuel: Option<String>,
+    /// 指定流体燃料温度；None 使用该流体的默认温度。
+    pub fuel_temperature: Option<i32>,
 }
 
 /// 腐坏组件。
@@ -272,6 +294,8 @@ pub struct ItemLaunchMechanic {
 pub struct GeneratorMechanic {
     pub generator: IdWithQuality,
     pub fluid: String,
+    /// 输入流体温度；None 使用流体默认温度。
+    pub temperature: Option<i32>,
 }
 
 /// 锅炉组件。
@@ -280,8 +304,12 @@ pub struct GeneratorMechanic {
 pub struct BoilerMechanic {
     pub boiler: IdWithQuality,
     pub fluid: String,
-    /// 流体燃料名（FluidID）；None = 自动选择/无需燃料。
+    /// 输入流体温度；None 使用流体默认温度。
+    pub temperature: Option<i32>,
+    /// 明确燃料 ID；None = 自动选择/无需燃料。
     pub fuel: Option<String>,
+    /// 指定流体燃料温度；None 使用该流体的默认温度。
+    pub fuel_temperature: Option<i32>,
 }
 
 /// 反应堆组件。
@@ -290,6 +318,6 @@ pub struct BoilerMechanic {
 pub struct ReactorMechanic {
     pub reactor: IdWithQuality,
     pub neighbours: u8,
-    /// 流体燃料名（FluidID）；None = 自动选择/无需燃料。
+    /// 明确燃料 ID（反应堆通常使用物品）；None = 自动选择/无需燃料。
     pub fuel: Option<String>,
 }

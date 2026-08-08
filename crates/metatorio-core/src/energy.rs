@@ -1,215 +1,281 @@
-//! 能量源 → 能源流（迁移自 metatorio-egui `energy_source_as_flow`）。
+//! 能量源到流的转换。
 //!
-//! 四种能量源：Electric（电力 + drain + 污染）、Heat（热 + 污染）、
-//! Burner（物品燃料 + 燃尽产物 + 污染）、Fluid（烧流体 / 流体热源 + 污染）。
-//!
-//! 流体燃料/热源的温度相关项：`FuelSpec::Fluid(name, temperature)` 携带温度，
-//! 展开层对温度区间两端各调一次并用 `TempFlow::add_dual` 合并（相关性表达）。
+//! 这里仅计算一秒内的能量与污染流。机器的运行速度由调用方计算，
+//! `fulfillment` 用来表达流体能量源的流量上限对机器速度的限制。
 
 use crate::context::Context;
 use crate::dual_var::DualVar;
 use crate::prim_var::Flow;
+use metatorio_data::generated_components::{FluidComponent, ItemComponent};
 use metatorio_data::store::PrototypeGroup;
 use metatorio_data::types::{Effect, EnergyAmount, EnergySource};
 
-#[derive(Debug, Clone, PartialEq)]
+/// 明确选择的燃料。
+///
+/// 未明确选择燃料时，能量源会生成 `ItemFuel` 或 `FluidHeat` 筛选流，
+/// 由求解器从其它机制提供的燃料中选择可行项。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FuelSpec<'a> {
+    Item(ItemFuelSpec<'a>),
+    Fluid(FluidFuelSpec<'a>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ItemFuelSpec<'a> {
+    pub name: &'a str,
+    pub quality: &'a str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FluidFuelSpec<'a> {
     pub fuel: &'a str,
     pub temperature: f64,
 }
 
 fn add(flow: &mut Flow, key: DualVar, value: f64) {
-    if value != 0.0 {
-        *flow.entry(key).or_insert(0.0) += value;
+    if value == 0.0 {
+        return;
+    }
+    let new_value = flow.get(&key).copied().unwrap_or_default() + value;
+    if new_value == 0.0 {
+        flow.shift_remove(&key);
+    } else {
+        flow.insert(key, new_value);
     }
 }
 
-/// 能量源 → 能源流（每秒）。
-///
-/// `fulfillment`：流体燃料/热源受最大流量限制时下调的产出因子（调用方乘到产出/速度上，
-/// 初始值 1.0）。
+fn effective_effectivity(effectivity: f64) -> f64 {
+    if effectivity > 0.0 { effectivity } else { 1.0 }
+}
+
+fn effective_scale_fluid_usage(scale_fluid_usage: Option<bool>) -> bool {
+    scale_fluid_usage.unwrap_or(false)
+}
+
+fn fluid_record<'a>(ctx: &'a Context, name: &str) -> Option<&'a FluidComponent> {
+    ctx.prototype
+        .get(PrototypeGroup::Fluid, name)
+        .and_then(|record| record.component::<FluidComponent>())
+}
+
+fn item_record<'a>(ctx: &'a Context, name: &str) -> Option<&'a ItemComponent> {
+    ctx.prototype
+        .get(PrototypeGroup::Item, name)
+        .and_then(|record| record.component::<ItemComponent>())
+}
+
+fn add_emissions(
+    flow: &mut Flow,
+    emissions_per_minute: &std::collections::BTreeMap<String, f64>,
+    effects: &Effect,
+    fuel_multiplier: f64,
+) {
+    let multiplier = (1.0 + effects.pollution) * (1.0 + effects.consumption);
+    for (name, amount) in emissions_per_minute {
+        add(
+            flow,
+            DualVar::Pollution { name: name.clone() },
+            amount * multiplier * fuel_multiplier / 60.0,
+        );
+    }
+}
+
+/// Apply the fluid source's per-tick usage rule.
+fn fluid_usage(requested: f64, maximum: f64, scale_usage: bool, fulfillment: &mut f64) -> f64 {
+    if requested <= 0.0 {
+        return 0.0;
+    }
+    if maximum <= 0.0 {
+        return requested;
+    }
+
+    let mut used = requested;
+    if used > maximum {
+        *fulfillment = (*fulfillment).min(maximum / used);
+        used = maximum;
+    } else if !scale_usage {
+        // A fixed fluid usage keeps the source at its declared flow rate.
+        used = maximum;
+    }
+    used
+}
+
+/// Convert an energy source to one-second flow coefficients.
 pub fn energy_source_as_flow(
     ctx: &Context,
     energy_source: &EnergySource,
     energy_usage: EnergyAmount,
     effects: &Effect,
-    fuel: Option<&FluidFuelSpec>,
-    // 修改入参
+    fuel: Option<&FuelSpec<'_>>,
     fulfillment: &mut f64,
 ) -> Flow {
-    let mut map: Flow = Default::default();
+    let mut flow = Flow::default();
+    let usage = energy_usage.amount * 60.0 * (1.0 + effects.consumption);
+
     match energy_source {
         EnergySource::Void => {}
         EnergySource::Electric(source) => {
-            let usage = energy_usage.amount * 60.0 * (1.0 + effects.consumption);
-            add(&mut map, DualVar::Electricity, -usage);
-            add(
-                &mut map,
-                DualVar::Electricity,
-                -source
-                    .drain
-                    .as_ref()
-                    .map(|d| d.amount * 60.0)
-                    .unwrap_or_default(),
-            );
-            for (pollutant, emission) in &source.emissions_per_minute {
-                add(
-                    &mut map,
-                    DualVar::Pollution {
-                        name: pollutant.clone(),
-                    },
-                    emission * (1.0 + effects.pollution) * (1.0 + effects.consumption) / 60.0,
-                );
+            add(&mut flow, DualVar::Electricity, -usage);
+            if let Some(drain) = source.drain {
+                add(&mut flow, DualVar::Electricity, -drain.amount * 60.0);
             }
+            add_emissions(&mut flow, &source.emissions_per_minute, effects, 1.0);
         }
         EnergySource::Heat(source) => {
-            add(
-                &mut map,
-                DualVar::Heat,
-                -energy_usage.amount * 60.0 * (1.0 + effects.consumption),
-            );
-            for (pollutant, emission) in &source.emissions_per_minute {
-                add(
-                    &mut map,
-                    DualVar::Pollution {
-                        name: pollutant.clone(),
-                    },
-                    emission * (1.0 + effects.pollution) * (1.0 + effects.consumption) / 60.0,
-                );
-            }
+            add(&mut flow, DualVar::Heat, -usage);
+            add_emissions(&mut flow, &source.emissions_per_minute, effects, 1.0);
         }
         EnergySource::Burner(source) => {
-            // 每秒能量消耗（燃烧效率折算）
-            let usage =
-                energy_usage.amount * 60.0 * (1.0 + effects.consumption) / source.effectivity;
+            let usage = usage / effective_effectivity(source.effectivity);
+            let mut fuel_emissions_multiplier = 1.0;
 
-            // 自动选择燃料：类别流（无燃尽产物，可隐式提升）
-            add(
-                &mut map,
-                DualVar::ItemFuel {
-                    category: source.fuel_categories.clone(),
-                    has_burnt_result: false,
-                },
-                -usage,
-            );
-
-            for (pollutant, emission) in &source.emissions_per_minute {
-                add(
-                    &mut map,
-                    DualVar::Pollution {
-                        name: pollutant.clone(),
-                    },
-                    emission * (1.0 + effects.pollution) * (1.0 + effects.consumption) / 60.0,
-                );
+            match fuel {
+                Some(FuelSpec::Item(item_spec)) => {
+                    let Some(item) = item_record(ctx, item_spec.name) else {
+                        return flow;
+                    };
+                    let fuel_value = item.fuel_value().amount;
+                    if fuel_value <= 0.0 {
+                        return flow;
+                    }
+                    let burn_rate = usage / fuel_value;
+                    add(
+                        &mut flow,
+                        DualVar::Item(crate::id::IdWithQuality::new(
+                            item_spec.name,
+                            item_spec.quality,
+                        )),
+                        -burn_rate,
+                    );
+                    if !item.burnt_result.is_empty() {
+                        add(
+                            &mut flow,
+                            DualVar::Item(crate::id::IdWithQuality::new(
+                                item.burnt_result.clone(),
+                                item_spec.quality,
+                            )),
+                            burn_rate,
+                        );
+                    }
+                    fuel_emissions_multiplier = item.fuel_emissions_multiplier;
+                }
+                Some(FuelSpec::Fluid(_)) => {
+                    // A burner cannot consume a fluid fuel. Keep the mechanism
+                    // usable when a shared config contains an irrelevant fuel.
+                    return flow;
+                }
+                None => {
+                    add(
+                        &mut flow,
+                        DualVar::ItemFuel {
+                            category: source.fuel_categories.clone(),
+                            has_burnt_result: source
+                                .burnt_inventory_size
+                                .is_some_and(|size| size > 0),
+                        },
+                        -usage,
+                    );
+                }
             }
+
+            add_emissions(
+                &mut flow,
+                &source.emissions_per_minute,
+                effects,
+                fuel_emissions_multiplier,
+            );
         }
         EnergySource::Fluid(source) => {
-            let usage =
-                energy_usage.amount * 60.0 * (1.0 + effects.consumption) / source.effectivity;
-            let filter = source.fluid_box.filter.clone().unwrap_or_default();
-            if source.burns_fluid.unwrap_or(false) {
-                // 烧流体作为燃料
-                if let Some(FluidFuelSpec { fuel, temperature }) = fuel {
-                    let Some(record) = ctx.prototype.get(PrototypeGroup::Fluid, fuel) else {
-                        return map;
+            let usage = usage / effective_effectivity(source.effectivity);
+            let maximum = source.fluid_usage_per_tick * 60.0;
+            let scale_usage = effective_scale_fluid_usage(source.scale_fluid_usage);
+            let burns_fluid = source.burns_fluid.unwrap_or(false);
+
+            match fuel {
+                Some(FuelSpec::Fluid(spec)) => {
+                    let Some(fluid) = fluid_record(ctx, spec.fuel) else {
+                        return flow;
                     };
-                    let Some(fluid) =
-                        record.component::<metatorio_data::generated_components::FluidComponent>()
-                    else {
-                        return map;
+                    let (requested, fuel_emissions_multiplier) = if burns_fluid {
+                        let fuel_value = fluid.fuel_value().amount;
+                        if fuel_value <= 0.0 {
+                            return flow;
+                        }
+                        (usage / fuel_value, fluid.emissions_multiplier)
+                    } else {
+                        let temperature_difference = spec.temperature - fluid.default_temperature;
+                        if temperature_difference <= 0.0 {
+                            *fulfillment = 0.0;
+                            return flow;
+                        }
+                        (
+                            usage / fluid.heat_capacity().amount / temperature_difference,
+                            fluid.emissions_multiplier,
+                        )
                     };
-                    let fuel_value = fluid.fuel_value().amount;
-                    let mut fuel_burn_speed = usage / fuel_value; // 每秒消耗的流体量
-                    let max_flow = source.fluid_usage_per_tick * 60.0;
-                    if fuel_burn_speed > max_flow && max_flow > 0.0 {
-                        // 最大流量限制：产出按比例下调
-                        *fulfillment = max_flow / fuel_burn_speed;
-                        fuel_burn_speed = max_flow;
-                    }
-                    if fuel_burn_speed < max_flow && !source.scale_fluid_usage.unwrap_or(false) {
-                        // 不可变流量：至少要满足指定流量
-                        fuel_burn_speed = max_flow;
-                    }
+                    let used = fluid_usage(requested, maximum, scale_usage, fulfillment);
                     add(
-                        &mut map,
+                        &mut flow,
                         DualVar::Fluid {
-                            name: fuel.to_string(),
-                            temperature: [*temperature as i32; 2],
+                            name: spec.fuel.to_string(),
+                            temperature: [spec.temperature as i32; 2],
                         },
-                        -fuel_burn_speed,
+                        -used,
+                    );
+                    if !burns_fluid {
+                        add(
+                            &mut flow,
+                            DualVar::FluidHeat {
+                                filter: spec.fuel.to_string(),
+                            },
+                            -used
+                                * (spec.temperature - fluid.default_temperature)
+                                * fluid.heat_capacity().amount,
+                        );
+                    }
+                    add_spent_fluid(ctx, &mut flow, &source.spent_fluid, used);
+                    add_emissions(
+                        &mut flow,
+                        &source.emissions_per_minute,
+                        effects,
+                        fuel_emissions_multiplier,
                     );
                 }
-            } else {
-                // 流体热源（温度差发电/供热）
-                if let Some(FluidFuelSpec { fuel, temperature }) = fuel {
-                    let Some(record) = ctx.prototype.get(PrototypeGroup::Fluid, fuel) else {
-                        return map;
-                    };
-                    let Some(fluid) =
-                        record.component::<metatorio_data::generated_components::FluidComponent>()
-                    else {
-                        return map;
-                    };
-                    let capacity = fluid.heat_capacity().amount;
-                    let default_temperature = fluid.default_temperature;
-                    let mut temperature_diff = *temperature - default_temperature;
-                    if !source.scale_fluid_usage.unwrap_or(false)
-                        && source.maximum_temperature > 0.0
-                        && source.fluid_usage_per_tick == 0.0
-                    {
-                        temperature_diff = source.maximum_temperature - default_temperature;
+                Some(FuelSpec::Item(_)) => {}
+                None => {
+                    // With no selected fluid, the solver only sees the energy
+                    // deficit. A concrete fluid provider supplies the matching
+                    // fluid and its heat in a later conversion step.
+                    let filter = source.fluid_box.filter.clone().unwrap_or_default();
+                    if !burns_fluid {
+                        add(&mut flow, DualVar::FluidHeat { filter }, -usage);
                     }
-                    let mut fuel_burn_speed = usage / capacity / temperature_diff;
-                    let max_flow = source.fluid_usage_per_tick * 60.0;
-                    if fuel_burn_speed > max_flow && max_flow > 0.0 {
-                        *fulfillment = max_flow / fuel_burn_speed;
-                        fuel_burn_speed = max_flow;
-                    }
-                    if fuel_burn_speed < max_flow && !source.scale_fluid_usage.unwrap_or(false) {
-                        fuel_burn_speed = max_flow;
-                    }
-                    add(
-                        &mut map,
-                        DualVar::Fluid {
-                            name: fuel.to_string(),
-                            temperature: [*temperature as i32; 2],
-                        },
-                        -fuel_burn_speed,
-                    );
-                    add(
-                        &mut map,
-                        DualVar::FluidHeat {
-                            filter: fuel.to_string(),
-                        },
-                        -fluid_heat(ctx, fuel, fuel_burn_speed, *temperature),
-                    );
-                } else {
-                    // 自动选择热源流体：热量缺口
-                    add(&mut map, DualVar::FluidHeat { filter }, -usage);
+                    add_emissions(&mut flow, &source.emissions_per_minute, effects, 1.0);
                 }
-            }
-            for (pollutant, emission) in &source.emissions_per_minute {
-                add(
-                    &mut map,
-                    DualVar::Pollution {
-                        name: pollutant.clone(),
-                    },
-                    emission * (1.0 + effects.pollution) * (1.0 + effects.consumption) / 60.0,
-                );
             }
         }
     }
-    map
+    flow
 }
 
-/// 流体热量：amount × (温度 − 默认温度) × 比热容（焦耳）。
-fn fluid_heat(ctx: &Context, name: &str, amount: f64, temperature: f64) -> f64 {
-    let Some(record) = ctx.prototype.get(PrototypeGroup::Fluid, name) else {
-        return 0.0;
-    };
-    let Some(fluid) = record.component::<metatorio_data::generated_components::FluidComponent>()
-    else {
-        return 0.0;
-    };
-    amount * (temperature - fluid.default_temperature) * fluid.heat_capacity().amount
+fn add_spent_fluid(
+    ctx: &Context,
+    flow: &mut Flow,
+    spent: &metatorio_data::generated_components::SpentFluidSpecification,
+    amount: f64,
+) {
+    if spent.amount <= 0.0 || spent.name.is_empty() || amount <= 0.0 {
+        return;
+    }
+    let temperature = fluid_record(ctx, &spent.name)
+        .map(|fluid| fluid.default_temperature as i32)
+        .unwrap_or_default();
+    add(
+        flow,
+        DualVar::Fluid {
+            name: spent.name.clone(),
+            temperature: [temperature; 2],
+        },
+        amount * spent.amount,
+    );
 }

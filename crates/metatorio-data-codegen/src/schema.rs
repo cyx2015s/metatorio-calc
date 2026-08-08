@@ -5,7 +5,6 @@
 //! 约定：null 成员省略；列表按 name 排序；order 表示网站显示顺序。
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// 整个 prototype-api.json 文档。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -208,28 +207,28 @@ impl Schema {
     }
 }
 
-/// 类型名索引（加载后构建，避免线性查找）。
-#[derive(Debug, Default)]
-pub struct TypeIndex {
-    prototypes: HashMap<String, usize>,
-    types: HashMap<String, usize>,
-}
+// 类型名索引（加载后构建，避免线性查找）。
+// #[derive(Debug, Default)]
+// pub struct TypeIndex {
+//     prototypes: HashMap<String, usize>,
+//     types: HashMap<String, usize>,
+// }
 
-impl TypeIndex {
-    pub fn build(schema: &Schema) -> Self {
-        Self {
-            prototypes: schema
-                .prototypes
-                .iter()
-                .enumerate()
-                .map(|(i, p)| (p.base.name.clone(), i))
-                .collect(),
-            types: schema
-                .types
-                .iter()
-                .enumerate()
-                .map(|(i, t)| (t.base.name.clone(), i))
-                .collect(),
-        }
-    }
-}
+// impl TypeIndex {
+//     pub fn build(schema: &Schema) -> Self {
+//         Self {
+//             prototypes: schema
+//                 .prototypes
+//                 .iter()
+//                 .enumerate()
+//                 .map(|(i, p)| (p.base.name.clone(), i))
+//                 .collect(),
+//             types: schema
+//                 .types
+//                 .iter()
+//                 .enumerate()
+//                 .map(|(i, t)| (t.base.name.clone(), i))
+//                 .collect(),
+//         }
+//     }
+// }

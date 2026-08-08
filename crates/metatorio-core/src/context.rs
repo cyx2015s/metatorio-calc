@@ -1,5 +1,7 @@
 //! 展开上下文：原型数据（不可变）+ 游戏进程状态（可变）。
 
+use ahash::RandomState;
+use indexmap::IndexMap;
 use metatorio_data::store::PrototypeStore;
 
 /// 展开上下文：求解/展开所需的全部外部数据的统一入口。
@@ -14,9 +16,9 @@ pub struct Context<'a> {
     pub game: &'a GameState,
 }
 
-impl<'a> Context<'a> {
-    pub fn new(prototype: &'a PrototypeStore, game: &'a GameState) -> Self {
-        Self { prototype, game }
+impl Context<'_> {
+    pub fn new<'a>(prototype: &'a PrototypeStore, game: &'a GameState) -> Context<'a> {
+        Context { prototype, game }
     }
 }
 
@@ -30,9 +32,13 @@ pub struct GameState {
     /// 解锁的品质上限索引（0 = normal）。
     pub max_quality: usize,
     /// 配方名 → 额外产能加成（科技等解锁，第一版未启用）。
-    pub recipe_productivity: indexmap::IndexMap<String, f64, ahash::RandomState>,
+    pub recipe_productivity: IndexMap<String, f64, RandomState>,
     /// 采矿产能加成（第一版未启用）。
     pub mining_productivity: f64,
+    /// Factorio 在无法从配方推导物品重量时使用的默认重量。
+    pub default_item_weight: f64,
+    /// 未指定火箭仓时使用的重量运力上限。
+    pub rocket_lift_weight: f64,
 }
 
 impl Default for GameState {
@@ -40,8 +46,10 @@ impl Default for GameState {
         Self {
             qualities: vec!["normal".to_string()],
             max_quality: 0,
-            recipe_productivity: indexmap::IndexMap::with_hasher(ahash::RandomState::default()),
+            recipe_productivity: IndexMap::with_hasher(RandomState::default()),
             mining_productivity: 0.0,
+            default_item_weight: 100.0,
+            rocket_lift_weight: 1_000_000.0,
         }
     }
 }

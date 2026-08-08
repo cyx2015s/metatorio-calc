@@ -20,6 +20,7 @@ fn recipe_mechanic_serde_roundtrip() {
             ..Default::default()
         },
         fuel: None,
+        fuel_temperature: None,
     });
     let json = serde_json::to_string(&m).unwrap();
     // tag = "type"，变体名 kebab-case："recipe"
@@ -37,6 +38,7 @@ fn generator_mechanic_serde_roundtrip() {
     let m = Mechanic::Generator(GeneratorMechanic {
         generator: id("steam-engine"),
         fluid: "steam".to_string(),
+        temperature: None,
     });
     let json = serde_json::to_string(&m).unwrap();
     assert!(json.contains(r#""type":"generator""#), "json: {json}");

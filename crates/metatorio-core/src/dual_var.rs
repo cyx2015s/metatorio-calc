@@ -4,7 +4,7 @@
 //! 对偶变量（DualVar）——每个变体是一条守恒约束（流）的身份。
 //!
 //! 流体热量模型：
-//! - `Fluid { name }`：流体本体（不含温度）
+//! - `Fluid { name, temperature }`：带温度状态的流体本体
 //! - `FluidHeat { filter }`：**纯筛选**的虚拟流体热量流（不含温度）。
 //!   产生流体时按约定同时插入"流体 + 虚拟流体热量"两个流；
 //!   温度完全由配对的流体量与热量流隐式推导（`T = heat / (amount × capacity) + 基准`），
@@ -24,7 +24,7 @@ pub enum DualVar {
     #[default]
     Unknown,
     Item(IdWithQuality),
-    /// 流体本体
+    /// 流体本体；温度区间键由展开层收敛为单点决策。
     Fluid {
         name: String,
         temperature: [i32; 2],

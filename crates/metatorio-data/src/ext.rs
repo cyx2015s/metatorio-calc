@@ -222,8 +222,9 @@ impl BeaconComponent {
         if self.profile.is_empty() {
             return 1.0;
         }
-        if beacon_count < self.profile.len() {
-            self.profile[beacon_count]
+        let index = beacon_count.saturating_sub(1);
+        if index < self.profile.len() {
+            self.profile[index]
         } else {
             *self.profile.last().unwrap()
         }
@@ -610,106 +611,81 @@ impl GeneratorComponent {
         fluid: &FluidComponent,
         temperature: f64,
     ) -> GeneratorOutput {
-        let mut scale = 1.0;
-        if self.burns_fluid {
-            // 直接燃烧流体产生电力的发电机
-            let fuel_value = fluid.fuel_value();
-            let actual_power_output = EnergyAmount {
-                amount: self.fluid_usage_per_tick * fuel_value.amount * self.effectivity,
-            };
-            if self.scale_fluid_usage
-                && let Some(max_power_output) = self.max_power_output
-            {
-                if actual_power_output > max_power_output {
-                    scale = max_power_output.amount / actual_power_output.amount;
-                    return GeneratorOutput {
-                        fluid_used_per_second: self.fluid_usage_per_tick * scale * 60.0,
-                        power_per_second: max_power_output.amount * 60.0,
-                    };
-                }
-                GeneratorOutput {
-                    fluid_used_per_second: self.fluid_usage_per_tick * scale * 60.0,
-                    power_per_second: actual_power_output.amount * 60.0,
-                }
-            } else {
-                if let Some(max_power_output) = self.max_power_output
-                    && actual_power_output > max_power_output
-                {
-                    return GeneratorOutput {
-                        fluid_used_per_second: self.fluid_usage_per_tick * 60.0,
-                        power_per_second: max_power_output.amount * 60.0,
-                    };
-                }
-                GeneratorOutput {
-                    fluid_used_per_second: self.fluid_usage_per_tick * 60.0,
-                    power_per_second: actual_power_output.amount * 60.0,
-                }
-            }
+        let effectivity = if self.effectivity > 0.0 {
+            self.effectivity
         } else {
-            // 靠热量差产生电力的发电机
-            let heat_capacity = fluid.heat_capacity();
-            let max_power_output = if let Some(max_power_output) = self.max_power_output {
-                max_power_output
-            } else {
-                let filter = self.fluid_box.filter.as_ref().unwrap();
-                if fluid_name != filter {
-                    // 如果流体不符合过滤条件，则不产生电力
-                    if self.destroy_non_fuel_fluid {
-                        return GeneratorOutput {
-                            fluid_used_per_second: self.fluid_usage_per_tick * 60.0,
-                            power_per_second: 0.0,
-                        };
-                    } else {
-                        return GeneratorOutput {
-                            fluid_used_per_second: 0.0,
-                            power_per_second: 0.0,
-                        };
-                    }
-                }
-                let max_temperature = if let Some(max_temperature) = fluid.max_temperature {
-                    max_temperature.min(self.maximum_temperature)
-                } else {
-                    self.maximum_temperature
-                };
-                let temperature_diff = max_temperature - fluid.default_temperature;
-                EnergyAmount {
-                    amount: temperature_diff
-                        * self.fluid_usage_per_tick
-                        * heat_capacity.amount
-                        * self.effectivity,
-                }
-            };
-            let actual_power_output = EnergyAmount {
-                amount: (temperature - fluid.default_temperature)
-                    * self.fluid_usage_per_tick
-                    * heat_capacity.amount
-                    * self.effectivity,
-            };
+            1.0
+        };
+        let flow_per_second = self.fluid_usage_per_tick * 60.0;
 
-            if self.scale_fluid_usage {
-                if actual_power_output > max_power_output {
-                    scale = max_power_output.amount / actual_power_output.amount;
-                    return GeneratorOutput {
-                        fluid_used_per_second: self.fluid_usage_per_tick * scale * 60.0,
-                        power_per_second: max_power_output.amount * 60.0,
-                    };
-                }
-                GeneratorOutput {
-                    fluid_used_per_second: self.fluid_usage_per_tick * scale * 60.0,
-                    power_per_second: actual_power_output.amount * 60.0,
-                }
-            } else {
-                if actual_power_output > max_power_output {
-                    return GeneratorOutput {
-                        fluid_used_per_second: self.fluid_usage_per_tick * 60.0,
-                        power_per_second: max_power_output.amount * 60.0,
-                    };
-                }
-                GeneratorOutput {
-                    fluid_used_per_second: self.fluid_usage_per_tick * 60.0,
-                    power_per_second: actual_power_output.amount * 60.0,
-                }
+        let (power_per_tick, max_power_per_tick) = if self.burns_fluid {
+            let fuel_value = fluid.fuel_value().amount;
+            if fuel_value <= 0.0 {
+                return GeneratorOutput {
+                    fluid_used_per_second: if self.destroy_non_fuel_fluid {
+                        flow_per_second
+                    } else {
+                        0.0
+                    },
+                    power_per_second: 0.0,
+                };
             }
+            (
+                self.fluid_usage_per_tick * fuel_value * effectivity,
+                self.max_power_output.map(|power| power.amount),
+            )
+        } else {
+            if self.max_power_output.is_none()
+                && self
+                    .fluid_box
+                    .filter
+                    .as_deref()
+                    .is_some_and(|filter| filter != fluid_name)
+            {
+                return GeneratorOutput {
+                    fluid_used_per_second: 0.0,
+                    power_per_second: 0.0,
+                };
+            }
+            let capacity = fluid.heat_capacity().amount;
+            let max_temperature = fluid.max_temperature().min(self.maximum_temperature);
+            (
+                (temperature - fluid.default_temperature).max(0.0)
+                    * self.fluid_usage_per_tick
+                    * capacity
+                    * effectivity,
+                self.max_power_output.map(|power| power.amount).or_else(|| {
+                    Some(
+                        (max_temperature - fluid.default_temperature).max(0.0)
+                            * self.fluid_usage_per_tick
+                            * capacity
+                            * effectivity,
+                    )
+                }),
+            )
+        };
+
+        let power_per_tick = max_power_per_tick
+            .map(|max| power_per_tick.min(max))
+            .unwrap_or(power_per_tick);
+        let scale = if self.scale_fluid_usage && power_per_tick > 0.0 {
+            power_per_tick
+                / (if self.burns_fluid {
+                    let fuel_value = fluid.fuel_value().amount;
+                    self.fluid_usage_per_tick * fuel_value * effectivity
+                } else {
+                    let capacity = fluid.heat_capacity().amount;
+                    (temperature - fluid.default_temperature).max(0.0)
+                        * self.fluid_usage_per_tick
+                        * capacity
+                        * effectivity
+                })
+        } else {
+            1.0
+        };
+        GeneratorOutput {
+            fluid_used_per_second: flow_per_second * scale,
+            power_per_second: power_per_tick * 60.0,
         }
     }
 }
@@ -741,14 +717,15 @@ impl BoilerComponent {
         input_temperature: f64,
     ) -> Option<FluidHeatingOutput> {
         let target_temperature = self.target_temperature?;
-        if target_temperature - input_temperature == 0.0 {
+        let temperature_difference = target_temperature - input_temperature;
+        if temperature_difference <= 0.0 {
             return None;
         }
         let source_capacity = input_fluid.heat_capacity().amount;
         let target_capacity = output_fluid.heat_capacity().amount;
         let amount = self.energy_consumption.amount * 60.0 // 功率
             / source_capacity // 输入流体的比热容
-            / (target_temperature - input_temperature); // 温度差
+            / temperature_difference; // 温度差
         Some(FluidHeatingOutput {
             input_amount_per_second: amount,
             output_amount_per_second: amount * source_capacity / target_capacity,

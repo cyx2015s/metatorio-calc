@@ -304,7 +304,7 @@ pub struct ItemProduct {
     pub quality_min: Option<String>,
     pub quality_max: Option<String>,
     #[serde(deserialize_with = "crate::lenient::de_int")]
-    pub quality_change: u8,
+    pub quality_change: i8,
     #[serde(default = "default_affected_by_quality")]
     pub affected_by_quality: bool,
     #[serde(default, flatten)]
@@ -490,15 +490,19 @@ impl FluidProduct {
                     None => min,
                 };
                 let max = f64::max(max, min);
-                let productivity = f64::max(
-                    // 积分均值
-                    (max - ignore + f64::max(min - ignore, 0.0))
-                        * (max - f64::max(min - ignore, 0.0))
-                        / 2.0
-                        / (max - min)
-                        * prob,
-                    0.0,
-                );
+                let productivity = if max == min {
+                    f64::max((min - ignore) * prob, 0.0)
+                } else {
+                    f64::max(
+                        // 积分均值
+                        (max - ignore + f64::max(min - ignore, 0.0))
+                            * (max - f64::max(min - ignore, 0.0))
+                            / 2.0
+                            / (max - min)
+                            * prob,
+                        0.0,
+                    )
+                };
                 Production {
                     base: ((max + min) / 2.0) * prob,
                     productivity,

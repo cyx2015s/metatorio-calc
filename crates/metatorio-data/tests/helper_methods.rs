@@ -12,6 +12,7 @@ fn energy(j: f64) -> EnergyAmount {
 fn fluid(default_temperature: f64, heat_capacity: f64, fuel_value: f64) -> FluidComponent {
     FluidComponent {
         default_temperature,
+        max_temperature: Some(1000.0),
         heat_capacity: Some(energy(heat_capacity)),
         fuel_value: Some(energy(fuel_value)),
         ..Default::default()
@@ -171,9 +172,9 @@ fn generator_temperature_diff() {
     let o = g.get_output("water", &f, 15.0);
     assert_eq!(o.power_per_second, 0.0);
 
-    // 过滤不匹配：不消耗流体不产电（destroy_non_fuel_fluid 默认 true → 消耗但不产电）
+    // 过滤不匹配：流体盒拒绝该流体，不消耗也不产电。
     let o = g.get_output("steam", &f, 115.0);
-    assert_eq!(o.fluid_used_per_second, 60.0);
+    assert_eq!(o.fluid_used_per_second, 0.0);
     assert_eq!(o.power_per_second, 0.0);
 }
 

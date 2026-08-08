@@ -15,6 +15,13 @@ fn load(dump: Value) -> PrototypeStore {
 /// 动态构造含流体配方的最小 dump。
 fn fluid_dump() -> Value {
     json!({
+        "assembling-machine": {
+            "assembling-machine-1": {
+                "crafting_speed": 1.0,
+                "energy_usage": "0J",
+                "energy_source": { "type": "electric", "drain": "0J" }
+            }
+        },
         "fluid": {
             "water": { "default_temperature": 15.0 },
             "steam": { "default_temperature": 100.0, "heat_capacity": "1kJ" }
@@ -41,6 +48,7 @@ fn recipe_mechanic(recipe: &str) -> Mechanic {
         machine: "assembling-machine-1".into(),
         module_config: Default::default(),
         fuel: None,
+        fuel_temperature: None,
     })
 }
 
@@ -82,5 +90,5 @@ fn stable_key_order_from_caller() {
 
     // config 标识 = 调用方的 ID：iron-plate 与 heat-water 各自独立
     let configs_used: Vec<&String> = a.variables.iter().map(|v| &v.prim_var.inner).collect();
-    assert_eq!(configs_used, vec!["iron-plate", "heat-water"]);
+    assert_eq!(configs_used, vec!["iron-plate", "heat-water", "heat-water"]);
 }

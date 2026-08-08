@@ -434,19 +434,18 @@ impl PrototypeStore {
                     out.insert(name.to_string(), vec![t]);
                 }
             };
-            let add_box =
-                |out: &mut AIndexMap<String, Vec<i32>>,
-                 box_: &crate::generated_components::FluidBox| {
-                    let Some(filter) = &box_.filter else {
-                        return;
-                    };
-                    if let Some(t) = box_.minimum_temperature {
-                        add(out, filter, t);
-                    }
-                    if let Some(t) = box_.maximum_temperature {
-                        add(out, filter, t);
-                    }
+            let add_box = |out: &mut AIndexMap<String, Vec<i32>>,
+                           box_: &crate::generated_components::FluidBox| {
+                let Some(filter) = &box_.filter else {
+                    return;
                 };
+                if let Some(t) = box_.minimum_temperature {
+                    add(out, filter, t);
+                }
+                if let Some(t) = box_.maximum_temperature {
+                    add(out, filter, t);
+                }
+            };
             // 收集点 1：配方产物流体温度
             for record in self
                 .groups
@@ -455,11 +454,25 @@ impl PrototypeStore {
                 .flat_map(|m| m.values())
             {
                 if let Some(recipe) = record.component::<RecipeComponent>() {
+                    for ingredient in &recipe.ingredients {
+                        if let crate::types::Ingredient::Fluid(fluid) = ingredient {
+                            if let Some(t) = fluid.temperature {
+                                add(&mut out, &fluid.name, t);
+                            }
+                            if let Some(t) = fluid.minimum_temperature {
+                                add(&mut out, &fluid.name, t);
+                            }
+                            if let Some(t) = fluid.maximum_temperature {
+                                add(&mut out, &fluid.name, t);
+                            }
+                        }
+                    }
                     for result in &recipe.results {
                         if let crate::types::Product::Fluid(f) = result
-                            && let Some(t) = f.temperature {
-                                add(&mut out, &f.name, t);
-                            }
+                            && let Some(t) = f.temperature
+                        {
+                            add(&mut out, &f.name, t);
+                        }
                     }
                 }
             }
@@ -481,6 +494,9 @@ impl PrototypeStore {
                 }
                 if let Some(g) = record.component::<GeneratorComponent>() {
                     add_box(&mut out, &g.fluid_box);
+                    if let Some(filter) = &g.fluid_box.filter {
+                        add(&mut out, filter, g.maximum_temperature);
+                    }
                 }
                 if let Some(c) = record.component::<CraftingMachineComponent>() {
                     for box_ in &c.fluid_boxes {

@@ -1,0 +1,245 @@
+use metatorio_core::IdWithQuality;
+use metatorio_core::context::{Context, GameState};
+use metatorio_core::dual_var::DualVar;
+use metatorio_core::expand::expand;
+use metatorio_core::mechanic::{
+    BoilerMechanic, GeneratorMechanic, ItemFuelMechanic, ItemLaunchMechanic, Mechanic,
+    PlantMechanic, ReactorMechanic, SpoilMechanic,
+};
+use metatorio_data::store::PrototypeStore;
+use serde_json::{Value, json};
+
+fn id(name: &str) -> IdWithQuality {
+    IdWithQuality::new(name, "normal")
+}
+
+fn flow(dump: Value, mechanic: Mechanic) -> metatorio_core::prim_var::Flow {
+    let store = PrototypeStore::load(&dump).expect("dump should load");
+    let mut game = GameState::default();
+    game.max_quality = store.quality_order().len().saturating_sub(0);
+    let ctx = Context::new(&store, &game);
+    let expansion = expand([(0usize, &mechanic)], &ctx);
+    assert_eq!(expansion.len(), 1, "mechanic should produce one variable");
+    expansion.variables.into_iter().next().unwrap().flow
+}
+
+#[test]
+fn item_fuel_preserves_burnt_result() {
+    let flow = flow(
+        json!({
+            "item": {
+                "coal": {
+                    "fuel_value": "8MJ",
+                    "fuel_category": "chemical",
+                    "burnt_result": "ash"
+                }
+            }
+        }),
+        Mechanic::ItemFuel(ItemFuelMechanic { item: id("coal") }),
+    );
+
+    assert_eq!(flow[&DualVar::Item(id("coal"))], -1.0);
+    assert_eq!(
+        flow[&DualVar::ItemFuel {
+            category: vec!["chemical".to_string()],
+            has_burnt_result: true,
+        }],
+        8_000_000.0
+    );
+    assert_eq!(flow[&DualVar::Item(id("ash"))], 1.0);
+}
+
+#[test]
+fn spoil_changes_quality_and_consumes_the_source() {
+    let flow = flow(
+        json!({
+            "item": {
+                "fresh": {
+                    "spoil_ticks": 60,
+                    "spoil_result": "spoiled",
+                    "spoil_quality_change": 1
+                }
+            },
+            "quality": {
+                "normal": { "type": "quality", "name": "normal", "level": 0, "next": "uncommon", "next_probability": 1.0 },
+                "uncommon": { "type": "quality", "name": "uncommon", "level": 1, "next": "rare", "next_probability": 1.0 },
+                "rare": { "type": "quality", "name": "rare", "level": 2, "next": "epic", "next_probability": 1.0 },
+                "epic": { "type": "quality", "name": "epic", "level": 3, "next": "legendary", "next_probability": 1.0 },
+                "legendary": { "type": "quality", "name": "legendary", "level": 4 }
+            }
+        }),
+        Mechanic::Spoil(SpoilMechanic { item: id("fresh") }),
+    );
+
+    dbg!(&flow);
+    assert_eq!(flow[&DualVar::Item(id("fresh"))], -1.0);
+    assert_eq!(
+        flow[&DualVar::Item(IdWithQuality::new("spoiled", "uncommon"))],
+        1.0
+    );
+}
+
+#[test]
+fn plant_is_a_per_second_cycle() {
+    let flow = flow(
+        json!({
+            "item": { "seed": { "plant_result": "plant" } },
+            "plant": {
+                "plant": {
+                    "growth_ticks": 60,
+                    "harvest_emissions": { "pollution": 2.0 },
+                    "minable": { "mining_time": 1.0, "result": "fruit", "count": 2 }
+                }
+            }
+        }),
+        Mechanic::Plant(PlantMechanic { seed: id("seed") }),
+    );
+
+    assert_eq!(flow[&DualVar::Item(id("seed"))], -1.0);
+    assert_eq!(flow[&DualVar::Item(id("fruit"))], 2.0);
+    assert_eq!(
+        flow[&DualVar::Pollution {
+            name: "pollution".to_string(),
+        }],
+        2.0
+    );
+}
+
+#[test]
+fn generator_consumes_fluid_and_produces_electricity() {
+    let flow = flow(
+        json!({
+            "fluid": { "steam": { "default_temperature": 100.0, "fuel_value": "1MJ" } },
+            "generator": {
+                "steam-engine": {
+                    "fluid_box": { "filter": "steam" },
+                    "fluid_usage_per_tick": 1.0,
+                    "maximum_temperature": 500.0,
+                    "burns_fluid": true,
+                    "energy_source": {}
+                }
+            }
+        }),
+        Mechanic::Generator(GeneratorMechanic {
+            generator: id("steam-engine"),
+            fluid: "steam".to_string(),
+            temperature: Some(100),
+        }),
+    );
+
+    assert_eq!(
+        flow[&DualVar::Fluid {
+            name: "steam".to_string(),
+            temperature: [100, 100],
+        }],
+        -60.0
+    );
+    assert_eq!(flow[&DualVar::Electricity], 60_000_000.0);
+}
+
+#[test]
+fn boiler_output_mode_converts_fluid() {
+    let flow = flow(
+        json!({
+            "fluid": {
+                "water": { "default_temperature": 15.0, "heat_capacity": "1kJ" },
+                "steam": { "default_temperature": 100.0, "heat_capacity": "1kJ" }
+            },
+            "boiler": {
+                "boiler": {
+                    "mode": "output-to-separate-pipe",
+                    "target_temperature": 165.0,
+                    "energy_consumption": "1MW",
+                    "energy_source": { "type": "electric" },
+                    "fluid_box": { "filter": "water" },
+                    "output_fluid_box": { "filter": "steam" }
+                }
+            }
+        }),
+        Mechanic::Boiler(BoilerMechanic {
+            boiler: id("boiler"),
+            fluid: "water".to_string(),
+            temperature: Some(15),
+            fuel: None,
+            fuel_temperature: None,
+        }),
+    );
+
+    assert!(
+        flow[&DualVar::Fluid {
+            name: "water".to_string(),
+            temperature: [15, 15],
+        }] < 0.0
+    );
+    assert!(
+        flow[&DualVar::Fluid {
+            name: "steam".to_string(),
+            temperature: [165, 165],
+        }] > 0.0
+    );
+}
+
+#[test]
+fn reactor_outputs_heat_without_quality_scaling() {
+    let flow = flow(
+        json!({
+            "item": {
+                "fuel": { "fuel_value": "1MJ", "fuel_category": "chemical" }
+            },
+            "reactor": {
+                "reactor": {
+                    "consumption": "1MW",
+                    "neighbour_bonus": 1.0,
+                    "energy_source": {
+                        "type": "burner",
+                        "fuel_categories": ["chemical"],
+                        "effectivity": 1.0
+                    },
+                    "heat_buffer": {
+                        "max_transfer": "10MW",
+                        "max_temperature": 1000.0,
+                        "specific_heat": "1MJ"
+                    }
+                }
+            }
+        }),
+        Mechanic::Reactor(ReactorMechanic {
+            reactor: id("reactor"),
+            neighbours: 2,
+            fuel: Some("fuel".to_string()),
+        }),
+    );
+
+    assert!((flow[&DualVar::Item(id("fuel"))] + 1.0).abs() < 1e-12);
+    assert!((flow[&DualVar::Heat] - 3_000_000.0).abs() < 1e-6);
+}
+
+#[test]
+fn item_launch_uses_rocket_silo_capacity() {
+    let flow = flow(
+        json!({
+            "item": {
+                "satellite": {
+                    "stack_size": 1,
+                    "rocket_launch_products": [
+                        { "type": "item", "name": "science", "amount": 100 }
+                    ]
+                }
+            },
+            "rocket-silo": {
+                "silo": {
+                    "launch_to_space_platforms": false,
+                    "to_be_inserted_to_rocket_inventory_size": 10
+                }
+            }
+        }),
+        Mechanic::ItemLaunch(ItemLaunchMechanic {
+            item: id("satellite"),
+            weight_mode: false,
+        }),
+    );
+
+    assert_eq!(flow[&DualVar::Item(id("satellite"))], -10.0);
+    assert_eq!(flow[&DualVar::RocketSlotCapacity], -10.0);
+    assert_eq!(flow[&DualVar::Item(id("science"))], 1000.0);
+}
