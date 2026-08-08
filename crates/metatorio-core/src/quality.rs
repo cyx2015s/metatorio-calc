@@ -130,5 +130,14 @@ fn test_calc_quality_distribution() {
     let ctx = Context::new(&s, &game);
     let qualities = sorted_qualities(&ctx);
     assert!(!qualities.is_empty());
-    assert_eq!(calc_quality_distribution(&ctx, 0.5, 0, 4), vec![0.5, 0.45, 0.045, 0.0045000000000000005, 0.0005000000000000001]);
+    assert_eq!(
+        calc_quality_distribution(&ctx, 0.5, 0, 4),
+        vec![
+            0.5,
+            0.45,
+            0.045,
+            0.0045000000000000005,
+            0.0005000000000000001
+        ]
+    );
 }

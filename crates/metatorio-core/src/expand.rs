@@ -384,27 +384,33 @@ mod tests {
         let game = GameState::default();
         let ctx = Context::new(&store, &game);
         dbg!(expand(
-            [("example", &Mechanic::Recipe(RecipeMechanic {
-                recipe: IdWithQuality::new("scrap-recycling", "normal"),
-                machine: IdWithQuality::new("recycler", "normal"),
-                module_config: ModuleConfig {
-                    modules: vec![IdWithQuality::new("quality-module-3", "legendary")],
-                    beacons: vec![]
-                },
-                fuel: None
-            }))],
+            [(
+                "example",
+                &Mechanic::Recipe(RecipeMechanic {
+                    recipe: IdWithQuality::new("scrap-recycling", "normal"),
+                    machine: IdWithQuality::new("recycler", "normal"),
+                    module_config: ModuleConfig {
+                        modules: vec![IdWithQuality::new("quality-module-3", "legendary")],
+                        beacons: vec![]
+                    },
+                    fuel: None
+                })
+            )],
             &ctx
         ));
         dbg!(expand(
-            [("example", &Mechanic::Recipe(RecipeMechanic {
-                recipe: IdWithQuality::new("processing-unit", "normal"),
-                machine: IdWithQuality::new("electromagnetic-plant", "normal"),
-                module_config: ModuleConfig {
-                    modules: vec![IdWithQuality::new("quality-module-3", "legendary")],
-                    beacons: vec![]
-                },
-                fuel: None
-            }))],
+            [(
+                "example",
+                &Mechanic::Recipe(RecipeMechanic {
+                    recipe: IdWithQuality::new("processing-unit", "normal"),
+                    machine: IdWithQuality::new("electromagnetic-plant", "normal"),
+                    module_config: ModuleConfig {
+                        modules: vec![IdWithQuality::new("quality-module-3", "legendary")],
+                        beacons: vec![]
+                    },
+                    fuel: None
+                })
+            )],
             &ctx
         ));
     }

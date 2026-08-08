@@ -126,8 +126,8 @@ impl TempFlow {
     pub fn add_parallel(&mut self, others: impl IntoIterator<Item = Flow>) {
         let mut next = Vec::with_capacity(self.copies.len());
         for other in others {
-        for copy in &self.copies {
-            let mut variant = copy.clone();
+            for copy in &self.copies {
+                let mut variant = copy.clone();
                 merge_flow(&mut variant, &other);
                 next.push(variant);
             }

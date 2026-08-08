@@ -83,17 +83,17 @@ pub fn energy_source_as_flow(
             // 每秒能量消耗（燃烧效率折算）
             let usage =
                 energy_usage.amount * 60.0 * (1.0 + effects.consumption) / source.effectivity;
-            
-                // 自动选择燃料：类别流（无燃尽产物，可隐式提升）
-                add(
-                    &mut map,
-                    DualVar::ItemFuel {
-                        category: source.fuel_categories.clone(),
-                        has_burnt_result: false,
-                    },
-                    -usage,
-                );
-            
+
+            // 自动选择燃料：类别流（无燃尽产物，可隐式提升）
+            add(
+                &mut map,
+                DualVar::ItemFuel {
+                    category: source.fuel_categories.clone(),
+                    has_burnt_result: false,
+                },
+                -usage,
+            );
+
             for (pollutant, emission) in &source.emissions_per_minute {
                 add(
                     &mut map,
@@ -139,7 +139,6 @@ pub fn energy_source_as_flow(
                         },
                         -fuel_burn_speed,
                     );
-                    
                 }
             } else {
                 // 流体热源（温度差发电/供热）
