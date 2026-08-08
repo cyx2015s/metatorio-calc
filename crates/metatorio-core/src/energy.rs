@@ -8,7 +8,6 @@
 
 use crate::context::Context;
 use crate::dual_var::DualVar;
-use crate::id::IdWithQuality;
 use crate::prim_var::Flow;
 use metatorio_data::store::PrototypeGroup;
 use metatorio_data::types::{Effect, EnergyAmount, EnergySource};
@@ -111,7 +110,7 @@ pub fn energy_source_as_flow(
             if source.burns_fluid.unwrap_or(false) {
                 // 烧流体作为燃料
                 if let Some(FluidFuelSpec { fuel, temperature }) = fuel {
-                    let Some(record) = ctx.prototype.get(PrototypeGroup::Fluid, *fuel) else {
+                    let Some(record) = ctx.prototype.get(PrototypeGroup::Fluid, fuel) else {
                         return map;
                     };
                     let Some(fluid) =
@@ -143,7 +142,7 @@ pub fn energy_source_as_flow(
             } else {
                 // 流体热源（温度差发电/供热）
                 if let Some(FluidFuelSpec { fuel, temperature }) = fuel {
-                    let Some(record) = ctx.prototype.get(PrototypeGroup::Fluid, *fuel) else {
+                    let Some(record) = ctx.prototype.get(PrototypeGroup::Fluid, fuel) else {
                         return map;
                     };
                     let Some(fluid) =

@@ -30,17 +30,14 @@ fn merge_flow(flow: &mut Flow, other: &Flow) {
     }
 }
 
-/// 变温流体热量：amount × (温度 − 默认温度) × 比热容（焦耳）。
-fn fluid_heat(ctx: &Context, name: &str, amount: f64, temperature: f64) -> f64 {
-    let Some(record) = ctx.prototype.get(PrototypeGroup::Fluid, name) else {
-        return 0.0;
-    };
-    let Some(fluid) = record.component::<FluidComponent>() else {
-        return 0.0;
-    };
-    let capacity = fluid.heat_capacity().amount;
-    let default = fluid.default_temperature;
-    amount * (temperature - default) * capacity
+/// 变温流体热量：amount × ΔT × 比热容（焦耳）。
+fn fluid_heat(ctx: &Context, name: &str, amount: f64, delta_temperature: f64) -> f64 {
+    if let Some(record) = ctx.prototype.get(PrototypeGroup::Fluid, name)
+        && let Some(fluid) = record.component::<FluidComponent>() {
+            let capacity = fluid.heat_capacity().amount;
+            return amount * delta_temperature * capacity;
+        }
+    0.0
 }
 
 /// 展开中的临时配方。
@@ -104,7 +101,7 @@ impl TempFlow {
     ///
     /// 每个温度生成 `Fluid{name@T}` 单点键 + 携带热量（`amount × (T − default) × capacity`）；
     /// 分裂顺序 = temps 顺序（稳定，调用方负责排序）。
-    pub fn add_fluid_multi(&mut self, ctx: &Context, name: &str, amount: f64, temps: &[i32]) {
+    pub fn add_fluid_multi(&mut self, _ctx: &Context, name: &str, amount: f64, temps: &[i32]) {
         let add_single = |flow: &mut Flow, temp: i32| {
             add_flow(
                 flow,

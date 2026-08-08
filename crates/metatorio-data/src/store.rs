@@ -424,7 +424,7 @@ impl PrototypeStore {
     pub fn fluid_temperatures(&self) -> &AIndexMap<String, Vec<i32>> {
         self.fluid_temps.get_or_init(|| {
             let mut out: AIndexMap<String, Vec<i32>> = AIndexMap::default();
-            let mut add = |out: &mut AIndexMap<String, Vec<i32>>, name: &str, temp: f64| {
+            let add = |out: &mut AIndexMap<String, Vec<i32>>, name: &str, temp: f64| {
                 let t = temp as i32;
                 if let Some(list) = out.get_mut(name) {
                     if !list.contains(&t) {
@@ -434,7 +434,7 @@ impl PrototypeStore {
                     out.insert(name.to_string(), vec![t]);
                 }
             };
-            let mut add_box =
+            let add_box =
                 |out: &mut AIndexMap<String, Vec<i32>>,
                  box_: &crate::generated_components::FluidBox| {
                     let Some(filter) = &box_.filter else {
@@ -456,11 +456,10 @@ impl PrototypeStore {
             {
                 if let Some(recipe) = record.component::<RecipeComponent>() {
                     for result in &recipe.results {
-                        if let crate::types::Product::Fluid(f) = result {
-                            if let Some(t) = f.temperature {
+                        if let crate::types::Product::Fluid(f) = result
+                            && let Some(t) = f.temperature {
                                 add(&mut out, &f.name, t);
                             }
-                        }
                     }
                 }
             }

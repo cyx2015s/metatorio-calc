@@ -200,17 +200,17 @@ fn expand_recipe<C: Clone>(config: C, m: &RecipeMechanic, ctx: &Context, out: &m
                     .temperature
                     .unwrap_or_else(|| fluid_default_temperature(ctx, &fluid.name));
                 let output = fluid.normalized_output();
-                temp.add_fluid(
-                    ctx,
-                    &fluid.name,
+                temp.add(
+                    DualVar::Fluid {
+                        name: fluid.name.clone(),
+                        temperature: [default as i32; 2],
+                    },
                     (output.base
                         + output.productivity
                             * module_effects
                                 .productivity
                                 .clamp(0.0, recipe.maximum_productivity))
                         * scale,
-                    default,
-                    default,
                 );
             }
         }
@@ -298,7 +298,13 @@ fn expand_mining<C: Clone>(config: C, m: &MiningMechanic, ctx: &Context, out: &m
     if let Some(fluid) = &minable.required_fluid {
         let amount =
             base_speed * (1.0 + module_effects.speed) * minable.fluid_amount / 10.0 * fulfillment;
-        temp.add_fluid(ctx, fluid, -amount, f64::MIN, f64::MAX);
+        temp.add(
+            DualVar::Fluid {
+                name: fluid.clone(),
+                temperature: [i32::MIN, i32::MAX],
+            },
+            -amount
+        );
     }
 
     // 品质分布（产物品质从 normal 起）
@@ -343,12 +349,13 @@ fn expand_mining<C: Clone>(config: C, m: &MiningMechanic, ctx: &Context, out: &m
                     let default = r
                         .temperature
                         .unwrap_or_else(|| fluid_default_temperature(ctx, &r.name));
-                    temp.add_fluid(
-                        ctx,
-                        &r.name,
-                        scale * (output.base + output.productivity * module_effects.productivity),
-                        default,
-                        default,
+                    temp.add(
+                        DualVar::Fluid {
+                            name: r.name.clone(),
+                            temperature: [default as i32; 2],
+                        },
+                        scale * (output.base * (1.0 + output.productivity + module_effects.productivity).max(0.0)),
+                        
                     );
                 }
             }
