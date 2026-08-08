@@ -1,4 +1,4 @@
-//! 配置 → 虚拟流展开测试：物品配方、流体插值 2 端、调用方稳定键序。
+//! 配置 → 虚拟流展开测试：物品配方、流体温度区间、调用方稳定键序。
 
 use metatorio_core::context::{Context, GameState};
 use metatorio_core::dual_var::DualVar;
@@ -88,7 +88,18 @@ fn stable_key_order_from_caller() {
     let b = expand(configs.iter().map(|(k, m)| (k.clone(), m)), &ctx);
     assert_eq!(a, b);
 
-    // config 标识 = 调用方的 ID：iron-plate 与 heat-water 各自独立
+    // 流体区间仍是一个由调用方/求解器转换的子类型，不由 TempFlow 自动拆分。
     let configs_used: Vec<&String> = a.variables.iter().map(|v| &v.prim_var.inner).collect();
-    assert_eq!(configs_used, vec!["iron-plate", "heat-water", "heat-water"]);
+    assert_eq!(configs_used, vec!["iron-plate", "heat-water"]);
+    assert_eq!(
+        a.variables[1].flow.get(&DualVar::Fluid {
+            name: "water".to_string(),
+            temperature: [15, 500],
+        }),
+        Some(&-10.0)
+    );
+    assert!(!a.variables[1].flow.keys().any(|key| matches!(
+        key,
+        DualVar::FluidHeat { filter } if filter == "water"
+    )));
 }

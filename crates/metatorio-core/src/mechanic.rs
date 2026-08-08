@@ -54,10 +54,7 @@ pub(crate) fn quality_by_level<'a>(
         .and_then(|record| record.component::<QualityComponent>())
 }
 
-pub fn module_effect_at_quality(
-    module: &ModuleComponent,
-    quality: &QualityComponent,
-) -> Effect {
+pub fn module_effect_at_quality(module: &ModuleComponent, quality: &QualityComponent) -> Effect {
     let raw_effect = module.effect;
     let scale = |value: f64, module_factor: f64, quality_factor: f64| {
         value * (1.0 - module_factor + quality_factor * module_factor)

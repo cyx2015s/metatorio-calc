@@ -84,6 +84,12 @@ fn quality_limit(ctx: &Context) -> usize {
         .min(quality_count(ctx).saturating_sub(1))
 }
 
+fn default_quality_multiplier(ctx: &Context, quality: &str) -> f64 {
+    quality_by_level(ctx, quality_level(ctx, quality))
+        .map(|quality| quality.default_multiplier())
+        .unwrap_or(1.0)
+}
+
 fn bounded_quality(
     ctx: &Context,
     base: usize,
@@ -110,6 +116,16 @@ fn fluid_temperature(ctx: &Context, name: &str) -> f64 {
         })
         .map(|fluid| fluid.default_temperature)
         .unwrap_or_default()
+}
+
+fn add_fluid_interval(temp: &mut TempFlow, name: &str, amount: f64, lower: f64, upper: f64) {
+    temp.add(
+        DualVar::Fluid {
+            name: name.to_string(),
+            temperature: [lower as i32, upper as i32],
+        },
+        amount,
+    );
 }
 
 fn fluid_record<'a>(
@@ -371,7 +387,7 @@ fn expand_recipe<C: Clone>(
                     .temperature
                     .or(fluid.maximum_temperature)
                     .unwrap_or(default);
-                temp.add_fluid(ctx, &fluid.name, -fluid.amount * scale, lo, hi);
+                add_fluid_interval(&mut temp, &fluid.name, -fluid.amount * scale, lo, hi);
             }
         }
     }
@@ -402,8 +418,8 @@ fn expand_recipe<C: Clone>(
                     .temperature
                     .unwrap_or_else(|| fluid_temperature(ctx, &fluid.name));
                 let output = fluid.normalized_output();
-                temp.add_fluid(
-                    ctx,
+                add_fluid_interval(
+                    &mut temp,
                     &fluid.name,
                     (output.base + output.productivity * effects.productivity) * scale,
                     temperature,
@@ -505,7 +521,7 @@ fn expand_mining<C: Clone>(
     if let Some(fluid) = &minable.required_fluid {
         let amount = scale * minable.fluid_amount / 10.0;
         let default = fluid_temperature(ctx, fluid);
-        temp.add_fluid(ctx, fluid, -amount, default, default);
+        add_fluid_interval(&mut temp, fluid, -amount, default, default);
     }
 
     let quality_distribution =
@@ -546,8 +562,8 @@ fn expand_mining<C: Clone>(
                     let temperature = fluid
                         .temperature
                         .unwrap_or_else(|| fluid_temperature(ctx, &fluid.name));
-                    temp.add_fluid(
-                        ctx,
+                    add_fluid_interval(
+                        &mut temp,
                         &fluid.name,
                         scale * (output.base + output.productivity * effects.productivity),
                         temperature,
@@ -574,6 +590,11 @@ fn expand_spoil<C: Clone>(
     }
 
     let base_quality = quality_level(ctx, &mechanic.item.quality);
+    let spoil_rate = 60.0
+        / (f64::from(item.spoil_ticks.unwrap_or_default())
+            * quality_by_level(ctx, base_quality)
+                .map(|quality| quality.spoil_ticks_multiplier())
+                .unwrap_or(1.0));
     let output_quality = bounded_quality(
         ctx,
         base_quality,
@@ -582,14 +603,14 @@ fn expand_spoil<C: Clone>(
         item.spoil_quality_max.as_ref(),
     );
     let mut temp = TempFlow::new();
-    temp.add(DualVar::Item(mechanic.item.clone()), -1.0);
+    temp.add(DualVar::Item(mechanic.item.clone()), -spoil_rate);
     if let Some(result) = &item.spoil_result {
         temp.add(
             DualVar::Item(IdWithQuality::new(
                 result,
                 quality_name(ctx, output_quality),
             )),
-            1.0,
+            spoil_rate,
         );
     }
     out.variables.extend(temp.into_variables(config));
@@ -656,8 +677,8 @@ fn add_minable_outputs(
                 let temperature = fluid
                     .temperature
                     .unwrap_or_else(|| fluid_temperature(ctx, &fluid.name));
-                temp.add_fluid(
-                    ctx,
+                add_fluid_interval(
+                    temp,
                     &fluid.name,
                     scale * fluid.normalized_output().base,
                     temperature,
@@ -798,8 +819,8 @@ fn expand_generator<C: Clone>(
         .unwrap_or(fluid.default_temperature);
     let output = generator.get_output(fluid_name, fluid, temperature);
     let mut temp = TempFlow::new();
-    temp.add_fluid(
-        ctx,
+    add_fluid_interval(
+        &mut temp,
         fluid_name,
         -output.fluid_used_per_second,
         temperature,
@@ -816,6 +837,7 @@ fn expand_generator<C: Clone>(
     for (name, amount) in &generator.energy_source.emissions_per_minute {
         temp.add(DualVar::Pollution { name: name.clone() }, amount / 60.0);
     }
+    temp.scale(default_quality_multiplier(ctx, &mechanic.generator.quality));
     out.variables.extend(temp.into_variables(config));
 }
 
@@ -837,8 +859,8 @@ fn add_generator_spent_fluid(
         return;
     }
     let temperature = fluid_temperature(ctx, &spent.name);
-    temp.add_fluid(
-        ctx,
+    add_fluid_interval(
+        temp,
         &spent.name,
         used * spent.amount,
         temperature,
@@ -913,15 +935,15 @@ fn expand_boiler<C: Clone>(
             else {
                 return;
             };
-            temp.add_fluid(
-                ctx,
+            add_fluid_interval(
+                &mut temp,
                 input_name,
                 -output.input_amount_per_second * fulfillment,
                 input_temperature,
                 input_temperature,
             );
-            temp.add_fluid(
-                ctx,
+            add_fluid_interval(
+                &mut temp,
                 output_name,
                 output.output_amount_per_second * fulfillment,
                 output.output_temperature,
@@ -929,6 +951,7 @@ fn expand_boiler<C: Clone>(
             );
         }
     }
+    temp.scale(default_quality_multiplier(ctx, &mechanic.boiler.quality));
     out.variables.extend(temp.into_variables(config));
 }
 
@@ -975,33 +998,43 @@ fn expand_reactor<C: Clone>(
         requested_heat
     };
     temp.add(DualVar::Heat, heat);
+    temp.scale(default_quality_multiplier(ctx, &mechanic.reactor.quality));
     out.variables.extend(temp.into_variables(config));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::context::GameState;
-    use metatorio_data::store::PrototypeStore;
-    use serde_json::json;
 
     #[test]
-    fn fluid_temperature_carries_heat() {
-        let store = PrototypeStore::load(&json!({
-            "fluid": { "water": { "default_temperature": 15.0, "heat_capacity": "1kJ" } }
-        }))
-        .unwrap();
-        let game = GameState::default();
-        let ctx = Context::new(&store, &game);
+    fn parallel_variants_are_caller_defined() {
         let mut flow = TempFlow::new();
-        flow.add_fluid(&ctx, "water", 2.0, 100.0, 100.0);
-        let variables = flow.into_variables("test");
-        assert_eq!(variables.len(), 1);
-        assert_eq!(
-            variables[0].flow.get(&DualVar::FluidHeat {
-                filter: "water".to_string(),
-            }),
-            Some(&170_000.0)
+        let mut low = crate::prim_var::Flow::default();
+        low.insert(
+            DualVar::Fluid {
+                name: "water".to_string(),
+                temperature: [15, 165],
+            },
+            2.0,
         );
+        let mut high = crate::prim_var::Flow::default();
+        high.insert(
+            DualVar::Fluid {
+                name: "water".to_string(),
+                temperature: [165, 500],
+            },
+            2.0,
+        );
+        flow.add_parallel([low, high]);
+        let variables = flow.into_variables("test");
+        assert_eq!(variables.len(), 2);
+        assert!(variables[0].flow.contains_key(&DualVar::Fluid {
+            name: "water".to_string(),
+            temperature: [15, 165],
+        }));
+        assert!(variables[1].flow.contains_key(&DualVar::Fluid {
+            name: "water".to_string(),
+            temperature: [165, 500],
+        }));
     }
 }

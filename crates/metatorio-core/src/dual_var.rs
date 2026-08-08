@@ -6,9 +6,8 @@
 //! 流体热量模型：
 //! - `Fluid { name, temperature }`：带温度状态的流体本体
 //! - `FluidHeat { filter }`：**纯筛选**的虚拟流体热量流（不含温度）。
-//!   产生流体时按约定同时插入"流体 + 虚拟流体热量"两个流；
-//!   温度完全由配对的流体量与热量流隐式推导（`T = heat / (amount × capacity) + 基准`），
-//!   消耗方按需消耗流体量 + 对应热量。
+//!   它只在机制明确需要抽象热量时显式加入；普通流体温度通过区间子类型
+//!   和区间转换流表达。
 
 use serde::{Deserialize, Serialize};
 
@@ -35,7 +34,7 @@ pub enum DualVar {
     Electricity,
     /// 虚拟流体热量流（**数值单位 = 焦耳 J**）：纯筛选，不含温度。
     ///
-    /// 流体温度转换时按约定自动插入对应数量的热量流（amount × ΔT × heat_capacity）；
+    /// 由需要抽象热量的机制显式加入，数值单位为焦耳；
     FluidHeat {
         filter: String,
     },

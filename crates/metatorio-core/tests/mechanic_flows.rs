@@ -15,8 +15,27 @@ fn id(name: &str) -> IdWithQuality {
 
 fn flow(dump: Value, mechanic: Mechanic) -> metatorio_core::prim_var::Flow {
     let store = PrototypeStore::load(&dump).expect("dump should load");
-    let mut game = GameState::default();
-    game.max_quality = store.quality_order().len().saturating_sub(0);
+    let game = GameState {
+        max_quality: store.quality_order().len().saturating_sub(1),
+        ..Default::default()
+    };
+    flow_loaded(store, game, mechanic)
+}
+
+fn flow_with_game(
+    dump: Value,
+    mechanic: Mechanic,
+    game: GameState,
+) -> metatorio_core::prim_var::Flow {
+    let store = PrototypeStore::load(&dump).expect("dump should load");
+    flow_loaded(store, game, mechanic)
+}
+
+fn flow_loaded(
+    store: PrototypeStore,
+    game: GameState,
+    mechanic: Mechanic,
+) -> metatorio_core::prim_var::Flow {
     let ctx = Context::new(&store, &game);
     let expansion = expand([(0usize, &mechanic)], &ctx);
     assert_eq!(expansion.len(), 1, "mechanic should produce one variable");
@@ -180,7 +199,7 @@ fn boiler_output_mode_converts_fluid() {
 }
 
 #[test]
-fn reactor_outputs_heat_without_quality_scaling() {
+fn reactor_outputs_heat() {
     let flow = flow(
         json!({
             "item": {
@@ -212,6 +231,50 @@ fn reactor_outputs_heat_without_quality_scaling() {
 
     assert!((flow[&DualVar::Item(id("fuel"))] + 1.0).abs() < 1e-12);
     assert!((flow[&DualVar::Heat] - 3_000_000.0).abs() < 1e-6);
+}
+
+#[test]
+fn reactor_quality_uses_default_multiplier() {
+    let game = GameState {
+        qualities: vec!["normal".to_string(), "quality".to_string()],
+        max_quality: 1,
+        ..Default::default()
+    };
+    let flow = flow_with_game(
+        json!({
+            "quality": {
+                "normal": { "level": 0, "next": "quality", "next_probability": 1.0 },
+                "quality": { "level": 1, "default_multiplier": 2.0 }
+            },
+            "item": {
+                "fuel": { "fuel_value": "1MJ", "fuel_category": "chemical" }
+            },
+            "reactor": {
+                "reactor": {
+                    "consumption": "1MW",
+                    "energy_source": {
+                        "type": "burner",
+                        "fuel_categories": ["chemical"],
+                        "effectivity": 1.0
+                    },
+                    "heat_buffer": {
+                        "max_transfer": "10MW",
+                        "max_temperature": 1000.0,
+                        "specific_heat": "1MJ"
+                    }
+                }
+            }
+        }),
+        Mechanic::Reactor(ReactorMechanic {
+            reactor: IdWithQuality::new("reactor", "quality"),
+            neighbours: 0,
+            fuel: Some("fuel".to_string()),
+        }),
+        game,
+    );
+
+    assert!((flow[&DualVar::Item(IdWithQuality::new("fuel", "quality"))] + 2.0).abs() < 1e-12);
+    assert!((flow[&DualVar::Heat] - 2_000_000.0).abs() < 1e-6);
 }
 
 #[test]

@@ -420,7 +420,7 @@ impl PrototypeStore {
     /// 收集点（报告制）：① 配方产物流体的温度（temperature/min/max）；
     /// ② 机器流体盒的温度筛选（Boiler/Generator 的 fluid_box、CraftingMachine 的
     /// fluid_boxes 的 minimum/maximum + Boiler.target_temperature 输出温度）。
-    /// 配方/机器按此表生成单态温度决策（一分为 N）。
+    /// 调用方可据此构造温度区间子类型或显式候选流；仓库本身不展开决策。
     pub fn fluid_temperatures(&self) -> &AIndexMap<String, Vec<i32>> {
         self.fluid_temps.get_or_init(|| {
             let mut out: AIndexMap<String, Vec<i32>> = AIndexMap::default();

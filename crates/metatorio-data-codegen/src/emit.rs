@@ -371,7 +371,7 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
                 continue;
             }
         }
-        if !group_variants.iter().any(|(t, _)| t == &tn) {
+        if !group_variants.iter().any(|(t, _)| t == tn) {
             group_variants.push((tn, variant));
         }
     }
