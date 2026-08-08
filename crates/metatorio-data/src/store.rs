@@ -13,8 +13,9 @@
 
 use crate::generated_components::prototype_groups::prototype_group_from_type;
 use crate::generated_components::{
-    COMPONENT_LIST, Component, ComponentValue, ItemSubGroupComponent, PrototypeBaseComponent,
-    QualityComponent, TechnologyComponent, deserialize_component,
+    BoilerComponent, COMPONENT_LIST, Component, ComponentValue, CraftingMachineComponent,
+    GeneratorComponent, ItemSubGroupComponent, PrototypeBaseComponent, QualityComponent,
+    RecipeComponent, TechnologyComponent, deserialize_component,
 };
 use serde_json::Value;
 use std::{fmt, sync::OnceLock};
@@ -120,6 +121,8 @@ pub struct PrototypeStore {
     reverse_order_info: OnceLock<AIndexMap<PrototypeGroup, ReverseOrderInfo>>,
     /// 惰性派生：按 order 排序的品质名列表（0 = normal；品质等级 ↔ 名字映射）。
     quality_order: OnceLock<Vec<String>>,
+    /// 惰性派生：流体可用温度表（流体名 → 排序去重的温度集合，i32 精度妥协）。
+    fluid_temps: OnceLock<AIndexMap<String, Vec<i32>>>,
     /// 惰性派生：科技反向依赖（科技原型只声明 prerequisites，这里预处理"谁依赖我"）。
     technology_dependents: OnceLock<AIndexMap<String, Vec<String>>>,
 }
@@ -200,6 +203,7 @@ impl PrototypeStore {
                 order_info: OnceLock::new(),
                 reverse_order_info: OnceLock::new(),
                 quality_order: OnceLock::new(),
+                fluid_temps: OnceLock::new(),
                 technology_dependents: OnceLock::new(),
             })
         } else {
@@ -411,6 +415,87 @@ impl PrototypeStore {
         })
     }
 
+    /// 流体的可用温度表：流体名 → 排序去重的温度集合。
+    ///
+    /// 收集点（报告制）：① 配方产物流体的温度（temperature/min/max）；
+    /// ② 机器流体盒的温度筛选（Boiler/Generator 的 fluid_box、CraftingMachine 的
+    /// fluid_boxes 的 minimum/maximum + Boiler.target_temperature 输出温度）。
+    /// 配方/机器按此表生成单态温度决策（一分为 N）。
+    pub fn fluid_temperatures(&self) -> &AIndexMap<String, Vec<i32>> {
+        self.fluid_temps.get_or_init(|| {
+            let mut out: AIndexMap<String, Vec<i32>> = AIndexMap::default();
+            let mut add = |out: &mut AIndexMap<String, Vec<i32>>, name: &str, temp: f64| {
+                let t = temp as i32;
+                if let Some(list) = out.get_mut(name) {
+                    if !list.contains(&t) {
+                        list.push(t);
+                    }
+                } else {
+                    out.insert(name.to_string(), vec![t]);
+                }
+            };
+            let mut add_box =
+                |out: &mut AIndexMap<String, Vec<i32>>,
+                 box_: &crate::generated_components::FluidBox| {
+                    let Some(filter) = &box_.filter else {
+                        return;
+                    };
+                    if let Some(t) = box_.minimum_temperature {
+                        add(out, filter, t);
+                    }
+                    if let Some(t) = box_.maximum_temperature {
+                        add(out, filter, t);
+                    }
+                };
+            // 收集点 1：配方产物流体温度
+            for record in self
+                .groups
+                .get(&PrototypeGroup::Recipe)
+                .into_iter()
+                .flat_map(|m| m.values())
+            {
+                if let Some(recipe) = record.component::<RecipeComponent>() {
+                    for result in &recipe.results {
+                        if let crate::types::Product::Fluid(f) = result {
+                            if let Some(t) = f.temperature {
+                                add(&mut out, &f.name, t);
+                            }
+                        }
+                    }
+                }
+            }
+            // 收集点 2：机器流体盒温度筛选
+            for record in self
+                .groups
+                .get(&PrototypeGroup::Entity)
+                .into_iter()
+                .flat_map(|m| m.values())
+            {
+                if let Some(b) = record.component::<BoilerComponent>() {
+                    add_box(&mut out, &b.fluid_box);
+                    add_box(&mut out, &b.output_fluid_box);
+                    if let Some(t) = b.target_temperature
+                        && let Some(filter) = &b.output_fluid_box.filter
+                    {
+                        add(&mut out, filter, t);
+                    }
+                }
+                if let Some(g) = record.component::<GeneratorComponent>() {
+                    add_box(&mut out, &g.fluid_box);
+                }
+                if let Some(c) = record.component::<CraftingMachineComponent>() {
+                    for box_ in &c.fluid_boxes {
+                        add_box(&mut out, box_);
+                    }
+                }
+            }
+            for list in out.values_mut() {
+                list.sort_unstable();
+                list.dedup();
+            }
+            out
+        })
+    }
     /// 惰性派生：科技反向依赖（科技只声明 `prerequisites`，这里预处理"谁依赖我"）。
     pub fn technology_dependents(&self) -> &AIndexMap<String, Vec<String>> {
         self.technology_dependents.get_or_init(|| {

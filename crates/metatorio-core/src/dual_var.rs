@@ -24,9 +24,10 @@ pub enum DualVar {
     #[default]
     Unknown,
     Item(IdWithQuality),
-    /// 流体本体（不含温度；温度由配对的 `FluidHeat` 流隐式推导）。
+    /// 流体本体
     Fluid {
         name: String,
+        temperature: [i32; 2],
     },
     Entity(IdWithQuality),
     /// 无类型热量（核热等）。
@@ -34,8 +35,7 @@ pub enum DualVar {
     Electricity,
     /// 虚拟流体热量流（**数值单位 = 焦耳 J**）：纯筛选，不含温度。
     ///
-    /// 产生流体时按约定自动插入对应数量的热量流（amount × ΔT × heat_capacity）；
-    /// 消耗时按实际温度扣对应热量。`filter` 绑定流体（None = 任意流体）。
+    /// 流体温度转换时按约定自动插入对应数量的热量流（amount × ΔT × heat_capacity）；
     FluidHeat {
         filter: String,
     },

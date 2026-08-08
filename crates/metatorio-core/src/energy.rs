@@ -13,13 +13,10 @@ use crate::prim_var::Flow;
 use metatorio_data::store::PrototypeGroup;
 use metatorio_data::types::{Effect, EnergyAmount, EnergySource};
 
-/// 燃料指定：物品（含品质）或流体（FluidID + 温度）。
 #[derive(Debug, Clone, PartialEq)]
-pub enum FuelSpec {
-    /// 物品燃料（如煤）。
-    Item(IdWithQuality),
-    /// 流体燃料/热源（FluidID，温度由展开上下文决定）。
-    Fluid(String, f64),
+pub struct FluidFuelSpec<'a> {
+    pub fuel: &'a str,
+    pub temperature: f64,
 }
 
 fn add(flow: &mut Flow, key: DualVar, value: f64) {
@@ -37,7 +34,8 @@ pub fn energy_source_as_flow(
     energy_source: &EnergySource,
     energy_usage: EnergyAmount,
     effects: &Effect,
-    fuel: Option<&FuelSpec>,
+    fuel: Option<&FluidFuelSpec>,
+    // 修改入参
     fulfillment: &mut f64,
 ) -> Flow {
     let mut map: Flow = Default::default();
@@ -85,36 +83,7 @@ pub fn energy_source_as_flow(
             // 每秒能量消耗（燃烧效率折算）
             let usage =
                 energy_usage.amount * 60.0 * (1.0 + effects.consumption) / source.effectivity;
-            if let Some(FuelSpec::Item(actual_fuel)) = fuel {
-                // 使用具体燃料：按燃料热值折算消耗量 + 燃尽产物
-                let Some(record) = ctx.prototype.item(&actual_fuel.id) else {
-                    return map;
-                };
-                let Some(item) =
-                    record.component::<metatorio_data::generated_components::ItemComponent>()
-                else {
-                    return map;
-                };
-                let fuel_value = item.fuel_value().amount;
-                if fuel_value > 0.0 {
-                    let fuel_burn_speed = usage / fuel_value; // 每秒消耗的燃料个数
-                    add(
-                        &mut map,
-                        DualVar::Item(actual_fuel.clone()),
-                        -fuel_burn_speed,
-                    );
-                    if !item.burnt_result.is_empty() {
-                        add(
-                            &mut map,
-                            DualVar::Item(IdWithQuality::new(
-                                item.burnt_result.clone(),
-                                actual_fuel.quality.clone(),
-                            )),
-                            fuel_burn_speed,
-                        );
-                    }
-                }
-            } else {
+            
                 // 自动选择燃料：类别流（无燃尽产物，可隐式提升）
                 add(
                     &mut map,
@@ -124,7 +93,7 @@ pub fn energy_source_as_flow(
                     },
                     -usage,
                 );
-            }
+            
             for (pollutant, emission) in &source.emissions_per_minute {
                 add(
                     &mut map,
@@ -141,8 +110,8 @@ pub fn energy_source_as_flow(
             let filter = source.fluid_box.filter.clone().unwrap_or_default();
             if source.burns_fluid.unwrap_or(false) {
                 // 烧流体作为燃料
-                if let Some(FuelSpec::Fluid(actual_fuel, temperature)) = fuel {
-                    let Some(record) = ctx.prototype.get(PrototypeGroup::Fluid, actual_fuel) else {
+                if let Some(FluidFuelSpec { fuel, temperature }) = fuel {
+                    let Some(record) = ctx.prototype.get(PrototypeGroup::Fluid, *fuel) else {
                         return map;
                     };
                     let Some(fluid) =
@@ -165,26 +134,17 @@ pub fn energy_source_as_flow(
                     add(
                         &mut map,
                         DualVar::Fluid {
-                            name: actual_fuel.clone(),
+                            name: fuel.to_string(),
+                            temperature: [*temperature as i32; 2],
                         },
                         -fuel_burn_speed,
                     );
-                    // 流体燃料的携带热量（按温度）——与燃料本体一起消耗
-                    add(
-                        &mut map,
-                        DualVar::FluidHeat {
-                            filter: actual_fuel.clone(),
-                        },
-                        -fluid_heat(ctx, actual_fuel, fuel_burn_speed, *temperature),
-                    );
-                } else {
-                    // 自动选择燃料：热量缺口（温度相关项由展开层 add_dual 处理）
-                    add(&mut map, DualVar::FluidHeat { filter }, -usage);
+                    
                 }
             } else {
                 // 流体热源（温度差发电/供热）
-                if let Some(FuelSpec::Fluid(actual_fuel, temperature)) = fuel {
-                    let Some(record) = ctx.prototype.get(PrototypeGroup::Fluid, actual_fuel) else {
+                if let Some(FluidFuelSpec { fuel, temperature }) = fuel {
+                    let Some(record) = ctx.prototype.get(PrototypeGroup::Fluid, *fuel) else {
                         return map;
                     };
                     let Some(fluid) =
@@ -213,16 +173,17 @@ pub fn energy_source_as_flow(
                     add(
                         &mut map,
                         DualVar::Fluid {
-                            name: actual_fuel.clone(),
+                            name: fuel.to_string(),
+                            temperature: [*temperature as i32; 2],
                         },
                         -fuel_burn_speed,
                     );
                     add(
                         &mut map,
                         DualVar::FluidHeat {
-                            filter: actual_fuel.clone(),
+                            filter: fuel.to_string(),
                         },
-                        -fluid_heat(ctx, actual_fuel, fuel_burn_speed, *temperature),
+                        -fluid_heat(ctx, fuel, fuel_burn_speed, *temperature),
                     );
                 } else {
                     // 自动选择热源流体：热量缺口

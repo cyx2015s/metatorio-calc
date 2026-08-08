@@ -4,13 +4,14 @@ use metatorio_core::{DualVar, IdWithQuality};
 
 #[test]
 fn fluid_serde_roundtrip() {
-    // 流体流不承载温度
+    // 流体流承载温度
     let f = DualVar::Fluid {
         name: "steam".to_string(),
+        temperature: [165; 2],
     };
     let json = serde_json::to_string(&f).unwrap();
     assert!(json.contains(r#""Fluid""#), "json: {json}");
-    assert!(!json.contains("temperature"), "json: {json}");
+    assert!(json.contains("temperature"), "json: {json}");
     let back: DualVar = serde_json::from_str(&json).unwrap();
     assert_eq!(f, back);
 }
@@ -70,7 +71,8 @@ fn is_energy() {
     assert!(!DualVar::Item(IdWithQuality::default()).is_energy());
     assert!(
         !DualVar::Fluid {
-            name: "water".to_string()
+            name: "water".to_string(),
+            temperature: [15; 2],
         }
         .is_energy()
     );

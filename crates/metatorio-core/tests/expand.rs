@@ -64,68 +64,6 @@ fn item_recipe_expands_single_variable() {
 }
 
 #[test]
-fn fluid_recipe_expands_two_interpolation_ends() {
-    let store = load(fluid_dump());
-    let game = GameState::default();
-    let ctx = Context::new(&store, &game);
-    let expansion = expand(
-        [("heat-water".to_string(), recipe_mechanic("heat-water"))]
-            .iter()
-            .map(|(c, m)| (c.clone(), m)),
-        &ctx,
-    );
-
-    // k=1 个流体输入 → 2 个插值端
-    assert_eq!(expansion.len(), 2);
-    let low = &expansion.variables[0];
-    let high = &expansion.variables[1];
-    assert_eq!(
-        low.prim_var.inner, high.prim_var.inner,
-        "同配置共享 config 标识"
-    );
-
-    // 两端共享：Fluid 流相同（水 -10、蒸汽 +10）
-    for v in [low, high] {
-        assert_eq!(
-            v.flow.get(&DualVar::Fluid {
-                name: "water".into()
-            }),
-            Some(&-10.0)
-        );
-        assert_eq!(
-            v.flow.get(&DualVar::Fluid {
-                name: "steam".into()
-            }),
-            Some(&10.0)
-        );
-        // 产物蒸汽 165°C：热量 = 10 × (165-100) × 1000 = 650 kJ
-        assert_eq!(
-            v.flow.get(&DualVar::FluidHeat {
-                filter: "steam".into()
-            }),
-            Some(&650_000.0)
-        );
-    }
-
-    // 低端（15°C 水）：热量 = 10 × (15-15) × 1000 = 0（水默认温度，无热量；0 系数被稀疏化跳过）
-    assert_eq!(
-        low.flow
-            .get(&DualVar::FluidHeat {
-                filter: "water".into()
-            })
-            .unwrap_or(&0.0),
-        &0.0
-    );
-    // 高端（500°C 水）：热量 = 10 × (500-15) × 1000 = 4,850 kJ（消耗）
-    assert_eq!(
-        high.flow.get(&DualVar::FluidHeat {
-            filter: "water".into()
-        }),
-        Some(&-4_850_000.0)
-    );
-}
-
-#[test]
 fn stable_key_order_from_caller() {
     let store = load(fluid_dump());
     let game = GameState::default();
@@ -144,9 +82,5 @@ fn stable_key_order_from_caller() {
 
     // config 标识 = 调用方的 ID：iron-plate 与 heat-water 各自独立
     let configs_used: Vec<&String> = a.variables.iter().map(|v| &v.prim_var.inner).collect();
-    assert_eq!(configs_used, vec!["iron-plate", "heat-water", "heat-water"]);
-    assert_eq!(
-        a.variables[1].prim_var.inner, a.variables[2].prim_var.inner,
-        "两个插值端共享 config"
-    );
+    assert_eq!(configs_used, vec!["iron-plate", "heat-water"]);
 }

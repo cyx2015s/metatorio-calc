@@ -1,8 +1,8 @@
 //! 品质分布计算（迁移自 metatorio-egui `calc_quality_distribution`）。
 
-use crate::context::Context;
+use crate::context::{Context, GameState};
 use metatorio_data::generated_components::QualityComponent;
-use metatorio_data::store::PrototypeGroup;
+use metatorio_data::store::{PrototypeGroup, PrototypeStore};
 
 /// 按 order 排序的品质组件列表（0 = normal）。
 pub(crate) fn sorted_qualities<'a>(ctx: &'a Context<'a>) -> Vec<&'a QualityComponent> {
@@ -108,4 +108,27 @@ pub fn calc_quality_distribution(
         result[base_quality] += (1.0 - sum).clamp(0.0, 1.0);
         result
     }
+}
+
+#[test]
+fn test_calc_quality_distribution() {
+    fn load_dump() -> serde_json::Value {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/data-raw-dump.json"
+        );
+        let text = std::fs::read_to_string(path)
+            .expect("modded dump 不存在（assets/data-raw-dump-heavily-modded.json）");
+        serde_json::from_str(&text).expect("modded dump 解析失败")
+    }
+    fn store() -> PrototypeStore {
+        let dump = load_dump();
+        PrototypeStore::load(&dump).expect("dump 加载失败")
+    }
+    let s = store();
+    let game = GameState::default();
+    let ctx = Context::new(&s, &game);
+    let qualities = sorted_qualities(&ctx);
+    assert!(!qualities.is_empty());
+    assert_eq!(calc_quality_distribution(&ctx, 0.5, 0, 4), vec![0.5, 0.45, 0.045, 0.0045000000000000005, 0.0005000000000000001]);
 }

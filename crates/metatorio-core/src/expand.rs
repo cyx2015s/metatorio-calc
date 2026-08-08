@@ -11,7 +11,7 @@
 use crate::NORMAL_QUALITY;
 use crate::context::Context;
 use crate::dual_var::DualVar;
-use crate::energy::{FuelSpec, energy_source_as_flow};
+use crate::energy::{FluidFuelSpec, energy_source_as_flow};
 use crate::id::IdWithQuality;
 use crate::mechanic::{Mechanic, MiningMechanic, RecipeMechanic, quality_by_level};
 use crate::prim_var::Expansion;
@@ -29,7 +29,7 @@ use metatorio_data::types::{EnergySource, Ingredient, Product};
 /// 同一配置的多个变量（流体插值端）连续排列，相对位置即端序号。
 /// **稳定性由调用方保证**（见模块文档）。
 pub fn expand<'a, C: Clone>(
-    mechanics: impl Iterator<Item = (C, &'a Mechanic)>,
+    mechanics: impl IntoIterator<Item = (C, &'a Mechanic)>,
     ctx: &Context,
 ) -> Expansion<C> {
     let mut out = Expansion::default();
@@ -105,10 +105,10 @@ fn expand_recipe<C: Clone>(config: C, m: &RecipeMechanic, ctx: &Context, out: &m
             };
         base_speed *= speed_multiplier;
         // 能源（燃料温度取流体默认温度；温度插值留待温度敏感机制）
-        let fuel = m
-            .fuel
-            .as_ref()
-            .map(|f| FuelSpec::Fluid(f.clone(), fluid_default_temperature(ctx, f)));
+        let fuel = m.fuel.as_ref().map(|f| FluidFuelSpec {
+            fuel: f.as_str(),
+            temperature: fluid_default_temperature(ctx, f),
+        });
         let energy_flow = energy_source_as_flow(
             ctx,
             &cm.energy_source,
@@ -128,7 +128,7 @@ fn expand_recipe<C: Clone>(config: C, m: &RecipeMechanic, ctx: &Context, out: &m
         }
     }
 
-    base_speed /= recipe.energy_required.max(1.0); // 防御：energy_required 缺省/为 0 时按 1 处理
+    base_speed /= recipe.energy_required;
     module_effects.productivity = module_effects
         .productivity
         .clamp(0.0, recipe.maximum_productivity);
@@ -160,7 +160,13 @@ fn expand_recipe<C: Clone>(config: C, m: &RecipeMechanic, ctx: &Context, out: &m
                     .temperature
                     .or(fluid.maximum_temperature)
                     .unwrap_or(default);
-                temp.add_fluid(ctx, &fluid.name, -fluid.amount * scale, lo, hi);
+                temp.add(
+                    DualVar::Fluid {
+                        name: fluid.name.clone(),
+                        temperature: [lo as i32, hi as i32],
+                    },
+                    -fluid.amount * scale,
+                );
             }
         }
     }
@@ -242,10 +248,10 @@ fn expand_mining<C: Clone>(config: C, m: &MiningMechanic, ctx: &Context, out: &m
         base_speed = md.mining_speed;
         drain_rate *= md.resource_drain_rate_percent.unwrap_or(100) as f64 / 100.0;
         // 能源（物品燃料）
-        let fuel = m
-            .fuel
-            .as_ref()
-            .map(|f| FuelSpec::Fluid(f.clone(), fluid_default_temperature(ctx, f)));
+        let fuel = m.fuel.as_ref().map(|f| FluidFuelSpec {
+            fuel: f.as_str(),
+            temperature: fluid_default_temperature(ctx, f),
+        });
         let energy_flow = energy_source_as_flow(
             ctx,
             &md.energy_source,
@@ -288,12 +294,11 @@ fn expand_mining<C: Clone>(config: C, m: &MiningMechanic, ctx: &Context, out: &m
         temp.add(DualVar::Electricity, -electric);
     }
 
-    // 开采流体消耗（默认温度单点；矿脉要求的流体温度固定）
+    // 开采流体消耗（默认温度无限制）
     if let Some(fluid) = &minable.required_fluid {
-        let default = fluid_default_temperature(ctx, fluid);
         let amount =
             base_speed * (1.0 + module_effects.speed) * minable.fluid_amount / 10.0 * fulfillment;
-        temp.add_fluid(ctx, fluid, -amount, default, default);
+        temp.add_fluid(ctx, fluid, -amount, f64::MIN, f64::MAX);
     }
 
     // 品质分布（产物品质从 normal 起）
@@ -351,4 +356,56 @@ fn expand_mining<C: Clone>(config: C, m: &MiningMechanic, ctx: &Context, out: &m
     }
 
     out.variables.extend(temp.into_variables(config));
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::ModuleConfig;
+
+    #[test]
+    fn visual_test() {
+        use super::*;
+        use crate::context::GameState;
+        use metatorio_data::store::PrototypeStore;
+        fn load_dump() -> serde_json::Value {
+            let path = concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../assets/data-raw-dump.json"
+            );
+            let text = std::fs::read_to_string(path)
+                .expect("modded dump 不存在（assets/data-raw-dump-heavily-modded.json）");
+            serde_json::from_str(&text).expect("modded dump 解析失败")
+        }
+        fn store() -> PrototypeStore {
+            let dump = load_dump();
+            PrototypeStore::load(&dump).expect("dump 加载失败")
+        }
+        let store = store();
+        let game = GameState::default();
+        let ctx = Context::new(&store, &game);
+        dbg!(expand(
+            [("example", &Mechanic::Recipe(RecipeMechanic {
+                recipe: IdWithQuality::new("scrap-recycling", "normal"),
+                machine: IdWithQuality::new("recycler", "normal"),
+                module_config: ModuleConfig {
+                    modules: vec![IdWithQuality::new("quality-module-3", "legendary")],
+                    beacons: vec![]
+                },
+                fuel: None
+            }))],
+            &ctx
+        ));
+        dbg!(expand(
+            [("example", &Mechanic::Recipe(RecipeMechanic {
+                recipe: IdWithQuality::new("processing-unit", "normal"),
+                machine: IdWithQuality::new("electromagnetic-plant", "normal"),
+                module_config: ModuleConfig {
+                    modules: vec![IdWithQuality::new("quality-module-3", "legendary")],
+                    beacons: vec![]
+                },
+                fuel: None
+            }))],
+            &ctx
+        ));
+    }
 }

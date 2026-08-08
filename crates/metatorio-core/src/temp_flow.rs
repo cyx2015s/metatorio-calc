@@ -48,8 +48,6 @@ fn fluid_heat(ctx: &Context, name: &str, amount: f64, temperature: f64) -> f64 {
 pub struct TempFlow {
     /// 每个副本的流系数；副本索引低 k 位 = 各变温流体的端点选择。
     copies: Vec<Flow>,
-    /// 变温流体数（单点温度不计入；副本数 = 2^k，k ≤ 8）。
-    split_count: usize,
 }
 
 impl Default for TempFlow {
@@ -63,7 +61,6 @@ impl TempFlow {
     pub fn new() -> Self {
         Self {
             copies: vec![Flow::default()],
-            split_count: 0,
         }
     }
 
@@ -74,59 +71,68 @@ impl TempFlow {
         }
     }
 
-    /// 变温流体：每个现有副本分裂为 lo 端 / hi 端两个副本。
+    /// 变温流体：温度区间 [lo, hi] 按可用温度表**一分为 N**（单态决策）。
     ///
-    /// `lo`/`hi` 不排序（端点语义，表达温度相关性）；`lo == hi` 退化为固定流。
-    /// 同时添加流体本体与配套的虚拟热量流（`amount × (T − default) × capacity`）。
+    /// 查询 `PrototypeStore::fluid_temperatures()`，取区间内可用温度逐个生成决策
+    /// （每个决策一个单点温度键，不混合不插值）；区间为空 → 退化为单点（默认温度）。
     pub fn add_fluid(&mut self, ctx: &Context, name: &str, amount: f64, lo: f64, hi: f64) {
-        let add_single = |flow: &mut Flow, temp: f64| {
-            add_flow(flow, DualVar::Fluid { name: name.into() }, amount);
-            add_flow(
-                flow,
-                DualVar::FluidHeat {
-                    filter: name.into(),
-                },
-                fluid_heat(ctx, name, amount, temp),
-            );
-        };
-        if lo == hi {
-            // 单点温度：不分裂
-            for copy in &mut self.copies {
-                add_single(copy, lo);
-            }
-            return;
+        let mut temps: Vec<i32> = ctx
+            .prototype
+            .fluid_temperatures()
+            .get(name)
+            .map(|ts| {
+                ts.iter()
+                    .filter(|&&t| f64::from(t) >= lo && f64::from(t) <= hi)
+                    .copied()
+                    .collect()
+            })
+            .unwrap_or_default();
+        // 无可用温度（或单点区间）：退化为单点（默认温度）
+        if temps.is_empty() {
+            let default = ctx
+                .prototype
+                .get(PrototypeGroup::Fluid, name)
+                .and_then(|r| r.component::<FluidComponent>())
+                .map(|f| f.default_temperature as i32)
+                .unwrap_or(0);
+            temps.push(default);
         }
-        let mut low: Flow = Default::default();
-        let mut high: Flow = Default::default();
-        add_single(&mut low, lo);
-        add_single(&mut high, hi);
-        self.add_dual(&low, &high);
+        self.add_fluid_multi(ctx, name, amount, &temps);
     }
 
-    /// 双端流：每个现有副本分裂为 lo 端 / hi 端两个副本，分别合并 `lo`/`hi` 的系数。
+    /// 多温度决策：每个现有副本 × N 分裂（N = 可用温度数）。
     ///
-    /// 这是表达**相关性**的原语：任意系数（燃料消耗、发电量、其他物品……）都可随
-    /// 端变化——调用方构造两个完整 Flow（如低温端/高温端）传入；`add_fluid` 是它的
-    /// 便捷包装（只有热量随端变化）。分裂次数 = 端序号位数（k ≤ 8）。
-    ///
-    /// 典型场景：锅炉输入不同温度的水 → 加热到目标温度所需的燃料量不同；
-    /// 汽轮机输入不同温度的蒸汽 → 发电量不同。两个 Flow 的差异就是相关性。
-    pub fn add_dual(&mut self, lo: &Flow, hi: &Flow) {
-        assert!(
-            self.split_count < 8,
-            "分裂次数超过 8（2^k 组合爆炸），当前实现不支持"
-        );
-        let mut next = Vec::with_capacity(self.copies.len() * 2);
+    /// 每个温度生成 `Fluid{name@T}` 单点键 + 携带热量（`amount × (T − default) × capacity`）；
+    /// 分裂顺序 = temps 顺序（稳定，调用方负责排序）。
+    pub fn add_fluid_multi(&mut self, ctx: &Context, name: &str, amount: f64, temps: &[i32]) {
+        let add_single = |flow: &mut Flow, temp: i32| {
+            add_flow(
+                flow,
+                DualVar::Fluid {
+                    name: name.into(),
+                    temperature: [temp; 2],
+                },
+                amount,
+            );
+        };
+        let flows = temps.iter().map(|&temp| {
+            let mut flow = Flow::default();
+            add_single(&mut flow, temp);
+            flow
+        });
+        self.add_parallel(flows);
+    }
+
+    pub fn add_parallel(&mut self, others: impl IntoIterator<Item = Flow>) {
+        let mut next = Vec::with_capacity(self.copies.len());
+        for other in others {
         for copy in &self.copies {
-            let mut low = copy.clone();
-            merge_flow(&mut low, lo);
-            let mut high = copy.clone();
-            merge_flow(&mut high, hi);
-            next.push(low);
-            next.push(high);
+            let mut variant = copy.clone();
+                merge_flow(&mut variant, &other);
+                next.push(variant);
+            }
         }
         self.copies = next;
-        self.split_count += 1;
     }
 
     /// 收尾：副本 → 展开变量。变量顺序 = 副本顺序（同一 config 连续排列，

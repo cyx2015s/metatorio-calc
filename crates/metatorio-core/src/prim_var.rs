@@ -41,12 +41,14 @@ pub struct ExpandedVariable<C> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Expansion<C> {
     pub variables: Vec<ExpandedVariable<C>>,
+    pub cost: f64,
 }
 
 impl<C> Default for Expansion<C> {
     fn default() -> Self {
         Self {
             variables: Vec::new(),
+            cost: 0.0,
         }
     }
 }
