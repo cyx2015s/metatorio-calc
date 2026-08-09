@@ -39,3 +39,4 @@ winresource = "0.1"
 [features]
 default = ["wgpu"]
 wgpu = ["eframe/wgpu"]
+inspection = ["eframe/inspection"]
