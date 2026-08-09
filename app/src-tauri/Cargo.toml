@@ -1,14 +1,13 @@
 [workspace]
 
 [package]
-name = "app"
+name = "Metatorio"
 version = "0.1.0"
-description = "A Tauri App"
+description = "Rewritten."
 authors = ["you"]
 license = ""
 repository = ""
-edition = "2021"
-rust-version = "1.77.2"
+edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -20,6 +19,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2.5.6", features = [] }
 
 [dependencies]
+metatorio-core = { path = "../../../crates/metatorio-core" }
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
