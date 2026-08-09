@@ -8,3 +8,8 @@
 .deepseek
 
 rustc-ice-*.txt
+
+playground
+# Tauri/Svelte 前端产物
+apps/metatorio-desktop/node_modules
+apps/metatorio-desktop/dist
