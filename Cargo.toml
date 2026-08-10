@@ -8,6 +8,7 @@ members = [
     "crates/metatorio-data-codegen", 
     "crates/metatorio-core",
     "crates/metatorio-ui",
+    "metatorio-app/src-tauri",
 ]
 default-members = [
     "crates/metatorio-egui",
