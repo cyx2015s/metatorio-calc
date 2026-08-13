@@ -3994,6 +3994,8 @@ dependencies = [
 name = "metatorio-app"
 version = "0.1.0"
 dependencies = [
+ "metatorio-data",
+ "metatorio-runtime",
  "serde",
  "serde_json",
  "tauri",
@@ -4028,6 +4030,17 @@ dependencies = [
 name = "metatorio-data-codegen"
 version = "0.1.0"
 dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "metatorio-runtime"
+version = "0.1.0"
+dependencies = [
+ "metatorio-core",
+ "metatorio-data",
+ "metatorio-solver",
  "serde",
  "serde_json",
 ]

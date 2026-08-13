@@ -1,0 +1,26 @@
+{
+  "item": {
+    "iron-plate": { "type": "item", "name": "iron-plate", "stack_size": 100 },
+    "iron-gear-wheel": { "type": "item", "name": "iron-gear-wheel", "stack_size": 100 }
+  },
+  "recipe": {
+    "iron-gear-wheel": {
+      "type": "recipe",
+      "name": "iron-gear-wheel",
+      "category": "crafting",
+      "energy_required": 0.5,
+      "ingredients": [{ "type": "item", "name": "iron-plate", "amount": 2 }],
+      "results": [{ "type": "item", "name": "iron-gear-wheel", "amount": 1 }]
+    }
+  },
+  "assembling-machine": {
+    "assembling-machine-1": {
+      "type": "assembling-machine",
+      "name": "assembling-machine-1",
+      "crafting_categories": ["crafting"],
+      "crafting_speed": 0.5,
+      "energy_usage": "90kW",
+      "energy_source": { "type": "electric" }
+    }
+  }
+}

@@ -1,0 +1,15 @@
+[package]
+name = "metatorio-runtime"
+version = "0.1.0"
+edition = "2024"
+description = "Metatorio application document model and framework-independent messages"
+license = "MIT"
+
+[dependencies]
+metatorio-data = { path = "../metatorio-data" }
+metatorio-core = { path = "../metatorio-core" }
+metatorio-solver = { path = "../metatorio-solver" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]

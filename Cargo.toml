@@ -7,6 +7,7 @@ members = [
     "crates/metatorio-data",
     "crates/metatorio-data-codegen", 
     "crates/metatorio-core",
+    "crates/metatorio-runtime",
     "crates/metatorio-ui",
     "metatorio-app/src-tauri",
 ]
