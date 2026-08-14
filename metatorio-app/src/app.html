@@ -1,10 +1,18 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
     <link rel="icon" href="%sveltekit.assets%/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Tauri + SvelteKit + Typescript App</title>
+    <meta name="color-scheme" content="light dark" />
+    <!-- 首帧即使用系统画布色，避免 CSS 就绪前的白屏/黑屏闪烁 -->
+    <style>
+      html {
+        background: Canvas;
+        color: CanvasText;
+      }
+    </style>
+    <title>Metatorio</title>
     %sveltekit.head%
   </head>
   <body data-sveltekit-preload-data="hover">

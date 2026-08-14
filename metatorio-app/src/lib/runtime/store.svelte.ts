@@ -1,29 +1,47 @@
 // Svelte 5 rune-based store bridging the frontend to the Tauri runtime.
 //
-// `runtime` is a singleton: the demo page (and later the real UI) reads its
-// $state fields reactively and calls its methods to send AppMessages.  After
-// every dispatch the store refreshes the document + UI snapshots, so the
-// UI never keeps its own copy of backend data.
+// `runtime` is a singleton: the UI reads its $state fields reactively and
+// calls its methods to send AppMessages.  After every dispatch the store
+// refreshes the document + UI snapshots, so the UI never keeps its own copy
+// of backend data.  Game context (prototype store + icons) and catalog
+// results are cached here as well.
 
 import {
+  catalog,
   dispatch,
+  getContext,
   getDocument,
   getUiState,
   loadBundledDump,
+  loadDump,
+  loadGameContext,
+  loadIcon,
+  onContextError,
+  onContextLoaded,
   onSolveError,
   onSolveResult,
+  openProjectDialog,
+  saveProject,
+  saveProjectAsDialog,
 } from "./client";
 import type {
+  AppDocument,
   AppMessage,
+  CatalogEntry,
+  CatalogKind,
+  ContextInfo,
   FactoryId,
   MechanicId,
   MechanicKind,
   ProjectId,
   SolveResult,
+  TargetId,
+  TimeScale,
+  ExternalInputId,
 } from "./types";
 
 class RuntimeStore {
-  document = $state<import("./types").AppDocument | null>(null);
+  document = $state<AppDocument | null>(null);
   ui = $state<import("./types").UiState | null>(null);
   solve = $state<SolveResult | null>(null);
   solveError = $state<string | null>(null);
@@ -32,6 +50,17 @@ class RuntimeStore {
   solving = $state(false);
   lastError = $state<string | null>(null);
   ready = $state(false);
+
+  context = $state<ContextInfo | null>(null);
+  contextBusy = $state(false);
+  contextError = $state<string | null>(null);
+
+  /** 图标缓存：`type/name` → blob URL（或 null 表示无图标）。 */
+  private icons = new Map<string, Promise<string | null>>();
+  /** 目录缓存：`kind|query` → 条目。 */
+  private catalogCache = new Map<string, CatalogEntry[]>();
+  /** 图标对象 URL 列表，用于卸载时释放。 */
+  private iconUrls: string[] = [];
 
   /** Subscribe to backend events; call once at app start. */
   async init(): Promise<void> {
@@ -44,8 +73,25 @@ class RuntimeStore {
       this.solveError = message;
       this.solving = false;
     });
+    onContextLoaded((info) => {
+      this.context = info;
+      this.contextBusy = false;
+      this.contextError = null;
+      this.clearIconCache();
+    });
+    onContextError((message) => {
+      this.contextError = message;
+      this.contextBusy = false;
+    });
     try {
-      await this.refresh();
+      const [document, ui, context] = await Promise.all([
+        getDocument(),
+        getUiState(),
+        getContext(),
+      ]);
+      this.document = document;
+      this.ui = ui;
+      this.context = context;
     } catch (error) {
       this.lastError = String(error);
     }
@@ -74,20 +120,127 @@ class RuntimeStore {
     }
   }
 
+  // ── 游戏上下文 ──────────────────────────────────────────────────
+
   async loadDemoData(): Promise<void> {
-    this.busy = true;
-    this.lastError = null;
+    await this.runContext(async () => {
+      this.context = await loadBundledDump();
+    });
+  }
+
+  async loadContextFromDump(path: string): Promise<void> {
+    await this.runContext(async () => {
+      this.context = await loadDump(path);
+    });
+  }
+
+  async loadContextFromExecutable(exe: string, modDir?: string | null): Promise<void> {
+    await this.runContext(async () => {
+      this.context = await loadGameContext(exe, modDir);
+    });
+  }
+
+  private async runContext(action: () => Promise<void>): Promise<void> {
+    this.contextBusy = true;
+    this.contextError = null;
     try {
-      await loadBundledDump();
-      this.solveError = null;
+      await action();
+    } catch (error) {
+      this.contextError = String(error);
+      this.contextBusy = false;
+      throw error;
+    }
+  }
+
+  // ── 文件 ────────────────────────────────────────────────────────
+
+  async openProject(): Promise<boolean> {
+    this.busy = true;
+    try {
+      const document = await openProjectDialog();
+      if (document) {
+        this.document = document;
+        const ui = await getUiState();
+        this.ui = ui;
+        return true;
+      }
+      return false;
     } catch (error) {
       this.lastError = String(error);
+      throw error;
     } finally {
       this.busy = false;
     }
   }
 
-  // ── Demo actions (grow into the real UI) ───────────────────────
+  async saveCurrentProject(): Promise<boolean> {
+    this.busy = true;
+    try {
+      const path = await saveProject();
+      if (path != null) return true;
+      return await this.saveProjectAs();
+    } catch (error) {
+      this.lastError = String(error);
+      throw error;
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  async saveProjectAs(): Promise<boolean> {
+    this.busy = true;
+    try {
+      const path = await saveProjectAsDialog();
+      return path != null;
+    } catch (error) {
+      this.lastError = String(error);
+      throw error;
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  // ── 图标与目录 ──────────────────────────────────────────────────
+
+  /** 取物品图标（blob URL）；无图标时返回 null。带缓存。 */
+  getIcon(type: string, name: string): Promise<string | null> {
+    const key = `${type}/${name}`;
+    let entry = this.icons.get(key);
+    if (!entry) {
+      entry = loadIcon(type, name).then((bytes) => {
+        if (!bytes || bytes.length === 0) return null;
+        const blob = new Blob([new Uint8Array(bytes)], { type: "image/png" });
+        const url = URL.createObjectURL(blob);
+        this.iconUrls.push(url);
+        return url;
+      });
+      this.icons.set(key, entry);
+    }
+    return entry;
+  }
+
+  private clearIconCache(): void {
+    for (const url of this.iconUrls) URL.revokeObjectURL(url);
+    this.iconUrls = [];
+    this.icons.clear();
+  }
+
+  /** 目录搜索，按 (kind, query) 缓存。 */
+  async searchCatalog(kind: CatalogKind, query: string): Promise<CatalogEntry[]> {
+    const key = `${kind}|${query.trim()}`;
+    const cached = this.catalogCache.get(key);
+    if (cached) return cached;
+    const entries = await catalog(kind, query, 300);
+    this.catalogCache.set(key, entries);
+    return entries;
+  }
+
+  /** 清空目录缓存（换上下文后调用）。 */
+  clearCatalogCache(): void {
+    this.catalogCache.clear();
+  }
+
+  // ── 项目 / 工厂 ─────────────────────────────────────────────────
 
   async newProject(name: string): Promise<void> {
     await this.send({ scope: "application", action: { "new-project": { name } } });
@@ -101,47 +254,57 @@ class RuntimeStore {
     });
   }
 
-  async addMechanic(kind: MechanicKind): Promise<void> {
-    const { project, factory } = this.requireFactory();
+  async removeFactory(factory: FactoryId): Promise<void> {
+    const project = this.requireProject();
     await this.send({
-      scope: "factory",
-      action: { project, factory, action: { "mechanic-list": { add: { kind } } } },
+      scope: "project",
+      action: { project, action: { "remove-factory": { factory } } },
     });
   }
 
-  async setRecipe(mechanic: MechanicId, recipe: string): Promise<void> {
-    const { project, factory } = this.requireFactory();
+  async selectProject(project: ProjectId | null): Promise<void> {
+    await this.send({ scope: "ui", action: { "select-project": { project } } });
+  }
+
+  async selectFactory(factory: FactoryId | null): Promise<void> {
+    await this.send({ scope: "ui", action: { "select-factory": { factory } } });
+  }
+
+  // ── 项目设置 ────────────────────────────────────────────────────
+
+  async setTimeScale(time_scale: TimeScale): Promise<void> {
+    const project = this.requireProject();
     await this.send({
-      scope: "factory",
-      action: {
-        project,
-        factory,
-        action: {
-          mechanic: {
-            mechanic,
-            action: { "set-recipe": { recipe: { id: recipe, quality: "normal" } } },
-          },
-        },
-      },
+      scope: "project",
+      action: { project, action: { "set-time-scale": { time_scale } } },
     });
   }
 
-  async setMachine(mechanic: MechanicId, machine: string): Promise<void> {
-    const { project, factory } = this.requireFactory();
+  async setAllAccessible(enabled: boolean): Promise<void> {
+    const project = this.requireProject();
     await this.send({
-      scope: "factory",
-      action: {
-        project,
-        factory,
-        action: {
-          mechanic: {
-            mechanic,
-            action: { "set-machine": { machine: { id: machine, quality: "normal" } } },
-          },
-        },
-      },
+      scope: "project",
+      action: { project, action: { "set-all-accessible": { enabled } } },
     });
   }
+
+  async setQualityLimit(quality: string | null): Promise<void> {
+    const project = this.requireProject();
+    await this.send({
+      scope: "project",
+      action: { project, action: { "set-quality-limit": { quality } } },
+    });
+  }
+
+  async setMiningProductivity(productivity: number): Promise<void> {
+    const project = this.requireProject();
+    await this.send({
+      scope: "project",
+      action: { project, action: { "set-mining-productivity": { productivity } } },
+    });
+  }
+
+  // ── 目标 ────────────────────────────────────────────────────────
 
   async addTarget(itemId: string, amount: number): Promise<void> {
     const { project, factory } = this.requireFactory();
@@ -159,6 +322,175 @@ class RuntimeStore {
     });
   }
 
+  async addTargetFlow(flow: import("./types").DualVar, amount: number): Promise<void> {
+    const { project, factory } = this.requireFactory();
+    await this.send({
+      scope: "factory",
+      action: { project, factory, action: { flow: { "add-to-target": { flow, amount } } } },
+    });
+  }
+
+  async setTargetAmount(target: TargetId, amount: number): Promise<void> {
+    const { project, factory } = this.requireFactory();
+    await this.send({
+      scope: "factory",
+      action: { project, factory, action: { target: { "set-amount": { target, amount } } } },
+    });
+  }
+
+  async removeTarget(target: TargetId): Promise<void> {
+    const { project, factory } = this.requireFactory();
+    await this.send({
+      scope: "factory",
+      action: { project, factory, action: { target: { remove: { target } } } },
+    });
+  }
+
+  // ── 外部输入 ────────────────────────────────────────────────────
+
+  async addExternalInput(itemId: string, penalty: number): Promise<void> {
+    const { project, factory } = this.requireFactory();
+    await this.send({
+      scope: "factory",
+      action: {
+        project,
+        factory,
+        action: {
+          "external-input": {
+            add: {
+              input: {
+                id: 0,
+                flow: { Item: { id: itemId, quality: "normal" } },
+                penalty,
+              },
+            },
+          },
+        },
+      },
+    });
+  }
+
+  async removeExternalInput(input: ExternalInputId): Promise<void> {
+    const { project, factory } = this.requireFactory();
+    await this.send({
+      scope: "factory",
+      action: {
+        project,
+        factory,
+        action: { "external-input": { remove: { input } } },
+      },
+    });
+  }
+
+  async setExternalInputPenalty(input: ExternalInputId, penalty: number): Promise<void> {
+    const { project, factory } = this.requireFactory();
+    await this.send({
+      scope: "factory",
+      action: {
+        project,
+        factory,
+        action: { "external-input": { "set-penalty": { input, penalty } } },
+      },
+    });
+  }
+
+  // ── 机制 ────────────────────────────────────────────────────────
+
+  async addMechanic(kind: MechanicKind): Promise<void> {
+    const { project, factory } = this.requireFactory();
+    await this.send({
+      scope: "factory",
+      action: { project, factory, action: { "mechanic-list": { add: { kind } } } },
+    });
+  }
+
+  async removeMechanic(mechanic: MechanicId): Promise<void> {
+    const { project, factory } = this.requireFactory();
+    await this.send({
+      scope: "factory",
+      action: { project, factory, action: { "mechanic-list": { remove: { mechanic } } } },
+    });
+  }
+
+  async setMechanicEnabled(mechanic: MechanicId, enabled: boolean): Promise<void> {
+    const { project, factory } = this.requireFactory();
+    await this.send({
+      scope: "factory",
+      action: {
+        project,
+        factory,
+        action: { "mechanic-list": { "set-enabled": { mechanic, enabled } } },
+      },
+    });
+  }
+
+  async mechanicMessage(mechanic: MechanicId, action: import("./types").MechanicAction): Promise<void> {
+    const { project, factory } = this.requireFactory();
+    await this.send({
+      scope: "factory",
+      action: { project, factory, action: { mechanic: { mechanic, action } } },
+    });
+  }
+
+  async setRecipe(mechanic: MechanicId, recipe: string): Promise<void> {
+    await this.mechanicMessage(mechanic, {
+      "set-recipe": { recipe: { id: recipe, quality: "normal" } },
+    });
+  }
+
+  async setMachine(mechanic: MechanicId, machine: string): Promise<void> {
+    await this.mechanicMessage(mechanic, {
+      "set-machine": { machine: { id: machine, quality: "normal" } },
+    });
+  }
+
+  async setResource(mechanic: MechanicId, resource: string): Promise<void> {
+    await this.mechanicMessage(mechanic, { "set-resource": { resource } });
+  }
+
+  async setItem(mechanic: MechanicId, item: string): Promise<void> {
+    await this.mechanicMessage(mechanic, {
+      "set-item": { item: { id: item, quality: "normal" } },
+    });
+  }
+
+  async setGenerator(mechanic: MechanicId, generator: string): Promise<void> {
+    await this.mechanicMessage(mechanic, {
+      "set-generator": { generator: { id: generator, quality: "normal" } },
+    });
+  }
+
+  async setBoiler(mechanic: MechanicId, boiler: string): Promise<void> {
+    await this.mechanicMessage(mechanic, {
+      "set-boiler": { boiler: { id: boiler, quality: "normal" } },
+    });
+  }
+
+  async setReactor(mechanic: MechanicId, reactor: string): Promise<void> {
+    await this.mechanicMessage(mechanic, {
+      "set-reactor": { reactor: { id: reactor, quality: "normal" } },
+    });
+  }
+
+  async setFluid(mechanic: MechanicId, fluid: string): Promise<void> {
+    await this.mechanicMessage(mechanic, { "set-fluid": { fluid } });
+  }
+
+  async setModuleSlot(mechanic: MechanicId, slot: number, module: string | null): Promise<void> {
+    await this.mechanicMessage(mechanic, {
+      module: {
+        "set-module-slot": {
+          slot,
+          module: module ? { id: module, quality: "normal" } : null,
+        },
+      },
+    });
+  }
+
+  async clearModules(mechanic: MechanicId): Promise<void> {
+    await this.mechanicMessage(mechanic, { module: { "clear-modules": null } });
+  }
+
   async recompute(): Promise<void> {
     const { project, factory } = this.requireFactory();
     this.solving = true;
@@ -173,7 +505,7 @@ class RuntimeStore {
     }
   }
 
-  // ── Derived helpers for the demo page ──────────────────────────
+  // ── 派生访问 ────────────────────────────────────────────────────
 
   get selectedProject() {
     return (
@@ -190,14 +522,14 @@ class RuntimeStore {
 
   private requireProject(): ProjectId {
     const project = this.ui?.selected_project;
-    if (project == null) throw new Error("没有选中的项目：先新建项目");
+    if (project == null) throw new Error("没有选中的项目");
     return project;
   }
 
   private requireFactory(): { project: ProjectId; factory: FactoryId } {
     const project = this.requireProject();
     const factory = this.ui?.selected_factory;
-    if (factory == null) throw new Error("没有选中的工厂：先新建工厂");
+    if (factory == null) throw new Error("没有选中的工厂");
     return { project, factory };
   }
 }
