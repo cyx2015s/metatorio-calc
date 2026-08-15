@@ -32,6 +32,8 @@ pub struct ProjectDocument {
     pub name: String,
     pub settings: ProjectSettings,
     pub planning: PlanningPreferences,
+    /// 该项目使用的游戏上下文（缓存 id）。`None` = 使用应用当前激活的上下文。
+    pub context_id: Option<String>,
     pub factories: Vec<FactoryDocument>,
 }
 
@@ -42,6 +44,7 @@ impl Default for ProjectDocument {
             name: "Unnamed project".to_string(),
             settings: ProjectSettings::default(),
             planning: PlanningPreferences::default(),
+            context_id: None,
             factories: Vec::new(),
         }
     }

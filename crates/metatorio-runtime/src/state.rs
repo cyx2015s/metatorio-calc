@@ -392,6 +392,10 @@ impl RuntimeState {
                 );
                 Ok(Outcome::all_factories_if(changed, project_id))
             }
+            ProjectAction::SetContext { context } => {
+                let changed = replace(&mut self.project_mut(project_id)?.context_id, context);
+                Ok(Outcome::all_factories_if(changed, project_id))
+            }
             ProjectAction::Planning(action) => {
                 // UseBestModules executes for the currently selected mechanic
                 // even though the preference itself is project-global.
@@ -1345,6 +1349,7 @@ pub enum RuntimeError {
     InvalidValue(String),
     DataNotLoaded,
     DataLoad(String),
+    ContextNotFound(String),
     Io(String),
 }
 
@@ -1380,6 +1385,7 @@ impl fmt::Display for RuntimeError {
             Self::InvalidValue(message) => f.write_str(message),
             Self::DataNotLoaded => f.write_str("game data has not been loaded"),
             Self::DataLoad(message) => write!(f, "failed to load game data: {message}"),
+            Self::ContextNotFound(id) => write!(f, "game context {id} is not loaded"),
             Self::Io(message) => write!(f, "I/O error: {message}"),
         }
     }

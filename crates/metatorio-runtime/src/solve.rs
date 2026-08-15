@@ -58,10 +58,16 @@ pub struct FlowBalance {
 
 /// Tauri-independent application runtime.  Tauri commands can own this value
 /// behind a mutex and forward its commands/events to the frontend.
+///
+/// The runtime holds one prototype store per game context (`contexts`), keyed
+/// by a stable context id.  A project pins the context it was planned against
+/// (`ProjectDocument::context_id`); solving falls back to the active context
+/// when the project does not pin one.
 #[derive(Debug, Default)]
 pub struct Runtime {
     pub state: RuntimeState,
-    prototype: Option<PrototypeStore>,
+    contexts: HashMap<String, PrototypeStore>,
+    active_context: Option<String>,
 }
 
 impl Runtime {
@@ -72,7 +78,8 @@ impl Runtime {
     pub fn from_document(document: AppDocument) -> Self {
         Self {
             state: RuntimeState::new(document),
-            prototype: None,
+            contexts: HashMap::new(),
+            active_context: None,
         }
     }
 
@@ -80,19 +87,64 @@ impl Runtime {
         self.state.dispatch(message)
     }
 
-    pub fn install_prototype_store(&mut self, prototype: PrototypeStore) {
-        self.prototype = Some(prototype);
+    /// Register a loaded prototype store under a stable context id.
+    pub fn install_context(&mut self, context_id: String, prototype: PrototypeStore) {
+        self.contexts.insert(context_id, prototype);
     }
 
-    pub fn load_dump_file(&mut self, path: impl AsRef<Path>) -> Result<(), RuntimeError> {
-        let file =
-            File::open(path.as_ref()).map_err(|error| RuntimeError::Io(error.to_string()))?;
-        let dump: serde_json::Value = serde_json::from_reader(file)
-            .map_err(|error| RuntimeError::DataLoad(error.to_string()))?;
-        let prototype = PrototypeStore::load(&dump)
-            .map_err(|error| RuntimeError::DataLoad(error.to_string()))?;
-        self.install_prototype_store(prototype);
-        Ok(())
+    /// Drop a context's in-memory store (the on-disk cache is untouched).
+    pub fn remove_context(&mut self, context_id: &str) {
+        self.contexts.remove(context_id);
+        if self.active_context.as_deref() == Some(context_id) {
+            self.active_context = None;
+        }
+    }
+
+    /// The context used by projects that do not pin one.
+    pub fn set_active_context(&mut self, context_id: Option<String>) {
+        self.active_context = context_id;
+    }
+
+    pub fn active_context(&self) -> Option<&str> {
+        self.active_context.as_deref()
+    }
+
+    /// Ids of contexts whose store is currently in memory.
+    pub fn context_ids(&self) -> impl Iterator<Item = &str> {
+        self.contexts.keys().map(String::as_str)
+    }
+
+    /// The in-memory store for a context id, if loaded.
+    pub fn context_store_by_id(&self, id: &str) -> Option<&PrototypeStore> {
+        self.contexts.get(id)
+    }
+
+    /// The context the UI should display / browse: the selected project's
+    /// pinned context, else the active context.
+    pub fn effective_context_id(&self) -> Option<String> {
+        self.state
+            .ui
+            .selected_project
+            .and_then(|project| self.state.project(project).ok())
+            .and_then(|project| project.context_id.clone())
+            .or_else(|| self.active_context.clone())
+    }
+
+    /// Resolve the prototype store for a project: its pinned context first,
+    /// then the active context.
+    pub fn context_store(&self, project_id: ProjectId) -> Result<&PrototypeStore, RuntimeError> {
+        let project = self.state.project(project_id)?;
+        let context_id = project
+            .context_id
+            .as_ref()
+            .or(self.active_context.as_ref());
+        match context_id {
+            Some(id) => self
+                .contexts
+                .get(id)
+                .ok_or_else(|| RuntimeError::ContextNotFound(id.clone())),
+            None => Err(RuntimeError::DataNotLoaded),
+        }
     }
 
     pub fn load_document_file(&mut self, path: impl AsRef<Path>) -> Result<(), RuntimeError> {
@@ -125,7 +177,7 @@ impl Runtime {
         project_id: ProjectId,
         factory_id: FactoryId,
     ) -> Result<SolveResult, RuntimeError> {
-        let prototype = self.prototype.as_ref().ok_or(RuntimeError::DataNotLoaded)?;
+        let prototype = self.context_store(project_id)?;
         let project = self.state.project(project_id)?;
         let factory = self.state.factory(project_id, factory_id)?;
         solve_document(prototype, project, factory, project_id, factory_id)
@@ -303,7 +355,11 @@ mod tests {
                 }
             }
         });
-        runtime.install_prototype_store(PrototypeStore::load(&dump).unwrap());
+        runtime.install_context(
+            "test-context".to_string(),
+            PrototypeStore::load(&dump).unwrap(),
+        );
+        runtime.set_active_context(Some("test-context".to_string()));
         runtime
     }
 
@@ -404,5 +460,61 @@ mod tests {
             project: project_id,
             factory: factory_id,
         }));
+    }
+
+    #[test]
+    fn project_pinned_context_wins_over_active_context() {
+        let mut runtime = load_runtime();
+        // A second, distinct context becomes active.
+        let other = json!({ "item": {} });
+        runtime.install_context("other".to_string(), PrototypeStore::load(&other).unwrap());
+        runtime.set_active_context(Some("other".to_string()));
+
+        let project_id = ProjectId(1);
+        runtime
+            .dispatch(AppMessage::Application(
+                crate::message::ApplicationAction::NewProject {
+                    name: "pinned".to_string(),
+                },
+            ))
+            .unwrap();
+        let project_id = runtime.state.ui.selected_project.unwrap_or(project_id);
+
+        // Unpinned project resolves to the active context.
+        assert!(runtime.context_store(project_id).is_ok());
+
+        // Pinning the project to "test-context" overrides the active context.
+        runtime
+            .dispatch(AppMessage::Project {
+                project: project_id,
+                action: crate::message::ProjectAction::SetContext {
+                    context: Some("test-context".to_string()),
+                },
+            })
+            .unwrap();
+        assert_eq!(
+            runtime
+                .state
+                .project(project_id)
+                .unwrap()
+                .context_id
+                .as_deref(),
+            Some("test-context")
+        );
+        assert!(runtime.context_store(project_id).is_ok());
+
+        // A pinned context that is not loaded → ContextNotFound.
+        runtime
+            .dispatch(AppMessage::Project {
+                project: project_id,
+                action: crate::message::ProjectAction::SetContext {
+                    context: Some("nope".to_string()),
+                },
+            })
+            .unwrap();
+        assert_eq!(
+            runtime.context_store(project_id).unwrap_err(),
+            RuntimeError::ContextNotFound("nope".to_string())
+        );
     }
 }

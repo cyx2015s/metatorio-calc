@@ -13,7 +13,8 @@ fn load_demo_runtime() -> Runtime {
     let dump: serde_json::Value = serde_json::from_str(DEMO_DUMP).unwrap();
     let prototype = metatorio_data::store::PrototypeStore::load(&dump).unwrap();
     let mut runtime = Runtime::new();
-    runtime.install_prototype_store(prototype);
+    runtime.install_context("demo-context".to_string(), prototype);
+    runtime.set_active_context(Some("demo-context".to_string()));
     runtime
 }
 

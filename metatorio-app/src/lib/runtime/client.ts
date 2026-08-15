@@ -2,7 +2,7 @@
 //
 // Every call goes through `invoke` on the Rust commands registered in
 // src-tauri/src/lib.rs; solve outcomes arrive as `solve-result` /
-// `solve-error` events emitted by the backend worker.
+// `solve-error` events, context changes as `contexts-changed`.
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -12,6 +12,7 @@ import type {
   CatalogEntry,
   CatalogKind,
   ContextInfo,
+  ContextList,
   DispatchResult,
   SolveResult,
   UiState,
@@ -42,6 +43,8 @@ export async function getUiState(): Promise<UiState> {
   return call("get_ui_state");
 }
 
+// ── Game contexts ─────────────────────────────────────────────────
+
 export async function loadBundledDump(): Promise<ContextInfo> {
   return call("load_bundled_dump");
 }
@@ -57,8 +60,20 @@ export async function loadDump(path: string): Promise<ContextInfo> {
   return call("load_dump", { path });
 }
 
-export async function getContext(): Promise<ContextInfo> {
-  return call("get_context");
+export async function listContexts(): Promise<ContextList> {
+  return call("list_contexts");
+}
+
+export async function setActiveContext(id: string | null): Promise<ContextList> {
+  return call("set_active_context", { id });
+}
+
+export async function renameContext(id: string, name: string): Promise<ContextList> {
+  return call("rename_context", { id, name });
+}
+
+export async function deleteContext(id: string): Promise<ContextList> {
+  return call("delete_context", { id });
 }
 
 export async function pickGameExecutable(): Promise<string | null> {
@@ -73,6 +88,8 @@ export async function pickModDir(): Promise<string | null> {
   return call("pick_mod_dir");
 }
 
+// ── Catalog & icons ───────────────────────────────────────────────
+
 export async function loadIcon(type: string, name: string): Promise<number[] | null> {
   return call("icon", { ty: type, name });
 }
@@ -84,6 +101,8 @@ export async function catalog(
 ): Promise<CatalogEntry[]> {
   return call("catalog", { kind, query, limit });
 }
+
+// ── Persistence ───────────────────────────────────────────────────
 
 export async function openProjectDialog(): Promise<AppDocument | null> {
   return call("open_project_dialog");
@@ -107,8 +126,8 @@ export function onSolveError(handler: (message: string) => void): Promise<() => 
   return listen<string>("solve-error", (event) => handler(event.payload));
 }
 
-export function onContextLoaded(handler: (info: ContextInfo) => void): Promise<() => void> {
-  return listen<ContextInfo>("context-loaded", (event) => handler(event.payload));
+export function onContextsChanged(handler: (list: ContextList) => void): Promise<() => void> {
+  return listen<ContextList>("contexts-changed", (event) => handler(event.payload));
 }
 
 export function onContextError(handler: (message: string) => void): Promise<() => void> {

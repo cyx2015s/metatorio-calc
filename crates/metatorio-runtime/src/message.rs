@@ -139,6 +139,10 @@ pub enum ProjectAction {
     SetQualityLimit {
         quality: Option<String>,
     },
+    /// 把项目绑定到某个游戏上下文（缓存 id）；`None` 表示用当前激活上下文。
+    SetContext {
+        context: Option<String>,
+    },
     Planning(PlanningAction),
 }
 

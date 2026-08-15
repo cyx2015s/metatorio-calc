@@ -8,21 +8,24 @@
 
 import {
   catalog,
+  deleteContext,
   dispatch,
-  getContext,
   getDocument,
   getUiState,
+  listContexts,
   loadBundledDump,
   loadDump,
   loadGameContext,
   loadIcon,
   onContextError,
-  onContextLoaded,
+  onContextsChanged,
   onSolveError,
   onSolveResult,
   openProjectDialog,
+  renameContext,
   saveProject,
   saveProjectAsDialog,
+  setActiveContext,
 } from "./client";
 import type {
   AppDocument,
@@ -51,12 +54,15 @@ class RuntimeStore {
   lastError = $state<string | null>(null);
   ready = $state(false);
 
-  context = $state<ContextInfo | null>(null);
+  contexts = $state<ContextInfo[]>([]);
+  activeContext = $state<ContextInfo | null>(null);
   contextBusy = $state(false);
   contextError = $state<string | null>(null);
 
   /** 图标缓存：`type/name` → blob URL（或 null 表示无图标）。 */
   private icons = new Map<string, Promise<string | null>>();
+  /** 上次刷新时的激活上下文 id（用于判断图标/目录缓存是否失效）。 */
+  private activeContextId = "";
   /** 目录缓存：`kind|query` → 条目。 */
   private catalogCache = new Map<string, CatalogEntry[]>();
   /** 图标对象 URL 列表，用于卸载时释放。 */
@@ -73,25 +79,20 @@ class RuntimeStore {
       this.solveError = message;
       this.solving = false;
     });
-    onContextLoaded((info) => {
-      this.context = info;
+    onContextsChanged(() => {
       this.contextBusy = false;
       this.contextError = null;
-      this.clearIconCache();
+      this.refreshContexts().catch(() => {});
     });
     onContextError((message) => {
       this.contextError = message;
       this.contextBusy = false;
     });
     try {
-      const [document, ui, context] = await Promise.all([
-        getDocument(),
-        getUiState(),
-        getContext(),
-      ]);
+      const [document, ui] = await Promise.all([getDocument(), getUiState()]);
       this.document = document;
       this.ui = ui;
-      this.context = context;
+      await this.refreshContexts();
     } catch (error) {
       this.lastError = String(error);
     }
@@ -122,21 +123,65 @@ class RuntimeStore {
 
   // ── 游戏上下文 ──────────────────────────────────────────────────
 
+  /** 拉取上下文列表；激活上下文变化时清空图标/目录缓存。 */
+  async refreshContexts(): Promise<void> {
+    const list = await listContexts();
+    this.contexts = list.contexts;
+    this.activeContext = list.contexts.find((entry) => entry.id === list.active) ?? null;
+    if (this.activeContextId !== list.active) {
+      this.activeContextId = list.active ?? "";
+      this.clearIconCache();
+      this.clearCatalogCache();
+    }
+  }
+
   async loadDemoData(): Promise<void> {
     await this.runContext(async () => {
-      this.context = await loadBundledDump();
+      await loadBundledDump();
+      await this.refreshContexts();
     });
   }
 
   async loadContextFromDump(path: string): Promise<void> {
     await this.runContext(async () => {
-      this.context = await loadDump(path);
+      await loadDump(path);
+      await this.refreshContexts();
     });
   }
 
   async loadContextFromExecutable(exe: string, modDir?: string | null): Promise<void> {
     await this.runContext(async () => {
-      this.context = await loadGameContext(exe, modDir);
+      await loadGameContext(exe, modDir);
+      await this.refreshContexts();
+    });
+  }
+
+  async setActiveContext(id: string | null): Promise<void> {
+    await this.runContext(async () => {
+      await setActiveContext(id);
+      await this.refreshContexts();
+    });
+  }
+
+  async renameContext(id: string, name: string): Promise<void> {
+    await this.runContext(async () => {
+      await renameContext(id, name);
+      await this.refreshContexts();
+    });
+  }
+
+  async deleteContext(id: string): Promise<void> {
+    await this.runContext(async () => {
+      await deleteContext(id);
+      await this.refreshContexts();
+    });
+  }
+
+  /** 把项目绑定到某个上下文；null = 跟随激活上下文。 */
+  async setProjectContext(project: ProjectId, context: string | null): Promise<void> {
+    await this.send({
+      scope: "project",
+      action: { project, action: { "set-context": { context } } },
     });
   }
 

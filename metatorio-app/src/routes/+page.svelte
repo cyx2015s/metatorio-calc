@@ -54,6 +54,13 @@
     selector = { kind, title, kinds, onSelect };
   }
 
+  function renameContextPrompt(context: import("$lib/runtime/types").ContextInfo) {
+    const name = window.prompt("重命名上下文", context.name);
+    if (name && name.trim()) {
+      runtime.renameContext(context.id, name.trim()).catch(() => {});
+    }
+  }
+
   // ── 派生数据 ────────────────────────────────────────────────────
   let project = $derived(runtime.selectedProject);
   let factory = $derived(runtime.selectedFactory);
@@ -190,8 +197,8 @@
   <!-- ══ 应用栏 ══ -->
   <header class="appbar">
     <div class="brand">
-      <span class="brand-mark">M</span>
-      <span class="brand-name">METATORIO</span>
+      <span class="brand-mark">切</span>
+      <span class="brand-name">向量化</span>
     </div>
 
     <div class="menu-wrap">
@@ -209,8 +216,8 @@
 
     {#if runtime.contextBusy}
       <span class="chip warn">正在加载数据…</span>
-    {:else if runtime.context?.loaded}
-      <span class="chip ok">数据已加载</span>
+    {:else if runtime.activeContext}
+      <span class="chip ok">{runtime.activeContext.name}</span>
     {:else}
       <span class="chip">未加载游戏数据</span>
     {/if}
@@ -298,7 +305,7 @@
               openSelector("item", "选择目标物品", (name) =>
                 runtime.addTarget(name, 1).catch(() => {}),
               )}
-            disabled={!runtime.context?.loaded}
+            disabled={!runtime.activeContext}
           >+ 添加目标</button>
         </section>
 
@@ -333,7 +340,7 @@
             openSelector("item", "选择外部输入物品", (name) =>
               runtime.addExternalInput(name, 1).catch(() => {}),
             )}
-          disabled={!runtime.context?.loaded}
+          disabled={!runtime.activeContext}
         >+ 添加外部输入</button>
         </section>
       {/if}
@@ -341,6 +348,23 @@
       {#if project}
         <section class="panel">
           <div class="title">项目设置</div>
+          <div class="field">
+            <label>游戏上下文</label>
+            <select
+              value={project.context_id ?? ""}
+              onchange={(event) => {
+                const value = (event.currentTarget as HTMLSelectElement).value;
+                runtime
+                  .setProjectContext(project.id, value === "" ? null : value)
+                  .catch(() => {});
+              }}
+            >
+              <option value="">跟随激活上下文（{runtime.activeContext?.name ?? "无"}）</option>
+              {#each runtime.contexts as context (context.id)}
+                <option value={context.id}>{context.name}</option>
+              {/each}
+            </select>
+          </div>
           <div class="field">
             <label>时间刻度</label>
             <select
@@ -387,7 +411,7 @@
         <button class="btn primary" onclick={() => runtime.recompute().catch(() => {})} disabled={runtime.busy || runtime.solving || !factory}>
           {runtime.solving ? "求解中…" : "重新求解"}
         </button>
-        {#if runtime.context?.loaded == null || !runtime.context.loaded}
+        {#if !runtime.activeContext}
           <span class="muted">先加载游戏数据（左上角「游戏数据」）</span>
         {/if}
         <span class="spacer"></span>
@@ -498,16 +522,49 @@
       </section>
 
       <section class="panel">
-        <div class="title">数据上下文</div>
-        {#if runtime.context?.loaded}
-          <div class="kv"><span>图标目录</span><span class="mono small" title={runtime.context.icon_root ?? ""}>{runtime.context.icon_root ?? "无（仅占位图标）"}</span></div>
-          <div class="chips-wrap">
-            {#each runtime.context.groups.filter((group) => group.count > 0) as group (group.name)}
-              <span class="chip" title={group.name}>{group.name}·{group.count}</span>
+        <div class="title">游戏上下文 <span class="count">{runtime.contexts.length}</span></div>
+        {#if runtime.contexts.length === 0}
+          <div class="empty-hint">尚未导出/加载任何上下文</div>
+        {:else}
+          <div class="rows compact">
+            {#each runtime.contexts as context (context.id)}
+              <div class="ctx-row" class:active={context.active}>
+                <div class="ctx-main">
+                  <div class="ctx-name">
+                    {context.name}
+                    {#if context.active}<span class="chip ok">激活</span>{/if}
+                    {#if !context.loaded}<span class="chip">未载入</span>{/if}
+                  </div>
+                  <div class="ctx-meta" title={context.source}>{context.source}</div>
+                </div>
+                <div class="ctx-actions">
+                  <button
+                    class="btn ghost"
+                    title={context.active ? "已激活" : "设为激活上下文"}
+                    disabled={context.active || runtime.contextBusy}
+                    onclick={() => runtime.setActiveContext(context.id).catch(() => {})}
+                  >激活</button>
+                  <button
+                    class="btn ghost"
+                    title="重命名"
+                    onclick={() => renameContextPrompt(context)}
+                  >改名</button>
+                  <button
+                    class="btn ghost danger"
+                    title="删除缓存"
+                    onclick={() => {
+                      if (confirm(`删除上下文「${context.name}」的缓存？`)) {
+                        runtime.deleteContext(context.id).catch(() => {});
+                      }
+                    }}
+                  >删除</button>
+                </div>
+              </div>
             {/each}
           </div>
-        {:else}
-          <div class="empty-hint">未加载游戏数据</div>
+          {#if runtime.activeContext && runtime.activeContext.icon_root}
+            <div class="kv"><span>图标目录</span><span class="mono small" title={runtime.activeContext.icon_root}>{runtime.activeContext.icon_root}</span></div>
+          {/if}
         {/if}
       </section>
     </aside>
@@ -903,11 +960,50 @@
     color: var(--accent);
   }
 
-  .chips-wrap {
+  .ctx-row {
     display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-    margin-top: 8px;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+  }
+
+  .ctx-row.active {
+    border-color: var(--accent-line);
+    background: var(--accent-dim);
+  }
+
+  .ctx-main {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .ctx-name {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    overflow: hidden;
+    font-size: 11px;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ctx-meta {
+    overflow: hidden;
+    margin-top: 2px;
+    color: var(--faint);
+    font-size: 9px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ctx-actions {
+    display: flex;
+    gap: 2px;
+    flex: 0 0 auto;
   }
 
   .check {

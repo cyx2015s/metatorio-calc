@@ -5,14 +5,17 @@
 //! (`RuntimeCommand`) are executed here — solving runs on a blocking worker
 //! and its outcome is pushed to the frontend as a `solve-result` event.
 //!
-//! This layer also owns the game-data context (loaded prototype store + icon
-//! directory) and project file persistence, both of which are inherently
-//! app-side concerns.
+//! This layer also owns the game-context cache (multiple exported data sets,
+//! each with its own prototype store + icon directory) and project file
+//! persistence.  Contexts are cached under
+//! `<app_data>/contexts/<content-hash>/`; projects pin the context they were
+//! planned against via `ProjectDocument::context_id`.
 
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
     sync::Mutex,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use metatorio_data::store::{PrototypeGroup, PrototypeRecord, PrototypeStore};
@@ -26,7 +29,7 @@ use metatorio_runtime::{
     solve::Runtime,
     state::{DispatchResult, UiState},
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 
@@ -39,7 +42,7 @@ const DEMO_DUMP: &str = include_str!("../dumps/demo_dump.json");
 
 pub struct AppState {
     runtime: Mutex<Runtime>,
-    context: Mutex<Option<GameContext>>,
+    contexts: Mutex<ContextRegistry>,
     project_paths: Mutex<HashMap<ProjectId, String>>,
 }
 
@@ -47,24 +50,48 @@ impl Default for AppState {
     fn default() -> Self {
         Self {
             runtime: Mutex::new(Runtime::new()),
-            context: Mutex::new(None),
+            contexts: Mutex::new(ContextRegistry::default()),
             project_paths: Mutex::new(HashMap::new()),
         }
     }
 }
 
-/// Loaded game context: the prototype store the solver and the selector use,
-/// plus the directory of game icon PNGs produced by `--dump-icon-sprites`.
-struct GameContext {
-    prototype: PrototypeStore,
-    icon_root: Option<PathBuf>,
+/// Game contexts cached on disk under `<app_data>/contexts/<id>/`.
+///
+/// The registry keeps manifests only; loaded prototype stores live in
+/// [`Runtime::contexts`] (single in-memory copy).  `id` is a content hash of
+/// the raw dump, so identical exports dedupe and ids are stable across
+/// machines.
+#[derive(Default)]
+struct ContextRegistry {
+    dir: PathBuf,
+    meta: HashMap<String, ContextMeta>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ContextMeta {
+    id: String,
+    name: String,
+    source: String,
+    created_at: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ContextInfo {
+    pub id: String,
+    pub name: String,
+    pub source: String,
+    pub created_at: u64,
     pub loaded: bool,
     pub groups: Vec<GroupCount>,
     pub icon_root: Option<String>,
+    pub active: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ContextList {
+    pub active: Option<String>,
+    pub contexts: Vec<ContextInfo>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -82,47 +109,232 @@ pub struct CatalogEntry {
     pub module_slots: Option<u16>,
 }
 
-// ── Context loading ───────────────────────────────────────────────
+// ── Registry helpers ──────────────────────────────────────────────
 
-fn context_info(state: &AppState) -> ContextInfo {
-    let context = state.context.lock().ok();
-    let Some(Some(context)) = context.as_deref() else {
-        return ContextInfo {
-            loaded: false,
-            groups: Vec::new(),
-            icon_root: None,
+impl ContextRegistry {
+    fn store_dir(&self, id: &str) -> PathBuf {
+        self.dir.join(id)
+    }
+
+    fn dump_path(&self, id: &str) -> PathBuf {
+        self.store_dir(id).join("data-raw-dump.json")
+    }
+
+    fn manifest_path(&self, id: &str) -> PathBuf {
+        self.store_dir(id).join("context.json")
+    }
+
+    fn icon_root(&self, id: &str) -> PathBuf {
+        self.store_dir(id).join("icons")
+    }
+
+    /// Rebuild `meta` from the manifests on disk.
+    fn scan(&mut self) {
+        if self.dir.as_os_str().is_empty() {
+            return;
+        }
+        let Ok(entries) = std::fs::read_dir(&self.dir) else {
+            return;
         };
-    };
-    ContextInfo {
-        loaded: true,
-        groups: context
-            .prototype
-            .groups
-            .iter()
-            .map(|(group, records)| GroupCount {
-                name: format!("{group:?}"),
-                count: records.len(),
-            })
-            .collect(),
-        icon_root: context
-            .icon_root
-            .as_ref()
-            .map(|path| path.to_string_lossy().to_string()),
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let Some(id) = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_string)
+            else {
+                continue;
+            };
+            if let Some(meta) = read_manifest(&path.join("context.json")) {
+                self.meta.insert(id, meta);
+            }
+        }
+    }
+
+    /// Create the cache directory + manifest for a new context id.
+    fn register(&mut self, id: String, name: String, source: String) {
+        let created_at = now_secs();
+        let meta = ContextMeta {
+            id: id.clone(),
+            name,
+            source,
+            created_at,
+        };
+        let _ = std::fs::create_dir_all(self.store_dir(&id));
+        write_manifest(&self.manifest_path(&id), &meta);
+        self.meta.insert(id, meta);
+    }
+
+    fn rename(&mut self, id: &str, name: String) -> Option<()> {
+        let manifest_path = self.manifest_path(id);
+        let meta = self.meta.get_mut(id)?;
+        meta.name = name;
+        write_manifest(&manifest_path, meta);
+        Some(())
+    }
+
+    fn remove(&mut self, id: &str) {
+        let _ = std::fs::remove_dir_all(self.store_dir(id));
+        self.meta.remove(id);
     }
 }
 
-fn install_context(
-    state: &AppState,
-    prototype: PrototypeStore,
-    icon_root: Option<PathBuf>,
-    runtime: &mut Runtime,
-) {
-    runtime.install_prototype_store(prototype.clone());
-    *state.context.lock().expect("context lock") = Some(GameContext {
-        prototype,
-        icon_root,
-    });
+fn read_manifest(path: &Path) -> Option<ContextMeta> {
+    let raw = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str(&raw).ok()
 }
+
+fn write_manifest(path: &Path, meta: &ContextMeta) {
+    if let Ok(json) = serde_json::to_string_pretty(meta) {
+        let _ = std::fs::write(path, json);
+    }
+}
+
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
+}
+
+fn context_id_of(raw: &[u8]) -> String {
+    format!("{:016x}", xxhash_rust::xxh3::xxh3_64(raw))
+}
+
+fn copy_dir(src: &Path, dst: &Path) {
+    if !src.is_dir() {
+        return;
+    }
+    let _ = std::fs::create_dir_all(dst);
+    if let Ok(entries) = std::fs::read_dir(src) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let target = dst.join(entry.file_name());
+            if path.is_dir() {
+                copy_dir(&path, &target);
+            } else {
+                let _ = std::fs::copy(&path, &target);
+            }
+        }
+    }
+}
+
+// ── Context loading / registration ────────────────────────────────
+
+fn ensure_context_loaded(
+    state: &AppState,
+    runtime: &mut Runtime,
+    id: &str,
+) -> Result<(), String> {
+    if runtime.context_store_by_id(id).is_some() {
+        return Ok(());
+    }
+    let dump_path = {
+        let registry = state.contexts.lock().map_err(|_| "contexts 锁损坏".to_string())?;
+        if !registry.meta.contains_key(id) {
+            return Err(format!("上下文 {id} 不存在于缓存"));
+        }
+        registry.dump_path(id)
+    };
+    let raw = std::fs::read(&dump_path).map_err(|error| error.to_string())?;
+    let dump: serde_json::Value = serde_json::from_slice(&raw).map_err(|error| error.to_string())?;
+    let prototype = PrototypeStore::load(&dump).map_err(|error| error.to_string())?;
+    runtime.install_context(id.to_string(), prototype);
+    Ok(())
+}
+
+/// Register a new context (or reuse the cached one by content hash), persist
+/// it, load its store and make it active.
+fn register_context(
+    state: &AppState,
+    runtime: &mut Runtime,
+    name: String,
+    source: String,
+    raw: &[u8],
+    icon_src: Option<&Path>,
+) -> Result<ContextInfo, String> {
+    let id = context_id_of(raw);
+    {
+        let mut registry = state.contexts.lock().map_err(|_| "contexts 锁损坏".to_string())?;
+        if !registry.meta.contains_key(&id) {
+            registry.register(id.clone(), name, source);
+            std::fs::write(registry.dump_path(&id), raw).map_err(|error| error.to_string())?;
+            if let Some(src) = icon_src {
+                copy_dir(src, &registry.icon_root(&id));
+            }
+        }
+    }
+    ensure_context_loaded(state, runtime, &id)?;
+    runtime.set_active_context(Some(id.clone()));
+    context_info_of(state, runtime, &id).ok_or_else(|| "上下文信息缺失".to_string())
+}
+
+fn context_info_from(
+    registry: &ContextRegistry,
+    runtime: &Runtime,
+    id: &str,
+) -> Option<ContextInfo> {
+    let meta = registry.meta.get(id)?.clone();
+    let store = runtime.context_store_by_id(id);
+    let icon_root = registry.icon_root(id);
+    Some(ContextInfo {
+        id: meta.id,
+        name: meta.name,
+        source: meta.source,
+        created_at: meta.created_at,
+        loaded: store.is_some(),
+        groups: store
+            .map(|store| {
+                store
+                    .groups
+                    .iter()
+                    .map(|(group, records)| GroupCount {
+                        name: format!("{group:?}"),
+                        count: records.len(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        icon_root: icon_root.is_dir().then(|| icon_root.to_string_lossy().to_string()),
+        active: runtime.active_context() == Some(id),
+    })
+}
+
+fn context_info_of(state: &AppState, runtime: &Runtime, id: &str) -> Option<ContextInfo> {
+    let registry = state.contexts.lock().ok()?;
+    context_info_from(&registry, runtime, id)
+}
+
+fn context_list(state: &AppState) -> ContextList {
+    let runtime = state.runtime.lock().ok();
+    let registry = state.contexts.lock().ok();
+    let (Some(runtime), Some(registry)) = (runtime.as_ref(), registry.as_ref()) else {
+        return ContextList {
+            active: None,
+            contexts: Vec::new(),
+        };
+    };
+    let active = runtime.active_context().map(str::to_string);
+    let mut contexts: Vec<ContextInfo> = registry
+        .meta
+        .keys()
+        .filter_map(|id| context_info_from(registry, runtime, id))
+        .collect();
+    contexts.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    ContextList { active, contexts }
+}
+
+fn emit_contexts_changed(app: &AppHandle, state: &AppState) {
+    let list = context_list(state);
+    if let Err(error) = app.emit("contexts-changed", list) {
+        eprintln!("failed to emit contexts-changed: {error}");
+    }
+}
+
+// ── Game export (executable) ──────────────────────────────────────
 
 fn game_export_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app
@@ -147,30 +359,6 @@ fn run_game(exe: &Path, config: &Path, args: &[&str], extra: &[String]) -> Resul
         return Err("游戏导出命令失败".to_string());
     }
     Ok(())
-}
-
-fn load_dump_impl(
-    app: &AppHandle,
-    state: &AppState,
-    path: String,
-) -> Result<ContextInfo, String> {
-    let raw = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
-    let dump: serde_json::Value = serde_json::from_str(&raw).map_err(|error| error.to_string())?;
-    let prototype = PrototypeStore::load(&dump).map_err(|error| error.to_string())?;
-    // Icon root: a sibling "icons" directory when the dump came from a game
-    // export (script-output/icons), otherwise no game icons.
-    let icon_root = Path::new(&path)
-        .parent()
-        .map(|dir| dir.join("icons"))
-        .filter(|dir| dir.is_dir());
-    let mut runtime = state
-        .runtime
-        .lock()
-        .map_err(|_| "runtime lock poisoned".to_string())?;
-    install_context(state, prototype, icon_root, &mut runtime);
-    let info = context_info(state);
-    let _ = app.emit("context-loaded", &info);
-    Ok(info)
 }
 
 fn load_game_context_impl(
@@ -208,27 +396,41 @@ fn load_game_context_impl(
             dump_path.display()
         ));
     }
-    load_dump_impl(app, state, dump_path.to_string_lossy().to_string())
-}
-
-// ── Commands ──────────────────────────────────────────────────────
-
-/// Load the embedded demo prototype store (idempotent; dev/demo helper).
-#[tauri::command]
-fn load_bundled_dump(state: State<'_, AppState>) -> Result<ContextInfo, String> {
-    let dump: serde_json::Value =
-        serde_json::from_str(DEMO_DUMP).map_err(|error| error.to_string())?;
-    let prototype = PrototypeStore::load(&dump).map_err(|error| format!("dump: {error}"))?;
+    let raw = std::fs::read(&dump_path).map_err(|error| error.to_string())?;
+    let name = mod_dir
+        .and_then(|dir| Path::new(dir).file_name())
+        .and_then(|name| name.to_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| "vanilla".to_string());
+    let source = format!(
+        "exe: {executable_path}{}",
+        mod_dir.map(|dir| format!(", mods: {dir}")).unwrap_or_default()
+    );
+    let icon_src = script_output.join("icons");
     let mut runtime = state
         .runtime
         .lock()
         .map_err(|_| "runtime lock poisoned".to_string())?;
-    install_context(&state, prototype, None, &mut runtime);
-    Ok(context_info(&state))
+    register_context(state, &mut runtime, name, source, &raw, Some(&icon_src))
+}
+
+// ── Commands ──────────────────────────────────────────────────────
+
+/// Load the embedded demo prototype store as a context (idempotent by hash).
+#[tauri::command]
+fn load_bundled_dump(app: AppHandle) -> Result<ContextInfo, String> {
+    let state = app.state::<AppState>();
+    let mut runtime = state
+        .runtime
+        .lock()
+        .map_err(|_| "runtime lock poisoned".to_string())?;
+    let info = register_context(&state, &mut runtime, "内置示例".to_string(), "embedded demo".to_string(), DEMO_DUMP.as_bytes(), None)?;
+    emit_contexts_changed(&app, &state);
+    Ok(info)
 }
 
 /// Run the Factorio executable to export data + locale + icon sprites, then
-/// load the result as the game context.
+/// cache and activate the result as a context.
 #[tauri::command]
 async fn load_game_context(
     app: AppHandle,
@@ -237,82 +439,148 @@ async fn load_game_context(
 ) -> Result<ContextInfo, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
-        load_game_context_impl(&app, &state, &executable_path, mod_dir.as_deref())
+        let info = load_game_context_impl(&app, &state, &executable_path, mod_dir.as_deref())?;
+        emit_contexts_changed(&app, &state);
+        Ok(info)
     })
     .await
     .map_err(|error| error.to_string())?
 }
 
-/// Load a pre-generated `data-raw-dump.json` as the game context.
+/// Load a pre-generated `data-raw-dump.json` as a cached context.
 #[tauri::command]
 async fn load_dump(app: AppHandle, path: String) -> Result<ContextInfo, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
-        load_dump_impl(&app, &state, path)
+        let raw = std::fs::read(&path).map_err(|error| error.to_string())?;
+        let name = Path::new(&path)
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or("dump")
+            .to_string();
+        let source = format!("dump: {path}");
+        let icon_src = Path::new(&path)
+            .parent()
+            .map(|dir| dir.join("icons"))
+            .filter(|dir| dir.is_dir());
+        let mut runtime = state
+            .runtime
+            .lock()
+            .map_err(|_| "runtime lock poisoned".to_string())?;
+        let info = register_context(
+            &state,
+            &mut runtime,
+            name,
+            source,
+            &raw,
+            icon_src.as_deref(),
+        )?;
+        emit_contexts_changed(&app, &state);
+        Ok(info)
     })
     .await
     .map_err(|error| error.to_string())?
 }
 
+/// All cached contexts + the active context id.
 #[tauri::command]
-fn get_context(state: State<'_, AppState>) -> ContextInfo {
-    context_info(&state)
+fn list_contexts(state: State<'_, AppState>) -> ContextList {
+    context_list(&state)
 }
 
-/// OS file dialog for the Factorio executable (game-context loading).
+/// Activate a context (loading its store from cache on demand).
 #[tauri::command]
-async fn pick_game_executable(app: AppHandle) -> Result<Option<String>, String> {
+async fn set_active_context(app: AppHandle, id: Option<String>) -> Result<ContextList, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let picked = app
-            .dialog()
-            .file()
-            .add_filter("Factorio 可执行文件", &["exe"])
-            .blocking_pick_file();
-        Ok(picked
-            .and_then(|picked| picked.into_path().ok())
-            .map(|path| path.to_string_lossy().to_string()))
+        let state = app.state::<AppState>();
+        let mut runtime = state
+            .runtime
+            .lock()
+            .map_err(|_| "runtime lock poisoned".to_string())?;
+        if let Some(id) = &id {
+            ensure_context_loaded(&state, &mut runtime, id)?;
+        }
+        runtime.set_active_context(id);
+        emit_contexts_changed(&app, &state);
+        Ok(context_list(&state))
     })
     .await
     .map_err(|error| error.to_string())?
 }
 
-/// OS file dialog for a pre-generated `data-raw-dump.json`.
 #[tauri::command]
-async fn pick_dump_file(app: AppHandle) -> Result<Option<String>, String> {
+async fn rename_context(app: AppHandle, id: String, name: String) -> Result<ContextList, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let picked = app
-            .dialog()
-            .file()
-            .add_filter("Factorio 数据 dump", &["json"])
-            .blocking_pick_file();
-        Ok(picked
-            .and_then(|picked| picked.into_path().ok())
-            .map(|path| path.to_string_lossy().to_string()))
+        let state = app.state::<AppState>();
+        let name = name.trim().to_string();
+        if name.is_empty() {
+            return Err("名称不能为空".to_string());
+        }
+        {
+            let mut registry = state
+                .contexts
+                .lock()
+                .map_err(|_| "contexts 锁损坏".to_string())?;
+            registry
+                .rename(&id, name)
+                .ok_or_else(|| format!("上下文 {id} 不存在"))?;
+        }
+        emit_contexts_changed(&app, &state);
+        Ok(context_list(&state))
     })
     .await
     .map_err(|error| error.to_string())?
 }
 
-/// OS folder dialog for a Factorio mod directory.
 #[tauri::command]
-async fn pick_mod_dir(app: AppHandle) -> Result<Option<String>, String> {
+async fn delete_context(app: AppHandle, id: String) -> Result<ContextList, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let picked = app.dialog().file().blocking_pick_folder();
-        Ok(picked
-            .and_then(|picked| picked.into_path().ok())
-            .map(|path| path.to_string_lossy().to_string()))
+        let state = app.state::<AppState>();
+        {
+            let runtime = state
+                .runtime
+                .lock()
+                .map_err(|_| "runtime lock poisoned".to_string())?;
+            let referenced = runtime
+                .state
+                .document
+                .projects
+                .iter()
+                .any(|project| project.context_id.as_deref() == Some(id.as_str()));
+            if referenced {
+                return Err("有项目正在引用该上下文，请先解除关联".to_string());
+            }
+        }
+        {
+            let mut registry = state
+                .contexts
+                .lock()
+                .map_err(|_| "contexts 锁损坏".to_string())?;
+            registry.remove(&id);
+        }
+        let mut runtime = state
+            .runtime
+            .lock()
+            .map_err(|_| "runtime lock poisoned".to_string())?;
+        runtime.remove_context(&id);
+        emit_contexts_changed(&app, &state);
+        Ok(context_list(&state))
     })
     .await
     .map_err(|error| error.to_string())?
 }
 
-/// Game icon PNG bytes for `<icon_root>/<ty>/<name>.png` (from
-/// `--dump-icon-sprites`).  Falls back to `item/` and `entity/` so items and
-/// their entity share icons where the dump only emitted one.
+/// Game icon PNG bytes for the *effective* context's `<icons>/<ty>/<name>.png`
+/// (from `--dump-icon-sprites`).
 #[tauri::command]
 fn icon(state: State<'_, AppState>, ty: String, name: String) -> Option<Vec<u8>> {
-    let context = state.context.lock().ok()?;
-    let root = context.as_ref()?.icon_root.as_ref()?;
+    let runtime = state.runtime.lock().ok()?;
+    let id = runtime.effective_context_id()?;
+    let registry = state.contexts.lock().ok()?;
+    let root = registry.icon_root(&id);
+    if !root.is_dir() {
+        return None;
+    }
     let candidates = [
         format!("{ty}/{name}.png"),
         format!("item/{name}.png"),
@@ -329,95 +597,69 @@ fn icon(state: State<'_, AppState>, ty: String, name: String) -> Option<Vec<u8>>
     None
 }
 
-/// Searchable prototype catalog for the selector.
-///
-/// `kind`: item | fluid | recipe | module | machine | mining-machine |
-/// generator | boiler | reactor | beacon | resource | entity | technology |
-/// planet | surface | quality.
+/// Searchable prototype catalog for the *effective* context.
 #[tauri::command]
 fn catalog(
     state: State<'_, AppState>,
     kind: String,
     query: String,
     limit: usize,
+) -> Result<Vec<CatalogEntry>, String> {
+    let mut runtime = state
+        .runtime
+        .lock()
+        .map_err(|_| "runtime lock poisoned".to_string())?;
+    let Some(id) = runtime.effective_context_id() else {
+        return Ok(Vec::new());
+    };
+    ensure_context_loaded(&state, &mut runtime, &id)?;
+    let Some(store) = runtime.context_store_by_id(&id) else {
+        return Ok(Vec::new());
+    };
+    Ok(catalog_from_store(store, &kind, &query, limit))
+}
+
+fn catalog_from_store(
+    store: &PrototypeStore,
+    kind: &str,
+    query: &str,
+    limit: usize,
 ) -> Vec<CatalogEntry> {
-    let Ok(guard) = state.context.lock() else {
-        return Vec::new();
-    };
-    let Some(context) = guard.as_ref() else {
-        return Vec::new();
-    };
     let limit = limit.clamp(1, 1000);
     let query = query.trim().to_lowercase();
     let mut out: Vec<CatalogEntry> = Vec::new();
 
-    match kind.as_str() {
-        "item" => ordered_group(
-            &mut out,
-            &context.prototype,
-            PrototypeGroup::Item,
-            "item",
-            &query,
-            limit,
-        ),
-        "fluid" => ordered_group(
-            &mut out,
-            &context.prototype,
-            PrototypeGroup::Fluid,
-            "fluid",
-            &query,
-            limit,
-        ),
-        "recipe" => ordered_group(
-            &mut out,
-            &context.prototype,
-            PrototypeGroup::Recipe,
-            "recipe",
-            &query,
-            limit,
-        ),
+    match kind {
+        "item" => ordered_group(&mut out, store, PrototypeGroup::Item, "item", &query, limit),
+        "fluid" => ordered_group(&mut out, store, PrototypeGroup::Fluid, "fluid", &query, limit),
+        "recipe" => ordered_group(&mut out, store, PrototypeGroup::Recipe, "recipe", &query, limit),
         "technology" => ordered_group(
             &mut out,
-            &context.prototype,
+            store,
             PrototypeGroup::Technology,
             "technology",
             &query,
             limit,
         ),
-        "planet" => ordered_group(
-            &mut out,
-            &context.prototype,
-            PrototypeGroup::Planet,
-            "planet",
-            &query,
-            limit,
-        ),
+        "planet" => ordered_group(&mut out, store, PrototypeGroup::Planet, "planet", &query, limit),
         "surface" => ordered_group(
             &mut out,
-            &context.prototype,
+            store,
             PrototypeGroup::Surface,
             "surface",
             &query,
             limit,
         ),
         "module" => {
-            for record in context.prototype.group(PrototypeGroup::Item) {
+            for record in store.group(PrototypeGroup::Item) {
                 if record.has("ModuleComponent") {
-                    push_entry(
-                        &mut out,
-                        &context.prototype,
-                        record,
-                        "item",
-                        None,
-                        &query,
-                        limit,
-                    );
+                    push_entry(&mut out, store, record, "item", None, &query, limit);
                 }
             }
         }
         "machine" => entity_filtered(
             &mut out,
-            &context.prototype,
+            store,
             "CraftingMachineComponent",
             "entity",
             true,
@@ -426,7 +668,7 @@ fn catalog(
         ),
         "mining-machine" => entity_filtered(
             &mut out,
-            &context.prototype,
+            store,
             "MiningDrillComponent",
             "entity",
             true,
@@ -435,7 +677,7 @@ fn catalog(
         ),
         "generator" => entity_filtered(
             &mut out,
-            &context.prototype,
+            store,
             "GeneratorComponent",
             "entity",
             true,
@@ -444,7 +686,7 @@ fn catalog(
         ),
         "boiler" => entity_filtered(
             &mut out,
-            &context.prototype,
+            store,
             "BoilerComponent",
             "entity",
             true,
@@ -453,7 +695,7 @@ fn catalog(
         ),
         "reactor" => entity_filtered(
             &mut out,
-            &context.prototype,
+            store,
             "ReactorComponent",
             "entity",
             true,
@@ -462,7 +704,7 @@ fn catalog(
         ),
         "beacon" => entity_filtered(
             &mut out,
-            &context.prototype,
+            store,
             "BeaconComponent",
             "entity",
             true,
@@ -471,7 +713,7 @@ fn catalog(
         ),
         "entity" => entity_filtered(
             &mut out,
-            &context.prototype,
+            store,
             "EntityComponent",
             "entity",
             false,
@@ -479,22 +721,14 @@ fn catalog(
             limit,
         ),
         "resource" => {
-            for record in context.prototype.group(PrototypeGroup::Entity) {
+            for record in store.group(PrototypeGroup::Entity) {
                 if record.type_ == "resource" {
-                    push_entry(
-                        &mut out,
-                        &context.prototype,
-                        record,
-                        "entity",
-                        None,
-                        &query,
-                        limit,
-                    );
+                    push_entry(&mut out, store, record, "entity", None, &query, limit);
                 }
             }
         }
         "quality" => {
-            for name in context.prototype.quality_order() {
+            for name in store.quality_order() {
                 if out.len() >= limit {
                     break;
                 }
@@ -653,6 +887,53 @@ fn get_ui_state(state: State<'_, AppState>) -> Result<UiState, String> {
 
 // ── Persistence ───────────────────────────────────────────────────
 
+/// OS file dialog for the Factorio executable (game-context loading).
+#[tauri::command]
+async fn pick_game_executable(app: AppHandle) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let picked = app
+            .dialog()
+            .file()
+            .add_filter("Factorio 可执行文件", &["exe"])
+            .blocking_pick_file();
+        Ok(picked
+            .and_then(|picked| picked.into_path().ok())
+            .map(|path| path.to_string_lossy().to_string()))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// OS file dialog for a pre-generated `data-raw-dump.json`.
+#[tauri::command]
+async fn pick_dump_file(app: AppHandle) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let picked = app
+            .dialog()
+            .file()
+            .add_filter("Factorio 数据 dump", &["json"])
+            .blocking_pick_file();
+        Ok(picked
+            .and_then(|picked| picked.into_path().ok())
+            .map(|path| path.to_string_lossy().to_string()))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// OS folder dialog for a Factorio mod directory.
+#[tauri::command]
+async fn pick_mod_dir(app: AppHandle) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let picked = app.dialog().file().blocking_pick_folder();
+        Ok(picked
+            .and_then(|picked| picked.into_path().ok())
+            .map(|path| path.to_string_lossy().to_string()))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 #[tauri::command]
 async fn open_project_dialog(app: AppHandle) -> Result<Option<AppDocument>, String> {
     let picked = app
@@ -760,6 +1041,19 @@ fn execute_command(
 ) {
     match command {
         RuntimeCommand::Recompute { project, factory } => {
+            // Make sure the project's context store is in memory first.
+            let context_id = runtime
+                .state
+                .project(*project)
+                .ok()
+                .and_then(|project| project.context_id.clone())
+                .or_else(|| runtime.active_context().map(str::to_string));
+            if let Some(id) = context_id {
+                if let Err(error) = ensure_context_loaded(state, runtime, &id) {
+                    emit(app, "solve-error", error);
+                    return;
+                }
+            }
             match runtime.solve_factory(*project, *factory) {
                 Ok(result) => emit(app, "solve-result", result),
                 Err(error) => emit(app, "solve-error", error.to_string()),
@@ -786,22 +1080,33 @@ fn execute_command(
             mod_path,
         } => {
             let result = load_game_context_impl(app, state, executable_path, mod_path.as_deref());
-            if let Err(error) = result {
-                emit(app, "context-error", error);
+            match result {
+                Ok(_) => emit_contexts_changed(app, state),
+                Err(error) => emit(app, "context-error", error),
             }
         }
         RuntimeCommand::LoadCachedContext => {
-            let cached = game_export_dir(app)
+            // 恢复最近创建的上下文。
+            let newest = state
+                .contexts
+                .lock()
                 .ok()
-                .map(|dir| dir.join("script-output").join("data-raw-dump.json"))
-                .filter(|path| path.exists())
-                .map(|path| path.to_string_lossy().to_string());
-            if let Some(path) = cached {
-                if let Err(error) = load_dump_impl(app, state, path) {
-                    emit(app, "context-error", error);
-                }
-            } else {
-                emit(app, "context-error", "没有缓存的游戏数据".to_string());
+                .and_then(|registry| {
+                    registry
+                        .meta
+                        .values()
+                        .max_by_key(|meta| meta.created_at)
+                        .map(|meta| meta.id.clone())
+                });
+            match newest {
+                Some(id) => match ensure_context_loaded(state, runtime, &id) {
+                    Ok(()) => {
+                        runtime.set_active_context(Some(id));
+                        emit_contexts_changed(app, state);
+                    }
+                    Err(error) => emit(app, "context-error", error),
+                },
+                None => emit(app, "context-error", "没有缓存的游戏数据".to_string()),
             }
         }
         other => eprintln!("unhandled runtime command: {other:?}"),
@@ -814,11 +1119,48 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState::default())
+        .setup(|app| {
+            // 恢复缓存注册表并激活最近使用的上下文。
+            let dir = app
+                .path()
+                .app_data_dir()
+                .map(|dir| dir.join("contexts"))
+                .unwrap_or_default();
+            let state = app.state::<AppState>();
+            {
+                let mut registry = state.contexts.lock().expect("contexts lock");
+                registry.dir = dir;
+                registry.scan();
+            }
+            let newest = state
+                .contexts
+                .lock()
+                .ok()
+                .and_then(|registry| {
+                    registry
+                        .meta
+                        .values()
+                        .max_by_key(|meta| meta.created_at)
+                        .map(|meta| meta.id.clone())
+                });
+            if let Some(id) = newest {
+                let mut runtime = state.runtime.lock().expect("runtime lock");
+                if let Err(error) = ensure_context_loaded(&state, &mut runtime, &id) {
+                    eprintln!("failed to load cached context: {error}");
+                } else {
+                    runtime.set_active_context(Some(id));
+                }
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             load_bundled_dump,
             load_game_context,
             load_dump,
-            get_context,
+            list_contexts,
+            set_active_context,
+            rename_context,
+            delete_context,
             pick_game_executable,
             pick_dump_file,
             pick_mod_dir,

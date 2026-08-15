@@ -81,6 +81,7 @@ export type ProjectAction =
   | { "set-all-accessible": { enabled: boolean } }
   | { "set-quality-limit": { quality: string | null } }
   | { "set-mining-productivity": { productivity: number } }
+  | { "set-context": { context: string | null } }
   | { planning: PlanningAction };
 
 export type MechanicKind =
@@ -237,6 +238,8 @@ export interface ProjectDocument {
   name: string;
   settings: ProjectSettings;
   planning: PlanningPreferences;
+  /** 项目绑定的游戏上下文（缓存 id）；null = 跟随应用当前激活的上下文。 */
+  context_id: string | null;
   factories: FactoryDocument[];
 }
 
@@ -379,9 +382,19 @@ export interface FlowBalance {
 // ── Game context & catalog ────────────────────────────────────────
 
 export interface ContextInfo {
+  id: string;
+  name: string;
+  source: string;
+  created_at: number;
   loaded: boolean;
   groups: { name: string; count: number }[];
   icon_root: string | null;
+  active: boolean;
+}
+
+export interface ContextList {
+  active: string | null;
+  contexts: ContextInfo[];
 }
 
 export interface CatalogEntry {
