@@ -148,3 +148,84 @@ fn frontend_json_one_click_demo_runs_end_to_end() {
     );
     assert!(flows.iter().any(|item| item.amount > 0.0), "flows: {flows:?}");
 }
+
+#[test]
+fn frontend_json_supports_all_dual_var_flow_kinds() {
+    let mut runtime = load_demo_runtime();
+
+    let dispatch = |runtime: &mut Runtime, json: serde_json::Value| {
+        let message: AppMessage = serde_json::from_value(json).unwrap();
+        runtime.dispatch(message).unwrap()
+    };
+
+    dispatch(&mut runtime, json!({
+        "scope": "application",
+        "action": { "new-project": { "name": "flows" } }
+    }));
+    let project = runtime.state.ui.selected_project.unwrap();
+    dispatch(&mut runtime, json!({
+        "scope": "project",
+        "action": { "project": project, "action": { "add-factory": { "name": "f", "template": "empty" } } }
+    }));
+    let factory = runtime.state.ui.selected_factory.unwrap();
+
+    // 流体目标（单点温度）
+    dispatch(&mut runtime, json!({
+        "scope": "factory",
+        "action": {
+            "project": project,
+            "factory": factory,
+            "action": {
+                "flow": {
+                    "add-to-target": {
+                        "flow": { "Fluid": { "name": "water", "temperature": [15, 15] } },
+                        "amount": 100
+                    }
+                }
+            }
+        }
+    }));
+    // 电外部输入（unit 变体 = 裸字符串）
+    dispatch(&mut runtime, json!({
+        "scope": "factory",
+        "action": {
+            "project": project,
+            "factory": factory,
+            "action": {
+                "external-input": {
+                    "add": { "input": { "id": 0, "flow": "Electricity", "penalty": 1 } }
+                }
+            }
+        }
+    }));
+    // 火箭运力目标
+    dispatch(&mut runtime, json!({
+        "scope": "factory",
+        "action": {
+            "project": project,
+            "factory": factory,
+            "action": {
+                "flow": {
+                    "add-to-target": {
+                        "flow": "RocketWeightCapacity",
+                        "amount": 10
+                    }
+                }
+            }
+        }
+    }));
+
+    let factory = runtime.state.factory(project, factory).unwrap();
+    assert_eq!(
+        factory.targets[0].flow,
+        metatorio_core::DualVar::Fluid {
+            name: "water".to_string(),
+            temperature: [15, 15]
+        }
+    );
+    assert_eq!(factory.targets[1].flow, metatorio_core::DualVar::RocketWeightCapacity);
+    assert_eq!(
+        factory.external_inputs[0].flow,
+        metatorio_core::DualVar::Electricity
+    );
+}

@@ -45,6 +45,12 @@
     onSelect: (name: string) => void;
   } | null>(null);
 
+  // 流选择器（目标/外部输入支持任意 DualVar 流）
+  let flowSelector = $state<{
+    title: string;
+    onSelectFlow: (flow: import("$lib/runtime/types").DualVar) => void;
+  } | null>(null);
+
   function openSelector(
     kind: CatalogKind,
     title: string,
@@ -59,6 +65,19 @@
     if (name && name.trim()) {
       runtime.renameContext(context.id, name.trim()).catch(() => {});
     }
+  }
+
+  /** 来源展示缩短：只留每段最后一个路径片段（完整路径在 tooltip）。 */
+  function shortSource(source: string): string {
+    return source
+      .split(", ")
+      .map((part) => {
+        const [label, path] = part.split(": ");
+        if (!path) return part;
+        const segment = path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? path;
+        return `${label}: ${segment}`;
+      })
+      .join(" · ");
   }
 
   // ── 派生数据 ────────────────────────────────────────────────────
@@ -81,11 +100,24 @@
   function flowIcon(flow: DualVar): { type: string; name: string } {
     const item = itemOf(flow);
     if (item) return { type: "item", name: item.id };
-    if (flow !== null && typeof flow === "object" && "Fluid" in flow) {
-      const fluid = (flow as { Fluid: { name: string } }).Fluid;
-      return { type: "fluid", name: fluid.name };
+    if (flow !== null && typeof flow === "object") {
+      if ("Fluid" in flow) {
+        const fluid = (flow as { Fluid: { name: string } }).Fluid;
+        return { type: "fluid", name: fluid.name };
+      }
+      if ("Entity" in flow) {
+        const entity = (flow as { Entity: { id: string } }).Entity;
+        return { type: "entity", name: entity.id };
+      }
     }
     return { type: "flow", name: dualVarLabel(flow) };
+  }
+
+  function flowDetailKind(icon: { type: string }): string | undefined {
+    if (icon.type === "item") return "item";
+    if (icon.type === "fluid") return "fluid";
+    if (icon.type === "entity") return "entity";
+    return undefined;
   }
 
   // ── 游戏数据加载 ────────────────────────────────────────────────
@@ -284,7 +316,7 @@
                   type={icon.type}
                   name={icon.name}
                   size={26}
-                  detailKind={icon.type === "item" ? "item" : icon.type === "fluid" ? "fluid" : undefined}
+                  detailKind={flowDetailKind(icon)}
                 />
                 <span class="row-name" title={dualVarLabel(target.flow)}>{dualVarLabel(target.flow)}</span>
                 <input
@@ -307,9 +339,10 @@
           <button
             class="btn"
             onclick={() =>
-              openSelector("item", "选择目标物品", (name) =>
-                runtime.addTarget(name, 1).catch(() => {}),
-              )}
+              (flowSelector = {
+                title: "添加目标流",
+                onSelectFlow: (flow) => runtime.addTargetFlow(flow, 1).catch(() => {}),
+              })}
             disabled={!runtime.activeContext}
           >+ 添加目标</button>
         </section>
@@ -324,7 +357,7 @@
                   type={icon.type}
                   name={icon.name}
                   size={26}
-                  detailKind={icon.type === "item" ? "item" : icon.type === "fluid" ? "fluid" : undefined}
+                  detailKind={flowDetailKind(icon)}
                 />
                 <span class="row-name" title={dualVarLabel(input.flow)}>{dualVarLabel(input.flow)}</span>
                 <input
@@ -347,9 +380,10 @@
         <button
           class="btn"
           onclick={() =>
-            openSelector("item", "选择外部输入物品", (name) =>
-              runtime.addExternalInput(name, 1).catch(() => {}),
-            )}
+            (flowSelector = {
+              title: "添加外部输入流",
+              onSelectFlow: (flow) => runtime.addExternalInputFlow(flow, 1).catch(() => {}),
+            })}
           disabled={!runtime.activeContext}
         >+ 添加外部输入</button>
         </section>
@@ -511,7 +545,7 @@
                   type={icon.type}
                   name={icon.name}
                   size={22}
-                  detailKind={icon.type === "item" ? "item" : icon.type === "fluid" ? "fluid" : undefined}
+                  detailKind={flowDetailKind(icon)}
                 />
                 <span class="row-name" title={dualVarLabel(balance.flow)}>{dualVarLabel(balance.flow)}</span>
                 <strong class:amount-pos={balance.amount > 0} class="mono amount">{balance.amount > 0 ? "+" : ""}{balance.amount.toFixed(3)}</strong>
@@ -550,7 +584,7 @@
                     {#if context.active}<span class="chip ok">激活</span>{/if}
                     {#if !context.loaded}<span class="chip">未载入</span>{/if}
                   </div>
-                  <div class="ctx-meta" title={context.source}>{context.source}</div>
+                  <div class="ctx-meta" title={context.source}>{shortSource(context.source)}</div>
                 </div>
                 <div class="ctx-actions">
                   <button
@@ -594,6 +628,16 @@
     kindOptions={selector.kinds}
     onSelect={selector.onSelect}
     onClose={() => (selector = null)}
+  />
+{/if}
+
+{#if flowSelector}
+  <Selector
+    kind="item"
+    title={flowSelector.title}
+    flowMode
+    onSelectFlow={flowSelector.onSelectFlow}
+    onClose={() => (flowSelector = null)}
   />
 {/if}
 
@@ -643,6 +687,7 @@
 
   .appbar {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 8px;
     padding: 8px 12px;
@@ -849,8 +894,10 @@
   }
 
   .col {
+    min-width: 0;
     min-height: 0;
     overflow-y: auto;
+    overflow-x: hidden;
     display: grid;
     align-content: start;
     gap: 10px;
@@ -873,6 +920,7 @@
   }
 
   .row-item {
+    min-width: 0;
     display: flex;
     align-items: center;
     gap: 8px;
@@ -993,9 +1041,11 @@
   .ctx-main {
     min-width: 0;
     flex: 1;
+    overflow: hidden;
   }
 
   .ctx-name {
+    min-width: 0;
     display: flex;
     align-items: center;
     gap: 6px;
@@ -1007,6 +1057,7 @@
   }
 
   .ctx-meta {
+    min-width: 0;
     overflow: hidden;
     margin-top: 2px;
     color: var(--faint);
@@ -1017,8 +1068,11 @@
 
   .ctx-actions {
     display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
     gap: 2px;
     flex: 0 0 auto;
+    max-width: 50%;
   }
 
   .check {

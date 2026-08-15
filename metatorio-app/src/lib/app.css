@@ -179,6 +179,7 @@ select {
 .field > input,
 .field > select {
   min-height: 26px;
+  max-width: 100%;
   padding: 0 8px;
   background: var(--bg);
   border: 1px solid var(--line-strong);

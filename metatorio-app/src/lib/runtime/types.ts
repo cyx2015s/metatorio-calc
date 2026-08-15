@@ -52,8 +52,10 @@ export function dualVarLabel(flow: DualVar): string {
     const record = flow as Record<string, unknown>;
     const key = Object.keys(record)[0];
     const value = record[key];
-    if (value && typeof value === "object" && "name" in value) {
-      return (value as { name: string }).name;
+    if (value !== null && typeof value === "object") {
+      const inner = value as Record<string, unknown>;
+      if ("name" in inner) return String(inner.name);
+      if ("id" in inner) return String(inner.id);
     }
     return key;
   }

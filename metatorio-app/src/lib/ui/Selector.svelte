@@ -1,27 +1,55 @@
 <script lang="ts">
-  // 原型选择器：复刻原始实现——大组分 tab、小组换行；筛选/分组/排序
-  // 全部在前端对全量目录索引进行（索引由后端一次性下发并按上下文缓存）。
-  // 悬停显示信息卡片（详情按需拉取 + 缓存）。
+  // 原型/流选择器：
+  // - 目录模式（flowMode=false）：复刻原始实现——大组分 tab、小组换行，
+  //   筛选/分组/排序全部前端本地（索引由后端一次性下发并缓存），悬停显示卡片。
+  // - 流模式（flowMode=true）：选择 DualVar 流（物品/流体/实体走目录，
+  //   电/热/火箭运力直接添加，自定义/污染输入名称）。
   import { runtime } from "$lib/runtime/store.svelte.ts";
   import Icon from "./Icon.svelte";
   import HoverCard from "./HoverCard.svelte";
-  import type { CatalogKind, IndexEntry } from "$lib/runtime/types";
+  import type { CatalogKind, DualVar, IndexEntry } from "$lib/runtime/types";
 
   let {
     kind,
     title,
     kindOptions = [],
+    flowMode = false,
     onSelect,
+    onSelectFlow,
     onClose,
   }: {
     kind: CatalogKind;
     title: string;
     kindOptions?: { kind: CatalogKind; label: string }[];
-    onSelect: (name: string) => void;
+    flowMode?: boolean;
+    onSelect?: (name: string) => void;
+    onSelectFlow?: (flow: DualVar) => void;
     onClose: () => void;
   } = $props();
 
+  const flowTabs = [
+    { id: "item", label: "物品" },
+    { id: "fluid", label: "流体" },
+    { id: "entity", label: "实体" },
+    { id: "electricity", label: "电" },
+    { id: "heat", label: "热" },
+    { id: "rocket-slot", label: "火箭·堆叠" },
+    { id: "rocket-weight", label: "火箭·重量" },
+    { id: "custom", label: "自定义" },
+  ] as const;
+  type FlowTab = (typeof flowTabs)[number]["id"];
+
+  const directFlows: Partial<Record<FlowTab, string>> = {
+    electricity: "Electricity",
+    heat: "Heat",
+    "rocket-slot": "RocketSlotCapacity",
+    "rocket-weight": "RocketWeightCapacity",
+  };
+
   let activeKind = $state<CatalogKind>(kind);
+  let flowTab = $state<FlowTab>("item");
+  let customVariant = $state<"Pollution" | "Custom">("Custom");
+  let customName = $state("");
   let query = $state("");
   let activeGroup = $state<string | null>(null);
   let loading = $state(false);
@@ -30,8 +58,18 @@
   let hover = $state<{ x: number; y: number; kind: string; name: string } | null>(null);
   let hoverDetail = $state<import("$lib/runtime/types").PrototypeDetail | null>(null);
 
+  // 目录模式下用 activeKind；流模式下仅 item/fluid/entity 走目录
+  let catalogKind = $derived(
+    flowMode
+      ? flowTab === "item" || flowTab === "fluid" || flowTab === "entity"
+        ? (flowTab as CatalogKind)
+        : null
+      : activeKind,
+  );
   let entries = $derived(
-    (runtime.catalogIndex?.entries ?? []).filter((entry) => entry.kind === activeKind),
+    catalogKind
+      ? (runtime.catalogIndex?.entries ?? []).filter((entry) => entry.kind === catalogKind)
+      : [],
   );
   let groups = $derived([...new Set(entries.map((entry) => entry.group))]);
   let searching = $derived(query.trim().length > 0);
@@ -43,6 +81,8 @@
         : entries,
   );
   let bySubgroup = $derived(groupBySubgroup(visible));
+  let isDirect = $derived(flowMode && flowTab in directFlows);
+  let isCustom = $derived(flowMode && flowTab === "custom");
 
   function groupBySubgroup(list: IndexEntry[]): { subgroup: string; items: IndexEntry[] }[] {
     const map = new Map<string, IndexEntry[]>();
@@ -93,8 +133,53 @@
     };
   });
 
-  function pick(name: string) {
-    onSelect(name);
+  function resetView() {
+    activeGroup = null;
+    query = "";
+  }
+
+  async function pick(name: string) {
+    if (flowMode && onSelectFlow) {
+      const flow = await buildCatalogFlow(name);
+      if (flow) {
+        onSelectFlow(flow);
+        onClose();
+      }
+      return;
+    }
+    onSelect?.(name);
+    onClose();
+  }
+
+  async function buildCatalogFlow(name: string): Promise<DualVar | null> {
+    switch (flowTab) {
+      case "item":
+        return { Item: { id: name, quality: "normal" } };
+      case "fluid": {
+        const detail = await runtime.getDetail("fluid", name);
+        const temperature =
+          detail?.default_temperature != null ? Math.round(detail.default_temperature) : 0;
+        return { Fluid: { name, temperature: [temperature, temperature] } };
+      }
+      case "entity":
+        return { Entity: { id: name, quality: "normal" } };
+      default:
+        return null;
+    }
+  }
+
+  function commitDirect(flow: string) {
+    if (!onSelectFlow) return;
+    onSelectFlow(flow as DualVar);
+    onClose();
+  }
+
+  function commitCustom() {
+    const name = customName.trim();
+    if (!name || !onSelectFlow) return;
+    onSelectFlow(
+      customVariant === "Pollution" ? { Pollution: { name } } : { Custom: { name } },
+    );
     onClose();
   }
 
@@ -106,7 +191,7 @@
     if (event.key === "Escape") {
       event.stopPropagation();
       onClose();
-    } else if (event.key === "Enter" && visible.length > 0) {
+    } else if (event.key === "Enter" && !isDirect && !isCustom && visible.length > 0) {
       pick(visible[0].name);
     }
   }
@@ -131,7 +216,20 @@
       <button class="btn ghost" onclick={onClose}>关闭</button>
     </div>
 
-    {#if kindOptions.length > 0}
+    {#if flowMode}
+      <div class="kind-tabs">
+        {#each flowTabs as option (option.id)}
+          <button
+            class:active={flowTab === option.id}
+            class="tab"
+            onclick={() => {
+              flowTab = option.id;
+              resetView();
+            }}
+          >{option.label}</button>
+        {/each}
+      </div>
+    {:else if kindOptions.length > 0}
       <div class="kind-tabs">
         {#each kindOptions as option (option.kind)}
           <button
@@ -139,35 +237,56 @@
             class="tab"
             onclick={() => {
               activeKind = option.kind;
-              activeGroup = null;
+              resetView();
             }}
           >{option.label}</button>
         {/each}
       </div>
     {/if}
 
-    <input
-      bind:this={searchBox}
-      bind:value={query}
-      class="search"
-      placeholder="搜索原型名称…"
-      spellcheck="false"
-    />
+    {#if !isDirect && !isCustom}
+      <input
+        bind:this={searchBox}
+        bind:value={query}
+        class="search"
+        placeholder="搜索原型名称…"
+        spellcheck="false"
+      />
 
-    {#if !searching && groups.length > 1}
-      <div class="group-tabs">
-        {#each groups as group (group)}
-          <button
-            class:active={activeGroup === group}
-            class="gtab"
-            onclick={() => (activeGroup = activeGroup === group ? null : group)}
-          >{group}</button>
-        {/each}
-      </div>
+      {#if !searching && groups.length > 1}
+        <div class="group-tabs">
+          {#each groups as group (group)}
+            <button
+              class:active={activeGroup === group}
+              class="gtab"
+              onclick={() => (activeGroup = activeGroup === group ? null : group)}
+            >{group}</button>
+          {/each}
+        </div>
+      {/if}
     {/if}
 
     <div class="body">
-      {#if visible.length === 0}
+      {#if isDirect}
+        {@const flow = directFlows[flowTab]!}
+        <div class="direct-panel">
+          <Icon type="flow" name={flow} size={40} />
+          <div class="direct-copy">
+            <strong>{flow}</strong>
+            <small>点击添加该流</small>
+          </div>
+          <button class="btn primary" onclick={() => commitDirect(flow)}>添加</button>
+        </div>
+      {:else if isCustom}
+        <div class="custom-panel">
+          <select bind:value={customVariant}>
+            <option value="Custom">自定义</option>
+            <option value="Pollution">污染</option>
+          </select>
+          <input bind:value={customName} placeholder="流名称" spellcheck="false" />
+          <button class="btn primary" onclick={commitCustom} disabled={!customName.trim()}>添加</button>
+        </div>
+      {:else if visible.length === 0}
         <div class="empty">{loading ? "加载中…" : "没有匹配的原型"}</div>
       {:else if searching}
         <div class="search-list">
@@ -297,6 +416,7 @@
 
   .search {
     min-height: 32px;
+    max-width: 100%;
     padding: 0 10px;
     background: var(--bg);
     border: 1px solid var(--line-strong);
@@ -417,5 +537,48 @@
     text-align: center;
     color: var(--muted);
     font-size: 11px;
+  }
+
+  .direct-panel,
+  .custom-panel {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 22px;
+  }
+
+  .direct-copy {
+    display: grid;
+    gap: 3px;
+    flex: 1;
+  }
+
+  .direct-copy strong {
+    font-size: 13px;
+  }
+
+  .direct-copy small {
+    color: var(--muted);
+    font-size: 11px;
+  }
+
+  .custom-panel {
+    flex-wrap: wrap;
+  }
+
+  .custom-panel select,
+  .custom-panel input {
+    min-height: 30px;
+    max-width: 100%;
+    padding: 0 9px;
+    background: var(--bg);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+  }
+
+  .custom-panel input {
+    flex: 1;
+    min-width: 140px;
   }
 </style>

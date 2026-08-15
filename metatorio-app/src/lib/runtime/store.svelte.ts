@@ -416,6 +416,11 @@ class RuntimeStore {
   // ── 外部输入 ────────────────────────────────────────────────────
 
   async addExternalInput(itemId: string, penalty: number): Promise<void> {
+    await this.addExternalInputFlow({ Item: { id: itemId, quality: "normal" } }, penalty);
+  }
+
+  /** 外部输入支持任意 DualVar 流（物品/流体/实体/电/热/火箭运力…）。 */
+  async addExternalInputFlow(flow: import("./types").DualVar, penalty: number): Promise<void> {
     const { project, factory } = this.requireFactory();
     await this.send({
       scope: "factory",
@@ -424,13 +429,7 @@ class RuntimeStore {
         factory,
         action: {
           "external-input": {
-            add: {
-              input: {
-                id: 0,
-                flow: { Item: { id: itemId, quality: "normal" } },
-                penalty,
-              },
-            },
+            add: { input: { id: 0, flow, penalty } },
           },
         },
       },
