@@ -3,7 +3,7 @@
    text buttons for general operations.
    Theme follows the system (prefers-color-scheme). */
 
-:global(:root) {
+:root {
   color-scheme: light dark;
   --radius: 8px;
   --radius-sm: 6px;
@@ -11,7 +11,7 @@
 }
 
 @media (prefers-color-scheme: light) {
-  :global(:root) {
+  :root {
     --bg: #f4f5f4;
     --panel: #ffffff;
     --card: #eceeec;
@@ -36,7 +36,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :global(:root) {
+  :root {
     --bg: #0e1112;
     --panel: #15191a;
     --card: #1a1f20;
@@ -60,7 +60,7 @@
   }
 }
 
-:global(body) {
+body {
   margin: 0;
   color: var(--text);
   background: var(--bg);
@@ -69,25 +69,25 @@
   -webkit-font-smoothing: antialiased;
 }
 
-:global(button) {
+button {
   font: inherit;
   color: inherit;
 }
 
-:global(input),
-:global(select) {
+input,
+select {
   font: inherit;
   color: var(--text);
 }
 
-:global(*),
-:global(*::before),
-:global(*::after) {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
 }
 
 /* 一般操作：文字按钮 */
-:global(.btn) {
+.btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -102,46 +102,46 @@
   white-space: nowrap;
 }
 
-:global(.btn:hover) {
+.btn:hover {
   background: var(--card-hover);
   border-color: var(--accent-line);
 }
 
-:global(.btn:disabled) {
+.btn:disabled {
   cursor: wait;
   opacity: 0.5;
 }
 
-:global(.btn.primary) {
+.btn.primary {
   color: var(--bg);
   background: var(--accent);
   border-color: var(--accent);
   font-weight: 700;
 }
 
-:global(.btn.primary:hover) {
+.btn.primary:hover {
   filter: brightness(1.06);
 }
 
-:global(.btn.danger) {
+.btn.danger {
   color: var(--danger);
   background: var(--danger-dim);
   border-color: var(--danger-line);
 }
 
-:global(.btn.ghost) {
+.btn.ghost {
   background: transparent;
   border-color: transparent;
   color: var(--muted);
 }
 
-:global(.btn.ghost:hover) {
+.btn.ghost:hover {
   color: var(--text);
   background: var(--card);
 }
 
 /* 游戏内物品：图标按钮 */
-:global(.icon-btn) {
+.icon-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -152,23 +152,23 @@
   cursor: pointer;
 }
 
-:global(.icon-btn:hover) {
+.icon-btn:hover {
   background: var(--card-hover);
   border-color: var(--accent-line);
 }
 
-:global(.icon-btn.empty) {
+.icon-btn.empty {
   border-color: var(--line-strong);
 }
 
-:global(.field) {
+.field {
   display: flex;
   flex-direction: column;
   gap: 4px;
   min-width: 0;
 }
 
-:global(.field > label) {
+.field > label {
   color: var(--muted);
   font-size: 9px;
   font-weight: 700;
@@ -176,8 +176,8 @@
   text-transform: uppercase;
 }
 
-:global(.field > input),
-:global(.field > select) {
+.field > input,
+.field > select {
   min-height: 26px;
   padding: 0 8px;
   background: var(--bg);
@@ -186,7 +186,7 @@
   font-size: 11px;
 }
 
-:global(.panel) {
+.panel {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -194,27 +194,27 @@
   box-shadow: var(--shadow);
 }
 
-:global(.card) {
+.card {
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
 }
 
-:global(.card-row) {
+.card-row {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-:global(.muted) {
+.muted {
   color: var(--muted);
 }
 
-:global(.mono) {
+.mono {
   font-family: var(--mono);
 }
 
-:global(.title) {
+.title {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -226,13 +226,13 @@
   letter-spacing: 0.04em;
 }
 
-:global(.title .count) {
+.title .count {
   color: var(--muted);
   font-size: 10px;
   font-weight: 500;
 }
 
-:global(.err-box) {
+.err-box {
   margin-top: 8px;
   padding: 8px 10px;
   color: var(--danger);
@@ -244,7 +244,7 @@
   word-break: break-word;
 }
 
-:global(.chip) {
+.chip {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -257,13 +257,13 @@
   white-space: nowrap;
 }
 
-:global(.chip.ok) {
+.chip.ok {
   color: var(--accent);
   background: var(--accent-dim);
   border-color: var(--accent-line);
 }
 
-:global(.chip.warn) {
+.chip.warn {
   color: var(--warn);
   background: var(--warn-dim);
   border-color: var(--warn-line);

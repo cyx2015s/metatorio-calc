@@ -157,6 +157,11 @@
     min-width: 0;
   }
 
+  .row2 {
+    padding-top: 8px;
+    border-top: 1px solid var(--line);
+  }
+
   .main {
     min-width: 0;
     flex: 1;

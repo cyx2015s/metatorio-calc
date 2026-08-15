@@ -29,7 +29,9 @@
 
   // ── 应用栏状态 ──────────────────────────────────────────────────
   let dataMenuOpen = $state(false);
-  let addMechMenuOpen = $state(false);
+  // 添加机制菜单用 fixed 定位（视口坐标），脱离滚动容器，避免开合时
+  // 改变机制列表滚动区域的高度。
+  let addMechMenuPos = $state<{ top: number; right: number } | null>(null);
   let newProjectOpen = $state(false);
   let newProjectName = $state("新项目");
   let newFactoryOpen = $state(false);
@@ -418,25 +420,35 @@
       </div>
 
       {#if factory}
-        <div class="menu-wrap add-wrap">
-          <button class="btn" onclick={() => (addMechMenuOpen = !addMechMenuOpen)}>
-            + 添加机制{addMechMenuOpen ? " ▴" : " ▾"}
+        <div class="add-wrap">
+          <button
+            class="btn"
+            onclick={(event) => {
+              const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+              addMechMenuPos = addMechMenuPos
+                ? null
+                : { top: rect.bottom + 4, right: Math.max(8, window.innerWidth - rect.right) };
+            }}
+          >
+            + 添加机制{addMechMenuPos ? " ▴" : " ▾"}
           </button>
-          {#if addMechMenuOpen}
-            <div class="menu">
-              {#each mechKinds as option (option.kind)}
-                <button
-                  onclick={() => {
-                    addMechMenuOpen = false;
-                    runtime.addMechanic(option.kind).catch(() => {});
-                  }}
-                >{option.label}</button>
-              {/each}
-            </div>
-          {/if}
         </div>
       {/if}
     </section>
+
+    {#if addMechMenuPos}
+      <div class="menu-catcher" aria-hidden="true" onclick={() => (addMechMenuPos = null)}></div>
+      <div class="menu fixed" style={`top:${addMechMenuPos.top}px;right:${addMechMenuPos.right}px`}>
+        {#each mechKinds as option (option.kind)}
+          <button
+            onclick={() => {
+              addMechMenuPos = null;
+              runtime.addMechanic(option.kind).catch(() => {});
+            }}
+          >{option.label}</button>
+        {/each}
+      </div>
+    {/if}
 
     <!-- 右栏：求解结果 / 数据上下文 -->
     <aside class="col">
@@ -628,9 +640,30 @@
     background: var(--card-hover);
   }
 
-  .add-wrap .menu {
-    right: 0;
-    left: auto;
+  .add-wrap {
+    padding-top: 2px;
+  }
+
+  /* fixed 定位的弹出菜单：完全脱离布局，不参与任何滚动区域 */
+  .menu-catcher {
+    position: fixed;
+    z-index: 29;
+    inset: 0;
+  }
+
+  .menu.fixed {
+    position: fixed;
+    z-index: 30;
+    min-width: 190px;
+    max-height: min(420px, 60vh);
+    overflow-y: auto;
+    padding: 5px;
+    display: grid;
+    gap: 2px;
+    background: var(--panel);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
   }
 
   .err-strip {
@@ -738,8 +771,8 @@
     min-height: 0;
     display: grid;
     grid-template-columns: 250px minmax(420px, 1fr) 290px;
-    gap: 10px;
-    padding: 10px 12px;
+    gap: 0;
+    padding: 10px 0;
     overflow: hidden;
   }
 
@@ -749,6 +782,12 @@
     display: grid;
     align-content: start;
     gap: 10px;
+    padding: 0 12px;
+  }
+
+  /* 分区竖分隔线 */
+  .col + .col {
+    border-left: 1px solid var(--line);
   }
 
   .rows {
@@ -808,7 +847,9 @@
     display: flex;
     align-items: center;
     gap: 8px;
+    padding-bottom: 8px;
     margin-bottom: 8px;
+    border-bottom: 1px solid var(--line);
   }
 
   .mech-list {
