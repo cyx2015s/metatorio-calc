@@ -14,9 +14,10 @@
 use crate::generated_components::prototype_groups::prototype_group_from_type;
 use crate::generated_components::{
     BoilerComponent, COMPONENT_LIST, Component, ComponentValue, CraftingMachineComponent,
-    GeneratorComponent, ItemSubGroupComponent, PrototypeBaseComponent, QualityComponent,
-    RecipeComponent, TechnologyComponent, deserialize_component,
+    GeneratorComponent, ItemComponent, ItemSubGroupComponent, PrototypeBaseComponent,
+    QualityComponent, RecipeComponent, TechnologyComponent, deserialize_component,
 };
+use crate::types::Product;
 use serde_json::Value;
 use std::{fmt, sync::OnceLock};
 
@@ -99,6 +100,13 @@ impl fmt::Display for LoadError {
 }
 
 impl std::error::Error for LoadError {}
+
+fn product_name(product: &Product) -> &str {
+    match product {
+        Product::Item(item) => &item.name,
+        Product::Fluid(fluid) => &fluid.name,
+    }
+}
 
 /// 排序信息：大组 → 小组 → 组内条目名（大组/小组/条目均按 order 排序）。
 ///
@@ -270,6 +278,41 @@ impl PrototypeStore {
         })
     }
 
+    /// 复刻原始实现：recipe 自身缺 order/subgroup 时，从主产物派生
+    /// （单产物 → main_product → 与配方同名的产物），优先 item，其次 fluid。
+    fn recipe_derived_order(&self, record: &PrototypeRecord) -> (Option<String>, String) {
+        let Some(recipe) = record.component::<RecipeComponent>() else {
+            return (None, String::new());
+        };
+        let candidate: Option<&str> = if recipe.results.len() == 1 {
+            recipe.results.first().map(product_name)
+        } else if let Some(main) = recipe.main_product.as_deref().filter(|name| !name.is_empty()) {
+            Some(main)
+        } else {
+            recipe
+                .results
+                .iter()
+                .find(|product| product_name(product) == record.name)
+                .map(product_name)
+        };
+        let Some(candidate) = candidate else {
+            return (None, String::new());
+        };
+        if let Some(base) = self
+            .get(PrototypeGroup::Item, candidate)
+            .and_then(|item| item.component::<PrototypeBaseComponent>())
+        {
+            return (base.subgroup.clone(), base.order.clone());
+        }
+        if let Some(base) = self
+            .get(PrototypeGroup::Fluid, candidate)
+            .and_then(|fluid| fluid.component::<PrototypeBaseComponent>())
+        {
+            return (base.subgroup.clone(), base.order.clone());
+        }
+        (None, String::new())
+    }
+
     /// 构建某组的排序信息（参考原始 get_order_info 的三层结构）。
     fn build_order_info(&self, group: PrototypeGroup) -> OrderInfo {
         // 小组 → 大组 映射、小组 order、大组 order（原型数据）
@@ -301,14 +344,45 @@ impl PrototypeStore {
         }
 
         // 条目分组：大组 → 小组 → Vec<(order, name)>
+        // order/subgroup 支持 fallback（复刻原始 get_order_info 前的派生逻辑）：
+        // - recipe：自身 order/subgroup 为空时，从主产物（单产物 → main_product →
+        //   同名产物）的 item/fluid 派生
+        // - entity：从 place_result 指向该实体的 item 派生
         let other = "other".to_string();
+        let place_result_map: Option<AIndexMap<String, String>> = if group == PrototypeGroup::Entity {
+            Some(
+                self.group(PrototypeGroup::Item)
+                    .filter_map(|record| {
+                        let place = record.component::<ItemComponent>()?.place_result.clone();
+                        (!place.is_empty()).then_some((place, record.name.clone()))
+                    })
+                    .collect(),
+            )
+        } else {
+            None
+        };
         let mut grouped: AIndexMap<String, AIndexMap<String, Vec<(String, String)>>> =
             AIndexMap::default();
         if let Some(records) = self.groups.get(&group) {
             for (name, r) in records {
-                let subgroup = r
-                    .component::<PrototypeBaseComponent>()
-                    .and_then(|b| b.subgroup.clone());
+                let base = r.component::<PrototypeBaseComponent>();
+                let own_subgroup = base.and_then(|b| b.subgroup.clone());
+                let own_order = base.map(|b| b.order.clone()).unwrap_or_default();
+                let (subgroup, order) = if own_order.is_empty() || own_subgroup.is_none() {
+                    match group {
+                        PrototypeGroup::Recipe => self.recipe_derived_order(r),
+                        PrototypeGroup::Entity => place_result_map
+                            .as_ref()
+                            .and_then(|map| map.get(name))
+                            .and_then(|item_name| self.get(PrototypeGroup::Item, item_name))
+                            .and_then(|item| item.component::<PrototypeBaseComponent>())
+                            .map(|base| (base.subgroup.clone(), base.order.clone()))
+                            .unwrap_or_else(|| (own_subgroup, own_order)),
+                        _ => (own_subgroup, own_order),
+                    }
+                } else {
+                    (own_subgroup, own_order)
+                };
                 let (g, sg) = match &subgroup {
                     Some(sg_name) => (
                         subgroup_group
@@ -319,10 +393,6 @@ impl PrototypeStore {
                     ),
                     None => (other.clone(), String::new()),
                 };
-                let order = r
-                    .component::<PrototypeBaseComponent>()
-                    .map(|b| b.order.clone())
-                    .unwrap_or_default();
                 grouped
                     .entry(g)
                     .or_default()
@@ -596,5 +666,61 @@ mod tests {
             deserialize_component("ItemComponent", &serde_json::json!({})).unwrap(),
         );
         assert_eq!(derive_group("item", &m), PrototypeGroup::Entity);
+    }
+
+    #[test]
+    fn order_info_falls_back_to_item_for_recipes_and_entities() {
+        let dump = serde_json::json!({
+            "item-group": {
+                "intermediate-products": { "name": "intermediate-products", "order": "d" }
+            },
+            "item-subgroup": {
+                "smelting": { "name": "smelting", "group": "intermediate-products", "order": "a" },
+                "raw-material": { "name": "raw-material", "group": "intermediate-products", "order": "b" },
+                "production-machine": { "name": "production-machine", "group": "intermediate-products", "order": "c" }
+            },
+            "item": {
+                "iron-plate": {
+                    "name": "iron-plate",
+                    "subgroup": "smelting",
+                    "order": "b[smelting]-2",
+                    "stack_size": 100
+                },
+                "assembling-machine-1": {
+                    "name": "assembling-machine-1",
+                    "subgroup": "production-machine",
+                    "order": "a[assembling-machine-1]",
+                    "stack_size": 50,
+                    "place_result": "assembling-machine-1"
+                }
+            },
+            "recipe": {
+                // 缺 order/subgroup：应从唯一产物 iron-plate 派生
+                "iron-plate": {
+                    "name": "iron-plate",
+                    "category": "smelting",
+                    "energy_required": 3.2,
+                    "results": [{ "type": "item", "name": "iron-plate", "amount": 1 }]
+                }
+            },
+            "assembling-machine": {
+                // 缺 order/subgroup：应从 place_result 对应的 item 派生
+                "assembling-machine-1": { "name": "assembling-machine-1" }
+            }
+        });
+        let store = PrototypeStore::load(&dump).unwrap();
+
+        let recipe_order = &store.order_info()[&PrototypeGroup::Recipe];
+        assert!(
+            recipe_order["intermediate-products"]["smelting"].contains(&"iron-plate".to_string()),
+            "recipe 应落入主产物 iron-plate 的 组/小组：{recipe_order:?}"
+        );
+
+        let entity_order = &store.order_info()[&PrototypeGroup::Entity];
+        assert!(
+            entity_order["intermediate-products"]["production-machine"]
+                .contains(&"assembling-machine-1".to_string()),
+            "entity 应落入 place_result 对应 item 的 组/小组：{entity_order:?}"
+        );
     }
 }

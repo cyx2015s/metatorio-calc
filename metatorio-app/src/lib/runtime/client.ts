@@ -9,11 +9,12 @@ import { listen } from "@tauri-apps/api/event";
 import type {
   AppDocument,
   AppMessage,
-  CatalogEntry,
+  CatalogIndex,
   CatalogKind,
   ContextInfo,
   ContextList,
   DispatchResult,
+  PrototypeDetail,
   SolveResult,
   UiState,
 } from "./types";
@@ -94,12 +95,15 @@ export async function loadIcon(type: string, name: string): Promise<number[] | n
   return call("icon", { ty: type, name });
 }
 
-export async function catalog(
-  kind: CatalogKind,
-  query: string,
-  limit: number,
-): Promise<CatalogEntry[]> {
-  return call("catalog", { kind, query, limit });
+export async function catalogIndex(): Promise<CatalogIndex> {
+  return call("catalog_index");
+}
+
+export async function prototypeDetail(
+  kind: string,
+  name: string,
+): Promise<PrototypeDetail | null> {
+  return call("prototype_detail", { kind, name });
 }
 
 // ── Persistence ───────────────────────────────────────────────────

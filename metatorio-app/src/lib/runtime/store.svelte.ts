@@ -7,7 +7,7 @@
 // results are cached here as well.
 
 import {
-  catalog,
+  catalogIndex,
   deleteContext,
   dispatch,
   getDocument,
@@ -22,6 +22,7 @@ import {
   onSolveError,
   onSolveResult,
   openProjectDialog,
+  prototypeDetail,
   renameContext,
   saveProject,
   saveProjectAsDialog,
@@ -30,13 +31,13 @@ import {
 import type {
   AppDocument,
   AppMessage,
-  CatalogEntry,
-  CatalogKind,
+  CatalogIndex,
   ContextInfo,
   FactoryId,
   MechanicId,
   MechanicKind,
   ProjectId,
+  PrototypeDetail,
   SolveResult,
   TargetId,
   TimeScale,
@@ -61,12 +62,15 @@ class RuntimeStore {
 
   /** 图标缓存：`type/name` → blob URL（或 null 表示无图标）。 */
   private icons = new Map<string, Promise<string | null>>();
-  /** 上次刷新时的激活上下文 id（用于判断图标/目录缓存是否失效）。 */
+  /** 上次刷新时的激活上下文 id（用于判断索引/图标缓存是否失效）。 */
   private activeContextId = "";
-  /** 目录缓存：`kind|query` → 条目。 */
-  private catalogCache = new Map<string, CatalogEntry[]>();
+  /** 悬停详情缓存：`kind/name` → 详情。 */
+  private detailCache = new Map<string, PrototypeDetail>();
   /** 图标对象 URL 列表，用于卸载时释放。 */
   private iconUrls: string[] = [];
+
+  /** 当前上下文的全量目录索引（前端本地筛选）。 */
+  catalogIndex = $state<CatalogIndex | null>(null);
 
   /** Subscribe to backend events; call once at app start. */
   async init(): Promise<void> {
@@ -134,7 +138,6 @@ class RuntimeStore {
       this.clearCatalogCache();
     }
   }
-
   async loadDemoData(): Promise<void> {
     await this.runContext(async () => {
       await loadBundledDump();
@@ -270,19 +273,38 @@ class RuntimeStore {
     this.icons.clear();
   }
 
-  /** 目录搜索，按 (kind, query) 缓存。 */
-  async searchCatalog(kind: CatalogKind, query: string): Promise<CatalogEntry[]> {
-    const key = `${kind}|${query.trim()}`;
-    const cached = this.catalogCache.get(key);
-    if (cached) return cached;
-    const entries = await catalog(kind, query, 300);
-    this.catalogCache.set(key, entries);
-    return entries;
+  /** 目录索引：一次拉取当前上下文的全量目录（前端本地筛选/分组）。 */
+  async loadCatalogIndex(): Promise<CatalogIndex | null> {
+    if (this.catalogIndex?.context_id === this.activeContextId && this.activeContextId) {
+      return this.catalogIndex;
+    }
+    try {
+      this.catalogIndex = await catalogIndex();
+      return this.catalogIndex;
+    } catch (error) {
+      this.lastError = String(error);
+      return null;
+    }
   }
 
-  /** 清空目录缓存（换上下文后调用）。 */
+  /** 悬停详情：按 (kind, name) 缓存。 */
+  async getDetail(kind: string, name: string): Promise<PrototypeDetail | null> {
+    const key = `${kind}/${name}`;
+    const cached = this.detailCache.get(key);
+    if (cached) return cached;
+    try {
+      const detail = await prototypeDetail(kind, name);
+      if (detail) this.detailCache.set(key, detail);
+      return detail;
+    } catch {
+      return null;
+    }
+  }
+
+  /** 换上下文后清空索引/详情缓存。 */
   clearCatalogCache(): void {
-    this.catalogCache.clear();
+    this.catalogIndex = null;
+    this.detailCache.clear();
   }
 
   // ── 项目 / 工厂 ─────────────────────────────────────────────────

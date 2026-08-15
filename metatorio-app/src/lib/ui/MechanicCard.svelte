@@ -1,7 +1,7 @@
 <script lang="ts">
   // 单个机制卡片：主选择器（配方/资源/物品/设备）为图标按钮，
   // 机器为图标按钮，模块为小图标槽位；操作按钮为文字。
-  import Icon from "./Icon.svelte";
+  import HoverIcon from "./HoverIcon.svelte";
   import type { CatalogKind, MechanicEntry } from "$lib/runtime/types";
 
   const kindLabel: Record<string, string> = {
@@ -83,7 +83,12 @@
       title={kindLabel[kind] ?? kind}
       onclick={() => onPick(primaryKind())}
     >
-      <Icon type={primaryName ? primaryIcon : "item"} name={primaryName || `+ ${kindLabel[kind] ?? kind}`} size={30} />
+      <HoverIcon
+        type={primaryName ? primaryIcon : "item"}
+        name={primaryName || `+ ${kindLabel[kind] ?? kind}`}
+        size={30}
+        detailKind={primaryName ? primaryKind() : undefined}
+      />
     </button>
 
     <div class="main">
@@ -103,23 +108,20 @@
   <div class="row2">
     {#if kind === "recipe" || kind === "mining"}
       <button class="icon-btn" class:empty={!machineName} title="机器" onclick={() => onPick(machineKind())}>
-        <Icon type="entity" name={machineName || "machine"} size={24} />
+        <HoverIcon
+          type="entity"
+          name={machineName || "machine"}
+          size={24}
+          detailKind={machineName ? machineKind() : undefined}
+        />
       </button>
       <span class="sub">{machineName || "选择机器"}</span>
     {:else if kind === "generator" || kind === "boiler"}
       <button class="icon-btn" class:empty={!fluidName} title="流体" onclick={() => onPick("fluid")}>
-        <Icon type="fluid" name={fluidName || "fluid"} size={24} />
+        <HoverIcon type="fluid" name={fluidName || "fluid"} size={24} detailKind={fluidName ? "fluid" : undefined} />
       </button>
       <span class="sub">{fluidName || "选择流体"}</span>
-      <button class="icon-btn" class:empty={!machineName} title="设备" onclick={() => onPick(primaryKind())}>
-        <Icon type="entity" name={machineName || "entity"} size={24} />
-      </button>
-      <span class="sub">{machineName || "选择设备"}</span>
     {:else if kind === "reactor"}
-      <button class="icon-btn" class:empty={!machineName} title="反应堆" onclick={() => onPick("reactor")}>
-        <Icon type="entity" name={machineName || "reactor"} size={24} />
-      </button>
-      <span class="sub">{machineName || "选择反应堆"}</span>
       <span class="sub">相邻 {entry.mechanic.neighbours ?? 0}</span>
     {/if}
 
@@ -128,11 +130,11 @@
     {#if modules.length > 0 || kind === "recipe" || kind === "mining"}
       {#each modules as module, slot (slot)}
         <button class="icon-btn" title={`模块槽 ${slot + 1}`} onclick={() => onPick("module", slot)}>
-          <Icon type="item" name={module.id} size={22} />
+          <HoverIcon type="item" name={module.id} size={22} detailKind="module" />
         </button>
       {/each}
       <button class="icon-btn empty" title="添加模块" onclick={() => onPick("module", modules.length)}>
-        <Icon type="item" name="+" size={22} />
+        <HoverIcon type="item" name="+" size={22} />
       </button>
     {/if}
   </div>

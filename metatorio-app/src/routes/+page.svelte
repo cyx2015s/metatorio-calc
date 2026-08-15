@@ -6,7 +6,7 @@
   import { pickDumpFile, pickGameExecutable, pickModDir } from "$lib/runtime/client";
   import { dualVarLabel, itemOf } from "$lib/runtime/types";
   import type { CatalogKind, DualVar, MechanicId, TargetId } from "$lib/runtime/types";
-  import Icon from "$lib/ui/Icon.svelte";
+  import HoverIcon from "$lib/ui/HoverIcon.svelte";
   import Selector from "$lib/ui/Selector.svelte";
   import MechanicCard from "$lib/ui/MechanicCard.svelte";
 
@@ -280,7 +280,12 @@
             {#each targets as target (target.id)}
               {@const icon = flowIcon(target.flow)}
               <div class="row-item">
-                <Icon type={icon.type} name={icon.name} size={26} />
+                <HoverIcon
+                  type={icon.type}
+                  name={icon.name}
+                  size={26}
+                  detailKind={icon.type === "item" ? "item" : icon.type === "fluid" ? "fluid" : undefined}
+                />
                 <span class="row-name" title={dualVarLabel(target.flow)}>{dualVarLabel(target.flow)}</span>
                 <input
                   class="num"
@@ -315,7 +320,12 @@
             {#each externalInputs as input (input.id)}
               {@const icon = flowIcon(input.flow)}
               <div class="row-item">
-                <Icon type={icon.type} name={icon.name} size={26} />
+                <HoverIcon
+                  type={icon.type}
+                  name={icon.name}
+                  size={26}
+                  detailKind={icon.type === "item" ? "item" : icon.type === "fluid" ? "fluid" : undefined}
+                />
                 <span class="row-name" title={dualVarLabel(input.flow)}>{dualVarLabel(input.flow)}</span>
                 <input
                   class="num"
@@ -497,7 +507,12 @@
             {#each status.flows as balance (balance.flow)}
               {@const icon = flowIcon(balance.flow)}
               <div class="row-item">
-                <Icon type={icon.type} name={icon.name} size={22} />
+                <HoverIcon
+                  type={icon.type}
+                  name={icon.name}
+                  size={22}
+                  detailKind={icon.type === "item" ? "item" : icon.type === "fluid" ? "fluid" : undefined}
+                />
                 <span class="row-name" title={dualVarLabel(balance.flow)}>{dualVarLabel(balance.flow)}</span>
                 <strong class:amount-pos={balance.amount > 0} class="mono amount">{balance.amount > 0 ? "+" : ""}{balance.amount.toFixed(3)}</strong>
               </div>

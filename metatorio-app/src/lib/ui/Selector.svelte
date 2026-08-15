@@ -1,9 +1,11 @@
 <script lang="ts">
-  // 目录选择器：搜索 + 分类页签 + 大组分栏，条目为图标 + 名称。
-  // 选择结果通过 onSelect(name) 回调给上层。
-  import Icon from "./Icon.svelte";
+  // 原型选择器：复刻原始实现——大组分 tab、小组换行；筛选/分组/排序
+  // 全部在前端对全量目录索引进行（索引由后端一次性下发并按上下文缓存）。
+  // 悬停显示信息卡片（详情按需拉取 + 缓存）。
   import { runtime } from "$lib/runtime/store.svelte.ts";
-  import type { CatalogEntry, CatalogKind } from "$lib/runtime/types";
+  import Icon from "./Icon.svelte";
+  import HoverCard from "./HoverCard.svelte";
+  import type { CatalogKind, IndexEntry } from "$lib/runtime/types";
 
   let {
     kind,
@@ -19,47 +21,75 @@
     onClose: () => void;
   } = $props();
 
+  let activeKind = $state<CatalogKind>(kind);
   let query = $state("");
-  let activeKind = $state<CatalogKind>("item");
-  let entries = $state<CatalogEntry[]>([]);
+  let activeGroup = $state<string | null>(null);
   let loading = $state(false);
-  let groupFilter = $state<string | null>(null);
   let searchBox = $state<HTMLInputElement | null>(null);
 
-  let groups = $derived([...new Set(entries.map((entry) => entry.group))].filter(Boolean));
-  let filtered = $derived(
-    groupFilter ? entries.filter((entry) => entry.group === groupFilter) : entries,
+  let hover = $state<{ x: number; y: number; kind: string; name: string } | null>(null);
+  let hoverDetail = $state<import("$lib/runtime/types").PrototypeDetail | null>(null);
+
+  let entries = $derived(
+    (runtime.catalogIndex?.entries ?? []).filter((entry) => entry.kind === activeKind),
   );
+  let groups = $derived([...new Set(entries.map((entry) => entry.group))]);
+  let searching = $derived(query.trim().length > 0);
+  let visible = $derived(
+    searching
+      ? entries.filter((entry) => entry.name.toLowerCase().includes(query.trim().toLowerCase()))
+      : activeGroup
+        ? entries.filter((entry) => entry.group === activeGroup)
+        : entries,
+  );
+  let bySubgroup = $derived(groupBySubgroup(visible));
+
+  function groupBySubgroup(list: IndexEntry[]): { subgroup: string; items: IndexEntry[] }[] {
+    const map = new Map<string, IndexEntry[]>();
+    for (const entry of list) {
+      const key = entry.subgroup || "其他";
+      const arr = map.get(key) ?? [];
+      arr.push(entry);
+      map.set(key, arr);
+    }
+    return [...map.entries()].map(([subgroup, items]) => ({ subgroup, items }));
+  }
 
   $effect(() => {
     activeKind = kind;
-    groupFilter = null;
+    activeGroup = null;
+    query = "";
   });
 
   $effect(() => {
     searchBox?.focus();
   });
 
-  // 搜索防抖；切换分类/关键字时重新拉取。
+  // 上下文变化时重新拉取索引。
   $effect(() => {
-    const timer = setTimeout(async () => {
-      loading = true;
-      let alive = true;
-      try {
-        const result = await runtime.searchCatalog(activeKind, query);
-        if (alive) {
-          entries = result;
-          groupFilter = null;
-        }
-      } catch {
-        if (alive) entries = [];
-      } finally {
-        if (alive) loading = false;
-      }
-      return;
-    }, 120);
+    const ctxId = runtime.activeContext?.id;
+    loading = true;
+    let alive = true;
+    runtime.loadCatalogIndex().then(() => {
+      if (alive) loading = false;
+    });
     return () => {
-      clearTimeout(timer);
+      alive = false;
+    };
+  });
+
+  // 悬停详情（防抖由缓存兜底，首次 hover 拉取一次）。
+  $effect(() => {
+    if (!hover) {
+      hoverDetail = null;
+      return;
+    }
+    let alive = true;
+    runtime.getDetail(hover.kind, hover.name).then((detail) => {
+      if (alive) hoverDetail = detail;
+    });
+    return () => {
+      alive = false;
     };
   });
 
@@ -68,12 +98,16 @@
     onClose();
   }
 
+  function showHover(event: MouseEvent, entry: IndexEntry) {
+    hover = { x: event.clientX, y: event.clientY, kind: entry.kind, name: entry.name };
+  }
+
   function onKeydown(event: KeyboardEvent) {
     if (event.key === "Escape") {
       event.stopPropagation();
       onClose();
-    } else if (event.key === "Enter" && filtered.length > 0) {
-      pick(filtered[0].name);
+    } else if (event.key === "Enter" && visible.length > 0) {
+      pick(visible[0].name);
     }
   }
 </script>
@@ -94,7 +128,7 @@
         {title}
         {#if loading}<span class="spinner"></span>{/if}
       </div>
-      <button class="btn ghost" onclick={onClose} title="关闭 (Esc)">关闭</button>
+      <button class="btn ghost" onclick={onClose}>关闭</button>
     </div>
 
     {#if kindOptions.length > 0}
@@ -102,8 +136,11 @@
         {#each kindOptions as option (option.kind)}
           <button
             class:active={activeKind === option.kind}
-            class="kind-tab"
-            onclick={() => (activeKind = option.kind)}
+            class="tab"
+            onclick={() => {
+              activeKind = option.kind;
+              activeGroup = null;
+            }}
           >{option.label}</button>
         {/each}
       </div>
@@ -117,39 +154,65 @@
       spellcheck="false"
     />
 
-    {#if groups.length > 1}
-      <div class="group-chips">
-        <button class:active={groupFilter === null} class="group-chip" onclick={() => (groupFilter = null)}>全部</button>
+    {#if !searching && groups.length > 1}
+      <div class="group-tabs">
         {#each groups as group (group)}
           <button
-            class:active={groupFilter === group}
-            class="group-chip"
-            onclick={() => (groupFilter = group)}
+            class:active={activeGroup === group}
+            class="gtab"
+            onclick={() => (activeGroup = activeGroup === group ? null : group)}
           >{group}</button>
         {/each}
       </div>
     {/if}
 
-    <div class="list">
-      {#if filtered.length === 0}
-        <div class="empty">
-          {loading ? "加载中…" : "没有匹配的原型"}
+    <div class="body">
+      {#if visible.length === 0}
+        <div class="empty">{loading ? "加载中…" : "没有匹配的原型"}</div>
+      {:else if searching}
+        <div class="search-list">
+          {#each visible as entry (entry.kind + entry.name)}
+            <button
+              class="row"
+              onclick={() => pick(entry.name)}
+              onmouseenter={(event) => showHover(event, entry)}
+              onmousemove={(event) => showHover(event, entry)}
+              onmouseleave={() => (hover = null)}
+            >
+              <Icon type={entry.icon_type} name={entry.name} size={28} />
+              <span class="row-name">{entry.name}</span>
+              {#if entry.subgroup}<span class="row-sub">{entry.subgroup}</span>{/if}
+            </button>
+          {/each}
         </div>
       {:else}
-        {#each filtered as entry (entry.name)}
-          <button class="row" onclick={() => pick(entry.name)}>
-            <Icon type={entry.icon_type} name={entry.name} size={30} />
-            <span class="row-name">{entry.name}</span>
-            {#if entry.subgroup}<span class="row-sub">{entry.subgroup}</span>{/if}
-            {#if entry.module_slots != null}
-              <span class="row-meta">{entry.module_slots} 模块槽</span>
-            {/if}
-          </button>
+        {#each bySubgroup as section (section.subgroup)}
+          <div class="subgroup">
+            <div class="sg-label">{section.subgroup}</div>
+            <div class="sg-items">
+              {#each section.items as entry (entry.name)}
+                <button
+                  class="icon-btn"
+                  title={entry.name}
+                  onclick={() => pick(entry.name)}
+                  onmouseenter={(event) => showHover(event, entry)}
+                  onmousemove={(event) => showHover(event, entry)}
+                  onmouseleave={() => (hover = null)}
+                >
+                  <Icon type={entry.icon_type} name={entry.name} size={34} />
+                </button>
+              {/each}
+            </div>
+          </div>
         {/each}
       {/if}
     </div>
   </div>
 </div>
+
+{#if hover}
+  <HoverCard kind={hover.kind} detail={hoverDetail} x={hover.x} y={hover.y} />
+{/if}
 
 <style>
   .backdrop {
@@ -164,8 +227,8 @@
   }
 
   .modal {
-    width: min(620px, 100%);
-    max-height: min(680px, calc(100vh - 48px));
+    width: min(640px, 100%);
+    max-height: min(700px, calc(100vh - 48px));
     display: flex;
     flex-direction: column;
     padding: 14px;
@@ -212,7 +275,7 @@
     margin-bottom: 8px;
   }
 
-  .kind-tab {
+  .tab {
     padding: 5px 9px;
     color: var(--muted);
     background: var(--card);
@@ -222,11 +285,11 @@
     cursor: pointer;
   }
 
-  .kind-tab:hover {
+  .tab:hover {
     border-color: var(--accent-line);
   }
 
-  .kind-tab.active {
+  .tab.active {
     color: var(--accent);
     background: var(--accent-dim);
     border-color: var(--accent-line);
@@ -246,37 +309,71 @@
     border-color: var(--accent-line);
   }
 
-  .group-chips {
+  /* 大组分 tab */
+  .group-tabs {
     display: flex;
     flex-wrap: wrap;
     gap: 4px;
     margin: 8px 0 2px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--line);
   }
 
-  .group-chip {
-    padding: 3px 8px;
+  .gtab {
+    padding: 4px 9px;
     color: var(--muted);
     background: transparent;
     border: 1px solid var(--line);
-    border-radius: 999px;
+    border-radius: var(--radius-sm);
     font-size: 10px;
     cursor: pointer;
   }
 
-  .group-chip:hover {
+  .gtab:hover {
     border-color: var(--accent-line);
   }
 
-  .group-chip.active {
+  .gtab.active {
     color: var(--accent);
+    background: var(--accent-dim);
     border-color: var(--accent-line);
   }
 
-  .list {
+  .body {
     flex: 1;
     min-height: 120px;
     margin-top: 8px;
     overflow-y: auto;
+  }
+
+  .subgroup {
+    display: grid;
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+
+  .sg-label {
+    color: var(--muted);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 3px;
+  }
+
+  /* 小组内图标换行 */
+  .sg-items {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+  }
+
+  .sg-items .icon-btn {
+    padding: 3px;
+  }
+
+  .search-list {
     display: grid;
     align-content: start;
     gap: 2px;
@@ -286,7 +383,7 @@
     display: flex;
     align-items: center;
     gap: 9px;
-    padding: 5px 7px;
+    padding: 4px 7px;
     text-align: left;
     background: transparent;
     border: 1px solid transparent;
@@ -313,11 +410,6 @@
     font-size: 10px;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-
-  .row-meta {
-    color: var(--faint);
-    font-size: 10px;
   }
 
   .empty {

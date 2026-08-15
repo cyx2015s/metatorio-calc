@@ -397,12 +397,43 @@ export interface ContextList {
   contexts: ContextInfo[];
 }
 
-export interface CatalogEntry {
+export interface IndexEntry {
+  kind: string;
   name: string;
   group: string;
   subgroup: string;
   icon_type: string;
   module_slots: number | null;
+}
+
+export interface CatalogIndex {
+  context_id: string;
+  entries: IndexEntry[];
+}
+
+export interface FlowAmount {
+  kind: "item" | "fluid";
+  name: string;
+  amount: number;
+}
+
+/** 悬停详情（按需拉取 + 前端缓存）。 */
+export interface PrototypeDetail {
+  name: string;
+  kind: string;
+  subgroup: string | null;
+  order: string;
+  hidden: boolean;
+  stack_size: number | null;
+  category: string | null;
+  energy_required: number | null;
+  ingredients: FlowAmount[];
+  results: FlowAmount[];
+  crafting_speed: number | null;
+  module_slots: number | null;
+  /** 焦耳/刻（功率）；前端换算为 W。 */
+  energy_usage_j: number | null;
+  default_temperature: number | null;
 }
 
 export type CatalogKind =

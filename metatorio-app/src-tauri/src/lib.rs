@@ -18,9 +18,10 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use metatorio_data::store::{PrototypeGroup, PrototypeRecord, PrototypeStore};
+use metatorio_data::store::{PrototypeGroup, PrototypeStore};
 use metatorio_data::{
-    CraftingMachineComponent, ItemSubGroupComponent, PrototypeBaseComponent,
+    CraftingMachineComponent, FluidComponent, ItemComponent, PrototypeBaseComponent,
+    RecipeComponent,
 };
 use metatorio_runtime::{
     document::AppDocument,
@@ -100,13 +101,52 @@ pub struct GroupCount {
     pub count: usize,
 }
 
+/// 目录索引条目：一次性下发到前端，筛选/分组/排序全部前端本地做。
 #[derive(Debug, Clone, Serialize)]
-pub struct CatalogEntry {
+pub struct IndexEntry {
+    pub kind: String,
     pub name: String,
     pub group: String,
     pub subgroup: String,
     pub icon_type: String,
     pub module_slots: Option<u16>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CatalogIndex {
+    pub context_id: String,
+    pub entries: Vec<IndexEntry>,
+}
+
+/// 悬停详情（按需拉取 + 前端缓存）。
+#[derive(Debug, Clone, Serialize)]
+pub struct FlowAmount {
+    pub kind: String,
+    pub name: String,
+    pub amount: f64,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct PrototypeDetail {
+    pub name: String,
+    pub kind: String,
+    pub subgroup: Option<String>,
+    pub order: String,
+    pub hidden: bool,
+    // item
+    pub stack_size: Option<f64>,
+    // recipe
+    pub category: Option<String>,
+    pub energy_required: Option<f64>,
+    pub ingredients: Vec<FlowAmount>,
+    pub results: Vec<FlowAmount>,
+    // machine
+    pub crafting_speed: Option<f64>,
+    pub module_slots: Option<u16>,
+    /// 焦耳/刻（功率）；前端换算为 W。
+    pub energy_usage_j: Option<f64>,
+    // fluid
+    pub default_temperature: Option<f64>,
 }
 
 // ── Registry helpers ──────────────────────────────────────────────
@@ -597,253 +637,257 @@ fn icon(state: State<'_, AppState>, ty: String, name: String) -> Option<Vec<u8>>
     None
 }
 
-/// Searchable prototype catalog for the *effective* context.
+/// 全量目录索引（含 order fallback 排序）：一次拉取，前端本地筛选/分组。
 #[tauri::command]
-fn catalog(
-    state: State<'_, AppState>,
-    kind: String,
-    query: String,
-    limit: usize,
-) -> Result<Vec<CatalogEntry>, String> {
+fn catalog_index(state: State<'_, AppState>) -> Result<CatalogIndex, String> {
     let mut runtime = state
         .runtime
         .lock()
         .map_err(|_| "runtime lock poisoned".to_string())?;
     let Some(id) = runtime.effective_context_id() else {
-        return Ok(Vec::new());
+        return Ok(CatalogIndex {
+            context_id: String::new(),
+            entries: Vec::new(),
+        });
     };
     ensure_context_loaded(&state, &mut runtime, &id)?;
-    let Some(store) = runtime.context_store_by_id(&id) else {
-        return Ok(Vec::new());
-    };
-    Ok(catalog_from_store(store, &kind, &query, limit))
+    let store = runtime.context_store_by_id(&id).ok_or("上下文未载入")?;
+    Ok(CatalogIndex {
+        context_id: id,
+        entries: catalog_index_from_store(store),
+    })
 }
 
-fn catalog_from_store(
-    store: &PrototypeStore,
-    kind: &str,
-    query: &str,
-    limit: usize,
-) -> Vec<CatalogEntry> {
-    let limit = limit.clamp(1, 1000);
-    let query = query.trim().to_lowercase();
-    let mut out: Vec<CatalogEntry> = Vec::new();
+fn catalog_index_from_store(store: &PrototypeStore) -> Vec<IndexEntry> {
+    let mut out: Vec<IndexEntry> = Vec::new();
 
-    match kind {
-        "item" => ordered_group(&mut out, store, PrototypeGroup::Item, "item", &query, limit),
-        "fluid" => ordered_group(&mut out, store, PrototypeGroup::Fluid, "fluid", &query, limit),
-        "recipe" => ordered_group(&mut out, store, PrototypeGroup::Recipe, "recipe", &query, limit),
-        "technology" => ordered_group(
-            &mut out,
-            store,
-            PrototypeGroup::Technology,
-            "technology",
-            &query,
-            limit,
-        ),
-        "planet" => ordered_group(&mut out, store, PrototypeGroup::Planet, "planet", &query, limit),
-        "surface" => ordered_group(
-            &mut out,
-            store,
-            PrototypeGroup::Surface,
-            "surface",
-            &query,
-            limit,
-        ),
-        "module" => {
-            for record in store.group(PrototypeGroup::Item) {
-                if record.has("ModuleComponent") {
-                    push_entry(&mut out, store, record, "item", None, &query, limit);
+    // 有 order_info 的组：大组 → 小组 → 条目（recipe/entity fallback 已在
+    // order_info 中生效）
+    let ordered = [
+        ("item", PrototypeGroup::Item, "item"),
+        ("fluid", PrototypeGroup::Fluid, "fluid"),
+        ("recipe", PrototypeGroup::Recipe, "recipe"),
+        ("technology", PrototypeGroup::Technology, "technology"),
+        ("planet", PrototypeGroup::Planet, "planet"),
+        ("surface", PrototypeGroup::Surface, "surface"),
+    ];
+    for (kind, group, icon_type) in ordered {
+        let Some(order) = store.order_info().get(&group) else {
+            continue;
+        };
+        for (big, subgroups) in order {
+            for (sub, names) in subgroups {
+                for name in names {
+                    out.push(IndexEntry {
+                        kind: kind.to_string(),
+                        name: name.clone(),
+                        group: big.clone(),
+                        subgroup: sub.clone(),
+                        icon_type: icon_type.to_string(),
+                        module_slots: None,
+                    });
                 }
             }
         }
-        "machine" => entity_filtered(
-            &mut out,
-            store,
-            "CraftingMachineComponent",
-            "entity",
-            true,
-            &query,
-            limit,
-        ),
-        "mining-machine" => entity_filtered(
-            &mut out,
-            store,
-            "MiningDrillComponent",
-            "entity",
-            true,
-            &query,
-            limit,
-        ),
-        "generator" => entity_filtered(
-            &mut out,
-            store,
-            "GeneratorComponent",
-            "entity",
-            true,
-            &query,
-            limit,
-        ),
-        "boiler" => entity_filtered(
-            &mut out,
-            store,
-            "BoilerComponent",
-            "entity",
-            true,
-            &query,
-            limit,
-        ),
-        "reactor" => entity_filtered(
-            &mut out,
-            store,
-            "ReactorComponent",
-            "entity",
-            true,
-            &query,
-            limit,
-        ),
-        "beacon" => entity_filtered(
-            &mut out,
-            store,
-            "BeaconComponent",
-            "entity",
-            true,
-            &query,
-            limit,
-        ),
-        "entity" => entity_filtered(
-            &mut out,
-            store,
-            "EntityComponent",
-            "entity",
-            false,
-            &query,
-            limit,
-        ),
-        "resource" => {
-            for record in store.group(PrototypeGroup::Entity) {
-                if record.type_ == "resource" {
-                    push_entry(&mut out, store, record, "entity", None, &query, limit);
-                }
-            }
-        }
-        "quality" => {
-            for name in store.quality_order() {
-                if out.len() >= limit {
-                    break;
-                }
-                if !query.is_empty() && !name.to_lowercase().contains(&query) {
-                    continue;
-                }
-                out.push(CatalogEntry {
-                    name: name.clone(),
-                    group: "quality".to_string(),
-                    subgroup: String::new(),
-                    icon_type: "quality".to_string(),
-                    module_slots: None,
-                });
-            }
-        }
-        _ => {}
     }
+
+    // 实体类：Entity 的 order_info（含 fallback）里按组件过滤
+    let entity_kinds = [
+        ("machine", "CraftingMachineComponent", true),
+        ("mining-machine", "MiningDrillComponent", true),
+        ("generator", "GeneratorComponent", true),
+        ("boiler", "BoilerComponent", true),
+        ("reactor", "ReactorComponent", true),
+        ("beacon", "BeaconComponent", true),
+        ("entity", "EntityComponent", false),
+    ];
+    for (kind, component, want_slots) in entity_kinds {
+        let Some(order) = store.order_info().get(&PrototypeGroup::Entity) else {
+            continue;
+        };
+        for (big, subgroups) in order {
+            for (sub, names) in subgroups {
+                for name in names {
+                    let Some(record) = store.get(PrototypeGroup::Entity, name) else {
+                        continue;
+                    };
+                    if !record.has(component) {
+                        continue;
+                    }
+                    let slots = if want_slots {
+                        record
+                            .component::<CraftingMachineComponent>()
+                            .and_then(|machine| machine.module_slots)
+                    } else {
+                        None
+                    };
+                    out.push(IndexEntry {
+                        kind: kind.to_string(),
+                        name: name.clone(),
+                        group: big.clone(),
+                        subgroup: sub.clone(),
+                        icon_type: "entity".to_string(),
+                        module_slots: slots,
+                    });
+                }
+            }
+        }
+    }
+
+    // module：Item order_info 过滤 ModuleComponent
+    if let Some(order) = store.order_info().get(&PrototypeGroup::Item) {
+        for (big, subgroups) in order {
+            for (sub, names) in subgroups {
+                for name in names {
+                    let Some(record) = store.get(PrototypeGroup::Item, name) else {
+                        continue;
+                    };
+                    if !record.has("ModuleComponent") {
+                        continue;
+                    }
+                    out.push(IndexEntry {
+                        kind: "module".to_string(),
+                        name: name.clone(),
+                        group: big.clone(),
+                        subgroup: sub.clone(),
+                        icon_type: "item".to_string(),
+                        module_slots: None,
+                    });
+                }
+            }
+        }
+    }
+
+    // resource：Entity order_info 过滤 type_ == "resource"
+    if let Some(order) = store.order_info().get(&PrototypeGroup::Entity) {
+        for (big, subgroups) in order {
+            for (sub, names) in subgroups {
+                for name in names {
+                    let Some(record) = store.get(PrototypeGroup::Entity, name) else {
+                        continue;
+                    };
+                    if record.type_ != "resource" {
+                        continue;
+                    }
+                    out.push(IndexEntry {
+                        kind: "resource".to_string(),
+                        name: name.clone(),
+                        group: big.clone(),
+                        subgroup: sub.clone(),
+                        icon_type: "entity".to_string(),
+                        module_slots: None,
+                    });
+                }
+            }
+        }
+    }
+
+    // quality
+    for name in store.quality_order() {
+        out.push(IndexEntry {
+            kind: "quality".to_string(),
+            name: name.clone(),
+            group: "quality".to_string(),
+            subgroup: String::new(),
+            icon_type: "quality".to_string(),
+            module_slots: None,
+        });
+    }
+
     out
 }
 
-fn push_entry(
-    out: &mut Vec<CatalogEntry>,
-    store: &PrototypeStore,
-    record: &PrototypeRecord,
-    icon_type: &str,
-    module_slots: Option<u16>,
-    query: &str,
-    limit: usize,
-) {
-    if out.len() >= limit {
-        return;
-    }
-    if record
-        .component::<PrototypeBaseComponent>()
-        .map(|base| base.hidden)
-        .unwrap_or(false)
-    {
-        return;
-    }
-    if record.name.starts_with("__") || record.name.ends_with("__") {
-        return;
-    }
-    if !query.is_empty() && !record.name.to_lowercase().contains(query) {
-        return;
-    }
-    let (group, subgroup) = subgroup_group(store, record);
-    out.push(CatalogEntry {
+/// 悬停详情：按需拉取，前端缓存。
+#[tauri::command]
+fn prototype_detail(
+    state: State<'_, AppState>,
+    kind: String,
+    name: String,
+) -> Result<Option<PrototypeDetail>, String> {
+    let mut runtime = state
+        .runtime
+        .lock()
+        .map_err(|_| "runtime lock poisoned".to_string())?;
+    let Some(id) = runtime.effective_context_id() else {
+        return Ok(None);
+    };
+    ensure_context_loaded(&state, &mut runtime, &id)?;
+    let store = runtime.context_store_by_id(&id).ok_or("上下文未载入")?;
+    let record = match kind.as_str() {
+        "item" | "module" => store.get(PrototypeGroup::Item, &name),
+        "fluid" => store.get(PrototypeGroup::Fluid, &name),
+        "recipe" => store.get(PrototypeGroup::Recipe, &name),
+        "technology" => store.get(PrototypeGroup::Technology, &name),
+        "planet" => store.get(PrototypeGroup::Planet, &name),
+        "surface" => store.get(PrototypeGroup::Surface, &name),
+        _ => store.get(PrototypeGroup::Entity, &name),
+    };
+    let Some(record) = record else {
+        return Ok(None);
+    };
+    let mut detail = PrototypeDetail {
         name: record.name.clone(),
-        group,
-        subgroup,
-        icon_type: icon_type.to_string(),
-        module_slots,
-    });
+        kind: kind.clone(),
+        ..Default::default()
+    };
+    if let Some(base) = record.component::<PrototypeBaseComponent>() {
+        detail.subgroup = base.subgroup.clone();
+        detail.order = base.order.clone();
+        detail.hidden = base.hidden;
+    }
+    if let Some(item) = record.component::<ItemComponent>() {
+        detail.stack_size = Some(item.stack_size as f64);
+    }
+    if let Some(recipe) = record.component::<RecipeComponent>() {
+        detail.category = recipe
+            .categories
+            .as_ref()
+            .map(|categories| categories.join(", "));
+        detail.energy_required = Some(recipe.energy_required);
+        detail.ingredients = recipe.ingredients.iter().map(ingredient_flow).collect();
+        detail.results = recipe.results.iter().map(product_flow).collect();
+    }
+    if let Some(machine) = record.component::<CraftingMachineComponent>() {
+        detail.crafting_speed = Some(machine.crafting_speed);
+        detail.module_slots = machine.module_slots;
+        detail.energy_usage_j = Some(machine.energy_usage.amount);
+    }
+    if let Some(fluid) = record.component::<FluidComponent>() {
+        detail.default_temperature = Some(fluid.default_temperature);
+    }
+    Ok(Some(detail))
 }
 
-fn ordered_group(
-    out: &mut Vec<CatalogEntry>,
-    store: &PrototypeStore,
-    group: PrototypeGroup,
-    icon_type: &str,
-    query: &str,
-    limit: usize,
-) {
-    let order = store.order_info();
-    let Some(subgroups) = order.get(&group) else {
-        return;
-    };
-    for (_, items_by_subgroup) in subgroups {
-        for (_, items) in items_by_subgroup {
-            for name in items {
-                if let Some(record) = store.get(group, name) {
-                    push_entry(out, store, record, icon_type, None, query, limit);
-                }
-            }
-        }
+fn ingredient_flow(ingredient: &metatorio_data::types::Ingredient) -> FlowAmount {
+    use metatorio_data::types::Ingredient;
+    match ingredient {
+        Ingredient::Item(item) => FlowAmount {
+            kind: "item".to_string(),
+            name: item.name.clone(),
+            amount: item.amount as f64,
+        },
+        Ingredient::Fluid(fluid) => FlowAmount {
+            kind: "fluid".to_string(),
+            name: fluid.name.clone(),
+            amount: fluid.amount,
+        },
     }
 }
 
-fn entity_filtered(
-    out: &mut Vec<CatalogEntry>,
-    store: &PrototypeStore,
-    component: &str,
-    icon_type: &str,
-    module_slots: bool,
-    query: &str,
-    limit: usize,
-) {
-    for record in store.group(PrototypeGroup::Entity) {
-        if !record.has(component) {
-            continue;
-        }
-        let slots = if module_slots {
-            record
-                .component::<CraftingMachineComponent>()
-                .and_then(|machine| machine.module_slots)
-        } else {
-            None
-        };
-        push_entry(out, store, record, icon_type, slots, query, limit);
+fn product_flow(product: &metatorio_data::types::Product) -> FlowAmount {
+    use metatorio_data::types::Product;
+    match product {
+        Product::Item(item) => FlowAmount {
+            kind: "item".to_string(),
+            name: item.name.clone(),
+            amount: item.amount.unwrap_or(0) as f64,
+        },
+        Product::Fluid(fluid) => FlowAmount {
+            kind: "fluid".to_string(),
+            name: fluid.name.clone(),
+            amount: fluid.amount.unwrap_or(0.0),
+        },
     }
-}
-
-fn subgroup_group(store: &PrototypeStore, record: &PrototypeRecord) -> (String, String) {
-    let Some(subgroup) = record
-        .component::<PrototypeBaseComponent>()
-        .and_then(|base| base.subgroup.clone())
-    else {
-        return ("other".to_string(), String::new());
-    };
-    let group = store
-        .get(PrototypeGroup::ItemSubgroup, &subgroup)
-        .and_then(|sub| sub.component::<ItemSubGroupComponent>())
-        .map(|sub| sub.group.clone())
-        .unwrap_or_else(|| "other".to_string());
-    (group, subgroup)
 }
 
 /// Accept one user message and execute its side effects.
@@ -1165,7 +1209,8 @@ pub fn run() {
             pick_dump_file,
             pick_mod_dir,
             icon,
-            catalog,
+            catalog_index,
+            prototype_detail,
             dispatch,
             get_document,
             get_ui_state,
