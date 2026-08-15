@@ -432,63 +432,142 @@ class RuntimeStore {
     });
   }
 
+  /** 当前机制的类型（来自文档快照）；用于构造按类型标签的 action。 */
+  mechanicKind(mechanic: MechanicId): import("./types").MechanicKind {
+    const kind = this.selectedFactory?.mechanics.find((entry) => entry.id === mechanic)?.mechanic
+      .type;
+    if (!kind) throw new Error(`机制 #${mechanic} 不存在`);
+    return kind;
+  }
+
   async setRecipe(mechanic: MechanicId, recipe: string): Promise<void> {
-    await this.mechanicMessage(mechanic, {
-      "set-recipe": { recipe: { id: recipe, quality: "normal" } },
-    });
+    const recipeId = { id: recipe, quality: "normal" } as import("./types").IdWithQuality;
+    await this.mechanicMessage(mechanic, { recipe: { "set-recipe": { recipe: recipeId } } });
   }
 
   async setMachine(mechanic: MechanicId, machine: string): Promise<void> {
-    await this.mechanicMessage(mechanic, {
-      "set-machine": { machine: { id: machine, quality: "normal" } },
-    });
+    const machineId = { id: machine, quality: "normal" } as import("./types").IdWithQuality;
+    switch (this.mechanicKind(mechanic)) {
+      case "recipe":
+        return this.mechanicMessage(mechanic, { recipe: { "set-machine": { machine: machineId } } });
+      case "mining":
+        return this.mechanicMessage(mechanic, { mining: { "set-machine": { machine: machineId } } });
+      default:
+        throw new Error(`${this.mechanicKind(mechanic)} 机制不支持设置机器`);
+    }
   }
 
   async setResource(mechanic: MechanicId, resource: string): Promise<void> {
-    await this.mechanicMessage(mechanic, { "set-resource": { resource } });
+    await this.mechanicMessage(mechanic, { mining: { "set-resource": { resource } } });
   }
 
   async setItem(mechanic: MechanicId, item: string): Promise<void> {
-    await this.mechanicMessage(mechanic, {
-      "set-item": { item: { id: item, quality: "normal" } },
-    });
+    const itemId = { id: item, quality: "normal" } as import("./types").IdWithQuality;
+    switch (this.mechanicKind(mechanic)) {
+      case "spoil":
+        return this.mechanicMessage(mechanic, { spoil: { "set-item": { item: itemId } } });
+      case "item-fuel":
+        return this.mechanicMessage(mechanic, { "item-fuel": { "set-item": { item: itemId } } });
+      case "item-launch":
+        return this.mechanicMessage(mechanic, { "item-launch": { "set-item": { item: itemId } } });
+      case "plant":
+        return this.mechanicMessage(mechanic, { plant: { "set-seed": { seed: itemId } } });
+      default:
+        throw new Error(`${this.mechanicKind(mechanic)} 机制不支持设置物品`);
+    }
   }
 
   async setGenerator(mechanic: MechanicId, generator: string): Promise<void> {
     await this.mechanicMessage(mechanic, {
-      "set-generator": { generator: { id: generator, quality: "normal" } },
+      generator: { "set-generator": { generator: { id: generator, quality: "normal" } } },
     });
   }
 
   async setBoiler(mechanic: MechanicId, boiler: string): Promise<void> {
     await this.mechanicMessage(mechanic, {
-      "set-boiler": { boiler: { id: boiler, quality: "normal" } },
+      boiler: { "set-boiler": { boiler: { id: boiler, quality: "normal" } } },
     });
   }
 
   async setReactor(mechanic: MechanicId, reactor: string): Promise<void> {
     await this.mechanicMessage(mechanic, {
-      "set-reactor": { reactor: { id: reactor, quality: "normal" } },
+      reactor: { "set-reactor": { reactor: { id: reactor, quality: "normal" } } },
     });
   }
 
   async setFluid(mechanic: MechanicId, fluid: string): Promise<void> {
-    await this.mechanicMessage(mechanic, { "set-fluid": { fluid } });
+    switch (this.mechanicKind(mechanic)) {
+      case "generator":
+        return this.mechanicMessage(mechanic, { generator: { "set-fluid": { fluid } } });
+      case "boiler":
+        return this.mechanicMessage(mechanic, { boiler: { "set-fluid": { fluid } } });
+      default:
+        throw new Error(`${this.mechanicKind(mechanic)} 机制不支持设置流体`);
+    }
   }
 
   async setModuleSlot(mechanic: MechanicId, slot: number, module: string | null): Promise<void> {
-    await this.mechanicMessage(mechanic, {
-      module: {
-        "set-module-slot": {
-          slot,
-          module: module ? { id: module, quality: "normal" } : null,
-        },
-      },
-    });
+    const moduleId = module ? { id: module, quality: "normal" } : null;
+    const inner: import("./types").ModuleAction = { "set-module-slot": { slot, module: moduleId } };
+    switch (this.mechanicKind(mechanic)) {
+      case "recipe":
+        return this.mechanicMessage(mechanic, { recipe: { module: inner } });
+      case "mining":
+        return this.mechanicMessage(mechanic, { mining: { module: inner } });
+      default:
+        throw new Error(`${this.mechanicKind(mechanic)} 机制不支持模块配置`);
+    }
   }
 
   async clearModules(mechanic: MechanicId): Promise<void> {
-    await this.mechanicMessage(mechanic, { module: { "clear-modules": null } });
+    const inner: import("./types").ModuleAction = { "clear-modules": null };
+    switch (this.mechanicKind(mechanic)) {
+      case "recipe":
+        return this.mechanicMessage(mechanic, { recipe: { module: inner } });
+      case "mining":
+        return this.mechanicMessage(mechanic, { mining: { module: inner } });
+      default:
+        throw new Error(`${this.mechanicKind(mechanic)} 机制不支持模块配置`);
+    }
+  }
+
+  // ── 自动规划偏好（项目级全局） ──────────────────────────────────
+
+  async planningMessage(action: import("./types").PlanningAction): Promise<void> {
+    const project = this.requireProject();
+    await this.send({ scope: "project", action: { project, action: { planning: action } } });
+  }
+
+  async setAlternativeCount(count: number): Promise<void> {
+    await this.planningMessage({ "set-alternative-count": { count } });
+  }
+
+  async addMachinePreference(machine: string): Promise<void> {
+    await this.planningMessage({
+      "add-machine-preference": { machine: { id: machine, quality: "normal" } },
+    });
+  }
+
+  async removeMachinePreference(machine: string): Promise<void> {
+    await this.planningMessage({
+      "remove-machine-preference": { machine: { id: machine, quality: "normal" } },
+    });
+  }
+
+  async addEnumeratedModule(module: string): Promise<void> {
+    await this.planningMessage({
+      "add-enumerated-module": { module: { id: module, quality: "normal" } },
+    });
+  }
+
+  async removeEnumeratedModule(module: string): Promise<void> {
+    await this.planningMessage({
+      "remove-enumerated-module": { module: { id: module, quality: "normal" } },
+    });
+  }
+
+  async useBestModules(): Promise<void> {
+    await this.planningMessage({ "use-best-modules": null });
   }
 
   async recompute(): Promise<void> {

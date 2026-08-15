@@ -13,7 +13,7 @@ pub mod state;
 
 pub use document::{
     AppDocument, AutoBeaconPlan, DOCUMENT_SCHEMA_VERSION, ExternalInput, FactoryDocument,
-    FactorySettings, FlowTarget, MechanicEntry, MechanicKind, MechanicPlanning, ProjectDocument,
+    FactorySettings, FlowTarget, MechanicEntry, MechanicKind, PlanningPreferences, ProjectDocument,
     ProjectSettings, RecipeProductivity, TargetExpression, TargetTerm, TechnologyMilestone,
     TimeScale,
 };

@@ -268,7 +268,8 @@ mod tests {
     use super::*;
     use crate::document::MechanicKind;
     use crate::message::{
-        FactoryAction, FlowAction, MechanicAction, MechanicListAction, RuntimeCommand, SolveAction,
+        FactoryAction, FlowAction, MechanicAction, MechanicListAction, RecipeMechanicAction,
+        RuntimeCommand, SolveAction,
     };
     use metatorio_core::IdWithQuality;
     use metatorio_data::store::PrototypeStore;
@@ -349,9 +350,9 @@ mod tests {
                 factory: factory_id,
                 action: FactoryAction::Mechanic {
                     mechanic: mechanic_id,
-                    action: MechanicAction::SetRecipe {
+                    action: MechanicAction::Recipe(RecipeMechanicAction::SetRecipe {
                         recipe: IdWithQuality::new("iron-gear-wheel", "normal"),
-                    },
+                    }),
                 },
             })
             .unwrap();
@@ -361,9 +362,9 @@ mod tests {
                 factory: factory_id,
                 action: FactoryAction::Mechanic {
                     mechanic: mechanic_id,
-                    action: MechanicAction::SetMachine {
+                    action: MechanicAction::Recipe(RecipeMechanicAction::SetMachine {
                         machine: IdWithQuality::new("assembling-machine-1", "normal"),
-                    },
+                    }),
                 },
             })
             .unwrap();

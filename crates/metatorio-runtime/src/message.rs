@@ -139,6 +139,7 @@ pub enum ProjectAction {
     SetQualityLimit {
         quality: Option<String>,
     },
+    Planning(PlanningAction),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -292,25 +293,95 @@ pub enum MechanicListAction {
     },
 }
 
+/// Operations on one mechanic, tagged by mechanic kind.
+///
+/// Each variant carries exactly the operations that kind supports (matching
+/// the field set of the corresponding core `Mechanic` struct), so a recipe
+/// mechanic cannot receive a mining operation and vice versa — the reducer
+/// rejects a kind mismatch without touching the document.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum MechanicAction {
+    Recipe(RecipeMechanicAction),
+    Mining(MiningMechanicAction),
+    Spoil(SpoilMechanicAction),
+    Plant(PlantMechanicAction),
+    ItemFuel(ItemFuelMechanicAction),
+    ItemLaunch(ItemLaunchMechanicAction),
+    Generator(GeneratorMechanicAction),
+    Boiler(BoilerMechanicAction),
+    Reactor(ReactorMechanicAction),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RecipeMechanicAction {
     SetRecipe { recipe: IdWithQuality },
     SetMachine { machine: IdWithQuality },
+    SetFuel { fuel: Option<String> },
+    SetFuelTemperature { temperature: Option<i32> },
+    Module(ModuleAction),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MiningMechanicAction {
     SetResource { resource: String },
+    SetMachine { machine: IdWithQuality },
+    SetFuel { fuel: Option<String> },
+    SetFuelTemperature { temperature: Option<i32> },
+    Module(ModuleAction),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SpoilMechanicAction {
     SetItem { item: IdWithQuality },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PlantMechanicAction {
     SetSeed { seed: IdWithQuality },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ItemFuelMechanicAction {
+    SetItem { item: IdWithQuality },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ItemLaunchMechanicAction {
+    SetItem { item: IdWithQuality },
+    SetWeightMode { weight_mode: bool },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum GeneratorMechanicAction {
     SetGenerator { generator: IdWithQuality },
+    SetFluid { fluid: String },
+    SetTemperature { temperature: Option<i32> },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum BoilerMechanicAction {
     SetBoiler { boiler: IdWithQuality },
-    SetReactor { reactor: IdWithQuality },
     SetFluid { fluid: String },
     SetTemperature { temperature: Option<i32> },
     SetFuel { fuel: Option<String> },
     SetFuelTemperature { temperature: Option<i32> },
-    SetWeightMode { weight_mode: bool },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReactorMechanicAction {
+    SetReactor { reactor: IdWithQuality },
+    SetFuel { fuel: Option<String> },
     SetNeighbours { neighbours: u8 },
-    Module(ModuleAction),
-    Planning(PlanningAction),
 }
 
 /// Operations emitted by the old ModuleConfigEditor, expressed in terms of
@@ -359,8 +430,9 @@ pub enum ModuleAction {
     },
 }
 
-/// Automatic-planning preferences formerly stored beside each old mechanic
-/// group rather than inside one concrete mechanism instance.
+/// Project-global automatic-planning preferences.  These describe how the
+/// planner enumerates alternatives and are intentionally NOT bound to any
+/// single mechanic.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum PlanningAction {
@@ -635,16 +707,19 @@ mod tests {
             factory: FactoryId(2),
             action: FactoryAction::Mechanic {
                 mechanic: MechanicId(3),
-                action: MechanicAction::Module(ModuleAction::SetModuleSlot {
-                    slot: 1,
-                    module: Some(IdWithQuality::new("speed-module-3", "rare")),
-                }),
+                action: MechanicAction::Recipe(RecipeMechanicAction::Module(
+                    ModuleAction::SetModuleSlot {
+                        slot: 1,
+                        module: Some(IdWithQuality::new("speed-module-3", "rare")),
+                    },
+                )),
             },
         };
         let encoded = serde_json::to_value(&message).unwrap();
         assert_eq!(encoded["scope"], "factory");
         assert_eq!(
-            encoded["action"]["action"]["mechanic"]["action"]["module"]["set-module-slot"]["slot"],
+            encoded["action"]["action"]["mechanic"]["action"]["recipe"]["module"]["set-module-slot"]
+                ["slot"],
             1
         );
         let decoded: AppMessage = serde_json::from_value(encoded).unwrap();

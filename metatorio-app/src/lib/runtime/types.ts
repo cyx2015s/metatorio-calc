@@ -80,7 +80,8 @@ export type ProjectAction =
   | { "set-time-scale": { time_scale: TimeScale } }
   | { "set-all-accessible": { enabled: boolean } }
   | { "set-quality-limit": { quality: string | null } }
-  | { "set-mining-productivity": { productivity: number } };
+  | { "set-mining-productivity": { productivity: number } }
+  | { planning: PlanningAction };
 
 export type MechanicKind =
   | "recipe"
@@ -101,21 +102,56 @@ export type MechanicListAction =
   | { reorder: { mechanic: MechanicId; position: number } }
   | { "set-enabled": { mechanic: MechanicId; enabled: boolean } };
 
-export type MechanicAction =
+// MechanicAction is tagged by mechanic kind: each variant carries exactly
+// the operations that kind supports.  The reducer rejects a kind mismatch.
+export type RecipeMechanicAction =
   | { "set-recipe": { recipe: IdWithQuality } }
   | { "set-machine": { machine: IdWithQuality } }
+  | { "set-fuel": { fuel: string | null } }
+  | { "set-fuel-temperature": { temperature: number | null } }
+  | { module: ModuleAction };
+
+export type MiningMechanicAction =
   | { "set-resource": { resource: string } }
+  | { "set-machine": { machine: IdWithQuality } }
+  | { "set-fuel": { fuel: string | null } }
+  | { "set-fuel-temperature": { temperature: number | null } }
+  | { module: ModuleAction };
+
+export type SpoilMechanicAction = { "set-item": { item: IdWithQuality } };
+export type PlantMechanicAction = { "set-seed": { seed: IdWithQuality } };
+export type ItemFuelMechanicAction = { "set-item": { item: IdWithQuality } };
+export type ItemLaunchMechanicAction =
   | { "set-item": { item: IdWithQuality } }
-  | { "set-seed": { seed: IdWithQuality } }
+  | { "set-weight-mode": { weight_mode: boolean } };
+
+export type GeneratorMechanicAction =
   | { "set-generator": { generator: IdWithQuality } }
+  | { "set-fluid": { fluid: string } }
+  | { "set-temperature": { temperature: number | null } };
+
+export type BoilerMechanicAction =
   | { "set-boiler": { boiler: IdWithQuality } }
-  | { "set-reactor": { reactor: IdWithQuality } }
   | { "set-fluid": { fluid: string } }
   | { "set-temperature": { temperature: number | null } }
   | { "set-fuel": { fuel: string | null } }
-  | { "set-weight-mode": { weight_mode: boolean } }
-  | { "set-neighbours": { neighbours: number } }
-  | { module: ModuleAction };
+  | { "set-fuel-temperature": { temperature: number | null } };
+
+export type ReactorMechanicAction =
+  | { "set-reactor": { reactor: IdWithQuality } }
+  | { "set-fuel": { fuel: string | null } }
+  | { "set-neighbours": { neighbours: number } };
+
+export type MechanicAction =
+  | { recipe: RecipeMechanicAction }
+  | { mining: MiningMechanicAction }
+  | { spoil: SpoilMechanicAction }
+  | { plant: PlantMechanicAction }
+  | { "item-fuel": ItemFuelMechanicAction }
+  | { "item-launch": ItemLaunchMechanicAction }
+  | { generator: GeneratorMechanicAction }
+  | { boiler: BoilerMechanicAction }
+  | { reactor: ReactorMechanicAction };
 
 export type ModuleAction =
   | { "set-module-slot": { slot: number; module: IdWithQuality | null } }
@@ -125,6 +161,20 @@ export type ModuleAction =
   | { "set-beacon": { beacon: number; value: IdWithQuality } }
   | { "set-beacon-count": { beacon: number; count: number } }
   | { "set-beacon-share": { beacon: number; share: number } };
+
+// 项目级自动规划偏好（全局，不绑定到单个机制）。
+export type PlanningAction =
+  | { "set-alternative-count": { count: number } }
+  | { "add-machine-preference": { machine: IdWithQuality } }
+  | { "remove-machine-preference": { machine: IdWithQuality } }
+  | { "reorder-machine-preference": { machine: IdWithQuality; position: number } }
+  | { "add-enumerated-module": { module: IdWithQuality } }
+  | { "remove-enumerated-module": { module: IdWithQuality } }
+  | { "use-best-modules": null }
+  | { "add-enumerated-beacon": null }
+  | { "remove-enumerated-beacon": { beacon: number } }
+  | { "set-enumerated-beacon": { beacon: number; plan: AutoBeaconPlan } }
+  | { "enumerated-beacon-module": { beacon: number; action: ModuleAction } };
 
 export type TargetAction =
   | { add: { target: FlowTarget } }
@@ -186,7 +236,19 @@ export interface ProjectDocument {
   id: ProjectId;
   name: string;
   settings: ProjectSettings;
+  planning: PlanningPreferences;
   factories: FactoryDocument[];
+}
+
+export interface PlanningPreferences {
+  alternative_count: number;
+  machine_preferences: IdWithQuality[];
+  enumerate_modules: IdWithQuality[];
+  enumerate_beacons: AutoBeaconPlan[];
+}
+
+export interface AutoBeaconPlan {
+  module_config: { modules: IdWithQuality[]; beacons: unknown[] };
 }
 
 export interface ProjectSettings {
@@ -234,7 +296,6 @@ export interface MechanicEntry {
   id: MechanicId;
   enabled: boolean;
   mechanic: Mechanic;
-  planning: unknown;
 }
 
 // Mechanic is internally tagged with "type" (kebab-case kind).

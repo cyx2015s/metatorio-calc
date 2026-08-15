@@ -31,6 +31,7 @@ pub struct ProjectDocument {
     pub id: ProjectId,
     pub name: String,
     pub settings: ProjectSettings,
+    pub planning: PlanningPreferences,
     pub factories: Vec<FactoryDocument>,
 }
 
@@ -40,6 +41,7 @@ impl Default for ProjectDocument {
             id: ProjectId::default(),
             name: "Unnamed project".to_string(),
             settings: ProjectSettings::default(),
+            planning: PlanningPreferences::default(),
             factories: Vec::new(),
         }
     }
@@ -242,7 +244,6 @@ pub struct MechanicEntry {
     pub id: MechanicId,
     pub enabled: bool,
     pub mechanic: Mechanic,
-    pub planning: MechanicPlanning,
 }
 
 impl MechanicEntry {
@@ -251,7 +252,6 @@ impl MechanicEntry {
             id,
             enabled: true,
             mechanic: kind.default_mechanic()?,
-            planning: MechanicPlanning::default(),
         })
     }
 
@@ -266,18 +266,19 @@ impl Default for MechanicEntry {
     }
 }
 
-/// Options used by automatic planning.  They are not part of core mechanics
-/// because they describe how the application should enumerate alternatives.
+/// Project-global options used by automatic planning.  They are not part of
+/// core mechanics and not bound to any single mechanic — they describe how
+/// the application enumerates alternatives for every mechanic in the project.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
-pub struct MechanicPlanning {
+pub struct PlanningPreferences {
     pub alternative_count: usize,
     pub machine_preferences: Vec<IdWithQuality>,
     pub enumerate_modules: Vec<IdWithQuality>,
     pub enumerate_beacons: Vec<AutoBeaconPlan>,
 }
 
-impl Default for MechanicPlanning {
+impl Default for PlanningPreferences {
     fn default() -> Self {
         Self {
             alternative_count: 1,

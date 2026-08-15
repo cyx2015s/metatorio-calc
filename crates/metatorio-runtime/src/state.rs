@@ -5,17 +5,19 @@ use serde::Serialize;
 
 use crate::document::{
     AppDocument, AutoBeaconPlan, ExternalInput, FactoryDocument, FlowTarget, MechanicEntry,
-    MechanicKind, ProjectDocument, TargetExpression, TargetTerm,
+    MechanicKind, PlanningPreferences, ProjectDocument, TargetExpression, TargetTerm,
 };
 use crate::id::{
     ExternalInputId, FactoryId, MechanicId, ProjectId, TargetExpressionId, TargetId, TargetTermId,
 };
 use crate::message::{
-    AppMessage, ApplicationAction, CloseDecision, DeleteDecision, ExternalInputAction,
-    FactoryAction, FactoryContextAction, FactoryTemplate, FlowAction, MechanicAction,
-    MechanicListAction, ModuleAction, PlanningAction, ProjectAction, ProjectPage, RuntimeCommand,
-    SelectorTarget, SelectorValue, SolveAction, SuggestionAction, SuggestionCandidate,
-    TargetAction, TargetExpressionAction, UiAction,
+    AppMessage, ApplicationAction, BoilerMechanicAction, CloseDecision, DeleteDecision,
+    ExternalInputAction, FactoryAction, FactoryContextAction, FactoryTemplate, FlowAction,
+    GeneratorMechanicAction, ItemFuelMechanicAction, ItemLaunchMechanicAction, MechanicAction,
+    MechanicListAction, MiningMechanicAction, ModuleAction, PlantMechanicAction, PlanningAction,
+    ProjectAction, ProjectPage, ReactorMechanicAction, RecipeMechanicAction, RuntimeCommand,
+    SelectorKind, SelectorTarget, SelectorValue, SolveAction, SpoilMechanicAction,
+    SuggestionAction, SuggestionCandidate, TargetAction, TargetExpressionAction, UiAction,
 };
 
 /// Mutable application state that is independent from any GUI framework.
@@ -390,6 +392,33 @@ impl RuntimeState {
                 );
                 Ok(Outcome::all_factories_if(changed, project_id))
             }
+            ProjectAction::Planning(action) => {
+                // UseBestModules executes for the currently selected mechanic
+                // even though the preference itself is project-global.
+                let outcome = match action {
+                    PlanningAction::UseBestModules => {
+                        let factory = self.ui.selected_factory.ok_or(
+                            RuntimeError::InvalidOperation("没有选中的工厂"),
+                        )?;
+                        let mechanic = self.ui.selected_mechanic.ok_or(
+                            RuntimeError::InvalidOperation("没有选中的机制"),
+                        )?;
+                        Outcome::command(RuntimeCommand::UseBestModules {
+                            project: project_id,
+                            factory,
+                            mechanic,
+                        })
+                    }
+                    other => {
+                        let changed = apply_planning_action(
+                            &mut self.project_mut(project_id)?.planning,
+                            other,
+                        )?;
+                        Outcome::all_factories_if(changed, project_id)
+                    }
+                };
+                Ok(outcome)
+            }
         }
     }
 
@@ -441,18 +470,6 @@ impl RuntimeState {
                 self.apply_mechanic_list(project_id, factory_id, action)
             }
             FactoryAction::Mechanic { mechanic, action } => {
-                let command = if matches!(
-                    &action,
-                    MechanicAction::Planning(PlanningAction::UseBestModules)
-                ) {
-                    Some(RuntimeCommand::UseBestModules {
-                        project: project_id,
-                        factory: factory_id,
-                        mechanic,
-                    })
-                } else {
-                    None
-                };
                 let entry = self
                     .factory_mut(project_id, factory_id)?
                     .mechanics
@@ -464,11 +481,7 @@ impl RuntimeState {
                         mechanic,
                     })?;
                 let changed = apply_mechanic_action(entry, action)?;
-                let mut outcome = Outcome::changed_factory_if(changed, project_id, factory_id);
-                if let Some(command) = command {
-                    outcome.commands.push(command);
-                }
-                Ok(outcome)
+                Ok(Outcome::changed_factory_if(changed, project_id, factory_id))
             }
             FactoryAction::Flow(action) => match action {
                 FlowAction::AddToTarget { flow, amount } => {
@@ -990,27 +1003,8 @@ impl RuntimeState {
                 mechanic,
                 kind,
             } => {
-                let action = match (kind, value) {
-                    (
-                        crate::message::SelectorKind::Recipe,
-                        SelectorValue::IdWithQuality(recipe),
-                    ) => MechanicAction::SetRecipe { recipe },
-                    (crate::message::SelectorKind::Item, SelectorValue::IdWithQuality(item)) => {
-                        MechanicAction::SetItem { item }
-                    }
-                    (
-                        crate::message::SelectorKind::Entity,
-                        SelectorValue::IdWithQuality(machine),
-                    ) => MechanicAction::SetMachine { machine },
-                    (crate::message::SelectorKind::Fluid, SelectorValue::Name(fluid)) => {
-                        MechanicAction::SetFluid { fluid }
-                    }
-                    _ => {
-                        return Err(RuntimeError::InvalidOperation(
-                            "selector value does not match mechanic field",
-                        ));
-                    }
-                };
+                let mechanic_kind = self.mechanic_kind(project, factory, mechanic)?;
+                let action = selector_to_mechanic_action(mechanic_kind, kind, value)?;
                 self.apply_factory(
                     project,
                     factory,
@@ -1030,16 +1024,15 @@ impl RuntimeState {
                         ));
                     }
                 };
+                let mechanic_kind = self.mechanic_kind(project, factory, mechanic)?;
+                let action = module_action_for_kind(
+                    mechanic_kind,
+                    ModuleAction::SetModuleSlot { slot, module },
+                )?;
                 self.apply_factory(
                     project,
                     factory,
-                    FactoryAction::Mechanic {
-                        mechanic,
-                        action: MechanicAction::Module(ModuleAction::SetModuleSlot {
-                            slot,
-                            module,
-                        }),
-                    },
+                    FactoryAction::Mechanic { mechanic, action },
                 )
             }
             SelectorTarget::Beacon {
@@ -1055,13 +1048,13 @@ impl RuntimeState {
                         ));
                     }
                 };
+                let mechanic_kind = self.mechanic_kind(project, factory, mechanic)?;
+                let action =
+                    module_action_for_kind(mechanic_kind, ModuleAction::SetBeacon { beacon, value })?;
                 self.apply_factory(
                     project,
                     factory,
-                    FactoryAction::Mechanic {
-                        mechanic,
-                        action: MechanicAction::Module(ModuleAction::SetBeacon { beacon, value }),
-                    },
+                    FactoryAction::Mechanic { mechanic, action },
                 )
             }
             SelectorTarget::BeaconModule {
@@ -1078,20 +1071,22 @@ impl RuntimeState {
                         ));
                     }
                 };
+                let mechanic_kind = self.mechanic_kind(project, factory, mechanic)?;
+                let action = module_action_for_kind(
+                    mechanic_kind,
+                    ModuleAction::SetBeaconModule {
+                        beacon,
+                        module,
+                        value,
+                    },
+                )?;
                 self.apply_factory(
                     project,
                     factory,
-                    FactoryAction::Mechanic {
-                        mechanic,
-                        action: MechanicAction::Module(ModuleAction::SetBeaconModule {
-                            beacon,
-                            module,
-                            value,
-                        }),
-                    },
+                    FactoryAction::Mechanic { mechanic, action },
                 )
             }
-            SelectorTarget::EnumeratedModule { factory, mechanic } => {
+            SelectorTarget::EnumeratedModule { .. } => {
                 let module = match value {
                     SelectorValue::IdWithQuality(module) => module,
                     _ => {
@@ -1100,15 +1095,10 @@ impl RuntimeState {
                         ));
                     }
                 };
-                self.apply_factory(
+                // Planning preferences are project-global.
+                self.apply_project(
                     project,
-                    factory,
-                    FactoryAction::Mechanic {
-                        mechanic,
-                        action: MechanicAction::Planning(PlanningAction::AddEnumeratedModule {
-                            module,
-                        }),
-                    },
+                    ProjectAction::Planning(PlanningAction::AddEnumeratedModule { module }),
                 )
             }
             SelectorTarget::EnumeratedBeacon { .. }
@@ -1119,6 +1109,24 @@ impl RuntimeState {
                 "this selector must be committed through a field-specific message",
             )),
         }
+    }
+
+    fn mechanic_kind(
+        &self,
+        project: ProjectId,
+        factory: FactoryId,
+        mechanic: MechanicId,
+    ) -> Result<MechanicKind, RuntimeError> {
+        self.factory(project, factory)?
+            .mechanics
+            .iter()
+            .find(|entry| entry.id == mechanic)
+            .map(MechanicEntry::kind)
+            .ok_or(RuntimeError::MechanicNotFound {
+                project,
+                factory,
+                mechanic,
+            })
     }
 
     fn new_factory(
@@ -1484,120 +1492,287 @@ fn apply_factory_context(
     })
 }
 
+/// Build a kind-tagged mechanic action from a selector commit.  The target
+/// mechanic's kind is known up front, so the produced action always matches
+/// the mechanic — a mismatched (selector kind, mechanic kind) pair is a
+/// protocol error instead of a runtime dispatch decision.
+fn selector_to_mechanic_action(
+    mechanic_kind: MechanicKind,
+    selector: SelectorKind,
+    value: SelectorValue,
+) -> Result<MechanicAction, RuntimeError> {
+    use MechanicKind as K;
+    use SelectorKind as S;
+    let idwq = |value: SelectorValue| match value {
+        SelectorValue::IdWithQuality(id) => Ok(id),
+        _ => Err(RuntimeError::InvalidOperation("需要带品质的物品")),
+    };
+    let name = |value: SelectorValue| match value {
+        SelectorValue::Name(name) => Ok(name),
+        _ => Err(RuntimeError::InvalidOperation("需要名称")),
+    };
+    match (mechanic_kind, selector) {
+        (K::Recipe, S::Recipe) => idwq(value)
+            .map(|recipe| MechanicAction::Recipe(RecipeMechanicAction::SetRecipe { recipe })),
+        (K::Recipe | K::Mining, S::Entity) => {
+            idwq(value).map(|machine| match mechanic_kind {
+                K::Recipe => {
+                    MechanicAction::Recipe(RecipeMechanicAction::SetMachine { machine })
+                }
+                _ => MechanicAction::Mining(MiningMechanicAction::SetMachine { machine }),
+            })
+        }
+        (K::Mining, S::Item) => name(value).map(|resource| {
+            MechanicAction::Mining(MiningMechanicAction::SetResource { resource })
+        }),
+        (K::Spoil, S::Item) => idwq(value)
+            .map(|item| MechanicAction::Spoil(SpoilMechanicAction::SetItem { item })),
+        (K::Plant, S::Item) => idwq(value)
+            .map(|seed| MechanicAction::Plant(PlantMechanicAction::SetSeed { seed })),
+        (K::ItemFuel, S::Item) => idwq(value)
+            .map(|item| MechanicAction::ItemFuel(ItemFuelMechanicAction::SetItem { item })),
+        (K::ItemLaunch, S::Item) => idwq(value)
+            .map(|item| MechanicAction::ItemLaunch(ItemLaunchMechanicAction::SetItem { item })),
+        (K::Generator, S::Entity) => idwq(value).map(|generator| {
+            MechanicAction::Generator(GeneratorMechanicAction::SetGenerator { generator })
+        }),
+        (K::Generator | K::Boiler, S::Fluid) => {
+            name(value).map(|fluid| match mechanic_kind {
+                K::Generator => {
+                    MechanicAction::Generator(GeneratorMechanicAction::SetFluid { fluid })
+                }
+                _ => MechanicAction::Boiler(BoilerMechanicAction::SetFluid { fluid }),
+            })
+        }
+        (K::Boiler, S::Entity) => idwq(value)
+            .map(|boiler| MechanicAction::Boiler(BoilerMechanicAction::SetBoiler { boiler })),
+        (K::Reactor, S::Entity) => idwq(value).map(|reactor| {
+            MechanicAction::Reactor(ReactorMechanicAction::SetReactor { reactor })
+        }),
+        _ => Err(RuntimeError::InvalidOperation("选择器类型与该机制不匹配")),
+    }
+}
+
+/// Only recipe and mining mechanics carry a module configuration.
+fn module_action_for_kind(
+    mechanic_kind: MechanicKind,
+    action: ModuleAction,
+) -> Result<MechanicAction, RuntimeError> {
+    match mechanic_kind {
+        MechanicKind::Recipe => Ok(MechanicAction::Recipe(RecipeMechanicAction::Module(action))),
+        MechanicKind::Mining => Ok(MechanicAction::Mining(MiningMechanicAction::Module(action))),
+        _ => Err(RuntimeError::InvalidOperation("该机制不支持模块配置")),
+    }
+}
+
 fn apply_mechanic_action(
     entry: &mut MechanicEntry,
     action: MechanicAction,
 ) -> Result<bool, RuntimeError> {
+    // Each MechanicAction variant names its mechanic kind explicitly; the
+    // dispatch validates that the target mechanic matches before touching it.
     match action {
-        MechanicAction::SetRecipe { recipe } => match &mut entry.mechanic {
-            Mechanic::Recipe(mechanic) => Ok(replace(&mut mechanic.recipe, recipe)),
-            _ => Err(RuntimeError::InvalidOperation(
-                "SetRecipe requires a recipe mechanic",
-            )),
-        },
-        MechanicAction::SetMachine { machine } => match &mut entry.mechanic {
-            Mechanic::Recipe(mechanic) => Ok(replace(&mut mechanic.machine, machine)),
-            Mechanic::Mining(mechanic) => Ok(replace(&mut mechanic.machine, machine)),
-            _ => Err(RuntimeError::InvalidOperation(
-                "SetMachine requires a recipe or mining mechanic",
-            )),
-        },
-        MechanicAction::SetResource { resource } => match &mut entry.mechanic {
-            Mechanic::Mining(mechanic) => Ok(replace(&mut mechanic.resource, resource)),
-            _ => Err(RuntimeError::InvalidOperation(
-                "SetResource requires a mining mechanic",
-            )),
-        },
-        MechanicAction::SetItem { item } => match &mut entry.mechanic {
-            Mechanic::Spoil(mechanic) => Ok(replace(&mut mechanic.item, item)),
-            Mechanic::ItemFuel(mechanic) => Ok(replace(&mut mechanic.item, item)),
-            Mechanic::ItemLaunch(mechanic) => Ok(replace(&mut mechanic.item, item)),
-            _ => Err(RuntimeError::InvalidOperation(
-                "SetItem requires an item mechanic",
-            )),
-        },
-        MechanicAction::SetSeed { seed } => match &mut entry.mechanic {
-            Mechanic::Plant(mechanic) => Ok(replace(&mut mechanic.seed, seed)),
-            _ => Err(RuntimeError::InvalidOperation(
-                "SetSeed requires a plant mechanic",
-            )),
-        },
-        MechanicAction::SetGenerator { generator } => match &mut entry.mechanic {
-            Mechanic::Generator(mechanic) => Ok(replace(&mut mechanic.generator, generator)),
-            _ => Err(RuntimeError::InvalidOperation(
-                "SetGenerator requires a generator mechanic",
-            )),
-        },
-        MechanicAction::SetBoiler { boiler } => match &mut entry.mechanic {
-            Mechanic::Boiler(mechanic) => Ok(replace(&mut mechanic.boiler, boiler)),
-            _ => Err(RuntimeError::InvalidOperation(
-                "SetBoiler requires a boiler mechanic",
-            )),
-        },
-        MechanicAction::SetReactor { reactor } => match &mut entry.mechanic {
-            Mechanic::Reactor(mechanic) => Ok(replace(&mut mechanic.reactor, reactor)),
-            _ => Err(RuntimeError::InvalidOperation(
-                "SetReactor requires a reactor mechanic",
-            )),
-        },
-        MechanicAction::SetFluid { fluid } => match &mut entry.mechanic {
-            Mechanic::Generator(mechanic) => Ok(replace(&mut mechanic.fluid, fluid)),
-            Mechanic::Boiler(mechanic) => Ok(replace(&mut mechanic.fluid, fluid)),
-            _ => Err(RuntimeError::InvalidOperation(
-                "SetFluid requires a generator or boiler mechanic",
-            )),
-        },
-        MechanicAction::SetTemperature { temperature } => match &mut entry.mechanic {
-            Mechanic::Generator(mechanic) => Ok(replace(&mut mechanic.temperature, temperature)),
-            Mechanic::Boiler(mechanic) => Ok(replace(&mut mechanic.temperature, temperature)),
-            _ => Err(RuntimeError::InvalidOperation(
-                "SetTemperature requires a fluid machine",
-            )),
-        },
-        MechanicAction::SetFuel { fuel } => match &mut entry.mechanic {
-            Mechanic::Recipe(mechanic) => Ok(replace(&mut mechanic.fuel, fuel)),
-            Mechanic::Mining(mechanic) => Ok(replace(&mut mechanic.fuel, fuel)),
-            Mechanic::Boiler(mechanic) => Ok(replace(&mut mechanic.fuel, fuel)),
-            Mechanic::Reactor(mechanic) => Ok(replace(&mut mechanic.fuel, fuel)),
-            _ => Err(RuntimeError::InvalidOperation(
-                "SetFuel is not supported by this mechanic",
-            )),
-        },
-        MechanicAction::SetFuelTemperature { temperature } => match &mut entry.mechanic {
-            Mechanic::Recipe(mechanic) => Ok(replace(&mut mechanic.fuel_temperature, temperature)),
-            Mechanic::Mining(mechanic) => Ok(replace(&mut mechanic.fuel_temperature, temperature)),
-            Mechanic::Boiler(mechanic) => Ok(replace(&mut mechanic.fuel_temperature, temperature)),
-            _ => Err(RuntimeError::InvalidOperation(
-                "SetFuelTemperature is not supported by this mechanic",
-            )),
-        },
-        MechanicAction::SetWeightMode { weight_mode } => match &mut entry.mechanic {
-            Mechanic::ItemLaunch(mechanic) => Ok(replace(&mut mechanic.weight_mode, weight_mode)),
-            _ => Err(RuntimeError::InvalidOperation(
-                "SetWeightMode requires an item launch mechanic",
-            )),
-        },
-        MechanicAction::SetNeighbours { neighbours } => match &mut entry.mechanic {
-            Mechanic::Reactor(mechanic) => {
-                if neighbours > 8 {
-                    return Err(RuntimeError::InvalidValue(
-                        "reactor neighbours must be <= 8".to_string(),
-                    ));
-                }
-                Ok(replace(&mut mechanic.neighbours, neighbours))
+        MechanicAction::Recipe(action) => {
+            let Mechanic::Recipe(mechanic) = &mut entry.mechanic else {
+                return Err(kind_mismatch("recipe"));
+            };
+            apply_recipe_action(mechanic, action)
+        }
+        MechanicAction::Mining(action) => {
+            let Mechanic::Mining(mechanic) = &mut entry.mechanic else {
+                return Err(kind_mismatch("mining"));
+            };
+            apply_mining_action(mechanic, action)
+        }
+        MechanicAction::Spoil(action) => {
+            let Mechanic::Spoil(mechanic) = &mut entry.mechanic else {
+                return Err(kind_mismatch("spoil"));
+            };
+            apply_spoil_action(mechanic, action)
+        }
+        MechanicAction::Plant(action) => {
+            let Mechanic::Plant(mechanic) = &mut entry.mechanic else {
+                return Err(kind_mismatch("plant"));
+            };
+            apply_plant_action(mechanic, action)
+        }
+        MechanicAction::ItemFuel(action) => {
+            let Mechanic::ItemFuel(mechanic) = &mut entry.mechanic else {
+                return Err(kind_mismatch("item-fuel"));
+            };
+            apply_item_fuel_action(mechanic, action)
+        }
+        MechanicAction::ItemLaunch(action) => {
+            let Mechanic::ItemLaunch(mechanic) = &mut entry.mechanic else {
+                return Err(kind_mismatch("item-launch"));
+            };
+            apply_item_launch_action(mechanic, action)
+        }
+        MechanicAction::Generator(action) => {
+            let Mechanic::Generator(mechanic) = &mut entry.mechanic else {
+                return Err(kind_mismatch("generator"));
+            };
+            apply_generator_action(mechanic, action)
+        }
+        MechanicAction::Boiler(action) => {
+            let Mechanic::Boiler(mechanic) = &mut entry.mechanic else {
+                return Err(kind_mismatch("boiler"));
+            };
+            apply_boiler_action(mechanic, action)
+        }
+        MechanicAction::Reactor(action) => {
+            let Mechanic::Reactor(mechanic) = &mut entry.mechanic else {
+                return Err(kind_mismatch("reactor"));
+            };
+            apply_reactor_action(mechanic, action)
+        }
+    }
+}
+
+fn kind_mismatch(kind: &'static str) -> RuntimeError {
+    let message: &'static str = match kind {
+        "recipe" => "该机制不是 recipe 类型",
+        "mining" => "该机制不是 mining 类型",
+        "spoil" => "该机制不是 spoil 类型",
+        "plant" => "该机制不是 plant 类型",
+        "item-fuel" => "该机制不是 item-fuel 类型",
+        "item-launch" => "该机制不是 item-launch 类型",
+        "generator" => "该机制不是 generator 类型",
+        "boiler" => "该机制不是 boiler 类型",
+        "reactor" => "该机制不是 reactor 类型",
+        _ => "机制类型不匹配",
+    };
+    RuntimeError::InvalidOperation(message)
+}
+
+fn apply_recipe_action(
+    mechanic: &mut metatorio_core::RecipeMechanic,
+    action: RecipeMechanicAction,
+) -> Result<bool, RuntimeError> {
+    match action {
+        RecipeMechanicAction::SetRecipe { recipe } => Ok(replace(&mut mechanic.recipe, recipe)),
+        RecipeMechanicAction::SetMachine { machine } => {
+            Ok(replace(&mut mechanic.machine, machine))
+        }
+        RecipeMechanicAction::SetFuel { fuel } => Ok(replace(&mut mechanic.fuel, fuel)),
+        RecipeMechanicAction::SetFuelTemperature { temperature } => {
+            Ok(replace(&mut mechanic.fuel_temperature, temperature))
+        }
+        RecipeMechanicAction::Module(action) => {
+            apply_module_action(&mut mechanic.module_config, action)
+        }
+    }
+}
+
+fn apply_mining_action(
+    mechanic: &mut metatorio_core::MiningMechanic,
+    action: MiningMechanicAction,
+) -> Result<bool, RuntimeError> {
+    match action {
+        MiningMechanicAction::SetResource { resource } => {
+            Ok(replace(&mut mechanic.resource, resource))
+        }
+        MiningMechanicAction::SetMachine { machine } => {
+            Ok(replace(&mut mechanic.machine, machine))
+        }
+        MiningMechanicAction::SetFuel { fuel } => Ok(replace(&mut mechanic.fuel, fuel)),
+        MiningMechanicAction::SetFuelTemperature { temperature } => {
+            Ok(replace(&mut mechanic.fuel_temperature, temperature))
+        }
+        MiningMechanicAction::Module(action) => {
+            apply_module_action(&mut mechanic.module_config, action)
+        }
+    }
+}
+
+fn apply_spoil_action(
+    mechanic: &mut metatorio_core::SpoilMechanic,
+    action: SpoilMechanicAction,
+) -> Result<bool, RuntimeError> {
+    match action {
+        SpoilMechanicAction::SetItem { item } => Ok(replace(&mut mechanic.item, item)),
+    }
+}
+
+fn apply_plant_action(
+    mechanic: &mut metatorio_core::PlantMechanic,
+    action: PlantMechanicAction,
+) -> Result<bool, RuntimeError> {
+    match action {
+        PlantMechanicAction::SetSeed { seed } => Ok(replace(&mut mechanic.seed, seed)),
+    }
+}
+
+fn apply_item_fuel_action(
+    mechanic: &mut metatorio_core::ItemFuelMechanic,
+    action: ItemFuelMechanicAction,
+) -> Result<bool, RuntimeError> {
+    match action {
+        ItemFuelMechanicAction::SetItem { item } => Ok(replace(&mut mechanic.item, item)),
+    }
+}
+
+fn apply_item_launch_action(
+    mechanic: &mut metatorio_core::ItemLaunchMechanic,
+    action: ItemLaunchMechanicAction,
+) -> Result<bool, RuntimeError> {
+    match action {
+        ItemLaunchMechanicAction::SetItem { item } => Ok(replace(&mut mechanic.item, item)),
+        ItemLaunchMechanicAction::SetWeightMode { weight_mode } => {
+            Ok(replace(&mut mechanic.weight_mode, weight_mode))
+        }
+    }
+}
+
+fn apply_generator_action(
+    mechanic: &mut metatorio_core::GeneratorMechanic,
+    action: GeneratorMechanicAction,
+) -> Result<bool, RuntimeError> {
+    match action {
+        GeneratorMechanicAction::SetGenerator { generator } => {
+            Ok(replace(&mut mechanic.generator, generator))
+        }
+        GeneratorMechanicAction::SetFluid { fluid } => Ok(replace(&mut mechanic.fluid, fluid)),
+        GeneratorMechanicAction::SetTemperature { temperature } => {
+            Ok(replace(&mut mechanic.temperature, temperature))
+        }
+    }
+}
+
+fn apply_boiler_action(
+    mechanic: &mut metatorio_core::BoilerMechanic,
+    action: BoilerMechanicAction,
+) -> Result<bool, RuntimeError> {
+    match action {
+        BoilerMechanicAction::SetBoiler { boiler } => Ok(replace(&mut mechanic.boiler, boiler)),
+        BoilerMechanicAction::SetFluid { fluid } => Ok(replace(&mut mechanic.fluid, fluid)),
+        BoilerMechanicAction::SetTemperature { temperature } => {
+            Ok(replace(&mut mechanic.temperature, temperature))
+        }
+        BoilerMechanicAction::SetFuel { fuel } => Ok(replace(&mut mechanic.fuel, fuel)),
+        BoilerMechanicAction::SetFuelTemperature { temperature } => {
+            Ok(replace(&mut mechanic.fuel_temperature, temperature))
+        }
+    }
+}
+
+fn apply_reactor_action(
+    mechanic: &mut metatorio_core::ReactorMechanic,
+    action: ReactorMechanicAction,
+) -> Result<bool, RuntimeError> {
+    match action {
+        ReactorMechanicAction::SetReactor { reactor } => {
+            Ok(replace(&mut mechanic.reactor, reactor))
+        }
+        ReactorMechanicAction::SetFuel { fuel } => Ok(replace(&mut mechanic.fuel, fuel)),
+        ReactorMechanicAction::SetNeighbours { neighbours } => {
+            if neighbours > 8 {
+                return Err(RuntimeError::InvalidValue(
+                    "reactor neighbours must be <= 8".to_string(),
+                ));
             }
-            _ => Err(RuntimeError::InvalidOperation(
-                "SetNeighbours requires a reactor mechanic",
-            )),
-        },
-        MechanicAction::Module(action) => match &mut entry.mechanic {
-            Mechanic::Recipe(mechanic) => apply_module_action(&mut mechanic.module_config, action),
-            Mechanic::Mining(mechanic) => apply_module_action(&mut mechanic.module_config, action),
-            _ => Err(RuntimeError::InvalidOperation(
-                "module configuration is not supported here",
-            )),
-        },
-        MechanicAction::Planning(action) => apply_planning_action(&mut entry.planning, action),
+            Ok(replace(&mut mechanic.neighbours, neighbours))
+        }
     }
 }
 
@@ -1711,7 +1886,7 @@ fn apply_module_action(
 }
 
 fn apply_planning_action(
-    planning: &mut crate::document::MechanicPlanning,
+    planning: &mut PlanningPreferences,
     action: PlanningAction,
 ) -> Result<bool, RuntimeError> {
     match action {
@@ -2101,9 +2276,9 @@ mod tests {
             factory,
             action: FactoryAction::Mechanic {
                 mechanic,
-                action: MechanicAction::SetRecipe {
+                action: MechanicAction::Recipe(RecipeMechanicAction::SetRecipe {
                     recipe: IdWithQuality::new("iron-plate", "normal"),
-                },
+                }),
             },
         });
         assert!(matches!(error, Err(RuntimeError::InvalidOperation(_))));
@@ -2156,10 +2331,12 @@ mod tests {
                 factory,
                 action: FactoryAction::Mechanic {
                     mechanic,
-                    action: MechanicAction::Module(ModuleAction::SetModuleSlot {
-                        slot: 0,
-                        module: Some(IdWithQuality::new("speed-module-1", "normal")),
-                    }),
+                    action: MechanicAction::Recipe(RecipeMechanicAction::Module(
+                        ModuleAction::SetModuleSlot {
+                            slot: 0,
+                            module: Some(IdWithQuality::new("speed-module-1", "normal")),
+                        },
+                    )),
                 },
             })
             .unwrap();
@@ -2176,7 +2353,9 @@ mod tests {
             factory,
             action: FactoryAction::Mechanic {
                 mechanic,
-                action: MechanicAction::Module(ModuleAction::RemoveBeacon { beacon: 1 }),
+                action: MechanicAction::Recipe(RecipeMechanicAction::Module(
+                    ModuleAction::RemoveBeacon { beacon: 1 },
+                )),
             },
         });
         assert!(matches!(error, Err(RuntimeError::InvalidValue(_))));

@@ -81,7 +81,7 @@ fn frontend_json_one_click_demo_runs_end_to_end() {
     }));
     let mechanic = runtime.state.factory(project, factory).unwrap().mechanics[0].id;
 
-    // 4. Set recipe + machine (exact TS shape).
+    // 4. Set recipe + machine (exact TS shape; actions are kind-tagged).
     dispatch(&mut runtime, json!({
         "scope": "factory",
         "action": {
@@ -90,7 +90,7 @@ fn frontend_json_one_click_demo_runs_end_to_end() {
             "action": {
                 "mechanic": {
                     "mechanic": mechanic,
-                    "action": { "set-recipe": { "recipe": { "id": "iron-gear-wheel", "quality": "normal" } } }
+                    "action": { "recipe": { "set-recipe": { "recipe": { "id": "iron-gear-wheel", "quality": "normal" } } } }
                 }
             }
         }
@@ -103,7 +103,7 @@ fn frontend_json_one_click_demo_runs_end_to_end() {
             "action": {
                 "mechanic": {
                     "mechanic": mechanic,
-                    "action": { "set-machine": { "machine": { "id": "assembling-machine-1", "quality": "normal" } } }
+                    "action": { "recipe": { "set-machine": { "machine": { "id": "assembling-machine-1", "quality": "normal" } } } }
                 }
             }
         }
