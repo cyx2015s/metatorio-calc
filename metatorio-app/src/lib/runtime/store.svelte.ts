@@ -1046,6 +1046,21 @@ class RuntimeStore {
     }
   }
 
+  /** 自动规划：迭代添加建议机制直至可解（后端 AutoPlan）。 */
+  async autoPlan(): Promise<void> {
+    const { project, factory } = this.requireFactory();
+    this.solving = true;
+    try {
+      await this.send({
+        scope: "factory",
+        action: { project, factory, action: { solve: "auto-plan" } },
+      });
+    } catch (error) {
+      this.solving = false;
+      throw error;
+    }
+  }
+
   // ── 派生访问 ────────────────────────────────────────────────────
 
   get selectedProject() {

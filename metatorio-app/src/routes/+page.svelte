@@ -1105,6 +1105,9 @@
         <button class="btn primary" onclick={() => runtime.recompute().catch(() => {})} disabled={runtime.busy || runtime.solving || !factory}>
           {runtime.solving ? "求解中…" : "重新求解"}
         </button>
+        <button class="btn" title="自动规划：迭代添加建议机制直至可解" onclick={() => runtime.autoPlan().catch(() => {})} disabled={runtime.busy || runtime.solving || !factory}>
+          自动规划
+        </button>
         <button class="btn ghost" title="移除求解中用量低于阈值的机制" onclick={() => runtime.cleanup("remove-unused").catch(() => {})} disabled={!solved}>
           移除未用
         </button>

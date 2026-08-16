@@ -34,7 +34,7 @@ use metatorio_runtime::{
         AppMessage, CleanupAction, FactoryAction, MechanicAction, MechanicListAction,
         MiningMechanicAction, ModuleAction, ProjectAction, RecipeMechanicAction, RuntimeCommand,
     },
-    solve::{Runtime, SolveStatus},
+    solve::{Runtime, SolveResult, SolveStatus},
     state::{DispatchResult, UiState},
 };
 use serde::{Deserialize, Serialize};
@@ -1012,6 +1012,11 @@ fn suggest(state: State<'_, AppState>, flow: DualVar) -> Result<Vec<Suggestion>,
     };
     ensure_context_loaded(&state, &mut runtime, &id)?;
     let store = runtime.context_store_by_id(&id).ok_or("上下文未载入")?;
+    Ok(suggest_for_flow(store, flow))
+}
+
+/// 生成候选机制（与 suggest 命令共用；AutoPlan 也用它）。
+fn suggest_for_flow(store: &PrototypeStore, flow: DualVar) -> Vec<Suggestion> {
     let mut out = Vec::new();
     match flow {
         DualVar::Item(item) => {
@@ -1098,7 +1103,105 @@ fn suggest(state: State<'_, AppState>, flow: DualVar) -> Result<Vec<Suggestion>,
         }
         _ => {}
     }
-    Ok(out)
+    out
+}
+
+/// 自动规划（迭代贪婪版）：反复"求解 → 对缺失供给的流添加第一个建议
+/// 机制 → 再求解"，直至可解或没有可加的建议。相比原版 auto.rs 的组合
+/// 枚举，这里以可行解优先、成本次优为代价换取实现简单。
+fn auto_plan(
+    state: &AppState,
+    runtime: &mut Runtime,
+    project: ProjectId,
+    factory: FactoryId,
+) -> Result<SolveResult, String> {
+    for _ in 0..24 {
+        let result = runtime.solve_factory(project, factory).map_err(|error| error.to_string())?;
+        if matches!(result.status, SolveStatus::Solved { .. }) {
+            return Ok(result);
+        }
+        let store = runtime.context_store(project).map_err(|error| error.to_string())?.clone();
+        let SolveStatus::NotSolved { no_provider, .. } = &result.status else {
+            return Ok(result);
+        };
+        let mut added = false;
+        for flow in no_provider.iter().cloned() {
+            if let Some(first) = suggest_for_flow(&store, flow).into_iter().next() {
+                add_suggestion_mechanic(state, runtime, project, factory, &first.kind, &first.name)?;
+                added = true;
+                break; // 一次迭代加一个机制，重新求解
+            }
+        }
+        if !added {
+            break; // 所有缺失流都没有候选
+        }
+    }
+    runtime.solve_factory(project, factory).map_err(|error| error.to_string())
+}
+
+/// 按建议候选新增机制并设置主项（机器由兼容回退自动推断）。
+fn add_suggestion_mechanic(
+    state: &AppState,
+    runtime: &mut Runtime,
+    project: ProjectId,
+    factory: FactoryId,
+    kind: &str,
+    name: &str,
+) -> Result<(), String> {
+    use metatorio_runtime::document::MechanicKind;
+    use metatorio_runtime::message::{GeneratorMechanicAction, ItemFuelMechanicAction, RecipeMechanicAction};
+    let mechanic_kind = match kind {
+        "recipe" => MechanicKind::Recipe,
+        "resource" => MechanicKind::Mining,
+        "item-fuel" => MechanicKind::ItemFuel,
+        "generator" => MechanicKind::Generator,
+        _ => return Err(format!("未知建议类型 {kind}")),
+    };
+    runtime
+        .dispatch(AppMessage::Factory {
+            project,
+            factory,
+            action: FactoryAction::MechanicList(MechanicListAction::Add { kind: mechanic_kind }),
+        })
+        .map_err(|error| error.to_string())?;
+    let id = runtime
+        .state
+        .factory(project, factory)
+        .map_err(|error| error.to_string())?
+        .mechanics
+        .last()
+        .ok_or("机制列表为空")?
+        .id;
+    let action = match kind {
+        "recipe" => MechanicAction::Recipe(RecipeMechanicAction::SetRecipe {
+            recipe: IdWithQuality::new(name, "normal"),
+        }),
+        "resource" => MechanicAction::Mining(MiningMechanicAction::SetResource {
+            resource: name.to_string(),
+        }),
+        "item-fuel" => MechanicAction::ItemFuel(ItemFuelMechanicAction::SetItem {
+            item: IdWithQuality::new(name, "normal"),
+        }),
+        "generator" => MechanicAction::Generator(GeneratorMechanicAction::SetGenerator {
+            generator: IdWithQuality::new(name, "normal"),
+        }),
+        _ => unreachable!(),
+    };
+    runtime
+        .dispatch(AppMessage::Factory {
+            project,
+            factory,
+            action: FactoryAction::Mechanic {
+                mechanic: id,
+                action,
+            },
+        })
+        .map_err(|error| error.to_string())?;
+    // 内部 dispatch 不会执行副作用命令，手动补跑机器兼容回退（自动选机）。
+    if matches!(mechanic_kind, MechanicKind::Recipe | MechanicKind::Mining) {
+        ensure_machine_compat(state, runtime, project, factory, id)?;
+    }
+    Ok(())
 }
 
 /// 物品的机制标签（伪类别，供前端按机制过滤选择器）：
@@ -2263,8 +2366,35 @@ fn execute_command(
                 eprintln!("cleanup failed: {error}");
             }
         }
+        RuntimeCommand::AutoPlan { project, factory } => {
+            // 自动规划：迭代添加建议机制直至可解。
+            let _ = ensure_context_for_project(state, runtime, *project);
+            match auto_plan(state, runtime, *project, *factory) {
+                Ok(result) => emit(app, "solve-result", result),
+                Err(error) => emit(app, "solve-error", error),
+            }
+        }
         other => eprintln!("unhandled runtime command: {other:?}"),
     }
+}
+
+/// 确保项目上下文已载入（AutoPlan 需要 store）。
+fn ensure_context_for_project(
+    state: &AppState,
+    runtime: &mut Runtime,
+    project: ProjectId,
+) -> Result<(), String> {
+    let context_id = runtime
+        .state
+        .project(project)
+        .map_err(|error| error.to_string())?
+        .context_id
+        .clone()
+        .or_else(|| runtime.active_context().map(str::to_string));
+    if let Some(id) = context_id {
+        ensure_context_loaded(state, runtime, &id)?;
+    }
+    Ok(())
 }
 
 /// 求解后清理：按最近一次求解结果删减/重排机制。
