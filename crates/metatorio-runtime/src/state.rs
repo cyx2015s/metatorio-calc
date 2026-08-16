@@ -483,6 +483,12 @@ impl RuntimeState {
                     MechanicAction::Recipe(RecipeMechanicAction::SetRecipe { .. })
                         | MechanicAction::Mining(MiningMechanicAction::SetResource { .. })
                 );
+                // 机器变化后，让外层按机器槽位上限钳制模块数量。
+                let needs_clamp = matches!(
+                    &action,
+                    MechanicAction::Recipe(RecipeMechanicAction::SetMachine { .. })
+                        | MechanicAction::Mining(MiningMechanicAction::SetMachine { .. })
+                );
                 let entry = self
                     .factory_mut(project_id, factory_id)?
                     .mechanics
@@ -495,14 +501,25 @@ impl RuntimeState {
                     })?;
                 let changed = apply_mechanic_action(entry, action)?;
                 let mut outcome = Outcome::changed_factory_if(changed, project_id, factory_id);
-                if needs_compat && changed {
-                    outcome
-                        .commands
-                        .push(RuntimeCommand::EnsureMachineCompat {
-                            project: project_id,
-                            factory: factory_id,
-                            mechanic,
-                        });
+                if changed {
+                    if needs_compat {
+                        outcome
+                            .commands
+                            .push(RuntimeCommand::EnsureMachineCompat {
+                                project: project_id,
+                                factory: factory_id,
+                                mechanic,
+                            });
+                    }
+                    if needs_clamp {
+                        outcome
+                            .commands
+                            .push(RuntimeCommand::ClampModules {
+                                project: project_id,
+                                factory: factory_id,
+                                mechanic,
+                            });
+                    }
                 }
                 Ok(outcome)
             }
@@ -1818,6 +1835,11 @@ fn apply_module_action(
             } else {
                 Ok(false)
             }
+        }
+        ModuleAction::ClampModules { max } => {
+            let changed = config.modules.len() > max;
+            config.modules.truncate(max);
+            Ok(changed)
         }
         ModuleAction::ClearModules => {
             let changed = !config.modules.is_empty() || !config.beacons.is_empty();

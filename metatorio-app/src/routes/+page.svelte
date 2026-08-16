@@ -179,7 +179,7 @@
   }
 
   // ── 机制拾取器分发 ──────────────────────────────────────────────
-  async function pickForMechanic(mechanic: MechanicId, kind: CatalogKind, slot?: number) {
+  async function pickForMechanic(mechanic: MechanicId, kind: CatalogKind, a?: number, b?: number) {
     const entry = mechanics.find((candidate) => candidate.id === mechanic);
     try {
       switch (kind) {
@@ -256,11 +256,58 @@
             runtime.setReactor(mechanic, name, quality),
           );
           break;
-        case "module":
-          openSelector("module", "选择模块", (name, quality) =>
-            runtime.setModuleSlot(mechanic, slot ?? 0, name, quality),
+        case "module": {
+          // 机器插件：按机器允许的插件类别过滤
+          const machineId = entry?.mechanic.machine?.id;
+          const detailKind = entry?.mechanic.type === "mining" ? "mining-machine" : "machine";
+          const filter = machineId
+            ? (await runtime.getDetail(detailKind, machineId))?.allowed_module_categories ?? []
+            : [];
+          openSelector(
+            "module",
+            "选择插件",
+            (name, quality) => runtime.setModuleSlot(mechanic, a ?? 0, name, quality),
+            [],
+            filter,
           );
           break;
+        }
+        case "beacon": {
+          const beacon = a ?? 0;
+          openSelector("beacon", "选择信标", (name, quality) =>
+            runtime
+              .moduleMessage(mechanic, {
+                "set-beacon": { beacon, value: { id: name, quality } },
+              })
+              .catch(() => {}),
+          );
+          break;
+        }
+        case "beacon-module": {
+          const beacon = a ?? 0;
+          const moduleIdx = b ?? 0;
+          const beaconModuleCount = entry?.mechanic.module_config?.beacons[beacon]?.modules.length ?? 0;
+          openSelector(
+            "module",
+            "选择塔内插件",
+            (name, quality) => {
+              const value = { id: name, quality };
+              if (moduleIdx >= beaconModuleCount) {
+                runtime
+                  .moduleMessage(mechanic, { "add-beacon-module": { beacon, module: value } })
+                  .catch(() => {});
+              } else {
+                runtime
+                  .moduleMessage(mechanic, {
+                    "set-beacon-module": { beacon, module: moduleIdx, value },
+                  })
+                  .catch(() => {});
+              }
+            },
+            [],
+          );
+          break;
+        }
         default:
           break;
       }
@@ -539,7 +586,7 @@
           <MechanicCard
             {entry}
             solution={solveMap.get(entry.id) ?? null}
-            onPick={(kind, slot) => pickForMechanic(entry.id, kind, slot)}
+            onPick={(kind, a, b) => pickForMechanic(entry.id, kind, a, b)}
             onToggleEnabled={() => runtime.setMechanicEnabled(entry.id, !entry.enabled).catch(() => {})}
             onRemove={() => runtime.removeMechanic(entry.id).catch(() => {})}
             onModuleSlot={(slot, module) => runtime.setModuleSlot(entry.id, slot, module).catch(() => {})}

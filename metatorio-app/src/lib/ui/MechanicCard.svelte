@@ -1,7 +1,8 @@
 <script lang="ts">
   // 单个机制卡片：主选择器（配方/资源/物品/设备）为图标按钮，
-  // 机器为图标按钮，模块为小图标槽位；操作按钮为文字。
+  // 机器为图标按钮，插件配置在展开区（ModuleEditor）。
   import HoverIcon from "./HoverIcon.svelte";
+  import ModuleEditor from "./ModuleEditor.svelte";
   import type { CatalogKind, MechanicEntry } from "$lib/runtime/types";
 
   const kindLabel: Record<string, string> = {
@@ -26,14 +27,13 @@
   }: {
     entry: MechanicEntry;
     solution?: { amount: number; cost: number } | null;
-    onPick: (kind: CatalogKind, slot?: number) => void;
+    onPick: (kind: CatalogKind | "beacon-module", a?: number, b?: number) => void;
     onToggleEnabled: () => void;
     onRemove: () => void;
     onModuleSlot: (slot: number, module: string | null) => void;
   } = $props();
 
   let kind = $derived(entry.mechanic.type);
-  let modules = $derived(entry.mechanic.module_config?.modules ?? []);
   let primaryName = $derived(
     entry.mechanic.recipe?.id ??
       entry.mechanic.item?.id ??
@@ -150,18 +150,18 @@
     {/if}
 
     <span class="spacer"></span>
-
-    {#if modules.length > 0 || kind === "recipe" || kind === "mining"}
-      {#each modules as module, slot (slot)}
-        <button class="icon-btn" title={`模块槽 ${slot + 1}`} onclick={() => onPick("module", slot)}>
-          <HoverIcon type="item" name={module.id} size={22} detailKind="module" />
-        </button>
-      {/each}
-      <button class="icon-btn empty" title="添加模块" onclick={() => onPick("module", modules.length)}>
-        <HoverIcon type="item" name="+" size={22} />
-      </button>
-    {/if}
   </div>
+
+  {#if kind === "recipe" || kind === "mining"}
+    <div class="row3">
+      <ModuleEditor
+        {entry}
+        onPickModule={(slot) => onPick("module", slot)}
+        onPickBeacon={(beacon) => onPick("beacon", beacon)}
+        onPickBeaconModule={(beacon, module) => onPick("beacon-module", beacon, module)}
+      />
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -184,6 +184,11 @@
   }
 
   .row2 {
+    padding-top: 8px;
+    border-top: 1px solid var(--line);
+  }
+
+  .row3 {
     padding-top: 8px;
     border-top: 1px solid var(--line);
   }

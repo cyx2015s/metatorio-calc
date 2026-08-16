@@ -397,6 +397,10 @@ pub enum ModuleAction {
         slot: usize,
         module: Option<IdWithQuality>,
     },
+    /// 钳制模块数量到机器槽位上限（由外层适配层触发）。
+    ClampModules {
+        max: usize,
+    },
     ClearModules,
     AddBeacon,
     RemoveBeacon {
@@ -665,6 +669,12 @@ pub enum RuntimeCommand {
     /// （目标/外部输入/机制），低于则自动提升。
     EnsureQualityLimit {
         project: ProjectId,
+    },
+    /// 机器变化后，由外层按机器槽位上限钳制模块数量。
+    ClampModules {
+        project: ProjectId,
+        factory: FactoryId,
+        mechanic: MechanicId,
     },
     AutoPlan {
         project: ProjectId,

@@ -81,7 +81,7 @@ export function flowQuality(flow: DualVar): string | null {
 export type ApplicationAction =
   | { "new-project": { name: string } }
   | { "load-game-context": { executable_path: string; mod_path: string | null } }
-  | { "load-cached-context": null }
+  | "load-cached-context"
   | { "save-project": { project: ProjectId } }
   | { "save-project-as": { project: ProjectId; path: string } };
 
@@ -170,14 +170,20 @@ export type MechanicAction =
   | { boiler: BoilerMechanicAction }
   | { reactor: ReactorMechanicAction };
 
+// 注意：unit 变体（clear-modules / add-beacon）在 serde 外部标签下序列化为裸字符串。
 export type ModuleAction =
   | { "set-module-slot": { slot: number; module: IdWithQuality | null } }
-  | { "clear-modules": null }
-  | { "add-beacon": null }
+  | "clear-modules"
+  | "add-beacon"
   | { "remove-beacon": { beacon: number } }
   | { "set-beacon": { beacon: number; value: IdWithQuality } }
   | { "set-beacon-count": { beacon: number; count: number } }
-  | { "set-beacon-share": { beacon: number; share: number } };
+  | { "set-beacon-share": { beacon: number; share: number } }
+  | { "add-beacon-module": { beacon: number; module: IdWithQuality } }
+  | { "remove-beacon-module": { beacon: number; module: number } }
+  | { "set-beacon-module": { beacon: number; module: number; value: IdWithQuality } }
+  | { "set-beacon-module-count": { beacon: number; module: number; count: number } }
+  | { "clamp-modules": { max: number } };
 
 // 项目级自动规划偏好（全局，不绑定到单个机制）。
 export type PlanningAction =
@@ -187,8 +193,8 @@ export type PlanningAction =
   | { "reorder-machine-preference": { machine: IdWithQuality; position: number } }
   | { "add-enumerated-module": { module: IdWithQuality } }
   | { "remove-enumerated-module": { module: IdWithQuality } }
-  | { "use-best-modules": null }
-  | { "add-enumerated-beacon": null }
+  | "use-best-modules"
+  | "add-enumerated-beacon"
   | { "remove-enumerated-beacon": { beacon: number } }
   | { "set-enumerated-beacon": { beacon: number; plan: AutoBeaconPlan } }
   | { "enumerated-beacon-module": { beacon: number; action: ModuleAction } };
@@ -267,7 +273,7 @@ export interface PlanningPreferences {
 }
 
 export interface AutoBeaconPlan {
-  module_config: { modules: IdWithQuality[]; beacons: unknown[] };
+  module_config: ModuleConfig;
 }
 
 export interface ProjectSettings {
@@ -317,6 +323,18 @@ export interface MechanicEntry {
   mechanic: Mechanic;
 }
 
+export interface BeaconConfig {
+  modules: [IdWithQuality, number][];
+  beacon: IdWithQuality;
+  count: number;
+  share: number;
+}
+
+export interface ModuleConfig {
+  modules: IdWithQuality[];
+  beacons: BeaconConfig[];
+}
+
 // Mechanic is internally tagged with "type" (kebab-case kind).
 export interface Mechanic {
   type: MechanicKind;
@@ -333,7 +351,7 @@ export interface Mechanic {
   fuel?: string | null;
   neighbours?: number;
   weight_mode?: boolean;
-  module_config?: { modules: IdWithQuality[]; beacons: unknown[] };
+  module_config?: ModuleConfig;
   [key: string]: unknown;
 }
 
@@ -454,8 +472,11 @@ export interface PrototypeDetail {
   results: FlowAmount[];
   crafting_speed: number | null;
   module_slots: number | null;
+  /** 机器/信标允许的插件类别（空 = 不限制）。 */
+  allowed_module_categories: string[];
   /** 焦耳/刻（功率）；前端换算为 W。 */
   energy_usage_j: number | null;
+  beacon_module_slots: number | null;
   default_temperature: number | null;
   // quality（kind = "quality"）
   quality_level: number | null;

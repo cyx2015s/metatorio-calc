@@ -21,15 +21,16 @@ use std::{
 use metatorio_core::{DualVar, IdWithQuality, Mechanic};
 use metatorio_data::store::{PrototypeGroup, PrototypeRecord, PrototypeStore};
 use metatorio_data::{
-    CraftingMachineComponent, FluidComponent, ItemComponent, MiningDrillComponent,
-    PrototypeBaseComponent, QualityComponent, RecipeComponent, ResourceEntityComponent,
+    BeaconComponent, CraftingMachineComponent, FluidComponent, ItemComponent, MiningDrillComponent,
+    ModuleComponent, PrototypeBaseComponent, QualityComponent, RecipeComponent,
+    ResourceEntityComponent,
 };
 use metatorio_runtime::{
     document::AppDocument,
     id::{FactoryId, MechanicId, ProjectId},
     message::{
-        AppMessage, FactoryAction, MechanicAction, MiningMechanicAction, ProjectAction,
-        RecipeMechanicAction, RuntimeCommand,
+        AppMessage, FactoryAction, MechanicAction, MiningMechanicAction, ModuleAction,
+        ProjectAction, RecipeMechanicAction, RuntimeCommand,
     },
     solve::Runtime,
     state::{DispatchResult, UiState},
@@ -153,8 +154,12 @@ pub struct PrototypeDetail {
     // machine
     pub crafting_speed: Option<f64>,
     pub module_slots: Option<u16>,
+    /// 机器允许的插件类别（空 = 不限制）。
+    pub allowed_module_categories: Vec<String>,
     /// 焦耳/刻（功率）；前端换算为 W。
     pub energy_usage_j: Option<f64>,
+    // beacon
+    pub beacon_module_slots: Option<u16>,
     // fluid
     pub default_temperature: Option<f64>,
     // quality（kind = "quality"）
@@ -788,9 +793,9 @@ fn catalog_index_from_store(store: &PrototypeStore) -> Vec<IndexEntry> {
                     let Some(record) = store.get(PrototypeGroup::Item, name) else {
                         continue;
                     };
-                    if !record.has("ModuleComponent") {
+                    let Some(module) = record.component::<ModuleComponent>() else {
                         continue;
-                    }
+                    };
                     out.push(IndexEntry {
                         kind: "module".to_string(),
                         name: name.clone(),
@@ -798,7 +803,11 @@ fn catalog_index_from_store(store: &PrototypeStore) -> Vec<IndexEntry> {
                         subgroup: sub.clone(),
                         icon_type: "item".to_string(),
                         module_slots: None,
-                        categories: Vec::new(),
+                        categories: if module.category.is_empty() {
+                            Vec::new()
+                        } else {
+                            vec![module.category.clone()]
+                        },
                     });
                 }
             }
@@ -902,11 +911,27 @@ fn prototype_detail(
     if let Some(machine) = record.component::<CraftingMachineComponent>() {
         detail.crafting_speed = Some(machine.crafting_speed);
         detail.module_slots = machine.module_slots;
+        detail.allowed_module_categories = machine
+            .allowed_module_categories
+            .clone()
+            .unwrap_or_default();
         detail.energy_usage_j = Some(machine.energy_usage.amount);
         detail.categories = machine.crafting_categories.clone();
     }
     if let Some(drill) = record.component::<MiningDrillComponent>() {
         detail.categories = drill.resource_categories.clone();
+        detail.module_slots = drill.module_slots;
+        detail.allowed_module_categories = drill
+            .allowed_module_categories
+            .clone()
+            .unwrap_or_default();
+    }
+    if let Some(beacon) = record.component::<BeaconComponent>() {
+        detail.beacon_module_slots = Some(beacon.module_slots);
+        detail.allowed_module_categories = beacon
+            .allowed_module_categories
+            .clone()
+            .unwrap_or_default();
     }
     if let Some(resource) = record.component::<ResourceEntityComponent>() {
         detail.categories = vec![effective_resource_category(resource)];
@@ -1137,6 +1162,98 @@ async fn save_project(app: AppHandle) -> Result<Option<String>, String> {
 }
 
 // ── Side effects ──────────────────────────────────────────────────
+
+/// 机器有效插件槽位（基础 + 品质加成；制造机/采矿机）。
+fn effective_module_slots(
+    store: &PrototypeStore,
+    machine_id: &str,
+    machine_quality: &str,
+) -> usize {
+    let Some(entity) = store.entity(machine_id) else {
+        return 0;
+    };
+    let base = entity
+        .component::<CraftingMachineComponent>()
+        .and_then(|machine| machine.module_slots)
+        .or_else(|| {
+            entity
+                .component::<MiningDrillComponent>()
+                .and_then(|drill| drill.module_slots)
+        })
+        .unwrap_or(0) as usize;
+    let bonus = entity
+        .component::<CraftingMachineComponent>()
+        .and_then(|machine| machine.module_slots_quality_bonus.get(machine_quality))
+        .copied()
+        .unwrap_or(0) as usize;
+    base + bonus
+}
+
+/// 机器变化后按槽位上限钳制模块数量（超出直接截断，经 reducer 落盘）。
+fn clamp_modules(
+    state: &AppState,
+    runtime: &mut Runtime,
+    project: ProjectId,
+    factory: FactoryId,
+    mechanic: MechanicId,
+) -> Result<(), String> {
+    let context_id = runtime
+        .state
+        .project(project)
+        .map_err(|error| error.to_string())?
+        .context_id
+        .clone()
+        .or_else(|| runtime.active_context().map(str::to_string));
+    let Some(context_id) = context_id else {
+        return Ok(());
+    };
+    ensure_context_loaded(state, runtime, &context_id)?;
+    let store = runtime
+        .context_store_by_id(&context_id)
+        .ok_or_else(|| "上下文未载入".to_string())?
+        .clone();
+
+    let entry = runtime
+        .state
+        .factory(project, factory)
+        .map_err(|error| error.to_string())?
+        .mechanics
+        .iter()
+        .find(|entry| entry.id == mechanic)
+        .cloned()
+        .ok_or_else(|| "机制不存在".to_string())?;
+
+    let (module_count, max) = match &entry.mechanic {
+        Mechanic::Recipe(recipe) => (
+            recipe.module_config.modules.len(),
+            effective_module_slots(&store, &recipe.machine.id, &recipe.machine.quality),
+        ),
+        Mechanic::Mining(mining) => (
+            mining.module_config.modules.len(),
+            effective_module_slots(&store, &mining.machine.id, &mining.machine.quality),
+        ),
+        _ => return Ok(()),
+    };
+    if module_count <= max {
+        return Ok(());
+    }
+    let action = match &entry.mechanic {
+        Mechanic::Recipe(_) => MechanicAction::Recipe(RecipeMechanicAction::Module(
+            ModuleAction::ClampModules { max },
+        )),
+        _ => MechanicAction::Mining(MiningMechanicAction::Module(ModuleAction::ClampModules {
+            max,
+        })),
+    };
+    runtime
+        .dispatch(AppMessage::Factory {
+            project,
+            factory,
+            action: FactoryAction::Mechanic { mechanic, action },
+        })
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
 
 fn emit<T: Serialize + Clone>(app: &AppHandle, event: &str, payload: T) {
     if let Err(error) = app.emit(event, payload) {
@@ -1486,6 +1603,15 @@ fn execute_command(
         RuntimeCommand::EnsureQualityLimit { project } => {
             if let Err(error) = ensure_quality_limit(state, runtime, *project) {
                 eprintln!("quality limit auto-raise failed: {error}");
+            }
+        }
+        RuntimeCommand::ClampModules {
+            project,
+            factory,
+            mechanic,
+        } => {
+            if let Err(error) = clamp_modules(state, runtime, *project, *factory, *mechanic) {
+                eprintln!("module clamp failed: {error}");
             }
         }
         RuntimeCommand::Persist { project, path } => {

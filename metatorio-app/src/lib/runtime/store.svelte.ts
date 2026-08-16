@@ -572,6 +572,19 @@ class RuntimeStore {
     }
   }
 
+  /** 模块配置消息（按机制类型包装 recipe/mining）。 */
+  async moduleMessage(mechanic: MechanicId, action: import("./types").ModuleAction): Promise<void> {
+    const kind = this.mechanicKind(mechanic);
+    switch (kind) {
+      case "recipe":
+        return this.mechanicMessage(mechanic, { recipe: { module: action } });
+      case "mining":
+        return this.mechanicMessage(mechanic, { mining: { module: action } });
+      default:
+        throw new Error(`${kind} 机制不支持模块配置`);
+    }
+  }
+
   async setModuleSlot(
     mechanic: MechanicId,
     slot: number,
@@ -579,27 +592,13 @@ class RuntimeStore {
     quality = "normal",
   ): Promise<void> {
     const moduleId = module ? { id: module, quality } : null;
-    const inner: import("./types").ModuleAction = { "set-module-slot": { slot, module: moduleId } };
-    switch (this.mechanicKind(mechanic)) {
-      case "recipe":
-        return this.mechanicMessage(mechanic, { recipe: { module: inner } });
-      case "mining":
-        return this.mechanicMessage(mechanic, { mining: { module: inner } });
-      default:
-        throw new Error(`${this.mechanicKind(mechanic)} 机制不支持模块配置`);
-    }
+    await this.moduleMessage(mechanic, {
+      "set-module-slot": { slot, module: moduleId },
+    });
   }
 
   async clearModules(mechanic: MechanicId): Promise<void> {
-    const inner: import("./types").ModuleAction = { "clear-modules": null };
-    switch (this.mechanicKind(mechanic)) {
-      case "recipe":
-        return this.mechanicMessage(mechanic, { recipe: { module: inner } });
-      case "mining":
-        return this.mechanicMessage(mechanic, { mining: { module: inner } });
-      default:
-        throw new Error(`${this.mechanicKind(mechanic)} 机制不支持模块配置`);
-    }
+    await this.moduleMessage(mechanic, "clear-modules");
   }
 
   // ── 自动规划偏好（项目级全局） ──────────────────────────────────
@@ -638,7 +637,7 @@ class RuntimeStore {
   }
 
   async useBestModules(): Promise<void> {
-    await this.planningMessage({ "use-best-modules": null });
+    await this.planningMessage("use-best-modules");
   }
 
   async recompute(): Promise<void> {
