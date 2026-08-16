@@ -704,6 +704,19 @@ class RuntimeStore {
     });
   }
 
+  /** 添加枚举信标方案：先加空方案，再把所选信标写入新方案的插件配置。 */
+  async addEnumeratedBeacon(beacon: { id: string; quality: string }): Promise<void> {
+    await this.planningMessage("add-enumerated-beacon");
+    const index = (this.selectedProject?.planning.enumerate_beacons.length ?? 1) - 1;
+    await this.planningMessage({
+      "enumerated-beacon-module": { beacon: index, action: { "add-beacon": { beacon } } },
+    });
+  }
+
+  async removeEnumeratedBeacon(index: number): Promise<void> {
+    await this.planningMessage({ "remove-enumerated-beacon": { beacon: index } });
+  }
+
   async useBestModules(): Promise<void> {
     await this.planningMessage("use-best-modules");
   }

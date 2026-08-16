@@ -38,6 +38,8 @@
   let newProjectName = $state("新项目");
   let newFactoryOpen = $state(false);
   let newFactoryName = $state("新工厂");
+  // 规划偏好弹窗（机器偏好/替代数量/枚举插件与信标）
+  let prefsOpen = $state(false);
 
   // 应用内确认/重命名弹窗（Tauri WebView2 不支持 window.confirm/prompt，会阻塞）
   let confirmState = $state<{ message: string; action: () => void } | null>(null);
@@ -110,6 +112,7 @@
 
   // ── 派生数据 ────────────────────────────────────────────────────
   let project = $derived(runtime.selectedProject);
+  let planning = $derived(project?.planning ?? null);
   let factory = $derived(runtime.selectedFactory);
   let mechanics = $derived(factory?.mechanics ?? []);
   let targets = $derived(factory?.targets ?? []);
@@ -752,6 +755,7 @@
               }}
             />
           </div>
+          <button class="btn" onclick={() => (prefsOpen = true)}>规划偏好…</button>
         </section>
       {/if}
     </aside>
@@ -1030,6 +1034,118 @@
       <div class="mini-actions">
         <button class="btn ghost" onclick={() => (renameCtx = null)}>取消</button>
         <button class="btn primary" onclick={confirmRename}>确定</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if prefsOpen && planning}
+  <!-- z-index 低于选择器（40），从弹窗内打开选择器时选择器叠在上层 -->
+  <div class="backdrop low" onclick={() => (prefsOpen = false)}>
+    <div class="prefs-modal" onclick={(event) => event.stopPropagation()}>
+      <div class="mini-title">规划偏好</div>
+
+      <div class="field">
+        <label>替代数量（自动规划时每个配方枚举几个备选机器）</label>
+        <input
+          type="number"
+          min="1"
+          max="3"
+          value={String(planning.alternative_count)}
+          onchange={(event) => {
+            const value = Number((event.currentTarget as HTMLInputElement).value);
+            if (Number.isFinite(value) && value >= 1 && value <= 3) {
+              runtime.setAlternativeCount(value).catch(() => {});
+            }
+          }}
+        />
+      </div>
+
+      <div class="prefs-section">
+        <div class="prefs-title">机器偏好（自动选机时优先）</div>
+        <div class="prefs-list">
+          {#each planning.machine_preferences as pref, i (i)}
+            <div class="prefs-item">
+              <HoverIcon type="entity" name={pref.id} size={22} detailKind="machine" quality={pref.quality} />
+              <span class="prefs-name">{runtime.localizedName("machine", pref.id)}</span>
+              <button
+                class="btn ghost"
+                title="移除"
+                onclick={() => runtime.removeMachinePreference(pref.id).catch(() => {})}
+              >×</button>
+            </div>
+          {:else}
+            <span class="muted">还没有机器偏好</span>
+          {/each}
+        </div>
+        <button
+          class="btn"
+          onclick={() =>
+            openSelector("machine", "添加机器偏好", (name) =>
+              runtime.addMachinePreference(name),
+            )}
+        >+ 添加机器</button>
+      </div>
+
+      <div class="prefs-section">
+        <div class="prefs-title">枚举插件（自动规划参与组合的插件）</div>
+        <div class="prefs-list">
+          {#each planning.enumerate_modules as module, i (i)}
+            <div class="prefs-item">
+              <HoverIcon type="item" name={module.id} size={22} detailKind="module" quality={module.quality} />
+              <span class="prefs-name">{runtime.localizedName("module", module.id)}</span>
+              <button
+                class="btn ghost"
+                title="移除"
+                onclick={() => runtime.removeEnumeratedModule(module.id).catch(() => {})}
+              >×</button>
+            </div>
+          {:else}
+            <span class="muted">还没有枚举插件</span>
+          {/each}
+        </div>
+        <button
+          class="btn"
+          onclick={() =>
+            openSelector("module", "添加枚举插件", (name) =>
+              runtime.addEnumeratedModule(name),
+            )}
+        >+ 添加插件</button>
+      </div>
+
+      <div class="prefs-section">
+        <div class="prefs-title">枚举信标（自动规划叠加的信标方案）</div>
+        <div class="prefs-list">
+          {#each planning.enumerate_beacons as plan, i (i)}
+            {@const beacon = plan.module_config?.beacons?.[0]?.beacon}
+            <div class="prefs-item">
+              {#if beacon}
+                <HoverIcon type="entity" name={beacon.id} size={22} detailKind="beacon" quality={beacon.quality} />
+                <span class="prefs-name">{runtime.localizedName("beacon", beacon.id)}</span>
+              {:else}
+                <span class="prefs-name muted">（未选信标）</span>
+              {/if}
+              <button
+                class="btn ghost"
+                title="移除"
+                onclick={() => runtime.removeEnumeratedBeacon(i).catch(() => {})}
+              >×</button>
+            </div>
+          {:else}
+            <span class="muted">还没有枚举信标</span>
+          {/each}
+        </div>
+        <button
+          class="btn"
+          onclick={() =>
+            openSelector("beacon", "添加枚举信标", (name, quality) =>
+              runtime.addEnumeratedBeacon({ id: name, quality }),
+            )}
+        >+ 添加信标</button>
+      </div>
+
+      <div class="mini-actions">
+        <button class="btn primary" onclick={() => (prefsOpen = false)}>完成</button>
       </div>
     </div>
   </div>
@@ -1450,6 +1566,60 @@
     place-items: center;
     padding: 24px;
     background: rgba(4, 7, 8, 0.72);
+  }
+
+  /* 低于选择器（z 40）的弹层：允许从其中再打开选择器 */
+  .backdrop.low {
+    z-index: 30;
+  }
+
+  .prefs-modal {
+    width: min(430px, 100%);
+    max-height: min(680px, calc(100vh - 48px));
+    display: grid;
+    gap: 10px;
+    padding: 14px;
+    overflow-y: auto;
+    background: var(--panel);
+    border: 1px solid var(--accent-line);
+    border-radius: var(--radius);
+  }
+
+  .prefs-section {
+    display: grid;
+    gap: 6px;
+    padding-top: 8px;
+    border-top: 1px solid var(--line);
+  }
+
+  .prefs-title {
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+  }
+
+  .prefs-list {
+    display: grid;
+    gap: 3px;
+  }
+
+  .prefs-item {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 2px 6px 2px 2px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+  }
+
+  .prefs-name {
+    flex: 1;
+    overflow: hidden;
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .mini-modal {
