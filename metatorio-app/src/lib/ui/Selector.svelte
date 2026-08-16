@@ -124,7 +124,11 @@
         : entries
     ).filter((entry) => {
       if (!categoryFilter || categoryFilter.length === 0 || !catalogKind) return true;
-      return entry.categories.some((category) => categoryFilter.includes(category));
+      // 空类别条目视为"不限制"（与后端 categories_overlap 语义一致）
+      return (
+        entry.categories.length === 0 ||
+        entry.categories.some((category) => categoryFilter.includes(category))
+      );
     }),
   );
   let bySubgroup = $derived(groupBySubgroup(visible));

@@ -311,7 +311,13 @@
         case "beacon-module": {
           const beacon = a ?? 0;
           const moduleIdx = b ?? 0;
-          const beaconModuleCount = entry?.mechanic.module_config?.beacons[beacon]?.modules.length ?? 0;
+          const beaconCfg = entry?.mechanic.module_config?.beacons[beacon];
+          const beaconModuleCount = beaconCfg?.modules.length ?? 0;
+          // 塔内插件按该信标允许的插件类别过滤（与机器插件同理）
+          const filter = beaconCfg?.beacon.id
+            ? (await runtime.getDetail("beacon", beaconCfg.beacon.id))
+                ?.allowed_module_categories ?? []
+            : [];
           openSelector(
             "module",
             "选择塔内插件",
@@ -330,6 +336,7 @@
               }
             },
             [],
+            filter,
           );
           break;
         }
