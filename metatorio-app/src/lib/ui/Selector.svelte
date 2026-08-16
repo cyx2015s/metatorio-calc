@@ -5,6 +5,7 @@
   // - 流模式（flowMode=true）：选择 DualVar 流（物品/流体/实体走目录，
   //   电/热/火箭运力直接添加，自定义/污染输入名称）。
   import { runtime } from "$lib/runtime/store.svelte.ts";
+  import HoverIcon from "./HoverIcon.svelte";
   import Icon from "./Icon.svelte";
   import HoverCard from "./HoverCard.svelte";
   import type { CatalogKind, DualVar, IndexEntry } from "$lib/runtime/types";
@@ -14,6 +15,7 @@
     title,
     kindOptions = [],
     flowMode = false,
+    categoryFilter,
     onSelect,
     onSelectFlow,
     onClose,
@@ -22,10 +24,27 @@
     title: string;
     kindOptions?: { kind: CatalogKind; label: string }[];
     flowMode?: boolean;
-    onSelect?: (name: string) => void;
+    /** 机器/资源类目录的类别过滤（如配方 categories）；空数组=不过滤。 */
+    categoryFilter?: string[];
+    onSelect?: (name: string, quality: string) => void;
     onSelectFlow?: (flow: DualVar) => void;
     onClose: () => void;
   } = $props();
+
+  // 支持品质的目录 kind（物品/配方/实体类）
+  const qualityKinds = new Set([
+    "item",
+    "recipe",
+    "entity",
+    "machine",
+    "mining-machine",
+    "generator",
+    "boiler",
+    "reactor",
+    "beacon",
+    "resource",
+    "module",
+  ]);
 
   const flowTabs = [
     { id: "item", label: "物品" },
@@ -50,6 +69,7 @@
   let flowTab = $state<FlowTab>("item");
   let customVariant = $state<"Pollution" | "Custom">("Custom");
   let customName = $state("");
+  let quality = $state("normal");
   let query = $state("");
   let activeGroup = $state<string | null>(null);
   let loading = $state(false);
@@ -74,15 +94,25 @@
   let groups = $derived([...new Set(entries.map((entry) => entry.group))]);
   let searching = $derived(query.trim().length > 0);
   let visible = $derived(
-    searching
+    (searching
       ? entries.filter((entry) => entry.name.toLowerCase().includes(query.trim().toLowerCase()))
       : activeGroup
         ? entries.filter((entry) => entry.group === activeGroup)
-        : entries,
+        : entries
+    ).filter((entry) => {
+      if (!categoryFilter || categoryFilter.length === 0 || !catalogKind) return true;
+      return entry.categories.some((category) => categoryFilter.includes(category));
+    }),
   );
   let bySubgroup = $derived(groupBySubgroup(visible));
   let isDirect = $derived(flowMode && flowTab in directFlows);
   let isCustom = $derived(flowMode && flowTab === "custom");
+  // 品质适用的场景：目录模式且 kind 支持品质；流模式下 item/entity 页签。
+  let qualityApplies = $derived(
+    (flowMode
+      ? flowTab === "item" || flowTab === "entity"
+      : catalogKind != null && qualityKinds.has(catalogKind)),
+  );
 
   function groupBySubgroup(list: IndexEntry[]): { subgroup: string; items: IndexEntry[] }[] {
     const map = new Map<string, IndexEntry[]>();
@@ -147,14 +177,14 @@
       }
       return;
     }
-    onSelect?.(name);
+    onSelect?.(name, quality);
     onClose();
   }
 
   async function buildCatalogFlow(name: string): Promise<DualVar | null> {
     switch (flowTab) {
       case "item":
-        return { Item: { id: name, quality: "normal" } };
+        return { Item: { id: name, quality } };
       case "fluid": {
         const detail = await runtime.getDetail("fluid", name);
         const temperature =
@@ -162,7 +192,7 @@
         return { Fluid: { name, temperature: [temperature, temperature] } };
       }
       case "entity":
-        return { Entity: { id: name, quality: "normal" } };
+        return { Entity: { id: name, quality } };
       default:
         return null;
     }
@@ -253,6 +283,22 @@
         spellcheck="false"
       />
 
+      {#if qualityApplies && (runtime.catalogIndex?.qualities ?? []).length > 0}
+        <div class="quality-row">
+          <span class="q-label">品质</span>
+          {#each runtime.catalogIndex!.qualities as q (q)}
+            <button
+              class:active={quality === q}
+              class="q-chip"
+              title={q}
+              onclick={() => (quality = q)}
+            >
+              <HoverIcon type="quality" name={q} size={22} detailKind="quality" />
+            </button>
+          {/each}
+        </div>
+      {/if}
+
       {#if !searching && groups.length > 1}
         <div class="group-tabs">
           {#each groups as group (group)}
@@ -287,7 +333,13 @@
           <button class="btn primary" onclick={commitCustom} disabled={!customName.trim()}>添加</button>
         </div>
       {:else if visible.length === 0}
-        <div class="empty">{loading ? "加载中…" : "没有匹配的原型"}</div>
+        <div class="empty">
+          {loading
+            ? "加载中…"
+            : categoryFilter && categoryFilter.length > 0 && entries.length > 0
+              ? "没有适配当前配方/资源的选项"
+              : "没有匹配的原型"}
+        </div>
       {:else if searching}
         <div class="search-list">
           {#each visible as entry (entry.kind + entry.name)}
@@ -437,6 +489,38 @@
     margin: 8px 0 2px;
     padding-bottom: 8px;
     border-bottom: 1px solid var(--line);
+  }
+
+  .quality-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin: 8px 0 2px;
+  }
+
+  .q-label {
+    color: var(--muted);
+    font-size: 10px;
+  }
+
+  .q-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+  }
+
+  .q-chip:hover {
+    border-color: var(--accent-line);
+  }
+
+  .q-chip.active {
+    background: var(--accent-dim);
+    border-color: var(--accent);
   }
 
   .gtab {

@@ -53,6 +53,16 @@
   );
   let machineName = $derived(entry.mechanic.machine?.id ?? "");
   let fluidName = $derived(entry.mechanic.fluid ?? "");
+  let primaryQuality = $derived(
+    entry.mechanic.recipe?.quality ??
+      entry.mechanic.item?.quality ??
+      entry.mechanic.seed?.quality ??
+      entry.mechanic.generator?.quality ??
+      entry.mechanic.boiler?.quality ??
+      entry.mechanic.reactor?.quality ??
+      "normal",
+  );
+  let machineQuality = $derived(entry.mechanic.machine?.quality ?? "normal");
   function primaryKind(): CatalogKind {
     switch (kind) {
       case "recipe":
@@ -92,7 +102,12 @@
     </button>
 
     <div class="main">
-      <div class="name">{primaryName || "未设置"}</div>
+      <div class="name">
+        {primaryName || "未设置"}
+        {#if primaryName && primaryQuality !== "normal"}
+          <HoverIcon type="quality" name={primaryQuality} size={14} detailKind="quality" />
+        {/if}
+      </div>
       <div class="meta">
         <span class="chip">{kindLabel[kind] ?? kind}</span>
         {#if amount != null}<span class="amount mono">{amount.toFixed(3)}</span>{/if}
@@ -115,7 +130,12 @@
           detailKind={machineName ? machineKind() : undefined}
         />
       </button>
-      <span class="sub">{machineName || "选择机器"}</span>
+      <span class="sub">
+        {machineName || "选择机器"}
+        {#if machineName && machineQuality !== "normal"}
+          <HoverIcon type="quality" name={machineQuality} size={14} detailKind="quality" />
+        {/if}
+      </span>
     {:else if kind === "generator" || kind === "boiler"}
       <button class="icon-btn" class:empty={!fluidName} title="流体" onclick={() => onPick("fluid")}>
         <HoverIcon type="fluid" name={fluidName || "fluid"} size={24} detailKind={fluidName ? "fluid" : undefined} />

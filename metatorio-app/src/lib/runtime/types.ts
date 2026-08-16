@@ -62,6 +62,20 @@ export function dualVarLabel(flow: DualVar): string {
   return String(flow);
 }
 
+/** 流的品质（Item/Entity 且非 normal 时返回；否则 null）。 */
+export function flowQuality(flow: DualVar): string | null {
+  if (flow !== null && typeof flow === "object") {
+    const record = flow as Record<string, unknown>;
+    const key = Object.keys(record)[0];
+    const value = record[key];
+    if (value !== null && typeof value === "object") {
+      const inner = value as { quality?: string };
+      if (inner.quality && inner.quality !== "normal") return inner.quality;
+    }
+  }
+  return null;
+}
+
 // ── Messages ──────────────────────────────────────────────────────
 
 export type ApplicationAction =
@@ -406,10 +420,14 @@ export interface IndexEntry {
   subgroup: string;
   icon_type: string;
   module_slots: number | null;
+  /** 兼容性类别：machine→crafting_categories、recipe→categories、mining-machine→resource_categories、resource→category。 */
+  categories: string[];
 }
 
 export interface CatalogIndex {
   context_id: string;
+  /** 可用品质（normal 起）。 */
+  qualities: string[];
   entries: IndexEntry[];
 }
 
@@ -428,6 +446,7 @@ export interface PrototypeDetail {
   hidden: boolean;
   stack_size: number | null;
   category: string | null;
+  categories: string[];
   energy_required: number | null;
   ingredients: FlowAmount[];
   results: FlowAmount[];
@@ -436,6 +455,13 @@ export interface PrototypeDetail {
   /** 焦耳/刻（功率）；前端换算为 W。 */
   energy_usage_j: number | null;
   default_temperature: number | null;
+  // quality（kind = "quality"）
+  quality_level: number | null;
+  quality_next: string | null;
+  quality_next_probability: number | null;
+  quality_crafting_speed: number | null;
+  quality_module_speed: number | null;
+  quality_module_productivity: number | null;
 }
 
 export type CatalogKind =

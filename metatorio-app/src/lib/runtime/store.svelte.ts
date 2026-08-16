@@ -506,13 +506,13 @@ class RuntimeStore {
     return kind;
   }
 
-  async setRecipe(mechanic: MechanicId, recipe: string): Promise<void> {
-    const recipeId = { id: recipe, quality: "normal" } as import("./types").IdWithQuality;
+  async setRecipe(mechanic: MechanicId, recipe: string, quality = "normal"): Promise<void> {
+    const recipeId = { id: recipe, quality } as import("./types").IdWithQuality;
     await this.mechanicMessage(mechanic, { recipe: { "set-recipe": { recipe: recipeId } } });
   }
 
-  async setMachine(mechanic: MechanicId, machine: string): Promise<void> {
-    const machineId = { id: machine, quality: "normal" } as import("./types").IdWithQuality;
+  async setMachine(mechanic: MechanicId, machine: string, quality = "normal"): Promise<void> {
+    const machineId = { id: machine, quality } as import("./types").IdWithQuality;
     switch (this.mechanicKind(mechanic)) {
       case "recipe":
         return this.mechanicMessage(mechanic, { recipe: { "set-machine": { machine: machineId } } });
@@ -527,8 +527,8 @@ class RuntimeStore {
     await this.mechanicMessage(mechanic, { mining: { "set-resource": { resource } } });
   }
 
-  async setItem(mechanic: MechanicId, item: string): Promise<void> {
-    const itemId = { id: item, quality: "normal" } as import("./types").IdWithQuality;
+  async setItem(mechanic: MechanicId, item: string, quality = "normal"): Promise<void> {
+    const itemId = { id: item, quality } as import("./types").IdWithQuality;
     switch (this.mechanicKind(mechanic)) {
       case "spoil":
         return this.mechanicMessage(mechanic, { spoil: { "set-item": { item: itemId } } });
@@ -543,21 +543,21 @@ class RuntimeStore {
     }
   }
 
-  async setGenerator(mechanic: MechanicId, generator: string): Promise<void> {
+  async setGenerator(mechanic: MechanicId, generator: string, quality = "normal"): Promise<void> {
     await this.mechanicMessage(mechanic, {
-      generator: { "set-generator": { generator: { id: generator, quality: "normal" } } },
+      generator: { "set-generator": { generator: { id: generator, quality } } },
     });
   }
 
-  async setBoiler(mechanic: MechanicId, boiler: string): Promise<void> {
+  async setBoiler(mechanic: MechanicId, boiler: string, quality = "normal"): Promise<void> {
     await this.mechanicMessage(mechanic, {
-      boiler: { "set-boiler": { boiler: { id: boiler, quality: "normal" } } },
+      boiler: { "set-boiler": { boiler: { id: boiler, quality } } },
     });
   }
 
-  async setReactor(mechanic: MechanicId, reactor: string): Promise<void> {
+  async setReactor(mechanic: MechanicId, reactor: string, quality = "normal"): Promise<void> {
     await this.mechanicMessage(mechanic, {
-      reactor: { "set-reactor": { reactor: { id: reactor, quality: "normal" } } },
+      reactor: { "set-reactor": { reactor: { id: reactor, quality } } },
     });
   }
 
@@ -572,8 +572,13 @@ class RuntimeStore {
     }
   }
 
-  async setModuleSlot(mechanic: MechanicId, slot: number, module: string | null): Promise<void> {
-    const moduleId = module ? { id: module, quality: "normal" } : null;
+  async setModuleSlot(
+    mechanic: MechanicId,
+    slot: number,
+    module: string | null,
+    quality = "normal",
+  ): Promise<void> {
+    const moduleId = module ? { id: module, quality } : null;
     const inner: import("./types").ModuleAction = { "set-module-slot": { slot, module: moduleId } };
     switch (this.mechanicKind(mechanic)) {
       case "recipe":

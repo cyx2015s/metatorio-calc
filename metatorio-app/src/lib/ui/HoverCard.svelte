@@ -34,6 +34,7 @@
     if (kind === "recipe") return "recipe";
     if (kind === "fluid") return "fluid";
     if (kind === "item" || kind === "module") return "item";
+    if (kind === "quality") return "quality";
     return "entity";
   }
 
@@ -42,6 +43,10 @@
     if (watts >= 1e6) return `${(watts / 1e6).toFixed(2)} MW`;
     if (watts >= 1e3) return `${(watts / 1e3).toFixed(1)} kW`;
     return `${watts.toFixed(0)} W`;
+  }
+
+  function formatMultiplier(value: number): string {
+    return `×${value.toFixed(2)}`;
   }
 </script>
 
@@ -78,6 +83,28 @@
       {/if}
       {#if detail.default_temperature != null}
         <div class="hc-row"><span>默认温度</span><strong>{detail.default_temperature}°C</strong></div>
+      {/if}
+      {#if detail.quality_level != null}
+        <div class="hc-row"><span>等级</span><strong>Lv.{detail.quality_level}</strong></div>
+        {#if detail.quality_next}
+          <div class="hc-row">
+            <span>下一品质</span>
+            <strong>{detail.quality_next}
+              {#if detail.quality_next_probability != null}
+                （{Math.round(detail.quality_next_probability * 100)}%）
+              {/if}
+            </strong>
+          </div>
+        {/if}
+        {#if detail.quality_crafting_speed != null}
+          <div class="hc-row"><span>机器速度</span><strong>{formatMultiplier(detail.quality_crafting_speed)}</strong></div>
+        {/if}
+        {#if detail.quality_module_speed != null}
+          <div class="hc-row"><span>模块速度</span><strong>{formatMultiplier(detail.quality_module_speed)}</strong></div>
+        {/if}
+        {#if detail.quality_module_productivity != null}
+          <div class="hc-row"><span>模块产出</span><strong>{formatMultiplier(detail.quality_module_productivity)}</strong></div>
+        {/if}
       {/if}
       {#if detail.ingredients.length > 0}
         <div class="hc-flow">

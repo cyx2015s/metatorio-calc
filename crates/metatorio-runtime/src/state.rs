@@ -98,6 +98,9 @@ impl RuntimeState {
                     project,
                     path: None,
                 });
+                outcome
+                    .commands
+                    .push(RuntimeCommand::EnsureQualityLimit { project });
 
                 if outcome.recompute_all {
                     for factory in &self.project(project)?.factories {
@@ -474,6 +477,12 @@ impl RuntimeState {
                 self.apply_mechanic_list(project_id, factory_id, action)
             }
             FactoryAction::Mechanic { mechanic, action } => {
+                // 配方/资源变化后，让外层校验机器与配方/资源的类别兼容性。
+                let needs_compat = matches!(
+                    &action,
+                    MechanicAction::Recipe(RecipeMechanicAction::SetRecipe { .. })
+                        | MechanicAction::Mining(MiningMechanicAction::SetResource { .. })
+                );
                 let entry = self
                     .factory_mut(project_id, factory_id)?
                     .mechanics
@@ -485,7 +494,17 @@ impl RuntimeState {
                         mechanic,
                     })?;
                 let changed = apply_mechanic_action(entry, action)?;
-                Ok(Outcome::changed_factory_if(changed, project_id, factory_id))
+                let mut outcome = Outcome::changed_factory_if(changed, project_id, factory_id);
+                if needs_compat && changed {
+                    outcome
+                        .commands
+                        .push(RuntimeCommand::EnsureMachineCompat {
+                            project: project_id,
+                            factory: factory_id,
+                            mechanic,
+                        });
+                }
+                Ok(outcome)
             }
             FactoryAction::Flow(action) => match action {
                 FlowAction::AddToTarget { flow, amount } => {
@@ -2261,6 +2280,24 @@ mod tests {
                 .contains(&RuntimeCommand::Recompute { project, factory })
         );
         assert_eq!(state.factory(project, factory).unwrap().mechanics.len(), 1);
+    }
+
+    #[test]
+    fn document_changes_request_quality_limit_check() {
+        let (mut state, project, factory) = state_with_factory();
+        let result = state
+            .dispatch(AppMessage::Factory {
+                project,
+                factory,
+                action: FactoryAction::Flow(FlowAction::AddToTarget {
+                    flow: DualVar::Item(IdWithQuality::new("iron-plate", "uncommon")),
+                    amount: 1.0,
+                }),
+            })
+            .unwrap();
+        assert!(result
+            .commands
+            .contains(&RuntimeCommand::EnsureQualityLimit { project }));
     }
 
     #[test]

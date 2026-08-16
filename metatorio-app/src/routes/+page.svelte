@@ -4,7 +4,7 @@
   import { onMount } from "svelte";
   import { runtime } from "$lib/runtime/store.svelte.ts";
   import { pickDumpFile, pickGameExecutable, pickModDir } from "$lib/runtime/client";
-  import { dualVarLabel, itemOf } from "$lib/runtime/types";
+  import { dualVarLabel, flowQuality, itemOf } from "$lib/runtime/types";
   import type { CatalogKind, DualVar, MechanicId, TargetId } from "$lib/runtime/types";
   import HoverIcon from "$lib/ui/HoverIcon.svelte";
   import Selector from "$lib/ui/Selector.svelte";
@@ -42,7 +42,8 @@
     kind: CatalogKind;
     title: string;
     kinds: { kind: CatalogKind; label: string }[];
-    onSelect: (name: string) => void;
+    categoryFilter?: string[];
+    onSelect: (name: string, quality: string) => void;
   } | null>(null);
 
   // 流选择器（目标/外部输入支持任意 DualVar 流）
@@ -54,10 +55,11 @@
   function openSelector(
     kind: CatalogKind,
     title: string,
-    onSelect: (name: string) => void,
+    onSelect: (name: string, quality: string) => void,
     kinds: { kind: CatalogKind; label: string }[] = [],
+    categoryFilter?: string[],
   ) {
-    selector = { kind, title, kinds, onSelect };
+    selector = { kind, title, kinds, categoryFilter, onSelect };
   }
 
   function renameContextPrompt(context: import("$lib/runtime/types").ContextInfo) {
@@ -177,46 +179,93 @@
   }
 
   // ── 机制拾取器分发 ──────────────────────────────────────────────
-  function pickForMechanic(mechanic: MechanicId, kind: CatalogKind, slot?: number) {
-    switch (kind) {
-      case "recipe":
-        openSelector("recipe", "选择配方", (name) => runtime.setRecipe(mechanic, name));
-        break;
-      case "resource":
-        openSelector("resource", "选择资源", (name) => runtime.setResource(mechanic, name), [
-          { kind: "resource", label: "资源" },
-        ]);
-        break;
-      case "machine":
-        openSelector("machine", "选择机器", (name) => runtime.setMachine(mechanic, name), [
-          { kind: "machine", label: "制造机" },
-          { kind: "mining-machine", label: "采矿机" },
-          { kind: "beacon", label: "信标" },
-        ]);
-        break;
-      case "mining-machine":
-        openSelector("mining-machine", "选择采矿机", (name) => runtime.setMachine(mechanic, name));
-        break;
-      case "fluid":
-        openSelector("fluid", "选择流体", (name) => runtime.setFluid(mechanic, name));
-        break;
-      case "item":
-        openSelector("item", "选择物品", (name) => runtime.setItem(mechanic, name));
-        break;
-      case "generator":
-        openSelector("generator", "选择发电机", (name) => runtime.setGenerator(mechanic, name));
-        break;
-      case "boiler":
-        openSelector("boiler", "选择锅炉", (name) => runtime.setBoiler(mechanic, name));
-        break;
-      case "reactor":
-        openSelector("reactor", "选择反应堆", (name) => runtime.setReactor(mechanic, name));
-        break;
-      case "module":
-        openSelector("module", "选择模块", (name) => runtime.setModuleSlot(mechanic, slot ?? 0, name));
-        break;
-      default:
-        break;
+  async function pickForMechanic(mechanic: MechanicId, kind: CatalogKind, slot?: number) {
+    const entry = mechanics.find((candidate) => candidate.id === mechanic);
+    try {
+      switch (kind) {
+        case "recipe":
+          openSelector("recipe", "选择配方", (name, quality) =>
+            runtime.setRecipe(mechanic, name, quality),
+          );
+          break;
+        case "machine": {
+          // 机器列表按当前配方的 categories 过滤（组装机/电炉/火箭发射井等）
+          const recipeId = entry?.mechanic.recipe?.id;
+          const filter = recipeId
+            ? (await runtime.getDetail("recipe", recipeId))?.categories ?? []
+            : [];
+          openSelector(
+            "machine",
+            "选择机器",
+            (name, quality) => runtime.setMachine(mechanic, name, quality),
+            [{ kind: "machine", label: "制造机" }],
+            filter,
+          );
+          break;
+        }
+        case "mining-machine": {
+          // 采矿机列表按当前资源的 category 过滤
+          const resource = entry?.mechanic.resource;
+          const filter = resource
+            ? (await runtime.getDetail("resource", resource))?.categories ?? []
+            : [];
+          openSelector(
+            "mining-machine",
+            "选择采矿机",
+            (name, quality) => runtime.setMachine(mechanic, name, quality),
+            [{ kind: "mining-machine", label: "采矿机" }],
+            filter,
+          );
+          break;
+        }
+        case "resource": {
+          // 资源列表按当前采矿机的 resource_categories 过滤
+          const machineId = entry?.mechanic.machine?.id;
+          const filter = machineId
+            ? (await runtime.getDetail("mining-machine", machineId))?.categories ?? []
+            : [];
+          openSelector(
+            "resource",
+            "选择资源",
+            (name) => runtime.setResource(mechanic, name),
+            [{ kind: "resource", label: "资源" }],
+            filter,
+          );
+          break;
+        }
+        case "fluid":
+          openSelector("fluid", "选择流体", (name) => runtime.setFluid(mechanic, name));
+          break;
+        case "item":
+          openSelector("item", "选择物品", (name, quality) =>
+            runtime.setItem(mechanic, name, quality),
+          );
+          break;
+        case "generator":
+          openSelector("generator", "选择发电机", (name, quality) =>
+            runtime.setGenerator(mechanic, name, quality),
+          );
+          break;
+        case "boiler":
+          openSelector("boiler", "选择锅炉", (name, quality) =>
+            runtime.setBoiler(mechanic, name, quality),
+          );
+          break;
+        case "reactor":
+          openSelector("reactor", "选择反应堆", (name, quality) =>
+            runtime.setReactor(mechanic, name, quality),
+          );
+          break;
+        case "module":
+          openSelector("module", "选择模块", (name, quality) =>
+            runtime.setModuleSlot(mechanic, slot ?? 0, name, quality),
+          );
+          break;
+        default:
+          break;
+      }
+    } catch {
+      /* 过滤信息拉取失败时仍打开选择器（不过滤） */
     }
   }
 </script>
@@ -311,6 +360,7 @@
           <div class="rows">
             {#each targets as target (target.id)}
               {@const icon = flowIcon(target.flow)}
+              {@const q = flowQuality(target.flow)}
               <div class="row-item">
                 <HoverIcon
                   type={icon.type}
@@ -319,6 +369,7 @@
                   detailKind={flowDetailKind(icon)}
                 />
                 <span class="row-name" title={dualVarLabel(target.flow)}>{dualVarLabel(target.flow)}</span>
+                {#if q}<HoverIcon type="quality" name={q} size={14} detailKind="quality" />{/if}
                 <input
                   class="num"
                   type="number"
@@ -352,6 +403,7 @@
           <div class="rows">
             {#each externalInputs as input (input.id)}
               {@const icon = flowIcon(input.flow)}
+              {@const q = flowQuality(input.flow)}
               <div class="row-item">
                 <HoverIcon
                   type={icon.type}
@@ -360,6 +412,7 @@
                   detailKind={flowDetailKind(icon)}
                 />
                 <span class="row-name" title={dualVarLabel(input.flow)}>{dualVarLabel(input.flow)}</span>
+                {#if q}<HoverIcon type="quality" name={q} size={14} detailKind="quality" />{/if}
                 <input
                   class="num"
                   type="number"
@@ -421,6 +474,21 @@
               <option value="seconds">秒</option>
               <option value="minutes">分钟</option>
               <option value="hours">小时</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>品质上限（超出会自动提升）</label>
+            <select
+              value={project.settings.quality_limit ?? ""}
+              onchange={(event) => {
+                const value = (event.currentTarget as HTMLSelectElement).value;
+                runtime.setQualityLimit(value === "" ? null : value).catch(() => {});
+              }}
+            >
+              <option value="">normal（当前上限）</option>
+              {#each runtime.catalogIndex?.qualities ?? [] as q (q)}
+                <option value={q}>{q}</option>
+              {/each}
             </select>
           </div>
           <label class="check">
@@ -540,6 +608,7 @@
           <div class="rows compact">
             {#each status.flows as balance (balance.flow)}
               {@const icon = flowIcon(balance.flow)}
+              {@const q = flowQuality(balance.flow)}
               <div class="row-item">
                 <HoverIcon
                   type={icon.type}
@@ -548,6 +617,7 @@
                   detailKind={flowDetailKind(icon)}
                 />
                 <span class="row-name" title={dualVarLabel(balance.flow)}>{dualVarLabel(balance.flow)}</span>
+                {#if q}<HoverIcon type="quality" name={q} size={12} detailKind="quality" />{/if}
                 <strong class:amount-pos={balance.amount > 0} class="mono amount">{balance.amount > 0 ? "+" : ""}{balance.amount.toFixed(3)}</strong>
               </div>
             {/each}
@@ -626,6 +696,7 @@
     kind={selector.kind}
     title={selector.title}
     kindOptions={selector.kinds}
+    categoryFilter={selector.categoryFilter}
     onSelect={selector.onSelect}
     onClose={() => (selector = null)}
   />

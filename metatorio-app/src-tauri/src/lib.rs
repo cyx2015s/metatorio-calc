@@ -18,15 +18,19 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use metatorio_data::store::{PrototypeGroup, PrototypeStore};
+use metatorio_core::{DualVar, IdWithQuality, Mechanic};
+use metatorio_data::store::{PrototypeGroup, PrototypeRecord, PrototypeStore};
 use metatorio_data::{
-    CraftingMachineComponent, FluidComponent, ItemComponent, PrototypeBaseComponent,
-    RecipeComponent,
+    CraftingMachineComponent, FluidComponent, ItemComponent, MiningDrillComponent,
+    PrototypeBaseComponent, QualityComponent, RecipeComponent, ResourceEntityComponent,
 };
 use metatorio_runtime::{
     document::AppDocument,
-    id::ProjectId,
-    message::{AppMessage, RuntimeCommand},
+    id::{FactoryId, MechanicId, ProjectId},
+    message::{
+        AppMessage, FactoryAction, MechanicAction, MiningMechanicAction, ProjectAction,
+        RecipeMechanicAction, RuntimeCommand,
+    },
     solve::Runtime,
     state::{DispatchResult, UiState},
 };
@@ -110,11 +114,16 @@ pub struct IndexEntry {
     pub subgroup: String,
     pub icon_type: String,
     pub module_slots: Option<u16>,
+    /// 兼容性类别：machine→crafting_categories、recipe→categories、
+    /// mining-machine→resource_categories、resource→category。
+    pub categories: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CatalogIndex {
     pub context_id: String,
+    /// 可用品质（normal 起，按 order）。
+    pub qualities: Vec<String>,
     pub entries: Vec<IndexEntry>,
 }
 
@@ -137,6 +146,7 @@ pub struct PrototypeDetail {
     pub stack_size: Option<f64>,
     // recipe
     pub category: Option<String>,
+    pub categories: Vec<String>,
     pub energy_required: Option<f64>,
     pub ingredients: Vec<FlowAmount>,
     pub results: Vec<FlowAmount>,
@@ -147,6 +157,13 @@ pub struct PrototypeDetail {
     pub energy_usage_j: Option<f64>,
     // fluid
     pub default_temperature: Option<f64>,
+    // quality（kind = "quality"）
+    pub quality_level: Option<u32>,
+    pub quality_next: Option<String>,
+    pub quality_next_probability: Option<f64>,
+    pub quality_crafting_speed: Option<f64>,
+    pub quality_module_speed: Option<f64>,
+    pub quality_module_productivity: Option<f64>,
 }
 
 // ── Registry helpers ──────────────────────────────────────────────
@@ -621,11 +638,16 @@ fn icon(state: State<'_, AppState>, ty: String, name: String) -> Option<Vec<u8>>
     if !root.is_dir() {
         return None;
     }
-    let candidates = [
-        format!("{ty}/{name}.png"),
-        format!("item/{name}.png"),
-        format!("entity/{name}.png"),
-    ];
+    let candidates: Vec<String> = if ty == "quality" {
+        // 品质图标只有 quality/ 目录；回退到 item/entity 会显示错误的物品图标。
+        vec![format!("quality/{name}.png")]
+    } else {
+        vec![
+            format!("{ty}/{name}.png"),
+            format!("item/{name}.png"),
+            format!("entity/{name}.png"),
+        ]
+    };
     for candidate in candidates {
         let path = root.join(candidate);
         if path.is_file() {
@@ -647,6 +669,7 @@ fn catalog_index(state: State<'_, AppState>) -> Result<CatalogIndex, String> {
     let Some(id) = runtime.effective_context_id() else {
         return Ok(CatalogIndex {
             context_id: String::new(),
+            qualities: Vec::new(),
             entries: Vec::new(),
         });
     };
@@ -654,6 +677,7 @@ fn catalog_index(state: State<'_, AppState>) -> Result<CatalogIndex, String> {
     let store = runtime.context_store_by_id(&id).ok_or("上下文未载入")?;
     Ok(CatalogIndex {
         context_id: id,
+        qualities: store.quality_order().to_vec(),
         entries: catalog_index_from_store(store),
     })
 }
@@ -678,6 +702,15 @@ fn catalog_index_from_store(store: &PrototypeStore) -> Vec<IndexEntry> {
         for (big, subgroups) in order {
             for (sub, names) in subgroups {
                 for name in names {
+                    let categories = if kind == "recipe" {
+                        store
+                            .get(PrototypeGroup::Recipe, name)
+                            .and_then(|record| record.component::<RecipeComponent>())
+                            .and_then(|recipe| recipe.categories.clone())
+                            .unwrap_or_default()
+                    } else {
+                        Vec::new()
+                    };
                     out.push(IndexEntry {
                         kind: kind.to_string(),
                         name: name.clone(),
@@ -685,6 +718,7 @@ fn catalog_index_from_store(store: &PrototypeStore) -> Vec<IndexEntry> {
                         subgroup: sub.clone(),
                         icon_type: icon_type.to_string(),
                         module_slots: None,
+                        categories,
                     });
                 }
             }
@@ -721,6 +755,17 @@ fn catalog_index_from_store(store: &PrototypeStore) -> Vec<IndexEntry> {
                     } else {
                         None
                     };
+                    let categories = match kind {
+                        "machine" => record
+                            .component::<CraftingMachineComponent>()
+                            .map(|machine| machine.crafting_categories.clone())
+                            .unwrap_or_default(),
+                        "mining-machine" => record
+                            .component::<MiningDrillComponent>()
+                            .map(|drill| drill.resource_categories.clone())
+                            .unwrap_or_default(),
+                        _ => Vec::new(),
+                    };
                     out.push(IndexEntry {
                         kind: kind.to_string(),
                         name: name.clone(),
@@ -728,6 +773,7 @@ fn catalog_index_from_store(store: &PrototypeStore) -> Vec<IndexEntry> {
                         subgroup: sub.clone(),
                         icon_type: "entity".to_string(),
                         module_slots: slots,
+                        categories,
                     });
                 }
             }
@@ -752,6 +798,7 @@ fn catalog_index_from_store(store: &PrototypeStore) -> Vec<IndexEntry> {
                         subgroup: sub.clone(),
                         icon_type: "item".to_string(),
                         module_slots: None,
+                        categories: Vec::new(),
                     });
                 }
             }
@@ -769,6 +816,10 @@ fn catalog_index_from_store(store: &PrototypeStore) -> Vec<IndexEntry> {
                     if record.type_ != "resource" {
                         continue;
                     }
+                    let categories = record
+                        .component::<ResourceEntityComponent>()
+                        .map(|resource| vec![resource.category.clone()])
+                        .unwrap_or_default();
                     out.push(IndexEntry {
                         kind: "resource".to_string(),
                         name: name.clone(),
@@ -776,6 +827,7 @@ fn catalog_index_from_store(store: &PrototypeStore) -> Vec<IndexEntry> {
                         subgroup: sub.clone(),
                         icon_type: "entity".to_string(),
                         module_slots: None,
+                        categories,
                     });
                 }
             }
@@ -791,6 +843,7 @@ fn catalog_index_from_store(store: &PrototypeStore) -> Vec<IndexEntry> {
             subgroup: String::new(),
             icon_type: "quality".to_string(),
             module_slots: None,
+            categories: Vec::new(),
         });
     }
 
@@ -820,6 +873,7 @@ fn prototype_detail(
         "technology" => store.get(PrototypeGroup::Technology, &name),
         "planet" => store.get(PrototypeGroup::Planet, &name),
         "surface" => store.get(PrototypeGroup::Surface, &name),
+        "quality" => store.get(PrototypeGroup::Quality, &name),
         _ => store.get(PrototypeGroup::Entity, &name),
     };
     let Some(record) = record else {
@@ -839,10 +893,8 @@ fn prototype_detail(
         detail.stack_size = Some(item.stack_size as f64);
     }
     if let Some(recipe) = record.component::<RecipeComponent>() {
-        detail.category = recipe
-            .categories
-            .as_ref()
-            .map(|categories| categories.join(", "));
+        detail.categories = recipe.categories.clone().unwrap_or_default();
+        detail.category = Some(detail.categories.join(", "));
         detail.energy_required = Some(recipe.energy_required);
         detail.ingredients = recipe.ingredients.iter().map(ingredient_flow).collect();
         detail.results = recipe.results.iter().map(product_flow).collect();
@@ -851,9 +903,26 @@ fn prototype_detail(
         detail.crafting_speed = Some(machine.crafting_speed);
         detail.module_slots = machine.module_slots;
         detail.energy_usage_j = Some(machine.energy_usage.amount);
+        detail.categories = machine.crafting_categories.clone();
+    }
+    if let Some(drill) = record.component::<MiningDrillComponent>() {
+        detail.categories = drill.resource_categories.clone();
+    }
+    if let Some(resource) = record.component::<ResourceEntityComponent>() {
+        if !resource.category.is_empty() {
+            detail.categories = vec![resource.category.clone()];
+        }
     }
     if let Some(fluid) = record.component::<FluidComponent>() {
         detail.default_temperature = Some(fluid.default_temperature);
+    }
+    if let Some(quality) = record.component::<QualityComponent>() {
+        detail.quality_level = Some(quality.level);
+        detail.quality_next = quality.next.clone();
+        detail.quality_next_probability = Some(quality.next_probability);
+        detail.quality_crafting_speed = quality.crafting_machine_speed_multiplier;
+        detail.quality_module_speed = quality.module_speed_multiplier;
+        detail.quality_module_productivity = quality.module_productivity_multiplier;
     }
     Ok(Some(detail))
 }
@@ -1077,6 +1146,294 @@ fn emit<T: Serialize + Clone>(app: &AppHandle, event: &str, payload: T) {
     }
 }
 
+/// 在实体组里挑选一台机器：优先项目规划偏好的机器偏好，其次按给定
+/// 排序分数（如 crafting_speed）取最优；都不满足返回 None。
+fn pick_entity<F: Fn(&metatorio_data::store::PrototypeRecord) -> bool, S: Fn(&metatorio_data::store::PrototypeRecord) -> f64>(
+    store: &PrototypeStore,
+    prefs: &[IdWithQuality],
+    matches: F,
+    score: S,
+) -> Option<String> {
+    let mut candidates: Vec<(&PrototypeRecord, f64)> = store
+        .group(PrototypeGroup::Entity)
+        .filter(|record| matches(record))
+        .map(|record| (record, score(record)))
+        .collect();
+    for pref in prefs {
+        if let Some((record, _)) = candidates.iter().find(|(record, _)| record.name == pref.id) {
+            return Some(record.name.clone());
+        }
+    }
+    if candidates.is_empty() {
+        return None;
+    }
+    candidates.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.0.name.cmp(&b.0.name))
+    });
+    Some(candidates[0].0.name.clone())
+}
+
+fn categories_overlap(required: &[String], available: &[String]) -> bool {
+    required.is_empty() || available.iter().any(|available| required.contains(available))
+}
+
+fn quality_level_of(qualities: &[String], name: &str) -> usize {
+    qualities.iter().position(|candidate| candidate == name).unwrap_or(0)
+}
+
+fn flow_quality_level(qualities: &[String], flow: &DualVar) -> usize {
+    let name = match flow {
+        DualVar::Item(id) | DualVar::Entity(id) => &id.quality,
+        _ => return 0,
+    };
+    quality_level_of(qualities, name)
+}
+
+fn mechanic_quality_level(qualities: &[String], mechanic: &Mechanic) -> usize {
+    let mut ids: Vec<&IdWithQuality> = match mechanic {
+        Mechanic::Recipe(mechanic) => vec![&mechanic.recipe, &mechanic.machine],
+        Mechanic::Mining(mechanic) => vec![&mechanic.machine],
+        Mechanic::Spoil(mechanic) => vec![&mechanic.item],
+        Mechanic::Plant(mechanic) => vec![&mechanic.seed],
+        Mechanic::ItemFuel(mechanic) => vec![&mechanic.item],
+        Mechanic::ItemLaunch(mechanic) => vec![&mechanic.item],
+        Mechanic::Generator(mechanic) => vec![&mechanic.generator],
+        Mechanic::Boiler(mechanic) => vec![&mechanic.boiler],
+        Mechanic::Reactor(mechanic) => vec![&mechanic.reactor],
+        _ => Vec::new(),
+    };
+    if let Mechanic::Recipe(mechanic) = mechanic {
+        ids.extend(mechanic.module_config.modules.iter());
+    }
+    if let Mechanic::Mining(mechanic) = mechanic {
+        ids.extend(mechanic.module_config.modules.iter());
+    }
+    ids.iter()
+        .map(|id| quality_level_of(qualities, &id.quality))
+        .max()
+        .unwrap_or(0)
+}
+
+/// 项目品质上限自动提升：文档中出现高于当前上限的品质时（目标/外部输入/
+/// 机制），把 `ProjectSettings.quality_limit` 提升到该品质。这样"显式要求
+/// uncommon 目标"不会被默认的 normal 上限静默判死。
+fn ensure_quality_limit(
+    state: &AppState,
+    runtime: &mut Runtime,
+    project: ProjectId,
+) -> Result<(), String> {
+    let context_id = runtime
+        .state
+        .project(project)
+        .map_err(|error| error.to_string())?
+        .context_id
+        .clone()
+        .or_else(|| runtime.active_context().map(str::to_string));
+    let Some(context_id) = context_id else {
+        return Ok(());
+    };
+    ensure_context_loaded(state, runtime, &context_id)?;
+    let qualities = runtime
+        .context_store_by_id(&context_id)
+        .map(|store| store.quality_order().to_vec())
+        .unwrap_or_default();
+    if qualities.len() <= 1 {
+        return Ok(());
+    }
+
+    let (all_accessible, current_limit) = {
+        let project_doc = runtime
+            .state
+            .project(project)
+            .map_err(|error| error.to_string())?;
+        (
+            project_doc.settings.all_accessible,
+            project_doc.settings.quality_limit.clone(),
+        )
+    };
+    if all_accessible {
+        return Ok(());
+    }
+    let current_level = current_limit
+        .as_deref()
+        .map(|quality| quality_level_of(&qualities, quality))
+        .unwrap_or(0);
+
+    let mut max_level = current_level;
+    {
+        let project_doc = runtime
+            .state
+            .project(project)
+            .map_err(|error| error.to_string())?;
+        for factory in &project_doc.factories {
+            for target in &factory.targets {
+                max_level = max_level.max(flow_quality_level(&qualities, &target.flow));
+            }
+            for input in &factory.external_inputs {
+                max_level = max_level.max(flow_quality_level(&qualities, &input.flow));
+            }
+            for entry in &factory.mechanics {
+                max_level = max_level.max(mechanic_quality_level(&qualities, &entry.mechanic));
+            }
+        }
+    }
+    if max_level > current_level {
+        let quality = qualities[max_level].clone();
+        runtime
+            .dispatch(AppMessage::Project {
+                project,
+                action: ProjectAction::SetQualityLimit {
+                    quality: Some(quality),
+                },
+            })
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+/// 配方/资源变化后的机器兼容性校验与回退：
+/// - 当前机器兼容（类别匹配）→ 不动；
+/// - 不兼容或未设置 → 挑选默认机器（项目规划偏好优先，其次最高 crafting_speed），
+///   通过 reducer 重新 SetMachine（保持原品质）。
+fn ensure_machine_compat(
+    state: &AppState,
+    runtime: &mut Runtime,
+    project: ProjectId,
+    factory: FactoryId,
+    mechanic: MechanicId,
+) -> Result<(), String> {
+    let context_id = runtime
+        .state
+        .project(project)
+        .map_err(|error| error.to_string())?
+        .context_id
+        .clone()
+        .or_else(|| runtime.active_context().map(str::to_string));
+    let Some(context_id) = context_id else {
+        return Ok(()); // 没有上下文时无从校验
+    };
+    ensure_context_loaded(state, runtime, &context_id)?;
+    let store = runtime
+        .context_store_by_id(&context_id)
+        .ok_or_else(|| "上下文未载入".to_string())?
+        .clone();
+    let prefs = runtime
+        .state
+        .project(project)
+        .map_err(|error| error.to_string())?
+        .planning
+        .machine_preferences
+        .clone();
+
+    let entry = runtime
+        .state
+        .factory(project, factory)
+        .map_err(|error| error.to_string())?
+        .mechanics
+        .iter()
+        .find(|entry| entry.id == mechanic)
+        .cloned()
+        .ok_or_else(|| "机制不存在".to_string())?;
+
+    match &entry.mechanic {
+        Mechanic::Recipe(recipe) => {
+            let recipe_categories = store
+                .get(PrototypeGroup::Recipe, &recipe.recipe.id)
+                .and_then(|record| record.component::<RecipeComponent>())
+                .and_then(|recipe| recipe.categories.clone())
+                .unwrap_or_default();
+            let machine_ok = !recipe.machine.id.is_empty()
+                && store
+                    .get(PrototypeGroup::Entity, &recipe.machine.id)
+                    .and_then(|record| record.component::<CraftingMachineComponent>())
+                    .is_some_and(|machine| {
+                        categories_overlap(&recipe_categories, &machine.crafting_categories)
+                    });
+            if machine_ok {
+                return Ok(());
+            }
+            let pick = pick_entity(
+                &store,
+                &prefs,
+                |record| {
+                    record.component::<CraftingMachineComponent>().is_some_and(|machine| {
+                        categories_overlap(&recipe_categories, &machine.crafting_categories)
+                    })
+                },
+                |record| {
+                    record
+                        .component::<CraftingMachineComponent>()
+                        .map(|machine| machine.crafting_speed)
+                        .unwrap_or(0.0)
+                },
+            );
+            if let Some(machine) = pick {
+                let machine = IdWithQuality::new(machine, &recipe.machine.quality);
+                runtime
+                    .dispatch(AppMessage::Factory {
+                        project,
+                        factory,
+                        action: FactoryAction::Mechanic {
+                            mechanic,
+                            action: MechanicAction::Recipe(RecipeMechanicAction::SetMachine {
+                                machine,
+                            }),
+                        },
+                    })
+                    .map_err(|error| error.to_string())?;
+            }
+        }
+        Mechanic::Mining(mining) => {
+            let resource_category = store
+                .get(PrototypeGroup::Entity, &mining.resource)
+                .and_then(|record| record.component::<ResourceEntityComponent>())
+                .map(|resource| resource.category.clone())
+                .unwrap_or_default();
+            let machine_ok = !mining.machine.id.is_empty()
+                && store
+                    .get(PrototypeGroup::Entity, &mining.machine.id)
+                    .and_then(|record| record.component::<MiningDrillComponent>())
+                    .is_some_and(|drill| {
+                        resource_category.is_empty()
+                            || drill.resource_categories.contains(&resource_category)
+                    });
+            if machine_ok {
+                return Ok(());
+            }
+            let pick = pick_entity(
+                &store,
+                &prefs,
+                |record| {
+                    record.component::<MiningDrillComponent>().is_some_and(|drill| {
+                        resource_category.is_empty()
+                            || drill.resource_categories.contains(&resource_category)
+                    })
+                },
+                |_| 0.0,
+            );
+            if let Some(machine) = pick {
+                let machine = IdWithQuality::new(machine, &mining.machine.quality);
+                runtime
+                    .dispatch(AppMessage::Factory {
+                        project,
+                        factory,
+                        action: FactoryAction::Mechanic {
+                            mechanic,
+                            action: MechanicAction::Mining(MiningMechanicAction::SetMachine {
+                                machine,
+                            }),
+                        },
+                    })
+                    .map_err(|error| error.to_string())?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 fn execute_command(
     app: &AppHandle,
     state: &AppState,
@@ -1101,6 +1458,21 @@ fn execute_command(
             match runtime.solve_factory(*project, *factory) {
                 Ok(result) => emit(app, "solve-result", result),
                 Err(error) => emit(app, "solve-error", error.to_string()),
+            }
+        }
+        RuntimeCommand::EnsureMachineCompat {
+            project,
+            factory,
+            mechanic,
+        } => {
+            if let Err(error) = ensure_machine_compat(state, runtime, *project, *factory, *mechanic)
+            {
+                eprintln!("machine compat fallback failed: {error}");
+            }
+        }
+        RuntimeCommand::EnsureQualityLimit { project } => {
+            if let Err(error) = ensure_quality_limit(state, runtime, *project) {
+                eprintln!("quality limit auto-raise failed: {error}");
             }
         }
         RuntimeCommand::Persist { project, path } => {

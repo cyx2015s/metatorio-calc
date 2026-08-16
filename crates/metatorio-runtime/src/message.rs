@@ -655,6 +655,17 @@ pub enum RuntimeCommand {
         project: ProjectId,
         factory: FactoryId,
     },
+    /// 机制主字段（配方/资源）变化后，由外层校验机器兼容性并回退。
+    EnsureMachineCompat {
+        project: ProjectId,
+        factory: FactoryId,
+        mechanic: MechanicId,
+    },
+    /// 文档变更后，由外层校验项目品质上限是否低于文档中出现的品质
+    /// （目标/外部输入/机制），低于则自动提升。
+    EnsureQualityLimit {
+        project: ProjectId,
+    },
     AutoPlan {
         project: ProjectId,
         factory: FactoryId,
