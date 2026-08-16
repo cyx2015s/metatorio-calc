@@ -415,8 +415,13 @@
     const entry = mechanics.find((candidate) => candidate.id === mechanic);
     openSelector("beacon", "选择信标（添加）", (name, quality) => {
       const existing = entry?.mechanic.module_config?.beacons ?? [];
-      if (existing.some((beacon) => beacon.beacon.id === name)) {
-        showNotice(`信标 ${name} 已添加，不能重复`);
+      // 重复按 IdWithQuality 判等：同种信标不同品质允许并存
+      if (
+        existing.some(
+          (beacon) => beacon.beacon.id === name && beacon.beacon.quality === quality,
+        )
+      ) {
+        showNotice(`信标 ${name}（${runtime.localizedName("quality", quality)}）已添加，不能重复`);
         return;
       }
       runtime

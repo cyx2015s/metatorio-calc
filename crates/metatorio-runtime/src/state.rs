@@ -1854,14 +1854,11 @@ fn apply_module_action(
                     "信标未选择，无法添加".to_string(),
                 ));
             }
-            if config
-                .beacons
-                .iter()
-                .any(|existing| existing.beacon.id == beacon.id)
-            {
+            // 重复按 IdWithQuality 整体判等（id + 品质）：同种信标不同品质允许并存。
+            if config.beacons.iter().any(|existing| existing.beacon == beacon) {
                 return Err(RuntimeError::InvalidValue(format!(
-                    "信标 {} 已添加，不能重复",
-                    beacon.id
+                    "信标 {}（{}）已添加，不能重复",
+                    beacon.id, beacon.quality
                 )));
             }
             config.beacons.push(BeaconConfig {
@@ -1883,15 +1880,16 @@ fn apply_module_action(
             if value.id.is_empty() {
                 return Err(RuntimeError::InvalidValue("信标未选择".to_string()));
             }
+            // 按 IdWithQuality 判等（排除自身索引）：同种不同品质不算重复。
             if config
                 .beacons
                 .iter()
                 .enumerate()
-                .any(|(index, existing)| index != beacon && existing.beacon.id == value.id)
+                .any(|(index, existing)| index != beacon && existing.beacon == value)
             {
                 return Err(RuntimeError::InvalidValue(format!(
-                    "信标 {} 已添加，不能重复",
-                    value.id
+                    "信标 {}（{}）已添加，不能重复",
+                    value.id, value.quality
                 )));
             }
             let beacon = config.beacons.get_mut(beacon).ok_or_else(|| {
@@ -2503,23 +2501,38 @@ mod tests {
         assert_eq!(recipe.module_config.beacons[0].count, 1);
         assert_eq!(recipe.module_config.beacons[0].share, 1.0);
 
-        // 重复信标拒绝
+        // 重复信标（同 id 同品质）拒绝
         let error = state.dispatch(module(ModuleAction::AddBeacon {
             beacon: IdWithQuality::new("beacon", "normal"),
         }));
         assert!(matches!(error, Err(RuntimeError::InvalidValue(_))));
 
-        // SetBeacon 换到另一个已有信标也拒绝；改成新信标允许
+        // 同种信标不同品质：允许（重复按 IdWithQuality 判等，不是按 name）
         state
             .dispatch(module(ModuleAction::AddBeacon {
-                beacon: IdWithQuality::new("big-beacon", "normal"),
+                beacon: IdWithQuality::new("beacon", "uncommon"),
             }))
             .unwrap();
+        let Mechanic::Recipe(recipe) =
+            &state.factory(project, factory).unwrap().mechanics[0].mechanic
+        else {
+            panic!("expected recipe mechanic");
+        };
+        assert_eq!(recipe.module_config.beacons.len(), 2);
+
+        // SetBeacon 换到另一个已有信标（同 id 同品质）拒绝；
+        // 换成同种但不同品质允许；换成新信标允许
         let error = state.dispatch(module(ModuleAction::SetBeacon {
             beacon: 1,
             value: IdWithQuality::new("beacon", "normal"),
         }));
         assert!(matches!(error, Err(RuntimeError::InvalidValue(_))));
+        state
+            .dispatch(module(ModuleAction::SetBeacon {
+                beacon: 1,
+                value: IdWithQuality::new("beacon", "rare"),
+            }))
+            .unwrap();
         state
             .dispatch(module(ModuleAction::SetBeacon {
                 beacon: 1,
