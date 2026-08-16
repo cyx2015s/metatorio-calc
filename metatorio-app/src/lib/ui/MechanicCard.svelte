@@ -98,6 +98,7 @@
         name={primaryName || `+ ${kindLabel[kind] ?? kind}`}
         size={30}
         detailKind={primaryName ? primaryKind() : undefined}
+        quality={primaryName ? primaryQuality : undefined}
       />
     </button>
 
@@ -132,6 +133,7 @@
           name={machineName || "machine"}
           size={24}
           detailKind={machineName ? machineKind() : undefined}
+          quality={machineName ? machineQuality : undefined}
         />
       </button>
       <span class="sub">

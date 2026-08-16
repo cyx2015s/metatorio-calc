@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fs::File, path::Path};
 
-use metatorio_core::{Context, DualVar, GameState, Mechanic};
+use metatorio_core::{Context, DualVar, GameState, Mechanic, ModuleConfig};
 use metatorio_data::generated_components::{EntityComponent, ItemComponent};
 use metatorio_data::store::PrototypeStore;
 use metatorio_solver::{AIndexMap, SolverData, SolverSolution, TargetSpec};
@@ -303,15 +303,27 @@ fn entity_area(store: &PrototypeStore, name: &str) -> Option<f64> {
     Some((bb.1 .0 - bb.0 .0).abs() * (bb.1 .1 - bb.0 .1).abs())
 }
 
-/// 单台实例成本（复刻旧实现）：
-/// - 带机器/设备的机制：机器碰撞箱面积（缺失回退 16.0）；
+/// 单台实例成本（复刻旧实现 + 信标占地）：
+/// - 带机器/设备的机制：机器碰撞箱面积 + Σ(信标面积 × 信标数 / 共享比例)
+///   （缺失回退 16.0）；
 /// - 腐坏：spoil_ticks / stack_size / 16；
 /// - 其余（种植/物品燃料/发射）：固定 16.0。
 fn instance_cost(store: &PrototypeStore, mechanic: &Mechanic) -> f64 {
     let area = |name: &str| entity_area(store, name).unwrap_or(16.0);
+    let beacon_area = |config: &ModuleConfig| -> f64 {
+        config
+            .beacons
+            .iter()
+            .map(|beacon| {
+                area(&beacon.beacon.id) * beacon.count as f64 / beacon.share.max(1.0)
+            })
+            .sum()
+    };
     match mechanic {
-        Mechanic::Recipe(mechanic) => area(&mechanic.machine.id),
-        Mechanic::Mining(mechanic) => area(&mechanic.machine.id),
+        Mechanic::Recipe(mechanic) => area(&mechanic.machine.id) + beacon_area(&mechanic.module_config),
+        Mechanic::Mining(mechanic) => {
+            area(&mechanic.machine.id) + beacon_area(&mechanic.module_config)
+        }
         Mechanic::Generator(mechanic) => area(&mechanic.generator.id),
         Mechanic::Boiler(mechanic) => area(&mechanic.boiler.id),
         Mechanic::Reactor(mechanic) => area(&mechanic.reactor.id),

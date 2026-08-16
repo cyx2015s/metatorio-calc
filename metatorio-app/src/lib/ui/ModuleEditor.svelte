@@ -78,7 +78,7 @@
       {#if i < modules.length}
         <div class="me-slot">
           <button class="icon-btn" title={`插件槽 ${i + 1}（点击更换）`} onclick={() => onPickModule(i)}>
-            <HoverIcon type="item" name={modules[i].id} size={24} detailKind="module" />
+            <HoverIcon type="item" name={modules[i].id} size={24} detailKind="module" quality={modules[i].quality} />
           </button>
           <button
             class="me-x"
@@ -114,6 +114,7 @@
                 name={beacon.beacon.id || "beacon"}
                 size={24}
                 detailKind={beacon.beacon.id ? "beacon" : undefined}
+                quality={beacon.beacon.quality}
               />
             </button>
             <label class="me-num">
@@ -146,7 +147,7 @@
             {#each beacon.modules as [module, count], mi (mi)}
               <div class="me-beacon-module">
                 <button class="icon-btn" title="选择塔内插件" onclick={() => onPickBeaconModule(bi, mi)}>
-                  <HoverIcon type="item" name={module.id} size={20} detailKind="module" />
+                  <HoverIcon type="item" name={module.id} size={20} detailKind="module" quality={module.quality} />
                 </button>
                 <input
                   type="number"

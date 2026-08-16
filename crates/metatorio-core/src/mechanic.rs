@@ -318,3 +318,67 @@ pub struct ReactorMechanic {
     /// 明确燃料 ID（反应堆通常使用物品）；None = 自动选择/无需燃料。
     pub fuel: Option<String>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::context::{Context, GameState};
+    use metatorio_data::store::PrototypeStore;
+
+    #[test]
+    fn beacon_modules_contribute_to_effect() {
+        let dump = serde_json::json!({
+            "module": {
+                "speed-module-3": {
+                    "name": "speed-module-3",
+                    "category": "speed",
+                    "tier": 3,
+                    "effect": { "speed": 0.5, "consumption": 0.5, "productivity": 0.0, "pollution": 0.0, "quality": 0.0 }
+                }
+            },
+            "beacon": {
+                "beacon": {
+                    "name": "beacon",
+                    "distribution_effectivity": 1.0,
+                    "module_slots": 2,
+                    "energy_usage": "480kW",
+                    "energy_source": { "type": "electric" }
+                }
+            },
+            "quality": {
+                "normal": { "name": "normal", "level": 0 }
+            }
+        });
+        let store = PrototypeStore::load(&dump).expect("dump 加载失败");
+        let game = GameState {
+            qualities: vec!["normal".to_string()],
+            max_quality: 0,
+            ..Default::default()
+        };
+        let ctx = Context::new(&store, &game);
+
+        // 无信标：速度为 0。
+        let without = ModuleConfig {
+            modules: vec![],
+            beacons: vec![],
+        };
+        assert_eq!(without.get_effect(&ctx).speed, 0.0);
+        // 一个信标 + 2 个速度插件 → 速度 > 0。
+        let with_beacon = ModuleConfig {
+            modules: vec![],
+            beacons: vec![BeaconConfig {
+                beacon: IdWithQuality::new("beacon", "normal"),
+                count: 1,
+                share: 1.0,
+                modules: vec![(IdWithQuality::new("speed-module-3", "normal"), 2)],
+            }],
+        };
+        let effect = with_beacon.get_effect(&ctx);
+        assert!(
+            effect.speed > 0.0,
+            "信标中的插件应计入产出加成：{effect:?}"
+        );
+        // 信标耗电（均摊）> 0。
+        assert!(with_beacon.get_consumption(&ctx) > 0.0);
+    }
+}

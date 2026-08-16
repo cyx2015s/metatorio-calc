@@ -266,24 +266,6 @@ fn context_id_of(raw: &[u8]) -> String {
     format!("{:016x}", xxhash_rust::xxh3::xxh3_64(raw))
 }
 
-fn copy_dir(src: &Path, dst: &Path) {
-    if !src.is_dir() {
-        return;
-    }
-    let _ = std::fs::create_dir_all(dst);
-    if let Ok(entries) = std::fs::read_dir(src) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let target = dst.join(entry.file_name());
-            if path.is_dir() {
-                copy_dir(&path, &target);
-            } else {
-                let _ = std::fs::copy(&path, &target);
-            }
-        }
-    }
-}
-
 // ── Context loading / registration ────────────────────────────────
 
 fn ensure_context_loaded(
@@ -310,13 +292,39 @@ fn ensure_context_loaded(
 
 /// Register a new context (or reuse the cached one by content hash), persist
 /// it, load its store and make it active.
+/// 图标来源：导出路径用 Move（rename，同卷瞬间、缓存自包含不可变），
+/// dump 导入路径用 Copy（用户目录不可 rename）。
+enum IconImport {
+    None,
+    Move(PathBuf),
+    Copy(PathBuf),
+}
+
+fn copy_dir(src: &Path, dst: &Path) {
+    if !src.is_dir() {
+        return;
+    }
+    let _ = std::fs::create_dir_all(dst);
+    if let Ok(entries) = std::fs::read_dir(src) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let target = dst.join(entry.file_name());
+            if path.is_dir() {
+                copy_dir(&path, &target);
+            } else {
+                let _ = std::fs::copy(&path, &target);
+            }
+        }
+    }
+}
+
 fn register_context(
     state: &AppState,
     runtime: &mut Runtime,
     name: String,
     source: String,
     raw: &[u8],
-    icon_src: Option<&Path>,
+    icon: IconImport,
 ) -> Result<ContextInfo, String> {
     let id = context_id_of(raw);
     {
@@ -324,8 +332,17 @@ fn register_context(
         if !registry.meta.contains_key(&id) {
             registry.register(id.clone(), name, source);
             std::fs::write(registry.dump_path(&id), raw).map_err(|error| error.to_string())?;
-            if let Some(src) = icon_src {
-                copy_dir(src, &registry.icon_root(&id));
+            match &icon {
+                IconImport::None => {}
+                IconImport::Move(src) => {
+                    // 同卷 rename：把本次导出的图标目录整体移入缓存，之后
+                    // 再次导出覆盖暂存目录也不会影响这个上下文。
+                    let dst = registry.icon_root(&id);
+                    if let Err(error) = std::fs::rename(src, &dst) {
+                        eprintln!("移动图标失败（忽略，使用占位图标）: {error}");
+                    }
+                }
+                IconImport::Copy(src) => copy_dir(src, &registry.icon_root(&id)),
             }
         }
     }
@@ -468,12 +485,19 @@ fn load_game_context_impl(
         "exe: {executable_path}{}",
         mod_dir.map(|dir| format!(", mods: {dir}")).unwrap_or_default()
     );
-    let icon_src = script_output.join("icons");
+    let icon_src = script_output.clone();
     let mut runtime = state
         .runtime
         .lock()
         .map_err(|_| "runtime lock poisoned".to_string())?;
-    register_context(state, &mut runtime, name, source, &raw, Some(&icon_src))
+    register_context(
+        state,
+        &mut runtime,
+        name,
+        source,
+        &raw,
+        IconImport::Move(icon_src),
+    )
 }
 
 // ── Commands ──────────────────────────────────────────────────────
@@ -486,7 +510,14 @@ fn load_bundled_dump(app: AppHandle) -> Result<ContextInfo, String> {
         .runtime
         .lock()
         .map_err(|_| "runtime lock poisoned".to_string())?;
-    let info = register_context(&state, &mut runtime, "内置示例".to_string(), "embedded demo".to_string(), DEMO_DUMP.as_bytes(), None)?;
+    let info = register_context(
+        &state,
+        &mut runtime,
+        "内置示例".to_string(),
+        "embedded demo".to_string(),
+        DEMO_DUMP.as_bytes(),
+        IconImport::None,
+    )?;
     emit_contexts_changed(&app, &state);
     Ok(info)
 }
@@ -521,22 +552,26 @@ async fn load_dump(app: AppHandle, path: String) -> Result<ContextInfo, String> 
             .unwrap_or("dump")
             .to_string();
         let source = format!("dump: {path}");
-        let icon_src = Path::new(&path)
-            .parent()
-            .map(|dir| dir.join("icons"))
-            .filter(|dir| dir.is_dir());
+        // 图标根：优先 dump 旁的 icons/（旧约定），否则 dump 所在目录本身
+        // （导出时类型目录直接位于 script-output 根下）。
+        let icon = match Path::new(&path).parent() {
+            Some(parent) => {
+                let sibling = parent.join("icons");
+                if sibling.is_dir() {
+                    IconImport::Copy(sibling)
+                } else if parent.join("item").is_dir() {
+                    IconImport::Copy(parent.to_path_buf())
+                } else {
+                    IconImport::None
+                }
+            }
+            None => IconImport::None,
+        };
         let mut runtime = state
             .runtime
             .lock()
             .map_err(|_| "runtime lock poisoned".to_string())?;
-        let info = register_context(
-            &state,
-            &mut runtime,
-            name,
-            source,
-            &raw,
-            icon_src.as_deref(),
-        )?;
+        let info = register_context(&state, &mut runtime, name, source, &raw, icon)?;
         emit_contexts_changed(&app, &state);
         Ok(info)
     })
@@ -633,14 +668,16 @@ async fn delete_context(app: AppHandle, id: String) -> Result<ContextList, Strin
 }
 
 /// Game icon PNG bytes for the *effective* context's `<icons>/<ty>/<name>.png`
-/// (from `--dump-icon-sprites`).
+/// (from `--dump-icon-sprites`)。图标在注册时已移入/拷入缓存，缓存自包含。
 #[tauri::command]
 fn icon(state: State<'_, AppState>, ty: String, name: String) -> Option<Vec<u8>> {
     let runtime = state.runtime.lock().ok()?;
     let id = runtime.effective_context_id()?;
-    let registry = state.contexts.lock().ok()?;
-    let root = registry.icon_root(&id);
-    if !root.is_dir() {
+    let cache_root = {
+        let registry = state.contexts.lock().ok()?;
+        registry.icon_root(&id)
+    };
+    if !cache_root.is_dir() {
         return None;
     }
     let candidates: Vec<String> = if ty == "quality" {
@@ -654,7 +691,7 @@ fn icon(state: State<'_, AppState>, ty: String, name: String) -> Option<Vec<u8>>
         ]
     };
     for candidate in candidates {
-        let path = root.join(candidate);
+        let path = cache_root.join(candidate);
         if path.is_file() {
             if let Ok(bytes) = std::fs::read(path) {
                 return Some(bytes);

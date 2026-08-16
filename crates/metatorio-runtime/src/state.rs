@@ -1,6 +1,6 @@
 use std::{collections::BTreeSet, fmt};
 
-use metatorio_core::{DualVar, IdWithQuality, Mechanic, ModuleConfig};
+use metatorio_core::{DualVar, Mechanic, ModuleConfig};
 use serde::Serialize;
 
 use crate::document::{
@@ -1825,8 +1825,9 @@ fn apply_module_action(
     match action {
         ModuleAction::SetModuleSlot { slot, module } => {
             if let Some(module) = module {
+                // 复刻旧行为：非首个槽位被设置时，前面的空槽填充相同的插件。
                 while config.modules.len() <= slot {
-                    config.modules.push(IdWithQuality::default());
+                    config.modules.push(module.clone());
                 }
                 Ok(replace(&mut config.modules[slot], module))
             } else if slot < config.modules.len() {
@@ -2253,6 +2254,7 @@ fn validate_positive(name: &str, value: f64) -> Result<(), RuntimeError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use metatorio_core::IdWithQuality;
     use crate::message::{
         AppMessage, FactoryAction, FactoryTemplate, MechanicAction, MechanicListAction,
         ProjectAction,

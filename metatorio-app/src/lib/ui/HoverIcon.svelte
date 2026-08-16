@@ -13,12 +13,15 @@
     size = 28,
     title,
     detailKind,
+    quality,
   }: {
     type?: string;
     name?: string;
     size?: number;
     title?: string;
     detailKind?: string;
+    /** 带品质时在图标左下角叠加品质角标（边长为主图标一半）。 */
+    quality?: string;
   } = $props();
 
   let hoverActive = $state(false);
@@ -63,6 +66,11 @@
   onmouseleave={leave}
 >
   <Icon {type} {name} {size} {title} />
+  {#if quality && quality !== "normal"}
+    <span class="quality-corner" style={`--corner:${Math.max(10, Math.round(size / 2))}px`}>
+      <Icon type="quality" name={quality} size={Math.max(10, Math.round(size / 2))} title={`${name} · ${quality}`} />
+    </span>
+  {/if}
 </span>
 
 {#if hoverActive && detail}
@@ -71,7 +79,23 @@
 
 <style>
   .hover-icon {
+    position: relative;
     display: inline-flex;
     flex: 0 0 auto;
+  }
+
+  .quality-corner {
+    position: absolute;
+    left: -1px;
+    bottom: -1px;
+    width: var(--corner);
+    height: var(--corner);
+    display: inline-flex;
+    border-radius: 4px;
+    overflow: hidden;
+  }
+
+  .quality-corner :global(.icon) {
+    border-radius: 0;
   }
 </style>

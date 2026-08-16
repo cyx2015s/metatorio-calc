@@ -179,7 +179,12 @@
   }
 
   // ── 机制拾取器分发 ──────────────────────────────────────────────
-  async function pickForMechanic(mechanic: MechanicId, kind: CatalogKind, a?: number, b?: number) {
+  async function pickForMechanic(
+    mechanic: MechanicId,
+    kind: CatalogKind | "beacon-module",
+    a?: number,
+    b?: number,
+  ) {
     const entry = mechanics.find((candidate) => candidate.id === mechanic);
     try {
       switch (kind) {
