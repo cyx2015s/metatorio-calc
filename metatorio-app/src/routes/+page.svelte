@@ -116,6 +116,7 @@
   let factory = $derived(runtime.selectedFactory);
   let mechanics = $derived(factory?.mechanics ?? []);
   let targets = $derived(factory?.targets ?? []);
+  let targetExpressions = $derived(factory?.target_expressions ?? []);
   let externalInputs = $derived(factory?.external_inputs ?? []);
   let solve = $derived(runtime.solve);
   let solveMap = $derived(
@@ -658,6 +659,111 @@
               })}
             disabled={!runtime.activeContext}
           >+ 添加目标</button>
+        </section>
+
+        <section class="panel">
+          <div class="title">目标表达式 <span class="count">{targetExpressions.length}</span></div>
+          <div class="rows">
+            {#each targetExpressions as expression, ei (expression.id)}
+              <div class="expr-card">
+                <div class="expr-head">
+                  <label class="expr-const">
+                    常数
+                    <input
+                      class="num"
+                      type="number"
+                      step="0.1"
+                      value={String(expression.constant)}
+                      onchange={(event) => {
+                        const value = Number((event.currentTarget as HTMLInputElement).value);
+                        if (Number.isFinite(value)) {
+                          runtime
+                            .setTargetExpressionConstant(expression.id, value)
+                            .catch(() => {});
+                        }
+                      }}
+                    />
+                  </label>
+                  <button
+                    class="btn ghost"
+                    title="移除表达式"
+                    onclick={() => runtime.removeTargetExpression(expression.id).catch(() => {})}
+                  >×</button>
+                </div>
+                <div class="expr-terms">
+                  {#each expression.terms as term, ti (term.id)}
+                    {@const icon = flowIcon(term.flow)}
+                    <div class="expr-term">
+                      <button
+                        class="icon-btn"
+                        title="更换流的种类"
+                        onclick={() => {
+                          flowSelector = {
+                            title: "更改目标表达式的流",
+                            initialTab: flowTabOf(term.flow),
+                            ...flowInitialOf(term.flow),
+                            onSelectFlow: (flow) =>
+                              runtime
+                                .setTargetExpressionTermFlow(expression.id, term.id, flow)
+                                .catch(() => {}),
+                          };
+                        }}
+                      >
+                        <HoverIcon
+                          type={icon.type}
+                          name={icon.name}
+                          size={20}
+                          detailKind={flowDetailKind(icon)}
+                          quality={flowQuality(term.flow) ?? undefined}
+                        />
+                      </button>
+                      <span class="row-name" title={dualVarLabel(term.flow)}>{flowLabel(term.flow)}</span>
+                      <input
+                        class="num"
+                        type="number"
+                        step="0.1"
+                        value={String(term.coefficient)}
+                        onchange={(event) => {
+                          const value = Number((event.currentTarget as HTMLInputElement).value);
+                          if (Number.isFinite(value)) {
+                            runtime
+                              .setTargetExpressionTermCoefficient(expression.id, term.id, value)
+                              .catch(() => {});
+                          }
+                        }}
+                      />
+                      <button
+                        class="btn ghost"
+                        title="移除项"
+                        onclick={() =>
+                          runtime
+                            .removeTargetExpressionTerm(expression.id, term.id)
+                            .catch(() => {})}
+                      >×</button>
+                    </div>
+                  {:else}
+                    <span class="muted">还没有项（仅常数）</span>
+                  {/each}
+                </div>
+                <button
+                  class="btn"
+                  onclick={() =>
+                    (flowSelector = {
+                      title: "添加目标表达式项",
+                      onSelectFlow: (flow) =>
+                        runtime.addTargetExpressionTerm(expression.id, flow).catch(() => {}),
+                    })}
+                >+ 添加项</button>
+              </div>
+            {:else}
+              <div class="empty-hint">目标表达式 = 常数 + Σ(流 × 系数)</div>
+            {/each}
+          </div>
+          <button
+            class="btn"
+            onclick={() => runtime.addTargetExpression().catch(() => {})}
+            disabled={!runtime.activeContext}
+          >+ 添加表达式</button>
         </section>
 
         <section class="panel">
@@ -1825,6 +1931,42 @@
     display: flex;
     align-items: center;
     gap: 6px;
+  }
+
+  .expr-card {
+    display: grid;
+    gap: 6px;
+    padding: 7px;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+  }
+
+  .expr-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .expr-const {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--muted);
+    font-size: 10px;
+  }
+
+  .expr-terms {
+    display: grid;
+    gap: 3px;
+  }
+
+  .expr-term {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
   }
 
   .prod-input {

@@ -498,6 +498,108 @@ class RuntimeStore {
     });
   }
 
+  // ── 目标表达式（常数 + 线性项求和） ──────────────────────────────
+
+  async addTargetExpression(): Promise<void> {
+    const { project, factory } = this.requireFactory();
+    await this.send({
+      scope: "factory",
+      action: {
+        project,
+        factory,
+        action: {
+          "target-expression": {
+            add: { expression: { id: 0, constant: 1, terms: [] } },
+          },
+        },
+      },
+    });
+  }
+
+  async removeTargetExpression(expression: number): Promise<void> {
+    const { project, factory } = this.requireFactory();
+    await this.send({
+      scope: "factory",
+      action: {
+        project,
+        factory,
+        action: { "target-expression": { remove: { expression } } },
+      },
+    });
+  }
+
+  async setTargetExpressionConstant(expression: number, constant: number): Promise<void> {
+    const { project, factory } = this.requireFactory();
+    await this.send({
+      scope: "factory",
+      action: {
+        project,
+        factory,
+        action: { "target-expression": { "set-constant": { expression, constant } } },
+      },
+    });
+  }
+
+  async addTargetExpressionTerm(expression: number, flow: import("./types").DualVar): Promise<void> {
+    const { project, factory } = this.requireFactory();
+    await this.send({
+      scope: "factory",
+      action: {
+        project,
+        factory,
+        action: {
+          "target-expression": {
+            "add-term": { expression, term: { id: 0, flow, coefficient: 1 } },
+          },
+        },
+      },
+    });
+  }
+
+  async removeTargetExpressionTerm(expression: number, term: number): Promise<void> {
+    const { project, factory } = this.requireFactory();
+    await this.send({
+      scope: "factory",
+      action: {
+        project,
+        factory,
+        action: { "target-expression": { "remove-term": { expression, term } } },
+      },
+    });
+  }
+
+  async setTargetExpressionTermCoefficient(
+    expression: number,
+    term: number,
+    coefficient: number,
+  ): Promise<void> {
+    const { project, factory } = this.requireFactory();
+    await this.send({
+      scope: "factory",
+      action: {
+        project,
+        factory,
+        action: { "target-expression": { "set-term-coefficient": { expression, term, coefficient } } },
+      },
+    });
+  }
+
+  async setTargetExpressionTermFlow(
+    expression: number,
+    term: number,
+    flow: import("./types").DualVar,
+  ): Promise<void> {
+    const { project, factory } = this.requireFactory();
+    await this.send({
+      scope: "factory",
+      action: {
+        project,
+        factory,
+        action: { "target-expression": { "set-term-flow": { expression, term, flow } } },
+      },
+    });
+  }
+
   /** 克隆工厂（整份追加为新工厂）。 */
   async cloneFactory(factory: FactoryId): Promise<void> {
     const project = this.requireProject();

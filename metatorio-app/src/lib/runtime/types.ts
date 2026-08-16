@@ -12,9 +12,9 @@ export type ProjectId = number;
 export type FactoryId = number;
 export type MechanicId = number;
 export type TargetId = number;
+export type ExternalInputId = number;
 export type TargetExpressionId = number;
 export type TargetTermId = number;
-export type ExternalInputId = number;
 
 export interface IdWithQuality {
   id: string;
@@ -225,6 +225,23 @@ export type TargetAction =
   | { "set-amount": { target: TargetId; amount: number } }
   | { reorder: { target: TargetId; position: number } };
 
+export type TargetExpressionAction =
+  | { add: { expression: TargetExpression } }
+  | { remove: { expression: TargetExpressionId } }
+  | { "set-constant": { expression: TargetExpressionId; constant: number } }
+  | { "add-term": { expression: TargetExpressionId; term: TargetTerm } }
+  | { "remove-term": { expression: TargetExpressionId; term: TargetTermId } }
+  | { "set-term-flow": { expression: TargetExpressionId; term: TargetTermId; flow: DualVar } }
+  | {
+      "set-term-coefficient": {
+        expression: TargetExpressionId;
+        term: TargetTermId;
+        coefficient: number;
+      };
+    }
+  | { reorder: { expression: TargetExpressionId; position: number } }
+  | { "reorder-term": { expression: TargetExpressionId; term: TargetTermId; position: number } };
+
 export type ExternalInputAction =
   | { add: { input: ExternalInput } }
   | { remove: { input: ExternalInputId } }
@@ -252,6 +269,7 @@ export type FactoryAction =
   | { context: FactoryContextAction }
   | { cleanup: CleanupAction }
   | { target: TargetAction }
+  | { "target-expression": TargetExpressionAction }
   | { "mechanic-list": MechanicListAction }
   | { mechanic: { mechanic: MechanicId; action: MechanicAction } }
   | { flow: FlowAction }
@@ -329,7 +347,7 @@ export interface FactoryDocument {
   name: string;
   settings: FactorySettings;
   targets: FlowTarget[];
-  target_expressions: unknown[];
+  target_expressions: TargetExpression[];
   external_inputs: ExternalInput[];
   mechanics: MechanicEntry[];
   strict_source: boolean;
@@ -347,6 +365,18 @@ export interface FlowTarget {
   id: TargetId;
   flow: DualVar;
   amount: number;
+}
+
+export interface TargetTerm {
+  id: TargetTermId;
+  flow: DualVar;
+  coefficient: number;
+}
+
+export interface TargetExpression {
+  id: TargetExpressionId;
+  constant: number;
+  terms: TargetTerm[];
 }
 
 export interface ExternalInput {
