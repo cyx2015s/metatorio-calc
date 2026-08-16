@@ -142,6 +142,14 @@
       ? flowTab === "item" || flowTab === "entity"
       : catalogKind != null && qualityKinds.has(catalogKind)),
   );
+  /** 真正"有品质可选"：品质适用且品质链多于 normal 一种。
+   *  只有 normal 时隐藏品质行与确认按钮，点击条目直接确认。 */
+  let hasQuality = $derived(
+    qualityApplies && (runtime.catalogIndex?.qualities ?? []).length > 1,
+  );
+  /** 编辑模式（更改目标/外部输入时预置了初始条目/品质）：
+   *  预置不算"点过"，自动确认按"两个都没点过"判定。 */
+  let presetMode = $derived(initialName != null || initialQuality != null);
   let selectedEntry = $derived(
     selected ? entries.find((entry) => entry.name === selected) ?? null : null,
   );
@@ -210,24 +218,25 @@
     return entry.localized_name || entry.name;
   }
 
-  /** 点击条目：仅选中/取消选中，不提交；若品质已主动点过则"物品+品质"
-   *  齐了，直接确认（任意顺序都成立）。 */
+  /** 点击条目：无品质 → 点击即确认；有品质 → 仅选中（品质主动点过且
+   *  非编辑模式时"物品+品质"齐了直接确认）；编辑模式按"两个都没点过"。 */
   function toggleSelect(name: string) {
     if (selected === name) {
       selected = null;
       return;
     }
     selected = name;
-    if (qualityPicked) {
+    if (!hasQuality || (!presetMode && qualityPicked)) {
       confirm();
     }
   }
 
-  /** 点击品质 chip：设定品质；若条目已选中则"物品+品质"齐了，直接确认。 */
+  /** 点击品质 chip（仅在有品质时出现）：设定品质；条目已选中且非编辑
+   *  模式时"物品+品质"齐了，直接确认。 */
   function pickQuality(name: string) {
     quality = name;
     qualityPicked = true;
-    if (selected) {
+    if (selected && !presetMode) {
       confirm();
     }
   }
@@ -302,7 +311,8 @@
       return;
     }
     // E 键确认（与游戏一致）：输入框里 e 是打字字符，不触发。
-    // 品质+物品都点过时默认已自动确认，E 用于只选了物品/直接确认的场景。
+    // 品质+物品都点过时默认已自动确认，E 用于只选了物品/直接确认的场景；
+    // 无品质模式下点击即确认，E 确认当前悬停（或第一条）条目。
     if (event.key === "e" || event.key === "E") {
       if (typing) return;
       event.stopPropagation();
@@ -312,6 +322,10 @@
       } else if (isCustom) {
         commitCustom();
       } else if (selected) {
+        confirm();
+      } else if (!hasQuality && visible.length > 0) {
+        const hovered = hover && visible.some((entry) => entry.name === hover?.name);
+        selected = hovered ? hover!.name : visible[0].name;
         confirm();
       }
       return;
@@ -379,7 +393,7 @@
         spellcheck="false"
       />
 
-      {#if qualityApplies && (runtime.catalogIndex?.qualities ?? []).length > 0}
+      {#if hasQuality}
         <div class="quality-row">
           <span class="q-label">品质</span>
           {#each runtime.catalogIndex!.qualities as q (q)}
@@ -483,7 +497,7 @@
       {/if}
     </div>
 
-    {#if !isDirect && !isCustom}
+    {#if hasQuality}
       <div class="modal-foot">
         <span class="foot-hint">
           {selectedEntry
