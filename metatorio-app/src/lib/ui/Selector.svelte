@@ -112,7 +112,13 @@
   let searching = $derived(query.trim().length > 0);
   let visible = $derived(
     (searching
-      ? entries.filter((entry) => entry.name.toLowerCase().includes(query.trim().toLowerCase()))
+      ? entries.filter((entry) => {
+          const needle = query.trim().toLowerCase();
+          return (
+            entry.name.toLowerCase().includes(needle) ||
+            entry.localized_name.toLowerCase().includes(needle)
+          );
+        })
       : activeGroup
         ? entries.filter((entry) => entry.group === activeGroup)
         : entries
@@ -188,6 +194,10 @@
     activeGroup = null;
     query = "";
     selected = null;
+  }
+
+  function labelOf(entry: IndexEntry): string {
+    return entry.localized_name || entry.name;
   }
 
   /** 点击条目：仅选中/取消选中，不提交（品质可之后再选）。 */
@@ -315,7 +325,7 @@
         bind:this={searchBox}
         bind:value={query}
         class="search"
-        placeholder="搜索原型名称…"
+        placeholder="搜索内部 id 或中文名…"
         spellcheck="false"
       />
 
@@ -389,8 +399,11 @@
               onmouseleave={() => (hover = null)}
             >
               <Icon type={entry.icon_type} name={entry.name} size={28} />
-              <span class="row-name" title={entry.name}>{entry.name}</span>
-              {#if entry.subgroup}<span class="row-sub">{entry.subgroup}</span>{/if}
+              <span class="row-name" title={entry.name}>{labelOf(entry)}</span>
+              {#if entry.localized_name}<span class="row-sub">{entry.name}</span>{/if}
+              {#if entry.subgroup && !entry.localized_name}
+                <span class="row-sub">{entry.subgroup}</span>
+              {/if}
             </button>
           {/each}
         </div>
@@ -403,7 +416,7 @@
                 <button
                   class="icon-btn"
                   class:active={selected === entry.name}
-                  title={entry.name}
+                  title={`${labelOf(entry)}${entry.localized_name ? `（${entry.name}）` : ""}`}
                   onclick={() => toggleSelect(entry.name)}
                   ondblclick={() => commitFast(entry.name)}
                   onmouseenter={(event) => showHover(event, entry)}
@@ -423,13 +436,13 @@
       <div class="modal-foot">
         <span class="foot-hint">
           {selectedEntry
-            ? `已选：${selectedEntry.name}${quality !== "normal" ? `（${quality}）` : ""}`
+            ? `已选：${labelOf(selectedEntry)}${quality !== "normal" ? `（${quality}）` : ""}`
             : "点击条目选中，品质可选任意顺序"}
         </span>
         <div class="foot-actions">
           <button class="btn ghost" onclick={onClose}>取消</button>
           <button class="btn primary" onclick={confirm} disabled={!selected}>
-            确定{selectedEntry ? ` · ${selectedEntry.name}` : ""}
+            确定{selectedEntry ? ` · ${labelOf(selectedEntry)}` : ""}
           </button>
         </div>
       </div>

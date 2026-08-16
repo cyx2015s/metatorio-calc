@@ -304,6 +304,14 @@ class RuntimeStore {
     }
   }
 
+  /** 本地化显示名（无翻译/未加载索引时回退内部 id）。 */
+  localizedName(kind: string, name: string): string {
+    const entry = this.catalogIndex?.entries.find(
+      (candidate) => candidate.kind === kind && candidate.name === name,
+    );
+    return entry?.localized_name || name;
+  }
+
   /** 换上下文后清空索引/详情缓存。 */
   clearCatalogCache(): void {
     this.catalogIndex = null;

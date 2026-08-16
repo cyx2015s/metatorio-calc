@@ -436,6 +436,8 @@ export interface ContextList {
 export interface IndexEntry {
   kind: string;
   name: string;
+  /** 本地化显示名（`--dump-prototype-locale`；无翻译时为空串）。 */
+  localized_name: string;
   group: string;
   subgroup: string;
   icon_type: string;
@@ -460,6 +462,8 @@ export interface FlowAmount {
 /** 悬停详情（按需拉取 + 前端缓存）。 */
 export interface PrototypeDetail {
   name: string;
+  /** 本地化显示名（无翻译时为空串）。 */
+  localized_name: string;
   kind: string;
   subgroup: string | null;
   order: string;

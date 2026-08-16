@@ -133,6 +133,15 @@
     return undefined;
   }
 
+  /** 流的显示名：物品/流体/实体优先本地化名，否则内部 id。 */
+  function flowLabel(flow: DualVar): string {
+    const icon = flowIcon(flow);
+    if (icon.type === "item" || icon.type === "fluid" || icon.type === "entity") {
+      return runtime.localizedName(icon.type, icon.name);
+    }
+    return dualVarLabel(flow);
+  }
+
   // ── 游戏数据加载 ────────────────────────────────────────────────
   async function loadFromExecutable() {
     dataMenuOpen = false;
@@ -432,7 +441,7 @@
                   detailKind={flowDetailKind(icon)}
                   quality={q ?? undefined}
                 />
-                <span class="row-name" title={dualVarLabel(target.flow)}>{dualVarLabel(target.flow)}</span>
+                <span class="row-name" title={dualVarLabel(target.flow)}>{flowLabel(target.flow)}</span>
                 <input
                   class="num"
                   type="number"
@@ -475,7 +484,7 @@
                   detailKind={flowDetailKind(icon)}
                   quality={q ?? undefined}
                 />
-                <span class="row-name" title={dualVarLabel(input.flow)}>{dualVarLabel(input.flow)}</span>
+                <span class="row-name" title={dualVarLabel(input.flow)}>{flowLabel(input.flow)}</span>
                 <input
                   class="num"
                   type="number"
@@ -671,7 +680,7 @@
                   detailKind={flowDetailKind(icon)}
                   quality={q ?? undefined}
                 />
-                <span class="row-name" title={dualVarLabel(balance.flow)}>{dualVarLabel(balance.flow)}</span>
+                <span class="row-name" title={dualVarLabel(balance.flow)}>{flowLabel(balance.flow)}</span>
                 <strong class:amount-pos={balance.amount > 0} class="mono amount">{balance.amount > 0 ? "+" : ""}{balance.amount.toFixed(3)}</strong>
               </div>
             {/each}

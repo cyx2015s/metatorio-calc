@@ -1,6 +1,7 @@
 <script lang="ts">
   // 单个机制卡片：主选择器（配方/资源/物品/设备）为图标按钮，
   // 机器为图标按钮，插件配置在展开区（ModuleEditor）。
+  import { runtime } from "$lib/runtime/store.svelte.ts";
   import HoverIcon from "./HoverIcon.svelte";
   import ModuleEditor from "./ModuleEditor.svelte";
   import type { CatalogKind, MechanicEntry } from "$lib/runtime/types";
@@ -63,6 +64,10 @@
       "normal",
   );
   let machineQuality = $derived(entry.mechanic.machine?.quality ?? "normal");
+  // 本地化显示名（无翻译回退内部 id）
+  let primaryLabel = $derived(primaryName ? runtime.localizedName(primaryKind(), primaryName) : "");
+  let machineLabel = $derived(machineName ? runtime.localizedName(machineKind(), machineName) : "");
+  let fluidLabel = $derived(fluidName ? runtime.localizedName("fluid", fluidName) : "");
   function primaryKind(): CatalogKind {
     switch (kind) {
       case "recipe":
@@ -104,7 +109,7 @@
 
     <div class="main">
       <div class="name">
-        {primaryName || "未设置"}
+        {primaryLabel || "未设置"}
       </div>
       <div class="meta">
         <span class="chip">{kindLabel[kind] ?? kind}</span>
@@ -134,13 +139,13 @@
         />
       </button>
       <span class="sub">
-        {machineName || "选择机器"}
+        {machineLabel || "选择机器"}
       </span>
     {:else if kind === "generator" || kind === "boiler"}
       <button class="icon-btn" class:empty={!fluidName} title="流体" onclick={() => onPick("fluid")}>
         <HoverIcon type="fluid" name={fluidName || "fluid"} size={24} detailKind={fluidName ? "fluid" : undefined} />
       </button>
-      <span class="sub">{fluidName || "选择流体"}</span>
+      <span class="sub">{fluidLabel || "选择流体"}</span>
     {:else if kind === "reactor"}
       <span class="sub">相邻 {entry.mechanic.neighbours ?? 0}</span>
     {/if}

@@ -58,7 +58,8 @@
     <div class="hc-head">
       <Icon type={iconTypeOf(detail.kind)} name={detail.name} size={32} />
       <div class="hc-title">
-        <strong>{detail.name}</strong>
+        <strong>{detail.localized_name || detail.name}</strong>
+        {#if detail.localized_name}<small>{detail.name}</small>{/if}
         <small>{kindLabel[kind] ?? kind}</small>
       </div>
     </div>
