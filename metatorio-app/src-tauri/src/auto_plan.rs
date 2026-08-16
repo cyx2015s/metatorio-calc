@@ -593,13 +593,21 @@ fn enumerate_energy(
             let Some(fluid) = boiler.fluid_box.filter.clone() else {
                 continue;
             };
-            out.push(Mechanic::Boiler(metatorio_core::BoilerMechanic {
-                boiler: IdWithQuality::new(record.name.clone(), major_quality.clone()),
-                fluid,
-                temperature: None,
-                fuel: None,
-                fuel_temperature: None,
-            }));
+            // 两种模式各枚举一个候选：HeatFluidInside 产抽象 FluidHeat，
+            // OutputToSeparatePipe 把输入流体加热成输出流体（水→蒸汽）。
+            for mode in [
+                metatorio_data::types::BoilerMode::HeatFluidInside,
+                metatorio_data::types::BoilerMode::OutputToSeparatePipe,
+            ] {
+                out.push(Mechanic::Boiler(metatorio_core::BoilerMechanic {
+                    boiler: IdWithQuality::new(record.name.clone(), major_quality.clone()),
+                    fluid: fluid.clone(),
+                    temperature: None,
+                    fuel: None,
+                    fuel_temperature: None,
+                    mode: Some(mode),
+                }));
+            }
         }
         if let Some(_reactor) = record.component::<ReactorComponent>() {
             out.push(Mechanic::Reactor(metatorio_core::ReactorMechanic {
@@ -615,12 +623,106 @@ fn enumerate_energy(
 mod tests {
     use super::*;
     use metatorio_core::context::GameState;
+    use metatorio_core::dual_var::DualVar;
+    use metatorio_core::expand::expand;
+    use metatorio_core::prim_var::{AIndexMap as CoreAIndexMap, Flow as CoreFlow};
+    use metatorio_runtime::document::MechanicKind;
+    use metatorio_runtime::solve::{ExpandedVarId, add_conversion_flows, instance_cost};
+    use metatorio_solver::{SolverData, SolverSolution};
+    use serde_json::json;
+
+    fn kind_of(mechanic: &Mechanic) -> MechanicKind {
+        MechanicKind::of(mechanic)
+    }
+
+    /// 合成 Nauvis：组装机（电）+ 锅炉（水→蒸汽）+ 蒸汽机 + 煤 + 铁矿配方。
+    fn nauvis_dump() -> serde_json::Value {
+        json!({
+            "item": {
+                "coal": { "type": "item", "name": "coal", "fuel_value": "8MJ", "fuel_category": "chemical" },
+                "iron-ore": { "type": "item", "name": "iron-ore", "stack_size": 50 },
+                "iron-plate": { "type": "item", "name": "iron-plate", "stack_size": 100 }
+            },
+            "fluid": {
+                "water": { "type": "fluid", "name": "water", "default_temperature": 15, "heat_capacity": "0.2kJ", "fuel_value": "0J" },
+                "steam": { "type": "fluid", "name": "steam", "default_temperature": 100, "max_temperature": 500, "heat_capacity": "0.2kJ", "fuel_value": "0J" }
+            },
+            "recipe": {
+                "iron-plate": {
+                    "type": "recipe", "name": "iron-plate", "energy_required": 1,
+                    "ingredients": [{ "type": "item", "name": "iron-ore", "amount": 1 }],
+                    "results": [{ "type": "item", "name": "iron-plate", "amount": 1 }],
+                    "categories": ["crafting"]
+                }
+            },
+            "assembling-machine": {
+                "assembling-machine-1": {
+                    "type": "assembling-machine", "name": "assembling-machine-1",
+                    "crafting_categories": ["crafting"], "crafting_speed": 1, "module_slots": 0,
+                    "energy_usage": "90kW", "energy_source": { "type": "electric", "drain": "0J" }
+                }
+            },
+            "boiler": {
+                "boiler": {
+                    "type": "boiler", "name": "boiler",
+                    "energy_consumption": "1.8MW",
+                    "energy_source": { "type": "burner", "fuel_categories": ["chemical"], "effectivity": 1.0 },
+                    "fluid_box": { "filter": "water" },
+                    "output_fluid_box": { "filter": "steam" },
+                    "mode": "output-to-separate-pipe",
+                    "target_temperature": 165,
+                    "burning_cooldown": 0,
+                    "circuit_wire_max_distance": 0,
+                    "draw_circuit_wires": true,
+                    "draw_copper_wires": true,
+                    "fire_glow_flicker_enabled": true
+                }
+            },
+            "generator": {
+                "steam-engine": {
+                    "type": "generator", "name": "steam-engine",
+                    "effectivity": 1.0, "fluid_usage_per_tick": 0.5, "maximum_temperature": 165,
+                    "scale_fluid_usage": false,
+                    "energy_source": { "type": "electric" },
+                    "fluid_box": { "filter": "steam" }
+                }
+            }
+        })
+    }
+
+    fn enumerate_demo() -> Vec<Mechanic> {
+        let dump = nauvis_dump();
+        let store = PrototypeStore::load(&dump).expect("dump 加载失败");
+        let game = GameState::default();
+        let ctx = Context::new(&store, &game);
+        let options = EnumerateOptions {
+            alternative_count: 1,
+            machine_preferences: Vec::new(),
+            enumerate_modules: Vec::new(),
+            enumerate_beacons: Vec::new(),
+            quality_limit: 0,
+            major_quality: 0,
+            planet: None,
+            surface: None,
+        };
+        enumerate_all(&store, &ctx, &options)
+    }
 
     #[test]
     fn enumerates_demo_recipe_candidates() {
-        let dump: serde_json::Value =
-            serde_json::from_str(include_str!("../dumps/demo_dump.json")).unwrap();
-        let store = PrototypeStore::load(&dump).unwrap();
+        let candidates = enumerate_demo();
+        assert!(
+            candidates.iter().any(|mechanic| matches!(mechanic, Mechanic::Recipe(_))),
+            "应枚举出配方候选：{candidates:?}"
+        );
+    }
+
+    /// 电力链路端到端：严格供给下，目标 = 电 + 铁板，应能从
+    /// 煤 → 锅炉 → 蒸汽 → 蒸汽机 产出电力，无需外部输入电力。
+    #[test]
+    fn strict_auto_plan_produces_power_from_coal_boiler_generator() {
+        let dump = nauvis_dump();
+        let store = PrototypeStore::load(&dump).expect("dump 加载失败");
         let game = GameState::default();
         let ctx = Context::new(&store, &game);
         let options = EnumerateOptions {
@@ -634,10 +736,67 @@ mod tests {
             surface: None,
         };
         let candidates = enumerate_all(&store, &ctx, &options);
-        // demo 只有 iron-plate 配方 + 一个组装机 → 至少一个配方候选
-        assert!(
-            candidates.iter().any(|mechanic| matches!(mechanic, Mechanic::Recipe(_))),
-            "应枚举出配方候选：{candidates:?}"
+        // 关键：必须枚举出电力链路四件套
+        for kind in [MechanicKind::Recipe, MechanicKind::ItemFuel, MechanicKind::Boiler, MechanicKind::Generator] {
+            assert!(
+                candidates.iter().any(|mechanic| kind_of(mechanic) == kind),
+                "候选缺少 {kind:?}：{candidates:?}"
+            );
+        }
+
+        let expansion = expand(
+            candidates.iter().enumerate().map(|(index, mechanic)| (index as u64, mechanic)),
+            &ctx,
         );
+        let mut variant_counts: std::collections::HashMap<u64, u16> = std::collections::HashMap::new();
+        let mut flows = CoreAIndexMap::default();
+        for variable in expansion.variables {
+            let variant = variant_counts.entry(variable.prim_var.inner).or_default();
+            let flow_id = ExpandedVarId {
+                mechanic: metatorio_runtime::id::MechanicId(variable.prim_var.inner),
+                variant: *variant,
+            };
+            *variant = variant.saturating_add(1);
+            flows.insert(
+                flow_id,
+                (variable.flow, instance_cost(&store, &candidates[variable.prim_var.inner as usize])),
+            );
+        }
+        // 目标：铁板 + 电（严格供给，只允许外部输入铁矿 + 星球资源）
+        let mut target = CoreFlow::default();
+        target.insert(DualVar::Item(IdWithQuality::new("iron-plate", "normal")), 1.0);
+        target.insert(DualVar::Electricity, 1000.0);
+        let mut sources = CoreFlow::default();
+        sources.insert(DualVar::Item(IdWithQuality::new("iron-ore", "normal")), 1.0);
+        // 星球免费资源（planet_autoplaced_flows：resource 类实体 + tile 流体）：
+        // coal 是可挖掘 resource，水是 tile 流体。
+        sources.insert(DualVar::Item(IdWithQuality::new("coal", "normal")), 1.0);
+        sources.insert(
+            DualVar::Fluid {
+                name: "water".to_string(),
+                temperature: [15, 15],
+            },
+            1.0,
+        );
+        add_conversion_flows(&mut flows, &store, &target, &sources);
+        let mut problem = SolverData::new_simple(target, flows);
+        problem.sources = sources;
+        problem.strict_source = true;
+        let solution = problem.solve();
+        let SolverSolution::Solved { prim, .. } = solution else {
+            panic!("严格供给自动规划应可解（煤→锅炉→蒸汽→蒸汽机→电）：{solution:?}");
+        };
+        // 选中了锅炉、蒸汽机、煤（电力链路成立）
+        let used: Vec<Mechanic> = prim
+            .into_iter()
+            .filter(|(_, amount)| *amount > 1e-9)
+            .map(|(id, _)| candidates[id.mechanic.0 as usize].clone())
+            .collect();
+        for kind in [MechanicKind::Boiler, MechanicKind::Generator, MechanicKind::ItemFuel] {
+            assert!(
+                used.iter().any(|mechanic| kind_of(mechanic) == kind),
+                "选中机制缺少 {kind:?}：{used:?}"
+            );
+        }
     }
 }

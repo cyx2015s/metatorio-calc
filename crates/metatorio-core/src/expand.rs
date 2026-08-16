@@ -917,7 +917,11 @@ fn expand_boiler<C: Clone>(
         &mut fulfillment,
     );
 
-    match boiler.mode.unwrap_or(BoilerMode::HeatFluidInside) {
+    match mechanic
+        .mode
+        .or(boiler.mode)
+        .unwrap_or(BoilerMode::HeatFluidInside)
+    {
         BoilerMode::HeatFluidInside => {
             // No material transfer happens in this mode. The useful result is
             // heat added to the fluid already inside the input box.

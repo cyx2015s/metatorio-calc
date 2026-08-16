@@ -246,6 +246,26 @@
             onclick={() => runtime.setFuel(entry.id, null).catch(() => {})}
           >×</button>
         {/if}
+        {#if kind === "boiler"}
+          <button
+            class="btn"
+            title="锅炉模式：箱内加热（产抽象热，原型缺省）或输出到独立管道（水→蒸汽）。点击循环切换。"
+            onclick={() => {
+              const cycle: Array<"heat-fluid-inside" | "output-to-separate-pipe" | null> = [
+                "output-to-separate-pipe",
+                "heat-fluid-inside",
+                null,
+              ];
+              const index = cycle.indexOf(entry.mechanic.mode ?? null);
+              const next = cycle[(index + 1) % cycle.length];
+              runtime.setBoilerMode(entry.id, next).catch(() => {});
+            }}
+          >{entry.mechanic.mode === "output-to-separate-pipe"
+            ? "独立管道"
+            : entry.mechanic.mode === "heat-fluid-inside"
+              ? "箱内加热"
+              : "原型模式"}</button>
+        {/if}
         {#if (kind === "recipe" || kind === "mining" || kind === "boiler") && fuelIsFluid(entry.mechanic.fuel)}
           <label class="sub temp" title="燃料流体温度（留空 = 默认温度）">
             燃料温度

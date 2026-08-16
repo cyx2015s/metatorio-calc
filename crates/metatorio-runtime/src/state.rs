@@ -1810,6 +1810,7 @@ fn apply_boiler_action(
         BoilerMechanicAction::SetFuelTemperature { temperature } => {
             Ok(replace(&mut mechanic.fuel_temperature, temperature))
         }
+        BoilerMechanicAction::SetMode { mode } => Ok(replace(&mut mechanic.mode, mode)),
     }
 }
 

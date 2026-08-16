@@ -1224,6 +1224,17 @@ fn auto_plan(
         surface: factory_doc.settings.surface.clone(),
     };
     let candidates = auto_plan::enumerate_all(&store, &context, &options);
+    eprintln!(
+        "[auto-plan] 候选机制 {} 个（recipe/mining/simple/energy 已按表面条件与种子可用性过滤），星球={:?} 地表={:?}",
+        candidates.len(),
+        factory_doc.settings.planet,
+        factory_doc.settings.surface,
+    );
+    for (index, mechanic) in candidates.iter().enumerate() {
+        if index < 8 {
+            eprintln!("[auto-plan] 候选 #{index}: {mechanic:?}");
+        }
+    }
     if candidates.is_empty() {
         return Err("没有可枚举的机制候选".to_string());
     }
@@ -1233,6 +1244,7 @@ fn auto_plan(
         candidates.iter().enumerate().map(|(index, mechanic)| (index as u64, mechanic)),
         &context,
     );
+    eprintln!("[auto-plan] 展开变量 {} 个", expansion.variables.len());
     let mut variant_counts: HashMap<u64, u16> = HashMap::new();
     let mut flows = AIndexMap::default();
     for variable in expansion.variables {
@@ -1257,10 +1269,21 @@ fn auto_plan(
         .iter()
         .map(|input| (input.flow.clone(), input.penalty))
         .collect();
-    add_conversion_flows(&mut flows, &store, &target, &sources);
+    // 星球隐式资源同样免费（与 solve_document 一致），外部输入覆盖剔除
+    let mut all_sources = sources.clone();
+    if let Some(planet) = factory_doc.settings.planet.as_deref() {
+        let mut implicit = metatorio_runtime::planet::planet_autoplaced_flows(&store, planet);
+        for key in all_sources.keys() {
+            implicit.shift_remove(key);
+        }
+        all_sources.extend(implicit);
+    }
+    add_conversion_flows(&mut flows, &store, &target, &all_sources);
     let mut problem = SolverData::new_simple(target, flows);
-    problem.sources = sources;
-    problem.strict_source = factory_doc.strict_source;
+    problem.sources = all_sources;
+    // 自动规划默认严格供给（复刻原版 auto_planner：只允许外部输入 + 星球资源
+    // 作为初始条件，不凭空输入贵重物品）。
+    problem.strict_source = true;
     problem.strict_sink = factory_doc.strict_sink;
     problem
         .target
@@ -1275,8 +1298,20 @@ fn auto_plan(
 
     let solution = problem.solve();
     let SolverSolution::Solved { prim, .. } = solution else {
-        return Err("自动规划无解（目标不可达）".to_string());
+        let SolverSolution::NotSolved {
+            no_provider,
+            no_consumer,
+            description,
+        } = solution
+        else {
+            return Err("自动规划求解失败".to_string());
+        };
+        eprintln!(
+            "[auto-plan] 无解: {description} | no_provider={no_provider:?} | no_consumer={no_consumer:?}"
+        );
+        return Err(format!("自动规划无解（目标不可达）：无供给 {no_provider:?}"));
     };
+    eprintln!("[auto-plan] 求解成功，选中 {} 个机制", prim.len());
     // 保留被选中的候选（用量 > 阈值），直接替换工厂机制。
     let mut used: Vec<Mechanic> = prim
         .into_iter()

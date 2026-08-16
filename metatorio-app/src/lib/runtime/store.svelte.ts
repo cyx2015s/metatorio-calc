@@ -991,6 +991,14 @@ class RuntimeStore {
     await this.mechanicMessage(mechanic, { reactor: { "set-neighbours": { neighbours } } });
   }
 
+  /** 锅炉工作模式；null = 使用锅炉原型自带模式（缺省 heat-fluid-inside）。 */
+  async setBoilerMode(
+    mechanic: MechanicId,
+    mode: "heat-fluid-inside" | "output-to-separate-pipe" | null,
+  ): Promise<void> {
+    await this.mechanicMessage(mechanic, { boiler: { "set-mode": { mode } } });
+  }
+
   /** 火箭发射重量模式（true = 按重量；false = 按堆叠槽位）。 */
   async setWeightMode(mechanic: MechanicId, weight_mode: boolean): Promise<void> {
     await this.mechanicMessage(mechanic, { "item-launch": { "set-weight-mode": { weight_mode } } });
