@@ -954,6 +954,15 @@ fn icon(state: State<'_, AppState>, ty: String, name: String) -> Option<Vec<u8>>
     let candidates: Vec<String> = if ty == "quality" {
         // 品质图标只有 quality/ 目录；回退到 item/entity 会显示错误的物品图标。
         vec![format!("quality/{name}.png")]
+    } else if ty == "planet" {
+        // Factorio 的 --dump-icon-sprites 把星球图标导出到 space-location/
+        // 目录（星球原型属于 space-location 类型），而不是 planet/。
+        vec![
+            format!("space-location/{name}.png"),
+            format!("planet/{name}.png"),
+            format!("item/{name}.png"),
+            format!("entity/{name}.png"),
+        ]
     } else {
         vec![
             format!("{ty}/{name}.png"),
