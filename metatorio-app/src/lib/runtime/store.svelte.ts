@@ -705,6 +705,49 @@ class RuntimeStore {
     throw new Error(`${kind} 机制不支持设置温度`);
   }
 
+  /** 指定机制燃料（配方/采矿/锅炉/反应堆）；null = 自动（燃料类别抽象）。 */
+  async setFuel(mechanic: MechanicId, fuel: string | null): Promise<void> {
+    const kind = this.mechanicKind(mechanic);
+    if (kind === "recipe") {
+      return this.mechanicMessage(mechanic, { recipe: { "set-fuel": { fuel } } });
+    }
+    if (kind === "mining") {
+      return this.mechanicMessage(mechanic, { mining: { "set-fuel": { fuel } } });
+    }
+    if (kind === "boiler") {
+      return this.mechanicMessage(mechanic, { boiler: { "set-fuel": { fuel } } });
+    }
+    if (kind === "reactor") {
+      return this.mechanicMessage(mechanic, { reactor: { "set-fuel": { fuel } } });
+    }
+    throw new Error(`${kind} 机制不支持指定燃料`);
+  }
+
+  /** 指定机制燃料温度（配方/采矿/锅炉）；null = 默认温度。 */
+  async setFuelTemperature(mechanic: MechanicId, temperature: number | null): Promise<void> {
+    const kind = this.mechanicKind(mechanic);
+    if (kind === "recipe") {
+      return this.mechanicMessage(mechanic, { recipe: { "set-fuel-temperature": { temperature } } });
+    }
+    if (kind === "mining") {
+      return this.mechanicMessage(mechanic, { mining: { "set-fuel-temperature": { temperature } } });
+    }
+    if (kind === "boiler") {
+      return this.mechanicMessage(mechanic, { boiler: { "set-fuel-temperature": { temperature } } });
+    }
+    throw new Error(`${kind} 机制不支持设置燃料温度`);
+  }
+
+  /** 反应堆相邻数（0-8）。 */
+  async setNeighbours(mechanic: MechanicId, neighbours: number): Promise<void> {
+    await this.mechanicMessage(mechanic, { reactor: { "set-neighbours": { neighbours } } });
+  }
+
+  /** 火箭发射重量模式（true = 按重量；false = 按堆叠槽位）。 */
+  async setWeightMode(mechanic: MechanicId, weight_mode: boolean): Promise<void> {
+    await this.mechanicMessage(mechanic, { "item-launch": { "set-weight-mode": { weight_mode } } });
+  }
+
   async setReactor(mechanic: MechanicId, reactor: string, quality = "normal"): Promise<void> {
     await this.mechanicMessage(mechanic, {
       reactor: { "set-reactor": { reactor: { id: reactor, quality } } },

@@ -28,6 +28,7 @@
     onRemove,
     onModuleSlot,
     onAddBeacon,
+    onPickFuel,
   }: {
     entry: MechanicEntry;
     solution?: { amount: number; cost: number } | null;
@@ -36,6 +37,7 @@
     onRemove: () => void;
     onModuleSlot: (slot: number, module: string | null) => void;
     onAddBeacon: () => void;
+    onPickFuel: () => void;
   } = $props();
 
   let kind = $derived(entry.mechanic.type);
@@ -98,6 +100,20 @@
   function machineKind(): CatalogKind {
     return kind === "mining" ? "mining-machine" : "machine";
   }
+
+  function fuelIsFluid(name: string | null | undefined): boolean {
+    if (!name) return false;
+    return (runtime.catalogIndex?.entries ?? []).some(
+      (entry) => entry.kind === "fluid" && entry.name === name,
+    );
+  }
+
+  function fuelLabel(name: string | null | undefined): string {
+    if (!name) return "燃料：自动";
+    return fuelIsFluid(name)
+      ? runtime.localizedName("fluid", name)
+      : runtime.localizedName("item", name);
+  }
 </script>
 
 <div class="mech-card card" class:off={!entry.enabled}>
@@ -156,8 +172,39 @@
         <HoverIcon type="fluid" name={fluidName || "fluid"} size={24} detailKind={fluidName ? "fluid" : undefined} />
       </button>
       <span class="sub">{fluidLabel || "选择流体"}</span>
+      <label class="sub temp" title="输入流体温度（留空 = 默认温度）">
+        温度
+        <input
+          type="number"
+          step="1"
+          value={entry.mechanic.temperature ?? ""}
+          placeholder="默认"
+          onchange={(event) => {
+            const raw = (event.currentTarget as HTMLInputElement).value;
+            const value = raw === "" ? null : Number(raw);
+            if (value === null || Number.isFinite(value)) {
+              runtime.setMechanicTemperature(entry.id, value).catch(() => {});
+            }
+          }}
+        />
+      </label>
     {:else if kind === "reactor"}
-      <span class="sub">相邻 {entry.mechanic.neighbours ?? 0}</span>
+      <label class="sub temp" title="相邻反应堆数量（0-8）">
+        相邻
+        <input
+          type="number"
+          min="0"
+          max="8"
+          step="1"
+          value={entry.mechanic.neighbours ?? 0}
+          onchange={(event) => {
+            const value = Number((event.currentTarget as HTMLInputElement).value);
+            if (Number.isFinite(value) && value >= 0 && value <= 8) {
+              runtime.setNeighbours(entry.id, value).catch(() => {});
+            }
+          }}
+        />
+      </label>
     {:else if kind === "fluid-fuel" || kind === "fluid-heat"}
       <label class="sub temp" title="流体温度（留空 = 默认温度）">
         温度
@@ -175,11 +222,58 @@
           }}
         />
       </label>
-      <span class="spacer"></span>
     {/if}
 
     <span class="spacer"></span>
   </div>
+
+  <!-- 机制细节：燃料 / 燃料温度 / 火箭重量模式 -->
+  {#if kind === "recipe" || kind === "mining" || kind === "boiler" || kind === "reactor" || kind === "item-launch"}
+    <div class="row2b">
+      {#if kind === "recipe" || kind === "mining" || kind === "boiler" || kind === "reactor"}
+        <button
+          class="btn"
+          title="指定燃料（默认 = 按燃料类别抽象选择）"
+          onclick={onPickFuel}
+        >{fuelLabel(entry.mechanic.fuel)}</button>
+        {#if entry.mechanic.fuel}
+          <button
+            class="btn ghost"
+            title="清除燃料（回到自动）"
+            onclick={() => runtime.setFuel(entry.id, null).catch(() => {})}
+          >×</button>
+        {/if}
+        {#if (kind === "recipe" || kind === "mining" || kind === "boiler") && fuelIsFluid(entry.mechanic.fuel)}
+          <label class="sub temp" title="燃料流体温度（留空 = 默认温度）">
+            燃料温度
+            <input
+              type="number"
+              step="1"
+              value={entry.mechanic.fuel_temperature ?? ""}
+              placeholder="默认"
+              onchange={(event) => {
+                const raw = (event.currentTarget as HTMLInputElement).value;
+                const value = raw === "" ? null : Number(raw);
+                if (value === null || Number.isFinite(value)) {
+                  runtime.setFuelTemperature(entry.id, value).catch(() => {});
+                }
+              }}
+            />
+          </label>
+        {/if}
+      {/if}
+      {#if kind === "item-launch"}
+        <button
+          class="btn"
+          class:on={entry.mechanic.weight_mode ?? false}
+          title="火箭运力模式：按堆叠槽位 或 按重量"
+          onclick={() =>
+            runtime.setWeightMode(entry.id, !(entry.mechanic.weight_mode ?? false)).catch(() => {})}
+        >{entry.mechanic.weight_mode ? "按重量" : "按堆叠槽位"}</button>
+      {/if}
+      <span class="spacer"></span>
+    </div>
+  {/if}
 
   {#if kind === "recipe" || kind === "mining"}
     <div class="row3">
@@ -216,6 +310,14 @@
   .row2 {
     padding-top: 8px;
     border-top: 1px solid var(--line);
+  }
+
+  .row2b {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    min-height: 24px;
   }
 
   .row3 {

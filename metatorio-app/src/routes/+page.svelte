@@ -488,6 +488,22 @@
     return detail?.fluid_filter ? [detail.fluid_filter] : [];
   }
 
+  /** 指定机制燃料：流选择器（物品/流体页签）→ SetFuel。 */
+  function pickFuel(mechanic: MechanicId) {
+    flowSelector = {
+      title: "选择燃料",
+      onSelectFlow: (flow) => {
+        const item = itemOf(flow);
+        const name = item
+          ? item.id
+          : flow !== null && typeof flow === "object" && "Fluid" in flow
+            ? (flow as { Fluid: { name: string } }).Fluid.name
+            : null;
+        if (name) runtime.setFuel(mechanic, name).catch(() => {});
+      },
+    };
+  }
+
   /** 添加信标：直接打开信标选择器（不再先加空配置行），重复信标拒绝。 */
   function addBeacon(mechanic: MechanicId) {
     const entry = mechanics.find((candidate) => candidate.id === mechanic);
@@ -936,6 +952,7 @@
             onRemove={() => runtime.removeMechanic(entry.id).catch(() => {})}
             onModuleSlot={(slot, module) => runtime.setModuleSlot(entry.id, slot, module).catch(() => {})}
             onAddBeacon={() => addBeacon(entry.id)}
+            onPickFuel={() => pickFuel(entry.id)}
           />
         {:else}
           <div class="empty-state">
