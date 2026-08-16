@@ -388,6 +388,8 @@ export interface MechanicSolution {
   mechanic: MechanicId;
   variant: number;
   amount: number;
+  /** 单台实例成本（机器碰撞箱面积）。 */
+  cost: number;
 }
 
 export interface FlowBalance {

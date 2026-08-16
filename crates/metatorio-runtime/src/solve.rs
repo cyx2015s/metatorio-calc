@@ -1,6 +1,7 @@
 use std::{collections::HashMap, fs::File, path::Path};
 
-use metatorio_core::{Context, DualVar, GameState};
+use metatorio_core::{Context, DualVar, GameState, Mechanic};
+use metatorio_data::generated_components::{EntityComponent, ItemComponent};
 use metatorio_data::store::PrototypeStore;
 use metatorio_solver::{AIndexMap, SolverData, SolverSolution, TargetSpec};
 use serde::{Deserialize, Serialize};
@@ -48,6 +49,8 @@ pub struct MechanicSolution {
     pub mechanic: MechanicId,
     pub variant: u16,
     pub amount: f64,
+    /// 单台实例成本（机器碰撞箱面积；无数据时 16.0）。
+    pub cost: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -202,6 +205,13 @@ fn solve_document(
         &context,
     );
 
+    // 每台实例成本（机器碰撞箱面积），作为 LP 目标系数。
+    let costs: HashMap<MechanicId, f64> = factory
+        .mechanics
+        .iter()
+        .map(|entry| (entry.id, instance_cost(prototype, &entry.mechanic)))
+        .collect();
+
     let mut variant_counts: HashMap<MechanicId, u16> = HashMap::new();
     let mut flows = AIndexMap::default();
     for variable in expansion.variables {
@@ -211,11 +221,8 @@ fn solve_document(
             variant: *variant,
         };
         *variant = variant.saturating_add(1);
-
-        // The current core expansion does not expose the old per-instance
-        // area cost yet.  A positive neutral cost keeps zero-cost conversion
-        // flow rules meaningful until that domain value is added to core.
-        flows.insert(flow_id, (variable.flow, 1.0));
+        let cost = costs.get(&flow_id.mechanic).copied().unwrap_or(1.0);
+        flows.insert(flow_id, (variable.flow, cost));
     }
 
     let target = factory
@@ -261,6 +268,7 @@ fn solve_document(
                         mechanic: id.mechanic,
                         variant: id.variant,
                         amount,
+                        cost: costs.get(&id.mechanic).copied().unwrap_or(1.0),
                     })
                     .collect(),
                 flows: sum
@@ -285,8 +293,40 @@ fn solve_document(
     })
 }
 
-fn make_game_state(prototype: &PrototypeStore, project: &ProjectDocument) -> GameState {
-    let mut game = GameState::default();
+/// 实体碰撞箱面积（占地成本）。
+fn entity_area(store: &PrototypeStore, name: &str) -> Option<f64> {
+    let bb = store
+        .entity(name)?
+        .component::<EntityComponent>()?
+        .collision_box
+        .as_ref()?;
+    Some((bb.1 .0 - bb.0 .0).abs() * (bb.1 .1 - bb.0 .1).abs())
+}
+
+/// 单台实例成本（复刻旧实现）：
+/// - 带机器/设备的机制：机器碰撞箱面积（缺失回退 16.0）；
+/// - 腐坏：spoil_ticks / stack_size / 16；
+/// - 其余（种植/物品燃料/发射）：固定 16.0。
+fn instance_cost(store: &PrototypeStore, mechanic: &Mechanic) -> f64 {
+    let area = |name: &str| entity_area(store, name).unwrap_or(16.0);
+    match mechanic {
+        Mechanic::Recipe(mechanic) => area(&mechanic.machine.id),
+        Mechanic::Mining(mechanic) => area(&mechanic.machine.id),
+        Mechanic::Generator(mechanic) => area(&mechanic.generator.id),
+        Mechanic::Boiler(mechanic) => area(&mechanic.boiler.id),
+        Mechanic::Reactor(mechanic) => area(&mechanic.reactor.id),
+        Mechanic::Spoil(mechanic) => store
+            .item(&mechanic.item.id)
+            .and_then(|record| {
+                let item = record.component::<ItemComponent>()?;
+                Some(item.spoil_ticks? as f64 / item.stack_size.max(1) as f64 / 16.0)
+            })
+            .unwrap_or(16.0),
+        _ => 16.0,
+    }
+}
+
+fn make_game_state(prototype: &PrototypeStore, project: &ProjectDocument) -> GameState {    let mut game = GameState::default();
     let qualities = prototype.quality_order();
     if !qualities.is_empty() {
         game.qualities = qualities.to_vec();

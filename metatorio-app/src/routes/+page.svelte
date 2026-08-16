@@ -92,7 +92,7 @@
   let solveMap = $derived(
     new Map(
       (solve != null && "solved" in solve.status ? solve.status.solved.mechanics : []).map(
-        (m) => [m.mechanic, m.amount] as const,
+        (m) => [m.mechanic, { amount: m.amount, cost: m.cost }] as const,
       ),
     ),
   );
@@ -538,7 +538,7 @@
         {#each mechanics as entry (entry.id)}
           <MechanicCard
             {entry}
-            amount={solveMap.get(entry.id) ?? null}
+            solution={solveMap.get(entry.id) ?? null}
             onPick={(kind, slot) => pickForMechanic(entry.id, kind, slot)}
             onToggleEnabled={() => runtime.setMechanicEnabled(entry.id, !entry.enabled).catch(() => {})}
             onRemove={() => runtime.removeMechanic(entry.id).catch(() => {})}
@@ -595,16 +595,7 @@
           <div class="kv">
             <span>总成本</span><strong class="mono">{status.cost.toFixed(3)}</strong>
           </div>
-          <div class="subtitle">机制解</div>
-          <div class="rows compact">
-            {#each status.mechanics as m (m.mechanic)}
-              <div class="row-item">
-                <span class="row-name mono">#{m.mechanic}</span>
-                <strong class="mono amount-pos">{m.amount.toFixed(4)}</strong>
-              </div>
-            {/each}
-          </div>
-          <div class="subtitle">流平衡</div>
+          <div class="subtitle">总流平衡</div>
           <div class="rows compact">
             {#each status.flows as balance (balance.flow)}
               {@const icon = flowIcon(balance.flow)}

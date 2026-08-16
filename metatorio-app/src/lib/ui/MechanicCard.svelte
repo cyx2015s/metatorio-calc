@@ -18,14 +18,14 @@
 
   let {
     entry,
-    amount = null,
+    solution = null,
     onPick,
     onToggleEnabled,
     onRemove,
     onModuleSlot,
   }: {
     entry: MechanicEntry;
-    amount?: number | null;
+    solution?: { amount: number; cost: number } | null;
     onPick: (kind: CatalogKind, slot?: number) => void;
     onToggleEnabled: () => void;
     onRemove: () => void;
@@ -110,7 +110,11 @@
       </div>
       <div class="meta">
         <span class="chip">{kindLabel[kind] ?? kind}</span>
-        {#if amount != null}<span class="amount mono">{amount.toFixed(3)}</span>{/if}
+        {#if solution}
+          <span class="amount mono" title={`单台成本 ${solution.cost.toFixed(2)}`}>
+            {solution.amount.toFixed(2)} 台 · 成本 {(solution.amount * solution.cost).toFixed(1)}
+          </span>
+        {/if}
       </div>
     </div>
 

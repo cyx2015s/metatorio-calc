@@ -706,7 +706,7 @@ fn catalog_index_from_store(store: &PrototypeStore) -> Vec<IndexEntry> {
                         store
                             .get(PrototypeGroup::Recipe, name)
                             .and_then(|record| record.component::<RecipeComponent>())
-                            .and_then(|recipe| recipe.categories.clone())
+                            .map(effective_recipe_categories)
                             .unwrap_or_default()
                     } else {
                         Vec::new()
@@ -818,7 +818,7 @@ fn catalog_index_from_store(store: &PrototypeStore) -> Vec<IndexEntry> {
                     }
                     let categories = record
                         .component::<ResourceEntityComponent>()
-                        .map(|resource| vec![resource.category.clone()])
+                        .map(|resource| vec![effective_resource_category(resource)])
                         .unwrap_or_default();
                     out.push(IndexEntry {
                         kind: "resource".to_string(),
@@ -893,7 +893,7 @@ fn prototype_detail(
         detail.stack_size = Some(item.stack_size as f64);
     }
     if let Some(recipe) = record.component::<RecipeComponent>() {
-        detail.categories = recipe.categories.clone().unwrap_or_default();
+        detail.categories = effective_recipe_categories(recipe);
         detail.category = Some(detail.categories.join(", "));
         detail.energy_required = Some(recipe.energy_required);
         detail.ingredients = recipe.ingredients.iter().map(ingredient_flow).collect();
@@ -909,9 +909,7 @@ fn prototype_detail(
         detail.categories = drill.resource_categories.clone();
     }
     if let Some(resource) = record.component::<ResourceEntityComponent>() {
-        if !resource.category.is_empty() {
-            detail.categories = vec![resource.category.clone()];
-        }
+        detail.categories = vec![effective_resource_category(resource)];
     }
     if let Some(fluid) = record.component::<FluidComponent>() {
         detail.default_temperature = Some(fluid.default_temperature);
@@ -1179,6 +1177,25 @@ fn categories_overlap(required: &[String], available: &[String]) -> bool {
     required.is_empty() || available.iter().any(|available| required.contains(available))
 }
 
+/// 配方有效类别：空数组 = 默认 `["crafting"]`，不是"任意机器都能造"。
+fn effective_recipe_categories(recipe: &RecipeComponent) -> Vec<String> {
+    let categories = recipe.categories.clone().unwrap_or_default();
+    if categories.is_empty() {
+        vec!["crafting".to_string()]
+    } else {
+        categories
+    }
+}
+
+/// 资源有效类别：空 = 默认 `"basic-solid"`。
+fn effective_resource_category(resource: &ResourceEntityComponent) -> String {
+    if resource.category.is_empty() {
+        "basic-solid".to_string()
+    } else {
+        resource.category.clone()
+    }
+}
+
 fn quality_level_of(qualities: &[String], name: &str) -> usize {
     qualities.iter().position(|candidate| candidate == name).unwrap_or(0)
 }
@@ -1342,7 +1359,7 @@ fn ensure_machine_compat(
             let recipe_categories = store
                 .get(PrototypeGroup::Recipe, &recipe.recipe.id)
                 .and_then(|record| record.component::<RecipeComponent>())
-                .and_then(|recipe| recipe.categories.clone())
+                .map(effective_recipe_categories)
                 .unwrap_or_default();
             let machine_ok = !recipe.machine.id.is_empty()
                 && store
@@ -1389,16 +1406,13 @@ fn ensure_machine_compat(
             let resource_category = store
                 .get(PrototypeGroup::Entity, &mining.resource)
                 .and_then(|record| record.component::<ResourceEntityComponent>())
-                .map(|resource| resource.category.clone())
+                .map(effective_resource_category)
                 .unwrap_or_default();
             let machine_ok = !mining.machine.id.is_empty()
                 && store
                     .get(PrototypeGroup::Entity, &mining.machine.id)
                     .and_then(|record| record.component::<MiningDrillComponent>())
-                    .is_some_and(|drill| {
-                        resource_category.is_empty()
-                            || drill.resource_categories.contains(&resource_category)
-                    });
+                    .is_some_and(|drill| drill.resource_categories.contains(&resource_category));
             if machine_ok {
                 return Ok(());
             }
@@ -1406,10 +1420,9 @@ fn ensure_machine_compat(
                 &store,
                 &prefs,
                 |record| {
-                    record.component::<MiningDrillComponent>().is_some_and(|drill| {
-                        resource_category.is_empty()
-                            || drill.resource_categories.contains(&resource_category)
-                    })
+                    record
+                        .component::<MiningDrillComponent>()
+                        .is_some_and(|drill| drill.resource_categories.contains(&resource_category))
                 },
                 |_| 0.0,
             );
@@ -1592,4 +1605,37 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_recipe_categories_default_to_crafting() {
+        let recipe = RecipeComponent {
+            categories: None,
+            ..Default::default()
+        };
+        assert_eq!(effective_recipe_categories(&recipe), vec!["crafting"]);
+        let recipe = RecipeComponent {
+            categories: Some(vec!["smelting".to_string()]),
+            ..Default::default()
+        };
+        assert_eq!(effective_recipe_categories(&recipe), vec!["smelting"]);
+    }
+
+    #[test]
+    fn empty_resource_category_defaults_to_basic_solid() {
+        let resource = ResourceEntityComponent {
+            category: String::new(),
+            ..Default::default()
+        };
+        assert_eq!(effective_resource_category(&resource), "basic-solid");
+        let resource = ResourceEntityComponent {
+            category: "calcite".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(effective_resource_category(&resource), "calcite");
+    }
 }

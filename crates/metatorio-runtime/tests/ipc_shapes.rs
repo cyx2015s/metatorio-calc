@@ -146,6 +146,12 @@ fn frontend_json_one_click_demo_runs_end_to_end() {
         mechanics.iter().any(|item| item.mechanic == mechanic && item.amount > 0.0),
         "recipe mechanic must produce: {mechanics:?}"
     );
+    assert!(
+        mechanics
+            .iter()
+            .any(|item| item.mechanic == mechanic && item.cost > 0.0),
+        "每台实例必须有正成本: {mechanics:?}"
+    );
     assert!(flows.iter().any(|item| item.amount > 0.0), "flows: {flows:?}");
 }
 
