@@ -4,6 +4,10 @@
   //   筛选/分组/排序全部前端本地（索引由后端一次性下发并缓存），悬停显示卡片。
   // - 流模式（flowMode=true）：选择 DualVar 流（物品/流体/实体走目录，
   //   电/热/火箭运力直接添加，自定义/污染输入名称）。
+  //
+  // 带品质的场景（物品/配方/实体类）支持"物品 + 品质"任意顺序选择：
+  // 点击条目只是选中（高亮，不退出），点品质 chips 设定品质，最后按
+  // 「确定」提交（双击条目 = 立即提交）；「取消」/Esc/点背景 = 提前退出。
   import { runtime } from "$lib/runtime/store.svelte.ts";
   import HoverIcon from "./HoverIcon.svelte";
   import Icon from "./Icon.svelte";
@@ -16,6 +20,9 @@
     kindOptions = [],
     flowMode = false,
     categoryFilter,
+    initialTab,
+    initialName,
+    initialQuality,
     onSelect,
     onSelectFlow,
     onClose,
@@ -26,6 +33,12 @@
     flowMode?: boolean;
     /** 机器/资源类目录的类别过滤（如配方 categories）；空数组=不过滤。 */
     categoryFilter?: string[];
+    /** 流模式初始页签（编辑目标/外部输入时预选当前流类型）。 */
+    initialTab?: string;
+    /** 目录模式初始选中（编辑时预选当前条目）。 */
+    initialName?: string;
+    /** 初始品质。 */
+    initialQuality?: string;
     onSelect?: (name: string, quality: string) => void;
     onSelectFlow?: (flow: DualVar) => void;
     onClose: () => void;
@@ -66,14 +79,18 @@
   };
 
   let activeKind = $state<CatalogKind>(kind);
-  let flowTab = $state<FlowTab>("item");
+  let flowTab = $state<FlowTab>(
+    (flowTabs.some((tab) => tab.id === initialTab) ? initialTab : "item") as FlowTab,
+  );
   let customVariant = $state<"Pollution" | "Custom">("Custom");
   let customName = $state("");
-  let quality = $state("normal");
+  let quality = $state(initialQuality || "normal");
   let query = $state("");
   let activeGroup = $state<string | null>(null);
   let loading = $state(false);
   let searchBox = $state<HTMLInputElement | null>(null);
+  /** 已选中（待确认）的条目名；null = 未选。 */
+  let selected = $state<string | null>(initialName || null);
 
   let hover = $state<{ x: number; y: number; kind: string; name: string } | null>(null);
   let hoverDetail = $state<import("$lib/runtime/types").PrototypeDetail | null>(null);
@@ -113,6 +130,9 @@
       ? flowTab === "item" || flowTab === "entity"
       : catalogKind != null && qualityKinds.has(catalogKind)),
   );
+  let selectedEntry = $derived(
+    selected ? entries.find((entry) => entry.name === selected) ?? null : null,
+  );
 
   function groupBySubgroup(list: IndexEntry[]): { subgroup: string; items: IndexEntry[] }[] {
     const map = new Map<string, IndexEntry[]>();
@@ -129,6 +149,7 @@
     activeKind = kind;
     activeGroup = null;
     query = "";
+    selected = initialName || null;
   });
 
   $effect(() => {
@@ -166,19 +187,33 @@
   function resetView() {
     activeGroup = null;
     query = "";
+    selected = null;
   }
 
-  async function pick(name: string) {
+  /** 点击条目：仅选中/取消选中，不提交（品质可之后再选）。 */
+  function toggleSelect(name: string) {
+    selected = selected === name ? null : name;
+  }
+
+  /** 提交当前选择（条目 + 当前品质）。 */
+  async function confirm() {
+    if (!selected) return;
     if (flowMode && onSelectFlow) {
-      const flow = await buildCatalogFlow(name);
+      const flow = await buildCatalogFlow(selected);
       if (flow) {
         onSelectFlow(flow);
         onClose();
       }
       return;
     }
-    onSelect?.(name, quality);
+    onSelect?.(selected, quality);
     onClose();
+  }
+
+  /** 双击：立即提交。 */
+  function commitFast(name: string) {
+    selected = name;
+    confirm();
   }
 
   async function buildCatalogFlow(name: string): Promise<DualVar | null> {
@@ -221,8 +256,9 @@
     if (event.key === "Escape") {
       event.stopPropagation();
       onClose();
-    } else if (event.key === "Enter" && !isDirect && !isCustom && visible.length > 0) {
-      pick(visible[0].name);
+    } else if (event.key === "Enter" && selected && !isDirect && !isCustom) {
+      event.stopPropagation();
+      confirm();
     }
   }
 </script>
@@ -345,13 +381,15 @@
           {#each visible as entry (entry.kind + entry.name)}
             <button
               class="row"
-              onclick={() => pick(entry.name)}
+              class:active={selected === entry.name}
+              onclick={() => toggleSelect(entry.name)}
+              ondblclick={() => commitFast(entry.name)}
               onmouseenter={(event) => showHover(event, entry)}
               onmousemove={(event) => showHover(event, entry)}
               onmouseleave={() => (hover = null)}
             >
               <Icon type={entry.icon_type} name={entry.name} size={28} />
-              <span class="row-name">{entry.name}</span>
+              <span class="row-name" title={entry.name}>{entry.name}</span>
               {#if entry.subgroup}<span class="row-sub">{entry.subgroup}</span>{/if}
             </button>
           {/each}
@@ -364,8 +402,10 @@
               {#each section.items as entry (entry.name)}
                 <button
                   class="icon-btn"
+                  class:active={selected === entry.name}
                   title={entry.name}
-                  onclick={() => pick(entry.name)}
+                  onclick={() => toggleSelect(entry.name)}
+                  ondblclick={() => commitFast(entry.name)}
                   onmouseenter={(event) => showHover(event, entry)}
                   onmousemove={(event) => showHover(event, entry)}
                   onmouseleave={() => (hover = null)}
@@ -378,6 +418,22 @@
         {/each}
       {/if}
     </div>
+
+    {#if !isDirect && !isCustom}
+      <div class="modal-foot">
+        <span class="foot-hint">
+          {selectedEntry
+            ? `已选：${selectedEntry.name}${quality !== "normal" ? `（${quality}）` : ""}`
+            : "点击条目选中，品质可选任意顺序"}
+        </span>
+        <div class="foot-actions">
+          <button class="btn ghost" onclick={onClose}>取消</button>
+          <button class="btn primary" onclick={confirm} disabled={!selected}>
+            确定{selectedEntry ? ` · ${selectedEntry.name}` : ""}
+          </button>
+        </div>
+      </div>
+    {/if}
   </div>
 </div>
 
@@ -600,6 +656,11 @@
     border-color: var(--line);
   }
 
+  .row.active {
+    background: var(--accent-dim);
+    border-color: var(--accent);
+  }
+
   .row-name {
     overflow: hidden;
     font-size: 12px;
@@ -664,5 +725,29 @@
   .custom-panel input {
     flex: 1;
     min-width: 140px;
+  }
+
+  .modal-foot {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--line);
+  }
+
+  .foot-hint {
+    flex: 1;
+    overflow: hidden;
+    color: var(--muted);
+    font-size: 10px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .foot-actions {
+    display: inline-flex;
+    gap: 6px;
+    flex: 0 0 auto;
   }
 </style>
