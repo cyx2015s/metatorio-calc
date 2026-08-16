@@ -684,6 +684,62 @@
         </section>
       {/if}
 
+      {#if factory}
+        <section class="panel">
+          <div class="title">工厂环境</div>
+          <div class="field">
+            <label>星球</label>
+            <div class="env-row">
+              <button
+                class="btn"
+                onclick={() =>
+                  openSelector("planet", "选择星球", (name) =>
+                    runtime.setFactoryPlanet(name),
+                  )}
+              >{factory.settings.planet ? runtime.localizedName("planet", factory.settings.planet) : "未选择"}</button>
+              {#if factory.settings.planet}
+                <button
+                  class="btn ghost"
+                  title="清除星球"
+                  onclick={() => runtime.setFactoryPlanet(null).catch(() => {})}
+                >×</button>
+              {/if}
+            </div>
+          </div>
+          <div class="field">
+            <label>地表</label>
+            <div class="env-row">
+              <button
+                class="btn"
+                onclick={() =>
+                  openSelector("surface", "选择地表", (name) =>
+                    runtime.setFactorySurface(name),
+                  )}
+              >{factory.settings.surface ? runtime.localizedName("surface", factory.settings.surface) : "未选择"}</button>
+              {#if factory.settings.surface}
+                <button
+                  class="btn ghost"
+                  title="清除地表"
+                  onclick={() => runtime.setFactorySurface(null).catch(() => {})}
+                >×</button>
+              {/if}
+            </div>
+          </div>
+          <div class="field">
+            <label>主品质（自动填机器时使用的品质）</label>
+            <div class="env-row">
+              <button
+                class="btn"
+                onclick={() =>
+                  openSelector("quality", "选择主品质", (name) =>
+                    runtime.setFactoryMajorQuality(name),
+                  )}
+              >{runtime.localizedName("quality", factory.settings.major_quality || "normal")}</button>
+            </div>
+          </div>
+        </section>
+      {/if}
+
       {#if project}
         <section class="panel">
           <div class="title">项目设置</div>
@@ -1620,6 +1676,12 @@
     font-size: 11px;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .env-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
   }
 
   .mini-modal {

@@ -382,6 +382,32 @@ class RuntimeStore {
     });
   }
 
+  // ── 工厂环境（星球/地表/主品质） ────────────────────────────────
+
+  async setFactoryPlanet(planet: string | null): Promise<void> {
+    const { project, factory } = this.requireFactory();
+    await this.send({
+      scope: "factory",
+      action: { project, factory, action: { context: { "set-planet": { planet } } } },
+    });
+  }
+
+  async setFactorySurface(surface: string | null): Promise<void> {
+    const { project, factory } = this.requireFactory();
+    await this.send({
+      scope: "factory",
+      action: { project, factory, action: { context: { "set-surface": { surface } } } },
+    });
+  }
+
+  async setFactoryMajorQuality(quality: string): Promise<void> {
+    const { project, factory } = this.requireFactory();
+    await this.send({
+      scope: "factory",
+      action: { project, factory, action: { context: { "set-major-quality": { quality } } } },
+    });
+  }
+
   // ── 目标 ────────────────────────────────────────────────────────
 
   async addTarget(itemId: string, amount: number): Promise<void> {

@@ -231,10 +231,16 @@ export type FlowAction =
 
 export type SolveAction = "recompute" | "auto-plan";
 
+export type FactoryContextAction =
+  | { "set-planet": { planet: string | null } }
+  | { "set-surface": { surface: string | null } }
+  | { "set-major-quality": { quality: string } };
+
 export type FactoryAction =
   | { "set-name": { name: string } }
   | { "set-strict-source": { strict: boolean } }
   | { "set-strict-sink": { strict: boolean } }
+  | { context: FactoryContextAction }
   | { target: TargetAction }
   | { "mechanic-list": MechanicListAction }
   | { mechanic: { mechanic: MechanicId; action: MechanicAction } }
