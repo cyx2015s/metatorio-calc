@@ -17,8 +17,8 @@ pub use context::{Context, GameState};
 pub use dual_var::DualVar;
 pub use id::{IdWithQuality, NORMAL_QUALITY};
 pub use mechanic::{
-    BeaconConfig, BoilerMechanic, GeneratorMechanic, ItemFuelMechanic, ItemLaunchMechanic,
-    Mechanic, MiningMechanic, ModuleConfig, PlantMechanic, ReactorMechanic, RecipeMechanic,
-    SpoilMechanic,
+    BeaconConfig, BoilerMechanic, FluidFuelMechanic, FluidHeatMechanic, GeneratorMechanic,
+    ItemFuelMechanic, ItemLaunchMechanic, Mechanic, MiningMechanic, ModuleConfig, PlantMechanic,
+    ReactorMechanic, RecipeMechanic, SpoilMechanic,
 };
 pub use prim_var::{AIndexMap, ExpandedVariable, Expansion, Flow, PrimVar};

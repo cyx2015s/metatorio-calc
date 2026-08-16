@@ -1018,6 +1018,24 @@ fn item_tags(store: &PrototypeStore, name: &str) -> Vec<String> {
     tags
 }
 
+/// 流体的机制标签：fluid-fuel（有热值可燃烧）/ fluid-heat（有比热容可提热）。
+fn fluid_tags(store: &PrototypeStore, name: &str) -> Vec<String> {
+    let Some(record) = store.get(PrototypeGroup::Fluid, name) else {
+        return Vec::new();
+    };
+    let Some(fluid) = record.component::<FluidComponent>() else {
+        return Vec::new();
+    };
+    let mut tags = Vec::new();
+    if fluid.fuel_value().amount > 0.0 {
+        tags.push("fluid-fuel".to_string());
+    }
+    if fluid.heat_capacity().amount > 0.0 {
+        tags.push("fluid-heat".to_string());
+    }
+    tags
+}
+
 fn catalog_index_from_store(store: &PrototypeStore, locale: &HashMap<String, String>) -> Vec<IndexEntry> {
     let mut out: Vec<IndexEntry> = Vec::new();
     // 有 order_info 的组：大组 → 小组 → 条目（recipe/entity fallback 已在
@@ -1045,6 +1063,8 @@ fn catalog_index_from_store(store: &PrototypeStore, locale: &HashMap<String, Str
                             .unwrap_or_default()
                     } else if kind == "item" {
                         item_tags(store, name)
+                    } else if kind == "fluid" {
+                        fluid_tags(store, name)
                     } else {
                         Vec::new()
                     };

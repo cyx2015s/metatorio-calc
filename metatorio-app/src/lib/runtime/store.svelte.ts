@@ -591,6 +591,38 @@ class RuntimeStore {
     });
   }
 
+  /** 流体燃料机制：选择热值流体。 */
+  async setFluidFuel(mechanic: MechanicId, fluid: string): Promise<void> {
+    await this.mechanicMessage(mechanic, { "fluid-fuel": { "set-fluid": { fluid } } });
+  }
+
+  /** 流体热机制：选择提热流体。 */
+  async setFluidHeat(mechanic: MechanicId, fluid: string): Promise<void> {
+    await this.mechanicMessage(mechanic, { "fluid-heat": { "set-fluid": { fluid } } });
+  }
+
+  /** 设置流体类机制的温度（流体燃料/流体热/发电机/锅炉）。 */
+  async setMechanicTemperature(mechanic: MechanicId, temperature: number | null): Promise<void> {
+    const kind = this.mechanicKind(mechanic);
+    if (kind === "fluid-fuel") {
+      return this.mechanicMessage(mechanic, {
+        "fluid-fuel": { "set-temperature": { temperature } },
+      });
+    }
+    if (kind === "fluid-heat") {
+      return this.mechanicMessage(mechanic, {
+        "fluid-heat": { "set-temperature": { temperature } },
+      });
+    }
+    if (kind === "generator") {
+      return this.mechanicMessage(mechanic, { generator: { "set-temperature": { temperature } } });
+    }
+    if (kind === "boiler") {
+      return this.mechanicMessage(mechanic, { boiler: { "set-temperature": { temperature } } });
+    }
+    throw new Error(`${kind} 机制不支持设置温度`);
+  }
+
   async setReactor(mechanic: MechanicId, reactor: string, quality = "normal"): Promise<void> {
     await this.mechanicMessage(mechanic, {
       reactor: { "set-reactor": { reactor: { id: reactor, quality } } },

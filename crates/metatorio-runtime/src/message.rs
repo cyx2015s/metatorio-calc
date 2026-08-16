@@ -315,6 +315,8 @@ pub enum MechanicAction {
     Generator(GeneratorMechanicAction),
     Boiler(BoilerMechanicAction),
     Reactor(ReactorMechanicAction),
+    FluidFuel(FluidFuelMechanicAction),
+    FluidHeat(FluidHeatMechanicAction),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -386,6 +388,20 @@ pub enum ReactorMechanicAction {
     SetReactor { reactor: IdWithQuality },
     SetFuel { fuel: Option<String> },
     SetNeighbours { neighbours: u8 },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FluidFuelMechanicAction {
+    SetFluid { fluid: String },
+    SetTemperature { temperature: Option<i32> },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FluidHeatMechanicAction {
+    SetFluid { fluid: String },
+    SetTemperature { temperature: Option<i32> },
 }
 
 /// Operations emitted by the old ModuleConfigEditor, expressed in terms of

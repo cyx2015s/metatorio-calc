@@ -13,11 +13,12 @@ use crate::id::{
 use crate::message::{
     AppMessage, ApplicationAction, BoilerMechanicAction, CloseDecision, DeleteDecision,
     ExternalInputAction, FactoryAction, FactoryContextAction, FactoryTemplate, FlowAction,
-    GeneratorMechanicAction, ItemFuelMechanicAction, ItemLaunchMechanicAction, MechanicAction,
-    MechanicListAction, MiningMechanicAction, ModuleAction, PlantMechanicAction, PlanningAction,
-    ProjectAction, ProjectPage, ReactorMechanicAction, RecipeMechanicAction, RuntimeCommand,
-    SelectorKind, SelectorTarget, SelectorValue, SolveAction, SpoilMechanicAction,
-    SuggestionAction, SuggestionCandidate, TargetAction, TargetExpressionAction, UiAction,
+    FluidFuelMechanicAction, FluidHeatMechanicAction, GeneratorMechanicAction,
+    ItemFuelMechanicAction, ItemLaunchMechanicAction, MechanicAction, MechanicListAction,
+    MiningMechanicAction, ModuleAction, PlantMechanicAction, PlanningAction, ProjectAction,
+    ProjectPage, ReactorMechanicAction, RecipeMechanicAction, RuntimeCommand, SelectorKind,
+    SelectorTarget, SelectorValue, SolveAction, SpoilMechanicAction, SuggestionAction,
+    SuggestionCandidate, TargetAction, TargetExpressionAction, UiAction,
 };
 
 /// Mutable application state that is independent from any GUI framework.
@@ -1668,6 +1669,18 @@ fn apply_mechanic_action(
             };
             apply_reactor_action(mechanic, action)
         }
+        MechanicAction::FluidFuel(action) => {
+            let Mechanic::FluidFuel(mechanic) = &mut entry.mechanic else {
+                return Err(kind_mismatch("fluid-fuel"));
+            };
+            apply_fluid_fuel_action(mechanic, action)
+        }
+        MechanicAction::FluidHeat(action) => {
+            let Mechanic::FluidHeat(mechanic) = &mut entry.mechanic else {
+                return Err(kind_mismatch("fluid-heat"));
+            };
+            apply_fluid_heat_action(mechanic, action)
+        }
     }
 }
 
@@ -1682,6 +1695,8 @@ fn kind_mismatch(kind: &'static str) -> RuntimeError {
         "generator" => "该机制不是 generator 类型",
         "boiler" => "该机制不是 boiler 类型",
         "reactor" => "该机制不是 reactor 类型",
+        "fluid-fuel" => "该机制不是 fluid-fuel 类型",
+        "fluid-heat" => "该机制不是 fluid-heat 类型",
         _ => "机制类型不匹配",
     };
     RuntimeError::InvalidOperation(message)
@@ -1814,6 +1829,40 @@ fn apply_reactor_action(
                 ));
             }
             Ok(replace(&mut mechanic.neighbours, neighbours))
+        }
+    }
+}
+
+fn apply_fluid_fuel_action(
+    mechanic: &mut metatorio_core::FluidFuelMechanic,
+    action: FluidFuelMechanicAction,
+) -> Result<bool, RuntimeError> {
+    match action {
+        FluidFuelMechanicAction::SetFluid { fluid } => {
+            if fluid.is_empty() {
+                return Err(RuntimeError::InvalidValue("流体未选择".to_string()));
+            }
+            Ok(replace(&mut mechanic.fluid, fluid))
+        }
+        FluidFuelMechanicAction::SetTemperature { temperature } => {
+            Ok(replace(&mut mechanic.temperature, temperature))
+        }
+    }
+}
+
+fn apply_fluid_heat_action(
+    mechanic: &mut metatorio_core::FluidHeatMechanic,
+    action: FluidHeatMechanicAction,
+) -> Result<bool, RuntimeError> {
+    match action {
+        FluidHeatMechanicAction::SetFluid { fluid } => {
+            if fluid.is_empty() {
+                return Err(RuntimeError::InvalidValue("流体未选择".to_string()));
+            }
+            Ok(replace(&mut mechanic.fluid, fluid))
+        }
+        FluidHeatMechanicAction::SetTemperature { temperature } => {
+            Ok(replace(&mut mechanic.temperature, temperature))
         }
     }
 }
@@ -2539,5 +2588,80 @@ mod tests {
                 value: IdWithQuality::new("another-beacon", "normal"),
             }))
             .unwrap();
+    }
+
+    #[test]
+    fn fluid_fuel_and_fluid_heat_actions_validate_kind_and_value() {
+        let (mut state, project, factory) = state_with_factory();
+        let add_mechanic = |state: &mut RuntimeState, kind: MechanicKind| {
+            state
+                .dispatch(AppMessage::Factory {
+                    project,
+                    factory,
+                    action: FactoryAction::MechanicList(MechanicListAction::Add { kind }),
+                })
+                .unwrap();
+            state
+                .factory(project, factory)
+                .unwrap()
+                .mechanics
+                .last()
+                .unwrap()
+                .id
+        };
+        let act = |state: &mut RuntimeState, mechanic, action: MechanicAction| {
+            state.dispatch(AppMessage::Factory {
+                project,
+                factory,
+                action: FactoryAction::Mechanic { mechanic, action },
+            })
+        };
+
+        let mechanic = add_mechanic(&mut state, MechanicKind::FluidFuel);
+        // 流体燃料：设置流体与温度
+        act(
+            &mut state,
+            mechanic,
+            MechanicAction::FluidFuel(FluidFuelMechanicAction::SetFluid {
+                fluid: "rocket-fuel".to_string(),
+            }),
+        )
+        .unwrap();
+        act(
+            &mut state,
+            mechanic,
+            MechanicAction::FluidFuel(FluidFuelMechanicAction::SetTemperature {
+                temperature: Some(25),
+            }),
+        )
+        .unwrap();
+        let Mechanic::FluidFuel(fuel) =
+            &state.factory(project, factory).unwrap().mechanics[0].mechanic
+        else {
+            panic!("expected fluid-fuel mechanic");
+        };
+        assert_eq!(fuel.fluid, "rocket-fuel");
+        assert_eq!(fuel.temperature, Some(25));
+
+        // 空流体拒绝
+        let mechanic = add_mechanic(&mut state, MechanicKind::FluidHeat);
+        let error = act(
+            &mut state,
+            mechanic,
+            MechanicAction::FluidHeat(FluidHeatMechanicAction::SetFluid {
+                fluid: String::new(),
+            }),
+        );
+        assert!(matches!(error, Err(RuntimeError::InvalidValue(_))));
+
+        // 种类不匹配拒绝：对 fluid-heat 机制发 fluid-fuel 动作
+        let error = act(
+            &mut state,
+            mechanic,
+            MechanicAction::FluidFuel(FluidFuelMechanicAction::SetTemperature {
+                temperature: None,
+            }),
+        );
+        assert!(matches!(error, Err(RuntimeError::InvalidOperation(_))));
     }
 }

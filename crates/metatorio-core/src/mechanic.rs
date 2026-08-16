@@ -192,6 +192,27 @@ impl ModuleConfig {
     }
 }
 
+/// 流体燃料机制：把指定温度的热值流体燃烧为"流体燃料"抽象能量流。
+/// 复刻原版 FluidFuelMechanic（fluid.rs）——擦除具体流体，减少 LP 空间膨胀；
+/// 代价是流体污染倍率等属性无法体现（边缘需求）。
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FluidFuelMechanic {
+    pub fluid: String,
+    /// 流体温度；None = 流体默认温度。
+    pub temperature: Option<i32>,
+}
+
+/// 流体热量机制：把高于默认温度的流体提取为"流体热量"抽象能量流。
+/// 复刻原版 FluidHeatMechanic（fluid.rs）；温度不高于默认温度时不产热。
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FluidHeatMechanic {
+    pub fluid: String,
+    /// 流体温度；None = 流体默认温度（不高于默认温度时不产热）。
+    pub temperature: Option<i32>,
+}
+
 /// 单个信标（插件塔）的配置。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -238,6 +259,8 @@ pub enum Mechanic {
     Generator(GeneratorMechanic),
     Boiler(BoilerMechanic),
     Reactor(ReactorMechanic),
+    FluidFuel(FluidFuelMechanic),
+    FluidHeat(FluidHeatMechanic),
 }
 
 // ── 组件配置 struct（迁移自 metatorio-egui 的 XxxInstance，单例语义）──

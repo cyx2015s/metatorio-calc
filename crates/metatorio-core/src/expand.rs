@@ -10,9 +10,9 @@ use crate::dual_var::DualVar;
 use crate::energy::{FluidFuelSpec, FuelSpec, ItemFuelSpec, energy_source_as_flow};
 use crate::id::IdWithQuality;
 use crate::mechanic::{
-    BoilerMechanic, GeneratorMechanic, ItemFuelMechanic, ItemLaunchMechanic, Mechanic,
-    MiningMechanic, PlantMechanic, ReactorMechanic, RecipeMechanic, SpoilMechanic,
-    quality_by_level,
+    BoilerMechanic, FluidFuelMechanic, FluidHeatMechanic, GeneratorMechanic, ItemFuelMechanic,
+    ItemLaunchMechanic, Mechanic, MiningMechanic, PlantMechanic, ReactorMechanic, RecipeMechanic,
+    SpoilMechanic, quality_by_level,
 };
 use crate::prim_var::Expansion;
 use crate::quality::calc_quality_distribution;
@@ -49,6 +49,12 @@ pub fn expand<'a, C: Clone>(
             }
             Mechanic::Boiler(mechanic) => expand_boiler(config, mechanic, ctx, &mut expansion),
             Mechanic::Reactor(mechanic) => expand_reactor(config, mechanic, ctx, &mut expansion),
+            Mechanic::FluidFuel(mechanic) => {
+                expand_fluid_fuel(config, mechanic, ctx, &mut expansion)
+            }
+            Mechanic::FluidHeat(mechanic) => {
+                expand_fluid_heat(config, mechanic, ctx, &mut expansion)
+            }
         }
     }
     expansion
@@ -999,6 +1005,69 @@ fn expand_reactor<C: Clone>(
     };
     temp.add(DualVar::Heat, heat);
     temp.scale(default_quality_multiplier(ctx, &mechanic.reactor.quality));
+    out.variables.extend(temp.into_variables(config));
+}
+
+/// 流体燃料机制：燃烧 1 单位热值流体 → `fluid_value` 焦耳的流体燃料
+/// 抽象能量（数值单位 J/s，与 energy.rs 一致；复刻原版
+/// FluidFuelInstance::as_flow 的语义，去掉其 ×60 时间刻度）。
+fn expand_fluid_fuel<C: Clone>(
+    config: C,
+    mechanic: &FluidFuelMechanic,
+    ctx: &Context,
+    out: &mut Expansion<C>,
+) {
+    let Some(fluid) = fluid_record(ctx, &mechanic.fluid) else {
+        return;
+    };
+    let fuel_value = fluid.fuel_value().amount;
+    if fuel_value <= 0.0 {
+        return;
+    }
+    let temperature = mechanic
+        .temperature
+        .map(f64::from)
+        .unwrap_or(fluid.default_temperature);
+    let mut temp = TempFlow::new();
+    add_fluid_interval(&mut temp, &mechanic.fluid, -1.0, temperature, temperature);
+    temp.add(
+        DualVar::FluidFuel {
+            filter: mechanic.fluid.clone(),
+        },
+        fuel_value,
+    );
+    out.variables.extend(temp.into_variables(config));
+}
+
+/// 流体热量机制：把 1 单位高于默认温度的流体提取为
+/// `heat_capacity × (温度 - 默认温度)` 焦耳的流体热量抽象能量
+/// （数值单位 J/s，与 energy.rs 一致；复刻原版 FluidHeatInstance::as_flow
+/// 的语义，去掉其 ×60 时间刻度；温度不高于默认温度时不产热）。
+fn expand_fluid_heat<C: Clone>(
+    config: C,
+    mechanic: &FluidHeatMechanic,
+    ctx: &Context,
+    out: &mut Expansion<C>,
+) {
+    let Some(fluid) = fluid_record(ctx, &mechanic.fluid) else {
+        return;
+    };
+    let temperature = mechanic
+        .temperature
+        .map(f64::from)
+        .unwrap_or(fluid.default_temperature);
+    if temperature <= fluid.default_temperature {
+        return;
+    }
+    let heat_capacity = fluid.heat_capacity().amount;
+    let mut temp = TempFlow::new();
+    add_fluid_interval(&mut temp, &mechanic.fluid, -1.0, temperature, temperature);
+    temp.add(
+        DualVar::FluidHeat {
+            filter: mechanic.fluid.clone(),
+        },
+        heat_capacity * (temperature - fluid.default_temperature),
+    );
     out.variables.extend(temp.into_variables(config));
 }
 

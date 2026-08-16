@@ -110,6 +110,8 @@ export type MechanicKind =
   | "generator"
   | "boiler"
   | "reactor"
+  | "fluid-fuel"
+  | "fluid-heat"
   | "unsupported";
 
 export type MechanicListAction =
@@ -159,6 +161,14 @@ export type ReactorMechanicAction =
   | { "set-fuel": { fuel: string | null } }
   | { "set-neighbours": { neighbours: number } };
 
+export type FluidFuelMechanicAction =
+  | { "set-fluid": { fluid: string } }
+  | { "set-temperature": { temperature: number | null } };
+
+export type FluidHeatMechanicAction =
+  | { "set-fluid": { fluid: string } }
+  | { "set-temperature": { temperature: number | null } };
+
 export type MechanicAction =
   | { recipe: RecipeMechanicAction }
   | { mining: MiningMechanicAction }
@@ -168,7 +178,9 @@ export type MechanicAction =
   | { "item-launch": ItemLaunchMechanicAction }
   | { generator: GeneratorMechanicAction }
   | { boiler: BoilerMechanicAction }
-  | { reactor: ReactorMechanicAction };
+  | { reactor: ReactorMechanicAction }
+  | { "fluid-fuel": FluidFuelMechanicAction }
+  | { "fluid-heat": FluidHeatMechanicAction };
 
 // 注意：unit 变体（clear-modules）在 serde 外部标签下序列化为裸字符串。
 export type ModuleAction =

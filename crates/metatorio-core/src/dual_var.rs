@@ -38,6 +38,13 @@ pub enum DualVar {
     FluidHeat {
         filter: String,
     },
+    /// 虚拟流体燃料流（**数值单位 = 焦耳 J**）：纯筛选，不含温度。
+    ///
+    /// 由流体燃料机制（燃烧热值流体）显式加入；`filter` 为流体名，
+    /// 空串表示"任意"。带 filter 的流可经零成本转换流归并为空串流。
+    FluidFuel {
+        filter: String,
+    },
     /// 物品燃料流（**数值单位 = 焦耳 J**）。
     ///
     /// `category`：燃料类别；`has_burnt_result`：燃料是否带燃尽产物。
@@ -67,6 +74,7 @@ impl DualVar {
             DualVar::Heat
                 | DualVar::Electricity
                 | DualVar::FluidHeat { .. }
+                | DualVar::FluidFuel { .. }
                 | DualVar::ItemFuel { .. }
         )
     }

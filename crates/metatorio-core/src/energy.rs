@@ -244,10 +244,14 @@ pub fn energy_source_as_flow(
                 Some(FuelSpec::Item(_)) => {}
                 None => {
                     // With no selected fluid, the solver only sees the energy
-                    // deficit. A concrete fluid provider supplies the matching
-                    // fluid and its heat in a later conversion step.
+                    // deficit. A concrete provider (流体燃料机制/锅炉等) supplies
+                    // the matching abstract flow in a later conversion step.
                     let filter = source.fluid_box.filter.clone().unwrap_or_default();
-                    if !burns_fluid {
+                    if burns_fluid {
+                        // 燃烧流体：消耗"流体燃料"抽象能量（热值流体被燃烧）。
+                        add(&mut flow, DualVar::FluidFuel { filter }, -usage);
+                    } else {
+                        // 利用流体热源：消耗"流体热量"抽象能量。
                         add(&mut flow, DualVar::FluidHeat { filter }, -usage);
                     }
                     add_emissions(&mut flow, &source.emissions_per_minute, effects, 1.0);

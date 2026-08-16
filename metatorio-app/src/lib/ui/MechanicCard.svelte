@@ -16,6 +16,8 @@
     generator: "发电机",
     boiler: "锅炉",
     reactor: "反应堆",
+    "fluid-fuel": "流体燃料",
+    "fluid-heat": "流体热",
   };
 
   let {
@@ -45,6 +47,7 @@
       entry.mechanic.generator?.id ??
       entry.mechanic.boiler?.id ??
       entry.mechanic.reactor?.id ??
+      entry.mechanic.fluid ??
       "",
   );
   let primaryIcon = $derived(
@@ -52,7 +55,9 @@
       ? "recipe"
       : kind === "mining" || kind === "generator" || kind === "boiler" || kind === "reactor"
         ? "entity"
-        : "item",
+        : kind === "fluid-fuel" || kind === "fluid-heat"
+          ? "fluid"
+          : "item",
   );
   let machineName = $derived(entry.mechanic.machine?.id ?? "");
   let fluidName = $derived(entry.mechanic.fluid ?? "");
@@ -82,6 +87,9 @@
         return "boiler";
       case "reactor":
         return "reactor";
+      case "fluid-fuel":
+      case "fluid-heat":
+        return "fluid";
       default:
         return "item";
     }
@@ -150,6 +158,24 @@
       <span class="sub">{fluidLabel || "选择流体"}</span>
     {:else if kind === "reactor"}
       <span class="sub">相邻 {entry.mechanic.neighbours ?? 0}</span>
+    {:else if kind === "fluid-fuel" || kind === "fluid-heat"}
+      <label class="sub temp" title="流体温度（留空 = 默认温度）">
+        温度
+        <input
+          type="number"
+          step="1"
+          value={entry.mechanic.temperature ?? ""}
+          placeholder="默认"
+          onchange={(event) => {
+            const raw = (event.currentTarget as HTMLInputElement).value;
+            const value = raw === "" ? null : Number(raw);
+            if (value === null || Number.isFinite(value)) {
+              runtime.setMechanicTemperature(entry.id, value).catch(() => {});
+            }
+          }}
+        />
+      </label>
+      <span class="spacer"></span>
     {/if}
 
     <span class="spacer"></span>
@@ -228,6 +254,25 @@
     font-size: 11px;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .sub.temp {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex: 0 0 auto;
+  }
+
+  .sub.temp input {
+    width: 56px;
+    min-height: 22px;
+    padding: 0 4px;
+    text-align: right;
+    background: var(--card);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    font-family: var(--mono);
+    font-size: 10px;
   }
 
   .spacer {

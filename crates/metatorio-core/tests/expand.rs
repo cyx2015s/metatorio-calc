@@ -103,3 +103,71 @@ fn stable_key_order_from_caller() {
         DualVar::FluidHeat { filter } if filter == "water"
     )));
 }
+
+/// 流体燃料/流体热机制：热值流体 → FluidFuel 抽象能量；高温流体 → FluidHeat。
+#[test]
+fn fluid_fuel_and_fluid_heat_mechanics_expand() {
+    use metatorio_core::mechanic::{FluidFuelMechanic, FluidHeatMechanic};
+
+    let mut dump = fluid_dump();
+    // 给 steam 加燃料值，方便验证 FluidFuel
+    dump["fluid"]["steam"]["fuel_value"] = json!("4MJ");
+    let store = load(dump);
+    let game = GameState::default();
+    let ctx = Context::new(&store, &game);
+
+    let fuel = Mechanic::FluidFuel(FluidFuelMechanic {
+        fluid: "steam".to_string(),
+        temperature: Some(165),
+    });
+    let heat = Mechanic::FluidHeat(FluidHeatMechanic {
+        fluid: "steam".to_string(),
+        temperature: Some(500),
+    });
+    let expansion = expand(
+        [("fuel".to_string(), &fuel), ("heat".to_string(), &heat)]
+            .into_iter(),
+        &ctx,
+    );
+    assert_eq!(expansion.len(), 2);
+
+    let fuel_var = expansion
+        .variables
+        .iter()
+        .find(|v| v.prim_var.inner == "fuel")
+        .expect("fluid-fuel 机制应展开");
+    assert_eq!(
+        fuel_var.flow.get(&DualVar::Fluid {
+            name: "steam".to_string(),
+            temperature: [165, 165],
+        }),
+        Some(&-1.0)
+    );
+    // steam: 4MJ/单位 → 4e6 J/s（数值单位 J/s，与 energy.rs 一致）
+    assert_eq!(
+        fuel_var.flow.get(&DualVar::FluidFuel {
+            filter: "steam".to_string(),
+        }),
+        Some(&4e6)
+    );
+
+    let heat_var = expansion
+        .variables
+        .iter()
+        .find(|v| v.prim_var.inner == "heat")
+        .expect("fluid-heat 机制应展开");
+    // heat_capacity 默认 1kJ/单位/℃：500-100=400℃ → 400_000 J/s
+    assert_eq!(
+        heat_var.flow.get(&DualVar::FluidHeat {
+            filter: "steam".to_string(),
+        }),
+        Some(&400_000.0)
+    );
+    // 温度不高于默认温度时（None → steam 默认 100℃）不产热
+    let cold = Mechanic::FluidHeat(FluidHeatMechanic {
+        fluid: "water".to_string(),
+        temperature: None,
+    });
+    let expansion = expand([("cold".to_string(), &cold)].into_iter(), &ctx);
+    assert_eq!(expansion.len(), 0);
+}

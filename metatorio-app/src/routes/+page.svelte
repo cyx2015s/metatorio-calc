@@ -20,6 +20,8 @@
     { kind: "generator", label: "发电机" },
     { kind: "boiler", label: "锅炉" },
     { kind: "reactor", label: "反应堆" },
+    { kind: "fluid-fuel", label: "流体燃料" },
+    { kind: "fluid-heat", label: "流体热" },
   ];
 
   onMount(() => {
@@ -323,17 +325,35 @@
           break;
         }
         case "fluid": {
-          // 发电机/锅炉的流体按流体箱过滤（如 steam/water）
+          // 按机制类型过滤：流体燃料/流体热有专用标签；发电机/锅炉按流体箱过滤
           const mechKind = entry?.mechanic.type;
+          if (mechKind === "fluid-fuel") {
+            openSelector(
+              "fluid",
+              "选择热值流体（燃料）",
+              (name) => runtime.setFluidFuel(mechanic, name),
+              [],
+              ["fluid-fuel"],
+            );
+            break;
+          }
+          if (mechKind === "fluid-heat") {
+            openSelector(
+              "fluid",
+              "选择提热流体",
+              (name) => runtime.setFluidHeat(mechanic, name),
+              [],
+              ["fluid-heat"],
+            );
+            break;
+          }
           const entityId =
             mechKind === "generator"
               ? entry?.mechanic.generator?.id
               : mechKind === "boiler"
                 ? entry?.mechanic.boiler?.id
                 : undefined;
-          const filter = entityId
-            ? await fluidFilterOf(mechKind, entityId)
-            : [];
+          const filter = entityId ? await fluidFilterOf(mechKind, entityId) : [];
           openSelector(
             "fluid",
             "选择流体",

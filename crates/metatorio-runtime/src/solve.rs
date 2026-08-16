@@ -1,8 +1,8 @@
 use std::{collections::HashMap, fs::File, path::Path};
 
-use metatorio_core::{Context, DualVar, GameState, Mechanic, ModuleConfig};
-use metatorio_data::generated_components::{EntityComponent, ItemComponent};
-use metatorio_data::store::PrototypeStore;
+use metatorio_core::{Context, DualVar, Flow, GameState, Mechanic, ModuleConfig};
+use metatorio_data::generated_components::{EntityComponent, FluidComponent, ItemComponent};
+use metatorio_data::store::{PrototypeGroup, PrototypeStore};
 use metatorio_solver::{AIndexMap, SolverData, SolverSolution, TargetSpec};
 use serde::{Deserialize, Serialize};
 
@@ -232,12 +232,16 @@ fn solve_document(
             *target.entry(item.flow.clone()).or_insert(0.0) += item.amount;
             target
         });
-    let mut problem = SolverData::new_simple(target, flows);
-    problem.sources = factory
+    let sources: Flow = factory
         .external_inputs
         .iter()
         .map(|input| (input.flow.clone(), input.penalty))
         .collect();
+    // 零成本转换流（子类型关系，复刻原版 planner.rs:264-316 并扩展）：
+    // 温度区间放宽、燃料子类型提升、filter 归并、定点温度互转（FluidHeat 平衡）。
+    add_conversion_flows(&mut flows, prototype, &target, &sources);
+    let mut problem = SolverData::new_simple(target, flows);
+    problem.sources = sources;
     problem.strict_source = factory.strict_source;
     problem.strict_sink = factory.strict_sink;
     problem
@@ -293,6 +297,170 @@ fn solve_document(
     })
 }
 
+/// 零成本转换流：表达流之间的子类型关系，复刻原版 planner.rs:264-316 并扩展。
+///
+/// 1. 温度区间子类型：窄区间流可放宽为包含它的宽区间流（[T,T] ⊆ [T1,T2]）。
+/// 2. 定点温度互转：同种流体不同定点温度互转，消耗/产出对应 FluidHeat
+///    平衡能量（加热消耗热量、冷却产出热量）。
+/// 3. 燃料子类型：无燃尽产物的燃料可提升为带燃尽产物的燃料——能接受
+///    带燃尽产物燃料的机器，自然也能接受无燃尽产物的燃料。
+/// 4. filter 归并：带具体流体 filter 的 FluidHeat/FluidFuel 归并为空串
+///    （"任意流体"）抽象流。
+///
+/// 全部使用 `MechanicId(u64::MAX)` 作为辅助变量身份（复刻 egui 的
+/// `usize::MAX`），不落入任何真实机制的求解结果。
+fn add_conversion_flows(
+    flows: &mut AIndexMap<ExpandedVarId, (Flow, f64)>,
+    prototype: &PrototypeStore,
+    target: &Flow,
+    sources: &Flow,
+) {
+    // 收集求解中实际出现的流键（含绝对值，避免正负相消漏掉）。
+    let mut seen: Flow = target.clone();
+    for (key, value) in sources {
+        *seen.entry(key.clone()).or_insert(0.0) += value.abs();
+    }
+    for (flow, _) in flows.values() {
+        for (key, value) in flow {
+            *seen.entry(key.clone()).or_insert(0.0) += value.abs();
+        }
+    }
+
+    let mut aux: u16 = 0;
+    let mut add_aux = |flows: &mut AIndexMap<ExpandedVarId, (Flow, f64)>,
+                       flow: Flow| {
+        flows.insert(
+            ExpandedVarId {
+                mechanic: MechanicId(u64::MAX),
+                variant: aux,
+            },
+            (flow, 0.0),
+        );
+        aux += 1;
+    };
+
+    // 温度区间子类型 + 定点温度互转
+    let mut fluid_temps: HashMap<String, Vec<[i32; 2]>> = HashMap::new();
+    for key in seen.keys() {
+        if let DualVar::Fluid { name, temperature } = key {
+            let list = fluid_temps.entry(name.clone()).or_default();
+            if !list.contains(temperature) {
+                list.push(*temperature);
+            }
+        }
+    }
+    for (name, temps) in &fluid_temps {
+        for narrow in temps {
+            for broad in temps {
+                if narrow[0] >= broad[0] && narrow[1] <= broad[1] && narrow != broad {
+                    let mut flow = Flow::default();
+                    flow.insert(
+                        DualVar::Fluid {
+                            name: name.clone(),
+                            temperature: *narrow,
+                        },
+                        -1.0,
+                    );
+                    flow.insert(
+                        DualVar::Fluid {
+                            name: name.clone(),
+                            temperature: *broad,
+                        },
+                        1.0,
+                    );
+                    add_aux(flows, flow);
+                }
+            }
+        }
+        let fixed: Vec<i32> = temps
+            .iter()
+            .filter(|interval| interval[0] == interval[1])
+            .map(|interval| interval[0])
+            .collect();
+        if fixed.len() > 1 {
+            let heat_capacity = prototype
+                .get(PrototypeGroup::Fluid, name)
+                .and_then(|record| record.component::<FluidComponent>())
+                .map(|fluid| fluid.heat_capacity().amount)
+                .unwrap_or(0.0);
+            for &t1 in &fixed {
+                for &t2 in &fixed {
+                    if t1 == t2 {
+                        continue;
+                    }
+                    // 1 单位流体从 t1 变到 t2 的热量差（加热为正 → 消耗热量）。
+                    let heat = heat_capacity * (f64::from(t2) - f64::from(t1));
+                    let mut flow = Flow::default();
+                    flow.insert(
+                        DualVar::Fluid {
+                            name: name.clone(),
+                            temperature: [t1, t1],
+                        },
+                        -1.0,
+                    );
+                    flow.insert(
+                        DualVar::Fluid {
+                            name: name.clone(),
+                            temperature: [t2, t2],
+                        },
+                        1.0,
+                    );
+                    flow.insert(DualVar::FluidHeat { filter: name.clone() }, -heat);
+                    add_aux(flows, flow);
+                }
+            }
+        }
+    }
+
+    // 燃料子类型：false → true（无燃尽产物燃料可满足带燃尽产物机器）。
+    for key in seen.keys() {
+        if let DualVar::ItemFuel {
+            category,
+            has_burnt_result: false,
+        } = key
+        {
+            let mut flow = Flow::default();
+            flow.insert(
+                DualVar::ItemFuel {
+                    category: category.clone(),
+                    has_burnt_result: false,
+                },
+                -1.0,
+            );
+            flow.insert(
+                DualVar::ItemFuel {
+                    category: category.clone(),
+                    has_burnt_result: true,
+                },
+                1.0,
+            );
+            add_aux(flows, flow);
+        }
+    }
+
+    // filter 归并：FluidHeat{F} / FluidFuel{F} → 空串（任意流体）。
+    for key in seen.keys() {
+        let flow = match key {
+            DualVar::FluidHeat { filter } if !filter.is_empty() => {
+                let mut f = Flow::default();
+                f.insert(DualVar::FluidHeat { filter: filter.clone() }, -1.0);
+                f.insert(DualVar::FluidHeat { filter: String::new() }, 1.0);
+                Some(f)
+            }
+            DualVar::FluidFuel { filter } if !filter.is_empty() => {
+                let mut f = Flow::default();
+                f.insert(DualVar::FluidFuel { filter: filter.clone() }, -1.0);
+                f.insert(DualVar::FluidFuel { filter: String::new() }, 1.0);
+                Some(f)
+            }
+            _ => None,
+        };
+        if let Some(flow) = flow {
+            add_aux(flows, flow);
+        }
+    }
+}
+
 /// 实体碰撞箱面积（占地成本）。
 fn entity_area(store: &PrototypeStore, name: &str) -> Option<f64> {
     let bb = store
@@ -334,6 +502,8 @@ fn instance_cost(store: &PrototypeStore, mechanic: &Mechanic) -> f64 {
                 Some(item.spoil_ticks? as f64 / item.stack_size.max(1) as f64 / 16.0)
             })
             .unwrap_or(16.0),
+        // 流体燃料/流体热：转换机制，几乎无成本（复刻原版 cost()=0）。
+        Mechanic::FluidFuel(_) | Mechanic::FluidHeat(_) => 0.0,
         _ => 16.0,
     }
 }
