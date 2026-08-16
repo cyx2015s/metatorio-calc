@@ -50,6 +50,9 @@ pub struct AppState {
     runtime: Mutex<Runtime>,
     contexts: Mutex<ContextRegistry>,
     project_paths: Mutex<HashMap<ProjectId, String>>,
+    /// 上下文 id → 本地化名映射（来自游戏 `--dump-prototype-locale` 的
+    /// `prototype-locale.json`，键为 `"{type}/{name}"`）。
+    locales: Mutex<HashMap<String, HashMap<String, String>>>,
 }
 
 impl Default for AppState {
@@ -58,6 +61,7 @@ impl Default for AppState {
             runtime: Mutex::new(Runtime::new()),
             contexts: Mutex::new(ContextRegistry::default()),
             project_paths: Mutex::new(HashMap::new()),
+            locales: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -111,6 +115,8 @@ pub struct GroupCount {
 pub struct IndexEntry {
     pub kind: String,
     pub name: String,
+    /// 本地化显示名（来自 `--dump-prototype-locale`；无翻译时为空串）。
+    pub localized_name: String,
     pub group: String,
     pub subgroup: String,
     pub icon_type: String,
@@ -139,6 +145,7 @@ pub struct FlowAmount {
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct PrototypeDetail {
     pub name: String,
+    pub localized_name: String,
     pub kind: String,
     pub subgroup: Option<String>,
     pub order: String,
@@ -184,6 +191,10 @@ impl ContextRegistry {
 
     fn manifest_path(&self, id: &str) -> PathBuf {
         self.store_dir(id).join("context.json")
+    }
+
+    fn locale_path(&self, id: &str) -> PathBuf {
+        self.store_dir(id).join("locale.json")
     }
 
     fn icon_root(&self, id: &str) -> PathBuf {
@@ -294,6 +305,112 @@ fn context_id_of(raw: &[u8]) -> String {
     format!("{:016x}", xxhash_rust::xxh3::xxh3_64(raw))
 }
 
+/// 解析单个 `{category}-locale.json`（游戏导出格式，见 metatorio-egui 的
+/// `LOCALE_CATEGORIES`）：顶层是 `{"names": {name: label}, "descriptions": …}`。
+/// 容忍顶层直接就是 `{name: label}` 的扁平形式。产出 `"{category}/{name}" → label`。
+fn parse_locale_category(raw: &[u8], category: &str) -> HashMap<String, String> {
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(raw) else {
+        return HashMap::new();
+    };
+    let names = value.get("names").unwrap_or(&value);
+    let Some(object) = names.as_object() else {
+        return HashMap::new();
+    };
+    let mut map = HashMap::new();
+    for (name, label) in object {
+        if let Some(label) = label.as_str() {
+            map.entry(format!("{category}/{name}")).or_insert_with(|| label.to_string());
+        }
+    }
+    map
+}
+
+/// 解析合并格式的 locale.json（本应用缓存：顶层即 `"{category}/{name}" → label`）。
+fn parse_flat_locale_map(raw: &[u8]) -> HashMap<String, String> {
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(raw) else {
+        return HashMap::new();
+    };
+    let Some(object) = value.as_object() else {
+        return HashMap::new();
+    };
+    let mut map = HashMap::new();
+    for (key, label) in object {
+        if let Some(label) = label.as_str() {
+            map.entry(key.clone()).or_insert_with(|| label.to_string());
+        }
+    }
+    map
+}
+
+/// 扫描目录合并翻译：逐类读取 `*-locale.json`（游戏导出格式），也接受
+/// 单独的 `locale.json`（本应用已合并的缓存格式）。
+fn collect_locale_map(dir: &Path) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return map;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        let Ok(raw) = std::fs::read(&path) else {
+            continue;
+        };
+        if file_name == "locale.json" {
+            let merged = parse_flat_locale_map(&raw);
+            for (key, label) in merged {
+                map.entry(key).or_insert(label);
+            }
+        } else if let Some(category) = file_name.strip_suffix("-locale.json") {
+            let category_map = parse_locale_category(&raw, category);
+            for (key, label) in category_map {
+                map.entry(key).or_insert(label);
+            }
+        }
+    }
+    map
+}
+
+/// 读上下文缓存的 locale.json（合并格式）并缓存到 AppState（缺失/解析失败 = 空映射）。
+fn locale_map_of(state: &AppState, id: &str) -> HashMap<String, String> {
+    {
+        let locales = state.locales.lock().ok();
+        if let Some(map) = locales.and_then(|locales| locales.get(id).cloned()) {
+            return map;
+        }
+    }
+    let path = {
+        let registry = state.contexts.lock().ok();
+        registry.map(|registry| registry.locale_path(id))
+    };
+    let map = path
+        .and_then(|path| std::fs::read(path).ok())
+        .map(|raw| parse_flat_locale_map(&raw))
+        .unwrap_or_default();
+    if let Ok(mut locales) = state.locales.lock() {
+        locales.insert(id.to_string(), map.clone());
+    }
+    map
+}
+
+/// 按 kind 查询本地化名：优先 `{kind}/{name}`，实体派生 kind
+/// （machine/mining-machine/beacon/…）回退到 `entity/{name}`，
+/// module 回退到 `item/{name}`；都没有则返回空串。
+fn localized_name(map: &HashMap<String, String>, kind: &str, name: &str) -> String {
+    let direct = format!("{kind}/{name}");
+    if let Some(label) = map.get(&direct) {
+        return label.clone();
+    }
+    for fallback in ["entity", "item", "recipe", "fluid", "technology"] {
+        let key = format!("{fallback}/{name}");
+        if let Some(label) = map.get(&key) {
+            return label.clone();
+        }
+    }
+    String::new()
+}
+
 // ── Context loading / registration ────────────────────────────────
 
 fn ensure_context_loaded(
@@ -352,6 +469,7 @@ fn register_context(
     name: String,
     source: String,
     raw: &[u8],
+    locale_raw: Option<&[u8]>,
     icon: IconImport,
 ) -> Result<ContextInfo, String> {
     let id = context_id_of(raw);
@@ -361,6 +479,14 @@ fn register_context(
         if is_new {
             registry.register(id.clone(), name, source);
             std::fs::write(registry.dump_path(&id), raw).map_err(|error| error.to_string())?;
+        }
+        // 翻译：合并后的 `{category}/{name}` 映射写入 locale.json（id 只由
+        // dump 内容决定，翻译变化不影响上下文 id；缺失/历史缓存则补写）。
+        let locale_path = registry.locale_path(&id);
+        if !locale_path.is_file() {
+            if let Some(locale_raw) = locale_raw {
+                let _ = std::fs::write(&locale_path, locale_raw);
+            }
         }
         // 图标：新上下文，或历史注册时缺图标（早期路径 bug 留下的缓存）
         // 都导入——重新导出同内容时 id 相同、注册被跳过，但图标仍需补齐。
@@ -535,6 +661,16 @@ fn load_game_context_impl(
         mod_dir.map(|dir| format!(", mods: {dir}")).unwrap_or_default()
     );
     let icon_src = script_output.clone();
+    // 翻译：`--dump-prototype-locale` 在 script-output 下写出多个
+    // `{category}-locale.json`（item/recipe/entity/…），逐类合并。
+    let locale_raw = {
+        let map = collect_locale_map(&script_output);
+        if map.is_empty() {
+            None
+        } else {
+            serde_json::to_vec(&map).ok()
+        }
+    };
     let mut runtime = state
         .runtime
         .lock()
@@ -545,6 +681,7 @@ fn load_game_context_impl(
         name,
         source,
         &raw,
+        locale_raw.as_deref(),
         IconImport::Move(icon_src),
     )
 }
@@ -565,6 +702,7 @@ fn load_bundled_dump(app: AppHandle) -> Result<ContextInfo, String> {
         "内置示例".to_string(),
         "embedded demo".to_string(),
         DEMO_DUMP.as_bytes(),
+        None,
         IconImport::None,
     )?;
     emit_contexts_changed(&app, &state, Some(&runtime));
@@ -601,6 +739,18 @@ async fn load_dump(app: AppHandle, path: String) -> Result<ContextInfo, String> 
             .unwrap_or("dump")
             .to_string();
         let source = format!("dump: {path}");
+        // 翻译：dump 旁的游戏导出目录里通常有多个 `{category}-locale.json`。
+        let locale_raw = {
+            let map = Path::new(&path)
+                .parent()
+                .map(collect_locale_map)
+                .unwrap_or_default();
+            if map.is_empty() {
+                None
+            } else {
+                serde_json::to_vec(&map).ok()
+            }
+        };
         // 图标根：优先 dump 旁的 icons/（旧约定），否则 dump 所在目录本身
         // （导出时类型目录直接位于 script-output 根下）。
         let icon = match Path::new(&path).parent() {
@@ -620,7 +770,15 @@ async fn load_dump(app: AppHandle, path: String) -> Result<ContextInfo, String> 
             .runtime
             .lock()
             .map_err(|_| "runtime lock poisoned".to_string())?;
-        let info = register_context(&state, &mut runtime, name, source, &raw, icon)?;
+        let info = register_context(
+            &state,
+            &mut runtime,
+            name,
+            source,
+            &raw,
+            locale_raw.as_deref(),
+            icon,
+        )?;
         emit_contexts_changed(&app, &state, Some(&runtime));
         Ok(info)
     })
@@ -766,14 +924,15 @@ fn catalog_index(state: State<'_, AppState>) -> Result<CatalogIndex, String> {
     };
     ensure_context_loaded(&state, &mut runtime, &id)?;
     let store = runtime.context_store_by_id(&id).ok_or("上下文未载入")?;
+    let locale = locale_map_of(&state, &id);
     Ok(CatalogIndex {
         context_id: id,
         qualities: store.quality_order().to_vec(),
-        entries: catalog_index_from_store(store),
+        entries: catalog_index_from_store(store, &locale),
     })
 }
 
-fn catalog_index_from_store(store: &PrototypeStore) -> Vec<IndexEntry> {
+fn catalog_index_from_store(store: &PrototypeStore, locale: &HashMap<String, String>) -> Vec<IndexEntry> {
     let mut out: Vec<IndexEntry> = Vec::new();
 
     // 有 order_info 的组：大组 → 小组 → 条目（recipe/entity fallback 已在
@@ -805,6 +964,7 @@ fn catalog_index_from_store(store: &PrototypeStore) -> Vec<IndexEntry> {
                     out.push(IndexEntry {
                         kind: kind.to_string(),
                         name: name.clone(),
+                        localized_name: localized_name(locale, kind, name),
                         group: big.clone(),
                         subgroup: sub.clone(),
                         icon_type: icon_type.to_string(),
@@ -860,6 +1020,7 @@ fn catalog_index_from_store(store: &PrototypeStore) -> Vec<IndexEntry> {
                     out.push(IndexEntry {
                         kind: kind.to_string(),
                         name: name.clone(),
+                        localized_name: localized_name(locale, kind, name),
                         group: big.clone(),
                         subgroup: sub.clone(),
                         icon_type: "entity".to_string(),
@@ -885,6 +1046,7 @@ fn catalog_index_from_store(store: &PrototypeStore) -> Vec<IndexEntry> {
                     out.push(IndexEntry {
                         kind: "module".to_string(),
                         name: name.clone(),
+                        localized_name: localized_name(locale, "module", name),
                         group: big.clone(),
                         subgroup: sub.clone(),
                         icon_type: "item".to_string(),
@@ -918,6 +1080,7 @@ fn catalog_index_from_store(store: &PrototypeStore) -> Vec<IndexEntry> {
                     out.push(IndexEntry {
                         kind: "resource".to_string(),
                         name: name.clone(),
+                        localized_name: localized_name(locale, "resource", name),
                         group: big.clone(),
                         subgroup: sub.clone(),
                         icon_type: "entity".to_string(),
@@ -934,6 +1097,7 @@ fn catalog_index_from_store(store: &PrototypeStore) -> Vec<IndexEntry> {
         out.push(IndexEntry {
             kind: "quality".to_string(),
             name: name.clone(),
+            localized_name: localized_name(locale, "quality", name),
             group: "quality".to_string(),
             subgroup: String::new(),
             icon_type: "quality".to_string(),
@@ -974,8 +1138,10 @@ fn prototype_detail(
     let Some(record) = record else {
         return Ok(None);
     };
+    let locale = locale_map_of(&state, &id);
     let mut detail = PrototypeDetail {
         name: record.name.clone(),
+        localized_name: localized_name(&locale, &kind, &record.name),
         kind: kind.clone(),
         ..Default::default()
     };
