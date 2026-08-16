@@ -464,6 +464,40 @@ class RuntimeStore {
     });
   }
 
+  async setStrictSource(strict: boolean): Promise<void> {
+    const { project, factory } = this.requireFactory();
+    await this.send({
+      scope: "factory",
+      action: { project, factory, action: { "set-strict-source": { strict } } },
+    });
+  }
+
+  async setStrictSink(strict: boolean): Promise<void> {
+    const { project, factory } = this.requireFactory();
+    await this.send({
+      scope: "factory",
+      action: { project, factory, action: { "set-strict-sink": { strict } } },
+    });
+  }
+
+  /** 克隆机制（追加到列表末尾）。 */
+  async cloneMechanic(mechanic: MechanicId): Promise<void> {
+    const { project, factory } = this.requireFactory();
+    await this.send({
+      scope: "factory",
+      action: { project, factory, action: { "mechanic-list": { clone: { mechanic } } } },
+    });
+  }
+
+  /** 克隆工厂（整份追加为新工厂）。 */
+  async cloneFactory(factory: FactoryId): Promise<void> {
+    const project = this.requireProject();
+    await this.send({
+      scope: "project",
+      action: { project, action: { "clone-factory": { factory } } },
+    });
+  }
+
   // ── 目标 ────────────────────────────────────────────────────────
 
   async addTarget(itemId: string, amount: number): Promise<void> {

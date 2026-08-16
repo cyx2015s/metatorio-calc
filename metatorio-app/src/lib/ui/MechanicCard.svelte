@@ -29,6 +29,7 @@
     onModuleSlot,
     onAddBeacon,
     onPickFuel,
+    onClone,
   }: {
     entry: MechanicEntry;
     solution?: { amount: number; cost: number } | null;
@@ -38,6 +39,7 @@
     onModuleSlot: (slot: number, module: string | null) => void;
     onAddBeacon: () => void;
     onPickFuel: () => void;
+    onClone: () => void;
   } = $props();
 
   let kind = $derived(entry.mechanic.type);
@@ -150,6 +152,7 @@
     <button class="btn ghost" class:on={entry.enabled} onclick={onToggleEnabled} title={entry.enabled ? "停用" : "启用"}>
       {entry.enabled ? "启用" : "停用"}
     </button>
+    <button class="btn ghost" onclick={onClone} title="克隆机制">克隆</button>
     <button class="btn ghost danger" onclick={onRemove} title="移除机制">移除</button>
   </div>
 

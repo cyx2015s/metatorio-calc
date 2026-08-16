@@ -91,6 +91,7 @@ export type TimeScale = "seconds" | "minutes" | "hours";
 
 export type ProjectAction =
   | { "add-factory": { name: string; template: FactoryTemplate } }
+  | { "clone-factory": { factory: FactoryId } }
   | { "remove-factory": { factory: FactoryId } }
   | { "reorder-factory": { factory: FactoryId; position: number } }
   | { "set-time-scale": { time_scale: TimeScale } }

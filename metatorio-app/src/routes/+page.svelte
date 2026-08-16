@@ -597,6 +597,11 @@
           >{item.name}</button>
           <button
             class="tab-x"
+            title="克隆工厂"
+            onclick={() => runtime.cloneFactory(item.id).catch(() => {})}
+          >⧉</button>
+          <button
+            class="tab-x"
             title="删除工厂"
             onclick={() => runtime.removeFactory(item.id).catch(() => {})}
           >×</button>
@@ -753,6 +758,24 @@
               >{runtime.localizedName("quality", factory.settings.major_quality || "normal")}</button>
             </div>
           </div>
+          <label class="check">
+            <input
+              type="checkbox"
+              checked={factory.strict_source}
+              onchange={(event) =>
+                runtime.setStrictSource((event.currentTarget as HTMLInputElement).checked).catch(() => {})}
+            />
+            严格供给（只允许从外部输入获得未配平物品）
+          </label>
+          <label class="check">
+            <input
+              type="checkbox"
+              checked={factory.strict_sink}
+              onchange={(event) =>
+                runtime.setStrictSink((event.currentTarget as HTMLInputElement).checked).catch(() => {})}
+            />
+            严格消耗（未出现在目标中的物品必须配平）
+          </label>
         </section>
       {/if}
 
@@ -953,6 +976,7 @@
             onModuleSlot={(slot, module) => runtime.setModuleSlot(entry.id, slot, module).catch(() => {})}
             onAddBeacon={() => addBeacon(entry.id)}
             onPickFuel={() => pickFuel(entry.id)}
+            onClone={() => runtime.cloneMechanic(entry.id).catch(() => {})}
           />
         {:else}
           <div class="empty-state">
