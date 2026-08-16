@@ -20,6 +20,7 @@
     kindOptions = [],
     flowMode = false,
     categoryFilter,
+    allowedNames,
     initialTab,
     initialName,
     initialQuality,
@@ -33,6 +34,8 @@
     flowMode?: boolean;
     /** 机器/资源类目录的类别过滤（如配方 categories）；空数组=不过滤。 */
     categoryFilter?: string[];
+    /** 精确名称过滤（如发电机/锅炉的流体箱过滤）；空数组=不过滤。 */
+    allowedNames?: string[];
     /** 流模式初始页签（编辑目标/外部输入时预选当前流类型）。 */
     initialTab?: string;
     /** 目录模式初始选中（编辑时预选当前条目）。 */
@@ -125,12 +128,12 @@
         ? entries.filter((entry) => entry.group === activeGroup)
         : entries
     ).filter((entry) => {
+      if (allowedNames && allowedNames.length > 0) {
+        if (!allowedNames.includes(entry.name)) return false;
+      }
       if (!categoryFilter || categoryFilter.length === 0 || !catalogKind) return true;
-      // 空类别条目视为"不限制"（与后端 categories_overlap 语义一致）
-      return (
-        entry.categories.length === 0 ||
-        entry.categories.some((category) => categoryFilter.includes(category))
-      );
+      // 与后端 categories_overlap 一致：空类别条目在过滤时视为不匹配
+      return entry.categories.some((category) => categoryFilter.includes(category));
     }),
   );
   let bySubgroup = $derived(groupBySubgroup(visible));

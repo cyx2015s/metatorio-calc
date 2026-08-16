@@ -486,6 +486,20 @@ export interface PrototypeDetail {
   order: string;
   hidden: boolean;
   stack_size: number | null;
+  /** 燃料能量（焦耳）。 */
+  fuel_value_j: number | null;
+  /** 燃料类别（如 "chemical"）。 */
+  fuel_category: string;
+  /** 燃烧产物。 */
+  burnt_result: string;
+  /** 腐坏产物。 */
+  spoil_result: string;
+  /** 腐坏时间（刻）。 */
+  spoil_ticks: number | null;
+  /** 种植产物（种子 → 实体）。 */
+  plant_result: string;
+  /** 是否可火箭发射。 */
+  launchable: boolean;
   category: string | null;
   categories: string[];
   energy_required: number | null;
@@ -501,6 +515,29 @@ export interface PrototypeDetail {
   allowed_module_categories: string[];
   /** 焦耳/刻（功率）；前端换算为 W。 */
   energy_usage_j: number | null;
+  // generator / boiler / reactor
+  /** 发电效率。 */
+  effectivity: number | null;
+  /** 最大出力（焦耳/刻）。 */
+  max_power_output_j: number | null;
+  /** 最高/目标温度。 */
+  maximum_temperature: number | null;
+  /** 发电机是否燃烧流体。 */
+  burns_fluid: boolean | null;
+  /** 发电机流体用量（单位/刻）。 */
+  fluid_usage_per_tick: number | null;
+  /** 锅炉能耗（焦耳/刻）。 */
+  energy_consumption_j: number | null;
+  /** 锅炉目标温度。 */
+  target_temperature: number | null;
+  /** 反应堆相邻加成。 */
+  neighbour_bonus: number | null;
+  /** 反应堆加热半径。 */
+  heating_radius: number | null;
+  /** 反应堆热输出（焦耳/刻）。 */
+  heat_output_j: number | null;
+  /** 流体箱过滤（如 "steam"）。 */
+  fluid_filter: string | null;
   beacon_module_slots: number | null;
   default_temperature: number | null;
   // quality（kind = "quality"）

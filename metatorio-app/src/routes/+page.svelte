@@ -56,6 +56,7 @@
     title: string;
     kinds: { kind: CatalogKind; label: string }[];
     categoryFilter?: string[];
+    allowedNames?: string[];
     onSelect: (name: string, quality: string) => void;
   } | null>(null);
 
@@ -74,8 +75,9 @@
     onSelect: (name: string, quality: string) => void,
     kinds: { kind: CatalogKind; label: string }[] = [],
     categoryFilter?: string[],
+    allowedNames?: string[],
   ) {
-    selector = { kind, title, kinds, categoryFilter, onSelect };
+    selector = { kind, title, kinds, categoryFilter, allowedNames, onSelect };
   }
 
   function renameContextPrompt(context: import("$lib/runtime/types").ContextInfo) {
@@ -320,14 +322,60 @@
           );
           break;
         }
-        case "fluid":
-          openSelector("fluid", "选择流体", (name) => runtime.setFluid(mechanic, name));
-          break;
-        case "item":
-          openSelector("item", "选择物品", (name, quality) =>
-            runtime.setItem(mechanic, name, quality),
+        case "fluid": {
+          // 发电机/锅炉的流体按流体箱过滤（如 steam/water）
+          const mechKind = entry?.mechanic.type;
+          const entityId =
+            mechKind === "generator"
+              ? entry?.mechanic.generator?.id
+              : mechKind === "boiler"
+                ? entry?.mechanic.boiler?.id
+                : undefined;
+          const filter = entityId
+            ? await fluidFilterOf(mechKind, entityId)
+            : [];
+          openSelector(
+            "fluid",
+            "选择流体",
+            (name) => runtime.setFluid(mechanic, name),
+            [],
+            [],
+            filter,
           );
           break;
+        }
+        case "item": {
+          // 按机制类型过滤物品：腐坏/种植/燃料/发射
+          const mechKind = entry?.mechanic.type;
+          const filter =
+            mechKind === "spoil"
+              ? ["spoilable"]
+              : mechKind === "plant"
+                ? ["plantable"]
+                : mechKind === "item-fuel"
+                  ? ["fuel"]
+                  : mechKind === "item-launch"
+                    ? ["launchable"]
+                    : [];
+          const title =
+            mechKind === "spoil"
+              ? "选择会腐坏的物品"
+              : mechKind === "plant"
+                ? "选择种子"
+                : mechKind === "item-fuel"
+                  ? "选择燃料"
+                  : mechKind === "item-launch"
+                    ? "选择发射物品"
+                    : "选择物品";
+          openSelector(
+            "item",
+            title,
+            (name, quality) => runtime.setItem(mechanic, name, quality),
+            [],
+            filter,
+          );
+          break;
+        }
         case "generator":
           openSelector("generator", "选择发电机", (name, quality) =>
             runtime.setGenerator(mechanic, name, quality),
@@ -408,6 +456,13 @@
     } catch {
       /* 过滤信息拉取失败时仍打开选择器（不过滤） */
     }
+  }
+
+  /** 发电机/锅炉允许的流体（流体箱 filter；无则空 = 不限制）。 */
+  async function fluidFilterOf(mechKind: string | undefined, entityId: string): Promise<string[]> {
+    const detailKind = mechKind === "generator" ? "generator" : "boiler";
+    const detail = await runtime.getDetail(detailKind, entityId);
+    return detail?.fluid_filter ? [detail.fluid_filter] : [];
   }
 
   /** 添加信标：直接打开信标选择器（不再先加空配置行），重复信标拒绝。 */
@@ -866,6 +921,7 @@
     title={selector.title}
     kindOptions={selector.kinds}
     categoryFilter={selector.categoryFilter}
+    allowedNames={selector.allowedNames}
     onSelect={selector.onSelect}
     onClose={() => (selector = null)}
   />

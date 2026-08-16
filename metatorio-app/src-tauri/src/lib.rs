@@ -21,8 +21,9 @@ use std::{
 use metatorio_core::{DualVar, IdWithQuality, Mechanic};
 use metatorio_data::store::{PrototypeGroup, PrototypeRecord, PrototypeStore};
 use metatorio_data::{
-    BeaconComponent, CraftingMachineComponent, FluidComponent, ItemComponent, MiningDrillComponent,
-    ModuleComponent, PrototypeBaseComponent, QualityComponent, RecipeComponent,
+    BeaconComponent, BoilerComponent, BurnerGeneratorComponent, CraftingMachineComponent,
+    FluidComponent, GeneratorComponent, ItemComponent, MiningDrillComponent, ModuleComponent,
+    PrototypeBaseComponent, QualityComponent, ReactorComponent, RecipeComponent,
     ResourceEntityComponent,
 };
 use metatorio_runtime::{
@@ -169,6 +170,20 @@ pub struct PrototypeDetail {
     pub hidden: bool,
     // item
     pub stack_size: Option<f64>,
+    /// 燃料能量（焦耳）。
+    pub fuel_value_j: Option<f64>,
+    /// 燃料类别（如 "chemical"）。
+    pub fuel_category: String,
+    /// 燃烧产物。
+    pub burnt_result: String,
+    /// 腐坏产物。
+    pub spoil_result: String,
+    /// 腐坏时间（刻）。
+    pub spoil_ticks: Option<u32>,
+    /// 种植产物（种子 → 实体）。
+    pub plant_result: String,
+    /// 是否可火箭发射。
+    pub launchable: bool,
     // recipe
     pub category: Option<String>,
     pub categories: Vec<String>,
@@ -186,6 +201,29 @@ pub struct PrototypeDetail {
     pub allowed_module_categories: Vec<String>,
     /// 焦耳/刻（功率）；前端换算为 W。
     pub energy_usage_j: Option<f64>,
+    // generator / boiler / reactor
+    /// 发电效率。
+    pub effectivity: Option<f64>,
+    /// 最大出力（焦耳/刻）。
+    pub max_power_output_j: Option<f64>,
+    /// 最高/目标温度。
+    pub maximum_temperature: Option<f64>,
+    /// 发电机是否燃烧流体。
+    pub burns_fluid: Option<bool>,
+    /// 发电机流体用量（单位/刻）。
+    pub fluid_usage_per_tick: Option<f64>,
+    /// 锅炉能耗（焦耳/刻）。
+    pub energy_consumption_j: Option<f64>,
+    /// 锅炉目标温度。
+    pub target_temperature: Option<f64>,
+    /// 反应堆相邻加成。
+    pub neighbour_bonus: Option<f64>,
+    /// 反应堆加热半径。
+    pub heating_radius: Option<f64>,
+    /// 反应堆热输出（焦耳/刻）。
+    pub heat_output_j: Option<f64>,
+    /// 流体箱过滤（如 "steam"）。
+    pub fluid_filter: Option<String>,
     // beacon
     pub beacon_module_slots: Option<u16>,
     // fluid
@@ -953,9 +991,35 @@ fn catalog_index(state: State<'_, AppState>) -> Result<CatalogIndex, String> {
     })
 }
 
+/// 物品的机制标签（伪类别，供前端按机制过滤选择器）：
+/// spoilable / plantable / fuel / launchable。
+fn item_tags(store: &PrototypeStore, name: &str) -> Vec<String> {
+    let Some(record) = store.get(PrototypeGroup::Item, name) else {
+        return Vec::new();
+    };
+    let Some(item) = record.component::<ItemComponent>() else {
+        return Vec::new();
+    };
+    let mut tags = Vec::new();
+    if item.spoil_result.as_deref().is_some_and(|result| !result.is_empty())
+        || item.spoil_ticks.is_some()
+    {
+        tags.push("spoilable".to_string());
+    }
+    if item.plant_result.as_deref().is_some_and(|result| !result.is_empty()) {
+        tags.push("plantable".to_string());
+    }
+    if !item.fuel_category.is_empty() || item.fuel_value.is_some() {
+        tags.push("fuel".to_string());
+    }
+    if !item.rocket_launch_products.is_empty() {
+        tags.push("launchable".to_string());
+    }
+    tags
+}
+
 fn catalog_index_from_store(store: &PrototypeStore, locale: &HashMap<String, String>) -> Vec<IndexEntry> {
     let mut out: Vec<IndexEntry> = Vec::new();
-
     // 有 order_info 的组：大组 → 小组 → 条目（recipe/entity fallback 已在
     // order_info 中生效）
     let ordered = [
@@ -979,6 +1043,8 @@ fn catalog_index_from_store(store: &PrototypeStore, locale: &HashMap<String, Str
                             .and_then(|record| record.component::<RecipeComponent>())
                             .map(effective_recipe_categories)
                             .unwrap_or_default()
+                    } else if kind == "item" {
+                        item_tags(store, name)
                     } else {
                         Vec::new()
                     };
@@ -999,15 +1065,19 @@ fn catalog_index_from_store(store: &PrototypeStore, locale: &HashMap<String, Str
 
     // 实体类：Entity 的 order_info（含 fallback）里按组件过滤
     let entity_kinds = [
-        ("machine", "CraftingMachineComponent", true),
-        ("mining-machine", "MiningDrillComponent", true),
-        ("generator", "GeneratorComponent", true),
-        ("boiler", "BoilerComponent", true),
-        ("reactor", "ReactorComponent", true),
-        ("beacon", "BeaconComponent", true),
-        ("entity", "EntityComponent", false),
+        ("machine", &["CraftingMachineComponent"][..], true),
+        ("mining-machine", &["MiningDrillComponent"][..], true),
+        (
+            "generator",
+            &["GeneratorComponent", "BurnerGeneratorComponent"][..],
+            true,
+        ),
+        ("boiler", &["BoilerComponent"][..], true),
+        ("reactor", &["ReactorComponent"][..], true),
+        ("beacon", &["BeaconComponent"][..], true),
+        ("entity", &["EntityComponent"][..], false),
     ];
-    for (kind, component, want_slots) in entity_kinds {
+    for (kind, components, want_slots) in entity_kinds {
         let Some(order) = store.order_info().get(&PrototypeGroup::Entity) else {
             continue;
         };
@@ -1017,7 +1087,7 @@ fn catalog_index_from_store(store: &PrototypeStore, locale: &HashMap<String, Str
                     let Some(record) = store.get(PrototypeGroup::Entity, name) else {
                         continue;
                     };
-                    if !record.has(component) {
+                    if !components.iter().any(|component| record.has(component)) {
                         continue;
                     }
                     let slots = if want_slots {
@@ -1172,7 +1242,14 @@ fn prototype_detail(
         detail.hidden = base.hidden;
     }
     if let Some(item) = record.component::<ItemComponent>() {
-        detail.stack_size = Some(item.stack_size as f64);
+        detail.stack_size = Some(f64::from(item.stack_size));
+        detail.fuel_value_j = item.fuel_value.map(|value| value.amount);
+        detail.fuel_category = item.fuel_category.clone();
+        detail.burnt_result = item.burnt_result.clone();
+        detail.spoil_result = item.spoil_result.clone().unwrap_or_default();
+        detail.spoil_ticks = item.spoil_ticks;
+        detail.plant_result = item.plant_result.clone().unwrap_or_default();
+        detail.launchable = !item.rocket_launch_products.is_empty();
     }
     if let Some(recipe) = record.component::<RecipeComponent>() {
         detail.categories = effective_recipe_categories(recipe);
@@ -1211,6 +1288,28 @@ fn prototype_detail(
             .allowed_module_categories
             .clone()
             .unwrap_or_default();
+    }
+    if let Some(gen) = record.component::<GeneratorComponent>() {
+        detail.effectivity = Some(gen.effectivity);
+        detail.max_power_output_j = gen.max_power_output.map(|value| value.amount);
+        detail.maximum_temperature = Some(gen.maximum_temperature);
+        detail.burns_fluid = Some(gen.burns_fluid);
+        detail.fluid_usage_per_tick = Some(gen.fluid_usage_per_tick);
+        detail.fluid_filter = gen.fluid_box.filter.clone();
+    }
+    if let Some(burner_gen) = record.component::<BurnerGeneratorComponent>() {
+        detail.max_power_output_j = Some(burner_gen.max_power_output.amount);
+        detail.fuel_category = burner_gen.burner.fuel_categories.join(", ");
+    }
+    if let Some(boiler) = record.component::<BoilerComponent>() {
+        detail.energy_consumption_j = Some(boiler.energy_consumption.amount);
+        detail.target_temperature = boiler.target_temperature;
+        detail.fluid_filter = boiler.fluid_box.filter.clone();
+    }
+    if let Some(reactor) = record.component::<ReactorComponent>() {
+        detail.heat_output_j = Some(reactor.consumption.amount);
+        detail.neighbour_bonus = Some(reactor.neighbour_bonus);
+        detail.heating_radius = Some(reactor.heating_radius);
     }
     if let Some(resource) = record.component::<ResourceEntityComponent>() {
         detail.categories = vec![effective_resource_category(resource)];

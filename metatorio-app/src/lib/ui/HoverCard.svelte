@@ -48,6 +48,14 @@
     return `${watts.toFixed(0)} W`;
   }
 
+  /** 能量（焦耳）→ 可读文本。 */
+  function formatEnergy(joules: number): string {
+    if (joules >= 1e9) return `${(joules / 1e9).toFixed(2)} GJ`;
+    if (joules >= 1e6) return `${(joules / 1e6).toFixed(1)} MJ`;
+    if (joules >= 1e3) return `${(joules / 1e3).toFixed(1)} kJ`;
+    return `${joules.toFixed(0)} J`;
+  }
+
   function formatMultiplier(value: number): string {
     return `×${value.toFixed(2)}`;
   }
@@ -125,6 +133,38 @@
       {#if detail.stack_size != null}
         <div class="hc-row"><span>堆叠</span><strong>{detail.stack_size}</strong></div>
       {/if}
+      {#if detail.fuel_value_j != null && detail.fuel_value_j > 0}
+        <div class="hc-row">
+          <span>燃料</span>
+          <strong>{formatEnergy(detail.fuel_value_j)}{detail.fuel_category ? ` · ${detail.fuel_category}` : ""}</strong>
+        </div>
+      {:else if detail.fuel_category && detail.fuel_value_j == null}
+        <div class="hc-row">
+          <span>燃料</span>
+          <strong>{detail.fuel_category}</strong>
+        </div>
+      {/if}
+      {#if detail.burnt_result}
+        <div class="hc-row">
+          <span>燃烧产物</span>
+          <strong>{runtime.localizedName("item", detail.burnt_result)}</strong>
+        </div>
+      {/if}
+      {#if detail.spoil_result}
+        <div class="hc-row">
+          <span>腐坏</span>
+          <strong>{runtime.localizedName("item", detail.spoil_result)}{detail.spoil_ticks != null ? `（${fmtNum(detail.spoil_ticks / 60)} 秒）` : ""}</strong>
+        </div>
+      {/if}
+      {#if detail.plant_result}
+        <div class="hc-row">
+          <span>种植</span>
+          <strong>{runtime.localizedName("entity", detail.plant_result)}</strong>
+        </div>
+      {/if}
+      {#if detail.launchable}
+        <div class="hc-row"><span>发射</span><strong>可火箭发射</strong></div>
+      {/if}
       {#if detail.category}
         <div class="hc-row"><span>类别</span><strong>{detail.category}</strong></div>
       {/if}
@@ -145,6 +185,36 @@
       {/if}
       {#if detail.energy_usage_j != null}
         <div class="hc-row"><span>能耗</span><strong>{formatPower(detail.energy_usage_j)}</strong></div>
+      {/if}
+      {#if detail.max_power_output_j != null}
+        <div class="hc-row"><span>出力</span><strong>{formatPower(detail.max_power_output_j)}</strong></div>
+      {/if}
+      {#if detail.heat_output_j != null}
+        <div class="hc-row"><span>热输出</span><strong>{formatPower(detail.heat_output_j)}</strong></div>
+      {/if}
+      {#if detail.effectivity != null && detail.effectivity !== 1}
+        <div class="hc-row"><span>效率</span><strong>×{fmtNum(detail.effectivity)}</strong></div>
+      {/if}
+      {#if detail.maximum_temperature != null}
+        <div class="hc-row"><span>最高温度</span><strong>{fmtNum(detail.maximum_temperature)}℃</strong></div>
+      {/if}
+      {#if detail.energy_consumption_j != null}
+        <div class="hc-row"><span>能耗</span><strong>{formatPower(detail.energy_consumption_j)}</strong></div>
+      {/if}
+      {#if detail.target_temperature != null}
+        <div class="hc-row"><span>目标温度</span><strong>{fmtNum(detail.target_temperature)}℃</strong></div>
+      {/if}
+      {#if detail.neighbour_bonus != null}
+        <div class="hc-row"><span>相邻加成</span><strong>×{fmtNum(detail.neighbour_bonus)}</strong></div>
+      {/if}
+      {#if detail.heating_radius != null}
+        <div class="hc-row"><span>加热半径</span><strong>{fmtNum(detail.heating_radius)}</strong></div>
+      {/if}
+      {#if detail.fluid_filter}
+        <div class="hc-row">
+          <span>流体</span>
+          <strong>{runtime.localizedName("fluid", detail.fluid_filter)}</strong>
+        </div>
       {/if}
       {#if detail.default_temperature != null}
         <div class="hc-row"><span>默认温度</span><strong>{detail.default_temperature}°C</strong></div>
