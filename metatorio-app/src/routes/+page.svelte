@@ -51,9 +51,12 @@
     onSelect: (name: string, quality: string) => void;
   } | null>(null);
 
-  // 流选择器（目标/外部输入支持任意 DualVar 流）
+  // 流选择器（目标/外部输入支持任意 DualVar 流；编辑时预选当前流）
   let flowSelector = $state<{
     title: string;
+    initialTab?: string;
+    initialName?: string;
+    initialQuality?: string;
     onSelectFlow: (flow: import("$lib/runtime/types").DualVar) => void;
   } | null>(null);
 
@@ -140,6 +143,57 @@
       return runtime.localizedName(icon.type, icon.name);
     }
     return dualVarLabel(flow);
+  }
+
+  /** 流 → 流选择器初始页签（编辑目标/外部输入时预选）。 */
+  function flowTabOf(flow: DualVar): string {
+    const item = itemOf(flow);
+    if (item) return "item";
+    if (flow !== null && typeof flow === "object") {
+      if ("Fluid" in flow) return "fluid";
+      if ("Entity" in flow) return "entity";
+      if ("Electricity" in flow) return "electricity";
+      if ("Heat" in flow) return "heat";
+      if ("RocketSlotCapacity" in flow) return "rocket-slot";
+      if ("RocketWeightCapacity" in flow) return "rocket-weight";
+      if ("Pollution" in flow || "Custom" in flow) return "custom";
+    }
+    return "item";
+  }
+
+  /** 流 → 初始选中条目/品质（物品/实体/流体类）。 */
+  function flowInitialOf(flow: DualVar): { initialName?: string; initialQuality?: string } {
+    const item = itemOf(flow);
+    if (item) return { initialName: item.id, initialQuality: item.quality };
+    if (flow !== null && typeof flow === "object") {
+      if ("Entity" in flow) {
+        const entity = (flow as { Entity: { id: string; quality?: string } }).Entity;
+        return { initialName: entity.id, initialQuality: entity.quality };
+      }
+      if ("Fluid" in flow) {
+        const fluid = (flow as { Fluid: { name: string } }).Fluid;
+        return { initialName: fluid.name };
+      }
+    }
+    return {};
+  }
+
+  function editTarget(target: import("$lib/runtime/types").FlowTarget) {
+    flowSelector = {
+      title: "更改目标流",
+      initialTab: flowTabOf(target.flow),
+      ...flowInitialOf(target.flow),
+      onSelectFlow: (flow) => runtime.setTargetFlow(target.id, flow).catch(() => {}),
+    };
+  }
+
+  function editExternalInput(input: import("$lib/runtime/types").ExternalInput) {
+    flowSelector = {
+      title: "更改外部输入流",
+      initialTab: flowTabOf(input.flow),
+      ...flowInitialOf(input.flow),
+      onSelectFlow: (flow) => runtime.setExternalInputFlow(input.id, flow).catch(() => {}),
+    };
   }
 
   // ── 游戏数据加载 ────────────────────────────────────────────────
@@ -460,6 +514,7 @@
                     if (Number.isFinite(value)) runtime.setTargetAmount(target.id, value).catch(() => {});
                   }}
                 />
+                <button class="btn ghost" title="更改目标流" onclick={() => editTarget(target)}>更改</button>
                 <button class="btn ghost" title="移除目标" onclick={() => runtime.removeTarget(target.id).catch(() => {})}>×</button>
               </div>
             {:else}
@@ -503,6 +558,7 @@
                     if (Number.isFinite(value)) runtime.setExternalInputPenalty(input.id, value).catch(() => {});
                   }}
                 />
+                <button class="btn ghost" title="更改外部输入流" onclick={() => editExternalInput(input)}>更改</button>
                 <button class="btn ghost" title="移除" onclick={() => runtime.removeExternalInput(input.id).catch(() => {})}>×</button>
               </div>
             {:else}
@@ -777,6 +833,9 @@
     kind="item"
     title={flowSelector.title}
     flowMode
+    initialTab={flowSelector.initialTab}
+    initialName={flowSelector.initialName}
+    initialQuality={flowSelector.initialQuality}
     onSelectFlow={flowSelector.onSelectFlow}
     onClose={() => (flowSelector = null)}
   />

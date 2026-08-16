@@ -424,6 +424,15 @@ class RuntimeStore {
     });
   }
 
+  /** 更改已有目标的流（不改变数量）。 */
+  async setTargetFlow(target: TargetId, flow: import("./types").DualVar): Promise<void> {
+    const { project, factory } = this.requireFactory();
+    await this.send({
+      scope: "factory",
+      action: { project, factory, action: { target: { "set-flow": { target, flow } } } },
+    });
+  }
+
   // ── 外部输入 ────────────────────────────────────────────────────
 
   async addExternalInput(itemId: string, penalty: number): Promise<void> {
@@ -455,6 +464,22 @@ class RuntimeStore {
         project,
         factory,
         action: { "external-input": { remove: { input } } },
+      },
+    });
+  }
+
+  /** 更改已有外部输入的流（不改变惩罚系数）。 */
+  async setExternalInputFlow(
+    input: ExternalInputId,
+    flow: import("./types").DualVar,
+  ): Promise<void> {
+    const { project, factory } = this.requireFactory();
+    await this.send({
+      scope: "factory",
+      action: {
+        project,
+        factory,
+        action: { "external-input": { "set-flow": { input, flow } } },
       },
     });
   }
