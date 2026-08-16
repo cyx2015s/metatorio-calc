@@ -12,6 +12,21 @@ use metatorio_data::{
     FluidComponent, GeneratorComponent, ItemComponent, MiningDrillComponent, ModuleComponent,
     ReactorComponent, RecipeComponent, ResourceEntityComponent,
 };
+use metatorio_runtime::solve::ExpandedVarId;
+
+/// 把求解结果中选中的流映射回候选机制。
+///
+/// 过滤掉零成本转换流的辅助变量（`MechanicId(u64::MAX)`，非真实机制）
+/// 和用量低于阈值的流；剩余流一定落在候选索引范围内（`[]` 自带越界检查）。
+pub fn used_candidates<T: Clone>(
+    candidates: &[T],
+    prim: impl IntoIterator<Item = (ExpandedVarId, f64)>,
+) -> Vec<T> {
+    prim.into_iter()
+        .filter(|(id, amount)| id.mechanic.0 != u64::MAX && *amount > 1e-9)
+        .map(|(id, _)| candidates[id.mechanic.0 as usize].clone())
+        .collect()
+}
 
 /// 枚举候选配置所需的项目级参数。
 pub struct EnumerateOptions {
@@ -787,16 +802,55 @@ mod tests {
             panic!("严格供给自动规划应可解（煤→锅炉→蒸汽→蒸汽机→电）：{solution:?}");
         };
         // 选中了锅炉、蒸汽机、煤（电力链路成立）
-        let used: Vec<Mechanic> = prim
-            .into_iter()
-            .filter(|(_, amount)| *amount > 1e-9)
-            .map(|(id, _)| candidates[id.mechanic.0 as usize].clone())
-            .collect();
+        // used_candidates 排除零成本转换流的辅助变量（MechanicId(u64::MAX)）。
+        let used: Vec<Mechanic> = used_candidates(&candidates, prim);
         for kind in [MechanicKind::Boiler, MechanicKind::Generator, MechanicKind::ItemFuel] {
             assert!(
                 used.iter().any(|mechanic| kind_of(mechanic) == kind),
                 "选中机制缺少 {kind:?}：{used:?}"
             );
         }
+    }
+
+    /// 求解结果里可能包含零成本转换流的辅助变量（MechanicId(u64::MAX)），
+    /// 它们不是真实机制，映射回候选时必须过滤，否则 `candidates[u64::MAX]`
+    /// 会越界 panic（回归：真实 dump 电力链路触发过）。
+    #[test]
+    fn used_candidates_filters_aux_variables() {
+        let candidates: Vec<String> = (0..3).map(|index| format!("candidate-{index}")).collect();
+        let prim = vec![
+            (
+                ExpandedVarId {
+                    mechanic: metatorio_runtime::id::MechanicId(0),
+                    variant: 0,
+                },
+                2.0,
+            ),
+            (
+                ExpandedVarId {
+                    mechanic: metatorio_runtime::id::MechanicId(2),
+                    variant: 1,
+                },
+                0.5,
+            ),
+            // 零成本转换流辅助变量：必须被过滤，不能进入 candidates 索引。
+            (
+                ExpandedVarId {
+                    mechanic: metatorio_runtime::id::MechanicId(u64::MAX),
+                    variant: 3,
+                },
+                7.0,
+            ),
+            // 用量低于阈值：同样过滤。
+            (
+                ExpandedVarId {
+                    mechanic: metatorio_runtime::id::MechanicId(1),
+                    variant: 0,
+                },
+                1e-12,
+            ),
+        ];
+        let used = used_candidates(&candidates, prim);
+        assert_eq!(used, vec!["candidate-0".to_string(), "candidate-2".to_string()]);
     }
 }

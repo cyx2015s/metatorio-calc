@@ -1035,7 +1035,6 @@ fn best_modules(state: State<'_, AppState>) -> Result<Vec<Suggestion>, String> {
 /// 供前端在外部输入面板用虚线展示。
 #[tauri::command]
 fn implicit_sources(state: State<'_, AppState>, factory: FactoryId) -> Result<Vec<DualVar>, String> {
-    use metatorio_core::Flow;
     let mut runtime = state
         .runtime
         .lock()
@@ -1313,11 +1312,8 @@ fn auto_plan(
     };
     eprintln!("[auto-plan] 求解成功，选中 {} 个机制", prim.len());
     // 保留被选中的候选（用量 > 阈值），直接替换工厂机制。
-    let mut used: Vec<Mechanic> = prim
-        .into_iter()
-        .filter(|(_, amount)| *amount > 1e-9)
-        .map(|(id, _)| candidates[id.mechanic.0 as usize].clone())
-        .collect();
+    // used_candidates 会排除零成本转换流的辅助变量（MechanicId(u64::MAX)）。
+    let mut used: Vec<Mechanic> = auto_plan::used_candidates(&candidates, prim);
     used.sort_by_key(|mechanic| {
         metatorio_runtime::document::MechanicKind::of(mechanic) as u8
     });
