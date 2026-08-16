@@ -300,7 +300,7 @@ fn entity_area(store: &PrototypeStore, name: &str) -> Option<f64> {
         .component::<EntityComponent>()?
         .collision_box
         .as_ref()?;
-    Some((bb.1 .0 - bb.0 .0).abs() * (bb.1 .1 - bb.0 .1).abs())
+    Some((bb.1 .0 - bb.0 .0).ceil().abs() * (bb.1 .1 - bb.0 .1).ceil().abs())
 }
 
 /// 单台实例成本（复刻旧实现 + 信标占地）：
