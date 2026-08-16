@@ -726,9 +726,22 @@
             class="btn"
             onclick={(event) => {
               const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-              addMechMenuPos = addMechMenuPos
-                ? null
-                : { top: rect.bottom + 4, right: Math.max(8, window.innerWidth - rect.right) };
+              if (addMechMenuPos) {
+                addMechMenuPos = null;
+                return;
+              }
+              // 下拉菜单：优先向下，底部空间不足时向上翻转（机制多时按钮
+              // 在列表末尾，下方往往没有空间）。
+              const estimate = mechKinds.length * 30 + 18;
+              const below = window.innerHeight - rect.bottom - 8;
+              const above = rect.top - 8;
+              addMechMenuPos = {
+                top:
+                  below >= estimate || below >= above
+                    ? rect.bottom + 4
+                    : Math.max(8, rect.top - estimate),
+                right: Math.max(8, window.innerWidth - rect.right),
+              };
             }}
           >
             + 添加机制{addMechMenuPos ? " ▴" : " ▾"}

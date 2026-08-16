@@ -456,7 +456,24 @@ export interface CatalogIndex {
 export interface FlowAmount {
   kind: "item" | "fluid";
   name: string;
+  /** 单次期望量（概率已折算）。 */
   amount: number;
+  /** 产出概率（0..1；常规产物为 1）。 */
+  probability: number;
+  /** 有概率时的原始量区间（amount_min/amount_max）。 */
+  amount_min: number | null;
+  amount_max: number | null;
+  /** 每次产能结算的额外产量（仅产物）。 */
+  productivity: number;
+  /** 流体温度。 */
+  temperature: number | null;
+  min_temperature: number | null;
+  max_temperature: number | null;
+  /** 产物品质下限/上限（如 "uncommon"）。 */
+  quality_min: string | null;
+  quality_max: string | null;
+  /** 品质偏移（品质等级偏移量，0 不显示）。 */
+  quality_change: number | null;
 }
 
 /** 悬停详情（按需拉取 + 前端缓存）。 */
@@ -472,6 +489,10 @@ export interface PrototypeDetail {
   category: string | null;
   categories: string[];
   energy_required: number | null;
+  /** 配方最大产能加成（默认 3.0）。 */
+  maximum_productivity: number | null;
+  /** 配方表面条件（如 "gravity: 1"）。 */
+  surface_conditions: string[];
   ingredients: FlowAmount[];
   results: FlowAmount[];
   crafting_speed: number | null;

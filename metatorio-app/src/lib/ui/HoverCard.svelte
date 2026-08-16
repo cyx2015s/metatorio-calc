@@ -1,8 +1,11 @@
 <script lang="ts">
   // 悬停信息卡片：显示原型名称、类型与关键参数（数据来自后端 prototype_detail，
-  // 按 (kind, name) 缓存）。
+  // 按 (kind, name) 缓存）。配方为核心内容，参考原 egui PrototypeHover：
+  // 时间/类别/表面条件/产能上限 + 原料/产物（概率折算、产能额外、品质范围偏移、
+  // 流体温度），一次尽量显示全。卡片超出视口时整体平移回屏。
+  import { runtime } from "$lib/runtime/store.svelte.ts";
   import Icon from "./Icon.svelte";
-  import type { PrototypeDetail } from "$lib/runtime/types";
+  import type { FlowAmount, PrototypeDetail } from "$lib/runtime/types";
 
   let {
     kind,
@@ -48,12 +51,68 @@
   function formatMultiplier(value: number): string {
     return `×${value.toFixed(2)}`;
   }
+
+  /** 数字显示：整数不带小数，小数额外保留 3 位去尾零。 */
+  function fmtNum(value: number): string {
+    if (Number.isInteger(value)) return String(value);
+    return value.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
+  }
+
+  function flowName(flow: FlowAmount): string {
+    return runtime.localizedName(flow.kind, flow.name);
+  }
+
+  function qualityLabel(name: string | null): string {
+    return name ? runtime.localizedName("quality", name) : "";
+  }
+
+  /** 原料/产物的元信息片段：期望量、概率、产能额外、品质范围/偏移、温度。 */
+  function flowMeta(flow: FlowAmount): string[] {
+    const parts: string[] = [fmtNum(flow.amount)];
+    if (flow.probability < 1) parts.push(`${(flow.probability * 100).toFixed(1)}%`);
+    if (flow.productivity > 0) parts.push(`+${fmtNum(flow.productivity)}/产能`);
+    const qmin = qualityLabel(flow.quality_min);
+    const qmax = qualityLabel(flow.quality_max);
+    if (qmin || qmax) {
+      let quality = qmin ? (qmax && qmin !== qmax ? `${qmin}~${qmax}` : qmin) : (qmax || "");
+      if (flow.quality_change) {
+        quality += ` 偏移${flow.quality_change > 0 ? "+" : ""}${flow.quality_change}`;
+      }
+      parts.push(`品质 ${quality}`);
+    }
+    if (flow.temperature != null) {
+      parts.push(`@${fmtNum(flow.temperature)}℃`);
+    }
+    if (flow.min_temperature != null && flow.max_temperature != null) {
+      parts.push(`${fmtNum(flow.min_temperature)}~${fmtNum(flow.max_temperature)}℃`);
+    } else if (flow.min_temperature != null) {
+      parts.push(`≥${fmtNum(flow.min_temperature)}℃`);
+    } else if (flow.max_temperature != null) {
+      parts.push(`≤${fmtNum(flow.max_temperature)}℃`);
+    }
+    return parts;
+  }
+
+  // 溢出修正：卡片渲染后若超出视口右下，整体平移回屏。
+  let cardEl = $state<HTMLDivElement | null>(null);
+  let shift = $state({ dx: 0, dy: 0 });
+  $effect(() => {
+    const el = cardEl;
+    if (!el) return;
+    void x;
+    void y;
+    const rect = el.getBoundingClientRect();
+    const dx = Math.min(0, window.innerWidth - 8 - rect.right);
+    const dy = Math.min(0, window.innerHeight - 8 - rect.bottom);
+    if (dx !== shift.dx || dy !== shift.dy) shift = { dx, dy };
+  });
 </script>
 
 {#if detail}
   <div
+    bind:this={cardEl}
     class="hover-card"
-    style={`left:${Math.min(x + 14, window.innerWidth - 280)}px;top:${Math.min(y + 14, window.innerHeight - 220)}px`}
+    style={`left:${x + 14 + shift.dx}px;top:${y + 14 + shift.dy}px`}
   >
     <div class="hc-head">
       <Icon type={iconTypeOf(detail.kind)} name={detail.name} size={32} />
@@ -72,6 +131,12 @@
       {/if}
       {#if detail.energy_required != null}
         <div class="hc-row"><span>时间</span><strong>{detail.energy_required}s</strong></div>
+      {/if}
+      {#if detail.maximum_productivity != null && detail.maximum_productivity !== 3}
+        <div class="hc-row"><span>产能上限</span><strong>×{fmtNum(detail.maximum_productivity)}</strong></div>
+      {/if}
+      {#if detail.surface_conditions.length > 0}
+        <div class="hc-row"><span>表面条件</span><strong>{detail.surface_conditions.join("；")}</strong></div>
       {/if}
       {#if detail.crafting_speed != null}
         <div class="hc-row"><span>速度</span><strong>{detail.crafting_speed}</strong></div>
@@ -114,7 +179,10 @@
             {#each detail.ingredients as flow (flow.name)}
               <span class="hc-flow-item" title={flow.name}>
                 <Icon type={flow.kind} name={flow.name} size={20} />
-                {flow.amount}
+                <span class="hc-flow-copy">
+                  <span class="hc-flow-name">{flowName(flow)}</span>
+                  <span class="hc-flow-meta">{flowMeta(flow).join(" · ")}</span>
+                </span>
               </span>
             {/each}
           </div>
@@ -127,7 +195,10 @@
             {#each detail.results as flow (flow.name)}
               <span class="hc-flow-item" title={flow.name}>
                 <Icon type={flow.kind} name={flow.name} size={20} />
-                {flow.amount}
+                <span class="hc-flow-copy">
+                  <span class="hc-flow-name">{flowName(flow)}</span>
+                  <span class="hc-flow-meta">{flowMeta(flow).join(" · ")}</span>
+                </span>
               </span>
             {/each}
           </div>
@@ -141,7 +212,9 @@
   .hover-card {
     position: fixed;
     z-index: 60;
-    width: min(260px, calc(100vw - 28px));
+    width: min(300px, calc(100vw - 28px));
+    max-height: calc(100vh - 24px);
+    overflow-y: auto;
     padding: 10px;
     background: var(--panel);
     border: 1px solid var(--accent-line);
@@ -194,6 +267,7 @@
     color: var(--text);
     font-family: var(--mono);
     font-size: 10px;
+    text-align: right;
   }
 
   .hc-flow {
@@ -212,19 +286,36 @@
 
   .hc-flows {
     display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
+    flex-direction: column;
+    gap: 3px;
   }
 
   .hc-flow-item {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: 6px;
     padding: 2px 6px 2px 2px;
     background: var(--card);
     border: 1px solid var(--line);
     border-radius: var(--radius-sm);
-    font-family: var(--mono);
+  }
+
+  .hc-flow-copy {
+    display: grid;
+    gap: 1px;
+    min-width: 0;
+  }
+
+  .hc-flow-name {
+    overflow: hidden;
     font-size: 10px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .hc-flow-meta {
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 9px;
   }
 </style>

@@ -134,12 +134,29 @@ pub struct CatalogIndex {
     pub entries: Vec<IndexEntry>,
 }
 
-/// 悬停详情（按需拉取 + 前端缓存）。
-#[derive(Debug, Clone, Serialize)]
+/// 配方原料/产物条目（含概率/产能/品质修饰）。
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct FlowAmount {
     pub kind: String,
     pub name: String,
+    /// 单次期望量（概率已折算）。
     pub amount: f64,
+    /// 产出概率（0..1；常规产物为 1）。
+    pub probability: f64,
+    /// 有概率时的原始量区间（amount_min/amount_max）。
+    pub amount_min: Option<f64>,
+    pub amount_max: Option<f64>,
+    /// 每次产能结算的额外产量（仅产物）。
+    pub productivity: f64,
+    /// 流体温度。
+    pub temperature: Option<f64>,
+    pub min_temperature: Option<f64>,
+    pub max_temperature: Option<f64>,
+    /// 产物品质下限/上限（如 "uncommon"）。
+    pub quality_min: Option<String>,
+    pub quality_max: Option<String>,
+    /// 品质偏移（品质等级偏移量，0 不显示）。
+    pub quality_change: Option<i32>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -156,6 +173,10 @@ pub struct PrototypeDetail {
     pub category: Option<String>,
     pub categories: Vec<String>,
     pub energy_required: Option<f64>,
+    /// 配方最大产能加成（默认 3.0）。
+    pub maximum_productivity: Option<f64>,
+    /// 配方表面条件（如 "gravity: 1"）。
+    pub surface_conditions: Vec<String>,
     pub ingredients: Vec<FlowAmount>,
     pub results: Vec<FlowAmount>,
     // machine
@@ -1157,6 +1178,12 @@ fn prototype_detail(
         detail.categories = effective_recipe_categories(recipe);
         detail.category = Some(detail.categories.join(", "));
         detail.energy_required = Some(recipe.energy_required);
+        detail.maximum_productivity = Some(recipe.maximum_productivity);
+        detail.surface_conditions = recipe
+            .surface_conditions
+            .iter()
+            .map(surface_condition_text)
+            .collect();
         detail.ingredients = recipe.ingredients.iter().map(ingredient_flow).collect();
         detail.results = recipe.results.iter().map(product_flow).collect();
     }
@@ -1202,35 +1229,107 @@ fn prototype_detail(
     Ok(Some(detail))
 }
 
+/// 表面条件文本：`property: ≥x` / `property: ≤x` / `property: x ~ y`。
+fn surface_condition_text(condition: &metatorio_data::SurfaceCondition) -> String {
+    let min = condition.min();
+    let max = condition.max();
+    let range = match (min, max) {
+        (min, max) if min == f64::MIN && max == f64::MAX => "任意".to_string(),
+        (_, max) if max == f64::MAX => format!("≥ {}", trim_number(min)),
+        (min, _) if min == f64::MIN => format!("≤ {}", trim_number(max)),
+        (min, max) => format!("{} ~ {}", trim_number(min), trim_number(max)),
+    };
+    format!("{}: {range}", condition.property)
+}
+
+/// 数字去尾零（3.000 → 3，1.500 → 1.5）。
+fn trim_number(value: f64) -> String {
+    let mut text = format!("{value:.3}");
+    while text.ends_with('0') {
+        text.pop();
+    }
+    if text.ends_with('.') {
+        text.pop();
+    }
+    text
+}
+
 fn ingredient_flow(ingredient: &metatorio_data::types::Ingredient) -> FlowAmount {
     use metatorio_data::types::Ingredient;
     match ingredient {
         Ingredient::Item(item) => FlowAmount {
             kind: "item".to_string(),
             name: item.name.clone(),
-            amount: item.amount as f64,
+            amount: f64::from(item.amount),
+            quality_min: item.quality_min.clone(),
+            quality_max: item.quality_max.clone(),
+            quality_change: (item.quality_change != 0)
+                .then_some(i32::from(item.quality_change)),
+            ..Default::default()
         },
         Ingredient::Fluid(fluid) => FlowAmount {
             kind: "fluid".to_string(),
             name: fluid.name.clone(),
             amount: fluid.amount,
+            temperature: fluid.temperature,
+            min_temperature: fluid.minimum_temperature,
+            max_temperature: fluid.maximum_temperature,
+            ..Default::default()
         },
     }
 }
 
+/// 有效产出概率 = 独立概率 × 共享概率区间宽（与 egui normalized_output 一致）。
+fn effective_probability(
+    independent: f64,
+    shared_min: f64,
+    shared_max: f64,
+) -> f64 {
+    independent * (shared_max - shared_min)
+}
+
 fn product_flow(product: &metatorio_data::types::Product) -> FlowAmount {
-    use metatorio_data::types::Product;
+    use metatorio_data::types::{Product, Production};
     match product {
-        Product::Item(item) => FlowAmount {
-            kind: "item".to_string(),
-            name: item.name.clone(),
-            amount: item.amount.unwrap_or(0) as f64,
-        },
-        Product::Fluid(fluid) => FlowAmount {
-            kind: "fluid".to_string(),
-            name: fluid.name.clone(),
-            amount: fluid.amount.unwrap_or(0.0),
-        },
+        Product::Item(item) => {
+            let Production { base, productivity } = item.normalized_output();
+            FlowAmount {
+                kind: "item".to_string(),
+                name: item.name.clone(),
+                amount: base,
+                probability: effective_probability(
+                    item.probability_info.independent_probability,
+                    item.probability_info.shared_probability.min,
+                    item.probability_info.shared_probability.max,
+                ),
+                amount_min: item.amount_min.map(f64::from),
+                amount_max: item.amount_max.map(f64::from),
+                productivity,
+                quality_min: item.quality_min.clone(),
+                quality_max: item.quality_max.clone(),
+                quality_change: (item.quality_change != 0)
+                    .then_some(i32::from(item.quality_change)),
+                ..Default::default()
+            }
+        }
+        Product::Fluid(fluid) => {
+            let Production { base, productivity } = fluid.normalized_output();
+            FlowAmount {
+                kind: "fluid".to_string(),
+                name: fluid.name.clone(),
+                amount: base,
+                probability: effective_probability(
+                    fluid.probability_info.independent_probability,
+                    fluid.probability_info.shared_probability.min,
+                    fluid.probability_info.shared_probability.max,
+                ),
+                amount_min: fluid.amount_min,
+                amount_max: fluid.amount_max,
+                productivity,
+                temperature: fluid.temperature,
+                ..Default::default()
+            }
+        }
     }
 }
 
