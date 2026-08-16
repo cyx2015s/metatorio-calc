@@ -660,6 +660,15 @@ class RuntimeStore {
     });
   }
 
+  /** 目标排序（position 为目标位置）。 */
+  async reorderTarget(target: TargetId, position: number): Promise<void> {
+    const { project, factory } = this.requireFactory();
+    await this.send({
+      scope: "factory",
+      action: { project, factory, action: { target: { reorder: { target, position } } } },
+    });
+  }
+
   // ── 外部输入 ────────────────────────────────────────────────────
 
   async addExternalInput(itemId: string, penalty: number): Promise<void> {
@@ -707,6 +716,19 @@ class RuntimeStore {
         project,
         factory,
         action: { "external-input": { "set-flow": { input, flow } } },
+      },
+    });
+  }
+
+  /** 外部输入排序（position 为目标位置）。 */
+  async reorderExternalInput(input: ExternalInputId, position: number): Promise<void> {
+    const { project, factory } = this.requireFactory();
+    await this.send({
+      scope: "factory",
+      action: {
+        project,
+        factory,
+        action: { "external-input": { reorder: { input, position } } },
       },
     });
   }

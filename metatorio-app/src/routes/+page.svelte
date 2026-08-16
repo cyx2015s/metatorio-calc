@@ -620,7 +620,7 @@
         <section class="panel">
           <div class="title">目标 <span class="count">{targets.length}</span></div>
           <div class="rows">
-            {#each targets as target (target.id)}
+            {#each targets as target, i (target.id)}
               {@const icon = flowIcon(target.flow)}
               {@const q = flowQuality(target.flow)}
               <div class="row-item">
@@ -643,6 +643,8 @@
                     if (Number.isFinite(value)) runtime.setTargetAmount(target.id, value).catch(() => {});
                   }}
                 />
+                <button class="btn ghost up" title="上移" disabled={i === 0} onclick={() => runtime.reorderTarget(target.id, i - 1).catch(() => {})}>↑</button>
+                <button class="btn ghost up" title="下移" disabled={i === targets.length - 1} onclick={() => runtime.reorderTarget(target.id, i + 1).catch(() => {})}>↓</button>
                 <button class="btn ghost" title="更改目标流" onclick={() => editTarget(target)}>更改</button>
                 <button class="btn ghost" title="移除目标" onclick={() => runtime.removeTarget(target.id).catch(() => {})}>×</button>
               </div>
@@ -769,7 +771,7 @@
         <section class="panel">
           <div class="title">外部输入 <span class="count">{externalInputs.length}</span></div>
           <div class="rows">
-            {#each externalInputs as input (input.id)}
+            {#each externalInputs as input, i (input.id)}
               {@const icon = flowIcon(input.flow)}
               {@const q = flowQuality(input.flow)}
               <div class="row-item">
@@ -792,6 +794,8 @@
                     if (Number.isFinite(value)) runtime.setExternalInputPenalty(input.id, value).catch(() => {});
                   }}
                 />
+                <button class="btn ghost up" title="上移" disabled={i === 0} onclick={() => runtime.reorderExternalInput(input.id, i - 1).catch(() => {})}>↑</button>
+                <button class="btn ghost up" title="下移" disabled={i === externalInputs.length - 1} onclick={() => runtime.reorderExternalInput(input.id, i + 1).catch(() => {})}>↓</button>
                 <button class="btn ghost" title="更改外部输入流" onclick={() => editExternalInput(input)}>更改</button>
                 <button class="btn ghost" title="移除" onclick={() => runtime.removeExternalInput(input.id).catch(() => {})}>×</button>
               </div>
