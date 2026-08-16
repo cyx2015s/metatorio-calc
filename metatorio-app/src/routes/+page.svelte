@@ -3,7 +3,7 @@
   // 一般操作一律文字按钮。
   import { onMount } from "svelte";
   import { runtime } from "$lib/runtime/store.svelte.ts";
-  import { pickDumpFile, pickGameExecutable, pickModDir } from "$lib/runtime/client";
+  import { pickDumpFile, pickGameExecutable, pickModDir, suggest } from "$lib/runtime/client";
   import { dualVarLabel, flowQuality, itemOf } from "$lib/runtime/types";
   import type { CatalogKind, DualVar, MechanicId, TargetId } from "$lib/runtime/types";
   import HoverIcon from "$lib/ui/HoverIcon.svelte";
@@ -40,6 +40,46 @@
   let newFactoryName = $state("新工厂");
   // 规划偏好弹窗（机器偏好/替代数量/枚举插件与信标）
   let prefsOpen = $state(false);
+  // 建议系统弹窗
+  let suggestions = $state<{
+    flow: DualVar;
+    items: import("$lib/runtime/types").Suggestion[];
+    loading: boolean;
+  } | null>(null);
+
+  async function openSuggestions(flow: DualVar) {
+    suggestions = { flow, items: [], loading: true };
+    try {
+      const items = await suggest(flow);
+      suggestions = { flow, items, loading: false };
+    } catch {
+      suggestions = { flow, items: [], loading: false };
+    }
+  }
+
+  function suggestionKindLabel(kind: string): string {
+    return (
+      {
+        recipe: "配方",
+        resource: "矿点",
+        "item-fuel": "燃料",
+        generator: "发电机",
+      }[kind] ?? kind
+    );
+  }
+
+  function suggestionIcon(kind: string): { type: string; detailKind: string } {
+    if (kind === "recipe") return { type: "recipe", detailKind: "recipe" };
+    if (kind === "resource") return { type: "entity", detailKind: "resource" };
+    if (kind === "item-fuel") return { type: "item", detailKind: "item" };
+    return { type: "entity", detailKind: "generator" };
+  }
+
+  function suggestionName(kind: string, name: string): string {
+    const localizeKind =
+      kind === "recipe" ? "recipe" : kind === "resource" ? "resource" : kind === "item-fuel" ? "item" : "generator";
+    return runtime.localizedName(localizeKind, name);
+  }
 
   // 应用内确认/重命名弹窗（Tauri WebView2 不支持 window.confirm/prompt，会阻塞）
   let confirmState = $state<{ message: string; action: () => void } | null>(null);
@@ -645,6 +685,7 @@
                 />
                 <button class="btn ghost up" title="上移" disabled={i === 0} onclick={() => runtime.reorderTarget(target.id, i - 1).catch(() => {})}>↑</button>
                 <button class="btn ghost up" title="下移" disabled={i === targets.length - 1} onclick={() => runtime.reorderTarget(target.id, i + 1).catch(() => {})}>↓</button>
+                <button class="btn ghost" title="建议能产出该流的机制" onclick={() => openSuggestions(target.flow)}>建议</button>
                 <button class="btn ghost" title="更改目标流" onclick={() => editTarget(target)}>更改</button>
                 <button class="btn ghost" title="移除目标" onclick={() => runtime.removeTarget(target.id).catch(() => {})}>×</button>
               </div>
@@ -1176,6 +1217,7 @@
                 />
                 <span class="row-name" title={dualVarLabel(balance.flow)}>{flowLabel(balance.flow)}</span>
                 <strong class:amount-pos={balance.amount > 0} class="mono amount">{balance.amount > 0 ? "+" : ""}{balance.amount.toFixed(3)}</strong>
+                <button class="btn ghost up" title="建议能产出该流的机制" onclick={() => openSuggestions(balance.flow)}>建议</button>
               </div>
             {/each}
           </div>
@@ -1455,6 +1497,49 @@
 
       <div class="mini-actions">
         <button class="btn primary" onclick={() => (prefsOpen = false)}>完成</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if suggestions}
+  <div class="backdrop low" onclick={() => (suggestions = null)}>
+    <div class="prefs-modal" onclick={(event) => event.stopPropagation()}>
+      <div class="mini-title">建议：{flowLabel(suggestions.flow)}</div>
+      {#if suggestions.loading}
+        <span class="muted">生成中…</span>
+      {:else if suggestions.items.length === 0}
+        <span class="muted">没有找到能产出该流的候选机制</span>
+      {:else}
+        <div class="prefs-list">
+          {#each suggestions.items as candidate, i (candidate.kind + candidate.name)}
+            {@const icon = suggestionIcon(candidate.kind)}
+            <div class="prefs-item">
+              <HoverIcon
+                type={icon.type}
+                name={candidate.name}
+                size={22}
+                detailKind={icon.detailKind}
+              />
+              <span class="prefs-name" title={candidate.name}>
+                {suggestionName(candidate.kind, candidate.name)}
+                <span class="muted">（{suggestionKindLabel(candidate.kind)}）</span>
+              </span>
+              <button
+                class="btn"
+                title="添加该机制"
+                onclick={() =>
+                  runtime
+                    .addSuggestion(candidate)
+                    .catch(() => {})
+                    .then(() => (suggestions = null))}
+              >添加</button>
+            </div>
+          {/each}
+        </div>
+      {/if}
+      <div class="mini-actions">
+        <button class="btn primary" onclick={() => (suggestions = null)}>关闭</button>
       </div>
     </div>
   </div>

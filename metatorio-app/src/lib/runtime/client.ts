@@ -106,6 +106,11 @@ export async function prototypeDetail(
   return call("prototype_detail", { kind, name });
 }
 
+/** 建议系统：为一条流生成候选机制（配方/矿点/燃料/发电机）。 */
+export async function suggest(flow: import("./types").DualVar): Promise<import("./types").Suggestion[]> {
+  return call("suggest", { flow });
+}
+
 // ── Persistence ───────────────────────────────────────────────────
 
 export async function openProjectDialog(): Promise<AppDocument | null> {

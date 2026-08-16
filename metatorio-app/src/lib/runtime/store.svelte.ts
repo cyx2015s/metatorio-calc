@@ -498,6 +498,25 @@ class RuntimeStore {
     });
   }
 
+  /** 采纳建议：新增对应机制并设置主项（机器由兼容回退自动推断）。 */
+  async addSuggestion(candidate: { kind: string; name: string }): Promise<void> {
+    const kindMap: Record<string, import("./types").MechanicKind> = {
+      recipe: "recipe",
+      resource: "mining",
+      "item-fuel": "item-fuel",
+      generator: "generator",
+    };
+    const kind = kindMap[candidate.kind];
+    if (!kind) throw new Error(`未知建议类型 ${candidate.kind}`);
+    await this.addMechanic(kind);
+    const id = this.selectedFactory?.mechanics.at(-1)?.id;
+    if (id == null) return;
+    if (candidate.kind === "recipe") await this.setRecipe(id, candidate.name);
+    else if (candidate.kind === "resource") await this.setResource(id, candidate.name);
+    else if (candidate.kind === "item-fuel") await this.setItem(id, candidate.name);
+    else if (candidate.kind === "generator") await this.setGenerator(id, candidate.name);
+  }
+
   // ── 目标表达式（常数 + 线性项求和） ──────────────────────────────
 
   async addTargetExpression(): Promise<void> {

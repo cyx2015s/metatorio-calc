@@ -385,6 +385,12 @@ export interface ExternalInput {
   penalty: number;
 }
 
+/** 建议候选：kind ∈ recipe | resource | item-fuel | generator。 */
+export interface Suggestion {
+  kind: string;
+  name: string;
+}
+
 export interface MechanicEntry {
   id: MechanicId;
   enabled: boolean;

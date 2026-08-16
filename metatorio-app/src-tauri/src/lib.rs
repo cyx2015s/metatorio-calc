@@ -22,10 +22,11 @@ use metatorio_core::{DualVar, IdWithQuality, Mechanic};
 use metatorio_data::store::{PrototypeGroup, PrototypeRecord, PrototypeStore};
 use metatorio_data::{
     BeaconComponent, BoilerComponent, BurnerGeneratorComponent, CraftingMachineComponent,
-    FluidComponent, GeneratorComponent, ItemComponent, MiningDrillComponent, ModuleComponent,
-    PrototypeBaseComponent, QualityComponent, ReactorComponent, RecipeComponent,
+    EntityComponent, FluidComponent, GeneratorComponent, ItemComponent, MiningDrillComponent,
+    ModuleComponent, PrototypeBaseComponent, QualityComponent, ReactorComponent, RecipeComponent,
     ResourceEntityComponent,
 };
+use metatorio_data::types::Product;
 use metatorio_runtime::{
     document::AppDocument,
     id::{FactoryId, MechanicId, ProjectId},
@@ -989,6 +990,115 @@ fn catalog_index(state: State<'_, AppState>) -> Result<CatalogIndex, String> {
         qualities: store.quality_order().to_vec(),
         entries: catalog_index_from_store(store, &locale),
     })
+}
+
+/// 建议候选：给定一条流，列出能产出/供给它的机制（配方/矿点/燃料/发电机）。
+#[derive(Debug, Clone, Serialize)]
+pub struct Suggestion {
+    /// "recipe" | "resource" | "item-fuel" | "generator"
+    pub kind: String,
+    pub name: String,
+}
+
+/// 建议系统：为一条流生成候选机制（对应 egui 的"推荐配方/矿点"模态框）。
+#[tauri::command]
+fn suggest(state: State<'_, AppState>, flow: DualVar) -> Result<Vec<Suggestion>, String> {
+    let mut runtime = state
+        .runtime
+        .lock()
+        .map_err(|_| "runtime lock poisoned".to_string())?;
+    let Some(id) = runtime.effective_context_id() else {
+        return Ok(Vec::new());
+    };
+    ensure_context_loaded(&state, &mut runtime, &id)?;
+    let store = runtime.context_store_by_id(&id).ok_or("上下文未载入")?;
+    let mut out = Vec::new();
+    match flow {
+        DualVar::Item(item) => {
+            let target = item.id.as_str();
+            for record in store.group(PrototypeGroup::Recipe) {
+                let Some(recipe) = record.component::<RecipeComponent>() else {
+                    continue;
+                };
+                if recipe
+                    .results
+                    .iter()
+                    .any(|product| matches!(product, Product::Item(p) if p.name == target))
+                {
+                    out.push(Suggestion {
+                        kind: "recipe".to_string(),
+                        name: record.name.clone(),
+                    });
+                }
+            }
+            for record in store.group(PrototypeGroup::Entity) {
+                if record.type_ != "resource" {
+                    continue;
+                }
+                let Some(minable) = record
+                    .component::<EntityComponent>()
+                    .and_then(|entity| entity.minable())
+                else {
+                    continue;
+                };
+                let yields_item = minable.result.as_deref() == Some(target)
+                    || minable
+                        .results
+                        .iter()
+                        .any(|product| matches!(product, Product::Item(p) if p.name == target));
+                if yields_item {
+                    out.push(Suggestion {
+                        kind: "resource".to_string(),
+                        name: record.name.clone(),
+                    });
+                }
+            }
+        }
+        DualVar::Fluid { name, .. } => {
+            for record in store.group(PrototypeGroup::Recipe) {
+                let Some(recipe) = record.component::<RecipeComponent>() else {
+                    continue;
+                };
+                if recipe
+                    .results
+                    .iter()
+                    .any(|product| matches!(product, Product::Fluid(p) if p.name == *name))
+                {
+                    out.push(Suggestion {
+                        kind: "recipe".to_string(),
+                        name: record.name.clone(),
+                    });
+                }
+            }
+        }
+        DualVar::Electricity => {
+            for record in store.group(PrototypeGroup::Entity) {
+                if record.has("GeneratorComponent") || record.has("BurnerGeneratorComponent") {
+                    out.push(Suggestion {
+                        kind: "generator".to_string(),
+                        name: record.name.clone(),
+                    });
+                }
+            }
+        }
+        DualVar::ItemFuel { category, .. } => {
+            for record in store.group(PrototypeGroup::Item) {
+                let Some(item) = record.component::<ItemComponent>() else {
+                    continue;
+                };
+                if item.fuel_value().amount > 0.0
+                    && category.iter().any(|candidate| candidate == &item.fuel_category)
+                {
+                    out.push(Suggestion {
+                        kind: "item-fuel".to_string(),
+                        name: record.name.clone(),
+                    });
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(out)
 }
 
 /// 物品的机制标签（伪类别，供前端按机制过滤选择器）：
@@ -2281,6 +2391,7 @@ pub fn run() {
             icon,
             catalog_index,
             prototype_detail,
+            suggest,
             dispatch,
             get_document,
             get_ui_state,
