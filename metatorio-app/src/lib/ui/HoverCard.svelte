@@ -108,9 +108,14 @@
     if (!el) return;
     void x;
     void y;
-    const rect = el.getBoundingClientRect();
-    const dx = Math.min(0, window.innerWidth - 8 - rect.right);
-    const dy = Math.min(0, window.innerHeight - 8 - rect.bottom);
+    // 用「原始锚点 + 卡片尺寸」算修正量（尺寸与位置无关），
+    // 不能依赖已修正位置，否则修正→再溢出→再修正无限振荡卡死主线程。
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    const left = x + 14;
+    const top = y + 14;
+    const dx = Math.min(0, window.innerWidth - 8 - (left + w));
+    const dy = Math.min(0, window.innerHeight - 8 - (top + h));
     if (dx !== shift.dx || dy !== shift.dy) shift = { dx, dy };
   });
 </script>
@@ -119,7 +124,7 @@
   <div
     bind:this={cardEl}
     class="hover-card"
-    style={`left:${x + 14 + shift.dx}px;top:${y + 14 + shift.dy}px`}
+    style={`left:${Math.max(8, x + 14 + shift.dx)}px;top:${Math.max(8, y + 14 + shift.dy)}px`}
   >
     <div class="hc-head">
       <Icon type={iconTypeOf(detail.kind)} name={detail.name} size={32} />
