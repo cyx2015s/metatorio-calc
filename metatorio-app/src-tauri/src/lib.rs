@@ -1031,6 +1031,41 @@ fn best_modules(state: State<'_, AppState>) -> Result<Vec<Suggestion>, String> {
         .collect())
 }
 
+/// 星球隐式可用输入（严格供给下也免费；外部输入显式覆盖后不显示）：
+/// 供前端在外部输入面板用虚线展示。
+#[tauri::command]
+fn implicit_sources(state: State<'_, AppState>, factory: FactoryId) -> Result<Vec<DualVar>, String> {
+    use metatorio_core::Flow;
+    let mut runtime = state
+        .runtime
+        .lock()
+        .map_err(|_| "runtime lock poisoned".to_string())?;
+    let project = runtime
+        .state
+        .ui
+        .selected_project
+        .ok_or("未选择项目")?;
+    let (planet, external_inputs) = {
+        let factory_doc = runtime
+            .state
+            .factory(project, factory)
+            .map_err(|error| error.to_string())?;
+        (factory_doc.settings.planet.clone(), factory_doc.external_inputs.clone())
+    };
+    let Some(planet) = planet else {
+        return Ok(Vec::new());
+    };
+    ensure_context_for_project(&state, &mut runtime, project)?;
+    let store = runtime.context_store(project).map_err(|error| error.to_string())?;
+    let mut implicit = metatorio_runtime::planet::planet_autoplaced_flows(store, &planet);
+    for input in &external_inputs {
+        implicit.shift_remove(&input.flow);
+    }
+    let mut keys: Vec<DualVar> = implicit.keys().cloned().collect();
+    keys.sort_by(|a, b| format!("{a:?}").cmp(&format!("{b:?}")));
+    Ok(keys)
+}
+
 /// 建议候选：给定一条流，列出能产出/供给它的机制（配方/矿点/燃料/发电机）。
 #[derive(Debug, Clone, Serialize)]
 pub struct Suggestion {
@@ -1185,6 +1220,8 @@ fn auto_plan(
         enumerate_beacons: project_doc.planning.enumerate_beacons.clone(),
         quality_limit: game.max_quality,
         major_quality: quality_level(&factory_doc.settings.major_quality),
+        planet: factory_doc.settings.planet.clone(),
+        surface: factory_doc.settings.surface.clone(),
     };
     let candidates = auto_plan::enumerate_all(&store, &context, &options);
     if candidates.is_empty() {
@@ -2596,6 +2633,7 @@ pub fn run() {
             prototype_detail,
             suggest,
             best_modules,
+            implicit_sources,
             dispatch,
             get_document,
             get_ui_state,

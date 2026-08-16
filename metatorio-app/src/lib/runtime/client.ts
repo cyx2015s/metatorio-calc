@@ -116,6 +116,11 @@ export async function bestModules(): Promise<import("./types").Suggestion[]> {
   return call("best_modules");
 }
 
+/** 星球隐式可用输入（严格供给下也免费；被外部输入覆盖的不返回）。 */
+export async function implicitSources(factory: number): Promise<import("./types").DualVar[]> {
+  return call("implicit_sources", { factory });
+}
+
 // ── Persistence ───────────────────────────────────────────────────
 
 export async function openProjectDialog(): Promise<AppDocument | null> {

@@ -8,9 +8,9 @@ use metatorio_core::{Context, IdWithQuality, Mechanic, ModuleConfig, NORMAL_QUAL
 use metatorio_data::store::{PrototypeGroup, PrototypeRecord, PrototypeStore};
 use metatorio_data::types::{EffectType, EffectTypeLimitation};
 use metatorio_data::{
-    BoilerComponent, BurnerGeneratorComponent, CraftingMachineComponent, FluidComponent,
-    GeneratorComponent, ItemComponent, MiningDrillComponent, ModuleComponent, ReactorComponent,
-    RecipeComponent, ResourceEntityComponent,
+    BoilerComponent, BurnerGeneratorComponent, CraftingMachineComponent, EntityComponent,
+    FluidComponent, GeneratorComponent, ItemComponent, MiningDrillComponent, ModuleComponent,
+    ReactorComponent, RecipeComponent, ResourceEntityComponent,
 };
 
 /// 枚举候选配置所需的项目级参数。
@@ -23,6 +23,9 @@ pub struct EnumerateOptions {
     pub quality_limit: usize,
     /// 机器/设备使用的品质等级（工厂主品质）。
     pub major_quality: usize,
+    /// 当前工厂的星球/地表（表面条件过滤；种子可用性）。
+    pub planet: Option<String>,
+    pub surface: Option<String>,
 }
 
 pub fn enumerate_all(
@@ -36,6 +39,15 @@ pub fn enumerate_all(
     enumerate_simple(store, ctx, options, &mut out);
     enumerate_energy(store, ctx, options, &mut out);
     out
+}
+
+/// 当前工厂的表面属性（planet/surface 规则见 metatorio_runtime::planet）。
+fn surface_properties(store: &PrototypeStore, options: &EnumerateOptions) -> Option<std::collections::BTreeMap<String, f64>> {
+    metatorio_runtime::planet::surface_properties_of(
+        store,
+        options.planet.as_deref(),
+        options.surface.as_deref(),
+    )
 }
 
 // ── 通用工具 ──────────────────────────────────────────────────────
@@ -267,10 +279,22 @@ fn enumerate_recipes(
     let quality_range = options.quality_limit + 1;
     let major_quality = quality_name(ctx, options.major_quality);
     let beacons = &options.enumerate_beacons;
+    // 表面条件：配方与机器都要满足当前星球/地表属性（自动规划才校验，
+    // 手动模式认为所有配方可用）。
+    let properties = surface_properties(store, options);
     for record in store.group(PrototypeGroup::Recipe) {
         let Some(recipe) = record.component::<RecipeComponent>() else {
             continue;
         };
+        if let Some(properties) = &properties {
+            if !metatorio_runtime::planet::surface_condition_satisfied(
+                store,
+                &recipe.surface_conditions,
+                properties,
+            ) {
+                continue;
+            }
+        }
         // 有物品原料的配方按品质展开；纯流体配方只有 normal。
         let has_item_ingredient = recipe.ingredients.iter().any(|ingredient| {
             matches!(ingredient, metatorio_data::types::Ingredient::Item(_))
@@ -293,10 +317,22 @@ fn enumerate_recipes(
             },
         );
         for machine_name in machines {
-            let Some(machine) = store
-                .get(PrototypeGroup::Entity, &machine_name)
-                .and_then(|record| record.component::<CraftingMachineComponent>())
-            else {
+            let Some(machine_record) = store.get(PrototypeGroup::Entity, &machine_name) else {
+                continue;
+            };
+            // 机器表面条件过滤
+            if let Some(properties) = &properties {
+                if let Some(entity) = machine_record.component::<EntityComponent>() {
+                    if !metatorio_runtime::planet::surface_condition_satisfied(
+                        store,
+                        &entity.surface_conditions,
+                        properties,
+                    ) {
+                        continue;
+                    }
+                }
+            }
+            let Some(machine) = machine_record.component::<CraftingMachineComponent>() else {
                 continue;
             };
             let allowed_modules: Vec<IdWithQuality> = options
@@ -358,6 +394,7 @@ fn enumerate_mining(
     let quality_range = options.quality_limit + 1;
     let major_quality = quality_name(ctx, options.major_quality);
     let beacons = &options.enumerate_beacons;
+    let properties = surface_properties(store, options);
     for record in store.group(PrototypeGroup::Entity) {
         if record.type_ != "resource" {
             continue;
@@ -382,10 +419,22 @@ fn enumerate_mining(
             |_| 0.0,
         );
         for machine_name in machines {
-            let Some(drill) = store
-                .get(PrototypeGroup::Entity, &machine_name)
-                .and_then(|record| record.component::<MiningDrillComponent>())
-            else {
+            let Some(drill_record) = store.get(PrototypeGroup::Entity, &machine_name) else {
+                continue;
+            };
+            // 采矿机表面条件过滤
+            if let Some(properties) = &properties {
+                if let Some(entity) = drill_record.component::<EntityComponent>() {
+                    if !metatorio_runtime::planet::surface_condition_satisfied(
+                        store,
+                        &entity.surface_conditions,
+                        properties,
+                    ) {
+                        continue;
+                    }
+                }
+            }
+            let Some(drill) = drill_record.component::<MiningDrillComponent>() else {
                 continue;
             };
             let allowed_modules: Vec<IdWithQuality> = options
@@ -464,8 +513,18 @@ fn enumerate_simple(
             if has_spoil {
                 out.push(Mechanic::Spoil(metatorio_core::SpoilMechanic { item: id.clone() }));
             }
+            // 种子可用性：种植物要求的 tile 与星球生成 tile 交集，回退 default_import_location
             if has_plant {
-                out.push(Mechanic::Plant(metatorio_core::PlantMechanic { seed: id.clone() }));
+                let plant_entity = item.plant_result.as_deref().unwrap_or("");
+                let available = metatorio_runtime::planet::seed_available_on_planet(
+                    store,
+                    item,
+                    plant_entity,
+                    options.planet.as_deref(),
+                );
+                if available {
+                    out.push(Mechanic::Plant(metatorio_core::PlantMechanic { seed: id.clone() }));
+                }
             }
             if has_fuel {
                 out.push(Mechanic::ItemFuel(metatorio_core::ItemFuelMechanic { item: id.clone() }));
@@ -571,6 +630,8 @@ mod tests {
             enumerate_beacons: Vec::new(),
             quality_limit: 0,
             major_quality: 0,
+            planet: None,
+            surface: None,
         };
         let candidates = enumerate_all(&store, &ctx, &options);
         // demo 只有 iron-plate 配方 + 一个组装机 → 至少一个配方候选

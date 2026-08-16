@@ -237,11 +237,21 @@ fn solve_document(
         .iter()
         .map(|input| (input.flow.clone(), input.penalty))
         .collect();
+    // 星球自带资源免费可用（严格供给下也不例外），除非外部输入显式覆盖。
+    let mut implicit_sources = Flow::default();
+    if let Some(planet) = factory.settings.planet.as_deref() {
+        implicit_sources = crate::planet::planet_autoplaced_flows(prototype, planet);
+        for key in sources.keys() {
+            implicit_sources.shift_remove(key);
+        }
+    }
+    let mut all_sources = implicit_sources;
+    all_sources.extend(sources.clone());
     // 零成本转换流（子类型关系，复刻原版 planner.rs:264-316 并扩展）：
     // 温度区间放宽、燃料子类型提升、filter 归并、定点温度互转（FluidHeat 平衡）。
-    add_conversion_flows(&mut flows, prototype, &target, &sources);
+    add_conversion_flows(&mut flows, prototype, &target, &all_sources);
     let mut problem = SolverData::new_simple(target, flows);
-    problem.sources = sources;
+    problem.sources = all_sources;
     problem.strict_source = factory.strict_source;
     problem.strict_sink = factory.strict_sink;
     problem

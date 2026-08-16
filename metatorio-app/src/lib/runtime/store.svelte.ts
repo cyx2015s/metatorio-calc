@@ -27,6 +27,7 @@ import {
   saveProject,
   saveProjectAsDialog,
   setActiveContext,
+  implicitSources,
 } from "./client";
 import type {
   AppDocument,
@@ -122,6 +123,25 @@ class RuntimeStore {
       throw error;
     } finally {
       this.busy = false;
+    }
+    this.refreshImplicitSources().catch(() => {});
+  }
+
+  // ── 星球隐式可用输入（外部输入面板的虚线行） ────────────────────
+
+  /** 当前工厂的星球隐式输入（被外部输入覆盖的已剔除）。 */
+  implicitSourcesCache = $state<import("./types").DualVar[]>([]);
+
+  async refreshImplicitSources(): Promise<void> {
+    const factory = this.ui?.selected_factory;
+    if (factory == null) {
+      this.implicitSourcesCache = [];
+      return;
+    }
+    try {
+      this.implicitSourcesCache = await implicitSources(factory);
+    } catch {
+      this.implicitSourcesCache = [];
     }
   }
 

@@ -159,6 +159,7 @@
   let targets = $derived(factory?.targets ?? []);
   let targetExpressions = $derived(factory?.target_expressions ?? []);
   let externalInputs = $derived(factory?.external_inputs ?? []);
+  let implicitInputs = $derived(runtime.implicitSourcesCache);
   // 拖拽排序的本地镜像（文档变化时同步；拖拽期间由 dndzone 更新）
   let dragTargets = $state<import("$lib/runtime/types").FlowTarget[]>([]);
   let dragInputs = $state<import("$lib/runtime/types").ExternalInput[]>([]);
@@ -891,6 +892,26 @@
               <div class="empty-hint">还没有外部输入</div>
           {/each}
         </div>
+        {#if implicitInputs.length > 0}
+          <div class="implicit-hint">星球自带（隐式免费，外部输入可覆盖）</div>
+          <div class="rows">
+            {#each implicitInputs as flow (dualVarLabel(flow))}
+              {@const icon = flowIcon(flow)}
+              {@const q = flowQuality(flow)}
+              <div class="row-item implicit" title="星球自动生成的可用资源，严格供给下也免费">
+                <HoverIcon
+                  type={icon.type}
+                  name={icon.name}
+                  size={24}
+                  detailKind={flowDetailKind(icon)}
+                  quality={q ?? undefined}
+                />
+                <span class="row-name">{flowLabel(flow)}</span>
+                <span class="chip">隐式</span>
+              </div>
+            {/each}
+          </div>
+        {/if}
         <button
           class="btn"
           onclick={() =>
@@ -1888,6 +1909,18 @@
 
   .row-item .row-name {
     flex: 1 1 90px;
+  }
+
+  .row-item.implicit {
+    border-style: dashed;
+    opacity: 0.75;
+  }
+
+  .implicit-hint {
+    margin-top: 6px;
+    color: var(--faint);
+    font-size: 9px;
+    letter-spacing: 0.05em;
   }
 
   .btn.up {
