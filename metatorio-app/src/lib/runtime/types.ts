@@ -238,6 +238,8 @@ export type FlowAction =
 
 export type SolveAction = "recompute" | "auto-plan";
 
+export type CleanupAction = "remove-unused" | "remove-unsolvable" | "sort-by-solution-rate";
+
 export type FactoryContextAction =
   | { "set-planet": { planet: string | null } }
   | { "set-surface": { surface: string | null } }
@@ -248,6 +250,7 @@ export type FactoryAction =
   | { "set-strict-source": { strict: boolean } }
   | { "set-strict-sink": { strict: boolean } }
   | { context: FactoryContextAction }
+  | { cleanup: CleanupAction }
   | { target: TargetAction }
   | { "mechanic-list": MechanicListAction }
   | { mechanic: { mechanic: MechanicId; action: MechanicAction } }

@@ -954,6 +954,15 @@
         <button class="btn primary" onclick={() => runtime.recompute().catch(() => {})} disabled={runtime.busy || runtime.solving || !factory}>
           {runtime.solving ? "求解中…" : "重新求解"}
         </button>
+        <button class="btn ghost" title="移除求解中用量低于阈值的机制" onclick={() => runtime.cleanup("remove-unused").catch(() => {})} disabled={!solved}>
+          移除未用
+        </button>
+        <button class="btn ghost" title="移除未参与求解的机制" onclick={() => runtime.cleanup("remove-unsolvable").catch(() => {})} disabled={!solved}>
+          移除无解
+        </button>
+        <button class="btn ghost" title="按求解流量从大到小重排机制" onclick={() => runtime.cleanup("sort-by-solution-rate").catch(() => {})} disabled={!solved}>
+          按流量排序
+        </button>
         {#if !runtime.activeContext}
           <span class="muted">先加载游戏数据（左上角「游戏数据」）</span>
         {/if}

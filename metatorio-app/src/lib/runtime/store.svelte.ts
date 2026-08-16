@@ -489,6 +489,15 @@ class RuntimeStore {
     });
   }
 
+  /** 求解后清理：移除未用/无解机制，或按流量重排。 */
+  async cleanup(action: import("./types").CleanupAction): Promise<void> {
+    const { project, factory } = this.requireFactory();
+    await this.send({
+      scope: "factory",
+      action: { project, factory, action: { cleanup: action } },
+    });
+  }
+
   /** 克隆工厂（整份追加为新工厂）。 */
   async cloneFactory(factory: FactoryId): Promise<void> {
     const project = this.requireProject();
