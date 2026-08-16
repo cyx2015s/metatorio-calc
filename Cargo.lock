@@ -3997,6 +3997,7 @@ dependencies = [
  "metatorio-core",
  "metatorio-data",
  "metatorio-runtime",
+ "metatorio-solver",
  "serde",
  "serde_json",
  "tauri",

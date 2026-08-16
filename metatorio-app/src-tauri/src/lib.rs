@@ -11,6 +11,8 @@
 //! `<app_data>/contexts/<content-hash>/`; projects pin the context they were
 //! planned against via `ProjectDocument::context_id`.
 
+mod auto_plan;
+
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -27,16 +29,18 @@ use metatorio_data::{
     ResourceEntityComponent,
 };
 use metatorio_data::types::Product;
+use metatorio_core::Flow;
 use metatorio_runtime::{
-    document::AppDocument,
+    document::{AppDocument, MechanicEntry},
     id::{FactoryId, MechanicId, ProjectId},
     message::{
         AppMessage, CleanupAction, FactoryAction, MechanicAction, MechanicListAction,
         MiningMechanicAction, ModuleAction, ProjectAction, RecipeMechanicAction, RuntimeCommand,
     },
-    solve::{Runtime, SolveResult, SolveStatus},
+    solve::{ExpandedVarId, Runtime, SolveResult, SolveStatus, add_conversion_flows, instance_cost},
     state::{DispatchResult, UiState},
 };
+use metatorio_solver::{AIndexMap, SolverData, SolverSolution, TargetSpec};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
@@ -992,6 +996,41 @@ fn catalog_index(state: State<'_, AppState>) -> Result<CatalogIndex, String> {
     })
 }
 
+/// 每插件类别中 tier 最高的插件（"使用最佳插件"填充枚举列表用）。
+#[tauri::command]
+fn best_modules(state: State<'_, AppState>) -> Result<Vec<Suggestion>, String> {
+    let mut runtime = state
+        .runtime
+        .lock()
+        .map_err(|_| "runtime lock poisoned".to_string())?;
+    let Some(id) = runtime.effective_context_id() else {
+        return Ok(Vec::new());
+    };
+    ensure_context_loaded(&state, &mut runtime, &id)?;
+    let store = runtime.context_store_by_id(&id).ok_or("上下文未载入")?;
+    let mut best: std::collections::BTreeMap<String, (u32, String)> = std::collections::BTreeMap::new();
+    for record in store.group(PrototypeGroup::Item) {
+        let Some(module) = record.component::<ModuleComponent>() else {
+            continue;
+        };
+        best.entry(module.category.clone())
+            .and_modify(|(tier, name)| {
+                if module.tier > *tier {
+                    *tier = module.tier;
+                    *name = record.name.clone();
+                }
+            })
+            .or_insert((module.tier, record.name.clone()));
+    }
+    Ok(best
+        .into_values()
+        .map(|(_, name)| Suggestion {
+            kind: "module".to_string(),
+            name,
+        })
+        .collect())
+}
+
 /// 建议候选：给定一条流，列出能产出/供给它的机制（配方/矿点/燃料/发电机）。
 #[derive(Debug, Clone, Serialize)]
 pub struct Suggestion {
@@ -1106,102 +1145,136 @@ fn suggest_for_flow(store: &PrototypeStore, flow: DualVar) -> Vec<Suggestion> {
     out
 }
 
-/// 自动规划（迭代贪婪版）：反复"求解 → 对缺失供给的流添加第一个建议
-/// 机制 → 再求解"，直至可解或没有可加的建议。相比原版 auto.rs 的组合
-/// 枚举，这里以可行解优先、成本次优为代价换取实现简单。
+/// 自动规划：完整状态空间枚举（复刻原版 auto.rs + 各机制 auto_populate）。
+///
+/// 枚举全部候选实例（配方/矿点 × 机器 × 插件组合 × 信塔配置 × 品质，
+/// 以及腐坏/种植/燃料/发射/发电机/锅炉/反应堆/流体燃料/流体热），一次
+/// 构建 LP 求解，保留被选中的候选替换工厂机制。
 fn auto_plan(
-    state: &AppState,
+    _state: &AppState,
     runtime: &mut Runtime,
     project: ProjectId,
     factory: FactoryId,
 ) -> Result<SolveResult, String> {
-    for _ in 0..24 {
-        let result = runtime.solve_factory(project, factory).map_err(|error| error.to_string())?;
-        if matches!(result.status, SolveStatus::Solved { .. }) {
-            return Ok(result);
-        }
-        let store = runtime.context_store(project).map_err(|error| error.to_string())?.clone();
-        let SolveStatus::NotSolved { no_provider, .. } = &result.status else {
-            return Ok(result);
-        };
-        let mut added = false;
-        for flow in no_provider.iter().cloned() {
-            if let Some(first) = suggest_for_flow(&store, flow).into_iter().next() {
-                add_suggestion_mechanic(state, runtime, project, factory, &first.kind, &first.name)?;
-                added = true;
-                break; // 一次迭代加一个机制，重新求解
-            }
-        }
-        if !added {
-            break; // 所有缺失流都没有候选
-        }
-    }
-    runtime.solve_factory(project, factory).map_err(|error| error.to_string())
-}
-
-/// 按建议候选新增机制并设置主项（机器由兼容回退自动推断）。
-fn add_suggestion_mechanic(
-    state: &AppState,
-    runtime: &mut Runtime,
-    project: ProjectId,
-    factory: FactoryId,
-    kind: &str,
-    name: &str,
-) -> Result<(), String> {
-    use metatorio_runtime::document::MechanicKind;
-    use metatorio_runtime::message::{GeneratorMechanicAction, ItemFuelMechanicAction, RecipeMechanicAction};
-    let mechanic_kind = match kind {
-        "recipe" => MechanicKind::Recipe,
-        "resource" => MechanicKind::Mining,
-        "item-fuel" => MechanicKind::ItemFuel,
-        "generator" => MechanicKind::Generator,
-        _ => return Err(format!("未知建议类型 {kind}")),
-    };
-    runtime
-        .dispatch(AppMessage::Factory {
-            project,
-            factory,
-            action: FactoryAction::MechanicList(MechanicListAction::Add { kind: mechanic_kind }),
-        })
-        .map_err(|error| error.to_string())?;
-    let id = runtime
+    let store = runtime
+        .context_store(project)
+        .map_err(|error| error.to_string())?
+        .clone();
+    let project_doc = runtime
+        .state
+        .project(project)
+        .map_err(|error| error.to_string())?
+        .clone();
+    let factory_doc = runtime
         .state
         .factory(project, factory)
         .map_err(|error| error.to_string())?
-        .mechanics
-        .last()
-        .ok_or("机制列表为空")?
-        .id;
-    let action = match kind {
-        "recipe" => MechanicAction::Recipe(RecipeMechanicAction::SetRecipe {
-            recipe: IdWithQuality::new(name, "normal"),
-        }),
-        "resource" => MechanicAction::Mining(MiningMechanicAction::SetResource {
-            resource: name.to_string(),
-        }),
-        "item-fuel" => MechanicAction::ItemFuel(ItemFuelMechanicAction::SetItem {
-            item: IdWithQuality::new(name, "normal"),
-        }),
-        "generator" => MechanicAction::Generator(GeneratorMechanicAction::SetGenerator {
-            generator: IdWithQuality::new(name, "normal"),
-        }),
-        _ => unreachable!(),
+        .clone();
+    let game = metatorio_runtime::solve::make_game_state(&store, &project_doc);
+    let context = metatorio_core::Context::new(&store, &game);
+    let quality_level = |name: &str| {
+        game.qualities
+            .iter()
+            .position(|candidate| candidate == name)
+            .unwrap_or(0)
     };
-    runtime
-        .dispatch(AppMessage::Factory {
-            project,
-            factory,
-            action: FactoryAction::Mechanic {
-                mechanic: id,
-                action,
-            },
-        })
-        .map_err(|error| error.to_string())?;
-    // 内部 dispatch 不会执行副作用命令，手动补跑机器兼容回退（自动选机）。
-    if matches!(mechanic_kind, MechanicKind::Recipe | MechanicKind::Mining) {
-        ensure_machine_compat(state, runtime, project, factory, id)?;
+    let options = auto_plan::EnumerateOptions {
+        alternative_count: project_doc.planning.alternative_count,
+        machine_preferences: project_doc.planning.machine_preferences.clone(),
+        enumerate_modules: project_doc.planning.enumerate_modules.clone(),
+        enumerate_beacons: project_doc.planning.enumerate_beacons.clone(),
+        quality_limit: game.max_quality,
+        major_quality: quality_level(&factory_doc.settings.major_quality),
+    };
+    let candidates = auto_plan::enumerate_all(&store, &context, &options);
+    if candidates.is_empty() {
+        return Err("没有可枚举的机制候选".to_string());
     }
-    Ok(())
+
+    // 展开全部候选为一个 LP。
+    let expansion = metatorio_core::expand::expand(
+        candidates.iter().enumerate().map(|(index, mechanic)| (index as u64, mechanic)),
+        &context,
+    );
+    let mut variant_counts: HashMap<u64, u16> = HashMap::new();
+    let mut flows = AIndexMap::default();
+    for variable in expansion.variables {
+        let variant = variant_counts.entry(variable.prim_var.inner).or_default();
+        let flow_id = ExpandedVarId {
+            mechanic: MechanicId(variable.prim_var.inner),
+            variant: *variant,
+        };
+        *variant = variant.saturating_add(1);
+        let candidate = &candidates[variable.prim_var.inner as usize];
+        flows.insert(flow_id, (variable.flow, instance_cost(&store, candidate)));
+    }
+    let target = factory_doc
+        .targets
+        .iter()
+        .fold(AIndexMap::default(), |mut target, item| {
+            *target.entry(item.flow.clone()).or_insert(0.0) += item.amount;
+            target
+        });
+    let sources: Flow = factory_doc
+        .external_inputs
+        .iter()
+        .map(|input| (input.flow.clone(), input.penalty))
+        .collect();
+    add_conversion_flows(&mut flows, &store, &target, &sources);
+    let mut problem = SolverData::new_simple(target, flows);
+    problem.sources = sources;
+    problem.strict_source = factory_doc.strict_source;
+    problem.strict_sink = factory_doc.strict_sink;
+    problem
+        .target
+        .extend(factory_doc.target_expressions.iter().map(|expression| TargetSpec {
+            constant: expression.constant,
+            coefficients: expression
+                .terms
+                .iter()
+                .map(|term| (term.flow.clone(), term.coefficient))
+                .collect(),
+        }));
+
+    let solution = problem.solve();
+    let SolverSolution::Solved { prim, .. } = solution else {
+        return Err("自动规划无解（目标不可达）".to_string());
+    };
+    // 保留被选中的候选（用量 > 阈值），直接替换工厂机制。
+    let mut used: Vec<Mechanic> = prim
+        .into_iter()
+        .filter(|(_, amount)| *amount > 1e-9)
+        .map(|(id, _)| candidates[id.mechanic.0 as usize].clone())
+        .collect();
+    used.sort_by_key(|mechanic| {
+        metatorio_runtime::document::MechanicKind::of(mechanic) as u8
+    });
+    // 直接改动文档后补一次求解结果（持久化由后续变更触发）。
+    let ids: Vec<MechanicId> = (0..used.len()).map(|_| runtime.state.allocate_id()).collect();
+    {
+        let document = &mut runtime.state.document;
+        let factory_doc = document
+            .projects
+            .iter_mut()
+            .find(|candidate| candidate.id == project)
+            .and_then(|candidate| {
+                candidate
+                    .factories
+                    .iter_mut()
+                    .find(|factory_doc| factory_doc.id == factory)
+            })
+            .ok_or("工厂不存在")?;
+        factory_doc.mechanics = used
+            .into_iter()
+            .zip(ids)
+            .map(|(mechanic, id)| MechanicEntry {
+                id,
+                enabled: true,
+                mechanic,
+            })
+            .collect();
+    }
+    runtime.solve_factory(project, factory).map_err(|error| error.to_string())
 }
 
 /// 物品的机制标签（伪类别，供前端按机制过滤选择器）：
@@ -2522,6 +2595,7 @@ pub fn run() {
             catalog_index,
             prototype_detail,
             suggest,
+            best_modules,
             dispatch,
             get_document,
             get_ui_state,

@@ -1253,7 +1253,7 @@ impl RuntimeState {
             .ok_or(RuntimeError::FactoryNotFound { project, factory })
     }
 
-    fn allocate_id<T: From<u64>>(&mut self) -> T {
+    pub fn allocate_id<T: From<u64>>(&mut self) -> T {
         let id = self.next_id;
         self.next_id = self.next_id.saturating_add(1);
         T::from(id)

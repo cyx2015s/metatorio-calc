@@ -309,7 +309,7 @@ fn solve_document(
 ///
 /// 全部使用 `MechanicId(u64::MAX)` 作为辅助变量身份（复刻 egui 的
 /// `usize::MAX`），不落入任何真实机制的求解结果。
-fn add_conversion_flows(
+pub fn add_conversion_flows(
     flows: &mut AIndexMap<ExpandedVarId, (Flow, f64)>,
     prototype: &PrototypeStore,
     target: &Flow,
@@ -476,7 +476,7 @@ fn entity_area(store: &PrototypeStore, name: &str) -> Option<f64> {
 ///   （缺失回退 16.0）；
 /// - 腐坏：spoil_ticks / stack_size / 16；
 /// - 其余（种植/物品燃料/发射）：固定 16.0。
-fn instance_cost(store: &PrototypeStore, mechanic: &Mechanic) -> f64 {
+pub fn instance_cost(store: &PrototypeStore, mechanic: &Mechanic) -> f64 {
     let area = |name: &str| entity_area(store, name).unwrap_or(16.0);
     let beacon_area = |config: &ModuleConfig| -> f64 {
         config
@@ -508,7 +508,8 @@ fn instance_cost(store: &PrototypeStore, mechanic: &Mechanic) -> f64 {
     }
 }
 
-fn make_game_state(prototype: &PrototypeStore, project: &ProjectDocument) -> GameState {    let mut game = GameState::default();
+/// 从项目设置构建求解用的 GameState（品质上限/采矿/配方产能加成）。
+pub fn make_game_state(prototype: &PrototypeStore, project: &ProjectDocument) -> GameState {    let mut game = GameState::default();
     let qualities = prototype.quality_order();
     if !qualities.is_empty() {
         game.qualities = qualities.to_vec();
