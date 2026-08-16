@@ -37,6 +37,11 @@
   let newFactoryOpen = $state(false);
   let newFactoryName = $state("新工厂");
 
+  // 应用内确认/重命名弹窗（Tauri WebView2 不支持 window.confirm/prompt，会阻塞）
+  let confirmState = $state<{ message: string; action: () => void } | null>(null);
+  let renameCtx = $state<{ id: string; name: string } | null>(null);
+  let renameName = $state("");
+
   // ── 选择器状态 ──────────────────────────────────────────────────
   let selector = $state<{
     kind: CatalogKind;
@@ -63,10 +68,16 @@
   }
 
   function renameContextPrompt(context: import("$lib/runtime/types").ContextInfo) {
-    const name = window.prompt("重命名上下文", context.name);
-    if (name && name.trim()) {
-      runtime.renameContext(context.id, name.trim()).catch(() => {});
+    renameCtx = { id: context.id, name: context.name };
+    renameName = context.name;
+  }
+
+  function confirmRename() {
+    const name = renameName.trim();
+    if (renameCtx && name) {
+      runtime.renameContext(renameCtx.id, name).catch(() => {});
     }
+    renameCtx = null;
   }
 
   /** 来源展示缩短：只留每段最后一个路径片段（完整路径在 tooltip）。 */
@@ -714,11 +725,11 @@
                   <button
                     class="btn ghost danger"
                     title="删除缓存"
-                    onclick={() => {
-                      if (confirm(`删除上下文「${context.name}」的缓存？`)) {
-                        runtime.deleteContext(context.id).catch(() => {});
-                      }
-                    }}
+                    onclick={() =>
+                      (confirmState = {
+                        message: `删除上下文「${context.name}」的缓存？`,
+                        action: () => runtime.deleteContext(context.id).catch(() => {}),
+                      })}
                   >删除</button>
                 </div>
               </div>
@@ -787,6 +798,44 @@
       <div class="mini-actions">
         <button class="btn ghost" onclick={() => (newFactoryOpen = false)}>取消</button>
         <button class="btn primary" onclick={createFactory}>创建</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if confirmState}
+  {@const confirm = confirmState}
+  <div class="backdrop" onclick={() => (confirmState = null)}>
+    <div class="mini-modal" onclick={(event) => event.stopPropagation()}>
+      <div class="mini-title">确认</div>
+      <div class="confirm-text">{confirm.message}</div>
+      <div class="mini-actions">
+        <button class="btn ghost" onclick={() => (confirmState = null)}>取消</button>
+        <button
+          class="btn danger"
+          onclick={() => {
+            confirm.action();
+            confirmState = null;
+          }}
+        >删除</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if renameCtx}
+  <div class="backdrop" onclick={() => (renameCtx = null)}>
+    <div class="mini-modal" onclick={(event) => event.stopPropagation()}>
+      <div class="mini-title">重命名上下文</div>
+      <input
+        bind:value={renameName}
+        onkeydown={(event) => {
+          if (event.key === "Enter") confirmRename();
+        }}
+      />
+      <div class="mini-actions">
+        <button class="btn ghost" onclick={() => (renameCtx = null)}>取消</button>
+        <button class="btn primary" onclick={confirmRename}>确定</button>
       </div>
     </div>
   </div>
@@ -1222,6 +1271,12 @@
   .mini-title {
     font-size: 12px;
     font-weight: 700;
+  }
+
+  .confirm-text {
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.5;
   }
 
   .mini-modal input {

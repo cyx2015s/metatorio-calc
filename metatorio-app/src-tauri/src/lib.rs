@@ -190,7 +190,8 @@ impl ContextRegistry {
         self.store_dir(id).join("icons")
     }
 
-    /// Rebuild `meta` from the manifests on disk.
+    /// Rebuild `meta` from the manifests on disk.  Dot-prefixed dirs are
+    /// fast-delete trash: skipped here, purged on a background thread.
     fn scan(&mut self) {
         if self.dir.as_os_str().is_empty() {
             return;
@@ -203,15 +204,19 @@ impl ContextRegistry {
             if !path.is_dir() {
                 continue;
             }
-            let Some(id) = path
+            let Some(name) = path
                 .file_name()
                 .and_then(|name| name.to_str())
                 .map(str::to_string)
             else {
                 continue;
             };
+            if name.starts_with('.') {
+                spawn_delete(path);
+                continue;
+            }
             if let Some(meta) = read_manifest(&path.join("context.json")) {
-                self.meta.insert(id, meta);
+                self.meta.insert(name, meta);
             }
         }
     }
@@ -238,10 +243,33 @@ impl ContextRegistry {
         Some(())
     }
 
+    /// Fast delete: rename the cache dir to a dot-prefixed trash name and
+    /// purge it on a background thread, so a huge `icons/` tree never blocks
+    /// the UI.  Any leftover trash is picked up by [`Self::scan`] on startup.
     fn remove(&mut self, id: &str) {
-        let _ = std::fs::remove_dir_all(self.store_dir(id));
-        self.meta.remove(id);
+        let Some(_meta) = self.meta.remove(id) else {
+            return;
+        };
+        let store = self.store_dir(id);
+        let trash = self.dir.join(format!(".trash-{id}"));
+        // 清掉可能残留的同名 trash，避免 rename 失败。
+        let _ = std::fs::remove_dir_all(&trash);
+        if std::fs::rename(&store, &trash).is_ok() {
+            spawn_delete(trash);
+        } else {
+            // rename 失败（跨卷等）：就地删，慢一点但保证删除。
+            let _ = std::fs::remove_dir_all(&store);
+        }
     }
+}
+
+/// Delete a directory tree off the UI thread (fire-and-forget).
+fn spawn_delete(dir: PathBuf) {
+    std::thread::spawn(move || {
+        if let Err(error) = std::fs::remove_dir_all(&dir) {
+            eprintln!("failed to purge {dir:?}: {error}");
+        }
+    });
 }
 
 fn read_manifest(path: &Path) -> Option<ContextMeta> {
@@ -329,13 +357,18 @@ fn register_context(
     let id = context_id_of(raw);
     {
         let mut registry = state.contexts.lock().map_err(|_| "contexts 锁损坏".to_string())?;
-        if !registry.meta.contains_key(&id) {
+        let is_new = !registry.meta.contains_key(&id);
+        if is_new {
             registry.register(id.clone(), name, source);
             std::fs::write(registry.dump_path(&id), raw).map_err(|error| error.to_string())?;
+        }
+        // 图标：新上下文，或历史注册时缺图标（早期路径 bug 留下的缓存）
+        // 都导入——重新导出同内容时 id 相同、注册被跳过，但图标仍需补齐。
+        if !registry.icon_root(&id).is_dir() {
             match &icon {
                 IconImport::None => {}
                 IconImport::Move(src) => {
-                    // 同卷 rename：把本次导出的图标目录整体移入缓存，之后
+                    // 同卷 rename：把本次导出的类型目录整体移入缓存，之后
                     // 再次导出覆盖暂存目录也不会影响这个上下文。
                     let dst = registry.icon_root(&id);
                     if let Err(error) = std::fs::rename(src, &dst) {
@@ -387,10 +420,22 @@ fn context_info_of(state: &AppState, runtime: &Runtime, id: &str) -> Option<Cont
     context_info_from(&registry, runtime, id)
 }
 
+/// 构建上下文列表。调用方若已持有 runtime 锁，请用
+/// [`context_list_with`]（避免 std Mutex 不可重入导致死锁）。
 fn context_list(state: &AppState) -> ContextList {
     let runtime = state.runtime.lock().ok();
+    let Some(runtime) = runtime.as_ref() else {
+        return ContextList {
+            active: None,
+            contexts: Vec::new(),
+        };
+    };
+    context_list_with(runtime, state)
+}
+
+fn context_list_with(runtime: &Runtime, state: &AppState) -> ContextList {
     let registry = state.contexts.lock().ok();
-    let (Some(runtime), Some(registry)) = (runtime.as_ref(), registry.as_ref()) else {
+    let Some(registry) = registry.as_ref() else {
         return ContextList {
             active: None,
             contexts: Vec::new(),
@@ -406,8 +451,12 @@ fn context_list(state: &AppState) -> ContextList {
     ContextList { active, contexts }
 }
 
-fn emit_contexts_changed(app: &AppHandle, state: &AppState) {
-    let list = context_list(state);
+/// 调用方持有 runtime 锁时传 `Some(runtime)`，否则传 `None`。
+fn emit_contexts_changed(app: &AppHandle, state: &AppState, runtime: Option<&Runtime>) {
+    let list = match runtime {
+        Some(runtime) => context_list_with(runtime, state),
+        None => context_list(state),
+    };
     if let Err(error) = app.emit("contexts-changed", list) {
         eprintln!("failed to emit contexts-changed: {error}");
     }
@@ -518,7 +567,7 @@ fn load_bundled_dump(app: AppHandle) -> Result<ContextInfo, String> {
         DEMO_DUMP.as_bytes(),
         IconImport::None,
     )?;
-    emit_contexts_changed(&app, &state);
+    emit_contexts_changed(&app, &state, Some(&runtime));
     Ok(info)
 }
 
@@ -533,7 +582,7 @@ async fn load_game_context(
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
         let info = load_game_context_impl(&app, &state, &executable_path, mod_dir.as_deref())?;
-        emit_contexts_changed(&app, &state);
+        emit_contexts_changed(&app, &state, None);
         Ok(info)
     })
     .await
@@ -572,7 +621,7 @@ async fn load_dump(app: AppHandle, path: String) -> Result<ContextInfo, String> 
             .lock()
             .map_err(|_| "runtime lock poisoned".to_string())?;
         let info = register_context(&state, &mut runtime, name, source, &raw, icon)?;
-        emit_contexts_changed(&app, &state);
+        emit_contexts_changed(&app, &state, Some(&runtime));
         Ok(info)
     })
     .await
@@ -598,8 +647,8 @@ async fn set_active_context(app: AppHandle, id: Option<String>) -> Result<Contex
             ensure_context_loaded(&state, &mut runtime, id)?;
         }
         runtime.set_active_context(id);
-        emit_contexts_changed(&app, &state);
-        Ok(context_list(&state))
+        emit_contexts_changed(&app, &state, Some(&runtime));
+        Ok(context_list_with(&runtime, &state))
     })
     .await
     .map_err(|error| error.to_string())?
@@ -622,7 +671,7 @@ async fn rename_context(app: AppHandle, id: String, name: String) -> Result<Cont
                 .rename(&id, name)
                 .ok_or_else(|| format!("上下文 {id} 不存在"))?;
         }
-        emit_contexts_changed(&app, &state);
+        emit_contexts_changed(&app, &state, None);
         Ok(context_list(&state))
     })
     .await
@@ -660,8 +709,8 @@ async fn delete_context(app: AppHandle, id: String) -> Result<ContextList, Strin
             .lock()
             .map_err(|_| "runtime lock poisoned".to_string())?;
         runtime.remove_context(&id);
-        emit_contexts_changed(&app, &state);
-        Ok(context_list(&state))
+        emit_contexts_changed(&app, &state, Some(&runtime));
+        Ok(context_list_with(&runtime, &state))
     })
     .await
     .map_err(|error| error.to_string())?
@@ -1673,7 +1722,7 @@ fn execute_command(
         } => {
             let result = load_game_context_impl(app, state, executable_path, mod_path.as_deref());
             match result {
-                Ok(_) => emit_contexts_changed(app, state),
+                Ok(_) => emit_contexts_changed(app, state, Some(runtime)),
                 Err(error) => emit(app, "context-error", error),
             }
         }
@@ -1694,7 +1743,7 @@ fn execute_command(
                 Some(id) => match ensure_context_loaded(state, runtime, &id) {
                     Ok(()) => {
                         runtime.set_active_context(Some(id));
-                        emit_contexts_changed(app, state);
+                        emit_contexts_changed(app, state, Some(runtime));
                     }
                     Err(error) => emit(app, "context-error", error),
                 },

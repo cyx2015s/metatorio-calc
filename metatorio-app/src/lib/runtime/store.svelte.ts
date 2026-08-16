@@ -195,8 +195,11 @@ class RuntimeStore {
       await action();
     } catch (error) {
       this.contextError = String(error);
-      this.contextBusy = false;
       throw error;
+    } finally {
+      // 成功路径不能依赖后端事件兜底复位：事件可能被错过，
+      // 否则 UI 会永久卡在“正在加载数据…”。
+      this.contextBusy = false;
     }
   }
 
