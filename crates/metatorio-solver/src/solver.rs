@@ -3,7 +3,6 @@ use good_lp::{IntoAffineExpression, Solution, variable};
 use crate::concept::{AIndexMap, AIndexSet, Flow, ItemIdent};
 use crate::ruiz::RuizSolver;
 use core::f64;
-use fust_i18n::t;
 
 use std::fmt::Debug;
 use std::hash::Hash;
@@ -585,16 +584,10 @@ where
             Err(err) => {
                 log::error!("求解器：求解失败，错误信息: {:?}", err);
                 let err_string = match err {
-                    good_lp::ResolutionError::Unbounded => {
-                        t!("metatorio.solver-unbounded").to_string()
-                    }
-                    good_lp::ResolutionError::Infeasible => {
-                        t!("metatorio.solver-infeasible").to_string()
-                    }
-                    good_lp::ResolutionError::Other(_) => t!("metatorio.solver-other").to_string(),
-                    good_lp::ResolutionError::Str(s) => {
-                        t!("metatorio.solver-str", s).to_string()
-                    }
+                    good_lp::ResolutionError::Unbounded => "求解无界（目标可无限增大）".to_string(),
+                    good_lp::ResolutionError::Infeasible => "无可行解（目标不可达）".to_string(),
+                    good_lp::ResolutionError::Other(_) => "求解器错误".to_string(),
+                    good_lp::ResolutionError::Str(s) => format!("求解器错误: {s}"),
                 };
                 SolverSolution::NotSolved {
                     no_provider: no_providers.iter().cloned().collect(),

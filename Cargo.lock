@@ -4054,7 +4054,6 @@ name = "metatorio-solver"
 version = "0.1.0"
 dependencies = [
  "ahash",
- "fust-i18n",
  "good_lp",
  "indexmap 2.14.0",
  "log",
