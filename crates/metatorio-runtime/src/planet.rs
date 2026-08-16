@@ -142,8 +142,12 @@ pub fn planet_autoplaced_flows(store: &PrototypeStore, planet: &str) -> Flow {
             || entity_settings.contains(&record.name)
     };
 
-    // 资源实体：minable 产物 → 物品/流体流
+    // 资源实体：只有 resource 类视为无限（树/岩石等自动放置实体即使可挖掘
+    // 也不免费）；minable 产物 → 物品/流体流
     for record in store.group(PrototypeGroup::Entity) {
+        if record.type_ != "resource" {
+            continue;
+        }
         if !autoplaced(record) {
             continue;
         }
@@ -295,6 +299,18 @@ mod tests {
                         "colliding_tiles": { "layers": {} },
                         "remove_on_collision": false
                     }]
+                },
+                "rock": {
+                    "type": "simple-entity", "name": "rock",
+                    "autoplace": { "control": "rock" },
+                    "minable": { "result": "stone" }
+                }
+            },
+            "resource": {
+                "iron-ore": {
+                    "type": "resource", "name": "iron-ore",
+                    "autoplace": { "control": "iron-ore" },
+                    "minable": { "result": "iron-ore" }
                 }
             },
             "tile": {
@@ -319,7 +335,7 @@ mod tests {
                     "type": "planet", "name": "nauvis",
                     "surface_properties": { "gravity": 10.0 },
                     "map_gen_settings": {
-                        "autoplace_controls": {},
+                        "autoplace_controls": { "iron-ore": {}, "rock": {} },
                         "autoplace_settings": {
                             "tile": { "settings": { "grass": {} }, "treat_missing_as_default": true }
                         }
@@ -384,5 +400,15 @@ mod tests {
             name: "water".to_string(),
             temperature: [15, 15],
         }));
+    }
+
+    #[test]
+    fn only_resource_entities_are_infinite_sources() {
+        let store = test_store();
+        let flows = planet_autoplaced_flows(&store, "nauvis");
+        // resource 类（iron-ore）→ 免费物品流
+        assert!(flows.contains_key(&DualVar::Item(IdWithQuality::new("iron-ore", "normal"))));
+        // 非 resource 的自动放置实体（rock，可挖掘）→ 不入免费列表
+        assert!(!flows.contains_key(&DualVar::Item(IdWithQuality::new("stone", "normal"))));
     }
 }
