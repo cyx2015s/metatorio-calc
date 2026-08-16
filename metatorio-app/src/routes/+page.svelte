@@ -41,6 +41,14 @@
   let confirmState = $state<{ message: string; action: () => void } | null>(null);
   let renameCtx = $state<{ id: string; name: string } | null>(null);
   let renameName = $state("");
+  // 轻量提示（自动消失）
+  let notice = $state<string | null>(null);
+  let noticeTimer: ReturnType<typeof setTimeout> | undefined;
+  function showNotice(message: string) {
+    notice = message;
+    clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(() => (notice = null), 4000);
+  }
 
   // ── 选择器状态 ──────────────────────────────────────────────────
   let selector = $state<{
@@ -401,6 +409,21 @@
       /* 过滤信息拉取失败时仍打开选择器（不过滤） */
     }
   }
+
+  /** 添加信标：直接打开信标选择器（不再先加空配置行），重复信标拒绝。 */
+  function addBeacon(mechanic: MechanicId) {
+    const entry = mechanics.find((candidate) => candidate.id === mechanic);
+    openSelector("beacon", "选择信标（添加）", (name, quality) => {
+      const existing = entry?.mechanic.module_config?.beacons ?? [];
+      if (existing.some((beacon) => beacon.beacon.id === name)) {
+        showNotice(`信标 ${name} 已添加，不能重复`);
+        return;
+      }
+      runtime
+        .moduleMessage(mechanic, { "add-beacon": { beacon: { id: name, quality } } })
+        .catch(() => {});
+    });
+  }
 </script>
 
 <svelte:head>
@@ -445,10 +468,11 @@
     </button>
   </header>
 
-  {#if runtime.contextError || runtime.lastError}
+  {#if runtime.contextError || runtime.lastError || notice}
     <div class="err-strip">
       {#if runtime.contextError}<span>数据：{runtime.contextError}</span>{/if}
       {#if runtime.lastError}<span>操作：{runtime.lastError}</span>{/if}
+      {#if notice}<span class="notice">提示：{notice}</span>{/if}
     </div>
   {/if}
 
@@ -678,6 +702,7 @@
             onToggleEnabled={() => runtime.setMechanicEnabled(entry.id, !entry.enabled).catch(() => {})}
             onRemove={() => runtime.removeMechanic(entry.id).catch(() => {})}
             onModuleSlot={(slot, module) => runtime.setModuleSlot(entry.id, slot, module).catch(() => {})}
+            onAddBeacon={() => addBeacon(entry.id)}
           />
         {:else}
           <div class="empty-state">

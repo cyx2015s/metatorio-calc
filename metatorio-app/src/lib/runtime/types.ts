@@ -170,11 +170,11 @@ export type MechanicAction =
   | { boiler: BoilerMechanicAction }
   | { reactor: ReactorMechanicAction };
 
-// 注意：unit 变体（clear-modules / add-beacon）在 serde 外部标签下序列化为裸字符串。
+// 注意：unit 变体（clear-modules）在 serde 外部标签下序列化为裸字符串。
 export type ModuleAction =
   | { "set-module-slot": { slot: number; module: IdWithQuality | null } }
   | "clear-modules"
-  | "add-beacon"
+  | { "add-beacon": { beacon: IdWithQuality } }
   | { "remove-beacon": { beacon: number } }
   | { "set-beacon": { beacon: number; value: IdWithQuality } }
   | { "set-beacon-count": { beacon: number; count: number } }

@@ -13,11 +13,14 @@
     onPickModule,
     onPickBeacon,
     onPickBeaconModule,
+    onAddBeacon,
   }: {
     entry: MechanicEntry;
     onPickModule: (slot: number) => void;
     onPickBeacon: (beacon: number) => void;
     onPickBeaconModule: (beacon: number, module: number) => void;
+    /** 直接选一个信标添加（信标配置必须绑定有效信标，不允许空配置行）。 */
+    onAddBeacon: () => void;
   } = $props();
 
   let machineDetail = $state<PrototypeDetail | null>(null);
@@ -177,7 +180,8 @@
 
   <button
     class="btn"
-    onclick={() => runtime.moduleMessage(entry.id, "add-beacon").catch(() => {})}
+    title="选择信标添加到这台机器"
+    onclick={onAddBeacon}
   >+ 添加信标</button>
 </div>
 

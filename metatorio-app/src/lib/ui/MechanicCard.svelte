@@ -25,6 +25,7 @@
     onToggleEnabled,
     onRemove,
     onModuleSlot,
+    onAddBeacon,
   }: {
     entry: MechanicEntry;
     solution?: { amount: number; cost: number } | null;
@@ -32,6 +33,7 @@
     onToggleEnabled: () => void;
     onRemove: () => void;
     onModuleSlot: (slot: number, module: string | null) => void;
+    onAddBeacon: () => void;
   } = $props();
 
   let kind = $derived(entry.mechanic.type);
@@ -160,6 +162,7 @@
         onPickModule={(slot) => onPick("module", slot)}
         onPickBeacon={(beacon) => onPick("beacon", beacon)}
         onPickBeaconModule={(beacon, module) => onPick("beacon-module", beacon, module)}
+        {onAddBeacon}
       />
     </div>
   {/if}
