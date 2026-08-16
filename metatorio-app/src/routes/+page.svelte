@@ -4,7 +4,7 @@
   import { onMount } from "svelte";
   import { dndzone } from "svelte-dnd-action";
   import { runtime } from "$lib/runtime/store.svelte.ts";
-  import { pickDumpFile, pickGameExecutable, pickModDir, suggest } from "$lib/runtime/client";
+  import { pickGameExecutable, pickModDir, suggest } from "$lib/runtime/client";
   import { dualVarLabel, flowQuality, itemOf } from "$lib/runtime/types";
   import type { CatalogKind, DualVar, MechanicId, TargetId } from "$lib/runtime/types";
   import HoverIcon from "$lib/ui/HoverIcon.svelte";
@@ -31,7 +31,6 @@
   });
 
   // ── 应用栏状态 ──────────────────────────────────────────────────
-  let dataMenuOpen = $state(false);
   // 添加机制菜单用 fixed 定位（视口坐标），脱离滚动容器，避免开合时
   // 改变机制列表滚动区域的高度。
   let addMechMenuPos = $state<{ top: number; right: number } | null>(null);
@@ -295,35 +294,52 @@
   }
 
   // ── 游戏数据加载 ────────────────────────────────────────────────
-  async function loadFromExecutable() {
-    dataMenuOpen = false;
-    const exe = await pickGameExecutable();
-    if (!exe) return;
-    const modDir = await pickModDir();
+  let loadGameOpen = $state(false);
+  let gameExePath = $state("");
+  let gameModDir = $state("");
+  let loadGameError = $state<string | null>(null);
+  let pickingExe = $state(false);
+  let pickingMod = $state(false);
+
+  async function openLoadGame() {
+    loadGameError = null;
+    gameExePath = "";
+    gameModDir = "";
+    loadGameOpen = true;
+  }
+
+  async function browseGameExe() {
+    pickingExe = true;
     try {
-      await runtime.loadContextFromExecutable(exe, modDir);
-    } catch {
-      /* contextError 已展示 */
+      const picked = await pickGameExecutable();
+      if (picked) gameExePath = picked;
+    } finally {
+      pickingExe = false;
     }
   }
 
-  async function loadFromDump() {
-    dataMenuOpen = false;
-    const path = await pickDumpFile();
-    if (!path) return;
+  async function browseGameMod() {
+    pickingMod = true;
     try {
-      await runtime.loadContextFromDump(path);
-    } catch {
-      /* contextError 已展示 */
+      const picked = await pickModDir();
+      if (picked) gameModDir = picked;
+    } finally {
+      pickingMod = false;
     }
   }
 
-  async function loadDemo() {
-    dataMenuOpen = false;
+  async function submitLoadGame() {
+    const exe = gameExePath.trim();
+    if (!exe) {
+      loadGameError = "请选择游戏可执行文件";
+      return;
+    }
+    loadGameError = null;
     try {
-      await runtime.loadDemoData();
-    } catch {
-      /* contextError 已展示 */
+      await runtime.loadContextFromExecutable(exe, gameModDir.trim() || null);
+      loadGameOpen = false;
+    } catch (error) {
+      loadGameError = String(error);
     }
   }
 
@@ -621,16 +637,9 @@
     </div>
 
     <div class="menu-wrap">
-      <button class="btn" onclick={() => (dataMenuOpen = !dataMenuOpen)} disabled={runtime.contextBusy}>
-        游戏数据{dataMenuOpen ? " ▴" : " ▾"}
+      <button class="btn" onclick={openLoadGame} disabled={runtime.contextBusy}>
+        加载游戏
       </button>
-      {#if dataMenuOpen}
-        <div class="menu">
-          <button onclick={loadFromExecutable}>从游戏可执行文件加载…</button>
-          <button onclick={loadFromDump}>从 data-raw-dump.json 加载…</button>
-          <button onclick={loadDemo}>加载内置示例数据</button>
-        </div>
-      {/if}
     </div>
 
     {#if runtime.contextBusy}
@@ -1434,6 +1443,53 @@
   </div>
 {/if}
 
+{#if loadGameOpen}
+  <div class="backdrop" onclick={() => (loadGameOpen = false)}>
+    <div class="mini-modal load-game" onclick={(event) => event.stopPropagation()}>
+      <div class="mini-title">加载游戏数据</div>
+      <div class="path-field">
+        <div class="path-label">游戏可执行文件（必选）</div>
+        <div class="path-row">
+          <input
+            bind:value={gameExePath}
+            placeholder="D:\异星工厂\bin\x64\factorio.exe"
+            onkeydown={(event) => {
+              if (event.key === "Enter") submitLoadGame();
+            }}
+          />
+          <button class="btn" onclick={browseGameExe} disabled={pickingExe}>
+            {pickingExe ? "…" : "浏览"}
+          </button>
+        </div>
+      </div>
+      <div class="path-field">
+        <div class="path-label">Mod 目录（可选，留空 = 原版）</div>
+        <div class="path-row">
+          <input
+            bind:value={gameModDir}
+            placeholder="留空使用原版"
+            onkeydown={(event) => {
+              if (event.key === "Enter") submitLoadGame();
+            }}
+          />
+          <button class="btn" onclick={browseGameMod} disabled={pickingMod}>
+            {pickingMod ? "…" : "浏览"}
+          </button>
+        </div>
+      </div>
+      {#if loadGameError}
+        <div class="err-text">{loadGameError}</div>
+      {/if}
+      <div class="mini-actions">
+        <button class="btn ghost" onclick={() => (loadGameOpen = false)}>取消</button>
+        <button class="btn primary" onclick={submitLoadGame} disabled={runtime.contextBusy}>
+          {runtime.contextBusy ? "加载中…" : "加载"}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
 {#if newFactoryOpen}
   <div class="backdrop" onclick={() => (newFactoryOpen = false)}>
     <div class="mini-modal" onclick={(event) => event.stopPropagation()}>
@@ -2208,6 +2264,36 @@
     background: var(--panel);
     border: 1px solid var(--accent-line);
     border-radius: var(--radius);
+  }
+
+  .mini-modal.load-game {
+    width: min(460px, 100%);
+  }
+
+  .path-field {
+    display: grid;
+    gap: 4px;
+  }
+
+  .path-label {
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  .path-row {
+    display: flex;
+    gap: 6px;
+  }
+
+  .path-row input {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .err-text {
+    color: var(--danger, #e5484d);
+    font-size: 11px;
+    line-height: 1.4;
   }
 
   .mini-title {
