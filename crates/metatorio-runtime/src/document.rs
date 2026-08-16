@@ -284,7 +284,10 @@ pub struct PlanningPreferences {
 impl Default for PlanningPreferences {
     fn default() -> Self {
         Self {
-            alternative_count: 1,
+            // 每种配方默认枚举 3 台候选机器：不同机器的运行条件不同
+            // （如 cryogenic-plant 需要氟利昂冷却，雷星无法自产），只枚举
+            // 速度最快的 1 台会漏掉真正可行的替代机器，导致链路断裂。
+            alternative_count: 3,
             machine_preferences: Vec::new(),
             enumerate_modules: Vec::new(),
             enumerate_beacons: Vec::new(),

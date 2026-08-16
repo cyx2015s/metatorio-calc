@@ -608,21 +608,19 @@ fn enumerate_energy(
             let Some(fluid) = boiler.fluid_box.filter.clone() else {
                 continue;
             };
-            // 两种模式各枚举一个候选：HeatFluidInside 产抽象 FluidHeat，
-            // OutputToSeparatePipe 把输入流体加热成输出流体（水→蒸汽）。
-            for mode in [
-                metatorio_data::types::BoilerMode::HeatFluidInside,
-                metatorio_data::types::BoilerMode::OutputToSeparatePipe,
-            ] {
-                out.push(Mechanic::Boiler(metatorio_core::BoilerMechanic {
-                    boiler: IdWithQuality::new(record.name.clone(), major_quality.clone()),
-                    fluid: fluid.clone(),
-                    temperature: None,
-                    fuel: None,
-                    fuel_temperature: None,
-                    mode: Some(mode),
-                }));
-            }
+            // 只按原型自带模式枚举一个候选：热交换器等原型自带
+            // output-to-separate-pipe（水→蒸汽）；HeatFluidInside 是旧版
+            // 锅炉缺省，仅当原型没有 mode 字段时才可能是它。两种模式都枚举
+            // 会让 heat-exchanger 多出一条 Heat→FluidHeat 抽象流，与温度互转/
+            // 提热机制流线性相关 → 求解器奇异（已实测复现）。
+            out.push(Mechanic::Boiler(metatorio_core::BoilerMechanic {
+                boiler: IdWithQuality::new(record.name.clone(), major_quality.clone()),
+                fluid: fluid.clone(),
+                temperature: None,
+                fuel: None,
+                fuel_temperature: None,
+                mode: boiler.mode,
+            }));
         }
         if let Some(_reactor) = record.component::<ReactorComponent>() {
             out.push(Mechanic::Reactor(metatorio_core::ReactorMechanic {
@@ -648,6 +646,93 @@ mod tests {
 
     fn kind_of(mechanic: &Mechanic) -> MechanicKind {
         MechanicKind::of(mechanic)
+    }
+
+    /// 真实 dump：fulgora 上自动规划电磁科学包（严格供给 + 星球资源 + 外部输入电力/煤）。
+    /// 依赖本机导出 dump（%APPDATA%\Factorio\script-output\data-raw-dump.json），
+    /// 存在则验证全链路可解；不存在则跳过。
+    ///
+    /// 回归背景：`alternative_count=1` 时每种配方只枚举速度最快的机器，
+    /// 塑料配方漏掉 chemical-plant（只给了需要氟利昂冷却的 cryogenic-plant），
+    /// 导致 fulgora 电磁链断裂；默认改为 3 后 chemical-plant 入选，链路可解。
+    #[test]
+    fn fulgora_em_science_real_dump() {
+        let path = "C:\\Users\\mirac\\AppData\\Roaming\\Factorio\\script-output\\data-raw-dump.json";
+        if !std::path::Path::new(path).exists() {
+            eprintln!("[skip] 无真实 dump，跳过");
+            return;
+        }
+        let raw = std::fs::read(path).expect("读 dump");
+        let dump: serde_json::Value = serde_json::from_slice(&raw).expect("解析 dump");
+        let store = PrototypeStore::load(&dump).expect("dump 加载失败");
+        let game = GameState::default();
+        let ctx = Context::new(&store, &game);
+        let options = EnumerateOptions {
+            alternative_count: 3,
+            machine_preferences: Vec::new(),
+            enumerate_modules: Vec::new(),
+            enumerate_beacons: Vec::new(),
+            quality_limit: 0,
+            major_quality: 0,
+            planet: Some("fulgora".to_string()),
+            surface: None,
+        };
+        let candidates = enumerate_all(&store, &ctx, &options);
+        assert!(
+            candidates.iter().any(|m| matches!(m, Mechanic::Recipe(r) if r.recipe.id == "electromagnetic-science-pack")),
+            "应枚举出电磁科学包配方"
+        );
+        // 塑料配方应同时枚举 cryogenic-plant 与 chemical-plant（回归：只枚举
+        // 前者会让雷星电磁链因氟利昂不可得而断裂）。
+        assert!(
+            candidates.iter().any(|m| matches!(
+                m,
+                Mechanic::Recipe(r) if r.recipe.id == "plastic-bar" && r.machine.id == "chemical-plant"
+            )),
+            "塑料配方应枚举出 chemical-plant 候选"
+        );
+
+        // 星球免费源：scrap 矿藏（Entity）+ 重油（tile 流体）。
+        // 注：planet_autoplaced_flows 把 resource 实体的 minable 产物当物品源，
+        // 但采矿机制消耗的是矿藏实体 Entity —— 这里显式补 Entity(scrap)。
+        let mut sources = metatorio_runtime::planet::planet_autoplaced_flows(&store, "fulgora");
+        sources.insert(DualVar::Entity(IdWithQuality::new("scrap", "normal")), 1.0);
+        // fulgora 无燃料发电，电力需外部输入（雷击/火箭运电）；煤用于塑料。
+        sources.insert(DualVar::Electricity, 1.0);
+        sources.insert(DualVar::Item(IdWithQuality::new("coal", "normal")), 1.0);
+
+        let expansion = expand(
+            candidates.iter().enumerate().map(|(index, mechanic)| (index as u64, mechanic)),
+            &ctx,
+        );
+        let mut variant_counts: std::collections::HashMap<u64, u16> = std::collections::HashMap::new();
+        let mut flows = CoreAIndexMap::default();
+        for variable in expansion.variables {
+            let variant = variant_counts.entry(variable.prim_var.inner).or_default();
+            let flow_id = ExpandedVarId {
+                mechanic: metatorio_runtime::id::MechanicId(variable.prim_var.inner),
+                variant: *variant,
+            };
+            *variant = variant.saturating_add(1);
+            flows.insert(
+                flow_id,
+                (variable.flow, instance_cost(&store, &candidates[variable.prim_var.inner as usize])),
+            );
+        }
+        let mut target = CoreFlow::default();
+        target.insert(
+            DualVar::Item(IdWithQuality::new("electromagnetic-science-pack", "normal")),
+            1.0,
+        );
+        add_conversion_flows(&mut flows, &store, &target, &sources);
+        let mut problem = SolverData::new_simple(target, flows);
+        problem.sources = sources;
+        problem.strict_source = true;
+        let solution = problem.solve();
+        assert!(
+            matches!(solution, SolverSolution::Solved { .. }),
+            "fulgora 电磁科学包应可解（scrap→回收→冰→水→holmium→电磁科学包）：{solution:?}"
+        );
     }
 
     /// 合成 Nauvis：组装机（电）+ 锅炉（水→蒸汽）+ 蒸汽机 + 煤 + 铁矿配方。

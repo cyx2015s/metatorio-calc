@@ -592,7 +592,9 @@ where
                         t!("metatorio.solver-infeasible").to_string()
                     }
                     good_lp::ResolutionError::Other(_) => t!("metatorio.solver-other").to_string(),
-                    good_lp::ResolutionError::Str(s) => t!("metatorio.solver-str", s).to_string(),
+                    good_lp::ResolutionError::Str(s) => {
+                        t!("metatorio.solver-str", s).to_string()
+                    }
                 };
                 SolverSolution::NotSolved {
                     no_provider: no_providers.iter().cloned().collect(),
