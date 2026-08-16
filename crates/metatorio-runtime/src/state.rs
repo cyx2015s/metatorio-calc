@@ -1,6 +1,6 @@
 use std::{collections::BTreeSet, fmt};
 
-use metatorio_core::{DualVar, Mechanic, ModuleConfig};
+use metatorio_core::{BeaconConfig, DualVar, Mechanic, ModuleConfig};
 use serde::Serialize;
 
 use crate::document::{
@@ -1848,8 +1848,26 @@ fn apply_module_action(
             config.beacons.clear();
             Ok(changed)
         }
-        ModuleAction::AddBeacon => {
-            config.beacons.push(Default::default());
+        ModuleAction::AddBeacon { beacon } => {
+            if beacon.id.is_empty() {
+                return Err(RuntimeError::InvalidValue(
+                    "信标未选择，无法添加".to_string(),
+                ));
+            }
+            if config
+                .beacons
+                .iter()
+                .any(|existing| existing.beacon.id == beacon.id)
+            {
+                return Err(RuntimeError::InvalidValue(format!(
+                    "信标 {} 已添加，不能重复",
+                    beacon.id
+                )));
+            }
+            config.beacons.push(BeaconConfig {
+                beacon,
+                ..Default::default()
+            });
             Ok(true)
         }
         ModuleAction::RemoveBeacon { beacon } => {
@@ -1862,6 +1880,20 @@ fn apply_module_action(
             Ok(true)
         }
         ModuleAction::SetBeacon { beacon, value } => {
+            if value.id.is_empty() {
+                return Err(RuntimeError::InvalidValue("信标未选择".to_string()));
+            }
+            if config
+                .beacons
+                .iter()
+                .enumerate()
+                .any(|(index, existing)| index != beacon && existing.beacon.id == value.id)
+            {
+                return Err(RuntimeError::InvalidValue(format!(
+                    "信标 {} 已添加，不能重复",
+                    value.id
+                )));
+            }
             let beacon = config.beacons.get_mut(beacon).ok_or_else(|| {
                 RuntimeError::InvalidValue("beacon index is out of range".to_string())
             })?;
@@ -2426,5 +2458,73 @@ mod tests {
             },
         });
         assert!(matches!(error, Err(RuntimeError::InvalidValue(_))));
+    }
+
+    #[test]
+    fn add_beacon_requires_valid_and_unique_beacon() {
+        let (mut state, project, factory) = state_with_factory();
+        state
+            .dispatch(AppMessage::Factory {
+                project,
+                factory,
+                action: FactoryAction::MechanicList(MechanicListAction::Add {
+                    kind: MechanicKind::Recipe,
+                }),
+            })
+            .unwrap();
+        let mechanic = state.factory(project, factory).unwrap().mechanics[0].id;
+        let module = |action: ModuleAction| AppMessage::Factory {
+            project,
+            factory,
+            action: FactoryAction::Mechanic {
+                mechanic,
+                action: MechanicAction::Recipe(RecipeMechanicAction::Module(action)),
+            },
+        };
+
+        // 空 id 拒绝
+        let error = state.dispatch(module(ModuleAction::AddBeacon {
+            beacon: IdWithQuality::default(),
+        }));
+        assert!(matches!(error, Err(RuntimeError::InvalidValue(_))));
+
+        // 合法添加：默认 count=1 / share=1.0
+        state
+            .dispatch(module(ModuleAction::AddBeacon {
+                beacon: IdWithQuality::new("beacon", "normal"),
+            }))
+            .unwrap();
+        let Mechanic::Recipe(recipe) =
+            &state.factory(project, factory).unwrap().mechanics[0].mechanic
+        else {
+            panic!("expected recipe mechanic");
+        };
+        assert_eq!(recipe.module_config.beacons.len(), 1);
+        assert_eq!(recipe.module_config.beacons[0].count, 1);
+        assert_eq!(recipe.module_config.beacons[0].share, 1.0);
+
+        // 重复信标拒绝
+        let error = state.dispatch(module(ModuleAction::AddBeacon {
+            beacon: IdWithQuality::new("beacon", "normal"),
+        }));
+        assert!(matches!(error, Err(RuntimeError::InvalidValue(_))));
+
+        // SetBeacon 换到另一个已有信标也拒绝；改成新信标允许
+        state
+            .dispatch(module(ModuleAction::AddBeacon {
+                beacon: IdWithQuality::new("big-beacon", "normal"),
+            }))
+            .unwrap();
+        let error = state.dispatch(module(ModuleAction::SetBeacon {
+            beacon: 1,
+            value: IdWithQuality::new("beacon", "normal"),
+        }));
+        assert!(matches!(error, Err(RuntimeError::InvalidValue(_))));
+        state
+            .dispatch(module(ModuleAction::SetBeacon {
+                beacon: 1,
+                value: IdWithQuality::new("another-beacon", "normal"),
+            }))
+            .unwrap();
     }
 }

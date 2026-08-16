@@ -402,7 +402,11 @@ pub enum ModuleAction {
         max: usize,
     },
     ClearModules,
-    AddBeacon,
+    /// 添加一个信标配置。必须携带信标本体（不允许空 id），且不能与已有
+    /// 信标重复——"信标配置必须绑定一个有效信标"。
+    AddBeacon {
+        beacon: IdWithQuality,
+    },
     RemoveBeacon {
         beacon: usize,
     },
