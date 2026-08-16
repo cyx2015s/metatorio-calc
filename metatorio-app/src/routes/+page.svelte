@@ -430,9 +430,9 @@
                   name={icon.name}
                   size={26}
                   detailKind={flowDetailKind(icon)}
+                  quality={q ?? undefined}
                 />
                 <span class="row-name" title={dualVarLabel(target.flow)}>{dualVarLabel(target.flow)}</span>
-                {#if q}<HoverIcon type="quality" name={q} size={14} detailKind="quality" />{/if}
                 <input
                   class="num"
                   type="number"
@@ -473,9 +473,9 @@
                   name={icon.name}
                   size={26}
                   detailKind={flowDetailKind(icon)}
+                  quality={q ?? undefined}
                 />
                 <span class="row-name" title={dualVarLabel(input.flow)}>{dualVarLabel(input.flow)}</span>
-                {#if q}<HoverIcon type="quality" name={q} size={14} detailKind="quality" />{/if}
                 <input
                   class="num"
                   type="number"
@@ -669,9 +669,9 @@
                   name={icon.name}
                   size={22}
                   detailKind={flowDetailKind(icon)}
+                  quality={q ?? undefined}
                 />
                 <span class="row-name" title={dualVarLabel(balance.flow)}>{dualVarLabel(balance.flow)}</span>
-                {#if q}<HoverIcon type="quality" name={q} size={12} detailKind="quality" />{/if}
                 <strong class:amount-pos={balance.amount > 0} class="mono amount">{balance.amount > 0 ? "+" : ""}{balance.amount.toFixed(3)}</strong>
               </div>
             {/each}

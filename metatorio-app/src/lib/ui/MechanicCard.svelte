@@ -105,9 +105,6 @@
     <div class="main">
       <div class="name">
         {primaryName || "未设置"}
-        {#if primaryName && primaryQuality !== "normal"}
-          <HoverIcon type="quality" name={primaryQuality} size={14} detailKind="quality" />
-        {/if}
       </div>
       <div class="meta">
         <span class="chip">{kindLabel[kind] ?? kind}</span>
@@ -138,9 +135,6 @@
       </button>
       <span class="sub">
         {machineName || "选择机器"}
-        {#if machineName && machineQuality !== "normal"}
-          <HoverIcon type="quality" name={machineQuality} size={14} detailKind="quality" />
-        {/if}
       </span>
     {:else if kind === "generator" || kind === "boiler"}
       <button class="icon-btn" class:empty={!fluidName} title="流体" onclick={() => onPick("fluid")}>

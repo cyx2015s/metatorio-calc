@@ -193,7 +193,7 @@ impl ModuleConfig {
 }
 
 /// 单个信标（插件塔）的配置。
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct BeaconConfig {
     /// 这种插件塔中的模块（数量是塔内模块数，不是塔数量）。
@@ -205,6 +205,20 @@ pub struct BeaconConfig {
     /// 插件塔共享比例：值为 x 表示平均一个插件塔能覆盖到 x 个机器，
     /// 计算插件塔的耗电时需要除以相应的数量。
     pub share: f64,
+}
+
+/// "添加信标"推入的默认配置：1 座信标、覆盖 1 台机器、normal 品质。
+/// count = 0 会让信标行完全无效（无加成/无耗电），share = 0 会被
+/// `max(1.0)` 静默掩盖成 1——两个默认值都不该是 0。
+impl Default for BeaconConfig {
+    fn default() -> Self {
+        Self {
+            modules: Vec::new(),
+            beacon: IdWithQuality::default(),
+            count: 1,
+            share: 1.0,
+        }
+    }
 }
 
 // ── Mechanic 枚举 ────────────────────────────────────────────────

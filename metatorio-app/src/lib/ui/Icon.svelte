@@ -18,7 +18,15 @@
     name = "",
     size = 28,
     title,
-  }: { type?: string; name?: string; size?: number; title?: string } = $props();
+    bare = false,
+  }: {
+    type?: string;
+    name?: string;
+    size?: number;
+    title?: string;
+    /** 无底色（品质图标等叠加场景）：背景透明、去掉圆角底。 */
+    bare?: boolean;
+  } = $props();
 
   let url = $state<string | null>(null);
 
@@ -43,6 +51,7 @@
 {#if url}
   <img
     class="icon"
+    class:bare={bare || type === "quality"}
     src={url}
     alt={name}
     title={title ?? name}
@@ -52,6 +61,7 @@
 {:else}
   <span
     class="icon placeholder"
+    class:bare={bare || type === "quality"}
     title={title ?? name}
     style={`width:${size}px;height:${size}px;font-size:${Math.max(9, Math.round(size * 0.32))}px`}
   >{name ? name.slice(0, 2) : "?"}</span>
@@ -64,6 +74,13 @@
     border-radius: 6px;
     object-fit: contain;
     background: var(--icon-bg);
+  }
+
+  /* 品质图标（角标/挑选）是透明菱形 PNG：必须透明底，否则会盖住
+     底下的物品图标主题。 */
+  .icon.bare {
+    background: transparent;
+    border-radius: 0;
   }
 
   .placeholder {

@@ -107,3 +107,15 @@ fn beacon_config_fields() {
     let back: BeaconConfig = serde_json::from_str(&json).unwrap();
     assert_eq!(b, back);
 }
+
+#[test]
+fn beacon_config_default_is_usable() {
+    // "添加信标"推入的默认配置：1 座信标、覆盖 1 台机器、normal 品质。
+    // 不能是 count 0（无加成/无耗电）、share 0（被 max(1.0) 静默掩盖）、
+    // 空品质（显示不出角标）。
+    let b = BeaconConfig::default();
+    assert_eq!(b.count, 1);
+    assert_eq!(b.share, 1.0);
+    assert_eq!(b.beacon.quality, NORMAL_QUALITY);
+    assert!(b.modules.is_empty());
+}

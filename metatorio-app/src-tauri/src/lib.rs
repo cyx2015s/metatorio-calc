@@ -1403,6 +1403,16 @@ fn quality_level_of(qualities: &[String], name: &str) -> usize {
     qualities.iter().position(|candidate| candidate == name).unwrap_or(0)
 }
 
+/// 品质为空（新机制/首次自动推断尚未设过品质）时归一化为 "normal"，
+/// 避免 UI 显示空品质（空串既不是 normal 也显示不出角标）。
+fn quality_or_normal(quality: &str) -> &str {
+    if quality.is_empty() {
+        "normal"
+    } else {
+        quality
+    }
+}
+
 fn flow_quality_level(qualities: &[String], flow: &DualVar) -> usize {
     let name = match flow {
         DualVar::Item(id) | DualVar::Entity(id) => &id.quality,
@@ -1590,7 +1600,7 @@ fn ensure_machine_compat(
                 },
             );
             if let Some(machine) = pick {
-                let machine = IdWithQuality::new(machine, &recipe.machine.quality);
+                let machine = IdWithQuality::new(machine, quality_or_normal(&recipe.machine.quality));
                 runtime
                     .dispatch(AppMessage::Factory {
                         project,
@@ -1630,7 +1640,7 @@ fn ensure_machine_compat(
                 |_| 0.0,
             );
             if let Some(machine) = pick {
-                let machine = IdWithQuality::new(machine, &mining.machine.quality);
+                let machine = IdWithQuality::new(machine, quality_or_normal(&mining.machine.quality));
                 runtime
                     .dispatch(AppMessage::Factory {
                         project,

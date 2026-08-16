@@ -292,7 +292,7 @@ fn expand_recipe<C: Clone>(
 
     let recipe_quality = quality_level(ctx, &mechanic.recipe.quality);
     let mut effects = restrict_effect(
-        mechanic.module_config.get_effect(ctx),
+        dbg!(mechanic.module_config.get_effect(ctx)),
         machine.allowed_effects.as_ref(),
         Some(recipe),
     );
