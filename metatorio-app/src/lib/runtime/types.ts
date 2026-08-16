@@ -98,6 +98,12 @@ export type ProjectAction =
   | { "set-quality-limit": { quality: string | null } }
   | { "set-mining-productivity": { productivity: number } }
   | { "set-context": { context: string | null } }
+  | { "add-technology-milestone": { milestone: TechnologyMilestone } }
+  | { "set-technology-unlocked": { technology: string; unlocked: boolean } }
+  | { "remove-technology-milestone": { technology: string } }
+  | { "set-ignore-productivity": { ignore: boolean } }
+  | { "set-recipe-productivity": { productivity: RecipeProductivity } }
+  | { "remove-recipe-productivity": { recipe: string } }
   | { planning: PlanningAction };
 
 export type MechanicKind =
@@ -294,10 +300,20 @@ export interface AutoBeaconPlan {
   module_config: ModuleConfig;
 }
 
+export interface TechnologyMilestone {
+  technology: string;
+  unlocked: boolean;
+}
+
+export interface RecipeProductivity {
+  recipe: string;
+  productivity: number;
+}
+
 export interface ProjectSettings {
   time_scale: TimeScale;
-  tech_milestones: unknown[];
-  recipe_productivity: unknown[];
+  tech_milestones: TechnologyMilestone[];
+  recipe_productivity: RecipeProductivity[];
   ignore_productivity: boolean;
   mining_productivity: number;
   all_accessible: boolean;

@@ -798,6 +798,99 @@
             />
             全部科技默认解锁
           </label>
+
+          <div class="field">
+            <label>科技里程碑（关闭的科技视为未解锁分支）</label>
+            <div class="prefs-list">
+              {#each project.settings.tech_milestones as milestone, i (i)}
+                <div class="prefs-item">
+                  <HoverIcon type="technology" name={milestone.technology} size={22} detailKind="technology" />
+                  <span class="prefs-name">{runtime.localizedName("technology", milestone.technology)}</span>
+                  <label class="check" title="解锁/锁定">
+                    <input
+                      type="checkbox"
+                      checked={milestone.unlocked}
+                      onchange={(event) =>
+                        runtime
+                          .setTechnologyUnlocked(
+                            milestone.technology,
+                            (event.currentTarget as HTMLInputElement).checked,
+                          )
+                          .catch(() => {})}
+                    />
+                  </label>
+                  <button
+                    class="btn ghost"
+                    title="移除里程碑"
+                    onclick={() =>
+                      runtime.removeTechnologyMilestone(milestone.technology).catch(() => {})}
+                  >×</button>
+                </div>
+              {:else}
+                <span class="muted">还没有科技里程碑</span>
+              {/each}
+            </div>
+            <button
+              class="btn"
+              onclick={() =>
+                openSelector("technology", "选择科技里程碑", (name) =>
+                  runtime.addTechnologyMilestone(name),
+                )}
+            >+ 添加里程碑</button>
+          </div>
+
+          <label class="check">
+            <input
+              type="checkbox"
+              checked={project.settings.ignore_productivity}
+              onchange={(event) =>
+                runtime
+                  .setIgnoreProductivity((event.currentTarget as HTMLInputElement).checked)
+                  .catch(() => {})}
+            />
+            忽略配方产能加成
+          </label>
+          <div class="field">
+            <label>配方产能加成（百分数，参与求解）</label>
+            <div class="prefs-list">
+              {#each project.settings.recipe_productivity as entry, i (i)}
+                <div class="prefs-item">
+                  <HoverIcon type="recipe" name={entry.recipe} size={22} detailKind="recipe" />
+                  <span class="prefs-name">{runtime.localizedName("recipe", entry.recipe)}</span>
+                  <input
+                    class="prod-input"
+                    type="number"
+                    step="10"
+                    min="0"
+                    value={String(Math.round(entry.productivity * 100))}
+                    onchange={(event) => {
+                      const value = Number((event.currentTarget as HTMLInputElement).value);
+                      if (Number.isFinite(value)) {
+                        runtime.setRecipeProductivity(entry.recipe, value / 100).catch(() => {});
+                      }
+                    }}
+                  />
+                  <span class="muted">%</span>
+                  <button
+                    class="btn ghost"
+                    title="移除"
+                    onclick={() =>
+                      runtime.removeRecipeProductivity(entry.recipe).catch(() => {})}
+                  >×</button>
+                </div>
+              {:else}
+                <span class="muted">还没有配方产能加成</span>
+              {/each}
+            </div>
+            <button
+              class="btn"
+              onclick={() =>
+                openSelector("recipe", "选择配方", (name) =>
+                  runtime.setRecipeProductivity(name, 0.5),
+                )}
+            >+ 添加配方产能</button>
+          </div>
+
           <div class="field">
             <label>采矿产出加成（倍率）</label>
             <input
@@ -1682,6 +1775,18 @@
     display: flex;
     align-items: center;
     gap: 6px;
+  }
+
+  .prod-input {
+    width: 56px;
+    min-height: 22px;
+    padding: 0 4px;
+    text-align: right;
+    background: var(--bg);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    font-family: var(--mono);
+    font-size: 10px;
   }
 
   .mini-modal {

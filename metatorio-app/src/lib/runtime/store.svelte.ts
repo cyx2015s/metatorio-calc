@@ -382,6 +382,62 @@ class RuntimeStore {
     });
   }
 
+  // ── 科技里程碑 / 配方产能 ────────────────────────────────────────
+
+  async addTechnologyMilestone(technology: string): Promise<void> {
+    const project = this.requireProject();
+    await this.send({
+      scope: "project",
+      action: {
+        project,
+        action: { "add-technology-milestone": { milestone: { technology, unlocked: true } } },
+      },
+    });
+  }
+
+  async setTechnologyUnlocked(technology: string, unlocked: boolean): Promise<void> {
+    const project = this.requireProject();
+    await this.send({
+      scope: "project",
+      action: { project, action: { "set-technology-unlocked": { technology, unlocked } } },
+    });
+  }
+
+  async removeTechnologyMilestone(technology: string): Promise<void> {
+    const project = this.requireProject();
+    await this.send({
+      scope: "project",
+      action: { project, action: { "remove-technology-milestone": { technology } } },
+    });
+  }
+
+  async setIgnoreProductivity(ignore: boolean): Promise<void> {
+    const project = this.requireProject();
+    await this.send({
+      scope: "project",
+      action: { project, action: { "set-ignore-productivity": { ignore } } },
+    });
+  }
+
+  async setRecipeProductivity(recipe: string, productivity: number): Promise<void> {
+    const project = this.requireProject();
+    await this.send({
+      scope: "project",
+      action: {
+        project,
+        action: { "set-recipe-productivity": { productivity: { recipe, productivity } } },
+      },
+    });
+  }
+
+  async removeRecipeProductivity(recipe: string): Promise<void> {
+    const project = this.requireProject();
+    await this.send({
+      scope: "project",
+      action: { project, action: { "remove-recipe-productivity": { recipe } } },
+    });
+  }
+
   // ── 工厂环境（星球/地表/主品质） ────────────────────────────────
 
   async setFactoryPlanet(planet: string | null): Promise<void> {
