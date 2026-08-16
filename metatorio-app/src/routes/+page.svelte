@@ -162,11 +162,15 @@
   // 拖拽排序的本地镜像（文档变化时同步；拖拽期间由 dndzone 更新）
   let dragTargets = $state<import("$lib/runtime/types").FlowTarget[]>([]);
   let dragInputs = $state<import("$lib/runtime/types").ExternalInput[]>([]);
+  let dragMechanics = $state<import("$lib/runtime/types").MechanicEntry[]>([]);
   $effect(() => {
     dragTargets = targets;
   });
   $effect(() => {
     dragInputs = externalInputs;
+  });
+  $effect(() => {
+    dragMechanics = mechanics;
   });
   function handleTargetsConsider(event: CustomEvent<{ items: import("$lib/runtime/types").FlowTarget[] }>) {
     dragTargets = event.detail.items;
@@ -184,6 +188,15 @@
     dragInputs = event.detail.items;
     runtime
       .reorderExternalInputs(event.detail.items.map((input) => input.id))
+      .catch(() => {});
+  }
+  function handleMechanicsConsider(event: CustomEvent<{ items: import("$lib/runtime/types").MechanicEntry[] }>) {
+    dragMechanics = event.detail.items;
+  }
+  function handleMechanicsFinalize(event: CustomEvent<{ items: import("$lib/runtime/types").MechanicEntry[] }>) {
+    dragMechanics = event.detail.items;
+    runtime
+      .reorderMechanics(event.detail.items.map((entry) => entry.id))
       .catch(() => {});
   }
   let solve = $derived(runtime.solve);
@@ -693,7 +706,7 @@
             onconsider={handleTargetsConsider}
             onfinalize={handleTargetsFinalize}
           >
-            {#each dragTargets as target, i (target.id)}
+            {#each dragTargets as target (target.id)}
               {@const icon = flowIcon(target.flow)}
               {@const q = flowQuality(target.flow)}
               <div class="row-item">
@@ -716,8 +729,6 @@
                     if (Number.isFinite(value)) runtime.setTargetAmount(target.id, value).catch(() => {});
                   }}
                 />
-                <button class="btn ghost up" title="上移" disabled={i === 0} onclick={() => runtime.reorderTarget(target.id, i - 1).catch(() => {})}>↑</button>
-                <button class="btn ghost up" title="下移" disabled={i === targets.length - 1} onclick={() => runtime.reorderTarget(target.id, i + 1).catch(() => {})}>↓</button>
                 <button class="btn ghost" title="建议能产出该流的机制" onclick={() => openSuggestions(target.flow)}>建议</button>
                 <button class="btn ghost" title="更改目标流" onclick={() => editTarget(target)}>更改</button>
                 <button class="btn ghost" title="移除目标" onclick={() => runtime.removeTarget(target.id).catch(() => {})}>×</button>
@@ -850,7 +861,7 @@
             onconsider={handleInputsConsider}
             onfinalize={handleInputsFinalize}
           >
-            {#each dragInputs as input, i (input.id)}
+            {#each dragInputs as input (input.id)}
               {@const icon = flowIcon(input.flow)}
               {@const q = flowQuality(input.flow)}
               <div class="row-item">
@@ -873,8 +884,6 @@
                     if (Number.isFinite(value)) runtime.setExternalInputPenalty(input.id, value).catch(() => {});
                   }}
                 />
-                <button class="btn ghost up" title="上移" disabled={i === 0} onclick={() => runtime.reorderExternalInput(input.id, i - 1).catch(() => {})}>↑</button>
-                <button class="btn ghost up" title="下移" disabled={i === externalInputs.length - 1} onclick={() => runtime.reorderExternalInput(input.id, i + 1).catch(() => {})}>↓</button>
                 <button class="btn ghost" title="更改外部输入流" onclick={() => editExternalInput(input)}>更改</button>
                 <button class="btn ghost" title="移除" onclick={() => runtime.removeExternalInput(input.id).catch(() => {})}>×</button>
               </div>
@@ -1190,8 +1199,13 @@
         {#if runtime.solveError}<span class="chip warn">求解错误</span>{/if}
       </div>
 
-      <div class="mech-list">
-        {#each mechanics as entry (entry.id)}
+      <div
+        class="mech-list"
+        use:dndzone={{ items: dragMechanics, flipDurationMs: 120 }}
+        onconsider={handleMechanicsConsider}
+        onfinalize={handleMechanicsFinalize}
+      >
+        {#each dragMechanics as entry (entry.id)}
           <MechanicCard
             {entry}
             solution={solveMap.get(entry.id) ?? null}

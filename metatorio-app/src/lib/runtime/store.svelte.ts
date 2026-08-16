@@ -804,6 +804,26 @@ class RuntimeStore {
     });
   }
 
+  /** 机制排序（position 为目标位置）。 */
+  async reorderMechanic(mechanic: MechanicId, position: number): Promise<void> {
+    const { project, factory } = this.requireFactory();
+    await this.send({
+      scope: "factory",
+      action: { project, factory, action: { "mechanic-list": { reorder: { mechanic, position } } } },
+    });
+  }
+
+  /** 拖拽后的整表重排（从末尾往前逐个移动到目标位置，保证稳定）。 */
+  async reorderMechanics(order: MechanicId[]): Promise<void> {
+    for (let i = order.length - 1; i >= 0; i--) {
+      const current = this.selectedFactory?.mechanics ?? [];
+      const currentIndex = current.findIndex((entry) => entry.id === order[i]);
+      if (currentIndex >= 0 && currentIndex !== i) {
+        await this.reorderMechanic(order[i], i);
+      }
+    }
+  }
+
   async setMechanicEnabled(mechanic: MechanicId, enabled: boolean): Promise<void> {
     const { project, factory } = this.requireFactory();
     await this.send({
