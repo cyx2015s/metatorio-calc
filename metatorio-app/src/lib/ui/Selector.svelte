@@ -85,6 +85,8 @@
   let customVariant = $state<"Pollution" | "Custom">("Custom");
   let customName = $state("");
   let quality = $state(initialQuality || "normal");
+  /** 用户是否主动点过品质 chips（区别于默认 normal）——点过再点条目即自动确认。 */
+  let qualityPicked = $state(false);
   let query = $state("");
   let activeGroup = $state<string | null>(null);
   let loading = $state(false);
@@ -142,6 +144,10 @@
   );
   let selectedEntry = $derived(
     selected ? entries.find((entry) => entry.name === selected) ?? null : null,
+  );
+  /** 当前品质的本地化名（normal 或未选中时不展示）。 */
+  let qualityLabel = $derived(
+    quality !== "normal" ? runtime.localizedName("quality", quality) : "",
   );
 
   function groupBySubgroup(list: IndexEntry[]): { subgroup: string; items: IndexEntry[] }[] {
@@ -204,9 +210,26 @@
     return entry.localized_name || entry.name;
   }
 
-  /** 点击条目：仅选中/取消选中，不提交（品质可之后再选）。 */
+  /** 点击条目：仅选中/取消选中，不提交；若品质已主动点过则"物品+品质"
+   *  齐了，直接确认（任意顺序都成立）。 */
   function toggleSelect(name: string) {
-    selected = selected === name ? null : name;
+    if (selected === name) {
+      selected = null;
+      return;
+    }
+    selected = name;
+    if (qualityPicked) {
+      confirm();
+    }
+  }
+
+  /** 点击品质 chip：设定品质；若条目已选中则"物品+品质"齐了，直接确认。 */
+  function pickQuality(name: string) {
+    quality = name;
+    qualityPicked = true;
+    if (selected) {
+      confirm();
+    }
   }
 
   /** 提交当前选择（条目 + 当前品质）。 */
@@ -267,10 +290,33 @@
   }
 
   function onKeydown(event: KeyboardEvent) {
+    const target = event.target as HTMLElement | null;
+    const typing =
+      !!target &&
+      (target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement);
     if (event.key === "Escape") {
       event.stopPropagation();
       onClose();
-    } else if (event.key === "Enter" && selected && !isDirect && !isCustom) {
+      return;
+    }
+    // E 键确认（与游戏一致）：输入框里 e 是打字字符，不触发。
+    // 品质+物品都点过时默认已自动确认，E 用于只选了物品/直接确认的场景。
+    if (event.key === "e" || event.key === "E") {
+      if (typing) return;
+      event.stopPropagation();
+      if (isDirect) {
+        const flow = directFlows[flowTab]!;
+        commitDirect(flow);
+      } else if (isCustom) {
+        commitCustom();
+      } else if (selected) {
+        confirm();
+      }
+      return;
+    }
+    if (event.key === "Enter" && !typing && selected && !isDirect && !isCustom) {
       event.stopPropagation();
       confirm();
     }
@@ -341,9 +387,10 @@
               class:active={quality === q}
               class="q-chip"
               title={q}
-              onclick={() => (quality = q)}
+              onclick={() => pickQuality(q)}
             >
               <HoverIcon type="quality" name={q} size={22} detailKind="quality" />
+              <span class="q-name">{runtime.localizedName("quality", q)}</span>
             </button>
           {/each}
         </div>
@@ -440,13 +487,20 @@
       <div class="modal-foot">
         <span class="foot-hint">
           {selectedEntry
-            ? `已选：${labelOf(selectedEntry)}${quality !== "normal" ? `（${quality}）` : ""}`
-            : "点击条目选中，品质可选任意顺序"}
+            ? `已选：${labelOf(selectedEntry)}${qualityLabel ? `（${qualityLabel}）` : ""}`
+            : "点击条目选中；物品+品质选齐即确认；E 键确认"}
         </span>
         <div class="foot-actions">
           <button class="btn ghost" onclick={onClose}>取消</button>
-          <button class="btn primary" onclick={confirm} disabled={!selected}>
-            确定{selectedEntry ? ` · ${labelOf(selectedEntry)}` : ""}
+          <button
+            class="btn primary"
+            title="按 E 或 Enter 确认"
+            onclick={confirm}
+            disabled={!selected}
+          >
+            确定{selectedEntry
+              ? ` · ${labelOf(selectedEntry)}${qualityLabel ? `（${qualityLabel}）` : ""}`
+              : ""}
           </button>
         </div>
       </div>
@@ -580,7 +634,8 @@
   .q-chip {
     display: inline-flex;
     align-items: center;
-    padding: 2px;
+    gap: 3px;
+    padding: 2px 7px 2px 2px;
     background: var(--card);
     border: 1px solid var(--line);
     border-radius: var(--radius-sm);
@@ -594,6 +649,10 @@
   .q-chip.active {
     background: var(--accent-dim);
     border-color: var(--accent);
+  }
+
+  .q-name {
+    font-size: 10px;
   }
 
   .gtab {
