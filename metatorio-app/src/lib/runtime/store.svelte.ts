@@ -688,6 +688,17 @@ class RuntimeStore {
     });
   }
 
+  /** 拖拽后的整表重排（从末尾往前逐个移动到目标位置，保证稳定）。 */
+  async reorderTargets(order: TargetId[]): Promise<void> {
+    for (let i = order.length - 1; i >= 0; i--) {
+      const current = this.selectedFactory?.targets ?? [];
+      const currentIndex = current.findIndex((target) => target.id === order[i]);
+      if (currentIndex >= 0 && currentIndex !== i) {
+        await this.reorderTarget(order[i], i);
+      }
+    }
+  }
+
   // ── 外部输入 ────────────────────────────────────────────────────
 
   async addExternalInput(itemId: string, penalty: number): Promise<void> {
@@ -750,6 +761,17 @@ class RuntimeStore {
         action: { "external-input": { reorder: { input, position } } },
       },
     });
+  }
+
+  /** 拖拽后的整表重排（从末尾往前逐个移动到目标位置，保证稳定）。 */
+  async reorderExternalInputs(order: ExternalInputId[]): Promise<void> {
+    for (let i = order.length - 1; i >= 0; i--) {
+      const current = this.selectedFactory?.external_inputs ?? [];
+      const currentIndex = current.findIndex((input) => input.id === order[i]);
+      if (currentIndex >= 0 && currentIndex !== i) {
+        await this.reorderExternalInput(order[i], i);
+      }
+    }
   }
 
   async setExternalInputPenalty(input: ExternalInputId, penalty: number): Promise<void> {
@@ -1003,9 +1025,9 @@ class RuntimeStore {
     });
   }
 
-  async addEnumeratedModule(module: string): Promise<void> {
+  async addEnumeratedModule(module: string, quality = "normal"): Promise<void> {
     await this.planningMessage({
-      "add-enumerated-module": { module: { id: module, quality: "normal" } },
+      "add-enumerated-module": { module: { id: module, quality } },
     });
   }
 
@@ -1013,6 +1035,19 @@ class RuntimeStore {
     await this.planningMessage({
       "remove-enumerated-module": { module: { id: module, quality: "normal" } },
     });
+  }
+
+  /** 使用最佳插件：用每插件类别中最高 tier 的插件（指定品质）替换枚举列表。 */
+  async applyBestModules(quality: string): Promise<void> {
+    const { bestModules } = await import("./client");
+    const modules = await bestModules();
+    const existing = [...(this.selectedProject?.planning.enumerate_modules ?? [])];
+    for (const module of existing) {
+      await this.removeEnumeratedModule(module.id);
+    }
+    for (const module of modules) {
+      await this.addEnumeratedModule(module.name, quality);
+    }
   }
 
   /** 添加枚举信标方案：先加空方案，再把所选信标写入新方案的插件配置。 */

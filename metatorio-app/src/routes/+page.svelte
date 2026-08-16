@@ -2,6 +2,7 @@
   // Metatorio 主界面：紧凑布局，圆角卡片分区；游戏内物品一律图标按钮，
   // 一般操作一律文字按钮。
   import { onMount } from "svelte";
+  import { dndzone } from "svelte-dnd-action";
   import { runtime } from "$lib/runtime/store.svelte.ts";
   import { pickDumpFile, pickGameExecutable, pickModDir, suggest } from "$lib/runtime/client";
   import { dualVarLabel, flowQuality, itemOf } from "$lib/runtime/types";
@@ -158,6 +159,33 @@
   let targets = $derived(factory?.targets ?? []);
   let targetExpressions = $derived(factory?.target_expressions ?? []);
   let externalInputs = $derived(factory?.external_inputs ?? []);
+  // 拖拽排序的本地镜像（文档变化时同步；拖拽期间由 dndzone 更新）
+  let dragTargets = $state<import("$lib/runtime/types").FlowTarget[]>([]);
+  let dragInputs = $state<import("$lib/runtime/types").ExternalInput[]>([]);
+  $effect(() => {
+    dragTargets = targets;
+  });
+  $effect(() => {
+    dragInputs = externalInputs;
+  });
+  function handleTargetsConsider(event: CustomEvent<{ items: import("$lib/runtime/types").FlowTarget[] }>) {
+    dragTargets = event.detail.items;
+  }
+  function handleTargetsFinalize(event: CustomEvent<{ items: import("$lib/runtime/types").FlowTarget[] }>) {
+    dragTargets = event.detail.items;
+    runtime
+      .reorderTargets(event.detail.items.map((target) => target.id))
+      .catch(() => {});
+  }
+  function handleInputsConsider(event: CustomEvent<{ items: import("$lib/runtime/types").ExternalInput[] }>) {
+    dragInputs = event.detail.items;
+  }
+  function handleInputsFinalize(event: CustomEvent<{ items: import("$lib/runtime/types").ExternalInput[] }>) {
+    dragInputs = event.detail.items;
+    runtime
+      .reorderExternalInputs(event.detail.items.map((input) => input.id))
+      .catch(() => {});
+  }
   let solve = $derived(runtime.solve);
   let solveMap = $derived(
     new Map(
@@ -659,8 +687,13 @@
       {#if factory}
         <section class="panel">
           <div class="title">目标 <span class="count">{targets.length}</span></div>
-          <div class="rows">
-            {#each targets as target, i (target.id)}
+          <div
+            class="rows"
+            use:dndzone={{ items: dragTargets, flipDurationMs: 120 }}
+            onconsider={handleTargetsConsider}
+            onfinalize={handleTargetsFinalize}
+          >
+            {#each dragTargets as target, i (target.id)}
               {@const icon = flowIcon(target.flow)}
               {@const q = flowQuality(target.flow)}
               <div class="row-item">
@@ -811,8 +844,13 @@
 
         <section class="panel">
           <div class="title">外部输入 <span class="count">{externalInputs.length}</span></div>
-          <div class="rows">
-            {#each externalInputs as input, i (input.id)}
+          <div
+            class="rows"
+            use:dndzone={{ items: dragInputs, flipDurationMs: 120 }}
+            onconsider={handleInputsConsider}
+            onfinalize={handleInputsFinalize}
+          >
+            {#each dragInputs as input, i (input.id)}
               {@const icon = flowIcon(input.flow)}
               {@const q = flowQuality(input.flow)}
               <div class="row-item">
@@ -859,55 +897,79 @@
       {#if factory}
         <section class="panel">
           <div class="title">工厂环境</div>
-          <div class="field">
-            <label>星球</label>
-            <div class="env-row">
+          <div class="env-row">
+            <button
+              class="icon-btn"
+              class:empty={!factory.settings.planet}
+              title={`星球：${factory.settings.planet ? runtime.localizedName("planet", factory.settings.planet) : "未选择"}`}
+              onclick={() =>
+                openSelector("planet", "选择星球", (name) =>
+                  runtime.setFactoryPlanet(name),
+                )}
+            >
+              <HoverIcon
+                type="planet"
+                name={factory.settings.planet || "planet"}
+                size={24}
+                detailKind={factory.settings.planet ? "planet" : undefined}
+              />
+            </button>
+            <span class="sub">
+              {factory.settings.planet ? runtime.localizedName("planet", factory.settings.planet) : "星球：未选择"}
+            </span>
+            {#if factory.settings.planet}
               <button
-                class="btn"
-                onclick={() =>
-                  openSelector("planet", "选择星球", (name) =>
-                    runtime.setFactoryPlanet(name),
-                  )}
-              >{factory.settings.planet ? runtime.localizedName("planet", factory.settings.planet) : "未选择"}</button>
-              {#if factory.settings.planet}
-                <button
-                  class="btn ghost"
-                  title="清除星球"
-                  onclick={() => runtime.setFactoryPlanet(null).catch(() => {})}
-                >×</button>
-              {/if}
-            </div>
+                class="btn ghost"
+                title="清除星球"
+                onclick={() => runtime.setFactoryPlanet(null).catch(() => {})}
+              >×</button>
+            {/if}
           </div>
-          <div class="field">
-            <label>地表</label>
-            <div class="env-row">
+          <div class="env-row">
+            <button
+              class="icon-btn"
+              class:empty={!factory.settings.surface}
+              title={`地表：${factory.settings.surface ? runtime.localizedName("surface", factory.settings.surface) : "未选择"}`}
+              onclick={() =>
+                openSelector("surface", "选择地表", (name) =>
+                  runtime.setFactorySurface(name),
+                )}
+            >
+              <HoverIcon
+                type="surface"
+                name={factory.settings.surface || "surface"}
+                size={24}
+                detailKind={factory.settings.surface ? "surface" : undefined}
+              />
+            </button>
+            <span class="sub">
+              {factory.settings.surface ? runtime.localizedName("surface", factory.settings.surface) : "地表：未选择"}
+            </span>
+            {#if factory.settings.surface}
               <button
-                class="btn"
-                onclick={() =>
-                  openSelector("surface", "选择地表", (name) =>
-                    runtime.setFactorySurface(name),
-                  )}
-              >{factory.settings.surface ? runtime.localizedName("surface", factory.settings.surface) : "未选择"}</button>
-              {#if factory.settings.surface}
-                <button
-                  class="btn ghost"
-                  title="清除地表"
-                  onclick={() => runtime.setFactorySurface(null).catch(() => {})}
-                >×</button>
-              {/if}
-            </div>
+                class="btn ghost"
+                title="清除地表"
+                onclick={() => runtime.setFactorySurface(null).catch(() => {})}
+              >×</button>
+            {/if}
           </div>
-          <div class="field">
-            <label>主品质（自动填机器时使用的品质）</label>
-            <div class="env-row">
-              <button
-                class="btn"
-                onclick={() =>
-                  openSelector("quality", "选择主品质", (name) =>
-                    runtime.setFactoryMajorQuality(name),
-                  )}
-              >{runtime.localizedName("quality", factory.settings.major_quality || "normal")}</button>
-            </div>
+          <div class="env-row">
+            <button
+              class="icon-btn"
+              title={`主品质：${runtime.localizedName("quality", factory.settings.major_quality || "normal")}`}
+              onclick={() =>
+                openSelector("quality", "选择主品质", (name) =>
+                  runtime.setFactoryMajorQuality(name),
+                )}
+            >
+              <HoverIcon
+                type="quality"
+                name={factory.settings.major_quality || "normal"}
+                size={24}
+                detailKind="quality"
+              />
+            </button>
+            <span class="sub">主品质：{runtime.localizedName("quality", factory.settings.major_quality || "normal")}</span>
           </div>
           <label class="check">
             <input
@@ -1465,6 +1527,14 @@
               runtime.addEnumeratedModule(name),
             )}
         >+ 添加插件</button>
+        <button
+          class="btn"
+          title="用每插件类别中最高 tier 的插件（工厂主品质）替换枚举列表"
+          onclick={() =>
+            runtime
+              .applyBestModules(factory?.settings.major_quality || "normal")
+              .catch(() => {})}
+        >使用最佳插件</button>
       </div>
 
       <div class="prefs-section">
@@ -1757,7 +1827,7 @@
     flex: 1;
     min-height: 0;
     display: grid;
-    grid-template-columns: 250px minmax(420px, 1fr) 290px;
+    grid-template-columns: 330px minmax(420px, 1fr) 300px;
     gap: 0;
     padding: 10px 0;
     overflow: hidden;
@@ -1793,12 +1863,22 @@
     min-width: 0;
     display: flex;
     align-items: center;
-    gap: 8px;
+    flex-wrap: wrap;
+    gap: 6px;
     min-height: 32px;
     padding: 3px 6px;
     background: var(--card);
     border: 1px solid var(--line);
     border-radius: var(--radius-sm);
+  }
+
+  .row-item .row-name {
+    flex: 1 1 90px;
+  }
+
+  .btn.up {
+    padding: 2px 6px;
+    line-height: 1;
   }
 
   .row-name {

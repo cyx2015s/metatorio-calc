@@ -111,6 +111,11 @@ export async function suggest(flow: import("./types").DualVar): Promise<import("
   return call("suggest", { flow });
 }
 
+/** 每插件类别中 tier 最高的插件（"使用最佳插件"）。 */
+export async function bestModules(): Promise<import("./types").Suggestion[]> {
+  return call("best_modules");
+}
+
 // ── Persistence ───────────────────────────────────────────────────
 
 export async function openProjectDialog(): Promise<AppDocument | null> {
