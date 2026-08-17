@@ -53,6 +53,8 @@ class RuntimeStore {
   projectPaths = $state<Map<ProjectId, string>>(new Map());
   solve = $state<SolveResult | null>(null);
   solveError = $state<string | null>(null);
+  /** 求解结果缓存：`${project}:${factory}` → 结果，切换项目/工厂时恢复。 */
+  private solveCache = new Map<string, SolveResult>();
   revision = $state(0);
   busy = $state(false);
   solving = $state(false);
@@ -82,6 +84,11 @@ class RuntimeStore {
       this.solve = result;
       this.solveError = null;
       this.solving = false;
+      // 缓存到当前工厂：切换回来时直接恢复，不重复求解。
+      const [project, factory] = this.currentFactoryKey();
+      if (project != null && factory != null) {
+        this.solveCache.set(`${project}:${factory}`, result);
+      }
     });
     onSolveError((message) => {
       this.solveError = message;
@@ -410,10 +417,36 @@ class RuntimeStore {
 
   async selectProject(project: ProjectId | null): Promise<void> {
     await this.send({ scope: "ui", action: { "select-project": { project } } });
+    this.restoreSolveForSelection();
   }
 
   async selectFactory(factory: FactoryId | null): Promise<void> {
     await this.send({ scope: "ui", action: { "select-factory": { factory } } });
+    this.restoreSolveForSelection();
+  }
+
+  /** 当前选中 (project, factory) 键；无选中返回 (null, null)。 */
+  private currentFactoryKey(): [ProjectId | null, FactoryId | null] {
+    const project = this.ui?.selected_project ?? null;
+    const factory = this.ui?.selected_factory ?? null;
+    return [project, factory];
+  }
+
+  /** 切换后恢复该工厂的缓存求解结果；无缓存则自动重新求解。 */
+  private async restoreSolveForSelection(): Promise<void> {
+    const [project, factory] = this.currentFactoryKey();
+    if (project == null || factory == null) {
+      this.solve = null;
+      return;
+    }
+    const cached = this.solveCache.get(`${project}:${factory}`);
+    if (cached) {
+      this.solve = cached;
+      this.solveError = null;
+    } else {
+      this.solve = null;
+      this.recompute().catch(() => {});
+    }
   }
 
   // ── 项目设置 ────────────────────────────────────────────────────
