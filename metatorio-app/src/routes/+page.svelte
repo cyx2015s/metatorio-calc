@@ -394,7 +394,39 @@
     if (icon.type === "item" || icon.type === "fluid" || icon.type === "entity") {
       return runtime.localizedName(icon.type, icon.name);
     }
+    // 抽象能量流的中文名
+    if (typeof flow === "string") {
+      if (flow === "Electricity") return "电力";
+      if (flow === "Heat") return "热量";
+      if (flow === "RocketSlotCapacity") return "火箭运力（槽位）";
+      if (flow === "RocketWeightCapacity") return "火箭运力（重量）";
+    }
+    if (flow !== null && typeof flow === "object") {
+      if ("ItemFuel" in flow) return "物品燃料";
+      if ("FluidFuel" in flow) return "流体燃料";
+      if ("FluidHeat" in flow) return "流体热量";
+      if ("Pollution" in flow) {
+        const pollution = (flow as { Pollution: { name: string } }).Pollution;
+        return `污染（${pollution.name}）`;
+      }
+    }
     return dualVarLabel(flow);
+  }
+
+  /** 抽象能量流的第二行说明（燃料类别/流体名）；无则空串。 */
+  function flowLabelSub(flow: DualVar): string {
+    if (flow !== null && typeof flow === "object") {
+      if ("ItemFuel" in flow) {
+        const itemFuel = flow as { ItemFuel: { category: string[] } };
+        return itemFuel.ItemFuel.category.join(" / ");
+      }
+      if ("FluidFuel" in flow || "FluidHeat" in flow) {
+        const inner = flow as { FluidFuel?: { filter: string }; FluidHeat?: { filter: string } };
+        const filter = inner.FluidFuel?.filter ?? inner.FluidHeat?.filter ?? "";
+        return filter ? runtime.localizedName("fluid", filter) || filter : "任意流体";
+      }
+    }
+    return "";
   }
 
   /** 流 → 流选择器初始页签（编辑目标/外部输入时预选）。 */
@@ -1548,7 +1580,12 @@
                   quality={q ?? undefined}
                   onClick={() => openSuggestions(balance.flow)}
                 />
-                <span class="row-name" title={dualVarLabel(balance.flow)}>{flowLabel(balance.flow)}</span>
+                <span class="row-name" title={dualVarLabel(balance.flow)}>
+                  <span class="flow-name">{flowLabel(balance.flow)}</span>
+                  {#if flowLabelSub(balance.flow)}
+                    <span class="flow-sub">{flowLabelSub(balance.flow)}</span>
+                  {/if}
+                </span>
                 <strong class:amount-pos={balance.amount > 0} class="mono amount">{formatFlowAmount(balance.flow, balance.amount)}</strong>
                 <button class="btn ghost up" title="建议能产出该流的机制" onclick={() => openSuggestions(balance.flow)}>建议</button>
               </div>
@@ -2383,6 +2420,24 @@
 
   .row-item .row-name {
     flex: 1 1 90px;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    min-width: 0;
+  }
+
+  .flow-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .flow-sub {
+    color: var(--faint);
+    font-size: 9px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .row-item.implicit {
