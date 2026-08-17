@@ -14,6 +14,7 @@
     title,
     detailKind,
     quality,
+    onClick,
   }: {
     type?: string;
     name?: string;
@@ -22,6 +23,8 @@
     detailKind?: string;
     /** 带品质时在图标左下角叠加品质角标（边长为主图标一半）。 */
     quality?: string;
+    /** 图标可点击（如触发生产/消耗建议）时传入；悬停详情仍可用。 */
+    onClick?: (event: MouseEvent) => void;
   } = $props();
 
   let hoverActive = $state(false);
@@ -61,9 +64,11 @@
 
 <span
   class="hover-icon"
+  class:clickable={!!onClick}
   onmouseenter={enter}
   onmousemove={move}
   onmouseleave={leave}
+  onclick={onClick}
 >
   <Icon {type} {name} {size} {title} />
   {#if quality && quality !== "normal"}
@@ -82,6 +87,10 @@
     position: relative;
     display: inline-flex;
     flex: 0 0 auto;
+  }
+
+  .hover-icon.clickable {
+    cursor: pointer;
   }
 
   .quality-corner {

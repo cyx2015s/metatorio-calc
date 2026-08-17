@@ -386,10 +386,11 @@ export interface ExternalInput {
   penalty: number;
 }
 
-/** 建议候选：kind ∈ recipe | resource | item-fuel | generator。 */
+/** 建议候选：kind ∈ recipe | resource | item-fuel | generator；role 区分生产/消耗。 */
 export interface Suggestion {
   kind: string;
   name: string;
+  role?: "producer" | "consumer";
 }
 
 export interface MechanicEntry {

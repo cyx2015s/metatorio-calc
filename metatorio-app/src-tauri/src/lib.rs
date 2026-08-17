@@ -28,7 +28,7 @@ use metatorio_data::{
     ModuleComponent, PrototypeBaseComponent, QualityComponent, ReactorComponent, RecipeComponent,
     ResourceEntityComponent,
 };
-use metatorio_data::types::Product;
+use metatorio_data::types::{Ingredient, Product};
 use metatorio_core::Flow;
 use metatorio_runtime::{
     document::{AppDocument, MechanicEntry},
@@ -1036,6 +1036,7 @@ fn best_modules(state: State<'_, AppState>) -> Result<Vec<Suggestion>, String> {
         .map(|(_, name)| Suggestion {
             kind: "module".to_string(),
             name,
+            role: "producer".to_string(),
         })
         .collect())
 }
@@ -1074,12 +1075,14 @@ fn implicit_sources(state: State<'_, AppState>, factory: FactoryId) -> Result<Ve
     Ok(keys)
 }
 
-/// 建议候选：给定一条流，列出能产出/供给它的机制（配方/矿点/燃料/发电机）。
+/// 建议候选：给定一条流，列出能产出/消耗它的机制（配方/矿点/燃料/发电机）。
 #[derive(Debug, Clone, Serialize)]
 pub struct Suggestion {
     /// "recipe" | "resource" | "item-fuel" | "generator"
     pub kind: String,
     pub name: String,
+    /// "producer" = 产出该流；"consumer" = 消耗该流（作为原料）。
+    pub role: String,
 }
 
 /// 建议系统：为一条流生成候选机制（对应 egui 的"推荐配方/矿点"模态框）。
@@ -1098,8 +1101,20 @@ fn suggest(state: State<'_, AppState>, flow: DualVar) -> Result<Vec<Suggestion>,
 }
 
 /// 生成候选机制（与 suggest 命令共用；AutoPlan 也用它）。
+///
+/// 对物品/流体同时收集：
+/// - producer：产出该流的配方 / 产出矿点
+/// - consumer：把该流作为原料的配方
+/// 其余能量类流沿用旧逻辑（只列生产者）。
 fn suggest_for_flow(store: &PrototypeStore, flow: DualVar) -> Vec<Suggestion> {
     let mut out = Vec::new();
+    let mut push = |kind: &str, name: &str, role: &str| {
+        out.push(Suggestion {
+            kind: kind.to_string(),
+            name: name.to_string(),
+            role: role.to_string(),
+        });
+    };
     match flow {
         DualVar::Item(item) => {
             let target = item.id.as_str();
@@ -1112,10 +1127,14 @@ fn suggest_for_flow(store: &PrototypeStore, flow: DualVar) -> Vec<Suggestion> {
                     .iter()
                     .any(|product| matches!(product, Product::Item(p) if p.name == target))
                 {
-                    out.push(Suggestion {
-                        kind: "recipe".to_string(),
-                        name: record.name.clone(),
-                    });
+                    push("recipe", &record.name, "producer");
+                }
+                if recipe
+                    .ingredients
+                    .iter()
+                    .any(|ingredient| matches!(ingredient, Ingredient::Item(p) if p.name == target))
+                {
+                    push("recipe", &record.name, "consumer");
                 }
             }
             for record in store.group(PrototypeGroup::Entity) {
@@ -1134,10 +1153,7 @@ fn suggest_for_flow(store: &PrototypeStore, flow: DualVar) -> Vec<Suggestion> {
                         .iter()
                         .any(|product| matches!(product, Product::Item(p) if p.name == target));
                 if yields_item {
-                    out.push(Suggestion {
-                        kind: "resource".to_string(),
-                        name: record.name.clone(),
-                    });
+                    push("resource", &record.name, "producer");
                 }
             }
         }
@@ -1151,20 +1167,21 @@ fn suggest_for_flow(store: &PrototypeStore, flow: DualVar) -> Vec<Suggestion> {
                     .iter()
                     .any(|product| matches!(product, Product::Fluid(p) if p.name == *name))
                 {
-                    out.push(Suggestion {
-                        kind: "recipe".to_string(),
-                        name: record.name.clone(),
-                    });
+                    push("recipe", &record.name, "producer");
+                }
+                if recipe
+                    .ingredients
+                    .iter()
+                    .any(|ingredient| matches!(ingredient, Ingredient::Fluid(p) if p.name == *name))
+                {
+                    push("recipe", &record.name, "consumer");
                 }
             }
         }
         DualVar::Electricity => {
             for record in store.group(PrototypeGroup::Entity) {
                 if record.has("GeneratorComponent") || record.has("BurnerGeneratorComponent") {
-                    out.push(Suggestion {
-                        kind: "generator".to_string(),
-                        name: record.name.clone(),
-                    });
+                    push("generator", &record.name, "producer");
                 }
             }
         }
@@ -1176,10 +1193,7 @@ fn suggest_for_flow(store: &PrototypeStore, flow: DualVar) -> Vec<Suggestion> {
                 if item.fuel_value().amount > 0.0
                     && category.iter().any(|candidate| candidate == &item.fuel_category)
                 {
-                    out.push(Suggestion {
-                        kind: "item-fuel".to_string(),
-                        name: record.name.clone(),
-                    });
+                    push("item-fuel", &record.name, "producer");
                 }
             }
         }

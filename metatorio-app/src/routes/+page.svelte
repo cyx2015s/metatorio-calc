@@ -804,6 +804,7 @@
                   size={26}
                   detailKind={flowDetailKind(icon)}
                   quality={q ?? undefined}
+                  onClick={() => openSuggestions(target.flow)}
                 />
                 <span class="row-name" title={dualVarLabel(target.flow)}>{flowLabel(target.flow)}</span>
                 <input
@@ -1443,6 +1444,7 @@
                   size={22}
                   detailKind={flowDetailKind(icon)}
                   quality={q ?? undefined}
+                  onClick={() => openSuggestions(balance.flow)}
                 />
                 <span class="row-name" title={dualVarLabel(balance.flow)}>{flowLabel(balance.flow)}</span>
                 <strong class:amount-pos={balance.amount > 0} class="mono amount">{formatFlowAmount(balance.flow, balance.amount)}</strong>
@@ -1793,34 +1795,68 @@
       {#if suggestions.loading}
         <span class="muted">生成中…</span>
       {:else if suggestions.items.length === 0}
-        <span class="muted">没有找到能产出该流的候选机制</span>
+        <span class="muted">没有找到与该流相关的候选机制</span>
       {:else}
-        <div class="prefs-list">
-          {#each suggestions.items as candidate, i (candidate.kind + candidate.name)}
-            {@const icon = suggestionIcon(candidate.kind)}
-            <div class="prefs-item">
-              <HoverIcon
-                type={icon.type}
-                name={candidate.name}
-                size={22}
-                detailKind={icon.detailKind}
-              />
-              <span class="prefs-name" title={candidate.name}>
-                {suggestionName(candidate.kind, candidate.name)}
-                <span class="muted">（{suggestionKindLabel(candidate.kind)}）</span>
-              </span>
-              <button
-                class="btn"
-                title="添加该机制"
-                onclick={() =>
-                  runtime
-                    .addSuggestion(candidate)
-                    .catch(() => {})
-                    .then(() => (suggestions = null))}
-              >添加</button>
-            </div>
-          {/each}
-        </div>
+        {@const producers = suggestions.items.filter((s) => s.role !== "consumer")}
+        {@const consumers = suggestions.items.filter((s) => s.role === "consumer")}
+        {#if producers.length > 0}
+          <div class="prefs-title">产出该流</div>
+          <div class="prefs-list">
+            {#each producers as candidate, i (candidate.kind + candidate.name)}
+              {@const icon = suggestionIcon(candidate.kind)}
+              <div class="prefs-item">
+                <HoverIcon
+                  type={icon.type}
+                  name={candidate.name}
+                  size={22}
+                  detailKind={icon.detailKind}
+                />
+                <span class="prefs-name" title={candidate.name}>
+                  {suggestionName(candidate.kind, candidate.name)}
+                  <span class="muted">（{suggestionKindLabel(candidate.kind)}）</span>
+                </span>
+                <button
+                  class="btn"
+                  title="添加该机制"
+                  onclick={() =>
+                    runtime
+                      .addSuggestion(candidate)
+                      .catch(() => {})
+                      .then(() => (suggestions = null))}
+                >添加</button>
+              </div>
+            {/each}
+          </div>
+        {/if}
+        {#if consumers.length > 0}
+          <div class="prefs-title">消耗该流</div>
+          <div class="prefs-list">
+            {#each consumers as candidate, i (candidate.kind + candidate.name)}
+              {@const icon = suggestionIcon(candidate.kind)}
+              <div class="prefs-item">
+                <HoverIcon
+                  type={icon.type}
+                  name={candidate.name}
+                  size={22}
+                  detailKind={icon.detailKind}
+                />
+                <span class="prefs-name" title={candidate.name}>
+                  {suggestionName(candidate.kind, candidate.name)}
+                  <span class="muted">（{suggestionKindLabel(candidate.kind)}）</span>
+                </span>
+                <button
+                  class="btn"
+                  title="添加该机制"
+                  onclick={() =>
+                    runtime
+                      .addSuggestion(candidate)
+                      .catch(() => {})
+                      .then(() => (suggestions = null))}
+                >添加</button>
+              </div>
+            {/each}
+          </div>
+        {/if}
       {/if}
       <div class="mini-actions">
         <button class="btn primary" onclick={() => (suggestions = null)}>关闭</button>
