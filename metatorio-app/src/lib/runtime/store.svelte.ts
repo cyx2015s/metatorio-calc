@@ -1111,6 +1111,16 @@ class RuntimeStore {
     await this.planningMessage({ "remove-enumerated-beacon": { beacon: index } });
   }
 
+  /** 编辑枚举信标方案的插件配置（信标数量/共享/塔内插件等，完整 ModuleAction）。 */
+  async enumeratedBeaconModule(
+    index: number,
+    action: import("./types").ModuleAction,
+  ): Promise<void> {
+    await this.planningMessage({
+      "enumerated-beacon-module": { beacon: index, action },
+    });
+  }
+
   async useBestModules(): Promise<void> {
     await this.planningMessage("use-best-modules");
   }

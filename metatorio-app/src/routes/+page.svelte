@@ -8,6 +8,7 @@
   import { dualVarLabel, flowQuality, itemOf } from "$lib/runtime/types";
   import type { CatalogKind, DualVar, MechanicId, TargetId } from "$lib/runtime/types";
   import HoverIcon from "$lib/ui/HoverIcon.svelte";
+  import Icon from "$lib/ui/Icon.svelte";
   import Selector from "$lib/ui/Selector.svelte";
   import MechanicCard from "$lib/ui/MechanicCard.svelte";
 
@@ -1755,18 +1756,104 @@
         <div class="prefs-list">
           {#each planning.enumerate_beacons as plan, i (i)}
             {@const beacon = plan.module_config?.beacons?.[0]?.beacon}
-            <div class="prefs-item">
-              {#if beacon}
-                <HoverIcon type="entity" name={beacon.id} size={22} detailKind="beacon" quality={beacon.quality} />
-                <span class="prefs-name">{runtime.localizedName("beacon", beacon.id)}</span>
-              {:else}
-                <span class="prefs-name muted">（未选信标）</span>
+            {@const beaconConfig = plan.module_config?.beacons?.[0]}
+            <div class="prefs-item column">
+              <div class="prefs-row">
+                <button
+                  class="icon-btn"
+                  title="选择信标"
+                  onclick={() =>
+                    openSelector("beacon", "选择枚举信标", (name, quality) =>
+                      runtime
+                        .enumeratedBeaconModule(i, {
+                          "add-beacon": { beacon: { id: name, quality } },
+                        })
+                        .catch(() => {}),
+                    )}
+                >
+                  {#if beacon}
+                    <HoverIcon type="entity" name={beacon.id} size={24} detailKind="beacon" quality={beacon.quality} />
+                  {:else}
+                    <Icon type="entity" name="beacon" size={24} />
+                  {/if}
+                </button>
+                <span class="prefs-name">{beacon ? runtime.localizedName("beacon", beacon.id) : "未选信标"}</span>
+                <button
+                  class="btn ghost danger"
+                  title="移除"
+                  onclick={() => runtime.removeEnumeratedBeacon(i).catch(() => {})}
+                >×</button>
+              </div>
+              {#if beaconConfig}
+                <div class="prefs-row sub">
+                  <label class="me-num">
+                    数量
+                    <input
+                      type="number"
+                      min="1"
+                      value={String(beaconConfig.count)}
+                      onchange={(event) => {
+                        const value = Number((event.currentTarget as HTMLInputElement).value);
+                        if (Number.isFinite(value) && value > 0) {
+                          runtime
+                            .enumeratedBeaconModule(i, { "set-beacon-count": { beacon: 0, count: value } })
+                            .catch(() => {});
+                        }
+                      }}
+                    />
+                  </label>
+                  <label class="me-num">
+                    共享
+                    <input
+                      type="number"
+                      min="0.1"
+                      step="0.1"
+                      value={String(beaconConfig.share)}
+                      onchange={(event) => {
+                        const value = Number((event.currentTarget as HTMLInputElement).value);
+                        if (Number.isFinite(value) && value > 0) {
+                          runtime
+                            .enumeratedBeaconModule(i, { "set-beacon-share": { beacon: 0, share: value } })
+                            .catch(() => {});
+                        }
+                      }}
+                    />
+                  </label>
+                  <button
+                    class="btn"
+                    title="添加塔内插件"
+                    onclick={() =>
+                      openSelector("module", "选择塔内插件", (name, quality) =>
+                        runtime
+                          .enumeratedBeaconModule(i, {
+                            "add-beacon-module": {
+                              beacon: 0,
+                              module: { id: name, quality },
+                            },
+                          })
+                          .catch(() => {}),
+                      )}
+                  >+ 插件</button>
+                </div>
+                {#if beaconConfig.modules.length > 0}
+                  <div class="prefs-row wrap">
+                    {#each beaconConfig.modules as [module, count], mi (mi)}
+                      <span class="prefs-chip">
+                        <HoverIcon type="item" name={module.id} size={16} detailKind="module" quality={module.quality} />
+                        <span class="mono">×{count}</span>
+                        <button
+                          class="prefs-chip-x"
+                          title="移除塔内插件"
+                          onclick={() =>
+                            runtime
+                              .enumeratedBeaconModule(i, { "remove-beacon-module": { beacon: 0, module: mi } })
+                              .catch(() => {})}
+                        >×</button>
+                      </span>
+                    {/each}
+                  </div>
+                {/if}
               {/if}
-              <button
-                class="btn ghost"
-                title="移除"
-                onclick={() => runtime.removeEnumeratedBeacon(i).catch(() => {})}
-              >×</button>
             </div>
           {:else}
             <span class="muted">还没有枚举信标</span>
@@ -2376,6 +2463,73 @@
     font-size: 11px;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .prefs-item.column {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+    padding: 5px 6px;
+  }
+
+  .prefs-row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+
+  .prefs-row.sub {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .prefs-row.wrap {
+    flex-wrap: wrap;
+  }
+
+  .me-num {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--muted);
+    font-size: 10px;
+  }
+
+  .me-num input {
+    width: 52px;
+    min-height: 22px;
+    padding: 0 4px;
+    text-align: right;
+    background: var(--card);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    font-family: var(--mono);
+    font-size: 10px;
+  }
+
+  .prefs-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 5px 1px 2px;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    font-size: 10px;
+  }
+
+  .prefs-chip-x {
+    width: 13px;
+    height: 13px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    color: var(--danger);
+    background: transparent;
+    border: none;
+    font-size: 9px;
+    line-height: 1;
+    cursor: pointer;
   }
 
   .env-row {
