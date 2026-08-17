@@ -62,11 +62,31 @@
 
   function beaconModuleCountChange(beacon: number, module: number, event: Event) {
     const value = Number((event.currentTarget as HTMLInputElement).value);
-    if (Number.isFinite(value) && value >= 0) {
+    if (!Number.isFinite(value) || value < 0) return;
+    const beaconCfg = beacons[beacon];
+    if (!beaconCfg) return;
+    void (async () => {
+      const slots = (await beaconSlotsOf(beaconCfg.beacon.id)) * beaconCfg.count;
+      if (slots > 0) {
+        const total =
+          beaconCfg.modules.reduce((sum, [, count], index) => {
+            return sum + (index === module ? 0 : count);
+          }, 0) + value;
+        if (total > slots) {
+          console.warn(`信标插件槽位不足（${slots} 个，已用 ${total}）`);
+          return;
+        }
+      }
       runtime.moduleMessage(entry.id, {
         "set-beacon-module-count": { beacon, module, count: value },
       });
-    }
+    })();
+  }
+
+  /** 信标原型插件槽数（getDetail 异步；未知默认 2）。 */
+  async function beaconSlotsOf(beaconId: string): Promise<number> {
+    const detail = await runtime.getDetail("beacon", beaconId);
+    return detail?.beacon_module_slots ?? detail?.module_slots ?? 2;
   }
 </script>
 

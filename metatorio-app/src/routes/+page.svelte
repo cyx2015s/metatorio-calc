@@ -193,6 +193,22 @@
   // 机制列表视图：list = 垂直卡片；grid = 多列网格，同配方×机器聚合品质
   let mechView = $state<"list" | "grid">("list");
 
+  /** 信标原型的插件槽数（getDetail 异步；未知时默认 2，与 Factorio 一致）。 */
+  async function beaconModuleSlots(beaconId: string | undefined): Promise<number> {
+    if (!beaconId) return 2;
+    const detail = await runtime.getDetail("beacon", beaconId);
+    return detail?.beacon_module_slots ?? detail?.module_slots ?? 2;
+  }
+
+  /** 机器原型的插件槽数（catalogIndex；未知时 0）。 */
+  function machineModuleSlots(machineId: string | undefined): number {
+    if (!machineId) return 0;
+    const entry = runtime.catalogIndex?.entries.find(
+      (candidate) => candidate.kind === "machine" && candidate.name === machineId,
+    );
+    return entry?.module_slots ?? 0;
+  }
+
   /** 聚合键：配方/采矿按 (主对象, 机器) 聚合；其余按类型聚合。 */
   function mechGroupKey(entry: import("$lib/runtime/types").MechanicEntry): string {
     const m = entry.mechanic;
@@ -619,9 +635,15 @@
           );
           break;
         case "module": {
-          // 机器插件：按机器允许的插件类别过滤
+          // 机器插件：按机器允许的插件类别过滤；添加前校验槽数。
           const machineId = entry?.mechanic.machine?.id;
           const detailKind = entry?.mechanic.type === "mining" ? "mining-machine" : "machine";
+          const slots = machineModuleSlots(machineId);
+          const filled = entry?.mechanic.module_config?.modules.length ?? 0;
+          if (a != null && a >= filled && slots > 0 && filled >= slots) {
+            showNotice(`插件槽已满（${slots} 个）`);
+            break;
+          }
           const filter = machineId
             ? (await runtime.getDetail(detailKind, machineId))?.allowed_module_categories ?? []
             : [];
@@ -650,6 +672,16 @@
           const moduleIdx = b ?? 0;
           const beaconCfg = entry?.mechanic.module_config?.beacons[beacon];
           const beaconModuleCount = beaconCfg?.modules.length ?? 0;
+          // 添加新塔内插件前校验：总数量 ≤ 信标插件槽数 × 信标数量。
+          if (moduleIdx >= beaconModuleCount && beaconCfg) {
+            const beaconSlots =
+              (await beaconModuleSlots(beaconCfg.beacon.id)) * beaconCfg.count;
+            const total = beaconCfg.modules.reduce((sum, [, count]) => sum + count, 0);
+            if (beaconSlots > 0 && total >= beaconSlots) {
+              showNotice(`信标插件已满（${beaconSlots} 个槽位）`);
+              break;
+            }
+          }
           // 塔内插件按该信标允许的插件类别过滤（与机器插件同理）
           const filter = beaconCfg?.beacon.id
             ? (await runtime.getDetail("beacon", beaconCfg.beacon.id))
@@ -1890,7 +1922,34 @@
                     {#each beaconConfig.modules as [module, count], mi (mi)}
                       <span class="prefs-chip">
                         <HoverIcon type="item" name={module.id} size={16} detailKind="module" quality={module.quality} />
-                        <span class="mono">×{count}</span>
+                        <input
+                          class="chip-num"
+                          type="number"
+                          min="1"
+                          value={String(count)}
+                          onchange={(event) => {
+                            const value = Number((event.currentTarget as HTMLInputElement).value);
+                            if (!Number.isFinite(value) || value < 1) return;
+                            void (async () => {
+                              const slots =
+                                (await beaconModuleSlots(beacon?.id)) * beaconConfig.count;
+                              const total =
+                                beaconConfig.modules.reduce(
+                                  (sum, [, c], index) => sum + (index === mi ? 0 : c),
+                                  0,
+                                ) + value;
+                              if (slots > 0 && total > slots) {
+                                showNotice(`信标插件槽位不足（${slots} 个）`);
+                                return;
+                              }
+                              runtime
+                                .enumeratedBeaconModule(i, {
+                                  "set-beacon-module-count": { beacon: 0, module: mi, count: value },
+                                })
+                                .catch(() => {});
+                            })();
+                          }}
+                        />
                         <button
                           class="prefs-chip-x"
                           title="移除塔内插件"
