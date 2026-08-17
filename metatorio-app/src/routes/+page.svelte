@@ -138,6 +138,32 @@
     renameCtx = null;
   }
 
+  // 项目 / 工厂重命名（复用同一弹窗，target 区分作用对象）
+  let renameTarget = $state<{ kind: "project" | "factory"; name: string } | null>(null);
+  function promptRenameProject() {
+    const item = runtime.selectedProject;
+    if (!item) return;
+    renameTarget = { kind: "project", name: item.name };
+    renameName = item.name;
+  }
+  function promptRenameFactory(name: string) {
+    renameTarget = { kind: "factory", name };
+    renameName = name;
+  }
+  function confirmRenameTarget() {
+    const name = renameName.trim();
+    if (!renameTarget || !name) {
+      renameTarget = null;
+      return;
+    }
+    if (renameTarget.kind === "project") {
+      runtime.setProjectName(name).catch(() => {});
+    } else {
+      runtime.setFactoryName(name).catch(() => {});
+    }
+    renameTarget = null;
+  }
+
   /** 来源展示缩短：只留每段最后一个路径片段（完整路径在 tooltip）。 */
   function shortSource(source: string): string {
     return source
@@ -732,7 +758,7 @@
     <span class="spacer"></span>
 
     <button class="btn" onclick={() => (newProjectOpen = true)}>新建项目</button>
-    <button class="btn" onclick={() => runtime.openProject().catch(() => {})} disabled={runtime.busy}>打开</button>
+    <button class="btn" onclick={() => runtime.openProject().catch(() => {})} disabled={runtime.busy}>导入项目</button>
     <button class="btn" onclick={() => runtime.saveCurrentProject().catch(() => {})} disabled={runtime.busy}>
       保存{runtime.solving ? "（求解中）" : ""}
     </button>
@@ -749,11 +775,15 @@
   <!-- ══ 项目 / 工厂页签 ══ -->
   <nav class="tabs">
     {#each runtime.document?.projects ?? [] as item (item.id)}
-      <button
-        class:active={item.id === runtime.ui?.selected_project}
-        class="tab"
-        onclick={() => runtime.selectProject(item.id).catch(() => {})}
-      >{item.name}</button>
+      <div class:active={item.id === runtime.ui?.selected_project} class="tab-cluster">
+        <button
+          class="tab"
+          onclick={() => runtime.selectProject(item.id).catch(() => {})}
+        >{item.name}</button>
+        {#if item.id === runtime.ui?.selected_project}
+          <button class="tab-x" title="重命名项目" onclick={promptRenameProject}>✎</button>
+        {/if}
+      </div>
     {/each}
     <button class="tab add" title="新建项目" onclick={() => (newProjectOpen = true)}>+</button>
   </nav>
@@ -766,6 +796,11 @@
             class="tab"
             onclick={() => runtime.selectFactory(item.id).catch(() => {})}
           >{item.name}</button>
+          <button
+            class="tab-x"
+            title="重命名工厂"
+            onclick={() => promptRenameFactory(item.name)}
+          >✎</button>
           <button
             class="tab-x"
             title="克隆工厂"
@@ -1664,6 +1699,24 @@
       <div class="mini-actions">
         <button class="btn ghost" onclick={() => (renameCtx = null)}>取消</button>
         <button class="btn primary" onclick={confirmRename}>确定</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if renameTarget}
+  <div class="backdrop" onclick={() => (renameTarget = null)}>
+    <div class="mini-modal" onclick={(event) => event.stopPropagation()}>
+      <div class="mini-title">{renameTarget.kind === "project" ? "重命名项目" : "重命名工厂"}</div>
+      <input
+        bind:value={renameName}
+        onkeydown={(event) => {
+          if (event.key === "Enter") confirmRenameTarget();
+        }}
+      />
+      <div class="mini-actions">
+        <button class="btn ghost" onclick={() => (renameTarget = null)}>取消</button>
+        <button class="btn primary" onclick={confirmRenameTarget}>确定</button>
       </div>
     </div>
   </div>

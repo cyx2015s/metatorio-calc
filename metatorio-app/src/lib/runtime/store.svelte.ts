@@ -230,6 +230,7 @@ class RuntimeStore {
     try {
       const document = await openProjectDialog();
       if (document) {
+        // 后端已把文件项目导入当前文档；这里用返回值整体刷新界面。
         this.document = document;
         const ui = await getUiState();
         this.ui = ui;
@@ -357,6 +358,24 @@ class RuntimeStore {
     await this.send({
       scope: "project",
       action: { project, action: { "remove-factory": { factory } } },
+    });
+  }
+
+  /** 重命名项目。 */
+  async setProjectName(name: string): Promise<void> {
+    const project = this.requireProject();
+    await this.send({
+      scope: "project",
+      action: { project, action: { "set-name": { name } } },
+    });
+  }
+
+  /** 重命名工厂。 */
+  async setFactoryName(name: string): Promise<void> {
+    const { project, factory } = this.requireFactory();
+    await this.send({
+      scope: "factory",
+      action: { project, factory, action: { "set-name": { name } } },
     });
   }
 

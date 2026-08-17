@@ -90,6 +90,7 @@ export type FactoryTemplate = "empty" | "default-mechanics";
 export type TimeScale = "seconds" | "minutes" | "hours";
 
 export type ProjectAction =
+  | { "set-name": { name: string } }
   | { "add-factory": { name: string; template: FactoryTemplate } }
   | { "clone-factory": { factory: FactoryId } }
   | { "remove-factory": { factory: FactoryId } }

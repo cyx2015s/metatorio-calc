@@ -6,7 +6,7 @@ use metatorio_data::store::{PrototypeGroup, PrototypeStore};
 use metatorio_solver::{AIndexMap, SolverData, SolverSolution, TargetSpec};
 use serde::{Deserialize, Serialize};
 
-use crate::document::{AppDocument, FactoryDocument, ProjectDocument};
+use crate::document::{AppDocument, DOCUMENT_SCHEMA_VERSION, FactoryDocument, ProjectDocument};
 use crate::id::{FactoryId, MechanicId, ProjectId};
 use crate::message::AppMessage;
 use crate::state::{DispatchResult, RuntimeError, RuntimeState};
@@ -150,24 +150,33 @@ impl Runtime {
         }
     }
 
+    /// 从文件加载项目并导入当前文档（追加，不替换现有项目；
+    /// 项目 id 冲突时自动重分配）。
     pub fn load_document_file(&mut self, path: impl AsRef<Path>) -> Result<(), RuntimeError> {
         let file =
             File::open(path.as_ref()).map_err(|error| RuntimeError::Io(error.to_string()))?;
         let document: AppDocument = serde_json::from_reader(file)
             .map_err(|error| RuntimeError::DataLoad(error.to_string()))?;
-        self.state = RuntimeState::new(document);
+        self.state.import_projects(&document);
         Ok(())
     }
 
+    /// 保存**当前选中的单个项目**到文件（项目级操作，不保存整个工程合集）。
+    ///
+    /// 文件格式仍是 `AppDocument`（只含这一个项目），与导入/打开兼容。
     pub fn save_document_file(
         &mut self,
         project: ProjectId,
         path: impl AsRef<Path>,
     ) -> Result<(), RuntimeError> {
-        self.state.project(project)?;
+        let project_doc = self.state.project(project)?.clone();
+        let document = AppDocument {
+            schema_version: DOCUMENT_SCHEMA_VERSION,
+            projects: vec![project_doc],
+        };
         let file =
             File::create(path.as_ref()).map_err(|error| RuntimeError::Io(error.to_string()))?;
-        serde_json::to_writer_pretty(file, &self.state.document)
+        serde_json::to_writer_pretty(file, &document)
             .map_err(|error| RuntimeError::Io(error.to_string()))?;
         self.state.dirty_projects.remove(&project);
         Ok(())

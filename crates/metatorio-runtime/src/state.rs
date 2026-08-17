@@ -1,4 +1,7 @@
-use std::{collections::BTreeSet, fmt};
+use std::{
+    collections::{BTreeSet, HashMap},
+    fmt,
+};
 
 use metatorio_core::{BeaconConfig, DualVar, Mechanic, ModuleConfig};
 use serde::Serialize;
@@ -1257,6 +1260,83 @@ impl RuntimeState {
         let id = self.next_id;
         self.next_id = self.next_id.saturating_add(1);
         T::from(id)
+    }
+
+    /// 把另一个文档的项目导入当前文档（追加，不替换现有项目）。
+    ///
+    /// 与现有项目 id 冲突时整体重分配：项目 → 工厂 → 目标/表达式/项 →
+    /// 外部输入 → 机制（所有子 id 同步映射，保持引用一致）。
+    pub fn import_projects(&mut self, imported: &AppDocument) {
+        for project in &imported.projects {
+            let mut project = project.clone();
+            let project_id_collides =
+                self.document.projects.iter().any(|p| p.id == project.id);
+            // 工厂/机制等子 id 若与现有文档冲突也要重分配（全局唯一，
+            // 避免跨项目引用歧义）。为简化，项目冲突时整套重分配。
+            let remap_all = project_id_collides;
+            if remap_all {
+                project.id = self.allocate_id();
+            }
+            let mut factory_ids: HashMap<FactoryId, FactoryId> = HashMap::new();
+            for factory in &mut project.factories {
+                if remap_all
+                    || self
+                        .document
+                        .projects
+                        .iter()
+                        .any(|p| p.factories.iter().any(|f| f.id == factory.id))
+                {
+                    let new_id = self.allocate_id();
+                    factory_ids.insert(factory.id, new_id);
+                    factory.id = new_id;
+                }
+            }
+            for factory in &mut project.factories {
+                for target in &mut factory.targets {
+                    if remap_all || self.project_contains_id(target.id.0) {
+                        target.id = self.allocate_id();
+                    }
+                }
+                for expression in &mut factory.target_expressions {
+                    if remap_all || self.project_contains_id(expression.id.0) {
+                        expression.id = self.allocate_id();
+                    }
+                    for term in &mut expression.terms {
+                        if remap_all || self.project_contains_id(term.id.0) {
+                            term.id = self.allocate_id();
+                        }
+                    }
+                }
+                for input in &mut factory.external_inputs {
+                    if remap_all || self.project_contains_id(input.id.0) {
+                        input.id = self.allocate_id();
+                    }
+                }
+                for mechanic in &mut factory.mechanics {
+                    if remap_all || self.project_contains_id(mechanic.id.0) {
+                        mechanic.id = self.allocate_id();
+                    }
+                }
+            }
+            self.document.projects.push(project);
+        }
+        self.refresh_next_id();
+    }
+
+    /// 当前文档任意项目是否已使用该 id（跨项目全局检查）。
+    fn project_contains_id(&self, id: u64) -> bool {
+        self.document.projects.iter().any(|p| {
+            p.id.0 == id
+                || p.factories.iter().any(|f| {
+                    f.id.0 == id
+                        || f.targets.iter().any(|t| t.id.0 == id)
+                        || f.target_expressions.iter().any(|e| {
+                            e.id.0 == id || e.terms.iter().any(|t| t.id.0 == id)
+                        })
+                        || f.external_inputs.iter().any(|i| i.id.0 == id)
+                        || f.mechanics.iter().any(|m| m.id.0 == id)
+                })
+        })
     }
 
     fn refresh_next_id(&mut self) {
