@@ -307,6 +307,7 @@
   .hc-title {
     display: grid;
     gap: 2px;
+    flex: 1;
     min-width: 0;
   }
 
@@ -364,8 +365,9 @@
   }
 
   .hc-flow-item {
-    display: inline-flex;
+    display: flex;
     align-items: center;
+    width: 100%;
     gap: 6px;
     padding: 2px 6px 2px 2px;
     background: var(--card);
@@ -376,6 +378,7 @@
   .hc-flow-copy {
     display: grid;
     gap: 1px;
+    flex: 1;
     min-width: 0;
   }
 
