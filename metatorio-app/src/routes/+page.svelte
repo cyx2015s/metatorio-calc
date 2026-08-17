@@ -190,8 +190,40 @@
   let dragTargets = $state<import("$lib/runtime/types").FlowTarget[]>([]);
   let dragInputs = $state<import("$lib/runtime/types").ExternalInput[]>([]);
   let dragMechanics = $state<import("$lib/runtime/types").MechanicEntry[]>([]);
-  // 机制列表视图：list = 垂直卡片；grid = 多列网格，同配方×机器聚合品质
-  let mechView = $state<"list" | "grid">("list");
+  // 机制列表始终聚合：同配方×机器合并成一张卡，品质变体紧凑排列。
+
+  /** 组的显示名（首个条目的配方/资源/物品名）。 */
+  function groupTitle(entries: import("$lib/runtime/types").MechanicEntry[]): string {
+    const first = entries[0]?.mechanic;
+    if (!first) return "";
+    const name =
+      first.recipe?.id ??
+      first.item?.id ??
+      first.seed?.id ??
+      first.resource ??
+      first.generator?.id ??
+      first.boiler?.id ??
+      first.reactor?.id ??
+      first.fluid ??
+      "";
+    const kind = first.type;
+    if (kind === "recipe") return runtime.localizedName("recipe", name) || name;
+    if (kind === "mining") return runtime.localizedName("resource", name) || name;
+    if (kind === "generator" || kind === "boiler" || kind === "reactor") {
+      return runtime.localizedName("entity", name) || name;
+    }
+    if (kind === "fluid-fuel" || kind === "fluid-heat") {
+      return runtime.localizedName("fluid", name) || name;
+    }
+    return runtime.localizedName("item", name) || name;
+  }
+
+  /** 组的机器名（配方/采矿有机器；其余无）。 */
+  function groupMachine(entries: import("$lib/runtime/types").MechanicEntry[]): string {
+    const machine = entries[0]?.mechanic.machine?.id;
+    if (!machine) return "";
+    return runtime.localizedName("machine", machine) || machine;
+  }
 
   /** 信标原型的插件槽数（getDetail 异步；未知时默认 2，与 Factorio 一致）。 */
   async function beaconModuleSlots(beaconId: string | undefined): Promise<number> {
@@ -1366,11 +1398,6 @@
         <button class="btn ghost" title="按求解流量从大到小重排机制" onclick={() => runtime.cleanup("sort-by-solution-rate").catch(() => {})} disabled={!solved}>
           按流量排序
         </button>
-        <button
-          class="btn ghost"
-          title={mechView === "list" ? "切换为网格视图（同配方不同品质合并一行）" : "切换为列表视图"}
-          onclick={() => (mechView = mechView === "list" ? "grid" : "list")}
-        >{mechView === "list" ? "格子" : "列表"}</button>
         {#if !runtime.activeContext}
           <span class="muted">先加载游戏数据（左上角「游戏数据」）</span>
         {/if}
@@ -1382,67 +1409,52 @@
         {#if runtime.solveError}<span class="chip warn">求解错误</span>{/if}
       </div>
 
-      {#if mechView === "grid"}
-        <div class="mech-list grid">
-          {#each mechGroups as group (group.key)}
-            <div class="mech-group card">
-              {#each group.entries as entry, i (entry.id)}
-                <div class="mech-group-row" class:first={i === 0}>
-                  <MechanicCard
-                    {entry}
-                    compact={i > 0}
-                    solution={solveMap.get(entry.id) ?? null}
-                    onPick={(kind, a, b) => pickForMechanic(entry.id, kind, a, b)}
-                    onToggleEnabled={() => runtime.setMechanicEnabled(entry.id, !entry.enabled).catch(() => {})}
-                    onRemove={() => runtime.removeMechanic(entry.id).catch(() => {})}
-                    onModuleSlot={(slot, module) => runtime.setModuleSlot(entry.id, slot, module).catch(() => {})}
-                    onAddBeacon={() => addBeacon(entry.id)}
-                    onPickFuel={() => pickFuel(entry.id)}
-                    onClone={() => runtime.cloneMechanic(entry.id).catch(() => {})}
-                  />
-                </div>
-              {/each}
-            </div>
-          {:else}
-            <div class="empty-state">
-              {#if factory}
-                <span class="muted">还没有机制，点下方「添加机制」</span>
-              {:else}
-                <span class="muted">选择或新建一个工厂</span>
+      <div
+        class="mech-list"
+        use:dndzone={{ items: dragMechanics, flipDurationMs: 120 }}
+        onconsider={handleMechanicsConsider}
+        onfinalize={handleMechanicsFinalize}
+      >
+        {#each mechGroups as group (group.key)}
+          <div class="mech-group card">
+            <div class="mech-group-head">
+              <span class="mech-group-title" title={groupTitle(group.entries)}>
+                {groupTitle(group.entries)}
+              </span>
+              {#if groupMachine(group.entries)}
+                <span class="chip">{groupMachine(group.entries)}</span>
+              {/if}
+              {#if group.entries.length > 1}
+                <span class="chip muted">{group.entries.length} 品质</span>
               {/if}
             </div>
-          {/each}
-        </div>
-      {:else}
-        <div
-          class="mech-list"
-          use:dndzone={{ items: dragMechanics, flipDurationMs: 120 }}
-          onconsider={handleMechanicsConsider}
-          onfinalize={handleMechanicsFinalize}
-        >
-          {#each dragMechanics as entry (entry.id)}
-            <MechanicCard
-              {entry}
-              solution={solveMap.get(entry.id) ?? null}
-              onPick={(kind, a, b) => pickForMechanic(entry.id, kind, a, b)}
-              onToggleEnabled={() => runtime.setMechanicEnabled(entry.id, !entry.enabled).catch(() => {})}
-              onRemove={() => runtime.removeMechanic(entry.id).catch(() => {})}
-              onModuleSlot={(slot, module) => runtime.setModuleSlot(entry.id, slot, module).catch(() => {})}
-              onAddBeacon={() => addBeacon(entry.id)}
-              onPickFuel={() => pickFuel(entry.id)}
-              onClone={() => runtime.cloneMechanic(entry.id).catch(() => {})}
-            />
-          {:else}
-            <div class="empty-state">
-              {#if factory}
-                <span class="muted">还没有机制，点下方「添加机制」</span>
-              {:else}
-                <span class="muted">选择或新建一个工厂</span>
-              {/if}
-            </div>
-          {/each}
-        </div>
-      {/if}
+            {#each group.entries as entry, i (entry.id)}
+              <div class="mech-group-row">
+                <MechanicCard
+                  {entry}
+                  compact={i > 0}
+                  solution={solveMap.get(entry.id) ?? null}
+                  onPick={(kind, a, b) => pickForMechanic(entry.id, kind, a, b)}
+                  onToggleEnabled={() => runtime.setMechanicEnabled(entry.id, !entry.enabled).catch(() => {})}
+                  onRemove={() => runtime.removeMechanic(entry.id).catch(() => {})}
+                  onModuleSlot={(slot, module) => runtime.setModuleSlot(entry.id, slot, module).catch(() => {})}
+                  onAddBeacon={() => addBeacon(entry.id)}
+                  onPickFuel={() => pickFuel(entry.id)}
+                  onClone={() => runtime.cloneMechanic(entry.id).catch(() => {})}
+                />
+              </div>
+            {/each}
+          </div>
+        {:else}
+          <div class="empty-state">
+            {#if factory}
+              <span class="muted">还没有机制，点下方「添加机制」</span>
+            {:else}
+              <span class="muted">选择或新建一个工厂</span>
+            {/if}
+          </div>
+        {/each}
+      </div>
 
       {#if factory}
         <div class="add-wrap">
@@ -2385,15 +2397,27 @@
     gap: 8px;
   }
 
-  .mech-list.grid {
-    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-    gap: 10px;
-  }
-
   .mech-group {
     display: grid;
     gap: 2px;
     padding: 6px;
+  }
+
+  .mech-group-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 4px 4px;
+  }
+
+  .mech-group-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    font-size: 12px;
+    font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .mech-group-row + .mech-group-row {
