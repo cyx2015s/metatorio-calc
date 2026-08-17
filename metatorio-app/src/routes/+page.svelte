@@ -2275,7 +2275,12 @@
   .menu.fixed {
     position: fixed;
     z-index: 30;
+    /* 覆盖基类 .menu 的 left: 0：fixed 定位用 right 锚定，left 必须 auto，
+       否则 left:0 + right 会同时生效把面板拉伸到整个视口宽。 */
+    left: auto;
+    width: max-content;
     min-width: 190px;
+    max-width: min(320px, calc(100vw - 16px));
     max-height: min(420px, 60vh);
     overflow-y: auto;
     padding: 5px;
