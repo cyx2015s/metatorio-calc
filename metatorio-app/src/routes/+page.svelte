@@ -730,7 +730,7 @@
 </script>
 
 <svelte:head>
-  <title>Metatorio</title>
+  <title>切向量化</title>
 </svelte:head>
 
 <div class="app">
@@ -754,14 +754,6 @@
     {:else}
       <span class="chip">未加载游戏数据</span>
     {/if}
-
-    <span class="spacer"></span>
-
-    <button class="btn" onclick={() => (newProjectOpen = true)}>新建项目</button>
-    <button class="btn" onclick={() => runtime.openProject().catch(() => {})} disabled={runtime.busy}>导入项目</button>
-    <button class="btn" onclick={() => runtime.saveCurrentProject().catch(() => {})} disabled={runtime.busy}>
-      保存{runtime.solving ? "（求解中）" : ""}
-    </button>
   </header>
 
   {#if runtime.contextError || runtime.lastError || notice}
@@ -786,6 +778,11 @@
       </div>
     {/each}
     <button class="tab add" title="新建项目" onclick={() => (newProjectOpen = true)}>+</button>
+    <!-- 项目级操作（保存/导入都是对单个项目的，放在项目 tab 行） -->
+    <button class="btn ghost" onclick={() => runtime.openProject().catch(() => {})} disabled={runtime.busy}>导入项目</button>
+    <button class="btn ghost" onclick={() => runtime.saveCurrentProject().catch(() => {})} disabled={runtime.busy}>
+      保存{runtime.solving ? "（求解中）" : ""}
+    </button>
   </nav>
 
   {#if project}
@@ -1151,8 +1148,8 @@
       {/if}
 
       {#if project}
-        <section class="panel">
-          <div class="title">项目设置</div>
+        <section class="panel project-settings">
+          <div class="title">项目设置 <span class="count">全局</span></div>
           <div class="field">
             <label>游戏上下文</label>
             <select
@@ -2347,6 +2344,12 @@
 
   .mech-group-row .mech-card {
     padding: 6px 8px;
+  }
+
+  .panel.project-settings {
+    /* 项目级设置与工厂级生产设置视觉区分：左侧品牌色强调条 */
+    border-left: 3px solid var(--accent-line);
+    background: color-mix(in srgb, var(--panel) 94%, var(--accent) 4%);
   }
 
   .empty-state {
