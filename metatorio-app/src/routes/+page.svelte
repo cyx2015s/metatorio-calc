@@ -1458,6 +1458,31 @@
           title="配方合并：同配方不同品质合并成一张卡"
           onclick={() => (mergeRecipes = !mergeRecipes)}
         >配方合并</button>
+        {#if factory}
+          <button
+            class="btn"
+            onclick={(event) => {
+              const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+              if (addMechMenuPos) {
+                addMechMenuPos = null;
+                return;
+              }
+              // 下拉菜单：优先向下，底部空间不足时向上翻转。
+              const estimate = mechKinds.length * 30 + 18;
+              const below = window.innerHeight - rect.bottom - 8;
+              const above = rect.top - 8;
+              addMechMenuPos = {
+                top:
+                  below >= estimate || below >= above
+                    ? rect.bottom + 4
+                    : Math.max(8, rect.top - estimate),
+                right: Math.max(8, window.innerWidth - rect.right),
+              };
+            }}
+          >
+            + 添加机制{addMechMenuPos ? " ▴" : " ▾"}
+          </button>
+        {/if}
         {#if !runtime.activeContext}
           <span class="muted">先加载游戏数据（左上角「游戏数据」）</span>
         {/if}
@@ -1534,35 +1559,6 @@
           </div>
         {/each}
       </div>
-
-      {#if factory}
-        <div class="add-wrap">
-          <button
-            class="btn"
-            onclick={(event) => {
-              const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-              if (addMechMenuPos) {
-                addMechMenuPos = null;
-                return;
-              }
-              // 下拉菜单：优先向下，底部空间不足时向上翻转（机制多时按钮
-              // 在列表末尾，下方往往没有空间）。
-              const estimate = mechKinds.length * 30 + 18;
-              const below = window.innerHeight - rect.bottom - 8;
-              const above = rect.top - 8;
-              addMechMenuPos = {
-                top:
-                  below >= estimate || below >= above
-                    ? rect.bottom + 4
-                    : Math.max(8, rect.top - estimate),
-                right: Math.max(8, window.innerWidth - rect.right),
-              };
-            }}
-          >
-            + 添加机制{addMechMenuPos ? " ▴" : " ▾"}
-          </button>
-        </div>
-      {/if}
     </section>
 
     {#if addMechMenuPos}
@@ -2514,11 +2510,15 @@
   }
 
   .toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 5;
     display: flex;
     align-items: center;
     gap: 8px;
-    padding-bottom: 8px;
+    padding: 6px 0 8px;
     margin-bottom: 8px;
+    background: var(--bg);
     border-bottom: 1px solid var(--line);
   }
 

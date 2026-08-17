@@ -467,7 +467,7 @@
               onmouseleave={() => (hover = null)}
             >
               <Icon type={entry.icon_type} name={entry.name} size={28} />
-              <span class="row-name" title={entry.name}>{labelOf(entry)}</span>
+              <span class="row-name">{labelOf(entry)}</span>
               {#if entry.localized_name}<span class="row-sub">{entry.name}</span>{/if}
               {#if entry.subgroup && !entry.localized_name}
                 <span class="row-sub">{entry.subgroup}</span>
@@ -484,7 +484,6 @@
                 <button
                   class="icon-btn"
                   class:active={selected === entry.name}
-                  title={`${labelOf(entry)}${entry.localized_name ? `（${entry.name}）` : ""}`}
                   onclick={() => toggleSelect(entry.name)}
                   ondblclick={() => commitFast(entry.name)}
                   onmouseenter={(event) => showHover(event, entry)}
