@@ -1033,8 +1033,7 @@ pub struct SolarBalance {
     /// 一个昼夜周期的秒数。
     pub cycle_seconds: f64,
     /// 一个周期溢出的总电量（J）——蓄电器需要储存的能量。
-    pub surplus_per_cycle: f64,
-    /// 蓄电器容量（J）。
+    pub surplus_per_cycle: f64,    /// 蓄电器容量（J）。
     pub accumulator_capacity: f64,
     /// 推荐蓄电器数量（每块面板）= surplus / capacity。
     pub recommended_accumulators: f64,
@@ -1058,7 +1057,9 @@ pub fn solar_balance(ctx: &Context, mechanic: &SolarMechanic) -> Option<SolarBal
     let perf_night = panel.performance_at_night;
     let average = peak * (0.7 * perf_day + 0.3 * perf_night);
     let cycle_seconds = ctx.game.day_night_cycle.max(1.0) / 60.0;
-    let surplus = (0.168 * peak * cycle_seconds * (perf_day - perf_night)).max(0.0);
+    // 蓄电器需储能量 = 21/125 × 峰值 × 周期 × |perf_day − perf_night|：
+    // 无论白天还是夜晚性能更高，昼夜波动都需要储能（只取幅度）。
+    let surplus = 0.168 * peak * cycle_seconds * (perf_day - perf_night).abs();
     let capacity = accumulator
         .energy_source
         .buffer_capacity
@@ -1361,6 +1362,48 @@ mod tests {
         assert!((balance.surplus_per_cycle - 2_116_800.0).abs() < 1e-3);
         // 推荐蓄电器数减半。
         assert!((balance.recommended_accumulators - 0.4234).abs() < 0.01);
+    }
+
+    #[test]
+    fn solar_balance_handles_night_stronger_than_day() {
+        // 反向性能曲线（performance_at_night > performance_at_day）：
+        // 平均按加权仍正确，蓄电器储能只取波动幅度（|Δ|）。
+        let dump = serde_json::json!({
+            "solar-panel": {
+                "night-solar-panel": {
+                    "name": "night-solar-panel",
+                    "production": "60kW",
+                    "performance_at_day": 0.4,
+                    "performance_at_night": 1.0
+                }
+            },
+            "accumulator": {
+                "accumulator": {
+                    "name": "accumulator",
+                    "energy_source": { "type": "electric", "buffer_capacity": "5MJ" }
+                }
+            },
+            "quality": {
+                "normal": { "name": "normal", "level": 0 }
+            }
+        });
+        let store = metatorio_data::store::PrototypeStore::load(&dump).expect("dump 加载失败");
+        let game = crate::context::GameState {
+            qualities: vec!["normal".to_string()],
+            max_quality: 0,
+            ..Default::default()
+        };
+        let ctx = Context::new(&store, &game);
+        let mechanic = SolarMechanic {
+            solar_panel: IdWithQuality::new("night-solar-panel", "normal"),
+            accumulator: IdWithQuality::new("accumulator", "normal"),
+        };
+        let balance = solar_balance(&ctx, &mechanic).expect("配平信息应可计算");
+        // 平均 = 峰值 × (0.7×0.4 + 0.3×1.0) = 0.58 × 60 kW = 34.8 kW。
+        assert!((balance.average_power - 34800.0).abs() < 1e-6);
+        // 盈余 = 21/125 × 60000 × 420 × |0.4 − 1.0| = 2.54016 MJ。
+        assert!((balance.surplus_per_cycle - 2_540_160.0).abs() < 1e-3);
+        assert!(balance.surplus_per_cycle > 0.0, "波动幅度应产生正储能需求");
     }
 
     #[test]

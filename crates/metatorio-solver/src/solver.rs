@@ -50,6 +50,11 @@ where
     pub strict_source: bool,
     // 如果是严格模式，相比普通模式有如下限制：没有出现在target中的物品必须配平
     pub strict_sink: bool,
+    /// 剪枝阶段（trim_flows）因缺少提供者而被移除配方所对应的缺失
+    /// 物品/流。用于失败诊断：这些物品没有任何配方能产出、外部也不
+    /// 供给，因此其消耗配方被整体剪掉——NoProvider 应如实报告它们，
+    /// 而不是在剪枝后静默消失。
+    pub pruned_missing: Vec<I>,
 }
 
 // TODO: warning: large size difference between variants
@@ -204,6 +209,7 @@ where
             sinks: AIndexMap::default(),
             strict_source: false,
             strict_sink: false,
+            pruned_missing: Vec::new(),
         }
     }
 
@@ -227,7 +233,10 @@ where
         self
     }
 
-    pub fn trim_flows(&mut self) -> bool {
+    /// 剪枝一轮。`record_missing` 为 true 时把本轮因缺少提供者而剪掉的
+    /// 物品记录进 `pruned_missing`（调用方应只在第一轮传 true：后续轮次
+    /// 缺少的物品往往是被第一轮剪枝连坐的间接原因，不是根因）。
+    pub fn trim_flows(&mut self, record_missing: bool) -> bool {
         let mut changed = false;
         if self.strict_source {
             // 在strict_source模式下，移除所有无法使用的配方
@@ -317,11 +326,12 @@ where
                         && !needed_by_target.contains(i_id)
                 // 目标也不需要
                 {
-                    // log::debug!(
-                    //     "求解器：物品 {:?} 无法获得，移除相关配方 {} 个",
-                    //     i_id,
-                    //     providers.len() + consumers.len()
-                    // );
+                    // 记录剪枝原因（仅第一轮）：该物品/流没有任何提供者
+                    // （无配方产出、外部也不供给），其消耗配方整体不可用。
+                    if record_missing && !consumers.is_empty() && !self.pruned_missing.contains(i_id)
+                    {
+                        self.pruned_missing.push(i_id.clone());
+                    }
                     for f_id in consumers {
                         self.flows.swap_remove(f_id);
                         changed = true;
@@ -366,8 +376,11 @@ where
         let mut count = 0;
         let instant = Instant::now();
         let len_before = self.flows.len();
-        while self.trim_flows() {
+        // 只在第一轮记录缺失物品（直接原因）；后续轮次缺失是连锁反应。
+        let mut first_round = true;
+        while self.trim_flows(first_round) {
             count += 1;
+            first_round = false;
         }
         let len_after = self.flows.len();
         log::info!(
@@ -589,10 +602,28 @@ where
                     good_lp::ResolutionError::Other(_) => "求解器错误".to_string(),
                     good_lp::ResolutionError::Str(s) => format!("求解器错误: {s}"),
                 };
+                // 剪枝阶段缺的物品并入 NoProvider：这些流没有任何配方
+                // 能产出且外部也不供给，是求解失败的根因之一。
+                let mut no_providers = no_providers;
+                for missing in &self.pruned_missing {
+                    no_providers.insert(missing.clone());
+                }
+                let mut description = err_string;
+                if !self.pruned_missing.is_empty() {
+                    description.push_str(&format!(
+                        "；剪枝阶段缺少供给的物品/流 {} 个：{}",
+                        self.pruned_missing.len(),
+                        self.pruned_missing
+                            .iter()
+                            .map(|item| format!("{item:?}"))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
+                }
                 SolverSolution::NotSolved {
                     no_provider: no_providers.iter().cloned().collect(),
                     no_consumer: no_consumers.iter().cloned().collect(),
-                    description: err_string,
+                    description,
                 }
             }
         }
@@ -814,6 +845,38 @@ mod tests {
     }
 
     #[test]
+    fn pruning_reports_missing_item_in_description_and_no_provider() {
+        // 严格供给：配方消耗 "uranium-ore"，但没有任何配方产出它、外部
+        // 也不供给 → 剪枝应移除该配方，并在失败描述里报告缺少的物品。
+        let mut target = AIndexMap::default();
+        target.insert("uranium-fuel-cell", 1.0);
+        let mut flows = AIndexMap::default();
+        let mut assemble = AIndexMap::default();
+        assemble.insert("uranium-ore", -1.0);
+        assemble.insert("uranium-fuel-cell", 1.0);
+        flows.insert("assemble", (assemble, 1.0));
+        let solution = SolverData::new_simple(target, flows)
+            .with_strict_source(true)
+            .solve();
+        let SolverSolution::NotSolved {
+            no_provider,
+            description,
+            ..
+        } = solution
+        else {
+            panic!("严格供给下缺少原料应不可行");
+        };
+        assert!(
+            no_provider.contains(&"uranium-ore"),
+            "NoProvider 应包含剪枝阶段缺的物品: {no_provider:?}"
+        );
+        assert!(
+            description.contains("uranium-ore"),
+            "描述应报告剪枝阶段缺少的物品: {description}"
+        );
+    }
+
+    #[test]
     fn solve_empty_target_reports_no_target() {
         let target: AIndexMap<&'static str, f64> = AIndexMap::default();
         let flows: AIndexMap<&'static str, (AIndexMap<&'static str, f64>, f64)> =
@@ -914,10 +977,15 @@ mod tests {
         let mut data = SolverData::new_simple(target, flows)
             .with_sources(sources)
             .with_strict_source(true);
-        assert!(data.trim_flows());
+        assert!(data.trim_flows(true));
         assert!(!data.flows.contains_key("react"));
         assert!(data.flows.contains_key("smelt"));
         assert!(data.flows.contains_key("miner"));
+        assert!(
+            data.pruned_missing.contains(&"uranium"),
+            "剪枝应记录缺失物品: {:?}",
+            data.pruned_missing
+        );
     }
 
     #[test]
@@ -931,7 +999,7 @@ mod tests {
         orphan.insert("waste", 1.0);
         flows.insert("react", (orphan, 1.0));
         let mut data = SolverData::new_simple(target, flows);
-        assert!(!data.trim_flows());
+        assert!(!data.trim_flows(false));
         assert!(data.flows.contains_key("react"));
     }
 }
