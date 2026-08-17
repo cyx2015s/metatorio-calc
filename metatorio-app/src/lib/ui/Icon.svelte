@@ -54,7 +54,7 @@
     class:bare={bare || type === "quality"}
     src={url}
     alt={name}
-    title={title ?? name}
+    title={title || undefined}
     style={`width:${size}px;height:${size}px`}
     draggable="false"
   />
@@ -62,7 +62,7 @@
   <span
     class="icon placeholder"
     class:bare={bare || type === "quality"}
-    title={title ?? name}
+    title={title || undefined}
     style={`width:${size}px;height:${size}px;font-size:${Math.max(9, Math.round(size * 0.32))}px`}
   >{name ? name.slice(0, 2) : "?"}</span>
 {/if}

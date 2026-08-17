@@ -7,6 +7,7 @@
   import Icon from "./Icon.svelte";
   import ModuleEditor from "./ModuleEditor.svelte";
   import { dualVarLabel } from "$lib/runtime/types";
+  import { compactNumber } from "$lib/format";
   import type { CatalogKind, MechanicEntry } from "$lib/runtime/types";
 
   const kindLabel: Record<string, string> = {
@@ -101,12 +102,9 @@
     return dualVarLabel(flow);
   }
 
-  /** 流行数量文本（系数 1 或按求解用量缩放）。 */
+  /** 流行数量文本（系数 1 或按求解用量缩放；复刻 egui compact_number）。 */
   function formatFlowQty(amount: number, scale: number): string {
-    const value = Math.abs(amount) * scale;
-    if (value >= 1e6) return `${(value / 1e6).toFixed(1)}M`;
-    if (value >= 1e3) return `${(value / 1e3).toFixed(1)}k`;
-    return value.toFixed(2);
+    return compactNumber(Math.abs(amount) * scale);
   }
   let primaryName = $derived(
     entry.mechanic.recipe?.id ??
@@ -207,8 +205,11 @@
       <div class="meta">
         <span class="chip">{kindLabel[kind] ?? kind}</span>
         {#if solution}
-          <span class="amount mono" title={`单台成本 ${solution.cost.toFixed(2)}`}>
-            {solution.amount.toFixed(2)} 台 · 成本 {(solution.amount * solution.cost).toFixed(1)}
+          <span
+            class="amount mono"
+            title={`精确值：用量 ${solution.amount} 台 · 成本 ${solution.cost} · 总成本 ${solution.amount * solution.cost}`}
+          >
+            {compactNumber(solution.amount)} 台 · 成本 {compactNumber(solution.amount * solution.cost)}
           </span>
         {/if}
       </div>

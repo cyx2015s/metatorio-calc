@@ -6,6 +6,7 @@
   import { runtime } from "$lib/runtime/store.svelte.ts";
   import { pickGameExecutable, pickModDir, suggest } from "$lib/runtime/client";
   import { dualVarLabel, flowQuality, itemOf } from "$lib/runtime/types";
+  import { signedCompactNumber } from "$lib/format";
   import type { CatalogKind, DualVar, MechanicId, TargetId } from "$lib/runtime/types";
   import HoverIcon from "$lib/ui/HoverIcon.svelte";
   import Icon from "$lib/ui/Icon.svelte";
@@ -378,10 +379,10 @@
     return value;
   }
 
-  /** 能量流数值显示：能量流用功率文本，否则普通数字。 */
+  /** 能量流数值显示：能量流用功率文本，否则普通数字（复刻 egui compact）。 */
   function formatFlowAmount(flow: DualVar, amount: number): string {
     if (isEnergyFlow(flow)) return formatPowerValue(Math.abs(amount));
-    return `${amount > 0 ? "+" : ""}${amount.toFixed(3)}`;
+    return signedCompactNumber(amount);
   }
 
   /** 流的显示名：物品/流体/实体优先本地化名，否则内部 id。 */
