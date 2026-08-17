@@ -140,6 +140,8 @@
 
   // 项目 / 工厂重命名（复用同一弹窗，target 区分作用对象）
   let renameTarget = $state<{ kind: "project" | "factory"; name: string } | null>(null);
+  // 关闭项目确认
+  let closeProjectState = $state<{ project: number; name: string } | null>(null);
   function promptRenameProject() {
     const item = runtime.selectedProject;
     if (!item) return;
@@ -831,9 +833,11 @@
   <!-- ══ 项目 / 工厂页签 ══ -->
   <nav class="tabs">
     {#each runtime.document?.projects ?? [] as item (item.id)}
+      {@const savePath = runtime.projectSavePath(item.id)}
       <div class:active={item.id === runtime.ui?.selected_project} class="tab-cluster">
         <button
           class="tab"
+          title={savePath ? `保存位置：${savePath}` : "尚未保存"}
           onclick={() => runtime.selectProject(item.id).catch(() => {})}
         >{item.name}</button>
         {#if item.id === runtime.ui?.selected_project}
@@ -842,11 +846,32 @@
       </div>
     {/each}
     <button class="tab add" title="新建项目" onclick={() => (newProjectOpen = true)}>+</button>
-    <!-- 项目级操作（保存/导入都是对单个项目的，放在项目 tab 行） -->
-    <button class="btn ghost" onclick={() => runtime.openProject().catch(() => {})} disabled={runtime.busy}>导入项目</button>
-    <button class="btn ghost" onclick={() => runtime.saveCurrentProject().catch(() => {})} disabled={runtime.busy}>
-      保存{runtime.solving ? "（求解中）" : ""}
+    <!-- 项目级操作（保存/导入/关闭都是对单个项目的，放在项目 tab 行） -->
+    <span class="tabs-sep"></span>
+    <button class="btn ghost" title="从文件导入项目（追加到当前）" onclick={() => runtime.openProject().catch(() => {})} disabled={runtime.busy}>
+      导入项目
     </button>
+    {#if project}
+      {@const savePath = runtime.projectSavePath(project.id)}
+      <button
+        class="btn ghost"
+        title={savePath ? `保存到 ${savePath}` : "保存（首次将选择位置）"}
+        onclick={() => runtime.saveCurrentProject().catch(() => {})}
+        disabled={runtime.busy}
+      >保存</button>
+      <button
+        class="btn ghost"
+        title="另存为（选择新位置）"
+        onclick={() => runtime.saveProjectAs().catch(() => {})}
+        disabled={runtime.busy}
+      >另存为</button>
+      <button
+        class="btn ghost"
+        title="关闭项目（不删除文件）"
+        onclick={() =>
+          (closeProjectState = { project: project.id, name: project.name })}
+      >关闭</button>
+    {/if}
   </nav>
 
   {#if project}
@@ -1758,6 +1783,35 @@
       <div class="mini-actions">
         <button class="btn ghost" onclick={() => (renameTarget = null)}>取消</button>
         <button class="btn primary" onclick={confirmRenameTarget}>确定</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if closeProjectState}
+  {@const closing = closeProjectState}
+  <div class="backdrop" onclick={() => (closeProjectState = null)}>
+    <div class="mini-modal" onclick={(event) => event.stopPropagation()}>
+      <div class="mini-title">关闭项目「{closing.name}」</div>
+      <div class="confirm-text">
+        关闭后项目从当前工作区移除（文件不会删除）。未保存的改动将丢失。
+      </div>
+      <div class="mini-actions">
+        <button class="btn ghost" onclick={() => (closeProjectState = null)}>取消</button>
+        <button
+          class="btn"
+          onclick={() => {
+            runtime.closeProject("save").catch(() => {});
+            closeProjectState = null;
+          }}
+        >保存并关闭</button>
+        <button
+          class="btn danger"
+          onclick={() => {
+            runtime.closeProject("discard").catch(() => {});
+            closeProjectState = null;
+          }}
+        >不保存关闭</button>
       </div>
     </div>
   </div>

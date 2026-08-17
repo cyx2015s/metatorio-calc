@@ -2008,6 +2008,17 @@ async fn save_project(app: AppHandle) -> Result<Option<String>, String> {
     Ok(Some(path))
 }
 
+/// 项目记忆的保存路径（未保存过返回 null），供界面显示"保存位置"。
+#[tauri::command]
+fn project_save_path(state: State<'_, AppState>, project: ProjectId) -> Option<String> {
+    state
+        .project_paths
+        .lock()
+        .ok()?
+        .get(&project)
+        .cloned()
+}
+
 // ── Side effects ──────────────────────────────────────────────────
 
 /// 机器有效插件槽位（基础 + 品质加成；制造机/采矿机）。
@@ -2694,6 +2705,7 @@ pub fn run() {
             open_project_dialog,
             save_project_as_dialog,
             save_project,
+            project_save_path,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -135,6 +135,10 @@ export async function saveProject(): Promise<string | null> {
   return call("save_project");
 }
 
+export async function projectSavePath(project: number): Promise<string | null> {
+  return call("project_save_path", { project });
+}
+
 // ── Events ────────────────────────────────────────────────────────
 
 export function onSolveResult(handler: (result: SolveResult) => void): Promise<() => void> {

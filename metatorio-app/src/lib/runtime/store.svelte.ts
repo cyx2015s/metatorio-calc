@@ -23,6 +23,7 @@ import {
   onSolveResult,
   openProjectDialog,
   prototypeDetail,
+  projectSavePath,
   renameContext,
   saveProject,
   saveProjectAsDialog,
@@ -48,6 +49,8 @@ import type {
 class RuntimeStore {
   document = $state<AppDocument | null>(null);
   ui = $state<import("./types").UiState | null>(null);
+  /** 项目 id → 保存路径（记忆路径，未保存过无条目）。 */
+  projectPaths = $state<Map<ProjectId, string>>(new Map());
   solve = $state<SolveResult | null>(null);
   solveError = $state<string | null>(null);
   revision = $state(0);
@@ -108,6 +111,7 @@ class RuntimeStore {
     const [document, ui] = await Promise.all([getDocument(), getUiState()]);
     this.document = document;
     this.ui = ui;
+    this.refreshProjectPaths().catch(() => {});
   }
 
   /** Send one AppMessage to the Rust runtime and refresh the snapshot. */
@@ -343,6 +347,31 @@ class RuntimeStore {
 
   async newProject(name: string): Promise<void> {
     await this.send({ scope: "application", action: { "new-project": { name } } });
+  }
+
+  /** 关闭项目：decision = "discard"（不保存关闭）| "save"（先保存再关闭）。 */
+  async closeProject(decision: "discard" | "save" = "discard"): Promise<void> {
+    const project = this.requireProject();
+    await this.send({
+      scope: "application",
+      action: { "close-project": { project, decision } },
+    });
+  }
+
+  /** 项目保存位置（记忆路径；null = 尚未保存过）。 */
+  projectSavePath(project: ProjectId): string | null {
+    return this.projectPaths.get(project) ?? null;
+  }
+
+  /** 刷新全部项目的保存路径缓存（保存/导入后调用）。 */
+  async refreshProjectPaths(): Promise<void> {
+    const projects = this.document?.projects ?? [];
+    const entries = await Promise.all(
+      projects.map(async (project) => [project.id, await projectSavePath(project.id)] as const),
+    );
+    this.projectPaths = new Map(
+      entries.filter((entry): entry is readonly [ProjectId, string] => entry[1] != null),
+    );
   }
 
   async addFactory(name: string): Promise<void> {

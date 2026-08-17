@@ -83,7 +83,9 @@ export type ApplicationAction =
   | { "load-game-context": { executable_path: string; mod_path: string | null } }
   | "load-cached-context"
   | { "save-project": { project: ProjectId } }
-  | { "save-project-as": { project: ProjectId; path: string } };
+  | { "save-project-as": { project: ProjectId; path: string } }
+  | { "close-project": { project: ProjectId; decision: "cancel" | "discard" | "save" } }
+  | { "delete-project": { project: ProjectId; decision: "cancel" | "confirm" } };
 
 export type FactoryTemplate = "empty" | "default-mechanics";
 
