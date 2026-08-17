@@ -121,6 +121,15 @@ export async function implicitSources(factory: number): Promise<import("./types"
   return call("implicit_sources", { factory });
 }
 
+/** 单个机制的展开流（系数 1 时每秒产/耗）；正值产出、负值消耗。 */
+export async function mechanicFlow(
+  project: number,
+  factory: number,
+  mechanic: number,
+): Promise<[import("./types").DualVar, number][]> {
+  return call("mechanic_flow", { project, factory, mechanic });
+}
+
 // ── Persistence ───────────────────────────────────────────────────
 
 export async function openProjectDialog(): Promise<AppDocument | null> {

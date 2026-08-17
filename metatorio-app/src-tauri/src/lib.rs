@@ -1100,6 +1100,56 @@ fn suggest(state: State<'_, AppState>, flow: DualVar) -> Result<Vec<Suggestion>,
     Ok(suggest_for_flow(store, flow))
 }
 
+/// 单个机制在当前规划条件下的展开流（系数 = 1 时的每秒产/耗）。
+///
+/// 返回 `(DualVar, f64)` 列表：正值产出、负值消耗。无求解结果时
+/// 前端用它展示"假定系数为 1 时产出的资源"（复刻原版 egui 机制卡）。
+#[tauri::command]
+fn mechanic_flow(
+    state: State<'_, AppState>,
+    project: ProjectId,
+    factory: FactoryId,
+    mechanic: MechanicId,
+) -> Result<Vec<(DualVar, f64)>, String> {
+    let mut runtime = state
+        .runtime
+        .lock()
+        .map_err(|_| "runtime lock poisoned".to_string())?;
+    let store = runtime
+        .context_store(project)
+        .map_err(|error| error.to_string())?
+        .clone();
+    let project_doc = runtime
+        .state
+        .project(project)
+        .map_err(|error| error.to_string())?
+        .clone();
+    let factory_doc = runtime
+        .state
+        .factory(project, factory)
+        .map_err(|error| error.to_string())?
+        .clone();
+    let entry = factory_doc
+        .mechanics
+        .iter()
+        .find(|entry| entry.id == mechanic)
+        .ok_or("机制不存在")?;
+    let game = metatorio_runtime::solve::make_game_state(&store, &project_doc);
+    let context = metatorio_core::Context::new(&store, &game);
+    let expansion = metatorio_core::expand::expand(
+        std::iter::once((mechanic, &entry.mechanic)),
+        &context,
+    );
+    // 合并所有展开变量的流（同 config 的流体插值端求和）。
+    let mut flow: metatorio_core::prim_var::Flow = Default::default();
+    for variable in expansion.variables {
+        for (key, value) in variable.flow {
+            *flow.entry(key).or_insert(0.0) += value;
+        }
+    }
+    Ok(flow.into_iter().filter(|(_, v)| v.abs() > 1e-12).collect())
+}
+
 /// 生成候选机制（与 suggest 命令共用；AutoPlan 也用它）。
 ///
 /// 对物品/流体同时收集：
@@ -2703,6 +2753,7 @@ pub fn run() {
             suggest,
             best_modules,
             implicit_sources,
+            mechanic_flow,
             dispatch,
             get_document,
             get_ui_state,

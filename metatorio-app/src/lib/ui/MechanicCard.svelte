@@ -2,9 +2,11 @@
   // 单个机制卡片：主选择器（配方/资源/物品/设备）为图标按钮，
   // 机器为图标按钮，插件配置在展开区（ModuleEditor）。
   import { runtime } from "$lib/runtime/store.svelte.ts";
+  import { mechanicFlow } from "$lib/runtime/client";
   import HoverIcon from "./HoverIcon.svelte";
   import Icon from "./Icon.svelte";
   import ModuleEditor from "./ModuleEditor.svelte";
+  import { dualVarLabel } from "$lib/runtime/types";
   import type { CatalogKind, MechanicEntry } from "$lib/runtime/types";
 
   const kindLabel: Record<string, string> = {
@@ -24,6 +26,8 @@
   let {
     entry,
     solution = null,
+    project,
+    factory,
     compact = false,
     onPick,
     onToggleEnabled,
@@ -35,6 +39,9 @@
   }: {
     entry: MechanicEntry;
     solution?: { amount: number; cost: number } | null;
+    /** 当前项目/工厂 id（加载机制展开流用）。 */
+    project: number;
+    factory: number;
     /** 聚合视图下非首行的品质变体：紧凑显示（隐藏机器/细节行）。 */
     compact?: boolean;
     onPick: (kind: CatalogKind | "beacon-module", a?: number, b?: number) => void;
@@ -46,7 +53,61 @@
     onClone: () => void;
   } = $props();
 
+  // 机制展开流（系数 1 时每秒产/耗；正值产出、负值消耗）。
+  // 有求解结果时按实际用量缩放显示；无求解结果时显示系数 1 的原始流。
+  let mechanicFlows = $state<{ flow: import("$lib/runtime/types").DualVar; amount: number }[]>([]);
+  $effect(() => {
+    let alive = true;
+    mechanicFlow(project, factory, entry.id)
+      .then((flows) => {
+        if (!alive) return;
+        mechanicFlows = flows.map(([flow, amount]) => ({ flow, amount }));
+      })
+      .catch(() => {
+        if (alive) mechanicFlows = [];
+      });
+    return () => {
+      alive = false;
+    };
+  });
+
   let kind = $derived(entry.mechanic.type);
+
+  /** 流 → 图标 (type, name)。 */
+  function flowIconOf(flow: import("$lib/runtime/types").DualVar): { type: string; name: string } {
+    if (flow !== null && typeof flow === "object") {
+      if ("Item" in flow) {
+        const item = (flow as { Item: { id: string } }).Item;
+        return { type: "item", name: item.id };
+      }
+      if ("Fluid" in flow) {
+        const fluid = (flow as { Fluid: { name: string } }).Fluid;
+        return { type: "fluid", name: fluid.name };
+      }
+      if ("Entity" in flow) {
+        const entity = (flow as { Entity: { id: string } }).Entity;
+        return { type: "entity", name: entity.id };
+      }
+    }
+    if (typeof flow === "string") {
+      if (flow === "Electricity") return { type: "flow", name: "Electricity" };
+      if (flow === "Heat") return { type: "flow", name: "Heat" };
+    }
+    return { type: "flow", name: dualVarLabel(flow) };
+  }
+
+  /** 流 → 渲染键。 */
+  function dualVarKey(flow: import("$lib/runtime/types").DualVar): string {
+    return dualVarLabel(flow);
+  }
+
+  /** 流行数量文本（系数 1 或按求解用量缩放）。 */
+  function formatFlowQty(amount: number, scale: number): string {
+    const value = Math.abs(amount) * scale;
+    if (value >= 1e6) return `${(value / 1e6).toFixed(1)}M`;
+    if (value >= 1e3) return `${(value / 1e3).toFixed(1)}k`;
+    return value.toFixed(2);
+  }
   let primaryName = $derived(
     entry.mechanic.recipe?.id ??
       entry.mechanic.item?.id ??
@@ -120,25 +181,6 @@
       ? runtime.localizedName("fluid", name)
       : runtime.localizedName("item", name);
   }
-
-  // 需求 4：recipe 机制常驻加载产物流，在卡片上显示（一眼看出机制做什么）。
-  let recipeResults = $state<{ kind: string; name: string; amount: number }[]>([]);
-  $effect(() => {
-    if (kind !== "recipe" || !entry.mechanic.recipe?.id) {
-      recipeResults = [];
-      return;
-    }
-    let alive = true;
-    runtime.getDetail("recipe", entry.mechanic.recipe.id).then((detail) => {
-      if (!alive || !detail) return;
-      recipeResults = detail.results
-        .filter((flow) => flow.amount !== 0)
-        .map((flow) => ({ kind: flow.kind, name: flow.name, amount: flow.amount }));
-    });
-    return () => {
-      alive = false;
-    };
-  });
 </script>
 
 <div class="mech-card card" class:off={!entry.enabled}>
@@ -179,11 +221,19 @@
     <button class="btn ghost danger" onclick={onRemove} title="移除机制">移除</button>
   </div>
 
-  {#if recipeResults.length > 0}
-    <div class="results-row" title="配方产物">
-      <span class="results-label">产</span>
-      {#each recipeResults as result (result.name)}
-        <Icon type={result.kind} name={result.name} size={18} title={`${runtime.localizedName(result.kind, result.name)} ×${result.amount}`} />
+  {#if mechanicFlows.length > 0}
+    {@const scale = solution ? Math.max(0, solution.amount) : 1}
+    <div class="flow-row">
+      {#each mechanicFlows as item (dualVarKey(item.flow))}
+        {@const icon = flowIconOf(item.flow)}
+        <span
+          class="flow-chip"
+          class:out={item.amount > 0}
+          title={`${dualVarLabel(item.flow)} ${item.amount > 0 ? "产出" : "消耗"} ×${(Math.abs(item.amount) * scale).toFixed(2)}/s`}
+        >
+          <Icon type={icon.type} name={icon.name} size={16} />
+          <span class="mono">{formatFlowQty(item.amount, scale)}</span>
+        </span>
       {/each}
     </div>
   {/if}
@@ -369,18 +419,32 @@
     border-top: 1px solid var(--line);
   }
 
-  .results-row {
+  .flow-row {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 4px;
-    padding-top: 4px;
-    min-height: 20px;
+    padding-top: 2px;
   }
 
-  .results-label {
+  .flow-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 1px 5px 1px 2px;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
     font-size: 10px;
+  }
+
+  .flow-chip.out {
+    border-color: var(--accent-line);
+    background: color-mix(in srgb, var(--card) 88%, var(--accent) 5%);
+  }
+
+  .flow-chip .mono {
     color: var(--muted);
-    margin-right: 2px;
   }
 
   .row2b {

@@ -243,21 +243,17 @@
     return entry?.module_slots ?? 0;
   }
 
-  /** 聚合键：配方/采矿按 (主对象, 机器) 聚合；其余按类型聚合。 */
+  // 机制列表：配方合并开关（同配方×机器合并成一张卡，品质变体并列）；
+  // 其他机制类型始终单条展示，不额外嵌套。
+  let mergeRecipes = $state(true);
+
+  /** 聚合键：合并开启时仅 recipe 按 (配方, 机器) 聚合；其余类型各自独立。 */
   function mechGroupKey(entry: import("$lib/runtime/types").MechanicEntry): string {
+    if (!mergeRecipes) return `single:${entry.id}`;
     const m = entry.mechanic;
     if (m.type === "recipe") return `recipe:${m.recipe?.id ?? ""}:${m.machine?.id ?? ""}`;
-    if (m.type === "mining") return `mining:${m.resource ?? ""}:${m.machine?.id ?? ""}`;
-    if (m.type === "generator") return `generator:${m.generator?.id ?? ""}:${m.fluid ?? ""}`;
-    if (m.type === "boiler") return `boiler:${m.boiler?.id ?? ""}:${m.fluid ?? ""}`;
-    if (m.type === "reactor") return `reactor:${m.reactor?.id ?? ""}`;
-    if (m.type === "item-fuel") return `item-fuel:${m.item?.id ?? ""}`;
-    if (m.type === "item-launch") return `item-launch:${m.item?.id ?? ""}`;
-    if (m.type === "plant") return `plant:${m.seed?.id ?? ""}`;
-    if (m.type === "spoil") return `spoil:${m.item?.id ?? ""}`;
-    if (m.type === "fluid-fuel") return `fluid-fuel:${m.fluid ?? ""}`;
-    if (m.type === "fluid-heat") return `fluid-heat:${m.fluid ?? ""}`;
-    return `other:${m.type}`;
+    // 非 recipe 机制：永不合并（每机制独立一组）。
+    return `single:${entry.id}`;
   }
 
   /** 网格分组：保持原始顺序，同键条目聚成一组（不同品质放一行）。 */
@@ -1455,6 +1451,12 @@
         <button class="btn ghost" title="按求解流量从大到小重排机制" onclick={() => runtime.cleanup("sort-by-solution-rate").catch(() => {})} disabled={!solved}>
           按流量排序
         </button>
+        <button
+          class="btn ghost"
+          class:on={mergeRecipes}
+          title="配方合并：同配方不同品质合并成一张卡"
+          onclick={() => (mergeRecipes = !mergeRecipes)}
+        >配方合并</button>
         {#if !runtime.activeContext}
           <span class="muted">先加载游戏数据（左上角「游戏数据」）</span>
         {/if}
@@ -1473,35 +1475,54 @@
         onfinalize={handleMechanicsFinalize}
       >
         {#each mechGroups as group (group.key)}
-          <div class="mech-group card">
-            <div class="mech-group-head">
-              <span class="mech-group-title" title={groupTitle(group.entries)}>
-                {groupTitle(group.entries)}
-              </span>
-              {#if groupMachine(group.entries)}
-                <span class="chip">{groupMachine(group.entries)}</span>
-              {/if}
-              {#if group.entries.length > 1}
+          {#if group.entries.length > 1}
+            <!-- 配方合并组：标题（配方名 + 机器名），子机制完整显示 -->
+            <div class="mech-group card">
+              <div class="mech-group-head">
+                <span class="mech-group-title" title={groupTitle(group.entries)}>
+                  {groupTitle(group.entries)}
+                </span>
+                {#if groupMachine(group.entries)}
+                  <span class="chip">{groupMachine(group.entries)}</span>
+                {/if}
                 <span class="chip muted">{group.entries.length} 品质</span>
-              {/if}
-            </div>
-            {#each group.entries as entry, i (entry.id)}
-              <div class="mech-group-row">
-                <MechanicCard
-                  {entry}
-                  compact={i > 0}
-                  solution={solveMap.get(entry.id) ?? null}
-                  onPick={(kind, a, b) => pickForMechanic(entry.id, kind, a, b)}
-                  onToggleEnabled={() => runtime.setMechanicEnabled(entry.id, !entry.enabled).catch(() => {})}
-                  onRemove={() => runtime.removeMechanic(entry.id).catch(() => {})}
-                  onModuleSlot={(slot, module) => runtime.setModuleSlot(entry.id, slot, module).catch(() => {})}
-                  onAddBeacon={() => addBeacon(entry.id)}
-                  onPickFuel={() => pickFuel(entry.id)}
-                  onClone={() => runtime.cloneMechanic(entry.id).catch(() => {})}
-                />
               </div>
+              {#each group.entries as entry (entry.id)}
+                <div class="mech-group-row">
+                  <MechanicCard
+                    {entry}
+                    project={project?.id ?? 0}
+                    factory={factory?.id ?? 0}
+                    solution={solveMap.get(entry.id) ?? null}
+                    onPick={(kind, a, b) => pickForMechanic(entry.id, kind, a, b)}
+                    onToggleEnabled={() => runtime.setMechanicEnabled(entry.id, !entry.enabled).catch(() => {})}
+                    onRemove={() => runtime.removeMechanic(entry.id).catch(() => {})}
+                    onModuleSlot={(slot, module) => runtime.setModuleSlot(entry.id, slot, module).catch(() => {})}
+                    onAddBeacon={() => addBeacon(entry.id)}
+                    onPickFuel={() => pickFuel(entry.id)}
+                    onClone={() => runtime.cloneMechanic(entry.id).catch(() => {})}
+                  />
+                </div>
+              {/each}
+            </div>
+          {:else}
+            <!-- 单条机制：不嵌套，直接完整卡片 -->
+            {#each group.entries as entry (entry.id)}
+              <MechanicCard
+                {entry}
+                project={project?.id ?? 0}
+                factory={factory?.id ?? 0}
+                solution={solveMap.get(entry.id) ?? null}
+                onPick={(kind, a, b) => pickForMechanic(entry.id, kind, a, b)}
+                onToggleEnabled={() => runtime.setMechanicEnabled(entry.id, !entry.enabled).catch(() => {})}
+                onRemove={() => runtime.removeMechanic(entry.id).catch(() => {})}
+                onModuleSlot={(slot, module) => runtime.setModuleSlot(entry.id, slot, module).catch(() => {})}
+                onAddBeacon={() => addBeacon(entry.id)}
+                onPickFuel={() => pickFuel(entry.id)}
+                onClone={() => runtime.cloneMechanic(entry.id).catch(() => {})}
+              />
             {/each}
-          </div>
+          {/if}
         {:else}
           <div class="empty-state">
             {#if factory}
