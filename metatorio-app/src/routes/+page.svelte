@@ -2265,7 +2265,9 @@
 
   .row-item.implicit {
     border-style: dashed;
-    opacity: 0.75;
+    border-color: var(--accent-line);
+    background: color-mix(in srgb, var(--card) 82%, var(--accent) 6%);
+    opacity: 1;
   }
 
   .implicit-hint {
