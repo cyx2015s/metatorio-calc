@@ -210,7 +210,13 @@ fn solve_document(
     project_id: ProjectId,
     factory_id: FactoryId,
 ) -> Result<SolveResult, RuntimeError> {
-    let game = make_game_state(prototype, project);
+    let mut game = make_game_state(prototype, project);
+    apply_environment_to_game_state(
+        prototype,
+        &mut game,
+        factory.settings.planet.as_deref(),
+        factory.settings.surface.as_deref(),
+    );
     let context = Context::new(prototype, &game);
     let expansion = metatorio_core::expand::expand(
         factory
@@ -533,6 +539,8 @@ pub fn instance_cost(store: &PrototypeStore, mechanic: &Mechanic) -> f64 {
         Mechanic::Generator(mechanic) => area(&mechanic.generator.id),
         Mechanic::Boiler(mechanic) => area(&mechanic.boiler.id),
         Mechanic::Reactor(mechanic) => area(&mechanic.reactor.id),
+        // 太阳能机制按太阳能板面积计成本（蓄电器体积小，随面板一起布局）。
+        Mechanic::Solar(mechanic) => area(&mechanic.solar_panel.id),
         Mechanic::Spoil(mechanic) => store
             .item(&mechanic.item.id)
             .and_then(|record| {
@@ -547,7 +555,8 @@ pub fn instance_cost(store: &PrototypeStore, mechanic: &Mechanic) -> f64 {
 }
 
 /// 从项目设置构建求解用的 GameState（品质上限/采矿/配方产能加成）。
-pub fn make_game_state(prototype: &PrototypeStore, project: &ProjectDocument) -> GameState {    let mut game = GameState::default();
+pub fn make_game_state(prototype: &PrototypeStore, project: &ProjectDocument) -> GameState {
+    let mut game = GameState::default();
     let qualities = prototype.quality_order();
     if !qualities.is_empty() {
         game.qualities = qualities.to_vec();
@@ -574,6 +583,49 @@ pub fn make_game_state(prototype: &PrototypeStore, project: &ProjectDocument) ->
         }
     }
     game
+}
+
+/// 根据工厂环境（星球/地表）写入太阳能倍率与昼夜周期。
+///
+/// 规则（复刻需求设计）：
+/// - 同时设置星球与地表（太空平台等）：用"太空中的太阳能"系数
+///   （space-location 的 solar_power_in_space）；
+/// - 否则（星球表面）：用"大气中的太阳能"系数（surface_properties
+///   里的 solar-power；缺失回退 1.0）。
+/// - day-night-cycle 来自星球 surface_properties，缺失回退 25200。
+pub fn apply_environment_to_game_state(
+    store: &PrototypeStore,
+    game: &mut GameState,
+    planet: Option<&str>,
+    surface: Option<&str>,
+) {
+    if surface.is_some() {
+        // 太空：solar_power_in_space（找不到 space-location 时回退 1.0）
+        if let Some(planet_name) = planet {
+            if let Some(record) =
+                store.get(metatorio_data::store::PrototypeGroup::SpaceLocation, planet_name)
+            {
+                if let Some(component) =
+                    record.component::<metatorio_data::generated_components::SpaceLocationComponent>()
+                {
+                    game.solar_power_multiplier = component.solar_power_in_space;
+                }
+            }
+        }
+    } else if let Some(planet_name) = planet {
+        if let Some(record) = store.get(metatorio_data::store::PrototypeGroup::Planet, planet_name) {
+            if let Some(component) =
+                record.component::<metatorio_data::generated_components::PlanetComponent>()
+            {
+                if let Some(&value) = component.surface_properties.get("solar-power") {
+                    game.solar_power_multiplier = value;
+                }
+                if let Some(&cycle) = component.surface_properties.get("day-night-cycle") {
+                    game.day_night_cycle = cycle;
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]

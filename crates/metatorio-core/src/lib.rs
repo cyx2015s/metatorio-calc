@@ -15,10 +15,11 @@ pub mod temp_flow;
 
 pub use context::{Context, GameState};
 pub use dual_var::DualVar;
+pub use expand::{SolarBalance, solar_balance};
 pub use id::{IdWithQuality, NORMAL_QUALITY};
 pub use mechanic::{
     BeaconConfig, BoilerMechanic, FluidFuelMechanic, FluidHeatMechanic, GeneratorMechanic,
     ItemFuelMechanic, ItemLaunchMechanic, Mechanic, MiningMechanic, ModuleConfig, PlantMechanic,
-    ReactorMechanic, RecipeMechanic, SpoilMechanic,
+    ReactorMechanic, RecipeMechanic, SolarMechanic, SpoilMechanic,
 };
 pub use prim_var::{AIndexMap, ExpandedVariable, Expansion, Flow, PrimVar};

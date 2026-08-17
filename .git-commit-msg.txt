@@ -1,0 +1,14 @@
+新增太阳能（Solar）机制：太阳能板 + 蓄电器昼夜配平
+
+core：Mechanic::Solar + SolarMechanic（太阳能板/蓄电器），
+expand_solar 按 performance_at_day/night 加权平均产出电力；
+solar_balance 用 sympy 精确积分（scripts/solar_balance_check.py）
+计算周期溢出总电量 = 21/125 × 峰值 × 周期 × Δperf，蓄电器配比
+与社区 25:21 ≈ 0.84 吻合。
+runtime：MechanicKind::Solar + SolarMechanicAction（SetSolarPanel/
+SetAccumulator）+ apply_solar_action + instance_cost；
+apply_environment_to_game_state 把星球 solar-power/day-night-cycle
+（太空用 solar_power_in_space）写入 GameState。
+前端：机制卡太阳能分支（面板/蓄电器选择 + 平均出力/溢出/建议配比）、
+添加机制下拉、catalog 加 solar-panel/accumulator 实体类。
+auto_plan：枚举太阳能板 × 蓄电器组合（品质展开）。

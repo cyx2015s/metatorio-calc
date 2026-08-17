@@ -20,8 +20,8 @@ use crate::message::{
     ItemFuelMechanicAction, ItemLaunchMechanicAction, MechanicAction, MechanicListAction,
     MiningMechanicAction, ModuleAction, PlantMechanicAction, PlanningAction, ProjectAction,
     ProjectPage, ReactorMechanicAction, RecipeMechanicAction, RuntimeCommand, SelectorKind,
-    SelectorTarget, SelectorValue, SolveAction, SpoilMechanicAction, SuggestionAction,
-    SuggestionCandidate, TargetAction, TargetExpressionAction, UiAction,
+    SelectorTarget, SelectorValue, SolveAction, SolarMechanicAction, SpoilMechanicAction,
+    SuggestionAction, SuggestionCandidate, TargetAction, TargetExpressionAction, UiAction,
 };
 
 /// Mutable application state that is independent from any GUI framework.
@@ -1749,6 +1749,12 @@ fn apply_mechanic_action(
             };
             apply_reactor_action(mechanic, action)
         }
+        MechanicAction::Solar(action) => {
+            let Mechanic::Solar(mechanic) = &mut entry.mechanic else {
+                return Err(kind_mismatch("solar"));
+            };
+            apply_solar_action(mechanic, action)
+        }
         MechanicAction::FluidFuel(action) => {
             let Mechanic::FluidFuel(mechanic) = &mut entry.mechanic else {
                 return Err(kind_mismatch("fluid-fuel"));
@@ -1775,6 +1781,7 @@ fn kind_mismatch(kind: &'static str) -> RuntimeError {
         "generator" => "该机制不是 generator 类型",
         "boiler" => "该机制不是 boiler 类型",
         "reactor" => "该机制不是 reactor 类型",
+        "solar" => "该机制不是 solar 类型",
         "fluid-fuel" => "该机制不是 fluid-fuel 类型",
         "fluid-heat" => "该机制不是 fluid-heat 类型",
         _ => "机制类型不匹配",
@@ -1910,6 +1917,20 @@ fn apply_reactor_action(
                 ));
             }
             Ok(replace(&mut mechanic.neighbours, neighbours))
+        }
+    }
+}
+
+fn apply_solar_action(
+    mechanic: &mut metatorio_core::SolarMechanic,
+    action: SolarMechanicAction,
+) -> Result<bool, RuntimeError> {
+    match action {
+        SolarMechanicAction::SetSolarPanel { solar_panel } => {
+            Ok(replace(&mut mechanic.solar_panel, solar_panel))
+        }
+        SolarMechanicAction::SetAccumulator { accumulator } => {
+            Ok(replace(&mut mechanic.accumulator, accumulator))
         }
     }
 }
@@ -2741,6 +2762,58 @@ mod tests {
             mechanic,
             MechanicAction::FluidFuel(FluidFuelMechanicAction::SetTemperature {
                 temperature: None,
+            }),
+        );
+        assert!(matches!(error, Err(RuntimeError::InvalidOperation(_))));
+    }
+
+    #[test]
+    fn solar_actions_set_panel_and_accumulator() {
+        let (mut state, project, factory) = state_with_factory();
+        state
+            .dispatch(AppMessage::Factory {
+                project,
+                factory,
+                action: FactoryAction::MechanicList(MechanicListAction::Add {
+                    kind: MechanicKind::Solar,
+                }),
+            })
+            .unwrap();
+        let mechanic = state.factory(project, factory).unwrap().mechanics[0].id;
+        let act = |state: &mut RuntimeState, action: MechanicAction| {
+            state.dispatch(AppMessage::Factory {
+                project,
+                factory,
+                action: FactoryAction::Mechanic { mechanic, action },
+            })
+        };
+        act(
+            &mut state,
+            MechanicAction::Solar(SolarMechanicAction::SetSolarPanel {
+                solar_panel: IdWithQuality::new("solar-panel", "normal"),
+            }),
+        )
+        .unwrap();
+        act(
+            &mut state,
+            MechanicAction::Solar(SolarMechanicAction::SetAccumulator {
+                accumulator: IdWithQuality::new("accumulator", "normal"),
+            }),
+        )
+        .unwrap();
+        let Mechanic::Solar(solar) =
+            &state.factory(project, factory).unwrap().mechanics[0].mechanic
+        else {
+            panic!("expected solar mechanic");
+        };
+        assert_eq!(solar.solar_panel.id, "solar-panel");
+        assert_eq!(solar.accumulator.id, "accumulator");
+
+        // 种类不匹配拒绝：对 solar 机制发 reactor 动作
+        let error = act(
+            &mut state,
+            MechanicAction::Reactor(ReactorMechanicAction::SetReactor {
+                reactor: IdWithQuality::new("nuclear-reactor", "normal"),
             }),
         );
         assert!(matches!(error, Err(RuntimeError::InvalidOperation(_))));

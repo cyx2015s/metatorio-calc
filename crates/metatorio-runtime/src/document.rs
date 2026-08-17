@@ -314,13 +314,14 @@ pub enum MechanicKind {
     Generator,
     Boiler,
     Reactor,
+    Solar,
     FluidFuel,
     FluidHeat,
     Unsupported,
 }
 
 impl MechanicKind {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::Recipe,
         Self::Mining,
         Self::Spoil,
@@ -330,6 +331,7 @@ impl MechanicKind {
         Self::Generator,
         Self::Boiler,
         Self::Reactor,
+        Self::Solar,
         Self::FluidFuel,
         Self::FluidHeat,
     ];
@@ -345,6 +347,7 @@ impl MechanicKind {
             Self::Generator => Mechanic::Generator(Default::default()),
             Self::Boiler => Mechanic::Boiler(Default::default()),
             Self::Reactor => Mechanic::Reactor(Default::default()),
+            Self::Solar => Mechanic::Solar(Default::default()),
             Self::FluidFuel => Mechanic::FluidFuel(Default::default()),
             Self::FluidHeat => Mechanic::FluidHeat(Default::default()),
             Self::Unsupported => return None,
@@ -362,6 +365,7 @@ impl MechanicKind {
             Mechanic::Generator(_) => Self::Generator,
             Mechanic::Boiler(_) => Self::Boiler,
             Mechanic::Reactor(_) => Self::Reactor,
+            Mechanic::Solar(_) => Self::Solar,
             Mechanic::FluidFuel(_) => Self::FluidFuel,
             Mechanic::FluidHeat(_) => Self::FluidHeat,
             _ => Self::Unsupported,

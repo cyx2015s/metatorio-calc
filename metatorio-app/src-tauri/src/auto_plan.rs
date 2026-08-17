@@ -8,9 +8,10 @@ use metatorio_core::{Context, IdWithQuality, Mechanic, ModuleConfig, NORMAL_QUAL
 use metatorio_data::store::{PrototypeGroup, PrototypeRecord, PrototypeStore};
 use metatorio_data::types::{EffectType, EffectTypeLimitation};
 use metatorio_data::{
-    BoilerComponent, BurnerGeneratorComponent, CraftingMachineComponent, EntityComponent,
-    FluidComponent, GeneratorComponent, ItemComponent, MiningDrillComponent, ModuleComponent,
-    ReactorComponent, RecipeComponent, ResourceEntityComponent,
+    AccumulatorComponent, BoilerComponent, BurnerGeneratorComponent, CraftingMachineComponent,
+    EntityComponent, FluidComponent, GeneratorComponent, ItemComponent, MiningDrillComponent,
+    ModuleComponent, ReactorComponent, RecipeComponent, ResourceEntityComponent,
+    SolarPanelComponent,
 };
 use metatorio_runtime::solve::ExpandedVarId;
 
@@ -597,6 +598,7 @@ fn enumerate_energy(
     out: &mut Vec<Mechanic>,
 ) {
     let major_quality = quality_name(ctx, options.major_quality);
+    let quality_range = options.quality_limit + 1;
     for record in store.group(PrototypeGroup::Entity) {
         if let Some(generator) = record.component::<GeneratorComponent>() {
             let Some(fluid) = generator.fluid_box.filter.clone() else {
@@ -640,6 +642,48 @@ fn enumerate_energy(
                 fuel: None,
                 neighbours: 3,
             }));
+        }
+    }
+    // 太阳能：所有太阳能板 × 蓄电器组合（按品质展开）。
+    // 太阳能板按满日照功率排序、蓄电器按容量排序，限制候选数量避免组合爆炸。
+    let mut panels: Vec<(String, f64)> = Vec::new();
+    let mut accumulators: Vec<(String, f64)> = Vec::new();
+    for record in store.group(PrototypeGroup::Entity) {
+        if let Some(panel) = record.component::<SolarPanelComponent>() {
+            panels.push((record.name.clone(), panel.production.amount));
+        }
+        if let Some(accumulator) = record.component::<AccumulatorComponent>() {
+            let capacity = accumulator
+                .energy_source
+                .buffer_capacity
+                .map(|energy| energy.amount)
+                .unwrap_or(0.0);
+            accumulators.push((record.name.clone(), capacity));
+        }
+    }
+    // 每种设备最多取 alternative_count 个（按功率/容量降序）。
+    let pick_top = |list: &mut Vec<(String, f64)>, count: usize| {
+        list.sort_by(|a, b| {
+            b.1.partial_cmp(&a.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.0.cmp(&b.0))
+        });
+        list.truncate(count.max(1));
+        list.iter().map(|(name, _)| name.clone()).collect::<Vec<_>>()
+    };
+    let panel_names = pick_top(&mut panels, options.alternative_count.max(1));
+    let accumulator_names = pick_top(&mut accumulators, options.alternative_count.max(1));
+    for panel in &panel_names {
+        for accumulator in &accumulator_names {
+            for quality in 0..quality_range {
+                out.push(Mechanic::Solar(metatorio_core::SolarMechanic {
+                    solar_panel: IdWithQuality::new(panel.clone(), quality_name(ctx, quality)),
+                    accumulator: IdWithQuality::new(
+                        accumulator.clone(),
+                        major_quality.clone(),
+                    ),
+                }));
+            }
         }
     }
 }
@@ -826,6 +870,56 @@ mod tests {
         assert!(
             candidates.iter().any(|mechanic| matches!(mechanic, Mechanic::Recipe(_))),
             "应枚举出配方候选：{candidates:?}"
+        );
+    }
+
+    /// 太阳能候选：枚举出太阳能板 × 蓄电器组合，且展开产出电力。
+    #[test]
+    fn enumerates_solar_candidates() {
+        let dump = json!({
+            "quality": { "normal": { "name": "normal", "level": 0 } },
+            "solar-panel": {
+                "solar-panel": {
+                    "type": "solar-panel", "name": "solar-panel",
+                    "production": "60kW"
+                }
+            },
+            "accumulator": {
+                "accumulator": {
+                    "type": "accumulator", "name": "accumulator",
+                    "energy_source": { "type": "electric", "buffer_capacity": "5MJ" }
+                }
+            }
+        });
+        let store = PrototypeStore::load(&dump).expect("dump 加载失败");
+        let game = GameState::default();
+        let ctx = Context::new(&store, &game);
+        let options = EnumerateOptions {
+            alternative_count: 1,
+            machine_preferences: Vec::new(),
+            enumerate_modules: Vec::new(),
+            enumerate_beacons: Vec::new(),
+            quality_limit: 0,
+            major_quality: 0,
+            planet: None,
+            surface: None,
+        };
+        let candidates = enumerate_all(&store, &ctx, &options);
+        assert!(
+            candidates
+                .iter()
+                .any(|mechanic| matches!(mechanic, Mechanic::Solar(_))),
+            "应枚举出太阳能候选：{candidates:?}"
+        );
+        let expansion = expand(
+            candidates.iter().enumerate().map(|(index, mechanic)| (index as u64, mechanic)),
+            &ctx,
+        );
+        assert!(
+            expansion.variables.iter().any(|variable| {
+                variable.flow.contains_key(&DualVar::Electricity)
+            }),
+            "太阳能候选展开应产出电力"
         );
     }
 

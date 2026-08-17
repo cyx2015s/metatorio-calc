@@ -1111,7 +1111,7 @@ fn mechanic_flow(
     factory: FactoryId,
     mechanic: MechanicId,
 ) -> Result<Vec<(DualVar, f64)>, String> {
-    let mut runtime = state
+    let runtime = state
         .runtime
         .lock()
         .map_err(|_| "runtime lock poisoned".to_string())?;
@@ -1148,6 +1148,53 @@ fn mechanic_flow(
         }
     }
     Ok(flow.into_iter().filter(|(_, v)| v.abs() > 1e-12).collect())
+}
+
+/// 太阳能机制的配平信息（平均出力 / 周期溢出总电量 / 蓄电器配比）。
+///
+/// 使用当前工厂环境的星球太阳能系数与昼夜周期（同求解路径）。
+#[tauri::command]
+fn solar_balance(
+    state: State<'_, AppState>,
+    project: ProjectId,
+    factory: FactoryId,
+    mechanic: MechanicId,
+) -> Result<Option<metatorio_core::SolarBalance>, String> {
+    let runtime = state
+        .runtime
+        .lock()
+        .map_err(|_| "runtime lock poisoned".to_string())?;
+    let store = runtime
+        .context_store(project)
+        .map_err(|error| error.to_string())?
+        .clone();
+    let project_doc = runtime
+        .state
+        .project(project)
+        .map_err(|error| error.to_string())?
+        .clone();
+    let factory_doc = runtime
+        .state
+        .factory(project, factory)
+        .map_err(|error| error.to_string())?
+        .clone();
+    let entry = factory_doc
+        .mechanics
+        .iter()
+        .find(|entry| entry.id == mechanic)
+        .ok_or("机制不存在")?;
+    let Mechanic::Solar(mechanic) = &entry.mechanic else {
+        return Ok(None);
+    };
+    let mut game = metatorio_runtime::solve::make_game_state(&store, &project_doc);
+    metatorio_runtime::solve::apply_environment_to_game_state(
+        &store,
+        &mut game,
+        factory_doc.settings.planet.as_deref(),
+        factory_doc.settings.surface.as_deref(),
+    );
+    let context = metatorio_core::Context::new(&store, &game);
+    Ok(metatorio_core::solar_balance(&context, mechanic))
 }
 
 /// 生成候选机制（与 suggest 命令共用；AutoPlan 也用它）。
@@ -1522,6 +1569,8 @@ fn catalog_index_from_store(store: &PrototypeStore, locale: &HashMap<String, Str
         ),
         ("boiler", &["BoilerComponent"][..], true),
         ("reactor", &["ReactorComponent"][..], true),
+        ("solar-panel", &["SolarPanelComponent"][..], false),
+        ("accumulator", &["AccumulatorComponent"][..], false),
         ("beacon", &["BeaconComponent"][..], true),
         ("entity", &["EntityComponent"][..], false),
     ];
@@ -2754,6 +2803,7 @@ pub fn run() {
             best_modules,
             implicit_sources,
             mechanic_flow,
+            solar_balance,
             dispatch,
             get_document,
             get_ui_state,

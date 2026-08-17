@@ -192,6 +192,14 @@ impl ModuleConfig {
     }
 }
 
+/// 太阳能发电组件：用太阳能板 + 蓄电器按昼夜周期提供稳定平均电力。
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SolarMechanic {
+    pub solar_panel: IdWithQuality,
+    pub accumulator: IdWithQuality,
+}
+
 /// 流体燃料机制：把指定温度的热值流体燃烧为"流体燃料"抽象能量流。
 /// 复刻原版 FluidFuelMechanic（fluid.rs）——擦除具体流体，减少 LP 空间膨胀；
 /// 代价是流体污染倍率等属性无法体现（边缘需求）。
@@ -259,6 +267,7 @@ pub enum Mechanic {
     Generator(GeneratorMechanic),
     Boiler(BoilerMechanic),
     Reactor(ReactorMechanic),
+    Solar(SolarMechanic),
     FluidFuel(FluidFuelMechanic),
     FluidHeat(FluidHeatMechanic),
 }

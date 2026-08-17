@@ -2,7 +2,7 @@
   // 单个机制卡片：主选择器（配方/资源/物品/设备）为图标按钮，
   // 机器为图标按钮，插件配置在展开区（ModuleEditor）。
   import { runtime } from "$lib/runtime/store.svelte.ts";
-  import { mechanicFlow } from "$lib/runtime/client";
+  import { mechanicFlow, solarBalance } from "$lib/runtime/client";
   import HoverIcon from "./HoverIcon.svelte";
   import Icon from "./Icon.svelte";
   import ModuleEditor from "./ModuleEditor.svelte";
@@ -20,6 +20,7 @@
     generator: "发电机",
     boiler: "锅炉",
     reactor: "反应堆",
+    solar: "太阳能",
     "fluid-fuel": "流体燃料",
     "fluid-heat": "流体热",
   };
@@ -72,6 +73,26 @@
     };
   });
 
+  // 太阳能配平信息（平均出力 / 周期溢出总电量 / 蓄电器配比）
+  let solarBalanceInfo = $state<import("$lib/runtime/types").SolarBalance | null>(null);
+  $effect(() => {
+    if (entry.mechanic.type !== "solar") {
+      solarBalanceInfo = null;
+      return;
+    }
+    let alive = true;
+    solarBalance(project, factory, entry.id)
+      .then((info) => {
+        if (alive) solarBalanceInfo = info;
+      })
+      .catch(() => {
+        if (alive) solarBalanceInfo = null;
+      });
+    return () => {
+      alive = false;
+    };
+  });
+
   let kind = $derived(entry.mechanic.type);
 
   /** 流 → 图标 (type, name)。 */
@@ -114,13 +135,14 @@
       entry.mechanic.generator?.id ??
       entry.mechanic.boiler?.id ??
       entry.mechanic.reactor?.id ??
+      entry.mechanic.solar_panel?.id ??
       entry.mechanic.fluid ??
       "",
   );
   let primaryIcon = $derived(
     kind === "recipe"
       ? "recipe"
-      : kind === "mining" || kind === "generator" || kind === "boiler" || kind === "reactor"
+      : kind === "mining" || kind === "generator" || kind === "boiler" || kind === "reactor" || kind === "solar"
         ? "entity"
         : kind === "fluid-fuel" || kind === "fluid-heat"
           ? "fluid"
@@ -135,6 +157,7 @@
       entry.mechanic.generator?.quality ??
       entry.mechanic.boiler?.quality ??
       entry.mechanic.reactor?.quality ??
+      entry.mechanic.solar_panel?.quality ??
       "normal",
   );
   let machineQuality = $derived(entry.mechanic.machine?.quality ?? "normal");
@@ -154,6 +177,8 @@
         return "boiler";
       case "reactor":
         return "reactor";
+      case "solar":
+        return "solar-panel";
       case "fluid-fuel":
       case "fluid-heat":
         return "fluid";
@@ -292,6 +317,28 @@
           }}
         />
       </label>
+    {:else if kind === "solar"}
+      <button class="icon-btn" class:empty={!entry.mechanic.accumulator?.id} title="蓄电器" onclick={() => onPick("accumulator")}>
+        <HoverIcon
+          type="entity"
+          name={entry.mechanic.accumulator?.id || "accumulator"}
+          size={24}
+          detailKind={entry.mechanic.accumulator?.id ? "accumulator" : undefined}
+          quality={entry.mechanic.accumulator?.quality}
+        />
+      </button>
+      <span class="sub">
+        {entry.mechanic.accumulator?.id
+          ? runtime.localizedName("entity", entry.mechanic.accumulator.id)
+          : "选择蓄电器"}
+      </span>
+      {#if solarBalanceInfo}
+        <span class="sub solar-balance" title={`峰值 ${compactNumber(solarBalanceInfo.peak_power)} J/s · 周期 ${solarBalanceInfo.cycle_seconds}s`}>
+          平均 {compactNumber(solarBalanceInfo.average_power)} J/s
+          · 溢出 {compactNumber(solarBalanceInfo.surplus_per_cycle)} J
+          · 建议 {solarBalanceInfo.recommended_accumulators.toFixed(2)} 蓄电器/面板
+        </span>
+      {/if}
     {:else if kind === "fluid-fuel" || kind === "fluid-heat"}
       <label class="sub temp" title="流体温度（留空 = 默认温度）">
         温度
@@ -509,6 +556,11 @@
     background: var(--card);
     border: 1px solid var(--line-strong);
     border-radius: var(--radius-sm);
+    font-family: var(--mono);
+    font-size: 10px;
+  }
+
+  .solar-balance {
     font-family: var(--mono);
     font-size: 10px;
   }

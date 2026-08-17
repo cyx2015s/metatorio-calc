@@ -23,6 +23,7 @@
     { kind: "generator", label: "发电机" },
     { kind: "boiler", label: "锅炉" },
     { kind: "reactor", label: "反应堆" },
+    { kind: "solar", label: "太阳能" },
     { kind: "fluid-fuel", label: "流体燃料" },
     { kind: "fluid-heat", label: "流体热" },
   ];
@@ -695,6 +696,16 @@
         case "reactor":
           openSelector("reactor", "选择反应堆", (name, quality) =>
             runtime.setReactor(mechanic, name, quality),
+          );
+          break;
+        case "solar-panel":
+          openSelector("solar-panel", "选择太阳能板", (name, quality) =>
+            runtime.setSolarPanel(mechanic, name, quality),
+          );
+          break;
+        case "accumulator":
+          openSelector("accumulator", "选择蓄电器", (name, quality) =>
+            runtime.setAccumulator(mechanic, name, quality),
           );
           break;
         case "module": {

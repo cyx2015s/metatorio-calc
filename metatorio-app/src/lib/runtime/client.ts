@@ -130,6 +130,15 @@ export async function mechanicFlow(
   return call("mechanic_flow", { project, factory, mechanic });
 }
 
+/** 太阳能机制的配平信息（平均出力 / 周期溢出总电量 / 蓄电器配比）。 */
+export async function solarBalance(
+  project: number,
+  factory: number,
+  mechanic: number,
+): Promise<import("./types").SolarBalance | null> {
+  return call("solar_balance", { project, factory, mechanic });
+}
+
 // ── Persistence ───────────────────────────────────────────────────
 
 export async function openProjectDialog(): Promise<AppDocument | null> {

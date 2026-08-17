@@ -120,6 +120,7 @@ export type MechanicKind =
   | "generator"
   | "boiler"
   | "reactor"
+  | "solar"
   | "fluid-fuel"
   | "fluid-heat"
   | "unsupported";
@@ -172,6 +173,10 @@ export type ReactorMechanicAction =
   | { "set-fuel": { fuel: string | null } }
   | { "set-neighbours": { neighbours: number } };
 
+export type SolarMechanicAction =
+  | { "set-solar-panel": { solar_panel: IdWithQuality } }
+  | { "set-accumulator": { accumulator: IdWithQuality } };
+
 export type FluidFuelMechanicAction =
   | { "set-fluid": { fluid: string } }
   | { "set-temperature": { temperature: number | null } };
@@ -190,6 +195,7 @@ export type MechanicAction =
   | { generator: GeneratorMechanicAction }
   | { boiler: BoilerMechanicAction }
   | { reactor: ReactorMechanicAction }
+  | { solar: SolarMechanicAction }
   | { "fluid-fuel": FluidFuelMechanicAction }
   | { "fluid-heat": FluidHeatMechanicAction };
 
@@ -425,6 +431,8 @@ export interface Mechanic {
   generator?: IdWithQuality;
   boiler?: IdWithQuality;
   reactor?: IdWithQuality;
+  solar_panel?: IdWithQuality;
+  accumulator?: IdWithQuality;
   fluid?: string;
   temperature?: number | null;
   fuel?: string | null;
@@ -498,6 +506,23 @@ export interface FlowBalance {
   amount: number;
   /** 该物品平衡约束的 Ruiz 缩放系数；amount/scale 为内部可比量。 */
   scale: number;
+}
+
+// ── Solar 配平信息（solar_balance 命令）──────────────────────────
+
+export interface SolarBalance {
+  /** 满日照峰值功率（J/s，含星球太阳能系数与品质倍率）。 */
+  peak_power: number;
+  /** 周期平均稳定出力（J/s）。 */
+  average_power: number;
+  /** 一个昼夜周期的秒数。 */
+  cycle_seconds: number;
+  /** 一个周期溢出的总电量（J）——蓄电器需要储存的能量。 */
+  surplus_per_cycle: number;
+  /** 蓄电器容量（J）。 */
+  accumulator_capacity: number;
+  /** 推荐蓄电器数量（每块面板）。 */
+  recommended_accumulators: number;
 }
 
 // ── Game context & catalog ────────────────────────────────────────
@@ -644,6 +669,8 @@ export type CatalogKind =
   | "generator"
   | "boiler"
   | "reactor"
+  | "solar-panel"
+  | "accumulator"
   | "beacon"
   | "resource"
   | "entity"

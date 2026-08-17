@@ -1091,6 +1091,18 @@ class RuntimeStore {
     });
   }
 
+  async setSolarPanel(mechanic: MechanicId, solarPanel: string, quality = "normal"): Promise<void> {
+    await this.mechanicMessage(mechanic, {
+      solar: { "set-solar-panel": { solar_panel: { id: solarPanel, quality } } },
+    });
+  }
+
+  async setAccumulator(mechanic: MechanicId, accumulator: string, quality = "normal"): Promise<void> {
+    await this.mechanicMessage(mechanic, {
+      solar: { "set-accumulator": { accumulator: { id: accumulator, quality } } },
+    });
+  }
+
   async setFluid(mechanic: MechanicId, fluid: string): Promise<void> {
     switch (this.mechanicKind(mechanic)) {
       case "generator":

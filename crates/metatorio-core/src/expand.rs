@@ -4,6 +4,8 @@
 //! 温度决策，`TempFlow` 负责保留这些决策之间的相关性。所有流量均以
 //! “每秒”计，负值表示消耗，正值表示产出。
 
+use serde::{Deserialize, Serialize};
+
 use crate::NORMAL_QUALITY;
 use crate::context::Context;
 use crate::dual_var::DualVar;
@@ -12,15 +14,16 @@ use crate::id::IdWithQuality;
 use crate::mechanic::{
     BoilerMechanic, FluidFuelMechanic, FluidHeatMechanic, GeneratorMechanic, ItemFuelMechanic,
     ItemLaunchMechanic, Mechanic, MiningMechanic, PlantMechanic, ReactorMechanic, RecipeMechanic,
-    SpoilMechanic, quality_by_level,
+    SolarMechanic, SpoilMechanic, quality_by_level,
 };
 use crate::prim_var::Expansion;
 use crate::quality::calc_quality_distribution;
 use crate::temp_flow::TempFlow;
 use metatorio_data::generated_components::{
-    BoilerComponent, CraftingMachineComponent, EntityComponent, GeneratorComponent, ItemComponent,
-    MinableProperties, MiningDrillComponent, PlantComponent, ReactorComponent, RecipeComponent,
-    ResourceEntityComponent, RocketSiloComponent,
+    AccumulatorComponent, BoilerComponent, CraftingMachineComponent, EntityComponent,
+    GeneratorComponent, ItemComponent, MinableProperties, MiningDrillComponent, PlantComponent,
+    ReactorComponent, RecipeComponent, ResourceEntityComponent, RocketSiloComponent,
+    SolarPanelComponent,
 };
 use metatorio_data::store::PrototypeGroup;
 use metatorio_data::types::{
@@ -49,6 +52,7 @@ pub fn expand<'a, C: Clone>(
             }
             Mechanic::Boiler(mechanic) => expand_boiler(config, mechanic, ctx, &mut expansion),
             Mechanic::Reactor(mechanic) => expand_reactor(config, mechanic, ctx, &mut expansion),
+            Mechanic::Solar(mechanic) => expand_solar(config, mechanic, ctx, &mut expansion),
             Mechanic::FluidFuel(mechanic) => {
                 expand_fluid_fuel(config, mechanic, ctx, &mut expansion)
             }
@@ -965,6 +969,115 @@ fn expand_boiler<C: Clone>(
     out.variables.extend(temp.into_variables(config));
 }
 
+fn expand_solar<C: Clone>(
+    config: C,
+    mechanic: &SolarMechanic,
+    ctx: &Context,
+    out: &mut Expansion<C>,
+) {
+    let Some(panel) = ctx
+        .prototype
+        .entity(&mechanic.solar_panel.id)
+        .and_then(|record| record.component::<SolarPanelComponent>())
+    else {
+        return;
+    };
+    let Some(accumulator) = ctx
+        .prototype
+        .entity(&mechanic.accumulator.id)
+        .and_then(|record| record.component::<AccumulatorComponent>())
+    else {
+        return;
+    };
+    // 昼夜配平：Factorio 官方数据太阳能板平均出力为峰值的 0.7
+    // （60 kW 峰值 → 42 kW 平均，含黄昏/黎明渐变），与 day_night_cycle
+    // 长度无关（周期只缩放时间轴，不改变昼夜占比）。
+    let day_fraction = 0.7;
+    let performance = panel.performance_at_day * day_fraction
+        + panel.performance_at_night * (1.0 - day_fraction);
+    let coefficient = ctx.game.solar_power_multiplier.max(0.0);
+    let production_per_second = panel.production.amount * 60.0 * coefficient * performance;
+    if production_per_second <= 0.0 {
+        return;
+    }
+    // 蓄电器用于吸收昼夜波动；平均稳定出力仍是周期平均太阳能功率。
+    // 配平所需的周期溢出总电量由 solar_balance() 计算（机制面板展示）。
+    let _capacity = accumulator
+        .energy_source
+        .buffer_capacity
+        .map(|energy| energy.amount)
+        .unwrap_or(0.0);
+    let mut temp = TempFlow::new();
+    temp.add(DualVar::Electricity, production_per_second);
+    temp.scale(default_quality_multiplier(ctx, &mechanic.solar_panel.quality));
+    out.variables.extend(temp.into_variables(config));
+}
+
+/// 太阳能配平信息（机制面板展示用，不参与 LP）。
+///
+/// 昼夜结构（[Factorio 官方默认](https://wiki.factorio.com/Game-day)，
+/// 与实测 dawn=0.75/dusk=0.25/morning=0.55/evening=0.45 一致）：
+/// 白天（满日照）50%、黄昏/黎明各 20%（性能线性渐变）、夜晚 10%。
+/// sympy 精确积分（scripts/solar_balance_check.py）：
+///   周期平均性能 = 7/10×performance_at_day + 3/10×performance_at_night
+///   （默认 day=1/night=0 时为 0.7）
+///   周期溢出总电量 = 21/125 × 峰值功率 × 周期秒 × (perf_day − perf_night)
+///   即 0.168 × Δ。验证：60 kW × 420 s × 0.168 = 4.234 MJ ÷ 5 MJ ≈ 0.847，
+///   与社区 25:21 ≈ 0.84 的配比吻合。
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct SolarBalance {
+    /// 满日照峰值功率（J/s，含星球太阳能系数与品质倍率）。
+    pub peak_power: f64,
+    /// 周期平均稳定出力（J/s）= 峰值 × (7/10×perf_day + 3/10×perf_night)。
+    pub average_power: f64,
+    /// 一个昼夜周期的秒数。
+    pub cycle_seconds: f64,
+    /// 一个周期溢出的总电量（J）——蓄电器需要储存的能量。
+    pub surplus_per_cycle: f64,
+    /// 蓄电器容量（J）。
+    pub accumulator_capacity: f64,
+    /// 推荐蓄电器数量（每块面板）= surplus / capacity。
+    pub recommended_accumulators: f64,
+}
+
+/// 计算太阳能机制的配平信息；面板/蓄电器原型缺失时返回 None。
+pub fn solar_balance(ctx: &Context, mechanic: &SolarMechanic) -> Option<SolarBalance> {
+    let panel = ctx
+        .prototype
+        .entity(&mechanic.solar_panel.id)
+        .and_then(|record| record.component::<SolarPanelComponent>())?;
+    let accumulator = ctx
+        .prototype
+        .entity(&mechanic.accumulator.id)
+        .and_then(|record| record.component::<AccumulatorComponent>())?;
+    let quality = default_quality_multiplier(ctx, &mechanic.solar_panel.quality);
+    let coefficient = ctx.game.solar_power_multiplier.max(0.0);
+    let peak = panel.production.amount * 60.0 * coefficient * quality;
+    // 自定义性能曲线：昼夜各段按 performance 加权（不能直接用 0.7）。
+    let perf_day = panel.performance_at_day;
+    let perf_night = panel.performance_at_night;
+    let average = peak * (0.7 * perf_day + 0.3 * perf_night);
+    let cycle_seconds = ctx.game.day_night_cycle.max(1.0) / 60.0;
+    let surplus = (0.168 * peak * cycle_seconds * (perf_day - perf_night)).max(0.0);
+    let capacity = accumulator
+        .energy_source
+        .buffer_capacity
+        .map(|energy| energy.amount)
+        .unwrap_or(0.0);
+    Some(SolarBalance {
+        peak_power: peak,
+        average_power: average,
+        cycle_seconds,
+        surplus_per_cycle: surplus,
+        accumulator_capacity: capacity,
+        recommended_accumulators: if capacity > 0.0 {
+            surplus / capacity
+        } else {
+            0.0
+        },
+    })
+}
+
 fn expand_reactor<C: Clone>(
     config: C,
     mechanic: &ReactorMechanic,
@@ -1078,6 +1191,219 @@ fn expand_fluid_heat<C: Clone>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn solar_expands_to_average_day_night_power() {
+        // 太阳能板 60 kW 峰值（60000 W → 1000 J/tick）；蓄电器 5 MJ。
+        let dump = serde_json::json!({
+            "solar-panel": {
+                "solar-panel": {
+                    "name": "solar-panel",
+                    "production": "60kW",
+                    "performance_at_day": 1.0,
+                    "performance_at_night": 0.0
+                }
+            },
+            "accumulator": {
+                "accumulator": {
+                    "name": "accumulator",
+                    "energy_source": { "type": "electric", "buffer_capacity": "5MJ" }
+                }
+            },
+            "quality": {
+                "normal": { "name": "normal", "level": 0 }
+            }
+        });
+        let store = metatorio_data::store::PrototypeStore::load(&dump).expect("dump 加载失败");
+        let game = crate::context::GameState {
+            qualities: vec!["normal".to_string()],
+            max_quality: 0,
+            ..Default::default()
+        };
+        let ctx = Context::new(&store, &game);
+        let mechanic = Mechanic::Solar(SolarMechanic {
+            solar_panel: IdWithQuality::new("solar-panel", "normal"),
+            accumulator: IdWithQuality::new("accumulator", "normal"),
+        });
+        let expansion = expand([(0u32, &mechanic)], &ctx);
+        assert_eq!(expansion.variables.len(), 1);
+        let electricity = expansion.variables[0]
+            .flow
+            .get(&DualVar::Electricity)
+            .copied()
+            .expect("太阳能展开应产出电力");
+        // 60 kW 峰值 × 0.7 平均 = 42 kW = 42000 J/s
+        assert!((electricity - 42000.0).abs() < 1e-6, "electricity = {electricity}");
+    }
+
+    #[test]
+    fn solar_uses_planet_solar_multiplier() {
+        let dump = serde_json::json!({
+            "solar-panel": {
+                "solar-panel": {
+                    "name": "solar-panel",
+                    "production": "60kW"
+                }
+            },
+            "accumulator": {
+                "accumulator": {
+                    "name": "accumulator",
+                    "energy_source": { "type": "electric", "buffer_capacity": "5MJ" }
+                }
+            },
+            "quality": {
+                "normal": { "name": "normal", "level": 0 }
+            }
+        });
+        let store = metatorio_data::store::PrototypeStore::load(&dump).expect("dump 加载失败");
+        // 模拟一颗太阳能系数 0.5 的星球（如昏暗地表）。
+        let game = crate::context::GameState {
+            qualities: vec!["normal".to_string()],
+            max_quality: 0,
+            solar_power_multiplier: 0.5,
+            ..Default::default()
+        };
+        let ctx = Context::new(&store, &game);
+        let mechanic = Mechanic::Solar(SolarMechanic {
+            solar_panel: IdWithQuality::new("solar-panel", "normal"),
+            accumulator: IdWithQuality::new("accumulator", "normal"),
+        });
+        let expansion = expand([(0u32, &mechanic)], &ctx);
+        let electricity = expansion.variables[0]
+            .flow
+            .get(&DualVar::Electricity)
+            .copied()
+            .expect("太阳能展开应产出电力");
+        // 60 kW × 0.7 × 0.5 = 21 kW = 21000 J/s
+        assert!((electricity - 21000.0).abs() < 1e-6, "electricity = {electricity}");
+    }
+
+    #[test]
+    fn solar_balance_matches_community_accumulator_ratio() {
+        let dump = serde_json::json!({
+            "solar-panel": {
+                "solar-panel": {
+                    "name": "solar-panel",
+                    "production": "60kW"
+                }
+            },
+            "accumulator": {
+                "accumulator": {
+                    "name": "accumulator",
+                    "energy_source": { "type": "electric", "buffer_capacity": "5MJ" }
+                }
+            },
+            "quality": {
+                "normal": { "name": "normal", "level": 0 }
+            }
+        });
+        let store = metatorio_data::store::PrototypeStore::load(&dump).expect("dump 加载失败");
+        let game = crate::context::GameState {
+            qualities: vec!["normal".to_string()],
+            max_quality: 0,
+            ..Default::default()
+        };
+        let ctx = Context::new(&store, &game);
+        let mechanic = SolarMechanic {
+            solar_panel: IdWithQuality::new("solar-panel", "normal"),
+            accumulator: IdWithQuality::new("accumulator", "normal"),
+        };
+        let balance = solar_balance(&ctx, &mechanic).expect("配平信息应可计算");
+        // 峰值 60 kW，平均 42 kW（默认 day=1/night=0 → 0.7）。
+        assert!((balance.peak_power - 60000.0).abs() < 1e-6);
+        assert!((balance.average_power - 42000.0).abs() < 1e-6);
+        // 默认昼夜周期 25200 ticks = 420 s。
+        assert!((balance.cycle_seconds - 420.0).abs() < 1e-9);
+        // 周期溢出总电量 = 21/125 × 峰值 × 周期 = 4.2336 MJ。
+        assert!((balance.surplus_per_cycle - 4_233_600.0).abs() < 1e-3);
+        // 蓄电器 5 MJ → 每块面板约 0.847 个（社区标准 0.84）。
+        assert!((balance.recommended_accumulators - 0.847).abs() < 0.01);
+        assert!((balance.accumulator_capacity - 5_000_000.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn solar_balance_respects_custom_performance_curve() {
+        // 自定义原型：夜间仍保持 50% 出力（performance_at_night = 0.5）。
+        let dump = serde_json::json!({
+            "solar-panel": {
+                "custom-solar-panel": {
+                    "name": "custom-solar-panel",
+                    "production": "60kW",
+                    "performance_at_day": 1.0,
+                    "performance_at_night": 0.5
+                }
+            },
+            "accumulator": {
+                "accumulator": {
+                    "name": "accumulator",
+                    "energy_source": { "type": "electric", "buffer_capacity": "5MJ" }
+                }
+            },
+            "quality": {
+                "normal": { "name": "normal", "level": 0 }
+            }
+        });
+        let store = metatorio_data::store::PrototypeStore::load(&dump).expect("dump 加载失败");
+        let game = crate::context::GameState {
+            qualities: vec!["normal".to_string()],
+            max_quality: 0,
+            ..Default::default()
+        };
+        let ctx = Context::new(&store, &game);
+        let mechanic = SolarMechanic {
+            solar_panel: IdWithQuality::new("custom-solar-panel", "normal"),
+            accumulator: IdWithQuality::new("accumulator", "normal"),
+        };
+        let balance = solar_balance(&ctx, &mechanic).expect("配平信息应可计算");
+        // 平均 = 峰值 × (0.7×1 + 0.3×0.5) = 0.85 × 60 kW = 51 kW。
+        assert!((balance.average_power - 51000.0).abs() < 1e-6);
+        // 盈余 = 21/125 × 60000 × 420 × (1 − 0.5) = 2.1168 MJ。
+        assert!((balance.surplus_per_cycle - 2_116_800.0).abs() < 1e-3);
+        // 推荐蓄电器数减半。
+        assert!((balance.recommended_accumulators - 0.4234).abs() < 0.01);
+    }
+
+    #[test]
+    fn solar_expands_with_custom_performance_curve() {
+        let dump = serde_json::json!({
+            "solar-panel": {
+                "custom-solar-panel": {
+                    "name": "custom-solar-panel",
+                    "production": "60kW",
+                    "performance_at_day": 1.0,
+                    "performance_at_night": 0.5
+                }
+            },
+            "accumulator": {
+                "accumulator": {
+                    "name": "accumulator",
+                    "energy_source": { "type": "electric", "buffer_capacity": "5MJ" }
+                }
+            },
+            "quality": {
+                "normal": { "name": "normal", "level": 0 }
+            }
+        });
+        let store = metatorio_data::store::PrototypeStore::load(&dump).expect("dump 加载失败");
+        let game = crate::context::GameState {
+            qualities: vec!["normal".to_string()],
+            max_quality: 0,
+            ..Default::default()
+        };
+        let ctx = Context::new(&store, &game);
+        let mechanic = Mechanic::Solar(SolarMechanic {
+            solar_panel: IdWithQuality::new("custom-solar-panel", "normal"),
+            accumulator: IdWithQuality::new("accumulator", "normal"),
+        });
+        let expansion = expand([(0u32, &mechanic)], &ctx);
+        let electricity = expansion.variables[0]
+            .flow
+            .get(&DualVar::Electricity)
+            .copied()
+            .expect("太阳能展开应产出电力");
+        // 60 kW × (0.7×1 + 0.3×0.5) = 51 kW = 51000 J/s。
+        assert!((electricity - 51000.0).abs() < 1e-6, "electricity = {electricity}");
+    }
 
     #[test]
     fn parallel_variants_are_caller_defined() {

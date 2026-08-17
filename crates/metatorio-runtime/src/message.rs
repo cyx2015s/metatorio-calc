@@ -315,6 +315,7 @@ pub enum MechanicAction {
     Generator(GeneratorMechanicAction),
     Boiler(BoilerMechanicAction),
     Reactor(ReactorMechanicAction),
+    Solar(SolarMechanicAction),
     FluidFuel(FluidFuelMechanicAction),
     FluidHeat(FluidHeatMechanicAction),
 }
@@ -390,6 +391,13 @@ pub enum ReactorMechanicAction {
     SetReactor { reactor: IdWithQuality },
     SetFuel { fuel: Option<String> },
     SetNeighbours { neighbours: u8 },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SolarMechanicAction {
+    SetSolarPanel { solar_panel: IdWithQuality },
+    SetAccumulator { accumulator: IdWithQuality },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

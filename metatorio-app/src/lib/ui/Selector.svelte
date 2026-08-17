@@ -57,6 +57,8 @@
     "generator",
     "boiler",
     "reactor",
+    "solar-panel",
+    "accumulator",
     "beacon",
     "resource",
     "module",
