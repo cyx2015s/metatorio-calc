@@ -489,11 +489,15 @@ export interface MechanicSolution {
   amount: number;
   /** 单台实例成本（机器碰撞箱面积）。 */
   cost: number;
+  /** Ruiz 均衡缩放系数；amount/scale 为内部可比量（判断接近 0 用）。 */
+  scale: number;
 }
 
 export interface FlowBalance {
   flow: DualVar;
   amount: number;
+  /** 该物品平衡约束的 Ruiz 缩放系数；amount/scale 为内部可比量。 */
+  scale: number;
 }
 
 // ── Game context & catalog ────────────────────────────────────────

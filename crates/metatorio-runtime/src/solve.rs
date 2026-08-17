@@ -51,12 +51,19 @@ pub struct MechanicSolution {
     pub amount: f64,
     /// 单台实例成本（机器碰撞箱面积；无数据时 16.0）。
     pub cost: f64,
+    /// 该变量的 Ruiz 均衡缩放系数。`amount / scale` 是内部缩放空间的
+    /// 可比量（剔除逐变量缩放差异），判断"接近 0"应使用它而不是
+    /// 表观 amount——单次产出大的配方表观量小但实际很重要。
+    pub scale: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FlowBalance {
     pub flow: DualVar,
     pub amount: f64,
+    /// 该物品平衡约束的 Ruiz 缩放系数（dual_scale）。
+    /// `amount / scale` 是内部可比量，判断"接近 0"应使用它。
+    pub scale: f64,
 }
 
 /// Tauri-independent application runtime.  Tauri commands can own this value
@@ -279,7 +286,12 @@ fn solve_document(
     let solution = problem.solve();
     Ok(match solution {
         SolverSolution::Solved {
-            prim, sum, cost, ..
+            prim,
+            prim_scale,
+            dual_scale,
+            sum,
+            cost,
+            ..
         } => SolveResult {
             project: project_id,
             factory: factory_id,
@@ -287,16 +299,23 @@ fn solve_document(
                 cost,
                 mechanics: prim
                     .into_iter()
-                    .map(|(id, amount)| MechanicSolution {
-                        mechanic: id.mechanic,
-                        variant: id.variant,
-                        amount,
-                        cost: costs.get(&id.mechanic).copied().unwrap_or(1.0),
+                    .map(|(id, amount)| {
+                        let scale = prim_scale.get(&id).copied().unwrap_or(1.0);
+                        MechanicSolution {
+                            mechanic: id.mechanic,
+                            variant: id.variant,
+                            amount,
+                            cost: costs.get(&id.mechanic).copied().unwrap_or(1.0),
+                            scale,
+                        }
                     })
                     .collect(),
                 flows: sum
                     .into_iter()
-                    .map(|(flow, amount)| FlowBalance { flow, amount })
+                    .map(|(flow, amount)| {
+                        let scale = dual_scale.get(&flow).copied().unwrap_or(1.0);
+                        FlowBalance { flow, amount, scale }
+                    })
                     .collect(),
             },
         },

@@ -1568,7 +1568,7 @@
           </div>
           <div class="subtitle">总流平衡</div>
           <div class="rows compact">
-            {#each status.flows.filter((b) => Math.abs(b.amount) > 1e-9) as balance (balance.flow)}
+            {#each status.flows.filter((b) => Math.abs(b.amount) / Math.max(b.scale ?? 1, 1e-12) > 1e-9) as balance (balance.flow)}
               {@const icon = flowIcon(balance.flow)}
               {@const q = flowQuality(balance.flow)}
               <div class="row-item">

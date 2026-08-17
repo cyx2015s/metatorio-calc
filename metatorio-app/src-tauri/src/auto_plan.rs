@@ -18,12 +18,24 @@ use metatorio_runtime::solve::ExpandedVarId;
 ///
 /// 过滤掉零成本转换流的辅助变量（`MechanicId(u64::MAX)`，非真实机制）
 /// 和用量低于阈值的流；剩余流一定落在候选索引范围内（`[]` 自带越界检查）。
+///
+/// 判断"用量 > 阈值"用内部缩放值 `amount / scale`（剔除逐变量 Ruiz
+/// 缩放差异），避免单次产出大的配方因表观量小被误判为未使用。
 pub fn used_candidates<T: Clone>(
     candidates: &[T],
     prim: impl IntoIterator<Item = (ExpandedVarId, f64)>,
+    prim_scale: impl IntoIterator<Item = (ExpandedVarId, f64)>,
 ) -> Vec<T> {
+    let scales: std::collections::HashMap<ExpandedVarId, f64> =
+        prim_scale.into_iter().collect();
     prim.into_iter()
-        .filter(|(id, amount)| id.mechanic.0 != u64::MAX && *amount > 1e-9)
+        .filter(|(id, amount)| {
+            if id.mechanic.0 == u64::MAX {
+                return false;
+            }
+            let scale = scales.get(id).copied().unwrap_or(1.0).max(1e-12);
+            *amount / scale > 1e-9
+        })
         .map(|(id, _)| candidates[id.mechanic.0 as usize].clone())
         .collect()
 }
@@ -883,12 +895,12 @@ mod tests {
         problem.sources = sources;
         problem.strict_source = true;
         let solution = problem.solve();
-        let SolverSolution::Solved { prim, .. } = solution else {
+        let SolverSolution::Solved { prim, prim_scale, .. } = solution else {
             panic!("严格供给自动规划应可解（煤→锅炉→蒸汽→蒸汽机→电）：{solution:?}");
         };
         // 选中了锅炉、蒸汽机、煤（电力链路成立）
         // used_candidates 排除零成本转换流的辅助变量（MechanicId(u64::MAX)）。
-        let used: Vec<Mechanic> = used_candidates(&candidates, prim);
+        let used: Vec<Mechanic> = used_candidates(&candidates, prim, prim_scale);
         for kind in [MechanicKind::Boiler, MechanicKind::Generator, MechanicKind::ItemFuel] {
             assert!(
                 used.iter().any(|mechanic| kind_of(mechanic) == kind),
@@ -935,7 +947,7 @@ mod tests {
                 1e-12,
             ),
         ];
-        let used = used_candidates(&candidates, prim);
+        let used = used_candidates(&candidates, prim, std::iter::empty::<(ExpandedVarId, f64)>());
         assert_eq!(used, vec!["candidate-0".to_string(), "candidate-2".to_string()]);
     }
 }

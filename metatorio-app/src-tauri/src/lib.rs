@@ -1319,7 +1319,7 @@ fn auto_plan(
         }));
 
     let solution = problem.solve();
-    let SolverSolution::Solved { prim, .. } = solution else {
+    let SolverSolution::Solved { prim, prim_scale, .. } = solution else {
         let SolverSolution::NotSolved {
             no_provider,
             no_consumer,
@@ -1336,7 +1336,8 @@ fn auto_plan(
     eprintln!("[auto-plan] 求解成功，选中 {} 个机制", prim.len());
     // 保留被选中的候选（用量 > 阈值），直接替换工厂机制。
     // used_candidates 会排除零成本转换流的辅助变量（MechanicId(u64::MAX)）。
-    let mut used: Vec<Mechanic> = auto_plan::used_candidates(&candidates, prim);
+    let mut used: Vec<Mechanic> =
+        auto_plan::used_candidates(&candidates, prim, prim_scale);
     used.sort_by_key(|mechanic| {
         metatorio_runtime::document::MechanicKind::of(mechanic) as u8
     });
@@ -2588,10 +2589,13 @@ fn cleanup_factory(
     let SolveStatus::Solved { mechanics, .. } = &result.status else {
         return Ok(());
     };
-    // 每机制总用量（多温度变体求和）。
+    // 每机制总用量（多温度变体求和）。判断"接近 0"用内部缩放值
+    // amount/scale（剔除逐变量缩放差异），避免单次产出大的配方因
+    // 表观量小被误判为未使用。
     let mut used: HashMap<MechanicId, f64> = HashMap::new();
     for solution in mechanics {
-        *used.entry(solution.mechanic).or_default() += solution.amount.max(0.0);
+        let scaled = solution.amount.max(0.0) / solution.scale.max(1e-12);
+        *used.entry(solution.mechanic).or_default() += scaled;
     }
     let entries: Vec<MechanicId> = runtime
         .state
