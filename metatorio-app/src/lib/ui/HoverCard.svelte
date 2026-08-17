@@ -294,6 +294,9 @@
     border-radius: var(--radius);
     box-shadow: 0 14px 34px rgba(0, 0, 0, 0.4);
     pointer-events: none;
+    /* 显式左对齐：fixed 定位仍会继承祖先 text-align（如某些容器居中），
+       导致同名悬停信息在不同位置显示不一致。 */
+    text-align: left;
   }
 
   .hc-head {
