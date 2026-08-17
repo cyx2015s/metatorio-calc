@@ -76,8 +76,7 @@
 
   /** 原料/产物的元信息片段：期望量、概率、产能额外、品质范围/偏移、温度。 */
   function flowMeta(flow: FlowAmount): string[] {
-    const parts: string[] = [fmtNum(flow.amount)];
-    if (flow.productivity > 0) parts.push(`+${fmtNum(flow.productivity)}/产能`);
+    const parts: string[] = [`${fmtNum(flow.amount - flow.productivity)} + ${fmtNum(flow.productivity)}`];
     const qmin = qualityLabel(flow.quality_min);
     const qmax = qualityLabel(flow.quality_max);
     if (qmin || qmax) {
