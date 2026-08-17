@@ -163,6 +163,47 @@
   let dragTargets = $state<import("$lib/runtime/types").FlowTarget[]>([]);
   let dragInputs = $state<import("$lib/runtime/types").ExternalInput[]>([]);
   let dragMechanics = $state<import("$lib/runtime/types").MechanicEntry[]>([]);
+  // 机制列表视图：list = 垂直卡片；grid = 多列网格，同配方×机器聚合品质
+  let mechView = $state<"list" | "grid">("list");
+
+  /** 聚合键：配方/采矿按 (主对象, 机器) 聚合；其余按类型聚合。 */
+  function mechGroupKey(entry: import("$lib/runtime/types").MechanicEntry): string {
+    const m = entry.mechanic;
+    if (m.type === "recipe") return `recipe:${m.recipe?.id ?? ""}:${m.machine?.id ?? ""}`;
+    if (m.type === "mining") return `mining:${m.resource ?? ""}:${m.machine?.id ?? ""}`;
+    if (m.type === "generator") return `generator:${m.generator?.id ?? ""}:${m.fluid ?? ""}`;
+    if (m.type === "boiler") return `boiler:${m.boiler?.id ?? ""}:${m.fluid ?? ""}`;
+    if (m.type === "reactor") return `reactor:${m.reactor?.id ?? ""}`;
+    if (m.type === "item-fuel") return `item-fuel:${m.item?.id ?? ""}`;
+    if (m.type === "item-launch") return `item-launch:${m.item?.id ?? ""}`;
+    if (m.type === "plant") return `plant:${m.seed?.id ?? ""}`;
+    if (m.type === "spoil") return `spoil:${m.item?.id ?? ""}`;
+    if (m.type === "fluid-fuel") return `fluid-fuel:${m.fluid ?? ""}`;
+    if (m.type === "fluid-heat") return `fluid-heat:${m.fluid ?? ""}`;
+    return `other:${m.type}`;
+  }
+
+  /** 网格分组：保持原始顺序，同键条目聚成一组（不同品质放一行）。 */
+  let mechGroups = $derived(
+    (() => {
+      const groups: {
+        key: string;
+        entries: import("$lib/runtime/types").MechanicEntry[];
+      }[] = [];
+      const index = new Map<string, number>();
+      for (const entry of dragMechanics) {
+        const key = mechGroupKey(entry);
+        const existing = index.get(key);
+        if (existing !== undefined) {
+          groups[existing].entries.push(entry);
+        } else {
+          index.set(key, groups.length);
+          groups.push({ key, entries: [entry] });
+        }
+      }
+      return groups;
+    })(),
+  );
   $effect(() => {
     dragTargets = targets;
   });
@@ -231,6 +272,43 @@
     if (icon.type === "fluid") return "fluid";
     if (icon.type === "entity") return "entity";
     return undefined;
+  }
+
+  /** 能量类流（数值单位为瓦特 J/s）：Electricity / Heat / 抽象燃料热量。 */
+  function isEnergyFlow(flow: DualVar): boolean {
+    if (typeof flow === "string") {
+      return flow === "Electricity" || flow === "Heat";
+    }
+    if (flow !== null && typeof flow === "object") {
+      return "FluidHeat" in flow || "FluidFuel" in flow || "ItemFuel" in flow;
+    }
+    return false;
+  }
+
+  /** 瓦特 → 可读功率文本（数值为 J/s，直接换算，不乘 60）。 */
+  function formatPowerValue(watts: number): string {
+    if (watts >= 1e6) return `${(watts / 1e6).toFixed(2)} MW`;
+    if (watts >= 1e3) return `${(watts / 1e3).toFixed(1)} kW`;
+    return `${watts.toFixed(0)} W`;
+  }
+
+  /** 解析功率输入：支持 "1.5MW" / "90kW" / "500"（纯数字 = 瓦特）；无法解析返回 null。 */
+  function parsePowerInput(raw: string): number | null {
+    const text = raw.trim();
+    const match = /^([+-]?\d*\.?\d+)\s*(MW|kW|W)?$/i.exec(text);
+    if (!match) return null;
+    const value = Number(match[1]);
+    if (!Number.isFinite(value)) return null;
+    const unit = (match[2] ?? "W").toUpperCase();
+    if (unit === "MW") return value * 1e6;
+    if (unit === "KW") return value * 1e3;
+    return value;
+  }
+
+  /** 能量流数值显示：能量流用功率文本，否则普通数字。 */
+  function formatFlowAmount(flow: DualVar, amount: number): string {
+    if (isEnergyFlow(flow)) return formatPowerValue(Math.abs(amount));
+    return `${amount > 0 ? "+" : ""}${amount.toFixed(3)}`;
   }
 
   /** 流的显示名：物品/流体/实体优先本地化名，否则内部 id。 */
@@ -730,13 +808,17 @@
                 <span class="row-name" title={dualVarLabel(target.flow)}>{flowLabel(target.flow)}</span>
                 <input
                   class="num"
-                  type="number"
-                  step="0.1"
-                  min="0"
-                  value={String(target.amount)}
+                  type="text"
+                  inputmode="decimal"
+                  value={isEnergyFlow(target.flow)
+                    ? formatPowerValue(Math.abs(target.amount))
+                    : String(target.amount)}
                   onchange={(event) => {
-                    const value = Number((event.currentTarget as HTMLInputElement).value);
-                    if (Number.isFinite(value)) runtime.setTargetAmount(target.id, value).catch(() => {});
+                    const raw = (event.currentTarget as HTMLInputElement).value;
+                    const value = isEnergyFlow(target.flow) ? parsePowerInput(raw) : Number(raw);
+                    if (value !== null && Number.isFinite(value)) {
+                      runtime.setTargetAmount(target.id, value).catch(() => {});
+                    }
                   }}
                 />
                 <button class="btn ghost" title="建议能产出该流的机制" onclick={() => openSuggestions(target.flow)}>建议</button>
@@ -1218,6 +1300,11 @@
         <button class="btn ghost" title="按求解流量从大到小重排机制" onclick={() => runtime.cleanup("sort-by-solution-rate").catch(() => {})} disabled={!solved}>
           按流量排序
         </button>
+        <button
+          class="btn ghost"
+          title={mechView === "list" ? "切换为网格视图（同配方不同品质合并一行）" : "切换为列表视图"}
+          onclick={() => (mechView = mechView === "list" ? "grid" : "list")}
+        >{mechView === "list" ? "格子" : "列表"}</button>
         {#if !runtime.activeContext}
           <span class="muted">先加载游戏数据（左上角「游戏数据」）</span>
         {/if}
@@ -1229,34 +1316,67 @@
         {#if runtime.solveError}<span class="chip warn">求解错误</span>{/if}
       </div>
 
-      <div
-        class="mech-list"
-        use:dndzone={{ items: dragMechanics, flipDurationMs: 120 }}
-        onconsider={handleMechanicsConsider}
-        onfinalize={handleMechanicsFinalize}
-      >
-        {#each dragMechanics as entry (entry.id)}
-          <MechanicCard
-            {entry}
-            solution={solveMap.get(entry.id) ?? null}
-            onPick={(kind, a, b) => pickForMechanic(entry.id, kind, a, b)}
-            onToggleEnabled={() => runtime.setMechanicEnabled(entry.id, !entry.enabled).catch(() => {})}
-            onRemove={() => runtime.removeMechanic(entry.id).catch(() => {})}
-            onModuleSlot={(slot, module) => runtime.setModuleSlot(entry.id, slot, module).catch(() => {})}
-            onAddBeacon={() => addBeacon(entry.id)}
-            onPickFuel={() => pickFuel(entry.id)}
-            onClone={() => runtime.cloneMechanic(entry.id).catch(() => {})}
-          />
-        {:else}
-          <div class="empty-state">
-            {#if factory}
-              <span class="muted">还没有机制，点下方「添加机制」</span>
-            {:else}
-              <span class="muted">选择或新建一个工厂</span>
-            {/if}
-          </div>
-        {/each}
-      </div>
+      {#if mechView === "grid"}
+        <div class="mech-list grid">
+          {#each mechGroups as group (group.key)}
+            <div class="mech-group card">
+              {#each group.entries as entry, i (entry.id)}
+                <div class="mech-group-row" class:first={i === 0}>
+                  <MechanicCard
+                    {entry}
+                    compact={i > 0}
+                    solution={solveMap.get(entry.id) ?? null}
+                    onPick={(kind, a, b) => pickForMechanic(entry.id, kind, a, b)}
+                    onToggleEnabled={() => runtime.setMechanicEnabled(entry.id, !entry.enabled).catch(() => {})}
+                    onRemove={() => runtime.removeMechanic(entry.id).catch(() => {})}
+                    onModuleSlot={(slot, module) => runtime.setModuleSlot(entry.id, slot, module).catch(() => {})}
+                    onAddBeacon={() => addBeacon(entry.id)}
+                    onPickFuel={() => pickFuel(entry.id)}
+                    onClone={() => runtime.cloneMechanic(entry.id).catch(() => {})}
+                  />
+                </div>
+              {/each}
+            </div>
+          {:else}
+            <div class="empty-state">
+              {#if factory}
+                <span class="muted">还没有机制，点下方「添加机制」</span>
+              {:else}
+                <span class="muted">选择或新建一个工厂</span>
+              {/if}
+            </div>
+          {/each}
+        </div>
+      {:else}
+        <div
+          class="mech-list"
+          use:dndzone={{ items: dragMechanics, flipDurationMs: 120 }}
+          onconsider={handleMechanicsConsider}
+          onfinalize={handleMechanicsFinalize}
+        >
+          {#each dragMechanics as entry (entry.id)}
+            <MechanicCard
+              {entry}
+              solution={solveMap.get(entry.id) ?? null}
+              onPick={(kind, a, b) => pickForMechanic(entry.id, kind, a, b)}
+              onToggleEnabled={() => runtime.setMechanicEnabled(entry.id, !entry.enabled).catch(() => {})}
+              onRemove={() => runtime.removeMechanic(entry.id).catch(() => {})}
+              onModuleSlot={(slot, module) => runtime.setModuleSlot(entry.id, slot, module).catch(() => {})}
+              onAddBeacon={() => addBeacon(entry.id)}
+              onPickFuel={() => pickFuel(entry.id)}
+              onClone={() => runtime.cloneMechanic(entry.id).catch(() => {})}
+            />
+          {:else}
+            <div class="empty-state">
+              {#if factory}
+                <span class="muted">还没有机制，点下方「添加机制」</span>
+              {:else}
+                <span class="muted">选择或新建一个工厂</span>
+              {/if}
+            </div>
+          {/each}
+        </div>
+      {/if}
 
       {#if factory}
         <div class="add-wrap">
@@ -1313,7 +1433,7 @@
           </div>
           <div class="subtitle">总流平衡</div>
           <div class="rows compact">
-            {#each status.flows as balance (balance.flow)}
+            {#each status.flows.filter((b) => Math.abs(b.amount) > 1e-9) as balance (balance.flow)}
               {@const icon = flowIcon(balance.flow)}
               {@const q = flowQuality(balance.flow)}
               <div class="row-item">
@@ -1325,7 +1445,7 @@
                   quality={q ?? undefined}
                 />
                 <span class="row-name" title={dualVarLabel(balance.flow)}>{flowLabel(balance.flow)}</span>
-                <strong class:amount-pos={balance.amount > 0} class="mono amount">{balance.amount > 0 ? "+" : ""}{balance.amount.toFixed(3)}</strong>
+                <strong class:amount-pos={balance.amount > 0} class="mono amount">{formatFlowAmount(balance.flow, balance.amount)}</strong>
                 <button class="btn ghost up" title="建议能产出该流的机制" onclick={() => openSuggestions(balance.flow)}>建议</button>
               </div>
             {/each}
@@ -2029,6 +2149,26 @@
     display: grid;
     align-content: start;
     gap: 8px;
+  }
+
+  .mech-list.grid {
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 10px;
+  }
+
+  .mech-group {
+    display: grid;
+    gap: 2px;
+    padding: 6px;
+  }
+
+  .mech-group-row + .mech-group-row {
+    padding-top: 6px;
+    border-top: 1px dashed var(--line);
+  }
+
+  .mech-group-row .mech-card {
+    padding: 6px 8px;
   }
 
   .empty-state {

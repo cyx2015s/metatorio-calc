@@ -3,6 +3,7 @@
   // 机器为图标按钮，插件配置在展开区（ModuleEditor）。
   import { runtime } from "$lib/runtime/store.svelte.ts";
   import HoverIcon from "./HoverIcon.svelte";
+  import Icon from "./Icon.svelte";
   import ModuleEditor from "./ModuleEditor.svelte";
   import type { CatalogKind, MechanicEntry } from "$lib/runtime/types";
 
@@ -23,6 +24,7 @@
   let {
     entry,
     solution = null,
+    compact = false,
     onPick,
     onToggleEnabled,
     onRemove,
@@ -33,6 +35,8 @@
   }: {
     entry: MechanicEntry;
     solution?: { amount: number; cost: number } | null;
+    /** 聚合视图下非首行的品质变体：紧凑显示（隐藏机器/细节行）。 */
+    compact?: boolean;
     onPick: (kind: CatalogKind | "beacon-module", a?: number, b?: number) => void;
     onToggleEnabled: () => void;
     onRemove: () => void;
@@ -116,6 +120,25 @@
       ? runtime.localizedName("fluid", name)
       : runtime.localizedName("item", name);
   }
+
+  // 需求 4：recipe 机制常驻加载产物流，在卡片上显示（一眼看出机制做什么）。
+  let recipeResults = $state<{ kind: string; name: string; amount: number }[]>([]);
+  $effect(() => {
+    if (kind !== "recipe" || !entry.mechanic.recipe?.id) {
+      recipeResults = [];
+      return;
+    }
+    let alive = true;
+    runtime.getDetail("recipe", entry.mechanic.recipe.id).then((detail) => {
+      if (!alive || !detail) return;
+      recipeResults = detail.results
+        .filter((flow) => flow.amount !== 0)
+        .map((flow) => ({ kind: flow.kind, name: flow.name, amount: flow.amount }));
+    });
+    return () => {
+      alive = false;
+    };
+  });
 </script>
 
 <div class="mech-card card" class:off={!entry.enabled}>
@@ -156,6 +179,16 @@
     <button class="btn ghost danger" onclick={onRemove} title="移除机制">移除</button>
   </div>
 
+  {#if recipeResults.length > 0}
+    <div class="results-row" title="配方产物">
+      <span class="results-label">产</span>
+      {#each recipeResults as result (result.name)}
+        <Icon type={result.kind} name={result.name} size={18} title={`${runtime.localizedName(result.kind, result.name)} ×${result.amount}`} />
+      {/each}
+    </div>
+  {/if}
+
+  {#if !compact}
   <div class="row2">
     {#if kind === "recipe" || kind === "mining"}
       <button class="icon-btn" class:empty={!machineName} title="机器" onclick={() => onPick(machineKind())}>
@@ -309,6 +342,7 @@
       />
     </div>
   {/if}
+  {/if}
 </div>
 
 <style>
@@ -333,6 +367,20 @@
   .row2 {
     padding-top: 8px;
     border-top: 1px solid var(--line);
+  }
+
+  .results-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding-top: 4px;
+    min-height: 20px;
+  }
+
+  .results-label {
+    font-size: 10px;
+    color: var(--muted);
+    margin-right: 2px;
   }
 
   .row2b {
