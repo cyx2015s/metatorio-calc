@@ -791,6 +791,52 @@ mod tests {
         );
     }
 
+    /// 真实 dump：太阳能配平信息应可计算，且随星球环境变化
+    /// （nauvis 大气太阳能 1.0 → 满日照峰值 60 kW；fulgora 0.2 → 12 kW）。
+    #[test]
+    fn real_dump_solar_balance_follows_planet() {
+        let path = "C:\\Users\\mirac\\AppData\\Roaming\\Factorio\\script-output\\data-raw-dump.json";
+        if !std::path::Path::new(path).exists() {
+            eprintln!("[skip] 无真实 dump，跳过");
+            return;
+        }
+        let raw = std::fs::read(path).expect("读 dump");
+        let dump: serde_json::Value = serde_json::from_slice(&raw).expect("解析 dump");
+        let store = PrototypeStore::load(&dump).expect("dump 加载失败");
+        let mechanic = metatorio_core::SolarMechanic {
+            solar_panel: IdWithQuality::new("solar-panel", "normal"),
+            accumulator: IdWithQuality::new("accumulator", "normal"),
+        };
+        let balance_for = |planet: Option<&str>, surface: Option<&str>| {
+            let mut game = metatorio_runtime::solve::make_game_state(&store, &Default::default());
+            metatorio_runtime::solve::apply_environment_to_game_state(&store, &mut game, planet, surface);
+            let ctx = Context::new(&store, &game);
+            metatorio_core::solar_balance(&ctx, &mechanic).expect("真实 dump 配平应可计算")
+        };
+        // nauvis：solar-power 缺失 → 默认 1.0；周期 25200 ticks。
+        let nauvis = balance_for(Some("nauvis"), None);
+        assert!(
+            (nauvis.peak_power - 60000.0).abs() < 1e-6,
+            "nauvis 峰值应为 60 kW: {}",
+            nauvis.peak_power
+        );
+        assert!((nauvis.cycle_seconds - 420.0).abs() < 1e-9);
+        // fulgora：solar-power = 20（百分比）→ 峰值 60 kW × 0.2 = 12 kW；周期 10800。
+        let fulgora = balance_for(Some("fulgora"), None);
+        assert!(
+            (fulgora.peak_power - 12000.0).abs() < 1e-6,
+            "fulgora 峰值应为 12 kW: {}",
+            fulgora.peak_power
+        );
+        assert!((fulgora.cycle_seconds - 180.0).abs() < 1e-9);
+        // 蓄电器 5 MJ：nauvis 盈余 0.168×60kW×420s = 4.234 MJ → 0.847 个/面板。
+        assert!(
+            (nauvis.recommended_accumulators - 0.847).abs() < 0.01,
+            "nauvis 推荐蓄电器: {}",
+            nauvis.recommended_accumulators
+        );
+    }
+
     /// 合成 Nauvis：组装机（电）+ 锅炉（水→蒸汽）+ 蒸汽机 + 煤 + 铁矿配方。
     fn nauvis_dump() -> serde_json::Value {
         json!({

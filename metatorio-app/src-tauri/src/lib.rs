@@ -1134,7 +1134,14 @@ fn mechanic_flow(
         .iter()
         .find(|entry| entry.id == mechanic)
         .ok_or("机制不存在")?;
-    let game = metatorio_runtime::solve::make_game_state(&store, &project_doc);
+    let mut game = metatorio_runtime::solve::make_game_state(&store, &project_doc);
+    // 与求解路径一致：应用当前工厂的星球/地表环境（太阳能系数、昼夜周期）。
+    metatorio_runtime::solve::apply_environment_to_game_state(
+        &store,
+        &mut game,
+        factory_doc.settings.planet.as_deref(),
+        factory_doc.settings.surface.as_deref(),
+    );
     let context = metatorio_core::Context::new(&store, &game);
     let expansion = metatorio_core::expand::expand(
         std::iter::once((mechanic, &entry.mechanic)),
