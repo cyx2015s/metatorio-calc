@@ -104,6 +104,9 @@
     kinds: { kind: CatalogKind; label: string }[];
     categoryFilter?: string[];
     allowedNames?: string[];
+    /** 编辑模式：预选当前条目/品质（允许只改品质或只改条目后确认）。 */
+    initialName?: string;
+    initialQuality?: string;
     onSelect: (name: string, quality: string) => void;
   } | null>(null);
 
@@ -123,8 +126,19 @@
     kinds: { kind: CatalogKind; label: string }[] = [],
     categoryFilter?: string[],
     allowedNames?: string[],
+    initialName?: string,
+    initialQuality?: string,
   ) {
-    selector = { kind, title, kinds, categoryFilter, allowedNames, onSelect };
+    selector = {
+      kind,
+      title,
+      kinds,
+      categoryFilter,
+      allowedNames,
+      initialName,
+      initialQuality,
+      onSelect,
+    };
   }
 
   function renameContextPrompt(context: import("$lib/runtime/types").ContextInfo) {
@@ -562,8 +576,15 @@
     try {
       switch (kind) {
         case "recipe":
-          openSelector("recipe", "选择配方", (name, quality) =>
-            runtime.setRecipe(mechanic, name, quality),
+          openSelector(
+            "recipe",
+            "选择配方",
+            (name, quality) => runtime.setRecipe(mechanic, name, quality),
+            [],
+            [],
+            undefined,
+            entry?.mechanic.recipe?.id,
+            entry?.mechanic.recipe?.quality,
           );
           break;
         case "machine": {
@@ -578,6 +599,9 @@
             (name, quality) => runtime.setMachine(mechanic, name, quality),
             [{ kind: "machine", label: "制造机" }],
             filter,
+            undefined,
+            entry?.mechanic.machine?.id,
+            entry?.mechanic.machine?.quality,
           );
           break;
         }
@@ -593,6 +617,9 @@
             (name, quality) => runtime.setMachine(mechanic, name, quality),
             [{ kind: "mining-machine", label: "采矿机" }],
             filter,
+            undefined,
+            entry?.mechanic.machine?.id,
+            entry?.mechanic.machine?.quality,
           );
           break;
         }
@@ -608,6 +635,8 @@
             (name) => runtime.setResource(mechanic, name),
             [{ kind: "resource", label: "资源" }],
             filter,
+            undefined,
+            entry?.mechanic.resource,
           );
           break;
         }
@@ -680,32 +709,65 @@
             (name, quality) => runtime.setItem(mechanic, name, quality),
             [],
             filter,
+            undefined,
+            entry?.mechanic.item?.id,
+            entry?.mechanic.item?.quality,
           );
           break;
         }
         case "generator":
-          openSelector("generator", "选择发电机", (name, quality) =>
-            runtime.setGenerator(mechanic, name, quality),
+          openSelector(
+            "generator",
+            "选择发电机",
+            (name, quality) => runtime.setGenerator(mechanic, name, quality),
+            [],
+            [],
+            undefined,
+            entry?.mechanic.generator?.id,
+            entry?.mechanic.generator?.quality,
           );
           break;
         case "boiler":
-          openSelector("boiler", "选择锅炉", (name, quality) =>
-            runtime.setBoiler(mechanic, name, quality),
+          openSelector(
+            "boiler",
+            "选择锅炉",
+            (name, quality) => runtime.setBoiler(mechanic, name, quality),
+            [],
+            [],
+            undefined,
+            entry?.mechanic.boiler?.id,
+            entry?.mechanic.boiler?.quality,
           );
           break;
         case "reactor":
-          openSelector("reactor", "选择反应堆", (name, quality) =>
-            runtime.setReactor(mechanic, name, quality),
+          openSelector(
+            "reactor",
+            "选择反应堆",
+            (name, quality) => runtime.setReactor(mechanic, name, quality),
+            [],
+            [],
+            undefined,
+            entry?.mechanic.reactor?.id,
+            entry?.mechanic.reactor?.quality,
           );
           break;
         case "solar-panel":
-          openSelector("solar-panel", "选择太阳能板", (name, quality) =>
-            runtime.setSolarPanel(mechanic, name, quality),
+          openSelector(
+            "solar-panel",
+            "选择太阳能板",
+            (name, quality) => runtime.setSolarPanel(mechanic, name, quality),
+            [],
+            [],
+            undefined,
+            entry?.mechanic.solar_panel?.id,
+            entry?.mechanic.solar_panel?.quality,
           );
           break;
         case "accumulator":
-          openSelector("accumulator", "选择蓄电器", (name, quality) =>
-            runtime.setAccumulator(mechanic, name, quality),
+          openSelector(
+            "accumulator",
+            "选择蓄电器",
+            (name, quality) => runtime.setAccumulator(mechanic, name, quality),
           );
           break;
         case "module": {
@@ -726,6 +788,9 @@
           // 已选机器但鉴权后无可用插件：用不可能匹配的哨兵让选择器显示空。
           const allowedNames =
             machineId && allowed.length === 0 ? [""] : allowed.length > 0 ? allowed : undefined;
+          // 编辑已有槽位：预选当前插件（只改品质也可确认）。
+          const currentModule =
+            a != null ? entry?.mechanic.module_config?.modules[a] : undefined;
           openSelector(
             "module",
             machineId ? "选择插件" : "选择插件（先选择机器）",
@@ -733,6 +798,8 @@
             [],
             [],
             allowedNames,
+            currentModule?.id,
+            currentModule?.quality,
           );
           break;
         }
@@ -1704,6 +1771,8 @@
     kindOptions={selector.kinds}
     categoryFilter={selector.categoryFilter}
     allowedNames={selector.allowedNames}
+    initialName={selector.initialName}
+    initialQuality={selector.initialQuality}
     onSelect={selector.onSelect}
     onClose={() => (selector = null)}
   />
