@@ -149,7 +149,7 @@ export async function allowedModules(
   machine: string,
   recipe: string | null,
 ): Promise<string[]> {
-  return call("allowed_modules", { machine_kind: machineKind, machine, recipe });
+  return call("allowed_modules", { machineKind, machine, recipe });
 }
 
 // ── Persistence ───────────────────────────────────────────────────
