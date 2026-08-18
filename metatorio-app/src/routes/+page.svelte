@@ -1665,6 +1665,11 @@
     <aside class="col">
       <section class="panel">
         <div class="title">求解结果</div>
+        {#if runtime.solveError}
+          <div class="err-box prominent" title="最近一次求解/自动规划失败">
+            <strong>求解失败</strong>：{runtime.solveError}
+          </div>
+        {/if}
         {#if solve && "solved" in solve.status}
           {@const status = solve.status.solved}
           <div class="kv">
@@ -1706,8 +1711,6 @@
               <div>无消耗：{status.no_consumer.map(dualVarLabel).join(", ")}</div>
             {/if}
           </div>
-        {:else if runtime.solveError}
-          <div class="err-box">{runtime.solveError}</div>
         {:else}
           <div class="empty-hint">改完数据后点「重新求解」</div>
         {/if}

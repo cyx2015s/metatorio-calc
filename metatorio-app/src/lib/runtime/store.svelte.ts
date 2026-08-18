@@ -1228,6 +1228,9 @@ class RuntimeStore {
       });
     } catch (error) {
       this.solving = false;
+      // 求解失败：写入 solveError 让求解面板醒目显示
+      // （后端失败会发 solve-error 事件覆盖；dispatch 校验失败走这里）。
+      this.solveError = String(error);
       throw error;
     }
   }
@@ -1243,6 +1246,9 @@ class RuntimeStore {
       });
     } catch (error) {
       this.solving = false;
+      // 自动规划失败：同时写入 solveError，让求解面板醒目显示
+      // （后端失败会发 solve-error 事件覆盖；dispatch 校验失败走这里）。
+      this.solveError = String(error);
       throw error;
     }
   }

@@ -245,6 +245,13 @@ select {
   word-break: break-word;
 }
 
+/* 求解面板顶部的醒目错误横幅（求解/自动规划失败常驻显示）。 */
+.err-box.prominent {
+  margin: 0 0 8px;
+  border-width: 1px;
+  box-shadow: 0 0 0 1px var(--danger-line);
+}
+
 .chip {
   display: inline-flex;
   align-items: center;
