@@ -143,13 +143,18 @@ impl PrototypeStore {
     /// 任一原型反序列化失败 → 返回 [`LoadError`]（含全部失败明细）。
     ///
     /// 加载前先做 [`crate::adapt::normalize_2_0_dump`]：把 Factorio 2.0
-    /// 导出的字段形态（recipe 标量 category / 单数 result / Lua map
-    /// ingredients / normal+expensive 变体 / furnace 缺槽位字段）改写为
-    /// 2.1 schema 期望的形态；对已是 2.1 的 dump 幂等无操作。
+    /// 导出的字段形态改写为 2.1 schema 期望的形态（当前适配层：
+    /// recipe 的 category + additional_categories → categories 数组）。
+    /// 只有检测到 2.0 特征时才克隆并改写；已是 2.1 的 dump 直接复用。
     pub fn load(dump: &Value) -> Result<Self, LoadError> {
-        let mut normalized = dump.clone();
-        crate::adapt::normalize_2_0_dump(&mut normalized);
-        let dump = &normalized;
+        let mut normalized;
+        let dump = if crate::adapt::needs_adaptation(dump) {
+            normalized = dump.clone();
+            crate::adapt::normalize_2_0_dump(&mut normalized);
+            &normalized
+        } else {
+            dump
+        };
         let mut records: AIndexMap<PrototypeGroup, AIndexMap<String, PrototypeRecord>> =
             AIndexMap::default();
         let mut failures: Vec<(String, String, String)> = Vec::new();

@@ -19,6 +19,27 @@
 
 use serde_json::Value;
 
+/// 只读检测 dump 是否需要适配（存在任意 2.0 特征）。
+///
+/// 当前特征：recipe 使用 `category` 或 `additional_categories`
+/// （2.1 形态只用 `categories` 数组）。全量遍历 recipe 组，命中即返回
+/// true；无 recipe 组或已是 2.1 形态返回 false。调用方据此决定是否
+/// 克隆改写（避免对 2.1 dump 做无谓的深拷贝）。
+pub fn needs_adaptation(dump: &Value) -> bool {
+    let Some(recipes) = dump
+        .get("recipe")
+        .and_then(Value::as_object)
+    else {
+        return false;
+    };
+    recipes.values().any(|recipe| {
+        let Some(obj) = recipe.as_object() else {
+            return false;
+        };
+        obj.contains_key("category") || obj.contains_key("additional_categories")
+    })
+}
+
 /// 把 2.0 形态的 dump 规范化到 2.1 schema 可加载的形态。
 ///
 /// 对每个受影响的顶层类型组做就地改写；已经是 2.1 形态的 dump
@@ -184,6 +205,31 @@ mod tests {
         let before = dump.clone();
         normalize_2_0_dump(&mut dump);
         assert_eq!(dump, before, "2.1 形态应保持幂等");
+    }
+
+    #[test]
+    fn needs_adaptation_detects_20_features() {
+        let twenty = serde_json::json!({
+            "recipe": {
+                "iron-plate": {
+                    "type": "recipe", "name": "iron-plate",
+                    "category": "smelting",
+                    "energy_required": 1
+                }
+            }
+        });
+        assert!(needs_adaptation(&twenty), "2.0 category 应触发适配");
+        let twenty_one = serde_json::json!({
+            "recipe": {
+                "iron-plate": {
+                    "type": "recipe", "name": "iron-plate",
+                    "categories": ["smelting"],
+                    "energy_required": 1
+                }
+            }
+        });
+        assert!(!needs_adaptation(&twenty_one), "2.1 形态无需适配");
+        assert!(!needs_adaptation(&serde_json::json!({})), "空 dump 无需适配");
     }
 
     /// 端到端：规范化后的 2.0 形态 dump 能被 PrototypeStore 加载，
