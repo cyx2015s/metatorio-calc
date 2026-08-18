@@ -10,3 +10,5 @@
 rustc-ice-*.txt
 
 playground
+.git-commit-msg.txt
+
