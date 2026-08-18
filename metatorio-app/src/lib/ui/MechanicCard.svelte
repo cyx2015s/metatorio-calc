@@ -57,8 +57,10 @@
 
   // 机制展开流（系数 1 时每秒产/耗；正值产出、负值消耗）。
   // 有求解结果时按实际用量缩放显示；无求解结果时显示系数 1 的原始流。
+  // 依赖 entry.mechanic 整体：配方/机器/插件配置变化时重新加载。
   let mechanicFlows = $state<{ flow: import("$lib/runtime/types").DualVar; amount: number }[]>([]);
   $effect(() => {
+    const mechanic = entry.mechanic;
     let alive = true;
     mechanicFlow(project, factory, entry.id)
       .then((flows) => {
@@ -118,9 +120,20 @@
     return { type: "flow", name: dualVarLabel(flow) };
   }
 
-  /** 流 → 渲染键。 */
+  /** 流 → 渲染键（含品质：同物品不同品质的流是不同条目，避免 each key 冲突）。 */
   function dualVarKey(flow: import("$lib/runtime/types").DualVar): string {
+    const item = flow !== null && typeof flow === "object" ? (flow as { Item?: { id: string; quality?: string } }).Item : undefined;
+    if (item) return `item:${item.id}:${item.quality ?? "normal"}`;
     return dualVarLabel(flow);
+  }
+
+  /** 流的品质（Item 流且非 normal；否则空）。 */
+  function flowQualityOf(flow: import("$lib/runtime/types").DualVar): string {
+    if (flow !== null && typeof flow === "object") {
+      const item = (flow as { Item?: { quality?: string } }).Item;
+      if (item?.quality && item.quality !== "normal") return item.quality;
+    }
+    return "";
   }
 
   /** 流行数量文本（系数 1 或按求解用量缩放；复刻 egui compact_number）。 */
@@ -252,12 +265,16 @@
     <div class="flow-row">
       {#each mechanicFlows as item (dualVarKey(item.flow))}
         {@const icon = flowIconOf(item.flow)}
+        {@const quality = flowQualityOf(item.flow)}
         <span
           class="flow-chip"
           class:out={item.amount > 0}
-          title={`${dualVarLabel(item.flow)} ${item.amount > 0 ? "产出" : "消耗"} ×${(Math.abs(item.amount) * scale).toFixed(2)}/s`}
+          title={`${dualVarLabel(item.flow)}${quality ? `（${quality}）` : ""} ${item.amount > 0 ? "产出" : "消耗"} ×${(Math.abs(item.amount) * scale).toFixed(2)}/s`}
         >
           <Icon type={icon.type} name={icon.name} size={16} />
+          {#if quality}
+            <span class="flow-quality" title={quality}>{quality.slice(0, 2)}</span>
+          {/if}
           <span class="mono">{formatFlowQty(item.amount, scale)}</span>
         </span>
       {/each}
@@ -493,6 +510,16 @@
 
   .flow-chip .mono {
     color: var(--muted);
+  }
+
+  .flow-quality {
+    padding: 0 3px;
+    color: var(--accent);
+    background: var(--accent-dim);
+    border-radius: 3px;
+    font-family: var(--mono);
+    font-size: 9px;
+    font-weight: 700;
   }
 
   .row2b {
