@@ -115,8 +115,13 @@ pub fn planet_generated_tiles(store: &PrototypeStore, planet: &str) -> HashSet<S
     tiles
 }
 
-/// 星球自动生成的可用流（免费源）：autoplaced 资源实体（minable 产物）
-/// + 自动生成且带流体的 tile（水/岩浆等，按默认温度）。
+/// 星球自动生成的可用流（免费源）：autoplaced 资源实体（供给**实体**流，
+/// 由采矿机制消耗并产出物品）+ 自动生成且带流体的 tile（水/岩浆等，
+/// 按默认温度）。
+///
+/// 资源实体改为供给 `DualVar::Entity`（而非直接给 minable 产物物品）：
+/// 这样自动规划会选中采矿机制（消耗实体、产出物品），而不是绕过采矿
+/// 直接免费取物品。外部输入显式覆盖同名流时仍以外部输入为准。
 pub fn planet_autoplaced_flows(store: &PrototypeStore, planet: &str) -> Flow {
     let mut flow = Flow::default();
     let Some(map_gen) = planet_map_gen(store, planet) else {
@@ -143,7 +148,7 @@ pub fn planet_autoplaced_flows(store: &PrototypeStore, planet: &str) -> Flow {
     };
 
     // 资源实体：只有 resource 类视为无限（树/岩石等自动放置实体即使可挖掘
-    // 也不免费）；minable 产物 → 物品/流体流
+    // 也不免费）；供给实体流（采矿机制消耗），须可挖掘才有效。
     for record in store.group(PrototypeGroup::Entity) {
         if record.type_ != "resource" {
             continue;
@@ -155,33 +160,16 @@ pub fn planet_autoplaced_flows(store: &PrototypeStore, planet: &str) -> Flow {
         else {
             continue;
         };
-        if let Some(result) = &minable.result {
-            let amount = f64::from(minable.count.unwrap_or(1));
-            *flow
-                .entry(DualVar::Item(IdWithQuality::new(result.clone(), NORMAL_QUALITY)))
-                .or_insert(0.0) += amount;
+        if minable.mining_time <= 0.0 {
+            continue;
         }
-        for product in &minable.results {
-            match product {
-                Product::Item(item) => {
-                    *flow
-                        .entry(DualVar::Item(IdWithQuality::new(
-                            item.name.clone(),
-                            NORMAL_QUALITY,
-                        )))
-                        .or_insert(0.0) += f64::from(item.amount.unwrap_or(1));
-                }
-                Product::Fluid(fluid) => {
-                    let temperature = fluid_record_temperature(store, &fluid.name);
-                    *flow
-                        .entry(DualVar::Fluid {
-                            name: fluid.name.clone(),
-                            temperature,
-                        })
-                        .or_insert(0.0) += fluid.amount.unwrap_or(1.0);
-                }
-            }
+        let has_output = minable.result.is_some() || !minable.results.is_empty();
+        if !has_output {
+            continue;
         }
+        *flow
+            .entry(DualVar::Entity(IdWithQuality::new(&record.name, NORMAL_QUALITY)))
+            .or_insert(0.0) += 1.0;
     }
     // 带流体的自动生成 tile → 流体流（默认温度）
     for tile_name in planet_generated_tiles(store, planet) {
@@ -310,7 +298,7 @@ mod tests {
                 "iron-ore": {
                     "type": "resource", "name": "iron-ore",
                     "autoplace": { "control": "iron-ore" },
-                    "minable": { "result": "iron-ore" }
+                    "minable": { "result": "iron-ore", "mining_time": 1.0 }
                 }
             },
             "tile": {
@@ -406,9 +394,14 @@ mod tests {
     fn only_resource_entities_are_infinite_sources() {
         let store = test_store();
         let flows = planet_autoplaced_flows(&store, "nauvis");
-        // resource 类（iron-ore）→ 免费物品流
-        assert!(flows.contains_key(&DualVar::Item(IdWithQuality::new("iron-ore", "normal"))));
+        // resource 类（iron-ore）→ 免费**实体**流（由采矿机制消耗并产出物品）
+        assert!(flows.contains_key(&DualVar::Entity(IdWithQuality::new(
+            "iron-ore",
+            "normal"
+        ))));
+        // 不应直接给物品流（否则绕过采矿机制）
+        assert!(!flows.contains_key(&DualVar::Item(IdWithQuality::new("iron-ore", "normal"))));
         // 非 resource 的自动放置实体（rock，可挖掘）→ 不入免费列表
-        assert!(!flows.contains_key(&DualVar::Item(IdWithQuality::new("stone", "normal"))));
+        assert!(!flows.contains_key(&DualVar::Entity(IdWithQuality::new("rock", "normal"))));
     }
 }
