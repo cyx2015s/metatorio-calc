@@ -116,7 +116,16 @@ fn effective_recipe_categories(recipe: &RecipeComponent) -> Vec<String> {
 }
 
 /// 配方/机器的插件类别与效果限制（复刻 egui collect_module_limitations）。
-fn module_allowed(
+///
+/// 规则：
+/// - `machine_categories`（allowed_module_categories）：非空时必须包含
+///   插件类别（空/None = 全部支持）；
+/// - `machine_allowed_effects`（allowed_effects）：插件对应效果属性为
+///   正面（≠0）时，机器必须允许该效果类型，且配方也允许（recipe 的
+///   allow_speed/allow_productivity/...）。
+///
+/// 自动规划枚举与机制卡手动插件选择共用此鉴权。
+pub(super) fn module_allowed(
     module: &ModuleComponent,
     machine_categories: &Option<Vec<String>>,
     machine_allowed_effects: &Option<EffectTypeLimitation>,
@@ -966,6 +975,103 @@ mod tests {
                 variable.flow.contains_key(&DualVar::Electricity)
             }),
             "太阳能候选展开应产出电力"
+        );
+    }
+
+    /// 插件鉴权：类别限制 + 效果类型限制（机制卡手动选择与自动规划共用）。
+    #[test]
+    fn module_allowed_respects_category_and_effect_limits() {
+        let module = |category: &str, effect: metatorio_data::types::Effect| ModuleComponent {
+            category: category.to_string(),
+            effect,
+            ..Default::default()
+        };
+        let speed = module(
+            "speed",
+            metatorio_data::types::Effect {
+                speed: 0.3,
+                ..Default::default()
+            },
+        );
+        let productivity = module(
+            "productivity",
+            metatorio_data::types::Effect {
+                productivity: 0.04,
+                ..Default::default()
+            },
+        );
+        let efficiency = module(
+            "effectivity",
+            metatorio_data::types::Effect {
+                consumption: -0.3,
+                ..Default::default()
+            },
+        );
+
+        // 无任何限制：全部允许。
+        assert!(module_allowed(&speed, &None, &None, None));
+        assert!(module_allowed(&productivity, &None, &None, None));
+        assert!(module_allowed(&efficiency, &None, &None, None));
+
+        // 类别限制：只允许 "speed"。
+        let categories = Some(vec!["speed".to_string()]);
+        assert!(module_allowed(&speed, &categories, &None, None));
+        assert!(!module_allowed(&productivity, &categories, &None, None));
+        assert!(!module_allowed(&efficiency, &categories, &None, None));
+
+        // 效果类型限制：机器只允许 speed，拒绝 productivity/consumption。
+        let effects: EffectTypeLimitation = serde_json::from_str(r#"["speed"]"#).unwrap();
+        let effects = Some(effects);
+        assert!(module_allowed(&speed, &None, &effects, None));
+        assert!(!module_allowed(&productivity, &None, &effects, None));
+        assert!(
+            !module_allowed(&efficiency, &None, &effects, None),
+            "consumption 效果被禁止时应拒绝（即使为负值也按效果类型判）"
+        );
+
+        // 配方开关：配方禁止 productivity 时，即使机器允许也被拒。
+        let recipe = RecipeComponent {
+            allow_productivity: false,
+            ..Default::default()
+        };
+        assert!(!module_allowed(&productivity, &None, &None, Some(&recipe)));
+    }
+
+    /// 真实 dump：allowed_modules 命令路径的鉴权核心（module_allowed）对
+    /// 装配机-1（electric，全类别）应允许全部原生插件。
+    #[test]
+    fn real_dump_assembler_allows_vanilla_modules() {
+        let path = "C:\\Users\\mirac\\AppData\\Roaming\\Factorio\\script-output\\data-raw-dump.json";
+        if !std::path::Path::new(path).exists() {
+            eprintln!("[skip] 无真实 dump，跳过");
+            return;
+        }
+        let raw = std::fs::read(path).expect("读 dump");
+        let dump: serde_json::Value = serde_json::from_slice(&raw).expect("解析 dump");
+        let store = PrototypeStore::load(&dump).expect("dump 加载失败");
+        let Some(record) = store.get(PrototypeGroup::Entity, "assembling-machine-1") else {
+            return;
+        };
+        let Some(machine) = record.component::<CraftingMachineComponent>() else {
+            return;
+        };
+        let mut allowed_count = 0usize;
+        for item_record in store.group(PrototypeGroup::Item) {
+            let Some(module) = item_record.component::<ModuleComponent>() else {
+                continue;
+            };
+            if module_allowed(
+                module,
+                &machine.allowed_module_categories,
+                &machine.allowed_effects,
+                None,
+            ) {
+                allowed_count += 1;
+            }
+        }
+        assert!(
+            allowed_count >= 3,
+            "装配机-1 应允许至少 3 种原生插件（速度/产能/效率），实际 {allowed_count}"
         );
     }
 

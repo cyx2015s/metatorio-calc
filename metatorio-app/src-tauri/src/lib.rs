@@ -1204,6 +1204,85 @@ fn solar_balance(
     Ok(metatorio_core::solar_balance(&context, mechanic))
 }
 
+/// 指定机器/信标允许的插件列表（机制卡手动插件选择的鉴权）。
+///
+/// 规则（与自动规划 `module_allowed` 一致）：
+/// - 显式插件类别（allowed_module_categories）非空时，插件类别必须在其中
+///   （留空 = 全部支持）；
+/// - 禁止的效果类型（allowed_effects）缺失/为空时，插件对应效果属性为
+///   正面（≠0）即被拒绝；配方机制还叠加配方的 allow_speed/allow_productivity
+///   等开关。
+///
+/// `machine_kind`: "machine" | "mining-machine" | "beacon"。
+/// `recipe`: 可选配方名（仅 recipe 机制传入；采矿/信标为 None）。
+#[tauri::command]
+fn allowed_modules(
+    state: State<'_, AppState>,
+    machine_kind: String,
+    machine: String,
+    recipe: Option<String>,
+) -> Result<Vec<String>, String> {
+    let mut runtime = state
+        .runtime
+        .lock()
+        .map_err(|_| "runtime lock poisoned".to_string())?;
+    let Some(id) = runtime.effective_context_id() else {
+        return Ok(Vec::new());
+    };
+    ensure_context_loaded(&state, &mut runtime, &id)?;
+    let store = runtime.context_store_by_id(&id).ok_or("上下文未载入")?;
+    let Some(record) = store.get(PrototypeGroup::Entity, &machine) else {
+        return Ok(Vec::new());
+    };
+    // 收集机器/采矿机/信标的插件类别与效果限制。
+    let (categories, effects) = match machine_kind.as_str() {
+        "mining-machine" => record
+            .component::<MiningDrillComponent>()
+            .map(|drill| {
+                (
+                    drill.allowed_module_categories.clone(),
+                    drill.allowed_effects.clone(),
+                )
+            })
+            .unwrap_or((None, None)),
+        "beacon" => record
+            .component::<BeaconComponent>()
+            .map(|beacon| {
+                (
+                    beacon.allowed_module_categories.clone(),
+                    beacon.allowed_effects.clone(),
+                )
+            })
+            .unwrap_or((None, None)),
+        _ => record
+            .component::<CraftingMachineComponent>()
+            .map(|machine| {
+                (
+                    machine.allowed_module_categories.clone(),
+                    machine.allowed_effects.clone(),
+                )
+            })
+            .unwrap_or((None, None)),
+    };
+    let recipe_component = recipe.as_deref().and_then(|name| {
+        store
+            .get(PrototypeGroup::Recipe, name)
+            .and_then(|record| record.component::<RecipeComponent>())
+    });
+    let mut out = Vec::new();
+    for item_record in store.group(PrototypeGroup::Item) {
+        let Some(module) = item_record.component::<ModuleComponent>() else {
+            continue;
+        };
+        if auto_plan::module_allowed(module, &categories, &effects, recipe_component) {
+            out.push(item_record.name.clone());
+        }
+    }
+    // 稳定排序（catalog 顺序由 order 决定，这里按名称保证可预测）。
+    out.sort();
+    Ok(out)
+}
+
 /// 生成候选机制（与 suggest 命令共用；AutoPlan 也用它）。
 ///
 /// 对物品/流体同时收集：
@@ -2811,6 +2890,7 @@ pub fn run() {
             implicit_sources,
             mechanic_flow,
             solar_balance,
+            allowed_modules,
             dispatch,
             get_document,
             get_ui_state,

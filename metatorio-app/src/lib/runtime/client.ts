@@ -139,6 +139,19 @@ export async function solarBalance(
   return call("solar_balance", { project, factory, mechanic });
 }
 
+/**
+ * 指定机器/信标允许的插件名列表（机制卡手动插件选择鉴权）。
+ * machineKind: "machine" | "mining-machine" | "beacon"。
+ * recipe: 可选配方名（recipe 机制传入；采矿/信标为 null）。
+ */
+export async function allowedModules(
+  machineKind: string,
+  machine: string,
+  recipe: string | null,
+): Promise<string[]> {
+  return call("allowed_modules", { machine_kind: machineKind, machine, recipe });
+}
+
 // ── Persistence ───────────────────────────────────────────────────
 
 export async function openProjectDialog(): Promise<AppDocument | null> {

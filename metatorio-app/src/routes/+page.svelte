@@ -4,7 +4,7 @@
   import { onMount } from "svelte";
   import { dndzone } from "svelte-dnd-action";
   import { runtime } from "$lib/runtime/store.svelte.ts";
-  import { pickGameExecutable, pickModDir, suggest } from "$lib/runtime/client";
+  import { allowedModules, pickGameExecutable, pickModDir, suggest } from "$lib/runtime/client";
   import { dualVarLabel, flowQuality, itemOf } from "$lib/runtime/types";
   import { signedCompactNumber } from "$lib/format";
   import type { CatalogKind, DualVar, MechanicId, TargetId } from "$lib/runtime/types";
@@ -709,7 +709,8 @@
           );
           break;
         case "module": {
-          // 机器插件：按机器允许的插件类别过滤；添加前校验槽数。
+          // 机器插件：按机器允许的插件鉴权（类别 + 效果类型 + 配方开关）
+          // 过滤；添加前校验槽数。
           const machineId = entry?.mechanic.machine?.id;
           const detailKind = entry?.mechanic.type === "mining" ? "mining-machine" : "machine";
           const slots = machineModuleSlots(machineId);
@@ -718,15 +719,20 @@
             showNotice(`插件槽已满（${slots} 个）`);
             break;
           }
-          const filter = machineId
-            ? (await runtime.getDetail(detailKind, machineId))?.allowed_module_categories ?? []
+          const recipeId = entry?.mechanic.type === "recipe" ? (entry?.mechanic.recipe?.id ?? null) : null;
+          const allowed = machineId
+            ? await allowedModules(detailKind, machineId, recipeId)
             : [];
+          // 已选机器但鉴权后无可用插件：用不可能匹配的哨兵让选择器显示空。
+          const allowedNames =
+            machineId && allowed.length === 0 ? [""] : allowed.length > 0 ? allowed : undefined;
           openSelector(
             "module",
-            "选择插件",
+            machineId ? "选择插件" : "选择插件（先选择机器）",
             (name, quality) => runtime.setModuleSlot(mechanic, a ?? 0, name, quality),
             [],
-            filter,
+            [],
+            allowedNames,
           );
           break;
         }
@@ -756,14 +762,15 @@
               break;
             }
           }
-          // 塔内插件按该信标允许的插件类别过滤（与机器插件同理）
-          const filter = beaconCfg?.beacon.id
-            ? (await runtime.getDetail("beacon", beaconCfg.beacon.id))
-                ?.allowed_module_categories ?? []
-            : [];
+          // 塔内插件按该信标允许的插件鉴权过滤（类别 + 效果类型；与机器同理）
+          const beaconId = beaconCfg?.beacon.id;
+          const allowed = beaconId ? await allowedModules("beacon", beaconId, null) : [];
+          // 已选信标但鉴权后无可用插件：用不可能匹配的哨兵让选择器显示空。
+          const allowedNames =
+            beaconId && allowed.length === 0 ? [""] : allowed.length > 0 ? allowed : undefined;
           openSelector(
             "module",
-            "选择塔内插件",
+            beaconId ? "选择塔内插件" : "选择塔内插件（先选择信标）",
             (name, quality) => {
               const value = { id: name, quality };
               if (moduleIdx >= beaconModuleCount) {
@@ -779,7 +786,8 @@
               }
             },
             [],
-            filter,
+            [],
+            allowedNames,
           );
           break;
         }
