@@ -141,7 +141,15 @@ impl PrototypeStore {
     /// 遍历 `COMPONENT_LIST` 的关注键，每个原型按组件清单反序列化，
     /// 推导聚合标签，按 `(group, name)` 合并（同键重复时组件并集，罕见）。
     /// 任一原型反序列化失败 → 返回 [`LoadError`]（含全部失败明细）。
+    ///
+    /// 加载前先做 [`crate::adapt::normalize_2_0_dump`]：把 Factorio 2.0
+    /// 导出的字段形态（recipe 标量 category / 单数 result / Lua map
+    /// ingredients / normal+expensive 变体 / furnace 缺槽位字段）改写为
+    /// 2.1 schema 期望的形态；对已是 2.1 的 dump 幂等无操作。
     pub fn load(dump: &Value) -> Result<Self, LoadError> {
+        let mut normalized = dump.clone();
+        crate::adapt::normalize_2_0_dump(&mut normalized);
+        let dump = &normalized;
         let mut records: AIndexMap<PrototypeGroup, AIndexMap<String, PrototypeRecord>> =
             AIndexMap::default();
         let mut failures: Vec<(String, String, String)> = Vec::new();

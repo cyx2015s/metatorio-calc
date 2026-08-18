@@ -1,17 +1,13 @@
-自动规划失败诊断：剪枝阶段报告缺少的物品/流
+新增 Factorio 2.0 → 2.1 数据适配层（adapt 模块）
 
-求解器剪枝（trim_flows）在严格供给下移除"消耗无法获得物品"的配方，
-但之前只记日志、不向 NoProvider/描述传播——失败的根因物品在剪枝后
-静默消失，前端只看到笼统的"无可行解"。
+schema（prototype-api.json）面向 2.1.14；2.0 导出的 data-raw-dump.json
+字段形态有差异，直接反序列化会失败。从官方 schema 更新 commit 86317bd
+推导字段变化，提供就地规范化适配层，每个适配层一个独立函数便于扩展。
 
-改进：
-- SolverData 新增 pruned_missing：剪枝时记录"无任何配方产出、外部
-  也不供给"的物品/流（只记录第一轮，后续轮次缺失是连锁反应，不是
-  根因；trim_flows 加 record_missing 参数）。
-- 求解失败时把这些物品并入 no_provider，并在描述里列出
-  （"剪枝阶段缺少供给的物品/流 N 个：…"）。
-- 测试：pruning_reports_missing_item_in_description_and_no_provider
-  + trim_flows 单测断言 pruned_missing。
+首个适配层：adapt_recipe_categories —— 2.0 recipe 的 category（标量）
++ additional_categories（数组）在 2.1 合并为单个 categories 数组
+（category 在前、additional 依次追加、去重；已含 categories 的 2.1
+形态幂等不变）。
 
-另：太阳能配平对 performance_at_night > performance_at_day 的反向
-性能曲线取波动幅度 |Δ|（之前 max(0.0) 会吞掉储能需求），补测试。
+PrototypeStore::load 在反序列化前调用 normalize_2_0_dump；含
+category 合并端到端加载测试与 7 个单测。
