@@ -120,9 +120,9 @@ fn effective_recipe_categories(recipe: &RecipeComponent) -> Vec<String> {
 /// 规则：
 /// - `machine_categories`（allowed_module_categories）：非空时必须包含
 ///   插件类别（空/None = 全部支持）；
-/// - `machine_allowed_effects`（allowed_effects）：插件对应效果属性为
-///   正面（≠0）时，机器必须允许该效果类型，且配方也允许（recipe 的
-///   allow_speed/allow_productivity/...）。
+/// - `machine_allowed_effects`（allowed_effects）：插件**正面**效果属性
+///   （> 0）必须被机器允许（负面效果如品质惩罚不限制）；配方机制还
+///   叠加配方的 allow_speed/allow_productivity/... 开关。
 ///
 /// 自动规划枚举与机制卡手动插件选择共用此鉴权。
 pub(super) fn module_allowed(
@@ -140,12 +140,12 @@ pub(super) fn module_allowed(
         recipe_allow && machine_allowed_effects.is_none_or(|limits| limits[kind])
     };
     let effect = &module.effect;
-    if effect.speed != 0.0
+    if effect.speed > 0.0
         && !recipe_allowed(EffectType::Speed, recipe.is_none_or(|r| r.allow_speed))
     {
         return false;
     }
-    if effect.productivity != 0.0
+    if effect.productivity > 0.0
         && !recipe_allowed(
             EffectType::Productivity,
             recipe.is_none_or(|r| r.allow_productivity),
@@ -153,12 +153,12 @@ pub(super) fn module_allowed(
     {
         return false;
     }
-    if effect.quality != 0.0
+    if effect.quality > 0.0
         && !recipe_allowed(EffectType::Quality, recipe.is_none_or(|r| r.allow_quality))
     {
         return false;
     }
-    if effect.consumption != 0.0
+    if effect.consumption > 0.0
         && !recipe_allowed(
             EffectType::Consumption,
             recipe.is_none_or(|r| r.allow_consumption),
@@ -166,7 +166,7 @@ pub(super) fn module_allowed(
     {
         return false;
     }
-    if effect.pollution != 0.0
+    if effect.pollution > 0.0
         && !recipe_allowed(EffectType::Pollution, recipe.is_none_or(|r| r.allow_pollution))
     {
         return false;
@@ -1007,6 +1007,23 @@ mod tests {
                 ..Default::default()
             },
         );
+        // 混合效果：speed 正面 + quality 负面（惩罚）——真实 speed-module 形态。
+        let speed_with_quality_penalty = module(
+            "speed",
+            metatorio_data::types::Effect {
+                speed: 0.2,
+                quality: -0.01,
+                ..Default::default()
+            },
+        );
+        // 正面 quality 效果（品质插件）。
+        let quality = module(
+            "quality",
+            metatorio_data::types::Effect {
+                quality: 0.1,
+                ..Default::default()
+            },
+        );
 
         // 无任何限制：全部允许。
         assert!(module_allowed(&speed, &None, &None, None));
@@ -1019,14 +1036,20 @@ mod tests {
         assert!(!module_allowed(&productivity, &categories, &None, None));
         assert!(!module_allowed(&efficiency, &categories, &None, None));
 
-        // 效果类型限制：机器只允许 speed，拒绝 productivity/consumption。
+        // 效果类型限制：机器只允许 speed。正面 productivity/quality 被拒；
+        // 负面 consumption（省电效率插件）不受限制。
         let effects: EffectTypeLimitation = serde_json::from_str(r#"["speed"]"#).unwrap();
         let effects = Some(effects);
         assert!(module_allowed(&speed, &None, &effects, None));
         assert!(!module_allowed(&productivity, &None, &effects, None));
+        assert!(!module_allowed(&quality, &None, &effects, None));
         assert!(
-            !module_allowed(&efficiency, &None, &effects, None),
-            "consumption 效果被禁止时应拒绝（即使为负值也按效果类型判）"
+            module_allowed(&efficiency, &None, &effects, None),
+            "负面 consumption 效果不受效果类型限制（规则只约束正面属性）"
+        );
+        assert!(
+            module_allowed(&speed_with_quality_penalty, &None, &effects, None),
+            "speed 正面被允许 + quality 负面（惩罚）不应被禁"
         );
 
         // 配方开关：配方禁止 productivity 时，即使机器允许也被拒。
@@ -1055,7 +1078,7 @@ mod tests {
         let Some(machine) = record.component::<CraftingMachineComponent>() else {
             return;
         };
-        let mut allowed_count = 0usize;
+        let mut allowed: Vec<String> = Vec::new();
         for item_record in store.group(PrototypeGroup::Item) {
             let Some(module) = item_record.component::<ModuleComponent>() else {
                 continue;
@@ -1066,12 +1089,26 @@ mod tests {
                 &machine.allowed_effects,
                 None,
             ) {
-                allowed_count += 1;
+                allowed.push(item_record.name.clone());
             }
         }
         assert!(
-            allowed_count >= 3,
-            "装配机-1 应允许至少 3 种原生插件（速度/产能/效率），实际 {allowed_count}"
+            allowed.len() >= 3,
+            "装配机-1 应允许至少 3 种原生插件（速度/产能/效率），实际 {allowed:?}"
+        );
+        assert!(
+            allowed.iter().any(|name| name.starts_with("speed-module")),
+            "装配机-1 应允许速度插件（speed-module 含 quality=-0.01 惩罚，旧逻辑因负面效果误拒，回归修复后应放行）：{allowed:?}"
+        );
+        assert!(
+            allowed.iter().any(|name| name.starts_with("efficiency-module")),
+            "装配机-1 应允许效率插件（负面 consumption 不受限制）：{allowed:?}"
+        );
+        // 装配机-1 的 allowed_effects 不含 productivity/quality：产能/品质
+        // 插件应被拒绝（游戏设计如此，不是 bug）。
+        assert!(
+            allowed.iter().all(|name| !name.starts_with("productivity-module")),
+            "装配机-1 不应允许产能插件（allowed_effects 无 productivity）：{allowed:?}"
         );
     }
 
