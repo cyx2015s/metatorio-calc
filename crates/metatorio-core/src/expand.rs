@@ -222,13 +222,13 @@ fn restrict_effect(
         EffectType::Consumption,
         recipe.is_none_or(|recipe| recipe.allow_consumption),
     ) {
-        effect.consumption = 0.0;
+        effect.consumption = effect.consumption.max(0.0);
     }
     if !allowed(
         EffectType::Speed,
         recipe.is_none_or(|recipe| recipe.allow_speed),
     ) {
-        effect.speed = 0.0;
+        effect.speed = effect.speed.min(0.0);
     }
     if !allowed(
         EffectType::Productivity,
@@ -240,13 +240,13 @@ fn restrict_effect(
         EffectType::Pollution,
         recipe.is_none_or(|recipe| recipe.allow_pollution),
     ) {
-        effect.pollution = 0.0;
+        effect.pollution = effect.pollution.max(0.0);
     }
     if !allowed(
         EffectType::Quality,
         recipe.is_none_or(|recipe| recipe.allow_quality),
     ) {
-        effect.quality = 0.0;
+        effect.quality = effect.quality.min(0.0);
     }
     effect
 }
