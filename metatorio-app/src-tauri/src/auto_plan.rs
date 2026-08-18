@@ -121,7 +121,9 @@ fn effective_recipe_categories(recipe: &RecipeComponent) -> Vec<String> {
 /// - `machine_categories`（allowed_module_categories）：非空时必须包含
 ///   插件类别（空/None = 全部支持）；
 /// - `machine_allowed_effects`（allowed_effects）：插件**正面**效果属性
-///   （> 0）必须被机器允许（负面效果如品质惩罚不限制）；配方机制还
+///   必须被机器允许。正面方向按效果类型区分：速度/产能/品质越高越好
+///   （> 0 触发鉴权），污染/能耗越低越好（< 0 即降低污染/能耗才是正面，
+///   触发鉴权）。反向效果（如品质惩罚、增加能耗）不限制；配方机制还
 ///   叠加配方的 allow_speed/allow_productivity/... 开关。
 ///
 /// 自动规划枚举与机制卡手动插件选择共用此鉴权。
@@ -158,7 +160,8 @@ pub(super) fn module_allowed(
     {
         return false;
     }
-    if effect.consumption > 0.0
+    // 能耗/污染：正面 = 降低（< 0），即减能耗/减污染需要许可。
+    if effect.consumption < 0.0
         && !recipe_allowed(
             EffectType::Consumption,
             recipe.is_none_or(|r| r.allow_consumption),
@@ -166,7 +169,7 @@ pub(super) fn module_allowed(
     {
         return false;
     }
-    if effect.pollution > 0.0
+    if effect.pollution < 0.0
         && !recipe_allowed(EffectType::Pollution, recipe.is_none_or(|r| r.allow_pollution))
     {
         return false;
@@ -1037,19 +1040,39 @@ mod tests {
         assert!(!module_allowed(&efficiency, &categories, &None, None));
 
         // 效果类型限制：机器只允许 speed。正面 productivity/quality 被拒；
-        // 负面 consumption（省电效率插件）不受限制。
+        // 效率插件（consumption=-0.3，降低能耗）需要 consumption 许可，
+        // 机器只允许 speed 时同样被拒（降低能耗是正面效果）。
         let effects: EffectTypeLimitation = serde_json::from_str(r#"["speed"]"#).unwrap();
         let effects = Some(effects);
         assert!(module_allowed(&speed, &None, &effects, None));
         assert!(!module_allowed(&productivity, &None, &effects, None));
         assert!(!module_allowed(&quality, &None, &effects, None));
         assert!(
-            module_allowed(&efficiency, &None, &effects, None),
-            "负面 consumption 效果不受效果类型限制（规则只约束正面属性）"
+            !module_allowed(&efficiency, &None, &effects, None),
+            "降低能耗（consumption<0）是正面效果，机器只允许 speed 时应拒绝"
         );
         assert!(
             module_allowed(&speed_with_quality_penalty, &None, &effects, None),
             "speed 正面被允许 + quality 负面（惩罚）不应被禁"
+        );
+
+        // 机器允许 speed+consumption 时，效率插件（降低能耗）放行。
+        let effects2: EffectTypeLimitation =
+            serde_json::from_str(r#"["speed","consumption"]"#).unwrap();
+        assert!(module_allowed(&efficiency, &None, &Some(effects2), None));
+
+        // 增加能耗的插件（consumption>0，负面效果）不需要 consumption 许可。
+        let wasteful = module(
+            "speed",
+            metatorio_data::types::Effect {
+                speed: 0.3,
+                consumption: 0.5,
+                ..Default::default()
+            },
+        );
+        assert!(
+            module_allowed(&wasteful, &None, &effects, None),
+            "增加能耗（consumption>0）是负面效果，不应被限制"
         );
 
         // 配方开关：配方禁止 productivity 时，即使机器允许也被拒。
