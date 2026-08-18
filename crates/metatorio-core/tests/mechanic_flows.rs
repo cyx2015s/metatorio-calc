@@ -307,3 +307,92 @@ fn item_launch_uses_rocket_silo_capacity() {
     assert_eq!(flow[&DualVar::RocketSlotCapacity], -10.0);
     assert_eq!(flow[&DualVar::Item(id("science"))], 1000.0);
 }
+
+/// 配方 + 品质插件：品质效果把产出拆分为多品质流（normal + 升级品质），
+/// 配方机制卡应显示这些流量（回归：带品质插件的配方流量不显示）。
+#[test]
+fn recipe_with_quality_module_produces_multi_quality_flow() {
+    let dump = json!({
+        "item": {
+            "iron-ore": { "type": "item", "name": "iron-ore", "stack_size": 50 },
+            "iron-plate": { "type": "item", "name": "iron-plate", "stack_size": 100 },
+            "quality-module": {
+                "type": "item", "name": "quality-module",
+                "category": "quality"
+            }
+        },
+        "quality": {
+            "normal": { "type": "quality", "name": "normal", "level": 0, "next": "uncommon", "next_probability": 1.0 },
+            "uncommon": { "type": "quality", "name": "uncommon", "level": 1 }
+        },
+        "recipe": {
+            "iron-plate": {
+                "type": "recipe", "name": "iron-plate",
+                "category": "smelting",
+                "energy_required": 1,
+                "ingredients": [{ "type": "item", "name": "iron-ore", "amount": 1 }],
+                "results": [{ "type": "item", "name": "iron-plate", "amount": 1 }]
+            }
+        },
+        "assembling-machine": {
+            "assembling-machine-1": {
+                "type": "assembling-machine", "name": "assembling-machine-1",
+                "crafting_categories": ["smelting"], "crafting_speed": 1, "module_slots": 1,
+                "energy_usage": "90kW",
+                "energy_source": { "type": "electric", "drain": "0J" },
+                "allowed_effects": ["speed", "productivity", "quality", "consumption", "pollution"]
+            }
+        },
+        "module": {
+            "quality-module": {
+                "type": "module", "name": "quality-module",
+                "category": "quality",
+                "effect": { "quality": 0.5, "speed": -0.05, "consumption": 0.3 }
+            }
+        }
+    });
+    let mechanic = Mechanic::Recipe(metatorio_core::RecipeMechanic {
+        recipe: IdWithQuality::new("iron-plate", "normal"),
+        machine: IdWithQuality::new("assembling-machine-1", "normal"),
+        module_config: metatorio_core::ModuleConfig {
+            modules: vec![IdWithQuality::new("quality-module", "normal")],
+            beacons: vec![],
+        },
+        fuel: None,
+        fuel_temperature: None,
+    });
+    let store = PrototypeStore::load(&dump).expect("dump should load");
+    let game = GameState {
+        qualities: vec!["normal".to_string(), "uncommon".to_string()],
+        max_quality: 1,
+        ..Default::default()
+    };
+    let ctx = Context::new(&store, &game);
+    let expansion = expand([(0usize, &mechanic)], &ctx);
+    assert_eq!(expansion.len(), 1, "mechanic should produce one variable");
+    let flow = &expansion.variables[0].flow;
+    // 品质插件生效：产出含 normal 与 uncommon 两种品质的铁板流。
+    let normal = flow
+        .get(&DualVar::Item(IdWithQuality::new("iron-plate", "normal")))
+        .copied()
+        .unwrap_or(0.0);
+    let uncommon = flow
+        .get(&DualVar::Item(IdWithQuality::new("iron-plate", "uncommon")))
+        .copied()
+        .unwrap_or(0.0);
+    assert!(
+        normal > 0.0 && uncommon > 0.0,
+        "品质插件应把产出拆分为多品质流：normal={normal} uncommon={uncommon}, flow={flow:?}"
+    );
+    // 品质分布各占一半（next_probability=1.0，quality=0.5 直接升级一级）。
+    assert!(
+        (normal - uncommon).abs() < 1e-9,
+        "normal 与 uncommon 产出应相等：normal={normal} uncommon={uncommon}"
+    );
+    // 原料仍是 normal 铁矿石（配方品质 normal 输入）。
+    assert!(
+        flow.get(&DualVar::Item(IdWithQuality::new("iron-ore", "normal")))
+            .is_some(),
+        "应消耗 normal 铁矿石"
+    );
+}
