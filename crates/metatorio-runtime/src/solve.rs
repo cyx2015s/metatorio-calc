@@ -589,9 +589,10 @@ pub fn make_game_state(prototype: &PrototypeStore, project: &ProjectDocument) ->
 ///
 /// 规则（复刻需求设计）：
 /// - 同时设置星球与地表（太空平台等）：用"太空中的太阳能"系数
-///   （space-location 的 solar_power_in_space）；
-/// - 否则（星球表面）：用"大气中的太阳能"系数（surface_properties
-///   里的 solar-power；缺失回退 1.0）。
+///   （space-location 的 solar_power_in_space，是倍率，直接使用）；
+/// - 否则（星球表面）：用"大气中的太阳能"系数。surface_properties
+///   的 `solar-power` 是**百分比**（surface-property 默认值 100 即
+///   nauvis 的 100%），需 ÷100 换算为倍率；缺失回退 1.0。
 /// - day-night-cycle 来自星球 surface_properties，缺失回退 25200。
 pub fn apply_environment_to_game_state(
     store: &PrototypeStore,
@@ -618,7 +619,8 @@ pub fn apply_environment_to_game_state(
                 record.component::<metatorio_data::generated_components::PlanetComponent>()
             {
                 if let Some(&value) = component.surface_properties.get("solar-power") {
-                    game.solar_power_multiplier = value;
+                    // 百分比 → 倍率（nauvis 默认 100 → 1.0）
+                    game.solar_power_multiplier = value / 100.0;
                 }
                 if let Some(&cycle) = component.surface_properties.get("day-night-cycle") {
                     game.day_night_cycle = cycle;
