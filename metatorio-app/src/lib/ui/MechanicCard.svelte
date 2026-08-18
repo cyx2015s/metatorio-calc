@@ -3,6 +3,7 @@
   // 机器为图标按钮，插件配置在展开区（ModuleEditor）。
   import { runtime } from "$lib/runtime/store.svelte.ts";
   import { mechanicFlow, solarBalance } from "$lib/runtime/client";
+  import FlowChip from "./FlowChip.svelte";
   import HoverIcon from "./HoverIcon.svelte";
   import Icon from "./Icon.svelte";
   import ModuleEditor from "./ModuleEditor.svelte";
@@ -97,48 +98,11 @@
 
   let kind = $derived(entry.mechanic.type);
 
-  /** 流 → 图标 (type, name)。 */
-  function flowIconOf(flow: import("$lib/runtime/types").DualVar): { type: string; name: string } {
-    if (flow !== null && typeof flow === "object") {
-      if ("Item" in flow) {
-        const item = (flow as { Item: { id: string } }).Item;
-        return { type: "item", name: item.id };
-      }
-      if ("Fluid" in flow) {
-        const fluid = (flow as { Fluid: { name: string } }).Fluid;
-        return { type: "fluid", name: fluid.name };
-      }
-      if ("Entity" in flow) {
-        const entity = (flow as { Entity: { id: string } }).Entity;
-        return { type: "entity", name: entity.id };
-      }
-    }
-    if (typeof flow === "string") {
-      if (flow === "Electricity") return { type: "flow", name: "Electricity" };
-      if (flow === "Heat") return { type: "flow", name: "Heat" };
-    }
-    return { type: "flow", name: dualVarLabel(flow) };
-  }
-
   /** 流 → 渲染键（含品质：同物品不同品质的流是不同条目，避免 each key 冲突）。 */
   function dualVarKey(flow: import("$lib/runtime/types").DualVar): string {
     const item = flow !== null && typeof flow === "object" ? (flow as { Item?: { id: string; quality?: string } }).Item : undefined;
     if (item) return `item:${item.id}:${item.quality ?? "normal"}`;
     return dualVarLabel(flow);
-  }
-
-  /** 流的品质（Item 流且非 normal；否则空）。 */
-  function flowQualityOf(flow: import("$lib/runtime/types").DualVar): string {
-    if (flow !== null && typeof flow === "object") {
-      const item = (flow as { Item?: { quality?: string } }).Item;
-      if (item?.quality && item.quality !== "normal") return item.quality;
-    }
-    return "";
-  }
-
-  /** 流行数量文本（系数 1 或按求解用量缩放；复刻 egui compact_number）。 */
-  function formatFlowQty(amount: number, scale: number): string {
-    return compactNumber(Math.abs(amount) * scale);
   }
   let primaryName = $derived(
     entry.mechanic.recipe?.id ??
@@ -264,19 +228,7 @@
     {@const scale = solution ? Math.max(0, solution.amount) : 1}
     <div class="flow-row">
       {#each mechanicFlows as item (dualVarKey(item.flow))}
-        {@const icon = flowIconOf(item.flow)}
-        {@const quality = flowQualityOf(item.flow)}
-        <span
-          class="flow-chip"
-          class:out={item.amount > 0}
-          title={`${dualVarLabel(item.flow)}${quality ? `（${quality}）` : ""} ${item.amount > 0 ? "产出" : "消耗"} ×${(Math.abs(item.amount) * scale).toFixed(2)}/s`}
-        >
-          <Icon type={icon.type} name={icon.name} size={16} />
-          {#if quality}
-            <span class="flow-quality" title={quality}>{quality.slice(0, 2)}</span>
-          {/if}
-          <span class="mono">{formatFlowQty(item.amount, scale)}</span>
-        </span>
+        <FlowChip flow={item.flow} amount={item.amount} {scale} />
       {/each}
     </div>
   {/if}
@@ -490,36 +442,6 @@
     flex-wrap: wrap;
     gap: 4px;
     padding-top: 2px;
-  }
-
-  .flow-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
-    padding: 1px 5px 1px 2px;
-    background: var(--bg);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-sm);
-    font-size: 10px;
-  }
-
-  .flow-chip.out {
-    border-color: var(--accent-line);
-    background: color-mix(in srgb, var(--card) 88%, var(--accent) 5%);
-  }
-
-  .flow-chip .mono {
-    color: var(--muted);
-  }
-
-  .flow-quality {
-    padding: 0 3px;
-    color: var(--accent);
-    background: var(--accent-dim);
-    border-radius: 3px;
-    font-family: var(--mono);
-    font-size: 9px;
-    font-weight: 700;
   }
 
   .row2b {
