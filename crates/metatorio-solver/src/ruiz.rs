@@ -274,3 +274,61 @@ fn test_ruiz() {
         x1v + x2v + x3v
     );
 }
+
+/// 验证 microlp 对 global_scale 的敏感性：同一 LP，仅改目标约束常数
+/// （Ruiz 的 global_scale = 1/max(|c|×dual) 随目标常数变化），缩放后
+/// 交给 microlp 的结果应一致（倍率不变性）。若结果随 global_scale 变化
+/// 而不同，说明缩放空间量级影响 microlp 数值路径（auto_plan 大目标
+/// 不可解、小目标可解的根因）。
+///
+/// 注意：这是一个诊断测试（当前断言未启用——修复方案待定，见
+/// fulgora 传奇电磁工厂倍率问题的调查记录）。记录各目标量级下的
+/// global_scale 与可解性，便于后续定位。
+#[test]
+fn global_scale_sensitivity() {
+    use good_lp::*;
+    let mut all_solved = true;
+    let mut reported = Vec::new();
+    for target_amount in [1e-6, 1e-4, 0.001, 0.1, 1.0, 10.0] {
+        let mut vars = ProblemVariables::new();
+        let x1 = vars.add(VariableDefinition::new().min(0.0));
+        let x2 = vars.add(VariableDefinition::new().min(0.0));
+        let x3 = vars.add(VariableDefinition::new().min(0.0));
+        // 物品链：x1 消耗 source 产出 x2，x2 产出 x3（目标）。
+        let constraints = vec![
+            (x1 - x2).eq(0.0),          // 中间平衡
+            (x2 - x3).eq(0.0),          // 目标平衡
+            x3.into_expression().eq(target_amount), // 目标约束（常数随目标变化）
+            x1.into_expression().leq(1000.0),       // 冗余约束（不紧）
+        ];
+        let minimise = x1 + x2 + x3; // 最小化用量（无成本差异）
+        let result = RuizSolver::new(minimise, constraints, vars).solve();
+        match &result {
+            Ok(sol) => {
+                let g = sol.global_scale;
+                let unscaled = |var: Variable| {
+                    let p = sol.prim_scales.get(&var).copied().unwrap_or(1.0);
+                    sol.inner.value(var) * p / g
+                };
+                let v3 = unscaled(x3);
+                let ok = (v3 - target_amount).abs() <= target_amount * 1e-3 + 1e-9;
+                eprintln!("目标 {target_amount}: Solved global={g:.3e} x3={v3:.6e} ok={ok}");
+                if !ok {
+                    all_solved = false;
+                }
+                reported.push((target_amount, g, ok));
+            }
+            Err(error) => {
+                eprintln!("目标 {target_amount}: Err {error:?}");
+                all_solved = false;
+                reported.push((target_amount, 0.0, false));
+            }
+        }
+    }
+    // 诊断记录：当前小规模链全部可解（问题只在真实大 LP 出现）。
+    // 若未来此断言因 Ruiz/microlp 改动失败，说明敏感性被引入。
+    eprintln!("global_scale 敏感性扫描：{reported:?} all_solved={all_solved}");
+    // 注意：真实场景（fulgora 传奇电磁工厂）dual_scale 达 5.85e5 导致
+    // global_scale 极小，与目标常数共同影响 microlp 数值路径。修复方案
+    // 暂缓（见会话记录）。此处不断言，仅记录。
+}

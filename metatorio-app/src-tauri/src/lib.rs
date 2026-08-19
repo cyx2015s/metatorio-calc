@@ -2934,4 +2934,229 @@ mod tests {
         };
         assert_eq!(effective_resource_category(&resource), "calcite");
     }
+
+    /// 复刻用户操作序列（自动规划）：新建项目 → 新建工厂 → 设目标 =
+    /// legendary electromagnetic-plant（amount 1e-6 vs 1.0）→ 星球
+    /// fulgora → 主品质 legendary → 规划偏好"使用最佳插件"（枚举传奇
+    /// 品质 module-3 四件套）→ 严格输入 → 自动规划。
+    ///
+    /// 诊断：对比目标倍率的可解性（倍率不变性问题暂缓，见
+    /// global_scale_sensitivity 测试注释）。跑一次约 100 秒（真实 dump
+    /// 16 万候选），标记 ignore 避免拖慢常规测试；调查时手动运行。
+    #[test]
+    #[ignore]
+    fn fulgora_legendary_plant_auto_plan_scale_invariance() {
+        use metatorio_runtime::message::{
+            ApplicationAction, FactoryAction, FactoryContextAction, PlanningAction, ProjectAction,
+        };
+
+        let path = "C:\\Users\\mirac\\AppData\\Roaming\\Factorio\\script-output\\data-raw-dump.json";
+        if !std::path::Path::new(path).exists() {
+            eprintln!("[skip] 无真实 dump，跳过");
+            return;
+        }
+        let raw = std::fs::read(path).expect("读 dump");
+        let dump: serde_json::Value = serde_json::from_slice(&raw).expect("解析 dump");
+        let store = PrototypeStore::load(&dump).expect("dump 加载失败");
+
+        let mut runtime = Runtime::new();
+        runtime.install_context("real".to_string(), store);
+        runtime.set_active_context(Some("real".to_string()));
+
+        // 1. 新建项目。
+        runtime
+            .dispatch(AppMessage::Application(ApplicationAction::NewProject {
+                name: "test".to_string(),
+            }))
+            .unwrap();
+        let project = runtime.state.ui.selected_project.unwrap();
+        // 2. 新建工厂。
+        runtime
+            .dispatch(AppMessage::Project {
+                project,
+                action: ProjectAction::AddFactory {
+                    name: "factory".to_string(),
+                    template: metatorio_runtime::message::FactoryTemplate::Empty,
+                },
+            })
+            .unwrap();
+        let factory = runtime.state.ui.selected_factory.unwrap();
+
+        // 4. 星球 fulgora + 主品质 legendary。
+        runtime
+            .dispatch(AppMessage::Factory {
+                project,
+                factory,
+                action: FactoryAction::Context(FactoryContextAction::SetPlanet {
+                    planet: Some("fulgora".to_string()),
+                }),
+            })
+            .unwrap();
+        runtime
+            .dispatch(AppMessage::Factory {
+                project,
+                factory,
+                action: FactoryAction::Context(FactoryContextAction::SetMajorQuality {
+                    quality: "legendary".to_string(),
+                }),
+            })
+            .unwrap();
+
+        // 5. 规划偏好"使用最佳插件"：枚举传奇品质的 module-3 四件套
+        //    （前端 applyBestModules：清空后逐个添加）。
+        for name in [
+            "efficiency-module-3",
+            "speed-module-3",
+            "productivity-module-3",
+            "quality-module-3",
+        ] {
+            runtime
+                .dispatch(AppMessage::Project {
+                    project,
+                    action: ProjectAction::Planning(PlanningAction::AddEnumeratedModule {
+                        module: IdWithQuality::new(name, "legendary"),
+                    }),
+                })
+                .unwrap();
+        }
+        // 6. 严格输入。
+        runtime
+            .dispatch(AppMessage::Factory {
+                project,
+                factory,
+                action: FactoryAction::SetStrictSource { strict: true },
+            })
+            .unwrap();
+
+        // 7. 品质上限提升到 legendary（UI 设传奇目标时"超出会自动提升"）。
+        runtime
+            .dispatch(AppMessage::Project {
+                project,
+                action: metatorio_runtime::message::ProjectAction::SetQualityLimit {
+                    quality: Some("legendary".to_string()),
+                },
+            })
+            .unwrap();
+
+        // 复刻用户操作：同一工厂，先设目标 1/s 点自动规划，再改 0.001/s
+        // 点自动规划。auto_plan 会用选中机制替换工厂机制（第二次跑时
+        // 工厂已有第一次的机制，但目标倍率变化不应影响可解性）。
+        // 同一目标跑两次验证求解确定性（用户 0.001 可解、测试不可解，
+        // 若两次不一致说明非确定性）。
+        fn set_target(
+            runtime: &mut Runtime,
+            project: ProjectId,
+            factory: FactoryId,
+            amount: f64,
+        ) {
+            // 复刻 UI 修改目标金额（SetAmount，目标 id 不变——与删除重建
+            // 不同，后者会改变目标列表顺序影响 LP 目标表达式结构）。
+            let targets = runtime
+                .state
+                .factory(project, factory)
+                .unwrap()
+                .targets
+                .clone();
+            if let Some(target) = targets.first() {
+                runtime
+                    .dispatch(AppMessage::Factory {
+                        project,
+                        factory,
+                        action: FactoryAction::Target(
+                            metatorio_runtime::message::TargetAction::SetAmount {
+                                target: target.id,
+                                amount,
+                            },
+                        ),
+                    })
+                    .unwrap();
+            } else {
+                runtime
+                    .dispatch(AppMessage::Factory {
+                        project,
+                        factory,
+                        action: FactoryAction::Flow(metatorio_runtime::message::FlowAction::AddToTarget {
+                            flow: DualVar::Item(IdWithQuality::new(
+                                "electromagnetic-plant",
+                                "legendary",
+                            )),
+                            amount,
+                        }),
+                    })
+                    .unwrap();
+            }
+        }
+
+        // 每个目标用新工厂隔离（auto_plan 会替换机制），验证确定性。
+        fn make_factory(
+            runtime: &mut Runtime,
+            project: ProjectId,
+            amount: f64,
+        ) -> FactoryId {
+            runtime
+                .dispatch(AppMessage::Project {
+                    project,
+                    action: ProjectAction::AddFactory {
+                        name: format!("factory-{amount}"),
+                        template: metatorio_runtime::message::FactoryTemplate::Empty,
+                    },
+                })
+                .unwrap();
+            let factory = runtime.state.ui.selected_factory.unwrap();
+            runtime
+                .dispatch(AppMessage::Factory {
+                    project,
+                    factory,
+                    action: FactoryAction::Context(FactoryContextAction::SetPlanet {
+                        planet: Some("fulgora".to_string()),
+                    }),
+                })
+                .unwrap();
+            runtime
+                .dispatch(AppMessage::Factory {
+                    project,
+                    factory,
+                    action: FactoryAction::Context(FactoryContextAction::SetMajorQuality {
+                        quality: "legendary".to_string(),
+                    }),
+                })
+                .unwrap();
+            runtime
+                .dispatch(AppMessage::Factory {
+                    project,
+                    factory,
+                    action: FactoryAction::SetStrictSource { strict: true },
+                })
+                .unwrap();
+            set_target(runtime, project, factory, amount);
+            factory
+        }
+
+        // 复刻用户操作：fulgora 传奇电磁工厂自动规划，对比目标倍率
+        // （1e-6 vs 1.0）的可解性。这是诊断测试：记录两种倍率的结果，
+        // 不强制断言（倍率不变性问题暂缓，根因是 dual_scale 达 5.85e5
+        // 导致 global_scale 极小、microlp 数值路径随目标常数变化）。
+        let mut outcomes = Vec::new();
+        for (label, amount) in [("1e-6（小目标）", 1e-6), ("1.0（大目标）", 1.0)] {
+            let factory = make_factory(&mut runtime, project, amount);
+            let result = auto_plan(&AppState::default(), &mut runtime, project, factory);
+            let status = match &result {
+                Ok(solve) => match &solve.status {
+                    SolveStatus::Solved { .. } => "Solved".to_string(),
+                    SolveStatus::NotSolved { description, .. } => {
+                        format!("NotSolved: {description}")
+                    }
+                },
+                Err(error) => format!("Err: {error}"),
+            };
+            eprintln!("{label}: {status}");
+            outcomes.push((label, amount, result));
+        }
+        // 记录诊断：两种倍率结果（供后续倍率不变性调查）。
+        eprintln!(
+            "倍率对比：1e-6={:?}，1.0={:?}",
+            outcomes[0].2.is_ok(),
+            outcomes[1].2.is_ok()
+        );
+    }
 }

@@ -13,7 +13,6 @@ use metatorio_data::generated_components::{
     SurfaceComponent, SurfaceCondition, SurfacePropertyComponent, TileComponent,
 };
 use metatorio_data::store::{PrototypeGroup, PrototypeRecord, PrototypeStore};
-use metatorio_data::types::Product;
 
 /// 当前工厂生效的表面属性：
 /// 1. 显式设置地表 → 该地表的 surface_properties；
