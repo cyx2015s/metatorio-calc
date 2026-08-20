@@ -1107,7 +1107,8 @@ pub const DEFAULT_FIELD_RULES: &[FieldRule] = &[
     skip!("BoilerPrototype", "fire_flicker_enabled"),
     skip!("EntityPrototype", "map_color"),
     skip!("EntityPrototype", "remove_decoratives"),
-    skip!("EntityPrototype", "placeable_by"),
+    // placeable_by：匿名 union（单个/数组 {item, count}），字段级指定自定义类型
+    ty!("EntityPrototype", "placeable_by", "crate::types::PlaceableBy"),
     skip!("EntityPrototype", "alert_icon_scale"),
     skip!("EntityPrototype", "alert_icon_shift"),
     skip!("EntityPrototype", "ambient_sounds"),

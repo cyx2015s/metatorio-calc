@@ -21,8 +21,8 @@ use std::collections::{HashMap, VecDeque};
 use metatorio_data::store::{PrototypeGroup, PrototypeStore};
 use metatorio_data::types::{Ingredient, Modifier, Product};
 use metatorio_data::{
-    CraftingMachineComponent, EntityComponent, RecipeComponent, ResourceEntityComponent,
-    TechnologyComponent,
+    CraftingMachineComponent, EntityComponent, ItemComponent, RecipeComponent,
+    ResourceEntityComponent, TechnologyComponent,
 };
 
 use crate::dual_var::DualVar;
@@ -151,6 +151,8 @@ struct GraphData {
     recipes_by_product: HashMap<String, Vec<String>>,
     /// 物品名 → 可采出它的矿藏实体名（minable 产出）。
     resources_by_product: HashMap<String, Vec<String>>,
+    /// 实体名 → 放置后成为该实体的物品名（`item.place_result`）。
+    items_by_place_result: HashMap<String, Vec<String>>,
     /// 配方/品质/空间名 → 解锁它的科技名（UnlockRecipe/UnlockQuality/UnlockSpaceLocation）。
     techs_by_unlock: HashMap<String, Vec<String>>,
     /// 配方类别 → 能做的机器实体名。
@@ -160,9 +162,20 @@ struct GraphData {
 fn build_graph(store: &PrototypeStore) -> GraphData {
     let mut recipes_by_product: HashMap<String, Vec<String>> = HashMap::new();
     let mut resources_by_product: HashMap<String, Vec<String>> = HashMap::new();
+    let mut items_by_place_result: HashMap<String, Vec<String>> = HashMap::new();
     let mut techs_by_unlock: HashMap<String, Vec<String>> = HashMap::new();
     let mut machines_by_category: HashMap<String, Vec<String>> = HashMap::new();
 
+    for record in store.group(PrototypeGroup::Item) {
+        if let Some(item) = record.component::<ItemComponent>()
+            && !item.place_result.is_empty()
+        {
+            items_by_place_result
+                .entry(item.place_result.clone())
+                .or_default()
+                .push(record.name.clone());
+        }
+    }
     for record in store.group(PrototypeGroup::Recipe) {
         let Some(recipe) = record.component::<RecipeComponent>() else {
             continue;
@@ -241,6 +254,7 @@ fn build_graph(store: &PrototypeStore) -> GraphData {
     GraphData {
         recipes_by_product,
         resources_by_product,
+        items_by_place_result,
         techs_by_unlock,
         machines_by_category,
     }
@@ -367,8 +381,25 @@ fn requirements(store: &PrototypeStore, graph: &GraphData, node: &Accessible) ->
                 // 矿藏实体：星球生成，不参与科技链（根）
                 Requirement::All(Vec::new())
             } else {
-                // 可放置实体：由同名物品放置
-                Requirement::Node(Accessible::Item(name.clone()))
+                // 实体解锁条件 = Any([
+                //   a) place_result 是该实体的物品（放置后成为该实体），
+                //   b) entity.placeable_by 中的物品（机器人/蓝图放置物），
+                // ])
+                let mut any: Vec<Requirement> = Vec::new();
+                if let Some(items) = graph.items_by_place_result.get(name) {
+                    any.extend(items.iter().map(|item| {
+                        Requirement::Node(Accessible::Item(item.clone()))
+                    }));
+                }
+                if let Some(placeable) = record
+                    .and_then(|r| r.component::<EntityComponent>())
+                    .and_then(|e| e.placeable_by.as_ref())
+                {
+                    any.extend(placeable.items.iter().map(|item| {
+                        Requirement::Node(Accessible::Item(item.clone()))
+                    }));
+                }
+                Requirement::Any(any)
             }
         }
         Accessible::Quality(name) => {
@@ -542,7 +573,8 @@ mod tests {
                 "steel-plate": { "type": "item", "name": "steel-plate" },
                 "engine-unit": { "type": "item", "name": "engine-unit" },
                 "magic-item": { "type": "item", "name": "magic-item" },
-                "assembling-machine-1": { "type": "item", "name": "assembling-machine-1" }
+                "rail": { "type": "item", "name": "rail" },
+                "assembling-machine-1": { "type": "item", "name": "assembling-machine-1", "place_result": "assembling-machine-1" }
             },
             "fluid": {},
             "technology": {},
@@ -551,6 +583,7 @@ mod tests {
                 "iron-plate": recipe("iron-plate", vec!["iron-ore"], vec!["iron-plate"], true, vec![]),
                 "steel-plate": recipe("steel-plate", vec!["iron-plate"], vec!["steel-plate"], false, vec!["tech-steel"]),
                 "engine-unit": recipe("engine-unit", vec!["iron-plate", "steel-plate"], vec!["engine-unit"], false, vec!["tech-engine"]),
+                "rail": recipe("rail", vec!["iron-plate"], vec!["rail"], true, vec![]),
                 "assembling-machine-1": recipe("assembling-machine-1", vec!["iron-plate"], vec!["assembling-machine-1"], true, vec![])
             },
             "assembling-machine": {
@@ -559,6 +592,20 @@ mod tests {
                     "crafting_categories": ["crafting"], "crafting_speed": 1,
                     "module_slots": 0, "energy_usage": "90kW",
                     "energy_source": { "type": "electric", "drain": "0J" }
+                },
+                "test-entity-b": {
+                    "type": "assembling-machine", "name": "test-entity-b",
+                    "crafting_categories": ["crafting"], "crafting_speed": 1,
+                    "module_slots": 0, "energy_usage": "90kW",
+                    "energy_source": { "type": "electric", "drain": "0J" },
+                    "placeable_by": { "item": "rail", "count": 1 }
+                },
+                "test-entity-dead": {
+                    "type": "assembling-machine", "name": "test-entity-dead",
+                    "crafting_categories": ["crafting"], "crafting_speed": 1,
+                    "module_slots": 0, "energy_usage": "90kW",
+                    "energy_source": { "type": "electric", "drain": "0J" },
+                    "placeable_by": { "item": "magic-item", "count": 1 }
                 }
             }
         });
@@ -597,6 +644,21 @@ mod tests {
         assert!(result.is_item_accessible("engine-unit"));
         // 无产出配方的物品不可达
         assert!(!result.is_item_accessible("magic-item"));
+        // 实体解锁：place_result 反查（机器由同名 item 放置）→ 可达
+        assert!(
+            result.is_accessible(&Accessible::Entity("assembling-machine-1".to_string())),
+            "机器实体应通过 place_result 物品可达"
+        );
+        // 实体解锁：placeable_by（b 分支）——rail 可达 → 实体可达；
+        // magic-item 不可达 → 实体不可达
+        assert!(
+            result.is_accessible(&Accessible::Entity("test-entity-b".to_string())),
+            "placeable_by 指向可达物品时应可达"
+        );
+        assert!(
+            !result.is_accessible(&Accessible::Entity("test-entity-dead".to_string())),
+            "placeable_by 指向不可达物品时应不可达"
+        );
     }
 
     #[test]

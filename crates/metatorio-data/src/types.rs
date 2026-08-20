@@ -282,8 +282,42 @@ impl<'de> serde::Deserialize<'de> for BoundingBox {
     }
 }
 
-// ── 配方产物/原料（Product：tag 枚举，type: "item"|"fluid"）──────
+/// `EntityPrototype::placeable_by`：能放置该实体的物品（机器人建造/蓝图
+/// 复活用）。游戏 dump 形态为匿名 union：单个 `{item, count}` 对象或
+/// 对象数组。只有物品名参与可达性（count 忽略）。
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
+pub struct PlaceableBy {
+    /// 能放置该实体的物品名。
+    pub items: Vec<String>,
+}
 
+impl<'de> serde::Deserialize<'de> for PlaceableBy {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value: Value = serde::Deserialize::deserialize(deserializer)?;
+        let mut items = Vec::new();
+        match &value {
+            Value::Array(list) => {
+                for entry in list {
+                    if let Some(item) = entry.get("item").and_then(|v| v.as_str()) {
+                        items.push(item.to_string());
+                    }
+                }
+            }
+            Value::Object(_) => {
+                if let Some(item) = value.get("item").and_then(|v| v.as_str()) {
+                    items.push(item.to_string());
+                }
+            }
+            _ => {}
+        }
+        Ok(PlaceableBy { items })
+    }
+}
+
+// ── 配方产物/原料（Product：tag 枚举，type: "item"|"fluid"）──────
 /// 物品产物/原料数据（`Product::Item`）。
 /// 字段全宽松（覆盖 IngredientPrototype / ProductPrototype / ItemProductPrototype）。
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
