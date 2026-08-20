@@ -1995,7 +1995,7 @@
               <button
                 class="btn ghost"
                 title="移除"
-                onclick={() => runtime.removeMachinePreference(pref.id).catch(() => {})}
+                onclick={() => runtime.removeMachinePreference(pref).catch(() => {})}
               >×</button>
             </div>
           {:else}
@@ -2005,8 +2005,8 @@
         <button
           class="btn"
           onclick={() =>
-            openSelector("machine", "添加机器偏好", (name) =>
-              runtime.addMachinePreference(name),
+            openSelector("machine", "添加机器偏好", (name, quality) =>
+              runtime.addMachinePreference({ id: name, quality }),
             )}
         >+ 添加机器</button>
       </div>

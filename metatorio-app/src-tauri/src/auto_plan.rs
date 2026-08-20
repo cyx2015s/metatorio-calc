@@ -6,7 +6,7 @@
 
 use metatorio_core::{Context, IdWithQuality, Mechanic, ModuleConfig, NORMAL_QUALITY};
 use metatorio_data::store::{PrototypeGroup, PrototypeRecord, PrototypeStore};
-use metatorio_data::types::{EffectType, EffectTypeLimitation};
+use metatorio_data::types::{EffectType, EffectTypeLimitation, EnergySource};
 use metatorio_data::{
     AccumulatorComponent, BoilerComponent, BurnerGeneratorComponent, CraftingMachineComponent,
     EntityComponent, FluidComponent, GeneratorComponent, ItemComponent, MiningDrillComponent,
@@ -177,14 +177,18 @@ pub(super) fn module_allowed(
     true
 }
 
-/// 选取至多 alternative_count 台不同机器：项目偏好优先，其次分数（速度）。
+/// 选取至多 alternative_count 台不同机器：项目偏好优先（**保留用户指定
+/// 的品质**），其次分数（复刻原版 measure_crafter：速度/碰撞箱面积 ×
+/// (1+基础效果速度) × (1+基础效果产能×2) × 电动机器×8 × (1+插件槽)）。
+/// 自动枚举出的机器品质 = 主品质；与用户偏好重复时优先用户的品质。
 fn pick_machines<F, S>(
     store: &PrototypeStore,
     prefs: &[IdWithQuality],
     alternative_count: usize,
+    major_quality: &str,
     matches: F,
     score: S,
-) -> Vec<String>
+) -> Vec<IdWithQuality>
 where
     F: Fn(&PrototypeRecord) -> bool,
     S: Fn(&PrototypeRecord) -> f64,
@@ -194,12 +198,14 @@ where
         .filter(|record| matches(record))
         .map(|record| (record, score(record)))
         .collect();
-    let mut out: Vec<String> = Vec::new();
+    let mut out: Vec<IdWithQuality> = Vec::new();
+    let contains_name = |out: &[IdWithQuality], name: &str| out.iter().any(|m| m.id == name);
+    // 用户偏好优先（带品质）；同一台机器只保留一次
     for pref in prefs {
         if let Some(index) = candidates.iter().position(|(record, _)| record.name == pref.id) {
             let record = candidates.remove(index).0;
-            if !out.contains(&record.name) {
-                out.push(record.name.clone());
+            if !contains_name(&out, &record.name) {
+                out.push(pref.clone());
             }
         }
     }
@@ -212,11 +218,50 @@ where
         if out.len() >= alternative_count.max(1).min(3) {
             break;
         }
-        if !out.contains(&record.name) {
-            out.push(record.name.clone());
+        if !contains_name(&out, &record.name) {
+            out.push(IdWithQuality::new(record.name.clone(), major_quality.to_string()));
         }
     }
     out
+}
+
+/// 机器打分（复刻原版 recipe.rs::measure_crafter）：
+/// 速度 / 碰撞箱面积 × (1+基础效果速度) × (1+基础效果产能×2) × 电动×8 × (1+插件槽)。
+fn crafter_score(machine: &CraftingMachineComponent, entity: Option<&EntityComponent>) -> f64 {
+    let area = entity
+        .and_then(|e| e.collision_box.as_ref())
+        .map_or(25.0, |bb| (bb.1 .0 - bb.0 .0).abs() * (bb.1 .1 - bb.0 .1).abs());
+    let mut score = machine.crafting_speed / area;
+    if let Some(effect_receiver) = &machine.effect_receiver {
+        if let Some(base) = &effect_receiver.base_effect {
+            score *= 1.0 + base.speed;
+            score *= 1.0 + (base.productivity * 2.0);
+        }
+    }
+    if matches!(machine.energy_source, EnergySource::Electric(_)) {
+        score *= 8.0;
+    }
+    score *= 1.0 + machine.module_slots.unwrap_or(0) as f64;
+    score
+}
+
+/// 采矿机打分（复刻原版 mining.rs::measure_miner）：mining_speed 同构。
+fn miner_score(miner: &MiningDrillComponent, entity: Option<&EntityComponent>) -> f64 {
+    let area = entity
+        .and_then(|e| e.collision_box.as_ref())
+        .map_or(25.0, |bb| (bb.1 .0 - bb.0 .0).abs() * (bb.1 .1 - bb.0 .1).abs());
+    let mut score = miner.mining_speed / area;
+    if let Some(effect_receiver) = &miner.effect_receiver {
+        if let Some(base) = &effect_receiver.base_effect {
+            score *= 1.0 + base.speed;
+            score *= 1.0 + (base.productivity * 2.0);
+        }
+    }
+    if matches!(miner.energy_source, EnergySource::Electric(_)) {
+        score *= 8.0;
+    }
+    score *= 1.0 + miner.module_slots.unwrap_or(0) as f64;
+    score
 }
 
 /// 弱组合：长度为 `parts`、和为 `sum` 的非负整数向量（含零）。
@@ -344,6 +389,7 @@ fn enumerate_recipes(
             store,
             &options.machine_preferences,
             options.alternative_count,
+            &major_quality,
             |record| {
                 record
                     .component::<CraftingMachineComponent>()
@@ -352,12 +398,14 @@ fn enumerate_recipes(
             |record| {
                 record
                     .component::<CraftingMachineComponent>()
-                    .map(|machine| machine.crafting_speed)
+                    .zip(record.component::<EntityComponent>())
+                    .map(|(machine, entity)| crafter_score(machine, Some(entity)))
                     .unwrap_or(0.0)
             },
         );
-        for machine_name in machines {
-            let Some(machine_record) = store.get(PrototypeGroup::Entity, &machine_name) else {
+        for machine in machines {
+            let machine_name = &machine.id;
+            let Some(machine_record) = store.get(PrototypeGroup::Entity, machine_name) else {
                 continue;
             };
             // 机器表面条件过滤
@@ -372,7 +420,8 @@ fn enumerate_recipes(
                     }
                 }
             }
-            let Some(machine) = machine_record.component::<CraftingMachineComponent>() else {
+            let Some(machine_component) = machine_record.component::<CraftingMachineComponent>()
+            else {
                 continue;
             };
             let allowed_modules: Vec<IdWithQuality> = options
@@ -385,8 +434,8 @@ fn enumerate_recipes(
                         .is_some_and(|module| {
                             module_allowed(
                                 module,
-                                &machine.allowed_module_categories,
-                                &machine.allowed_effects,
+                                &machine_component.allowed_module_categories,
+                                &machine_component.allowed_effects,
                                 Some(recipe),
                             )
                         })
@@ -399,7 +448,10 @@ fn enumerate_recipes(
                     .and_then(|record| record.component::<ModuleComponent>())
                     .is_some_and(|module| module.effect.quality > 0.0)
             });
-            let module_slots = machine.module_slots.map(|slots| slots as usize).unwrap_or(0);
+            let module_slots = machine_component
+                .module_slots
+                .map(|slots| slots as usize)
+                .unwrap_or(0);
             let combos = module_combinations(allowed_modules.len(), module_slots, quality_involved);
             for (comb, dup) in combos {
                 for quality in 0..recipe_quality_range {
@@ -409,9 +461,10 @@ fn enumerate_recipes(
                             modules.push(module.clone());
                         }
                     }
+                    // 机器品质：用户偏好命中用偏好品质，否则主品质
                     let base = Mechanic::Recipe(metatorio_core::RecipeMechanic {
                         recipe: IdWithQuality::new(record.name.clone(), quality_name(ctx, quality)),
-                        machine: IdWithQuality::new(machine_name.clone(), major_quality.clone()),
+                        machine: machine.clone(),
                         module_config: ModuleConfig::default(),
                         fuel: None,
                         fuel_temperature: None,
@@ -451,15 +504,23 @@ fn enumerate_mining(
             store,
             &options.machine_preferences,
             options.alternative_count,
+            &major_quality,
             |drill_record| {
                 drill_record
                     .component::<MiningDrillComponent>()
                     .is_some_and(|drill| drill.resource_categories.contains(&category))
             },
-            |_| 0.0,
+            |drill_record| {
+                drill_record
+                    .component::<MiningDrillComponent>()
+                    .zip(drill_record.component::<EntityComponent>())
+                    .map(|(miner, entity)| miner_score(miner, Some(entity)))
+                    .unwrap_or(0.0)
+            },
         );
-        for machine_name in machines {
-            let Some(drill_record) = store.get(PrototypeGroup::Entity, &machine_name) else {
+        for machine in machines {
+            let machine_name = &machine.id;
+            let Some(drill_record) = store.get(PrototypeGroup::Entity, machine_name) else {
                 continue;
             };
             // 采矿机表面条件过滤
@@ -513,7 +574,7 @@ fn enumerate_mining(
                     }
                     let base = Mechanic::Mining(metatorio_core::MiningMechanic {
                         resource: record.name.clone(),
-                        machine: IdWithQuality::new(machine_name.clone(), major_quality.clone()),
+                        machine: machine.clone(),
                         module_config: ModuleConfig::default(),
                         fuel: None,
                         fuel_temperature: None,
@@ -849,6 +910,75 @@ mod tests {
         );
     }
 
+    /// 机器打分（复刻原版 measure_crafter）应区分快慢机器；偏好机器
+    /// 优先且保留用户指定品质；无偏好时自动选机的品质 = 主品质。
+    #[test]
+    fn pick_machines_prefers_user_quality_and_scores_crafters() {
+        let dump = json!({
+            "recipe": {
+                "iron-plate": {
+                    "type": "recipe", "name": "iron-plate", "energy_required": 1,
+                    "ingredients": [{ "type": "item", "name": "iron-ore", "amount": 1 }],
+                    "results": [{ "type": "item", "name": "iron-plate", "amount": 1 }],
+                    "categories": ["crafting"]
+                }
+            },
+            "assembling-machine": {
+                "slow-assembler": {
+                    "type": "assembling-machine", "name": "slow-assembler",
+                    "crafting_categories": ["crafting"], "crafting_speed": 0.5,
+                    "module_slots": 0, "energy_usage": "90kW",
+                    "energy_source": { "type": "electric", "drain": "0J" }
+                },
+                "fast-assembler": {
+                    "type": "assembling-machine", "name": "fast-assembler",
+                    "crafting_categories": ["crafting"], "crafting_speed": 2.0,
+                    "module_slots": 4, "energy_usage": "90kW",
+                    "energy_source": { "type": "electric", "drain": "0J" }
+                }
+            }
+        });
+        let store = PrototypeStore::load(&dump).expect("dump 加载失败");
+
+        let fits = |record: &PrototypeRecord| {
+            record
+                .component::<CraftingMachineComponent>()
+                .is_some_and(|machine| machine.crafting_categories.contains(&"crafting".to_string()))
+        };
+        let score = |record: &PrototypeRecord| {
+            record
+                .component::<CraftingMachineComponent>()
+                .zip(record.component::<EntityComponent>())
+                .map(|(machine, entity)| crafter_score(machine, Some(entity)))
+                .unwrap_or(0.0)
+        };
+
+        // 无偏好：按分数选，品质 = 主品质
+        let machines = pick_machines(&store, &[], 1, "legendary", fits, score);
+        assert_eq!(machines.len(), 1);
+        assert_eq!(machines[0].id, "fast-assembler", "应选分数最高的机器");
+        assert_eq!(machines[0].quality, "legendary", "自动选机品质 = 主品质");
+
+        // 有偏好：偏好优先且保留用户指定品质（即使分数更低）
+        let prefs = vec![IdWithQuality::new("slow-assembler", "uncommon")];
+        let machines = pick_machines(&store, &prefs, 2, "legendary", fits, score);
+        assert_eq!(machines[0].id, "slow-assembler", "偏好机器应排最前");
+        assert_eq!(machines[0].quality, "uncommon", "偏好品质应保留");
+        assert_eq!(machines[1].id, "fast-assembler", "其余按分数补齐");
+        assert_eq!(machines[1].quality, "legendary");
+
+        // 打分：fast 应显著高于 slow（速度 2/面积 vs 0.5/面积 + 插件槽）
+        let slow = crafter_score(
+            store.get(PrototypeGroup::Entity, "slow-assembler").unwrap().component::<CraftingMachineComponent>().unwrap(),
+            store.get(PrototypeGroup::Entity, "slow-assembler").unwrap().component::<EntityComponent>(),
+        );
+        let fast = crafter_score(
+            store.get(PrototypeGroup::Entity, "fast-assembler").unwrap().component::<CraftingMachineComponent>().unwrap(),
+            store.get(PrototypeGroup::Entity, "fast-assembler").unwrap().component::<EntityComponent>(),
+        );
+        assert!(fast > slow, "fast={fast} 应大于 slow={slow}");
+    }
+
     /// 合成 Nauvis：组装机（电）+ 锅炉（水→蒸汽）+ 蒸汽机 + 煤 + 铁矿配方。
     fn nauvis_dump() -> serde_json::Value {
         json!({
@@ -928,6 +1058,52 @@ mod tests {
         assert!(
             candidates.iter().any(|mechanic| matches!(mechanic, Mechanic::Recipe(_))),
             "应枚举出配方候选：{candidates:?}"
+        );
+    }
+
+    /// 真实 dump：机器偏好指定品质后，自动规划枚举该机器时用偏好品质
+    /// （覆盖主品质）。用户需求：手动指定部分机器的品质，与自动枚举
+    /// 重复时优先用户设定。
+    #[test]
+    fn real_dump_machine_preference_quality_overrides_major() {
+        let path = "C:\\Users\\mirac\\AppData\\Roaming\\Factorio\\script-output\\data-raw-dump.json";
+        if !std::path::Path::new(path).exists() {
+            eprintln!("[skip] 无真实 dump，跳过");
+            return;
+        }
+        let raw = std::fs::read(path).expect("读 dump");
+        let dump: serde_json::Value = serde_json::from_slice(&raw).expect("解析 dump");
+        let store = PrototypeStore::load(&dump).expect("dump 加载失败");
+        let game = GameState::default();
+        let ctx = Context::new(&store, &game);
+        let options = EnumerateOptions {
+            alternative_count: 3,
+            // 用户手动指定 legendary assembling-machine-1；主品质为 normal
+            machine_preferences: vec![IdWithQuality::new("assembling-machine-1", "legendary")],
+            enumerate_modules: Vec::new(),
+            enumerate_beacons: Vec::new(),
+            quality_limit: 4,
+            major_quality: 0,
+            planet: Some("fulgora".to_string()),
+            surface: None,
+        };
+        let candidates = enumerate_all(&store, &ctx, &options);
+        let pref_machines: Vec<String> = candidates
+            .iter()
+            .filter_map(|mechanic| match mechanic {
+                Mechanic::Recipe(r) if r.machine.id == "assembling-machine-1" => {
+                    Some(r.machine.quality.clone())
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(
+            !pref_machines.is_empty(),
+            "应枚举出 assembling-machine-1 配方候选"
+        );
+        assert!(
+            pref_machines.iter().all(|quality| quality == "legendary"),
+            "偏好品质应覆盖主品质（normal）：{pref_machines:?}"
         );
     }
 

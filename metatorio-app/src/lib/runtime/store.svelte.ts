@@ -1155,15 +1155,17 @@ class RuntimeStore {
     await this.planningMessage({ "set-alternative-count": { count } });
   }
 
-  async addMachinePreference(machine: string): Promise<void> {
+  async addMachinePreference(machine: IdWithQuality): Promise<void> {
     await this.planningMessage({
-      "add-machine-preference": { machine: { id: machine, quality: "normal" } },
+      "add-machine-preference": { machine: { id: machine.id, quality: machine.quality } },
     });
   }
 
-  async removeMachinePreference(machine: string): Promise<void> {
+  async removeMachinePreference(machine: IdWithQuality): Promise<void> {
+    // 必须传完整品质：runtime 按 IdWithQuality 精确匹配删除
+    // （历史 bug：硬编码 normal 导致带品质的机器偏好删不掉）。
     await this.planningMessage({
-      "remove-machine-preference": { machine: { id: machine, quality: "normal" } },
+      "remove-machine-preference": { machine: { id: machine.id, quality: machine.quality } },
     });
   }
 
