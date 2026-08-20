@@ -353,6 +353,34 @@ impl RuntimeState {
                     project_id,
                 ))
             }
+            ProjectAction::AddMarkedAccessible { node } => {
+                let marks = &mut self.project_mut(project_id)?.settings.marked_accessible;
+                let before = marks.len();
+                if !marks.contains(&node) {
+                    marks.push(node);
+                }
+                Ok(Outcome::all_factories_if(before != marks.len(), project_id))
+            }
+            ProjectAction::RemoveMarkedAccessible { node } => {
+                let marks = &mut self.project_mut(project_id)?.settings.marked_accessible;
+                let before = marks.len();
+                marks.retain(|mark| mark != &node);
+                Ok(Outcome::all_factories_if(before != marks.len(), project_id))
+            }
+            ProjectAction::AddMarkedInaccessible { node } => {
+                let marks = &mut self.project_mut(project_id)?.settings.marked_inaccessible;
+                let before = marks.len();
+                if !marks.contains(&node) {
+                    marks.push(node);
+                }
+                Ok(Outcome::all_factories_if(before != marks.len(), project_id))
+            }
+            ProjectAction::RemoveMarkedInaccessible { node } => {
+                let marks = &mut self.project_mut(project_id)?.settings.marked_inaccessible;
+                let before = marks.len();
+                marks.retain(|mark| mark != &node);
+                Ok(Outcome::all_factories_if(before != marks.len(), project_id))
+            }
             ProjectAction::SetMiningProductivity { productivity } => {
                 validate_non_negative("mining productivity", productivity)?;
                 let changed = replace(

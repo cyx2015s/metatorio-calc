@@ -33,7 +33,10 @@ pub type AIndexSet<T> = indexmap::IndexSet<T, ahash::RandomState>;
 
 /// 可达性对象。原型级：物品/实体不携带品质、流体不携带温度——
 /// 可达性是原型属性（品质解锁由 `UnlockQuality` 科技经 [`Accessible::Quality`] 表达）。
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+///
+/// serde 采用外部标签（默认）：`{"Tech":"automation-science-pack"}`、
+/// 单元变体 `"Electricity"`。runtime 文档持久化与前端消息共用此格式。
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Accessible {
     Tech(String),
     Recipe(String),

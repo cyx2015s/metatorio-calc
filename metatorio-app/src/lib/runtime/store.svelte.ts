@@ -7,6 +7,7 @@
 // results are cached here as well.
 
 import {
+  accessibility,
   catalogIndex,
   deleteContext,
   dispatch,
@@ -31,6 +32,7 @@ import {
   implicitSources,
 } from "./client";
 import type {
+  Accessible,
   AppDocument,
   AppMessage,
   CatalogIndex,
@@ -78,6 +80,13 @@ class RuntimeStore {
 
   /** 当前上下文的全量目录索引（前端本地筛选）。 */
   catalogIndex = $state<CatalogIndex | null>(null);
+
+  /**
+   * 当前选中项目的可达性快照（选择器过滤用）。
+   * `null` = 未拉取/不可用（未绑定上下文等）；任意 dispatch 后失效，
+   * 打开选择器时经 `ensureAccessibility()` 惰性重拉。
+   */
+  accessibility = $state<Accessible[] | null>(null);
 
   /** Subscribe to backend events; call once at app start. */
   async init(): Promise<void> {
@@ -129,6 +138,9 @@ class RuntimeStore {
     try {
       const result = await dispatch(message);
       this.revision = result.revision;
+      // 任何交互都可能改变可达性（显式标记/里程碑/无视开关/换上下文），
+      // 整体失效缓存；选择器打开时按需重拉。
+      this.accessibility = null;
       await this.refresh();
     } catch (error) {
       this.lastError = String(error);
@@ -137,6 +149,31 @@ class RuntimeStore {
       this.busy = false;
     }
     this.refreshImplicitSources().catch(() => {});
+  }
+
+  // ── 可达性（选择器过滤） ────────────────────────────────────────
+
+  /**
+   * 确保当前选中项目的可达性快照已拉取；返回可达对象集合
+   * （未绑定上下文等失败时返回空数组——选择器不做可达性过滤）。
+   */
+  async ensureAccessibility(): Promise<Accessible[]> {
+    if (this.accessibility != null) return this.accessibility;
+    const project = this.ui?.selected_project;
+    if (project == null) return [];
+    try {
+      const nodes = await accessibility(project);
+      this.accessibility = nodes;
+      return nodes;
+    } catch {
+      this.accessibility = [];
+      return [];
+    }
+  }
+
+  /** 选中项目是否"无视可达性"（全可达）。 */
+  get allAccessible(): boolean {
+    return this.selectedProject?.settings.all_accessible ?? false;
   }
 
   // ── 星球隐式可用输入（外部输入面板的虚线行） ────────────────────
@@ -510,6 +547,40 @@ class RuntimeStore {
     await this.send({
       scope: "project",
       action: { project, action: { "remove-technology-milestone": { technology } } },
+    });
+  }
+
+  // ── 显式可达性覆盖 ───────────────────────────────────────────────
+
+  async addMarkedAccessible(node: Accessible): Promise<void> {
+    const project = this.requireProject();
+    await this.send({
+      scope: "project",
+      action: { project, action: { "add-marked-accessible": { node } } },
+    });
+  }
+
+  async removeMarkedAccessible(node: Accessible): Promise<void> {
+    const project = this.requireProject();
+    await this.send({
+      scope: "project",
+      action: { project, action: { "remove-marked-accessible": { node } } },
+    });
+  }
+
+  async addMarkedInaccessible(node: Accessible): Promise<void> {
+    const project = this.requireProject();
+    await this.send({
+      scope: "project",
+      action: { project, action: { "add-marked-inaccessible": { node } } },
+    });
+  }
+
+  async removeMarkedInaccessible(node: Accessible): Promise<void> {
+    const project = this.requireProject();
+    await this.send({
+      scope: "project",
+      action: { project, action: { "remove-marked-inaccessible": { node } } },
     });
   }
 

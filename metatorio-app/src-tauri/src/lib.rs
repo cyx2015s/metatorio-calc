@@ -20,7 +20,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use metatorio_core::{DualVar, IdWithQuality, Mechanic};
+use metatorio_core::{Accessible, DualVar, IdWithQuality, Mechanic};
 use metatorio_data::store::{PrototypeGroup, PrototypeRecord, PrototypeStore};
 use metatorio_data::{
     BeaconComponent, BoilerComponent, BurnerGeneratorComponent, CraftingMachineComponent,
@@ -2054,6 +2054,24 @@ fn get_ui_state(state: State<'_, AppState>) -> Result<UiState, String> {
     Ok(runtime.state.ui.clone())
 }
 
+/// 项目可达性快照（选择器过滤用）：当前可达对象集合。
+///
+/// 由 runtime 用项目的用户显式覆盖（marked accessible/inaccessible、
+/// 科技里程碑、无视可达性）经 core 的 `compute_accessibility` 计算并缓存；
+/// `all_accessible` 时返回全部对象。项目未绑定上下文时返回错误（前端
+/// 应在此情况下不做可达性过滤）。
+#[tauri::command]
+fn accessibility(state: State<'_, AppState>, project: ProjectId) -> Result<Vec<Accessible>, String> {
+    let mut runtime = state
+        .runtime
+        .lock()
+        .map_err(|_| "runtime lock poisoned".to_string())?;
+    let result = runtime
+        .project_accessibility(project)
+        .map_err(|error| error.to_string())?;
+    Ok(result.accessible().iter().cloned().collect())
+}
+
 // ── Persistence ───────────────────────────────────────────────────
 
 /// OS file dialog for the Factorio executable (game-context loading).
@@ -2894,6 +2912,7 @@ pub fn run() {
             dispatch,
             get_document,
             get_ui_state,
+            accessibility,
             open_project_dialog,
             save_project_as_dialog,
             save_project,

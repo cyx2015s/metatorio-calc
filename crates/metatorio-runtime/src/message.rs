@@ -1,4 +1,4 @@
-use metatorio_core::{DualVar, IdWithQuality};
+use metatorio_core::{Accessible, DualVar, IdWithQuality};
 use serde::{Deserialize, Serialize};
 
 use crate::document::{
@@ -123,6 +123,20 @@ pub enum ProjectAction {
     },
     RemoveTechnologyMilestone {
         technology: String,
+    },
+    /// 显式标记某对象可达（并入根种子；即使无任何来源也可达）。
+    AddMarkedAccessible {
+        node: Accessible,
+    },
+    RemoveMarkedAccessible {
+        node: Accessible,
+    },
+    /// 显式标记某对象不可达（剪枝；阻断依赖它的对象）。
+    AddMarkedInaccessible {
+        node: Accessible,
+    },
+    RemoveMarkedInaccessible {
+        node: Accessible,
     },
     SetMiningProductivity {
         productivity: f64,

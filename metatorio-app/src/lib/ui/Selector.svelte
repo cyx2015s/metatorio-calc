@@ -13,6 +13,7 @@
   import Icon from "./Icon.svelte";
   import HoverCard from "./HoverCard.svelte";
   import type { CatalogKind, DualVar, IndexEntry } from "$lib/runtime/types";
+  import { accessibleKind, accessibleName } from "$lib/runtime/types";
 
   let {
     kind,
@@ -21,6 +22,7 @@
     flowMode = false,
     categoryFilter,
     allowedNames,
+    respectAccessibility = true,
     initialTab,
     initialName,
     initialQuality,
@@ -36,6 +38,9 @@
     categoryFilter?: string[];
     /** 精确名称过滤（如发电机/锅炉的流体箱过滤）；空数组=不过滤。 */
     allowedNames?: string[];
+    /** 按项目可达性过滤（不可达条目隐藏）；项目"无视可达性"时自动跳过。
+     *  需要完全不受可达性约束的调用方置 false。 */
+    respectAccessibility?: boolean;
     /** 流模式初始页签（编辑目标/外部输入时预选当前流类型）。 */
     initialTab?: string;
     /** 目录模式初始选中（编辑时预选当前条目）。 */
@@ -117,6 +122,54 @@
   );
   let groups = $derived([...new Set(entries.map((entry) => entry.group))]);
   let searching = $derived(query.trim().length > 0);
+
+  // ── 可达性过滤 ──────────────────────────────────────────────────
+  // 选中项目"无视可达性"时不拉取也不过滤；否则惰性拉取可达性快照
+  // （`kind/name` 集合）。未就绪（null）时不过滤，避免误隐藏。
+  let accessibleKeys = $state<Set<string> | null>(null);
+  $effect(() => {
+    if (respectAccessibility && !runtime.allAccessible) {
+      runtime.ensureAccessibility().then((nodes) => {
+        accessibleKeys = new Set(nodes.map((node) => `${accessibleKind(node)}/${accessibleName(node)}`));
+      });
+    } else {
+      accessibleKeys = null;
+    }
+  });
+  /** 目录 kind → 可达性 kind（machine/resource 等按实体判断）；无对应则不过滤。 */
+  function accessibleKindFor(kind: string): string | null {
+    switch (kind) {
+      case "item":
+      case "module":
+        return "item";
+      case "fluid":
+        return "fluid";
+      case "recipe":
+        return "recipe";
+      case "technology":
+        return "technology";
+      case "planet":
+        return "planet";
+      case "quality":
+        return "quality";
+      case "space-location":
+        return "space-location";
+      case "entity":
+      case "machine":
+      case "mining-machine":
+      case "generator":
+      case "boiler":
+      case "reactor":
+      case "solar-panel":
+      case "accumulator":
+      case "beacon":
+      case "resource":
+        return "entity";
+      default:
+        return null;
+    }
+  }
+
   let visible = $derived(
     (searching
       ? entries.filter((entry) => {
@@ -132,6 +185,10 @@
     ).filter((entry) => {
       if (allowedNames && allowedNames.length > 0) {
         if (!allowedNames.includes(entry.name)) return false;
+      }
+      if (respectAccessibility && accessibleKeys != null) {
+        const mapped = accessibleKindFor(entry.kind);
+        if (mapped != null && !accessibleKeys.has(`${mapped}/${entry.name}`)) return false;
       }
       if (!categoryFilter || categoryFilter.length === 0 || !catalogKind) return true;
       // 与后端 categories_overlap 一致：空类别条目在过滤时视为不匹配

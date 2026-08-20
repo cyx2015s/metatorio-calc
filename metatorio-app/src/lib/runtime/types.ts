@@ -91,6 +91,39 @@ export type FactoryTemplate = "empty" | "default-mechanics";
 
 export type TimeScale = "seconds" | "minutes" | "hours";
 
+// 可达性对象（镜像 metatorio-core::Accessible 的 serde 外部标签：
+// 结构变体 {"Tech":"..."}，单元变体裸字符串 "Electricity"/"Heat"）。
+export type Accessible =
+  | { Tech: string }
+  | { Recipe: string }
+  | { Quality: string }
+  | { Space: string }
+  | { Item: string }
+  | { Fluid: string }
+  | { Entity: string }
+  | { Planet: string }
+  | "Electricity"
+  | "Heat";
+
+/** 可达性对象的目录 kind（与选择器 kind 对齐：technology/recipe/…）。 */
+export function accessibleKind(node: Accessible): string {
+  switch (node) {
+    case "Electricity":
+      return "electricity";
+    case "Heat":
+      return "heat";
+  }
+  if ("Tech" in node) return "technology";
+  if ("Space" in node) return "space-location";
+  return Object.keys(node)[0].toLowerCase();
+}
+
+/** 可达性对象的名称（电/热无名称，返回 ""）。 */
+export function accessibleName(node: Accessible): string {
+  if (typeof node === "string") return "";
+  return Object.values(node)[0];
+}
+
 export type ProjectAction =
   | { "set-name": { name: string } }
   | { "add-factory": { name: string; template: FactoryTemplate } }
@@ -105,6 +138,10 @@ export type ProjectAction =
   | { "add-technology-milestone": { milestone: TechnologyMilestone } }
   | { "set-technology-unlocked": { technology: string; unlocked: boolean } }
   | { "remove-technology-milestone": { technology: string } }
+  | { "add-marked-accessible": { node: Accessible } }
+  | { "remove-marked-accessible": { node: Accessible } }
+  | { "add-marked-inaccessible": { node: Accessible } }
+  | { "remove-marked-inaccessible": { node: Accessible } }
   | { "set-ignore-productivity": { ignore: boolean } }
   | { "set-recipe-productivity": { productivity: RecipeProductivity } }
   | { "remove-recipe-productivity": { recipe: string } }
@@ -349,6 +386,10 @@ export interface ProjectSettings {
   ignore_productivity: boolean;
   mining_productivity: number;
   all_accessible: boolean;
+  /** 用户显式标记可达的对象（并入根种子；即使无来源也可达）。 */
+  marked_accessible: Accessible[];
+  /** 用户显式标记不可达的对象（剪枝；阻断依赖它的对象）。 */
+  marked_inaccessible: Accessible[];
   quality_limit: string | null;
 }
 

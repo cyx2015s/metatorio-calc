@@ -5,9 +5,15 @@
   import { dndzone } from "svelte-dnd-action";
   import { runtime } from "$lib/runtime/store.svelte.ts";
   import { allowedModules, pickGameExecutable, pickModDir, suggest } from "$lib/runtime/client";
-  import { dualVarLabel, flowQuality, itemOf } from "$lib/runtime/types";
+  import { dualVarLabel, flowQuality, itemOf, accessibleKind, accessibleName } from "$lib/runtime/types";
   import { signedCompactNumber } from "$lib/format";
-  import type { CatalogKind, DualVar, MechanicId, TargetId } from "$lib/runtime/types";
+  import type {
+    Accessible,
+    CatalogKind,
+    DualVar,
+    MechanicId,
+    TargetId,
+  } from "$lib/runtime/types";
   import HoverIcon from "$lib/ui/HoverIcon.svelte";
   import Icon from "$lib/ui/Icon.svelte";
   import Selector from "$lib/ui/Selector.svelte";
@@ -144,6 +150,39 @@
   function renameContextPrompt(context: import("$lib/runtime/types").ContextInfo) {
     renameCtx = { id: context.id, name: context.name };
     renameName = context.name;
+  }
+
+  // ── 显式可达性标记 ──────────────────────────────────────────────
+  // 标记 UI 用的目录 kind（与可达性对象一一对应；目录无 space-location 条目）。
+  const markKinds: { kind: CatalogKind; label: string }[] = [
+    { kind: "item", label: "物品" },
+    { kind: "recipe", label: "配方" },
+    { kind: "entity", label: "实体" },
+    { kind: "technology", label: "科技" },
+    { kind: "fluid", label: "流体" },
+    { kind: "quality", label: "品质" },
+    { kind: "planet", label: "星球" },
+  ];
+  let markAccessibleKind = $state<CatalogKind>("item");
+  let markInaccessibleKind = $state<CatalogKind>("item");
+
+  function makeAccessible(kind: CatalogKind, name: string): Accessible {
+    switch (kind) {
+      case "technology":
+        return { Tech: name };
+      case "recipe":
+        return { Recipe: name };
+      case "quality":
+        return { Quality: name };
+      case "fluid":
+        return { Fluid: name };
+      case "planet":
+        return { Planet: name };
+      case "entity":
+        return { Entity: name };
+      default:
+        return { Item: name };
+    }
   }
 
   function confirmRename() {
@@ -1407,7 +1446,7 @@
               onchange={(event) =>
                 runtime.setAllAccessible((event.currentTarget as HTMLInputElement).checked).catch(() => {})}
             />
-            全部科技默认解锁
+            无视可达性（全部可用）
           </label>
 
           <div class="field">
@@ -1448,6 +1487,76 @@
                   runtime.addTechnologyMilestone(name),
                 )}
             >+ 添加里程碑</button>
+          </div>
+
+          <div class="field">
+            <label>显式标记可达（无视来源，并入根种子）</label>
+            <div class="prefs-list">
+              {#each project.settings.marked_accessible as node, i (i)}
+                <div class="prefs-item">
+                  <HoverIcon type={accessibleKind(node)} name={accessibleName(node)} size={22} />
+                  <span class="prefs-name">
+                    {runtime.localizedName(accessibleKind(node), accessibleName(node))}
+                  </span>
+                  <button
+                    class="btn ghost"
+                    title="取消标记"
+                    onclick={() => runtime.removeMarkedAccessible(node).catch(() => {})}
+                  >×</button>
+                </div>
+              {:else}
+                <span class="muted">还没有显式标记</span>
+              {/each}
+            </div>
+            <div class="prefs-add-row">
+              <select bind:value={markAccessibleKind}>
+                {#each markKinds as option (option.kind)}
+                  <option value={option.kind}>{option.label}</option>
+                {/each}
+              </select>
+              <button
+                class="btn"
+                onclick={() =>
+                  openSelector(markAccessibleKind, "选择要标记可达的原型", (name) =>
+                    runtime.addMarkedAccessible(makeAccessible(markAccessibleKind, name)),
+                  )}
+              >+ 标记可达</button>
+            </div>
+          </div>
+
+          <div class="field">
+            <label>显式标记不可达（剪枝，阻断依赖它的对象）</label>
+            <div class="prefs-list">
+              {#each project.settings.marked_inaccessible as node, i (i)}
+                <div class="prefs-item">
+                  <HoverIcon type={accessibleKind(node)} name={accessibleName(node)} size={22} />
+                  <span class="prefs-name">
+                    {runtime.localizedName(accessibleKind(node), accessibleName(node))}
+                  </span>
+                  <button
+                    class="btn ghost"
+                    title="取消标记"
+                    onclick={() => runtime.removeMarkedInaccessible(node).catch(() => {})}
+                  >×</button>
+                </div>
+              {:else}
+                <span class="muted">还没有显式标记</span>
+              {/each}
+            </div>
+            <div class="prefs-add-row">
+              <select bind:value={markInaccessibleKind}>
+                {#each markKinds as option (option.kind)}
+                  <option value={option.kind}>{option.label}</option>
+                {/each}
+              </select>
+              <button
+                class="btn"
+                onclick={() =>
+                  openSelector(markInaccessibleKind, "选择要标记不可达的原型", (name) =>
+                    runtime.addMarkedInaccessible(makeAccessible(markInaccessibleKind, name)),
+                  )}
+              >+ 标记不可达</button>
+            </div>
           </div>
 
           <label class="check">
@@ -2844,6 +2953,18 @@
     display: flex;
     align-items: center;
     gap: 7px;
+  }
+
+  .prefs-add-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 5px;
+  }
+
+  .prefs-add-row select {
+    flex: 1;
+    min-width: 0;
   }
 
   .prefs-row.sub {

@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fs::File, path::Path};
 
-use metatorio_core::{Context, DualVar, Flow, GameState, Mechanic, ModuleConfig};
+use metatorio_core::{Accessibility, AccessibilityOptions, Accessible, Context, DualVar, Flow, GameState, Mechanic, ModuleConfig};
 use metatorio_data::{EntityComponent, FluidComponent, ItemComponent};
 use metatorio_data::store::{PrototypeGroup, PrototypeStore};
 use metatorio_solver::{AIndexMap, SolverData, SolverSolution, TargetSpec};
@@ -78,6 +78,9 @@ pub struct Runtime {
     pub state: RuntimeState,
     contexts: HashMap<String, PrototypeStore>,
     active_context: Option<String>,
+    /// 项目 → 可达性结果缓存（settings 变化时在 dispatch 里整体失效；
+    /// 计算按需进行，避免每次交互重算全图）。
+    accessibilities: HashMap<ProjectId, Accessibility>,
 }
 
 impl Runtime {
@@ -90,10 +93,14 @@ impl Runtime {
             state: RuntimeState::new(document),
             contexts: HashMap::new(),
             active_context: None,
+            accessibilities: HashMap::new(),
         }
     }
 
     pub fn dispatch(&mut self, message: AppMessage) -> Result<DispatchResult, RuntimeError> {
+        // 任何交互都可能改变 settings（时间缩放、里程碑、显式标记、无视可达性），
+        // 简单起见整体失效缓存；计算本身发生在 project_accessibility 查询时。
+        self.accessibilities.clear();
         self.state.dispatch(message)
     }
 
@@ -155,6 +162,44 @@ impl Runtime {
                 .ok_or_else(|| RuntimeError::ContextNotFound(id.clone())),
             None => Err(RuntimeError::DataNotLoaded),
         }
+    }
+
+    /// 计算并缓存项目的可达性结果（选择器过滤 / 自动规划过滤共用）。
+    ///
+    /// 用户显式覆盖来自 `ProjectSettings`：
+    /// - `marked_accessible`：并入根种子（即使无来源也可达）；
+    /// - `marked_inaccessible`：剪枝（自身不可达，阻断依赖它的对象）；
+    /// - 科技里程碑 `unlocked == false` 也剪枝（对应原版"未解锁里程碑
+    ///   阻断子树"语义；`unlocked == true` 不强行开锁，交给自动传播）；
+    /// - `all_accessible`：无视一切，全可达。
+    pub fn project_accessibility(
+        &mut self,
+        project_id: ProjectId,
+    ) -> Result<Accessibility, RuntimeError> {
+        if let Some(cached) = self.accessibilities.get(&project_id) {
+            return Ok(cached.clone());
+        }
+        let store = self.context_store(project_id)?;
+        let settings = &self.state.project(project_id)?.settings;
+        let options = AccessibilityOptions {
+            marked_accessible: settings.marked_accessible.iter().cloned().collect(),
+            marked_inaccessible: settings
+                .marked_inaccessible
+                .iter()
+                .cloned()
+                .chain(
+                    settings
+                        .tech_milestones
+                        .iter()
+                        .filter(|milestone| !milestone.unlocked)
+                        .map(|milestone| Accessible::Tech(milestone.technology.clone())),
+                )
+                .collect(),
+            all_accessible: settings.all_accessible,
+        };
+        let result = metatorio_core::accessibility::compute_accessibility(store, &options);
+        self.accessibilities.insert(project_id, result.clone());
+        Ok(result)
     }
 
     /// 从文件加载项目并导入当前文档（追加，不替换现有项目；
@@ -633,10 +678,10 @@ pub fn apply_environment_to_game_state(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::document::MechanicKind;
+    use crate::document::{MechanicKind, TechnologyMilestone};
     use crate::message::{
-        FactoryAction, FlowAction, MechanicAction, MechanicListAction, RecipeMechanicAction,
-        RuntimeCommand, SolveAction,
+        FactoryAction, FlowAction, MechanicAction, MechanicListAction, ProjectAction,
+        RecipeMechanicAction, RuntimeCommand, SolveAction,
     };
     use metatorio_core::IdWithQuality;
     use metatorio_data::store::PrototypeStore;
@@ -676,6 +721,197 @@ mod tests {
         );
         runtime.set_active_context(Some("test-context".to_string()));
         runtime
+    }
+
+    /// 可达性测试专用合成 dump：科技链 + 解锁配方链 + 手工制造。
+    fn load_accessibility_runtime() -> Runtime {
+        let mut runtime = Runtime::new();
+        let dump = json!({
+            "item": {
+                "iron-ore": { "type": "item", "name": "iron-ore" },
+                "iron-plate": { "type": "item", "name": "iron-plate" },
+                "steel-plate": { "type": "item", "name": "steel-plate" },
+                "magic-item": { "type": "item", "name": "magic-item" },
+                "assembling-machine-1": {
+                    "type": "item", "name": "assembling-machine-1",
+                    "place_result": "assembling-machine-1"
+                }
+            },
+            "fluid": {},
+            "technology": {
+                "tech-base": {
+                    "type": "technology", "name": "tech-base",
+                    "prerequisites": [], "enabled": true,
+                    "effects": [], "unit": { "count": 10, "time": 10, "ingredients": [] }
+                },
+                "tech-steel": {
+                    "type": "technology", "name": "tech-steel",
+                    "prerequisites": ["tech-base"], "enabled": false,
+                    "effects": [{ "type": "unlock-recipe", "recipe": "steel-plate" }],
+                    "unit": { "count": 10, "time": 10, "ingredients": [] }
+                }
+            },
+            "recipe": {
+                "iron-ore": {
+                    "type": "recipe", "name": "iron-ore",
+                    "energy_required": 1,
+                    "ingredients": [],
+                    "results": [{ "type": "item", "name": "iron-ore", "amount": 1 }],
+                    "categories": ["crafting"], "enabled": true
+                },
+                "iron-plate": {
+                    "type": "recipe", "name": "iron-plate",
+                    "energy_required": 1,
+                    "ingredients": [{ "type": "item", "name": "iron-ore", "amount": 1 }],
+                    "results": [{ "type": "item", "name": "iron-plate", "amount": 1 }],
+                    "categories": ["crafting"], "enabled": true
+                },
+                "steel-plate": {
+                    "type": "recipe", "name": "steel-plate",
+                    "energy_required": 1,
+                    "ingredients": [{ "type": "item", "name": "iron-plate", "amount": 1 }],
+                    "results": [{ "type": "item", "name": "steel-plate", "amount": 1 }],
+                    "categories": ["crafting"], "enabled": false
+                }
+            },
+            "assembling-machine": {
+                "assembling-machine-1": {
+                    "type": "assembling-machine", "name": "assembling-machine-1",
+                    "crafting_categories": ["crafting"], "crafting_speed": 1,
+                    "module_slots": 0, "energy_usage": "90kW",
+                    "energy_source": { "type": "electric", "drain": "0J" }
+                }
+            }
+        });
+        runtime.install_context(
+            "test-context".to_string(),
+            PrototypeStore::load(&dump).unwrap(),
+        );
+        runtime.set_active_context(Some("test-context".to_string()));
+        runtime
+    }
+
+    fn new_project(runtime: &mut Runtime) -> ProjectId {
+        runtime
+            .dispatch(AppMessage::Application(
+                crate::message::ApplicationAction::NewProject {
+                    name: "test project".to_string(),
+                },
+            ))
+            .unwrap();
+        runtime.state.ui.selected_project.unwrap()
+    }
+
+    fn dispatch_project(runtime: &mut Runtime, project: ProjectId, action: ProjectAction) {
+        runtime
+            .dispatch(AppMessage::Project { project, action })
+            .unwrap();
+    }
+
+    #[test]
+    fn project_accessibility_respects_user_marks_and_milestones() {
+        let mut runtime = load_accessibility_runtime();
+        let project = new_project(&mut runtime);
+
+        // 默认自动层：iron-plate 可达（enabled 配方），steel-plate 可达
+        // （tech-steel 由 tech-base 解锁），无来源的 magic-item 不可达。
+        let result = runtime.project_accessibility(project).unwrap();
+        assert!(result.is_item_accessible("iron-plate"));
+        assert!(result.is_item_accessible("steel-plate"));
+        assert!(!result.is_item_accessible("magic-item"));
+
+        // 显式可达：magic-item 无任何来源，标记后仍可达；移除后恢复不可达。
+        dispatch_project(
+            &mut runtime,
+            project,
+            ProjectAction::AddMarkedAccessible {
+                node: Accessible::Item("magic-item".to_string()),
+            },
+        );
+        assert!(
+            runtime
+                .project_accessibility(project)
+                .unwrap()
+                .is_item_accessible("magic-item"),
+            "显式标记可达应并入根种子"
+        );
+        dispatch_project(
+            &mut runtime,
+            project,
+            ProjectAction::RemoveMarkedAccessible {
+                node: Accessible::Item("magic-item".to_string()),
+            },
+        );
+        assert!(!runtime.project_accessibility(project).unwrap().is_item_accessible("magic-item"));
+
+        // 显式不可达：iron-plate 剪枝，其下游 steel-plate（原料依赖）一并不可达。
+        dispatch_project(
+            &mut runtime,
+            project,
+            ProjectAction::AddMarkedInaccessible {
+                node: Accessible::Item("iron-plate".to_string()),
+            },
+        );
+        let result = runtime.project_accessibility(project).unwrap();
+        assert!(!result.is_item_accessible("iron-plate"));
+        assert!(!result.is_item_accessible("steel-plate"), "剪枝应阻断依赖它的对象");
+        dispatch_project(
+            &mut runtime,
+            project,
+            ProjectAction::RemoveMarkedInaccessible {
+                node: Accessible::Item("iron-plate".to_string()),
+            },
+        );
+
+        // 科技里程碑：tech-base 未解锁 → 子树剪枝 → steel-plate 不可达。
+        dispatch_project(
+            &mut runtime,
+            project,
+            ProjectAction::AddTechnologyMilestone {
+                milestone: TechnologyMilestone {
+                    technology: "tech-base".to_string(),
+                    unlocked: false,
+                },
+            },
+        );
+        let result = runtime.project_accessibility(project).unwrap();
+        assert!(!result.is_accessible(&Accessible::Tech("tech-steel".to_string())));
+        assert!(!result.is_item_accessible("steel-plate"), "未解锁里程碑应阻断科技子树");
+
+        // 无视可达性：全可达。
+        dispatch_project(&mut runtime, project, ProjectAction::SetAllAccessible { enabled: true });
+        let result = runtime.project_accessibility(project).unwrap();
+        assert!(result.is_item_accessible("magic-item"));
+        assert!(result.is_item_accessible("steel-plate"));
+    }
+
+    #[test]
+    fn marked_accessibility_settings_persist_in_document() {
+        let mut runtime = load_accessibility_runtime();
+        let project = new_project(&mut runtime);
+        let node = Accessible::Item("magic-item".to_string());
+        dispatch_project(
+            &mut runtime,
+            project,
+            ProjectAction::AddMarkedAccessible { node: node.clone() },
+        );
+        dispatch_project(
+            &mut runtime,
+            project,
+            ProjectAction::AddMarkedInaccessible {
+                node: Accessible::Recipe("steel-plate".to_string()),
+            },
+        );
+        let settings = &runtime.state.project(project).unwrap().settings;
+        assert_eq!(settings.marked_accessible, vec![node]);
+        assert_eq!(
+            settings.marked_inaccessible,
+            vec![Accessible::Recipe("steel-plate".to_string())]
+        );
+        // 文档 roundtrip（serde 持久化）：Accessible 外部标签格式。
+        let encoded = serde_json::to_string(&runtime.state.document).unwrap();
+        let decoded: crate::document::AppDocument = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded, runtime.state.document);
     }
 
     #[test]

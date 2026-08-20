@@ -1,4 +1,4 @@
-use metatorio_core::{DualVar, IdWithQuality, Mechanic, ModuleConfig};
+use metatorio_core::{Accessible, DualVar, IdWithQuality, Mechanic, ModuleConfig};
 use serde::{Deserialize, Serialize};
 
 use crate::id::{
@@ -59,6 +59,10 @@ pub struct ProjectSettings {
     pub ignore_productivity: bool,
     pub mining_productivity: f64,
     pub all_accessible: bool,
+    /// 用户显式标记为可达的对象（即使无任何来源也可达，并入根种子）。
+    pub marked_accessible: Vec<Accessible>,
+    /// 用户显式标记为不可达的对象（剪枝：自身不可达，并阻断依赖它的对象）。
+    pub marked_inaccessible: Vec<Accessible>,
     pub quality_limit: Option<String>,
 }
 
@@ -71,6 +75,8 @@ impl Default for ProjectSettings {
             ignore_productivity: false,
             mining_productivity: 0.0,
             all_accessible: false,
+            marked_accessible: Vec::new(),
+            marked_inaccessible: Vec::new(),
             quality_limit: None,
         }
     }

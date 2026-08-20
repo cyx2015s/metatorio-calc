@@ -7,6 +7,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type {
+  Accessible,
   AppDocument,
   AppMessage,
   CatalogIndex,
@@ -42,6 +43,11 @@ export async function getDocument(): Promise<AppDocument> {
 
 export async function getUiState(): Promise<UiState> {
   return call("get_ui_state");
+}
+
+/** 项目可达性快照（选择器过滤用）：当前可达对象集合。 */
+export async function accessibility(project: number): Promise<Accessible[]> {
+  return call("accessibility", { project });
 }
 
 // ── Game contexts ─────────────────────────────────────────────────
