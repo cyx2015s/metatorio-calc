@@ -260,37 +260,12 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
     // 5. 生成"原型 → 组件清单"注册表（COMPONENT_LIST）：
     //    继承链组件（根在前）+ 命中的组合组件（如 IconComponent，追加在末尾）。
     //    语义层可按清单统一遍历（如提取图标时只需找 IconComponent）。
-    out.push_str("/// 关注原型（dump 顶层键）→ 其组件清单（继承链组件 + 组合组件，根在前）。\n");
-    out.push_str("pub const COMPONENT_LIST: &[(&str, &[&str])] = &[\n");
-    for p in &concerned {
-        let Some(tn) = &p.typename else { continue };
-        let chain = schema.prototype_chain(p);
-        let mut names: Vec<String> = chain
-            .iter()
-            .rev()
-            .map(|l| type_map::component_name(schema, &l.base.name))
-            .collect();
-        // 命中的组合组件追加到末尾（按配置顺序、去重）
-        for c in &composites {
-            if chain.iter().any(|l| c.layers.contains(&l.base.name)) {
-                let comp_name = format!("{}Component", c.name);
-                if !names.contains(&comp_name) {
-                    names.push(comp_name);
-                }
-            }
-        }
-        out.push_str(&format!(
-            "    ({tn:?}, &[{}]),\n",
-            names
-                .iter()
-                .map(|n| format!("{n:?}"))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
-    }
-    out.push_str("];\n");
-
-    // 5.5 生成 ComponentValue 枚举 + deserialize_component 分发（Phase 3）
+    //
+    //    设计原则：清单覆盖**所有** dump 原型类型（不只关注类型）——子类型
+    //    （如 rail-planner 的 RailPlannerPrototype）即使被忽略（不生成组件），
+    //    其继承链中**属于关注组件集合**的部分（如 ItemComponent 的 place_result）
+    //    也必须正常反序列化进 store。组件列表 = 继承链层 ∩ 关注组件集合；
+    //    无任何关注组件的类型（animation 等）不进入清单。
     let mut all_components: Vec<String> = Vec::new();
     for p in &concerned {
         for layer in schema.prototype_chain(p) {
@@ -306,6 +281,73 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
             all_components.push(n);
         }
     }
+    out.push_str("/// 原型（dump 顶层键）→ 其关注组件清单（继承链 ∩ 关注组件 + 组合组件，根在前）。\n");
+    out.push_str("/// 覆盖所有含关注组件的原型（含被忽略子类型：子类型的继承链关注组件照常提取）。\n");
+    out.push_str("pub const COMPONENT_LIST: &[(&str, &[&str])] = &[\n");
+    let mut component_list: Vec<(String, Vec<String>)> = Vec::new();
+    for p in &schema.prototypes {
+        let Some(tn) = &p.typename else { continue };
+        let chain = schema.prototype_chain(p);
+        let mut names: Vec<String> = chain
+            .iter()
+            .rev()
+            .filter_map(|l| {
+                let n = type_map::component_name(schema, &l.base.name);
+                if all_components.contains(&n) {
+                    Some(n)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        // 命中的组合组件追加到末尾（按配置顺序、去重）
+        for c in &composites {
+            if chain.iter().any(|l| c.layers.contains(&l.base.name)) {
+                let comp_name = format!("{}Component", c.name);
+                if !names.contains(&comp_name) {
+                    names.push(comp_name);
+                }
+            }
+        }
+        if names.is_empty() {
+            continue;
+        }
+        // 只保留"能归组"的类型：含组决定性组件（Entity/Item/Fluid/Recipe/
+        // Technology/Quality/SpaceLocation/Tile）或关注类型（prototype_group_from_type
+        // 可映射）。其余（如纯 PrototypeBaseComponent 类型）无法归组，不加载。
+        let group_components = [
+            "EntityComponent",
+            "ItemComponent",
+            "FluidComponent",
+            "RecipeComponent",
+            "TechnologyComponent",
+            "QualityComponent",
+            "SpaceLocationComponent",
+            "TileComponent",
+        ];
+        let has_group_component = names
+            .iter()
+            .any(|n| group_components.contains(&n.as_str()));
+        let is_concerned = concerned
+            .iter()
+            .any(|c| c.typename.as_deref() == Some(tn.as_str()));
+        if !has_group_component && !is_concerned {
+            continue;
+        }
+        out.push_str(&format!(
+            "    ({tn:?}, &[{}]),\n",
+            names
+                .iter()
+                .map(|n| format!("{n:?}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+        component_list.push((tn.clone(), names));
+    }
+    out.push_str("];\n");
+
+    // 5.5 生成 ComponentValue 枚举 + deserialize_component 分发（Phase 3）
+    // （all_components 已在第 5 步提前收集：关注组件集合）
     out.push_str("/// 全部组件变体（原型继承链层 + 组合组件）。\n");
     out.push_str("#[derive(Debug, Clone)]\npub enum ComponentValue {\n");
     for n in &all_components {
@@ -379,14 +421,33 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
         out.push_str(&format!("    {variant},\n"));
     }
     out.push_str("}\n\n");
-    out.push_str("/// typename（dump 键名）→ PrototypeGroup（未知类型 → Unknown）。\n");
+    out.push_str("/// typename（dump 键名）→ PrototypeGroup。\n");
+    out.push_str("/// 覆盖所有 COMPONENT_LIST 类型（含被忽略子类型）：\n");
+    out.push_str("/// 优先按组决定性组件映射（与 derive_group 一致），fallback 关注类型变体。\n");
     out.push_str("pub fn prototype_group_from_type(typename: &str) -> PrototypeGroup {\n    match typename {\n");
-    // 聚合键：entity/item 顶层键直接归入聚合变体（与 derive_group 的组件判断一致）
-    out.push_str("        \"entity\" => PrototypeGroup::Entity,\n        \"item\" => PrototypeGroup::Item,\n");
-    for (tn, variant) in &group_variants {
+    // 组件 → 聚合组变体（与 derive_group 的组件判断一致）。
+    // PlanetComponent 优先于 SpaceLocationComponent（planet 继承 space-location，
+    // 但应归 Planet 组）。
+    let component_to_variant: [(&str, &str); 9] = [
+        ("PlanetComponent", "Planet"),
+        ("EntityComponent", "Entity"),
+        ("ItemComponent", "Item"),
+        ("FluidComponent", "Fluid"),
+        ("RecipeComponent", "Recipe"),
+        ("TechnologyComponent", "Technology"),
+        ("QualityComponent", "Quality"),
+        ("SpaceLocationComponent", "SpaceLocation"),
+        ("TileComponent", "Tile"),
+    ];
+    for (tn, names) in &component_list {
+        let variant: String = component_to_variant
+            .iter()
+            .find(|(comp, _)| names.iter().any(|n| n == comp))
+            .map(|(_, v)| v.to_string())
+            .unwrap_or_else(|| typename_to_variant(tn));
         out.push_str(&format!("        {tn:?} => PrototypeGroup::{variant},\n"));
     }
-    out.push_str("        // 不可达：store 只加载关注类型（COMPONENT_LIST 键）\n        _ => panic!(\"prototype_group_from_type: 未知 typename {typename:?}\"),\n    }\n}\n");
+    out.push_str("        // 不可达：COMPONENT_LIST 已按归组能力过滤\n        _ => panic!(\"prototype_group_from_type: 未知 typename {typename:?}\"),\n    }\n}\n");
     out.push_str("} // mod prototype_groups\n\n");
 
     // 6. 自定义类型使用清单

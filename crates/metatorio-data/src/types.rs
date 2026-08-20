@@ -245,8 +245,8 @@ impl<'de> serde::Deserialize<'de> for BoundingBox {
     {
         let value: Value = serde::Deserialize::deserialize(deserializer)?;
         match value {
-            Value::Array(vec) if vec.len() == 2 => {
-                // 嵌套形态 [[x1,y1],[x2,y2]]
+            Value::Array(vec) if vec.len() >= 2 && vec[0].is_array() && vec[1].is_array() => {
+                // 嵌套形态 [[x1,y1],[x2,y2]]（可能带第 3 个"方向"元素，忽略）
                 let min = serde_json::from_value::<Vector>(vec[0].clone())
                     .map_err(|_| D::Error::custom("BoundingBox 第一个顶点非法"))?;
                 let max = serde_json::from_value::<Vector>(vec[1].clone())
@@ -254,7 +254,7 @@ impl<'de> serde::Deserialize<'de> for BoundingBox {
                 Ok(BoundingBox(min, max))
             }
             Value::Array(vec) if vec.len() >= 4 => {
-                // 平铺形态 [x1, y1, x2, y2]
+                // 平铺形态 [x1, y1, x2, y2]（可能更长，取前 4）
                 Ok(BoundingBox(
                     Vector(
                         vec[0].as_f64().unwrap_or(0.0),

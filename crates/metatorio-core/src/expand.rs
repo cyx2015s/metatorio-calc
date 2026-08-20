@@ -19,7 +19,7 @@ use crate::mechanic::{
 use crate::prim_var::Expansion;
 use crate::quality::calc_quality_distribution;
 use crate::temp_flow::TempFlow;
-use metatorio_data::generated_components::{
+use metatorio_data::{
     AccumulatorComponent, BoilerComponent, CraftingMachineComponent, EntityComponent,
     GeneratorComponent, ItemComponent, MinableProperties, MiningDrillComponent, PlantComponent,
     ReactorComponent, RecipeComponent, ResourceEntityComponent, RocketSiloComponent,
@@ -122,7 +122,7 @@ fn fluid_temperature(ctx: &Context, name: &str) -> f64 {
     ctx.prototype
         .get(PrototypeGroup::Fluid, name)
         .and_then(|record| {
-            record.component::<metatorio_data::generated_components::FluidComponent>()
+            record.component::<metatorio_data::FluidComponent>()
         })
         .map(|fluid| fluid.default_temperature)
         .unwrap_or_default()
@@ -141,7 +141,7 @@ fn add_fluid_interval(temp: &mut TempFlow, name: &str, amount: f64, lower: f64, 
 fn fluid_record<'a>(
     ctx: &'a Context,
     name: &str,
-) -> Option<&'a metatorio_data::generated_components::FluidComponent> {
+) -> Option<&'a metatorio_data::FluidComponent> {
     ctx.prototype
         .get(PrototypeGroup::Fluid, name)
         .and_then(|record| record.component())
@@ -202,7 +202,7 @@ fn add_energy(
 
 fn add_machine_effects(
     effects: &mut Effect,
-    receiver: Option<&metatorio_data::generated_components::EffectReceiver>,
+    receiver: Option<&metatorio_data::EffectReceiver>,
 ) {
     if let Some(receiver) = receiver {
         *effects = *effects + receiver.base_effect.unwrap_or_default();
@@ -855,7 +855,7 @@ fn add_generator_spent_fluid(
     temp: &mut TempFlow,
     ctx: &Context,
     generator: &GeneratorComponent,
-    input: &metatorio_data::generated_components::FluidComponent,
+    input: &metatorio_data::FluidComponent,
     used: f64,
 ) {
     let spent = generator

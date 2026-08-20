@@ -1,7 +1,7 @@
 //! Phase 3 集成测试：PrototypeStore 加载 fixture dump，
 //! 验证 (group, name) 主键、聚合标签与跨键分组。
 
-use metatorio_data::generated_components::{
+use metatorio_data::{
     ComponentValue, CraftingMachineComponent, ItemComponent, PrototypeBaseComponent,
 };
 use metatorio_data::store::{PrototypeGroup, PrototypeStore};

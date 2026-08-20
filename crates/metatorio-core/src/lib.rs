@@ -10,6 +10,7 @@ pub mod energy;
 pub mod expand;
 pub mod id;
 pub mod mechanic;
+pub mod planet;
 pub mod prim_var;
 pub mod quality;
 pub mod temp_flow;

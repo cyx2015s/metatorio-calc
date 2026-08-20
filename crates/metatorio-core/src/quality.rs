@@ -1,7 +1,7 @@
 //! 品质分布计算（迁移自 metatorio-egui `calc_quality_distribution`）。
 
 use crate::context::Context;
-use metatorio_data::generated_components::QualityComponent;
+use metatorio_data::QualityComponent;
 use metatorio_data::store::PrototypeGroup;
 
 /// 按 order 排序的品质组件列表（0 = normal）。

@@ -26,7 +26,7 @@ pub mod ext;
 
 /// 生成代码的模块容器（避免与手写代码命名冲突）。
 #[allow(clippy::all, dead_code, non_snake_case)]
-pub mod generated_components {
+pub(crate) mod generated_components {
     include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 }
 

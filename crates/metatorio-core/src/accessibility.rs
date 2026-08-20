@@ -21,8 +21,8 @@ use std::collections::{HashMap, VecDeque};
 use metatorio_data::store::{PrototypeGroup, PrototypeStore};
 use metatorio_data::types::{Ingredient, Modifier, Product};
 use metatorio_data::{
-    CraftingMachineComponent, EntityComponent, ItemComponent, RecipeComponent,
-    ResourceEntityComponent, TechnologyComponent,
+    AsteroidChunkComponent, CraftingMachineComponent, EnemySpawnerComponent, EntityComponent,
+    EntityWithHealthComponent, ItemComponent, PlantComponent, RecipeComponent, TechnologyComponent,
 };
 
 use crate::dual_var::DualVar;
@@ -42,6 +42,9 @@ pub enum Accessible {
     Item(String),
     Fluid(String),
     Entity(String),
+    /// 星球（普通节点）：nauvis 恒解锁（根）；其他星球 = 需要
+    /// `planet-discovery-<星球>` 科技。星球解锁后其资源可自由移动。
+    Planet(String),
     Electricity,
     Heat,
 }
@@ -69,6 +72,7 @@ impl Accessible {
             Accessible::Item(name) => ("item", name),
             Accessible::Fluid(name) => ("fluid", name),
             Accessible::Entity(name) => ("entity", name),
+            Accessible::Planet(name) => ("planet", name),
             Accessible::Electricity => ("electricity", ""),
             Accessible::Heat => ("heat", ""),
         }
@@ -151,29 +155,148 @@ struct GraphData {
     recipes_by_product: HashMap<String, Vec<String>>,
     /// 物品名 → 可采出它的矿藏实体名（minable 产出）。
     resources_by_product: HashMap<String, Vec<String>>,
+    /// 变质产物名 → 可变质成它的物品名（`item.spoil_result`，隐含
+    /// "spoil.<item>" 配方，对应 yafc 的 getSpoilRecipe）。
+    spoil_sources: HashMap<String, Vec<String>>,
     /// 实体名 → 放置后成为该实体的物品名（`item.place_result`）。
     items_by_place_result: HashMap<String, Vec<String>>,
     /// 配方/品质/空间名 → 解锁它的科技名（UnlockRecipe/UnlockQuality/UnlockSpaceLocation）。
     techs_by_unlock: HashMap<String, Vec<String>>,
     /// 配方类别 → 能做的机器实体名。
     machines_by_category: HashMap<String, Vec<String>>,
+    /// 资源实体/星球流体名 → 生成它的星球列表（planet_autoplaced_flows +
+    /// seed_available_on_planet）。星球解锁（planet-discovery-<p> 科技可达，
+    /// nauvis 恒解锁）后该资源可自由移动到任何星球 → 根。
+    resource_planets: HashMap<String, Vec<String>>,
+}
+
+/// 资源实体/星球流体名 → 生成它的星球列表。
+/// 收集**所有**在该星球自动放置的可采集实体（不限 resource 类）：
+/// - 星球流体（带流体 tile）；
+/// - 可挖掘实体（矿藏/岩石/卵筏等）→ 实体本身 + minable 产物；
+/// - 击杀掉落（loot）实体 → 实体本身 + loot 产物；
+/// - 虫巢（unit-spawner）→ 捕获产物（captured_spawner_entity 产卵器）；
+/// - 植物（seed_available_on_planet）。
+/// 星球解锁（[`Accessible::Planet`] 节点可达）后资源可自由移动到任何星球。
+fn build_resource_planets(store: &PrototypeStore) -> HashMap<String, Vec<String>> {
+    let mut map: HashMap<String, Vec<String>> = HashMap::new();
+    for planet_record in store.group(PrototypeGroup::Planet) {
+        let planet = &planet_record.name;
+        let map_gen = crate::planet::planet_map_gen(store, planet);
+        // 星球流体（planet_autoplaced_flows 的流体部分；矿藏实体由下方统一处理）
+        for (flow, _) in crate::planet::planet_autoplaced_flows(store, planet) {
+            if let Some(Accessible::Fluid(name)) = Accessible::from_flow(&flow) {
+                map.entry(name).or_default().push(planet.clone());
+            }
+        }
+        // 所有自动放置实体（autoplace 命中该星球）的可采集内容
+        if let Some(map_gen) = &map_gen {
+            let entity_settings: std::collections::HashSet<String> = map_gen
+                .autoplace_settings
+                .get("entity")
+                .map(|settings| settings.settings.keys().cloned().collect())
+                .unwrap_or_default();
+            for record in store.group(PrototypeGroup::Entity) {
+                let Some(entity) = record.component::<EntityComponent>() else {
+                    continue;
+                };
+                let autoplaced = entity.autoplace.as_ref().is_some_and(|autoplace| {
+                    autoplace.control.as_ref().is_some_and(|control| {
+                        map_gen.autoplace_controls.contains_key(control)
+                    }) || entity_settings.contains(&record.name)
+                });
+                if !autoplaced {
+                    continue;
+                }
+                // 可采集内容：可挖掘 / 击杀掉落 / 可捕获虫巢
+                let minable = entity.minable();
+                let loot_items: Vec<String> = record
+                    .component::<EntityWithHealthComponent>()
+                    .map(|health| health.loot.iter().map(|loot| loot.name.clone()).collect())
+                    .unwrap_or_default();
+                let is_spawner = record.component::<EnemySpawnerComponent>().is_some();
+                if minable.is_some() || !loot_items.is_empty() || is_spawner {
+                    map.entry(record.name.clone())
+                        .or_default()
+                        .push(planet.clone());
+                }
+                if let Some(minable) = minable {
+                    if let Some(result) = &minable.result {
+                        map.entry(result.clone()).or_default().push(planet.clone());
+                    }
+                    for product in &minable.results {
+                        match product {
+                            Product::Item(item) => {
+                                map.entry(item.name.clone()).or_default().push(planet.clone());
+                            }
+                            Product::Fluid(fluid) => {
+                                map.entry(fluid.name.clone()).or_default().push(planet.clone());
+                            }
+                        }
+                    }
+                }
+                for loot in loot_items {
+                    map.entry(loot).or_default().push(planet.clone());
+                }
+                // 捕获虫巢 → 产卵器实体（biter-egg 获取途径）
+                if let Some(spawner) = record.component::<EnemySpawnerComponent>()
+                    && let Some(captured) = &spawner.captured_spawner_entity
+                {
+                    map.entry(captured.clone())
+                        .or_default()
+                        .push(planet.clone());
+                }
+            }
+        }
+        // 植物实体：存在种子且该星球可种（seed_available_on_planet）
+        for record in store.group(PrototypeGroup::Entity) {
+            if record.component::<PlantComponent>().is_none() {
+                continue;
+            }
+            let plant_entity = &record.name;
+            let seed_available = store.group(PrototypeGroup::Item).any(|item| {
+                item.component::<ItemComponent>().is_some_and(|item| {
+                    item.plant_result.as_deref() == Some(plant_entity.as_str())
+                        && crate::planet::seed_available_on_planet(
+                            store,
+                            item,
+                            plant_entity,
+                            Some(planet),
+                        )
+                })
+            });
+            if seed_available {
+                map.entry(plant_entity.clone()).or_default().push(planet.clone());
+            }
+        }
+    }
+    map
 }
 
 fn build_graph(store: &PrototypeStore) -> GraphData {
     let mut recipes_by_product: HashMap<String, Vec<String>> = HashMap::new();
     let mut resources_by_product: HashMap<String, Vec<String>> = HashMap::new();
+    let mut spoil_sources: HashMap<String, Vec<String>> = HashMap::new();
     let mut items_by_place_result: HashMap<String, Vec<String>> = HashMap::new();
     let mut techs_by_unlock: HashMap<String, Vec<String>> = HashMap::new();
     let mut machines_by_category: HashMap<String, Vec<String>> = HashMap::new();
 
     for record in store.group(PrototypeGroup::Item) {
-        if let Some(item) = record.component::<ItemComponent>()
-            && !item.place_result.is_empty()
-        {
-            items_by_place_result
-                .entry(item.place_result.clone())
-                .or_default()
-                .push(record.name.clone());
+        if let Some(item) = record.component::<ItemComponent>() {
+            if !item.place_result.is_empty() {
+                items_by_place_result
+                    .entry(item.place_result.clone())
+                    .or_default()
+                    .push(record.name.clone());
+            }
+            if let Some(spoil) = &item.spoil_result
+                && !spoil.is_empty()
+            {
+                spoil_sources
+                    .entry(spoil.clone())
+                    .or_default()
+                    .push(record.name.clone());
+            }
         }
     }
     for record in store.group(PrototypeGroup::Recipe) {
@@ -254,9 +377,11 @@ fn build_graph(store: &PrototypeStore) -> GraphData {
     GraphData {
         recipes_by_product,
         resources_by_product,
+        spoil_sources,
         items_by_place_result,
         techs_by_unlock,
         machines_by_category,
+        resource_planets: build_resource_planets(store),
     }
 }
 
@@ -356,6 +481,18 @@ fn requirements(store: &PrototypeStore, graph: &GraphData, node: &Accessible) ->
                     Requirement::Node(Accessible::Entity(entity.clone()))
                 }));
             }
+            if let Some(spoils) = graph.spoil_sources.get(name) {
+                // 变质来源：可变质成该物品的任一物品（隐含 spoil.<item> 配方）
+                any.extend(spoils.iter().map(|source| {
+                    Requirement::Node(Accessible::Item(source.clone()))
+                }));
+            }
+            // 星球资源（可挖掘/loot/捕获产物）：星球解锁即可获取
+            if let Some(planets) = graph.resource_planets.get(name) {
+                any.extend(planets.iter().map(|planet| {
+                    Requirement::Node(Accessible::Planet(planet.clone()))
+                }));
+            }
             Requirement::Any(any)
         }
         Accessible::Fluid(name) => {
@@ -370,16 +507,37 @@ fn requirements(store: &PrototypeStore, graph: &GraphData, node: &Accessible) ->
                     Requirement::Node(Accessible::Entity(entity.clone()))
                 }));
             }
+            // 星球流体（如某星球生成的水/岩浆）：星球解锁即可获取
+            if let Some(planets) = graph.resource_planets.get(name) {
+                any.extend(planets.iter().map(|planet| {
+                    Requirement::Node(Accessible::Planet(planet.clone()))
+                }));
+            }
             Requirement::Any(any)
         }
         Accessible::Entity(name) => {
             let record = store.get(PrototypeGroup::Entity, name);
             if record
-                .and_then(|r| r.component::<ResourceEntityComponent>())
+                .and_then(|r| r.component::<AsteroidChunkComponent>())
                 .is_some()
             {
-                // 矿藏实体：星球生成，不参与科技链（根）
+                // 太空小行星（asteroid-chunk）：空间平台可采集（太空资源，
+                // 简化：始终可达，不绑定具体星球）。
                 Requirement::All(Vec::new())
+            } else if graph.resource_planets.contains_key(name) {
+                // 星球刷新的可采集实体（矿藏/植物/可挖掘/loot/产卵器）：
+                // 任一生成星球解锁即可采集（星球解锁后资源可自由移动）。
+                let planets = graph
+                    .resource_planets
+                    .get(name)
+                    .cloned()
+                    .unwrap_or_default();
+                Requirement::Any(
+                    planets
+                        .into_iter()
+                        .map(|planet| Requirement::Node(Accessible::Planet(planet)))
+                        .collect(),
+                )
             } else {
                 // 实体解锁条件 = Any([
                 //   a) place_result 是该实体的物品（放置后成为该实体），
@@ -428,36 +586,82 @@ fn requirements(store: &PrototypeStore, graph: &GraphData, node: &Accessible) ->
                 .collect();
             Requirement::Any(any)
         }
+        Accessible::Planet(name) => {
+            // nauvis 初始解锁（根）；其他星球需要 planet-discovery-<星球> 科技。
+            if name == "nauvis" {
+                Requirement::All(Vec::new())
+            } else {
+                Requirement::All(vec![Requirement::Node(Accessible::Tech(format!(
+                    "planet-discovery-{name}"
+                )))])
+            }
+        }
         Accessible::Electricity | Accessible::Heat => Requirement::All(Vec::new()),
     }
 }
 
-/// 收集全部可达性节点（科技/配方/物品/流体/实体/品质/空间位置）。
+/// 收集全部可达性节点（科技/配方/物品/流体/实体/品质/空间/星球）。
+/// 物品/流体以**配方引用**为准（原料+产物）——某些物品类型不在
+/// Item 组（如 rail-planner 的 rail），但它们可经配方获得，必须入图。
 fn collect_nodes(store: &PrototypeStore) -> Vec<Accessible> {
     let mut out = Vec::new();
     for group in [
         PrototypeGroup::Technology,
         PrototypeGroup::Recipe,
-        PrototypeGroup::Item,
-        PrototypeGroup::Fluid,
         PrototypeGroup::Entity,
         PrototypeGroup::Quality,
         PrototypeGroup::SpaceLocation,
+        PrototypeGroup::Planet,
     ] {
         for record in store.group(group) {
             let node = match group {
                 PrototypeGroup::Technology => Accessible::Tech(record.name.clone()),
                 PrototypeGroup::Recipe => Accessible::Recipe(record.name.clone()),
-                PrototypeGroup::Item => Accessible::Item(record.name.clone()),
-                PrototypeGroup::Fluid => Accessible::Fluid(record.name.clone()),
                 PrototypeGroup::Entity => Accessible::Entity(record.name.clone()),
                 PrototypeGroup::Quality => Accessible::Quality(record.name.clone()),
                 PrototypeGroup::SpaceLocation => Accessible::Space(record.name.clone()),
+                PrototypeGroup::Planet => Accessible::Planet(record.name.clone()),
                 _ => continue,
             };
             out.push(node);
         }
     }
+    // 物品/流体：Item/Fluid 组 ∪ 全部配方的原料与产物。
+    let mut items: AIndexSet<String> = store
+        .group(PrototypeGroup::Item)
+        .map(|record| record.name.clone())
+        .collect();
+    let mut fluids: AIndexSet<String> = store
+        .group(PrototypeGroup::Fluid)
+        .map(|record| record.name.clone())
+        .collect();
+    for record in store.group(PrototypeGroup::Recipe) {
+        let Some(recipe) = record.component::<RecipeComponent>() else {
+            continue;
+        };
+        for ingredient in &recipe.ingredients {
+            match ingredient {
+                Ingredient::Item(item) => {
+                    items.insert(item.name.clone());
+                }
+                Ingredient::Fluid(fluid) => {
+                    fluids.insert(fluid.name.clone());
+                }
+            }
+        }
+        for result in &recipe.results {
+            match result {
+                Product::Item(product) => {
+                    items.insert(product.name.clone());
+                }
+                Product::Fluid(product) => {
+                    fluids.insert(product.name.clone());
+                }
+            }
+        }
+    }
+    out.extend(items.into_iter().map(Accessible::Item));
+    out.extend(fluids.into_iter().map(Accessible::Fluid));
     out
 }
 
@@ -539,6 +743,28 @@ mod tests {
         PrototypeStore::load(&dump).expect("dump 加载失败")
     }
 
+    /// 仓库内真实 dump（相对路径，测试可移植；不依赖机器上的 %APPDATA%）。
+    const REAL_DUMP: &str =
+        concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/data-raw-dump.json");
+
+    fn load_real_dump() -> Option<PrototypeStore> {
+        if !std::path::Path::new(REAL_DUMP).exists() {
+            eprintln!("[skip] 无真实 dump（{REAL_DUMP}），跳过");
+            return None;
+        }
+        let raw = std::fs::read(REAL_DUMP).expect("读 dump");
+        let dump: serde_json::Value = serde_json::from_slice(&raw).expect("解析 dump");
+        match PrototypeStore::load(&dump) {
+            Ok(store) => Some(store),
+            Err(error) => {
+                for failure in &error.failures {
+                    eprintln!("[load 失败] {:?}", failure);
+                }
+                panic!("dump 加载失败: {:?}", error);
+            }
+        }
+    }
+
     fn tech(name: &str, prerequisites: Vec<&str>, enabled: bool) -> serde_json::Value {
         json!({
             "type": "technology", "name": name,
@@ -574,6 +800,8 @@ mod tests {
                 "engine-unit": { "type": "item", "name": "engine-unit" },
                 "magic-item": { "type": "item", "name": "magic-item" },
                 "rail": { "type": "item", "name": "rail" },
+                "fish-food": { "type": "item", "name": "fish-food", "spoil_result": "spoilage-fish" },
+                "spoilage-fish": { "type": "item", "name": "spoilage-fish" },
                 "assembling-machine-1": { "type": "item", "name": "assembling-machine-1", "place_result": "assembling-machine-1" }
             },
             "fluid": {},
@@ -584,6 +812,7 @@ mod tests {
                 "steel-plate": recipe("steel-plate", vec!["iron-plate"], vec!["steel-plate"], false, vec!["tech-steel"]),
                 "engine-unit": recipe("engine-unit", vec!["iron-plate", "steel-plate"], vec!["engine-unit"], false, vec!["tech-engine"]),
                 "rail": recipe("rail", vec!["iron-plate"], vec!["rail"], true, vec![]),
+                "fish-food": recipe("fish-food", vec!["iron-plate"], vec!["fish-food"], true, vec![]),
                 "assembling-machine-1": recipe("assembling-machine-1", vec!["iron-plate"], vec!["assembling-machine-1"], true, vec![])
             },
             "assembling-machine": {
@@ -659,6 +888,11 @@ mod tests {
             !result.is_accessible(&Accessible::Entity("test-entity-dead".to_string())),
             "placeable_by 指向不可达物品时应不可达"
         );
+        // 变质来源：fish-food（enabled 配方产物）变质为 spoilage-fish → 后者可达
+        assert!(
+            result.is_item_accessible("spoilage-fish"),
+            "仅靠变质来源获得的物品应可达（spoil_result 链）"
+        );
     }
 
     #[test]
@@ -711,14 +945,9 @@ mod tests {
     /// 依赖本机导出 dump，存在则验证；不存在则跳过。
     #[test]
     fn real_dump_basic_accessibility_chains() {
-        let path = "C:\\Users\\mirac\\AppData\\Roaming\\Factorio\\script-output\\data-raw-dump.json";
-        if !std::path::Path::new(path).exists() {
-            eprintln!("[skip] 无真实 dump，跳过");
+        let Some(store) = load_real_dump() else {
             return;
-        }
-        let raw = std::fs::read(path).expect("读 dump");
-        let dump: serde_json::Value = serde_json::from_slice(&raw).expect("解析 dump");
-        let store = load(dump);
+        };
         let result = compute_accessibility(&store, &AccessibilityOptions::default());
 
         // 诊断：打印关键物品的可达性（便于调整断言）。
@@ -762,5 +991,81 @@ mod tests {
         // 高级链
         assert!(result.is_item_accessible("electromagnetic-science-pack"), "电磁科学包应可达");
         assert!(result.is_item_accessible("space-science-pack"), "空间科学包应可达");
+        // 变质机制：spoilage（仅靠可变质物品变质而来）应可达
+        assert!(result.is_item_accessible("spoilage"), "spoilage（变质来源）应可达");
+    }
+
+    /// 真实 dump：不显式禁用科技时，原版所有科技瓶都应可达（可解锁）。
+    /// 科技瓶链覆盖基础/石油/军事/生产/物流/空间/冶金/电磁/农业/低温/普罗米修斯，
+    /// 是可达性传播完备性的关键验证。
+    #[test]
+    fn real_dump_all_vanilla_science_packs_reachable() {
+        let Some(store) = load_real_dump() else {
+            return;
+        };
+        let result = compute_accessibility(&store, &AccessibilityOptions::default());
+
+        // promethium-science-pack 暂缺：依赖太空小行星（promethium-asteroid-chunk），
+        // 其生成链是"大星岩 dying_trigger_effect 生成小星岩 → 星岩收集器采集"，
+        // 需要解析 TriggerEffect 复杂 union（create-asteroid-chunk 等）——后续再做。
+        let packs = [
+            "automation-science-pack",
+            "logistic-science-pack",
+            "military-science-pack",
+            "chemical-science-pack",
+            "production-science-pack",
+            "utility-science-pack",
+            "space-science-pack",
+            "metallurgic-science-pack",
+            "electromagnetic-science-pack",
+            "agricultural-science-pack",
+            "cryogenic-science-pack",
+        ];
+        let mut all_ok = true;
+        for pack in packs {
+            let ok = result.is_item_accessible(pack);
+            eprintln!("科技瓶 [{pack}] = {ok}");
+            all_ok &= ok;
+        }
+        assert!(
+            all_ok,
+            "不显式禁用科技时原版所有科技瓶都应可达"
+        );
+    }
+
+    /// 诊断：rail 在 store 中的实际归属（验证"rail 是否在 Item 组"）。
+    #[test]
+    fn real_dump_rail_in_store() {
+        let Some(store) = load_real_dump() else {
+            return;
+        };
+        eprintln!(
+            "Item 组含 rail = {}",
+            store.get(PrototypeGroup::Item, "rail").is_some()
+        );
+        eprintln!(
+            "Entity 组含 straight-rail = {}",
+            store.get(PrototypeGroup::Entity, "straight-rail").is_some()
+        );
+        eprintln!(
+            "Recipe 组含 rail = {}",
+            store.get(PrototypeGroup::Recipe, "rail").is_some()
+        );
+        let rail_items: Vec<String> = store
+            .group(PrototypeGroup::Item)
+            .filter(|record| record.name.contains("rail"))
+            .map(|record| record.name.clone())
+            .collect();
+        eprintln!("Item 组含 rail 的名字: {rail_items:?}");
+        // rail 配方的 results 是否含 Product::Item("rail")
+        if let Some(record) = store.get(PrototypeGroup::Recipe, "rail") {
+            if let Some(recipe) = record.component::<RecipeComponent>() {
+                for result in &recipe.results {
+                    if let Product::Item(product) = result {
+                        eprintln!("rail 配方产物: item [{}]", product.name);
+                    }
+                }
+            }
+        }
     }
 }

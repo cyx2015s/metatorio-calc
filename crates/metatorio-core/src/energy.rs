@@ -6,7 +6,7 @@
 use crate::context::Context;
 use crate::dual_var::DualVar;
 use crate::prim_var::Flow;
-use metatorio_data::generated_components::{FluidComponent, ItemComponent};
+use metatorio_data::{FluidComponent, ItemComponent};
 use metatorio_data::store::PrototypeGroup;
 use metatorio_data::types::{Effect, EnergyAmount, EnergySource};
 
@@ -265,7 +265,7 @@ pub fn energy_source_as_flow(
 fn add_spent_fluid(
     ctx: &Context,
     flow: &mut Flow,
-    spent: &metatorio_data::generated_components::SpentFluidSpecification,
+    spent: &metatorio_data::SpentFluidSpecification,
     amount: f64,
 ) {
     if spent.amount <= 0.0 || spent.name.is_empty() || amount <= 0.0 {

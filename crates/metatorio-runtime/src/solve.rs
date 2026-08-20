@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fs::File, path::Path};
 
 use metatorio_core::{Context, DualVar, Flow, GameState, Mechanic, ModuleConfig};
-use metatorio_data::generated_components::{EntityComponent, FluidComponent, ItemComponent};
+use metatorio_data::{EntityComponent, FluidComponent, ItemComponent};
 use metatorio_data::store::{PrototypeGroup, PrototypeStore};
 use metatorio_solver::{AIndexMap, SolverData, SolverSolution, TargetSpec};
 use serde::{Deserialize, Serialize};
@@ -607,7 +607,7 @@ pub fn apply_environment_to_game_state(
                 store.get(metatorio_data::store::PrototypeGroup::SpaceLocation, planet_name)
             {
                 if let Some(component) =
-                    record.component::<metatorio_data::generated_components::SpaceLocationComponent>()
+                    record.component::<metatorio_data::SpaceLocationComponent>()
                 {
                     game.solar_power_multiplier = component.solar_power_in_space;
                 }
@@ -616,7 +616,7 @@ pub fn apply_environment_to_game_state(
     } else if let Some(planet_name) = planet {
         if let Some(record) = store.get(metatorio_data::store::PrototypeGroup::Planet, planet_name) {
             if let Some(component) =
-                record.component::<metatorio_data::generated_components::PlanetComponent>()
+                record.component::<metatorio_data::PlanetComponent>()
             {
                 if let Some(&value) = component.surface_properties.get("solar-power") {
                     // 百分比 → 倍率（nauvis 默认 100 → 1.0）

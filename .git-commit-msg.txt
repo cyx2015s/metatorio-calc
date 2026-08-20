@@ -1,7 +1,17 @@
-适配层优化：needs_adaptation 只读检测避免 2.1 dump 深拷贝
+可达性 Planet 节点 + 星球资源收集 + codegen 继承链提取（提交当前进展，promethium/Asteroid 后续再做）
 
-PrototypeStore::load 之前无条件克隆整个 dump 再规范化——29MB 的
-2.1 dump 每次加载都白做一次深拷贝。新增 adapt::needs_adaptation
-（只读遍历 recipe 组，命中 category/additional_categories 任一 2.0
-特征才返回 true），load 仅在需要时克隆改写；2.1 dump 直接复用原
-Value。补检测单测。
+可达性模型扩展：
+- Accessible::Planet(name) 普通节点：nauvis 恒解锁（根）；其他星球 = 需要 planet-discovery-<星球> 科技。星球解锁后其资源可自由移动。
+- build_resource_planets 按星球收集所有自动放置的可采集实体：矿藏（minable）、击杀掉落（EntityWithHealthComponent.loot）、虫巢（unit-spawner 捕获 → EnemySpawnerComponent.captured_spawner_entity 产卵器）、植物（seed_available_on_planet）、星球流体（autoplaced 带流体 tile）；星球流体/资源实体需求 = Any([Planet(Y1), Planet(Y2)...])。
+- 变质来源 spoil_sources（item.spoil_result，隐含 spoil.<item> 配方）。
+
+codegen 继承链提取（emit.rs）：
+- COMPONENT_LIST 覆盖所有含关注组件的 dump 原型类型（含被忽略子类型，如 rail-planner 的 ItemComponent.place_result 照常反序列化进 store）——子类型被忽略，其中继承的关注组件部分必须正常加载。
+- prototype_group_from_type 按"组决定性组件"映射（component_to_variant），PlanetComponent 优先于 SpaceLocationComponent（planet 归 Planet 组），fallback 关注类型变体。
+
+其余：
+- planet.rs 从 metatorio-runtime 迁移到 metatorio-core（runtime 改为 re-export），供可达性直接使用。
+- generated_components 改 pub(crate)，组件在 metatorio-data 顶层 re-export（各 crate import 简化）。
+- BoundingBox 支持嵌套 3 元素（[[x1,y1],[x2,y2],方向]，方向忽略）。
+
+测试：真实 dump 科技瓶 11/12 可达（promethium-science-pack 暂缺：依赖太空小行星生成链"大星岩 dying_trigger_effect 生成小星岩 → 星岩收集器采集"，需解析 TriggerEffect 复杂 union——按计划后续再做）。

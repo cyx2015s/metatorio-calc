@@ -24,7 +24,7 @@ pub struct ModuleConfig {
 // 模块/插件塔效果与耗电（迁移自 metatorio-egui ModuleConfig::get_effect/get_consumption）
 
 use crate::context::Context;
-use metatorio_data::generated_components::{BeaconComponent, ModuleComponent, QualityComponent};
+use metatorio_data::{BeaconComponent, ModuleComponent, QualityComponent};
 use metatorio_data::types::{BeaconCounter, Effect, EnergySource};
 
 fn module_prototype<'a>(
@@ -47,7 +47,7 @@ fn beacon_prototype<'a>(
 pub(crate) fn quality_by_level<'a>(
     ctx: &'a Context,
     level: usize,
-) -> Option<&'a metatorio_data::generated_components::QualityComponent> {
+) -> Option<&'a metatorio_data::QualityComponent> {
     let name = ctx.prototype.quality_order().get(level)?;
     ctx.prototype
         .get(metatorio_data::store::PrototypeGroup::Quality, name)

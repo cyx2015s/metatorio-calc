@@ -804,7 +804,8 @@ pub const DEFAULT_CONCERNED_TYPENAMES: &[&str] = &[
     // "elevated-curved-rail-b",
     // "elevated-half-diagonal-rail",
     // "elevated-straight-rail",
-    // "unit-spawner",
+    // unit-spawner：虫巢（捕获 → captured_spawner_entity 产卵器 → biter-egg 获取）
+    "unit-spawner",
     // "energy-shield-equipment",
     // "entity-ghost",
     // "equip-armor-achievement",
@@ -900,6 +901,8 @@ pub const DEFAULT_CONCERNED_TYPENAMES: &[&str] = &[
     "quality",
     // "radar",
     // "rail-chain-signal",
+    // rail-planner 本身被忽略（不生成 RailPlannerComponent），但其继承链中的
+    // ItemComponent（place_result 等）由 COMPONENT_LIST 的继承链提取逻辑加载。
     // "rail-planner",
     // "rail-ramp",
     // "rail-remnants",

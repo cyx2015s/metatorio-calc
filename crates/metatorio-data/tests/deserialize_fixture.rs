@@ -4,7 +4,7 @@
 //! fixture 由 make_fixture.py 从完整 data-raw-dump.json 裁剪生成，
 //! 提交进仓库，CI 可离线运行。
 
-use metatorio_data::generated_components::*;
+use metatorio_data::*;
 use serde_json::Value;
 
 fn load_fixture() -> Value {
