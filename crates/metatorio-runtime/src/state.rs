@@ -2506,6 +2506,63 @@ mod tests {
     }
 
     #[test]
+    fn enumerated_module_removal_requires_exact_quality_match() {
+        // 用户报告 bug：添加带品质的枚举插件后永远删不掉。根因是前端
+        // removeEnumeratedModule 硬编码 quality="normal"，与存储的
+        // IdWithQuality 精确匹配失败。本测试固化 runtime 语义：
+        // RemoveEnumeratedModule 按完整 IdWithQuality 匹配（用 normal
+        // 删 legendary 必须失败，用同品质删除必须成功）。
+        let (mut state, project, _factory) = state_with_factory();
+        let legendary = IdWithQuality::new("efficiency-module-3", "legendary");
+        let normal = IdWithQuality::new("efficiency-module-3", "normal");
+        let planning = |state: &mut RuntimeState, action| {
+            state
+                .dispatch(AppMessage::Project {
+                    project,
+                    action: ProjectAction::Planning(action),
+                })
+                .unwrap()
+        };
+        let modules = |state: &RuntimeState| {
+            state
+                .project(project)
+                .unwrap()
+                .planning
+                .enumerate_modules
+                .clone()
+        };
+
+        // 添加带品质的插件（applyBestModules 用主品质添加的场景）
+        assert!(planning(&mut state, PlanningAction::AddEnumeratedModule {
+            module: legendary.clone(),
+        })
+        .changed);
+        assert!(modules(&state).contains(&legendary));
+        // 重复添加同品质被拒
+        assert!(!planning(&mut state, PlanningAction::AddEnumeratedModule {
+            module: legendary.clone(),
+        })
+        .changed);
+
+        // 前端旧逻辑：用 normal 删除 → 精确匹配失败，删不掉
+        assert!(!planning(&mut state, PlanningAction::RemoveEnumeratedModule {
+            module: normal.clone(),
+        })
+        .changed);
+        assert!(
+            modules(&state).contains(&legendary),
+            "normal 品质删除不应影响 legendary 条目"
+        );
+
+        // 修复后的前端：用完整品质删除 → 成功
+        assert!(planning(&mut state, PlanningAction::RemoveEnumeratedModule {
+            module: legendary.clone(),
+        })
+        .changed);
+        assert!(!modules(&state).contains(&legendary));
+    }
+
+    #[test]
     fn wrong_mechanic_action_is_rejected_without_mutating_the_document() {
         let (mut state, project, factory) = state_with_factory();
         state

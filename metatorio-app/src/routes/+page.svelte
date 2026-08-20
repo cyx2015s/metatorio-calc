@@ -2021,7 +2021,7 @@
               <button
                 class="btn ghost"
                 title="移除"
-                onclick={() => runtime.removeEnumeratedModule(module.id).catch(() => {})}
+                onclick={() => runtime.removeEnumeratedModule(module).catch(() => {})}
               >×</button>
             </div>
           {:else}

@@ -36,6 +36,7 @@ import type {
   CatalogIndex,
   ContextInfo,
   FactoryId,
+  IdWithQuality,
   MechanicId,
   MechanicKind,
   ProjectId,
@@ -1172,9 +1173,12 @@ class RuntimeStore {
     });
   }
 
-  async removeEnumeratedModule(module: string): Promise<void> {
+  async removeEnumeratedModule(module: IdWithQuality): Promise<void> {
+    // 必须传完整品质：runtime 按 IdWithQuality 精确匹配删除。
+    // 历史 bug：硬编码 quality="normal" 导致带品质的插件（如 applyBestModules
+    // 用主品质添加的 legendary）永远删不掉。
     await this.planningMessage({
-      "remove-enumerated-module": { module: { id: module, quality: "normal" } },
+      "remove-enumerated-module": { module: { id: module.id, quality: module.quality } },
     });
   }
 
@@ -1184,7 +1188,7 @@ class RuntimeStore {
     const modules = await bestModules();
     const existing = [...(this.selectedProject?.planning.enumerate_modules ?? [])];
     for (const module of existing) {
-      await this.removeEnumeratedModule(module.id);
+      await this.removeEnumeratedModule(module);
     }
     for (const module of modules) {
       await this.addEnumeratedModule(module.name, quality);
