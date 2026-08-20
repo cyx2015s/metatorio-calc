@@ -3,6 +3,7 @@
 //! 方向 B：Mechanic 组件枚举（工厂的单个生产单元）+ DualVar（流标识）。
 //! 纯数据层：UI 状态、求解逻辑（AsFlow）、偏好配置均不在此层。
 
+pub mod accessibility;
 pub mod context;
 pub mod dual_var;
 pub mod energy;
@@ -13,6 +14,7 @@ pub mod prim_var;
 pub mod quality;
 pub mod temp_flow;
 
+pub use accessibility::{Accessibility, AccessibilityOptions, Accessible, Requirement};
 pub use context::{Context, GameState};
 pub use dual_var::DualVar;
 pub use expand::{SolarBalance, solar_balance};
