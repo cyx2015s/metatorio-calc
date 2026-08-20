@@ -770,6 +770,7 @@ mod tests {
     use metatorio_core::prim_var::{AIndexMap as CoreAIndexMap, Flow as CoreFlow};
     use metatorio_runtime::document::MechanicKind;
     use metatorio_runtime::solve::{ExpandedVarId, add_conversion_flows, instance_cost};
+    use metatorio_runtime::AppMessage;
     use metatorio_solver::{SolverData, SolverSolution};
     use serde_json::json;
 
@@ -1431,5 +1432,130 @@ mod tests {
         ];
         let used = used_candidates(&candidates, prim, std::iter::empty::<(ExpandedVarId, f64)>());
         assert_eq!(used, vec!["candidate-0".to_string(), "candidate-2".to_string()]);
+    }
+
+    /// ③ 自动规划过滤不可达候选：steel-plate 配方由不可达科技解锁 →
+    /// 候选被剔除 → 目标 steel-plate 无供给（即便外部输入 iron-ore 也
+    /// 造不出）→ 报错；显式标记该科技可达后自动规划正常求解。
+    #[test]
+    fn auto_plan_filters_inaccessible_candidates() {
+        use metatorio_runtime::message::{
+            ApplicationAction, FactoryAction, FlowAction, ProjectAction,
+        };
+
+        let mut dump = nauvis_dump();
+        // 追加：steel-plate 配方（解锁科技前置科技不存在 → 科技不可达）。
+        dump["recipe"]["steel-plate"] = json!({
+            "type": "recipe", "name": "steel-plate", "energy_required": 1,
+            "ingredients": [{ "type": "item", "name": "iron-plate", "amount": 1 }],
+            "results": [{ "type": "item", "name": "steel-plate", "amount": 1 }],
+            "categories": ["crafting"], "enabled": false
+        });
+        dump["item"]["steel-plate"] = json!({ "type": "item", "name": "steel-plate" });
+        dump["technology"]["tech-steel"] = json!({
+            "type": "technology", "name": "tech-steel",
+            "prerequisites": ["missing-tech"], "enabled": false,
+            "effects": [{ "type": "unlock-recipe", "recipe": "steel-plate" }],
+            "unit": { "count": 10, "time": 10, "ingredients": [] }
+        });
+
+        let mut runtime = crate::Runtime::new();
+        runtime.install_context(
+            "test-context".to_string(),
+            PrototypeStore::load(&dump).expect("dump 加载失败"),
+        );
+        runtime.set_active_context(Some("test-context".to_string()));
+        runtime
+            .dispatch(AppMessage::Application(ApplicationAction::NewProject {
+                name: "t".to_string(),
+            }))
+            .unwrap();
+        let project = runtime.state.ui.selected_project.unwrap();
+        runtime
+            .dispatch(AppMessage::Project {
+                project,
+                action: ProjectAction::AddFactory {
+                    name: "f".to_string(),
+                    template: metatorio_runtime::message::FactoryTemplate::Empty,
+                },
+            })
+            .unwrap();
+        let factory = runtime.state.ui.selected_factory.unwrap();
+        runtime
+            .dispatch(AppMessage::Factory {
+                project,
+                factory,
+                action: FactoryAction::Flow(FlowAction::AddToTarget {
+                    flow: DualVar::Item(metatorio_core::IdWithQuality::new("steel-plate", "normal")),
+                    amount: 1.0,
+                }),
+            })
+            .unwrap();
+        // 外部输入：铁矿（nauvis_dump 无 iron-ore 矿藏/配方，铁板链靠它
+        // 供给）+ 煤 + 水（电力链：煤→锅炉→蒸汽→蒸汽机需要燃料与水）。
+        for (flow, penalty) in [
+            (
+                DualVar::Item(metatorio_core::IdWithQuality::new("iron-ore", "normal")),
+                1.0,
+            ),
+            (
+                DualVar::Item(metatorio_core::IdWithQuality::new("coal", "normal")),
+                1.0,
+            ),
+            (DualVar::Fluid { name: "water".to_string(), temperature: [15, 15] }, 1.0),
+        ] {
+            runtime
+                .dispatch(AppMessage::Factory {
+                    project,
+                    factory,
+                    action: FactoryAction::Flow(FlowAction::AddToExternalInput { flow, penalty }),
+                })
+                .unwrap();
+        }
+
+        // 过滤逻辑单元验证：steel-plate 由不可达科技解锁 → 未解锁；
+        // iron-plate enabled → 已解锁。
+        let accessibility = runtime.project_accessibility(project).unwrap();
+        assert!(
+            !crate::recipe_unlocked(&runtime.context_store(project).unwrap(), &accessibility, "steel-plate"),
+            "科技未解锁时 steel-plate 配方应判定未解锁"
+        );
+        assert!(
+            crate::recipe_unlocked(&runtime.context_store(project).unwrap(), &accessibility, "iron-plate"),
+            "enabled 配方应判定已解锁"
+        );
+
+        // 端到端：steel-plate 配方候选被过滤 → 目标无法通过任何候选达成
+        // → 自动规划失败。
+        let result = crate::auto_plan(&crate::AppState::default(), &mut runtime, project, factory);
+        assert!(
+            result.is_err(),
+            "科技未解锁时自动规划应失败（steel-plate 配方候选被过滤），实际: {result:?}"
+        );
+
+        // 显式标记 tech-steel 可达（并入根种子）→ steel-plate 配方解锁
+        // → 自动规划正常求解。
+        runtime
+            .dispatch(AppMessage::Project {
+                project,
+                action: ProjectAction::AddMarkedAccessible {
+                    node: metatorio_core::Accessible::Tech("tech-steel".to_string()),
+                },
+            })
+            .unwrap();
+        let accessibility = runtime.project_accessibility(project).unwrap();
+        assert!(
+            crate::recipe_unlocked(&runtime.context_store(project).unwrap(), &accessibility, "steel-plate"),
+            "标记科技可达后 steel-plate 配方应判定已解锁"
+        );
+        let result = crate::auto_plan(&crate::AppState::default(), &mut runtime, project, factory);
+        assert!(
+            matches!(
+                &result,
+                Ok(solve) if matches!(solve.status, metatorio_runtime::solve::SolveStatus::Solved { .. })
+            ),
+            "标记科技可达后自动规划应可解: {:?}",
+            result.err()
+        );
     }
 }

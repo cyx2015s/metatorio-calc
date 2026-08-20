@@ -20,13 +20,13 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use metatorio_core::{Accessible, DualVar, IdWithQuality, Mechanic};
+use metatorio_core::{Accessibility, Accessible, DualVar, IdWithQuality, Mechanic};
 use metatorio_data::store::{PrototypeGroup, PrototypeRecord, PrototypeStore};
 use metatorio_data::{
     BeaconComponent, BoilerComponent, BurnerGeneratorComponent, CraftingMachineComponent,
     EntityComponent, FluidComponent, GeneratorComponent, ItemComponent, MiningDrillComponent,
     ModuleComponent, PrototypeBaseComponent, QualityComponent, ReactorComponent, RecipeComponent,
-    ResourceEntityComponent,
+    ResourceEntityComponent, TechnologyComponent,
 };
 use metatorio_data::types::{Ingredient, Product};
 use metatorio_core::Flow;
@@ -1390,6 +1390,52 @@ fn suggest_for_flow(store: &PrototypeStore, flow: DualVar) -> Vec<Suggestion> {
 /// 枚举全部候选实例（配方/矿点 × 机器 × 插件组合 × 信塔配置 × 品质，
 /// 以及腐坏/种植/燃料/发射/发电机/锅炉/反应堆/流体燃料/流体热），一次
 /// 构建 LP 求解，保留被选中的候选替换工厂机制。
+/// 自动规划候选的可达性过滤：只按"配方已解锁"判定（自动规划考虑
+/// **科技可达性**）——配方 `enabled`（游戏开始可用）或任一解锁科技
+/// 可达即放行。
+///
+/// 机器/燃料/原料/矿藏**不做**可达性判定：它们依赖 place_result 物品链
+/// 与矿藏/流体链，完整 dump 下通常可达，但简化数据或外部输入供给时
+/// 误判会引入假阴性（自动规划被错误拒绝）；缺供给本就由求解器报告
+/// （"剪枝阶段缺少供给的物品/流"）。配方级过滤的假阴性风险最低：
+/// 科技未解锁 = 明确的"不可用"语义，也是用户要求的核心。
+fn mechanic_accessible(
+    store: &PrototypeStore,
+    accessible: &Accessibility,
+    mechanic: &Mechanic,
+) -> bool {
+    let Mechanic::Recipe(mechanic) = mechanic else {
+        return true;
+    };
+    recipe_unlocked(store, accessible, &mechanic.recipe.id)
+}
+
+/// 配方是否已解锁：`enabled` 或任一 `unlock-recipe` 科技可达。
+fn recipe_unlocked(store: &PrototypeStore, accessible: &Accessibility, name: &str) -> bool {
+    let Some(record) = store.get(PrototypeGroup::Recipe, name) else {
+        return true;
+    };
+    let Some(recipe) = record.component::<RecipeComponent>() else {
+        return true;
+    };
+    if recipe.enabled {
+        return true;
+    }
+    store
+        .group(PrototypeGroup::Technology)
+        .any(|tech_record| {
+            let Some(tech) = tech_record.component::<TechnologyComponent>() else {
+                return false;
+            };
+            if !accessible.is_accessible(&Accessible::Tech(tech_record.name.clone())) {
+                return false;
+            }
+            tech.effects.iter().any(|effect| {
+                matches!(effect, metatorio_data::types::Modifier::UnlockRecipe(unlock) if unlock.recipe == name)
+            })
+        })
+}
+
 fn auto_plan(
     _state: &AppState,
     runtime: &mut Runtime,
@@ -1435,13 +1481,31 @@ fn auto_plan(
         factory_doc.settings.planet,
         factory_doc.settings.surface,
     );
-    for (index, mechanic) in candidates.iter().enumerate() {
-        if index < 8 {
-            eprintln!("[auto-plan] 候选 #{index}: {mechanic:?}");
-        }
+    // ③ 自动规划考虑可达性：剔除不可达候选（科技未解锁的配方、
+    // 不可达的矿藏/物品/流体等；用户显式标记与"无视可达性"经
+    // project_accessibility 生效）。
+    let accessibility = runtime
+        .project_accessibility(project)
+        .map_err(|error| error.to_string())?;
+    let (candidates, dropped): (Vec<_>, Vec<_>) = candidates
+        .into_iter()
+        .partition(|mechanic| mechanic_accessible(&store, &accessibility, mechanic));
+    if !dropped.is_empty() {
+        eprintln!(
+            "[auto-plan] 可达性过滤剔除 {} 个候选（保留 {} 个）",
+            dropped.len(),
+            candidates.len()
+        );
     }
     if candidates.is_empty() {
-        return Err("没有可枚举的机制候选".to_string());
+        return Err(if dropped.is_empty() {
+            "没有可枚举的机制候选".to_string()
+        } else {
+            format!(
+                "所有 {} 个候选机制都不可达（目标依赖的科技未解锁？可用\"无视可达性\"开关或显式标记可达）",
+                dropped.len()
+            )
+        });
     }
 
     // 展开全部候选为一个 LP。
@@ -2969,12 +3033,12 @@ mod tests {
             ApplicationAction, FactoryAction, FactoryContextAction, PlanningAction, ProjectAction,
         };
 
-        let path = "C:\\Users\\mirac\\AppData\\Roaming\\Factorio\\script-output\\data-raw-dump.json";
+        // 仓库内真实 dump（相对路径，测试可移植；不依赖机器上的 %APPDATA%）。
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/data-raw-dump.json");
         if !std::path::Path::new(path).exists() {
-            eprintln!("[skip] 无真实 dump，跳过");
+            eprintln!("[skip] 无真实 dump（{path}），跳过");
             return;
-        }
-        let raw = std::fs::read(path).expect("读 dump");
+        }        let raw = std::fs::read(path).expect("读 dump");
         let dump: serde_json::Value = serde_json::from_slice(&raw).expect("解析 dump");
         let store = PrototypeStore::load(&dump).expect("dump 加载失败");
 
