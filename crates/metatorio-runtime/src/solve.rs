@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fs::File, path::Path};
 
 use metatorio_core::{Accessibility, AccessibilityOptions, Accessible, Context, DualVar, Flow, GameState, Mechanic, ModuleConfig};
-use metatorio_data::{EntityComponent, FluidComponent, ItemComponent};
+use metatorio_data::{EntityComponent, FluidComponent, ItemComponent, LabComponent};
 use metatorio_data::store::{PrototypeGroup, PrototypeStore};
 use metatorio_solver::{AIndexMap, SolverData, SolverSolution, TargetSpec};
 use serde::{Deserialize, Serialize};
@@ -169,8 +169,8 @@ impl Runtime {
     /// 用户显式覆盖来自 `ProjectSettings`：
     /// - `marked_accessible`：并入根种子（即使无来源也可达）；
     /// - `marked_inaccessible`：剪枝（自身不可达，阻断依赖它的对象）；
-    /// - 科技里程碑 `unlocked == false` 也剪枝（对应原版"未解锁里程碑
-    ///   阻断子树"语义；`unlocked == true` 不强行开锁，交给自动传播）；
+    /// - 里程碑 `unlocked == false` 的节点也剪枝（默认是科技瓶物品；
+    ///   对应"未解锁阶段"语义，阻断依赖它的对象）；
     /// - `all_accessible`：无视一切，全可达。
     pub fn project_accessibility(
         &mut self,
@@ -189,10 +189,10 @@ impl Runtime {
                 .cloned()
                 .chain(
                     settings
-                        .tech_milestones
+                        .milestones
                         .iter()
                         .filter(|milestone| !milestone.unlocked)
-                        .map(|milestone| Accessible::Tech(milestone.technology.clone())),
+                        .map(|milestone| milestone.node.clone()),
                 )
                 .collect(),
             all_accessible: settings.all_accessible,
@@ -200,6 +200,35 @@ impl Runtime {
         let result = metatorio_core::accessibility::compute_accessibility(store, &options);
         self.accessibilities.insert(project_id, result.clone());
         Ok(result)
+    }
+
+    /// 默认里程碑：把**科技瓶物品**（出现在实验室 LabComponent.inputs 的
+    /// 物品，即 lab 消耗的科技瓶）设为里程碑，unlocked=true。
+    ///
+    /// 里程碑是可达性节点级（不限于科技）：锁定某个科技瓶（unlocked=false）
+    /// 即剪枝该节点并阻断依赖它的对象，模拟"还没到这个科技阶段"。
+    pub fn set_default_milestones(&mut self, project_id: ProjectId) -> Result<bool, RuntimeError> {
+        let store = self.context_store(project_id)?;
+        let mut science_packs: Vec<String> = Vec::new();
+        for record in store.group(PrototypeGroup::Entity) {
+            let Some(lab) = record.component::<LabComponent>() else {
+                continue;
+            };
+            for name in &lab.inputs {
+                if !science_packs.contains(name) {
+                    science_packs.push(name.clone());
+                }
+            }
+        }
+        science_packs.sort();
+        let milestones = science_packs
+            .into_iter()
+            .map(|name| crate::document::Milestone {
+                node: Accessible::Item(name),
+                unlocked: true,
+            })
+            .collect();
+        self.state.replace_milestones(project_id, milestones)
     }
 
     /// 从文件加载项目并导入当前文档（追加，不替换现有项目；
@@ -678,7 +707,7 @@ pub fn apply_environment_to_game_state(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::document::{MechanicKind, TechnologyMilestone};
+    use crate::document::MechanicKind;
     use crate::message::{
         FactoryAction, FlowAction, MechanicAction, MechanicListAction, ProjectAction,
         RecipeMechanicAction, RuntimeCommand, SolveAction,
@@ -863,15 +892,13 @@ mod tests {
             },
         );
 
-        // 科技里程碑：tech-base 未解锁 → 子树剪枝 → steel-plate 不可达。
+        // 里程碑：tech-base 未解锁 → 子树剪枝 → steel-plate 不可达。
         dispatch_project(
             &mut runtime,
             project,
-            ProjectAction::AddTechnologyMilestone {
-                milestone: TechnologyMilestone {
-                    technology: "tech-base".to_string(),
-                    unlocked: false,
-                },
+            ProjectAction::AddMilestone {
+                node: Accessible::Tech("tech-base".to_string()),
+                unlocked: false,
             },
         );
         let result = runtime.project_accessibility(project).unwrap();
@@ -912,6 +939,84 @@ mod tests {
         let encoded = serde_json::to_string(&runtime.state.document).unwrap();
         let decoded: crate::document::AppDocument = serde_json::from_str(&encoded).unwrap();
         assert_eq!(decoded, runtime.state.document);
+    }
+
+    /// 默认里程碑 = 科技瓶物品（实验室 LabComponent.inputs），unlocked=true；
+    /// 锁定科技瓶物品里程碑 → 该物品剪枝。
+    #[test]
+    fn default_milestones_are_lab_science_packs() {
+        let mut runtime = Runtime::new();
+        let dump = json!({
+            "item": {
+                "automation-science-pack": { "type": "item", "name": "automation-science-pack" },
+                "chemical-science-pack": { "type": "item", "name": "chemical-science-pack" }
+            },
+            "fluid": {},
+            "recipe": {
+                "chemical-science-pack": {
+                    "type": "recipe", "name": "chemical-science-pack",
+                    "energy_required": 1, "ingredients": [],
+                    "results": [{ "type": "item", "name": "chemical-science-pack", "amount": 1 }],
+                    "categories": ["crafting"], "enabled": true
+                }
+            },
+            "technology": {},
+            "lab": {
+                "lab": {
+                    "type": "lab", "name": "lab",
+                    "energy_usage": "60kW",
+                    "energy_source": { "type": "electric", "drain": "0J" },
+                    "researching_speed": 1,
+                    "inputs": ["automation-science-pack", "chemical-science-pack"]
+                }
+            }
+        });
+        runtime.install_context(
+            "test-context".to_string(),
+            PrototypeStore::load(&dump).unwrap(),
+        );
+        runtime.set_active_context(Some("test-context".to_string()));
+        let project = new_project(&mut runtime);
+
+        assert!(runtime.set_default_milestones(project).unwrap());
+        let settings = &runtime.state.project(project).unwrap().settings;
+        let nodes: Vec<Accessible> = settings
+            .milestones
+            .iter()
+            .map(|milestone| milestone.node.clone())
+            .collect();
+        assert_eq!(
+            nodes,
+            vec![
+                Accessible::Item("automation-science-pack".to_string()),
+                Accessible::Item("chemical-science-pack".to_string()),
+            ],
+            "默认里程碑应为实验室输入的科技瓶物品"
+        );
+        assert!(settings.milestones.iter().all(|m| m.unlocked));
+
+        // 锁定科技瓶里程碑 → 该物品剪枝（不可达）。
+        dispatch_project(
+            &mut runtime,
+            project,
+            ProjectAction::SetMilestoneUnlocked {
+                node: Accessible::Item("automation-science-pack".to_string()),
+                unlocked: false,
+            },
+        );
+        let result = runtime.project_accessibility(project).unwrap();
+        assert!(!result.is_item_accessible("automation-science-pack"));
+        assert!(result.is_item_accessible("chemical-science-pack"));
+
+        // 移除里程碑 → 列表恢复。
+        dispatch_project(
+            &mut runtime,
+            project,
+            ProjectAction::RemoveMilestone {
+                node: Accessible::Item("automation-science-pack".to_string()),
+            },
+        );
+        assert_eq!(runtime.state.project(project).unwrap().settings.milestones.len(), 1);
     }
 
     #[test]

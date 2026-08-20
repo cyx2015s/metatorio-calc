@@ -300,54 +300,41 @@ impl RuntimeState {
                 );
                 Ok(Outcome::all_factories_if(changed, project_id))
             }
-            ProjectAction::AddTechnologyMilestone { milestone } => {
+            ProjectAction::AddMilestone { node, unlocked } => {
                 let settings = &mut self.project_mut(project_id)?.settings;
                 if let Some(existing) = settings
-                    .tech_milestones
+                    .milestones
                     .iter_mut()
-                    .find(|candidate| candidate.technology == milestone.technology)
+                    .find(|candidate| candidate.node == node)
                 {
-                    let changed = replace(existing, milestone);
+                    let changed = replace(
+                        existing,
+                        crate::document::Milestone { node, unlocked },
+                    );
                     Ok(Outcome::all_factories_if(changed, project_id))
                 } else {
-                    settings.tech_milestones.push(milestone);
+                    settings
+                        .milestones
+                        .push(crate::document::Milestone { node, unlocked });
                     Ok(Outcome::all_factories(project_id))
                 }
             }
-            ProjectAction::ReplaceTechnologyMilestone {
-                technology,
-                replacement,
-            } => {
+            ProjectAction::SetMilestoneUnlocked { node, unlocked } => {
                 let settings = &mut self.project_mut(project_id)?.settings;
                 let milestone = settings
-                    .tech_milestones
+                    .milestones
                     .iter_mut()
-                    .find(|candidate| candidate.technology == technology)
+                    .find(|candidate| candidate.node == node)
                     .ok_or_else(|| {
-                        RuntimeError::InvalidValue(format!("unknown technology: {technology}"))
-                    })?;
-                let changed = replace(&mut milestone.technology, replacement);
-                Ok(Outcome::all_factories_if(changed, project_id))
-            }
-            ProjectAction::SetTechnologyUnlocked {
-                technology,
-                unlocked,
-            } => {
-                let settings = &mut self.project_mut(project_id)?.settings;
-                let milestone = settings
-                    .tech_milestones
-                    .iter_mut()
-                    .find(|candidate| candidate.technology == technology)
-                    .ok_or_else(|| {
-                        RuntimeError::InvalidValue(format!("unknown technology: {technology}"))
+                        RuntimeError::InvalidValue(format!("unknown milestone: {node:?}"))
                     })?;
                 let changed = replace(&mut milestone.unlocked, unlocked);
                 Ok(Outcome::all_factories_if(changed, project_id))
             }
-            ProjectAction::RemoveTechnologyMilestone { technology } => {
-                let milestones = &mut self.project_mut(project_id)?.settings.tech_milestones;
+            ProjectAction::RemoveMilestone { node } => {
+                let milestones = &mut self.project_mut(project_id)?.settings.milestones;
                 let before = milestones.len();
-                milestones.retain(|candidate| candidate.technology != technology);
+                milestones.retain(|candidate| candidate.node != node);
                 Ok(Outcome::all_factories_if(
                     before != milestones.len(),
                     project_id,
@@ -1270,6 +1257,19 @@ impl RuntimeState {
             .iter_mut()
             .find(|project| project.id == id)
             .ok_or(RuntimeError::ProjectNotFound(id))
+    }
+
+    /// 整体替换里程碑（"默认里程碑"等批量操作）。
+    pub fn replace_milestones(
+        &mut self,
+        project_id: ProjectId,
+        milestones: Vec<crate::document::Milestone>,
+    ) -> Result<bool, RuntimeError> {
+        let changed = replace(
+            &mut self.project_mut(project_id)?.settings.milestones,
+            milestones,
+        );
+        Ok(changed)
     }
 
     fn factory_mut(

@@ -50,6 +50,11 @@ export async function accessibility(project: number): Promise<Accessible[]> {
   return call("accessibility", { project });
 }
 
+/** 把项目的里程碑重置为默认（实验室输入的科技瓶物品，全部解锁）。 */
+export async function setDefaultMilestones(project: number): Promise<void> {
+  await call("set_default_milestones", { project });
+}
+
 // ── Game contexts ─────────────────────────────────────────────────
 
 export async function loadBundledDump(): Promise<ContextInfo> {

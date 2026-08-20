@@ -29,6 +29,7 @@ import {
   saveProject,
   saveProjectAsDialog,
   setActiveContext,
+  setDefaultMilestones,
   implicitSources,
 } from "./client";
 import type {
@@ -521,33 +522,37 @@ class RuntimeStore {
     });
   }
 
-  // ── 科技里程碑 / 配方产能 ────────────────────────────────────────
+  // ── 里程碑 / 配方产能 ────────────────────────────────────────────
 
-  async addTechnologyMilestone(technology: string): Promise<void> {
+  async addMilestone(node: Accessible, unlocked = true): Promise<void> {
     const project = this.requireProject();
     await this.send({
       scope: "project",
-      action: {
-        project,
-        action: { "add-technology-milestone": { milestone: { technology, unlocked: true } } },
-      },
+      action: { project, action: { "add-milestone": { node, unlocked } } },
     });
   }
 
-  async setTechnologyUnlocked(technology: string, unlocked: boolean): Promise<void> {
+  async setMilestoneUnlocked(node: Accessible, unlocked: boolean): Promise<void> {
     const project = this.requireProject();
     await this.send({
       scope: "project",
-      action: { project, action: { "set-technology-unlocked": { technology, unlocked } } },
+      action: { project, action: { "set-milestone-unlocked": { node, unlocked } } },
     });
   }
 
-  async removeTechnologyMilestone(technology: string): Promise<void> {
+  async removeMilestone(node: Accessible): Promise<void> {
     const project = this.requireProject();
     await this.send({
       scope: "project",
-      action: { project, action: { "remove-technology-milestone": { technology } } },
+      action: { project, action: { "remove-milestone": { node } } },
     });
+  }
+
+  /** 把里程碑重置为默认（实验室输入的科技瓶物品，全部解锁）。 */
+  async setDefaultMilestones(): Promise<void> {
+    const project = this.requireProject();
+    await setDefaultMilestones(project);
+    await this.refresh();
   }
 
   // ── 显式可达性覆盖 ───────────────────────────────────────────────

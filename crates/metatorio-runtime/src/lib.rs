@@ -14,9 +14,8 @@ pub mod state;
 
 pub use document::{
     AppDocument, AutoBeaconPlan, DOCUMENT_SCHEMA_VERSION, ExternalInput, FactoryDocument,
-    FactorySettings, FlowTarget, MechanicEntry, MechanicKind, PlanningPreferences, ProjectDocument,
-    ProjectSettings, RecipeProductivity, TargetExpression, TargetTerm, TechnologyMilestone,
-    TimeScale,
+    FactorySettings, FlowTarget, MechanicEntry, MechanicKind, Milestone, PlanningPreferences,
+    ProjectDocument, ProjectSettings, RecipeProductivity, TargetExpression, TargetTerm, TimeScale,
 };
 pub use id::{
     ExternalInputId, FactoryId, MechanicId, ProjectId, TargetExpressionId, TargetId, TargetTermId,

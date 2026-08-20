@@ -54,7 +54,9 @@ impl Default for ProjectDocument {
 #[serde(default)]
 pub struct ProjectSettings {
     pub time_scale: TimeScale,
-    pub tech_milestones: Vec<TechnologyMilestone>,
+    /// 里程碑（可达性节点级，默认是各科技瓶物品；`unlocked=false` 的节点
+    /// 剪枝——自身不可达并阻断依赖它的对象，模拟科技树不同分支）。
+    pub milestones: Vec<Milestone>,
     pub recipe_productivity: Vec<RecipeProductivity>,
     pub ignore_productivity: bool,
     pub mining_productivity: f64,
@@ -70,7 +72,7 @@ impl Default for ProjectSettings {
     fn default() -> Self {
         Self {
             time_scale: TimeScale::Seconds,
-            tech_milestones: Vec::new(),
+            milestones: Vec::new(),
             recipe_productivity: Vec::new(),
             ignore_productivity: false,
             mining_productivity: 0.0,
@@ -93,15 +95,17 @@ pub enum TimeScale {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
-pub struct TechnologyMilestone {
-    pub technology: String,
+pub struct Milestone {
+    /// 里程碑节点（默认是科技瓶物品；也支持科技/配方等可达性对象）。
+    pub node: Accessible,
+    /// true = 已解锁；false = 未解锁（剪枝自身并阻断依赖它的对象）。
     pub unlocked: bool,
 }
 
-impl Default for TechnologyMilestone {
+impl Default for Milestone {
     fn default() -> Self {
         Self {
-            technology: String::new(),
+            node: Accessible::Item(String::new()),
             unlocked: true,
         }
     }

@@ -2121,7 +2121,7 @@ fn get_ui_state(state: State<'_, AppState>) -> Result<UiState, String> {
 /// 项目可达性快照（选择器过滤用）：当前可达对象集合。
 ///
 /// 由 runtime 用项目的用户显式覆盖（marked accessible/inaccessible、
-/// 科技里程碑、无视可达性）经 core 的 `compute_accessibility` 计算并缓存；
+/// 里程碑、无视可达性）经 core 的 `compute_accessibility` 计算并缓存；
 /// `all_accessible` 时返回全部对象。项目未绑定上下文时返回错误（前端
 /// 应在此情况下不做可达性过滤）。
 #[tauri::command]
@@ -2134,6 +2134,20 @@ fn accessibility(state: State<'_, AppState>, project: ProjectId) -> Result<Vec<A
         .project_accessibility(project)
         .map_err(|error| error.to_string())?;
     Ok(result.accessible().iter().cloned().collect())
+}
+
+/// 把项目的里程碑重置为默认：实验室（LabComponent.inputs）输入的
+/// 科技瓶物品，全部解锁。
+#[tauri::command]
+fn set_default_milestones(state: State<'_, AppState>, project: ProjectId) -> Result<(), String> {
+    let mut runtime = state
+        .runtime
+        .lock()
+        .map_err(|_| "runtime lock poisoned".to_string())?;
+    runtime
+        .set_default_milestones(project)
+        .map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 // ── Persistence ───────────────────────────────────────────────────
@@ -2977,6 +2991,7 @@ pub fn run() {
             get_document,
             get_ui_state,
             accessibility,
+            set_default_milestones,
             open_project_dialog,
             save_project_as_dialog,
             save_project,

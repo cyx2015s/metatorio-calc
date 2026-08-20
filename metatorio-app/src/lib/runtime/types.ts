@@ -135,9 +135,9 @@ export type ProjectAction =
   | { "set-quality-limit": { quality: string | null } }
   | { "set-mining-productivity": { productivity: number } }
   | { "set-context": { context: string | null } }
-  | { "add-technology-milestone": { milestone: TechnologyMilestone } }
-  | { "set-technology-unlocked": { technology: string; unlocked: boolean } }
-  | { "remove-technology-milestone": { technology: string } }
+  | { "add-milestone": { node: Accessible; unlocked: boolean } }
+  | { "set-milestone-unlocked": { node: Accessible; unlocked: boolean } }
+  | { "remove-milestone": { node: Accessible } }
   | { "add-marked-accessible": { node: Accessible } }
   | { "remove-marked-accessible": { node: Accessible } }
   | { "add-marked-inaccessible": { node: Accessible } }
@@ -369,8 +369,10 @@ export interface AutoBeaconPlan {
   module_config: ModuleConfig;
 }
 
-export interface TechnologyMilestone {
-  technology: string;
+export interface Milestone {
+  /** 里程碑节点（默认是科技瓶物品；也支持科技/配方等可达性对象）。 */
+  node: Accessible;
+  /** true = 已解锁；false = 未解锁（剪枝自身并阻断依赖它的对象）。 */
   unlocked: boolean;
 }
 
@@ -381,7 +383,8 @@ export interface RecipeProductivity {
 
 export interface ProjectSettings {
   time_scale: TimeScale;
-  tech_milestones: TechnologyMilestone[];
+  /** 里程碑（可达性节点级；unlocked=false 的节点剪枝）。 */
+  milestones: Milestone[];
   recipe_productivity: RecipeProductivity[];
   ignore_productivity: boolean;
   mining_productivity: number;

@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::document::{
     AutoBeaconPlan, FlowTarget, MechanicKind, RecipeProductivity, TargetExpression, TargetTerm,
-    TechnologyMilestone, TimeScale,
+    TimeScale,
 };
 use crate::id::{
     ExternalInputId, FactoryId, MechanicId, ProjectId, TargetExpressionId, TargetId, TargetTermId,
@@ -110,19 +110,18 @@ pub enum ProjectAction {
     SetAllAccessible {
         enabled: bool,
     },
-    AddTechnologyMilestone {
-        milestone: TechnologyMilestone,
-    },
-    ReplaceTechnologyMilestone {
-        technology: String,
-        replacement: String,
-    },
-    SetTechnologyUnlocked {
-        technology: String,
+    /// 添加里程碑（默认解锁；`unlocked=false` 的节点剪枝——自身不可达并
+    /// 阻断依赖它的对象，模拟科技树不同分支）。
+    AddMilestone {
+        node: Accessible,
         unlocked: bool,
     },
-    RemoveTechnologyMilestone {
-        technology: String,
+    SetMilestoneUnlocked {
+        node: Accessible,
+        unlocked: bool,
+    },
+    RemoveMilestone {
+        node: Accessible,
     },
     /// 显式标记某对象可达（并入根种子；即使无任何来源也可达）。
     AddMarkedAccessible {

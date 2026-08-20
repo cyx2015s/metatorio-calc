@@ -1450,20 +1450,22 @@
           </label>
 
           <div class="field">
-            <label>科技里程碑（关闭的科技视为未解锁分支）</label>
+            <label>里程碑（锁定 = 剪枝该节点及其依赖，模拟科技树分支）</label>
             <div class="prefs-list">
-              {#each project.settings.tech_milestones as milestone, i (i)}
+              {#each project.settings.milestones as milestone, i (i)}
                 <div class="prefs-item">
-                  <HoverIcon type="technology" name={milestone.technology} size={22} detailKind="technology" />
-                  <span class="prefs-name">{runtime.localizedName("technology", milestone.technology)}</span>
+                  <HoverIcon type={accessibleKind(milestone.node)} name={accessibleName(milestone.node)} size={22} />
+                  <span class="prefs-name">
+                    {runtime.localizedName(accessibleKind(milestone.node), accessibleName(milestone.node))}
+                  </span>
                   <label class="check" title="解锁/锁定">
                     <input
                       type="checkbox"
                       checked={milestone.unlocked}
                       onchange={(event) =>
                         runtime
-                          .setTechnologyUnlocked(
-                            milestone.technology,
+                          .setMilestoneUnlocked(
+                            milestone.node,
                             (event.currentTarget as HTMLInputElement).checked,
                           )
                           .catch(() => {})}
@@ -1473,20 +1475,25 @@
                     class="btn ghost"
                     title="移除里程碑"
                     onclick={() =>
-                      runtime.removeTechnologyMilestone(milestone.technology).catch(() => {})}
+                      runtime.removeMilestone(milestone.node).catch(() => {})}
                   >×</button>
                 </div>
               {:else}
-                <span class="muted">还没有科技里程碑</span>
+                <span class="muted">还没有里程碑</span>
               {/each}
             </div>
-            <button
-              class="btn"
-              onclick={() =>
-                openSelector("technology", "选择科技里程碑", (name) =>
-                  runtime.addTechnologyMilestone(name),
-                )}
-            >+ 添加里程碑</button>
+            <div class="prefs-row">
+              <button
+                class="btn"
+                onclick={() =>
+                  openSelector("item", "选择里程碑（科技瓶物品）", (name) =>
+                    runtime.addMilestone({ Item: name }),
+                  )}
+              >+ 添加里程碑</button>
+              <button class="btn" onclick={() => runtime.setDefaultMilestones().catch(() => {})}>
+                设置默认里程碑
+              </button>
+            </div>
           </div>
 
           <div class="field">
