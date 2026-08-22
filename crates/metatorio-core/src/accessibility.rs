@@ -172,11 +172,7 @@ struct GraphData {
     /// seed_available_on_planet）。星球解锁（planet-discovery-<p> 科技可达，
     /// nauvis 恒解锁）后该资源可自由移动到任何星球 → 根。
     resource_planets: HashMap<String, Vec<String>>,
-    /// 实体名 → 死亡触发生成的实体名（`dying_trigger_effect` 的
-    /// create-asteroid-chunk / create-entity）。如小星岩死亡 → 星岩碎片。
-    death_products: HashMap<String, Vec<String>>,
-    /// 实体名 → 会产生它的触发实体（反查 death_products）。如星岩碎片
-    /// ← 小星岩。
+    /// 实体名 → 会产生它的触发实体（反查生成的实体）。如星岩碎片 ← 小星岩。
     generated_by: HashMap<String, Vec<String>>,
     /// 星岩/小行星实体名 → 生成它的空间地点（SpaceLocation 自带星岩：
     /// 停靠该地点即可得，如深空地带 solar-system-edge / shattered-planet）。
@@ -418,7 +414,7 @@ fn build_graph(store: &PrototypeStore) -> GraphData {
     }
     // 死亡触发效果：`dying_trigger_effect` 中 create-asteroid-chunk /
     // create-entity 生成的实体。小星岩死亡 → 小一号星岩碎片（碎片链）。
-    let mut death_products: HashMap<String, Vec<String>> = HashMap::new();
+    // 只保留反查表 generated_by（实体 → 生成它的触发实体）。
     let mut generated_by: HashMap<String, Vec<String>> = HashMap::new();
     for record in store.group(PrototypeGroup::Entity) {
         let Some(health) = record.component::<EntityWithHealthComponent>() else {
@@ -434,10 +430,6 @@ fn build_graph(store: &PrototypeStore) -> GraphData {
                 _ => None,
             };
             if let Some(generated) = generated {
-                death_products
-                    .entry(record.name.clone())
-                    .or_default()
-                    .push(generated.clone());
                 generated_by
                     .entry(generated)
                     .or_default()
@@ -491,7 +483,6 @@ fn build_graph(store: &PrototypeStore) -> GraphData {
         techs_by_unlock,
         machines_by_category,
         resource_planets: build_resource_planets(store),
-        death_products,
         generated_by,
         asteroid_locations,
         asteroid_connections,
@@ -669,21 +660,10 @@ fn requirements(store: &PrototypeStore, graph: &GraphData, node: &Accessible) ->
             if !sources.is_empty() {
                 return Requirement::Any(sources);
             }
-            // 无地点/死亡生成来源：以下是原逻辑。
+            // 无地点/连接/死亡来源：星岩严格按数据来源判定，无来源 → 不可达
+            // （不引入"初始轨道恒有"等额外假设）。以下是普通实体的原逻辑。
             let record = store.get(PrototypeGroup::Entity, name);
-            if graph.death_products.contains_key(name) {
-                // 死亡生成星岩/小行星的实体（无地点来源，且不在地点数据中）：
-                // 普通轨道的小星岩初始即存在 → 根。
-                return Requirement::All(Vec::new());
-            }
-            if record
-                .and_then(|r| r.component::<AsteroidChunkComponent>())
-                .is_some()
-            {
-                // 太空小行星（asteroid-chunk）：空间平台可采集（太空资源，
-                // 简化：始终可达，不绑定具体星球）。
-                Requirement::All(Vec::new())
-            } else if graph.resource_planets.contains_key(name) {
+            if graph.resource_planets.contains_key(name) {
                 // 星球刷新的可采集实体（矿藏/植物/可挖掘/loot/产卵器）：
                 // 任一生成星球解锁即可采集（星球解锁后资源可自由移动）。
                 let planets = graph
