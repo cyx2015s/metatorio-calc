@@ -141,7 +141,8 @@ impl Accessibility {
 
     /// 便捷查询：物品名。
     pub fn is_item_accessible(&self, name: &str) -> bool {
-        self.accessible.contains(&Accessible::Item(name.to_string()))
+        self.accessible
+            .contains(&Accessible::Item(name.to_string()))
     }
 
     /// 便捷查询：流是否可达（虚拟流默认视为可达——燃料/污染等不参与科技链）。
@@ -164,6 +165,8 @@ struct GraphData {
     spoil_sources: HashMap<String, Vec<String>>,
     /// 实体名 → 放置后成为该实体的物品名（`item.place_result`）。
     items_by_place_result: HashMap<String, Vec<String>>,
+    /// 科技名 → 科技依赖的物品。
+    tech_units: HashMap<String, Vec<String>>,
     /// 配方/品质/空间名 → 解锁它的科技名（UnlockRecipe/UnlockQuality/UnlockSpaceLocation）。
     techs_by_unlock: HashMap<String, Vec<String>>,
     /// 资源实体/星球流体名 → 生成它的星球列表（planet_autoplaced_flows +
@@ -211,9 +214,11 @@ fn build_resource_planets(store: &PrototypeStore) -> HashMap<String, Vec<String>
                     continue;
                 };
                 let autoplaced = entity.autoplace.as_ref().is_some_and(|autoplace| {
-                    autoplace.control.as_ref().is_some_and(|control| {
-                        map_gen.autoplace_controls.contains_key(control)
-                    }) || entity_settings.contains(&record.name)
+                    autoplace
+                        .control
+                        .as_ref()
+                        .is_some_and(|control| map_gen.autoplace_controls.contains_key(control))
+                        || entity_settings.contains(&record.name)
                 });
                 if !autoplaced {
                     continue;
@@ -237,10 +242,14 @@ fn build_resource_planets(store: &PrototypeStore) -> HashMap<String, Vec<String>
                     for product in &minable.results {
                         match product {
                             Product::Item(item) => {
-                                map.entry(item.name.clone()).or_default().push(planet.clone());
+                                map.entry(item.name.clone())
+                                    .or_default()
+                                    .push(planet.clone());
                             }
                             Product::Fluid(fluid) => {
-                                map.entry(fluid.name.clone()).or_default().push(planet.clone());
+                                map.entry(fluid.name.clone())
+                                    .or_default()
+                                    .push(planet.clone());
                             }
                         }
                     }
@@ -276,7 +285,9 @@ fn build_resource_planets(store: &PrototypeStore) -> HashMap<String, Vec<String>
                 })
             });
             if seed_available {
-                map.entry(plant_entity.clone()).or_default().push(planet.clone());
+                map.entry(plant_entity.clone())
+                    .or_default()
+                    .push(planet.clone());
             }
         }
     }
@@ -289,6 +300,7 @@ fn build_graph(store: &PrototypeStore) -> GraphData {
     let mut spoil_sources: HashMap<String, Vec<String>> = HashMap::new();
     let mut items_by_place_result: HashMap<String, Vec<String>> = HashMap::new();
     let mut techs_by_unlock: HashMap<String, Vec<String>> = HashMap::new();
+    let mut tech_units: HashMap<String, Vec<String>> = HashMap::new();
 
     for record in store.group(PrototypeGroup::Item) {
         if let Some(item) = record.component::<ItemComponent>() {
@@ -397,6 +409,19 @@ fn build_graph(store: &PrototypeStore) -> GraphData {
                 _ => {}
             }
         }
+        if let Some(unit) = &tech.unit {
+            for ingredient in &unit.ingredients {
+                if let Some(item) = store.item(&ingredient.0)
+                    && let Some(base) = item.component::<PrototypeBaseComponent>()
+                    && !base.hidden
+                {
+                    tech_units
+                        .entry(record.name.clone())
+                        .or_default()
+                        .push(item.name.clone());
+                }
+            }
+        }
     }
     // 死亡触发效果：`dying_trigger_effect` 中 create-asteroid-chunk /
     // create-entity 生成的实体。小星岩死亡 → 小一号星岩碎片（碎片链）。
@@ -466,6 +491,7 @@ fn build_graph(store: &PrototypeStore) -> GraphData {
         resources_by_product,
         spoil_sources,
         items_by_place_result,
+        tech_units,
         techs_by_unlock,
         resource_planets: build_resource_planets(store),
         generated_by,
@@ -491,15 +517,22 @@ fn requirements(store: &PrototypeStore, graph: &GraphData, node: &Accessible) ->
             let tech = store
                 .get(PrototypeGroup::Technology, name)
                 .and_then(|record| record.component::<TechnologyComponent>());
+            
             match tech {
                 Some(tech) if !tech.enabled && !tech.prerequisites.is_empty() => {
+                    let items = graph.tech_units
+                        .get(name)
+                        .cloned()
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|item| Requirement::Node(Accessible::Item(item)));
                     Requirement::All(
-                        tech.prerequisites
-                            .iter()
-                            .map(|prereq| Requirement::Node(Accessible::Tech(prereq.clone())))
-                            .collect(),
-                    )
-                }
+                    tech.prerequisites
+                        .iter()
+                        .map(|prereq| Requirement::Node(Accessible::Tech(prereq.clone())))
+                        .chain(items)
+                        .collect::<Vec<_>>(),
+                )},
                 // enabled 科技（游戏开始可用）或无条件科技：根
                 _ => Requirement::All(Vec::new()),
             }
@@ -532,11 +565,7 @@ fn requirements(store: &PrototypeStore, graph: &GraphData, node: &Accessible) ->
                     // 不再要求机器可达。自动规划在枚举时会处理"无解锁机器则选
                     // 评分最低的 1 台"。
                     // 至少一个解锁科技可达
-                    let unlocks = graph
-                        .techs_by_unlock
-                        .get(name)
-                        .cloned()
-                        .unwrap_or_default();
+                    let unlocks = graph.techs_by_unlock.get(name).cloned().unwrap_or_default();
                     all.push(Requirement::Any(
                         unlocks
                             .into_iter()
@@ -552,46 +581,60 @@ fn requirements(store: &PrototypeStore, graph: &GraphData, node: &Accessible) ->
         Accessible::Item(name) => {
             let mut any: Vec<Requirement> = Vec::new();
             if let Some(recipes) = graph.recipes_by_product.get(name) {
-                any.extend(recipes.iter().map(|recipe| {
-                    Requirement::Node(Accessible::Recipe(recipe.clone()))
-                }));
+                any.extend(
+                    recipes
+                        .iter()
+                        .map(|recipe| Requirement::Node(Accessible::Recipe(recipe.clone()))),
+                );
             }
             if let Some(resources) = graph.resources_by_product.get(name) {
-                any.extend(resources.iter().map(|entity| {
-                    Requirement::Node(Accessible::Entity(entity.clone()))
-                }));
+                any.extend(
+                    resources
+                        .iter()
+                        .map(|entity| Requirement::Node(Accessible::Entity(entity.clone()))),
+                );
             }
             if let Some(spoils) = graph.spoil_sources.get(name) {
                 // 变质来源：可变质成该物品的任一物品（隐含 spoil.<item> 配方）
-                any.extend(spoils.iter().map(|source| {
-                    Requirement::Node(Accessible::Item(source.clone()))
-                }));
+                any.extend(
+                    spoils
+                        .iter()
+                        .map(|source| Requirement::Node(Accessible::Item(source.clone()))),
+                );
             }
             // 星球资源（可挖掘/loot/捕获产物）：星球解锁即可获取
             if let Some(planets) = graph.resource_planets.get(name) {
-                any.extend(planets.iter().map(|planet| {
-                    Requirement::Node(Accessible::Planet(planet.clone()))
-                }));
+                any.extend(
+                    planets
+                        .iter()
+                        .map(|planet| Requirement::Node(Accessible::Planet(planet.clone()))),
+                );
             }
             Requirement::Any(any)
         }
         Accessible::Fluid(name) => {
             let mut any: Vec<Requirement> = Vec::new();
             if let Some(recipes) = graph.recipes_by_product.get(name) {
-                any.extend(recipes.iter().map(|recipe| {
-                    Requirement::Node(Accessible::Recipe(recipe.clone()))
-                }));
+                any.extend(
+                    recipes
+                        .iter()
+                        .map(|recipe| Requirement::Node(Accessible::Recipe(recipe.clone()))),
+                );
             }
             if let Some(resources) = graph.resources_by_product.get(name) {
-                any.extend(resources.iter().map(|entity| {
-                    Requirement::Node(Accessible::Entity(entity.clone()))
-                }));
+                any.extend(
+                    resources
+                        .iter()
+                        .map(|entity| Requirement::Node(Accessible::Entity(entity.clone()))),
+                );
             }
             // 星球流体（如某星球生成的水/岩浆）：星球解锁即可获取
             if let Some(planets) = graph.resource_planets.get(name) {
-                any.extend(planets.iter().map(|planet| {
-                    Requirement::Node(Accessible::Planet(planet.clone()))
-                }));
+                any.extend(
+                    planets
+                        .iter()
+                        .map(|planet| Requirement::Node(Accessible::Planet(planet.clone()))),
+                );
             }
             Requirement::Any(any)
         }
@@ -601,11 +644,7 @@ fn requirements(store: &PrototypeStore, graph: &GraphData, node: &Accessible) ->
             // promethium 星岩需到达生成它的深空地点）。
             let mut sources: Vec<Requirement> = Vec::new();
             if let Some(locations) = graph.asteroid_locations.get(name) {
-                sources.extend(
-                    locations
-                        .iter()
-                        .map(|loc| Requirement::Node(loc.clone())),
-                );
+                sources.extend(locations.iter().map(|loc| Requirement::Node(loc.clone())));
             }
             if let Some(connections) = graph.asteroid_connections.get(name) {
                 for (from, to) in connections {
@@ -650,17 +689,22 @@ fn requirements(store: &PrototypeStore, graph: &GraphData, node: &Accessible) ->
                 // ])
                 let mut any: Vec<Requirement> = Vec::new();
                 if let Some(items) = graph.items_by_place_result.get(name) {
-                    any.extend(items.iter().map(|item| {
-                        Requirement::Node(Accessible::Item(item.clone()))
-                    }));
+                    any.extend(
+                        items
+                            .iter()
+                            .map(|item| Requirement::Node(Accessible::Item(item.clone()))),
+                    );
                 }
                 if let Some(placeable) = record
                     .and_then(|r| r.component::<EntityComponent>())
                     .and_then(|e| e.placeable_by.as_ref())
                 {
-                    any.extend(placeable.items.iter().map(|item| {
-                        Requirement::Node(Accessible::Item(item.clone()))
-                    }));
+                    any.extend(
+                        placeable
+                            .items
+                            .iter()
+                            .map(|item| Requirement::Node(Accessible::Item(item.clone()))),
+                    );
                 }
                 Requirement::Any(any)
             }
@@ -817,7 +861,8 @@ pub fn compute_accessibility(
     seed(Accessible::Entity("character".to_string()));
     // 无依赖对象（enabled 配方/科技、矿藏实体、normal 品质……）作为根种子。
     for node in &nodes {
-        if matches!(requirements(store, &graph, node), Requirement::All(ref list) if list.is_empty()) {
+        if matches!(requirements(store, &graph, node), Requirement::All(ref list) if list.is_empty())
+        {
             seed(node.clone());
         }
     }
@@ -852,8 +897,10 @@ mod tests {
     }
 
     /// 仓库内真实 dump（相对路径，测试可移植；不依赖机器上的 %APPDATA%）。
-    const REAL_DUMP: &str =
-        concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/data-raw-dump.json");
+    const REAL_DUMP: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../assets/data-raw-dump.json"
+    );
 
     fn load_real_dump() -> Option<PrototypeStore> {
         if !std::path::Path::new(REAL_DUMP).exists() {
@@ -883,7 +930,13 @@ mod tests {
         })
     }
 
-    fn recipe(name: &str, ingredients: Vec<&str>, results: Vec<&str>, enabled: bool, unlock_techs: Vec<&str>) -> serde_json::Value {
+    fn recipe(
+        name: &str,
+        ingredients: Vec<&str>,
+        results: Vec<&str>,
+        enabled: bool,
+        unlock_techs: Vec<&str>,
+    ) -> serde_json::Value {
         let mut recipe = json!({
             "type": "recipe", "name": name,
             "energy_required": 1,
@@ -956,8 +1009,10 @@ mod tests {
         });
         dump["technology"] = techs;
         // 配方解锁：steel-plate ← tech-steel；engine-unit ← tech-engine
-        dump["technology"]["tech-steel"]["effects"] = json!([{ "type": "unlock-recipe", "recipe": "steel-plate" }]);
-        dump["technology"]["tech-engine"]["effects"] = json!([{ "type": "unlock-recipe", "recipe": "engine-unit" }]);
+        dump["technology"]["tech-steel"]["effects"] =
+            json!([{ "type": "unlock-recipe", "recipe": "steel-plate" }]);
+        dump["technology"]["tech-engine"]["effects"] =
+            json!([{ "type": "unlock-recipe", "recipe": "engine-unit" }]);
         dump
     }
 
@@ -966,8 +1021,14 @@ mod tests {
         let store = load(chain_dump());
         let result = compute_accessibility(&store, &AccessibilityOptions::default());
         // enabled 配方产物：iron-ore、iron-plate、assembling-machine-1 可达
-        assert!(result.is_item_accessible("iron-plate"), "enabled 配方产物应可达");
-        assert!(result.is_item_accessible("assembling-machine-1"), "机器（enabled 配方产出）应可达");
+        assert!(
+            result.is_item_accessible("iron-plate"),
+            "enabled 配方产物应可达"
+        );
+        assert!(
+            result.is_item_accessible("assembling-machine-1"),
+            "机器（enabled 配方产出）应可达"
+        );
         // 科技链：tech-base(enabled) → tech-iron → tech-steel → tech-engine 全部可达
         assert!(result.is_accessible(&Accessible::Tech("tech-base".into())));
         assert!(result.is_accessible(&Accessible::Tech("tech-iron".into())));
@@ -1073,10 +1134,23 @@ mod tests {
             eprintln!("可达性 [{item}] = {}", result.is_item_accessible(item));
         }
         // 塑料链断点诊断
-        for item in ["coal", "crude-oil", "petroleum-gas", "chemical-plant", "oil-refinery", "sulfur"] {
+        for item in [
+            "coal",
+            "crude-oil",
+            "petroleum-gas",
+            "chemical-plant",
+            "oil-refinery",
+            "sulfur",
+        ] {
             eprintln!("塑料链 [{item}] = {}", result.is_item_accessible(item));
         }
-        for tech in ["automation", "oil-processing", "plastics", "advanced-oil-processing", "sulfur-processing"] {
+        for tech in [
+            "automation",
+            "oil-processing",
+            "plastics",
+            "advanced-oil-processing",
+            "sulfur-processing",
+        ] {
             eprintln!(
                 "科技 [{tech}] = {}",
                 result.is_accessible(&Accessible::Tech(tech.to_string()))
@@ -1088,19 +1162,40 @@ mod tests {
         );
 
         // 基础链：enabled 配方产物
-        assert!(result.is_item_accessible("iron-ore"), "铁矿应可达（enabled 采矿配方）");
+        assert!(
+            result.is_item_accessible("iron-ore"),
+            "铁矿应可达（enabled 采矿配方）"
+        );
         assert!(result.is_item_accessible("iron-plate"));
-        assert!(result.is_item_accessible("steel-plate"), "钢（科技链）应可达");
+        assert!(
+            result.is_item_accessible("steel-plate"),
+            "钢（科技链）应可达"
+        );
         assert!(result.is_item_accessible("copper-cable"));
         // 石油链（原油 minable 或泵送 + 科技解锁）
-        assert!(result.is_item_accessible("plastic-bar"), "塑料（石油链）应可达");
+        assert!(
+            result.is_item_accessible("plastic-bar"),
+            "塑料（石油链）应可达"
+        );
         // 核：离心机链（科技解锁）
-        assert!(result.is_item_accessible("uranium-235"), "铀-235（科技链）应可达");
+        assert!(
+            result.is_item_accessible("uranium-235"),
+            "铀-235（科技链）应可达"
+        );
         // 高级链
-        assert!(result.is_item_accessible("electromagnetic-science-pack"), "电磁科学包应可达");
-        assert!(result.is_item_accessible("space-science-pack"), "空间科学包应可达");
+        assert!(
+            result.is_item_accessible("electromagnetic-science-pack"),
+            "电磁科学包应可达"
+        );
+        assert!(
+            result.is_item_accessible("space-science-pack"),
+            "空间科学包应可达"
+        );
         // 变质机制：spoilage（仅靠可变质物品变质而来）应可达
-        assert!(result.is_item_accessible("spoilage"), "spoilage（变质来源）应可达");
+        assert!(
+            result.is_item_accessible("spoilage"),
+            "spoilage（变质来源）应可达"
+        );
     }
 
     /// 真实 dump：不显式禁用科技时，原版所有科技瓶都应可达（可解锁）。
@@ -1133,10 +1228,7 @@ mod tests {
             eprintln!("科技瓶 [{pack}] = {ok}");
             all_ok &= ok;
         }
-        assert!(
-            all_ok,
-            "不显式禁用科技时原版所有科技瓶都应可达"
-        );
+        assert!(all_ok, "不显式禁用科技时原版所有科技瓶都应可达");
     }
 
     /// 诊断：rail 在 store 中的实际归属（验证"rail 是否在 Item 组"）。
@@ -1261,8 +1353,9 @@ mod tests {
         // promethium 星岩仅在 shattered-planet 深空地点生成——锁定该地点（或
         // 无 promethium-science-pack 科技）时不可达，体现"按地点判定"。
         let mut locked = AccessibilityOptions::default();
-        locked.marked_inaccessible =
-            [Accessible::Space("shattered-planet".to_string())].into_iter().collect();
+        locked.marked_inaccessible = [Accessible::Space("shattered-planet".to_string())]
+            .into_iter()
+            .collect();
         let locked_result = compute_accessibility(&store, &locked);
         assert!(
             !locked_result.is_item_accessible("promethium-asteroid-chunk"),
