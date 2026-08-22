@@ -125,6 +125,17 @@
     onSelectFlow: (flow: import("$lib/runtime/types").DualVar) => void;
   } | null>(null);
 
+  // ── 左侧栏面板折叠状态 ───────────────────────────────────────────
+  // 每个可设置项可独立下拉展开/收起；默认展开常用的（目标/工厂环境/
+  // 项目设置），收起常为空的（目标表达式/外部输入）。
+  let panels = $state({
+    targets: true,
+    expressions: false,
+    inputs: false,
+    env: true,
+    settings: true,
+  });
+
   function openSelector(
     kind: CatalogKind,
     title: string,
@@ -1063,7 +1074,17 @@
     <aside class="col">
       {#if factory}
         <section class="panel">
-          <div class="title">目标 <span class="count">{targets.length}</span></div>
+          <button
+            class="title panel-toggle"
+            aria-expanded={panels.targets}
+            onclick={() => (panels.targets = !panels.targets)}
+          >
+            <span class="toggle-label">
+              <span class="chev">{panels.targets ? "▾" : "▸"}</span>
+              目标 <span class="count">{targets.length}</span>
+            </span>
+          </button>
+          {#if panels.targets}
           <div
             class="rows"
             use:dndzone={{ items: dragTargets, flipDurationMs: 120 }}
@@ -1115,10 +1136,21 @@
               })}
             disabled={!runtime.activeContext}
           >+ 添加目标</button>
+          {/if}
         </section>
 
         <section class="panel">
-          <div class="title">目标表达式 <span class="count">{targetExpressions.length}</span></div>
+          <button
+            class="title panel-toggle"
+            aria-expanded={panels.expressions}
+            onclick={() => (panels.expressions = !panels.expressions)}
+          >
+            <span class="toggle-label">
+              <span class="chev">{panels.expressions ? "▾" : "▸"}</span>
+              目标表达式 <span class="count">{targetExpressions.length}</span>
+            </span>
+          </button>
+          {#if panels.expressions}
           <div class="rows">
             {#each targetExpressions as expression, ei (expression.id)}
               <div class="expr-card">
@@ -1220,10 +1252,21 @@
             onclick={() => runtime.addTargetExpression().catch(() => {})}
             disabled={!runtime.activeContext}
           >+ 添加表达式</button>
+          {/if}
         </section>
 
         <section class="panel">
-          <div class="title">外部输入 <span class="count">{externalInputs.length}</span></div>
+          <button
+            class="title panel-toggle"
+            aria-expanded={panels.inputs}
+            onclick={() => (panels.inputs = !panels.inputs)}
+          >
+            <span class="toggle-label">
+              <span class="chev">{panels.inputs ? "▾" : "▸"}</span>
+              外部输入 <span class="count">{externalInputs.length}</span>
+            </span>
+          </button>
+          {#if panels.inputs}
           <div
             class="rows"
             use:dndzone={{ items: dragInputs, flipDurationMs: 120 }}
@@ -1289,12 +1332,23 @@
             })}
           disabled={!runtime.activeContext}
         >+ 添加外部输入</button>
+          {/if}
         </section>
       {/if}
 
       {#if factory}
         <section class="panel">
-          <div class="title">工厂环境</div>
+          <button
+            class="title panel-toggle"
+            aria-expanded={panels.env}
+            onclick={() => (panels.env = !panels.env)}
+          >
+            <span class="toggle-label">
+              <span class="chev">{panels.env ? "▾" : "▸"}</span>
+              工厂环境
+            </span>
+          </button>
+          {#if panels.env}
           <div class="env-row">
             <button
               class="icon-btn"
@@ -1387,12 +1441,23 @@
             />
             严格消耗（未出现在目标中的物品必须配平）
           </label>
+          {/if}
         </section>
       {/if}
 
       {#if project}
         <section class="panel project-settings">
-          <div class="title">项目设置 <span class="count">全局</span></div>
+          <button
+            class="title panel-toggle"
+            aria-expanded={panels.settings}
+            onclick={() => (panels.settings = !panels.settings)}
+          >
+            <span class="toggle-label">
+              <span class="chev">{panels.settings ? "▾" : "▸"}</span>
+              项目设置 <span class="count">全局</span>
+            </span>
+          </button>
+          {#if panels.settings}
           <div class="field">
             <label>游戏上下文</label>
             <select
@@ -1647,6 +1712,7 @@
             />
           </div>
           <button class="btn" onclick={() => (prefsOpen = true)}>规划偏好…</button>
+          {/if}
         </section>
       {/if}
     </aside>
@@ -2987,6 +3053,41 @@
   .prefs-add-row select {
     flex: 1;
     min-width: 0;
+  }
+
+  /* 左侧栏可折叠面板标题（复用 .title 基类的 flex / 间距）。 */
+  .panel-toggle {
+    width: 100%;
+    border: none;
+    background: none;
+    padding: 0;
+    margin: 0 0 8px;
+    cursor: pointer;
+    text-align: left;
+    font: inherit;
+    color: var(--text);
+  }
+
+  .panel-toggle:hover {
+    color: var(--accent);
+  }
+
+  .panel-toggle .count {
+    margin-left: auto;
+  }
+
+  .toggle-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+  }
+
+  .chev {
+    color: var(--muted);
+    font-size: 10px;
+    width: 12px;
+    flex: 0 0 auto;
   }
 
   .prefs-row.sub {
