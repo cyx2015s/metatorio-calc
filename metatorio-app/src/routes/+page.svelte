@@ -114,6 +114,8 @@
     initialName?: string;
     initialQuality?: string;
     onSelect: (name: string, quality: string) => void;
+    /** 目录多分类页签选中时返回分类 kind（选择里程碑/标记可达等）。 */
+    onPickKind?: (kind: CatalogKind, name: string, quality: string) => void;
   } | null>(null);
 
   // 流选择器（目标/外部输入支持任意 DualVar 流；编辑时预选当前流）
@@ -145,6 +147,7 @@
     allowedNames?: string[],
     initialName?: string,
     initialQuality?: string,
+    onPickKind?: (kind: CatalogKind, name: string, quality: string) => void,
   ) {
     selector = {
       kind,
@@ -155,6 +158,7 @@
       initialName,
       initialQuality,
       onSelect,
+      onPickKind,
     };
   }
 
@@ -163,8 +167,9 @@
     renameName = context.name;
   }
 
-  // ── 显式可达性标记 ──────────────────────────────────────────────
-  // 标记 UI 用的目录 kind（与可达性对象一一对应；目录无 space-location 条目）。
+  // ── 可达性选择分类 ──────────────────────────────────────────────
+  // 里程碑 / 显式标记可达 / 不可达统一的分类页签（与可达性对象一一对应；
+  // 目录无 space-location 条目，故不含太空地点）。
   const markKinds: { kind: CatalogKind; label: string }[] = [
     { kind: "item", label: "物品" },
     { kind: "recipe", label: "配方" },
@@ -174,8 +179,6 @@
     { kind: "quality", label: "品质" },
     { kind: "planet", label: "星球" },
   ];
-  let markAccessibleKind = $state<CatalogKind>("item");
-  let markInaccessibleKind = $state<CatalogKind>("item");
 
   function makeAccessible(kind: CatalogKind, name: string): Accessible {
     switch (kind) {
@@ -1556,8 +1559,16 @@
               <button
                 class="btn"
                 onclick={() =>
-                  openSelector("item", "选择里程碑（科技瓶物品）", (name) =>
-                    runtime.addMilestone({ Item: name }),
+                  openSelector(
+                    "item",
+                    "选择里程碑",
+                    () => {},
+                    markKinds,
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    (kind, name) => runtime.addMilestone(makeAccessible(kind, name)),
                   )}
               >+ 添加里程碑</button>
               <button class="btn" onclick={() => runtime.setDefaultMilestones().catch(() => {})}>
@@ -1591,16 +1602,19 @@
               {/each}
             </div>
             <div class="prefs-add-row">
-              <select bind:value={markAccessibleKind}>
-                {#each markKinds as option (option.kind)}
-                  <option value={option.kind}>{option.label}</option>
-                {/each}
-              </select>
               <button
                 class="btn"
                 onclick={() =>
-                  openSelector(markAccessibleKind, "选择要标记可达的原型", (name) =>
-                    runtime.addMarkedAccessible(makeAccessible(markAccessibleKind, name)),
+                  openSelector(
+                    "item",
+                    "选择要标记可达的原型",
+                    () => {},
+                    markKinds,
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    (kind, name) => runtime.addMarkedAccessible(makeAccessible(kind, name)),
                   )}
               >+ 标记可达</button>
             </div>
@@ -1631,16 +1645,19 @@
               {/each}
             </div>
             <div class="prefs-add-row">
-              <select bind:value={markInaccessibleKind}>
-                {#each markKinds as option (option.kind)}
-                  <option value={option.kind}>{option.label}</option>
-                {/each}
-              </select>
               <button
                 class="btn"
                 onclick={() =>
-                  openSelector(markInaccessibleKind, "选择要标记不可达的原型", (name) =>
-                    runtime.addMarkedInaccessible(makeAccessible(markInaccessibleKind, name)),
+                  openSelector(
+                    "item",
+                    "选择要标记不可达的原型",
+                    () => {},
+                    markKinds,
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    (kind, name) => runtime.addMarkedInaccessible(makeAccessible(kind, name)),
                   )}
               >+ 标记不可达</button>
             </div>
@@ -1974,6 +1991,7 @@
     initialName={selector.initialName}
     initialQuality={selector.initialQuality}
     onSelect={selector.onSelect}
+    onPickKind={selector.onPickKind}
     onClose={() => (selector = null)}
   />
 {/if}
@@ -3048,11 +3066,6 @@
     align-items: center;
     gap: 6px;
     margin-top: 5px;
-  }
-
-  .prefs-add-row select {
-    flex: 1;
-    min-width: 0;
   }
 
   /* 左侧栏可折叠面板标题（复用 .title 基类的 flex / 间距）。 */

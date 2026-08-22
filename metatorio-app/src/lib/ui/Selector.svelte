@@ -28,6 +28,7 @@
     initialQuality,
     onSelect,
     onSelectFlow,
+    onPickKind,
     onClose,
   }: {
     kind: CatalogKind;
@@ -49,6 +50,10 @@
     initialQuality?: string;
     onSelect?: (name: string, quality: string) => void;
     onSelectFlow?: (flow: DualVar) => void;
+    /** 目录模式（含多分类页签）选中时回调，额外返回当前分类 kind——
+     *  用于"选择里程碑/标记可达"这类需要按原型类型构造对象的场景；
+     *  存在时优先于 onSelect。 */
+    onPickKind?: (kind: CatalogKind, name: string, quality: string) => void;
     onClose: () => void;
   } = $props();
 
@@ -319,7 +324,11 @@
       }
       return;
     }
-    onSelect?.(selected, quality);
+    if (onPickKind) {
+      onPickKind(activeKind, selected, quality);
+    } else {
+      onSelect?.(selected, quality);
+    }
     onClose();
   }
 
