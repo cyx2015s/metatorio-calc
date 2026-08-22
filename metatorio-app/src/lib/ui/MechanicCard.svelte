@@ -127,6 +127,24 @@
   );
   let machineName = $derived(entry.mechanic.machine?.id ?? "");
   let fluidName = $derived(entry.mechanic.fluid ?? "");
+
+  // 机器能量源类型（electric/burner/fluid/heat/void）：burner 机器需要物品燃料，
+  // electric 等不需要——据此决定 recipe/mining 卡是否显示燃料配置。
+  let machineEnergySource = $state<string | null>(null);
+  $effect(() => {
+    const id = machineName;
+    if (!id || (kind !== "recipe" && kind !== "mining")) {
+      machineEnergySource = null;
+      return;
+    }
+    let alive = true;
+    runtime.getDetail(machineKind(), id).then((detail) => {
+      if (alive) machineEnergySource = detail?.machine_energy_source ?? null;
+    });
+    return () => {
+      alive = false;
+    };
+  });
   let primaryQuality = $derived(
     entry.mechanic.recipe?.quality ??
       entry.mechanic.item?.quality ??
@@ -333,7 +351,15 @@
   <!-- 机制细节：燃料 / 燃料温度 / 火箭重量模式 -->
   {#if kind === "recipe" || kind === "mining" || kind === "boiler" || kind === "reactor" || kind === "item-launch"}
     <div class="row2b">
-      {#if kind === "recipe" || kind === "mining" || kind === "boiler" || kind === "reactor"}
+      {#if kind === "item-launch"}
+        <button
+          class="btn"
+          class:on={entry.mechanic.weight_mode ?? false}
+          title="火箭运力模式：按堆叠槽位 或 按重量"
+          onclick={() =>
+            runtime.setWeightMode(entry.id, !(entry.mechanic.weight_mode ?? false)).catch(() => {})}
+        >{entry.mechanic.weight_mode ? "按重量" : "按堆叠槽位"}</button>
+      {:else if kind === "boiler" || kind === "reactor" || machineEnergySource === "burner"}
         <button
           class="btn"
           title="指定燃料（默认 = 按燃料类别抽象选择）"
@@ -345,26 +371,6 @@
             title="清除燃料（回到自动）"
             onclick={() => runtime.setFuel(entry.id, null).catch(() => {})}
           >×</button>
-        {/if}
-        {#if kind === "boiler"}
-          <button
-            class="btn"
-            title="锅炉模式：箱内加热（产抽象热，原型缺省）或输出到独立管道（水→蒸汽）。点击循环切换。"
-            onclick={() => {
-              const cycle: Array<"heat-fluid-inside" | "output-to-separate-pipe" | null> = [
-                "output-to-separate-pipe",
-                "heat-fluid-inside",
-                null,
-              ];
-              const index = cycle.indexOf(entry.mechanic.mode ?? null);
-              const next = cycle[(index + 1) % cycle.length];
-              runtime.setBoilerMode(entry.id, next).catch(() => {});
-            }}
-          >{entry.mechanic.mode === "output-to-separate-pipe"
-            ? "独立管道"
-            : entry.mechanic.mode === "heat-fluid-inside"
-              ? "箱内加热"
-              : "原型模式"}</button>
         {/if}
         {#if (kind === "recipe" || kind === "mining" || kind === "boiler") && fuelIsFluid(entry.mechanic.fuel)}
           <label class="sub temp" title="燃料流体温度（留空 = 默认温度）">
@@ -384,15 +390,6 @@
             />
           </label>
         {/if}
-      {/if}
-      {#if kind === "item-launch"}
-        <button
-          class="btn"
-          class:on={entry.mechanic.weight_mode ?? false}
-          title="火箭运力模式：按堆叠槽位 或 按重量"
-          onclick={() =>
-            runtime.setWeightMode(entry.id, !(entry.mechanic.weight_mode ?? false)).catch(() => {})}
-        >{entry.mechanic.weight_mode ? "按重量" : "按堆叠槽位"}</button>
       {/if}
       <span class="spacer"></span>
     </div>

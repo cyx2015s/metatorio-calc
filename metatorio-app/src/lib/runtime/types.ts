@@ -704,6 +704,8 @@ export interface PrototypeDetail {
   allowed_module_categories: string[];
   /** 焦耳/刻（功率）；前端换算为 W。 */
   energy_usage_j: number | null;
+  /** 机器能量源类型（electric/burner/fluid/heat/void）；burner 才显示燃料配置。 */
+  machine_energy_source: string | null;
   // generator / boiler / reactor
   /** 发电效率。 */
   effectivity: number | null;

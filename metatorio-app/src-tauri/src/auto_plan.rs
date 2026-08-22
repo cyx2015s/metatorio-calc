@@ -54,6 +54,9 @@ pub struct EnumerateOptions {
     /// 当前工厂的星球/地表（表面条件过滤；种子可用性）。
     pub planet: Option<String>,
     pub surface: Option<String>,
+    /// 项目可达性（机器候选按此过滤：不可达机器不枚举）。
+    /// `None` = 不做机器可达性过滤（测试/无项目可达性时）。
+    pub accessibility: Option<metatorio_core::Accessibility>,
 }
 
 pub fn enumerate_all(
@@ -418,6 +421,14 @@ fn enumerate_recipes(
                     ) {
                         continue;
                     }
+                }
+            }
+            // 机器可达性过滤：当前项目科技未解锁的机器不枚举。
+            if let Some(accessibility) = &options.accessibility {
+                if !accessibility.is_accessible(&metatorio_core::Accessible::Entity(
+                    machine_name.clone(),
+                )) {
+                    continue;
                 }
             }
             let Some(machine_component) = machine_record.component::<CraftingMachineComponent>()
@@ -806,6 +817,7 @@ mod tests {
             major_quality: 0,
             planet: Some("fulgora".to_string()),
             surface: None,
+                accessibility: None,
         };
         let candidates = enumerate_all(&store, &ctx, &options);
         assert!(
@@ -1049,6 +1061,7 @@ mod tests {
             major_quality: 0,
             planet: None,
             surface: None,
+                accessibility: None,
         };
         enumerate_all(&store, &ctx, &options)
     }
@@ -1087,6 +1100,7 @@ mod tests {
             major_quality: 0,
             planet: Some("fulgora".to_string()),
             surface: None,
+                accessibility: None,
         };
         let candidates = enumerate_all(&store, &ctx, &options);
         let pref_machines: Vec<String> = candidates
@@ -1138,6 +1152,7 @@ mod tests {
             major_quality: 0,
             planet: None,
             surface: None,
+                accessibility: None,
         };
         let candidates = enumerate_all(&store, &ctx, &options);
         assert!(
@@ -1329,6 +1344,7 @@ mod tests {
             major_quality: 0,
             planet: None,
             surface: None,
+                accessibility: None,
         };
         let candidates = enumerate_all(&store, &ctx, &options);
         // 关键：必须枚举出电力链路四件套
@@ -1458,6 +1474,18 @@ mod tests {
             "effects": [{ "type": "unlock-recipe", "recipe": "steel-plate" }],
             "unit": { "count": 10, "time": 10, "ingredients": [] }
         });
+        // 保证 assembling-machine-1 机器**可达**（item + place_result + enabled 配方），
+        // 否则机器可达性过滤会把它剔除，导致配方候选丢失。
+        dump["item"]["assembling-machine-1"] = json!({
+            "type": "item", "name": "assembling-machine-1",
+            "place_result": "assembling-machine-1"
+        });
+        dump["recipe"]["assembling-machine-1"] = json!({
+            "type": "recipe", "name": "assembling-machine-1", "energy_required": 1,
+            "ingredients": [{ "type": "item", "name": "iron-plate", "amount": 1 }],
+            "results": [{ "type": "item", "name": "assembling-machine-1", "amount": 1 }],
+            "categories": ["crafting"], "enabled": true
+        });
 
         let mut runtime = crate::Runtime::new();
         runtime.install_context(
@@ -1559,3 +1587,4 @@ mod tests {
         );
     }
 }
+

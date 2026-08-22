@@ -206,6 +206,9 @@ pub struct PrototypeDetail {
     pub allowed_module_categories: Vec<String>,
     /// 焦耳/刻（功率）；前端换算为 W。
     pub energy_usage_j: Option<f64>,
+    /// 机器能量源类型（electric/burner/fluid/heat/void）。前端据此判断
+    /// 是否显示燃料配置（burner 机器需要物品燃料，electric 等不需要）。
+    pub machine_energy_source: Option<String>,
     // generator / boiler / reactor
     /// 发电效率。
     pub effectivity: Option<f64>,
@@ -1464,6 +1467,11 @@ fn auto_plan(
             .position(|candidate| candidate == name)
             .unwrap_or(0)
     };
+    // ③ 自动规划考虑可达性：机型候选与配方候选都按项目可达性过滤
+    // （用户显式标记 / 里程碑 / "无视可达性" 经 project_accessibility 生效）。
+    let accessibility = runtime
+        .project_accessibility(project)
+        .map_err(|error| error.to_string())?;
     let options = auto_plan::EnumerateOptions {
         alternative_count: project_doc.planning.alternative_count,
         machine_preferences: project_doc.planning.machine_preferences.clone(),
@@ -1473,6 +1481,7 @@ fn auto_plan(
         major_quality: quality_level(&factory_doc.settings.major_quality),
         planet: factory_doc.settings.planet.clone(),
         surface: factory_doc.settings.surface.clone(),
+        accessibility: Some(accessibility.clone()),
     };
     let candidates = auto_plan::enumerate_all(&store, &context, &options);
     eprintln!(
@@ -1481,12 +1490,6 @@ fn auto_plan(
         factory_doc.settings.planet,
         factory_doc.settings.surface,
     );
-    // ③ 自动规划考虑可达性：剔除不可达候选（科技未解锁的配方、
-    // 不可达的矿藏/物品/流体等；用户显式标记与"无视可达性"经
-    // project_accessibility 生效）。
-    let accessibility = runtime
-        .project_accessibility(project)
-        .map_err(|error| error.to_string())?;
     let (candidates, dropped): (Vec<_>, Vec<_>) = candidates
         .into_iter()
         .partition(|mechanic| mechanic_accessible(&store, &accessibility, mechanic));
@@ -1920,6 +1923,16 @@ fn prototype_detail(
             .unwrap_or_default();
         detail.energy_usage_j = Some(machine.energy_usage.amount);
         detail.categories = machine.crafting_categories.clone();
+        detail.machine_energy_source = Some(
+            match &machine.energy_source {
+                metatorio_data::types::EnergySource::Electric(_) => "electric",
+                metatorio_data::types::EnergySource::Burner(_) => "burner",
+                metatorio_data::types::EnergySource::Fluid(_) => "fluid",
+                metatorio_data::types::EnergySource::Heat(_) => "heat",
+                metatorio_data::types::EnergySource::Void => "void",
+            }
+            .to_string(),
+        );
     }
     if let Some(drill) = record.component::<MiningDrillComponent>() {
         detail.categories = drill.resource_categories.clone();
