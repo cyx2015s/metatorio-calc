@@ -22,8 +22,8 @@ use metatorio_data::store::{PrototypeGroup, PrototypeStore};
 use metatorio_data::types::{Ingredient, Modifier, Product, TriggerEffect};
 use metatorio_data::{
     AsteroidChunkComponent, CraftingMachineComponent, EnemySpawnerComponent, EntityComponent,
-    EntityWithHealthComponent, ItemComponent, PlantComponent, RecipeComponent,
-    SpaceConnectionComponent, SpaceLocationComponent, TechnologyComponent,
+    EntityWithHealthComponent, ItemComponent, PlantComponent, PrototypeBaseComponent,
+    RecipeComponent, SpaceConnectionComponent, SpaceLocationComponent, TechnologyComponent,
 };
 
 use crate::dual_var::DualVar;
@@ -530,10 +530,16 @@ fn requirements(store: &PrototypeStore, graph: &GraphData, node: &Accessible) ->
             }
         }
         Accessible::Recipe(name) => {
-            let recipe = store
-                .get(PrototypeGroup::Recipe, name)
-                .and_then(|record| record.component::<RecipeComponent>());
+            let record = store.get(PrototypeGroup::Recipe, name);
+            let recipe = record.and_then(|r| r.component::<RecipeComponent>());
+            let hidden = record
+                .and_then(|r| r.component::<PrototypeBaseComponent>())
+                .map(|base| base.hidden)
+                .unwrap_or(false);
             match recipe {
+                // hidden 配方：mod 保守替换产物（即便 enabled=true）→ 无法制作，
+                // 其产物不能视为可达（不作根种子，也不因依赖满足而可达）。
+                Some(_) if hidden => Requirement::Any(Vec::new()),
                 Some(recipe) if !recipe.enabled => {
                     let mut all: Vec<Requirement> = Vec::new();
                     // 原料（全部满足）
@@ -1207,6 +1213,57 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// enabled 但 hidden 的配方：mod 保守替换产物，不可制作 → 产物不可达
+    /// （不放进可达性根种子；即便有解锁科技或空原料也因 hidden 不可制作）。
+    #[test]
+    fn hidden_enabled_recipe_is_not_root() {
+        let dump = json!({
+            "item": {
+                "visible-item": { "type": "item", "name": "visible-item" },
+                "secret-item": { "type": "item", "name": "secret-item" }
+            },
+            "fluid": {},
+            "technology": {
+                "tech-secret": {
+                    "type": "technology", "name": "tech-secret",
+                    "prerequisites": [], "enabled": true,
+                    "effects": [{ "type": "unlock-recipe", "recipe": "secret" }],
+                    "unit": { "count": 10, "time": 10, "ingredients": [] }
+                }
+            },
+            "recipe": {
+                "visible": {
+                    "type": "recipe", "name": "visible",
+                    "energy_required": 1, "ingredients": [],
+                    "results": [{ "type": "item", "name": "visible-item", "amount": 1 }],
+                    "categories": ["crafting"], "enabled": true, "hidden": false
+                },
+                "secret": {
+                    "type": "recipe", "name": "secret",
+                    "energy_required": 1, "ingredients": [],
+                    "results": [{ "type": "item", "name": "secret-item", "amount": 1 }],
+                    "categories": ["crafting"], "enabled": true, "hidden": true
+                },
+                "secret-unlocked": {
+                    "type": "recipe", "name": "secret-unlocked",
+                    "energy_required": 1, "ingredients": [],
+                    "results": [{ "type": "item", "name": "secret-item", "amount": 1 }],
+                    "categories": ["crafting"], "enabled": false, "hidden": true
+                }
+            }
+        });
+        let store = load(dump);
+        let result = compute_accessibility(&store, &AccessibilityOptions::default());
+        assert!(
+            result.is_item_accessible("visible-item"),
+            "未 hidden 的 enabled 配方产物应可达（根）"
+        );
+        assert!(
+            !result.is_item_accessible("secret-item"),
+            "enabled 但 hidden 的配方产物不可达（不作根）"
+        );
     }
 
     /// 星岩按空间地点判定：基础三色星岩（初始轨道）可达；promethium 星岩
