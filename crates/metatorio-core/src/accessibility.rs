@@ -22,7 +22,8 @@ use metatorio_data::store::{PrototypeGroup, PrototypeStore};
 use metatorio_data::types::{Ingredient, Modifier, Product, TriggerEffect};
 use metatorio_data::{
     AsteroidChunkComponent, CraftingMachineComponent, EnemySpawnerComponent, EntityComponent,
-    EntityWithHealthComponent, ItemComponent, PlantComponent, RecipeComponent, TechnologyComponent,
+    EntityWithHealthComponent, ItemComponent, PlantComponent, RecipeComponent,
+    SpaceLocationComponent, TechnologyComponent,
 };
 
 use crate::dual_var::DualVar;
@@ -177,6 +178,10 @@ struct GraphData {
     /// 实体名 → 会产生它的触发实体（反查 death_products）。如星岩碎片
     /// ← 小星岩。
     generated_by: HashMap<String, Vec<String>>,
+    /// 星岩/小行星实体名 → 生成它的空间地点（SpaceLocation 的
+    /// asteroid_spawn_definitions；深空地点如 solar-system-edge /
+    /// shattered-planet）。星岩在该地点可达后才可得。
+    asteroid_locations: HashMap<String, Vec<Accessible>>,
 }
 
 /// 资源实体/星球流体名 → 生成它的星球列表。
@@ -438,6 +443,26 @@ fn build_graph(store: &PrototypeStore) -> GraphData {
             }
         }
     }
+    // 星岩/小行星的空间地点生成：SpaceLocation.asteroid_spawn_definitions。
+    // 深空地点（如 solar-system-edge / shattered-planet）生成对应星岩；
+    // 星岩在该地点可达后（Accessible::Space，unlock-space-location 科技）
+    // 才可得。普通星轨（nauvis orbit 等）不在 dump 的 space-location 中，
+    // 其基础星岩没有地点来源 → 走"根"兜底（见 requirements）。
+    let mut asteroid_locations: HashMap<String, Vec<Accessible>> = HashMap::new();
+    for record in store.group(PrototypeGroup::SpaceLocation) {
+        let Some(location) = record.component::<SpaceLocationComponent>() else {
+            continue;
+        };
+        for definition in &location.asteroid_spawn_definitions {
+            let Some(asteroid) = &definition.asteroid else {
+                continue;
+            };
+            asteroid_locations
+                .entry(asteroid.clone())
+                .or_default()
+                .push(Accessible::Space(record.name.clone()));
+        }
+    }
 
     GraphData {
         recipes_by_product,
@@ -449,6 +474,7 @@ fn build_graph(store: &PrototypeStore) -> GraphData {
         resource_planets: build_resource_planets(store),
         death_products,
         generated_by,
+        asteroid_locations,
     }
 }
 
@@ -583,21 +609,34 @@ fn requirements(store: &PrototypeStore, graph: &GraphData, node: &Accessible) ->
             Requirement::Any(any)
         }
         Accessible::Entity(name) => {
-            // 死亡生成产物：实体由某个触发实体的 dying_trigger_effect 生成
-            // （如小行星死亡 → 小一号星岩碎片）。碎片可达 ⟸ 生成它的实体可达。
-            if let Some(parents) = graph.generated_by.get(name) {
-                return Requirement::Any(
-                    parents
+            // 星岩/小行星：来源 = 空间地点生成（深空地点可控）+ 死亡生成链。
+            // 任一来源满足即可（普通星岩可经死亡链从初始轨道的小星岩递推，
+            // promethium 星岩需到达生成它的深空地点）。
+            let mut sources: Vec<Requirement> = Vec::new();
+            if let Some(locations) = graph.asteroid_locations.get(name) {
+                sources.extend(
+                    locations
                         .iter()
-                        .map(|parent| Requirement::Node(Accessible::Entity(parent.clone())))
-                        .collect(),
+                        .map(|loc| Requirement::Node(loc.clone())),
                 );
             }
-            // 死亡生成星岩/实体的**源头**（如小星岩）：太空中自动生成 → 根。
+            if let Some(parents) = graph.generated_by.get(name) {
+                sources.extend(
+                    parents
+                        .iter()
+                        .map(|parent| Requirement::Node(Accessible::Entity(parent.clone()))),
+                );
+            }
+            if !sources.is_empty() {
+                return Requirement::Any(sources);
+            }
+            // 无地点/死亡生成来源：以下是原逻辑。
+            let record = store.get(PrototypeGroup::Entity, name);
             if graph.death_products.contains_key(name) {
+                // 死亡生成星岩/小行星的实体（无地点来源，且不在地点数据中）：
+                // 普通轨道的小星岩初始即存在 → 根。
                 return Requirement::All(Vec::new());
             }
-            let record = store.get(PrototypeGroup::Entity, name);
             if record
                 .and_then(|r| r.component::<AsteroidChunkComponent>())
                 .is_some()
@@ -1149,5 +1188,53 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// 星岩按空间地点判定：基础三色星岩（初始轨道）可达；promethium 星岩
+    /// 经 shattered-planet（深空地点，promethium-science-pack 科技可达）与
+    /// 死亡生成链可递推到星岩碎片。
+    #[test]
+    fn real_dump_asteroid_locations() {
+        let Some(store) = load_real_dump() else {
+            return;
+        };
+        let result = compute_accessibility(&store, &AccessibilityOptions::default());
+        for e in [
+            "metallic-asteroid-chunk",
+            "carbonic-asteroid-chunk",
+            "oxide-asteroid-chunk",
+        ] {
+            assert!(
+                result.is_accessible(&Accessible::Entity(e.to_string())),
+                "基础星岩（初始轨道）应可达: {e}"
+            );
+        }
+        // promethium 星岩：huge（深空地点生成）→ small → chunk，且碎片可采集为物品。
+        assert!(
+            result.is_accessible(&Accessible::Entity("huge-promethium-asteroid".to_string())),
+            "promethium 大星岩应可达（shattered-planet 地点）"
+        );
+        assert!(
+            result.is_accessible(&Accessible::Entity("promethium-asteroid-chunk".to_string())),
+            "promethium 星岩碎片应可达（死亡链）"
+        );
+        assert!(
+            result.is_item_accessible("promethium-asteroid-chunk"),
+            "promethium 星岩碎片物品应可达（星岩收集器采集）"
+        );
+        // promethium 星岩仅在 shattered-planet 深空地点生成——锁定该地点（或
+        // 无 promethium-science-pack 科技）时不可达，体现"按地点判定"。
+        let mut locked = AccessibilityOptions::default();
+        locked.marked_inaccessible =
+            [Accessible::Space("shattered-planet".to_string())].into_iter().collect();
+        let locked_result = compute_accessibility(&store, &locked);
+        assert!(
+            !locked_result.is_item_accessible("promethium-asteroid-chunk"),
+            "锁定 shattered-planet 后 promethium 星岩应不可达（地点判定生效）"
+        );
+        assert!(
+            locked_result.is_item_accessible("metallic-asteroid-chunk"),
+            "锁定深空地点不应影响基础星岩"
+        );
     }
 }
