@@ -6,6 +6,11 @@
   import { runtime } from "$lib/runtime/store.svelte.ts";
   import Icon from "./Icon.svelte";
   import type { FlowAmount, PrototypeDetail } from "$lib/runtime/types";
+  import {
+    accessibleKind,
+    accessibleKindFor,
+    accessibleName,
+  } from "$lib/runtime/types";
 
   let {
     kind,
@@ -13,6 +18,43 @@
     x,
     y,
   }: { kind: string; detail: PrototypeDetail | null; x: number; y: number } = $props();
+
+  // ── 可达性状态 ──────────────────────────────────────────────────
+  // 显示当前选中项目下的原型可达/不可达；项目"无视可达性"或上下文未载入
+  // （无可达性数据）时显示"未知"（不标注）。
+  let accessibleState = $state<"accessible" | "inaccessible" | "unknown">("unknown");
+  $effect(() => {
+    if (!detail) {
+      accessibleState = "unknown";
+      return;
+    }
+    if (runtime.allAccessible) {
+      accessibleState = "accessible";
+      return;
+    }
+    const mapKind = accessibleKindFor(detail.kind);
+    if (mapKind == null) {
+      accessibleState = "unknown";
+      return;
+    }
+    let alive = true;
+    runtime.ensureAccessibility().then((nodes) => {
+      if (!alive) return;
+      if (nodes == null) {
+        accessibleState = "unknown";
+        return;
+      }
+      const ok = nodes.some(
+        (node) =>
+          `${accessibleKind(node)}/${accessibleName(node)}` ===
+          `${mapKind}/${detail.name}`,
+      );
+      accessibleState = ok ? "accessible" : "inaccessible";
+    });
+    return () => {
+      alive = false;
+    };
+  });
 
   const kindLabel: Record<string, string> = {
     item: "物品",
@@ -130,7 +172,15 @@
       <div class="hc-title">
         <strong>{detail.localized_name || detail.name}</strong>
         {#if detail.localized_name}<small>{detail.name}</small>{/if}
-        <small>{kindLabel[kind] ?? kind}</small>
+        <small>
+          {kindLabel[kind] ?? kind}
+          {#if detail.hidden}<span class="hc-badge hidden">隐藏</span>{/if}
+        </small>
+        {#if accessibleState !== "unknown"}
+          <span class="hc-badge {accessibleState}">
+            {accessibleState === "accessible" ? "可达" : "不可达"}
+          </span>
+        {/if}
       </div>
     </div>
     <div class="hc-body">
@@ -324,6 +374,31 @@
   .hc-title small {
     color: var(--muted);
     font-size: 10px;
+  }
+
+  .hc-badge {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 6px;
+    padding: 1px 6px;
+    border-radius: 8px;
+    font-size: 9px;
+    font-weight: 600;
+  }
+
+  .hc-badge.accessible {
+    color: #7fd18a;
+    background: color-mix(in srgb, #7fd18a 18%, transparent);
+  }
+
+  .hc-badge.inaccessible {
+    color: var(--danger);
+    background: color-mix(in srgb, var(--danger) 18%, transparent);
+  }
+
+  .hc-badge.hidden {
+    color: var(--muted);
+    background: color-mix(in srgb, var(--muted) 20%, transparent);
   }
 
   .hc-body {

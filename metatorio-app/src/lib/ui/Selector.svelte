@@ -13,7 +13,11 @@
   import Icon from "./Icon.svelte";
   import HoverCard from "./HoverCard.svelte";
   import type { CatalogKind, DualVar, IndexEntry } from "$lib/runtime/types";
-  import { accessibleKind, accessibleName } from "$lib/runtime/types";
+  import {
+    accessibleKind,
+    accessibleKindFor as catalogAccessibleKindFor,
+    accessibleName,
+  } from "$lib/runtime/types";
 
   let {
     kind,
@@ -146,39 +150,8 @@
       accessibleKeys = null;
     }
   });
-  /** 目录 kind → 可达性 kind（machine/resource 等按实体判断）；无对应则不过滤。 */
-  function accessibleKindFor(kind: string): string | null {
-    switch (kind) {
-      case "item":
-      case "module":
-        return "item";
-      case "fluid":
-        return "fluid";
-      case "recipe":
-        return "recipe";
-      case "technology":
-        return "technology";
-      case "planet":
-        return "planet";
-      case "quality":
-        return "quality";
-      case "space-location":
-        return "space-location";
-      case "entity":
-      case "machine":
-      case "mining-machine":
-      case "generator":
-      case "boiler":
-      case "reactor":
-      case "solar-panel":
-      case "accumulator":
-      case "beacon":
-      case "resource":
-        return "entity";
-      default:
-        return null;
-    }
-  }
+  /** 目录 kind → 可达性 kind（见 types.accessibleKindFor；无对应则不过滤）。 */
+  const accessibleKindFor = catalogAccessibleKindFor;
 
   let visible = $derived(
     (searching

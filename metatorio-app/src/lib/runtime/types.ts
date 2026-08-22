@@ -124,6 +124,41 @@ export function accessibleName(node: Accessible): string {
   return Object.values(node)[0];
 }
 
+/** 目录 kind（item/recipe/machine/resource/…）→ 可达性 kind；
+ *  机器/资源等按实体判断；surface 等无对应的返回 null（不做可达性过滤）。 */
+export function accessibleKindFor(kind: string): string | null {
+  switch (kind) {
+    case "item":
+    case "module":
+      return "item";
+    case "fluid":
+      return "fluid";
+    case "recipe":
+      return "recipe";
+    case "technology":
+      return "technology";
+    case "planet":
+      return "planet";
+    case "quality":
+      return "quality";
+    case "space-location":
+      return "space-location";
+    case "entity":
+    case "machine":
+    case "mining-machine":
+    case "generator":
+    case "boiler":
+    case "reactor":
+    case "solar-panel":
+    case "accumulator":
+    case "beacon":
+    case "resource":
+      return "entity";
+    default:
+      return null;
+  }
+}
+
 export type ProjectAction =
   | { "set-name": { name: string } }
   | { "add-factory": { name: string; template: FactoryTemplate } }
