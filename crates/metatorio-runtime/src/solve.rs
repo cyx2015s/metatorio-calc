@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fs::File, path::Path};
 
 use metatorio_core::{Accessibility, AccessibilityOptions, Accessible, Context, DualVar, Flow, GameState, Mechanic, ModuleConfig};
-use metatorio_data::{EntityComponent, FluidComponent, ItemComponent, LabComponent};
+use metatorio_data::{EntityComponent, FluidComponent, ItemComponent, LabComponent, PrototypeBaseComponent};
 use metatorio_data::store::{PrototypeGroup, PrototypeStore};
 use metatorio_solver::{AIndexMap, SolverData, SolverSolution, TargetSpec};
 use serde::{Deserialize, Serialize};
@@ -205,6 +205,9 @@ impl Runtime {
     /// 默认里程碑：把**科技瓶物品**（出现在实验室 LabComponent.inputs 的
     /// 物品，即 lab 消耗的科技瓶）设为里程碑，unlocked=true。
     ///
+    /// 只提取**未被 hidden 标记**的 lab（mod 里不可见的实验室不参与默认
+    /// 里程碑）；hidden 实验室的输入（如特殊科技瓶）不进入默认集合。
+    ///
     /// 里程碑是可达性节点级（不限于科技）：锁定某个科技瓶（unlocked=false）
     /// 即剪枝该节点并阻断依赖它的对象，模拟"还没到这个科技阶段"。
     pub fn set_default_milestones(&mut self, project_id: ProjectId) -> Result<bool, RuntimeError> {
@@ -214,6 +217,14 @@ impl Runtime {
             let Some(lab) = record.component::<LabComponent>() else {
                 continue;
             };
+            // 过滤隐藏实验室（不可见原型不参与默认里程碑）。
+            if record
+                .component::<PrototypeBaseComponent>()
+                .map(|base| base.hidden)
+                .unwrap_or(false)
+            {
+                continue;
+            }
             for name in &lab.inputs {
                 if !science_packs.contains(name) {
                     science_packs.push(name.clone());
@@ -949,7 +960,8 @@ mod tests {
         let dump = json!({
             "item": {
                 "automation-science-pack": { "type": "item", "name": "automation-science-pack" },
-                "chemical-science-pack": { "type": "item", "name": "chemical-science-pack" }
+                "chemical-science-pack": { "type": "item", "name": "chemical-science-pack" },
+                "secret-science-pack": { "type": "item", "name": "secret-science-pack" }
             },
             "fluid": {},
             "recipe": {
@@ -968,6 +980,14 @@ mod tests {
                     "energy_source": { "type": "electric", "drain": "0J" },
                     "researching_speed": 1,
                     "inputs": ["automation-science-pack", "chemical-science-pack"]
+                },
+                "hidden-lab": {
+                    "type": "lab", "name": "hidden-lab",
+                    "hidden": true,
+                    "energy_usage": "60kW",
+                    "energy_source": { "type": "electric", "drain": "0J" },
+                    "researching_speed": 1,
+                    "inputs": ["secret-science-pack"]
                 }
             }
         });
@@ -992,6 +1012,10 @@ mod tests {
                 Accessible::Item("chemical-science-pack".to_string()),
             ],
             "默认里程碑应为实验室输入的科技瓶物品"
+        );
+        assert!(
+            !nodes.contains(&Accessible::Item("secret-science-pack".to_string())),
+            "隐藏实验室（hidden）的输入不应进入默认里程碑"
         );
         assert!(settings.milestones.iter().all(|m| m.unlocked));
 
