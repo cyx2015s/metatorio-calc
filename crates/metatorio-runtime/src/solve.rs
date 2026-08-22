@@ -166,11 +166,9 @@ impl Runtime {
 
     /// 计算并缓存项目的可达性结果（选择器过滤 / 自动规划过滤共用）。
     ///
-    /// 用户显式覆盖来自 `ProjectSettings`：
-    /// - `marked_accessible`：并入根种子（即使无来源也可达）；
-    /// - `marked_inaccessible`：剪枝（自身不可达，阻断依赖它的对象）；
-    /// - 里程碑 `unlocked == false` 的节点也剪枝（默认是科技瓶物品；
-    ///   对应"未解锁阶段"语义，阻断依赖它的对象）；
+    /// 里程碑来自 `ProjectSettings.milestones`，`unlocked` 是**强制覆盖**：
+    /// - `unlocked = true` → 强制可达（并入根种子，最终结果保证可达）；
+    /// - `unlocked = false` → 强制不可达（剪枝，最终结果保证不可达）；
     /// - `all_accessible`：无视一切，全可达。
     pub fn project_accessibility(
         &mut self,
@@ -182,18 +180,17 @@ impl Runtime {
         let store = self.context_store(project_id)?;
         let settings = &self.state.project(project_id)?.settings;
         let options = AccessibilityOptions {
-            marked_accessible: settings.marked_accessible.iter().cloned().collect(),
-            marked_inaccessible: settings
-                .marked_inaccessible
+            forced_accessible: settings
+                .milestones
                 .iter()
-                .cloned()
-                .chain(
-                    settings
-                        .milestones
-                        .iter()
-                        .filter(|milestone| !milestone.unlocked)
-                        .map(|milestone| milestone.node.clone()),
-                )
+                .filter(|milestone| milestone.unlocked)
+                .map(|milestone| milestone.node.clone())
+                .collect(),
+            forced_inaccessible: settings
+                .milestones
+                .iter()
+                .filter(|milestone| !milestone.unlocked)
+                .map(|milestone| milestone.node.clone())
                 .collect(),
             all_accessible: settings.all_accessible,
         };
@@ -849,7 +846,7 @@ mod tests {
     }
 
     #[test]
-    fn project_accessibility_respects_user_marks_and_milestones() {
+    fn accessibility_milestones_are_forced_overrides() {
         let mut runtime = load_accessibility_runtime();
         let project = new_project(&mut runtime);
 
@@ -860,12 +857,14 @@ mod tests {
         assert!(result.is_item_accessible("steel-plate"));
         assert!(!result.is_item_accessible("magic-item"));
 
-        // 显式可达：magic-item 无任何来源，标记后仍可达；移除后恢复不可达。
+        // 强制可达：magic-item 无任何来源，里程碑 unlocked=true → 强制可达，
+        // 自动解析（无来源应不可达）被覆盖。
         dispatch_project(
             &mut runtime,
             project,
-            ProjectAction::AddMarkedAccessible {
+            ProjectAction::AddMilestone {
                 node: Accessible::Item("magic-item".to_string()),
+                unlocked: true,
             },
         );
         assert!(
@@ -873,37 +872,34 @@ mod tests {
                 .project_accessibility(project)
                 .unwrap()
                 .is_item_accessible("magic-item"),
-            "显式标记可达应并入根种子"
+            "里程碑 unlocked=true 应强制可达（覆盖自动解析）"
         );
-        dispatch_project(
-            &mut runtime,
-            project,
-            ProjectAction::RemoveMarkedAccessible {
-                node: Accessible::Item("magic-item".to_string()),
-            },
-        );
-        assert!(!runtime.project_accessibility(project).unwrap().is_item_accessible("magic-item"));
 
-        // 显式不可达：iron-plate 剪枝，其下游 steel-plate（原料依赖）一并不可达。
+        // 强制不可达：iron-plate 自动解析可达，但里程碑 unlocked=false 强制不可达，
+        // 自动解析被覆盖，且阻断依赖它的对象（steel-plate）。
         dispatch_project(
             &mut runtime,
             project,
-            ProjectAction::AddMarkedInaccessible {
+            ProjectAction::AddMilestone {
                 node: Accessible::Item("iron-plate".to_string()),
+                unlocked: false,
             },
         );
         let result = runtime.project_accessibility(project).unwrap();
-        assert!(!result.is_item_accessible("iron-plate"));
-        assert!(!result.is_item_accessible("steel-plate"), "剪枝应阻断依赖它的对象");
+        assert!(!result.is_item_accessible("iron-plate"), "强制不可达应覆盖自动可达");
+        assert!(!result.is_item_accessible("steel-plate"), "强制不可达应阻断依赖");
+
+        // 移除里程碑 → 恢复自动状态（iron-plate 重新可达）。
         dispatch_project(
             &mut runtime,
             project,
-            ProjectAction::RemoveMarkedInaccessible {
+            ProjectAction::RemoveMilestone {
                 node: Accessible::Item("iron-plate".to_string()),
             },
         );
+        assert!(runtime.project_accessibility(project).unwrap().is_item_accessible("iron-plate"));
 
-        // 里程碑：tech-base 未解锁 → 子树剪枝 → steel-plate 不可达。
+        // 科技里程碑 unlocked=false 剪枝科技子树。
         dispatch_project(
             &mut runtime,
             project,
@@ -924,29 +920,40 @@ mod tests {
     }
 
     #[test]
-    fn marked_accessibility_settings_persist_in_document() {
+    fn milestone_settings_persist_in_document() {
         let mut runtime = load_accessibility_runtime();
         let project = new_project(&mut runtime);
-        let node = Accessible::Item("magic-item".to_string());
         dispatch_project(
             &mut runtime,
             project,
-            ProjectAction::AddMarkedAccessible { node: node.clone() },
+            ProjectAction::AddMilestone {
+                node: Accessible::Item("magic-item".to_string()),
+                unlocked: true,
+            },
         );
         dispatch_project(
             &mut runtime,
             project,
-            ProjectAction::AddMarkedInaccessible {
+            ProjectAction::AddMilestone {
                 node: Accessible::Recipe("steel-plate".to_string()),
+                unlocked: false,
             },
         );
         let settings = &runtime.state.project(project).unwrap().settings;
-        assert_eq!(settings.marked_accessible, vec![node]);
         assert_eq!(
-            settings.marked_inaccessible,
-            vec![Accessible::Recipe("steel-plate".to_string())]
+            settings.milestones,
+            vec![
+                crate::document::Milestone {
+                    node: Accessible::Item("magic-item".to_string()),
+                    unlocked: true,
+                },
+                crate::document::Milestone {
+                    node: Accessible::Recipe("steel-plate".to_string()),
+                    unlocked: false,
+                },
+            ]
         );
-        // 文档 roundtrip（serde 持久化）：Accessible 外部标签格式。
+        // 文档 roundtrip（serde 持久化）：Milestone 的 Accessible 外部标签格式。
         let encoded = serde_json::to_string(&runtime.state.document).unwrap();
         let decoded: crate::document::AppDocument = serde_json::from_str(&encoded).unwrap();
         assert_eq!(decoded, runtime.state.document);

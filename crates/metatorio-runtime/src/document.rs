@@ -54,17 +54,14 @@ impl Default for ProjectDocument {
 #[serde(default)]
 pub struct ProjectSettings {
     pub time_scale: TimeScale,
-    /// 里程碑（可达性节点级，默认是各科技瓶物品；`unlocked=false` 的节点
-    /// 剪枝——自身不可达并阻断依赖它的对象，模拟科技树不同分支）。
+    /// 里程碑（可达性节点级，默认是各科技瓶物品；`unlocked` 是**强制覆盖**——
+    /// `unlocked=false` 强制不可达并阻断依赖它的对象，`unlocked=true` 强制可达，
+    /// 自动解析（依赖传播）不能覆盖此状态）。
     pub milestones: Vec<Milestone>,
     pub recipe_productivity: Vec<RecipeProductivity>,
     pub ignore_productivity: bool,
     pub mining_productivity: f64,
     pub all_accessible: bool,
-    /// 用户显式标记为可达的对象（即使无任何来源也可达，并入根种子）。
-    pub marked_accessible: Vec<Accessible>,
-    /// 用户显式标记为不可达的对象（剪枝：自身不可达，并阻断依赖它的对象）。
-    pub marked_inaccessible: Vec<Accessible>,
     pub quality_limit: Option<String>,
 }
 
@@ -77,8 +74,6 @@ impl Default for ProjectSettings {
             ignore_productivity: false,
             mining_productivity: 0.0,
             all_accessible: false,
-            marked_accessible: Vec::new(),
-            marked_inaccessible: Vec::new(),
             quality_limit: None,
         }
     }

@@ -12,8 +12,8 @@
 //! 1. **自动层**：`enabled` 配方/科技（游戏开始可用）与无依赖对象作为根种子，
 //!    递归传播到"前置依赖全部可达"的对象（用户要求的"从没有前置依赖的
 //!    科技开始递归传播可达性，直到遇到不可达科技"）。
-//! 2. **用户层**：[`AccessibilityOptions::marked_accessible`]（显式可达，并入根种子）
-//!    / [`AccessibilityOptions::marked_inaccessible`]（显式剪枝，永不可达）
+//! 2. **用户层**：[`AccessibilityOptions::forced_accessible`]（显式可达，并入根种子）
+//!    / [`AccessibilityOptions::forced_inaccessible`]（显式剪枝，永不可达）
 //!    / [`AccessibilityOptions::all_accessible`]（无视一切，全可达）。
 
 use std::collections::{HashMap, VecDeque};
@@ -116,10 +116,12 @@ impl Requirement {
 /// 用户层可达性选项。
 #[derive(Debug, Clone, Default)]
 pub struct AccessibilityOptions {
-    /// 显式标记可达的对象（并入根种子；即使无任何来源也可达）。
-    pub marked_accessible: AIndexSet<Accessible>,
-    /// 显式标记不可达的对象（剪枝：自身不可达，且阻断依赖它的对象）。
-    pub marked_inaccessible: AIndexSet<Accessible>,
+    /// **强制可达**的对象（里程碑 `unlocked = true`）：并入根种子传播，
+    /// 且**最终结果保证可达**——自动解析（依赖传播）不能覆盖这个状态。
+    pub forced_accessible: AIndexSet<Accessible>,
+    /// **强制不可达**的对象（里程碑 `unlocked = false`）：剪枝（阻断依赖它的
+    /// 对象），且**最终结果保证不可达**——自动解析不能覆盖。
+    pub forced_inaccessible: AIndexSet<Accessible>,
     /// 无视一切可达性限制（全可达）。
     pub all_accessible: bool,
 }
@@ -843,7 +845,7 @@ pub fn compute_accessibility(
     let mut accessible: AIndexSet<Accessible> = AIndexSet::default();
     let mut queue: VecDeque<Accessible> = VecDeque::new();
     let mut seed = |node: Accessible| {
-        if options.marked_inaccessible.contains(&node) {
+        if options.forced_inaccessible.contains(&node) {
             return;
         }
         if accessible.insert(node.clone()) {
@@ -851,8 +853,8 @@ pub fn compute_accessibility(
         }
     };
 
-    // 用户显式可达（并入根种子）。
-    for node in &options.marked_accessible {
+    // 强制可达（里程碑 unlocked=true）：并入根种子。
+    for node in &options.forced_accessible {
         seed(node.clone());
     }
     // 恒真根：电/热/角色（角色手工制造打破机器死锁）。
@@ -871,7 +873,7 @@ pub fn compute_accessibility(
     while let Some(node) = queue.pop_front() {
         let dependents = reverse.get(&node).cloned().unwrap_or_default();
         for dependent in dependents {
-            if options.marked_inaccessible.contains(&dependent) {
+            if options.forced_inaccessible.contains(&dependent) {
                 continue;
             }
             if accessible.contains(&dependent) {
@@ -882,6 +884,15 @@ pub fn compute_accessibility(
                 queue.push_back(dependent);
             }
         }
+    }
+
+    // 最终强制覆盖：里程碑是**强制决定**，自动解析（传播）不能覆盖——
+    // 强制可达的对象必然可达，强制不可达的对象必然不可达。
+    for node in &options.forced_accessible {
+        accessible.insert(node.clone());
+    }
+    for node in &options.forced_inaccessible {
+        accessible.remove(node);
     }
 
     Accessibility { accessible }
@@ -1065,10 +1076,10 @@ mod tests {
     }
 
     #[test]
-    fn user_marked_inaccessible_prunes_descendants() {
+    fn user_forced_inaccessible_prunes_descendants() {
         let store = load(chain_dump());
         let options = AccessibilityOptions {
-            marked_inaccessible: [Accessible::Item("iron-plate".to_string())]
+            forced_inaccessible: [Accessible::Item("iron-plate".to_string())]
                 .into_iter()
                 .collect(),
             ..Default::default()
@@ -1083,10 +1094,10 @@ mod tests {
     }
 
     #[test]
-    fn user_marked_accessible_overrides_missing_sources() {
+    fn user_forced_accessible_overrides_missing_sources() {
         let store = load(chain_dump());
         let options = AccessibilityOptions {
-            marked_accessible: [Accessible::Item("magic-item".to_string())]
+            forced_accessible: [Accessible::Item("magic-item".to_string())]
                 .into_iter()
                 .collect(),
             ..Default::default()
@@ -1353,7 +1364,7 @@ mod tests {
         // promethium 星岩仅在 shattered-planet 深空地点生成——锁定该地点（或
         // 无 promethium-science-pack 科技）时不可达，体现"按地点判定"。
         let mut locked = AccessibilityOptions::default();
-        locked.marked_inaccessible = [Accessible::Space("shattered-planet".to_string())]
+        locked.forced_inaccessible = [Accessible::Space("shattered-planet".to_string())]
             .into_iter()
             .collect();
         let locked_result = compute_accessibility(&store, &locked);
@@ -1367,3 +1378,4 @@ mod tests {
         );
     }
 }
+

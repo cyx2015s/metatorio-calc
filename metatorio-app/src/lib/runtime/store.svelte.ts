@@ -556,40 +556,6 @@ class RuntimeStore {
     await this.refresh();
   }
 
-  // ── 显式可达性覆盖 ───────────────────────────────────────────────
-
-  async addMarkedAccessible(node: Accessible): Promise<void> {
-    const project = this.requireProject();
-    await this.send({
-      scope: "project",
-      action: { project, action: { "add-marked-accessible": { node } } },
-    });
-  }
-
-  async removeMarkedAccessible(node: Accessible): Promise<void> {
-    const project = this.requireProject();
-    await this.send({
-      scope: "project",
-      action: { project, action: { "remove-marked-accessible": { node } } },
-    });
-  }
-
-  async addMarkedInaccessible(node: Accessible): Promise<void> {
-    const project = this.requireProject();
-    await this.send({
-      scope: "project",
-      action: { project, action: { "add-marked-inaccessible": { node } } },
-    });
-  }
-
-  async removeMarkedInaccessible(node: Accessible): Promise<void> {
-    const project = this.requireProject();
-    await this.send({
-      scope: "project",
-      action: { project, action: { "remove-marked-inaccessible": { node } } },
-    });
-  }
-
   async setIgnoreProductivity(ignore: boolean): Promise<void> {
     const project = this.requireProject();
     await this.send({

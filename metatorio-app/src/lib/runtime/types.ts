@@ -173,10 +173,6 @@ export type ProjectAction =
   | { "add-milestone": { node: Accessible; unlocked: boolean } }
   | { "set-milestone-unlocked": { node: Accessible; unlocked: boolean } }
   | { "remove-milestone": { node: Accessible } }
-  | { "add-marked-accessible": { node: Accessible } }
-  | { "remove-marked-accessible": { node: Accessible } }
-  | { "add-marked-inaccessible": { node: Accessible } }
-  | { "remove-marked-inaccessible": { node: Accessible } }
   | { "set-ignore-productivity": { ignore: boolean } }
   | { "set-recipe-productivity": { productivity: RecipeProductivity } }
   | { "remove-recipe-productivity": { recipe: string } }
@@ -417,16 +413,12 @@ export interface RecipeProductivity {
 
 export interface ProjectSettings {
   time_scale: TimeScale;
-  /** 里程碑（可达性节点级；unlocked=false 的节点剪枝）。 */
+  /** 里程碑（可达性节点级；unlocked 是强制覆盖——false 强制不可达并阻断依赖，true 强制可达）。 */
   milestones: Milestone[];
   recipe_productivity: RecipeProductivity[];
   ignore_productivity: boolean;
   mining_productivity: number;
   all_accessible: boolean;
-  /** 用户显式标记可达的对象（并入根种子；即使无来源也可达）。 */
-  marked_accessible: Accessible[];
-  /** 用户显式标记不可达的对象（剪枝；阻断依赖它的对象）。 */
-  marked_inaccessible: Accessible[];
   quality_limit: string | null;
 }
 

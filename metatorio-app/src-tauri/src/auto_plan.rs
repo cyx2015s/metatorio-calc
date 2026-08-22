@@ -1576,13 +1576,14 @@ mod tests {
             "科技未解锁时自动规划应失败（steel-plate 配方候选被过滤），实际: {result:?}"
         );
 
-        // 显式标记 tech-steel 可达（并入根种子）→ steel-plate 配方解锁
-        // → 自动规划正常求解。
+        // 强制解锁 tech-steel（里程碑 unlocked=true → 强制可达/解锁）
+        // → steel-plate 配方解锁 → 自动规划正常求解。
         runtime
             .dispatch(AppMessage::Project {
                 project,
-                action: ProjectAction::AddMarkedAccessible {
+                action: ProjectAction::AddMilestone {
                     node: metatorio_core::Accessible::Tech("tech-steel".to_string()),
+                    unlocked: true,
                 },
             })
             .unwrap();
