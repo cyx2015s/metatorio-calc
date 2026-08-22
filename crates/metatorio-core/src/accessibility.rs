@@ -23,7 +23,7 @@ use metatorio_data::types::{Ingredient, Modifier, Product, TriggerEffect};
 use metatorio_data::{
     AsteroidChunkComponent, CraftingMachineComponent, EnemySpawnerComponent, EntityComponent,
     EntityWithHealthComponent, ItemComponent, PlantComponent, RecipeComponent,
-    SpaceLocationComponent, TechnologyComponent,
+    SpaceConnectionComponent, SpaceLocationComponent, TechnologyComponent,
 };
 
 use crate::dual_var::DualVar;
@@ -178,10 +178,12 @@ struct GraphData {
     /// 实体名 → 会产生它的触发实体（反查 death_products）。如星岩碎片
     /// ← 小星岩。
     generated_by: HashMap<String, Vec<String>>,
-    /// 星岩/小行星实体名 → 生成它的空间地点（SpaceLocation 的
-    /// asteroid_spawn_definitions；深空地点如 solar-system-edge /
-    /// shattered-planet）。星岩在该地点可达后才可得。
+    /// 星岩/小行星实体名 → 生成它的空间地点（SpaceLocation 自带星岩：
+    /// 停靠该地点即可得，如深空地带 solar-system-edge / shattered-planet）。
     asteroid_locations: HashMap<String, Vec<Accessible>>,
+    /// 星岩/小行星实体名 → 生成它的空间连接 (from, to)。SpaceConnection 星岩
+    /// 只在飞船**飞行**时沿途生成，需两端地点都可达才飞得过去。
+    asteroid_connections: HashMap<String, Vec<(String, String)>>,
 }
 
 /// 资源实体/星球流体名 → 生成它的星球列表。
@@ -463,6 +465,23 @@ fn build_graph(store: &PrototypeStore) -> GraphData {
                 .push(Accessible::Space(record.name.clone()));
         }
     }
+    // 星岩的空间连接生成：SpaceConnection.asteroid_spawn_definitions。
+    // 该星岩只在飞船飞行沿途生成，需两端地点都可达（导航通过）。
+    let mut asteroid_connections: HashMap<String, Vec<(String, String)>> = HashMap::new();
+    for record in store.group(PrototypeGroup::SpaceConnection) {
+        let Some(connection) = record.component::<SpaceConnectionComponent>() else {
+            continue;
+        };
+        for definition in &connection.asteroid_spawn_definitions {
+            let Some(asteroid) = &definition.asteroid else {
+                continue;
+            };
+            asteroid_connections
+                .entry(asteroid.clone())
+                .or_default()
+                .push((connection.from.clone(), connection.to.clone()));
+        }
+    }
 
     GraphData {
         recipes_by_product,
@@ -475,6 +494,17 @@ fn build_graph(store: &PrototypeStore) -> GraphData {
         death_products,
         generated_by,
         asteroid_locations,
+        asteroid_connections,
+    }
+}
+
+/// 空间地点名 → 可达性节点：星球（planet，planet 是 space-location 子类）
+/// 归 Planet 组（planet-discovery 科技）；深空地点 → Space（unlock 科技）。
+fn space_node(store: &PrototypeStore, name: &str) -> Accessible {
+    if store.get(PrototypeGroup::Planet, name).is_some() {
+        Accessible::Planet(name.to_string())
+    } else {
+        Accessible::Space(name.to_string())
     }
 }
 
@@ -619,6 +649,15 @@ fn requirements(store: &PrototypeStore, graph: &GraphData, node: &Accessible) ->
                         .iter()
                         .map(|loc| Requirement::Node(loc.clone())),
                 );
+            }
+            if let Some(connections) = graph.asteroid_connections.get(name) {
+                for (from, to) in connections {
+                    // space-connection 星岩：飞船飞行沿途生成，需两端地点都可达。
+                    sources.push(Requirement::All(vec![
+                        Requirement::Node(space_node(store, from)),
+                        Requirement::Node(space_node(store, to)),
+                    ]));
+                }
             }
             if let Some(parents) = graph.generated_by.get(name) {
                 sources.extend(
