@@ -978,6 +978,66 @@ pub enum TechnologyTrigger {
     Other,
 }
 
+/// 触发效果（TriggerEffect union）——只保留影响**生产/可达性**的变体。
+///
+/// Factorio 2.1 的 TriggerEffect 有约 25 个变体，绝大多数是纯视觉/音效
+/// （爆炸、火、烟、粒子、声音、推送、脚本……），不承载生产或可达性信息，
+/// 统一吸收到 [`TriggerEffect::Other`]。只关心会**生成资源/实体**的两类：
+/// - `create-asteroid-chunk`：生成小一号星岩（大星岩死亡/被击杀后产生，
+///   星岩收集器采集 → promethium 等科技瓶的来源链）；
+/// - `create-entity`：生成实体（如 metallic-asteroid-explosion 等）。
+///
+/// serde 按 `type` 判别（kebab-case），未知/不关心的变体落入 `Other`；
+/// 各变体只保留关键字段（生成的实体名），其余字段被忽略。
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+pub enum TriggerEffect {
+    /// 生成小一号星岩：`asteroid_name` 指向生成的星岩实体。
+    CreateAsteroidChunk {
+        asteroid_name: Option<String>,
+    },
+    /// 生成实体：`entity_name` 指向生成的实体。
+    CreateEntity {
+        entity_name: Option<String>,
+    },
+    /// 其他不影响生产/可达性的变体（爆炸/火/烟/粒子/声音/伤害等）。
+    #[serde(other)]
+    Other,
+}
+
+/// 宽松的 TriggerEffect 列表。
+///
+/// Factorio 的 `dying_trigger_effect` / `damaged_trigger_effect` / `trigger_effect`
+/// 等在 dump 中**单/数组混用**（schema 却统一标为单个 TriggerEffect），统一
+/// 反序列化为 `Vec<TriggerEffect>`：
+/// - 单个对象（`{type,...}`）→ `[该对象]`；
+/// - 数组 → 逐元素（忽略无法解析的元素）；
+/// - 空（`null` / 缺失 / 空数组）→ 空列表。
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
+pub struct TriggerEffects(pub Vec<TriggerEffect>);
+
+impl<'de> serde::Deserialize<'de> for TriggerEffects {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value: serde_json::Value = serde::Deserialize::deserialize(deserializer)?;
+        let effects = match value {
+            serde_json::Value::Null => Vec::new(),
+            serde_json::Value::Array(items) => items
+                .into_iter()
+                .filter_map(|item| serde_json::from_value::<TriggerEffect>(item).ok())
+                .collect(),
+            other => {
+                serde_json::from_value::<TriggerEffect>(other)
+                    .map(|effect| vec![effect])
+                    .unwrap_or_default()
+            }
+        };
+        Ok(TriggerEffects(effects))
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum Modifier {

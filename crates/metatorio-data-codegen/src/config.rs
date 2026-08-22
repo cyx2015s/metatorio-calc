@@ -1073,6 +1073,11 @@ impl Default for Config {
                 map_type!("ItemIngredientPrototype", "crate::types::ItemIngredient"),
                 map_type!("TechnologyTrigger", "crate::types::TechnologyTrigger"),
                 map_type!("Modifier", "crate::types::Modifier"),
+                // TriggerEffect union：手写枚举只保留生成资源/实体的变体
+                // （create-asteroid-chunk → 小星岩、create-entity），其余吸收
+                // 到 Other。字段由宽松的 TriggerEffects 承载（单/数组/空皆可，
+                // Factorio 的 trigger_effect 各字段在 dump 中单/数组混用）。
+                map_type!("TriggerEffect", "crate::types::TriggerEffects"),
                 map_type!("EffectValueRange", "crate::types::EffectValueRangeOpt"),
                 map_type!("Effect", "crate::types::Effect"),
             ],

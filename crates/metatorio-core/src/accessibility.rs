@@ -19,7 +19,7 @@
 use std::collections::{HashMap, VecDeque};
 
 use metatorio_data::store::{PrototypeGroup, PrototypeStore};
-use metatorio_data::types::{Ingredient, Modifier, Product};
+use metatorio_data::types::{Ingredient, Modifier, Product, TriggerEffect};
 use metatorio_data::{
     AsteroidChunkComponent, CraftingMachineComponent, EnemySpawnerComponent, EntityComponent,
     EntityWithHealthComponent, ItemComponent, PlantComponent, RecipeComponent, TechnologyComponent,
@@ -171,6 +171,12 @@ struct GraphData {
     /// seed_available_on_planet）。星球解锁（planet-discovery-<p> 科技可达，
     /// nauvis 恒解锁）后该资源可自由移动到任何星球 → 根。
     resource_planets: HashMap<String, Vec<String>>,
+    /// 实体名 → 死亡触发生成的实体名（`dying_trigger_effect` 的
+    /// create-asteroid-chunk / create-entity）。如小星岩死亡 → 星岩碎片。
+    death_products: HashMap<String, Vec<String>>,
+    /// 实体名 → 会产生它的触发实体（反查 death_products）。如星岩碎片
+    /// ← 小星岩。
+    generated_by: HashMap<String, Vec<String>>,
 }
 
 /// 资源实体/星球流体名 → 生成它的星球列表。
@@ -343,6 +349,33 @@ fn build_graph(store: &PrototypeStore) -> GraphData {
                 .push(record.name.clone());
         }
     }
+    // 太空小行星（asteroid-chunk，AsteroidChunk 组）：星岩收集器在空间平台
+    // 采集 chunk 实体 → 同名物品（minable.result/results）。收集该来源，
+    // 使星岩物品（如 promethium-asteroid-chunk）可达 ⟸ 星岩实体可达。
+    for record in store.group(PrototypeGroup::AsteroidChunk) {
+        let Some(chunk) = record.component::<AsteroidChunkComponent>() else {
+            continue;
+        };
+        let Some(minable) = &chunk.minable else {
+            continue;
+        };
+        let mut products: Vec<String> = Vec::new();
+        if let Some(result) = &minable.result {
+            products.push(result.clone());
+        }
+        for product in &minable.results {
+            match product {
+                Product::Item(item) => products.push(item.name.clone()),
+                Product::Fluid(fluid) => products.push(fluid.name.clone()),
+            }
+        }
+        for name in products {
+            resources_by_product
+                .entry(name)
+                .or_default()
+                .push(record.name.clone());
+        }
+    }
     for record in store.group(PrototypeGroup::Technology) {
         let Some(tech) = record.component::<TechnologyComponent>() else {
             continue;
@@ -376,6 +409,35 @@ fn build_graph(store: &PrototypeStore) -> GraphData {
                 .push(record.name.clone());
         }
     }
+    // 死亡触发效果：`dying_trigger_effect` 中 create-asteroid-chunk /
+    // create-entity 生成的实体。小星岩死亡 → 小一号星岩碎片（碎片链）。
+    let mut death_products: HashMap<String, Vec<String>> = HashMap::new();
+    let mut generated_by: HashMap<String, Vec<String>> = HashMap::new();
+    for record in store.group(PrototypeGroup::Entity) {
+        let Some(health) = record.component::<EntityWithHealthComponent>() else {
+            continue;
+        };
+        let Some(effects) = &health.dying_trigger_effect else {
+            continue;
+        };
+        for effect in &effects.0 {
+            let generated = match effect {
+                TriggerEffect::CreateAsteroidChunk { asteroid_name } => asteroid_name.clone(),
+                TriggerEffect::CreateEntity { entity_name } => entity_name.clone(),
+                _ => None,
+            };
+            if let Some(generated) = generated {
+                death_products
+                    .entry(record.name.clone())
+                    .or_default()
+                    .push(generated.clone());
+                generated_by
+                    .entry(generated)
+                    .or_default()
+                    .push(record.name.clone());
+            }
+        }
+    }
 
     GraphData {
         recipes_by_product,
@@ -385,6 +447,8 @@ fn build_graph(store: &PrototypeStore) -> GraphData {
         techs_by_unlock,
         machines_by_category,
         resource_planets: build_resource_planets(store),
+        death_products,
+        generated_by,
     }
 }
 
@@ -519,6 +583,20 @@ fn requirements(store: &PrototypeStore, graph: &GraphData, node: &Accessible) ->
             Requirement::Any(any)
         }
         Accessible::Entity(name) => {
+            // 死亡生成产物：实体由某个触发实体的 dying_trigger_effect 生成
+            // （如小行星死亡 → 小一号星岩碎片）。碎片可达 ⟸ 生成它的实体可达。
+            if let Some(parents) = graph.generated_by.get(name) {
+                return Requirement::Any(
+                    parents
+                        .iter()
+                        .map(|parent| Requirement::Node(Accessible::Entity(parent.clone())))
+                        .collect(),
+                );
+            }
+            // 死亡生成星岩/实体的**源头**（如小星岩）：太空中自动生成 → 根。
+            if graph.death_products.contains_key(name) {
+                return Requirement::All(Vec::new());
+            }
             let record = store.get(PrototypeGroup::Entity, name);
             if record
                 .and_then(|r| r.component::<AsteroidChunkComponent>())
@@ -612,6 +690,7 @@ fn collect_nodes(store: &PrototypeStore) -> Vec<Accessible> {
         PrototypeGroup::Technology,
         PrototypeGroup::Recipe,
         PrototypeGroup::Entity,
+        PrototypeGroup::AsteroidChunk,
         PrototypeGroup::Quality,
         PrototypeGroup::SpaceLocation,
         PrototypeGroup::Planet,
@@ -620,7 +699,9 @@ fn collect_nodes(store: &PrototypeStore) -> Vec<Accessible> {
             let node = match group {
                 PrototypeGroup::Technology => Accessible::Tech(record.name.clone()),
                 PrototypeGroup::Recipe => Accessible::Recipe(record.name.clone()),
-                PrototypeGroup::Entity => Accessible::Entity(record.name.clone()),
+                PrototypeGroup::Entity | PrototypeGroup::AsteroidChunk => {
+                    Accessible::Entity(record.name.clone())
+                }
                 PrototypeGroup::Quality => Accessible::Quality(record.name.clone()),
                 PrototypeGroup::SpaceLocation => Accessible::Space(record.name.clone()),
                 PrototypeGroup::Planet => Accessible::Planet(record.name.clone()),
@@ -1008,9 +1089,6 @@ mod tests {
         };
         let result = compute_accessibility(&store, &AccessibilityOptions::default());
 
-        // promethium-science-pack 暂缺：依赖太空小行星（promethium-asteroid-chunk），
-        // 其生成链是"大星岩 dying_trigger_effect 生成小星岩 → 星岩收集器采集"，
-        // 需要解析 TriggerEffect 复杂 union（create-asteroid-chunk 等）——后续再做。
         let packs = [
             "automation-science-pack",
             "logistic-science-pack",
@@ -1023,6 +1101,7 @@ mod tests {
             "electromagnetic-science-pack",
             "agricultural-science-pack",
             "cryogenic-science-pack",
+            "promethium-science-pack",
         ];
         let mut all_ok = true;
         for pack in packs {
