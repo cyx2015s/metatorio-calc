@@ -130,7 +130,12 @@
   $effect(() => {
     if (respectAccessibility && !runtime.allAccessible) {
       runtime.ensureAccessibility().then((nodes) => {
-        accessibleKeys = new Set(nodes.map((node) => `${accessibleKind(node)}/${accessibleName(node)}`));
+        accessibleKeys =
+          nodes == null
+            ? null
+            : new Set(
+                nodes.map((node) => `${accessibleKind(node)}/${accessibleName(node)}`),
+              );
       });
     } else {
       accessibleKeys = null;

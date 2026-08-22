@@ -155,20 +155,21 @@ class RuntimeStore {
   // ── 可达性（选择器过滤） ────────────────────────────────────────
 
   /**
-   * 确保当前选中项目的可达性快照已拉取；返回可达对象集合
-   * （未绑定上下文等失败时返回空数组——选择器不做可达性过滤）。
+   * 确保当前选中项目的可达性快照已拉取；返回可达对象集合。
+   * 无选中项目 / 未绑定上下文 / 拉取失败时返回 `null`（表示"不可用，
+   * 不做可达性过滤"），避免把全部条目标记为不可达而误滤。
    */
-  async ensureAccessibility(): Promise<Accessible[]> {
+  async ensureAccessibility(): Promise<Accessible[] | null> {
     if (this.accessibility != null) return this.accessibility;
     const project = this.ui?.selected_project;
-    if (project == null) return [];
+    if (project == null) return null;
     try {
       const nodes = await accessibility(project);
       this.accessibility = nodes;
       return nodes;
     } catch {
-      this.accessibility = [];
-      return [];
+      this.accessibility = null;
+      return null;
     }
   }
 

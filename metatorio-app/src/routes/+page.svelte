@@ -1454,7 +1454,12 @@
             <div class="prefs-list">
               {#each project.settings.milestones as milestone, i (i)}
                 <div class="prefs-item">
-                  <HoverIcon type={accessibleKind(milestone.node)} name={accessibleName(milestone.node)} size={22} />
+                  <HoverIcon
+                    type={accessibleKind(milestone.node)}
+                    name={accessibleName(milestone.node)}
+                    size={22}
+                    detailKind={accessibleKind(milestone.node)}
+                  />
                   <span class="prefs-name">
                     {runtime.localizedName(accessibleKind(milestone.node), accessibleName(milestone.node))}
                   </span>
@@ -1501,7 +1506,12 @@
             <div class="prefs-list">
               {#each project.settings.marked_accessible as node, i (i)}
                 <div class="prefs-item">
-                  <HoverIcon type={accessibleKind(node)} name={accessibleName(node)} size={22} />
+                  <HoverIcon
+                    type={accessibleKind(node)}
+                    name={accessibleName(node)}
+                    size={22}
+                    detailKind={accessibleKind(node)}
+                  />
                   <span class="prefs-name">
                     {runtime.localizedName(accessibleKind(node), accessibleName(node))}
                   </span>
@@ -1536,7 +1546,12 @@
             <div class="prefs-list">
               {#each project.settings.marked_inaccessible as node, i (i)}
                 <div class="prefs-item">
-                  <HoverIcon type={accessibleKind(node)} name={accessibleName(node)} size={22} />
+                  <HoverIcon
+                    type={accessibleKind(node)}
+                    name={accessibleName(node)}
+                    size={22}
+                    detailKind={accessibleKind(node)}
+                  />
                   <span class="prefs-name">
                     {runtime.localizedName(accessibleKind(node), accessibleName(node))}
                   </span>
