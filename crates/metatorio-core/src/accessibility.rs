@@ -21,9 +21,9 @@ use std::collections::{HashMap, VecDeque};
 use metatorio_data::store::{PrototypeGroup, PrototypeStore};
 use metatorio_data::types::{Ingredient, Modifier, Product, TriggerEffect};
 use metatorio_data::{
-    AsteroidChunkComponent, CraftingMachineComponent, EnemySpawnerComponent, EntityComponent,
-    EntityWithHealthComponent, ItemComponent, PlantComponent, PrototypeBaseComponent,
-    RecipeComponent, SpaceConnectionComponent, SpaceLocationComponent, TechnologyComponent,
+    AsteroidChunkComponent, EnemySpawnerComponent, EntityComponent, EntityWithHealthComponent,
+    ItemComponent, PlantComponent, PrototypeBaseComponent, RecipeComponent,
+    SpaceConnectionComponent, SpaceLocationComponent, TechnologyComponent,
 };
 
 use crate::dual_var::DualVar;
@@ -166,8 +166,6 @@ struct GraphData {
     items_by_place_result: HashMap<String, Vec<String>>,
     /// 配方/品质/空间名 → 解锁它的科技名（UnlockRecipe/UnlockQuality/UnlockSpaceLocation）。
     techs_by_unlock: HashMap<String, Vec<String>>,
-    /// 配方类别 → 能做的机器实体名。
-    machines_by_category: HashMap<String, Vec<String>>,
     /// 资源实体/星球流体名 → 生成它的星球列表（planet_autoplaced_flows +
     /// seed_available_on_planet）。星球解锁（planet-discovery-<p> 科技可达，
     /// nauvis 恒解锁）后该资源可自由移动到任何星球 → 根。
@@ -291,7 +289,6 @@ fn build_graph(store: &PrototypeStore) -> GraphData {
     let mut spoil_sources: HashMap<String, Vec<String>> = HashMap::new();
     let mut items_by_place_result: HashMap<String, Vec<String>> = HashMap::new();
     let mut techs_by_unlock: HashMap<String, Vec<String>> = HashMap::new();
-    let mut machines_by_category: HashMap<String, Vec<String>> = HashMap::new();
 
     for record in store.group(PrototypeGroup::Item) {
         if let Some(item) = record.component::<ItemComponent>() {
@@ -401,17 +398,6 @@ fn build_graph(store: &PrototypeStore) -> GraphData {
             }
         }
     }
-    for record in store.group(PrototypeGroup::Entity) {
-        let Some(machine) = record.component::<CraftingMachineComponent>() else {
-            continue;
-        };
-        for category in &machine.crafting_categories {
-            machines_by_category
-                .entry(category.clone())
-                .or_default()
-                .push(record.name.clone());
-        }
-    }
     // 死亡触发效果：`dying_trigger_effect` 中 create-asteroid-chunk /
     // create-entity 生成的实体。小星岩死亡 → 小一号星岩碎片（碎片链）。
     // 只保留反查表 generated_by（实体 → 生成它的触发实体）。
@@ -481,7 +467,6 @@ fn build_graph(store: &PrototypeStore) -> GraphData {
         spoil_sources,
         items_by_place_result,
         techs_by_unlock,
-        machines_by_category,
         resource_planets: build_resource_planets(store),
         generated_by,
         asteroid_locations,
@@ -496,16 +481,6 @@ fn space_node(store: &PrototypeStore, name: &str) -> Accessible {
         Accessible::Planet(name.to_string())
     } else {
         Accessible::Space(name.to_string())
-    }
-}
-
-/// 配方实际生效的类别（空 → `["crafting"]`，与自动规划一致）。
-fn recipe_categories(recipe: &RecipeComponent) -> Vec<String> {
-    let categories = recipe.categories.clone().unwrap_or_default();
-    if categories.is_empty() {
-        vec!["crafting".to_string()]
-    } else {
-        categories
     }
 }
 
@@ -553,24 +528,9 @@ fn requirements(store: &PrototypeStore, graph: &GraphData, node: &Accessible) ->
                             }
                         }
                     }
-                    // 至少一台能做的机器可达（Entity 可达 = 同名可放置 Item 可达）。
-                    // crafting 类配方玩家可手工制造（character 手工 = 根可达），
-                    // 打破"机器需要机器"的死锁（如 stone-furnace 需 assembling-machine）。
-                    let mut machines: Vec<Requirement> = recipe_categories(recipe)
-                        .iter()
-                        .flat_map(|category| graph.machines_by_category.get(category))
-                        .flatten()
-                        .map(|machine| Requirement::Node(Accessible::Entity(machine.clone())))
-                        .collect();
-                    if recipe_categories(recipe)
-                        .iter()
-                        .any(|category| category == "crafting")
-                    {
-                        machines.push(Requirement::Node(Accessible::Entity(
-                            "character".to_string(),
-                        )));
-                    }
-                    all.push(Requirement::Any(machines));
+                    // 机器依赖：配方出现即视为有对应组装机（合理 mod 设计）——
+                    // 不再要求机器可达。自动规划在枚举时会处理"无解锁机器则选
+                    // 评分最低的 1 台"。
                     // 至少一个解锁科技可达
                     let unlocks = graph
                         .techs_by_unlock

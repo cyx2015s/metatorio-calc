@@ -631,6 +631,10 @@ export interface IndexEntry {
   module_slots: number | null;
   /** 兼容性类别：machine→crafting_categories、recipe→categories、mining-machine→resource_categories、resource→category。 */
   categories: string[];
+  /** 物品燃料类别（非燃料物品为空串）。 */
+  fuel_category: string;
+  /** 物品/流体燃料热值（焦耳；非燃料为 null）。 */
+  fuel_value_j: number | null;
 }
 
 export interface CatalogIndex {
@@ -687,6 +691,8 @@ export interface PrototypeDetail {
   plant_result: string;
   /** 是否可火箭发射。 */
   launchable: boolean;
+  /** 火箭发射产物物品名列表（如 satellite）。 */
+  rocket_launch_products: string[];
   category: string | null;
   categories: string[];
   energy_required: number | null;
@@ -704,6 +710,8 @@ export interface PrototypeDetail {
   energy_usage_j: number | null;
   /** 机器能量源类型（electric/burner/fluid/heat/void）；burner 才显示燃料配置。 */
   machine_energy_source: string | null;
+  /** burner 机器可接受的燃料类别（electric/fluid 为空）。 */
+  burner_fuel_categories: string[];
   // generator / boiler / reactor
   /** 发电效率。 */
   effectivity: number | null;

@@ -130,6 +130,10 @@ pub struct IndexEntry {
     /// 兼容性类别：machine→crafting_categories、recipe→categories、
     /// mining-machine→resource_categories、resource→category。
     pub categories: Vec<String>,
+    /// 物品燃料类别（非燃料物品为空串）；供前端燃料选择筛选。
+    pub fuel_category: String,
+    /// 物品/流体燃料热值（焦耳；非燃料为 null）；供前端燃料选择筛选。
+    pub fuel_value_j: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -189,6 +193,8 @@ pub struct PrototypeDetail {
     pub plant_result: String,
     /// 是否可火箭发射。
     pub launchable: bool,
+    /// 火箭发射产物物品名列表（`rocket_launch_products`，如 satellite）。
+    pub rocket_launch_products: Vec<String>,
     // recipe
     pub category: Option<String>,
     pub categories: Vec<String>,
@@ -209,6 +215,8 @@ pub struct PrototypeDetail {
     /// 机器能量源类型（electric/burner/fluid/heat/void）。前端据此判断
     /// 是否显示燃料配置（burner 机器需要物品燃料，electric 等不需要）。
     pub machine_energy_source: Option<String>,
+    /// burner 机器可接受的燃料类别（electric/fluid 为空）；燃料选择筛选用。
+    pub burner_fuel_categories: Vec<String>,
     // generator / boiler / reactor
     /// 发电效率。
     pub effectivity: Option<f64>,
@@ -1646,6 +1654,29 @@ fn item_tags(store: &PrototypeStore, name: &str) -> Vec<String> {
     tags
 }
 
+/// 物品燃料信息（燃料类别 + 热值；非燃料 → 空/None）。
+fn item_fuel_info(store: &PrototypeStore, name: &str) -> (String, Option<f64>) {
+    let Some(item) = store
+        .get(PrototypeGroup::Item, name)
+        .and_then(|record| record.component::<ItemComponent>())
+    else {
+        return (String::new(), None);
+    };
+    (item.fuel_category.clone(), item.fuel_value.map(|v| v.amount))
+}
+
+/// 流体燃料信息（热值 >0 才有；类别为空——流体按热值视为燃料）。
+fn fluid_fuel_info(store: &PrototypeStore, name: &str) -> (String, Option<f64>) {
+    let Some(fluid) = store
+        .get(PrototypeGroup::Fluid, name)
+        .and_then(|record| record.component::<FluidComponent>())
+    else {
+        return (String::new(), None);
+    };
+    let value = fluid.fuel_value().amount;
+    (String::new(), if value > 0.0 { Some(value) } else { None })
+}
+
 /// 流体的机制标签：fluid-fuel（有热值可燃烧）/ fluid-heat（有比热容可提热）。
 fn fluid_tags(store: &PrototypeStore, name: &str) -> Vec<String> {
     let Some(record) = store.get(PrototypeGroup::Fluid, name) else {
@@ -1696,6 +1727,13 @@ fn catalog_index_from_store(store: &PrototypeStore, locale: &HashMap<String, Str
                     } else {
                         Vec::new()
                     };
+                    let (fuel_category, fuel_value_j) = if kind == "item" {
+                        item_fuel_info(store, name)
+                    } else if kind == "fluid" {
+                        fluid_fuel_info(store, name)
+                    } else {
+                        (String::new(), None)
+                    };
                     out.push(IndexEntry {
                         kind: kind.to_string(),
                         name: name.clone(),
@@ -1705,6 +1743,8 @@ fn catalog_index_from_store(store: &PrototypeStore, locale: &HashMap<String, Str
                         icon_type: icon_type.to_string(),
                         module_slots: None,
                         categories,
+                        fuel_category,
+                        fuel_value_j,
                     });
                 }
             }
@@ -1767,6 +1807,8 @@ fn catalog_index_from_store(store: &PrototypeStore, locale: &HashMap<String, Str
                         icon_type: "entity".to_string(),
                         module_slots: slots,
                         categories,
+                        fuel_category: String::new(),
+                        fuel_value_j: None,
                     });
                 }
             }
@@ -1797,6 +1839,8 @@ fn catalog_index_from_store(store: &PrototypeStore, locale: &HashMap<String, Str
                         } else {
                             vec![module.category.clone()]
                         },
+                        fuel_category: String::new(),
+                        fuel_value_j: None,
                     });
                 }
             }
@@ -1827,6 +1871,8 @@ fn catalog_index_from_store(store: &PrototypeStore, locale: &HashMap<String, Str
                         icon_type: "entity".to_string(),
                         module_slots: None,
                         categories,
+                        fuel_category: String::new(),
+                        fuel_value_j: None,
                     });
                 }
             }
@@ -1844,6 +1890,8 @@ fn catalog_index_from_store(store: &PrototypeStore, locale: &HashMap<String, Str
             icon_type: "quality".to_string(),
             module_slots: None,
             categories: Vec::new(),
+            fuel_category: String::new(),
+            fuel_value_j: None,
         });
     }
 
@@ -1900,6 +1948,11 @@ fn prototype_detail(
         detail.spoil_ticks = item.spoil_ticks;
         detail.plant_result = item.plant_result.clone().unwrap_or_default();
         detail.launchable = !item.rocket_launch_products.is_empty();
+        detail.rocket_launch_products = item
+            .rocket_launch_products
+            .iter()
+            .map(|product| product.name.clone())
+            .collect();
     }
     if let Some(recipe) = record.component::<RecipeComponent>() {
         detail.categories = effective_recipe_categories(recipe);
@@ -1933,6 +1986,12 @@ fn prototype_detail(
             }
             .to_string(),
         );
+        detail.burner_fuel_categories = match &machine.energy_source {
+            metatorio_data::types::EnergySource::Burner(burner) => {
+                burner.fuel_categories.clone()
+            }
+            _ => Vec::new(),
+        };
     }
     if let Some(drill) = record.component::<MiningDrillComponent>() {
         detail.categories = drill.resource_categories.clone();

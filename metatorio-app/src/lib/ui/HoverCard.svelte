@@ -217,7 +217,23 @@
         </div>
       {/if}
       {#if detail.launchable}
-        <div class="hc-row"><span>发射</span><strong>可火箭发射</strong></div>
+        {#if detail.rocket_launch_products.length > 0}
+          <div class="hc-flow">
+            <span class="hc-label">发射产物</span>
+            <div class="hc-flows">
+              {#each detail.rocket_launch_products as name (name)}
+                <span class="hc-flow-item" title={name}>
+                  <Icon type="item" name={name} size={20} />
+                  <span class="hc-flow-copy">
+                    <span class="hc-flow-name">{runtime.localizedName("item", name)}</span>
+                  </span>
+                </span>
+              {/each}
+            </div>
+          </div>
+        {:else}
+          <div class="hc-row"><span>发射</span><strong>可火箭发射</strong></div>
+        {/if}
       {/if}
       {#if detail.category}
         <div class="hc-row"><span>类别</span><strong>{detail.category}</strong></div>

@@ -406,7 +406,8 @@ fn enumerate_recipes(
                     .unwrap_or(0.0)
             },
         );
-        for machine in machines {
+        let mut kept_any = false;
+        for machine in &machines {
             let machine_name = &machine.id;
             let Some(machine_record) = store.get(PrototypeGroup::Entity, machine_name) else {
                 continue;
@@ -482,6 +483,21 @@ fn enumerate_recipes(
                     });
                     push_with_beacons(out, base, modules, beacons);
                 }
+            }
+            kept_any = true;
+        }
+        // 无满足条件/解锁的机器（全被表面/可达性过滤）：退化为评分最低的一台——
+        // 配方出现即视为有对应组装机（mod 合理设计），不管替代数量设置与可达性。
+        if !kept_any {
+            if let Some(machine) = machines.last() {
+                let base = Mechanic::Recipe(metatorio_core::RecipeMechanic {
+                    recipe: IdWithQuality::new(record.name.clone(), quality_name(ctx, 0)),
+                    machine: machine.clone(),
+                    module_config: ModuleConfig::default(),
+                    fuel: None,
+                    fuel_temperature: None,
+                });
+                push_with_beacons(out, base, Vec::new(), beacons);
             }
         }
     }

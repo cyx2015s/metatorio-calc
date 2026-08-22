@@ -124,6 +124,8 @@
     initialTab?: string;
     initialName?: string;
     initialQuality?: string;
+    /** 精确名称过滤（如燃料选择：只允许匹配机器燃料类别且有热值的物品）。 */
+    allowedNames?: string[];
     onSelectFlow: (flow: import("$lib/runtime/types").DualVar) => void;
   } | null>(null);
 
@@ -926,10 +928,36 @@
     return detail?.fluid_filter ? [detail.fluid_filter] : [];
   }
 
-  /** 指定机制燃料：流选择器（物品/流体页签）→ SetFuel。 */
-  function pickFuel(mechanic: MechanicId) {
+  /** 指定机制燃料：流选择器（物品/流体页签）→ SetFuel。
+   *  物品页签只显示"燃料类别匹配机器 + 有热值"的燃料。 */
+  async function pickFuel(mechanic: MechanicId) {
+    const entry = mechanics.find((candidate) => candidate.id === mechanic);
+    const machineId = entry?.mechanic.machine?.id;
+    let allowedNames: string[] | undefined;
+    let initialTab: string | undefined;
+    if (machineId) {
+      const isMining = entry != null && "resource" in entry.mechanic;
+      const machineKind: import("$lib/runtime/types").CatalogKind = isMining
+        ? "mining-machine"
+        : "machine";
+      const detail = await runtime.getDetail(machineKind, machineId);
+      const categories = detail?.burner_fuel_categories ?? [];
+      // 只允许物品燃料：有热值（fuel_value_j>0），且（机器无类别限制 或 类别匹配）。
+      allowedNames = (runtime.catalogIndex?.entries ?? [])
+        .filter(
+          (entry) =>
+            entry.kind === "item" &&
+            entry.fuel_value_j != null &&
+            entry.fuel_value_j > 0 &&
+            (categories.length === 0 || categories.includes(entry.fuel_category)),
+        )
+        .map((entry) => entry.name);
+      initialTab = "item";
+    }
     flowSelector = {
       title: "选择燃料",
+      initialTab,
+      allowedNames,
       onSelectFlow: (flow) => {
         const item = itemOf(flow);
         const name = item
@@ -2004,6 +2032,7 @@
     initialTab={flowSelector.initialTab}
     initialName={flowSelector.initialName}
     initialQuality={flowSelector.initialQuality}
+    allowedNames={flowSelector.allowedNames}
     onSelectFlow={flowSelector.onSelectFlow}
     onClose={() => (flowSelector = null)}
   />
