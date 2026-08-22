@@ -237,8 +237,7 @@ export type BoilerMechanicAction =
   | { "set-fluid": { fluid: string } }
   | { "set-temperature": { temperature: number | null } }
   | { "set-fuel": { fuel: string | null } }
-  | { "set-fuel-temperature": { temperature: number | null } }
-  | { "set-mode": { mode: "heat-fluid-inside" | "output-to-separate-pipe" | null } };
+  | { "set-fuel-temperature": { temperature: number | null } };
 
 export type ReactorMechanicAction =
   | { "set-reactor": { reactor: IdWithQuality } }
@@ -518,7 +517,6 @@ export interface Mechanic {
   fuel_temperature?: number | null;
   neighbours?: number;
   weight_mode?: boolean;
-  mode?: "heat-fluid-inside" | "output-to-separate-pipe" | null;
   module_config?: ModuleConfig;
   [key: string]: unknown;
 }

@@ -181,7 +181,6 @@ fn boiler_output_mode_converts_fluid() {
             temperature: Some(15),
             fuel: None,
             fuel_temperature: None,
-            mode: None,
         }),
     );
 

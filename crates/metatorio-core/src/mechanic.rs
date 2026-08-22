@@ -353,10 +353,6 @@ pub struct BoilerMechanic {
     pub fuel: Option<String>,
     /// 指定流体燃料温度；None 使用该流体的默认温度。
     pub fuel_temperature: Option<i32>,
-    /// 工作模式覆盖：None = 用锅炉原型自带模式（缺省 HeatFluidInside，
-    /// 只产抽象 FluidHeat 不产蒸汽）；OutputToSeparatePipe 才能把输入流体
-    /// 加热成输出流体（水→蒸汽）。自动规划对两种模式各枚举一个候选。
-    pub mode: Option<metatorio_data::types::BoilerMode>,
 }
 
 /// 反应堆组件。

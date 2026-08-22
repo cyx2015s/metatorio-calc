@@ -394,8 +394,7 @@ pub enum BoilerMechanicAction {
     SetTemperature { temperature: Option<i32> },
     SetFuel { fuel: Option<String> },
     SetFuelTemperature { temperature: Option<i32> },
-    /// 工作模式：None = 使用锅炉原型自带模式。
-    SetMode { mode: Option<metatorio_data::types::BoilerMode> },
+    // SetMode（工作模式）已移除：锅炉 mode 只读，运行/展开时从原型读取。
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

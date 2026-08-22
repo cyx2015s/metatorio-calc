@@ -717,7 +717,6 @@ fn enumerate_energy(
                 temperature: None,
                 fuel: None,
                 fuel_temperature: None,
-                mode: boiler.mode,
             }));
         }
         if let Some(_reactor) = record.component::<ReactorComponent>() {
