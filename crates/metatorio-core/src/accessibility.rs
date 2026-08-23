@@ -530,24 +530,47 @@ fn space_node(store: &PrototypeStore, name: &str) -> Accessible {
 
 /// 里程碑节点按依赖关系**拓扑排序**（依赖在前）。
 ///
-/// 复用可达性依赖图（`requirements` 的 leaves）：节点 A 若依赖节点 B（B 在 A 的
-/// 依赖叶中），则 B 排在 A 前。Kahn 拓扑排序；若存在依赖环（里程碑互相依赖），
-/// 环内节点按原序附加（UI 不崩）。
+/// 不特设任何具体类型/链路——按 `Requirements` **递归展开**实际依赖图：对每个
+/// 里程碑节点，BFS 展开其依赖叶（`item → recipe → 解锁科技 → tech_units 物品 →
+/// …`，visited 去重防环），收集它**传递依赖**的其它里程碑，再 Kahn 排序。
+/// 依赖环内节点按原序附加（UI 不崩）。
 pub fn milestone_order(store: &PrototypeStore, milestones: &[Accessible]) -> Vec<Accessible> {
     let graph = build_graph(store);
-    let set: AIndexSet<Accessible> = milestones.iter().cloned().collect();
 
-    // 有向边：dep（前提）→ dependent；indeg = 该节点依赖的里程碑数。
+    // 依赖图本身存在环：`Any` 节点只需满足其中一支，但闭包会把两支都当作
+    // 依赖，于是同一对里程碑可能互相"依赖"。不过真实的解锁链是**更短**的那
+    // 条（例如 logistic→automation 直接可达，而 automation→logistic 要绕行整
+    // 个星球科技树，路径长得多）。因此对每对里程碑，以最短路径（BFS 跳数）判
+    // 定方向：较短的即为真实依赖，据此有向即可打破环。
+    let dist = milestone_pair_distances(store, &graph, milestones);
+
+    // 有向边：前置 → 后置；indeg = 该节点"必须先满足"的里程碑数（去重）。
     let mut adj: HashMap<Accessible, Vec<Accessible>> = HashMap::new();
     let mut indeg: HashMap<Accessible, usize> = HashMap::new();
-    for node in milestones {
-        indeg.entry(node.clone()).or_insert(0);
-        let mut leaves = Vec::new();
-        requirements(store, &graph, node).leaves(&mut leaves);
-        for leaf in leaves {
-            if set.contains(&leaf) {
-                adj.entry(leaf.clone()).or_default().push(node.clone());
-                *indeg.entry(node.clone()).or_insert(0) += 1;
+    for m in milestones {
+        indeg.entry(m.clone()).or_insert(0);
+    }
+    for a in milestones {
+        for b in milestones {
+            if a == b {
+                continue;
+            }
+            // a 依赖 b（b 更短即真实前置）→ b 排在 a 前。
+            let d_ab = dist.get(a).and_then(|m| m.get(b)).copied().unwrap_or(usize::MAX);
+            let d_ba = dist.get(b).and_then(|m| m.get(a)).copied().unwrap_or(usize::MAX);
+            match d_ab.cmp(&d_ba) {
+                // a→b 更短：a 依赖 b。
+                std::cmp::Ordering::Less => {
+                    adj.entry(b.clone()).or_default().push(a.clone());
+                    *indeg.entry(a.clone()).or_insert(0) += 1;
+                }
+                // b→a 更短：b 依赖 a。
+                std::cmp::Ordering::Greater => {
+                    adj.entry(a.clone()).or_default().push(b.clone());
+                    *indeg.entry(b.clone()).or_insert(0) += 1;
+                }
+                // 等距（真 Any 互相或无关）：不建边，维持原序。
+                std::cmp::Ordering::Equal => {}
             }
         }
     }
@@ -572,13 +595,56 @@ pub fn milestone_order(store: &PrototypeStore, milestones: &[Accessible]) -> Vec
             }
         }
     }
-    // 环内剩余节点（仍无入度被清）按原序补在后面。
+    // 残余环（等距互依）按原序补在后面。
     for node in milestones {
         if !out.contains(node) {
             out.push(node.clone());
         }
     }
     out
+}
+
+/// 每对里程碑之间的最短依赖跳数（BFS 于需求闭包上、全节点类型展开）。
+/// `dist[&a][&b]` = 从 a 出发沿需求最少几步可达 b（b 是 a 的（传递）前提）。
+/// BFS 首次到达即最短；不可达则无对应项。
+fn milestone_pair_distances(
+    store: &PrototypeStore,
+    graph: &GraphData,
+    milestones: &[Accessible],
+) -> HashMap<Accessible, HashMap<Accessible, usize>> {
+    let mut result = HashMap::new();
+    for m in milestones {
+        let mut order_index: HashMap<Accessible, usize> = HashMap::new();
+        let mut dist: HashMap<Accessible, usize> = HashMap::new();
+        // BFS 层级：dist[node] = 里程碑 → node 的最小跳数。
+        dist.insert(m.clone(), 0);
+        let mut queue: VecDeque<Accessible> = VecDeque::new();
+        queue.push_back(m.clone());
+        while let Some(node) = queue.pop_front() {
+            let cur = dist[&node];
+            let mut leaves = Vec::new();
+            requirements(store, graph, &node).leaves(&mut leaves);
+            for leaf in leaves {
+                // 只记录首次（最短）到达。
+                if dist.contains_key(&leaf) {
+                    continue;
+                }
+                dist.insert(leaf.clone(), cur + 1);
+                queue.push_back(leaf.clone());
+            }
+        }
+        // 抽取里程碑节点的最短距离。
+        for milestone in milestones {
+            if milestone == m {
+                continue;
+            }
+            if let Some(&d) = dist.get(milestone) {
+                order_index.entry(milestone.clone()).or_insert(d);
+            }
+        }
+        result.insert(m.clone(), order_index);
+    }
+    result
 }
 
 /// 对象 → 依赖声明（按类型 match 分发）。
@@ -1464,6 +1530,35 @@ mod tests {
         assert!(
             inaccessible >= total / 2,
             "禁用 automation-science-pack 后至少一半科技不可达（实际 {inaccessible}/{total}）"
+        );
+    }
+
+    /// 里程碑拓扑排序：科技瓶按依赖序（非字母序）——automation-science-pack
+    /// 依赖最少（无其它科技瓶依赖它），logistics/military 等传递依赖它，应靠后。
+    #[test]
+    fn milestone_order_follows_transitive_dependencies() {
+        let Some(store) = load_real_dump() else {
+            return;
+        };
+        let nodes = [
+            Accessible::Item("logistic-science-pack".to_string()),
+            Accessible::Item("automation-science-pack".to_string()),
+            Accessible::Item("military-science-pack".to_string()),
+        ];
+        let order = milestone_order(&store, &nodes);
+        let pos = |name: &str| {
+            order
+                .iter()
+                .position(|n| n == &Accessible::Item(name.to_string()))
+                .expect("节点应在排序结果中")
+        };
+        assert!(
+            pos("automation-science-pack") < pos("logistic-science-pack"),
+            "automation-science-pack 应排在 logistic-science-pack 前（logistics 依赖它）"
+        );
+        assert!(
+            pos("automation-science-pack") < pos("military-science-pack"),
+            "automation-science-pack 应排在 military-science-pack 前"
         );
     }
 }
