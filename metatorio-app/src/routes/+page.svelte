@@ -1561,7 +1561,7 @@
             </button>
             {#if panels.subMilestones}
             <div class="field">
-              <label>锁定 = 剪枝该节点及其依赖，模拟科技树分支</label>
+              <label>取消勾选 = 禁用，含依赖内容</label>
               <div class="prefs-list">
                 {#each runtime.orderedMilestones ?? project.settings.milestones as milestone, i (i)}
                   <div class="prefs-item">
@@ -1644,55 +1644,37 @@
                       .setIgnoreProductivity((event.currentTarget as HTMLInputElement).checked)
                       .catch(() => {})}
                 />
-                忽略产能加成（丢弃自动推算，仅用用户设定）
+                忽略产能加成
               </label>
             </div>
 
             <div class="field">
-              <label>采矿产出（倍率）</label>
+              <label>采矿产能加成</label>
               <div class="prefs-list">
-                <div class="prefs-item inferred">
-                  <span class="prefs-name">自动推算</span>
-                  <input
-                    class="prod-input"
-                    type="text"
-                    readonly
-                    value={String(runtime.productivityInfo?.auto_mining ?? 0)}
-                  />
-                  <span class="muted badge">推断</span>
-                </div>
-                <div class="prefs-item {project.settings.mining_productivity !== 0 ? "user-specified" : ""}">
-                  <span class="prefs-name">用户覆盖</span>
+                <div class="prefs-item {project.settings.mining_productivity !== 0 ? "user-specified" : "inferred"}">
+                  <span class="prefs-name">采矿</span>
                   <input
                     class="prod-input"
                     type="number"
                     step="0.1"
                     min="0"
-                    value={String(project.settings.mining_productivity)}
+                    value={String(
+                      project.settings.mining_productivity !== 0
+                        ? project.settings.mining_productivity
+                        : (runtime.productivityInfo?.auto_mining ?? 0),
+                    )}
                     onchange={(event) => {
                       const value = Number((event.currentTarget as HTMLInputElement).value);
                       if (Number.isFinite(value)) runtime.setMiningProductivity(value).catch(() => {});
                     }}
                   />
-                  {#if project.settings.mining_productivity !== 0}
-                    <span class="muted badge">用户</span>
-                  {/if}
-                </div>
-                <div class="prefs-item {project.settings.mining_productivity !== 0 ? "user-specified" : "inferred"}">
-                  <span class="prefs-name">最终</span>
-                  <input
-                    class="prod-input"
-                    type="text"
-                    readonly
-                    value={String(runtime.productivityInfo?.mining ?? 0)}
-                  />
-                  <span class="muted badge">用于求解</span>
+                  <span class="muted badge">{project.settings.mining_productivity !== 0 ? "用户" : "推断"}</span>
                 </div>
               </div>
             </div>
 
             <div class="field">
-              <label>配方产能加成（百分数；自动项点击改值即转为用户指定）</label>
+              <label>配方产能加成（%）</label>
               <div class="prefs-list">
                 {#each runtime.productivityInfo?.recipes ?? [] as entry, i (entry.recipe)}
                   <div class="prefs-item {entry.source === "user" ? "user-specified" : "inferred"}">
@@ -1737,7 +1719,7 @@
             </div>
 
             <div class="field">
-              <label>无限科技研究次数（据此推断产能）</label>
+              <label>无限科技研究次数</label>
               <div class="prefs-list">
                 {#each project.settings.infinite_levels as entry (entry.tech)}
                   <div class="prefs-item user-specified">
@@ -3079,6 +3061,7 @@
   .prefs-list {
     display: grid;
     gap: 3px;
+    min-width: 0;
   }
 
   .prefs-item {
@@ -3089,10 +3072,13 @@
     background: var(--card);
     border: 1px solid var(--line);
     border-radius: var(--radius-sm);
+    min-width: 0;
+    overflow: hidden;
   }
 
   .prefs-name {
-    flex: 1;
+    flex: 1 1 auto;
+    min-width: 0;
     overflow: hidden;
     font-size: 11px;
     text-overflow: ellipsis;
@@ -3140,6 +3126,9 @@
     border-radius: calc(var(--radius-sm) - 2px);
     border: 1px solid var(--line);
     white-space: nowrap;
+    max-width: 48px;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .prefs-row {
