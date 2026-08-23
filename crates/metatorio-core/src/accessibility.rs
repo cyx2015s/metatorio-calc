@@ -528,6 +528,59 @@ fn space_node(store: &PrototypeStore, name: &str) -> Accessible {
     }
 }
 
+/// 里程碑节点按依赖关系**拓扑排序**（依赖在前）。
+///
+/// 复用可达性依赖图（`requirements` 的 leaves）：节点 A 若依赖节点 B（B 在 A 的
+/// 依赖叶中），则 B 排在 A 前。Kahn 拓扑排序；若存在依赖环（里程碑互相依赖），
+/// 环内节点按原序附加（UI 不崩）。
+pub fn milestone_order(store: &PrototypeStore, milestones: &[Accessible]) -> Vec<Accessible> {
+    let graph = build_graph(store);
+    let set: AIndexSet<Accessible> = milestones.iter().cloned().collect();
+
+    // 有向边：dep（前提）→ dependent；indeg = 该节点依赖的里程碑数。
+    let mut adj: HashMap<Accessible, Vec<Accessible>> = HashMap::new();
+    let mut indeg: HashMap<Accessible, usize> = HashMap::new();
+    for node in milestones {
+        indeg.entry(node.clone()).or_insert(0);
+        let mut leaves = Vec::new();
+        requirements(store, &graph, node).leaves(&mut leaves);
+        for leaf in leaves {
+            if set.contains(&leaf) {
+                adj.entry(leaf.clone()).or_default().push(node.clone());
+                *indeg.entry(node.clone()).or_insert(0) += 1;
+            }
+        }
+    }
+
+    // Kahn：无里程碑依赖（入度 0）的先出队；按里程碑原序稳定排序保证确定性。
+    let mut queue: VecDeque<Accessible> = milestones
+        .iter()
+        .filter(|node| indeg.get(*node).copied().unwrap_or(0) == 0)
+        .cloned()
+        .collect();
+    let mut out: Vec<Accessible> = Vec::new();
+    while let Some(node) = queue.pop_front() {
+        out.push(node.clone());
+        if let Some(dependents) = adj.get(&node) {
+            for dependent in dependents {
+                if let Some(deg) = indeg.get_mut(dependent) {
+                    *deg = deg.saturating_sub(1);
+                    if *deg == 0 {
+                        queue.push_back(dependent.clone());
+                    }
+                }
+            }
+        }
+    }
+    // 环内剩余节点（仍无入度被清）按原序补在后面。
+    for node in milestones {
+        if !out.contains(node) {
+            out.push(node.clone());
+        }
+    }
+    out
+}
+
 /// 对象 → 依赖声明（按类型 match 分发）。
 fn requirements(store: &PrototypeStore, graph: &GraphData, node: &Accessible) -> Requirement {
     match node {

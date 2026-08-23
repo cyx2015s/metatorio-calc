@@ -30,6 +30,7 @@ import {
   saveProjectAsDialog,
   setActiveContext,
   setDefaultMilestones,
+  milestonesOrdered,
   implicitSources,
 } from "./client";
 import type {
@@ -42,6 +43,7 @@ import type {
   IdWithQuality,
   MechanicId,
   MechanicKind,
+  Milestone,
   ProjectId,
   PrototypeDetail,
   SolveResult,
@@ -123,6 +125,7 @@ class RuntimeStore {
       this.lastError = String(error);
     }
     this.ready = true;
+    this.refreshOrderedMilestones().catch(() => {});
   }
 
   async refresh(): Promise<void> {
@@ -150,6 +153,7 @@ class RuntimeStore {
       this.busy = false;
     }
     this.refreshImplicitSources().catch(() => {});
+    this.refreshOrderedMilestones().catch(() => {});
   }
 
   // ── 可达性（选择器过滤） ────────────────────────────────────────
@@ -554,6 +558,21 @@ class RuntimeStore {
     const project = this.requireProject();
     await setDefaultMilestones(project);
     await this.refresh();
+  }
+
+  /** 里程碑节点按依赖拓扑排序（依赖在前）的当前结果；供里程碑列表按序展示。 */
+  orderedMilestones = $state<Milestone[] | null>(null);
+  async refreshOrderedMilestones(): Promise<void> {
+    const project = this.ui?.selected_project;
+    if (project == null) {
+      this.orderedMilestones = null;
+      return;
+    }
+    try {
+      this.orderedMilestones = await milestonesOrdered(project);
+    } catch {
+      this.orderedMilestones = null;
+    }
   }
 
   async setIgnoreProductivity(ignore: boolean): Promise<void> {

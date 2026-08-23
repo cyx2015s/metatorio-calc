@@ -1548,7 +1548,7 @@
           <div class="field">
             <label>里程碑（锁定 = 剪枝该节点及其依赖，模拟科技树分支）</label>
             <div class="prefs-list">
-              {#each project.settings.milestones as milestone, i (i)}
+              {#each runtime.orderedMilestones ?? project.settings.milestones as milestone, i (i)}
                 <div class="prefs-item">
                   <HoverIcon
                     type={accessibleKind(milestone.node)}

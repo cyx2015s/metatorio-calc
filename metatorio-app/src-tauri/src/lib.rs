@@ -2222,6 +2222,21 @@ fn set_default_milestones(state: State<'_, AppState>, project: ProjectId) -> Res
     Ok(())
 }
 
+/// 里程碑节点按依赖拓扑排序（依赖在前），供 UI 按序展示。
+#[tauri::command]
+fn milestones_ordered(
+    state: State<'_, AppState>,
+    project: ProjectId,
+) -> Result<Vec<metatorio_runtime::Milestone>, String> {
+    let mut runtime = state
+        .runtime
+        .lock()
+        .map_err(|_| "runtime lock poisoned".to_string())?;
+    runtime
+        .ordered_project_milestones(project)
+        .map_err(|error| error.to_string())
+}
+
 // ── Persistence ───────────────────────────────────────────────────
 
 /// OS file dialog for the Factorio executable (game-context loading).
@@ -3064,6 +3079,7 @@ pub fn run() {
             get_ui_state,
             accessibility,
             set_default_milestones,
+            milestones_ordered,
             open_project_dialog,
             save_project_as_dialog,
             save_project,

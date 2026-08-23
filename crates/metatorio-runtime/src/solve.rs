@@ -199,6 +199,32 @@ impl Runtime {
         Ok(result)
     }
 
+    /// 里程碑节点按依赖关系**拓扑排序**（依赖在前），供 UI 按序展示。
+    /// `unlocked` 状态随节点保留；依赖环内的节点按原序附加。
+    pub fn ordered_project_milestones(
+        &mut self,
+        project_id: ProjectId,
+    ) -> Result<Vec<crate::document::Milestone>, RuntimeError> {
+        let store = self.context_store(project_id)?;
+        let settings = &self.state.project(project_id)?.settings;
+        let nodes: Vec<Accessible> = settings.milestones.iter().map(|m| m.node.clone()).collect();
+        let order = metatorio_core::accessibility::milestone_order(store, &nodes);
+        Ok(order
+            .into_iter()
+            .map(|node| {
+                settings
+                    .milestones
+                    .iter()
+                    .find(|m| m.node == node)
+                    .cloned()
+                    .unwrap_or_else(|| crate::document::Milestone {
+                        node,
+                        unlocked: true,
+                    })
+            })
+            .collect())
+    }
+
     /// 默认里程碑：把**科技瓶物品**（出现在实验室 LabComponent.inputs 的
     /// 物品，即 lab 消耗的科技瓶）设为里程碑，unlocked=true。
     ///
