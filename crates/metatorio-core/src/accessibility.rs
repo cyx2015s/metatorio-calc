@@ -450,11 +450,10 @@ fn build_graph(store: &PrototypeStore) -> GraphData {
             }
         }
     }
-    // 星岩/小行星的空间地点生成：SpaceLocation.asteroid_spawn_definitions。
-    // 深空地点（如 solar-system-edge / shattered-planet）生成对应星岩；
-    // 星岩在该地点可达后（Accessible::Space，unlock-space-location 科技）
-    // 才可得。普通星轨（nauvis orbit 等）不在 dump 的 space-location 中，
-    // 其基础星岩没有地点来源 → 走"根"兜底（见 requirements）。
+    // 星岩/小行星的空间地点生成：SpaceLocation / Planet（星球 orbit）的
+    // asteroid_spawn_definitions。深空地点（solar-system-edge / shattered-planet）
+    // 生成对应星岩；星球（nauvis 等，Planet 可达）的 orbit 也生成基础星岩。
+    // 星岩在该地点可达后（Accessible::Space / Accessible::Planet）才可得。
     let mut asteroid_locations: HashMap<String, Vec<Accessible>> = HashMap::new();
     for record in store.group(PrototypeGroup::SpaceLocation) {
         let Some(location) = record.component::<SpaceLocationComponent>() else {
@@ -468,6 +467,23 @@ fn build_graph(store: &PrototypeStore) -> GraphData {
                 .entry(asteroid.clone())
                 .or_default()
                 .push(Accessible::Space(record.name.clone()));
+        }
+    }
+    // 星球 orbit：planet 继承 space-location，其 asteroid_spawn_definitions
+    // 是**星球轨道**的星岩（如 nauvis orbit 初始就有基础星岩）。按星球地点
+    // 推断（Planet 可达，nauvis 恒解锁）。
+    for record in store.group(PrototypeGroup::Planet) {
+        let Some(location) = record.component::<SpaceLocationComponent>() else {
+            continue;
+        };
+        for definition in &location.asteroid_spawn_definitions {
+            let Some(asteroid) = &definition.asteroid else {
+                continue;
+            };
+            asteroid_locations
+                .entry(asteroid.clone())
+                .or_default()
+                .push(Accessible::Planet(record.name.clone()));
         }
     }
     // 星岩的空间连接生成：SpaceConnection.asteroid_spawn_definitions。
@@ -644,15 +660,10 @@ fn requirements(store: &PrototypeStore, graph: &GraphData, node: &Accessible) ->
             Requirement::Any(any)
         }
         Accessible::Entity(name) => {
-            // 星岩碎片（AsteroidChunk 组实体）：空间平台可采集，初始 orbit 天然可得
-            // → 根。不特判名称——只要是星岩碎片就按碎片处理；大星岩（Entity 组）
-            // 才走下面的地点/死亡生成链。
-            if store.get(PrototypeGroup::AsteroidChunk, name).is_some() {
-                return Requirement::All(Vec::new());
-            }
-            // 星岩/小行星（大星岩）：来源 = 空间地点生成（深空地点可控）+ 死亡生成链。
-            // 任一来源满足即可（普通星岩可经死亡链从初始轨道的小星岩递推，
-            // promethium 大星岩需到达生成它的深空地点）。
+            // 星岩/小行星（含星岩碎片 chunk）：来源 = 生成它的空间地点
+            // （SpaceLocation 自带 / SpaceConnection 飞行沿途）+ 死亡 trigger
+            // 产物（大星岩 dying_trigger_effect → create-asteroid-chunk）。
+            // 不从名称或"碎片"特判为根——都按星球地点 / 死亡链推断。
             let mut sources: Vec<Requirement> = Vec::new();
             if let Some(locations) = graph.asteroid_locations.get(name) {
                 sources.extend(locations.iter().map(|loc| Requirement::Node(loc.clone())));
