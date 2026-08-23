@@ -562,6 +562,14 @@ fn enumerate_mining(
                     }
                 }
             }
+            // 采矿机可达性过滤：当前项目科技未解锁的机器不枚举。
+            if let Some(accessibility) = &options.accessibility {
+                if !accessibility.is_accessible(&metatorio_core::Accessible::Entity(
+                    machine_name.clone(),
+                )) {
+                    continue;
+                }
+            }
             let Some(drill) = drill_record.component::<MiningDrillComponent>() else {
                 continue;
             };
@@ -700,6 +708,14 @@ fn enumerate_energy(
     let major_quality = quality_name(ctx, options.major_quality);
     let quality_range = options.quality_limit + 1;
     for record in store.group(PrototypeGroup::Entity) {
+        // 能量机器（发电机/锅炉/反应堆）可达性过滤：当前项目科技未解锁的机器不枚举。
+        if let Some(accessibility) = &options.accessibility {
+            if !accessibility.is_accessible(&metatorio_core::Accessible::Entity(
+                record.name.clone(),
+            )) {
+                continue;
+            }
+        }
         if let Some(generator) = record.component::<GeneratorComponent>() {
             let Some(fluid) = generator.fluid_box.filter.clone() else {
                 continue;
@@ -748,6 +764,14 @@ fn enumerate_energy(
     let mut panels: Vec<(String, f64)> = Vec::new();
     let mut accumulators: Vec<(String, f64)> = Vec::new();
     for record in store.group(PrototypeGroup::Entity) {
+        // 太阳能板/蓄电器可达性过滤：当前项目科技未解锁的不枚举。
+        let accessible = options
+            .accessibility
+            .as_ref()
+            .is_none_or(|acc| acc.is_accessible(&metatorio_core::Accessible::Entity(record.name.clone())));
+        if !accessible {
+            continue;
+        }
         if let Some(panel) = record.component::<SolarPanelComponent>() {
             panels.push((record.name.clone(), panel.production.amount));
         }
@@ -1499,6 +1523,22 @@ mod tests {
             "type": "recipe", "name": "assembling-machine-1", "energy_required": 1,
             "ingredients": [{ "type": "item", "name": "iron-plate", "amount": 1 }],
             "results": [{ "type": "item", "name": "assembling-machine-1", "amount": 1 }],
+            "categories": ["crafting"], "enabled": true
+        });
+        // 能源链机器（锅炉/蒸汽机）可达：item place_result + enabled 配方，否则
+        // 能源机制机器可达性过滤会剔除它们 → 无电力，steel-plate 不可解。
+        dump["item"]["boiler"] = json!({ "type": "item", "name": "boiler", "place_result": "boiler" });
+        dump["recipe"]["boiler"] = json!({
+            "type": "recipe", "name": "boiler", "energy_required": 1,
+            "ingredients": [{ "type": "item", "name": "iron-plate", "amount": 1 }],
+            "results": [{ "type": "item", "name": "boiler", "amount": 1 }],
+            "categories": ["crafting"], "enabled": true
+        });
+        dump["item"]["steam-engine"] = json!({ "type": "item", "name": "steam-engine", "place_result": "steam-engine" });
+        dump["recipe"]["steam-engine"] = json!({
+            "type": "recipe", "name": "steam-engine", "energy_required": 1,
+            "ingredients": [{ "type": "item", "name": "iron-plate", "amount": 1 }],
+            "results": [{ "type": "item", "name": "steam-engine", "amount": 1 }],
             "categories": ["crafting"], "enabled": true
         });
 
