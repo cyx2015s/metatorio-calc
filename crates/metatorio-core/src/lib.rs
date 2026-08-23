@@ -12,6 +12,7 @@ pub mod id;
 pub mod mechanic;
 pub mod planet;
 pub mod prim_var;
+pub mod productivity;
 pub mod quality;
 pub mod temp_flow;
 
@@ -26,3 +27,4 @@ pub use mechanic::{
     ReactorMechanic, RecipeMechanic, SolarMechanic, SpoilMechanic,
 };
 pub use prim_var::{AIndexMap, ExpandedVariable, Expansion, Flow, PrimVar};
+pub use productivity::{InfiniteTechLevel, ProductivityResult, compute_productivity};

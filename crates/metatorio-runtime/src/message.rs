@@ -2,8 +2,8 @@ use metatorio_core::{Accessible, DualVar, IdWithQuality};
 use serde::{Deserialize, Serialize};
 
 use crate::document::{
-    AutoBeaconPlan, FlowTarget, MechanicKind, RecipeProductivity, TargetExpression, TargetTerm,
-    TimeScale,
+    AutoBeaconPlan, FlowTarget, InfiniteTechLevel, MechanicKind, RecipeProductivity,
+    TargetExpression, TargetTerm, TimeScale,
 };
 use crate::id::{
     ExternalInputId, FactoryId, MechanicId, ProjectId, TargetExpressionId, TargetId, TargetTermId,
@@ -134,6 +134,12 @@ pub enum ProjectAction {
     },
     RemoveRecipeProductivity {
         recipe: String,
+    },
+    SetInfiniteTechLevel {
+        level: InfiniteTechLevel,
+    },
+    RemoveInfiniteTechLevel {
+        tech: String,
     },
     SetQualityLimit {
         quality: Option<String>,

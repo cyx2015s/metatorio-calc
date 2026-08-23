@@ -58,8 +58,16 @@ pub struct ProjectSettings {
     /// `unlocked=false` 强制不可达并阻断依赖它的对象，`unlocked=true` 强制可达，
     /// 自动解析（依赖传播）不能覆盖此状态）。
     pub milestones: Vec<Milestone>,
+    /// 用户**手动固定**的配方产能（2.a）：指定某配方的产能为指定值，
+    /// **替换**该配方的自动推算值。
     pub recipe_productivity: Vec<RecipeProductivity>,
+    /// 用户对**无限科技**的研究次数覆盖（2.b）：据此推断该科技的产能贡献，
+    /// 替换默认（按可达性推断的等级 1）。
+    pub infinite_levels: Vec<InfiniteTechLevel>,
+    /// 忽略产能加成（2.c）：丢弃按可达性自动推算的配方/采矿产能，
+    /// 但保留用户设定值（recipe_productivity / infinite_levels / mining_productivity）。
     pub ignore_productivity: bool,
+    /// 用户**手动固定**的采矿产出加成：作为替换值（设置后替换自动推算值）。
     pub mining_productivity: f64,
     pub all_accessible: bool,
     pub quality_limit: Option<String>,
@@ -71,6 +79,7 @@ impl Default for ProjectSettings {
             time_scale: TimeScale::Seconds,
             milestones: Vec::new(),
             recipe_productivity: Vec::new(),
+            infinite_levels: Vec::new(),
             ignore_productivity: false,
             mining_productivity: 0.0,
             all_accessible: false,
@@ -118,6 +127,23 @@ impl Default for RecipeProductivity {
         Self {
             recipe: String::new(),
             productivity: 0.0,
+        }
+    }
+}
+
+/// 无限科技的研究次数覆盖（2.b）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct InfiniteTechLevel {
+    pub tech: String,
+    pub level: u32,
+}
+
+impl Default for InfiniteTechLevel {
+    fn default() -> Self {
+        Self {
+            tech: String::new(),
+            level: 0,
         }
     }
 }

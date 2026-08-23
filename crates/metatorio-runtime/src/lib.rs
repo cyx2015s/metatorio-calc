@@ -14,12 +14,16 @@ pub mod state;
 
 pub use document::{
     AppDocument, AutoBeaconPlan, DOCUMENT_SCHEMA_VERSION, ExternalInput, FactoryDocument,
-    FactorySettings, FlowTarget, MechanicEntry, MechanicKind, Milestone, PlanningPreferences,
-    ProjectDocument, ProjectSettings, RecipeProductivity, TargetExpression, TargetTerm, TimeScale,
+    FactorySettings, FlowTarget, InfiniteTechLevel, MechanicEntry, MechanicKind, Milestone,
+    PlanningPreferences, ProjectDocument, ProjectSettings, RecipeProductivity, TargetExpression,
+    TargetTerm, TimeScale,
 };
 pub use id::{
     ExternalInputId, FactoryId, MechanicId, ProjectId, TargetExpressionId, TargetId, TargetTermId,
 };
 pub use message::*;
-pub use solve::{ExpandedVarId, FlowBalance, MechanicSolution, Runtime, SolveResult, SolveStatus};
+pub use solve::{
+    ExpandedVarId, FlowBalance, MechanicSolution, ProductivityView, RecipeProductivityView,
+    Runtime, SolveResult, SolveStatus,
+};
 pub use state::{DispatchResult, RuntimeError, RuntimeState, SelectorState, UiState};

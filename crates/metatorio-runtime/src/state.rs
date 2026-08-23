@@ -379,6 +379,30 @@ impl RuntimeState {
                     project_id,
                 ))
             }
+            ProjectAction::SetInfiniteTechLevel { level } => {
+                validate_non_negative("infinite tech level", level.level as f64)?;
+                let settings = &mut self.project_mut(project_id)?.settings;
+                if let Some(existing) = settings
+                    .infinite_levels
+                    .iter_mut()
+                    .find(|candidate| candidate.tech == level.tech)
+                {
+                    let changed = replace(existing, level);
+                    Ok(Outcome::all_factories_if(changed, project_id))
+                } else {
+                    settings.infinite_levels.push(level);
+                    Ok(Outcome::all_factories(project_id))
+                }
+            }
+            ProjectAction::RemoveInfiniteTechLevel { tech } => {
+                let entries = &mut self.project_mut(project_id)?.settings.infinite_levels;
+                let before = entries.len();
+                entries.retain(|entry| entry.tech != tech);
+                Ok(Outcome::all_factories_if(
+                    before != entries.len(),
+                    project_id,
+                ))
+            }
             ProjectAction::SetQualityLimit { quality } => {
                 let changed = replace(
                     &mut self.project_mut(project_id)?.settings.quality_limit,

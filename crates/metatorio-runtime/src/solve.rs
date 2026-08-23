@@ -6,7 +6,10 @@ use metatorio_data::store::{PrototypeGroup, PrototypeStore};
 use metatorio_solver::{AIndexMap, SolverData, SolverSolution, TargetSpec};
 use serde::{Deserialize, Serialize};
 
-use crate::document::{AppDocument, DOCUMENT_SCHEMA_VERSION, FactoryDocument, ProjectDocument};
+use crate::document::{
+    AppDocument, DOCUMENT_SCHEMA_VERSION, FactoryDocument, InfiniteTechLevel, ProjectDocument,
+    ProjectSettings,
+};
 use crate::id::{FactoryId, MechanicId, ProjectId};
 use crate::message::AppMessage;
 use crate::state::{DispatchResult, RuntimeError, RuntimeState};
@@ -65,6 +68,30 @@ pub struct FlowBalance {
     /// `amount / scale` 是内部可比量，判断"接近 0"应使用它。
     pub scale: f64,
 }
+
+/// 面向前端的产品力视图：区分**自动推算**与**用户指定**（用户值有虚线边框）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProductivityView {
+    /// 每个配方产能项：source = "auto"（自动推算）| "user"（用户指定）。
+    pub recipes: Vec<RecipeProductivityView>,
+    /// 自动推算的采矿产出加成。
+    pub auto_mining: f64,
+    /// 最终采矿产出加成（用户覆盖后）。
+    pub mining: f64,
+    /// 用户对无限科技的研究次数覆盖（2.b）。
+    pub infinite_levels: Vec<InfiniteTechLevel>,
+    /// 是否忽略自动推算（2.c）。
+    pub ignore: bool,
+}
+
+/// 单个配方产能项。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RecipeProductivityView {
+    pub recipe: String,
+    pub value: f64,
+    pub source: String,
+}
+
 
 /// Tauri-independent application runtime.  Tauri commands can own this value
 /// behind a mutex and forward its commands/events to the frontend.
@@ -179,24 +206,81 @@ impl Runtime {
         }
         let store = self.context_store(project_id)?;
         let settings = &self.state.project(project_id)?.settings;
-        let options = AccessibilityOptions {
-            forced_accessible: settings
-                .milestones
-                .iter()
-                .filter(|milestone| milestone.unlocked)
-                .map(|milestone| milestone.node.clone())
-                .collect(),
-            forced_inaccessible: settings
-                .milestones
-                .iter()
-                .filter(|milestone| !milestone.unlocked)
-                .map(|milestone| milestone.node.clone())
-                .collect(),
-            all_accessible: settings.all_accessible,
-        };
+        let options = accessibility_options(settings);
         let result = metatorio_core::accessibility::compute_accessibility(store, &options);
         self.accessibilities.insert(project_id, result.clone());
         Ok(result)
+    }
+
+    /// 面向前端的产品力视图：自动推算 + 用户覆盖，按来源区分。
+    pub fn project_productivity(
+        &mut self,
+        project_id: ProjectId,
+    ) -> Result<ProductivityView, RuntimeError> {
+        let store = self.context_store(project_id)?;
+        let project = self.state.project(project_id)?.clone();
+        let settings = &project.settings;
+
+        let options = accessibility_options(settings);
+        let accessibility = metatorio_core::accessibility::compute_accessibility(store, &options);
+        let levels: Vec<(String, u32)> = settings
+            .infinite_levels
+            .iter()
+            .map(|level| (level.tech.clone(), level.level))
+            .collect();
+        // 纯自动基准（不含用户无限等级）——用于展示"自动推算"。
+        let pure_auto = metatorio_core::productivity::compute_productivity(
+            store,
+            &accessibility,
+            &[],
+            settings.ignore_productivity,
+        );
+        // 最终（含用户无限等级 2.b）。
+        let with_levels = metatorio_core::productivity::compute_productivity(
+            store,
+            &accessibility,
+            &levels,
+            settings.ignore_productivity,
+        );
+
+        // 合并展示列表：with_levels 基准，用户 2.a 替换同名项。
+        let mut recipes: Vec<RecipeProductivityView> = with_levels
+            .recipe_productivity
+            .iter()
+            .map(|(recipe, value)| RecipeProductivityView {
+                recipe: recipe.clone(),
+                value: *value,
+                source: "auto".to_string(),
+            })
+            .collect();
+        for user in &settings.recipe_productivity {
+            if let Some(entry) = recipes.iter_mut().find(|r| r.recipe == user.recipe) {
+                entry.value = user.productivity;
+                entry.source = "user".to_string();
+            } else {
+                recipes.push(RecipeProductivityView {
+                    recipe: user.recipe.clone(),
+                    value: user.productivity,
+                    source: "user".to_string(),
+                });
+            }
+        }
+        recipes.sort_by(|a, b| a.recipe.cmp(&b.recipe));
+
+        // 采矿：用户设定的固定值（非 0）替换自动推算值。
+        let mining = if settings.mining_productivity != 0.0 {
+            settings.mining_productivity
+        } else {
+            with_levels.mining_productivity
+        };
+
+        Ok(ProductivityView {
+            recipes,
+            auto_mining: pure_auto.mining_productivity,
+            mining,
+            infinite_levels: settings.infinite_levels.clone(),
+            ignore: settings.ignore_productivity,
+        })
     }
 
     /// 里程碑节点按依赖关系**拓扑排序**（依赖在前），供 UI 按序展示。
@@ -663,6 +747,10 @@ pub fn instance_cost(store: &PrototypeStore, mechanic: &Mechanic) -> f64 {
 }
 
 /// 从项目设置构建求解用的 GameState（品质上限/采矿/配方产能加成）。
+///
+/// 产能 = **自动推算**（从可达性：可达的无限产能科技按等级贡献）+
+/// 用户覆盖（2.a 固定配方值替换自动；2.b 无限科技等级替换默认等级；
+/// 2.c 忽略时丢弃自动但保留用户值）。
 pub fn make_game_state(prototype: &PrototypeStore, project: &ProjectDocument) -> GameState {
     let mut game = GameState::default();
     let qualities = prototype.quality_order();
@@ -683,14 +771,69 @@ pub fn make_game_state(prototype: &PrototypeStore, project: &ProjectDocument) ->
             })
             .unwrap_or(0)
     };
-    game.mining_productivity = project.settings.mining_productivity;
-    if !project.settings.ignore_productivity {
-        for productivity in &project.settings.recipe_productivity {
-            game.recipe_productivity
-                .insert(productivity.recipe.clone(), productivity.productivity);
-        }
-    }
+    let productivity = productivity_for_game(prototype, project);
+    game.mining_productivity = productivity.mining_productivity;
+    game.recipe_productivity = productivity.recipe_productivity;
     game
+}
+
+/// 里程碑/可达性选项（由项目设置派生），供 `project_accessibility` 与
+/// 产能自动推算共用，避免两处构建不一致。
+pub(crate) fn accessibility_options(settings: &ProjectSettings) -> AccessibilityOptions {
+    AccessibilityOptions {
+        forced_accessible: settings
+            .milestones
+            .iter()
+            .filter(|milestone| milestone.unlocked)
+            .map(|milestone| milestone.node.clone())
+            .collect(),
+        forced_inaccessible: settings
+            .milestones
+            .iter()
+            .filter(|milestone| !milestone.unlocked)
+            .map(|milestone| milestone.node.clone())
+            .collect(),
+        all_accessible: settings.all_accessible,
+    }
+}
+
+/// 计算项目的最终配方/采矿产能（自动推算 + 用户覆盖）。
+fn productivity_for_game(
+    prototype: &PrototypeStore,
+    project: &ProjectDocument,
+) -> metatorio_core::ProductivityResult {
+    let options = accessibility_options(&project.settings);
+    let accessibility = metatorio_core::accessibility::compute_accessibility(prototype, &options);
+    let levels: Vec<(String, u32)> = project
+        .settings
+        .infinite_levels
+        .iter()
+        .map(|level| (level.tech.clone(), level.level))
+        .collect();
+    let auto = metatorio_core::productivity::compute_productivity(
+        prototype,
+        &accessibility,
+        &levels,
+        project.settings.ignore_productivity,
+    );
+
+    // 2.a：用户固定配方值**替换**该配方的自动推算值。
+    let mut recipe_productivity = auto.recipe_productivity;
+    for user in &project.settings.recipe_productivity {
+        recipe_productivity.insert(user.recipe.clone(), user.productivity);
+    }
+
+    // 采矿：用户设定的固定值（非 0）替换自动推算值。
+    let mining_productivity = if project.settings.mining_productivity != 0.0 {
+        project.settings.mining_productivity
+    } else {
+        auto.mining_productivity
+    };
+
+    metatorio_core::ProductivityResult {
+        recipe_productivity,
+        mining_productivity,
+    }
 }
 
 /// 根据工厂环境（星球/地表）写入太阳能倍率与昼夜周期。
@@ -741,7 +884,7 @@ pub fn apply_environment_to_game_state(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::document::MechanicKind;
+    use crate::document::{MechanicKind, RecipeProductivity};
     use crate::message::{
         FactoryAction, FlowAction, MechanicAction, MechanicListAction, ProjectAction,
         RecipeMechanicAction, RuntimeCommand, SolveAction,
@@ -845,6 +988,40 @@ mod tests {
                     "energy_source": { "type": "electric", "drain": "0J" }
                 }
             }
+        });
+        runtime.install_context(
+            "test-context".to_string(),
+            PrototypeStore::load(&dump).unwrap(),
+        );
+        runtime.set_active_context(Some("test-context".to_string()));
+        runtime
+    }
+
+    /// 产能测试专用合成 dump：两个无限产能科技（采矿 + 配方）。
+    fn load_productivity_runtime() -> Runtime {
+        let mut runtime = Runtime::new();
+        let dump = json!({
+            "item": {
+                "iron-plate": { "type": "item", "name": "iron-plate" },
+                "steel-plate": { "type": "item", "name": "steel-plate" }
+            },
+            "fluid": {},
+            "technology": {
+                "mining-prod": {
+                    "type": "technology", "name": "mining-prod",
+                    "prerequisites": [], "enabled": true, "max_level": "infinite",
+                    "effects": [{ "type": "mining-drill-productivity-bonus", "modifier": 0.1 }],
+                    "unit": { "count": 1, "time": 1, "ingredients": [] }
+                },
+                "steel-prod": {
+                    "type": "technology", "name": "steel-prod",
+                    "prerequisites": [], "enabled": true, "max_level": "infinite",
+                    "effects": [{ "type": "change-recipe-productivity", "recipe": "steel-plate", "change": 0.1 }],
+                    "unit": { "count": 1, "time": 1, "ingredients": [] }
+                }
+            },
+            "recipe": {},
+            "assembling-machine": {}
         });
         runtime.install_context(
             "test-context".to_string(),
@@ -1229,5 +1406,57 @@ mod tests {
             runtime.context_store(project_id).unwrap_err(),
             RuntimeError::ContextNotFound("nope".to_string())
         );
+    }
+
+    #[test]
+    fn project_productivity_auto_and_user() {
+        let mut runtime = load_productivity_runtime();
+        let project = new_project(&mut runtime);
+        // 全可达，让两个无限产能科技都可达（等级 1）。
+        dispatch_project(&mut runtime, project, ProjectAction::SetAllAccessible { enabled: true });
+
+        let view = runtime.project_productivity(project).unwrap();
+        assert!(
+            (view.auto_mining - 0.1).abs() < 1e-9,
+            "自动采矿应为 0.1，实际 {}",
+            view.auto_mining
+        );
+        assert!((view.mining - 0.1).abs() < 1e-9, "最终采矿应为 0.1");
+        let steel = view.recipes.iter().find(|r| r.recipe == "steel-plate").unwrap();
+        assert!((steel.value - 0.1).abs() < 1e-9, "steel-plate 自动应 0.1");
+        assert_eq!(steel.source, "auto");
+
+        // 2.b：用户把 mining-prod 研究到 50 级 → 最终采矿 = 0.1×50 = 5.0。
+        dispatch_project(
+            &mut runtime,
+            project,
+            ProjectAction::SetInfiniteTechLevel {
+                level: InfiniteTechLevel { tech: "mining-prod".to_string(), level: 50 },
+            },
+        );
+        let view = runtime.project_productivity(project).unwrap();
+        // 自动采矿基准（无用户等级）仍是 0.1；最终采矿被 2.b 覆盖为 5.0。
+        assert!((view.auto_mining - 0.1).abs() < 1e-9, "自动采矿基准应不变");
+        assert!((view.mining - 5.0).abs() < 1e-9, "最终采矿应 5.0，实际 {}", view.mining);
+
+        // 2.a：用户把 steel-plate 的产能固定为 0.5 → source=user，替换自动 0.1。
+        dispatch_project(
+            &mut runtime,
+            project,
+            ProjectAction::SetRecipeProductivity {
+                productivity: RecipeProductivity { recipe: "steel-plate".to_string(), productivity: 0.5 },
+            },
+        );
+        let view = runtime.project_productivity(project).unwrap();
+        let steel = view.recipes.iter().find(|r| r.recipe == "steel-plate").unwrap();
+        assert!((steel.value - 0.5).abs() < 1e-9, "2.a 用户值应替换自动");
+        assert_eq!(steel.source, "user");
+
+        // 2.c：忽略产能 → 自动采矿 0；但用户 2.b 等级仍生效（采矿 5.0）。
+        dispatch_project(&mut runtime, project, ProjectAction::SetIgnoreProductivity { ignore: true });
+        let view = runtime.project_productivity(project).unwrap();
+        assert!((view.auto_mining - 0.0).abs() < 1e-9, "忽略时自动采矿应 0");
+        assert!((view.mining - 5.0).abs() < 1e-9, "忽略时用户 2.b 仍生效");
+        assert!(view.ignore);
     }
 }
