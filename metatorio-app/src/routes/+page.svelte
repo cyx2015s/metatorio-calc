@@ -1651,7 +1651,7 @@
             <div class="field">
               <label>采矿产出（倍率）</label>
               <div class="prefs-list">
-                <div class="prefs-item">
+                <div class="prefs-item inferred">
                   <span class="prefs-name">自动推算</span>
                   <input
                     class="prod-input"
@@ -1659,7 +1659,7 @@
                     readonly
                     value={String(runtime.productivityInfo?.auto_mining ?? 0)}
                   />
-                  <span class="muted badge">自动</span>
+                  <span class="muted badge">推断</span>
                 </div>
                 <div class="prefs-item {project.settings.mining_productivity !== 0 ? "user-specified" : ""}">
                   <span class="prefs-name">用户覆盖</span>
@@ -1678,7 +1678,7 @@
                     <span class="muted badge">用户</span>
                   {/if}
                 </div>
-                <div class="prefs-item">
+                <div class="prefs-item {project.settings.mining_productivity !== 0 ? "user-specified" : "inferred"}">
                   <span class="prefs-name">最终</span>
                   <input
                     class="prod-input"
@@ -1695,7 +1695,7 @@
               <label>配方产能加成（百分数；自动项点击改值即转为用户指定）</label>
               <div class="prefs-list">
                 {#each runtime.productivityInfo?.recipes ?? [] as entry, i (entry.recipe)}
-                  <div class="prefs-item {entry.source === "user" ? "user-specified" : ""}">
+                  <div class="prefs-item {entry.source === "user" ? "user-specified" : "inferred"}">
                     <HoverIcon type="recipe" name={entry.recipe} size={22} detailKind="recipe" />
                     <span class="prefs-name">{runtime.localizedName("recipe", entry.recipe)}</span>
                     <input
@@ -1720,7 +1720,7 @@
                           runtime.removeRecipeProductivity(entry.recipe).catch(() => {})}
                       >×</button>
                     {:else}
-                      <span class="muted badge">自动</span>
+                      <span class="muted badge">推断</span>
                     {/if}
                   </div>
                 {:else}
@@ -3117,11 +3117,18 @@
     margin-bottom: 6px;
   }
 
-  /* 用户指定的产能项：虚线边框（区分自动推算）。 */
-  .prefs-item.user-specified {
+  /* 推断（自动）产能项：虚线边框（与外部输入面板的隐式行一致）。 */
+  .prefs-item.inferred {
     border-style: dashed;
     border-color: var(--accent-line);
     background: color-mix(in srgb, var(--card) 84%, var(--accent) 8%);
+  }
+
+  /* 用户指定的产能项：实线，辅以强调色表示是自己指定的。 */
+  .prefs-item.user-specified {
+    border-style: solid;
+    border-color: var(--accent-line);
+    background: color-mix(in srgb, var(--card) 92%, var(--accent) 6%);
   }
 
   .badge {
