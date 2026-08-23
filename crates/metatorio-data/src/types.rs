@@ -1,7 +1,7 @@
 //! 预定义类型：schema 中需要自定义反序列化的类型。
 //!
 //! codegen 的 `custom_type_map` 检测到这些类型名时，不生成 struct，
-//! 直接引用本模块的类型（如 `crate::types::EnergyAmount`）。
+//! 直接引用本插件的类型（如 `crate::types::EnergyAmount`）。
 //!
 //! 这些类型实现**自定义 Deserialize**，因为游戏 dump 的 JSON 形态
 //! 与 Rust 类型不对应（如能量是 "5MJ" 字符串而非数值）。
@@ -702,7 +702,7 @@ pub enum BoilerMode {
 
 // ── 效果类型（EffectTypeLimitation）──────────────────────────────
 
-/// 模块/信标效果类型（schema 的 union 成员是固定的 5 个字面值）。
+/// 插件/信标效果类型（schema 的 union 成员是固定的 5 个字面值）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum EffectType {
@@ -713,7 +713,7 @@ pub enum EffectType {
     Quality,
 }
 
-/// 允许的效果类型集合（模块/信标机器）。
+/// 允许的效果类型集合（插件/信标机器）。
 ///
 /// schema 形态（手写建模示范——自动化无法推断语义）：
 /// `union[ union[literal × 5] | array[union[literal × 5]] ]`，

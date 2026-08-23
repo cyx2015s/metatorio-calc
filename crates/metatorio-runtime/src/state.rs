@@ -498,7 +498,7 @@ impl RuntimeState {
                     MechanicAction::Recipe(RecipeMechanicAction::SetRecipe { .. })
                         | MechanicAction::Mining(MiningMechanicAction::SetResource { .. })
                 );
-                // 机器变化后，让外层按机器槽位上限钳制模块数量。
+                // 机器变化后，让外层按机器槽位上限钳制插件数量。
                 let needs_clamp = matches!(
                     &action,
                     MechanicAction::Recipe(RecipeMechanicAction::SetMachine { .. })
@@ -1708,7 +1708,7 @@ fn module_action_for_kind(
     match mechanic_kind {
         MechanicKind::Recipe => Ok(MechanicAction::Recipe(RecipeMechanicAction::Module(action))),
         MechanicKind::Mining => Ok(MechanicAction::Mining(MiningMechanicAction::Module(action))),
-        _ => Err(RuntimeError::InvalidOperation("该机制不支持模块配置")),
+        _ => Err(RuntimeError::InvalidOperation("该机制不支持插件配置")),
     }
 }
 

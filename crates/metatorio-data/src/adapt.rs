@@ -2,7 +2,7 @@
 //!
 //! 仓库 schema 面向 2.1.x（prototype-api.json 2.1.14）。Factorio 2.0
 //! 导出的 data-raw-dump.json 字段形态与 2.1 schema 有差异，直接
-//! 反序列化会失败或漏读。本模块提供**就地规范化**（每个适配层一个
+//! 反序列化会失败或漏读。本插件提供**就地规范化**（每个适配层一个
 //! 独立函数，便于按需增删），把 2.0 形态改写为 2.1 schema 期望的形态。
 //!
 //! 差异来源：官方 schema 更新 commit 86317bd（wube/factorio-data

@@ -2432,7 +2432,7 @@ fn effective_module_slots(
     base + bonus
 }
 
-/// 机器变化后按槽位上限钳制模块数量（超出直接截断，经 reducer 落盘）。
+/// 机器变化后按槽位上限钳制插件数量（超出直接截断，经 reducer 落盘）。
 fn clamp_modules(
     state: &AppState,
     runtime: &mut Runtime,

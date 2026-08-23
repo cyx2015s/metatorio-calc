@@ -2,7 +2,7 @@
 //!
 //! 这些测试是"正确性锚点"：
 //! - 版本锚定：schema 的 application_version / api_version 变化会在此暴露
-//! - 继承链：关键原型（组装机/电炉/模块）的链结构符合游戏类层次
+//! - 继承链：关键原型（组装机/电炉/插件）的链结构符合游戏类层次
 //! - 类型映射：关键字段的 Rust 类型映射正确（标量、Option、自定义类型）
 
 use metatorio_data_codegen::{Config, Schema, config::DEFAULT_CONCERNED_TYPENAMES, generate};
@@ -70,7 +70,7 @@ fn inheritance_chain_matches_game_hierarchy() {
         ]
     );
     assert!(chain("FurnacePrototype").contains(&"CraftingMachinePrototype"));
-    // 模块是物品的子类（ModulePrototype → ItemPrototype）
+    // 插件是物品的子类（ModulePrototype → ItemPrototype）
     assert!(chain("ModulePrototype").contains(&"ItemPrototype"));
     // 矿机不是制造机
     assert!(!chain("MiningDrillPrototype").contains(&"CraftingMachinePrototype"));

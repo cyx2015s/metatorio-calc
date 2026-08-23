@@ -60,7 +60,7 @@
     item: "物品",
     fluid: "流体",
     recipe: "配方",
-    module: "模块",
+    module: "插件",
     machine: "制造机",
     "mining-machine": "采矿机",
     generator: "发电机",
@@ -251,7 +251,7 @@
         <div class="hc-row"><span>速度</span><strong>{detail.crafting_speed}</strong></div>
       {/if}
       {#if detail.module_slots != null}
-        <div class="hc-row"><span>模块槽</span><strong>{detail.module_slots}</strong></div>
+        <div class="hc-row"><span>插件槽</span><strong>{detail.module_slots}</strong></div>
       {/if}
       {#if detail.energy_usage_j != null}
         <div class="hc-row"><span>能耗</span><strong>{formatPower(detail.energy_usage_j)}</strong></div>
@@ -300,15 +300,6 @@
               {/if}
             </strong>
           </div>
-        {/if}
-        {#if detail.quality_crafting_speed != null}
-          <div class="hc-row"><span>机器速度</span><strong>{formatMultiplier(detail.quality_crafting_speed)}</strong></div>
-        {/if}
-        {#if detail.quality_module_speed != null}
-          <div class="hc-row"><span>模块速度</span><strong>{formatMultiplier(detail.quality_module_speed)}</strong></div>
-        {/if}
-        {#if detail.quality_module_productivity != null}
-          <div class="hc-row"><span>模块产出</span><strong>{formatMultiplier(detail.quality_module_productivity)}</strong></div>
         {/if}
       {/if}
       {#if detail.ingredients.length > 0}

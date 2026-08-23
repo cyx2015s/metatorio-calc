@@ -1,4 +1,4 @@
-//! 工厂组件（Mechanic）枚举与模块配置。
+//! 工厂组件（Mechanic）枚举与插件配置。
 //!
 //! **`Mechanic` 表示工厂的 1 个组件（单个生产单元）**，不是列表：
 //! 如 `Mechanic::Recipe(RecipeMechanic)` 即 1 个配方 + 1 个机器 + 可选燃料 +
@@ -11,9 +11,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::id::IdWithQuality;
 
-// ── 模块配置（ModuleConfig 体系，纯数据）─────────────────────────
+// ── 插件配置（ModuleConfig 体系，纯数据）─────────────────────────
 
-/// 一个机器实例的模块/信标配置。
+/// 一个机器实例的插件/信标配置。
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ModuleConfig {
@@ -21,7 +21,7 @@ pub struct ModuleConfig {
     pub beacons: Vec<BeaconConfig>,
 }
 
-// 模块/插件塔效果与耗电（迁移自 metatorio-egui ModuleConfig::get_effect/get_consumption）
+// 插件/插件塔效果与耗电（迁移自 metatorio-egui ModuleConfig::get_effect/get_consumption）
 
 use crate::context::Context;
 use metatorio_data::{BeaconComponent, ModuleComponent, QualityComponent};
@@ -89,7 +89,7 @@ pub fn module_effect_at_quality(module: &ModuleComponent, quality: &QualityCompo
 }
 
 impl ModuleConfig {
-    /// 模块与插件塔的效果汇总（迁移自 egui ModuleConfig::get_effect）。
+    /// 插件与插件塔的效果汇总（迁移自 egui ModuleConfig::get_effect）。
     pub fn get_effect(&self, ctx: &Context) -> Effect {
         let mut total_effect = Effect::default();
         for module in &self.modules {
@@ -225,7 +225,7 @@ pub struct FluidHeatMechanic {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct BeaconConfig {
-    /// 这种插件塔中的模块（数量是塔内模块数，不是塔数量）。
+    /// 这种插件塔中的插件（数量是塔内插件数，不是塔数量）。
     pub modules: Vec<(IdWithQuality, usize)>,
     /// 插件塔本身。
     pub beacon: IdWithQuality,
@@ -274,7 +274,7 @@ pub enum Mechanic {
 
 // ── 组件配置 struct（迁移自 metatorio-egui 的 XxxInstance，单例语义）──
 
-/// 配方组件：在机器中按模块配置生产指定配方。
+/// 配方组件：在机器中按插件配置生产指定配方。
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct RecipeMechanic {

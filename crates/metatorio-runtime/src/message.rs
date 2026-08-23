@@ -427,7 +427,7 @@ pub enum ModuleAction {
         slot: usize,
         module: Option<IdWithQuality>,
     },
-    /// 钳制模块数量到机器槽位上限（由外层适配层触发）。
+    /// 钳制插件数量到机器槽位上限（由外层适配层触发）。
     ClampModules {
         max: usize,
     },
@@ -704,7 +704,7 @@ pub enum RuntimeCommand {
     EnsureQualityLimit {
         project: ProjectId,
     },
-    /// 机器变化后，由外层按机器槽位上限钳制模块数量。
+    /// 机器变化后，由外层按机器槽位上限钳制插件数量。
     ClampModules {
         project: ProjectId,
         factory: FactoryId,

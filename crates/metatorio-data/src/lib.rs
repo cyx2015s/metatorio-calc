@@ -1,7 +1,7 @@
 //! metatorio-data：Factorio 原型数据 crate。
 //!
 //! 架构（两层）：
-//! - **忠实层**（`generated_components` 模块）：与 dump 键 + 官方 schema
+//! - **忠实层**（`generated_components` 插件）：与 dump 键 + 官方 schema
 //!   （prototype-api.json）一一对应的组件结构体，字段名与游戏一致。
 //! - **语义层**（后续 Phase 4 实现）：继承链匹配 → 领域角色（Crafter/Miner/...）
 //!   归一化，供 metatorio_egui / metatorio_tauri / metatorio_iced 使用。
@@ -24,7 +24,7 @@ pub mod store;
 /// Phase 4：扩展方法，默认值 getter、辅助
 pub mod ext;
 
-/// 生成代码的模块容器（避免与手写代码命名冲突）。
+/// 生成代码的插件容器（避免与手写代码命名冲突）。
 #[allow(clippy::all, dead_code, non_snake_case)]
 pub(crate) mod generated_components {
     include!(concat!(env!("OUT_DIR"), "/generated.rs"));

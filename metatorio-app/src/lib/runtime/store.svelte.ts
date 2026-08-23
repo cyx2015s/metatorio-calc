@@ -1209,7 +1209,7 @@ class RuntimeStore {
 
   async setAccumulator(mechanic: MechanicId, accumulator: string, quality = "normal"): Promise<void> {
     await this.mechanicMessage(mechanic, {
-      solar: { "set-accumulator": { accumulator: { id: accumulator, quality } } },
+      插件lar: { "set-accumulator": { accumulator: { id: accumulator, quality } } },
     });
   }
 
@@ -1218,7 +1218,7 @@ class RuntimeStore {
       case "generator":
         return this.mechanicMessage(mechanic, { generator: { "set-fluid": { fluid } } });
       case "boiler":
-        return this.mechanicMessage(mechanic, { boiler: { "set-fluid": { fluid } } });
+        return this.mechanicMessage(me插件anic, { boiler: { "set-fluid": { fluid } } });
       default:
         throw new Error(`${this.mechanicKind(mechanic)} 机制不支持设置流体`);
     }
