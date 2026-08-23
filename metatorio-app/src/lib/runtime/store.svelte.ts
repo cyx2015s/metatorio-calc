@@ -124,6 +124,9 @@ class RuntimeStore {
       this.document = document;
       this.ui = ui;
       await this.refreshContexts();
+      // 及早拉取目录索引（含本地化显示名），保证产能/机制等面板在
+      // 首个渲染就能用上译名，而不是回退到内部 id。
+      await this.loadCatalogIndex();
     } catch (error) {
       this.lastError = String(error);
     }
@@ -206,7 +209,7 @@ class RuntimeStore {
 
   // ── 游戏上下文 ──────────────────────────────────────────────────
 
-  /** 拉取上下文列表；激活上下文变化时清空图标/目录缓存。 */
+  /** 拉取上下文列表；激活上下文变化时清空图标/目录缓存并重拉目录索引。 */
   async refreshContexts(): Promise<void> {
     const list = await listContexts();
     this.contexts = list.contexts;
@@ -216,6 +219,9 @@ class RuntimeStore {
       this.clearIconCache();
       this.clearCatalogCache();
     }
+    // 激活上下文就绪后立即加载目录索引（含本地化显示名），
+    // 使产能/机制等面板的译名尽早生效。
+    this.loadCatalogIndex().catch(() => {});
   }
   async loadDemoData(): Promise<void> {
     await this.runContext(async () => {
@@ -357,17 +363,26 @@ class RuntimeStore {
   }
 
   /** 目录索引：一次拉取当前上下文的全量目录（前端本地筛选/分组）。 */
+  private catalogLoadPromise: Promise<CatalogIndex | null> | null = null;
+
   async loadCatalogIndex(): Promise<CatalogIndex | null> {
     if (this.catalogIndex?.context_id === this.activeContextId && this.activeContextId) {
       return this.catalogIndex;
     }
-    try {
-      this.catalogIndex = await catalogIndex();
-      return this.catalogIndex;
-    } catch (error) {
-      this.lastError = String(error);
-      return null;
-    }
+    // 合并并发加载（init 的 await 与上下文切换的 fire-and-forget 可能同时触发）。
+    if (this.catalogLoadPromise) return this.catalogLoadPromise;
+    this.catalogLoadPromise = (async () => {
+      try {
+        this.catalogIndex = await catalogIndex();
+        return this.catalogIndex;
+      } catch (error) {
+        this.lastError = String(error);
+        return null;
+      } finally {
+        this.catalogLoadPromise = null;
+      }
+    })();
+    return this.catalogLoadPromise;
   }
 
   /** 悬停详情：按 (kind, name) 缓存。 */
