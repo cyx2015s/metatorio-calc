@@ -557,7 +557,11 @@ class RuntimeStore {
   async setDefaultMilestones(): Promise<void> {
     const project = this.requireProject();
     await setDefaultMilestones(project);
+    // 走的是 Tauri 命令（不经过 send），需手动失效可达性缓存并刷新
+    // 有序里程碑（否则里程碑列表不立刻更新，要手动添加一次才刷新）。
+    this.accessibility = null;
     await this.refresh();
+    this.refreshOrderedMilestones().catch(() => {});
   }
 
   /** 里程碑节点按依赖拓扑排序（依赖在前）的当前结果；供里程碑列表按序展示。 */
