@@ -138,6 +138,8 @@
     inputs: false,
     env: true,
     settings: true,
+    subMilestones: true,
+    subProductivity: true,
   });
 
   function openSelector(
@@ -1545,130 +1547,236 @@
             无视可达性（全部可用）
           </label>
 
-          <div class="field">
-            <label>里程碑（锁定 = 剪枝该节点及其依赖，模拟科技树分支）</label>
-            <div class="prefs-list">
-              {#each runtime.orderedMilestones ?? project.settings.milestones as milestone, i (i)}
-                <div class="prefs-item">
-                  <HoverIcon
-                    type={accessibleKind(milestone.node)}
-                    name={accessibleName(milestone.node)}
-                    size={22}
-                    detailKind={accessibleKind(milestone.node)}
-                  />
-                  <span class="prefs-name">
-                    {runtime.localizedName(accessibleKind(milestone.node), accessibleName(milestone.node))}
-                  </span>
-                  <label class="check" title="解锁/锁定">
-                    <input
-                      type="checkbox"
-                      checked={milestone.unlocked}
-                      onchange={(event) =>
-                        runtime
-                          .setMilestoneUnlocked(
-                            milestone.node,
-                            (event.currentTarget as HTMLInputElement).checked,
-                          )
-                          .catch(() => {})}
+          <div class="subpanel">
+            <button
+              class="title panel-toggle"
+              aria-expanded={panels.subMilestones}
+              onclick={() => (panels.subMilestones = !panels.subMilestones)}
+            >
+              <span class="toggle-label">
+                <span class="chev">{panels.subMilestones ? "▾" : "▸"}</span>
+                里程碑
+                <span class="count">{runtime.orderedMilestones?.length ?? project.settings.milestones.length}</span>
+              </span>
+            </button>
+            {#if panels.subMilestones}
+            <div class="field">
+              <label>锁定 = 剪枝该节点及其依赖，模拟科技树分支</label>
+              <div class="prefs-list">
+                {#each runtime.orderedMilestones ?? project.settings.milestones as milestone, i (i)}
+                  <div class="prefs-item">
+                    <HoverIcon
+                      type={accessibleKind(milestone.node)}
+                      name={accessibleName(milestone.node)}
+                      size={22}
+                      detailKind={accessibleKind(milestone.node)}
                     />
-                  </label>
-                  <button
-                    class="btn ghost"
-                    title="移除里程碑"
-                    onclick={() =>
-                      runtime.removeMilestone(milestone.node).catch(() => {})}
-                  >×</button>
-                </div>
-              {:else}
-                <span class="muted">还没有里程碑</span>
-              {/each}
+                    <span class="prefs-name">
+                      {runtime.localizedName(accessibleKind(milestone.node), accessibleName(milestone.node))}
+                    </span>
+                    <label class="check" title="解锁/锁定">
+                      <input
+                        type="checkbox"
+                        checked={milestone.unlocked}
+                        onchange={(event) =>
+                          runtime
+                            .setMilestoneUnlocked(
+                              milestone.node,
+                              (event.currentTarget as HTMLInputElement).checked,
+                            )
+                            .catch(() => {})}
+                      />
+                    </label>
+                    <button
+                      class="btn ghost"
+                      title="移除里程碑"
+                      onclick={() =>
+                        runtime.removeMilestone(milestone.node).catch(() => {})}
+                    >×</button>
+                  </div>
+                {:else}
+                  <span class="muted">还没有里程碑</span>
+                {/each}
+              </div>
+              <div class="prefs-row">
+                <button
+                  class="btn"
+                  onclick={() =>
+                    openSelector(
+                      "item",
+                      "选择里程碑",
+                      () => {},
+                      markKinds,
+                      undefined,
+                      undefined,
+                      undefined,
+                      undefined,
+                      (kind, name) => runtime.addMilestone(makeAccessible(kind, name)),
+                    )}
+                >+ 添加里程碑</button>
+                <button class="btn" onclick={() => runtime.setDefaultMilestones().catch(() => {})}>
+                  设置默认里程碑
+                </button>
+              </div>
             </div>
-            <div class="prefs-row">
-              <button
-                class="btn"
-                onclick={() =>
-                  openSelector(
-                    "item",
-                    "选择里程碑",
-                    () => {},
-                    markKinds,
-                    undefined,
-                    undefined,
-                    undefined,
-                    undefined,
-                    (kind, name) => runtime.addMilestone(makeAccessible(kind, name)),
-                  )}
-              >+ 添加里程碑</button>
-              <button class="btn" onclick={() => runtime.setDefaultMilestones().catch(() => {})}>
-                设置默认里程碑
-              </button>
-            </div>
+            {/if}
           </div>
 
-          <label class="check">
-            <input
-              type="checkbox"
-              checked={project.settings.ignore_productivity}
-              onchange={(event) =>
-                runtime
-                  .setIgnoreProductivity((event.currentTarget as HTMLInputElement).checked)
-                  .catch(() => {})}
-            />
-            忽略配方产能加成
-          </label>
-          <div class="field">
-            <label>配方产能加成（百分数，参与求解）</label>
-            <div class="prefs-list">
-              {#each project.settings.recipe_productivity as entry, i (i)}
+          <div class="subpanel">
+            <button
+              class="title panel-toggle"
+              aria-expanded={panels.subProductivity}
+              onclick={() => (panels.subProductivity = !panels.subProductivity)}
+            >
+              <span class="toggle-label">
+                <span class="chev">{panels.subProductivity ? "▾" : "▸"}</span>
+                产能（配方/采矿）
+              </span>
+            </button>
+            {#if panels.subProductivity}
+            <div class="field">
+              <label class="check">
+                <input
+                  type="checkbox"
+                  checked={project.settings.ignore_productivity}
+                  onchange={(event) =>
+                    runtime
+                      .setIgnoreProductivity((event.currentTarget as HTMLInputElement).checked)
+                      .catch(() => {})}
+                />
+                忽略产能加成（丢弃自动推算，仅用用户设定）
+              </label>
+            </div>
+
+            <div class="field">
+              <label>采矿产出（倍率）</label>
+              <div class="prefs-list">
                 <div class="prefs-item">
-                  <HoverIcon type="recipe" name={entry.recipe} size={22} detailKind="recipe" />
-                  <span class="prefs-name">{runtime.localizedName("recipe", entry.recipe)}</span>
+                  <span class="prefs-name">自动推算</span>
+                  <input
+                    class="prod-input"
+                    type="text"
+                    readonly
+                    value={String(runtime.productivityInfo?.auto_mining ?? 0)}
+                  />
+                  <span class="muted badge">自动</span>
+                </div>
+                <div class="prefs-item {project.settings.mining_productivity !== 0 ? "user-specified" : ""}">
+                  <span class="prefs-name">用户覆盖</span>
                   <input
                     class="prod-input"
                     type="number"
-                    step="10"
+                    step="0.1"
                     min="0"
-                    value={String(Math.round(entry.productivity * 100))}
+                    value={String(project.settings.mining_productivity)}
                     onchange={(event) => {
                       const value = Number((event.currentTarget as HTMLInputElement).value);
-                      if (Number.isFinite(value)) {
-                        runtime.setRecipeProductivity(entry.recipe, value / 100).catch(() => {});
-                      }
+                      if (Number.isFinite(value)) runtime.setMiningProductivity(value).catch(() => {});
                     }}
                   />
-                  <span class="muted">%</span>
-                  <button
-                    class="btn ghost"
-                    title="移除"
-                    onclick={() =>
-                      runtime.removeRecipeProductivity(entry.recipe).catch(() => {})}
-                  >×</button>
+                  {#if project.settings.mining_productivity !== 0}
+                    <span class="muted badge">用户</span>
+                  {/if}
                 </div>
-              {:else}
-                <span class="muted">还没有配方产能加成</span>
-              {/each}
+                <div class="prefs-item">
+                  <span class="prefs-name">最终</span>
+                  <input
+                    class="prod-input"
+                    type="text"
+                    readonly
+                    value={String(runtime.productivityInfo?.mining ?? 0)}
+                  />
+                  <span class="muted badge">用于求解</span>
+                </div>
+              </div>
             </div>
-            <button
-              class="btn"
-              onclick={() =>
-                openSelector("recipe", "选择配方", (name) =>
-                  runtime.setRecipeProductivity(name, 0.5),
-                )}
-            >+ 添加配方产能</button>
-          </div>
 
-          <div class="field">
-            <label>采矿产出加成（倍率）</label>
-            <input
-              type="number"
-              step="0.1"
-              min="0"
-              value={String(project.settings.mining_productivity)}
-              onchange={(event) => {
-                const value = Number((event.currentTarget as HTMLInputElement).value);
-                if (Number.isFinite(value)) runtime.setMiningProductivity(value).catch(() => {});
-              }}
-            />
+            <div class="field">
+              <label>配方产能加成（百分数；自动项点击改值即转为用户指定）</label>
+              <div class="prefs-list">
+                {#each runtime.productivityInfo?.recipes ?? [] as entry, i (entry.recipe)}
+                  <div class="prefs-item {entry.source === "user" ? "user-specified" : ""}">
+                    <HoverIcon type="recipe" name={entry.recipe} size={22} detailKind="recipe" />
+                    <span class="prefs-name">{runtime.localizedName("recipe", entry.recipe)}</span>
+                    <input
+                      class="prod-input"
+                      type="number"
+                      step="10"
+                      min="0"
+                      value={String(Math.round(entry.value * 100))}
+                      onchange={(event) => {
+                        const value = Number((event.currentTarget as HTMLInputElement).value);
+                        if (Number.isFinite(value)) {
+                          runtime.setRecipeProductivity(entry.recipe, value / 100).catch(() => {});
+                        }
+                      }}
+                    />
+                    <span class="muted">%</span>
+                    {#if entry.source === "user"}
+                      <button
+                        class="btn ghost"
+                        title="移除"
+                        onclick={() =>
+                          runtime.removeRecipeProductivity(entry.recipe).catch(() => {})}
+                      >×</button>
+                    {:else}
+                      <span class="muted badge">自动</span>
+                    {/if}
+                  </div>
+                {:else}
+                  <span class="muted">还没有配方产能加成</span>
+                {/each}
+              </div>
+              <button
+                class="btn"
+                onclick={() =>
+                  openSelector("recipe", "选择配方", (name) =>
+                    runtime.setRecipeProductivity(name, 0.5),
+                  )}
+              >+ 添加配方产能</button>
+            </div>
+
+            <div class="field">
+              <label>无限科技研究次数（据此推断产能）</label>
+              <div class="prefs-list">
+                {#each project.settings.infinite_levels as entry (entry.tech)}
+                  <div class="prefs-item user-specified">
+                    <HoverIcon type="technology" name={entry.tech} size={22} detailKind="technology" />
+                    <span class="prefs-name">{runtime.localizedName("technology", entry.tech)}</span>
+                    <input
+                      class="prod-input"
+                      type="number"
+                      step="1"
+                      min="0"
+                      value={String(entry.level)}
+                      onchange={(event) => {
+                        const value = Number((event.currentTarget as HTMLInputElement).value);
+                        if (Number.isInteger(value) && value >= 0) {
+                          runtime.setInfiniteTechLevel(entry.tech, value).catch(() => {});
+                        }
+                      }}
+                    />
+                    <span class="muted">级</span>
+                    <button
+                      class="btn ghost"
+                      title="移除"
+                      onclick={() =>
+                        runtime.removeInfiniteTechLevel(entry.tech).catch(() => {})}
+                    >×</button>
+                  </div>
+                {:else}
+                  <span class="muted">还没有无限科技等级</span>
+                {/each}
+              </div>
+              <button
+                class="btn"
+                onclick={() =>
+                  openSelector("technology", "选择无限科技", (name) =>
+                    runtime.setInfiniteTechLevel(name, 1),
+                  )}
+              >+ 添加无限科技</button>
+            </div>
+            {/if}
           </div>
           <button class="btn" onclick={() => (prefsOpen = true)}>规划偏好…</button>
           {/if}
@@ -2996,6 +3104,35 @@
     align-items: stretch;
     gap: 4px;
     padding: 5px 6px;
+  }
+
+  /* 嵌套可折叠子面板（里程碑 / 产能）。 */
+  .subpanel {
+    margin-top: 10px;
+    padding-top: 6px;
+    border-top: 1px solid var(--line);
+  }
+
+  .subpanel .panel-toggle {
+    margin-bottom: 6px;
+  }
+
+  /* 用户指定的产能项：虚线边框（区分自动推算）。 */
+  .prefs-item.user-specified {
+    border-style: dashed;
+    border-color: var(--accent-line);
+    background: color-mix(in srgb, var(--card) 84%, var(--accent) 8%);
+  }
+
+  .badge {
+    flex: 0 0 auto;
+    font-size: 9px;
+    letter-spacing: 0.05em;
+    color: var(--faint);
+    padding: 1px 5px;
+    border-radius: calc(var(--radius-sm) - 2px);
+    border: 1px solid var(--line);
+    white-space: nowrap;
   }
 
   .prefs-row {

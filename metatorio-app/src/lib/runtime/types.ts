@@ -176,6 +176,8 @@ export type ProjectAction =
   | { "set-ignore-productivity": { ignore: boolean } }
   | { "set-recipe-productivity": { productivity: RecipeProductivity } }
   | { "remove-recipe-productivity": { recipe: string } }
+  | { "set-infinite-tech-level": { level: InfiniteTechLevel } }
+  | { "remove-infinite-tech-level": { tech: string } }
   | { planning: PlanningAction };
 
 export type MechanicKind =
@@ -411,12 +413,44 @@ export interface RecipeProductivity {
   productivity: number;
 }
 
+/** 无限科技的研究次数覆盖（2.b）。 */
+export interface InfiniteTechLevel {
+  tech: string;
+  level: number;
+}
+
+/** 面向前端的产品力视图：区分自动推算与用户指定（用户值有虚线边框）。 */
+export interface ProductivityView {
+  /** 每个配方产能项：source = "auto"（自动推算）| "user"（用户指定）。 */
+  recipes: RecipeProductivityView[];
+  /** 自动推算的采矿产出加成。 */
+  auto_mining: number;
+  /** 最终采矿产出加成（用户覆盖后）。 */
+  mining: number;
+  /** 用户对无限科技的研究次数覆盖（2.b）。 */
+  infinite_levels: InfiniteTechLevel[];
+  /** 是否忽略自动推算（2.c）。 */
+  ignore: boolean;
+}
+
+/** 单个配方产能项。 */
+export interface RecipeProductivityView {
+  recipe: string;
+  value: number;
+  source: "auto" | "user";
+}
+
 export interface ProjectSettings {
   time_scale: TimeScale;
   /** 里程碑（可达性节点级；unlocked 是强制覆盖——false 强制不可达并阻断依赖，true 强制可达）。 */
   milestones: Milestone[];
+  /** 用户手动固定的配方产能（2.a，替换自动值）。 */
   recipe_productivity: RecipeProductivity[];
+  /** 用户对无限科技的研究次数覆盖（2.b）。 */
+  infinite_levels: InfiniteTechLevel[];
+  /** 忽略产能加成（2.c：丢弃自动推算，保留用户值）。 */
   ignore_productivity: boolean;
+  /** 用户手动固定的采矿产出加成（替换自动值）。 */
   mining_productivity: number;
   all_accessible: boolean;
   quality_limit: string | null;

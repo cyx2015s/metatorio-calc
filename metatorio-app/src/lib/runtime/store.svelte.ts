@@ -31,6 +31,7 @@ import {
   setActiveContext,
   setDefaultMilestones,
   milestonesOrdered,
+  productivity,
   implicitSources,
 } from "./client";
 import type {
@@ -41,9 +42,11 @@ import type {
   ContextInfo,
   FactoryId,
   IdWithQuality,
+  InfiniteTechLevel,
   MechanicId,
   MechanicKind,
   Milestone,
+  ProductivityView,
   ProjectId,
   PrototypeDetail,
   SolveResult,
@@ -154,6 +157,7 @@ class RuntimeStore {
     }
     this.refreshImplicitSources().catch(() => {});
     this.refreshOrderedMilestones().catch(() => {});
+    this.refreshProductivity().catch(() => {});
   }
 
   // ── 可达性（选择器过滤） ────────────────────────────────────────
@@ -562,6 +566,7 @@ class RuntimeStore {
     this.accessibility = null;
     await this.refresh();
     this.refreshOrderedMilestones().catch(() => {});
+    this.refreshProductivity().catch(() => {});
   }
 
   /** 里程碑节点按依赖拓扑排序（依赖在前）的当前结果；供里程碑列表按序展示。 */
@@ -576,6 +581,21 @@ class RuntimeStore {
       this.orderedMilestones = await milestonesOrdered(project);
     } catch {
       this.orderedMilestones = null;
+    }
+  }
+
+  /** 产品力视图（自动 + 用户覆盖），供项目设置面板按来源区分展示。 */
+  productivityInfo = $state<ProductivityView | null>(null);
+  async refreshProductivity(): Promise<void> {
+    const project = this.ui?.selected_project;
+    if (project == null) {
+      this.productivityInfo = null;
+      return;
+    }
+    try {
+      this.productivityInfo = await productivity(project);
+    } catch {
+      this.productivityInfo = null;
     }
   }
 
@@ -603,6 +623,22 @@ class RuntimeStore {
     await this.send({
       scope: "project",
       action: { project, action: { "remove-recipe-productivity": { recipe } } },
+    });
+  }
+
+  async setInfiniteTechLevel(tech: string, level: number): Promise<void> {
+    const project = this.requireProject();
+    await this.send({
+      scope: "project",
+      action: { project, action: { "set-infinite-tech-level": { level: { tech, level } } } },
+    });
+  }
+
+  async removeInfiniteTechLevel(tech: string): Promise<void> {
+    const project = this.requireProject();
+    await this.send({
+      scope: "project",
+      action: { project, action: { "remove-infinite-tech-level": { tech } } },
     });
   }
 
