@@ -519,24 +519,27 @@ fn requirements(store: &PrototypeStore, graph: &GraphData, node: &Accessible) ->
             let tech = store
                 .get(PrototypeGroup::Technology, name)
                 .and_then(|record| record.component::<TechnologyComponent>());
-            
+
             match tech {
-                Some(tech) if !tech.enabled && !tech.prerequisites.is_empty() => {
-                    let items = graph.tech_units
-                        .get(name)
-                        .cloned()
-                        .unwrap_or_default()
-                        .into_iter()
-                        .map(|item| Requirement::Node(Accessible::Item(item)));
-                    Requirement::All(
-                    tech.prerequisites
-                        .iter()
-                        .map(|prereq| Requirement::Node(Accessible::Tech(prereq.clone())))
-                        .chain(items)
-                        .collect::<Vec<_>>(),
-                )},
-                // enabled 科技（游戏开始可用）或无条件科技：根
-                _ => Requirement::All(Vec::new()),
+                // 科技可达 = 所有前置科技 + 所有科技原料物品（unit.ingredients 中
+                // 非 hidden 的物品）同时可达。原版 schema 中 enabled 表示"科技是否
+                // 出现在科技树"（默认 true），并非"已解锁"——科技仍需研究，故不豁免
+                // enabled：禁用科技瓶（物品里程碑）即可阻断依赖它的科技。
+                Some(tech) => {
+                    let mut all: Vec<Requirement> = Vec::new();
+                    for prereq in &tech.prerequisites {
+                        all.push(Requirement::Node(Accessible::Tech(prereq.clone())));
+                    }
+                    if let Some(items) = graph.tech_units.get(name) {
+                        for item in items {
+                            all.push(Requirement::Node(Accessible::Item(item.clone())));
+                        }
+                    }
+                    // 无任何依赖（无前置且无科技原料物品）→ All() 空 → 根。
+                    Requirement::All(all)
+                }
+                // 缺失科技（不会作为节点，也不会被 seed）。
+                None => Requirement::Any(Vec::new()),
             }
         }
         Accessible::Recipe(name) => {
@@ -641,9 +644,15 @@ fn requirements(store: &PrototypeStore, graph: &GraphData, node: &Accessible) ->
             Requirement::Any(any)
         }
         Accessible::Entity(name) => {
-            // 星岩/小行星：来源 = 空间地点生成（深空地点可控）+ 死亡生成链。
+            // 星岩碎片（AsteroidChunk 组实体）：空间平台可采集，初始 orbit 天然可得
+            // → 根。不特判名称——只要是星岩碎片就按碎片处理；大星岩（Entity 组）
+            // 才走下面的地点/死亡生成链。
+            if store.get(PrototypeGroup::AsteroidChunk, name).is_some() {
+                return Requirement::All(Vec::new());
+            }
+            // 星岩/小行星（大星岩）：来源 = 空间地点生成（深空地点可控）+ 死亡生成链。
             // 任一来源满足即可（普通星岩可经死亡链从初始轨道的小星岩递推，
-            // promethium 星岩需到达生成它的深空地点）。
+            // promethium 大星岩需到达生成它的深空地点）。
             let mut sources: Vec<Requirement> = Vec::new();
             if let Some(locations) = graph.asteroid_locations.get(name) {
                 sources.extend(locations.iter().map(|loc| Requirement::Node(loc.clone())));
@@ -857,10 +866,9 @@ pub fn compute_accessibility(
     for node in &options.forced_accessible {
         seed(node.clone());
     }
-    // 恒真根：电/热/角色（角色手工制造打破机器死锁）。
+    // 恒真根：电/热
     seed(Accessible::Electricity);
     seed(Accessible::Heat);
-    seed(Accessible::Entity("character".to_string()));
     // 无依赖对象（enabled 配方/科技、矿藏实体、normal 品质……）作为根种子。
     for node in &nodes {
         if matches!(requirements(store, &graph, node), Requirement::All(ref list) if list.is_empty())
@@ -884,15 +892,6 @@ pub fn compute_accessibility(
                 queue.push_back(dependent);
             }
         }
-    }
-
-    // 最终强制覆盖：里程碑是**强制决定**，自动解析（传播）不能覆盖——
-    // 强制可达的对象必然可达，强制不可达的对象必然不可达。
-    for node in &options.forced_accessible {
-        accessible.insert(node.clone());
-    }
-    for node in &options.forced_inaccessible {
-        accessible.remove(node);
     }
 
     Accessibility { accessible }
@@ -1361,21 +1360,46 @@ mod tests {
             result.is_item_accessible("promethium-asteroid-chunk"),
             "promethium 星岩碎片物品应可达（星岩收集器采集）"
         );
-        // promethium 星岩仅在 shattered-planet 深空地点生成——锁定该地点（或
-        // 无 promethium-science-pack 科技）时不可达，体现"按地点判定"。
+        // promethium **大星岩**仅由 shattered-planet 深空地点生成——锁定该地点后
+        // 大星岩不可达（地点判定生效）。星岩碎片（AsteroidChunk 组）初始可采集，
+        // 不受地点锁定影响。
         let mut locked = AccessibilityOptions::default();
         locked.forced_inaccessible = [Accessible::Space("shattered-planet".to_string())]
             .into_iter()
             .collect();
         let locked_result = compute_accessibility(&store, &locked);
         assert!(
-            !locked_result.is_item_accessible("promethium-asteroid-chunk"),
-            "锁定 shattered-planet 后 promethium 星岩应不可达（地点判定生效）"
+            !locked_result.is_accessible(&Accessible::Entity("huge-promethium-asteroid".to_string())),
+            "锁定 shattered-planet 后 promethium 大星岩应不可达（地点判定生效）"
         );
         assert!(
             locked_result.is_item_accessible("metallic-asteroid-chunk"),
             "锁定深空地点不应影响基础星岩"
         );
     }
-}
 
+    /// 新里程碑（强制覆盖）行为：禁用 automation-science-pack 物品后，大量依赖
+    /// 科技瓶的科技不可达——至少一半（科技依赖 = 前置科技 + 科技原料物品）。
+    #[test]
+    fn real_dump_disabling_automation_pack_blocks_half_the_techs() {
+        let Some(store) = load_real_dump() else {
+            return;
+        };
+        let mut options = AccessibilityOptions::default();
+        options.forced_inaccessible =
+            [Accessible::Item("automation-science-pack".to_string())].into_iter().collect();
+        let result = compute_accessibility(&store, &options);
+
+        let total = store.group(PrototypeGroup::Technology).count();
+        let accessible = store
+            .group(PrototypeGroup::Technology)
+            .filter(|record| result.is_accessible(&Accessible::Tech(record.name.clone())))
+            .count();
+        let inaccessible = total - accessible;
+        eprintln!("禁用 automation-science-pack：科技 total={total} 可达={accessible} 不可达={inaccessible}");
+        assert!(
+            inaccessible >= total / 2,
+            "禁用 automation-science-pack 后至少一半科技不可达（实际 {inaccessible}/{total}）"
+        );
+    }
+}
