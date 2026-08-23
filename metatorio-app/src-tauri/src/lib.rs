@@ -2237,6 +2237,22 @@ fn milestones_ordered(
         .map_err(|error| error.to_string())
 }
 
+/// 面向前端的产品力视图：自动推算 + 用户覆盖，按来源（auto/user）区分，
+/// 供 UI 以虚线边框标注用户指定项。
+#[tauri::command]
+fn productivity(
+    state: State<'_, AppState>,
+    project: ProjectId,
+) -> Result<metatorio_runtime::ProductivityView, String> {
+    let mut runtime = state
+        .runtime
+        .lock()
+        .map_err(|_| "runtime lock poisoned".to_string())?;
+    runtime
+        .project_productivity(project)
+        .map_err(|error| error.to_string())
+}
+
 // ── Persistence ───────────────────────────────────────────────────
 
 /// OS file dialog for the Factorio executable (game-context loading).
@@ -3080,6 +3096,7 @@ pub fn run() {
             accessibility,
             set_default_milestones,
             milestones_ordered,
+            productivity,
             open_project_dialog,
             save_project_as_dialog,
             save_project,
