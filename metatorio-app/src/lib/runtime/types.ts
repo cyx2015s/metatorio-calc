@@ -419,7 +419,7 @@ export interface InfiniteTechLevel {
   level: number;
 }
 
-/** 面向前端的产品力视图：区分自动推算与用户指定（用户值有虚线边框）。 */
+/** 面向前端的产能视图：区分自动推算与用户指定（用户值有虚线边框）。 */
 export interface ProductivityView {
   /** 每个配方产能项：source = "auto"（自动推算）| "user"（用户指定）。 */
   recipes: RecipeProductivityView[];

@@ -61,7 +61,7 @@ export async function milestonesOrdered(project: number): Promise<Milestone[]> {
   return call("milestones_ordered", { project });
 }
 
-/** 产品力视图：自动推算 + 用户覆盖，按来源区分。 */
+/** 产能视图：自动推算 + 用户覆盖，按来源区分。 */
 export async function productivity(project: number): Promise<import("./types").ProductivityView> {
   return call("productivity", { project });
 }

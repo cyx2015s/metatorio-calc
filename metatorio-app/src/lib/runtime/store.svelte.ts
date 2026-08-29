@@ -599,7 +599,7 @@ class RuntimeStore {
     }
   }
 
-  /** 产品力视图（自动 + 用户覆盖），供项目设置面板按来源区分展示。 */
+  /** 产能视图（自动 + 用户覆盖），供项目设置面板按来源区分展示。 */
   productivityInfo = $state<ProductivityView | null>(null);
   async refreshProductivity(): Promise<void> {
     const project = this.ui?.selected_project;
