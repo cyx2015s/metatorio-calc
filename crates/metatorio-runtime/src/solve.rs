@@ -716,6 +716,50 @@ pub fn add_conversion_flows(
         }
     }
 
+    // 燃料类别子集转换：窄类别燃料可满足包含它的更多类别的机器需求
+    // （复刻流体温度区间子类型放宽）。如 coal(fuel_category=chemical) 可供给
+    // fuel_categories=(chemical, kr-vehicle-fuel, processed-chemical) 的锅炉。
+    // 类别集合以**精确顺序**的身份标识（ItemFuel 的身份就是 category Vec 本身），
+    // 故按出现的确切类别列表逐对生成 子集→超 集 的零成本转换。
+    {
+        // 收集去重（精确向量相等）的燃料类别集合。
+        let mut category_sets: Vec<Vec<String>> = Vec::new();
+        for key in seen.keys() {
+            if let DualVar::ItemFuel { category, .. } = key {
+                if !category.is_empty() && !category_sets.contains(category) {
+                    category_sets.push(category.clone());
+                }
+            }
+        }
+        let is_proper_subset =
+            |a: &Vec<String>, b: &Vec<String>| a.len() < b.len() && a.iter().all(|x| b.contains(x));
+        for s1 in &category_sets {
+            for s2 in &category_sets {
+                if s1 == s2 || !is_proper_subset(s1, s2) {
+                    continue;
+                }
+                for burnt in [false, true] {
+                    let mut flow = Flow::default();
+                    flow.insert(
+                        DualVar::ItemFuel {
+                            category: s1.clone(),
+                            has_burnt_result: burnt,
+                        },
+                        -1.0,
+                    );
+                    flow.insert(
+                        DualVar::ItemFuel {
+                            category: s2.clone(),
+                            has_burnt_result: burnt,
+                        },
+                        1.0,
+                    );
+                    add_aux(flows, flow);
+                }
+            }
+        }
+    }
+
     // filter 归并：FluidHeat{F} / FluidFuel{F} → 空串（任意流体）。
     for key in seen.keys() {
         let flow = match key {
@@ -1455,5 +1499,50 @@ mod tests {
         assert!((view.auto_mining - 0.0).abs() < 1e-9, "忽略时自动采矿应 0");
         assert!((view.mining - 5.0).abs() < 1e-9, "忽略时用户 2.b 仍生效");
         assert!(view.ignore);
+    }
+
+    /// 燃料类别子集转换：单一化学燃料应能供给多类别（chemical + …）的锅炉。
+    /// 回归：KR/SE 里燃料使用者 fuel_categories 为多类别，煤炭 fuel_category
+    /// 只有 chemical，此前二者 ItemFuel 身份不相等 → 自动规划选不中燃煤发电。
+    #[test]
+    fn fuel_category_subset_conversion_allows_narrow_fuel() {
+        let store = PrototypeStore::load(&serde_json::json!({})).expect("空 dump 应可加载");
+        let narrow = vec!["chemical".to_string()];
+        let wide = vec![
+            "chemical".to_string(),
+            "kr-vehicle-fuel".to_string(),
+            "processed-chemical".to_string(),
+        ];
+        let mut flows = AIndexMap::default();
+        let fuel_var = ExpandedVarId { mechanic: MechanicId(1), variant: 0 };
+        let boiler_var = ExpandedVarId { mechanic: MechanicId(2), variant: 0 };
+        let mut fuel_flow = Flow::default();
+        fuel_flow.insert(
+            DualVar::ItemFuel { category: narrow.clone(), has_burnt_result: false },
+            100.0,
+        );
+        flows.insert(fuel_var, (fuel_flow, 1.0));
+        let mut boiler_flow = Flow::default();
+        boiler_flow.insert(
+            DualVar::ItemFuel { category: wide.clone(), has_burnt_result: false },
+            -100.0,
+        );
+        flows.insert(boiler_var, (boiler_flow, 1.0));
+        add_conversion_flows(&mut flows, &store, &Flow::default(), &Flow::default());
+        let has_conversion = flows.values().any(|(flow, _)| {
+            flow.get(&DualVar::ItemFuel { category: narrow.clone(), has_burnt_result: false })
+                .copied()
+                .unwrap_or(0.0)
+                < 0.0
+                && flow
+                    .get(&DualVar::ItemFuel { category: wide.clone(), has_burnt_result: false })
+                    .copied()
+                    .unwrap_or(0.0)
+                    > 0.0
+        });
+        assert!(
+            has_conversion,
+            "应产出 化学 → 化学+kr-vehicle-fuel+processed-chemical 的零成本转换"
+        );
     }
 }
