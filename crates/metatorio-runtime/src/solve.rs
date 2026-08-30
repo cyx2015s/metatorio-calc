@@ -439,6 +439,140 @@ impl Runtime {
         let factory = self.state.factory(project_id, factory_id)?;
         solve_document(prototype, project, factory, project_id, factory_id)
     }
+
+    /// 自动规划：完整状态空间枚举候选 → 构建 LP 求解 → 保留被选中的机制并
+    /// 替换工厂机制，最后重求解。返回最终 SolveResult。
+    pub fn auto_plan(
+        &mut self,
+        project_id: ProjectId,
+        factory_id: FactoryId,
+    ) -> Result<SolveResult, RuntimeError> {
+        let store = self.context_store(project_id)?.clone();
+        let project_doc = self.state.project(project_id)?.clone();
+        let factory_doc = self.state.factory(project_id, factory_id)?.clone();
+        let game = make_game_state(&store, &project_doc);
+        let context = metatorio_core::Context::new(&store, &game);
+        let quality_level =
+            |name: &str| game.qualities.iter().position(|c| c == name).unwrap_or(0);
+        let accessibility = self.project_accessibility(project_id)?;
+        let options = crate::auto_plan::EnumerateOptions {
+            alternative_count: project_doc.planning.alternative_count,
+            machine_preferences: project_doc.planning.machine_preferences.clone(),
+            enumerate_modules: project_doc.planning.enumerate_modules.clone(),
+            enumerate_beacons: project_doc.planning.enumerate_beacons.clone(),
+            quality_limit: game.max_quality,
+            major_quality: quality_level(&factory_doc.settings.major_quality),
+            planet: factory_doc.settings.planet.clone(),
+            surface: factory_doc.settings.surface.clone(),
+            accessibility: Some(accessibility.clone()),
+        };
+        let candidates = crate::auto_plan::enumerate_all(&store, &context, &options);
+        let (candidates, dropped): (Vec<_>, Vec<_>) = candidates
+            .into_iter()
+            .partition(|m| crate::auto_plan::mechanic_accessible(&store, &accessibility, m));
+        if candidates.is_empty() {
+            return Err(RuntimeError::InvalidValue(if dropped.is_empty() {
+                "没有可枚举的机制候选".to_string()
+            } else {
+                format!(
+                    "所有 {} 个候选机制都不可达（目标依赖的科技未解锁？可用\"无视可达性\"开关或显式标记可达）",
+                    dropped.len()
+                )
+            }));
+        }
+
+        // 展开全部候选为一个 LP。
+        let expansion = metatorio_core::expand::expand(
+            candidates.iter().enumerate().map(|(index, mechanic)| (index as u64, mechanic)),
+            &context,
+        );
+        let mut variant_counts: HashMap<MechanicId, u16> = HashMap::new();
+        let mut flows = AIndexMap::default();
+        for variable in expansion.variables {
+            let config = MechanicId(variable.prim_var.inner);
+            let variant = variant_counts.entry(config).or_default();
+            let flow_id = ExpandedVarId {
+                mechanic: config,
+                variant: *variant,
+            };
+            *variant = variant.saturating_add(1);
+            flows.insert(flow_id, (variable.flow, variable.cost));
+        }
+        let target = factory_doc
+            .targets
+            .iter()
+            .fold(AIndexMap::default(), |mut target, item| {
+                *target.entry(item.flow.clone()).or_insert(0.0) += item.amount;
+                target
+            });
+        let sources: Flow = factory_doc
+            .external_inputs
+            .iter()
+            .map(|input| (input.flow.clone(), input.penalty))
+            .collect();
+        let mut all_sources = sources.clone();
+        if let Some(planet) = factory_doc.settings.planet.as_deref() {
+            let mut implicit = crate::planet::planet_autoplaced_flows(&store, planet);
+            for key in all_sources.keys() {
+                implicit.shift_remove(key);
+            }
+            all_sources.extend(implicit);
+        }
+        add_conversion_flows(&mut flows, &store, &target, &all_sources);
+        let mut problem = SolverData::new_simple(target, flows);
+        problem.sources = all_sources;
+        // 自动规划默认严格供给。
+        problem.strict_source = true;
+        problem.strict_sink = factory_doc.strict_sink;
+        problem
+            .target
+            .extend(factory_doc.target_expressions.iter().map(|expression| TargetSpec {
+                constant: expression.constant,
+                coefficients: expression
+                    .terms
+                    .iter()
+                    .map(|term| (term.flow.clone(), term.coefficient))
+                    .collect(),
+            }));
+
+        let solution = problem.solve();
+        let SolverSolution::Solved { prim, prim_scale, .. } = solution else {
+            let SolverSolution::NotSolved { no_provider, .. } = solution else {
+                return Err(RuntimeError::InvalidValue("自动规划求解失败".to_string()));
+            };
+            return Err(RuntimeError::InvalidValue(format!(
+                "自动规划无解（目标不可达）：无供给 {no_provider:?}"
+            )));
+        };
+        // 保留被选中的候选（用量 > 阈值），直接替换工厂机制。
+        let mut used = crate::auto_plan::used_candidates(&candidates, prim, prim_scale);
+        used.sort_by_key(|mechanic| crate::document::MechanicKind::of(mechanic) as u8);
+        let ids: Vec<MechanicId> = (0..used.len()).map(|_| self.state.allocate_id()).collect();
+        {
+            let document = &mut self.state.document;
+            let factory_doc = document
+                .projects
+                .iter_mut()
+                .find(|candidate| candidate.id == project_id)
+                .and_then(|candidate| {
+                    candidate.factories.iter_mut().find(|factory_doc| factory_doc.id == factory_id)
+                })
+                .ok_or(RuntimeError::FactoryNotFound {
+                    project: project_id,
+                    factory: factory_id,
+                })?;
+            factory_doc.mechanics = used
+                .into_iter()
+                .zip(ids)
+                .map(|(mechanic, id)| crate::document::MechanicEntry {
+                    id,
+                    enabled: true,
+                    mechanic,
+                })
+                .collect();
+        }
+        self.solve_factory(project_id, factory_id)
+    }
 }
 
 fn solve_document(

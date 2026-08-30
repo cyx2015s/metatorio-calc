@@ -11,8 +11,6 @@
 //! `<app_data>/contexts/<content-hash>/`; projects pin the context they were
 //! planned against via `ProjectDocument::context_id`.
 
-mod auto_plan;
-
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -20,27 +18,26 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use metatorio_core::{Accessibility, Accessible, DualVar, IdWithQuality, Mechanic};
+use metatorio_core::{Accessible, DualVar, IdWithQuality, Mechanic};
 use metatorio_data::store::{PrototypeGroup, PrototypeRecord, PrototypeStore};
 use metatorio_data::{
     BeaconComponent, BoilerComponent, BurnerGeneratorComponent, CraftingMachineComponent,
     EntityComponent, FluidComponent, GeneratorComponent, ItemComponent, MiningDrillComponent,
     ModuleComponent, PrototypeBaseComponent, QualityComponent, ReactorComponent, RecipeComponent,
-    ResourceEntityComponent, TechnologyComponent,
+    ResourceEntityComponent,
 };
 use metatorio_data::types::{Ingredient, Product};
-use metatorio_core::Flow;
 use metatorio_runtime::{
-    document::{AppDocument, MechanicEntry},
+    auto_plan,
+    document::{AppDocument},
     id::{FactoryId, MechanicId, ProjectId},
     message::{
         AppMessage, CleanupAction, FactoryAction, MechanicAction, MechanicListAction,
         MiningMechanicAction, ModuleAction, ProjectAction, RecipeMechanicAction, RuntimeCommand,
     },
-    solve::{ExpandedVarId, Runtime, SolveResult, SolveStatus, add_conversion_flows},
+    solve::{Runtime, SolveStatus},
     state::{DispatchResult, UiState},
 };
-use metatorio_solver::{AIndexMap, SolverData, SolverSolution, TargetSpec};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
@@ -1409,235 +1406,6 @@ fn suggest_for_flow(store: &PrototypeStore, flow: DualVar) -> Vec<Suggestion> {
     out
 }
 
-/// 自动规划：完整状态空间枚举（复刻原版 auto.rs + 各机制 auto_populate）。
-///
-/// 枚举全部候选实例（配方/矿点 × 机器 × 插件组合 × 信塔配置 × 品质，
-/// 以及变质/种植/燃料/发射/发电机/锅炉/反应堆/流体燃料/流体热），一次
-/// 构建 LP 求解，保留被选中的候选替换工厂机制。
-/// 自动规划候选的可达性过滤：只按"配方已解锁"判定（自动规划考虑
-/// **科技可达性**）——配方 `enabled`（游戏开始可用）或任一解锁科技
-/// 可达即放行。
-///
-/// 机器/燃料/原料/矿藏**不做**可达性判定：它们依赖 place_result 物品链
-/// 与矿藏/流体链，完整 dump 下通常可达，但简化数据或外部输入供给时
-/// 误判会引入假阴性（自动规划被错误拒绝）；缺供给本就由求解器报告
-/// （"剪枝阶段缺少供给的物品/流"）。配方级过滤的假阴性风险最低：
-/// 科技未解锁 = 明确的"不可用"语义，也是用户要求的核心。
-fn mechanic_accessible(
-    store: &PrototypeStore,
-    accessible: &Accessibility,
-    mechanic: &Mechanic,
-) -> bool {
-    let Mechanic::Recipe(mechanic) = mechanic else {
-        return true;
-    };
-    recipe_unlocked(store, accessible, &mechanic.recipe.id)
-}
-
-/// 配方是否已解锁：`enabled` 或任一 `unlock-recipe` 科技可达。
-fn recipe_unlocked(store: &PrototypeStore, accessible: &Accessibility, name: &str) -> bool {
-    let Some(record) = store.get(PrototypeGroup::Recipe, name) else {
-        return true;
-    };
-    let Some(recipe) = record.component::<RecipeComponent>() else {
-        return true;
-    };
-    if recipe.enabled {
-        return true;
-    }
-    store
-        .group(PrototypeGroup::Technology)
-        .any(|tech_record| {
-            let Some(tech) = tech_record.component::<TechnologyComponent>() else {
-                return false;
-            };
-            if !accessible.is_accessible(&Accessible::Tech(tech_record.name.clone())) {
-                return false;
-            }
-            tech.effects.iter().any(|effect| {
-                matches!(effect, metatorio_data::types::Modifier::UnlockRecipe(unlock) if unlock.recipe == name)
-            })
-        })
-}
-
-fn auto_plan(
-    _state: &AppState,
-    runtime: &mut Runtime,
-    project: ProjectId,
-    factory: FactoryId,
-) -> Result<SolveResult, String> {
-    let store = runtime
-        .context_store(project)
-        .map_err(|error| error.to_string())?
-        .clone();
-    let project_doc = runtime
-        .state
-        .project(project)
-        .map_err(|error| error.to_string())?
-        .clone();
-    let factory_doc = runtime
-        .state
-        .factory(project, factory)
-        .map_err(|error| error.to_string())?
-        .clone();
-    let game = metatorio_runtime::solve::make_game_state(&store, &project_doc);
-    let context = metatorio_core::Context::new(&store, &game);
-    let quality_level = |name: &str| {
-        game.qualities
-            .iter()
-            .position(|candidate| candidate == name)
-            .unwrap_or(0)
-    };
-    // ③ 自动规划考虑可达性：机型候选与配方候选都按项目可达性过滤
-    // （用户显式标记 / 里程碑 / "无视可达性" 经 project_accessibility 生效）。
-    let accessibility = runtime
-        .project_accessibility(project)
-        .map_err(|error| error.to_string())?;
-    let options = auto_plan::EnumerateOptions {
-        alternative_count: project_doc.planning.alternative_count,
-        machine_preferences: project_doc.planning.machine_preferences.clone(),
-        enumerate_modules: project_doc.planning.enumerate_modules.clone(),
-        enumerate_beacons: project_doc.planning.enumerate_beacons.clone(),
-        quality_limit: game.max_quality,
-        major_quality: quality_level(&factory_doc.settings.major_quality),
-        planet: factory_doc.settings.planet.clone(),
-        surface: factory_doc.settings.surface.clone(),
-        accessibility: Some(accessibility.clone()),
-    };
-    let candidates = auto_plan::enumerate_all(&store, &context, &options);
-    eprintln!(
-        "[auto-plan] 候选机制 {} 个（recipe/mining/simple/energy 已按表面条件与种子可用性过滤），星球={:?} 地表={:?}",
-        candidates.len(),
-        factory_doc.settings.planet,
-        factory_doc.settings.surface,
-    );
-    let (candidates, dropped): (Vec<_>, Vec<_>) = candidates
-        .into_iter()
-        .partition(|mechanic| mechanic_accessible(&store, &accessibility, mechanic));
-    if !dropped.is_empty() {
-        eprintln!(
-            "[auto-plan] 可达性过滤剔除 {} 个候选（保留 {} 个）",
-            dropped.len(),
-            candidates.len()
-        );
-    }
-    if candidates.is_empty() {
-        return Err(if dropped.is_empty() {
-            "没有可枚举的机制候选".to_string()
-        } else {
-            format!(
-                "所有 {} 个候选机制都不可达（目标依赖的科技未解锁？可用\"无视可达性\"开关或显式标记可达）",
-                dropped.len()
-            )
-        });
-    }
-
-    // 展开全部候选为一个 LP。
-    let expansion = metatorio_core::expand::expand(
-        candidates.iter().enumerate().map(|(index, mechanic)| (index as u64, mechanic)),
-        &context,
-    );
-    eprintln!("[auto-plan] 展开变量 {} 个", expansion.variables.len());
-    let mut variant_counts: HashMap<u64, u16> = HashMap::new();
-    let mut flows = AIndexMap::default();
-    for variable in expansion.variables {
-        let variant = variant_counts.entry(variable.prim_var.inner).or_default();
-        let flow_id = ExpandedVarId {
-            mechanic: MechanicId(variable.prim_var.inner),
-            variant: *variant,
-        };
-        *variant = variant.saturating_add(1);
-        flows.insert(flow_id, (variable.flow, variable.cost));
-    }
-    let target = factory_doc
-        .targets
-        .iter()
-        .fold(AIndexMap::default(), |mut target, item| {
-            *target.entry(item.flow.clone()).or_insert(0.0) += item.amount;
-            target
-        });
-    let sources: Flow = factory_doc
-        .external_inputs
-        .iter()
-        .map(|input| (input.flow.clone(), input.penalty))
-        .collect();
-    // 星球隐式资源同样免费（与 solve_document 一致），外部输入覆盖剔除
-    let mut all_sources = sources.clone();
-    if let Some(planet) = factory_doc.settings.planet.as_deref() {
-        let mut implicit = metatorio_runtime::planet::planet_autoplaced_flows(&store, planet);
-        for key in all_sources.keys() {
-            implicit.shift_remove(key);
-        }
-        all_sources.extend(implicit);
-    }
-    add_conversion_flows(&mut flows, &store, &target, &all_sources);
-    let mut problem = SolverData::new_simple(target, flows);
-    problem.sources = all_sources;
-    // 自动规划默认严格供给（复刻原版 auto_planner：只允许外部输入 + 星球资源
-    // 作为初始条件，不凭空输入贵重物品）。
-    problem.strict_source = true;
-    problem.strict_sink = factory_doc.strict_sink;
-    problem
-        .target
-        .extend(factory_doc.target_expressions.iter().map(|expression| TargetSpec {
-            constant: expression.constant,
-            coefficients: expression
-                .terms
-                .iter()
-                .map(|term| (term.flow.clone(), term.coefficient))
-                .collect(),
-        }));
-
-    let solution = problem.solve();
-    let SolverSolution::Solved { prim, prim_scale, .. } = solution else {
-        let SolverSolution::NotSolved {
-            no_provider,
-            no_consumer,
-            description,
-        } = solution
-        else {
-            return Err("自动规划求解失败".to_string());
-        };
-        eprintln!(
-            "[auto-plan] 无解: {description} | no_provider={no_provider:?} | no_consumer={no_consumer:?}"
-        );
-        return Err(format!("自动规划无解（目标不可达）：无供给 {no_provider:?}"));
-    };
-    eprintln!("[auto-plan] 求解成功，选中 {} 个机制", prim.len());
-    // 保留被选中的候选（用量 > 阈值），直接替换工厂机制。
-    // used_candidates 会排除零成本转换流的辅助变量（MechanicId(u64::MAX)）。
-    let mut used: Vec<Mechanic> =
-        auto_plan::used_candidates(&candidates, prim, prim_scale);
-    used.sort_by_key(|mechanic| {
-        metatorio_runtime::document::MechanicKind::of(mechanic) as u8
-    });
-    // 直接改动文档后补一次求解结果（持久化由后续变更触发）。
-    let ids: Vec<MechanicId> = (0..used.len()).map(|_| runtime.state.allocate_id()).collect();
-    {
-        let document = &mut runtime.state.document;
-        let factory_doc = document
-            .projects
-            .iter_mut()
-            .find(|candidate| candidate.id == project)
-            .and_then(|candidate| {
-                candidate
-                    .factories
-                    .iter_mut()
-                    .find(|factory_doc| factory_doc.id == factory)
-            })
-            .ok_or("工厂不存在")?;
-        factory_doc.mechanics = used
-            .into_iter()
-            .zip(ids)
-            .map(|(mechanic, id)| MechanicEntry {
-                id,
-                enabled: true,
-                mechanic,
-            })
-            .collect();
-    }
-    runtime.solve_factory(project, factory).map_err(|error| error.to_string())
-}
 
 /// 物品的机制标签（伪类别，供前端按机制过滤选择器）：
 /// spoilable / plantable / fuel / launchable。
@@ -2948,9 +2716,9 @@ fn execute_command(
         RuntimeCommand::AutoPlan { project, factory } => {
             // 自动规划：迭代添加建议机制直至可解。
             let _ = ensure_context_for_project(state, runtime, *project);
-            match auto_plan(state, runtime, *project, *factory) {
+            match runtime.auto_plan(*project, *factory) {
                 Ok(result) => emit(app, "solve-result", result),
-                Err(error) => emit(app, "solve-error", error),
+                Err(error) => emit(app, "solve-error", error.to_string()),
             }
         }
         other => eprintln!("unhandled runtime command: {other:?}"),
@@ -3361,7 +3129,7 @@ mod tests {
         let mut outcomes = Vec::new();
         for (label, amount) in [("1e-6（小目标）", 1e-6), ("1.0（大目标）", 1.0)] {
             let factory = make_factory(&mut runtime, project, amount);
-            let result = auto_plan(&AppState::default(), &mut runtime, project, factory);
+            let result = runtime.auto_plan(project, factory);
             let status = match &result {
                 Ok(solve) => match &solve.status {
                     SolveStatus::Solved { .. } => "Solved".to_string(),

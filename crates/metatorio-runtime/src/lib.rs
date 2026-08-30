@@ -5,6 +5,7 @@
 //! turns input events into [`AppMessage`] values; an outer runtime applies
 //! them and schedules persistence or solving as needed.
 
+pub mod auto_plan;
 pub mod document;
 pub mod id;
 pub mod message;
