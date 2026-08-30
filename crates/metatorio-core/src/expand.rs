@@ -88,7 +88,7 @@ fn entity_area(store: &PrototypeStore, name: &str) -> Option<f64> {
 /// 单台实例成本（复刻旧实现 + 信标占地）：
 /// - 带机器/设备的机制：机器碰撞箱面积 + Σ(信标面积 × 信标数 / 共享比例)
 ///   （缺失回退 16.0）；
-/// - 腐坏：spoil_ticks / stack_size / 16；
+/// - 变质：spoil_ticks / stack_size / 16；
 /// - 太阳能：太阳能板面积（蓄电器面积按表面倍率在 `expand` 单独叠加）；
 /// - 其余（种植/物品燃料/发射）：固定 16.0。
 pub fn instance_cost(store: &PrototypeStore, mechanic: &Mechanic) -> f64 {

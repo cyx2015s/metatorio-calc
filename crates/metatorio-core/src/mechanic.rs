@@ -301,7 +301,7 @@ pub struct MiningMechanic {
     pub fuel_temperature: Option<i32>,
 }
 
-/// 腐坏组件。
+/// 变质组件。
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SpoilMechanic {

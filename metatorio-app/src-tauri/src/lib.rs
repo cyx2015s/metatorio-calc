@@ -185,9 +185,9 @@ pub struct PrototypeDetail {
     pub fuel_category: String,
     /// 燃烧产物。
     pub burnt_result: String,
-    /// 腐坏产物。
+    /// 变质产物。
     pub spoil_result: String,
-    /// 腐坏时间（刻）。
+    /// 变质时间（刻）。
     pub spoil_ticks: Option<u32>,
     /// 种植产物（种子 → 实体）。
     pub plant_result: String,
@@ -1404,7 +1404,7 @@ fn suggest_for_flow(store: &PrototypeStore, flow: DualVar) -> Vec<Suggestion> {
 /// 自动规划：完整状态空间枚举（复刻原版 auto.rs + 各机制 auto_populate）。
 ///
 /// 枚举全部候选实例（配方/矿点 × 机器 × 插件组合 × 信塔配置 × 品质，
-/// 以及腐坏/种植/燃料/发射/发电机/锅炉/反应堆/流体燃料/流体热），一次
+/// 以及变质/种植/燃料/发射/发电机/锅炉/反应堆/流体燃料/流体热），一次
 /// 构建 LP 求解，保留被选中的候选替换工厂机制。
 /// 自动规划候选的可达性过滤：只按"配方已解锁"判定（自动规划考虑
 /// **科技可达性**）——配方 `enabled`（游戏开始可用）或任一解锁科技

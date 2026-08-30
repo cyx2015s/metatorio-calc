@@ -709,9 +709,9 @@ export interface PrototypeDetail {
   fuel_category: string;
   /** 燃烧产物。 */
   burnt_result: string;
-  /** 腐坏产物。 */
+  /** 变质产物。 */
   spoil_result: string;
-  /** 腐坏时间（刻）。 */
+  /** 变质时间（刻）。 */
   spoil_ticks: number | null;
   /** 种植产物（种子 → 实体）。 */
   plant_result: string;

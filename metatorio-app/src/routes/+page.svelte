@@ -22,7 +22,7 @@
   const mechKinds: { kind: import("$lib/runtime/types").MechanicKind; label: string }[] = [
     { kind: "recipe", label: "配方" },
     { kind: "mining", label: "采矿" },
-    { kind: "spoil", label: "腐坏" },
+    { kind: "spoil", label: "变质" },
     { kind: "plant", label: "种植" },
     { kind: "item-fuel", label: "物品燃料" },
     { kind: "item-launch", label: "火箭发射" },
@@ -738,7 +738,7 @@
           break;
         }
         case "item": {
-          // 按机制类型过滤物品：腐坏/种植/燃料/发射
+          // 按机制类型过滤物品：变质/种植/燃料/发射
           const mechKind = entry?.mechanic.type;
           const filter =
             mechKind === "spoil"
@@ -752,7 +752,7 @@
                     : [];
           const title =
             mechKind === "spoil"
-              ? "选择会腐坏的物品"
+              ? "选择会变质的物品"
               : mechKind === "plant"
                 ? "选择种子"
                 : mechKind === "item-fuel"
@@ -1658,14 +1658,14 @@
                     type="number"
                     step="0.1"
                     min="0"
-                    value={String(
+                    value={String(100 * (
                       project.settings.mining_productivity !== 0
                         ? project.settings.mining_productivity
-                        : (runtime.productivityInfo?.auto_mining ?? 0),
-                    )}
+                        : (runtime.productivityInfo?.auto_mining ?? 0)
+                    ))}
                     onchange={(event) => {
                       const value = Number((event.currentTarget as HTMLInputElement).value);
-                      if (Number.isFinite(value)) runtime.setMiningProductivity(value).catch(() => {});
+                      if (Number.isFinite(value)) runtime.setMiningProductivity(value / 100).catch(() => {});
                     }}
                   />
                   <span class="muted badge">{project.settings.mining_productivity !== 0 ? "用户" : "推断"}</span>
@@ -1683,9 +1683,8 @@
                     <input
                       class="prod-input"
                       type="number"
-                      step="10"
                       min="0"
-                      value={String(Math.round(entry.value * 100))}
+                      value={String(entry.value * 100)}
                       onchange={(event) => {
                         const value = Number((event.currentTarget as HTMLInputElement).value);
                         if (Number.isFinite(value)) {

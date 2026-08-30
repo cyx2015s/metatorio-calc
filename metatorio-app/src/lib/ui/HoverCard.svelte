@@ -206,7 +206,7 @@
       {/if}
       {#if detail.spoil_result}
         <div class="hc-row">
-          <span>腐坏</span>
+          <span>变质</span>
           <strong>{runtime.localizedName("item", detail.spoil_result)}{detail.spoil_ticks != null ? `（${fmtNum(detail.spoil_ticks / 60)} 秒）` : ""}</strong>
         </div>
       {/if}

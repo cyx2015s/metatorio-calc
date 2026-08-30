@@ -632,7 +632,7 @@ fn enumerate_simple(
     out: &mut Vec<Mechanic>,
 ) {
     let quality_range = options.quality_limit + 1;
-    // 腐坏 / 种植 / 物品燃料 / 火箭发射
+    // 变质 / 种植 / 物品燃料 / 火箭发射
     for record in store.group(PrototypeGroup::Item) {
         let Some(item) = record.component::<ItemComponent>() else {
             continue;

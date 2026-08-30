@@ -14,7 +14,7 @@
   const kindLabel: Record<string, string> = {
     recipe: "配方",
     mining: "采矿",
-    spoil: "腐坏",
+    spoil: "变质",
     plant: "种植",
     "item-fuel": "物品燃料",
     "item-launch": "发射",
