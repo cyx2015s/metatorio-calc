@@ -15,6 +15,7 @@
     detailKind,
     quality,
     onClick,
+    flow,
   }: {
     type?: string;
     name?: string;
@@ -25,13 +26,24 @@
     quality?: string;
     /** 图标可点击（如触发生产/消耗建议）时传入；悬停详情仍可用。 */
     onClick?: (event: MouseEvent) => void;
+    /** 当前流（抽象能量流/定温流体等）。传入时悬停卡片会显示流的具体参数
+     * （流体实际温度、ItemFuel 类别列表等），无原型详情也能弹出。 */
+    flow?: import("$lib/runtime/types").DualVar;
   } = $props();
 
   let hoverActive = $state(false);
   let pos = $state({ x: 0, y: 0 });
   let detail = $state<PrototypeDetail | null>(null);
 
-  let enabled = $derived(!!detailKind && detailKind !== "flow" && detailKind !== "quality");
+  // 抽象流（无原型详情）也会触发悬停，只要它能提供具体参数（定温流体/燃料类别等）。
+  let flowActive = $derived(
+    !!flow &&
+      typeof flow === "object" &&
+      ("ItemFuel" in flow || "FluidFuel" in flow || "FluidHeat" in flow || "Fluid" in flow),
+  );
+  let enabled = $derived(
+    (!!detailKind && detailKind !== "flow" && detailKind !== "quality") || flowActive,
+  );
 
   function enter(event: MouseEvent) {
     if (!enabled || !name) return;
@@ -78,8 +90,8 @@
   {/if}
 </span>
 
-{#if hoverActive && detail}
-  <HoverCard kind={detailKind ?? ""} {detail} x={pos.x} y={pos.y} />
+{#if hoverActive && (detail || flowActive)}
+  <HoverCard kind={detailKind ?? ""} {detail} x={pos.x} y={pos.y} {flow} />
 {/if}
 
 <style>

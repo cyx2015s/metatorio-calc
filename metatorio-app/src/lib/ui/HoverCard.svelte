@@ -17,7 +17,71 @@
     detail,
     x,
     y,
-  }: { kind: string; detail: PrototypeDetail | null; x: number; y: number } = $props();
+    flow,
+  }: {
+    kind: string;
+    detail: PrototypeDetail | null;
+    x: number;
+    y: number;
+    /** 当前悬停的流（抽象能量流/定温流体等）——按流显示具体参数。 */
+    flow?: import("$lib/runtime/types").DualVar;
+  } = $props();
+
+  // 流相关的实际参数：流体实际使用温度、ItemFuel 实际类别列表、流体燃料过滤器。
+  let flowRows = $derived(buildFlowRows(flow));
+
+  function buildFlowRows(flow: import("$lib/runtime/types").DualVar | undefined) {
+    if (!flow || typeof flow !== "object") return [];
+    const rows: { label: string; value: string }[] = [];
+    if ("Fluid" in flow) {
+      const fluid = (flow as { Fluid: { name: string; temperature: [number, number] } }).Fluid;
+      const [t1, t2] = fluid.temperature;
+      rows.push({
+        label: "温度",
+        value: t1 === t2 ? `${fmtNum(t1)}℃` : `${fmtNum(t1)}~${fmtNum(t2)}℃`,
+      });
+    }
+    if ("ItemFuel" in flow) {
+      const itemFuel = (flow as { ItemFuel: { category: string[] } }).ItemFuel;
+      rows.push({ label: "燃料类别", value: itemFuel.category.join(" / ") });
+    }
+    const fluidFilter =
+      ("FluidFuel" in flow ? (flow as { FluidFuel: { filter: string } }).FluidFuel.filter : "") ||
+      ("FluidHeat" in flow ? (flow as { FluidHeat: { filter: string } }).FluidHeat.filter : "");
+    if ("FluidFuel" in flow || "FluidHeat" in flow) {
+      rows.push({
+        label: "流体",
+        value: fluidFilter ? runtime.localizedName("fluid", fluidFilter) || fluidFilter : "任意流体",
+      });
+    }
+    return rows;
+  }
+
+  // 抽象流（无原型详情）时卡片的标题 / 图标名 / 类型标签。
+  let flowHead = $derived(buildFlowHead(flow));
+  function buildFlowHead(flow: import("$lib/runtime/types").DualVar | undefined) {
+    if (!flow || typeof flow !== "object") return null;
+    if ("ItemFuel" in flow) {
+      return { title: "物品燃料", iconName: "ItemFuel", type: "flow", typeLabel: "燃料" };
+    }
+    if ("FluidFuel" in flow) {
+      return { title: "流体燃料", iconName: "FluidFuel", type: "flow", typeLabel: "燃料" };
+    }
+    if ("FluidHeat" in flow) {
+      return { title: "流体热量", iconName: "FluidHeat", type: "flow", typeLabel: "热量" };
+    }
+    if ("Fluid" in flow) {
+      const name = (flow as { Fluid: { name: string } }).Fluid.name;
+      return {
+        title: runtime.localizedName("fluid", name) || name,
+        iconName: name,
+        type: "fluid",
+        typeLabel: "流体",
+      };
+    }
+    return null;
+  }
+
 
   // ── 可达性状态 ──────────────────────────────────────────────────
   // 显示当前选中项目下的原型可达/不可达；项目"无视可达性"或上下文未载入
@@ -161,12 +225,13 @@
   });
 </script>
 
-{#if detail}
+{#if detail || flowRows.length > 0}
   <div
     bind:this={cardEl}
     class="hover-card"
     style={`left:${Math.max(8, x + 14 + shift.dx)}px;top:${Math.max(8, y + 14 + shift.dy)}px`}
   >
+    {#if detail}
     <div class="hc-head">
       <Icon type={iconTypeOf(detail.kind)} name={detail.name} size={32} />
       <div class="hc-title">
@@ -183,7 +248,20 @@
         {/if}
       </div>
     </div>
+    {:else}
+      <div class="hc-head">
+        <Icon type={flowHead?.type ?? "flow"} name={flowHead?.iconName ?? "ItemFuel"} size={32} />
+        <div class="hc-title">
+          <strong>{flowHead?.title ?? "抽象流"}</strong>
+          <small>{flowHead?.typeLabel ?? kindLabel[kind] ?? kind}</small>
+        </div>
+      </div>
+    {/if}
     <div class="hc-body">
+      {#each flowRows as row}
+        <div class="hc-row"><span>{row.label}</span><strong>{row.value}</strong></div>
+      {/each}
+      {#if detail}
       {#if detail.stack_size != null}
         <div class="hc-row"><span>堆叠</span><strong>{detail.stack_size}</strong></div>
       {/if}
@@ -333,6 +411,7 @@
             {/each}
           </div>
         </div>
+      {/if}
       {/if}
     </div>
   </div>

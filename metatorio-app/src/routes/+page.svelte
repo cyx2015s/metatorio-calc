@@ -1138,6 +1138,7 @@
                   size={26}
                   detailKind={flowDetailKind(icon)}
                   quality={q ?? undefined}
+                  flow={target.flow}
                   onClick={() => openSuggestions(target.flow)}
                 />
                 <span class="row-name" title={dualVarLabel(target.flow)}>{flowLabel(target.flow)}</span>
@@ -1240,6 +1241,7 @@
                           size={20}
                           detailKind={flowDetailKind(icon)}
                           quality={flowQuality(term.flow) ?? undefined}
+                          flow={term.flow}
                         />
                       </button>
                       <span class="row-name" title={dualVarLabel(term.flow)}>{flowLabel(term.flow)}</span>
@@ -1320,6 +1322,7 @@
                   size={26}
                   detailKind={flowDetailKind(icon)}
                   quality={q ?? undefined}
+                  flow={input.flow}
                 />
                 <span class="row-name" title={dualVarLabel(input.flow)}>{flowLabel(input.flow)}</span>
                 <input
@@ -1353,6 +1356,7 @@
                   size={24}
                   detailKind={flowDetailKind(icon)}
                   quality={q ?? undefined}
+                  flow={flow}
                 />
                 <span class="row-name">{flowLabel(flow)}</span>
                 <span class="chip">隐式</span>
@@ -1937,6 +1941,7 @@
                   size={22}
                   detailKind={flowDetailKind(icon)}
                   quality={q ?? undefined}
+                  flow={balance.flow}
                   onClick={() => openSuggestions(balance.flow)}
                 />
                 <span class="row-name" title={dualVarLabel(balance.flow)}>
