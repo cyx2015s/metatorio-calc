@@ -994,26 +994,31 @@ fn icon(state: State<'_, AppState>, ty: String, name: String) -> Option<Vec<u8>>
 
 /// 全量目录索引（含 order fallback 排序）：一次拉取，前端本地筛选/分组。
 #[tauri::command]
-fn catalog_index(state: State<'_, AppState>) -> Result<CatalogIndex, String> {
-    let mut runtime = state
-        .runtime
-        .lock()
-        .map_err(|_| "runtime lock poisoned".to_string())?;
-    let Some(id) = runtime.effective_context_id() else {
-        return Ok(CatalogIndex {
-            context_id: String::new(),
-            qualities: Vec::new(),
-            entries: Vec::new(),
-        });
-    };
-    ensure_context_loaded(&state, &mut runtime, &id)?;
-    let store = runtime.context_store_by_id(&id).ok_or("上下文未载入")?;
-    let locale = locale_map_of(&state, &id);
-    Ok(CatalogIndex {
-        context_id: id,
-        qualities: store.quality_order().to_vec(),
-        entries: catalog_index_from_store(store, &locale),
+async fn catalog_index(app: AppHandle) -> Result<CatalogIndex, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let mut runtime = state
+            .runtime
+            .lock()
+            .map_err(|_| "runtime lock poisoned".to_string())?;
+        let Some(id) = runtime.effective_context_id() else {
+            return Ok(CatalogIndex {
+                context_id: String::new(),
+                qualities: Vec::new(),
+                entries: Vec::new(),
+            });
+        };
+        ensure_context_loaded(&state, &mut runtime, &id)?;
+        let store = runtime.context_store_by_id(&id).ok_or("上下文未载入")?;
+        let locale = locale_map_of(&state, &id);
+        Ok(CatalogIndex {
+            context_id: id,
+            qualities: store.quality_order().to_vec(),
+            entries: catalog_index_from_store(store, &locale),
+        })
     })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 /// 每插件类别中 tier 最高的插件（"使用最佳插件"填充枚举列表用）。
@@ -2190,6 +2195,23 @@ fn get_ui_state(state: State<'_, AppState>) -> Result<UiState, String> {
     Ok(runtime.state.ui.clone())
 }
 
+/// 在阻塞线程池里以 `&mut Runtime` 执行一段逻辑（用于把重计算移出主线程）。
+async fn run_blocking<T: Send + 'static>(
+    app: AppHandle,
+    f: impl FnOnce(&mut Runtime) -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let mut runtime = state
+            .runtime
+            .lock()
+            .map_err(|_| "runtime lock poisoned".to_string())?;
+        f(&mut runtime)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 /// 项目可达性快照（选择器过滤用）：当前可达对象集合。
 ///
 /// 由 runtime 用项目的用户显式覆盖（marked accessible/inaccessible、
@@ -2197,60 +2219,56 @@ fn get_ui_state(state: State<'_, AppState>) -> Result<UiState, String> {
 /// `all_accessible` 时返回全部对象。项目未绑定上下文时返回错误（前端
 /// 应在此情况下不做可达性过滤）。
 #[tauri::command]
-fn accessibility(state: State<'_, AppState>, project: ProjectId) -> Result<Vec<Accessible>, String> {
-    let mut runtime = state
-        .runtime
-        .lock()
-        .map_err(|_| "runtime lock poisoned".to_string())?;
-    let result = runtime
-        .project_accessibility(project)
-        .map_err(|error| error.to_string())?;
-    Ok(result.accessible().iter().cloned().collect())
+async fn accessibility(app: AppHandle, project: ProjectId) -> Result<Vec<Accessible>, String> {
+    run_blocking(app, move |runtime| {
+        let result = runtime
+            .project_accessibility(project)
+            .map_err(|error| error.to_string())?;
+        Ok(result.accessible().iter().cloned().collect())
+    })
+    .await
 }
 
 /// 把项目的里程碑重置为默认：实验室（LabComponent.inputs）输入的
 /// 科技瓶物品，全部解锁。
 #[tauri::command]
-fn set_default_milestones(state: State<'_, AppState>, project: ProjectId) -> Result<(), String> {
-    let mut runtime = state
-        .runtime
-        .lock()
-        .map_err(|_| "runtime lock poisoned".to_string())?;
-    runtime
-        .set_default_milestones(project)
-        .map_err(|error| error.to_string())?;
-    Ok(())
+async fn set_default_milestones(app: AppHandle, project: ProjectId) -> Result<(), String> {
+    run_blocking(app, move |runtime| {
+        runtime
+            .set_default_milestones(project)
+            .map_err(|error| error.to_string())
+            .map(|_| ())
+    })
+    .await
 }
 
 /// 里程碑节点按依赖拓扑排序（依赖在前），供 UI 按序展示。
 #[tauri::command]
-fn milestones_ordered(
-    state: State<'_, AppState>,
+async fn milestones_ordered(
+    app: AppHandle,
     project: ProjectId,
 ) -> Result<Vec<metatorio_runtime::Milestone>, String> {
-    let mut runtime = state
-        .runtime
-        .lock()
-        .map_err(|_| "runtime lock poisoned".to_string())?;
-    runtime
-        .ordered_project_milestones(project)
-        .map_err(|error| error.to_string())
+    run_blocking(app, move |runtime| {
+        runtime
+            .ordered_project_milestones(project)
+            .map_err(|error| error.to_string())
+    })
+    .await
 }
 
 /// 面向前端的产能视图：自动推算 + 用户覆盖，按来源（auto/user）区分，
 /// 供 UI 以虚线边框标注用户指定项。
 #[tauri::command]
-fn productivity(
-    state: State<'_, AppState>,
+async fn productivity(
+    app: AppHandle,
     project: ProjectId,
 ) -> Result<metatorio_runtime::ProductivityView, String> {
-    let mut runtime = state
-        .runtime
-        .lock()
-        .map_err(|_| "runtime lock poisoned".to_string())?;
-    runtime
-        .project_productivity(project)
-        .map_err(|error| error.to_string())
+    run_blocking(app, move |runtime| {
+        runtime
+            .project_productivity(project)
+            .map_err(|error| error.to_string())
+    })
+    .await
 }
 
 // ── Persistence ───────────────────────────────────────────────────
