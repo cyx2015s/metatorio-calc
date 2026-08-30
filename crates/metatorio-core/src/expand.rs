@@ -13,8 +13,8 @@ use crate::energy::{FluidFuelSpec, FuelSpec, ItemFuelSpec, energy_source_as_flow
 use crate::id::IdWithQuality;
 use crate::mechanic::{
     BoilerMechanic, FluidFuelMechanic, FluidHeatMechanic, GeneratorMechanic, ItemFuelMechanic,
-    ItemLaunchMechanic, Mechanic, MiningMechanic, PlantMechanic, ReactorMechanic, RecipeMechanic,
-    SolarMechanic, SpoilMechanic, quality_by_level,
+    ItemLaunchMechanic, Mechanic, MiningMechanic, ModuleConfig, PlantMechanic, ReactorMechanic,
+    RecipeMechanic, SolarMechanic, SpoilMechanic, quality_by_level,
 };
 use crate::prim_var::Expansion;
 use crate::quality::calc_quality_distribution;
@@ -25,7 +25,7 @@ use metatorio_data::{
     ReactorComponent, RecipeComponent, ResourceEntityComponent, RocketSiloComponent,
     SolarPanelComponent,
 };
-use metatorio_data::store::PrototypeGroup;
+use metatorio_data::store::{PrototypeGroup, PrototypeStore};
 use metatorio_data::types::{
     BoilerMode, Effect, EffectType, EffectTypeLimitation, EnergyAmount, EnergySource, Ingredient,
     Product,
@@ -38,6 +38,7 @@ pub fn expand<'a, C: Clone>(
 ) -> Expansion<C> {
     let mut expansion = Expansion::default();
     for (config, mechanic) in mechanics {
+        let before = expansion.variables.len();
         match mechanic {
             Mechanic::Recipe(mechanic) => expand_recipe(config, mechanic, ctx, &mut expansion),
             Mechanic::Mining(mechanic) => expand_mining(config, mechanic, ctx, &mut expansion),
@@ -60,8 +61,79 @@ pub fn expand<'a, C: Clone>(
                 expand_fluid_heat(config, mechanic, ctx, &mut expansion)
             }
         }
+        // 给本次机制生成的每个变量写入单位成本。太阳能按表面倍率叠加所需
+        // 蓄电器面积（instance_cost 拿不到表面太阳能系数，故在展开处计算）。
+        let cost = if let Mechanic::Solar(mechanic) = mechanic {
+            solar_instance_cost(ctx, mechanic)
+        } else {
+            instance_cost(ctx.prototype, mechanic)
+        };
+        for variable in &mut expansion.variables[before..] {
+            variable.cost = cost;
+        }
     }
     expansion
+}
+
+/// 实体碰撞箱面积（用于成本，复科旧实现）。
+fn entity_area(store: &PrototypeStore, name: &str) -> Option<f64> {
+    let bb = store
+        .entity(name)?
+        .component::<EntityComponent>()?
+        .collision_box
+        .as_ref()?;
+    Some((bb.1 .0 - bb.0 .0).ceil().abs() * (bb.1 .1 - bb.0 .1).ceil().abs())
+}
+
+/// 单台实例成本（复刻旧实现 + 信标占地）：
+/// - 带机器/设备的机制：机器碰撞箱面积 + Σ(信标面积 × 信标数 / 共享比例)
+///   （缺失回退 16.0）；
+/// - 腐坏：spoil_ticks / stack_size / 16；
+/// - 太阳能：太阳能板面积（蓄电器面积按表面倍率在 `expand` 单独叠加）；
+/// - 其余（种植/物品燃料/发射）：固定 16.0。
+pub fn instance_cost(store: &PrototypeStore, mechanic: &Mechanic) -> f64 {
+    let area = |name: &str| entity_area(store, name).unwrap_or(16.0);
+    let beacon_area = |config: &ModuleConfig| -> f64 {
+        config
+            .beacons
+            .iter()
+            .map(|beacon| {
+                area(&beacon.beacon.id) * beacon.count as f64 / beacon.share.max(1.0)
+            })
+            .sum()
+    };
+    match mechanic {
+        Mechanic::Recipe(mechanic) => area(&mechanic.machine.id) + beacon_area(&mechanic.module_config),
+        Mechanic::Mining(mechanic) => {
+            area(&mechanic.machine.id) + beacon_area(&mechanic.module_config)
+        }
+        Mechanic::Generator(mechanic) => area(&mechanic.generator.id),
+        Mechanic::Boiler(mechanic) => area(&mechanic.boiler.id),
+        Mechanic::Reactor(mechanic) => area(&mechanic.reactor.id),
+        Mechanic::Solar(mechanic) => area(&mechanic.solar_panel.id),
+        Mechanic::Spoil(mechanic) => store
+            .item(&mechanic.item.id)
+            .and_then(|record| {
+                let item = record.component::<ItemComponent>()?;
+                Some(item.spoil_ticks? as f64 / item.stack_size.max(1) as f64 / 16.0)
+            })
+            .unwrap_or(16.0),
+        // 流体燃料/流体热：转换机制，几乎无成本（复刻原版 cost()=0）。
+        Mechanic::FluidFuel(_) | Mechanic::FluidHeat(_) => 0.0,
+        _ => 16.0,
+    }
+}
+
+/// 太阳能机制的单台成本：太阳能板面积 + 所需蓄电器面积。
+/// 蓄电器数量依赖表面太阳能系数与昼夜周期（`solar_balance` 计算），故只能在
+/// 展开处（有 `ctx`）求，`instance_cost` 拿不到表面系数。
+fn solar_instance_cost(ctx: &Context, mechanic: &SolarMechanic) -> f64 {
+    let panel_area = entity_area(ctx.prototype, &mechanic.solar_panel.id).unwrap_or(16.0);
+    let accumulator_area = entity_area(ctx.prototype, &mechanic.accumulator.id).unwrap_or(16.0);
+    let accumulators = solar_balance(ctx, mechanic)
+        .map(|balance| balance.recommended_accumulators)
+        .unwrap_or(0.0);
+    panel_area + accumulators * accumulator_area
 }
 
 fn quality_name(ctx: &Context, level: usize) -> String {
@@ -1273,6 +1345,58 @@ mod tests {
             .expect("太阳能展开应产出电力");
         // 60 kW × 0.7 × 0.5 = 21 kW = 21000 J/s
         assert!((electricity - 21000.0).abs() < 1e-6, "electricity = {electricity}");
+    }
+
+    /// 太阳能单位成本 = 面板面积 + 所需蓄电器面积（依赖表面系数；不同表面不同）。
+    #[test]
+    fn solar_cost_includes_accumulators_and_follows_surface() {
+        let dump = serde_json::json!({
+            "solar-panel": {
+                "solar-panel": {
+                    "name": "solar-panel",
+                    "production": "60kW",
+                    "collision_box": [[-1, -1], [1, 1]]
+                }
+            },
+            "accumulator": {
+                "accumulator": {
+                    "name": "accumulator",
+                    "energy_source": { "type": "electric", "buffer_capacity": "5MJ" },
+                    "collision_box": [[-0.5, -0.5], [0.5, 0.5]]
+                }
+            },
+            "quality": {
+                "normal": { "name": "normal", "level": 0 }
+            }
+        });
+        let store = metatorio_data::store::PrototypeStore::load(&dump).expect("dump 加载失败");
+        let sm = SolarMechanic {
+            solar_panel: IdWithQuality::new("solar-panel", "normal"),
+            accumulator: IdWithQuality::new("accumulator", "normal"),
+        };
+        let mechanic = Mechanic::Solar(sm.clone());
+        let cost_at = |coefficient: f64| {
+            let game = crate::context::GameState {
+                qualities: vec!["normal".to_string()],
+                max_quality: 0,
+                solar_power_multiplier: coefficient,
+                ..Default::default()
+            };
+            let ctx = Context::new(&store, &game);
+            let expansion = expand([(0u32, &mechanic)], &ctx);
+            let balance = solar_balance(&ctx, &sm).expect("配平应可计算");
+            (expansion.variables[0].cost, balance.recommended_accumulators)
+        };
+        // 面板面积 = 2×2 = 4，蓄电器面积 = 1×1 = 1；成本 = 面板面积 + 蓄电器数×蓄电器面积。
+        let (c1, acc1) = cost_at(1.0);
+        let expected1 = 4.0 + acc1 * 1.0;
+        assert!((c1 - expected1).abs() < 1e-6, "c1={c1} expected1={expected1}");
+        assert!(c1 > 4.0, "太阳能成本应含蓄电器面积（大于面板面积 4）");
+        // 表面系数更低 → 每面板蓄电器需求更少（周期盈余随峰值同比缩小）→ 成本不同。
+        let (c05, acc05) = cost_at(0.5);
+        assert!(acc05 < acc1, "低倍率下每面板蓄电器需求应更少: {acc05} vs {acc1}");
+        assert!((c05 - (4.0 + acc05)).abs() < 1e-6, "c05={c05}");
+        assert!((c05 - c1).abs() > 1e-6, "不同表面系数下太阳能成本应不同");
     }
 
     #[test]

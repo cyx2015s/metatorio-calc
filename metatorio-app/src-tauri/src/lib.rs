@@ -37,7 +37,7 @@ use metatorio_runtime::{
         AppMessage, CleanupAction, FactoryAction, MechanicAction, MechanicListAction,
         MiningMechanicAction, ModuleAction, ProjectAction, RecipeMechanicAction, RuntimeCommand,
     },
-    solve::{ExpandedVarId, Runtime, SolveResult, SolveStatus, add_conversion_flows, instance_cost},
+    solve::{ExpandedVarId, Runtime, SolveResult, SolveStatus, add_conversion_flows},
     state::{DispatchResult, UiState},
 };
 use metatorio_solver::{AIndexMap, SolverData, SolverSolution, TargetSpec};
@@ -1539,8 +1539,7 @@ fn auto_plan(
             variant: *variant,
         };
         *variant = variant.saturating_add(1);
-        let candidate = &candidates[variable.prim_var.inner as usize];
-        flows.insert(flow_id, (variable.flow, instance_cost(&store, candidate)));
+        flows.insert(flow_id, (variable.flow, variable.cost));
     }
     let target = factory_doc
         .targets

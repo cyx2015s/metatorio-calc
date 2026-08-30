@@ -23,7 +23,7 @@ pub use accessibility::{
 };
 pub use context::{Context, GameState};
 pub use dual_var::DualVar;
-pub use expand::{SolarBalance, solar_balance};
+pub use expand::{SolarBalance, instance_cost, solar_balance};
 pub use id::{IdWithQuality, NORMAL_QUALITY};
 pub use mechanic::{
     BeaconConfig, BoilerMechanic, FluidFuelMechanic, FluidHeatMechanic, GeneratorMechanic,

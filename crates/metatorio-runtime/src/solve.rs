@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fs::File, path::Path, sync::Arc};
 
-use metatorio_core::{Accessibility, AccessibilityOptions, Accessible, Context, DualVar, Flow, GameState, Mechanic, ModuleConfig};
-use metatorio_data::{EntityComponent, FluidComponent, ItemComponent, LabComponent, PrototypeBaseComponent};
+use metatorio_core::{Accessibility, AccessibilityOptions, Accessible, Context, DualVar, Flow, GameState};
+use metatorio_data::{FluidComponent, LabComponent, PrototypeBaseComponent};
 use metatorio_data::store::{PrototypeGroup, PrototypeStore};
 use metatorio_solver::{AIndexMap, SolverData, SolverSolution, TargetSpec};
 use serde::{Deserialize, Serialize};
@@ -465,15 +465,11 @@ fn solve_document(
         &context,
     );
 
-    // 每台实例成本（机器碰撞箱面积），作为 LP 目标系数。
-    let costs: HashMap<MechanicId, f64> = factory
-        .mechanics
-        .iter()
-        .map(|entry| (entry.id, instance_cost(prototype, &entry.mechanic)))
-        .collect();
-
+    // 每台实例成本由展开阶段写入每个变量（ExpandedVariable.cost），
+    // 太阳能会随表面倍率叠加蓄电器面积——作为 LP 目标系数。
     let mut variant_counts: HashMap<MechanicId, u16> = HashMap::new();
     let mut flows = AIndexMap::default();
+    let mut variable_costs: HashMap<ExpandedVarId, f64> = HashMap::new();
     for variable in expansion.variables {
         let variant = variant_counts.entry(variable.prim_var.inner).or_default();
         let flow_id = ExpandedVarId {
@@ -481,8 +477,8 @@ fn solve_document(
             variant: *variant,
         };
         *variant = variant.saturating_add(1);
-        let cost = costs.get(&flow_id.mechanic).copied().unwrap_or(1.0);
-        flows.insert(flow_id, (variable.flow, cost));
+        variable_costs.insert(flow_id, variable.cost);
+        flows.insert(flow_id, (variable.flow, variable.cost));
     }
 
     let target = factory
@@ -549,7 +545,7 @@ fn solve_document(
                             mechanic: id.mechanic,
                             variant: id.variant,
                             amount,
-                            cost: costs.get(&id.mechanic).copied().unwrap_or(1.0),
+                            cost: variable_costs.get(&id).copied().unwrap_or(1.0),
                             scale,
                         }
                     })
@@ -743,54 +739,9 @@ pub fn add_conversion_flows(
     }
 }
 
-/// 实体碰撞箱面积（占地成本）。
-fn entity_area(store: &PrototypeStore, name: &str) -> Option<f64> {
-    let bb = store
-        .entity(name)?
-        .component::<EntityComponent>()?
-        .collision_box
-        .as_ref()?;
-    Some((bb.1 .0 - bb.0 .0).ceil().abs() * (bb.1 .1 - bb.0 .1).ceil().abs())
-}
-
-/// 单台实例成本（复刻旧实现 + 信标占地）：
-/// - 带机器/设备的机制：机器碰撞箱面积 + Σ(信标面积 × 信标数 / 共享比例)
-///   （缺失回退 16.0）；
-/// - 腐坏：spoil_ticks / stack_size / 16；
-/// - 其余（种植/物品燃料/发射）：固定 16.0。
-pub fn instance_cost(store: &PrototypeStore, mechanic: &Mechanic) -> f64 {
-    let area = |name: &str| entity_area(store, name).unwrap_or(16.0);
-    let beacon_area = |config: &ModuleConfig| -> f64 {
-        config
-            .beacons
-            .iter()
-            .map(|beacon| {
-                area(&beacon.beacon.id) * beacon.count as f64 / beacon.share.max(1.0)
-            })
-            .sum()
-    };
-    match mechanic {
-        Mechanic::Recipe(mechanic) => area(&mechanic.machine.id) + beacon_area(&mechanic.module_config),
-        Mechanic::Mining(mechanic) => {
-            area(&mechanic.machine.id) + beacon_area(&mechanic.module_config)
-        }
-        Mechanic::Generator(mechanic) => area(&mechanic.generator.id),
-        Mechanic::Boiler(mechanic) => area(&mechanic.boiler.id),
-        Mechanic::Reactor(mechanic) => area(&mechanic.reactor.id),
-        // 太阳能机制按太阳能板面积计成本（蓄电器体积小，随面板一起布局）。
-        Mechanic::Solar(mechanic) => area(&mechanic.solar_panel.id),
-        Mechanic::Spoil(mechanic) => store
-            .item(&mechanic.item.id)
-            .and_then(|record| {
-                let item = record.component::<ItemComponent>()?;
-                Some(item.spoil_ticks? as f64 / item.stack_size.max(1) as f64 / 16.0)
-            })
-            .unwrap_or(16.0),
-        // 流体燃料/流体热：转换机制，几乎无成本（复刻原版 cost()=0）。
-        Mechanic::FluidFuel(_) | Mechanic::FluidHeat(_) => 0.0,
-        _ => 16.0,
-    }
-}
+/// 单台实例成本已移至 core（`metatorio_core::instance_cost`），此处 re-export
+/// 以保持既有调用方（Tauri / auto_plan）的导入路径不变。
+pub use metatorio_core::instance_cost;
 
 /// 从项目设置构建求解用的 GameState（品质上限/采矿/配方产能加成）。
 ///

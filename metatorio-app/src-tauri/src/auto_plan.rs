@@ -819,7 +819,7 @@ mod tests {
     use metatorio_core::expand::expand;
     use metatorio_core::prim_var::{AIndexMap as CoreAIndexMap, Flow as CoreFlow};
     use metatorio_runtime::document::MechanicKind;
-    use metatorio_runtime::solve::{ExpandedVarId, add_conversion_flows, instance_cost};
+    use metatorio_runtime::solve::{ExpandedVarId, add_conversion_flows};
     use metatorio_runtime::AppMessage;
     use metatorio_solver::{SolverData, SolverSolution};
     use serde_json::json;
@@ -897,7 +897,7 @@ mod tests {
             *variant = variant.saturating_add(1);
             flows.insert(
                 flow_id,
-                (variable.flow, instance_cost(&store, &candidates[variable.prim_var.inner as usize])),
+                (variable.flow, variable.cost),
             );
         }
         let mut target = CoreFlow::default();
@@ -1409,7 +1409,7 @@ mod tests {
             *variant = variant.saturating_add(1);
             flows.insert(
                 flow_id,
-                (variable.flow, instance_cost(&store, &candidates[variable.prim_var.inner as usize])),
+                (variable.flow, variable.cost),
             );
         }
         // 目标：铁板 + 电（严格供给，只允许外部输入铁矿 + 星球资源）

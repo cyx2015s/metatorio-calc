@@ -33,6 +33,9 @@ pub struct PrimVar<C> {
 pub struct ExpandedVariable<C> {
     pub prim_var: PrimVar<C>,
     pub flow: Flow,
+    /// 该变量的单位成本（LP 目标系数）。不同物品转换流可有不同代价
+    /// （如太阳能随表面倍率变化的面积成本）；由展开函数按机制计算写入。
+    pub cost: f64,
 }
 
 /// 展开结果：全部代数变量（流体插值的多个端也在其中）。
@@ -41,14 +44,12 @@ pub struct ExpandedVariable<C> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Expansion<C> {
     pub variables: Vec<ExpandedVariable<C>>,
-    pub cost: f64,
 }
 
 impl<C> Default for Expansion<C> {
     fn default() -> Self {
         Self {
             variables: Vec::new(),
-            cost: 0.0,
         }
     }
 }

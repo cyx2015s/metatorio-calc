@@ -92,6 +92,7 @@ impl TempFlow {
                     inner: config.clone(),
                 },
                 flow,
+                cost: 0.0,
             })
             .collect()
     }
