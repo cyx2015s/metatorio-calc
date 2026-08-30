@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs::File, path::Path};
+use std::{collections::HashMap, fs::File, path::Path, sync::Arc};
 
 use metatorio_core::{Accessibility, AccessibilityOptions, Accessible, Context, DualVar, Flow, GameState, Mechanic, ModuleConfig};
 use metatorio_data::{EntityComponent, FluidComponent, ItemComponent, LabComponent, PrototypeBaseComponent};
@@ -108,6 +108,9 @@ pub struct Runtime {
     /// 项目 → 可达性结果缓存（settings 变化时在 dispatch 里整体失效；
     /// 计算按需进行，避免每次交互重算全图）。
     accessibilities: HashMap<ProjectId, Accessibility>,
+    /// 上下文 → 可达性依赖图（一次构建缓存，供 milestone_order /
+    /// compute_accessibility 复用，避免每交互重建全图）。
+    graph_cache: HashMap<String, Arc<metatorio_core::GraphData>>,
 }
 
 impl Runtime {
@@ -121,6 +124,7 @@ impl Runtime {
             contexts: HashMap::new(),
             active_context: None,
             accessibilities: HashMap::new(),
+            graph_cache: HashMap::new(),
         }
     }
 
@@ -133,12 +137,15 @@ impl Runtime {
 
     /// Register a loaded prototype store under a stable context id.
     pub fn install_context(&mut self, context_id: String, prototype: PrototypeStore) {
+        // 换了 store，之前的依赖图作废。
+        self.graph_cache.remove(&context_id);
         self.contexts.insert(context_id, prototype);
     }
 
     /// Drop a context's in-memory store (the on-disk cache is untouched).
     pub fn remove_context(&mut self, context_id: &str) {
         self.contexts.remove(context_id);
+        self.graph_cache.remove(context_id);
         if self.active_context.as_deref() == Some(context_id) {
             self.active_context = None;
         }
@@ -191,6 +198,39 @@ impl Runtime {
         }
     }
 
+    /// Resolve the context id a project uses (pinned or active).
+    fn context_id_for(&self, project_id: ProjectId) -> Result<String, RuntimeError> {
+        let project = self.state.project(project_id)?;
+        project
+            .context_id
+            .clone()
+            .or_else(|| self.active_context.clone())
+            .ok_or(RuntimeError::ContextNotFound(String::new()))
+    }
+
+    /// The cached, context-scoped accessibility dependency graph.  Built once
+    /// per context and reused by `milestone_order` / `compute_accessibility`
+    /// so interactions don't re-scan the whole prototype store.
+    fn graph_for_context(&mut self, context_id: &str) -> Arc<metatorio_core::GraphData> {
+        if let Some(graph) = self.graph_cache.get(context_id) {
+            return graph.clone();
+        }
+        let store = self
+            .contexts
+            .get(context_id)
+            .expect("graph_for_context: context not loaded");
+        let graph = Arc::new(metatorio_core::build_graph(store));
+        self.graph_cache
+            .insert(context_id.to_string(), graph.clone());
+        graph
+    }
+
+    /// Cached graph for a project's context (convenience).
+    fn graph_for_project(&mut self, project_id: ProjectId) -> Result<Arc<metatorio_core::GraphData>, RuntimeError> {
+        let context_id = self.context_id_for(project_id)?;
+        Ok(self.graph_for_context(&context_id))
+    }
+
     /// 计算并缓存项目的可达性结果（选择器过滤 / 自动规划过滤共用）。
     ///
     /// 里程碑来自 `ProjectSettings.milestones`，`unlocked` 是**强制覆盖**：
@@ -204,10 +244,15 @@ impl Runtime {
         if let Some(cached) = self.accessibilities.get(&project_id) {
             return Ok(cached.clone());
         }
+        // 先取图（owned Arc，不借用 self），再取 store/settings，避免借用冲突。
+        let graph = self.graph_for_project(project_id)?;
         let store = self.context_store(project_id)?;
-        let settings = &self.state.project(project_id)?.settings;
-        let options = accessibility_options(settings);
-        let result = metatorio_core::accessibility::compute_accessibility(store, &options);
+        let options = {
+            let settings = &self.state.project(project_id)?.settings;
+            accessibility_options(settings)
+        };
+        let result =
+            metatorio_core::compute_accessibility_with_graph(store, &options, &graph);
         self.accessibilities.insert(project_id, result.clone());
         Ok(result)
     }
@@ -217,12 +262,12 @@ impl Runtime {
         &mut self,
         project_id: ProjectId,
     ) -> Result<ProductivityView, RuntimeError> {
+        // 复用缓存的可达性结果（与 project_accessibility 同一 settings 推导）。
+        let accessibility = self.project_accessibility(project_id)?;
         let store = self.context_store(project_id)?;
         let project = self.state.project(project_id)?.clone();
         let settings = &project.settings;
 
-        let options = accessibility_options(settings);
-        let accessibility = metatorio_core::accessibility::compute_accessibility(store, &options);
         let levels: Vec<(String, u32)> = settings
             .infinite_levels
             .iter()
@@ -289,10 +334,11 @@ impl Runtime {
         &mut self,
         project_id: ProjectId,
     ) -> Result<Vec<crate::document::Milestone>, RuntimeError> {
+        let graph = self.graph_for_project(project_id)?;
         let store = self.context_store(project_id)?;
         let settings = &self.state.project(project_id)?.settings;
         let nodes: Vec<Accessible> = settings.milestones.iter().map(|m| m.node.clone()).collect();
-        let order = metatorio_core::accessibility::milestone_order(store, &nodes);
+        let order = metatorio_core::milestone_order_with_graph(store, &graph, &nodes);
         Ok(order
             .into_iter()
             .map(|node| {

@@ -16,7 +16,11 @@ pub mod productivity;
 pub mod quality;
 pub mod temp_flow;
 
-pub use accessibility::{Accessibility, AccessibilityOptions, Accessible, Requirement};
+pub use accessibility::{
+    Accessibility, AccessibilityOptions, Accessible, GraphData, Requirement, build_graph,
+    compute_accessibility, compute_accessibility_with_graph, milestone_order,
+    milestone_order_with_graph,
+};
 pub use context::{Context, GameState};
 pub use dual_var::DualVar;
 pub use expand::{SolarBalance, solar_balance};

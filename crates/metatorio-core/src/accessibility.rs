@@ -157,7 +157,8 @@ impl Accessibility {
 }
 
 /// 依赖图构建的辅助反向表（一次遍历缓存，避免每次查询全量扫描）。
-struct GraphData {
+#[derive(Debug)]
+pub struct GraphData {
     /// 物品/流体名 → 产出它的配方名。
     recipes_by_product: HashMap<String, Vec<String>>,
     /// 物品名 → 可采出它的矿藏实体名（minable 产出）。
@@ -296,7 +297,9 @@ fn build_resource_planets(store: &PrototypeStore) -> HashMap<String, Vec<String>
     map
 }
 
-fn build_graph(store: &PrototypeStore) -> GraphData {
+/// 构建可达性依赖图（一次遍历，供 `compute_accessibility` / `milestone_order`
+/// 复用；`Runtime` 会按上下文缓存，避免每次交互重建）。
+pub fn build_graph(store: &PrototypeStore) -> GraphData {
     let mut recipes_by_product: HashMap<String, Vec<String>> = HashMap::new();
     let mut resources_by_product: HashMap<String, Vec<String>> = HashMap::new();
     let mut spoil_sources: HashMap<String, Vec<String>> = HashMap::new();
@@ -536,13 +539,21 @@ fn space_node(store: &PrototypeStore, name: &str) -> Accessible {
 /// 依赖环内节点按原序附加（UI 不崩）。
 pub fn milestone_order(store: &PrototypeStore, milestones: &[Accessible]) -> Vec<Accessible> {
     let graph = build_graph(store);
+    milestone_order_with_graph(store, &graph, milestones)
+}
 
+/// 用已构建的依赖图做里程碑依赖排序（供 `Runtime` 复用缓存的图）。
+pub fn milestone_order_with_graph(
+    store: &PrototypeStore,
+    graph: &GraphData,
+    milestones: &[Accessible],
+) -> Vec<Accessible> {
     // 依赖图本身存在环：`Any` 节点只需满足其中一支，但闭包会把两支都当作
     // 依赖，于是同一对里程碑可能互相"依赖"。不过真实的解锁链是**更短**的那
     // 条（例如 logistic→automation 直接可达，而 automation→logistic 要绕行整
     // 个星球科技树，路径长得多）。因此对每对里程碑，以最短路径（BFS 跳数）判
     // 定方向：较短的即为真实依赖，据此有向即可打破环。
-    let dist = milestone_pair_distances(store, &graph, milestones);
+    let dist = milestone_pair_distances(store, graph, milestones);
 
     // 有向边：前置 → 后置；indeg = 该节点"必须先满足"的里程碑数（去重）。
     let mut adj: HashMap<Accessible, Vec<Accessible>> = HashMap::new();
@@ -967,15 +978,28 @@ pub fn compute_accessibility(
         let accessible = collect_nodes(store).into_iter().collect();
         return Accessibility { accessible };
     }
-
     let graph = build_graph(store);
+    compute_accessibility_with_graph(store, options, &graph)
+}
+
+/// 用已构建的依赖图计算可达性（供 `Runtime` 复用缓存的图，避免每交互重建）。
+pub fn compute_accessibility_with_graph(
+    store: &PrototypeStore,
+    options: &AccessibilityOptions,
+    graph: &GraphData,
+) -> Accessibility {
+    if options.all_accessible {
+        let accessible = collect_nodes(store).into_iter().collect();
+        return Accessibility { accessible };
+    }
+
     let nodes = collect_nodes(store);
 
     // 反向依赖表：依赖某个对象的对象集合（用于传播时触发重新评估）。
     let mut reverse: HashMap<Accessible, Vec<Accessible>> = HashMap::new();
     for node in &nodes {
         let mut leaves = Vec::new();
-        requirements(store, &graph, node).leaves(&mut leaves);
+        requirements(store, graph, node).leaves(&mut leaves);
         for leaf in leaves {
             reverse.entry(leaf).or_default().push(node.clone());
         }
@@ -1001,7 +1025,7 @@ pub fn compute_accessibility(
     seed(Accessible::Heat);
     // 无依赖对象（enabled 配方/科技、矿藏实体、normal 品质……）作为根种子。
     for node in &nodes {
-        if matches!(requirements(store, &graph, node), Requirement::All(ref list) if list.is_empty())
+        if matches!(requirements(store, graph, node), Requirement::All(ref list) if list.is_empty())
         {
             seed(node.clone());
         }
@@ -1017,7 +1041,7 @@ pub fn compute_accessibility(
             if accessible.contains(&dependent) {
                 continue;
             }
-            if requirements(store, &graph, &dependent).is_satisfied(&accessible) {
+            if requirements(store, graph, &dependent).is_satisfied(&accessible) {
                 accessible.insert(dependent.clone());
                 queue.push_back(dependent);
             }
