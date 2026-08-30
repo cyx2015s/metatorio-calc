@@ -116,6 +116,8 @@
     onSelect: (name: string, quality: string) => void;
     /** 目录多分类页签选中时返回分类 kind（选择里程碑/标记可达等）。 */
     onPickKind?: (kind: CatalogKind, name: string, quality: string) => void;
+    /** 是否按项目可达性过滤；需要列出全部可选对象的调用方置 false（如里程碑）。 */
+    respectAccessibility?: boolean;
   } | null>(null);
 
   // 流选择器（目标/外部输入支持任意 DualVar 流；编辑时预选当前流）
@@ -152,6 +154,7 @@
     initialName?: string,
     initialQuality?: string,
     onPickKind?: (kind: CatalogKind, name: string, quality: string) => void,
+    respectAccessibility = true,
   ) {
     selector = {
       kind,
@@ -163,6 +166,7 @@
       initialQuality,
       onSelect,
       onPickKind,
+      respectAccessibility,
     };
   }
 
@@ -1612,6 +1616,7 @@
                       undefined,
                       undefined,
                       (kind, name) => runtime.addMilestone(makeAccessible(kind, name)),
+                      false,
                     )}
                 >+ 添加里程碑</button>
                 <button class="btn" onclick={() => runtime.setDefaultMilestones().catch(() => {})}>
@@ -2023,6 +2028,7 @@
     initialQuality={selector.initialQuality}
     onSelect={selector.onSelect}
     onPickKind={selector.onPickKind}
+    respectAccessibility={selector.respectAccessibility}
     onClose={() => (selector = null)}
   />
 {/if}
