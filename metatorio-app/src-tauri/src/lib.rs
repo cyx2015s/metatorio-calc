@@ -1060,35 +1060,43 @@ fn best_modules(state: State<'_, AppState>) -> Result<Vec<Suggestion>, String> {
 /// 星球隐式可用输入（严格供给下也免费；外部输入显式覆盖后不显示）：
 /// 供前端在外部输入面板用虚线展示。
 #[tauri::command]
-fn implicit_sources(state: State<'_, AppState>, factory: FactoryId) -> Result<Vec<DualVar>, String> {
-    let mut runtime = state
-        .runtime
-        .lock()
-        .map_err(|_| "runtime lock poisoned".to_string())?;
-    let project = runtime
-        .state
-        .ui
-        .selected_project
-        .ok_or("未选择项目")?;
-    let (planet, external_inputs) = {
-        let factory_doc = runtime
+async fn implicit_sources(
+    app: AppHandle,
+    factory: FactoryId,
+) -> Result<Vec<DualVar>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let mut runtime = state
+            .runtime
+            .lock()
+            .map_err(|_| "runtime lock poisoned".to_string())?;
+        let project = runtime
             .state
-            .factory(project, factory)
-            .map_err(|error| error.to_string())?;
-        (factory_doc.settings.planet.clone(), factory_doc.external_inputs.clone())
-    };
-    let Some(planet) = planet else {
-        return Ok(Vec::new());
-    };
-    ensure_context_for_project(&state, &mut runtime, project)?;
-    let store = runtime.context_store(project).map_err(|error| error.to_string())?;
-    let mut implicit = metatorio_runtime::planet::planet_autoplaced_flows(store, &planet);
-    for input in &external_inputs {
-        implicit.shift_remove(&input.flow);
-    }
-    let mut keys: Vec<DualVar> = implicit.keys().cloned().collect();
-    keys.sort_by(|a, b| format!("{a:?}").cmp(&format!("{b:?}")));
-    Ok(keys)
+            .ui
+            .selected_project
+            .ok_or("未选择项目")?;
+        let (planet, external_inputs) = {
+            let factory_doc = runtime
+                .state
+                .factory(project, factory)
+                .map_err(|error| error.to_string())?;
+            (factory_doc.settings.planet.clone(), factory_doc.external_inputs.clone())
+        };
+        let Some(planet) = planet else {
+            return Ok(Vec::new());
+        };
+        ensure_context_for_project(&state, &mut runtime, project)?;
+        let store = runtime.context_store(project).map_err(|error| error.to_string())?;
+        let mut implicit = metatorio_runtime::planet::planet_autoplaced_flows(store, &planet);
+        for input in &external_inputs {
+            implicit.shift_remove(&input.flow);
+        }
+        let mut keys: Vec<DualVar> = implicit.keys().cloned().collect();
+        keys.sort_by(|a, b| format!("{a:?}").cmp(&format!("{b:?}")));
+        Ok(keys)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 /// 建议候选：给定一条流，列出能产出/消耗它的机制（配方/矿点/燃料/发电机）。
@@ -2176,22 +2184,16 @@ async fn dispatch(app: AppHandle, message: AppMessage) -> Result<DispatchResult,
 
 /// Current serializable document snapshot.
 #[tauri::command]
-fn get_document(state: State<'_, AppState>) -> Result<AppDocument, String> {
-    let runtime = state
-        .runtime
-        .lock()
-        .map_err(|_| "runtime lock poisoned".to_string())?;
-    Ok(runtime.state.document.clone())
+async fn get_document(app: AppHandle) -> Result<AppDocument, String> {
+    run_blocking(app, |runtime| Ok(runtime.state.document.clone()))
+        .await
 }
 
 /// Current transient UI selection snapshot.
 #[tauri::command]
-fn get_ui_state(state: State<'_, AppState>) -> Result<UiState, String> {
-    let runtime = state
-        .runtime
-        .lock()
-        .map_err(|_| "runtime lock poisoned".to_string())?;
-    Ok(runtime.state.ui.clone())
+async fn get_ui_state(app: AppHandle) -> Result<UiState, String> {
+    run_blocking(app, |runtime| Ok(runtime.state.ui.clone()))
+        .await
 }
 
 /// 在阻塞线程池里以 `&mut Runtime` 执行一段逻辑（用于把重计算移出主线程）。
