@@ -111,14 +111,7 @@ fn machine_fits_recipe(machine: &CraftingMachineComponent, recipe: &RecipeCompon
         .any(|available| required.contains(available))
 }
 
-fn effective_recipe_categories(recipe: &RecipeComponent) -> Vec<String> {
-    let categories = recipe.categories.clone().unwrap_or_default();
-    if categories.is_empty() {
-        vec!["crafting".to_string()]
-    } else {
-        categories
-    }
-}
+use crate::prototype::effective_recipe_categories;
 
 /// 配方/机器的插件类别与效果限制（复刻 egui collect_module_limitations）。
 ///

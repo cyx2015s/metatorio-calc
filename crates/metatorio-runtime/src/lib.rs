@@ -10,6 +10,7 @@ pub mod document;
 pub mod id;
 pub mod message;
 pub mod planet;
+pub mod prototype;
 pub mod solve;
 pub mod state;
 
