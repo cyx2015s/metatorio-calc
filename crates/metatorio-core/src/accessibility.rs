@@ -701,54 +701,56 @@ fn requirements(store: &PrototypeStore, graph: &GraphData, node: &Accessible) ->
             }
         }
         Accessible::Recipe(name) => {
-            let record = store.get(PrototypeGroup::Recipe, name);
-            let recipe = record.and_then(|r| r.component::<RecipeComponent>());
-            let hidden = record
-                .and_then(|r| r.component::<PrototypeBaseComponent>())
-                .map(|base| base.hidden)
-                .unwrap_or(false);
+            let recipe = store
+                .get(PrototypeGroup::Recipe, name)
+                .and_then(|record| record.component::<RecipeComponent>());
             match recipe {
-                // hidden 配方：mod 保守替换产物（即便 enabled=true）→ 无法制作，
-                // 其产物不能视为可达（不作根种子，也不因依赖满足而可达）。
-                Some(_) if hidden => Requirement::Any(Vec::new()),
                 Some(recipe) if !recipe.enabled => {
-                    let mut all: Vec<Requirement> = Vec::new();
-                    // 原料（全部满足）
-                    for ingredient in &recipe.ingredients {
-                        match ingredient {
-                            Ingredient::Item(item) => {
-                                all.push(Requirement::Node(Accessible::Item(item.name.clone())));
-                            }
-                            Ingredient::Fluid(fluid) => {
-                                all.push(Requirement::Node(Accessible::Fluid(fluid.name.clone())));
-                            }
-                        }
-                    }
-                    // 机器依赖：配方出现即视为有对应组装机（合理 mod 设计）——
-                    // 不再要求机器可达。自动规划在枚举时会处理"无解锁机器则选
-                    // 评分最低的 1 台"。
-                    // 至少一个解锁科技可达
+                    // 配方可达 = 至少一个解锁科技可达。原料不再是配方自身的依赖
+                    // ——"能制造某物品"的原料需求移到物品可达性：物品 C 需
+                    // （配方 R 可用 + 全部原料可用）才可制造（并非解锁就能制造）。
+                    // hidden 且 enabled 的配方视为可达（注册/默认配方常是 hidden）。
                     let unlocks = graph.techs_by_unlock.get(name).cloned().unwrap_or_default();
-                    all.push(Requirement::Any(
+                    Requirement::Any(
                         unlocks
                             .into_iter()
                             .map(|tech| Requirement::Node(Accessible::Tech(tech)))
                             .collect(),
-                    ));
-                    Requirement::All(all)
+                    )
                 }
-                // enabled 配方（游戏开始可用）：根
+                // enabled 配方（含 hidden 但 enabled）：始终可达（根）。
                 _ => Requirement::All(Vec::new()),
             }
         }
         Accessible::Item(name) => {
             let mut any: Vec<Requirement> = Vec::new();
             if let Some(recipes) = graph.recipes_by_product.get(name) {
-                any.extend(
-                    recipes
-                        .iter()
-                        .map(|recipe| Requirement::Node(Accessible::Recipe(recipe.clone()))),
-                );
+                for recipe_name in recipes {
+                    // 物品 C 可经配方 R 制造：需要配方 R 可用 + 它的全部原料可用
+                    // （并非解锁就能制造）。
+                    let mut all =
+                        vec![Requirement::Node(Accessible::Recipe(recipe_name.clone()))];
+                    if let Some(recipe) = store
+                        .get(PrototypeGroup::Recipe, recipe_name)
+                        .and_then(|record| record.component::<RecipeComponent>())
+                    {
+                        for ingredient in &recipe.ingredients {
+                            match ingredient {
+                                Ingredient::Item(item) => {
+                                    all.push(Requirement::Node(Accessible::Item(
+                                        item.name.clone(),
+                                    )));
+                                }
+                                Ingredient::Fluid(fluid) => {
+                                    all.push(Requirement::Node(Accessible::Fluid(
+                                        fluid.name.clone(),
+                                    )));
+                                }
+                            }
+                        }
+                    }
+                    any.push(Requirement::All(all));
+                }
             }
             if let Some(resources) = graph.resources_by_product.get(name) {
                 any.extend(
@@ -1452,21 +1454,22 @@ mod tests {
         }
     }
 
-    /// enabled 但 hidden 的配方：mod 保守替换产物，不可制作 → 产物不可达
-    /// （不放进可达性根种子；即便有解锁科技或空原料也因 hidden 不可制作）。
+    /// enabled 但 hidden 的配方视为可达（注册/默认配方常是 hidden 且 enabled）；
+    /// 只有"未 enabled 且无解锁科技"的配方才不可达（孤儿）。
     #[test]
-    fn hidden_enabled_recipe_is_not_root() {
+    fn hidden_enabled_recipe_is_reachable() {
         let dump = json!({
             "item": {
                 "visible-item": { "type": "item", "name": "visible-item" },
-                "secret-item": { "type": "item", "name": "secret-item" }
+                "secret-item": { "type": "item", "name": "secret-item" },
+                "orphan-item": { "type": "item", "name": "orphan-item" }
             },
             "fluid": {},
             "technology": {
                 "tech-secret": {
                     "type": "technology", "name": "tech-secret",
                     "prerequisites": [], "enabled": true,
-                    "effects": [{ "type": "unlock-recipe", "recipe": "secret" }],
+                    "effects": [{ "type": "unlock-recipe", "recipe": "secret-unlocked" }],
                     "unit": { "count": 10, "time": 10, "ingredients": [] }
                 }
             },
@@ -1488,6 +1491,12 @@ mod tests {
                     "energy_required": 1, "ingredients": [],
                     "results": [{ "type": "item", "name": "secret-item", "amount": 1 }],
                     "categories": ["crafting"], "enabled": false, "hidden": true
+                },
+                "secret-orphan": {
+                    "type": "recipe", "name": "secret-orphan",
+                    "energy_required": 1, "ingredients": [],
+                    "results": [{ "type": "item", "name": "orphan-item", "amount": 1 }],
+                    "categories": ["crafting"], "enabled": false, "hidden": true
                 }
             }
         });
@@ -1498,8 +1507,56 @@ mod tests {
             "未 hidden 的 enabled 配方产物应可达（根）"
         );
         assert!(
-            !result.is_item_accessible("secret-item"),
-            "enabled 但 hidden 的配方产物不可达（不作根）"
+            result.is_item_accessible("secret-item"),
+            "enabled 但 hidden 的配方产物应可达（hidden+enabled 视为可达）"
+        );
+        assert!(
+            !result.is_item_accessible("orphan-item"),
+            "未 enabled 且无解锁科技的隐藏配方产物应不可达（孤儿）"
+        );
+    }
+
+    /// 物品可达 = （配方可用 + 全部原料可用），不是"配方解锁即能制造"。
+    /// 回归：配方原料需求从配方自身移到物品（R: A+B→C，C 需 R+A+B）。
+    #[test]
+    fn item_requires_recipe_and_all_ingredients() {
+        let dump = json!({
+            "item": {
+                "ing-avail": { "type": "item", "name": "ing-avail" },
+                "ing-unavailable": { "type": "item", "name": "ing-unavailable" },
+                "product": { "type": "item", "name": "product" }
+            },
+            "fluid": {},
+            "recipe": {
+                "make-product": {
+                    "type": "recipe", "name": "make-product",
+                    "energy_required": 1, "enabled": true,
+                    "ingredients": [
+                        { "type": "item", "name": "ing-avail", "amount": 1 },
+                        { "type": "item", "name": "ing-unavailable", "amount": 1 }
+                    ],
+                    "results": [{ "type": "item", "name": "product", "amount": 1 }],
+                    "categories": ["crafting"]
+                },
+                "make-ing-avail": {
+                    "type": "recipe", "name": "make-ing-avail",
+                    "energy_required": 1, "enabled": true,
+                    "ingredients": [],
+                    "results": [{ "type": "item", "name": "ing-avail", "amount": 1 }],
+                    "categories": ["crafting"]
+                }
+            }
+        });
+        let store = load(dump);
+        let result = compute_accessibility(&store, &AccessibilityOptions::default());
+        assert!(result.is_item_accessible("ing-avail"));
+        assert!(
+            !result.is_item_accessible("ing-unavailable"),
+            "无生产来源的原料不可达"
+        );
+        assert!(
+            !result.is_item_accessible("product"),
+            "配方启用但某原料不可达 → 产物不可达（并非解锁就能制造）"
         );
     }
 
