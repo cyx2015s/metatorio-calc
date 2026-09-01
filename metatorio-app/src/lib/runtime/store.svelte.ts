@@ -399,17 +399,40 @@ class RuntimeStore {
     }
   }
 
-  /** 本地化显示名（无翻译/未加载索引时回退内部 id）。 */
+  /** 本地化显示名（无翻译/未加载索引时回退内部 id）。O(1) Map 查找，避免大
+   * 目录下每次重渲染对 entries 做 O(N) 线性 .find。 */
+  private localizedNameMap = new Map<string, string>();
+  private localizedNameContext = "";
+
+  private ensureLocalizedNameMap(): void {
+    const ci = this.catalogIndex;
+    if (!ci) {
+      this.localizedNameMap.clear();
+      this.localizedNameContext = "";
+      return;
+    }
+    // 目录/上下文变化时重建一次；按 context_id 判断是否需要重建。
+    const key = ci.context_id;
+    if (key === this.localizedNameContext) return;
+    const map = new Map<string, string>();
+    for (const entry of ci.entries) {
+      map.set(`${entry.kind}/${entry.name}`, entry.localized_name);
+    }
+    this.localizedNameMap = map;
+    this.localizedNameContext = key;
+  }
+
   localizedName(kind: string, name: string): string {
-    const entry = this.catalogIndex?.entries.find(
-      (candidate) => candidate.kind === kind && candidate.name === name,
-    );
-    return entry?.localized_name || name;
+    this.ensureLocalizedNameMap();
+    const localized = this.localizedNameMap.get(`${kind}/${name}`);
+    return localized || name;
   }
 
   /** 换上下文后清空索引/详情缓存。 */
   clearCatalogCache(): void {
     this.catalogIndex = null;
+    this.localizedNameMap.clear();
+    this.localizedNameContext = "";
     this.detailCache.clear();
   }
 
