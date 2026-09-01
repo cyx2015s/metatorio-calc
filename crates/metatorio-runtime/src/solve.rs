@@ -436,15 +436,27 @@ impl Runtime {
 
     /// Solve a factory synchronously.  The outer Tauri layer should call this
     /// from its dedicated worker rather than from the command thread.
+    ///
+    /// 复用 runtime 缓存的可达性（`project_accessibility`）：求解内部依赖的
+    /// 配方/采矿产能自动推算需要可达性，若每次重新 `compute_accessibility`
+    /// 在 py 上下文下就要多花 ~2.5s（"创建新工厂都卡"的主因）。
     pub fn solve_factory(
-        &self,
+        &mut self,
         project_id: ProjectId,
         factory_id: FactoryId,
     ) -> Result<SolveResult, RuntimeError> {
+        let accessibility = self.project_accessibility(project_id)?;
         let prototype = self.context_store(project_id)?;
         let project = self.state.project(project_id)?;
         let factory = self.state.factory(project_id, factory_id)?;
-        solve_document(prototype, project, factory, project_id, factory_id)
+        solve_document(
+            prototype,
+            project,
+            factory,
+            project_id,
+            factory_id,
+            &accessibility,
+        )
     }
 
     /// 自动规划：完整状态空间枚举候选 → 构建 LP 求解 → 保留被选中的机制并
@@ -457,11 +469,11 @@ impl Runtime {
         let store = self.context_store(project_id)?.clone();
         let project_doc = self.state.project(project_id)?.clone();
         let factory_doc = self.state.factory(project_id, factory_id)?.clone();
-        let game = make_game_state(&store, &project_doc);
+        let accessibility = self.project_accessibility(project_id)?;
+        let game = make_game_state_with_accessibility(&store, &project_doc, &accessibility);
         let context = metatorio_core::Context::new(&store, &game);
         let quality_level =
             |name: &str| game.qualities.iter().position(|c| c == name).unwrap_or(0);
-        let accessibility = self.project_accessibility(project_id)?;
         let options = crate::auto_plan::EnumerateOptions {
             alternative_count: project_doc.planning.alternative_count,
             machine_preferences: project_doc.planning.machine_preferences.clone(),
@@ -608,8 +620,9 @@ fn solve_document(
     factory: &FactoryDocument,
     project_id: ProjectId,
     factory_id: FactoryId,
+    accessibility: &metatorio_core::Accessibility,
 ) -> Result<SolveResult, RuntimeError> {
-    let mut game = make_game_state(prototype, project);
+    let mut game = make_game_state_with_accessibility(prototype, project, accessibility);
     apply_environment_to_game_state(
         prototype,
         &mut game,
@@ -954,6 +967,20 @@ pub use metatorio_core::instance_cost;
 /// 用户覆盖（2.a 固定配方值替换自动；2.b 无限科技等级替换默认等级；
 /// 2.c 忽略时丢弃自动但保留用户值）。
 pub fn make_game_state(prototype: &PrototypeStore, project: &ProjectDocument) -> GameState {
+    let options = accessibility_options(&project.settings);
+    let accessibility = metatorio_core::accessibility::compute_accessibility(prototype, &options);
+    make_game_state_with_accessibility(prototype, project, &accessibility)
+}
+
+/// 与 `make_game_state` 等价，但复用**外部已算好**的可达性结果，而不是在
+/// 调用处重新 `compute_accessibility`。py(Pyanodon) 上下文下该计算约 2.5s，
+/// 是"创建新工厂都卡"的主因——求解/自动规划/悬停展开都走这里，必须复用
+/// runtime 缓存的 `project_accessibility`。
+pub fn make_game_state_with_accessibility(
+    prototype: &PrototypeStore,
+    project: &ProjectDocument,
+    accessibility: &metatorio_core::Accessibility,
+) -> GameState {
     let mut game = GameState::default();
     let qualities = prototype.quality_order();
     if !qualities.is_empty() {
@@ -973,7 +1000,7 @@ pub fn make_game_state(prototype: &PrototypeStore, project: &ProjectDocument) ->
             })
             .unwrap_or(0)
     };
-    let productivity = productivity_for_game(prototype, project);
+    let productivity = productivity_for_game(prototype, project, accessibility);
     game.mining_productivity = productivity.mining_productivity;
     game.recipe_productivity = productivity.recipe_productivity;
     game
@@ -1000,12 +1027,14 @@ pub(crate) fn accessibility_options(settings: &ProjectSettings) -> Accessibility
 }
 
 /// 计算项目的最终配方/采矿产能（自动推算 + 用户覆盖）。
+///
+/// 复用调用方算好的 `accessibility`（避免在求解/悬停等高频路径重复
+/// `compute_accessibility`）。
 fn productivity_for_game(
     prototype: &PrototypeStore,
     project: &ProjectDocument,
+    accessibility: &metatorio_core::Accessibility,
 ) -> metatorio_core::ProductivityResult {
-    let options = accessibility_options(&project.settings);
-    let accessibility = metatorio_core::accessibility::compute_accessibility(prototype, &options);
     let levels: Vec<(String, u32)> = project
         .settings
         .infinite_levels
@@ -1014,7 +1043,7 @@ fn productivity_for_game(
         .collect();
     let auto = metatorio_core::productivity::compute_productivity(
         prototype,
-        &accessibility,
+        accessibility,
         &levels,
         project.settings.ignore_productivity,
     );
@@ -1764,5 +1793,89 @@ mod tests {
         assert!(!message_affects_accessibility(&AppMessage::Application(
             ApplicationAction::InstallUpdate
         )));
+    }
+
+    /// 临时基准：py(Pyanodon) 上下文下各命令的 Rust 侧耗时（诊断用）。
+    /// 机器上没有该 dump 时跳过；本地运行看各 eprintln 的毫秒。
+    #[test]
+    fn py_context_command_timings() {
+        let path = "C:\\Users\\mirac\\AppData\\Roaming\\com.mirac.metatorio-app\\contexts\\c3544821b3232cf9\\data-raw-dump.json";
+        if !std::path::Path::new(path).exists() {
+            eprintln!("[skip] 无 py dump（{path}），跳过");
+            return;
+        }
+        let raw = std::fs::read(path).expect("读 dump");
+        let dump: serde_json::Value = serde_json::from_slice(&raw).expect("解析 dump");
+        let store = PrototypeStore::load(&dump).expect("dump 加载失败");
+        let mut runtime = Runtime::new();
+        runtime.install_context("py".to_string(), store);
+        runtime.set_active_context(Some("py".to_string()));
+        let project = new_project(&mut runtime);
+        runtime
+            .dispatch(AppMessage::Project {
+                project,
+                action: ProjectAction::AddFactory {
+                    name: "f".to_string(),
+                    template: crate::message::FactoryTemplate::Empty,
+                },
+            })
+            .unwrap();
+        let factory = runtime.state.ui.selected_factory.unwrap();
+        runtime
+            .dispatch(AppMessage::Factory {
+                project,
+                factory,
+                action: crate::message::FactoryAction::Context(
+                    crate::message::FactoryContextAction::SetPlanet {
+                        planet: Some("nauvis".to_string()),
+                    },
+                ),
+            })
+            .unwrap();
+
+        let now = std::time::Instant::now;
+        let t = now();
+        runtime.set_default_milestones(project).unwrap();
+        eprintln!("[py] set_default_milestones: {} ms", t.elapsed().as_millis());
+        let t = now();
+        runtime.project_accessibility(project).unwrap();
+        eprintln!("[py] project_accessibility: {} ms", t.elapsed().as_millis());
+        let t = now();
+        runtime.ordered_project_milestones(project).unwrap();
+        eprintln!("[py] ordered_project_milestones: {} ms", t.elapsed().as_millis());
+        let t = now();
+        runtime.project_productivity(project).unwrap();
+        eprintln!("[py] project_productivity: {} ms", t.elapsed().as_millis());
+        let t = now();
+        runtime.solve_factory(project, factory).unwrap();
+        eprintln!("[py] solve_factory(空工厂): {} ms", t.elapsed().as_millis());
+        let t = now();
+        let _ = crate::planet::planet_autoplaced_flows(
+            runtime.context_store(project).unwrap(),
+            "nauvis",
+        );
+        eprintln!("[py] planet_autoplaced_flows(nauvis): {} ms", t.elapsed().as_millis());
+        let t = now();
+        let _graph = metatorio_core::build_graph(runtime.context_store(project).unwrap());
+        eprintln!("[py] build_graph: {} ms", t.elapsed().as_millis());
+        let nodes: Vec<Accessible> = runtime
+            .state
+            .project(project)
+            .unwrap()
+            .settings
+            .milestones
+            .iter()
+            .map(|m| m.node.clone())
+            .collect();
+        let t = now();
+        let _ = metatorio_core::milestone_order(
+            runtime.context_store(project).unwrap(),
+            &nodes,
+        );
+        eprintln!(
+            "[py] milestone_order ({} 个里程碑): {} ms",
+            nodes.len(),
+            t.elapsed().as_millis()
+        );
     }
 }

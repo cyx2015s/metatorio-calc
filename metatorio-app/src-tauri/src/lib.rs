@@ -1137,7 +1137,7 @@ fn mechanic_flow(
     factory: FactoryId,
     mechanic: MechanicId,
 ) -> Result<Vec<(DualVar, f64)>, String> {
-    let runtime = state
+    let mut runtime = state
         .runtime
         .lock()
         .map_err(|_| "runtime lock poisoned".to_string())?;
@@ -1155,12 +1155,16 @@ fn mechanic_flow(
         .factory(project, factory)
         .map_err(|error| error.to_string())?
         .clone();
+    let accessibility = runtime
+        .project_accessibility(project)
+        .map_err(|error| error.to_string())?;
     let entry = factory_doc
         .mechanics
         .iter()
         .find(|entry| entry.id == mechanic)
         .ok_or("机制不存在")?;
-    let mut game = metatorio_runtime::solve::make_game_state(&store, &project_doc);
+    let mut game =
+        metatorio_runtime::solve::make_game_state_with_accessibility(&store, &project_doc, &accessibility);
     // 与求解路径一致：应用当前工厂的星球/地表环境（太阳能系数、昼夜周期）。
     metatorio_runtime::solve::apply_environment_to_game_state(
         &store,
@@ -1193,7 +1197,7 @@ fn solar_balance(
     factory: FactoryId,
     mechanic: MechanicId,
 ) -> Result<Option<metatorio_core::SolarBalance>, String> {
-    let runtime = state
+    let mut runtime = state
         .runtime
         .lock()
         .map_err(|_| "runtime lock poisoned".to_string())?;
@@ -1211,6 +1215,9 @@ fn solar_balance(
         .factory(project, factory)
         .map_err(|error| error.to_string())?
         .clone();
+    let accessibility = runtime
+        .project_accessibility(project)
+        .map_err(|error| error.to_string())?;
     let entry = factory_doc
         .mechanics
         .iter()
@@ -1219,7 +1226,8 @@ fn solar_balance(
     let Mechanic::Solar(mechanic) = &entry.mechanic else {
         return Ok(None);
     };
-    let mut game = metatorio_runtime::solve::make_game_state(&store, &project_doc);
+    let mut game =
+        metatorio_runtime::solve::make_game_state_with_accessibility(&store, &project_doc, &accessibility);
     metatorio_runtime::solve::apply_environment_to_game_state(
         &store,
         &mut game,
