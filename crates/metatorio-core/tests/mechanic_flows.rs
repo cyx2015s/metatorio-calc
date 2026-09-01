@@ -307,6 +307,50 @@ fn item_launch_uses_rocket_silo_capacity() {
     assert_eq!(flow[&DualVar::Item(id("science"))], 1000.0);
 }
 
+/// 回归：组装机为 rocket-silo 时，配方应额外产出火箭发射载荷（虚拟物品）。
+/// 此前 expand_recipe 只按普通机器展开，导致 ItemLaunch 消耗的容量无来源。
+#[test]
+fn recipe_in_rocket_silo_produces_launch_capacity() {
+    let flow = flow(
+        json!({
+            "item": {
+                "rocket-part": { "type": "item", "name": "rocket-part", "stack_size": 10 },
+                "space-part": { "type": "item", "name": "space-part", "stack_size": 10 }
+            },
+            "recipe": {
+                "rocket-part": {
+                    "type": "recipe", "name": "rocket-part",
+                    "energy_required": 1, "enabled": true,
+                    "ingredients": [{ "type": "item", "name": "rocket-part", "amount": 5 }],
+                    "results": [{ "type": "item", "name": "space-part", "amount": 1 }]
+                }
+            },
+            "rocket-silo": {
+                "silo": {
+                    "type": "rocket-silo", "name": "silo",
+                    "energy_usage": "1MW",
+                    "energy_source": { "type": "electric", "drain": "0J" },
+                    "crafting_speed": 1, "crafting_categories": ["crafting"],
+                    "launch_to_space_platforms": false,
+                    "rocket_parts_required": 5,
+                    "to_be_inserted_to_rocket_inventory_size": 10
+                }
+            }
+        }),
+        Mechanic::Recipe(metatorio_core::RecipeMechanic {
+            recipe: IdWithQuality::new("rocket-part", "normal"),
+            machine: IdWithQuality::new("silo", "normal"),
+            module_config: Default::default(),
+            fuel: None,
+            fuel_temperature: None,
+        }),
+    );
+    // 每次合成产出 整枚火箭容量(10) / rocket_parts_required(5) = 2.
+    assert_eq!(flow[&DualVar::RocketSlotCapacity], 2.0);
+    assert_eq!(flow[&DualVar::Item(id("space-part"))], 1.0);
+    assert_eq!(flow[&DualVar::Item(id("rocket-part"))], -5.0);
+}
+
 /// 配方 + 品质插件：品质效果把产出拆分为多品质流（normal + 升级品质），
 /// 配方机制卡应显示这些流量（回归：带品质插件的配方流量不显示）。
 #[test]

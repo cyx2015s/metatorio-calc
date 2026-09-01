@@ -184,6 +184,9 @@ pub struct GraphData {
     /// 星岩/小行星实体名 → 生成它的空间连接 (from, to)。SpaceConnection 星岩
     /// 只在飞船**飞行**时沿途生成，需两端地点都可达才飞得过去。
     asteroid_connections: HashMap<String, Vec<(String, String)>>,
+    /// 物品名 → 发射出它的物品（某物品可通过把另一个物品发射上太空得到）。
+    /// 逆向表：产物 → 发射它的基物品（`item.rocket_launch_products`）。
+    launch_sources: HashMap<String, Vec<String>>,
 }
 
 /// 资源实体/星球流体名 → 生成它的星球列表。
@@ -306,6 +309,7 @@ pub fn build_graph(store: &PrototypeStore) -> GraphData {
     let mut items_by_place_result: HashMap<String, Vec<String>> = HashMap::new();
     let mut techs_by_unlock: HashMap<String, Vec<String>> = HashMap::new();
     let mut tech_units: HashMap<String, Vec<String>> = HashMap::new();
+    let mut launch_sources: HashMap<String, Vec<String>> = HashMap::new();
 
     for record in store.group(PrototypeGroup::Item) {
         if let Some(item) = record.component::<ItemComponent>() {
@@ -320,6 +324,13 @@ pub fn build_graph(store: &PrototypeStore) -> GraphData {
             {
                 spoil_sources
                     .entry(spoil.clone())
+                    .or_default()
+                    .push(record.name.clone());
+            }
+            // 发射产物：把该物品发射上太空（ItemLaunch 机制）可得到的物品。
+            for product in &item.rocket_launch_products {
+                launch_sources
+                    .entry(product.name.clone())
                     .or_default()
                     .push(record.name.clone());
             }
@@ -518,6 +529,7 @@ pub fn build_graph(store: &PrototypeStore) -> GraphData {
         generated_by,
         asteroid_locations,
         asteroid_connections,
+        launch_sources,
     }
 }
 
@@ -759,6 +771,15 @@ fn requirements(store: &PrototypeStore, graph: &GraphData, node: &Accessible) ->
                     planets
                         .iter()
                         .map(|planet| Requirement::Node(Accessible::Planet(planet.clone()))),
+                );
+            }
+            // 发射产物：把其它物品发射上太空可得到该物品（ItemLaunch 机制）。
+            // 物品可通过发射另一物品得到——发射的基物品可达即可。
+            if let Some(bases) = graph.launch_sources.get(name) {
+                any.extend(
+                    bases
+                        .iter()
+                        .map(|base| Requirement::Node(Accessible::Item(base.clone()))),
                 );
             }
             Requirement::Any(any)
@@ -1583,6 +1604,41 @@ mod tests {
         assert!(
             pos("automation-science-pack") < pos("military-science-pack"),
             "automation-science-pack 应排在 military-science-pack 前"
+        );
+    }
+
+    /// 发射产物可达：某物品可经把另一物品发射上太空得到，基物品可达即可。
+    /// 回归：此前可达性未考虑 rocket_launch_products，发射专属物品（无配方/矿藏）
+    /// 被误判为不可达。
+    #[test]
+    fn launch_products_reachable_from_base_item() {
+        let store = load(json!({
+            "item": {
+                "satellite": {
+                    "type": "item", "name": "satellite", "stack_size": 1,
+                    "rocket_launch_products": [
+                        { "type": "item", "name": "space-item", "amount": 100 }
+                    ]
+                },
+                "space-item": { "type": "item", "name": "space-item", "stack_size": 1 }
+            },
+            "recipe": {
+                "satellite": {
+                    "type": "recipe", "name": "satellite",
+                    "energy_required": 1, "enabled": true,
+                    "ingredients": [],
+                    "results": [{ "type": "item", "name": "satellite", "amount": 1 }]
+                }
+            }
+        }));
+        let result = compute_accessibility(&store, &AccessibilityOptions::default());
+        assert!(
+            result.is_item_accessible("satellite"),
+            "卫星应可达（enabled 配方）"
+        );
+        assert!(
+            result.is_item_accessible("space-item"),
+            "space-item 应经发射卫星（rocket_launch_products）可达"
         );
     }
 }
