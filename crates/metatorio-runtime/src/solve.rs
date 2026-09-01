@@ -1679,4 +1679,23 @@ mod tests {
             "应产出 化学 → 化学+kr-vehicle-fuel+processed-chemical 的零成本转换"
         );
     }
+
+    /// 人体工学：新建工厂默认星球为 nauvis（避免"无星球"导致环境/隐式资源缺失）。
+    #[test]
+    fn new_factory_defaults_to_nauvis_planet() {
+        let mut runtime = load_runtime();
+        let project = new_project(&mut runtime);
+        runtime
+            .dispatch(AppMessage::Project {
+                project,
+                action: ProjectAction::AddFactory {
+                    name: "test factory".to_string(),
+                    template: crate::message::FactoryTemplate::Empty,
+                },
+            })
+            .unwrap();
+        let factory_id = runtime.state.ui.selected_factory.unwrap();
+        let settings = &runtime.state.factory(project, factory_id).unwrap().settings;
+        assert_eq!(settings.planet.as_deref(), Some("nauvis"));
+    }
 }

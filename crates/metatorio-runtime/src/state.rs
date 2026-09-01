@@ -1195,6 +1195,9 @@ impl RuntimeState {
             name: non_empty(name, "Unnamed factory"),
             ..FactoryDocument::default()
         };
+        // 人体工学：新工厂默认星球为 nauvis（起始行星），避免"无星球"导致
+        // 求解时环境/隐式资源全部缺失。克隆工厂保留其原有星球，不在此重置。
+        factory.settings.planet = Some("nauvis".to_string());
         if matches!(template, FactoryTemplate::DefaultMechanics) {
             for kind in MechanicKind::ALL {
                 let mechanic_id = self.allocate_id();
