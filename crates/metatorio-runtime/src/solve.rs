@@ -11,7 +11,7 @@ use crate::document::{
     ProjectSettings,
 };
 use crate::id::{FactoryId, MechanicId, ProjectId};
-use crate::message::AppMessage;
+use crate::message::{ApplicationAction, AppMessage, ProjectAction};
 use crate::state::{DispatchResult, RuntimeError, RuntimeState};
 
 /// The solver variable identity used by the application adapter.
@@ -129,16 +129,19 @@ impl Runtime {
     }
 
     pub fn dispatch(&mut self, message: AppMessage) -> Result<DispatchResult, RuntimeError> {
-        // 任何交互都可能改变 settings（时间缩放、里程碑、显式标记、无视可达性），
-        // 简单起见整体失效缓存；计算本身发生在 project_accessibility 查询时。
-        self.accessibilities.clear();
+        // 只对可能改变可达性的消息失效 `accessibilities` 缓存（可达性计算耗时，
+        // 不应每次交互都重算）。其余（改目标/机制/偏好等）保留缓存。
+        if message_affects_accessibility(&message) {
+            self.accessibilities.clear();
+        }
         self.state.dispatch(message)
     }
 
     /// Register a loaded prototype store under a stable context id.
     pub fn install_context(&mut self, context_id: String, prototype: PrototypeStore) {
-        // 换了 store，之前的依赖图作废。
+        // 换了 store，之前的依赖图与可达性结果作废。
         self.graph_cache.remove(&context_id);
+        self.accessibilities.clear();
         self.contexts.insert(context_id, prototype);
     }
 
@@ -146,6 +149,7 @@ impl Runtime {
     pub fn remove_context(&mut self, context_id: &str) {
         self.contexts.remove(context_id);
         self.graph_cache.remove(context_id);
+        self.accessibilities.clear();
         if self.active_context.as_deref() == Some(context_id) {
             self.active_context = None;
         }
@@ -153,6 +157,9 @@ impl Runtime {
 
     /// The context used by projects that do not pin one.
     pub fn set_active_context(&mut self, context_id: Option<String>) {
+        if self.active_context != context_id {
+            self.accessibilities.clear();
+        }
         self.active_context = context_id;
     }
 
@@ -572,6 +579,26 @@ impl Runtime {
                 .collect();
         }
         self.solve_factory(project_id, factory_id)
+    }
+}
+
+/// 该消息是否可能改变项目的可达性（里程碑/无视可达性/绑定上下文/换仓库）。
+/// 若是则需失效 `accessibilities` 缓存；否则保留（可达性计算耗时，不每次重算）。
+fn message_affects_accessibility(message: &AppMessage) -> bool {
+    match message {
+        AppMessage::Project { action, .. } => matches!(
+            action,
+            ProjectAction::SetAllAccessible { .. }
+                | ProjectAction::AddMilestone { .. }
+                | ProjectAction::SetMilestoneUnlocked { .. }
+                | ProjectAction::RemoveMilestone { .. }
+                | ProjectAction::SetContext { .. }
+        ),
+        AppMessage::Application(action) => matches!(
+            action,
+            ApplicationAction::LoadGameContext { .. } | ApplicationAction::LoadCachedContext
+        ),
+        _ => false,
     }
 }
 
@@ -1697,5 +1724,45 @@ mod tests {
         let factory_id = runtime.state.ui.selected_factory.unwrap();
         let settings = &runtime.state.factory(project, factory_id).unwrap().settings;
         assert_eq!(settings.planet.as_deref(), Some("nauvis"));
+    }
+
+    /// 可达性缓存失效守卫：只有可能改变可达性的消息才清空 accessibilities。
+    #[test]
+    fn message_accessibility_guard_targets_only_relevant_actions() {
+        use crate::message::ApplicationAction;
+        let project = ProjectId(1);
+        let proj = |action| AppMessage::Project { project, action };
+        // 相关 → true
+        assert!(message_affects_accessibility(&proj(ProjectAction::SetAllAccessible { enabled: true })));
+        assert!(message_affects_accessibility(&proj(ProjectAction::AddMilestone {
+            node: Accessible::Item("x".to_string()),
+            unlocked: true,
+        })));
+        assert!(message_affects_accessibility(&proj(ProjectAction::SetMilestoneUnlocked {
+            node: Accessible::Item("x".to_string()),
+            unlocked: false,
+        })));
+        assert!(message_affects_accessibility(&proj(ProjectAction::RemoveMilestone {
+            node: Accessible::Item("x".to_string()),
+        })));
+        assert!(message_affects_accessibility(&proj(ProjectAction::SetContext {
+            context: Some("c".to_string()),
+        })));
+        assert!(message_affects_accessibility(&AppMessage::Application(
+            ApplicationAction::LoadCachedContext
+        )));
+        // 无关 → false
+        assert!(!message_affects_accessibility(&proj(ProjectAction::SetMiningProductivity {
+            productivity: 1.0,
+        })));
+        assert!(!message_affects_accessibility(&proj(ProjectAction::SetRecipeProductivity {
+            productivity: RecipeProductivity {
+                recipe: "iron-plate".to_string(),
+                productivity: 0.1,
+            },
+        })));
+        assert!(!message_affects_accessibility(&AppMessage::Application(
+            ApplicationAction::InstallUpdate
+        )));
     }
 }
