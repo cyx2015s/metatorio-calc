@@ -1895,7 +1895,7 @@ mod tests {
         let dump: serde_json::Value = serde_json::from_slice(&raw).expect("解析 dump");
         let store = PrototypeStore::load(&dump).expect("dump 加载失败");
         use metatorio_data::store::PrototypeGroup;
-        use metatorio_data::{BoilerComponent, RecipeComponent, TechnologyComponent};
+        use metatorio_data::{RecipeComponent, TechnologyComponent};
 
         let mut runtime = Runtime::new();
         runtime.install_context("py".to_string(), store.clone());

@@ -21,9 +21,10 @@ use std::collections::{HashMap, VecDeque};
 use metatorio_data::store::{PrototypeGroup, PrototypeStore};
 use metatorio_data::types::{BoilerMode, Ingredient, Modifier, Product, TriggerEffect};
 use metatorio_data::{
-    AsteroidChunkComponent, BoilerComponent, EnemySpawnerComponent, EntityComponent,
-    EntityWithHealthComponent, ItemComponent, PlantComponent, PrototypeBaseComponent,
-    RecipeComponent, SpaceConnectionComponent, SpaceLocationComponent, TechnologyComponent,
+    AsteroidChunkComponent, AssemblingMachineComponent, BoilerComponent, EnemySpawnerComponent,
+    EntityComponent, EntityWithHealthComponent, ItemComponent, PlantComponent,
+    PrototypeBaseComponent, RecipeComponent, SpaceConnectionComponent, SpaceLocationComponent,
+    TechnologyComponent,
 };
 
 use crate::dual_var::DualVar;
@@ -192,6 +193,10 @@ pub struct GraphData {
     /// 该流体可达 ⟸ 锅炉实体可达 + 输入流体（若限定）可达。复刻
     /// `expand_boiler` 的 `OutputToSeparatePipe` 分支。
     boiler_outputs: HashMap<String, Vec<(String, String)>>,
+    /// 配方名 → 以它为 `fixed_recipe` 的建筑实体名列表。**解锁该建筑**
+    /// （实体可达）即视为解锁此配方——建筑本身运行固定配方，不依赖
+    /// `enabled`/解锁科技（py 的 bioport→guano 属此类，hidden+enabled=false）。
+    fixed_recipes: HashMap<String, Vec<String>>,
 }
 
 /// 资源实体/星球流体名 → 生成它的星球列表。
@@ -316,6 +321,7 @@ pub fn build_graph(store: &PrototypeStore) -> GraphData {
     let mut tech_units: HashMap<String, Vec<String>> = HashMap::new();
     let mut launch_sources: HashMap<String, Vec<String>> = HashMap::new();
     let mut boiler_outputs: HashMap<String, Vec<(String, String)>> = HashMap::new();
+    let mut fixed_recipes: HashMap<String, Vec<String>> = HashMap::new();
 
     for record in store.group(PrototypeGroup::Item) {
         if let Some(item) = record.component::<ItemComponent>() {
@@ -549,6 +555,21 @@ pub fn build_graph(store: &PrototypeStore) -> GraphData {
             .push((record.name.clone(), input));
     }
 
+    // 固定配方建筑(AssemblingMachineComponent.fixed_recipe):解锁该建筑即视为
+    // 解锁此配方——建筑运行固定配方,不依赖 enabled/解锁科技(py 的 bioport).
+    for record in store.group(PrototypeGroup::Entity) {
+        let Some(machine) = record.component::<AssemblingMachineComponent>() else {
+            continue;
+        };
+        if machine.fixed_recipe.is_empty() {
+            continue;
+        }
+        fixed_recipes
+            .entry(machine.fixed_recipe.clone())
+            .or_default()
+            .push(record.name.clone());
+    }
+
     GraphData {
         recipes_by_product,
         resources_by_product,
@@ -562,6 +583,7 @@ pub fn build_graph(store: &PrototypeStore) -> GraphData {
         asteroid_connections,
         launch_sources,
         boiler_outputs,
+        fixed_recipes,
     }
 }
 
@@ -738,17 +760,27 @@ fn requirements(store: &PrototypeStore, graph: &GraphData, node: &Accessible) ->
                 .and_then(|record| record.component::<RecipeComponent>());
             match recipe {
                 Some(recipe) if !recipe.enabled => {
-                    // 配方可达 = 至少一个解锁科技可达。原料不再是配方自身的依赖
-                    // ——"能制造某物品"的原料需求移到物品可达性：物品 C 需
-                    // （配方 R 可用 + 全部原料可用）才可制造（并非解锁就能制造）。
-                    // hidden 且 enabled 的配方视为可达（注册/默认配方常是 hidden）。
-                    let unlocks = graph.techs_by_unlock.get(name).cloned().unwrap_or_default();
-                    Requirement::Any(
-                        unlocks
-                            .into_iter()
-                            .map(|tech| Requirement::Node(Accessible::Tech(tech)))
-                            .collect(),
-                    )
+                    // 配方可达 = 至少一个解锁科技可达，**或** 某个以它为
+                    // fixed_recipe 的建筑可达（解锁建筑即解锁固定配方）。
+                    // 原料不再是配方自身的依赖——"能制造某物品"的原料需求移到
+                    // 物品可达性：物品 C 需（配方 R 可用 + 全部原料可用）才可制造
+                    // （并非解锁就能制造）。hidden 且 enabled 的配方视为可达。
+                    let mut any: Vec<Requirement> = graph
+                        .techs_by_unlock
+                        .get(name)
+                        .cloned()
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|tech| Requirement::Node(Accessible::Tech(tech)))
+                        .collect();
+                    if let Some(entities) = graph.fixed_recipes.get(name) {
+                        any.extend(
+                            entities
+                                .iter()
+                                .map(|entity| Requirement::Node(Accessible::Entity(entity.clone()))),
+                        );
+                    }
+                    Requirement::Any(any)
                 }
                 // enabled 配方（含 hidden 但 enabled）：始终可达（根）。
                 _ => Requirement::All(Vec::new()),
@@ -1390,6 +1422,50 @@ mod tests {
         assert!(
             result.is_accessible(&Accessible::Fluid("steam".to_string())),
             "蒸汽应经锅炉机制可达(锅炉实体可达 + 输入水可达)"
+        );
+    }
+
+    /// 固定配方建筑：某配方是建筑（AssemblingMachineComponent.fixed_recipe）的
+    /// 固定配方且该建筑可达时，即使配方 enabled=false 且无解锁科技也应可达
+    /// （py 的 bioport→guano 等 hidden+enabled=false 配方属此类）。
+    #[test]
+    fn fixed_recipe_building_unlocks_recipe() {
+        let dump = serde_json::json!({
+            "item": {
+                "bioport": { "type": "item", "name": "bioport", "place_result": "bioport" }
+            },
+            "recipe": {
+                "bioport": {
+                    "type": "recipe", "name": "bioport", "enabled": true,
+                    "ingredients": [], "energy_required": 1,
+                    "results": [{ "type": "item", "name": "bioport", "amount": 1 }]
+                },
+                "bioport-hidden-recipe": {
+                    "type": "recipe", "name": "bioport-hidden-recipe", "enabled": false,
+                    "ingredients": [], "energy_required": 1,
+                    "results": [{ "type": "item", "name": "guano", "amount": 1 }]
+                }
+            },
+            "assembling-machine": {
+                "bioport": {
+                    "type": "assembling-machine", "name": "bioport",
+                    "fixed_recipe": "bioport-hidden-recipe"
+                }
+            }
+        });
+        let store = load(dump);
+        let result = compute_accessibility(&store, &AccessibilityOptions::default());
+        assert!(
+            result.is_accessible(&Accessible::Entity("bioport".to_string())),
+            "bioport 建筑应可达(其 place_result 物品由 enabled 配方产出)"
+        );
+        assert!(
+            result.is_accessible(&Accessible::Recipe("bioport-hidden-recipe".to_string())),
+            "建筑 fixed_recipe 应视为解锁该配方(无需 enabled/解锁科技)"
+        );
+        assert!(
+            result.is_item_accessible("guano"),
+            "guano 应经 bioport 的固定配方可达"
         );
     }
 

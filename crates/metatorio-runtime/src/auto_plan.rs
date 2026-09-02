@@ -10,10 +10,10 @@ use metatorio_core::{
 use metatorio_data::store::{PrototypeGroup, PrototypeRecord, PrototypeStore};
 use metatorio_data::types::{EffectType, EffectTypeLimitation, EnergySource, Modifier};
 use metatorio_data::{
-    AccumulatorComponent, BoilerComponent, BurnerGeneratorComponent, CraftingMachineComponent,
-    EntityComponent, FluidComponent, GeneratorComponent, ItemComponent, MiningDrillComponent,
-    ModuleComponent, ReactorComponent, RecipeComponent, ResourceEntityComponent,
-    SolarPanelComponent, TechnologyComponent,
+    AccumulatorComponent, AssemblingMachineComponent, BoilerComponent, BurnerGeneratorComponent,
+    CraftingMachineComponent, EntityComponent, FluidComponent, GeneratorComponent, ItemComponent,
+    MiningDrillComponent, ModuleComponent, ReactorComponent, RecipeComponent,
+    ResourceEntityComponent, SolarPanelComponent, TechnologyComponent,
 };
 use crate::solve::ExpandedVarId;
 
@@ -820,7 +820,9 @@ pub fn mechanic_accessible(
     recipe_unlocked(store, accessible, &mechanic.recipe.id)
 }
 
-/// 配方是否已解锁：`enabled` 或任一 `unlock-recipe` 科技可达。
+/// 配方是否已解锁：`enabled`、任一 `unlock-recipe` 科技可达，**或** 某个
+/// 以它为 `fixed_recipe` 的建筑可达（解锁建筑即解锁其固定配方，py 的
+/// bioport→guano 等 hidden+enabled=false 配方属此类）。
 pub fn recipe_unlocked(store: &PrototypeStore, accessible: &Accessibility, name: &str) -> bool {
     let Some(record) = store.get(PrototypeGroup::Recipe, name) else {
         return true;
@@ -829,6 +831,15 @@ pub fn recipe_unlocked(store: &PrototypeStore, accessible: &Accessibility, name:
         return true;
     };
     if recipe.enabled {
+        return true;
+    }
+    // 固定配方建筑：解锁该建筑视为解锁此配方。
+    if store.group(PrototypeGroup::Entity).any(|entity| {
+        entity
+            .component::<AssemblingMachineComponent>()
+            .is_some_and(|machine| machine.fixed_recipe == name)
+            && accessible.is_accessible(&Accessible::Entity(entity.name.clone()))
+    }) {
         return true;
     }
     store
