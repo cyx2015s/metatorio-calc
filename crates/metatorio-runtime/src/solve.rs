@@ -1878,4 +1878,372 @@ mod tests {
             t.elapsed().as_millis()
         );
     }
+
+    /// 诊断:py 上下文下"默认设置"(新项目、未点"设置默认里程碑"、空里程碑,
+    /// 即什么都不强制可达)时,研究中心输入物品(广义科技包)的可达性。
+    ///
+    /// 目的:找出哪些科技包不可达、以及默认设置下不可达的原因——为
+    /// "py 下大量物品/配方不可达"定位根因(是不是科技包链路本身断了)。
+    #[test]
+    fn py_science_pack_reachability() {
+        let path = "C:\\Users\\mirac\\AppData\\Roaming\\com.mirac.metatorio-app\\contexts\\c3544821b3232cf9\\data-raw-dump.json";
+        if !std::path::Path::new(path).exists() {
+            eprintln!("[skip] 无 py dump（{path}），跳过");
+            return;
+        }
+        let raw = std::fs::read(path).expect("读 dump");
+        let dump: serde_json::Value = serde_json::from_slice(&raw).expect("解析 dump");
+        let store = PrototypeStore::load(&dump).expect("dump 加载失败");
+        use metatorio_data::store::PrototypeGroup;
+        use metatorio_data::{BoilerComponent, RecipeComponent, TechnologyComponent};
+
+        let mut runtime = Runtime::new();
+        runtime.install_context("py".to_string(), store.clone());
+        runtime.set_active_context(Some("py".to_string()));
+        let project = new_project(&mut runtime);
+        // 默认设置:空里程碑(未设置默认里程碑) → forced 空集。
+        let access = runtime.project_accessibility(project).unwrap();
+
+        // 研究中心输入物品 = 实验室 LabComponent.inputs(广义科技包)。
+        let mut packs: Vec<String> = store
+            .group(PrototypeGroup::Entity)
+            .filter_map(|record| record.component::<LabComponent>().map(|lab| lab.inputs.clone()))
+            .flatten()
+            .collect();
+        packs.sort();
+        packs.dedup();
+
+        // 物品全集(Item 组 ∪ 配方原料/产物),统计可达比例。
+        let mut all_items: Vec<String> = store
+            .group(PrototypeGroup::Item)
+            .map(|record| record.name.clone())
+            .collect();
+        for record in store.group(PrototypeGroup::Recipe) {
+            let Some(recipe) = record.component::<RecipeComponent>() else {
+                continue;
+            };
+            for ingredient in &recipe.ingredients {
+                if let metatorio_data::types::Ingredient::Item(item) = ingredient {
+                    all_items.push(item.name.clone());
+                }
+            }
+            for result in &recipe.results {
+                if let metatorio_data::types::Product::Item(product) = result {
+                    all_items.push(product.name.clone());
+                }
+            }
+        }
+        all_items.sort();
+        all_items.dedup();
+        let reachable_items = all_items
+            .iter()
+            .filter(|name| access.is_item_accessible(name))
+            .count();
+        eprintln!(
+            "\n[py] 物品: 总 {} , 默认可达 {} ({:.1}%)",
+            all_items.len(),
+            reachable_items,
+            100.0 * reachable_items as f64 / all_items.len().max(1) as f64
+        );
+
+        // 科技/配方总量回顾。
+        let tech_count = store.group(PrototypeGroup::Technology).count();
+        let recipe_count = store.group(PrototypeGroup::Recipe).count();
+        let tech_reachable = store
+            .group(PrototypeGroup::Technology)
+            .filter(|r| r.name.len() > 0 && access.is_accessible(&metatorio_core::Accessible::Tech(r.name.clone())))
+            .count();
+        let recipe_reachable = store
+            .group(PrototypeGroup::Recipe)
+            .filter(|r| access.is_accessible(&metatorio_core::Accessible::Recipe(r.name.clone())))
+            .count();
+        eprintln!("[py] 科技: 总 {tech_count} , 默认可达 {tech_reachable};配方: 总 {recipe_count} , 默认可达 {recipe_reachable}");
+
+        // 建 物品→产出配方 反查表(等价 GraphData.recipes_by_product)。
+        use std::collections::HashMap;
+        let mut recipes_by_product: HashMap<String, Vec<String>> = HashMap::new();
+        for record in store.group(PrototypeGroup::Recipe) {
+            let Some(recipe) = record.component::<RecipeComponent>() else {
+                continue;
+            };
+            for result in &recipe.results {
+                match result {
+                    metatorio_data::types::Product::Item(product) => {
+                        recipes_by_product.entry(product.name.clone()).or_default().push(record.name.clone());
+                    }
+                    metatorio_data::types::Product::Fluid(product) => {
+                        recipes_by_product.entry(product.name.clone()).or_default().push(record.name.clone());
+                    }
+                    _ => {}
+                }
+            }
+        }
+        // 建 配方→解锁科技 表(等价 GraphData.techs_by_unlock)。
+        let mut unlock_by_recipe: HashMap<String, Vec<String>> = HashMap::new();
+        for record in store.group(PrototypeGroup::Technology) {
+            let Some(tech) = record.component::<TechnologyComponent>() else {
+                continue;
+            };
+            for effect in &tech.effects {
+                if let metatorio_data::types::Modifier::UnlockRecipe(unlock) = effect {
+                    unlock_by_recipe.entry(unlock.recipe.clone()).or_default().push(record.name.clone());
+                }
+            }
+        }
+
+        eprintln!("\n[py] 科技包(实验室输入物品)共 {} 个:", packs.len());
+        let mut unreachable_packs: Vec<&String> = Vec::new();
+        for pack in &packs {
+            if access.is_item_accessible(pack) {
+                eprintln!("  [可达] {pack}");
+                continue;
+            }
+            unreachable_packs.push(pack);
+            let producers = recipes_by_product.get(pack).cloned().unwrap_or_default();
+            eprintln!("  [不可达] {pack}");
+            if producers.is_empty() {
+                eprintln!("      · 无产出配方(仅能经矿藏/变质/发射/星球获得或纯运行时机制)");
+                continue;
+            }
+            for recipe_name in &producers {
+                let Some(recipe) = store
+                    .get(PrototypeGroup::Recipe, recipe_name)
+                    .and_then(|r| r.component::<RecipeComponent>())
+                else {
+                    continue;
+                };
+                let enabled = recipe.enabled;
+                let r_reachable = access.is_accessible(&metatorio_core::Accessible::Recipe(recipe_name.clone()));
+                let unlock_techs = unlock_by_recipe.get(recipe_name).cloned().unwrap_or_default();
+                let mut blocked: Vec<String> = Vec::new();
+                for ingredient in &recipe.ingredients {
+                    match ingredient {
+                        metatorio_data::types::Ingredient::Item(item) if !access.is_item_accessible(&item.name) => {
+                            blocked.push(format!("物品:{}", item.name));
+                        }
+                        metatorio_data::types::Ingredient::Fluid(fluid) if !access.is_accessible(&metatorio_core::Accessible::Fluid(fluid.name.clone())) => {
+                            blocked.push(format!("流体:{}", fluid.name));
+                        }
+                        _ => {}
+                    }
+                }
+                eprintln!(
+                    "      · 配方 {recipe_name}: enabled={enabled} reachable={r_reachable} unlock_techs={unlock_techs:?} 缺原料={blocked:?}"
+                );
+            }
+        }
+        eprintln!("\n[py] 不可达科技包共 {} 个:\n  {}", unreachable_packs.len(), unreachable_packs.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("\n  "));
+    }
+
+    /// 诊断:沿"可达配方 → 第一个不可达原料"递归下钻,定位科技包不可达的
+    /// 根因链(哪一环先断、以及为什么——无配方/配方不可达/原料不可达)。
+    #[test]
+    fn py_trace_science_pack_ingredients() {
+        let path = "C:\\Users\\mirac\\AppData\\Roaming\\com.mirac.metatorio-app\\contexts\\c3544821b3232cf9\\data-raw-dump.json";
+        if !std::path::Path::new(path).exists() {
+            eprintln!("[skip] 无 py dump（{path}），跳过");
+            return;
+        }
+        let raw = std::fs::read(path).expect("读 dump");
+        let dump: serde_json::Value = serde_json::from_slice(&raw).expect("解析 dump");
+        let store = PrototypeStore::load(&dump).expect("dump 加载失败");
+        use metatorio_data::store::PrototypeGroup;
+        use metatorio_data::{BoilerComponent, RecipeComponent, TechnologyComponent};
+
+        let mut runtime = Runtime::new();
+        runtime.install_context("py".to_string(), store.clone());
+        runtime.set_active_context(Some("py".to_string()));
+        let project = new_project(&mut runtime);
+        let access = runtime.project_accessibility(project).unwrap();
+
+        use std::collections::HashMap;
+        let mut recipes_by_product: HashMap<String, Vec<String>> = HashMap::new();
+        for record in store.group(PrototypeGroup::Recipe) {
+            let Some(recipe) = record.component::<RecipeComponent>() else {
+                continue;
+            };
+            for result in &recipe.results {
+                match result {
+                    metatorio_data::types::Product::Item(product) => recipes_by_product
+                        .entry(product.name.clone())
+                        .or_default()
+                        .push(record.name.clone()),
+                    metatorio_data::types::Product::Fluid(product) => recipes_by_product
+                        .entry(product.name.clone())
+                        .or_default()
+                        .push(record.name.clone()),
+                    _ => {}
+                }
+            }
+        }
+        let mut unlock_by_recipe: HashMap<String, Vec<String>> = HashMap::new();
+        for record in store.group(PrototypeGroup::Technology) {
+            let Some(tech) = record.component::<TechnologyComponent>() else {
+                continue;
+            };
+            for effect in &tech.effects {
+                if let metatorio_data::types::Modifier::UnlockRecipe(unlock) = effect {
+                    unlock_by_recipe.entry(unlock.recipe.clone()).or_default().push(record.name.clone());
+                }
+            }
+        }
+
+        // 递归链条:选一个"可用配方"(enable 或解锁科技可达),沿其第一个
+        // 不可达原料下钻,直到无配方 / 配方不可达 / 深度耗尽。
+        fn chain(
+            access: &metatorio_core::Accessibility,
+            store: &PrototypeStore,
+            recipes_by_product: &HashMap<String, Vec<String>>,
+            unlock_by_recipe: &HashMap<String, Vec<String>>,
+            name: &str,
+            depth: usize,
+            seen: &mut Vec<String>,
+        ) -> String {
+            if access.is_item_accessible(name) {
+                return "可达".to_string();
+            }
+            if depth > 5 {
+                return format!("…(深度 {depth}, {name})");
+            }
+            if seen.contains(&name.to_string()) {
+                return format!("→ 循环({name})");
+            }
+            seen.push(name.to_string());
+            let producers = recipes_by_product.get(name).cloned().unwrap_or_default();
+            if producers.is_empty() {
+                return format!("({name}: 无产出配方/无矿藏变质发射起源)");
+            }
+            // 选可用配方:优先 enabled,其次解锁科技可达。
+            let mut chosen: Option<String> = None;
+            for recipe_name in &producers {
+                let Some(recipe) = store
+                    .get(PrototypeGroup::Recipe, recipe_name)
+                    .and_then(|r| r.component::<RecipeComponent>())
+                else {
+                    continue;
+                };
+                if recipe.enabled {
+                    chosen = Some(recipe_name.clone());
+                    break;
+                }
+                if access.is_accessible(&metatorio_core::Accessible::Recipe(recipe_name.clone())) {
+                    chosen = Some(recipe_name.clone());
+                }
+            }
+            let Some(recipe_name) = chosen else {
+                let reasons: Vec<String> = producers
+                    .iter()
+                    .map(|recipe_name| {
+                        let unlock = unlock_by_recipe.get(recipe_name).cloned().unwrap_or_default();
+                        format!("{recipe_name}(enabled=false, 解锁科技={unlock:?})")
+                    })
+                    .collect();
+                return format!("({name}: 所有产出配方均不可达 → {})", reasons.join("; "));
+            };
+            let recipe = store
+                .get(PrototypeGroup::Recipe, &recipe_name)
+                .and_then(|r| r.component::<RecipeComponent>())
+                .expect("选中的配方应存在");
+            let mut blocked: Vec<String> = Vec::new();
+            for ingredient in &recipe.ingredients {
+                match ingredient {
+                    metatorio_data::types::Ingredient::Item(item) => {
+                        if !access.is_item_accessible(&item.name) {
+                            blocked.push(item.name.clone());
+                        }
+                    }
+                    metatorio_data::types::Ingredient::Fluid(fluid) => {
+                        if !access.is_accessible(&metatorio_core::Accessible::Fluid(fluid.name.clone())) {
+                            blocked.push(format!("流体:{}", fluid.name));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            if blocked.is_empty() {
+                return format!("({name} ← {recipe_name}: 配方可用但不可达?)");
+            }
+            // 从第一个不可达原料下钻。
+            let next = blocked.remove(0);
+            let reason = chain(access, store, recipes_by_product, unlock_by_recipe, &next, depth + 1, seen);
+            format!("{name} ← {recipe_name} 缺原料 → {reason}")
+        }
+
+        for target in [
+            "py-science-pack-1",
+            "logistic-science-pack",
+            "chemical-science-pack",
+        ] {
+            let mut seen = Vec::new();
+            let c = chain(&access, &store, &recipes_by_product, &unlock_by_recipe, target, 0, &mut seen);
+            eprintln!("\n[chain] {target}:\n  {c}");
+        }
+
+        // 单独看 fawogae-substrate / flask:是否连"可用配方"都没有。
+        for probe in ["fawogae-substrate", "flask", "alien-sample01", "solidified-sarcorus", "advanced-circuit", "optical-fiber", "workers-food-03", "nv-center", "pi-josephson-junction"] {
+            let mut seen = Vec::new();
+            let c = chain(&access, &store, &recipes_by_product, &unlock_by_recipe, probe, 0, &mut seen);
+            eprintln!("[probe] {probe}:\n  {c}");
+        }
+
+        // 流体侧:steam / water 到底怎么来的?有没有产出配方、是否星球自动资源。
+        let nauvis_flows = crate::planet::planet_autoplaced_flows(&store, "nauvis");
+        let flu = |name: &str| {
+            let producers = recipes_by_product.get(name).cloned().unwrap_or_default();
+            let mut info = Vec::new();
+            for recipe_name in &producers {
+                let Some(recipe) = store
+                    .get(PrototypeGroup::Recipe, recipe_name)
+                    .and_then(|r| r.component::<RecipeComponent>())
+                else {
+                    continue;
+                };
+                let unlock = unlock_by_recipe.get(recipe_name).cloned().unwrap_or_default();
+                info.push(format!(
+                    "{recipe_name}(enabled={}, reachable={}, 解锁={unlock:?})",
+                    recipe.enabled,
+                    access.is_accessible(&metatorio_core::Accessible::Recipe(recipe_name.clone()))
+                ));
+            }
+            let in_nauvis_any = nauvis_flows.iter().any(|(flow, _)| matches!(flow, metatorio_core::DualVar::Fluid { name: n, .. } if n == name));
+            let node_reachable = access.is_accessible(&metatorio_core::Accessible::Fluid(name.to_string()));
+            eprintln!(
+                "[fluid] {name}: 可达(node)={node_reachable}, 产出配方={info:?}, nauvis自动流={in_nauvis_any}"
+            );
+        };
+        flu("steam");
+        flu("water");
+        flu("pure-water");
+        flu("hot-water");
+
+        // 锅炉机制:steam 由锅炉加热水而来,不是普通配方。看锅炉实体本身
+        // 及其 place_result 物品在默认设置下是否可达(可达则锅炉应能产 steam)。
+        eprintln!("\n[py] 锅炉实体:");
+        let mut boiler_count = 0usize;
+        let mut boiler_reachable = 0usize;
+        for record in store.group(PrototypeGroup::Entity) {
+            let Some(boiler) = record.component::<BoilerComponent>() else {
+                continue;
+            };
+            boiler_count += 1;
+            let out_filter = boiler
+                .output_fluid_box
+                .filter
+                .as_deref()
+                .or(boiler.fluid_box.filter.as_deref())
+                .unwrap_or("");
+            // 该实体能否产出 steam。
+            let makes_steam = out_filter.contains("steam");
+            // 实体可达性:实体节点(通过 place_result/placeable_by)。
+            let entity_reachable =
+                access.is_accessible(&metatorio_core::Accessible::Entity(record.name.clone()));
+            if makes_steam {
+                eprintln!("  · {} (→ {out_filter}) 实体可达={entity_reachable}", record.name);
+            }
+            if entity_reachable {
+                boiler_reachable += 1;
+            }
+        }
+        eprintln!("[py] 锅炉实体: 总 {boiler_count}, 默认可达(实体节点) {boiler_reachable}");
+    }
 }

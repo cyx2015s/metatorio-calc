@@ -19,11 +19,11 @@
 use std::collections::{HashMap, VecDeque};
 
 use metatorio_data::store::{PrototypeGroup, PrototypeStore};
-use metatorio_data::types::{Ingredient, Modifier, Product, TriggerEffect};
+use metatorio_data::types::{BoilerMode, Ingredient, Modifier, Product, TriggerEffect};
 use metatorio_data::{
-    AsteroidChunkComponent, EnemySpawnerComponent, EntityComponent, EntityWithHealthComponent,
-    ItemComponent, PlantComponent, PrototypeBaseComponent, RecipeComponent,
-    SpaceConnectionComponent, SpaceLocationComponent, TechnologyComponent,
+    AsteroidChunkComponent, BoilerComponent, EnemySpawnerComponent, EntityComponent,
+    EntityWithHealthComponent, ItemComponent, PlantComponent, PrototypeBaseComponent,
+    RecipeComponent, SpaceConnectionComponent, SpaceLocationComponent, TechnologyComponent,
 };
 
 use crate::dual_var::DualVar;
@@ -187,6 +187,11 @@ pub struct GraphData {
     /// 物品名 → 发射出它的物品（某物品可通过把另一个物品发射上太空得到）。
     /// 逆向表：产物 → 发射它的基物品（`item.rocket_launch_products`）。
     launch_sources: HashMap<String, Vec<String>>,
+    /// 输出流体名 → [(锅炉实体, 输入流体名)]（输入流体为空串 = 不限定）。
+    /// `OutputToSeparatePipe` 锅炉把输入流体加热成输出流体（如 water→steam）；
+    /// 该流体可达 ⟸ 锅炉实体可达 + 输入流体（若限定）可达。复刻
+    /// `expand_boiler` 的 `OutputToSeparatePipe` 分支。
+    boiler_outputs: HashMap<String, Vec<(String, String)>>,
 }
 
 /// 资源实体/星球流体名 → 生成它的星球列表。
@@ -310,6 +315,7 @@ pub fn build_graph(store: &PrototypeStore) -> GraphData {
     let mut techs_by_unlock: HashMap<String, Vec<String>> = HashMap::new();
     let mut tech_units: HashMap<String, Vec<String>> = HashMap::new();
     let mut launch_sources: HashMap<String, Vec<String>> = HashMap::new();
+    let mut boiler_outputs: HashMap<String, Vec<(String, String)>> = HashMap::new();
 
     for record in store.group(PrototypeGroup::Item) {
         if let Some(item) = record.component::<ItemComponent>() {
@@ -518,6 +524,31 @@ pub fn build_graph(store: &PrototypeStore) -> GraphData {
         }
     }
 
+    // 输出流体 → [(锅炉实体, 输入流体)]。
+    // `OutputToSeparatePipe` 锅炉把输入流体加热成输出流体(如 water→steam)；
+    // steam 这类流体单纯靠配方产出会被科技链卡死,须考虑锅炉机制这一
+    // 基础产能路径(复刻 expand_boiler 的 OutputToSeparatePipe 分支)。
+    for record in store.group(PrototypeGroup::Entity) {
+        let Some(boiler) = record.component::<BoilerComponent>() else {
+            continue;
+        };
+        if boiler.mode.unwrap_or(BoilerMode::HeatFluidInside) != BoilerMode::OutputToSeparatePipe {
+            continue;
+        }
+        let Some(output) = boiler.output_fluid_box.filter.as_deref() else {
+            continue;
+        };
+        if output.is_empty() {
+            continue;
+        }
+        // 输入流体名(可能为空 = 不限定,即加热任意送入流体)。
+        let input = boiler.fluid_box.filter.clone().unwrap_or_default();
+        boiler_outputs
+            .entry(output.to_string())
+            .or_default()
+            .push((record.name.clone(), input));
+    }
+
     GraphData {
         recipes_by_product,
         resources_by_product,
@@ -530,6 +561,7 @@ pub fn build_graph(store: &PrototypeStore) -> GraphData {
         asteroid_locations,
         asteroid_connections,
         launch_sources,
+        boiler_outputs,
     }
 }
 
@@ -809,6 +841,16 @@ fn requirements(store: &PrototypeStore, graph: &GraphData, node: &Accessible) ->
                         .iter()
                         .map(|planet| Requirement::Node(Accessible::Planet(planet.clone()))),
                 );
+            }
+            // 锅炉产流体：能产出该流体的锅炉实体可达 + 其输入流体（若限定）可达。
+            if let Some(sources) = graph.boiler_outputs.get(name) {
+                for (boiler, input) in sources {
+                    let mut all = vec![Requirement::Node(Accessible::Entity(boiler.clone()))];
+                    if !input.is_empty() {
+                        all.push(Requirement::Node(Accessible::Fluid(input.clone())));
+                    }
+                    any.push(Requirement::All(all));
+                }
             }
             Requirement::Any(any)
         }
@@ -1295,6 +1337,60 @@ mod tests {
         let result = compute_accessibility(&store, &options);
         assert!(result.is_item_accessible("magic-item"));
         assert!(result.is_accessible(&Accessible::Tech("tech-void".into())));
+    }
+
+    /// 锅炉机制：`OutputToSeparatePipe` 锅炉把输入流体(water)加热成输出流体
+    /// (steam)。steam 单纯靠配方产出会因科技链卡死——可达性必须考虑锅炉
+    /// 这一基础产能路径：锅炉实体可达 + 输入流体可达 ⟹ 输出流体可达。
+    /// 回归：此前只按配方/矿藏/星球推断流体来源，导致 py 上下文下 steam
+    /// 不可达、下游科技包与大量内容被连锁锁死。
+    #[test]
+    fn boiler_produces_output_fluid_as_reachability_source() {
+        let dump = serde_json::json!({
+            "fluid": {
+                "water": { "type": "fluid", "name": "water" },
+                "steam": { "type": "fluid", "name": "steam" }
+            },
+            "item": {
+                "boiler": { "type": "item", "name": "boiler", "place_result": "boiler" }
+            },
+            "recipe": {
+                "boiler": {
+                    "type": "recipe", "name": "boiler", "enabled": true,
+                    "ingredients": [], "energy_required": 1,
+                    "results": [{ "type": "item", "name": "boiler", "amount": 1 }]
+                },
+                "water": {
+                    "type": "recipe", "name": "water", "enabled": true,
+                    "ingredients": [], "energy_required": 1,
+                    "results": [{ "type": "fluid", "name": "water", "amount": 1 }]
+                }
+            },
+            "boiler": {
+                "boiler": {
+                    "type": "boiler", "name": "boiler",
+                    "energy_consumption": "1MW",
+                    "mode": "output-to-separate-pipe",
+                    "fluid_box": { "filter": "water" },
+                    "output_fluid_box": { "filter": "steam" },
+                    "target_temperature": 165
+                }
+            }
+        });
+        let store = load(dump);
+        let result = compute_accessibility(&store, &AccessibilityOptions::default());
+        assert!(
+            result.is_accessible(&Accessible::Entity("boiler".to_string())),
+            "锅炉实体应可达(enabled 配方产出 place_result 物品)"
+        );
+        assert!(
+            result.is_accessible(&Accessible::Fluid("water".to_string())),
+            "水应可达"
+        );
+        assert!(
+            result.is_accessible(&Accessible::Fluid("steam".to_string())),
+            "蒸汽应经锅炉机制可达(锅炉实体可达 + 输入水可达)"
+        );
     }
 
     /// 真实 dump：基础科技链/物品链应可达，矿藏（minable）应作为来源。
