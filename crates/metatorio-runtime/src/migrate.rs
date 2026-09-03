@@ -69,7 +69,7 @@ pub fn migrate_old_project(
     let new_factories = factories
         .iter()
         .enumerate()
-        .map(|(idx, fact)| factory_of(fact, idx, quality_order))
+        .map(|(idx, fact)| factory_of(fact, idx, quality_order, store))
         .collect::<Vec<_>>();
 
     Ok(json!({
@@ -162,7 +162,7 @@ fn merge_planning(planning: &mut Value, mechanic: &Value, q: &[String]) -> bool 
 
 // ── 工厂 ──────────────────────────────────────────────────────────
 
-fn factory_of(f: &Value, idx: usize, q: &[String]) -> Value {
+fn factory_of(f: &Value, idx: usize, q: &[String], store: Option<&PrototypeStore>) -> Value {
     let factory = f.get("factory").cloned().unwrap_or(json!({}));
     let planet = factory.get("planet").cloned().unwrap_or(Value::Null);
     let surface = factory.get("surface").cloned().unwrap_or(Value::Null);
@@ -241,7 +241,7 @@ fn factory_of(f: &Value, idx: usize, q: &[String]) -> Value {
     let mut mechanics = Vec::new();
     if let Some(arr) = f.get("mechanics").and_then(Value::as_array) {
         for m in arr {
-            mechanic_entries(m, q, &mut mechanics);
+            mechanic_entries(m, q, store, &mut mechanics);
         }
     }
     let mechanics = mechanics
@@ -271,7 +271,12 @@ fn factory_of(f: &Value, idx: usize, q: &[String]) -> Value {
 // ── 机制（SoA → AoS）─────────────────────────────────────────────
 
 /// 把旧版一个机制对象（内部多条 instances）展开成多条新版机制 JSON。
-fn mechanic_entries(mechanic: &Value, q: &[String], out: &mut Vec<Value>) {
+fn mechanic_entries(
+    mechanic: &Value,
+    q: &[String],
+    store: Option<&PrototypeStore>,
+    out: &mut Vec<Value>,
+) {
     let Some(typ) = mechanic.get("type").and_then(Value::as_str) else {
         return;
     };
@@ -288,7 +293,7 @@ fn mechanic_entries(mechanic: &Value, q: &[String], out: &mut Vec<Value>) {
         return;
     }
     for inst in &instances {
-        out.push(mechanic_of(new_type, inst, q));
+        out.push(mechanic_of(new_type, inst, q, store));
     }
 }
 
@@ -309,15 +314,15 @@ fn map_mechanic_type(old: &str) -> Option<&'static str> {
     })
 }
 
-fn mechanic_of(new_type: &str, inst: &Value, q: &[String]) -> Value {
+fn mechanic_of(new_type: &str, inst: &Value, q: &[String], store: Option<&PrototypeStore>) -> Value {
     match new_type {
         "recipe" => json!({
             "type": "recipe",
             "recipe": id_of(inst_get(inst, "recipe"), q),
             "machine": id_of(inst_get(inst, "machine"), q),
             "module_config": module_config_of(inst_get(inst, "module_config")),
-            "fuel": fuel_name(inst_get(inst, "fuel")),
-            "fuel_temperature": fuel_temperature(inst_get(inst, "fuel")),
+            "fuel": fuel_fields(inst_get(inst, "fuel"), store).0,
+            "fuel_temperature": fuel_fields(inst_get(inst, "fuel"), store).1,
         }),
         "mining" => json!({
             "type": "mining",
@@ -346,8 +351,8 @@ fn mechanic_of(new_type: &str, inst: &Value, q: &[String]) -> Value {
             "boiler": id_of(inst_get(inst, "boiler"), q),
             "fluid": inst.get("fluid").cloned().unwrap_or(json!("")),
             "temperature": inst.get("temperature").cloned().unwrap_or(json!(0)),
-            "fuel": fuel_name(inst_get(inst, "fuel")),
-            "fuel_temperature": fuel_temperature(inst_get(inst, "fuel")),
+            "fuel": fuel_fields(inst_get(inst, "fuel"), store).0,
+            "fuel_temperature": fuel_fields(inst_get(inst, "fuel"), store).1,
         }),
         "reactor" => json!({
             "type": "reactor",
@@ -394,6 +399,26 @@ fn fuel_id_name(fuel: &Value) -> Value {
         .and_then(Value::as_str)
         .map(|s| json!(s))
         .unwrap_or(Value::Null)
+}
+
+/// 处理 `Option<(String,i32)>` 燃料（recipe/boiler 的 fuel）：返回 `(燃料名, 燃料温度)`。
+///
+/// 旧版第二个元素对**流体燃料**是温度、对**burner 物品燃料**是品质索引。新版
+/// `fuel` 只有名字（`Option<String>`），没有品质——因此 burner 燃料的品质**被
+/// 设计丢弃**，不能也不应迁移。按当前上下文把名字分类为流体与否：流体 → 第二
+/// 元素是温度，映射到 `fuel_temperature`；物品 → 第二元素是品质，置 `None`
+/// （避免把品质索引误当温度注入）。
+fn fuel_fields(fuel: &Value, store: Option<&PrototypeStore>) -> (Value, Value) {
+    let name = fuel_name(fuel);
+    let is_fluid = name
+        .as_str()
+        .map(|n| store.is_some_and(|s| s.get(PrototypeGroup::Fluid, n).is_some()))
+        .unwrap_or(false);
+    if is_fluid {
+        (name, fuel_temperature(fuel))
+    } else {
+        (name, Value::Null)
+    }
 }
 
 // ── 插件配置 / 信标 ───────────────────────────────────────────────
@@ -675,5 +700,27 @@ mod tests {
         // 未知名字回退 Tech（旧语义），无仓库时也回退。
         assert_eq!(classify_node("nope", Some(&store)), json!({ "Tech": "nope" }));
         assert_eq!(classify_node("my-item", None), json!({ "Tech": "my-item" }));
+    }
+
+    #[test]
+    fn fuel_handles_fluid_vs_burner() {
+        // 仓库：steam 是流体，coal 是物品。
+        let dump = serde_json::json!({
+            "fluid": { "steam": { "type": "fluid", "name": "steam" } },
+            "item": { "coal": { "type": "item", "name": "coal" } }
+        });
+        let store = PrototypeStore::load(&dump).expect("最小仓库应可加载");
+        // 流体燃料：第二个元素是温度 → 映射到 fuel_temperature。
+        let (name, temp) = fuel_fields(&json!(["steam", 165]), Some(&store));
+        assert_eq!(name, json!("steam"));
+        assert_eq!(temp, json!(165));
+        // burner 物品燃料：第二个元素是品质索引，新版无品质 → 丢弃（不误当温度）。
+        let (name, temp) = fuel_fields(&json!(["coal", 3]), Some(&store));
+        assert_eq!(name, json!("coal"));
+        assert_eq!(temp, Value::Null);
+        // 无燃料。
+        let (name, temp) = fuel_fields(&Value::Null, Some(&store));
+        assert_eq!(name, Value::Null);
+        assert_eq!(temp, Value::Null);
     }
 }
