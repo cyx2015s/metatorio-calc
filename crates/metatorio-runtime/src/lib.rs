@@ -9,6 +9,7 @@ pub mod auto_plan;
 pub mod document;
 pub mod id;
 pub mod message;
+pub mod migrate;
 pub mod planet;
 pub mod prototype;
 pub mod solve;

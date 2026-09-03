@@ -402,13 +402,39 @@ impl Runtime {
         self.state.replace_milestones(project_id, milestones)
     }
 
-    /// 从文件加载项目并导入当前文档（追加，不替换现有项目；
+    /// 从文件加载一个项目并导入当前文档（追加，不替换现有项目；
     /// 项目 id 冲突时自动重分配）。
+    ///
+    /// 兼容旧版 metatorio-egui 工程文件：检测到旧格式（有 `proj`+`factories`，
+    /// 无 `schema_version`）时按**当前游戏上下文**的品质顺序把 level → 品质名
+    /// 迁移为新版 `AppDocument`（一次性转换，非强类型变换）。
     pub fn load_document_file(&mut self, path: impl AsRef<Path>) -> Result<(), RuntimeError> {
-        let file =
-            File::open(path.as_ref()).map_err(|error| RuntimeError::Io(error.to_string()))?;
-        let document: AppDocument = serde_json::from_reader(file)
+        let raw = std::fs::read_to_string(path.as_ref())
+            .map_err(|error| RuntimeError::Io(error.to_string()))?;
+        let value: serde_json::Value = serde_json::from_str(&raw)
             .map_err(|error| RuntimeError::DataLoad(error.to_string()))?;
+        let document: AppDocument = if crate::migrate::is_old_project_format(&value) {
+            // 当前激活上下文 → 品质顺序 + 绑定 id + 里程碑节点分类。
+            let context_id = self.active_context.clone();
+            let store = context_id
+                .as_deref()
+                .and_then(|id| self.contexts.get(id));
+            let quality_order = store
+                .map(|s| s.quality_order().to_vec())
+                .unwrap_or_default();
+            let migrated = crate::migrate::migrate_old_project(
+                &value,
+                context_id.as_deref(),
+                &quality_order,
+                store,
+            )
+            .map_err(RuntimeError::DataLoad)?;
+            serde_json::from_value(migrated)
+                .map_err(|error| RuntimeError::DataLoad(error.to_string()))?
+        } else {
+            serde_json::from_value(value)
+                .map_err(|error| RuntimeError::DataLoad(error.to_string()))?
+        };
         self.state.import_projects(&document);
         Ok(())
     }
