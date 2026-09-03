@@ -2,7 +2,7 @@
   // 单个机制卡片：主选择器（配方/资源/物品/设备）为图标按钮，
   // 机器为图标按钮，插件配置在展开区（ModuleEditor）。
   import { runtime } from "$lib/runtime/store.svelte.ts";
-  import { mechanicFlow, solarBalance } from "$lib/runtime/client";
+  import { solarBalance } from "$lib/runtime/client";
   import FlowChip from "./FlowChip.svelte";
   import HoverIcon from "./HoverIcon.svelte";
   import Icon from "./Icon.svelte";
@@ -63,13 +63,11 @@
   $effect(() => {
     const mechanic = entry.mechanic;
     let alive = true;
-    mechanicFlow(project, factory, entry.id)
+    runtime
+      .getMechanicFlow(project, factory, entry.id, mechanic)
       .then((flows) => {
         if (!alive) return;
-        mechanicFlows = flows.map(([flow, amount]) => ({ flow, amount }));
-      })
-      .catch(() => {
-        if (alive) mechanicFlows = [];
+        mechanicFlows = flows;
       });
     return () => {
       alive = false;

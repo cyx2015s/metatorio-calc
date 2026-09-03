@@ -33,6 +33,7 @@ import {
   milestonesOrdered,
   productivity,
   implicitSources,
+  mechanicFlow,
 } from "./client";
 import type {
   Accessible,
@@ -54,6 +55,27 @@ import type {
   TimeScale,
   ExternalInputId,
 } from "./types";
+
+// 会修改里程碑集合/可达性的项目动作（重拉有序里程碑用）。与后端
+// message_affects_accessibility 对齐。
+const MILESTONE_KEYS = new Set([
+  "add-milestone",
+  "set-milestone-unlocked",
+  "remove-milestone",
+  "set-all-accessible",
+  "set-context",
+]);
+// 会修改配方/采矿产能（自动推算 + 用户覆盖）的项目动作。
+const PRODUCTIVITY_KEYS = new Set([
+  "set-all-accessible",
+  "set-context",
+  "set-mining-productivity",
+  "set-ignore-productivity",
+  "set-recipe-productivity",
+  "remove-recipe-productivity",
+  "set-infinite-tech-level",
+  "remove-infinite-tech-level",
+]);
 
 class RuntimeStore {
   document = $state<AppDocument | null>(null);
@@ -81,6 +103,14 @@ class RuntimeStore {
   private activeContextId = "";
   /** 悬停详情缓存：`kind/name` → 详情。 */
   private detailCache = new Map<string, PrototypeDetail>();
+  /** 机制展开流缓存：`contextId:project:factory:mechanicId` → {机制内容hash, 流}。
+   *  每次 dispatch 后 refresh() 会用全新对象引用刷新机制列表，导致每个
+   *  MechanicCard 都重新拉取展开流。按机制**内容哈希**缓存，内容不变时不重发
+   *  IPC（py 大厂几百机制时，这是主线程卡顿/滞后的主要来源之一）。 */
+  private mechanicFlowCache = new Map<
+    string,
+    { hash: string; flows: { flow: import("./types").DualVar; amount: number }[] }
+  >();
   /** 图标对象 URL 列表，用于卸载时释放。 */
   private iconUrls: string[] = [];
 
@@ -145,6 +175,7 @@ class RuntimeStore {
   async send(message: AppMessage): Promise<void> {
     this.busy = true;
     this.lastError = null;
+    const prevProject = this.ui?.selected_project;
     try {
       const result = await dispatch(message);
       this.revision = result.revision;
@@ -158,9 +189,32 @@ class RuntimeStore {
     } finally {
       this.busy = false;
     }
+    // 只有会改动里程碑/产能的消息才重拉它们（py 下 milestonesOrdered 是
+    // 重 BFS ~1.8s，不应在每次无关键交互后都跑）；换选项目也要重拉。
+    const keys = RuntimeStore.innerActionKeys(message);
+    const domain =
+      keys.some((k) => MILESTONE_KEYS.has(k)) || prevProject !== this.ui?.selected_project;
+    if (domain) this.refreshOrderedMilestones().catch(() => {});
+    if (
+      keys.some((k) => PRODUCTIVITY_KEYS.has(k)) ||
+      keys.some((k) => MILESTONE_KEYS.has(k)) ||
+      prevProject !== this.ui?.selected_project
+    ) {
+      this.refreshProductivity().catch(() => {});
+    }
     this.refreshImplicitSources().catch(() => {});
-    this.refreshOrderedMilestones().catch(() => {});
-    this.refreshProductivity().catch(() => {});
+  }
+
+  /** 提取 AppMessage 内层动作键（scope=project/factory 时在 action.action，
+   *  scope=application 时直接是 action）。用于判断是否需要重拉里程碑/产能。 */
+  private static innerActionKeys(message: AppMessage): string[] {
+    const action = (message as { action?: unknown }).action as
+      | { action?: Record<string, unknown> }
+      | Record<string, unknown>
+      | undefined;
+    if (!action) return [];
+    const inner = (action as { action?: Record<string, unknown> }).action ?? action;
+    return Object.keys(inner);
   }
 
   // ── 可达性（选择器过滤） ────────────────────────────────────────
@@ -218,6 +272,7 @@ class RuntimeStore {
       this.activeContextId = list.active ?? "";
       this.clearIconCache();
       this.clearCatalogCache();
+      this.clearMechanicFlowCache();
     }
     // 激活上下文就绪后立即加载目录索引（含本地化显示名），
     // 使产能/机制等面板的译名尽早生效。
@@ -397,6 +452,38 @@ class RuntimeStore {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * 单个机制的展开流，带内容哈希缓存。`mechanic` 为机制配置对象（按当前
+   * 内容判断是否需要重拉）。上下文/项目/工厂/机制 id 与**配置内容**都参与
+   * 缓存键：配置不变（仅引用刷新）时直接复用，避免每次 dispatch 后所有
+   * MechanicCard 重发 `mechanicFlow` IPC。
+   */
+  async getMechanicFlow(
+    project: number,
+    factory: number,
+    mechanicId: number,
+    mechanic: unknown,
+  ): Promise<{ flow: import("./types").DualVar; amount: number }[]> {
+    const key = `${this.activeContextId || ""}:${project}:${factory}:${mechanicId}`;
+    const hash = JSON.stringify(mechanic);
+    const cached = this.mechanicFlowCache.get(key);
+    if (cached && cached.hash === hash) return cached.flows;
+    try {
+      const flows = await mechanicFlow(project, factory, mechanicId);
+      const result = flows.map(([flow, amount]) => ({ flow, amount }));
+      this.mechanicFlowCache.set(key, { hash, flows: result });
+      return result;
+    } catch {
+      return [];
+    }
+  }
+
+  /** 换上下文/项目后清空机制流缓存（同一 id 在不同上下文含义可能不同）。
+   *  具体缓存按 (项目, 工厂, id) 隔离，故仅在幂等上有益。 */
+  clearMechanicFlowCache(): void {
+    this.mechanicFlowCache.clear();
   }
 
   /** 本地化显示名（无翻译/未加载索引时回退内部 id）。O(1) Map 查找，避免大
