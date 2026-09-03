@@ -3,7 +3,7 @@ use metatorio_core::context::{Context, GameState};
 use metatorio_core::dual_var::DualVar;
 use metatorio_core::expand::expand;
 use metatorio_core::mechanic::{
-    BoilerMechanic, GeneratorMechanic, ItemFuelMechanic, ItemLaunchMechanic, Mechanic,
+    BoilerMechanic, Fuel, GeneratorMechanic, ItemFuelMechanic, ItemLaunchMechanic, Mechanic,
     PlantMechanic, ReactorMechanic, SpoilMechanic,
 };
 use metatorio_data::store::PrototypeStore;
@@ -180,7 +180,6 @@ fn boiler_output_mode_converts_fluid() {
             fluid: "water".to_string(),
             temperature: Some(15),
             fuel: None,
-            fuel_temperature: None,
         }),
     );
 
@@ -225,7 +224,7 @@ fn reactor_outputs_heat() {
         Mechanic::Reactor(ReactorMechanic {
             reactor: id("reactor"),
             neighbours: 2,
-            fuel: Some("fuel".to_string()),
+            fuel: Some(Fuel::Item { item: id("fuel") }),
         }),
     );
 
@@ -268,7 +267,7 @@ fn reactor_quality_uses_default_multiplier() {
         Mechanic::Reactor(ReactorMechanic {
             reactor: IdWithQuality::new("reactor", "quality"),
             neighbours: 0,
-            fuel: Some("fuel".to_string()),
+            fuel: Some(Fuel::Item { item: IdWithQuality::new("fuel", "quality") }),
         }),
         game,
     );
@@ -342,7 +341,6 @@ fn recipe_in_rocket_silo_produces_launch_capacity() {
             machine: IdWithQuality::new("silo", "normal"),
             module_config: Default::default(),
             fuel: None,
-            fuel_temperature: None,
         }),
     );
     // 每次合成产出 整枚火箭容量(10) / rocket_parts_required(5) = 2.
@@ -402,7 +400,6 @@ fn recipe_with_quality_module_produces_multi_quality_flow() {
             beacons: vec![],
         },
         fuel: None,
-        fuel_temperature: None,
     });
     let store = PrototypeStore::load(&dump).expect("dump should load");
     let game = GameState {

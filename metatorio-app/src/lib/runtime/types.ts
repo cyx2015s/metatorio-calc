@@ -207,14 +207,14 @@ export type MechanicListAction =
 export type RecipeMechanicAction =
   | { "set-recipe": { recipe: IdWithQuality } }
   | { "set-machine": { machine: IdWithQuality } }
-  | { "set-fuel": { fuel: string | null } }
+  | { "set-fuel": { fuel: Fuel | null } }
   | { "set-fuel-temperature": { temperature: number | null } }
   | { module: ModuleAction };
 
 export type MiningMechanicAction =
   | { "set-resource": { resource: string } }
   | { "set-machine": { machine: IdWithQuality } }
-  | { "set-fuel": { fuel: string | null } }
+  | { "set-fuel": { fuel: Fuel | null } }
   | { "set-fuel-temperature": { temperature: number | null } }
   | { module: ModuleAction };
 
@@ -234,12 +234,12 @@ export type BoilerMechanicAction =
   | { "set-boiler": { boiler: IdWithQuality } }
   | { "set-fluid": { fluid: string } }
   | { "set-temperature": { temperature: number | null } }
-  | { "set-fuel": { fuel: string | null } }
+  | { "set-fuel": { fuel: Fuel | null } }
   | { "set-fuel-temperature": { temperature: number | null } };
 
 export type ReactorMechanicAction =
   | { "set-reactor": { reactor: IdWithQuality } }
-  | { "set-fuel": { fuel: string | null } }
+  | { "set-fuel": { fuel: Fuel | null } }
   | { "set-neighbours": { neighbours: number } };
 
 export type SolarMechanicAction =
@@ -539,13 +539,17 @@ export interface Mechanic {
   accumulator?: IdWithQuality;
   fluid?: string;
   temperature?: number | null;
-  fuel?: string | null;
-  fuel_temperature?: number | null;
+  fuel?: Fuel | null;
   neighbours?: number;
   weight_mode?: boolean;
   module_config?: ModuleConfig;
   [key: string]: unknown;
 }
+
+/** 明确燃料：语义上直接区分物品燃料（带品质）与流体燃料（名称 + 温度）。 */
+export type Fuel =
+  | { kind: "item"; item: IdWithQuality }
+  | { kind: "fluid"; fluid: string; temperature?: number | null };
 
 // ── Runtime replies ───────────────────────────────────────────────
 

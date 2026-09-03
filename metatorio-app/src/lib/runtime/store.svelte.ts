@@ -1263,7 +1263,7 @@ class RuntimeStore {
   }
 
   /** 指定机制燃料（配方/采矿/锅炉/反应堆）；null = 自动（燃料类别抽象）。 */
-  async setFuel(mechanic: MechanicId, fuel: string | null): Promise<void> {
+  async setFuel(mechanic: MechanicId, fuel: import("./types").Fuel | null): Promise<void> {
     const kind = this.mechanicKind(mechanic);
     if (kind === "recipe") {
       return this.mechanicMessage(mechanic, { recipe: { "set-fuel": { fuel } } });

@@ -20,7 +20,6 @@ fn recipe_mechanic_serde_roundtrip() {
             ..Default::default()
         },
         fuel: None,
-        fuel_temperature: None,
     });
     let json = serde_json::to_string(&m).unwrap();
     // tag = "type"，变体名 kebab-case："recipe"
@@ -44,6 +43,22 @@ fn generator_mechanic_serde_roundtrip() {
     assert!(json.contains(r#""type":"generator""#), "json: {json}");
     let back: Mechanic = serde_json::from_str(&json).unwrap();
     assert_eq!(m, back);
+}
+
+#[test]
+fn fuel_serde_distinguishes_item_vs_fluid() {
+    use metatorio_core::Fuel;
+    let item = Fuel::Item { item: id("coal") };
+    let json = serde_json::to_string(&item).unwrap();
+    assert!(json.contains(r#""kind":"item""#), "json: {json}");
+    let back: Fuel = serde_json::from_str(&json).unwrap();
+    assert_eq!(item, back);
+
+    let fluid = Fuel::Fluid { fluid: "steam".to_string(), temperature: Some(165) };
+    let json = serde_json::to_string(&fluid).unwrap();
+    assert!(json.contains(r#""kind":"fluid""#), "json: {json}");
+    let back: Fuel = serde_json::from_str(&json).unwrap();
+    assert_eq!(fluid, back);
 }
 
 #[test]

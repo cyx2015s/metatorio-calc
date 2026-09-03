@@ -12,7 +12,7 @@ use crate::dual_var::DualVar;
 use crate::energy::{FluidFuelSpec, FuelSpec, ItemFuelSpec, energy_source_as_flow};
 use crate::id::IdWithQuality;
 use crate::mechanic::{
-    BoilerMechanic, FluidFuelMechanic, FluidHeatMechanic, GeneratorMechanic, ItemFuelMechanic,
+    BoilerMechanic, FluidFuelMechanic, FluidHeatMechanic, Fuel, GeneratorMechanic, ItemFuelMechanic,
     ItemLaunchMechanic, Mechanic, MiningMechanic, ModuleConfig, PlantMechanic, ReactorMechanic,
     RecipeMechanic, SolarMechanic, SpoilMechanic, quality_by_level,
 };
@@ -231,24 +231,21 @@ fn entity_component<'a>(ctx: &'a Context, name: &str) -> Option<&'a EntityCompon
         .and_then(|record| record.component())
 }
 
-fn explicit_fuel<'a>(
-    ctx: &Context,
-    name: Option<&'a str>,
-    temperature: Option<i32>,
-    quality: &'a str,
-) -> Option<FuelSpec<'a>> {
-    let name = name?;
-    if ctx.prototype.get(PrototypeGroup::Fluid, name).is_some() {
-        Some(FuelSpec::Fluid(FluidFuelSpec {
-            fuel: name,
+/// 把明确燃料转换为 `FuelSpec`：`Fuel::Item` 用其自带品质，`Fuel::Fluid` 用
+/// 名称 + 温度（None → 流体默认温度）。
+fn explicit_fuel<'a>(ctx: &Context, fuel: Option<&'a Fuel>) -> Option<FuelSpec<'a>> {
+    let fuel = fuel?;
+    match fuel {
+        Fuel::Item { item } => Some(FuelSpec::Item(ItemFuelSpec {
+            name: item.id.as_str(),
+            quality: item.quality.as_str(),
+        })),
+        Fuel::Fluid { fluid, temperature } => Some(FuelSpec::Fluid(FluidFuelSpec {
+            fuel: fluid.as_str(),
             temperature: temperature
                 .map(f64::from)
-                .unwrap_or_else(|| fluid_temperature(ctx, name)),
-        }))
-    } else if ctx.prototype.get(PrototypeGroup::Item, name).is_some() {
-        Some(FuelSpec::Item(ItemFuelSpec { name, quality }))
-    } else {
-        None
+                .unwrap_or_else(|| fluid_temperature(ctx, fluid)),
+        })),
     }
 }
 
@@ -406,12 +403,7 @@ fn expand_recipe<C: Clone>(
 
     let mut base_speed = machine.crafting_speed * speed_multiplier / recipe_time;
     let mut fulfillment = 1.0;
-    let fuel = explicit_fuel(
-        ctx,
-        mechanic.fuel.as_deref(),
-        mechanic.fuel_temperature,
-        &mechanic.machine.quality,
-    );
+    let fuel = explicit_fuel(ctx, mechanic.fuel.as_ref());
     let mut temp = TempFlow::new();
     add_energy(
         ctx,
@@ -584,12 +576,7 @@ fn expand_mining<C: Clone>(
             .unwrap_or(1.0);
 
     let mut fulfillment = 1.0;
-    let fuel = explicit_fuel(
-        ctx,
-        mechanic.fuel.as_deref(),
-        mechanic.fuel_temperature,
-        &mechanic.machine.quality,
-    );
+    let fuel = explicit_fuel(ctx, mechanic.fuel.as_ref());
     let mut temp = TempFlow::new();
     add_energy(
         ctx,
@@ -995,12 +982,7 @@ fn expand_boiler<C: Clone>(
         .temperature
         .map(f64::from)
         .unwrap_or(input_fluid.default_temperature);
-    let fuel = explicit_fuel(
-        ctx,
-        mechanic.fuel.as_deref(),
-        mechanic.fuel_temperature,
-        &mechanic.boiler.quality,
-    );
+    let fuel = explicit_fuel(ctx, mechanic.fuel.as_ref());
     let mut fulfillment = 1.0;
     let mut temp = TempFlow::new();
     add_energy(
@@ -1183,12 +1165,7 @@ fn expand_reactor<C: Clone>(
     if matches!(&reactor.energy_source, EnergySource::Heat(_)) {
         return;
     }
-    let fuel = explicit_fuel(
-        ctx,
-        mechanic.fuel.as_deref(),
-        None,
-        &mechanic.reactor.quality,
-    );
+    let fuel = explicit_fuel(ctx, mechanic.fuel.as_ref());
     let mut temp = TempFlow::new();
     let mut fulfillment = 1.0;
     add_energy(

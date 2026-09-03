@@ -966,12 +966,17 @@
       allowedNames,
       onSelectFlow: (flow) => {
         const item = itemOf(flow);
-        const name = item
-          ? item.id
-          : flow !== null && typeof flow === "object" && "Fluid" in flow
-            ? (flow as { Fluid: { name: string } }).Fluid.name
-            : null;
-        if (name) runtime.setFuel(mechanic, name).catch(() => {});
+        if (item) {
+          // 物品燃料：带品质。
+          runtime.setFuel(mechanic, { kind: "item", item }).catch(() => {});
+          return;
+        }
+        if (flow !== null && typeof flow === "object" && "Fluid" in flow) {
+          const fluid = (flow as { Fluid: { name: string } }).Fluid.name;
+          runtime.setFuel(mechanic, { kind: "fluid", fluid }).catch(() => {});
+          return;
+        }
+        runtime.setFuel(mechanic, null).catch(() => {});
       },
     };
   }

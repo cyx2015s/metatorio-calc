@@ -3,7 +3,22 @@ use std::{
     fmt,
 };
 
-use metatorio_core::{BeaconConfig, DualVar, Mechanic, ModuleConfig};
+use metatorio_core::{BeaconConfig, DualVar, Fuel, Mechanic, ModuleConfig};
+
+/// 设置流体燃料的温度。仅 `Fuel::Fluid` 有意义（物品燃料无温度，忽略）。
+fn set_fuel_temperature(fuel: &mut Option<Fuel>, temperature: Option<i32>) -> bool {
+    let Some(Fuel::Fluid {
+        temperature: t, ..
+    }) = fuel
+    else {
+        return false;
+    };
+    if *t == temperature {
+        return false;
+    }
+    *t = temperature;
+    true
+}
 use serde::Serialize;
 
 use crate::document::{
@@ -1827,7 +1842,7 @@ fn apply_recipe_action(
         }
         RecipeMechanicAction::SetFuel { fuel } => Ok(replace(&mut mechanic.fuel, fuel)),
         RecipeMechanicAction::SetFuelTemperature { temperature } => {
-            Ok(replace(&mut mechanic.fuel_temperature, temperature))
+            Ok(set_fuel_temperature(&mut mechanic.fuel, temperature))
         }
         RecipeMechanicAction::Module(action) => {
             apply_module_action(&mut mechanic.module_config, action)
@@ -1848,7 +1863,7 @@ fn apply_mining_action(
         }
         MiningMechanicAction::SetFuel { fuel } => Ok(replace(&mut mechanic.fuel, fuel)),
         MiningMechanicAction::SetFuelTemperature { temperature } => {
-            Ok(replace(&mut mechanic.fuel_temperature, temperature))
+            Ok(set_fuel_temperature(&mut mechanic.fuel, temperature))
         }
         MiningMechanicAction::Module(action) => {
             apply_module_action(&mut mechanic.module_config, action)
@@ -1922,7 +1937,7 @@ fn apply_boiler_action(
         }
         BoilerMechanicAction::SetFuel { fuel } => Ok(replace(&mut mechanic.fuel, fuel)),
         BoilerMechanicAction::SetFuelTemperature { temperature } => {
-            Ok(replace(&mut mechanic.fuel_temperature, temperature))
+            Ok(set_fuel_temperature(&mut mechanic.fuel, temperature))
         }
     }
 }

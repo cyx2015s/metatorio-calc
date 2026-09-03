@@ -321,16 +321,14 @@ fn mechanic_of(new_type: &str, inst: &Value, q: &[String], store: Option<&Protot
             "recipe": id_of(inst_get(inst, "recipe"), q),
             "machine": id_of(inst_get(inst, "machine"), q),
             "module_config": module_config_of(inst_get(inst, "module_config")),
-            "fuel": fuel_fields(inst_get(inst, "fuel"), store).0,
-            "fuel_temperature": fuel_fields(inst_get(inst, "fuel"), store).1,
+            "fuel": fuel_value(inst_get(inst, "fuel"), q, store),
         }),
         "mining" => json!({
             "type": "mining",
             "resource": inst.get("resource").cloned().unwrap_or(json!("")),
             "machine": id_of(inst_get(inst, "machine"), q),
             "module_config": module_config_of(inst_get(inst, "module_config")),
-            "fuel": fuel_id_name(inst_get(inst, "fuel")),
-            "fuel_temperature": Value::Null,
+            "fuel": fuel_value(inst_get(inst, "fuel"), q, store),
         }),
         "item-fuel" => json!({ "type": "item-fuel", "item": id_of(inst_get(inst, "item"), q) }),
         "item-launch" => json!({
@@ -351,14 +349,13 @@ fn mechanic_of(new_type: &str, inst: &Value, q: &[String], store: Option<&Protot
             "boiler": id_of(inst_get(inst, "boiler"), q),
             "fluid": inst.get("fluid").cloned().unwrap_or(json!("")),
             "temperature": inst.get("temperature").cloned().unwrap_or(json!(0)),
-            "fuel": fuel_fields(inst_get(inst, "fuel"), store).0,
-            "fuel_temperature": fuel_fields(inst_get(inst, "fuel"), store).1,
+            "fuel": fuel_value(inst_get(inst, "fuel"), q, store),
         }),
         "reactor" => json!({
             "type": "reactor",
             "reactor": id_of(inst_get(inst, "reactor"), q),
             "neighbours": inst.get("neighbours").cloned().unwrap_or(json!(0)),
-            "fuel": fuel_name(inst_get(inst, "fuel")),
+            "fuel": fuel_value(inst_get(inst, "fuel"), q, store),
         }),
         "fluid-fuel" => json!({
             "type": "fluid-fuel",
@@ -378,46 +375,28 @@ fn inst_get<'a>(inst: &'a Value, key: &str) -> &'a Value {
     inst.get(key).unwrap_or(&Value::Null)
 }
 
-/// `Option<(String,i32)>` → 燃料名（recipe/boiler 的 fuel 第二个元素是温度）。
-fn fuel_name(fuel: &Value) -> Value {
-    fuel
-        .get(0)
-        .and_then(Value::as_str)
-        .map(|s| json!(s))
-        .unwrap_or(Value::Null)
-}
-
-fn fuel_temperature(fuel: &Value) -> Value {
-    fuel.get(0).is_some().then(|| fuel.get(1).cloned()).flatten().unwrap_or(Value::Null)
-}
-
-/// `Option<IdWithQuality>`（mining 的 fuel，形如 `["name",level]`）→ 燃料名。
-fn fuel_id_name(fuel: &Value) -> Value {
-    fuel
-        .as_array()
-        .and_then(|arr| arr.first())
-        .and_then(Value::as_str)
-        .map(|s| json!(s))
-        .unwrap_or(Value::Null)
-}
-
-/// 处理 `Option<(String,i32)>` 燃料（recipe/boiler 的 fuel）：返回 `(燃料名, 燃料温度)`。
-///
-/// 旧版第二个元素对**流体燃料**是温度、对**burner 物品燃料**是品质索引。新版
-/// `fuel` 只有名字（`Option<String>`），没有品质——因此 burner 燃料的品质**被
-/// 设计丢弃**，不能也不应迁移。按当前上下文把名字分类为流体与否：流体 → 第二
-/// 元素是温度，映射到 `fuel_temperature`；物品 → 第二元素是品质，置 `None`
-/// （避免把品质索引误当温度注入）。
-fn fuel_fields(fuel: &Value, store: Option<&PrototypeStore>) -> (Value, Value) {
-    let name = fuel_name(fuel);
-    let is_fluid = name
-        .as_str()
-        .map(|n| store.is_some_and(|s| s.get(PrototypeGroup::Fluid, n).is_some()))
-        .unwrap_or(false);
+/// 旧版燃料（array `[name, second]` 或 null）→ 新版 `Fuel` 枚举 JSON。
+/// `second` 对流体燃料是温度、对物品燃料是品质索引；按上下文分类成
+/// `Fuel::Fluid`（名称+温度）或 `Fuel::Item`（带品质）。null → null。
+fn fuel_value(fuel: &Value, q: &[String], store: Option<&PrototypeStore>) -> Value {
+    let Some(arr) = fuel.as_array() else {
+        return Value::Null;
+    };
+    let name = arr.get(0).and_then(Value::as_str).unwrap_or("");
+    let second = arr.get(1);
+    let is_fluid = store.is_some_and(|s| s.get(PrototypeGroup::Fluid, name).is_some());
     if is_fluid {
-        (name, fuel_temperature(fuel))
+        json!({
+            "kind": "fluid",
+            "fluid": name,
+            "temperature": second.cloned().unwrap_or(Value::Null),
+        })
     } else {
-        (name, Value::Null)
+        let level = second.and_then(Value::as_i64).unwrap_or(0);
+        json!({
+            "kind": "item",
+            "item": { "id": name, "quality": quality_name(q, level) },
+        })
     }
 }
 
@@ -710,17 +689,18 @@ mod tests {
             "item": { "coal": { "type": "item", "name": "coal" } }
         });
         let store = PrototypeStore::load(&dump).expect("最小仓库应可加载");
-        // 流体燃料：第二个元素是温度 → 映射到 fuel_temperature。
-        let (name, temp) = fuel_fields(&json!(["steam", 165]), Some(&store));
-        assert_eq!(name, json!("steam"));
-        assert_eq!(temp, json!(165));
-        // burner 物品燃料：第二个元素是品质索引，新版无品质 → 丢弃（不误当温度）。
-        let (name, temp) = fuel_fields(&json!(["coal", 3]), Some(&store));
-        assert_eq!(name, json!("coal"));
-        assert_eq!(temp, Value::Null);
+        let q = vanilla_q();
+        // 流体燃料：`["steam", 165]` → `Fuel::Fluid`（temperature=165）。
+        assert_eq!(
+            fuel_value(&json!(["steam", 165]), &q, Some(&store)),
+            json!({ "kind": "fluid", "fluid": "steam", "temperature": 165 })
+        );
+        // burner 物品燃料：`["coal", 3]` → `Fuel::Item`（品质 3 → epic）。
+        assert_eq!(
+            fuel_value(&json!(["coal", 3]), &q, Some(&store)),
+            json!({ "kind": "item", "item": { "id": "coal", "quality": "epic" } })
+        );
         // 无燃料。
-        let (name, temp) = fuel_fields(&Value::Null, Some(&store));
-        assert_eq!(name, Value::Null);
-        assert_eq!(temp, Value::Null);
+        assert_eq!(fuel_value(&Value::Null, &q, Some(&store)), Value::Null);
     }
 }

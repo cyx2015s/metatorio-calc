@@ -48,7 +48,6 @@ fn recipe_mechanic(recipe: &str) -> Mechanic {
         machine: "assembling-machine-1".into(),
         module_config: Default::default(),
         fuel: None,
-        fuel_temperature: None,
     })
 }
 

@@ -254,6 +254,24 @@ impl Default for BeaconConfig {
 // 工厂的一个组件（单例配置）。每个变体持有 1 个 struct（不内联）。
 // #[non_exhaustive]：机制集合会继续扩展，禁止外部穷尽匹配。
 
+/// 明确燃料：语义上直接区分**物品燃料**（带品质）与**流体燃料**（名称 + 温度）。
+///
+/// 替代旧的 `fuel: Option<String>` + `fuel_temperature: Option<i32>` 二字段——
+/// 旧形态把"物品燃料的品质"与"流体燃料的温度"挤在一个 i32 里，靠上下文（仓库
+/// 里是流体还是物品）猜测；现在由枚举显式表达，无需猜。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum Fuel {
+    /// 物品燃料（如 burner 煤炭），带品质。
+    Item { item: IdWithQuality },
+    /// 流体燃料（热值流体）；`temperature` 为 None 时用流体默认温度。
+    Fluid {
+        fluid: String,
+        #[serde(default)]
+        temperature: Option<i32>,
+    },
+}
+
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
@@ -281,11 +299,9 @@ pub struct RecipeMechanic {
     pub recipe: IdWithQuality,
     pub machine: IdWithQuality,
     pub module_config: ModuleConfig,
-    /// 明确燃料 ID。流体能量源使用流体，Burner 能量源使用物品；
+    /// 明确燃料。流体能量源用 `Fuel::Fluid`，Burner 能量源用 `Fuel::Item`；
     /// Electric/Heat/Void 时无效（None）。
-    pub fuel: Option<String>,
-    /// 指定流体燃料温度；None 使用该流体的默认温度。
-    pub fuel_temperature: Option<i32>,
+    pub fuel: Option<Fuel>,
 }
 
 /// 采矿组件。
@@ -295,10 +311,8 @@ pub struct MiningMechanic {
     pub resource: String,
     pub machine: IdWithQuality,
     pub module_config: ModuleConfig,
-    /// 明确燃料 ID；None = 自动选择/无需燃料。
-    pub fuel: Option<String>,
-    /// 指定流体燃料温度；None 使用该流体的默认温度。
-    pub fuel_temperature: Option<i32>,
+    /// 明确燃料；None = 自动选择/无需燃料。
+    pub fuel: Option<Fuel>,
 }
 
 /// 变质组件。
@@ -349,10 +363,8 @@ pub struct BoilerMechanic {
     pub fluid: String,
     /// 输入流体温度；None 使用流体默认温度。
     pub temperature: Option<i32>,
-    /// 明确燃料 ID；None = 自动选择/无需燃料。
-    pub fuel: Option<String>,
-    /// 指定流体燃料温度；None 使用该流体的默认温度。
-    pub fuel_temperature: Option<i32>,
+    /// 明确燃料；None = 自动选择/无需燃料。
+    pub fuel: Option<Fuel>,
 }
 
 /// 反应堆组件。
@@ -361,8 +373,8 @@ pub struct BoilerMechanic {
 pub struct ReactorMechanic {
     pub reactor: IdWithQuality,
     pub neighbours: u8,
-    /// 明确燃料 ID（反应堆通常使用物品）；None = 自动选择/无需燃料。
-    pub fuel: Option<String>,
+    /// 明确燃料（反应堆通常使用物品）；None = 自动选择/无需燃料。
+    pub fuel: Option<Fuel>,
 }
 
 #[cfg(test)]

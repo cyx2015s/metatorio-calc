@@ -184,18 +184,22 @@
     return kind === "mining" ? "mining-machine" : "machine";
   }
 
-  function fuelIsFluid(name: string | null | undefined): boolean {
-    if (!name) return false;
-    return (runtime.catalogIndex?.entries ?? []).some(
-      (entry) => entry.kind === "fluid" && entry.name === name,
-    );
+  /** 燃料显示名：Fuel::Item → 物品（带品质），Fuel::Fluid → 流体。 */
+  function fuelLabel(fuel: import("$lib/runtime/types").Fuel | null | undefined): string {
+    if (!fuel) return "燃料：自动";
+    if (fuel.kind === "fluid") return runtime.localizedName("fluid", fuel.fluid) || fuel.fluid;
+    return runtime.localizedName("item", fuel.item.id) || fuel.item.id;
   }
 
-  function fuelLabel(name: string | null | undefined): string {
-    if (!name) return "燃料：自动";
-    return fuelIsFluid(name)
-      ? runtime.localizedName("fluid", name)
-      : runtime.localizedName("item", name);
+  /** 指定燃料是否为流体（决定温度输入是否显示）。 */
+  function fuelIsFluid(fuel: import("$lib/runtime/types").Fuel | null | undefined): boolean {
+    return fuel?.kind === "fluid";
+  }
+
+  /** 流体燃料温度（Fuel::Fluid.temperature）；非流体/空 → 空串。 */
+  function fuelTemperature(fuel: import("$lib/runtime/types").Fuel | null | undefined): string {
+    if (fuel?.kind !== "fluid") return "";
+    return fuel.temperature == null ? "" : String(fuel.temperature);
   }
 </script>
 
@@ -376,7 +380,7 @@
             <input
               type="number"
               step="1"
-              value={entry.mechanic.fuel_temperature ?? ""}
+              value={fuelTemperature(entry.mechanic.fuel)}
               placeholder="默认"
               onchange={(event) => {
                 const raw = (event.currentTarget as HTMLInputElement).value;

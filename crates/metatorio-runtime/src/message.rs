@@ -1,4 +1,4 @@
-use metatorio_core::{Accessible, DualVar, IdWithQuality};
+use metatorio_core::{Accessible, DualVar, Fuel, IdWithQuality};
 use serde::{Deserialize, Serialize};
 
 use crate::document::{
@@ -330,7 +330,7 @@ pub enum MechanicAction {
 pub enum RecipeMechanicAction {
     SetRecipe { recipe: IdWithQuality },
     SetMachine { machine: IdWithQuality },
-    SetFuel { fuel: Option<String> },
+    SetFuel { fuel: Option<Fuel> },
     SetFuelTemperature { temperature: Option<i32> },
     Module(ModuleAction),
 }
@@ -340,7 +340,7 @@ pub enum RecipeMechanicAction {
 pub enum MiningMechanicAction {
     SetResource { resource: String },
     SetMachine { machine: IdWithQuality },
-    SetFuel { fuel: Option<String> },
+    SetFuel { fuel: Option<Fuel> },
     SetFuelTemperature { temperature: Option<i32> },
     Module(ModuleAction),
 }
@@ -384,7 +384,7 @@ pub enum BoilerMechanicAction {
     SetBoiler { boiler: IdWithQuality },
     SetFluid { fluid: String },
     SetTemperature { temperature: Option<i32> },
-    SetFuel { fuel: Option<String> },
+    SetFuel { fuel: Option<Fuel> },
     SetFuelTemperature { temperature: Option<i32> },
     // SetMode（工作模式）已移除：锅炉 mode 只读，运行/展开时从原型读取。
 }
@@ -393,7 +393,7 @@ pub enum BoilerMechanicAction {
 #[serde(rename_all = "kebab-case")]
 pub enum ReactorMechanicAction {
     SetReactor { reactor: IdWithQuality },
-    SetFuel { fuel: Option<String> },
+    SetFuel { fuel: Option<Fuel> },
     SetNeighbours { neighbours: u8 },
 }
 

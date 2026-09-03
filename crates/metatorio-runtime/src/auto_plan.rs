@@ -474,7 +474,6 @@ fn enumerate_recipes(
                         machine: machine.clone(),
                         module_config: ModuleConfig::default(),
                         fuel: None,
-                        fuel_temperature: None,
                     });
                     push_with_beacons(out, base, modules, beacons);
                 }
@@ -490,7 +489,6 @@ fn enumerate_recipes(
                     machine: machine.clone(),
                     module_config: ModuleConfig::default(),
                     fuel: None,
-                    fuel_temperature: None,
                 });
                 push_with_beacons(out, base, Vec::new(), beacons);
             }
@@ -607,7 +605,6 @@ fn enumerate_mining(
                         machine: machine.clone(),
                         module_config: ModuleConfig::default(),
                         fuel: None,
-                        fuel_temperature: None,
                     });
                     // 采矿按资源品质展开（矿藏实体无品质，品质作用于产出）
                     let _ = quality;
@@ -743,7 +740,6 @@ fn enumerate_energy(
                 fluid: fluid.clone(),
                 temperature: None,
                 fuel: None,
-                fuel_temperature: None,
             }));
         }
         if let Some(_reactor) = record.component::<ReactorComponent>() {

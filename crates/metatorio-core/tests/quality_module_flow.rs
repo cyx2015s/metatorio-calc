@@ -36,7 +36,6 @@ fn real_dump_recipe_with_quality_module_has_flow() {
             beacons: vec![],
         },
         fuel: None,
-        fuel_temperature: None,
     });
     let expansion = expand([(0usize, &mechanic)], &ctx);
     assert_eq!(expansion.len(), 1, "应产出一个变量");
@@ -81,7 +80,6 @@ fn real_dump_quality_variant_recipe_has_flow() {
         machine: IdWithQuality::new("assembling-machine-2", "normal"),
         module_config: ModuleConfig::default(),
         fuel: None,
-        fuel_temperature: None,
     });
     let expansion = expand([(0usize, &mechanic)], &ctx);
     assert_eq!(expansion.len(), 1, "应产出一个变量");
@@ -119,7 +117,6 @@ fn quality_module_with_zero_limit_still_has_flow() {
             beacons: vec![],
         },
         fuel: None,
-        fuel_temperature: None,
     });
     let expansion = expand([(0usize, &mechanic)], &ctx);
     assert_eq!(expansion.len(), 1);
@@ -156,7 +153,6 @@ fn quality_variant_with_quality_module_has_multi_quality_flow() {
             beacons: vec![],
         },
         fuel: None,
-        fuel_temperature: None,
     });
     let expansion = expand([(0usize, &mechanic)], &ctx);
     assert_eq!(expansion.len(), 1);
