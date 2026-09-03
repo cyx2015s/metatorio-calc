@@ -2005,7 +2005,7 @@ async fn open_project_dialog(app: AppHandle) -> Result<Option<AppDocument>, Stri
     let picked = app
         .dialog()
         .file()
-        .add_filter("Metatorio 工程", &["json"])
+        .add_filter("Metatorio 工程", &["json", "fpp"])
         .blocking_pick_file();
     let Some(picked) = picked else {
         return Ok(None);
@@ -2033,7 +2033,7 @@ async fn save_project_as_dialog(app: AppHandle) -> Result<Option<String>, String
         .dialog()
         .file()
         .set_file_name("metatorio-project.json")
-        .add_filter("Metatorio 工程", &["json"])
+        .add_filter("Metatorio 工程", &["json", "fpp"])
         .blocking_save_file();
     let Some(picked) = picked else {
         return Ok(None);
