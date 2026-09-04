@@ -588,13 +588,57 @@ class RuntimeStore {
     });
   }
 
+  /** 轻量 UI 动作：只同步后端的选择态（供 effective_context_id / 上下文解析），
+   *  不刷新整份 document、不置 busy。前端选择态直接本地设置，省去 getDocument 回程。 */
+  private async uiDispatch(message: AppMessage): Promise<void> {
+    const result = await dispatch(message);
+    this.revision = result.revision;
+  }
+
   async selectProject(project: ProjectId | null): Promise<void> {
-    await this.send({ scope: "ui", action: { "select-project": { project } } });
+    if (!this.ui) {
+      this.ui = {
+        selected_project: null,
+        selected_factory: null,
+        selected_mechanic: null,
+        page: "preferences",
+        selector: null,
+        suggestion_mechanic: 0,
+        suggestion_filter: "",
+        logs_open: false,
+        font_filter: "",
+        font: null,
+        locale: null,
+        close_requested: false,
+      };
+    }
+    this.ui = { ...this.ui, selected_project: project, selected_factory: null, selected_mechanic: null };
+    this.accessibility = null;
+    // 后端选择态保持同步（图标/上下文解析用），但无需整份刷新。
+    void this.uiDispatch({ scope: "ui", action: { "select-project": { project } } });
     this.restoreSolveForSelection();
   }
 
   async selectFactory(factory: FactoryId | null): Promise<void> {
-    await this.send({ scope: "ui", action: { "select-factory": { factory } } });
+    if (!this.ui) {
+      this.ui = {
+        selected_project: null,
+        selected_factory: null,
+        selected_mechanic: null,
+        page: "preferences",
+        selector: null,
+        suggestion_mechanic: 0,
+        suggestion_filter: "",
+        logs_open: false,
+        font_filter: "",
+        font: null,
+        locale: null,
+        close_requested: false,
+      };
+    }
+    this.ui = { ...this.ui, selected_factory: factory, selected_mechanic: null };
+    // 后端选择态保持同步；无需整份刷新。
+    void this.uiDispatch({ scope: "ui", action: { "select-factory": { factory } } });
     this.restoreSolveForSelection();
   }
 
