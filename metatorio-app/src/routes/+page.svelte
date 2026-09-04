@@ -1767,10 +1767,10 @@
     <!-- 中栏：机制列表 -->
     <section class="col center">
       <div class="toolbar">
-        <button class="btn primary" onclick={() => runtime.recompute().catch(() => {})} disabled={runtime.busy || runtime.solving || !factory}>
-          {runtime.solving ? "求解中…" : "重新求解"}
+        <button class="btn primary" onclick={() => runtime.recompute().catch(() => {})} disabled={runtime.busy || runtime.isSolvingCurrent || !factory}>
+          {runtime.isSolvingCurrent ? "求解中…" : "重新求解"}
         </button>
-        <button class="btn" title="自动规划：迭代添加建议机制直至可解" onclick={() => runtime.autoPlan().catch(() => {})} disabled={runtime.busy || runtime.solving || !factory}>
+        <button class="btn" title="自动规划：迭代添加建议机制直至可解" onclick={() => runtime.autoPlan().catch(() => {})} disabled={runtime.busy || runtime.isSolvingCurrent || !factory}>
           自动规划
         </button>
         <button class="btn ghost" title="移除求解中用量低于阈值的机制" onclick={() => runtime.cleanup("remove-unused").catch(() => {})} disabled={!solved}>
@@ -2289,8 +2289,8 @@
         <button
           class="btn"
           onclick={() =>
-            openSelector("module", "添加枚举插件", (name) =>
-              runtime.addEnumeratedModule(name),
+            openSelector("module", "添加枚举插件", (name, quality) =>
+              runtime.addEnumeratedModule(name, quality),
             )}
         >+ 添加插件</button>
         <button

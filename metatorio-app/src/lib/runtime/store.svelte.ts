@@ -92,7 +92,9 @@ class RuntimeStore {
   private solveCache = new Map<string, SolveResult>();
   revision = $state(0);
   busy = $state(false);
-  solving = $state(false);
+  /** 正在求解/自动规划的 (project, factory)；null = 空闲。按工厂区分，避免
+   *  切换工厂时误判"当前在算"而锁死按钮。 */
+  solving = $state<{ project: ProjectId; factory: FactoryId } | null>(null);
   lastError = $state<string | null>(null);
   ready = $state(false);
 
@@ -133,7 +135,7 @@ class RuntimeStore {
     onSolveResult((result) => {
       this.solve = result;
       this.solveError = null;
-      this.solving = false;
+      this.solving = null;
       // 缓存到当前工厂：切换回来时直接恢复，不重复求解。
       const [project, factory] = this.currentFactoryKey();
       if (project != null && factory != null) {
@@ -142,7 +144,7 @@ class RuntimeStore {
     });
     onSolveError((message) => {
       this.solveError = message;
-      this.solving = false;
+      this.solving = null;
     });
     onContextsChanged(() => {
       this.contextBusy = false;
@@ -413,9 +415,10 @@ class RuntimeStore {
 
   // ── 图标与目录 ──────────────────────────────────────────────────
 
-  /** 取物品图标（blob URL）；无图标时返回 null。带缓存。 */
+  /** 取物品图标（blob URL）；无图标时返回 null。带缓存（按上下文 id 区分）。 */
   getIcon(type: string, name: string): Promise<string | null> {
-    const key = `${type}/${name}`;
+    // 上下文已项目级绑定：同一 type/name 在不同上下文可能指向不同 mod 图标。
+    const key = `${this.effectiveContextId}/${type}/${name}`;
     let entry = this.icons.get(key);
     if (!entry) {
       entry = loadIcon(type, name, this.effectiveContextId).then((bytes) => {
@@ -460,9 +463,9 @@ class RuntimeStore {
     return this.catalogLoadPromise;
   }
 
-  /** 悬停详情：按 (kind, name) 缓存。 */
+  /** 悬停详情：按 (context, kind, name) 缓存（上下文项目级绑定）。 */
   async getDetail(kind: string, name: string): Promise<PrototypeDetail | null> {
-    const key = `${kind}/${name}`;
+    const key = `${this.effectiveContextId}/${kind}/${name}`;
     const cached = this.detailCache.get(key);
     if (cached) return cached;
     try {
@@ -653,6 +656,12 @@ class RuntimeStore {
     const project = this.selectedProjectId;
     const factory = this.selectedFactoryId;
     return [project, factory];
+  }
+
+  /** 当前选中 (project, factory) 是否正在求解/自动规划（按工厂区分忙状态）。 */
+  get isSolvingCurrent(): boolean {
+    const s = this.solving;
+    return !!s && s.project === this.selectedProjectId && s.factory === this.selectedFactoryId;
   }
 
   /** 切换后恢复该工厂的缓存求解结果；无缓存则自动重新求解。 */
@@ -1501,14 +1510,14 @@ class RuntimeStore {
 
   async recompute(): Promise<void> {
     const { project, factory } = this.requireFactory();
-    this.solving = true;
+    this.solving = { project, factory };
     try {
       await this.send({
         scope: "factory",
         action: { project, factory, action: { solve: "recompute" } },
       });
     } catch (error) {
-      this.solving = false;
+      this.solving = null;
       // 求解失败：写入 solveError 让求解面板醒目显示
       // （后端失败会发 solve-error 事件覆盖；dispatch 校验失败走这里）。
       this.solveError = String(error);
@@ -1519,14 +1528,14 @@ class RuntimeStore {
   /** 自动规划：迭代添加建议机制直至可解（后端 AutoPlan）。 */
   async autoPlan(): Promise<void> {
     const { project, factory } = this.requireFactory();
-    this.solving = true;
+    this.solving = { project, factory };
     try {
       await this.send({
         scope: "factory",
         action: { project, factory, action: { solve: "auto-plan" } },
       });
     } catch (error) {
-      this.solving = false;
+      this.solving = null;
       // 自动规划失败：同时写入 solveError，让求解面板醒目显示
       // （后端失败会发 solve-error 事件覆盖；dispatch 校验失败走这里）。
       this.solveError = String(error);
