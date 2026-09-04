@@ -563,15 +563,6 @@ export interface UiState {
   selected_project: ProjectId | null;
   selected_factory: FactoryId | null;
   selected_mechanic: MechanicId | null;
-  page: "preferences" | { factory: FactoryId };
-  selector: unknown;
-  suggestion_mechanic: number;
-  suggestion_filter: string;
-  logs_open: boolean;
-  font_filter: string;
-  font: string | null;
-  locale: string | null;
-  close_requested: boolean;
 }
 
 // ── Solver output ─────────────────────────────────────────────────

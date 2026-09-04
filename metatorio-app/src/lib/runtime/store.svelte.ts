@@ -596,22 +596,7 @@ class RuntimeStore {
   }
 
   async selectProject(project: ProjectId | null): Promise<void> {
-    if (!this.ui) {
-      this.ui = {
-        selected_project: null,
-        selected_factory: null,
-        selected_mechanic: null,
-        page: "preferences",
-        selector: null,
-        suggestion_mechanic: 0,
-        suggestion_filter: "",
-        logs_open: false,
-        font_filter: "",
-        font: null,
-        locale: null,
-        close_requested: false,
-      };
-    }
+    if (!this.ui) this.ui = { selected_project: null, selected_factory: null, selected_mechanic: null };
     this.ui = { ...this.ui, selected_project: project, selected_factory: null, selected_mechanic: null };
     this.accessibility = null;
     // 后端选择态保持同步（图标/上下文解析用），但无需整份刷新。
@@ -620,22 +605,7 @@ class RuntimeStore {
   }
 
   async selectFactory(factory: FactoryId | null): Promise<void> {
-    if (!this.ui) {
-      this.ui = {
-        selected_project: null,
-        selected_factory: null,
-        selected_mechanic: null,
-        page: "preferences",
-        selector: null,
-        suggestion_mechanic: 0,
-        suggestion_filter: "",
-        logs_open: false,
-        font_filter: "",
-        font: null,
-        locale: null,
-        close_requested: false,
-      };
-    }
+    if (!this.ui) this.ui = { selected_project: null, selected_factory: null, selected_mechanic: null };
     this.ui = { ...this.ui, selected_factory: factory, selected_mechanic: null };
     // 后端选择态保持同步；无需整份刷新。
     void this.uiDispatch({ scope: "ui", action: { "select-factory": { factory } } });

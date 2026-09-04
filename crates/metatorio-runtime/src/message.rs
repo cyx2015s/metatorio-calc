@@ -553,9 +553,8 @@ pub enum SolveAction {
     AutoPlan,
 }
 
-/// Transient operations are separate from document actions and must not enter
-/// undo history.  They cover selector state, tabs, logs, and the old window
-/// close confirmation.
+/// 选择态（transient）操作：运行时只保留选择，供上下文解析；其余纯 UI
+/// 代理操作（选择器/页面/日志/字号/语言/关闭确认）已移至前端 `$state`。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum UiAction {
@@ -564,44 +563,6 @@ pub enum UiAction {
     },
     SelectFactory {
         factory: Option<FactoryId>,
-    },
-    SelectPage {
-        page: ProjectPage,
-    },
-    OpenSelector {
-        target: SelectorTarget,
-    },
-    CloseSelector,
-    SetSelectorQuery {
-        query: String,
-    },
-    SelectSelectorGroup {
-        group: usize,
-    },
-    SelectSelectorSubgroup {
-        subgroup: usize,
-    },
-    CommitSelector {
-        target: SelectorTarget,
-        value: SelectorValue,
-    },
-    SelectSuggestionMechanic {
-        mechanic: usize,
-    },
-    OpenLogs,
-    SetFontFilter {
-        filter: String,
-    },
-    SelectFont {
-        font: String,
-    },
-    SetLocale {
-        locale: String,
-    },
-    ReloadIcons,
-    RequestWindowClose,
-    ResolveWindowClose {
-        decision: CloseDecision,
     },
 }
 

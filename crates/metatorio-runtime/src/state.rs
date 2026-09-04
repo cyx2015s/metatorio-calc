@@ -34,9 +34,9 @@ use crate::message::{
     FluidFuelMechanicAction, FluidHeatMechanicAction, GeneratorMechanicAction,
     ItemFuelMechanicAction, ItemLaunchMechanicAction, MechanicAction, MechanicListAction,
     MiningMechanicAction, ModuleAction, PlantMechanicAction, PlanningAction, ProjectAction,
-    ProjectPage, ReactorMechanicAction, RecipeMechanicAction, RuntimeCommand, SelectorKind,
-    SelectorTarget, SelectorValue, SolveAction, SolarMechanicAction, SpoilMechanicAction,
-    SuggestionAction, SuggestionCandidate, TargetAction, TargetExpressionAction, UiAction,
+    ReactorMechanicAction, RecipeMechanicAction, RuntimeCommand, SelectorKind, SelectorTarget,
+    SelectorValue, SolveAction, SolarMechanicAction, SpoilMechanicAction, SuggestionAction,
+    SuggestionCandidate, TargetAction, TargetExpressionAction, UiAction,
 };
 
 /// Mutable application state that is independent from any GUI framework.
@@ -887,8 +887,8 @@ impl RuntimeState {
                 self.ui.selected_mechanic = Some(mechanic);
                 Ok(Outcome::none())
             }
-            SuggestionAction::SetFilter { filter } => {
-                self.ui.suggestion_filter = filter;
+            SuggestionAction::SetFilter { .. } => {
+                // 建议过滤是纯 UI 前端状态；运行时不再持有。
                 Ok(Outcome::none())
             }
             SuggestionAction::Accept { candidate } => {
@@ -955,78 +955,6 @@ impl RuntimeState {
                     ));
                 }
                 self.ui.selected_factory = factory;
-                Ok(Outcome::none())
-            }
-            UiAction::SelectPage { page } => {
-                if let ProjectPage::Factory(factory) = page {
-                    let project = self
-                        .ui
-                        .selected_project
-                        .ok_or(RuntimeError::InvalidOperation("no selected project"))?;
-                    self.factory(project, factory)?;
-                    self.ui.selected_factory = Some(factory);
-                }
-                self.ui.page = page;
-                Ok(Outcome::none())
-            }
-            UiAction::OpenSelector { target } => {
-                self.ui.selector = Some(SelectorState {
-                    target,
-                    ..SelectorState::default()
-                });
-                Ok(Outcome::none())
-            }
-            UiAction::CloseSelector => {
-                self.ui.selector = None;
-                Ok(Outcome::none())
-            }
-            UiAction::SetSelectorQuery { query } => {
-                self.selector_mut()?.query = query;
-                Ok(Outcome::none())
-            }
-            UiAction::SelectSelectorGroup { group } => {
-                let selector = self.selector_mut()?;
-                selector.group = group;
-                selector.subgroup = 0;
-                Ok(Outcome::none())
-            }
-            UiAction::SelectSelectorSubgroup { subgroup } => {
-                self.selector_mut()?.subgroup = subgroup;
-                Ok(Outcome::none())
-            }
-            UiAction::CommitSelector { target, value } => {
-                self.ui.selector = None;
-                self.apply_selector_commit(target, value)
-            }
-            UiAction::SelectSuggestionMechanic { mechanic } => {
-                self.ui.suggestion_mechanic = mechanic;
-                Ok(Outcome::none())
-            }
-            UiAction::OpenLogs => {
-                self.ui.logs_open = true;
-                Ok(Outcome::none())
-            }
-            UiAction::SetFontFilter { filter } => {
-                self.ui.font_filter = filter;
-                Ok(Outcome::none())
-            }
-            UiAction::SelectFont { font } => {
-                self.ui.font = Some(font);
-                Ok(Outcome::none())
-            }
-            UiAction::SetLocale { locale } => {
-                self.ui.locale = Some(locale);
-                Ok(Outcome::none())
-            }
-            UiAction::ReloadIcons => Ok(Outcome::none()),
-            UiAction::RequestWindowClose => {
-                self.ui.close_requested = true;
-                Ok(Outcome::none())
-            }
-            UiAction::ResolveWindowClose { decision } => {
-                if matches!(decision, CloseDecision::Cancel) {
-                    self.ui.close_requested = false;
-                }
                 Ok(Outcome::none())
             }
         }
@@ -1422,13 +1350,6 @@ impl RuntimeState {
             .and_then(|project| project.factories.first())
             .map(|factory| factory.id);
     }
-
-    fn selector_mut(&mut self) -> Result<&mut SelectorState, RuntimeError> {
-        self.ui
-            .selector
-            .as_mut()
-            .ok_or(RuntimeError::InvalidOperation("no selector is open"))
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -1436,15 +1357,6 @@ pub struct UiState {
     pub selected_project: Option<ProjectId>,
     pub selected_factory: Option<FactoryId>,
     pub selected_mechanic: Option<MechanicId>,
-    pub page: ProjectPage,
-    pub selector: Option<SelectorState>,
-    pub suggestion_mechanic: usize,
-    pub suggestion_filter: String,
-    pub logs_open: bool,
-    pub font_filter: String,
-    pub font: Option<String>,
-    pub locale: Option<String>,
-    pub close_requested: bool,
 }
 
 impl Default for UiState {
@@ -1453,34 +1365,6 @@ impl Default for UiState {
             selected_project: None,
             selected_factory: None,
             selected_mechanic: None,
-            page: ProjectPage::Preferences,
-            selector: None,
-            suggestion_mechanic: 0,
-            suggestion_filter: String::new(),
-            logs_open: false,
-            font_filter: String::new(),
-            font: None,
-            locale: None,
-            close_requested: false,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct SelectorState {
-    pub target: SelectorTarget,
-    pub query: String,
-    pub group: usize,
-    pub subgroup: usize,
-}
-
-impl Default for SelectorState {
-    fn default() -> Self {
-        Self {
-            target: SelectorTarget::ProjectQuality,
-            query: String::new(),
-            group: 0,
-            subgroup: 0,
         }
     }
 }
