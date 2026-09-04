@@ -1549,10 +1549,10 @@ class RuntimeStore {
     );
   }
 
-  /** 前端解析的"有效上下文 id"：当前选中项目绑定的上下文，否则为激活上下文。
+  /** 前端解析的"有效上下文 id"：当前选中项目绑定的上下文（项目级上下文唯一来源）。
    *  用于图标/目录/详情等需按上下文取数据的命令（后端不再持有该选择）。 */
   get effectiveContextId(): string {
-    return this.selectedProject?.context_id ?? this.activeContext?.id ?? "";
+    return this.selectedProject?.context_id ?? "";
   }
 
   /** 前端持有选择态：若当前选中的项目/工厂已不在文档中（被删除），清除选择。 */

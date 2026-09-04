@@ -1963,8 +1963,11 @@
 
       <section class="panel">
         <div class="title">游戏上下文 <span class="count">{runtime.contexts.length}</span></div>
+        {#if project && project.context_id && !runtime.contexts.some((c) => c.id === project.context_id)}
+          <div class="warn-strip">当前项目引用的游戏上下文已删除或不存在，请从下方列表选一个并点「应用」重新绑定。</div>
+        {/if}
         {#if runtime.contexts.length === 0}
-          <div class="empty-hint">尚未导出/加载任何上下文</div>
+          <div class="empty-hint">尚未加载任何游戏上下文。请先加载一个（左上角「加载游戏」或「从文件导入 Dump」）以创建。</div>
         {:else}
           <div class="rows compact">
             {#each runtime.contexts as context (context.id)}
@@ -2646,6 +2649,19 @@
     color: var(--danger);
     background: var(--danger-dim);
     border-bottom: 1px solid var(--danger-line);
+    font-size: 11px;
+  }
+
+  .warn-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 6px 10px;
+    margin: 0 12px 8px;
+    color: var(--warn);
+    background: var(--warn-dim);
+    border: 1px solid var(--warn-line);
+    border-radius: var(--radius-sm);
     font-size: 11px;
   }
 
