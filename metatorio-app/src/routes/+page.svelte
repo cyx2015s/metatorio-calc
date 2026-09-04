@@ -59,7 +59,7 @@
   async function openSuggestions(flow: DualVar) {
     suggestions = { flow, items: [], loading: true };
     try {
-      const items = await suggest(flow);
+      const items = await suggest(flow, runtime.effectiveContextId);
       suggestions = { flow, items, loading: false };
     } catch {
       suggestions = { flow, items: [], loading: false };
@@ -844,7 +844,7 @@
           }
           const recipeId = entry?.mechanic.type === "recipe" ? (entry?.mechanic.recipe?.id ?? null) : null;
           const allowed = machineId
-            ? await allowedModules(detailKind, machineId, recipeId)
+            ? await allowedModules(detailKind, machineId, recipeId, runtime.effectiveContextId)
             : [];
           // 已选机器但鉴权后无可用插件：用不可能匹配的哨兵让选择器显示空。
           const allowedNames =
@@ -892,7 +892,9 @@
           }
           // 塔内插件按该信标允许的插件鉴权过滤（类别 + 效果类型；与机器同理）
           const beaconId = beaconCfg?.beacon.id;
-          const allowed = beaconId ? await allowedModules("beacon", beaconId, null) : [];
+          const allowed = beaconId
+            ? await allowedModules("beacon", beaconId, null, runtime.effectiveContextId)
+            : [];
           // 已选信标但鉴权后无可用插件：用不可能匹配的哨兵让选择器显示空。
           const allowedNames =
             beaconId && allowed.length === 0 ? [""] : allowed.length > 0 ? allowed : undefined;
@@ -1041,13 +1043,13 @@
   <nav class="tabs">
     {#each runtime.document?.projects ?? [] as item (item.id)}
       {@const savePath = runtime.projectSavePath(item.id)}
-      <div class:active={item.id === runtime.ui?.selected_project} class="tab-cluster">
+      <div class:active={item.id === runtime.selectedProject?.id} class="tab-cluster">
         <button
           class="tab"
           title={savePath ? `保存位置：${savePath}` : "尚未保存"}
           onclick={() => runtime.selectProject(item.id).catch(() => {})}
         >{item.name}</button>
-        {#if item.id === runtime.ui?.selected_project}
+        {#if item.id === runtime.selectedProject?.id}
           <button class="tab-x" title="重命名项目" onclick={promptRenameProject}>✎</button>
         {/if}
       </div>
@@ -1084,7 +1086,7 @@
   {#if project}
     <nav class="tabs sub">
       {#each project.factories as item (item.id)}
-        <div class:active={item.id === runtime.ui?.selected_factory} class="tab-cluster">
+        <div class:active={item.id === runtime.selectedFactory?.id} class="tab-cluster">
           <button
             class="tab"
             onclick={() => runtime.selectFactory(item.id).catch(() => {})}

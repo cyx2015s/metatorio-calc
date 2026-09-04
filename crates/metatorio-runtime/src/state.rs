@@ -36,14 +36,12 @@ use crate::message::{
     MiningMechanicAction, ModuleAction, PlantMechanicAction, PlanningAction, ProjectAction,
     ReactorMechanicAction, RecipeMechanicAction, RuntimeCommand, SolveAction, SolarMechanicAction,
     SpoilMechanicAction, SuggestionAction, SuggestionCandidate, TargetAction, TargetExpressionAction,
-    UiAction,
 };
 
 /// Mutable application state that is independent from any GUI framework.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RuntimeState {
     pub document: AppDocument,
-    pub ui: UiState,
     pub revision: u64,
     pub dirty_projects: BTreeSet<ProjectId>,
     /// 当前激活的上下文 id（镜像 Runtime.active_context，供新建项目固定到
@@ -62,14 +60,12 @@ impl RuntimeState {
     pub fn new(document: AppDocument) -> Self {
         let mut state = Self {
             document,
-            ui: UiState::default(),
             revision: 0,
             dirty_projects: BTreeSet::new(),
             active_context: None,
             next_id: 1,
         };
         state.refresh_next_id();
-        state.select_first_project();
         state
     }
 
@@ -86,7 +82,6 @@ impl RuntimeState {
                 factory,
                 action,
             } => self.apply_factory(project, factory, action)?,
-            AppMessage::Ui(action) => self.apply_ui(action)?,
         };
 
         self.finish(outcome)
@@ -159,8 +154,6 @@ impl RuntimeState {
                     ..ProjectDocument::default()
                 };
                 self.document.projects.push(project);
-                self.ui.selected_project = Some(id);
-                self.ui.selected_factory = None;
                 Ok(Outcome::changed(id))
             }
             ApplicationAction::OpenProject { path } => {
@@ -253,8 +246,6 @@ impl RuntimeState {
                 let factory_id = self.allocate_id();
                 let factory = self.new_factory(factory_id, name, template);
                 self.project_mut(project_id)?.factories.push(factory);
-                self.ui.selected_project = Some(project_id);
-                self.ui.selected_factory = Some(factory_id);
                 Ok(Outcome::changed_factory(project_id, factory_id))
             }
             ProjectAction::CloneFactory { factory } => {
@@ -271,27 +262,19 @@ impl RuntimeState {
                 let clone = self.clone_factory(source);
                 let clone_id = clone.id;
                 self.project_mut(project_id)?.factories.push(clone);
-                self.ui.selected_project = Some(project_id);
-                self.ui.selected_factory = Some(clone_id);
                 Ok(Outcome::changed_factory(project_id, clone_id))
             }
             ProjectAction::RemoveFactory { factory } => {
-                let new_selected_factory = {
-                    let project = self.project_mut(project_id)?;
-                    let index = project
-                        .factories
-                        .iter()
-                        .position(|candidate| candidate.id == factory)
-                        .ok_or(RuntimeError::FactoryNotFound {
-                            project: project_id,
-                            factory,
-                        })?;
-                    project.factories.remove(index);
-                    project.factories.get(index.saturating_sub(1)).map(|f| f.id)
-                };
-                if self.ui.selected_factory == Some(factory) {
-                    self.ui.selected_factory = new_selected_factory;
-                }
+                let project = self.project_mut(project_id)?;
+                let index = project
+                    .factories
+                    .iter()
+                    .position(|candidate| candidate.id == factory)
+                    .ok_or(RuntimeError::FactoryNotFound {
+                        project: project_id,
+                        factory,
+                    })?;
+                project.factories.remove(index);
                 Ok(Outcome::changed(project_id))
             }
             ProjectAction::ReorderFactory { factory, position } => {
@@ -436,16 +419,10 @@ impl RuntimeState {
                 Ok(Outcome::all_factories_if(changed, project_id))
             }
             ProjectAction::Planning(action) => {
-                // UseBestModules executes for the currently selected mechanic
-                // even though the preference itself is project-global.
+                // UseBestModules executes for the given factory/mechanic even
+                // though the preference itself is project-global.
                 let outcome = match action {
-                    PlanningAction::UseBestModules => {
-                        let factory = self.ui.selected_factory.ok_or(
-                            RuntimeError::InvalidOperation("没有选中的工厂"),
-                        )?;
-                        let mechanic = self.ui.selected_mechanic.ok_or(
-                            RuntimeError::InvalidOperation("没有选中的机制"),
-                        )?;
+                    PlanningAction::UseBestModules { factory, mechanic } => {
                         Outcome::command(RuntimeCommand::UseBestModules {
                             project: project_id,
                             factory,
@@ -836,12 +813,9 @@ impl RuntimeState {
                         mechanic,
                     })?;
                 clone.id = self.allocate_id();
-                let new_id = clone.id;
                 let mechanics = &mut self.factory_mut(project_id, factory_id)?.mechanics;
                 let index = index_by_id(mechanics, mechanic)?;
                 mechanics.insert(index + 1, clone);
-                self.ui.selected_factory = Some(factory_id);
-                self.ui.selected_mechanic = Some(new_id);
                 Ok(Outcome::changed_factory(project_id, factory_id))
             }
             MechanicListAction::Reorder { mechanic, position } => {
@@ -884,7 +858,6 @@ impl RuntimeState {
                         factory: factory_id,
                         mechanic,
                     })?;
-                self.ui.selected_mechanic = Some(mechanic);
                 Ok(Outcome::none())
             }
             SuggestionAction::SetFilter { .. } => {
@@ -927,39 +900,11 @@ impl RuntimeState {
                 self.factory_mut(project_id, factory_id)?
                     .mechanics
                     .push(entry);
-                self.ui.selected_mechanic = Some(id);
                 Ok(Outcome::changed_factory(project_id, factory_id))
             }
             SuggestionAction::Dismiss => Ok(Outcome::none()),
         }
     }
-
-    fn apply_ui(&mut self, action: UiAction) -> Result<Outcome, RuntimeError> {
-        match action {
-            UiAction::SelectProject { project } => {
-                if let Some(project) = project {
-                    self.project(project)?;
-                }
-                self.ui.selected_project = project;
-                self.ui.selected_factory = None;
-                Ok(Outcome::none())
-            }
-            UiAction::SelectFactory { factory } => {
-                if let Some(project) = self.ui.selected_project {
-                    if let Some(factory) = factory {
-                        self.factory(project, factory)?;
-                    }
-                } else if factory.is_some() {
-                    return Err(RuntimeError::InvalidOperation(
-                        "cannot select a factory without a selected project",
-                    ));
-                }
-                self.ui.selected_factory = factory;
-                Ok(Outcome::none())
-            }
-        }
-    }
-
 
 
     fn new_factory(
@@ -1017,14 +962,6 @@ impl RuntimeState {
             .ok_or(RuntimeError::ProjectNotFound(id))?;
         self.document.projects.remove(index);
         self.dirty_projects.remove(&id);
-        if self.ui.selected_project == Some(id) {
-            self.ui.selected_project = self
-                .document
-                .projects
-                .get(index.saturating_sub(1))
-                .map(|p| p.id);
-            self.ui.selected_factory = None;
-        }
         Ok(())
     }
 
@@ -1170,32 +1107,6 @@ impl RuntimeState {
         self.next_id = max_id.saturating_add(1).max(1);
     }
 
-    fn select_first_project(&mut self) {
-        self.ui.selected_project = self.document.projects.first().map(|project| project.id);
-        self.ui.selected_factory = self
-            .document
-            .projects
-            .first()
-            .and_then(|project| project.factories.first())
-            .map(|factory| factory.id);
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct UiState {
-    pub selected_project: Option<ProjectId>,
-    pub selected_factory: Option<FactoryId>,
-    pub selected_mechanic: Option<MechanicId>,
-}
-
-impl Default for UiState {
-    fn default() -> Self {
-        Self {
-            selected_project: None,
-            selected_factory: None,
-            selected_mechanic: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -1863,7 +1774,7 @@ fn apply_planning_action(
                 .retain(|candidate| candidate != &module);
             Ok(before != planning.enumerate_modules.len())
         }
-        PlanningAction::UseBestModules => Ok(false),
+        PlanningAction::UseBestModules { .. } => Ok(false),
         PlanningAction::AddEnumeratedBeacon => {
             planning.enumerate_beacons.push(AutoBeaconPlan::default());
             Ok(true)
@@ -2143,13 +2054,14 @@ mod tests {
         );
     }
 
-    fn state_with_factory() -> (RuntimeState, ProjectId, FactoryId) {        let mut state = RuntimeState::default();
+    fn state_with_factory() -> (RuntimeState, ProjectId, FactoryId) {
+        let mut state = RuntimeState::default();
         state
             .dispatch(AppMessage::Application(ApplicationAction::NewProject {
                 name: "project".to_string(),
             }))
             .unwrap();
-        let project = state.ui.selected_project.unwrap();
+        let project = state.document.projects[0].id;
         state
             .dispatch(AppMessage::Project {
                 project,
@@ -2159,7 +2071,7 @@ mod tests {
                 },
             })
             .unwrap();
-        let factory = state.ui.selected_factory.unwrap();
+        let factory = state.project(project).unwrap().factories[0].id;
         (state, project, factory)
     }
 

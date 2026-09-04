@@ -18,7 +18,6 @@ import type {
   Milestone,
   PrototypeDetail,
   SolveResult,
-  UiState,
 } from "./types";
 
 function inTauri(): boolean {
@@ -40,10 +39,6 @@ export async function dispatch(message: AppMessage): Promise<DispatchResult> {
 
 export async function getDocument(): Promise<AppDocument> {
   return call("get_document");
-}
-
-export async function getUiState(): Promise<UiState> {
-  return call("get_ui_state");
 }
 
 /** 项目可达性快照（选择器过滤用）：当前可达对象集合。 */
@@ -113,34 +108,45 @@ export async function pickModDir(): Promise<string | null> {
 
 // ── Catalog & icons ───────────────────────────────────────────────
 
-export async function loadIcon(type: string, name: string): Promise<number[] | null> {
-  return call("icon", { ty: type, name });
+export async function loadIcon(
+  type: string,
+  name: string,
+  contextId: string,
+): Promise<number[] | null> {
+  return call("icon", { ty: type, name, context_id: contextId });
 }
 
-export async function catalogIndex(): Promise<CatalogIndex> {
-  return call("catalog_index");
+export async function catalogIndex(contextId: string): Promise<CatalogIndex> {
+  return call("catalog_index", { context_id: contextId });
 }
 
 export async function prototypeDetail(
   kind: string,
   name: string,
+  contextId: string,
 ): Promise<PrototypeDetail | null> {
-  return call("prototype_detail", { kind, name });
+  return call("prototype_detail", { context_id: contextId, kind, name });
 }
 
 /** 建议系统：为一条流生成候选机制（配方/矿点/燃料/发电机）。 */
-export async function suggest(flow: import("./types").DualVar): Promise<import("./types").Suggestion[]> {
-  return call("suggest", { flow });
+export async function suggest(
+  flow: import("./types").DualVar,
+  contextId: string,
+): Promise<import("./types").Suggestion[]> {
+  return call("suggest", { context_id: contextId, flow });
 }
 
 /** 每插件类别中 tier 最高的插件（"使用最佳插件"）。 */
-export async function bestModules(): Promise<import("./types").Suggestion[]> {
-  return call("best_modules");
+export async function bestModules(contextId: string): Promise<import("./types").Suggestion[]> {
+  return call("best_modules", { context_id: contextId });
 }
 
 /** 星球隐式可用输入（严格供给下也免费；被外部输入覆盖的不返回）。 */
-export async function implicitSources(factory: number): Promise<import("./types").DualVar[]> {
-  return call("implicit_sources", { factory });
+export async function implicitSources(
+  project: number,
+  factory: number,
+): Promise<import("./types").DualVar[]> {
+  return call("implicit_sources", { project, factory });
 }
 
 /** 单个机制的展开流（系数 1 时每秒产/耗）；正值产出、负值消耗。 */
@@ -170,8 +176,9 @@ export async function allowedModules(
   machineKind: string,
   machine: string,
   recipe: string | null,
+  contextId: string,
 ): Promise<string[]> {
-  return call("allowed_modules", { machineKind, machine, recipe });
+  return call("allowed_modules", { context_id: contextId, machineKind, machine, recipe });
 }
 
 // ── Persistence ───────────────────────────────────────────────────
@@ -180,12 +187,12 @@ export async function openProjectDialog(): Promise<AppDocument | null> {
   return call("open_project_dialog");
 }
 
-export async function saveProjectAsDialog(): Promise<string | null> {
-  return call("save_project_as_dialog");
+export async function saveProjectAsDialog(project: number): Promise<string | null> {
+  return call("save_project_as_dialog", { project });
 }
 
-export async function saveProject(): Promise<string | null> {
-  return call("save_project");
+export async function saveProject(project: number): Promise<string | null> {
+  return call("save_project", { project });
 }
 
 export async function projectSavePath(project: number): Promise<string | null> {

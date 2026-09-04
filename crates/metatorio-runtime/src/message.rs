@@ -24,7 +24,6 @@ pub enum AppMessage {
         factory: FactoryId,
         action: FactoryAction,
     },
-    Ui(UiAction),
 }
 
 pub type RuntimeMessage = AppMessage;
@@ -497,7 +496,10 @@ pub enum PlanningAction {
     RemoveEnumeratedModule {
         module: IdWithQuality,
     },
-    UseBestModules,
+    UseBestModules {
+        factory: FactoryId,
+        mechanic: MechanicId,
+    },
     AddEnumeratedBeacon,
     RemoveEnumeratedBeacon {
         beacon: usize,
@@ -551,19 +553,6 @@ pub enum CleanupAction {
 pub enum SolveAction {
     Recompute,
     AutoPlan,
-}
-
-/// 选择态（transient）操作：运行时只保留选择，供上下文解析；其余纯 UI
-/// 代理操作（选择器/页面/日志/字号/语言/关闭确认）已移至前端 `$state`。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum UiAction {
-    SelectProject {
-        project: Option<ProjectId>,
-    },
-    SelectFactory {
-        factory: Option<FactoryId>,
-    },
 }
 
 /// Effects requested by a reducer after applying an AppMessage.  Keeping

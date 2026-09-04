@@ -29,4 +29,4 @@ pub use solve::{
     CommandEffect, ExpandedVarId, FlowBalance, MechanicSolution, ProductivityView,
     RecipeProductivityView, Runtime, SolveResult, SolveStatus,
 };
-pub use state::{DispatchResult, RuntimeError, RuntimeState, UiState};
+pub use state::{DispatchResult, RuntimeError, RuntimeState};

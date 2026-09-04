@@ -291,7 +291,7 @@ export type PlanningAction =
   | { "reorder-machine-preference": { machine: IdWithQuality; position: number } }
   | { "add-enumerated-module": { module: IdWithQuality } }
   | { "remove-enumerated-module": { module: IdWithQuality } }
-  | "use-best-modules"
+  | { "use-best-modules": { factory: FactoryId; mechanic: MechanicId } }
   | "add-enumerated-beacon"
   | { "remove-enumerated-beacon": { beacon: number } }
   | { "set-enumerated-beacon": { beacon: number; plan: AutoBeaconPlan } }
@@ -355,14 +355,10 @@ export type FactoryAction =
   | { solve: SolveAction }
   | { "external-input": ExternalInputAction };
 
-export type UiAction =
-  | { "select-project": { project: ProjectId | null } }
-  | { "select-factory": { factory: FactoryId | null } };
-
 // AppMessage is internally tagged (tag "scope", content "action").
 // serde wraps struct-variant fields under the content key:
 //   { scope: "project", action: { project: 1, action: {...} } }
-// (newtype variants like Application/Ui put the payload directly under
+// (newtype variants like Application put the payload directly under
 // "action").  Keep in sync with crates/metatorio-runtime/src/message.rs.
 export type AppMessage =
   | { scope: "application"; action: ApplicationAction }
@@ -370,8 +366,7 @@ export type AppMessage =
   | {
       scope: "factory";
       action: { project: ProjectId; factory: FactoryId; action: FactoryAction };
-    }
-  | { scope: "ui"; action: UiAction };
+    };
 
 // ── Document snapshot ─────────────────────────────────────────────
 
@@ -557,12 +552,6 @@ export interface DispatchResult {
   revision: number;
   changed: boolean;
   commands: unknown[];
-}
-
-export interface UiState {
-  selected_project: ProjectId | null;
-  selected_factory: FactoryId | null;
-  selected_mechanic: MechanicId | null;
 }
 
 // ── Solver output ─────────────────────────────────────────────────

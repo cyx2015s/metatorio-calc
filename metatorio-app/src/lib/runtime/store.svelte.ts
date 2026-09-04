@@ -12,7 +12,6 @@ import {
   deleteContext,
   dispatch,
   getDocument,
-  getUiState,
   listContexts,
   loadBundledDump,
   loadDump,
@@ -79,7 +78,12 @@ const PRODUCTIVITY_KEYS = new Set([
 
 class RuntimeStore {
   document = $state<AppDocument | null>(null);
-  ui = $state<import("./types").UiState | null>(null);
+  // 前端持有 UI 选择态（后端不再存储任何选择）。选中 id 为 0 时表示未选；
+  // 用独立的 *Id 字段承担 id，`selectedProject`/`selectedFactory` getter 仍
+  // 返回文档对象，便于模板直接读取。
+  selectedProjectId = $state<ProjectId | null>(null);
+  selectedFactoryId = $state<FactoryId | null>(null);
+  selectedMechanic = $state<MechanicId | null>(null);
   /** 项目 id → 保存路径（记忆路径，未保存过无条目）。 */
   projectPaths = $state<Map<ProjectId, string>>(new Map());
   solve = $state<SolveResult | null>(null);
@@ -150,9 +154,12 @@ class RuntimeStore {
       this.contextBusy = false;
     });
     try {
-      const [document, ui] = await Promise.all([getDocument(), getUiState()]);
-      this.document = document;
-      this.ui = ui;
+      this.document = await getDocument();
+      // 前端持有选择态：初始选中第一个项目（如有）+ 其第一个工厂。
+      const firstProject = this.document?.projects[0] ?? null;
+      this.selectedProjectId = firstProject?.id ?? null;
+      this.selectedFactoryId = firstProject?.factories[0]?.id ?? null;
+      this.selectedMechanic = null;
       await this.refreshContexts();
       // 及早拉取目录索引（含本地化显示名），保证产能/机制等面板在
       // 首个渲染就能用上译名，而不是回退到内部 id。
@@ -165,9 +172,9 @@ class RuntimeStore {
   }
 
   async refresh(): Promise<void> {
-    const [document, ui] = await Promise.all([getDocument(), getUiState()]);
-    this.document = document;
-    this.ui = ui;
+    this.document = await getDocument();
+    // 前端持有选择态：文档刷新后若选中项已被删除（删除工厂/项目），清除选择。
+    this.pruneSelection();
     this.refreshProjectPaths().catch(() => {});
   }
 
@@ -175,7 +182,7 @@ class RuntimeStore {
   async send(message: AppMessage): Promise<void> {
     this.busy = true;
     this.lastError = null;
-    const prevProject = this.ui?.selected_project;
+    const prevProject = this.selectedProjectId;
     try {
       const result = await dispatch(message);
       this.revision = result.revision;
@@ -193,12 +200,12 @@ class RuntimeStore {
     // 重 BFS ~1.8s，不应在每次无关键交互后都跑）；换选项目也要重拉。
     const keys = RuntimeStore.innerActionKeys(message);
     const domain =
-      keys.some((k) => MILESTONE_KEYS.has(k)) || prevProject !== this.ui?.selected_project;
+      keys.some((k) => MILESTONE_KEYS.has(k)) || prevProject !== this.selectedProjectId;
     if (domain) this.refreshOrderedMilestones().catch(() => {});
     if (
       keys.some((k) => PRODUCTIVITY_KEYS.has(k)) ||
       keys.some((k) => MILESTONE_KEYS.has(k)) ||
-      prevProject !== this.ui?.selected_project
+      prevProject !== this.selectedProjectId
     ) {
       this.refreshProductivity().catch(() => {});
     }
@@ -226,7 +233,7 @@ class RuntimeStore {
    */
   async ensureAccessibility(): Promise<Accessible[] | null> {
     if (this.accessibility != null) return this.accessibility;
-    const project = this.ui?.selected_project;
+    const project = this.selectedProjectId;
     if (project == null) return null;
     try {
       const nodes = await accessibility(project);
@@ -249,13 +256,14 @@ class RuntimeStore {
   implicitSourcesCache = $state<import("./types").DualVar[]>([]);
 
   async refreshImplicitSources(): Promise<void> {
-    const factory = this.ui?.selected_factory;
-    if (factory == null) {
+    const project = this.selectedProjectId;
+    const factory = this.selectedFactoryId;
+    if (project == null || factory == null) {
       this.implicitSourcesCache = [];
       return;
     }
     try {
-      this.implicitSourcesCache = await implicitSources(factory);
+      this.implicitSourcesCache = await implicitSources(project, factory);
     } catch {
       this.implicitSourcesCache = [];
     }
@@ -352,8 +360,17 @@ class RuntimeStore {
       if (document) {
         // 后端已把文件项目导入当前文档；这里用返回值整体刷新界面。
         this.document = document;
-        const ui = await getUiState();
-        this.ui = ui;
+        // 前端持有选择态：导入后选中最后一个（最近导入的）项目。
+        const projects = document.projects;
+        this.selectedProjectId = projects[projects.length - 1]?.id ?? null;
+        this.selectedFactoryId = null;
+        this.selectedMechanic = null;
+        this.accessibility = null;
+        await this.refreshProjectPaths();
+        this.restoreSolveForSelection();
+        this.refreshOrderedMilestones().catch(() => {});
+        this.refreshProductivity().catch(() => {});
+        this.refreshImplicitSources().catch(() => {});
         return true;
       }
       return false;
@@ -367,8 +384,9 @@ class RuntimeStore {
 
   async saveCurrentProject(): Promise<boolean> {
     this.busy = true;
+    const project = this.requireProject();
     try {
-      const path = await saveProject();
+      const path = await saveProject(project);
       if (path != null) return true;
       return await this.saveProjectAs();
     } catch (error) {
@@ -381,8 +399,9 @@ class RuntimeStore {
 
   async saveProjectAs(): Promise<boolean> {
     this.busy = true;
+    const project = this.requireProject();
     try {
-      const path = await saveProjectAsDialog();
+      const path = await saveProjectAsDialog(project);
       return path != null;
     } catch (error) {
       this.lastError = String(error);
@@ -399,7 +418,7 @@ class RuntimeStore {
     const key = `${type}/${name}`;
     let entry = this.icons.get(key);
     if (!entry) {
-      entry = loadIcon(type, name).then((bytes) => {
+      entry = loadIcon(type, name, this.effectiveContextId).then((bytes) => {
         if (!bytes || bytes.length === 0) return null;
         const blob = new Blob([new Uint8Array(bytes)], { type: "image/png" });
         const url = URL.createObjectURL(blob);
@@ -421,14 +440,15 @@ class RuntimeStore {
   private catalogLoadPromise: Promise<CatalogIndex | null> | null = null;
 
   async loadCatalogIndex(): Promise<CatalogIndex | null> {
-    if (this.catalogIndex?.context_id === this.activeContextId && this.activeContextId) {
+    const contextId = this.effectiveContextId;
+    if (this.catalogIndex?.context_id === contextId && contextId) {
       return this.catalogIndex;
     }
     // 合并并发加载（init 的 await 与上下文切换的 fire-and-forget 可能同时触发）。
     if (this.catalogLoadPromise) return this.catalogLoadPromise;
     this.catalogLoadPromise = (async () => {
       try {
-        this.catalogIndex = await catalogIndex();
+        this.catalogIndex = await catalogIndex(contextId);
         return this.catalogIndex;
       } catch (error) {
         this.lastError = String(error);
@@ -446,7 +466,7 @@ class RuntimeStore {
     const cached = this.detailCache.get(key);
     if (cached) return cached;
     try {
-      const detail = await prototypeDetail(kind, name);
+      const detail = await prototypeDetail(kind, name, this.effectiveContextId);
       if (detail) this.detailCache.set(key, detail);
       return detail;
     } catch {
@@ -527,6 +547,16 @@ class RuntimeStore {
 
   async newProject(name: string): Promise<void> {
     await this.send({ scope: "application", action: { "new-project": { name } } });
+    // 前端持有选择态：新建项目后选中它（文档里最后一个）。
+    const projects = this.document?.projects ?? [];
+    this.selectedProjectId = projects[projects.length - 1]?.id ?? null;
+    this.selectedFactoryId = null;
+    this.selectedMechanic = null;
+    this.accessibility = null;
+    this.restoreSolveForSelection();
+    this.refreshOrderedMilestones().catch(() => {});
+    this.refreshProductivity().catch(() => {});
+    this.refreshImplicitSources().catch(() => {});
   }
 
   /** 关闭项目：decision = "discard"（不保存关闭）| "save"（先保存再关闭）。 */
@@ -560,6 +590,12 @@ class RuntimeStore {
       scope: "project",
       action: { project, action: { "add-factory": { name, template: "empty" } } },
     });
+    // 前端持有选择态：新建工厂后选中它（项目里最后一个工厂）。
+    const factories = this.selectedProject?.factories ?? [];
+    this.selectedFactoryId = factories[factories.length - 1]?.id ?? null;
+    this.selectedMechanic = null;
+    this.restoreSolveForSelection();
+    this.refreshImplicitSources().catch(() => {});
   }
 
   async removeFactory(factory: FactoryId): Promise<void> {
@@ -588,34 +624,34 @@ class RuntimeStore {
     });
   }
 
-  /** 轻量 UI 动作：只同步后端的选择态（供 effective_context_id / 上下文解析），
-   *  不刷新整份 document、不置 busy。前端选择态直接本地设置，省去 getDocument 回程。 */
-  private async uiDispatch(message: AppMessage): Promise<void> {
-    const result = await dispatch(message);
-    this.revision = result.revision;
-  }
-
   async selectProject(project: ProjectId | null): Promise<void> {
-    if (!this.ui) this.ui = { selected_project: null, selected_factory: null, selected_mechanic: null };
-    this.ui = { ...this.ui, selected_project: project, selected_factory: null, selected_mechanic: null };
+    // 前端持有选择态：只更新本地 `$state`，不再向后端同步（后端无 UI 状态）。
+    const changed = this.selectedProjectId !== project;
+    this.selectedProjectId = project;
+    this.selectedFactoryId = null;
+    this.selectedMechanic = null;
     this.accessibility = null;
-    // 后端选择态保持同步（图标/上下文解析用），但无需整份刷新。
-    void this.uiDispatch({ scope: "ui", action: { "select-project": { project } } });
     this.restoreSolveForSelection();
+    if (changed) {
+      // 选择态由前端驱动：换选项目后重拉其里程碑/产能/隐式输入。
+      this.refreshOrderedMilestones().catch(() => {});
+      this.refreshProductivity().catch(() => {});
+      this.refreshImplicitSources().catch(() => {});
+    }
   }
 
   async selectFactory(factory: FactoryId | null): Promise<void> {
-    if (!this.ui) this.ui = { selected_project: null, selected_factory: null, selected_mechanic: null };
-    this.ui = { ...this.ui, selected_factory: factory, selected_mechanic: null };
-    // 后端选择态保持同步；无需整份刷新。
-    void this.uiDispatch({ scope: "ui", action: { "select-factory": { factory } } });
+    const changed = this.selectedFactoryId !== factory;
+    this.selectedFactoryId = factory;
+    this.selectedMechanic = null;
     this.restoreSolveForSelection();
+    if (changed) this.refreshImplicitSources().catch(() => {});
   }
 
   /** 当前选中 (project, factory) 键；无选中返回 (null, null)。 */
   private currentFactoryKey(): [ProjectId | null, FactoryId | null] {
-    const project = this.ui?.selected_project ?? null;
-    const factory = this.ui?.selected_factory ?? null;
+    const project = this.selectedProjectId;
+    const factory = this.selectedFactoryId;
     return [project, factory];
   }
 
@@ -711,7 +747,7 @@ class RuntimeStore {
   /** 里程碑节点按依赖拓扑排序（依赖在前）的当前结果；供里程碑列表按序展示。 */
   orderedMilestones = $state<Milestone[] | null>(null);
   async refreshOrderedMilestones(): Promise<void> {
-    const project = this.ui?.selected_project;
+    const project = this.selectedProjectId;
     if (project == null) {
       this.orderedMilestones = null;
       return;
@@ -726,7 +762,7 @@ class RuntimeStore {
   /** 产能视图（自动 + 用户覆盖），供项目设置面板按来源区分展示。 */
   productivityInfo = $state<ProductivityView | null>(null);
   async refreshProductivity(): Promise<void> {
-    const project = this.ui?.selected_project;
+    const project = this.selectedProjectId;
     if (project == null) {
       this.productivityInfo = null;
       return;
@@ -969,6 +1005,12 @@ class RuntimeStore {
       scope: "project",
       action: { project, action: { "clone-factory": { factory } } },
     });
+    // 前端持有选择态：克隆工厂后选中克隆（项目里最后一个工厂）。
+    const factories = this.selectedProject?.factories ?? [];
+    this.selectedFactoryId = factories[factories.length - 1]?.id ?? null;
+    this.selectedMechanic = null;
+    this.restoreSolveForSelection();
+    this.refreshImplicitSources().catch(() => {});
   }
 
   // ── 目标 ────────────────────────────────────────────────────────
@@ -1420,7 +1462,7 @@ class RuntimeStore {
   /** 使用最佳插件：用每插件类别中最高 tier 的插件（指定品质）替换枚举列表。 */
   async applyBestModules(quality: string): Promise<void> {
     const { bestModules } = await import("./client");
-    const modules = await bestModules();
+    const modules = await bestModules(this.effectiveContextId);
     const existing = [...(this.selectedProject?.planning.enumerate_modules ?? [])];
     for (const module of existing) {
       await this.removeEnumeratedModule(module);
@@ -1453,8 +1495,8 @@ class RuntimeStore {
     });
   }
 
-  async useBestModules(): Promise<void> {
-    await this.planningMessage("use-best-modules");
+  async useBestModules(factory: FactoryId, mechanic: MechanicId): Promise<void> {
+    await this.planningMessage({ "use-best-modules": { factory, mechanic } });
   }
 
   async recompute(): Promise<void> {
@@ -1496,26 +1538,50 @@ class RuntimeStore {
 
   get selectedProject() {
     return (
-      this.document?.projects.find((project) => project.id === this.ui?.selected_project) ?? null
+      this.document?.projects.find((project) => project.id === this.selectedProjectId) ?? null
     );
   }
 
   get selectedFactory() {
     const project = this.selectedProject;
     return (
-      project?.factories.find((factory) => factory.id === this.ui?.selected_factory) ?? null
+      project?.factories.find((factory) => factory.id === this.selectedFactoryId) ?? null
     );
   }
 
+  /** 前端解析的"有效上下文 id"：当前选中项目绑定的上下文，否则为激活上下文。
+   *  用于图标/目录/详情等需按上下文取数据的命令（后端不再持有该选择）。 */
+  get effectiveContextId(): string {
+    return this.selectedProject?.context_id ?? this.activeContext?.id ?? "";
+  }
+
+  /** 前端持有选择态：若当前选中的项目/工厂已不在文档中（被删除），清除选择。 */
+  private pruneSelection(): void {
+    const projects = this.document?.projects ?? [];
+    if (this.selectedProjectId != null && !projects.some((p) => p.id === this.selectedProjectId)) {
+      this.selectedProjectId = null;
+      this.selectedFactoryId = null;
+      this.selectedMechanic = null;
+      return;
+    }
+    if (this.selectedFactoryId != null) {
+      const factories = this.selectedProject?.factories ?? [];
+      if (!factories.some((f) => f.id === this.selectedFactoryId)) {
+        this.selectedFactoryId = null;
+        this.selectedMechanic = null;
+      }
+    }
+  }
+
   private requireProject(): ProjectId {
-    const project = this.ui?.selected_project;
+    const project = this.selectedProjectId;
     if (project == null) throw new Error("没有选中的项目");
     return project;
   }
 
   private requireFactory(): { project: ProjectId; factory: FactoryId } {
     const project = this.requireProject();
-    const factory = this.ui?.selected_factory;
+    const factory = this.selectedFactoryId;
     if (factory == null) throw new Error("没有选中的工厂");
     return { project, factory };
   }

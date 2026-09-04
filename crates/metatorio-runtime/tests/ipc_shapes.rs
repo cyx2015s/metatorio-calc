@@ -32,11 +32,7 @@ fn frontend_json_new_project_selects_the_project() {
     let result = runtime.dispatch(message).unwrap();
     assert!(result.changed);
     assert_eq!(result.revision, 1);
-    let project = runtime
-        .state
-        .ui
-        .selected_project
-        .expect("new-project must select the created project");
+    let project = runtime.state.document.projects[0].id;
     assert_eq!(runtime.state.project(project).unwrap().name, "Demo project");
 }
 
@@ -58,7 +54,7 @@ fn frontend_json_one_click_demo_runs_end_to_end() {
         "action": { "new-project": { "name": "Demo project" } }
     }));
     let _ = r;
-    let project = runtime.state.ui.selected_project.unwrap();
+    let project = runtime.state.document.projects[0].id;
 
     // 2. Add factory (struct variant: fields are wrapped under "action").
     let r = dispatch(&mut runtime, json!({
@@ -68,7 +64,7 @@ fn frontend_json_one_click_demo_runs_end_to_end() {
             "action": { "add-factory": { "name": "Demo factory", "template": "empty" } }
         }
     }));
-    let factory = runtime.state.ui.selected_factory.unwrap();
+    let factory = runtime.state.project(project).unwrap().factories[0].id;
     assert!(r.commands.contains(&RuntimeCommand::Recompute { project, factory }));
 
     // 3. Add recipe mechanic.
@@ -168,12 +164,12 @@ fn frontend_json_supports_all_dual_var_flow_kinds() {
         "scope": "application",
         "action": { "new-project": { "name": "flows" } }
     }));
-    let project = runtime.state.ui.selected_project.unwrap();
+    let project = runtime.state.document.projects[0].id;
     dispatch(&mut runtime, json!({
         "scope": "project",
         "action": { "project": project, "action": { "add-factory": { "name": "f", "template": "empty" } } }
     }));
-    let factory = runtime.state.ui.selected_factory.unwrap();
+    let factory = runtime.state.project(project).unwrap().factories[0].id;
 
     // 流体目标（单点温度）
     dispatch(&mut runtime, json!({

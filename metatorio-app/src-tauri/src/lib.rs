@@ -41,7 +41,7 @@ use metatorio_runtime::{
         surface_condition_text,
     },
     solve::{Runtime},
-    state::{DispatchResult, UiState},
+    state::{DispatchResult},
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -951,15 +951,17 @@ async fn delete_context(app: AppHandle, id: String) -> Result<ContextList, Strin
     .map_err(|error| error.to_string())?
 }
 
-/// Game icon PNG bytes for the *effective* context's `<icons>/<ty>/<name>.png`
+/// Game icon PNG bytes for the given context's `<icons>/<ty>/<name>.png`
 /// (from `--dump-icon-sprites`)。图标在注册时已移入/拷入缓存，缓存自包含。
+/// 前端显式传入 `context_id`（当前选中项目绑定的上下文，否则为激活上下文）。
 #[tauri::command]
-fn icon(state: State<'_, AppState>, ty: String, name: String) -> Option<Vec<u8>> {
-    let runtime = state.runtime.lock().ok()?;
-    let id = runtime.effective_context_id()?;
+fn icon(state: State<'_, AppState>, ty: String, name: String, context_id: String) -> Option<Vec<u8>> {
+    if context_id.is_empty() {
+        return None;
+    }
     let cache_root = {
         let registry = state.contexts.lock().ok()?;
-        registry.icon_root(&id)
+        registry.icon_root(&context_id)
     };
     if !cache_root.is_dir() {
         return None;
@@ -996,25 +998,25 @@ fn icon(state: State<'_, AppState>, ty: String, name: String) -> Option<Vec<u8>>
 
 /// 全量目录索引（含 order fallback 排序）：一次拉取，前端本地筛选/分组。
 #[tauri::command]
-async fn catalog_index(app: AppHandle) -> Result<CatalogIndex, String> {
+async fn catalog_index(app: AppHandle, context_id: String) -> Result<CatalogIndex, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
         let mut runtime = state
             .runtime
             .lock()
             .map_err(|_| "runtime lock poisoned".to_string())?;
-        let Some(id) = runtime.effective_context_id() else {
+        if context_id.is_empty() {
             return Ok(CatalogIndex {
                 context_id: String::new(),
                 qualities: Vec::new(),
                 entries: Vec::new(),
             });
-        };
-        ensure_context_loaded(&state, &mut runtime, &id)?;
-        let store = runtime.context_store_by_id(&id).ok_or("上下文未载入")?;
-        let locale = locale_map_of(&state, &id);
+        }
+        ensure_context_loaded(&state, &mut runtime, &context_id)?;
+        let store = runtime.context_store_by_id(&context_id).ok_or("上下文未载入")?;
+        let locale = locale_map_of(&state, &context_id);
         Ok(CatalogIndex {
-            context_id: id,
+            context_id: context_id.clone(),
             qualities: store.quality_order().to_vec(),
             entries: catalog_index_from_store(store, &locale),
         })
@@ -1025,16 +1027,16 @@ async fn catalog_index(app: AppHandle) -> Result<CatalogIndex, String> {
 
 /// 每插件类别中 tier 最高的插件（"使用最佳插件"填充枚举列表用）。
 #[tauri::command]
-fn best_modules(state: State<'_, AppState>) -> Result<Vec<Suggestion>, String> {
+fn best_modules(state: State<'_, AppState>, context_id: String) -> Result<Vec<Suggestion>, String> {
     let mut runtime = state
         .runtime
         .lock()
         .map_err(|_| "runtime lock poisoned".to_string())?;
-    let Some(id) = runtime.effective_context_id() else {
+    if context_id.is_empty() {
         return Ok(Vec::new());
-    };
-    ensure_context_loaded(&state, &mut runtime, &id)?;
-    let store = runtime.context_store_by_id(&id).ok_or("上下文未载入")?;
+    }
+    ensure_context_loaded(&state, &mut runtime, &context_id)?;
+    let store = runtime.context_store_by_id(&context_id).ok_or("上下文未载入")?;
     let mut best: std::collections::BTreeMap<String, (u32, String)> = std::collections::BTreeMap::new();
     for record in store.group(PrototypeGroup::Item) {
         let Some(module) = record.component::<ModuleComponent>() else {
@@ -1064,6 +1066,7 @@ fn best_modules(state: State<'_, AppState>) -> Result<Vec<Suggestion>, String> {
 #[tauri::command]
 async fn implicit_sources(
     app: AppHandle,
+    project: ProjectId,
     factory: FactoryId,
 ) -> Result<Vec<DualVar>, String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -1072,11 +1075,6 @@ async fn implicit_sources(
             .runtime
             .lock()
             .map_err(|_| "runtime lock poisoned".to_string())?;
-        let project = runtime
-            .state
-            .ui
-            .selected_project
-            .ok_or("未选择项目")?;
         let (planet, external_inputs) = {
             let factory_doc = runtime
                 .state
@@ -1113,16 +1111,16 @@ pub struct Suggestion {
 
 /// 建议系统：为一条流生成候选机制（对应 egui 的"推荐配方/矿点"模态框）。
 #[tauri::command]
-fn suggest(state: State<'_, AppState>, flow: DualVar) -> Result<Vec<Suggestion>, String> {
+fn suggest(state: State<'_, AppState>, context_id: String, flow: DualVar) -> Result<Vec<Suggestion>, String> {
     let mut runtime = state
         .runtime
         .lock()
         .map_err(|_| "runtime lock poisoned".to_string())?;
-    let Some(id) = runtime.effective_context_id() else {
+    if context_id.is_empty() {
         return Ok(Vec::new());
-    };
-    ensure_context_loaded(&state, &mut runtime, &id)?;
-    let store = runtime.context_store_by_id(&id).ok_or("上下文未载入")?;
+    }
+    ensure_context_loaded(&state, &mut runtime, &context_id)?;
+    let store = runtime.context_store_by_id(&context_id).ok_or("上下文未载入")?;
     Ok(suggest_for_flow(store, flow))
 }
 
@@ -1252,6 +1250,7 @@ fn solar_balance(
 #[tauri::command]
 fn allowed_modules(
     state: State<'_, AppState>,
+    context_id: String,
     machine_kind: String,
     machine: String,
     recipe: Option<String>,
@@ -1260,11 +1259,11 @@ fn allowed_modules(
         .runtime
         .lock()
         .map_err(|_| "runtime lock poisoned".to_string())?;
-    let Some(id) = runtime.effective_context_id() else {
+    if context_id.is_empty() {
         return Ok(Vec::new());
-    };
-    ensure_context_loaded(&state, &mut runtime, &id)?;
-    let store = runtime.context_store_by_id(&id).ok_or("上下文未载入")?;
+    }
+    ensure_context_loaded(&state, &mut runtime, &context_id)?;
+    let store = runtime.context_store_by_id(&context_id).ok_or("上下文未载入")?;
     let Some(record) = store.get(PrototypeGroup::Entity, &machine) else {
         return Ok(Vec::new());
     };
@@ -1627,6 +1626,7 @@ fn catalog_index_from_store(store: &PrototypeStore, locale: &HashMap<String, Str
 #[tauri::command]
 fn prototype_detail(
     state: State<'_, AppState>,
+    context_id: String,
     kind: String,
     name: String,
 ) -> Result<Option<PrototypeDetail>, String> {
@@ -1634,11 +1634,11 @@ fn prototype_detail(
         .runtime
         .lock()
         .map_err(|_| "runtime lock poisoned".to_string())?;
-    let Some(id) = runtime.effective_context_id() else {
+    if context_id.is_empty() {
         return Ok(None);
-    };
-    ensure_context_loaded(&state, &mut runtime, &id)?;
-    let store = runtime.context_store_by_id(&id).ok_or("上下文未载入")?;
+    }
+    ensure_context_loaded(&state, &mut runtime, &context_id)?;
+    let store = runtime.context_store_by_id(&context_id).ok_or("上下文未载入")?;
     let record = match kind.as_str() {
         "item" | "module" => store.get(PrototypeGroup::Item, &name),
         "fluid" => store.get(PrototypeGroup::Fluid, &name),
@@ -1652,7 +1652,7 @@ fn prototype_detail(
     let Some(record) = record else {
         return Ok(None);
     };
-    let locale = locale_map_of(&state, &id);
+    let locale = locale_map_of(&state, &context_id);
     let mut detail = PrototypeDetail {
         name: record.name.clone(),
         localized_name: localized_name(&locale, &kind, &record.name),
@@ -1868,13 +1868,6 @@ async fn get_document(app: AppHandle) -> Result<AppDocument, String> {
         .await
 }
 
-/// Current transient UI selection snapshot.
-#[tauri::command]
-async fn get_ui_state(app: AppHandle) -> Result<UiState, String> {
-    run_blocking(app, |runtime| Ok(runtime.state.ui.clone()))
-        .await
-}
-
 /// 在阻塞线程池里以 `&mut Runtime` 执行一段逻辑（用于把重计算移出主线程）。
 async fn run_blocking<T: Send + 'static>(
     app: AppHandle,
@@ -2016,19 +2009,24 @@ async fn open_project_dialog(app: AppHandle) -> Result<Option<AppDocument>, Stri
         .runtime
         .lock()
         .map_err(|_| "runtime lock poisoned".to_string())?;
+    let before: std::collections::HashSet<ProjectId> =
+        runtime.state.document.projects.iter().map(|p| p.id).collect();
     runtime
         .load_document_file(&path)
         .map_err(|error| error.to_string())?;
-    if let Some(project) = runtime.state.ui.selected_project {
-        if let Ok(mut paths) = state.project_paths.lock() {
-            paths.insert(project, path.to_string_lossy().to_string());
+    let path = path.to_string_lossy().to_string();
+    if let Ok(mut paths) = state.project_paths.lock() {
+        for project in &runtime.state.document.projects {
+            if !before.contains(&project.id) {
+                paths.insert(project.id, path.clone());
+            }
         }
     }
     Ok(Some(runtime.state.document.clone()))
 }
 
 #[tauri::command]
-async fn save_project_as_dialog(app: AppHandle) -> Result<Option<String>, String> {
+async fn save_project_as_dialog(app: AppHandle, project: ProjectId) -> Result<Option<String>, String> {
     let picked = app
         .dialog()
         .file()
@@ -2045,11 +2043,6 @@ async fn save_project_as_dialog(app: AppHandle) -> Result<Option<String>, String
         .runtime
         .lock()
         .map_err(|_| "runtime lock poisoned".to_string())?;
-    let project = runtime
-        .state
-        .ui
-        .selected_project
-        .ok_or("没有选中的项目")?;
     runtime
         .save_document_file(project, &path)
         .map_err(|error| error.to_string())?;
@@ -2062,16 +2055,8 @@ async fn save_project_as_dialog(app: AppHandle) -> Result<Option<String>, String
 /// Save to the remembered path; `Ok(None)` means no path yet (call
 /// `save_project_as_dialog`).
 #[tauri::command]
-async fn save_project(app: AppHandle) -> Result<Option<String>, String> {
+async fn save_project(app: AppHandle, project: ProjectId) -> Result<Option<String>, String> {
     let state = app.state::<AppState>();
-    let project = state
-        .runtime
-        .lock()
-        .map_err(|_| "runtime lock poisoned".to_string())?
-        .state
-        .ui
-        .selected_project
-        .ok_or("没有选中的项目")?;
     let path = state
         .project_paths
         .lock()
@@ -2673,7 +2658,6 @@ pub fn run() {
             allowed_modules,
             dispatch,
             get_document,
-            get_ui_state,
             accessibility,
             set_default_milestones,
             milestones_ordered,
@@ -2753,7 +2737,7 @@ mod tests {
                 name: "test".to_string(),
             }))
             .unwrap();
-        let project = runtime.state.ui.selected_project.unwrap();
+        let project = runtime.state.document.projects[0].id;
         // 2. 新建工厂。
         runtime
             .dispatch(AppMessage::Project {
@@ -2764,7 +2748,7 @@ mod tests {
                 },
             })
             .unwrap();
-        let factory = runtime.state.ui.selected_factory.unwrap();
+        let factory = runtime.state.project(project).unwrap().factories[0].id;
 
         // 4. 星球 fulgora + 主品质 legendary。
         runtime
@@ -2886,7 +2870,7 @@ mod tests {
                     },
                 })
                 .unwrap();
-            let factory = runtime.state.ui.selected_factory.unwrap();
+            let factory = runtime.state.project(project).unwrap().factories.last().unwrap().id;
             runtime
                 .dispatch(AppMessage::Factory {
                     project,

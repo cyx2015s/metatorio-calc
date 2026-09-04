@@ -196,17 +196,6 @@ impl Runtime {
         self.contexts.get(id)
     }
 
-    /// The context the UI should display / browse: the selected project's
-    /// pinned context, else the active context.
-    pub fn effective_context_id(&self) -> Option<String> {
-        self.state
-            .ui
-            .selected_project
-            .and_then(|project| self.state.project(project).ok())
-            .and_then(|project| project.context_id.clone())
-            .or_else(|| self.active_context.clone())
-    }
-
     /// Resolve the prototype store for a project: its pinned context first,
     /// then the active context.
     pub fn context_store(&self, project_id: ProjectId) -> Result<&PrototypeStore, RuntimeError> {
@@ -1409,7 +1398,7 @@ mod tests {
                 },
             ))
             .unwrap();
-        runtime.state.ui.selected_project.unwrap()
+        runtime.state.document.projects.last().unwrap().id
     }
 
     fn dispatch_project(runtime: &mut Runtime, project: ProjectId, action: ProjectAction) {
@@ -1626,7 +1615,6 @@ mod tests {
     #[test]
     fn recipe_target_dispatch_and_solve_form_one_closed_loop() {
         let mut runtime = load_runtime();
-        let project_id = ProjectId(1);
         runtime
             .dispatch(AppMessage::Application(
                 crate::message::ApplicationAction::NewProject {
@@ -1634,7 +1622,7 @@ mod tests {
                 },
             ))
             .unwrap();
-        let project_id = runtime.state.ui.selected_project.unwrap_or(project_id);
+        let project_id = runtime.state.document.projects[0].id;
         runtime
             .dispatch(AppMessage::Project {
                 project: project_id,
@@ -1644,7 +1632,7 @@ mod tests {
                 },
             })
             .unwrap();
-        let factory_id = runtime.state.ui.selected_factory.unwrap();
+        let factory_id = runtime.state.project(project_id).unwrap().factories[0].id;
         runtime
             .dispatch(AppMessage::Factory {
                 project: project_id,
@@ -1737,7 +1725,7 @@ mod tests {
                 },
             })
             .unwrap();
-        let factory = runtime.state.ui.selected_factory.unwrap();
+        let factory = runtime.state.project(project).unwrap().factories[0].id;
         runtime
             .dispatch(AppMessage::Factory {
                 project,
@@ -1819,7 +1807,6 @@ mod tests {
         runtime.install_context("other".to_string(), PrototypeStore::load(&other).unwrap());
         runtime.set_active_context(Some("other".to_string()));
 
-        let project_id = ProjectId(1);
         runtime
             .dispatch(AppMessage::Application(
                 crate::message::ApplicationAction::NewProject {
@@ -1827,7 +1814,7 @@ mod tests {
                 },
             ))
             .unwrap();
-        let project_id = runtime.state.ui.selected_project.unwrap_or(project_id);
+        let project_id = runtime.state.document.projects[0].id;
 
         // Unpinned project resolves to the active context.
         assert!(runtime.context_store(project_id).is_ok());
@@ -1978,7 +1965,7 @@ mod tests {
                 },
             })
             .unwrap();
-        let factory_id = runtime.state.ui.selected_factory.unwrap();
+        let factory_id = runtime.state.project(project).unwrap().factories[0].id;
         let settings = &runtime.state.factory(project, factory_id).unwrap().settings;
         assert_eq!(settings.planet.as_deref(), Some("nauvis"));
     }
@@ -2048,7 +2035,7 @@ mod tests {
                 },
             })
             .unwrap();
-        let factory = runtime.state.ui.selected_factory.unwrap();
+        let factory = runtime.state.project(project).unwrap().factories[0].id;
         runtime
             .dispatch(AppMessage::Factory {
                 project,
