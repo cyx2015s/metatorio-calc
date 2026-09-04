@@ -1507,23 +1507,6 @@
           </button>
           {#if panels.settings}
           <div class="field">
-            <label>游戏上下文</label>
-            <select
-              value={project.context_id ?? ""}
-              onchange={(event) => {
-                const value = (event.currentTarget as HTMLSelectElement).value;
-                runtime
-                  .setProjectContext(project.id, value === "" ? null : value)
-                  .catch(() => {});
-              }}
-            >
-              <option value="">跟随激活上下文（{runtime.activeContext?.name ?? "无"}）</option>
-              {#each runtime.contexts as context (context.id)}
-                <option value={context.id}>{context.name}</option>
-              {/each}
-            </select>
-          </div>
-          <div class="field">
             <label>时间刻度</label>
             <select
               value={project.settings.time_scale}
@@ -1985,11 +1968,11 @@
         {:else}
           <div class="rows compact">
             {#each runtime.contexts as context (context.id)}
-              <div class="ctx-row" class:active={context.active}>
+              <div class="ctx-row" class:active={project?.context_id === context.id}>
                 <div class="ctx-main">
                   <div class="ctx-name">
                     {context.name}
-                    {#if context.active}<span class="chip ok">激活</span>{/if}
+                    {#if project?.context_id === context.id}<span class="chip ok">项目上下文</span>{/if}
                     {#if !context.loaded}<span class="chip">未载入</span>{/if}
                   </div>
                   <div class="ctx-meta" title={context.source}>{shortSource(context.source)}</div>
@@ -1997,10 +1980,14 @@
                 <div class="ctx-actions">
                   <button
                     class="btn ghost"
-                    title={context.active ? "已激活" : "设为激活上下文"}
-                    disabled={context.active || runtime.contextBusy}
-                    onclick={() => runtime.setActiveContext(context.id).catch(() => {})}
-                  >激活</button>
+                    title={project?.context_id === context.id ? "当前项目已用此上下文" : "把选中项目改用此上下文"}
+                    disabled={project?.context_id === context.id || !project || runtime.contextBusy}
+                    onclick={() => {
+                      if (project) {
+                        runtime.setProjectContext(project.id, context.id).catch(() => {});
+                      }
+                    }}
+                  >应用</button>
                   <button
                     class="btn ghost"
                     title="重命名"
@@ -2019,8 +2006,11 @@
               </div>
             {/each}
           </div>
-          {#if runtime.activeContext && runtime.activeContext.icon_root}
-            <div class="kv"><span>图标目录</span><span class="mono small" title={runtime.activeContext.icon_root}>{runtime.activeContext.icon_root}</span></div>
+          {#if project}
+            {@const projCtx = runtime.contexts.find((c) => c.id === project.context_id)}
+            {#if projCtx && projCtx.icon_root}
+              <div class="kv"><span>图标目录</span><span class="mono small" title={projCtx.icon_root}>{projCtx.icon_root}</span></div>
+            {/if}
           {/if}
         {/if}
       </section>
