@@ -46,6 +46,9 @@ pub struct RuntimeState {
     pub ui: UiState,
     pub revision: u64,
     pub dirty_projects: BTreeSet<ProjectId>,
+    /// 当前激活的上下文 id（镜像 Runtime.active_context，供新建项目固定到
+    /// 当前上下文用——项目创建后自含上下文，不再依赖全局 active_context 回退）。
+    pub active_context: Option<String>,
     next_id: u64,
 }
 
@@ -62,6 +65,7 @@ impl RuntimeState {
             ui: UiState::default(),
             revision: 0,
             dirty_projects: BTreeSet::new(),
+            active_context: None,
             next_id: 1,
         };
         state.refresh_next_id();
@@ -150,6 +154,8 @@ impl RuntimeState {
                 let project = ProjectDocument {
                     id,
                     name: non_empty(name, "Unnamed project"),
+                    // 固定到当前上下文：项目创建后自含上下文，不依赖全局回退。
+                    context_id: self.active_context.clone(),
                     ..ProjectDocument::default()
                 };
                 self.document.projects.push(project);
@@ -2482,8 +2488,24 @@ mod tests {
         ProjectAction,
     };
 
-    fn state_with_factory() -> (RuntimeState, ProjectId, FactoryId) {
+    #[test]
+    fn new_project_pins_active_context() {
         let mut state = RuntimeState::default();
+        state.active_context = Some("ctx-x".to_string());
+        state
+            .dispatch(AppMessage::Application(ApplicationAction::NewProject {
+                name: "p".to_string(),
+            }))
+            .unwrap();
+        let project = &state.document.projects[0];
+        assert_eq!(
+            project.context_id.as_deref(),
+            Some("ctx-x"),
+            "新建项目应固定到当前上下文"
+        );
+    }
+
+    fn state_with_factory() -> (RuntimeState, ProjectId, FactoryId) {        let mut state = RuntimeState::default();
         state
             .dispatch(AppMessage::Application(ApplicationAction::NewProject {
                 name: "project".to_string(),

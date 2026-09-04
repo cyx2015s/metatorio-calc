@@ -169,6 +169,7 @@ impl Runtime {
         self.accessibilities.clear();
         if self.active_context.as_deref() == Some(context_id) {
             self.active_context = None;
+            self.state.active_context = None;
         }
     }
 
@@ -177,7 +178,8 @@ impl Runtime {
         if self.active_context != context_id {
             self.accessibilities.clear();
         }
-        self.active_context = context_id;
+        self.active_context = context_id.clone();
+        self.state.active_context = context_id;
     }
 
     pub fn active_context(&self) -> Option<&str> {
