@@ -324,12 +324,14 @@
     return entry?.module_slots ?? 0;
   }
 
-  /** 科技等级上限（catalogIndex；null = 无限，未知 = null）。 */
-  function techMaxLevel(tech: string): number | null {
+  /** 科技等级信息（catalogIndex）：base = 名字后缀最低等级，max = 有效上限
+   *  （null = 无限）。未知科技返回 null。 */
+  function techInfo(tech: string): { base: number; max: number | null } | null {
     const entry = runtime.catalogIndex?.entries.find(
       (candidate) => candidate.kind === "technology" && candidate.name === tech,
     );
-    return entry?.technology_max_level ?? null;
+    if (!entry) return null;
+    return { base: entry.technology_base_level, max: entry.technology_max_level };
   }
 
   // 机制列表：配方合并开关（同配方×机器合并成一张卡，品质变体并列）；
@@ -978,9 +980,9 @@
     if (entityKind && entityId) {
       const detail = await runtime.getDetail(entityKind, entityId);
       const categories = detail?.burner_fuel_categories ?? [];
-      const isBurner = detail?.machine_energy_source === "burner";
-      // burner 机器：只允许物品燃料（有热值），且（无类别限制 或 类别匹配）。
-      if (isBurner || categories.length > 0) {
+      const energySource = detail?.machine_energy_source;
+      if (energySource === "burner" || categories.length > 0) {
+        // burner 机器：只允许物品燃料（有热值），且（无类别限制 或 类别匹配）。
         allowedNames = (runtime.catalogIndex?.entries ?? [])
           .filter(
             (candidate) =>
@@ -991,6 +993,17 @@
           )
           .map((candidate) => candidate.name);
         initialTab = "item";
+      } else if (energySource === "fluid") {
+        // 流体能量源（如某些锅炉/发电机）：只允许有热值的流体燃料。
+        allowedNames = (runtime.catalogIndex?.entries ?? [])
+          .filter(
+            (candidate) =>
+              candidate.kind === "fluid" &&
+              candidate.fuel_value_j != null &&
+              candidate.fuel_value_j > 0,
+          )
+          .map((candidate) => candidate.name);
+        initialTab = "fluid";
       }
     }
     flowSelector = {
@@ -1758,15 +1771,19 @@
                       class="prod-input"
                       type="number"
                       step="1"
-                      min="0"
+                      min={techInfo(entry.tech)?.base ?? 0}
                       value={String(entry.level)}
                       onchange={(event) => {
                         const raw = (event.currentTarget as HTMLInputElement).value;
                         let value = Number(raw);
-                        // 钳制到科技实际上限（有限上限；无限无上限）。
-                        const max = techMaxLevel(entry.tech);
+                        // 钳制到科技实际范围 [base, max]（无限无上限）：
+                        // 低于最低等级或无上限时按 base/自身取值。
+                        const info = techInfo(entry.tech);
+                        const base = info?.base ?? 0;
+                        const max = info?.max ?? null;
                         if (max != null) value = Math.min(value, max);
-                        if (Number.isInteger(value) && value >= 0) {
+                        value = Math.max(value, base);
+                        if (Number.isInteger(value)) {
                           runtime.setInfiniteTechLevel(entry.tech, value).catch(() => {});
                         }
                       }}
@@ -1789,7 +1806,11 @@
                   openSelector(
                     "technology",
                     "选择无限科技",
-                    (name) => runtime.setInfiniteTechLevel(name, 1),
+                    (name) => {
+                      // 默认从最低等级再研究一次（base + 1），有限上限会自动钳制。
+                      const info = techInfo(name);
+                      runtime.setInfiniteTechLevel(name, (info?.base ?? 0) + 1);
+                    },
                     [],
                     [],
                     undefined,

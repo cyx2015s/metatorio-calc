@@ -648,6 +648,9 @@ export interface IndexEntry {
   /** 科技等级上限：`(number)` = 有限上限，`null` = 无限科技。
    *  仅 technology 条目填充；其余为 null。前端据此筛选"可多次研究"的科技。 */
   technology_max_level: number | null;
+  /** 科技最低等级（名字 `-<number>` 后缀；无后缀为 0）。仅 technology 条目填充。
+   *  max_level 与 base 共同决定该科技是否可配置（max > base 或无限）。 */
+  technology_base_level: number;
 }
 
 export interface CatalogIndex {

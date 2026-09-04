@@ -173,10 +173,12 @@
       if (allowedNames && allowedNames.length > 0) {
         if (!allowedNames.includes(entry.name)) return false;
       }
-      // 无限科技选择器：只保留可多次研究的科技（无限 或 上限 >= 2）。
+      // 无限科技选择器：只保留可多次研究的科技——无限（max=null），
+      // 或 max_level > 最低等级（有实际多级研究空间）。
       if (multiLevelTechOnly && entry.kind === "technology") {
         const max = entry.technology_max_level;
-        if (max != null && max < 2) return false;
+        const base = entry.technology_base_level;
+        if (max != null && max <= base) return false;
       }
       if (respectAccessibility && accessibleKeys != null) {
         const mapped = accessibleKindFor(entry.kind);

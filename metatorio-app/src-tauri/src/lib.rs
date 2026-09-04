@@ -139,6 +139,9 @@ pub struct IndexEntry {
     /// 科技等级上限：`U32(n)` → `Some(n)`，`Infinite` → `None`（无限）。
     /// 仅 technology 条目填充；其余为 None。前端据此筛选"可多次研究"的科技。
     pub technology_max_level: Option<u32>,
+    /// 科技最低等级（名字 `-<number>` 后缀；无后缀为 0）。仅 technology 条目填充。
+    /// max_level 与 base 共同决定该科技是否可配置（max > base 或无限）。
+    pub technology_base_level: u32,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1422,16 +1425,23 @@ fn suggest_for_flow(store: &PrototypeStore, flow: DualVar) -> Vec<Suggestion> {
 }
 
 
+/// 科技的最低等级：名字以 `-<number>` 结尾时取该数字（Factorio 规则），
+/// 否则为 0（非升级档科技）。
+fn technology_base_level(name: &str) -> u32 {
+    name.rsplit_once('-')
+        .and_then(|(_, suffix)| suffix.parse::<u32>().ok())
+        .unwrap_or(0)
+}
+
 /// 科技等级上限 → 前端 `Option<u32>`。
-/// - `Some(n)`：有限上限 n（可研究到该等级）。
 /// - `None`：无限科技（无上限）。
-/// 未显式声明的 max_level（普通科技/升级档默认同等级）视为 `Some(0)`，即
-/// 单次研究，前端据此隐藏（不作为无限科技）。
-fn technology_max_level_value(tech: &TechnologyComponent) -> Option<u32> {
+/// - `Some(n)`：有效上限 n。
+/// max_level 未显式声明时默认等于该科技的最低等级（自身），即单次研究。
+fn technology_max_level_value(tech: &TechnologyComponent, name: &str) -> Option<u32> {
     match tech.max_level {
         Some(TechnologyMaxLevel::Infinite) => None,
         Some(TechnologyMaxLevel::U32(level)) => Some(level),
-        None => Some(0),
+        None => Some(technology_base_level(name)),
     }
 }
 
@@ -1498,9 +1508,14 @@ fn catalog_index_from_store(store: &PrototypeStore, locale: &HashMap<String, Str
                         store
                             .get(PrototypeGroup::Technology, name)
                             .and_then(|record| record.component::<TechnologyComponent>())
-                            .and_then(technology_max_level_value)
+                            .and_then(|tech| technology_max_level_value(tech, name))
                     } else {
                         None
+                    };
+                    let technology_base_level = if kind == "technology" {
+                        technology_base_level(name)
+                    } else {
+                        0
                     };
                     out.push(IndexEntry {
                         kind: kind.to_string(),
@@ -1514,6 +1529,7 @@ fn catalog_index_from_store(store: &PrototypeStore, locale: &HashMap<String, Str
                         fuel_category,
                         fuel_value_j,
                         technology_max_level,
+                        technology_base_level,
                     });
                 }
             }
@@ -1579,6 +1595,7 @@ fn catalog_index_from_store(store: &PrototypeStore, locale: &HashMap<String, Str
                         fuel_category: String::new(),
                         fuel_value_j: None,
                         technology_max_level: None,
+                        technology_base_level: 0,
                     });
                 }
             }
@@ -1612,6 +1629,7 @@ fn catalog_index_from_store(store: &PrototypeStore, locale: &HashMap<String, Str
                         fuel_category: String::new(),
                         fuel_value_j: None,
                         technology_max_level: None,
+                        technology_base_level: 0,
                     });
                 }
             }
@@ -1645,6 +1663,7 @@ fn catalog_index_from_store(store: &PrototypeStore, locale: &HashMap<String, Str
                         fuel_category: String::new(),
                         fuel_value_j: None,
                         technology_max_level: None,
+                        technology_base_level: 0,
                     });
                 }
             }
@@ -1665,6 +1684,7 @@ fn catalog_index_from_store(store: &PrototypeStore, locale: &HashMap<String, Str
             fuel_category: String::new(),
             fuel_value_j: None,
             technology_max_level: None,
+            technology_base_level: 0,
         });
     }
 
