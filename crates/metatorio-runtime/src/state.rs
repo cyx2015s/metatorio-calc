@@ -3,7 +3,7 @@ use std::{
     fmt,
 };
 
-use metatorio_core::{BeaconConfig, DualVar, Fuel, Mechanic, ModuleConfig};
+use metatorio_core::{BeaconConfig, Fuel, Mechanic, ModuleConfig};
 
 /// 设置流体燃料的温度。仅 `Fuel::Fluid` 有意义（物品燃料无温度，忽略）。
 fn set_fuel_temperature(fuel: &mut Option<Fuel>, temperature: Option<i32>) -> bool {
@@ -34,9 +34,9 @@ use crate::message::{
     FluidFuelMechanicAction, FluidHeatMechanicAction, GeneratorMechanicAction,
     ItemFuelMechanicAction, ItemLaunchMechanicAction, MechanicAction, MechanicListAction,
     MiningMechanicAction, ModuleAction, PlantMechanicAction, PlanningAction, ProjectAction,
-    ReactorMechanicAction, RecipeMechanicAction, RuntimeCommand, SelectorKind, SelectorTarget,
-    SelectorValue, SolveAction, SolarMechanicAction, SpoilMechanicAction, SuggestionAction,
-    SuggestionCandidate, TargetAction, TargetExpressionAction, UiAction,
+    ReactorMechanicAction, RecipeMechanicAction, RuntimeCommand, SolveAction, SolarMechanicAction,
+    SpoilMechanicAction, SuggestionAction, SuggestionCandidate, TargetAction, TargetExpressionAction,
+    UiAction,
 };
 
 /// Mutable application state that is independent from any GUI framework.
@@ -960,178 +960,7 @@ impl RuntimeState {
         }
     }
 
-    fn apply_selector_commit(
-        &mut self,
-        target: SelectorTarget,
-        value: SelectorValue,
-    ) -> Result<Outcome, RuntimeError> {
-        let project = self
-            .ui
-            .selected_project
-            .ok_or(RuntimeError::InvalidOperation("no selected project"))?;
-        match target {
-            SelectorTarget::Target { factory, target } => {
-                let flow = selector_value_to_flow(value)?;
-                self.apply_factory(
-                    project,
-                    factory,
-                    FactoryAction::Target(TargetAction::SetFlow { target, flow }),
-                )
-            }
-            SelectorTarget::TargetTerm {
-                factory,
-                expression,
-                term,
-            } => {
-                let flow = selector_value_to_flow(value)?;
-                self.apply_factory(
-                    project,
-                    factory,
-                    FactoryAction::TargetExpression(TargetExpressionAction::SetTermFlow {
-                        expression,
-                        term,
-                        flow,
-                    }),
-                )
-            }
-            SelectorTarget::ExternalInput { factory, input } => {
-                let flow = selector_value_to_flow(value)?;
-                self.apply_factory(
-                    project,
-                    factory,
-                    FactoryAction::ExternalInput(ExternalInputAction::SetFlow { input, flow }),
-                )
-            }
-            SelectorTarget::Mechanic {
-                factory,
-                mechanic,
-                kind,
-            } => {
-                let mechanic_kind = self.mechanic_kind(project, factory, mechanic)?;
-                let action = selector_to_mechanic_action(mechanic_kind, kind, value)?;
-                self.apply_factory(
-                    project,
-                    factory,
-                    FactoryAction::Mechanic { mechanic, action },
-                )
-            }
-            SelectorTarget::ModuleSlot {
-                factory,
-                mechanic,
-                slot,
-            } => {
-                let module = match value {
-                    SelectorValue::IdWithQuality(module) => Some(module),
-                    _ => {
-                        return Err(RuntimeError::InvalidOperation(
-                            "module selector requires an item with quality",
-                        ));
-                    }
-                };
-                let mechanic_kind = self.mechanic_kind(project, factory, mechanic)?;
-                let action = module_action_for_kind(
-                    mechanic_kind,
-                    ModuleAction::SetModuleSlot { slot, module },
-                )?;
-                self.apply_factory(
-                    project,
-                    factory,
-                    FactoryAction::Mechanic { mechanic, action },
-                )
-            }
-            SelectorTarget::Beacon {
-                factory,
-                mechanic,
-                beacon,
-            } => {
-                let value = match value {
-                    SelectorValue::IdWithQuality(value) => value,
-                    _ => {
-                        return Err(RuntimeError::InvalidOperation(
-                            "beacon selector requires an entity",
-                        ));
-                    }
-                };
-                let mechanic_kind = self.mechanic_kind(project, factory, mechanic)?;
-                let action =
-                    module_action_for_kind(mechanic_kind, ModuleAction::SetBeacon { beacon, value })?;
-                self.apply_factory(
-                    project,
-                    factory,
-                    FactoryAction::Mechanic { mechanic, action },
-                )
-            }
-            SelectorTarget::BeaconModule {
-                factory,
-                mechanic,
-                beacon,
-                module,
-            } => {
-                let value = match value {
-                    SelectorValue::IdWithQuality(value) => value,
-                    _ => {
-                        return Err(RuntimeError::InvalidOperation(
-                            "beacon module requires an item",
-                        ));
-                    }
-                };
-                let mechanic_kind = self.mechanic_kind(project, factory, mechanic)?;
-                let action = module_action_for_kind(
-                    mechanic_kind,
-                    ModuleAction::SetBeaconModule {
-                        beacon,
-                        module,
-                        value,
-                    },
-                )?;
-                self.apply_factory(
-                    project,
-                    factory,
-                    FactoryAction::Mechanic { mechanic, action },
-                )
-            }
-            SelectorTarget::EnumeratedModule { .. } => {
-                let module = match value {
-                    SelectorValue::IdWithQuality(module) => module,
-                    _ => {
-                        return Err(RuntimeError::InvalidOperation(
-                            "enumerated module requires an item",
-                        ));
-                    }
-                };
-                // Planning preferences are project-global.
-                self.apply_project(
-                    project,
-                    ProjectAction::Planning(PlanningAction::AddEnumeratedModule { module }),
-                )
-            }
-            SelectorTarget::EnumeratedBeacon { .. }
-            | SelectorTarget::ProjectPlanet
-            | SelectorTarget::ProjectSurface
-            | SelectorTarget::ProjectQuality
-            | SelectorTarget::Technology => Err(RuntimeError::InvalidOperation(
-                "this selector must be committed through a field-specific message",
-            )),
-        }
-    }
 
-    fn mechanic_kind(
-        &self,
-        project: ProjectId,
-        factory: FactoryId,
-        mechanic: MechanicId,
-    ) -> Result<MechanicKind, RuntimeError> {
-        self.factory(project, factory)?
-            .mechanics
-            .iter()
-            .find(|entry| entry.id == mechanic)
-            .map(MechanicEntry::kind)
-            .ok_or(RuntimeError::MechanicNotFound {
-                project,
-                factory,
-                mechanic,
-            })
-    }
 
     fn new_factory(
         &mut self,
@@ -1551,74 +1380,8 @@ fn apply_factory_context(
 /// mechanic's kind is known up front, so the produced action always matches
 /// the mechanic — a mismatched (selector kind, mechanic kind) pair is a
 /// protocol error instead of a runtime dispatch decision.
-fn selector_to_mechanic_action(
-    mechanic_kind: MechanicKind,
-    selector: SelectorKind,
-    value: SelectorValue,
-) -> Result<MechanicAction, RuntimeError> {
-    use MechanicKind as K;
-    use SelectorKind as S;
-    let idwq = |value: SelectorValue| match value {
-        SelectorValue::IdWithQuality(id) => Ok(id),
-        _ => Err(RuntimeError::InvalidOperation("需要带品质的物品")),
-    };
-    let name = |value: SelectorValue| match value {
-        SelectorValue::Name(name) => Ok(name),
-        _ => Err(RuntimeError::InvalidOperation("需要名称")),
-    };
-    match (mechanic_kind, selector) {
-        (K::Recipe, S::Recipe) => idwq(value)
-            .map(|recipe| MechanicAction::Recipe(RecipeMechanicAction::SetRecipe { recipe })),
-        (K::Recipe | K::Mining, S::Entity) => {
-            idwq(value).map(|machine| match mechanic_kind {
-                K::Recipe => {
-                    MechanicAction::Recipe(RecipeMechanicAction::SetMachine { machine })
-                }
-                _ => MechanicAction::Mining(MiningMechanicAction::SetMachine { machine }),
-            })
-        }
-        (K::Mining, S::Item) => name(value).map(|resource| {
-            MechanicAction::Mining(MiningMechanicAction::SetResource { resource })
-        }),
-        (K::Spoil, S::Item) => idwq(value)
-            .map(|item| MechanicAction::Spoil(SpoilMechanicAction::SetItem { item })),
-        (K::Plant, S::Item) => idwq(value)
-            .map(|seed| MechanicAction::Plant(PlantMechanicAction::SetSeed { seed })),
-        (K::ItemFuel, S::Item) => idwq(value)
-            .map(|item| MechanicAction::ItemFuel(ItemFuelMechanicAction::SetItem { item })),
-        (K::ItemLaunch, S::Item) => idwq(value)
-            .map(|item| MechanicAction::ItemLaunch(ItemLaunchMechanicAction::SetItem { item })),
-        (K::Generator, S::Entity) => idwq(value).map(|generator| {
-            MechanicAction::Generator(GeneratorMechanicAction::SetGenerator { generator })
-        }),
-        (K::Generator | K::Boiler, S::Fluid) => {
-            name(value).map(|fluid| match mechanic_kind {
-                K::Generator => {
-                    MechanicAction::Generator(GeneratorMechanicAction::SetFluid { fluid })
-                }
-                _ => MechanicAction::Boiler(BoilerMechanicAction::SetFluid { fluid }),
-            })
-        }
-        (K::Boiler, S::Entity) => idwq(value)
-            .map(|boiler| MechanicAction::Boiler(BoilerMechanicAction::SetBoiler { boiler })),
-        (K::Reactor, S::Entity) => idwq(value).map(|reactor| {
-            MechanicAction::Reactor(ReactorMechanicAction::SetReactor { reactor })
-        }),
-        _ => Err(RuntimeError::InvalidOperation("选择器类型与该机制不匹配")),
-    }
-}
 
 /// Only recipe and mining mechanics carry a module configuration.
-fn module_action_for_kind(
-    mechanic_kind: MechanicKind,
-    action: ModuleAction,
-) -> Result<MechanicAction, RuntimeError> {
-    match mechanic_kind {
-        MechanicKind::Recipe => Ok(MechanicAction::Recipe(RecipeMechanicAction::Module(action))),
-        MechanicKind::Mining => Ok(MechanicAction::Mining(MiningMechanicAction::Module(action))),
-        _ => Err(RuntimeError::InvalidOperation("该机制不支持插件配置")),
-    }
-}
 
 fn apply_mechanic_action(
     entry: &mut MechanicEntry,
@@ -2129,15 +1892,6 @@ fn apply_planning_action(
     }
 }
 
-fn selector_value_to_flow(value: SelectorValue) -> Result<DualVar, RuntimeError> {
-    match value {
-        SelectorValue::IdWithQuality(value) => Ok(DualVar::Item(value)),
-        SelectorValue::Name(value) if !value.is_empty() => Ok(DualVar::Custom { name: value }),
-        SelectorValue::Name(_) => Err(RuntimeError::InvalidValue(
-            "selector name cannot be empty".to_string(),
-        )),
-    }
-}
 
 fn ensure_unique_target(factory: &FactoryDocument, id: TargetId) -> Result<(), RuntimeError> {
     if factory.targets.iter().any(|target| target.id == id) {
@@ -2366,7 +2120,7 @@ fn validate_positive(name: &str, value: f64) -> Result<(), RuntimeError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use metatorio_core::IdWithQuality;
+    use metatorio_core::{DualVar, IdWithQuality};
     use crate::message::{
         AppMessage, FactoryAction, FactoryTemplate, MechanicAction, MechanicListAction,
         ProjectAction,
