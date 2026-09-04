@@ -118,6 +118,8 @@
     onPickKind?: (kind: CatalogKind, name: string, quality: string) => void;
     /** 是否按项目可达性过滤；需要列出全部可选对象的调用方置 false（如里程碑）。 */
     respectAccessibility?: boolean;
+    /** 仅显示可多次研究的科技（无限科技选择器用）。 */
+    multiLevelTechOnly?: boolean;
   } | null>(null);
 
   // 流选择器（目标/外部输入支持任意 DualVar 流；编辑时预选当前流）
@@ -155,6 +157,7 @@
     initialQuality?: string,
     onPickKind?: (kind: CatalogKind, name: string, quality: string) => void,
     respectAccessibility = true,
+    multiLevelTechOnly = false,
   ) {
     selector = {
       kind,
@@ -167,6 +170,7 @@
       onSelect,
       onPickKind,
       respectAccessibility,
+      multiLevelTechOnly,
     };
   }
 
@@ -318,6 +322,14 @@
       (candidate) => candidate.kind === "machine" && candidate.name === machineId,
     );
     return entry?.module_slots ?? 0;
+  }
+
+  /** 科技等级上限（catalogIndex；null = 无限，未知 = null）。 */
+  function techMaxLevel(tech: string): number | null {
+    const entry = runtime.catalogIndex?.entries.find(
+      (candidate) => candidate.kind === "technology" && candidate.name === tech,
+    );
+    return entry?.technology_max_level ?? null;
   }
 
   // 机制列表：配方合并开关（同配方×机器合并成一张卡，品质变体并列）；
@@ -937,30 +949,49 @@
   }
 
   /** 指定机制燃料：流选择器（物品/流体页签）→ SetFuel。
-   *  物品页签只显示"燃料类别匹配机器 + 有热值"的燃料。 */
+   *  burner 机器只吃物品燃料：按机器的燃料类别（burner_fuel_categories）
+   *  过滤物品的 fuel_category（无类别限制 → 全部燃料）；非 burner（流体/
+   *  热能量源）不做物品限定，流体页签可选。锅炉/反应堆/采矿机与制造机同规则。 */
   async function pickFuel(mechanic: MechanicId) {
     const entry = mechanics.find((candidate) => candidate.id === mechanic);
-    const machineId = entry?.mechanic.machine?.id;
+    const m = entry?.mechanic;
+    const type = m?.type;
+    // 依机制类型确定要查的实体详情 kind + 设备 id（各组件字段不同）。
+    let entityKind: CatalogKind | null = null;
+    let entityId: string | null = null;
+    if (type === "recipe") {
+      entityKind = "machine";
+      entityId = m?.machine?.id ?? null;
+    } else if (type === "mining") {
+      entityKind = "mining-machine";
+      entityId = m?.machine?.id ?? null;
+    } else if (type === "boiler") {
+      entityKind = "boiler";
+      entityId = m?.boiler?.id ?? null;
+    } else if (type === "reactor") {
+      entityKind = "reactor";
+      entityId = m?.reactor?.id ?? null;
+    }
+
     let allowedNames: string[] | undefined;
     let initialTab: string | undefined;
-    if (machineId) {
-      const isMining = entry != null && "resource" in entry.mechanic;
-      const machineKind: import("$lib/runtime/types").CatalogKind = isMining
-        ? "mining-machine"
-        : "machine";
-      const detail = await runtime.getDetail(machineKind, machineId);
+    if (entityKind && entityId) {
+      const detail = await runtime.getDetail(entityKind, entityId);
       const categories = detail?.burner_fuel_categories ?? [];
-      // 只允许物品燃料：有热值（fuel_value_j>0），且（机器无类别限制 或 类别匹配）。
-      allowedNames = (runtime.catalogIndex?.entries ?? [])
-        .filter(
-          (entry) =>
-            entry.kind === "item" &&
-            entry.fuel_value_j != null &&
-            entry.fuel_value_j > 0 &&
-            (categories.length === 0 || categories.includes(entry.fuel_category)),
-        )
-        .map((entry) => entry.name);
-      initialTab = "item";
+      const isBurner = detail?.machine_energy_source === "burner";
+      // burner 机器：只允许物品燃料（有热值），且（无类别限制 或 类别匹配）。
+      if (isBurner || categories.length > 0) {
+        allowedNames = (runtime.catalogIndex?.entries ?? [])
+          .filter(
+            (candidate) =>
+              candidate.kind === "item" &&
+              candidate.fuel_value_j != null &&
+              candidate.fuel_value_j > 0 &&
+              (categories.length === 0 || categories.includes(candidate.fuel_category)),
+          )
+          .map((candidate) => candidate.name);
+        initialTab = "item";
+      }
     }
     flowSelector = {
       title: "选择燃料",
@@ -1730,7 +1761,11 @@
                       min="0"
                       value={String(entry.level)}
                       onchange={(event) => {
-                        const value = Number((event.currentTarget as HTMLInputElement).value);
+                        const raw = (event.currentTarget as HTMLInputElement).value;
+                        let value = Number(raw);
+                        // 钳制到科技实际上限（有限上限；无限无上限）。
+                        const max = techMaxLevel(entry.tech);
+                        if (max != null) value = Math.min(value, max);
                         if (Number.isInteger(value) && value >= 0) {
                           runtime.setInfiniteTechLevel(entry.tech, value).catch(() => {});
                         }
@@ -1751,8 +1786,18 @@
               <button
                 class="btn"
                 onclick={() =>
-                  openSelector("technology", "选择无限科技", (name) =>
-                    runtime.setInfiniteTechLevel(name, 1),
+                  openSelector(
+                    "technology",
+                    "选择无限科技",
+                    (name) => runtime.setInfiniteTechLevel(name, 1),
+                    [],
+                    [],
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    true, // 尊重可达性
+                    true, // 只显示可多次研究的科技
                   )}
               >+ 添加无限科技</button>
             </div>
@@ -1971,7 +2016,12 @@
         {:else}
           <div class="rows compact">
             {#each runtime.contexts as context (context.id)}
-              <div class="ctx-row" class:active={project?.context_id === context.id}>
+              <div
+                class="ctx-row"
+                class:active={project
+                  ? project?.context_id === context.id
+                  : runtime.activeContext?.id === context.id}
+              >
                 <div class="ctx-main">
                   <div class="ctx-name">
                     {context.name}
@@ -1983,11 +2033,21 @@
                 <div class="ctx-actions">
                   <button
                     class="btn ghost"
-                    title={project?.context_id === context.id ? "当前项目已用此上下文" : "把选中项目改用此上下文"}
-                    disabled={project?.context_id === context.id || !project || runtime.contextBusy}
+                    title={project
+                      ? (project?.context_id === context.id
+                          ? "当前项目已用此上下文"
+                          : "把选中项目改用此上下文")
+                      : (runtime.activeContext?.id === context.id
+                          ? "当前为新项目默认上下文"
+                          : "设为新项目默认上下文")}
+                    disabled={project
+                      ? project?.context_id === context.id || runtime.contextBusy
+                      : runtime.activeContext?.id === context.id || runtime.contextBusy}
                     onclick={() => {
                       if (project) {
                         runtime.setProjectContext(project.id, context.id).catch(() => {});
+                      } else {
+                        runtime.setActiveContext(context.id).catch(() => {});
                       }
                     }}
                   >应用</button>
@@ -2034,6 +2094,7 @@
     onSelect={selector.onSelect}
     onPickKind={selector.onPickKind}
     respectAccessibility={selector.respectAccessibility}
+    multiLevelTechOnly={selector.multiLevelTechOnly}
     onClose={() => (selector = null)}
   />
 {/if}

@@ -107,6 +107,9 @@ class RuntimeStore {
   private icons = new Map<string, Promise<string | null>>();
   /** 上次刷新时的激活上下文 id（用于判断索引/图标缓存是否失效）。 */
   private activeContextId = "";
+  /** 上次同步过的"项目有效上下文"id：项目上下文切换后用它驱动目录/上下文列表
+   *  刷新，使后端 store 载入后"未载入"徽标消失。 */
+  private syncedContextId = "";
   /** 悬停详情缓存：`kind/name` → 详情。 */
   private detailCache = new Map<string, PrototypeDetail>();
   /** 机制展开流缓存：`contextId:project:factory:mechanicId` → {机制内容hash, 流}。
@@ -171,6 +174,9 @@ class RuntimeStore {
     }
     this.ready = true;
     this.refreshOrderedMilestones().catch(() => {});
+    // 首屏目录/上下文刷新后同步一次：目录索引会触发后端载入 store，
+    // 再刷新上下文列表以清除「未载入」徽标（初始化时序里列表先于 store 载入）。
+    await this.syncEffectiveContext();
   }
 
   async refresh(): Promise<void> {
@@ -212,6 +218,9 @@ class RuntimeStore {
       this.refreshProductivity().catch(() => {});
     }
     this.refreshImplicitSources().catch(() => {});
+    // 项目上下文切换（设置上下文/换绑等）后同步目录与上下文列表，
+    // 使后端 store 载入后「未载入」徽标消失。幂等：上下文未变时不处理。
+    this.syncEffectiveContext().catch(() => {});
   }
 
   /** 提取 AppMessage 内层动作键（scope=project/factory 时在 action.action，
@@ -287,6 +296,25 @@ class RuntimeStore {
     // 激活上下文就绪后立即加载目录索引（含本地化显示名），
     // 使产能/机制等面板的译名尽早生效。
     this.loadCatalogIndex().catch(() => {});
+  }
+
+  /**
+   * 项目上下文变化后同步前端状态：重载目录索引（会触发后端载入该上下文的
+   * store）并刷新上下文列表，使「未载入」徽标在 store 实际载入后消失。
+   * 项目上下文未变时无操作（幂等；可按当前项目切换/新建触发）。
+   */
+  private async syncEffectiveContext(): Promise<void> {
+    const ctxId = this.effectiveContextId;
+    if (ctxId === this.syncedContextId) return;
+    this.syncedContextId = ctxId;
+    try {
+      // 先载入 store（catalog_index 后端会 ensure_context_loaded），
+      // 再刷新列表：列表里的 loaded 才会反映真实载入状态。
+      if (ctxId) await this.loadCatalogIndex();
+      await this.refreshContexts();
+    } catch {
+      /* 刷新失败不阻塞界面 */
+    }
   }
   async loadDemoData(): Promise<void> {
     await this.runContext(async () => {
@@ -373,6 +401,7 @@ class RuntimeStore {
         this.refreshOrderedMilestones().catch(() => {});
         this.refreshProductivity().catch(() => {});
         this.refreshImplicitSources().catch(() => {});
+        this.syncEffectiveContext().catch(() => {});
         return true;
       }
       return false;
@@ -560,6 +589,7 @@ class RuntimeStore {
     this.refreshOrderedMilestones().catch(() => {});
     this.refreshProductivity().catch(() => {});
     this.refreshImplicitSources().catch(() => {});
+    this.syncEffectiveContext().catch(() => {});
   }
 
   /** 关闭项目：decision = "discard"（不保存关闭）| "save"（先保存再关闭）。 */
@@ -640,6 +670,8 @@ class RuntimeStore {
       this.refreshOrderedMilestones().catch(() => {});
       this.refreshProductivity().catch(() => {});
       this.refreshImplicitSources().catch(() => {});
+      // 切换项目可能绑定不同上下文：同步目录/上下文列表（清「未载入」）。
+      this.syncEffectiveContext().catch(() => {});
     }
   }
 

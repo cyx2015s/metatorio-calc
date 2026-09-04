@@ -645,6 +645,9 @@ export interface IndexEntry {
   fuel_category: string;
   /** 物品/流体燃料热值（焦耳；非燃料为 null）。 */
   fuel_value_j: number | null;
+  /** 科技等级上限：`(number)` = 有限上限，`null` = 无限科技。
+   *  仅 technology 条目填充；其余为 null。前端据此筛选"可多次研究"的科技。 */
+  technology_max_level: number | null;
 }
 
 export interface CatalogIndex {

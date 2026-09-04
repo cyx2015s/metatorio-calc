@@ -24,9 +24,9 @@ use metatorio_data::{
     BeaconComponent, BoilerComponent, BurnerGeneratorComponent, CraftingMachineComponent,
     EntityComponent, FluidComponent, GeneratorComponent, ItemComponent, MiningDrillComponent,
     ModuleComponent, PrototypeBaseComponent, QualityComponent, ReactorComponent, RecipeComponent,
-    ResourceEntityComponent,
+    ResourceEntityComponent, TechnologyComponent,
 };
-use metatorio_data::types::{Ingredient, Product};
+use metatorio_data::types::{Ingredient, Product, TechnologyMaxLevel};
 use metatorio_runtime::{
     auto_plan,
     document::{AppDocument},
@@ -136,6 +136,9 @@ pub struct IndexEntry {
     pub fuel_category: String,
     /// 物品/流体燃料热值（焦耳；非燃料为 null）；供前端燃料选择筛选。
     pub fuel_value_j: Option<f64>,
+    /// 科技等级上限：`U32(n)` → `Some(n)`，`Infinite` → `None`（无限）。
+    /// 仅 technology 条目填充；其余为 None。前端据此筛选"可多次研究"的科技。
+    pub technology_max_level: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1419,6 +1422,39 @@ fn suggest_for_flow(store: &PrototypeStore, flow: DualVar) -> Vec<Suggestion> {
 }
 
 
+/// 科技等级上限 → 前端 `Option<u32>`。
+/// - `Some(n)`：有限上限 n（可研究到该等级）。
+/// - `None`：无限科技（无上限）。
+/// 未显式声明的 max_level（普通科技/升级档默认同等级）视为 `Some(0)`，即
+/// 单次研究，前端据此隐藏（不作为无限科技）。
+fn technology_max_level_value(tech: &TechnologyComponent) -> Option<u32> {
+    match tech.max_level {
+        Some(TechnologyMaxLevel::Infinite) => None,
+        Some(TechnologyMaxLevel::U32(level)) => Some(level),
+        None => Some(0),
+    }
+}
+
+/// 能量源类型字符串（electric/burner/fluid/heat/void）；前端据此决定是否显示燃料。
+fn energy_source_kind(source: &metatorio_data::types::EnergySource) -> &'static str {
+    match source {
+        metatorio_data::types::EnergySource::Electric(_) => "electric",
+        metatorio_data::types::EnergySource::Burner(_) => "burner",
+        metatorio_data::types::EnergySource::Fluid(_) => "fluid",
+        metatorio_data::types::EnergySource::Heat(_) => "heat",
+        metatorio_data::types::EnergySource::Void => "void",
+    }
+}
+
+/// Burner 能量源的燃料类别；非 burner 能量源返回空。供前端燃料选择筛选
+/// 物品的 `fuel_category`（配合 getDetail 返回）。
+fn burner_fuel_categories_of(source: &metatorio_data::types::EnergySource) -> Vec<String> {
+    match source {
+        metatorio_data::types::EnergySource::Burner(burner) => burner.fuel_categories.clone(),
+        _ => Vec::new(),
+    }
+}
+
 fn catalog_index_from_store(store: &PrototypeStore, locale: &HashMap<String, String>) -> Vec<IndexEntry> {
     let mut out: Vec<IndexEntry> = Vec::new();
     // 有 order_info 的组：大组 → 小组 → 条目（recipe/entity fallback 已在
@@ -1458,6 +1494,14 @@ fn catalog_index_from_store(store: &PrototypeStore, locale: &HashMap<String, Str
                     } else {
                         (String::new(), None)
                     };
+                    let technology_max_level = if kind == "technology" {
+                        store
+                            .get(PrototypeGroup::Technology, name)
+                            .and_then(|record| record.component::<TechnologyComponent>())
+                            .and_then(technology_max_level_value)
+                    } else {
+                        None
+                    };
                     out.push(IndexEntry {
                         kind: kind.to_string(),
                         name: name.clone(),
@@ -1469,6 +1513,7 @@ fn catalog_index_from_store(store: &PrototypeStore, locale: &HashMap<String, Str
                         categories,
                         fuel_category,
                         fuel_value_j,
+                        technology_max_level,
                     });
                 }
             }
@@ -1533,6 +1578,7 @@ fn catalog_index_from_store(store: &PrototypeStore, locale: &HashMap<String, Str
                         categories,
                         fuel_category: String::new(),
                         fuel_value_j: None,
+                        technology_max_level: None,
                     });
                 }
             }
@@ -1565,6 +1611,7 @@ fn catalog_index_from_store(store: &PrototypeStore, locale: &HashMap<String, Str
                         },
                         fuel_category: String::new(),
                         fuel_value_j: None,
+                        technology_max_level: None,
                     });
                 }
             }
@@ -1597,6 +1644,7 @@ fn catalog_index_from_store(store: &PrototypeStore, locale: &HashMap<String, Str
                         categories,
                         fuel_category: String::new(),
                         fuel_value_j: None,
+                        technology_max_level: None,
                     });
                 }
             }
@@ -1616,6 +1664,7 @@ fn catalog_index_from_store(store: &PrototypeStore, locale: &HashMap<String, Str
             categories: Vec::new(),
             fuel_category: String::new(),
             fuel_value_j: None,
+            technology_max_level: None,
         });
     }
 
@@ -1701,22 +1750,8 @@ fn prototype_detail(
             .unwrap_or_default();
         detail.energy_usage_j = Some(machine.energy_usage.amount);
         detail.categories = machine.crafting_categories.clone();
-        detail.machine_energy_source = Some(
-            match &machine.energy_source {
-                metatorio_data::types::EnergySource::Electric(_) => "electric",
-                metatorio_data::types::EnergySource::Burner(_) => "burner",
-                metatorio_data::types::EnergySource::Fluid(_) => "fluid",
-                metatorio_data::types::EnergySource::Heat(_) => "heat",
-                metatorio_data::types::EnergySource::Void => "void",
-            }
-            .to_string(),
-        );
-        detail.burner_fuel_categories = match &machine.energy_source {
-            metatorio_data::types::EnergySource::Burner(burner) => {
-                burner.fuel_categories.clone()
-            }
-            _ => Vec::new(),
-        };
+        detail.machine_energy_source = Some(energy_source_kind(&machine.energy_source).to_string());
+        detail.burner_fuel_categories = burner_fuel_categories_of(&machine.energy_source);
     }
     if let Some(drill) = record.component::<MiningDrillComponent>() {
         detail.categories = drill.resource_categories.clone();
@@ -1725,6 +1760,8 @@ fn prototype_detail(
             .allowed_module_categories
             .clone()
             .unwrap_or_default();
+        detail.machine_energy_source = Some(energy_source_kind(&drill.energy_source).to_string());
+        detail.burner_fuel_categories = burner_fuel_categories_of(&drill.energy_source);
     }
     if let Some(beacon) = record.component::<BeaconComponent>() {
         detail.beacon_module_slots = Some(beacon.module_slots);
@@ -1744,16 +1781,22 @@ fn prototype_detail(
     if let Some(burner_gen) = record.component::<BurnerGeneratorComponent>() {
         detail.max_power_output_j = Some(burner_gen.max_power_output.amount);
         detail.fuel_category = burner_gen.burner.fuel_categories.join(", ");
+        detail.machine_energy_source = Some("burner".to_string());
+        detail.burner_fuel_categories = burner_gen.burner.fuel_categories.clone();
     }
     if let Some(boiler) = record.component::<BoilerComponent>() {
         detail.energy_consumption_j = Some(boiler.energy_consumption.amount);
         detail.target_temperature = boiler.target_temperature;
         detail.fluid_filter = boiler.fluid_box.filter.clone();
+        detail.machine_energy_source = Some(energy_source_kind(&boiler.energy_source).to_string());
+        detail.burner_fuel_categories = burner_fuel_categories_of(&boiler.energy_source);
     }
     if let Some(reactor) = record.component::<ReactorComponent>() {
         detail.heat_output_j = Some(reactor.consumption.amount);
         detail.neighbour_bonus = Some(reactor.neighbour_bonus);
         detail.heating_radius = Some(reactor.heating_radius);
+        detail.machine_energy_source = Some(energy_source_kind(&reactor.energy_source).to_string());
+        detail.burner_fuel_categories = burner_fuel_categories_of(&reactor.energy_source);
     }
     if let Some(resource) = record.component::<ResourceEntityComponent>() {
         detail.categories = vec![effective_resource_category(resource)];

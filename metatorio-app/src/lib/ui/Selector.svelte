@@ -27,6 +27,7 @@
     categoryFilter,
     allowedNames,
     respectAccessibility = true,
+    multiLevelTechOnly = false,
     initialTab,
     initialName,
     initialQuality,
@@ -46,6 +47,9 @@
     /** 按项目可达性过滤（不可达条目隐藏）；项目"无视可达性"时自动跳过。
      *  需要完全不受可达性约束的调用方置 false。 */
     respectAccessibility?: boolean;
+    /** 仅显示"可多次研究"的科技（无限科技选择器用）：max_level 为
+     *  null（无限）或 >= 2；普通/单次研究科技隐藏。 */
+    multiLevelTechOnly?: boolean;
     /** 流模式初始页签（编辑目标/外部输入时预选当前流类型）。 */
     initialTab?: string;
     /** 目录模式初始选中（编辑时预选当前条目）。 */
@@ -168,6 +172,11 @@
     ).filter((entry) => {
       if (allowedNames && allowedNames.length > 0) {
         if (!allowedNames.includes(entry.name)) return false;
+      }
+      // 无限科技选择器：只保留可多次研究的科技（无限 或 上限 >= 2）。
+      if (multiLevelTechOnly && entry.kind === "technology") {
+        const max = entry.technology_max_level;
+        if (max != null && max < 2) return false;
       }
       if (respectAccessibility && accessibleKeys != null) {
         const mapped = accessibleKindFor(entry.kind);
