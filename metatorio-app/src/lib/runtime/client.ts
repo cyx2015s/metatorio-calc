@@ -113,11 +113,11 @@ export async function loadIcon(
   name: string,
   contextId: string,
 ): Promise<number[] | null> {
-  return call("icon", { ty: type, name, context_id: contextId });
+  return call("icon", { ty: type, name, contextId: contextId });
 }
 
 export async function catalogIndex(contextId: string): Promise<CatalogIndex> {
-  return call("catalog_index", { context_id: contextId });
+  return call("catalog_index", { contextId: contextId });
 }
 
 export async function prototypeDetail(
@@ -125,7 +125,7 @@ export async function prototypeDetail(
   name: string,
   contextId: string,
 ): Promise<PrototypeDetail | null> {
-  return call("prototype_detail", { context_id: contextId, kind, name });
+  return call("prototype_detail", { contextId: contextId, kind, name });
 }
 
 /** 建议系统：为一条流生成候选机制（配方/矿点/燃料/发电机）。 */
@@ -133,12 +133,12 @@ export async function suggest(
   flow: import("./types").DualVar,
   contextId: string,
 ): Promise<import("./types").Suggestion[]> {
-  return call("suggest", { context_id: contextId, flow });
+  return call("suggest", { contextId: contextId, flow });
 }
 
 /** 每插件类别中 tier 最高的插件（"使用最佳插件"）。 */
 export async function bestModules(contextId: string): Promise<import("./types").Suggestion[]> {
-  return call("best_modules", { context_id: contextId });
+  return call("best_modules", { contextId: contextId });
 }
 
 /** 星球隐式可用输入（严格供给下也免费；被外部输入覆盖的不返回）。 */
@@ -178,7 +178,7 @@ export async function allowedModules(
   recipe: string | null,
   contextId: string,
 ): Promise<string[]> {
-  return call("allowed_modules", { context_id: contextId, machineKind, machine, recipe });
+  return call("allowed_modules", { contextId: contextId, machineKind, machine, recipe });
 }
 
 // ── Persistence ───────────────────────────────────────────────────
