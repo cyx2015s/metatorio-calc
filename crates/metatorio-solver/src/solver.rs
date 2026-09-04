@@ -328,7 +328,9 @@ where
                 {
                     // 记录剪枝原因（仅第一轮）：该物品/流没有任何提供者
                     // （无配方产出、外部也不供给），其消耗配方整体不可用。
-                    if record_missing && !consumers.is_empty() && !self.pruned_missing.contains(i_id)
+                    if record_missing
+                        && !consumers.is_empty()
+                        && !self.pruned_missing.contains(i_id)
                     {
                         self.pruned_missing.push(i_id.clone());
                     }

@@ -11,9 +11,9 @@
 //! 用户可对某些无限科技单独指定研究次数（2.b 覆盖该科技等级），该覆盖
 //! 不论是否"忽略产能"都生效。
 
+use metatorio_data::TechnologyComponent;
 use metatorio_data::store::{PrototypeGroup, PrototypeStore};
 use metatorio_data::types::Modifier;
-use metatorio_data::TechnologyComponent;
 
 use crate::accessibility::{Accessibility, Accessible};
 use crate::prim_var::AIndexMap;
@@ -119,7 +119,10 @@ mod tests {
         let Some(store) = load_real_dump() else {
             return;
         };
-        let options = AccessibilityOptions { all_accessible: true, ..Default::default() };
+        let options = AccessibilityOptions {
+            all_accessible: true,
+            ..Default::default()
+        };
         let accessibility = compute_accessibility(&store, &options);
 
         let result = compute_productivity(&store, &accessibility, &[], false);
@@ -142,12 +145,19 @@ mod tests {
         let Some(store) = load_real_dump() else {
             return;
         };
-        let options = AccessibilityOptions { all_accessible: true, ..Default::default() };
+        let options = AccessibilityOptions {
+            all_accessible: true,
+            ..Default::default()
+        };
         let accessibility = compute_accessibility(&store, &options);
 
         let base = compute_productivity(&store, &accessibility, &[], false);
-        let overridden =
-            compute_productivity(&store, &accessibility, &[("mining-productivity-3".into(), 50)], false);
+        let overridden = compute_productivity(
+            &store,
+            &accessibility,
+            &[("mining-productivity-3".into(), 50)],
+            false,
+        );
         let delta = overridden.mining_productivity - base.mining_productivity;
         assert!(
             near(delta, 4.9),
@@ -162,7 +172,10 @@ mod tests {
         let Some(store) = load_real_dump() else {
             return;
         };
-        let options = AccessibilityOptions { all_accessible: true, ..Default::default() };
+        let options = AccessibilityOptions {
+            all_accessible: true,
+            ..Default::default()
+        };
         let accessibility = compute_accessibility(&store, &options);
 
         let ignored = compute_productivity(&store, &accessibility, &[], true);
@@ -170,8 +183,12 @@ mod tests {
         assert!(ignored.recipe_productivity.is_empty(), "忽略时配方应空");
 
         // 用户覆盖的无限等级仍生效（忽略时也计入）。
-        let ignored_user =
-            compute_productivity(&store, &accessibility, &[("mining-productivity-3".into(), 10)], true);
+        let ignored_user = compute_productivity(
+            &store,
+            &accessibility,
+            &[("mining-productivity-3".into(), 10)],
+            true,
+        );
         assert!(
             near(ignored_user.mining_productivity, 1.0),
             "忽略但用户设 mining-productivity-3=10 应得 1.0，实际 {}",

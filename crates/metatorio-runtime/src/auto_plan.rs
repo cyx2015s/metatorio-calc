@@ -4,6 +4,7 @@
 //! 一次构建 LP 求解，保留被选中的实例。相比旧实现的"迭代贪婪"，这是
 //! 原版用户实际使用的"枚举全部组合取最优"。
 
+use crate::solve::ExpandedVarId;
 use metatorio_core::{
     Accessibility, Accessible, Context, IdWithQuality, Mechanic, ModuleConfig, NORMAL_QUALITY,
 };
@@ -15,7 +16,6 @@ use metatorio_data::{
     MiningDrillComponent, ModuleComponent, ReactorComponent, RecipeComponent,
     ResourceEntityComponent, SolarPanelComponent, TechnologyComponent,
 };
-use crate::solve::ExpandedVarId;
 
 /// 把求解结果中选中的流映射回候选机制。
 ///
@@ -29,8 +29,7 @@ pub fn used_candidates<T: Clone>(
     prim: impl IntoIterator<Item = (ExpandedVarId, f64)>,
     prim_scale: impl IntoIterator<Item = (ExpandedVarId, f64)>,
 ) -> Vec<T> {
-    let scales: std::collections::HashMap<ExpandedVarId, f64> =
-        prim_scale.into_iter().collect();
+    let scales: std::collections::HashMap<ExpandedVarId, f64> = prim_scale.into_iter().collect();
     prim.into_iter()
         .filter(|(id, amount)| {
             if id.mechanic.0 == u64::MAX {
@@ -75,7 +74,10 @@ pub fn enumerate_all(
 }
 
 /// 当前工厂的表面属性（planet/surface 规则见 metatorio_runtime::planet）。
-fn surface_properties(store: &PrototypeStore, options: &EnumerateOptions) -> Option<std::collections::BTreeMap<String, f64>> {
+fn surface_properties(
+    store: &PrototypeStore,
+    options: &EnumerateOptions,
+) -> Option<std::collections::BTreeMap<String, f64>> {
     crate::planet::surface_properties_of(
         store,
         options.planet.as_deref(),
@@ -168,7 +170,10 @@ pub fn module_allowed(
         return false;
     }
     if effect.pollution < 0.0
-        && !recipe_allowed(EffectType::Pollution, recipe.is_none_or(|r| r.allow_pollution))
+        && !recipe_allowed(
+            EffectType::Pollution,
+            recipe.is_none_or(|r| r.allow_pollution),
+        )
     {
         return false;
     }
@@ -200,7 +205,10 @@ where
     let contains_name = |out: &[IdWithQuality], name: &str| out.iter().any(|m| m.id == name);
     // 用户偏好优先（带品质）；同一台机器只保留一次
     for pref in prefs {
-        if let Some(index) = candidates.iter().position(|(record, _)| record.name == pref.id) {
+        if let Some(index) = candidates
+            .iter()
+            .position(|(record, _)| record.name == pref.id)
+        {
             let record = candidates.remove(index).0;
             if !contains_name(&out, &record.name) {
                 out.push(pref.clone());
@@ -217,7 +225,10 @@ where
             break;
         }
         if !contains_name(&out, &record.name) {
-            out.push(IdWithQuality::new(record.name.clone(), major_quality.to_string()));
+            out.push(IdWithQuality::new(
+                record.name.clone(),
+                major_quality.to_string(),
+            ));
         }
     }
     out
@@ -228,7 +239,7 @@ where
 fn crafter_score(machine: &CraftingMachineComponent, entity: Option<&EntityComponent>) -> f64 {
     let area = entity
         .and_then(|e| e.collision_box.as_ref())
-        .map_or(25.0, |bb| (bb.1 .0 - bb.0 .0).abs() * (bb.1 .1 - bb.0 .1).abs());
+        .map_or(25.0, |bb| (bb.1.0 - bb.0.0).abs() * (bb.1.1 - bb.0.1).abs());
     let mut score = machine.crafting_speed / area;
     if let Some(effect_receiver) = &machine.effect_receiver {
         if let Some(base) = &effect_receiver.base_effect {
@@ -247,7 +258,7 @@ fn crafter_score(machine: &CraftingMachineComponent, entity: Option<&EntityCompo
 fn miner_score(miner: &MiningDrillComponent, entity: Option<&EntityComponent>) -> f64 {
     let area = entity
         .and_then(|e| e.collision_box.as_ref())
-        .map_or(25.0, |bb| (bb.1 .0 - bb.0 .0).abs() * (bb.1 .1 - bb.0 .1).abs());
+        .map_or(25.0, |bb| (bb.1.0 - bb.0.0).abs() * (bb.1.1 - bb.0.1).abs());
     let mut score = miner.mining_speed / area;
     if let Some(effect_receiver) = &miner.effect_receiver {
         if let Some(base) = &effect_receiver.base_effect {
@@ -266,7 +277,13 @@ fn miner_score(miner: &MiningDrillComponent, entity: Option<&EntityComponent>) -
 fn compositions(parts: usize, sum: usize) -> Vec<Vec<usize>> {
     let mut out = Vec::new();
     let mut current = vec![0usize; parts];
-    fn rec(parts: usize, index: usize, remaining: usize, current: &mut Vec<usize>, out: &mut Vec<Vec<usize>>) {
+    fn rec(
+        parts: usize,
+        index: usize,
+        remaining: usize,
+        current: &mut Vec<usize>,
+        out: &mut Vec<Vec<usize>>,
+    ) {
         if index == parts - 1 {
             current[index] = remaining;
             out.push(current.clone());
@@ -379,10 +396,15 @@ fn enumerate_recipes(
             }
         }
         // 有物品原料的配方按品质展开；纯流体配方只有 normal。
-        let has_item_ingredient = recipe.ingredients.iter().any(|ingredient| {
-            matches!(ingredient, metatorio_data::types::Ingredient::Item(_))
-        });
-        let recipe_quality_range = if has_item_ingredient { quality_range } else { 1 };
+        let has_item_ingredient = recipe
+            .ingredients
+            .iter()
+            .any(|ingredient| matches!(ingredient, metatorio_data::types::Ingredient::Item(_)));
+        let recipe_quality_range = if has_item_ingredient {
+            quality_range
+        } else {
+            1
+        };
         let machines = pick_machines(
             store,
             &options.machine_preferences,
@@ -421,9 +443,9 @@ fn enumerate_recipes(
             }
             // 机器可达性过滤：当前项目科技未解锁的机器不枚举。
             if let Some(accessibility) = &options.accessibility {
-                if !accessibility.is_accessible(&metatorio_core::Accessible::Entity(
-                    machine_name.clone(),
-                )) {
+                if !accessibility
+                    .is_accessible(&metatorio_core::Accessible::Entity(machine_name.clone()))
+                {
                     continue;
                 }
             }
@@ -557,9 +579,9 @@ fn enumerate_mining(
             }
             // 采矿机可达性过滤：当前项目科技未解锁的机器不枚举。
             if let Some(accessibility) = &options.accessibility {
-                if !accessibility.is_accessible(&metatorio_core::Accessible::Entity(
-                    machine_name.clone(),
-                )) {
+                if !accessibility
+                    .is_accessible(&metatorio_core::Accessible::Entity(machine_name.clone()))
+                {
                     continue;
                 }
             }
@@ -639,7 +661,9 @@ fn enumerate_simple(
         for quality in 0..quality_range {
             let id = IdWithQuality::new(record.name.clone(), quality_name(ctx, quality));
             if has_spoil {
-                out.push(Mechanic::Spoil(metatorio_core::SpoilMechanic { item: id.clone() }));
+                out.push(Mechanic::Spoil(metatorio_core::SpoilMechanic {
+                    item: id.clone(),
+                }));
             }
             // 种子可用性：种植物要求的 tile 与星球生成 tile 交集，回退 default_import_location
             if has_plant {
@@ -651,11 +675,15 @@ fn enumerate_simple(
                     options.planet.as_deref(),
                 );
                 if available {
-                    out.push(Mechanic::Plant(metatorio_core::PlantMechanic { seed: id.clone() }));
+                    out.push(Mechanic::Plant(metatorio_core::PlantMechanic {
+                        seed: id.clone(),
+                    }));
                 }
             }
             if has_fuel {
-                out.push(Mechanic::ItemFuel(metatorio_core::ItemFuelMechanic { item: id.clone() }));
+                out.push(Mechanic::ItemFuel(metatorio_core::ItemFuelMechanic {
+                    item: id.clone(),
+                }));
             }
             if has_launch {
                 out.push(Mechanic::ItemLaunch(metatorio_core::ItemLaunchMechanic {
@@ -677,9 +705,7 @@ fn enumerate_simple(
             }));
         }
         // 提热流体：用最高温度（高于默认温度才产热）
-        let temperature = fluid
-            .max_temperature
-            .unwrap_or(fluid.default_temperature);
+        let temperature = fluid.max_temperature.unwrap_or(fluid.default_temperature);
         if temperature > fluid.default_temperature {
             out.push(Mechanic::FluidHeat(metatorio_core::FluidHeatMechanic {
                 fluid: record.name.clone(),
@@ -702,9 +728,9 @@ fn enumerate_energy(
     for record in store.group(PrototypeGroup::Entity) {
         // 能量机器（发电机/锅炉/反应堆）可达性过滤：当前项目科技未解锁的机器不枚举。
         if let Some(accessibility) = &options.accessibility {
-            if !accessibility.is_accessible(&metatorio_core::Accessible::Entity(
-                record.name.clone(),
-            )) {
+            if !accessibility
+                .is_accessible(&metatorio_core::Accessible::Entity(record.name.clone()))
+            {
                 continue;
             }
         }
@@ -715,7 +741,9 @@ fn enumerate_energy(
             let temperature = if generator.maximum_temperature > 0.0 {
                 generator.maximum_temperature
             } else {
-                fluid_record(ctx, &fluid).map(|f| f.default_temperature).unwrap_or(0.0)
+                fluid_record(ctx, &fluid)
+                    .map(|f| f.default_temperature)
+                    .unwrap_or(0.0)
             };
             out.push(Mechanic::Generator(metatorio_core::GeneratorMechanic {
                 generator: IdWithQuality::new(record.name.clone(), major_quality.clone()),
@@ -756,10 +784,9 @@ fn enumerate_energy(
     let mut accumulators: Vec<(String, f64)> = Vec::new();
     for record in store.group(PrototypeGroup::Entity) {
         // 太阳能板/蓄电器可达性过滤：当前项目科技未解锁的不枚举。
-        let accessible = options
-            .accessibility
-            .as_ref()
-            .is_none_or(|acc| acc.is_accessible(&metatorio_core::Accessible::Entity(record.name.clone())));
+        let accessible = options.accessibility.as_ref().is_none_or(|acc| {
+            acc.is_accessible(&metatorio_core::Accessible::Entity(record.name.clone()))
+        });
         if !accessible {
             continue;
         }
@@ -783,7 +810,9 @@ fn enumerate_energy(
                 .then_with(|| a.0.cmp(&b.0))
         });
         list.truncate(count.max(1));
-        list.iter().map(|(name, _)| name.clone()).collect::<Vec<_>>()
+        list.iter()
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>()
     };
     let panel_names = pick_top(&mut panels, options.alternative_count.max(1));
     let accumulator_names = pick_top(&mut accumulators, options.alternative_count.max(1));
@@ -792,10 +821,7 @@ fn enumerate_energy(
             for quality in 0..quality_range {
                 out.push(Mechanic::Solar(metatorio_core::SolarMechanic {
                     solar_panel: IdWithQuality::new(panel.clone(), quality_name(ctx, quality)),
-                    accumulator: IdWithQuality::new(
-                        accumulator.clone(),
-                        major_quality.clone(),
-                    ),
+                    accumulator: IdWithQuality::new(accumulator.clone(), major_quality.clone()),
                 }));
             }
         }
@@ -838,19 +864,17 @@ pub fn recipe_unlocked(store: &PrototypeStore, accessible: &Accessibility, name:
     }) {
         return true;
     }
-    store
-        .group(PrototypeGroup::Technology)
-        .any(|tech_record| {
-            let Some(tech) = tech_record.component::<TechnologyComponent>() else {
-                return false;
-            };
-            if !accessible.is_accessible(&Accessible::Tech(tech_record.name.clone())) {
-                return false;
-            }
-            tech.effects.iter().any(|effect| {
-                matches!(effect, Modifier::UnlockRecipe(unlock) if unlock.recipe == name)
-            })
-        })
+    store.group(PrototypeGroup::Technology).any(|tech_record| {
+        let Some(tech) = tech_record.component::<TechnologyComponent>() else {
+            return false;
+        };
+        if !accessible.is_accessible(&Accessible::Tech(tech_record.name.clone())) {
+            return false;
+        }
+        tech.effects
+            .iter()
+            .any(|effect| matches!(effect, Modifier::UnlockRecipe(unlock) if unlock.recipe == name))
+    })
 }
 
 #[cfg(test)]
@@ -878,14 +902,50 @@ mod tests {
         // 索引 1 用量大于阈值保留；索引 2 用量接近 0 剔除。
         let candidates = vec!["aux", "kept", "dropped"];
         let prim = vec![
-            (ExpandedVarId { mechanic: MechanicId(u64::MAX), variant: 0 }, 5.0),
-            (ExpandedVarId { mechanic: MechanicId(1), variant: 0 }, 2.0),
-            (ExpandedVarId { mechanic: MechanicId(2), variant: 0 }, 1e-12),
+            (
+                ExpandedVarId {
+                    mechanic: MechanicId(u64::MAX),
+                    variant: 0,
+                },
+                5.0,
+            ),
+            (
+                ExpandedVarId {
+                    mechanic: MechanicId(1),
+                    variant: 0,
+                },
+                2.0,
+            ),
+            (
+                ExpandedVarId {
+                    mechanic: MechanicId(2),
+                    variant: 0,
+                },
+                1e-12,
+            ),
         ];
         let prim_scale = vec![
-            (ExpandedVarId { mechanic: MechanicId(u64::MAX), variant: 0 }, 1.0),
-            (ExpandedVarId { mechanic: MechanicId(1), variant: 0 }, 1.0),
-            (ExpandedVarId { mechanic: MechanicId(2), variant: 0 }, 1.0),
+            (
+                ExpandedVarId {
+                    mechanic: MechanicId(u64::MAX),
+                    variant: 0,
+                },
+                1.0,
+            ),
+            (
+                ExpandedVarId {
+                    mechanic: MechanicId(1),
+                    variant: 0,
+                },
+                1.0,
+            ),
+            (
+                ExpandedVarId {
+                    mechanic: MechanicId(2),
+                    variant: 0,
+                },
+                1.0,
+            ),
         ];
         let used = used_candidates(&candidates, prim, prim_scale);
         assert_eq!(used, vec!["kept"]);
@@ -911,11 +971,13 @@ mod tests {
             }
         });
         let store = PrototypeStore::load(&dump).expect("dump 加载失败");
-        let accessibility =
-            metatorio_core::compute_accessibility(&store, &metatorio_core::AccessibilityOptions {
+        let accessibility = metatorio_core::compute_accessibility(
+            &store,
+            &metatorio_core::AccessibilityOptions {
                 all_accessible: true,
                 ..Default::default()
-            });
+            },
+        );
         assert!(recipe_unlocked(&store, &accessibility, "enabled-recipe"));
         assert!(recipe_unlocked(&store, &accessibility, "locked-recipe"));
     }

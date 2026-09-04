@@ -281,8 +281,12 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
             all_components.push(n);
         }
     }
-    out.push_str("/// 原型（dump 顶层键）→ 其关注组件清单（继承链 ∩ 关注组件 + 组合组件，根在前）。\n");
-    out.push_str("/// 覆盖所有含关注组件的原型（含被忽略子类型：子类型的继承链关注组件照常提取）。\n");
+    out.push_str(
+        "/// 原型（dump 顶层键）→ 其关注组件清单（继承链 ∩ 关注组件 + 组合组件，根在前）。\n",
+    );
+    out.push_str(
+        "/// 覆盖所有含关注组件的原型（含被忽略子类型：子类型的继承链关注组件照常提取）。\n",
+    );
     out.push_str("pub const COMPONENT_LIST: &[(&str, &[&str])] = &[\n");
     let mut component_list: Vec<(String, Vec<String>)> = Vec::new();
     for p in &schema.prototypes {
@@ -325,9 +329,7 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
             "SpaceLocationComponent",
             "TileComponent",
         ];
-        let has_group_component = names
-            .iter()
-            .any(|n| group_components.contains(&n.as_str()));
+        let has_group_component = names.iter().any(|n| group_components.contains(&n.as_str()));
         let is_concerned = concerned
             .iter()
             .any(|c| c.typename.as_deref() == Some(tn.as_str()));

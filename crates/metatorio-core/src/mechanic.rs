@@ -24,8 +24,8 @@ pub struct ModuleConfig {
 // 插件/插件塔效果与耗电（迁移自 metatorio-egui ModuleConfig::get_effect/get_consumption）
 
 use crate::context::Context;
-use metatorio_data::{BeaconComponent, ModuleComponent, QualityComponent};
 use metatorio_data::types::{BeaconCounter, Effect, EnergySource};
+use metatorio_data::{BeaconComponent, ModuleComponent, QualityComponent};
 
 fn module_prototype<'a>(
     ctx: &'a Context,
@@ -432,10 +432,7 @@ mod tests {
             }],
         };
         let effect = with_beacon.get_effect(&ctx);
-        assert!(
-            effect.speed > 0.0,
-            "信标中的插件应计入产出加成：{effect:?}"
-        );
+        assert!(effect.speed > 0.0, "信标中的插件应计入产出加成：{effect:?}");
         // 信标耗电（均摊）> 0。
         assert!(with_beacon.get_consumption(&ctx) > 0.0);
     }

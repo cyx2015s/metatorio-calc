@@ -106,7 +106,9 @@ fn real_dump_machine_with_recipe_allows_modules() {
         "应允许速度插件：{allowed:?}"
     );
     assert!(
-        allowed.iter().any(|name| name.starts_with("efficiency-module")),
+        allowed
+            .iter()
+            .any(|name| name.starts_with("efficiency-module")),
         "应允许效率插件：{allowed:?}"
     );
 }

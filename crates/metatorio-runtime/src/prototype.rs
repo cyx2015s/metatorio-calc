@@ -5,8 +5,8 @@
 
 use metatorio_data::store::{PrototypeGroup, PrototypeStore};
 use metatorio_data::{
-    CraftingMachineComponent, FluidComponent, ItemComponent, MiningDrillComponent,
-    RecipeComponent, ResourceEntityComponent,
+    CraftingMachineComponent, FluidComponent, ItemComponent, MiningDrillComponent, RecipeComponent,
+    ResourceEntityComponent,
 };
 
 /// 物品的机制标签（伪类别，供前端按机制过滤选择器）：
@@ -19,12 +19,19 @@ pub fn item_tags(store: &PrototypeStore, name: &str) -> Vec<String> {
         return Vec::new();
     };
     let mut tags = Vec::new();
-    if item.spoil_result.as_deref().is_some_and(|result| !result.is_empty())
+    if item
+        .spoil_result
+        .as_deref()
+        .is_some_and(|result| !result.is_empty())
         || item.spoil_ticks.is_some()
     {
         tags.push("spoilable".to_string());
     }
-    if item.plant_result.as_deref().is_some_and(|result| !result.is_empty()) {
+    if item
+        .plant_result
+        .as_deref()
+        .is_some_and(|result| !result.is_empty())
+    {
         tags.push("plantable".to_string());
     }
     if !item.fuel_category.is_empty() || item.fuel_value.is_some() {
@@ -44,7 +51,10 @@ pub fn item_fuel_info(store: &PrototypeStore, name: &str) -> (String, Option<f64
     else {
         return (String::new(), None);
     };
-    (item.fuel_category.clone(), item.fuel_value.map(|v| v.amount))
+    (
+        item.fuel_category.clone(),
+        item.fuel_value.map(|v| v.amount),
+    )
 }
 
 /// 流体燃料信息（热值 >0 才有；类别为空——流体按热值视为燃料）。
@@ -123,11 +133,7 @@ pub fn effective_module_slots(
 }
 
 /// 有效产出概率 = 独立概率 × 共享概率区间宽（与 egui normalized_output 一致）。
-pub fn effective_probability(
-    independent: f64,
-    shared_min: f64,
-    shared_max: f64,
-) -> f64 {
+pub fn effective_probability(independent: f64, shared_min: f64, shared_max: f64) -> f64 {
     independent * (shared_max - shared_min)
 }
 

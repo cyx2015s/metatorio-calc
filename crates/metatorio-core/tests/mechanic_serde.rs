@@ -54,7 +54,10 @@ fn fuel_serde_distinguishes_item_vs_fluid() {
     let back: Fuel = serde_json::from_str(&json).unwrap();
     assert_eq!(item, back);
 
-    let fluid = Fuel::Fluid { fluid: "steam".to_string(), temperature: Some(165) };
+    let fluid = Fuel::Fluid {
+        fluid: "steam".to_string(),
+        temperature: Some(165),
+    };
     let json = serde_json::to_string(&fluid).unwrap();
     assert!(json.contains(r#""kind":"fluid""#), "json: {json}");
     let back: Fuel = serde_json::from_str(&json).unwrap();

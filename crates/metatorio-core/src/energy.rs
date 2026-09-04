@@ -6,9 +6,9 @@
 use crate::context::Context;
 use crate::dual_var::DualVar;
 use crate::prim_var::Flow;
-use metatorio_data::{FluidComponent, ItemComponent};
 use metatorio_data::store::PrototypeGroup;
 use metatorio_data::types::{Effect, EnergyAmount, EnergySource};
+use metatorio_data::{FluidComponent, ItemComponent};
 
 /// 明确选择的燃料。
 ///

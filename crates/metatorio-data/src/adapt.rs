@@ -30,10 +30,7 @@ use serde_json::Value;
 /// 无 recipe 组或已是 2.1 形态返回 false。调用方据此决定是否克隆改写
 /// （避免对 2.1 dump 做无谓的深拷贝）。
 pub fn needs_adaptation(dump: &Value) -> bool {
-    let Some(recipes) = dump
-        .get("recipe")
-        .and_then(Value::as_object)
-    else {
+    let Some(recipes) = dump.get("recipe").and_then(Value::as_object) else {
         return false;
     };
     recipes.values().any(|recipe| {
@@ -47,7 +44,9 @@ pub fn needs_adaptation(dump: &Value) -> bool {
             .and_then(Value::as_array)
             .is_some_and(|results| {
                 results.iter().any(|product| {
-                    product.as_object().is_some_and(|p| p.contains_key("probability"))
+                    product
+                        .as_object()
+                        .is_some_and(|p| p.contains_key("probability"))
                 })
             })
     })
@@ -229,7 +228,10 @@ mod tests {
             "energy_required": 1
         });
         adapt_recipe_categories(&mut recipe);
-        assert_eq!(recipe["categories"], serde_json::json!(["smelting", "crafting"]));
+        assert_eq!(
+            recipe["categories"],
+            serde_json::json!(["smelting", "crafting"])
+        );
     }
 
     #[test]
@@ -248,7 +250,10 @@ mod tests {
         assert!(results[0].get("independent_probability").is_none());
         // 有概率的产物：probability → independent_probability
         assert_eq!(results[1]["independent_probability"], 0.02);
-        assert!(results[1].get("probability").is_none(), "原 probability 键应移除");
+        assert!(
+            results[1].get("probability").is_none(),
+            "原 probability 键应移除"
+        );
     }
 
     #[test]
@@ -277,10 +282,7 @@ mod tests {
                 }
             }
         });
-        assert!(
-            needs_adaptation(&twenty),
-            "2.0 产物 probability 应触发适配"
-        );
+        assert!(needs_adaptation(&twenty), "2.0 产物 probability 应触发适配");
         let twenty_one = serde_json::json!({
             "recipe": {
                 "yumako-processing": {
@@ -394,7 +396,10 @@ mod tests {
             }
         });
         assert!(!needs_adaptation(&twenty_one), "2.1 形态无需适配");
-        assert!(!needs_adaptation(&serde_json::json!({})), "空 dump 无需适配");
+        assert!(
+            !needs_adaptation(&serde_json::json!({})),
+            "空 dump 无需适配"
+        );
     }
 
     /// 端到端：规范化后的 2.0 形态 dump 能被 PrototypeStore 加载，

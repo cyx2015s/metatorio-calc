@@ -296,8 +296,8 @@ fn global_scale_sensitivity() {
         let x3 = vars.add(VariableDefinition::new().min(0.0));
         // 物品链：x1 消耗 source 产出 x2，x2 产出 x3（目标）。
         let constraints = vec![
-            (x1 - x2).eq(0.0),          // 中间平衡
-            (x2 - x3).eq(0.0),          // 目标平衡
+            (x1 - x2).eq(0.0),                      // 中间平衡
+            (x2 - x3).eq(0.0),                      // 目标平衡
             x3.into_expression().eq(target_amount), // 目标约束（常数随目标变化）
             x1.into_expression().leq(1000.0),       // 冗余约束（不紧）
         ];

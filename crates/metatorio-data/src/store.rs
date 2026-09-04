@@ -299,7 +299,11 @@ impl PrototypeStore {
         };
         let candidate: Option<&str> = if recipe.results.len() == 1 {
             recipe.results.first().map(product_name)
-        } else if let Some(main) = recipe.main_product.as_deref().filter(|name| !name.is_empty()) {
+        } else if let Some(main) = recipe
+            .main_product
+            .as_deref()
+            .filter(|name| !name.is_empty())
+        {
             Some(main)
         } else {
             recipe
@@ -362,7 +366,8 @@ impl PrototypeStore {
         //   同名产物）的 item/fluid 派生
         // - entity：从 place_result 指向该实体的 item 派生
         let other = "other".to_string();
-        let place_result_map: Option<AIndexMap<String, String>> = if group == PrototypeGroup::Entity {
+        let place_result_map: Option<AIndexMap<String, String>> = if group == PrototypeGroup::Entity
+        {
             Some(
                 self.group(PrototypeGroup::Item)
                     .filter_map(|record| {

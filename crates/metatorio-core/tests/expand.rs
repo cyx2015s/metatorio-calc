@@ -124,8 +124,7 @@ fn fluid_fuel_and_fluid_heat_mechanics_expand() {
         temperature: Some(500),
     });
     let expansion = expand(
-        [("fuel".to_string(), &fuel), ("heat".to_string(), &heat)]
-            .into_iter(),
+        [("fuel".to_string(), &fuel), ("heat".to_string(), &heat)].into_iter(),
         &ctx,
     );
     assert_eq!(expansion.len(), 2);

@@ -21,7 +21,7 @@ use std::collections::{HashMap, VecDeque};
 use metatorio_data::store::{PrototypeGroup, PrototypeStore};
 use metatorio_data::types::{BoilerMode, Ingredient, Modifier, Product, TriggerEffect};
 use metatorio_data::{
-    AsteroidChunkComponent, AssemblingMachineComponent, BoilerComponent, EnemySpawnerComponent,
+    AssemblingMachineComponent, AsteroidChunkComponent, BoilerComponent, EnemySpawnerComponent,
     EntityComponent, EntityWithHealthComponent, ItemComponent, PlantComponent,
     PrototypeBaseComponent, RecipeComponent, SpaceConnectionComponent, SpaceLocationComponent,
     TechnologyComponent,
@@ -633,8 +633,16 @@ pub fn milestone_order_with_graph(
                 continue;
             }
             // a 依赖 b（b 更短即真实前置）→ b 排在 a 前。
-            let d_ab = dist.get(a).and_then(|m| m.get(b)).copied().unwrap_or(usize::MAX);
-            let d_ba = dist.get(b).and_then(|m| m.get(a)).copied().unwrap_or(usize::MAX);
+            let d_ab = dist
+                .get(a)
+                .and_then(|m| m.get(b))
+                .copied()
+                .unwrap_or(usize::MAX);
+            let d_ba = dist
+                .get(b)
+                .and_then(|m| m.get(a))
+                .copied()
+                .unwrap_or(usize::MAX);
             match d_ab.cmp(&d_ba) {
                 // a→b 更短：a 依赖 b。
                 std::cmp::Ordering::Less => {
@@ -775,9 +783,9 @@ fn requirements(store: &PrototypeStore, graph: &GraphData, node: &Accessible) ->
                         .collect();
                     if let Some(entities) = graph.fixed_recipes.get(name) {
                         any.extend(
-                            entities
-                                .iter()
-                                .map(|entity| Requirement::Node(Accessible::Entity(entity.clone()))),
+                            entities.iter().map(|entity| {
+                                Requirement::Node(Accessible::Entity(entity.clone()))
+                            }),
                         );
                     }
                     Requirement::Any(any)
@@ -792,8 +800,7 @@ fn requirements(store: &PrototypeStore, graph: &GraphData, node: &Accessible) ->
                 for recipe_name in recipes {
                     // 物品 C 可经配方 R 制造：需要配方 R 可用 + 它的全部原料可用
                     // （并非解锁就能制造）。
-                    let mut all =
-                        vec![Requirement::Node(Accessible::Recipe(recipe_name.clone()))];
+                    let mut all = vec![Requirement::Node(Accessible::Recipe(recipe_name.clone()))];
                     if let Some(recipe) = store
                         .get(PrototypeGroup::Recipe, recipe_name)
                         .and_then(|record| record.component::<RecipeComponent>())
@@ -1773,7 +1780,8 @@ mod tests {
             .collect();
         let locked_result = compute_accessibility(&store, &locked);
         assert!(
-            !locked_result.is_accessible(&Accessible::Entity("huge-promethium-asteroid".to_string())),
+            !locked_result
+                .is_accessible(&Accessible::Entity("huge-promethium-asteroid".to_string())),
             "锁定 shattered-planet 后 promethium 大星岩应不可达（地点判定生效）"
         );
         assert!(
@@ -1790,8 +1798,9 @@ mod tests {
             return;
         };
         let mut options = AccessibilityOptions::default();
-        options.forced_inaccessible =
-            [Accessible::Item("automation-science-pack".to_string())].into_iter().collect();
+        options.forced_inaccessible = [Accessible::Item("automation-science-pack".to_string())]
+            .into_iter()
+            .collect();
         let result = compute_accessibility(&store, &options);
 
         let total = store.group(PrototypeGroup::Technology).count();
@@ -1800,7 +1809,9 @@ mod tests {
             .filter(|record| result.is_accessible(&Accessible::Tech(record.name.clone())))
             .count();
         let inaccessible = total - accessible;
-        eprintln!("禁用 automation-science-pack：科技 total={total} 可达={accessible} 不可达={inaccessible}");
+        eprintln!(
+            "禁用 automation-science-pack：科技 total={total} 可达={accessible} 不可达={inaccessible}"
+        );
         assert!(
             inaccessible >= total / 2,
             "禁用 automation-science-pack 后至少一半科技不可达（实际 {inaccessible}/{total}）"

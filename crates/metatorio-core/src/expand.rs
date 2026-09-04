@@ -12,23 +12,23 @@ use crate::dual_var::DualVar;
 use crate::energy::{FluidFuelSpec, FuelSpec, ItemFuelSpec, energy_source_as_flow};
 use crate::id::IdWithQuality;
 use crate::mechanic::{
-    BoilerMechanic, FluidFuelMechanic, FluidHeatMechanic, Fuel, GeneratorMechanic, ItemFuelMechanic,
-    ItemLaunchMechanic, Mechanic, MiningMechanic, ModuleConfig, PlantMechanic, ReactorMechanic,
-    RecipeMechanic, SolarMechanic, SpoilMechanic, quality_by_level,
+    BoilerMechanic, FluidFuelMechanic, FluidHeatMechanic, Fuel, GeneratorMechanic,
+    ItemFuelMechanic, ItemLaunchMechanic, Mechanic, MiningMechanic, ModuleConfig, PlantMechanic,
+    ReactorMechanic, RecipeMechanic, SolarMechanic, SpoilMechanic, quality_by_level,
 };
 use crate::prim_var::Expansion;
 use crate::quality::calc_quality_distribution;
 use crate::temp_flow::TempFlow;
+use metatorio_data::store::{PrototypeGroup, PrototypeStore};
+use metatorio_data::types::{
+    BoilerMode, Effect, EffectType, EffectTypeLimitation, EnergyAmount, EnergySource, Ingredient,
+    Product,
+};
 use metatorio_data::{
     AccumulatorComponent, BoilerComponent, CraftingMachineComponent, EntityComponent,
     GeneratorComponent, ItemComponent, MinableProperties, MiningDrillComponent, PlantComponent,
     ReactorComponent, RecipeComponent, ResourceEntityComponent, RocketSiloComponent,
     SolarPanelComponent,
-};
-use metatorio_data::store::{PrototypeGroup, PrototypeStore};
-use metatorio_data::types::{
-    BoilerMode, Effect, EffectType, EffectTypeLimitation, EnergyAmount, EnergySource, Ingredient,
-    Product,
 };
 
 /// Expand all mechanisms in the caller-provided order.
@@ -82,7 +82,7 @@ fn entity_area(store: &PrototypeStore, name: &str) -> Option<f64> {
         .component::<EntityComponent>()?
         .collision_box
         .as_ref()?;
-    Some((bb.1 .0 - bb.0 .0).ceil().abs() * (bb.1 .1 - bb.0 .1).ceil().abs())
+    Some((bb.1.0 - bb.0.0).ceil().abs() * (bb.1.1 - bb.0.1).ceil().abs())
 }
 
 /// 单台实例成本（复刻旧实现 + 信标占地）：
@@ -97,13 +97,13 @@ pub fn instance_cost(store: &PrototypeStore, mechanic: &Mechanic) -> f64 {
         config
             .beacons
             .iter()
-            .map(|beacon| {
-                area(&beacon.beacon.id) * beacon.count as f64 / beacon.share.max(1.0)
-            })
+            .map(|beacon| area(&beacon.beacon.id) * beacon.count as f64 / beacon.share.max(1.0))
             .sum()
     };
     match mechanic {
-        Mechanic::Recipe(mechanic) => area(&mechanic.machine.id) + beacon_area(&mechanic.module_config),
+        Mechanic::Recipe(mechanic) => {
+            area(&mechanic.machine.id) + beacon_area(&mechanic.module_config)
+        }
         Mechanic::Mining(mechanic) => {
             area(&mechanic.machine.id) + beacon_area(&mechanic.module_config)
         }
@@ -193,9 +193,7 @@ fn bounded_quality(
 fn fluid_temperature(ctx: &Context, name: &str) -> f64 {
     ctx.prototype
         .get(PrototypeGroup::Fluid, name)
-        .and_then(|record| {
-            record.component::<metatorio_data::FluidComponent>()
-        })
+        .and_then(|record| record.component::<metatorio_data::FluidComponent>())
         .map(|fluid| fluid.default_temperature)
         .unwrap_or_default()
 }
@@ -210,10 +208,7 @@ fn add_fluid_interval(temp: &mut TempFlow, name: &str, amount: f64, lower: f64, 
     );
 }
 
-fn fluid_record<'a>(
-    ctx: &'a Context,
-    name: &str,
-) -> Option<&'a metatorio_data::FluidComponent> {
+fn fluid_record<'a>(ctx: &'a Context, name: &str) -> Option<&'a metatorio_data::FluidComponent> {
     ctx.prototype
         .get(PrototypeGroup::Fluid, name)
         .and_then(|record| record.component())
@@ -269,10 +264,7 @@ fn add_energy(
     }
 }
 
-fn add_machine_effects(
-    effects: &mut Effect,
-    receiver: Option<&metatorio_data::EffectReceiver>,
-) {
+fn add_machine_effects(effects: &mut Effect, receiver: Option<&metatorio_data::EffectReceiver>) {
     if let Some(receiver) = receiver {
         *effects = *effects + receiver.base_effect.unwrap_or_default();
     }
@@ -448,7 +440,9 @@ fn expand_recipe<C: Clone>(
             };
             temp.add(DualVar::RocketWeightCapacity, lift_weight / parts);
         } else {
-            let slots = silo.to_be_inserted_to_rocket_inventory_size.unwrap_or_default() as f64;
+            let slots = silo
+                .to_be_inserted_to_rocket_inventory_size
+                .unwrap_or_default() as f64;
             temp.add(DualVar::RocketSlotCapacity, slots / parts);
         }
     }
@@ -1063,8 +1057,8 @@ fn expand_solar<C: Clone>(
     // （60 kW 峰值 → 42 kW 平均，含黄昏/黎明渐变），与 day_night_cycle
     // 长度无关（周期只缩放时间轴，不改变昼夜占比）。
     let day_fraction = 0.7;
-    let performance = panel.performance_at_day * day_fraction
-        + panel.performance_at_night * (1.0 - day_fraction);
+    let performance =
+        panel.performance_at_day * day_fraction + panel.performance_at_night * (1.0 - day_fraction);
     let coefficient = ctx.game.solar_power_multiplier.max(0.0);
     let production_per_second = panel.production.amount * 60.0 * coefficient * performance;
     if production_per_second <= 0.0 {
@@ -1079,7 +1073,10 @@ fn expand_solar<C: Clone>(
         .unwrap_or(0.0);
     let mut temp = TempFlow::new();
     temp.add(DualVar::Electricity, production_per_second);
-    temp.scale(default_quality_multiplier(ctx, &mechanic.solar_panel.quality));
+    temp.scale(default_quality_multiplier(
+        ctx,
+        &mechanic.solar_panel.quality,
+    ));
     out.variables.extend(temp.into_variables(config));
 }
 
@@ -1103,7 +1100,8 @@ pub struct SolarBalance {
     /// 一个昼夜周期的秒数。
     pub cycle_seconds: f64,
     /// 一个周期溢出的总电量（J）——蓄电器需要储存的能量。
-    pub surplus_per_cycle: f64,    /// 蓄电器容量（J）。
+    pub surplus_per_cycle: f64,
+    /// 蓄电器容量（J）。
     pub accumulator_capacity: f64,
     /// 推荐蓄电器数量（每块面板）= surplus / capacity。
     pub recommended_accumulators: f64,
@@ -1299,7 +1297,10 @@ mod tests {
             .copied()
             .expect("太阳能展开应产出电力");
         // 60 kW 峰值 × 0.7 平均 = 42 kW = 42000 J/s
-        assert!((electricity - 42000.0).abs() < 1e-6, "electricity = {electricity}");
+        assert!(
+            (electricity - 42000.0).abs() < 1e-6,
+            "electricity = {electricity}"
+        );
     }
 
     #[test]
@@ -1341,7 +1342,10 @@ mod tests {
             .copied()
             .expect("太阳能展开应产出电力");
         // 60 kW × 0.7 × 0.5 = 21 kW = 21000 J/s
-        assert!((electricity - 21000.0).abs() < 1e-6, "electricity = {electricity}");
+        assert!(
+            (electricity - 21000.0).abs() < 1e-6,
+            "electricity = {electricity}"
+        );
     }
 
     /// 太阳能单位成本 = 面板面积 + 所需蓄电器面积（依赖表面系数；不同表面不同）。
@@ -1382,16 +1386,25 @@ mod tests {
             let ctx = Context::new(&store, &game);
             let expansion = expand([(0u32, &mechanic)], &ctx);
             let balance = solar_balance(&ctx, &sm).expect("配平应可计算");
-            (expansion.variables[0].cost, balance.recommended_accumulators)
+            (
+                expansion.variables[0].cost,
+                balance.recommended_accumulators,
+            )
         };
         // 面板面积 = 2×2 = 4，蓄电器面积 = 1×1 = 1；成本 = 面板面积 + 蓄电器数×蓄电器面积。
         let (c1, acc1) = cost_at(1.0);
         let expected1 = 4.0 + acc1 * 1.0;
-        assert!((c1 - expected1).abs() < 1e-6, "c1={c1} expected1={expected1}");
+        assert!(
+            (c1 - expected1).abs() < 1e-6,
+            "c1={c1} expected1={expected1}"
+        );
         assert!(c1 > 4.0, "太阳能成本应含蓄电器面积（大于面板面积 4）");
         // 表面系数更低 → 每面板蓄电器需求更少（周期盈余随峰值同比缩小）→ 成本不同。
         let (c05, acc05) = cost_at(0.5);
-        assert!(acc05 < acc1, "低倍率下每面板蓄电器需求应更少: {acc05} vs {acc1}");
+        assert!(
+            acc05 < acc1,
+            "低倍率下每面板蓄电器需求应更少: {acc05} vs {acc1}"
+        );
         assert!((c05 - (4.0 + acc05)).abs() < 1e-6, "c05={c05}");
         assert!((c05 - c1).abs() > 1e-6, "不同表面系数下太阳能成本应不同");
     }
@@ -1562,7 +1575,10 @@ mod tests {
             .copied()
             .expect("太阳能展开应产出电力");
         // 60 kW × (0.7×1 + 0.3×0.5) = 51 kW = 51000 J/s。
-        assert!((electricity - 51000.0).abs() < 1e-6, "electricity = {electricity}");
+        assert!(
+            (electricity - 51000.0).abs() < 1e-6,
+            "electricity = {electricity}"
+        );
     }
 
     #[test]

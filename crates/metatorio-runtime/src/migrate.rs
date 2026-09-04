@@ -17,7 +17,7 @@
 //! 直接操作 `serde_json::Value`（不引入强类型变换）。转换按"当前游戏上下文"
 //! 的品质顺序进行：level → 品质名。项目绑定到当前激活上下文 id。
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use metatorio_data::store::{PrototypeGroup, PrototypeStore};
 
@@ -94,7 +94,11 @@ fn settings_of(proj: &Value, store: Option<&PrototypeStore>) -> Value {
         .map(|arr| {
             arr.iter()
                 .map(|pair| {
-                    let tech = pair.get(0).and_then(Value::as_str).unwrap_or("").to_string();
+                    let tech = pair
+                        .get(0)
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string();
                     let unlocked = pair.get(1).and_then(Value::as_bool).unwrap_or(true);
                     json!({ "node": classify_node(&tech, store), "unlocked": unlocked })
                 })
@@ -106,9 +110,7 @@ fn settings_of(proj: &Value, store: Option<&PrototypeStore>) -> Value {
         .and_then(Value::as_object)
         .map(|map| {
             map.iter()
-                .map(|(recipe, value)| {
-                    json!({ "recipe": recipe, "productivity": value })
-                })
+                .map(|(recipe, value)| json!({ "recipe": recipe, "productivity": value }))
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
@@ -145,13 +147,14 @@ fn merge_planning(planning: &mut Value, mechanic: &Value, q: &[String]) -> bool 
     if let Some(ac) = mechanic.get("alternative_count") {
         planning["alternative_count"] = ac.clone();
     }
-    if let Some(arr) = mechanic.get("machine_preferences").and_then(Value::as_array) {
-        planning["machine_preferences"] =
-            Value::Array(arr.iter().map(|v| id_of(v, q)).collect());
+    if let Some(arr) = mechanic
+        .get("machine_preferences")
+        .and_then(Value::as_array)
+    {
+        planning["machine_preferences"] = Value::Array(arr.iter().map(|v| id_of(v, q)).collect());
     }
     if let Some(arr) = mechanic.get("enumerate_modules").and_then(Value::as_array) {
-        planning["enumerate_modules"] =
-            Value::Array(arr.iter().map(|v| id_of(v, q)).collect());
+        planning["enumerate_modules"] = Value::Array(arr.iter().map(|v| id_of(v, q)).collect());
     }
     if let Some(arr) = mechanic.get("enumerate_beacons").and_then(Value::as_array) {
         planning["enumerate_beacons"] =
@@ -166,7 +169,10 @@ fn factory_of(f: &Value, idx: usize, q: &[String], store: Option<&PrototypeStore
     let factory = f.get("factory").cloned().unwrap_or(json!({}));
     let planet = factory.get("planet").cloned().unwrap_or(Value::Null);
     let surface = factory.get("surface").cloned().unwrap_or(Value::Null);
-    let major_quality_level = factory.get("major_quality").and_then(Value::as_i64).unwrap_or(0);
+    let major_quality_level = factory
+        .get("major_quality")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
     let major_quality = quality_name(q, major_quality_level);
     let debug = factory.get("debug").cloned().unwrap_or(json!(false));
 
@@ -314,7 +320,12 @@ fn map_mechanic_type(old: &str) -> Option<&'static str> {
     })
 }
 
-fn mechanic_of(new_type: &str, inst: &Value, q: &[String], store: Option<&PrototypeStore>) -> Value {
+fn mechanic_of(
+    new_type: &str,
+    inst: &Value,
+    q: &[String],
+    store: Option<&PrototypeStore>,
+) -> Value {
     match new_type {
         "recipe" => json!({
             "type": "recipe",
@@ -429,14 +440,20 @@ fn beacon_of(v: &Value) -> Value {
         .map(|arr| {
             arr.iter()
                 .map(|m| {
-                    let idv = m.get(0).map(|idv| id_of_plain(idv)).unwrap_or_else(id_empty);
+                    let idv = m
+                        .get(0)
+                        .map(|idv| id_of_plain(idv))
+                        .unwrap_or_else(id_empty);
                     let count = m.get(1).cloned().unwrap_or(json!(1));
                     json!([idv, count])
                 })
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    let beacon = map.get("beacon").map(|b| id_of_plain(b)).unwrap_or_else(id_empty);
+    let beacon = map
+        .get("beacon")
+        .map(|b| id_of_plain(b))
+        .unwrap_or_else(id_empty);
     json!({
         "modules": modules,
         "beacon": beacon,
@@ -527,7 +544,8 @@ fn id_empty_with_q(q: &[String], level: i64) -> Value {
 }
 
 /// 旧 `DualVar` → 新版 `DualVar`（只改各变体的 id/品质形态与 filter/category 形态）。
-fn dualvar_of(v: &Value, q: &[String]) -> Value {    match v {
+fn dualvar_of(v: &Value, q: &[String]) -> Value {
+    match v {
         Value::String(s) => json!(s),
         Value::Object(map) => {
             if let Some(inner) = map.get("Item") {
@@ -612,7 +630,10 @@ mod tests {
         let doc: AppDocument = serde_json::from_value(migrated).expect("迁移结果应可反序列化");
         let proj = &doc.projects[0];
         assert_eq!(proj.context_id.as_deref(), Some("ctx-1"));
-        assert_eq!(proj.settings.time_scale, crate::document::TimeScale::Seconds);
+        assert_eq!(
+            proj.settings.time_scale,
+            crate::document::TimeScale::Seconds
+        );
 
         // 品质 level 4 → legendary（工厂 major_quality 与目标/机制 id 都映射）。
         assert_eq!(proj.factories[0].settings.major_quality, "legendary");
@@ -647,13 +668,20 @@ mod tests {
         assert!(recipe_count >= 2, "recipe 实例应展开为多条机制条目");
 
         // 里程碑 + 配方产能 + 采矿产能从旧 proj 迁移。
-        assert!(!proj.settings.milestones.is_empty(), "tech_milestones 应迁移为里程碑");
+        assert!(
+            !proj.settings.milestones.is_empty(),
+            "tech_milestones 应迁移为里程碑"
+        );
         assert_eq!(
-            proj.settings.mining_productivity,
-            0.3,
+            proj.settings.mining_productivity, 0.3,
             "mining_productivity 应迁移"
         );
-        assert!(proj.settings.recipe_productivity.iter().any(|r| r.recipe == "steel-plate"));
+        assert!(
+            proj.settings
+                .recipe_productivity
+                .iter()
+                .any(|r| r.recipe == "steel-plate")
+        );
     }
 
     #[test]
@@ -672,12 +700,27 @@ mod tests {
             "planet": { "my-planet": { "type": "planet", "name": "my-planet" } }
         });
         let store = PrototypeStore::load(&dump).expect("最小仓库应可加载");
-        assert_eq!(classify_node("my-tech", Some(&store)), json!({ "Tech": "my-tech" }));
-        assert_eq!(classify_node("my-item", Some(&store)), json!({ "Item": "my-item" }));
-        assert_eq!(classify_node("ordinary", Some(&store)), json!({ "Quality": "ordinary" }));
-        assert_eq!(classify_node("my-planet", Some(&store)), json!({ "Planet": "my-planet" }));
+        assert_eq!(
+            classify_node("my-tech", Some(&store)),
+            json!({ "Tech": "my-tech" })
+        );
+        assert_eq!(
+            classify_node("my-item", Some(&store)),
+            json!({ "Item": "my-item" })
+        );
+        assert_eq!(
+            classify_node("ordinary", Some(&store)),
+            json!({ "Quality": "ordinary" })
+        );
+        assert_eq!(
+            classify_node("my-planet", Some(&store)),
+            json!({ "Planet": "my-planet" })
+        );
         // 未知名字回退 Tech（旧语义），无仓库时也回退。
-        assert_eq!(classify_node("nope", Some(&store)), json!({ "Tech": "nope" }));
+        assert_eq!(
+            classify_node("nope", Some(&store)),
+            json!({ "Tech": "nope" })
+        );
         assert_eq!(classify_node("my-item", None), json!({ "Tech": "my-item" }));
     }
 

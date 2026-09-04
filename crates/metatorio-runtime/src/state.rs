@@ -7,10 +7,7 @@ use metatorio_core::{BeaconConfig, Fuel, Mechanic, ModuleConfig};
 
 /// 设置流体燃料的温度。仅 `Fuel::Fluid` 有意义（物品燃料无温度，忽略）。
 fn set_fuel_temperature(fuel: &mut Option<Fuel>, temperature: Option<i32>) -> bool {
-    let Some(Fuel::Fluid {
-        temperature: t, ..
-    }) = fuel
-    else {
+    let Some(Fuel::Fluid { temperature: t, .. }) = fuel else {
         return false;
     };
     if *t == temperature {
@@ -33,9 +30,10 @@ use crate::message::{
     ExternalInputAction, FactoryAction, FactoryContextAction, FactoryTemplate, FlowAction,
     FluidFuelMechanicAction, FluidHeatMechanicAction, GeneratorMechanicAction,
     ItemFuelMechanicAction, ItemLaunchMechanicAction, MechanicAction, MechanicListAction,
-    MiningMechanicAction, ModuleAction, PlantMechanicAction, PlanningAction, ProjectAction,
-    ReactorMechanicAction, RecipeMechanicAction, RuntimeCommand, SolveAction, SolarMechanicAction,
-    SpoilMechanicAction, SuggestionAction, SuggestionCandidate, TargetAction, TargetExpressionAction,
+    MiningMechanicAction, ModuleAction, PlanningAction, PlantMechanicAction, ProjectAction,
+    ReactorMechanicAction, RecipeMechanicAction, RuntimeCommand, SolarMechanicAction, SolveAction,
+    SpoilMechanicAction, SuggestionAction, SuggestionCandidate, TargetAction,
+    TargetExpressionAction,
 };
 
 /// Mutable application state that is independent from any GUI framework.
@@ -311,10 +309,7 @@ impl RuntimeState {
                     .iter_mut()
                     .find(|candidate| candidate.node == node)
                 {
-                    let changed = replace(
-                        existing,
-                        crate::document::Milestone { node, unlocked },
-                    );
+                    let changed = replace(existing, crate::document::Milestone { node, unlocked });
                     Ok(Outcome::all_factories_if(changed, project_id))
                 } else {
                     settings
@@ -516,22 +511,18 @@ impl RuntimeState {
                 let mut outcome = Outcome::changed_factory_if(changed, project_id, factory_id);
                 if changed {
                     if needs_compat {
-                        outcome
-                            .commands
-                            .push(RuntimeCommand::EnsureMachineCompat {
-                                project: project_id,
-                                factory: factory_id,
-                                mechanic,
-                            });
+                        outcome.commands.push(RuntimeCommand::EnsureMachineCompat {
+                            project: project_id,
+                            factory: factory_id,
+                            mechanic,
+                        });
                     }
                     if needs_clamp {
-                        outcome
-                            .commands
-                            .push(RuntimeCommand::ClampModules {
-                                project: project_id,
-                                factory: factory_id,
-                                mechanic,
-                            });
+                        outcome.commands.push(RuntimeCommand::ClampModules {
+                            project: project_id,
+                            factory: factory_id,
+                            mechanic,
+                        });
                     }
                 }
                 Ok(outcome)
@@ -906,7 +897,6 @@ impl RuntimeState {
         }
     }
 
-
     fn new_factory(
         &mut self,
         id: FactoryId,
@@ -1011,8 +1001,7 @@ impl RuntimeState {
     pub fn import_projects(&mut self, imported: &AppDocument) {
         for project in &imported.projects {
             let mut project = project.clone();
-            let project_id_collides =
-                self.document.projects.iter().any(|p| p.id == project.id);
+            let project_id_collides = self.document.projects.iter().any(|p| p.id == project.id);
             // 工厂/机制等子 id 若与现有文档冲突也要重分配（全局唯一，
             // 避免跨项目引用歧义）。为简化，项目冲突时整套重分配。
             let remap_all = project_id_collides;
@@ -1072,9 +1061,9 @@ impl RuntimeState {
                 || p.factories.iter().any(|f| {
                     f.id.0 == id
                         || f.targets.iter().any(|t| t.id.0 == id)
-                        || f.target_expressions.iter().any(|e| {
-                            e.id.0 == id || e.terms.iter().any(|t| t.id.0 == id)
-                        })
+                        || f.target_expressions
+                            .iter()
+                            .any(|e| e.id.0 == id || e.terms.iter().any(|t| t.id.0 == id))
                         || f.external_inputs.iter().any(|i| i.id.0 == id)
                         || f.mechanics.iter().any(|m| m.id.0 == id)
                 })
@@ -1106,7 +1095,6 @@ impl RuntimeState {
         }
         self.next_id = max_id.saturating_add(1).max(1);
     }
-
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -1401,9 +1389,7 @@ fn apply_recipe_action(
 ) -> Result<bool, RuntimeError> {
     match action {
         RecipeMechanicAction::SetRecipe { recipe } => Ok(replace(&mut mechanic.recipe, recipe)),
-        RecipeMechanicAction::SetMachine { machine } => {
-            Ok(replace(&mut mechanic.machine, machine))
-        }
+        RecipeMechanicAction::SetMachine { machine } => Ok(replace(&mut mechanic.machine, machine)),
         RecipeMechanicAction::SetFuel { fuel } => Ok(replace(&mut mechanic.fuel, fuel)),
         RecipeMechanicAction::SetFuelTemperature { temperature } => {
             Ok(set_fuel_temperature(&mut mechanic.fuel, temperature))
@@ -1422,9 +1408,7 @@ fn apply_mining_action(
         MiningMechanicAction::SetResource { resource } => {
             Ok(replace(&mut mechanic.resource, resource))
         }
-        MiningMechanicAction::SetMachine { machine } => {
-            Ok(replace(&mut mechanic.machine, machine))
-        }
+        MiningMechanicAction::SetMachine { machine } => Ok(replace(&mut mechanic.machine, machine)),
         MiningMechanicAction::SetFuel { fuel } => Ok(replace(&mut mechanic.fuel, fuel)),
         MiningMechanicAction::SetFuelTemperature { temperature } => {
             Ok(set_fuel_temperature(&mut mechanic.fuel, temperature))
@@ -1611,7 +1595,11 @@ fn apply_module_action(
                 ));
             }
             // 重复按 IdWithQuality 整体判等（id + 品质）：同种信标不同品质允许并存。
-            if config.beacons.iter().any(|existing| existing.beacon == beacon) {
+            if config
+                .beacons
+                .iter()
+                .any(|existing| existing.beacon == beacon)
+            {
                 return Err(RuntimeError::InvalidValue(format!(
                     "信标 {}（{}）已添加，不能重复",
                     beacon.id, beacon.quality
@@ -1802,7 +1790,6 @@ fn apply_planning_action(
         }
     }
 }
-
 
 fn ensure_unique_target(factory: &FactoryDocument, id: TargetId) -> Result<(), RuntimeError> {
     if factory.targets.iter().any(|target| target.id == id) {
@@ -2031,11 +2018,11 @@ fn validate_positive(name: &str, value: f64) -> Result<(), RuntimeError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use metatorio_core::{DualVar, IdWithQuality};
     use crate::message::{
         AppMessage, FactoryAction, FactoryTemplate, MechanicAction, MechanicListAction,
         ProjectAction,
     };
+    use metatorio_core::{DualVar, IdWithQuality};
 
     #[test]
     fn new_project_pins_active_context() {
@@ -2113,9 +2100,11 @@ mod tests {
                 }),
             })
             .unwrap();
-        assert!(result
-            .commands
-            .contains(&RuntimeCommand::EnsureQualityLimit { project }));
+        assert!(
+            result
+                .commands
+                .contains(&RuntimeCommand::EnsureQualityLimit { project })
+        );
     }
 
     #[test]
@@ -2146,32 +2135,52 @@ mod tests {
         };
 
         // 添加带品质的插件（applyBestModules 用主品质添加的场景）
-        assert!(planning(&mut state, PlanningAction::AddEnumeratedModule {
-            module: legendary.clone(),
-        })
-        .changed);
+        assert!(
+            planning(
+                &mut state,
+                PlanningAction::AddEnumeratedModule {
+                    module: legendary.clone(),
+                }
+            )
+            .changed
+        );
         assert!(modules(&state).contains(&legendary));
         // 重复添加同品质被拒
-        assert!(!planning(&mut state, PlanningAction::AddEnumeratedModule {
-            module: legendary.clone(),
-        })
-        .changed);
+        assert!(
+            !planning(
+                &mut state,
+                PlanningAction::AddEnumeratedModule {
+                    module: legendary.clone(),
+                }
+            )
+            .changed
+        );
 
         // 前端旧逻辑：用 normal 删除 → 精确匹配失败，删不掉
-        assert!(!planning(&mut state, PlanningAction::RemoveEnumeratedModule {
-            module: normal.clone(),
-        })
-        .changed);
+        assert!(
+            !planning(
+                &mut state,
+                PlanningAction::RemoveEnumeratedModule {
+                    module: normal.clone(),
+                }
+            )
+            .changed
+        );
         assert!(
             modules(&state).contains(&legendary),
             "normal 品质删除不应影响 legendary 条目"
         );
 
         // 修复后的前端：用完整品质删除 → 成功
-        assert!(planning(&mut state, PlanningAction::RemoveEnumeratedModule {
-            module: legendary.clone(),
-        })
-        .changed);
+        assert!(
+            planning(
+                &mut state,
+                PlanningAction::RemoveEnumeratedModule {
+                    module: legendary.clone(),
+                }
+            )
+            .changed
+        );
         assert!(!modules(&state).contains(&legendary));
     }
 

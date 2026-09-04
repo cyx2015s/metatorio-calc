@@ -1076,11 +1076,20 @@ impl Default for Config {
                 // 星岩生成定义：space-location（直接概率）/ space-connection
                 // （spawn_points 按距离）两种形态都只关心 asteroid 实体名，
                 // 用同一个宽松 struct（其余字段忽略）。
-                map_type!("SpaceConnectionAsteroidSpawnDefinition", "crate::types::AsteroidSpawnDefinition"),
-                map_type!("SpaceLocationAsteroidSpawnDefinition", "crate::types::AsteroidSpawnDefinition"),
+                map_type!(
+                    "SpaceConnectionAsteroidSpawnDefinition",
+                    "crate::types::AsteroidSpawnDefinition"
+                ),
+                map_type!(
+                    "SpaceLocationAsteroidSpawnDefinition",
+                    "crate::types::AsteroidSpawnDefinition"
+                ),
                 // space-connection 的 spawn_points 是纯概率分布，可达性不关心，
                 // 但字段类型需能反序列化（宽松 struct，字段忽略）。
-                map_type!("SpaceConnectionAsteroidSpawnPoint", "crate::types::AsteroidSpawnDefinition"),
+                map_type!(
+                    "SpaceConnectionAsteroidSpawnPoint",
+                    "crate::types::AsteroidSpawnDefinition"
+                ),
                 // TriggerEffect union：手写枚举只保留生成资源/实体的变体
                 // （create-asteroid-chunk → 小星岩、create-entity），其余吸收
                 // 到 Other。字段由宽松的 TriggerEffects 承载（单/数组/空皆可，
@@ -1124,7 +1133,11 @@ pub const DEFAULT_FIELD_RULES: &[FieldRule] = &[
     skip!("EntityPrototype", "map_color"),
     skip!("EntityPrototype", "remove_decoratives"),
     // placeable_by：匿名 union（单个/数组 {item, count}），字段级指定自定义类型
-    ty!("EntityPrototype", "placeable_by", "crate::types::PlaceableBy"),
+    ty!(
+        "EntityPrototype",
+        "placeable_by",
+        "crate::types::PlaceableBy"
+    ),
     skip!("EntityPrototype", "alert_icon_scale"),
     skip!("EntityPrototype", "alert_icon_shift"),
     skip!("EntityPrototype", "ambient_sounds"),

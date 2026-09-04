@@ -6,8 +6,7 @@ use metatorio_runtime::message::{AppMessage, RuntimeCommand};
 use metatorio_runtime::solve::{Runtime, SolveStatus};
 use serde_json::json;
 
-const DEMO_DUMP: &str =
-    include_str!("../../../metatorio-app/src-tauri/dumps/demo_dump.json");
+const DEMO_DUMP: &str = include_str!("../../../metatorio-app/src-tauri/dumps/demo_dump.json");
 
 fn load_demo_runtime() -> Runtime {
     let dump: serde_json::Value = serde_json::from_str(DEMO_DUMP).unwrap();
@@ -49,97 +48,129 @@ fn frontend_json_one_click_demo_runs_end_to_end() {
     let mut runtime = load_demo_runtime();
 
     // 1. New project (exact TS shape).
-    let r = dispatch(&mut runtime, json!({
-        "scope": "application",
-        "action": { "new-project": { "name": "Demo project" } }
-    }));
+    let r = dispatch(
+        &mut runtime,
+        json!({
+            "scope": "application",
+            "action": { "new-project": { "name": "Demo project" } }
+        }),
+    );
     let _ = r;
     let project = runtime.state.document.projects[0].id;
 
     // 2. Add factory (struct variant: fields are wrapped under "action").
-    let r = dispatch(&mut runtime, json!({
-        "scope": "project",
-        "action": {
-            "project": project,
-            "action": { "add-factory": { "name": "Demo factory", "template": "empty" } }
-        }
-    }));
+    let r = dispatch(
+        &mut runtime,
+        json!({
+            "scope": "project",
+            "action": {
+                "project": project,
+                "action": { "add-factory": { "name": "Demo factory", "template": "empty" } }
+            }
+        }),
+    );
     let factory = runtime.state.project(project).unwrap().factories[0].id;
-    assert!(r.commands.contains(&RuntimeCommand::Recompute { project, factory }));
+    assert!(
+        r.commands
+            .contains(&RuntimeCommand::Recompute { project, factory })
+    );
 
     // 3. Add recipe mechanic.
-    dispatch(&mut runtime, json!({
-        "scope": "factory",
-        "action": {
-            "project": project,
-            "factory": factory,
-            "action": { "mechanic-list": { "add": { "kind": "recipe" } } }
-        }
-    }));
+    dispatch(
+        &mut runtime,
+        json!({
+            "scope": "factory",
+            "action": {
+                "project": project,
+                "factory": factory,
+                "action": { "mechanic-list": { "add": { "kind": "recipe" } } }
+            }
+        }),
+    );
     let mechanic = runtime.state.factory(project, factory).unwrap().mechanics[0].id;
 
     // 4. Set recipe + machine (exact TS shape; actions are kind-tagged).
-    dispatch(&mut runtime, json!({
-        "scope": "factory",
-        "action": {
-            "project": project,
-            "factory": factory,
+    dispatch(
+        &mut runtime,
+        json!({
+            "scope": "factory",
             "action": {
-                "mechanic": {
-                    "mechanic": mechanic,
-                    "action": { "recipe": { "set-recipe": { "recipe": { "id": "iron-gear-wheel", "quality": "normal" } } } }
-                }
-            }
-        }
-    }));
-    dispatch(&mut runtime, json!({
-        "scope": "factory",
-        "action": {
-            "project": project,
-            "factory": factory,
-            "action": {
-                "mechanic": {
-                    "mechanic": mechanic,
-                    "action": { "recipe": { "set-machine": { "machine": { "id": "assembling-machine-1", "quality": "normal" } } } }
-                }
-            }
-        }
-    }));
-
-    // 5. Add target.
-    dispatch(&mut runtime, json!({
-        "scope": "factory",
-        "action": {
-            "project": project,
-            "factory": factory,
-            "action": {
-                "flow": {
-                    "add-to-target": {
-                        "flow": { "Item": { "id": "iron-gear-wheel", "quality": "normal" } },
-                        "amount": 1
+                "project": project,
+                "factory": factory,
+                "action": {
+                    "mechanic": {
+                        "mechanic": mechanic,
+                        "action": { "recipe": { "set-recipe": { "recipe": { "id": "iron-gear-wheel", "quality": "normal" } } } }
                     }
                 }
             }
-        }
-    }));
+        }),
+    );
+    dispatch(
+        &mut runtime,
+        json!({
+            "scope": "factory",
+            "action": {
+                "project": project,
+                "factory": factory,
+                "action": {
+                    "mechanic": {
+                        "mechanic": mechanic,
+                        "action": { "recipe": { "set-machine": { "machine": { "id": "assembling-machine-1", "quality": "normal" } } } }
+                    }
+                }
+            }
+        }),
+    );
+
+    // 5. Add target.
+    dispatch(
+        &mut runtime,
+        json!({
+            "scope": "factory",
+            "action": {
+                "project": project,
+                "factory": factory,
+                "action": {
+                    "flow": {
+                        "add-to-target": {
+                            "flow": { "Item": { "id": "iron-gear-wheel", "quality": "normal" } },
+                            "amount": 1
+                        }
+                    }
+                }
+            }
+        }),
+    );
 
     // 6. Explicit recompute → must solve with the demo dump.
-    let r = dispatch(&mut runtime, json!({
-        "scope": "factory",
-        "action": {
-            "project": project,
-            "factory": factory,
-            "action": { "solve": "recompute" }
-        }
-    }));
-    assert!(r.commands.contains(&RuntimeCommand::Recompute { project, factory }));
+    let r = dispatch(
+        &mut runtime,
+        json!({
+            "scope": "factory",
+            "action": {
+                "project": project,
+                "factory": factory,
+                "action": { "solve": "recompute" }
+            }
+        }),
+    );
+    assert!(
+        r.commands
+            .contains(&RuntimeCommand::Recompute { project, factory })
+    );
 
     let solve = runtime.solve_factory(project, factory).unwrap();
-    let SolveStatus::Solved { mechanics, flows, .. } = solve.status else {
+    let SolveStatus::Solved {
+        mechanics, flows, ..
+    } = solve.status
+    else {
         panic!("expected the demo factory to solve, got: {solve:?}");
     };
     assert!(
-        mechanics.iter().any(|item| item.mechanic == mechanic && item.amount > 0.0),
+        mechanics
+            .iter()
+            .any(|item| item.mechanic == mechanic && item.amount > 0.0),
         "recipe mechanic must produce: {mechanics:?}"
     );
     assert!(
@@ -148,7 +179,10 @@ fn frontend_json_one_click_demo_runs_end_to_end() {
             .any(|item| item.mechanic == mechanic && item.cost > 0.0),
         "每台实例必须有正成本: {mechanics:?}"
     );
-    assert!(flows.iter().any(|item| item.amount > 0.0), "flows: {flows:?}");
+    assert!(
+        flows.iter().any(|item| item.amount > 0.0),
+        "flows: {flows:?}"
+    );
 }
 
 #[test]
@@ -160,62 +194,77 @@ fn frontend_json_supports_all_dual_var_flow_kinds() {
         runtime.dispatch(message).unwrap()
     };
 
-    dispatch(&mut runtime, json!({
-        "scope": "application",
-        "action": { "new-project": { "name": "flows" } }
-    }));
+    dispatch(
+        &mut runtime,
+        json!({
+            "scope": "application",
+            "action": { "new-project": { "name": "flows" } }
+        }),
+    );
     let project = runtime.state.document.projects[0].id;
-    dispatch(&mut runtime, json!({
-        "scope": "project",
-        "action": { "project": project, "action": { "add-factory": { "name": "f", "template": "empty" } } }
-    }));
+    dispatch(
+        &mut runtime,
+        json!({
+            "scope": "project",
+            "action": { "project": project, "action": { "add-factory": { "name": "f", "template": "empty" } } }
+        }),
+    );
     let factory = runtime.state.project(project).unwrap().factories[0].id;
 
     // 流体目标（单点温度）
-    dispatch(&mut runtime, json!({
-        "scope": "factory",
-        "action": {
-            "project": project,
-            "factory": factory,
+    dispatch(
+        &mut runtime,
+        json!({
+            "scope": "factory",
             "action": {
-                "flow": {
-                    "add-to-target": {
-                        "flow": { "Fluid": { "name": "water", "temperature": [15, 15] } },
-                        "amount": 100
+                "project": project,
+                "factory": factory,
+                "action": {
+                    "flow": {
+                        "add-to-target": {
+                            "flow": { "Fluid": { "name": "water", "temperature": [15, 15] } },
+                            "amount": 100
+                        }
                     }
                 }
             }
-        }
-    }));
+        }),
+    );
     // 电外部输入（unit 变体 = 裸字符串）
-    dispatch(&mut runtime, json!({
-        "scope": "factory",
-        "action": {
-            "project": project,
-            "factory": factory,
+    dispatch(
+        &mut runtime,
+        json!({
+            "scope": "factory",
             "action": {
-                "external-input": {
-                    "add": { "input": { "id": 0, "flow": "Electricity", "penalty": 1 } }
-                }
-            }
-        }
-    }));
-    // 火箭运力目标
-    dispatch(&mut runtime, json!({
-        "scope": "factory",
-        "action": {
-            "project": project,
-            "factory": factory,
-            "action": {
-                "flow": {
-                    "add-to-target": {
-                        "flow": "RocketWeightCapacity",
-                        "amount": 10
+                "project": project,
+                "factory": factory,
+                "action": {
+                    "external-input": {
+                        "add": { "input": { "id": 0, "flow": "Electricity", "penalty": 1 } }
                     }
                 }
             }
-        }
-    }));
+        }),
+    );
+    // 火箭运力目标
+    dispatch(
+        &mut runtime,
+        json!({
+            "scope": "factory",
+            "action": {
+                "project": project,
+                "factory": factory,
+                "action": {
+                    "flow": {
+                        "add-to-target": {
+                            "flow": "RocketWeightCapacity",
+                            "amount": 10
+                        }
+                    }
+                }
+            }
+        }),
+    );
 
     let factory = runtime.state.factory(project, factory).unwrap();
     assert_eq!(
@@ -225,7 +274,10 @@ fn frontend_json_supports_all_dual_var_flow_kinds() {
             temperature: [15, 15]
         }
     );
-    assert_eq!(factory.targets[1].flow, metatorio_core::DualVar::RocketWeightCapacity);
+    assert_eq!(
+        factory.targets[1].flow,
+        metatorio_core::DualVar::RocketWeightCapacity
+    );
     assert_eq!(
         factory.external_inputs[0].flow,
         metatorio_core::DualVar::Electricity

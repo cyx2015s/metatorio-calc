@@ -993,13 +993,9 @@ pub enum TechnologyTrigger {
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum TriggerEffect {
     /// 生成小一号星岩：`asteroid_name` 指向生成的星岩实体。
-    CreateAsteroidChunk {
-        asteroid_name: Option<String>,
-    },
+    CreateAsteroidChunk { asteroid_name: Option<String> },
     /// 生成实体：`entity_name` 指向生成的实体。
-    CreateEntity {
-        entity_name: Option<String>,
-    },
+    CreateEntity { entity_name: Option<String> },
     /// 其他不影响生产/可达性的变体（爆炸/火/烟/粒子/声音/伤害等）。
     #[serde(other)]
     Other,
@@ -1043,11 +1039,9 @@ impl<'de> serde::Deserialize<'de> for TriggerEffects {
                 .into_iter()
                 .filter_map(|item| serde_json::from_value::<TriggerEffect>(item).ok())
                 .collect(),
-            other => {
-                serde_json::from_value::<TriggerEffect>(other)
-                    .map(|effect| vec![effect])
-                    .unwrap_or_default()
-            }
+            other => serde_json::from_value::<TriggerEffect>(other)
+                .map(|effect| vec![effect])
+                .unwrap_or_default(),
         };
         Ok(TriggerEffects(effects))
     }

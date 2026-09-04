@@ -20,16 +20,16 @@ use std::{
 
 use metatorio_core::{Accessible, DualVar, IdWithQuality, Mechanic};
 use metatorio_data::store::{PrototypeGroup, PrototypeRecord, PrototypeStore};
+use metatorio_data::types::{Ingredient, Product, TechnologyMaxLevel};
 use metatorio_data::{
     BeaconComponent, BoilerComponent, BurnerGeneratorComponent, CraftingMachineComponent,
     EntityComponent, FluidComponent, GeneratorComponent, ItemComponent, MiningDrillComponent,
     ModuleComponent, PrototypeBaseComponent, QualityComponent, ReactorComponent, RecipeComponent,
     ResourceEntityComponent, TechnologyComponent,
 };
-use metatorio_data::types::{Ingredient, Product, TechnologyMaxLevel};
 use metatorio_runtime::{
     auto_plan,
-    document::{AppDocument},
+    document::AppDocument,
     id::{FactoryId, MechanicId, ProjectId},
     message::{
         AppMessage, FactoryAction, MechanicAction, MiningMechanicAction, ModuleAction,
@@ -40,8 +40,8 @@ use metatorio_runtime::{
         effective_resource_category, fluid_fuel_info, fluid_tags, item_fuel_info, item_tags,
         surface_condition_text,
     },
-    solve::{Runtime},
-    state::{DispatchResult},
+    solve::Runtime,
+    state::DispatchResult,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -402,7 +402,8 @@ fn parse_locale_category(raw: &[u8], category: &str) -> HashMap<String, String> 
     let mut map = HashMap::new();
     for (name, label) in object {
         if let Some(label) = label.as_str() {
-            map.entry(format!("{category}/{name}")).or_insert_with(|| label.to_string());
+            map.entry(format!("{category}/{name}"))
+                .or_insert_with(|| label.to_string());
         }
     }
     map
@@ -496,23 +497,23 @@ fn localized_name(map: &HashMap<String, String>, kind: &str, name: &str) -> Stri
 
 // ── Context loading / registration ────────────────────────────────
 
-fn ensure_context_loaded(
-    state: &AppState,
-    runtime: &mut Runtime,
-    id: &str,
-) -> Result<(), String> {
+fn ensure_context_loaded(state: &AppState, runtime: &mut Runtime, id: &str) -> Result<(), String> {
     if runtime.context_store_by_id(id).is_some() {
         return Ok(());
     }
     let dump_path = {
-        let registry = state.contexts.lock().map_err(|_| "contexts 锁损坏".to_string())?;
+        let registry = state
+            .contexts
+            .lock()
+            .map_err(|_| "contexts 锁损坏".to_string())?;
         if !registry.meta.contains_key(id) {
             return Err(format!("上下文 {id} 不存在于缓存"));
         }
         registry.dump_path(id)
     };
     let raw = std::fs::read(&dump_path).map_err(|error| error.to_string())?;
-    let dump: serde_json::Value = serde_json::from_slice(&raw).map_err(|error| error.to_string())?;
+    let dump: serde_json::Value =
+        serde_json::from_slice(&raw).map_err(|error| error.to_string())?;
     let prototype = PrototypeStore::load(&dump).map_err(|error| error.to_string())?;
     runtime.install_context(id.to_string(), prototype);
     Ok(())
@@ -557,7 +558,10 @@ fn register_context(
 ) -> Result<ContextInfo, String> {
     let id = context_id_of(raw);
     {
-        let mut registry = state.contexts.lock().map_err(|_| "contexts 锁损坏".to_string())?;
+        let mut registry = state
+            .contexts
+            .lock()
+            .map_err(|_| "contexts 锁损坏".to_string())?;
         let is_new = !registry.meta.contains_key(&id);
         if is_new {
             registry.register(id.clone(), name, source);
@@ -619,7 +623,9 @@ fn context_info_from(
                     .collect()
             })
             .unwrap_or_default(),
-        icon_root: icon_root.is_dir().then(|| icon_root.to_string_lossy().to_string()),
+        icon_root: icon_root
+            .is_dir()
+            .then(|| icon_root.to_string_lossy().to_string()),
         active: runtime.active_context() == Some(id),
     })
 }
@@ -723,7 +729,12 @@ fn load_game_context_impl(
 
     run_game(&exe, &config, &["--dump-data"], &extra)?;
     run_game(&exe, &config, &["--dump-prototype-locale"], &extra)?;
-    run_game(&exe, &config, &["--dump-icon-sprites", "--disable-audio"], &extra)?;
+    run_game(
+        &exe,
+        &config,
+        &["--dump-icon-sprites", "--disable-audio"],
+        &extra,
+    )?;
 
     let script_output = export.join("script-output");
     let dump_path = script_output.join("data-raw-dump.json");
@@ -741,7 +752,9 @@ fn load_game_context_impl(
         .unwrap_or_else(|| "vanilla".to_string());
     let source = format!(
         "exe: {executable_path}{}",
-        mod_dir.map(|dir| format!(", mods: {dir}")).unwrap_or_default()
+        mod_dir
+            .map(|dir| format!(", mods: {dir}"))
+            .unwrap_or_default()
     );
     let icon_src = script_output.clone();
     // 翻译：`--dump-prototype-locale` 在 script-output 下写出多个
@@ -961,7 +974,12 @@ async fn delete_context(app: AppHandle, id: String) -> Result<ContextList, Strin
 /// (from `--dump-icon-sprites`)。图标在注册时已移入/拷入缓存，缓存自包含。
 /// 前端显式传入 `context_id`（当前选中项目绑定的上下文，否则为激活上下文）。
 #[tauri::command]
-fn icon(state: State<'_, AppState>, ty: String, name: String, context_id: String) -> Option<Vec<u8>> {
+fn icon(
+    state: State<'_, AppState>,
+    ty: String,
+    name: String,
+    context_id: String,
+) -> Option<Vec<u8>> {
     if context_id.is_empty() {
         return None;
     }
@@ -1019,7 +1037,9 @@ async fn catalog_index(app: AppHandle, context_id: String) -> Result<CatalogInde
             });
         }
         ensure_context_loaded(&state, &mut runtime, &context_id)?;
-        let store = runtime.context_store_by_id(&context_id).ok_or("上下文未载入")?;
+        let store = runtime
+            .context_store_by_id(&context_id)
+            .ok_or("上下文未载入")?;
         let locale = locale_map_of(&state, &context_id);
         Ok(CatalogIndex {
             context_id: context_id.clone(),
@@ -1042,8 +1062,11 @@ fn best_modules(state: State<'_, AppState>, context_id: String) -> Result<Vec<Su
         return Ok(Vec::new());
     }
     ensure_context_loaded(&state, &mut runtime, &context_id)?;
-    let store = runtime.context_store_by_id(&context_id).ok_or("上下文未载入")?;
-    let mut best: std::collections::BTreeMap<String, (u32, String)> = std::collections::BTreeMap::new();
+    let store = runtime
+        .context_store_by_id(&context_id)
+        .ok_or("上下文未载入")?;
+    let mut best: std::collections::BTreeMap<String, (u32, String)> =
+        std::collections::BTreeMap::new();
     for record in store.group(PrototypeGroup::Item) {
         let Some(module) = record.component::<ModuleComponent>() else {
             continue;
@@ -1086,13 +1109,18 @@ async fn implicit_sources(
                 .state
                 .factory(project, factory)
                 .map_err(|error| error.to_string())?;
-            (factory_doc.settings.planet.clone(), factory_doc.external_inputs.clone())
+            (
+                factory_doc.settings.planet.clone(),
+                factory_doc.external_inputs.clone(),
+            )
         };
         let Some(planet) = planet else {
             return Ok(Vec::new());
         };
         ensure_context_for_project(&state, &mut runtime, project)?;
-        let store = runtime.context_store(project).map_err(|error| error.to_string())?;
+        let store = runtime
+            .context_store(project)
+            .map_err(|error| error.to_string())?;
         let mut implicit = metatorio_runtime::planet::planet_autoplaced_flows(store, &planet);
         for input in &external_inputs {
             implicit.shift_remove(&input.flow);
@@ -1117,7 +1145,11 @@ pub struct Suggestion {
 
 /// 建议系统：为一条流生成候选机制（对应 egui 的"推荐配方/矿点"模态框）。
 #[tauri::command]
-fn suggest(state: State<'_, AppState>, context_id: String, flow: DualVar) -> Result<Vec<Suggestion>, String> {
+fn suggest(
+    state: State<'_, AppState>,
+    context_id: String,
+    flow: DualVar,
+) -> Result<Vec<Suggestion>, String> {
     let mut runtime = state
         .runtime
         .lock()
@@ -1126,7 +1158,9 @@ fn suggest(state: State<'_, AppState>, context_id: String, flow: DualVar) -> Res
         return Ok(Vec::new());
     }
     ensure_context_loaded(&state, &mut runtime, &context_id)?;
-    let store = runtime.context_store_by_id(&context_id).ok_or("上下文未载入")?;
+    let store = runtime
+        .context_store_by_id(&context_id)
+        .ok_or("上下文未载入")?;
     Ok(suggest_for_flow(store, flow))
 }
 
@@ -1167,8 +1201,11 @@ fn mechanic_flow(
         .iter()
         .find(|entry| entry.id == mechanic)
         .ok_or("机制不存在")?;
-    let mut game =
-        metatorio_runtime::solve::make_game_state_with_accessibility(&store, &project_doc, &accessibility);
+    let mut game = metatorio_runtime::solve::make_game_state_with_accessibility(
+        &store,
+        &project_doc,
+        &accessibility,
+    );
     // 与求解路径一致：应用当前工厂的星球/地表环境（太阳能系数、昼夜周期）。
     metatorio_runtime::solve::apply_environment_to_game_state(
         &store,
@@ -1177,10 +1214,8 @@ fn mechanic_flow(
         factory_doc.settings.surface.as_deref(),
     );
     let context = metatorio_core::Context::new(&store, &game);
-    let expansion = metatorio_core::expand::expand(
-        std::iter::once((mechanic, &entry.mechanic)),
-        &context,
-    );
+    let expansion =
+        metatorio_core::expand::expand(std::iter::once((mechanic, &entry.mechanic)), &context);
     // 合并所有展开变量的流（同 config 的流体插值端求和）。
     let mut flow: metatorio_core::prim_var::Flow = Default::default();
     for variable in expansion.variables {
@@ -1230,8 +1265,11 @@ fn solar_balance(
     let Mechanic::Solar(mechanic) = &entry.mechanic else {
         return Ok(None);
     };
-    let mut game =
-        metatorio_runtime::solve::make_game_state_with_accessibility(&store, &project_doc, &accessibility);
+    let mut game = metatorio_runtime::solve::make_game_state_with_accessibility(
+        &store,
+        &project_doc,
+        &accessibility,
+    );
     metatorio_runtime::solve::apply_environment_to_game_state(
         &store,
         &mut game,
@@ -1269,7 +1307,9 @@ fn allowed_modules(
         return Ok(Vec::new());
     }
     ensure_context_loaded(&state, &mut runtime, &context_id)?;
-    let store = runtime.context_store_by_id(&context_id).ok_or("上下文未载入")?;
+    let store = runtime
+        .context_store_by_id(&context_id)
+        .ok_or("上下文未载入")?;
     let Some(record) = store.get(PrototypeGroup::Entity, &machine) else {
         return Ok(Vec::new());
     };
@@ -1413,7 +1453,9 @@ fn suggest_for_flow(store: &PrototypeStore, flow: DualVar) -> Vec<Suggestion> {
                     continue;
                 };
                 if item.fuel_value().amount > 0.0
-                    && category.iter().any(|candidate| candidate == &item.fuel_category)
+                    && category
+                        .iter()
+                        .any(|candidate| candidate == &item.fuel_category)
                 {
                     push("item-fuel", &record.name, "producer");
                 }
@@ -1423,7 +1465,6 @@ fn suggest_for_flow(store: &PrototypeStore, flow: DualVar) -> Vec<Suggestion> {
     }
     out
 }
-
 
 /// 科技的最低等级：名字以 `-<number>` 结尾时取该数字（Factorio 规则），
 /// 否则为 0（非升级档科技）。
@@ -1465,7 +1506,10 @@ fn burner_fuel_categories_of(source: &metatorio_data::types::EnergySource) -> Ve
     }
 }
 
-fn catalog_index_from_store(store: &PrototypeStore, locale: &HashMap<String, String>) -> Vec<IndexEntry> {
+fn catalog_index_from_store(
+    store: &PrototypeStore,
+    locale: &HashMap<String, String>,
+) -> Vec<IndexEntry> {
     let mut out: Vec<IndexEntry> = Vec::new();
     // 有 order_info 的组：大组 → 小组 → 条目（recipe/entity fallback 已在
     // order_info 中生效）
@@ -1707,7 +1751,9 @@ fn prototype_detail(
         return Ok(None);
     }
     ensure_context_loaded(&state, &mut runtime, &context_id)?;
-    let store = runtime.context_store_by_id(&context_id).ok_or("上下文未载入")?;
+    let store = runtime
+        .context_store_by_id(&context_id)
+        .ok_or("上下文未载入")?;
     let record = match kind.as_str() {
         "item" | "module" => store.get(PrototypeGroup::Item, &name),
         "fluid" => store.get(PrototypeGroup::Fluid, &name),
@@ -1776,19 +1822,15 @@ fn prototype_detail(
     if let Some(drill) = record.component::<MiningDrillComponent>() {
         detail.categories = drill.resource_categories.clone();
         detail.module_slots = drill.module_slots;
-        detail.allowed_module_categories = drill
-            .allowed_module_categories
-            .clone()
-            .unwrap_or_default();
+        detail.allowed_module_categories =
+            drill.allowed_module_categories.clone().unwrap_or_default();
         detail.machine_energy_source = Some(energy_source_kind(&drill.energy_source).to_string());
         detail.burner_fuel_categories = burner_fuel_categories_of(&drill.energy_source);
     }
     if let Some(beacon) = record.component::<BeaconComponent>() {
         detail.beacon_module_slots = Some(beacon.module_slots);
-        detail.allowed_module_categories = beacon
-            .allowed_module_categories
-            .clone()
-            .unwrap_or_default();
+        detail.allowed_module_categories =
+            beacon.allowed_module_categories.clone().unwrap_or_default();
     }
     if let Some(gen) = record.component::<GeneratorComponent>() {
         detail.effectivity = Some(gen.effectivity);
@@ -1844,8 +1886,7 @@ fn ingredient_flow(ingredient: &metatorio_data::types::Ingredient) -> FlowAmount
             amount: f64::from(item.amount),
             quality_min: item.quality_min.clone(),
             quality_max: item.quality_max.clone(),
-            quality_change: (item.quality_change != 0)
-                .then_some(i32::from(item.quality_change)),
+            quality_change: (item.quality_change != 0).then_some(i32::from(item.quality_change)),
             ..Default::default()
         },
         Ingredient::Fluid(fluid) => FlowAmount {
@@ -1914,7 +1955,9 @@ async fn dispatch(app: AppHandle, message: AppMessage) -> Result<DispatchResult,
             .runtime
             .lock()
             .map_err(|_| "runtime lock poisoned".to_string())?;
-        let outcome = runtime.dispatch(message).map_err(|error| error.to_string())?;
+        let outcome = runtime
+            .dispatch(message)
+            .map_err(|error| error.to_string())?;
         for command in &outcome.commands {
             execute_command(&app, &state, &mut runtime, command);
         }
@@ -1927,8 +1970,7 @@ async fn dispatch(app: AppHandle, message: AppMessage) -> Result<DispatchResult,
 /// Current serializable document snapshot.
 #[tauri::command]
 async fn get_document(app: AppHandle) -> Result<AppDocument, String> {
-    run_blocking(app, |runtime| Ok(runtime.state.document.clone()))
-        .await
+    run_blocking(app, |runtime| Ok(runtime.state.document.clone())).await
 }
 
 /// 在阻塞线程池里以 `&mut Runtime` 执行一段逻辑（用于把重计算移出主线程）。
@@ -2072,8 +2114,13 @@ async fn open_project_dialog(app: AppHandle) -> Result<Option<AppDocument>, Stri
         .runtime
         .lock()
         .map_err(|_| "runtime lock poisoned".to_string())?;
-    let before: std::collections::HashSet<ProjectId> =
-        runtime.state.document.projects.iter().map(|p| p.id).collect();
+    let before: std::collections::HashSet<ProjectId> = runtime
+        .state
+        .document
+        .projects
+        .iter()
+        .map(|p| p.id)
+        .collect();
     runtime
         .load_document_file(&path)
         .map_err(|error| error.to_string())?;
@@ -2089,7 +2136,10 @@ async fn open_project_dialog(app: AppHandle) -> Result<Option<AppDocument>, Stri
 }
 
 #[tauri::command]
-async fn save_project_as_dialog(app: AppHandle, project: ProjectId) -> Result<Option<String>, String> {
+async fn save_project_as_dialog(
+    app: AppHandle,
+    project: ProjectId,
+) -> Result<Option<String>, String> {
     let picked = app
         .dialog()
         .file()
@@ -2142,12 +2192,7 @@ async fn save_project(app: AppHandle, project: ProjectId) -> Result<Option<Strin
 /// 项目记忆的保存路径（未保存过返回 null），供界面显示"保存位置"。
 #[tauri::command]
 fn project_save_path(state: State<'_, AppState>, project: ProjectId) -> Option<String> {
-    state
-        .project_paths
-        .lock()
-        .ok()?
-        .get(&project)
-        .cloned()
+    state.project_paths.lock().ok()?.get(&project).cloned()
 }
 
 // ── Side effects ──────────────────────────────────────────────────
@@ -2201,9 +2246,11 @@ fn clamp_modules(
         return Ok(());
     }
     let action = match &entry.mechanic {
-        Mechanic::Recipe(_) => MechanicAction::Recipe(RecipeMechanicAction::Module(
-            ModuleAction::ClampModules { max },
-        )),
+        Mechanic::Recipe(_) => {
+            MechanicAction::Recipe(RecipeMechanicAction::Module(ModuleAction::ClampModules {
+                max,
+            }))
+        }
         _ => MechanicAction::Mining(MiningMechanicAction::Module(ModuleAction::ClampModules {
             max,
         })),
@@ -2226,7 +2273,10 @@ fn emit<T: Serialize + Clone>(app: &AppHandle, event: &str, payload: T) {
 
 /// 在实体组里挑选一台机器：优先项目规划偏好的机器偏好，其次按给定
 /// 排序分数（如 crafting_speed）取最优；都不满足返回 None。
-fn pick_entity<F: Fn(&metatorio_data::store::PrototypeRecord) -> bool, S: Fn(&metatorio_data::store::PrototypeRecord) -> f64>(
+fn pick_entity<
+    F: Fn(&metatorio_data::store::PrototypeRecord) -> bool,
+    S: Fn(&metatorio_data::store::PrototypeRecord) -> f64,
+>(
     store: &PrototypeStore,
     prefs: &[IdWithQuality],
     matches: F,
@@ -2254,11 +2304,17 @@ fn pick_entity<F: Fn(&metatorio_data::store::PrototypeRecord) -> bool, S: Fn(&me
 }
 
 fn categories_overlap(required: &[String], available: &[String]) -> bool {
-    required.is_empty() || available.iter().any(|available| required.contains(available))
+    required.is_empty()
+        || available
+            .iter()
+            .any(|available| required.contains(available))
 }
 
 fn quality_level_of(qualities: &[String], name: &str) -> usize {
-    qualities.iter().position(|candidate| candidate == name).unwrap_or(0)
+    qualities
+        .iter()
+        .position(|candidate| candidate == name)
+        .unwrap_or(0)
 }
 
 /// 品质为空（新机制/首次自动推断尚未设过品质）时归一化为 "normal"，
@@ -2446,9 +2502,11 @@ fn ensure_machine_compat(
                 &store,
                 &prefs,
                 |record| {
-                    record.component::<CraftingMachineComponent>().is_some_and(|machine| {
-                        categories_overlap(&recipe_categories, &machine.crafting_categories)
-                    })
+                    record
+                        .component::<CraftingMachineComponent>()
+                        .is_some_and(|machine| {
+                            categories_overlap(&recipe_categories, &machine.crafting_categories)
+                        })
                 },
                 |record| {
                     record
@@ -2458,7 +2516,8 @@ fn ensure_machine_compat(
                 },
             );
             if let Some(machine) = pick {
-                let machine = IdWithQuality::new(machine, quality_or_normal(&recipe.machine.quality));
+                let machine =
+                    IdWithQuality::new(machine, quality_or_normal(&recipe.machine.quality));
                 runtime
                     .dispatch(AppMessage::Factory {
                         project,
@@ -2498,7 +2557,8 @@ fn ensure_machine_compat(
                 |_| 0.0,
             );
             if let Some(machine) = pick {
-                let machine = IdWithQuality::new(machine, quality_or_normal(&mining.machine.quality));
+                let machine =
+                    IdWithQuality::new(machine, quality_or_normal(&mining.machine.quality));
                 runtime
                     .dispatch(AppMessage::Factory {
                         project,
@@ -2599,17 +2659,13 @@ fn execute_command(
         }
         RuntimeCommand::LoadCachedContext => {
             // 恢复最近创建的上下文。
-            let newest = state
-                .contexts
-                .lock()
-                .ok()
-                .and_then(|registry| {
-                    registry
-                        .meta
-                        .values()
-                        .max_by_key(|meta| meta.created_at)
-                        .map(|meta| meta.id.clone())
-                });
+            let newest = state.contexts.lock().ok().and_then(|registry| {
+                registry
+                    .meta
+                    .values()
+                    .max_by_key(|meta| meta.created_at)
+                    .map(|meta| meta.id.clone())
+            });
             match newest {
                 Some(id) => match ensure_context_loaded(state, runtime, &id) {
                     Ok(()) => {
@@ -2658,7 +2714,6 @@ fn ensure_context_for_project(
     Ok(())
 }
 
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -2678,17 +2733,13 @@ pub fn run() {
                 registry.dir = dir;
                 registry.scan();
             }
-            let newest = state
-                .contexts
-                .lock()
-                .ok()
-                .and_then(|registry| {
-                    registry
-                        .meta
-                        .values()
-                        .max_by_key(|meta| meta.created_at)
-                        .map(|meta| meta.id.clone())
-                });
+            let newest = state.contexts.lock().ok().and_then(|registry| {
+                registry
+                    .meta
+                    .values()
+                    .max_by_key(|meta| meta.created_at)
+                    .map(|meta| meta.id.clone())
+            });
             if let Some(id) = newest {
                 let mut runtime = state.runtime.lock().expect("runtime lock");
                 if let Err(error) = ensure_context_loaded(&state, &mut runtime, &id) {
@@ -2736,6 +2787,8 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    use metatorio_runtime::SolveStatus;
+
     use super::*;
 
     #[test]
@@ -2782,11 +2835,15 @@ mod tests {
         };
 
         // 仓库内真实 dump（相对路径，测试可移植；不依赖机器上的 %APPDATA%）。
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/data-raw-dump.json");
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/data-raw-dump.json"
+        );
         if !std::path::Path::new(path).exists() {
             eprintln!("[skip] 无真实 dump（{path}），跳过");
             return;
-        }        let raw = std::fs::read(path).expect("读 dump");
+        }
+        let raw = std::fs::read(path).expect("读 dump");
         let dump: serde_json::Value = serde_json::from_slice(&raw).expect("解析 dump");
         let store = PrototypeStore::load(&dump).expect("dump 加载失败");
 
@@ -2874,12 +2931,7 @@ mod tests {
         // 工厂已有第一次的机制，但目标倍率变化不应影响可解性）。
         // 同一目标跑两次验证求解确定性（用户 0.001 可解、测试不可解，
         // 若两次不一致说明非确定性）。
-        fn set_target(
-            runtime: &mut Runtime,
-            project: ProjectId,
-            factory: FactoryId,
-            amount: f64,
-        ) {
+        fn set_target(runtime: &mut Runtime, project: ProjectId, factory: FactoryId, amount: f64) {
             // 复刻 UI 修改目标金额（SetAmount，目标 id 不变——与删除重建
             // 不同，后者会改变目标列表顺序影响 LP 目标表达式结构）。
             let targets = runtime
@@ -2906,24 +2958,22 @@ mod tests {
                     .dispatch(AppMessage::Factory {
                         project,
                         factory,
-                        action: FactoryAction::Flow(metatorio_runtime::message::FlowAction::AddToTarget {
-                            flow: DualVar::Item(IdWithQuality::new(
-                                "electromagnetic-plant",
-                                "legendary",
-                            )),
-                            amount,
-                        }),
+                        action: FactoryAction::Flow(
+                            metatorio_runtime::message::FlowAction::AddToTarget {
+                                flow: DualVar::Item(IdWithQuality::new(
+                                    "electromagnetic-plant",
+                                    "legendary",
+                                )),
+                                amount,
+                            },
+                        ),
                     })
                     .unwrap();
             }
         }
 
         // 每个目标用新工厂隔离（auto_plan 会替换机制），验证确定性。
-        fn make_factory(
-            runtime: &mut Runtime,
-            project: ProjectId,
-            amount: f64,
-        ) -> FactoryId {
+        fn make_factory(runtime: &mut Runtime, project: ProjectId, amount: f64) -> FactoryId {
             runtime
                 .dispatch(AppMessage::Project {
                     project,
@@ -2933,7 +2983,14 @@ mod tests {
                     },
                 })
                 .unwrap();
-            let factory = runtime.state.project(project).unwrap().factories.last().unwrap().id;
+            let factory = runtime
+                .state
+                .project(project)
+                .unwrap()
+                .factories
+                .last()
+                .unwrap()
+                .id;
             runtime
                 .dispatch(AppMessage::Factory {
                     project,

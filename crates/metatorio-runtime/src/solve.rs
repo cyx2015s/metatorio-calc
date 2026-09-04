@@ -1,8 +1,10 @@
 use std::{collections::HashMap, fs::File, path::Path, sync::Arc};
 
-use metatorio_core::{Accessibility, AccessibilityOptions, Accessible, Context, DualVar, Flow, GameState};
-use metatorio_data::{FluidComponent, LabComponent, PrototypeBaseComponent};
+use metatorio_core::{
+    Accessibility, AccessibilityOptions, Accessible, Context, DualVar, Flow, GameState,
+};
 use metatorio_data::store::{PrototypeGroup, PrototypeStore};
+use metatorio_data::{FluidComponent, LabComponent, PrototypeBaseComponent};
 use metatorio_solver::{AIndexMap, SolverData, SolverSolution, TargetSpec};
 use serde::{Deserialize, Serialize};
 
@@ -12,7 +14,7 @@ use crate::document::{
 };
 use crate::id::{FactoryId, MechanicId, ProjectId};
 use crate::message::{
-    ApplicationAction, AppMessage, CleanupAction, FactoryAction, MechanicListAction, ProjectAction,
+    AppMessage, ApplicationAction, CleanupAction, FactoryAction, MechanicListAction, ProjectAction,
     RuntimeCommand,
 };
 use crate::state::{DispatchResult, RuntimeError, RuntimeState};
@@ -109,7 +111,6 @@ pub struct RecipeProductivityView {
     pub source: String,
 }
 
-
 /// Tauri-independent application runtime.  Tauri commands can own this value
 /// behind a mutex and forward its commands/events to the frontend.
 ///
@@ -200,10 +201,7 @@ impl Runtime {
     /// then the active context.
     pub fn context_store(&self, project_id: ProjectId) -> Result<&PrototypeStore, RuntimeError> {
         let project = self.state.project(project_id)?;
-        let context_id = project
-            .context_id
-            .as_ref()
-            .or(self.active_context.as_ref());
+        let context_id = project.context_id.as_ref().or(self.active_context.as_ref());
         match context_id {
             Some(id) => self
                 .contexts
@@ -241,7 +239,10 @@ impl Runtime {
     }
 
     /// Cached graph for a project's context (convenience).
-    fn graph_for_project(&mut self, project_id: ProjectId) -> Result<Arc<metatorio_core::GraphData>, RuntimeError> {
+    fn graph_for_project(
+        &mut self,
+        project_id: ProjectId,
+    ) -> Result<Arc<metatorio_core::GraphData>, RuntimeError> {
         let context_id = self.context_id_for(project_id)?;
         Ok(self.graph_for_context(&context_id))
     }
@@ -266,8 +267,7 @@ impl Runtime {
             let settings = &self.state.project(project_id)?.settings;
             accessibility_options(settings)
         };
-        let result =
-            metatorio_core::compute_accessibility_with_graph(store, &options, &graph);
+        let result = metatorio_core::compute_accessibility_with_graph(store, &options, &graph);
         self.accessibilities.insert(project_id, result.clone());
         Ok(result)
     }
@@ -424,9 +424,7 @@ impl Runtime {
         let document: AppDocument = if crate::migrate::is_old_project_format(&value) {
             // 当前激活上下文 → 品质顺序 + 绑定 id + 里程碑节点分类。
             let context_id = self.active_context.clone();
-            let store = context_id
-                .as_deref()
-                .and_then(|id| self.contexts.get(id));
+            let store = context_id.as_deref().and_then(|id| self.contexts.get(id));
             let quality_order = store
                 .map(|s| s.quality_order().to_vec())
                 .unwrap_or_default();
@@ -506,8 +504,7 @@ impl Runtime {
         let accessibility = self.project_accessibility(project_id)?;
         let game = make_game_state_with_accessibility(&store, &project_doc, &accessibility);
         let context = metatorio_core::Context::new(&store, &game);
-        let quality_level =
-            |name: &str| game.qualities.iter().position(|c| c == name).unwrap_or(0);
+        let quality_level = |name: &str| game.qualities.iter().position(|c| c == name).unwrap_or(0);
         let options = crate::auto_plan::EnumerateOptions {
             alternative_count: project_doc.planning.alternative_count,
             machine_preferences: project_doc.planning.machine_preferences.clone(),
@@ -536,7 +533,10 @@ impl Runtime {
 
         // 展开全部候选为一个 LP。
         let expansion = metatorio_core::expand::expand(
-            candidates.iter().enumerate().map(|(index, mechanic)| (index as u64, mechanic)),
+            candidates
+                .iter()
+                .enumerate()
+                .map(|(index, mechanic)| (index as u64, mechanic)),
             &context,
         );
         let mut variant_counts: HashMap<MechanicId, u16> = HashMap::new();
@@ -579,17 +579,22 @@ impl Runtime {
         problem.strict_sink = factory_doc.strict_sink;
         problem
             .target
-            .extend(factory_doc.target_expressions.iter().map(|expression| TargetSpec {
-                constant: expression.constant,
-                coefficients: expression
-                    .terms
-                    .iter()
-                    .map(|term| (term.flow.clone(), term.coefficient))
-                    .collect(),
+            .extend(factory_doc.target_expressions.iter().map(|expression| {
+                TargetSpec {
+                    constant: expression.constant,
+                    coefficients: expression
+                        .terms
+                        .iter()
+                        .map(|term| (term.flow.clone(), term.coefficient))
+                        .collect(),
+                }
             }));
 
         let solution = problem.solve();
-        let SolverSolution::Solved { prim, prim_scale, .. } = solution else {
+        let SolverSolution::Solved {
+            prim, prim_scale, ..
+        } = solution
+        else {
             let SolverSolution::NotSolved { no_provider, .. } = solution else {
                 return Err(RuntimeError::InvalidValue("自动规划求解失败".to_string()));
             };
@@ -608,7 +613,10 @@ impl Runtime {
                 .iter_mut()
                 .find(|candidate| candidate.id == project_id)
                 .and_then(|candidate| {
-                    candidate.factories.iter_mut().find(|factory_doc| factory_doc.id == factory_id)
+                    candidate
+                        .factories
+                        .iter_mut()
+                        .find(|factory_doc| factory_doc.id == factory_id)
                 })
                 .ok_or(RuntimeError::FactoryNotFound {
                     project: project_id,
@@ -635,13 +643,17 @@ impl Runtime {
     /// 此处返回 [`CommandEffect::Nothing`]。
     pub fn run_command(&mut self, command: &RuntimeCommand) -> Result<CommandEffect, RuntimeError> {
         match command {
-            RuntimeCommand::Recompute { project, factory } => {
-                Ok(CommandEffect::Solve(self.solve_factory(*project, *factory)?))
-            }
+            RuntimeCommand::Recompute { project, factory } => Ok(CommandEffect::Solve(
+                self.solve_factory(*project, *factory)?,
+            )),
             RuntimeCommand::AutoPlan { project, factory } => {
                 Ok(CommandEffect::Solve(self.auto_plan(*project, *factory)?))
             }
-            RuntimeCommand::Cleanup { project, factory, action } => {
+            RuntimeCommand::Cleanup {
+                project,
+                factory,
+                action,
+            } => {
                 self.cleanup_factory(*project, *factory, *action)?;
                 Ok(CommandEffect::Mutated)
             }
@@ -856,7 +868,11 @@ fn solve_document(
                     .into_iter()
                     .map(|(flow, amount)| {
                         let scale = dual_scale.get(&flow).copied().unwrap_or(1.0);
-                        FlowBalance { flow, amount, scale }
+                        FlowBalance {
+                            flow,
+                            amount,
+                            scale,
+                        }
                     })
                     .collect(),
             },
@@ -907,8 +923,7 @@ pub fn add_conversion_flows(
     }
 
     let mut aux: u16 = 0;
-    let mut add_aux = |flows: &mut AIndexMap<ExpandedVarId, (Flow, f64)>,
-                       flow: Flow| {
+    let mut add_aux = |flows: &mut AIndexMap<ExpandedVarId, (Flow, f64)>, flow: Flow| {
         flows.insert(
             ExpandedVarId {
                 mechanic: MechanicId(u64::MAX),
@@ -985,7 +1000,12 @@ pub fn add_conversion_flows(
                         },
                         1.0,
                     );
-                    flow.insert(DualVar::FluidHeat { filter: name.clone() }, -heat);
+                    flow.insert(
+                        DualVar::FluidHeat {
+                            filter: name.clone(),
+                        },
+                        -heat,
+                    );
                     add_aux(flows, flow);
                 }
             }
@@ -1067,14 +1087,34 @@ pub fn add_conversion_flows(
         let flow = match key {
             DualVar::FluidHeat { filter } if !filter.is_empty() => {
                 let mut f = Flow::default();
-                f.insert(DualVar::FluidHeat { filter: filter.clone() }, -1.0);
-                f.insert(DualVar::FluidHeat { filter: String::new() }, 1.0);
+                f.insert(
+                    DualVar::FluidHeat {
+                        filter: filter.clone(),
+                    },
+                    -1.0,
+                );
+                f.insert(
+                    DualVar::FluidHeat {
+                        filter: String::new(),
+                    },
+                    1.0,
+                );
                 Some(f)
             }
             DualVar::FluidFuel { filter } if !filter.is_empty() => {
                 let mut f = Flow::default();
-                f.insert(DualVar::FluidFuel { filter: filter.clone() }, -1.0);
-                f.insert(DualVar::FluidFuel { filter: String::new() }, 1.0);
+                f.insert(
+                    DualVar::FluidFuel {
+                        filter: filter.clone(),
+                    },
+                    -1.0,
+                );
+                f.insert(
+                    DualVar::FluidFuel {
+                        filter: String::new(),
+                    },
+                    1.0,
+                );
                 Some(f)
             }
             _ => None,
@@ -1213,9 +1253,10 @@ pub fn apply_environment_to_game_state(
     if surface.is_some() {
         // 太空：solar_power_in_space（找不到 space-location 时回退 1.0）
         if let Some(planet_name) = planet {
-            if let Some(record) =
-                store.get(metatorio_data::store::PrototypeGroup::SpaceLocation, planet_name)
-            {
+            if let Some(record) = store.get(
+                metatorio_data::store::PrototypeGroup::SpaceLocation,
+                planet_name,
+            ) {
                 if let Some(component) =
                     record.component::<metatorio_data::SpaceLocationComponent>()
                 {
@@ -1224,10 +1265,9 @@ pub fn apply_environment_to_game_state(
             }
         }
     } else if let Some(planet_name) = planet {
-        if let Some(record) = store.get(metatorio_data::store::PrototypeGroup::Planet, planet_name) {
-            if let Some(component) =
-                record.component::<metatorio_data::PlanetComponent>()
-            {
+        if let Some(record) = store.get(metatorio_data::store::PrototypeGroup::Planet, planet_name)
+        {
+            if let Some(component) = record.component::<metatorio_data::PlanetComponent>() {
                 if let Some(&value) = component.surface_properties.get("solar-power") {
                     // 百分比 → 倍率（nauvis 默认 100 → 1.0）
                     game.solar_power_multiplier = value / 100.0;
@@ -1448,8 +1488,14 @@ mod tests {
             },
         );
         let result = runtime.project_accessibility(project).unwrap();
-        assert!(!result.is_item_accessible("iron-plate"), "强制不可达应覆盖自动可达");
-        assert!(!result.is_item_accessible("steel-plate"), "强制不可达应阻断依赖");
+        assert!(
+            !result.is_item_accessible("iron-plate"),
+            "强制不可达应覆盖自动可达"
+        );
+        assert!(
+            !result.is_item_accessible("steel-plate"),
+            "强制不可达应阻断依赖"
+        );
 
         // 移除里程碑 → 恢复自动状态（iron-plate 重新可达）。
         dispatch_project(
@@ -1459,7 +1505,12 @@ mod tests {
                 node: Accessible::Item("iron-plate".to_string()),
             },
         );
-        assert!(runtime.project_accessibility(project).unwrap().is_item_accessible("iron-plate"));
+        assert!(
+            runtime
+                .project_accessibility(project)
+                .unwrap()
+                .is_item_accessible("iron-plate")
+        );
 
         // 科技里程碑 unlocked=false 剪枝科技子树。
         dispatch_project(
@@ -1472,10 +1523,17 @@ mod tests {
         );
         let result = runtime.project_accessibility(project).unwrap();
         assert!(!result.is_accessible(&Accessible::Tech("tech-steel".to_string())));
-        assert!(!result.is_item_accessible("steel-plate"), "未解锁里程碑应阻断科技子树");
+        assert!(
+            !result.is_item_accessible("steel-plate"),
+            "未解锁里程碑应阻断科技子树"
+        );
 
         // 无视可达性：全可达。
-        dispatch_project(&mut runtime, project, ProjectAction::SetAllAccessible { enabled: true });
+        dispatch_project(
+            &mut runtime,
+            project,
+            ProjectAction::SetAllAccessible { enabled: true },
+        );
         let result = runtime.project_accessibility(project).unwrap();
         assert!(result.is_item_accessible("magic-item"));
         assert!(result.is_item_accessible("steel-plate"));
@@ -1609,7 +1667,16 @@ mod tests {
                 node: Accessible::Item("automation-science-pack".to_string()),
             },
         );
-        assert_eq!(runtime.state.project(project).unwrap().settings.milestones.len(), 1);
+        assert_eq!(
+            runtime
+                .state
+                .project(project)
+                .unwrap()
+                .settings
+                .milestones
+                .len(),
+            1
+        );
     }
 
     #[test]
@@ -1735,12 +1802,7 @@ mod tests {
                 }),
             })
             .unwrap();
-        let mechanic = runtime
-            .state
-            .factory(project, factory)
-            .unwrap()
-            .mechanics[0]
-            .id;
+        let mechanic = runtime.state.factory(project, factory).unwrap().mechanics[0].id;
         runtime
             .dispatch(AppMessage::Factory {
                 project,
@@ -1760,7 +1822,10 @@ mod tests {
                 action: FactoryAction::Mechanic {
                     mechanic,
                     action: MechanicAction::Recipe(RecipeMechanicAction::SetMachine {
-                        machine: metatorio_core::IdWithQuality::new("assembling-machine-1", "normal"),
+                        machine: metatorio_core::IdWithQuality::new(
+                            "assembling-machine-1",
+                            "normal",
+                        ),
                     }),
                 },
             })
@@ -1770,7 +1835,10 @@ mod tests {
                 project,
                 factory,
                 action: FactoryAction::Flow(FlowAction::AddToTarget {
-                    flow: DualVar::Item(metatorio_core::IdWithQuality::new("iron-gear-wheel", "normal")),
+                    flow: DualVar::Item(metatorio_core::IdWithQuality::new(
+                        "iron-gear-wheel",
+                        "normal",
+                    )),
                     amount: 1.0,
                 }),
             })
@@ -1859,7 +1927,11 @@ mod tests {
         let mut runtime = load_productivity_runtime();
         let project = new_project(&mut runtime);
         // 全可达，让两个无限产能科技都可达（等级 1）。
-        dispatch_project(&mut runtime, project, ProjectAction::SetAllAccessible { enabled: true });
+        dispatch_project(
+            &mut runtime,
+            project,
+            ProjectAction::SetAllAccessible { enabled: true },
+        );
 
         let view = runtime.project_productivity(project).unwrap();
         assert!(
@@ -1868,7 +1940,11 @@ mod tests {
             view.auto_mining
         );
         assert!((view.mining - 0.1).abs() < 1e-9, "最终采矿应为 0.1");
-        let steel = view.recipes.iter().find(|r| r.recipe == "steel-plate").unwrap();
+        let steel = view
+            .recipes
+            .iter()
+            .find(|r| r.recipe == "steel-plate")
+            .unwrap();
         assert!((steel.value - 0.1).abs() < 1e-9, "steel-plate 自动应 0.1");
         assert_eq!(steel.source, "auto");
 
@@ -1877,29 +1953,47 @@ mod tests {
             &mut runtime,
             project,
             ProjectAction::SetInfiniteTechLevel {
-                level: InfiniteTechLevel { tech: "mining-prod".to_string(), level: 50 },
+                level: InfiniteTechLevel {
+                    tech: "mining-prod".to_string(),
+                    level: 50,
+                },
             },
         );
         let view = runtime.project_productivity(project).unwrap();
         // 自动采矿基准（无用户等级）仍是 0.1；最终采矿被 2.b 覆盖为 5.0。
         assert!((view.auto_mining - 0.1).abs() < 1e-9, "自动采矿基准应不变");
-        assert!((view.mining - 5.0).abs() < 1e-9, "最终采矿应 5.0，实际 {}", view.mining);
+        assert!(
+            (view.mining - 5.0).abs() < 1e-9,
+            "最终采矿应 5.0，实际 {}",
+            view.mining
+        );
 
         // 2.a：用户把 steel-plate 的产能固定为 0.5 → source=user，替换自动 0.1。
         dispatch_project(
             &mut runtime,
             project,
             ProjectAction::SetRecipeProductivity {
-                productivity: RecipeProductivity { recipe: "steel-plate".to_string(), productivity: 0.5 },
+                productivity: RecipeProductivity {
+                    recipe: "steel-plate".to_string(),
+                    productivity: 0.5,
+                },
             },
         );
         let view = runtime.project_productivity(project).unwrap();
-        let steel = view.recipes.iter().find(|r| r.recipe == "steel-plate").unwrap();
+        let steel = view
+            .recipes
+            .iter()
+            .find(|r| r.recipe == "steel-plate")
+            .unwrap();
         assert!((steel.value - 0.5).abs() < 1e-9, "2.a 用户值应替换自动");
         assert_eq!(steel.source, "user");
 
         // 2.c：忽略产能 → 自动采矿 0；但用户 2.b 等级仍生效（采矿 5.0）。
-        dispatch_project(&mut runtime, project, ProjectAction::SetIgnoreProductivity { ignore: true });
+        dispatch_project(
+            &mut runtime,
+            project,
+            ProjectAction::SetIgnoreProductivity { ignore: true },
+        );
         let view = runtime.project_productivity(project).unwrap();
         assert!((view.auto_mining - 0.0).abs() < 1e-9, "忽略时自动采矿应 0");
         assert!((view.mining - 5.0).abs() < 1e-9, "忽略时用户 2.b 仍生效");
@@ -1919,28 +2013,46 @@ mod tests {
             "processed-chemical".to_string(),
         ];
         let mut flows = AIndexMap::default();
-        let fuel_var = ExpandedVarId { mechanic: MechanicId(1), variant: 0 };
-        let boiler_var = ExpandedVarId { mechanic: MechanicId(2), variant: 0 };
+        let fuel_var = ExpandedVarId {
+            mechanic: MechanicId(1),
+            variant: 0,
+        };
+        let boiler_var = ExpandedVarId {
+            mechanic: MechanicId(2),
+            variant: 0,
+        };
         let mut fuel_flow = Flow::default();
         fuel_flow.insert(
-            DualVar::ItemFuel { category: narrow.clone(), has_burnt_result: false },
+            DualVar::ItemFuel {
+                category: narrow.clone(),
+                has_burnt_result: false,
+            },
             100.0,
         );
         flows.insert(fuel_var, (fuel_flow, 1.0));
         let mut boiler_flow = Flow::default();
         boiler_flow.insert(
-            DualVar::ItemFuel { category: wide.clone(), has_burnt_result: false },
+            DualVar::ItemFuel {
+                category: wide.clone(),
+                has_burnt_result: false,
+            },
             -100.0,
         );
         flows.insert(boiler_var, (boiler_flow, 1.0));
         add_conversion_flows(&mut flows, &store, &Flow::default(), &Flow::default());
         let has_conversion = flows.values().any(|(flow, _)| {
-            flow.get(&DualVar::ItemFuel { category: narrow.clone(), has_burnt_result: false })
-                .copied()
-                .unwrap_or(0.0)
+            flow.get(&DualVar::ItemFuel {
+                category: narrow.clone(),
+                has_burnt_result: false,
+            })
+            .copied()
+            .unwrap_or(0.0)
                 < 0.0
                 && flow
-                    .get(&DualVar::ItemFuel { category: wide.clone(), has_burnt_result: false })
+                    .get(&DualVar::ItemFuel {
+                        category: wide.clone(),
+                        has_burnt_result: false,
+                    })
                     .copied()
                     .unwrap_or(0.0)
                     > 0.0
@@ -1977,34 +2089,46 @@ mod tests {
         let project = ProjectId(1);
         let proj = |action| AppMessage::Project { project, action };
         // 相关 → true
-        assert!(message_affects_accessibility(&proj(ProjectAction::SetAllAccessible { enabled: true })));
-        assert!(message_affects_accessibility(&proj(ProjectAction::AddMilestone {
-            node: Accessible::Item("x".to_string()),
-            unlocked: true,
-        })));
-        assert!(message_affects_accessibility(&proj(ProjectAction::SetMilestoneUnlocked {
-            node: Accessible::Item("x".to_string()),
-            unlocked: false,
-        })));
-        assert!(message_affects_accessibility(&proj(ProjectAction::RemoveMilestone {
-            node: Accessible::Item("x".to_string()),
-        })));
-        assert!(message_affects_accessibility(&proj(ProjectAction::SetContext {
-            context: Some("c".to_string()),
-        })));
+        assert!(message_affects_accessibility(&proj(
+            ProjectAction::SetAllAccessible { enabled: true }
+        )));
+        assert!(message_affects_accessibility(&proj(
+            ProjectAction::AddMilestone {
+                node: Accessible::Item("x".to_string()),
+                unlocked: true,
+            }
+        )));
+        assert!(message_affects_accessibility(&proj(
+            ProjectAction::SetMilestoneUnlocked {
+                node: Accessible::Item("x".to_string()),
+                unlocked: false,
+            }
+        )));
+        assert!(message_affects_accessibility(&proj(
+            ProjectAction::RemoveMilestone {
+                node: Accessible::Item("x".to_string()),
+            }
+        )));
+        assert!(message_affects_accessibility(&proj(
+            ProjectAction::SetContext {
+                context: Some("c".to_string()),
+            }
+        )));
         assert!(message_affects_accessibility(&AppMessage::Application(
             ApplicationAction::LoadCachedContext
         )));
         // 无关 → false
-        assert!(!message_affects_accessibility(&proj(ProjectAction::SetMiningProductivity {
-            productivity: 1.0,
-        })));
-        assert!(!message_affects_accessibility(&proj(ProjectAction::SetRecipeProductivity {
-            productivity: RecipeProductivity {
-                recipe: "iron-plate".to_string(),
-                productivity: 0.1,
-            },
-        })));
+        assert!(!message_affects_accessibility(&proj(
+            ProjectAction::SetMiningProductivity { productivity: 1.0 }
+        )));
+        assert!(!message_affects_accessibility(&proj(
+            ProjectAction::SetRecipeProductivity {
+                productivity: RecipeProductivity {
+                    recipe: "iron-plate".to_string(),
+                    productivity: 0.1,
+                },
+            }
+        )));
         assert!(!message_affects_accessibility(&AppMessage::Application(
             ApplicationAction::InstallUpdate
         )));
@@ -2051,13 +2175,19 @@ mod tests {
         let now = std::time::Instant::now;
         let t = now();
         runtime.set_default_milestones(project).unwrap();
-        eprintln!("[py] set_default_milestones: {} ms", t.elapsed().as_millis());
+        eprintln!(
+            "[py] set_default_milestones: {} ms",
+            t.elapsed().as_millis()
+        );
         let t = now();
         runtime.project_accessibility(project).unwrap();
         eprintln!("[py] project_accessibility: {} ms", t.elapsed().as_millis());
         let t = now();
         runtime.ordered_project_milestones(project).unwrap();
-        eprintln!("[py] ordered_project_milestones: {} ms", t.elapsed().as_millis());
+        eprintln!(
+            "[py] ordered_project_milestones: {} ms",
+            t.elapsed().as_millis()
+        );
         let t = now();
         runtime.project_productivity(project).unwrap();
         eprintln!("[py] project_productivity: {} ms", t.elapsed().as_millis());
@@ -2069,7 +2199,10 @@ mod tests {
             runtime.context_store(project).unwrap(),
             "nauvis",
         );
-        eprintln!("[py] planet_autoplaced_flows(nauvis): {} ms", t.elapsed().as_millis());
+        eprintln!(
+            "[py] planet_autoplaced_flows(nauvis): {} ms",
+            t.elapsed().as_millis()
+        );
         let t = now();
         let _graph = metatorio_core::build_graph(runtime.context_store(project).unwrap());
         eprintln!("[py] build_graph: {} ms", t.elapsed().as_millis());
@@ -2083,10 +2216,7 @@ mod tests {
             .map(|m| m.node.clone())
             .collect();
         let t = now();
-        let _ = metatorio_core::milestone_order(
-            runtime.context_store(project).unwrap(),
-            &nodes,
-        );
+        let _ = metatorio_core::milestone_order(runtime.context_store(project).unwrap(), &nodes);
         eprintln!(
             "[py] milestone_order ({} 个里程碑): {} ms",
             nodes.len(),
@@ -2122,7 +2252,11 @@ mod tests {
         // 研究中心输入物品 = 实验室 LabComponent.inputs(广义科技包)。
         let mut packs: Vec<String> = store
             .group(PrototypeGroup::Entity)
-            .filter_map(|record| record.component::<LabComponent>().map(|lab| lab.inputs.clone()))
+            .filter_map(|record| {
+                record
+                    .component::<LabComponent>()
+                    .map(|lab| lab.inputs.clone())
+            })
             .flatten()
             .collect();
         packs.sort();
@@ -2166,13 +2300,18 @@ mod tests {
         let recipe_count = store.group(PrototypeGroup::Recipe).count();
         let tech_reachable = store
             .group(PrototypeGroup::Technology)
-            .filter(|r| r.name.len() > 0 && access.is_accessible(&metatorio_core::Accessible::Tech(r.name.clone())))
+            .filter(|r| {
+                r.name.len() > 0
+                    && access.is_accessible(&metatorio_core::Accessible::Tech(r.name.clone()))
+            })
             .count();
         let recipe_reachable = store
             .group(PrototypeGroup::Recipe)
             .filter(|r| access.is_accessible(&metatorio_core::Accessible::Recipe(r.name.clone())))
             .count();
-        eprintln!("[py] 科技: 总 {tech_count} , 默认可达 {tech_reachable};配方: 总 {recipe_count} , 默认可达 {recipe_reachable}");
+        eprintln!(
+            "[py] 科技: 总 {tech_count} , 默认可达 {tech_reachable};配方: 总 {recipe_count} , 默认可达 {recipe_reachable}"
+        );
 
         // 建 物品→产出配方 反查表(等价 GraphData.recipes_by_product)。
         use std::collections::HashMap;
@@ -2184,12 +2323,17 @@ mod tests {
             for result in &recipe.results {
                 match result {
                     metatorio_data::types::Product::Item(product) => {
-                        recipes_by_product.entry(product.name.clone()).or_default().push(record.name.clone());
+                        recipes_by_product
+                            .entry(product.name.clone())
+                            .or_default()
+                            .push(record.name.clone());
                     }
                     metatorio_data::types::Product::Fluid(product) => {
-                        recipes_by_product.entry(product.name.clone()).or_default().push(record.name.clone());
+                        recipes_by_product
+                            .entry(product.name.clone())
+                            .or_default()
+                            .push(record.name.clone());
                     }
-                    _ => {}
                 }
             }
         }
@@ -2201,7 +2345,10 @@ mod tests {
             };
             for effect in &tech.effects {
                 if let metatorio_data::types::Modifier::UnlockRecipe(unlock) = effect {
-                    unlock_by_recipe.entry(unlock.recipe.clone()).or_default().push(record.name.clone());
+                    unlock_by_recipe
+                        .entry(unlock.recipe.clone())
+                        .or_default()
+                        .push(record.name.clone());
                 }
             }
         }
@@ -2228,15 +2375,25 @@ mod tests {
                     continue;
                 };
                 let enabled = recipe.enabled;
-                let r_reachable = access.is_accessible(&metatorio_core::Accessible::Recipe(recipe_name.clone()));
-                let unlock_techs = unlock_by_recipe.get(recipe_name).cloned().unwrap_or_default();
+                let r_reachable =
+                    access.is_accessible(&metatorio_core::Accessible::Recipe(recipe_name.clone()));
+                let unlock_techs = unlock_by_recipe
+                    .get(recipe_name)
+                    .cloned()
+                    .unwrap_or_default();
                 let mut blocked: Vec<String> = Vec::new();
                 for ingredient in &recipe.ingredients {
                     match ingredient {
-                        metatorio_data::types::Ingredient::Item(item) if !access.is_item_accessible(&item.name) => {
+                        metatorio_data::types::Ingredient::Item(item)
+                            if !access.is_item_accessible(&item.name) =>
+                        {
                             blocked.push(format!("物品:{}", item.name));
                         }
-                        metatorio_data::types::Ingredient::Fluid(fluid) if !access.is_accessible(&metatorio_core::Accessible::Fluid(fluid.name.clone())) => {
+                        metatorio_data::types::Ingredient::Fluid(fluid)
+                            if !access.is_accessible(&metatorio_core::Accessible::Fluid(
+                                fluid.name.clone(),
+                            )) =>
+                        {
                             blocked.push(format!("流体:{}", fluid.name));
                         }
                         _ => {}
@@ -2247,7 +2404,15 @@ mod tests {
                 );
             }
         }
-        eprintln!("\n[py] 不可达科技包共 {} 个:\n  {}", unreachable_packs.len(), unreachable_packs.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("\n  "));
+        eprintln!(
+            "\n[py] 不可达科技包共 {} 个:\n  {}",
+            unreachable_packs.len(),
+            unreachable_packs
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join("\n  ")
+        );
     }
 
     /// 诊断:沿"可达配方 → 第一个不可达原料"递归下钻,定位科技包不可达的
@@ -2287,7 +2452,6 @@ mod tests {
                         .entry(product.name.clone())
                         .or_default()
                         .push(record.name.clone()),
-                    _ => {}
                 }
             }
         }
@@ -2298,7 +2462,10 @@ mod tests {
             };
             for effect in &tech.effects {
                 if let metatorio_data::types::Modifier::UnlockRecipe(unlock) = effect {
-                    unlock_by_recipe.entry(unlock.recipe.clone()).or_default().push(record.name.clone());
+                    unlock_by_recipe
+                        .entry(unlock.recipe.clone())
+                        .or_default()
+                        .push(record.name.clone());
                 }
             }
         }
@@ -2349,7 +2516,10 @@ mod tests {
                 let reasons: Vec<String> = producers
                     .iter()
                     .map(|recipe_name| {
-                        let unlock = unlock_by_recipe.get(recipe_name).cloned().unwrap_or_default();
+                        let unlock = unlock_by_recipe
+                            .get(recipe_name)
+                            .cloned()
+                            .unwrap_or_default();
                         format!("{recipe_name}(enabled=false, 解锁科技={unlock:?})")
                     })
                     .collect();
@@ -2368,11 +2538,12 @@ mod tests {
                         }
                     }
                     metatorio_data::types::Ingredient::Fluid(fluid) => {
-                        if !access.is_accessible(&metatorio_core::Accessible::Fluid(fluid.name.clone())) {
+                        if !access
+                            .is_accessible(&metatorio_core::Accessible::Fluid(fluid.name.clone()))
+                        {
                             blocked.push(format!("流体:{}", fluid.name));
                         }
                     }
-                    _ => {}
                 }
             }
             if blocked.is_empty() {
@@ -2380,7 +2551,15 @@ mod tests {
             }
             // 从第一个不可达原料下钻。
             let next = blocked.remove(0);
-            let reason = chain(access, store, recipes_by_product, unlock_by_recipe, &next, depth + 1, seen);
+            let reason = chain(
+                access,
+                store,
+                recipes_by_product,
+                unlock_by_recipe,
+                &next,
+                depth + 1,
+                seen,
+            );
             format!("{name} ← {recipe_name} 缺原料 → {reason}")
         }
 
@@ -2390,14 +2569,40 @@ mod tests {
             "chemical-science-pack",
         ] {
             let mut seen = Vec::new();
-            let c = chain(&access, &store, &recipes_by_product, &unlock_by_recipe, target, 0, &mut seen);
+            let c = chain(
+                &access,
+                &store,
+                &recipes_by_product,
+                &unlock_by_recipe,
+                target,
+                0,
+                &mut seen,
+            );
             eprintln!("\n[chain] {target}:\n  {c}");
         }
 
         // 单独看 fawogae-substrate / flask:是否连"可用配方"都没有。
-        for probe in ["fawogae-substrate", "flask", "alien-sample01", "solidified-sarcorus", "advanced-circuit", "optical-fiber", "workers-food-03", "nv-center", "pi-josephson-junction"] {
+        for probe in [
+            "fawogae-substrate",
+            "flask",
+            "alien-sample01",
+            "solidified-sarcorus",
+            "advanced-circuit",
+            "optical-fiber",
+            "workers-food-03",
+            "nv-center",
+            "pi-josephson-junction",
+        ] {
             let mut seen = Vec::new();
-            let c = chain(&access, &store, &recipes_by_product, &unlock_by_recipe, probe, 0, &mut seen);
+            let c = chain(
+                &access,
+                &store,
+                &recipes_by_product,
+                &unlock_by_recipe,
+                probe,
+                0,
+                &mut seen,
+            );
             eprintln!("[probe] {probe}:\n  {c}");
         }
 
@@ -2413,7 +2618,10 @@ mod tests {
                 else {
                     continue;
                 };
-                let unlock = unlock_by_recipe.get(recipe_name).cloned().unwrap_or_default();
+                let unlock = unlock_by_recipe
+                    .get(recipe_name)
+                    .cloned()
+                    .unwrap_or_default();
                 info.push(format!(
                     "{recipe_name}(enabled={}, reachable={}, 解锁={unlock:?})",
                     recipe.enabled,
@@ -2421,7 +2629,8 @@ mod tests {
                 ));
             }
             let in_nauvis_any = nauvis_flows.iter().any(|(flow, _)| matches!(flow, metatorio_core::DualVar::Fluid { name: n, .. } if n == name));
-            let node_reachable = access.is_accessible(&metatorio_core::Accessible::Fluid(name.to_string()));
+            let node_reachable =
+                access.is_accessible(&metatorio_core::Accessible::Fluid(name.to_string()));
             eprintln!(
                 "[fluid] {name}: 可达(node)={node_reachable}, 产出配方={info:?}, nauvis自动流={in_nauvis_any}"
             );
@@ -2453,7 +2662,10 @@ mod tests {
             let entity_reachable =
                 access.is_accessible(&metatorio_core::Accessible::Entity(record.name.clone()));
             if makes_steam {
-                eprintln!("  · {} (→ {out_filter}) 实体可达={entity_reachable}", record.name);
+                eprintln!(
+                    "  · {} (→ {out_filter}) 实体可达={entity_reachable}",
+                    record.name
+                );
             }
             if entity_reachable {
                 boiler_reachable += 1;

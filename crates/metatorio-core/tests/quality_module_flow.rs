@@ -58,7 +58,9 @@ fn real_dump_recipe_with_quality_module_has_flow() {
         "品质插件应把电子电路拆分为多品质流：{circuit_flows:?}"
     );
     for (flow, amount) in &circuit_flows {
-        let DualVar::Item(item) = flow else { unreachable!() };
+        let DualVar::Item(item) = flow else {
+            unreachable!()
+        };
         eprintln!("电路 {}/{} 产量 {amount}", item.id, item.quality);
     }
 }
@@ -93,7 +95,9 @@ fn real_dump_quality_variant_recipe_has_flow() {
         "品质变体配方应产出物品流，实际 flow={flow:?}"
     );
     for (flow, amount) in &outputs {
-        let DualVar::Item(item) = flow else { unreachable!() };
+        let DualVar::Item(item) = flow else {
+            unreachable!()
+        };
         eprintln!("产出 {}/{} 产量 {amount}", item.id, item.quality);
     }
 }
@@ -130,7 +134,9 @@ fn quality_module_with_zero_limit_still_has_flow() {
         "品质上限 0 时带品质插件的配方也应产出物品流：flow={flow:?}"
     );
     for (flow, amount) in &outputs {
-        let DualVar::Item(item) = flow else { unreachable!() };
+        let DualVar::Item(item) = flow else {
+            unreachable!()
+        };
         eprintln!("品质上限0 产出 {}/{} 产量 {amount}", item.id, item.quality);
     }
 }
@@ -168,7 +174,9 @@ fn quality_variant_with_quality_module_has_multi_quality_flow() {
         "品质变体 + 品质插件应产出多品质电路流：{circuit_flows:?}"
     );
     for (flow, amount) in &circuit_flows {
-        let DualVar::Item(item) = flow else { unreachable!() };
+        let DualVar::Item(item) = flow else {
+            unreachable!()
+        };
         eprintln!("变体+插件 产出 {}/{} 产量 {amount}", item.id, item.quality);
     }
 }

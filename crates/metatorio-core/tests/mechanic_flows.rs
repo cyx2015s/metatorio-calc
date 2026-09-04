@@ -267,7 +267,9 @@ fn reactor_quality_uses_default_multiplier() {
         Mechanic::Reactor(ReactorMechanic {
             reactor: IdWithQuality::new("reactor", "quality"),
             neighbours: 0,
-            fuel: Some(Fuel::Item { item: IdWithQuality::new("fuel", "quality") }),
+            fuel: Some(Fuel::Item {
+                item: IdWithQuality::new("fuel", "quality"),
+            }),
         }),
         game,
     );
