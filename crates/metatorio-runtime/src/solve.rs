@@ -11,7 +11,10 @@ use crate::document::{
     ProjectSettings,
 };
 use crate::id::{FactoryId, MechanicId, ProjectId};
-use crate::message::{ApplicationAction, AppMessage, ProjectAction};
+use crate::message::{
+    ApplicationAction, AppMessage, CleanupAction, FactoryAction, MechanicListAction, ProjectAction,
+    RuntimeCommand,
+};
 use crate::state::{DispatchResult, RuntimeError, RuntimeState};
 
 /// The solver variable identity used by the application adapter.
@@ -67,6 +70,20 @@ pub struct FlowBalance {
     /// 该物品平衡约束的 Ruiz 缩放系数（dual_scale）。
     /// `amount / scale` 是内部可比量，判断"接近 0"应使用它。
     pub scale: f64,
+}
+
+/// 执行一个 `RuntimeCommand` 后的结构化产出，供外层（Tauri 的 execute_command
+/// 或未来的 MCP 工具）**统一**消费。MCP 传 `AppMessage` → `dispatch` 得
+/// `RuntimeCommand` → 调 `Runtime::run_command`，无需依赖框架。
+#[derive(Debug, Clone, PartialEq)]
+pub enum CommandEffect {
+    /// 求解/自动规划的结果（Recompute / AutoPlan）。
+    Solve(SolveResult),
+    /// 运行时内部操作（校验/回退/钳制/清理等）：已改动文档，但无对外结果；
+    /// 外层可刷新文档。
+    Mutated,
+    /// 无任何产出（既不改文档，也不发射事件）。
+    Nothing,
 }
 
 /// 面向前端的产能视图：区分**自动推算**与**用户指定**（用户值有虚线边框）。
@@ -617,6 +634,100 @@ impl Runtime {
                 .collect();
         }
         self.solve_factory(project_id, factory_id)
+    }
+
+    /// 统一执行一个 `RuntimeCommand`，返回结构化产出。
+    ///
+    /// 这里只处理**纯运行时**命令（求解/自动规划/清理），返回 [`CommandEffect`]
+    /// 供外层（Tauri 的 `execute_command` / MCP 工具）统一消费。需要外部资源
+    /// 的命令（加载游戏上下文/项目文件/更新等）与此处无关，由框架层单独处理；
+    /// 此处返回 [`CommandEffect::Nothing`]。
+    pub fn run_command(&mut self, command: &RuntimeCommand) -> Result<CommandEffect, RuntimeError> {
+        match command {
+            RuntimeCommand::Recompute { project, factory } => {
+                Ok(CommandEffect::Solve(self.solve_factory(*project, *factory)?))
+            }
+            RuntimeCommand::AutoPlan { project, factory } => {
+                Ok(CommandEffect::Solve(self.auto_plan(*project, *factory)?))
+            }
+            RuntimeCommand::Cleanup { project, factory, action } => {
+                self.cleanup_factory(*project, *factory, *action)?;
+                Ok(CommandEffect::Mutated)
+            }
+            _ => Ok(CommandEffect::Nothing),
+        }
+    }
+
+    /// 求解后清理：按最近一次求解结果删减/重排机制。
+    /// - RemoveUnused：用量低于阈值（1e-9）的机制移除；
+    /// - RemoveUnsolvable：未出现在求解变量中的机制移除；
+    /// - SortBySolutionRate：按总流量从大到小重排机制。
+    fn cleanup_factory(
+        &mut self,
+        project: ProjectId,
+        factory: FactoryId,
+        action: CleanupAction,
+    ) -> Result<(), RuntimeError> {
+        let result = self.solve_factory(project, factory)?;
+        let SolveStatus::Solved { mechanics, .. } = &result.status else {
+            return Ok(());
+        };
+        // 每机制总用量（多温度变体求和）。判断"接近 0"用内部缩放值
+        // amount/scale（剔除逐变量缩放差异），避免单次产出大的配方因
+        // 表观量小被误判为未使用。
+        let mut used: HashMap<MechanicId, f64> = HashMap::new();
+        for solution in mechanics {
+            let scaled = solution.amount.max(0.0) / solution.scale.max(1e-12);
+            *used.entry(solution.mechanic).or_default() += scaled;
+        }
+        let entries: Vec<MechanicId> = self
+            .state
+            .factory(project, factory)?
+            .mechanics
+            .iter()
+            .map(|entry| entry.id)
+            .collect();
+
+        match action {
+            CleanupAction::RemoveUnused | CleanupAction::RemoveUnsolvable => {
+                for id in entries {
+                    let keep = match action {
+                        CleanupAction::RemoveUnused => {
+                            used.get(&id).copied().unwrap_or(0.0) >= 1e-9
+                        }
+                        CleanupAction::RemoveUnsolvable => used.contains_key(&id),
+                        _ => unreachable!(),
+                    };
+                    if !keep {
+                        let _ = self.dispatch(AppMessage::Factory {
+                            project,
+                            factory,
+                            action: FactoryAction::MechanicList(MechanicListAction::Remove {
+                                mechanic: id,
+                            }),
+                        });
+                    }
+                }
+            }
+            CleanupAction::SortBySolutionRate => {
+                let mut sorted: Vec<(MechanicId, f64)> = entries
+                    .into_iter()
+                    .map(|id| (id, used.get(&id).copied().unwrap_or(0.0)))
+                    .collect();
+                sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+                for (position, (id, _)) in sorted.into_iter().enumerate() {
+                    let _ = self.dispatch(AppMessage::Factory {
+                        project,
+                        factory,
+                        action: FactoryAction::MechanicList(MechanicListAction::Reorder {
+                            mechanic: id,
+                            position,
+                        }),
+                    });
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -1607,6 +1718,95 @@ mod tests {
             project: project_id,
             factory: factory_id,
         }));
+    }
+
+    #[test]
+    fn run_command_processes_recompute_and_auto_plan() {
+        // 模拟 MCP/无 UI 流程：发 AppMessage 得到 RuntimeCommand，再用 run_command
+        // 统一执行（不经过任何框架层）。
+        let mut runtime = load_runtime();
+        let project = new_project(&mut runtime);
+        runtime
+            .dispatch(AppMessage::Project {
+                project,
+                action: ProjectAction::AddFactory {
+                    name: "f".to_string(),
+                    template: crate::message::FactoryTemplate::Empty,
+                },
+            })
+            .unwrap();
+        let factory = runtime.state.ui.selected_factory.unwrap();
+        runtime
+            .dispatch(AppMessage::Factory {
+                project,
+                factory,
+                action: FactoryAction::MechanicList(MechanicListAction::Add {
+                    kind: crate::document::MechanicKind::Recipe,
+                }),
+            })
+            .unwrap();
+        let mechanic = runtime
+            .state
+            .factory(project, factory)
+            .unwrap()
+            .mechanics[0]
+            .id;
+        runtime
+            .dispatch(AppMessage::Factory {
+                project,
+                factory,
+                action: FactoryAction::Mechanic {
+                    mechanic,
+                    action: MechanicAction::Recipe(RecipeMechanicAction::SetRecipe {
+                        recipe: metatorio_core::IdWithQuality::new("iron-gear-wheel", "normal"),
+                    }),
+                },
+            })
+            .unwrap();
+        runtime
+            .dispatch(AppMessage::Factory {
+                project,
+                factory,
+                action: FactoryAction::Mechanic {
+                    mechanic,
+                    action: MechanicAction::Recipe(RecipeMechanicAction::SetMachine {
+                        machine: metatorio_core::IdWithQuality::new("assembling-machine-1", "normal"),
+                    }),
+                },
+            })
+            .unwrap();
+        runtime
+            .dispatch(AppMessage::Factory {
+                project,
+                factory,
+                action: FactoryAction::Flow(FlowAction::AddToTarget {
+                    flow: DualVar::Item(metatorio_core::IdWithQuality::new("iron-gear-wheel", "normal")),
+                    amount: 1.0,
+                }),
+            })
+            .unwrap();
+
+        // dispatch(solve:recompute) 产生 RuntimeCommand::Recompute → run_command。
+        let update = runtime
+            .dispatch(AppMessage::Factory {
+                project,
+                factory,
+                action: FactoryAction::Solve(SolveAction::Recompute),
+            })
+            .unwrap();
+        let cmd = update
+            .commands
+            .iter()
+            .find_map(|c| match c {
+                RuntimeCommand::Recompute { .. } => Some(c.clone()),
+                _ => None,
+            })
+            .expect("应有 Recompute 命令");
+        let effect = runtime.run_command(&cmd).unwrap();
+        assert!(
+            matches!(effect, CommandEffect::Solve(_)),
+            "recompute 应产出 Solve 效果"
+        );
     }
 
     #[test]

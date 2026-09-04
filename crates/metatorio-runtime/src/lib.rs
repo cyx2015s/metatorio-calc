@@ -26,7 +26,7 @@ pub use id::{
 };
 pub use message::*;
 pub use solve::{
-    ExpandedVarId, FlowBalance, MechanicSolution, ProductivityView, RecipeProductivityView,
-    Runtime, SolveResult, SolveStatus,
+    CommandEffect, ExpandedVarId, FlowBalance, MechanicSolution, ProductivityView,
+    RecipeProductivityView, Runtime, SolveResult, SolveStatus,
 };
 pub use state::{DispatchResult, RuntimeError, RuntimeState, SelectorState, UiState};

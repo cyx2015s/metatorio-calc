@@ -32,15 +32,15 @@ use metatorio_runtime::{
     document::{AppDocument},
     id::{FactoryId, MechanicId, ProjectId},
     message::{
-        AppMessage, CleanupAction, FactoryAction, MechanicAction, MechanicListAction,
-        MiningMechanicAction, ModuleAction, ProjectAction, RecipeMechanicAction, RuntimeCommand,
+        AppMessage, FactoryAction, MechanicAction, MiningMechanicAction, ModuleAction,
+        ProjectAction, RecipeMechanicAction, RuntimeCommand,
     },
     prototype::{
         effective_module_slots, effective_probability, effective_recipe_categories,
         effective_resource_category, fluid_fuel_info, fluid_tags, item_fuel_info, item_tags,
         surface_condition_text,
     },
-    solve::{Runtime, SolveStatus},
+    solve::{Runtime},
     state::{DispatchResult, UiState},
 };
 use serde::{Deserialize, Serialize};
@@ -2477,7 +2477,7 @@ fn execute_command(
     command: &RuntimeCommand,
 ) {
     match command {
-        RuntimeCommand::Recompute { project, factory } => {
+        RuntimeCommand::Recompute { project, .. } => {
             // Make sure the project's context store is in memory first.
             let context_id = runtime
                 .state
@@ -2491,8 +2491,11 @@ fn execute_command(
                     return;
                 }
             }
-            match runtime.solve_factory(*project, *factory) {
-                Ok(result) => emit(app, "solve-result", result),
+            match runtime.run_command(command) {
+                Ok(metatorio_runtime::CommandEffect::Solve(result)) => {
+                    emit(app, "solve-result", result);
+                }
+                Ok(_) => {}
                 Err(error) => emit(app, "solve-error", error.to_string()),
             }
         }
@@ -2570,20 +2573,17 @@ fn execute_command(
                 None => emit(app, "context-error", "没有缓存的游戏数据".to_string()),
             }
         }
-        RuntimeCommand::Cleanup {
-            project,
-            factory,
-            action,
-        } => {
-            if let Err(error) = cleanup_factory(runtime, *project, *factory, *action) {
-                eprintln!("cleanup failed: {error}");
-            }
+        RuntimeCommand::Cleanup { .. } => {
+            let _ = runtime.run_command(command);
         }
-        RuntimeCommand::AutoPlan { project, factory } => {
+        RuntimeCommand::AutoPlan { project, .. } => {
             // 自动规划：迭代添加建议机制直至可解。
             let _ = ensure_context_for_project(state, runtime, *project);
-            match runtime.auto_plan(*project, *factory) {
-                Ok(result) => emit(app, "solve-result", result),
+            match runtime.run_command(command) {
+                Ok(metatorio_runtime::CommandEffect::Solve(result)) => {
+                    emit(app, "solve-result", result);
+                }
+                Ok(_) => {}
                 Err(error) => emit(app, "solve-error", error.to_string()),
             }
         }
@@ -2610,78 +2610,6 @@ fn ensure_context_for_project(
     Ok(())
 }
 
-/// 求解后清理：按最近一次求解结果删减/重排机制。
-/// - RemoveUnused：用量低于阈值（1e-9）的机制移除；
-/// - RemoveUnsolvable：未出现在求解变量中的机制移除；
-/// - SortBySolutionRate：按总流量从大到小重排机制。
-fn cleanup_factory(
-    runtime: &mut Runtime,
-    project: ProjectId,
-    factory: FactoryId,
-    action: CleanupAction,
-) -> Result<(), String> {
-    let result = runtime
-        .solve_factory(project, factory)
-        .map_err(|error| error.to_string())?;
-    let SolveStatus::Solved { mechanics, .. } = &result.status else {
-        return Ok(());
-    };
-    // 每机制总用量（多温度变体求和）。判断"接近 0"用内部缩放值
-    // amount/scale（剔除逐变量缩放差异），避免单次产出大的配方因
-    // 表观量小被误判为未使用。
-    let mut used: HashMap<MechanicId, f64> = HashMap::new();
-    for solution in mechanics {
-        let scaled = solution.amount.max(0.0) / solution.scale.max(1e-12);
-        *used.entry(solution.mechanic).or_default() += scaled;
-    }
-    let entries: Vec<MechanicId> = runtime
-        .state
-        .factory(project, factory)
-        .map_err(|error| error.to_string())?
-        .mechanics
-        .iter()
-        .map(|entry| entry.id)
-        .collect();
-
-    match action {
-        CleanupAction::RemoveUnused | CleanupAction::RemoveUnsolvable => {
-            for id in entries {
-                let keep = match action {
-                    CleanupAction::RemoveUnused => used.get(&id).copied().unwrap_or(0.0) >= 1e-9,
-                    CleanupAction::RemoveUnsolvable => used.contains_key(&id),
-                    _ => unreachable!(),
-                };
-                if !keep {
-                    let _ = runtime.dispatch(AppMessage::Factory {
-                        project,
-                        factory,
-                        action: FactoryAction::MechanicList(MechanicListAction::Remove {
-                            mechanic: id,
-                        }),
-                    });
-                }
-            }
-        }
-        CleanupAction::SortBySolutionRate => {
-            let mut sorted: Vec<(MechanicId, f64)> = entries
-                .into_iter()
-                .map(|id| (id, used.get(&id).copied().unwrap_or(0.0)))
-                .collect();
-            sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-            for (position, (id, _)) in sorted.into_iter().enumerate() {
-                let _ = runtime.dispatch(AppMessage::Factory {
-                    project,
-                    factory,
-                    action: FactoryAction::MechanicList(MechanicListAction::Reorder {
-                        mechanic: id,
-                        position,
-                    }),
-                });
-            }
-        }
-    }
-    Ok(())
-}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
