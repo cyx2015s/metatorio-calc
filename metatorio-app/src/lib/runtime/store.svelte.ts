@@ -1472,11 +1472,18 @@ class RuntimeStore {
   async applyBestModules(quality: string): Promise<void> {
     const { bestModules } = await import("./client");
     const modules = await bestModules(this.effectiveContextId);
+    // 只保留可达的插件（尊重项目的可达性设置；未拉取则不过滤）。
+    const access = await this.ensureAccessibility();
+    const reachable = access
+      ? modules.filter((m) =>
+          access.some((n) => (n as { Item?: string }).Item === m.name),
+        )
+      : modules;
     const existing = [...(this.selectedProject?.planning.enumerate_modules ?? [])];
     for (const module of existing) {
       await this.removeEnumeratedModule(module);
     }
-    for (const module of modules) {
+    for (const module of reachable) {
       await this.addEnumeratedModule(module.name, quality);
     }
   }
