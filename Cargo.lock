@@ -4018,7 +4018,7 @@ dependencies = [
 
 [[package]]
 name = "metatorio-app"
-version = "1.5.1"
+version = "1.5.2"
 dependencies = [
  "metatorio-core",
  "metatorio-data",
