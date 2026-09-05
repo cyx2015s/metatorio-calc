@@ -134,19 +134,12 @@ impl Default for RecipeProductivity {
 /// 无限科技的研究次数覆盖（2.b）。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct InfiniteTechLevel {
     pub tech: String,
     pub level: u32,
 }
 
-impl Default for InfiniteTechLevel {
-    fn default() -> Self {
-        Self {
-            tech: String::new(),
-            level: 0,
-        }
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]

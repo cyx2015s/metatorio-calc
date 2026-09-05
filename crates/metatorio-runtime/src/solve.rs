@@ -362,7 +362,7 @@ impl Runtime {
                     .iter()
                     .find(|m| m.node == node)
                     .cloned()
-                    .unwrap_or_else(|| crate::document::Milestone {
+                    .unwrap_or(crate::document::Milestone {
                         node,
                         unlocked: true,
                     })
@@ -1047,11 +1047,10 @@ pub fn add_conversion_flows(
         // 收集去重（精确向量相等）的燃料类别集合。
         let mut category_sets: Vec<Vec<String>> = Vec::new();
         for key in seen.keys() {
-            if let DualVar::ItemFuel { category, .. } = key {
-                if !category.is_empty() && !category_sets.contains(category) {
+            if let DualVar::ItemFuel { category, .. } = key
+                && !category.is_empty() && !category_sets.contains(category) {
                     category_sets.push(category.clone());
                 }
-            }
         }
         let is_proper_subset =
             |a: &Vec<String>, b: &Vec<String>| a.len() < b.len() && a.iter().all(|x| b.contains(x));
@@ -1252,22 +1251,19 @@ pub fn apply_environment_to_game_state(
 ) {
     if surface.is_some() {
         // 太空：solar_power_in_space（找不到 space-location 时回退 1.0）
-        if let Some(planet_name) = planet {
-            if let Some(record) = store.get(
+        if let Some(planet_name) = planet
+            && let Some(record) = store.get(
                 metatorio_data::store::PrototypeGroup::SpaceLocation,
                 planet_name,
-            ) {
-                if let Some(component) =
+            )
+                && let Some(component) =
                     record.component::<metatorio_data::SpaceLocationComponent>()
                 {
                     game.solar_power_multiplier = component.solar_power_in_space;
                 }
-            }
-        }
-    } else if let Some(planet_name) = planet {
-        if let Some(record) = store.get(metatorio_data::store::PrototypeGroup::Planet, planet_name)
-        {
-            if let Some(component) = record.component::<metatorio_data::PlanetComponent>() {
+    } else if let Some(planet_name) = planet
+        && let Some(record) = store.get(metatorio_data::store::PrototypeGroup::Planet, planet_name)
+            && let Some(component) = record.component::<metatorio_data::PlanetComponent>() {
                 if let Some(&value) = component.surface_properties.get("solar-power") {
                     // 百分比 → 倍率（nauvis 默认 100 → 1.0）
                     game.solar_power_multiplier = value / 100.0;
@@ -1276,8 +1272,6 @@ pub fn apply_environment_to_game_state(
                     game.day_night_cycle = cycle;
                 }
             }
-        }
-    }
 }
 
 #[cfg(test)]

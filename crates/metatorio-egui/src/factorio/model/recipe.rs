@@ -415,14 +415,10 @@ pub fn machine_fits_for_recipe(
     crafter: &CraftingMachinePrototype,
     recipe: &RecipePrototype,
 ) -> bool {
-    if recipe
+    recipe
         .categories
         .iter()
         .any(|cat| crafter.crafting_categories.contains(cat))
-    {
-        return true;
-    }
-    false
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

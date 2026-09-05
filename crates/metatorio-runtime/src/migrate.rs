@@ -393,7 +393,7 @@ fn fuel_value(fuel: &Value, q: &[String], store: Option<&PrototypeStore>) -> Val
     let Some(arr) = fuel.as_array() else {
         return Value::Null;
     };
-    let name = arr.get(0).and_then(Value::as_str).unwrap_or("");
+    let name = arr.first().and_then(Value::as_str).unwrap_or("");
     let second = arr.get(1);
     let is_fluid = store.is_some_and(|s| s.get(PrototypeGroup::Fluid, name).is_some());
     if is_fluid {
@@ -420,12 +420,12 @@ fn module_config_of(v: &Value) -> Value {
     let modules = map
         .get("modules")
         .and_then(Value::as_array)
-        .map(|arr| arr.iter().map(|m| id_of_plain(m)).collect::<Vec<_>>())
+        .map(|arr| arr.iter().map(id_of_plain).collect::<Vec<_>>())
         .unwrap_or_default();
     let beacons = map
         .get("beacons")
         .and_then(Value::as_array)
-        .map(|arr| arr.iter().map(|b| beacon_of(b)).collect::<Vec<_>>())
+        .map(|arr| arr.iter().map(beacon_of).collect::<Vec<_>>())
         .unwrap_or_default();
     json!({ "modules": modules, "beacons": beacons })
 }
@@ -442,7 +442,7 @@ fn beacon_of(v: &Value) -> Value {
                 .map(|m| {
                     let idv = m
                         .get(0)
-                        .map(|idv| id_of_plain(idv))
+                        .map(id_of_plain)
                         .unwrap_or_else(id_empty);
                     let count = m.get(1).cloned().unwrap_or(json!(1));
                     json!([idv, count])
@@ -452,7 +452,7 @@ fn beacon_of(v: &Value) -> Value {
         .unwrap_or_default();
     let beacon = map
         .get("beacon")
-        .map(|b| id_of_plain(b))
+        .map(id_of_plain)
         .unwrap_or_else(id_empty);
     json!({
         "modules": modules,

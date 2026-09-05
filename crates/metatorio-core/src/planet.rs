@@ -70,16 +70,14 @@ pub fn surface_condition_satisfied(
                     .map(|component| component.default_value)
             })
             .unwrap_or(0.0);
-        if let Some(min) = condition.min {
-            if value < min {
+        if let Some(min) = condition.min
+            && value < min {
                 return false;
             }
-        }
-        if let Some(max) = condition.max {
-            if value > max {
+        if let Some(max) = condition.max
+            && value > max {
                 return false;
             }
-        }
     }
     true
 }
@@ -112,11 +110,10 @@ pub fn planet_generated_tiles(store: &PrototypeStore, planet: &str) -> HashSet<S
         let Some(autoplace) = &tile.autoplace else {
             continue;
         };
-        if let Some(control) = &autoplace.control {
-            if map_gen.autoplace_controls.contains_key(control) {
+        if let Some(control) = &autoplace.control
+            && map_gen.autoplace_controls.contains_key(control) {
                 tiles.insert(record.name.clone());
             }
-        }
     }
     tiles
 }

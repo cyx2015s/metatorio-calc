@@ -1320,7 +1320,7 @@ fn allowed_modules(
             .map(|drill| {
                 (
                     drill.allowed_module_categories.clone(),
-                    drill.allowed_effects.clone(),
+                    drill.allowed_effects,
                 )
             })
             .unwrap_or((None, None)),
@@ -1329,7 +1329,7 @@ fn allowed_modules(
             .map(|beacon| {
                 (
                     beacon.allowed_module_categories.clone(),
-                    beacon.allowed_effects.clone(),
+                    beacon.allowed_effects,
                 )
             })
             .unwrap_or((None, None)),
@@ -1338,7 +1338,7 @@ fn allowed_modules(
             .map(|machine| {
                 (
                     machine.allowed_module_categories.clone(),
-                    machine.allowed_effects.clone(),
+                    machine.allowed_effects,
                 )
             })
             .unwrap_or((None, None)),
