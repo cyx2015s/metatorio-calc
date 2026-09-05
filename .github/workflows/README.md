@@ -1,81 +1,43 @@
 # GitHub Workflows
 
-This directory contains GitHub Actions workflows for the project.
-
 ## build-and-release.yml
 
-Automatically builds binaries for multiple platforms and architectures.
+用 **Tauri** 编译并发布桌面应用（不再是旧的 egui 版），支持 **Linux（x86_64 → AppImage）** 和 **Windows（x86_64 → NSIS setup.exe）**。
+macOS 因签名需付费证书暂不构建。
 
-### Triggers
+### 触发器
 
-- **Push to master**: Builds binaries and uploads them as artifacts
-- **Release creation**: Builds binaries and attaches them to the release
-- **Manual trigger**: Can be triggered manually via workflow_dispatch
+- **push tag `v*.*.*`**：构建并创建/更新 GitHub Release（含 updater 产物）。
+- **Release created**：同上。
+- **手动触发（workflow_dispatch）**：按 `tauri.conf.json` 里的 `version` 打 tag 建 Release（`v__VERSION__`）。
 
-### Supported Platforms
+### 更新机制
 
-Currently configured targets:
+采用 `tauri-plugin-updater`：
 
-- **Linux**:
-  - x86_64 (Intel/AMD 64-bit)
-  - aarch64 (ARM 64-bit)
+- **Windows**：下载 `setup.exe` + `.sig`，静默运行安装器完成替换（`installMode: passive`）。
+- **Linux**：下载 AppImage + `.sig`，镜像自替换。
+- 更新清单由 `tauri-action` 的 `includeUpdaterJson` 生成，端点为
+  `https://github.com/cyx2015s/metatorio-calc/releases/latest/download/latest.json`。
 
-- **macOS**:
-  - x86_64 (Intel Macs)
-  - aarch64 (Apple Silicon)
+### 发布前需要配置的 Secrets / 密钥
 
-- **Windows**:
-  - x86_64 (Intel/AMD 64-bit)
+因为用了 updater 签名，发布前**必须**：
 
-### Adding New Architectures
+1. 生成签名密钥对（在本地）：
+   ```bash
+   cd metatorio-app
+   pnpm tauri signer generate --write-keys ~/.tauri/metatorio.key
+   ```
+2. 在仓库 **Settings → Secrets → Actions** 新增两个 secret：
+   - `TAURI_SIGNING_PRIVATE_KEY`：私钥内容
+   - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`：私钥密码
+3. 把**公钥**写入 `metatorio-app/src-tauri/tauri.conf.json` 的
+   `plugins.updater.pubkey`（二维码下方输出的 `publicKey`），替换当前
+   `REPLACE_WITH_TAURI_SIGNER_PUBLIC_KEY` 占位符。
 
-To add support for additional architectures, add a new entry to the `matrix.include` section in `.github/workflows/build-and-release.yml`:
+### 产物
 
-```yaml
-- target: <rust-target-triple>
-  os: <github-runner-os>
-  name: metatorio-<platform>-<arch>
-```
-
-#### Common Rust Target Triples
-
-- Linux: `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `armv7-unknown-linux-gnueabihf`
-- macOS: `x86_64-apple-darwin`, `aarch64-apple-darwin`
-- Windows: `x86_64-pc-windows-msvc`, `i686-pc-windows-msvc`, `aarch64-pc-windows-msvc`
-- FreeBSD: `x86_64-unknown-freebsd`
-
-#### Example: Adding 32-bit Linux Support
-
-```yaml
-- target: i686-unknown-linux-gnu
-  os: ubuntu-latest
-  name: metatorio-linux-i686
-```
-
-### Cross-Compilation
-
-The workflow uses Rust's built-in cross-compilation support. For Linux ARM targets, it installs the necessary cross-compilation toolchain automatically.
-
-For more complex cross-compilation scenarios, consider using the [cross](https://github.com/cross-rs/cross) tool by modifying the build step:
-
-```yaml
-- name: Build binary
-  run: cross build --release --target ${{ matrix.target }}
-```
-
-### Configuration Options
-
-You can customize the workflow behavior by modifying:
-
-- **Trigger branches**: Change the `branches` list under `on.push` (currently set to `master`)
-- **Ignored paths**: Modify `paths-ignore` to skip builds for certain file changes
-- **Build flags**: Add cargo features or flags to the `cargo build` command
-- **Environment variables**: Add or modify variables in the `env` section
-
-### Artifacts
-
-Built binaries are uploaded as workflow artifacts and can be downloaded from the Actions tab for 90 days (default GitHub retention).
-
-### Releases
-
-When creating a GitHub release, the workflow automatically builds and attaches binaries for all configured platforms.
+- Windows：`src-tauri/target/release/bundle/nsis/*setup.exe`（含 `.sig` 更新签名）。
+- Linux：`src-tauri/target/release/bundle/appimage/*.AppImage`（含 `.sig`）。
+- 均由 `tauri-action` 上传到 GitHub Release。

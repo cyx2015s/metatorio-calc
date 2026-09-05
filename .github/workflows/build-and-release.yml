@@ -1,5 +1,7 @@
-name: Build and Release Binaries
+name: Build and Release (Tauri)
 
+# 编译并发布 Tauri 桌面应用（Linux + Windows），附带 tauri-plugin-updater 更新产物。
+# macOS 因签名需要付费证书，暂不构建。
 on:
   push:
     tags:
@@ -8,40 +10,25 @@ on:
     types: [created]
   workflow_dispatch:
 
-env:
-  CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
+permissions:
+  contents: write
 
 jobs:
-  build:
-    name: Build ${{ matrix.target }}
-    runs-on: ${{ matrix.os }}
-    permissions:
-      contents: write  # Required for uploading release assets
+  publish-tauri:
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Linux targets
-          # - target: x86_64-unknown-linux-gnu
-          #   os: ubuntu-latest
-          #   name: metatorio-linux-x86_64
-          # - target: aarch64-unknown-linux-gnu
-          #   os: ubuntu-latest
-          #   name: metatorio-linux-aarch64
+          # Linux x86_64 → AppImage（镜像自替换，配合 updater）
+          - platform: ubuntu-22.04
+            args: '--bundles appimage'
+            name: linux-x86_64
+          # Windows x86_64 → NSIS setup.exe（静默升级）
+          - platform: windows-latest
+            args: '--bundles nsis'
+            name: windows-x86_64
 
-          # macOS targets
-          # - target: x86_64-apple-darwin
-          #   os: macos-latest
-          #   name: metatorio-macos-x86_64
-          # - target: aarch64-apple-darwin
-          #   os: macos-latest
-          #   name: metatorio-macos-aarch64
-
-          # Windows targets
-          - target: x86_64-pc-windows-msvc
-            os: windows-latest
-            name: metatorio-windows-x86_64.exe
+    runs-on: ${{ matrix.platform }}
 
     steps:
       - name: Checkout code
@@ -49,66 +36,52 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-
-      - name: Setup Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.target }}
-
-      - name: Install cross-compilation tools (Linux aarch64)
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
+      # Tauri v2 在 Linux 上需要这几个系统库。
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev
 
-      - name: Run tests
-        run: cargo test --target ${{ matrix.target }}
-        env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-
-      - name: Build binary
-        run: cargo build --release --target ${{ matrix.target }}
-        env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-
-      - name: Prepare binary (Unix)
-        if: matrix.os != 'windows-latest'
-        run: |
-          cd target/${{ matrix.target }}/release
-          if [ -f "metatorio" ]; then
-            cp metatorio ${{ matrix.name }}
-            echo "Binary prepared: ${{ matrix.name }}"
-          else
-            echo "Warning: Binary not found at expected location"
-            ls -la
-          fi
-
-      - name: Prepare binary (Windows)
-        if: matrix.os == 'windows-latest'
-        run: |
-          cd target/${{ matrix.target }}/release
-          if (Test-Path "metatorio.exe") {
-            Copy-Item "metatorio.exe" "${{ matrix.name }}"
-            Write-Host "Binary prepared: ${{ matrix.name }}"
-          } else {
-            Write-Host "Warning: Binary not found at expected location"
-            Get-ChildItem
-          }
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          name: ${{ matrix.name }}
-          path: target/${{ matrix.target }}/release/${{ matrix.name }}
-          if-no-files-found: error
+          node-version: lts/*
+          cache: 'pnpm'
+          cache-dependency-path: metatorio-app/pnpm-lock.yaml
 
-      - name: Upload to release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: target/${{ matrix.target }}/release/${{ matrix.name }}
+      - name: Setup pnpm
+        run: corepack enable
+
+      - name: Install frontend dependencies
+        working-directory: metatorio-app
+        run: pnpm install --frozen-lockfile
+
+      # Tauri 构建由 tauri-action 完成；它调用 `pnpm build`（beforeBuildCommand）并打包。
+      # 若需 updater 签名，必须在仓库 Secrets 里配置：
+      #   TAURI_SIGNING_PRIVATE_KEY          （`pnpm tauri signer generate` 生成的私钥）
+      #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD （私钥密码）
+      # 并把公钥写入 metatorio-app/src-tauri/tauri.conf.json 的 plugins.updater.pubkey。
+      - name: Build and release
+        uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: metatorio-app
+          tagName: v__VERSION__
+          releaseName: 'metatorio v__VERSION__'
+          releaseBody: |
+            见各平台的安装包 / 更新镜像：
+            - Windows: NSIS setup.exe
+            - Linux: AppImage
+          releaseDraft: true
+          prerelease: false
+          includeUpdaterJson: true
+          args: ${{ matrix.args }}

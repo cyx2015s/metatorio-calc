@@ -3,6 +3,8 @@
   // 一般操作一律文字按钮。
   import { onMount } from "svelte";
   import { dndzone } from "svelte-dnd-action";
+  import { check as updaterCheck } from "@tauri-apps/plugin-updater";
+  import { relaunch } from "@tauri-apps/plugin-process";
   import { runtime } from "$lib/runtime/store.svelte.ts";
   import { allowedModules, pickGameExecutable, pickModDir, suggest } from "$lib/runtime/client";
   import { dualVarLabel, flowQuality, itemOf, accessibleKind, accessibleName } from "$lib/runtime/types";
@@ -101,6 +103,34 @@
     notice = message;
     clearTimeout(noticeTimer);
     noticeTimer = setTimeout(() => (notice = null), 4000);
+  }
+
+  // ── 应用更新 ────────────────────────────────────────────────────
+  let updating = $state(false);
+  async function checkForUpdate() {
+    if (updating) return;
+    updating = true;
+    try {
+      const update = await updaterCheck();
+      if (!update) {
+        showNotice("当前已是最新版本");
+        return;
+      }
+      confirmState = {
+        message: `发现新版本 ${update.version}，是否立即下载并重启更新？`,
+        action: () => {
+          showNotice("正在下载更新…");
+          update
+            .downloadAndInstall()
+            .then(() => relaunch())
+            .catch((error) => showNotice(`更新失败：${String(error)}`));
+        },
+      };
+    } catch (error) {
+      showNotice(`检查更新失败：${String(error)}`);
+    } finally {
+      updating = false;
+    }
   }
 
   // ── 选择器状态 ──────────────────────────────────────────────────
@@ -1063,6 +1093,9 @@
     <div class="menu-wrap">
       <button class="btn" onclick={openLoadGame} disabled={runtime.contextBusy}>
         加载游戏
+      </button>
+      <button class="btn ghost" onclick={checkForUpdate} disabled={updating}>
+        {updating ? "检查中…" : "检查更新"}
       </button>
     </div>
 
