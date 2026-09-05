@@ -63,6 +63,7 @@ jobs:
         with:
           node-version: lts/*
           cache: 'pnpm'
+          cache-dependency-path: metatorio-app/pnpm-lock.yaml
 
       - name: Install frontend dependencies
         working-directory: metatorio-app
