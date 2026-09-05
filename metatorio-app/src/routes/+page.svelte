@@ -2211,7 +2211,7 @@
         <div class="path-row">
           <input
             bind:value={gameExePath}
-            placeholder="D:\异星工厂\bin\x64\factorio.exe"
+            placeholder="游戏可执行文件路径"
             onkeydown={(event) => {
               if (event.key === "Enter") submitLoadGame();
             }}
