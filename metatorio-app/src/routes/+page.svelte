@@ -3,6 +3,7 @@
   // 一般操作一律文字按钮。
   import { onMount } from "svelte";
   import { dndzone } from "svelte-dnd-action";
+  import { getVersion } from "@tauri-apps/api/app";
   import { check as updaterCheck } from "@tauri-apps/plugin-updater";
   import { relaunch } from "@tauri-apps/plugin-process";
   import { runtime } from "$lib/runtime/store.svelte.ts";
@@ -39,7 +40,11 @@
   onMount(() => {
     runtime.init().catch(() => {});
     runtime.clearCatalogCache();
+    getVersion().then((v) => (appVersion = v)).catch(() => {});
   });
+
+  // 应用版本号（来自 tauri.conf.json version，无则空串）
+  let appVersion = $state("");
 
   // ── 应用栏状态 ──────────────────────────────────────────────────
   // 添加机制菜单用 fixed 定位（视口坐标），脱离滚动容器，避免开合时
@@ -93,7 +98,12 @@
   }
 
   // 应用内确认/重命名弹窗（Tauri WebView2 不支持 window.confirm/prompt，会阻塞）
-  let confirmState = $state<{ message: string; action: () => void } | null>(null);
+  let confirmState = $state<{
+    message: string;
+    action: () => void;
+    confirmLabel?: string;
+    danger?: boolean;
+  } | null>(null);
   let renameCtx = $state<{ id: string; name: string } | null>(null);
   let renameName = $state("");
   // 轻量提示（自动消失）
@@ -118,6 +128,7 @@
       }
       confirmState = {
         message: `发现新版本 ${update.version}，是否立即下载并重启更新？`,
+        confirmLabel: "立即更新",
         action: () => {
           showNotice("正在下载更新…");
           update
@@ -1105,6 +1116,9 @@
       <span class="chip ok">{runtime.activeContext.name}</span>
     {:else}
       <span class="chip">未加载游戏数据</span>
+    {/if}
+    {#if appVersion}
+      <span class="chip mono" title="当前版本">v{appVersion}</span>
     {/if}
   </header>
 
@@ -2116,6 +2130,8 @@
                     onclick={() =>
                       (confirmState = {
                         message: `删除上下文「${context.name}」的缓存？`,
+                        confirmLabel: "删除",
+                        danger: true,
                         action: () => runtime.deleteContext(context.id).catch(() => {}),
                       })}
                   >删除</button>
@@ -2260,12 +2276,12 @@
       <div class="mini-actions">
         <button class="btn ghost" onclick={() => (confirmState = null)}>取消</button>
         <button
-          class="btn danger"
+          class="btn {confirm.danger ? 'danger' : 'primary'}"
           onclick={() => {
             confirm.action();
             confirmState = null;
           }}
-        >删除</button>
+        >{confirm.confirmLabel ?? "确定"}</button>
       </div>
     </div>
   </div>
