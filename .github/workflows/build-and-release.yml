@@ -15,6 +15,10 @@ permissions:
 
 jobs:
   publish-tauri:
+    # 用某个 environment 里的密钥：此处 `environment` 取仓库变量 RELEASE_ENVIRONMENT
+    # （缺省 'release'）。若你要用刚创建的 environment，新建仓库变量
+    #   RELEASE_ENVIRONMENT = <你的 environment 名字>
+    environment: "Release"
     strategy:
       fail-fast: false
       matrix:
@@ -32,7 +36,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -55,18 +59,17 @@ jobs:
           run_install: false
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: lts/*
           cache: 'pnpm'
-          cache-dependency-path: metatorio-app/pnpm-lock.yaml
 
       - name: Install frontend dependencies
         working-directory: metatorio-app
         run: pnpm install --frozen-lockfile
 
       # Tauri 构建由 tauri-action 完成；它调用 `pnpm build`（beforeBuildCommand）并打包。
-      # 若需 updater 签名，必须在仓库 Secrets 里配置：
+      # updater 签名密钥来自当前 environment（`environment:` 指定）或仓库：
       #   TAURI_SIGNING_PRIVATE_KEY          （`pnpm tauri signer generate` 生成的私钥）
       #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD （私钥密码）
       # 并把公钥写入 metatorio-app/src-tauri/tauri.conf.json 的 plugins.updater.pubkey。
