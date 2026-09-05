@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "切向量化",
-  "version": "0.1.0",
+  "version": "1.5.0-rc1",
   "identifier": "com.mirac.metatorio-app",
   "build": {
     "beforeDevCommand": "pnpm dev",
@@ -37,7 +37,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "REPLACE_WITH_TAURI_SIGNER_PUBLIC_KEY",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEE4OEFFQTI1RUM5QTc4RjIKUldUeWVKcnNKZXFLcUhvTzJPNUR1dlFKdCtGWERveFFJd3ZDMXpJYkwwNUozemsrdjVBVjBqQkUK",
       "endpoints": [
         "https://github.com/cyx2015s/metatorio-calc/releases/latest/download/latest.json"
       ],
