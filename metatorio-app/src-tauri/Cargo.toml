@@ -1,6 +1,6 @@
 [package]
 name = "metatorio-app"
-version = "1.5.0"
+version = "1.5.1"
 description = "切向量化：异星工厂（Factorio）规划工具"
 authors = ["cyx2015s"]
 edition = "2021"
