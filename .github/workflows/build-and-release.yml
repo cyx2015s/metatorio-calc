@@ -88,7 +88,7 @@ jobs:
             见各平台的安装包 / 更新镜像：
             - Windows: NSIS setup.exe
             - Linux: AppImage
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           includeUpdaterJson: true
           args: ${{ matrix.args }}
