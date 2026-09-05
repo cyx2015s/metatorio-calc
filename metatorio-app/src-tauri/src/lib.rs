@@ -2057,10 +2057,16 @@ async fn productivity(
 #[tauri::command]
 async fn pick_game_executable(app: AppHandle) -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(windows)]
         let picked = app
             .dialog()
             .file()
             .add_filter("Factorio 可执行文件", &["exe"])
+            .blocking_pick_file();
+        #[cfg(not(windows))]
+        let picked = app
+            .dialog()
+            .file()
             .blocking_pick_file();
         Ok(picked
             .and_then(|picked| picked.into_path().ok())
