@@ -3,7 +3,9 @@
 //! 原版中所有配方/采矿产能加成都来自**科技 effect**（`Modifier`）：
 //! - `ChangeRecipeProductivity { change, recipe }`：给某配方 +change 产能（每级）；
 //! - `MiningDrillProductivityBonus { modifier }`：给采矿 +modifier 产能（每级）。
+//! 
 //! 这两类 effect 通常挂在 `max_level = infinite` 的无限科技上（如
+//! 
 //! `mining-productivity-3`、`steel-plate-productivity`），每研究一级 +0.1。
 //!
 //! 因此"从可达性推算"即：遍历全部科技，对**可达的**产能科技按其

@@ -206,6 +206,7 @@ pub struct GraphData {
 /// - 击杀掉落（loot）实体 → 实体本身 + loot 产物；
 /// - 虫巢（unit-spawner）→ 捕获产物（captured_spawner_entity 产卵器）；
 /// - 植物（seed_available_on_planet）。
+/// 
 /// 星球解锁（[`Accessible::Planet`] 节点可达）后资源可自由移动到任何星球。
 fn build_resource_planets(store: &PrototypeStore) -> HashMap<String, Vec<String>> {
     let mut map: HashMap<String, Vec<String>> = HashMap::new();

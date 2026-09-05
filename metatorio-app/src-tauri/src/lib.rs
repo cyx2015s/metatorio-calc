@@ -662,7 +662,7 @@ fn context_list_with(runtime: &Runtime, state: &AppState) -> ContextList {
         .keys()
         .filter_map(|id| context_info_from(registry, runtime, id))
         .collect();
-    contexts.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    contexts.sort_by_key(|x| std::cmp::Reverse(x.created_at));
     ContextList { active, contexts }
 }
 
@@ -1367,6 +1367,7 @@ fn allowed_modules(
 /// 对物品/流体同时收集：
 /// - producer：产出该流的配方 / 产出矿点
 /// - consumer：把该流作为原料的配方
+/// 
 /// 其余能量类流沿用旧逻辑（只列生产者）。
 fn suggest_for_flow(store: &PrototypeStore, flow: DualVar) -> Vec<Suggestion> {
     let mut out = Vec::new();
@@ -1477,6 +1478,7 @@ fn technology_base_level(name: &str) -> u32 {
 /// 科技等级上限 → 前端 `Option<u32>`。
 /// - `None`：无限科技（无上限）。
 /// - `Some(n)`：有效上限 n。
+/// 
 /// max_level 未显式声明时默认等于该科技的最低等级（自身），即单次研究。
 fn technology_max_level_value(tech: &TechnologyComponent, name: &str) -> Option<u32> {
     match tech.max_level {

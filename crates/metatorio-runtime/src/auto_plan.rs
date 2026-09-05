@@ -220,7 +220,7 @@ where
             .then_with(|| a.0.name.cmp(&b.0.name))
     });
     for (record, _) in candidates {
-        if out.len() >= alternative_count.max(1).min(3) {
+        if out.len() >= alternative_count.clamp(1, 3) {
             break;
         }
         if !contains_name(&out, &record.name) {

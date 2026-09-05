@@ -510,7 +510,7 @@ fn id_of(v: &Value, q: &[String]) -> Value {
             let level = arr[1].as_i64().unwrap_or(0);
             json!({ "id": name, "quality": quality_name(q, level) })
         }
-        Value::Null | _ => {
+        _ => {
             // 已是对象 / 缺省：保留原样（对象）；null → 空 id。
             if v.is_object() {
                 v.clone()

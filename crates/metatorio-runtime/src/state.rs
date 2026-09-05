@@ -1279,9 +1279,7 @@ fn apply_factory_context(
 /// mechanic's kind is known up front, so the produced action always matches
 /// the mechanic — a mismatched (selector kind, mechanic kind) pair is a
 /// protocol error instead of a runtime dispatch decision.
-
 /// Only recipe and mining mechanics carry a module configuration.
-
 fn apply_mechanic_action(
     entry: &mut MechanicEntry,
     action: MechanicAction,

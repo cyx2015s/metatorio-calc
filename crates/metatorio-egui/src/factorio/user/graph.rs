@@ -412,8 +412,7 @@ pub fn update_accessibles(user: &mut ProjectContext, data: &DataContext) {
         }
     }
     user.cur_max_quality_level = 0;
-    for i in 1..data.qualities.len() {
-        let quality = &data.qualities[i];
+    for (i, quality) in data.qualities.iter().enumerate().skip(1) {
         if user
             .accessible_prototypes
             .get("quality")
