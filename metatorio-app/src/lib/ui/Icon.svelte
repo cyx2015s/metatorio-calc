@@ -32,6 +32,10 @@
 
   $effect(() => {
     url = null;
+    // 显式依赖有效上下文 id：上下文就绪/切换后需重新拉取图标。否则首屏渲染
+    // 时若上下文尚未就绪，getIcon 会拿到 null 并停在首字母占位（而选择器/悬停
+    // 卡片是后来才渲染、用到了已就绪的上下文，所以有图标）。
+    runtime.effectiveContextId;
     const syntheticUrl = synthetic[name];
     if (syntheticUrl) {
       url = syntheticUrl;

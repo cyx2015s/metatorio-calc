@@ -447,10 +447,14 @@ class RuntimeStore {
   /** 取物品图标（blob URL）；无图标时返回 null。带缓存（按上下文 id 区分）。 */
   getIcon(type: string, name: string): Promise<string | null> {
     // 上下文已项目级绑定：同一 type/name 在不同上下文可能指向不同 mod 图标。
-    const key = `${this.effectiveContextId}/${type}/${name}`;
+    const ctxId = this.effectiveContextId;
+    // 上下文未就绪时直接返回 null 且不缓存，避免把空上下文的"无图标"结果
+    // 污染缓存，导致上下文就绪后仍停在占位图。
+    if (!ctxId) return Promise.resolve(null);
+    const key = `${ctxId}/${type}/${name}`;
     let entry = this.icons.get(key);
     if (!entry) {
-      entry = loadIcon(type, name, this.effectiveContextId).then((bytes) => {
+      entry = loadIcon(type, name, ctxId).then((bytes) => {
         if (!bytes || bytes.length === 0) return null;
         const blob = new Blob([new Uint8Array(bytes)], { type: "image/png" });
         const url = URL.createObjectURL(blob);
