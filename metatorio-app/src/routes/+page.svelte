@@ -38,6 +38,7 @@
   ];
 
   onMount(() => {
+    runtime.initTheme();
     runtime.init().catch(() => {});
     runtime.clearCatalogCache();
     getVersion().then((v) => (appVersion = v)).catch(() => {});
@@ -1120,6 +1121,18 @@
     {#if appVersion}
       <span class="chip mono" title="当前版本">v{appVersion}</span>
     {/if}
+    <label class="theme-picker" title="主题">
+      <span class="muted">主题</span>
+      <select
+        value={runtime.theme}
+        onchange={(event) =>
+          runtime.setTheme((event.currentTarget as HTMLSelectElement).value as "system" | "light" | "dark")}
+      >
+        <option value="system">跟随系统</option>
+        <option value="light">亮色</option>
+        <option value="dark">深色</option>
+      </select>
+    </label>
   </header>
 
   {#if runtime.contextError || runtime.lastError || notice}

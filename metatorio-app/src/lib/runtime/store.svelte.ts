@@ -101,6 +101,42 @@ class RuntimeStore {
   lastError = $state<string | null>(null);
   ready = $state(false);
 
+  /** 主题模式：system(跟随系统) / light / dark。不会写死，用户可选。 */
+  theme = $state<"system" | "light" | "dark">("system");
+  private themeMedia: MediaQueryList | null = null;
+  private static readonly THEME_KEY = "metatorio-theme";
+  /** 依主题模式解析实际亮/暗，并写入 <html data-theme>。 */
+  private applyTheme(): void {
+    const resolved =
+      this.theme === "system"
+        ? typeof window !== "undefined" &&
+          window.matchMedia("(prefers-color-scheme: light)").matches
+          ? "light"
+          : "dark"
+        : this.theme;
+    document.documentElement.dataset.theme = resolved;
+  }
+  /** 启动时读回存储的主题并监听系统偏好变化（system 模式下实时跟随）。 */
+  initTheme(): void {
+    const saved = localStorage.getItem(RuntimeStore.THEME_KEY) as
+      | "system"
+      | "light"
+      | "dark"
+      | null;
+    this.theme = saved === "light" || saved === "dark" || saved === "system" ? saved : "system";
+    if (typeof window === "undefined") return;
+    this.themeMedia = window.matchMedia("(prefers-color-scheme: light)");
+    this.themeMedia.addEventListener("change", () => {
+      if (this.theme === "system") this.applyTheme();
+    });
+    this.applyTheme();
+  }
+  setTheme(mode: "system" | "light" | "dark"): void {
+    this.theme = mode;
+    localStorage.setItem(RuntimeStore.THEME_KEY, mode);
+    this.applyTheme();
+  }
+
   contexts = $state<ContextInfo[]>([]);
   activeContext = $state<ContextInfo | null>(null);
   contextBusy = $state(false);

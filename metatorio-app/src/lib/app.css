@@ -11,7 +11,7 @@
   --mono: "JetBrains Mono", "SFMono-Regular", Consolas, "Cascadia Mono", monospace;
   --sans: "Inter", "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
 
-  /* 深色石墨 + 青绿 accent（统一暗色基线，不再跟随系统切换）。 */
+  /* 深色石墨 + 青绿 accent（默认/基座）。 */
   --bg: #0c0e0f;
   --panel: #131617;
   --panel-elev: #191d1e;
@@ -35,6 +35,32 @@
   /* 更平的阴影：专业工具少用投影。 */
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.28);
   --shadow-strong: 0 6px 18px rgba(0, 0, 0, 0.42);
+}
+
+/* 浅色主题：由前端根据主题模式（light/dark/system）设置 data-theme。 */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f2f4f3;
+  --panel: #ffffff;
+  --card: #eaeceb;
+  --card-hover: #e2e6e3;
+  --line: #d9dcda;
+  --line-strong: #bfc5c1;
+  --text: #1d2422;
+  --muted: #5d6a65;
+  --faint: #8b9691;
+  --accent: #17815f;
+  --accent-dim: #e0f2ea;
+  --accent-line: #96cdbb;
+  --warn: #92621c;
+  --warn-dim: #f6ecda;
+  --warn-line: #d0b17a;
+  --danger: #b0453b;
+  --danger-dim: #fbeae7;
+  --danger-line: #d6a19b;
+  --icon-bg: #e6e9e7;
+  --shadow: 0 1px 2px rgba(20, 30, 26, 0.08);
+  --shadow-strong: 0 6px 18px rgba(20, 30, 26, 0.16);
 }
 
 body {
@@ -262,4 +288,23 @@ input.num {
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
+}
+
+/* app bar 主题选择器（紧凑）。 */
+.theme-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+}
+
+.theme-picker select {
+  color: var(--text);
+  background: var(--card);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
 }
