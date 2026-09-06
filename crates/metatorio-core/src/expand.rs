@@ -198,6 +198,14 @@ fn fluid_temperature(ctx: &Context, name: &str) -> f64 {
         .unwrap_or_default()
 }
 
+fn fluid_max_temperature(ctx: &Context, name: &str) -> f64 {
+    ctx.prototype
+        .get(PrototypeGroup::Fluid, name)
+        .and_then(|record| record.component::<metatorio_data::FluidComponent>())
+        .map(|fluid| fluid.max_temperature())
+        .unwrap_or_default()
+}
+
 fn add_fluid_interval(temp: &mut TempFlow, name: &str, amount: f64, lower: f64, upper: f64) {
     temp.add(
         DualVar::Fluid {
@@ -466,15 +474,16 @@ fn expand_recipe<C: Clone>(
                 );
             }
             Ingredient::Fluid(fluid) => {
-                let default = fluid_temperature(ctx, &fluid.name);
+                let default_temp = fluid_temperature(ctx, &fluid.name);
+                let max_temp = fluid_max_temperature(ctx, &fluid.name);
                 let lo = fluid
                     .temperature
                     .or(fluid.minimum_temperature)
-                    .unwrap_or(default);
+                    .unwrap_or(default_temp);
                 let hi = fluid
                     .temperature
                     .or(fluid.maximum_temperature)
-                    .unwrap_or(default);
+                    .unwrap_or(max_temp);
                 add_fluid_interval(&mut temp, &fluid.name, -fluid.amount * scale, lo, hi);
             }
         }
