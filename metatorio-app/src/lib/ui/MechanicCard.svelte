@@ -360,7 +360,7 @@
   </div>
 
   <!-- 机制细节：燃料 / 燃料温度 / 火箭重量模式 -->
-  {#if kind === "recipe" || kind === "mining" || kind === "boiler" || kind === "reactor" || kind === "item-launch"}
+  {#if kind === "item-launch" || kind === "boiler" || kind === "reactor" || ((kind === "recipe" || kind === "mining") && machineEnergySource === "burner")}
     <div class="row2b">
       {#if kind === "item-launch"}
         <button
