@@ -144,6 +144,9 @@ class RuntimeStore {
 
   /** 图标缓存：`type/name` → blob URL（或 null 表示无图标）。 */
   private icons = new Map<string, Promise<string | null>>();
+  /** 图标缓存失效版本：缓存清空/目录加载后自增，驱动 <Icon> 组件重新拉取，
+   *  修复"总流平衡等面板偶发首字母占位"（瞬时 null 被缓存后不再刷新）。 */
+  iconRevision = $state(0);
   /** 上次刷新时的激活上下文 id（用于判断索引/图标缓存是否失效）。 */
   private activeContextId = "";
   /** 上次同步过的"项目有效上下文"id：项目上下文切换后用它驱动目录/上下文列表
@@ -509,6 +512,7 @@ class RuntimeStore {
     for (const url of this.iconUrls) URL.revokeObjectURL(url);
     this.iconUrls = [];
     this.icons.clear();
+    this.iconRevision++;
   }
 
   /** 目录索引：一次拉取当前上下文的全量目录（前端本地筛选/分组）。 */
@@ -524,6 +528,9 @@ class RuntimeStore {
     this.catalogLoadPromise = (async () => {
       try {
         this.catalogIndex = await catalogIndex(contextId);
+        // 目录（含该上下文图标）就绪后，让已渲染的 <Icon> 重新拉取，
+        // 修复"首屏/上下文未就绪时图标被瞬时 null 缓存"导致的占位。
+        this.iconRevision++;
         return this.catalogIndex;
       } catch (error) {
         this.lastError = String(error);
