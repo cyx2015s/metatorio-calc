@@ -2694,8 +2694,8 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 8px;
-    padding: 8px 12px;
+    gap: 6px;
+    padding: 4px 10px;
     background: var(--panel);
     border-bottom: 1px solid var(--line);
   }
@@ -2703,18 +2703,18 @@
   .brand {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     margin-right: 6px;
   }
 
   .brand-mark {
     display: grid;
     place-items: center;
-    width: 22px;
-    height: 22px;
+    width: 20px;
+    height: 20px;
     color: #0f1f19;
     background: var(--accent);
-    border-radius: 6px;
+    border-radius: 5px;
     font-size: 11px;
     font-weight: 800;
   }
