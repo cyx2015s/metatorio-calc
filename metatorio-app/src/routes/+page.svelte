@@ -2948,11 +2948,16 @@
     align-items: center;
     flex-wrap: wrap;
     gap: 6px;
-    min-height: 32px;
+    min-height: 28px;
     padding: 3px 6px;
-    background: var(--card);
-    border: 1px solid var(--line);
+    background: transparent;
+    border: 1px solid transparent;
     border-radius: var(--radius-sm);
+  }
+
+  .row-item:hover {
+    background: var(--card-hover);
+    border-color: var(--line);
   }
 
   .row-item .row-name {
