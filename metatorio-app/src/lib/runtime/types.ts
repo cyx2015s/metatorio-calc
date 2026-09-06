@@ -720,7 +720,7 @@ export interface PrototypeDetail {
   results: FlowAmount[];
   crafting_speed: number | null;
   module_slots: number | null;
-  /** 机器/信标允许的插件类别（空 = 不限制）。 */
+  /** 机器/插件塔允许的插件类别（空 = 不限制）。 */
   allowed_module_categories: string[];
   /** 焦耳/刻（功率）；前端换算为 W。 */
   energy_usage_j: number | null;

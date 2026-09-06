@@ -130,7 +130,7 @@
     generator: "发电机",
     boiler: "锅炉",
     reactor: "反应堆",
-    beacon: "信标",
+    beacon: "插件塔",
     resource: "资源",
     entity: "实体",
     technology: "科技",

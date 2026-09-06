@@ -13,7 +13,7 @@ use crate::id::IdWithQuality;
 
 // ── 插件配置（ModuleConfig 体系，纯数据）─────────────────────────
 
-/// 一个机器实例的插件/信标配置。
+/// 一个机器实例的插件/插件塔配置。
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ModuleConfig {
@@ -221,7 +221,7 @@ pub struct FluidHeatMechanic {
     pub temperature: Option<i32>,
 }
 
-/// 单个信标（插件塔）的配置。
+/// 单个插件塔（插件塔）的配置。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct BeaconConfig {
@@ -236,8 +236,8 @@ pub struct BeaconConfig {
     pub share: f64,
 }
 
-/// "添加信标"推入的默认配置：1 座信标、覆盖 1 台机器、normal 品质。
-/// count = 0 会让信标行完全无效（无加成/无耗电），share = 0 会被
+/// "添加插件塔"推入的默认配置：1 座插件塔、覆盖 1 台机器、normal 品质。
+/// count = 0 会让插件塔行完全无效（无加成/无耗电），share = 0 会被
 /// `max(1.0)` 静默掩盖成 1——两个默认值都不该是 0。
 impl Default for BeaconConfig {
     fn default() -> Self {
@@ -415,13 +415,13 @@ mod tests {
         };
         let ctx = Context::new(&store, &game);
 
-        // 无信标：速度为 0。
+        // 无插件塔：速度为 0。
         let without = ModuleConfig {
             modules: vec![],
             beacons: vec![],
         };
         assert_eq!(without.get_effect(&ctx).speed, 0.0);
-        // 一个信标 + 2 个速度插件 → 速度 > 0。
+        // 一个插件塔 + 2 个速度插件 → 速度 > 0。
         let with_beacon = ModuleConfig {
             modules: vec![],
             beacons: vec![BeaconConfig {
@@ -432,8 +432,8 @@ mod tests {
             }],
         };
         let effect = with_beacon.get_effect(&ctx);
-        assert!(effect.speed > 0.0, "信标中的插件应计入产出加成：{effect:?}");
-        // 信标耗电（均摊）> 0。
+        assert!(effect.speed > 0.0, "插件塔中的插件应计入产出加成：{effect:?}");
+        // 插件塔耗电（均摊）> 0。
         assert!(with_beacon.get_consumption(&ctx) > 0.0);
     }
 }

@@ -431,8 +431,8 @@ pub enum ModuleAction {
         max: usize,
     },
     ClearModules,
-    /// 添加一个信标配置。必须携带信标本体（不允许空 id），且不能与已有
-    /// 信标重复——"信标配置必须绑定一个有效信标"。
+    /// 添加一个插件塔配置。必须携带插件塔本体（不允许空 id），且不能与已有
+    /// 插件塔重复——"插件塔配置必须绑定一个有效插件塔"。
     AddBeacon {
         beacon: IdWithQuality,
     },

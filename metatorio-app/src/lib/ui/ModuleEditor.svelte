@@ -2,7 +2,7 @@
   // 插件配置编辑器（复刻旧 egui ModuleConfigEditor）：
   // - 机器插件槽：已填槽图标（点击更换，× 移除）+ 空槽（点击添加），
   //   槽位上限来自机器原型的 module_slots（后端 ClampModules 兜底钳制）。
-  // - 信标：信标实体（点击选择）、数量、共享比例、塔内插件（图标 + 数量）。
+  // - 插件塔：插件塔实体（点击选择）、数量、共享比例、塔内插件（图标 + 数量）。
   import { runtime } from "$lib/runtime/store.svelte.ts";
   import HoverIcon from "./HoverIcon.svelte";
   import Icon from "./Icon.svelte";
@@ -19,7 +19,7 @@
     onPickModule: (slot: number) => void;
     onPickBeacon: (beacon: number) => void;
     onPickBeaconModule: (beacon: number, module: number) => void;
-    /** 直接选一个信标添加（信标配置必须绑定有效信标，不允许空配置行）。 */
+    /** 直接选一个插件塔添加（插件塔配置必须绑定有效插件塔，不允许空配置行）。 */
     onAddBeacon: () => void;
   } = $props();
 
@@ -73,7 +73,7 @@
             return sum + (index === module ? 0 : count);
           }, 0) + value;
         if (total > slots) {
-          console.warn(`信标插件槽位不足（${slots} 个，已用 ${total}）`);
+          console.warn(`插件塔插件槽位不足（${slots} 个，已用 ${total}）`);
           return;
         }
       }
@@ -83,7 +83,7 @@
     })();
   }
 
-  /** 信标原型插件槽数（getDetail 异步；未知默认 2）。 */
+  /** 插件塔原型插件槽数（getDetail 异步；未知默认 2）。 */
   async function beaconSlotsOf(beaconId: string): Promise<number> {
     const detail = await runtime.getDetail("beacon", beaconId);
     return detail?.beacon_module_slots ?? detail?.module_slots ?? 2;
@@ -124,12 +124,12 @@
   {#if beacons.length > 0}
     <div class="me-beacons">
       <div class="me-beacons-head">
-        <span class="me-label">信标</span>
+        <span class="me-label">插件塔</span>
         <button
           class="btn"
-          title="选择信标添加到这台机器"
+          title="选择插件塔添加到这台机器"
           onclick={onAddBeacon}
-        >+ 添加信标</button>
+        >+ 添加插件塔</button>
       </div>
       {#each beacons as beacon, bi (bi)}
         <div class="me-beacon">
@@ -137,7 +137,7 @@
             <button
               class="icon-btn"
               class:empty={!beacon.beacon.id}
-              title="选择信标"
+              title="选择插件塔"
               onclick={() => onPickBeacon(bi)}
             >
               <HoverIcon
@@ -169,7 +169,7 @@
             </label>
             <button
               class="btn ghost danger"
-              title="移除信标"
+              title="移除插件塔"
               onclick={() => runtime.moduleMessage(entry.id, { "remove-beacon": { beacon: bi } }).catch(() => {})}
             >×</button>
           </div>
@@ -207,9 +207,9 @@
   {:else}
     <button
       class="btn"
-      title="选择信标添加到这台机器"
+      title="选择插件塔添加到这台机器"
       onclick={onAddBeacon}
-    >+ 添加信标</button>
+    >+ 添加插件塔</button>
   {/if}
 </div>
 

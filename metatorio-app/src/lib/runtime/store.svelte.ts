@@ -1575,7 +1575,7 @@ class RuntimeStore {
     }
   }
 
-  /** 添加枚举信标方案：先加空方案，再把所选信标写入新方案的插件配置。 */
+  /** 添加枚举插件塔方案：先加空方案，再把所选插件塔写入新方案的插件配置。 */
   async addEnumeratedBeacon(beacon: { id: string; quality: string }): Promise<void> {
     await this.planningMessage("add-enumerated-beacon");
     const index = (this.selectedProject?.planning.enumerate_beacons.length ?? 1) - 1;
@@ -1588,7 +1588,7 @@ class RuntimeStore {
     await this.planningMessage({ "remove-enumerated-beacon": { beacon: index } });
   }
 
-  /** 编辑枚举信标方案的插件配置（信标数量/共享/塔内插件等，完整 ModuleAction）。 */
+  /** 编辑枚举插件塔方案的插件配置（插件塔数量/共享/塔内插件等，完整 ModuleAction）。 */
   async enumeratedBeaconModule(
     index: number,
     action: import("./types").ModuleAction,

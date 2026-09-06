@@ -702,7 +702,7 @@ pub enum BoilerMode {
 
 // ── 效果类型（EffectTypeLimitation）──────────────────────────────
 
-/// 插件/信标效果类型（schema 的 union 成员是固定的 5 个字面值）。
+/// 插件/插件塔效果类型（schema 的 union 成员是固定的 5 个字面值）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum EffectType {
@@ -713,7 +713,7 @@ pub enum EffectType {
     Quality,
 }
 
-/// 允许的效果类型集合（插件/信标机器）。
+/// 允许的效果类型集合（插件/插件塔机器）。
 ///
 /// schema 形态（手写建模示范——自动化无法推断语义）：
 /// `union[ union[literal × 5] | array[union[literal × 5]] ]`，

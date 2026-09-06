@@ -55,7 +55,7 @@
   let newProjectName = $state("新项目");
   let newFactoryOpen = $state(false);
   let newFactoryName = $state("新工厂");
-  // 规划偏好弹窗（机器偏好/替代数量/枚举插件与信标）
+  // 规划偏好弹窗（机器偏好/替代数量/枚举插件与插件塔）
   let prefsOpen = $state(false);
   // 建议系统弹窗
   let suggestions = $state<{
@@ -358,7 +358,7 @@
     return runtime.localizedName("machine", machine) || machine;
   }
 
-  /** 信标原型的插件槽数（getDetail 异步；未知时默认 2，与 Factorio 一致）。 */
+  /** 插件塔原型的插件槽数（getDetail 异步；未知时默认 2，与 Factorio 一致）。 */
   async function beaconModuleSlots(beaconId: string | undefined): Promise<number> {
     if (!beaconId) return 2;
     const detail = await runtime.getDetail("beacon", beaconId);
@@ -940,7 +940,7 @@
         }
         case "beacon": {
           const beacon = a ?? 0;
-          openSelector("beacon", "选择信标", (name, quality) =>
+          openSelector("beacon", "选择插件塔", (name, quality) =>
             runtime
               .moduleMessage(mechanic, {
                 "set-beacon": { beacon, value: { id: name, quality } },
@@ -954,27 +954,27 @@
           const moduleIdx = b ?? 0;
           const beaconCfg = entry?.mechanic.module_config?.beacons[beacon];
           const beaconModuleCount = beaconCfg?.modules.length ?? 0;
-          // 添加新塔内插件前校验：总数量 ≤ 信标插件槽数 × 信标数量。
+          // 添加新塔内插件前校验：总数量 ≤ 插件塔插件槽数 × 插件塔数量。
           if (moduleIdx >= beaconModuleCount && beaconCfg) {
             const beaconSlots =
               (await beaconModuleSlots(beaconCfg.beacon.id)) * beaconCfg.count;
             const total = beaconCfg.modules.reduce((sum, [, count]) => sum + count, 0);
             if (beaconSlots > 0 && total >= beaconSlots) {
-              showNotice(`信标插件已满（${beaconSlots} 个槽位）`);
+              showNotice(`插件塔插件已满（${beaconSlots} 个槽位）`);
               break;
             }
           }
-          // 塔内插件按该信标允许的插件鉴权过滤（类别 + 效果类型；与机器同理）
+          // 塔内插件按该插件塔允许的插件鉴权过滤（类别 + 效果类型；与机器同理）
           const beaconId = beaconCfg?.beacon.id;
           const allowed = beaconId
             ? await allowedModules("beacon", beaconId, null, runtime.effectiveContextId)
             : [];
-          // 已选信标但鉴权后无可用插件：用不可能匹配的哨兵让选择器显示空。
+          // 已选插件塔但鉴权后无可用插件：用不可能匹配的哨兵让选择器显示空。
           const allowedNames =
             beaconId && allowed.length === 0 ? [""] : allowed.length > 0 ? allowed : undefined;
           openSelector(
             "module",
-            beaconId ? "选择塔内插件" : "选择塔内插件（先选择信标）",
+            beaconId ? "选择塔内插件" : "选择塔内插件（先选择插件塔）",
             (name, quality) => {
               const value = { id: name, quality };
               if (moduleIdx >= beaconModuleCount) {
@@ -1087,18 +1087,18 @@
     };
   }
 
-  /** 添加信标：直接打开信标选择器（不再先加空配置行），重复信标拒绝。 */
+  /** 添加插件塔：直接打开插件塔选择器（不再先加空配置行），重复插件塔拒绝。 */
   function addBeacon(mechanic: MechanicId) {
     const entry = mechanics.find((candidate) => candidate.id === mechanic);
-    openSelector("beacon", "选择信标（添加）", (name, quality) => {
+    openSelector("beacon", "选择插件塔（添加）", (name, quality) => {
       const existing = entry?.mechanic.module_config?.beacons ?? [];
-      // 重复按 IdWithQuality 判等：同种信标不同品质允许并存
+      // 重复按 IdWithQuality 判等：同种插件塔不同品质允许并存
       if (
         existing.some(
           (beacon) => beacon.beacon.id === name && beacon.beacon.quality === quality,
         )
       ) {
-        showNotice(`信标 ${name}（${runtime.localizedName("quality", quality)}）已添加，不能重复`);
+        showNotice(`插件塔 ${name}（${runtime.localizedName("quality", quality)}）已添加，不能重复`);
         return;
       }
       runtime
@@ -2478,7 +2478,7 @@
       </div>
 
       <div class="prefs-section">
-        <div class="prefs-title">枚举信标（自动规划叠加的信标方案）</div>
+        <div class="prefs-title">枚举插件塔（自动规划叠加的插件塔方案）</div>
         <div class="prefs-list">
           {#each planning.enumerate_beacons as plan, i (i)}
             {@const beacon = plan.module_config?.beacons?.[0]?.beacon}
@@ -2487,9 +2487,9 @@
               <div class="prefs-row">
                 <button
                   class="icon-btn"
-                  title="选择信标"
+                  title="选择插件塔"
                   onclick={() =>
-                    openSelector("beacon", "选择枚举信标", (name, quality) =>
+                    openSelector("beacon", "选择枚举插件塔", (name, quality) =>
                       runtime
                         .enumeratedBeaconModule(i, {
                           "add-beacon": { beacon: { id: name, quality } },
@@ -2503,7 +2503,7 @@
                     <Icon type="entity" name="beacon" size={24} />
                   {/if}
                 </button>
-                <span class="prefs-name">{beacon ? runtime.localizedName("beacon", beacon.id) : "未选信标"}</span>
+                <span class="prefs-name">{beacon ? runtime.localizedName("beacon", beacon.id) : "未选插件塔"}</span>
                 <button
                   class="btn ghost danger"
                   title="移除"
@@ -2583,7 +2583,7 @@
                                   0,
                                 ) + value;
                               if (slots > 0 && total > slots) {
-                                showNotice(`信标插件槽位不足（${slots} 个）`);
+                                showNotice(`插件塔插件槽位不足（${slots} 个）`);
                                 return;
                               }
                               runtime
@@ -2609,16 +2609,16 @@
               {/if}
             </div>
           {:else}
-            <span class="muted">还没有枚举信标</span>
+            <span class="muted">还没有枚举插件塔</span>
           {/each}
         </div>
         <button
           class="btn"
           onclick={() =>
-            openSelector("beacon", "添加枚举信标", (name, quality) =>
+            openSelector("beacon", "添加枚举插件塔", (name, quality) =>
               runtime.addEnumeratedBeacon({ id: name, quality }),
             )}
-        >+ 添加信标</button>
+        >+ 添加插件塔</button>
       </div>
 
       <div class="mini-actions">

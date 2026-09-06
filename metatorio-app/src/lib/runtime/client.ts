@@ -168,9 +168,9 @@ export async function solarBalance(
 }
 
 /**
- * 指定机器/信标允许的插件名列表（机制卡手动插件选择鉴权）。
+ * 指定机器/插件塔允许的插件名列表（机制卡手动插件选择鉴权）。
  * machineKind: "machine" | "mining-machine" | "beacon"。
- * recipe: 可选配方名（recipe 机制传入；采矿/信标为 null）。
+ * recipe: 可选配方名（recipe 机制传入；采矿/插件塔为 null）。
  */
 export async function allowedModules(
   machineKind: string,

@@ -411,7 +411,7 @@ fn fuel_value(fuel: &Value, q: &[String], store: Option<&PrototypeStore>) -> Val
     }
 }
 
-// ── 插件配置 / 信标 ───────────────────────────────────────────────
+// ── 插件配置 / 插件塔 ───────────────────────────────────────────────
 
 fn module_config_of(v: &Value) -> Value {
     let Some(map) = v.as_object() else {
@@ -462,7 +462,7 @@ fn beacon_of(v: &Value) -> Value {
     })
 }
 
-/// 旧自动规划信标 `{module_config:{...}}` → 新版 `AutoBeaconPlan {module_config}`。
+/// 旧自动规划插件塔 `{module_config:{...}}` → 新版 `AutoBeaconPlan {module_config}`。
 fn auto_beacon_of(v: &Value, _q: &[String]) -> Value {
     json!({ "module_config": module_config_of(inst_get(v, "module_config")) })
 }
@@ -521,7 +521,7 @@ fn id_of(v: &Value, q: &[String]) -> Value {
     }
 }
 
-/// 无品质上下文时（模块/信标 id 在旧格式里不带 level 语义之外的差异），
+/// 无品质上下文时（模块/插件塔 id 在旧格式里不带 level 语义之外的差异），
 /// 仅转换数组形态，level 用默认 normal。
 fn id_of_plain(v: &Value) -> Value {
     match v {

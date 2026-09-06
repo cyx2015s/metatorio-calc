@@ -1280,7 +1280,7 @@ fn solar_balance(
     Ok(metatorio_core::solar_balance(&context, mechanic))
 }
 
-/// 指定机器/信标允许的插件列表（机制卡手动插件选择的鉴权）。
+/// 指定机器/插件塔允许的插件列表（机制卡手动插件选择的鉴权）。
 ///
 /// 规则（与自动规划 `module_allowed` 一致）：
 /// - 显式插件类别（allowed_module_categories）非空时，插件类别必须在其中
@@ -1290,7 +1290,7 @@ fn solar_balance(
 ///   等开关。
 ///
 /// `machine_kind`: "machine" | "mining-machine" | "beacon"。
-/// `recipe`: 可选配方名（仅 recipe 机制传入；采矿/信标为 None）。
+/// `recipe`: 可选配方名（仅 recipe 机制传入；采矿/插件塔为 None）。
 #[tauri::command]
 fn allowed_modules(
     state: State<'_, AppState>,
@@ -1313,7 +1313,7 @@ fn allowed_modules(
     let Some(record) = store.get(PrototypeGroup::Entity, &machine) else {
         return Ok(Vec::new());
     };
-    // 收集机器/采矿机/信标的插件类别与效果限制。
+    // 收集机器/采矿机/插件塔的插件类别与效果限制。
     let (categories, effects) = match machine_kind.as_str() {
         "mining-machine" => record
             .component::<MiningDrillComponent>()
