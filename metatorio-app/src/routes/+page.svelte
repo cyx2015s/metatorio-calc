@@ -3269,11 +3269,15 @@
     align-items: center;
     gap: 7px;
     padding: 2px 6px 2px 2px;
-    background: var(--card);
-    border: 1px solid var(--line);
+    background: transparent;
+    border: 1px solid transparent;
     border-radius: var(--radius-sm);
     min-width: 0;
-    overflow: hidden;
+  }
+
+  .prefs-item:hover {
+    background: var(--card-hover);
+    border-color: var(--line);
   }
 
   .prefs-name {
