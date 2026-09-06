@@ -423,8 +423,8 @@
 <style>
   .mech-card {
     display: grid;
-    gap: 8px;
-    padding: 8px 10px;
+    gap: 6px;
+    padding: 6px 8px;
   }
 
   .mech-card.off {
