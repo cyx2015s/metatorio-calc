@@ -97,7 +97,7 @@
     const scaled = amount * scale * timeFactor;
     // 取一个带单位的紧凑文本：用保留一位的表格数字。
     const num = Math.abs(scaled) >= 1000 ? signedCompactNumber(scaled) : scaled.toFixed(1);
-    return `${scaled < 0 ? "-" : "+"}${num}${timeUnit}`;
+    return `${num}${timeUnit}`;
   }
 
   const meta = $derived(flowMeta(flow));
