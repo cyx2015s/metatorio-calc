@@ -29,14 +29,19 @@
   } = $props();
 
   let url = $state<string | null>(null);
+  let lastKey = $state("");
 
   $effect(() => {
-    url = null;
-    // 显式依赖有效上下文 id + 图标缓存版本：上下文就绪/切换、或目录（图标）加载
-    // 后，重新拉取图标。否则首屏渲染若上下文未就绪会停在首字母占位（而选择器/
-    // 悬停卡片是后来才渲染、用到了已就绪的上下文，所以有图标）。
-    runtime.effectiveContextId;
+    const ctxId = runtime.effectiveContextId;
     runtime.iconRevision;
+    // 仅当图标"身份"（上下文/类型/名称）真正变化时才清空（恢复占位）重拉；
+    // 若只是缓存失效/上下文重载触发重跑，保留当前图标直到新图标到位，
+    // 避免"每次操作都闪一下首字母占位"。
+    const key = `${ctxId}/${type}/${name}`;
+    if (key !== lastKey) {
+      lastKey = key;
+      url = null;
+    }
     const syntheticUrl = synthetic[name];
     if (syntheticUrl) {
       url = syntheticUrl;

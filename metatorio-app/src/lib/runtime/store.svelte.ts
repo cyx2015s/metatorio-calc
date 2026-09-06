@@ -497,7 +497,12 @@ class RuntimeStore {
     let entry = this.icons.get(key);
     if (!entry) {
       entry = loadIcon(type, name, ctxId).then((bytes) => {
-        if (!bytes || bytes.length === 0) return null;
+        if (!bytes || bytes.length === 0) {
+          // 不要缓存瞬时 null：下一次调用仍会重试，避免图标短暂缺失后
+          // 变成"永久占位"。
+          this.icons.delete(key);
+          return null;
+        }
         const blob = new Blob([new Uint8Array(bytes)], { type: "image/png" });
         const url = URL.createObjectURL(blob);
         this.iconUrls.push(url);
