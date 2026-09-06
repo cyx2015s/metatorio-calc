@@ -522,7 +522,11 @@
   /** 能量流数值显示：能量流用功率文本，否则普通数字（复刻 egui compact）。 */
   function formatFlowAmount(flow: DualVar, amount: number): string {
     if (isEnergyFlow(flow)) return formatPowerValue(Math.abs(amount));
-    return signedCompactNumber(amount);
+    // 非能量流：按项目时间刻度（秒/分/时）缩放，并带单位（/s /min /h）。
+    const scale = project?.settings.time_scale ?? "seconds";
+    const factor = scale === "minutes" ? 60 : scale === "hours" ? 3600 : 1;
+    const unit = scale === "minutes" ? "/min" : scale === "hours" ? "/h" : "/s";
+    return `${signedCompactNumber(amount * factor)}${unit}`;
   }
 
   /** 流的显示名：物品/流体/实体优先本地化名，否则内部 id。 */

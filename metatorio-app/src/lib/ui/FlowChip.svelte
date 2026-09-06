@@ -71,6 +71,15 @@
     return false;
   }
 
+  /** 项目时间刻度：秒/分/时。能量（W/kW/MW）始终按秒（功率），其它流按刻度缩放。 */
+  const timeScale = $derived(runtime.selectedProject?.settings.time_scale ?? "seconds");
+  const timeFactor = $derived(
+    timeScale === "minutes" ? 60 : timeScale === "hours" ? 3600 : 1,
+  );
+  const timeUnit = $derived(
+    timeScale === "minutes" ? "/min" : timeScale === "hours" ? "/h" : "/s",
+  );
+
   /** 瓦特 → 功率文本（数值为 J/s，直接换算）。 */
   function powerValue(watts: number): string {
     if (watts >= 1e6) return `${(watts / 1e6).toFixed(2)} MW`;
@@ -78,14 +87,17 @@
     return `${watts.toFixed(0)} W`;
   }
 
-  /** 数量文本：能量流用功率（带符号），否则紧凑数（带 +-）。 */
+  /** 数量文本：能量流用功率（带符号，按秒），否则按时间刻度缩放的紧凑数（带 +- 和单位）。 */
   function qtyText(flow: DualVar, amount: number, scale: number): string {
-    const scaled = amount * scale;
     if (isEnergyFlow(flow)) {
+      const scaled = amount * scale;
       const prefix = scaled < 0 ? "-" : "+";
       return `${prefix}${powerValue(Math.abs(scaled))}`;
     }
-    return signedCompactNumber(scaled);
+    const scaled = amount * scale * timeFactor;
+    // 取一个带单位的紧凑文本：用保留一位的表格数字。
+    const num = Math.abs(scaled) >= 1000 ? signedCompactNumber(scaled) : scaled.toFixed(1);
+    return `${scaled < 0 ? "-" : "+"}${num}${timeUnit}`;
   }
 
   const meta = $derived(flowMeta(flow));
@@ -94,12 +106,18 @@
       ? runtime.localizedName(meta.type, meta.name)
       : meta.name,
   );
+  /** tooltip 用：能量流显示功率文本，否则显示刻度缩放值。 */
+  const tipText = $derived(
+    isEnergyFlow(flow)
+      ? `${powerValue(Math.abs(amount * scale))}J/s`
+      : `${(Math.abs(amount) * scale * timeFactor).toFixed(2)}${timeUnit}`,
+  );
 </script>
 
 <span
   class="flow-chip"
   class:out={amount > 0}
-  title={`${displayName}${meta.quality ? `（${meta.quality}）` : ""} ${amount > 0 ? "产出" : "消耗"} ×${(Math.abs(amount) * scale).toFixed(2)}/s`}
+  title={`${displayName}${meta.quality ? `（${meta.quality}）` : ""} ${amount > 0 ? "产出" : "消耗"} ${tipText}`}
 >
   <HoverIcon
     type={meta.type}
