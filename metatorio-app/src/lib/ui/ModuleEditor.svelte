@@ -216,7 +216,7 @@
 <style>
   .module-editor {
     display: grid;
-    gap: 8px;
+    gap: 5px;
   }
 
   .me-label {
@@ -269,7 +269,7 @@
 
   .me-beacons {
     display: grid;
-    gap: 8px;
+    gap: 5px;
   }
 
   .me-beacons-head {
@@ -284,8 +284,8 @@
 
   .me-beacon {
     display: grid;
-    gap: 6px;
-    padding: 8px;
+    gap: 5px;
+    padding: 6px;
     background: var(--bg);
     border: 1px solid var(--line);
     border-radius: var(--radius-sm);
