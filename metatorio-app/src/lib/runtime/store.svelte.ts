@@ -95,6 +95,9 @@ class RuntimeStore {
   /** 正在求解/自动规划的 (project, factory)；null = 空闲。按工厂区分，避免
    *  切换工厂时误判"当前在算"而锁死按钮。 */
   solving = $state<{ project: ProjectId; factory: FactoryId } | null>(null);
+  /** 自动规划是否正在进行。它与全局 `busy`（任何交互都会短暂置位）解耦，
+   *  只在真正执行自动规划时置为 true，避免后台自动重算把「自动规划」按钮误禁用。 */
+  autoPlanning = $state(false);
   lastError = $state<string | null>(null);
   ready = $state(false);
 
@@ -1572,6 +1575,7 @@ class RuntimeStore {
   async autoPlan(): Promise<void> {
     const { project, factory } = this.requireFactory();
     this.solving = { project, factory };
+    this.autoPlanning = true;
     try {
       await this.send({
         scope: "factory",
@@ -1583,6 +1587,8 @@ class RuntimeStore {
       // （后端失败会发 solve-error 事件覆盖；dispatch 校验失败走这里）。
       this.solveError = String(error);
       throw error;
+    } finally {
+      this.autoPlanning = false;
     }
   }
 
