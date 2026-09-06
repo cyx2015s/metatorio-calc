@@ -181,8 +181,10 @@
   }
 
   /** 原料/产物的元信息片段：期望量、概率、产能额外、品质范围/偏移、温度。 */
-  function flowMeta(flow: FlowAmount): string[] {
-    const parts: string[] = [`${fmtNum(flow.amount - flow.productivity)} + ${fmtNum(flow.productivity)}`];
+  function flowMeta(flow: FlowAmount, isIngredient: boolean): string[] {
+    const parts: string[] = isIngredient
+      ? [`${fmtNum(flow.amount)}`]
+      : [`${fmtNum(flow.amount - flow.productivity)} + ${fmtNum(flow.productivity)}`];
     const qmin = qualityLabel(flow.quality_min);
     const qmax = qualityLabel(flow.quality_max);
     if (qmin || qmax) {
@@ -389,7 +391,7 @@
                 <Icon type={flow.kind} name={flow.name} size={20} />
                 <span class="hc-flow-copy">
                   <span class="hc-flow-name">{flowName(flow)}</span>
-                  <span class="hc-flow-meta">{flowMeta(flow).join(" · ")}</span>
+                  <span class="hc-flow-meta">{flowMeta(flow, true).join(" · ")}</span>
                 </span>
               </span>
             {/each}
@@ -405,7 +407,7 @@
                 <Icon type={flow.kind} name={flow.name} size={20} />
                 <span class="hc-flow-copy">
                   <span class="hc-flow-name">{flowName(flow)}</span>
-                  <span class="hc-flow-meta">{flowMeta(flow).join(" · ")}</span>
+                  <span class="hc-flow-meta">{flowMeta(flow, false).join(" · ")}</span>
                 </span>
               </span>
             {/each}
