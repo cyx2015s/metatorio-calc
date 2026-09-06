@@ -399,14 +399,13 @@
 
 <svelte:window onkeydown={onKeydown} />
 
-<div class="backdrop" role="presentation" onclick={onClose}>
+<div class="backdrop" role="button" tabindex="0" onclick={(event) => { if (event.target === event.currentTarget) onClose(); }} onkeydown={(event) => { if (event.key === "Enter" || event.key === " " || event.key === "Escape") { event.preventDefault(); onClose(); } }}>
   <div
     class="modal"
     role="dialog"
     aria-modal="true"
     aria-label={title}
     tabindex="-1"
-    onclick={(event) => event.stopPropagation()}
   >
     <div class="modal-head">
       <div class="modal-title">

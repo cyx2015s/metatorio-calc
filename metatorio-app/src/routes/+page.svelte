@@ -145,6 +145,14 @@
     }
   }
 
+  /** 遮罩/可点击背景的键盘访达：Enter/Space/Esc 与点击一致（a11y）。 */
+  function backdropKeydown(event: KeyboardEvent, close: () => void): void {
+    if (event.key === "Enter" || event.key === " " || event.key === "Escape") {
+      event.preventDefault();
+      close();
+    }
+  }
+
   // ── 选择器状态 ──────────────────────────────────────────────────
   let selector = $state<{
     kind: CatalogKind;
@@ -1611,8 +1619,9 @@
           </button>
           {#if panels.settings}
           <div class="field">
-            <label>时间刻度</label>
+            <label for="time-scale">时间刻度</label>
             <select
+              id="time-scale"
               value={project.settings.time_scale}
               onchange={(event) =>
                 runtime
@@ -1625,8 +1634,9 @@
             </select>
           </div>
           <div class="field">
-            <label>品质上限（超出会自动提升）</label>
+            <label for="quality-limit">品质上限（超出会自动提升）</label>
             <select
+              id="quality-limit"
               value={project.settings.quality_limit ?? ""}
               onchange={(event) => {
                 const value = (event.currentTarget as HTMLSelectElement).value;
@@ -1663,7 +1673,7 @@
             </button>
             {#if panels.subMilestones}
             <div class="field">
-              <label>取消勾选 = 禁用，含依赖内容</label>
+              <span class="field-label">取消勾选 = 禁用，含依赖内容</span>
               <div class="prefs-list">
                 {#each runtime.orderedMilestones ?? project.settings.milestones as milestone, i (i)}
                   <div class="prefs-item">
@@ -1752,7 +1762,7 @@
             </div>
 
             <div class="field">
-              <label>采矿产能加成</label>
+              <span class="field-label">采矿产能加成</span>
               <div class="prefs-list">
                 <div class="prefs-item {project.settings.mining_productivity !== 0 ? "user-specified" : "inferred"}">
                   <span class="prefs-name">采矿</span>
@@ -1777,7 +1787,7 @@
             </div>
 
             <div class="field">
-              <label>配方产能加成（%）</label>
+              <span class="field-label">配方产能加成（%）</span>
               <div class="prefs-list">
                 {#each runtime.productivityInfo?.recipes ?? [] as entry, i (entry.recipe)}
                   <div class="prefs-item {entry.source === "user" ? "user-specified" : "inferred"}">
@@ -1821,7 +1831,7 @@
             </div>
 
             <div class="field">
-              <label>无限科技研究次数</label>
+              <span class="field-label">无限科技研究次数</span>
               <div class="prefs-list">
                 {#each project.settings.infinite_levels as entry (entry.tech)}
                   <div class="prefs-item user-specified">
@@ -2195,8 +2205,8 @@
 
 <!-- ══ 新建项目 / 新建工厂 ══ -->
 {#if newProjectOpen}
-  <div class="backdrop" onclick={() => (newProjectOpen = false)}>
-    <div class="mini-modal" onclick={(event) => event.stopPropagation()}>
+  <div class="backdrop" role="button" tabindex="0" onclick={(e) => { if (e.target === e.currentTarget) newProjectOpen = false; }} onkeydown={(e) => backdropKeydown(e, () => (newProjectOpen = false))}>
+    <div class="mini-modal">
       <div class="mini-title">新建项目</div>
       <input
         bind:value={newProjectName}
@@ -2213,8 +2223,8 @@
 {/if}
 
 {#if loadGameOpen}
-  <div class="backdrop" onclick={() => (loadGameOpen = false)}>
-    <div class="mini-modal load-game" onclick={(event) => event.stopPropagation()}>
+  <div class="backdrop" role="button" tabindex="0" onclick={(e) => { if (e.target === e.currentTarget) loadGameOpen = false; }} onkeydown={(e) => backdropKeydown(e, () => (loadGameOpen = false))}>
+    <div class="mini-modal load-game">
       <div class="mini-title">加载游戏数据</div>
       <div class="path-field">
         <div class="path-label">游戏可执行文件（必选）</div>
@@ -2260,8 +2270,8 @@
 {/if}
 
 {#if newFactoryOpen}
-  <div class="backdrop" onclick={() => (newFactoryOpen = false)}>
-    <div class="mini-modal" onclick={(event) => event.stopPropagation()}>
+  <div class="backdrop" role="button" tabindex="0" onclick={(e) => { if (e.target === e.currentTarget) newFactoryOpen = false; }} onkeydown={(e) => backdropKeydown(e, () => (newFactoryOpen = false))}>
+    <div class="mini-modal">
       <div class="mini-title">新建工厂</div>
       <input
         bind:value={newFactoryName}
@@ -2279,8 +2289,8 @@
 
 {#if confirmState}
   {@const confirm = confirmState}
-  <div class="backdrop" onclick={() => (confirmState = null)}>
-    <div class="mini-modal" onclick={(event) => event.stopPropagation()}>
+  <div class="backdrop" role="button" tabindex="0" onclick={(e) => { if (e.target === e.currentTarget) confirmState = null; }} onkeydown={(e) => backdropKeydown(e, () => (confirmState = null))}>
+    <div class="mini-modal">
       <div class="mini-title">确认</div>
       <div class="confirm-text">{confirm.message}</div>
       <div class="mini-actions">
@@ -2298,8 +2308,8 @@
 {/if}
 
 {#if renameCtx}
-  <div class="backdrop" onclick={() => (renameCtx = null)}>
-    <div class="mini-modal" onclick={(event) => event.stopPropagation()}>
+  <div class="backdrop" role="button" tabindex="0" onclick={(e) => { if (e.target === e.currentTarget) renameCtx = null; }} onkeydown={(e) => backdropKeydown(e, () => (renameCtx = null))}>
+    <div class="mini-modal">
       <div class="mini-title">重命名上下文</div>
       <input
         bind:value={renameName}
@@ -2316,8 +2326,8 @@
 {/if}
 
 {#if renameTarget}
-  <div class="backdrop" onclick={() => (renameTarget = null)}>
-    <div class="mini-modal" onclick={(event) => event.stopPropagation()}>
+  <div class="backdrop" role="button" tabindex="0" onclick={(e) => { if (e.target === e.currentTarget) renameTarget = null; }} onkeydown={(e) => backdropKeydown(e, () => (renameTarget = null))}>
+    <div class="mini-modal">
       <div class="mini-title">{renameTarget.kind === "project" ? "重命名项目" : "重命名工厂"}</div>
       <input
         bind:value={renameName}
@@ -2335,8 +2345,8 @@
 
 {#if closeProjectState}
   {@const closing = closeProjectState}
-  <div class="backdrop" onclick={() => (closeProjectState = null)}>
-    <div class="mini-modal" onclick={(event) => event.stopPropagation()}>
+  <div class="backdrop" role="button" tabindex="0" onclick={(e) => { if (e.target === e.currentTarget) closeProjectState = null; }} onkeydown={(e) => backdropKeydown(e, () => (closeProjectState = null))}>
+    <div class="mini-modal">
       <div class="mini-title">关闭项目「{closing.name}」</div>
       <div class="confirm-text">
         关闭后项目从当前工作区移除（文件不会删除）。未保存的改动将丢失。
@@ -2364,13 +2374,14 @@
 
 {#if prefsOpen && planning}
   <!-- z-index 低于选择器（40），从弹窗内打开选择器时选择器叠在上层 -->
-  <div class="backdrop low" onclick={() => (prefsOpen = false)}>
-    <div class="prefs-modal" onclick={(event) => event.stopPropagation()}>
+  <div class="backdrop low" role="button" tabindex="0" onclick={(e) => { if (e.target === e.currentTarget) prefsOpen = false; }} onkeydown={(e) => backdropKeydown(e, () => (prefsOpen = false))}>
+    <div class="prefs-modal">
       <div class="mini-title">规划偏好</div>
 
       <div class="field">
-        <label>替代数量（自动规划时每个配方枚举几个备选机器）</label>
+        <label for="alt-count">替代数量（自动规划时每个配方枚举几个备选机器）</label>
         <input
+          id="alt-count"
           type="number"
           min="1"
           max="3"
@@ -2596,8 +2607,8 @@
 {/if}
 
 {#if suggestions}
-  <div class="backdrop low" onclick={() => (suggestions = null)}>
-    <div class="prefs-modal" onclick={(event) => event.stopPropagation()}>
+  <div class="backdrop low" role="button" tabindex="0" onclick={(e) => { if (e.target === e.currentTarget) suggestions = null; }} onkeydown={(e) => backdropKeydown(e, () => (suggestions = null))}>
+    <div class="prefs-modal">
       <div class="mini-title">建议：{flowLabel(suggestions.flow)}</div>
       {#if suggestions.loading}
         <span class="muted">生成中…</span>

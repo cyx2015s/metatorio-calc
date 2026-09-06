@@ -181,6 +181,15 @@ select {
   text-transform: uppercase;
 }
 
+/* 分组字段标题（非单个控件，不能用 <label>，避免 a11y 警告）。 */
+.field > .field-label {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .field > input,
 .field > select {
   min-height: 26px;

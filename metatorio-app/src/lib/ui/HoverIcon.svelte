@@ -34,6 +34,8 @@
   let hoverActive = $state(false);
   let pos = $state({ x: 0, y: 0 });
   let detail = $state<PrototypeDetail | null>(null);
+  /** 该图标是否可点击（建议/其它动作）：可点击时按按钮语义实现（role/tabindex/键盘）。 */
+  let interactive = $derived(!!onClick);
 
   // 抽象流（无原型详情）也会触发悬停，只要它能提供具体参数（定温流体/燃料类别等）。
   let flowActive = $derived(
@@ -74,13 +76,26 @@
   });
 </script>
 
-<span
+<!-- 悬停工具提示容器：非可点击态用 span + 鼠标悬停展示详情，非"可交互"语义，
+     此规则对该场景是误报，抑制。 -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<svelte:element
+  this={interactive ? "button" : "span"}
   class="hover-icon"
-  class:clickable={!!onClick}
+  class:clickable={interactive}
+  type={interactive ? "button" : undefined}
   onmouseenter={enter}
   onmousemove={move}
   onmouseleave={leave}
   onclick={onClick}
+  onkeydown={onClick
+    ? (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onClick(event);
+        }
+      }
+    : undefined}
 >
   <Icon {type} {name} {size} {title} />
   {#if quality && quality !== "normal"}
@@ -88,7 +103,7 @@
       <Icon type="quality" name={quality} size={Math.max(10, Math.round(size / 2))} title={`${name} · ${quality}`} />
     </span>
   {/if}
-</span>
+</svelte:element>
 
 {#if hoverActive && (detail || flowActive)}
   <HoverCard kind={detailKind ?? ""} {detail} x={pos.x} y={pos.y} {flow} />
@@ -99,6 +114,11 @@
     position: relative;
     display: inline-flex;
     flex: 0 0 auto;
+    padding: 0;
+    color: inherit;
+    background: none;
+    border: none;
+    font: inherit;
   }
 
   .hover-icon.clickable {
