@@ -220,12 +220,32 @@
       />
     </button>
 
+    {#if !compact && (kind === "recipe" || kind === "mining")}
+      <button
+        class="icon-btn"
+        class:empty={!machineName}
+        title="机器"
+        onclick={() => onPick(machineKind())}
+      >
+        <HoverIcon
+          type="entity"
+          name={machineName || "machine"}
+          size={30}
+          detailKind={machineName ? machineKind() : undefined}
+          quality={machineName ? machineQuality : undefined}
+        />
+      </button>
+    {/if}
+
     <div class="main">
       <div class="name">
         {primaryLabel || "未设置"}
       </div>
       <div class="meta">
         <span class="chip">{kindLabel[kind] ?? kind}</span>
+        {#if !compact && (kind === "recipe" || kind === "mining") && machineLabel}
+          <span class="chip muted">{machineLabel}</span>
+        {/if}
         {#if solution}
           <span
             class="amount mono"
@@ -256,18 +276,7 @@
   {#if !compact}
   <div class="row2">
     {#if kind === "recipe" || kind === "mining"}
-      <button class="icon-btn" class:empty={!machineName} title="机器" onclick={() => onPick(machineKind())}>
-        <HoverIcon
-          type="entity"
-          name={machineName || "machine"}
-          size={24}
-          detailKind={machineName ? machineKind() : undefined}
-          quality={machineName ? machineQuality : undefined}
-        />
-      </button>
-      <span class="sub">
-        {machineLabel || "选择机器"}
-      </span>
+      <!-- 机器图标与名称已并入上方头部行（配方图标 + 机器图标在一行）。 -->
     {:else if kind === "generator" || kind === "boiler"}
       <button class="icon-btn" class:empty={!fluidName} title="流体" onclick={() => onPick("fluid")}>
         <HoverIcon type="fluid" name={fluidName || "fluid"} size={24} detailKind={fluidName ? "fluid" : undefined} />
