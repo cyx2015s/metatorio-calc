@@ -529,6 +529,12 @@
     return `${signedCompactNumber(amount * factor)}${unit}`;
   }
 
+  /** 项目时间刻度的数值因子（秒=1、分=60、时=3600）。内部一律按每秒，显示按当前刻度。 */
+  function currentTimeFactor(): number {
+    const s = project?.settings.time_scale ?? "seconds";
+    return s === "minutes" ? 60 : s === "hours" ? 3600 : 1;
+  }
+
   /** 流的显示名：物品/流体/实体优先本地化名，否则内部 id。 */
   function flowLabel(flow: DualVar): string {
     const icon = flowIcon(flow);
@@ -1271,10 +1277,13 @@
                   inputmode="decimal"
                   value={isEnergyFlow(target.flow)
                     ? formatPowerValue(Math.abs(target.amount))
-                    : String(target.amount)}
+                    : String(Number((target.amount * currentTimeFactor()).toFixed(6)))}
                   onchange={(event) => {
                     const raw = (event.currentTarget as HTMLInputElement).value;
-                    const value = isEnergyFlow(target.flow) ? parsePowerInput(raw) : Number(raw);
+                    // 能量流按功率解析；非能量流输入为"当前单位下的产能"，内部转回每秒。
+                    const value = isEnergyFlow(target.flow)
+                      ? parsePowerInput(raw)
+                      : Number(raw) / currentTimeFactor();
                     if (value !== null && Number.isFinite(value)) {
                       runtime.setTargetAmount(target.id, value).catch(() => {});
                     }
@@ -1453,10 +1462,19 @@
                   type="number"
                   step="0.1"
                   min="0"
-                  value={String(input.penalty)}
+                  value={isEnergyFlow(input.flow)
+                    ? String(Number((input.penalty * 1e6).toFixed(6)))
+                    : String(Number((input.penalty / currentTimeFactor()).toFixed(6)))}
                   onchange={(event) => {
-                    const value = Number((event.currentTarget as HTMLInputElement).value);
-                    if (Number.isFinite(value)) runtime.setExternalInputPenalty(input.id, value).catch(() => {});
+                    const raw = (event.currentTarget as HTMLInputElement).value;
+                    const value = Number(raw);
+                    if (!Number.isFinite(value)) return;
+                    // 能量流：输入为"每 MW 成本"，内部存"每 W 成本"（除以 1e6）。
+                    // 非能量：输入为"当前单位下产出 1 个的代价"，内部存"每秒产出 1 个的代价"。
+                    const internal = isEnergyFlow(input.flow)
+                      ? value / 1e6
+                      : value * currentTimeFactor();
+                    runtime.setExternalInputPenalty(input.id, internal).catch(() => {});
                   }}
                 />
                 <button class="btn ghost" title="更改外部输入流" onclick={() => editExternalInput(input)}>更改</button>
