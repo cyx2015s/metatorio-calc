@@ -91,38 +91,46 @@
 </script>
 
 <div class="module-editor">
-  <div class="me-label">
-    插件槽（{modules.length}/{slotCount}）
-    {#if slotCount > 0 && modules.length === 0}<span class="muted">点击空槽添加</span>{/if}
-  </div>
-
-  <div class="me-slots">
-    {#each Array.from({ length: slotCount }) as _, i (i)}
-      {#if i < modules.length}
-        <div class="me-slot">
-          <button class="icon-btn" title={`插件槽 ${i + 1}（点击更换）`} onclick={() => onPickModule(i)}>
-            <HoverIcon type="item" name={modules[i].id} size={24} detailKind="module" quality={modules[i].quality} />
+  <div class="me-slots-row">
+    <span class="me-label">
+      插件槽（{modules.length}/{slotCount}）
+      {#if slotCount > 0 && modules.length === 0}<span class="muted">点击空槽添加</span>{/if}
+    </span>
+    <div class="me-slots">
+      {#each Array.from({ length: slotCount }) as _, i (i)}
+        {#if i < modules.length}
+          <div class="me-slot">
+            <button class="icon-btn" title={`插件槽 ${i + 1}（点击更换）`} onclick={() => onPickModule(i)}>
+              <HoverIcon type="item" name={modules[i].id} size={24} detailKind="module" quality={modules[i].quality} />
+            </button>
+            <button
+              class="me-x"
+              title="移除插件"
+              onclick={() => runtime.setModuleSlot(entry.id, i, null).catch(() => {})}
+            >×</button>
+          </div>
+        {:else}
+          <button class="icon-btn empty" title={`空插件槽 ${i + 1}`} onclick={() => onPickModule(i)}>
+            <Icon type="item" name="+" size={22} />
           </button>
-          <button
-            class="me-x"
-            title="移除插件"
-            onclick={() => runtime.setModuleSlot(entry.id, i, null).catch(() => {})}
-          >×</button>
-        </div>
-      {:else}
-        <button class="icon-btn empty" title={`空插件槽 ${i + 1}`} onclick={() => onPickModule(i)}>
-          <Icon type="item" name="+" size={22} />
-        </button>
+        {/if}
+      {/each}
+      {#if slotCount === 0 && modules.length > 0}
+        <span class="muted">当前机器无插件槽</span>
       {/if}
-    {/each}
-    {#if slotCount === 0 && modules.length > 0}
-      <span class="muted">当前机器无插件槽</span>
-    {/if}
+    </div>
   </div>
 
   {#if beacons.length > 0}
     <div class="me-beacons">
-      <div class="me-label">信标</div>
+      <div class="me-beacons-head">
+        <span class="me-label">信标</span>
+        <button
+          class="btn"
+          title="选择信标添加到这台机器"
+          onclick={onAddBeacon}
+        >+ 添加信标</button>
+      </div>
       {#each beacons as beacon, bi (bi)}
         <div class="me-beacon">
           <div class="me-beacon-head">
@@ -196,13 +204,13 @@
         </div>
       {/each}
     </div>
+  {:else}
+    <button
+      class="btn"
+      title="选择信标添加到这台机器"
+      onclick={onAddBeacon}
+    >+ 添加信标</button>
   {/if}
-
-  <button
-    class="btn"
-    title="选择信标添加到这台机器"
-    onclick={onAddBeacon}
-  >+ 添加信标</button>
 </div>
 
 <style>
@@ -223,6 +231,17 @@
     display: flex;
     flex-wrap: wrap;
     gap: 4px;
+  }
+
+  .me-slots-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .me-slots-row .me-label {
+    flex: 0 0 auto;
   }
 
   .me-slot {
@@ -251,6 +270,16 @@
   .me-beacons {
     display: grid;
     gap: 8px;
+  }
+
+  .me-beacons-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .me-beacons-head .me-label {
+    flex: 1;
   }
 
   .me-beacon {
