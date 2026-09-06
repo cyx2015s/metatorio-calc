@@ -257,6 +257,21 @@
       </div>
     </div>
 
+    {#if !compact && (kind === "recipe" || kind === "mining") && machineEnergySource === "burner"}
+      <button
+        class="btn"
+        title="指定燃料（默认 = 按燃料类别抽象选择）"
+        onclick={onPickFuel}
+      >{fuelLabel(entry.mechanic.fuel)}</button>
+      {#if entry.mechanic.fuel}
+        <button
+          class="btn ghost"
+          title="清除燃料（回到自动）"
+          onclick={() => runtime.setFuel(entry.id, null).catch(() => {})}
+        >×</button>
+      {/if}
+    {/if}
+
     <button class="btn ghost" class:on={entry.enabled} onclick={onToggleEnabled} title={entry.enabled ? "停用" : "启用"}>
       {entry.enabled ? "启用" : "停用"}
     </button>
@@ -359,8 +374,8 @@
     <span class="spacer"></span>
   </div>
 
-  <!-- 机制细节：燃料 / 燃料温度 / 火箭重量模式 -->
-  {#if kind === "item-launch" || kind === "boiler" || kind === "reactor" || ((kind === "recipe" || kind === "mining") && machineEnergySource === "burner")}
+  <!-- 机制细节：燃料 / 燃料温度 / 火箭重量模式（recipe/mining 的燃料已在头部行） -->
+  {#if kind === "item-launch" || kind === "boiler" || kind === "reactor"}
     <div class="row2b">
       {#if kind === "item-launch"}
         <button
@@ -383,7 +398,7 @@
             onclick={() => runtime.setFuel(entry.id, null).catch(() => {})}
           >×</button>
         {/if}
-        {#if (kind === "recipe" || kind === "mining" || kind === "boiler") && fuelIsFluid(entry.mechanic.fuel)}
+        {#if kind === "boiler" && fuelIsFluid(entry.mechanic.fuel)}
           <label class="sub temp" title="燃料流体温度（留空 = 默认温度）">
             燃料温度
             <input
