@@ -257,7 +257,7 @@
       </div>
     </div>
 
-    {#if !compact && (kind === "recipe" || kind === "mining") && machineEnergySource === "burner"}
+    {#if !compact && (((kind === "recipe" || kind === "mining") && machineEnergySource === "burner") || kind === "boiler" || kind === "reactor")}
       <button
         class="btn"
         title="指定燃料（默认 = 按燃料类别抽象选择）"
@@ -289,10 +289,9 @@
   {/if}
 
   {#if !compact}
+  {#if kind !== "recipe" && kind !== "mining"}
   <div class="row2">
-    {#if kind === "recipe" || kind === "mining"}
-      <!-- 机器图标与名称已并入上方头部行（配方图标 + 机器图标在一行）。 -->
-    {:else if kind === "generator" || kind === "boiler"}
+    {#if kind === "generator" || kind === "boiler"}
       <button class="icon-btn" class:empty={!fluidName} title="流体" onclick={() => onPick("fluid")}>
         <HoverIcon type="fluid" name={fluidName || "fluid"} size={24} detailKind={fluidName ? "fluid" : undefined} />
       </button>
@@ -373,9 +372,10 @@
 
     <span class="spacer"></span>
   </div>
+  {/if}
 
   <!-- 机制细节：燃料 / 燃料温度 / 火箭重量模式（recipe/mining 的燃料已在头部行） -->
-  {#if kind === "item-launch" || kind === "boiler" || kind === "reactor"}
+  {#if kind === "item-launch" || (kind === "boiler" && fuelIsFluid(entry.mechanic.fuel))}
     <div class="row2b">
       {#if kind === "item-launch"}
         <button
@@ -385,19 +385,7 @@
           onclick={() =>
             runtime.setWeightMode(entry.id, !(entry.mechanic.weight_mode ?? false)).catch(() => {})}
         >{entry.mechanic.weight_mode ? "按重量" : "按堆叠槽位"}</button>
-      {:else if kind === "boiler" || kind === "reactor" || machineEnergySource === "burner"}
-        <button
-          class="btn"
-          title="指定燃料（默认 = 按燃料类别抽象选择）"
-          onclick={onPickFuel}
-        >{fuelLabel(entry.mechanic.fuel)}</button>
-        {#if entry.mechanic.fuel}
-          <button
-            class="btn ghost"
-            title="清除燃料（回到自动）"
-            onclick={() => runtime.setFuel(entry.id, null).catch(() => {})}
-          >×</button>
-        {/if}
+      {:else if kind === "boiler" || kind === "reactor"}
         {#if kind === "boiler" && fuelIsFluid(entry.mechanic.fuel)}
           <label class="sub temp" title="燃料流体温度（留空 = 默认温度）">
             燃料温度
