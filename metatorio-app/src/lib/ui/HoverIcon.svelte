@@ -89,10 +89,10 @@
   onmouseleave={leave}
   onclick={onClick}
   onkeydown={onClick
-    ? (event) => {
+    ? (event: KeyboardEvent) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
-          onClick(event);
+          onClick(event as unknown as MouseEvent);
         }
       }
     : undefined}

@@ -1966,7 +1966,7 @@
         {#each mechGroups as group (group.key)}
           {#if group.entries.length > 1}
             <!-- 配方合并组：标题（配方名 + 机器名），子机制完整显示 -->
-            <div class="mech-group card">
+            <div class="mech-group">
               <div class="mech-group-head">
                 <span class="mech-group-title" title={groupTitle(group.entries)}>
                   {groupTitle(group.entries)}
@@ -3044,39 +3044,59 @@
   .mech-list {
     display: grid;
     align-content: start;
-    gap: 8px;
+    gap: 0;
   }
 
+  /* 机制组：由内嵌卡片改为「分组标题 + 底部分隔线」的扁平 section。 */
   .mech-group {
     display: grid;
-    gap: 2px;
-    padding: 6px;
+    gap: 0;
+    padding: 0 0 6px;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--line);
   }
 
   .mech-group-head {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 6px;
-    padding: 2px 4px 4px;
+    padding: 4px 6px 4px;
   }
 
   .mech-group-title {
     flex: 1;
     min-width: 0;
     overflow: hidden;
-    font-size: 12px;
+    color: var(--muted);
+    font-size: 10px;
     font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
   .mech-group-row + .mech-group-row {
-    padding-top: 6px;
-    border-top: 1px dashed var(--line);
+    border-top: 1px solid var(--line);
   }
 
   .mech-group-row .mech-card {
     padding: 6px 8px;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+  }
+
+  /* 单条机制（未合并）：同样扁平化为行式，避免浮起卡片。 */
+  .mech-list > .mech-card {
+    padding: 8px;
+    margin: 0;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    border-bottom: 1px solid var(--line);
   }
 
   .panel.project-settings {
