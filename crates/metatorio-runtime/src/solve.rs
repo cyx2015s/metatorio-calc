@@ -1,3 +1,4 @@
+use std::sync::Mutex;
 use std::{collections::HashMap, fs::File, path::Path, sync::Arc};
 
 use metatorio_core::{
@@ -125,10 +126,10 @@ pub struct Runtime {
     active_context: Option<String>,
     /// 项目 → 可达性结果缓存（settings 变化时在 dispatch 里整体失效；
     /// 计算按需进行，避免每次交互重算全图）。
-    accessibilities: HashMap<ProjectId, Accessibility>,
+    accessibilities: Mutex<HashMap<ProjectId, Accessibility>>,
     /// 上下文 → 可达性依赖图（一次构建缓存，供 milestone_order /
     /// compute_accessibility 复用，避免每交互重建全图）。
-    graph_cache: HashMap<String, Arc<metatorio_core::GraphData>>,
+    graph_cache: Mutex<HashMap<String, Arc<metatorio_core::GraphData>>>,
 }
 
 impl Runtime {
@@ -141,8 +142,8 @@ impl Runtime {
             state: RuntimeState::new(document),
             contexts: HashMap::new(),
             active_context: None,
-            accessibilities: HashMap::new(),
-            graph_cache: HashMap::new(),
+            accessibilities: Mutex::new(HashMap::new()),
+            graph_cache: Mutex::new(HashMap::new()),
         }
     }
 
@@ -150,7 +151,7 @@ impl Runtime {
         // 只对可能改变可达性的消息失效 `accessibilities` 缓存（可达性计算耗时，
         // 不应每次交互都重算）。其余（改目标/机制/偏好等）保留缓存。
         if message_affects_accessibility(&message) {
-            self.accessibilities.clear();
+            self.accessibilities.lock().unwrap().clear();
         }
         self.state.dispatch(message)
     }
@@ -158,16 +159,16 @@ impl Runtime {
     /// Register a loaded prototype store under a stable context id.
     pub fn install_context(&mut self, context_id: String, prototype: PrototypeStore) {
         // 换了 store，之前的依赖图与可达性结果作废。
-        self.graph_cache.remove(&context_id);
-        self.accessibilities.clear();
+        self.graph_cache.lock().unwrap().remove(&context_id);
+        self.accessibilities.lock().unwrap().clear();
         self.contexts.insert(context_id, prototype);
     }
 
     /// Drop a context's in-memory store (the on-disk cache is untouched).
     pub fn remove_context(&mut self, context_id: &str) {
         self.contexts.remove(context_id);
-        self.graph_cache.remove(context_id);
-        self.accessibilities.clear();
+        self.graph_cache.lock().unwrap().remove(context_id);
+        self.accessibilities.lock().unwrap().clear();
         if self.active_context.as_deref() == Some(context_id) {
             self.active_context = None;
             self.state.active_context = None;
@@ -177,7 +178,7 @@ impl Runtime {
     /// The context used by projects that do not pin one.
     pub fn set_active_context(&mut self, context_id: Option<String>) {
         if self.active_context != context_id {
-            self.accessibilities.clear();
+            self.accessibilities.lock().unwrap().clear();
         }
         self.active_context = context_id.clone();
         self.state.active_context = context_id;
@@ -224,8 +225,8 @@ impl Runtime {
     /// The cached, context-scoped accessibility dependency graph.  Built once
     /// per context and reused by `milestone_order` / `compute_accessibility`
     /// so interactions don't re-scan the whole prototype store.
-    fn graph_for_context(&mut self, context_id: &str) -> Arc<metatorio_core::GraphData> {
-        if let Some(graph) = self.graph_cache.get(context_id) {
+    fn graph_for_context(&self, context_id: &str) -> Arc<metatorio_core::GraphData> {
+        if let Some(graph) = self.graph_cache.lock().unwrap().get(context_id) {
             return graph.clone();
         }
         let store = self
@@ -234,13 +235,15 @@ impl Runtime {
             .expect("graph_for_context: context not loaded");
         let graph = Arc::new(metatorio_core::build_graph(store));
         self.graph_cache
+            .lock()
+            .unwrap()
             .insert(context_id.to_string(), graph.clone());
         graph
     }
 
     /// Cached graph for a project's context (convenience).
     fn graph_for_project(
-        &mut self,
+        &self,
         project_id: ProjectId,
     ) -> Result<Arc<metatorio_core::GraphData>, RuntimeError> {
         let context_id = self.context_id_for(project_id)?;
@@ -254,10 +257,10 @@ impl Runtime {
     /// - `unlocked = false` → 强制不可达（剪枝，最终结果保证不可达）；
     /// - `all_accessible`：无视一切，全可达。
     pub fn project_accessibility(
-        &mut self,
+        &self,
         project_id: ProjectId,
     ) -> Result<Accessibility, RuntimeError> {
-        if let Some(cached) = self.accessibilities.get(&project_id) {
+        if let Some(cached) = self.accessibilities.lock().unwrap().get(&project_id) {
             return Ok(cached.clone());
         }
         // 先取图（owned Arc，不借用 self），再取 store/settings，避免借用冲突。
@@ -268,7 +271,7 @@ impl Runtime {
             accessibility_options(settings)
         };
         let result = metatorio_core::compute_accessibility_with_graph(store, &options, &graph);
-        self.accessibilities.insert(project_id, result.clone());
+        self.accessibilities.lock().unwrap().insert(project_id, result.clone());
         Ok(result)
     }
 

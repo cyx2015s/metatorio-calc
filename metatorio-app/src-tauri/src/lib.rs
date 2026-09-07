@@ -1179,7 +1179,7 @@ fn mechanic_flow(
     factory: FactoryId,
     mechanic: MechanicId,
 ) -> Result<Vec<(DualVar, f64)>, String> {
-    let mut runtime = state
+    let runtime = state
         .runtime
         .lock()
         .map_err(|_| "runtime lock poisoned".to_string())?;
@@ -1240,7 +1240,7 @@ fn solar_balance(
     factory: FactoryId,
     mechanic: MechanicId,
 ) -> Result<Option<metatorio_core::SolarBalance>, String> {
-    let mut runtime = state
+    let runtime = state
         .runtime
         .lock()
         .map_err(|_| "runtime lock poisoned".to_string())?;
