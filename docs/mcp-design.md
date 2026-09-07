@@ -58,10 +58,10 @@
 
 Phase 2 工具面**不在一开始就做成离散的友好工具**，而是：
 
-1. **MVP = 一个 `dispatch` 工具**，接受原始 `AppMessage` JSON，转发给 `runtime.dispatch`，与 GUI 共用同一 `Mutex<Runtime>`。
+1. **MVP = 一个 `dispatch` 工具**，接受 `AppMessage`，转发给 `runtime.dispatch`，与 GUI 共用同一 `Mutex<Runtime>`。
    - 理由：`AppMessage` 已无缝对接调度核心，一个工具即覆盖整个动作集；不用为每种操作设计参数结构，永不失效。
    - **代价（已接受）**：`AppMessage` 是超大嵌套 enum，LLM 手写 JSON 易错。这是**确定性接口** + 收集 agent 使用反馈用的。
-   - **不作 `JsonSchema` 派生**：`AppMessage` 用 `#[serde(tag="scope", content="action")]` 邻接标签，schemars 对 `content` 内层 enum 推导不保证精确匹配 serde 实际形状；跨 crates（core 的 `DualVar`/`Mechanic`/`Fuel` + runtime 的 message/document 全树）侵入大。故工具参数直接 `message: serde_json::Value`（`schemars::JsonSchema for Value` 生效），在服务端 `serde_json::from_value::<AppMessage>()` 反序列化，错误信息清晰。
+   - **采用 `JsonSchema` 派生（revised）**：`AppMessage` 用 `#[serde(tag="scope", content="action")]` 邻接标签。实测 schemars 1.2 能**精确还原**该形状（`{scope, action:{project, factory, action}}`），且外部标签 enum/内部标签/`[i32;2]` 数组/`Vec<(A,usize)>` 元组均正确。故为整个 `AppMessage` 传递闭包派生 `JsonSchema`（core：`IdWithQuality`/`DualVar`/`Fuel`/`ModuleConfig`/`BeaconConfig`/`Accessible`；runtime：id newtype + document 结构 + 全部 action 子枚举），工具参数直接 `message: AppMessage`，inputSchema 即真实消息 schema，替代 V1 的 `serde_json::Value` + 服务端 `from_value` 反序列化。
 
 ### 实现要点（已落地）
 
@@ -76,14 +76,43 @@ Phase 2 工具面**不在一开始就做成离散的友好工具**，而是：
 
 | 工具 | 参数 | 说明 |
 | --- | --- | --- |
-| `dispatch` | `{ message: <AppMessage JSON> }` | 万能回退：转发任意规划动作，返回 `revision`/`changed`/`scheduled_commands`/`solve` |
+| `dispatch` | `{ message: AppMessage }` | 万能回退：转发任意规划动作，返回 `revision`/`changed`/`scheduled_commands`/`solve`（均结构化 JSON） |
+| `get_planning_state` | `{ project?, factory?, recompute? }` | 读取：Omit `project` → 全文档；`project` → 单项目；`project`+`factory` → 单工厂；`recompute`（需 project+factory）时先求解并附带结构化结果 |
 
 后续按 agent 真实使用反馈，再把常见需求从 `dispatch` 拆出更友好的专用工具（仍在同一 `dispatch` 路径之上）。
 
+## 决策 8（反馈驱动修正，2026-xx）：**首个 agent 实证后的修正**
+
+另一个 agent 实际调用 `mcp__metatorio__dispatch` 走通完整链路后给出高价值反馈，据此修正 V1：
+
+### 已修正
+
+1. **文档示例格式错误（P0-2）**：原工具 description 里 project/factory 示例写成 `{scope, project, factory, action}`，把 `project`/`factory` 放在 `scope` 同级——但 `AppMessage` 是**相邻标签**，所有字段须进 `action`。已改为 `{scope:"project", action:{project, action}}`。**根因**是 V1 用 `serde_json::Value` 手写描述，靠人肉确保格式正确 → **改用 `JsonSchema` 派生后，schema 自动对齐 serde 输出，此类错误不会再复发**。
+2. **`solve` 返回 Rust `Debug` 字符串（P1-3）**：`format!("{effect:?}")` 不结构化、LLM 难解析。已改为把 `CommandEffect::Solve(result)` 的 `SolveResult` 序列化为 JSON。
+3. **`scheduled_commands` 只返回数量（P1-4）**：agent 不知是哪几条副作用。已改为返回真实 `RuntimeCommand` 序列化数组。
+4. **新建对象不知 id（P1-5）**：`dispatch` 只回 revision，读不到新分配的 project/factory/mechanic id。**仍待补**（方案见下），由 `get_planning_state` 承担读取职责或直接抽取新 id。
+
+### 正交性原则（功能边界）
+
+**Metatorio 的 MCP 工具只负责产出全量、结构化、可直接序列化的 JSON；「如何筛选/切片/摘要结果」不属于它的职责范围**——支持 MCP 的 agent 上下文里自有 JSON 处理工具来处理。因此：
+- **不加入**结果截断、分页、字段裁剪、human-readable 摘要等逻辑（那是 agent 侧 JSON 工具的事）。
+- 结果再长也接受，保持原样全量返回（如 `get_planning_state` 省略 `project` 时返回完整 `AppDocument`）。
+- 前提：产出必须是**标准 JSON**（对象/数组，字段名稳定、可被既有 JSON 工具处理），而非 Rust `Debug` 字符串这类非结构化的东西——后者才是真正的缺陷（P1-3 已修）。
+
+### 待补（按优先级）
+
+- **读取工具**：`dispatch` 目前**纯写入、无自省**——agent 看不到当前文档、拿不到 id。~~方案：加一个 `get_planning_state` 读取工具~~ **已实现**：`get_planning_state(project?, factory?, recompute?)` 读 `runtime.state.document` 快照，一并解决 P0-1（只写不读）+ P1-5（id）+ P1-3（solve 结构化读取）。
+- **长求异步化**：`recompute`/`auto_plan` 同步占住 `Mutex<Runtime>`，期间 GUI 排队。方案：投递后台任务 + 经 `document-changed`/solving 事件回报（原决策 47）。
+- **领域词表**：`list_prototypes` / `list_contexts` 可读工具，列出可用物品/配方/机器/品质，消除"盲猜字符串"（P2-6）。
+- **友好工具拆分**：`list_projects` / `add_target` / `set_target_amount` / `add_mechanic` / `set_recipe` / `set_machine` / `recompute` / `auto_plan` / `load_context`（原决策 6）。
+- **并发冲突语义**（原决策 45）；**端口/多实例/token 细节**（原决策 48）。
+
 ## 待办 / 下阶段
 
-- [ ] 真实跑一次 `metatorio-mcp` 应用，用 DSH 客户端连 `http://127.0.0.1:8765/mcp`，验证 `dispatch` 工具可驱动规划、GUI 实时刷新。
-- [ ] 收集 agent 使用 AppMessage 的感受 → 抽离友好工具（`list_projects` / `get_planning_state` / `add_target` / `set_target_amount` / `add_mechanic` / `set_recipe` / `set_machine` / `recompute` / `auto_plan` / `load_context`）——对应原决策 6。
+- [x] 真实跑一次应用，用 DSH 客户端连 `http://127.0.0.1:8765/mcp`，验证 `dispatch` 工具可驱动规划、GUI 实时刷新。
+- [x] 收集 agent 使用 AppMessage 的感受 → 修正：`JsonSchema` 派生（inputSchema 真实化）+ `solve`/`scheduled_commands` 结构化 + 修正文档示例。
+- [x] **补读取工具**（`get_planning_state`）——P0-1/P1-5 的核心，MVP 目前最大的盲区。
+- [ ] 采集使用反馈 → 抽离友好工具（`list_projects` / `get_planning_state` / `add_target` / `set_target_amount` / `add_mechanic` / `set_recipe` / `set_machine` / `recompute` / `auto_plan` / `load_context`）——对应原决策 6。
 - [ ] 长时求解（`recompute`/`auto_plan`）走**异步**（类似 GUI 的 solving 事件），避免 MCP 调用期间占住 `Mutex<Runtime>` 导致 GUI 排队——原决策 47 的风险。
 - [ ] 并发冲突语义（乐观锁/变更冲突提示）——原决策 45。
 - [ ] 端口被占用 / 多实例 / token 传递细节——原决策 48。

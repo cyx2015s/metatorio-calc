@@ -50,6 +50,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::{AppState, execute_command};
 use metatorio_runtime::message::AppMessage;
+use metatorio_runtime::{CommandEffect, FactoryId, ProjectId, RuntimeCommand};
 
 /// Default loopback port for the MCP endpoint (override with `METATORIO_MCP_PORT`).
 const DEFAULT_PORT: u16 = 8765;
@@ -148,6 +149,107 @@ impl MetatorioMcp {
         });
         Ok(CallToolResult::structured(payload))
     }
+
+    /// Read the current planning state (the shared document snapshot).  This is
+    /// the reading counterpart to `dispatch`: it lets an agent observe projects /
+    /// factories / targets / mechanics and their assigned ids before mutating.
+    #[tool(description = "Read the current planning state from the shared Metatorio \
+        document.  Omit `project` to return the whole document; pass `project` to \
+        narrow to one project; pass `project` + `factory` to narrow to one factory. \
+        Set `recompute` (only meaningful with project + factory) to also run a solve \
+        and include the structured result.")]
+    async fn get_planning_state(
+        &self,
+        Parameters(params): Parameters<PlanningStateParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let app = self.app.clone();
+        let handled = tauri::async_runtime::spawn_blocking(move || {
+            let state = app.state::<AppState>();
+            let mut runtime = state
+                .runtime
+                .lock()
+                .map_err(|_| "runtime lock poisoned".to_string())?;
+
+            let project = params.project.map(ProjectId);
+            let factory = params.factory.map(FactoryId);
+
+            // 收集所选层级的文档快照。
+            let mut snapshot = match (project, factory) {
+                (None, _) => serde_json::to_value(&runtime.state.document).map_err(|e| e.to_string())?,
+                (Some(p), None) => {
+                    let doc = runtime
+                        .state
+                        .project(p)
+                        .map_err(|e| e.to_string())?;
+                    serde_json::to_value(doc).map_err(|e| e.to_string())?
+                }
+                (Some(p), Some(f)) => {
+                    // 求解（可选）：仅当项目上下文已载入且请求时触发。
+                    let solve = if params.recompute {
+                        let command = RuntimeCommand::Recompute {
+                            project: p,
+                            factory: f,
+                        };
+                        match runtime.run_command(&command) {
+                            Ok(effect) => match effect {
+                                CommandEffect::Solve(result) => {
+                                    Some(serde_json::to_value(&result).map_err(|e| e.to_string())?)
+                                }
+                                _ => None,
+                            },
+                            Err(error) => {
+                                return Err(format!("recompute failed: {error}"));
+                            }
+                        }
+                    } else {
+                        None
+                    };
+                    let doc = runtime
+                        .state
+                        .factory(p, f)
+                        .map_err(|e| e.to_string())?;
+                    let factory_doc = serde_json::to_value(doc).map_err(|e| e.to_string())?;
+                    serde_json::to_value(serde_json::json!({
+                        "project": p.0,
+                        "factory": f.0,
+                        "factory_document": factory_doc,
+                        "solve": solve,
+                    }))
+                    .map_err(|e| e.to_string())?
+                }
+            };
+            // 顶层补充 revision，便于 agent 得知文档版本。
+            if let serde_json::Value::Object(obj) = &mut snapshot {
+                obj.insert(
+                    "revision".to_string(),
+                    serde_json::Value::Number(runtime.state.revision.into()),
+                );
+            }
+            Ok::<_, String>(snapshot)
+        })
+        .await
+        .map_err(|error| McpError::internal_error(format!("get_planning_state join 失败: {error}"), None))?;
+
+        let snapshot = handled.map_err(|error| {
+            McpError::invalid_params(format!("get_planning_state 执行失败: {error}"), None)
+        })?;
+
+        Ok(CallToolResult::structured(snapshot))
+    }
+}
+
+/// Parameters for `get_planning_state` (all optional; omit for the whole document).
+#[derive(Debug, serde::Deserialize, JsonSchema)]
+struct PlanningStateParams {
+    /// Project id (u64). Omit to return all projects.
+    #[serde(default)]
+    project: Option<u64>,
+    /// Factory id (u64). Requires `project`.
+    #[serde(default)]
+    factory: Option<u64>,
+    /// When set with `project` + `factory`, run a solve and include its result.
+    #[serde(default)]
+    recompute: bool,
 }
 
 struct DispatchHandled {
