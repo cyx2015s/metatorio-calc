@@ -216,3 +216,11 @@ export function onContextsChanged(handler: (list: ContextList) => void): Promise
 export function onContextError(handler: (message: string) => void): Promise<() => void> {
   return listen<string>("context-error", (event) => handler(event.payload));
 }
+
+/**
+ * 后端文档被外部修改（如 MCP 的 `dispatch` 工具）后广播，通知 GUI 重新拉取
+ * 文档快照，实现「外部 agent + 用户在同一个界面上实时并存操作」。
+ */
+export function onDocumentChanged(handler: (revision: number) => void): Promise<() => void> {
+  return listen<number>("document-changed", (event) => handler(event.payload));
+}

@@ -30,3 +30,9 @@ tauri-plugin-process = "2"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# MCP server (merged into the app binary, Streamable-HTTP on localhost).
+rmcp = { version = "3.2", features = ["transport-streamable-http-server"] }
+# 工具参数派生 JsonSchema 需要直接依赖 schemars（derive 展开引用 ::schemars）。
+schemars = { version = "1", features = ["chrono04"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "time", "sync"] }

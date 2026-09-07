@@ -1,0 +1,236 @@
+//! Model Context Protocol server, merged into the main binary.
+//!
+//! The server is a localhost Streamable-HTTP endpoint (decisions in
+//! `docs/mcp-design.md`): it shares the single managed [`AppState`] (and thus
+//! the one [`Runtime`]) with the GUI, so an external agent and a human user
+//! operate the same projects in one process.  Every planning operation is a
+//! `Runtime::dispatch(AppMessage)` — the MCP surface is therefore a thin,
+//! framework-independent wrapper over the same reducer the UI uses.
+//!
+//! # MVP
+//!
+//! The minimal viable surface is a single `dispatch` tool that accepts a raw
+//! `AppMessage` JSON value and forwards it to the runtime.  This is a
+//! deliberate **escape hatch**: it covers the entire message set (project /
+//! factory / mechanism / solve) with no per-operation parameter structs, so no
+//! schema work is required up front and it never goes stale.  Once agent
+//! usage is observed, common operations can be re-wrapped as friendlier
+//! dedicated tools on top of the same `dispatch` path.
+//!
+//! # Security
+//!
+//! - Bound to `127.0.0.1` only.
+//! - The rmcp `StreamableHttpServerConfig` additionally restricts the accepted
+//!   `Host` header to loopback names (DNS-rebinding protection).
+//! - Optional bearer-token auth: if `METATORIO_MCP_TOKEN` is set, every request
+//!   must carry `Authorization: Bearer <token>` (or the raw token); if it is
+//!   unset, no auth is required (loopback-only is the fallback).
+
+use std::net::SocketAddr;
+
+use axum::{
+    Router,
+    extract::{Request, State},
+    http::StatusCode,
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
+};
+use rmcp::{
+    ErrorData as McpError,
+    handler::server::wrapper::Parameters,
+    model::CallToolResult,
+    tool, tool_router,
+    transport::streamable_http_server::{
+        session::local::LocalSessionManager,
+        StreamableHttpServerConfig, StreamableHttpService,
+    },
+};
+use schemars::JsonSchema;
+use tauri::{AppHandle, Emitter, Manager};
+
+use crate::{AppState, execute_command};
+use metatorio_runtime::{message::AppMessage, CommandEffect};
+
+/// Default loopback port for the MCP endpoint (override with `METATORIO_MCP_PORT`).
+const DEFAULT_PORT: u16 = 8765;
+
+/// The MCP service routes are mounted under this path (e.g.
+/// `http://127.0.0.1:8765/mcp`).
+const MCP_PATH: &str = "/mcp";
+
+// ── Tool surface ───────────────────────────────────────────────────
+
+/// Parameters for the `dispatch` escape-hatch tool: a raw `AppMessage` JSON.
+#[derive(Debug, serde::Deserialize, JsonSchema)]
+struct DispatchParams {
+    /// A serialized `AppMessage`:
+    ///
+    /// - `{ "scope": "application", "action": { "new-project": { "name": "…" } } }`
+    /// - `{ "scope": "project", "project": 1, "action": { "add-factory": { "name": "…", "template": "empty" } } }`
+    /// - `{ "scope": "factory", "project": 1, "factory": 2, "action": { "flow": { "add-to-target": { "flow": { "Item": { "id": "iron-plate", "quality": "normal" } }, "amount": 60.0 } } } }`
+    ///
+    /// The `action` is the same externally-tagged value the UI sends over IPC;
+    /// see `metatorio-runtime`'s `AppMessage` for the full set.  On any change
+    /// the GUI is refreshed via a `document-changed` broadcast event.
+    message: serde_json::Value,
+}
+
+/// The MCP server handler.  Stateless: it only carries the [`AppHandle`] it
+/// needs to reach the shared [`AppState`], so rmcp can construct a fresh one
+/// per request.
+#[derive(Clone)]
+pub struct MetatorioMcp {
+    app: AppHandle,
+}
+
+#[tool_router(server_handler)]
+impl MetatorioMcp {
+    /// Forward one `AppMessage` to the planner runtime (project / factory /
+    /// mechanism / solve), exactly as the GUI's dispatch does, and return the
+    /// resulting revision + solve status.  This is the universal escape hatch
+    /// for every planning operation.
+    #[tool(description = "Forward one AppMessage to the Metatorio planner runtime \
+        (project / factory / mechanism / solve) and return the resulting revision. \
+        This is the universal escape hatch for every planning operation; wire \
+        convenience tools on top of it as needed.")]
+    async fn dispatch(
+        &self,
+        Parameters(params): Parameters<DispatchParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let message: AppMessage = serde_json::from_value(params.message).map_err(|error| {
+            McpError::invalid_params(
+                format!("AppMessage 反序列化失败: {error}"),
+                None,
+            )
+        })?;
+
+        let app = self.app.clone();
+        let handled = tauri::async_runtime::spawn_blocking(move || {
+            let state = app.state::<AppState>();
+            let mut runtime = state
+                .runtime
+                .lock()
+                .map_err(|_| "runtime lock poisoned".to_string())?;
+            let outcome = runtime.dispatch(message).map_err(|error| error.to_string())?;
+            let mut solve = None;
+            for command in &outcome.commands {
+                if let Some(effect) = execute_command(&app, &state, &mut runtime, command) {
+                    solve = Some(effect);
+                }
+            }
+            // Co-op: if the document changed, tell the GUI to re-fetch.
+            if outcome.changed {
+                let _ = app.emit("document-changed", outcome.revision);
+            }
+            Ok::<_, String>(DispatchHandled {
+                outcome_commands: outcome.commands.len(),
+                revision: outcome.revision,
+                changed: outcome.changed,
+                solve,
+            })
+        })
+        .await
+        .map_err(|error| McpError::internal_error(format!("dispatch join 失败: {error}"), None))?;
+
+        let handled = handled.map_err(|error| {
+            McpError::invalid_params(format!("dispatch 执行失败: {error}"), None)
+        })?;
+
+        let payload = serde_json::json!({
+            "revision": handled.revision,
+            "changed": handled.changed,
+            "scheduled_commands": handled.outcome_commands,
+            "solve": handled.solve.as_ref().map(|effect| format!("{effect:?}")),
+        });
+        Ok(CallToolResult::structured(payload))
+    }
+}
+
+struct DispatchHandled {
+    outcome_commands: usize,
+    revision: u64,
+    changed: bool,
+    solve: Option<CommandEffect>,
+}
+
+// ── Server lifecycle ───────────────────────────────────────────────
+
+/// Start the MCP server on a dedicated tokio runtime thread, bound to
+/// `127.0.0.1:<port>`.  Fire-and-forget: the thread ends when the app exits.
+pub fn spawn_server(app: AppHandle) {
+    std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("failed to build MCP tokio runtime");
+        runtime.block_on(serve(app));
+    });
+}
+
+/// Build the axum router + listener and serve MCP until the process exits.
+async fn serve(app: AppHandle) {
+    let token = std::env::var("METATORIO_MCP_TOKEN")
+        .ok()
+        .filter(|token| !token.is_empty());
+    let port = std::env::var("METATORIO_MCP_PORT")
+        .ok()
+        .and_then(|port| port.parse::<u16>().ok())
+        .unwrap_or(DEFAULT_PORT);
+
+    let service = StreamableHttpService::new(
+        move || Ok(MetatorioMcp { app: app.clone() }),
+        LocalSessionManager::default().into(),
+        StreamableHttpServerConfig::default()
+            // Stateless for every protocol version: each request gets a fresh
+            // handler, shared state lives in the managed `AppState`.
+            .with_legacy_session_mode(false)
+            // Simple request/response tools reply as `application/json`.
+            .with_json_response(true),
+    );
+
+    let router = Router::new()
+        .nest_service(MCP_PATH, service)
+        .layer(middleware::from_fn_with_state(token.clone(), require_token));
+
+    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let listener = match tokio::net::TcpListener::bind(addr).await {
+        Ok(listener) => listener,
+        Err(error) => {
+            eprintln!("metatorio MCP server failed to bind {addr}: {error}");
+            return;
+        }
+    };
+    eprintln!(
+        "metatorio MCP server listening on http://{addr}{MCP_PATH}{}",
+        if token.is_some() {
+            " (token auth enabled)"
+        } else {
+            " (no token auth; loopback only)"
+        }
+    );
+    if let Err(error) = axum::serve(listener, router).await {
+        eprintln!("metatorio MCP server error: {error}");
+    }
+}
+
+/// Bearer-token gate.  When `token` is `None` (env var unset) this is a no-op;
+/// otherwise the request must present `Authorization: Bearer <token>` (or the
+/// raw token) to pass.
+async fn require_token(
+    State(token): State<Option<String>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    if let Some(token) = token {
+        let authorized = request
+            .headers()
+            .get("authorization")
+            .and_then(|value| value.to_str().ok())
+            .map(|header| header.strip_prefix("Bearer ").unwrap_or(header))
+            .is_some_and(|presented| presented == token);
+        if !authorized {
+            return (StatusCode::UNAUTHORIZED, "unauthorized").into_response();
+        }
+    }
+    next.run(request).await
+}

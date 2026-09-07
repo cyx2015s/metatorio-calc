@@ -47,6 +47,10 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 
+/// 与本体合并的 MCP 服务器（localhost Streamable-HTTP 端点）。
+#[cfg(not(mobile))]
+mod mcp;
+
 /// Minimal embedded game-data dump so the app can solve out of the box.
 /// Replace with a real Factorio dump once data loading is wired to a
 /// file dialog.
@@ -2586,12 +2590,18 @@ fn ensure_machine_compat(
     Ok(())
 }
 
+/// Execute the side effects of one [`RuntimeCommand`] on the shared runtime,
+/// emitting the usual Tauri events (so a live GUI stays in sync).
+///
+/// Returns the [`CommandEffect`] produced by solving commands (Recompute /
+/// AutoPlan / Cleanup) so non-GUI consumers such as the MCP server can surface
+/// the result directly; every other command returns `None`.
 fn execute_command(
     app: &AppHandle,
     state: &AppState,
     runtime: &mut Runtime,
     command: &RuntimeCommand,
-) {
+) -> Option<metatorio_runtime::CommandEffect> {
     match command {
         RuntimeCommand::Recompute { project, .. } => {
             // Make sure the project's context store is in memory first.
@@ -2604,15 +2614,21 @@ fn execute_command(
             if let Some(id) = context_id {
                 if let Err(error) = ensure_context_loaded(state, runtime, &id) {
                     emit(app, "solve-error", error);
-                    return;
+                    return None;
                 }
             }
             match runtime.run_command(command) {
-                Ok(metatorio_runtime::CommandEffect::Solve(result)) => {
-                    emit(app, "solve-result", result);
+                Ok(effect @ metatorio_runtime::CommandEffect::Solve(_)) => {
+                    if let metatorio_runtime::CommandEffect::Solve(result) = &effect {
+                        emit(app, "solve-result", result.clone());
+                    }
+                    Some(effect)
                 }
-                Ok(_) => {}
-                Err(error) => emit(app, "solve-error", error.to_string()),
+                Ok(_) => None,
+                Err(error) => {
+                    emit(app, "solve-error", error.to_string());
+                    None
+                }
             }
         }
         RuntimeCommand::EnsureMachineCompat {
@@ -2624,11 +2640,13 @@ fn execute_command(
             {
                 eprintln!("machine compat fallback failed: {error}");
             }
+            None
         }
         RuntimeCommand::EnsureQualityLimit { project } => {
             if let Err(error) = ensure_quality_limit(state, runtime, *project) {
                 eprintln!("quality limit auto-raise failed: {error}");
             }
+            None
         }
         RuntimeCommand::ClampModules {
             project,
@@ -2638,6 +2656,7 @@ fn execute_command(
             if let Err(error) = clamp_modules(state, runtime, *project, *factory, *mechanic) {
                 eprintln!("module clamp failed: {error}");
             }
+            None
         }
         RuntimeCommand::Persist { project, path } => {
             let path = path
@@ -2654,6 +2673,7 @@ fn execute_command(
                 }
             }
             // Pathless persist with no remembered path is a no-op.
+            None
         }
         RuntimeCommand::LoadGameContext {
             executable_path,
@@ -2664,6 +2684,7 @@ fn execute_command(
                 Ok(_) => emit_contexts_changed(app, state, Some(runtime)),
                 Err(error) => emit(app, "context-error", error),
             }
+            None
         }
         RuntimeCommand::LoadCachedContext => {
             // 恢复最近创建的上下文。
@@ -2684,22 +2705,37 @@ fn execute_command(
                 },
                 None => emit(app, "context-error", "没有缓存的游戏数据".to_string()),
             }
+            None
         }
-        RuntimeCommand::Cleanup { .. } => {
-            let _ = runtime.run_command(command);
-        }
+        RuntimeCommand::Cleanup { .. } => match runtime.run_command(command) {
+            Ok(effect @ metatorio_runtime::CommandEffect::Solve(_)) => Some(effect),
+            Ok(_) => None,
+            Err(error) => {
+                emit(app, "solve-error", error.to_string());
+                None
+            }
+        },
         RuntimeCommand::AutoPlan { project, .. } => {
             // 自动规划：迭代添加建议机制直至可解。
             let _ = ensure_context_for_project(state, runtime, *project);
             match runtime.run_command(command) {
-                Ok(metatorio_runtime::CommandEffect::Solve(result)) => {
-                    emit(app, "solve-result", result);
+                Ok(effect @ metatorio_runtime::CommandEffect::Solve(_)) => {
+                    if let metatorio_runtime::CommandEffect::Solve(result) = &effect {
+                        emit(app, "solve-result", result.clone());
+                    }
+                    Some(effect)
                 }
-                Ok(_) => {}
-                Err(error) => emit(app, "solve-error", error.to_string()),
+                Ok(_) => None,
+                Err(error) => {
+                    emit(app, "solve-error", error.to_string());
+                    None
+                }
             }
         }
-        other => eprintln!("unhandled runtime command: {other:?}"),
+        other => {
+            eprintln!("unhandled runtime command: {other:?}");
+            None
+        }
     }
 }
 
@@ -2758,6 +2794,9 @@ pub fn run() {
                     runtime.set_active_context(Some(id));
                 }
             }
+            // 启动与本体合并的 MCP 服务器（localhost Streamable-HTTP）。
+            #[cfg(not(mobile))]
+            mcp::spawn_server(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

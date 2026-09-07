@@ -54,4 +54,42 @@
 4. MCP 工具面 = GUI 规划操作的 `runtime.dispatch` 子集。
 5. 待细化：并发冲突语义、长求解的异步化、端口/token 细节。
 
+## 决策 7（MVP 落地，2026-xx）：**单 `dispatch` 万能工具先行**
+
+Phase 2 工具面**不在一开始就做成离散的友好工具**，而是：
+
+1. **MVP = 一个 `dispatch` 工具**，接受原始 `AppMessage` JSON，转发给 `runtime.dispatch`，与 GUI 共用同一 `Mutex<Runtime>`。
+   - 理由：`AppMessage` 已无缝对接调度核心，一个工具即覆盖整个动作集；不用为每种操作设计参数结构，永不失效。
+   - **代价（已接受）**：`AppMessage` 是超大嵌套 enum，LLM 手写 JSON 易错。这是**确定性接口** + 收集 agent 使用反馈用的。
+   - **不作 `JsonSchema` 派生**：`AppMessage` 用 `#[serde(tag="scope", content="action")]` 邻接标签，schemars 对 `content` 内层 enum 推导不保证精确匹配 serde 实际形状；跨 crates（core 的 `DualVar`/`Mechanic`/`Fuel` + runtime 的 message/document 全树）侵入大。故工具参数直接 `message: serde_json::Value`（`schemars::JsonSchema for Value` 生效），在服务端 `serde_json::from_value::<AppMessage>()` 反序列化，错误信息清晰。
+
+### 实现要点（已落地）
+
+- **传输**：`rmcp 3.2.0` Streamable-HTTP（Tower service），挂到 axum，`/mcp` 路径。
+- **生命周期**：`spawn_server(app.handle().clone())` 在 `run()` 的 `setup` 里启动；独立 tokio 多线程 runtime 线程，绑定 `127.0.0.1:<port>`（默认 `8765`，`METATORIO_MCP_PORT` 可改）。
+- **token 鉴权**：axum middleware (`from_fn_with_state`)，`Authorization: Bearer <token>` 或裸 token；`METATORIO_MCP_TOKEN` 未设则**不鉴权**（仅 loopback 兜底）。rmcp 的 `StreamableHttpServerConfig` 默认只接受 loopback `Host`（DNS rebinding 防护）。
+- **共享状态**：工具 handler 持有 `AppHandle`，经 `app.state::<AppState>()` 取 `Mutex<Runtime>`；`dispatch` 后对每个 `RuntimeCommand` 调 `execute_command`（同样会 `emit` solve-result 等事件，GUI 实时更新）。
+- **co-op 广播**：`runtime.dispatch` 返回 `outcome.changed` 时，MCP 端 `emit("document-changed", revision)`；前端 store 订阅后调 `refresh()` 重拉文档快照 → **外部 agent + 用户在同一个界面实时并存协同**。
+- **`execute_command` 改为返回 `Option<CommandEffect>`**：Recompute/AutoPlan/Cleanup 返回 `Some(effect)` 供 MCP 直接 surfacing solve 结果；其余命令返回 `None`；原有 Tauri emit 副作用全部保留（非破坏性）。
+
+### 工具面（MVP）
+
+| 工具 | 参数 | 说明 |
+| --- | --- | --- |
+| `dispatch` | `{ message: <AppMessage JSON> }` | 万能回退：转发任意规划动作，返回 `revision`/`changed`/`scheduled_commands`/`solve` |
+
+后续按 agent 真实使用反馈，再把常见需求从 `dispatch` 拆出更友好的专用工具（仍在同一 `dispatch` 路径之上）。
+
+## 待办 / 下阶段
+
+- [ ] 真实跑一次 `metatorio-mcp` 应用，用 DSH 客户端连 `http://127.0.0.1:8765/mcp`，验证 `dispatch` 工具可驱动规划、GUI 实时刷新。
+- [ ] 收集 agent 使用 AppMessage 的感受 → 抽离友好工具（`list_projects` / `get_planning_state` / `add_target` / `set_target_amount` / `add_mechanic` / `set_recipe` / `set_machine` / `recompute` / `auto_plan` / `load_context`）——对应原决策 6。
+- [ ] 长时求解（`recompute`/`auto_plan`）走**异步**（类似 GUI 的 solving 事件），避免 MCP 调用期间占住 `Mutex<Runtime>` 导致 GUI 排队——原决策 47 的风险。
+- [ ] 并发冲突语义（乐观锁/变更冲突提示）——原决策 45。
+- [ ] 端口被占用 / 多实例 / token 传递细节——原决策 48。
+
+## DSH 接入（验证用）
+
+DSH 客户端配置见 DSH 仓库 `@deepseek-ai/dsh-mcp-client` 的 Streamable-HTTP 接法：命令（stdio）不用时，可改成 HTTP 端点 + `Authorization: Bearer <token>` 头部。本服务器**默认提供 HTTP 端点**，故 DSH 侧用 http transport 配置即可，工具名会带 `mcp__<serverName>__dispatch` 前缀。
+
 要我把上面整理成一份**可写进仓库的设计稿**（比如 `docs/mcp-design.md`，含"决策理由"树，方便下轮 compact 接力），还是就以这段对话为准等 compact 自动节选？另外：是否需要我下轮从"工具面枚举 + 异步求解"继续（Phase 2 规划细化），还是先停在架构决策这层？

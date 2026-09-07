@@ -19,6 +19,7 @@ import {
   loadIcon,
   onContextError,
   onContextsChanged,
+  onDocumentChanged,
   onSolveError,
   onSolveResult,
   openProjectDialog,
@@ -199,6 +200,11 @@ class RuntimeStore {
     onContextError((message) => {
       this.contextError = message;
       this.contextBusy = false;
+    });
+    // 外部（MCP dispatch）改动文档后，拉取最新快照，实现「外部 agent + 用户」
+    // 在同一个界面上实时并存协同。
+    onDocumentChanged(() => {
+      this.refresh().catch(() => {});
     });
     try {
       this.document = await getDocument();
