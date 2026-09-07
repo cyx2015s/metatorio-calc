@@ -49,7 +49,7 @@ use schemars::JsonSchema;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::{AppState, execute_command};
-use metatorio_runtime::{message::AppMessage, CommandEffect};
+use metatorio_runtime::message::AppMessage;
 
 /// Default loopback port for the MCP endpoint (override with `METATORIO_MCP_PORT`).
 const DEFAULT_PORT: u16 = 8765;
@@ -63,16 +63,18 @@ const MCP_PATH: &str = "/mcp";
 /// Parameters for the `dispatch` escape-hatch tool: a raw `AppMessage` JSON.
 #[derive(Debug, serde::Deserialize, JsonSchema)]
 struct DispatchParams {
-    /// A serialized `AppMessage`:
+    /// A serialized `AppMessage` (adjacently tagged: `scope` selects the
+    /// variant, everything else — including `project` / `factory` — lives
+    /// inside `action`):
     ///
     /// - `{ "scope": "application", "action": { "new-project": { "name": "…" } } }`
-    /// - `{ "scope": "project", "project": 1, "action": { "add-factory": { "name": "…", "template": "empty" } } }`
-    /// - `{ "scope": "factory", "project": 1, "factory": 2, "action": { "flow": { "add-to-target": { "flow": { "Item": { "id": "iron-plate", "quality": "normal" } }, "amount": 60.0 } } } }`
+    /// - `{ "scope": "project", "action": { "project": 1, "action": { "add-factory": { "name": "…", "template": "empty" } } } }`
+    /// - `{ "scope": "factory", "action": { "project": 1, "factory": 2, "action": { "flow": { "add-to-target": { "flow": { "Item": { "id": "iron-plate", "quality": "normal" } }, "amount": 60.0 } } } } }`
     ///
-    /// The `action` is the same externally-tagged value the UI sends over IPC;
-    /// see `metatorio-runtime`'s `AppMessage` for the full set.  On any change
-    /// the GUI is refreshed via a `document-changed` broadcast event.
-    message: serde_json::Value,
+    /// The `action` is the same value the UI sends over IPC; see
+    /// `metatorio-runtime`'s `AppMessage` for the full set.  On any change the
+    /// GUI is refreshed via a `document-changed` broadcast event.
+    message: AppMessage,
 }
 
 /// The MCP server handler.  Stateless: it only carries the [`AppHandle`] it
@@ -97,12 +99,7 @@ impl MetatorioMcp {
         &self,
         Parameters(params): Parameters<DispatchParams>,
     ) -> Result<CallToolResult, McpError> {
-        let message: AppMessage = serde_json::from_value(params.message).map_err(|error| {
-            McpError::invalid_params(
-                format!("AppMessage 反序列化失败: {error}"),
-                None,
-            )
-        })?;
+        let message = params.message;
 
         let app = self.app.clone();
         let handled = tauri::async_runtime::spawn_blocking(move || {
@@ -112,10 +109,17 @@ impl MetatorioMcp {
                 .lock()
                 .map_err(|_| "runtime lock poisoned".to_string())?;
             let outcome = runtime.dispatch(message).map_err(|error| error.to_string())?;
-            let mut solve = None;
+            // 求解结果结构化为 JSON；命令列表真实返回（而非仅数量）。
+            let mut solve: Option<serde_json::Value> = None;
+            let mut commands: Vec<serde_json::Value> = Vec::new();
             for command in &outcome.commands {
                 if let Some(effect) = execute_command(&app, &state, &mut runtime, command) {
-                    solve = Some(effect);
+                    if let metatorio_runtime::CommandEffect::Solve(result) = effect {
+                        solve = serde_json::to_value(&result).ok();
+                    }
+                }
+                if let Ok(value) = serde_json::to_value(command) {
+                    commands.push(value);
                 }
             }
             // Co-op: if the document changed, tell the GUI to re-fetch.
@@ -123,9 +127,9 @@ impl MetatorioMcp {
                 let _ = app.emit("document-changed", outcome.revision);
             }
             Ok::<_, String>(DispatchHandled {
-                outcome_commands: outcome.commands.len(),
                 revision: outcome.revision,
                 changed: outcome.changed,
+                commands,
                 solve,
             })
         })
@@ -139,18 +143,18 @@ impl MetatorioMcp {
         let payload = serde_json::json!({
             "revision": handled.revision,
             "changed": handled.changed,
-            "scheduled_commands": handled.outcome_commands,
-            "solve": handled.solve.as_ref().map(|effect| format!("{effect:?}")),
+            "scheduled_commands": handled.commands,
+            "solve": handled.solve,
         });
         Ok(CallToolResult::structured(payload))
     }
 }
 
 struct DispatchHandled {
-    outcome_commands: usize,
     revision: u64,
     changed: bool,
-    solve: Option<CommandEffect>,
+    commands: Vec<serde_json::Value>,
+    solve: Option<serde_json::Value>,
 }
 
 // ── Server lifecycle ───────────────────────────────────────────────

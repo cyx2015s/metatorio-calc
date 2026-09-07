@@ -2262,6 +2262,7 @@ dependencies = [
  "ahash",
  "indexmap 2.14.0",
  "metatorio-data",
+ "schemars 1.2.2",
  "serde",
  "serde_json",
 ]
@@ -2293,6 +2294,7 @@ dependencies = [
  "metatorio-core",
  "metatorio-data",
  "metatorio-solver",
+ "schemars 1.2.2",
  "serde",
  "serde_json",
 ]

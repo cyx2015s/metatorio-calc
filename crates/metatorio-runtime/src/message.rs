@@ -1,4 +1,5 @@
 use metatorio_core::{Accessible, DualVar, Fuel, IdWithQuality};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::document::{
@@ -11,7 +12,7 @@ use crate::id::{
 
 /// Framework-independent user intent.  Rendering code should emit these
 /// values instead of mutating the project document directly.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "scope", content = "action", rename_all = "kebab-case")]
 pub enum AppMessage {
     Application(ApplicationAction),
@@ -29,7 +30,7 @@ pub enum AppMessage {
 pub type RuntimeMessage = AppMessage;
 
 /// File, data-context, update, and process-level operations.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum ApplicationAction {
     NewProject {
@@ -67,7 +68,7 @@ pub enum ApplicationAction {
     RestartAfterUpdate,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum CloseDecision {
     Cancel,
@@ -75,7 +76,7 @@ pub enum CloseDecision {
     Save,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum DeleteDecision {
     Cancel,
@@ -83,7 +84,7 @@ pub enum DeleteDecision {
 }
 
 /// Persistent project-level changes formerly handled by ProjectContext.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum ProjectAction {
     SetName {
@@ -150,7 +151,7 @@ pub enum ProjectAction {
     Planning(PlanningAction),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum FactoryTemplate {
     Empty,
@@ -158,7 +159,7 @@ pub enum FactoryTemplate {
 }
 
 /// Changes to one factory document.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum FactoryAction {
     SetName {
@@ -185,7 +186,7 @@ pub enum FactoryAction {
     Solve(SolveAction),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum FactoryContextAction {
     SetPlanet { planet: Option<String> },
@@ -194,7 +195,7 @@ pub enum FactoryContextAction {
     SetDebug { enabled: bool },
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum TargetAction {
     Add { target: FlowTarget },
@@ -204,7 +205,7 @@ pub enum TargetAction {
     Reorder { target: TargetId, position: usize },
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum TargetExpressionAction {
     Add {
@@ -246,7 +247,7 @@ pub enum TargetExpressionAction {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum ExternalInputAction {
     Add {
@@ -272,14 +273,14 @@ pub enum ExternalInputAction {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum ExternalLocation {
     Planet(String),
     Surface(String),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum MechanicListAction {
     Add {
@@ -307,7 +308,7 @@ pub enum MechanicListAction {
 /// the field set of the corresponding core `Mechanic` struct), so a recipe
 /// mechanic cannot receive a mining operation and vice versa — the reducer
 /// rejects a kind mismatch without touching the document.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum MechanicAction {
     Recipe(RecipeMechanicAction),
@@ -324,7 +325,7 @@ pub enum MechanicAction {
     FluidHeat(FluidHeatMechanicAction),
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum RecipeMechanicAction {
     SetRecipe { recipe: IdWithQuality },
@@ -334,7 +335,7 @@ pub enum RecipeMechanicAction {
     Module(ModuleAction),
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum MiningMechanicAction {
     SetResource { resource: String },
@@ -344,32 +345,32 @@ pub enum MiningMechanicAction {
     Module(ModuleAction),
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum SpoilMechanicAction {
     SetItem { item: IdWithQuality },
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum PlantMechanicAction {
     SetSeed { seed: IdWithQuality },
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum ItemFuelMechanicAction {
     SetItem { item: IdWithQuality },
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum ItemLaunchMechanicAction {
     SetItem { item: IdWithQuality },
     SetWeightMode { weight_mode: bool },
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum GeneratorMechanicAction {
     SetGenerator { generator: IdWithQuality },
@@ -377,7 +378,7 @@ pub enum GeneratorMechanicAction {
     SetTemperature { temperature: Option<i32> },
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum BoilerMechanicAction {
     SetBoiler { boiler: IdWithQuality },
@@ -388,7 +389,7 @@ pub enum BoilerMechanicAction {
     // SetMode（工作模式）已移除：锅炉 mode 只读，运行/展开时从原型读取。
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum ReactorMechanicAction {
     SetReactor { reactor: IdWithQuality },
@@ -396,21 +397,21 @@ pub enum ReactorMechanicAction {
     SetNeighbours { neighbours: u8 },
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum SolarMechanicAction {
     SetSolarPanel { solar_panel: IdWithQuality },
     SetAccumulator { accumulator: IdWithQuality },
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum FluidFuelMechanicAction {
     SetFluid { fluid: String },
     SetTemperature { temperature: Option<i32> },
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum FluidHeatMechanicAction {
     SetFluid { fluid: String },
@@ -419,7 +420,7 @@ pub enum FluidHeatMechanicAction {
 
 /// Operations emitted by the old ModuleConfigEditor, expressed in terms of
 /// slots and stable list positions rather than mouse buttons.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum ModuleAction {
     SetModuleSlot {
@@ -474,7 +475,7 @@ pub enum ModuleAction {
 /// Project-global automatic-planning preferences.  These describe how the
 /// planner enumerates alternatives and are intentionally NOT bound to any
 /// single mechanic.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum PlanningAction {
     SetAlternativeCount {
@@ -514,7 +515,7 @@ pub enum PlanningAction {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum FlowAction {
     AddToTarget { flow: DualVar, amount: f64 },
@@ -522,7 +523,7 @@ pub enum FlowAction {
     RequestSuggestions { flow: DualVar, amount: f64 },
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum SuggestionAction {
     SelectMechanic { mechanic: MechanicId },
@@ -531,7 +532,7 @@ pub enum SuggestionAction {
     Dismiss,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum SuggestionCandidate {
     Recipe { recipe: IdWithQuality },
@@ -540,7 +541,7 @@ pub enum SuggestionCandidate {
     Generator { generator: IdWithQuality },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum CleanupAction {
     RemoveUnused,
@@ -548,7 +549,7 @@ pub enum CleanupAction {
     SortBySolutionRate,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum SolveAction {
     Recompute,
@@ -557,7 +558,7 @@ pub enum SolveAction {
 
 /// Effects requested by a reducer after applying an AppMessage.  Keeping
 /// these explicit makes the future Tauri adapter thin and testable.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum RuntimeCommand {
     Recompute {

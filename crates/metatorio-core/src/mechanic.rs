@@ -7,6 +7,7 @@
 //! 纯数据层：UI 状态（suggestion_*）、求解逻辑（AsFlow）与偏好配置
 //! （machine_preferences/enumerate_*）均不在此层。
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::id::IdWithQuality;
@@ -14,7 +15,7 @@ use crate::id::IdWithQuality;
 // ── 插件配置（ModuleConfig 体系，纯数据）─────────────────────────
 
 /// 一个机器实例的插件/插件塔配置。
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct ModuleConfig {
     pub modules: Vec<IdWithQuality>,
@@ -222,7 +223,7 @@ pub struct FluidHeatMechanic {
 }
 
 /// 单个插件塔（插件塔）的配置。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct BeaconConfig {
     /// 这种插件塔中的插件（数量是塔内插件数，不是塔数量）。
@@ -259,7 +260,7 @@ impl Default for BeaconConfig {
 /// 替代旧的 `fuel: Option<String>` + `fuel_temperature: Option<i32>` 二字段——
 /// 旧形态把"物品燃料的品质"与"流体燃料的温度"挤在一个 i32 里，靠上下文（仓库
 /// 里是流体还是物品）猜测；现在由枚举显式表达，无需猜。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum Fuel {
     /// 物品燃料（如 burner 煤炭），带品质。

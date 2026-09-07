@@ -1,4 +1,5 @@
 use metatorio_core::{Accessible, DualVar, IdWithQuality, Mechanic, ModuleConfig};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::id::{
@@ -88,7 +89,7 @@ impl Default for ProjectSettings {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TimeScale {
     #[default]
@@ -115,7 +116,7 @@ impl Default for Milestone {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct RecipeProductivity {
     pub recipe: String,
@@ -132,9 +133,8 @@ impl Default for RecipeProductivity {
 }
 
 /// 无限科技的研究次数覆盖（2.b）。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
-#[derive(Default)]
 pub struct InfiniteTechLevel {
     pub tech: String,
     pub level: u32,
@@ -191,7 +191,7 @@ impl Default for FactorySettings {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct FlowTarget {
     pub id: TargetId,
@@ -209,7 +209,7 @@ impl Default for FlowTarget {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct TargetExpression {
     pub id: TargetExpressionId,
@@ -227,7 +227,7 @@ impl Default for TargetExpression {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct TargetTerm {
     pub id: TargetTermId,
@@ -245,7 +245,7 @@ impl Default for TargetTerm {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct ExternalInput {
     pub id: ExternalInputId,
@@ -319,13 +319,13 @@ impl Default for PlanningPreferences {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct AutoBeaconPlan {
     pub module_config: ModuleConfig,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum MechanicKind {
     #[default]

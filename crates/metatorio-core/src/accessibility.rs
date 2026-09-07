@@ -38,7 +38,7 @@ pub type AIndexSet<T> = indexmap::IndexSet<T, ahash::RandomState>;
 ///
 /// serde 采用外部标签（默认）：`{"Tech":"automation-science-pack"}`、
 /// 单元变体 `"Electricity"`。runtime 文档持久化与前端消息共用此格式。
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub enum Accessible {
     Tech(String),
     Recipe(String),

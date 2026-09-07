@@ -9,6 +9,7 @@
 //!   它只在机制明确需要抽象热量时显式加入；普通流体温度通过区间子类型
 //!   和区间转换流表达。
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::id::IdWithQuality;
@@ -16,7 +17,7 @@ use crate::id::IdWithQuality;
 /// 流标识。
 ///
 /// `Flow<DualVar>` 中每个键代表一种流，值为流量。
-#[derive(Debug, Default, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Hash, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[repr(u8)]
 #[non_exhaustive]
 pub enum DualVar {
