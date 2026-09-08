@@ -2779,7 +2779,7 @@ pub fn run() {
                 registry.dir = dir;
                 registry.scan();
             }
-            let newest = state.contexts.lock().ok().and_then(|registry| {
+            let newest: Option<String> = state.contexts.lock().ok().and_then(|registry| {
                 registry
                     .meta
                     .values()
