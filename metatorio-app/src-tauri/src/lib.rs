@@ -44,7 +44,7 @@ use metatorio_runtime::{
     state::DispatchResult,
 };
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, Runtime as TauriRuntime, State};
 use tauri_plugin_dialog::DialogExt;
 
 /// 与本体合并的 MCP 服务器（localhost Streamable-HTTP 端点）。
@@ -753,7 +753,11 @@ fn context_list_with(runtime: &Runtime, state: &AppState) -> ContextList {
 }
 
 /// 调用方持有 runtime 锁时传 `Some(runtime)`，否则传 `None`。
-fn emit_contexts_changed(app: &AppHandle, state: &AppState, runtime: Option<&Runtime>) {
+fn emit_contexts_changed<R: TauriRuntime>(
+    app: &AppHandle<R>,
+    state: &AppState,
+    runtime: Option<&Runtime>,
+) {
     let list = match runtime {
         Some(runtime) => context_list_with(runtime, state),
         None => context_list(state),
@@ -765,7 +769,7 @@ fn emit_contexts_changed(app: &AppHandle, state: &AppState, runtime: Option<&Run
 
 // ── Game export (executable) ──────────────────────────────────────
 
-fn game_export_dir(app: &AppHandle) -> Result<PathBuf, String> {
+fn game_export_dir<R: TauriRuntime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     let dir = app
         .path()
         .app_data_dir()
@@ -795,8 +799,8 @@ fn run_game(exe: &Path, config: &Path, args: &[&str], extra: &[String]) -> Resul
 /// 返回 `(name, source, dump 原始字节, locale 字节, 图标源目录)`。
 type GameExport = (String, String, Vec<u8>, Option<Vec<u8>>, PathBuf);
 
-fn export_game_context(
-    app: &AppHandle,
+fn export_game_context<R: TauriRuntime>(
+    app: &AppHandle<R>,
     executable_path: &str,
     mod_dir: Option<&str>,
 ) -> Result<GameExport, String> {
@@ -861,8 +865,8 @@ fn export_game_context(
 }
 
 /// 导出 → 注册 → 锁外载入 → 激活。
-async fn load_game_context_and_activate(
-    app: &AppHandle,
+async fn load_game_context_and_activate<R: TauriRuntime>(
+    app: &AppHandle<R>,
     state: &AppState,
     executable_path: &str,
     mod_dir: Option<&str>,
@@ -2006,7 +2010,8 @@ async fn dispatch(app: AppHandle, message: AppMessage) -> Result<DispatchResult,
             .map_err(|error| error.to_string())?
     };
     for command in &outcome.commands {
-        execute_command(&app, &app.state::<AppState>(), command).await;
+        // 失败已通过 `solve-error` / `context-error` 事件送达 GUI，这里丢弃回执。
+        let _ = execute_command(&app, &app.state::<AppState>(), command).await;
     }
     Ok(outcome)
 }
@@ -2343,7 +2348,7 @@ fn clamp_modules(
     Ok(())
 }
 
-fn emit<T: Serialize + Clone>(app: &AppHandle, event: &str, payload: T) {
+fn emit<R: TauriRuntime, T: Serialize + Clone>(app: &AppHandle<R>, event: &str, payload: T) {
     if let Err(error) = app.emit(event, payload) {
         eprintln!("failed to emit {event}: {error}");
     }
@@ -2729,8 +2734,8 @@ async fn persist_project(state: &AppState, project: ProjectId, path: String) -> 
 ///
 /// 求解本身不持有 runtime 锁，因此 MCP 调用与 GUI 交互不会被长求解挡住；
 /// 不同工厂的求解还能真正并行（见 [`solve_jobs`]）。
-pub(crate) async fn solve_factory_offlock(
-    app: &AppHandle,
+pub(crate) async fn solve_factory_offlock<R: TauriRuntime>(
+    app: &AppHandle<R>,
     state: &AppState,
     project: ProjectId,
     factory: FactoryId,
@@ -2770,37 +2775,107 @@ pub(crate) async fn solve_factory_offlock(
         .await
 }
 
+/// 一条（或一组嵌套）命令的执行结果。
+///
+/// 失败时 GUI 侧已经 `emit` 了错误事件；`errors` 是给**发起方**（MCP 工具、
+/// 未来的其它适配层）的显式回执——否则调用方只能看到 `solve: null`，无法区分
+/// 「无解」「参数无效」「什么都没做」。
+#[derive(Default)]
+struct CommandOutcome {
+    /// 求解类命令的结构化产出。
+    effect: Option<metatorio_runtime::CommandEffect>,
+    /// 失败信息（按发生顺序累积；GUI 事件不受影响）。
+    errors: Vec<String>,
+}
+
+impl CommandOutcome {
+    fn done(effect: Option<metatorio_runtime::CommandEffect>) -> Self {
+        Self {
+            effect,
+            errors: Vec::new(),
+        }
+    }
+
+    fn failed(error: impl Into<String>) -> Self {
+        Self {
+            effect: None,
+            errors: vec![error.into()],
+        }
+    }
+
+    /// 合并嵌套命令的结果：保留第一个求解产出，错误全部累积。
+    fn absorb(&mut self, other: CommandOutcome) {
+        if self.effect.is_none() {
+            self.effect = other.effect;
+        }
+        self.errors.extend(other.errors);
+    }
+}
+
+/// 逐条执行命令并汇总结果：第一个求解产出、命令的 JSON 序列化、全部错误。
+///
+/// 抽出来是为了让「命令执行 → 工具回执」的汇总逻辑可单测（不需要 Tauri
+/// AppHandle：执行器由调用方以闭包注入）。
+pub(crate) async fn run_commands<F, Fut>(
+    commands: &[RuntimeCommand],
+    mut execute: F,
+) -> (
+    Option<metatorio_runtime::SolveResult>,
+    Vec<serde_json::Value>,
+    Vec<String>,
+)
+where
+    F: FnMut(&RuntimeCommand) -> Fut,
+    Fut: std::future::Future<Output = CommandOutcome>,
+{
+    let mut solve = None;
+    let mut serialized = Vec::new();
+    let mut errors = Vec::new();
+    for command in commands {
+        let outcome = execute(command).await;
+        if solve.is_none() {
+            if let Some(metatorio_runtime::CommandEffect::Solve(result)) = outcome.effect {
+                solve = Some(result);
+            }
+        }
+        errors.extend(outcome.errors);
+        if let Ok(value) = serde_json::to_value(command) {
+            serialized.push(value);
+        }
+    }
+    (solve, serialized, errors)
+}
+
 /// Execute the side effects of one [`RuntimeCommand`] on the shared runtime,
 /// emitting the usual Tauri events (so a live GUI stays in sync).
 ///
 /// 每条分支只在自己的**短临界区**内持锁；求解（Recompute / AutoPlan）与
 /// 文件/上下文 IO 都在锁外进行，因此本函数是 `async` 的。
 ///
-/// Returns the [`CommandEffect`] produced by solving commands (Recompute /
-/// AutoPlan / Cleanup) so non-GUI consumers such as the MCP server can surface
-/// the result directly; every other command returns `None`.
-async fn execute_command(
-    app: &AppHandle,
+/// 返回 [`CommandOutcome`]：求解类命令带上 `CommandEffect` 供 MCP 等非 GUI
+/// 消费方直接取用；任何失败都会记录在 `errors` 里（同时仍 emit 事件）。
+async fn execute_command<R: TauriRuntime>(
+    app: &AppHandle<R>,
     state: &AppState,
     command: &RuntimeCommand,
-) -> Option<metatorio_runtime::CommandEffect> {
+) -> CommandOutcome {
     match command {
         RuntimeCommand::Recompute { project, factory } => {
             let (project, factory) = (*project, *factory);
             // 先确保项目的上下文 store 在内存里（读盘在锁外完成）。
             if let Err(error) = ensure_context_for_project_offlock(state, project).await {
-                emit(app, "solve-error", error);
-                return None;
+                emit(app, "solve-error", error.clone());
+                return CommandOutcome::failed(error);
             }
             // 锁外求解。
             match solve_factory_offlock(app, state, project, factory).await {
                 Ok(result) => {
                     emit(app, "solve-result", result.clone());
-                    Some(metatorio_runtime::CommandEffect::Solve(result))
+                    CommandOutcome::done(Some(metatorio_runtime::CommandEffect::Solve(result)))
                 }
                 Err(error) => {
-                    emit(app, "solve-error", error);
-                    None
+                    emit(app, "solve-error", error.clone());
+                    CommandOutcome::failed(error)
                 }
             }
         }
@@ -2809,13 +2884,15 @@ async fn execute_command(
             factory,
             mechanic,
         } => {
+            // 内部一致性修复（best-effort）：失败只记日志，不作为本次操作的
+            // 失败回执，否则每次普通编辑都可能被无关的修复失败污染。
             let (project, factory, mechanic) = (*project, *factory, *mechanic);
             if let Err(error) = with_runtime(state, |runtime| {
                 ensure_machine_compat(state, runtime, project, factory, mechanic)
             }) {
                 eprintln!("machine compat fallback failed: {error}");
             }
-            None
+            CommandOutcome::default()
         }
         RuntimeCommand::EnsureQualityLimit { project } => {
             let project = *project;
@@ -2824,7 +2901,7 @@ async fn execute_command(
             }) {
                 eprintln!("quality limit auto-raise failed: {error}");
             }
-            None
+            CommandOutcome::default()
         }
         RuntimeCommand::ClampModules {
             project,
@@ -2837,21 +2914,25 @@ async fn execute_command(
             }) {
                 eprintln!("module clamp failed: {error}");
             }
-            None
+            CommandOutcome::default()
         }
         RuntimeCommand::Persist { project, path } => {
             let project = *project;
             let path = path
                 .clone()
                 .or_else(|| state.project_paths.lock().ok()?.get(&project).cloned());
-            if let Some(path) = path {
-                // 锁外序列化 + 写盘。
-                if let Err(error) = persist_project(state, project, path).await {
+            let Some(path) = path else {
+                // Pathless persist with no remembered path is a no-op.
+                return CommandOutcome::default();
+            };
+            // 锁外序列化 + 写盘。
+            match persist_project(state, project, path).await {
+                Ok(()) => CommandOutcome::default(),
+                Err(error) => {
                     eprintln!("persist failed: {error}");
+                    CommandOutcome::failed(format!("保存项目 {} 失败: {error}", project.0))
                 }
             }
-            // Pathless persist with no remembered path is a no-op.
-            None
         }
         RuntimeCommand::LoadGameContext {
             executable_path,
@@ -2860,10 +2941,15 @@ async fn execute_command(
             match load_game_context_and_activate(app, state, executable_path, mod_path.as_deref())
                 .await
             {
-                Ok(_) => emit_contexts_changed(app, state, None),
-                Err(error) => emit(app, "context-error", error),
+                Ok(_) => {
+                    emit_contexts_changed(app, state, None);
+                    CommandOutcome::default()
+                }
+                Err(error) => {
+                    emit(app, "context-error", error.clone());
+                    CommandOutcome::failed(error)
+                }
             }
-            None
         }
         RuntimeCommand::LoadCachedContext => {
             // 恢复最近创建的上下文。
@@ -2884,13 +2970,20 @@ async fn execute_command(
                                 Ok(())
                             });
                             emit_contexts_changed(app, state, None);
+                            CommandOutcome::default()
                         }
-                        Err(error) => emit(app, "context-error", error),
+                        Err(error) => {
+                            emit(app, "context-error", error.clone());
+                            CommandOutcome::failed(error)
+                        }
                     }
                 }
-                None => emit(app, "context-error", "没有缓存的游戏数据".to_string()),
+                None => {
+                    let error = "没有缓存的游戏数据".to_string();
+                    emit(app, "context-error", error.clone());
+                    CommandOutcome::failed(error)
+                }
             }
-            None
         }
         RuntimeCommand::Cleanup {
             project,
@@ -2899,15 +2992,15 @@ async fn execute_command(
         } => {
             let (project, factory, action) = (*project, *factory, *action);
             if let Err(error) = ensure_context_for_project_offlock(state, project).await {
-                emit(app, "solve-error", error);
-                return None;
+                emit(app, "solve-error", error.clone());
+                return CommandOutcome::failed(error);
             }
             // 1) 锁外求解（清理规则基于求解结果）。
             let solved = match solve_factory_offlock(app, state, project, factory).await {
                 Ok(result) => result,
                 Err(error) => {
-                    emit(app, "solve-error", error);
-                    return None;
+                    emit(app, "solve-error", error.clone());
+                    return CommandOutcome::failed(error);
                 }
             };
             // 2) 锁内按用量回写（走 reducer 收尾：revision/dirty/Persist/Recompute）。
@@ -2925,25 +3018,23 @@ async fn execute_command(
             }) {
                 Ok(commands) => commands,
                 Err(error) => {
-                    emit(app, "solve-error", error);
-                    return None;
+                    emit(app, "solve-error", error.clone());
+                    return CommandOutcome::failed(error);
                 }
             };
             // 3) 执行回写产生的命令（落盘 + 重解）。
-            let mut effect = None;
+            let mut outcome = CommandOutcome::default();
             for command in &commands {
-                if let Some(next) = Box::pin(execute_command(app, state, command)).await {
-                    effect = Some(next);
-                }
+                outcome.absorb(Box::pin(execute_command(app, state, command)).await);
             }
-            effect
+            outcome
         }
         RuntimeCommand::AutoPlan { project, factory } => {
             // 自动规划：枚举候选 → LP → 回写被选中的机制 → 重解。
             let (project, factory) = (*project, *factory);
             if let Err(error) = ensure_context_for_project_offlock(state, project).await {
-                emit(app, "solve-error", error);
-                return None;
+                emit(app, "solve-error", error.clone());
+                return CommandOutcome::failed(error);
             }
             // 1) 锁外枚举 + 求解（真实 dump 上可能数十秒，绝不持锁）。
             let snapshot_app = app.clone();
@@ -2982,8 +3073,8 @@ async fn execute_command(
             let (snapshot, mechanics) = match planned {
                 Ok(planned) => planned,
                 Err(error) => {
-                    emit(app, "solve-error", error);
-                    return None;
+                    emit(app, "solve-error", error.clone());
+                    return CommandOutcome::failed(error);
                 }
             };
             // 2) 锁内回写：文档必须与快照一致，否则会覆盖用户在规划期间的编辑。
@@ -2999,18 +3090,16 @@ async fn execute_command(
             }) {
                 Ok(commands) => commands,
                 Err(error) => {
-                    emit(app, "solve-error", error);
-                    return None;
+                    emit(app, "solve-error", error.clone());
+                    return CommandOutcome::failed(error);
                 }
             };
             // 3) 执行回写产生的命令（落盘 + 重解），并让 GUI 重新拉取文档。
-            let mut effect = None;
+            let mut outcome = CommandOutcome::default();
             for command in &commands {
-                if let Some(next) = Box::pin(execute_command(app, state, command)).await {
-                    effect = Some(next);
-                }
+                outcome.absorb(Box::pin(execute_command(app, state, command)).await);
             }
-            effect
+            outcome
         }
         RuntimeCommand::LoadProject { path } => {
             // 读盘 + JSON 解析在锁外；迁移/导入在短锁内。
@@ -3021,30 +3110,33 @@ async fn execute_command(
             })
             .await
             .map_err(|error| error.to_string());
-            match parsed {
-                Ok(Ok(value)) => {
-                    let outcome = with_runtime(state, |runtime| {
-                        runtime
-                            .import_document_value(value)
-                            .map_err(|error| error.to_string())?;
-                        Ok(runtime.state.document.clone())
-                    });
-                    match outcome {
-                        Ok(document) => {
-                            if let Ok(mut paths) = state.project_paths.lock() {
-                                for project in &document.projects {
-                                    paths.entry(project.id).or_insert_with(|| path.clone());
-                                }
-                            }
-                            emit(app, "document-changed", ());
-                        }
-                        Err(error) => emit(app, "solve-error", error),
-                    }
+            let value = match parsed {
+                Ok(Ok(value)) => value,
+                Ok(Err(error)) | Err(error) => {
+                    emit(app, "solve-error", error.clone());
+                    return CommandOutcome::failed(error);
                 }
-                Ok(Err(error)) => emit(app, "solve-error", error),
-                Err(error) => emit(app, "solve-error", error),
+            };
+            match with_runtime(state, |runtime| {
+                runtime
+                    .import_document_value(value)
+                    .map_err(|error| error.to_string())?;
+                Ok(runtime.state.document.clone())
+            }) {
+                Ok(document) => {
+                    if let Ok(mut paths) = state.project_paths.lock() {
+                        for project in &document.projects {
+                            paths.entry(project.id).or_insert_with(|| path.clone());
+                        }
+                    }
+                    emit(app, "document-changed", ());
+                    CommandOutcome::default()
+                }
+                Err(error) => {
+                    emit(app, "solve-error", error.clone());
+                    CommandOutcome::failed(error)
+                }
             }
-            None
         }
         RuntimeCommand::CloseProject { project } => {
             let project = *project;
@@ -3060,43 +3152,40 @@ async fn execute_command(
             }
             match outcome {
                 Ok(commands) => {
+                    let mut outcome = CommandOutcome::default();
                     for command in &commands {
-                        Box::pin(execute_command(app, state, command)).await;
+                        outcome.absorb(Box::pin(execute_command(app, state, command)).await);
                     }
+                    outcome
                 }
-                Err(error) => eprintln!("close project failed: {error}"),
+                Err(error) => {
+                    eprintln!("close project failed: {error}");
+                    CommandOutcome::failed(format!("关闭项目 {} 失败: {error}", project.0))
+                }
             }
-            None
         }
         // 以下命令目前只有消息侧定义、没有实现（GUI 分别走 `suggest` /
         // `best_modules` / `implicit_sources` 等独立 Tauri 命令，更新走
         // tauri-plugin-updater 的 JS 插件）。保留显式分支而不是 `_ =>`，
-        // 这样新增 RuntimeCommand 变体会在编译期暴露，而不是静默不执行。
+        // 这样新增 RuntimeCommand 变体会在编译期暴露；调用方也应收到明确的
+        // 「未实现」而不是静默成功。
         RuntimeCommand::RequestSuggestions { .. } => {
-            eprintln!("RuntimeCommand::RequestSuggestions 未实现（GUI 走 suggest 命令）");
-            None
+            CommandOutcome::failed("request-suggestions 未实现（GUI 走 suggest 命令）")
         }
         RuntimeCommand::UseBestModules { .. } => {
-            eprintln!("RuntimeCommand::UseBestModules 未实现（GUI 走 best_modules 命令）");
-            None
+            CommandOutcome::failed("use-best-modules 未实现（GUI 走 best_modules 命令）")
         }
         RuntimeCommand::ReplaceExternalInputs { .. } => {
-            eprintln!(
-                "RuntimeCommand::ReplaceExternalInputs 未实现（GUI 走 implicit_sources 命令）"
-            );
-            None
+            CommandOutcome::failed("replace-external-inputs 未实现（GUI 走 implicit_sources 命令）")
         }
         RuntimeCommand::CheckForUpdate => {
-            eprintln!("RuntimeCommand::CheckForUpdate 未实现（前端走 updater 插件）");
-            None
+            CommandOutcome::failed("check-for-update 未实现（前端走 updater 插件）")
         }
         RuntimeCommand::InstallUpdate => {
-            eprintln!("RuntimeCommand::InstallUpdate 未实现（前端走 updater 插件）");
-            None
+            CommandOutcome::failed("install-update 未实现（前端走 updater 插件）")
         }
         RuntimeCommand::RestartAfterUpdate => {
-            eprintln!("RuntimeCommand::RestartAfterUpdate 未实现（前端走 updater 插件）");
-            None
+            CommandOutcome::failed("restart-after-update 未实现（前端走 updater 插件）")
         }
     }
 }
@@ -3202,6 +3291,45 @@ mod tests {
     use metatorio_runtime::SolveStatus;
 
     use super::*;
+
+    /// 命令汇总契约：求解产出取第一个、错误全部收集、命令按序序列化。
+    /// 这是「求解失败必须让 agent 看见」的实现基础。
+    #[tokio::test]
+    async fn run_commands_collects_errors_and_solve() {
+        use metatorio_runtime::message::RuntimeCommand;
+        let commands = vec![
+            RuntimeCommand::CheckForUpdate,
+            RuntimeCommand::Recompute {
+                project: ProjectId(1),
+                factory: FactoryId(2),
+            },
+        ];
+        let (solve, serialized, errors) = run_commands(&commands, |command| {
+            let failed = matches!(command, RuntimeCommand::CheckForUpdate);
+            async move {
+                if failed {
+                    CommandOutcome::failed("boom")
+                } else {
+                    CommandOutcome::done(Some(metatorio_runtime::CommandEffect::Solve(
+                        metatorio_runtime::SolveResult {
+                            project: ProjectId(1),
+                            factory: FactoryId(2),
+                            status: SolveStatus::NotSolved {
+                                no_provider: Vec::new(),
+                                no_consumer: Vec::new(),
+                                description: "test".to_string(),
+                            },
+                        },
+                    )))
+                }
+            }
+        })
+        .await;
+
+        assert!(solve.is_some(), "应保留求解产出");
+        assert_eq!(errors, vec!["boom".to_string()], "错误必须被收集");
+        assert_eq!(serialized.len(), 2, "每条命令都应序列化");
+    }
 
     #[test]
     fn empty_recipe_categories_default_to_crafting() {

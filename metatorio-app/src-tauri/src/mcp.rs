@@ -45,7 +45,7 @@ use rmcp::{
     ErrorData as McpError,
 };
 use schemars::JsonSchema;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 use crate::{execute_command, AppState};
 use metatorio_runtime::message::AppMessage;
@@ -101,58 +101,7 @@ impl MetatorioMcp {
         &self,
         Parameters(params): Parameters<DispatchParams>,
     ) -> Result<CallToolResult, McpError> {
-        let message = params.message;
-        let app = self.app.clone();
-
-        // 1) reducer：短临界区（放进阻塞线程池，避免占用 tokio worker）。
-        let reduce_app = app.clone();
-        let outcome = tauri::async_runtime::spawn_blocking(move || {
-            let state = reduce_app.state::<AppState>();
-            let mut runtime = state
-                .runtime
-                .lock()
-                .map_err(|_| "runtime lock poisoned".to_string())?;
-            runtime.dispatch(message).map_err(|error| error.to_string())
-        })
-        .await
-        .map_err(|error| McpError::internal_error(format!("dispatch join 失败: {error}"), None))?
-        .map_err(|error| McpError::invalid_params(format!("dispatch 执行失败: {error}"), None))?;
-
-        // 2) 副作用：求解在锁外跑（不阻塞 GUI 与其它 MCP 调用）。
-        let mut solve: Option<serde_json::Value> = None;
-        let mut commands: Vec<serde_json::Value> = Vec::new();
-        for command in &outcome.commands {
-            if let Some(effect) = execute_command(&app, &app.state::<AppState>(), command).await {
-                if let metatorio_runtime::CommandEffect::Solve(result) = effect {
-                    solve = serde_json::to_value(&result).ok();
-                }
-            }
-            if let Ok(value) = serde_json::to_value(command) {
-                commands.push(value);
-            }
-        }
-        // Co-op: if the document changed, tell the GUI to re-fetch.
-        // 命令执行本身也可能改文档（如自动规划回写机制），因此用当前 revision
-        // 判定，而不只看 reducer 的 `changed`。
-        let revision = {
-            let state = app.state::<AppState>();
-            state
-                .runtime
-                .lock()
-                .map(|runtime| runtime.state.revision)
-                .unwrap_or(outcome.revision)
-        };
-        if outcome.changed || revision != outcome.revision {
-            let _ = app.emit("document-changed", revision);
-        }
-
-        let payload = serde_json::json!({
-            "revision": revision,
-            "changed": outcome.changed || revision != outcome.revision,
-            "scheduled_commands": commands,
-            "solve": solve,
-        });
-        Ok(CallToolResult::structured(payload))
+        dispatch_message(&self.app, params.message).await
     }
 
     /// Read the current planning state (the shared document snapshot).  This is
@@ -258,6 +207,66 @@ impl MetatorioMcp {
         }
         Ok(CallToolResult::structured(value))
     }
+}
+
+/// `dispatch` 工具的实际逻辑：与具体 Tauri runtime 解耦，便于用 mock app 测试。
+async fn dispatch_message<R: Runtime>(
+    app: &AppHandle<R>,
+    message: AppMessage,
+) -> Result<CallToolResult, McpError> {
+    // 1) reducer：短临界区（放进阻塞线程池，避免占用 tokio worker）。
+    let reduce_app = app.clone();
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        let state = reduce_app.state::<AppState>();
+        let mut runtime = state
+            .runtime
+            .lock()
+            .map_err(|_| "runtime lock poisoned".to_string())?;
+        runtime.dispatch(message).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| McpError::internal_error(format!("dispatch join 失败: {error}"), None))?
+    .map_err(|error| McpError::invalid_params(format!("dispatch 执行失败: {error}"), None))?;
+
+    // 2) 副作用：求解在锁外跑（不阻塞 GUI 与其它 MCP 调用）。
+    let state = app.state::<AppState>();
+    let state_ref = &state;
+    let (solve, commands, errors) = crate::run_commands(&outcome.commands, move |command| {
+        // 闭包返回值不能借用参数，故克隆命令进 async 块。
+        let command = command.clone();
+        async move { execute_command(app, state_ref, &command).await }
+    })
+    .await;
+    let solve = solve.and_then(|result| serde_json::to_value(&result).ok());
+    // Co-op: if the document changed, tell the GUI to re-fetch.
+    // 命令执行本身也可能改文档（如自动规划回写机制），因此用当前 revision
+    // 判定，而不只看 reducer 的 `changed`。
+    let revision = {
+        let state = app.state::<AppState>();
+        state
+            .runtime
+            .lock()
+            .map(|runtime| runtime.state.revision)
+            .unwrap_or(outcome.revision)
+    };
+    if outcome.changed || revision != outcome.revision {
+        let _ = app.emit("document-changed", revision);
+    }
+
+    let payload = serde_json::json!({
+        "revision": revision,
+        "changed": outcome.changed || revision != outcome.revision,
+        "scheduled_commands": commands,
+        "solve": solve,
+        "errors": errors,
+    });
+    // 有失败时把结果标记为错误：agent 必须能区分「命令跑了但失败了」
+    // 与「命令跑了且成功但恰好没有求解产出」。
+    let mut result = CallToolResult::structured(payload);
+    if !errors.is_empty() {
+        result.is_error = Some(true);
+    }
+    Ok(result)
 }
 
 /// `get_planning_state` 的读取层级（锁内只克隆，序列化在锁外）。
