@@ -541,17 +541,34 @@ impl Runtime {
         })
     }
 
-    /// 锁外算出的结果能否安全写回文档：快照依据的文档、可达性代次与上下文
-    /// 都还没变。
+    /// 锁外算出的结果能否安全写回文档。
     ///
-    /// 自动规划/清理会**替换或删改**工厂机制，若期间用户改了同一工厂，直接
-    /// 写回就会覆盖人的编辑，因此回写前必须校验。
+    /// 只校验**本次要写的对象**是否还和快照一致，而不是整份文档的全局
+    /// `revision`——否则「A 工厂规划期间人在 B 工厂改了个名字」也会误报冲突，
+    /// 而并行规划正是这次锁改造的目标。
+    ///
+    /// 校验项：
+    /// - 目标工厂文档（机制 / 目标 / 外部输入 / 工厂设置）没被改过；
+    /// - 项目级设置与规划偏好没被改过（它们参与自动规划的枚举与求解）；
+    /// - 上下文仓库实例与可达性失效代次没变（计划基于它们算出来）。
     pub fn document_matches(&self, snapshot: &SolveSnapshot) -> bool {
-        self.state.revision == snapshot.revision
-            && self.accessibility_epoch.load(Ordering::SeqCst) == snapshot.accessibility_epoch
+        self.accessibility_epoch.load(Ordering::SeqCst) == snapshot.accessibility_epoch
             && self
                 .context_arc(snapshot.project)
                 .map(|store| Arc::ptr_eq(&store, &snapshot.store))
+                .unwrap_or(false)
+            && self
+                .state
+                .project(snapshot.project)
+                .map(|project| {
+                    project.settings == snapshot.project_doc.settings
+                        && project.planning == snapshot.project_doc.planning
+                })
+                .unwrap_or(false)
+            && self
+                .state
+                .factory(snapshot.project, snapshot.factory)
+                .map(|factory| factory == &snapshot.factory_doc)
                 .unwrap_or(false)
     }
 
@@ -2269,6 +2286,84 @@ mod tests {
         assert!(!dir.join("project.json.tmp").exists(), "临时文件应被改名走");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 回写前的冲突检查必须**只盯目标工厂**：并行规划时别的工厂/项目的无关
+    /// 改动不应把自动规划的回写拒掉。
+    #[test]
+    fn document_matches_is_scoped_to_the_planned_factory() {
+        let mut runtime = load_runtime();
+        let project = new_project(&mut runtime);
+        let add_factory = |runtime: &mut Runtime, name: &str| {
+            runtime
+                .dispatch(AppMessage::Project {
+                    project,
+                    action: ProjectAction::AddFactory {
+                        name: name.to_string(),
+                        template: crate::message::FactoryTemplate::Empty,
+                    },
+                })
+                .unwrap();
+            runtime
+                .state
+                .project(project)
+                .unwrap()
+                .factories
+                .last()
+                .unwrap()
+                .id
+        };
+        let planned = add_factory(&mut runtime, "planned");
+        let other = add_factory(&mut runtime, "other");
+
+        let snapshot = runtime.solve_snapshot_inputs(project, planned).unwrap();
+        assert!(runtime.document_matches(&snapshot), "刚取快照时应匹配");
+
+        // 另一个工厂改名：不影响目标工厂 → 仍然匹配（修复点）。
+        runtime
+            .dispatch(AppMessage::Factory {
+                project,
+                factory: other,
+                action: FactoryAction::SetName {
+                    name: "renamed".to_string(),
+                },
+            })
+            .unwrap();
+        assert!(
+            runtime.document_matches(&snapshot),
+            "别的工厂改动不应误报冲突：{:?}",
+            snapshot.revision
+        );
+
+        // 项目规划偏好变化：参与自动规划枚举 → 不匹配。
+        runtime
+            .dispatch(AppMessage::Project {
+                project,
+                action: ProjectAction::Planning(
+                    crate::message::PlanningAction::SetAlternativeCount { count: 9 },
+                ),
+            })
+            .unwrap();
+        assert!(
+            !runtime.document_matches(&snapshot),
+            "规划偏好变化应使快照失效"
+        );
+
+        // 目标工厂自身变化 → 不匹配。
+        let snapshot = runtime.solve_snapshot_inputs(project, planned).unwrap();
+        runtime
+            .dispatch(AppMessage::Factory {
+                project,
+                factory: planned,
+                action: FactoryAction::MechanicList(MechanicListAction::Add {
+                    kind: MechanicKind::Recipe,
+                }),
+            })
+            .unwrap();
+        assert!(
+            !runtime.document_matches(&snapshot),
+            "目标工厂变化应使快照失效"
+        );
     }
 
     #[test]

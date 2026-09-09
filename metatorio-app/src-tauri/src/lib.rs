@@ -3077,10 +3077,14 @@ async fn execute_command<R: TauriRuntime>(
                     return CommandOutcome::failed(error);
                 }
             };
-            // 2) 锁内回写：文档必须与快照一致，否则会覆盖用户在规划期间的编辑。
+            // 2) 锁内回写：目标工厂/项目设置必须与快照一致，否则会覆盖用户在
+            //    规划期间的编辑（其它工厂的改动不影响——见 document_matches）。
             let commands = match with_runtime(state, |runtime| {
                 if !runtime.document_matches(&snapshot) {
-                    return Err("文档在自动规划期间被修改，已放弃本次回写，请重试".to_string());
+                    return Err(
+                        "该工厂或项目设置在自动规划期间被修改，已放弃本次回写，请重试"
+                            .to_string(),
+                    );
                 }
                 runtime
                     .state

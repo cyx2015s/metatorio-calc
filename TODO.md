@@ -9,7 +9,7 @@
 - ~~写入前校验原型名~~ **已修复**：新增 `metatorio-runtime/src/validate.rs`，`Runtime::dispatch` 在进 reducer 前用项目当前上下文校验消息引用的原型名（配方 / 机器 / 资源 / 物品 / 流体 / 科技 / 星球 / 地表 / 品质，含插件与插件塔、燃料、枚举偏好、建议候选）；不存在的名字返回 `InvalidValue`，不再静默写入垃圾。拿不到 store（项目未绑定/未载入上下文）时跳过，不阻塞。
 - ~~求解失败要让 agent 看见~~ **已修复**：`execute_command` 改为返回 `CommandOutcome { effect, errors }`，MCP `dispatch` 回传 `errors: [...]` 并在有失败时置 `is_error = true`（求解 / 自动规划 / 清理 / 落盘 / 打开工程 / 关闭项目 / 上下文载入的失败，以及未实现命令，都不再静默）。
 - 求解结果的可读量：`solve.mechanics[].amount` 是 Ruiz 缩放空间的原始值，可比量是 `amount / scale`（代码注释里有，schema 里没有）；另外 `mechanic: 18446744073709551615` 是展开阶段引入的「转换流」虚拟变量，不是文档里的机制 id，容易被当成悬空引用。
-- 版本冲突检查收窄到工厂：`revision` 是整份文档的全局版本，`Runtime::document_matches` 用它做自动规划回写前的校验，于是「A 工厂规划期间人在 B 工厂改了个名字」也会让回写被拒（报「文档在自动规划期间被修改」）。需要工厂级版本或内容哈希，否则会误伤并行规划——而那正是这次锁改造的目标。
+- ~~版本冲突检查收窄到工厂~~ **已修复**：`Runtime::document_matches` 不再比较整份文档的全局 `revision`，改为比较**目标工厂文档**（机制 / 目标 / 外部输入 / 工厂设置）+ 项目设置与规划偏好 + 上下文实例与可达性代次；别的工厂改名不再误拒自动规划回写。
 - 读取粒度：`get_planning_state` 取单个工厂也要返回整份工厂文档（大项目几十个机制），且 `recompute` 在 project 层被静默忽略。补 `list_projects` / `list_factories` 与字段/机制过滤，非法参数组合显式报错。
 - 单位标注：内部量纲是「每秒」（实测把项目 `time_scale` 改成 minutes 不改变任何求解数值，只影响显示），但工具 schema 未说明，agent 容易按「每分钟」填目标。
 - 幂等/重试：`dispatch` 超时后重试会重复添加 target/mechanic；没有 request id 或幂等键。
