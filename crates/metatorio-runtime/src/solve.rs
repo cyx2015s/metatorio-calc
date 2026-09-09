@@ -122,7 +122,9 @@ pub struct RecipeProductivityView {
 #[derive(Debug, Default)]
 pub struct Runtime {
     pub state: RuntimeState,
-    contexts: HashMap<String, PrototypeStore>,
+    /// 上下文 id → 原型仓库。用 `Arc` 持有，使「取快照去锁外求解」是
+    /// O(1) 的指针拷贝，而不是克隆数百 MB 的 store。
+    contexts: HashMap<String, Arc<PrototypeStore>>,
     active_context: Option<String>,
     /// 项目 → 可达性结果缓存（settings 变化时在 dispatch 里整体失效；
     /// 计算按需进行，避免每次交互重算全图）。
@@ -161,7 +163,7 @@ impl Runtime {
         // 换了 store，之前的依赖图与可达性结果作废。
         self.graph_cache.lock().unwrap().remove(&context_id);
         self.accessibilities.lock().unwrap().clear();
-        self.contexts.insert(context_id, prototype);
+        self.contexts.insert(context_id, Arc::new(prototype));
     }
 
     /// Drop a context's in-memory store (the on-disk cache is untouched).
@@ -195,7 +197,12 @@ impl Runtime {
 
     /// The in-memory store for a context id, if loaded.
     pub fn context_store_by_id(&self, id: &str) -> Option<&PrototypeStore> {
-        self.contexts.get(id)
+        self.contexts.get(id).map(Arc::as_ref)
+    }
+
+    /// [`Self::context_store_by_id`] 的 `Arc` 版本（取快照用，O(1)）。
+    pub fn context_arc_by_id(&self, id: &str) -> Option<Arc<PrototypeStore>> {
+        self.contexts.get(id).cloned()
     }
 
     /// Resolve the prototype store for a project: its pinned context first,
@@ -207,6 +214,21 @@ impl Runtime {
             Some(id) => self
                 .contexts
                 .get(id)
+                .map(Arc::as_ref)
+                .ok_or_else(|| RuntimeError::ContextNotFound(id.clone())),
+            None => Err(RuntimeError::DataNotLoaded),
+        }
+    }
+
+    /// Resolve the prototype store `Arc` for a project (snapshot-friendly).
+    pub fn context_arc(&self, project_id: ProjectId) -> Result<Arc<PrototypeStore>, RuntimeError> {
+        let project = self.state.project(project_id)?;
+        let context_id = project.context_id.as_ref().or(self.active_context.as_ref());
+        match context_id {
+            Some(id) => self
+                .contexts
+                .get(id)
+                .cloned()
                 .ok_or_else(|| RuntimeError::ContextNotFound(id.clone())),
             None => Err(RuntimeError::DataNotLoaded),
         }
@@ -427,7 +449,10 @@ impl Runtime {
         let document: AppDocument = if crate::migrate::is_old_project_format(&value) {
             // 当前激活上下文 → 品质顺序 + 绑定 id + 里程碑节点分类。
             let context_id = self.active_context.clone();
-            let store = context_id.as_deref().and_then(|id| self.contexts.get(id));
+            let store = context_id
+                .as_deref()
+                .and_then(|id| self.contexts.get(id))
+                .map(Arc::as_ref);
             let quality_order = store
                 .map(|s| s.quality_order().to_vec())
                 .unwrap_or_default();
@@ -469,29 +494,65 @@ impl Runtime {
         Ok(())
     }
 
+    /// 取一次求解快照（锁内微秒级）。
+    ///
+    /// 只做「读」：Arc 拷贝 store/依赖图、克隆项目/工厂文档、读可达性缓存。
+    /// 拿到的 [`SolveSnapshot`] 可以脱离 `&mut Runtime` 与 runtime 锁，在任意
+    /// 线程上跑 [`solve_snapshot`]——这是把长求解移出锁的关键。
+    ///
+    /// 冷缓存时快照里 `accessibility` 为 `None`，由 [`SolveSnapshot::resolve_accessibility`]
+    /// 在锁外现算（py 上下文约 2.5s），算完可用 [`Runtime::cache_accessibility`] 回填。
+    pub fn solve_snapshot_inputs(
+        &self,
+        project_id: ProjectId,
+        factory_id: FactoryId,
+    ) -> Result<SolveSnapshot, RuntimeError> {
+        let project_doc = self.state.project(project_id)?.clone();
+        let factory_doc = self.state.factory(project_id, factory_id)?.clone();
+        Ok(SolveSnapshot {
+            project: project_id,
+            factory: factory_id,
+            revision: self.state.revision,
+            store: self.context_arc(project_id)?,
+            graph: self.graph_for_project(project_id)?,
+            accessibility_options: accessibility_options(&project_doc.settings),
+            accessibility: self
+                .accessibilities
+                .lock()
+                .unwrap()
+                .get(&project_id)
+                .cloned(),
+            project_doc,
+            factory_doc,
+        })
+    }
+
+    /// 回填可达性缓存（锁内微秒级）。求解在锁外算出的可达性经此写回，
+    /// 供后续交互复用。
+    pub fn cache_accessibility(&self, project_id: ProjectId, accessibility: Accessibility) {
+        self.accessibilities
+            .lock()
+            .unwrap()
+            .insert(project_id, accessibility);
+    }
+
     /// Solve a factory synchronously.  The outer Tauri layer should call this
     /// from its dedicated worker rather than from the command thread.
     ///
     /// 复用 runtime 缓存的可达性（`project_accessibility`）：求解内部依赖的
     /// 配方/采矿产能自动推算需要可达性，若每次重新 `compute_accessibility`
     /// 在 py 上下文下就要多花 ~2.5s（"创建新工厂都卡"的主因）。
+    ///
+    /// 等价于「取快照 → [`solve_snapshot`]」；锁外路径请直接用后者。
     pub fn solve_factory(
         &mut self,
         project_id: ProjectId,
         factory_id: FactoryId,
     ) -> Result<SolveResult, RuntimeError> {
-        let accessibility = self.project_accessibility(project_id)?;
-        let prototype = self.context_store(project_id)?;
-        let project = self.state.project(project_id)?;
-        let factory = self.state.factory(project_id, factory_id)?;
-        solve_document(
-            prototype,
-            project,
-            factory,
-            project_id,
-            factory_id,
-            &accessibility,
-        )
+        let snapshot = self.solve_snapshot_inputs(project_id, factory_id)?;
+        let accessibility = snapshot.resolve_accessibility();
+        self.cache_accessibility(project_id, accessibility.clone());
+        solve_snapshot_with(&snapshot, &accessibility)
     }
 
     /// 自动规划：完整状态空间枚举候选 → 构建 LP 求解 → 保留被选中的机制并
@@ -501,7 +562,7 @@ impl Runtime {
         project_id: ProjectId,
         factory_id: FactoryId,
     ) -> Result<SolveResult, RuntimeError> {
-        let store = self.context_store(project_id)?.clone();
+        let store = self.context_arc(project_id)?;
         let project_doc = self.state.project(project_id)?.clone();
         let factory_doc = self.state.factory(project_id, factory_id)?.clone();
         let accessibility = self.project_accessibility(project_id)?;
@@ -735,6 +796,69 @@ impl Runtime {
         }
         Ok(())
     }
+}
+
+/// 求解输入快照：把「求解所需的一切」从 `&mut Runtime` 里摘出来，使求解可以
+/// 在**不持有 runtime 锁**的线程上运行。
+///
+/// 所有重字段都是 `Arc`（O(1) 拷贝），文档是浅副本；取快照本身是微秒级。
+/// `revision` 记录快照依据的文档版本，调用方据此丢弃过期结果。
+#[derive(Debug, Clone)]
+pub struct SolveSnapshot {
+    pub project: ProjectId,
+    pub factory: FactoryId,
+    /// 取快照时的文档版本。
+    pub revision: u64,
+    pub store: Arc<PrototypeStore>,
+    pub graph: Arc<metatorio_core::GraphData>,
+    /// 由项目设置派生的可达性选项（无缓存时用它现算可达性）。
+    accessibility_options: AccessibilityOptions,
+    /// 已缓存的可达性结果；`None` 表示需要按 `accessibility_options` 现算。
+    accessibility: Option<Accessibility>,
+    pub project_doc: ProjectDocument,
+    pub factory_doc: FactoryDocument,
+}
+
+impl SolveSnapshot {
+    /// 解析本次求解要用的可达性：有缓存直接用，否则现算。
+    ///
+    /// 纯函数（只读快照），可以在锁外/后台线程跑；py 上下文冷缓存约 2.5s。
+    pub fn resolve_accessibility(&self) -> Accessibility {
+        match &self.accessibility {
+            Some(cached) => cached.clone(),
+            None => metatorio_core::compute_accessibility_with_graph(
+                &self.store,
+                &self.accessibility_options,
+                &self.graph,
+            ),
+        }
+    }
+
+    /// 快照是否带上了已缓存的可达性（用于判断本次是否还要现算）。
+    pub fn has_cached_accessibility(&self) -> bool {
+        self.accessibility.is_some()
+    }
+}
+
+/// 纯函数求解：只依赖快照，不碰 `Runtime`、不持锁。可达性按需现算。
+pub fn solve_snapshot(snapshot: &SolveSnapshot) -> Result<SolveResult, RuntimeError> {
+    let accessibility = snapshot.resolve_accessibility();
+    solve_snapshot_with(snapshot, &accessibility)
+}
+
+/// [`solve_snapshot`] 的显式可达性版本：调用方已算好可达性（并打算回填缓存）时用。
+pub fn solve_snapshot_with(
+    snapshot: &SolveSnapshot,
+    accessibility: &Accessibility,
+) -> Result<SolveResult, RuntimeError> {
+    solve_document(
+        &snapshot.store,
+        &snapshot.project_doc,
+        &snapshot.factory_doc,
+        snapshot.project,
+        snapshot.factory,
+        accessibility,
+    )
 }
 
 /// 该消息是否可能改变项目的可达性（里程碑/无视可达性/绑定上下文/换仓库）。
@@ -1862,6 +1986,100 @@ mod tests {
             matches!(effect, CommandEffect::Solve(_)),
             "recompute 应产出 Solve 效果"
         );
+    }
+
+    /// 求解快照必须与 runtime 解耦：取了快照之后文档怎么改，快照算出来的
+    /// 都是当时的结果。这是「锁外求解 + revision 戳」的前提。
+    #[test]
+    fn solve_snapshot_is_decoupled_from_later_document_edits() {
+        let mut runtime = load_runtime();
+        let project = new_project(&mut runtime);
+        runtime
+            .dispatch(AppMessage::Project {
+                project,
+                action: ProjectAction::AddFactory {
+                    name: "f".to_string(),
+                    template: crate::message::FactoryTemplate::Empty,
+                },
+            })
+            .unwrap();
+        let factory = runtime.state.project(project).unwrap().factories[0].id;
+        runtime
+            .dispatch(AppMessage::Factory {
+                project,
+                factory,
+                action: FactoryAction::MechanicList(MechanicListAction::Add {
+                    kind: MechanicKind::Recipe,
+                }),
+            })
+            .unwrap();
+        let mechanic = runtime.state.factory(project, factory).unwrap().mechanics[0].id;
+        for action in [
+            MechanicAction::Recipe(RecipeMechanicAction::SetRecipe {
+                recipe: IdWithQuality::new("iron-gear-wheel", "normal"),
+            }),
+            MechanicAction::Recipe(RecipeMechanicAction::SetMachine {
+                machine: IdWithQuality::new("assembling-machine-1", "normal"),
+            }),
+        ] {
+            runtime
+                .dispatch(AppMessage::Factory {
+                    project,
+                    factory,
+                    action: FactoryAction::Mechanic { mechanic, action },
+                })
+                .unwrap();
+        }
+        runtime
+            .dispatch(AppMessage::Factory {
+                project,
+                factory,
+                action: FactoryAction::Flow(FlowAction::AddToTarget {
+                    flow: DualVar::Item(IdWithQuality::new("iron-gear-wheel", "normal")),
+                    amount: 1.0,
+                }),
+            })
+            .unwrap();
+
+        // 冷缓存：快照不带可达性，需要现算。
+        let snapshot = runtime.solve_snapshot_inputs(project, factory).unwrap();
+        assert!(!snapshot.has_cached_accessibility());
+        let before = solve_snapshot(&snapshot).unwrap();
+        assert!(
+            matches!(before.status, SolveStatus::Solved { .. }),
+            "非严格供给下应可解：{:?}",
+            before.status
+        );
+
+        // 文档变更：目标量放大 42 倍。旧快照不应受影响。
+        let target = runtime.state.factory(project, factory).unwrap().targets[0].id;
+        runtime
+            .dispatch(AppMessage::Factory {
+                project,
+                factory,
+                action: FactoryAction::Target(crate::message::TargetAction::SetAmount {
+                    target,
+                    amount: 42.0,
+                }),
+            })
+            .unwrap();
+        let after = runtime.solve_factory(project, factory).unwrap();
+        assert_ne!(after, before, "改目标量后求解结果应变化");
+        assert_eq!(
+            solve_snapshot(&snapshot).unwrap(),
+            before,
+            "快照必须与后续文档改动解耦"
+        );
+        assert!(snapshot.revision < runtime.state.revision);
+
+        // 同一版本下，快照路径与 solve_factory 结果一致；可达性已回填缓存。
+        let snapshot = runtime.solve_snapshot_inputs(project, factory).unwrap();
+        assert!(
+            snapshot.has_cached_accessibility(),
+            "solve_factory 应回填可达性缓存"
+        );
+        assert_eq!(snapshot.revision, runtime.state.revision);
+        assert_eq!(solve_snapshot(&snapshot).unwrap(), after);
     }
 
     #[test]
