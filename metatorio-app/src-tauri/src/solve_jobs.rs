@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use metatorio_data::store::PrototypeStore;
-use metatorio_runtime::{FactoryId, ProjectId, SolveResult, SolveSnapshot};
+use metatorio_runtime::{FactoryId, ProjectId, SolveSnapshot};
 use tokio::sync::Mutex;
 
 /// 求解的调度键：一个工厂的求解彼此无关，因此按工厂并行。
@@ -30,24 +30,23 @@ pub type SolveKey = (ProjectId, FactoryId);
 const MAX_ROUNDS: usize = 3;
 
 /// 每键一份的求解槽位。
-#[derive(Default)]
-struct Slot {
+struct Slot<R> {
     /// 上次成功求解的身份与结果。
-    last: Option<Cached>,
+    last: Option<Cached<R>>,
 }
 
 /// 一次成功求解的缓存条目。
 ///
 /// 身份 = 文档版本 + 可达性失效代次 + 原型仓库实例。三者都相同意味着求解
 /// 输入完全相同（求解是纯函数），可以安全复用结果。
-struct Cached {
+struct Cached<R> {
     revision: u64,
     accessibility_epoch: u64,
     store: Arc<PrototypeStore>,
-    result: SolveResult,
+    result: R,
 }
 
-impl Cached {
+impl<R> Cached<R> {
     fn matches(&self, snapshot: &SolveSnapshot) -> bool {
         self.revision == snapshot.revision
             && self.accessibility_epoch == snapshot.accessibility_epoch
@@ -55,46 +54,41 @@ impl Cached {
     }
 }
 
-/// 求解调度器（挂在 `AppState` 上，全进程一份）。
-#[derive(Default)]
-pub struct SolveJobs {
-    slots: Mutex<HashMap<SolveKey, Arc<Mutex<Slot>>>>,
+/// 求解调度器（挂在 `AppState` 上，按用途各一份）。
+///
+/// `R` 是这次「求解」的产出：重算产 [`SolveResult`]，自动规划产
+/// `(快照, 候选机制)`（快照用于回写前的版本校验）。
+pub struct SolveJobs<R> {
+    slots: Mutex<HashMap<SolveKey, Arc<Mutex<Slot<R>>>>>,
 }
 
-impl SolveJobs {
+impl<R> Default for SolveJobs<R> {
+    fn default() -> Self {
+        Self {
+            slots: Mutex::new(HashMap::new()),
+        }
+    }
+}
+
+impl<R: Clone + Send + 'static> SolveJobs<R> {
     /// 取某个工厂的键锁（不同键可并行）。
-    async fn slot(&self, key: SolveKey) -> Arc<Mutex<Slot>> {
+    async fn slot(&self, key: SolveKey) -> Arc<Mutex<Slot<R>>> {
         self.slots
             .lock()
             .await
             .entry(key)
-            .or_insert_with(|| Arc::new(Mutex::new(Slot::default())))
+            .or_insert_with(|| Arc::new(Mutex::new(Slot { last: None })))
             .clone()
-    }
-
-    /// 让某个工厂的缓存失效。
-    ///
-    /// 用于「绕过 reducer 直接改写文档」的路径（如自动规划回写），这类改动
-    /// 不会 bump revision，缓存的身份判断无从察觉。
-    pub async fn invalidate(&self, key: SolveKey) {
-        let slot = self.slot(key).await;
-        let mut slot = slot.lock().await;
-        slot.last = None;
     }
 
     /// 跑一次（或复用一次）求解。
     ///
     /// - `take_snapshot`：在 runtime 锁内取快照（微秒级），每次调用都会重新取。
     /// - `compute`：锁外纯计算，跑在阻塞线程池上；应自行回填可达性缓存。
-    pub async fn run<F, G>(
-        &self,
-        key: SolveKey,
-        take_snapshot: F,
-        compute: G,
-    ) -> Result<SolveResult, String>
+    pub async fn run<F, G>(&self, key: SolveKey, take_snapshot: F, compute: G) -> Result<R, String>
     where
         F: Fn() -> Result<SolveSnapshot, String> + Send + Sync + 'static,
-        G: Fn(&SolveSnapshot) -> Result<SolveResult, String> + Send + Sync + 'static,
+        G: Fn(&SolveSnapshot) -> Result<R, String> + Send + Sync + 'static,
     {
         let slot = self.slot(key).await;
         // 同键串行：等锁期间文档可能已被别人算过，因此快照要在拿到锁之后取。
@@ -149,7 +143,7 @@ mod tests {
     use metatorio_runtime::message::{
         AppMessage, ApplicationAction, FactoryAction, FactoryTemplate, ProjectAction,
     };
-    use metatorio_runtime::{ProjectId, Runtime, SolveStatus};
+    use metatorio_runtime::{ProjectId, Runtime, SolveResult, SolveStatus};
 
     /// 造一个带项目/工厂的最小 runtime（内置示例 dump）。
     fn demo_runtime() -> (StdMutex<Runtime>, ProjectId, FactoryId) {
@@ -292,10 +286,10 @@ mod tests {
     async fn concurrent_requests_for_one_key_run_once() {
         let (runtime, project, factory) = demo_runtime();
         let runtime = Arc::new(runtime);
-        let jobs = Arc::new(SolveJobs::default());
+        let jobs = Arc::new(SolveJobs::<SolveResult>::default());
         let calls = Arc::new(AtomicUsize::new(0));
 
-        let make_task = |jobs: Arc<SolveJobs>, calls: Arc<AtomicUsize>| {
+        let make_task = |jobs: Arc<SolveJobs<SolveResult>>, calls: Arc<AtomicUsize>| {
             let runtime = runtime.clone();
             tokio::spawn(async move {
                 jobs.run(
@@ -338,12 +332,12 @@ mod tests {
             runtime.state.project(project).unwrap().factories[1].id
         };
         let runtime = Arc::new(runtime);
-        let jobs = Arc::new(SolveJobs::default());
+        let jobs = Arc::new(SolveJobs::<SolveResult>::default());
         // 记录同时进行的求解数峰值：串行实现下峰值只会是 1。
         let running = Arc::new(AtomicUsize::new(0));
         let peak = Arc::new(AtomicUsize::new(0));
 
-        let make_task = |jobs: Arc<SolveJobs>, factory: FactoryId| {
+        let make_task = |jobs: Arc<SolveJobs<SolveResult>>, factory: FactoryId| {
             let runtime = runtime.clone();
             let running = running.clone();
             let peak = peak.clone();

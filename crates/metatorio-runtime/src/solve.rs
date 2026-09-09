@@ -3,7 +3,7 @@ use std::sync::Mutex;
 use std::{collections::HashMap, fs::File, path::Path, sync::Arc};
 
 use metatorio_core::{
-    Accessibility, AccessibilityOptions, Accessible, Context, DualVar, Flow, GameState,
+    Accessibility, AccessibilityOptions, Accessible, Context, DualVar, Flow, GameState, Mechanic,
 };
 use metatorio_data::store::{PrototypeGroup, PrototypeStore};
 use metatorio_data::{FluidComponent, LabComponent, PrototypeBaseComponent};
@@ -15,10 +15,7 @@ use crate::document::{
     ProjectSettings,
 };
 use crate::id::{FactoryId, MechanicId, ProjectId};
-use crate::message::{
-    AppMessage, ApplicationAction, CleanupAction, FactoryAction, MechanicListAction, ProjectAction,
-    RuntimeCommand,
-};
+use crate::message::{AppMessage, ApplicationAction, CleanupAction, ProjectAction, RuntimeCommand};
 use crate::state::{DispatchResult, RuntimeError, RuntimeState};
 
 /// The solver variable identity used by the application adapter.
@@ -567,6 +564,20 @@ impl Runtime {
         true
     }
 
+    /// 锁外算出的结果能否安全写回文档：快照依据的文档、可达性代次与上下文
+    /// 都还没变。
+    ///
+    /// 自动规划/清理会**替换或删改**工厂机制，若期间用户改了同一工厂，直接
+    /// 写回就会覆盖人的编辑，因此回写前必须校验。
+    pub fn document_matches(&self, snapshot: &SolveSnapshot) -> bool {
+        self.state.revision == snapshot.revision
+            && self.accessibility_epoch.load(Ordering::SeqCst) == snapshot.accessibility_epoch
+            && self
+                .context_arc(snapshot.project)
+                .map(|store| Arc::ptr_eq(&store, &snapshot.store))
+                .unwrap_or(false)
+    }
+
     /// Solve a factory synchronously.  The outer Tauri layer should call this
     /// from its dedicated worker rather than from the command thread.
     ///
@@ -586,147 +597,21 @@ impl Runtime {
         solve_snapshot_with(&snapshot, &accessibility)
     }
 
-    /// 自动规划：完整状态空间枚举候选 → 构建 LP 求解 → 保留被选中的机制并
-    /// 替换工厂机制，最后重求解。返回最终 SolveResult。
+    /// 自动规划（同步便捷入口）：计算候选 → 回写文档 → 重解。
+    ///
+    /// 计算部分（可能数十秒）见 [`plan_auto_plan`]；需要锁外执行时请自行
+    /// 「取快照 → 锁外 [`plan_auto_plan`] → 锁内 [`RuntimeState::replace_factory_mechanics`]」。
     pub fn auto_plan(
         &mut self,
         project_id: ProjectId,
         factory_id: FactoryId,
     ) -> Result<SolveResult, RuntimeError> {
-        let store = self.context_arc(project_id)?;
-        let project_doc = self.state.project(project_id)?.clone();
-        let factory_doc = self.state.factory(project_id, factory_id)?.clone();
-        let accessibility = self.project_accessibility(project_id)?;
-        let game = make_game_state_with_accessibility(&store, &project_doc, &accessibility);
-        let context = metatorio_core::Context::new(&store, &game);
-        let quality_level = |name: &str| game.qualities.iter().position(|c| c == name).unwrap_or(0);
-        let options = crate::auto_plan::EnumerateOptions {
-            alternative_count: project_doc.planning.alternative_count,
-            machine_preferences: project_doc.planning.machine_preferences.clone(),
-            enumerate_modules: project_doc.planning.enumerate_modules.clone(),
-            enumerate_beacons: project_doc.planning.enumerate_beacons.clone(),
-            quality_limit: game.max_quality,
-            major_quality: quality_level(&factory_doc.settings.major_quality),
-            planet: factory_doc.settings.planet.clone(),
-            surface: factory_doc.settings.surface.clone(),
-            accessibility: Some(accessibility.clone()),
-        };
-        let candidates = crate::auto_plan::enumerate_all(&store, &context, &options);
-        let (candidates, dropped): (Vec<_>, Vec<_>) = candidates
-            .into_iter()
-            .partition(|m| crate::auto_plan::mechanic_accessible(&store, &accessibility, m));
-        if candidates.is_empty() {
-            return Err(RuntimeError::InvalidValue(if dropped.is_empty() {
-                "没有可枚举的机制候选".to_string()
-            } else {
-                format!(
-                    "所有 {} 个候选机制都不可达（目标依赖的科技未解锁？可用\"无视可达性\"开关或显式标记可达）",
-                    dropped.len()
-                )
-            }));
-        }
-
-        // 展开全部候选为一个 LP。
-        let expansion = metatorio_core::expand::expand(
-            candidates
-                .iter()
-                .enumerate()
-                .map(|(index, mechanic)| (index as u64, mechanic)),
-            &context,
-        );
-        let mut variant_counts: HashMap<MechanicId, u16> = HashMap::new();
-        let mut flows = AIndexMap::default();
-        for variable in expansion.variables {
-            let config = MechanicId(variable.prim_var.inner);
-            let variant = variant_counts.entry(config).or_default();
-            let flow_id = ExpandedVarId {
-                mechanic: config,
-                variant: *variant,
-            };
-            *variant = variant.saturating_add(1);
-            flows.insert(flow_id, (variable.flow, variable.cost));
-        }
-        let target = factory_doc
-            .targets
-            .iter()
-            .fold(AIndexMap::default(), |mut target, item| {
-                *target.entry(item.flow.clone()).or_insert(0.0) += item.amount;
-                target
-            });
-        let sources: Flow = factory_doc
-            .external_inputs
-            .iter()
-            .map(|input| (input.flow.clone(), input.penalty))
-            .collect();
-        let mut all_sources = sources.clone();
-        if let Some(planet) = factory_doc.settings.planet.as_deref() {
-            let mut implicit = crate::planet::planet_autoplaced_flows(&store, planet);
-            for key in all_sources.keys() {
-                implicit.shift_remove(key);
-            }
-            all_sources.extend(implicit);
-        }
-        add_conversion_flows(&mut flows, &store, &target, &all_sources);
-        let mut problem = SolverData::new_simple(target, flows);
-        problem.sources = all_sources;
-        // 自动规划默认严格供给。
-        problem.strict_source = true;
-        problem.strict_sink = factory_doc.strict_sink;
-        problem
-            .target
-            .extend(factory_doc.target_expressions.iter().map(|expression| {
-                TargetSpec {
-                    constant: expression.constant,
-                    coefficients: expression
-                        .terms
-                        .iter()
-                        .map(|term| (term.flow.clone(), term.coefficient))
-                        .collect(),
-                }
-            }));
-
-        let solution = problem.solve();
-        let SolverSolution::Solved {
-            prim, prim_scale, ..
-        } = solution
-        else {
-            let SolverSolution::NotSolved { no_provider, .. } = solution else {
-                return Err(RuntimeError::InvalidValue("自动规划求解失败".to_string()));
-            };
-            return Err(RuntimeError::InvalidValue(format!(
-                "自动规划无解（目标不可达）：无供给 {no_provider:?}"
-            )));
-        };
-        // 保留被选中的候选（用量 > 阈值），直接替换工厂机制。
-        let mut used = crate::auto_plan::used_candidates(&candidates, prim, prim_scale);
-        used.sort_by_key(|mechanic| crate::document::MechanicKind::of(mechanic) as u8);
-        let ids: Vec<MechanicId> = (0..used.len()).map(|_| self.state.allocate_id()).collect();
-        {
-            let document = &mut self.state.document;
-            let factory_doc = document
-                .projects
-                .iter_mut()
-                .find(|candidate| candidate.id == project_id)
-                .and_then(|candidate| {
-                    candidate
-                        .factories
-                        .iter_mut()
-                        .find(|factory_doc| factory_doc.id == factory_id)
-                })
-                .ok_or(RuntimeError::FactoryNotFound {
-                    project: project_id,
-                    factory: factory_id,
-                })?;
-            factory_doc.mechanics = used
-                .into_iter()
-                .zip(ids)
-                .map(|(mechanic, id)| crate::document::MechanicEntry {
-                    id,
-                    enabled: true,
-                    mechanic,
-                })
-                .collect();
-        }
+        let snapshot = self.solve_snapshot_inputs(project_id, factory_id)?;
+        let accessibility = snapshot.resolve_accessibility();
+        self.cache_accessibility(project_id, accessibility.clone());
+        let mechanics = plan_auto_plan(&snapshot, &accessibility)?;
+        self.state
+            .replace_factory_mechanics(project_id, factory_id, mechanics)?;
         self.solve_factory(project_id, factory_id)
     }
 
@@ -760,6 +645,9 @@ impl Runtime {
     /// - RemoveUnused：用量低于阈值（1e-9）的机制移除；
     /// - RemoveUnsolvable：未出现在求解变量中的机制移除；
     /// - SortBySolutionRate：按总流量从大到小重排机制。
+    ///
+    /// 求解部分（可能很慢）可先用 [`solve_factory`](Self::solve_factory) 或锁外
+    /// 路径算好，再调 [`RuntimeState::apply_cleanup`] 只做回写。
     fn cleanup_factory(
         &mut self,
         project: ProjectId,
@@ -767,64 +655,8 @@ impl Runtime {
         action: CleanupAction,
     ) -> Result<(), RuntimeError> {
         let result = self.solve_factory(project, factory)?;
-        let SolveStatus::Solved { mechanics, .. } = &result.status else {
-            return Ok(());
-        };
-        // 每机制总用量（多温度变体求和）。判断"接近 0"用内部缩放值
-        // amount/scale（剔除逐变量缩放差异），避免单次产出大的配方因
-        // 表观量小被误判为未使用。
-        let mut used: HashMap<MechanicId, f64> = HashMap::new();
-        for solution in mechanics {
-            let scaled = solution.amount.max(0.0) / solution.scale.max(1e-12);
-            *used.entry(solution.mechanic).or_default() += scaled;
-        }
-        let entries: Vec<MechanicId> = self
-            .state
-            .factory(project, factory)?
-            .mechanics
-            .iter()
-            .map(|entry| entry.id)
-            .collect();
-
-        match action {
-            CleanupAction::RemoveUnused | CleanupAction::RemoveUnsolvable => {
-                for id in entries {
-                    let keep = match action {
-                        CleanupAction::RemoveUnused => {
-                            used.get(&id).copied().unwrap_or(0.0) >= 1e-9
-                        }
-                        CleanupAction::RemoveUnsolvable => used.contains_key(&id),
-                        _ => unreachable!(),
-                    };
-                    if !keep {
-                        let _ = self.dispatch(AppMessage::Factory {
-                            project,
-                            factory,
-                            action: FactoryAction::MechanicList(MechanicListAction::Remove {
-                                mechanic: id,
-                            }),
-                        });
-                    }
-                }
-            }
-            CleanupAction::SortBySolutionRate => {
-                let mut sorted: Vec<(MechanicId, f64)> = entries
-                    .into_iter()
-                    .map(|id| (id, used.get(&id).copied().unwrap_or(0.0)))
-                    .collect();
-                sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-                for (position, (id, _)) in sorted.into_iter().enumerate() {
-                    let _ = self.dispatch(AppMessage::Factory {
-                        project,
-                        factory,
-                        action: FactoryAction::MechanicList(MechanicListAction::Reorder {
-                            mechanic: id,
-                            position,
-                        }),
-                    });
-                }
-            }
-        }
+        self.state
+            .apply_cleanup(project, factory, action, &mechanic_usage(&result))?;
         Ok(())
     }
 }
@@ -892,6 +724,140 @@ pub fn solve_snapshot_with(
         snapshot.factory,
         accessibility,
     )
+}
+
+/// 自动规划的**纯计算**部分：完整状态空间枚举候选 → 构建 LP → 返回被选中的
+/// 机制列表（按种类排序），**不修改任何文档**。
+///
+/// 与 [`solve_snapshot`] 一样只依赖快照，因此可以锁外执行（真实 dump 上可能
+/// 需要数十秒）。回写请走 [`RuntimeState::replace_factory_mechanics`]。
+pub fn plan_auto_plan(
+    snapshot: &SolveSnapshot,
+    accessibility: &Accessibility,
+) -> Result<Vec<Mechanic>, RuntimeError> {
+    let store = &snapshot.store;
+    let project_doc = &snapshot.project_doc;
+    let factory_doc = &snapshot.factory_doc;
+    let game = make_game_state_with_accessibility(store, project_doc, accessibility);
+    let context = metatorio_core::Context::new(store, &game);
+    let quality_level = |name: &str| game.qualities.iter().position(|c| c == name).unwrap_or(0);
+    let options = crate::auto_plan::EnumerateOptions {
+        alternative_count: project_doc.planning.alternative_count,
+        machine_preferences: project_doc.planning.machine_preferences.clone(),
+        enumerate_modules: project_doc.planning.enumerate_modules.clone(),
+        enumerate_beacons: project_doc.planning.enumerate_beacons.clone(),
+        quality_limit: game.max_quality,
+        major_quality: quality_level(&factory_doc.settings.major_quality),
+        planet: factory_doc.settings.planet.clone(),
+        surface: factory_doc.settings.surface.clone(),
+        accessibility: Some(accessibility.clone()),
+    };
+    let candidates = crate::auto_plan::enumerate_all(store, &context, &options);
+    let (candidates, dropped): (Vec<_>, Vec<_>) = candidates
+        .into_iter()
+        .partition(|m| crate::auto_plan::mechanic_accessible(store, accessibility, m));
+    if candidates.is_empty() {
+        return Err(RuntimeError::InvalidValue(if dropped.is_empty() {
+            "没有可枚举的机制候选".to_string()
+        } else {
+            format!(
+                "所有 {} 个候选机制都不可达（目标依赖的科技未解锁？可用\"无视可达性\"开关或显式标记可达）",
+                dropped.len()
+            )
+        }));
+    }
+
+    // 展开全部候选为一个 LP。
+    let expansion = metatorio_core::expand::expand(
+        candidates
+            .iter()
+            .enumerate()
+            .map(|(index, mechanic)| (index as u64, mechanic)),
+        &context,
+    );
+    let mut variant_counts: HashMap<MechanicId, u16> = HashMap::new();
+    let mut flows = AIndexMap::default();
+    for variable in expansion.variables {
+        let config = MechanicId(variable.prim_var.inner);
+        let variant = variant_counts.entry(config).or_default();
+        let flow_id = ExpandedVarId {
+            mechanic: config,
+            variant: *variant,
+        };
+        *variant = variant.saturating_add(1);
+        flows.insert(flow_id, (variable.flow, variable.cost));
+    }
+    let target = factory_doc
+        .targets
+        .iter()
+        .fold(AIndexMap::default(), |mut target, item| {
+            *target.entry(item.flow.clone()).or_insert(0.0) += item.amount;
+            target
+        });
+    let sources: Flow = factory_doc
+        .external_inputs
+        .iter()
+        .map(|input| (input.flow.clone(), input.penalty))
+        .collect();
+    let mut all_sources = sources.clone();
+    if let Some(planet) = factory_doc.settings.planet.as_deref() {
+        let mut implicit = crate::planet::planet_autoplaced_flows(store, planet);
+        for key in all_sources.keys() {
+            implicit.shift_remove(key);
+        }
+        all_sources.extend(implicit);
+    }
+    add_conversion_flows(&mut flows, store, &target, &all_sources);
+    let mut problem = SolverData::new_simple(target, flows);
+    problem.sources = all_sources;
+    // 自动规划默认严格供给。
+    problem.strict_source = true;
+    problem.strict_sink = factory_doc.strict_sink;
+    problem
+        .target
+        .extend(factory_doc.target_expressions.iter().map(|expression| {
+            TargetSpec {
+                constant: expression.constant,
+                coefficients: expression
+                    .terms
+                    .iter()
+                    .map(|term| (term.flow.clone(), term.coefficient))
+                    .collect(),
+            }
+        }));
+
+    let solution = problem.solve();
+    let SolverSolution::Solved {
+        prim, prim_scale, ..
+    } = solution
+    else {
+        let SolverSolution::NotSolved { no_provider, .. } = solution else {
+            return Err(RuntimeError::InvalidValue("自动规划求解失败".to_string()));
+        };
+        return Err(RuntimeError::InvalidValue(format!(
+            "自动规划无解（目标不可达）：无供给 {no_provider:?}"
+        )));
+    };
+    // 保留被选中的候选（用量 > 阈值）。
+    let mut used = crate::auto_plan::used_candidates(&candidates, prim, prim_scale);
+    used.sort_by_key(|mechanic| crate::document::MechanicKind::of(mechanic) as u8);
+    Ok(used)
+}
+
+/// 一次求解结果里每机制的总用量（多温度变体求和）。
+///
+/// 判断「接近 0」用内部缩放值 `amount / scale`（剔除逐变量缩放差异），避免
+/// 单次产出大的配方因表观量小被误判为未使用。清理（Cleanup）据此增删机制。
+pub fn mechanic_usage(result: &SolveResult) -> HashMap<MechanicId, f64> {
+    let SolveStatus::Solved { mechanics, .. } = &result.status else {
+        return HashMap::new();
+    };
+    let mut used: HashMap<MechanicId, f64> = HashMap::new();
+    for solution in mechanics {
+        let scaled = solution.amount.max(0.0) / solution.scale.max(1e-12);
+        *used.entry(solution.mechanic).or_default() += scaled;
+    }
+    used
 }
 
 /// 该消息是否可能改变项目的可达性（里程碑/无视可达性/绑定上下文/换仓库）。

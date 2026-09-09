@@ -26,9 +26,9 @@ use crate::id::{
     ExternalInputId, FactoryId, MechanicId, ProjectId, TargetExpressionId, TargetId, TargetTermId,
 };
 use crate::message::{
-    AppMessage, ApplicationAction, BoilerMechanicAction, CloseDecision, DeleteDecision,
-    ExternalInputAction, FactoryAction, FactoryContextAction, FactoryTemplate, FlowAction,
-    FluidFuelMechanicAction, FluidHeatMechanicAction, GeneratorMechanicAction,
+    AppMessage, ApplicationAction, BoilerMechanicAction, CleanupAction, CloseDecision,
+    DeleteDecision, ExternalInputAction, FactoryAction, FactoryContextAction, FactoryTemplate,
+    FlowAction, FluidFuelMechanicAction, FluidHeatMechanicAction, GeneratorMechanicAction,
     ItemFuelMechanicAction, ItemLaunchMechanicAction, MechanicAction, MechanicListAction,
     MiningMechanicAction, ModuleAction, PlanningAction, PlantMechanicAction, ProjectAction,
     ReactorMechanicAction, RecipeMechanicAction, RuntimeCommand, SolarMechanicAction, SolveAction,
@@ -103,6 +103,67 @@ impl RuntimeState {
             .iter()
             .find(|candidate| candidate.id == factory)
             .ok_or(RuntimeError::FactoryNotFound { project, factory })
+    }
+
+    /// 用给定机制整体替换工厂的机制列表（自动规划回写用）。
+    ///
+    /// 走与 reducer 相同的收尾流程：bump revision、标记 dirty、产生
+    /// `Persist` / `EnsureQualityLimit` / `Recompute` 命令——**不要**绕过它直接
+    /// 改写 `factory.mechanics`，否则文档不会落盘、GUI 也收不到变更广播。
+    pub fn replace_factory_mechanics(
+        &mut self,
+        project: ProjectId,
+        factory: FactoryId,
+        mechanics: Vec<Mechanic>,
+    ) -> Result<DispatchResult, RuntimeError> {
+        let entries: Vec<MechanicEntry> = mechanics
+            .into_iter()
+            .map(|mechanic| {
+                let id = self.allocate_id();
+                MechanicEntry {
+                    id,
+                    enabled: true,
+                    mechanic,
+                }
+            })
+            .collect();
+        self.factory_mut(project, factory)?.mechanics = entries;
+        self.finish(Outcome::solve_factory(project, factory))
+    }
+
+    /// 求解后清理回写：按每机制用量删减/重排机制（同样走 reducer 收尾）。
+    ///
+    /// - `RemoveUnused`：用量低于阈值（1e-9）的机制移除；
+    /// - `RemoveUnsolvable`：未出现在求解结果里的机制移除；
+    /// - `SortBySolutionRate`：按用量从大到小重排。
+    pub fn apply_cleanup(
+        &mut self,
+        project: ProjectId,
+        factory: FactoryId,
+        action: CleanupAction,
+        used: &HashMap<MechanicId, f64>,
+    ) -> Result<DispatchResult, RuntimeError> {
+        let factory_doc = self.factory_mut(project, factory)?;
+        match action {
+            CleanupAction::RemoveUnused | CleanupAction::RemoveUnsolvable => {
+                factory_doc.mechanics.retain(|entry| match action {
+                    CleanupAction::RemoveUnused => {
+                        used.get(&entry.id).copied().unwrap_or(0.0) >= 1e-9
+                    }
+                    CleanupAction::RemoveUnsolvable => used.contains_key(&entry.id),
+                    _ => unreachable!(),
+                });
+            }
+            CleanupAction::SortBySolutionRate => {
+                factory_doc.mechanics.sort_by(|a, b| {
+                    let rate = |entry: &MechanicEntry| used.get(&entry.id).copied().unwrap_or(0.0);
+                    rate(b)
+                        .partial_cmp(&rate(a))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+            }
+        }
+        self.finish(Outcome::solve_factory(project, factory))
     }
 
     /// 收尾：按 [`Outcome`] 的分类追加副作用命令。
@@ -2240,6 +2301,105 @@ mod tests {
             "改目标量必须重解：{:?}",
             outcome.commands
         );
+    }
+
+    /// 自动规划/清理的回写必须走与 reducer 相同的收尾流程：bump revision、
+    /// 标记 dirty、产生 Persist/Recompute 命令。否则机制被换掉了却不落盘、
+    /// GUI 也收不到变更广播。
+    #[test]
+    fn mechanic_writeback_goes_through_reducer_bookkeeping() {
+        let (mut state, project, factory) = state_with_factory();
+        let recipe = MechanicKind::Recipe
+            .default_mechanic()
+            .expect("recipe 机制可用");
+        let before = state.revision;
+
+        let outcome = state
+            .replace_factory_mechanics(project, factory, vec![recipe.clone(), recipe])
+            .unwrap();
+        assert!(outcome.changed, "回写应标记文档已变更");
+        assert_eq!(state.revision, before + 1, "回写应 bump revision");
+        assert!(state.dirty_projects.contains(&project), "回写应标记 dirty");
+        assert!(outcome.commands.contains(&RuntimeCommand::Persist {
+            project,
+            path: None,
+        }));
+        assert!(
+            outcome
+                .commands
+                .contains(&RuntimeCommand::Recompute { project, factory })
+        );
+        let mechanics = &state.factory(project, factory).unwrap().mechanics;
+        assert_eq!(mechanics.len(), 2);
+        assert_ne!(
+            mechanics[0].id, mechanics[1].id,
+            "回写的机制应各自分配新 id"
+        );
+    }
+
+    /// 清理回写：按用量删减/重排，同样走 reducer 收尾。
+    #[test]
+    fn cleanup_writeback_removes_and_reorders_by_usage() {
+        let (mut state, project, factory) = state_with_factory();
+        for _ in 0..3 {
+            state
+                .dispatch(AppMessage::Factory {
+                    project,
+                    factory,
+                    action: FactoryAction::MechanicList(MechanicListAction::Add {
+                        kind: MechanicKind::Recipe,
+                    }),
+                })
+                .unwrap();
+        }
+        let ids: Vec<MechanicId> = state
+            .factory(project, factory)
+            .unwrap()
+            .mechanics
+            .iter()
+            .map(|entry| entry.id)
+            .collect();
+
+        // 只有第 2、3 个机制有用；期望按用量降序重排成 [3, 2]。
+        let mut used = HashMap::new();
+        used.insert(ids[2], 10.0);
+        used.insert(ids[1], 1.0);
+
+        let before = state.revision;
+        let outcome = state
+            .apply_cleanup(project, factory, CleanupAction::RemoveUnused, &used)
+            .unwrap();
+        assert_eq!(state.revision, before + 1);
+        let remaining: Vec<MechanicId> = state
+            .factory(project, factory)
+            .unwrap()
+            .mechanics
+            .iter()
+            .map(|entry| entry.id)
+            .collect();
+        assert_eq!(remaining, vec![ids[1], ids[2]], "应删掉未使用的机制");
+        assert!(outcome.commands.contains(&RuntimeCommand::Persist {
+            project,
+            path: None,
+        }));
+        assert!(
+            outcome
+                .commands
+                .contains(&RuntimeCommand::Recompute { project, factory })
+        );
+
+        let outcome = state
+            .apply_cleanup(project, factory, CleanupAction::SortBySolutionRate, &used)
+            .unwrap();
+        assert!(outcome.changed);
+        let reordered: Vec<MechanicId> = state
+            .factory(project, factory)
+            .unwrap()
+            .mechanics
+            .iter()
+            .map(|entry| entry.id)
+            .collect();
+        assert_eq!(reordered, vec![ids[2], ids[1]], "应按用量降序重排");
     }
 
     #[test]

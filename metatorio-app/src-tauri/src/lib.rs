@@ -64,7 +64,12 @@ const DEMO_DUMP: &str = include_str!("../dumps/demo_dump.json");
 pub struct AppState {
     runtime: Mutex<Runtime>,
     /// 求解调度器：长求解在锁外跑，按 (project, factory) 单飞 + latest-wins。
-    solve_jobs: solve_jobs::SolveJobs,
+    solve_jobs: solve_jobs::SolveJobs<metatorio_runtime::SolveResult>,
+    /// 自动规划调度器：产出 `(快照, 候选机制)`，回写前用快照校验版本。
+    autoplan_jobs: solve_jobs::SolveJobs<(
+        metatorio_runtime::SolveSnapshot,
+        Vec<metatorio_core::Mechanic>,
+    )>,
     contexts: Mutex<ContextRegistry>,
     project_paths: Mutex<HashMap<ProjectId, String>>,
     /// 上下文 id → 本地化名映射（来自游戏 `--dump-prototype-locale` 的
@@ -77,6 +82,7 @@ impl Default for AppState {
         Self {
             runtime: Mutex::new(Runtime::new()),
             solve_jobs: solve_jobs::SolveJobs::default(),
+            autoplan_jobs: solve_jobs::SolveJobs::default(),
             contexts: Mutex::new(ContextRegistry::default()),
             project_paths: Mutex::new(HashMap::new()),
             locales: Mutex::new(HashMap::new()),
@@ -2780,50 +2786,123 @@ async fn execute_command(
             None
         }
         RuntimeCommand::Cleanup {
-            project, factory, ..
+            project,
+            factory,
+            action,
         } => {
-            let (project, factory) = (*project, *factory);
-            let outcome = with_runtime(state, |runtime| {
-                runtime
-                    .run_command(command)
-                    .map_err(|error| error.to_string())
-            });
-            // 清理会直接改写文档（不 bump revision），求解缓存必须失效。
-            state.solve_jobs.invalidate((project, factory)).await;
-            match outcome {
-                Ok(effect @ metatorio_runtime::CommandEffect::Solve(_)) => Some(effect),
-                Ok(_) => None,
+            let (project, factory, action) = (*project, *factory, *action);
+            if let Err(error) = with_runtime(state, |runtime| {
+                ensure_context_for_project(state, runtime, project)
+            }) {
+                emit(app, "solve-error", error);
+                return None;
+            }
+            // 1) 锁外求解（清理规则基于求解结果）。
+            let solved = match solve_factory_offlock(app, state, project, factory).await {
+                Ok(result) => result,
                 Err(error) => {
                     emit(app, "solve-error", error);
-                    None
+                    return None;
+                }
+            };
+            // 2) 锁内按用量回写（走 reducer 收尾：revision/dirty/Persist/Recompute）。
+            let commands = match with_runtime(state, |runtime| {
+                runtime
+                    .state
+                    .apply_cleanup(
+                        project,
+                        factory,
+                        action,
+                        &metatorio_runtime::solve::mechanic_usage(&solved),
+                    )
+                    .map(|outcome| outcome.commands)
+                    .map_err(|error| error.to_string())
+            }) {
+                Ok(commands) => commands,
+                Err(error) => {
+                    emit(app, "solve-error", error);
+                    return None;
+                }
+            };
+            // 3) 执行回写产生的命令（落盘 + 重解）。
+            let mut effect = None;
+            for command in &commands {
+                if let Some(next) = Box::pin(execute_command(app, state, command)).await {
+                    effect = Some(next);
                 }
             }
+            effect
         }
         RuntimeCommand::AutoPlan { project, factory } => {
-            // 自动规划：迭代添加建议机制直至可解。
-            // TODO(C5)：枚举/求解部分同样应移到锁外，这里仍是整段持锁。
+            // 自动规划：枚举候选 → LP → 回写被选中的机制 → 重解。
             let (project, factory) = (*project, *factory);
-            let outcome = with_runtime(state, |runtime| {
-                let _ = ensure_context_for_project(state, runtime, project);
-                runtime
-                    .run_command(command)
-                    .map_err(|error| error.to_string())
-            });
-            // 自动规划会直接替换工厂机制（不 bump revision），求解缓存必须失效。
-            state.solve_jobs.invalidate((project, factory)).await;
-            match outcome {
-                Ok(effect @ metatorio_runtime::CommandEffect::Solve(_)) => {
-                    if let metatorio_runtime::CommandEffect::Solve(result) = &effect {
-                        emit(app, "solve-result", result.clone());
-                    }
-                    Some(effect)
-                }
-                Ok(_) => None,
+            if let Err(error) = with_runtime(state, |runtime| {
+                ensure_context_for_project(state, runtime, project)
+            }) {
+                emit(app, "solve-error", error);
+                return None;
+            }
+            // 1) 锁外枚举 + 求解（真实 dump 上可能数十秒，绝不持锁）。
+            let snapshot_app = app.clone();
+            let compute_app = app.clone();
+            let planned = state
+                .autoplan_jobs
+                .run(
+                    (project, factory),
+                    move || {
+                        let state = snapshot_app.state::<AppState>();
+                        let runtime = state
+                            .runtime
+                            .lock()
+                            .map_err(|_| "runtime lock poisoned".to_string())?;
+                        runtime
+                            .solve_snapshot_inputs(project, factory)
+                            .map_err(|error| error.to_string())
+                    },
+                    move |snapshot| {
+                        let accessibility = snapshot.resolve_accessibility();
+                        let mechanics =
+                            metatorio_runtime::solve::plan_auto_plan(snapshot, &accessibility)
+                                .map_err(|error| error.to_string())?;
+                        if let Ok(runtime) = compute_app.state::<AppState>().runtime.lock() {
+                            runtime.cache_accessibility_if_current(snapshot, accessibility);
+                        }
+                        Ok((snapshot.clone(), mechanics))
+                    },
+                )
+                .await;
+            let (snapshot, mechanics) = match planned {
+                Ok(planned) => planned,
                 Err(error) => {
                     emit(app, "solve-error", error);
-                    None
+                    return None;
+                }
+            };
+            // 2) 锁内回写：文档必须与快照一致，否则会覆盖用户在规划期间的编辑。
+            let commands = match with_runtime(state, |runtime| {
+                if !runtime.document_matches(&snapshot) {
+                    return Err("文档在自动规划期间被修改，已放弃本次回写，请重试".to_string());
+                }
+                runtime
+                    .state
+                    .replace_factory_mechanics(project, factory, mechanics)
+                    .map(|outcome| outcome.commands)
+                    .map_err(|error| error.to_string())
+            }) {
+                Ok(commands) => commands,
+                Err(error) => {
+                    emit(app, "solve-error", error);
+                    return None;
+                }
+            };
+            // 3) 执行回写产生的命令（落盘 + 重解），并让 GUI 重新拉取文档。
+            let mut effect = None;
+            for command in &commands {
+                if let Some(next) = Box::pin(execute_command(app, state, command)).await {
+                    effect = Some(next);
                 }
             }
+            effect
         }
         other => {
             eprintln!("unhandled runtime command: {other:?}");
