@@ -16,7 +16,7 @@ fn set_fuel_temperature(fuel: &mut Option<Fuel>, temperature: Option<i32>) -> bo
     *t = temperature;
     true
 }
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::document::{
     AppDocument, AutoBeaconPlan, ExternalInput, FactoryDocument, FlowTarget, MechanicEntry,
@@ -127,8 +127,11 @@ impl RuntimeState {
                 }
             })
             .collect();
+        let created: Vec<MechanicId> = entries.iter().map(|entry| entry.id).collect();
         self.factory_mut(project, factory)?.mechanics = entries;
-        self.finish(Outcome::solve_factory(project, factory))
+        let mut outcome = Outcome::solve_factory(project, factory);
+        outcome.created.mechanics.extend(created);
+        self.finish(outcome)
     }
 
     /// 求解后清理回写：按每机制用量删减/重排机制（同样走 reducer 收尾）。
@@ -208,6 +211,7 @@ impl RuntimeState {
             revision: self.revision,
             changed: outcome.changed,
             commands: outcome.commands,
+            created: outcome.created,
         })
     }
 
@@ -223,7 +227,9 @@ impl RuntimeState {
                     ..ProjectDocument::default()
                 };
                 self.document.projects.push(project);
-                Ok(Outcome::meta(id))
+                let mut outcome = Outcome::meta(id);
+                outcome.created.project(id);
+                Ok(outcome)
             }
             ApplicationAction::OpenProject { path } => {
                 Ok(Outcome::command(RuntimeCommand::LoadProject { path }))
@@ -314,8 +320,13 @@ impl RuntimeState {
             ProjectAction::AddFactory { name, template } => {
                 let factory_id = self.allocate_id();
                 let factory = self.new_factory(factory_id, name, template);
+                let template_mechanics: Vec<MechanicId> =
+                    factory.mechanics.iter().map(|entry| entry.id).collect();
                 self.project_mut(project_id)?.factories.push(factory);
-                Ok(Outcome::solve_factory(project_id, factory_id))
+                let mut outcome = Outcome::solve_factory(project_id, factory_id);
+                outcome.created.factory(factory_id);
+                outcome.created.mechanics.extend(template_mechanics);
+                Ok(outcome)
             }
             ProjectAction::CloneFactory { factory } => {
                 let source = self
@@ -331,7 +342,9 @@ impl RuntimeState {
                 let clone = self.clone_factory(source);
                 let clone_id = clone.id;
                 self.project_mut(project_id)?.factories.push(clone);
-                Ok(Outcome::solve_factory(project_id, clone_id))
+                let mut outcome = Outcome::solve_factory(project_id, clone_id);
+                outcome.created.factory(clone_id);
+                Ok(outcome)
             }
             ProjectAction::RemoveFactory { factory } => {
                 let project = self.project_mut(project_id)?;
@@ -600,10 +613,13 @@ impl RuntimeState {
                         flow,
                         amount,
                     };
+                    let target_id = target.id;
                     self.factory_mut(project_id, factory_id)?
                         .targets
                         .push(target);
-                    Ok(Outcome::solve_factory(project_id, factory_id))
+                    let mut outcome = Outcome::solve_factory(project_id, factory_id);
+                    outcome.created.target(target_id);
+                    Ok(outcome)
                 }
                 FlowAction::AddToExternalInput { flow, penalty } => {
                     validate_non_negative("external input penalty", penalty)?;
@@ -612,10 +628,13 @@ impl RuntimeState {
                         flow,
                         penalty,
                     };
+                    let input_id = input.id;
                     self.factory_mut(project_id, factory_id)?
                         .external_inputs
                         .push(input);
-                    Ok(Outcome::solve_factory(project_id, factory_id))
+                    let mut outcome = Outcome::solve_factory(project_id, factory_id);
+                    outcome.created.external_input(input_id);
+                    Ok(outcome)
                 }
                 FlowAction::RequestSuggestions { flow, amount } => {
                     Ok(Outcome::command(RuntimeCommand::RequestSuggestions {
@@ -664,8 +683,11 @@ impl RuntimeState {
         if let Some(target) = target_to_add {
             let factory = self.factory_mut(project_id, factory_id)?;
             ensure_unique_target(factory, target.id)?;
+            let target_id = target.id;
             factory.targets.push(target);
-            return Ok(Outcome::solve_factory(project_id, factory_id));
+            let mut outcome = Outcome::solve_factory(project_id, factory_id);
+            outcome.created.target(target_id);
+            return Ok(outcome);
         }
 
         let factory = self.factory_mut(project_id, factory_id)?;
@@ -714,8 +736,15 @@ impl RuntimeState {
             }
             let factory = self.factory_mut(project_id, factory_id)?;
             ensure_unique_expression(factory, expression.id)?;
+            let expression_id = expression.id;
+            let term_ids: Vec<TargetTermId> = expression.terms.iter().map(|term| term.id).collect();
             factory.target_expressions.push(expression);
-            return Ok(Outcome::solve_factory(project_id, factory_id));
+            let mut outcome = Outcome::solve_factory(project_id, factory_id);
+            outcome.created.expression(expression_id);
+            for term_id in term_ids {
+                outcome.created.term(term_id);
+            }
+            return Ok(outcome);
         }
 
         let factory = self.factory_mut(project_id, factory_id)?;
@@ -813,8 +842,11 @@ impl RuntimeState {
             }
             let factory = self.factory_mut(project_id, factory_id)?;
             ensure_unique_external(factory, input.id)?;
+            let input_id = input.id;
             factory.external_inputs.push(input);
-            return Ok(Outcome::solve_factory(project_id, factory_id));
+            let mut outcome = Outcome::solve_factory(project_id, factory_id);
+            outcome.created.external_input(input_id);
+            return Ok(outcome);
         }
 
         let factory = self.factory_mut(project_id, factory_id)?;
@@ -869,7 +901,9 @@ impl RuntimeState {
                 self.factory_mut(project_id, factory_id)?
                     .mechanics
                     .push(entry);
-                Ok(Outcome::solve_factory(project_id, factory_id))
+                let mut outcome = Outcome::solve_factory(project_id, factory_id);
+                outcome.created.mechanic(id);
+                Ok(outcome)
             }
             MechanicListAction::Remove { mechanic } => {
                 let changed = remove_by_id(
@@ -891,10 +925,13 @@ impl RuntimeState {
                         mechanic,
                     })?;
                 clone.id = self.allocate_id();
+                let clone_id = clone.id;
                 let mechanics = &mut self.factory_mut(project_id, factory_id)?.mechanics;
                 let index = index_by_id(mechanics, mechanic)?;
                 mechanics.insert(index + 1, clone);
-                Ok(Outcome::solve_factory(project_id, factory_id))
+                let mut outcome = Outcome::solve_factory(project_id, factory_id);
+                outcome.created.mechanic(clone_id);
+                Ok(outcome)
             }
             MechanicListAction::Reorder { mechanic, position } => {
                 let mechanics = &mut self.factory_mut(project_id, factory_id)?.mechanics;
@@ -979,7 +1016,9 @@ impl RuntimeState {
                 self.factory_mut(project_id, factory_id)?
                     .mechanics
                     .push(entry);
-                Ok(Outcome::solve_factory(project_id, factory_id))
+                let mut outcome = Outcome::solve_factory(project_id, factory_id);
+                outcome.created.mechanic(id);
+                Ok(outcome)
             }
             SuggestionAction::Dismiss => Ok(Outcome::none()),
         }
@@ -1190,6 +1229,63 @@ pub struct DispatchResult {
     pub revision: u64,
     pub changed: bool,
     pub commands: Vec<RuntimeCommand>,
+    /// 本次 dispatch 新建的对象 id（按创建顺序）。
+    ///
+    /// 供调用方（尤其 MCP agent）免去「创建后再读一遍文档」的往返。
+    pub created: CreatedIds,
+}
+
+/// 一次 dispatch 新建的对象 id。空表示没有新建任何对象。
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CreatedIds {
+    pub projects: Vec<ProjectId>,
+    pub factories: Vec<FactoryId>,
+    pub mechanics: Vec<MechanicId>,
+    pub targets: Vec<TargetId>,
+    pub target_expressions: Vec<TargetExpressionId>,
+    pub target_terms: Vec<TargetTermId>,
+    pub external_inputs: Vec<ExternalInputId>,
+}
+
+impl CreatedIds {
+    pub fn is_empty(&self) -> bool {
+        self.projects.is_empty()
+            && self.factories.is_empty()
+            && self.mechanics.is_empty()
+            && self.targets.is_empty()
+            && self.target_expressions.is_empty()
+            && self.target_terms.is_empty()
+            && self.external_inputs.is_empty()
+    }
+
+    fn project(&mut self, id: ProjectId) {
+        self.projects.push(id);
+    }
+
+    fn factory(&mut self, id: FactoryId) {
+        self.factories.push(id);
+    }
+
+    fn mechanic(&mut self, id: MechanicId) {
+        self.mechanics.push(id);
+    }
+
+    fn target(&mut self, id: TargetId) {
+        self.targets.push(id);
+    }
+
+    fn expression(&mut self, id: TargetExpressionId) {
+        self.target_expressions.push(id);
+    }
+
+    fn term(&mut self, id: TargetTermId) {
+        self.target_terms.push(id);
+    }
+
+    fn external_input(&mut self, id: ExternalInputId) {
+        self.external_inputs.push(id);
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1265,6 +1361,8 @@ struct Outcome {
     factory: Option<FactoryId>,
     recompute_all: bool,
     commands: Vec<RuntimeCommand>,
+    /// 本次新建的对象 id（随 [`DispatchResult`] 回传）。
+    created: CreatedIds,
 }
 
 /// 变更分类（决定 `finish` 追加哪些副作用命令）：
@@ -2420,6 +2518,90 @@ mod tests {
             "关闭项目不再产生副作用命令：{:?}",
             outcome.commands
         );
+    }
+
+    /// 新建对象必须回传 id，调用方（尤其 MCP agent）不必再读一次文档。
+    #[test]
+    fn created_ids_are_reported_for_new_objects() {
+        let (mut state, project, factory) = state_with_factory();
+
+        let outcome = state
+            .dispatch(AppMessage::Factory {
+                project,
+                factory,
+                action: FactoryAction::MechanicList(MechanicListAction::Add {
+                    kind: MechanicKind::Recipe,
+                }),
+            })
+            .unwrap();
+        assert_eq!(outcome.created.mechanics.len(), 1);
+        let mechanic = outcome.created.mechanics[0];
+
+        let outcome = state
+            .dispatch(AppMessage::Factory {
+                project,
+                factory,
+                action: FactoryAction::Flow(FlowAction::AddToTarget {
+                    flow: DualVar::Item(IdWithQuality::new("iron-plate", "normal")),
+                    amount: 1.0,
+                }),
+            })
+            .unwrap();
+        assert_eq!(outcome.created.targets.len(), 1);
+
+        let outcome = state
+            .dispatch(AppMessage::Factory {
+                project,
+                factory,
+                action: FactoryAction::Flow(FlowAction::AddToExternalInput {
+                    flow: DualVar::Item(IdWithQuality::new("iron-ore", "normal")),
+                    penalty: 1.0,
+                }),
+            })
+            .unwrap();
+        assert_eq!(outcome.created.external_inputs.len(), 1);
+
+        // 克隆机制：报告新的机制 id（与源不同）。
+        let outcome = state
+            .dispatch(AppMessage::Factory {
+                project,
+                factory,
+                action: FactoryAction::MechanicList(MechanicListAction::Clone { mechanic }),
+            })
+            .unwrap();
+        assert_eq!(outcome.created.mechanics.len(), 1);
+        assert_ne!(outcome.created.mechanics[0], mechanic);
+
+        // 改名不新建任何对象。
+        let outcome = state
+            .dispatch(AppMessage::Factory {
+                project,
+                factory,
+                action: FactoryAction::SetName {
+                    name: "renamed".to_string(),
+                },
+            })
+            .unwrap();
+        assert!(outcome.created.is_empty(), "{:?}", outcome.created);
+
+        // 新建项目与工厂。
+        let outcome = state
+            .dispatch(AppMessage::Application(ApplicationAction::NewProject {
+                name: "p2".to_string(),
+            }))
+            .unwrap();
+        assert_eq!(outcome.created.projects.len(), 1);
+        let second = outcome.created.projects[0];
+        let outcome = state
+            .dispatch(AppMessage::Project {
+                project: second,
+                action: ProjectAction::AddFactory {
+                    name: "f".to_string(),
+                    template: FactoryTemplate::Empty,
+                },
+            })
+            .unwrap();
+        assert_eq!(outcome.created.factories.len(), 1);
     }
 
     #[test]

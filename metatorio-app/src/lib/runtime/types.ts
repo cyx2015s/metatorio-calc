@@ -552,6 +552,16 @@ export interface DispatchResult {
   revision: number;
   changed: boolean;
   commands: unknown[];
+  /** 本次 dispatch 新建的对象 id（按创建顺序）；空数组表示没有新建。 */
+  created: {
+    projects: ProjectId[];
+    factories: FactoryId[];
+    mechanics: MechanicId[];
+    targets: TargetId[];
+    target_expressions: number[];
+    target_terms: number[];
+    external_inputs: ExternalInputId[];
+  };
 }
 
 // ── Solver output ─────────────────────────────────────────────────

@@ -94,6 +94,9 @@ impl MetatorioMcp {
     #[tool(
         description = "Forward one AppMessage to the Metatorio planner runtime \
         (project / factory / mechanism / solve) and return the resulting revision. \
+        The response includes `created` (ids of objects this call created, so no \
+        follow-up read is needed), `solve` (structured solve result when the command \
+        solves), and `errors` (non-empty + isError when a command failed). \
         This is the universal escape hatch for every planning operation; wire \
         convenience tools on top of it as needed."
     )]
@@ -256,6 +259,7 @@ async fn dispatch_message<R: Runtime>(
     let payload = serde_json::json!({
         "revision": revision,
         "changed": outcome.changed || revision != outcome.revision,
+        "created": &outcome.created,
         "scheduled_commands": commands,
         "solve": solve,
         "errors": errors,
