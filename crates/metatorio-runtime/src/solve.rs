@@ -306,101 +306,28 @@ impl Runtime {
     }
 
     /// 面向前端的产能视图：自动推算 + 用户覆盖，按来源区分。
+    ///
+    /// 重计算可锁外执行：见 [`Runtime::project_snapshot`] + [`productivity_view`]。
     pub fn project_productivity(
         &mut self,
         project_id: ProjectId,
     ) -> Result<ProductivityView, RuntimeError> {
-        // 复用缓存的可达性结果（与 project_accessibility 同一 settings 推导）。
-        let accessibility = self.project_accessibility(project_id)?;
-        let store = self.context_store(project_id)?;
-        let project = self.state.project(project_id)?.clone();
-        let settings = &project.settings;
-
-        let levels: Vec<(String, u32)> = settings
-            .infinite_levels
-            .iter()
-            .map(|level| (level.tech.clone(), level.level))
-            .collect();
-        // 纯自动基准（不含用户无限等级）——用于展示"自动推算"。
-        let pure_auto = metatorio_core::productivity::compute_productivity(
-            store,
-            &accessibility,
-            &[],
-            settings.ignore_productivity,
-        );
-        // 最终（含用户无限等级 2.b）。
-        let with_levels = metatorio_core::productivity::compute_productivity(
-            store,
-            &accessibility,
-            &levels,
-            settings.ignore_productivity,
-        );
-
-        // 合并展示列表：with_levels 基准，用户 2.a 替换同名项。
-        let mut recipes: Vec<RecipeProductivityView> = with_levels
-            .recipe_productivity
-            .iter()
-            .map(|(recipe, value)| RecipeProductivityView {
-                recipe: recipe.clone(),
-                value: *value,
-                source: "auto".to_string(),
-            })
-            .collect();
-        for user in &settings.recipe_productivity {
-            if let Some(entry) = recipes.iter_mut().find(|r| r.recipe == user.recipe) {
-                entry.value = user.productivity;
-                entry.source = "user".to_string();
-            } else {
-                recipes.push(RecipeProductivityView {
-                    recipe: user.recipe.clone(),
-                    value: user.productivity,
-                    source: "user".to_string(),
-                });
-            }
-        }
-        recipes.sort_by(|a, b| a.recipe.cmp(&b.recipe));
-
-        // 采矿：用户设定的固定值（非 0）替换自动推算值。
-        let mining = if settings.mining_productivity != 0.0 {
-            settings.mining_productivity
-        } else {
-            with_levels.mining_productivity
-        };
-
-        Ok(ProductivityView {
-            recipes,
-            auto_mining: pure_auto.mining_productivity,
-            mining,
-            infinite_levels: settings.infinite_levels.clone(),
-            ignore: settings.ignore_productivity,
-        })
+        let snapshot = self.project_snapshot(project_id)?;
+        let accessibility = snapshot.resolve_accessibility();
+        self.cache_accessibility(project_id, accessibility.clone());
+        Ok(productivity_view(&snapshot, &accessibility))
     }
 
     /// 里程碑节点按依赖关系**拓扑排序**（依赖在前），供 UI 按序展示。
     /// `unlocked` 状态随节点保留；依赖环内的节点按原序附加。
+    ///
+    /// 重计算可锁外执行：见 [`Runtime::project_snapshot`] + [`ordered_milestones`]。
     pub fn ordered_project_milestones(
         &mut self,
         project_id: ProjectId,
     ) -> Result<Vec<crate::document::Milestone>, RuntimeError> {
-        let graph = self.graph_for_project(project_id)?;
-        let store = self.context_store(project_id)?;
-        let settings = &self.state.project(project_id)?.settings;
-        let nodes: Vec<Accessible> = settings.milestones.iter().map(|m| m.node.clone()).collect();
-        let order = metatorio_core::milestone_order_with_graph(store, &graph, &nodes);
-        Ok(order
-            .into_iter()
-            .map(|node| {
-                settings
-                    .milestones
-                    .iter()
-                    .find(|m| m.node == node)
-                    .cloned()
-                    .unwrap_or(crate::document::Milestone {
-                        node,
-                        unlocked: true,
-                    })
-            })
-            .collect())
+        let snapshot = self.project_snapshot(project_id)?;
+        Ok(ordered_milestones(&snapshot))
     }
 
     /// 默认里程碑：把**科技瓶物品**（出现在实验室 LabComponent.inputs 的
@@ -561,23 +488,46 @@ impl Runtime {
             .insert(project_id, accessibility);
     }
 
-    /// 锁外求解后回填可达性缓存，**仅当**文档版本与失效代次都没变。
+    /// 锁外算出的可达性回填缓存，**仅当**文档版本与失效代次都没变。
     ///
-    /// 求解期间用户改了里程碑/换了上下文都会 bump 其中之一；此时写入会把
+    /// 计算期间用户改了里程碑/换了上下文都会 bump 其中之一；此时写入会把
     /// 过期可达性留在缓存里，直到下一次失效才被发现，因此必须拒绝。
     /// 返回是否写入。
     pub fn cache_accessibility_if_current(
         &self,
-        snapshot: &SolveSnapshot,
+        project: ProjectId,
+        revision: u64,
+        accessibility_epoch: u64,
         accessibility: Accessibility,
     ) -> bool {
-        if self.state.revision != snapshot.revision
-            || self.accessibility_epoch.load(Ordering::SeqCst) != snapshot.accessibility_epoch
+        if self.state.revision != revision
+            || self.accessibility_epoch.load(Ordering::SeqCst) != accessibility_epoch
         {
             return false;
         }
-        self.cache_accessibility(snapshot.project, accessibility);
+        self.cache_accessibility(project, accessibility);
         true
+    }
+
+    /// 项目级读取快照（不含工厂）：供可达性/产能/里程碑等**只读重计算**
+    /// 在锁外执行。
+    pub fn project_snapshot(&self, project_id: ProjectId) -> Result<ProjectSnapshot, RuntimeError> {
+        let project_doc = self.state.project(project_id)?.clone();
+        Ok(ProjectSnapshot {
+            project: project_id,
+            revision: self.state.revision,
+            accessibility_epoch: self.accessibility_epoch.load(Ordering::SeqCst),
+            store: self.context_arc(project_id)?,
+            graph: self.graph_for_project(project_id)?,
+            accessibility_options: accessibility_options(&project_doc.settings),
+            accessibility: self
+                .accessibilities
+                .lock()
+                .unwrap()
+                .get(&project_id)
+                .cloned(),
+            project_doc,
+        })
     }
 
     /// 锁外算出的结果能否安全写回文档：快照依据的文档、可达性代次与上下文
@@ -612,7 +562,6 @@ impl Runtime {
         self.cache_accessibility(project_id, accessibility.clone());
         solve_snapshot_with(&snapshot, &accessibility)
     }
-
     /// 自动规划（同步便捷入口）：计算候选 → 回写文档 → 重解。
     ///
     /// 计算部分（可能数十秒）见 [`plan_auto_plan`]；需要锁外执行时请自行
@@ -760,6 +709,126 @@ impl SolveSnapshot {
     pub fn has_cached_accessibility(&self) -> bool {
         self.accessibility.is_some()
     }
+}
+
+/// 项目级读取快照：与 [`SolveSnapshot`] 同构，但不需要工厂。
+///
+/// 供可达性 / 产能 / 里程碑排序等**只读重计算**在锁外执行——这些计算在
+/// 大型 mod 上下文里同样耗时（可达性 BFS 约 2.5s），不应占着 runtime 锁。
+#[derive(Debug, Clone)]
+pub struct ProjectSnapshot {
+    pub project: ProjectId,
+    pub revision: u64,
+    pub accessibility_epoch: u64,
+    pub store: Arc<PrototypeStore>,
+    pub graph: Arc<metatorio_core::GraphData>,
+    accessibility_options: AccessibilityOptions,
+    accessibility: Option<Accessibility>,
+    pub project_doc: ProjectDocument,
+}
+
+impl ProjectSnapshot {
+    /// 解析本次计算要用的可达性：有缓存直接用，否则现算（纯函数，可锁外跑）。
+    pub fn resolve_accessibility(&self) -> Accessibility {
+        match &self.accessibility {
+            Some(cached) => cached.clone(),
+            None => metatorio_core::compute_accessibility_with_graph(
+                &self.store,
+                &self.accessibility_options,
+                &self.graph,
+            ),
+        }
+    }
+}
+
+/// 纯函数：面向前端的产能视图（自动推算 + 用户覆盖，按来源区分）。
+pub fn productivity_view(
+    snapshot: &ProjectSnapshot,
+    accessibility: &Accessibility,
+) -> ProductivityView {
+    let store = &snapshot.store;
+    let settings = &snapshot.project_doc.settings;
+    let levels: Vec<(String, u32)> = settings
+        .infinite_levels
+        .iter()
+        .map(|level| (level.tech.clone(), level.level))
+        .collect();
+    // 纯自动基准（不含用户无限等级）——用于展示"自动推算"。
+    let pure_auto = metatorio_core::productivity::compute_productivity(
+        store,
+        accessibility,
+        &[],
+        settings.ignore_productivity,
+    );
+    // 最终（含用户无限等级 2.b）。
+    let with_levels = metatorio_core::productivity::compute_productivity(
+        store,
+        accessibility,
+        &levels,
+        settings.ignore_productivity,
+    );
+
+    // 合并展示列表：with_levels 基准，用户 2.a 替换同名项。
+    let mut recipes: Vec<RecipeProductivityView> = with_levels
+        .recipe_productivity
+        .iter()
+        .map(|(recipe, value)| RecipeProductivityView {
+            recipe: recipe.clone(),
+            value: *value,
+            source: "auto".to_string(),
+        })
+        .collect();
+    for user in &settings.recipe_productivity {
+        if let Some(entry) = recipes.iter_mut().find(|r| r.recipe == user.recipe) {
+            entry.value = user.productivity;
+            entry.source = "user".to_string();
+        } else {
+            recipes.push(RecipeProductivityView {
+                recipe: user.recipe.clone(),
+                value: user.productivity,
+                source: "user".to_string(),
+            });
+        }
+    }
+    recipes.sort_by(|a, b| a.recipe.cmp(&b.recipe));
+
+    // 采矿：用户设定的固定值（非 0）替换自动推算值。
+    let mining = if settings.mining_productivity != 0.0 {
+        settings.mining_productivity
+    } else {
+        with_levels.mining_productivity
+    };
+
+    ProductivityView {
+        recipes,
+        auto_mining: pure_auto.mining_productivity,
+        mining,
+        infinite_levels: settings.infinite_levels.clone(),
+        ignore: settings.ignore_productivity,
+    }
+}
+
+/// 纯函数：里程碑按依赖关系**拓扑排序**（依赖在前），`unlocked` 随节点保留；
+/// 依赖环内的节点按原序附加。
+pub fn ordered_milestones(snapshot: &ProjectSnapshot) -> Vec<crate::document::Milestone> {
+    let settings = &snapshot.project_doc.settings;
+    let nodes: Vec<Accessible> = settings.milestones.iter().map(|m| m.node.clone()).collect();
+    let order =
+        metatorio_core::milestone_order_with_graph(&snapshot.store, &snapshot.graph, &nodes);
+    order
+        .into_iter()
+        .map(|node| {
+            settings
+                .milestones
+                .iter()
+                .find(|m| m.node == node)
+                .cloned()
+                .unwrap_or(crate::document::Milestone {
+                    node,
+                    unlocked: true,
+                })
+        })
+        .collect()
 }
 
 /// 纯函数求解：只依赖快照，不碰 `Runtime`、不持锁。可达性按需现算。

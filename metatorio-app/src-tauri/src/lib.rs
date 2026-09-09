@@ -14,7 +14,7 @@
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
-    sync::Mutex,
+    sync::{Arc, Mutex},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -1102,71 +1102,60 @@ fn icon(
 /// 全量目录索引（含 order fallback 排序）：一次拉取，前端本地筛选/分组。
 #[tauri::command]
 async fn catalog_index(app: AppHandle, context_id: String) -> Result<CatalogIndex, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let state = app.state::<AppState>();
-        let mut runtime = state
-            .runtime
-            .lock()
-            .map_err(|_| "runtime lock poisoned".to_string())?;
-        if context_id.is_empty() {
-            return Ok(CatalogIndex {
-                context_id: String::new(),
-                qualities: Vec::new(),
-                entries: Vec::new(),
-            });
-        }
-        ensure_context_loaded(&state, &mut runtime, &context_id)?;
-        let store = runtime
-            .context_store_by_id(&context_id)
-            .ok_or("上下文未载入")?;
-        let locale = locale_map_of(&state, &context_id);
-        Ok(CatalogIndex {
-            context_id: context_id.clone(),
-            qualities: store.quality_order().to_vec(),
-            entries: catalog_index_from_store(store, &locale),
-        })
+    if context_id.is_empty() {
+        return Ok(CatalogIndex {
+            context_id: String::new(),
+            qualities: Vec::new(),
+            entries: Vec::new(),
+        });
+    }
+    let state = app.state::<AppState>();
+    let store = context_store_arc(&state, &context_id).await?;
+    let locale = locale_map_of(&state, &context_id);
+    // 索引构建遍历全部原型：放到阻塞线程池，且不持 runtime 锁。
+    tauri::async_runtime::spawn_blocking(move || CatalogIndex {
+        context_id: context_id.clone(),
+        qualities: store.quality_order().to_vec(),
+        entries: catalog_index_from_store(&store, &locale),
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())
 }
 
 /// 每插件类别中 tier 最高的插件（"使用最佳插件"填充枚举列表用）。
 #[tauri::command]
-fn best_modules(state: State<'_, AppState>, context_id: String) -> Result<Vec<Suggestion>, String> {
-    let mut runtime = state
-        .runtime
-        .lock()
-        .map_err(|_| "runtime lock poisoned".to_string())?;
+async fn best_modules(app: AppHandle, context_id: String) -> Result<Vec<Suggestion>, String> {
     if context_id.is_empty() {
         return Ok(Vec::new());
     }
-    ensure_context_loaded(&state, &mut runtime, &context_id)?;
-    let store = runtime
-        .context_store_by_id(&context_id)
-        .ok_or("上下文未载入")?;
-    let mut best: std::collections::BTreeMap<String, (u32, String)> =
-        std::collections::BTreeMap::new();
-    for record in store.group(PrototypeGroup::Item) {
-        let Some(module) = record.component::<ModuleComponent>() else {
-            continue;
-        };
-        best.entry(module.category.clone())
-            .and_modify(|(tier, name)| {
-                if module.tier > *tier {
-                    *tier = module.tier;
-                    *name = record.name.clone();
-                }
+    let state = app.state::<AppState>();
+    let store = context_store_arc(&state, &context_id).await?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut best: std::collections::BTreeMap<String, (u32, String)> =
+            std::collections::BTreeMap::new();
+        for record in store.group(PrototypeGroup::Item) {
+            let Some(module) = record.component::<ModuleComponent>() else {
+                continue;
+            };
+            best.entry(module.category.clone())
+                .and_modify(|(tier, name)| {
+                    if module.tier > *tier {
+                        *tier = module.tier;
+                        *name = record.name.clone();
+                    }
+                })
+                .or_insert((module.tier, record.name.clone()));
+        }
+        best.into_values()
+            .map(|(_, name)| Suggestion {
+                kind: "module".to_string(),
+                name,
+                role: "producer".to_string(),
             })
-            .or_insert((module.tier, record.name.clone()));
-    }
-    Ok(best
-        .into_values()
-        .map(|(_, name)| Suggestion {
-            kind: "module".to_string(),
-            name,
-            role: "producer".to_string(),
-        })
-        .collect())
+            .collect()
+    })
+    .await
+    .map_err(|error| error.to_string())
 }
 
 /// 星球隐式可用输入（严格供给下也免费；外部输入显式覆盖后不显示）：
@@ -1177,39 +1166,24 @@ async fn implicit_sources(
     project: ProjectId,
     factory: FactoryId,
 ) -> Result<Vec<DualVar>, String> {
+    let state = app.state::<AppState>();
+    let snapshot = factory_snapshot(&state, project, factory).await?;
     tauri::async_runtime::spawn_blocking(move || {
-        let state = app.state::<AppState>();
-        let mut runtime = state
-            .runtime
-            .lock()
-            .map_err(|_| "runtime lock poisoned".to_string())?;
-        let (planet, external_inputs) = {
-            let factory_doc = runtime
-                .state
-                .factory(project, factory)
-                .map_err(|error| error.to_string())?;
-            (
-                factory_doc.settings.planet.clone(),
-                factory_doc.external_inputs.clone(),
-            )
+        let factory_doc = &snapshot.factory_doc;
+        let Some(planet) = factory_doc.settings.planet.as_deref() else {
+            return Vec::new();
         };
-        let Some(planet) = planet else {
-            return Ok(Vec::new());
-        };
-        ensure_context_for_project(&state, &mut runtime, project)?;
-        let store = runtime
-            .context_store(project)
-            .map_err(|error| error.to_string())?;
-        let mut implicit = metatorio_runtime::planet::planet_autoplaced_flows(store, &planet);
-        for input in &external_inputs {
+        let mut implicit =
+            metatorio_runtime::planet::planet_autoplaced_flows(&snapshot.store, planet);
+        for input in &factory_doc.external_inputs {
             implicit.shift_remove(&input.flow);
         }
         let mut keys: Vec<DualVar> = implicit.keys().cloned().collect();
         keys.sort_by(|a, b| format!("{a:?}").cmp(&format!("{b:?}")));
-        Ok(keys)
+        keys
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())
 }
 
 /// 建议候选：给定一条流，列出能产出/消耗它的机制（配方/矿点/燃料/发电机）。
@@ -1224,23 +1198,19 @@ pub struct Suggestion {
 
 /// 建议系统：为一条流生成候选机制（对应 egui 的"推荐配方/矿点"模态框）。
 #[tauri::command]
-fn suggest(
-    state: State<'_, AppState>,
+async fn suggest(
+    app: AppHandle,
     context_id: String,
     flow: DualVar,
 ) -> Result<Vec<Suggestion>, String> {
-    let mut runtime = state
-        .runtime
-        .lock()
-        .map_err(|_| "runtime lock poisoned".to_string())?;
     if context_id.is_empty() {
         return Ok(Vec::new());
     }
-    ensure_context_loaded(&state, &mut runtime, &context_id)?;
-    let store = runtime
-        .context_store_by_id(&context_id)
-        .ok_or("上下文未载入")?;
-    Ok(suggest_for_flow(store, flow))
+    let state = app.state::<AppState>();
+    let store = context_store_arc(&state, &context_id).await?;
+    tauri::async_runtime::spawn_blocking(move || suggest_for_flow(&store, flow))
+        .await
+        .map_err(|error| error.to_string())
 }
 
 /// 单个机制在当前规划条件下的展开流（系数 = 1 时的每秒产/耗）。
@@ -1248,115 +1218,91 @@ fn suggest(
 /// 返回 `(DualVar, f64)` 列表：正值产出、负值消耗。无求解结果时
 /// 前端用它展示"假定系数为 1 时产出的资源"（复刻原版 egui 机制卡）。
 #[tauri::command]
-fn mechanic_flow(
-    state: State<'_, AppState>,
+async fn mechanic_flow(
+    app: AppHandle,
     project: ProjectId,
     factory: FactoryId,
     mechanic: MechanicId,
 ) -> Result<Vec<(DualVar, f64)>, String> {
-    let runtime = state
-        .runtime
-        .lock()
-        .map_err(|_| "runtime lock poisoned".to_string())?;
-    let store = runtime
-        .context_store(project)
-        .map_err(|error| error.to_string())?
-        .clone();
-    let project_doc = runtime
-        .state
-        .project(project)
-        .map_err(|error| error.to_string())?
-        .clone();
-    let factory_doc = runtime
-        .state
-        .factory(project, factory)
-        .map_err(|error| error.to_string())?
-        .clone();
-    let accessibility = runtime
-        .project_accessibility(project)
-        .map_err(|error| error.to_string())?;
-    let entry = factory_doc
-        .mechanics
-        .iter()
-        .find(|entry| entry.id == mechanic)
-        .ok_or("机制不存在")?;
-    let mut game = metatorio_runtime::solve::make_game_state_with_accessibility(
-        &store,
-        &project_doc,
-        &accessibility,
-    );
-    // 与求解路径一致：应用当前工厂的星球/地表环境（太阳能系数、昼夜周期）。
-    metatorio_runtime::solve::apply_environment_to_game_state(
-        &store,
-        &mut game,
-        factory_doc.settings.planet.as_deref(),
-        factory_doc.settings.surface.as_deref(),
-    );
-    let context = metatorio_core::Context::new(&store, &game);
-    let expansion =
-        metatorio_core::expand::expand(std::iter::once((mechanic, &entry.mechanic)), &context);
-    // 合并所有展开变量的流（同 config 的流体插值端求和）。
-    let mut flow: metatorio_core::prim_var::Flow = Default::default();
-    for variable in expansion.variables {
-        for (key, value) in variable.flow {
-            *flow.entry(key).or_insert(0.0) += value;
+    let state = app.state::<AppState>();
+    let snapshot = factory_snapshot(&state, project, factory).await?;
+    tauri::async_runtime::spawn_blocking(move || -> Result<Vec<(DualVar, f64)>, String> {
+        let accessibility = snapshot.resolve_accessibility();
+        let store = &snapshot.store;
+        let factory_doc = &snapshot.factory_doc;
+        let entry = factory_doc
+            .mechanics
+            .iter()
+            .find(|entry| entry.id == mechanic)
+            .ok_or("机制不存在")?;
+        let mut game = metatorio_runtime::solve::make_game_state_with_accessibility(
+            store,
+            &snapshot.project_doc,
+            &accessibility,
+        );
+        // 与求解路径一致：应用当前工厂的星球/地表环境（太阳能系数、昼夜周期）。
+        metatorio_runtime::solve::apply_environment_to_game_state(
+            store,
+            &mut game,
+            factory_doc.settings.planet.as_deref(),
+            factory_doc.settings.surface.as_deref(),
+        );
+        let context = metatorio_core::Context::new(store, &game);
+        let expansion =
+            metatorio_core::expand::expand(std::iter::once((mechanic, &entry.mechanic)), &context);
+        // 合并所有展开变量的流（同 config 的流体插值端求和）。
+        let mut flow: metatorio_core::prim_var::Flow = Default::default();
+        for variable in expansion.variables {
+            for (key, value) in variable.flow {
+                *flow.entry(key).or_insert(0.0) += value;
+            }
         }
-    }
-    Ok(flow.into_iter().filter(|(_, v)| v.abs() > 1e-12).collect())
+        Ok(flow.into_iter().filter(|(_, v)| v.abs() > 1e-12).collect())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 /// 太阳能机制的配平信息（平均出力 / 周期溢出总电量 / 蓄电器配比）。
 ///
 /// 使用当前工厂环境的星球太阳能系数与昼夜周期（同求解路径）。
 #[tauri::command]
-fn solar_balance(
-    state: State<'_, AppState>,
+async fn solar_balance(
+    app: AppHandle,
     project: ProjectId,
     factory: FactoryId,
     mechanic: MechanicId,
 ) -> Result<Option<metatorio_core::SolarBalance>, String> {
-    let runtime = state
-        .runtime
-        .lock()
-        .map_err(|_| "runtime lock poisoned".to_string())?;
-    let store = runtime
-        .context_store(project)
-        .map_err(|error| error.to_string())?
-        .clone();
-    let project_doc = runtime
-        .state
-        .project(project)
-        .map_err(|error| error.to_string())?
-        .clone();
-    let factory_doc = runtime
-        .state
-        .factory(project, factory)
-        .map_err(|error| error.to_string())?
-        .clone();
-    let accessibility = runtime
-        .project_accessibility(project)
-        .map_err(|error| error.to_string())?;
-    let entry = factory_doc
-        .mechanics
-        .iter()
-        .find(|entry| entry.id == mechanic)
-        .ok_or("机制不存在")?;
-    let Mechanic::Solar(mechanic) = &entry.mechanic else {
-        return Ok(None);
-    };
-    let mut game = metatorio_runtime::solve::make_game_state_with_accessibility(
-        &store,
-        &project_doc,
-        &accessibility,
-    );
-    metatorio_runtime::solve::apply_environment_to_game_state(
-        &store,
-        &mut game,
-        factory_doc.settings.planet.as_deref(),
-        factory_doc.settings.surface.as_deref(),
-    );
-    let context = metatorio_core::Context::new(&store, &game);
-    Ok(metatorio_core::solar_balance(&context, mechanic))
+    let state = app.state::<AppState>();
+    let snapshot = factory_snapshot(&state, project, factory).await?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let accessibility = snapshot.resolve_accessibility();
+        let store = &snapshot.store;
+        let factory_doc = &snapshot.factory_doc;
+        let entry = factory_doc
+            .mechanics
+            .iter()
+            .find(|entry| entry.id == mechanic)
+            .ok_or("机制不存在")?;
+        let Mechanic::Solar(mechanic) = &entry.mechanic else {
+            return Ok(None);
+        };
+        let mut game = metatorio_runtime::solve::make_game_state_with_accessibility(
+            store,
+            &snapshot.project_doc,
+            &accessibility,
+        );
+        metatorio_runtime::solve::apply_environment_to_game_state(
+            store,
+            &mut game,
+            factory_doc.settings.planet.as_deref(),
+            factory_doc.settings.surface.as_deref(),
+        );
+        let context = metatorio_core::Context::new(store, &game);
+        Ok(metatorio_core::solar_balance(&context, mechanic))
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 /// 指定机器/插件塔允许的插件列表（机制卡手动插件选择的鉴权）。
@@ -1371,74 +1317,72 @@ fn solar_balance(
 /// `machine_kind`: "machine" | "mining-machine" | "beacon"。
 /// `recipe`: 可选配方名（仅 recipe 机制传入；采矿/插件塔为 None）。
 #[tauri::command]
-fn allowed_modules(
-    state: State<'_, AppState>,
+async fn allowed_modules(
+    app: AppHandle,
     context_id: String,
     machine_kind: String,
     machine: String,
     recipe: Option<String>,
 ) -> Result<Vec<String>, String> {
-    let mut runtime = state
-        .runtime
-        .lock()
-        .map_err(|_| "runtime lock poisoned".to_string())?;
     if context_id.is_empty() {
         return Ok(Vec::new());
     }
-    ensure_context_loaded(&state, &mut runtime, &context_id)?;
-    let store = runtime
-        .context_store_by_id(&context_id)
-        .ok_or("上下文未载入")?;
-    let Some(record) = store.get(PrototypeGroup::Entity, &machine) else {
-        return Ok(Vec::new());
-    };
-    // 收集机器/采矿机/插件塔的插件类别与效果限制。
-    let (categories, effects) = match machine_kind.as_str() {
-        "mining-machine" => record
-            .component::<MiningDrillComponent>()
-            .map(|drill| {
-                (
-                    drill.allowed_module_categories.clone(),
-                    drill.allowed_effects,
-                )
-            })
-            .unwrap_or((None, None)),
-        "beacon" => record
-            .component::<BeaconComponent>()
-            .map(|beacon| {
-                (
-                    beacon.allowed_module_categories.clone(),
-                    beacon.allowed_effects,
-                )
-            })
-            .unwrap_or((None, None)),
-        _ => record
-            .component::<CraftingMachineComponent>()
-            .map(|machine| {
-                (
-                    machine.allowed_module_categories.clone(),
-                    machine.allowed_effects,
-                )
-            })
-            .unwrap_or((None, None)),
-    };
-    let recipe_component = recipe.as_deref().and_then(|name| {
-        store
-            .get(PrototypeGroup::Recipe, name)
-            .and_then(|record| record.component::<RecipeComponent>())
-    });
-    let mut out = Vec::new();
-    for item_record in store.group(PrototypeGroup::Item) {
-        let Some(module) = item_record.component::<ModuleComponent>() else {
-            continue;
+    let state = app.state::<AppState>();
+    let store = context_store_arc(&state, &context_id).await?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(record) = store.get(PrototypeGroup::Entity, &machine) else {
+            return Vec::new();
         };
-        if auto_plan::module_allowed(module, &categories, &effects, recipe_component) {
-            out.push(item_record.name.clone());
+        // 收集机器/采矿机/插件塔的插件类别与效果限制。
+        let (categories, effects) = match machine_kind.as_str() {
+            "mining-machine" => record
+                .component::<MiningDrillComponent>()
+                .map(|drill| {
+                    (
+                        drill.allowed_module_categories.clone(),
+                        drill.allowed_effects,
+                    )
+                })
+                .unwrap_or((None, None)),
+            "beacon" => record
+                .component::<BeaconComponent>()
+                .map(|beacon| {
+                    (
+                        beacon.allowed_module_categories.clone(),
+                        beacon.allowed_effects,
+                    )
+                })
+                .unwrap_or((None, None)),
+            _ => record
+                .component::<CraftingMachineComponent>()
+                .map(|machine| {
+                    (
+                        machine.allowed_module_categories.clone(),
+                        machine.allowed_effects,
+                    )
+                })
+                .unwrap_or((None, None)),
+        };
+        let recipe_component = recipe.as_deref().and_then(|name| {
+            store
+                .get(PrototypeGroup::Recipe, name)
+                .and_then(|record| record.component::<RecipeComponent>())
+        });
+        let mut out = Vec::new();
+        for item_record in store.group(PrototypeGroup::Item) {
+            let Some(module) = item_record.component::<ModuleComponent>() else {
+                continue;
+            };
+            if auto_plan::module_allowed(module, &categories, &effects, recipe_component) {
+                out.push(item_record.name.clone());
+            }
         }
-    }
-    // 稳定排序（catalog 顺序由 order 决定，这里按名称保证可预测）。
-    out.sort();
-    Ok(out)
+        // 稳定排序（catalog 顺序由 order 决定，这里按名称保证可预测）。
+        out.sort();
+        out
+    })
+    .await
+    .map_err(|error| error.to_string())
 }
 
 /// 生成候选机制（与 suggest 命令共用；AutoPlan 也用它）。
@@ -2081,13 +2025,29 @@ async fn run_blocking<T: Send + 'static>(
 /// 应在此情况下不做可达性过滤）。
 #[tauri::command]
 async fn accessibility(app: AppHandle, project: ProjectId) -> Result<Vec<Accessible>, String> {
-    run_blocking(app, move |runtime| {
-        let result = runtime
-            .project_accessibility(project)
-            .map_err(|error| error.to_string())?;
-        Ok(result.accessible().iter().cloned().collect())
+    let state = app.state::<AppState>();
+    ensure_context_for_project_offlock(&state, project).await?;
+    // 锁内只取快照；可达性 BFS（py 上下文约 2.5s）在锁外算。
+    let snapshot = with_runtime(&state, |runtime| {
+        runtime.project_snapshot(project).map_err(|e| e.to_string())
+    })?;
+    let (snapshot, accessibility, nodes) = tauri::async_runtime::spawn_blocking(move || {
+        let accessibility = snapshot.resolve_accessibility();
+        let nodes: Vec<Accessible> = accessibility.accessible().iter().cloned().collect();
+        (snapshot, accessibility, nodes)
     })
     .await
+    .map_err(|error| error.to_string())?;
+    let _ = with_runtime(&state, |runtime| {
+        runtime.cache_accessibility_if_current(
+            snapshot.project,
+            snapshot.revision,
+            snapshot.accessibility_epoch,
+            accessibility,
+        );
+        Ok(())
+    });
+    Ok(nodes)
 }
 
 /// 把项目的里程碑重置为默认：实验室（LabComponent.inputs）输入的
@@ -2109,12 +2069,14 @@ async fn milestones_ordered(
     app: AppHandle,
     project: ProjectId,
 ) -> Result<Vec<metatorio_runtime::Milestone>, String> {
-    run_blocking(app, move |runtime| {
-        runtime
-            .ordered_project_milestones(project)
-            .map_err(|error| error.to_string())
-    })
-    .await
+    let state = app.state::<AppState>();
+    ensure_context_for_project_offlock(&state, project).await?;
+    let snapshot = with_runtime(&state, |runtime| {
+        runtime.project_snapshot(project).map_err(|e| e.to_string())
+    })?;
+    tauri::async_runtime::spawn_blocking(move || metatorio_runtime::ordered_milestones(&snapshot))
+        .await
+        .map_err(|error| error.to_string())
 }
 
 /// 面向前端的产能视图：自动推算 + 用户覆盖，按来源（auto/user）区分，
@@ -2124,12 +2086,28 @@ async fn productivity(
     app: AppHandle,
     project: ProjectId,
 ) -> Result<metatorio_runtime::ProductivityView, String> {
-    run_blocking(app, move |runtime| {
-        runtime
-            .project_productivity(project)
-            .map_err(|error| error.to_string())
+    let state = app.state::<AppState>();
+    ensure_context_for_project_offlock(&state, project).await?;
+    let snapshot = with_runtime(&state, |runtime| {
+        runtime.project_snapshot(project).map_err(|e| e.to_string())
+    })?;
+    let (snapshot, accessibility, view) = tauri::async_runtime::spawn_blocking(move || {
+        let accessibility = snapshot.resolve_accessibility();
+        let view = metatorio_runtime::productivity_view(&snapshot, &accessibility);
+        (snapshot, accessibility, view)
     })
     .await
+    .map_err(|error| error.to_string())?;
+    let _ = with_runtime(&state, |runtime| {
+        runtime.cache_accessibility_if_current(
+            snapshot.project,
+            snapshot.revision,
+            snapshot.accessibility_epoch,
+            accessibility,
+        );
+        Ok(())
+    });
+    Ok(view)
 }
 
 // ── Persistence ───────────────────────────────────────────────────
@@ -2676,6 +2654,36 @@ fn with_runtime<T>(
     f(&mut runtime)
 }
 
+/// 取上下文 store 的 `Arc`（必要时先锁外载入）。之后的重计算可锁外进行。
+async fn context_store_arc(
+    state: &AppState,
+    context_id: &str,
+) -> Result<Arc<PrototypeStore>, String> {
+    if context_id.is_empty() {
+        return Err("上下文为空".to_string());
+    }
+    ensure_context_loaded_offlock(state, context_id).await?;
+    with_runtime(state, |runtime| {
+        runtime
+            .context_arc_by_id(context_id)
+            .ok_or_else(|| "上下文未载入".to_string())
+    })
+}
+
+/// 取工厂级求解快照（必要时先锁外载入上下文）。之后的重计算可锁外进行。
+async fn factory_snapshot(
+    state: &AppState,
+    project: ProjectId,
+    factory: FactoryId,
+) -> Result<metatorio_runtime::SolveSnapshot, String> {
+    ensure_context_for_project_offlock(state, project).await?;
+    with_runtime(state, |runtime| {
+        runtime
+            .solve_snapshot_inputs(project, factory)
+            .map_err(|error| error.to_string())
+    })
+}
+
 /// 保存项目到文件：锁内取文档快照 → 锁外原子写盘 → 锁内清 dirty。
 ///
 /// 序列化 + 文件 IO 都不持 runtime 锁（大工程 JSON 序列化可能有几十毫秒，
@@ -2735,7 +2743,12 @@ pub(crate) async fn solve_factory_offlock(
                     .map_err(|error| error.to_string())?;
                 // 锁外算出的可达性回填缓存（仅当文档/失效代次都没变）。
                 if let Ok(runtime) = compute_app.state::<AppState>().runtime.lock() {
-                    runtime.cache_accessibility_if_current(snapshot, accessibility);
+                    runtime.cache_accessibility_if_current(
+                        snapshot.project,
+                        snapshot.revision,
+                        snapshot.accessibility_epoch,
+                        accessibility,
+                    );
                 }
                 Ok(result)
             },
@@ -2941,7 +2954,12 @@ async fn execute_command(
                             metatorio_runtime::solve::plan_auto_plan(snapshot, &accessibility)
                                 .map_err(|error| error.to_string())?;
                         if let Ok(runtime) = compute_app.state::<AppState>().runtime.lock() {
-                            runtime.cache_accessibility_if_current(snapshot, accessibility);
+                            runtime.cache_accessibility_if_current(
+                                snapshot.project,
+                                snapshot.revision,
+                                snapshot.accessibility_epoch,
+                                accessibility,
+                            );
                         }
                         Ok((snapshot.clone(), mechanics))
                     },
@@ -3049,7 +3067,9 @@ async fn execute_command(
             None
         }
         RuntimeCommand::ReplaceExternalInputs { .. } => {
-            eprintln!("RuntimeCommand::ReplaceExternalInputs 未实现（GUI 走 implicit_sources 命令）");
+            eprintln!(
+                "RuntimeCommand::ReplaceExternalInputs 未实现（GUI 走 implicit_sources 命令）"
+            );
             None
         }
         RuntimeCommand::CheckForUpdate => {
@@ -3067,26 +3087,7 @@ async fn execute_command(
     }
 }
 
-/// 确保项目上下文已载入（AutoPlan 需要 store）。
-fn ensure_context_for_project(
-    state: &AppState,
-    runtime: &mut Runtime,
-    project: ProjectId,
-) -> Result<(), String> {
-    let context_id = runtime
-        .state
-        .project(project)
-        .map_err(|error| error.to_string())?
-        .context_id
-        .clone()
-        .or_else(|| runtime.active_context().map(str::to_string));
-    if let Some(id) = context_id {
-        ensure_context_loaded(state, runtime, &id)?;
-    }
-    Ok(())
-}
-
-/// [`ensure_context_for_project`] 的锁外版：读盘解析在锁外完成。
+/// 确保项目上下文已载入：读盘解析在锁外完成。
 async fn ensure_context_for_project_offlock(
     state: &AppState,
     project: ProjectId,

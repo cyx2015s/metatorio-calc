@@ -26,8 +26,9 @@ pub use id::{
 };
 pub use message::*;
 pub use solve::{
-    parse_document_file, solve_snapshot, solve_snapshot_with, write_document_file, CommandEffect,
-    ExpandedVarId, FlowBalance, MechanicSolution, ProductivityView, RecipeProductivityView, Runtime,
-    SolveResult, SolveSnapshot, SolveStatus,
+    ordered_milestones, parse_document_file, productivity_view, solve_snapshot, solve_snapshot_with,
+    write_document_file, CommandEffect, ExpandedVarId, FlowBalance, MechanicSolution,
+    ProductivityView, ProjectSnapshot, RecipeProductivityView, Runtime, SolveResult, SolveSnapshot,
+    SolveStatus,
 };
 pub use state::{DispatchResult, RuntimeError, RuntimeState};
