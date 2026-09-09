@@ -592,16 +592,22 @@ export interface MechanicSolution {
   mechanic: MechanicId;
   variant: number;
   amount: number;
+  /** `amount / scale`：剔除 Ruiz 缩放后的可比量（判断「几乎没用到」用它）。 */
+  rate: number;
   /** 单台实例成本（机器碰撞箱面积）。 */
   cost: number;
-  /** Ruiz 均衡缩放系数；amount/scale 为内部可比量（判断接近 0 用）。 */
+  /** Ruiz 均衡缩放系数（`rate = amount / scale`）。 */
   scale: number;
+  /** 展开阶段引入的转换流辅助变量（`mechanic` 为 u64::MAX，不对应文档机制）。 */
+  is_virtual: boolean;
 }
 
 export interface FlowBalance {
   flow: DualVar;
   amount: number;
-  /** 该物品平衡约束的 Ruiz 缩放系数；amount/scale 为内部可比量。 */
+  /** `amount / scale`：内部可比量（判断接近 0 用它）。 */
+  rate: number;
+  /** 该物品平衡约束的 Ruiz 缩放系数。 */
   scale: number;
 }
 

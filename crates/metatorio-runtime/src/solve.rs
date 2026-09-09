@@ -56,20 +56,27 @@ pub struct MechanicSolution {
     pub mechanic: MechanicId,
     pub variant: u16,
     pub amount: f64,
+    /// `amount / scale`：剔除逐变量 Ruiz 缩放后的**可比量**。
+    ///
+    /// 判断「这条机制几乎没被用到」请用它，而不是表观 `amount`——单次产出
+    /// 大的配方表观量小但实际很重要。
+    pub rate: f64,
     /// 单台实例成本（机器碰撞箱面积；无数据时 16.0）。
     pub cost: f64,
-    /// 该变量的 Ruiz 均衡缩放系数。`amount / scale` 是内部缩放空间的
-    /// 可比量（剔除逐变量缩放差异），判断"接近 0"应使用它而不是
-    /// 表观 amount——单次产出大的配方表观量小但实际很重要。
+    /// 该变量的 Ruiz 均衡缩放系数（`rate = amount / scale`）。
     pub scale: f64,
+    /// 展开阶段引入的「转换流」辅助变量：`mechanic` 为 `u64::MAX`，
+    /// **不对应文档里的任何机制**，不要拿它去查机制。
+    pub is_virtual: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FlowBalance {
     pub flow: DualVar,
     pub amount: f64,
+    /// `amount / scale`：内部可比量，判断「接近 0」用它。
+    pub rate: f64,
     /// 该物品平衡约束的 Ruiz 缩放系数（dual_scale）。
-    /// `amount / scale` 是内部可比量，判断"接近 0"应使用它。
     pub scale: f64,
 }
 
@@ -1147,8 +1154,10 @@ fn solve_document(
                             mechanic: id.mechanic,
                             variant: id.variant,
                             amount,
+                            rate: amount / scale.max(1e-12),
                             cost: variable_costs.get(&id).copied().unwrap_or(1.0),
                             scale,
+                            is_virtual: id.mechanic.0 == u64::MAX,
                         }
                     })
                     .collect(),
@@ -1159,6 +1168,7 @@ fn solve_document(
                         FlowBalance {
                             flow,
                             amount,
+                            rate: amount / scale.max(1e-12),
                             scale,
                         }
                     })
@@ -2364,6 +2374,86 @@ mod tests {
             !runtime.document_matches(&snapshot),
             "目标工厂变化应使快照失效"
         );
+    }
+
+    /// 求解结果必须自带可比量 `rate` 与虚拟变量标记，agent 不必自己猜
+    /// `amount/scale` 语义、也不会把 `u64::MAX` 当成悬空机制 id。
+    #[test]
+    fn solve_solution_exposes_rate_and_virtual_marker() {
+        let mut runtime = load_runtime();
+        let project = new_project(&mut runtime);
+        runtime
+            .dispatch(AppMessage::Project {
+                project,
+                action: ProjectAction::AddFactory {
+                    name: "f".to_string(),
+                    template: crate::message::FactoryTemplate::Empty,
+                },
+            })
+            .unwrap();
+        let factory = runtime.state.project(project).unwrap().factories[0].id;
+        runtime
+            .dispatch(AppMessage::Factory {
+                project,
+                factory,
+                action: FactoryAction::MechanicList(MechanicListAction::Add {
+                    kind: MechanicKind::Recipe,
+                }),
+            })
+            .unwrap();
+        let mechanic = runtime.state.factory(project, factory).unwrap().mechanics[0].id;
+        for action in [
+            MechanicAction::Recipe(RecipeMechanicAction::SetRecipe {
+                recipe: IdWithQuality::new("iron-gear-wheel", "normal"),
+            }),
+            MechanicAction::Recipe(RecipeMechanicAction::SetMachine {
+                machine: IdWithQuality::new("assembling-machine-1", "normal"),
+            }),
+        ] {
+            runtime
+                .dispatch(AppMessage::Factory {
+                    project,
+                    factory,
+                    action: FactoryAction::Mechanic { mechanic, action },
+                })
+                .unwrap();
+        }
+        runtime
+            .dispatch(AppMessage::Factory {
+                project,
+                factory,
+                action: FactoryAction::Flow(FlowAction::AddToTarget {
+                    flow: DualVar::Item(IdWithQuality::new("iron-gear-wheel", "normal")),
+                    amount: 1.0,
+                }),
+            })
+            .unwrap();
+
+        let result = runtime.solve_factory(project, factory).unwrap();
+        let SolveStatus::Solved {
+            mechanics, flows, ..
+        } = &result.status
+        else {
+            panic!("应可解：{:?}", result.status);
+        };
+        assert!(!mechanics.is_empty());
+        for solution in mechanics {
+            assert!(
+                (solution.rate - solution.amount / solution.scale.max(1e-12)).abs() < 1e-12,
+                "rate 应等于 amount/scale：{solution:?}"
+            );
+            assert_eq!(solution.is_virtual, solution.mechanic.0 == u64::MAX);
+        }
+        assert!(
+            mechanics.iter().any(|solution| !solution.is_virtual),
+            "应有真实机制变量"
+        );
+        for balance in flows {
+            assert!(
+                (balance.rate - balance.amount / balance.scale.max(1e-12)).abs() < 1e-12,
+                "flow rate 应等于 amount/scale：{balance:?}"
+            );
+        }
     }
 
     #[test]
