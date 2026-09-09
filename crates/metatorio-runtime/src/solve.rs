@@ -163,6 +163,14 @@ impl Runtime {
         if message_affects_accessibility(&message) {
             self.invalidate_accessibility();
         }
+        // 进入 reducer 之前先校验消息引用的原型名（配方/机器/物品/品质/…）：
+        // reducer 拿不到仓库，旧行为会把不存在的名字静默写进文档。
+        // 项目还没绑定/载入上下文时跳过（此时无从校验，也不应阻塞）。
+        if let Some(project) = message_project(&message) {
+            if let Ok(store) = self.context_store(project) {
+                crate::validate::validate_message(store, &message)?;
+            }
+        }
         self.state.dispatch(message)
     }
 
@@ -989,6 +997,14 @@ pub fn mechanic_usage(result: &SolveResult) -> HashMap<MechanicId, f64> {
     used
 }
 
+/// 消息作用域里的项目 id（Application 级消息没有项目）。
+fn message_project(message: &AppMessage) -> Option<ProjectId> {
+    match message {
+        AppMessage::Application(_) => None,
+        AppMessage::Project { project, .. } | AppMessage::Factory { project, .. } => Some(*project),
+    }
+}
+
 /// 该消息是否可能改变项目的可达性（里程碑/无视可达性/绑定上下文/换仓库）。
 /// 若是则需失效 `accessibilities` 缓存；否则保留（可达性计算耗时，不每次重算）。
 fn message_affects_accessibility(message: &AppMessage) -> bool {
@@ -1670,7 +1686,13 @@ mod tests {
                     "unit": { "count": 1, "time": 1, "ingredients": [] }
                 }
             },
-            "recipe": {},
+            // 产能覆盖需要配方原型存在（dispatch 会校验原型名）。
+            "recipe": {
+                "steel-plate": {
+                    "type": "recipe", "name": "steel-plate", "energy_required": 1.0,
+                    "ingredients": [], "results": [], "enabled": true
+                }
+            },
             "assembling-machine": {}
         });
         runtime.install_context(

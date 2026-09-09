@@ -6,7 +6,7 @@
 ## MCP / AI 体工学（按优先级；结论来自对 live 端点 http://localhost:8765/mcp 的实测）
 
 - `dispatch` 创建对象后直接返回新 id：现在只有 project/factory 能从 `scheduled_commands`（persist / ensure-quality-limit / recompute）间接读出，mechanic 与 target 完全读不到，agent 每个创建动作都要再补一次 `get_planning_state` 往返。
-- 写入前校验原型名：`set-recipe` / `set-machine` 传不存在的名字（实测 `not-a-real-recipe`、`not-a-real-machine`）返回 `changed: true` 并把垃圾写进文档——reducer 拿不到原型仓库，无法校验。应报错，或至少返回 warning。
+- ~~写入前校验原型名~~ **已修复**：新增 `metatorio-runtime/src/validate.rs`，`Runtime::dispatch` 在进 reducer 前用项目当前上下文校验消息引用的原型名（配方 / 机器 / 资源 / 物品 / 流体 / 科技 / 星球 / 地表 / 品质，含插件与插件塔、燃料、枚举偏好、建议候选）；不存在的名字返回 `InvalidValue`，不再静默写入垃圾。拿不到 store（项目未绑定/未载入上下文）时跳过，不阻塞。
 - ~~求解失败要让 agent 看见~~ **已修复**：`execute_command` 改为返回 `CommandOutcome { effect, errors }`，MCP `dispatch` 回传 `errors: [...]` 并在有失败时置 `is_error = true`（求解 / 自动规划 / 清理 / 落盘 / 打开工程 / 关闭项目 / 上下文载入的失败，以及未实现命令，都不再静默）。
 - 求解结果的可读量：`solve.mechanics[].amount` 是 Ruiz 缩放空间的原始值，可比量是 `amount / scale`（代码注释里有，schema 里没有）；另外 `mechanic: 18446744073709551615` 是展开阶段引入的「转换流」虚拟变量，不是文档里的机制 id，容易被当成悬空引用。
 - 版本冲突检查收窄到工厂：`revision` 是整份文档的全局版本，`Runtime::document_matches` 用它做自动规划回写前的校验，于是「A 工厂规划期间人在 B 工厂改了个名字」也会让回写被拒（报「文档在自动规划期间被修改」）。需要工厂级版本或内容哈希，否则会误伤并行规划——而那正是这次锁改造的目标。

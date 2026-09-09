@@ -14,6 +14,7 @@ pub mod planet;
 pub mod prototype;
 pub mod solve;
 pub mod state;
+pub mod validate;
 
 pub use document::{
     AppDocument, AutoBeaconPlan, DOCUMENT_SCHEMA_VERSION, ExternalInput, FactoryDocument,
