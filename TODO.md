@@ -10,7 +10,7 @@
 - ~~求解失败要让 agent 看见~~ **已修复**：`execute_command` 改为返回 `CommandOutcome { effect, errors }`，MCP `dispatch` 回传 `errors: [...]` 并在有失败时置 `is_error = true`（求解 / 自动规划 / 清理 / 落盘 / 打开工程 / 关闭项目 / 上下文载入的失败，以及未实现命令，都不再静默）。
 - ~~求解结果的可读量~~ **已修复**：`MechanicSolution` 新增 `rate = amount / scale`（可比量）与 `is_virtual`（展开阶段转换流辅助变量，`mechanic` 为 u64::MAX、不对应文档机制）；`FlowBalance` 同样补 `rate`。
 - ~~版本冲突检查收窄到工厂~~ **已修复**：`Runtime::document_matches` 不再比较整份文档的全局 `revision`，改为比较**目标工厂文档**（机制 / 目标 / 外部输入 / 工厂设置）+ 项目设置与规划偏好 + 上下文实例与可达性代次；别的工厂改名不再误拒自动规划回写。
-- 读取粒度：`get_planning_state` 取单个工厂也要返回整份工厂文档（大项目几十个机制），且 `recompute` 在 project 层被静默忽略。补 `list_projects` / `list_factories` 与字段/机制过滤，非法参数组合显式报错。
+- ~~读取粒度~~ **已修复**：新增 `list_projects` / `list_factories` 两个轻量索引工具（项目：id/名称/上下文/工厂·机制·目标计数；工厂：id/名称/星球·地表/主品质/严格供给/计数 + 目标清单），agent 先看索引再决定读哪个完整文档；`get_planning_state` 的 `recompute` 只在 project + factory 同时给出时有效，其余组合显式报错（不再静默忽略）。（字段/机制裁剪按设计稿的正交性原则不做——那是 agent 侧 JSON 工具的事。）
 - 单位标注：内部量纲是「每秒」（实测把项目 `time_scale` 改成 minutes 不改变任何求解数值，只影响显示），但工具 schema 未说明，agent 容易按「每分钟」填目标。
 - 幂等/重试：`dispatch` 超时后重试会重复添加 target/mechanic；没有 request id 或幂等键。
 - ~~自动规划结果与当前一致时跳过回写~~ **已修复**：`auto_plan::same_mechanics` 做与顺序无关的等价判定（忽略条目 id / enabled），等价时不再回写——省掉 revision bump、落盘与求解缓存失效；随后直接重解一次（命中缓存）以回传结果。

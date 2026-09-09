@@ -130,6 +130,14 @@ impl MetatorioMcp {
         let app = self.app.clone();
         let project = params.project.map(ProjectId);
         let factory = params.factory.map(FactoryId);
+        // `recompute` 只在 project + factory 同时给出时才有意义：其余组合显式
+        // 报错，而不是静默忽略（agent 之前无法察觉）。
+        if params.recompute && (project.is_none() || factory.is_none()) {
+            return Err(McpError::invalid_params(
+                "recompute 需要同时提供 project 与 factory".to_string(),
+                None,
+            ));
+        }
 
         // 1) 可选重算：与 GUI 走同一条锁外求解路径（不占 runtime 锁，可与
         //    GUI / 其它 MCP 调用并行）。
@@ -215,6 +223,76 @@ impl MetatorioMcp {
             );
         }
         Ok(CallToolResult::structured(value))
+    }
+
+    /// 项目索引：有哪些项目、各自多少个工厂 / 机制 / 目标。
+    ///
+    /// 给 agent 一个**便宜的第一步**：先看索引再决定读哪个项目的完整文档，
+    /// 避免为了找一个 id 而拉全量文档。
+    #[tool(
+        description = "List projects (id, name, context, and counts of factories / \
+        mechanics / targets).  Cheap index: call this first, then use \
+        get_planning_state to read a specific project."
+    )]
+    async fn list_projects(&self) -> Result<CallToolResult, McpError> {
+        let app = self.app.clone();
+        let projects = tauri::async_runtime::spawn_blocking(move || {
+            let state = app.state::<AppState>();
+            let runtime = state
+                .runtime
+                .lock()
+                .map_err(|_| "runtime lock poisoned".to_string())?;
+            Ok::<_, String>(project_summary(&runtime.state.document))
+        })
+        .await
+        .map_err(|error| {
+            McpError::internal_error(format!("list_projects join 失败: {error}"), None)
+        })?
+        .map_err(|error| {
+            McpError::invalid_params(format!("list_projects 执行失败: {error}"), None)
+        })?;
+        Ok(CallToolResult::structured(serde_json::json!({
+            "projects": projects,
+        })))
+    }
+
+    /// 工厂索引：某个项目下有哪些工厂、规模与关键设置（含目标清单）。
+    #[tool(
+        description = "List the factories of one project (id, name, planet/surface, \
+        major quality, strict source/sink, counts, and the target list).  Cheap \
+        index: call this first, then get_planning_state with project + factory to \
+        read the full factory document."
+    )]
+    async fn list_factories(
+        &self,
+        Parameters(params): Parameters<ListFactoriesParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let app = self.app.clone();
+        let project = ProjectId(params.project);
+        let (name, factories) = tauri::async_runtime::spawn_blocking(move || {
+            let state = app.state::<AppState>();
+            let runtime = state
+                .runtime
+                .lock()
+                .map_err(|_| "runtime lock poisoned".to_string())?;
+            let project_doc = runtime
+                .state
+                .project(project)
+                .map_err(|error| error.to_string())?;
+            Ok::<_, String>((project_doc.name.clone(), factory_summary(project_doc)))
+        })
+        .await
+        .map_err(|error| {
+            McpError::internal_error(format!("list_factories join 失败: {error}"), None)
+        })?
+        .map_err(|error| {
+            McpError::invalid_params(format!("list_factories 执行失败: {error}"), None)
+        })?;
+        Ok(CallToolResult::structured(serde_json::json!({
+            "project": params.project,
+            "name": name,
+            "factories": factories,
+        })))
     }
 }
 
@@ -304,6 +382,66 @@ struct PlanningStateParams {
     recompute: bool,
 }
 
+/// Parameters for `list_factories`.
+#[derive(Debug, serde::Deserialize, JsonSchema)]
+struct ListFactoriesParams {
+    /// Project id (u64).
+    project: u64,
+}
+
+/// 项目级索引条目：只给「有哪些项目、各自多大」，不给内容。
+fn project_summary(document: &metatorio_runtime::AppDocument) -> Vec<serde_json::Value> {
+    document
+        .projects
+        .iter()
+        .map(|project| {
+            serde_json::json!({
+                "id": project.id.0,
+                "name": project.name,
+                "context_id": project.context_id,
+                "factories": project.factories.len(),
+                "mechanics": project
+                    .factories
+                    .iter()
+                    .map(|factory| factory.mechanics.len())
+                    .sum::<usize>(),
+                "targets": project
+                    .factories
+                    .iter()
+                    .map(|factory| factory.targets.len())
+                    .sum::<usize>(),
+            })
+        })
+        .collect()
+}
+
+/// 工厂级索引条目：规模与关键设置，供 agent 决定去读哪一个工厂。
+fn factory_summary(project: &metatorio_runtime::ProjectDocument) -> Vec<serde_json::Value> {
+    project
+        .factories
+        .iter()
+        .map(|factory| {
+            serde_json::json!({
+                "id": factory.id.0,
+                "name": factory.name,
+                "planet": factory.settings.planet,
+                "surface": factory.settings.surface,
+                "major_quality": factory.settings.major_quality,
+                "strict_source": factory.strict_source,
+                "strict_sink": factory.strict_sink,
+                "mechanics": factory.mechanics.len(),
+                "targets": factory.targets.iter().map(|target| serde_json::json!({
+                    "id": target.id.0,
+                    "flow": target.flow,
+                    "amount": target.amount,
+                })).collect::<Vec<_>>(),
+                "external_inputs": factory.external_inputs.len(),
+                "target_expressions": factory.target_expressions.len(),
+            })
+        })
+        .collect()
+}
+
 // ── Server lifecycle ───────────────────────────────────────────────
 
 /// Start the MCP server on a dedicated tokio runtime thread, bound to
@@ -384,4 +522,54 @@ async fn require_token(
         }
     }
     next.run(request).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use metatorio_core::{DualVar, IdWithQuality};
+    use metatorio_runtime::document::{AppDocument, FactoryDocument, FlowTarget, ProjectDocument};
+    use metatorio_runtime::id::{FactoryId, ProjectId, TargetId};
+
+    /// 索引工具必须「小而有信息」：只给规模与关键字段，不含机制明细。
+    #[test]
+    fn summaries_are_compact_and_informative() {
+        let mut factory = FactoryDocument {
+            id: FactoryId(2),
+            name: "f".to_string(),
+            ..Default::default()
+        };
+        factory.targets.push(FlowTarget {
+            id: TargetId(3),
+            flow: DualVar::Item(IdWithQuality::new("iron-plate", "normal")),
+            amount: 60.0,
+        });
+        let mut project = ProjectDocument {
+            id: ProjectId(1),
+            name: "p".to_string(),
+            ..Default::default()
+        };
+        project.factories.push(factory);
+        let document = AppDocument {
+            schema_version: metatorio_runtime::DOCUMENT_SCHEMA_VERSION,
+            projects: vec![project.clone()],
+        };
+
+        let projects = project_summary(&document);
+        assert_eq!(projects.len(), 1);
+        assert_eq!(projects[0]["id"], 1);
+        assert_eq!(projects[0]["factories"], 1);
+        assert_eq!(projects[0]["targets"], 1);
+        assert!(projects[0].get("factories_document").is_none());
+
+        let factories = factory_summary(&project);
+        assert_eq!(factories.len(), 1);
+        assert_eq!(factories[0]["id"], 2);
+        assert_eq!(factories[0]["targets"][0]["amount"], 60.0);
+        assert_eq!(
+            factories[0]["targets"][0]["flow"]["Item"]["id"],
+            "iron-plate"
+        );
+        assert!(factories[0].get("mechanics").is_some());
+    }
 }
