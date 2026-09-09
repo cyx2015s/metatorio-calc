@@ -54,6 +54,28 @@ impl<R> Cached<R> {
     }
 }
 
+/// 按字符串键串行化一段异步操作（「同一资源只加载一次」用）。
+///
+/// 例：两个并发请求要载入同一个游戏上下文时，只有一个真正读盘解析，
+/// 另一个等它装好后直接返回。
+#[derive(Default)]
+pub struct KeyLocks {
+    locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
+}
+
+impl KeyLocks {
+    pub async fn lock(&self, key: String) -> tokio::sync::OwnedMutexGuard<()> {
+        let lock = self
+            .locks
+            .lock()
+            .await
+            .entry(key)
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone();
+        lock.lock_owned().await
+    }
+}
+
 /// 求解调度器（挂在 `AppState` 上，按用途各一份）。
 ///
 /// `R` 是这次「求解」的产出：重算产 [`SolveResult`]，自动规划产

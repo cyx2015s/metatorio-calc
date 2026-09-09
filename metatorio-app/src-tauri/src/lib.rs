@@ -70,6 +70,8 @@ pub struct AppState {
         metatorio_runtime::SolveSnapshot,
         Vec<metatorio_core::Mechanic>,
     )>,
+    /// 上下文载入的按键串行锁（同一上下文只读盘解析一次）。
+    context_loads: solve_jobs::KeyLocks,
     contexts: Mutex<ContextRegistry>,
     project_paths: Mutex<HashMap<ProjectId, String>>,
     /// 上下文 id → 本地化名映射（来自游戏 `--dump-prototype-locale` 的
@@ -83,6 +85,7 @@ impl Default for AppState {
             runtime: Mutex::new(Runtime::new()),
             solve_jobs: solve_jobs::SolveJobs::default(),
             autoplan_jobs: solve_jobs::SolveJobs::default(),
+            context_loads: solve_jobs::KeyLocks::default(),
             contexts: Mutex::new(ContextRegistry::default()),
             project_paths: Mutex::new(HashMap::new()),
             locales: Mutex::new(HashMap::new()),
@@ -513,26 +516,62 @@ fn localized_name(map: &HashMap<String, String>, kind: &str, name: &str) -> Stri
 
 // ── Context loading / registration ────────────────────────────────
 
+/// 上下文的 dump 文件路径（短暂持有 registry 锁）。
+fn context_dump_path(state: &AppState, id: &str) -> Result<PathBuf, String> {
+    let registry = state
+        .contexts
+        .lock()
+        .map_err(|_| "contexts 锁损坏".to_string())?;
+    if !registry.meta.contains_key(id) {
+        return Err(format!("上下文 {id} 不存在于缓存"));
+    }
+    Ok(registry.dump_path(id))
+}
+
+/// 读 dump 并构建原型仓库。**不碰 runtime / runtime 锁**，可在锁外或阻塞
+/// 线程池上执行（大 dump 解析可达数秒）。
+fn load_store_from_dump(dump_path: &Path) -> Result<PrototypeStore, String> {
+    let raw = std::fs::read(dump_path).map_err(|error| error.to_string())?;
+    let dump: serde_json::Value =
+        serde_json::from_slice(&raw).map_err(|error| error.to_string())?;
+    PrototypeStore::load(&dump).map_err(|error| error.to_string())
+}
+
+/// 同步版：调用方已持有 runtime 锁时用（读盘仍在锁内）。
 fn ensure_context_loaded(state: &AppState, runtime: &mut Runtime, id: &str) -> Result<(), String> {
     if runtime.context_store_by_id(id).is_some() {
         return Ok(());
     }
-    let dump_path = {
-        let registry = state
-            .contexts
-            .lock()
-            .map_err(|_| "contexts 锁损坏".to_string())?;
-        if !registry.meta.contains_key(id) {
-            return Err(format!("上下文 {id} 不存在于缓存"));
-        }
-        registry.dump_path(id)
-    };
-    let raw = std::fs::read(&dump_path).map_err(|error| error.to_string())?;
-    let dump: serde_json::Value =
-        serde_json::from_slice(&raw).map_err(|error| error.to_string())?;
-    let prototype = PrototypeStore::load(&dump).map_err(|error| error.to_string())?;
+    let dump_path = context_dump_path(state, id)?;
+    let prototype = load_store_from_dump(&dump_path)?;
     runtime.install_context(id.to_string(), prototype);
     Ok(())
+}
+
+/// 锁外版：读盘/解析在阻塞线程池上完成，只在最后短暂上锁装入 store。
+///
+/// 同一上下文并发请求会串行（`context_loads`），避免大 dump 被解析多次。
+async fn ensure_context_loaded_offlock(state: &AppState, id: &str) -> Result<(), String> {
+    if with_runtime(state, |runtime| {
+        Ok(runtime.context_store_by_id(id).is_some())
+    })? {
+        return Ok(());
+    }
+    let _guard = state.context_loads.lock(id.to_string()).await;
+    // 等锁期间别人可能已经装好。
+    if with_runtime(state, |runtime| {
+        Ok(runtime.context_store_by_id(id).is_some())
+    })? {
+        return Ok(());
+    }
+    let dump_path = context_dump_path(state, id)?;
+    let prototype = tauri::async_runtime::spawn_blocking(move || load_store_from_dump(&dump_path))
+        .await
+        .map_err(|error| error.to_string())??;
+    with_runtime(state, |runtime| {
+        runtime.install_context(id.to_string(), prototype);
+        Ok(())
+    })
 }
 
 /// Register a new context (or reuse the cached one by content hash), persist
@@ -563,17 +602,20 @@ fn copy_dir(src: &Path, dst: &Path) {
     }
 }
 
-fn register_context(
+/// 注册上下文：写注册表 + 落盘 dump/locale/图标，返回上下文 id。
+///
+/// 不碰 runtime，也不长时间持有 registry 锁（几十 MB 的 dump 写入与图标目录
+/// 拷贝都在锁外完成；注册表只在开头做一次 check-and-set）。
+fn register_context_files(
     state: &AppState,
-    runtime: &mut Runtime,
     name: String,
     source: String,
     raw: &[u8],
     locale_raw: Option<&[u8]>,
     icon: IconImport,
-) -> Result<ContextInfo, String> {
+) -> Result<String, String> {
     let id = context_id_of(raw);
-    {
+    let (is_new, dump_path, locale_path, icon_root) = {
         let mut registry = state
             .contexts
             .lock()
@@ -581,36 +623,57 @@ fn register_context(
         let is_new = !registry.meta.contains_key(&id);
         if is_new {
             registry.register(id.clone(), name, source);
-            std::fs::write(registry.dump_path(&id), raw).map_err(|error| error.to_string())?;
         }
-        // 翻译：合并后的 `{category}/{name}` 映射写入 locale.json（id 只由
-        // dump 内容决定，翻译变化不影响上下文 id；缺失/历史缓存则补写）。
-        let locale_path = registry.locale_path(&id);
-        if !locale_path.is_file() {
-            if let Some(locale_raw) = locale_raw {
-                let _ = std::fs::write(&locale_path, locale_raw);
-            }
-        }
-        // 图标：新上下文，或历史注册时缺图标（早期路径 bug 留下的缓存）
-        // 都导入——重新导出同内容时 id 相同、注册被跳过，但图标仍需补齐。
-        if !registry.icon_root(&id).is_dir() {
-            match &icon {
-                IconImport::None => {}
-                IconImport::Move(src) => {
-                    // 同卷 rename：把本次导出的类型目录整体移入缓存，之后
-                    // 再次导出覆盖暂存目录也不会影响这个上下文。
-                    let dst = registry.icon_root(&id);
-                    if let Err(error) = std::fs::rename(src, &dst) {
-                        eprintln!("移动图标失败（忽略，使用占位图标）: {error}");
-                    }
-                }
-                IconImport::Copy(src) => copy_dir(src, &registry.icon_root(&id)),
-            }
+        (
+            is_new,
+            registry.dump_path(&id),
+            registry.locale_path(&id),
+            registry.icon_root(&id),
+        )
+    };
+    if is_new {
+        std::fs::write(&dump_path, raw).map_err(|error| error.to_string())?;
+    }
+    // 翻译：合并后的 `{category}/{name}` 映射写入 locale.json（id 只由
+    // dump 内容决定，翻译变化不影响上下文 id；缺失/历史缓存则补写）。
+    if !locale_path.is_file() {
+        if let Some(locale_raw) = locale_raw {
+            let _ = std::fs::write(&locale_path, locale_raw);
         }
     }
-    ensure_context_loaded(state, runtime, &id)?;
-    runtime.set_active_context(Some(id.clone()));
-    context_info_of(state, runtime, &id).ok_or_else(|| "上下文信息缺失".to_string())
+    // 图标：新上下文，或历史注册时缺图标（早期路径 bug 留下的缓存）
+    // 都导入——重新导出同内容时 id 相同、注册被跳过，但图标仍需补齐。
+    if !icon_root.is_dir() {
+        match &icon {
+            IconImport::None => {}
+            IconImport::Move(src) => {
+                // 同卷 rename：把本次导出的类型目录整体移入缓存，之后
+                // 再次导出覆盖暂存目录也不会影响这个上下文。
+                if let Err(error) = std::fs::rename(src, &icon_root) {
+                    eprintln!("移动图标失败（忽略，使用占位图标）: {error}");
+                }
+            }
+            IconImport::Copy(src) => copy_dir(src, &icon_root),
+        }
+    }
+    Ok(id)
+}
+
+/// 注册上下文并激活：注册文件 → 锁外载入 store → 短暂上锁激活。
+async fn register_context_and_activate(
+    state: &AppState,
+    name: String,
+    source: String,
+    raw: &[u8],
+    locale_raw: Option<&[u8]>,
+    icon: IconImport,
+) -> Result<ContextInfo, String> {
+    let id = register_context_files(state, name, source, raw, locale_raw, icon)?;
+    ensure_context_loaded_offlock(state, &id).await?;
+    with_runtime(state, |runtime| {
+        runtime.set_active_context(Some(id.clone()));
+        context_info_of(state, runtime, &id).ok_or_else(|| "上下文信息缺失".to_string())
+    })
 }
 
 fn context_info_from(
@@ -720,12 +783,16 @@ fn run_game(exe: &Path, config: &Path, args: &[&str], extra: &[String]) -> Resul
     Ok(())
 }
 
-fn load_game_context_impl(
+/// 跑游戏导出并读回产物（纯 IO + 子进程，**不碰 runtime / registry 锁**）。
+///
+/// 返回 `(name, source, dump 原始字节, locale 字节, 图标源目录)`。
+type GameExport = (String, String, Vec<u8>, Option<Vec<u8>>, PathBuf);
+
+fn export_game_context(
     app: &AppHandle,
-    state: &AppState,
     executable_path: &str,
     mod_dir: Option<&str>,
-) -> Result<ContextInfo, String> {
+) -> Result<GameExport, String> {
     let exe = PathBuf::from(executable_path);
     if !exe.is_file() {
         return Err(format!("游戏可执行文件不存在: {executable_path}"));
@@ -783,41 +850,52 @@ fn load_game_context_impl(
             serde_json::to_vec(&map).ok()
         }
     };
-    let mut runtime = state
-        .runtime
-        .lock()
-        .map_err(|_| "runtime lock poisoned".to_string())?;
-    register_context(
+    Ok((name, source, raw, locale_raw, icon_src))
+}
+
+/// 导出 → 注册 → 锁外载入 → 激活。
+async fn load_game_context_and_activate(
+    app: &AppHandle,
+    state: &AppState,
+    executable_path: &str,
+    mod_dir: Option<&str>,
+) -> Result<ContextInfo, String> {
+    let export_app = app.clone();
+    let executable = executable_path.to_string();
+    let mods = mod_dir.map(str::to_string);
+    let (name, source, raw, locale_raw, icon_src) =
+        tauri::async_runtime::spawn_blocking(move || {
+            export_game_context(&export_app, &executable, mods.as_deref())
+        })
+        .await
+        .map_err(|error| error.to_string())??;
+    register_context_and_activate(
         state,
-        &mut runtime,
         name,
         source,
         &raw,
         locale_raw.as_deref(),
         IconImport::Move(icon_src),
     )
+    .await
 }
 
 // ── Commands ──────────────────────────────────────────────────────
 
 /// Load the embedded demo prototype store as a context (idempotent by hash).
 #[tauri::command]
-fn load_bundled_dump(app: AppHandle) -> Result<ContextInfo, String> {
+async fn load_bundled_dump(app: AppHandle) -> Result<ContextInfo, String> {
     let state = app.state::<AppState>();
-    let mut runtime = state
-        .runtime
-        .lock()
-        .map_err(|_| "runtime lock poisoned".to_string())?;
-    let info = register_context(
+    let info = register_context_and_activate(
         &state,
-        &mut runtime,
         "内置示例".to_string(),
         "embedded demo".to_string(),
         DEMO_DUMP.as_bytes(),
         None,
         IconImport::None,
-    )?;
-    emit_contexts_changed(&app, &state, Some(&runtime));
+    )
+    .await?;
+    emit_contexts_changed(&app, &state, None);
     Ok(info)
 }
 
@@ -829,21 +907,18 @@ async fn load_game_context(
     executable_path: String,
     mod_dir: Option<String>,
 ) -> Result<ContextInfo, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let state = app.state::<AppState>();
-        let info = load_game_context_impl(&app, &state, &executable_path, mod_dir.as_deref())?;
-        emit_contexts_changed(&app, &state, None);
-        Ok(info)
-    })
-    .await
-    .map_err(|error| error.to_string())?
+    let state = app.state::<AppState>();
+    let info =
+        load_game_context_and_activate(&app, &state, &executable_path, mod_dir.as_deref()).await?;
+    emit_contexts_changed(&app, &state, None);
+    Ok(info)
 }
 
 /// Load a pre-generated `data-raw-dump.json` as a cached context.
 #[tauri::command]
 async fn load_dump(app: AppHandle, path: String) -> Result<ContextInfo, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let state = app.state::<AppState>();
+    // 读盘 + 目录探测放在阻塞线程池（dump 可能几十 MB）。
+    let (name, source, raw, locale_raw, icon) = tauri::async_runtime::spawn_blocking(move || {
         let raw = std::fs::read(&path).map_err(|error| error.to_string())?;
         let name = Path::new(&path)
             .file_stem()
@@ -878,24 +953,16 @@ async fn load_dump(app: AppHandle, path: String) -> Result<ContextInfo, String> 
             }
             None => IconImport::None,
         };
-        let mut runtime = state
-            .runtime
-            .lock()
-            .map_err(|_| "runtime lock poisoned".to_string())?;
-        let info = register_context(
-            &state,
-            &mut runtime,
-            name,
-            source,
-            &raw,
-            locale_raw.as_deref(),
-            icon,
-        )?;
-        emit_contexts_changed(&app, &state, Some(&runtime));
-        Ok(info)
+        Ok::<_, String>((name, source, raw, locale_raw, icon))
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string())??;
+    let state = app.state::<AppState>();
+    let info =
+        register_context_and_activate(&state, name, source, &raw, locale_raw.as_deref(), icon)
+            .await?;
+    emit_contexts_changed(&app, &state, None);
+    Ok(info)
 }
 
 /// All cached contexts + the active context id.
@@ -907,21 +974,17 @@ fn list_contexts(state: State<'_, AppState>) -> ContextList {
 /// Activate a context (loading its store from cache on demand).
 #[tauri::command]
 async fn set_active_context(app: AppHandle, id: Option<String>) -> Result<ContextList, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let state = app.state::<AppState>();
-        let mut runtime = state
-            .runtime
-            .lock()
-            .map_err(|_| "runtime lock poisoned".to_string())?;
-        if let Some(id) = &id {
-            ensure_context_loaded(&state, &mut runtime, id)?;
-        }
-        runtime.set_active_context(id);
-        emit_contexts_changed(&app, &state, Some(&runtime));
-        Ok(context_list_with(&runtime, &state))
-    })
-    .await
-    .map_err(|error| error.to_string())?
+    let state = app.state::<AppState>();
+    if let Some(id) = &id {
+        // 读盘解析在锁外完成，只在最后短暂上锁装入。
+        ensure_context_loaded_offlock(&state, id).await?;
+    }
+    let list = with_runtime(&state, |runtime| {
+        runtime.set_active_context(id.clone());
+        Ok(context_list_with(runtime, &state))
+    })?;
+    emit_contexts_changed(&app, &state, None);
+    Ok(list)
 }
 
 #[tauri::command]
@@ -2176,19 +2239,10 @@ async fn save_project_as_dialog(
         return Ok(None);
     };
     let path = picked.into_path().map_err(|error| error.to_string())?;
-    let path_string = path.to_string_lossy().to_string();
+    let path = path.to_string_lossy().to_string();
     let state = app.state::<AppState>();
-    let mut runtime = state
-        .runtime
-        .lock()
-        .map_err(|_| "runtime lock poisoned".to_string())?;
-    runtime
-        .save_document_file(project, &path)
-        .map_err(|error| error.to_string())?;
-    if let Ok(mut paths) = state.project_paths.lock() {
-        paths.insert(project, path_string.clone());
-    }
-    Ok(Some(path_string))
+    persist_project(&state, project, path.clone()).await?;
+    Ok(Some(path))
 }
 
 /// Save to the remembered path; `Ok(None)` means no path yet (call
@@ -2205,13 +2259,7 @@ async fn save_project(app: AppHandle, project: ProjectId) -> Result<Option<Strin
     let Some(path) = path else {
         return Ok(None);
     };
-    let mut runtime = state
-        .runtime
-        .lock()
-        .map_err(|_| "runtime lock poisoned".to_string())?;
-    runtime
-        .save_document_file(project, &path)
-        .map_err(|error| error.to_string())?;
+    persist_project(&state, project, path.clone()).await?;
     Ok(Some(path))
 }
 
@@ -2616,6 +2664,33 @@ fn with_runtime<T>(
     f(&mut runtime)
 }
 
+/// 保存项目到文件：锁内取文档快照 → 锁外原子写盘 → 锁内清 dirty。
+///
+/// 序列化 + 文件 IO 都不持 runtime 锁（大工程 JSON 序列化可能有几十毫秒，
+/// 不该阻塞 MCP / GUI 的其它交互）。
+async fn persist_project(state: &AppState, project: ProjectId, path: String) -> Result<(), String> {
+    let document = with_runtime(state, |runtime| {
+        runtime
+            .document_for_save(project)
+            .map_err(|error| error.to_string())
+    })?;
+    let write_path = PathBuf::from(&path);
+    tauri::async_runtime::spawn_blocking(move || {
+        metatorio_runtime::write_document_file(&document, &write_path)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    with_runtime(state, |runtime| {
+        runtime.mark_saved(project);
+        Ok(())
+    })?;
+    if let Ok(mut paths) = state.project_paths.lock() {
+        paths.insert(project, path);
+    }
+    Ok(())
+}
+
 /// 锁外求解一个工厂：取快照（短锁）→ 后台线程求解 → 回填可达性缓存（短锁）。
 ///
 /// 求解本身不持有 runtime 锁，因此 MCP 调用与 GUI 交互不会被长求解挡住；
@@ -2673,10 +2748,8 @@ async fn execute_command(
     match command {
         RuntimeCommand::Recompute { project, factory } => {
             let (project, factory) = (*project, *factory);
-            // 先确保项目的上下文 store 在内存里（锁内；读盘路径见 C5 优化）。
-            if let Err(error) = with_runtime(state, |runtime| {
-                ensure_context_for_project(state, runtime, project)
-            }) {
+            // 先确保项目的上下文 store 在内存里（读盘在锁外完成）。
+            if let Err(error) = ensure_context_for_project_offlock(state, project).await {
                 emit(app, "solve-error", error);
                 return None;
             }
@@ -2733,17 +2806,9 @@ async fn execute_command(
                 .clone()
                 .or_else(|| state.project_paths.lock().ok()?.get(&project).cloned());
             if let Some(path) = path {
-                match with_runtime(state, |runtime| {
-                    runtime
-                        .save_document_file(project, &path)
-                        .map_err(|error| error.to_string())
-                }) {
-                    Ok(()) => {
-                        if let Ok(mut paths) = state.project_paths.lock() {
-                            paths.insert(project, path);
-                        }
-                    }
-                    Err(error) => eprintln!("persist failed: {error}"),
+                // 锁外序列化 + 写盘。
+                if let Err(error) = persist_project(state, project, path).await {
+                    eprintln!("persist failed: {error}");
                 }
             }
             // Pathless persist with no remembered path is a no-op.
@@ -2753,9 +2818,9 @@ async fn execute_command(
             executable_path,
             mod_path,
         } => {
-            // `load_game_context_impl` 内部自己取 runtime 锁；这里**不能**持锁
-            // 调用（std::sync::Mutex 不可重入）。
-            match load_game_context_impl(app, state, executable_path, mod_path.as_deref()) {
+            match load_game_context_and_activate(app, state, executable_path, mod_path.as_deref())
+                .await
+            {
                 Ok(_) => emit_contexts_changed(app, state, None),
                 Err(error) => emit(app, "context-error", error),
             }
@@ -2772,12 +2837,15 @@ async fn execute_command(
             });
             match newest {
                 Some(id) => {
-                    match with_runtime(state, |runtime| {
-                        ensure_context_loaded(state, runtime, &id)?;
-                        runtime.set_active_context(Some(id.clone()));
-                        Ok(())
-                    }) {
-                        Ok(()) => emit_contexts_changed(app, state, None),
+                    // 读盘解析在锁外完成。
+                    match ensure_context_loaded_offlock(state, &id).await {
+                        Ok(()) => {
+                            let _ = with_runtime(state, |runtime| {
+                                runtime.set_active_context(Some(id.clone()));
+                                Ok(())
+                            });
+                            emit_contexts_changed(app, state, None);
+                        }
                         Err(error) => emit(app, "context-error", error),
                     }
                 }
@@ -2791,9 +2859,7 @@ async fn execute_command(
             action,
         } => {
             let (project, factory, action) = (*project, *factory, *action);
-            if let Err(error) = with_runtime(state, |runtime| {
-                ensure_context_for_project(state, runtime, project)
-            }) {
+            if let Err(error) = ensure_context_for_project_offlock(state, project).await {
                 emit(app, "solve-error", error);
                 return None;
             }
@@ -2836,9 +2902,7 @@ async fn execute_command(
         RuntimeCommand::AutoPlan { project, factory } => {
             // 自动规划：枚举候选 → LP → 回写被选中的机制 → 重解。
             let (project, factory) = (*project, *factory);
-            if let Err(error) = with_runtime(state, |runtime| {
-                ensure_context_for_project(state, runtime, project)
-            }) {
+            if let Err(error) = ensure_context_for_project_offlock(state, project).await {
                 emit(app, "solve-error", error);
                 return None;
             }
@@ -2926,6 +2990,26 @@ fn ensure_context_for_project(
         .or_else(|| runtime.active_context().map(str::to_string));
     if let Some(id) = context_id {
         ensure_context_loaded(state, runtime, &id)?;
+    }
+    Ok(())
+}
+
+/// [`ensure_context_for_project`] 的锁外版：读盘解析在锁外完成。
+async fn ensure_context_for_project_offlock(
+    state: &AppState,
+    project: ProjectId,
+) -> Result<(), String> {
+    let context_id = with_runtime(state, |runtime| {
+        Ok(runtime
+            .state
+            .project(project)
+            .map_err(|error| error.to_string())?
+            .context_id
+            .clone()
+            .or_else(|| runtime.active_context().map(str::to_string)))
+    })?;
+    if let Some(id) = context_id {
+        ensure_context_loaded_offlock(state, &id).await?;
     }
     Ok(())
 }

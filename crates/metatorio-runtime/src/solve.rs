@@ -1,5 +1,5 @@
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::{collections::HashMap, fs::File, path::Path, sync::Arc};
 
 use metatorio_core::{
@@ -484,22 +484,33 @@ impl Runtime {
     /// 保存**当前选中的单个项目**到文件（项目级操作，不保存整个工程合集）。
     ///
     /// 文件格式仍是 `AppDocument`（只含这一个项目），与导入/打开兼容。
+    ///
+    /// 序列化 + 写盘都发生在锁内；需要把 IO 移出锁的调用方请用
+    /// [`Runtime::document_for_save`] + [`write_document_file`] +
+    /// [`Runtime::mark_saved`] 三步。
     pub fn save_document_file(
         &mut self,
         project: ProjectId,
         path: impl AsRef<Path>,
     ) -> Result<(), RuntimeError> {
+        let document = self.document_for_save(project)?;
+        write_document_file(&document, path.as_ref())?;
+        self.mark_saved(project);
+        Ok(())
+    }
+
+    /// 取出「单项目保存」用的文档快照（锁内，只是克隆文档）。
+    pub fn document_for_save(&self, project: ProjectId) -> Result<AppDocument, RuntimeError> {
         let project_doc = self.state.project(project)?.clone();
-        let document = AppDocument {
+        Ok(AppDocument {
             schema_version: DOCUMENT_SCHEMA_VERSION,
             projects: vec![project_doc],
-        };
-        let file =
-            File::create(path.as_ref()).map_err(|error| RuntimeError::Io(error.to_string()))?;
-        serde_json::to_writer_pretty(file, &document)
-            .map_err(|error| RuntimeError::Io(error.to_string()))?;
+        })
+    }
+
+    /// 清除「未保存」标记（写盘成功后调用）。
+    pub fn mark_saved(&mut self, project: ProjectId) {
         self.state.dirty_projects.remove(&project);
-        Ok(())
     }
 
     /// 取一次求解快照（锁内微秒级）。
@@ -659,6 +670,38 @@ impl Runtime {
             .apply_cleanup(project, factory, action, &mechanic_usage(&result))?;
         Ok(())
     }
+}
+
+/// 把文档写入文件（**不涉及 Runtime / 锁**，可锁外执行）。
+///
+/// 先写同目录临时文件再改名，避免写一半崩溃留下截断的工程文件；
+/// Windows 上 `rename` 不能覆盖已存在文件，故失败时先删目标再重试。
+pub fn write_document_file(document: &AppDocument, path: &Path) -> Result<(), RuntimeError> {
+    let tmp = match path.file_name() {
+        Some(name) => path.with_file_name(format!("{}.tmp", name.to_string_lossy())),
+        None => path.with_extension("tmp"),
+    };
+    let io = |error: std::io::Error| RuntimeError::Io(error.to_string());
+    {
+        let file = File::create(&tmp).map_err(io)?;
+        serde_json::to_writer_pretty(&file, document)
+            .map_err(|error| RuntimeError::Io(error.to_string()))?;
+        // 落盘后再改名，保证 rename 后内容已持久。
+        file.sync_all().map_err(io)?;
+    }
+    if let Err(first) = std::fs::rename(&tmp, path) {
+        // Windows: 目标已存在时 rename 失败 → 删掉再试一次。
+        if std::fs::remove_file(path).is_ok() {
+            if let Err(second) = std::fs::rename(&tmp, path) {
+                let _ = std::fs::remove_file(&tmp);
+                return Err(io(second));
+            }
+        } else {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(io(first));
+        }
+    }
+    Ok(())
 }
 
 /// 求解输入快照：把「求解所需的一切」从 `&mut Runtime` 里摘出来，使求解可以
@@ -2079,6 +2122,43 @@ mod tests {
         );
         assert_eq!(snapshot.revision, runtime.state.revision);
         assert_eq!(solve_snapshot(&snapshot).unwrap(), after);
+    }
+
+    /// 落盘必须是「临时文件 + 改名」，且能覆盖已存在的文件（Windows 上
+    /// rename 不能覆盖，需先删目标）。
+    #[test]
+    fn write_document_file_roundtrips_and_overwrites() {
+        let dir = std::env::temp_dir().join(format!(
+            "metatorio-save-test-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("project.json");
+
+        let mut runtime = load_runtime();
+        let project = new_project(&mut runtime);
+        let document = runtime.document_for_save(project).unwrap();
+        write_document_file(&document, &path).unwrap();
+
+        // 覆盖写：改个名再写，文件内容应更新，且不留下临时文件。
+        runtime
+            .dispatch(AppMessage::Project {
+                project,
+                action: ProjectAction::SetName {
+                    name: "renamed".to_string(),
+                },
+            })
+            .unwrap();
+        let document = runtime.document_for_save(project).unwrap();
+        write_document_file(&document, &path).unwrap();
+
+        let raw = std::fs::read_to_string(&path).unwrap();
+        let read: AppDocument = serde_json::from_str(&raw).unwrap();
+        assert_eq!(read.projects[0].name, "renamed");
+        assert!(!dir.join("project.json.tmp").exists(), "临时文件应被改名走");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

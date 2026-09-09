@@ -26,8 +26,8 @@ pub use id::{
 };
 pub use message::*;
 pub use solve::{
-    CommandEffect, ExpandedVarId, FlowBalance, MechanicSolution, ProductivityView,
-    RecipeProductivityView, Runtime, SolveResult, SolveSnapshot, SolveStatus, solve_snapshot,
-    solve_snapshot_with,
+    solve_snapshot, solve_snapshot_with, write_document_file, CommandEffect, ExpandedVarId,
+    FlowBalance, MechanicSolution, ProductivityView, RecipeProductivityView, Runtime, SolveResult,
+    SolveSnapshot, SolveStatus,
 };
 pub use state::{DispatchResult, RuntimeError, RuntimeState};
