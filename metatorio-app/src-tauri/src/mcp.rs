@@ -79,6 +79,11 @@ struct DispatchParams {
     /// **每秒**；项目的 `time-scale`（seconds/minutes/hours）只影响界面显示，
     /// 不改变数值。
     message: AppMessage,
+    /// 幂等键（可选）：同一个 id 的重复调用只应用一次，重试直接拿回上次的
+    /// 载荷（返回里带 `idempotent_replay: true`）。调用超时后重试请带上它，
+    /// 避免重复添加目标 / 机制。
+    #[serde(default)]
+    request_id: Option<String>,
 }
 
 /// The MCP server handler.  Stateless: it only carries the [`AppHandle`] it
@@ -102,6 +107,8 @@ impl MetatorioMcp {
         follow-up read is needed), `solve` (structured solve result when the command \
         solves), and `errors` (non-empty + isError when a command failed). \
         All flow amounts are per second; the project time-scale only affects display. \
+        Pass `request_id` to make retries idempotent (a repeated id replays the \
+        previous response instead of applying the message again). \
         This is the universal escape hatch for every planning operation; wire \
         convenience tools on top of it as needed."
     )]
@@ -109,7 +116,7 @@ impl MetatorioMcp {
         &self,
         Parameters(params): Parameters<DispatchParams>,
     ) -> Result<CallToolResult, McpError> {
-        dispatch_message(&self.app, params.message).await
+        dispatch_message(&self.app, params.message, params.request_id).await
     }
 
     /// Read the current planning state (the shared document snapshot).  This is
@@ -297,10 +304,36 @@ impl MetatorioMcp {
 }
 
 /// `dispatch` 工具的实际逻辑：与具体 Tauri runtime 解耦，便于用 mock app 测试。
+///
+/// `request_id` 为幂等键：重复的 id 不重新应用消息，直接回放上次的载荷。
 async fn dispatch_message<R: Runtime>(
     app: &AppHandle<R>,
     message: AppMessage,
+    request_id: Option<String>,
 ) -> Result<CallToolResult, McpError> {
+    // 0) 幂等回放：同一 request_id 已经执行过就直接返回上次的载荷。
+    if let Some(request_id) = &request_id {
+        let cached = app
+            .state::<AppState>()
+            .dispatch_cache
+            .lock()
+            .ok()
+            .and_then(|cache| cache.get(request_id));
+        if let Some((mut payload, is_error)) = cached {
+            if let serde_json::Value::Object(object) = &mut payload {
+                object.insert(
+                    "idempotent_replay".to_string(),
+                    serde_json::Value::Bool(true),
+                );
+            }
+            let mut result = CallToolResult::structured(payload);
+            if is_error {
+                result.is_error = Some(true);
+            }
+            return Ok(result);
+        }
+    }
+
     // 1) reducer：短临界区（放进阻塞线程池，避免占用 tokio worker）。
     let reduce_app = app.clone();
     let outcome = tauri::async_runtime::spawn_blocking(move || {
@@ -350,8 +383,15 @@ async fn dispatch_message<R: Runtime>(
     });
     // 有失败时把结果标记为错误：agent 必须能区分「命令跑了但失败了」
     // 与「命令跑了且成功但恰好没有求解产出」。
+    let is_error = !errors.is_empty();
+    // 记录幂等结果（成功与失败都记：重试同一个 id 都不应再次应用消息）。
+    if let Some(request_id) = request_id {
+        if let Ok(mut cache) = app.state::<AppState>().dispatch_cache.lock() {
+            cache.insert(request_id, payload.clone(), is_error);
+        }
+    }
     let mut result = CallToolResult::structured(payload);
-    if !errors.is_empty() {
+    if is_error {
         result.is_error = Some(true);
     }
     Ok(result)

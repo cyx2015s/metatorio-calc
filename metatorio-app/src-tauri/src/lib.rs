@@ -77,6 +77,42 @@ pub struct AppState {
     /// 上下文 id → 本地化名映射（来自游戏 `--dump-prototype-locale` 的
     /// `prototype-locale.json`，键为 `"{type}/{name}"`）。
     locales: Mutex<HashMap<String, HashMap<String, String>>>,
+    /// MCP `dispatch` 的幂等缓存：request_id → 上次返回的载荷。
+    dispatch_cache: Mutex<DispatchCache>,
+}
+
+/// MCP `dispatch` 的幂等缓存（有界 FIFO）。
+///
+/// 工具调用超时后 agent 会重试；没有幂等键时「添加目标/机制」会被重复应用。
+/// agent 传 `request_id` 后，同一个 id 只应用一次，重试直接拿回上次的载荷。
+#[derive(Default)]
+struct DispatchCache {
+    order: std::collections::VecDeque<String>,
+    entries: HashMap<String, (serde_json::Value, bool)>,
+}
+
+impl DispatchCache {
+    /// 最多记住多少次调用（超出后淘汰最早的）。
+    const CAPACITY: usize = 256;
+
+    fn get(&self, request_id: &str) -> Option<(serde_json::Value, bool)> {
+        self.entries.get(request_id).cloned()
+    }
+
+    fn insert(&mut self, request_id: String, payload: serde_json::Value, is_error: bool) {
+        if self
+            .entries
+            .insert(request_id.clone(), (payload, is_error))
+            .is_none()
+        {
+            self.order.push_back(request_id);
+        }
+        while self.order.len() > Self::CAPACITY {
+            if let Some(oldest) = self.order.pop_front() {
+                self.entries.remove(&oldest);
+            }
+        }
+    }
 }
 
 impl Default for AppState {
@@ -89,6 +125,7 @@ impl Default for AppState {
             contexts: Mutex::new(ContextRegistry::default()),
             project_paths: Mutex::new(HashMap::new()),
             locales: Mutex::new(HashMap::new()),
+            dispatch_cache: Mutex::new(DispatchCache::default()),
         }
     }
 }
@@ -3403,7 +3440,26 @@ mod tests {
         assert_eq!(serialized.len(), 2, "每条命令都应序列化");
     }
 
-    /// data 目录推断：`bin/x64/`、`bin/`、根目录三种布局都要命中，
+    /// 幂等缓存：同一 request_id 回放上次载荷；超过容量淘汰最早的。
+    #[test]
+    fn dispatch_cache_replays_and_evicts() {
+        let mut cache = DispatchCache::default();
+        assert!(cache.get("a").is_none());
+        cache.insert("a".to_string(), serde_json::json!({ "revision": 1 }), false);
+        let (payload, is_error) = cache.get("a").expect("应命中");
+        assert_eq!(payload["revision"], 1);
+        assert!(!is_error);
+
+        cache.insert("b".to_string(), serde_json::json!({}), true);
+        assert!(cache.get("b").expect("应命中").1, "错误结果同样记录");
+
+        for index in 0..DispatchCache::CAPACITY {
+            cache.insert(format!("k{index}"), serde_json::json!({}), false);
+        }
+        assert!(cache.get("a").is_none(), "最早的条目应被淘汰");
+    }
+
+    /// 游戏安装目录推断：`bin/x64/`、`bin/`、根目录三种布局都要命中，
     /// 且返回的是 `data` 目录本身（read-data 的语义）；找不到时返回 None。
     #[test]
     fn factorio_data_dir_handles_common_layouts() {
