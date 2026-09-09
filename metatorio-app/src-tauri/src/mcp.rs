@@ -101,51 +101,45 @@ impl MetatorioMcp {
         Parameters(params): Parameters<DispatchParams>,
     ) -> Result<CallToolResult, McpError> {
         let message = params.message;
-
         let app = self.app.clone();
-        let handled = tauri::async_runtime::spawn_blocking(move || {
-            let state = app.state::<AppState>();
+
+        // 1) reducer：短临界区（放进阻塞线程池，避免占用 tokio worker）。
+        let reduce_app = app.clone();
+        let outcome = tauri::async_runtime::spawn_blocking(move || {
+            let state = reduce_app.state::<AppState>();
             let mut runtime = state
                 .runtime
                 .lock()
                 .map_err(|_| "runtime lock poisoned".to_string())?;
-            let outcome = runtime.dispatch(message).map_err(|error| error.to_string())?;
-            // 求解结果结构化为 JSON；命令列表真实返回（而非仅数量）。
-            let mut solve: Option<serde_json::Value> = None;
-            let mut commands: Vec<serde_json::Value> = Vec::new();
-            for command in &outcome.commands {
-                if let Some(effect) = execute_command(&app, &state, &mut runtime, command) {
-                    if let metatorio_runtime::CommandEffect::Solve(result) = effect {
-                        solve = serde_json::to_value(&result).ok();
-                    }
-                }
-                if let Ok(value) = serde_json::to_value(command) {
-                    commands.push(value);
-                }
-            }
-            // Co-op: if the document changed, tell the GUI to re-fetch.
-            if outcome.changed {
-                let _ = app.emit("document-changed", outcome.revision);
-            }
-            Ok::<_, String>(DispatchHandled {
-                revision: outcome.revision,
-                changed: outcome.changed,
-                commands,
-                solve,
-            })
+            runtime.dispatch(message).map_err(|error| error.to_string())
         })
         .await
-        .map_err(|error| McpError::internal_error(format!("dispatch join 失败: {error}"), None))?;
+        .map_err(|error| McpError::internal_error(format!("dispatch join 失败: {error}"), None))?
+        .map_err(|error| McpError::invalid_params(format!("dispatch 执行失败: {error}"), None))?;
 
-        let handled = handled.map_err(|error| {
-            McpError::invalid_params(format!("dispatch 执行失败: {error}"), None)
-        })?;
+        // 2) 副作用：求解在锁外跑（不阻塞 GUI 与其它 MCP 调用）。
+        let mut solve: Option<serde_json::Value> = None;
+        let mut commands: Vec<serde_json::Value> = Vec::new();
+        for command in &outcome.commands {
+            if let Some(effect) = execute_command(&app, &app.state::<AppState>(), command).await {
+                if let metatorio_runtime::CommandEffect::Solve(result) = effect {
+                    solve = serde_json::to_value(&result).ok();
+                }
+            }
+            if let Ok(value) = serde_json::to_value(command) {
+                commands.push(value);
+            }
+        }
+        // Co-op: if the document changed, tell the GUI to re-fetch.
+        if outcome.changed {
+            let _ = app.emit("document-changed", outcome.revision);
+        }
 
         let payload = serde_json::json!({
-            "revision": handled.revision,
-            "changed": handled.changed,
-            "scheduled_commands": handled.commands,
-            "solve": handled.solve,
+            "revision": outcome.revision,
+            "changed": outcome.changed,
+            "scheduled_commands": commands,
+            "solve": solve,
         });
         Ok(CallToolResult::structured(payload))
     }
@@ -250,13 +244,6 @@ struct PlanningStateParams {
     /// When set with `project` + `factory`, run a solve and include its result.
     #[serde(default)]
     recompute: bool,
-}
-
-struct DispatchHandled {
-    revision: u64,
-    changed: bool,
-    commands: Vec<serde_json::Value>,
-    solve: Option<serde_json::Value>,
 }
 
 // ── Server lifecycle ───────────────────────────────────────────────

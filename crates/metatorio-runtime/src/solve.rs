@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::{collections::HashMap, fs::File, path::Path, sync::Arc};
 
@@ -129,6 +130,9 @@ pub struct Runtime {
     /// 项目 → 可达性结果缓存（settings 变化时在 dispatch 里整体失效；
     /// 计算按需进行，避免每次交互重算全图）。
     accessibilities: Mutex<HashMap<ProjectId, Accessibility>>,
+    /// 可达性失效代次：每次清空 `accessibilities` 时 +1。锁外算出的可达性
+    /// 只有代次未变才允许回填，否则会写进过期值。
+    accessibility_epoch: AtomicU64,
     /// 上下文 → 可达性依赖图（一次构建缓存，供 milestone_order /
     /// compute_accessibility 复用，避免每交互重建全图）。
     graph_cache: Mutex<HashMap<String, Arc<metatorio_core::GraphData>>>,
@@ -145,15 +149,22 @@ impl Runtime {
             contexts: HashMap::new(),
             active_context: None,
             accessibilities: Mutex::new(HashMap::new()),
+            accessibility_epoch: AtomicU64::new(0),
             graph_cache: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// 失效全部可达性结果（换上下文/换 store/改里程碑设置时调用）。
+    fn invalidate_accessibility(&self) {
+        self.accessibilities.lock().unwrap().clear();
+        self.accessibility_epoch.fetch_add(1, Ordering::SeqCst);
     }
 
     pub fn dispatch(&mut self, message: AppMessage) -> Result<DispatchResult, RuntimeError> {
         // 只对可能改变可达性的消息失效 `accessibilities` 缓存（可达性计算耗时，
         // 不应每次交互都重算）。其余（改目标/机制/偏好等）保留缓存。
         if message_affects_accessibility(&message) {
-            self.accessibilities.lock().unwrap().clear();
+            self.invalidate_accessibility();
         }
         self.state.dispatch(message)
     }
@@ -162,7 +173,7 @@ impl Runtime {
     pub fn install_context(&mut self, context_id: String, prototype: PrototypeStore) {
         // 换了 store，之前的依赖图与可达性结果作废。
         self.graph_cache.lock().unwrap().remove(&context_id);
-        self.accessibilities.lock().unwrap().clear();
+        self.invalidate_accessibility();
         self.contexts.insert(context_id, Arc::new(prototype));
     }
 
@@ -170,7 +181,7 @@ impl Runtime {
     pub fn remove_context(&mut self, context_id: &str) {
         self.contexts.remove(context_id);
         self.graph_cache.lock().unwrap().remove(context_id);
-        self.accessibilities.lock().unwrap().clear();
+        self.invalidate_accessibility();
         if self.active_context.as_deref() == Some(context_id) {
             self.active_context = None;
             self.state.active_context = None;
@@ -180,7 +191,7 @@ impl Runtime {
     /// The context used by projects that do not pin one.
     pub fn set_active_context(&mut self, context_id: Option<String>) {
         if self.active_context != context_id {
-            self.accessibilities.lock().unwrap().clear();
+            self.invalidate_accessibility();
         }
         self.active_context = context_id.clone();
         self.state.active_context = context_id;
@@ -513,6 +524,7 @@ impl Runtime {
             project: project_id,
             factory: factory_id,
             revision: self.state.revision,
+            accessibility_epoch: self.accessibility_epoch.load(Ordering::SeqCst),
             store: self.context_arc(project_id)?,
             graph: self.graph_for_project(project_id)?,
             accessibility_options: accessibility_options(&project_doc.settings),
@@ -534,6 +546,25 @@ impl Runtime {
             .lock()
             .unwrap()
             .insert(project_id, accessibility);
+    }
+
+    /// 锁外求解后回填可达性缓存，**仅当**文档版本与失效代次都没变。
+    ///
+    /// 求解期间用户改了里程碑/换了上下文都会 bump 其中之一；此时写入会把
+    /// 过期可达性留在缓存里，直到下一次失效才被发现，因此必须拒绝。
+    /// 返回是否写入。
+    pub fn cache_accessibility_if_current(
+        &self,
+        snapshot: &SolveSnapshot,
+        accessibility: Accessibility,
+    ) -> bool {
+        if self.state.revision != snapshot.revision
+            || self.accessibility_epoch.load(Ordering::SeqCst) != snapshot.accessibility_epoch
+        {
+            return false;
+        }
+        self.cache_accessibility(snapshot.project, accessibility);
+        true
     }
 
     /// Solve a factory synchronously.  The outer Tauri layer should call this
@@ -809,6 +840,8 @@ pub struct SolveSnapshot {
     pub factory: FactoryId,
     /// 取快照时的文档版本。
     pub revision: u64,
+    /// 取快照时的可达性失效代次（用于判断锁外算出的可达性还能否回填）。
+    pub accessibility_epoch: u64,
     pub store: Arc<PrototypeStore>,
     pub graph: Arc<metatorio_core::GraphData>,
     /// 由项目设置派生的可达性选项（无缓存时用它现算可达性）。

@@ -51,6 +51,9 @@ use tauri_plugin_dialog::DialogExt;
 #[cfg(not(mobile))]
 mod mcp;
 
+/// 求解任务调度（把长求解移出 `Mutex<Runtime>`）。
+mod solve_jobs;
+
 /// Minimal embedded game-data dump so the app can solve out of the box.
 /// Replace with a real Factorio dump once data loading is wired to a
 /// file dialog.
@@ -60,6 +63,8 @@ const DEMO_DUMP: &str = include_str!("../dumps/demo_dump.json");
 
 pub struct AppState {
     runtime: Mutex<Runtime>,
+    /// 求解调度器：长求解在锁外跑，按 (project, factory) 单飞 + latest-wins。
+    solve_jobs: solve_jobs::SolveJobs,
     contexts: Mutex<ContextRegistry>,
     project_paths: Mutex<HashMap<ProjectId, String>>,
     /// 上下文 id → 本地化名映射（来自游戏 `--dump-prototype-locale` 的
@@ -71,6 +76,7 @@ impl Default for AppState {
     fn default() -> Self {
         Self {
             runtime: Mutex::new(Runtime::new()),
+            solve_jobs: solve_jobs::SolveJobs::default(),
             contexts: Mutex::new(ContextRegistry::default()),
             project_paths: Mutex::new(HashMap::new()),
             locales: Mutex::new(HashMap::new()),
@@ -1953,24 +1959,26 @@ fn product_flow(product: &metatorio_data::types::Product) -> FlowAmount {
 }
 
 /// Accept one user message and execute its side effects.
+///
+/// 锁纪律：reducer 在**短临界区**内跑完即放锁；随后的 `RuntimeCommand` 各自
+/// 按需短暂上锁（求解/落盘/载入上下文都在锁外进行）。这样 MCP 工具调用与
+/// GUI 交互、以及不同工厂的求解之间不再互相阻塞。
 #[tauri::command]
 async fn dispatch(app: AppHandle, message: AppMessage) -> Result<DispatchResult, String> {
-    tauri::async_runtime::spawn_blocking(move || {
+    let outcome = {
         let state = app.state::<AppState>();
         let mut runtime = state
             .runtime
             .lock()
             .map_err(|_| "runtime lock poisoned".to_string())?;
-        let outcome = runtime
+        runtime
             .dispatch(message)
-            .map_err(|error| error.to_string())?;
-        for command in &outcome.commands {
-            execute_command(&app, &state, &mut runtime, command);
-        }
-        Ok(outcome)
-    })
-    .await
-    .map_err(|error| error.to_string())?
+            .map_err(|error| error.to_string())?
+    };
+    for command in &outcome.commands {
+        execute_command(&app, &app.state::<AppState>(), command).await;
+    }
+    Ok(outcome)
 }
 
 /// Current serializable document snapshot.
@@ -2590,43 +2598,90 @@ fn ensure_machine_compat(
     Ok(())
 }
 
+/// 短暂持有 runtime 锁执行一段逻辑（**不得跨 `await`**）。
+fn with_runtime<T>(
+    state: &AppState,
+    f: impl FnOnce(&mut Runtime) -> Result<T, String>,
+) -> Result<T, String> {
+    let mut runtime = state
+        .runtime
+        .lock()
+        .map_err(|_| "runtime lock poisoned".to_string())?;
+    f(&mut runtime)
+}
+
+/// 锁外求解一个工厂：取快照（短锁）→ 后台线程求解 → 回填可达性缓存（短锁）。
+///
+/// 求解本身不持有 runtime 锁，因此 MCP 调用与 GUI 交互不会被长求解挡住；
+/// 不同工厂的求解还能真正并行（见 [`solve_jobs`]）。
+async fn solve_factory_offlock(
+    app: &AppHandle,
+    state: &AppState,
+    project: ProjectId,
+    factory: FactoryId,
+) -> Result<metatorio_runtime::SolveResult, String> {
+    let snapshot_app = app.clone();
+    let compute_app = app.clone();
+    state
+        .solve_jobs
+        .run(
+            (project, factory),
+            move || {
+                let state = snapshot_app.state::<AppState>();
+                let runtime = state
+                    .runtime
+                    .lock()
+                    .map_err(|_| "runtime lock poisoned".to_string())?;
+                runtime
+                    .solve_snapshot_inputs(project, factory)
+                    .map_err(|error| error.to_string())
+            },
+            move |snapshot| {
+                let accessibility = snapshot.resolve_accessibility();
+                let result = metatorio_runtime::solve_snapshot_with(snapshot, &accessibility)
+                    .map_err(|error| error.to_string())?;
+                // 锁外算出的可达性回填缓存（仅当文档/失效代次都没变）。
+                if let Ok(runtime) = compute_app.state::<AppState>().runtime.lock() {
+                    runtime.cache_accessibility_if_current(snapshot, accessibility);
+                }
+                Ok(result)
+            },
+        )
+        .await
+}
+
 /// Execute the side effects of one [`RuntimeCommand`] on the shared runtime,
 /// emitting the usual Tauri events (so a live GUI stays in sync).
+///
+/// 每条分支只在自己的**短临界区**内持锁；求解（Recompute / AutoPlan）与
+/// 文件/上下文 IO 都在锁外进行，因此本函数是 `async` 的。
 ///
 /// Returns the [`CommandEffect`] produced by solving commands (Recompute /
 /// AutoPlan / Cleanup) so non-GUI consumers such as the MCP server can surface
 /// the result directly; every other command returns `None`.
-fn execute_command(
+async fn execute_command(
     app: &AppHandle,
     state: &AppState,
-    runtime: &mut Runtime,
     command: &RuntimeCommand,
 ) -> Option<metatorio_runtime::CommandEffect> {
     match command {
-        RuntimeCommand::Recompute { project, .. } => {
-            // Make sure the project's context store is in memory first.
-            let context_id = runtime
-                .state
-                .project(*project)
-                .ok()
-                .and_then(|project| project.context_id.clone())
-                .or_else(|| runtime.active_context().map(str::to_string));
-            if let Some(id) = context_id {
-                if let Err(error) = ensure_context_loaded(state, runtime, &id) {
-                    emit(app, "solve-error", error);
-                    return None;
-                }
+        RuntimeCommand::Recompute { project, factory } => {
+            let (project, factory) = (*project, *factory);
+            // 先确保项目的上下文 store 在内存里（锁内；读盘路径见 C5 优化）。
+            if let Err(error) = with_runtime(state, |runtime| {
+                ensure_context_for_project(state, runtime, project)
+            }) {
+                emit(app, "solve-error", error);
+                return None;
             }
-            match runtime.run_command(command) {
-                Ok(effect @ metatorio_runtime::CommandEffect::Solve(_)) => {
-                    if let metatorio_runtime::CommandEffect::Solve(result) = &effect {
-                        emit(app, "solve-result", result.clone());
-                    }
-                    Some(effect)
+            // 锁外求解。
+            match solve_factory_offlock(app, state, project, factory).await {
+                Ok(result) => {
+                    emit(app, "solve-result", result.clone());
+                    Some(metatorio_runtime::CommandEffect::Solve(result))
                 }
-                Ok(_) => None,
                 Err(error) => {
-                    emit(app, "solve-error", error.to_string());
+                    emit(app, "solve-error", error);
                     None
                 }
             }
@@ -2636,14 +2691,19 @@ fn execute_command(
             factory,
             mechanic,
         } => {
-            if let Err(error) = ensure_machine_compat(state, runtime, *project, *factory, *mechanic)
-            {
+            let (project, factory, mechanic) = (*project, *factory, *mechanic);
+            if let Err(error) = with_runtime(state, |runtime| {
+                ensure_machine_compat(state, runtime, project, factory, mechanic)
+            }) {
                 eprintln!("machine compat fallback failed: {error}");
             }
             None
         }
         RuntimeCommand::EnsureQualityLimit { project } => {
-            if let Err(error) = ensure_quality_limit(state, runtime, *project) {
+            let project = *project;
+            if let Err(error) = with_runtime(state, |runtime| {
+                ensure_quality_limit(state, runtime, project)
+            }) {
                 eprintln!("quality limit auto-raise failed: {error}");
             }
             None
@@ -2653,20 +2713,28 @@ fn execute_command(
             factory,
             mechanic,
         } => {
-            if let Err(error) = clamp_modules(state, runtime, *project, *factory, *mechanic) {
+            let (project, factory, mechanic) = (*project, *factory, *mechanic);
+            if let Err(error) = with_runtime(state, |runtime| {
+                clamp_modules(state, runtime, project, factory, mechanic)
+            }) {
                 eprintln!("module clamp failed: {error}");
             }
             None
         }
         RuntimeCommand::Persist { project, path } => {
+            let project = *project;
             let path = path
                 .clone()
-                .or_else(|| state.project_paths.lock().ok()?.get(project).cloned());
+                .or_else(|| state.project_paths.lock().ok()?.get(&project).cloned());
             if let Some(path) = path {
-                match runtime.save_document_file(*project, &path) {
+                match with_runtime(state, |runtime| {
+                    runtime
+                        .save_document_file(project, &path)
+                        .map_err(|error| error.to_string())
+                }) {
                     Ok(()) => {
                         if let Ok(mut paths) = state.project_paths.lock() {
-                            paths.insert(*project, path);
+                            paths.insert(project, path);
                         }
                     }
                     Err(error) => eprintln!("persist failed: {error}"),
@@ -2679,9 +2747,10 @@ fn execute_command(
             executable_path,
             mod_path,
         } => {
-            let result = load_game_context_impl(app, state, executable_path, mod_path.as_deref());
-            match result {
-                Ok(_) => emit_contexts_changed(app, state, Some(runtime)),
+            // `load_game_context_impl` 内部自己取 runtime 锁；这里**不能**持锁
+            // 调用（std::sync::Mutex 不可重入）。
+            match load_game_context_impl(app, state, executable_path, mod_path.as_deref()) {
+                Ok(_) => emit_contexts_changed(app, state, None),
                 Err(error) => emit(app, "context-error", error),
             }
             None
@@ -2696,29 +2765,53 @@ fn execute_command(
                     .map(|meta| meta.id.clone())
             });
             match newest {
-                Some(id) => match ensure_context_loaded(state, runtime, &id) {
-                    Ok(()) => {
-                        runtime.set_active_context(Some(id));
-                        emit_contexts_changed(app, state, Some(runtime));
+                Some(id) => {
+                    match with_runtime(state, |runtime| {
+                        ensure_context_loaded(state, runtime, &id)?;
+                        runtime.set_active_context(Some(id.clone()));
+                        Ok(())
+                    }) {
+                        Ok(()) => emit_contexts_changed(app, state, None),
+                        Err(error) => emit(app, "context-error", error),
                     }
-                    Err(error) => emit(app, "context-error", error),
-                },
+                }
                 None => emit(app, "context-error", "没有缓存的游戏数据".to_string()),
             }
             None
         }
-        RuntimeCommand::Cleanup { .. } => match runtime.run_command(command) {
-            Ok(effect @ metatorio_runtime::CommandEffect::Solve(_)) => Some(effect),
-            Ok(_) => None,
-            Err(error) => {
-                emit(app, "solve-error", error.to_string());
-                None
+        RuntimeCommand::Cleanup {
+            project, factory, ..
+        } => {
+            let (project, factory) = (*project, *factory);
+            let outcome = with_runtime(state, |runtime| {
+                runtime
+                    .run_command(command)
+                    .map_err(|error| error.to_string())
+            });
+            // 清理会直接改写文档（不 bump revision），求解缓存必须失效。
+            state.solve_jobs.invalidate((project, factory)).await;
+            match outcome {
+                Ok(effect @ metatorio_runtime::CommandEffect::Solve(_)) => Some(effect),
+                Ok(_) => None,
+                Err(error) => {
+                    emit(app, "solve-error", error);
+                    None
+                }
             }
-        },
-        RuntimeCommand::AutoPlan { project, .. } => {
+        }
+        RuntimeCommand::AutoPlan { project, factory } => {
             // 自动规划：迭代添加建议机制直至可解。
-            let _ = ensure_context_for_project(state, runtime, *project);
-            match runtime.run_command(command) {
+            // TODO(C5)：枚举/求解部分同样应移到锁外，这里仍是整段持锁。
+            let (project, factory) = (*project, *factory);
+            let outcome = with_runtime(state, |runtime| {
+                let _ = ensure_context_for_project(state, runtime, project);
+                runtime
+                    .run_command(command)
+                    .map_err(|error| error.to_string())
+            });
+            // 自动规划会直接替换工厂机制（不 bump revision），求解缓存必须失效。
+            state.solve_jobs.invalidate((project, factory)).await;
+            match outcome {
                 Ok(effect @ metatorio_runtime::CommandEffect::Solve(_)) => {
                     if let metatorio_runtime::CommandEffect::Solve(result) = &effect {
                         emit(app, "solve-result", result.clone());
@@ -2727,7 +2820,7 @@ fn execute_command(
                 }
                 Ok(_) => None,
                 Err(error) => {
-                    emit(app, "solve-error", error.to_string());
+                    emit(app, "solve-error", error);
                     None
                 }
             }
