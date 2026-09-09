@@ -50,7 +50,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::{AppState, execute_command};
 use metatorio_runtime::message::AppMessage;
-use metatorio_runtime::{CommandEffect, FactoryId, ProjectId, RuntimeCommand};
+use metatorio_runtime::{FactoryId, ProjectId};
 
 /// Default loopback port for the MCP endpoint (override with `METATORIO_MCP_PORT`).
 const DEFAULT_PORT: u16 = 8765;
@@ -131,13 +131,23 @@ impl MetatorioMcp {
             }
         }
         // Co-op: if the document changed, tell the GUI to re-fetch.
-        if outcome.changed {
-            let _ = app.emit("document-changed", outcome.revision);
+        // 命令执行本身也可能改文档（如自动规划回写机制），因此用当前 revision
+        // 判定，而不只看 reducer 的 `changed`。
+        let revision = {
+            let state = app.state::<AppState>();
+            state
+                .runtime
+                .lock()
+                .map(|runtime| runtime.state.revision)
+                .unwrap_or(outcome.revision)
+        };
+        if outcome.changed || revision != outcome.revision {
+            let _ = app.emit("document-changed", revision);
         }
 
         let payload = serde_json::json!({
-            "revision": outcome.revision,
-            "changed": outcome.changed,
+            "revision": revision,
+            "changed": outcome.changed || revision != outcome.revision,
             "scheduled_commands": commands,
             "solve": solve,
         });
@@ -157,79 +167,105 @@ impl MetatorioMcp {
         Parameters(params): Parameters<PlanningStateParams>,
     ) -> Result<CallToolResult, McpError> {
         let app = self.app.clone();
-        let handled = tauri::async_runtime::spawn_blocking(move || {
+        let project = params.project.map(ProjectId);
+        let factory = params.factory.map(FactoryId);
+
+        // 1) 可选重算：与 GUI 走同一条锁外求解路径（不占 runtime 锁，可与
+        //    GUI / 其它 MCP 调用并行）。
+        let solve = match (project, factory, params.recompute) {
+            (Some(project), Some(factory), true) => {
+                let state = app.state::<AppState>();
+                match crate::solve_factory_offlock(&app, &state, project, factory).await {
+                    Ok(result) => Some(serde_json::to_value(&result).map_err(|error| {
+                        McpError::internal_error(format!("solve 序列化失败: {error}"), None)
+                    })?),
+                    Err(error) => {
+                        return Err(McpError::invalid_params(
+                            format!("recompute failed: {error}"),
+                            None,
+                        ))
+                    }
+                }
+            }
+            _ => None,
+        };
+
+        // 2) 取文档快照（短锁，只克隆）+ 锁外序列化。
+        let (snapshot, revision) = {
             let state = app.state::<AppState>();
-            let mut runtime = state
+            let runtime = state
                 .runtime
                 .lock()
-                .map_err(|_| "runtime lock poisoned".to_string())?;
-
-            let project = params.project.map(ProjectId);
-            let factory = params.factory.map(FactoryId);
-
-            // 收集所选层级的文档快照。
-            let mut snapshot = match (project, factory) {
-                (None, _) => serde_json::to_value(&runtime.state.document).map_err(|e| e.to_string())?,
-                (Some(p), None) => {
-                    let doc = runtime
+                .map_err(|_| McpError::internal_error("runtime lock poisoned".to_string(), None))?;
+            let revision = runtime.state.revision;
+            let snapshot = match (project, factory) {
+                (None, _) => DocSnapshot::Document(runtime.state.document.clone()),
+                (Some(p), None) => DocSnapshot::Project(
+                    runtime
                         .state
                         .project(p)
-                        .map_err(|e| e.to_string())?;
-                    serde_json::to_value(doc).map_err(|e| e.to_string())?
-                }
+                        .map_err(|error| {
+                            McpError::invalid_params(
+                                format!("get_planning_state 执行失败: {error}"),
+                                None,
+                            )
+                        })?
+                        .clone(),
+                ),
                 (Some(p), Some(f)) => {
-                    // 求解（可选）：仅当项目上下文已载入且请求时触发。
-                    let solve = if params.recompute {
-                        let command = RuntimeCommand::Recompute {
-                            project: p,
-                            factory: f,
-                        };
-                        match runtime.run_command(&command) {
-                            Ok(effect) => match effect {
-                                CommandEffect::Solve(result) => {
-                                    Some(serde_json::to_value(&result).map_err(|e| e.to_string())?)
-                                }
-                                _ => None,
-                            },
-                            Err(error) => {
-                                return Err(format!("recompute failed: {error}"));
-                            }
-                        }
-                    } else {
-                        None
-                    };
-                    let doc = runtime
-                        .state
-                        .factory(p, f)
-                        .map_err(|e| e.to_string())?;
-                    let factory_doc = serde_json::to_value(doc).map_err(|e| e.to_string())?;
-                    serde_json::to_value(serde_json::json!({
-                        "project": p.0,
-                        "factory": f.0,
-                        "factory_document": factory_doc,
-                        "solve": solve,
-                    }))
-                    .map_err(|e| e.to_string())?
+                    let factory_doc = runtime.state.factory(p, f).map_err(|error| {
+                        McpError::invalid_params(
+                            format!("get_planning_state 执行失败: {error}"),
+                            None,
+                        )
+                    })?;
+                    DocSnapshot::Factory {
+                        project: p.0,
+                        factory: f.0,
+                        factory_document: factory_doc.clone(),
+                    }
                 }
             };
-            // 顶层补充 revision，便于 agent 得知文档版本。
-            if let serde_json::Value::Object(obj) = &mut snapshot {
-                obj.insert(
-                    "revision".to_string(),
-                    serde_json::Value::Number(runtime.state.revision.into()),
-                );
-            }
-            Ok::<_, String>(snapshot)
-        })
-        .await
-        .map_err(|error| McpError::internal_error(format!("get_planning_state join 失败: {error}"), None))?;
+            (snapshot, revision)
+        };
 
-        let snapshot = handled.map_err(|error| {
-            McpError::invalid_params(format!("get_planning_state 执行失败: {error}"), None)
+        let mut value = match snapshot {
+            DocSnapshot::Document(document) => serde_json::to_value(&document),
+            DocSnapshot::Project(project) => serde_json::to_value(&project),
+            DocSnapshot::Factory {
+                project,
+                factory,
+                factory_document,
+            } => serde_json::to_value(serde_json::json!({
+                "project": project,
+                "factory": factory,
+                "factory_document": factory_document,
+                "solve": solve,
+            })),
+        }
+        .map_err(|error| {
+            McpError::internal_error(format!("get_planning_state 序列化失败: {error}"), None)
         })?;
-
-        Ok(CallToolResult::structured(snapshot))
+        // 顶层补充 revision，便于 agent 得知文档版本。
+        if let serde_json::Value::Object(obj) = &mut value {
+            obj.insert(
+                "revision".to_string(),
+                serde_json::Value::Number(revision.into()),
+            );
+        }
+        Ok(CallToolResult::structured(value))
     }
+}
+
+/// `get_planning_state` 的读取层级（锁内只克隆，序列化在锁外）。
+enum DocSnapshot {
+    Document(metatorio_runtime::AppDocument),
+    Project(metatorio_runtime::ProjectDocument),
+    Factory {
+        project: u64,
+        factory: u64,
+        factory_document: metatorio_runtime::FactoryDocument,
+    },
 }
 
 /// Parameters for `get_planning_state` (all optional; omit for the whole document).

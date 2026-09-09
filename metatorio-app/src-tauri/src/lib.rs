@@ -2695,7 +2695,7 @@ async fn persist_project(state: &AppState, project: ProjectId, path: String) -> 
 ///
 /// 求解本身不持有 runtime 锁，因此 MCP 调用与 GUI 交互不会被长求解挡住；
 /// 不同工厂的求解还能真正并行（见 [`solve_jobs`]）。
-async fn solve_factory_offlock(
+pub(crate) async fn solve_factory_offlock(
     app: &AppHandle,
     state: &AppState,
     project: ProjectId,
