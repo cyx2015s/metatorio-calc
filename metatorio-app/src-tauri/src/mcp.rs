@@ -74,6 +74,10 @@ struct DispatchParams {
     /// The `action` is the same value the UI sends over IPC; see
     /// `metatorio-runtime`'s `AppMessage` for the full set.  On any change the
     /// GUI is refreshed via a `document-changed` broadcast event.
+    ///
+    /// **单位**：所有流量（目标 amount、外部输入、求解结果 flows）都是
+    /// **每秒**；项目的 `time-scale`（seconds/minutes/hours）只影响界面显示，
+    /// 不改变数值。
     message: AppMessage,
 }
 
@@ -97,6 +101,7 @@ impl MetatorioMcp {
         The response includes `created` (ids of objects this call created, so no \
         follow-up read is needed), `solve` (structured solve result when the command \
         solves), and `errors` (non-empty + isError when a command failed). \
+        All flow amounts are per second; the project time-scale only affects display. \
         This is the universal escape hatch for every planning operation; wire \
         convenience tools on top of it as needed."
     )]
@@ -115,7 +120,8 @@ impl MetatorioMcp {
         document.  Omit `project` to return the whole document; pass `project` to \
         narrow to one project; pass `project` + `factory` to narrow to one factory. \
         Set `recompute` (only meaningful with project + factory) to also run a solve \
-        and include the structured result."
+        and include the structured result.  All flow amounts are per second \
+        (time-scale only affects display)."
     )]
     async fn get_planning_state(
         &self,
