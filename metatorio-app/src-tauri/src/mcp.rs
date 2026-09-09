@@ -384,10 +384,13 @@ async fn dispatch_message<R: Runtime>(
     // 有失败时把结果标记为错误：agent 必须能区分「命令跑了但失败了」
     // 与「命令跑了且成功但恰好没有求解产出」。
     let is_error = !errors.is_empty();
-    // 记录幂等结果（成功与失败都记：重试同一个 id 都不应再次应用消息）。
-    if let Some(request_id) = request_id {
-        if let Ok(mut cache) = app.state::<AppState>().dispatch_cache.lock() {
-            cache.insert(request_id, payload.clone(), is_error);
+    // 只记录**成功**的幂等结果：失败（尤其求解超时）必须允许用同一个 id
+    // 重试，否则重试会一直回放失败。
+    if !is_error {
+        if let Some(request_id) = request_id {
+            if let Ok(mut cache) = app.state::<AppState>().dispatch_cache.lock() {
+                cache.insert(request_id, payload.clone(), false);
+            }
         }
     }
     let mut result = CallToolResult::structured(payload);

@@ -52,8 +52,14 @@ pub fn same_mechanics(existing: &[Mechanic], planned: &[Mechanic]) -> bool {
     }
     // `Mechanic` 只实现 PartialEq（含浮点），用 Debug 串做与顺序无关的等价
     // 判定：字段顺序固定、浮点 Debug 精确，够用且实现简单。
-    let mut existing: Vec<String> = existing.iter().map(|mechanic| format!("{mechanic:?}")).collect();
-    let mut planned: Vec<String> = planned.iter().map(|mechanic| format!("{mechanic:?}")).collect();
+    let mut existing: Vec<String> = existing
+        .iter()
+        .map(|mechanic| format!("{mechanic:?}"))
+        .collect();
+    let mut planned: Vec<String> = planned
+        .iter()
+        .map(|mechanic| format!("{mechanic:?}"))
+        .collect();
     existing.sort();
     planned.sort();
     existing == planned

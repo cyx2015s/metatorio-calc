@@ -18,6 +18,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use metatorio_data::store::PrototypeStore;
 use metatorio_runtime::{FactoryId, ProjectId, SolveSnapshot};
@@ -82,17 +83,38 @@ impl KeyLocks {
 /// `(快照, 候选机制)`（快照用于回写前的版本校验）。
 pub struct SolveJobs<R> {
     slots: Mutex<HashMap<SolveKey, Arc<Mutex<Slot<R>>>>>,
+    /// 单次求解的等待上限：超时返回可重试错误，后台任务继续跑完
+    /// （结果丢弃；重试会重新算）。默认 120s，`METATORIO_SOLVE_TIMEOUT_MS` 可调。
+    timeout: Duration,
 }
 
 impl<R> Default for SolveJobs<R> {
     fn default() -> Self {
         Self {
             slots: Mutex::new(HashMap::new()),
+            timeout: solve_timeout_from_env(),
         }
     }
 }
 
+/// 默认求解等待上限（毫秒），可用 `METATORIO_SOLVE_TIMEOUT_MS` 覆盖。
+fn solve_timeout_from_env() -> Duration {
+    const DEFAULT: Duration = Duration::from_secs(120);
+    std::env::var("METATORIO_SOLVE_TIMEOUT_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(Duration::from_millis)
+        .unwrap_or(DEFAULT)
+}
+
 impl<R: Clone + Send + 'static> SolveJobs<R> {
+    /// 覆盖等待上限（测试用）。
+    #[cfg(test)]
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
+    }
+
     /// 取某个工厂的键锁（不同键可并行）。
     async fn slot(&self, key: SolveKey) -> Arc<Mutex<Slot<R>>> {
         self.slots
@@ -128,9 +150,20 @@ impl<R: Clone + Send + 'static> SolveJobs<R> {
             let result = {
                 let task_snapshot = snapshot.clone();
                 let compute = compute.clone();
-                tauri::async_runtime::spawn_blocking(move || compute(&task_snapshot))
-                    .await
-                    .map_err(|error| format!("求解任务 join 失败: {error}"))?
+                let handle = tauri::async_runtime::spawn_blocking(move || compute(&task_snapshot));
+                // 等待上限：超时只放弃**等待**，阻塞任务继续跑完（句柄 drop
+                // 不取消任务）。这样调用方不会被一个失控求解钉住十分钟，重试
+                // 也只是重算一次，不会留下锁。
+                match tokio::time::timeout(self.timeout, handle).await {
+                    Ok(joined) => joined.map_err(|error| format!("求解任务 join 失败: {error}"))?,
+                    Err(_) => {
+                        return Err(format!(
+                            "求解超时（等待超过 {} 秒，任务仍在后台运行）：请稍后重试，\
+                             或先缩小目标 / 关闭自动规划后重算",
+                            self.timeout.as_secs()
+                        ))
+                    }
+                }
             };
             match result {
                 Ok(result) => {
@@ -430,6 +463,26 @@ mod tests {
             .unwrap();
         assert_eq!(calls.load(Ordering::SeqCst), 2, "文档变更应触发第二轮");
         assert_eq!(cost_of(&result), 2.0, "应返回最新一轮的结果");
+    }
+
+    /// 失控求解不能把调用方钉死：超过等待上限返回可重试错误。
+    #[tokio::test]
+    async fn long_solves_time_out_with_a_retryable_error() {
+        let (runtime, project, factory) = demo_runtime();
+        let runtime = Arc::new(runtime);
+        let jobs = SolveJobs::<SolveResult>::default().with_timeout(Duration::from_millis(50));
+        let result = jobs
+            .run(
+                (project, factory),
+                snapshot_fn(&runtime, project, factory),
+                move |_| {
+                    std::thread::sleep(Duration::from_millis(300));
+                    Ok(fake_result(project, factory, 1.0))
+                },
+            )
+            .await;
+        let error = result.expect_err("超时应报错");
+        assert!(error.contains("超时"), "错误应说明超时：{error}");
     }
 
     /// 失败不缓存：下一次请求必须重新尝试。
