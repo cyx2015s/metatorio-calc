@@ -105,6 +105,10 @@ impl RuntimeState {
             .ok_or(RuntimeError::FactoryNotFound { project, factory })
     }
 
+    /// 收尾：按 [`Outcome`] 的分类追加副作用命令。
+    ///
+    /// 只有 `solve_factory` / `solve_all` 会追加 `Recompute`；`meta` 只落盘
+    /// （元数据变更不需要重解，避免改名/拖排序也触发整厂求解）。
     fn finish(&mut self, mut outcome: Outcome) -> Result<DispatchResult, RuntimeError> {
         if outcome.changed {
             self.revision = self.revision.wrapping_add(1);
@@ -152,7 +156,7 @@ impl RuntimeState {
                     ..ProjectDocument::default()
                 };
                 self.document.projects.push(project);
-                Ok(Outcome::changed(id))
+                Ok(Outcome::meta(id))
             }
             ApplicationAction::OpenProject { path } => {
                 Ok(Outcome::command(RuntimeCommand::LoadProject { path }))
@@ -177,7 +181,7 @@ impl RuntimeState {
                     CloseDecision::Cancel => Ok(Outcome::none()),
                     CloseDecision::Discard => {
                         self.remove_project(project)?;
-                        Ok(Outcome::changed_without_project())
+                        Ok(Outcome::meta_without_project())
                     }
                     CloseDecision::Save => Ok(Outcome::commands(vec![
                         RuntimeCommand::Persist {
@@ -191,7 +195,7 @@ impl RuntimeState {
             ApplicationAction::DeleteProject { project, decision } => {
                 if matches!(decision, DeleteDecision::Confirm) {
                     self.remove_project(project)?;
-                    Ok(Outcome::changed_without_project())
+                    Ok(Outcome::meta_without_project())
                 } else {
                     self.project(project)?;
                     Ok(Outcome::none())
@@ -205,7 +209,7 @@ impl RuntimeState {
                     .position(|candidate| candidate.id == project)
                     .ok_or(RuntimeError::ProjectNotFound(project))?;
                 let changed = move_item(&mut self.document.projects, index, position);
-                Ok(Outcome::changed_if(changed, project))
+                Ok(Outcome::meta_if(changed, project))
             }
             ApplicationAction::LoadGameContext {
                 executable_path,
@@ -238,13 +242,13 @@ impl RuntimeState {
             ProjectAction::SetName { name } => {
                 let project = self.project_mut(project_id)?;
                 let changed = replace(&mut project.name, non_empty(name, "Unnamed project"));
-                Ok(Outcome::changed_if(changed, project_id))
+                Ok(Outcome::meta_if(changed, project_id))
             }
             ProjectAction::AddFactory { name, template } => {
                 let factory_id = self.allocate_id();
                 let factory = self.new_factory(factory_id, name, template);
                 self.project_mut(project_id)?.factories.push(factory);
-                Ok(Outcome::changed_factory(project_id, factory_id))
+                Ok(Outcome::solve_factory(project_id, factory_id))
             }
             ProjectAction::CloneFactory { factory } => {
                 let source = self
@@ -260,7 +264,7 @@ impl RuntimeState {
                 let clone = self.clone_factory(source);
                 let clone_id = clone.id;
                 self.project_mut(project_id)?.factories.push(clone);
-                Ok(Outcome::changed_factory(project_id, clone_id))
+                Ok(Outcome::solve_factory(project_id, clone_id))
             }
             ProjectAction::RemoveFactory { factory } => {
                 let project = self.project_mut(project_id)?;
@@ -273,7 +277,7 @@ impl RuntimeState {
                         factory,
                     })?;
                 project.factories.remove(index);
-                Ok(Outcome::changed(project_id))
+                Ok(Outcome::meta(project_id))
             }
             ProjectAction::ReorderFactory { factory, position } => {
                 let project = self.project_mut(project_id)?;
@@ -286,21 +290,21 @@ impl RuntimeState {
                         factory,
                     })?;
                 let changed = move_item(&mut project.factories, index, position);
-                Ok(Outcome::changed_if(changed, project_id))
+                Ok(Outcome::meta_if(changed, project_id))
             }
             ProjectAction::SetTimeScale { time_scale } => {
                 let changed = replace(
                     &mut self.project_mut(project_id)?.settings.time_scale,
                     time_scale,
                 );
-                Ok(Outcome::all_factories_if(changed, project_id))
+                Ok(Outcome::solve_all_if(changed, project_id))
             }
             ProjectAction::SetAllAccessible { enabled } => {
                 let changed = replace(
                     &mut self.project_mut(project_id)?.settings.all_accessible,
                     enabled,
                 );
-                Ok(Outcome::all_factories_if(changed, project_id))
+                Ok(Outcome::solve_all_if(changed, project_id))
             }
             ProjectAction::AddMilestone { node, unlocked } => {
                 let settings = &mut self.project_mut(project_id)?.settings;
@@ -310,12 +314,12 @@ impl RuntimeState {
                     .find(|candidate| candidate.node == node)
                 {
                     let changed = replace(existing, crate::document::Milestone { node, unlocked });
-                    Ok(Outcome::all_factories_if(changed, project_id))
+                    Ok(Outcome::solve_all_if(changed, project_id))
                 } else {
                     settings
                         .milestones
                         .push(crate::document::Milestone { node, unlocked });
-                    Ok(Outcome::all_factories(project_id))
+                    Ok(Outcome::solve_all(project_id))
                 }
             }
             ProjectAction::SetMilestoneUnlocked { node, unlocked } => {
@@ -328,13 +332,13 @@ impl RuntimeState {
                         RuntimeError::InvalidValue(format!("unknown milestone: {node:?}"))
                     })?;
                 let changed = replace(&mut milestone.unlocked, unlocked);
-                Ok(Outcome::all_factories_if(changed, project_id))
+                Ok(Outcome::solve_all_if(changed, project_id))
             }
             ProjectAction::RemoveMilestone { node } => {
                 let milestones = &mut self.project_mut(project_id)?.settings.milestones;
                 let before = milestones.len();
                 milestones.retain(|candidate| candidate.node != node);
-                Ok(Outcome::all_factories_if(
+                Ok(Outcome::solve_all_if(
                     before != milestones.len(),
                     project_id,
                 ))
@@ -345,14 +349,14 @@ impl RuntimeState {
                     &mut self.project_mut(project_id)?.settings.mining_productivity,
                     productivity,
                 );
-                Ok(Outcome::all_factories_if(changed, project_id))
+                Ok(Outcome::solve_all_if(changed, project_id))
             }
             ProjectAction::SetIgnoreProductivity { ignore } => {
                 let changed = replace(
                     &mut self.project_mut(project_id)?.settings.ignore_productivity,
                     ignore,
                 );
-                Ok(Outcome::all_factories_if(changed, project_id))
+                Ok(Outcome::solve_all_if(changed, project_id))
             }
             ProjectAction::SetRecipeProductivity { productivity } => {
                 validate_non_negative("recipe productivity", productivity.productivity)?;
@@ -363,17 +367,17 @@ impl RuntimeState {
                     .find(|candidate| candidate.recipe == productivity.recipe)
                 {
                     let changed = replace(existing, productivity);
-                    Ok(Outcome::all_factories_if(changed, project_id))
+                    Ok(Outcome::solve_all_if(changed, project_id))
                 } else {
                     settings.recipe_productivity.push(productivity);
-                    Ok(Outcome::all_factories(project_id))
+                    Ok(Outcome::solve_all(project_id))
                 }
             }
             ProjectAction::RemoveRecipeProductivity { recipe } => {
                 let entries = &mut self.project_mut(project_id)?.settings.recipe_productivity;
                 let before = entries.len();
                 entries.retain(|entry| entry.recipe != recipe);
-                Ok(Outcome::all_factories_if(
+                Ok(Outcome::solve_all_if(
                     before != entries.len(),
                     project_id,
                 ))
@@ -387,17 +391,17 @@ impl RuntimeState {
                     .find(|candidate| candidate.tech == level.tech)
                 {
                     let changed = replace(existing, level);
-                    Ok(Outcome::all_factories_if(changed, project_id))
+                    Ok(Outcome::solve_all_if(changed, project_id))
                 } else {
                     settings.infinite_levels.push(level);
-                    Ok(Outcome::all_factories(project_id))
+                    Ok(Outcome::solve_all(project_id))
                 }
             }
             ProjectAction::RemoveInfiniteTechLevel { tech } => {
                 let entries = &mut self.project_mut(project_id)?.settings.infinite_levels;
                 let before = entries.len();
                 entries.retain(|entry| entry.tech != tech);
-                Ok(Outcome::all_factories_if(
+                Ok(Outcome::solve_all_if(
                     before != entries.len(),
                     project_id,
                 ))
@@ -407,11 +411,11 @@ impl RuntimeState {
                     &mut self.project_mut(project_id)?.settings.quality_limit,
                     quality,
                 );
-                Ok(Outcome::all_factories_if(changed, project_id))
+                Ok(Outcome::solve_all_if(changed, project_id))
             }
             ProjectAction::SetContext { context } => {
                 let changed = replace(&mut self.project_mut(project_id)?.context_id, context);
-                Ok(Outcome::all_factories_if(changed, project_id))
+                Ok(Outcome::solve_all_if(changed, project_id))
             }
             ProjectAction::Planning(action) => {
                 // UseBestModules executes for the given factory/mechanic even
@@ -429,7 +433,7 @@ impl RuntimeState {
                             &mut self.project_mut(project_id)?.planning,
                             other,
                         )?;
-                        Outcome::all_factories_if(changed, project_id)
+                        Outcome::solve_all_if(changed, project_id)
                     }
                 };
                 Ok(outcome)
@@ -451,28 +455,28 @@ impl RuntimeState {
                     &mut self.factory_mut(project_id, factory_id)?.name,
                     non_empty(name, "Unnamed factory"),
                 );
-                Ok(Outcome::changed_factory_if(changed, project_id, factory_id))
+                Ok(Outcome::solve_factory_if(changed, project_id, factory_id))
             }
             FactoryAction::SetStrictSource { strict } => {
                 let changed = replace(
                     &mut self.factory_mut(project_id, factory_id)?.strict_source,
                     strict,
                 );
-                Ok(Outcome::changed_factory_if(changed, project_id, factory_id))
+                Ok(Outcome::solve_factory_if(changed, project_id, factory_id))
             }
             FactoryAction::SetStrictSink { strict } => {
                 let changed = replace(
                     &mut self.factory_mut(project_id, factory_id)?.strict_sink,
                     strict,
                 );
-                Ok(Outcome::changed_factory_if(changed, project_id, factory_id))
+                Ok(Outcome::solve_factory_if(changed, project_id, factory_id))
             }
             FactoryAction::Context(action) => {
                 let changed = apply_factory_context(
                     &mut self.factory_mut(project_id, factory_id)?.settings,
                     action,
                 )?;
-                Ok(Outcome::changed_factory_if(changed, project_id, factory_id))
+                Ok(Outcome::solve_factory_if(changed, project_id, factory_id))
             }
             FactoryAction::Target(action) => self.apply_target(project_id, factory_id, action),
             FactoryAction::TargetExpression(action) => {
@@ -508,7 +512,7 @@ impl RuntimeState {
                         mechanic,
                     })?;
                 let changed = apply_mechanic_action(entry, action)?;
-                let mut outcome = Outcome::changed_factory_if(changed, project_id, factory_id);
+                let mut outcome = Outcome::solve_factory_if(changed, project_id, factory_id);
                 if changed {
                     if needs_compat {
                         outcome.commands.push(RuntimeCommand::EnsureMachineCompat {
@@ -537,7 +541,7 @@ impl RuntimeState {
                     self.factory_mut(project_id, factory_id)?
                         .targets
                         .push(target);
-                    Ok(Outcome::changed_factory(project_id, factory_id))
+                    Ok(Outcome::solve_factory(project_id, factory_id))
                 }
                 FlowAction::AddToExternalInput { flow, penalty } => {
                     validate_non_negative("external input penalty", penalty)?;
@@ -549,7 +553,7 @@ impl RuntimeState {
                     self.factory_mut(project_id, factory_id)?
                         .external_inputs
                         .push(input);
-                    Ok(Outcome::changed_factory(project_id, factory_id))
+                    Ok(Outcome::solve_factory(project_id, factory_id))
                 }
                 FlowAction::RequestSuggestions { flow, amount } => {
                     Ok(Outcome::command(RuntimeCommand::RequestSuggestions {
@@ -599,7 +603,7 @@ impl RuntimeState {
             let factory = self.factory_mut(project_id, factory_id)?;
             ensure_unique_target(factory, target.id)?;
             factory.targets.push(target);
-            return Ok(Outcome::changed_factory(project_id, factory_id));
+            return Ok(Outcome::solve_factory(project_id, factory_id));
         }
 
         let factory = self.factory_mut(project_id, factory_id)?;
@@ -622,7 +626,7 @@ impl RuntimeState {
                 move_item(&mut factory.targets, index, position)
             }
         };
-        Ok(Outcome::changed_factory_if(changed, project_id, factory_id))
+        Ok(Outcome::solve_factory_if(changed, project_id, factory_id))
     }
 
     fn apply_target_expression(
@@ -643,7 +647,7 @@ impl RuntimeState {
             let factory = self.factory_mut(project_id, factory_id)?;
             ensure_unique_expression(factory, expression.id)?;
             factory.target_expressions.push(expression);
-            return Ok(Outcome::changed_factory(project_id, factory_id));
+            return Ok(Outcome::solve_factory(project_id, factory_id));
         }
 
         let factory = self.factory_mut(project_id, factory_id)?;
@@ -717,7 +721,7 @@ impl RuntimeState {
                 move_item(&mut expression.terms, index, position)
             }
         };
-        Ok(Outcome::changed_factory_if(changed, project_id, factory_id))
+        Ok(Outcome::solve_factory_if(changed, project_id, factory_id))
     }
 
     fn apply_external_input(
@@ -733,7 +737,7 @@ impl RuntimeState {
             let factory = self.factory_mut(project_id, factory_id)?;
             ensure_unique_external(factory, input.id)?;
             factory.external_inputs.push(input);
-            return Ok(Outcome::changed_factory(project_id, factory_id));
+            return Ok(Outcome::solve_factory(project_id, factory_id));
         }
 
         let factory = self.factory_mut(project_id, factory_id)?;
@@ -765,7 +769,7 @@ impl RuntimeState {
                 }));
             }
         };
-        Ok(Outcome::changed_factory_if(changed, project_id, factory_id))
+        Ok(Outcome::solve_factory_if(changed, project_id, factory_id))
     }
 
     fn apply_mechanic_list(
@@ -782,14 +786,14 @@ impl RuntimeState {
                 self.factory_mut(project_id, factory_id)?
                     .mechanics
                     .push(entry);
-                Ok(Outcome::changed_factory(project_id, factory_id))
+                Ok(Outcome::solve_factory(project_id, factory_id))
             }
             MechanicListAction::Remove { mechanic } => {
                 let changed = remove_by_id(
                     &mut self.factory_mut(project_id, factory_id)?.mechanics,
                     mechanic,
                 )?;
-                Ok(Outcome::changed_factory_if(changed, project_id, factory_id))
+                Ok(Outcome::solve_factory_if(changed, project_id, factory_id))
             }
             MechanicListAction::Clone { mechanic } => {
                 let mut clone = self
@@ -807,13 +811,13 @@ impl RuntimeState {
                 let mechanics = &mut self.factory_mut(project_id, factory_id)?.mechanics;
                 let index = index_by_id(mechanics, mechanic)?;
                 mechanics.insert(index + 1, clone);
-                Ok(Outcome::changed_factory(project_id, factory_id))
+                Ok(Outcome::solve_factory(project_id, factory_id))
             }
             MechanicListAction::Reorder { mechanic, position } => {
                 let mechanics = &mut self.factory_mut(project_id, factory_id)?.mechanics;
                 let index = index_by_id(mechanics, mechanic)?;
                 let changed = move_item(mechanics, index, position);
-                Ok(Outcome::changed_factory_if(changed, project_id, factory_id))
+                Ok(Outcome::solve_factory_if(changed, project_id, factory_id))
             }
             MechanicListAction::SetEnabled { mechanic, enabled } => {
                 let entry = self
@@ -827,7 +831,7 @@ impl RuntimeState {
                         mechanic,
                     })?;
                 let changed = replace(&mut entry.enabled, enabled);
-                Ok(Outcome::changed_factory_if(changed, project_id, factory_id))
+                Ok(Outcome::solve_factory_if(changed, project_id, factory_id))
             }
         }
     }
@@ -891,7 +895,7 @@ impl RuntimeState {
                 self.factory_mut(project_id, factory_id)?
                     .mechanics
                     .push(entry);
-                Ok(Outcome::changed_factory(project_id, factory_id))
+                Ok(Outcome::solve_factory(project_id, factory_id))
             }
             SuggestionAction::Dismiss => Ok(Outcome::none()),
         }
@@ -1179,12 +1183,22 @@ struct Outcome {
     commands: Vec<RuntimeCommand>,
 }
 
+/// 变更分类（决定 `finish` 追加哪些副作用命令）：
+///
+/// - [`Outcome::meta`] —— 文档变了但**不影响求解**（改名/排序等元数据）：
+///   只落盘，不追加 `Recompute`。
+/// - [`Outcome::solve_factory`] —— 影响该工厂的求解：落盘 + 重解该工厂。
+/// - [`Outcome::solve_all`] —— 影响项目内所有工厂（可达性/产能/上下文等）：
+///   落盘 + 重解全部工厂。
+///
+/// 构造器命名即意图：写 `meta` 就是声明"这里不需要求解"。
 impl Outcome {
     fn none() -> Self {
         Self::default()
     }
 
-    fn changed(project: ProjectId) -> Self {
+    /// 元数据变更（仅落盘，不触发求解）。
+    fn meta(project: ProjectId) -> Self {
         Self {
             changed: true,
             project: Some(project),
@@ -1192,14 +1206,15 @@ impl Outcome {
         }
     }
 
-    fn changed_without_project() -> Self {
+    /// 元数据变更，但没有可归属的项目（如删除项目）。
+    fn meta_without_project() -> Self {
         Self {
             changed: true,
             ..Self::default()
         }
     }
 
-    fn changed_factory(project: ProjectId, factory: FactoryId) -> Self {
+    fn solve_factory(project: ProjectId, factory: FactoryId) -> Self {
         Self {
             changed: true,
             project: Some(project),
@@ -1208,15 +1223,15 @@ impl Outcome {
         }
     }
 
-    fn changed_factory_if(changed: bool, project: ProjectId, factory: FactoryId) -> Self {
+    fn solve_factory_if(changed: bool, project: ProjectId, factory: FactoryId) -> Self {
         if changed {
-            Self::changed_factory(project, factory)
+            Self::solve_factory(project, factory)
         } else {
             Self::none()
         }
     }
 
-    fn all_factories(project: ProjectId) -> Self {
+    fn solve_all(project: ProjectId) -> Self {
         Self {
             changed: true,
             project: Some(project),
@@ -1225,17 +1240,17 @@ impl Outcome {
         }
     }
 
-    fn all_factories_if(changed: bool, project: ProjectId) -> Self {
+    fn solve_all_if(changed: bool, project: ProjectId) -> Self {
         if changed {
-            Self::all_factories(project)
+            Self::solve_all(project)
         } else {
             Self::none()
         }
     }
 
-    fn changed_if(changed: bool, project: ProjectId) -> Self {
+    fn meta_if(changed: bool, project: ProjectId) -> Self {
         if changed {
-            Self::changed(project)
+            Self::meta(project)
         } else {
             Self::none()
         }
