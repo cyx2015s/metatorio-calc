@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 macro_rules! id_type {
     ($name:ident) => {
@@ -15,7 +15,7 @@ macro_rules! id_type {
             Ord,
             Serialize,
             Deserialize,
-            JsonSchema
+            JsonSchema,
         )]
         #[serde(transparent)]
         pub struct $name(pub u64);

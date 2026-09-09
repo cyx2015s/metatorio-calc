@@ -433,7 +433,10 @@ mod tests {
             }],
         };
         let effect = with_beacon.get_effect(&ctx);
-        assert!(effect.speed > 0.0, "插件塔中的插件应计入产出加成：{effect:?}");
+        assert!(
+            effect.speed > 0.0,
+            "插件塔中的插件应计入产出加成：{effect:?}"
+        );
         // 插件塔耗电（均摊）> 0。
         assert!(with_beacon.get_consumption(&ctx) > 0.0);
     }

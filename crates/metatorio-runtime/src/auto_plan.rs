@@ -134,9 +134,11 @@ pub fn module_allowed(
     recipe: Option<&RecipeComponent>,
 ) -> bool {
     if let Some(categories) = machine_categories
-        && !categories.is_empty() && !categories.contains(&module.category) {
-            return false;
-        }
+        && !categories.is_empty()
+        && !categories.contains(&module.category)
+    {
+        return false;
+    }
     let recipe_allowed = |kind: EffectType, recipe_allow: bool| {
         recipe_allow && machine_allowed_effects.is_none_or(|limits| limits[kind])
     };
@@ -241,10 +243,11 @@ fn crafter_score(machine: &CraftingMachineComponent, entity: Option<&EntityCompo
         .map_or(25.0, |bb| (bb.1.0 - bb.0.0).abs() * (bb.1.1 - bb.0.1).abs());
     let mut score = machine.crafting_speed / area;
     if let Some(effect_receiver) = &machine.effect_receiver
-        && let Some(base) = &effect_receiver.base_effect {
-            score *= 1.0 + base.speed;
-            score *= 1.0 + (base.productivity * 2.0);
-        }
+        && let Some(base) = &effect_receiver.base_effect
+    {
+        score *= 1.0 + base.speed;
+        score *= 1.0 + (base.productivity * 2.0);
+    }
     if matches!(machine.energy_source, EnergySource::Electric(_)) {
         score *= 8.0;
     }
@@ -259,10 +262,11 @@ fn miner_score(miner: &MiningDrillComponent, entity: Option<&EntityComponent>) -
         .map_or(25.0, |bb| (bb.1.0 - bb.0.0).abs() * (bb.1.1 - bb.0.1).abs());
     let mut score = miner.mining_speed / area;
     if let Some(effect_receiver) = &miner.effect_receiver
-        && let Some(base) = &effect_receiver.base_effect {
-            score *= 1.0 + base.speed;
-            score *= 1.0 + (base.productivity * 2.0);
-        }
+        && let Some(base) = &effect_receiver.base_effect
+    {
+        score *= 1.0 + base.speed;
+        score *= 1.0 + (base.productivity * 2.0);
+    }
     if matches!(miner.energy_source, EnergySource::Electric(_)) {
         score *= 8.0;
     }
@@ -388,9 +392,10 @@ fn enumerate_recipes(
                 store,
                 &recipe.surface_conditions,
                 properties,
-            ) {
-                continue;
-            }
+            )
+        {
+            continue;
+        }
         // 有物品原料的配方按品质展开；纯流体配方只有 normal。
         let has_item_ingredient = recipe
             .ingredients
@@ -428,20 +433,21 @@ fn enumerate_recipes(
             // 机器表面条件过滤
             if let Some(properties) = &properties
                 && let Some(entity) = machine_record.component::<EntityComponent>()
-                    && !crate::planet::surface_condition_satisfied(
-                        store,
-                        &entity.surface_conditions,
-                        properties,
-                    ) {
-                        continue;
-                    }
+                && !crate::planet::surface_condition_satisfied(
+                    store,
+                    &entity.surface_conditions,
+                    properties,
+                )
+            {
+                continue;
+            }
             // 机器可达性过滤：当前项目科技未解锁的机器不枚举。
             if let Some(accessibility) = &options.accessibility
                 && !accessibility
                     .is_accessible(&metatorio_core::Accessible::Entity(machine_name.clone()))
-                {
-                    continue;
-                }
+            {
+                continue;
+            }
             let Some(machine_component) = machine_record.component::<CraftingMachineComponent>()
             else {
                 continue;
@@ -497,16 +503,15 @@ fn enumerate_recipes(
         }
         // 无满足条件/解锁的机器（全被表面/可达性过滤）：退化为评分最低的一台——
         // 配方出现即视为有对应组装机（mod 合理设计），不管替代数量设置与可达性。
-        if !kept_any
-            && let Some(machine) = machines.last() {
-                let base = Mechanic::Recipe(metatorio_core::RecipeMechanic {
-                    recipe: IdWithQuality::new(record.name.clone(), quality_name(ctx, 0)),
-                    machine: machine.clone(),
-                    module_config: ModuleConfig::default(),
-                    fuel: None,
-                });
-                push_with_beacons(out, base, Vec::new(), beacons);
-            }
+        if !kept_any && let Some(machine) = machines.last() {
+            let base = Mechanic::Recipe(metatorio_core::RecipeMechanic {
+                recipe: IdWithQuality::new(record.name.clone(), quality_name(ctx, 0)),
+                machine: machine.clone(),
+                module_config: ModuleConfig::default(),
+                fuel: None,
+            });
+            push_with_beacons(out, base, Vec::new(), beacons);
+        }
     }
 }
 
@@ -560,20 +565,21 @@ fn enumerate_mining(
             // 采矿机表面条件过滤
             if let Some(properties) = &properties
                 && let Some(entity) = drill_record.component::<EntityComponent>()
-                    && !crate::planet::surface_condition_satisfied(
-                        store,
-                        &entity.surface_conditions,
-                        properties,
-                    ) {
-                        continue;
-                    }
+                && !crate::planet::surface_condition_satisfied(
+                    store,
+                    &entity.surface_conditions,
+                    properties,
+                )
+            {
+                continue;
+            }
             // 采矿机可达性过滤：当前项目科技未解锁的机器不枚举。
             if let Some(accessibility) = &options.accessibility
                 && !accessibility
                     .is_accessible(&metatorio_core::Accessible::Entity(machine_name.clone()))
-                {
-                    continue;
-                }
+            {
+                continue;
+            }
             let Some(drill) = drill_record.component::<MiningDrillComponent>() else {
                 continue;
             };
@@ -719,9 +725,9 @@ fn enumerate_energy(
         if let Some(accessibility) = &options.accessibility
             && !accessibility
                 .is_accessible(&metatorio_core::Accessible::Entity(record.name.clone()))
-            {
-                continue;
-            }
+        {
+            continue;
+        }
         if let Some(generator) = record.component::<GeneratorComponent>() {
             let Some(fluid) = generator.fluid_box.filter.clone() else {
                 continue;

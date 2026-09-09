@@ -99,9 +99,10 @@ pub fn adapt_recipe_categories(recipe: &mut Value) {
             Value::Array(list) => {
                 for entry in list {
                     if let Value::String(category) = entry
-                        && !merged.contains(category) {
-                            merged.push(category.clone());
-                        }
+                        && !merged.contains(category)
+                    {
+                        merged.push(category.clone());
+                    }
                 }
             }
             _ => {}

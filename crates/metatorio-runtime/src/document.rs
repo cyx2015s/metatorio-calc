@@ -140,7 +140,6 @@ pub struct InfiniteTechLevel {
     pub level: u32,
 }
 
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FactoryDocument {

@@ -29,26 +29,25 @@
 use std::net::SocketAddr;
 
 use axum::{
-    Router,
     extract::{Request, State},
     http::StatusCode,
     middleware::{self, Next},
     response::{IntoResponse, Response},
+    Router,
 };
 use rmcp::{
-    ErrorData as McpError,
     handler::server::wrapper::Parameters,
     model::CallToolResult,
     tool, tool_router,
     transport::streamable_http_server::{
-        session::local::LocalSessionManager,
-        StreamableHttpServerConfig, StreamableHttpService,
+        session::local::LocalSessionManager, StreamableHttpServerConfig, StreamableHttpService,
     },
+    ErrorData as McpError,
 };
 use schemars::JsonSchema;
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::{AppState, execute_command};
+use crate::{execute_command, AppState};
 use metatorio_runtime::message::AppMessage;
 use metatorio_runtime::{FactoryId, ProjectId};
 
@@ -92,10 +91,12 @@ impl MetatorioMcp {
     /// mechanism / solve), exactly as the GUI's dispatch does, and return the
     /// resulting revision + solve status.  This is the universal escape hatch
     /// for every planning operation.
-    #[tool(description = "Forward one AppMessage to the Metatorio planner runtime \
+    #[tool(
+        description = "Forward one AppMessage to the Metatorio planner runtime \
         (project / factory / mechanism / solve) and return the resulting revision. \
         This is the universal escape hatch for every planning operation; wire \
-        convenience tools on top of it as needed.")]
+        convenience tools on top of it as needed."
+    )]
     async fn dispatch(
         &self,
         Parameters(params): Parameters<DispatchParams>,
@@ -157,11 +158,13 @@ impl MetatorioMcp {
     /// Read the current planning state (the shared document snapshot).  This is
     /// the reading counterpart to `dispatch`: it lets an agent observe projects /
     /// factories / targets / mechanics and their assigned ids before mutating.
-    #[tool(description = "Read the current planning state from the shared Metatorio \
+    #[tool(
+        description = "Read the current planning state from the shared Metatorio \
         document.  Omit `project` to return the whole document; pass `project` to \
         narrow to one project; pass `project` + `factory` to narrow to one factory. \
         Set `recompute` (only meaningful with project + factory) to also run a solve \
-        and include the structured result.")]
+        and include the structured result."
+    )]
     async fn get_planning_state(
         &self,
         Parameters(params): Parameters<PlanningStateParams>,

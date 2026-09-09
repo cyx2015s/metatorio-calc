@@ -301,7 +301,10 @@ impl Runtime {
             accessibility_options(settings)
         };
         let result = metatorio_core::compute_accessibility_with_graph(store, &options, &graph);
-        self.accessibilities.lock().unwrap().insert(project_id, result.clone());
+        self.accessibilities
+            .lock()
+            .unwrap()
+            .insert(project_id, result.clone());
         Ok(result)
     }
 
@@ -1300,9 +1303,11 @@ pub fn add_conversion_flows(
         let mut category_sets: Vec<Vec<String>> = Vec::new();
         for key in seen.keys() {
             if let DualVar::ItemFuel { category, .. } = key
-                && !category.is_empty() && !category_sets.contains(category) {
-                    category_sets.push(category.clone());
-                }
+                && !category.is_empty()
+                && !category_sets.contains(category)
+            {
+                category_sets.push(category.clone());
+            }
         }
         let is_proper_subset =
             |a: &Vec<String>, b: &Vec<String>| a.len() < b.len() && a.iter().all(|x| b.contains(x));
@@ -1508,22 +1513,22 @@ pub fn apply_environment_to_game_state(
                 metatorio_data::store::PrototypeGroup::SpaceLocation,
                 planet_name,
             )
-                && let Some(component) =
-                    record.component::<metatorio_data::SpaceLocationComponent>()
-                {
-                    game.solar_power_multiplier = component.solar_power_in_space;
-                }
+            && let Some(component) = record.component::<metatorio_data::SpaceLocationComponent>()
+        {
+            game.solar_power_multiplier = component.solar_power_in_space;
+        }
     } else if let Some(planet_name) = planet
         && let Some(record) = store.get(metatorio_data::store::PrototypeGroup::Planet, planet_name)
-            && let Some(component) = record.component::<metatorio_data::PlanetComponent>() {
-                if let Some(&value) = component.surface_properties.get("solar-power") {
-                    // 百分比 → 倍率（nauvis 默认 100 → 1.0）
-                    game.solar_power_multiplier = value / 100.0;
-                }
-                if let Some(&cycle) = component.surface_properties.get("day-night-cycle") {
-                    game.day_night_cycle = cycle;
-                }
-            }
+        && let Some(component) = record.component::<metatorio_data::PlanetComponent>()
+    {
+        if let Some(&value) = component.surface_properties.get("solar-power") {
+            // 百分比 → 倍率（nauvis 默认 100 → 1.0）
+            game.solar_power_multiplier = value / 100.0;
+        }
+        if let Some(&cycle) = component.surface_properties.get("day-night-cycle") {
+            game.day_night_cycle = cycle;
+        }
+    }
 }
 
 #[cfg(test)]

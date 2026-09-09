@@ -440,20 +440,14 @@ fn beacon_of(v: &Value) -> Value {
         .map(|arr| {
             arr.iter()
                 .map(|m| {
-                    let idv = m
-                        .get(0)
-                        .map(id_of_plain)
-                        .unwrap_or_else(id_empty);
+                    let idv = m.get(0).map(id_of_plain).unwrap_or_else(id_empty);
                     let count = m.get(1).cloned().unwrap_or(json!(1));
                     json!([idv, count])
                 })
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    let beacon = map
-        .get("beacon")
-        .map(id_of_plain)
-        .unwrap_or_else(id_empty);
+    let beacon = map.get("beacon").map(id_of_plain).unwrap_or_else(id_empty);
     json!({
         "modules": modules,
         "beacon": beacon,
