@@ -796,8 +796,31 @@ fn run_game(exe: &Path, config: &Path, args: &[&str], extra: &[String]) -> Resul
 
 /// 跑游戏导出并读回产物（纯 IO + 子进程，**不碰 runtime / registry 锁**）。
 ///
-/// 返回 `(name, source, dump 原始字节, locale 字节, 图标源目录)`。
-type GameExport = (String, String, Vec<u8>, Option<Vec<u8>>, PathBuf);
+/// 返回 `(name, source, dump 原始字节, locale 字节, 图标源目录)`；图标源为
+/// `None` 表示本次没导出贴图（无头/无图形环境），上下文照常可用、只是没图标。
+type GameExport = (String, String, Vec<u8>, Option<Vec<u8>>, Option<PathBuf>);
+
+/// 从可执行文件路径推断游戏安装目录（含 `data/` 的那一层）。
+///
+/// 覆盖常见布局：`<root>/bin/x64/factorio(.exe)`、`<root>/bin/factorio`、
+/// `<root>/factorio`。找不到 `data/` 目录时返回 `None`（不写 `read-data`，
+/// 让游戏按自己的默认逻辑找数据）。
+fn factorio_install_dir(exe: &Path) -> Option<PathBuf> {
+    let mut dir = exe.parent()?;
+    if dir
+        .file_name()
+        .is_some_and(|name| name.eq_ignore_ascii_case("x64"))
+    {
+        dir = dir.parent()?;
+    }
+    if dir
+        .file_name()
+        .is_some_and(|name| name.eq_ignore_ascii_case("bin"))
+    {
+        dir = dir.parent()?;
+    }
+    dir.join("data").is_dir().then(|| dir.to_path_buf())
+}
 
 fn export_game_context<R: TauriRuntime>(
     app: &AppHandle<R>,
@@ -810,10 +833,13 @@ fn export_game_context<R: TauriRuntime>(
     }
     let export = game_export_dir(app)?;
     let config = export.join("config.ini");
-    let config_text = format!(
-        "[path]\nwrite-data={}\n[general]\nlocale=zh-CN\n",
-        export.to_string_lossy()
-    );
+    // `read-data` 必须指向游戏安装目录，否则游戏会去默认路径（Linux 下常见
+    // `/usr/share/factorio`）找 data 包而失败。找不到就省略，交给游戏自己找。
+    let mut config_text = format!("[path]\nwrite-data={}\n", export.to_string_lossy());
+    if let Some(root) = factorio_install_dir(&exe) {
+        config_text.push_str(&format!("read-data={}\n", root.to_string_lossy()));
+    }
+    config_text.push_str("[general]\nlocale=zh-CN\n");
     std::fs::write(&config, config_text).map_err(|error| error.to_string())?;
 
     let extra: Vec<String> = match mod_dir {
@@ -823,12 +849,16 @@ fn export_game_context<R: TauriRuntime>(
 
     run_game(&exe, &config, &["--dump-data"], &extra)?;
     run_game(&exe, &config, &["--dump-prototype-locale"], &extra)?;
-    run_game(
+    // 贴图导出是 best-effort：无头环境（没有图形/贴图数据）会让这一步失败，
+    // 但数据与翻译仍然可用——不应因此整体失败。
+    if let Err(error) = run_game(
         &exe,
         &config,
         &["--dump-icon-sprites", "--disable-audio"],
         &extra,
-    )?;
+    ) {
+        eprintln!("贴图导出失败（忽略，本上下文将没有图标）: {error}");
+    }
 
     let script_output = export.join("script-output");
     let dump_path = script_output.join("data-raw-dump.json");
@@ -850,7 +880,10 @@ fn export_game_context<R: TauriRuntime>(
             .map(|dir| format!(", mods: {dir}"))
             .unwrap_or_default()
     );
-    let icon_src = script_output.clone();
+    // 只有真的导出了贴图目录才把它当作图标源：否则 `script-output` 里只有
+    // dump/locale，搬过去会变成"图标目录"里塞着一份 dump。
+    let icon_src = (script_output.join("item").is_dir() || script_output.join("entity").is_dir())
+        .then(|| script_output.clone());
     // 翻译：`--dump-prototype-locale` 在 script-output 下写出多个
     // `{category}-locale.json`（item/recipe/entity/…），逐类合并。
     let locale_raw = {
@@ -886,7 +919,11 @@ async fn load_game_context_and_activate<R: TauriRuntime>(
         source,
         &raw,
         locale_raw.as_deref(),
-        IconImport::Move(icon_src),
+        match icon_src {
+            Some(src) => IconImport::Move(src),
+            // 无头/无图形环境没导出贴图：照常注册上下文，只是没有图标。
+            None => IconImport::None,
+        },
     )
     .await
 }
@@ -3333,6 +3370,39 @@ mod tests {
         assert!(solve.is_some(), "应保留求解产出");
         assert_eq!(errors, vec!["boom".to_string()], "错误必须被收集");
         assert_eq!(serialized.len(), 2, "每条命令都应序列化");
+    }
+
+    /// 游戏安装目录推断：`bin/x64/`、`bin/`、根目录三种布局都要命中，
+    /// 找不到 `data/` 时返回 None（不写 read-data）。
+    #[test]
+    fn factorio_install_dir_handles_common_layouts() {
+        let root = std::env::temp_dir().join(format!("metatorio-install-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("data")).unwrap();
+        let bin_x64 = root.join("bin").join("x64");
+        std::fs::create_dir_all(&bin_x64).unwrap();
+        let exe = bin_x64.join("factorio.exe");
+        std::fs::write(&exe, b"").unwrap();
+        assert_eq!(factorio_install_dir(&exe), Some(root.clone()));
+
+        let flat = root.join("bin").join("factorio");
+        std::fs::write(&flat, b"").unwrap();
+        assert_eq!(factorio_install_dir(&flat), Some(root.clone()));
+
+        let bare = root.join("factorio");
+        std::fs::write(&bare, b"").unwrap();
+        assert_eq!(factorio_install_dir(&bare), Some(root.clone()));
+
+        let elsewhere =
+            std::env::temp_dir().join(format!("metatorio-install-x-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&elsewhere);
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        let stray = elsewhere.join("factorio");
+        std::fs::write(&stray, b"").unwrap();
+        assert_eq!(factorio_install_dir(&stray), None, "没有 data/ 时不应猜");
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&elsewhere);
     }
 
     #[test]
