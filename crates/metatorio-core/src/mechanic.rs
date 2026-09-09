@@ -91,18 +91,42 @@ pub fn module_effect_at_quality(module: &ModuleComponent, quality: &QualityCompo
 
 impl ModuleConfig {
     /// 插件与插件塔的效果汇总（迁移自 egui ModuleConfig::get_effect）。
+    ///
+    /// **不区分目标机器**：等价于 [`Self::get_effect_for`] 的 `receiver = None`。
+    /// 生产路径请用 `get_effect_for`，以便机器自己声明
+    /// `uses_module_effects` / `uses_beacon_effects`。
     pub fn get_effect(&self, ctx: &Context) -> Effect {
+        self.get_effect_for(ctx, None)
+    }
+
+    /// 目标机器感知的效果汇总：
+    /// - `receiver.uses_module_effects == false` → 机器自身插件无效（忽略 `modules`）；
+    /// - `receiver.uses_beacon_effects == false` → 插件塔对该机器无效（忽略 `beacons`）。
+    ///
+    /// `None` = 不做限制（等价于两者都为 true）。
+    pub fn get_effect_for(
+        &self,
+        ctx: &Context,
+        receiver: Option<&metatorio_data::EffectReceiver>,
+    ) -> Effect {
+        let uses_modules = receiver.is_none_or(|receiver| receiver.uses_module_effects);
+        let uses_beacons = receiver.is_none_or(|receiver| receiver.uses_beacon_effects);
         let mut total_effect = Effect::default();
-        for module in &self.modules {
-            if let Some(record) = module_prototype(ctx, &module.id)
-                && let Some(module_proto) = record.component::<ModuleComponent>()
-            {
-                let quality = ctx.game.quality_level(&module.quality);
-                let effect = quality_by_level(ctx, quality)
-                    .map(|q| module_effect_at_quality(module_proto, q))
-                    .unwrap_or(module_proto.effect);
-                total_effect = total_effect + effect;
+        if uses_modules {
+            for module in &self.modules {
+                if let Some(record) = module_prototype(ctx, &module.id)
+                    && let Some(module_proto) = record.component::<ModuleComponent>()
+                {
+                    let quality = ctx.game.quality_level(&module.quality);
+                    let effect = quality_by_level(ctx, quality)
+                        .map(|q| module_effect_at_quality(module_proto, q))
+                        .unwrap_or(module_proto.effect);
+                    total_effect = total_effect + effect;
+                }
             }
+        }
+        if !uses_beacons {
+            return total_effect;
         }
         let mut beacon_count = 0usize;
         let mut beacon_count_by_type: crate::prim_var::AIndexMap<String, usize> =
@@ -170,7 +194,22 @@ impl ModuleConfig {
     }
 
     /// 插件塔耗电量（考虑共享比例均摊），单位 W（每秒）。
+    ///
+    /// **不区分目标机器**：等价于 [`Self::get_consumption_for`] 的 `receiver = None`。
     pub fn get_consumption(&self, ctx: &Context) -> f64 {
+        self.get_consumption_for(ctx, None)
+    }
+
+    /// 目标机器感知的插件塔耗电量：机器 `uses_beacon_effects == false` 时
+    /// 插件塔对它完全无效（既无效果也不计能耗），返回 0。
+    pub fn get_consumption_for(
+        &self,
+        ctx: &Context,
+        receiver: Option<&metatorio_data::EffectReceiver>,
+    ) -> f64 {
+        if receiver.is_some_and(|receiver| !receiver.uses_beacon_effects) {
+            return 0.0;
+        }
         let mut total_consumption = 0.0;
         for bc in &self.beacons {
             if let Some(record) = beacon_prototype(ctx, &bc.beacon.id)
@@ -439,5 +478,76 @@ mod tests {
         );
         // 插件塔耗电（均摊）> 0。
         assert!(with_beacon.get_consumption(&ctx) > 0.0);
+    }
+
+    /// 目标机器的 EffectReceiver 决定插件/插件塔是否生效：
+    /// 不吃插件塔效果的机器（如熔炉）不应因插件塔获得加成，也不应为插件塔耗电。
+    #[test]
+    fn effect_receiver_flags_gate_modules_and_beacons() {
+        let dump = serde_json::json!({
+            "module": {
+                "speed-module-3": {
+                    "name": "speed-module-3",
+                    "category": "speed",
+                    "tier": 3,
+                    "effect": { "speed": 0.5, "consumption": 0.5, "productivity": 0.0, "pollution": 0.0, "quality": 0.0 }
+                }
+            },
+            "beacon": {
+                "beacon": {
+                    "name": "beacon",
+                    "distribution_effectivity": 1.0,
+                    "module_slots": 2,
+                    "energy_usage": "480kW",
+                    "energy_source": { "type": "electric" }
+                }
+            },
+            "quality": { "normal": { "name": "normal", "level": 0 } }
+        });
+        let store = PrototypeStore::load(&dump).expect("dump 加载失败");
+        let game = GameState::default();
+        let ctx = Context::new(&store, &game);
+        let config = ModuleConfig {
+            modules: vec![IdWithQuality::new("speed-module-3", "normal")],
+            beacons: vec![BeaconConfig {
+                beacon: IdWithQuality::new("beacon", "normal"),
+                count: 1,
+                share: 1.0,
+                modules: vec![(IdWithQuality::new("speed-module-3", "normal"), 2)],
+            }],
+        };
+        // 注意：EffectReceiver 的 bool 字段 serde 默认 true，但 `Default` 派生
+        // 给的是 false，所以必须显式写全关心的两个字段。
+        let receiver = |modules: bool, beacons: bool| metatorio_data::EffectReceiver {
+            uses_module_effects: modules,
+            uses_beacon_effects: beacons,
+            ..Default::default()
+        };
+
+        let full = config.get_effect(&ctx);
+        assert!(full.speed > 0.0);
+        assert!(config.get_consumption(&ctx) > 0.0);
+
+        // 不吃插件塔：塔效果被忽略，只剩机器自身插件。
+        let no_beacon = config.get_effect_for(&ctx, Some(&receiver(true, false)));
+        assert!(no_beacon.speed > 0.0, "机器自身插件仍应生效");
+        assert!(
+            no_beacon.speed < full.speed,
+            "忽略插件塔后速度应低于完整值：{no_beacon:?} vs {full:?}"
+        );
+        assert_eq!(
+            config.get_consumption_for(&ctx, Some(&receiver(true, false))),
+            0.0,
+            "不吃插件塔效果的机器不应为插件塔计耗电"
+        );
+
+        // 不吃自身插件：只剩插件塔效果。
+        let no_module = config.get_effect_for(&ctx, Some(&receiver(false, true)));
+        assert!(no_module.speed > 0.0, "插件塔效果仍应生效");
+        assert!(no_module.speed < full.speed);
+
+        // 两者都不吃：完全没有效果。
+        let neither = config.get_effect_for(&ctx, Some(&receiver(false, false)));
+        assert_eq!(neither.speed, 0.0);
     }
 }

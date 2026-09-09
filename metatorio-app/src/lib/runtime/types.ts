@@ -722,6 +722,10 @@ export interface PrototypeDetail {
   module_slots: number | null;
   /** 机器/插件塔允许的插件类别（空 = 不限制）。 */
   allowed_module_categories: string[];
+  /** 机器是否接受插件塔效果；null/undefined = 未声明（按 true 处理）。 */
+  uses_beacon_effects: boolean | null;
+  /** 机器是否接受自身插件效果；null/undefined = 未声明（按 true 处理）。 */
+  uses_module_effects: boolean | null;
   /** 焦耳/刻（功率）；前端换算为 W。 */
   energy_usage_j: number | null;
   /** 机器能量源类型（electric/burner/fluid/heat/void）；burner 才显示燃料配置。 */

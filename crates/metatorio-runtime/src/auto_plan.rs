@@ -85,6 +85,42 @@ fn surface_properties(
     )
 }
 
+/// 实体能否在当前表面建造（`surface_conditions` 判定；无表面属性/无条件时允许）。
+///
+/// 这是**硬约束**：星球上建不出来的机器不应进入候选（否则自动规划会给出
+/// 无法落地的方案，例如在 Nauvis 上枚举 foundry）。
+fn buildable_on_surface(
+    store: &PrototypeStore,
+    record: &PrototypeRecord,
+    properties: Option<&std::collections::BTreeMap<String, f64>>,
+) -> bool {
+    let Some(properties) = properties else {
+        return true;
+    };
+    let Some(entity) = record.component::<EntityComponent>() else {
+        return true;
+    };
+    crate::planet::surface_condition_satisfied(store, &entity.surface_conditions, properties)
+}
+
+/// 当前表面可用的枚举插件塔方案：方案里**每个**插件塔实体都要能在此建造。
+fn buildable_beacon_plans<'a>(
+    store: &PrototypeStore,
+    plans: &'a [crate::document::AutoBeaconPlan],
+    properties: Option<&std::collections::BTreeMap<String, f64>>,
+) -> Vec<&'a crate::document::AutoBeaconPlan> {
+    plans
+        .iter()
+        .filter(|plan| {
+            plan.module_config.beacons.iter().all(|bc| {
+                store
+                    .get(PrototypeGroup::Entity, &bc.beacon.id)
+                    .is_none_or(|record| buildable_on_surface(store, record, properties))
+            })
+        })
+        .collect()
+}
+
 // ── 通用工具 ──────────────────────────────────────────────────────
 
 fn quality_name(ctx: &Context, level: usize) -> String {
@@ -338,11 +374,16 @@ fn module_combinations(
         .collect()
 }
 
+/// 追加「无插件塔」与各枚举插件塔变体。
+///
+/// `uses_beacon_effects = false` 的机器**不吃插件塔效果**（EffectReceiver），
+/// 因此不为它生成任何插件塔变体。
 fn push_with_beacons(
     out: &mut Vec<Mechanic>,
     base: Mechanic,
     modules: Vec<IdWithQuality>,
-    beacons: &[crate::document::AutoBeaconPlan],
+    beacons: &[&crate::document::AutoBeaconPlan],
+    uses_beacon_effects: bool,
 ) {
     let with_beacons = |module_config: ModuleConfig| match &base {
         Mechanic::Recipe(mechanic) => Mechanic::Recipe(metatorio_core::RecipeMechanic {
@@ -360,6 +401,9 @@ fn push_with_beacons(
         modules: modules.clone(),
         beacons: Vec::new(),
     }));
+    if !uses_beacon_effects {
+        return;
+    }
     // 每个枚举信塔配置额外创建一个变体
     for plan in beacons {
         out.push(with_beacons(ModuleConfig {
@@ -379,10 +423,11 @@ fn enumerate_recipes(
 ) {
     let quality_range = options.quality_limit + 1;
     let major_quality = quality_name(ctx, options.major_quality);
-    let beacons = &options.enumerate_beacons;
     // 表面条件：配方与机器都要满足当前星球/地表属性（自动规划才校验，
     // 手动模式认为所有配方可用）。
     let properties = surface_properties(store, options);
+    // 只在能建造的插件塔方案里枚举（插件塔实体本身也有表面条件）。
+    let beacons = buildable_beacon_plans(store, &options.enumerate_beacons, properties.as_ref());
     for record in store.group(PrototypeGroup::Recipe) {
         let Some(recipe) = record.component::<RecipeComponent>() else {
             continue;
@@ -406,6 +451,8 @@ fn enumerate_recipes(
         } else {
             1
         };
+        // 机器候选：配方类别匹配 **且** 能在当前表面建造（表面条件在候选
+        // 选取阶段就过滤，保证挑出的前 N 台都是可落地的）。
         let machines = pick_machines(
             store,
             &options.machine_preferences,
@@ -415,6 +462,7 @@ fn enumerate_recipes(
                 record
                     .component::<CraftingMachineComponent>()
                     .is_some_and(|machine| machine_fits_recipe(machine, recipe))
+                    && buildable_on_surface(store, record, properties.as_ref())
             },
             |record| {
                 record
@@ -430,17 +478,6 @@ fn enumerate_recipes(
             let Some(machine_record) = store.get(PrototypeGroup::Entity, machine_name) else {
                 continue;
             };
-            // 机器表面条件过滤
-            if let Some(properties) = &properties
-                && let Some(entity) = machine_record.component::<EntityComponent>()
-                && !crate::planet::surface_condition_satisfied(
-                    store,
-                    &entity.surface_conditions,
-                    properties,
-                )
-            {
-                continue;
-            }
             // 机器可达性过滤：当前项目科技未解锁的机器不枚举。
             if let Some(accessibility) = &options.accessibility
                 && !accessibility
@@ -452,24 +489,32 @@ fn enumerate_recipes(
             else {
                 continue;
             };
-            let allowed_modules: Vec<IdWithQuality> = options
-                .enumerate_modules
-                .iter()
-                .filter(|module_name| {
-                    store
-                        .get(PrototypeGroup::Item, &module_name.id)
-                        .and_then(|record| record.component::<ModuleComponent>())
-                        .is_some_and(|module| {
-                            module_allowed(
-                                module,
-                                &machine_component.allowed_module_categories,
-                                &machine_component.allowed_effects,
-                                Some(recipe),
-                            )
-                        })
-                })
-                .cloned()
-                .collect();
+            let receiver = machine_component.effect_receiver.as_ref();
+            // 不吃插件效果的机器（EffectReceiver）不枚举对应配置。
+            let uses_modules = receiver.is_none_or(|receiver| receiver.uses_module_effects);
+            let uses_beacons = receiver.is_none_or(|receiver| receiver.uses_beacon_effects);
+            let allowed_modules: Vec<IdWithQuality> = if uses_modules {
+                options
+                    .enumerate_modules
+                    .iter()
+                    .filter(|module_name| {
+                        store
+                            .get(PrototypeGroup::Item, &module_name.id)
+                            .and_then(|record| record.component::<ModuleComponent>())
+                            .is_some_and(|module| {
+                                module_allowed(
+                                    module,
+                                    &machine_component.allowed_module_categories,
+                                    &machine_component.allowed_effects,
+                                    Some(recipe),
+                                )
+                            })
+                    })
+                    .cloned()
+                    .collect()
+            } else {
+                Vec::new()
+            };
             let quality_involved = allowed_modules.iter().any(|module_name| {
                 store
                     .get(PrototypeGroup::Item, &module_name.id)
@@ -496,21 +541,27 @@ fn enumerate_recipes(
                         module_config: ModuleConfig::default(),
                         fuel: None,
                     });
-                    push_with_beacons(out, base, modules, beacons);
+                    push_with_beacons(out, base, modules, &beacons, uses_beacons);
                 }
             }
             kept_any = true;
         }
-        // 无满足条件/解锁的机器（全被表面/可达性过滤）：退化为评分最低的一台——
-        // 配方出现即视为有对应组装机（mod 合理设计），不管替代数量设置与可达性。
+        // 无解锁的机器（全被可达性过滤）：退化为评分最低的一台——配方出现即
+        // 视为有对应组装机（mod 合理设计），不管替代数量设置与可达性。
+        // 机器列表本身已按表面条件过滤，因此退化候选仍然是**可落地**的。
         if !kept_any && let Some(machine) = machines.last() {
+            let uses_beacons = store
+                .get(PrototypeGroup::Entity, &machine.id)
+                .and_then(|record| record.component::<CraftingMachineComponent>())
+                .and_then(|machine| machine.effect_receiver.as_ref())
+                .is_none_or(|receiver| receiver.uses_beacon_effects);
             let base = Mechanic::Recipe(metatorio_core::RecipeMechanic {
                 recipe: IdWithQuality::new(record.name.clone(), quality_name(ctx, 0)),
                 machine: machine.clone(),
                 module_config: ModuleConfig::default(),
                 fuel: None,
             });
-            push_with_beacons(out, base, Vec::new(), beacons);
+            push_with_beacons(out, base, Vec::new(), &beacons, uses_beacons);
         }
     }
 }
@@ -525,8 +576,8 @@ fn enumerate_mining(
 ) {
     let quality_range = options.quality_limit + 1;
     let major_quality = quality_name(ctx, options.major_quality);
-    let beacons = &options.enumerate_beacons;
     let properties = surface_properties(store, options);
+    let beacons = buildable_beacon_plans(store, &options.enumerate_beacons, properties.as_ref());
     for record in store.group(PrototypeGroup::Entity) {
         if record.type_ != "resource" {
             continue;
@@ -539,6 +590,7 @@ fn enumerate_mining(
         } else {
             resource.category.clone()
         };
+        // 采矿机候选：资源类别匹配 **且** 能在当前表面建造。
         let machines = pick_machines(
             store,
             &options.machine_preferences,
@@ -548,6 +600,7 @@ fn enumerate_mining(
                 drill_record
                     .component::<MiningDrillComponent>()
                     .is_some_and(|drill| drill.resource_categories.contains(&category))
+                    && buildable_on_surface(store, drill_record, properties.as_ref())
             },
             |drill_record| {
                 drill_record
@@ -562,17 +615,6 @@ fn enumerate_mining(
             let Some(drill_record) = store.get(PrototypeGroup::Entity, machine_name) else {
                 continue;
             };
-            // 采矿机表面条件过滤
-            if let Some(properties) = &properties
-                && let Some(entity) = drill_record.component::<EntityComponent>()
-                && !crate::planet::surface_condition_satisfied(
-                    store,
-                    &entity.surface_conditions,
-                    properties,
-                )
-            {
-                continue;
-            }
             // 采矿机可达性过滤：当前项目科技未解锁的机器不枚举。
             if let Some(accessibility) = &options.accessibility
                 && !accessibility
@@ -583,24 +625,31 @@ fn enumerate_mining(
             let Some(drill) = drill_record.component::<MiningDrillComponent>() else {
                 continue;
             };
-            let allowed_modules: Vec<IdWithQuality> = options
-                .enumerate_modules
-                .iter()
-                .filter(|module_name| {
-                    store
-                        .get(PrototypeGroup::Item, &module_name.id)
-                        .and_then(|record| record.component::<ModuleComponent>())
-                        .is_some_and(|module| {
-                            module_allowed(
-                                module,
-                                &drill.allowed_module_categories,
-                                &drill.allowed_effects,
-                                None,
-                            )
-                        })
-                })
-                .cloned()
-                .collect();
+            let receiver = drill.effect_receiver.as_ref();
+            let uses_modules = receiver.is_none_or(|receiver| receiver.uses_module_effects);
+            let uses_beacons = receiver.is_none_or(|receiver| receiver.uses_beacon_effects);
+            let allowed_modules: Vec<IdWithQuality> = if uses_modules {
+                options
+                    .enumerate_modules
+                    .iter()
+                    .filter(|module_name| {
+                        store
+                            .get(PrototypeGroup::Item, &module_name.id)
+                            .and_then(|record| record.component::<ModuleComponent>())
+                            .is_some_and(|module| {
+                                module_allowed(
+                                    module,
+                                    &drill.allowed_module_categories,
+                                    &drill.allowed_effects,
+                                    None,
+                                )
+                            })
+                    })
+                    .cloned()
+                    .collect()
+            } else {
+                Vec::new()
+            };
             let quality_involved = allowed_modules.iter().any(|module_name| {
                 store
                     .get(PrototypeGroup::Item, &module_name.id)
@@ -625,7 +674,7 @@ fn enumerate_mining(
                     });
                     // 采矿按资源品质展开（矿藏实体无品质，品质作用于产出）
                     let _ = quality;
-                    push_with_beacons(out, base, modules, beacons);
+                    push_with_beacons(out, base, modules, &beacons, uses_beacons);
                 }
             }
         }
@@ -720,12 +769,17 @@ fn enumerate_energy(
 ) {
     let major_quality = quality_name(ctx, options.major_quality);
     let quality_range = options.quality_limit + 1;
+    // 能量设备同样受表面条件约束（如只能建在特定星球的发电机/锅炉）。
+    let properties = surface_properties(store, options);
     for record in store.group(PrototypeGroup::Entity) {
         // 能量机器（发电机/锅炉/反应堆）可达性过滤：当前项目科技未解锁的机器不枚举。
         if let Some(accessibility) = &options.accessibility
             && !accessibility
                 .is_accessible(&metatorio_core::Accessible::Entity(record.name.clone()))
         {
+            continue;
+        }
+        if !buildable_on_surface(store, record, properties.as_ref()) {
             continue;
         }
         if let Some(generator) = record.component::<GeneratorComponent>() {
@@ -782,6 +836,10 @@ fn enumerate_energy(
             acc.is_accessible(&metatorio_core::Accessible::Entity(record.name.clone()))
         });
         if !accessible {
+            continue;
+        }
+        // 表面条件过滤（如某些星球不能建太阳能板）。
+        if !buildable_on_surface(store, record, properties.as_ref()) {
             continue;
         }
         if let Some(panel) = record.component::<SolarPanelComponent>() {
@@ -874,7 +932,316 @@ pub fn recipe_unlocked(store: &PrototypeStore, accessible: &Accessibility, name:
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::document::AutoBeaconPlan;
     use crate::id::MechanicId;
+    use metatorio_core::BeaconConfig;
+
+    /// 用给定 dump 在当前表面枚举全部候选。
+    fn enumerate_on(planet: Option<&str>, dump: &serde_json::Value) -> Vec<Mechanic> {
+        enumerate_on_with_beacons(planet, dump, Vec::new())
+    }
+
+    fn enumerate_on_with_beacons(
+        planet: Option<&str>,
+        dump: &serde_json::Value,
+        enumerate_beacons: Vec<AutoBeaconPlan>,
+    ) -> Vec<Mechanic> {
+        let store = PrototypeStore::load(dump).expect("dump 加载失败");
+        let game = metatorio_core::GameState::default();
+        let ctx = metatorio_core::Context::new(&store, &game);
+        let options = EnumerateOptions {
+            alternative_count: 3,
+            machine_preferences: Vec::new(),
+            enumerate_modules: Vec::new(),
+            enumerate_beacons,
+            quality_limit: 0,
+            major_quality: 0,
+            planet: planet.map(str::to_string),
+            surface: None,
+            accessibility: None,
+        };
+        enumerate_all(&store, &ctx, &options)
+    }
+
+    fn recipe_machines(candidates: &[Mechanic], recipe: &str) -> Vec<String> {
+        candidates
+            .iter()
+            .filter_map(|mechanic| match mechanic {
+                Mechanic::Recipe(mechanic) if mechanic.recipe.id == recipe => {
+                    Some(mechanic.machine.id.clone())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// 机器表面条件不满足当前星球时不枚举（原来只在挑完候选后过滤，
+    /// 且「无可建造机器」的退化分支会把它重新放回来）。
+    #[test]
+    fn machines_not_buildable_on_planet_are_not_enumerated() {
+        let dump = serde_json::json!({
+            "item": {},
+            "recipe": {
+                "gear": {
+                    "type": "recipe", "name": "gear", "energy_required": 1.0,
+                    "ingredients": [], "results": [], "categories": ["crafting"], "enabled": true
+                }
+            },
+            "assembling-machine": {
+                "everywhere-machine": {
+                    "type": "assembling-machine", "name": "everywhere-machine",
+                    "crafting_categories": ["crafting"], "crafting_speed": 1.0,
+                    "energy_usage": "90kW", "energy_source": { "type": "electric" },
+                    "module_slots": 0
+                },
+                "hot-machine": {
+                    "type": "assembling-machine", "name": "hot-machine",
+                    "crafting_categories": ["crafting"], "crafting_speed": 100.0,
+                    "energy_usage": "90kW", "energy_source": { "type": "electric" },
+                    "module_slots": 0,
+                    "surface_conditions": [{ "property": "pressure", "min": 100 }]
+                }
+            },
+            "planet": {
+                "nauvis": {
+                    "type": "planet", "name": "nauvis",
+                    "surface_properties": { "pressure": 1 }
+                },
+                "vulcanus": {
+                    "type": "planet", "name": "vulcanus",
+                    "surface_properties": { "pressure": 1000 }
+                }
+            }
+        });
+
+        let on_nauvis = recipe_machines(&enumerate_on(Some("nauvis"), &dump), "gear");
+        assert!(
+            on_nauvis.contains(&"everywhere-machine".to_string()),
+            "无表面条件的机器应枚举：{on_nauvis:?}"
+        );
+        assert!(
+            !on_nauvis.contains(&"hot-machine".to_string()),
+            "表面条件不满足的机器不应枚举：{on_nauvis:?}"
+        );
+
+        let on_vulcanus = recipe_machines(&enumerate_on(Some("vulcanus"), &dump), "gear");
+        assert!(
+            on_vulcanus.contains(&"hot-machine".to_string()),
+            "满足表面条件的星球应枚举该机器：{on_vulcanus:?}"
+        );
+    }
+
+    /// 唯一机器在当前表面建不出来时，配方不应退化成不可建造的候选。
+    #[test]
+    fn recipe_without_buildable_machine_yields_no_candidate() {
+        let dump = serde_json::json!({
+            "item": {},
+            "recipe": {
+                "gear": {
+                    "type": "recipe", "name": "gear", "energy_required": 1.0,
+                    "ingredients": [], "results": [], "categories": ["crafting"], "enabled": true
+                }
+            },
+            "assembling-machine": {
+                "hot-machine": {
+                    "type": "assembling-machine", "name": "hot-machine",
+                    "crafting_categories": ["crafting"], "crafting_speed": 1.0,
+                    "energy_usage": "90kW", "energy_source": { "type": "electric" },
+                    "module_slots": 0,
+                    "surface_conditions": [{ "property": "pressure", "min": 100 }]
+                }
+            },
+            "planet": {
+                "nauvis": {
+                    "type": "planet", "name": "nauvis",
+                    "surface_properties": { "pressure": 1 }
+                }
+            }
+        });
+
+        let on_nauvis = recipe_machines(&enumerate_on(Some("nauvis"), &dump), "gear");
+        assert!(
+            on_nauvis.is_empty(),
+            "没有可建造机器时不应产生候选：{on_nauvis:?}"
+        );
+        // 未指定星球 → 不做表面条件过滤（既有语义）。
+        let no_planet = recipe_machines(&enumerate_on(None, &dump), "gear");
+        assert_eq!(no_planet, vec!["hot-machine".to_string()]);
+    }
+
+    /// 不吃插件塔效果的机器（EffectReceiver.uses_beacon_effects = false）
+    /// 不枚举插件塔变体。
+    #[test]
+    fn beacons_are_not_enumerated_for_machines_that_ignore_them() {
+        let dump = serde_json::json!({
+            "item": {},
+            "recipe": {
+                "gear": {
+                    "type": "recipe", "name": "gear", "energy_required": 1.0,
+                    "ingredients": [], "results": [], "categories": ["crafting"], "enabled": true
+                }
+            },
+            "assembling-machine": {
+                "furnace-like": {
+                    "type": "assembling-machine", "name": "furnace-like",
+                    "crafting_categories": ["crafting"], "crafting_speed": 1.0,
+                    "energy_usage": "90kW", "energy_source": { "type": "electric" },
+                    "module_slots": 0,
+                    "effect_receiver": { "uses_beacon_effects": false, "uses_module_effects": true }
+                },
+                "assembler": {
+                    "type": "assembling-machine", "name": "assembler",
+                    "crafting_categories": ["crafting"], "crafting_speed": 1.0,
+                    "energy_usage": "90kW", "energy_source": { "type": "electric" },
+                    "module_slots": 0
+                }
+            },
+            "beacon": {
+                "beacon": {
+                    "name": "beacon", "distribution_effectivity": 1.0, "module_slots": 2,
+                    "energy_usage": "480kW", "energy_source": { "type": "electric" }
+                }
+            }
+        });
+        let plan = AutoBeaconPlan {
+            module_config: ModuleConfig {
+                modules: Vec::new(),
+                beacons: vec![BeaconConfig {
+                    beacon: IdWithQuality::new("beacon", "normal"),
+                    count: 1,
+                    share: 1.0,
+                    modules: Vec::new(),
+                }],
+            },
+        };
+        let candidates = enumerate_on_with_beacons(Some("nauvis"), &dump, vec![plan]);
+
+        let with_beacon_variants = |machine: &str| {
+            candidates
+                .iter()
+                .filter(|candidate| {
+                    matches!(
+                        candidate,
+                        Mechanic::Recipe(mechanic)
+                            if mechanic.machine.id == machine && !mechanic.module_config.beacons.is_empty()
+                    )
+                })
+                .count()
+        };
+        assert_eq!(
+            with_beacon_variants("furnace-like"),
+            0,
+            "不吃插件塔的机器不应有插件塔变体"
+        );
+        assert_eq!(
+            with_beacon_variants("assembler"),
+            1,
+            "吃插件塔的机器应有一个插件塔变体"
+        );
+    }
+
+    /// 真实 dump 回归（仓库内 `assets/data-raw-dump.json`，缺失时跳过）：
+    /// - 表面条件过滤必须拦住「当前星球建不出来」的机器（crusher 只能建在
+    ///   gravity = 0 的太空平台），同时不能误杀能在该星球建造的机器
+    ///   （石炉/钢炉要求 pressure ≥ 10，Nauvis 走 surface-property 默认值 1000）；
+    /// - 不吃插件塔效果的机器（石炉/钢炉的 EffectReceiver.uses_beacon_effects
+    ///   = false）不枚举插件塔变体，而吃插件塔的机器（电炉）要枚举。
+    #[test]
+    fn real_dump_surface_and_beacon_filters() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/data-raw-dump.json"
+        );
+        if !std::path::Path::new(path).exists() {
+            eprintln!("[skip] 无真实 dump（{path}），跳过");
+            return;
+        }
+        let raw = std::fs::read(path).expect("读 dump");
+        let dump: serde_json::Value = serde_json::from_slice(&raw).expect("解析 dump");
+        let store = PrototypeStore::load(&dump).expect("dump 加载失败");
+        let game = metatorio_core::GameState::default();
+        let ctx = metatorio_core::Context::new(&store, &game);
+
+        let options =
+            |planet: Option<&str>, surface: Option<&str>, beacons: Vec<AutoBeaconPlan>| {
+                EnumerateOptions {
+                    alternative_count: 3,
+                    machine_preferences: Vec::new(),
+                    enumerate_modules: Vec::new(),
+                    enumerate_beacons: beacons,
+                    quality_limit: 0,
+                    major_quality: 0,
+                    planet: planet.map(str::to_string),
+                    surface: surface.map(str::to_string),
+                    accessibility: None,
+                }
+            };
+        let has_machine = |candidates: &[Mechanic], machine: &str| {
+            candidates.iter().any(|candidate| {
+                matches!(candidate, Mechanic::Recipe(mechanic) if mechanic.machine.id == machine)
+            })
+        };
+
+        // Nauvis：crusher（gravity 0..0）不可建；石炉/钢炉可建。
+        let nauvis = enumerate_all(&store, &ctx, &options(Some("nauvis"), None, Vec::new()));
+        assert!(
+            !has_machine(&nauvis, "crusher"),
+            "Nauvis 不应枚举只能建在太空平台的 crusher"
+        );
+        assert!(
+            has_machine(&nauvis, "stone-furnace") || has_machine(&nauvis, "steel-furnace"),
+            "Nauvis 应保留可建造的熔炉"
+        );
+
+        // 太空平台（gravity/pressure = 0）：crusher 可建；石炉（pressure ≥ 10）不可建。
+        let space = enumerate_all(
+            &store,
+            &ctx,
+            &options(None, Some("space-platform"), Vec::new()),
+        );
+        assert!(has_machine(&space, "crusher"), "太空平台应枚举 crusher");
+        assert!(
+            !has_machine(&space, "stone-furnace") && !has_machine(&space, "steel-furnace"),
+            "太空平台（pressure 0）不应枚举要求 pressure ≥ 10 的熔炉"
+        );
+
+        // 插件塔：石炉/钢炉不吃插件塔效果 → 无塔变体；电炉吃 → 有塔变体。
+        let plan = AutoBeaconPlan {
+            module_config: ModuleConfig {
+                modules: Vec::new(),
+                beacons: vec![BeaconConfig {
+                    beacon: IdWithQuality::new("beacon", "normal"),
+                    count: 1,
+                    share: 1.0,
+                    modules: vec![(IdWithQuality::new("speed-module-3", "normal"), 1)],
+                }],
+            },
+        };
+        let with_beacons = enumerate_all(&store, &ctx, &options(Some("nauvis"), None, vec![plan]));
+        let beacon_variants = |machine: &str| {
+            with_beacons
+                .iter()
+                .filter(|candidate| {
+                    matches!(
+                        candidate,
+                        Mechanic::Recipe(mechanic)
+                            if mechanic.machine.id == machine && !mechanic.module_config.beacons.is_empty()
+                    )
+                })
+                .count()
+        };
+        for machine in ["stone-furnace", "steel-furnace"] {
+            assert_eq!(
+                beacon_variants(machine),
+                0,
+                "{machine} 不吃插件塔效果，不应有插件塔变体"
+            );
+        }
+        assert!(
+            beacon_variants("electric-furnace") > 0,
+            "电炉吃插件塔效果，应有插件塔变体"
+        );
+    }
 
     #[test]
     fn effective_recipe_categories_defaults_to_crafting() {

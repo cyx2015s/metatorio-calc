@@ -244,6 +244,13 @@ pub struct PrototypeDetail {
     pub machine_energy_source: Option<String>,
     /// burner 机器可接受的燃料类别（electric/fluid 为空）；燃料选择筛选用。
     pub burner_fuel_categories: Vec<String>,
+    /// 机器是否接受**插件塔**效果（`EffectReceiver.uses_beacon_effects`）；
+    /// `None` = 该原型没有 EffectReceiver（按 true 处理），false 时前端不应
+    /// 允许添加插件塔。
+    pub uses_beacon_effects: Option<bool>,
+    /// 机器是否接受**自身插件**效果（`EffectReceiver.uses_module_effects`）；
+    /// `None` = 未声明（按 true 处理）。
+    pub uses_module_effects: Option<bool>,
     // generator / boiler / reactor
     /// 发电效率。
     pub effectivity: Option<f64>,
@@ -1843,6 +1850,11 @@ fn prototype_detail(
         detail.categories = machine.crafting_categories.clone();
         detail.machine_energy_source = Some(energy_source_kind(&machine.energy_source).to_string());
         detail.burner_fuel_categories = burner_fuel_categories_of(&machine.energy_source);
+        let receiver = machine.effect_receiver.as_ref();
+        detail.uses_beacon_effects =
+            Some(receiver.is_none_or(|receiver| receiver.uses_beacon_effects));
+        detail.uses_module_effects =
+            Some(receiver.is_none_or(|receiver| receiver.uses_module_effects));
     }
     if let Some(drill) = record.component::<MiningDrillComponent>() {
         detail.categories = drill.resource_categories.clone();
@@ -1851,6 +1863,11 @@ fn prototype_detail(
             drill.allowed_module_categories.clone().unwrap_or_default();
         detail.machine_energy_source = Some(energy_source_kind(&drill.energy_source).to_string());
         detail.burner_fuel_categories = burner_fuel_categories_of(&drill.energy_source);
+        let receiver = drill.effect_receiver.as_ref();
+        detail.uses_beacon_effects =
+            Some(receiver.is_none_or(|receiver| receiver.uses_beacon_effects));
+        detail.uses_module_effects =
+            Some(receiver.is_none_or(|receiver| receiver.uses_module_effects));
     }
     if let Some(beacon) = record.component::<BeaconComponent>() {
         detail.beacon_module_slots = Some(beacon.module_slots);

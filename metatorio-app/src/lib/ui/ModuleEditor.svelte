@@ -28,6 +28,9 @@
   let modules = $derived(entry.mechanic.module_config?.modules ?? []);
   let beacons = $derived(entry.mechanic.module_config?.beacons ?? []);
   let slotCount = $derived(Math.max(machineDetail?.module_slots ?? 0, modules.length));
+  /** 机器是否吃插件塔效果（EffectReceiver.uses_beacon_effects，未声明按 true）。
+   *  false 时不允许添加插件塔——加了也不生效（后端同样忽略其效果与耗电）。 */
+  let usesBeaconEffects = $derived(machineDetail?.uses_beacon_effects ?? true);
 
   // 机器变化时拉取槽位信息。
   $effect(() => {
@@ -125,11 +128,15 @@
     <div class="me-beacons">
       <div class="me-beacons-head">
         <span class="me-label">插件塔</span>
-        <button
-          class="btn"
-          title="选择插件塔添加到这台机器"
-          onclick={onAddBeacon}
-        >+ 添加插件塔</button>
+        {#if usesBeaconEffects}
+          <button
+            class="btn"
+            title="选择插件塔添加到这台机器"
+            onclick={onAddBeacon}
+          >+ 添加插件塔</button>
+        {:else}
+          <span class="muted">该机器不受插件塔影响</span>
+        {/if}
       </div>
       {#each beacons as beacon, bi (bi)}
         <div class="me-beacon">
@@ -204,7 +211,7 @@
         </div>
       {/each}
     </div>
-  {:else}
+  {:else if usesBeaconEffects}
     <button
       class="btn"
       title="选择插件塔添加到这台机器"

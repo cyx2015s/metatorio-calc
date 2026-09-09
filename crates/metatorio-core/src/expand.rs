@@ -371,7 +371,9 @@ fn expand_recipe<C: Clone>(
 
     let recipe_quality = quality_level(ctx, &mechanic.recipe.quality);
     let mut effects = restrict_effect(
-        mechanic.module_config.get_effect(ctx),
+        mechanic
+            .module_config
+            .get_effect_for(ctx, machine.effect_receiver.as_ref()),
         machine.allowed_effects.as_ref(),
         Some(recipe),
     );
@@ -423,7 +425,9 @@ fn expand_recipe<C: Clone>(
         );
     }
 
-    let module_consumption = mechanic.module_config.get_consumption(ctx);
+    let module_consumption = mechanic
+        .module_config
+        .get_consumption_for(ctx, machine.effect_receiver.as_ref());
     if module_consumption > 0.0 {
         temp.add(DualVar::Electricity, -module_consumption);
     }
@@ -563,7 +567,9 @@ fn expand_mining<C: Clone>(
 
     let machine_quality = quality_level(ctx, &mechanic.machine.quality);
     let mut effects = restrict_effect(
-        mechanic.module_config.get_effect(ctx),
+        mechanic
+            .module_config
+            .get_effect_for(ctx, machine.effect_receiver.as_ref()),
         machine.allowed_effects.as_ref(),
         None,
     );
@@ -606,7 +612,9 @@ fn expand_mining<C: Clone>(
         -scale * drain_rate,
     );
 
-    let module_consumption = mechanic.module_config.get_consumption(ctx);
+    let module_consumption = mechanic
+        .module_config
+        .get_consumption_for(ctx, machine.effect_receiver.as_ref());
     if module_consumption > 0.0 {
         temp.add(DualVar::Electricity, -module_consumption);
     }
