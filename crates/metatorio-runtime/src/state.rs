@@ -166,6 +166,12 @@ impl RuntimeState {
         self.finish(Outcome::solve_factory(project, factory))
     }
 
+    /// 关闭（从工作区移除）一个项目（`RuntimeCommand::CloseProject` 的回写）。
+    pub fn close_project(&mut self, project: ProjectId) -> Result<DispatchResult, RuntimeError> {
+        self.remove_project(project)?;
+        self.finish(Outcome::meta_without_project())
+    }
+
     /// 收尾：按 [`Outcome`] 的分类追加副作用命令。
     ///
     /// 只有 `solve_factory` / `solve_all` 会追加 `Recompute`；`meta` 只落盘
@@ -2400,6 +2406,20 @@ mod tests {
             .map(|entry| entry.id)
             .collect();
         assert_eq!(reordered, vec![ids[2], ids[1]], "应按用量降序重排");
+    }
+
+    /// `CloseProject` 命令（「保存后关闭」的第二步）必须真的把项目移出工作区。
+    #[test]
+    fn close_project_removes_it_from_the_workspace() {
+        let (mut state, project, _factory) = state_with_factory();
+        let outcome = state.close_project(project).unwrap();
+        assert!(outcome.changed);
+        assert!(state.project(project).is_err(), "项目应已被移除");
+        assert!(
+            outcome.commands.is_empty(),
+            "关闭项目不再产生副作用命令：{:?}",
+            outcome.commands
+        );
     }
 
     #[test]

@@ -2198,30 +2198,42 @@ async fn open_project_dialog(app: AppHandle) -> Result<Option<AppDocument>, Stri
         return Ok(None);
     };
     let path = picked.into_path().map_err(|error| error.to_string())?;
+    // 读盘 + JSON 解析在锁外（工程文件可能很大）。
+    let parse_path = path.clone();
+    let value = tauri::async_runtime::spawn_blocking(move || {
+        metatorio_runtime::parse_document_file(&parse_path).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())??;
     let state = app.state::<AppState>();
-    let mut runtime = state
-        .runtime
-        .lock()
-        .map_err(|_| "runtime lock poisoned".to_string())?;
-    let before: std::collections::HashSet<ProjectId> = runtime
-        .state
-        .document
-        .projects
-        .iter()
-        .map(|p| p.id)
-        .collect();
-    runtime
-        .load_document_file(&path)
-        .map_err(|error| error.to_string())?;
     let path = path.to_string_lossy().to_string();
+    let (document, added) = with_runtime(&state, |runtime| {
+        let before: std::collections::HashSet<ProjectId> = runtime
+            .state
+            .document
+            .projects
+            .iter()
+            .map(|project| project.id)
+            .collect();
+        runtime
+            .import_document_value(value)
+            .map_err(|error| error.to_string())?;
+        let added: Vec<ProjectId> = runtime
+            .state
+            .document
+            .projects
+            .iter()
+            .map(|project| project.id)
+            .filter(|id| !before.contains(id))
+            .collect();
+        Ok((runtime.state.document.clone(), added))
+    })?;
     if let Ok(mut paths) = state.project_paths.lock() {
-        for project in &runtime.state.document.projects {
-            if !before.contains(&project.id) {
-                paths.insert(project.id, path.clone());
-            }
+        for project in added {
+            paths.insert(project, path.clone());
         }
     }
-    Ok(Some(runtime.state.document.clone()))
+    Ok(Some(document))
 }
 
 #[tauri::command]
@@ -2968,8 +2980,88 @@ async fn execute_command(
             }
             effect
         }
-        other => {
-            eprintln!("unhandled runtime command: {other:?}");
+        RuntimeCommand::LoadProject { path } => {
+            // 读盘 + JSON 解析在锁外；迁移/导入在短锁内。
+            let load_path = PathBuf::from(path.clone());
+            let parsed = tauri::async_runtime::spawn_blocking(move || {
+                metatorio_runtime::parse_document_file(&load_path)
+                    .map_err(|error| error.to_string())
+            })
+            .await
+            .map_err(|error| error.to_string());
+            match parsed {
+                Ok(Ok(value)) => {
+                    let outcome = with_runtime(state, |runtime| {
+                        runtime
+                            .import_document_value(value)
+                            .map_err(|error| error.to_string())?;
+                        Ok(runtime.state.document.clone())
+                    });
+                    match outcome {
+                        Ok(document) => {
+                            if let Ok(mut paths) = state.project_paths.lock() {
+                                for project in &document.projects {
+                                    paths.entry(project.id).or_insert_with(|| path.clone());
+                                }
+                            }
+                            emit(app, "document-changed", ());
+                        }
+                        Err(error) => emit(app, "solve-error", error),
+                    }
+                }
+                Ok(Err(error)) => emit(app, "solve-error", error),
+                Err(error) => emit(app, "solve-error", error),
+            }
+            None
+        }
+        RuntimeCommand::CloseProject { project } => {
+            let project = *project;
+            let outcome = with_runtime(state, |runtime| {
+                runtime
+                    .state
+                    .close_project(project)
+                    .map(|outcome| outcome.commands)
+                    .map_err(|error| error.to_string())
+            });
+            if let Ok(mut paths) = state.project_paths.lock() {
+                paths.remove(&project);
+            }
+            match outcome {
+                Ok(commands) => {
+                    for command in &commands {
+                        Box::pin(execute_command(app, state, command)).await;
+                    }
+                }
+                Err(error) => eprintln!("close project failed: {error}"),
+            }
+            None
+        }
+        // 以下命令目前只有消息侧定义、没有实现（GUI 分别走 `suggest` /
+        // `best_modules` / `implicit_sources` 等独立 Tauri 命令，更新走
+        // tauri-plugin-updater 的 JS 插件）。保留显式分支而不是 `_ =>`，
+        // 这样新增 RuntimeCommand 变体会在编译期暴露，而不是静默不执行。
+        RuntimeCommand::RequestSuggestions { .. } => {
+            eprintln!("RuntimeCommand::RequestSuggestions 未实现（GUI 走 suggest 命令）");
+            None
+        }
+        RuntimeCommand::UseBestModules { .. } => {
+            eprintln!("RuntimeCommand::UseBestModules 未实现（GUI 走 best_modules 命令）");
+            None
+        }
+        RuntimeCommand::ReplaceExternalInputs { .. } => {
+            eprintln!("RuntimeCommand::ReplaceExternalInputs 未实现（GUI 走 implicit_sources 命令）");
+            None
+        }
+        RuntimeCommand::CheckForUpdate => {
+            eprintln!("RuntimeCommand::CheckForUpdate 未实现（前端走 updater 插件）");
+            None
+        }
+        RuntimeCommand::InstallUpdate => {
+            eprintln!("RuntimeCommand::InstallUpdate 未实现（前端走 updater 插件）");
+            None
+        }
+        RuntimeCommand::RestartAfterUpdate => {
+            eprintln!("RuntimeCommand::RestartAfterUpdate 未实现（前端走 updater 插件）");
             None
         }
     }

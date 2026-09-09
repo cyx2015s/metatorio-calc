@@ -449,11 +449,16 @@ impl Runtime {
     /// 兼容旧版 metatorio-egui 工程文件：检测到旧格式（有 `proj`+`factories`，
     /// 无 `schema_version`）时按**当前游戏上下文**的品质顺序把 level → 品质名
     /// 迁移为新版 `AppDocument`（一次性转换，非强类型变换）。
+    ///
+    /// 读盘 + JSON 解析在锁内；需要移出锁的调用方请用
+    /// [`parse_document_file`] + [`Runtime::import_document_value`]。
     pub fn load_document_file(&mut self, path: impl AsRef<Path>) -> Result<(), RuntimeError> {
-        let raw = std::fs::read_to_string(path.as_ref())
-            .map_err(|error| RuntimeError::Io(error.to_string()))?;
-        let value: serde_json::Value = serde_json::from_str(&raw)
-            .map_err(|error| RuntimeError::DataLoad(error.to_string()))?;
+        let value = parse_document_file(path.as_ref())?;
+        self.import_document_value(value)
+    }
+
+    /// 导入一个已解析的工程 JSON（迁移 + 追加到当前文档）。锁内调用。
+    pub fn import_document_value(&mut self, value: serde_json::Value) -> Result<(), RuntimeError> {
         let document: AppDocument = if crate::migrate::is_old_project_format(&value) {
             // 当前激活上下文 → 品质顺序 + 绑定 id + 里程碑节点分类。
             let context_id = self.active_context.clone();
@@ -670,6 +675,15 @@ impl Runtime {
             .apply_cleanup(project, factory, action, &mechanic_usage(&result))?;
         Ok(())
     }
+}
+
+/// 读取并解析工程文件为 JSON（**不涉及 Runtime / 锁**，可锁外执行）。
+///
+/// 与 [`Runtime::import_document_value`] 配合，把「打开工程」的读盘/解析
+/// 移出 runtime 锁。
+pub fn parse_document_file(path: &Path) -> Result<serde_json::Value, RuntimeError> {
+    let raw = std::fs::read_to_string(path).map_err(|error| RuntimeError::Io(error.to_string()))?;
+    serde_json::from_str(&raw).map_err(|error| RuntimeError::DataLoad(error.to_string()))
 }
 
 /// 把文档写入文件（**不涉及 Runtime / 锁**，可锁外执行）。
