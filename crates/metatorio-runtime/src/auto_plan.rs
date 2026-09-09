@@ -42,6 +42,23 @@ pub fn used_candidates<T: Clone>(
         .collect()
 }
 
+/// 自动规划算出的机制与工厂现有机制是否等价（忽略顺序、忽略条目 id/enabled）。
+///
+/// 等价时不应回写文档：那会平白 bump revision、触发落盘并让求解缓存失效
+/// （连续两次 auto-plan 会因此都重算）。
+pub fn same_mechanics(existing: &[Mechanic], planned: &[Mechanic]) -> bool {
+    if existing.len() != planned.len() {
+        return false;
+    }
+    // `Mechanic` 只实现 PartialEq（含浮点），用 Debug 串做与顺序无关的等价
+    // 判定：字段顺序固定、浮点 Debug 精确，够用且实现简单。
+    let mut existing: Vec<String> = existing.iter().map(|mechanic| format!("{mechanic:?}")).collect();
+    let mut planned: Vec<String> = planned.iter().map(|mechanic| format!("{mechanic:?}")).collect();
+    existing.sort();
+    planned.sort();
+    existing == planned
+}
+
 /// 枚举候选配置所需的项目级参数。
 pub struct EnumerateOptions {
     pub alternative_count: usize,
@@ -1241,6 +1258,30 @@ mod tests {
             beacon_variants("electric-furnace") > 0,
             "电炉吃插件塔效果，应有插件塔变体"
         );
+    }
+
+    /// 回写前的「结果没变」判定：忽略顺序，任何内容差异都算变。
+    #[test]
+    fn same_mechanics_ignores_order_and_detects_differences() {
+        let recipe = |machine: &str| {
+            Mechanic::Recipe(metatorio_core::RecipeMechanic {
+                recipe: IdWithQuality::new("gear", "normal"),
+                machine: IdWithQuality::new(machine, "normal"),
+                module_config: ModuleConfig::default(),
+                fuel: None,
+            })
+        };
+        let assembler = recipe("assembler");
+        let furnace = recipe("furnace");
+        assert!(same_mechanics(
+            &[assembler.clone(), furnace.clone()],
+            &[furnace.clone(), assembler.clone()]
+        ));
+        assert!(!same_mechanics(
+            &[assembler.clone(), furnace],
+            &[assembler.clone()]
+        ));
+        assert!(!same_mechanics(&[assembler], &[recipe("furnace")]));
     }
 
     #[test]

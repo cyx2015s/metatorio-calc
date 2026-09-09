@@ -800,12 +800,13 @@ fn run_game(exe: &Path, config: &Path, args: &[&str], extra: &[String]) -> Resul
 /// `None` 表示本次没导出贴图（无头/无图形环境），上下文照常可用、只是没图标。
 type GameExport = (String, String, Vec<u8>, Option<Vec<u8>>, Option<PathBuf>);
 
-/// 从可执行文件路径推断游戏安装目录（含 `data/` 的那一层）。
+/// 从可执行文件路径推断游戏的 **data 目录**（`read-data` 要指向它本身，
+/// 与 Factorio 默认的 `__PATH__executable__/../../data` 一致）。
 ///
 /// 覆盖常见布局：`<root>/bin/x64/factorio(.exe)`、`<root>/bin/factorio`、
 /// `<root>/factorio`。找不到 `data/` 目录时返回 `None`（不写 `read-data`，
 /// 让游戏按自己的默认逻辑找数据）。
-fn factorio_install_dir(exe: &Path) -> Option<PathBuf> {
+fn factorio_data_dir(exe: &Path) -> Option<PathBuf> {
     let mut dir = exe.parent()?;
     if dir
         .file_name()
@@ -819,7 +820,8 @@ fn factorio_install_dir(exe: &Path) -> Option<PathBuf> {
     {
         dir = dir.parent()?;
     }
-    dir.join("data").is_dir().then(|| dir.to_path_buf())
+    let data = dir.join("data");
+    data.is_dir().then_some(data)
 }
 
 fn export_game_context<R: TauriRuntime>(
@@ -833,11 +835,12 @@ fn export_game_context<R: TauriRuntime>(
     }
     let export = game_export_dir(app)?;
     let config = export.join("config.ini");
-    // `read-data` 必须指向游戏安装目录，否则游戏会去默认路径（Linux 下常见
-    // `/usr/share/factorio`）找 data 包而失败。找不到就省略，交给游戏自己找。
+    // `read-data` 指向游戏的 data 目录本身（与 Factorio 默认的
+    // `__PATH__executable__/../../data` 一致）；否则游戏会去默认路径
+    // （Linux 下常见 `/usr/share/factorio`）找数据包而失败。找不到就省略。
     let mut config_text = format!("[path]\nwrite-data={}\n", export.to_string_lossy());
-    if let Some(root) = factorio_install_dir(&exe) {
-        config_text.push_str(&format!("read-data={}\n", root.to_string_lossy()));
+    if let Some(data) = factorio_data_dir(&exe) {
+        config_text.push_str(&format!("read-data={}\n", data.to_string_lossy()));
     }
     config_text.push_str("[general]\nlocale=zh-CN\n");
     std::fs::write(&config, config_text).map_err(|error| error.to_string())?;
@@ -3114,13 +3117,41 @@ async fn execute_command<R: TauriRuntime>(
                     return CommandOutcome::failed(error);
                 }
             };
-            // 2) 锁内回写：目标工厂/项目设置必须与快照一致，否则会覆盖用户在
+            // 2) 规划结果与现有机制等价时**不回写**：省掉 revision bump、落盘
+            //    与求解缓存失效（连续两次 auto-plan 会因此都重算）。直接重解
+            //    一次（大概率命中缓存）以便回传结果。
+            let unchanged = with_runtime(state, |runtime| {
+                let existing: Vec<_> = runtime
+                    .state
+                    .factory(project, factory)
+                    .map_err(|error| error.to_string())?
+                    .mechanics
+                    .iter()
+                    .map(|entry| entry.mechanic.clone())
+                    .collect();
+                Ok(metatorio_runtime::auto_plan::same_mechanics(
+                    &existing, &mechanics,
+                ))
+            })
+            .unwrap_or(false);
+            if unchanged {
+                return match solve_factory_offlock(app, state, project, factory).await {
+                    Ok(result) => {
+                        emit(app, "solve-result", result.clone());
+                        CommandOutcome::done(Some(metatorio_runtime::CommandEffect::Solve(result)))
+                    }
+                    Err(error) => {
+                        emit(app, "solve-error", error.clone());
+                        CommandOutcome::failed(error)
+                    }
+                };
+            }
+            // 3) 锁内回写：目标工厂/项目设置必须与快照一致，否则会覆盖用户在
             //    规划期间的编辑（其它工厂的改动不影响——见 document_matches）。
             let commands = match with_runtime(state, |runtime| {
                 if !runtime.document_matches(&snapshot) {
                     return Err(
-                        "该工厂或项目设置在自动规划期间被修改，已放弃本次回写，请重试"
-                            .to_string(),
+                        "该工厂或项目设置在自动规划期间被修改，已放弃本次回写，请重试".to_string(),
                     );
                 }
                 runtime
@@ -3372,26 +3403,27 @@ mod tests {
         assert_eq!(serialized.len(), 2, "每条命令都应序列化");
     }
 
-    /// 游戏安装目录推断：`bin/x64/`、`bin/`、根目录三种布局都要命中，
-    /// 找不到 `data/` 时返回 None（不写 read-data）。
+    /// data 目录推断：`bin/x64/`、`bin/`、根目录三种布局都要命中，
+    /// 且返回的是 `data` 目录本身（read-data 的语义）；找不到时返回 None。
     #[test]
-    fn factorio_install_dir_handles_common_layouts() {
+    fn factorio_data_dir_handles_common_layouts() {
         let root = std::env::temp_dir().join(format!("metatorio-install-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("data")).unwrap();
+        let expected = root.join("data");
         let bin_x64 = root.join("bin").join("x64");
         std::fs::create_dir_all(&bin_x64).unwrap();
         let exe = bin_x64.join("factorio.exe");
         std::fs::write(&exe, b"").unwrap();
-        assert_eq!(factorio_install_dir(&exe), Some(root.clone()));
+        assert_eq!(factorio_data_dir(&exe), Some(expected.clone()));
 
         let flat = root.join("bin").join("factorio");
         std::fs::write(&flat, b"").unwrap();
-        assert_eq!(factorio_install_dir(&flat), Some(root.clone()));
+        assert_eq!(factorio_data_dir(&flat), Some(expected.clone()));
 
         let bare = root.join("factorio");
         std::fs::write(&bare, b"").unwrap();
-        assert_eq!(factorio_install_dir(&bare), Some(root.clone()));
+        assert_eq!(factorio_data_dir(&bare), Some(expected));
 
         let elsewhere =
             std::env::temp_dir().join(format!("metatorio-install-x-{}", std::process::id()));
@@ -3399,7 +3431,7 @@ mod tests {
         std::fs::create_dir_all(&elsewhere).unwrap();
         let stray = elsewhere.join("factorio");
         std::fs::write(&stray, b"").unwrap();
-        assert_eq!(factorio_install_dir(&stray), None, "没有 data/ 时不应猜");
+        assert_eq!(factorio_data_dir(&stray), None, "没有 data/ 时不应猜");
 
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&elsewhere);
