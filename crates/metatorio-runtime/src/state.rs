@@ -377,10 +377,7 @@ impl RuntimeState {
                 let entries = &mut self.project_mut(project_id)?.settings.recipe_productivity;
                 let before = entries.len();
                 entries.retain(|entry| entry.recipe != recipe);
-                Ok(Outcome::solve_all_if(
-                    before != entries.len(),
-                    project_id,
-                ))
+                Ok(Outcome::solve_all_if(before != entries.len(), project_id))
             }
             ProjectAction::SetInfiniteTechLevel { level } => {
                 validate_non_negative("infinite tech level", level.level as f64)?;
@@ -401,10 +398,7 @@ impl RuntimeState {
                 let entries = &mut self.project_mut(project_id)?.settings.infinite_levels;
                 let before = entries.len();
                 entries.retain(|entry| entry.tech != tech);
-                Ok(Outcome::solve_all_if(
-                    before != entries.len(),
-                    project_id,
-                ))
+                Ok(Outcome::solve_all_if(before != entries.len(), project_id))
             }
             ProjectAction::SetQualityLimit { quality } => {
                 let changed = replace(
@@ -455,7 +449,8 @@ impl RuntimeState {
                     &mut self.factory_mut(project_id, factory_id)?.name,
                     non_empty(name, "Unnamed factory"),
                 );
-                Ok(Outcome::solve_factory_if(changed, project_id, factory_id))
+                // 改名是纯元数据：只落盘，不必重解。
+                Ok(Outcome::meta_if(changed, project_id))
             }
             FactoryAction::SetStrictSource { strict } => {
                 let changed = replace(
@@ -607,6 +602,8 @@ impl RuntimeState {
         }
 
         let factory = self.factory_mut(project_id, factory_id)?;
+        // 排序不影响 LP（目标按 id 求和，顺序无意义）：只落盘。
+        let meta_only = matches!(action, TargetAction::Reorder { .. });
         let changed = match action {
             TargetAction::Add { .. } => unreachable!("handled above"),
             TargetAction::Remove { target } => remove_by_id(&mut factory.targets, target)?,
@@ -626,7 +623,11 @@ impl RuntimeState {
                 move_item(&mut factory.targets, index, position)
             }
         };
-        Ok(Outcome::solve_factory_if(changed, project_id, factory_id))
+        Ok(if meta_only {
+            Outcome::meta_if(changed, project_id)
+        } else {
+            Outcome::solve_factory_if(changed, project_id, factory_id)
+        })
     }
 
     fn apply_target_expression(
@@ -651,6 +652,11 @@ impl RuntimeState {
         }
 
         let factory = self.factory_mut(project_id, factory_id)?;
+        // 表达式/项的排序不影响 LP：只落盘。
+        let meta_only = matches!(
+            action,
+            TargetExpressionAction::Reorder { .. } | TargetExpressionAction::ReorderTerm { .. }
+        );
         let changed = match action {
             TargetExpressionAction::Add { .. } => unreachable!("handled above"),
             TargetExpressionAction::Remove { expression } => {
@@ -721,7 +727,11 @@ impl RuntimeState {
                 move_item(&mut expression.terms, index, position)
             }
         };
-        Ok(Outcome::solve_factory_if(changed, project_id, factory_id))
+        Ok(if meta_only {
+            Outcome::meta_if(changed, project_id)
+        } else {
+            Outcome::solve_factory_if(changed, project_id, factory_id)
+        })
     }
 
     fn apply_external_input(
@@ -741,6 +751,8 @@ impl RuntimeState {
         }
 
         let factory = self.factory_mut(project_id, factory_id)?;
+        // 外部输入按 flow 存进 map，顺序不影响 LP：只落盘。
+        let meta_only = matches!(action, ExternalInputAction::Reorder { .. });
         let changed = match action {
             ExternalInputAction::Add { .. } => unreachable!("handled above"),
             ExternalInputAction::Remove { input } => {
@@ -769,7 +781,11 @@ impl RuntimeState {
                 }));
             }
         };
-        Ok(Outcome::solve_factory_if(changed, project_id, factory_id))
+        Ok(if meta_only {
+            Outcome::meta_if(changed, project_id)
+        } else {
+            Outcome::solve_factory_if(changed, project_id, factory_id)
+        })
     }
 
     fn apply_mechanic_list(
@@ -817,7 +833,8 @@ impl RuntimeState {
                 let mechanics = &mut self.factory_mut(project_id, factory_id)?.mechanics;
                 let index = index_by_id(mechanics, mechanic)?;
                 let changed = move_item(mechanics, index, position);
-                Ok(Outcome::solve_factory_if(changed, project_id, factory_id))
+                // 机制顺序不影响 LP（求解按 id 展开，顺序无意义）：只落盘。
+                Ok(Outcome::meta_if(changed, project_id))
             }
             MechanicListAction::SetEnabled { mechanic, enabled } => {
                 let entry = self
@@ -2073,6 +2090,156 @@ mod tests {
             .unwrap();
         let factory = state.project(project).unwrap().factories[0].id;
         (state, project, factory)
+    }
+
+    /// 纯元数据/顺序变更只需落盘，不应追加 `Recompute`——否则改名、拖排序
+    /// 都会白跑一次（可能长达数秒的）整厂求解。
+    #[test]
+    fn metadata_only_changes_persist_without_recomputing() {
+        let (mut state, project, factory) = state_with_factory();
+        // 准备可排序的对象：2 个机制 / 2 个目标 / 2 个外部输入。
+        for _ in 0..2 {
+            state
+                .dispatch(AppMessage::Factory {
+                    project,
+                    factory,
+                    action: FactoryAction::MechanicList(MechanicListAction::Add {
+                        kind: MechanicKind::Recipe,
+                    }),
+                })
+                .unwrap();
+        }
+        for name in ["iron-plate", "copper-plate"] {
+            state
+                .dispatch(AppMessage::Factory {
+                    project,
+                    factory,
+                    action: FactoryAction::Flow(FlowAction::AddToTarget {
+                        flow: DualVar::Item(IdWithQuality::new(name, "normal")),
+                        amount: 1.0,
+                    }),
+                })
+                .unwrap();
+        }
+        for name in ["iron-ore", "copper-ore"] {
+            state
+                .dispatch(AppMessage::Factory {
+                    project,
+                    factory,
+                    action: FactoryAction::Flow(FlowAction::AddToExternalInput {
+                        flow: DualVar::Item(IdWithQuality::new(name, "normal")),
+                        penalty: 1.0,
+                    }),
+                })
+                .unwrap();
+        }
+        let mechanics: Vec<MechanicId> = state
+            .factory(project, factory)
+            .unwrap()
+            .mechanics
+            .iter()
+            .map(|entry| entry.id)
+            .collect();
+        let targets: Vec<TargetId> = state
+            .factory(project, factory)
+            .unwrap()
+            .targets
+            .iter()
+            .map(|target| target.id)
+            .collect();
+        let inputs: Vec<ExternalInputId> = state
+            .factory(project, factory)
+            .unwrap()
+            .external_inputs
+            .iter()
+            .map(|input| input.id)
+            .collect();
+
+        let assert_meta_only = |result: DispatchResult, what: &str| {
+            assert!(result.changed, "{what} 应标记文档已变更");
+            assert!(
+                result.commands.contains(&RuntimeCommand::Persist {
+                    project,
+                    path: None,
+                }),
+                "{what} 应仍然落盘：{:?}",
+                result.commands
+            );
+            assert!(
+                !result
+                    .commands
+                    .iter()
+                    .any(|command| matches!(command, RuntimeCommand::Recompute { .. })),
+                "{what} 不应触发求解：{:?}",
+                result.commands
+            );
+        };
+
+        let outcome = state
+            .dispatch(AppMessage::Factory {
+                project,
+                factory,
+                action: FactoryAction::SetName {
+                    name: "renamed".to_string(),
+                },
+            })
+            .unwrap();
+        assert_meta_only(outcome, "改名");
+
+        let outcome = state
+            .dispatch(AppMessage::Factory {
+                project,
+                factory,
+                action: FactoryAction::MechanicList(MechanicListAction::Reorder {
+                    mechanic: mechanics[1],
+                    position: 0,
+                }),
+            })
+            .unwrap();
+        assert_meta_only(outcome, "机制排序");
+
+        let outcome = state
+            .dispatch(AppMessage::Factory {
+                project,
+                factory,
+                action: FactoryAction::Target(TargetAction::Reorder {
+                    target: targets[1],
+                    position: 0,
+                }),
+            })
+            .unwrap();
+        assert_meta_only(outcome, "目标排序");
+
+        let outcome = state
+            .dispatch(AppMessage::Factory {
+                project,
+                factory,
+                action: FactoryAction::ExternalInput(ExternalInputAction::Reorder {
+                    input: inputs[1],
+                    position: 0,
+                }),
+            })
+            .unwrap();
+        assert_meta_only(outcome, "外部输入排序");
+
+        // 对照：真正影响求解的变更仍然要重解。
+        let outcome = state
+            .dispatch(AppMessage::Factory {
+                project,
+                factory,
+                action: FactoryAction::Target(TargetAction::SetAmount {
+                    target: targets[0],
+                    amount: 42.0,
+                }),
+            })
+            .unwrap();
+        assert!(
+            outcome
+                .commands
+                .contains(&RuntimeCommand::Recompute { project, factory }),
+            "改目标量必须重解：{:?}",
+            outcome.commands
+        );
     }
 
     #[test]
