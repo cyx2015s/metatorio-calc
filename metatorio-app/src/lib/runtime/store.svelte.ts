@@ -29,7 +29,6 @@ import {
   saveProject,
   saveProjectAsDialog,
   setActiveContext,
-  setDefaultMilestones,
   milestonesOrdered,
   productivity,
   implicitSources,
@@ -62,6 +61,7 @@ const MILESTONE_KEYS = new Set([
   "add-milestone",
   "set-milestone-unlocked",
   "remove-milestone",
+  "set-default-milestones",
   "set-all-accessible",
   "set-context",
 ]);
@@ -837,13 +837,13 @@ class RuntimeStore {
   /** 把里程碑重置为默认（实验室输入的科技瓶物品，全部解锁）。 */
   async setDefaultMilestones(): Promise<void> {
     const project = this.requireProject();
-    await setDefaultMilestones(project);
-    // 走的是 Tauri 命令（不经过 send），需手动失效可达性缓存并刷新
-    // 有序里程碑（否则里程碑列表不立刻更新，要手动添加一次才刷新）。
-    this.accessibility = null;
-    await this.refresh();
-    this.refreshOrderedMilestones().catch(() => {});
-    this.refreshProductivity().catch(() => {});
+    // 走消息而不是 Tauri 命令：后端由 Runtime 解析默认集合后统一走
+    // finish（递增 revision、落盘、重解全部工厂），前端因此不需要手写
+    // 「失效可达性缓存 + 重拉里程碑」的补偿逻辑。
+    await this.send({
+      scope: "project",
+      action: { project, action: "set-default-milestones" },
+    });
   }
 
   /** 里程碑节点按依赖拓扑排序（依赖在前）的当前结果；供里程碑列表按序展示。 */

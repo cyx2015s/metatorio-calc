@@ -46,11 +46,6 @@ export async function accessibility(project: number): Promise<Accessible[]> {
   return call("accessibility", { project });
 }
 
-/** 把项目的里程碑重置为默认（实验室输入的科技瓶物品，全部解锁）。 */
-export async function setDefaultMilestones(project: number): Promise<void> {
-  await call("set_default_milestones", { project });
-}
-
 /** 里程碑节点按依赖拓扑排序（依赖在前），供 UI 按序展示。 */
 export async function milestonesOrdered(project: number): Promise<Milestone[]> {
   return call("milestones_ordered", { project });

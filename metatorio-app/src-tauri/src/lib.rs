@@ -2149,19 +2149,6 @@ async fn accessibility(app: AppHandle, project: ProjectId) -> Result<Vec<Accessi
     Ok(nodes)
 }
 
-/// 把项目的里程碑重置为默认：实验室（LabComponent.inputs）输入的
-/// 科技瓶物品，全部解锁。
-#[tauri::command]
-async fn set_default_milestones(app: AppHandle, project: ProjectId) -> Result<(), String> {
-    run_blocking(app, move |runtime| {
-        runtime
-            .set_default_milestones(project)
-            .map_err(|error| error.to_string())
-            .map(|_| ())
-    })
-    .await
-}
-
 /// 里程碑节点按依赖拓扑排序（依赖在前），供 UI 按序展示。
 #[tauri::command]
 async fn milestones_ordered(
@@ -3383,7 +3370,6 @@ pub fn run() {
             dispatch,
             get_document,
             accessibility,
-            set_default_milestones,
             milestones_ordered,
             productivity,
             open_project_dialog,

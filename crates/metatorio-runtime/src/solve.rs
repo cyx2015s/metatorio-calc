@@ -170,6 +170,18 @@ impl Runtime {
         if message_affects_accessibility(&message) {
             self.invalidate_accessibility();
         }
+        // 「默认里程碑」要从原型仓库（实验室 LabComponent.inputs）推导集合，
+        // 而 reducer 不持有 store，因此在进入 reducer 之前就地解析并改文档。
+        // 这样它和普通消息共享同一条管线：finish 的 revision/dirty/Persist/
+        // Recompute，以及 app 层的命令执行与广播。（历史上它是 Tauri 命令的
+        // 直接方法调用，既不落盘也不重解。）
+        if let AppMessage::Project {
+            project,
+            action: ProjectAction::SetDefaultMilestones,
+        } = &message
+        {
+            return self.set_default_milestones(*project);
+        }
         // 进入 reducer 之前先校验消息引用的原型名（配方/机器/物品/品质/…）：
         // reducer 拿不到仓库，旧行为会把不存在的名字静默写进文档。
         // 项目还没绑定/载入上下文时跳过（此时无从校验，也不应阻塞）。
@@ -356,7 +368,15 @@ impl Runtime {
     ///
     /// 里程碑是可达性节点级（不限于科技）：锁定某个科技瓶（unlocked=false）
     /// 即剪枝该节点并阻断依赖它的对象，模拟"还没到这个科技阶段"。
-    pub fn set_default_milestones(&mut self, project_id: ProjectId) -> Result<bool, RuntimeError> {
+    ///
+    /// 走完整 dispatch 语义：改文档后由 `finish` 递增 revision、标记脏项目、
+    /// 落盘并重解项目内全部工厂。也由
+    /// [`ProjectAction::SetDefaultMilestones`](crate::message::ProjectAction::SetDefaultMilestones)
+    /// 消息触发（reducer 无 store，故在 `dispatch` 内拦截）。
+    pub fn set_default_milestones(
+        &mut self,
+        project_id: ProjectId,
+    ) -> Result<DispatchResult, RuntimeError> {
         let store = self.context_store(project_id)?;
         let mut science_packs: Vec<String> = Vec::new();
         for record in store.group(PrototypeGroup::Entity) {
@@ -1039,6 +1059,7 @@ fn message_affects_accessibility(message: &AppMessage) -> bool {
                 | ProjectAction::AddMilestone { .. }
                 | ProjectAction::SetMilestoneUnlocked { .. }
                 | ProjectAction::RemoveMilestone { .. }
+                | ProjectAction::SetDefaultMilestones
                 | ProjectAction::SetContext { .. }
         ),
         AppMessage::Application(action) => matches!(
@@ -1925,7 +1946,7 @@ mod tests {
         runtime.set_active_context(Some("test-context".to_string()));
         let project = new_project(&mut runtime);
 
-        assert!(runtime.set_default_milestones(project).unwrap());
+        assert!(runtime.set_default_milestones(project).unwrap().changed);
         let settings = &runtime.state.project(project).unwrap().settings;
         let nodes: Vec<Accessible> = settings
             .milestones
@@ -1977,6 +1998,105 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    /// 默认里程碑必须走完整 dispatch 管线：revision 递增 + 标记脏 + 落盘 +
+    /// 重解项目内全部工厂（里程碑是可达性级别的设置）。
+    ///
+    /// 历史缺陷：该操作曾是 Tauri 命令直接调用 `RuntimeState::replace_milestones`，
+    /// 只改内存、不递增 revision、不落盘、不重解——前端只能手写补偿逻辑
+    /// （清可达性缓存 + 重取里程碑），求解结果仍是陈旧的。
+    #[test]
+    fn default_milestones_message_persists_and_recomputes() {
+        let mut runtime = Runtime::new();
+        let dump = json!({
+            "item": {
+                "automation-science-pack": { "type": "item", "name": "automation-science-pack" }
+            },
+            "fluid": {},
+            "recipe": {},
+            "technology": {},
+            "lab": {
+                "lab": {
+                    "type": "lab", "name": "lab",
+                    "energy_usage": "60kW",
+                    "energy_source": { "type": "electric", "drain": "0J" },
+                    "researching_speed": 1,
+                    "inputs": ["automation-science-pack"]
+                }
+            }
+        });
+        runtime.install_context(
+            "test-context".to_string(),
+            PrototypeStore::load(&dump).unwrap(),
+        );
+        runtime.set_active_context(Some("test-context".to_string()));
+        let project = new_project(&mut runtime);
+        dispatch_project(
+            &mut runtime,
+            project,
+            ProjectAction::AddFactory {
+                name: "test factory".to_string(),
+                template: crate::message::FactoryTemplate::Empty,
+            },
+        );
+        let factory = runtime.state.project(project).unwrap().factories[0].id;
+        let revision = runtime.state.revision;
+
+        let result = runtime
+            .dispatch(AppMessage::Project {
+                project,
+                action: ProjectAction::SetDefaultMilestones,
+            })
+            .unwrap();
+
+        assert!(result.changed, "默认里程碑改变了文档");
+        assert_eq!(result.revision, revision.wrapping_add(1), "revision 应递增");
+        assert!(
+            result.commands.contains(&RuntimeCommand::Persist {
+                project,
+                path: None
+            }),
+            "改变了文档必须落盘：{:?}",
+            result.commands
+        );
+        assert!(
+            result
+                .commands
+                .contains(&RuntimeCommand::Recompute { project, factory }),
+            "可达性变化必须重解全部工厂：{:?}",
+            result.commands
+        );
+
+        // 幂等：同样的默认集合再发一次 → 无变化、无副作用命令。
+        let again = runtime
+            .dispatch(AppMessage::Project {
+                project,
+                action: ProjectAction::SetDefaultMilestones,
+            })
+            .unwrap();
+        assert!(!again.changed, "集合未变不应报 changed");
+        assert!(again.commands.is_empty(), "{:?}", again.commands);
+
+        // 没有原型仓库时给出明确错误（而不是 panic / 静默成功）。
+        let mut bare = Runtime::new();
+        let bare_project = new_project(&mut bare);
+        assert!(matches!(
+            bare.dispatch(AppMessage::Project {
+                project: bare_project,
+                action: ProjectAction::SetDefaultMilestones,
+            }),
+            Err(RuntimeError::DataNotLoaded)
+        ));
+
+        // 绕过 Runtime 直接喂 reducer 时应报错，而不是静默成功。
+        assert!(matches!(
+            bare.state.dispatch(AppMessage::Project {
+                project: bare_project,
+                action: ProjectAction::SetDefaultMilestones,
+            }),
+            Err(RuntimeError::InvalidOperation(_))
+        ));
     }
 
     #[test]

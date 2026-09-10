@@ -92,7 +92,9 @@ for command in &outcome.commands {
 ## 已知剩余项
 
 - `icon` 仍是同步命令，在主线程上读 PNG 文件（前端已缓存图标，影响有限）。
-- `set_default_milestones` 仍在锁内遍历全部实体（一次性操作）。
+- 「默认里程碑」（`ProjectAction::SetDefaultMilestones`）在锁内遍历全部实体推导
+  科技瓶集合（一次性操作）；它已收敛进 `dispatch` 管线，改文档后由 `finish`
+  统一递增 revision、落盘并重解全部工厂。
 - LP 求解器本身不可中断：现在的策略是「不启动过期任务」，不做 mid-solve 取消。
 - 两个客户端同时改同一工厂仍是「后写覆盖」；求解结果按 revision 丢弃过期值，
   但文档层面的冲突提示尚未实现（见 `docs/mcp-design.md` 决策 45）。

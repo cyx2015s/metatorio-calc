@@ -423,6 +423,14 @@ impl RuntimeState {
                     project_id,
                 ))
             }
+            ProjectAction::SetDefaultMilestones => {
+                // 默认集合要从原型仓库（实验室输入）推导，reducer 不持有 store。
+                // 正常路径由 `Runtime::dispatch` 在进入 reducer 前拦截并解析，
+                // 走到这里说明调用方绕过了 Runtime；报错而不是静默成功。
+                Err(RuntimeError::InvalidOperation(
+                    "set-default-milestones must be dispatched through Runtime (needs the prototype store)",
+                ))
+            }
             ProjectAction::SetMiningProductivity { productivity } => {
                 validate_non_negative("mining productivity", productivity)?;
                 let changed = replace(
@@ -1091,16 +1099,21 @@ impl RuntimeState {
     }
 
     /// 整体替换里程碑（"默认里程碑"等批量操作）。
+    ///
+    /// 走 `finish`：里程碑改变可达性，因此需要递增 revision、标记脏项目、
+    /// 落盘并重解项目内全部工厂（`solve_all`）。早期版本只改内存并返回
+    /// `bool`，导致前端必须手写「刷新可达性/重取里程碑」的补偿逻辑，
+    /// 且求解结果保持陈旧。
     pub fn replace_milestones(
         &mut self,
         project_id: ProjectId,
         milestones: Vec<crate::document::Milestone>,
-    ) -> Result<bool, RuntimeError> {
+    ) -> Result<DispatchResult, RuntimeError> {
         let changed = replace(
             &mut self.project_mut(project_id)?.settings.milestones,
             milestones,
         );
-        Ok(changed)
+        self.finish(Outcome::solve_all_if(changed, project_id))
     }
 
     fn factory_mut(

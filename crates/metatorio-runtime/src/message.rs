@@ -123,6 +123,12 @@ pub enum ProjectAction {
     RemoveMilestone {
         node: Accessible,
     },
+    /// 把里程碑整体重置为「默认集合」（实验室消耗的科技瓶物品，全部解锁）。
+    ///
+    /// 默认集合由原型仓库推导，而 reducer 不持有 store，因此本变体在
+    /// [`crate::Runtime::dispatch`] 进入 reducer 之前被拦截解析；reducer 层
+    /// 的同名分支只兜底报错（见 `RuntimeState::dispatch`）。
+    SetDefaultMilestones,
     SetMiningProductivity {
         productivity: f64,
     },

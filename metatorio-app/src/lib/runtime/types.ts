@@ -173,6 +173,7 @@ export type ProjectAction =
   | { "add-milestone": { node: Accessible; unlocked: boolean } }
   | { "set-milestone-unlocked": { node: Accessible; unlocked: boolean } }
   | { "remove-milestone": { node: Accessible } }
+  | "set-default-milestones"
   | { "set-ignore-productivity": { ignore: boolean } }
   | { "set-recipe-productivity": { productivity: RecipeProductivity } }
   | { "remove-recipe-productivity": { recipe: string } }
