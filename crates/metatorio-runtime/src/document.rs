@@ -176,6 +176,10 @@ pub struct FactorySettings {
     pub planet: Option<String>,
     pub surface: Option<String>,
     pub major_quality: String,
+    /// **遗留字段**：仅在旧版 metatorio-egui 工程里被写入，迁移时原样搬运，
+    /// 当前**没有任何读取方**（求解、可达性、UI 都不用）。保留是为了工程文件
+    /// 与旧格式迁移的兼容；`FactoryContextAction::SetDebug` 是它唯一的写入口，
+    /// 前端故意不镜像该动作（见 types.ts 的 FactoryContextAction 注释）。
     pub debug: bool,
 }
 

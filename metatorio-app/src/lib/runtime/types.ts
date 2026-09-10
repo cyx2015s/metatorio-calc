@@ -301,6 +301,8 @@ export type PlanningAction =
   | { "reorder-machine-preference": { machine: IdWithQuality; position: number } }
   | { "add-enumerated-module": { module: IdWithQuality } }
   | { "remove-enumerated-module": { module: IdWithQuality } }
+  // 未实现（app 层返回「未实现」错误）：GUI 的「使用最佳插件」走只读命令
+  // best_modules + add/remove-enumerated-module。保留镜像以便与 Rust 枚举对齐。
   | { "use-best-modules": { factory: FactoryId; mechanic: MechanicId } }
   | "add-enumerated-beacon"
   | { "remove-enumerated-beacon": { beacon: number } }
@@ -331,6 +333,9 @@ export type TargetExpressionAction =
   | { reorder: { expression: TargetExpressionId; position: number } }
   | { "reorder-term": { expression: TargetExpressionId; term: TargetTermId; position: number } };
 
+// Rust 侧还有 `replace-from-location`，但它对应的 app 命令未实现（GUI 用只读的
+// implicit_sources + external-input 消息），因此这里**故意不镜像**——少一个
+// 「有类型、发出去必失败」的死路径。
 export type ExternalInputAction =
   | { add: { input: ExternalInput } }
   | { remove: { input: ExternalInputId } }
@@ -338,6 +343,8 @@ export type ExternalInputAction =
   | { "set-penalty": { input: ExternalInputId; penalty: number } }
   | { reorder: { input: ExternalInputId; position: number } };
 
+// 同理，Rust 的 `request-suggestions` 未实现（GUI 用 suggest 命令 + mechanic-list
+// 消息），这里不镜像。
 export type FlowAction =
   | { "add-to-target": { flow: DualVar; amount: number } }
   | { "add-to-external-input": { flow: DualVar; penalty: number } };
@@ -477,6 +484,7 @@ export interface FactorySettings {
   planet: string | null;
   surface: string | null;
   major_quality: string;
+  /** 遗留字段：只由旧版 egui 工程写入，当前无读取方；不镜像 `set-debug` 动作。 */
   debug: boolean;
 }
 

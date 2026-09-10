@@ -80,6 +80,9 @@ pub enum ApplicationAction {
     DeleteContext {
         id: String,
     },
+    /// **未实现**（三条更新动作）：reducer 会发出对应的 `RuntimeCommand`，但
+    /// app 层没有实现——GUI 的自动更新走前端 `@tauri-apps/plugin-updater`。
+    /// 调用会拿到明确的「未实现」错误，而不是静默成功。
     CheckForUpdate,
     InstallUpdate,
     RestartAfterUpdate,
@@ -204,7 +207,6 @@ pub enum FactoryAction {
         action: MechanicAction,
     },
     Flow(FlowAction),
-    Suggestion(SuggestionAction),
     Cleanup(CleanupAction),
     Solve(SolveAction),
 }
@@ -291,6 +293,9 @@ pub enum ExternalInputAction {
         input: ExternalInputId,
         position: usize,
     },
+    /// **未实现**：reducer 会发出 `ReplaceExternalInputs` 命令，app 层没有实现
+    /// （GUI 的「隐式来源」走只读的 `implicit_sources` 命令 + `external-input`
+    /// 消息）。调用会拿到明确的「未实现」错误。
     ReplaceFromLocation {
         location: ExternalLocation,
     },
@@ -520,6 +525,9 @@ pub enum PlanningAction {
     RemoveEnumeratedModule {
         module: IdWithQuality,
     },
+    /// **未实现**：reducer 会发出 `UseBestModules` 命令，app 层没有实现
+    /// （GUI 的「使用最佳插件」走只读的 `best_modules` 命令 + `add-enumerated-module`
+    /// 消息）。调用会拿到明确的「未实现」错误。
     UseBestModules {
         factory: FactoryId,
         mechanic: MechanicId,
@@ -541,27 +549,21 @@ pub enum PlanningAction {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum FlowAction {
-    AddToTarget { flow: DualVar, amount: f64 },
-    AddToExternalInput { flow: DualVar, penalty: f64 },
-    RequestSuggestions { flow: DualVar, amount: f64 },
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "kebab-case")]
-pub enum SuggestionAction {
-    SelectMechanic { mechanic: MechanicId },
-    SetFilter { filter: String },
-    Accept { candidate: SuggestionCandidate },
-    Dismiss,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "kebab-case")]
-pub enum SuggestionCandidate {
-    Recipe { recipe: IdWithQuality },
-    Resource { resource: String },
-    ItemFuel { item: IdWithQuality },
-    Generator { generator: IdWithQuality },
+    AddToTarget {
+        flow: DualVar,
+        amount: f64,
+    },
+    AddToExternalInput {
+        flow: DualVar,
+        penalty: f64,
+    },
+    /// **未实现**：reducer 会发出 `RequestSuggestions` 命令，但 app 层没有实现
+    /// （GUI 的「建议」面板走只读的 `suggest` 命令，返回候选后由前端用
+    /// `mechanic-list` 消息落地）。调用会拿到明确的「未实现」错误。
+    RequestSuggestions {
+        flow: DualVar,
+        amount: f64,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -644,6 +646,11 @@ pub enum RuntimeCommand {
     CloseProject {
         project: ProjectId,
     },
+    /// 以下四条命令**已在 reducer 中声明但 app 层未实现**（`execute_command`
+    /// 返回明确的「未实现」错误）：更新三连由前端 updater 插件承担，
+    /// `ReplaceExternalInputs` / `RequestSuggestions` / `UseBestModules` 的
+    /// 等效能力由只读命令 `implicit_sources` / `suggest` / `best_modules` 提供。
+    /// 保留变体是为了让协议不自相矛盾地假装支持，同时给 headless 模式留接口。
     CheckForUpdate,
     InstallUpdate,
     RestartAfterUpdate,

@@ -1633,10 +1633,6 @@ class RuntimeStore {
     });
   }
 
-  async useBestModules(factory: FactoryId, mechanic: MechanicId): Promise<void> {
-    await this.planningMessage({ "use-best-modules": { factory, mechanic } });
-  }
-
   async recompute(): Promise<void> {
     const { project, factory } = this.requireFactory();
     this.solving = { project, factory };

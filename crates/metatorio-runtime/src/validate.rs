@@ -15,8 +15,7 @@ use metatorio_data::store::{PrototypeGroup, PrototypeStore};
 use crate::document::AutoBeaconPlan;
 use crate::message::{
     AppMessage, FactoryAction, FactoryContextAction, MechanicAction, MiningMechanicAction,
-    ModuleAction, PlanningAction, ProjectAction, RecipeMechanicAction, SuggestionAction,
-    SuggestionCandidate,
+    ModuleAction, PlanningAction, ProjectAction, RecipeMechanicAction,
 };
 use crate::state::RuntimeError;
 
@@ -133,30 +132,7 @@ fn validate_factory(store: &PrototypeStore, action: &FactoryAction) -> Result<()
             FactoryContextAction::SetDebug { .. } => Ok(()),
         },
         FactoryAction::Mechanic { action, .. } => validate_mechanic(store, action),
-        FactoryAction::Suggestion(SuggestionAction::Accept { candidate }) => {
-            validate_candidate(store, candidate)
-        }
         _ => Ok(()),
-    }
-}
-
-fn validate_candidate(
-    store: &PrototypeStore,
-    candidate: &SuggestionCandidate,
-) -> Result<(), RuntimeError> {
-    match candidate {
-        SuggestionCandidate::Recipe { recipe } => {
-            require_id(store, PrototypeGroup::Recipe, "配方", recipe)
-        }
-        SuggestionCandidate::Resource { resource } => {
-            require(store, PrototypeGroup::Entity, "资源", resource)
-        }
-        SuggestionCandidate::ItemFuel { item } => {
-            require_id(store, PrototypeGroup::Item, "物品", item)
-        }
-        SuggestionCandidate::Generator { generator } => {
-            require_id(store, PrototypeGroup::Entity, "发电机", generator)
-        }
     }
 }
 

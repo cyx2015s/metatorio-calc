@@ -4,8 +4,8 @@
 //! 如 `Mechanic::Recipe(RecipeMechanic)` 即 1 个配方 + 1 个机器 + 可选燃料 +
 //! 可选插件配置；工厂整体是用户层的 `Vec<Mechanic>`。
 //!
-//! 纯数据层：UI 状态（suggestion_*）、求解逻辑（AsFlow）与偏好配置
-//! （machine_preferences/enumerate_*）均不在此层。
+//! 纯数据层：求解逻辑（AsFlow）与偏好配置（machine_preferences/enumerate_*）
+//! 均不在此层。
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

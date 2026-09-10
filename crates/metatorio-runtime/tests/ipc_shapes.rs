@@ -306,6 +306,30 @@ fn frontend_json_persistence_actions_become_commands() {
     );
 }
 
+/// 「已声明但未实现」的变体必须在 JSON Schema 里带上人话警告。
+///
+/// MCP 的 `dispatch` 工具直接把 `AppMessage` 的 JsonSchema 作为 inputSchema 下发，
+/// agent 会**先读 schema 再动手**。如果 schema 里看不出某条变体一定失败，agent
+/// 就会浪费一次调用（甚至误以为能力存在）。这里守住「文档注释真的进了 schema」
+/// 这一前提——否则下面的注释只是给人看的摆设。
+#[test]
+fn unimplemented_variants_are_documented_in_the_schema() {
+    let schema = schemars::schema_for!(AppMessage);
+    let json = serde_json::to_string(&schema).unwrap();
+    assert!(
+        json.contains("未实现"),
+        "未实现变体的说明没有进入 JSON Schema（schemars 不再取文档注释？）"
+    );
+    for needle in [
+        "request-suggestions",
+        "use-best-modules",
+        "replace-from-location",
+        "check-for-update",
+    ] {
+        assert!(json.contains(needle), "schema 里缺少 {needle} 的定义");
+    }
+}
+
 #[test]
 fn frontend_json_supports_all_dual_var_flow_kinds() {
     let mut runtime = load_demo_runtime();

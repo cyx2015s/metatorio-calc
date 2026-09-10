@@ -32,8 +32,7 @@ use crate::message::{
     ItemFuelMechanicAction, ItemLaunchMechanicAction, MechanicAction, MechanicListAction,
     MiningMechanicAction, ModuleAction, PlanningAction, PlantMechanicAction, ProjectAction,
     ReactorMechanicAction, RecipeMechanicAction, RuntimeCommand, SolarMechanicAction, SolveAction,
-    SpoilMechanicAction, SuggestionAction, SuggestionCandidate, TargetAction,
-    TargetExpressionAction,
+    SpoilMechanicAction, TargetAction, TargetExpressionAction,
 };
 
 /// Mutable application state that is independent from any GUI framework.
@@ -670,9 +669,6 @@ impl RuntimeState {
                     }))
                 }
             },
-            FactoryAction::Suggestion(action) => {
-                self.apply_suggestion(project_id, factory_id, action)
-            }
             FactoryAction::Cleanup(action) => Ok(Outcome::command(RuntimeCommand::Cleanup {
                 project: project_id,
                 factory: factory_id,
@@ -979,73 +975,6 @@ impl RuntimeState {
                 let changed = replace(&mut entry.enabled, enabled);
                 Ok(Outcome::solve_factory_if(changed, project_id, factory_id))
             }
-        }
-    }
-
-    fn apply_suggestion(
-        &mut self,
-        project_id: ProjectId,
-        factory_id: FactoryId,
-        action: SuggestionAction,
-    ) -> Result<Outcome, RuntimeError> {
-        match action {
-            SuggestionAction::SelectMechanic { mechanic } => {
-                self.factory(project_id, factory_id)?
-                    .mechanics
-                    .iter()
-                    .find(|entry| entry.id == mechanic)
-                    .ok_or(RuntimeError::MechanicNotFound {
-                        project: project_id,
-                        factory: factory_id,
-                        mechanic,
-                    })?;
-                Ok(Outcome::none())
-            }
-            SuggestionAction::SetFilter { .. } => {
-                // 建议过滤是纯 UI 前端状态；运行时不再持有。
-                Ok(Outcome::none())
-            }
-            SuggestionAction::Accept { candidate } => {
-                let id = self.allocate_id();
-                let mut entry = match candidate {
-                    SuggestionCandidate::Recipe { recipe } => {
-                        let mut entry = MechanicEntry::new(id, MechanicKind::Recipe).unwrap();
-                        if let Mechanic::Recipe(mechanic) = &mut entry.mechanic {
-                            mechanic.recipe = recipe;
-                        }
-                        entry
-                    }
-                    SuggestionCandidate::Resource { resource } => {
-                        let mut entry = MechanicEntry::new(id, MechanicKind::Mining).unwrap();
-                        if let Mechanic::Mining(mechanic) = &mut entry.mechanic {
-                            mechanic.resource = resource;
-                        }
-                        entry
-                    }
-                    SuggestionCandidate::ItemFuel { item } => {
-                        let mut entry = MechanicEntry::new(id, MechanicKind::ItemFuel).unwrap();
-                        if let Mechanic::ItemFuel(mechanic) = &mut entry.mechanic {
-                            mechanic.item = item;
-                        }
-                        entry
-                    }
-                    SuggestionCandidate::Generator { generator } => {
-                        let mut entry = MechanicEntry::new(id, MechanicKind::Generator).unwrap();
-                        if let Mechanic::Generator(mechanic) = &mut entry.mechanic {
-                            mechanic.generator = generator;
-                        }
-                        entry
-                    }
-                };
-                entry.enabled = true;
-                self.factory_mut(project_id, factory_id)?
-                    .mechanics
-                    .push(entry);
-                let mut outcome = Outcome::solve_factory(project_id, factory_id);
-                outcome.created.mechanic(id);
-                Ok(outcome)
-            }
-            SuggestionAction::Dismiss => Ok(Outcome::none()),
         }
     }
 
