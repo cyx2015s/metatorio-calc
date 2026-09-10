@@ -185,6 +185,73 @@ fn frontend_json_one_click_demo_runs_end_to_end() {
     );
 }
 
+/// 上下文动作的线上形状：前端 store 的 setActiveContext / renameContext /
+/// deleteContext 现在发送这些 JSON（过去是 Tauri 命令）。形状错了会退化成
+/// serde 的 "unknown variant" —— 在 GUI 里表现为「操作没反应」。
+///
+/// 这些动作改的是 app 层注册表（磁盘缓存清单 + 内存 store），reducer 只发命令，
+/// 因此 `changed` 必须为 false：上下文切换不该递增文档 revision。
+#[test]
+fn frontend_json_context_actions_become_commands() {
+    let mut runtime = load_demo_runtime();
+
+    let activated = dispatch(
+        &mut runtime,
+        json!({
+            "scope": "application",
+            "action": { "set-active-context": { "context": "demo-context" } }
+        }),
+    );
+    assert_eq!(
+        activated.commands,
+        vec![RuntimeCommand::SetActiveContext {
+            context: Some("demo-context".to_string())
+        }]
+    );
+    assert!(!activated.changed, "切换上下文不改文档，不应递增 revision");
+
+    let cleared = dispatch(
+        &mut runtime,
+        json!({
+            "scope": "application",
+            "action": { "set-active-context": { "context": null } }
+        }),
+    );
+    assert_eq!(
+        cleared.commands,
+        vec![RuntimeCommand::SetActiveContext { context: None }]
+    );
+
+    let renamed = dispatch(
+        &mut runtime,
+        json!({
+            "scope": "application",
+            "action": { "rename-context": { "id": "demo-context", "name": "Demo" } }
+        }),
+    );
+    assert_eq!(
+        renamed.commands,
+        vec![RuntimeCommand::RenameContext {
+            id: "demo-context".to_string(),
+            name: "Demo".to_string()
+        }]
+    );
+
+    let deleted = dispatch(
+        &mut runtime,
+        json!({
+            "scope": "application",
+            "action": { "delete-context": { "id": "demo-context" } }
+        }),
+    );
+    assert_eq!(
+        deleted.commands,
+        vec![RuntimeCommand::DeleteContext {
+            id: "demo-context".to_string()
+        }]
+    );
+}
+
 #[test]
 fn frontend_json_supports_all_dual_var_flow_kinds() {
     let mut runtime = load_demo_runtime();

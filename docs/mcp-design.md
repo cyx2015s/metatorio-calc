@@ -76,8 +76,11 @@ Phase 2 工具面**不在一开始就做成离散的友好工具**，而是：
 
 | 工具 | 参数 | 说明 |
 | --- | --- | --- |
-| `dispatch` | `{ message: AppMessage }` | 万能回退：转发任意规划动作，返回 `revision`/`changed`/`scheduled_commands`/`solve`（均结构化 JSON） |
+| `dispatch` | `{ message: AppMessage, request_id? }` | 万能回退：转发任意规划动作，返回 `revision`/`changed`/`created`/`scheduled_commands`/`solve`（均结构化 JSON） |
 | `get_planning_state` | `{ project?, factory?, recompute? }` | 读取：Omit `project` → 全文档；`project` → 单项目；`project`+`factory` → 单工厂；`recompute`（需 project+factory）时先求解并附带结构化结果 |
+| `list_projects` | — | 项目索引（id/名称/上下文/工厂·机制·目标计数） |
+| `list_factories` | `{ project }` | 单项目下的工厂索引（含目标清单） |
+| `list_contexts` | — | 游戏数据上下文索引（id/名称/来源/是否已载入/哪个是激活的）。上下文是内容哈希缓存，agent 只能列举与切换，不能创建 |
 
 后续按 agent 真实使用反馈，再把常见需求从 `dispatch` 拆出更友好的专用工具（仍在同一 `dispatch` 路径之上）。
 
@@ -103,7 +106,8 @@ Phase 2 工具面**不在一开始就做成离散的友好工具**，而是：
 
 - **读取工具**：`dispatch` 目前**纯写入、无自省**——agent 看不到当前文档、拿不到 id。~~方案：加一个 `get_planning_state` 读取工具~~ **已实现**：`get_planning_state(project?, factory?, recompute?)` 读 `runtime.state.document` 快照，一并解决 P0-1（只写不读）+ P1-5（id）+ P1-3（solve 结构化读取）。
 - **长求异步化**：`recompute`/`auto_plan` 同步占住 `Mutex<Runtime>`，期间 GUI 排队。方案：投递后台任务 + 经 `document-changed`/solving 事件回报（原决策 47）。~~**待补**~~ **已完成**（2026-xx）：`dispatch` 改为「reducer 短临界区 → 逐条命令各自按需短锁」，求解/自动规划在锁外跑（`solve_jobs` 按 `(project, factory)` 单飞 + latest-wins + revision 戳）；自动规划/清理的回写走 reducer 并校验版本，MCP 端按 revision 变化补发 `document-changed`。详见 `docs/runtime-concurrency.md`。
-- **领域词表**：`list_prototypes` / `list_contexts` 可读工具，列出可用物品/配方/机器/品质，消除"盲猜字符串"（P2-6）。
+- **领域词表**：~~`list_contexts`~~ **已实现**（`list_contexts`）；`list_prototypes`（可用物品/配方/机器/品质）仍待补，用于消除"盲猜字符串"（P2-6）。
+- **上下文可写**：上下文的切换/重命名/删除已从「只有 Tauri 命令」收敛为 `AppMessage`（`ApplicationAction::SetActiveContext` / `RenameContext` / `DeleteContext`），因此 agent 用 `dispatch` 即可操作；app 层 `activate_context` / `rename_registered_context` / `delete_registered_context` 是 GUI 与 agent 共用的单一实现。
 - **友好工具拆分**：`list_projects` / `add_target` / `set_target_amount` / `add_mechanic` / `set_recipe` / `set_machine` / `recompute` / `auto_plan` / `load_context`（原决策 6）。
 - **并发冲突语义**（原决策 45）；**端口/多实例/token 细节**（原决策 48）。
 
@@ -112,7 +116,7 @@ Phase 2 工具面**不在一开始就做成离散的友好工具**，而是：
 - [x] 真实跑一次应用，用 DSH 客户端连 `http://127.0.0.1:8765/mcp`，验证 `dispatch` 工具可驱动规划、GUI 实时刷新。
 - [x] 收集 agent 使用 AppMessage 的感受 → 修正：`JsonSchema` 派生（inputSchema 真实化）+ `solve`/`scheduled_commands` 结构化 + 修正文档示例。
 - [x] **补读取工具**（`get_planning_state`）——P0-1/P1-5 的核心，MVP 目前最大的盲区。
-- [ ] 采集使用反馈 → 抽离友好工具（`list_projects` / `get_planning_state` / `add_target` / `set_target_amount` / `add_mechanic` / `set_recipe` / `set_machine` / `recompute` / `auto_plan` / `load_context`）——对应原决策 6。
+- [ ] 采集使用反馈 → 抽离友好工具（`list_projects` / `get_planning_state` / `add_target` / `set_target_amount` / `add_mechanic` / `set_recipe` / `set_machine` / `recompute` / `auto_plan` / `load_context`）——对应原决策 6。（`list_projects` / `list_factories` / `list_contexts` 已落地。）
 - [ ] 长时求解（`recompute`/`auto_plan`）走**异步**（类似 GUI 的 solving 事件），避免 MCP 调用期间占住 `Mutex<Runtime>` 导致 GUI 排队——原决策 47 的风险。→ **已完成**，见 `docs/runtime-concurrency.md`。
 - [ ] 并发冲突语义（乐观锁/变更冲突提示）——原决策 45。
 - [ ] 端口被占用 / 多实例 / token 传递细节——原决策 48。

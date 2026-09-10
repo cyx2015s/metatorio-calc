@@ -9,7 +9,6 @@
 import {
   accessibility,
   catalogIndex,
-  deleteContext,
   dispatch,
   getDocument,
   listContexts,
@@ -25,10 +24,8 @@ import {
   openProjectDialog,
   prototypeDetail,
   projectSavePath,
-  renameContext,
   saveProject,
   saveProjectAsDialog,
-  setActiveContext,
   milestonesOrdered,
   productivity,
   implicitSources,
@@ -387,21 +384,32 @@ class RuntimeStore {
 
   async setActiveContext(id: string | null): Promise<void> {
     await this.runContext(async () => {
-      await setActiveContext(id);
+      // 走消息而不是 Tauri 命令：上下文动作进入 dispatch 管线后，MCP agent 与
+      // GUI 走同一条路径（app 层共用 activate_context 实现）。
+      await this.send({
+        scope: "application",
+        action: { "set-active-context": { context: id } },
+      });
       await this.refreshContexts();
     });
   }
 
   async renameContext(id: string, name: string): Promise<void> {
     await this.runContext(async () => {
-      await renameContext(id, name);
+      await this.send({
+        scope: "application",
+        action: { "rename-context": { id, name } },
+      });
       await this.refreshContexts();
     });
   }
 
   async deleteContext(id: string): Promise<void> {
     await this.runContext(async () => {
-      await deleteContext(id);
+      await this.send({
+        scope: "application",
+        action: { "delete-context": { id } },
+      });
       await this.refreshContexts();
     });
   }

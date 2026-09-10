@@ -301,6 +301,34 @@ impl MetatorioMcp {
             "factories": factories,
         })))
     }
+
+    /// 上下文索引：有哪些游戏数据上下文（dump/导出缓存）、激活的是哪个。
+    ///
+    /// agent 需要它才能理解 `project.context_id` 的含义，并在多个上下文之间
+    /// 切换（`dispatch` + `{"scope":"application","action":{"set-active-context":…}}`）。
+    #[tool(
+        description = "List the registered game-data contexts (id, display name, source, \
+        whether its prototype store is currently loaded, and which one is active). \
+        A project's `context_id` points at one of these ids; switch with dispatch \
+        {scope: application, action: {set-active-context: {context: id}}}. \
+        Contexts are content-hashed caches of exported game data — an agent cannot \
+        create one, only list / activate / rename / delete existing ones."
+    )]
+    async fn list_contexts(&self) -> Result<CallToolResult, McpError> {
+        let app = self.app.clone();
+        let list = tauri::async_runtime::spawn_blocking(move || {
+            let state = app.state::<AppState>();
+            crate::context_list(&state)
+        })
+        .await
+        .map_err(|error| {
+            McpError::internal_error(format!("list_contexts join 失败: {error}"), None)
+        })?;
+        let value = serde_json::to_value(&list).map_err(|error| {
+            McpError::internal_error(format!("list_contexts 序列化失败: {error}"), None)
+        })?;
+        Ok(CallToolResult::structured(value))
+    }
 }
 
 /// `dispatch` 工具的实际逻辑：与具体 Tauri runtime 解耦，便于用 mock app 测试。

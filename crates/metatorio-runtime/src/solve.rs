@@ -1064,7 +1064,10 @@ fn message_affects_accessibility(message: &AppMessage) -> bool {
         ),
         AppMessage::Application(action) => matches!(
             action,
-            ApplicationAction::LoadGameContext { .. } | ApplicationAction::LoadCachedContext
+            ApplicationAction::LoadGameContext { .. }
+                | ApplicationAction::LoadCachedContext
+                | ApplicationAction::SetActiveContext { .. }
+                | ApplicationAction::DeleteContext { .. }
         ),
         _ => false,
     }

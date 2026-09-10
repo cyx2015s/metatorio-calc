@@ -63,6 +63,23 @@ pub enum ApplicationAction {
         mod_path: Option<String>,
     },
     LoadCachedContext,
+    /// 切换当前激活的上下文（`None` = 不激活任何上下文）。
+    ///
+    /// 上下文注册表（磁盘缓存清单 + 内存 store）由 app 层持有，reducer 不
+    /// 接触它，因此 reducer 只发 [`RuntimeCommand::SetActiveContext`]；app 层
+    /// 负责校验 id 是否存在、按需从磁盘载入并广播 `contexts-changed`。
+    SetActiveContext {
+        context: Option<String>,
+    },
+    /// 重命名已注册的上下文（只改显示名；id 是内容哈希，不可变）。
+    RenameContext {
+        id: String,
+        name: String,
+    },
+    /// 删除已注册的上下文：被项目引用时拒绝，否则清缓存并卸载 store。
+    DeleteContext {
+        id: String,
+    },
     CheckForUpdate,
     InstallUpdate,
     RestartAfterUpdate,
@@ -604,6 +621,20 @@ pub enum RuntimeCommand {
         mod_path: Option<String>,
     },
     LoadCachedContext,
+    /// 切换当前激活的上下文（`None` = 不激活；项目需自带 `context_id`）。
+    /// 上下文注册表在 app 层，reducer 只发命令。
+    SetActiveContext {
+        context: Option<String>,
+    },
+    /// 重命名已注册的上下文（只改显示名；`id` 是内容哈希，不可变）。
+    RenameContext {
+        id: String,
+        name: String,
+    },
+    /// 删除已注册的上下文；被项目引用时由 app 层拒绝。
+    DeleteContext {
+        id: String,
+    },
     CloseProject {
         project: ProjectId,
     },

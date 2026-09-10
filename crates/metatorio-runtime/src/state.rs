@@ -294,6 +294,24 @@ impl RuntimeState {
             ApplicationAction::LoadCachedContext => {
                 Ok(Outcome::command(RuntimeCommand::LoadCachedContext))
             }
+            // 上下文注册表（磁盘缓存清单 + 内存 store）在 app 层，reducer 只
+            // 发命令；这样 GUI 与 MCP 走同一条路径，而不是只有 Tauri 命令能改。
+            ApplicationAction::SetActiveContext { context } => {
+                Ok(Outcome::command(RuntimeCommand::SetActiveContext {
+                    context: context.clone(),
+                }))
+            }
+            ApplicationAction::RenameContext { id, name } => {
+                Ok(Outcome::command(RuntimeCommand::RenameContext {
+                    id: id.clone(),
+                    name: name.clone(),
+                }))
+            }
+            ApplicationAction::DeleteContext { id } => {
+                Ok(Outcome::command(RuntimeCommand::DeleteContext {
+                    id: id.clone(),
+                }))
+            }
             ApplicationAction::CheckForUpdate => {
                 Ok(Outcome::command(RuntimeCommand::CheckForUpdate))
             }

@@ -82,6 +82,9 @@ export type ApplicationAction =
   | { "new-project": { name: string } }
   | { "load-game-context": { executable_path: string; mod_path: string | null } }
   | "load-cached-context"
+  | { "set-active-context": { context: string | null } }
+  | { "rename-context": { id: string; name: string } }
+  | { "delete-context": { id: string } }
   | { "save-project": { project: ProjectId } }
   | { "save-project-as": { project: ProjectId; path: string } }
   | { "close-project": { project: ProjectId; decision: "cancel" | "discard" | "save" } }

@@ -77,17 +77,9 @@ export async function listContexts(): Promise<ContextList> {
   return call("list_contexts");
 }
 
-export async function setActiveContext(id: string | null): Promise<ContextList> {
-  return call("set_active_context", { id });
-}
-
-export async function renameContext(id: string, name: string): Promise<ContextList> {
-  return call("rename_context", { id, name });
-}
-
-export async function deleteContext(id: string): Promise<ContextList> {
-  return call("delete_context", { id });
-}
+// 上下文的切换/重命名/删除已收敛为 AppMessage（见 store.setActiveContext 等）：
+// 它们改的是 app 层注册表，只有 app 层的命令执行器能碰，因此走 dispatch 后
+// MCP agent 与 GUI 共享同一条路径（app 层 `activate_context` 等单一实现）。
 
 export async function pickGameExecutable(): Promise<string | null> {
   return call("pick_game_executable");

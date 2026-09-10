@@ -771,6 +771,17 @@ fn context_list(state: &AppState) -> ContextList {
     context_list_with(runtime, state)
 }
 
+/// 是否有项目绑定到该上下文（删除前的引用检查）。
+///
+/// 抽成纯函数是为了可单测：GUI 命令与消息层共用同一条守卫，避免 agent 走
+/// dispatch 时绕过「先解除关联」的限制。
+fn context_referenced(document: &AppDocument, id: &str) -> bool {
+    document
+        .projects
+        .iter()
+        .any(|project| project.context_id.as_deref() == Some(id))
+}
+
 fn context_list_with(runtime: &Runtime, state: &AppState) -> ContextList {
     let registry = state.contexts.lock().ok();
     let Some(registry) = registry.as_ref() else {
@@ -1059,9 +1070,15 @@ fn list_contexts(state: State<'_, AppState>) -> ContextList {
     context_list(&state)
 }
 
-/// Activate a context (loading its store from cache on demand).
-#[tauri::command]
-async fn set_active_context(app: AppHandle, id: Option<String>) -> Result<ContextList, String> {
+/// Activate a context (loading its store from cache on demand) and broadcast.
+///
+/// GUI 命令与消息层（`ApplicationAction::SetActiveContext`）共用：上下文的
+/// 注册表/缓存只有 app 层能碰，把它做成单一实现，避免「GUI 能切、agent 不能」
+/// 或两条路径行为漂移。
+async fn activate_context<R: TauriRuntime>(
+    app: &AppHandle<R>,
+    id: Option<String>,
+) -> Result<ContextList, String> {
     let state = app.state::<AppState>();
     if let Some(id) = &id {
         // 读盘解析在锁外完成，只在最后短暂上锁装入。
@@ -1071,12 +1088,17 @@ async fn set_active_context(app: AppHandle, id: Option<String>) -> Result<Contex
         runtime.set_active_context(id.clone());
         Ok(context_list_with(runtime, &state))
     })?;
-    emit_contexts_changed(&app, &state, None);
+    emit_contexts_changed(app, &state, None);
     Ok(list)
 }
 
-#[tauri::command]
-async fn rename_context(app: AppHandle, id: String, name: String) -> Result<ContextList, String> {
+/// 重命名已注册的上下文（只改显示名；写 manifest 在阻塞线程上）。
+async fn rename_registered_context<R: TauriRuntime>(
+    app: &AppHandle<R>,
+    id: String,
+    name: String,
+) -> Result<ContextList, String> {
+    let app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
         let name = name.trim().to_string();
@@ -1099,8 +1121,13 @@ async fn rename_context(app: AppHandle, id: String, name: String) -> Result<Cont
     .map_err(|error| error.to_string())?
 }
 
-#[tauri::command]
-async fn delete_context(app: AppHandle, id: String) -> Result<ContextList, String> {
+/// 删除已注册的上下文：被任何项目引用时拒绝（提示先解除关联），否则清磁盘
+/// 缓存并在有 store 时一并卸载。
+async fn delete_registered_context<R: TauriRuntime>(
+    app: &AppHandle<R>,
+    id: String,
+) -> Result<ContextList, String> {
+    let app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
         {
@@ -1108,13 +1135,7 @@ async fn delete_context(app: AppHandle, id: String) -> Result<ContextList, Strin
                 .runtime
                 .lock()
                 .map_err(|_| "runtime lock poisoned".to_string())?;
-            let referenced = runtime
-                .state
-                .document
-                .projects
-                .iter()
-                .any(|project| project.context_id.as_deref() == Some(id.as_str()));
-            if referenced {
+            if context_referenced(&runtime.state.document, &id) {
                 return Err("有项目正在引用该上下文，请先解除关联".to_string());
             }
         }
@@ -3049,6 +3070,33 @@ async fn execute_command<R: TauriRuntime>(
                 }
             }
         }
+        RuntimeCommand::SetActiveContext { context } => {
+            match activate_context(app, context.clone()).await {
+                Ok(_) => CommandOutcome::default(),
+                Err(error) => {
+                    emit(app, "context-error", error.clone());
+                    CommandOutcome::failed(error)
+                }
+            }
+        }
+        RuntimeCommand::RenameContext { id, name } => {
+            match rename_registered_context(app, id.clone(), name.clone()).await {
+                Ok(_) => CommandOutcome::default(),
+                Err(error) => {
+                    emit(app, "context-error", error.clone());
+                    CommandOutcome::failed(error)
+                }
+            }
+        }
+        RuntimeCommand::DeleteContext { id } => {
+            match delete_registered_context(app, id.clone()).await {
+                Ok(_) => CommandOutcome::default(),
+                Err(error) => {
+                    emit(app, "context-error", error.clone());
+                    CommandOutcome::failed(error)
+                }
+            }
+        }
         RuntimeCommand::Cleanup {
             project,
             factory,
@@ -3352,9 +3400,8 @@ pub fn run() {
             load_game_context,
             load_dump,
             list_contexts,
-            set_active_context,
-            rename_context,
-            delete_context,
+            // set_active_context / rename_context / delete_context 已收敛为
+            // AppMessage（ApplicationAction），由 dispatch 命令统一处理。
             pick_game_executable,
             pick_dump_file,
             pick_mod_dir,
@@ -3386,6 +3433,24 @@ mod tests {
     use metatorio_runtime::SolveStatus;
 
     use super::*;
+
+    /// 上下文删除的引用守卫：只有 `context_id` 精确等于目标 id 的项目才算引用；
+    /// `None`（跟随激活上下文）不算引用。GUI 命令与消息层共用它，避免 agent 走
+    /// dispatch 时能删掉正在被引用的上下文。
+    #[test]
+    fn context_reference_guard_is_exact() {
+        let mut document = AppDocument::default();
+        let mut pinned = metatorio_runtime::document::ProjectDocument::default();
+        pinned.context_id = Some("hash-a".to_string());
+        let mut follows_active = metatorio_runtime::document::ProjectDocument::default();
+        follows_active.context_id = None;
+        document.projects.push(pinned);
+        document.projects.push(follows_active);
+
+        assert!(context_referenced(&document, "hash-a"));
+        assert!(!context_referenced(&document, "hash-b"));
+        assert!(!context_referenced(&document, ""));
+    }
 
     /// 命令汇总契约：求解产出取第一个、错误全部收集、命令按序序列化。
     /// 这是「求解失败必须让 agent 看见」的实现基础。
