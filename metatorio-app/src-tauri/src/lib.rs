@@ -2478,6 +2478,22 @@ fn flow_quality_level(qualities: &[String], flow: &DualVar) -> usize {
     quality_level_of(qualities, name)
 }
 
+/// 一条机制「显式引用」的最高品质等级。
+///
+/// 用于 [`ensure_quality_limit`]：文档里出现的品质都要反映到项目品质上限，
+/// 否则上限会低于文档实际使用值——自动规划按 `quality_limit + 1` 枚举品质
+/// （`auto_plan.rs`），偏低的上限会让它**枚举不出**用户已选的更高品质设备，
+/// 从而在重排机制时把显式选择静默降级。
+///
+/// 因此这里必须覆盖全部带品质的字段，而不只是"参与当前计算"的字段：
+/// - 各机制的主设备（配方/机器、矿机、燃料、种子、发电机、锅炉、反应堆、
+///   **太阳能板 + 蓄电器**）；
+/// - 插件清单（recipe/mining）；
+/// - **插件塔及其塔内插件**（插件塔品质影响覆盖效率与耗电，见
+///   `metatorio_core::mechanic`）。
+///
+/// 注意 `Mechanic` 是 `#[non_exhaustive]`，新增带品质的机制时这个 `_` 会静默
+/// 漏掉——上面枚举的就是它唯一会吞掉的分支（Solar 曾在此被漏掉）。
 fn mechanic_quality_level(qualities: &[String], mechanic: &Mechanic) -> usize {
     let mut ids: Vec<&IdWithQuality> = match mechanic {
         Mechanic::Recipe(mechanic) => vec![&mechanic.recipe, &mechanic.machine],
@@ -2489,18 +2505,29 @@ fn mechanic_quality_level(qualities: &[String], mechanic: &Mechanic) -> usize {
         Mechanic::Generator(mechanic) => vec![&mechanic.generator],
         Mechanic::Boiler(mechanic) => vec![&mechanic.boiler],
         Mechanic::Reactor(mechanic) => vec![&mechanic.reactor],
+        Mechanic::Solar(mechanic) => vec![&mechanic.solar_panel, &mechanic.accumulator],
         _ => Vec::new(),
     };
-    if let Mechanic::Recipe(mechanic) = mechanic {
-        ids.extend(mechanic.module_config.modules.iter());
-    }
-    if let Mechanic::Mining(mechanic) = mechanic {
-        ids.extend(mechanic.module_config.modules.iter());
+    if let Some(config) = module_config_of(mechanic) {
+        ids.extend(config.modules.iter());
+        for beacon in &config.beacons {
+            ids.push(&beacon.beacon);
+            ids.extend(beacon.modules.iter().map(|(module, _)| module));
+        }
     }
     ids.iter()
         .map(|id| quality_level_of(qualities, &id.quality))
         .max()
         .unwrap_or(0)
+}
+
+/// 带插件配置的机制（只有配方与采矿有）。
+fn module_config_of(mechanic: &Mechanic) -> Option<&metatorio_core::ModuleConfig> {
+    match mechanic {
+        Mechanic::Recipe(mechanic) => Some(&mechanic.module_config),
+        Mechanic::Mining(mechanic) => Some(&mechanic.module_config),
+        _ => None,
+    }
 }
 
 /// 项目品质上限自动提升：文档中出现高于当前上限的品质时（目标/外部输入/
@@ -3544,6 +3571,95 @@ mod tests {
         assert!(solve.is_some(), "应保留求解产出");
         assert_eq!(errors, vec!["boom".to_string()], "错误必须被收集");
         assert_eq!(serialized.len(), 2, "每条命令都应序列化");
+    }
+
+    /// 品质上限自动提升必须看到**文档里显式引用的每一个品质**，包括那些
+    /// 「当前模型没用到」的字段（蓄电器品质）与容易漏掉的分支（太阳能、
+    /// 插件塔及其塔内插件）：漏掉就会让自动规划按过低的上限枚举品质，
+    /// 把用户显式选的更高品质设备静默降级。
+    #[test]
+    fn mechanic_quality_level_covers_every_quality_bearing_field() {
+        let qualities: Vec<String> = ["normal", "uncommon", "rare", "epic", "legendary"]
+            .iter()
+            .map(|quality| quality.to_string())
+            .collect();
+        let q = |name: &str| IdWithQuality::new("thing", name);
+        let level = |mechanic: &Mechanic| mechanic_quality_level(&qualities, mechanic);
+
+        // 各机制主设备（含曾被 `_` 吞掉的 Solar）。
+        assert_eq!(
+            level(&Mechanic::Solar(metatorio_core::SolarMechanic {
+                solar_panel: q("legendary"),
+                accumulator: q("normal"),
+            })),
+            4
+        );
+        assert_eq!(
+            level(&Mechanic::Solar(metatorio_core::SolarMechanic {
+                solar_panel: q("normal"),
+                accumulator: q("rare"),
+            })),
+            2,
+            "蓄电器品质同样要计入（它是文档里的显式选择）"
+        );
+        assert_eq!(
+            level(&Mechanic::Reactor(metatorio_core::ReactorMechanic {
+                reactor: q("epic"),
+                ..Default::default()
+            })),
+            3
+        );
+
+        // 插件清单（recipe / mining）。
+        let recipe_with_module = Mechanic::Recipe(metatorio_core::RecipeMechanic {
+            recipe: q("normal"),
+            machine: q("normal"),
+            module_config: metatorio_core::ModuleConfig {
+                modules: vec![q("uncommon")],
+                beacons: Vec::new(),
+            },
+            ..Default::default()
+        });
+        assert_eq!(level(&recipe_with_module), 1);
+
+        // 插件塔本体品质影响覆盖效率/耗电，塔内插件品质影响其效果——两者都要计入。
+        let recipe_with_beacon = Mechanic::Recipe(metatorio_core::RecipeMechanic {
+            recipe: q("normal"),
+            machine: q("normal"),
+            module_config: metatorio_core::ModuleConfig {
+                modules: Vec::new(),
+                beacons: vec![metatorio_core::BeaconConfig {
+                    beacon: q("epic"),
+                    modules: vec![(q("normal"), 1)],
+                    ..Default::default()
+                }],
+            },
+            ..Default::default()
+        });
+        assert_eq!(level(&recipe_with_beacon), 3, "插件塔本体品质要计入");
+        let recipe_with_beacon_module = Mechanic::Recipe(metatorio_core::RecipeMechanic {
+            recipe: q("normal"),
+            machine: q("normal"),
+            module_config: metatorio_core::ModuleConfig {
+                modules: Vec::new(),
+                beacons: vec![metatorio_core::BeaconConfig {
+                    beacon: q("normal"),
+                    modules: vec![(q("legendary"), 2)],
+                    ..Default::default()
+                }],
+            },
+            ..Default::default()
+        });
+        assert_eq!(level(&recipe_with_beacon_module), 4, "塔内插件品质要计入");
+
+        // 没有品质字段的机制（流体燃料/流体热只有流体名）恒为 normal。
+        assert_eq!(
+            level(&Mechanic::FluidFuel(metatorio_core::FluidFuelMechanic {
+                fluid: "steam".to_string(),
+                ..Default::default()
+            })),
+            0
+        );
     }
 
     /// 幂等缓存：同一 request_id 回放上次载荷；超过容量淘汰最早的。
