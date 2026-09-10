@@ -48,6 +48,7 @@ use schemars::JsonSchema;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 use crate::{execute_command, AppState};
+use metatorio_core::DualVar;
 use metatorio_runtime::message::AppMessage;
 use metatorio_runtime::{FactoryId, ProjectId};
 
@@ -84,6 +85,37 @@ struct DispatchParams {
     /// 避免重复添加目标 / 机制。
     #[serde(default)]
     request_id: Option<String>,
+}
+
+/// Parameters for the `list_prototypes` tool: the domain vocabulary of one
+/// game context, optionally narrowed by kind and/or a name substring.
+#[derive(Debug, serde::Deserialize, JsonSchema)]
+struct ListPrototypesParams {
+    /// 要查询的游戏上下文 id；省略 = 当前激活的上下文。
+    #[serde(default)]
+    context_id: Option<String>,
+    /// 按条目 kind 精确过滤，例如 `item` / `fluid` / `recipe` / `technology` /
+    /// `machine` / `mining-machine` / `generator` / `boiler` / `reactor` /
+    /// `solar-panel` / `accumulator` / `beacon` / `resource` / `module` /
+    /// `planet` / `surface`。省略 = 全部 kind。
+    #[serde(default)]
+    kind: Option<String>,
+    /// 名字包含（大小写不敏感子串）；同时匹配 `name` 与 `localized_name`。
+    /// 省略 = 不过滤。
+    #[serde(default)]
+    name_contains: Option<String>,
+}
+
+/// Parameters for the `suggest` tool: candidates that can provide/consume a flow.
+#[derive(Debug, serde::Deserialize, JsonSchema)]
+struct SuggestParams {
+    /// 要查建议的流——与 `dispatch` 里目标/外部输入用的 `DualVar` 同形
+    /// （如 `{"Item":{"id":"iron-plate","quality":"normal"}}` 或
+    /// `{"Fluid":{"name":"water","temperature":[15,15]}}` 或 `"Electricity"`）。
+    flow: DualVar,
+    /// 游戏上下文 id；省略 = 当前激活的上下文。
+    #[serde(default)]
+    context_id: Option<String>,
 }
 
 /// The MCP server handler.  Stateless: it only carries the [`AppHandle`] it
@@ -328,6 +360,77 @@ impl MetatorioMcp {
             McpError::internal_error(format!("list_contexts 序列化失败: {error}"), None)
         })?;
         Ok(CallToolResult::structured(value))
+    }
+
+    /// 领域词表：某个游戏上下文里有哪些原型（物品/流体/配方/科技/机器/…）。
+    ///
+    /// 消除 agent 的「盲猜字符串」：dispatch 里的 recipe/machine/item/fluid 名字
+    /// 必须真实存在（校验会拒绝不存在的名字），这里给出合法取值。
+    #[tool(
+        description = "List the prototypes of a game context (the domain vocabulary): \
+        items / fluids / recipes / technologies / machines / resources / qualities … \
+        with name, localized_name, group/subgroup, categories, fuel info and module \
+        slots.  Omit `context_id` to use the active context.  Narrow with `kind` \
+        (exact) and/or `name_contains` (case-insensitive substring on name or \
+        localized_name).  Returns `total` (all entries in the context), `matched` and \
+        the filtered `entries` — no truncation, so filter rather than paginate."
+    )]
+    async fn list_prototypes(
+        &self,
+        Parameters(params): Parameters<ListPrototypesParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let kind = params.kind;
+        let needle = params.name_contains;
+        let state = self.app.state::<AppState>();
+        // 只是读一次 runtime 里的激活上下文 id（短锁），无需阻塞线程。
+        let context_id = crate::resolve_context_id(&state, params.context_id.as_deref())
+            .map_err(|error| McpError::invalid_params(error, None))?;
+        let index = crate::catalog_index_for(&state, &context_id)
+            .await
+            .map_err(|error| {
+                McpError::invalid_params(format!("list_prototypes 执行失败: {error}"), None)
+            })?;
+        let total = index.entries.len();
+        let entries =
+            crate::filter_index_entries(index.entries, kind.as_deref(), needle.as_deref());
+        let matched = entries.len();
+        let value = serde_json::json!({
+            "context_id": context_id,
+            "qualities": index.qualities,
+            "total": total,
+            "matched": matched,
+            "entries": entries,
+        });
+        Ok(CallToolResult::structured(value))
+    }
+
+    /// 建议：给定一条流，列出能产出/消耗它的候选机制。
+    #[tool(
+        description = "Suggest mechanics that could provide or consume one flow in the \
+        active game context (recipes, resource patches, fuels, generators), each as \
+        {kind, name, role} where role='producer' produces the flow and \
+        role='consumer' consumes it.  This is the cheap first step before adding a \
+        mechanic: pick a candidate, then dispatch a mechanic-list add + the matching \
+        set-recipe / set-resource / set-item / set-generator message."
+    )]
+    async fn suggest(
+        &self,
+        Parameters(params): Parameters<SuggestParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let flow = params.flow.clone();
+        let state = self.app.state::<AppState>();
+        let context_id = crate::resolve_context_id(&state, params.context_id.as_deref())
+            .map_err(|error| McpError::invalid_params(error, None))?;
+        let suggestions = crate::suggest_for(&state, &context_id, flow.clone())
+            .await
+            .map_err(|error| {
+                McpError::invalid_params(format!("suggest 执行失败: {error}"), None)
+            })?;
+        Ok(CallToolResult::structured(serde_json::json!({
+            "context_id": context_id,
+            "flow": flow,
+            "suggestions": suggestions,
+        })))
     }
 }
 

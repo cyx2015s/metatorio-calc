@@ -81,6 +81,8 @@ Phase 2 工具面**不在一开始就做成离散的友好工具**，而是：
 | `list_projects` | — | 项目索引（id/名称/上下文/工厂·机制·目标计数） |
 | `list_factories` | `{ project }` | 单项目下的工厂索引（含目标清单） |
 | `list_contexts` | — | 游戏数据上下文索引（id/名称/来源/是否已载入/哪个是激活的）。上下文是内容哈希缓存，agent 只能列举与切换，不能创建 |
+| `list_prototypes` | `{ kind?, name_contains?, context_id? }` | 领域词表：该上下文里的物品/流体/配方/科技/机器/资源…（name、localized_name、group/subgroup、categories、燃料信息、插件槽）。返回 `total`/`matched`/`entries`，不做截断——用 `kind`/`name_contains` 收窄 |
+| `suggest` | `{ flow, context_id? }` | 给定一条流，列出能产出/消耗它的候选机制（recipe/resource/item-fuel/generator，含 role）——「加机制」前的第一步 |
 
 后续按 agent 真实使用反馈，再把常见需求从 `dispatch` 拆出更友好的专用工具（仍在同一 `dispatch` 路径之上）。
 
@@ -106,7 +108,7 @@ Phase 2 工具面**不在一开始就做成离散的友好工具**，而是：
 
 - **读取工具**：`dispatch` 目前**纯写入、无自省**——agent 看不到当前文档、拿不到 id。~~方案：加一个 `get_planning_state` 读取工具~~ **已实现**：`get_planning_state(project?, factory?, recompute?)` 读 `runtime.state.document` 快照，一并解决 P0-1（只写不读）+ P1-5（id）+ P1-3（solve 结构化读取）。
 - **长求异步化**：`recompute`/`auto_plan` 同步占住 `Mutex<Runtime>`，期间 GUI 排队。方案：投递后台任务 + 经 `document-changed`/solving 事件回报（原决策 47）。~~**待补**~~ **已完成**（2026-xx）：`dispatch` 改为「reducer 短临界区 → 逐条命令各自按需短锁」，求解/自动规划在锁外跑（`solve_jobs` 按 `(project, factory)` 单飞 + latest-wins + revision 戳）；自动规划/清理的回写走 reducer 并校验版本，MCP 端按 revision 变化补发 `document-changed`。详见 `docs/runtime-concurrency.md`。
-- **领域词表**：~~`list_contexts`~~ **已实现**（`list_contexts`）；`list_prototypes`（可用物品/配方/机器/品质）仍待补，用于消除"盲猜字符串"（P2-6）。
+- **领域词表**：~~`list_contexts`~~ / ~~`list_prototypes`~~ **已实现**（`list_contexts`、`list_prototypes`，后者支持 `kind` 与 `name_contains` 过滤，GUI 的 `catalog_index` 命令与它共用同一实现）；候选机制建议 **已实现**（`suggest`，与 GUI 的 `suggest` 命令共用 `suggest_for_flow`）。仍未工具化的是 `allowed_modules` / `implicit_sources` / `mechanic_flow` / `accessibility` / `productivity`（GUI 有命令，agent 暂时只能通过 `get_planning_state` 的求解结果间接观察）。
 - **上下文可写**：上下文的切换/重命名/删除已从「只有 Tauri 命令」收敛为 `AppMessage`（`ApplicationAction::SetActiveContext` / `RenameContext` / `DeleteContext`），因此 agent 用 `dispatch` 即可操作；app 层 `activate_context` / `rename_registered_context` / `delete_registered_context` 是 GUI 与 agent 共用的单一实现。
 - **工程文件可读写**：`open-project { path }` / `save-project { project }` / `save-project-as { project, path }` 现在是 GUI 的真实路径（Tauri 侧只保留文件对话框 `pick_project_file` / `pick_project_save_path` 与只读的 `project_save_path`），因此 agent 也能按路径打开/另存工程。显式保存走专用命令 `RuntimeCommand::SaveProject`：没有记忆路径时**报错**（提示先用 save-project-as），而自动落盘的 `Persist{path:None}` 对未保存过的新项目仍静默跳过——两者语义不同，不可混用。
 - **未实现变体在 schema 里自述**：`request-suggestions` / `use-best-modules` / `replace-from-location` 与更新三连的文档注释会进入 MCP inputSchema（测试 `unimplemented_variants_are_documented_in_the_schema` 守住这一点），agent 读 schema 即可知道它们目前一定失败，不必先浪费一次调用。同一轮删除了**废弃的 suggestion 会话**（`FactoryAction::Suggestion` / `SuggestionAction` / `SuggestionCandidate` 及其 `apply_suggestion`）：它对应「运行时持有建议状态」的旧设计，而真实能力早已由只读命令 `suggest` / `best_modules` / `implicit_sources` + `mechanic-list` 消息提供，剩下的三条分支（`SetFilter` / `Dismiss` / `SelectMechanic`）全是静默 no-op，只会让调用方误以为会话模型存在。

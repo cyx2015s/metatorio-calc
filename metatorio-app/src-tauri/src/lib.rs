@@ -1208,9 +1208,53 @@ fn icon(
     None
 }
 
-/// 全量目录索引（含 order fallback 排序）：一次拉取，前端本地筛选/分组。
-#[tauri::command]
-async fn catalog_index(app: AppHandle, context_id: String) -> Result<CatalogIndex, String> {
+/// 过滤目录索引条目：`kind` 精确匹配（大小写不敏感），`name_contains` 大小写不
+/// 敏感地匹配 `name` 或 `localized_name`。归一化在这里做，调用方直接传原始输入。
+/// 供 MCP 的 `list_prototypes` 工具与测试共用——「domain 词表」查得对不对完全
+/// 取决于这两个条件。
+pub(crate) fn filter_index_entries(
+    entries: Vec<IndexEntry>,
+    kind: Option<&str>,
+    needle: Option<&str>,
+) -> Vec<IndexEntry> {
+    let kind = kind
+        .map(|kind| kind.trim().to_lowercase())
+        .filter(|kind| !kind.is_empty());
+    let needle = needle
+        .map(|needle| needle.trim().to_lowercase())
+        .filter(|needle| !needle.is_empty());
+    entries
+        .into_iter()
+        .filter(|entry| kind.as_deref().is_none_or(|kind| entry.kind == kind))
+        .filter(|entry| match &needle {
+            Some(needle) => {
+                entry.name.to_lowercase().contains(needle)
+                    || entry.localized_name.to_lowercase().contains(needle)
+            }
+            None => true,
+        })
+        .collect()
+}
+
+/// 解析「查询用的上下文 id」：显式给出优先，否则用当前激活上下文。
+///
+/// MCP 的只读工具（list_prototypes / suggest）因此不必让 agent 先 list_contexts
+/// 再回填 id——省略参数就查它正在操作的那个上下文。
+fn resolve_context_id(state: &AppState, requested: Option<&str>) -> Result<String, String> {
+    if let Some(id) = requested.map(str::trim).filter(|id| !id.is_empty()) {
+        return Ok(id.to_string());
+    }
+    with_runtime(state, |runtime| {
+        runtime.active_context().map(str::to_string).ok_or_else(|| {
+            "没有激活的游戏上下文：先在返回值里指定 context_id，或用 dispatch 的 set-active-context 选中一个"
+                .to_string()
+        })
+    })
+}
+
+/// 全量目录索引（含 order fallback 排序）：GUI 的 `catalog_index` 命令与 MCP 的
+/// `list_prototypes` 工具共用，避免两条路径的条目形状漂移。
+async fn catalog_index_for(state: &AppState, context_id: &str) -> Result<CatalogIndex, String> {
     if context_id.is_empty() {
         return Ok(CatalogIndex {
             context_id: String::new(),
@@ -1218,10 +1262,10 @@ async fn catalog_index(app: AppHandle, context_id: String) -> Result<CatalogInde
             entries: Vec::new(),
         });
     }
-    let state = app.state::<AppState>();
-    let store = context_store_arc(&state, &context_id).await?;
-    let locale = locale_map_of(&state, &context_id);
+    let store = context_store_arc(state, context_id).await?;
+    let locale = locale_map_of(state, context_id);
     // 索引构建遍历全部原型：放到阻塞线程池，且不持 runtime 锁。
+    let context_id = context_id.to_string();
     tauri::async_runtime::spawn_blocking(move || CatalogIndex {
         context_id: context_id.clone(),
         qualities: store.quality_order().to_vec(),
@@ -1229,6 +1273,29 @@ async fn catalog_index(app: AppHandle, context_id: String) -> Result<CatalogInde
     })
     .await
     .map_err(|error| error.to_string())
+}
+
+/// 一条流（物品/流体）的候选机制建议：GUI 的 `suggest` 命令与 MCP 的 `suggest`
+/// 工具共用。
+async fn suggest_for(
+    state: &AppState,
+    context_id: &str,
+    flow: DualVar,
+) -> Result<Vec<Suggestion>, String> {
+    if context_id.is_empty() {
+        return Ok(Vec::new());
+    }
+    let store = context_store_arc(state, context_id).await?;
+    tauri::async_runtime::spawn_blocking(move || suggest_for_flow(&store, flow))
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// 全量目录索引（含 order fallback 排序）：一次拉取，前端本地筛选/分组。
+#[tauri::command]
+async fn catalog_index(app: AppHandle, context_id: String) -> Result<CatalogIndex, String> {
+    let state = app.state::<AppState>();
+    catalog_index_for(&state, &context_id).await
 }
 
 /// 每插件类别中 tier 最高的插件（"使用最佳插件"填充枚举列表用）。
@@ -1312,14 +1379,8 @@ async fn suggest(
     context_id: String,
     flow: DualVar,
 ) -> Result<Vec<Suggestion>, String> {
-    if context_id.is_empty() {
-        return Ok(Vec::new());
-    }
     let state = app.state::<AppState>();
-    let store = context_store_arc(&state, &context_id).await?;
-    tauri::async_runtime::spawn_blocking(move || suggest_for_flow(&store, flow))
-        .await
-        .map_err(|error| error.to_string())
+    suggest_for(&state, &context_id, flow).await
 }
 
 /// 单个机制在当前规划条件下的展开流（系数 = 1 时的每秒产/耗）。
@@ -3425,6 +3486,66 @@ mod tests {
         assert!(context_referenced(&document, "hash-a"));
         assert!(!context_referenced(&document, "hash-b"));
         assert!(!context_referenced(&document, ""));
+    }
+
+    /// `list_prototypes` 的过滤契约：kind 精确、名字大小写不敏感、同时匹配
+    /// 本地化名；两个条件都不给时返回全部（工具只负责过滤，不做截断）。
+    #[test]
+    fn index_entry_filter_matches_kind_and_name() {
+        let entry = |kind: &str, name: &str, localized: &str| IndexEntry {
+            kind: kind.to_string(),
+            name: name.to_string(),
+            localized_name: localized.to_string(),
+            group: String::new(),
+            subgroup: String::new(),
+            icon_type: String::new(),
+            module_slots: None,
+            categories: Vec::new(),
+            fuel_category: String::new(),
+            fuel_value_j: None,
+            technology_max_level: None,
+            technology_base_level: 0,
+        };
+        let entries = vec![
+            entry("item", "iron-plate", "铁板"),
+            entry("item", "iron-gear-wheel", "铁齿轮"),
+            entry("recipe", "iron-gear-wheel", "铁齿轮"),
+            entry("fluid", "water", "水"),
+        ];
+
+        let names = |filtered: &[IndexEntry]| {
+            filtered
+                .iter()
+                .map(|entry| (entry.kind.clone(), entry.name.clone()))
+                .collect::<Vec<_>>()
+        };
+
+        // 无过滤 → 全部
+        assert_eq!(filter_index_entries(entries.clone(), None, None).len(), 4);
+        // kind 精确：recipe 不会连带 item
+        assert_eq!(
+            names(&filter_index_entries(entries.clone(), Some("recipe"), None)),
+            vec![("recipe".to_string(), "iron-gear-wheel".to_string())]
+        );
+        // 名字子串：大小写不敏感
+        assert_eq!(
+            filter_index_entries(entries.clone(), None, Some("IRON-")).len(),
+            3
+        );
+        // 本地化名也参与匹配
+        assert_eq!(
+            names(&filter_index_entries(entries.clone(), None, Some("水"))),
+            vec![("fluid".to_string(), "water".to_string())]
+        );
+        // 两个条件叠加
+        assert_eq!(
+            names(&filter_index_entries(
+                entries.clone(),
+                Some("item"),
+                Some("iron-plate")
+            )),
+            vec![("item".to_string(), "iron-plate".to_string())]
+        );
     }
 
     /// 命令汇总契约：求解产出取第一个、错误全部收集、命令按序序列化。
