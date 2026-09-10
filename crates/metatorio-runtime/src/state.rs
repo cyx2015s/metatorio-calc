@@ -236,10 +236,9 @@ impl RuntimeState {
             }
             ApplicationAction::SaveProject { project } => {
                 self.project(project)?;
-                Ok(Outcome::command(RuntimeCommand::Persist {
-                    project,
-                    path: None,
-                }))
+                // 显式保存用专用命令：没有记忆路径时 app 层报错，而不是像自动
+                // 落盘那样静默跳过（否则 agent 无法区分「已保存」与「没保存」）。
+                Ok(Outcome::command(RuntimeCommand::SaveProject { project }))
             }
             ApplicationAction::SaveProjectAs { project, path } => {
                 self.project(project)?;

@@ -613,6 +613,12 @@ pub enum RuntimeCommand {
         project: ProjectId,
         path: Option<String>,
     },
+    /// 显式保存到「已记忆的路径」：与自动落盘的 [`Self::Persist`] 不同，这里
+    /// 没有记忆路径时由 app 层**报错**（而不是静默 no-op），否则 agent 会把
+    /// 「什么都没做」当成保存成功。
+    SaveProject {
+        project: ProjectId,
+    },
     LoadProject {
         path: String,
     },

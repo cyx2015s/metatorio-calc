@@ -2269,92 +2269,42 @@ async fn pick_mod_dir(app: AppHandle) -> Result<Option<String>, String> {
     .map_err(|error| error.to_string())?
 }
 
+/// OS 文件对话框：选一个工程文件路径。只返回路径——真正的导入走
+/// `ApplicationAction::OpenProject` 消息（`RuntimeCommand::LoadProject`），
+/// 这样 GUI 与 MCP agent 共用同一条导入路径。
 #[tauri::command]
-async fn open_project_dialog(app: AppHandle) -> Result<Option<AppDocument>, String> {
-    let picked = app
-        .dialog()
-        .file()
-        .add_filter("Metatorio 工程", &["json", "fpp"])
-        .blocking_pick_file();
-    let Some(picked) = picked else {
-        return Ok(None);
-    };
-    let path = picked.into_path().map_err(|error| error.to_string())?;
-    // 读盘 + JSON 解析在锁外（工程文件可能很大）。
-    let parse_path = path.clone();
-    let value = tauri::async_runtime::spawn_blocking(move || {
-        metatorio_runtime::parse_document_file(&parse_path).map_err(|error| error.to_string())
+async fn pick_project_file(app: AppHandle) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let picked = app
+            .dialog()
+            .file()
+            .add_filter("Metatorio 工程", &["json", "fpp"])
+            .blocking_pick_file();
+        Ok(picked
+            .and_then(|picked| picked.into_path().ok())
+            .map(|path| path.to_string_lossy().to_string()))
     })
     .await
-    .map_err(|error| error.to_string())??;
-    let state = app.state::<AppState>();
-    let path = path.to_string_lossy().to_string();
-    let (document, added) = with_runtime(&state, |runtime| {
-        let before: std::collections::HashSet<ProjectId> = runtime
-            .state
-            .document
-            .projects
-            .iter()
-            .map(|project| project.id)
-            .collect();
-        runtime
-            .import_document_value(value)
-            .map_err(|error| error.to_string())?;
-        let added: Vec<ProjectId> = runtime
-            .state
-            .document
-            .projects
-            .iter()
-            .map(|project| project.id)
-            .filter(|id| !before.contains(id))
-            .collect();
-        Ok((runtime.state.document.clone(), added))
-    })?;
-    if let Ok(mut paths) = state.project_paths.lock() {
-        for project in added {
-            paths.insert(project, path.clone());
-        }
-    }
-    Ok(Some(document))
+    .map_err(|error| error.to_string())?
 }
 
+/// OS 文件对话框：选「另存为」的路径。只返回路径——写盘走
+/// `ApplicationAction::SaveProjectAs` 消息（`RuntimeCommand::Persist`）。
 #[tauri::command]
-async fn save_project_as_dialog(
-    app: AppHandle,
-    project: ProjectId,
-) -> Result<Option<String>, String> {
-    let picked = app
-        .dialog()
-        .file()
-        .set_file_name("metatorio-project.json")
-        .add_filter("Metatorio 工程", &["json", "fpp"])
-        .blocking_save_file();
-    let Some(picked) = picked else {
-        return Ok(None);
-    };
-    let path = picked.into_path().map_err(|error| error.to_string())?;
-    let path = path.to_string_lossy().to_string();
-    let state = app.state::<AppState>();
-    persist_project(&state, project, path.clone()).await?;
-    Ok(Some(path))
-}
-
-/// Save to the remembered path; `Ok(None)` means no path yet (call
-/// `save_project_as_dialog`).
-#[tauri::command]
-async fn save_project(app: AppHandle, project: ProjectId) -> Result<Option<String>, String> {
-    let state = app.state::<AppState>();
-    let path = state
-        .project_paths
-        .lock()
-        .map_err(|_| "project paths lock poisoned".to_string())?
-        .get(&project)
-        .cloned();
-    let Some(path) = path else {
-        return Ok(None);
-    };
-    persist_project(&state, project, path.clone()).await?;
-    Ok(Some(path))
+async fn pick_project_save_path(app: AppHandle) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let picked = app
+            .dialog()
+            .file()
+            .set_file_name("metatorio-project.json")
+            .add_filter("Metatorio 工程", &["json", "fpp"])
+            .blocking_save_file();
+        Ok(picked
+            .and_then(|picked| picked.into_path().ok())
+            .map(|path| path.to_string_lossy().to_string()))
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 /// 项目记忆的保存路径（未保存过返回 null），供界面显示"保存位置"。
@@ -3007,7 +2957,8 @@ async fn execute_command<R: TauriRuntime>(
                 .clone()
                 .or_else(|| state.project_paths.lock().ok()?.get(&project).cloned());
             let Some(path) = path else {
-                // Pathless persist with no remembered path is a no-op.
+                // Pathless persist with no remembered path is a no-op: 这是**自动
+                // 落盘**的路径（元数据变更），未保存过的新项目不该报错。
                 return CommandOutcome::default();
             };
             // 锁外序列化 + 写盘。
@@ -3015,6 +2966,31 @@ async fn execute_command<R: TauriRuntime>(
                 Ok(()) => CommandOutcome::default(),
                 Err(error) => {
                     eprintln!("persist failed: {error}");
+                    CommandOutcome::failed(format!("保存项目 {} 失败: {error}", project.0))
+                }
+            }
+        }
+        RuntimeCommand::SaveProject { project } => {
+            // 显式保存（ApplicationAction::SaveProject）：没有记忆路径时必须报错，
+            // 否则 agent 会把静默 no-op 当成保存成功。
+            let project = *project;
+            let path = state
+                .project_paths
+                .lock()
+                .ok()
+                .and_then(|paths| paths.get(&project).cloned());
+            let Some(path) = path else {
+                let error = format!(
+                    "项目 {} 尚无保存路径：请先用 save-project-as 指定路径",
+                    project.0
+                );
+                emit(app, "solve-error", error.clone());
+                return CommandOutcome::failed(error);
+            };
+            match persist_project(state, project, path).await {
+                Ok(()) => CommandOutcome::default(),
+                Err(error) => {
+                    emit(app, "solve-error", error.clone());
                     CommandOutcome::failed(format!("保存项目 {} 失败: {error}", project.0))
                 }
             }
@@ -3419,9 +3395,8 @@ pub fn run() {
             accessibility,
             milestones_ordered,
             productivity,
-            open_project_dialog,
-            save_project_as_dialog,
-            save_project,
+            pick_project_file,
+            pick_project_save_path,
             project_save_path,
         ])
         .run(tauri::generate_context!())

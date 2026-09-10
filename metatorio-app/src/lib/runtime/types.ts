@@ -80,6 +80,7 @@ export function flowQuality(flow: DualVar): string | null {
 
 export type ApplicationAction =
   | { "new-project": { name: string } }
+  | { "open-project": { path: string } }
   | { "load-game-context": { executable_path: string; mod_path: string | null } }
   | "load-cached-context"
   | { "set-active-context": { context: string | null } }
@@ -88,7 +89,12 @@ export type ApplicationAction =
   | { "save-project": { project: ProjectId } }
   | { "save-project-as": { project: ProjectId; path: string } }
   | { "close-project": { project: ProjectId; decision: "cancel" | "discard" | "save" } }
-  | { "delete-project": { project: ProjectId; decision: "cancel" | "confirm" } };
+  | { "delete-project": { project: ProjectId; decision: "cancel" | "confirm" } }
+  | { "reorder-project": { project: ProjectId; position: number } }
+  // 自动更新：GUI 走 @tauri-apps/plugin-updater，这三条消息留给 MCP/其它适配层。
+  | "check-for-update"
+  | "install-update"
+  | "restart-after-update";
 
 export type FactoryTemplate = "empty" | "default-mechanics";
 

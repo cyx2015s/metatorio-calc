@@ -252,6 +252,60 @@ fn frontend_json_context_actions_become_commands() {
     );
 }
 
+/// 打开/保存的线上形状：GUI（store.openProject / saveCurrentProject /
+/// saveProjectAs）现在只调用文件对话框命令拿路径，真正的读盘/写盘走这些消息。
+///
+/// 显式保存必须用**专用命令** `SaveProject`（无记忆路径时 app 层报错），
+/// 而不是 `Persist{path:None}`——后者是自动落盘，未保存过的新项目应静默跳过。
+#[test]
+fn frontend_json_persistence_actions_become_commands() {
+    let mut runtime = load_demo_runtime();
+    dispatch(
+        &mut runtime,
+        json!({ "scope": "application", "action": { "new-project": { "name": "save me" } } }),
+    );
+    let project = runtime.state.document.projects[0].id;
+
+    let opened = dispatch(
+        &mut runtime,
+        json!({ "scope": "application", "action": { "open-project": { "path": "C:/tmp/p.json" } } }),
+    );
+    assert_eq!(
+        opened.commands,
+        vec![RuntimeCommand::LoadProject {
+            path: "C:/tmp/p.json".to_string()
+        }],
+        "open-project 只发 LoadProject 命令（导入在命令阶段完成）"
+    );
+
+    let saved = dispatch(
+        &mut runtime,
+        json!({
+            "scope": "application",
+            "action": { "save-project": { "project": project } }
+        }),
+    );
+    assert_eq!(
+        saved.commands,
+        vec![RuntimeCommand::SaveProject { project }]
+    );
+
+    let saved_as = dispatch(
+        &mut runtime,
+        json!({
+            "scope": "application",
+            "action": { "save-project-as": { "project": project, "path": "C:/tmp/out.json" } }
+        }),
+    );
+    assert_eq!(
+        saved_as.commands,
+        vec![RuntimeCommand::Persist {
+            project,
+            path: Some("C:/tmp/out.json".to_string())
+        }]
+    );
+}
+
 #[test]
 fn frontend_json_supports_all_dual_var_flow_kinds() {
     let mut runtime = load_demo_runtime();

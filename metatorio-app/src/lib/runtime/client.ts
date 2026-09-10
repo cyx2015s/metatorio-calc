@@ -169,17 +169,17 @@ export async function allowedModules(
 }
 
 // ── Persistence ───────────────────────────────────────────────────
+//
+// 打开/保存只保留**文件对话框**命令（返回路径）与 `project_save_path` 读取；
+// 真正的读盘 + 导入 / 写盘走 AppMessage（`open-project` / `save-project` /
+// `save-project-as`），因此 MCP agent 与 GUI 共享同一条持久化路径。
 
-export async function openProjectDialog(): Promise<AppDocument | null> {
-  return call("open_project_dialog");
+export async function pickProjectFile(): Promise<string | null> {
+  return call("pick_project_file");
 }
 
-export async function saveProjectAsDialog(project: number): Promise<string | null> {
-  return call("save_project_as_dialog", { project });
-}
-
-export async function saveProject(project: number): Promise<string | null> {
-  return call("save_project", { project });
+export async function pickProjectSavePath(): Promise<string | null> {
+  return call("pick_project_save_path");
 }
 
 export async function projectSavePath(project: number): Promise<string | null> {

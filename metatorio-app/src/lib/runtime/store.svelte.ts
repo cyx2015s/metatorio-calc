@@ -21,11 +21,10 @@ import {
   onDocumentChanged,
   onSolveError,
   onSolveResult,
-  openProjectDialog,
+  pickProjectFile,
+  pickProjectSavePath,
   prototypeDetail,
   projectSavePath,
-  saveProject,
-  saveProjectAsDialog,
   milestonesOrdered,
   productivity,
   implicitSources,
@@ -37,6 +36,7 @@ import type {
   AppMessage,
   CatalogIndex,
   ContextInfo,
+  DispatchResult,
   FactoryId,
   IdWithQuality,
   InfiniteTechLevel,
@@ -231,13 +231,18 @@ class RuntimeStore {
     this.refreshProjectPaths().catch(() => {});
   }
 
-  /** Send one AppMessage to the Rust runtime and refresh the snapshot. */
-  async send(message: AppMessage): Promise<void> {
+  /** Send one AppMessage to the Rust runtime and refresh the snapshot.
+   *
+   * 返回本次 dispatch 的结果（revision / changed / created / commands），供需要
+   * 「刚刚创建了什么」的调用方使用（如 openProject 选出新导入的项目）。
+   */
+  async send(message: AppMessage): Promise<DispatchResult> {
     this.busy = true;
     this.lastError = null;
     const prevProject = this.selectedProjectId;
+    let result: DispatchResult;
     try {
-      const result = await dispatch(message);
+      result = await dispatch(message);
       this.revision = result.revision;
       // 任何交互都可能改变可达性（显式标记/里程碑/无视开关/换上下文），
       // 整体失效缓存；选择器打开时按需重拉。
@@ -266,6 +271,7 @@ class RuntimeStore {
     // 项目上下文切换（设置上下文/换绑等）后同步目录与上下文列表，
     // 使后端 store 载入后「未载入」徽标消失。幂等：上下文未变时不处理。
     this.syncEffectiveContext().catch(() => {});
+    return result;
   }
 
   /** 提取 AppMessage 内层动作键（scope=project/factory 时在 action.action，
@@ -442,25 +448,31 @@ class RuntimeStore {
   async openProject(): Promise<boolean> {
     this.busy = true;
     try {
-      const document = await openProjectDialog();
-      if (document) {
-        // 后端已把文件项目导入当前文档；这里用返回值整体刷新界面。
-        this.document = document;
-        // 前端持有选择态：导入后选中最后一个（最近导入的）项目。
-        const projects = document.projects;
-        this.selectedProjectId = projects[projects.length - 1]?.id ?? null;
-        this.selectedFactoryId = null;
-        this.selectedMechanic = null;
-        this.accessibility = null;
-        await this.refreshProjectPaths();
-        this.restoreSolveForSelection();
-        this.refreshOrderedMilestones().catch(() => {});
-        this.refreshProductivity().catch(() => {});
-        this.refreshImplicitSources().catch(() => {});
-        this.syncEffectiveContext().catch(() => {});
-        return true;
+      const path = await pickProjectFile();
+      if (!path) return false;
+      // 导入走消息（后端 LoadProject：锁外解析 + 短锁内导入 + 注册保存路径 +
+      // document-changed）。新项目 id 由「导入前后的 id 差集」得出——命令阶段
+      // 的导入结果不在 DispatchResult.created 里（那是 reducer 的产出）。
+      const before = new Set((this.document?.projects ?? []).map((project) => project.id));
+      await this.send({ scope: "application", action: { "open-project": { path } } });
+      const added = (this.document?.projects ?? []).filter((project) => !before.has(project.id));
+      if (added.length === 0) {
+        // 导入失败时命令层只会 emit solve-error（dispatch 命令不回传命令失败），
+        // 因此这里显式区分「没导入任何东西」与「导入成功」，避免误选已有项目。
+        this.lastError = `没有从 ${path} 导入任何项目（文件为空或解析失败，详见错误面板）`;
+        return false;
       }
-      return false;
+      // 前端持有选择态：选中最后导入的那个项目。
+      this.selectedProjectId = added[added.length - 1].id;
+      this.selectedFactoryId = null;
+      this.selectedMechanic = null;
+      await this.refreshProjectPaths();
+      this.restoreSolveForSelection();
+      this.refreshOrderedMilestones().catch(() => {});
+      this.refreshProductivity().catch(() => {});
+      this.refreshImplicitSources().catch(() => {});
+      this.syncEffectiveContext().catch(() => {});
+      return true;
     } catch (error) {
       this.lastError = String(error);
       throw error;
@@ -473,9 +485,12 @@ class RuntimeStore {
     this.busy = true;
     const project = this.requireProject();
     try {
-      const path = await saveProject(project);
-      if (path != null) return true;
-      return await this.saveProjectAs();
+      // 没有记忆路径时先走「另存为」（后端 SaveProject 命令对无路径会报错，
+      // 不再像过去那样靠 Tauri 命令返回 null 来区分）。
+      if (this.projectSavePath(project) == null) return await this.saveProjectAs();
+      await this.send({ scope: "application", action: { "save-project": { project } } });
+      await this.refreshProjectPaths();
+      return true;
     } catch (error) {
       this.lastError = String(error);
       throw error;
@@ -488,8 +503,14 @@ class RuntimeStore {
     this.busy = true;
     const project = this.requireProject();
     try {
-      const path = await saveProjectAsDialog(project);
-      return path != null;
+      const path = await pickProjectSavePath();
+      if (!path) return false;
+      await this.send({
+        scope: "application",
+        action: { "save-project-as": { project, path } },
+      });
+      await this.refreshProjectPaths();
+      return true;
     } catch (error) {
       this.lastError = String(error);
       throw error;
