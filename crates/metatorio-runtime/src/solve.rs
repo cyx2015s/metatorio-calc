@@ -426,28 +426,15 @@ impl Runtime {
     /// revision、标记脏项目、落盘并重解全部工厂（枚举列表决定自动规划为每条机制
     /// 枚举哪些插件组合）。
     ///
-    /// `quality = None` 用项目品质上限（`settings.quality_limit`，未设置时
-    /// `normal`）：这是项目级设置，不该跟着某个工厂的主品质走。候选按当前可达性
-    /// 过滤，见 [`crate::auto_plan::best_modules`]。
+    /// `quality` 由调用方显式给出，运行时**不做推断**：解锁某品质 ≠ 能大规模
+    /// 量产该品质的插件，所以不能拿项目品质上限之类的东西当默认；GUI 传当前
+    /// 工厂的主品质。候选按当前可达性过滤，见 [`crate::auto_plan::best_modules`]。
     pub fn use_best_modules(
         &mut self,
         project_id: ProjectId,
-        quality: Option<String>,
+        quality: String,
     ) -> Result<DispatchResult, RuntimeError> {
-        let quality = match quality {
-            Some(quality) => quality,
-            None => self
-                .state
-                .project(project_id)?
-                .settings
-                .quality_limit
-                .clone()
-                .unwrap_or_else(|| metatorio_core::NORMAL_QUALITY.to_string()),
-        };
         let store = self.context_store(project_id)?;
-        // 推导出来的品质同样要校验：显式参数走 `validate_message`，而
-        // `quality_limit` 可能是「换过上下文之后」的陈旧值。
-        crate::validate::require_quality(store, &quality)?;
         let accessibility = self.project_accessibility(project_id)?;
         let modules = crate::auto_plan::best_modules(store, &accessibility, &quality);
         self.state.replace_enumerated_modules(project_id, modules)
@@ -2213,12 +2200,23 @@ mod tests {
             );
         }
         let revision = runtime.state.revision;
+        // 品质由调用方给出——GUI 传的就是当前工厂的主品质。
+        let factory_quality = |runtime: &Runtime| {
+            runtime
+                .state
+                .factory(project, factory)
+                .unwrap()
+                .settings
+                .major_quality
+                .clone()
+        };
+        let use_best = |quality: String| AppMessage::Project {
+            project,
+            action: ProjectAction::Planning(PlanningAction::UseBestModules { quality }),
+        };
 
         let result = runtime
-            .dispatch(AppMessage::Project {
-                project,
-                action: ProjectAction::Planning(PlanningAction::UseBestModules { quality: None }),
-            })
+            .dispatch(use_best(factory_quality(&runtime)))
             .unwrap();
 
         let enumerated = |runtime: &Runtime| {
@@ -2258,47 +2256,59 @@ mod tests {
             result.commands
         );
 
-        // 幂等：同一仓库上重复调用集合不变 → 无变化、无副作用命令。
+        // 幂等：同一仓库 + 同一品质 → 集合不变 → 无变化、无副作用命令。
         let again = runtime
-            .dispatch(AppMessage::Project {
-                project,
-                action: ProjectAction::Planning(PlanningAction::UseBestModules { quality: None }),
-            })
+            .dispatch(use_best(factory_quality(&runtime)))
             .unwrap();
         assert!(!again.changed, "集合未变不应报 changed");
         assert!(again.commands.is_empty(), "{:?}", again.commands);
 
-        // 项目品质上限：quality = None 时跟随它（项目级设置，不看工厂主品质）。
-        dispatch_project(
-            &mut runtime,
-            project,
-            ProjectAction::SetQualityLimit {
-                quality: Some("rare".to_string()),
-            },
-        );
+        // 换工厂主品质（GUI 的品质来源）→ 枚举列表按新品质重写。
         runtime
-            .dispatch(AppMessage::Project {
+            .dispatch(AppMessage::Factory {
                 project,
-                action: ProjectAction::Planning(PlanningAction::UseBestModules { quality: None }),
+                factory,
+                action: crate::message::FactoryAction::Context(
+                    crate::message::FactoryContextAction::SetMajorQuality {
+                        quality: "rare".to_string(),
+                    },
+                ),
             })
+            .unwrap();
+        assert_eq!(factory_quality(&runtime), "rare");
+        runtime
+            .dispatch(use_best(factory_quality(&runtime)))
             .unwrap();
         assert!(
             enumerated(&runtime)
                 .iter()
                 .all(|(_, quality)| quality == "rare"),
-            "quality=None 应使用项目品质上限：{:?}",
+            "应使用调用方给出的品质：{:?}",
             enumerated(&runtime)
         );
 
-        // 显式品质覆盖项目上限。
+        // **不做品质推断**：项目品质上限只在别处使用，不得影响本操作
+        // （品质解锁 ≠ 可大规模量产，所以不能拿「上限」当默认）。
+        dispatch_project(
+            &mut runtime,
+            project,
+            ProjectAction::SetQualityLimit {
+                quality: Some("epic".to_string()),
+            },
+        );
         runtime
-            .dispatch(AppMessage::Project {
-                project,
-                action: ProjectAction::Planning(PlanningAction::UseBestModules {
-                    quality: Some("legendary".to_string()),
-                }),
-            })
+            .dispatch(use_best(factory_quality(&runtime)))
             .unwrap();
+        assert!(
+            enumerated(&runtime)
+                .iter()
+                .all(|(_, quality)| quality == "rare"),
+            "改项目品质上限不应改变本操作的结果：{:?}",
+            enumerated(&runtime)
+        );
+
+        // 调用方给出的品质就是最终品质（不做任何钳制/提升）。
+        runtime.dispatch(use_best("legendary".to_string())).unwrap();
         assert!(
             enumerated(&runtime)
                 .iter()
@@ -2313,7 +2323,9 @@ mod tests {
         assert!(matches!(
             bare.dispatch(AppMessage::Project {
                 project: bare_project,
-                action: ProjectAction::Planning(PlanningAction::UseBestModules { quality: None }),
+                action: ProjectAction::Planning(PlanningAction::UseBestModules {
+                    quality: "normal".to_string(),
+                }),
             }),
             Err(RuntimeError::DataNotLoaded)
         ));
@@ -2321,15 +2333,16 @@ mod tests {
         assert!(matches!(
             bare.state.dispatch(AppMessage::Project {
                 project: bare_project,
-                action: ProjectAction::Planning(PlanningAction::UseBestModules { quality: None }),
+                action: ProjectAction::Planning(PlanningAction::UseBestModules {
+                    quality: "normal".to_string(),
+                }),
             }),
             Err(RuntimeError::InvalidOperation(_))
         ));
     }
 
-    /// 品质必须真实存在于当前上下文：显式参数走 `validate_message`，推导出的
-    /// 项目品质上限（可能是换过上下文后的陈旧值）由 `use_best_modules` 自己拦
-    /// ——两者都不能把「不存在的品质」写进枚举列表。
+    /// 品质必须真实存在于当前上下文：调用方给什么就校验什么，运行时既不默认
+    /// 也不提升——「解锁某品质」不等于「能大规模量产该品质的插件」。
     #[test]
     fn use_best_modules_rejects_unknown_quality() {
         let mut runtime = Runtime::new();
@@ -2364,9 +2377,11 @@ mod tests {
             },
         );
 
-        let explicit = |quality: Option<String>| AppMessage::Project {
+        let use_best = |quality: &str| AppMessage::Project {
             project,
-            action: ProjectAction::Planning(PlanningAction::UseBestModules { quality }),
+            action: ProjectAction::Planning(PlanningAction::UseBestModules {
+                quality: quality.to_string(),
+            }),
         };
         let enumerated = |runtime: &Runtime| {
             runtime
@@ -2378,17 +2393,15 @@ mod tests {
                 .clone()
         };
 
-        // 显式传入不存在的品质 → 校验拒绝，文档不变。
+        // 上下文里不存在的品质 → 校验拒绝，文档不变。
         assert!(matches!(
-            runtime.dispatch(explicit(Some("legendary".to_string()))),
+            runtime.dispatch(use_best("legendary")),
             Err(RuntimeError::InvalidValue(_))
         ));
         assert!(enumerated(&runtime).is_empty());
 
-        // 存在的品质 → 接受，并写入该品质。
-        runtime
-            .dispatch(explicit(Some("rare".to_string())))
-            .unwrap();
+        // 存在的品质 → 接受，并原样写入（不钳制到上限、不向上升级）。
+        runtime.dispatch(use_best("rare")).unwrap();
         assert_eq!(
             enumerated(&runtime)
                 .iter()
@@ -2397,19 +2410,22 @@ mod tests {
             vec!["rare".to_string()]
         );
 
-        // 推导出的品质上限陈旧（上下文里没有该品质）→ 同样拒绝，不写脏数据。
-        runtime.state.document.projects[0].settings.quality_limit = Some("legendary".to_string());
-        assert!(matches!(
-            runtime.dispatch(explicit(None)),
-            Err(RuntimeError::InvalidValue(_))
-        ));
+        // 项目品质上限与本操作无关：即使上限更高也不改变结果。
+        dispatch_project(
+            &mut runtime,
+            project,
+            ProjectAction::SetQualityLimit {
+                quality: Some("rare".to_string()),
+            },
+        );
+        runtime.dispatch(use_best("normal")).unwrap();
         assert_eq!(
             enumerated(&runtime)
                 .iter()
                 .map(|module| module.quality.clone())
                 .collect::<Vec<_>>(),
-            vec!["rare".to_string()],
-            "被拒绝的调用不应改动枚举列表"
+            vec!["normal".to_string()],
+            "调用方给的品质就是最终品质（上限只约束文档里出现的品质）"
         );
     }
 

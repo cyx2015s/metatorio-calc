@@ -301,9 +301,10 @@ export type PlanningAction =
   | { "reorder-machine-preference": { machine: IdWithQuality; position: number } }
   | { "add-enumerated-module": { module: IdWithQuality } }
   | { "remove-enumerated-module": { module: IdWithQuality } }
-  // 项目级：用「每类别 tier 最高的插件」整体替换枚举列表；quality=null 表示用
-  // 项目品质上限（未设置时 normal）。不接收 factory/mechanic——它是项目级偏好。
-  | { "use-best-modules": { quality: string | null } }
+  // 项目级：用「每类别 tier 最高的插件」整体替换枚举列表。quality **必填**且不做
+  // 推断（解锁某品质 ≠ 能大规模量产该品质的插件），GUI 传当前工厂主品质；
+  // 不接收 factory/mechanic——它是项目级偏好。
+  | { "use-best-modules": { quality: string } }
   | "add-enumerated-beacon"
   | { "remove-enumerated-beacon": { beacon: number } }
   | { "set-enumerated-beacon": { beacon: number; plan: AutoBeaconPlan } }

@@ -331,11 +331,11 @@ fn unimplemented_variants_are_documented_in_the_schema() {
 }
 
 /// 「使用最佳插件」的线上形状：前端按钮发的是
-/// `{scope:"project", action:{project, action:{planning:{"use-best-modules":{quality}}}}}`。
+/// `{scope:"project", action:{project, action:{planning:{"use-best-modules":{quality}}}}}`，
+/// 品质由调用方显式给出（GUI 传当前工厂主品质）——运行时不做任何品质推断。
 ///
-/// demo dump 里没有插件原型，所以最佳集合为空——这里断言的是**形状被接受**
-/// （`quality` 可空可省）且不会凭空产生变更；品质语义与替换结果由
-/// `solve::tests::use_best_modules_replaces_the_enumeration_at_project_quality` 覆盖。
+/// demo dump 里没有插件原型，所以最佳集合为空——这里断言的是**形状被接受**且不会
+/// 凭空产生变更；替换结果与品质语义由 `solve::tests::use_best_modules_*` 覆盖。
 #[test]
 fn frontend_json_use_best_modules_shape() {
     let mut runtime = load_demo_runtime();
@@ -345,31 +345,17 @@ fn frontend_json_use_best_modules_shape() {
     );
     let project = runtime.state.document.projects[0].id;
 
-    let explicit_null = dispatch(
+    let result = dispatch(
         &mut runtime,
         json!({
             "scope": "project",
             "action": {
                 "project": project,
-                "action": { "planning": { "use-best-modules": { "quality": null } } }
+                "action": { "planning": { "use-best-modules": { "quality": "normal" } } }
             }
         }),
     );
-    assert!(!explicit_null.changed, "空仓库上不应产生变更");
-
-    // 省略 quality 也要能解析（Option 字段缺省 = None）。
-    let omitted = dispatch(
-        &mut runtime,
-        json!({
-            "scope": "project",
-            "action": {
-                "project": project,
-                "action": { "planning": { "use-best-modules": {} } }
-            }
-        }),
-    );
-    assert!(!omitted.changed);
-
+    assert!(!result.changed, "空仓库上不应产生变更");
     assert!(
         runtime
             .state
@@ -379,6 +365,16 @@ fn frontend_json_use_best_modules_shape() {
             .enumerate_modules
             .is_empty()
     );
+
+    // quality 是必填参数：缺了应当反序列化失败（而不是静默用一个推断值）。
+    let missing = serde_json::from_value::<AppMessage>(json!({
+        "scope": "project",
+        "action": {
+            "project": project,
+            "action": { "planning": { "use-best-modules": {} } }
+        }
+    }));
+    assert!(missing.is_err(), "quality 缺失应被拒绝：{missing:?}");
 }
 
 #[test]

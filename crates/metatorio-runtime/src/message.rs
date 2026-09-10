@@ -532,15 +532,18 @@ pub enum PlanningAction {
     /// - 这是**项目级**偏好，所以不接收 factory / mechanic——旧版
     ///   `UseBestModules { factory, mechanic }` 把 factory/mechanic 塞进一个项目级
     ///   设置里，语义错位，且 app 层从未实现；
-    /// - 品质取 `quality`；`None` = 项目品质上限（`settings.quality_limit`，未设置
-    ///   时 `normal`）——项目级设置不该跟着某个工厂的主品质漂移；
+    /// - **品质必须由调用方显式给出**，运行时不做任何推断。品质是特殊维度：
+    ///   「解锁了某个品质」不等于「能大规模量产该品质的插件」（产能、废料、
+    ///   配方链都可能卡住），所以不能拿「项目品质上限」之类的东西当默认值。
+    ///   GUI 的「使用最佳插件」传当前工厂的主品质（`factory.settings.major_quality`），
+    ///   与品质无关的调用方应传 `normal`；
     /// - 候选按**当前可达性**过滤（不可达插件不进枚举列表）；
     /// - 同类别 tier 并列时取名字最小者，保证确定性与幂等。
     ///
     /// 需要原型仓库（reducer 不持有），因此在 [`crate::Runtime::dispatch`] 进入
     /// reducer 之前拦截解析；reducer 分支只兜底报错。
     UseBestModules {
-        quality: Option<String>,
+        quality: String,
     },
     AddEnumeratedBeacon,
     RemoveEnumeratedBeacon {

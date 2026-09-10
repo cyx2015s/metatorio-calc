@@ -1597,10 +1597,10 @@ class RuntimeStore {
    * 可达性过滤 + 逐条 add/remove 消息，N 次 dispatch）：后端解析最佳集合、
    * 按可达性过滤并统一 finish（递增 revision、落盘、重解全部工厂）。
    *
-   * `quality = null` 用项目品质上限（未设置时 normal）——枚举列表是**项目级**
-   * 偏好，不该跟着某个工厂的主品质走。
+   * `quality` 必须由调用方给出，后端不做推断——品质是特殊维度，「解锁某品质」
+   * 不等于「能大规模量产该品质的插件」。界面按钮传当前工厂的主品质。
    */
-  async applyBestModules(quality: string | null = null): Promise<void> {
+  async applyBestModules(quality: string): Promise<void> {
     await this.planningMessage({ "use-best-modules": { quality } });
   }
 
