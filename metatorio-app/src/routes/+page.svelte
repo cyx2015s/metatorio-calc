@@ -2469,11 +2469,8 @@
         >+ 添加插件</button>
         <button
           class="btn"
-          title="用每插件类别中最高 tier 的插件（工厂主品质）替换枚举列表"
-          onclick={() =>
-            runtime
-              .applyBestModules(factory?.settings.major_quality || "normal")
-              .catch(() => {})}
+          title="用每插件类别中最高 tier 的插件（项目品质上限）替换枚举列表"
+          onclick={() => runtime.applyBestModules().catch(() => {})}
         >使用最佳插件</button>
       </div>
 

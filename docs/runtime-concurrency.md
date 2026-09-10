@@ -80,7 +80,8 @@ for command in &outcome.commands {
 | --- | --- | --- |
 | 状态变更（微秒） | reducer、`EnsureQualityLimit`、`ClampModules`、`EnsureMachineCompat` | 短锁 |
 | 派生计算（长，可丢弃） | `Recompute`、`AutoPlan`、`Cleanup` | 锁外算 → 版本校验 → 回写 |
-| 只读重计算 | `accessibility` / `productivity` / `milestones_ordered` / `mechanic_flow` / `solar_balance` / `implicit_sources` / `catalog_index` / `suggest` / `best_modules` / `allowed_modules` | 锁内取快照 → 锁外算 → 短锁回填缓存 |
+| 只读重计算 | `accessibility` / `productivity` / `milestones_ordered` / `mechanic_flow` / `solar_balance` / `implicit_sources` / `catalog_index` / `suggest` / `allowed_modules` | 锁内取快照 → 锁外算 → 短锁回填缓存 |
+| 需 store 的项目级批量写 | `SetDefaultMilestones`、`UseBestModules`（`planning.use-best-modules`） | 在 `Runtime::dispatch` 进入 reducer 前解析（reducer 无 store），再走 `finish`：revision/dirty/Persist/Recompute |
 | 外部 IO（长） | `Persist`、`LoadProject`、`LoadGameContext`、`LoadCachedContext`、`CloseProject` | 锁内取/写增量，读盘/写盘/子进程在锁外 |
 
 `Outcome` 的构造器命名即意图：`meta`（只落盘，不求解）/ `solve_factory` /

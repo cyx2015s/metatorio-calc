@@ -525,12 +525,22 @@ pub enum PlanningAction {
     RemoveEnumeratedModule {
         module: IdWithQuality,
     },
-    /// **未实现**：reducer 会发出 `UseBestModules` 命令，app 层没有实现
-    /// （GUI 的「使用最佳插件」走只读的 `best_modules` 命令 + `add-enumerated-module`
-    /// 消息）。调用会拿到明确的「未实现」错误。
+    /// 用「每个插件类别中 tier 最高的插件」整体替换**项目级**枚举插件列表
+    /// （`planning.enumerate_modules`，自动规划参与组合的插件集合）。
+    ///
+    /// 语义要点：
+    /// - 这是**项目级**偏好，所以不接收 factory / mechanic——旧版
+    ///   `UseBestModules { factory, mechanic }` 把 factory/mechanic 塞进一个项目级
+    ///   设置里，语义错位，且 app 层从未实现；
+    /// - 品质取 `quality`；`None` = 项目品质上限（`settings.quality_limit`，未设置
+    ///   时 `normal`）——项目级设置不该跟着某个工厂的主品质漂移；
+    /// - 候选按**当前可达性**过滤（不可达插件不进枚举列表）；
+    /// - 同类别 tier 并列时取名字最小者，保证确定性与幂等。
+    ///
+    /// 需要原型仓库（reducer 不持有），因此在 [`crate::Runtime::dispatch`] 进入
+    /// reducer 之前拦截解析；reducer 分支只兜底报错。
     UseBestModules {
-        factory: FactoryId,
-        mechanic: MechanicId,
+        quality: Option<String>,
     },
     AddEnumeratedBeacon,
     RemoveEnumeratedBeacon {
@@ -646,11 +656,11 @@ pub enum RuntimeCommand {
     CloseProject {
         project: ProjectId,
     },
-    /// 以下四条命令**已在 reducer 中声明但 app 层未实现**（`execute_command`
+    /// 以下三条命令**已在 reducer 中声明但 app 层未实现**（`execute_command`
     /// 返回明确的「未实现」错误）：更新三连由前端 updater 插件承担，
-    /// `ReplaceExternalInputs` / `RequestSuggestions` / `UseBestModules` 的
-    /// 等效能力由只读命令 `implicit_sources` / `suggest` / `best_modules` 提供。
-    /// 保留变体是为了让协议不自相矛盾地假装支持，同时给 headless 模式留接口。
+    /// `ReplaceExternalInputs` / `RequestSuggestions` 的等效能力由只读命令
+    /// `implicit_sources` / `suggest` 提供。保留变体是为了让协议不自相矛盾地
+    /// 假装支持，同时给 headless 模式留接口。
     CheckForUpdate,
     InstallUpdate,
     RestartAfterUpdate,
@@ -669,11 +679,6 @@ pub enum RuntimeCommand {
         project: ProjectId,
         factory: FactoryId,
         action: CleanupAction,
-    },
-    UseBestModules {
-        project: ProjectId,
-        factory: FactoryId,
-        mechanic: MechanicId,
     },
 }
 

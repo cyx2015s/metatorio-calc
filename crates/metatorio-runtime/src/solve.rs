@@ -15,7 +15,9 @@ use crate::document::{
     ProjectSettings,
 };
 use crate::id::{FactoryId, MechanicId, ProjectId};
-use crate::message::{AppMessage, ApplicationAction, CleanupAction, ProjectAction, RuntimeCommand};
+use crate::message::{
+    AppMessage, ApplicationAction, CleanupAction, PlanningAction, ProjectAction, RuntimeCommand,
+};
 use crate::state::{DispatchResult, RuntimeError, RuntimeState};
 
 /// The solver variable identity used by the application adapter.
@@ -189,6 +191,15 @@ impl Runtime {
             if let Ok(store) = self.context_store(project) {
                 crate::validate::validate_message(store, &message)?;
             }
+        }
+        // 「使用最佳插件」要遍历仓库（每类别最高 tier）并按可达性过滤，同样在
+        // 进入 reducer 之前解析。放在校验之后，品质参数照常先被校验。
+        if let AppMessage::Project {
+            project,
+            action: ProjectAction::Planning(PlanningAction::UseBestModules { quality }),
+        } = &message
+        {
+            return self.use_best_modules(*project, quality.clone());
         }
         self.state.dispatch(message)
     }
@@ -406,6 +417,40 @@ impl Runtime {
             })
             .collect();
         self.state.replace_milestones(project_id, milestones)
+    }
+
+    /// 用「每个插件类别中 tier 最高的插件」整体替换项目的枚举插件列表。
+    ///
+    /// 与 [`Self::set_default_milestones`] 同属「需要 store 才能算出来的项目级
+    /// 批量操作」，因此同样在 `dispatch` 里拦截：改文档后由 `finish` 统一递增
+    /// revision、标记脏项目、落盘并重解全部工厂（枚举列表决定自动规划为每条机制
+    /// 枚举哪些插件组合）。
+    ///
+    /// `quality = None` 用项目品质上限（`settings.quality_limit`，未设置时
+    /// `normal`）：这是项目级设置，不该跟着某个工厂的主品质走。候选按当前可达性
+    /// 过滤，见 [`crate::auto_plan::best_modules`]。
+    pub fn use_best_modules(
+        &mut self,
+        project_id: ProjectId,
+        quality: Option<String>,
+    ) -> Result<DispatchResult, RuntimeError> {
+        let quality = match quality {
+            Some(quality) => quality,
+            None => self
+                .state
+                .project(project_id)?
+                .settings
+                .quality_limit
+                .clone()
+                .unwrap_or_else(|| metatorio_core::NORMAL_QUALITY.to_string()),
+        };
+        let store = self.context_store(project_id)?;
+        // 推导出来的品质同样要校验：显式参数走 `validate_message`，而
+        // `quality_limit` 可能是「换过上下文之后」的陈旧值。
+        crate::validate::require_quality(store, &quality)?;
+        let accessibility = self.project_accessibility(project_id)?;
+        let modules = crate::auto_plan::best_modules(store, &accessibility, &quality);
+        self.state.replace_enumerated_modules(project_id, modules)
     }
 
     /// 从文件加载一个项目并导入当前文档（追加，不替换现有项目；
@@ -2100,6 +2145,272 @@ mod tests {
             }),
             Err(RuntimeError::InvalidOperation(_))
         ));
+    }
+
+    /// 「使用最佳插件」是**项目级**批量操作：每个插件类别取 tier 最高的插件
+    /// （并列取名字最小者，保证确定性），按当前可达性过滤，整体替换
+    /// `planning.enumerate_modules`，并走 finish（revision/落盘/重解全部工厂）。
+    ///
+    /// 品质语义：显式 quality 优先；`None` = 项目品质上限（未设置时 normal），
+    /// 而不是某个工厂的主品质——旧签名把 factory/mechanic 塞进项目级设置里。
+    #[test]
+    fn use_best_modules_replaces_the_enumeration_at_project_quality() {
+        let mut runtime = Runtime::new();
+        let module = |name: &str, category: &str, tier: u32| {
+            json!({
+                "type": "module", "name": name, "category": category, "tier": tier
+            })
+        };
+        // 插件在 dump 里位于顶层 `module` 段（COMPONENT_LIST 的键），加载后
+        // 因带 ItemComponent 而归入 Item 组。
+        let dump = json!({
+            "module": {
+                "speed-module-1": module("speed-module-1", "speed", 1),
+                "speed-module-2": module("speed-module-2", "speed", 2),
+                "speed-module-3-alpha": module("speed-module-3-alpha", "speed", 3),
+                "speed-module-3-zeta": module("speed-module-3-zeta", "speed", 3),
+                "prod-module-1": module("prod-module-1", "productivity", 1),
+                "quality-module-1": module("quality-module-1", "quality", 1)
+            },
+            "item": {
+                "iron-plate": { "type": "item", "name": "iron-plate" }
+            },
+            "fluid": {},
+            "recipe": {},
+            "technology": {}
+        });
+        runtime.install_context(
+            "test-context".to_string(),
+            PrototypeStore::load(&dump).unwrap(),
+        );
+        runtime.set_active_context(Some("test-context".to_string()));
+        let project = new_project(&mut runtime);
+        dispatch_project(
+            &mut runtime,
+            project,
+            ProjectAction::AddFactory {
+                name: "test factory".to_string(),
+                template: crate::message::FactoryTemplate::Empty,
+            },
+        );
+        let factory = runtime.state.project(project).unwrap().factories[0].id;
+        // 可达性：用「强制可达」里程碑精确控制哪些插件算可达
+        // （quality-module-1 故意不可达 → 不应进入枚举列表）。
+        for name in [
+            "speed-module-1",
+            "speed-module-2",
+            "speed-module-3-alpha",
+            "speed-module-3-zeta",
+            "prod-module-1",
+        ] {
+            dispatch_project(
+                &mut runtime,
+                project,
+                ProjectAction::AddMilestone {
+                    node: Accessible::Item(name.to_string()),
+                    unlocked: true,
+                },
+            );
+        }
+        let revision = runtime.state.revision;
+
+        let result = runtime
+            .dispatch(AppMessage::Project {
+                project,
+                action: ProjectAction::Planning(PlanningAction::UseBestModules { quality: None }),
+            })
+            .unwrap();
+
+        let enumerated = |runtime: &Runtime| {
+            runtime
+                .state
+                .project(project)
+                .unwrap()
+                .planning
+                .enumerate_modules
+                .iter()
+                .map(|module| (module.id.clone(), module.quality.clone()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            enumerated(&runtime),
+            vec![
+                ("prod-module-1".to_string(), "normal".to_string()),
+                ("speed-module-3-alpha".to_string(), "normal".to_string()),
+            ],
+            "每类别取最高 tier、并列取名字最小者、不可达插件被过滤；品质默认 normal"
+        );
+        assert!(result.changed);
+        assert_eq!(result.revision, revision.wrapping_add(1));
+        assert!(
+            result.commands.contains(&RuntimeCommand::Persist {
+                project,
+                path: None
+            }),
+            "改了文档必须落盘：{:?}",
+            result.commands
+        );
+        assert!(
+            result
+                .commands
+                .contains(&RuntimeCommand::Recompute { project, factory }),
+            "枚举列表变化必须重解：{:?}",
+            result.commands
+        );
+
+        // 幂等：同一仓库上重复调用集合不变 → 无变化、无副作用命令。
+        let again = runtime
+            .dispatch(AppMessage::Project {
+                project,
+                action: ProjectAction::Planning(PlanningAction::UseBestModules { quality: None }),
+            })
+            .unwrap();
+        assert!(!again.changed, "集合未变不应报 changed");
+        assert!(again.commands.is_empty(), "{:?}", again.commands);
+
+        // 项目品质上限：quality = None 时跟随它（项目级设置，不看工厂主品质）。
+        dispatch_project(
+            &mut runtime,
+            project,
+            ProjectAction::SetQualityLimit {
+                quality: Some("rare".to_string()),
+            },
+        );
+        runtime
+            .dispatch(AppMessage::Project {
+                project,
+                action: ProjectAction::Planning(PlanningAction::UseBestModules { quality: None }),
+            })
+            .unwrap();
+        assert!(
+            enumerated(&runtime)
+                .iter()
+                .all(|(_, quality)| quality == "rare"),
+            "quality=None 应使用项目品质上限：{:?}",
+            enumerated(&runtime)
+        );
+
+        // 显式品质覆盖项目上限。
+        runtime
+            .dispatch(AppMessage::Project {
+                project,
+                action: ProjectAction::Planning(PlanningAction::UseBestModules {
+                    quality: Some("legendary".to_string()),
+                }),
+            })
+            .unwrap();
+        assert!(
+            enumerated(&runtime)
+                .iter()
+                .all(|(_, quality)| quality == "legendary"),
+            "{:?}",
+            enumerated(&runtime)
+        );
+
+        // 没有原型仓库时报错而不是静默成功。
+        let mut bare = Runtime::new();
+        let bare_project = new_project(&mut bare);
+        assert!(matches!(
+            bare.dispatch(AppMessage::Project {
+                project: bare_project,
+                action: ProjectAction::Planning(PlanningAction::UseBestModules { quality: None }),
+            }),
+            Err(RuntimeError::DataNotLoaded)
+        ));
+        // 绕过 Runtime 直接喂 reducer 时报错（reducer 拿不到 store）。
+        assert!(matches!(
+            bare.state.dispatch(AppMessage::Project {
+                project: bare_project,
+                action: ProjectAction::Planning(PlanningAction::UseBestModules { quality: None }),
+            }),
+            Err(RuntimeError::InvalidOperation(_))
+        ));
+    }
+
+    /// 品质必须真实存在于当前上下文：显式参数走 `validate_message`，推导出的
+    /// 项目品质上限（可能是换过上下文后的陈旧值）由 `use_best_modules` 自己拦
+    /// ——两者都不能把「不存在的品质」写进枚举列表。
+    #[test]
+    fn use_best_modules_rejects_unknown_quality() {
+        let mut runtime = Runtime::new();
+        let dump = json!({
+            "quality": {
+                "normal": { "level": 0, "color": [0, 0, 0, 1], "order": "a", "next": "rare" },
+                "rare": { "level": 1, "color": [0, 0, 1, 1], "order": "b" }
+            },
+            "module": {
+                "speed-module-1": {
+                    "type": "module", "name": "speed-module-1",
+                    "category": "speed", "tier": 1
+                }
+            },
+            "item": {},
+            "fluid": {},
+            "recipe": {},
+            "technology": {}
+        });
+        runtime.install_context(
+            "test-context".to_string(),
+            PrototypeStore::load(&dump).unwrap(),
+        );
+        runtime.set_active_context(Some("test-context".to_string()));
+        let project = new_project(&mut runtime);
+        dispatch_project(
+            &mut runtime,
+            project,
+            ProjectAction::AddMilestone {
+                node: Accessible::Item("speed-module-1".to_string()),
+                unlocked: true,
+            },
+        );
+
+        let explicit = |quality: Option<String>| AppMessage::Project {
+            project,
+            action: ProjectAction::Planning(PlanningAction::UseBestModules { quality }),
+        };
+        let enumerated = |runtime: &Runtime| {
+            runtime
+                .state
+                .project(project)
+                .unwrap()
+                .planning
+                .enumerate_modules
+                .clone()
+        };
+
+        // 显式传入不存在的品质 → 校验拒绝，文档不变。
+        assert!(matches!(
+            runtime.dispatch(explicit(Some("legendary".to_string()))),
+            Err(RuntimeError::InvalidValue(_))
+        ));
+        assert!(enumerated(&runtime).is_empty());
+
+        // 存在的品质 → 接受，并写入该品质。
+        runtime
+            .dispatch(explicit(Some("rare".to_string())))
+            .unwrap();
+        assert_eq!(
+            enumerated(&runtime)
+                .iter()
+                .map(|module| module.quality.clone())
+                .collect::<Vec<_>>(),
+            vec!["rare".to_string()]
+        );
+
+        // 推导出的品质上限陈旧（上下文里没有该品质）→ 同样拒绝，不写脏数据。
+        runtime.state.document.projects[0].settings.quality_limit = Some("legendary".to_string());
+        assert!(matches!(
+            runtime.dispatch(explicit(None)),
+            Err(RuntimeError::InvalidValue(_))
+        ));
+        assert_eq!(
+            enumerated(&runtime)
+                .iter()
+                .map(|module| module.quality.clone())
+                .collect::<Vec<_>>(),
+            vec!["rare".to_string()],
+            "被拒绝的调用不应改动枚举列表"
+        );
     }
 
     #[test]

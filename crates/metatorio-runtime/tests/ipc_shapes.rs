@@ -322,12 +322,63 @@ fn unimplemented_variants_are_documented_in_the_schema() {
     );
     for needle in [
         "request-suggestions",
-        "use-best-modules",
         "replace-from-location",
         "check-for-update",
+        "install-update",
     ] {
         assert!(json.contains(needle), "schema 里缺少 {needle} 的定义");
     }
+}
+
+/// 「使用最佳插件」的线上形状：前端按钮发的是
+/// `{scope:"project", action:{project, action:{planning:{"use-best-modules":{quality}}}}}`。
+///
+/// demo dump 里没有插件原型，所以最佳集合为空——这里断言的是**形状被接受**
+/// （`quality` 可空可省）且不会凭空产生变更；品质语义与替换结果由
+/// `solve::tests::use_best_modules_replaces_the_enumeration_at_project_quality` 覆盖。
+#[test]
+fn frontend_json_use_best_modules_shape() {
+    let mut runtime = load_demo_runtime();
+    dispatch(
+        &mut runtime,
+        json!({ "scope": "application", "action": { "new-project": { "name": "best modules" } } }),
+    );
+    let project = runtime.state.document.projects[0].id;
+
+    let explicit_null = dispatch(
+        &mut runtime,
+        json!({
+            "scope": "project",
+            "action": {
+                "project": project,
+                "action": { "planning": { "use-best-modules": { "quality": null } } }
+            }
+        }),
+    );
+    assert!(!explicit_null.changed, "空仓库上不应产生变更");
+
+    // 省略 quality 也要能解析（Option 字段缺省 = None）。
+    let omitted = dispatch(
+        &mut runtime,
+        json!({
+            "scope": "project",
+            "action": {
+                "project": project,
+                "action": { "planning": { "use-best-modules": {} } }
+            }
+        }),
+    );
+    assert!(!omitted.changed);
+
+    assert!(
+        runtime
+            .state
+            .project(project)
+            .unwrap()
+            .planning
+            .enumerate_modules
+            .is_empty()
+    );
 }
 
 #[test]

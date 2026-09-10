@@ -516,25 +516,17 @@ impl RuntimeState {
                 Ok(Outcome::solve_all_if(changed, project_id))
             }
             ProjectAction::Planning(action) => {
-                // UseBestModules executes for the given factory/mechanic even
-                // though the preference itself is project-global.
-                let outcome = match action {
-                    PlanningAction::UseBestModules { factory, mechanic } => {
-                        Outcome::command(RuntimeCommand::UseBestModules {
-                            project: project_id,
-                            factory,
-                            mechanic,
-                        })
-                    }
-                    other => {
-                        let changed = apply_planning_action(
-                            &mut self.project_mut(project_id)?.planning,
-                            other,
-                        )?;
-                        Outcome::solve_all_if(changed, project_id)
-                    }
-                };
-                Ok(outcome)
+                // UseBestModules 需要原型仓库（算「每类别最高 tier 的插件」）与
+                // 可达性，reducer 都拿不到，因此在 Runtime::dispatch 里拦截；
+                // 走到这里说明调用方绕过了 Runtime。
+                if let PlanningAction::UseBestModules { .. } = &action {
+                    return Err(RuntimeError::InvalidOperation(
+                        "use-best-modules must be dispatched through Runtime (needs the prototype store)",
+                    ));
+                }
+                let changed =
+                    apply_planning_action(&mut self.project_mut(project_id)?.planning, action)?;
+                Ok(Outcome::solve_all_if(changed, project_id))
             }
         }
     }
@@ -1058,6 +1050,22 @@ impl RuntimeState {
         let changed = replace(
             &mut self.project_mut(project_id)?.settings.milestones,
             milestones,
+        );
+        self.finish(Outcome::solve_all_if(changed, project_id))
+    }
+
+    /// 整体替换「枚举插件」列表（"使用最佳插件"等批量操作）。
+    ///
+    /// 走 `finish`：枚举列表决定自动规划为每条机制枚举哪些插件组合，因此需要
+    /// 递增 revision、标记脏项目、落盘并重解项目内全部工厂。
+    pub fn replace_enumerated_modules(
+        &mut self,
+        project_id: ProjectId,
+        modules: Vec<metatorio_core::IdWithQuality>,
+    ) -> Result<DispatchResult, RuntimeError> {
+        let changed = replace(
+            &mut self.project_mut(project_id)?.planning.enumerate_modules,
+            modules,
         );
         self.finish(Outcome::solve_all_if(changed, project_id))
     }
@@ -1916,6 +1924,7 @@ fn apply_planning_action(
                 .retain(|candidate| candidate != &module);
             Ok(before != planning.enumerate_modules.len())
         }
+        // 需要原型仓库/可达性，由 Runtime::dispatch 在进入 reducer 前处理。
         PlanningAction::UseBestModules { .. } => Ok(false),
         PlanningAction::AddEnumeratedBeacon => {
             planning.enumerate_beacons.push(AutoBeaconPlan::default());

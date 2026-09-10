@@ -1590,24 +1590,18 @@ class RuntimeStore {
     });
   }
 
-  /** 使用最佳插件：用每插件类别中最高 tier 的插件（指定品质）替换枚举列表。 */
-  async applyBestModules(quality: string): Promise<void> {
-    const { bestModules } = await import("./client");
-    const modules = await bestModules(this.effectiveContextId);
-    // 只保留可达的插件（尊重项目的可达性设置；未拉取则不过滤）。
-    const access = await this.ensureAccessibility();
-    const reachable = access
-      ? modules.filter((m) =>
-          access.some((n) => (n as { Item?: string }).Item === m.name),
-        )
-      : modules;
-    const existing = [...(this.selectedProject?.planning.enumerate_modules ?? [])];
-    for (const module of existing) {
-      await this.removeEnumeratedModule(module);
-    }
-    for (const module of reachable) {
-      await this.addEnumeratedModule(module.name, quality);
-    }
+  /**
+   * 使用最佳插件：用「每个插件类别中 tier 最高的插件」整体替换枚举插件列表。
+   *
+   * 走一条项目级消息而不是前端编排（旧实现是 `best_modules` 只读命令 +
+   * 可达性过滤 + 逐条 add/remove 消息，N 次 dispatch）：后端解析最佳集合、
+   * 按可达性过滤并统一 finish（递增 revision、落盘、重解全部工厂）。
+   *
+   * `quality = null` 用项目品质上限（未设置时 normal）——枚举列表是**项目级**
+   * 偏好，不该跟着某个工厂的主品质走。
+   */
+  async applyBestModules(quality: string | null = null): Promise<void> {
+    await this.planningMessage({ "use-best-modules": { quality } });
   }
 
   /** 添加枚举插件塔方案：先加空方案，再把所选插件塔写入新方案的插件配置。 */

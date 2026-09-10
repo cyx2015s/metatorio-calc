@@ -57,7 +57,10 @@ fn require_id(
 }
 
 /// 品质名必须在该仓库的品质顺序里（仓库没有品质原型时不做限制）。
-fn require_quality(store: &PrototypeStore, quality: &str) -> Result<(), RuntimeError> {
+///
+/// 也供 `Runtime::use_best_modules` 校验**推导出来的**品质（项目品质上限）：
+/// 显式参数走 `validate_message`，推导值只有这里能拦。
+pub(crate) fn require_quality(store: &PrototypeStore, quality: &str) -> Result<(), RuntimeError> {
     let order = store.quality_order();
     if order.is_empty() || order.iter().any(|candidate| candidate == quality) {
         Ok(())
@@ -103,6 +106,10 @@ fn validate_planning(store: &PrototypeStore, action: &PlanningAction) -> Result<
         }
         PlanningAction::SetEnumeratedBeacon { plan, .. } => validate_beacon_plan(store, plan),
         PlanningAction::EnumeratedBeaconModule { action, .. } => validate_module(store, action),
+        // 显式指定品质时必须存在于当前上下文；None = 用项目品质上限（由运行时解析）。
+        PlanningAction::UseBestModules {
+            quality: Some(quality),
+        } => require_quality(store, quality),
         _ => Ok(()),
     }
 }

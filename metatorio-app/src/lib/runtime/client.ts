@@ -123,11 +123,6 @@ export async function suggest(
   return call("suggest", { contextId: contextId, flow });
 }
 
-/** 每插件类别中 tier 最高的插件（"使用最佳插件"）。 */
-export async function bestModules(contextId: string): Promise<import("./types").Suggestion[]> {
-  return call("best_modules", { contextId: contextId });
-}
-
 /** 星球隐式可用输入（严格供给下也免费；被外部输入覆盖的不返回）。 */
 export async function implicitSources(
   project: number,

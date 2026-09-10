@@ -1298,42 +1298,6 @@ async fn catalog_index(app: AppHandle, context_id: String) -> Result<CatalogInde
     catalog_index_for(&state, &context_id).await
 }
 
-/// 每插件类别中 tier 最高的插件（"使用最佳插件"填充枚举列表用）。
-#[tauri::command]
-async fn best_modules(app: AppHandle, context_id: String) -> Result<Vec<Suggestion>, String> {
-    if context_id.is_empty() {
-        return Ok(Vec::new());
-    }
-    let state = app.state::<AppState>();
-    let store = context_store_arc(&state, &context_id).await?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let mut best: std::collections::BTreeMap<String, (u32, String)> =
-            std::collections::BTreeMap::new();
-        for record in store.group(PrototypeGroup::Item) {
-            let Some(module) = record.component::<ModuleComponent>() else {
-                continue;
-            };
-            best.entry(module.category.clone())
-                .and_modify(|(tier, name)| {
-                    if module.tier > *tier {
-                        *tier = module.tier;
-                        *name = record.name.clone();
-                    }
-                })
-                .or_insert((module.tier, record.name.clone()));
-        }
-        best.into_values()
-            .map(|(_, name)| Suggestion {
-                kind: "module".to_string(),
-                name,
-                role: "producer".to_string(),
-            })
-            .collect()
-    })
-    .await
-    .map_err(|error| error.to_string())
-}
-
 /// 星球隐式可用输入（严格供给下也免费；外部输入显式覆盖后不显示）：
 /// 供前端在外部输入面板用虚线展示。
 #[tauri::command]
@@ -3346,15 +3310,11 @@ async fn execute_command<R: TauriRuntime>(
             }
         }
         // 以下命令目前只有消息侧定义、没有实现（GUI 分别走 `suggest` /
-        // `best_modules` / `implicit_sources` 等独立 Tauri 命令，更新走
-        // tauri-plugin-updater 的 JS 插件）。保留显式分支而不是 `_ =>`，
-        // 这样新增 RuntimeCommand 变体会在编译期暴露；调用方也应收到明确的
-        // 「未实现」而不是静默成功。
+        // `implicit_sources` 等独立 Tauri 命令，更新走 tauri-plugin-updater 的
+        // JS 插件）。保留显式分支而不是 `_ =>`，这样新增 RuntimeCommand 变体会在
+        // 编译期暴露；调用方也应收到明确的「未实现」而不是静默成功。
         RuntimeCommand::RequestSuggestions { .. } => {
             CommandOutcome::failed("request-suggestions 未实现（GUI 走 suggest 命令）")
-        }
-        RuntimeCommand::UseBestModules { .. } => {
-            CommandOutcome::failed("use-best-modules 未实现（GUI 走 best_modules 命令）")
         }
         RuntimeCommand::ReplaceExternalInputs { .. } => {
             CommandOutcome::failed("replace-external-inputs 未实现（GUI 走 implicit_sources 命令）")
@@ -3446,7 +3406,6 @@ pub fn run() {
             catalog_index,
             prototype_detail,
             suggest,
-            best_modules,
             implicit_sources,
             mechanic_flow,
             solar_balance,

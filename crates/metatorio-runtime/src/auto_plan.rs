@@ -42,6 +42,44 @@ pub fn used_candidates<T: Clone>(
         .collect()
 }
 
+/// 每个插件类别中「最好」的插件：`ModuleComponent.tier` 最大者。
+///
+/// 供「使用最佳插件」（[`crate::message::PlanningAction::UseBestModules`]）填充
+/// 枚举插件列表。规则刻意保持简单且确定：
+///
+/// - **按当前可达性过滤**：不可达插件不进入枚举列表（否则自动规划会为实现
+///   不了的组合白白枚举）；
+/// - 每个 `module.category` 只取一个（tier 最大）；tier 并列时取名字最小者，
+///   保证同一仓库上重复调用结果完全一致（配合 `replace` 的等价判断即可幂等）；
+/// - `quality` 统一作用于所有条目——品质是「用哪一档插件」的选择，不是排序键。
+pub fn best_modules(
+    store: &PrototypeStore,
+    accessibility: &Accessibility,
+    quality: &str,
+) -> Vec<IdWithQuality> {
+    let mut best: std::collections::BTreeMap<String, (u32, String)> =
+        std::collections::BTreeMap::new();
+    for record in store.group(PrototypeGroup::Item) {
+        let Some(module) = record.component::<ModuleComponent>() else {
+            continue;
+        };
+        if !accessibility.is_accessible(&Accessible::Item(record.name.clone())) {
+            continue;
+        }
+        best.entry(module.category.clone())
+            .and_modify(|(tier, name)| {
+                if module.tier > *tier || (module.tier == *tier && record.name < *name) {
+                    *tier = module.tier;
+                    *name = record.name.clone();
+                }
+            })
+            .or_insert((module.tier, record.name.clone()));
+    }
+    best.into_values()
+        .map(|(_, name)| IdWithQuality::new(name, quality))
+        .collect()
+}
+
 /// 自动规划算出的机制与工厂现有机制是否等价（忽略顺序、忽略条目 id/enabled）。
 ///
 /// 等价时不应回写文档：那会平白 bump revision、触发落盘并让求解缓存失效
