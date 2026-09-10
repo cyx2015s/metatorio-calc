@@ -516,14 +516,8 @@ impl RuntimeState {
                 Ok(Outcome::solve_all_if(changed, project_id))
             }
             ProjectAction::Planning(action) => {
-                // UseBestModules 需要原型仓库（算「每类别最高 tier 的插件」）与
-                // 可达性，reducer 都拿不到，因此在 Runtime::dispatch 里拦截；
-                // 走到这里说明调用方绕过了 Runtime。
-                if let PlanningAction::UseBestModules { .. } = &action {
-                    return Err(RuntimeError::InvalidOperation(
-                        "use-best-modules must be dispatched through Runtime (needs the prototype store)",
-                    ));
-                }
+                // 计划动作里只有 UseBestModules 需要原型仓库/可达性，由
+                // `apply_planning_action` 自己报错（见该函数），这里保持直通。
                 let changed =
                     apply_planning_action(&mut self.project_mut(project_id)?.planning, action)?;
                 Ok(Outcome::solve_all_if(changed, project_id))
@@ -1924,8 +1918,12 @@ fn apply_planning_action(
                 .retain(|candidate| candidate != &module);
             Ok(before != planning.enumerate_modules.len())
         }
-        // 需要原型仓库/可达性，由 Runtime::dispatch 在进入 reducer 前处理。
-        PlanningAction::UseBestModules { .. } => Ok(false),
+        // 需要原型仓库（算「每类别最高 tier 的插件」）与可达性，reducer 都拿不到，
+        // 由 `Runtime::dispatch` 在进入 reducer 前拦截解析。走到这里说明调用方
+        // 绕过了 Runtime —— 报错而不是静默 no-op（静默成功会让调用方以为已生效）。
+        PlanningAction::UseBestModules { .. } => Err(RuntimeError::InvalidOperation(
+            "use-best-modules must be dispatched through Runtime (needs the prototype store)",
+        )),
         PlanningAction::AddEnumeratedBeacon => {
             planning.enumerate_beacons.push(AutoBeaconPlan::default());
             Ok(true)

@@ -2374,29 +2374,33 @@ fn clamp_modules(
         .cloned()
         .ok_or_else(|| "机制不存在".to_string())?;
 
-    let (module_count, max) = match &entry.mechanic {
+    // 只有配方/采矿机制带插件槽（`module_config`）；其余机制没有可钳制的插件。
+    // 这里一次判定同时给出「哪种机制」，避免第二个 match 依赖此处的提前 return
+    // 才能安全地把 `_` 当成 Mining。
+    let (module_count, max, is_recipe) = match &entry.mechanic {
         Mechanic::Recipe(recipe) => (
             recipe.module_config.modules.len(),
             effective_module_slots(&store, &recipe.machine.id, &recipe.machine.quality),
+            true,
         ),
         Mechanic::Mining(mining) => (
             mining.module_config.modules.len(),
             effective_module_slots(&store, &mining.machine.id, &mining.machine.quality),
+            false,
         ),
         _ => return Ok(()),
     };
     if module_count <= max {
         return Ok(());
     }
-    let action = match &entry.mechanic {
-        Mechanic::Recipe(_) => {
-            MechanicAction::Recipe(RecipeMechanicAction::Module(ModuleAction::ClampModules {
-                max,
-            }))
-        }
-        _ => MechanicAction::Mining(MiningMechanicAction::Module(ModuleAction::ClampModules {
+    let action = if is_recipe {
+        MechanicAction::Recipe(RecipeMechanicAction::Module(ModuleAction::ClampModules {
             max,
-        })),
+        }))
+    } else {
+        MechanicAction::Mining(MiningMechanicAction::Module(ModuleAction::ClampModules {
+            max,
+        }))
     };
     runtime
         .dispatch(AppMessage::Factory {
