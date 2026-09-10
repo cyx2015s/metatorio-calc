@@ -206,3 +206,13 @@ export function onContextError(handler: (message: string) => void): Promise<() =
 export function onDocumentChanged(handler: (revision: number) => void): Promise<() => void> {
   return listen<number>("document-changed", (event) => handler(event.payload));
 }
+
+/**
+ * 命令阶段失败（dispatch 产生的副作用命令）。
+ *
+ * 求解/上下文类命令自己会发 `solve-error` / `context-error`；落盘（自动保存）、
+ * 关闭项目等没有专属事件——没有这个广播，它们的失败在界面上完全不可见。
+ */
+export function onCommandError(handler: (errors: string[]) => void): Promise<() => void> {
+  return listen<string[]>("command-error", (event) => handler(event.payload));
+}

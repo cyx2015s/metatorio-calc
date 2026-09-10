@@ -2132,9 +2132,21 @@ async fn dispatch(app: AppHandle, message: AppMessage) -> Result<DispatchResult,
             .dispatch(message)
             .map_err(|error| error.to_string())?
     };
-    for command in &outcome.commands {
-        // 失败已通过 `solve-error` / `context-error` 事件送达 GUI，这里丢弃回执。
-        let _ = execute_command(&app, &app.state::<AppState>(), command).await;
+    // 与 MCP 的 `dispatch` 工具共用同一套汇总（`run_commands`）：求解产出、
+    // 命令序列化、失败收集。求解/上下文类命令自己会 emit（`solve-error` /
+    // `context-error`），其余（落盘、关闭项目…）只有回执——丢弃回执就等于
+    // **失败在界面上完全不可见**（例如自动保存写盘失败，用户以为已保存）。
+    let state = app.state::<AppState>();
+    let state_ref = &state;
+    let app_ref = &app;
+    let (_solve, _commands, errors) = run_commands(&outcome.commands, move |command| {
+        // 闭包返回值不能借用参数，故克隆命令进 async 块。
+        let command = command.clone();
+        async move { execute_command(app_ref, state_ref, &command).await }
+    })
+    .await;
+    if !errors.is_empty() {
+        emit(&app, "command-error", errors);
     }
     Ok(outcome)
 }

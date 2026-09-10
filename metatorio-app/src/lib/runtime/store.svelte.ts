@@ -17,6 +17,7 @@ import {
   loadGameContext,
   loadIcon,
   onContextError,
+  onCommandError,
   onContextsChanged,
   onDocumentChanged,
   onSolveError,
@@ -202,6 +203,11 @@ class RuntimeStore {
     // 在同一个界面上实时并存协同。
     onDocumentChanged(() => {
       this.refresh().catch(() => {});
+    });
+    // 命令阶段失败（自动保存写盘失败等）：没有专属事件，统一进「操作」错误条，
+    // 否则失败只写 stderr，界面上完全看不出来。
+    onCommandError((errors) => {
+      this.lastError = errors.join("；");
     });
     try {
       this.document = await getDocument();

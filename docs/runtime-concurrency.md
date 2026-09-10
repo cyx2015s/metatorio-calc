@@ -87,6 +87,12 @@ for command in &outcome.commands {
 `Outcome` 的构造器命名即意图：`meta`（只落盘，不求解）/ `solve_factory` /
 `solve_all`。改名、排序等纯元数据变更走 `meta`，不再白跑一次整厂求解。
 
+命令失败的送达路径：GUI 与 MCP 共用 `run_commands` 汇总回执。MCP 把失败放进
+工具回执的 `errors`（非空即 `isError`）；GUI 的 `dispatch` 命令把失败广播成
+`command-error` 事件，由前端写进「操作」错误条。求解/上下文类命令另有
+`solve-error` / `context-error`。**任何一侧都不要丢弃回执**——落盘（自动保存）、
+关闭项目等失败没有专属事件，丢弃就等于失败在界面上完全不可见。
+
 `execute_command` 的 match **没有通配分支**：新增 `RuntimeCommand` 变体会在
 编译期暴露，而不是静默不执行。
 
