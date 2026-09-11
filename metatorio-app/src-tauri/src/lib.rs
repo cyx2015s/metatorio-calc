@@ -48,8 +48,10 @@ use tauri::{AppHandle, Emitter, Manager, Runtime as TauriRuntime, State};
 use tauri_plugin_dialog::DialogExt;
 
 /// 与本体合并的 MCP 服务器（localhost Streamable-HTTP 端点）。
+///
+/// `pub`：bin（main.rs）要用 `mcp::DEFAULT_MCP_PORT` / `MCP_PATH` 作为 CLI 默认值。
 #[cfg(not(mobile))]
-mod mcp;
+pub mod mcp;
 
 /// 求解任务调度（把长求解移出 `Mutex<Runtime>`）。
 mod solve_jobs;
@@ -127,6 +129,50 @@ impl Default for AppState {
             locales: Mutex::new(HashMap::new()),
             dispatch_cache: Mutex::new(DispatchCache::default()),
         }
+    }
+}
+
+/// 启动选项：由 bin 的 CLI 解析（CLI > 环境变量 > 默认）后传入。
+///
+/// lib 不依赖 clap：这样 `Options` 是普通数据，可单测，也便于将来换解析器；
+/// **参数的单一真相**在这里，`mcp::spawn_server` 与求解调度器都只认它，
+/// 不再各自去读环境变量。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Options {
+    /// MCP 端点端口（仅 loopback）。
+    pub mcp_port: u16,
+    /// MCP Bearer token；`None`/空 = 不鉴权（仅 loopback 兜底）。
+    pub mcp_token: Option<String>,
+    /// 单次求解的等待上限（毫秒）；`None` = 内置默认 120s。
+    pub solve_timeout_ms: Option<u64>,
+    /// 无头：不创建窗口，只提供 MCP 端点（GUI 命令因此无人调用）。
+    pub headless: bool,
+    /// 是否启动 MCP 端点。默认开；`--no-mcp` 可关（只想要 GUI、不开本地端口）。
+    pub mcp: bool,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            mcp_port: mcp::DEFAULT_MCP_PORT,
+            mcp_token: None,
+            solve_timeout_ms: None,
+            headless: false,
+            mcp: true,
+        }
+    }
+}
+
+impl AppState {
+    /// 按启动选项构造（目前只有求解等待上限需要覆盖）。
+    pub fn with_options(options: &Options) -> Self {
+        let mut state = Self::default();
+        if let Some(ms) = options.solve_timeout_ms {
+            let timeout = std::time::Duration::from_millis(ms);
+            state.solve_jobs = solve_jobs::SolveJobs::default().with_timeout(timeout);
+            state.autoplan_jobs = solve_jobs::SolveJobs::default().with_timeout(timeout);
+        }
+        state
     }
 }
 
@@ -3395,14 +3441,44 @@ async fn ensure_context_for_project_offlock(
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
+pub fn run(options: Options) {
+    // `tauri.conf.json` 的窗口是在事件循环首次迭代的 `setup` 阶段创建的
+    // （tauri 源码 `fn setup`：`for window_config in app.config().app.windows`）。
+    // 无头模式因此**在 build 之前清空窗口配置**：`setup` 照常跑（注册表扫描、
+    // 恢复最近上下文、启动 MCP 都在里面），但一个窗口都不会建，事件循环也不会
+    // 因为「最后一个窗口关闭」而退出。
+    let mut context = tauri::generate_context!();
+    if options.headless {
+        context.config_mut().app.windows.clear();
+        if options.mcp {
+            println!(
+                "切向量化 headless：不创建窗口，MCP 端点在 http://127.0.0.1:{}{}",
+                options.mcp_port,
+                mcp::MCP_PATH
+            );
+        } else {
+            println!("切向量化 headless：不创建窗口，且已关闭 MCP（没有任何接口）");
+        }
+    }
+    let mcp_port = options.mcp_port;
+    let mcp_token = options.mcp_token.clone();
+    let mcp_enabled = options.mcp;
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .manage(AppState::default())
-        .setup(|app| {
+        .manage(AppState::with_options(&options))
+        .setup(move |app| {
+            // 先把 MCP 端点起起来：恢复缓存上下文可能要读几十 MB 的 dump（真机上
+            // 数秒），而 MCP 客户端（尤其 headless/agent 场景）往往启动后立刻连接。
+            // 此时 AppState 已 manage 完毕，工具照常可见；若正好在载入上下文，
+            // 调用会在 runtime 锁上短暂等待。
+            #[cfg(not(mobile))]
+            if mcp_enabled {
+                mcp::spawn_server(app.handle().clone(), mcp_port, mcp_token.clone());
+            }
+
             // 恢复缓存注册表并激活最近使用的上下文。
             let dir = app
                 .path()
@@ -3430,9 +3506,6 @@ pub fn run() {
                     runtime.set_active_context(Some(id));
                 }
             }
-            // 启动与本体合并的 MCP 服务器（localhost Streamable-HTTP）。
-            #[cfg(not(mobile))]
-            mcp::spawn_server(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -3462,7 +3535,7 @@ pub fn run() {
             pick_project_save_path,
             project_save_path,
         ])
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("error while running tauri application");
 }
 

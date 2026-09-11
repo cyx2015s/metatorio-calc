@@ -36,3 +36,4 @@ rmcp = { version = "3.2", features = ["transport-streamable-http-server"] }
 schemars = { version = "1", features = ["chrono04"] }
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
 tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "time", "sync"] }
+clap = { version = "4.6.6", features = ["derive", "env"] }

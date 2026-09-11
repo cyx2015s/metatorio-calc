@@ -52,12 +52,13 @@ use metatorio_core::DualVar;
 use metatorio_runtime::message::AppMessage;
 use metatorio_runtime::{FactoryId, ProjectId};
 
-/// Default loopback port for the MCP endpoint (override with `METATORIO_MCP_PORT`).
-const DEFAULT_PORT: u16 = 8765;
+/// Default loopback port for the MCP endpoint (`--mcp-port` /
+/// `METATORIO_MCP_PORT` 可覆盖）。
+pub const DEFAULT_MCP_PORT: u16 = 8765;
 
 /// The MCP service routes are mounted under this path (e.g.
 /// `http://127.0.0.1:8765/mcp`).
-const MCP_PATH: &str = "/mcp";
+pub const MCP_PATH: &str = "/mcp";
 
 // ── Tool surface ───────────────────────────────────────────────────
 
@@ -620,25 +621,22 @@ fn factory_summary(project: &metatorio_runtime::ProjectDocument) -> Vec<serde_js
 
 /// Start the MCP server on a dedicated tokio runtime thread, bound to
 /// `127.0.0.1:<port>`.  Fire-and-forget: the thread ends when the app exits.
-pub fn spawn_server(app: AppHandle) {
+///
+/// `port` / `token` 由启动选项（CLI 或环境变量）解析后传入——这里不再自己读
+/// 环境变量，避免出现「CLI 指定了但服务仍按 env 起」的双份真相。
+pub fn spawn_server(app: AppHandle, port: u16, token: Option<String>) {
     std::thread::spawn(move || {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
             .expect("failed to build MCP tokio runtime");
-        runtime.block_on(serve(app));
+        runtime.block_on(serve(app, port, token));
     });
 }
 
 /// Build the axum router + listener and serve MCP until the process exits.
-async fn serve(app: AppHandle) {
-    let token = std::env::var("METATORIO_MCP_TOKEN")
-        .ok()
-        .filter(|token| !token.is_empty());
-    let port = std::env::var("METATORIO_MCP_PORT")
-        .ok()
-        .and_then(|port| port.parse::<u16>().ok())
-        .unwrap_or(DEFAULT_PORT);
+async fn serve(app: AppHandle, port: u16, token: Option<String>) {
+    let token = token.filter(|token| !token.is_empty());
 
     let service = StreamableHttpService::new(
         move || Ok(MetatorioMcp { app: app.clone() }),

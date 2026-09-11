@@ -108,8 +108,7 @@ fn solve_timeout_from_env() -> Duration {
 }
 
 impl<R: Clone + Send + 'static> SolveJobs<R> {
-    /// 覆盖等待上限（测试用）。
-    #[cfg(test)]
+    /// 覆盖等待上限（`--solve-timeout-ms` 或测试用）。
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
         self

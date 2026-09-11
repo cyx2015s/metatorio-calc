@@ -66,8 +66,9 @@ Phase 2 工具面**不在一开始就做成离散的友好工具**，而是：
 ### 实现要点（已落地）
 
 - **传输**：`rmcp 3.2.0` Streamable-HTTP（Tower service），挂到 axum，`/mcp` 路径。
-- **生命周期**：`spawn_server(app.handle().clone())` 在 `run()` 的 `setup` 里启动；独立 tokio 多线程 runtime 线程，绑定 `127.0.0.1:<port>`（默认 `8765`，`METATORIO_MCP_PORT` 可改）。
-- **token 鉴权**：axum middleware (`from_fn_with_state`)，`Authorization: Bearer <token>` 或裸 token；`METATORIO_MCP_TOKEN` 未设则**不鉴权**（仅 loopback 兜底）。rmcp 的 `StreamableHttpServerConfig` 默认只接受 loopback `Host`（DNS rebinding 防护）。
+- **生命周期 / 启动参数**：`spawn_server(app.handle().clone(), port, token)` 在 `run()` 的 `setup` **开头**启动（先起端点，再做可能数十 MB 的上下文恢复，agent 不必等）；独立 tokio 多线程 runtime 线程，绑定 `127.0.0.1:<port>`。参数由 bin 的 clap 解析后传入（`Options`）：`--mcp-port`（默认 8765）、`--mcp-token`、`--solve-timeout-ms`、`--headless`、`--no-mcp`，**同名环境变量作为回退**（`METATORIO_MCP_PORT` / `METATORIO_MCP_TOKEN` / `METATORIO_SOLVE_TIMEOUT_MS` / `METATORIO_HEADLESS` / `METATORIO_NO_MCP`），优先级 CLI > env > 默认。lib 不再自己读环境变量，避免「CLI 指定了但服务仍按 env 起」的双份真相。`--headless` 与 `--no-mcp` 互斥（那等于没有窗口也没有接口），启动时直接报错退出。
+- **无头模式**：`--headless` 在 `Builder::build` 之前清空 `tauri.conf.json` 的窗口配置（窗口是事件循环首次迭代的 `setup` 阶段才建的），`setup` 照常执行 → 一个窗口都不建、事件循环常驻，MCP 端点在 `http://127.0.0.1:<port>/mcp`。此时没有 webview，因此 `icon`/`pick_*` 等 GUI 命令无人调用；GUI 与 headless 是同一个二进制（决策 1「同一进程共享 AppState」不变）。Linux 上 tauri 仍会初始化 GTK/X11（需 xvfb）。
+- **token 鉴权**：axum middleware (`from_fn_with_state`)，`Authorization: Bearer <token>` 或裸 token；`--mcp-token` 未给（或为空）则**不鉴权**（仅 loopback 兜底）。rmcp 的 `StreamableHttpServerConfig` 默认只接受 loopback `Host`（DNS rebinding 防护）。
 - **共享状态**：工具 handler 持有 `AppHandle`，经 `app.state::<AppState>()` 取 `Mutex<Runtime>`；`dispatch` 后对每个 `RuntimeCommand` 调 `execute_command`（同样会 `emit` solve-result 等事件，GUI 实时更新）。
 - **co-op 广播**：`runtime.dispatch` 返回 `outcome.changed` 时，MCP 端 `emit("document-changed", revision)`；前端 store 订阅后调 `refresh()` 重拉文档快照 → **外部 agent + 用户在同一个界面实时并存协同**。
 - **`execute_command` 改为返回 `Option<CommandEffect>`**：Recompute/AutoPlan/Cleanup 返回 `Some(effect)` 供 MCP 直接 surfacing solve 结果；其余命令返回 `None`；原有 Tauri emit 副作用全部保留（非破坏性）。
