@@ -78,10 +78,10 @@ fn require_fuel(store: &PrototypeStore, fuel: &Option<Fuel>) -> Result<(), Runti
 
 fn validate_project(store: &PrototypeStore, action: &ProjectAction) -> Result<(), RuntimeError> {
     match action {
-        ProjectAction::SetQualityLimit { quality } => match quality {
-            Some(quality) => require_quality(store, quality),
-            None => Ok(()),
-        },
+        ProjectAction::SetQualityLimit {
+            quality: Some(quality),
+        } => require_quality(store, quality),
+
         ProjectAction::SetRecipeProductivity { productivity } => {
             require(store, PrototypeGroup::Recipe, "配方", &productivity.recipe)
         }
@@ -236,10 +236,10 @@ fn validate_mechanic(store: &PrototypeStore, action: &MechanicAction) -> Result<
 
 fn validate_module(store: &PrototypeStore, action: &ModuleAction) -> Result<(), RuntimeError> {
     match action {
-        ModuleAction::SetModuleSlot { module, .. } => match module {
-            Some(module) => require_id(store, PrototypeGroup::Item, "插件", module),
-            None => Ok(()),
-        },
+        ModuleAction::SetModuleSlot {
+            module: Some(module),
+            ..
+        } => require_id(store, PrototypeGroup::Item, "插件", module),
         ModuleAction::AddBeacon { beacon } | ModuleAction::SetBeacon { value: beacon, .. } => {
             require_id(store, PrototypeGroup::Entity, "插件塔", beacon)
         }

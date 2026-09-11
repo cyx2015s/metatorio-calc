@@ -187,10 +187,10 @@ impl Runtime {
         // 进入 reducer 之前先校验消息引用的原型名（配方/机器/物品/品质/…）：
         // reducer 拿不到仓库，旧行为会把不存在的名字静默写进文档。
         // 项目还没绑定/载入上下文时跳过（此时无从校验，也不应阻塞）。
-        if let Some(project) = message_project(&message) {
-            if let Ok(store) = self.context_store(project) {
-                crate::validate::validate_message(store, &message)?;
-            }
+        if let Some(project) = message_project(&message)
+            && let Ok(store) = self.context_store(project)
+        {
+            crate::validate::validate_message(store, &message)?;
         }
         // 「使用最佳插件」要遍历仓库（每类别最高 tier）并按可达性过滤，同样在
         // 进入 reducer 之前解析。放在校验之后，品质参数照常先被校验。

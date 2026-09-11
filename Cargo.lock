@@ -1200,26 +1200,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ext-trait"
-version = "2.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c1caab68b8ae950f6bc3ea2190a26208f9d83909b968914eedc63b008a51d13"
-dependencies = [
- "ext-trait-proc_macros",
-]
-
-[[package]]
-name = "ext-trait-proc_macros"
-version = "2.0.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46c9c6707feeeea253f67d67fb7278bc246aa4f34e264b72f6e56d1a0c9151e1"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
 name = "fastrand"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2356,7 +2336,7 @@ dependencies = [
 
 [[package]]
 name = "metatorio-app"
-version = "1.5.8"
+version = "1.5.9"
 dependencies = [
  "axum",
  "clap",
@@ -2414,7 +2394,6 @@ dependencies = [
 name = "metatorio-runtime"
 version = "0.1.0"
 dependencies = [
- "ext-trait",
  "metatorio-core",
  "metatorio-data",
  "metatorio-solver",
