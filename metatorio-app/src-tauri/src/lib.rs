@@ -254,6 +254,20 @@ pub struct CatalogIndex {
     pub entries: Vec<IndexEntry>,
 }
 
+/// 一次「名字 ↔ 本地化名」查询命中的条目。
+///
+/// `matched_by` 说明命中方式，便于调用方区分「就是它」和「只是像」：
+/// `name-exact` / `localized-exact` / `localized-prefix` / `name-prefix` /
+/// `localized-contains` / `name-contains`。
+#[derive(Debug, Clone, Serialize)]
+pub struct ResolvedName {
+    pub kind: String,
+    pub name: String,
+    pub localized_name: String,
+    pub group: String,
+    pub matched_by: &'static str,
+}
+
 /// 配方原料/产物条目（含概率/产能/品质修饰）。
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct FlowAmount {
@@ -1252,6 +1266,96 @@ fn icon(
         }
     }
     None
+}
+
+/// 一次名字查询的结果：精确命中 + 截断到 `limit` 的模糊命中。
+///
+/// `partial_matched` 是模糊命中的**总数**（截断前），因此
+/// `partial_matched > partial.len()` 即表示结果被截断。
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ResolvedQuery {
+    pub exact: Vec<ResolvedName>,
+    pub partial: Vec<ResolvedName>,
+    pub partial_matched: usize,
+}
+
+/// 解析一个「名字查询」：既接受原型 id（`iron-gear-wheel`），也接受玩家口述的
+/// 本地化名（`铁齿轮`）。
+///
+/// - **精确命中**：原型名或本地化名与查询完全相同（大小写不敏感）。同一个名字
+///   在不同原型组里可能是多条（如 `speed-module` 同时是 item/recipe/technology），
+///   因此这里返回全部、不去重；
+/// - **模糊命中**：按「本地化名前缀 → 原型名前缀 → 本地化名子串 → 原型名子串」
+///   排序后取前 `limit` 条，并用 `matched_by` 标注命中方式——口述名往往只记得
+///   一半（「铁板」可能同时是 `铁板`/`铁棒`/`铁板条`），排序让人一眼看到该选哪个。
+///
+/// 抽成纯函数是为了可单测：MCP 工具只负责取索引与序列化。求解结果里的 id 换成
+/// 中文名（向群里汇报）与「口述名 → id」共用这一套匹配口径。
+pub(crate) fn resolve_index_entry(
+    entries: &[IndexEntry],
+    query: &str,
+    limit: usize,
+) -> ResolvedQuery {
+    let needle = query.trim().to_lowercase();
+    if needle.is_empty() {
+        return ResolvedQuery::default();
+    }
+    let resolved = |entry: &IndexEntry, matched_by: &'static str| ResolvedName {
+        kind: entry.kind.clone(),
+        name: entry.name.clone(),
+        localized_name: entry.localized_name.clone(),
+        group: entry.group.clone(),
+        matched_by,
+    };
+
+    let mut exact = Vec::new();
+    // (排序键, 本地化名长度, 名字)——后两者只为让结果稳定、可读。
+    let mut partial: Vec<(u8, usize, ResolvedName)> = Vec::new();
+    for entry in entries {
+        let name = entry.name.to_lowercase();
+        let localized = entry.localized_name.to_lowercase();
+        if name == needle {
+            exact.push(resolved(entry, "name-exact"));
+            continue;
+        }
+        if !localized.is_empty() && localized == needle {
+            exact.push(resolved(entry, "localized-exact"));
+            continue;
+        }
+        let (rank, matched_by) = if !localized.is_empty() && localized.starts_with(&needle) {
+            (0, "localized-prefix")
+        } else if name.starts_with(&needle) {
+            (1, "name-prefix")
+        } else if !localized.is_empty() && localized.contains(&needle) {
+            (2, "localized-contains")
+        } else if name.contains(&needle) {
+            (3, "name-contains")
+        } else {
+            continue;
+        };
+        partial.push((
+            rank,
+            entry.localized_name.chars().count(),
+            resolved(entry, matched_by),
+        ));
+    }
+    partial.sort_by(|left, right| {
+        left.0
+            .cmp(&right.0)
+            .then(left.1.cmp(&right.1))
+            .then(left.2.name.cmp(&right.2.name))
+    });
+    let partial_matched = partial.len();
+    let partial = partial
+        .into_iter()
+        .take(limit)
+        .map(|(_, _, resolved)| resolved)
+        .collect();
+    ResolvedQuery {
+        exact,
+        partial,
+        partial_matched,
+    }
 }
 
 /// 过滤目录索引条目：`kind` 精确匹配（大小写不敏感），`name_contains` 大小写不
@@ -3609,6 +3713,115 @@ mod tests {
                 Some("iron-plate")
             )),
             vec![("item".to_string(), "iron-plate".to_string())]
+        );
+    }
+
+    /// 测试用目录条目（只填与匹配相关的字段）。
+    fn index_entry(kind: &str, name: &str, localized: &str) -> IndexEntry {
+        IndexEntry {
+            kind: kind.to_string(),
+            name: name.to_string(),
+            localized_name: localized.to_string(),
+            group: String::new(),
+            subgroup: String::new(),
+            icon_type: String::new(),
+            module_slots: None,
+            categories: Vec::new(),
+            fuel_category: String::new(),
+            fuel_value_j: None,
+            technology_max_level: None,
+            technology_base_level: 0,
+        }
+    }
+
+    /// 名字解析的两个方向：id → 本地化名（把求解结果翻译成人话）、口述名 → id
+    /// （群里说的「铁板」落到 `iron-plate`）。两者共用一套匹配/排序口径，因此这里
+    /// 逐条钉住：精确优先、跨组同名都返回、模糊按「本地化前缀 → 原型前缀 →
+    /// 本地化子串 → 原型子串」排序、大小写不敏感、空查询不匹配、截断要如实上报。
+    #[test]
+    fn resolve_index_entry_handles_both_directions() {
+        let entries = vec![
+            index_entry("item", "iron-plate", "铁板"),
+            index_entry("recipe", "iron-plate", "铁板"),
+            index_entry("item", "iron-stick", "铁棒"),
+            index_entry("item", "iron-plate-long", "铁板条"),
+            index_entry("fluid", "water", "水"),
+            index_entry("item", "no-translation", ""),
+        ];
+
+        // 方向一：id → 本地化名。同名跨组（item/recipe）都要返回，且都是精确命中。
+        // `iron-plate-long` 会作为「id 前缀」进入模糊结果（有意如此：id 也只记得
+        // 前半截时仍能找回来），所以这里只钉精确组。
+        let by_name = resolve_index_entry(&entries, "iron-plate", 8);
+        assert_eq!(by_name.exact.len(), 2, "item 与 recipe 都应返回");
+        assert!(by_name
+            .exact
+            .iter()
+            .all(|hit| hit.localized_name == "铁板" && hit.matched_by == "name-exact"));
+        assert!(
+            by_name
+                .partial
+                .iter()
+                .any(|hit| hit.name == "iron-plate-long" && hit.matched_by == "name-prefix"),
+            "{:?}",
+            by_name.partial
+        );
+
+        // 方向二：口述名 → id。
+        let by_localized = resolve_index_entry(&entries, "铁板", 8);
+        assert_eq!(by_localized.exact.len(), 2);
+        assert!(by_localized
+            .exact
+            .iter()
+            .all(|hit| hit.name == "iron-plate" && hit.matched_by == "localized-exact"));
+        assert!(
+            by_localized
+                .partial
+                .iter()
+                .any(|hit| hit.name == "iron-plate-long"),
+            "「铁板条」应与「铁板」区分开：只出现在模糊结果里"
+        );
+
+        // 大小写不敏感（口述名多半是中文，但 id 会被随手打成大写）。
+        assert_eq!(
+            resolve_index_entry(&entries, "IRON-PLATE", 8).exact.len(),
+            2
+        );
+
+        // 模糊排序 + 确定性：全是 name-prefix 时，按本地化名长度再按名字排序。
+        let partial = resolve_index_entry(&entries, "iron", 8).partial;
+        assert_eq!(
+            partial
+                .iter()
+                .map(|hit| hit.name.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "iron-plate",      // item（铁板）
+                "iron-plate",      // recipe（同名同长，保持索引顺序）
+                "iron-stick",      // 铁棒
+                "iron-plate-long", // 铁板条
+            ]
+        );
+        assert!(partial.iter().all(|hit| hit.matched_by == "name-prefix"));
+
+        // 截断要如实上报：命中 4 条、只取 2 条。
+        let truncated = resolve_index_entry(&entries, "iron", 2);
+        assert_eq!(truncated.partial.len(), 2);
+        assert_eq!(truncated.partial_matched, 4);
+
+        // 空/空白查询不匹配任何东西（否则 `contains("")` 会把全库倒出来）。
+        for query in ["", "   "] {
+            let empty = resolve_index_entry(&entries, query, 8);
+            assert!(empty.exact.is_empty() && empty.partial.is_empty());
+            assert_eq!(empty.partial_matched, 0);
+        }
+
+        // 无翻译的条目不会因为「本地化名为空」而被误命中。
+        assert!(
+            resolve_index_entry(&entries, "no-translation", 8)
+                .exact
+                .len()
+                == 1
         );
     }
 

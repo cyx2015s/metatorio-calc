@@ -107,6 +107,23 @@ struct ListPrototypesParams {
     name_contains: Option<String>,
 }
 
+/// Parameters for the `localized_names` tool: prototype ids and/or localized names.
+#[derive(Debug, serde::Deserialize, JsonSchema)]
+struct LocalizedNamesParams {
+    /// 要解析的名字，可混用原型 id（`iron-gear-wheel`）与本地化名（`铁齿轮`）。
+    queries: Vec<String>,
+    /// 限定条目 kind（`item` / `fluid` / `recipe` / `technology` / `machine` / …）；
+    /// 省略 = 全部。
+    #[serde(default)]
+    kind: Option<String>,
+    /// 每个查询的**模糊**命中上限（默认 8，最多 50）；精确命中不受此限制。
+    #[serde(default)]
+    limit_per_query: Option<usize>,
+    /// 游戏上下文 id；省略 = 当前激活上下文。
+    #[serde(default)]
+    context_id: Option<String>,
+}
+
 /// Parameters for the `suggest` tool: candidates that can provide/consume a flow.
 #[derive(Debug, serde::Deserialize, JsonSchema)]
 struct SuggestParams {
@@ -374,7 +391,10 @@ impl MetatorioMcp {
         slots.  Omit `context_id` to use the active context.  Narrow with `kind` \
         (exact) and/or `name_contains` (case-insensitive substring on name or \
         localized_name).  Returns `total` (all entries in the context), `matched` and \
-        the filtered `entries` — no truncation, so filter rather than paginate."
+        the filtered `entries` — no truncation, so filter rather than paginate.  \
+        For 'id → localized name' or 'a name someone said in chat → id' use \
+        `localized_names` instead: it is ranked (exact hit first) and answers several \
+        names at once."
     )]
     async fn list_prototypes(
         &self,
@@ -403,6 +423,59 @@ impl MetatorioMcp {
             "entries": entries,
         });
         Ok(CallToolResult::structured(value))
+    }
+
+    /// 名字 ↔ 本地化名互查：把求解结果里的 id 换成人话，或把群友口述的名字换成 id。
+    #[tool(
+        description = "Resolve prototype names to their localized (translated) names and \
+        back.  Pass `queries` with either a raw prototype id (e.g. `iron-gear-wheel`) or a \
+        localized name as a player would say it (e.g. `铁齿轮`); each query is matched \
+        exactly first (raw id, then localized name), then by prefix/substring, and every \
+        hit reports `matched_by` so you can tell an exact hit from a loose one.  Use this \
+        to (a) report solve results in the player's language instead of raw ids and \
+        (b) turn an item name someone mentioned in chat back into the id that `dispatch` \
+        needs.  `localized_name` is empty when the context has no locale dump (then fall \
+        back to `list_prototypes`).  `exact` may contain several entries for one query: \
+        the same name can exist as item / recipe / technology / entity, and `kind` \
+        narrows it."
+    )]
+    async fn localized_names(
+        &self,
+        Parameters(params): Parameters<LocalizedNamesParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let state = self.app.state::<AppState>();
+        let context_id = crate::resolve_context_id(&state, params.context_id.as_deref())
+            .map_err(|error| McpError::invalid_params(error, None))?;
+        let index = crate::catalog_index_for(&state, &context_id)
+            .await
+            .map_err(|error| {
+                McpError::invalid_params(format!("localized_names 执行失败: {error}"), None)
+            })?;
+        // kind 过滤只做一次（整个查询共用同一份索引子集）。
+        let entries = crate::filter_index_entries(index.entries, params.kind.as_deref(), None);
+        let limit = params.limit_per_query.unwrap_or(8).clamp(1, 50);
+        let results: Vec<serde_json::Value> = params
+            .queries
+            .iter()
+            .map(|query| {
+                let resolved = crate::resolve_index_entry(&entries, query, limit);
+                serde_json::json!({
+                    "query": query,
+                    // 精确 + 模糊命中的总数（模糊部分在截断前计数）。
+                    "matched": resolved.exact.len() + resolved.partial_matched,
+                    // 模糊结果被 limit 截断时置 true：要更全就调大 limit_per_query，
+                    // 或用 `list_prototypes` 的 name_contains 自己筛。
+                    "partial_truncated": resolved.partial_matched > resolved.partial.len(),
+                    "exact": resolved.exact,
+                    "partial": resolved.partial,
+                })
+            })
+            .collect();
+        Ok(CallToolResult::structured(serde_json::json!({
+            "context_id": context_id,
+            "kind": params.kind,
+            "results": results,
+        })))
     }
 
     /// 建议：给定一条流，列出能产出/消耗它的候选机制。
