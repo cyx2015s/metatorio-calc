@@ -1260,7 +1260,9 @@
             {#each dragTargets as target (target.id)}
               {@const icon = flowIcon(target.flow)}
               {@const q = flowQuality(target.flow)}
-              <div class="row-item">
+              <div class="row-item one-line">
+                <!-- 图标承载两个动作：左键更改流、右键看建议（右键没有可见按钮，
+                     靠 title 提示；「建议」按钮保留为可发现入口，同一个动作）。 -->
                 <HoverIcon
                   type={icon.type}
                   name={icon.name}
@@ -1268,9 +1270,13 @@
                   detailKind={flowDetailKind(icon)}
                   quality={q ?? undefined}
                   flow={target.flow}
-                  onClick={() => openSuggestions(target.flow)}
+                  title="左键更改流 · 右键建议能供给它的机制"
+                  onClick={() => editTarget(target)}
+                  onContextMenu={() => openSuggestions(target.flow)}
                 />
-                <span class="row-name" title={dualVarLabel(target.flow)}>{flowLabel(target.flow)}</span>
+                <span class="row-name" title={dualVarLabel(target.flow)}>
+                  <span class="flow-name">{flowLabel(target.flow)}</span>
+                </span>
                 <input
                   class="num"
                   type="text"
@@ -1289,9 +1295,8 @@
                     }
                   }}
                 />
-                <button class="btn ghost" title="建议能产出该流的机制" onclick={() => openSuggestions(target.flow)}>建议</button>
-                <button class="btn ghost" title="更改目标流" onclick={() => editTarget(target)}>更改</button>
-                <button class="btn ghost" title="移除目标" onclick={() => runtime.removeTarget(target.id).catch(() => {})}>×</button>
+                <button class="btn ghost up" title="建议能产出该流的机制（等同右键图标）" onclick={() => openSuggestions(target.flow)}>建议</button>
+                <button class="btn ghost up" title="移除目标" onclick={() => runtime.removeTarget(target.id).catch(() => {})}>×</button>
               </div>
             {:else}
               <div class="empty-hint">还没有目标流</div>
@@ -1612,7 +1617,7 @@
               onchange={(event) =>
                 runtime.setStrictSource((event.currentTarget as HTMLInputElement).checked).catch(() => {})}
             />
-            严格供给（只允许从外部输入获得未配平物品；<strong>自动规划总是按它求解，完成后会打开此项</strong>）
+            严格供给（只允许从外部输入获得未配平物品）
           </label>
           <label class="check">
             <input
@@ -2079,7 +2084,9 @@
             {#each status.flows.filter((b) => Math.abs(b.amount) / Math.max(b.scale ?? 1, 1e-12) > 1e-9) as balance (balance.flow)}
               {@const icon = flowIcon(balance.flow)}
               {@const q = flowQuality(balance.flow)}
-              <div class="row-item">
+              <div class="row-item one-line">
+                <!-- 与目标面板同一套图标语义：右键 = 建议。这里流是被求解的结果、
+                     不可更改，所以左键保持原来的「建议」（同一个动作）。 -->
                 <HoverIcon
                   type={icon.type}
                   name={icon.name}
@@ -2087,7 +2094,9 @@
                   detailKind={flowDetailKind(icon)}
                   quality={q ?? undefined}
                   flow={balance.flow}
+                  title="左键/右键建议能供给或消耗它的机制"
                   onClick={() => openSuggestions(balance.flow)}
+                  onContextMenu={() => openSuggestions(balance.flow)}
                 />
                 <span class="row-name" title={dualVarLabel(balance.flow)}>
                   <span class="flow-name">{flowLabel(balance.flow)}</span>
@@ -2096,7 +2105,7 @@
                   {/if}
                 </span>
                 <strong class:amount-pos={balance.amount > 0} class="mono amount">{formatFlowAmount(balance.flow, balance.amount)}</strong>
-                <button class="btn ghost up" title="建议能产出该流的机制" onclick={() => openSuggestions(balance.flow)}>建议</button>
+                <button class="btn ghost up" title="建议能产出该流的机制（等同右键图标）" onclick={() => openSuggestions(balance.flow)}>建议</button>
               </div>
             {/each}
           </div>
@@ -2975,6 +2984,18 @@
     background: transparent;
     border: 1px solid transparent;
     border-radius: var(--radius-sm);
+  }
+
+  /* 一行式行（目标 / 求解流）：图标 + 名称 + 数值 + 动作固定占一行，名称自己
+     以省略号收缩。否则动作按钮会被挤到第二行，同一行里同时出现「点图标」和
+     「点按钮」两种语义，看起来像两件事。 */
+  .row-item.one-line {
+    flex-wrap: nowrap;
+  }
+
+  .row-item.one-line .row-name {
+    flex: 1 1 auto;
+    overflow: hidden;
   }
 
   .row-item:hover {

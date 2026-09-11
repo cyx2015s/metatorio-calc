@@ -15,6 +15,7 @@
     detailKind,
     quality,
     onClick,
+    onContextMenu,
     flow,
   }: {
     type?: string;
@@ -24,8 +25,11 @@
     detailKind?: string;
     /** 带品质时在图标左下角叠加品质角标（边长为主图标一半）。 */
     quality?: string;
-    /** 图标可点击（如触发生产/消耗建议）时传入；悬停详情仍可用。 */
+    /** 左键动作（如「更改目标流」）；悬停详情仍可用。 */
     onClick?: (event: MouseEvent) => void;
+    /** 右键动作（如「显示建议」）。传入时**阻止浏览器右键菜单**，
+     * 并用 `title` 提示这两种操作（右键没有可见的按钮，全靠提示）。 */
+    onContextMenu?: (event: MouseEvent) => void;
     /** 当前流（抽象能量流/定温流体等）。传入时悬停卡片会显示流的具体参数
      * （流体实际温度、ItemFuel 类别列表等），无原型详情也能弹出。 */
     flow?: import("$lib/runtime/types").DualVar;
@@ -34,8 +38,9 @@
   let hoverActive = $state(false);
   let pos = $state({ x: 0, y: 0 });
   let detail = $state<PrototypeDetail | null>(null);
-  /** 该图标是否可点击（建议/其它动作）：可点击时按按钮语义实现（role/tabindex/键盘）。 */
-  let interactive = $derived(!!onClick);
+  /** 该图标是否可交互（左键/右键任一有动作）：可交互时按按钮语义实现
+   * （role/tabindex/键盘）。 */
+  let interactive = $derived(!!onClick || !!onContextMenu);
 
   // 抽象流（无原型详情）也会触发悬停，只要它能提供具体参数（定温流体/燃料类别等）。
   let flowActive = $derived(
@@ -88,6 +93,13 @@
   onmousemove={move}
   onmouseleave={leave}
   onclick={onClick}
+  oncontextmenu={onContextMenu
+    ? (event: MouseEvent) => {
+        // 右键动作：压掉浏览器菜单，否则弹出的菜单会盖住我们自己的交互。
+        event.preventDefault();
+        onContextMenu(event);
+      }
+    : undefined}
   onkeydown={onClick
     ? (event: KeyboardEvent) => {
         if (event.key === "Enter" || event.key === " ") {
