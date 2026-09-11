@@ -77,12 +77,12 @@ Phase 2 工具面**不在一开始就做成离散的友好工具**，而是：
 
 | 工具 | 参数 | 说明 |
 | --- | --- | --- |
-| `dispatch` | `{ message: AppMessage, request_id? }` | 万能回退：转发任意规划动作，返回 `revision`/`changed`/`created`/`scheduled_commands`/`solve`（均结构化 JSON） |
-| `get_planning_state` | `{ project?, factory?, recompute? }` | 读取：Omit `project` → 全文档；`project` → 单项目；`project`+`factory` → 单工厂；`recompute`（需 project+factory）时先求解并附带结构化结果 |
+| `dispatch` | `{ message: AppMessage, request_id?, limit?, offset? }` | 万能回退：转发任意规划动作，返回 `revision`/`changed`/`created`/`scheduled_commands`/`solve`（均结构化 JSON）。`solve` 的 `mechanics`/`flows` 按 `limit`/`offset` 分页（默认 50、上限 1000） |
+| `get_planning_state` | `{ project?, factory?, recompute?, limit?, offset? }` | **逐层读取**：无 `project` → 项目索引；`project` → 设置/规划偏好 + 工厂索引；`project`+`factory` → 该工厂文档（机制/目标/目标表达式/外部输入分页）；`recompute`（需 project+factory）时附带求解结果（同样分页）。所有响应带 `page.totals` / `page.truncated` |
 | `list_projects` | — | 项目索引（id/名称/上下文/工厂·机制·目标计数） |
 | `list_factories` | `{ project }` | 单项目下的工厂索引（含目标清单） |
 | `list_contexts` | — | 游戏数据上下文索引（id/名称/来源/是否已载入/哪个是激活的）。上下文是内容哈希缓存，agent 只能列举与切换，不能创建 |
-| `list_prototypes` | `{ kind?, name_contains?, context_id? }` | 领域词表：该上下文里的物品/流体/配方/科技/机器/资源…（name、localized_name、group/subgroup、categories、燃料信息、插件槽）。返回 `total`/`matched`/`entries`，不做截断——用 `kind`/`name_contains` 收窄 |
+| `list_prototypes` | `{ kind?, name_contains?, context_id?, limit?, offset? }` | 领域词表：该上下文里的物品/流体/配方/科技/机器/资源…（name、localized_name、group/subgroup、categories、燃料信息、插件槽）。`entries` 按 `limit`（默认 50、上限 1000）/`offset` 分页，带 `total`/`matched`/`returned`/`page` |
 | `localized_names` | `{ queries[], kind?, limit_per_query?, context_id? }` | **名字 ↔ 本地化名互查**：`queries` 可混用原型 id（`iron-gear-wheel`）与玩家口述的本地化名（`铁齿轮`）。匹配时**忽略 `-` / `_` / 空白**（`processing unit`＝`processing_unit`＝`PROCESSING-UNIT`＝`processing-unit`），先精确命中（id、本地化名各一轮），再按「本地化名前缀 → id 前缀 → 本地化名子串 → id 子串」给模糊命中，逐条带 `matched_by`；精确与模糊都为空时再给**错拼候选**（编辑距离，相邻换位算 1 步），其中 `typo_suggestion` 只在「最佳距离上**名字唯一**」时非空（同名跨 item/recipe 不算歧义，kind 由调用方按上下文选）——几个名字同样接近（`processing-unit-2` 与 `-3`）时返回 null，让人确认 |
 | `suggest` | `{ flow, context_id? }` | 给定一条流，列出能产出/消耗它的候选机制（recipe/resource/item-fuel/generator，含 role）——「加机制」前的第一步 |
 
@@ -99,12 +99,15 @@ Phase 2 工具面**不在一开始就做成离散的友好工具**，而是：
 3. **`scheduled_commands` 只返回数量（P1-4）**：agent 不知是哪几条副作用。已改为返回真实 `RuntimeCommand` 序列化数组。
 4. **新建对象不知 id（P1-5）**：`dispatch` 只回 revision，读不到新分配的 project/factory/mechanic id。**仍待补**（方案见下），由 `get_planning_state` 承担读取职责或直接抽取新 id。
 
-### 正交性原则（功能边界）
+### 输出有界原则（功能边界，2026-xx 修正）
 
-**Metatorio 的 MCP 工具只负责产出全量、结构化、可直接序列化的 JSON；「如何筛选/切片/摘要结果」不属于它的职责范围**——支持 MCP 的 agent 上下文里自有 JSON 处理工具来处理。因此：
-- **不加入**结果截断、分页、字段裁剪、human-readable 摘要等逻辑（那是 agent 侧 JSON 工具的事）。
-- 结果再长也接受，保持原样全量返回（如 `get_planning_state` 省略 `project` 时返回完整 `AppDocument`）。
-- 前提：产出必须是**标准 JSON**（对象/数组，字段名稳定、可被既有 JSON 工具处理），而非 Rust `Debug` 字符串这类非结构化的东西——后者才是真正的缺陷（P1-3 已修）。
+~~原「正交性原则」：工具只产出全量 JSON，截断/分页是 agent 侧 JSON 工具的事。~~ **已被实战推翻**：群友实测反馈——「现在截断完全依赖我的 bash 返回给你兜底了，不然一条查询语句直接上下文爆炸」。真实量级：py 上下文目录索引 17757 条、一次自动规划写出 757 条机制，`get_planning_state` 省略 `project` 时会把每层工厂的每条机制一起倒出来。因此改为：
+
+- **每个返回集合都必须有上界**：`limit`（默认 50、上限 1000）+ `offset`，工具自己保证，不依赖调用方兜底。
+- **截断必须自证**：响应带 `page: { offset, limit, totals, truncated }`（`totals` 是截断前总数，`truncated` 列出被截断的集合名），被截断的集合另附 `<key>_hint` 说明如何收窄——**绝不静默丢数据**。
+- **逐层只给下一层索引**：`get_planning_state` 无 `project` → 项目索引；给 `project` → 设置/规划偏好 + 工厂索引；给 `project`+`factory` → 该工厂文档（重复集合分页）。要看机制明细就必须指名到工厂，任何一次调用的返回量都由 `limit` 决定。
+- 仍然坚持的前提：产出必须是**标准 JSON**（对象/数组、字段名稳定、可被 agent 侧 JSON 工具处理），而不是 Rust `Debug` 字符串这类非结构化文本。
+- 不做的：按字段裁剪（`fields` 选择）——多一个心智负担，收益有限；agent 侧 JSON 工具更适合做这件事。
 
 ### 待补（按优先级）
 

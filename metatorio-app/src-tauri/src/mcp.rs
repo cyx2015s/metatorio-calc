@@ -86,6 +86,10 @@ struct DispatchParams {
     /// 避免重复添加目标 / 机制。
     #[serde(default)]
     request_id: Option<String>,
+    /// 每个集合的返回上限与偏移（默认 50、上限 1000）——求解结果里的
+    /// `mechanics` / `flows` 可能是几百条，必须由工具自己兜住。
+    #[serde(flatten)]
+    page: PageParams,
 }
 
 /// Parameters for the `list_prototypes` tool: the domain vocabulary of one
@@ -105,6 +109,9 @@ struct ListPrototypesParams {
     /// 省略 = 不过滤。
     #[serde(default)]
     name_contains: Option<String>,
+    /// 每个集合的返回上限与偏移（默认 50、上限 1000）。
+    #[serde(flatten)]
+    page: PageParams,
 }
 
 /// Parameters for the `localized_names` tool: prototype ids and/or localized names.
@@ -159,6 +166,9 @@ impl MetatorioMcp {
         All flow amounts are per second; the project time-scale only affects display. \
         Pass `request_id` to make retries idempotent (a repeated id replays the \
         previous response instead of applying the message again). \
+        `solve` is always bounded: its `mechanics`/`flows` are capped by `limit` \
+        (default 50, max 1000) with `offset` for paging, and `page.totals` / \
+        `page.truncated` report what was cut. \
         This is the universal escape hatch for every planning operation; wire \
         convenience tools on top of it as needed."
     )]
@@ -166,7 +176,13 @@ impl MetatorioMcp {
         &self,
         Parameters(params): Parameters<DispatchParams>,
     ) -> Result<CallToolResult, McpError> {
-        dispatch_message(&self.app, params.message, params.request_id).await
+        dispatch_message(
+            &self.app,
+            params.message,
+            params.request_id,
+            params.page.resolve(),
+        )
+        .await
     }
 
     /// Read the current planning state (the shared document snapshot).  This is
@@ -174,17 +190,23 @@ impl MetatorioMcp {
     /// factories / targets / mechanics and their assigned ids before mutating.
     #[tool(
         description = "Read the current planning state from the shared Metatorio \
-        document.  Omit `project` to return the whole document; pass `project` to \
-        narrow to one project; pass `project` + `factory` to narrow to one factory. \
-        Set `recompute` (only meaningful with project + factory) to also run a solve \
-        and include the structured result.  All flow amounts are per second \
-        (time-scale only affects display)."
+        document, **level by level** so a single call can never flood the context: \
+        without `project` you get the project index (ids, names, counts); with \
+        `project` you get its settings/planning plus the factory index; with \
+        `project`+`factory` you get that factory's document.  Every repeated \
+        collection is capped by `limit` (default 50, max 1000) and `offset` pages \
+        through it; the response always carries `page.totals` (pre-truncation counts) \
+        and `page.truncated` (which collections were cut), so nothing is silently \
+        dropped.  Set `recompute` (only with project + factory) to also run a solve \
+        and include its result (its mechanics/flows are paged the same way).  All flow \
+        amounts are per second (time-scale only affects display)."
     )]
     async fn get_planning_state(
         &self,
         Parameters(params): Parameters<PlanningStateParams>,
     ) -> Result<CallToolResult, McpError> {
         let app = self.app.clone();
+        let page = params.page.resolve();
         let project = params.project.map(ProjectId);
         let factory = params.factory.map(FactoryId);
         // `recompute` 只在 project + factory 同时给出时才有意义：其余组合显式
@@ -255,29 +277,27 @@ impl MetatorioMcp {
             (snapshot, revision)
         };
 
-        let mut value = match snapshot {
-            DocSnapshot::Document(document) => serde_json::to_value(&document),
-            DocSnapshot::Project(project) => serde_json::to_value(&project),
-            DocSnapshot::Factory {
-                project,
-                factory,
-                factory_document,
-            } => serde_json::to_value(serde_json::json!({
-                "project": project,
-                "factory": factory,
-                "factory_document": factory_document,
-                "solve": solve,
-            })),
+        let (mut value, mut report) = planning_state_value(&snapshot, page);
+        // 工厂层可选带上重算结果：它的 mechanics/flows 同样按 page 截断。
+        if let Some(solve) = solve {
+            if let Some(object) = value.as_object_mut() {
+                let mut solve = solve;
+                if let Some(status) = solve.get_mut("status").and_then(|s| s.as_object_mut()) {
+                    if let Some(solved) = status.get_mut("solved").and_then(|s| s.as_object_mut()) {
+                        report.page_key(solved, "mechanics", "solve.mechanics", page);
+                        report.page_key(solved, "flows", "solve.flows", page);
+                    }
+                }
+                object.insert("solve".to_string(), solve);
+            }
         }
-        .map_err(|error| {
-            McpError::internal_error(format!("get_planning_state 序列化失败: {error}"), None)
-        })?;
-        // 顶层补充 revision，便于 agent 得知文档版本。
-        if let serde_json::Value::Object(obj) = &mut value {
-            obj.insert(
+        // 顶层补充 revision 与分页元信息：版本便于判断新鲜度，page 说明截断情况。
+        if let serde_json::Value::Object(object) = &mut value {
+            object.insert(
                 "revision".to_string(),
                 serde_json::Value::Number(revision.into()),
             );
+            object.insert("page".to_string(), report.value(page));
         }
         Ok(CallToolResult::structured(value))
     }
@@ -390,11 +410,14 @@ impl MetatorioMcp {
         with name, localized_name, group/subgroup, categories, fuel info and module \
         slots.  Omit `context_id` to use the active context.  Narrow with `kind` \
         (exact) and/or `name_contains` (case-insensitive substring on name or \
-        localized_name).  Returns `total` (all entries in the context), `matched` and \
-        the filtered `entries` — no truncation, so filter rather than paginate.  \
-        For 'id → localized name' or 'a name someone said in chat → id' use \
-        `localized_names` instead: it is ranked (exact hit first) and answers several \
-        names at once."
+        localized_name; separators `-`/`_`/space are ignored).  \
+        **The result is always bounded**: `entries` is capped by `limit` (default 50, \
+        max 1000) and `offset` pages through the matches; `total` is every entry in the \
+        context, `matched` is how many matched before paging, and `page.truncated` tells \
+        you whether the list was cut (a `entries_hint` string appears when it was). \
+        For 'id → localized name' or 'a name someone said in chat → id' prefer \
+        `localized_names`: it is ranked (exact hit first) and answers several names at \
+        once."
     )]
     async fn list_prototypes(
         &self,
@@ -402,6 +425,7 @@ impl MetatorioMcp {
     ) -> Result<CallToolResult, McpError> {
         let kind = params.kind;
         let needle = params.name_contains;
+        let page = params.page.resolve();
         let state = self.app.state::<AppState>();
         // 只是读一次 runtime 里的激活上下文 id（短锁），无需阻塞线程。
         let context_id = crate::resolve_context_id(&state, params.context_id.as_deref())
@@ -412,16 +436,27 @@ impl MetatorioMcp {
                 McpError::invalid_params(format!("list_prototypes 执行失败: {error}"), None)
             })?;
         let total = index.entries.len();
-        let entries =
+        let matched =
             crate::filter_index_entries(index.entries, kind.as_deref(), needle.as_deref());
-        let matched = entries.len();
-        let value = serde_json::json!({
+        let matched_total = matched.len();
+        // 分页在这里做（并在 page 元信息里如实上报），调用方不需要替我们兜底。
+        let (entries, _) = page.slice(&matched);
+        let mut report = PageReport::default();
+        report.record("entries", matched_total, entries.len());
+        let mut value = serde_json::json!({
             "context_id": context_id,
             "qualities": index.qualities,
             "total": total,
-            "matched": matched,
+            "matched": matched_total,
+            "returned": entries.len(),
             "entries": entries,
+            "page": report.value(page),
         });
+        if entries.len() < matched_total {
+            // 与嵌套集合同一措辞：被截断就说清怎么收窄，别让调用方以为「就这么多」。
+            value["entries_hint"] =
+                serde_json::json!(truncation_hint(matched_total, entries.len()));
+        }
         Ok(CallToolResult::structured(value))
     }
 
@@ -448,12 +483,32 @@ impl MetatorioMcp {
         produces the wrong plan.  \
         `localized_name` is empty when the context has no locale dump (then fall back to \
         `list_prototypes`).  `exact` may contain several entries for one query: the same \
-        name can exist as item / recipe / technology / entity, and `kind` narrows it."
+        name can exist as item / recipe / technology / entity, and `kind` narrows it.  \
+        Each query's buckets are capped by `limit_per_query` (default 8, max 50) and at \
+        most 50 queries are accepted per call, so the response stays bounded."
     )]
     async fn localized_names(
         &self,
         Parameters(params): Parameters<LocalizedNamesParams>,
     ) -> Result<CallToolResult, McpError> {
+        // 每个查询的输出已经按 limit_per_query 限制；这里再限制一次「一次问多少
+        // 个名字」，避免批量调用本身变成上下文炸弹（超过就显式报错，不静默丢）。
+        const MAX_QUERIES: usize = 50;
+        if params.queries.is_empty() {
+            return Err(McpError::invalid_params(
+                "queries 不能为空".to_string(),
+                None,
+            ));
+        }
+        if params.queries.len() > MAX_QUERIES {
+            return Err(McpError::invalid_params(
+                format!(
+                    "一次最多解析 {MAX_QUERIES} 个名字（收到 {}），请分批调用",
+                    params.queries.len()
+                ),
+                None,
+            ));
+        }
         let state = self.app.state::<AppState>();
         let context_id = crate::resolve_context_id(&state, params.context_id.as_deref())
             .map_err(|error| McpError::invalid_params(error, None))?;
@@ -531,10 +586,13 @@ impl MetatorioMcp {
 /// `dispatch` 工具的实际逻辑：与具体 Tauri runtime 解耦，便于用 mock app 测试。
 ///
 /// `request_id` 为幂等键：重复的 id 不重新应用消息，直接回放上次的载荷。
+/// `page` 决定返回里 `solve` 的 mechanics/flows 上限（求解可能产出几百条，
+/// 实测 py 上一次自动规划就有 757 条机制）。
 async fn dispatch_message<R: Runtime>(
     app: &AppHandle<R>,
     message: AppMessage,
     request_id: Option<String>,
+    page: Page,
 ) -> Result<CallToolResult, McpError> {
     // 0) 幂等回放：同一 request_id 已经执行过就直接返回上次的载荷。
     if let Some(request_id) = &request_id {
@@ -583,6 +641,17 @@ async fn dispatch_message<R: Runtime>(
     })
     .await;
     let solve = solve.and_then(|result| serde_json::to_value(&result).ok());
+    // 求解结果可能很长（机制/流各几百条）：同样按 page 截断并如实上报。
+    let mut report = PageReport::default();
+    let solve = solve.map(|mut solve| {
+        if let Some(status) = solve.get_mut("status").and_then(|s| s.as_object_mut()) {
+            if let Some(solved) = status.get_mut("solved").and_then(|s| s.as_object_mut()) {
+                report.page_key(solved, "mechanics", "solve.mechanics", page);
+                report.page_key(solved, "flows", "solve.flows", page);
+            }
+        }
+        solve
+    });
     // Co-op: if the document changed, tell the GUI to re-fetch.
     // 命令执行本身也可能改文档（如自动规划回写机制），因此用当前 revision
     // 判定，而不只看 reducer 的 `changed`。
@@ -605,6 +674,7 @@ async fn dispatch_message<R: Runtime>(
         "scheduled_commands": commands,
         "solve": solve,
         "errors": errors,
+        "page": report.value(page),
     });
     // 有失败时把结果标记为错误：agent 必须能区分「命令跑了但失败了」
     // 与「命令跑了且成功但恰好没有求解产出」。
@@ -636,18 +706,186 @@ enum DocSnapshot {
     },
 }
 
+/// 分页参数：所有返回集合的工具共用（`limit` 默认 50、上限 1000）。
+///
+/// 群里的实测反馈：以前「截断」是调用方（bash/客户端）替我们兜的——一条查询就能让
+/// 上下文爆炸。现在**工具自己保证有上界**，并在 `page` 元信息里如实说明哪些集合被
+/// 截断了、截断前有多少条，调用方据此翻页或收窄查询。
+#[derive(Debug, Clone, Copy, Default, serde::Deserialize, JsonSchema)]
+struct PageParams {
+    /// 每个集合最多返回多少条（默认 50，上限 1000）。
+    #[serde(default)]
+    limit: Option<usize>,
+    /// 从第几条开始返回（配合 `limit` 翻页）。
+    #[serde(default)]
+    offset: Option<usize>,
+}
+
+impl PageParams {
+    const DEFAULT_LIMIT: usize = 50;
+    const MAX_LIMIT: usize = 1000;
+
+    fn resolve(&self) -> Page {
+        Page {
+            offset: self.offset.unwrap_or(0),
+            limit: self
+                .limit
+                .unwrap_or(Self::DEFAULT_LIMIT)
+                .clamp(1, Self::MAX_LIMIT),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Page {
+    offset: usize,
+    limit: usize,
+}
+
+impl Page {
+    /// 按页切一个数组，返回 `(页内元素, 截断前总数)`。
+    fn slice<T: Clone>(&self, items: &[T]) -> (Vec<T>, usize) {
+        let total = items.len();
+        let start = self.offset.min(total);
+        let end = (start + self.limit).min(total);
+        (items[start..end].to_vec(), total)
+    }
+}
+
+/// 分页记账：把每个被截断集合的「截断前总数」与「是否被截断」汇总进 `page` 元信息。
+#[derive(Debug, Default)]
+struct PageReport {
+    totals: serde_json::Map<String, serde_json::Value>,
+    truncated: Vec<String>,
+}
+
+/// 被截断时的收窄提示（扁平列表与嵌套集合共用同一措辞）。
+fn truncation_hint(total: usize, returned: usize) -> String {
+    format!("已截断：共 {total} 条，本页 {returned} 条。用 offset/limit 翻页，或收窄查询")
+}
+
+impl PageReport {
+    fn record(&mut self, path: &str, total: usize, returned: usize) {
+        self.totals
+            .insert(path.to_string(), serde_json::json!(total));
+        if returned < total {
+            self.truncated.push(path.to_string());
+        }
+    }
+
+    /// 对 JSON 对象里的某个数组键分页（键不存在或不是数组时跳过）。
+    fn page_key(
+        &mut self,
+        object: &mut serde_json::Map<String, serde_json::Value>,
+        key: &str,
+        path: &str,
+        page: Page,
+    ) {
+        let (total, kept) = match object.get_mut(key) {
+            Some(serde_json::Value::Array(items)) => {
+                let total = items.len();
+                let start = page.offset.min(total);
+                let end = (start + page.limit).min(total);
+                let kept = items[start..end].to_vec();
+                *items = kept.clone();
+                (total, kept)
+            }
+            _ => return,
+        };
+        if kept.len() < total {
+            // 截断时给出明确的收窄提示，避免调用方以为「就这么多」。
+            object.insert(
+                format!("{key}_hint"),
+                serde_json::json!(truncation_hint(total, kept.len())),
+            );
+        }
+        self.record(path, total, kept.len());
+    }
+
+    fn value(&self, page: Page) -> serde_json::Value {
+        serde_json::json!({
+            "offset": page.offset,
+            "limit": page.limit,
+            "totals": self.totals,
+            "truncated": self.truncated,
+        })
+    }
+}
+
+/// 构造 `get_planning_state` 的载荷：**逐层只给下一层的索引**，最内层才给细节。
+///
+/// 这是对「一条查询让上下文爆炸」的结构性修法：原来读整个文档会把每层工厂的每条
+/// 机制一起倒出来（真实 py 上下文里一次自动规划就能写出 757 条机制），逐层索引 +
+/// 每层分页后，任何一次调用的返回量都由 `page` 决定。抽成纯函数以便单测。
+fn planning_state_value(snapshot: &DocSnapshot, page: Page) -> (serde_json::Value, PageReport) {
+    let mut report = PageReport::default();
+    let value = match snapshot {
+        // 无 project：项目索引（复用 list_projects 的紧凑摘要）。
+        DocSnapshot::Document(document) => {
+            let projects = project_summary(document);
+            let (kept, total) = page.slice(&projects);
+            report.record("projects", total, kept.len());
+            serde_json::json!({ "level": "document", "projects": kept })
+        }
+        // 单个 project：项目设置/规划偏好 + **工厂索引**（工厂细节要指名 factory）。
+        DocSnapshot::Project(project) => {
+            let factories = factory_summary(project);
+            let (kept, total) = page.slice(&factories);
+            report.record("factories", total, kept.len());
+            serde_json::json!({
+                "level": "project",
+                "project": project.id.0,
+                "name": project.name,
+                "context_id": project.context_id,
+                "settings": project.settings,
+                "planning": project.planning,
+                "factories": kept,
+            })
+        }
+        // project + factory：工厂文档（重复集合按 page 截断）。
+        DocSnapshot::Factory {
+            project,
+            factory,
+            factory_document,
+        } => {
+            let mut document = match serde_json::to_value(factory_document) {
+                Ok(serde_json::Value::Object(object)) => object,
+                _ => serde_json::Map::new(),
+            };
+            for (key, path) in [
+                ("mechanics", "mechanics"),
+                ("targets", "targets"),
+                ("target_expressions", "target_expressions"),
+                ("external_inputs", "external_inputs"),
+            ] {
+                report.page_key(&mut document, key, path, page);
+            }
+            serde_json::json!({
+                "level": "factory",
+                "project": project,
+                "factory": factory,
+                "factory_document": serde_json::Value::Object(document),
+            })
+        }
+    };
+    (value, report)
+}
+
 /// Parameters for `get_planning_state` (all optional; omit for the whole document).
 #[derive(Debug, serde::Deserialize, JsonSchema)]
 struct PlanningStateParams {
-    /// Project id (u64). Omit to return all projects.
+    /// Project id (u64). Omit to return the project index.
     #[serde(default)]
     project: Option<u64>,
-    /// Factory id (u64). Requires `project`.
+    /// Factory id (u64). Requires `project`; returns that factory's document.
     #[serde(default)]
     factory: Option<u64>,
     /// When set with `project` + `factory`, run a solve and include its result.
     #[serde(default)]
     recompute: bool,
+    /// 每个集合的返回上限与偏移（默认 50、上限 1000）。
+    #[serde(flatten)]
+    page: PageParams,
 }
 
 /// Parameters for `list_factories`.
@@ -836,5 +1074,136 @@ mod tests {
             "iron-plate"
         );
         assert!(factories[0].get("mechanics").is_some());
+    }
+
+    /// 分页参数：默认 50、下限 1、上限 1000；offset 原样传递。
+    #[test]
+    fn page_params_are_defaulted_and_clamped() {
+        assert_eq!(PageParams::default().resolve().limit, 50);
+        assert_eq!(PageParams::default().resolve().offset, 0);
+        assert_eq!(
+            PageParams {
+                limit: Some(0),
+                offset: None
+            }
+            .resolve()
+            .limit,
+            1
+        );
+        assert_eq!(
+            PageParams {
+                limit: Some(9_999),
+                offset: None
+            }
+            .resolve()
+            .limit,
+            1000
+        );
+        let paged = PageParams {
+            limit: Some(10),
+            offset: Some(7),
+        }
+        .resolve();
+        assert_eq!((paged.limit, paged.offset), (10, 7));
+        // 切片语义：起始位置超出总数时返回空页，而不是 panic 或倒回开头。
+        assert!(paged.slice(&[1, 2, 3]).0.is_empty());
+    }
+
+    /// `get_planning_state` 逐层只给下一层索引，最内层才给细节并分页——这是
+    /// 「一条查询把上下文撑爆」的结构性修法（原来读整个文档会把每层工厂的每条
+    /// 机制一起倒出来）。
+    #[test]
+    fn planning_state_is_level_by_level_and_paged() {
+        let document: AppDocument = serde_json::from_value(serde_json::json!({
+            "schema_version": metatorio_runtime::DOCUMENT_SCHEMA_VERSION,
+            "projects": [{
+                "id": 1,
+                "name": "p",
+                "factories": [{
+                    "id": 2,
+                    "name": "f",
+                    "targets": [
+                        { "id": 3, "flow": { "Item": { "id": "iron-plate", "quality": "normal" } }, "amount": 1.0 },
+                        { "id": 4, "flow": { "Item": { "id": "copper-plate", "quality": "normal" } }, "amount": 2.0 },
+                    ],
+                    "mechanics": [
+                        { "id": 5, "mechanic": { "type": "recipe" } },
+                        { "id": 6, "mechanic": { "type": "recipe" } },
+                        { "id": 7, "mechanic": { "type": "mining" } },
+                    ]
+                }]
+            }]
+        }))
+        .unwrap();
+        let project = document.projects[0].clone();
+        let factory_document = project.factories[0].clone();
+        let page = PageParams {
+            limit: Some(2),
+            offset: None,
+        }
+        .resolve();
+
+        // 文档层：项目索引（没有工厂/机制明细）。
+        let (value, report) = planning_state_value(&DocSnapshot::Document(document), page);
+        assert_eq!(value["level"], "document");
+        assert_eq!(value["projects"].as_array().unwrap().len(), 1);
+        assert!(
+            value["projects"][0]["mechanics"].is_number(),
+            "项目索引里的 mechanics 是数量而不是明细数组：{}",
+            value["projects"][0]
+        );
+        assert_eq!(report.totals["projects"], 1);
+        assert!(report.truncated.is_empty(), "1 条项目不该被截断");
+
+        // 项目层：设置/规划偏好 + 工厂索引（同样没有机制明细）。
+        let (value, _) = planning_state_value(&DocSnapshot::Project(project), page);
+        assert_eq!(value["level"], "project");
+        assert_eq!(value["name"], "p");
+        assert!(value.get("settings").is_some() && value.get("planning").is_some());
+        assert_eq!(value["factories"].as_array().unwrap().len(), 1);
+        assert!(
+            value["factories"][0]["mechanics"].is_number(),
+            "工厂索引里的 mechanics 是数量，项目层不该泄漏机制明细：{}",
+            value["factories"][0]
+        );
+        assert!(value["factories"][0]["targets"].is_array());
+
+        // 工厂层：给细节，但重复集合按 page 截断且如实上报（3 条机制 → 2 条）。
+        let (value, report) = planning_state_value(
+            &DocSnapshot::Factory {
+                project: 1,
+                factory: 2,
+                factory_document,
+            },
+            page,
+        );
+        assert_eq!(value["level"], "factory");
+        let document = &value["factory_document"];
+        assert_eq!(document["mechanics"].as_array().unwrap().len(), 2);
+        assert_eq!(document["targets"].as_array().unwrap().len(), 2);
+        assert_eq!(report.totals["mechanics"], 3);
+        assert_eq!(report.totals["targets"], 2);
+        assert!(
+            report.truncated.contains(&"mechanics".to_string()),
+            "{:?}",
+            report.truncated
+        );
+        assert!(
+            !report.truncated.contains(&"targets".to_string()),
+            "刚好放得下就不该标成截断"
+        );
+        assert!(
+            document["mechanics_hint"]
+                .as_str()
+                .unwrap()
+                .contains("共 3 条"),
+            "被截断的集合要带收窄提示：{}",
+            document["mechanics_hint"]
+        );
+        // page 元信息本身要能自证：截断前总数 + 被截断的集合名。
+        let meta = report.value(page);
+        assert_eq!(meta["limit"], 2);
+        assert_eq!(meta["totals"]["mechanics"], 3);
+        assert_eq!(meta["truncated"][0], "mechanics");
     }
 }
