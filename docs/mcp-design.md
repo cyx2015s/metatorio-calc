@@ -83,7 +83,7 @@ Phase 2 工具面**不在一开始就做成离散的友好工具**，而是：
 | `list_factories` | `{ project }` | 单项目下的工厂索引（含目标清单） |
 | `list_contexts` | — | 游戏数据上下文索引（id/名称/来源/是否已载入/哪个是激活的）。上下文是内容哈希缓存，agent 只能列举与切换，不能创建 |
 | `list_prototypes` | `{ kind?, name_contains?, context_id? }` | 领域词表：该上下文里的物品/流体/配方/科技/机器/资源…（name、localized_name、group/subgroup、categories、燃料信息、插件槽）。返回 `total`/`matched`/`entries`，不做截断——用 `kind`/`name_contains` 收窄 |
-| `localized_names` | `{ queries[], kind?, limit_per_query?, context_id? }` | **名字 ↔ 本地化名互查**：`queries` 可混用原型 id（`iron-gear-wheel`）与玩家口述的本地化名（`铁齿轮`）。每个查询先精确命中（id、本地化名各一轮），再按「本地化名前缀 → id 前缀 → 本地化名子串 → id 子串」给出模糊命中，逐条带 `matched_by`。用于「把求解结果翻译成群内能读懂的名字」与「群友口述 → id」 |
+| `localized_names` | `{ queries[], kind?, limit_per_query?, context_id? }` | **名字 ↔ 本地化名互查**：`queries` 可混用原型 id（`iron-gear-wheel`）与玩家口述的本地化名（`铁齿轮`）。匹配时**忽略 `-` / `_` / 空白**（`processing unit`＝`processing_unit`＝`PROCESSING-UNIT`＝`processing-unit`），先精确命中（id、本地化名各一轮），再按「本地化名前缀 → id 前缀 → 本地化名子串 → id 子串」给模糊命中，逐条带 `matched_by`；精确与模糊都为空时再给**错拼候选**（编辑距离，相邻换位算 1 步），其中 `typo_suggestion` 只在「最佳距离上**名字唯一**」时非空（同名跨 item/recipe 不算歧义，kind 由调用方按上下文选）——几个名字同样接近（`processing-unit-2` 与 `-3`）时返回 null，让人确认 |
 | `suggest` | `{ flow, context_id? }` | 给定一条流，列出能产出/消耗它的候选机制（recipe/resource/item-fuel/generator，含 role）——「加机制」前的第一步 |
 
 后续按 agent 真实使用反馈，再把常见需求从 `dispatch` 拆出更友好的专用工具（仍在同一 `dispatch` 路径之上）。

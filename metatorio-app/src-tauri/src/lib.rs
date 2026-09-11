@@ -258,7 +258,7 @@ pub struct CatalogIndex {
 ///
 /// `matched_by` 说明命中方式，便于调用方区分「就是它」和「只是像」：
 /// `name-exact` / `localized-exact` / `localized-prefix` / `name-prefix` /
-/// `localized-contains` / `name-contains`。
+/// `localized-contains` / `name-contains` / `typo`。
 #[derive(Debug, Clone, Serialize)]
 pub struct ResolvedName {
     pub kind: String,
@@ -266,6 +266,9 @@ pub struct ResolvedName {
     pub localized_name: String,
     pub group: String,
     pub matched_by: &'static str,
+    /// 仅 `typo` 命中带距离（其它命中为 null，序列化时省略）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub distance: Option<usize>,
 }
 
 /// 配方原料/产物条目（含概率/产能/品质修饰）。
@@ -1268,7 +1271,78 @@ fn icon(
     None
 }
 
-/// 一次名字查询的结果：精确命中 + 截断到 `limit` 的模糊命中。
+/// 匹配用的归一化：小写 + 去掉分隔符（连字符/下划线/空白，含全角与 Unicode 破折号）。
+///
+/// 名字里的分隔符几乎不可预测——同一个原型会被写成 `processing-unit`、
+/// `processing_unit`、`processing unit`，中文 mod 名里也常夹空格。因此**只对
+/// 比较用的字符串**去掉这些字符；返回给调用方的 `name` / `localized_name`
+/// 仍是原型原名（要拿它去 dispatch）。
+fn normalize_for_match(value: &str) -> String {
+    value
+        .chars()
+        .flat_map(char::to_lowercase)
+        .filter(|ch| !is_separator(*ch))
+        .collect()
+}
+
+fn is_separator(ch: char) -> bool {
+    ch.is_whitespace()
+        || matches!(
+            ch,
+            '-' | '_' | '\u{2010}'
+                ..='\u{2015}' // 各种 Unicode 连字符/破折号
+                | '\u{2212}'               // 减号
+                | '\u{ff0d}'               // 全角连字符
+                | '\u{ff3f}' // 全角下划线
+        )
+}
+
+/// typo 桶的 kind 优先级：口述一个名字时最可能指的是**物品/插件**，其次是流体，
+/// 再是配方，最后才是机器/科技/星球这类概念。
+///
+/// 只用于给错拼候选排序：同一个名字跨多个原型组时，让 `typo_suggestion` 落在最
+/// 可能的那个组上（否则可能给出 `kind: technology` 这种突兀的默认），调用方仍可
+/// 用 `kind` 参数或从 `typo` 列表里自选。
+fn typo_kind_rank(kind: &str) -> u8 {
+    match kind {
+        "item" | "module" => 0,
+        "fluid" => 1,
+        "recipe" => 2,
+        _ => 3,
+    }
+}
+
+/// 打字错误的编辑距离（OSA：相邻字符换位算 1 步——这是最常见的手误，
+/// 纯 Levenshtein 会把它算成 2，从而漏掉 `chemcial` 这类错拼）。
+fn typo_distance(left: &[char], right: &[char]) -> usize {
+    if left.is_empty() {
+        return right.len();
+    }
+    if right.is_empty() {
+        return left.len();
+    }
+    let mut prev2 = vec![0usize; right.len() + 1];
+    let mut prev: Vec<usize> = (0..=right.len()).collect();
+    let mut current = vec![0usize; right.len() + 1];
+    for i in 1..=left.len() {
+        current[0] = i;
+        for j in 1..=right.len() {
+            let cost = usize::from(left[i - 1] != right[j - 1]);
+            let mut best = (prev[j] + 1)
+                .min(current[j - 1] + 1)
+                .min(prev[j - 1] + cost);
+            if i > 1 && j > 1 && left[i - 1] == right[j - 2] && left[i - 2] == right[j - 1] {
+                best = best.min(prev2[j - 2] + 1);
+            }
+            current[j] = best;
+        }
+        std::mem::swap(&mut prev2, &mut prev);
+        std::mem::swap(&mut prev, &mut current);
+    }
+    prev[right.len()]
+}
+
+/// 一次名字查询的结果：精确命中 + 截断到 `limit` 的模糊命中 + 打字错误候选。
 ///
 /// `partial_matched` 是模糊命中的**总数**（截断前），因此
 /// `partial_matched > partial.len()` 即表示结果被截断。
@@ -1277,49 +1351,75 @@ pub struct ResolvedQuery {
     pub exact: Vec<ResolvedName>,
     pub partial: Vec<ResolvedName>,
     pub partial_matched: usize,
+    /// 打字错误候选（**仅在精确与模糊都为空时才计算**）：按编辑距离升序，
+    /// 每条带 `distance`。
+    pub typo: Vec<ResolvedName>,
+    /// typo 命中的总数（截断前）。
+    pub typo_matched: usize,
+    /// 最佳（最小）编辑距离；没有 typo 命中时为 `None`。
+    pub typo_best_distance: Option<usize>,
+    /// 最佳距离上有多少**不同名字**。`1` = 名字唯一——即使同名跨 item/recipe
+    /// 等多个原型组也不算歧义（与 `exact` 桶的约定一致：名字是确定的，kind 由
+    /// 调用方按上下文选）；`> 1` = 有几个同样接近的名字，必须人工确认。
+    pub typo_best_name_count: usize,
+    /// 「高置信度结果」：**仅当最佳距离上只有一个不同名字时**给出该候选，否则 `None`。
+    ///
+    /// 这是刻意的：错拼命中一旦被当成确定答案，就会把错误原型名写进计划
+    /// （校验能过、计划是错的），所以平局时宁可交回 `None` 让调用方问人。
+    pub typo_suggestion: Option<ResolvedName>,
 }
 
 /// 解析一个「名字查询」：既接受原型 id（`iron-gear-wheel`），也接受玩家口述的
 /// 本地化名（`铁齿轮`）。
 ///
-/// - **精确命中**：原型名或本地化名与查询完全相同（大小写不敏感）。同一个名字
-///   在不同原型组里可能是多条（如 `speed-module` 同时是 item/recipe/technology），
-///   因此这里返回全部、不去重；
+/// - **精确命中**：归一化（小写 + 去掉 `-`/`_`/空白）后与原型名或本地化名完全
+///   相同——`processing unit` / `processing_unit` / `PROCESSING-UNIT` 都等于
+///   `processing-unit`。同一个名字在不同原型组里可能是多条（`speed-module`
+///   同时是 item/recipe/technology），因此返回全部、不去重；
 /// - **模糊命中**：按「本地化名前缀 → 原型名前缀 → 本地化名子串 → 原型名子串」
-///   排序后取前 `limit` 条，并用 `matched_by` 标注命中方式——口述名往往只记得
-///   一半（「铁板」可能同时是 `铁板`/`铁棒`/`铁板条`），排序让人一眼看到该选哪个。
+///   排序后取前 `limit` 条，用 `matched_by` 标注命中方式——口述名往往只记得
+///   一半（「铁板」可能同时是 `铁板`/`铁棒`/`铁板条`）；
+/// - **打字错误**：精确与模糊都为空时，才按编辑距离找近似候选（阈值随查询长度
+///   收紧），并给出 `typo_best_distance` / `typo_margin` 作为置信证据。
 ///
 /// 抽成纯函数是为了可单测：MCP 工具只负责取索引与序列化。求解结果里的 id 换成
 /// 中文名（向群里汇报）与「口述名 → id」共用这一套匹配口径。
+///
+/// 打字错误的置信规则：只有「最佳编辑距离上只有一个候选」时才给
+/// [`ResolvedQuery::typo_suggestion`]；平局时它是 `None`（宁可让人确认，也不能
+/// 猜一个原型名——错误的名字能通过校验，却会让计划悄悄跑偏）。
 pub(crate) fn resolve_index_entry(
     entries: &[IndexEntry],
     query: &str,
     limit: usize,
 ) -> ResolvedQuery {
-    let needle = query.trim().to_lowercase();
+    let needle = normalize_for_match(query);
     if needle.is_empty() {
         return ResolvedQuery::default();
     }
-    let resolved = |entry: &IndexEntry, matched_by: &'static str| ResolvedName {
-        kind: entry.kind.clone(),
-        name: entry.name.clone(),
-        localized_name: entry.localized_name.clone(),
-        group: entry.group.clone(),
-        matched_by,
-    };
+    let needle_chars: Vec<char> = needle.chars().collect();
+    let resolved =
+        |entry: &IndexEntry, matched_by: &'static str, distance: Option<usize>| ResolvedName {
+            kind: entry.kind.clone(),
+            name: entry.name.clone(),
+            localized_name: entry.localized_name.clone(),
+            group: entry.group.clone(),
+            matched_by,
+            distance,
+        };
 
     let mut exact = Vec::new();
     // (排序键, 本地化名长度, 名字)——后两者只为让结果稳定、可读。
     let mut partial: Vec<(u8, usize, ResolvedName)> = Vec::new();
     for entry in entries {
-        let name = entry.name.to_lowercase();
-        let localized = entry.localized_name.to_lowercase();
+        let name = normalize_for_match(&entry.name);
+        let localized = normalize_for_match(&entry.localized_name);
         if name == needle {
-            exact.push(resolved(entry, "name-exact"));
+            exact.push(resolved(entry, "name-exact", None));
             continue;
         }
         if !localized.is_empty() && localized == needle {
-            exact.push(resolved(entry, "localized-exact"));
+            exact.push(resolved(entry, "localized-exact", None));
             continue;
         }
         let (rank, matched_by) = if !localized.is_empty() && localized.starts_with(&needle) {
@@ -1336,7 +1436,7 @@ pub(crate) fn resolve_index_entry(
         partial.push((
             rank,
             entry.localized_name.chars().count(),
-            resolved(entry, matched_by),
+            resolved(entry, matched_by, None),
         ));
     }
     partial.sort_by(|left, right| {
@@ -1346,22 +1446,96 @@ pub(crate) fn resolve_index_entry(
             .then(left.2.name.cmp(&right.2.name))
     });
     let partial_matched = partial.len();
-    let partial = partial
+    let partial: Vec<ResolvedName> = partial
         .into_iter()
         .take(limit)
         .map(|(_, _, resolved)| resolved)
         .collect();
+
+    // 打字错误只在「什么都没有」时才算：正常查询不会被近似结果干扰，扫描成本也
+    // 只在真正可能用到时付出（外加长度预筛，避免对两万条原型逐个算距离）。
+    // 排序键 = (编辑距离, kind 优先级, 本地化名长度) + 命中。
+    let mut typo: Vec<((usize, u8, usize), ResolvedName)> = Vec::new();
+    if exact.is_empty() && partial_matched == 0 {
+        let max_distance = match needle_chars.len() {
+            0..=2 => 0, // 太短：任何两个名字都「差不多」，没有意义
+            3..=4 => 1,
+            _ => 2,
+        };
+        if max_distance > 0 {
+            for entry in entries {
+                let name = normalize_for_match(&entry.name);
+                let localized = normalize_for_match(&entry.localized_name);
+                let mut best: Option<usize> = None;
+                for candidate in [&name, &localized] {
+                    if candidate.is_empty()
+                        || candidate.len().abs_diff(needle_chars.len()) > max_distance
+                    {
+                        continue;
+                    }
+                    let chars: Vec<char> = candidate.chars().collect();
+                    let distance = typo_distance(&needle_chars, &chars);
+                    best = Some(best.map_or(distance, |current: usize| current.min(distance)));
+                }
+                if let Some(distance) = best {
+                    if distance <= max_distance {
+                        typo.push((
+                            (
+                                distance,
+                                typo_kind_rank(&entry.kind),
+                                entry.localized_name.chars().count(),
+                            ),
+                            resolved(entry, "typo", Some(distance)),
+                        ));
+                    }
+                }
+            }
+            // 排序键 = (编辑距离, kind 优先级, 本地化名长度)，同键按名字稳定收尾。
+            typo.sort_by(|left, right| left.0.cmp(&right.0).then(left.1.name.cmp(&right.1.name)));
+        }
+    }
+    let typo_matched = typo.len();
+    let typo_best_distance = typo.first().map(|((distance, _, _), _)| *distance);
+    // 并列判定按**名字**去重：同一个名字出现在多个原型组（item/recipe/…）不算歧义
+    // ——名字是确定的，调用方只需再按上下文选一个 kind（与 `exact` 桶一致）。
+    let typo_best_name_count = typo_best_distance.map_or(0, |best| {
+        let mut names: Vec<&str> = typo
+            .iter()
+            .filter(|((distance, _, _), _)| *distance == best)
+            .map(|(_, resolved)| resolved.name.as_str())
+            .collect();
+        names.sort_unstable();
+        names.dedup();
+        names.len()
+    });
+    // 名字唯一才给高置信度建议；多个同样接近的名字（processing-unit-2 与 -3）返回 None。
+    let typo_suggestion = if typo_best_name_count == 1 {
+        typo.first().map(|(_, resolved)| resolved.clone())
+    } else {
+        None
+    };
+    let typo: Vec<ResolvedName> = typo
+        .into_iter()
+        .take(limit)
+        .map(|(_, resolved)| resolved)
+        .collect();
+
     ResolvedQuery {
         exact,
         partial,
         partial_matched,
+        typo,
+        typo_matched,
+        typo_best_distance,
+        typo_best_name_count,
+        typo_suggestion,
     }
 }
 
-/// 过滤目录索引条目：`kind` 精确匹配（大小写不敏感），`name_contains` 大小写不
-/// 敏感地匹配 `name` 或 `localized_name`。归一化在这里做，调用方直接传原始输入。
-/// 供 MCP 的 `list_prototypes` 工具与测试共用——「domain 词表」查得对不对完全
-/// 取决于这两个条件。
+/// 过滤目录索引条目：`kind` 精确匹配（大小写不敏感），`name_contains` 与
+/// `name`/`localized_name` 做子串比较——**同样走 [`normalize_for_match`]**，
+/// 因此 `processing unit` 也能筛出 `processing-unit`。归一化在这里做，调用方
+/// 直接传原始输入。供 MCP 的 `list_prototypes` 工具与测试共用。
 pub(crate) fn filter_index_entries(
     entries: Vec<IndexEntry>,
     kind: Option<&str>,
@@ -1371,15 +1545,15 @@ pub(crate) fn filter_index_entries(
         .map(|kind| kind.trim().to_lowercase())
         .filter(|kind| !kind.is_empty());
     let needle = needle
-        .map(|needle| needle.trim().to_lowercase())
+        .map(normalize_for_match)
         .filter(|needle| !needle.is_empty());
     entries
         .into_iter()
         .filter(|entry| kind.as_deref().is_none_or(|kind| entry.kind == kind))
         .filter(|entry| match &needle {
             Some(needle) => {
-                entry.name.to_lowercase().contains(needle)
-                    || entry.localized_name.to_lowercase().contains(needle)
+                normalize_for_match(&entry.name).contains(needle)
+                    || normalize_for_match(&entry.localized_name).contains(needle)
             }
             None => true,
         })
@@ -3822,6 +3996,158 @@ mod tests {
                 .exact
                 .len()
                 == 1
+        );
+    }
+
+    /// 分隔符归一化：`-` / `_` / 空白（含全角、Unicode 破折号）在比较时等同，
+    /// 因此 `processing unit` / `processing_unit` / `PROCESSING-UNIT` 都能命中
+    /// `processing-unit`——同一件事在群里会被写成三种样子。
+    #[test]
+    fn resolve_index_entry_ignores_separators() {
+        let entries = vec![
+            index_entry("item", "processing-unit", "处理器"),
+            index_entry("item", "processing-unit-2", "处理器2"),
+            index_entry("fluid", "sulfuric-acid", "硫酸"),
+        ];
+
+        for query in [
+            "processing unit",
+            "processing_unit",
+            "PROCESSING-UNIT",
+            "  processing   unit  ",
+            "processing\u{2011}unit", // Unicode 连字符
+            "processing\u{ff0d}unit", // 全角连字符
+        ] {
+            let resolved = resolve_index_entry(&entries, query, 8);
+            assert_eq!(
+                resolved.exact.len(),
+                1,
+                "`{query}` 应精确命中 processing-unit：{:?}",
+                resolved
+            );
+            assert_eq!(resolved.exact[0].name, "processing-unit");
+            assert_eq!(resolved.exact[0].matched_by, "name-exact");
+        }
+
+        // 带序号的名字同样能被「用空格念出来」的写法找到。
+        let numbered = resolve_index_entry(&entries, "processing unit 2", 8);
+        assert_eq!(numbered.exact.len(), 1);
+        assert_eq!(numbered.exact[0].name, "processing-unit-2");
+
+        // 反方向：本地化名里的空格也归一化。
+        let with_space = vec![index_entry("item", "weird-item", "奇怪 物品")];
+        let resolved = resolve_index_entry(&with_space, "奇怪物品", 8);
+        assert_eq!(resolved.exact.len(), 1, "本地化名里的空格应被忽略");
+    }
+
+    /// 打字错误候选：只在精确与模糊都为空时计算，按编辑距离排序，并给出置信证据
+    /// ——**绝不替调用方选一个「最佳答案」**。
+    #[test]
+    fn resolve_index_entry_reports_typo_candidates_with_evidence() {
+        let entries = vec![
+            index_entry("item", "processing-unit", "处理器"),
+            index_entry("item", "chemical-plant", "化工厂"),
+        ];
+
+        // 唯一且领先的错拼（漏一个字母 / 相邻换位）→ 给出高置信度建议。
+        for query in ["procesing-unit", "processnig-unit"] {
+            let resolved = resolve_index_entry(&entries, query, 8);
+            assert!(resolved.exact.is_empty() && resolved.partial.is_empty());
+            assert_eq!(resolved.typo_matched, 1, "`{query}`：{:?}", resolved.typo);
+            assert_eq!(resolved.typo[0].name, "processing-unit");
+            assert_eq!(resolved.typo[0].matched_by, "typo");
+            assert_eq!(resolved.typo[0].distance, Some(1));
+            assert_eq!(resolved.typo_best_distance, Some(1));
+            assert_eq!(resolved.typo_best_name_count, 1);
+            assert_eq!(
+                resolved.typo_suggestion.map(|hit| hit.name),
+                Some("processing-unit".to_string()),
+                "唯一最接近的候选应作为高置信度建议给出"
+            );
+        }
+
+        // 同名跨组（item + recipe）**不算歧义**：名字确定，只是 kind 要调用方选。
+        let same_name_two_kinds = vec![
+            index_entry("item", "processing-unit", "处理器"),
+            index_entry("recipe", "processing-unit", "处理器"),
+        ];
+        let same_name = resolve_index_entry(&same_name_two_kinds, "procesing-unit", 8);
+        assert_eq!(same_name.typo_best_name_count, 1);
+        assert_eq!(same_name.typo_matched, 2);
+        assert!(
+            same_name.typo_suggestion.is_some(),
+            "同名跨组不该被判成歧义：{:?}",
+            same_name.typo
+        );
+
+        // 更远的候选仍会列出（供人判断），但不会影响「最佳唯一」的结论。
+        let with_numbers = vec![
+            index_entry("item", "processing-unit", "处理器"),
+            index_entry("item", "processing-unit-2", "处理器2"),
+        ];
+        let ranked = resolve_index_entry(&with_numbers, "procesing-unit", 8);
+        assert_eq!(ranked.typo[0].name, "processing-unit");
+        assert_eq!(ranked.typo_best_distance, Some(1));
+        assert_eq!(ranked.typo_best_name_count, 1);
+        assert!(ranked.typo.len() >= 2, "{:?}", ranked.typo);
+
+        // 两个不同的名字同样接近（`-2` 与 `-3`）→ 不给建议，必须人工确认。
+        let ambiguous_entries = vec![
+            index_entry("item", "processing-unit-2", "处理器2"),
+            index_entry("item", "processing-unit-3", "处理器3"),
+        ];
+        let ambiguous = resolve_index_entry(&ambiguous_entries, "processing-unit-4", 8);
+        assert_eq!(ambiguous.typo.len(), 2, "{:?}", ambiguous.typo);
+        assert_eq!(ambiguous.typo_best_distance, Some(1));
+        assert_eq!(ambiguous.typo_best_name_count, 2);
+        assert!(
+            ambiguous.typo_suggestion.is_none(),
+            "并列时不能给「高置信度建议」：{:?}",
+            ambiguous.typo_suggestion
+        );
+
+        // 命中精确/模糊时不计算 typo：正常查询不被近似结果干扰。
+        let normal = resolve_index_entry(&entries, "chemical-plant", 8);
+        assert_eq!(normal.exact.len(), 1);
+        assert!(normal.typo.is_empty() && normal.typo_best_distance.is_none());
+
+        // 查询太短（≤2 字符）时不做错拼匹配：那时任何名字都「差不多」。
+        let short = resolve_index_entry(&entries, "zz", 8);
+        assert!(short.typo.is_empty());
+
+        // 差距过大时不硬凑答案。
+        let unrelated = resolve_index_entry(&entries, "uranium-enrichment", 8);
+        assert!(
+            unrelated.typo.is_empty(),
+            "不该凑近似答案：{:?}",
+            unrelated.typo
+        );
+    }
+
+    /// `list_prototypes` 的 `name_contains` 与名字解析共用同一套归一化。
+    #[test]
+    fn index_entry_filter_ignores_separators() {
+        let entries = vec![
+            index_entry("item", "processing-unit", "处理器"),
+            index_entry("item", "iron-plate", "铁板"),
+        ];
+        let names = |filtered: Vec<IndexEntry>| {
+            filtered
+                .into_iter()
+                .map(|entry| entry.name)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            names(filter_index_entries(
+                entries.clone(),
+                None,
+                Some("processing unit")
+            )),
+            vec!["processing-unit".to_string()]
+        );
+        assert_eq!(
+            names(filter_index_entries(entries, None, Some("IRON_PLATE"))),
+            vec!["iron-plate".to_string()]
         );
     }
 

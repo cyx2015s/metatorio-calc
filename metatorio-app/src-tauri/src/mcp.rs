@@ -431,13 +431,24 @@ impl MetatorioMcp {
         back.  Pass `queries` with either a raw prototype id (e.g. `iron-gear-wheel`) or a \
         localized name as a player would say it (e.g. `铁齿轮`); each query is matched \
         exactly first (raw id, then localized name), then by prefix/substring, and every \
-        hit reports `matched_by` so you can tell an exact hit from a loose one.  Use this \
-        to (a) report solve results in the player's language instead of raw ids and \
-        (b) turn an item name someone mentioned in chat back into the id that `dispatch` \
-        needs.  `localized_name` is empty when the context has no locale dump (then fall \
-        back to `list_prototypes`).  `exact` may contain several entries for one query: \
-        the same name can exist as item / recipe / technology / entity, and `kind` \
-        narrows it."
+        hit reports `matched_by` so you can tell an exact hit from a loose one.  \
+        Separators are ignored while matching: `processing unit`, `processing_unit` and \
+        `PROCESSING-UNIT` all hit `processing-unit` (returned `name` keeps the real id).  \
+        Use this to (a) report solve results in the player's language instead of raw ids \
+        and (b) turn an item name someone mentioned in chat back into the id that \
+        `dispatch` needs.  \
+        When nothing matches exactly or partially, the `typo` bucket holds \
+        typo-tolerant candidates for queries of 3+ characters, each with an edit \
+        `distance` (adjacent transpositions count as 1).  `typo_suggestion` is the \
+        high-confidence pick and is non-null **only when a single name is uniquely \
+        closest** (the same name in several prototype groups is not ambiguous — pick \
+        the `kind` you need from `typo`); when it is null, several names are equally \
+        close (`processing-unit-2` vs `-3`) or none is close enough — ask the human \
+        instead of guessing, because a wrong prototype id validates fine and silently \
+        produces the wrong plan.  \
+        `localized_name` is empty when the context has no locale dump (then fall back to \
+        `list_prototypes`).  `exact` may contain several entries for one query: the same \
+        name can exist as item / recipe / technology / entity, and `kind` narrows it."
     )]
     async fn localized_names(
         &self,
@@ -461,13 +472,22 @@ impl MetatorioMcp {
                 let resolved = crate::resolve_index_entry(&entries, query, limit);
                 serde_json::json!({
                     "query": query,
-                    // 精确 + 模糊命中的总数（模糊部分在截断前计数）。
+                    // 精确 + 模糊命中的总数（模糊部分在截断前计数；typo 单独统计）。
                     "matched": resolved.exact.len() + resolved.partial_matched,
                     // 模糊结果被 limit 截断时置 true：要更全就调大 limit_per_query，
                     // 或用 `list_prototypes` 的 name_contains 自己筛。
                     "partial_truncated": resolved.partial_matched > resolved.partial.len(),
                     "exact": resolved.exact,
                     "partial": resolved.partial,
+                    // 错拼候选：只在精确与模糊都为空时才有内容。typo_suggestion 是
+                    // 「高置信度结果」——只有最佳距离上**名字唯一**时才非空（同名跨
+                    // item/recipe 不算歧义）；为 null 说明有几个同样接近的名字
+                    // （processing-unit-2 与 -3）或都没凑到，需要问人。
+                    "typo": resolved.typo,
+                    "typo_matched": resolved.typo_matched,
+                    "typo_best_distance": resolved.typo_best_distance,
+                    "typo_best_name_count": resolved.typo_best_name_count,
+                    "typo_suggestion": resolved.typo_suggestion,
                 })
             })
             .collect();
