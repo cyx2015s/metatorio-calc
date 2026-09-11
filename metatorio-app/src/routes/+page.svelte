@@ -1612,7 +1612,7 @@
               onchange={(event) =>
                 runtime.setStrictSource((event.currentTarget as HTMLInputElement).checked).catch(() => {})}
             />
-            严格供给（只允许从外部输入获得未配平物品）
+            严格供给（只允许从外部输入获得未配平物品；<strong>自动规划总是按它求解，完成后会打开此项</strong>）
           </label>
           <label class="check">
             <input
@@ -1925,7 +1925,7 @@
     <!-- 中栏：机制列表 -->
     <section class="col center">
       <div class="toolbar">
-        <button class="btn" title="自动规划：迭代添加建议机制直至可解" onclick={() => runtime.autoPlan().catch(() => {})} disabled={runtime.autoPlanning || !factory}>
+        <button class="btn" title="自动规划：按规划偏好的枚举列表生成候选机制 → 选优 → 回写机制列表。总是按严格供给求解，并在完成后自动开启严格供给" onclick={() => runtime.autoPlan().catch(() => {})} disabled={runtime.autoPlanning || !factory}>
           {runtime.autoPlanning ? "规划中…" : "自动规划"}
         </button>
         <button class="btn ghost" title="移除求解中用量低于阈值的机制" onclick={() => runtime.cleanup("remove-unused").catch(() => {})} disabled={!solved}>

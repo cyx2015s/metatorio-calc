@@ -590,7 +590,16 @@ pub enum CleanupAction {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum SolveAction {
+    /// 按工厂**当前的** `strict_source` / `strict_sink` 重新求解（不修改文档设置）。
     Recompute,
+    /// 自动规划：按项目的枚举偏好生成候选机制 → LP 选优 → **回写机制列表** → 重解。
+    ///
+    /// **总是按严格供给（strict source）求解**，并在回写时把工厂的 `strict_source`
+    /// 置为 true：规划用严格供给算出 A，而普通重解按工厂设置可能给出 B，同一个工厂
+    /// 两套结果会让人和 agent 都无法判断哪个算数。因此调用方**不需要**先手动开严格
+    /// 供给；如果只想按当前设置重解，用 `recompute`。
+    ///
+    /// 候选空间由 `planning`（替代数量 / 机器偏好 / 枚举插件 / 枚举插件塔）决定。
     AutoPlan,
 }
 

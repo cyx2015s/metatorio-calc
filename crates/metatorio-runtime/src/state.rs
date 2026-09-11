@@ -133,6 +133,37 @@ impl RuntimeState {
         self.finish(outcome)
     }
 
+    /// 自动规划回写：替换机制列表，**并把工厂标记为严格供给**。
+    ///
+    /// 自动规划**总是**按严格供给求解（[`crate::solve::plan_auto_plan`] 里写死
+    /// `strict_source = true`），所以文档必须跟着落在同一个模式下：否则规划按严格
+    /// 供给给出 A，而之后任何一次普通重解（[`crate::solve::solve_snapshot_with`]
+    /// 按 `factory.strict_source` 走）会给出 B，同一个工厂两套结果——实际使用中
+    /// 反复出现「人和 agent 都忘了开严格供给，于是看到错误结果」。
+    ///
+    /// 机制列表与现有机制等价时**不动列表**（只补标记）：重新分配机制 id 会让前端
+    /// 的选择态失效，而计划本身没变。两者都没变时返回 `changed = false`，调用方
+    /// 可据此直接重解（命中缓存）而不必落盘。
+    pub fn apply_auto_plan(
+        &mut self,
+        project: ProjectId,
+        factory: FactoryId,
+        mechanics: Vec<Mechanic>,
+    ) -> Result<DispatchResult, RuntimeError> {
+        let strict_changed = replace(&mut self.factory_mut(project, factory)?.strict_source, true);
+        let existing: Vec<Mechanic> = self
+            .factory(project, factory)?
+            .mechanics
+            .iter()
+            .map(|entry| entry.mechanic.clone())
+            .collect();
+        if crate::auto_plan::same_mechanics(&existing, &mechanics) {
+            // 标记与列表都没变 → changed = false；只补了标记 → 一次 Persist + 重解。
+            return self.finish(Outcome::solve_factory_if(strict_changed, project, factory));
+        }
+        self.replace_factory_mechanics(project, factory, mechanics)
+    }
+
     /// 求解后清理回写：按每机制用量删减/重排机制（同样走 reducer 收尾）。
     ///
     /// - `RemoveUnused`：用量低于阈值（1e-9）的机制移除；
@@ -2404,6 +2435,86 @@ mod tests {
         assert_ne!(
             mechanics[0].id, mechanics[1].id,
             "回写的机制应各自分配新 id"
+        );
+    }
+
+    /// 自动规划回写：替换机制**并**把工厂标记为严格供给；三态行为都要对——
+    /// - 机制不同 → 换列表 + 补标记（同一次 finish：一次 revision/Persist/Recompute）；
+    /// - 机制等价但未严格供给 → **不动机制列表**（保住机制 id，前端选择态不失效），
+    ///   只补标记（仍要落盘 + 重解，因为求解语义变了）；
+    /// - 机制等价且已严格供给 → `changed = false`、无副作用命令（调用方可直接重解）。
+    #[test]
+    fn auto_plan_writeback_forces_strict_source() {
+        let (mut state, project, factory) = state_with_factory();
+        let recipe = MechanicKind::Recipe
+            .default_mechanic()
+            .expect("recipe 机制可用");
+        assert!(
+            !state.factory(project, factory).unwrap().strict_source,
+            "前置：默认不是严格供给"
+        );
+
+        // 1) 机制不同：换列表 + 补标记，只有一次 revision bump。
+        let before = state.revision;
+        let outcome = state
+            .apply_auto_plan(project, factory, vec![recipe.clone()])
+            .unwrap();
+        assert!(outcome.changed);
+        assert_eq!(
+            state.revision,
+            before + 1,
+            "标记与列表应在同一次 finish 里落盘"
+        );
+        assert!(
+            state.factory(project, factory).unwrap().strict_source,
+            "自动规划回写必须把工厂标记为严格供给"
+        );
+        assert!(outcome.commands.contains(&RuntimeCommand::Persist {
+            project,
+            path: None,
+        }));
+        assert!(
+            outcome
+                .commands
+                .contains(&RuntimeCommand::Recompute { project, factory })
+        );
+
+        // 2) 机制等价 + 已严格供给：无变化、无副作用命令。
+        let without = state.factory(project, factory).unwrap().mechanics.len();
+        let outcome = state
+            .apply_auto_plan(project, factory, vec![recipe.clone()])
+            .unwrap();
+        assert!(!outcome.changed, "计划与标记都没变时不应报 changed");
+        assert!(outcome.commands.is_empty(), "{:?}", outcome.commands);
+
+        // 3) 机制等价但标记为假：只补标记，机制 id 保持不变。
+        state.factory_mut(project, factory).unwrap().strict_source = false;
+        let ids_before: Vec<MechanicId> = state
+            .factory(project, factory)
+            .unwrap()
+            .mechanics
+            .iter()
+            .map(|entry| entry.id)
+            .collect();
+        let outcome = state
+            .apply_auto_plan(project, factory, vec![recipe])
+            .unwrap();
+        assert!(outcome.changed, "只补标记也要落盘并重解（求解语义变了）");
+        assert!(state.factory(project, factory).unwrap().strict_source);
+        let ids_after: Vec<MechanicId> = state
+            .factory(project, factory)
+            .unwrap()
+            .mechanics
+            .iter()
+            .map(|entry| entry.id)
+            .collect();
+        assert_eq!(
+            ids_before, ids_after,
+            "计划未变时不该重新分配机制 id（会让前端选择态失效）"
+        );
+        assert_eq!(
+            state.factory(project, factory).unwrap().mechanics.len(),
+            without
         );
     }
 

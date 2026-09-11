@@ -87,6 +87,14 @@ for command in &outcome.commands {
 `Outcome` 的构造器命名即意图：`meta`（只落盘，不求解）/ `solve_factory` /
 `solve_all`。改名、排序等纯元数据变更走 `meta`，不再白跑一次整厂求解。
 
+**自动规划的严格供给契约**：`plan_auto_plan` 构建 LP 时**写死** `strict_source = true`
+（与工厂设置无关），回写走 `RuntimeState::apply_auto_plan`——它同时把工厂的
+`strict_source` 置为 true。理由：规划按严格供给给出 A，而普通重解按工厂设置可能
+给出 B（非严格会「凭空借入」缺失原料），同一个工厂两套结果；实际使用中反复出现
+「忘了开严格供给 → 看到错误结果」。因此调用方不需要预先开严格供给；`apply_auto_plan`
+在「机制等价且已严格供给」时返回 `changed = false`（不落盘、不重解），只差标记时
+只补标记（不重新分配机制 id，保住前端选择态）。
+
 命令失败的送达路径：GUI 与 MCP 共用 `run_commands` 汇总回执。MCP 把失败放进
 工具回执的 `errors`（非空即 `isError`）；GUI 的 `dispatch` 命令把失败广播成
 `command-error` 事件，由前端写进「操作」错误条。求解/上下文类命令另有

@@ -3279,24 +3279,33 @@ async fn execute_command<R: TauriRuntime>(
                     return CommandOutcome::failed(error);
                 }
             };
-            // 2) 规划结果与现有机制等价时**不回写**：省掉 revision bump、落盘
-            //    与求解缓存失效（连续两次 auto-plan 会因此都重算）。直接重解
-            //    一次（大概率命中缓存）以便回传结果。
-            let unchanged = with_runtime(state, |runtime| {
-                let existing: Vec<_> = runtime
+            // 2) 锁内回写：目标工厂/项目设置必须与快照一致，否则会覆盖用户在
+            //    规划期间的编辑（其它工厂的改动不影响——见 document_matches）。
+            //
+            //    `apply_auto_plan` 除了替换机制，还会把工厂标记为**严格供给**：
+            //    规划本身就是按严格供给算的，文档不跟着落到同一模式的话，之后
+            //    任何一次普通重解都会给出另一套结果（人和 agent 反复踩这个坑）。
+            //    机制与标记都没变时它返回 `changed = false`，此时直接重解回传
+            //    （大概率命中缓存），省掉 revision bump / 落盘。
+            let written = with_runtime(state, |runtime| {
+                if !runtime.document_matches(&snapshot) {
+                    return Err(
+                        "该工厂或项目设置在自动规划期间被修改，已放弃本次回写，请重试".to_string(),
+                    );
+                }
+                runtime
                     .state
-                    .factory(project, factory)
-                    .map_err(|error| error.to_string())?
-                    .mechanics
-                    .iter()
-                    .map(|entry| entry.mechanic.clone())
-                    .collect();
-                Ok(metatorio_runtime::auto_plan::same_mechanics(
-                    &existing, &mechanics,
-                ))
-            })
-            .unwrap_or(false);
-            if unchanged {
+                    .apply_auto_plan(project, factory, mechanics)
+                    .map_err(|error| error.to_string())
+            });
+            let written = match written {
+                Ok(written) => written,
+                Err(error) => {
+                    emit(app, "solve-error", error.clone());
+                    return CommandOutcome::failed(error);
+                }
+            };
+            if !written.changed {
                 return match solve_factory_offlock(app, state, project, factory).await {
                     Ok(result) => {
                         emit(app, "solve-result", result.clone());
@@ -3308,29 +3317,9 @@ async fn execute_command<R: TauriRuntime>(
                     }
                 };
             }
-            // 3) 锁内回写：目标工厂/项目设置必须与快照一致，否则会覆盖用户在
-            //    规划期间的编辑（其它工厂的改动不影响——见 document_matches）。
-            let commands = match with_runtime(state, |runtime| {
-                if !runtime.document_matches(&snapshot) {
-                    return Err(
-                        "该工厂或项目设置在自动规划期间被修改，已放弃本次回写，请重试".to_string(),
-                    );
-                }
-                runtime
-                    .state
-                    .replace_factory_mechanics(project, factory, mechanics)
-                    .map(|outcome| outcome.commands)
-                    .map_err(|error| error.to_string())
-            }) {
-                Ok(commands) => commands,
-                Err(error) => {
-                    emit(app, "solve-error", error.clone());
-                    return CommandOutcome::failed(error);
-                }
-            };
             // 3) 执行回写产生的命令（落盘 + 重解），并让 GUI 重新拉取文档。
             let mut outcome = CommandOutcome::default();
-            for command in &commands {
+            for command in &written.commands {
                 outcome.absorb(Box::pin(execute_command(app, state, command)).await);
             }
             outcome

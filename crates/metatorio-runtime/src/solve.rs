@@ -652,7 +652,10 @@ impl Runtime {
     /// 自动规划（同步便捷入口）：计算候选 → 回写文档 → 重解。
     ///
     /// 计算部分（可能数十秒）见 [`plan_auto_plan`]；需要锁外执行时请自行
-    /// 「取快照 → 锁外 [`plan_auto_plan`] → 锁内 [`RuntimeState::replace_factory_mechanics`]」。
+    /// 「取快照 → 锁外 [`plan_auto_plan`] → 锁内 [`RuntimeState::apply_auto_plan`]」。
+    ///
+    /// 规划**总是**按严格供给求解，回写时会把工厂的 `strict_source` 置为 true
+    /// （见 [`RuntimeState::apply_auto_plan`]）。
     pub fn auto_plan(
         &mut self,
         project_id: ProjectId,
@@ -663,7 +666,7 @@ impl Runtime {
         self.cache_accessibility(project_id, accessibility.clone());
         let mechanics = plan_auto_plan(&snapshot, &accessibility)?;
         self.state
-            .replace_factory_mechanics(project_id, factory_id, mechanics)?;
+            .apply_auto_plan(project_id, factory_id, mechanics)?;
         self.solve_factory(project_id, factory_id)
     }
 
@@ -943,7 +946,8 @@ pub fn solve_snapshot_with(
 /// 机制列表（按种类排序），**不修改任何文档**。
 ///
 /// 与 [`solve_snapshot`] 一样只依赖快照，因此可以锁外执行（真实 dump 上可能
-/// 需要数十秒）。回写请走 [`RuntimeState::replace_factory_mechanics`]。
+/// 需要数十秒）。回写请走 [`RuntimeState::apply_auto_plan`]——它会把工厂标记为
+/// 严格供给，因为这里的 LP **总是**用 `strict_source = true`（见下方设置）。
 pub fn plan_auto_plan(
     snapshot: &SolveSnapshot,
     accessibility: &Accessibility,
@@ -2614,6 +2618,195 @@ mod tests {
         assert!(
             matches!(effect, CommandEffect::Solve(_)),
             "recompute 应产出 Solve 效果"
+        );
+    }
+
+    /// 自动规划**总是**按严格供给求解——即使工厂的 `strict_source` 是 false。
+    ///
+    /// 这正是当初的困惑来源：同一个工厂，普通重解（按工厂设置、允许「凭空借入」）
+    /// 能给出一个可解但依赖未声明供给的计划，而自动规划会拒绝它。两者用不同语义
+    /// 就会给出两套结果，人/agent 无从判断哪个算数。所以自动规划必须始终严格，
+    /// 并且回写时把工厂标记过来（见下一个测试）。
+    #[test]
+    fn auto_plan_always_solves_strict_even_when_the_factory_is_not_strict() {
+        let mut runtime = load_runtime();
+        let project = new_project(&mut runtime);
+        dispatch_project(
+            &mut runtime,
+            project,
+            ProjectAction::AddFactory {
+                name: "f".to_string(),
+                template: crate::message::FactoryTemplate::Empty,
+            },
+        );
+        let factory = runtime.state.project(project).unwrap().factories[0].id;
+        // 工厂里放一条现有机制，这样普通重解有东西可解（自动规划不看现有机制，
+        // 它按枚举偏好从仓库重新生成候选）。
+        runtime
+            .dispatch(AppMessage::Factory {
+                project,
+                factory,
+                action: FactoryAction::MechanicList(MechanicListAction::Add {
+                    kind: MechanicKind::Recipe,
+                }),
+            })
+            .unwrap();
+        let mechanic = runtime.state.factory(project, factory).unwrap().mechanics[0].id;
+        for action in [
+            MechanicAction::Recipe(RecipeMechanicAction::SetRecipe {
+                recipe: IdWithQuality::new("iron-gear-wheel", "normal"),
+            }),
+            MechanicAction::Recipe(RecipeMechanicAction::SetMachine {
+                machine: IdWithQuality::new("assembling-machine-1", "normal"),
+            }),
+        ] {
+            runtime
+                .dispatch(AppMessage::Factory {
+                    project,
+                    factory,
+                    action: FactoryAction::Mechanic { mechanic, action },
+                })
+                .unwrap();
+        }
+        // 目标需要 iron-plate，而仓库里没有任何 iron-plate 的来源。
+        runtime
+            .dispatch(AppMessage::Factory {
+                project,
+                factory,
+                action: FactoryAction::Flow(FlowAction::AddToTarget {
+                    flow: DualVar::Item(IdWithQuality::new("iron-gear-wheel", "normal")),
+                    amount: 1.0,
+                }),
+            })
+            .unwrap();
+        assert!(
+            !runtime
+                .state
+                .factory(project, factory)
+                .unwrap()
+                .strict_source
+        );
+
+        // 非严格重解：可以凭空借入 iron-plate，所以能解。
+        let borrowed = runtime.solve_factory(project, factory).unwrap();
+        assert!(
+            matches!(borrowed.status, SolveStatus::Solved { .. }),
+            "非严格重解会借入缺失原料：{:?}",
+            borrowed.status
+        );
+
+        // 自动规划：严格供给 → iron-plate 无供给，必须报错而不是给一个借入的计划。
+        let update = runtime
+            .dispatch(AppMessage::Factory {
+                project,
+                factory,
+                action: FactoryAction::Solve(SolveAction::AutoPlan),
+            })
+            .unwrap();
+        let command = update
+            .commands
+            .iter()
+            .find(|command| matches!(command, RuntimeCommand::AutoPlan { .. }))
+            .cloned()
+            .expect("应有 AutoPlan 命令");
+        let error = runtime
+            .run_command(&command)
+            .expect_err("严格供给下缺失原料应让自动规划失败");
+        assert!(
+            error.to_string().contains("无供给"),
+            "错误应指出缺失的供给：{error}"
+        );
+    }
+
+    /// 走完整消息链路（`dispatch(solve:auto-plan)` → `RuntimeCommand::AutoPlan` →
+    /// `run_command`）验证自动规划回写会把工厂标记为**严格供给**：规划本身按严格
+    /// 供给算，文档必须落在同一模式，否则之后任何一次普通重解又会给出另一套结果。
+    #[test]
+    fn auto_plan_command_forces_strict_source_end_to_end() {
+        let mut runtime = load_runtime();
+        let project = new_project(&mut runtime);
+        dispatch_project(
+            &mut runtime,
+            project,
+            ProjectAction::AddFactory {
+                name: "f".to_string(),
+                template: crate::message::FactoryTemplate::Empty,
+            },
+        );
+        let factory = runtime.state.project(project).unwrap().factories[0].id;
+        // 严格供给下 iron-plate 没有产出配方，必须显式声明为外部输入，
+        // 否则 LP 会把该配方剪掉、规划无解（这本身就是严格供给的语义）。
+        // 电同理：合成仓库里没有发电机制。
+        for flow in [
+            DualVar::Item(IdWithQuality::new("iron-plate", "normal")),
+            DualVar::Electricity,
+        ] {
+            runtime
+                .dispatch(AppMessage::Factory {
+                    project,
+                    factory,
+                    action: FactoryAction::Flow(FlowAction::AddToExternalInput {
+                        flow,
+                        penalty: 1.0,
+                    }),
+                })
+                .unwrap();
+        }
+        runtime
+            .dispatch(AppMessage::Factory {
+                project,
+                factory,
+                action: FactoryAction::Flow(FlowAction::AddToTarget {
+                    flow: DualVar::Item(IdWithQuality::new("iron-gear-wheel", "normal")),
+                    amount: 1.0,
+                }),
+            })
+            .unwrap();
+        assert!(
+            !runtime
+                .state
+                .factory(project, factory)
+                .unwrap()
+                .strict_source,
+            "前置：工厂默认不是严格供给"
+        );
+
+        let update = runtime
+            .dispatch(AppMessage::Factory {
+                project,
+                factory,
+                action: FactoryAction::Solve(SolveAction::AutoPlan),
+            })
+            .unwrap();
+        let command = update
+            .commands
+            .iter()
+            .find(|command| matches!(command, RuntimeCommand::AutoPlan { .. }))
+            .cloned()
+            .expect("应有 AutoPlan 命令");
+        let effect = runtime
+            .run_command(&command)
+            .unwrap_or_else(|error| panic!("auto-plan 应成功：{error}"));
+        assert!(
+            matches!(effect, CommandEffect::Solve(_)),
+            "auto-plan 应产出 Solve 效果"
+        );
+        assert!(
+            runtime
+                .state
+                .factory(project, factory)
+                .unwrap()
+                .strict_source,
+            "自动规划回写必须把工厂标记为严格供给"
+        );
+        assert!(
+            !runtime
+                .state
+                .factory(project, factory)
+                .unwrap()
+                .mechanics
+                .is_empty(),
+            "自动规划应回写被选中的机制"
         );
     }
 
