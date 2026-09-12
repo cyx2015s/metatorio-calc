@@ -3,6 +3,9 @@
     "iron-plate": { "type": "item", "name": "iron-plate", "stack_size": 100 },
     "iron-gear-wheel": { "type": "item", "name": "iron-gear-wheel", "stack_size": 100 }
   },
+  "fluid": {
+    "water": { "type": "fluid", "name": "water" }
+  },
   "recipe": {
     "iron-gear-wheel": {
       "type": "recipe",

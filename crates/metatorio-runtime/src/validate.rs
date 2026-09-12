@@ -14,13 +14,14 @@
 //! 的名字**必须报错——同样因为 `retain` 是静默 no-op，调用方（尤其 LLM）会以为删掉
 //! 了，而那条设置/条目依旧生效。
 
-use metatorio_core::{Fuel, IdWithQuality};
+use metatorio_core::{DualVar, Fuel, IdWithQuality};
 use metatorio_data::store::{PrototypeGroup, PrototypeStore};
 
-use crate::document::AutoBeaconPlan;
+use crate::document::{AutoBeaconPlan, ExternalInput, FlowTarget, TargetExpression};
 use crate::message::{
-    AppMessage, FactoryAction, FactoryContextAction, MechanicAction, MiningMechanicAction,
-    ModuleAction, PlanningAction, ProjectAction, RecipeMechanicAction,
+    AppMessage, ExternalInputAction, FactoryAction, FactoryContextAction, FlowAction,
+    MechanicAction, MiningMechanicAction, ModuleAction, PlanningAction, ProjectAction,
+    RecipeMechanicAction, TargetAction, TargetExpressionAction,
 };
 use crate::state::RuntimeError;
 
@@ -119,6 +120,12 @@ fn validate_planning(store: &PrototypeStore, action: &PlanningAction) -> Result<
         PlanningAction::RemoveMachinePreference { machine } => {
             require_id(store, PrototypeGroup::Entity, "机器", machine)
         }
+        // 同族的「排序」也带机器名。它本来就不是静默失败（reducer 会报
+        // `machine preference was not found`），但那个措辞会被读成「不在列表里」——
+        // 名字写错与条目真的不在列表里是两件事，先按存在性报错才分得清。
+        PlanningAction::ReorderMachinePreference { machine, .. } => {
+            require_id(store, PrototypeGroup::Entity, "机器", machine)
+        }
         PlanningAction::RemoveEnumeratedModule { module } => {
             require_id(store, PrototypeGroup::Item, "插件", module)
         }
@@ -156,8 +163,74 @@ fn validate_factory(store: &PrototypeStore, action: &FactoryAction) -> Result<()
             FactoryContextAction::SetDebug { .. } => Ok(()),
         },
         FactoryAction::Mechanic { action, .. } => validate_mechanic(store, action),
+        // 目标 / 目标表达式 / 外部输入里都带 `DualVar`：写错物品或流体名以前会被
+        // **原样写进文档**（实测 `add-to-external-input` 传 `not-a-real-item` 时那份
+        // 外部输入确实进了文档、自动规划还照常报成功），所以这里逐条校验。
+        FactoryAction::Target(action) => match action {
+            TargetAction::Add { target } => validate_target(store, target),
+            TargetAction::SetFlow { flow, .. } => require_flow(store, flow),
+            _ => Ok(()),
+        },
+        FactoryAction::TargetExpression(action) => match action {
+            TargetExpressionAction::Add { expression } => validate_expression(store, expression),
+            TargetExpressionAction::SetTermFlow { flow, .. } => require_flow(store, flow),
+            _ => Ok(()),
+        },
+        FactoryAction::ExternalInput(action) => match action {
+            ExternalInputAction::Add { input } => validate_external_input(store, input),
+            ExternalInputAction::SetFlow { flow, .. } => require_flow(store, flow),
+            _ => Ok(()),
+        },
+        FactoryAction::Flow(action) => match action {
+            FlowAction::AddToTarget { flow, .. } | FlowAction::AddToExternalInput { flow, .. } => {
+                require_flow(store, flow)
+            }
+            // `RequestSuggestions` 是**未实现**的变体：让 app 层报「未实现」更有用，
+            // 不必先在这里判名字（schema 里也自述了这一点）。
+            FlowAction::RequestSuggestions { .. } => Ok(()),
+        },
         _ => Ok(()),
     }
+}
+
+/// 流（`DualVar`）里引用的原型名必须存在于当前上下文：物品 / 实体（资源、机器）/
+/// 流体。其余变体是**虚拟流**（电、热、污染、燃料流与筛选用流），没有对应原型。
+///
+/// `Unknown` 是 `Default` 留下的占位：`FlowTarget` / `ExternalInput` 都带
+/// `#[serde(default)]`，漏填 `flow` 的消息能反序列化成功、然后把这个占位写进文档，
+/// 所以它必须报错而不是放行。
+fn require_flow(store: &PrototypeStore, flow: &DualVar) -> Result<(), RuntimeError> {
+    match flow {
+        DualVar::Item(item) => require_id(store, PrototypeGroup::Item, "物品", item),
+        DualVar::Entity(entity) => require_id(store, PrototypeGroup::Entity, "实体", entity),
+        DualVar::Fluid { name, .. } => require(store, PrototypeGroup::Fluid, "流体", name),
+        DualVar::Unknown => Err(RuntimeError::InvalidValue(
+            "流未指定（DualVar::Unknown）：目标 / 外部输入必须给出具体的物品、流体或实体"
+                .to_string(),
+        )),
+        _ => Ok(()),
+    }
+}
+
+fn validate_target(store: &PrototypeStore, target: &FlowTarget) -> Result<(), RuntimeError> {
+    require_flow(store, &target.flow)
+}
+
+fn validate_expression(
+    store: &PrototypeStore,
+    expression: &TargetExpression,
+) -> Result<(), RuntimeError> {
+    for term in &expression.terms {
+        require_flow(store, &term.flow)?;
+    }
+    Ok(())
+}
+
+fn validate_external_input(
+    store: &PrototypeStore,
+    input: &ExternalInput,
+) -> Result<(), RuntimeError> {
+    require_flow(store, &input.flow)
 }
 
 fn validate_mechanic(store: &PrototypeStore, action: &MechanicAction) -> Result<(), RuntimeError> {
@@ -481,5 +554,160 @@ mod tests {
             },
         ));
         assert!(validate_message(&store, &bad_machine).is_err());
+
+        // 排序同族：名字写错时按「不存在于当前上下文」报错，而不是等 reducer 报
+        // 「machine preference was not found」（那会被读成「不在列表里」）。
+        let ok_reorder = project(ProjectAction::Planning(
+            PlanningAction::ReorderMachinePreference {
+                machine: IdWithQuality::new("assembler", "normal"),
+                position: 0,
+            },
+        ));
+        assert!(validate_message(&store, &ok_reorder).is_ok());
+        let bad_reorder = project(ProjectAction::Planning(
+            PlanningAction::ReorderMachinePreference {
+                machine: IdWithQuality::new("not-a-real-machine", "normal"),
+                position: 0,
+            },
+        ));
+        let error = validate_message(&store, &bad_reorder).unwrap_err();
+        assert!(error.to_string().contains("not-a-real-machine"), "{error}");
+    }
+
+    /// 目标 / 外部输入 / 目标表达式里带的 `DualVar` 也要校验：物品与流体必须在当前
+    /// 上下文里存在，虚拟流放行，`Unknown`（`#[serde(default)]` 漏填 `flow` 时的占位）
+    /// 必须报错。以前这些名字会被**原样写进文档**：实测 `add-to-external-input` 传
+    /// `not-a-real-item`，那条外部输入确实进了文档，自动规划还照常报成功。
+    #[test]
+    fn flows_reference_existing_prototypes() {
+        let store = store();
+        let factory = |action: FactoryAction| AppMessage::Factory {
+            project: crate::id::ProjectId(1),
+            factory: crate::id::FactoryId(1),
+            action,
+        };
+        let item = |id: &str| DualVar::Item(IdWithQuality::new(id, "normal"));
+        let fluid = |name: &str| DualVar::Fluid {
+            name: name.to_string(),
+            temperature: [15, 15],
+        };
+        let target = |flow: DualVar| FlowTarget {
+            id: crate::id::TargetId(1),
+            flow,
+            amount: 1.0,
+        };
+
+        // add-to-target：存在的物品放行，写错报错。
+        let ok = factory(FactoryAction::Flow(FlowAction::AddToTarget {
+            flow: item("coal"),
+            amount: 1.0,
+        }));
+        assert!(validate_message(&store, &ok).is_ok());
+        let bad = factory(FactoryAction::Flow(FlowAction::AddToTarget {
+            flow: item("not-a-real-item"),
+            amount: 1.0,
+        }));
+        assert!(validate_message(&store, &bad).is_err());
+
+        // add-to-external-input：流体同理。
+        let ok = factory(FactoryAction::Flow(FlowAction::AddToExternalInput {
+            flow: fluid("water"),
+            penalty: 1.0,
+        }));
+        assert!(validate_message(&store, &ok).is_ok());
+        let bad = factory(FactoryAction::Flow(FlowAction::AddToExternalInput {
+            flow: fluid("not-a-real-fluid"),
+            penalty: 1.0,
+        }));
+        assert!(validate_message(&store, &bad).is_err());
+
+        // 虚拟流没有对应原型，一律放行。
+        for flow in [
+            DualVar::Electricity,
+            DualVar::Heat,
+            DualVar::Pollution {
+                name: "pollution".to_string(),
+            },
+            DualVar::ItemFuel {
+                category: vec!["chemical".to_string()],
+                has_burnt_result: false,
+            },
+        ] {
+            let message = factory(FactoryAction::Flow(FlowAction::AddToTarget {
+                flow: flow.clone(),
+                amount: 1.0,
+            }));
+            assert!(validate_message(&store, &message).is_ok(), "{flow:?}");
+        }
+
+        // Unknown 是占位：任何位置出现都要报错，而不是写进文档。
+        let unknown = factory(FactoryAction::Flow(FlowAction::AddToTarget {
+            flow: DualVar::Unknown,
+            amount: 1.0,
+        }));
+        let error = validate_message(&store, &unknown).unwrap_err();
+        assert!(error.to_string().contains("Unknown"), "{error}");
+
+        // Target::Add / SetFlow。
+        let ok = factory(FactoryAction::Target(TargetAction::Add {
+            target: target(item("coal")),
+        }));
+        assert!(validate_message(&store, &ok).is_ok());
+        let bad = factory(FactoryAction::Target(TargetAction::Add {
+            target: target(item("not-a-real-item")),
+        }));
+        assert!(validate_message(&store, &bad).is_err());
+        let bad = factory(FactoryAction::Target(TargetAction::SetFlow {
+            target: crate::id::TargetId(1),
+            flow: item("not-a-real-item"),
+        }));
+        assert!(validate_message(&store, &bad).is_err());
+
+        // ExternalInput::Add / SetFlow。
+        let external_input = |flow: DualVar| ExternalInput {
+            id: crate::id::ExternalInputId(1),
+            flow,
+            penalty: 1.0,
+        };
+        let bad = factory(FactoryAction::ExternalInput(ExternalInputAction::Add {
+            input: external_input(item("not-a-real-item")),
+        }));
+        assert!(validate_message(&store, &bad).is_err());
+        let bad = factory(FactoryAction::ExternalInput(ExternalInputAction::SetFlow {
+            input: crate::id::ExternalInputId(1),
+            flow: item("not-a-real-item"),
+        }));
+        assert!(validate_message(&store, &bad).is_err());
+
+        // 目标表达式：**每一个 term** 的流都要查（表达式的项就是目标的一部分）。
+        let expression = |flow: DualVar| TargetExpression {
+            id: crate::id::TargetExpressionId(1),
+            constant: 0.0,
+            terms: vec![crate::document::TargetTerm {
+                id: crate::id::TargetTermId(1),
+                flow,
+                coefficient: 1.0,
+            }],
+        };
+        let ok = factory(FactoryAction::TargetExpression(
+            TargetExpressionAction::Add {
+                expression: expression(item("coal")),
+            },
+        ));
+        assert!(validate_message(&store, &ok).is_ok());
+        let bad = factory(FactoryAction::TargetExpression(
+            TargetExpressionAction::Add {
+                expression: expression(item("not-a-real-item")),
+            },
+        ));
+        assert!(validate_message(&store, &bad).is_err());
+        let bad = factory(FactoryAction::TargetExpression(
+            TargetExpressionAction::SetTermFlow {
+                expression: crate::id::TargetExpressionId(1),
+                term: crate::id::TargetTermId(1),
+                flow: fluid("not-a-real-fluid"),
+            },
+        ));
+        assert!(validate_message(&store, &bad).is_err());
     }
 }
