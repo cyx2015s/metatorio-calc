@@ -6,7 +6,7 @@
 ## MCP / AI 体工学（按优先级；结论来自对 live 端点 http://localhost:8765/mcp 的实测）
 
 - ~~`dispatch` 创建对象后直接返回新 id~~ **已修复**：`DispatchResult` 新增 `created`（projects / factories / mechanics / targets / target_expressions / target_terms / external_inputs，按创建顺序），MCP `dispatch` 原样回传；新建工厂模板自带机制、克隆机制、自动规划回写的机制 id 也一并报告。agent 不再需要「创建后再读一遍」。
-- ~~写入前校验原型名~~ **已修复**：新增 `metatorio-runtime/src/validate.rs`，`Runtime::dispatch` 在进 reducer 前用项目当前上下文校验消息引用的原型名（配方 / 机器 / 资源 / 物品 / 流体 / 科技 / 星球 / 地表 / 品质，含插件与插件塔、燃料、枚举偏好、建议候选）；不存在的名字返回 `InvalidValue`，不再静默写入垃圾。拿不到 store（项目未绑定/未载入上下文）时跳过，不阻塞。
+- ~~写入前校验原型名~~ **已修复**：新增 `metatorio-runtime/src/validate.rs`，`Runtime::dispatch` 在进 reducer 前用项目当前上下文校验消息引用的原型名（配方 / 机器 / 资源 / 物品 / 流体 / 科技 / 星球 / 地表 / 品质，含插件与插件塔、燃料、枚举偏好、建议候选）；不存在的名字返回 `InvalidValue`，不再静默写入垃圾。**删除类动作用同一口径：只校验「原型是否存在」，不校验「是否在列表里」**——后者是 GUI 重复操作的正常幂等，但前者缺失时 `retain` 会静默 no-op，调用方以为删掉了而设置依旧生效（`remove-enumerated-module` / `remove-machine-preference` / `remove-recipe-productivity` / `remove-infinite-tech-level` 已覆盖）。拿不到 store（项目未绑定/未载入上下文）时跳过，不阻塞。
 - ~~求解失败要让 agent 看见~~ **已修复**：`execute_command` 改为返回 `CommandOutcome { effect, errors }`，MCP `dispatch` 回传 `errors: [...]` 并在有失败时置 `is_error = true`（求解 / 自动规划 / 清理 / 落盘 / 打开工程 / 关闭项目 / 上下文载入的失败，以及未实现命令，都不再静默）。
 - ~~求解结果的可读量~~ **已修复**：`MechanicSolution` 新增 `rate = amount / scale`（可比量）与 `is_virtual`（展开阶段转换流辅助变量，`mechanic` 为 u64::MAX、不对应文档机制）；`FlowBalance` 同样补 `rate`。
 - ~~版本冲突检查收窄到工厂~~ **已修复**：`Runtime::document_matches` 不再比较整份文档的全局 `revision`，改为比较**目标工厂文档**（机制 / 目标 / 外部输入 / 工厂设置）+ 项目设置与规划偏好 + 上下文实例与可达性代次；别的工厂改名不再误拒自动规划回写。

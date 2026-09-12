@@ -8,6 +8,11 @@
 //! 这里在 [`crate::solve::Runtime::dispatch`] 进入 reducer 之前，用项目当前
 //! 上下文校验消息里引用的原型名（配方 / 机器 / 资源 / 物品 / 流体 / 科技 /
 //! 星球 / 品质）。**拿不到 store 时跳过**（项目还没绑定游戏数据，不应阻塞）。
+//!
+//! **删除类动作只校验「原型是否存在」，不校验「是否真的在列表里」**：后者是 GUI
+//! 重复操作时的正常幂等（`retain` 找不到就报「无变化」，不算错误），但一个**不存在
+//! 的名字**必须报错——同样因为 `retain` 是静默 no-op，调用方（尤其 LLM）会以为删掉
+//! 了，而那条设置/条目依旧生效。
 
 use metatorio_core::{Fuel, IdWithQuality};
 use metatorio_data::store::{PrototypeGroup, PrototypeStore};
@@ -88,6 +93,13 @@ fn validate_project(store: &PrototypeStore, action: &ProjectAction) -> Result<()
         ProjectAction::SetInfiniteTechLevel { level } => {
             require(store, PrototypeGroup::Technology, "科技", &level.tech)
         }
+        // 删除只查「原型是否存在」，不查「是否在列表里」（理由见模块文档）。
+        ProjectAction::RemoveRecipeProductivity { recipe } => {
+            require(store, PrototypeGroup::Recipe, "配方", recipe)
+        }
+        ProjectAction::RemoveInfiniteTechLevel { tech } => {
+            require(store, PrototypeGroup::Technology, "科技", tech)
+        }
         ProjectAction::Planning(planning) => validate_planning(store, planning),
         _ => Ok(()),
     }
@@ -101,11 +113,12 @@ fn validate_planning(store: &PrototypeStore, action: &PlanningAction) -> Result<
         PlanningAction::AddEnumeratedModule { module } => {
             require_id(store, PrototypeGroup::Item, "插件", module)
         }
-        // 删除类动作**只校验原型是否存在**，不校验「是否真的在列表里」：后者在 GUI
-        // 里是有意的幂等（重复点删除不算错误），但一个**不存在的名字**必须报错——
-        // `remove-enumerated-module` 对不存在的插件是静默 no-op（`retain` 找不到就
-        // 报「无变化」），调用方（尤其 LLM）会以为「已排除」，而计划里那条插件依旧
-        // 生效；实测 auto_plan 传 `speed-module-99` 就踩到过。
+        // 删除只查「原型是否存在」，不查「是否在列表里」（理由见模块文档）。
+        // 实测踩到过：`remove-enumerated-module` 传 `speed-module-99` 时静默「成功」，
+        // 调用方以为已排除，而计划里那条插件依旧生效。
+        PlanningAction::RemoveMachinePreference { machine } => {
+            require_id(store, PrototypeGroup::Entity, "机器", machine)
+        }
         PlanningAction::RemoveEnumeratedModule { module } => {
             require_id(store, PrototypeGroup::Item, "插件", module)
         }
@@ -425,5 +438,48 @@ mod tests {
         // 不存在的插件：报错，并说清是哪个名字。
         let error = validate_message(&store, &remove("speed-module-99")).unwrap_err();
         assert!(error.to_string().contains("speed-module-99"), "{error}");
+    }
+
+    /// 另外三个「按名字删」的动作同一口径：名字必须在当前上下文里存在。
+    /// 它们的 reducer 分支也都是 `retain` —— 名字写错就是静默 no-op。
+    #[test]
+    fn removing_settings_checks_existence_only() {
+        let store = store();
+        let project = |action: ProjectAction| AppMessage::Project {
+            project: crate::id::ProjectId(1),
+            action,
+        };
+
+        // 配了配方产能 / 无限科技等级 / 机器偏好之后，再删掉它们。
+        let ok_recipe = project(ProjectAction::RemoveRecipeProductivity {
+            recipe: "gear".to_string(),
+        });
+        assert!(validate_message(&store, &ok_recipe).is_ok());
+        let bad_recipe = project(ProjectAction::RemoveRecipeProductivity {
+            recipe: "not-a-real-recipe".to_string(),
+        });
+        assert!(validate_message(&store, &bad_recipe).is_err());
+
+        let ok_tech = project(ProjectAction::RemoveInfiniteTechLevel {
+            tech: "tech".to_string(),
+        });
+        assert!(validate_message(&store, &ok_tech).is_ok());
+        let bad_tech = project(ProjectAction::RemoveInfiniteTechLevel {
+            tech: "not-a-real-tech".to_string(),
+        });
+        assert!(validate_message(&store, &bad_tech).is_err());
+
+        let ok_machine = project(ProjectAction::Planning(
+            PlanningAction::RemoveMachinePreference {
+                machine: IdWithQuality::new("assembler", "normal"),
+            },
+        ));
+        assert!(validate_message(&store, &ok_machine).is_ok());
+        let bad_machine = project(ProjectAction::Planning(
+            PlanningAction::RemoveMachinePreference {
+                machine: IdWithQuality::new("not-a-real-machine", "normal"),
+            },
+        ));
+        assert!(validate_message(&store, &bad_machine).is_err());
     }
 }
