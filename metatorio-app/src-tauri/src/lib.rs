@@ -1534,8 +1534,14 @@ pub(crate) fn resolve_index_entry(
     // 排序键 = (编辑距离, kind 优先级, 本地化名长度) + 命中。
     let mut typo: Vec<((usize, u8, usize), ResolvedName)> = Vec::new();
     if exact.is_empty() && partial_matched == 0 {
+        // 长度门槛按**字符**算，并且对非 ASCII（中日韩）放宽一格：`铁板` 只有两个
+        // 字，却是一个完整的词，打错一个字（`铁版`）就该给候选。原来「3 个字符起」
+        // 是拉丁中心口径——中文名永远拿不到错拼候选。
+        let non_ascii = needle_chars.iter().any(|character| !character.is_ascii());
         let max_distance = match needle_chars.len() {
-            0..=2 => 0, // 太短：任何两个名字都「差不多」，没有意义
+            0..=1 => 0, // 太短：任何两个名字都「差不多」，没有意义
+            2 if non_ascii => 1,
+            2 => 0, // ASCII 两个字母同样太短（`zz` 不该匹配一堆东西）
             3..=4 => 1,
             _ => 2,
         };
@@ -1545,9 +1551,11 @@ pub(crate) fn resolve_index_entry(
                 let localized = normalize_for_match(&entry.localized_name);
                 let mut best: Option<usize> = None;
                 for candidate in [&name, &localized] {
-                    if candidate.is_empty()
-                        || candidate.len().abs_diff(needle_chars.len()) > max_distance
-                    {
+                    // **按字符**比较长度，不能拿 `str::len()`（UTF-8 字节数）去比
+                    // 字符数：`铁齿轮` 是 9 字节 / 3 字符，旧写法算出差距 6 > 阈值，
+                    // 于是所有中文名在这里就被预筛掉了——错拼匹配对中文完全失效。
+                    let chars = candidate.chars().count();
+                    if candidate.is_empty() || chars.abs_diff(needle_chars.len()) > max_distance {
                         continue;
                     }
                     let chars: Vec<char> = candidate.chars().collect();
@@ -4199,6 +4207,52 @@ mod tests {
             "不该凑近似答案：{:?}",
             unrelated.typo
         );
+    }
+
+    /// 错拼候选对**中文名**同样有效——群里玩家报的是中文，`铁版` 应该能查到 `铁板`。
+    ///
+    /// 以前这里有两个拉丁中心的假设，把中文名彻底挡在门外：
+    /// 1. 长度预筛拿 `candidate.len()`（UTF-8 **字节数**）对比 `needle_chars.len()`
+    ///    （**字符数**）——`铁齿轮` 是 9 字节 / 3 字符，差距 6 直接超阈值，于是所有
+    ///    非 ASCII 名字都被跳过，错拼匹配对中文**从未生效**；
+    /// 2. 门槛「3 个字符起」——`铁板` 只有两个字，却是一个完整的词。
+    #[test]
+    fn typo_candidates_work_for_cjk_names() {
+        let entries = vec![
+            index_entry("item", "iron-plate", "铁板"),
+            index_entry("item", "steel-plate", "钢板"),
+            index_entry("item", "iron-gear-wheel", "铁齿轮"),
+        ];
+
+        // 两个汉字打错一个：`铁版` → `铁板`（群里最典型的一幕）。`钢板` 有两处不同、
+        // 距离 2，超出「2 字名」的阈值，所以这里是**唯一**候选 → 可以给高置信度建议。
+        let resolved = resolve_index_entry(&entries, "铁版", 8);
+        assert!(resolved.exact.is_empty() && resolved.partial.is_empty());
+        assert_eq!(resolved.typo_best_distance, Some(1));
+        assert_eq!(resolved.typo_best_name_count, 1, "{:?}", resolved.typo);
+        assert_eq!(
+            resolved.typo_suggestion.map(|hit| hit.name),
+            Some("iron-plate".to_string()),
+            "{:?}",
+            resolved.typo
+        );
+
+        // 三个汉字打错一个：旧写法（字节长度预筛）在这里一条候选都给不出来。
+        let resolved = resolve_index_entry(&entries, "铁齿抡", 8);
+        assert_eq!(resolved.typo_best_distance, Some(1), "{:?}", resolved.typo);
+        assert_eq!(
+            resolved.typo_suggestion.map(|hit| hit.name),
+            Some("iron-gear-wheel".to_string()),
+            "{:?}",
+            resolved.typo
+        );
+
+        // 单个汉字仍然太短：任何名字都「差不多」，不给候选。
+        let short = resolve_index_entry(&entries, "铁", 8);
+        assert!(short.typo.is_empty(), "{:?}", short.typo);
+        // ASCII 两个字母同样太短（这条旧行为不能因为放宽中文而回退）。
+        let short_ascii = resolve_index_entry(&entries, "zz", 8);
+        assert!(short_ascii.typo.is_empty(), "{:?}", short_ascii.typo);
     }
 
     /// `list_prototypes` 的 `name_contains` 与名字解析共用同一套归一化。

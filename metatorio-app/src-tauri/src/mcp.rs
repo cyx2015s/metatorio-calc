@@ -706,7 +706,8 @@ impl MetatorioMcp {
         and (b) turn an item name someone mentioned in chat back into the id that \
         `dispatch` needs.  \
         When nothing matches exactly or partially, the `typo` bucket holds \
-        typo-tolerant candidates for queries of 3+ characters, each with an edit \
+        typo-tolerant candidates (queries of 3+ characters, or 2 characters when the \
+        query is non-ASCII — a two-character Chinese name is a whole word), each with an edit \
         `distance` (adjacent transpositions count as 1).  `typo_suggestion` is the \
         high-confidence pick and is non-null **only when a single name is uniquely \
         closest** (the same name in several prototype groups is not ambiguous — pick \
