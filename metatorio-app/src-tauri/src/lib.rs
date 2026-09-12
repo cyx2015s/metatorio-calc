@@ -168,6 +168,9 @@ pub struct Options {
     pub mcp_port: u16,
     /// 额外允许的 `Host`（用主机名/mDNS 名访问时填）；具体 IP 由 `mcp_bind` 自动允许。
     pub mcp_allow_hosts: Vec<String>,
+    /// 对外暴露哪些 MCP 工具；**空 = 全部**。用 `--mcp-tools a,b,c` 只开子集，
+    /// 例如只留 `auto_plan,dispatch,get_planning_state`——工具越少，agent 选择越准。
+    pub mcp_tools: Vec<String>,
     /// MCP Bearer token；`None`/空 = 不鉴权（仅回环兜底；非回环会被拒绝启动）。
     pub mcp_token: Option<String>,
     /// 单次求解的等待上限（毫秒）；`None` = 内置默认 120s。
@@ -184,6 +187,7 @@ impl Default for Options {
             mcp_bind: mcp::DEFAULT_MCP_BIND.to_string(),
             mcp_port: mcp::DEFAULT_MCP_PORT,
             mcp_allow_hosts: Vec::new(),
+            mcp_tools: Vec::new(),
             mcp_token: None,
             solve_timeout_ms: None,
             headless: false,
@@ -3843,6 +3847,7 @@ pub fn run(options: Options) {
         port: options.mcp_port,
         token: options.mcp_token.clone(),
         allow_hosts: options.mcp_allow_hosts.clone(),
+        tools: options.mcp_tools.clone(),
     };
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())

@@ -92,7 +92,29 @@ Phase 2 工具面**不在一开始就做成离散的友好工具**，而是：
 
 **报错也一律中文**（2026-xx）：runtime 的 `RuntimeError`（找不到项目/工厂/机制/目标、下标越界、重复 id、数值校验、`品质 X 不存在于当前游戏上下文`）、`validate.rs` 的原型名校验、app 层命令错误、MCP 工具的 `invalid_params`、启动日志与 dump 解析错误全部改成中文。实测（headless + 原生 MCP）：`找不到项目 999`、`配方 not-a-real-recipe 不存在于当前游戏上下文`、`重复的目标 id`、`插件塔 not-a-real-beacon 不存在于当前游戏上下文`、`机制 999 不在工厂 2 里：先 get_planning_state {project, factory} 读 mechanics 列表拿 id`。
 
-> 唯一的例外是**框架级**报错：rmcp 反序列化工具参数失败时给出的 `failed to deserialize parameters: missing field ...` 由 serde 生成，要翻它得换掉 rmcp 的参数提取器，收益不值；agent 只在**参数形状写错**时才会看到它（语义错误全都走我们自己的中文校验）。
+> 唯一的例外是**框架级**报错：rmcp 反序列化工具参数失败时给出的 `failed to deserialize parameters: missing field ...`、以及调用**未启用**的工具时的 `tool not found`，都由 rmcp 生成；后者见下面「工具子集」一节。
+
+### 工具子集：`--mcp-tools`（按重要性裁剪工具面）
+
+群内 agent 被问「如果必须一个个移除工具，你会按什么顺序」时给出的排序（从最不痛到最致命）：
+
+| 顺序 | 工具 | agent 的理由 |
+| --- | --- | --- |
+| 1 | ~~`suggest`~~ | 纯锦上添花，凭游戏知识 + `list_prototypes` 就能选机制（**已删除**） |
+| 2 | `list_contexts` | 单上下文场景完全用不上 |
+| 3 | `list_prototypes` | `dispatch` 的校验报错本身就带候选，等于半个查询工具 |
+| 4 | `localized_names` | 它可以用内置的 wiki 工具顶替 |
+| 5 | `auto_plan` | 功能上 `dispatch` 能替代，但移除后要手写一长串消息，**LLM 友好度断崖式下跌** |
+| 临界 | `dispatch` + `get_planning_state` | **最小可用集**：一个写一个读。再少任何一个，端口事实上就不可用了（没读则异步结果取不回、文档全盲；没写则连项目都建不起来） |
+
+结论不是「砍掉」，而是**做成可开关**：`--mcp-tools`（env `METATORIO_MCP_TOOLS`，逗号分隔）选本次启动暴露哪些工具，留空或 `all` = 全部（默认，行为不变）。名字写错**拒绝启动**并列出可用工具——绝不静默全开或静默少开一个。
+
+- 被禁用的工具对客户端**根本不存在**（`tools/list` 里不列出），而不是「列出来但调用报错」——后者会诱导 agent 反复重试。实现用 rmcp 内置的 `disabled` 路由（`ToolRouter::disable_route`），不需要手写 `ServerHandler`。
+- 调用被禁用的工具会拿到 rmcp 的 `tool not found`（框架文案，见上面的例外说明）。
+- 启动日志会写明「只启用 N 个工具：…（其余 M 个对客户端不可见）」；`auto_plan` 开着而 `get_planning_state` 关着时额外提醒（异步结果没有查询入口）。
+- **`auto_plan` 的 `poll` 提示跟着开关走**：`get_planning_state` 没启用时，提示直接说明「没有查询入口」，而不是把 agent 指向一个不存在的工具。
+- agent 的推荐配置：`--mcp-tools auto_plan,dispatch,get_planning_state`（权威入口 + 万能逃生通道 + 读取）。工具越少，模型选得越准。
+
 
 后续按 agent 真实使用反馈，再把常见需求从 `dispatch` 拆出更友好的专用工具（仍在同一 `dispatch` 路径之上）。
 
@@ -159,7 +181,7 @@ RikkaHub（Android）原生支持 MCP，传输类型选 **Streamable HTTP**（�
 1. 电脑上起服务（`<本机局域网 IP>` 用 `ipconfig` 里 WLAN/以太网那个，例如 `192.168.0.101`）：
 
    ```text
-   metatorio-app --mcp-bind 192.168.0.101 --mcp-token <自己起一个长一点的随机串>
+   metatorio-app --mcp-bind 192.168.0.101 --mcp-token <自己起一个长一点的随机串> --mcp-tools auto_plan,dispatch,get_planning_state
    ```
 
    启动日志会打印手机该用的完整 URL 与 Host 白名单；GUI 与 MCP 是同一个进程，手机上让 AI 改的文档会实时反映在电脑界面上（`document-changed`）。

@@ -32,13 +32,13 @@ use axum::{
     Router,
 };
 use rmcp::{
-    handler::server::wrapper::Parameters,
+    handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::CallToolResult,
-    tool, tool_router,
+    tool, tool_handler, tool_router,
     transport::streamable_http_server::{
         session::local::LocalSessionManager, StreamableHttpServerConfig, StreamableHttpService,
     },
-    ErrorData as McpError,
+    ErrorData as McpError, ServerHandler,
 };
 use schemars::JsonSchema;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
@@ -138,7 +138,7 @@ pub struct MetatorioMcp {
     app: AppHandle,
 }
 
-#[tool_router(server_handler)]
+#[tool_router(router = base_tool_router)]
 impl MetatorioMcp {
     /// 把一条 `AppMessage` 原样转发给规划 runtime（项目 / 工厂 / 机制 / 求解），
     /// 与 GUI 的 dispatch 走同一条路径，返回新的 revision 与求解状态。这是**万能
@@ -604,6 +604,25 @@ impl MetatorioMcp {
             .as_ref()
             .map(|modules| modules.exclude.len())
             .unwrap_or(0);
+        // 轮询提示要跟着**本次启动实际启用的工具**走：如果 get_planning_state 被
+        // `--mcp-tools` 关掉了，还让 agent 去调它就是把它指向一个不存在的工具。
+        let poll = if tool_router().get("get_planning_state").is_some() {
+            serde_json::json!({
+                "tool": "get_planning_state",
+                "arguments": { "project": project.0, "factory": factory.0 },
+                "hint": "规划在后台跑：稍后（普通上下文 2~5s 起，py 这类大上下文要几分钟）\
+                用 get_planning_state 查这个 project + factory，读 auto_plan.status\
+                （running/done/failed）；done 时求解结果在 auto_plan.result 里（已分页）。",
+            })
+        } else {
+            serde_json::json!({
+                "tool": null,
+                "arguments": { "project": project.0, "factory": factory.0 },
+                "hint": "规划在后台跑，但本次启动**没有启用 get_planning_state**：\
+                auto_plan 自己的状态与结果没有查询入口。要读的话请重启并把它加进 \
+                --mcp-tools（或留空启用全部），或改用 dispatch 自己触发一次求解。",
+            })
+        };
         let payload = serde_json::json!({
             "project": project.0,
             "factory": factory.0,
@@ -628,13 +647,7 @@ impl MetatorioMcp {
                 "beacons": params.beacons.len(),
             },
             "auto_plan": { "status": status },
-            "poll": {
-                "tool": "get_planning_state",
-                "arguments": { "project": project.0, "factory": factory.0 },
-                "hint": "规划在后台跑：稍后（普通上下文 2~5s 起，py 这类大上下文要几分钟）\
-                用 get_planning_state 查这个 project + factory，读 auto_plan.status\
-                （running/done/failed）；done 时求解结果在 auto_plan.result 里（已分页）。",
-            },
+            "poll": poll,
         });
         if let Some(request_id) = params.request_id {
             if let Ok(mut cache) = app.state::<AppState>().dispatch_cache.lock() {
@@ -814,6 +827,83 @@ impl MetatorioMcp {
         })))
     }
 }
+
+/// 本次启动启用的工具集（`--mcp-tools` 没给 = 全部）。`serve` 在开始服务前设置。
+static ENABLED_TOOLS: std::sync::OnceLock<Option<std::collections::HashSet<String>>> =
+    std::sync::OnceLock::new();
+
+/// 过滤后的工具路由：进程内只建一次，未启用的工具用 rmcp 内置的 `disabled` 集合关掉
+/// （`tools/list` 不列出、调用被拒），因此不需要手写 `ServerHandler`。
+fn tool_router() -> ToolRouter<MetatorioMcp> {
+    static ROUTER: std::sync::OnceLock<ToolRouter<MetatorioMcp>> = std::sync::OnceLock::new();
+    ROUTER
+        .get_or_init(|| {
+            let mut router = MetatorioMcp::base_tool_router();
+            if let Some(Some(enabled)) = ENABLED_TOOLS.get() {
+                for tool in router.list_all() {
+                    if !enabled.contains(tool.name.as_ref()) {
+                        router.disable_route(tool.name.clone());
+                    }
+                }
+            }
+            router
+        })
+        .clone()
+}
+
+/// 全部工具名（用于 `--mcp-tools` 的校验与报错提示）。名字来自宏生成的路由，
+/// 因此**不可能**与真实工具面漂移：加一个 `#[tool]` 方法，这里自动跟着变。
+pub fn all_tool_names() -> Vec<String> {
+    MetatorioMcp::base_tool_router()
+        .list_all()
+        .into_iter()
+        .map(|tool| tool.name.to_string())
+        .collect()
+}
+
+/// 解析 `--mcp-tools`：空（或只给 `all`）= 全部启用；否则给出要启用的子集。
+///
+/// 名字写错**直接报错并列出合法名字**，不退化成「静默全开」或「静默少开一个」——
+/// 后两者都会让调用方以为某个工具在，实际却不在。
+pub fn resolve_tools(requested: &[String]) -> Result<Vec<String>, String> {
+    let mut wanted: Vec<String> = Vec::new();
+    for name in requested {
+        let name = name.trim();
+        if name.is_empty() {
+            continue;
+        }
+        if name.eq_ignore_ascii_case("all") {
+            return Ok(Vec::new());
+        }
+        if !wanted.iter().any(|existing| existing == name) {
+            wanted.push(name.to_string());
+        }
+    }
+    if wanted.is_empty() {
+        return Ok(Vec::new());
+    }
+    let known = all_tool_names();
+    let unknown: Vec<&String> = wanted
+        .iter()
+        .filter(|name| !known.iter().any(|known| known == *name))
+        .collect();
+    if !unknown.is_empty() {
+        return Err(format!(
+            "--mcp-tools 里有不存在的工具：{}。可用工具：{}（或写 `all` / 留空表示全部）",
+            unknown
+                .iter()
+                .map(|name| name.as_str())
+                .collect::<Vec<_>>()
+                .join("、"),
+            known.join("、")
+        ));
+    }
+    Ok(wanted)
+}
+
+/// 用宏生成的 `list_tools` / `call_tool` / `get_tool`，路由换成上面那个过滤过的。
+#[tool_handler(router = tool_router())]
+impl ServerHandler for MetatorioMcp {}
 
 /// `dispatch` 工具的实际逻辑：与具体 Tauri runtime 解耦，便于用 mock app 测试。
 ///
@@ -1666,6 +1756,8 @@ pub struct ServerConfig {
     pub token: Option<String>,
     /// 额外允许的 `Host`（主机名/mDNS 名）；IP 由 `bind` 自动允许。
     pub allow_hosts: Vec<String>,
+    /// 要启用的工具名；**空 = 全部启用**（见 `--mcp-tools`）。
+    pub tools: Vec<String>,
 }
 
 /// 把 `--mcp-bind` 解析成「监听地址 + Host 白名单」。
@@ -1757,6 +1849,53 @@ async fn serve(app: AppHandle, config: ServerConfig) {
         Some(hosts) => server_config.with_allowed_hosts(hosts.clone()),
         None => server_config.disable_allowed_hosts(),
     };
+
+    // 先按 `--mcp-tools` 定下要启用的工具（必须在处理任何请求之前设置）。
+    match resolve_tools(&config.tools) {
+        Ok(names) if names.is_empty() => {
+            ENABLED_TOOLS.set(None).ok();
+        }
+        Ok(names) => {
+            let all = all_tool_names();
+            let chosen: Vec<&String> = all
+                .iter()
+                .filter(|name| names.iter().any(|wanted| wanted == *name))
+                .collect();
+            eprintln!(
+                "  --mcp-tools 只启用 {} 个工具：{}（其余 {} 个对客户端不可见）",
+                chosen.len(),
+                chosen
+                    .iter()
+                    .map(|name| name.as_str())
+                    .collect::<Vec<_>>()
+                    .join("、"),
+                all.len() - chosen.len()
+            );
+            // 配置自相矛盾时点名提醒：auto_plan 的返回里带 get_planning_state 的轮询
+            // 提示，而异步结果只有它能读到。
+            if chosen.iter().any(|name| name.as_str() == "auto_plan")
+                && !chosen
+                    .iter()
+                    .any(|name| name.as_str() == "get_planning_state")
+            {
+                eprintln!(
+                    "  注意：启用了 auto_plan 却没有 get_planning_state——异步规划的结果\
+                     没有查询入口，agent 只能另开一次求解或重跑规划"
+                );
+            }
+            ENABLED_TOOLS
+                .set(Some(
+                    names
+                        .into_iter()
+                        .collect::<std::collections::HashSet<String>>(),
+                ))
+                .ok();
+        }
+        Err(error) => {
+            eprintln!("metatorio MCP server 未启动：{error}");
+            return;
+        }
+    }
 
     let service = StreamableHttpService::new(
         move || Ok(MetatorioMcp { app: app.clone() }),
@@ -2298,6 +2437,49 @@ mod tests {
         let (inputs, outputs) = split_mechanic_flow(&[(DualVar::Electricity, -0.09)]);
         assert_eq!(inputs.len(), 1);
         assert!(outputs.is_empty());
+    }
+
+    /// `--mcp-tools` 的解析：空 = 全部；`all` = 全部；子集原样；**写错就报错并列出
+    /// 可用工具**（绝不静默全开、也不静默少开——两者都会让调用方以为某个工具在）。
+    #[test]
+    fn tool_selection_is_explicit_and_never_silently_wrong() {
+        let all = all_tool_names();
+        for expected in ["auto_plan", "dispatch", "get_planning_state"] {
+            assert!(all.contains(&expected.to_string()), "{all:?}");
+        }
+
+        // 空 / 只给空白 / `all` → 全部（用空列表表示）。
+        assert!(resolve_tools(&[]).unwrap().is_empty());
+        assert!(resolve_tools(&["  ".to_string()]).unwrap().is_empty());
+        assert!(resolve_tools(&["all".to_string()]).unwrap().is_empty());
+        assert!(resolve_tools(&["ALL".to_string()]).unwrap().is_empty());
+
+        // 子集：保留顺序、去重、去空白。
+        let chosen = resolve_tools(&[
+            " auto_plan ".to_string(),
+            "dispatch".to_string(),
+            "auto_plan".to_string(),
+        ])
+        .unwrap();
+        assert_eq!(
+            chosen,
+            vec!["auto_plan".to_string(), "dispatch".to_string()]
+        );
+
+        // 群内 agent 推荐的「三个核心」是可用的组合。
+        let core = resolve_tools(&[
+            "auto_plan".to_string(),
+            "dispatch".to_string(),
+            "get_planning_state".to_string(),
+        ])
+        .unwrap();
+        assert_eq!(core.len(), 3);
+
+        // 写错 → 报错，且错误里既有那个错名字，也有可用工具清单。
+        let error = resolve_tools(&["no-such-tool".to_string()]).unwrap_err();
+        assert!(error.contains("no-such-tool"), "{error}");
+        assert!(error.contains("auto_plan"), "{error}");
+        assert!(error.contains("all"), "{error}");
     }
 
     /// 分页参数：默认 50、下限 1、上限 1000；offset 原样传递。

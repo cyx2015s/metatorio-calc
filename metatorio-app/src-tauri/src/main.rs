@@ -46,6 +46,12 @@ struct Cli {
     )]
     mcp_allow_hosts: Vec<String>,
 
+    /// 对外暴露哪些 MCP 工具（逗号分隔；**留空 = 全部**）。工具越少，agent 选得越准：
+    /// 例如 `--mcp-tools auto_plan,dispatch,get_planning_state` 只留「权威入口 + 万能
+    /// 逃生通道 + 读取」。名字写错会拒绝启动并列出可用工具。
+    #[arg(long = "mcp-tools", env = "METATORIO_MCP_TOOLS", value_delimiter = ',')]
+    mcp_tools: Vec<String>,
+
     /// MCP 鉴权 token（`Authorization: Bearer <token>` 或裸 token）。
     /// 不提供 = 不鉴权，此时只允许监听回环地址。
     #[arg(long, env = "METATORIO_MCP_TOKEN")]
@@ -72,6 +78,8 @@ fn validate(cli: &Cli) -> Result<(), String> {
         return Ok(());
     }
     let (bind, _) = mcp::resolve_bind(&cli.mcp_bind, &cli.mcp_allow_hosts)?;
+    // 工具名必须真实存在：写错就报错，而不是「静默全开」或「静默少开一个」。
+    mcp::resolve_tools(&cli.mcp_tools)?;
     let has_token = cli
         .mcp_token
         .as_deref()
@@ -96,6 +104,7 @@ fn main() {
         mcp_bind: cli.mcp_bind.clone(),
         mcp_port: cli.mcp_port,
         mcp_allow_hosts: cli.mcp_allow_hosts.clone(),
+        mcp_tools: cli.mcp_tools.clone(),
         // 空串等于没给：与原来「env 存在但为空 → 不鉴权」的行为一致。
         mcp_token: cli.mcp_token.filter(|token| !token.trim().is_empty()),
         solve_timeout_ms: cli.solve_timeout_ms,
@@ -117,6 +126,30 @@ mod tests {
         assert!(Cli::try_parse_from(["metatorio-app", "--solve-timeout-ms", "-1"]).is_err());
     }
 
+    /// `--mcp-tools`：写错工具名必须**拒绝启动**（而不是静默全开或静默少开一个）。
+    #[test]
+    fn mcp_tools_selection_is_validated() {
+        let cli = |tools: Vec<&str>| Cli {
+            headless: true,
+            mcp_bind: mcp::DEFAULT_MCP_BIND.to_string(),
+            mcp_port: mcp::DEFAULT_MCP_PORT,
+            mcp_allow_hosts: Vec::new(),
+            mcp_tools: tools.into_iter().map(str::to_string).collect(),
+            mcp_token: None,
+            solve_timeout_ms: None,
+            no_mcp: false,
+        };
+
+        // 留空 = 全部；群内 agent 推荐的三个核心；`all` 也是全部。
+        assert!(validate(&cli(vec![])).is_ok());
+        assert!(validate(&cli(vec!["all"])).is_ok());
+        assert!(validate(&cli(vec!["auto_plan", "dispatch", "get_planning_state"])).is_ok());
+        // 写错 → 报错，并列出可用工具。
+        let err = validate(&cli(vec!["auto_plan", "nope"])).unwrap_err();
+        assert!(err.contains("nope"), "{err}");
+        assert!(err.contains("auto_plan"), "{err}");
+    }
+
     /// `--headless --no-mcp` = 既没有窗口也没有接口：必须显式拒绝。
     ///
     /// 这里**直接构造 `Cli`**而不是 `try_parse_from`：clap 的 `env` 回退会把
@@ -131,6 +164,7 @@ mod tests {
             mcp_bind: mcp::DEFAULT_MCP_BIND.to_string(),
             mcp_port: mcp::DEFAULT_MCP_PORT,
             mcp_allow_hosts: Vec::new(),
+            mcp_tools: Vec::new(),
             mcp_token: None,
             solve_timeout_ms: None,
             no_mcp,
@@ -156,6 +190,7 @@ mod tests {
             mcp_bind: bind.to_string(),
             mcp_port: mcp::DEFAULT_MCP_PORT,
             mcp_allow_hosts: Vec::new(),
+            mcp_tools: Vec::new(),
             mcp_token: token.map(str::to_string),
             solve_timeout_ms: None,
             no_mcp,
@@ -190,6 +225,7 @@ mod tests {
             "METATORIO_MCP_PORT",
             "METATORIO_MCP_BIND",
             "METATORIO_MCP_ALLOW_HOSTS",
+            "METATORIO_MCP_TOOLS",
             "METATORIO_MCP_TOKEN",
             "METATORIO_HEADLESS",
             "METATORIO_SOLVE_TIMEOUT_MS",
@@ -238,6 +274,7 @@ mod tests {
         std::env::set_var("METATORIO_MCP_PORT", "8801");
         std::env::set_var("METATORIO_MCP_BIND", "192.168.1.99");
         std::env::set_var("METATORIO_MCP_ALLOW_HOSTS", "a.local,b.local");
+        std::env::set_var("METATORIO_MCP_TOOLS", "auto_plan,dispatch");
         std::env::set_var("METATORIO_MCP_TOKEN", "from-env");
         std::env::set_var("METATORIO_HEADLESS", "true");
         std::env::set_var("METATORIO_SOLVE_TIMEOUT_MS", "7000");
@@ -249,6 +286,11 @@ mod tests {
             vec!["a.local".to_string(), "b.local".to_string()],
             "环境变量里的 Host 白名单按逗号分隔"
         );
+        assert_eq!(
+            cli.mcp_tools,
+            vec!["auto_plan".to_string(), "dispatch".to_string()],
+            "环境变量里的工具清单按逗号分隔"
+        );
         assert_eq!(cli.mcp_token.as_deref(), Some("from-env"));
         assert!(cli.headless, "bool 标志也应支持环境变量");
         assert_eq!(cli.solve_timeout_ms, Some(7000));
@@ -256,6 +298,11 @@ mod tests {
         // 4) 命令行优先于环境变量。
         let cli = Cli::try_parse_from(["metatorio-app", "--mcp-port", "8802"]).unwrap();
         assert_eq!(cli.mcp_port, 8802);
+        assert_eq!(
+            cli.mcp_tools,
+            vec!["auto_plan".to_string(), "dispatch".to_string()],
+            "环境变量里的工具清单按逗号分隔"
+        );
         assert_eq!(cli.mcp_token.as_deref(), Some("from-env"));
 
         // 5) 空 token = 不鉴权（main 里的 filter 把空串变成 None）。
@@ -267,6 +314,7 @@ mod tests {
             "METATORIO_MCP_PORT",
             "METATORIO_MCP_BIND",
             "METATORIO_MCP_ALLOW_HOSTS",
+            "METATORIO_MCP_TOOLS",
             "METATORIO_MCP_TOKEN",
             "METATORIO_HEADLESS",
             "METATORIO_SOLVE_TIMEOUT_MS",
