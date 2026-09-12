@@ -161,9 +161,14 @@ impl Default for AppState {
 /// 不再各自去读环境变量。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Options {
-    /// MCP 端点端口（仅 loopback）。
+    /// MCP 监听地址；默认 `127.0.0.1`（只回环）。填本机局域网 IP 或 `0.0.0.0`
+    /// 才能被手机等其它设备访问——**非回环时必须有 token**（`run` 前的校验拦住）。
+    pub mcp_bind: String,
+    /// MCP 端点端口。
     pub mcp_port: u16,
-    /// MCP Bearer token；`None`/空 = 不鉴权（仅 loopback 兜底）。
+    /// 额外允许的 `Host`（用主机名/mDNS 名访问时填）；具体 IP 由 `mcp_bind` 自动允许。
+    pub mcp_allow_hosts: Vec<String>,
+    /// MCP Bearer token；`None`/空 = 不鉴权（仅回环兜底；非回环会被拒绝启动）。
     pub mcp_token: Option<String>,
     /// 单次求解的等待上限（毫秒）；`None` = 内置默认 120s。
     pub solve_timeout_ms: Option<u64>,
@@ -176,7 +181,9 @@ pub struct Options {
 impl Default for Options {
     fn default() -> Self {
         Self {
+            mcp_bind: mcp::DEFAULT_MCP_BIND.to_string(),
             mcp_port: mcp::DEFAULT_MCP_PORT,
+            mcp_allow_hosts: Vec::new(),
             mcp_token: None,
             solve_timeout_ms: None,
             headless: false,
@@ -3804,7 +3811,8 @@ pub fn run(options: Options) {
         context.config_mut().app.windows.clear();
         if options.mcp {
             println!(
-                "切向量化 headless：不创建窗口，MCP 端点在 http://127.0.0.1:{}{}",
+                "切向量化 headless：不创建窗口，MCP 端点在 http://{}:{}{}",
+                options.mcp_bind,
                 options.mcp_port,
                 mcp::MCP_PATH
             );
@@ -3812,9 +3820,13 @@ pub fn run(options: Options) {
             println!("切向量化 headless：不创建窗口，且已关闭 MCP（没有任何接口）");
         }
     }
-    let mcp_port = options.mcp_port;
-    let mcp_token = options.mcp_token.clone();
     let mcp_enabled = options.mcp;
+    let mcp_config = mcp::ServerConfig {
+        bind: options.mcp_bind.clone(),
+        port: options.mcp_port,
+        token: options.mcp_token.clone(),
+        allow_hosts: options.mcp_allow_hosts.clone(),
+    };
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -3828,7 +3840,7 @@ pub fn run(options: Options) {
             // 调用会在 runtime 锁上短暂等待。
             #[cfg(not(mobile))]
             if mcp_enabled {
-                mcp::spawn_server(app.handle().clone(), mcp_port, mcp_token.clone());
+                mcp::spawn_server(app.handle().clone(), mcp_config.clone());
             }
 
             // 恢复缓存注册表并激活最近使用的上下文。

@@ -26,7 +26,7 @@
 //!   must carry `Authorization: Bearer <token>` (or the raw token); if it is
 //!   unset, no auth is required (loopback-only is the fallback).
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 
 use axum::{
     extract::{Request, State},
@@ -59,6 +59,11 @@ use metatorio_runtime::{FactoryId, ProjectId};
 /// Default loopback port for the MCP endpoint (`--mcp-port` /
 /// `METATORIO_MCP_PORT` 可覆盖）。
 pub const DEFAULT_MCP_PORT: u16 = 8765;
+
+/// 默认只监听回环：这个端点能建项目、改目标、跑规划，默认不该被局域网里任何设备碰到。
+/// 要手机/其它设备接入就显式 `--mcp-bind <本机 IP>`（或 `0.0.0.0`），并且**必须**配
+/// token（启动前校验，见 bin 的 `validate`）。
+pub const DEFAULT_MCP_BIND: &str = "127.0.0.1";
 
 /// The MCP service routes are mounted under this path (e.g.
 /// `http://127.0.0.1:8765/mcp`).
@@ -1545,41 +1550,121 @@ fn factory_summary(project: &metatorio_runtime::ProjectDocument) -> Vec<serde_js
 
 // ── Server lifecycle ───────────────────────────────────────────────
 
-/// Start the MCP server on a dedicated tokio runtime thread, bound to
-/// `127.0.0.1:<port>`.  Fire-and-forget: the thread ends when the app exits.
+/// MCP 端点的启动配置（由 `Options` 组装后传入，见 `crate::run`）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServerConfig {
+    /// 监听地址：`127.0.0.1`（默认）/ 本机 IP / `0.0.0.0`，或 `localhost`。
+    pub bind: String,
+    /// 监听端口。
+    pub port: u16,
+    /// Bearer token；`None`/空 = 不鉴权（只允许出现在回环绑定上）。
+    pub token: Option<String>,
+    /// 额外允许的 `Host`（主机名/mDNS 名）；IP 由 `bind` 自动允许。
+    pub allow_hosts: Vec<String>,
+}
+
+/// 把 `--mcp-bind` 解析成「监听地址 + Host 白名单」。
 ///
-/// `port` / `token` 由启动选项（CLI 或环境变量）解析后传入——这里不再自己读
-/// 环境变量，避免出现「CLI 指定了但服务仍按 env 起」的双份真相。
-pub fn spawn_server(app: AppHandle, port: u16, token: Option<String>) {
+/// 白名单来自 rmcp 的 DNS-rebinding 防护（默认只认回环 Host）：绑到具体 IP 时把该 IP
+/// 加进去，客户端用 `http://<那个 IP>:<port>/mcp` 就不会被 Host 校验拦下。绑到
+/// `0.0.0.0`/`::` 时无从枚举本机地址，返回 `None` 表示**关闭**这项校验——此时调用方
+/// 已明确要求对所有网卡开放，访问控制只剩 token（启动日志会写明这一点）。
+///
+/// `pub` 是为了让 bin 的 `validate` 复用同一份解析（非回环必须有 token 的判断要用它），
+/// 而不是各写一份「什么算回环」。
+pub fn resolve_bind(
+    bind: &str,
+    allow_hosts: &[String],
+) -> Result<(IpAddr, Option<Vec<String>>), String> {
+    let bind = bind.trim();
+    if bind.is_empty() {
+        return Err("--mcp-bind 不能为空".to_string());
+    }
+    let addr: IpAddr = if bind.eq_ignore_ascii_case("localhost") {
+        IpAddr::from([127, 0, 0, 1])
+    } else {
+        bind.parse().map_err(|_| {
+            format!(
+                "--mcp-bind `{bind}` 不是合法地址：只接受 IP 字面量（`127.0.0.1` / \
+                 `0.0.0.0` / `192.168.1.23`）或 `localhost`"
+            )
+        })?
+    };
+    if addr.is_unspecified() {
+        return Ok((addr, None));
+    }
+    let mut hosts = vec![
+        "localhost".to_string(),
+        "127.0.0.1".to_string(),
+        "::1".to_string(),
+    ];
+    hosts.push(addr.to_string());
+    for host in allow_hosts {
+        let host = host.trim();
+        if !host.is_empty() && !hosts.iter().any(|existing| existing == host) {
+            hosts.push(host.to_string());
+        }
+    }
+    Ok((addr, Some(hosts)))
+}
+
+/// 猜一个「手机该连的地址」：绑到 `0.0.0.0` 时本机可能有多个网卡，这里 connect 一个
+/// 公网地址（UDP，不发包）让内核挑一条出口路由，得到最可能的局域网 IP。**只是提示**，
+/// 多网卡/无默认路由时会不准（返回 `None`，日志里就写占位符）。
+fn guess_lan_ip() -> Option<IpAddr> {
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("8.8.8.8:80").ok()?;
+    socket.local_addr().ok().map(|addr| addr.ip())
+}
+
+/// Start the MCP server on a dedicated tokio runtime thread.  Fire-and-forget: the
+/// thread ends when the app exits.
+///
+/// 监听地址 / 端口 / token / Host 白名单都由启动选项（CLI 或环境变量）解析后传入——
+/// 这里不再自己读环境变量，避免出现「CLI 指定了但服务仍按 env 起」的双份真相。
+pub fn spawn_server(app: AppHandle, config: ServerConfig) {
     std::thread::spawn(move || {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
             .expect("failed to build MCP tokio runtime");
-        runtime.block_on(serve(app, port, token));
+        runtime.block_on(serve(app, config));
     });
 }
 
 /// Build the axum router + listener and serve MCP until the process exits.
-async fn serve(app: AppHandle, port: u16, token: Option<String>) {
-    let token = token.filter(|token| !token.is_empty());
+async fn serve(app: AppHandle, config: ServerConfig) {
+    let token = config.token.filter(|token| !token.is_empty());
+    let (bind, allowed_hosts) = match resolve_bind(&config.bind, &config.allow_hosts) {
+        Ok(resolved) => resolved,
+        Err(error) => {
+            eprintln!("metatorio MCP server 未启动：{error}");
+            return;
+        }
+    };
+
+    let server_config = StreamableHttpServerConfig::default()
+        // Stateless for every protocol version: each request gets a fresh
+        // handler, shared state lives in the managed `AppState`.
+        .with_legacy_session_mode(false)
+        // Simple request/response tools reply as `application/json`.
+        .with_json_response(true);
+    let server_config = match &allowed_hosts {
+        Some(hosts) => server_config.with_allowed_hosts(hosts.clone()),
+        None => server_config.disable_allowed_hosts(),
+    };
 
     let service = StreamableHttpService::new(
         move || Ok(MetatorioMcp { app: app.clone() }),
         LocalSessionManager::default().into(),
-        StreamableHttpServerConfig::default()
-            // Stateless for every protocol version: each request gets a fresh
-            // handler, shared state lives in the managed `AppState`.
-            .with_legacy_session_mode(false)
-            // Simple request/response tools reply as `application/json`.
-            .with_json_response(true),
+        server_config,
     );
 
     let router = Router::new()
         .nest_service(MCP_PATH, service)
         .layer(middleware::from_fn_with_state(token.clone(), require_token));
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let addr = SocketAddr::new(bind, config.port);
     let listener = match tokio::net::TcpListener::bind(addr).await {
         Ok(listener) => listener,
         Err(error) => {
@@ -1595,6 +1680,32 @@ async fn serve(app: AppHandle, port: u16, token: Option<String>) {
             " (no token auth; loopback only)"
         }
     );
+    // 手机等其它设备要连的地址、以及最容易踩的坑，直接打在启动日志里：这个端点不再
+    // 只给本机用时，「手机上填什么」完全取决于它。
+    if !bind.is_loopback() {
+        let reachable = if bind.is_unspecified() {
+            guess_lan_ip()
+                .map(|ip| ip.to_string())
+                .unwrap_or_else(|| "<本机局域网 IP>".to_string())
+        } else {
+            bind.to_string()
+        };
+        eprintln!(
+            "  其它设备（手机/局域网）：http://{reachable}:{}{MCP_PATH}",
+            config.port
+        );
+        match &allowed_hosts {
+            Some(hosts) => eprintln!("  Host 白名单：{}", hosts.join(", ")),
+            None => eprintln!(
+                "  注意：绑定 {bind} 时 Host 校验已关闭（无法枚举本机地址），访问控制只靠 token"
+            ),
+        }
+        if token.is_none() {
+            eprintln!(
+                "  危险：没有 token——这个端点能改文档、跑规划，暴露到局域网前请加 --mcp-token"
+            );
+        }
+    }
     if let Err(error) = axum::serve(listener, router).await {
         eprintln!("metatorio MCP server error: {error}");
     }
@@ -2006,6 +2117,55 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.contains("localized_names"), "{error}");
+    }
+
+    /// `--mcp-bind` 解析：默认/`localhost` → 回环；本机 IP → 该 IP 进 Host 白名单；
+    /// `0.0.0.0` → 无从枚举地址，返回 `None`（关闭 Host 校验，启动日志会写明）；
+    /// 非法地址必须报错，而不是静默退化成回环。
+    #[test]
+    fn bind_parsing_is_explicit_about_hosts_and_wildcards() {
+        // 默认：回环，白名单只含回环名。
+        let (addr, hosts) = resolve_bind("127.0.0.1", &[]).unwrap();
+        assert!(addr.is_loopback());
+        let hosts = hosts.expect("回环也要给白名单");
+        assert!(hosts.contains(&"127.0.0.1".to_string()));
+        assert!(hosts.contains(&"localhost".to_string()));
+
+        // localhost 归一化成 127.0.0.1。
+        assert_eq!(
+            resolve_bind("localhost", &[]).unwrap().0,
+            resolve_bind("127.0.0.1", &[]).unwrap().0
+        );
+
+        // 具体局域网 IP：该 IP 必须在白名单里（手机用 http://<IP>:port 访问）。
+        let (addr, hosts) = resolve_bind(" 192.168.1.23 ", &[]).unwrap();
+        assert_eq!(addr.to_string(), "192.168.1.23");
+        let hosts = hosts.unwrap();
+        assert!(hosts.contains(&"192.168.1.23".to_string()));
+        // 额外 Host（主机名/mDNS）会追加，且不重复。
+        let (_, hosts) = resolve_bind(
+            "192.168.1.23",
+            &["mirac-pc.local".to_string(), " 192.168.1.23 ".to_string()],
+        )
+        .unwrap();
+        let hosts = hosts.unwrap();
+        assert!(hosts.contains(&"mirac-pc.local".to_string()));
+        assert_eq!(
+            hosts.iter().filter(|host| *host == "192.168.1.23").count(),
+            1
+        );
+
+        // 所有网卡：白名单为 None = 关闭 Host 校验（日志里会说明）。
+        assert!(resolve_bind("0.0.0.0", &[]).unwrap().1.is_none());
+        assert!(resolve_bind("::", &[]).unwrap().1.is_none());
+
+        // 非法地址 / 空串：报错带上开关名，便于排查。
+        assert!(resolve_bind("not-an-ip", &[])
+            .unwrap_err()
+            .contains("mcp-bind"));
+        assert!(resolve_bind("  ", &[]).unwrap_err().contains("mcp-bind"));
+        // 主机名不解析（只接受 IP 字面量与 localhost），避免依赖 DNS 结果。
+        assert!(resolve_bind("mirac-pc", &[]).is_err());
     }
 
     /// 分页参数：默认 50、下限 1、上限 1000；offset 原样传递。

@@ -29,8 +29,12 @@
 ## 决策 4：更新
 - 合并后 = 现有 Tauri updater 更新整包（GUI + MCP 端点）。**无需 headless 单独更新**。
 
-## 决策 5：安全
-- 仅 `127.0.0.1`，配 **token**（配置或按会话生成），外部 agent 需带 token 调用；避免任何本机进程都能驱动规划器。
+## 决策 5：安全（2026-xx 修订：默认仍只回环；要局域网/手机接入则非回环必须有 token）
+- **默认只监听 `127.0.0.1`**（`--mcp-bind` 的默认值）：这个端点能建项目、改目标、跑规划，默认不该被同一网段里任何设备碰到。
+- 要让手机等其它设备接入：`--mcp-bind <本机局域网 IP>`（或 `0.0.0.0`）。**非回环绑定必须同时提供 `--mcp-token`，否则直接拒绝启动**（bin 的 `validate` 报错退出，而不是警告后照跑）——家用网段里任何设备都能扫到开放端口。
+- 鉴权：`Authorization: Bearer <token>`（或裸 token）。回环 + 无 token 仍是允许的（本机自用）。
+- **Host 白名单**：rmcp 的 Streamable HTTP 默认只接受回环 `Host`（防 DNS rebinding）。绑定具体 IP 时自动把该 IP 加进白名单（手机用 `http://<IP>:<port>/mcp` 即可）；用主机名/mDNS 名访问再加 `--mcp-allow-host <name>`；绑 `0.0.0.0`/`::` 时无法枚举本机地址，白名单**关闭**（启动日志会写明），此时访问控制只剩 token。实测：错误 `Host` → `403 Forbidden: Host header is not allowed`。
+- 启动日志直接打印「其它设备该用的 URL」+ 当前白名单（绑 `0.0.0.0` 时用一次 UDP connect 猜一个局域网 IP），减少「手机上到底填什么」的来回试。
 - 复用 MCP 客户端注意：DSH 接 MCP 时服务器命令是**沙箱外**代码；这里我们是**被动提供 MCP 服务**，方向相反，安全边界是"只信任持 token 的调用方"。
 
 ## 决策 6：MCP 工具面（Outline，Phase 2 细化）
@@ -142,4 +146,23 @@ Phase 2 工具面**不在一开始就做成离散的友好工具**，而是：
 
 DSH 客户端配置见 DSH 仓库 `@deepseek-ai/dsh-mcp-client` 的 Streamable-HTTP 接法：命令（stdio）不用时，可改成 HTTP 端点 + `Authorization: Bearer <token>` 头部。本服务器**默认提供 HTTP 端点**，故 DSH 侧用 http transport 配置即可，工具名会带 `mcp__<serverName>__dispatch` 前缀。
 
-要我把上面整理成一份**可写进仓库的设计稿**（比如 `docs/mcp-design.md`，含"决策理由"树，方便下轮 compact 接力），还是就以这段对话为准等 compact 自动节选？另外：是否需要我下轮从"工具面枚举 + 异步求解"继续（Phase 2 规划细化），还是先停在架构决策这层？
+## 手机接入（RikkaHub，局域网）
+
+RikkaHub（Android）原生支持 MCP，传输类型选 **Streamable HTTP**（它还有 SSE，但我们的端点是 Streamable HTTP）。
+
+1. 电脑上起服务（`<本机局域网 IP>` 用 `ipconfig` 里 WLAN/以太网那个，例如 `192.168.0.101`）：
+
+   ```text
+   metatorio-app --mcp-bind 192.168.0.101 --mcp-token <自己起一个长一点的随机串>
+   ```
+
+   启动日志会打印手机该用的完整 URL 与 Host 白名单；GUI 与 MCP 是同一个进程，手机上让 AI 改的文档会实时反映在电脑界面上（`document-changed`）。
+   Windows 首次会弹「是否允许应用通过防火墙」，要**勾上专用网络**；没弹就手动加一条入站规则放行该端口。
+2. 手机上：**设置 → MCP → + → Streamable HTTP**，填
+   - **name**：随意，如 `metatorio`
+   - **url**：`http://192.168.0.101:8765/mcp`（端口按 `--mcp-port`）
+   - **headers**（自定义请求头，名称/值一对）：
+     - 名称 `Authorization`，值 `Bearer <同一个 token>`（`Bearer` 后有**一个空格**）
+3. 保存后应显示「已连接」并同步出 7 个工具；再到**助手的 MCP 服务器**里勾选这个服务器，工具才会进入对话。
+4. 建议把会改文档的工具（`dispatch` / `auto_plan`）在 RikkaHub 里打开 **needsApproval**，让手机上每次真正动规划前都确认一次。
+5. 排错顺序：手机浏览器先打开 `http://<IP>:<port>/mcp`（会看到 405/400 之类，说明网络通）→ 401 说明头没带对 → 403 说明 `Host` 不在白名单（换成 IP，或加 `--mcp-allow-host`）→ 连不上就是防火墙/不同网段（访客 Wi-Fi 常与主机隔离）。
