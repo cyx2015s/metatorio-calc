@@ -81,6 +81,27 @@ pub struct AppState {
     locales: Mutex<HashMap<String, HashMap<String, String>>>,
     /// MCP `dispatch` 的幂等缓存：request_id → 上次返回的载荷。
     dispatch_cache: Mutex<DispatchCache>,
+    /// 异步自动规划的状态（MCP 的 `auto_plan` 工具用）：按 (project, factory)
+    /// 记录「运行中 / 完成（含求解结果）/ 失败」，供 agent 稍后查询。
+    auto_plans: Mutex<HashMap<(ProjectId, FactoryId), AutoPlanState>>,
+}
+
+/// 一次**异步**自动规划的状态（`auto_plan` 工具立即返回后由 agent 轮询）。
+///
+/// 为什么不让 `get_planning_state(recompute=true)` 直接当轮询入口：那条路会**重新**
+/// 求解**当前**文档——规划还没回写时它算的是旧文档，agent 会拿到与计划无关的结果。
+/// 所以这里把「这次规划自己的结果」存下来，由 `get_planning_state` 一并返回。
+#[derive(Debug, Clone)]
+pub enum AutoPlanState {
+    /// 已受理，枚举/求解/回写进行中。
+    Running,
+    /// 完成：`revision` 是回写后的文档版本，`result` 是回写后的重解结果。
+    Done {
+        revision: u64,
+        result: Box<metatorio_runtime::SolveResult>,
+    },
+    /// 失败（无解 / 版本冲突 / 上下文缺失等）：原样带上错误信息。
+    Failed(String),
 }
 
 /// MCP `dispatch` 的幂等缓存（有界 FIFO）。
@@ -128,6 +149,7 @@ impl Default for AppState {
             project_paths: Mutex::new(HashMap::new()),
             locales: Mutex::new(HashMap::new()),
             dispatch_cache: Mutex::new(DispatchCache::default()),
+            auto_plans: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -174,6 +196,61 @@ impl AppState {
         }
         state
     }
+}
+
+/// 组合入口（MCP 的 `auto_plan`）在「先把文档配好」阶段只跑这些**便宜的收敛命令**。
+///
+/// 它们修正文档内部一致性（品质上限 / 机器兼容 / 插件数钳制），代价微秒级。
+/// `Recompute`/`AutoPlan` 会在最后统一跑一次，`Persist` 对新项目本就是 no-op
+/// （没有保存路径），因此这里跳过它们——否则一次组合配置会触发六次整厂求解，
+/// 「立即返回」就成了空话。
+pub(crate) fn is_consistency_command(command: &metatorio_runtime::message::RuntimeCommand) -> bool {
+    use metatorio_runtime::message::RuntimeCommand;
+    matches!(
+        command,
+        RuntimeCommand::EnsureQualityLimit { .. }
+            | RuntimeCommand::ClampModules { .. }
+            | RuntimeCommand::EnsureMachineCompat { .. }
+    )
+}
+
+/// 触发一次**异步**自动规划：立刻返回，把状态写进 `AppState::auto_plans` 供轮询。
+///
+/// `execute_command` 的 `AutoPlan` 分支本身是「锁外枚举 → 版本校验 → 回写 → 重解」
+/// （py 上下文实测 70s+），所以这里只负责把它丢到后台任务，并把**这次规划自己的**
+/// 结果回报出去——不要让 agent 用 `recompute` 去猜（那会去算规划尚未回写的旧文档）。
+pub(crate) fn spawn_auto_plan<R: TauriRuntime>(
+    app: &AppHandle<R>,
+    project: ProjectId,
+    factory: FactoryId,
+    command: metatorio_runtime::message::RuntimeCommand,
+) {
+    let app = app.clone();
+    if let Ok(mut plans) = app.state::<AppState>().auto_plans.lock() {
+        plans.insert((project, factory), AutoPlanState::Running);
+    }
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<AppState>();
+        let outcome = execute_command(&app, &state, &command).await;
+        let revision = with_runtime(&state, |runtime| Ok(runtime.state.revision)).unwrap_or(0);
+        let next = if !outcome.errors.is_empty() {
+            AutoPlanState::Failed(outcome.errors.join("；"))
+        } else {
+            match outcome.effect {
+                Some(metatorio_runtime::CommandEffect::Solve(result)) => AutoPlanState::Done {
+                    revision,
+                    result: Box::new(result),
+                },
+                _ => AutoPlanState::Failed("自动规划没有产出求解结果".to_string()),
+            }
+        };
+        if let Ok(mut plans) = state.auto_plans.lock() {
+            plans.insert((project, factory), next);
+        }
+        if let Err(error) = app.emit("document-changed", revision) {
+            eprintln!("failed to emit document-changed: {error}");
+        }
+    });
 }
 
 /// Game contexts cached on disk under `<app_data>/contexts/<id>/`.

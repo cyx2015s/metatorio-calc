@@ -48,8 +48,12 @@ use schemars::JsonSchema;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 use crate::{execute_command, AppState};
-use metatorio_core::DualVar;
-use metatorio_runtime::message::AppMessage;
+use metatorio_core::{BeaconConfig, DualVar, IdWithQuality, ModuleConfig};
+use metatorio_runtime::document::AutoBeaconPlan;
+use metatorio_runtime::message::{
+    AppMessage, ApplicationAction, DeleteDecision, FactoryAction, FactoryContextAction,
+    FactoryTemplate, FlowAction, PlanningAction, ProjectAction, RuntimeCommand, SolveAction,
+};
 use metatorio_runtime::{FactoryId, ProjectId};
 
 /// Default loopback port for the MCP endpoint (`--mcp-port` /
@@ -198,8 +202,12 @@ impl MetatorioMcp {
         through it; the response always carries `page.totals` (pre-truncation counts) \
         and `page.truncated` (which collections were cut), so nothing is silently \
         dropped.  Set `recompute` (only with project + factory) to also run a solve \
-        and include its result (its mechanics/flows are paged the same way).  All flow \
-        amounts are per second (time-scale only affects display)."
+        and include its result (its mechanics/flows are paged the same way).  \
+        With `project`+`factory` the response also carries `auto_plan` when that \
+        factory has an asynchronous auto-plan (started by the `auto_plan` tool): \
+        `{status: running|done|failed, revision?, result?, error?}` — poll this to \
+        collect the result.  All flow amounts are per second (time-scale only affects \
+        display)."
     )]
     async fn get_planning_state(
         &self,
@@ -278,6 +286,53 @@ impl MetatorioMcp {
         };
 
         let (mut value, mut report) = planning_state_value(&snapshot, page);
+        // 工厂层：附上该工厂的**异步自动规划**状态（如果有），供 `auto_plan` 的
+        // 调用方轮询。这是「稍后查这个 project + factory」的落点：状态与结果都由
+        // 那次规划自己写入，不用猜、也不会与当前文档的 recompute 混淆。
+        if let DocSnapshot::Factory {
+            project, factory, ..
+        } = &snapshot
+        {
+            let status = app
+                .state::<AppState>()
+                .auto_plans
+                .lock()
+                .ok()
+                .and_then(|plans| {
+                    plans
+                        .get(&(ProjectId(*project), FactoryId(*factory)))
+                        .cloned()
+                });
+            if let Some(status) = status {
+                let auto_plan = match status {
+                    crate::AutoPlanState::Running => serde_json::json!({ "status": "running" }),
+                    crate::AutoPlanState::Failed(error) => {
+                        serde_json::json!({ "status": "failed", "error": error })
+                    }
+                    crate::AutoPlanState::Done { revision, result } => {
+                        let mut result =
+                            serde_json::to_value(&*result).unwrap_or(serde_json::Value::Null);
+                        if let Some(solved) = result
+                            .get_mut("status")
+                            .and_then(|status| status.as_object_mut())
+                            .and_then(|status| status.get_mut("solved"))
+                            .and_then(|solved| solved.as_object_mut())
+                        {
+                            report.page_key(solved, "mechanics", "auto_plan.mechanics", page);
+                            report.page_key(solved, "flows", "auto_plan.flows", page);
+                        }
+                        serde_json::json!({
+                            "status": "done",
+                            "revision": revision,
+                            "result": result,
+                        })
+                    }
+                };
+                if let Some(object) = value.as_object_mut() {
+                    object.insert("auto_plan".to_string(), auto_plan);
+                }
+            }
+        }
         // 工厂层可选带上重算结果：它的 mechanics/flows 同样按 page 截断。
         if let Some(solve) = solve {
             if let Some(object) = value.as_object_mut() {
@@ -302,74 +357,252 @@ impl MetatorioMcp {
         Ok(CallToolResult::structured(value))
     }
 
-    /// 项目索引：有哪些项目、各自多少个工厂 / 机制 / 目标。
+    /// 一站式入口：建项目/工厂 + 配好目标/星球/品质/插件/插件塔/外部输入，然后
+    /// **立刻返回**并异步跑自动规划。
     ///
-    /// 给 agent 一个**便宜的第一步**：先看索引再决定读哪个项目的完整文档，
-    /// 避免为了找一个 id 而拉全量文档。
+    /// 群里的实测反馈：每次手拼 `dispatch` 序列既费人又费 AI（而且容易漏配严格
+    /// 供给）。这个入口把那条序列固定下来，并把「跑得久」的规划甩到后台。
     #[tool(
-        description = "List projects (id, name, context, and counts of factories / \
-        mechanics / targets).  Cheap index: call this first, then use \
-        get_planning_state to read a specific project."
+        description = "ONE-SHOT planning entry point: create a project + factory, configure \
+        targets / planet / major quality / modules / beacons / external inputs, then kick \
+        off auto-planning **asynchronously and return immediately**.  \
+        Required: `targets` = [{ item, quality?, amount }] — `item` accepts a raw id \
+        (`iron-plate`) or a localized name (`铁板`); separators are ignored; a typo or a \
+        non-item name is rejected with candidates (use `localized_names` if unsure).  \
+        **Every hand-written name is validated against the active context before \
+        anything is created** (`item`, `modules.exclude`, `beacons[].beacon`, \
+        `beacons[].modules[].module`, `external_inputs[].flow`): one wrong name fails \
+        the whole call with candidates and creates nothing — a name that silently does \
+        nothing (or writes garbage into the document) is worse than an error.  \
+        Optional: `planet`, `major_quality`, `modules` = {best, quality, exclude[]}, \
+        `beacons` = [{beacon:{id,quality}, count?, share?, modules:[{module,count?}]}], \
+        `external_inputs` = [{flow, penalty?}] (this is how you supply raw materials — \
+        auto-planning is ALWAYS strict-source and there is no toggle), `project_name`, \
+        `factory_name`, `context_id`, `request_id` (idempotent retry).  \
+        The response returns the created `project`/`factory` ids plus \
+        `{\"auto_plan\": {\"status\": \"running\"}}` and a `poll` hint; call \
+        `get_planning_state` with that project + factory to read \
+        `auto_plan.status` (`running`/`done`/`failed`), and the solve result once done.  \
+        All flow amounts are per second.  Prefer this over hand-writing the dispatch \
+        sequence unless you need something it does not expose."
     )]
-    async fn list_projects(&self) -> Result<CallToolResult, McpError> {
-        let app = self.app.clone();
-        let projects = tauri::async_runtime::spawn_blocking(move || {
-            let state = app.state::<AppState>();
-            let runtime = state
-                .runtime
-                .lock()
-                .map_err(|_| "runtime lock poisoned".to_string())?;
-            Ok::<_, String>(project_summary(&runtime.state.document))
-        })
-        .await
-        .map_err(|error| {
-            McpError::internal_error(format!("list_projects join 失败: {error}"), None)
-        })?
-        .map_err(|error| {
-            McpError::invalid_params(format!("list_projects 执行失败: {error}"), None)
-        })?;
-        Ok(CallToolResult::structured(serde_json::json!({
-            "projects": projects,
-        })))
-    }
-
-    /// 工厂索引：某个项目下有哪些工厂、规模与关键设置（含目标清单）。
-    #[tool(
-        description = "List the factories of one project (id, name, planet/surface, \
-        major quality, strict source/sink, counts, and the target list).  Cheap \
-        index: call this first, then get_planning_state with project + factory to \
-        read the full factory document."
-    )]
-    async fn list_factories(
+    async fn auto_plan(
         &self,
-        Parameters(params): Parameters<ListFactoriesParams>,
+        Parameters(params): Parameters<AutoPlanParams>,
     ) -> Result<CallToolResult, McpError> {
         let app = self.app.clone();
-        let project = ProjectId(params.project);
-        let (name, factories) = tauri::async_runtime::spawn_blocking(move || {
-            let state = app.state::<AppState>();
-            let runtime = state
-                .runtime
+        if params.targets.is_empty() {
+            return Err(McpError::invalid_params(
+                "targets 至少给一个目标".to_string(),
+                None,
+            ));
+        }
+        // 幂等回放：同一个 request_id 直接返回上次载荷（含 ids），不重复建项目。
+        if let Some(request_id) = &params.request_id {
+            let cached = app
+                .state::<AppState>()
+                .dispatch_cache
                 .lock()
-                .map_err(|_| "runtime lock poisoned".to_string())?;
-            let project_doc = runtime
-                .state
-                .project(project)
-                .map_err(|error| error.to_string())?;
-            Ok::<_, String>((project_doc.name.clone(), factory_summary(project_doc)))
-        })
-        .await
-        .map_err(|error| {
-            McpError::internal_error(format!("list_factories join 失败: {error}"), None)
-        })?
-        .map_err(|error| {
-            McpError::invalid_params(format!("list_factories 执行失败: {error}"), None)
-        })?;
-        Ok(CallToolResult::structured(serde_json::json!({
-            "project": params.project,
-            "name": name,
-            "factories": factories,
-        })))
+                .ok()
+                .and_then(|cache| cache.get(request_id));
+            if let Some((mut payload, false)) = cached {
+                if let serde_json::Value::Object(object) = &mut payload {
+                    object.insert("idempotent_replay".into(), serde_json::Value::Bool(true));
+                }
+                return Ok(CallToolResult::structured(payload));
+            }
+        }
+        // 1) 目标名 → id：用当前/指定的上下文目录索引解析（只接受精确的物品原型）。
+        let state = app.state::<AppState>();
+        let context_id = crate::resolve_context_id(&state, params.context_id.as_deref())
+            .map_err(|error| McpError::invalid_params(error, None))?;
+        let index = crate::catalog_index_for(&state, &context_id)
+            .await
+            .map_err(|error| McpError::invalid_params(format!("读取目录失败: {error}"), None))?;
+        let targets = resolve_auto_plan_targets(&index, &params.targets)
+            .map_err(|error| McpError::invalid_params(error, None))?;
+        // 手写名字（插件/插件塔/外部输入）全部先过一遍：不通过就一个对象都不建。
+        validate_auto_plan_names(&index, &params)
+            .map_err(|error| McpError::invalid_params(error, None))?;
+
+        // 2) 建项目（拿 id）→ 配置 → 触发。**配置阶段任何一步失败都回滚刚建的项目**：
+        //    这个项目是本次调用自己建的、调用方还不知道它存在，留下一个「只配了一半」
+        //    的项目比直接报错更糟（实测：插件名写错一个字母就会留下半成品）。
+        let outcome = apply_consistency_only(
+            &app,
+            AppMessage::Application(ApplicationAction::NewProject {
+                name: params
+                    .project_name
+                    .clone()
+                    .unwrap_or_else(|| "自动规划".to_string()),
+            }),
+        )
+        .await?;
+        let project = match outcome.created.projects.first() {
+            Some(project) => *project,
+            None => {
+                return Err(McpError::internal_error(
+                    "新建项目没有返回 id".to_string(),
+                    None,
+                ))
+            }
+        };
+
+        let configured = async {
+            if let Some(context) = &params.context_id {
+                apply_consistency_only(
+                    &app,
+                    AppMessage::Project {
+                        project,
+                        action: ProjectAction::SetContext {
+                            context: Some(context.clone()),
+                        },
+                    },
+                )
+                .await?;
+            }
+            let factory = match apply_consistency_only(
+                &app,
+                AppMessage::Project {
+                    project,
+                    action: ProjectAction::AddFactory {
+                        name: params
+                            .factory_name
+                            .clone()
+                            .unwrap_or_else(|| "主工厂".to_string()),
+                        template: FactoryTemplate::DefaultMechanics,
+                    },
+                },
+            )
+            .await?
+            .created
+            .factories
+            .first()
+            .copied()
+            {
+                Some(factory) => factory,
+                None => {
+                    return Err(McpError::internal_error(
+                        "新建工厂没有返回 id".to_string(),
+                        None,
+                    ))
+                }
+            };
+            // 序列里最后一条是 `solve: auto-plan`：**不在请求里同步跑**，否则一次
+            // 调用要等几分钟（py 那种规模实测 70s+）。
+            let mut messages = auto_plan_body_messages(&params, project, factory, &targets);
+            let trigger = messages.pop();
+            let mut created_targets = Vec::new();
+            let mut created_inputs = Vec::new();
+            for message in &messages {
+                let outcome = apply_consistency_only(&app, message.clone()).await?;
+                created_targets.extend(outcome.created.targets.iter().map(|id| id.0));
+                created_inputs.extend(outcome.created.external_inputs.iter().map(|id| id.0));
+            }
+
+            // 3) 触发异步自动规划（状态写进 AppState，供 agent 稍后查询）。
+            let mut status = "running";
+            let mut trigger_commands = Vec::new();
+            if let Some(message) = trigger {
+                // 只走 reducer：AutoPlan 命令由后台任务执行（它不是一致性命令）。
+                trigger_commands = apply_consistency_only(&app, message).await?.commands;
+            }
+            let trigger_command = trigger_commands
+                .into_iter()
+                .find(|command| matches!(command, RuntimeCommand::AutoPlan { .. }));
+            match trigger_command {
+                Some(command) => crate::spawn_auto_plan(&app, project, factory, command),
+                None => {
+                    // reducer 没发出 AutoPlan（例如项目/工厂刚被别处删掉）：如实报告。
+                    status = "failed";
+                    if let Ok(mut plans) = app.state::<AppState>().auto_plans.lock() {
+                        plans.insert(
+                            (project, factory),
+                            crate::AutoPlanState::Failed("未能触发自动规划命令".to_string()),
+                        );
+                    }
+                }
+            }
+            Ok::<_, McpError>((factory, status, created_targets, created_inputs))
+        }
+        .await;
+        let (factory, status, created_targets, created_inputs) = match configured {
+            Ok(configured) => configured,
+            Err(error) => {
+                // 回滚：只删本次调用刚建的项目。回滚自己也失败时**两个事实都报**，
+                // 不能让调用方以为项目已经收干净了。
+                let rolled_back = match apply_consistency_only(
+                    &app,
+                    AppMessage::Application(ApplicationAction::DeleteProject {
+                        project,
+                        decision: DeleteDecision::Confirm,
+                    }),
+                )
+                .await
+                {
+                    Ok(_) => true,
+                    Err(rollback) => {
+                        eprintln!("auto_plan rollback failed for project {project:?}: {rollback}");
+                        false
+                    }
+                };
+                let suffix = if rolled_back {
+                    format!("（已回滚：本次新建的项目 {} 已删除）", project.0)
+                } else {
+                    format!("（回滚失败：项目 {} 仍留在文档里，请手动删除）", project.0)
+                };
+                let message = if error.message.is_empty() {
+                    format!("auto_plan 配置失败{suffix}")
+                } else {
+                    format!("{}{suffix}", error.message)
+                };
+                return Err(McpError::invalid_params(message, None));
+            }
+        };
+        let modules_best = params.modules.as_ref().is_some_and(|modules| modules.best);
+        let modules_excluded = params
+            .modules
+            .as_ref()
+            .map(|modules| modules.exclude.len())
+            .unwrap_or(0);
+        let payload = serde_json::json!({
+            "project": project.0,
+            "factory": factory.0,
+            "created": {
+                "project": project.0,
+                "factory": factory.0,
+                "targets": created_targets,
+                "external_inputs": created_inputs,
+            },
+            "applied": {
+                "planet": params.planet,
+                "major_quality": params.major_quality,
+                "context_id": params.context_id,
+                "targets": targets.iter().map(|(item, amount)| serde_json::json!({
+                    "item": item.id,
+                    "quality": item.quality,
+                    "amount": amount,
+                })).collect::<Vec<_>>(),
+                "external_inputs": params.external_inputs.len(),
+                "modules_best": modules_best,
+                "modules_excluded": modules_excluded,
+                "beacons": params.beacons.len(),
+            },
+            "auto_plan": { "status": status },
+            "poll": {
+                "tool": "get_planning_state",
+                "arguments": { "project": project.0, "factory": factory.0 },
+                "hint": "规划在后台跑：稍后（普通上下文 2~5s 起，py 这类大上下文要几分钟）\
+                用 get_planning_state 查这个 project + factory，读 auto_plan.status\
+                （running/done/failed）；done 时求解结果在 auto_plan.result 里（已分页）。",
+            },
+        });
+        if let Some(request_id) = params.request_id {
+            if let Ok(mut cache) = app.state::<AppState>().dispatch_cache.lock() {
+                cache.insert(request_id, payload.clone(), false);
+            }
+        }
+        Ok(CallToolResult::structured(payload))
     }
 
     /// 上下文索引：有哪些游戏数据上下文（dump/导出缓存）、激活的是哪个。
@@ -706,6 +939,343 @@ enum DocSnapshot {
     },
 }
 
+/// 一个目标：物品（id **或**本地化名）+ 可选品质 + 每秒速率。
+#[derive(Debug, Clone, serde::Deserialize, JsonSchema)]
+struct AutoPlanTarget {
+    /// 物品名：原型 id（`iron-plate`）或本地化名（`铁板`）都行；分隔符不敏感。
+    item: String,
+    /// 品质（`normal` / `uncommon` / …）；省略 = `normal`。
+    #[serde(default)]
+    quality: Option<String>,
+    /// 目标速率（每秒；项目 time-scale 只影响显示）。
+    amount: f64,
+}
+
+/// 插件策略。
+#[derive(Debug, Default, Clone, serde::Deserialize, JsonSchema)]
+struct AutoPlanModules {
+    /// 用「每类别 tier 最高的插件」填充枚举列表（需要 `quality`）。
+    #[serde(default)]
+    best: bool,
+    /// `best` 使用的品质；省略 = 工厂主品质。
+    #[serde(default)]
+    quality: Option<String>,
+    /// 从枚举列表里剔除的插件（在 `best` 之后应用，例如排除效率 3）。
+    #[serde(default)]
+    exclude: Vec<IdWithQuality>,
+}
+
+/// 插件塔方案（自动规划叠加的插件塔配置）。
+#[derive(Debug, Clone, serde::Deserialize, JsonSchema)]
+struct AutoPlanBeacon {
+    /// 插件塔本体（id + 品质）。
+    beacon: IdWithQuality,
+    /// 插件塔数量；省略 = 1。
+    #[serde(default)]
+    count: Option<usize>,
+    /// 共享比例（平均一个塔覆盖几台机器）；省略 = 1.0。
+    #[serde(default)]
+    share: Option<f64>,
+    /// 塔内插件（数量是「塔内插件数」，不是塔数量）。
+    #[serde(default)]
+    modules: Vec<AutoPlanBeaconModule>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, JsonSchema)]
+struct AutoPlanBeaconModule {
+    module: IdWithQuality,
+    #[serde(default)]
+    count: Option<usize>,
+}
+
+/// 外部输入：手动指定原料来源（**这才是「放宽严格供给」的正确做法**——
+/// 自动规划总是严格供给，缺什么就在这里声明什么，而不是关掉严格供给）。
+#[derive(Debug, Clone, serde::Deserialize, JsonSchema)]
+struct AutoPlanExternalInput {
+    /// 流（`{"Item":{"id":"iron-plate","quality":"normal"}}` / `{"Fluid":{…}}` / `"Electricity"`）。
+    flow: DualVar,
+    /// 惩罚系数；省略 = 1.0。
+    #[serde(default)]
+    penalty: Option<f64>,
+}
+
+/// `auto_plan` 的参数：把群里 bot 实际用过的配置序列收敛成**一个入口**。
+///
+/// 一次调用内部依次执行：新建项目 → （可选绑定上下文）→ 新建工厂 →
+/// 星球/主品质 → 目标（多个）→ 外部输入 → 插件策略 → 插件塔方案 → 触发自动规划。
+/// 与逐条 `dispatch` 相比，人只需记一个工具、AI 只需一次调用。
+#[derive(Debug, Clone, serde::Deserialize, JsonSchema)]
+struct AutoPlanParams {
+    /// 目标列表（至少一个）。
+    targets: Vec<AutoPlanTarget>,
+    /// 项目名；省略 = “自动规划”。
+    #[serde(default)]
+    project_name: Option<String>,
+    /// 工厂名；省略 = “主工厂”。
+    #[serde(default)]
+    factory_name: Option<String>,
+    /// 星球（工厂设置，如 `nauvis` / `vulcanus`）；省略 = 保持新工厂默认（nauvis）。
+    #[serde(default)]
+    planet: Option<String>,
+    /// 主品质（工厂设置）；省略 = `normal`。
+    #[serde(default)]
+    major_quality: Option<String>,
+    /// 插件策略（最佳 / 剔除）。
+    #[serde(default)]
+    modules: Option<AutoPlanModules>,
+    /// 枚举插件塔方案。
+    #[serde(default)]
+    beacons: Vec<AutoPlanBeacon>,
+    /// 外部输入（手动指定原料来源）。
+    #[serde(default)]
+    external_inputs: Vec<AutoPlanExternalInput>,
+    /// 绑定到某个游戏上下文 id；省略 = 当前激活上下文。
+    #[serde(default)]
+    context_id: Option<String>,
+    /// 幂等键：同一个 id 的重复调用只应用一次，重试直接拿回上次载荷。
+    #[serde(default)]
+    request_id: Option<String>,
+}
+
+/// 组装 `auto_plan` 在「项目与工厂都已建好」之后要依次执行的消息序列
+/// （纯函数：`project`/`factory` id 由工具按 `created` 回填后传入）。
+///
+/// **这里不建工厂**：工厂必须由工具先建，才能拿到 id 去组装工厂级消息；本函数若
+/// 再发一条 `add-factory`，一个 `auto_plan` 调用就会给项目留下两个工厂（一个是
+/// 刚配好的、一个是空模板）——实测踩到过：项目里凭空多出一个 12 机制的 `主工厂`。
+///
+/// 顺序有讲究：
+/// 1. **星球/主品质在目标之前**：它们决定求解环境（太阳能系数、允许的品质档）；
+/// 2. 目标 → 外部输入：先确定「要什么」，再声明「从哪来」；
+/// 3. `best` 模块（整体替换枚举列表）**在剔除之前**，否则剔除会被覆盖；
+/// 4. 插件塔方案次之，最后才是 `solve: auto-plan` 触发。
+fn auto_plan_body_messages(
+    params: &AutoPlanParams,
+    project: ProjectId,
+    factory: FactoryId,
+    targets: &[(IdWithQuality, f64)],
+) -> Vec<AppMessage> {
+    let mut messages = Vec::new();
+    if let Some(planet) = &params.planet {
+        messages.push(AppMessage::Factory {
+            project,
+            factory,
+            action: FactoryAction::Context(FactoryContextAction::SetPlanet {
+                planet: Some(planet.clone()),
+            }),
+        });
+    }
+    if let Some(quality) = &params.major_quality {
+        messages.push(AppMessage::Factory {
+            project,
+            factory,
+            action: FactoryAction::Context(FactoryContextAction::SetMajorQuality {
+                quality: quality.clone(),
+            }),
+        });
+    }
+    for (item, amount) in targets {
+        messages.push(AppMessage::Factory {
+            project,
+            factory,
+            action: FactoryAction::Flow(FlowAction::AddToTarget {
+                flow: DualVar::Item(item.clone()),
+                amount: *amount,
+            }),
+        });
+    }
+    for input in &params.external_inputs {
+        messages.push(AppMessage::Factory {
+            project,
+            factory,
+            action: FactoryAction::Flow(FlowAction::AddToExternalInput {
+                flow: input.flow.clone(),
+                penalty: input.penalty.unwrap_or(1.0),
+            }),
+        });
+    }
+    if let Some(modules) = &params.modules {
+        if modules.best {
+            let quality = modules
+                .quality
+                .clone()
+                .or_else(|| params.major_quality.clone())
+                .unwrap_or_else(|| "normal".to_string());
+            messages.push(AppMessage::Project {
+                project,
+                action: ProjectAction::Planning(PlanningAction::UseBestModules { quality }),
+            });
+        }
+        for module in &modules.exclude {
+            messages.push(AppMessage::Project {
+                project,
+                action: ProjectAction::Planning(PlanningAction::RemoveEnumeratedModule {
+                    module: module.clone(),
+                }),
+            });
+        }
+    }
+    for (index, beacon) in params.beacons.iter().enumerate() {
+        // 新项目的枚举插件塔列表从空开始，因此这里逐个 append，index 即序号。
+        messages.push(AppMessage::Project {
+            project,
+            action: ProjectAction::Planning(PlanningAction::AddEnumeratedBeacon),
+        });
+        let plan = AutoBeaconPlan {
+            module_config: ModuleConfig {
+                modules: Vec::new(),
+                beacons: vec![BeaconConfig {
+                    beacon: beacon.beacon.clone(),
+                    count: beacon.count.unwrap_or(1),
+                    share: beacon.share.unwrap_or(1.0),
+                    modules: beacon
+                        .modules
+                        .iter()
+                        .map(|entry| (entry.module.clone(), entry.count.unwrap_or(1)))
+                        .collect(),
+                }],
+            },
+        };
+        messages.push(AppMessage::Project {
+            project,
+            action: ProjectAction::Planning(PlanningAction::SetEnumeratedBeacon {
+                beacon: index,
+                plan,
+            }),
+        });
+    }
+    messages.push(AppMessage::Factory {
+        project,
+        factory,
+        action: FactoryAction::Solve(SolveAction::AutoPlan),
+    });
+    messages
+}
+
+/// 把目标里的物品名解析成 `(IdWithQuality, amount)`：接受原型 id 或本地化名
+/// （分隔符不敏感），但**只接受精确命中的物品原型**——不猜：名字打错或指向配方时
+/// 报错并附候选（含错拼候选），因为错误的名字能通过校验、却会让计划悄悄跑偏。
+fn resolve_auto_plan_targets(
+    index: &crate::CatalogIndex,
+    targets: &[AutoPlanTarget],
+) -> Result<Vec<(IdWithQuality, f64)>, String> {
+    let mut resolved = Vec::new();
+    for target in targets {
+        if !(target.amount.is_finite() && target.amount > 0.0) {
+            return Err(format!(
+                "目标物品「{}」的 amount 必须是正数（每秒速率）",
+                target.item
+            ));
+        }
+        let name = require_index_entry(index, &["item"], "目标物品", &target.item)?;
+        let quality = target
+            .quality
+            .clone()
+            .unwrap_or_else(|| "normal".to_string());
+        resolved.push((IdWithQuality::new(name, quality), target.amount));
+    }
+    Ok(resolved)
+}
+
+/// 「近似候选」提示：把精确/模糊/错拼命中压成短标签，附在报错里。
+fn name_candidates(outcome: &crate::ResolvedQuery) -> Vec<String> {
+    let mut hints: Vec<String> = outcome
+        .exact
+        .iter()
+        .chain(outcome.partial.iter())
+        .take(5)
+        .map(|hit| format!("{} [{}]", hit.name, hit.kind))
+        .collect();
+    hints.extend(outcome.typo.iter().take(3).map(|hit| {
+        format!(
+            "{} [{}]（错拼? d={}）",
+            hit.name,
+            hit.kind,
+            hit.distance.unwrap_or(0)
+        )
+    }));
+    hints
+}
+
+/// 手写名字必须**精确命中** `kinds` 里的某一种原型，命中则返回规范原型名，否则报错
+/// 并附候选（id / 本地化名 / 错拼都行，分隔符不敏感）。
+///
+/// 为什么要在入口挡：`auto_plan` 的参数是**人和 AI 手打的名字**，而写错的名字不一定
+/// 会报错——实测两种情况都很危险：
+/// - `remove-enumerated-module` 对不存在的插件是**静默 no-op**（`retain` 找不到就报
+///   「无变化」），调用方以为「已排除」；
+/// - `add-to-external-input` 更直接把不存在的物品**原样写进文档**，自动规划照常
+///   「成功」，那条外部输入其实什么也没接上。
+fn require_index_entry(
+    index: &crate::CatalogIndex,
+    kinds: &[&str],
+    label: &str,
+    name: &str,
+) -> Result<String, String> {
+    let outcome = crate::resolve_index_entry(&index.entries, name, 8);
+    if let Some(hit) = outcome
+        .exact
+        .iter()
+        .find(|hit| kinds.contains(&hit.kind.as_str()))
+    {
+        return Ok(hit.name.clone());
+    }
+    let hints = name_candidates(&outcome);
+    Err(if hints.is_empty() {
+        format!("{label}「{name}」不存在于当前游戏上下文：用 localized_names 查一下正确名字")
+    } else {
+        format!(
+            "{label}「{name}」不存在于当前游戏上下文，近似候选：{}",
+            hints.join("、")
+        )
+    })
+}
+
+/// `auto_plan` 里**所有手写名字的参数**在「建任何东西之前」统一过一遍：插件剔除项、
+/// 插件塔与其插件、外部输入的物品/流体/实体。
+///
+/// 校验不过就整个调用失败、一个对象都不建——这正是组合入口该有的原子性；等到配置
+/// 中途才报错，就得靠回滚来收拾半成品（回滚仍然保留，用来兜住 reducer 侧的失败）。
+/// 虚拟流（电/热/污染/燃料流）不是原型，不校验。
+fn validate_auto_plan_names(
+    index: &crate::CatalogIndex,
+    params: &AutoPlanParams,
+) -> Result<(), String> {
+    if let Some(modules) = &params.modules {
+        for module in &modules.exclude {
+            require_index_entry(index, &["module", "item"], "要剔除的插件", &module.id)?;
+        }
+    }
+    for (position, beacon) in params.beacons.iter().enumerate() {
+        let label = format!("第 {} 个插件塔", position + 1);
+        require_index_entry(index, &["beacon", "entity"], &label, &beacon.beacon.id)?;
+        for module in &beacon.modules {
+            require_index_entry(
+                index,
+                &["module", "item"],
+                &format!("{label}里的插件"),
+                &module.module.id,
+            )?;
+        }
+    }
+    for input in &params.external_inputs {
+        match &input.flow {
+            DualVar::Item(item) => {
+                require_index_entry(index, &["item"], "外部输入物品", &item.id)?;
+            }
+            DualVar::Fluid { name, .. } => {
+                require_index_entry(index, &["fluid"], "外部输入流体", name)?;
+            }
+            DualVar::Entity(entity) => {
+                require_index_entry(index, &["entity"], "外部输入实体", &entity.id)?;
+            }
+            // 电 / 热 / 污染 / 燃料流 / 自定义流都是虚拟流，没有对应原型。
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 /// 分页参数：所有返回集合的工具共用（`limit` 默认 50、上限 1000）。
 ///
 /// 群里的实测反馈：以前「截断」是调用方（bash/客户端）替我们兜的——一条查询就能让
@@ -757,6 +1327,37 @@ impl Page {
 struct PageReport {
     totals: serde_json::Map<String, serde_json::Value>,
     truncated: Vec<String>,
+}
+
+/// 走一步 reducer（短锁），并且**只执行便宜的收敛命令**（品质上限 / 机器兼容 /
+/// 插件钳制），跳过 `Recompute`/`Persist`/`AutoPlan`——组合入口先要把文档配好，
+/// 而每配一步就跑一次整厂求解会让「立即返回」变成几分钟（py 实测一次 70s+）。
+/// 最后那次 `solve: auto-plan` 会统一落盘与重解。
+async fn apply_consistency_only<R: Runtime + 'static>(
+    app: &AppHandle<R>,
+    message: AppMessage,
+) -> Result<metatorio_runtime::state::DispatchResult, McpError> {
+    let reduce_app = app.clone();
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        let state = reduce_app.state::<AppState>();
+        let mut runtime = state
+            .runtime
+            .lock()
+            .map_err(|_| "runtime lock poisoned".to_string())?;
+        runtime.dispatch(message).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| McpError::internal_error(format!("dispatch join 失败: {error}"), None))?
+    .map_err(|error| McpError::invalid_params(format!("auto_plan 配置失败: {error}"), None))?;
+    let state = app.state::<AppState>();
+    for command in &outcome.commands {
+        if crate::is_consistency_command(command) {
+            let _ = execute_command(app, &state, command).await;
+        }
+    }
+    // 文档变了就通知 GUI：外部 agent 建的项目要立刻出现在界面上。
+    let _ = app.emit("document-changed", outcome.revision);
+    Ok(outcome)
 }
 
 /// 被截断时的收窄提示（扁平列表与嵌套集合共用同一措辞）。
@@ -886,13 +1487,6 @@ struct PlanningStateParams {
     /// 每个集合的返回上限与偏移（默认 50、上限 1000）。
     #[serde(flatten)]
     page: PageParams,
-}
-
-/// Parameters for `list_factories`.
-#[derive(Debug, serde::Deserialize, JsonSchema)]
-struct ListFactoriesParams {
-    /// Project id (u64).
-    project: u64,
 }
 
 /// 项目级索引条目：只给「有哪些项目、各自多大」，不给内容。
@@ -1074,6 +1668,343 @@ mod tests {
             "iron-plate"
         );
         assert!(factories[0].get("mechanics").is_some());
+    }
+
+    /// `auto_plan` 的消息序列：顺序与形状就是这个工具的契约——星球/品质在目标
+    /// 之前（决定求解环境）、`best` 在剔除之前（否则剔除被整体替换覆盖）、
+    /// 插件塔逐条 append（索引即序号）、最后必须触发 `solve: auto-plan`。
+    #[test]
+    fn auto_plan_body_messages_are_ordered_and_complete() {
+        let params = AutoPlanParams {
+            targets: vec![
+                AutoPlanTarget {
+                    item: "iron-plate".to_string(),
+                    quality: None,
+                    amount: 60.0,
+                },
+                AutoPlanTarget {
+                    item: "copper-plate".to_string(),
+                    quality: Some("legendary".to_string()),
+                    amount: 30.0,
+                },
+            ],
+            project_name: Some("p".to_string()),
+            factory_name: Some("f".to_string()),
+            planet: Some("vulcanus".to_string()),
+            major_quality: Some("legendary".to_string()),
+            modules: Some(AutoPlanModules {
+                best: true,
+                quality: None,
+                exclude: vec![IdWithQuality::new("efficiency-module-3", "normal")],
+            }),
+            beacons: vec![AutoPlanBeacon {
+                beacon: IdWithQuality::new("beacon", "legendary"),
+                count: Some(2),
+                share: Some(8.0),
+                modules: vec![AutoPlanBeaconModule {
+                    module: IdWithQuality::new("speed-module-3", "legendary"),
+                    count: Some(2),
+                }],
+            }],
+            external_inputs: vec![AutoPlanExternalInput {
+                flow: DualVar::Item(IdWithQuality::new("iron-plate", "normal")),
+                penalty: None,
+            }],
+            context_id: Some("ctx".to_string()),
+            request_id: None,
+        };
+        let targets = vec![
+            (IdWithQuality::new("iron-plate", "normal"), 60.0),
+            (IdWithQuality::new("copper-plate", "legendary"), 30.0),
+        ];
+        let messages = auto_plan_body_messages(&params, ProjectId(7), FactoryId(9), &targets);
+
+        // 星球 → 主品质 → 两个目标 → 外部输入 → best → 剔除 → 插件塔×2 → 触发。
+        assert_eq!(messages.len(), 10, "{messages:#?}");
+        let encoded: Vec<serde_json::Value> = messages
+            .iter()
+            .map(|message| serde_json::to_value(message).unwrap())
+            .collect();
+        // 工厂由工具先建（要拿 id），本序列**绝不能再建工厂**：否则一个项目里会多出
+        // 一个空模板工厂（实测踩到）。这条断言就是那个回归的守卫。
+        assert!(
+            !encoded
+                .iter()
+                .any(|message| message["action"]["action"].get("add-factory").is_some()),
+            "auto_plan 的配置序列里不该再有 add-factory：{encoded:#?}"
+        );
+        assert_eq!(
+            encoded[0]["action"]["action"]["context"]["set-planet"]["planet"],
+            "vulcanus"
+        );
+        assert_eq!(
+            encoded[1]["action"]["action"]["context"]["set-major-quality"]["quality"],
+            "legendary"
+        );
+        // 目标是「物品 + 品质 + 每秒速率」，两个目标各一条消息。
+        assert_eq!(
+            encoded[2]["action"]["action"]["flow"]["add-to-target"]["flow"]["Item"]["id"],
+            "iron-plate"
+        );
+        assert_eq!(
+            encoded[2]["action"]["action"]["flow"]["add-to-target"]["amount"],
+            serde_json::json!(60.0)
+        );
+        assert_eq!(
+            encoded[3]["action"]["action"]["flow"]["add-to-target"]["flow"]["Item"]["quality"],
+            "legendary"
+        );
+        // 外部输入：penalty 省略时默认 1.0（严格供给下靠它声明原料来源）。
+        assert_eq!(
+            encoded[4]["action"]["action"]["flow"]["add-to-external-input"]["penalty"],
+            serde_json::json!(1.0)
+        );
+        // best 用工厂主品质（modules.quality 省略），且在剔除之前。
+        assert_eq!(
+            encoded[5]["action"]["action"]["planning"]["use-best-modules"]["quality"],
+            "legendary"
+        );
+        assert_eq!(
+            encoded[6]["action"]["action"]["planning"]["remove-enumerated-module"]["module"]["id"],
+            "efficiency-module-3"
+        );
+        // 插件塔：先 append 空方案，再把方案写进该索引（index = 0）。
+        assert_eq!(
+            encoded[7]["action"]["action"]["planning"],
+            "add-enumerated-beacon"
+        );
+        let plan = &encoded[8]["action"]["action"]["planning"]["set-enumerated-beacon"];
+        assert_eq!(plan["beacon"], serde_json::json!(0));
+        let beacon = &plan["plan"]["module_config"]["beacons"][0];
+        assert_eq!(beacon["beacon"]["id"], "beacon");
+        assert_eq!(beacon["count"], serde_json::json!(2));
+        assert_eq!(beacon["share"], serde_json::json!(8.0));
+        assert_eq!(beacon["modules"][0][0]["id"], "speed-module-3");
+        assert_eq!(beacon["modules"][0][1], serde_json::json!(2));
+        // 最后一条必须是触发（否则整个入口等于没跑规划）。
+        assert_eq!(encoded[9]["action"]["action"]["solve"], "auto-plan");
+    }
+
+    /// 目标名解析：id 与本地化名都行、分隔符不敏感；**不猜**——指向配方或拼错时
+    /// 报错并给出候选（错误的名字能过校验，却会让计划悄悄跑偏）。
+    #[test]
+    fn auto_plan_targets_resolve_strictly_with_hints() {
+        let entry = |kind: &str, name: &str, localized: &str| crate::IndexEntry {
+            kind: kind.to_string(),
+            name: name.to_string(),
+            localized_name: localized.to_string(),
+            group: String::new(),
+            subgroup: String::new(),
+            icon_type: String::new(),
+            module_slots: None,
+            categories: Vec::new(),
+            fuel_category: String::new(),
+            fuel_value_j: None,
+            technology_max_level: None,
+            technology_base_level: 0,
+        };
+        let index = crate::CatalogIndex {
+            context_id: "c".to_string(),
+            qualities: vec!["normal".to_string()],
+            entries: vec![
+                entry("item", "processing-unit", "处理器"),
+                entry("recipe", "processing-unit", "处理器"),
+                entry("item", "iron-plate", "铁板"),
+            ],
+        };
+        let target = |item: &str, amount: f64| AutoPlanTarget {
+            item: item.to_string(),
+            quality: None,
+            amount,
+        };
+
+        // id / 本地化名 / 分隔符变体都能解析到物品原型。
+        for name in ["iron-plate", "铁板", "IRON_PLATE", "iron plate"] {
+            let resolved = resolve_auto_plan_targets(&index, &[target(name, 1.0)]).expect(name);
+            assert_eq!(resolved[0].0.id, "iron-plate");
+            assert_eq!(resolved[0].0.quality, "normal");
+            assert_eq!(resolved[0].1, 1.0);
+        }
+        // 同名跨 item/recipe 时取物品（目标只能是物品）。
+        let resolved =
+            resolve_auto_plan_targets(&index, &[target("processing unit", 5.0)]).unwrap();
+        assert_eq!(resolved[0].0.id, "processing-unit");
+        // 品质原样带上。
+        let resolved = resolve_auto_plan_targets(
+            &index,
+            &[AutoPlanTarget {
+                item: "铁板".to_string(),
+                quality: Some("legendary".to_string()),
+                amount: 2.0,
+            }],
+        )
+        .unwrap();
+        assert_eq!(resolved[0].0.quality, "legendary");
+        // 拼错 → 报错并附错拼候选，不猜。
+        let error = resolve_auto_plan_targets(&index, &[target("iron-plte", 1.0)]).unwrap_err();
+        assert!(error.contains("iron-plate"), "{error}");
+        // 完全不认识 → 提示去查名字。
+        let error = resolve_auto_plan_targets(&index, &[target("nonsense-xyz", 1.0)]).unwrap_err();
+        assert!(error.contains("localized_names"), "{error}");
+        // amount 必须是正数。
+        let error = resolve_auto_plan_targets(&index, &[target("iron-plate", 0.0)]).unwrap_err();
+        assert!(error.contains("正数"), "{error}");
+    }
+
+    /// `auto_plan` 的手写名字必须在**建任何东西之前**被挡住：两类实测过的静默失败
+    /// ——`remove-enumerated-module` 对不存在的插件是 no-op（`retain` 找不到就报
+    /// 「无变化」），`add-to-external-input` 更把不存在的物品**原样写进文档**、自动规划
+    /// 照常报「成功」。两者都会让调用方以为配置生效了，所以这里必须报错并给候选。
+    #[test]
+    fn auto_plan_rejects_unknown_names_before_creating_anything() {
+        let entry = |kind: &str, name: &str, localized: &str| crate::IndexEntry {
+            kind: kind.to_string(),
+            name: name.to_string(),
+            localized_name: localized.to_string(),
+            group: String::new(),
+            subgroup: String::new(),
+            icon_type: String::new(),
+            module_slots: None,
+            categories: Vec::new(),
+            fuel_category: String::new(),
+            fuel_value_j: None,
+            technology_max_level: None,
+            technology_base_level: 0,
+        };
+        let index = crate::CatalogIndex {
+            context_id: "c".to_string(),
+            qualities: vec!["normal".to_string()],
+            entries: vec![
+                entry("item", "iron-plate", "铁板"),
+                entry("module", "speed-module-3", "速度插件 3"),
+                entry("beacon", "beacon", "插件塔"),
+                entry("fluid", "water", "水"),
+            ],
+        };
+        let module = |id: &str| IdWithQuality::new(id, "normal");
+        let params = |modules: Option<AutoPlanModules>,
+                      beacons: Vec<AutoPlanBeacon>,
+                      inputs: Vec<AutoPlanExternalInput>| AutoPlanParams {
+            targets: vec![AutoPlanTarget {
+                item: "iron-plate".to_string(),
+                quality: None,
+                amount: 1.0,
+            }],
+            project_name: None,
+            factory_name: None,
+            planet: None,
+            major_quality: None,
+            modules,
+            beacons,
+            external_inputs: inputs,
+            context_id: None,
+            request_id: None,
+        };
+        let fluid = |name: &str| DualVar::Fluid {
+            name: name.to_string(),
+            temperature: [15, 15],
+        };
+        let exclude = |ids: &[&str]| {
+            Some(AutoPlanModules {
+                best: false,
+                quality: None,
+                exclude: ids.iter().map(|id| module(id)).collect(),
+            })
+        };
+
+        // 合法名字全部通过：包括「索引里的模块既是 item 也是 module」的两种 kind，
+        // 以及没有原型的虚拟流（电）。
+        assert!(validate_auto_plan_names(
+            &index,
+            &params(
+                exclude(&["speed-module-3"]),
+                vec![AutoPlanBeacon {
+                    beacon: module("beacon"),
+                    count: None,
+                    share: None,
+                    modules: vec![AutoPlanBeaconModule {
+                        module: module("speed-module-3"),
+                        count: None,
+                    }],
+                }],
+                vec![
+                    AutoPlanExternalInput {
+                        flow: DualVar::Item(module("iron-plate")),
+                        penalty: None,
+                    },
+                    AutoPlanExternalInput {
+                        flow: fluid("water"),
+                        penalty: None,
+                    },
+                    AutoPlanExternalInput {
+                        flow: DualVar::Electricity,
+                        penalty: None,
+                    },
+                ],
+            )
+        )
+        .is_ok());
+
+        // 剔除一个不存在的插件 → 报错，并把正确名字当候选给出来。
+        let error = validate_auto_plan_names(
+            &index,
+            &params(exclude(&["speed-module-99"]), Vec::new(), Vec::new()),
+        )
+        .unwrap_err();
+        assert!(error.contains("speed-module-3"), "{error}");
+        assert!(error.contains("要剔除的插件"), "{error}");
+        // 外部输入写错物品 → 报错（否则垃圾会被原样写进文档）。
+        let error = validate_auto_plan_names(
+            &index,
+            &params(
+                None,
+                Vec::new(),
+                vec![AutoPlanExternalInput {
+                    flow: DualVar::Item(module("iron-plte")),
+                    penalty: None,
+                }],
+            ),
+        )
+        .unwrap_err();
+        assert!(error.contains("iron-plate"), "{error}");
+        assert!(error.contains("外部输入物品"), "{error}");
+        // 外部输入写错流体。
+        let error = validate_auto_plan_names(
+            &index,
+            &params(
+                None,
+                Vec::new(),
+                vec![AutoPlanExternalInput {
+                    flow: fluid("watter"),
+                    penalty: None,
+                }],
+            ),
+        )
+        .unwrap_err();
+        assert!(error.contains("water"), "{error}");
+        // 插件塔写错。
+        let error = validate_auto_plan_names(
+            &index,
+            &params(
+                None,
+                vec![AutoPlanBeacon {
+                    beacon: module("beacon-99"),
+                    count: None,
+                    share: None,
+                    modules: Vec::new(),
+                }],
+                Vec::new(),
+            ),
+        )
+        .unwrap_err();
+        assert!(error.contains("插件塔"), "{error}");
+        // 完全不着边际的名字 → 提示去查名字（不许猜一个相近的原型）。
+        let error = validate_auto_plan_names(
+            &index,
+            &params(exclude(&["zzzzzzzz"]), Vec::new(), Vec::new()),
+        )
+        .unwrap_err();
+        assert!(error.contains("localized_names"), "{error}");
     }
 
     /// 分页参数：默认 50、下限 1、上限 1000；offset 原样传递。

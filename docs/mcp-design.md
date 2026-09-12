@@ -77,10 +77,9 @@ Phase 2 工具面**不在一开始就做成离散的友好工具**，而是：
 
 | 工具 | 参数 | 说明 |
 | --- | --- | --- |
-| `dispatch` | `{ message: AppMessage, request_id?, limit?, offset? }` | 万能回退：转发任意规划动作，返回 `revision`/`changed`/`created`/`scheduled_commands`/`solve`（均结构化 JSON）。`solve` 的 `mechanics`/`flows` 按 `limit`/`offset` 分页（默认 50、上限 1000） |
-| `get_planning_state` | `{ project?, factory?, recompute?, limit?, offset? }` | **逐层读取**：无 `project` → 项目索引；`project` → 设置/规划偏好 + 工厂索引；`project`+`factory` → 该工厂文档（机制/目标/目标表达式/外部输入分页）；`recompute`（需 project+factory）时附带求解结果（同样分页）。所有响应带 `page.totals` / `page.truncated` |
-| `list_projects` | — | 项目索引（id/名称/上下文/工厂·机制·目标计数） |
-| `list_factories` | `{ project }` | 单项目下的工厂索引（含目标清单） |
+| `auto_plan` | `{ targets[{item,quality?,amount}], project_name?, factory_name?, planet?, major_quality?, modules?{best,quality?,exclude[]}, beacons?[{beacon,count?,share?,modules?}], external_inputs?[{flow,penalty?}], context_id?, request_id? }` | **一站式入口**：一次调用建项目/工厂、配好星球/主品质/目标/外部输入/插件策略/插件塔方案，然后**异步**开跑自动规划并**立刻返回**（`project`/`factory` id + `auto_plan.status=running` + `poll` 提示）。稍后 `get_planning_state {project, factory}` 读 `auto_plan.status`（running/done/failed）与结果 |
+| `dispatch` | `{ message: AppMessage, request_id?, limit?, offset? }` | 万能回退：转发任意规划动作，返回 `revision`/`changed`/`created`/`scheduled_commands`/`solve`（均结构化 JSON）。`solve` 的 `mechanics`/`flows` 按 `limit`/`offset` 分页（默认 50、上限 1000）。**同步**等待求解完成 |
+| `get_planning_state` | `{ project?, factory?, recompute?, limit?, offset? }` | **逐层读取**：无 `project` → 项目索引（原 `list_projects`）；`project` → 设置/规划偏好 + 工厂索引（原 `list_factories`，`mechanics` 只是数量）；`project`+`factory` → 该工厂文档（机制/目标/目标表达式/外部输入分页）+ 该工厂的 `auto_plan` 状态；`recompute`（需 project+factory）时附带同步求解结果（同样分页）。所有响应带 `page.totals` / `page.truncated` |
 | `list_contexts` | — | 游戏数据上下文索引（id/名称/来源/是否已载入/哪个是激活的）。上下文是内容哈希缓存，agent 只能列举与切换，不能创建 |
 | `list_prototypes` | `{ kind?, name_contains?, context_id?, limit?, offset? }` | 领域词表：该上下文里的物品/流体/配方/科技/机器/资源…（name、localized_name、group/subgroup、categories、燃料信息、插件槽）。`entries` 按 `limit`（默认 50、上限 1000）/`offset` 分页，带 `total`/`matched`/`returned`/`page` |
 | `localized_names` | `{ queries[], kind?, limit_per_query?, context_id? }` | **名字 ↔ 本地化名互查**：`queries` 可混用原型 id（`iron-gear-wheel`）与玩家口述的本地化名（`铁齿轮`）。匹配时**忽略 `-` / `_` / 空白**（`processing unit`＝`processing_unit`＝`PROCESSING-UNIT`＝`processing-unit`），先精确命中（id、本地化名各一轮），再按「本地化名前缀 → id 前缀 → 本地化名子串 → id 子串」给模糊命中，逐条带 `matched_by`；精确与模糊都为空时再给**错拼候选**（编辑距离，相邻换位算 1 步），其中 `typo_suggestion` 只在「最佳距离上**名字唯一**」时非空（同名跨 item/recipe 不算歧义，kind 由调用方按上下文选）——几个名字同样接近（`processing-unit-2` 与 `-3`）时返回 null，让人确认 |
@@ -97,7 +96,7 @@ Phase 2 工具面**不在一开始就做成离散的友好工具**，而是：
 1. **文档示例格式错误（P0-2）**：原工具 description 里 project/factory 示例写成 `{scope, project, factory, action}`，把 `project`/`factory` 放在 `scope` 同级——但 `AppMessage` 是**相邻标签**，所有字段须进 `action`。已改为 `{scope:"project", action:{project, action}}`。**根因**是 V1 用 `serde_json::Value` 手写描述，靠人肉确保格式正确 → **改用 `JsonSchema` 派生后，schema 自动对齐 serde 输出，此类错误不会再复发**。
 2. **`solve` 返回 Rust `Debug` 字符串（P1-3）**：`format!("{effect:?}")` 不结构化、LLM 难解析。已改为把 `CommandEffect::Solve(result)` 的 `SolveResult` 序列化为 JSON。
 3. **`scheduled_commands` 只返回数量（P1-4）**：agent 不知是哪几条副作用。已改为返回真实 `RuntimeCommand` 序列化数组。
-4. **新建对象不知 id（P1-5）**：`dispatch` 只回 revision，读不到新分配的 project/factory/mechanic id。**仍待补**（方案见下），由 `get_planning_state` 承担读取职责或直接抽取新 id。
+4. **新建对象不知 id（P1-5）**：`dispatch` 只回 revision，读不到新分配的 project/factory/mechanic id。~~**仍待补**~~ **已补**：`DispatchResult` 增加 `created`（本次新建的 project/factory/mechanic id），`dispatch` 与 `auto_plan` 都直接回；读取职责另由 `get_planning_state` 承担。
 
 ### 输出有界原则（功能边界，2026-xx 修正）
 
@@ -118,7 +117,15 @@ Phase 2 工具面**不在一开始就做成离散的友好工具**，而是：
 - **工程文件可读写**：`open-project { path }` / `save-project { project }` / `save-project-as { project, path }` 现在是 GUI 的真实路径（Tauri 侧只保留文件对话框 `pick_project_file` / `pick_project_save_path` 与只读的 `project_save_path`），因此 agent 也能按路径打开/另存工程。显式保存走专用命令 `RuntimeCommand::SaveProject`：没有记忆路径时**报错**（提示先用 save-project-as），而自动落盘的 `Persist{path:None}` 对未保存过的新项目仍静默跳过——两者语义不同，不可混用。
 - **未实现变体在 schema 里自述**：`request-suggestions` / `replace-from-location` 与更新三连的文档注释会进入 MCP inputSchema（测试 `unimplemented_variants_are_documented_in_the_schema` 守住这一点），agent 读 schema 即可知道它们目前一定失败，不必先浪费一次调用。同一轮删除了**废弃的 suggestion 会话**（`FactoryAction::Suggestion` / `SuggestionAction` / `SuggestionCandidate` 及其 `apply_suggestion`）：它对应「运行时持有建议状态」的旧设计，而真实能力早已由只读命令 `suggest` / `implicit_sources` + `mechanic-list` 消息提供，剩下的三条分支（`SetFilter` / `Dismiss` / `SelectMechanic`）全是静默 no-op，只会让调用方误以为会话模型存在。
 - **`use-best-modules` 语义修正并实现**：旧签名 `UseBestModules { factory, mechanic }` 把 factory/mechanic 塞进一个**项目级**设置（`planning.enumerate_modules`）里，且 app 层从未实现。现改为 `UseBestModules { quality: String }`：项目级、**品质必填且不做推断**（品质是特殊维度——「解锁某品质」不等于「能大规模量产该品质的插件」，所以不能拿项目品质上限之类的东西当默认；GUI 传当前工厂的主品质）、候选按当前可达性过滤、同类别 tier 并列时取名字最小者（确定性 + 幂等），在 `Runtime::dispatch` 里解析后走 `finish`（revision/落盘/重解全部工厂）。GUI 的「使用最佳插件」按钮从「只读命令 + 可达性过滤 + N 条 add/remove 消息」收敛为**一条消息**；原 `best_modules` Tauri 命令与 `RuntimeCommand::UseBestModules`（占位）随之删除。
-- **友好工具拆分**：`list_projects` / `add_target` / `set_target_amount` / `add_mechanic` / `set_recipe` / `set_machine` / `recompute` / `auto_plan` / `load_context`（原决策 6）。
+- **友好工具拆分**：`auto_plan`（一站式入口，见下）已落地；其余候选（`add_target` / `set_target_amount` / `set_recipe` / `set_machine` / `load_context`）暂不拆——`dispatch` 已覆盖且 schema 就是真实协议。**同时删掉了 `list_projects` / `list_factories`**：它们的载荷（项目索引 / 工厂索引）现在正是 `get_planning_state` 的无 `project` / 给 `project` 两层的返回值，留着只是重复的工具面（群里「工具在精不在多」）。
+- **`auto_plan` 一站式入口（2026-xx，群内 bot 实测驱动）**：群里 bot 每次指挥都要手拼 `dispatch` 序列（建项目 → 建工厂 → 星球 → 主品质 → 目标 → 外部输入 → 插件策略 → 插件塔 → solve），既费人又费 AI，还容易漏配严格供给。现在一条消息搞定，参数只暴露实测高频项（目标物品×品质×速率、星球、主品质、最佳/排除插件、插件塔方案、外部输入），并按「星球/品质 → 目标 → 外部输入 → best → 剔除 → 插件塔 → 触发」的固定顺序执行。
+  - **不提供 strict-source 开关**（用户明确反对）：自动规划总是严格供给，缺原料的**正确做法是声明外部输入**（`external_inputs`），而不是放宽约束。
+  - **异步**：规划在后台跑（py 实测 70s+），工具立刻返回 `project`/`factory` + `auto_plan.status=running` + `poll` 提示；agent 稍后 `get_planning_state {project, factory}` 读状态与结果。状态由**这次规划自己**写入 `AppState::auto_plans`，而不是让 agent 用 `recompute` 去猜——规划尚未回写时 `recompute` 算的是旧文档，会给出与计划无关的结果。
+  - 配置阶段只跑**便宜的收敛命令**（品质上限 / 机器兼容 / 插件钳制），跳过 `Recompute`/`Persist`（最后一次规划统一落盘+重解），否则一次组合会触发六次整厂求解，「立即返回」就成了空话。
+  - **实测验证逼出的两处修正**（都是「拿到成功、其实什么都没发生」这一类）：
+    1. **一个调用曾经建出两个工厂**：工具先建工厂拿 id，`auto_plan_body_messages` 里又含一条 `add-factory`，于是项目里凭空多出一个 12 机制的空模板工厂（单测已加守卫）。
+    2. **手写名字先校验、后动手**：`remove-enumerated-module` 对不存在的插件是**静默 no-op**（`retain` 找不到就报「无变化」），`add-to-external-input` 更把不存在的物品**原样写进文档**、规划照常报成功。现在 `item` / `modules.exclude` / `beacons[].beacon` / `beacons[].modules[].module` / `external_inputs[].flow` 一律在**建任何对象之前**按当前上下文的原型校验，错一个就整个调用失败并给候选（含错拼候选），一个对象都不建。
+    3. 校验兜不住的部分（reducer 侧的失败，例如插件与机器不兼容）仍可能配置到一半：此时**回滚本次刚建的项目**，并在错误信息里说明是否回滚成功——绝不留下半个配置好的项目。
 - **并发冲突语义**（原决策 45）；**端口/多实例/token 细节**（原决策 48）。
 
 ## 待办 / 下阶段
@@ -126,8 +133,8 @@ Phase 2 工具面**不在一开始就做成离散的友好工具**，而是：
 - [x] 真实跑一次应用，用 DSH 客户端连 `http://127.0.0.1:8765/mcp`，验证 `dispatch` 工具可驱动规划、GUI 实时刷新。
 - [x] 收集 agent 使用 AppMessage 的感受 → 修正：`JsonSchema` 派生（inputSchema 真实化）+ `solve`/`scheduled_commands` 结构化 + 修正文档示例。
 - [x] **补读取工具**（`get_planning_state`）——P0-1/P1-5 的核心，MVP 目前最大的盲区。
-- [ ] 采集使用反馈 → 抽离友好工具（`list_projects` / `get_planning_state` / `add_target` / `set_target_amount` / `add_mechanic` / `set_recipe` / `set_machine` / `recompute` / `auto_plan` / `load_context`）——对应原决策 6。（`list_projects` / `list_factories` / `list_contexts` 已落地。）
-- [ ] 长时求解（`recompute`/`auto_plan`）走**异步**（类似 GUI 的 solving 事件），避免 MCP 调用期间占住 `Mutex<Runtime>` 导致 GUI 排队——原决策 47 的风险。→ **已完成**，见 `docs/runtime-concurrency.md`。
+- [x] 采集使用反馈 → 抽离友好工具（原决策 6）：`get_planning_state` / `list_contexts` / `list_prototypes` / `localized_names` / `suggest` / `auto_plan` 已落地；`list_projects` / `list_factories` 被 `get_planning_state` 逐层读取覆盖后**已删除**；`add_target` / `set_target_amount` / `add_mechanic` / `set_recipe` / `set_machine` / `load_context` 明确**不拆**（`dispatch` 即真实协议）。
+- [x] 长时求解（`recompute`/`auto_plan`）走**异步**（类似 GUI 的 solving 事件），避免 MCP 调用期间占住 `Mutex<Runtime>` 导致 GUI 排队——原决策 47 的风险。见 `docs/runtime-concurrency.md`；`auto_plan` 另加「立刻返回 + `get_planning_state` 轮询状态」。
 - [ ] 并发冲突语义（乐观锁/变更冲突提示）——原决策 45。
 - [ ] 端口被占用 / 多实例 / token 传递细节——原决策 48。
 
