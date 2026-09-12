@@ -1,5 +1,10 @@
 # MCP 工具 —— 设计决策（Phase 1）
 
+> **本文件不写日期。** 之前写的 `2026-xx` 占位既没信息量、又会被误读成"某年某月"；
+> 真要时间标记就直接看 `git log` / `git blame`——提交时间天然是准确的锚点，而且和
+> 具体行绑定。需要表达先后时用「修订 / 后续 / 已完成」这类**相对**措辞（文件本身的
+> 章节顺序已经承载了大部分时间信息）。
+
 ## 决策 1（核心）：**合并进本体，不单独拆 bin —— 推荐**
 
 **结论：MCP 服务器作为 Tauri 主程序内的一个**后台任务**（本地 Streamable-HTTP 端点），而不是独立的 `metatorio-mcp` 可执行文件。**
@@ -29,7 +34,7 @@
 ## 决策 4：更新
 - 合并后 = 现有 Tauri updater 更新整包（GUI + MCP 端点）。**无需 headless 单独更新**。
 
-## 决策 5：安全（2026-xx 修订：默认仍只回环；要局域网/手机接入则非回环必须有 token）
+## 决策 5：安全（修订：默认仍只回环；要局域网/手机接入则非回环必须有 token）
 - **默认只监听 `127.0.0.1`**（`--mcp-bind` 的默认值）：这个端点能建项目、改目标、跑规划，默认不该被同一网段里任何设备碰到。
 - 要让手机等其它设备接入：`--mcp-bind <本机局域网 IP>`（或 `0.0.0.0`）。**非回环绑定必须同时提供 `--mcp-token`，否则直接拒绝启动**（bin 的 `validate` 报错退出，而不是警告后照跑）——家用网段里任何设备都能扫到开放端口。
 - 鉴权：`Authorization: Bearer <token>`（或裸 token）。回环 + 无 token 仍是允许的（本机自用）。
@@ -58,7 +63,7 @@
 4. MCP 工具面 = GUI 规划操作的 `runtime.dispatch` 子集。
 5. 待细化：并发冲突语义、长求解的异步化、端口/token 细节。
 
-## 决策 7（MVP 落地，2026-xx）：**单 `dispatch` 万能工具先行**
+## 决策 7（MVP 落地）：**单 `dispatch` 万能工具先行**
 
 Phase 2 工具面**不在一开始就做成离散的友好工具**，而是：
 
@@ -90,7 +95,7 @@ Phase 2 工具面**不在一开始就做成离散的友好工具**，而是：
 
 工具面原则：**权威入口是 `auto_plan`**（从目标反推整条链）；`dispatch` 是覆盖全部消息的逃生通道；其余工具只服务「读」与「名字解析」。曾经的 `suggest`（列出某条流的候选机制）**已删除**——它会把 agent 引向「一个个配方手工拼装」的错误心智（正确做法是给目标让规划器枚举），而且与 `auto_plan` 的能力重叠。工具描述与参数说明**一律用中文**：垂直领域的术语（物品名、品质、插件塔）本来就是中文，中文描述比英文更准、也少一层翻译损耗（群内反馈）。
 
-**报错也一律中文**（2026-xx）：runtime 的 `RuntimeError`（找不到项目/工厂/机制/目标、下标越界、重复 id、数值校验、`品质 X 不存在于当前游戏上下文`）、`validate.rs` 的原型名校验、app 层命令错误、MCP 工具的 `invalid_params`、启动日志与 dump 解析错误全部改成中文。实测（headless + 原生 MCP）：`找不到项目 999`、`配方 not-a-real-recipe 不存在于当前游戏上下文`、`重复的目标 id`、`插件塔 not-a-real-beacon 不存在于当前游戏上下文`、`机制 999 不在工厂 2 里：先 get_planning_state {project, factory} 读 mechanics 列表拿 id`。
+**报错也一律中文**：runtime 的 `RuntimeError`（找不到项目/工厂/机制/目标、下标越界、重复 id、数值校验、`品质 X 不存在于当前游戏上下文`）、`validate.rs` 的原型名校验、app 层命令错误、MCP 工具的 `invalid_params`、启动日志与 dump 解析错误全部改成中文。实测（headless + 原生 MCP）：`找不到项目 999`、`配方 not-a-real-recipe 不存在于当前游戏上下文`、`重复的目标 id`、`插件塔 not-a-real-beacon 不存在于当前游戏上下文`、`机制 999 不在工厂 2 里：先 get_planning_state {project, factory} 读 mechanics 列表拿 id`。
 
 > 唯一的例外是**框架级**报错：rmcp 反序列化工具参数失败时给出的 `failed to deserialize parameters: missing field ...`、以及调用**未启用**的工具时的 `tool not found`，都由 rmcp 生成；后者见下面「工具子集」一节。
 
@@ -118,7 +123,7 @@ Phase 2 工具面**不在一开始就做成离散的友好工具**，而是：
 
 后续按 agent 真实使用反馈，再把常见需求从 `dispatch` 拆出更友好的专用工具（仍在同一 `dispatch` 路径之上）。
 
-## 决策 8（反馈驱动修正，2026-xx）：**首个 agent 实证后的修正**
+## 决策 8（反馈驱动修正）：**首个 agent 实证后的修正**
 
 另一个 agent 实际调用 `mcp__metatorio__dispatch` 走通完整链路后给出高价值反馈，据此修正 V1：
 
@@ -129,7 +134,7 @@ Phase 2 工具面**不在一开始就做成离散的友好工具**，而是：
 3. **`scheduled_commands` 只返回数量（P1-4）**：agent 不知是哪几条副作用。已改为返回真实 `RuntimeCommand` 序列化数组。
 4. **新建对象不知 id（P1-5）**：`dispatch` 只回 revision，读不到新分配的 project/factory/mechanic id。~~**仍待补**~~ **已补**：`DispatchResult` 增加 `created`（本次新建的 project/factory/mechanic id），`dispatch` 与 `auto_plan` 都直接回；读取职责另由 `get_planning_state` 承担。
 
-### 输出有界原则（功能边界，2026-xx 修正）
+### 输出有界原则（功能边界，后续修正）
 
 ~~原「正交性原则」：工具只产出全量 JSON，截断/分页是 agent 侧 JSON 工具的事。~~ **已被实战推翻**：群友实测反馈——「现在截断完全依赖我的 bash 返回给你兜底了，不然一条查询语句直接上下文爆炸」。真实量级：py 上下文目录索引 17757 条、一次自动规划写出 757 条机制，`get_planning_state` 省略 `project` 时会把每层工厂的每条机制一起倒出来。因此改为：
 
@@ -142,15 +147,15 @@ Phase 2 工具面**不在一开始就做成离散的友好工具**，而是：
 ### 待补（按优先级）
 
 - **读取工具**：`dispatch` 目前**纯写入、无自省**——agent 看不到当前文档、拿不到 id。~~方案：加一个 `get_planning_state` 读取工具~~ **已实现**：`get_planning_state(project?, factory?, recompute?)` 读 `runtime.state.document` 快照，一并解决 P0-1（只写不读）+ P1-5（id）+ P1-3（solve 结构化读取）。
-- **长求异步化**：`recompute`/`auto_plan` 同步占住 `Mutex<Runtime>`，期间 GUI 排队。方案：投递后台任务 + 经 `document-changed`/solving 事件回报（原决策 47）。~~**待补**~~ **已完成**（2026-xx）：`dispatch` 改为「reducer 短临界区 → 逐条命令各自按需短锁」，求解/自动规划在锁外跑（`solve_jobs` 按 `(project, factory)` 单飞 + latest-wins + revision 戳）；自动规划/清理的回写走 reducer 并校验版本，MCP 端按 revision 变化补发 `document-changed`。详见 `docs/runtime-concurrency.md`。
+- **长求异步化**：`recompute`/`auto_plan` 同步占住 `Mutex<Runtime>`，期间 GUI 排队。方案：投递后台任务 + 经 `document-changed`/solving 事件回报（原决策 47）。~~**待补**~~ **已完成**：`dispatch` 改为「reducer 短临界区 → 逐条命令各自按需短锁」，求解/自动规划在锁外跑（`solve_jobs` 按 `(project, factory)` 单飞 + latest-wins + revision 戳）；自动规划/清理的回写走 reducer 并校验版本，MCP 端按 revision 变化补发 `document-changed`。详见 `docs/runtime-concurrency.md`。
 - **领域词表**：~~`list_contexts`~~ / ~~`list_prototypes`~~ **已实现**（`list_contexts`、`list_prototypes`，后者支持 `kind` 与 `name_contains` 过滤，GUI 的 `catalog_index` 命令与它共用同一实现）；~~候选机制建议（`suggest`）~~ **已删除**（见上文工具面原则：把 agent 引向手工拼配方，且与 `auto_plan` 重叠；GUI 侧的同名命令仍保留给「建议」面板）；**名字解析已实现**（`localized_names`：id → 本地化名用于向群内汇报，口述名 → id 用于落成消息；匹配/排序口径抽成纯函数 `resolve_index_entry`，与 `list_prototypes` 共用同一份目录索引）。仍未工具化的是 `allowed_modules` / `implicit_sources` / `accessibility` / `productivity` / `solar_balance`（GUI 有命令，agent 暂时只能通过 `get_planning_state` 的求解结果间接观察）。
-- **机制级读取（`mechanic_flow`，2026-xx）**：机制在文档里只有 machine/recipe/modules 这些**零件**，agent 光看机制名（甚至看零件）也推不出「一个系数到底在消耗什么、产出什么」——机器速度、插件、插件塔都参与之后更是如此。因此把 GUI 的机制卡数据（`mechanic_flow` 命令：系数 = 1 时的每秒产/耗）按**下一层**接进 `get_planning_state {project, factory, mechanic}`：`config` 给零件、`inputs`/`outputs` 给正数化的消耗与产出（方向由数组名承载，不再让 LLM 去读 `-2.0` 的符号）。计算路径与 GUI **同一份实现**（`crate::mechanic_flow_for`），避免「界面上显示的」和「agent 读到的」是两套算法。实测（vanilla-2.1）：钢炉炼铁板 → 0.625 铁矿石/秒 + 化学燃料 → 0.625 铁板/秒；蒸汽轮机 500°C → 60 蒸汽/秒 → 5.82 MW；3 邻核反应堆 → 40 MW 燃料 → 160 MW 热；同一条铀燃料电池配方带 4×产能插件 3 时，输入降到 0.5/0.05/0.95、电耗升到 1.5875 MW——**插件效果如实反映在数字里**。
+- **机制级读取（`mechanic_flow`）**：机制在文档里只有 machine/recipe/modules 这些**零件**，agent 光看机制名（甚至看零件）也推不出「一个系数到底在消耗什么、产出什么」——机器速度、插件、插件塔都参与之后更是如此。因此把 GUI 的机制卡数据（`mechanic_flow` 命令：系数 = 1 时的每秒产/耗）按**下一层**接进 `get_planning_state {project, factory, mechanic}`：`config` 给零件、`inputs`/`outputs` 给正数化的消耗与产出（方向由数组名承载，不再让 LLM 去读 `-2.0` 的符号）。计算路径与 GUI **同一份实现**（`crate::mechanic_flow_for`），避免「界面上显示的」和「agent 读到的」是两套算法。实测（vanilla-2.1）：钢炉炼铁板 → 0.625 铁矿石/秒 + 化学燃料 → 0.625 铁板/秒；蒸汽轮机 500°C → 60 蒸汽/秒 → 5.82 MW；3 邻核反应堆 → 40 MW 燃料 → 160 MW 热；同一条铀燃料电池配方带 4×产能插件 3 时，输入降到 0.5/0.05/0.95、电耗升到 1.5875 MW——**插件效果如实反映在数字里**。
 - **上下文可写**：上下文的切换/重命名/删除已从「只有 Tauri 命令」收敛为 `AppMessage`（`ApplicationAction::SetActiveContext` / `RenameContext` / `DeleteContext`），因此 agent 用 `dispatch` 即可操作；app 层 `activate_context` / `rename_registered_context` / `delete_registered_context` 是 GUI 与 agent 共用的单一实现。
 - **工程文件可读写**：`open-project { path }` / `save-project { project }` / `save-project-as { project, path }` 现在是 GUI 的真实路径（Tauri 侧只保留文件对话框 `pick_project_file` / `pick_project_save_path` 与只读的 `project_save_path`），因此 agent 也能按路径打开/另存工程。显式保存走专用命令 `RuntimeCommand::SaveProject`：没有记忆路径时**报错**（提示先用 save-project-as），而自动落盘的 `Persist{path:None}` 对未保存过的新项目仍静默跳过——两者语义不同，不可混用。
 - **未实现变体在 schema 里自述**：`request-suggestions` / `replace-from-location` 与更新三连的文档注释会进入 MCP inputSchema（测试 `unimplemented_variants_are_documented_in_the_schema` 守住这一点），agent 读 schema 即可知道它们目前一定失败，不必先浪费一次调用。同一轮删除了**废弃的 suggestion 会话**（`FactoryAction::Suggestion` / `SuggestionAction` / `SuggestionCandidate` 及其 `apply_suggestion`）：它对应「运行时持有建议状态」的旧设计，而真实能力早已由只读命令 `suggest` / `implicit_sources` + `mechanic-list` 消息提供，剩下的三条分支（`SetFilter` / `Dismiss` / `SelectMechanic`）全是静默 no-op，只会让调用方误以为会话模型存在。
 - **`use-best-modules` 语义修正并实现**：旧签名 `UseBestModules { factory, mechanic }` 把 factory/mechanic 塞进一个**项目级**设置（`planning.enumerate_modules`）里，且 app 层从未实现。现改为 `UseBestModules { quality: String }`：项目级、**品质必填且不做推断**（品质是特殊维度——「解锁某品质」不等于「能大规模量产该品质的插件」，所以不能拿项目品质上限之类的东西当默认；GUI 传当前工厂的主品质）、候选按当前可达性过滤、同类别 tier 并列时取名字最小者（确定性 + 幂等），在 `Runtime::dispatch` 里解析后走 `finish`（revision/落盘/重解全部工厂）。GUI 的「使用最佳插件」按钮从「只读命令 + 可达性过滤 + N 条 add/remove 消息」收敛为**一条消息**；原 `best_modules` Tauri 命令与 `RuntimeCommand::UseBestModules`（占位）随之删除。
 - **友好工具拆分**：`auto_plan`（一站式入口，见下）已落地；其余候选（`add_target` / `set_target_amount` / `set_recipe` / `set_machine` / `load_context`）暂不拆——`dispatch` 已覆盖且 schema 就是真实协议。**同时删掉了 `list_projects` / `list_factories`**：它们的载荷（项目索引 / 工厂索引）现在正是 `get_planning_state` 的无 `project` / 给 `project` 两层的返回值，留着只是重复的工具面（群里「工具在精不在多」）。
-- **`auto_plan` 一站式入口（2026-xx，群内 bot 实测驱动）**：群里 bot 每次指挥都要手拼 `dispatch` 序列（建项目 → 建工厂 → 星球 → 主品质 → 目标 → 外部输入 → 插件策略 → 插件塔 → solve），既费人又费 AI，还容易漏配严格供给。现在一条消息搞定，参数只暴露实测高频项（目标物品×品质×速率、星球、主品质、最佳/排除插件、插件塔方案、外部输入），并按「星球/品质 → 目标 → 外部输入 → best → 剔除 → 插件塔 → 触发」的固定顺序执行。
+- **`auto_plan` 一站式入口（群内 bot 实测驱动）**：群里 bot 每次指挥都要手拼 `dispatch` 序列（建项目 → 建工厂 → 星球 → 主品质 → 目标 → 外部输入 → 插件策略 → 插件塔 → solve），既费人又费 AI，还容易漏配严格供给。现在一条消息搞定，参数只暴露实测高频项（目标物品×品质×速率、星球、主品质、最佳/排除插件、插件塔方案、外部输入），并按「星球/品质 → 目标 → 外部输入 → best → 剔除 → 插件塔 → 触发」的固定顺序执行。
   - **不提供 strict-source 开关**（用户明确反对）：自动规划总是严格供给，缺原料的**正确做法是声明外部输入**（`external_inputs`），而不是放宽约束。
   - **异步**：规划在后台跑（py 实测 70s+），工具立刻返回 `project`/`factory` + `auto_plan.status=running` + `poll` 提示；agent 稍后 `get_planning_state {project, factory}` 读状态与结果。状态由**这次规划自己**写入 `AppState::auto_plans`，而不是让 agent 用 `recompute` 去猜——规划尚未回写时 `recompute` 算的是旧文档，会给出与计划无关的结果。
   - 配置阶段只跑**便宜的收敛命令**（品质上限 / 机器兼容 / 插件钳制），跳过 `Recompute`/`Persist`（最后一次规划统一落盘+重解），否则一次组合会触发六次整厂求解，「立即返回」就成了空话。
