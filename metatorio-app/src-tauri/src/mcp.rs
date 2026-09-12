@@ -238,10 +238,9 @@ impl MetatorioMcp {
         // 2) 取文档快照（短锁，只克隆）+ 锁外序列化。
         let (snapshot, revision) = {
             let state = app.state::<AppState>();
-            let runtime = state
-                .runtime
-                .lock()
-                .map_err(|_| McpError::internal_error("runtime lock poisoned".to_string(), None))?;
+            let runtime = state.runtime.lock().map_err(|_| {
+                McpError::internal_error("runtime 锁已损坏（poisoned）".to_string(), None)
+            })?;
             let revision = runtime.state.revision;
             let snapshot = match (project, factory) {
                 (None, _) => DocSnapshot::Document(runtime.state.document.clone()),
@@ -582,7 +581,7 @@ impl MetatorioMcp {
                 {
                     Ok(_) => true,
                     Err(rollback) => {
-                        eprintln!("auto_plan rollback failed for project {project:?}: {rollback}");
+                        eprintln!("auto_plan 回滚项目 {project:?} 失败：{rollback}");
                         false
                     }
                 };
@@ -857,7 +856,7 @@ async fn dispatch_message<R: Runtime>(
         let mut runtime = state
             .runtime
             .lock()
-            .map_err(|_| "runtime lock poisoned".to_string())?;
+            .map_err(|_| "runtime 锁已损坏（poisoned）".to_string())?;
         runtime.dispatch(message).map_err(|error| error.to_string())
     })
     .await
@@ -1343,7 +1342,7 @@ async fn apply_consistency_only<R: Runtime + 'static>(
         let mut runtime = state
             .runtime
             .lock()
-            .map_err(|_| "runtime lock poisoned".to_string())?;
+            .map_err(|_| "runtime 锁已损坏（poisoned）".to_string())?;
         runtime.dispatch(message).map_err(|error| error.to_string())
     })
     .await
@@ -1732,7 +1731,7 @@ pub fn spawn_server(app: AppHandle, config: ServerConfig) {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
-            .expect("failed to build MCP tokio runtime");
+            .expect("构建 MCP 的 tokio runtime 失败");
         runtime.block_on(serve(app, config));
     });
 }
@@ -1773,16 +1772,16 @@ async fn serve(app: AppHandle, config: ServerConfig) {
     let listener = match tokio::net::TcpListener::bind(addr).await {
         Ok(listener) => listener,
         Err(error) => {
-            eprintln!("metatorio MCP server failed to bind {addr}: {error}");
+            eprintln!("metatorio MCP 服务绑定 {addr} 失败：{error}");
             return;
         }
     };
     eprintln!(
-        "metatorio MCP server listening on http://{addr}{MCP_PATH}{}",
+        "metatorio MCP 服务已启动：http://{addr}{MCP_PATH}{}",
         if token.is_some() {
-            " (token auth enabled)"
+            "（已启用 token 鉴权）"
         } else {
-            " (no token auth; loopback only)"
+            "（无 token 鉴权；仅回环）"
         }
     );
     // 手机等其它设备要连的地址、以及最容易踩的坑，直接打在启动日志里：这个端点不再
@@ -1812,7 +1811,7 @@ async fn serve(app: AppHandle, config: ServerConfig) {
         }
     }
     if let Err(error) = axum::serve(listener, router).await {
-        eprintln!("metatorio MCP server error: {error}");
+        eprintln!("metatorio MCP 服务出错：{error}");
     }
 }
 

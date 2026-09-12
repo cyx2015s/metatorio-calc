@@ -456,7 +456,7 @@ impl RuntimeState {
                     .iter_mut()
                     .find(|candidate| candidate.node == node)
                     .ok_or_else(|| {
-                        RuntimeError::InvalidValue(format!("unknown milestone: {node:?}"))
+                        RuntimeError::InvalidValue(format!("未知的里程碑目标：{node:?}"))
                     })?;
                 let changed = replace(&mut milestone.unlocked, unlocked);
                 Ok(Outcome::solve_all_if(changed, project_id))
@@ -479,7 +479,7 @@ impl RuntimeState {
                 ))
             }
             ProjectAction::SetMiningProductivity { productivity } => {
-                validate_non_negative("mining productivity", productivity)?;
+                validate_non_negative("采矿产能", productivity)?;
                 let changed = replace(
                     &mut self.project_mut(project_id)?.settings.mining_productivity,
                     productivity,
@@ -494,7 +494,7 @@ impl RuntimeState {
                 Ok(Outcome::solve_all_if(changed, project_id))
             }
             ProjectAction::SetRecipeProductivity { productivity } => {
-                validate_non_negative("recipe productivity", productivity.productivity)?;
+                validate_non_negative("配方产能", productivity.productivity)?;
                 let settings = &mut self.project_mut(project_id)?.settings;
                 if let Some(existing) = settings
                     .recipe_productivity
@@ -515,7 +515,7 @@ impl RuntimeState {
                 Ok(Outcome::solve_all_if(before != entries.len(), project_id))
             }
             ProjectAction::SetInfiniteTechLevel { level } => {
-                validate_non_negative("infinite tech level", level.level as f64)?;
+                validate_non_negative("无限科技等级", level.level as f64)?;
                 let settings = &mut self.project_mut(project_id)?.settings;
                 if let Some(existing) = settings
                     .infinite_levels
@@ -663,7 +663,7 @@ impl RuntimeState {
                     Ok(outcome)
                 }
                 FlowAction::AddToExternalInput { flow, penalty } => {
-                    validate_non_negative("external input penalty", penalty)?;
+                    validate_non_negative("外部输入惩罚系数", penalty)?;
                     let input = ExternalInput {
                         id: self.allocate_id(),
                         flow,
@@ -739,7 +739,7 @@ impl RuntimeState {
                 flow,
             ),
             TargetAction::SetAmount { target, amount } => {
-                validate_finite("target amount", amount)?;
+                validate_finite("目标速率", amount)?;
                 replace(
                     &mut find_target_mut(&mut factory.targets, target)?.amount,
                     amount,
@@ -800,7 +800,7 @@ impl RuntimeState {
                 expression,
                 constant,
             } => {
-                validate_finite("target expression constant", constant)?;
+                validate_finite("目标表达式常数", constant)?;
                 replace(
                     &mut find_expression_mut(&mut factory.target_expressions, expression)?.constant,
                     constant,
@@ -819,7 +819,7 @@ impl RuntimeState {
                     .iter()
                     .any(|candidate| candidate.id == term.id)
                 {
-                    return Err(RuntimeError::DuplicateId("target term"));
+                    return Err(RuntimeError::DuplicateId("目标项"));
                 }
                 expression.terms.push(term);
                 true
@@ -838,7 +838,7 @@ impl RuntimeState {
                 term,
                 coefficient,
             } => {
-                validate_finite("target term coefficient", coefficient)?;
+                validate_finite("目标项系数", coefficient)?;
                 replace(
                     &mut find_term_mut(factory, expression, term)?.coefficient,
                     coefficient,
@@ -900,7 +900,7 @@ impl RuntimeState {
                 flow,
             ),
             ExternalInputAction::SetPenalty { input, penalty } => {
-                validate_non_negative("external input penalty", penalty)?;
+                validate_non_negative("外部输入惩罚系数", penalty)?;
                 replace(
                     &mut find_external_mut(&mut factory.external_inputs, input)?.penalty,
                     penalty,
@@ -1309,13 +1309,9 @@ pub enum RuntimeError {
 impl fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::ProjectNotFound(id) => write!(f, "project {} was not found", id.0),
+            Self::ProjectNotFound(id) => write!(f, "找不到项目 {}", id.0),
             Self::FactoryNotFound { project, factory } => {
-                write!(
-                    f,
-                    "factory {} was not found in project {}",
-                    factory.0, project.0
-                )
+                write!(f, "项目 {} 里找不到工厂 {}", project.0, factory.0)
             }
             Self::MechanicNotFound {
                 project,
@@ -1323,23 +1319,23 @@ impl fmt::Display for RuntimeError {
                 mechanic,
             } => write!(
                 f,
-                "mechanic {} was not found in factory {} of project {}",
-                mechanic.0, factory.0, project.0
+                "项目 {} 的工厂 {} 里找不到机制 {}",
+                project.0, factory.0, mechanic.0
             ),
-            Self::TargetNotFound(id) => write!(f, "target {} was not found", id.0),
+            Self::TargetNotFound(id) => write!(f, "找不到目标 {}", id.0),
             Self::TargetExpressionNotFound(id) => {
-                write!(f, "target expression {} was not found", id.0)
+                write!(f, "找不到目标表达式 {}", id.0)
             }
-            Self::TargetTermNotFound(id) => write!(f, "target term {} was not found", id.0),
-            Self::ExternalInputNotFound(id) => write!(f, "external input {} was not found", id.0),
-            Self::DuplicateId(kind) => write!(f, "duplicate {kind} id"),
-            Self::UnsupportedMechanic => f.write_str("unsupported mechanic variant"),
+            Self::TargetTermNotFound(id) => write!(f, "找不到目标项 {}", id.0),
+            Self::ExternalInputNotFound(id) => write!(f, "找不到外部输入 {}", id.0),
+            Self::DuplicateId(kind) => write!(f, "重复的{kind} id"),
+            Self::UnsupportedMechanic => f.write_str("不支持的机制种类"),
             Self::InvalidOperation(message) => f.write_str(message),
             Self::InvalidValue(message) => f.write_str(message),
-            Self::DataNotLoaded => f.write_str("game data has not been loaded"),
-            Self::DataLoad(message) => write!(f, "failed to load game data: {message}"),
-            Self::ContextNotFound(id) => write!(f, "game context {id} is not loaded"),
-            Self::Io(message) => write!(f, "I/O error: {message}"),
+            Self::DataNotLoaded => f.write_str("游戏数据尚未载入"),
+            Self::DataLoad(message) => write!(f, "游戏数据载入失败：{message}"),
+            Self::ContextNotFound(id) => write!(f, "游戏上下文 {id} 未载入"),
+            Self::Io(message) => write!(f, "I/O 错误：{message}"),
         }
     }
 }
@@ -1454,9 +1450,7 @@ fn apply_factory_context(
         FactoryContextAction::SetSurface { surface } => replace(&mut settings.surface, surface),
         FactoryContextAction::SetMajorQuality { quality } => {
             if quality.is_empty() {
-                return Err(RuntimeError::InvalidValue(
-                    "quality cannot be empty".to_string(),
-                ));
+                return Err(RuntimeError::InvalidValue("品质不能为空".to_string()));
             }
             replace(&mut settings.major_quality, quality)
         }
@@ -1689,7 +1683,7 @@ fn apply_reactor_action(
         ReactorMechanicAction::SetNeighbours { neighbours } => {
             if neighbours > 8 {
                 return Err(RuntimeError::InvalidValue(
-                    "reactor neighbours must be <= 8".to_string(),
+                    "反应堆相邻数量不能超过 8".to_string(),
                 ));
             }
             Ok(replace(&mut mechanic.neighbours, neighbours))
@@ -1800,9 +1794,7 @@ fn apply_module_action(
         }
         ModuleAction::RemoveBeacon { beacon } => {
             if beacon >= config.beacons.len() {
-                return Err(RuntimeError::InvalidValue(
-                    "beacon index is out of range".to_string(),
-                ));
+                return Err(RuntimeError::InvalidValue("插件塔下标越界".to_string()));
             }
             config.beacons.remove(beacon);
             Ok(true)
@@ -1823,43 +1815,48 @@ fn apply_module_action(
                     value.id, value.quality
                 )));
             }
-            let beacon = config.beacons.get_mut(beacon).ok_or_else(|| {
-                RuntimeError::InvalidValue("beacon index is out of range".to_string())
-            })?;
+            let beacon = config
+                .beacons
+                .get_mut(beacon)
+                .ok_or_else(|| RuntimeError::InvalidValue("插件塔下标越界".to_string()))?;
             Ok(replace(&mut beacon.beacon, value))
         }
         ModuleAction::SetBeaconCount { beacon, count } => {
             if count == 0 {
                 return Err(RuntimeError::InvalidValue(
-                    "beacon count must be positive".to_string(),
+                    "插件塔数量必须为正数".to_string(),
                 ));
             }
-            let beacon = config.beacons.get_mut(beacon).ok_or_else(|| {
-                RuntimeError::InvalidValue("beacon index is out of range".to_string())
-            })?;
+            let beacon = config
+                .beacons
+                .get_mut(beacon)
+                .ok_or_else(|| RuntimeError::InvalidValue("插件塔下标越界".to_string()))?;
             Ok(replace(&mut beacon.count, count))
         }
         ModuleAction::SetBeaconShare { beacon, share } => {
-            validate_positive("beacon share", share)?;
-            let beacon = config.beacons.get_mut(beacon).ok_or_else(|| {
-                RuntimeError::InvalidValue("beacon index is out of range".to_string())
-            })?;
+            validate_positive("插件塔共享比例", share)?;
+            let beacon = config
+                .beacons
+                .get_mut(beacon)
+                .ok_or_else(|| RuntimeError::InvalidValue("插件塔下标越界".to_string()))?;
             Ok(replace(&mut beacon.share, share))
         }
         ModuleAction::AddBeaconModule { beacon, module } => {
-            let beacon = config.beacons.get_mut(beacon).ok_or_else(|| {
-                RuntimeError::InvalidValue("beacon index is out of range".to_string())
-            })?;
+            let beacon = config
+                .beacons
+                .get_mut(beacon)
+                .ok_or_else(|| RuntimeError::InvalidValue("插件塔下标越界".to_string()))?;
             beacon.modules.push((module, 0));
             Ok(true)
         }
         ModuleAction::RemoveBeaconModule { beacon, module } => {
-            let beacon = config.beacons.get_mut(beacon).ok_or_else(|| {
-                RuntimeError::InvalidValue("beacon index is out of range".to_string())
-            })?;
+            let beacon = config
+                .beacons
+                .get_mut(beacon)
+                .ok_or_else(|| RuntimeError::InvalidValue("插件塔下标越界".to_string()))?;
             if module >= beacon.modules.len() {
                 return Err(RuntimeError::InvalidValue(
-                    "beacon module index is out of range".to_string(),
+                    "插件塔内插件下标越界".to_string(),
                 ));
             }
             beacon.modules.remove(module);
@@ -1870,12 +1867,14 @@ fn apply_module_action(
             module,
             value,
         } => {
-            let beacon = config.beacons.get_mut(beacon).ok_or_else(|| {
-                RuntimeError::InvalidValue("beacon index is out of range".to_string())
-            })?;
-            let slot = beacon.modules.get_mut(module).ok_or_else(|| {
-                RuntimeError::InvalidValue("beacon module index is out of range".to_string())
-            })?;
+            let beacon = config
+                .beacons
+                .get_mut(beacon)
+                .ok_or_else(|| RuntimeError::InvalidValue("插件塔下标越界".to_string()))?;
+            let slot = beacon
+                .modules
+                .get_mut(module)
+                .ok_or_else(|| RuntimeError::InvalidValue("插件塔内插件下标越界".to_string()))?;
             Ok(replace(&mut slot.0, value))
         }
         ModuleAction::SetBeaconModuleCount {
@@ -1883,12 +1882,14 @@ fn apply_module_action(
             module,
             count,
         } => {
-            let beacon = config.beacons.get_mut(beacon).ok_or_else(|| {
-                RuntimeError::InvalidValue("beacon index is out of range".to_string())
-            })?;
-            let slot = beacon.modules.get_mut(module).ok_or_else(|| {
-                RuntimeError::InvalidValue("beacon module index is out of range".to_string())
-            })?;
+            let beacon = config
+                .beacons
+                .get_mut(beacon)
+                .ok_or_else(|| RuntimeError::InvalidValue("插件塔下标越界".to_string()))?;
+            let slot = beacon
+                .modules
+                .get_mut(module)
+                .ok_or_else(|| RuntimeError::InvalidValue("插件塔内插件下标越界".to_string()))?;
             Ok(replace(&mut slot.1, count))
         }
     }
@@ -1902,7 +1903,7 @@ fn apply_planning_action(
         PlanningAction::SetAlternativeCount { count } => {
             if count == 0 {
                 return Err(RuntimeError::InvalidValue(
-                    "alternative count must be positive".to_string(),
+                    "替代方案数量必须为正数".to_string(),
                 ));
             }
             Ok(replace(&mut planning.alternative_count, count))
@@ -1926,9 +1927,7 @@ fn apply_planning_action(
                 .machine_preferences
                 .iter()
                 .position(|candidate| candidate == &machine)
-                .ok_or_else(|| {
-                    RuntimeError::InvalidValue("machine preference was not found".to_string())
-                })?;
+                .ok_or_else(|| RuntimeError::InvalidValue("机器偏好不在列表里".to_string()))?;
             Ok(move_item(
                 &mut planning.machine_preferences,
                 index,
@@ -1961,23 +1960,23 @@ fn apply_planning_action(
         }
         PlanningAction::RemoveEnumeratedBeacon { beacon } => {
             if beacon >= planning.enumerate_beacons.len() {
-                return Err(RuntimeError::InvalidValue(
-                    "enumerated beacon index is out of range".to_string(),
-                ));
+                return Err(RuntimeError::InvalidValue("枚举插件塔下标越界".to_string()));
             }
             planning.enumerate_beacons.remove(beacon);
             Ok(true)
         }
         PlanningAction::SetEnumeratedBeacon { beacon, plan } => {
-            let current = planning.enumerate_beacons.get_mut(beacon).ok_or_else(|| {
-                RuntimeError::InvalidValue("enumerated beacon index is out of range".to_string())
-            })?;
+            let current = planning
+                .enumerate_beacons
+                .get_mut(beacon)
+                .ok_or_else(|| RuntimeError::InvalidValue("枚举插件塔下标越界".to_string()))?;
             Ok(replace(current, plan))
         }
         PlanningAction::EnumeratedBeaconModule { beacon, action } => {
-            let plan = planning.enumerate_beacons.get_mut(beacon).ok_or_else(|| {
-                RuntimeError::InvalidValue("enumerated beacon index is out of range".to_string())
-            })?;
+            let plan = planning
+                .enumerate_beacons
+                .get_mut(beacon)
+                .ok_or_else(|| RuntimeError::InvalidValue("枚举插件塔下标越界".to_string()))?;
             apply_module_action(&mut plan.module_config, action)
         }
     }
@@ -1985,7 +1984,7 @@ fn apply_planning_action(
 
 fn ensure_unique_target(factory: &FactoryDocument, id: TargetId) -> Result<(), RuntimeError> {
     if factory.targets.iter().any(|target| target.id == id) {
-        Err(RuntimeError::DuplicateId("target"))
+        Err(RuntimeError::DuplicateId("目标"))
     } else {
         Ok(())
     }
@@ -2000,7 +1999,7 @@ fn ensure_unique_expression(
         .iter()
         .any(|expression| expression.id == id)
     {
-        Err(RuntimeError::DuplicateId("target expression"))
+        Err(RuntimeError::DuplicateId("目标表达式"))
     } else {
         Ok(())
     }
@@ -2011,7 +2010,7 @@ fn ensure_unique_external(
     id: ExternalInputId,
 ) -> Result<(), RuntimeError> {
     if factory.external_inputs.iter().any(|input| input.id == id) {
-        Err(RuntimeError::DuplicateId("external input"))
+        Err(RuntimeError::DuplicateId("外部输入"))
     } else {
         Ok(())
     }
@@ -2077,7 +2076,7 @@ where
     items
         .iter()
         .position(|item| item.id() == id)
-        .ok_or(RuntimeError::InvalidOperation("item was not found"))
+        .ok_or(RuntimeError::InvalidOperation("找不到物品"))
 }
 
 fn remove_by_id<T>(items: &mut Vec<T>, id: T::Id) -> Result<bool, RuntimeError>
@@ -2181,16 +2180,14 @@ fn validate_finite(name: &str, value: f64) -> Result<(), RuntimeError> {
     if value.is_finite() {
         Ok(())
     } else {
-        Err(RuntimeError::InvalidValue(format!("{name} must be finite")))
+        Err(RuntimeError::InvalidValue(format!("{name}必须是有限数")))
     }
 }
 
 fn validate_non_negative(name: &str, value: f64) -> Result<(), RuntimeError> {
     validate_finite(name, value)?;
     if value < 0.0 {
-        Err(RuntimeError::InvalidValue(format!(
-            "{name} must be non-negative"
-        )))
+        Err(RuntimeError::InvalidValue(format!("{name}不能为负")))
     } else {
         Ok(())
     }
@@ -2199,9 +2196,7 @@ fn validate_non_negative(name: &str, value: f64) -> Result<(), RuntimeError> {
 fn validate_positive(name: &str, value: f64) -> Result<(), RuntimeError> {
     validate_finite(name, value)?;
     if value <= 0.0 {
-        Err(RuntimeError::InvalidValue(format!(
-            "{name} must be positive"
-        )))
+        Err(RuntimeError::InvalidValue(format!("{name}必须为正数")))
     } else {
         Ok(())
     }

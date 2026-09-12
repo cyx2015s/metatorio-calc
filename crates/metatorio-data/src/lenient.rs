@@ -49,7 +49,7 @@ pub fn de_int<'de, T: LenientInt, D: Deserializer<'de>>(d: D) -> Result<T, D::Er
     impl<'de, T: LenientInt> Visitor<'de> for V<T> {
         type Value = T;
         fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            f.write_str("an integer (floats truncated toward zero)")
+            f.write_str("一个整数（浮点会被截断到零）")
         }
         fn visit_i64<E: Error>(self, v: i64) -> Result<T, E> {
             Ok(T::from_i64(v))
@@ -72,7 +72,7 @@ pub fn de_opt_int<'de, T: LenientInt, D: Deserializer<'de>>(d: D) -> Result<Opti
     impl<'de, T: LenientInt> Visitor<'de> for V<T> {
         type Value = Option<T>;
         fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            f.write_str("an optional integer (floats truncated toward zero)")
+            f.write_str("一个可选整数（浮点会被截断到零）")
         }
         fn visit_unit<E: Error>(self) -> Result<Option<T>, E> {
             Ok(None)
@@ -100,7 +100,7 @@ pub fn de_vec_lenient<'de, T: serde::Deserialize<'de>, D: Deserializer<'de>>(
     impl<'de, T: serde::Deserialize<'de>> Visitor<'de> for V<T> {
         type Value = Vec<T>;
         fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            f.write_str("a sequence or an empty map (Lua empty table)")
+            f.write_str("一个数组，或空 map（Lua 空表）")
         }
         fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Vec<T>, A::Error> {
             let mut out = Vec::new();
@@ -114,7 +114,7 @@ pub fn de_vec_lenient<'de, T: serde::Deserialize<'de>, D: Deserializer<'de>>(
                 Ok(Vec::new())
             } else {
                 Err(A::Error::custom(
-                    "expected an empty map (Lua empty table) or a sequence, got a non-empty map",
+                    "期望空 map（Lua 空表）或数组，实际拿到非空 map",
                 ))
             }
         }
@@ -132,7 +132,7 @@ pub fn de_opt_vec_lenient<'de, T: serde::Deserialize<'de>, D: Deserializer<'de>>
     impl<'de, T: serde::Deserialize<'de>> Visitor<'de> for V<T> {
         type Value = Option<Vec<T>>;
         fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            f.write_str("an optional sequence or an empty map (Lua empty table)")
+            f.write_str("一个可选数组，或空 map（Lua 空表）")
         }
         fn visit_unit<E: Error>(self) -> Result<Option<Vec<T>>, E> {
             Ok(None)
@@ -155,7 +155,7 @@ pub fn de_vec_int<'de, T: LenientInt, D: Deserializer<'de>>(d: D) -> Result<Vec<
     impl<'de, T: LenientInt> Visitor<'de> for V<T> {
         type Value = Vec<T>;
         fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            f.write_str("a sequence of integers or an empty map (Lua empty table)")
+            f.write_str("一个整数数组，或空 map（Lua 空表）")
         }
         fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Vec<T>, A::Error> {
             struct Elem<T>(PhantomData<T>);
@@ -176,7 +176,7 @@ pub fn de_vec_int<'de, T: LenientInt, D: Deserializer<'de>>(d: D) -> Result<Vec<
                 Ok(Vec::new())
             } else {
                 Err(A::Error::custom(
-                    "expected an empty map (Lua empty table) or a sequence, got a non-empty map",
+                    "期望空 map（Lua 空表）或数组，实际拿到非空 map",
                 ))
             }
         }
@@ -194,7 +194,7 @@ pub fn de_opt_vec_int<'de, T: LenientInt, D: Deserializer<'de>>(
     impl<'de, T: LenientInt> Visitor<'de> for V<T> {
         type Value = Option<Vec<T>>;
         fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            f.write_str("an optional sequence of integers or an empty map")
+            f.write_str("一个可选的整数数组，或空 map")
         }
         fn visit_unit<E: Error>(self) -> Result<Option<Vec<T>>, E> {
             Ok(None)

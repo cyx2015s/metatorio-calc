@@ -255,7 +255,7 @@ pub(crate) fn spawn_auto_plan<R: TauriRuntime>(
             plans.insert((project, factory), next);
         }
         if let Err(error) = app.emit("document-changed", revision) {
-            eprintln!("failed to emit document-changed: {error}");
+            eprintln!("广播 document-changed 失败：{error}");
         }
     });
 }
@@ -958,7 +958,7 @@ fn emit_contexts_changed<R: TauriRuntime>(
         None => context_list(state),
     };
     if let Err(error) = app.emit("contexts-changed", list) {
-        eprintln!("failed to emit contexts-changed: {error}");
+        eprintln!("广播 contexts-changed 失败：{error}");
     }
 }
 
@@ -1281,7 +1281,7 @@ async fn delete_registered_context<R: TauriRuntime>(
             let runtime = state
                 .runtime
                 .lock()
-                .map_err(|_| "runtime lock poisoned".to_string())?;
+                .map_err(|_| "runtime 锁已损坏（poisoned）".to_string())?;
             if context_referenced(&runtime.state.document, &id) {
                 return Err("有项目正在引用该上下文，请先解除关联".to_string());
             }
@@ -1296,7 +1296,7 @@ async fn delete_registered_context<R: TauriRuntime>(
         let mut runtime = state
             .runtime
             .lock()
-            .map_err(|_| "runtime lock poisoned".to_string())?;
+            .map_err(|_| "runtime 锁已损坏（poisoned）".to_string())?;
         runtime.remove_context(&id);
         emit_contexts_changed(&app, &state, Some(&runtime));
         Ok(context_list_with(&runtime, &state))
@@ -2338,7 +2338,7 @@ fn prototype_detail(
     let mut runtime = state
         .runtime
         .lock()
-        .map_err(|_| "runtime lock poisoned".to_string())?;
+        .map_err(|_| "runtime 锁已损坏（poisoned）".to_string())?;
     if context_id.is_empty() {
         return Ok(None);
     }
@@ -2560,7 +2560,7 @@ async fn dispatch(app: AppHandle, message: AppMessage) -> Result<DispatchResult,
         let mut runtime = state
             .runtime
             .lock()
-            .map_err(|_| "runtime lock poisoned".to_string())?;
+            .map_err(|_| "runtime 锁已损坏（poisoned）".to_string())?;
         runtime
             .dispatch(message)
             .map_err(|error| error.to_string())?
@@ -2600,7 +2600,7 @@ async fn run_blocking<T: Send + 'static>(
         let mut runtime = state
             .runtime
             .lock()
-            .map_err(|_| "runtime lock poisoned".to_string())?;
+            .map_err(|_| "runtime 锁已损坏（poisoned）".to_string())?;
         f(&mut runtime)
     })
     .await
@@ -3205,7 +3205,7 @@ fn with_runtime<T>(
     let mut runtime = state
         .runtime
         .lock()
-        .map_err(|_| "runtime lock poisoned".to_string())?;
+        .map_err(|_| "runtime 锁已损坏（poisoned）".to_string())?;
     f(&mut runtime)
 }
 
@@ -3287,7 +3287,7 @@ pub(crate) async fn solve_factory_offlock<R: TauriRuntime>(
                 let runtime = state
                     .runtime
                     .lock()
-                    .map_err(|_| "runtime lock poisoned".to_string())?;
+                    .map_err(|_| "runtime 锁已损坏（poisoned）".to_string())?;
                 runtime
                     .solve_snapshot_inputs(project, factory)
                     .map_err(|error| error.to_string())
@@ -3426,7 +3426,7 @@ async fn execute_command<R: TauriRuntime>(
             if let Err(error) = with_runtime(state, |runtime| {
                 ensure_machine_compat(state, runtime, project, factory, mechanic)
             }) {
-                eprintln!("machine compat fallback failed: {error}");
+                eprintln!("机器兼容性兜底失败：{error}");
             }
             CommandOutcome::default()
         }
@@ -3637,7 +3637,7 @@ async fn execute_command<R: TauriRuntime>(
                         let runtime = state
                             .runtime
                             .lock()
-                            .map_err(|_| "runtime lock poisoned".to_string())?;
+                            .map_err(|_| "runtime 锁已损坏（poisoned）".to_string())?;
                         runtime
                             .solve_snapshot_inputs(project, factory)
                             .map_err(|error| error.to_string())
@@ -3868,7 +3868,7 @@ pub fn run(options: Options) {
                 .unwrap_or_default();
             let state = app.state::<AppState>();
             {
-                let mut registry = state.contexts.lock().expect("contexts lock");
+                let mut registry = state.contexts.lock().expect("contexts 锁");
                 registry.dir = dir;
                 registry.scan();
             }
@@ -3880,9 +3880,9 @@ pub fn run(options: Options) {
                     .map(|meta| meta.id.clone())
             });
             if let Some(id) = newest {
-                let mut runtime = state.runtime.lock().expect("runtime lock");
+                let mut runtime = state.runtime.lock().expect("runtime 锁");
                 if let Err(error) = ensure_context_loaded(&state, &mut runtime, &id) {
-                    eprintln!("failed to load cached context: {error}");
+                    eprintln!("载入缓存上下文失败：{error}");
                 } else {
                     runtime.set_active_context(Some(id));
                 }
@@ -3917,7 +3917,7 @@ pub fn run(options: Options) {
             project_save_path,
         ])
         .run(context)
-        .expect("error while running tauri application");
+        .expect("tauri 应用运行出错");
 }
 
 #[cfg(test)]
