@@ -140,17 +140,17 @@ struct LocalizedNamesParams {
     context_id: Option<String>,
 }
 
-/// Parameters for the `suggest` tool: candidates that can provide/consume a flow.
-#[derive(Debug, serde::Deserialize, JsonSchema)]
-struct SuggestParams {
-    /// 要查建议的流——与 `dispatch` 里目标/外部输入用的 `DualVar` 同形
-    /// （如 `{"Item":{"id":"iron-plate","quality":"normal"}}` 或
-    /// `{"Fluid":{"name":"water","temperature":[15,15]}}` 或 `"Electricity"`）。
-    flow: DualVar,
-    /// 游戏上下文 id；省略 = 当前激活的上下文。
-    #[serde(default)]
-    context_id: Option<String>,
-}
+// /// Parameters for the `suggest` tool: candidates that can provide/consume a flow.
+// #[derive(Debug, serde::Deserialize, JsonSchema)]
+// struct SuggestParams {
+//     /// 要查建议的流——与 `dispatch` 里目标/外部输入用的 `DualVar` 同形
+//     /// （如 `{"Item":{"id":"iron-plate","quality":"normal"}}` 或
+//     /// `{"Fluid":{"name":"water","temperature":[15,15]}}` 或 `"Electricity"`）。
+//     flow: DualVar,
+//     /// 游戏上下文 id；省略 = 当前激活的上下文。
+//     #[serde(default)]
+//     context_id: Option<String>,
+// }
 
 /// The MCP server handler.  Stateless: it only carries the [`AppHandle`] it
 /// needs to reach the shared [`AppState`], so rmcp can construct a fresh one
@@ -858,34 +858,34 @@ impl MetatorioMcp {
         })))
     }
 
-    /// 建议：给定一条流，列出能产出/消耗它的候选机制。
-    #[tool(
-        description = "Suggest mechanics that could provide or consume one flow in the \
-        active game context (recipes, resource patches, fuels, generators), each as \
-        {kind, name, role} where role='producer' produces the flow and \
-        role='consumer' consumes it.  This is the cheap first step before adding a \
-        mechanic: pick a candidate, then dispatch a mechanic-list add + the matching \
-        set-recipe / set-resource / set-item / set-generator message."
-    )]
-    async fn suggest(
-        &self,
-        Parameters(params): Parameters<SuggestParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let flow = params.flow.clone();
-        let state = self.app.state::<AppState>();
-        let context_id = crate::resolve_context_id(&state, params.context_id.as_deref())
-            .map_err(|error| McpError::invalid_params(error, None))?;
-        let suggestions = crate::suggest_for(&state, &context_id, flow.clone())
-            .await
-            .map_err(|error| {
-                McpError::invalid_params(format!("suggest 执行失败: {error}"), None)
-            })?;
-        Ok(CallToolResult::structured(serde_json::json!({
-            "context_id": context_id,
-            "flow": flow,
-            "suggestions": suggestions,
-        })))
-    }
+    // /// 建议：给定一条流，列出能产出/消耗它的候选机制。
+    // #[tool(
+    //     description = "Suggest mechanics that could provide or consume one flow in the \
+    //     active game context (recipes, resource patches, fuels, generators), each as \
+    //     {kind, name, role} where role='producer' produces the flow and \
+    //     role='consumer' consumes it.  This is the cheap first step before adding a \
+    //     mechanic: pick a candidate, then dispatch a mechanic-list add + the matching \
+    //     set-recipe / set-resource / set-item / set-generator message."
+    // )]
+    // async fn suggest(
+    //     &self,
+    //     Parameters(params): Parameters<SuggestParams>,
+    // ) -> Result<CallToolResult, McpError> {
+    //     let flow = params.flow.clone();
+    //     let state = self.app.state::<AppState>();
+    //     let context_id = crate::resolve_context_id(&state, params.context_id.as_deref())
+    //         .map_err(|error| McpError::invalid_params(error, None))?;
+    //     let suggestions = crate::suggest_for(&state, &context_id, flow.clone())
+    //         .await
+    //         .map_err(|error| {
+    //             McpError::invalid_params(format!("suggest 执行失败: {error}"), None)
+    //         })?;
+    //     Ok(CallToolResult::structured(serde_json::json!({
+    //         "context_id": context_id,
+    //         "flow": flow,
+    //         "suggestions": suggestions,
+    //     })))
+    // }
 }
 
 /// `dispatch` 工具的实际逻辑：与具体 Tauri runtime 解耦，便于用 mock app 测试。
