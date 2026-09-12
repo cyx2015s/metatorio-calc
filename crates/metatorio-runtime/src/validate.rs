@@ -101,6 +101,14 @@ fn validate_planning(store: &PrototypeStore, action: &PlanningAction) -> Result<
         PlanningAction::AddEnumeratedModule { module } => {
             require_id(store, PrototypeGroup::Item, "插件", module)
         }
+        // 删除类动作**只校验原型是否存在**，不校验「是否真的在列表里」：后者在 GUI
+        // 里是有意的幂等（重复点删除不算错误），但一个**不存在的名字**必须报错——
+        // `remove-enumerated-module` 对不存在的插件是静默 no-op（`retain` 找不到就
+        // 报「无变化」），调用方（尤其 LLM）会以为「已排除」，而计划里那条插件依旧
+        // 生效；实测 auto_plan 传 `speed-module-99` 就踩到过。
+        PlanningAction::RemoveEnumeratedModule { module } => {
+            require_id(store, PrototypeGroup::Item, "插件", module)
+        }
         PlanningAction::SetEnumeratedBeacon { plan, .. } => validate_beacon_plan(store, plan),
         PlanningAction::EnumeratedBeaconModule { action, .. } => validate_module(store, action),
         // 「使用最佳插件」的品质由调用方显式给出（运行时不做推断），必须存在于
@@ -397,5 +405,25 @@ mod tests {
             }),
         };
         assert!(validate_message(&store, &bad_planet).is_err());
+    }
+
+    /// 删除枚举插件：名字不存在要报错（否则是静默 no-op，调用方以为「已排除」），
+    /// 但名字存在、只是**不在列表里**必须照旧放行——重复删除是 GUI 的正常幂等，
+    /// 不能因为加了校验就把「删一个本来就没有的东西」变成错误。
+    #[test]
+    fn removing_enumerated_module_checks_existence_only() {
+        let store = store();
+        let remove = |name: &str| AppMessage::Project {
+            project: crate::id::ProjectId(1),
+            action: ProjectAction::Planning(PlanningAction::RemoveEnumeratedModule {
+                module: IdWithQuality::new(name, "normal"),
+            }),
+        };
+
+        // 存在的插件：不管在不在枚举列表里（校验拿不到列表），都必须放行。
+        assert!(validate_message(&store, &remove("speed-module-3")).is_ok());
+        // 不存在的插件：报错，并说清是哪个名字。
+        let error = validate_message(&store, &remove("speed-module-99")).unwrap_err();
+        assert!(error.to_string().contains("speed-module-99"), "{error}");
     }
 }
