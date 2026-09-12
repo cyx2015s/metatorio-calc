@@ -84,15 +84,31 @@ mod tests {
     }
 
     /// `--headless --no-mcp` = 既没有窗口也没有接口：必须显式拒绝。
+    ///
+    /// 这里**直接构造 `Cli`**而不是 `try_parse_from`：clap 的 `env` 回退会把
+    /// `METATORIO_HEADLESS` 读进来，而环境变量是进程级的——`cargo test` 同二进制内
+    /// 并行跑时，另一个测试刚设上的 `METATORIO_HEADLESS=true` 会让这里的
+    /// `--no-mcp` 子用例莫名变成「headless + no-mcp」。本断言只关心**组合规则**，
+    /// 来源解析交给 `cli_overrides_env_over_defaults` 单独验证。
     #[test]
     fn headless_without_mcp_is_rejected() {
-        let ok = Cli::try_parse_from(["metatorio-app", "--headless"]).unwrap();
-        assert!(validate(&ok).is_ok());
-        let ok = Cli::try_parse_from(["metatorio-app", "--no-mcp"]).unwrap();
-        assert!(validate(&ok).is_ok());
+        let cli = |headless, no_mcp| Cli {
+            headless,
+            mcp_port: mcp::DEFAULT_MCP_PORT,
+            mcp_token: None,
+            solve_timeout_ms: None,
+            no_mcp,
+        };
 
-        let bad = Cli::try_parse_from(["metatorio-app", "--headless", "--no-mcp"]).unwrap();
-        assert!(validate(&bad).is_err());
+        assert!(validate(&cli(true, false)).is_ok());
+        assert!(validate(&cli(false, true)).is_ok());
+        assert!(validate(&cli(false, false)).is_ok());
+
+        let err = validate(&cli(true, true)).unwrap_err();
+        assert!(
+            err.contains("headless"),
+            "错误信息要说清是哪两条互斥：{err}"
+        );
     }
 
     /// CLI > 环境变量 > 默认值，三条来源都要生效且优先级不能反。
