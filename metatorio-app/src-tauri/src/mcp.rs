@@ -54,7 +54,7 @@ use metatorio_runtime::message::{
     AppMessage, ApplicationAction, DeleteDecision, FactoryAction, FactoryContextAction,
     FactoryTemplate, FlowAction, PlanningAction, ProjectAction, RuntimeCommand, SolveAction,
 };
-use metatorio_runtime::{FactoryId, ProjectId};
+use metatorio_runtime::{FactoryId, MechanicId, ProjectId};
 
 /// Default loopback port for the MCP endpoint (`--mcp-port` /
 /// `METATORIO_MCP_PORT` 可覆盖）。
@@ -211,8 +211,15 @@ impl MetatorioMcp {
         With `project`+`factory` the response also carries `auto_plan` when that \
         factory has an asynchronous auto-plan (started by the `auto_plan` tool): \
         `{status: running|done|failed, revision?, result?, error?}` — poll this to \
-        collect the result.  All flow amounts are per second (time-scale only affects \
-        display)."
+        collect the result.  \
+        Add `mechanic` (an id from that factory's `mechanics`, so it also needs \
+        project + factory) to go one level deeper and get **one mechanic's flow \
+        conversion**: its full `config` (type/machine/recipe/modules/beacons/fuel) plus \
+        `inputs`/`outputs` — the per-second amounts that mechanic consumes and produces \
+        at coefficient 1, already including machine speed, module and beacon effects \
+        (the same expansion the solver uses).  Use it instead of inferring what a \
+        mechanic does from its name.  \
+        All flow amounts are per second (time-scale only affects display)."
     )]
     async fn get_planning_state(
         &self,
@@ -222,11 +229,17 @@ impl MetatorioMcp {
         let page = params.page.resolve();
         let project = params.project.map(ProjectId);
         let factory = params.factory.map(FactoryId);
-        // `recompute` 只在 project + factory 同时给出时才有意义：其余组合显式
-        // 报错，而不是静默忽略（agent 之前无法察觉）。
+        // `recompute` / `mechanic` 只在 project + factory 同时给出时才有意义：其余
+        // 组合显式报错，而不是静默忽略（agent 之前无法察觉）。
         if params.recompute && (project.is_none() || factory.is_none()) {
             return Err(McpError::invalid_params(
                 "recompute 需要同时提供 project 与 factory".to_string(),
+                None,
+            ));
+        }
+        if params.mechanic.is_some() && (project.is_none() || factory.is_none()) {
+            return Err(McpError::invalid_params(
+                "mechanic 需要同时提供 project 与 factory（机制属于某个工厂）".to_string(),
                 None,
             ));
         }
@@ -289,6 +302,59 @@ impl MetatorioMcp {
             };
             (snapshot, revision)
         };
+
+        // 1.5) 指定 mechanic：再下一层，**聚焦到这一个机制**（配置 + 系数 = 1 的每秒
+        //      产/耗）。机制在文档里只有 machine/recipe/modules 这些零件，agent 光看
+        //      机制名推不出它到底消耗/产出什么，尤其是插件、插件塔、机器速度都参与之后。
+        if let Some(mechanic) = params.mechanic {
+            let (mechanic_project, mechanic_factory, factory_document) = match &snapshot {
+                DocSnapshot::Factory {
+                    project,
+                    factory,
+                    factory_document,
+                } => (*project, *factory, factory_document),
+                // 上面已要求 project + factory 同时给出；走到这里说明内部状态不一致。
+                _ => {
+                    return Err(McpError::internal_error(
+                        "mechanic 需要 project + factory".to_string(),
+                        None,
+                    ))
+                }
+            };
+            let mut report = PageReport::default();
+            let mut object = match mechanic_level_value(
+                &app,
+                mechanic_project,
+                mechanic_factory,
+                factory_document,
+                mechanic,
+                page,
+                &mut report,
+            )
+            .await?
+            {
+                serde_json::Value::Object(object) => object,
+                _ => serde_json::Map::new(),
+            };
+            // `recompute` 与 `mechanic` 同时给出时，求解结果也算出来了，别丢掉。
+            if let Some(mut solve) = solve {
+                if let Some(status) = solve.get_mut("status").and_then(|s| s.as_object_mut()) {
+                    if let Some(solved) = status.get_mut("solved").and_then(|s| s.as_object_mut()) {
+                        report.page_key(solved, "mechanics", "solve.mechanics", page);
+                        report.page_key(solved, "flows", "solve.flows", page);
+                    }
+                }
+                object.insert("solve".to_string(), solve);
+            }
+            object.insert(
+                "revision".to_string(),
+                serde_json::Value::Number(revision.into()),
+            );
+            object.insert("page".to_string(), report.value(page));
+            return Ok(CallToolResult::structured(serde_json::Value::Object(
+                object,
+            )));
+        }
 
         let (mut value, mut report) = planning_state_value(&snapshot, page);
         // 工厂层：附上该工厂的**异步自动规划**状态（如果有），供 `auto_plan` 的
@@ -1487,12 +1553,125 @@ struct PlanningStateParams {
     /// Factory id (u64). Requires `project`; returns that factory's document.
     #[serde(default)]
     factory: Option<u64>,
+    /// Mechanic id (from that factory's `mechanics`). Requires `project` + `factory`;
+    /// returns just this mechanic's config plus its per-second inputs/outputs at
+    /// coefficient 1.
+    #[serde(default)]
+    mechanic: Option<u64>,
     /// When set with `project` + `factory`, run a solve and include its result.
     #[serde(default)]
     recompute: bool,
     /// 每个集合的返回上限与偏移（默认 50、上限 1000）。
     #[serde(flatten)]
     page: PageParams,
+}
+
+/// 「机制层」载荷：一个机制的**配置** + 它在**系数 = 1** 时的每秒产/耗。
+///
+/// 为什么要这一层：文档里的机制只有 `machine` / `recipe` / `module_config` 这些零件，
+/// agent 光看机制名（甚至看零件）也推不出「一个系数到底消耗什么、产出什么」——机器
+/// 速度、插件、插件塔都参与之后更是如此。这里给的是 GUI 机制卡显示的**同一份展开
+/// 结果**（[`crate::mechanic_flow_for`]），不是另写一套近似。
+async fn mechanic_level_value(
+    app: &AppHandle,
+    project: u64,
+    factory: u64,
+    factory_document: &metatorio_runtime::FactoryDocument,
+    mechanic: u64,
+    page: Page,
+    report: &mut PageReport,
+) -> Result<serde_json::Value, McpError> {
+    let entry = factory_document
+        .mechanics
+        .iter()
+        .find(|entry| entry.id == MechanicId(mechanic))
+        .ok_or_else(|| {
+            McpError::invalid_params(
+                format!(
+                    "机制 {mechanic} 不在工厂 {factory} 里：先 get_planning_state \
+                     {{project, factory}} 读 mechanics 列表拿 id"
+                ),
+                None,
+            )
+        })?;
+    let config = serde_json::to_value(&entry.mechanic).unwrap_or(serde_json::Value::Null);
+    let flow = crate::mechanic_flow_for(
+        &app.state::<AppState>(),
+        ProjectId(project),
+        FactoryId(factory),
+        MechanicId(mechanic),
+    )
+    .await
+    .map_err(|error| {
+        McpError::invalid_params(format!("读取机制 {mechanic} 的流失败: {error}"), None)
+    })?;
+
+    let (inputs, outputs) = split_mechanic_flow(&flow);
+    let (inputs, inputs_total) = page.slice(&inputs);
+    let (outputs, outputs_total) = page.slice(&outputs);
+    report.record("mechanic.inputs", inputs_total, inputs.len());
+    report.record("mechanic.outputs", outputs_total, outputs.len());
+
+    let encode = |items: Vec<(DualVar, f64)>| {
+        items
+            .into_iter()
+            .map(|(flow, amount)| serde_json::json!({ "flow": flow, "amount": amount }))
+            .collect::<Vec<_>>()
+    };
+    let mut object = serde_json::Map::new();
+    object.insert("level".to_string(), serde_json::json!("mechanic"));
+    object.insert("project".to_string(), serde_json::json!(project));
+    object.insert("factory".to_string(), serde_json::json!(factory));
+    object.insert("mechanic".to_string(), serde_json::json!(mechanic));
+    object.insert("enabled".to_string(), serde_json::json!(entry.enabled));
+    object.insert("config".to_string(), config);
+    object.insert(
+        "rate_note".to_string(),
+        serde_json::json!(
+            "系数（求解里的 amount）= 1 时每秒的量：inputs 是消耗、outputs 是产出，\
+             已含机器速度、插件与插件塔效果（与求解同一份展开）"
+        ),
+    );
+    object.insert(
+        "inputs".to_string(),
+        serde_json::json!(encode(inputs.clone())),
+    );
+    object.insert(
+        "outputs".to_string(),
+        serde_json::json!(encode(outputs.clone())),
+    );
+    // 与其它集合同一口径：截断了就说清怎么收窄，绝不静默丢。
+    if inputs.len() < inputs_total {
+        object.insert(
+            "inputs_hint".to_string(),
+            serde_json::json!(truncation_hint(inputs_total, inputs.len())),
+        );
+    }
+    if outputs.len() < outputs_total {
+        object.insert(
+            "outputs_hint".to_string(),
+            serde_json::json!(truncation_hint(outputs_total, outputs.len())),
+        );
+    }
+    Ok(serde_json::Value::Object(object))
+}
+
+/// 把展开出来的带符号流拆成 `(消耗, 产出)`，两边都是**正数**：符号改由数组名承载。
+///
+/// 展开结果里正数是产出、负数是消耗（见 `mechanic_flow` 的约定），直接给 LLM 看
+/// `-2.0` 容易被读成「产出 2」。接近 0 的浮点残渣（`|v| <= 1e-12`）在展开侧已经
+/// 过滤过，这里不再重复判断。
+fn split_mechanic_flow(flow: &[(DualVar, f64)]) -> (Vec<(DualVar, f64)>, Vec<(DualVar, f64)>) {
+    let mut inputs = Vec::new();
+    let mut outputs = Vec::new();
+    for (flow, amount) in flow {
+        if *amount < 0.0 {
+            inputs.push((flow.clone(), -amount));
+        } else {
+            outputs.push((flow.clone(), *amount));
+        }
+    }
+    (inputs, outputs)
 }
 
 /// 项目级索引条目：只给「有哪些项目、各自多大」，不给内容。
@@ -2166,6 +2345,35 @@ mod tests {
         assert!(resolve_bind("  ", &[]).unwrap_err().contains("mcp-bind"));
         // 主机名不解析（只接受 IP 字面量与 localhost），避免依赖 DNS 结果。
         assert!(resolve_bind("mirac-pc", &[]).is_err());
+    }
+
+    /// 展开结果是**带符号**的一串流（正=产出、负=消耗），直接给 LLM 看 `-2.0` 容易
+    /// 被读成「产出 2」。这里按数组名承载方向、数值一律正数。
+    #[test]
+    fn mechanic_flow_splits_into_positive_inputs_and_outputs() {
+        let iron = DualVar::Item(IdWithQuality::new("iron-plate", "normal"));
+        let gear = DualVar::Item(IdWithQuality::new("iron-gear-wheel", "normal"));
+        let water = DualVar::Fluid {
+            name: "water".to_string(),
+            temperature: [15, 15],
+        };
+
+        let (inputs, outputs) = split_mechanic_flow(&[
+            (iron.clone(), -2.0),
+            (gear.clone(), 1.0),
+            (water.clone(), -0.5),
+        ]);
+        assert_eq!(inputs.len(), 2);
+        assert_eq!(outputs.len(), 1);
+        // 消耗是正数（方向由 inputs 数组承载）。
+        assert_eq!(inputs[0], (iron, 2.0));
+        assert_eq!(inputs[1], (water, 0.5));
+        assert_eq!(outputs[0], (gear, 1.0));
+
+        // 只有消耗（例如采矿机吃电）或只有产出（例如太阳能）都不能丢。
+        let (inputs, outputs) = split_mechanic_flow(&[(DualVar::Electricity, -0.09)]);
+        assert_eq!(inputs.len(), 1);
+        assert!(outputs.is_empty());
     }
 
     /// 分页参数：默认 50、下限 1、上限 1000；offset 原样传递。

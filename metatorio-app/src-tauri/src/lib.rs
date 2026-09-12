@@ -1775,42 +1775,59 @@ async fn mechanic_flow(
     mechanic: MechanicId,
 ) -> Result<Vec<(DualVar, f64)>, String> {
     let state = app.state::<AppState>();
-    let snapshot = factory_snapshot(&state, project, factory).await?;
-    tauri::async_runtime::spawn_blocking(move || -> Result<Vec<(DualVar, f64)>, String> {
-        let accessibility = snapshot.resolve_accessibility();
-        let store = &snapshot.store;
-        let factory_doc = &snapshot.factory_doc;
-        let entry = factory_doc
-            .mechanics
-            .iter()
-            .find(|entry| entry.id == mechanic)
-            .ok_or("机制不存在")?;
-        let mut game = metatorio_runtime::solve::make_game_state_with_accessibility(
-            store,
-            &snapshot.project_doc,
-            &accessibility,
-        );
-        // 与求解路径一致：应用当前工厂的星球/地表环境（太阳能系数、昼夜周期）。
-        metatorio_runtime::solve::apply_environment_to_game_state(
-            store,
-            &mut game,
-            factory_doc.settings.planet.as_deref(),
-            factory_doc.settings.surface.as_deref(),
-        );
-        let context = metatorio_core::Context::new(store, &game);
-        let expansion =
-            metatorio_core::expand::expand(std::iter::once((mechanic, &entry.mechanic)), &context);
-        // 合并所有展开变量的流（同 config 的流体插值端求和）。
-        let mut flow: metatorio_core::prim_var::Flow = Default::default();
-        for variable in expansion.variables {
-            for (key, value) in variable.flow {
-                *flow.entry(key).or_insert(0.0) += value;
-            }
+    mechanic_flow_for(&state, project, factory, mechanic).await
+}
+
+/// [`mechanic_flow`] 命令与 MCP `get_planning_state {mechanic}` 的**共用实现**：
+/// 两条路径必须给出同一份数（GUI 机制卡上显示的、和 agent 读到的不能是两套算法）。
+pub(crate) async fn mechanic_flow_for(
+    state: &AppState,
+    project: ProjectId,
+    factory: FactoryId,
+    mechanic: MechanicId,
+) -> Result<Vec<(DualVar, f64)>, String> {
+    let snapshot = factory_snapshot(state, project, factory).await?;
+    tauri::async_runtime::spawn_blocking(move || mechanic_flow_from_snapshot(&snapshot, mechanic))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+/// 展开一个机制的流（纯计算，不碰 runtime 锁；求解路径与它共用同一套上下文/环境设置）。
+pub(crate) fn mechanic_flow_from_snapshot(
+    snapshot: &metatorio_runtime::SolveSnapshot,
+    mechanic: MechanicId,
+) -> Result<Vec<(DualVar, f64)>, String> {
+    let accessibility = snapshot.resolve_accessibility();
+    let store = &snapshot.store;
+    let factory_doc = &snapshot.factory_doc;
+    let entry = factory_doc
+        .mechanics
+        .iter()
+        .find(|entry| entry.id == mechanic)
+        .ok_or("机制不存在")?;
+    let mut game = metatorio_runtime::solve::make_game_state_with_accessibility(
+        store,
+        &snapshot.project_doc,
+        &accessibility,
+    );
+    // 与求解路径一致：应用当前工厂的星球/地表环境（太阳能系数、昼夜周期）。
+    metatorio_runtime::solve::apply_environment_to_game_state(
+        store,
+        &mut game,
+        factory_doc.settings.planet.as_deref(),
+        factory_doc.settings.surface.as_deref(),
+    );
+    let context = metatorio_core::Context::new(store, &game);
+    let expansion =
+        metatorio_core::expand::expand(std::iter::once((mechanic, &entry.mechanic)), &context);
+    // 合并所有展开变量的流（同 config 的流体插值端求和）。
+    let mut flow: metatorio_core::prim_var::Flow = Default::default();
+    for variable in expansion.variables {
+        for (key, value) in variable.flow {
+            *flow.entry(key).or_insert(0.0) += value;
         }
-        Ok(flow.into_iter().filter(|(_, v)| v.abs() > 1e-12).collect())
-    })
-    .await
-    .map_err(|error| error.to_string())?
+    }
+    Ok(flow.into_iter().filter(|(_, v)| v.abs() > 1e-12).collect())
 }
 
 /// 太阳能机制的配平信息（平均出力 / 周期溢出总电量 / 蓄电器配比）。
@@ -3209,7 +3226,7 @@ async fn context_store_arc(
 }
 
 /// 取工厂级求解快照（必要时先锁外载入上下文）。之后的重计算可锁外进行。
-async fn factory_snapshot(
+pub(crate) async fn factory_snapshot(
     state: &AppState,
     project: ProjectId,
     factory: FactoryId,
@@ -3905,9 +3922,93 @@ pub fn run(options: Options) {
 
 #[cfg(test)]
 mod tests {
+    use metatorio_runtime::message::{
+        ApplicationAction, FactoryTemplate, MechanicAction, MechanicListAction,
+        RecipeMechanicAction,
+    };
     use metatorio_runtime::SolveStatus;
 
     use super::*;
+
+    /// 机制流（MCP `get_planning_state {mechanic}` 与 GUI 机制卡读的同一份）的语义：
+    /// **系数 = 1 时每秒**的产/耗。用演示 dump（2 铁板 → 1 铁齿轮）断言两件事：
+    /// 比率必须与配方一致；速率必须带上机器速度（`assembling-machine-1` 速度 0.5、
+    /// 铁齿轮 0.5 s/个 → 1 个/秒）。速率写死数字会把「机器速度没生效」这种错也一起
+    /// 写进期望值里，所以这里断言的是**语义**。
+    #[test]
+    fn mechanic_flow_reports_recipe_rates_at_coefficient_one() {
+        let dump: serde_json::Value = serde_json::from_str(DEMO_DUMP).expect("内置示例 dump");
+        let mut runtime = Runtime::new();
+        runtime.install_context(
+            "demo".to_string(),
+            PrototypeStore::load(&dump).expect("加载内置示例 dump"),
+        );
+        runtime.set_active_context(Some("demo".to_string()));
+        runtime
+            .dispatch(AppMessage::Application(ApplicationAction::NewProject {
+                name: "p".to_string(),
+            }))
+            .unwrap();
+        let project = runtime.state.document.projects[0].id;
+        runtime
+            .dispatch(AppMessage::Project {
+                project,
+                action: ProjectAction::AddFactory {
+                    name: "f".to_string(),
+                    template: FactoryTemplate::Empty,
+                },
+            })
+            .unwrap();
+        let factory = runtime.state.project(project).unwrap().factories[0].id;
+        runtime
+            .dispatch(AppMessage::Factory {
+                project,
+                factory,
+                action: FactoryAction::MechanicList(MechanicListAction::Add {
+                    kind: metatorio_runtime::document::MechanicKind::Recipe,
+                }),
+            })
+            .unwrap();
+        let mechanic = runtime.state.factory(project, factory).unwrap().mechanics[0].id;
+        for action in [
+            MechanicAction::Recipe(RecipeMechanicAction::SetRecipe {
+                recipe: IdWithQuality::new("iron-gear-wheel", "normal"),
+            }),
+            MechanicAction::Recipe(RecipeMechanicAction::SetMachine {
+                machine: IdWithQuality::new("assembling-machine-1", "normal"),
+            }),
+        ] {
+            runtime
+                .dispatch(AppMessage::Factory {
+                    project,
+                    factory,
+                    action: FactoryAction::Mechanic { mechanic, action },
+                })
+                .unwrap();
+        }
+
+        let snapshot = runtime
+            .solve_snapshot_inputs(project, factory)
+            .expect("求解快照");
+        let flow = mechanic_flow_from_snapshot(&snapshot, mechanic).expect("机制流");
+        let amount = |id: &str| {
+            flow.iter()
+                .find(|(flow, _)| *flow == DualVar::Item(IdWithQuality::new(id, "normal")))
+                .map(|(_, amount)| *amount)
+        };
+        let iron = amount("iron-plate").expect("消耗铁板");
+        let gear = amount("iron-gear-wheel").expect("产出铁齿轮");
+        // 约定：正数产出、负数消耗（MCP 层负责拆成 inputs / outputs 的正数）。
+        assert!(iron < 0.0 && gear > 0.0, "{flow:?}");
+        assert!(
+            (iron.abs() / gear - 2.0).abs() < 1e-9,
+            "比率应与配方一致（2 铁板 : 1 铁齿轮）：{flow:?}"
+        );
+        assert!(
+            (gear - 1.0).abs() < 1e-9,
+            "速率应带上机器速度（速度 0.5 × 0.5 s/个）：{flow:?}"
+        );
+    }
 
     /// 上下文删除的引用守卫：只有 `context_id` 精确等于目标 id 的项目才算引用；
     /// `None`（跟随激活上下文）不算引用。GUI 命令与消息层共用它，避免 agent 走
