@@ -1,30 +1,26 @@
-//! Model Context Protocol server, merged into the main binary.
+//! Model Context Protocol 服务端（合并进主二进制）。
 //!
-//! The server is a localhost Streamable-HTTP endpoint (decisions in
-//! `docs/mcp-design.md`): it shares the single managed [`AppState`] (and thus
-//! the one [`Runtime`]) with the GUI, so an external agent and a human user
-//! operate the same projects in one process.  Every planning operation is a
-//! `Runtime::dispatch(AppMessage)` — the MCP surface is therefore a thin,
-//! framework-independent wrapper over the same reducer the UI uses.
+//! 端点是一个本机 Streamable-HTTP 服务（决策见 `docs/mcp-design.md`）：它与 GUI 共享
+//! 同一份 [`AppState`]（也就是同一个 [`Runtime`]），所以外部 agent 与人是**在同一个
+//! 进程里操作同一批项目**。每个规划动作都是 `Runtime::dispatch(AppMessage)`——MCP 这
+//! 一层因此只是同一个 reducer 之上的薄封装，与具体框架无关。
 //!
-//! # MVP
+//! # 工具面的取向
 //!
-//! The minimal viable surface is a single `dispatch` tool that accepts a raw
-//! `AppMessage` JSON value and forwards it to the runtime.  This is a
-//! deliberate **escape hatch**: it covers the entire message set (project /
-//! factory / mechanism / solve) with no per-operation parameter structs, so no
-//! schema work is required up front and it never goes stale.  Once agent
-//! usage is observed, common operations can be re-wrapped as friendlier
-//! dedicated tools on top of the same `dispatch` path.
+//! 底线是 `dispatch`（接受原始 `AppMessage` JSON 并转发给 runtime）：它**故意**做成
+//! 逃生通道，覆盖整个消息集（项目 / 工厂 / 机制 / 求解），不需要为每种操作设计参数
+//! 结构，因此永不失效。在它之上只包**实测高频**的友好工具（`auto_plan` 等）。
+//! 垂直领域的工具描述用中文写——面向玩家的术语（物品名、品质、插件塔）本来就是中文，
+//! 中文描述反而比英文更准，也少一层翻译损耗。
 //!
-//! # Security
+//! # 安全
 //!
-//! - Bound to `127.0.0.1` only.
-//! - The rmcp `StreamableHttpServerConfig` additionally restricts the accepted
-//!   `Host` header to loopback names (DNS-rebinding protection).
-//! - Optional bearer-token auth: if `METATORIO_MCP_TOKEN` is set, every request
-//!   must carry `Authorization: Bearer <token>` (or the raw token); if it is
-//!   unset, no auth is required (loopback-only is the fallback).
+//! - 默认只监听 `127.0.0.1`；绑到非回环地址（局域网/手机接入）时**必须有 token**，
+//!   见 `crate::Options::mcp_bind` 与 bin 的 `validate`。
+//! - rmcp 的 `StreamableHttpServerConfig` 另外限制 `Host` 头（防 DNS rebinding），
+//!   绑具体 IP 时把该 IP 加进白名单。
+//! - 可选 bearer-token：配了 token（`--mcp-token` / `METATORIO_MCP_TOKEN`）时每个请求
+//!   必须带 `Authorization: Bearer <token>`（或裸 token）；回环 + 无 token 是允许的。
 
 use std::net::{IpAddr, SocketAddr};
 
@@ -56,8 +52,7 @@ use metatorio_runtime::message::{
 };
 use metatorio_runtime::{FactoryId, MechanicId, ProjectId};
 
-/// Default loopback port for the MCP endpoint (`--mcp-port` /
-/// `METATORIO_MCP_PORT` 可覆盖）。
+/// MCP 端点的默认回环端口（`--mcp-port` / `METATORIO_MCP_PORT` 可覆盖）。
 pub const DEFAULT_MCP_PORT: u16 = 8765;
 
 /// 默认只监听回环：这个端点能建项目、改目标、跑规划，默认不该被局域网里任何设备碰到。
@@ -65,26 +60,23 @@ pub const DEFAULT_MCP_PORT: u16 = 8765;
 /// token（启动前校验，见 bin 的 `validate`）。
 pub const DEFAULT_MCP_BIND: &str = "127.0.0.1";
 
-/// The MCP service routes are mounted under this path (e.g.
-/// `http://127.0.0.1:8765/mcp`).
+/// MCP 服务挂在这个路径下（例如 `http://127.0.0.1:8765/mcp`）。
 pub const MCP_PATH: &str = "/mcp";
 
-// ── Tool surface ───────────────────────────────────────────────────
+// ── 工具面 ─────────────────────────────────────────────────────────
 
-/// Parameters for the `dispatch` escape-hatch tool: a raw `AppMessage` JSON.
+/// `dispatch`（逃生通道）的参数：一份原始 `AppMessage` JSON。
 #[derive(Debug, serde::Deserialize, JsonSchema)]
 struct DispatchParams {
-    /// A serialized `AppMessage` (adjacently tagged: `scope` selects the
-    /// variant, everything else — including `project` / `factory` — lives
-    /// inside `action`):
+    /// 序列化的 `AppMessage`（**相邻标签**：`scope` 选分支，其余字段——包括
+    /// `project` / `factory`——都在 `action` 里面）：
     ///
     /// - `{ "scope": "application", "action": { "new-project": { "name": "…" } } }`
     /// - `{ "scope": "project", "action": { "project": 1, "action": { "add-factory": { "name": "…", "template": "empty" } } } }`
     /// - `{ "scope": "factory", "action": { "project": 1, "factory": 2, "action": { "flow": { "add-to-target": { "flow": { "Item": { "id": "iron-plate", "quality": "normal" } }, "amount": 60.0 } } } } }`
     ///
-    /// The `action` is the same value the UI sends over IPC; see
-    /// `metatorio-runtime`'s `AppMessage` for the full set.  On any change the
-    /// GUI is refreshed via a `document-changed` broadcast event.
+    /// `action` 与界面走 IPC 时发的是同一个值；完整消息集见 `metatorio-runtime`
+    /// 的 `AppMessage`。文档一有变化，GUI 会通过 `document-changed` 广播自动刷新。
     ///
     /// **单位**：所有流量（目标 amount、外部输入、求解结果 flows）都是
     /// **每秒**；项目的 `time-scale`（seconds/minutes/hours）只影响界面显示，
@@ -101,8 +93,7 @@ struct DispatchParams {
     page: PageParams,
 }
 
-/// Parameters for the `list_prototypes` tool: the domain vocabulary of one
-/// game context, optionally narrowed by kind and/or a name substring.
+/// `list_prototypes` 的参数：某个游戏上下文里的领域词表，可按 kind 与名字子串收窄。
 #[derive(Debug, serde::Deserialize, JsonSchema)]
 struct ListPrototypesParams {
     /// 要查询的游戏上下文 id；省略 = 当前激活的上下文。
@@ -123,7 +114,7 @@ struct ListPrototypesParams {
     page: PageParams,
 }
 
-/// Parameters for the `localized_names` tool: prototype ids and/or localized names.
+/// `localized_names` 的参数：原型 id 与/或本地化名。
 #[derive(Debug, serde::Deserialize, JsonSchema)]
 struct LocalizedNamesParams {
     /// 要解析的名字，可混用原型 id（`iron-gear-wheel`）与本地化名（`铁齿轮`）。
@@ -140,21 +131,8 @@ struct LocalizedNamesParams {
     context_id: Option<String>,
 }
 
-// /// Parameters for the `suggest` tool: candidates that can provide/consume a flow.
-// #[derive(Debug, serde::Deserialize, JsonSchema)]
-// struct SuggestParams {
-//     /// 要查建议的流——与 `dispatch` 里目标/外部输入用的 `DualVar` 同形
-//     /// （如 `{"Item":{"id":"iron-plate","quality":"normal"}}` 或
-//     /// `{"Fluid":{"name":"water","temperature":[15,15]}}` 或 `"Electricity"`）。
-//     flow: DualVar,
-//     /// 游戏上下文 id；省略 = 当前激活的上下文。
-//     #[serde(default)]
-//     context_id: Option<String>,
-// }
-
-/// The MCP server handler.  Stateless: it only carries the [`AppHandle`] it
-/// needs to reach the shared [`AppState`], so rmcp can construct a fresh one
-/// per request.
+/// MCP 服务端 handler。无状态：只持有取 [`AppState`] 需要的 [`AppHandle`]，
+/// 因此 rmcp 可以为每个请求新建一个。
 #[derive(Clone)]
 pub struct MetatorioMcp {
     app: AppHandle,
@@ -162,24 +140,21 @@ pub struct MetatorioMcp {
 
 #[tool_router(server_handler)]
 impl MetatorioMcp {
-    /// Forward one `AppMessage` to the planner runtime (project / factory /
-    /// mechanism / solve), exactly as the GUI's dispatch does, and return the
-    /// resulting revision + solve status.  This is the universal escape hatch
-    /// for every planning operation.
+    /// 把一条 `AppMessage` 原样转发给规划 runtime（项目 / 工厂 / 机制 / 求解），
+    /// 与 GUI 的 dispatch 走同一条路径，返回新的 revision 与求解状态。这是**万能
+    /// 逃生通道**：任何规划动作都能用它完成。
     #[tool(
-        description = "Forward one AppMessage to the Metatorio planner runtime \
-        (project / factory / mechanism / solve) and return the resulting revision. \
-        The response includes `created` (ids of objects this call created, so no \
-        follow-up read is needed), `solve` (structured solve result when the command \
-        solves), and `errors` (non-empty + isError when a command failed). \
-        All flow amounts are per second; the project time-scale only affects display. \
-        Pass `request_id` to make retries idempotent (a repeated id replays the \
-        previous response instead of applying the message again). \
-        `solve` is always bounded: its `mechanics`/`flows` are capped by `limit` \
-        (default 50, max 1000) with `offset` for paging, and `page.totals` / \
-        `page.truncated` report what was cut. \
-        This is the universal escape hatch for every planning operation; wire \
-        convenience tools on top of it as needed."
+        description = "把一条 AppMessage 转发给切向量化（Metatorio）规划 runtime\
+        （项目 / 工厂 / 机制 / 求解），返回新的 revision。这是**万能逃生通道**，任何\
+        规划动作都能用它完成。  \
+        返回里 `created` 是本次调用新建对象的 id（不用再读一次），`solve` 是命令触发\
+        求解时的结构化结果，`errors` 非空时 `isError` 为真（命令跑了但失败了）。  \
+        **所有流量都是「每秒」**；项目的 time-scale 只影响界面显示。  \
+        传 `request_id` 让重试幂等（同一个 id 只应用一次，重复调用回放上次的载荷）。  \
+        `solve` 的输出始终有界：`mechanics`/`flows` 按 `limit`（默认 50、上限 1000）+\
+        `offset` 分页，`page.totals`/`page.truncated` 如实说明被截断的集合。  \
+        这是**逃生通道**：常规规划请优先用 `auto_plan`（权威入口），不要一个个配方\
+        手工拼装——那样既费力又容易漏配严格供给。"
     )]
     async fn dispatch(
         &self,
@@ -194,32 +169,28 @@ impl MetatorioMcp {
         .await
     }
 
-    /// Read the current planning state (the shared document snapshot).  This is
-    /// the reading counterpart to `dispatch`: it lets an agent observe projects /
-    /// factories / targets / mechanics and their assigned ids before mutating.
+    /// 读取当前规划状态（共享文档快照）。它是 `dispatch` 的读取对应物：让 agent 在
+    /// 动手前先看到项目 / 工厂 / 目标 / 机制以及它们分配到的 id。
     #[tool(
-        description = "Read the current planning state from the shared Metatorio \
-        document, **level by level** so a single call can never flood the context: \
-        without `project` you get the project index (ids, names, counts); with \
-        `project` you get its settings/planning plus the factory index; with \
-        `project`+`factory` you get that factory's document.  Every repeated \
-        collection is capped by `limit` (default 50, max 1000) and `offset` pages \
-        through it; the response always carries `page.totals` (pre-truncation counts) \
-        and `page.truncated` (which collections were cut), so nothing is silently \
-        dropped.  Set `recompute` (only with project + factory) to also run a solve \
-        and include its result (its mechanics/flows are paged the same way).  \
-        With `project`+`factory` the response also carries `auto_plan` when that \
-        factory has an asynchronous auto-plan (started by the `auto_plan` tool): \
-        `{status: running|done|failed, revision?, result?, error?}` — poll this to \
-        collect the result.  \
-        Add `mechanic` (an id from that factory's `mechanics`, so it also needs \
-        project + factory) to go one level deeper and get **one mechanic's flow \
-        conversion**: its full `config` (type/machine/recipe/modules/beacons/fuel) plus \
-        `inputs`/`outputs` — the per-second amounts that mechanic consumes and produces \
-        at coefficient 1, already including machine speed, module and beacon effects \
-        (the same expansion the solver uses).  Use it instead of inferring what a \
-        mechanic does from its name.  \
-        All flow amounts are per second (time-scale only affects display)."
+        description = "读取当前规划状态（共享文档快照）。**逐层读取**，任何一次调用都\
+        不会把上下文撑爆：  \
+        不给 `project` → 项目索引（id / 名称 / 规模计数）；  \
+        给 `project` → 该项目的设置与规划偏好 + 工厂索引；  \
+        给 `project`+`factory` → 该工厂的文档（机制 / 目标 / 目标表达式 / 外部输入）；  \
+        再加 `mechanic`（该工厂 `mechanics` 列表里的 id）→ **聚焦到这一个机制**：\
+        `config` 是它的零件（类型 / 机器 / 配方 / 插件 / 插件塔 / 燃料），`inputs`/\
+        `outputs` 是它在**系数 = 1 时每秒**的消耗与产出（已含机器速度、插件与插件塔\
+        效果，与求解同一份展开）。需要知道某个机制到底在消耗/产出什么时用它，\
+        **不要从机制名去猜**。  \
+        每个重复集合都按 `limit`（默认 50、上限 1000）+ `offset` 分页，返回始终带\
+        `page.totals`（截断前总数）与 `page.truncated`（哪些集合被截断），绝不静默\
+        丢数据。  \
+        `recompute`（需 project + factory）额外同步跑一次求解并附上结果（它的\
+        mechanics/flows 同样分页）。  \
+        给 `project`+`factory` 时若该工厂有异步自动规划（`auto_plan` 工具发起），\
+        返回里还会带 `auto_plan`：`{status: running|done|failed, revision?, result?,\
+        error?}` —— 轮询它来收取结果。  \
+        所有流量都是「每秒」（time-scale 只影响显示）。"
     )]
     async fn get_planning_state(
         &self,
@@ -434,28 +405,26 @@ impl MetatorioMcp {
     /// 群里的实测反馈：每次手拼 `dispatch` 序列既费人又费 AI（而且容易漏配严格
     /// 供给）。这个入口把那条序列固定下来，并把「跑得久」的规划甩到后台。
     #[tool(
-        description = "ONE-SHOT planning entry point: create a project + factory, configure \
-        targets / planet / major quality / modules / beacons / external inputs, then kick \
-        off auto-planning **asynchronously and return immediately**.  \
-        Required: `targets` = [{ item, quality?, amount }] — `item` accepts a raw id \
-        (`iron-plate`) or a localized name (`铁板`); separators are ignored; a typo or a \
-        non-item name is rejected with candidates (use `localized_names` if unsure).  \
-        **Every hand-written name is validated against the active context before \
-        anything is created** (`item`, `modules.exclude`, `beacons[].beacon`, \
-        `beacons[].modules[].module`, `external_inputs[].flow`): one wrong name fails \
-        the whole call with candidates and creates nothing — a name that silently does \
-        nothing (or writes garbage into the document) is worse than an error.  \
-        Optional: `planet`, `major_quality`, `modules` = {best, quality, exclude[]}, \
-        `beacons` = [{beacon:{id,quality}, count?, share?, modules:[{module,count?}]}], \
-        `external_inputs` = [{flow, penalty?}] (this is how you supply raw materials — \
-        auto-planning is ALWAYS strict-source and there is no toggle), `project_name`, \
-        `factory_name`, `context_id`, `request_id` (idempotent retry).  \
-        The response returns the created `project`/`factory` ids plus \
-        `{\"auto_plan\": {\"status\": \"running\"}}` and a `poll` hint; call \
-        `get_planning_state` with that project + factory to read \
-        `auto_plan.status` (`running`/`done`/`failed`), and the solve result once done.  \
-        All flow amounts are per second.  Prefer this over hand-writing the dispatch \
-        sequence unless you need something it does not expose."
+        description = "**权威一站式入口**：一条调用建好项目 + 工厂，配好目标 / 星球 / \
+        主品质 / 插件 / 插件塔 / 外部输入，然后**异步**开跑自动规划并**立刻返回**。  \
+        规划工厂请用这个入口，**不要**一个个配方手工往里加——规划器的强项是从目标\
+        反推整条链，手工拼装既费力又容易漏配严格供给。  \
+        必填 `targets` = [{ item, quality?, amount }]：`item` 可给原型 id（`iron-plate`）\
+        或本地化名（`铁板`），分隔符不敏感；拼错或给出了非物品名会被拒绝并附候选\
+        （拿不准先用 `localized_names` 查）。  \
+        **所有手写名字都在建任何东西之前按当前上下文校验**（`item`、`modules.exclude`、\
+        `beacons[].beacon`、`beacons[].modules[].module`、`external_inputs[].flow`）：\
+        错一个就整个调用失败并给候选，**一个对象都不建**——一个「悄悄什么也没做」\
+        （或把垃圾写进文档）的名字比报错危险得多。  \
+        可选：`planet`、`major_quality`、`modules` = {best, quality, exclude[]}、\
+        `beacons` = [{beacon:{id,quality}, count?, share?, modules:[{module,count?}]}]、\
+        `external_inputs` = [{flow, penalty?}]（**缺原料就在这里声明外部输入**——\
+        自动规划**永远**严格供给，没有开关）、`project_name`、`factory_name`、\
+        `context_id`、`request_id`（幂等重试）。  \
+        返回新建的 `project`/`factory` id、`{\"auto_plan\": {\"status\": \"running\"}}`\
+        与 `poll` 提示；稍后用 `get_planning_state` 带该 project + factory 读\
+        `auto_plan.status`（`running`/`done`/`failed`），done 时结果也在里面。  \
+        所有流量都是「每秒」。"
     )]
     async fn auto_plan(
         &self,
@@ -681,12 +650,11 @@ impl MetatorioMcp {
     /// agent 需要它才能理解 `project.context_id` 的含义，并在多个上下文之间
     /// 切换（`dispatch` + `{"scope":"application","action":{"set-active-context":…}}`）。
     #[tool(
-        description = "List the registered game-data contexts (id, display name, source, \
-        whether its prototype store is currently loaded, and which one is active). \
-        A project's `context_id` points at one of these ids; switch with dispatch \
-        {scope: application, action: {set-active-context: {context: id}}}. \
-        Contexts are content-hashed caches of exported game data — an agent cannot \
-        create one, only list / activate / rename / delete existing ones."
+        description = "列出已注册的游戏数据上下文（id、显示名、来源、原型库是否已载入、\
+        当前激活的是哪个）。项目的 `context_id` 指向其中之一；切换用 dispatch \
+        {scope: application, action: {set-active-context: {context: id}}}。  \
+        上下文是「导出的游戏数据」按内容哈希得到的缓存——agent 不能创建，只能列举 / \
+        激活 / 重命名 / 删除已有的。"
     )]
     async fn list_contexts(&self) -> Result<CallToolResult, McpError> {
         let app = self.app.clone();
@@ -709,19 +677,16 @@ impl MetatorioMcp {
     /// 消除 agent 的「盲猜字符串」：dispatch 里的 recipe/machine/item/fluid 名字
     /// 必须真实存在（校验会拒绝不存在的名字），这里给出合法取值。
     #[tool(
-        description = "List the prototypes of a game context (the domain vocabulary): \
-        items / fluids / recipes / technologies / machines / resources / qualities … \
-        with name, localized_name, group/subgroup, categories, fuel info and module \
-        slots.  Omit `context_id` to use the active context.  Narrow with `kind` \
-        (exact) and/or `name_contains` (case-insensitive substring on name or \
-        localized_name; separators `-`/`_`/space are ignored).  \
-        **The result is always bounded**: `entries` is capped by `limit` (default 50, \
-        max 1000) and `offset` pages through the matches; `total` is every entry in the \
-        context, `matched` is how many matched before paging, and `page.truncated` tells \
-        you whether the list was cut (a `entries_hint` string appears when it was). \
-        For 'id → localized name' or 'a name someone said in chat → id' prefer \
-        `localized_names`: it is ranked (exact hit first) and answers several names at \
-        once."
+        description = "列出某个游戏上下文里的原型（领域词表）：物品 / 流体 / 配方 / \
+        科技 / 机器 / 资源 / 品质…… 每条含 name、localized_name、group/subgroup、\
+        categories、燃料信息与插件槽。省略 `context_id` = 当前激活上下文。  \
+        用 `kind`（精确）与/或 `name_contains`（名字或本地化名的大小写不敏感子串，\
+        忽略 `-`/`_`/空格）收窄。  \
+        **返回始终有界**：`entries` 按 `limit`（默认 50、上限 1000）+ `offset` 翻页；\
+        `total` 是该上下文的全部条数，`matched` 是分页前的命中数，`page.truncated` \
+        说明是否被截断（被截断时另有 `entries_hint` 说明怎么收窄）。  \
+        要「id → 本地化名」或「群里说的名字 → id」请优先用 `localized_names`：它带\
+        排序（精确命中优先）且一次能解析多个名字。"
     )]
     async fn list_prototypes(
         &self,
@@ -765,33 +730,25 @@ impl MetatorioMcp {
     }
 
     /// 名字 ↔ 本地化名互查：把求解结果里的 id 换成人话，或把群友口述的名字换成 id。
-    #[tool(
-        description = "Resolve prototype names to their localized (translated) names and \
-        back.  Pass `queries` with either a raw prototype id (e.g. `iron-gear-wheel`) or a \
-        localized name as a player would say it (e.g. `铁齿轮`); each query is matched \
-        exactly first (raw id, then localized name), then by prefix/substring, and every \
-        hit reports `matched_by` so you can tell an exact hit from a loose one.  \
-        Separators are ignored while matching: `processing unit`, `processing_unit` and \
-        `PROCESSING-UNIT` all hit `processing-unit` (returned `name` keeps the real id).  \
-        Use this to (a) report solve results in the player's language instead of raw ids \
-        and (b) turn an item name someone mentioned in chat back into the id that \
-        `dispatch` needs.  \
-        When nothing matches exactly or partially, the `typo` bucket holds \
-        typo-tolerant candidates (queries of 3+ characters, or 2 characters when the \
-        query is non-ASCII — a two-character Chinese name is a whole word), each with an edit \
-        `distance` (adjacent transpositions count as 1).  `typo_suggestion` is the \
-        high-confidence pick and is non-null **only when a single name is uniquely \
-        closest** (the same name in several prototype groups is not ambiguous — pick \
-        the `kind` you need from `typo`); when it is null, several names are equally \
-        close (`processing-unit-2` vs `-3`) or none is close enough — ask the human \
-        instead of guessing, because a wrong prototype id validates fine and silently \
-        produces the wrong plan.  \
-        `localized_name` is empty when the context has no locale dump (then fall back to \
-        `list_prototypes`).  `exact` may contain several entries for one query: the same \
-        name can exist as item / recipe / technology / entity, and `kind` narrows it.  \
-        Each query's buckets are capped by `limit_per_query` (default 8, max 50) and at \
-        most 50 queries are accepted per call, so the response stays bounded."
-    )]
+    #[tool(description = "原型名 ↔ 本地化名互查。`queries` 里可以给原始原型 id\
+        （如 `iron-gear-wheel`），也可以给玩家口中的本地化名（如 `铁齿轮`）；每个查询\
+        先精确匹配（先 id、再本地化名），然后按前缀/子串模糊匹配，每条命中都带\
+        `matched_by`，以便区分「精确命中」与「差不多」。  \
+        匹配时**忽略分隔符**：`processing unit`、`processing_unit`、`PROCESSING-UNIT` \
+        都能命中 `processing-unit`（返回的 `name` 始终是真实 id）。  \
+        用途：把求解结果按玩家的语言汇报（而不是甩 raw id）；把群里提到的物品名换成\
+        `dispatch` 需要的 id。  \
+        精确与模糊都为空时，`typo` 桶给**错拼候选**（查询 3 个字符以上，或非 ASCII\
+        查询 2 个字符——两个字的中文名就是一个完整的词），每条带编辑 `distance`\
+        （相邻换位算 1 步）。`typo_suggestion` 是**高置信度建议**，只在「最佳距离上\
+        名字唯一」时非空（同名跨多个原型组不算歧义——从 `typo` 里挑你要的 `kind`）；\
+        它是 null 说明有几个名字同样接近（`processing-unit-2` 与 `-3`）或都不够近——\
+        **去问人，不要猜**：一个错的 id 能顺利通过校验，然后悄悄算出一份错的计划。  \
+        上下文没有语言 dump 时 `localized_name` 为空（那就退回 `list_prototypes`）。\
+        一次查询的 `exact` 可能有多条：同一个名字可能同时是物品 / 配方 / 科技 / 实体，\
+        用 `kind` 收窄。  \
+        每个查询的各桶按 `limit_per_query`（默认 8、最多 50）截断，且每次调用最多接受\
+        50 个查询，因此返回始终有界。")]
     async fn localized_names(
         &self,
         Parameters(params): Parameters<LocalizedNamesParams>,
@@ -857,35 +814,6 @@ impl MetatorioMcp {
             "results": results,
         })))
     }
-
-    // /// 建议：给定一条流，列出能产出/消耗它的候选机制。
-    // #[tool(
-    //     description = "Suggest mechanics that could provide or consume one flow in the \
-    //     active game context (recipes, resource patches, fuels, generators), each as \
-    //     {kind, name, role} where role='producer' produces the flow and \
-    //     role='consumer' consumes it.  This is the cheap first step before adding a \
-    //     mechanic: pick a candidate, then dispatch a mechanic-list add + the matching \
-    //     set-recipe / set-resource / set-item / set-generator message."
-    // )]
-    // async fn suggest(
-    //     &self,
-    //     Parameters(params): Parameters<SuggestParams>,
-    // ) -> Result<CallToolResult, McpError> {
-    //     let flow = params.flow.clone();
-    //     let state = self.app.state::<AppState>();
-    //     let context_id = crate::resolve_context_id(&state, params.context_id.as_deref())
-    //         .map_err(|error| McpError::invalid_params(error, None))?;
-    //     let suggestions = crate::suggest_for(&state, &context_id, flow.clone())
-    //         .await
-    //         .map_err(|error| {
-    //             McpError::invalid_params(format!("suggest 执行失败: {error}"), None)
-    //         })?;
-    //     Ok(CallToolResult::structured(serde_json::json!({
-    //         "context_id": context_id,
-    //         "flow": flow,
-    //         "suggestions": suggestions,
-    //     })))
-    // }
 }
 
 /// `dispatch` 工具的实际逻辑：与具体 Tauri runtime 解耦，便于用 mock app 测试。
@@ -957,7 +885,7 @@ async fn dispatch_message<R: Runtime>(
         }
         solve
     });
-    // Co-op: if the document changed, tell the GUI to re-fetch.
+    // 协同：文档变了就通知 GUI 重新拉取。
     // 命令执行本身也可能改文档（如自动规划回写机制），因此用当前 revision
     // 判定，而不只看 reducer 的 `changed`。
     let revision = {
@@ -1544,21 +1472,20 @@ fn planning_state_value(snapshot: &DocSnapshot, page: Page) -> (serde_json::Valu
     (value, report)
 }
 
-/// Parameters for `get_planning_state` (all optional; omit for the whole document).
+/// `get_planning_state` 的参数（都可选；全不给 = 整个文档的项目索引）。
 #[derive(Debug, serde::Deserialize, JsonSchema)]
 struct PlanningStateParams {
-    /// Project id (u64). Omit to return the project index.
+    /// 项目 id；省略 = 返回项目索引。
     #[serde(default)]
     project: Option<u64>,
-    /// Factory id (u64). Requires `project`; returns that factory's document.
+    /// 工厂 id；需要 `project`，返回该工厂的文档。
     #[serde(default)]
     factory: Option<u64>,
-    /// Mechanic id (from that factory's `mechanics`). Requires `project` + `factory`;
-    /// returns just this mechanic's config plus its per-second inputs/outputs at
-    /// coefficient 1.
+    /// 机制 id（取自该工厂的 `mechanics`）；需要 `project` + `factory`，
+    /// 只返回这一个机制的配置 + 它在系数 = 1 时每秒的消耗/产出。
     #[serde(default)]
     mechanic: Option<u64>,
-    /// When set with `project` + `factory`, run a solve and include its result.
+    /// 与 `project` + `factory` 同时给出时，同步跑一次求解并附上结果。
     #[serde(default)]
     recompute: bool,
     /// 每个集合的返回上限与偏移（默认 50、上限 1000）。
@@ -1796,8 +1723,7 @@ fn guess_lan_ip() -> Option<IpAddr> {
     socket.local_addr().ok().map(|addr| addr.ip())
 }
 
-/// Start the MCP server on a dedicated tokio runtime thread.  Fire-and-forget: the
-/// thread ends when the app exits.
+/// 在独立的 tokio runtime 线程上启动 MCP 服务（发后不理：进程退出时线程随之结束）。
 ///
 /// 监听地址 / 端口 / token / Host 白名单都由启动选项（CLI 或环境变量）解析后传入——
 /// 这里不再自己读环境变量，避免出现「CLI 指定了但服务仍按 env 起」的双份真相。
@@ -1811,7 +1737,7 @@ pub fn spawn_server(app: AppHandle, config: ServerConfig) {
     });
 }
 
-/// Build the axum router + listener and serve MCP until the process exits.
+/// 组装 axum router + listener，一直服务到进程退出。
 async fn serve(app: AppHandle, config: ServerConfig) {
     let token = config.token.filter(|token| !token.is_empty());
     let (bind, allowed_hosts) = match resolve_bind(&config.bind, &config.allow_hosts) {
@@ -1890,9 +1816,8 @@ async fn serve(app: AppHandle, config: ServerConfig) {
     }
 }
 
-/// Bearer-token gate.  When `token` is `None` (env var unset) this is a no-op;
-/// otherwise the request must present `Authorization: Bearer <token>` (or the
-/// raw token) to pass.
+/// Bearer token 闸门：`token` 为 `None`（没配置）时直接放行；否则请求必须带
+/// `Authorization: Bearer <token>`（或裸 token）。
 async fn require_token(
     State(token): State<Option<String>>,
     request: Request,

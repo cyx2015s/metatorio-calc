@@ -87,7 +87,8 @@ Phase 2 工具面**不在一开始就做成离散的友好工具**，而是：
 | `list_contexts` | — | 游戏数据上下文索引（id/名称/来源/是否已载入/哪个是激活的）。上下文是内容哈希缓存，agent 只能列举与切换，不能创建 |
 | `list_prototypes` | `{ kind?, name_contains?, context_id?, limit?, offset? }` | 领域词表：该上下文里的物品/流体/配方/科技/机器/资源…（name、localized_name、group/subgroup、categories、燃料信息、插件槽）。`entries` 按 `limit`（默认 50、上限 1000）/`offset` 分页，带 `total`/`matched`/`returned`/`page` |
 | `localized_names` | `{ queries[], kind?, limit_per_query?, context_id? }` | **名字 ↔ 本地化名互查**：`queries` 可混用原型 id（`iron-gear-wheel`）与玩家口述的本地化名（`铁齿轮`）。匹配时**忽略 `-` / `_` / 空白**（`processing unit`＝`processing_unit`＝`PROCESSING-UNIT`＝`processing-unit`），先精确命中（id、本地化名各一轮），再按「本地化名前缀 → id 前缀 → 本地化名子串 → id 子串」给模糊命中，逐条带 `matched_by`；精确与模糊都为空时再给**错拼候选**（编辑距离，相邻换位算 1 步；**按字符**算长度并对中文放宽到 2 个字符——`铁版` → `铁板` 是群里最典型的一幕），其中 `typo_suggestion` 只在「最佳距离上**名字唯一**」时非空（同名跨 item/recipe 不算歧义，kind 由调用方按上下文选）——几个名字同样接近（`processing-unit-2` 与 `-3`）时返回 null，让人确认；中文两字名常有十几个等距候选，此时 `typo` 按 `limit_per_query` 截断、`typo_matched` 给真实条数，建议交给人工/上层判断 |
-| `suggest` | `{ flow, context_id? }` | 给定一条流，列出能产出/消耗它的候选机制（recipe/resource/item-fuel/generator，含 role）——「加机制」前的第一步 |
+
+工具面原则：**权威入口是 `auto_plan`**（从目标反推整条链）；`dispatch` 是覆盖全部消息的逃生通道；其余工具只服务「读」与「名字解析」。曾经的 `suggest`（列出某条流的候选机制）**已删除**——它会把 agent 引向「一个个配方手工拼装」的错误心智（正确做法是给目标让规划器枚举），而且与 `auto_plan` 的能力重叠。工具描述与参数说明**一律用中文**：垂直领域的术语（物品名、品质、插件塔）本来就是中文，中文描述比英文更准、也少一层翻译损耗（群内反馈）。
 
 后续按 agent 真实使用反馈，再把常见需求从 `dispatch` 拆出更友好的专用工具（仍在同一 `dispatch` 路径之上）。
 
@@ -116,7 +117,7 @@ Phase 2 工具面**不在一开始就做成离散的友好工具**，而是：
 
 - **读取工具**：`dispatch` 目前**纯写入、无自省**——agent 看不到当前文档、拿不到 id。~~方案：加一个 `get_planning_state` 读取工具~~ **已实现**：`get_planning_state(project?, factory?, recompute?)` 读 `runtime.state.document` 快照，一并解决 P0-1（只写不读）+ P1-5（id）+ P1-3（solve 结构化读取）。
 - **长求异步化**：`recompute`/`auto_plan` 同步占住 `Mutex<Runtime>`，期间 GUI 排队。方案：投递后台任务 + 经 `document-changed`/solving 事件回报（原决策 47）。~~**待补**~~ **已完成**（2026-xx）：`dispatch` 改为「reducer 短临界区 → 逐条命令各自按需短锁」，求解/自动规划在锁外跑（`solve_jobs` 按 `(project, factory)` 单飞 + latest-wins + revision 戳）；自动规划/清理的回写走 reducer 并校验版本，MCP 端按 revision 变化补发 `document-changed`。详见 `docs/runtime-concurrency.md`。
-- **领域词表**：~~`list_contexts`~~ / ~~`list_prototypes`~~ **已实现**（`list_contexts`、`list_prototypes`，后者支持 `kind` 与 `name_contains` 过滤，GUI 的 `catalog_index` 命令与它共用同一实现）；候选机制建议 **已实现**（`suggest`，与 GUI 的 `suggest` 命令共用 `suggest_for_flow`）；**名字解析已实现**（`localized_names`：id → 本地化名用于向群内汇报，口述名 → id 用于落成消息；匹配/排序口径抽成纯函数 `resolve_index_entry`，与 `list_prototypes` 共用同一份目录索引）。仍未工具化的是 `allowed_modules` / `implicit_sources` / `accessibility` / `productivity` / `solar_balance`（GUI 有命令，agent 暂时只能通过 `get_planning_state` 的求解结果间接观察）。
+- **领域词表**：~~`list_contexts`~~ / ~~`list_prototypes`~~ **已实现**（`list_contexts`、`list_prototypes`，后者支持 `kind` 与 `name_contains` 过滤，GUI 的 `catalog_index` 命令与它共用同一实现）；~~候选机制建议（`suggest`）~~ **已删除**（见上文工具面原则：把 agent 引向手工拼配方，且与 `auto_plan` 重叠；GUI 侧的同名命令仍保留给「建议」面板）；**名字解析已实现**（`localized_names`：id → 本地化名用于向群内汇报，口述名 → id 用于落成消息；匹配/排序口径抽成纯函数 `resolve_index_entry`，与 `list_prototypes` 共用同一份目录索引）。仍未工具化的是 `allowed_modules` / `implicit_sources` / `accessibility` / `productivity` / `solar_balance`（GUI 有命令，agent 暂时只能通过 `get_planning_state` 的求解结果间接观察）。
 - **机制级读取（`mechanic_flow`，2026-xx）**：机制在文档里只有 machine/recipe/modules 这些**零件**，agent 光看机制名（甚至看零件）也推不出「一个系数到底在消耗什么、产出什么」——机器速度、插件、插件塔都参与之后更是如此。因此把 GUI 的机制卡数据（`mechanic_flow` 命令：系数 = 1 时的每秒产/耗）按**下一层**接进 `get_planning_state {project, factory, mechanic}`：`config` 给零件、`inputs`/`outputs` 给正数化的消耗与产出（方向由数组名承载，不再让 LLM 去读 `-2.0` 的符号）。计算路径与 GUI **同一份实现**（`crate::mechanic_flow_for`），避免「界面上显示的」和「agent 读到的」是两套算法。实测（vanilla-2.1）：钢炉炼铁板 → 0.625 铁矿石/秒 + 化学燃料 → 0.625 铁板/秒；蒸汽轮机 500°C → 60 蒸汽/秒 → 5.82 MW；3 邻核反应堆 → 40 MW 燃料 → 160 MW 热；同一条铀燃料电池配方带 4×产能插件 3 时，输入降到 0.5/0.05/0.95、电耗升到 1.5875 MW——**插件效果如实反映在数字里**。
 - **上下文可写**：上下文的切换/重命名/删除已从「只有 Tauri 命令」收敛为 `AppMessage`（`ApplicationAction::SetActiveContext` / `RenameContext` / `DeleteContext`），因此 agent 用 `dispatch` 即可操作；app 层 `activate_context` / `rename_registered_context` / `delete_registered_context` 是 GUI 与 agent 共用的单一实现。
 - **工程文件可读写**：`open-project { path }` / `save-project { project }` / `save-project-as { project, path }` 现在是 GUI 的真实路径（Tauri 侧只保留文件对话框 `pick_project_file` / `pick_project_save_path` 与只读的 `project_save_path`），因此 agent 也能按路径打开/另存工程。显式保存走专用命令 `RuntimeCommand::SaveProject`：没有记忆路径时**报错**（提示先用 save-project-as），而自动落盘的 `Persist{path:None}` 对未保存过的新项目仍静默跳过——两者语义不同，不可混用。
@@ -138,7 +139,7 @@ Phase 2 工具面**不在一开始就做成离散的友好工具**，而是：
 - [x] 真实跑一次应用，用 DSH 客户端连 `http://127.0.0.1:8765/mcp`，验证 `dispatch` 工具可驱动规划、GUI 实时刷新。
 - [x] 收集 agent 使用 AppMessage 的感受 → 修正：`JsonSchema` 派生（inputSchema 真实化）+ `solve`/`scheduled_commands` 结构化 + 修正文档示例。
 - [x] **补读取工具**（`get_planning_state`）——P0-1/P1-5 的核心，MVP 目前最大的盲区。
-- [x] 采集使用反馈 → 抽离友好工具（原决策 6）：`get_planning_state` / `list_contexts` / `list_prototypes` / `localized_names` / `suggest` / `auto_plan` 已落地；`list_projects` / `list_factories` 被 `get_planning_state` 逐层读取覆盖后**已删除**；`add_target` / `set_target_amount` / `add_mechanic` / `set_recipe` / `set_machine` / `load_context` 明确**不拆**（`dispatch` 即真实协议）。
+- [x] 采集使用反馈 → 抽离友好工具（原决策 6）：`get_planning_state` / `list_contexts` / `list_prototypes` / `localized_names` / `auto_plan` 已落地；`list_projects` / `list_factories` 被 `get_planning_state` 逐层读取覆盖后**已删除**；`suggest` 后来也**已删除**（易把 agent 引向手工加配方，且与 `auto_plan` 重叠）；`add_target` / `set_target_amount` / `add_mechanic` / `set_recipe` / `set_machine` / `load_context` 明确**不拆**（`dispatch` 即真实协议）。当前工具面 6 个。
 - [x] 长时求解（`recompute`/`auto_plan`）走**异步**（类似 GUI 的 solving 事件），避免 MCP 调用期间占住 `Mutex<Runtime>` 导致 GUI 排队——原决策 47 的风险。见 `docs/runtime-concurrency.md`；`auto_plan` 另加「立刻返回 + `get_planning_state` 轮询状态」。
 - [ ] 并发冲突语义（乐观锁/变更冲突提示）——原决策 45。
 - [ ] 端口被占用 / 多实例 / token 传递细节——原决策 48。
@@ -164,6 +165,6 @@ RikkaHub（Android）原生支持 MCP，传输类型选 **Streamable HTTP**（�
    - **url**：`http://192.168.0.101:8765/mcp`（端口按 `--mcp-port`）
    - **headers**（自定义请求头，名称/值一对）：
      - 名称 `Authorization`，值 `Bearer <同一个 token>`（`Bearer` 后有**一个空格**）
-3. 保存后应显示「已连接」并同步出 7 个工具；再到**助手的 MCP 服务器**里勾选这个服务器，工具才会进入对话。
+3. 保存后应显示「已连接」并同步出 6 个工具；再到**助手的 MCP 服务器**里勾选这个服务器，工具才会进入对话。
 4. 建议把会改文档的工具（`dispatch` / `auto_plan`）在 RikkaHub 里打开 **needsApproval**，让手机上每次真正动规划前都确认一次。
 5. 排错顺序：手机浏览器先打开 `http://<IP>:<port>/mcp`（会看到 405/400 之类，说明网络通）→ 401 说明头没带对 → 403 说明 `Host` 不在白名单（换成 IP，或加 `--mcp-allow-host`）→ 连不上就是防火墙/不同网段（访客 Wi-Fi 常与主机隔离）。

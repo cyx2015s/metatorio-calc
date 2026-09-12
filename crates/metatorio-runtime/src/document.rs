@@ -8,8 +8,7 @@ use crate::id::{
 
 pub const DOCUMENT_SCHEMA_VERSION: u32 = 1;
 
-/// Serializable application document.  Selection, dialogs, solver results,
-/// and file paths are intentionally kept outside this structure.
+/// 可序列化的应用文档。选中项、对话框、求解结果与文件路径**故意**不放进这个结构里。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppDocument {
@@ -266,8 +265,8 @@ impl Default for ExternalInput {
     }
 }
 
-/// One ordered user-facing mechanism.  The core enum is still a single
-/// mechanism; ordering and stable identity belong to the application layer.
+/// 一条有序的、面向用户的机制。core 里的枚举仍然只是「一个机制」；顺序与稳定身份
+/// 属于应用层。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct MechanicEntry {
@@ -296,9 +295,8 @@ impl Default for MechanicEntry {
     }
 }
 
-/// Project-global options used by automatic planning.  They are not part of
-/// core mechanics and not bound to any single mechanic — they describe how
-/// the application enumerates alternatives for every mechanic in the project.
+/// 自动规划使用的项目级选项。它们不属于 core 机制、也不绑定任何单个机制——只描述
+/// 应用如何为项目里的每个机制枚举备选方案。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PlanningPreferences {

@@ -10,8 +10,7 @@ use crate::id::{
     ExternalInputId, FactoryId, MechanicId, ProjectId, TargetExpressionId, TargetId, TargetTermId,
 };
 
-/// Framework-independent user intent.  Rendering code should emit these
-/// values instead of mutating the project document directly.
+/// 与框架无关的「用户意图」。渲染层应当发出这些消息，而不是直接改项目文档。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "scope", content = "action", rename_all = "kebab-case")]
 pub enum AppMessage {
@@ -29,7 +28,7 @@ pub enum AppMessage {
 
 pub type RuntimeMessage = AppMessage;
 
-/// File, data-context, update, and process-level operations.
+/// 文件、游戏数据上下文、更新与进程级操作。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum ApplicationAction {
@@ -103,7 +102,7 @@ pub enum DeleteDecision {
     Confirm,
 }
 
-/// Persistent project-level changes formerly handled by ProjectContext.
+/// 项目级的持久改动（原先由 ProjectContext 承担）。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum ProjectAction {
@@ -184,7 +183,7 @@ pub enum FactoryTemplate {
     DefaultMechanics,
 }
 
-/// Changes to one factory document.
+/// 对某个工厂文档的改动。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum FactoryAction {
@@ -330,12 +329,11 @@ pub enum MechanicListAction {
     },
 }
 
-/// Operations on one mechanic, tagged by mechanic kind.
+/// 对某一个机制的操作，按机制种类分支。
 ///
-/// Each variant carries exactly the operations that kind supports (matching
-/// the field set of the corresponding core `Mechanic` struct), so a recipe
-/// mechanic cannot receive a mining operation and vice versa — the reducer
-/// rejects a kind mismatch without touching the document.
+/// 每个变体只带该种类支持的操作（与 core 里对应的 `Mechanic` 结构字段集一致）：
+/// 配方机制不可能收到采矿操作，反之亦然——种类不匹配时 reducer 直接报错，
+/// 不动文档。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum MechanicAction {
@@ -446,8 +444,7 @@ pub enum FluidHeatMechanicAction {
     SetTemperature { temperature: Option<i32> },
 }
 
-/// Operations emitted by the old ModuleConfigEditor, expressed in terms of
-/// slots and stable list positions rather than mouse buttons.
+/// 插件配置操作：用「槽位 + 稳定列表下标」表达，而不是旧 ModuleConfigEditor 的鼠标按钮。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum ModuleAction {
@@ -500,9 +497,7 @@ pub enum ModuleAction {
     },
 }
 
-/// Project-global automatic-planning preferences.  These describe how the
-/// planner enumerates alternatives and are intentionally NOT bound to any
-/// single mechanic.
+/// 项目级的自动规划偏好：描述规划器如何枚举备选方案，**故意**不绑定任何单个机制。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum PlanningAction {
@@ -603,8 +598,8 @@ pub enum SolveAction {
     AutoPlan,
 }
 
-/// Effects requested by a reducer after applying an AppMessage.  Keeping
-/// these explicit makes the future Tauri adapter thin and testable.
+/// reducer 应用完一条 AppMessage 后请求执行的副作用。把它们显式列出来，
+/// Tauri 适配层才能保持又薄又可测。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum RuntimeCommand {
