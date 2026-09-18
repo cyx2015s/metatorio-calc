@@ -8,7 +8,8 @@
 //! - [`sources`]：把 `__base__/…`、`__core__/…`、`__mod__/…` 解析到真实文件（目录或
 //!   mod 的 zip）；
 //! - [`image`]：RGBA8 缓冲、PNG 解码/编码、直通↔预乘转换、重采样与合成；
-//! - [`render`]：按官方 `IconData` 规则把一层或多层叠成一张图标；
+//! - [`render`]：按官方 `IconData` 规则把一层或多层叠成一张图标；没有图标定义时按官方
+//!   文档写明的规则推导（配方 → `main_product`/唯一产物）；
 //! - [`compare`]：和游戏自己导出的图标逐像素比对（验证用，也是本 crate 的验收手段）。
 //!
 //! **alpha 约定**：crate 内部一律用**直通 alpha**（straight，和游戏源 PNG 一致）；
@@ -22,7 +23,21 @@ pub mod sources;
 
 pub use image::Rgba8;
 pub use render::{
-    IconRenderError, RenderOptions, RenderReport, ScaleLaw, render_all_icons, render_icon,
-    render_prototype_icon, render_prototype_icon_with,
+    IconRenderError, RenderOptions, RenderReport, ScaleLaw, derived_product, has_icon_definition,
+    render_all_icons, render_icon, render_prototype_icon, render_prototype_icon_with,
+    render_record_icon, render_record_icon_with,
 };
 pub use sources::{Archive, IconSources};
+
+/// 测试辅助：从一份最小 dump 建原型仓库（加载失败要带出失败明细，不能静默）。
+#[cfg(test)]
+pub(crate) mod test_support {
+    use metatorio_data::store::PrototypeStore;
+
+    pub fn store_from_json(dump: serde_json::Value) -> PrototypeStore {
+        match PrototypeStore::load(&dump) {
+            Ok(store) => store,
+            Err(error) => panic!("测试 dump 加载失败: {error}"),
+        }
+    }
+}

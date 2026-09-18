@@ -918,8 +918,10 @@ async fn register_context_and_activate(
             match render {
                 Ok(report) => {
                     eprintln!(
-                        "图标渲染完成：写出 {} 张（{}），无图标定义 {}、缺文件 {}、解码失败 {}",
+                        "图标渲染完成：写出 {} 张（其中按官方规则推导 {} 张；{}），无图标定义 {}、\
+                         推导失败 {}、缺文件 {}、解码失败 {}",
                         report.written,
+                        report.written_derived,
                         report
                             .by_type
                             .iter()
@@ -927,6 +929,7 @@ async fn register_context_and_activate(
                             .collect::<Vec<_>>()
                             .join("、"),
                         report.no_icon,
+                        report.derived_missing,
                         report.missing_source,
                         report.decode_failed
                     );

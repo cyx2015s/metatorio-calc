@@ -286,9 +286,11 @@ fn main() -> Result<(), String> {
     let mut missing_sources = 0usize;
     let mut decoded = 0usize;
     let mut no_icon = 0usize;
-    // 「官方导出了图，但 dump 里没有图标定义」——游戏自己按产物拼的图标。
-    // 这类现在直接跳过，必须单独数出来：跳过不等于没问题，只是还没实现。
-    let mut generated: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+    let mut derived_missing = 0usize;
+    // 没有图标定义、官方也没导出图：一致，没什么可画的（单独数出来，避免被当成漏掉）。
+    let mut skipped_without_icon = 0usize;
+    // 官方有图、dump 里没有图标定义——**现在按官方文档的推导规则画**，单独统计匹配率。
+    let mut derived: std::collections::BTreeMap<String, CompareReport> = Default::default();
     // 反方向：dump 里有图标定义、官方导出里却没有图。这些也没参与比对。
     let mut no_reference: std::collections::BTreeMap<String, usize> = Default::default();
     // 实测的「原型 type → 实际目录」映射（用来确认导出规律，而不是假设它）。
@@ -307,31 +309,27 @@ fn main() -> Result<(), String> {
             if args.limit.is_some_and(|limit| report.total >= limit) {
                 break;
             }
-            let component = record.component::<metatorio_data::IconComponent>();
-            let defined = component
-                .is_some_and(|component| !(component.icons.is_empty() && component.icon.is_none()));
-            // 官方只导出「有图标」的原型；没有图标定义但官方有图的，是自动生成的那类。
-            if !defined {
-                if let Some((folder, _)) = references.resolve(&record.type_, &record.name) {
-                    references.mark_used(&folder, &record.name);
-                    generated
-                        .entry(record.type_.clone())
-                        .or_default()
-                        .push(record.name.clone());
-                }
-                continue;
-            }
+            let defined = metatorio_icons::has_icon_definition(record);
             let Some((folder, reference_path)) = references.resolve(&record.type_, &record.name)
             else {
-                report.record_missing_reference();
-                *no_reference.entry(record.type_.clone()).or_default() += 1;
+                if defined {
+                    report.record_missing_reference();
+                    *no_reference.entry(record.type_.clone()).or_default() += 1;
+                } else {
+                    skipped_without_icon += 1;
+                }
                 continue;
             };
             *folder_by_type
                 .entry((record.type_.clone(), folder.clone()))
                 .or_default() += 1;
             references.mark_used(&folder, &record.name);
-            match render_prototype_icon(record, &sources) {
+            match metatorio_icons::render_record_icon_with(
+                &store,
+                record,
+                &sources,
+                RenderOptions::default(),
+            ) {
                 Ok(ours) => {
                     let bytes = std::fs::read(&reference_path)
                         .map_err(|error| format!("读参考图失败: {error}"))?;
@@ -359,6 +357,12 @@ fn main() -> Result<(), String> {
                         .entry(folder.clone())
                         .or_default()
                         .record(&record.name, &stats);
+                    if !defined {
+                        derived
+                            .entry(record.type_.clone())
+                            .or_default()
+                            .record(&record.name, &stats);
+                    }
                 }
                 Err(error) => {
                     report.record_render_failure();
@@ -367,7 +371,10 @@ fn main() -> Result<(), String> {
                             missing_sources += 1
                         }
                         metatorio_icons::IconRenderError::Decode { .. } => decoded += 1,
-                        metatorio_icons::IconRenderError::NoIcon => no_icon += 1,
+                        metatorio_icons::IconRenderError::NoIcon { .. } => no_icon += 1,
+                        metatorio_icons::IconRenderError::DerivedMissing { .. } => {
+                            derived_missing += 1
+                        }
                     }
                     if report.render_failed <= 5 {
                         println!("  渲染失败 {}/{}: {error}", record.type_, record.name);
@@ -379,13 +386,16 @@ fn main() -> Result<(), String> {
 
     println!("\n=== 总览 ===");
     println!(
-        "参与 {}，其中参考图缺失 {}、渲染失败 {}（缺文件 {}、解码 {}、无图标 {}）",
+        "参与 {}，其中参考图缺失 {}、渲染失败 {}（缺文件 {}、解码 {}、无图标 {}、推导失败 {}）；\
+         无图标定义且官方也没图（一致，跳过）{}",
         report.total,
         report.reference_missing,
         report.render_failed,
         missing_sources,
         decoded,
-        no_icon
+        no_icon,
+        derived_missing,
+        skipped_without_icon
     );
     println!(
         "逐像素完全一致 {}/{}（{:.1}%），平均匹配率 {:.3}%，最大通道差 {}（tolerance {}）",
@@ -424,23 +434,26 @@ fn main() -> Result<(), String> {
             );
         }
     }
-    if !generated.is_empty() {
-        let total: usize = generated.values().map(Vec::len).sum();
+    if !derived.is_empty() {
+        let total: usize = derived.values().map(CompareReport::compared).sum();
+        let ratio_sum: f64 = derived
+            .values()
+            .map(|report| report.average_match_ratio() * report.compared() as f64)
+            .sum();
         println!(
-            "\n=== 官方有图、但 dump 里没有图标定义（游戏自动生成，{total} 张，未参与比对）==="
+            "\n=== 按官方推导规则画的（dump 里没有图标定义，{total} 张，平均匹配 {:.2}%）===",
+            if total == 0 {
+                0.0
+            } else {
+                ratio_sum * 100.0 / total as f64
+            }
         );
-        for (type_, names) in &generated {
-            let sample: Vec<&str> = names.iter().take(8).map(String::as_str).collect();
-            let more = names.len().saturating_sub(sample.len());
+        for (type_, type_report) in &derived {
             println!(
-                "  {type_}: {} 张，例如 {}{}",
-                names.len(),
-                sample.join(", "),
-                if more > 0 {
-                    format!(" 等 {more} 张")
-                } else {
-                    String::new()
-                }
+                "  {type_}: {} 张，完全一致 {}，平均匹配 {:.2}%",
+                type_report.compared(),
+                type_report.exact,
+                type_report.average_match_ratio() * 100.0
             );
         }
     }
