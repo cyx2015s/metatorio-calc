@@ -299,10 +299,7 @@ pub fn render_icon_with(
             detail: "IconComponent 里既没有 icons 也没有 icon".to_string(),
         });
     }
-    let expected = component
-        .icon_size
-        .map(|size| size.max(1) as u32)
-        .unwrap_or(type_default_size);
+    let expected = canvas_size(component, type_default_size);
     let mut canvas = Rgba8::transparent(expected, expected);
     for (index, layer) in layers.iter().enumerate() {
         let layer_size = layer
@@ -413,6 +410,28 @@ pub fn render_all_icons(
         }
     }
     Ok(report)
+}
+
+/// 画布边长。
+///
+/// 官方 `icon_size` 的说明是 "Only loaded if `icons` is not defined"——**给了 `icons` 时，
+/// 原型上的 `icon_size` 根本不参与**，画布取**第 0 层**的层边长。实测三例（py）：
+/// `icon_size = 32` + 层 `[256, 32]` → 官方 256×256；层 `[64, 32]` → 64×64；
+/// 层 `[1, 32]`（pyvoid 的占位底层）→ 官方就是 **1×1**。所以既不是原型的 `icon_size`、
+/// 也不是「最大的层」（按原型的 32 去比，整幅图只剩 1% 对得上）。
+/// 没有 `icons`、只有 `icon` 时，才用原型的 `icon_size`。
+fn canvas_size(component: &IconComponent, type_default_size: u32) -> u32 {
+    if let Some(first) = component.icons.first() {
+        return first
+            .icon_size
+            .map(|size| size.max(1) as u32)
+            .unwrap_or(type_default_size)
+            .max(1);
+    }
+    component
+        .icon_size
+        .map(|size| size.max(1) as u32)
+        .unwrap_or(type_default_size)
 }
 
 /// 层清单：`icons` 优先；只有 `icon` 时视为单层（`icon_size` 取原型的）。
@@ -578,5 +597,66 @@ mod tests {
             .get(metatorio_data::store::PrototypeGroup::Item, "iron-plate")
             .expect("物品存在");
         assert!(derived_product(&store, item).is_none());
+    }
+
+    /// 画布口径：给了 `icons` 就**不看**原型的 `icon_size`，取**第 0 层**的层边长
+    /// （py 的配方是 `icon_size = 32` + 层 256/32 → 官方 256×256；pyvoid 是层 1/32 → 官方 1×1）。
+    #[test]
+    fn canvas_size_ignores_prototype_icon_size_when_icons_exist() {
+        let component = IconComponent {
+            icon: None,
+            icon_size: Some(32),
+            icons: vec![
+                IconData {
+                    icon: "a.png".to_string(),
+                    icon_size: Some(256),
+                    ..IconData::default()
+                },
+                IconData {
+                    icon: "b.png".to_string(),
+                    icon_size: Some(32),
+                    ..IconData::default()
+                },
+            ],
+        };
+        assert_eq!(canvas_size(&component, 64), 256);
+
+        // 第 0 层只有 1 像素、后面跟着 32 像素的叠加层：官方导出就是 1×1
+        let component = IconComponent {
+            icon: None,
+            icon_size: Some(32),
+            icons: vec![
+                IconData {
+                    icon: "a.png".to_string(),
+                    icon_size: Some(1),
+                    ..IconData::default()
+                },
+                IconData {
+                    icon: "b.png".to_string(),
+                    icon_size: Some(32),
+                    ..IconData::default()
+                },
+            ],
+        };
+        assert_eq!(canvas_size(&component, 64), 1);
+
+        // 层没写 icon_size → 用类型默认
+        let component = IconComponent {
+            icon: None,
+            icon_size: Some(32),
+            icons: vec![IconData {
+                icon: "a.png".to_string(),
+                ..IconData::default()
+            }],
+        };
+        assert_eq!(canvas_size(&component, 64), 64);
+
+        // 只有 legacy `icon` → 用原型的 icon_size
+        let component = IconComponent {
+            icon: Some("a.png".to_string()),
+            icon_size: Some(128),
+            icons: Vec::new(),
+        };
+        assert_eq!(canvas_size(&component, 64), 128);
     }
 }

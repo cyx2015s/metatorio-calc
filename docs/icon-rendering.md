@@ -64,12 +64,20 @@ cargo run -p metatorio-icons --example compare -- \
    像素差一大截」的原因。
 2. **图标文件是「mipmap 横排」**：`graphics/icons/iron-plate.png` 是 120×64 =
    64+32+16+8，level 0 就是左上角的 64×64。渲染取这一块即可。
-3. **导出尺寸 = 原型的 `icon_size`**（未给时按类型默认）：物品/实体/流体 64，
-   科技 256，成就/物品组 128；其余一律 64。
-   官方文档里 512 只针对 `SpaceLocationPrototype::starmap_icon`、32 只针对
-   `ShortcutPrototype::small_icons`——**普通 `icons` 不能套这两个数**（一开始把
-   `space-location` 设成 512，`space-location`/`space-connection` 的匹配率掉到 33%，
-   因为拿 512 画布去和官方 64 画布比，只比到了中心那一小块）。
+3. **画布尺寸的口径**（这条改过两次，都是被实测逼出来的）：
+   - 只有 `icon`（老式单层图标）时，画布 = **原型的 `icon_size`**，没给就按类型默认
+     （物品/实体/流体 64，科技 256，成就/物品组 128）；
+   - 给了 `icons` 时，**原型的 `icon_size` 根本不参与**（官方文档原文就是 "Only loaded if
+     `icons` is not defined"），画布 = **第 0 层的 `icon_size`**（没给则类型默认）。
+     实测三例（py 配方）：原型 `icon_size = 32` + 层 `[256, 32]` → 官方 **256×256**；
+     层 `[64, 32]` → **64×64**；层 `[1, 32]`（pyvoid 的占位底层）→ 官方就是 **1×1**。
+     一开始按原型的 32 去画，整个 py 上下文的配方匹配率被钉在 53.7%。
+   - 官方文档里 512 只针对 `SpaceLocationPrototype::starmap_icon`、32 只针对
+     `ShortcutPrototype::small_icons`——**普通 `icons` 不能套这两个数**（一开始把
+     `space-location` 设成 512，`space-location`/`space-connection` 的匹配率掉到 33%，
+     因为拿 512 画布去和官方 64 画布比，只比到了中心那一小块）。
+   - 还有一类**画布比 64 大一点**的：`space-connection` 官方是 66×66，py 某些配方是
+     66×68。尺寸对不上时逐像素比对会整体错位，所以这两类仍然偏低（见下）。
 4. **`space-age`（DLC）不是 mod**：它在 `<游戏>/data/space-age`，所以路径解析要把
    `data/` 下**每个子目录**都注册成根（否则 54/200 个物品图标直接找不到文件）。
 5. **图标里有调色板（Indexed）PNG**：解码要开 `png` 的 `EXPAND`（顺手也做了 16→8 位）。
@@ -102,8 +110,11 @@ cargo run -p metatorio-icons --example compare -- \
    `resource`、`container`、`inserter` …）写在 `entity/` 下，所有**物品子类型**
    （`ammo`、`gun`、`module`、`armor`、`capsule`、`item-with-entity-data` …）写在 `item/`
    下，`planet` 写在 `space-location/` 下，其余类型才是 `<type>/`。所以比对工具改成
-   **按文件名建索引、优先取与原型 `type` 同名的目录**，并把实际用到的映射打印出来
-   （规律是实测出来的，不是假设的）。修正后覆盖率 1027 → 1885 张。
+   **按文件名建索引**，解析时优先找「该原型实际会落到的目录」——这个目录由**聚合组**
+   推出来（`Item` → `item/`、`Entity` → `entity/`、其余用自己的 `type`），不是硬编码名字，
+   也把实际用到的映射打印出来（规律是实测出来的，不是假设的）。修正后覆盖率 1027 → 1885 张。
+   只看名字会踩同名：`module/fish` 被解析到 `entity/fish.png`，实测只有 2.86%；按聚合组
+   落到 `item/fish.png` 才对。
 10. **官方只写明了两种图标推导**（把官方 schema `crates/metatorio-data/schema/prototype-api.json`
     里所有带 `icon` 的 description 都过了一遍，只有这两处写了「否则用……」）：
     - **配方**：没有 `icons`/`icon` 时用 `main_product` 或**唯一产物**的图标；「多产物且没有
@@ -134,27 +145,26 @@ cargo run -p metatorio-icons --example compare -- \
 | 渲染失败（缺文件/解码） | 0 | 0 | |
 | 无图标定义、官方也没图 | 428 | 584 | 一致，没什么可画 |
 | 官方有图、但仓库里没有这条原型 | 429 | 300 | `decorative` 163、`virtual-signal` 155、`achievement` 85、`shortcut` 20 …（类型不在关注列表） |
-| 同名图在导出里有多份 | 44 | 64 | 只用了「原型 `type` 优先」的那份 |
+| 同名图在导出里有多份 | 24 | 64 | 只用了「按聚合组该落到的目录」那一份 |
 
 按参考图目录（vanilla `--tolerance 2`）：
 
 | 参考图目录 | 张数 | 平均像素匹配率 |
 | --- | --- | --- |
-| entity（爆炸 225、尸体 177、树 32、机械 …） | 764 | 97.4% |
-| item（含 ammo / gun / module / armor / capsule 等子类型） | 327 | 96.4% |
+| entity（爆炸 225、尸体 177、树 32、机械 …） | 766 | 97.4% |
+| item（含 ammo / gun / module / armor / capsule 等子类型） | 342 | 96.4% |
 | **recipe（显式图标 413 + 推导 249）** | 662 | **79.8%**（显式 69.1% / 推导 **97.5%**） |
 | technology | 277 | 97.4% |
 | fluid | 33 | 96.7% |
-| asteroid-chunk | 25 | 93.6% |
+| asteroid-chunk | 15 | 94.4% |
 | item-group | 12 | 98.8% |
 | space-location | 8 | 97.7% |
 | quality | 6 | 92.8% |
-| ammo-category | 7 | **65.4%** |
 | tile | 3 | 96.9% |
 | surface | 1 | 96.5% |
 | **space-connection** | 9 | **33.1%** |
 
-合计 2134 张、平均匹配率 91.4%，逐像素完全一致 44 张（2.1%）——「完全一致」要求每个通道
+合计 2134 张、平均匹配率 91.5%，逐像素完全一致 44 张（2.1%）——「完全一致」要求每个通道
 都相同，单层图标剩下的几个百分点主要是**预乘/四舍五入**的 ±1~2，所以主指标是容忍度内的
 匹配率。
 
@@ -164,10 +174,9 @@ cargo run -p metatorio-icons --example compare -- \
   规则本身是对的（249/3280 张、两个上下文一致）。
 - **`recipe` 显式那部分偏低**：最差的一批全是 `*-recycling`（`recycling.png` + 缩小的物品
   图标 `scale = 0.4` + `recycling-top.png` 三层叠加），属于下面「缩放层重采样」这一类。
-- **`space-connection` 偏低**：官方导出是 **66×66**，不是 64×64，而且「只画第 0 层」
-  解释不了官方图（差异铺满整幅）——说明这类图标的画布尺寸/摆放另有一套规则，待查。
-- **`ammo-category` 偏低（65.4%）**：这类原型的 `icons` 在 dump 里往往只有一层，而官方图
-  是把多个物品图画成一个小格阵——同「无推导可用」一类，待查。
+- **`space-connection` 偏低**：官方导出是 **66×66**，不是 64×64，画布尺寸对不上导致整幅
+  错位；py 里还有 **66×68** 的配方（层带 `shift`/`floating`），属于同一类「画布比 64 大
+  一点点」的现象，待查。
 - **带显式 `scale` 的叠加层**还没做到逐像素一致：我们的面积平均重采样与 Factorio 的
   mipmap 采样核不同，缩放层边缘会有几个像素的差别（视觉上一致，数值上有差）。
   要更贴近需要试更细的滤波核（或按 mipmap 级别取邻近层）。
@@ -176,27 +185,32 @@ cargo run -p metatorio-icons --example compare -- \
 
 | 参考图目录 | 张数 | 平均像素匹配率 |
 | --- | --- | --- |
-| entity | 1638 | 95.2% |
-| item | 3259 | 90.4% |
+| entity | 1603 | 95.5% |
+| item | 3300 | 90.7% |
 | technology | 957 | 97.6% |
 | fluid | 472 | 96.0% |
 | item-group | 19 | 97.7% |
-| **recipe（显式 6855 + 推导 3280）** | 10135 | **66.9%**（显式 53.7% / 推导 **94.6%**） |
-| 其余（quality / space-location / tile / ammo-category / asteroid-chunk） | 11 | 67%~99% |
+| **recipe（显式 6855 + 推导 3280）** | 10135 | **74.7%**（显式 65.1% / 推导 **94.7%**） |
+| 其余（quality / space-location / tile / asteroid-chunk） | 7 | 87%~99% |
 
-合计 16493 张、平均匹配率 **77.0%**（比 vanilla 低，主因是 py 自己定义的配方图标有大量
-多层缩放）。py 里推导覆盖了 **3280 张配方**，平均 94.6%。
+合计 16493 张、平均匹配率 **81.9%**（比 vanilla 低，主因是 py 自己定义的配方图标有大量
+多层缩放与 `shift`）。py 里推导覆盖了 **3280 张配方**，平均 94.7%。
 
 ## 下一步
 
 1. 补上**地块**的推导：官方文档写明「没给 `icon`/`icons` 就用 `variants.material_background`」，
    vanilla 150 张、py 62 张（现在全是「推导也画不出」）。需要 codegen 先放行
-   `TilePrototype::variants.material_background`（`count`/`line_length`/`picture`/`scale`/`x`/`y`）。
+   `TilePrototype::variants.material_background`（`count`/`line_length`/`picture`/`scale`/`x`/`y`）
+   与 `map_color`：实测色块地块（`black-/blue-/red-refined-concrete`）的官方图标 ≈ 素材
+   ×`map_color`（`blue` 的 `map_color = {r:0.155, g:0.54, b:0.898, a:0.5}`，官方图标均值
+   `(34,66,93)` 对素材均值 `(95,93,88)`），但**确切的取色/帧/缩放口径还没定下来**——
+   在没定下来之前不画，免得画出「颜色不对」的图标冒充正确。
 2. 修**数据层的 Sprite 图标**：`airborne-pollutant` / `burner-usage` 的 `icon` 是 `Sprite`
    而不是文件名，现在被当成「没有图标定义」（vanilla 3 张、py 1 张）。
-3. 查 py 显式定义的配方为什么只有 53.7%（`*-pyvoid` 那批是 0.00%）：先
-   `--show recipe/<name>` 看层清单与官方图的差异形态，判断是「画布/摆位不一致」还是别的。
-4. 查清 `space-connection` 的 66×66 画布规则。
+3. 查清「画布比 64 大一点」的那一类：`space-connection` 是 66×66，py 有配方是 66×68
+   （层带 `scale`/`shift`/`floating`）——现在尺寸对不上导致整幅错位（33% / 14%）。
+4. 查 py 显式定义的配方剩下的 35%（`*-pyvoid` 已经查清：底层 `icon_size = 1`、官方就是
+   1×1，我们的居中取整与官方差一个像素，属于退化情形；`Phadai-Dance-*` 那批落在上一条）。
 5. 用更好的重采样（或按 mipmap 级别选择）收敛缩放层的偏差。
 6. 决定 `scale` 口径：`expected × scale` 在全量上略好，但要在 py（16k 张）上复核后再换默认。
 7. 把「游戏根目录 / mod 目录」写进上下文元数据（现在只有 `source` 字符串，重新注册同

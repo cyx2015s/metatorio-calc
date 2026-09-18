@@ -81,13 +81,13 @@ impl ReferenceIndex {
         })
     }
 
-    /// 解析某个原型的参考图：优先 `<type>/`，否则取候选里唯一一个（多个候选时取字典序
-    /// 最小的，保证结果稳定可复现）。
-    fn resolve(&self, type_: &str, name: &str) -> Option<(String, PathBuf)> {
+    /// 解析某个原型的参考图：优先 `preferred`（该原型实际会落到的目录），否则取候选里
+    /// 字典序最小的，保证结果稳定可复现。
+    fn resolve(&self, preferred: &str, name: &str) -> Option<(String, PathBuf)> {
         let candidates = self.by_name.get(name)?;
         let same_folder = candidates
             .iter()
-            .find(|(folder, _)| folder == type_)
+            .find(|(folder, _)| folder == preferred)
             .cloned();
         same_folder.or_else(|| {
             candidates
@@ -127,6 +127,21 @@ impl ReferenceIndex {
             }
         }
         (absent, duplicate)
+    }
+}
+
+/// 该原型的参考图应该落在哪个目录。
+///
+/// 官方导出按「GUI 归类」分目录，而不是按原型 `type`：**物品子类型**（`ammo`、`gun`、
+/// `module`、`armor`、`capsule` …）都进 `item/`，**实体类型**都进 `entity/`，其余用自己的
+/// `type`。只看名字会踩同名：`module/fish` 会拿到 `entity/fish.png`（实测差 2.86%），
+/// 而它对应的其实是 `item/fish.png`。
+fn reference_folder(record: &metatorio_data::store::PrototypeRecord) -> String {
+    use metatorio_data::store::PrototypeGroup;
+    match record.group {
+        PrototypeGroup::Item => "item".to_string(),
+        PrototypeGroup::Entity => "entity".to_string(),
+        _ => record.type_.clone(),
     }
 }
 
@@ -310,7 +325,8 @@ fn main() -> Result<(), String> {
                 break;
             }
             let defined = metatorio_icons::has_icon_definition(record);
-            let Some((folder, reference_path)) = references.resolve(&record.type_, &record.name)
+            let Some((folder, reference_path)) =
+                references.resolve(&reference_folder(record), &record.name)
             else {
                 if defined {
                     report.record_missing_reference();
@@ -541,13 +557,14 @@ fn show_prototype(
         );
     }
     let ours = render_prototype_icon(record, sources).map_err(|error| error.to_string())?;
+    let preferred = reference_folder(record);
     let (folder, reference_path) = references
-        .resolve(type_, name)
+        .resolve(&preferred, name)
         .ok_or_else(|| format!("官方导出里找不到 {target} 的参考图"))?;
     let reference = Rgba8::decode_png(&std::fs::read(&reference_path).map_err(|e| e.to_string())?)
         .map_err(|error| error.to_string())?;
-    if folder != type_ {
-        println!("参考图目录：{folder}（原型 type 是 {type_}）");
+    if folder != preferred {
+        println!("参考图目录：{folder}（{target} 应该落在 {preferred}/）");
     }
     println!(
         "我们 {}x{}，官方 {}x{}",
@@ -634,7 +651,9 @@ fn fit_layer_scale(
             let Some(explicit) = layer.scale else {
                 continue;
             };
-            let Some((_, reference_path)) = references.resolve(&record.type_, &record.name) else {
+            let Some((_, reference_path)) =
+                references.resolve(&reference_folder(record), &record.name)
+            else {
                 continue;
             };
             let Ok(reference) =
@@ -732,7 +751,8 @@ fn sweep_laws(
                     {
                         continue;
                     }
-                    let Some((_, reference_path)) = references.resolve(&record.type_, &record.name)
+                    let Some((_, reference_path)) =
+                        references.resolve(&reference_folder(record), &record.name)
                     else {
                         continue;
                     };
