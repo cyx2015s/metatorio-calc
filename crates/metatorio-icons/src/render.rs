@@ -489,12 +489,32 @@ impl RenderReport {
     }
 }
 
-/// 把一个原型仓库里**所有能画出图标的原型**渲染到 `out_dir/<type>/<name>.png`。
+/// 图标写盘时的目录名——**必须和前端 `icon` 命令要的路径一致**。
+///
+/// 游戏 `--dump-icon-sprites` 的布局**不是**按原型 `type` 分的，而是按「归类」：
+/// - 所有**物品子类型**（`module`、`capsule`、`gun`、`armor`、`ammo`、`tool`、
+///   `item-with-entity-data` …）都进 **`item/`**；
+/// - 所有**实体类型**（`assembling-machine`、`furnace`、`inserter`、`tree`、`explosion` …）
+///   都进 **`entity/`**；
+/// - `planet` 进 **`space-location/`**（游戏就是这么放的，前端也优先找这里）；
+/// - 其余类型用自己的 `type`（`recipe`、`technology`、`fluid`、`tile`、`quality` …）。
+///
+/// 前端的目录索引正是按归类取图标的（条目 `icon_type`：物品一律 `item`、实体一律 `entity`），
+/// 所以**按原型 type 建目录会让这些图标全部取不到**——实测踩过：插件 / 投掷物 / 枪械 /
+/// 装甲 / 载具的物品图标、以及所有机器图标都不显示。
+fn output_folder(record: &PrototypeRecord) -> &str {
+    match record.group {
+        PrototypeGroup::Item => "item",
+        PrototypeGroup::Entity => "entity",
+        PrototypeGroup::Planet => "space-location",
+        _ => &record.type_,
+    }
+}
+
+/// 把一个原型仓库里**所有能画出图标的原型**渲染到 `out_dir/<归类目录>/<name>.png`。
 ///
 /// 画不出来的分三类如实计数：没有图标定义且没有推导（`no_icon`）、推导出的产物拿不到图标
 /// （`derived_missing`）、缺文件/解码失败。**不允许静默缺图**。
-///
-/// 输出布局与游戏 `--dump-icon-sprites` 一致，因此前端 `icon` 命令与缓存目录约定都不用改。
 pub fn render_all_icons(
     store: &metatorio_data::store::PrototypeStore,
     sources: &IconSources,
@@ -507,10 +527,15 @@ pub fn render_all_icons(
             let derived = !has_icon_definition(record);
             match render_record_icon_with(store, record, sources, options) {
                 Ok(image) => {
-                    let dir = out_dir.join(&record.type_);
+                    let dir = out_dir.join(output_folder(record));
                     std::fs::create_dir_all(&dir)
                         .map_err(|error| format!("创建 {} 失败: {error}", dir.display()))?;
                     let path = dir.join(format!("{}.png", record.name));
+                    // `planet` 与 `space-location` 撞同一个目录：真 `space-location` 原型那份
+                    // 优先（前端 `icon` 命令也是先找 space-location），所以行星不许覆盖它。
+                    if record.type_ == "planet" && path.is_file() {
+                        continue;
+                    }
                     let bytes = image.encode_png()?;
                     std::fs::write(&path, bytes)
                         .map_err(|error| format!("写 {} 失败: {error}", path.display()))?;
@@ -930,6 +955,111 @@ mod tests {
         let (width, height, _, _) =
             union_canvas(&component, 64, options, true).expect("算得出画布");
         assert_eq!((width, height), (66, 68));
+    }
+
+    /// **写盘布局必须按归类**：插件 / 投掷物 / 枪械 / 装甲这些物品子类型要落到 `item/`、
+    /// 机器等实体要落到 `entity/`、行星落到 `space-location/`——否则前端按 `item/<名字>`
+    /// 取图标会全部取不到（实测踩过）。
+    #[test]
+    fn batch_render_uses_the_grouped_folders() {
+        let dir = std::env::temp_dir().join(format!("metatorio-layout-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("建临时目录");
+        let icon = "__t__/graphics/icons/x.png";
+        std::fs::write(
+            dir.join("dump.json"),
+            serde_json::json!({
+                "item": {
+                    "iron-plate": { "type": "item", "name": "iron-plate", "icon": icon }
+                },
+                "module": {
+                    "speed-module": { "type": "module", "name": "speed-module", "icon": icon }
+                },
+                "gun": {
+                    "submachine-gun": { "type": "gun", "name": "submachine-gun", "icon": icon }
+                },
+                "armor": {
+                    "heavy-armor": { "type": "armor", "name": "heavy-armor", "icon": icon }
+                },
+                "assembling-machine": {
+                    "assembling-machine-1": {
+                        "type": "assembling-machine",
+                        "name": "assembling-machine-1",
+                        "icon": icon
+                    }
+                },
+                "space-location": {
+                    "nauvis": { "type": "space-location", "name": "nauvis", "icon": icon }
+                },
+                "planet": {
+                    "nauvis": { "type": "planet", "name": "nauvis", "icon": icon }
+                }
+            })
+            .to_string(),
+        )
+        .expect("写 dump");
+        let raw = std::fs::read(dir.join("dump.json")).expect("读 dump");
+        let dump: serde_json::Value = serde_json::from_slice(&raw).expect("解析 dump");
+        let store = crate::test_support::store_from_json(dump);
+        // 图标来源：一个临时目录，里面放一张最小的 PNG。
+        let files = dir.join("files");
+        std::fs::create_dir_all(files.join("graphics/icons")).expect("建图标目录");
+        let png = crate::image::Rgba8::from_pixels(64, 64, vec![255; 64 * 64 * 4]);
+        std::fs::write(
+            files.join("graphics/icons/x.png"),
+            png.encode_png().unwrap(),
+        )
+        .unwrap();
+        let sources = IconSources::from_roots([(
+            "t".to_string(),
+            crate::sources::Archive::Dir(files.clone()),
+        )]);
+        let out = dir.join("out");
+        let report =
+            render_all_icons(&store, &sources, &out, RenderOptions::default()).expect("批量渲染");
+        assert_eq!(report.failed(), 0, "{report:?}");
+
+        // 物品子类型 → item/；实体 → entity/；行星与 space-location 同名时只有一份，
+        // 且是真 space-location 原型写的。
+        for path in [
+            "item/iron-plate.png",
+            "item/speed-module.png",
+            "item/submachine-gun.png",
+            "item/heavy-armor.png",
+            "entity/assembling-machine-1.png",
+            "space-location/nauvis.png",
+        ] {
+            assert!(
+                out.join(path).is_file(),
+                "缺 {path}（实得 {:?}）",
+                list_files(&out)
+            );
+        }
+        // 不许再出现按原型 type 命名的目录。
+        for wrong in ["module", "gun", "armor", "assembling-machine", "planet"] {
+            assert!(!out.join(wrong).exists(), "不该有 {wrong}/ 目录");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn list_files(root: &Path) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut stack = vec![root.to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else {
+                    out.push(path.display().to_string());
+                }
+            }
+        }
+        out.sort();
+        out
     }
 
     /// 画布口径：给了 `icons` 就**不看**原型的 `icon_size`，取**第 0 层**的层边长

@@ -70,10 +70,19 @@ cargo run -p metatorio-icons --example compare -- \
   目录，例如用户自己用游戏导出的那套）、`None`（内嵌 dump / 用户自备 dump，没有游戏目录可读）。
 - 新上下文（或历史缓存缺图标目录）时，`IconSource::Render` 先建出 `icons/` 占位目录，
   再在**阻塞线程池**里跑 `render_icons_into`——它只吃 dump 字节与目录路径、不碰 runtime，
-  于是既可以丢进 `spawn_blocking`，也能在测试里直接调用。写盘布局为
-  `icons/<type>/<name>.png`，与 `icon` 命令的读取路径一致。
+  于是既可以丢进 `spawn_blocking`，也能在测试里直接调用。
+- **写盘目录必须按「归类」，不是按原型 `type`**（踩过一次）：所有**物品子类型**
+  （`module`/`capsule`/`gun`/`armor`/`ammo`/`tool`/`item-with-entity-data` …）写进
+  **`item/`**、所有**实体类型**（`assembling-machine`/`furnace`/`inserter`/`tree`/`explosion` …）
+  写进 **`entity/`**、`planet` 写进 **`space-location/`**，其余才是 `<type>/`。
+  前端的目录索引就是按归类给 `icon_type` 的（物品一律 `item`、实体一律 `entity`），
+  所以按原型 type 建目录 → 插件/投掷物/枪械/装甲/载具的物品图标、以及所有机器图标
+  **全部取不到**（实测就是这个症状）。`planet` 与 `space-location` 撞目录时以后者为准
+  （前端也是先找 `space-location`），所以行星那份不覆盖已存在的文件。
 - 图标是 best-effort：渲染失败**不挡**上下文注册，但必须如实报出来，并把空的 `icons/`
   目录收掉——`icon_root` 不存在 = 前端退回占位图标，不留「有目录却没图」的假象。
+  另外**旧上下文会「缺文件」**：dump 是当时导出的，之后游戏/mod 变了（例如 recycler 的图标
+  从 `data/quality/` 挪到了 `data/recycler/`），那些路径就真的不存在了——照实计数，不假装画得出来。
 - **上下文元数据只记「游戏版本 + 启用的 mod（名字 + 版本）」**：路径（可执行文件 / mod 目录）
   不进元数据——它只在导出那一刻有用（图标当场渲染完），旧缓存里的 `source` 字段被忽略。
 - 渲染走 `render_record_icon_with`：自带 `icon`/`icons` 的按定义画；没有的按官方写明的
