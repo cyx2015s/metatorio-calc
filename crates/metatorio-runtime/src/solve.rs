@@ -1048,11 +1048,19 @@ pub fn plan_auto_plan(
         prim, prim_scale, ..
     } = solution
     else {
-        let SolverSolution::NotSolved { no_provider, .. } = solution else {
+        // 透出求解器给出的 description——区分「真的不可行」与「数值/求解器
+        // 失败」（microlp 返回 Other/Str）是诊断自动规划失败的前提。
+        let SolverSolution::NotSolved {
+            no_provider,
+            description,
+            ..
+        } = solution
+        else {
             return Err(RuntimeError::InvalidValue("自动规划求解失败".to_string()));
         };
         return Err(RuntimeError::InvalidValue(format!(
-            "自动规划无解（目标不可达）：无供给 {no_provider:?}"
+            "自动规划无解：{description}；无供给 {} 项：{no_provider:?}",
+            no_provider.len()
         )));
     };
     // 保留被选中的候选（用量 > 阈值）。
@@ -3904,5 +3912,89 @@ mod tests {
             }
         }
         eprintln!("[py] 锅炉实体: 总 {boiler_count}, 默认可达(实体节点) {boiler_reachable}");
+    }
+
+    // ── 「传说虫卵」自动规划复现 ─────────────────────────────────────
+
+    /// 装载「传说虫卵」工程（`tests/data/legendary-biter-egg.json`）+ 该工程 pin
+    /// 的上下文的真实 dump。
+    ///
+    /// 优先用本机 app-data 缓存里**该 context id 的那份 dump**（内容哈希与工程
+    /// 一致，最忠实复现）；没有时回退到仓库内 `assets/data-raw-dump.json`——但
+    /// 两者原型集合若有差异，可能**复现不出**同一问题。
+    fn legendary_biter_egg_runtime() -> Option<(Runtime, ProjectId, FactoryId)> {
+        let doc: crate::document::AppDocument =
+            serde_json::from_str(include_str!("../tests/data/legendary-biter-egg.json"))
+                .expect("工程文档解析失败");
+        let project = doc.projects[0].id;
+        let factory = doc.projects[0].factories[0].id;
+        let context_id = doc.projects[0]
+            .context_id
+            .clone()
+            .expect("工程应绑定上下文");
+
+        let user_dump = format!(
+            "C:\\Users\\mirac\\AppData\\Roaming\\com.mirac.metatorio-app\\contexts\\{context_id}\\data-raw-dump.json"
+        );
+        let dump_path = if std::path::Path::new(&user_dump).exists() {
+            user_dump
+        } else {
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../assets/data-raw-dump.json"
+            )
+            .to_string()
+        };
+        if !std::path::Path::new(&dump_path).exists() {
+            eprintln!("[skip] 无 dump（{dump_path}），跳过");
+            return None;
+        }
+        eprintln!("[dump] {dump_path}");
+        let raw = std::fs::read(&dump_path).expect("读 dump");
+        let dump: serde_json::Value = serde_json::from_slice(&raw).expect("解析 dump");
+        let store = PrototypeStore::load(&dump).expect("dump 加载失败");
+
+        let mut runtime = Runtime::from_document(doc);
+        runtime.install_context(context_id, store);
+        Some((runtime, project, factory))
+    }
+
+    /// 复现「传说虫卵」：同一份文档，**固定机制能解**，但**自动规划得不到可解
+    /// 结果**。
+    ///
+    /// 真实 dump 上自动规划要全量枚举候选（数十秒），故 `#[ignore]`；诊断时用：
+    /// `cargo test -p metatorio-runtime --lib legendary_biter_egg -- --ignored --nocapture`
+    #[test]
+    #[ignore = "真实 dump 全量枚举候选，耗时较长；复现/诊断时手动运行"]
+    fn legendary_biter_egg_document_solves_but_auto_plan_fails() {
+        // 1) 固定机制：正常重解应可解（用户确认「正常是能计算的」）。
+        let Some((mut runtime, project, factory)) = legendary_biter_egg_runtime() else {
+            return;
+        };
+        let direct = runtime
+            .solve_factory(project, factory)
+            .expect("固定机制重解不应报错");
+        eprintln!("[direct] {:?}", direct.status);
+        assert!(
+            matches!(direct.status, SolveStatus::Solved { .. }),
+            "固定机制文档应可解，实际：{:?}",
+            direct.status
+        );
+
+        // 2) 自动规划：同一文档应能规划出可解方案；当前失败/不可解 → 复现。
+        let Some((mut planned, project, factory)) = legendary_biter_egg_runtime() else {
+            return;
+        };
+        match planned.auto_plan(project, factory) {
+            Ok(result) => {
+                eprintln!("[auto_plan] {:?}", result.status);
+                assert!(
+                    matches!(result.status, SolveStatus::Solved { .. }),
+                    "自动规划应解出可解方案，实际：{:?}",
+                    result.status
+                );
+            }
+            Err(error) => panic!("自动规划报错：{error}"),
+        }
     }
 }

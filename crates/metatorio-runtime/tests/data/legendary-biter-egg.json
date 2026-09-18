@@ -1,0 +1,306 @@
+{
+  "schema_version": 1,
+  "projects": [
+    {
+      "id": 1,
+      "name": "传说虫卵",
+      "settings": {
+        "time_scale": "seconds",
+        "milestones": [],
+        "recipe_productivity": [],
+        "infinite_levels": [],
+        "ignore_productivity": false,
+        "mining_productivity": 0.0,
+        "all_accessible": false,
+        "quality_limit": "legendary"
+      },
+      "planning": {
+        "alternative_count": 3,
+        "machine_preferences": [],
+        "enumerate_modules": [
+          {
+            "id": "productivity-module-3",
+            "quality": "legendary"
+          },
+          {
+            "id": "quality-module-3",
+            "quality": "legendary"
+          },
+          {
+            "id": "speed-module-3",
+            "quality": "legendary"
+          }
+        ],
+        "enumerate_beacons": []
+      },
+      "context_id": "2d1e8c21a400155c",
+      "factories": [
+        {
+          "id": 2,
+          "name": "新工厂",
+          "settings": {
+            "planet": "nauvis",
+            "surface": null,
+            "major_quality": "legendary",
+            "debug": false
+          },
+          "targets": [
+            {
+              "id": 4,
+              "flow": {
+                "Item": {
+                  "id": "biter-egg",
+                  "quality": "legendary"
+                }
+              },
+              "amount": 1.0
+            }
+          ],
+          "target_expressions": [],
+          "external_inputs": [
+            {
+              "id": 3,
+              "flow": {
+                "Item": {
+                  "id": "bioflux",
+                  "quality": "normal"
+                }
+              },
+              "penalty": 1.0
+            }
+          ],
+          "mechanics": [
+            {
+              "id": 6,
+              "enabled": true,
+              "mechanic": {
+                "type": "recipe",
+                "recipe": {
+                  "id": "biter-egg",
+                  "quality": "normal"
+                },
+                "machine": {
+                  "id": "captive-biter-spawner",
+                  "quality": "normal"
+                },
+                "module_config": {
+                  "modules": [],
+                  "beacons": []
+                },
+                "fuel": {
+                  "kind": "item",
+                  "item": {
+                    "id": "bioflux",
+                    "quality": "normal"
+                  }
+                }
+              }
+            },
+            {
+              "id": 7,
+              "enabled": true,
+              "mechanic": {
+                "type": "recipe",
+                "recipe": {
+                  "id": "biter-egg-recycling",
+                  "quality": "normal"
+                },
+                "machine": {
+                  "id": "recycler",
+                  "quality": "normal"
+                },
+                "module_config": {
+                  "modules": [
+                    {
+                      "id": "quality-module-3",
+                      "quality": "legendary"
+                    },
+                    {
+                      "id": "quality-module-3",
+                      "quality": "legendary"
+                    },
+                    {
+                      "id": "quality-module-3",
+                      "quality": "legendary"
+                    },
+                    {
+                      "id": "quality-module-3",
+                      "quality": "legendary"
+                    }
+                  ],
+                  "beacons": []
+                },
+                "fuel": null
+              }
+            },
+            {
+              "id": 8,
+              "enabled": true,
+              "mechanic": {
+                "type": "recipe",
+                "recipe": {
+                  "id": "biter-egg-recycling",
+                  "quality": "uncommon"
+                },
+                "machine": {
+                  "id": "recycler",
+                  "quality": "normal"
+                },
+                "module_config": {
+                  "modules": [
+                    {
+                      "id": "quality-module-3",
+                      "quality": "legendary"
+                    },
+                    {
+                      "id": "quality-module-3",
+                      "quality": "legendary"
+                    },
+                    {
+                      "id": "quality-module-3",
+                      "quality": "legendary"
+                    },
+                    {
+                      "id": "quality-module-3",
+                      "quality": "legendary"
+                    }
+                  ],
+                  "beacons": []
+                },
+                "fuel": null
+              }
+            },
+            {
+              "id": 11,
+              "enabled": true,
+              "mechanic": {
+                "type": "recipe",
+                "recipe": {
+                  "id": "biter-egg-recycling",
+                  "quality": "rare"
+                },
+                "machine": {
+                  "id": "recycler",
+                  "quality": "normal"
+                },
+                "module_config": {
+                  "modules": [
+                    {
+                      "id": "quality-module-3",
+                      "quality": "legendary"
+                    },
+                    {
+                      "id": "quality-module-3",
+                      "quality": "legendary"
+                    },
+                    {
+                      "id": "quality-module-3",
+                      "quality": "legendary"
+                    },
+                    {
+                      "id": "quality-module-3",
+                      "quality": "legendary"
+                    }
+                  ],
+                  "beacons": []
+                },
+                "fuel": null
+              }
+            },
+            {
+              "id": 10,
+              "enabled": true,
+              "mechanic": {
+                "type": "recipe",
+                "recipe": {
+                  "id": "biter-egg-recycling",
+                  "quality": "epic"
+                },
+                "machine": {
+                  "id": "recycler",
+                  "quality": "normal"
+                },
+                "module_config": {
+                  "modules": [
+                    {
+                      "id": "quality-module-3",
+                      "quality": "legendary"
+                    },
+                    {
+                      "id": "quality-module-3",
+                      "quality": "legendary"
+                    },
+                    {
+                      "id": "quality-module-3",
+                      "quality": "legendary"
+                    },
+                    {
+                      "id": "quality-module-3",
+                      "quality": "legendary"
+                    }
+                  ],
+                  "beacons": []
+                },
+                "fuel": null
+              }
+            },
+            {
+              "id": 9,
+              "enabled": true,
+              "mechanic": {
+                "type": "recipe",
+                "recipe": {
+                  "id": "biter-egg-recycling",
+                  "quality": "legendary"
+                },
+                "machine": {
+                  "id": "recycler",
+                  "quality": "normal"
+                },
+                "module_config": {
+                  "modules": [
+                    {
+                      "id": "quality-module-3",
+                      "quality": "legendary"
+                    },
+                    {
+                      "id": "quality-module-3",
+                      "quality": "legendary"
+                    },
+                    {
+                      "id": "quality-module-3",
+                      "quality": "legendary"
+                    },
+                    {
+                      "id": "quality-module-3",
+                      "quality": "legendary"
+                    }
+                  ],
+                  "beacons": []
+                },
+                "fuel": null
+              }
+            },
+            {
+              "id": 13,
+              "enabled": true,
+              "mechanic": {
+                "type": "solar",
+                "solar_panel": {
+                  "id": "solar-panel",
+                  "quality": "normal"
+                },
+                "accumulator": {
+                  "id": "accumulator",
+                  "quality": "normal"
+                }
+              }
+            }
+          ],
+          "strict_source": true,
+          "strict_sink": false
+        }
+      ]
+    }
+  ]
+}
