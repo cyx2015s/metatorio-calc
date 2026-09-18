@@ -1,0 +1,13 @@
+[package]
+name = "metatorio-icons"
+version = "0.1.0"
+edition = "2024"
+description = "在 Rust 进程内解析并组合渲染 Factorio 图标（替代调用游戏 --dump-icon-sprites）"
+license = "MIT"
+
+[dependencies]
+metatorio-data = { path = "../metatorio-data" }
+serde_json = "1"
+png = "0.17"
+# 只解压 deflate（Factorio 的 mod zip 就是标准 deflate），其余压缩后端不要。
+zip = { version = "4", default-features = false, features = ["deflate-flate2"] }

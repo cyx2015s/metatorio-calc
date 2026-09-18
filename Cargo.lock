@@ -2391,6 +2391,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "metatorio-icons"
+version = "0.1.0"
+dependencies = [
+ "metatorio-data",
+ "png 0.17.16",
+ "serde_json",
+ "zip",
+]
+
+[[package]]
 name = "metatorio-runtime"
 version = "0.1.0"
 dependencies = [
@@ -6062,6 +6072,7 @@ checksum = "caa8cd6af31c3b31c6631b8f483848b91589021b28fffe50adada48d4f4d2ed1"
 dependencies = [
  "arbitrary",
  "crc32fast",
+ "flate2",
  "indexmap 2.14.0",
  "memchr",
 ]
