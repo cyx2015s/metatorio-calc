@@ -170,6 +170,94 @@ impl Rgba8 {
         out
     }
 
+    /// 双线性缩放（目标尺寸直接给出）。预乘域里插值，避免透明像素污染颜色。
+    pub fn scaled_bilinear(&self, new_w: u32, new_h: u32) -> Rgba8 {
+        let new_w = new_w.max(1);
+        let new_h = new_h.max(1);
+        if new_w == self.width && new_h == self.height {
+            return self.clone();
+        }
+        let mut out = Rgba8::transparent(new_w, new_h);
+        // 像素中心对齐：源坐标 = (目标坐标 + 0.5) * 源尺寸 / 目标尺寸 - 0.5。
+        let ratio_x = self.width as f64 / new_w as f64;
+        let ratio_y = self.height as f64 / new_h as f64;
+        let sample = |x: f64, y: f64| -> [f64; 4] {
+            let x = x.clamp(0.0, (self.width - 1) as f64);
+            let y = y.clamp(0.0, (self.height - 1) as f64);
+            let x0 = x.floor() as u32;
+            let y0 = y.floor() as u32;
+            let x1 = (x0 + 1).min(self.width - 1);
+            let y1 = (y0 + 1).min(self.height - 1);
+            let fx = x - x0 as f64;
+            let fy = y - y0 as f64;
+            let mut sum = [0.0f64; 4];
+            for (px, py, weight) in [
+                (x0, y0, (1.0 - fx) * (1.0 - fy)),
+                (x1, y0, fx * (1.0 - fy)),
+                (x0, y1, (1.0 - fx) * fy),
+                (x1, y1, fx * fy),
+            ] {
+                let [r, g, b, a] = self.pixel(px, py);
+                let alpha = a as f64 / 255.0;
+                sum[0] += r as f64 * alpha * weight;
+                sum[1] += g as f64 * alpha * weight;
+                sum[2] += b as f64 * alpha * weight;
+                sum[3] += a as f64 * weight;
+            }
+            sum
+        };
+        for y in 0..new_h {
+            for x in 0..new_w {
+                let sum = sample(
+                    (x as f64 + 0.5) * ratio_x - 0.5,
+                    (y as f64 + 0.5) * ratio_y - 0.5,
+                );
+                let alpha = sum[3].clamp(0.0, 255.0);
+                let straight = |value: f64| -> u8 {
+                    if alpha <= 0.0 {
+                        0
+                    } else {
+                        (value / (alpha / 255.0)).clamp(0.0, 255.0).round() as u8
+                    }
+                };
+                let index = ((y * new_w + x) * 4) as usize;
+                out.pixels[index] = straight(sum[0]);
+                out.pixels[index + 1] = straight(sum[1]);
+                out.pixels[index + 2] = straight(sum[2]);
+                out.pixels[index + 3] = alpha.round() as u8;
+            }
+        }
+        out
+    }
+
+    /// 「mipmap 式」缩放：先按 2×2 逐级降到还不小于目标的 mip 级别，再双线性插值到目标尺寸。
+    ///
+    /// 这是想贴近 Factorio 的做法（它给贴图生成 mipmap，缩小时选级别再线性过滤）：
+    /// 面积平均在 2 倍整数缩放时和它一致（都是 2×2 平均），非整数倍时两者的核不同。
+    pub fn scaled_mipmap(&self, scale: f64) -> Rgba8 {
+        let new_w = ((self.width as f64 * scale).round() as u32).max(1);
+        let new_h = ((self.height as f64 * scale).round() as u32).max(1);
+        if new_w == self.width && new_h == self.height {
+            return self.clone();
+        }
+        let mut level = 0u32;
+        while scale < 1.0
+            && (self.width >> (level + 1)) >= new_w
+            && (self.height >> (level + 1)) >= new_h
+        {
+            level += 1;
+        }
+        let mut base = self.clone();
+        for _ in 0..level {
+            base = base.scaled(0.5);
+        }
+        if base.width == new_w && base.height == new_h {
+            base
+        } else {
+            base.scaled_bilinear(new_w, new_h)
+        }
+    }
+
     /// 把 `layer` **居中**叠到本画布上，再整体偏移 `offset_x/offset_y` 像素（source-over）。
     pub fn composite_over_centered(&mut self, layer: &Rgba8, offset_x: i32, offset_y: i32) {
         let base_x = (self.width as i32 - layer.width as i32) / 2 + offset_x;

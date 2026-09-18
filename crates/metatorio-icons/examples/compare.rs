@@ -162,8 +162,20 @@ struct Args {
     fit_scale: bool,
     /// `--sweep`：把所有候选 scale 口径各跑一遍，按像素匹配率挑最好的。
     sweep: bool,
+    /// `--sweep-kernel`：把重采样核各跑一遍（比 `--sweep` 便宜：只有两个候选）。
+    sweep_kernel: bool,
+    /// `--sweep-multiplier`：把「显式 scale 的倍数」各跑一遍（定缩放层的量纲）。
+    sweep_multiplier: bool,
+    /// `--render-only <目录>`：只跑「像应用那样把图标全画出来」这一步并计时
+    /// （不读参考图），用来估算注册上下文要多久。
+    render_only: Option<PathBuf>,
     /// `--types`：额外打印「按原型类型」的完整统计（默认只按参考图目录汇总，输出有界）。
     types: bool,
+    /// `--sheet <out.png>`：把匹配率最差的若干张拼成一张「左=我们 / 右=官方」对照图。
+    /// 数字过关不代表看着像，反过来也一样——这张图是给人眼看的。
+    sheet: Option<PathBuf>,
+    /// `--sheet-count N`：对照图放几张（默认 12）。
+    sheet_count: usize,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -179,7 +191,12 @@ fn parse_args() -> Result<Args, String> {
     let mut pixels = Vec::new();
     let mut fit_scale = false;
     let mut sweep = false;
+    let mut sweep_kernel = false;
+    let mut sweep_multiplier = false;
+    let mut render_only = None;
     let mut types = false;
+    let mut sheet = None;
+    let mut sheet_count = 12usize;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         let mut next = |name: &str| -> Result<String, String> {
@@ -207,7 +224,16 @@ fn parse_args() -> Result<Args, String> {
             "--show" => show = Some(next("--show")?),
             "--fit-scale" => fit_scale = true,
             "--sweep" => sweep = true,
+            "--sweep-kernel" => sweep_kernel = true,
+            "--sweep-multiplier" => sweep_multiplier = true,
+            "--render-only" => render_only = Some(PathBuf::from(next("--render-only")?)),
             "--types" => types = true,
+            "--sheet" => sheet = Some(PathBuf::from(next("--sheet")?)),
+            "--sheet-count" => {
+                sheet_count = next("--sheet-count")?
+                    .parse::<usize>()
+                    .map_err(|error| format!("--sheet-count 解析失败: {error}"))?
+            }
             "--pixels" => {
                 for pair in next("--pixels")?.split(';') {
                     let (x, y) = pair
@@ -235,7 +261,12 @@ fn parse_args() -> Result<Args, String> {
         pixels,
         fit_scale,
         sweep,
+        sweep_kernel,
+        sweep_multiplier,
+        render_only,
         types,
+        sheet,
+        sheet_count,
     })
 }
 
@@ -272,6 +303,9 @@ fn main() -> Result<(), String> {
         .map(|record| record.name.clone())
         .collect();
 
+    if let Some(dir) = &args.render_only {
+        return render_only(dir, &store, &sources);
+    }
     if let Some(target) = &args.show {
         return show_prototype(target, &store, &sources, &references, &args.pixels);
     }
@@ -282,6 +316,26 @@ fn main() -> Result<(), String> {
             &references,
             args.only_type.as_deref(),
             args.limit,
+        );
+    }
+    if args.sweep_multiplier {
+        return sweep_multipliers(
+            &store,
+            &sources,
+            &references,
+            args.only_type.as_deref(),
+            args.limit,
+            args.tolerance,
+        );
+    }
+    if args.sweep_kernel {
+        return sweep_kernels(
+            &store,
+            &sources,
+            &references,
+            args.only_type.as_deref(),
+            args.limit,
+            args.tolerance,
         );
     }
     if args.sweep {
@@ -313,6 +367,10 @@ fn main() -> Result<(), String> {
         Default::default();
     // 按**参考图目录**汇总（实体 / 物品子类型 / 配方 …），比按原型 type 汇总更能说明覆盖面。
     let mut per_folder: std::collections::BTreeMap<String, CompareReport> = Default::default();
+    // 匹配率最差的若干张（`--sheet` 用它们出对照图）。
+    let mut worst_sheet: Vec<(f64, String, String)> = Vec::new();
+    // 匹配率分布：平均分会被少数烂样本拖住，分布能看出「是长尾还是一大片」。
+    let mut ratio_histogram: Vec<f64> = Vec::new();
 
     for (_, records) in &store.groups {
         for record in records.values() {
@@ -379,6 +437,20 @@ fn main() -> Result<(), String> {
                             .or_default()
                             .record(&record.name, &stats);
                     }
+                    if args.sheet.is_some() {
+                        worst_sheet.push((
+                            stats.match_ratio(),
+                            record.type_.clone(),
+                            record.name.clone(),
+                        ));
+                        worst_sheet.sort_by(|left, right| {
+                            left.0
+                                .partial_cmp(&right.0)
+                                .unwrap_or(std::cmp::Ordering::Equal)
+                        });
+                        worst_sheet.truncate(args.sheet_count);
+                    }
+                    ratio_histogram.push(stats.match_ratio());
                 }
                 Err(error) => {
                     report.record_render_failure();
@@ -429,6 +501,23 @@ fn main() -> Result<(), String> {
     println!("\n最差 10 个：");
     for (name, ratio, delta) in &report.worst {
         println!("  {name}: 匹配 {:.2}%，最大差 {delta}", ratio * 100.0);
+    }
+    if !ratio_histogram.is_empty() {
+        let bucket = |low: f64, high: f64| {
+            ratio_histogram
+                .iter()
+                .filter(|ratio| **ratio >= low && **ratio < high)
+                .count()
+        };
+        println!(
+            "\n匹配率分布：<50% {} 张、50~80% {} 张、80~95% {} 张、95~99% {} 张、≥99% {} 张（共 {}）",
+            bucket(0.0, 0.5),
+            bucket(0.5, 0.8),
+            bucket(0.8, 0.95),
+            bucket(0.95, 0.99),
+            bucket(0.99, 1.01),
+            ratio_histogram.len()
+        );
     }
     println!("\n按参考图目录：");
     for (folder, folder_report) in &per_folder {
@@ -511,7 +600,112 @@ fn main() -> Result<(), String> {
             println!("  {folder}: {count} 张");
         }
     }
+    if let Some(path) = &args.sheet {
+        write_sheet(path, &worst_sheet, &store, &sources, &mut references)?;
+        println!(
+            "\n对照图：{}（{} 行；每行左=我们、右=官方，×2 放大，白底=透明）",
+            path.display(),
+            worst_sheet.len()
+        );
+    }
     Ok(())
+}
+
+/// 把最差的若干张拼成一张对照图：每行「左=我们 / 右=官方」，白底，×2 放大。
+///
+/// 数字过关不等于看着像：这张图是给人眼看的（`--sheet`）。
+fn write_sheet(
+    out: &Path,
+    entries: &[(f64, String, String)],
+    store: &metatorio_data::store::PrototypeStore,
+    sources: &IconSources,
+    references: &mut ReferenceIndex,
+) -> Result<(), String> {
+    const SCALE: u32 = 2;
+    const GAP: u32 = 6;
+    let mut rows: Vec<(Rgba8, Rgba8)> = Vec::new();
+    for (_, type_, name) in entries {
+        let record = store
+            .groups
+            .values()
+            .flat_map(|records| records.values())
+            .find(|record| &record.type_ == type_ && &record.name == name)
+            .ok_or_else(|| format!("找不到原型 {type_}/{name}"))?;
+        let ours = metatorio_icons::render_record_icon_with(
+            store,
+            record,
+            sources,
+            RenderOptions::default(),
+        )
+        .map_err(|error| error.to_string())?
+        .scaled(SCALE as f64);
+        let preferred = reference_folder(record);
+        let (folder, path) = references
+            .resolve(&preferred, name)
+            .ok_or_else(|| format!("官方导出里找不到 {type_}/{name}"))?;
+        references.mark_used(&folder, name);
+        let reference = Rgba8::decode_png(&std::fs::read(&path).map_err(|e| e.to_string())?)
+            .map_err(|error| error.to_string())?
+            .scaled(SCALE as f64);
+        rows.push((ours, reference));
+    }
+    if rows.is_empty() {
+        return Err("没有可画进对照图的样本".to_string());
+    }
+    let cell_w = rows
+        .iter()
+        .map(|(ours, reference)| ours.width.max(reference.width))
+        .max()
+        .unwrap_or(SCALE);
+    let row_h = rows
+        .iter()
+        .map(|(ours, reference)| ours.height.max(reference.height))
+        .max()
+        .unwrap_or(SCALE);
+    let width = cell_w * 2 + GAP;
+    let height = row_h * rows.len() as u32 + GAP * (rows.len() as u32 - 1);
+    let mut sheet = Rgba8::from_pixels(width, height, vec![255; (width * height * 4) as usize]);
+    for (index, (ours, reference)) in rows.iter().enumerate() {
+        let y = index as u32 * (row_h + GAP);
+        blit_centered(&mut sheet, ours, 0, y, cell_w, row_h);
+        blit_centered(&mut sheet, reference, cell_w + GAP, y, cell_w, row_h);
+    }
+    std::fs::write(out, sheet.encode_png()?).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+/// 在 `(x, y)` 起的 `cell_w × cell_h` 格子里居中放一张图（覆盖到白底上）。
+fn blit_centered(dst: &mut Rgba8, src: &Rgba8, x: u32, y: u32, cell_w: u32, cell_h: u32) {
+    let ox = x + cell_w.saturating_sub(src.width) / 2;
+    let oy = y + cell_h.saturating_sub(src.height) / 2;
+    for sy in 0..src.height {
+        for sx in 0..src.width {
+            let (dx, dy) = (ox + sx, oy + sy);
+            if dx >= dst.width || dy >= dst.height {
+                continue;
+            }
+            let [r, g, b, a] = src.pixel(sx, sy);
+            if a == 0 {
+                continue;
+            }
+            let index = ((dy * dst.width + dx) * 4) as usize;
+            if a == 255 {
+                dst.pixels[index] = r;
+                dst.pixels[index + 1] = g;
+                dst.pixels[index + 2] = b;
+                dst.pixels[index + 3] = 255;
+                continue;
+            }
+            let alpha = a as f64 / 255.0;
+            let mix = |source: u8, dest: u8| -> u8 {
+                (source as f64 * alpha + dest as f64 * (1.0 - alpha)).round() as u8
+            };
+            dst.pixels[index] = mix(r, dst.pixels[index]);
+            dst.pixels[index + 1] = mix(g, dst.pixels[index + 1]);
+            dst.pixels[index + 2] = mix(b, dst.pixels[index + 2]);
+            dst.pixels[index + 3] = 255;
+        }
+    }
 }
 
 #[allow(dead_code)]
@@ -709,6 +903,206 @@ fn fit_layer_scale(
     Ok(())
 }
 
+/// `--render-only`：只跑应用注册上下文时那一步（`render_all_icons`，含解码/缩放/编码/写盘），
+/// 不读官方参考图。用来估「注册一个上下文要多久」，也方便对比 debug / release 的吞吐。
+fn render_only(
+    out_dir: &Path,
+    store: &metatorio_data::store::PrototypeStore,
+    sources: &IconSources,
+) -> Result<(), String> {
+    let start = std::time::Instant::now();
+    let report =
+        metatorio_icons::render_all_icons(store, sources, out_dir, RenderOptions::default())?;
+    let elapsed = start.elapsed();
+    let per_icon = if report.written == 0 {
+        0.0
+    } else {
+        elapsed.as_secs_f64() / report.written as f64
+    };
+    println!(
+        "\n=== 只渲染（含解码/缩放/编码/写盘）===\n写出 {} 张（推导 {}），耗时 {:.1}s，\
+         平均 {:.1} ms/张，约 {:.0} 张/秒",
+        report.written,
+        report.written_derived,
+        elapsed.as_secs_f64(),
+        per_icon * 1000.0,
+        if per_icon > 0.0 { 1.0 / per_icon } else { 0.0 }
+    );
+    println!(
+        "失败：无图标定义 {}、推导失败 {}、缺文件 {}、解码 {}",
+        report.no_icon, report.derived_missing, report.missing_source, report.decode_failed
+    );
+    println!("输出目录：{}", out_dir.display());
+    Ok(())
+}
+
+/// `--sweep-multiplier`：把「显式 scale 的倍数」各跑一遍，定「层绘制尺寸 = 层边长 × scale」
+/// 里的量纲。
+///
+/// 背景（对照图看出来的）：官方 `recipe/*-recycling`、`space-connection` 里显式 `scale = 0.4`
+/// / `0.333` 的层，画出来明显比我们的大一截；用「包围盒反推」不可靠（多层叠在一起），
+/// 所以直接按**整图匹配率**扫倍数。只改「显式给了 scale」的层，没给的层不受影响。
+fn sweep_multipliers(
+    store: &metatorio_data::store::PrototypeStore,
+    sources: &IconSources,
+    references: &ReferenceIndex,
+    only_type: Option<&str>,
+    limit: Option<usize>,
+    tolerance: u8,
+) -> Result<(), String> {
+    let mut results: Vec<(f64, CompareReport)> = Vec::new();
+    for multiplier in [1.0f64, 1.25, 1.5, 1.75, 1.875, 2.0, 2.25, 2.5, 3.0] {
+        let mut report = CompareReport::default();
+        let mut visited = 0usize;
+        'outer: for records in store.groups.values() {
+            for record in records.values() {
+                if let Some(only) = only_type {
+                    if record.type_ != only {
+                        continue;
+                    }
+                }
+                if limit.is_some_and(|limit| visited >= limit) {
+                    break 'outer;
+                }
+                let Some((_, reference_path)) =
+                    references.resolve(&reference_folder(record), &record.name)
+                else {
+                    continue;
+                };
+                let Some(component) = record.component::<metatorio_data::IconComponent>() else {
+                    continue;
+                };
+                // 没有任何显式 scale 的原型，倍数对它没有影响 → 跳过，让样本只反映缩放层。
+                if !component.icons.iter().any(|layer| layer.scale.is_some()) {
+                    continue;
+                }
+                visited += 1;
+                let mut scaled = component.clone();
+                for layer in &mut scaled.icons {
+                    if let Some(scale) = layer.scale {
+                        layer.scale = Some(scale * multiplier);
+                    }
+                }
+                let Ok(ours) = metatorio_icons::render::render_icon_with(
+                    &scaled,
+                    metatorio_icons::render::expected_icon_size(&record.type_),
+                    sources,
+                    RenderOptions::default(),
+                ) else {
+                    report.record_render_failure();
+                    continue;
+                };
+                let Ok(reference) =
+                    Rgba8::decode_png(&std::fs::read(&reference_path).unwrap_or_default())
+                else {
+                    report.record_missing_reference();
+                    continue;
+                };
+                let stats = diff_against_official(&ours, &reference, tolerance);
+                report.record(&format!("{}/{}", record.type_, record.name), &stats);
+            }
+        }
+        results.push((multiplier, report));
+    }
+    println!("\n=== 显式 scale 的倍数定标（只比「有显式 scale 的层」的原型）===");
+    for (multiplier, report) in &results {
+        println!(
+            "  ×{multiplier:<5}: 平均 {:>6.2}%  完好 {}/{}",
+            report.average_match_ratio() * 100.0,
+            report.exact,
+            report.compared()
+        );
+    }
+    if let Some((multiplier, report)) = results.iter().max_by(|left, right| {
+        left.1
+            .average_match_ratio()
+            .partial_cmp(&right.1.average_match_ratio())
+            .unwrap()
+    }) {
+        println!(
+            "\n最佳：×{multiplier}，平均匹配 {:.2}%",
+            report.average_match_ratio() * 100.0
+        );
+    }
+    Ok(())
+}
+
+/// `--sweep-kernel`：把重采样核各跑一遍（其余口径用默认值），按像素匹配率挑最好的。
+fn sweep_kernels(
+    store: &metatorio_data::store::PrototypeStore,
+    sources: &IconSources,
+    references: &ReferenceIndex,
+    only_type: Option<&str>,
+    limit: Option<usize>,
+    tolerance: u8,
+) -> Result<(), String> {
+    let mut results: Vec<(metatorio_icons::Resample, CompareReport)> = Vec::new();
+    for resample in metatorio_icons::Resample::all() {
+        let options = RenderOptions {
+            resample,
+            ..RenderOptions::default()
+        };
+        let mut report = CompareReport::default();
+        let mut visited = 0usize;
+        'outer: for records in store.groups.values() {
+            for record in records.values() {
+                if let Some(only) = only_type {
+                    if record.type_ != only {
+                        continue;
+                    }
+                }
+                if limit.is_some_and(|limit| visited >= limit) {
+                    break 'outer;
+                }
+                let Some((_, reference_path)) =
+                    references.resolve(&reference_folder(record), &record.name)
+                else {
+                    continue;
+                };
+                visited += 1;
+                let Ok(ours) =
+                    metatorio_icons::render_record_icon_with(store, record, sources, options)
+                else {
+                    report.record_render_failure();
+                    continue;
+                };
+                let Ok(reference) =
+                    Rgba8::decode_png(&std::fs::read(&reference_path).unwrap_or_default())
+                else {
+                    report.record_missing_reference();
+                    continue;
+                };
+                let stats = diff_against_official(&ours, &reference, tolerance);
+                report.record(&format!("{}/{}", record.type_, record.name), &stats);
+            }
+        }
+        results.push((resample, report));
+    }
+    println!("\n=== 重采样核定标（匹配率越高越好）===");
+    for (resample, report) in &results {
+        println!(
+            "  {:<16}: 平均 {:>6.2}%  完好 {}/{}",
+            resample.name(),
+            report.average_match_ratio() * 100.0,
+            report.exact,
+            report.compared()
+        );
+    }
+    if let Some((resample, report)) = results.iter().max_by(|left, right| {
+        left.1
+            .average_match_ratio()
+            .partial_cmp(&right.1.average_match_ratio())
+            .unwrap()
+    }) {
+        println!(
+            "\n最佳：{}，平均匹配 {:.2}%",
+            resample.name(),
+            report.average_match_ratio() * 100.0
+        );
+    }
+    Ok(())
+}
+
 /// `--sweep`：把候选 scale 口径各跑一遍，按像素匹配率挑最好的。
 fn sweep_laws(
     store: &metatorio_data::store::PrototypeStore,
@@ -725,6 +1119,7 @@ fn sweep_laws(
             let options = RenderOptions {
                 scale_law: law,
                 shift_pixels_per_unit: shift,
+                ..RenderOptions::default()
             };
             let mut report = CompareReport::default();
             let mut visited = 0usize;

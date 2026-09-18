@@ -87,23 +87,30 @@ pub fn expected_icon_size(type_: &str) -> u32 {
 }
 
 /// 层的尺寸口径（拿官方导出比对来定标：`examples/compare.rs --sweep`）。
+///
+/// **采用 [`ScaleLaw::DoubledDocDefault`]**：`2 × 层边长 × scale`，没给 `scale` 时用官方
+/// 文档的默认 `(expected/2)/层边长`——即 `2 × 层边长 × scale.unwrap_or(expected/(2×层边长))`。
+/// 没给 scale 时结果正好是 `expected`（画布边长），给了 scale 时是「层边长 × scale × 2」。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScaleLaw {
-    /// `icon_size × scale.unwrap_or(1)`（默认）
+    /// 官方文档公式**整体乘 2**（当前采用，逐像素定标的结果）。
+    DoubledDocDefault,
+    /// `层边长 × scale.unwrap_or(1)`
     Natural,
-    /// `icon_size × scale.unwrap_or(1) × 2`
+    /// `层边长 × scale.unwrap_or(1) × 2`
     NaturalDouble,
-    /// 忽略 `scale`，永远画 `icon_size`
+    /// 忽略 `scale`，永远画层边长
     IgnoreScale,
     /// `expected × scale.unwrap_or(1)`
     ExpectedTimesScale,
-    /// 官方文档写的默认：`scale.unwrap_or((expected/2)/icon_size)`
+    /// 官方文档写的默认（**不乘 2**）：`层边长 × scale.unwrap_or((expected/2)/层边长)`
     DocDefault,
 }
 
 impl ScaleLaw {
-    pub fn all() -> [ScaleLaw; 5] {
+    pub fn all() -> [ScaleLaw; 6] {
         [
+            ScaleLaw::DoubledDocDefault,
             ScaleLaw::Natural,
             ScaleLaw::NaturalDouble,
             ScaleLaw::IgnoreScale,
@@ -114,11 +121,41 @@ impl ScaleLaw {
 
     pub fn name(self) -> &'static str {
         match self {
-            ScaleLaw::Natural => "icon_size × scale",
-            ScaleLaw::NaturalDouble => "icon_size × scale × 2",
-            ScaleLaw::IgnoreScale => "icon_size（忽略 scale）",
+            ScaleLaw::DoubledDocDefault => "文档默认 × 2（采用）",
+            ScaleLaw::Natural => "层边长 × scale",
+            ScaleLaw::NaturalDouble => "层边长 × scale × 2",
+            ScaleLaw::IgnoreScale => "层边长（忽略 scale）",
             ScaleLaw::ExpectedTimesScale => "expected × scale",
-            ScaleLaw::DocDefault => "scale.unwrap_or((expected/2)/icon_size)",
+            ScaleLaw::DocDefault => "文档默认（不乘 2）",
+        }
+    }
+}
+
+/// 缩放层的重采样核（拿官方导出比对来定标：`examples/compare.rs --sweep-kernel`）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Resample {
+    /// 面积平均（目标像素覆盖的源区域求平均）。
+    AreaAverage,
+    /// 先按 2×2 逐级降到 mip 级别，再双线性插值（贴近 Factorio 用 mipmap 的做法）。
+    MipmapBilinear,
+}
+
+impl Resample {
+    pub fn all() -> [Resample; 2] {
+        [Resample::AreaAverage, Resample::MipmapBilinear]
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Resample::AreaAverage => "面积平均",
+            Resample::MipmapBilinear => "mipmap+双线性",
+        }
+    }
+
+    fn apply(self, image: &Rgba8, scale: f64) -> Rgba8 {
+        match self {
+            Resample::AreaAverage => image.scaled(scale),
+            Resample::MipmapBilinear => image.scaled_mipmap(scale),
         }
     }
 }
@@ -129,13 +166,16 @@ pub struct RenderOptions {
     pub scale_law: ScaleLaw,
     /// `shift` 的像素换算：1 单位 = 这么多像素（官方文档说 1 单位 = 2 像素）。
     pub shift_pixels_per_unit: f64,
+    /// 缩放层的重采样核。
+    pub resample: Resample,
 }
 
 impl Default for RenderOptions {
     fn default() -> Self {
         Self {
-            scale_law: ScaleLaw::Natural,
+            scale_law: ScaleLaw::DoubledDocDefault,
             shift_pixels_per_unit: 2.0,
+            resample: Resample::AreaAverage,
         }
     }
 }
@@ -323,7 +363,7 @@ pub fn render_icon_with(
         let drawn = layer_drawn_size(layer, layer_size, expected, options.scale_law);
         let scale = drawn as f64 / tile.width as f64;
         if (scale - 1.0).abs() > f64::EPSILON {
-            tile = tile.scaled(scale);
+            tile = options.resample.apply(&tile, scale);
         }
         let shift = layer.shift.unwrap_or_default();
         let dx = shift.0 * options.shift_pixels_per_unit;
@@ -455,15 +495,15 @@ fn layers_of(component: &IconComponent, type_default_size: u32) -> Vec<IconData>
 /// 层在画布上的绘制边长（像素）。
 fn layer_drawn_size(layer: &IconData, layer_size: u32, expected: u32, law: ScaleLaw) -> u32 {
     let natural = layer_size as f64;
+    let doc_default = (expected as f64 / 2.0) / natural.max(1.0);
     let size = match law {
+        // 官方文档公式整体乘 2：没给 scale 时 = expected，给了 scale 时 = 层边长 × scale × 2。
+        ScaleLaw::DoubledDocDefault => 2.0 * natural * layer.scale.unwrap_or(doc_default),
         ScaleLaw::Natural => natural * layer.scale.unwrap_or(1.0),
         ScaleLaw::NaturalDouble => natural * layer.scale.unwrap_or(1.0) * 2.0,
         ScaleLaw::IgnoreScale => natural,
         ScaleLaw::ExpectedTimesScale => expected as f64 * layer.scale.unwrap_or(1.0),
-        ScaleLaw::DocDefault => {
-            let default = (expected as f64 / 2.0) / natural.max(1.0);
-            natural * layer.scale.unwrap_or(default)
-        }
+        ScaleLaw::DocDefault => natural * layer.scale.unwrap_or(doc_default),
     };
     size.round().max(1.0) as u32
 }
@@ -597,6 +637,39 @@ mod tests {
             .get(metatorio_data::store::PrototypeGroup::Item, "iron-plate")
             .expect("物品存在");
         assert!(derived_product(&store, item).is_none());
+    }
+
+    /// 绘制尺寸口径：没给 `scale` 时画布边长；给了 `scale` 时「层边长 × scale × 2」。
+    ///
+    /// 这条是**逐像素定标**出来的：显式 scale 的 463 张原型上，×2 是明显的最优点
+    /// （74.40%，×1 只有 70.21%、×2.25 掉到 66.75%），也正好对上官方文档那句
+    /// `scale.unwrap_or((expected/2)/icon_size)`——文档公式整体还要乘 2。
+    #[test]
+    fn drawn_size_follows_the_calibrated_law() {
+        let layer = |scale: Option<f64>| IconData {
+            icon: "a.png".to_string(),
+            scale,
+            ..IconData::default()
+        };
+        // 没给 scale → 画布边长（64）
+        assert_eq!(
+            layer_drawn_size(&layer(None), 64, 64, ScaleLaw::DoubledDocDefault),
+            64
+        );
+        // 给了 scale → 层边长 × scale × 2
+        assert_eq!(
+            layer_drawn_size(&layer(Some(0.4)), 64, 64, ScaleLaw::DoubledDocDefault),
+            51
+        );
+        assert_eq!(
+            layer_drawn_size(&layer(Some(0.333)), 64, 64, ScaleLaw::DoubledDocDefault),
+            43
+        );
+        // 层的 icon_size 与画布不同、又没给 scale：仍然画到画布那么大
+        assert_eq!(
+            layer_drawn_size(&layer(None), 32, 64, ScaleLaw::DoubledDocDefault),
+            64
+        );
     }
 
     /// 画布口径：给了 `icons` 就**不看**原型的 `icon_size`，取**第 0 层**的层边长
