@@ -1192,8 +1192,20 @@ fn export_game_context<R: TauriRuntime>(
     config_text.push_str("[general]\nlocale=zh-CN\n");
     std::fs::write(&config, config_text).map_err(|error| error.to_string())?;
 
-    let extra: Vec<String> = match mod_dir {
-        Some(dir) => vec!["--mod-directory".to_string(), dir.to_string()],
+    // mod 目录：用户指定了就用它；没指定就**按游戏自己的配置推导**（zip 便携版是
+    // `<游戏>/mods`，安装版是 `%APPDATA%\Factorio\mods`），并把推导结果显式传给游戏
+    // ——这样「dump 里加载的 mod」与「我们解析图标、记元数据用的 mod 目录」一定是同一个。
+    let mod_dir: Option<PathBuf> = mod_dir
+        .map(PathBuf::from)
+        .or_else(|| game_mods_dir(&exe).filter(|dir| dir.is_dir()));
+    if let Some(dir) = &mod_dir {
+        eprintln!("本次导出使用的 mod 目录：{}", dir.display());
+    }
+    let extra: Vec<String> = match &mod_dir {
+        Some(dir) => vec![
+            "--mod-directory".to_string(),
+            dir.to_string_lossy().to_string(),
+        ],
         None => Vec::new(),
     };
 
@@ -1214,21 +1226,22 @@ fn export_game_context<R: TauriRuntime>(
     }
     let raw = std::fs::read(&dump_path).map_err(|error| error.to_string())?;
     let name = mod_dir
-        .and_then(|dir| Path::new(dir).file_name())
+        .as_ref()
+        .and_then(|dir| dir.file_name())
         .and_then(|name| name.to_str())
         .map(str::to_string)
         .unwrap_or_else(|| "vanilla".to_string());
     // 元数据只记「游戏版本 + 导出时启用的 mod（名字 + 版本）」：**路径不记**
     // ——它只在导出这一刻有用（图标当场就渲染好了），存下来换机器/换目录只会误导。
     let game_version = game_version_of(&exe);
-    let mods = enabled_mods(&exe, mod_dir);
+    let mods = enabled_mods(mod_dir.as_deref());
     // 图标来源：从可执行文件路径推出游戏根目录（`<游戏>/bin/x64/factorio.exe` →
-    // `<游戏>`，里面找 `data/base`），mod 目录沿用本次导出的那个（None = 游戏自带
-    // 的 `<游戏>/mods`）。推不出来就老实说「这个上下文没有图标」。
+    // `<游戏>`，里面找 `data/base`），mod 目录用上面定下来的那个。
+    // 推不出游戏根目录就老实说「这个上下文没有图标」。
     let icon = match metatorio_icons::sources::game_root_from_exe(&exe) {
         Some(game_root) => IconSource::Render {
             game_root,
-            mod_dir: mod_dir.map(PathBuf::from),
+            mod_dir: mod_dir.clone(),
         },
         None => {
             eprintln!("无法从 {} 推断游戏根目录，本次不渲染图标", exe.display());
@@ -1255,6 +1268,130 @@ fn export_game_context<R: TauriRuntime>(
     })
 }
 
+/// 用户没指定 mod 目录时，**按游戏自己的配置推导**它（而不是一律假设 `<游戏>/mods`）。
+///
+/// 规则（实测这台 zip 便携版 + 官方 `config-path.cfg` 注释）：
+/// - `config-path.cfg` 里的 `config-path=__PATH__executable__/../../config` 指向游戏配置目录；
+/// - `<配置目录>/config.ini` 的 `[path] write-data` 就是用户数据目录，**mod 在 `<write-data>/mods`**
+///   （本机是 `__PATH__executable__\..\..` ⇒ `<游戏>/mods`）；
+/// - 配置里没写 `write-data` 时看 `use-system-read-write-data-directories`：`true`（安装版）
+///   用系统目录（Windows `%APPDATA%\Factorio`、其它 `~/.factorio`），`false`（zip 版）用游戏根目录。
+///
+/// 拿不到配置就返回 `None`——调用方按「不知道 mod 在哪」处理，不要瞎猜。
+fn game_mods_dir(exe: &Path) -> Option<PathBuf> {
+    let exe_dir = exe.parent()?;
+    // `config-path.cfg` 通常在游戏根目录（`<root>/bin/x64/factorio.exe` 往上两级）。
+    let mut root = exe_dir;
+    let mut config_path_cfg = None;
+    for _ in 0..3 {
+        let candidate = root.join("config-path.cfg");
+        if candidate.is_file() {
+            config_path_cfg = Some(candidate);
+            break;
+        }
+        root = root.parent()?;
+    }
+    let config_path_cfg = config_path_cfg?;
+    let root = config_path_cfg.parent()?;
+    let raw = std::fs::read_to_string(&config_path_cfg).ok()?;
+    let config_dir = ini_or_cfg_value(&raw, "config-path")
+        .and_then(|value| expand_executable_path(&value, exe_dir))
+        .unwrap_or_else(|| root.join("config"));
+    if let Ok(config) = std::fs::read_to_string(config_dir.join("config.ini")) {
+        if let Some(write_data) = ini_section_value(&config, "path", "write-data")
+            .and_then(|value| expand_executable_path(&value, exe_dir))
+        {
+            return Some(write_data.join("mods"));
+        }
+    }
+    let use_system = ini_or_cfg_value(&raw, "use-system-read-write-data-directories")
+        .map(|value| value.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    if use_system {
+        system_factorio_dir().map(|dir| dir.join("mods"))
+    } else {
+        Some(root.join("mods"))
+    }
+}
+
+/// 系统用户数据目录（安装版 mod 的位置）。
+fn system_factorio_dir() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        std::env::var_os("APPDATA").map(|appdata| PathBuf::from(appdata).join("Factorio"))
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".factorio"))
+    }
+}
+
+/// `key=value` 形式（`config-path.cfg` 的写法，允许 `#` 注释与空格）。
+fn ini_or_cfg_value(text: &str, key: &str) -> Option<String> {
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.starts_with('#') && !line.starts_with(';'))
+        .find_map(|line| {
+            let (name, value) = line.split_once('=')?;
+            (name.trim() == key).then(|| value.trim().to_string())
+        })
+}
+
+/// `[section]` 下的 `key=value`（`config.ini` 的写法）。
+fn ini_section_value(text: &str, section: &str, key: &str) -> Option<String> {
+    let mut in_section = false;
+    for line in text.lines().map(str::trim) {
+        if line.starts_with('[') {
+            in_section = line.trim_start_matches('[').trim_end_matches(']') == section;
+            continue;
+        }
+        if !in_section || line.starts_with('#') || line.starts_with(';') {
+            continue;
+        }
+        if let Some((name, value)) = line.split_once('=') {
+            if name.trim() == key {
+                return Some(value.trim().to_string());
+            }
+        }
+    }
+    None
+}
+
+/// 把 `__PATH__executable__` 展开成可执行文件所在目录；还剩别的占位符（例如
+/// `__PATH__system-write-data__`）就返回 `None`，交给上层走系统目录的分支。
+fn expand_executable_path(value: &str, exe_dir: &Path) -> Option<PathBuf> {
+    let expanded = value.replace("__PATH__executable__", &exe_dir.to_string_lossy());
+    if expanded.contains("__PATH__") {
+        return None;
+    }
+    // Factorio 在 Windows 上写 `\`、其它平台写 `/`：都归一化成路径分隔符再拼。
+    let normalized = expanded.replace('\\', std::path::MAIN_SEPARATOR_STR);
+    let path = PathBuf::from(normalized);
+    let path = if path.is_absolute() {
+        path
+    } else {
+        exe_dir.join(path)
+    };
+    // 配置里是 `…\..\..` 这种相对写法：做一次**词法**归一化（不碰磁盘、不要求存在），
+    // 否则日志里会是一串 `..`，比较路径时也不相等。
+    Some(normalize_path(path))
+}
+
+/// 词法归一化：去掉 `.`、让 `..` 抵消前一段。
+fn normalize_path(path: PathBuf) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            std::path::Component::CurDir => {}
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
 /// 跑一次 `factorio --version` 拿版本号（`Version: 2.1.17 (build …)` 的第一行）。
 ///
 /// 拿不到就返回 `None`——**不猜**（不写进上下文，UI 显示「版本未知」）。
@@ -1277,15 +1414,11 @@ fn game_version_of(exe: &Path) -> Option<String> {
 /// 启用名单读 `<mod 目录>/mod-list.json`；版本取**游戏实际会加载的那份文件**的版本
 /// （`loaded_mods` 已经按 Factorio 的约定挑过：目录名必须是 id 且 `info.json` 直接在里面、
 /// zip 文件名必须带版本号、同名多版本取 mod-list 锁定的那个、否则取最新）。
-/// 没传 `--mod-directory` 时按游戏自带的 `<游戏>/mods` 找（与图标来源同一约定）。
+/// 传 `None` 时按游戏自己的配置推导 mod 目录（见 [`game_mods_dir`]）。
 /// `mod-list.json` 读不到 → 空表（**不知道哪些启用**，不猜）。
-fn enabled_mods(exe: &Path, mod_dir: Option<&str>) -> Vec<ModEntry> {
-    let dir = match mod_dir {
-        Some(dir) => PathBuf::from(dir),
-        None => match metatorio_icons::sources::game_root_from_exe(exe) {
-            Some(game_root) => game_root.join("mods"),
-            None => return Vec::new(),
-        },
+fn enabled_mods(mod_dir: Option<&Path>) -> Vec<ModEntry> {
+    let Some(dir) = mod_dir else {
+        return Vec::new();
     };
     let enabled: std::collections::HashSet<String> = metatorio_icons::read_mod_list(&dir)
         .into_iter()
@@ -4311,6 +4444,54 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// mod 目录推导：便携版读 `config.ini` 的 `write-data`（本机就是
+    /// `__PATH__executable__\..\..` ⇒ `<游戏>/mods`）；配置里没写时看
+    /// `use-system-read-write-data-directories`；都拿不到就不猜。
+    #[test]
+    fn mod_directory_follows_the_game_config() {
+        let root = std::env::temp_dir().join(format!("metatorio-moddir-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let exe_dir = root.join("bin").join("x64");
+        let config_dir = root.join("config");
+        std::fs::create_dir_all(&exe_dir).unwrap();
+        std::fs::create_dir_all(&config_dir).unwrap();
+        let exe = exe_dir.join("factorio.exe");
+        std::fs::write(&exe, b"n/a").unwrap();
+        std::fs::write(
+            root.join("config-path.cfg"),
+            "config-path=__PATH__executable__/../../config\nuse-system-read-write-data-directories=false\n",
+        )
+        .unwrap();
+        // 便携版：write-data 指向游戏根目录（用 Windows 风格分隔符，和游戏写的一致）
+        std::fs::write(
+            config_dir.join("config.ini"),
+            "[path]\nread-data=__PATH__executable__\\..\\..\\data\nwrite-data=__PATH__executable__\\..\\..\n",
+        )
+        .unwrap();
+        assert_eq!(game_mods_dir(&exe), Some(root.join("mods")));
+
+        // 安装版：配置里没写 write-data 且用系统目录 → 结果落在系统用户目录下的 mods
+        std::fs::write(config_dir.join("config.ini"), "[general]\nlocale=zh-CN\n").unwrap();
+        std::fs::write(
+            root.join("config-path.cfg"),
+            "config-path=__PATH__executable__/../../config\nuse-system-read-write-data-directories=true\n",
+        )
+        .unwrap();
+        let system = game_mods_dir(&exe).expect("系统目录也要能推导");
+        assert!(system.ends_with("mods"), "{}", system.display());
+        assert!(
+            system.to_string_lossy().contains("Factorio")
+                || system.to_string_lossy().contains(".factorio"),
+            "{}",
+            system.display()
+        );
+
+        // 连 config-path.cfg 都没有 → 不猜
+        std::fs::remove_file(root.join("config-path.cfg")).unwrap();
+        assert_eq!(game_mods_dir(&exe), None);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// 导出时启用的 mod：只收 `mod-list.json` 里 enabled 的（去掉 `base`），
     /// 版本从 `info.json` 读；名字对不上就留空串（不猜版本）。
     #[test]
@@ -4341,7 +4522,7 @@ mod tests {
         )
         .unwrap();
 
-        let mods = enabled_mods(&root, Some(mods.to_str().unwrap()));
+        let mods = enabled_mods(Some(Path::new(mods.to_str().unwrap())));
         // `disabled-mod` 没启用不出现；`ghost-mod` 虽然启用但文件不在（游戏也不会加载它）
         // → 不记；`base` 不算 mod。
         assert_eq!(
