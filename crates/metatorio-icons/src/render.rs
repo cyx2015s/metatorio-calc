@@ -160,6 +160,38 @@ impl Resample {
     }
 }
 
+/// 画布口径。
+///
+/// 两条都实测过（`examples/compare.rs --check-canvas` 比官方参考图的**尺寸**、全量比对比
+/// **逐像素**、`--sheet` 出对照图给人眼看）：
+/// - [`CanvasRule::LayerUnion`]（采用）：画布 = 所有层绘制矩形（含 `shift`）的并集包围盒。
+///   尺寸与官方一致率 **100%（vanilla 1885/1885）/ 97.9%（py）**；它把整套构图按原生分辨率
+///   完整画出来，不会裁掉溢出部分。看图上比官方更好（官方的导出有时只写半分辨率版本，
+///   例如 `recipe/empty-acetylene-canister` 官方 35×35、按并集算出来是 70×70）。
+/// - [`CanvasRule::FirstLayer`]：画布 = 第 0 层的层边长。**逐像素匹配率更高**
+///   （vanilla 92.37% vs 92.34%、py 86.99% vs 83.94%），但那是因为它把图标裁到第 0 层那么大，
+///   构图溢出部分直接没了；数值好看不代表图好看。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CanvasRule {
+    /// 画布 = 第 0 层的层边长（没写则类型默认）。
+    FirstLayer,
+    /// 画布 = 所有层绘制矩形的并集包围盒（含 `shift`）；**采用**。
+    LayerUnion,
+}
+
+impl CanvasRule {
+    pub fn all() -> [CanvasRule; 2] {
+        [CanvasRule::LayerUnion, CanvasRule::FirstLayer]
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            CanvasRule::FirstLayer => "第 0 层层边长",
+            CanvasRule::LayerUnion => "层绘制矩形并集（采用）",
+        }
+    }
+}
+
 /// 渲染参数（默认 = 当前模型；由 sweep 定标后写回默认值）。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RenderOptions {
@@ -168,6 +200,8 @@ pub struct RenderOptions {
     pub shift_pixels_per_unit: f64,
     /// 缩放层的重采样核。
     pub resample: Resample,
+    /// 画布口径。
+    pub canvas: CanvasRule,
 }
 
 impl Default for RenderOptions {
@@ -176,6 +210,7 @@ impl Default for RenderOptions {
             scale_law: ScaleLaw::DoubledDocDefault,
             shift_pixels_per_unit: 2.0,
             resample: Resample::AreaAverage,
+            canvas: CanvasRule::LayerUnion,
         }
     }
 }
@@ -340,12 +375,45 @@ pub fn render_icon_with(
         });
     }
     let expected = canvas_size(component, type_default_size);
-    let mut canvas = Rgba8::transparent(expected, expected);
+    // 两条画布口径（见 [`CanvasRule`]）：并集（默认）把整套构图按原生分辨率完整画出来；
+    // 「第 0 层层边长」则把画布钉死在第 0 层那么大（逐像素更高，但溢出部分被裁掉）。
+    let (canvas_width, canvas_height, placement) = match options.canvas {
+        CanvasRule::LayerUnion => {
+            let layout =
+                canvas_layout(component, type_default_size, options, true).ok_or_else(|| {
+                    IconRenderError::NoIcon {
+                        detail: "算不出画布（没有层）".to_string(),
+                    }
+                })?;
+            let mut placement = Vec::with_capacity(layout.rects.len());
+            for (index, layer) in layers.iter().enumerate() {
+                let (left, top, right, _) = layout.rects[index];
+                let drawn = (right - left).max(1) as u32;
+                let _ = layer;
+                placement.push((drawn, left - layout.origin_x, top - layout.origin_y));
+            }
+            (layout.width, layout.height, placement)
+        }
+        CanvasRule::FirstLayer => {
+            let mut placement = Vec::with_capacity(layers.len());
+            for layer in &layers {
+                let layer_size = layer_size_of(layer, expected);
+                let drawn = layer_drawn_size_exact(layer, layer_size, expected, options.scale_law)
+                    .round()
+                    .max(1.0) as u32;
+                let shift = layer.shift.unwrap_or_default();
+                let dx = (shift.0 * options.shift_pixels_per_unit).round() as i32;
+                let dy = (shift.1 * options.shift_pixels_per_unit).round() as i32;
+                let left = (expected as i32 - drawn as i32) / 2 + dx;
+                let top = (expected as i32 - drawn as i32) / 2 + dy;
+                placement.push((drawn, left, top));
+            }
+            (expected, expected, placement)
+        }
+    };
+    let mut canvas = Rgba8::transparent(canvas_width, canvas_height);
     for (index, layer) in layers.iter().enumerate() {
-        let layer_size = layer
-            .icon_size
-            .map(|size| size.max(1) as u32)
-            .unwrap_or(expected);
+        let layer_size = layer_size_of(layer, expected);
         // 读 + 解码（带缓存）：同一个贴图会被成百上千个原型引用，重复解码是纯浪费。
         let source = sources.decode(&layer.icon).map_err(|error| match error {
             SourceError::Read(error) => IconRenderError::MissingSource {
@@ -361,15 +429,12 @@ pub fn render_icon_with(
         })?;
         let mut tile = source.top_left_tile(layer_size);
         apply_tint(&mut tile, layer.tint);
-        let drawn = layer_drawn_size(layer, layer_size, expected, options.scale_law);
+        let (drawn, left, top) = placement[index];
         let scale = drawn as f64 / tile.width as f64;
         if (scale - 1.0).abs() > f64::EPSILON {
             tile = options.resample.apply(&tile, scale);
         }
-        let shift = layer.shift.unwrap_or_default();
-        let dx = shift.0 * options.shift_pixels_per_unit;
-        let dy = shift.1 * options.shift_pixels_per_unit;
-        canvas.composite_over_centered(&tile, dx.round() as i32, dy.round() as i32);
+        canvas.composite_at(&tile, left, top);
     }
     Ok(canvas)
 }
@@ -493,11 +558,16 @@ fn layers_of(component: &IconComponent, type_default_size: u32) -> Vec<IconData>
     }
 }
 
-/// 层在画布上的绘制边长（像素）。
-fn layer_drawn_size(layer: &IconData, layer_size: u32, expected: u32, law: ScaleLaw) -> u32 {
+/// 层在画布上的绘制边长（像素，**未取整**）。定标时看的就是这个数。
+pub fn layer_drawn_size_exact(
+    layer: &IconData,
+    layer_size: u32,
+    expected: u32,
+    law: ScaleLaw,
+) -> f64 {
     let natural = layer_size as f64;
     let doc_default = (expected as f64 / 2.0) / natural.max(1.0);
-    let size = match law {
+    match law {
         // 官方文档公式整体乘 2：没给 scale 时 = expected，给了 scale 时 = 层边长 × scale × 2。
         ScaleLaw::DoubledDocDefault => 2.0 * natural * layer.scale.unwrap_or(doc_default),
         ScaleLaw::Natural => natural * layer.scale.unwrap_or(1.0),
@@ -505,8 +575,109 @@ fn layer_drawn_size(layer: &IconData, layer_size: u32, expected: u32, law: Scale
         ScaleLaw::IgnoreScale => natural,
         ScaleLaw::ExpectedTimesScale => expected as f64 * layer.scale.unwrap_or(1.0),
         ScaleLaw::DocDefault => natural * layer.scale.unwrap_or(doc_default),
-    };
-    size.round().max(1.0) as u32
+    }
+}
+
+/// 层的边长（没写 `icon_size` 时按画布）。
+pub fn layer_size_of(layer: &IconData, expected: u32) -> u32 {
+    layer
+        .icon_size
+        .map(|size| size.max(1) as u32)
+        .unwrap_or(expected)
+}
+
+/// 层绘制矩形相对图标中心的四个边界 `(left, top, right, bottom)`（半开区间）。
+///
+/// `floor` 决定绘制边长是向下取整还是四舍五入——官方画布的奇偶口径就靠这个分。
+pub fn layer_rect(
+    layer: &IconData,
+    expected: u32,
+    options: RenderOptions,
+    floor: bool,
+) -> (f64, f64, f64, f64) {
+    let layer_size = layer_size_of(layer, expected);
+    let exact = layer_drawn_size_exact(layer, layer_size, expected, options.scale_law).max(1.0);
+    let drawn = if floor { exact.floor() } else { exact.round() }.max(1.0);
+    let shift = layer.shift.unwrap_or_default();
+    let cx = shift.0 * options.shift_pixels_per_unit;
+    let cy = shift.1 * options.shift_pixels_per_unit;
+    let half = drawn / 2.0;
+    (cx - half, cy - half, cx + half, cy + half)
+}
+
+/// 一个原型的画布布局：尺寸 + 每层的整数绘制矩形（相对图标中心，左闭右开）+ 并集原点。
+#[derive(Debug, Clone)]
+pub struct CanvasLayout {
+    pub width: u32,
+    pub height: u32,
+    /// 并集左下角在「图标中心坐标系」里的位置；画布坐标 = 图标坐标 − 它。
+    pub origin_x: i32,
+    pub origin_y: i32,
+    /// 每层的整数矩形 `(left, top, right, bottom)`。
+    pub rects: Vec<(i32, i32, i32, i32)>,
+}
+
+/// **画布 = 所有层绘制矩形（含 `shift`）的并集包围盒**。
+///
+/// 验算：`space-connection` 三层（64、64×0.333 shift(-6,-6)、64×0.333 shift(6,6)）按
+/// 绘制边长**向下取整**（64 / 42）→ x/y 并集 `[-33,33]` = **66×66**，与官方一致；py 的
+/// `Phadai-…-2-dubstep`（64×0.5、64×0.25 shift(9,9)、40×0.35 shift(10,-10)）→
+/// x `[-32,34]`=66、y `[-34,34]`=68，也与官方 66×68 一致。
+///
+/// 拿 1885 张 vanilla 参考图的**尺寸**当标准（`examples/compare.rs --check-canvas`）：
+/// 并集（向下取整）**1885/1885 = 100%**、并集（四舍五入）1876/1885 = 99.5%、
+/// 「第 0 层层边长」只有 1753/1885 = 93%；py 上分别是 97.9% / 97.9% / 72.1%。
+/// 所以**用向下取整**。
+pub fn canvas_layout(
+    component: &IconComponent,
+    type_default_size: u32,
+    options: RenderOptions,
+    floor: bool,
+) -> Option<CanvasLayout> {
+    let layers = layers_of(component, type_default_size);
+    if layers.is_empty() {
+        return None;
+    }
+    let expected = canvas_size(component, type_default_size);
+    let mut rects: Vec<(i32, i32, i32, i32)> = Vec::with_capacity(layers.len());
+    for layer in &layers {
+        let layer_size = layer_size_of(layer, expected);
+        let exact = layer_drawn_size_exact(layer, layer_size, expected, options.scale_law).max(1.0);
+        let drawn = if floor { exact.floor() } else { exact.round() }.max(1.0) as i32;
+        let shift = layer.shift.unwrap_or_default();
+        let cx = shift.0 * options.shift_pixels_per_unit;
+        let cy = shift.1 * options.shift_pixels_per_unit;
+        let left = (cx - drawn as f64 / 2.0).floor() as i32;
+        let top = (cy - drawn as f64 / 2.0).floor() as i32;
+        rects.push((left, top, left + drawn, top + drawn));
+    }
+    let origin_x = rects.iter().map(|rect| rect.0).min().unwrap_or(0);
+    let origin_y = rects.iter().map(|rect| rect.1).min().unwrap_or(0);
+    let right = rects.iter().map(|rect| rect.2).max().unwrap_or(0);
+    let bottom = rects.iter().map(|rect| rect.3).max().unwrap_or(0);
+    Some(CanvasLayout {
+        width: (right - origin_x).max(1) as u32,
+        height: (bottom - origin_y).max(1) as u32,
+        origin_x,
+        origin_y,
+        rects,
+    })
+}
+
+/// 画布尺寸 + 图标中心在画布里的位置（给比对工具看尺寸用）。
+pub fn union_canvas(
+    component: &IconComponent,
+    type_default_size: u32,
+    options: RenderOptions,
+    floor: bool,
+) -> Option<(u32, u32, i32, i32)> {
+    let layout = canvas_layout(component, type_default_size, options, floor)?;
+    Some((
+        layout.width,
+        layout.height,
+        -layout.origin_x,
+        -layout.origin_y,
+    ))
 }
 
 /// 乘色：RGB 按 tint 的比例、alpha 乘 tint.a。
@@ -652,25 +823,83 @@ mod tests {
             scale,
             ..IconData::default()
         };
+        // 绘制边长按**向下取整**（与画布口径一致，`--check-canvas` 的 100% 就是这么来的）
+        let drawn = |layer: &IconData, layer_size: u32, expected: u32| {
+            layer_drawn_size_exact(layer, layer_size, expected, ScaleLaw::DoubledDocDefault).floor()
+                as u32
+        };
         // 没给 scale → 画布边长（64）
-        assert_eq!(
-            layer_drawn_size(&layer(None), 64, 64, ScaleLaw::DoubledDocDefault),
-            64
-        );
+        assert_eq!(drawn(&layer(None), 64, 64), 64);
         // 给了 scale → 层边长 × scale × 2
-        assert_eq!(
-            layer_drawn_size(&layer(Some(0.4)), 64, 64, ScaleLaw::DoubledDocDefault),
-            51
-        );
-        assert_eq!(
-            layer_drawn_size(&layer(Some(0.333)), 64, 64, ScaleLaw::DoubledDocDefault),
-            43
-        );
+        assert_eq!(drawn(&layer(Some(0.4)), 64, 64), 51);
+        assert_eq!(drawn(&layer(Some(0.333)), 64, 64), 42);
         // 层的 icon_size 与画布不同、又没给 scale：仍然画到画布那么大
-        assert_eq!(
-            layer_drawn_size(&layer(None), 32, 64, ScaleLaw::DoubledDocDefault),
-            64
-        );
+        assert_eq!(drawn(&layer(None), 32, 64), 64);
+    }
+
+    /// 画布 = 所有层绘制矩形（含 shift）的并集包围盒：两条实测案例都要对上官方尺寸。
+    #[test]
+    fn canvas_is_the_union_of_layer_rects() {
+        let options = RenderOptions::default();
+        // space-connection/nauvis-vulcanus：64 + 64×0.333 shift(-6,-6) + 64×0.333 shift(6,6)
+        // → 官方 66×66
+        let component = IconComponent {
+            icon: None,
+            icon_size: None,
+            icons: vec![
+                IconData {
+                    icon: "route.png".to_string(),
+                    ..IconData::default()
+                },
+                IconData {
+                    icon: "a.png".to_string(),
+                    icon_size: Some(64),
+                    scale: Some(0.333),
+                    shift: Some(metatorio_data::types::Vector(-6.0, -6.0)),
+                    ..IconData::default()
+                },
+                IconData {
+                    icon: "b.png".to_string(),
+                    icon_size: Some(64),
+                    scale: Some(0.333),
+                    shift: Some(metatorio_data::types::Vector(6.0, 6.0)),
+                    ..IconData::default()
+                },
+            ],
+        };
+        let (width, height, _, _) =
+            union_canvas(&component, 64, options, true).expect("算得出画布");
+        assert_eq!((width, height), (66, 66));
+
+        // py 的 Phadai-…-2-dubstep：64×0.5 + 64×0.25 shift(9,9) + 40×0.35 shift(10,-10)
+        // → 官方 66×68
+        let component = IconComponent {
+            icon: None,
+            icon_size: None,
+            icons: vec![
+                IconData {
+                    icon: "a.png".to_string(),
+                    scale: Some(0.5),
+                    ..IconData::default()
+                },
+                IconData {
+                    icon: "b.png".to_string(),
+                    scale: Some(0.25),
+                    shift: Some(metatorio_data::types::Vector(9.0, 9.0)),
+                    ..IconData::default()
+                },
+                IconData {
+                    icon: "c.png".to_string(),
+                    icon_size: Some(40),
+                    scale: Some(0.35),
+                    shift: Some(metatorio_data::types::Vector(10.0, -10.0)),
+                    ..IconData::default()
+                },
+            ],
+        };
+        let (width, height, _, _) =
+            union_canvas(&component, 64, options, true).expect("算得出画布");
+        assert_eq!((width, height), (66, 68));
     }
 
     /// 画布口径：给了 `icons` 就**不看**原型的 `icon_size`，取**第 0 层**的层边长

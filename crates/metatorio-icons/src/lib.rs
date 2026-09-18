@@ -24,8 +24,9 @@ pub mod sources;
 pub use image::Rgba8;
 pub use render::{
     IconRenderError, RenderOptions, RenderReport, Resample, ScaleLaw, derived_product,
-    has_icon_definition, render_all_icons, render_icon, render_prototype_icon,
-    render_prototype_icon_with, render_record_icon, render_record_icon_with,
+    has_icon_definition, layer_drawn_size_exact, layer_rect, layer_size_of, render_all_icons,
+    render_icon, render_prototype_icon, render_prototype_icon_with, render_record_icon,
+    render_record_icon_with, union_canvas,
 };
 pub use sources::{Archive, IconSources};
 

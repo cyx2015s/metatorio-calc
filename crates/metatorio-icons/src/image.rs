@@ -258,17 +258,15 @@ impl Rgba8 {
         }
     }
 
-    /// 把 `layer` **居中**叠到本画布上，再整体偏移 `offset_x/offset_y` 像素（source-over）。
-    pub fn composite_over_centered(&mut self, layer: &Rgba8, offset_x: i32, offset_y: i32) {
-        let base_x = (self.width as i32 - layer.width as i32) / 2 + offset_x;
-        let base_y = (self.height as i32 - layer.height as i32) / 2 + offset_y;
+    /// 把 `layer` 的左上角放到画布坐标 `(x, y)`（source-over）。坐标可以是负的（超出裁剪）。
+    pub fn composite_at(&mut self, layer: &Rgba8, x: i32, y: i32) {
         for ly in 0..layer.height as i32 {
-            let cy = base_y + ly;
+            let cy = y + ly;
             if cy < 0 || cy >= self.height as i32 {
                 continue;
             }
             for lx in 0..layer.width as i32 {
-                let cx = base_x + lx;
+                let cx = x + lx;
                 if cx < 0 || cx >= self.width as i32 {
                     continue;
                 }
@@ -310,6 +308,13 @@ impl Rgba8 {
                 self.pixels[index + 3] = (out_a * 255.0).round() as u8;
             }
         }
+    }
+
+    /// 把 `layer` **居中**叠到本画布上，再整体偏移 `offset_x/offset_y` 像素（source-over）。
+    pub fn composite_over_centered(&mut self, layer: &Rgba8, offset_x: i32, offset_y: i32) {
+        let base_x = (self.width as i32 - layer.width as i32) / 2 + offset_x;
+        let base_y = (self.height as i32 - layer.height as i32) / 2 + offset_y;
+        self.composite_at(layer, base_x, base_y);
     }
 }
 

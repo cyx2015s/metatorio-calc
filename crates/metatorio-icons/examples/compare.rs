@@ -169,6 +169,8 @@ struct Args {
     /// `--render-only <目录>`：只跑「像应用那样把图标全画出来」这一步并计时
     /// （不读参考图），用来估算注册上下文要多久。
     render_only: Option<PathBuf>,
+    /// `--check-canvas`：拿官方参考图的尺寸检验「画布 = 层绘制矩形并集」这条规则。
+    check_canvas: bool,
     /// `--types`：额外打印「按原型类型」的完整统计（默认只按参考图目录汇总，输出有界）。
     types: bool,
     /// `--sheet <out.png>`：把匹配率最差的若干张拼成一张「左=我们 / 右=官方」对照图。
@@ -194,6 +196,7 @@ fn parse_args() -> Result<Args, String> {
     let mut sweep_kernel = false;
     let mut sweep_multiplier = false;
     let mut render_only = None;
+    let mut check_canvas = false;
     let mut types = false;
     let mut sheet = None;
     let mut sheet_count = 12usize;
@@ -227,6 +230,7 @@ fn parse_args() -> Result<Args, String> {
             "--sweep-kernel" => sweep_kernel = true,
             "--sweep-multiplier" => sweep_multiplier = true,
             "--render-only" => render_only = Some(PathBuf::from(next("--render-only")?)),
+            "--check-canvas" => check_canvas = true,
             "--types" => types = true,
             "--sheet" => sheet = Some(PathBuf::from(next("--sheet")?)),
             "--sheet-count" => {
@@ -264,6 +268,7 @@ fn parse_args() -> Result<Args, String> {
         sweep_kernel,
         sweep_multiplier,
         render_only,
+        check_canvas,
         types,
         sheet,
         sheet_count,
@@ -303,6 +308,9 @@ fn main() -> Result<(), String> {
         .map(|record| record.name.clone())
         .collect();
 
+    if args.check_canvas {
+        return check_canvas(&store, &references, args.only_type.as_deref(), args.limit);
+    }
     if let Some(dir) = &args.render_only {
         return render_only(dir, &store, &sources);
     }
@@ -371,6 +379,8 @@ fn main() -> Result<(), String> {
     let mut worst_sheet: Vec<(f64, String, String)> = Vec::new();
     // 匹配率分布：平均分会被少数烂样本拖住，分布能看出「是长尾还是一大片」。
     let mut ratio_histogram: Vec<f64> = Vec::new();
+    // 我们渲染出来的画布尺寸（并集口径下会不会出现离谱的大图，看尺寸最直接）。
+    let mut canvas_sizes: Vec<(u32, u32)> = Vec::new();
 
     for (_, records) in &store.groups {
         for record in records.values() {
@@ -405,6 +415,7 @@ fn main() -> Result<(), String> {
                 RenderOptions::default(),
             ) {
                 Ok(ours) => {
+                    canvas_sizes.push((ours.width, ours.height));
                     let bytes = std::fs::read(&reference_path)
                         .map_err(|error| format!("读参考图失败: {error}"))?;
                     let reference = Rgba8::decode_png(&bytes)
@@ -517,6 +528,29 @@ fn main() -> Result<(), String> {
             bucket(0.95, 0.99),
             bucket(0.99, 1.01),
             ratio_histogram.len()
+        );
+    }
+    if !canvas_sizes.is_empty() {
+        let largest = canvas_sizes.iter().max().copied().unwrap_or((0, 0));
+        let over = |limit: u32| {
+            canvas_sizes
+                .iter()
+                .filter(|(w, h)| (*w).max(*h) > limit)
+                .count()
+        };
+        let average = canvas_sizes
+            .iter()
+            .map(|(w, h)| (*w).max(*h) as f64)
+            .sum::<f64>()
+            / canvas_sizes.len() as f64;
+        println!(
+            "画布尺寸：最大 {}×{}，平均边长 {:.1}；>64 的 {} 张、>128 的 {} 张、>256 的 {} 张",
+            largest.0,
+            largest.1,
+            average,
+            over(64),
+            over(128),
+            over(256)
         );
     }
     println!("\n按参考图目录：");
@@ -901,6 +935,123 @@ fn fit_layer_scale(
         );
     }
     Ok(())
+}
+
+/// `--check-canvas`：用官方参考图的**尺寸**当标准，检验「画布 = 层绘制矩形并集包围盒」。
+///
+/// 只看尺寸、不解码整张图（读 PNG 头 33 字节就够），所以几千张也是秒级；尺寸是硬指标，
+/// 不用先实现渲染就能判断「四舍五入 / 向下取整」哪个对。
+fn check_canvas(
+    store: &metatorio_data::store::PrototypeStore,
+    references: &ReferenceIndex,
+    only_type: Option<&str>,
+    limit: Option<usize>,
+) -> Result<(), String> {
+    // 候选：绘制边长向下取整 / 四舍五入；再加上「第 0 层的层边长」当基线。
+    let variants = [
+        ("并集（向下取整）", Some(true)),
+        ("并集（四舍五入）", Some(false)),
+        ("第 0 层层边长（当前）", None),
+    ];
+    let mut stats = vec![(0usize, 0usize); variants.len()];
+    let mut samples: Vec<String> = Vec::new();
+    let mut visited = 0usize;
+    'outer: for records in store.groups.values() {
+        for record in records.values() {
+            if let Some(only) = only_type {
+                if record.type_ != only {
+                    continue;
+                }
+            }
+            if limit.is_some_and(|limit| visited >= limit) {
+                break 'outer;
+            }
+            let Some(component) = record.component::<metatorio_data::IconComponent>() else {
+                continue;
+            };
+            if component.icons.is_empty() && component.icon.is_none() {
+                continue;
+            }
+            let Some((_, reference_path)) =
+                references.resolve(&reference_folder(record), &record.name)
+            else {
+                continue;
+            };
+            let Some((width, height)) = png_size(&reference_path)? else {
+                continue;
+            };
+            visited += 1;
+            let expected = metatorio_icons::render::expected_icon_size(&record.type_);
+            for (index, (_, floor)) in variants.iter().enumerate() {
+                let predicted = match floor {
+                    Some(floor) => metatorio_icons::union_canvas(
+                        component,
+                        expected,
+                        RenderOptions::default(),
+                        *floor,
+                    )
+                    .map(|(w, h, _, _)| (w, h)),
+                    None => {
+                        let size = component
+                            .icons
+                            .first()
+                            .map(|layer| metatorio_icons::layer_size_of(layer, expected))
+                            .unwrap_or(expected);
+                        Some((size, size))
+                    }
+                };
+                let Some((predicted_w, predicted_h)) = predicted else {
+                    continue;
+                };
+                stats[index].1 += 1;
+                if (predicted_w, predicted_h) == (width, height) {
+                    stats[index].0 += 1;
+                } else if index == 0 && samples.len() < 12 {
+                    samples.push(format!(
+                        "{}/{}: 预测 {predicted_w}×{predicted_h}，官方 {width}×{height}",
+                        record.type_, record.name
+                    ));
+                }
+            }
+        }
+    }
+    println!("\n=== 画布尺寸预测（与官方参考图尺寸比，共 {visited} 张）===");
+    for (index, (name, _)) in variants.iter().enumerate() {
+        let (matched, total) = stats[index];
+        println!(
+            "  {name:<22}: {matched}/{total}（{:.2}%）",
+            if total == 0 {
+                0.0
+            } else {
+                matched as f64 * 100.0 / total as f64
+            }
+        );
+    }
+    if !samples.is_empty() {
+        println!("\n并集（向下取整）算错的前几个：");
+        for sample in &samples {
+            println!("  {sample}");
+        }
+    }
+    Ok(())
+}
+
+/// 只读 PNG 头拿尺寸（不解码像素）。
+fn png_size(path: &Path) -> Result<Option<(u32, u32)>, String> {
+    use std::io::Read;
+    let mut file = match std::fs::File::open(path) {
+        Ok(file) => file,
+        Err(_) => return Ok(None),
+    };
+    let mut header = [0u8; 33];
+    if file.read_exact(&mut header).is_err() {
+        return Ok(None);
+    }
+    if &header[..8] != b"\x89PNG\r\n\x1a\n" {
+        return Err(format!("不是 PNG: {}", path.display()));
+    }
+    let be = |bytes: &[u8]| -> u32 { u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) };
+    Ok(Some((be(&header[16..20]), be(&header[20..24]))))
 }
 
 /// `--render-only`：只跑应用注册上下文时那一步（`render_all_icons`，含解码/缩放/编码/写盘），
