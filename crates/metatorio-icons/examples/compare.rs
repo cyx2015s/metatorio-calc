@@ -6,10 +6,14 @@
 //! cargo run -p metatorio-icons --example compare -- \
 //!   --context "C:\Users\<你>\AppData\Roaming\com.mirac.metatorio-app\contexts\2d1e8c21a400155c" \
 //!   --game "D:\异星工厂\Factorio_2.1" \
-//!   [--mods <mod 目录>] [--type item] [--limit 200] [--tolerance 2] [--dump-only]
+//!   [--mods <mod 目录>] [--type item] [--limit 200] [--tolerance 2] [--types] [--dump-only]
 //! ```
 //!
 //! `--context` 目录里应有 `data-raw-dump.json` 与 `icons/`（官方导出结果）。
+//!
+//! 输出分四块，**四块都算数**：参与比对的（按参考图目录 + 可选按原型类型）、官方有图但
+//! dump 里没有图标定义（游戏自动生成，未实现）、dump 有定义但官方没导出图、以及官方有图
+//! 但原型仓库里没有这条原型（类型不在关注列表）——跳过的东西必须被数出来。
 
 use std::path::{Path, PathBuf};
 
@@ -17,6 +21,114 @@ use metatorio_icons::compare::{CompareReport, diff_against_official};
 use metatorio_icons::image::Rgba8;
 use metatorio_icons::render::{RenderOptions, ScaleLaw};
 use metatorio_icons::{IconSources, render_prototype_icon};
+
+/// 官方导出的参考图索引。
+///
+/// **导出目录名不一定等于原型 `type`**（实测）：所有实体类型（`assembling-machine`、
+/// `tree`、`explosion`、`corpse`、`simple-entity`、`resource` …）的图标都写在
+/// `entity/` 下，所有物品子类型（`ammo`、`gun`、`module`、`armor`、`capsule`、
+/// `item-with-entity-data` …）都写在 `item/` 下，其余类型才是 `<type>/`。
+/// 所以按**文件名**建索引，解析时优先取与原型 `type` 同名的目录，取不到再用唯一候选；
+/// 并把「实际用到的目录」记下来——这条规律要靠实测报告，不能靠猜。
+struct ReferenceIndex {
+    by_name: std::collections::BTreeMap<String, Vec<(String, PathBuf)>>,
+    used: std::collections::BTreeSet<(String, String)>,
+    folders: std::collections::BTreeSet<String>,
+    total: usize,
+}
+
+impl ReferenceIndex {
+    fn scan(root: &Path) -> Result<Self, String> {
+        let mut by_name: std::collections::BTreeMap<String, Vec<(String, PathBuf)>> =
+            Default::default();
+        let mut folders = std::collections::BTreeSet::new();
+        let mut total = 0usize;
+        let entries = std::fs::read_dir(root)
+            .map_err(|error| format!("读参考图目录 {} 失败: {error}", root.display()))?;
+        for entry in entries.flatten() {
+            let folder = entry.path();
+            if !folder.is_dir() {
+                continue;
+            }
+            let folder_name = entry.file_name().to_string_lossy().into_owned();
+            folders.insert(folder_name.clone());
+            for file in std::fs::read_dir(&folder)
+                .map_err(|e| e.to_string())?
+                .flatten()
+            {
+                let path = file.path();
+                if path.extension().is_none_or(|ext| ext != "png") {
+                    continue;
+                }
+                let Some(stem) = path
+                    .file_stem()
+                    .map(|stem| stem.to_string_lossy().into_owned())
+                else {
+                    continue;
+                };
+                total += 1;
+                by_name
+                    .entry(stem)
+                    .or_default()
+                    .push((folder_name.clone(), path));
+            }
+        }
+        Ok(Self {
+            by_name,
+            used: Default::default(),
+            folders,
+            total,
+        })
+    }
+
+    /// 解析某个原型的参考图：优先 `<type>/`，否则取候选里唯一一个（多个候选时取字典序
+    /// 最小的，保证结果稳定可复现）。
+    fn resolve(&self, type_: &str, name: &str) -> Option<(String, PathBuf)> {
+        let candidates = self.by_name.get(name)?;
+        let same_folder = candidates
+            .iter()
+            .find(|(folder, _)| folder == type_)
+            .cloned();
+        same_folder.or_else(|| {
+            candidates
+                .iter()
+                .min_by(|left, right| left.0.cmp(&right.0))
+                .cloned()
+        })
+    }
+
+    fn mark_used(&mut self, folder: &str, name: &str) {
+        self.used.insert((folder.to_string(), name.to_string()));
+    }
+
+    /// 没用上的参考图，分两种如实报告：
+    /// `absent` = 原型仓库里压根没有这个文件名对应的原型（类型不在关注列表）；
+    /// `duplicate` = 原型在，只是同名图有多份，只用了「原型 type 优先」的那一份。
+    fn unused(
+        &self,
+        store_names: &std::collections::BTreeSet<String>,
+    ) -> (
+        std::collections::BTreeMap<String, usize>,
+        std::collections::BTreeMap<String, usize>,
+    ) {
+        let mut absent: std::collections::BTreeMap<String, usize> = Default::default();
+        let mut duplicate: std::collections::BTreeMap<String, usize> = Default::default();
+        for (name, candidates) in &self.by_name {
+            for (folder, _) in candidates {
+                if self.used.contains(&(folder.clone(), name.clone())) {
+                    continue;
+                }
+                let bucket = if store_names.contains(name) {
+                    &mut duplicate
+                } else {
+                    &mut absent
+                };
+                *bucket.entry(folder.clone()).or_default() += 1;
+            }
+        }
+        (absent, duplicate)
+    }
+}
 
 struct Args {
     context: PathBuf,
@@ -35,6 +147,8 @@ struct Args {
     fit_scale: bool,
     /// `--sweep`：把所有候选 scale 口径各跑一遍，按像素匹配率挑最好的。
     sweep: bool,
+    /// `--types`：额外打印「按原型类型」的完整统计（默认只按参考图目录汇总，输出有界）。
+    types: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -50,6 +164,7 @@ fn parse_args() -> Result<Args, String> {
     let mut pixels = Vec::new();
     let mut fit_scale = false;
     let mut sweep = false;
+    let mut types = false;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         let mut next = |name: &str| -> Result<String, String> {
@@ -77,6 +192,7 @@ fn parse_args() -> Result<Args, String> {
             "--show" => show = Some(next("--show")?),
             "--fit-scale" => fit_scale = true,
             "--sweep" => sweep = true,
+            "--types" => types = true,
             "--pixels" => {
                 for pair in next("--pixels")?.split(';') {
                     let (x, y) = pair
@@ -104,6 +220,7 @@ fn parse_args() -> Result<Args, String> {
         pixels,
         fit_scale,
         sweep,
+        types,
     })
 }
 
@@ -126,14 +243,28 @@ fn main() -> Result<(), String> {
     let sources = IconSources::from_game_root(&args.game, args.mods.as_deref())?;
     println!("来源   : {}", sources.root_names().join(", "));
 
+    let mut references = ReferenceIndex::scan(&icons_root)?;
+    println!(
+        "参考图 : {} 张，{} 个目录",
+        references.total,
+        references.folders.len()
+    );
+    // 原型仓库里的全部名字（含未参与比对的类型），用来区分「真没这条原型」与「同名多份」。
+    let store_names: std::collections::BTreeSet<String> = store
+        .groups
+        .values()
+        .flat_map(|records| records.values())
+        .map(|record| record.name.clone())
+        .collect();
+
     if let Some(target) = &args.show {
-        return show_prototype(target, &store, &sources, &icons_root, &args.pixels);
+        return show_prototype(target, &store, &sources, &references, &args.pixels);
     }
     if args.fit_scale {
         return fit_layer_scale(
             &store,
             &sources,
-            &icons_root,
+            &references,
             args.only_type.as_deref(),
             args.limit,
         );
@@ -142,7 +273,7 @@ fn main() -> Result<(), String> {
         return sweep_laws(
             &store,
             &sources,
-            &icons_root,
+            &references,
             args.only_type.as_deref(),
             args.limit,
             args.tolerance,
@@ -155,6 +286,16 @@ fn main() -> Result<(), String> {
     let mut missing_sources = 0usize;
     let mut decoded = 0usize;
     let mut no_icon = 0usize;
+    // 「官方导出了图，但 dump 里没有图标定义」——游戏自己按产物拼的图标。
+    // 这类现在直接跳过，必须单独数出来：跳过不等于没问题，只是还没实现。
+    let mut generated: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+    // 反方向：dump 里有图标定义、官方导出里却没有图。这些也没参与比对。
+    let mut no_reference: std::collections::BTreeMap<String, usize> = Default::default();
+    // 实测的「原型 type → 实际目录」映射（用来确认导出规律，而不是假设它）。
+    let mut folder_by_type: std::collections::BTreeMap<(String, String), usize> =
+        Default::default();
+    // 按**参考图目录**汇总（实体 / 物品子类型 / 配方 …），比按原型 type 汇总更能说明覆盖面。
+    let mut per_folder: std::collections::BTreeMap<String, CompareReport> = Default::default();
 
     for (_, records) in &store.groups {
         for record in records.values() {
@@ -166,20 +307,30 @@ fn main() -> Result<(), String> {
             if args.limit.is_some_and(|limit| report.total >= limit) {
                 break;
             }
-            // 官方只导出「有图标定义」的原型；没有图标定义的不算失败。
-            let Some(component) = record.component::<metatorio_data::IconComponent>() else {
+            let component = record.component::<metatorio_data::IconComponent>();
+            let defined = component
+                .is_some_and(|component| !(component.icons.is_empty() && component.icon.is_none()));
+            // 官方只导出「有图标」的原型；没有图标定义但官方有图的，是自动生成的那类。
+            if !defined {
+                if let Some((folder, _)) = references.resolve(&record.type_, &record.name) {
+                    references.mark_used(&folder, &record.name);
+                    generated
+                        .entry(record.type_.clone())
+                        .or_default()
+                        .push(record.name.clone());
+                }
+                continue;
+            }
+            let Some((folder, reference_path)) = references.resolve(&record.type_, &record.name)
+            else {
+                report.record_missing_reference();
+                *no_reference.entry(record.type_.clone()).or_default() += 1;
                 continue;
             };
-            if component.icons.is_empty() && component.icon.is_none() {
-                continue;
-            }
-            let reference_path = icons_root
-                .join(&record.type_)
-                .join(format!("{}.png", record.name));
-            if !reference_path.is_file() {
-                report.record_missing_reference();
-                continue;
-            }
+            *folder_by_type
+                .entry((record.type_.clone(), folder.clone()))
+                .or_default() += 1;
+            references.mark_used(&folder, &record.name);
             match render_prototype_icon(record, &sources) {
                 Ok(ours) => {
                     let bytes = std::fs::read(&reference_path)
@@ -202,6 +353,10 @@ fn main() -> Result<(), String> {
                     report.record(&format!("{}/{}", record.type_, record.name), &stats);
                     per_type
                         .entry(record.type_.clone())
+                        .or_default()
+                        .record(&record.name, &stats);
+                    per_folder
+                        .entry(folder.clone())
                         .or_default()
                         .record(&record.name, &stats);
                 }
@@ -249,14 +404,83 @@ fn main() -> Result<(), String> {
     for (name, ratio, delta) in &report.worst {
         println!("  {name}: 匹配 {:.2}%，最大差 {delta}", ratio * 100.0);
     }
-    println!("\n按类型：");
-    for (type_, type_report) in &per_type {
+    println!("\n按参考图目录：");
+    for (folder, folder_report) in &per_folder {
         println!(
-            "  {type_}: {} 张，完全一致 {}，平均匹配 {:.2}%",
-            type_report.compared(),
-            type_report.exact,
-            type_report.average_match_ratio() * 100.0
+            "  {folder}: {} 张，完全一致 {}，平均匹配 {:.2}%",
+            folder_report.compared(),
+            folder_report.exact,
+            folder_report.average_match_ratio() * 100.0
         );
+    }
+    if args.types {
+        println!("\n按原型类型：");
+        for (type_, type_report) in &per_type {
+            println!(
+                "  {type_}: {} 张，完全一致 {}，平均匹配 {:.2}%",
+                type_report.compared(),
+                type_report.exact,
+                type_report.average_match_ratio() * 100.0
+            );
+        }
+    }
+    if !generated.is_empty() {
+        let total: usize = generated.values().map(Vec::len).sum();
+        println!(
+            "\n=== 官方有图、但 dump 里没有图标定义（游戏自动生成，{total} 张，未参与比对）==="
+        );
+        for (type_, names) in &generated {
+            let sample: Vec<&str> = names.iter().take(8).map(String::as_str).collect();
+            let more = names.len().saturating_sub(sample.len());
+            println!(
+                "  {type_}: {} 张，例如 {}{}",
+                names.len(),
+                sample.join(", "),
+                if more > 0 {
+                    format!(" 等 {more} 张")
+                } else {
+                    String::new()
+                }
+            );
+        }
+    }
+    if !no_reference.is_empty() {
+        println!("\n=== dump 有图标定义、官方导出里没有图（未参与比对）===");
+        for (type_, count) in &no_reference {
+            println!("  {type_}: {count} 张");
+        }
+    }
+    println!("\n=== 实测的「原型 type → 参考图目录」（只为确认导出规律）===");
+    let mut folder_rows: Vec<(&str, &str, usize)> = folder_by_type
+        .iter()
+        .map(|((type_, folder), count)| (type_.as_str(), folder.as_str(), *count))
+        .collect();
+    folder_rows.sort_by_key(|row| std::cmp::Reverse(row.2));
+    for (type_, folder, count) in folder_rows {
+        if folder == type_ {
+            continue;
+        }
+        println!("  {type_} → {folder}: {count} 张");
+    }
+    let unused = references.unused(&store_names);
+    for (title, bucket) in [
+        (
+            "官方导出里有图、但原型仓库里没有这条原型（未参与比对）",
+            unused.0,
+        ),
+        (
+            "官方导出里同名图有多份、只用了「原型 type 优先」的那份",
+            unused.1,
+        ),
+    ] {
+        if bucket.is_empty() {
+            continue;
+        }
+        let total: usize = bucket.values().sum();
+        println!("\n=== {title}（共 {total} 张）===");
+        for (folder, count) in &bucket {
+            println!("  {folder}: {count} 张");
+        }
     }
     Ok(())
 }
@@ -269,7 +493,7 @@ fn show_prototype(
     target: &str,
     store: &metatorio_data::store::PrototypeStore,
     sources: &IconSources,
-    icons_root: &Path,
+    references: &ReferenceIndex,
     pixels: &[(u32, u32)],
 ) -> Result<(), String> {
     let (type_, name) = target
@@ -304,9 +528,14 @@ fn show_prototype(
         );
     }
     let ours = render_prototype_icon(record, sources).map_err(|error| error.to_string())?;
-    let reference_path = icons_root.join(type_).join(format!("{name}.png"));
+    let (folder, reference_path) = references
+        .resolve(type_, name)
+        .ok_or_else(|| format!("官方导出里找不到 {target} 的参考图"))?;
     let reference = Rgba8::decode_png(&std::fs::read(&reference_path).map_err(|e| e.to_string())?)
         .map_err(|error| error.to_string())?;
+    if folder != type_ {
+        println!("参考图目录：{folder}（原型 type 是 {type_}）");
+    }
     println!(
         "我们 {}x{}，官方 {}x{}",
         ours.width, ours.height, reference.width, reference.height
@@ -365,7 +594,7 @@ fn show_prototype(
 fn fit_layer_scale(
     store: &metatorio_data::store::PrototypeStore,
     sources: &IconSources,
-    icons_root: &Path,
+    references: &ReferenceIndex,
     only_type: Option<&str>,
     limit: Option<usize>,
 ) -> Result<(), String> {
@@ -392,12 +621,9 @@ fn fit_layer_scale(
             let Some(explicit) = layer.scale else {
                 continue;
             };
-            let reference_path = icons_root
-                .join(&record.type_)
-                .join(format!("{}.png", record.name));
-            if !reference_path.is_file() {
+            let Some((_, reference_path)) = references.resolve(&record.type_, &record.name) else {
                 continue;
-            }
+            };
             let Ok(reference) =
                 Rgba8::decode_png(&std::fs::read(&reference_path).unwrap_or_default())
             else {
@@ -455,7 +681,7 @@ fn fit_layer_scale(
 fn sweep_laws(
     store: &metatorio_data::store::PrototypeStore,
     sources: &IconSources,
-    icons_root: &Path,
+    references: &ReferenceIndex,
     only_type: Option<&str>,
     limit: Option<usize>,
     tolerance: u8,
@@ -493,12 +719,10 @@ fn sweep_laws(
                     {
                         continue;
                     }
-                    let reference_path = icons_root
-                        .join(&record.type_)
-                        .join(format!("{}.png", record.name));
-                    if !reference_path.is_file() {
+                    let Some((_, reference_path)) = references.resolve(&record.type_, &record.name)
+                    else {
                         continue;
-                    }
+                    };
                     visited += 1;
                     let Ok(ours) = metatorio_icons::render::render_prototype_icon_with(
                         record, sources, options,
