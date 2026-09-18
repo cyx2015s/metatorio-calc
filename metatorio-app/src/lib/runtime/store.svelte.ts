@@ -653,6 +653,10 @@ class RuntimeStore {
     for (const entry of ci.entries) {
       map.set(`${entry.kind}/${entry.name}`, entry.localized_name);
     }
+    // 非条目的名字（物品大组 `item-group/<id>`）：选择器的分组标题要用它。
+    for (const [name, localized] of Object.entries(ci.names ?? {})) {
+      map.set(name, localized);
+    }
     this.localizedNameMap = map;
     this.localizedNameContext = key;
   }

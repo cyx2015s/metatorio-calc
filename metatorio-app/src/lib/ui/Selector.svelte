@@ -470,13 +470,18 @@
       {/if}
 
       {#if !searching && groups.length > 1}
+        <!-- 大组用**物品大组图标**（2 倍于条目图标 34px）而不是文字：文字是内部 id
+             （`intermediate-products` 这种），图标才是游戏里那套。中文名放 tooltip。 -->
         <div class="group-tabs">
           {#each groups as group (group)}
             <button
               class:active={activeGroup === group}
               class="gtab"
+              title={runtime.localizedName("item-group", group)}
               onclick={() => (activeGroup = activeGroup === group ? null : group)}
-            >{group}</button>
+            >
+              <Icon type="item-group" name={group} size={68} />
+            </button>
           {/each}
         </div>
       {/if}
@@ -728,12 +733,14 @@
   }
 
   .gtab {
-    padding: 4px 9px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2px;
     color: var(--muted);
     background: transparent;
     border: 1px solid var(--line);
     border-radius: var(--radius-sm);
-    font-size: 10px;
     cursor: pointer;
   }
 

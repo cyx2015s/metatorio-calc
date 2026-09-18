@@ -112,7 +112,7 @@
   <Icon {type} {name} {size} {title} />
   {#if quality && quality !== "normal"}
     <span class="quality-corner" style={`--corner:${Math.max(10, Math.round(size / 2))}px`}>
-      <Icon type="quality" name={quality} size={Math.max(10, Math.round(size / 2))} title={`${name} · ${quality}`} />
+      <Icon type="quality" name={quality} size={Math.max(10, Math.round(size / 2))} title={runtime.localizedName("quality", quality)} />
     </span>
   {/if}
 </svelte:element>

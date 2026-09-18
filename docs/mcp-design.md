@@ -95,6 +95,8 @@ Phase 2 工具面**不在一开始就做成离散的友好工具**，而是：
 
 工具面原则：**权威入口是 `auto_plan`**（从目标反推整条链）；`dispatch` 是覆盖全部消息的逃生通道；其余工具只服务「读」与「名字解析」。曾经的 `suggest`（列出某条流的候选机制）**已删除**——它会把 agent 引向「一个个配方手工拼装」的错误心智（正确做法是给目标让规划器枚举），而且与 `auto_plan` 的能力重叠。工具描述与参数说明**一律用中文**：垂直领域的术语（物品名、品质、插件塔）本来就是中文，中文描述比英文更准、也少一层翻译损耗（群内反馈）。
 
+**本地化名的 key 口径**（GUI 的 `localized_names` 命令与 MCP 工具共用同一个函数）：locale 里的 section 是**游戏的类型名**，与目录索引里的界面归类**不总一致**——最典型的是**星球**：索引里 `kind = planet`，而汉化存在 `space-location-name.*`（实测 locale.json 里只有 `space-location/nauvis`，没有 `planet/…`），所以要映射成 `space-location`；`machine` / `module` / `resource` / `beacon` 这类派生 kind 按归类回退到 `entity` / `item`。品质（`quality/*`）与物品/流体/配方/科技同名 section，直接命中。物品**大组**（`item-group/*`）不是可选的目录条目，但选择器的分组标题要用它，所以 `catalog_index` 额外回传一份 `names`（`"<section>/<name>" → 中文名`），前端并进本地化名表后 `localizedName("item-group", id)` 就是中文。
+
 **报错也一律中文**：runtime 的 `RuntimeError`（找不到项目/工厂/机制/目标、下标越界、重复 id、数值校验、`品质 X 不存在于当前游戏上下文`）、`validate.rs` 的原型名校验、app 层命令错误、MCP 工具的 `invalid_params`、启动日志与 dump 解析错误全部改成中文。实测（headless + 原生 MCP）：`找不到项目 999`、`配方 not-a-real-recipe 不存在于当前游戏上下文`、`重复的目标 id`、`插件塔 not-a-real-beacon 不存在于当前游戏上下文`、`机制 999 不在工厂 2 里：先 get_planning_state {project, factory} 读 mechanics 列表拿 id`。
 
 > 唯一的例外是**框架级**报错：rmcp 反序列化工具参数失败时给出的 `failed to deserialize parameters: missing field ...`、以及调用**未启用**的工具时的 `tool not found`，都由 rmcp 生成；后者见下面「工具子集」一节。

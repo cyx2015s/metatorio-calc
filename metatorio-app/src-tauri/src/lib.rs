@@ -358,6 +358,10 @@ pub struct CatalogIndex {
     pub context_id: String,
     /// 可用品质（normal 起，按 order）。
     pub qualities: Vec<String>,
+    /// **不在 `entries` 里的本地化名**：`"<section>/<name>" → 中文名`。
+    /// 目前装的是物品大组（`item-group/<id>`）——选择器的大组分隔用它的图标与名字显示，
+    /// 而大组本身不是一个可选的目录条目。
+    pub names: std::collections::BTreeMap<String, String>,
     pub entries: Vec<IndexEntry>,
 }
 
@@ -718,15 +722,33 @@ fn locale_map_of(state: &AppState, id: &str) -> HashMap<String, String> {
     map
 }
 
-/// 按 kind 查询本地化名：优先 `{kind}/{name}`，实体派生 kind
-/// （machine/mining-machine/beacon/…）回退到 `entity/{name}`，
-/// module 回退到 `item/{name}`；都没有则返回空串。
+/// 按 kind 查询本地化名。
+///
+/// 目录索引里的 `kind` 是**界面归类**（`machine` / `module` / `resource` / `planet` …），
+/// 而 locale 的 section 用的是**游戏的类型名**，两者不总一致，所以要映射：
+/// - `planet` → `space-location`（星球原型的汉化就存在 `space-location-name.*` 里，
+///   实测 locale.json 里只有 `space-location/nauvis`，**没有** `planet/…`）；
+/// - 其余没有映射的 kind（`machine`/`module`/`resource`/`beacon`/…）按归类回退到
+///   `entity` / `item` / `recipe` / `fluid` / `technology`。
+///
+/// 都查不到时返回空串（调用方自己决定显示原 id）。
 fn localized_name(map: &HashMap<String, String>, kind: &str, name: &str) -> String {
-    let direct = format!("{kind}/{name}");
+    let section = match kind {
+        "planet" => "space-location",
+        other => other,
+    };
+    let direct = format!("{section}/{name}");
     if let Some(label) = map.get(&direct) {
         return label.clone();
     }
-    for fallback in ["entity", "item", "recipe", "fluid", "technology"] {
+    for fallback in [
+        "entity",
+        "item",
+        "recipe",
+        "fluid",
+        "technology",
+        "space-location",
+    ] {
         let key = format!("{fallback}/{name}");
         if let Some(label) = map.get(&key) {
             return label.clone();
@@ -1947,6 +1969,7 @@ async fn catalog_index_for(state: &AppState, context_id: &str) -> Result<Catalog
         return Ok(CatalogIndex {
             context_id: String::new(),
             qualities: Vec::new(),
+            names: Default::default(),
             entries: Vec::new(),
         });
     }
@@ -1957,10 +1980,29 @@ async fn catalog_index_for(state: &AppState, context_id: &str) -> Result<Catalog
     tauri::async_runtime::spawn_blocking(move || CatalogIndex {
         context_id: context_id.clone(),
         qualities: store.quality_order().to_vec(),
+        names: item_group_names(&store, &locale),
         entries: catalog_index_from_store(&store, &locale),
     })
     .await
     .map_err(|error| error.to_string())
+}
+
+/// 物品大组的本地化名（`"item-group/<id>" → 中文名`）：大组不是可选的目录条目，
+/// 但选择器的分组标题要显示它（配 `item-group/<id>` 图标）。
+fn item_group_names(
+    store: &PrototypeStore,
+    locale: &HashMap<String, String>,
+) -> std::collections::BTreeMap<String, String> {
+    let mut names = std::collections::BTreeMap::new();
+    if let Some(groups) = store.groups.get(&PrototypeGroup::ItemGroup) {
+        for name in groups.keys() {
+            let localized = localized_name(locale, "item-group", name);
+            if !localized.is_empty() {
+                names.insert(format!("item-group/{name}"), localized);
+            }
+        }
+    }
+    names
 }
 
 /// 一条流（物品/流体）的候选机制建议：GUI 的 `suggest` 命令与 MCP 的 `suggest`
@@ -4423,6 +4465,27 @@ mod tests {
         // `None` = 这次导出**不加载 mod**（原版 + DLC）：必须是空表，不许去猜 `<游戏>/mods`。
         assert!(enabled_mods(None).is_empty());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 本地化 key：`planet` 的汉化在 `space-location` 段（游戏就是这么存的），
+    /// 品质、物品、流体直接用同名 section；机器的派生 kind 回退到 `entity`。
+    #[test]
+    fn localized_name_maps_planet_to_space_location() {
+        let mut map = HashMap::new();
+        map.insert("space-location/nauvis".to_string(), "新地星".to_string());
+        map.insert("quality/uncommon".to_string(), "精良".to_string());
+        map.insert("entity/beacon".to_string(), "插件塔".to_string());
+        map.insert("item/speed-module".to_string(), "速度插件".to_string());
+
+        // 星球：索引里的 kind 是 planet，汉化在 space-location
+        assert_eq!(localized_name(&map, "planet", "nauvis"), "新地星");
+        // 品质：section 同名，直接命中
+        assert_eq!(localized_name(&map, "quality", "uncommon"), "精良");
+        // 机器的派生 kind 回退到 entity；插件回退到 item
+        assert_eq!(localized_name(&map, "machine", "beacon"), "插件塔");
+        assert_eq!(localized_name(&map, "module", "speed-module"), "速度插件");
+        // 查不到 → 空串（调用方显示原 id）
+        assert_eq!(localized_name(&map, "item", "nope"), "");
     }
 
     /// 上下文元数据：旧缓存（只有 `source`，没有 `game_version`/`mods`）必须照常载入；

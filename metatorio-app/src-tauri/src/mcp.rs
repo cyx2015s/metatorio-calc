@@ -2160,6 +2160,7 @@ mod tests {
         let index = crate::CatalogIndex {
             context_id: "c".to_string(),
             qualities: vec!["normal".to_string()],
+            names: Default::default(),
             entries: vec![
                 entry("item", "processing-unit", "处理器"),
                 entry("recipe", "processing-unit", "处理器"),
@@ -2228,6 +2229,7 @@ mod tests {
         let index = crate::CatalogIndex {
             context_id: "c".to_string(),
             qualities: vec!["normal".to_string()],
+            names: Default::default(),
             entries: vec![
                 entry("item", "iron-plate", "铁板"),
                 entry("module", "speed-module-3", "速度插件 3"),

@@ -695,6 +695,8 @@ export interface CatalogIndex {
   context_id: string;
   /** 可用品质（normal 起）。 */
   qualities: string[];
+  /** **不在 `entries` 里的本地化名**：`"<section>/<name>" → 中文名`（目前是物品大组）。 */
+  names: Record<string, string>;
   entries: IndexEntry[];
 }
 

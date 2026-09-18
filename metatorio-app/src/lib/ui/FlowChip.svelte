@@ -117,7 +117,7 @@
 <span
   class="flow-chip"
   class:out={amount > 0}
-  title={`${displayName}${meta.quality ? `（${meta.quality}）` : ""} ${amount > 0 ? "产出" : "消耗"} ${tipText}`}
+  title={`${displayName}${meta.quality ? `（${runtime.localizedName("quality", meta.quality)}）` : ""} ${amount > 0 ? "产出" : "消耗"} ${tipText}`}
 >
   <HoverIcon
     type={meta.type}
