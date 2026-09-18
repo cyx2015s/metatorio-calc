@@ -30,7 +30,7 @@ pub use render::{
     render_icon, render_prototype_icon, render_prototype_icon_with, render_record_icon,
     render_record_icon_with, union_canvas,
 };
-pub use sources::{Archive, IconSources};
+pub use sources::{Archive, IconSources, ModFile, enabled_mod_names, scan_mod_files};
 pub use utility::{
     UtilityParse, UtilityReport, UtilitySprite, parse_utility_sprites, render_utility_icons,
 };

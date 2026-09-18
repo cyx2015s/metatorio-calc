@@ -652,8 +652,11 @@ export interface SolarBalance {
 export interface ContextInfo {
   id: string;
   name: string;
-  source: string;
   created_at: number;
+  /** 导出时的游戏版本（拿不到 → null，例如内嵌示例 / 用户自备 dump）。 */
+  game_version: string | null;
+  /** 导出时启用的 mod（不含 base）；老缓存没有记录 → 空表。 */
+  mods: { name: string; version: string }[];
   loaded: boolean;
   groups: { name: string; count: number }[];
   icon_root: string | null;

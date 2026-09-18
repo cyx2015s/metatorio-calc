@@ -255,10 +255,19 @@ pub fn game_root_from_exe(exe: &Path) -> Option<PathBuf> {
     None
 }
 
+/// 扫到的一个 mod 文件：名字、版本（拿不到就是 `None`）、以及它的资源根。
+#[derive(Debug, Clone)]
+pub struct ModFile {
+    pub name: String,
+    pub version: Option<String>,
+    pub archive: Archive,
+}
+
 /// 扫描 mod 目录：解压出来的目录、以及 `<名字>_<版本>.zip`。
 ///
-/// mod 名优先取 `info.json` 里的 `name`（zip 里读、目录里读），拿不到才退回文件名。
-fn scan_mods(dir: &Path) -> Result<Vec<(String, Archive)>, String> {
+/// mod 名优先取 `info.json` 里的 `name`（zip 里读、目录里读），拿不到才退回文件名；
+/// 版本同样优先 `info.json` 的 `version`，退回 zip 文件名里的 `<版本>` 段。
+pub fn scan_mod_files(dir: &Path) -> Result<Vec<ModFile>, String> {
     let mut found = Vec::new();
     let entries = match std::fs::read_dir(dir) {
         Ok(entries) => entries,
@@ -268,21 +277,69 @@ fn scan_mods(dir: &Path) -> Result<Vec<(String, Archive)>, String> {
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
-            let name = dir_name(&path);
-            let name = info_json_name(&path).unwrap_or(name);
-            found.push((name, Archive::Dir(path)));
-        } else if path.extension().is_some_and(|ext| ext == "zip") {
             let file_name = dir_name(&path);
-            match zip_mod_name(&path) {
-                Some((name, prefix)) => found.push((name, Archive::Zip { path, prefix })),
-                // 不是 mod zip（例如 `.modpack.zip`）：跳过。
-                None => {
-                    let _ = file_name;
-                }
+            let info = info_json(&path);
+            let name = info
+                .as_ref()
+                .and_then(|info| info.0.clone())
+                .unwrap_or(file_name);
+            let version = info.and_then(|info| info.1);
+            found.push(ModFile {
+                name,
+                version,
+                archive: Archive::Dir(path),
+            });
+        } else if path.extension().is_some_and(|ext| ext == "zip") {
+            // 不是 mod zip（例如 `.modpack.zip`）：跳过。
+            if let Some((name, prefix, version)) = zip_mod_info(&path) {
+                found.push(ModFile {
+                    name,
+                    version,
+                    archive: Archive::Zip { path, prefix },
+                });
             }
         }
     }
     Ok(found)
+}
+
+fn scan_mods(dir: &Path) -> Result<Vec<(String, Archive)>, String> {
+    Ok(scan_mod_files(dir)?
+        .into_iter()
+        .map(|file| (file.name, file.archive))
+        .collect())
+}
+
+/// 读 `<mod 目录>/mod-list.json` 里**启用**的 mod 名（含 `base`）。
+///
+/// 文件不存在（没有 mod / 不是标准布局）时返回空——调用方按「不知道」处理，不要猜。
+pub fn enabled_mod_names(dir: &Path) -> Vec<String> {
+    let Ok(raw) = std::fs::read_to_string(dir.join("mod-list.json")) else {
+        return Vec::new();
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return Vec::new();
+    };
+    value
+        .get("mods")
+        .and_then(serde_json::Value::as_array)
+        .map(|mods| {
+            mods.iter()
+                .filter(|entry| {
+                    entry
+                        .get("enabled")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false)
+                })
+                .filter_map(|entry| {
+                    entry
+                        .get("name")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_string)
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn dir_name(path: &Path) -> String {
@@ -292,18 +349,24 @@ fn dir_name(path: &Path) -> String {
         .to_string()
 }
 
-/// `<dir>/info.json` 里的 `name` 字段。
-fn info_json_name(dir: &Path) -> Option<String> {
+/// `<dir>/info.json` 里的 `(name, version)`。
+fn info_json(dir: &Path) -> Option<(Option<String>, Option<String>)> {
     let raw = std::fs::read_to_string(dir.join("info.json")).ok()?;
     let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
-    value.get("name")?.as_str().map(str::to_string)
+    Some((
+        value.get("name")?.as_str().map(str::to_string),
+        value
+            .get("version")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string),
+    ))
 }
 
-/// zip mod：返回 (mod 名, zip 内前缀)。
+/// zip mod：返回 (mod 名, zip 内前缀, 版本)。
 ///
 /// 条目形如 `aai-industry_0.7.3/graphics/…`，因此取第一个条目的第一段当前缀；
-/// mod 名优先用包里的 `info.json`。
-fn zip_mod_name(path: &Path) -> Option<(String, String)> {
+/// mod 名与版本优先用包里的 `info.json`，拿不到才退回前缀/文件名。
+fn zip_mod_info(path: &Path) -> Option<(String, String, Option<String>)> {
     let file = File::open(path).ok()?;
     let mut zip = zip::ZipArchive::new(file).ok()?;
     let first = zip.by_index(0).ok()?.name().to_string();
@@ -311,23 +374,101 @@ fn zip_mod_name(path: &Path) -> Option<(String, String)> {
     if prefix.is_empty() {
         return None;
     }
-    let info_name = format!("{prefix}/info.json");
-    let name = zip
-        .by_name(&info_name)
-        .ok()
-        .and_then(|mut entry| {
-            let mut raw = String::new();
-            entry.read_to_string(&mut raw).ok()?;
-            let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
-            value.get("name")?.as_str().map(str::to_string)
-        })
-        .unwrap_or_else(|| prefix.split('_').next().unwrap_or(&prefix).to_string());
-    Some((name, format!("{prefix}/")))
+    let mut info_name = None;
+    let mut info_version = None;
+    if let Ok(mut entry) = zip.by_name(&format!("{prefix}/info.json")) {
+        let mut raw = String::new();
+        if entry.read_to_string(&mut raw).is_ok()
+            && let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw)
+        {
+            info_name = value
+                .get("name")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            info_version = value
+                .get("version")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+        }
+    }
+    let name = info_name.unwrap_or_else(|| prefix.split('_').next().unwrap_or(&prefix).to_string());
+    // 版本：info.json → 退回 zip 文件名 `<名字>_<版本>.zip` 的 `<版本>` 段。
+    let version = info_version.or_else(|| {
+        let stem = path.file_stem()?.to_str()?;
+        let (_, version) = stem.rsplit_once('_')?;
+        (!version.is_empty()).then(|| version.to_string())
+    });
+    Some((name, format!("{prefix}/"), version))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// mod 版本：`info.json` 优先；包里没有 info.json 时退回 zip 文件名
+    /// `<名字>_<版本>.zip` 的版本段。
+    #[test]
+    fn scan_mod_files_reads_zip_versions() {
+        use std::io::Write;
+        let dir = std::env::temp_dir().join(format!("metatorio-modscan-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("建临时目录");
+        let write_zip = |path: &Path, entries: &[(&str, &[u8])]| {
+            let file = File::create(path).expect("建 zip");
+            let mut writer = zip::ZipWriter::new(file);
+            let options: zip::write::SimpleFileOptions = Default::default();
+            for (name, bytes) in entries {
+                writer.start_file(*name, options).expect("写条目");
+                writer.write_all(bytes).expect("写字节");
+            }
+            writer.finish().expect("收尾");
+        };
+        write_zip(
+            &dir.join("with-info_1.2.3.zip"),
+            &[
+                (
+                    "with-info_1.2.3/info.json",
+                    br#"{"name":"with-info","version":"9.9.9"}"#,
+                ),
+                ("with-info_1.2.3/graphics/x.png", b"png"),
+            ],
+        );
+        write_zip(
+            &dir.join("bare-mod_4.5.6.zip"),
+            &[("bare-mod_4.5.6/graphics/x.png", b"png")],
+        );
+
+        let files = scan_mod_files(&dir).expect("扫描");
+        let find = |name: &str| {
+            files
+                .iter()
+                .find(|file| file.name == name)
+                .unwrap_or_else(|| panic!("扫到 {name}"))
+        };
+        assert_eq!(find("with-info").version.as_deref(), Some("9.9.9"));
+        assert_eq!(find("bare-mod").version.as_deref(), Some("4.5.6"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `mod-list.json`：只取 `enabled: true` 的名字。
+    #[test]
+    fn enabled_mod_names_filters_by_enabled_flag() {
+        let dir = std::env::temp_dir().join(format!("metatorio-modlist-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("建临时目录");
+        std::fs::write(
+            dir.join("mod-list.json"),
+            r#"{"mods":[{"name":"base","enabled":true},{"name":"off","enabled":false},{"name":"on","enabled":true}]}"#,
+        )
+        .expect("写 mod-list");
+        assert_eq!(
+            enabled_mod_names(&dir),
+            vec!["base".to_string(), "on".to_string()]
+        );
+        // 没有这个文件（或不是标准布局）→ 空，不猜。
+        assert!(enabled_mod_names(&dir.join("nope")).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn split_spec_reads_mod_and_path() {

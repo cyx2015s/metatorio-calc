@@ -13,6 +13,7 @@
   import type {
     Accessible,
     CatalogKind,
+    ContextInfo,
     DualVar,
     MechanicId,
     TargetId,
@@ -297,17 +298,25 @@
     renameTarget = null;
   }
 
-  /** 来源展示缩短：只留每段最后一个路径片段（完整路径在 tooltip）。 */
-  function shortSource(source: string): string {
-    return source
-      .split(", ")
-      .map((part) => {
-        const [label, path] = part.split(": ");
-        if (!path) return part;
-        const segment = path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? path;
-        return `${label}: ${segment}`;
-      })
-      .join(" · ");
+  /** 上下文来源摘要：游戏版本 + 启用的 mod 数（完整清单在 tooltip）。 */
+  function contextSummary(context: ContextInfo): string {
+    const version = context.game_version ?? "版本未知";
+    const mods = context.mods.length ? `${context.mods.length} 个 mod` : "无 mod";
+    return `${version} · ${mods}`;
+  }
+
+  /** 上下文 tooltip：逐条列出启用的 mod 与版本。 */
+  function contextTitle(context: ContextInfo): string {
+    const lines = [`游戏版本：${context.game_version ?? "未知"}`];
+    if (context.mods.length === 0) {
+      lines.push("启用 mod：无（或这份缓存没有记录）");
+    } else {
+      lines.push(`启用 mod（${context.mods.length}）：`);
+      for (const mod of context.mods) {
+        lines.push(`  ${mod.name}${mod.version ? ` ${mod.version}` : ""}`);
+      }
+    }
+    return lines.join("\n");
   }
 
   // ── 派生数据 ────────────────────────────────────────────────────
@@ -2147,7 +2156,7 @@
                     {#if project?.context_id === context.id}<span class="chip ok">项目上下文</span>{/if}
                     {#if !context.loaded}<span class="chip">未载入</span>{/if}
                   </div>
-                  <div class="ctx-meta" title={context.source}>{shortSource(context.source)}</div>
+                  <div class="ctx-meta" title={contextTitle(context)}>{contextSummary(context)}</div>
                 </div>
                 <div class="ctx-actions">
                   <button

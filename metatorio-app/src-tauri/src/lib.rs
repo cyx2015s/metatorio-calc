@@ -276,20 +276,39 @@ struct ContextRegistry {
     meta: HashMap<String, ContextMeta>,
 }
 
+/// 导出时启用的一个 mod（名字 + 版本）。
+///
+/// 只记「启用了哪些 mod、什么版本」——**不记 mod 目录与可执行文件路径**：那些只在导出那一刻
+/// 有意义（导出时就用它们渲染图标），存进上下文只会在换机器/改 mod 目录后变成误导。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ModEntry {
+    pub name: String,
+    /// 版本号；拿不到时是空串（不猜）。
+    pub version: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ContextMeta {
     id: String,
     name: String,
-    source: String,
     created_at: u64,
+    /// 导出时的游戏版本；内嵌 dump / 用户自备 dump 拿不到 → `None`。
+    #[serde(default)]
+    game_version: Option<String>,
+    /// 导出时**启用**的 mod（不含 `base`）。老缓存没有这个字段 → 空表。
+    #[serde(default)]
+    mods: Vec<ModEntry>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ContextInfo {
     pub id: String,
     pub name: String,
-    pub source: String,
     pub created_at: u64,
+    /// 导出时的游戏版本（拿不到 → `null`）。
+    pub game_version: Option<String>,
+    /// 导出时启用的 mod（不含 `base`）。
+    pub mods: Vec<ModEntry>,
     pub loaded: bool,
     pub groups: Vec<GroupCount>,
     pub icon_root: Option<String>,
@@ -530,13 +549,20 @@ impl ContextRegistry {
     }
 
     /// Create the cache directory + manifest for a new context id.
-    fn register(&mut self, id: String, name: String, source: String) {
+    fn register(
+        &mut self,
+        id: String,
+        name: String,
+        game_version: Option<String>,
+        mods: Vec<ModEntry>,
+    ) {
         let created_at = now_secs();
         let meta = ContextMeta {
             id: id.clone(),
             name,
-            source,
             created_at,
+            game_version,
+            mods,
         };
         let _ = std::fs::create_dir_all(self.store_dir(&id));
         write_manifest(&self.manifest_path(&id), &meta);
@@ -813,7 +839,8 @@ fn copy_dir(src: &Path, dst: &Path) {
 fn register_context_files(
     state: &AppState,
     name: String,
-    source: String,
+    game_version: Option<String>,
+    mods: Vec<ModEntry>,
     raw: &[u8],
     locale_raw: Option<&[u8]>,
     icon: &IconSource,
@@ -826,7 +853,7 @@ fn register_context_files(
             .map_err(|_| "contexts 锁损坏".to_string())?;
         let is_new = !registry.meta.contains_key(&id);
         if is_new {
-            registry.register(id.clone(), name, source);
+            registry.register(id.clone(), name, game_version, mods);
         }
         (
             is_new,
@@ -907,12 +934,14 @@ fn render_icons_into(
 async fn register_context_and_activate(
     state: &AppState,
     name: String,
-    source: String,
+    game_version: Option<String>,
+    mods: Vec<ModEntry>,
     raw: &[u8],
     locale_raw: Option<&[u8]>,
     icon: IconSource,
 ) -> Result<ContextInfo, String> {
-    let (id, needs_icons) = register_context_files(state, name, source, raw, locale_raw, &icon)?;
+    let (id, needs_icons) =
+        register_context_files(state, name, game_version, mods, raw, locale_raw, &icon)?;
     if needs_icons {
         if let IconSource::Render { game_root, mod_dir } = &icon {
             let icon_root = {
@@ -991,8 +1020,9 @@ fn context_info_from(
     Some(ContextInfo {
         id: meta.id,
         name: meta.name,
-        source: meta.source,
         created_at: meta.created_at,
+        game_version: meta.game_version,
+        mods: meta.mods,
         loaded: store.is_some(),
         groups: store
             .map(|store| {
@@ -1106,7 +1136,16 @@ fn run_game(exe: &Path, config: &Path, args: &[&str], extra: &[String]) -> Resul
 ///
 /// 返回 `(name, source, dump 原始字节, locale 字节, 图标源目录)`；图标源为
 /// `None` 表示本次没导出贴图（无头/无图形环境），上下文照常可用、只是没图标。
-type GameExport = (String, String, Vec<u8>, Option<Vec<u8>>, IconSource);
+/// 一次游戏导出的产物：dump 字节、翻译、图标来源，以及**要记进上下文元数据**的
+/// 游戏版本与启用 mod（路径不进元数据）。
+struct GameExport {
+    name: String,
+    game_version: Option<String>,
+    mods: Vec<ModEntry>,
+    raw: Vec<u8>,
+    locale_raw: Option<Vec<u8>>,
+    icon: IconSource,
+}
 
 /// 从可执行文件路径推断游戏的 **data 目录**（`read-data` 要指向它本身，
 /// 与 Factorio 默认的 `__PATH__executable__/../../data` 一致）。
@@ -1179,12 +1218,10 @@ fn export_game_context<R: TauriRuntime>(
         .and_then(|name| name.to_str())
         .map(str::to_string)
         .unwrap_or_else(|| "vanilla".to_string());
-    let source = format!(
-        "exe: {executable_path}{}",
-        mod_dir
-            .map(|dir| format!(", mods: {dir}"))
-            .unwrap_or_default()
-    );
+    // 元数据只记「游戏版本 + 导出时启用的 mod（名字 + 版本）」：**路径不记**
+    // ——它只在导出这一刻有用（图标当场就渲染好了），存下来换机器/换目录只会误导。
+    let game_version = game_version_of(&exe);
+    let mods = enabled_mods(&exe, mod_dir);
     // 图标来源：从可执行文件路径推出游戏根目录（`<游戏>/bin/x64/factorio.exe` →
     // `<游戏>`，里面找 `data/base`），mod 目录沿用本次导出的那个（None = 游戏自带
     // 的 `<游戏>/mods`）。推不出来就老实说「这个上下文没有图标」。
@@ -1208,7 +1245,62 @@ fn export_game_context<R: TauriRuntime>(
             serde_json::to_vec(&map).ok()
         }
     };
-    Ok((name, source, raw, locale_raw, icon))
+    Ok(GameExport {
+        name,
+        game_version,
+        mods,
+        raw,
+        locale_raw,
+        icon,
+    })
+}
+
+/// 跑一次 `factorio --version` 拿版本号（`Version: 2.1.17 (build …)` 的第一行）。
+///
+/// 拿不到就返回 `None`——**不猜**（不写进上下文，UI 显示「版本未知」）。
+fn game_version_of(exe: &Path) -> Option<String> {
+    let output = std::process::Command::new(exe)
+        .arg("--version")
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let line = text.lines().next()?.trim();
+    let version = line
+        .strip_prefix("Version:")
+        .map(str::trim)
+        .and_then(|rest| rest.split_whitespace().next())?;
+    (!version.is_empty()).then(|| version.to_string())
+}
+
+/// 导出时**启用**的 mod（名字 + 版本，不含 `base`）。
+///
+/// 启用名单读 `<mod 目录>/mod-list.json`，版本从 mod 文件解析（`info.json` 优先，
+/// 退回 zip 文件名的 `<名字>_<版本>.zip`）。没传 `--mod-directory` 时按游戏自带的
+/// `<游戏>/mods` 找（与图标来源同一约定）。读不到就返回空表——**不猜**。
+fn enabled_mods(exe: &Path, mod_dir: Option<&str>) -> Vec<ModEntry> {
+    let dir = match mod_dir {
+        Some(dir) => PathBuf::from(dir),
+        None => match metatorio_icons::sources::game_root_from_exe(exe) {
+            Some(game_root) => game_root.join("mods"),
+            None => return Vec::new(),
+        },
+    };
+    let enabled = metatorio_icons::enabled_mod_names(&dir);
+    let Ok(files) = metatorio_icons::scan_mod_files(&dir) else {
+        return Vec::new();
+    };
+    let mut versions: std::collections::HashMap<String, String> = files
+        .into_iter()
+        .filter_map(|file| Some((file.name, file.version?)))
+        .collect();
+    enabled
+        .into_iter()
+        .filter(|name| name != "base")
+        .map(|name| ModEntry {
+            version: versions.remove(&name).unwrap_or_default(),
+            name,
+        })
+        .collect()
 }
 
 /// 导出 → 注册 → 锁外载入 → 激活。
@@ -1221,12 +1313,29 @@ async fn load_game_context_and_activate<R: TauriRuntime>(
     let export_app = app.clone();
     let executable = executable_path.to_string();
     let mods = mod_dir.map(str::to_string);
-    let (name, source, raw, locale_raw, icon) = tauri::async_runtime::spawn_blocking(move || {
+    let export = tauri::async_runtime::spawn_blocking(move || {
         export_game_context(&export_app, &executable, mods.as_deref())
     })
     .await
     .map_err(|error| error.to_string())??;
-    register_context_and_activate(state, name, source, &raw, locale_raw.as_deref(), icon).await
+    let GameExport {
+        name,
+        game_version,
+        mods,
+        raw,
+        locale_raw,
+        icon,
+    } = export;
+    register_context_and_activate(
+        state,
+        name,
+        game_version,
+        mods,
+        &raw,
+        locale_raw.as_deref(),
+        icon,
+    )
+    .await
 }
 
 // ── Commands ──────────────────────────────────────────────────────
@@ -1238,7 +1347,9 @@ async fn load_bundled_dump(app: AppHandle) -> Result<ContextInfo, String> {
     let info = register_context_and_activate(
         &state,
         "内置示例".to_string(),
-        "embedded demo".to_string(),
+        // 内嵌 dump：不知道它出自哪个游戏版本、开了哪些 mod —— 留空，不猜。
+        None,
+        Vec::new(),
         DEMO_DUMP.as_bytes(),
         None,
         IconSource::None,
@@ -1267,14 +1378,13 @@ async fn load_game_context(
 #[tauri::command]
 async fn load_dump(app: AppHandle, path: String) -> Result<ContextInfo, String> {
     // 读盘 + 目录探测放在阻塞线程池（dump 可能几十 MB）。
-    let (name, source, raw, locale_raw, icon) = tauri::async_runtime::spawn_blocking(move || {
+    let (name, raw, locale_raw, icon) = tauri::async_runtime::spawn_blocking(move || {
         let raw = std::fs::read(&path).map_err(|error| error.to_string())?;
         let name = Path::new(&path)
             .file_stem()
             .and_then(|stem| stem.to_str())
             .unwrap_or("dump")
             .to_string();
-        let source = format!("dump: {path}");
         // 翻译：dump 旁的游戏导出目录里通常有多个 `{category}-locale.json`。
         let locale_raw = {
             let map = Path::new(&path)
@@ -1302,14 +1412,22 @@ async fn load_dump(app: AppHandle, path: String) -> Result<ContextInfo, String> 
             }
             None => IconSource::None,
         };
-        Ok::<_, String>((name, source, raw, locale_raw, icon))
+        Ok::<_, String>((name, raw, locale_raw, icon))
     })
     .await
     .map_err(|error| error.to_string())??;
     let state = app.state::<AppState>();
-    let info =
-        register_context_and_activate(&state, name, source, &raw, locale_raw.as_deref(), icon)
-            .await?;
+    // 用户自备 dump：不知道游戏版本与 mod 名单（dump 里没有这些信息）——留空，不猜。
+    let info = register_context_and_activate(
+        &state,
+        name,
+        None,
+        Vec::new(),
+        &raw,
+        locale_raw.as_deref(),
+        icon,
+    )
+    .await?;
     emit_contexts_changed(&app, &state, None);
     Ok(info)
 }
@@ -4150,7 +4268,11 @@ mod tests {
         let (id, needs_icons) = register_context_files(
             &state,
             "test".to_string(),
-            "test".to_string(),
+            Some("2.1.17".to_string()),
+            vec![ModEntry {
+                name: "quality".to_string(),
+                version: "2.1.17".to_string(),
+            }],
             &raw,
             None,
             &IconSource::Render {
@@ -4182,6 +4304,96 @@ mod tests {
         // 这份最小 dump 里没有 `utility-sprites`：如实报「没得画」，不是失败。
         assert_eq!(utility.written, 0, "{utility:?}");
         assert_eq!(utility.total, 0, "{utility:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 导出时启用的 mod：只收 `mod-list.json` 里 enabled 的（去掉 `base`），
+    /// 版本从 `info.json` 读；名字对不上就留空串（不猜版本）。
+    #[test]
+    fn enabled_mods_filters_mod_list_and_reads_versions() {
+        let root = std::env::temp_dir().join(format!("metatorio-mods-{}", std::process::id()));
+        let mods = root.join("mods");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(mods.join("quality")).unwrap();
+        std::fs::create_dir_all(mods.join("disabled-mod")).unwrap();
+        std::fs::write(
+            mods.join("mod-list.json"),
+            r#"{"mods":[
+                {"name":"base","enabled":true},
+                {"name":"quality","enabled":true},
+                {"name":"disabled-mod","enabled":false},
+                {"name":"ghost-mod","enabled":true}
+            ]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            mods.join("quality").join("info.json"),
+            r#"{"name":"quality","version":"2.1.17"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            mods.join("disabled-mod").join("info.json"),
+            r#"{"name":"disabled-mod","version":"1.0.0"}"#,
+        )
+        .unwrap();
+
+        let mods = enabled_mods(&root, Some(mods.to_str().unwrap()));
+        // `ghost-mod` 被启用但文件不在 → 版本留空（不猜）；`disabled-mod` 不出现；`base` 不算 mod。
+        assert_eq!(
+            mods,
+            vec![
+                ModEntry {
+                    name: "quality".to_string(),
+                    version: "2.1.17".to_string(),
+                },
+                ModEntry {
+                    name: "ghost-mod".to_string(),
+                    version: String::new(),
+                },
+            ]
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 上下文元数据：旧缓存（只有 `source`，没有 `game_version`/`mods`）必须照常载入；
+    /// 新缓存把「游戏版本 + 启用的 mod」写全；两者都不记路径。
+    #[test]
+    fn context_manifest_records_mods_and_tolerates_old_caches() {
+        // 旧格式（历史上写的是 `source: "exe: …"`）：不能因为多了/少了字段就载不进来。
+        let old: ContextMeta = serde_json::from_str(
+            r#"{"id":"hash-a","name":"vanilla-2.1","source":"exe: D:\\game\\factorio.exe","created_at":1}"#,
+        )
+        .expect("旧缓存要能载入");
+        assert_eq!(old.game_version, None);
+        assert!(old.mods.is_empty());
+
+        // 新格式：版本 + 启用的 mod 逐条记录，路径不出现。
+        let dir = std::env::temp_dir().join(format!("metatorio-manifest-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("context.json");
+        let meta = ContextMeta {
+            id: "hash-b".to_string(),
+            name: "py".to_string(),
+            created_at: 2,
+            game_version: Some("2.1.17".to_string()),
+            mods: vec![
+                ModEntry {
+                    name: "pyalienlife".to_string(),
+                    version: "3.1.0".to_string(),
+                },
+                ModEntry {
+                    name: "space-age".to_string(),
+                    version: String::new(),
+                },
+            ],
+        };
+        write_manifest(&path, &meta);
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(!raw.contains("source"), "元数据里不该再有路径字段：{raw}");
+        let back = read_manifest(&path).expect("读回");
+        assert_eq!(back.game_version.as_deref(), Some("2.1.17"));
+        assert_eq!(back.mods, meta.mods);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

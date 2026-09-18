@@ -74,6 +74,8 @@ cargo run -p metatorio-icons --example compare -- \
   `icons/<type>/<name>.png`，与 `icon` 命令的读取路径一致。
 - 图标是 best-effort：渲染失败**不挡**上下文注册，但必须如实报出来，并把空的 `icons/`
   目录收掉——`icon_root` 不存在 = 前端退回占位图标，不留「有目录却没图」的假象。
+- **上下文元数据只记「游戏版本 + 启用的 mod（名字 + 版本）」**：路径（可执行文件 / mod 目录）
+  不进元数据——它只在导出那一刻有用（图标当场渲染完），旧缓存里的 `source` 字段被忽略。
 - 渲染走 `render_record_icon_with`：自带 `icon`/`icons` 的按定义画；没有的按官方写明的
   **推导**画（配方 → 主产物/唯一产物）。
 - 完成情况打到 stderr：`图标渲染完成：写出 N 张（其中按官方规则推导 D 张；<type> N、…），
@@ -305,5 +307,9 @@ cargo run -p metatorio-icons --example compare -- \
 4. 查 py 那 97 张 `<50%` 的：`*-pyvoid` 已经查清（底层 `icon_size = 1`、官方就是 1×1，
    我们的居中取整与官方差一个像素，属于退化情形）。
 5. 用更好的重采样（或按 mipmap 级别选择）收敛缩放层的偏差（vanilla 上两种核打平，py 待测）。
-6. 把「游戏根目录 / mod 目录」写进上下文元数据（现在只有 `source` 字符串，重新注册同
-   内容的上下文时会靠解析字符串补路径，太脆）；顺带让 `Copy`/`None` 来源也能被如实记录。
+6. ~~把「游戏根目录 / mod 目录」写进上下文元数据~~ **改成了记录「启用的 mod + 版本号」**
+   （路径只在导出那一刻有意义，图标当时就渲染完了；把路径存进上下文，换机器/换 mod 目录后
+   只会误导）。`context.json` 现在写 `game_version` 与 `mods: [{name, version}]`：
+   版本号从 `info.json` 读、拿不到就退回 `<名字>_<版本>.zip` 的文件名；`mod-list.json`
+   读不到、或内嵌 dump / 用户自备 dump 的情况下留空**不猜**。旧缓存没有这两个字段也能载入
+   （`#[serde(default)]`），UI 显示「版本未知 / 无 mod」。
