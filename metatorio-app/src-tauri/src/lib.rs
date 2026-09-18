@@ -811,6 +811,28 @@ enum IconSource {
     },
 }
 
+/// 图标缓存布局版本：口径变化时 +1，让旧缓存重新渲染（见 `register_context_files`）。
+/// 1 → 2：从「按原型 `type` 建目录」改成「按归类建目录」（`item/`、`entity/`、
+/// `space-location/`），否则物品子类型与实体的图标前端全都取不到。
+const ICON_LAYOUT_VERSION: u32 = 2;
+
+/// 图标缓存目录里的布局版本标记（`.layout`）。
+fn read_layout_marker(icon_root: &Path) -> Option<u32> {
+    std::fs::read_to_string(icon_root.join(".layout"))
+        .ok()?
+        .trim()
+        .parse()
+        .ok()
+}
+
+fn write_layout_marker(icon_root: &Path) -> Result<(), String> {
+    std::fs::write(
+        icon_root.join(".layout"),
+        format!("{ICON_LAYOUT_VERSION}\n"),
+    )
+    .map_err(|error| format!("写布局标记失败: {error}"))
+}
+
 fn copy_dir(src: &Path, dst: &Path) {
     if !src.is_dir() {
         return;
@@ -874,6 +896,18 @@ fn register_context_files(
     }
     // 图标：新上下文，或历史注册时缺图标（早期路径 bug 留下的缓存）都要处理——
     // 重新导出同内容时 id 相同、注册被跳过，但图标仍需补齐。
+    //
+    // **布局版本**：缓存里的 PNG 是按当时的布局写的；布局口径变了（例如从「按原型 type
+    // 建目录」改成「按归类：item/ entity/»」）之后，旧缓存里那些目录名就是错的，重新导入
+    // 同内容也会因为「目录已存在」被跳过、永远修不好。所以渲染出来的目录里放一个版本标记，
+    // 版本对不上就**丢掉重渲染**（只在能重建时丢：`Copy`/`None` 的缓存不是我们写的，不动）。
+    let layout_stale = matches!(icon, IconSource::Render { .. })
+        && icon_root.is_dir()
+        && read_layout_marker(&icon_root) != Some(ICON_LAYOUT_VERSION);
+    if layout_stale {
+        eprintln!("图标缓存布局版本不符，重新渲染：{}", icon_root.display());
+        let _ = std::fs::remove_dir_all(&icon_root);
+    }
     let mut needs_icons = false;
     if !icon_root.is_dir() {
         needs_icons = true;
@@ -927,6 +961,10 @@ fn render_icons_into(
         parsed.skipped.len(),
         icon_root,
     )?;
+    // 记下布局版本：下次布局口径变了就能认出这份缓存是旧的（见 `register_context_files`）。
+    if icons.written > 0 || utility.written > 0 {
+        write_layout_marker(icon_root)?;
+    }
     Ok((icons, utility))
 }
 
@@ -4441,6 +4479,29 @@ mod tests {
         // 这份最小 dump 里没有 `utility-sprites`：如实报「没得画」，不是失败。
         assert_eq!(utility.written, 0, "{utility:?}");
         assert_eq!(utility.total, 0, "{utility:?}");
+        // 渲染完会写下布局版本标记：布局口径变了才认得出旧缓存。
+        assert_eq!(read_layout_marker(&icon_root), Some(ICON_LAYOUT_VERSION));
+
+        // (3) 旧布局的缓存：往图标目录塞一个「按原型 type 命名」的假目录 + 旧版本标记，
+        //     重新注册必须要求**重渲染**，并且把旧目录丢掉（否则前端永远取不到图标）。
+        std::fs::create_dir_all(icon_root.join("module")).unwrap();
+        std::fs::write(icon_root.join("module/speed-module.png"), b"stale").unwrap();
+        std::fs::write(icon_root.join(".layout"), b"1\n").unwrap();
+        let (_, needs_icons) = register_context_files(
+            &state,
+            "test".to_string(),
+            Some("2.1.17".to_string()),
+            Vec::new(),
+            &raw,
+            None,
+            &IconSource::Render {
+                game_root: game.clone(),
+                mod_dir: None,
+            },
+        )
+        .expect("重新注册");
+        assert!(needs_icons, "布局版本不符必须重新渲染");
+        assert!(!icon_root.join("module").exists(), "旧布局的目录要被丢掉");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
