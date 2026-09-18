@@ -13,6 +13,9 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+
+use crate::image::Rgba8;
 
 /// 一个资源根：目录，或一个 mod 的 zip。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,10 +26,64 @@ pub enum Archive {
     Zip { path: PathBuf, prefix: String },
 }
 
+/// 读/解码某个资源时的失败原因（分开报，才能老实统计「缺文件」和「解码失败」）。
+#[derive(Debug, Clone)]
+pub enum SourceError {
+    /// 路径解析不了、文件/条目不存在、读失败。
+    Read(String),
+    /// 读到了但 PNG 解不开。
+    Decode(String),
+}
+
+impl std::fmt::Display for SourceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Read(error) => write!(f, "{error}"),
+            Self::Decode(error) => write!(f, "解码失败: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for SourceError {}
+
+/// 已解码图片的缓存：同一个贴图会被成百上千个原型引用（配方尤其明显），
+/// 重复解码是纯浪费。按总字节数封顶，超了整批清空（简单、可预期）。
+#[derive(Default)]
+struct DecodedCache {
+    entries: HashMap<String, Arc<Rgba8>>,
+    bytes: usize,
+}
+
+/// 解码缓存上限（py 那种大包全量渲染时，这是内存换时间的旋钮）。
+const DECODED_CACHE_MAX_BYTES: usize = 128 * 1024 * 1024;
+
 /// 图标（以及其它原型资源）的来源集合。
-#[derive(Debug, Clone, Default)]
+///
+/// 内部带两层缓存（都不改变语义，只省时间）：
+/// - **zip 只开一次**：py 的 graphics 包有上百 MB，每次读一张图都重开一遍要好几毫秒；
+/// - **解码结果按资源路径缓存**：一张 `recycling.png` 会被几千个配方引用。
 pub struct IconSources {
     roots: HashMap<String, Archive>,
+    zips: Mutex<HashMap<PathBuf, zip::ZipArchive<File>>>,
+    decoded: Mutex<DecodedCache>,
+}
+
+impl std::fmt::Debug for IconSources {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("IconSources")
+            .field("roots", &self.roots.len())
+            .finish()
+    }
+}
+
+impl Default for IconSources {
+    fn default() -> Self {
+        Self {
+            roots: HashMap::new(),
+            zips: Mutex::new(HashMap::new()),
+            decoded: Mutex::new(DecodedCache::default()),
+        }
+    }
 }
 
 impl IconSources {
@@ -76,6 +133,7 @@ impl IconSources {
     pub fn from_roots(roots: impl IntoIterator<Item = (String, Archive)>) -> Self {
         Self {
             roots: roots.into_iter().collect(),
+            ..Self::default()
         }
     }
 
@@ -114,11 +172,16 @@ impl IconSources {
             }
             Archive::Zip { path, prefix } => {
                 let entry_name = format!("{prefix}{relative}");
-                let file = File::open(path)
-                    .map_err(|error| format!("打开 {} 失败: {error}", path.display()))?;
-                let mut zip = zip::ZipArchive::new(file)
-                    .map_err(|error| format!("解析 {} 失败: {error}", path.display()))?;
-                let mut entry = zip
+                let mut zips = self.zips.lock().map_err(|_| "zip 缓存锁损坏".to_string())?;
+                if !zips.contains_key(path) {
+                    let file = File::open(path)
+                        .map_err(|error| format!("打开 {} 失败: {error}", path.display()))?;
+                    let archive = zip::ZipArchive::new(file)
+                        .map_err(|error| format!("解析 {} 失败: {error}", path.display()))?;
+                    zips.insert(path.clone(), archive);
+                }
+                let archive = zips.get_mut(path).expect("上面刚插入");
+                let mut entry = archive
                     .by_name(&entry_name)
                     .map_err(|_| format!("{} 里没有条目 {entry_name}", path.display()))?;
                 let mut bytes = Vec::with_capacity(entry.size() as usize);
@@ -128,6 +191,27 @@ impl IconSources {
                 Ok(bytes)
             }
         }
+    }
+
+    /// 读并**解码**一个资源（带解码缓存；同一个路径只解一次）。
+    pub fn decode(&self, spec: &str) -> Result<Arc<Rgba8>, SourceError> {
+        if let Ok(cache) = self.decoded.lock()
+            && let Some(image) = cache.entries.get(spec)
+        {
+            return Ok(image.clone());
+        }
+        let bytes = self.read(spec).map_err(SourceError::Read)?;
+        let image = Arc::new(Rgba8::decode_png(&bytes).map_err(SourceError::Decode)?);
+        if let Ok(mut cache) = self.decoded.lock() {
+            let size = image.pixels.len();
+            if cache.bytes + size > DECODED_CACHE_MAX_BYTES && !cache.entries.is_empty() {
+                cache.entries.clear();
+                cache.bytes = 0;
+            }
+            cache.bytes += size;
+            cache.entries.insert(spec.to_string(), image.clone());
+        }
+        Ok(image)
     }
 }
 

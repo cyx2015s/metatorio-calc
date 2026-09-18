@@ -31,7 +31,7 @@ use metatorio_data::{IconComponent, IconData, RecipeComponent};
 use std::path::Path;
 
 use crate::image::Rgba8;
-use crate::sources::IconSources;
+use crate::sources::{IconSources, SourceError};
 
 /// 渲染失败的原因（都能定位到具体原型/层，便于统计「缺文件」有多少）。
 #[derive(Debug, Clone)]
@@ -346,17 +346,18 @@ pub fn render_icon_with(
             .icon_size
             .map(|size| size.max(1) as u32)
             .unwrap_or(expected);
-        let bytes = sources
-            .read(&layer.icon)
-            .map_err(|error| IconRenderError::MissingSource {
+        // 读 + 解码（带缓存）：同一个贴图会被成百上千个原型引用，重复解码是纯浪费。
+        let source = sources.decode(&layer.icon).map_err(|error| match error {
+            SourceError::Read(error) => IconRenderError::MissingSource {
                 layer: index,
                 spec: layer.icon.clone(),
                 error,
-            })?;
-        let source = Rgba8::decode_png(&bytes).map_err(|error| IconRenderError::Decode {
-            layer: index,
-            spec: layer.icon.clone(),
-            error,
+            },
+            SourceError::Decode(error) => IconRenderError::Decode {
+                layer: index,
+                spec: layer.icon.clone(),
+                error,
+            },
         })?;
         let mut tile = source.top_left_tile(layer_size);
         apply_tint(&mut tile, layer.tint);
