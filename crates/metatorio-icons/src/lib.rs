@@ -21,5 +21,8 @@ pub mod render;
 pub mod sources;
 
 pub use image::Rgba8;
-pub use render::{IconRenderError, render_icon, render_prototype_icon};
+pub use render::{
+    IconRenderError, RenderOptions, RenderReport, ScaleLaw, render_all_icons, render_icon,
+    render_prototype_icon, render_prototype_icon_with,
+};
 pub use sources::{Archive, IconSources};

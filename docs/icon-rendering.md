@@ -9,7 +9,8 @@
 
 图标本身并没有那么神秘：原型数据里每个有图标的原型都带 `icon` / `icons`
 （`IconData` 层数组），要做的只是「读 PNG → 按规则叠加」。因此改为**在
-metatorio 自己的进程内渲染**，导出流程不再需要启动游戏。
+metatorio 自己的进程内渲染**：导出只剩 `--dump-data` 与 `--dump-prototype-locale`
+两条无头命令，`--dump-icon-sprites` 已经不再调用。
 
 实现落在新 crate **`crates/metatorio-icons`**：
 
@@ -17,7 +18,7 @@ metatorio 自己的进程内渲染**，导出流程不再需要启动游戏。
 | --- | --- |
 | `sources` | 把 `__base__/…`、`__core__/…`、`__mod__/…` 解析到真实文件：`<游戏>/data/*` 各目录（含 DLC 的 `space-age`）、mod 目录（解压目录或 `<名字>_<版本>.zip`，按需只读一个条目） |
 | `image` | RGBA8 缓冲、PNG 解码/编码（调色板/灰度/16 位归一化）、直通↔预乘、面积平均重采样、source-over 合成 |
-| `render` | 按 `IconData` 规则把一层或多层叠成一张图标（[`render_icon`] / [`render_prototype_icon`]） |
+| `render` | 按 `IconData` 规则把一层或多层叠成一张图标（[`render_icon`] / [`render_prototype_icon`]）；`render_all_icons` 遍历整个原型仓库，把结果写进缓存目录 |
 | `compare` | 与官方导出逐像素比对（统计与验收） |
 
 验收工具：`examples/compare.rs`
@@ -28,6 +29,23 @@ cargo run -p metatorio-icons --example compare -- \
   [--type item] [--limit 200] [--tolerance 2] [--save <目录>] \
   [--show <type>/<name> --pixels 36,2;40,2] [--sweep] [--fit-scale]
 ```
+
+## 接进应用
+
+注册上下文时（`metatorio-app` 的 `register_context_files` / `register_context_and_activate`）：
+
+- 导出只剩 `--dump-data`、`--dump-prototype-locale`；图标来源由枚举 `IconSource` 表达：
+  `Render { game_root, mod_dir }`（游戏导出 → 自己渲染）、`Copy(dir)`（外部已备好的贴图
+  目录，例如用户自己用游戏导出的那套）、`None`（内嵌 dump / 用户自备 dump，没有游戏目录可读）。
+- 新上下文（或历史缓存缺图标目录）时，`IconSource::Render` 先建出 `icons/` 占位目录，
+  再在**阻塞线程池**里跑 `render_icons_into`——它只吃 dump 字节与目录路径、不碰 runtime，
+  于是既可以丢进 `spawn_blocking`，也能在测试里直接调用。写盘布局为
+  `icons/<type>/<name>.png`，与 `icon` 命令的读取路径一致。
+- 图标是 best-effort：渲染失败**不挡**上下文注册，但必须如实报出来，并把空的 `icons/`
+  目录收掉——`icon_root` 不存在 = 前端退回占位图标，不留「有目录却没图」的假象。
+- 完成情况打到 stderr：`图标渲染完成：写出 N 张（<type> N、…），无图标定义 X、缺文件 Y、解码失败 Z`。
+- 测试 `context_registration_renders_icons_without_running_the_game` 串起「注册 → 渲染 →
+  读回 PNG」整条链（本机没有 `<游戏>/data/base` 时打印 `[skip]` 跳过）。
 
 ## 已经查清的事实（都是实测，不是猜的）
 
@@ -103,7 +121,6 @@ cargo run -p metatorio-icons --example compare -- \
 
 1. 查清 `space-connection` 的 66×66 画布规则；补上「配方图标自动生成」。
 2. 用更好的重采样（或按 mipmap 级别选择）收敛缩放层的偏差。
-3. 接进应用：`register_context_and_activate` 时用本 crate 渲染图标（替换
-   `--dump-icon-sprites`），并把「游戏根目录 / mod 目录」写进上下文元数据
-   （现在只有 `source` 字符串，靠解析字符串补路径太脆）。
+3. 把「游戏根目录 / mod 目录」写进上下文元数据（现在只有 `source` 字符串，重新注册同
+   内容的上下文时会靠解析字符串补路径，太脆）；顺带让 `Copy`/`None` 来源也能被如实记录。
 4. 渲染进度与失败统计要如实上报（缺文件/解码失败分别计数），不允许静默缺图。

@@ -769,14 +769,20 @@ async fn ensure_context_loaded_offlock(state: &AppState, id: &str) -> Result<(),
     })
 }
 
-/// Register a new context (or reuse the cached one by content hash), persist
-/// it, load its store and make it active.
-/// 图标来源：导出路径用 Move（rename，同卷瞬间、缓存自包含不可变），
-/// dump 导入路径用 Copy（用户目录不可 rename）。
-enum IconImport {
+/// 图标来源。
+///
+/// **不再调用游戏的 `--dump-icon-sprites`**：Steam 版启动时要用户确认，自动导出会被
+/// 打断；图标改为在**本进程内**用 dump 里的 `IconData` 定义自己渲染
+/// （[`metatorio_icons`]），渲染结果与官方导出的差异由 `examples/compare.rs` 量化。
+enum IconSource {
     None,
-    Move(PathBuf),
+    /// 外部已经准备好的图标目录 → 拷贝（例如用户自己用游戏导出的贴图目录）。
     Copy(PathBuf),
+    /// **自己渲染**：给游戏数据目录（`<游戏>`，内部再找 `data/*`）与可选 mod 目录。
+    Render {
+        game_root: PathBuf,
+        mod_dir: Option<PathBuf>,
+    },
 }
 
 fn copy_dir(src: &Path, dst: &Path) {
@@ -797,7 +803,10 @@ fn copy_dir(src: &Path, dst: &Path) {
     }
 }
 
-/// 注册上下文：写注册表 + 落盘 dump/locale/图标，返回上下文 id。
+/// 注册上下文：写注册表 + 落盘 dump/locale，并**按图标来源建/拷图标目录**。
+///
+/// 返回 `(上下文 id, 本次是否刚建出图标目录)`——第二个值让调用方只在「需要图标」时
+/// 才去渲染，复用已有缓存时不重复渲染。
 ///
 /// 不碰 runtime，也不长时间持有 registry 锁（几十 MB 的 dump 写入与图标目录
 /// 拷贝都在锁外完成；注册表只在开头做一次 check-and-set）。
@@ -807,8 +816,8 @@ fn register_context_files(
     source: String,
     raw: &[u8],
     locale_raw: Option<&[u8]>,
-    icon: IconImport,
-) -> Result<String, String> {
+    icon: &IconSource,
+) -> Result<(String, bool), String> {
     let id = context_id_of(raw);
     let (is_new, dump_path, locale_path, icon_root) = {
         let mut registry = state
@@ -836,34 +845,105 @@ fn register_context_files(
             let _ = std::fs::write(&locale_path, locale_raw);
         }
     }
-    // 图标：新上下文，或历史注册时缺图标（早期路径 bug 留下的缓存）
-    // 都导入——重新导出同内容时 id 相同、注册被跳过，但图标仍需补齐。
+    // 图标：新上下文，或历史注册时缺图标（早期路径 bug 留下的缓存）都要处理——
+    // 重新导出同内容时 id 相同、注册被跳过，但图标仍需补齐。
+    let mut needs_icons = false;
     if !icon_root.is_dir() {
-        match &icon {
-            IconImport::None => {}
-            IconImport::Move(src) => {
-                // 同卷 rename：把本次导出的类型目录整体移入缓存，之后
-                // 再次导出覆盖暂存目录也不会影响这个上下文。
-                if let Err(error) = std::fs::rename(src, &icon_root) {
-                    eprintln!("移动图标失败（忽略，使用占位图标）: {error}");
-                }
+        needs_icons = true;
+        match icon {
+            IconSource::None => {}
+            IconSource::Copy(src) => copy_dir(src, &icon_root),
+            // 自己渲染：先占位建目录，真正的渲染在阻塞线程池里做
+            // （见 `render_icons_into`），避免这里长时间阻塞调用方。
+            IconSource::Render { .. } => {
+                std::fs::create_dir_all(&icon_root).map_err(|error| error.to_string())?;
             }
-            IconImport::Copy(src) => copy_dir(src, &icon_root),
         }
     }
-    Ok(id)
+    Ok((id, needs_icons))
 }
 
-/// 注册上下文并激活：注册文件 → 锁外载入 store → 短暂上锁激活。
+/// 用游戏数据把**所有带图标定义的原型**渲染进 `icon_root`（**同步重活**，调用方负责
+/// 放进阻塞线程池）。只吃普通数据（dump 字节 + 输出目录 + 游戏目录），不碰 runtime，
+/// 因此既可以放进 `spawn_blocking`，也能在测试里直接调用。
+fn render_icons_into(
+    raw: &[u8],
+    icon_root: &Path,
+    game_root: &Path,
+    mod_dir: Option<&Path>,
+) -> Result<metatorio_icons::RenderReport, String> {
+    let dump: serde_json::Value =
+        serde_json::from_slice(raw).map_err(|error| format!("解析 dump 失败: {error}"))?;
+    let store = metatorio_data::store::PrototypeStore::load(&dump)
+        .map_err(|error| format!("加载原型仓库失败: {error}"))?;
+    let sources = metatorio_icons::IconSources::from_game_root(game_root, mod_dir)?;
+    metatorio_icons::render_all_icons(
+        &store,
+        &sources,
+        icon_root,
+        metatorio_icons::RenderOptions::default(),
+    )
+}
+
+/// 注册上下文并激活：注册文件 → （必要时）自己渲染图标 → 锁外载入 store → 短暂上锁激活。
 async fn register_context_and_activate(
     state: &AppState,
     name: String,
     source: String,
     raw: &[u8],
     locale_raw: Option<&[u8]>,
-    icon: IconImport,
+    icon: IconSource,
 ) -> Result<ContextInfo, String> {
-    let id = register_context_files(state, name, source, raw, locale_raw, icon)?;
+    let (id, needs_icons) = register_context_files(state, name, source, raw, locale_raw, &icon)?;
+    if needs_icons {
+        if let IconSource::Render { game_root, mod_dir } = &icon {
+            let icon_root = {
+                let registry = state
+                    .contexts
+                    .lock()
+                    .map_err(|_| "contexts 锁损坏".to_string())?;
+                registry.icon_root(&id)
+            };
+            // 渲染要解码/编码几千张 PNG（py 规模更久），绝不占着调用线程。
+            // 只把普通数据搬进阻塞任务（dump 复制一份，避免把借用带过 await）。
+            let dump = raw.to_vec();
+            let game_root = game_root.clone();
+            let mods = mod_dir.clone();
+            let render_root = icon_root.clone();
+            let render = tauri::async_runtime::spawn_blocking(move || {
+                render_icons_into(&dump, &render_root, &game_root, mods.as_deref())
+            })
+            .await
+            .map_err(|error| format!("图标渲染任务失败: {error}"))?;
+            match render {
+                Ok(report) => {
+                    eprintln!(
+                        "图标渲染完成：写出 {} 张（{}），无图标定义 {}、缺文件 {}、解码失败 {}",
+                        report.written,
+                        report
+                            .by_type
+                            .iter()
+                            .map(|(type_, count)| format!("{type_} {count}"))
+                            .collect::<Vec<_>>()
+                            .join("、"),
+                        report.no_icon,
+                        report.missing_source,
+                        report.decode_failed
+                    );
+                    if report.written == 0 {
+                        // 一张都没渲染出来：别留一个空目录冒充「有图标」。
+                        let _ = std::fs::remove_dir_all(&icon_root);
+                    }
+                }
+                // 图标是 best-effort：渲染失败不挡上下文注册，但必须说出来，
+                // 并且把空目录收掉（`icon_root` 不存在 = 前端用占位图标）。
+                Err(error) => {
+                    eprintln!("图标渲染失败（该上下文将没有图标）: {error}");
+                    let _ = std::fs::remove_dir_all(&icon_root);
+                }
+            }
+        }
+    }
     ensure_context_loaded_offlock(state, &id).await?;
     with_runtime(state, |runtime| {
         runtime.set_active_context(Some(id.clone()));
@@ -997,7 +1077,7 @@ fn run_game(exe: &Path, config: &Path, args: &[&str], extra: &[String]) -> Resul
 ///
 /// 返回 `(name, source, dump 原始字节, locale 字节, 图标源目录)`；图标源为
 /// `None` 表示本次没导出贴图（无头/无图形环境），上下文照常可用、只是没图标。
-type GameExport = (String, String, Vec<u8>, Option<Vec<u8>>, Option<PathBuf>);
+type GameExport = (String, String, Vec<u8>, Option<Vec<u8>>, IconSource);
 
 /// 从可执行文件路径推断游戏的 **data 目录**（`read-data` 要指向它本身，
 /// 与 Factorio 默认的 `__PATH__executable__/../../data` 一致）。
@@ -1051,16 +1131,10 @@ fn export_game_context<R: TauriRuntime>(
 
     run_game(&exe, &config, &["--dump-data"], &extra)?;
     run_game(&exe, &config, &["--dump-prototype-locale"], &extra)?;
-    // 贴图导出是 best-effort：无头环境（没有图形/贴图数据）会让这一步失败，
-    // 但数据与翻译仍然可用——不应因此整体失败。
-    if let Err(error) = run_game(
-        &exe,
-        &config,
-        &["--dump-icon-sprites", "--disable-audio"],
-        &extra,
-    ) {
-        eprintln!("贴图导出失败（忽略，本上下文将没有图标）: {error}");
-    }
+    // **不再调用 `--dump-icon-sprites`**：Steam 版那一步会弹「是否启动游戏」的确认，
+    // 自动流程会被打断。图标改为在注册阶段用 dump 里的 IconData 自己渲染
+    // （见 `render_icons_into` / `metatorio-icons`）。
+    // 图标是 best-effort：渲染失败照常注册上下文，只是没有图标。
 
     let script_output = export.join("script-output");
     let dump_path = script_output.join("data-raw-dump.json");
@@ -1082,10 +1156,19 @@ fn export_game_context<R: TauriRuntime>(
             .map(|dir| format!(", mods: {dir}"))
             .unwrap_or_default()
     );
-    // 只有真的导出了贴图目录才把它当作图标源：否则 `script-output` 里只有
-    // dump/locale，搬过去会变成"图标目录"里塞着一份 dump。
-    let icon_src = (script_output.join("item").is_dir() || script_output.join("entity").is_dir())
-        .then(|| script_output.clone());
+    // 图标来源：从可执行文件路径推出游戏根目录（`<游戏>/bin/x64/factorio.exe` →
+    // `<游戏>`，里面找 `data/base`），mod 目录沿用本次导出的那个（None = 游戏自带
+    // 的 `<游戏>/mods`）。推不出来就老实说「这个上下文没有图标」。
+    let icon = match metatorio_icons::sources::game_root_from_exe(&exe) {
+        Some(game_root) => IconSource::Render {
+            game_root,
+            mod_dir: mod_dir.map(PathBuf::from),
+        },
+        None => {
+            eprintln!("无法从 {} 推断游戏根目录，本次不渲染图标", exe.display());
+            IconSource::None
+        }
+    };
     // 翻译：`--dump-prototype-locale` 在 script-output 下写出多个
     // `{category}-locale.json`（item/recipe/entity/…），逐类合并。
     let locale_raw = {
@@ -1096,7 +1179,7 @@ fn export_game_context<R: TauriRuntime>(
             serde_json::to_vec(&map).ok()
         }
     };
-    Ok((name, source, raw, locale_raw, icon_src))
+    Ok((name, source, raw, locale_raw, icon))
 }
 
 /// 导出 → 注册 → 锁外载入 → 激活。
@@ -1109,25 +1192,12 @@ async fn load_game_context_and_activate<R: TauriRuntime>(
     let export_app = app.clone();
     let executable = executable_path.to_string();
     let mods = mod_dir.map(str::to_string);
-    let (name, source, raw, locale_raw, icon_src) =
-        tauri::async_runtime::spawn_blocking(move || {
-            export_game_context(&export_app, &executable, mods.as_deref())
-        })
-        .await
-        .map_err(|error| error.to_string())??;
-    register_context_and_activate(
-        state,
-        name,
-        source,
-        &raw,
-        locale_raw.as_deref(),
-        match icon_src {
-            Some(src) => IconImport::Move(src),
-            // 无头/无图形环境没导出贴图：照常注册上下文，只是没有图标。
-            None => IconImport::None,
-        },
-    )
+    let (name, source, raw, locale_raw, icon) = tauri::async_runtime::spawn_blocking(move || {
+        export_game_context(&export_app, &executable, mods.as_deref())
+    })
     .await
+    .map_err(|error| error.to_string())??;
+    register_context_and_activate(state, name, source, &raw, locale_raw.as_deref(), icon).await
 }
 
 // ── Commands ──────────────────────────────────────────────────────
@@ -1142,7 +1212,7 @@ async fn load_bundled_dump(app: AppHandle) -> Result<ContextInfo, String> {
         "embedded demo".to_string(),
         DEMO_DUMP.as_bytes(),
         None,
-        IconImport::None,
+        IconSource::None,
     )
     .await?;
     emit_contexts_changed(&app, &state, None);
@@ -1194,14 +1264,14 @@ async fn load_dump(app: AppHandle, path: String) -> Result<ContextInfo, String> 
             Some(parent) => {
                 let sibling = parent.join("icons");
                 if sibling.is_dir() {
-                    IconImport::Copy(sibling)
+                    IconSource::Copy(sibling)
                 } else if parent.join("item").is_dir() {
-                    IconImport::Copy(parent.to_path_buf())
+                    IconSource::Copy(parent.to_path_buf())
                 } else {
-                    IconImport::None
+                    IconSource::None
                 }
             }
-            None => IconImport::None,
+            None => IconSource::None,
         };
         Ok::<_, String>((name, source, raw, locale_raw, icon))
     })
@@ -4013,6 +4083,73 @@ mod tests {
             (gear - 1.0).abs() < 1e-9,
             "速率应带上机器速度（速度 0.5 × 0.5 s/个）：{flow:?}"
         );
+    }
+
+    /// 上下文注册阶段的图标渲染：**不启动游戏**，直接用 dump 里的 `IconData` 与游戏
+    /// 数据目录把图标画出来，写进缓存的 `icons/<type>/<name>.png`。
+    ///
+    /// 覆盖两件事：(1) 注册流程会为 `IconSource::Render` 建出图标目录并要求渲染；
+    /// (2) 渲染函数确实能产出 64×64、非空的 PNG。需要本机有游戏数据，否则跳过。
+    #[test]
+    fn context_registration_renders_icons_without_running_the_game() {
+        let game = PathBuf::from(r"D:\异星工厂\Factorio_2.1");
+        if !game.join("data/base").is_dir() {
+            eprintln!("[skip] 没有游戏数据目录 {}", game.display());
+            return;
+        }
+        // 最小 dump：一个物品，图标指向真实存在的游戏文件。
+        let dump = serde_json::json!({
+            "item": {
+                "iron-plate": {
+                    "type": "item",
+                    "name": "iron-plate",
+                    "icon": "__base__/graphics/icons/iron-plate.png"
+                }
+            }
+        });
+        let raw = serde_json::to_vec(&dump).unwrap();
+        let dir = std::env::temp_dir().join(format!("metatorio-icon-test-{}", context_id_of(&raw)));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // (1) 注册路径：registry 指向临时目录 → 图标目录被建出来、且要求渲染。
+        let state = AppState::default();
+        {
+            let mut registry = state.contexts.lock().expect("contexts 锁");
+            registry.dir = dir.clone();
+        }
+        let (id, needs_icons) = register_context_files(
+            &state,
+            "test".to_string(),
+            "test".to_string(),
+            &raw,
+            None,
+            &IconSource::Render {
+                game_root: game.clone(),
+                mod_dir: None,
+            },
+        )
+        .expect("注册上下文");
+        assert!(needs_icons, "新上下文必须要求渲染图标");
+        let icon_root = {
+            let registry = state.contexts.lock().expect("contexts 锁");
+            registry.icon_root(&id)
+        };
+        assert!(icon_root.is_dir(), "注册时应建出图标目录");
+
+        // (2) 渲染：产出 64×64、非空的 PNG。
+        let report = render_icons_into(&raw, &icon_root, &game, None).expect("渲染图标");
+        assert_eq!(report.written, 1, "{report:?}");
+        assert_eq!(report.failed(), 0, "{report:?}");
+        let bytes = std::fs::read(icon_root.join("item/iron-plate.png")).expect("读渲染结果");
+        let image = metatorio_icons::Rgba8::decode_png(&bytes).expect("解码渲染结果");
+        assert_eq!((image.width, image.height), (64, 64));
+        let opaque = image
+            .pixels
+            .chunks_exact(4)
+            .filter(|pixel| pixel[3] > 0)
+            .count();
+        assert!(opaque > 100, "渲染结果几乎是空的：{opaque} 个非透明像素");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// 上下文删除的引用守卫：只有 `context_id` 精确等于目标 id 的项目才算引用；

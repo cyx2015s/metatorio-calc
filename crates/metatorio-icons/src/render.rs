@@ -18,6 +18,8 @@
 use metatorio_data::store::PrototypeRecord;
 use metatorio_data::{IconComponent, IconData};
 
+use std::path::Path;
+
 use crate::image::Rgba8;
 use crate::sources::IconSources;
 
@@ -208,6 +210,80 @@ pub fn render_icon_with(
         canvas.composite_over_centered(&tile, dx.round() as i32, dy.round() as i32);
     }
     Ok(canvas)
+}
+
+/// 批量渲染的结果（必须如实上报：缺文件/解码失败不能被当成「就这么多图标」）。
+#[derive(Debug, Default, Clone)]
+pub struct RenderReport {
+    /// 成功写出的图标数。
+    pub written: usize,
+    /// 原型没有图标定义（游戏会按产物自动生成配方图标，这类暂时跳过）。
+    pub no_icon: usize,
+    /// 层引用的文件读不到。
+    pub missing_source: usize,
+    /// 层文件解码失败。
+    pub decode_failed: usize,
+    /// 前若干条失败样本（`type/name: 原因`），便于排查。
+    pub samples: Vec<String>,
+    /// 按类型统计写出数（`item` → 1234）。
+    pub by_type: std::collections::BTreeMap<String, usize>,
+}
+
+impl RenderReport {
+    pub fn failed(&self) -> usize {
+        self.no_icon + self.missing_source + self.decode_failed
+    }
+
+    fn record_failure(&mut self, record: &PrototypeRecord, error: &IconRenderError) {
+        match error {
+            IconRenderError::NoIcon => self.no_icon += 1,
+            IconRenderError::MissingSource { .. } => self.missing_source += 1,
+            IconRenderError::Decode { .. } => self.decode_failed += 1,
+        }
+        const MAX_SAMPLES: usize = 10;
+        if self.samples.len() < MAX_SAMPLES {
+            self.samples
+                .push(format!("{}/{}: {error}", record.type_, record.name));
+        }
+    }
+}
+
+/// 把一个原型仓库里**所有带图标定义的原型**渲染到 `out_dir/<type>/<name>.png`。
+///
+/// 输出布局与游戏 `--dump-icon-sprites` 一致，因此前端 `icon` 命令与缓存目录约定都不用改。
+/// 返回的成功/失败计数由调用方如实上报（**不允许静默缺图**）。
+pub fn render_all_icons(
+    store: &metatorio_data::store::PrototypeStore,
+    sources: &IconSources,
+    out_dir: &Path,
+    options: RenderOptions,
+) -> Result<RenderReport, String> {
+    let mut report = RenderReport::default();
+    for records in store.groups.values() {
+        for record in records.values() {
+            let Some(component) = record.component::<IconComponent>() else {
+                continue;
+            };
+            if component.icons.is_empty() && component.icon.is_none() {
+                continue;
+            }
+            match render_prototype_icon_with(record, sources, options) {
+                Ok(image) => {
+                    let dir = out_dir.join(&record.type_);
+                    std::fs::create_dir_all(&dir)
+                        .map_err(|error| format!("创建 {} 失败: {error}", dir.display()))?;
+                    let path = dir.join(format!("{}.png", record.name));
+                    let bytes = image.encode_png()?;
+                    std::fs::write(&path, bytes)
+                        .map_err(|error| format!("写 {} 失败: {error}", path.display()))?;
+                    report.written += 1;
+                    *report.by_type.entry(record.type_.clone()).or_insert(0) += 1;
+                }
+                Err(error) => report.record_failure(record, &error),
+            }
+        }
+    }
+    Ok(report)
 }
 
 /// 层清单：`icons` 优先；只有 `icon` 时视为单层（`icon_size` 取原型的）。
