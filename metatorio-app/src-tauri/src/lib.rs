@@ -1274,9 +1274,11 @@ fn game_version_of(exe: &Path) -> Option<String> {
 
 /// 导出时**启用**的 mod（名字 + 版本，不含 `base`）。
 ///
-/// 启用名单读 `<mod 目录>/mod-list.json`，版本从 mod 文件解析（`info.json` 优先，
-/// 退回 zip 文件名的 `<名字>_<版本>.zip`）。没传 `--mod-directory` 时按游戏自带的
-/// `<游戏>/mods` 找（与图标来源同一约定）。读不到就返回空表——**不猜**。
+/// 启用名单读 `<mod 目录>/mod-list.json`；版本取**游戏实际会加载的那份文件**的版本
+/// （`loaded_mods` 已经按 Factorio 的约定挑过：目录名必须是 id 且 `info.json` 直接在里面、
+/// zip 文件名必须带版本号、同名多版本取 mod-list 锁定的那个、否则取最新）。
+/// 没传 `--mod-directory` 时按游戏自带的 `<游戏>/mods` 找（与图标来源同一约定）。
+/// `mod-list.json` 读不到 → 空表（**不知道哪些启用**，不猜）。
 fn enabled_mods(exe: &Path, mod_dir: Option<&str>) -> Vec<ModEntry> {
     let dir = match mod_dir {
         Some(dir) => PathBuf::from(dir),
@@ -1285,20 +1287,22 @@ fn enabled_mods(exe: &Path, mod_dir: Option<&str>) -> Vec<ModEntry> {
             None => return Vec::new(),
         },
     };
-    let enabled = metatorio_icons::enabled_mod_names(&dir);
-    let Ok(files) = metatorio_icons::scan_mod_files(&dir) else {
+    let enabled: std::collections::HashSet<String> = metatorio_icons::read_mod_list(&dir)
+        .into_iter()
+        .filter(|entry| entry.enabled)
+        .map(|entry| entry.name)
+        .collect();
+    if enabled.is_empty() {
+        return Vec::new();
+    }
+    let Ok(mods) = metatorio_icons::loaded_mods(&dir) else {
         return Vec::new();
     };
-    let mut versions: std::collections::HashMap<String, String> = files
-        .into_iter()
-        .filter_map(|file| Some((file.name, file.version?)))
-        .collect();
-    enabled
-        .into_iter()
-        .filter(|name| name != "base")
-        .map(|name| ModEntry {
-            version: versions.remove(&name).unwrap_or_default(),
-            name,
+    mods.into_iter()
+        .filter(|file| file.name != "base" && enabled.contains(&file.name))
+        .map(|file| ModEntry {
+            version: file.version.unwrap_or_default(),
+            name: file.name,
         })
         .collect()
 }
@@ -4338,19 +4342,14 @@ mod tests {
         .unwrap();
 
         let mods = enabled_mods(&root, Some(mods.to_str().unwrap()));
-        // `ghost-mod` 被启用但文件不在 → 版本留空（不猜）；`disabled-mod` 不出现；`base` 不算 mod。
+        // `disabled-mod` 没启用不出现；`ghost-mod` 虽然启用但文件不在（游戏也不会加载它）
+        // → 不记；`base` 不算 mod。
         assert_eq!(
             mods,
-            vec![
-                ModEntry {
-                    name: "quality".to_string(),
-                    version: "2.1.17".to_string(),
-                },
-                ModEntry {
-                    name: "ghost-mod".to_string(),
-                    version: String::new(),
-                },
-            ]
+            vec![ModEntry {
+                name: "quality".to_string(),
+                version: "2.1.17".to_string(),
+            }]
         );
         let _ = std::fs::remove_dir_all(&root);
     }

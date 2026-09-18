@@ -309,7 +309,19 @@ cargo run -p metatorio-icons --example compare -- \
 5. 用更好的重采样（或按 mipmap 级别选择）收敛缩放层的偏差（vanilla 上两种核打平，py 待测）。
 6. ~~把「游戏根目录 / mod 目录」写进上下文元数据~~ **改成了记录「启用的 mod + 版本号」**
    （路径只在导出那一刻有意义，图标当时就渲染完了；把路径存进上下文，换机器/换 mod 目录后
-   只会误导）。`context.json` 现在写 `game_version` 与 `mods: [{name, version}]`：
-   版本号从 `info.json` 读、拿不到就退回 `<名字>_<版本>.zip` 的文件名；`mod-list.json`
-   读不到、或内嵌 dump / 用户自备 dump 的情况下留空**不猜**。旧缓存没有这两个字段也能载入
-   （`#[serde(default)]`），UI 显示「版本未知 / 无 mod」。
+   只会误导）。`context.json` 现在写 `game_version` 与 `mods: [{name, version}]`，
+   版本号取**游戏实际会加载的那份文件**的版本；`mod-list.json` 读不到、或内嵌 dump /
+   用户自备 dump 的情况下留空**不猜**。旧缓存没有这两个字段也能载入（`#[serde(default)]`），
+   UI 显示「版本未知 / 无 mod」。
+7. **mod 目录的挑法**（Factorio 的约定，用户给的规则 + 在本机实测）：
+   - **目录形态**：目录名必须**正好是 mod 的 id**（**带版本号的目录不接受**），`info.json`
+     直接躺在目录下（不像 zip 会嵌一层 `<名字>_<版本>/`）；版本取 `info.json.version`，
+     没有 `info.json` 的不算 mod。本机的 3 个目录 mod 都是这个形态。
+   - **zip 形态**：**文件名必须带版本号**（`<名字>_<版本>.zip`），包内是 `<名字>_<版本>/…`；
+     文件名没有版本号的（`.modpack.zip`、`some_mod.zip`）一概不收。
+   - **同名多个候选**：`mod-list.json` 里锁定了版本就用那个版本（同版本时**目录形态优先**）；
+     没锁定就用**能查到的最新版本**（按版本号逐段比，不是字符串比），无论目录还是 zip。
+   - 实测本机：104 条 mod-list（启用 5、锁定版本 0）、**99 个会被加载**；`tanvec-ai-cn`
+     装了 5 个版本 → 取 `2026.09.12`；`ForGavin` 4 个 → `2.1.7`；`tanvec-tweaks` 3 个 zip +
+     1 个目录 → 目录 `2.1.3`（最新）。**这条以前是看 `read_dir` 顺序的**（谁生效看运气），
+     现在确定。想自己核对用 `cargo run -p metatorio-icons --example compare -- --mods-report <mod 目录>`。

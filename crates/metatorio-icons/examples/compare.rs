@@ -177,6 +177,8 @@ struct Args {
     normalize: bool,
     /// `--utility <目录>`：渲染 `utility-sprites`（非原型 GUI 素材）并打印计数。
     utility: Option<PathBuf>,
+    /// `--mods-report <mod 目录>`：打印该目录里会被加载的 mod（名字 / 版本 / 形态）。
+    mods_report: Option<PathBuf>,
     /// `--types`：额外打印「按原型类型」的完整统计（默认只按参考图目录汇总，输出有界）。
     types: bool,
     /// `--sheet <out.png>`：把匹配率最差的若干张拼成一张「左=我们 / 右=官方」对照图。
@@ -206,6 +208,7 @@ fn parse_args() -> Result<Args, String> {
     let mut canvas_sweep = false;
     let mut normalize = false;
     let mut utility = None;
+    let mut mods_report = None;
     let mut types = false;
     let mut sheet = None;
     let mut sheet_count = 12usize;
@@ -243,6 +246,7 @@ fn parse_args() -> Result<Args, String> {
             "--canvas-sweep" => canvas_sweep = true,
             "--normalize" => normalize = true,
             "--utility" => utility = Some(PathBuf::from(next("--utility")?)),
+            "--mods-report" => mods_report = Some(PathBuf::from(next("--mods-report")?)),
             "--types" => types = true,
             "--sheet" => sheet = Some(PathBuf::from(next("--sheet")?)),
             "--sheet-count" => {
@@ -265,8 +269,9 @@ fn parse_args() -> Result<Args, String> {
         }
     }
     Ok(Args {
-        context: context.ok_or("缺少 --context")?,
-        game: game.ok_or("缺少 --game")?,
+        // 只有 `--mods-report` 不需要这两项（它只看 mod 目录），其余模式下面会显式报错。
+        context: context.unwrap_or_default(),
+        game: game.unwrap_or_default(),
         mods,
         only_type,
         limit,
@@ -284,6 +289,7 @@ fn parse_args() -> Result<Args, String> {
         canvas_sweep,
         normalize,
         utility,
+        mods_report,
         types,
         sheet,
         sheet_count,
@@ -292,6 +298,16 @@ fn parse_args() -> Result<Args, String> {
 
 fn main() -> Result<(), String> {
     let args = parse_args()?;
+    // `--mods-report` 只看 mod 目录，不需要上下文 / 游戏目录。
+    if let Some(dir) = &args.mods_report {
+        return mods_report(dir);
+    }
+    if args.context.as_os_str().is_empty() {
+        return Err("缺少 --context".to_string());
+    }
+    if args.game.as_os_str().is_empty() {
+        return Err("缺少 --game".to_string());
+    }
     let dump_path = args.context.join("data-raw-dump.json");
     let icons_root = args.context.join("icons");
     println!("dump   : {}", dump_path.display());
@@ -985,6 +1001,48 @@ fn normalized_pair(ours: &Rgba8, reference: &Rgba8) -> (Rgba8, Rgba8) {
         }
     };
     (fit(ours), fit(reference))
+}
+
+/// `--mods-report <mod 目录>`：打印这个 mod 目录里**游戏会加载**的 mod（名字 / 版本 / 形态）
+/// 以及 `mod-list.json` 的启用状态。同名多版本时这里显示的就是被挑中的那个。
+fn mods_report(dir: &Path) -> Result<(), String> {
+    let entries = metatorio_icons::read_mod_list(dir);
+    let enabled: std::collections::BTreeMap<&str, bool> = entries
+        .iter()
+        .map(|entry| (entry.name.as_str(), entry.enabled))
+        .collect();
+    let pinned: std::collections::BTreeMap<&str, &str> = entries
+        .iter()
+        .filter_map(|entry| Some((entry.name.as_str(), entry.version.as_deref()?)))
+        .collect();
+    let mods = metatorio_icons::loaded_mods(dir)?;
+    println!("\n=== mod 目录：{} ===", dir.display());
+    println!(
+        "mod-list.json 条目 {}（启用 {}、锁定版本 {}）；会加载的 mod {}",
+        entries.len(),
+        entries.iter().filter(|entry| entry.enabled).count(),
+        pinned.len(),
+        mods.len()
+    );
+    println!("名字 | 版本 | 形态 | 启用 | 锁定版本");
+    for file in &mods {
+        let form = match &file.archive {
+            metatorio_icons::Archive::Dir(_) => "目录",
+            metatorio_icons::Archive::Zip { .. } => "zip",
+        };
+        println!(
+            "  {} | {} | {form} | {} | {}",
+            file.name,
+            file.version.as_deref().unwrap_or("（未知）"),
+            match enabled.get(file.name.as_str()) {
+                Some(true) => "是",
+                Some(false) => "否",
+                None => "不在名单",
+            },
+            pinned.get(file.name.as_str()).copied().unwrap_or("-"),
+        );
+    }
+    Ok(())
 }
 
 /// `--utility <目录>`：渲染 `utility-sprites` 里那些**非原型**的 GUI 素材

@@ -123,8 +123,8 @@ impl IconSources {
                 sources.roots.entry(name).or_insert(Archive::Dir(path));
             }
         }
-        for (name, archive) in scan_mods(&mods)? {
-            sources.roots.insert(name, archive);
+        for file in loaded_mods(&mods)? {
+            sources.roots.insert(file.name, file.archive);
         }
         Ok(sources)
     }
@@ -255,65 +255,27 @@ pub fn game_root_from_exe(exe: &Path) -> Option<PathBuf> {
     None
 }
 
-/// 扫到的一个 mod 文件：名字、版本（拿不到就是 `None`）、以及它的资源根。
+/// 扫到并**会被游戏加载**的一个 mod：名字、版本、资源根。
 #[derive(Debug, Clone)]
-pub struct ModFile {
+pub struct LoadedMod {
     pub name: String,
     pub version: Option<String>,
     pub archive: Archive,
 }
 
-/// 扫描 mod 目录：解压出来的目录、以及 `<名字>_<版本>.zip`。
-///
-/// mod 名优先取 `info.json` 里的 `name`（zip 里读、目录里读），拿不到才退回文件名；
-/// 版本同样优先 `info.json` 的 `version`，退回 zip 文件名里的 `<版本>` 段。
-pub fn scan_mod_files(dir: &Path) -> Result<Vec<ModFile>, String> {
-    let mut found = Vec::new();
-    let entries = match std::fs::read_dir(dir) {
-        Ok(entries) => entries,
-        // 没有 mod 目录是正常的（纯原版）。
-        Err(_) => return Ok(found),
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            let file_name = dir_name(&path);
-            let info = info_json(&path);
-            let name = info
-                .as_ref()
-                .and_then(|info| info.0.clone())
-                .unwrap_or(file_name);
-            let version = info.and_then(|info| info.1);
-            found.push(ModFile {
-                name,
-                version,
-                archive: Archive::Dir(path),
-            });
-        } else if path.extension().is_some_and(|ext| ext == "zip") {
-            // 不是 mod zip（例如 `.modpack.zip`）：跳过。
-            if let Some((name, prefix, version)) = zip_mod_info(&path) {
-                found.push(ModFile {
-                    name,
-                    version,
-                    archive: Archive::Zip { path, prefix },
-                });
-            }
-        }
-    }
-    Ok(found)
+/// `mod-list.json` 里的一条（只关心启用状态与可选锁定版本）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModListEntry {
+    pub name: String,
+    pub enabled: bool,
+    /// 锁定版本：`mod-list.json` 里给了 `version` 才有（实测这台机器上一条都没有）。
+    pub version: Option<String>,
 }
 
-fn scan_mods(dir: &Path) -> Result<Vec<(String, Archive)>, String> {
-    Ok(scan_mod_files(dir)?
-        .into_iter()
-        .map(|file| (file.name, file.archive))
-        .collect())
-}
-
-/// 读 `<mod 目录>/mod-list.json` 里**启用**的 mod 名（含 `base`）。
+/// 读 `<mod 目录>/mod-list.json`。
 ///
-/// 文件不存在（没有 mod / 不是标准布局）时返回空——调用方按「不知道」处理，不要猜。
-pub fn enabled_mod_names(dir: &Path) -> Vec<String> {
+/// 文件不存在 / 解析失败 → 空表：**不知道哪些启用**，调用方要按「不知道」处理，不要猜。
+pub fn read_mod_list(dir: &Path) -> Vec<ModListEntry> {
     let Ok(raw) = std::fs::read_to_string(dir.join("mod-list.json")) else {
         return Vec::new();
     };
@@ -323,23 +285,191 @@ pub fn enabled_mod_names(dir: &Path) -> Vec<String> {
     value
         .get("mods")
         .and_then(serde_json::Value::as_array)
-        .map(|mods| {
-            mods.iter()
-                .filter(|entry| {
-                    entry
-                        .get("enabled")
-                        .and_then(serde_json::Value::as_bool)
-                        .unwrap_or(false)
-                })
+        .map(|entries| {
+            entries
+                .iter()
                 .filter_map(|entry| {
-                    entry
-                        .get("name")
-                        .and_then(serde_json::Value::as_str)
-                        .map(str::to_string)
+                    Some(ModListEntry {
+                        name: entry.get("name")?.as_str()?.to_string(),
+                        enabled: entry
+                            .get("enabled")
+                            .and_then(serde_json::Value::as_bool)
+                            .unwrap_or(false),
+                        version: entry
+                            .get("version")
+                            .and_then(serde_json::Value::as_str)
+                            .map(str::to_string),
+                    })
                 })
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// 启用名单（含 `base`）。
+pub fn enabled_mod_names(dir: &Path) -> Vec<String> {
+    read_mod_list(dir)
+        .into_iter()
+        .filter(|entry| entry.enabled)
+        .map(|entry| entry.name)
+        .collect()
+}
+
+/// 同名多版本之间的一个候选。
+struct ModCandidate {
+    name: String,
+    version: Option<String>,
+    archive: Archive,
+}
+
+/// **游戏实际会加载的 mod**，按名字排序。
+///
+/// 遵守 Factorio 的 mod 目录约定（用户给的规则 + 实测）：
+/// - **目录形态**：目录名必须正好是 mod 的 id（**带版本号的目录不接受**），`info.json`
+///   直接躺在目录下（不像 zip 会嵌一层 `<名字>_<版本>/`）；版本取 `info.json.version`，
+///   没有 `info.json` 的不算 mod。实测这台机器的 3 个目录 mod 都是这个形态。
+/// - **zip 形态**：**文件名必须带版本号**（`<名字>_<版本>.zip`），包内是 `<名字>_<版本>/…`；
+///   文件名没有版本号的不收（`.modpack.zip` 这类也在这个判据下被挡掉）。
+/// - **同名多个候选**：`mod-list.json` 里锁定了版本就用那个版本（同版本时**目录形态优先**）；
+///   没锁定就用**能查到的最新版本**（按版本号比较，不是字符串比较），无论目录还是 zip。
+///   实测这台机器上 `tanvec-ai-cn` 装了 5 个版本、`ForGavin` 4 个、`tanvec-tweaks` 3 个——
+///   以前谁生效取决于 `read_dir` 的顺序，现在确定：取最新。
+pub fn loaded_mods(dir: &Path) -> Result<Vec<LoadedMod>, String> {
+    let pinned: std::collections::HashMap<String, String> = read_mod_list(dir)
+        .into_iter()
+        .filter_map(|entry| entry.version.map(|version| (entry.name, version)))
+        .collect();
+    let mut candidates: std::collections::HashMap<String, Vec<ModCandidate>> = Default::default();
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        // 没有 mod 目录是正常的（纯原版）。
+        Err(_) => return Ok(Vec::new()),
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let candidate = if path.is_dir() {
+            directory_candidate(&path)
+        } else if path.extension().is_some_and(|ext| ext == "zip") {
+            zip_candidate(&path)
+        } else {
+            None
+        };
+        if let Some(candidate) = candidate {
+            candidates
+                .entry(candidate.name.clone())
+                .or_default()
+                .push(candidate);
+        }
+    }
+    let mut loaded: Vec<LoadedMod> = candidates
+        .into_iter()
+        .filter_map(|(name, mut group)| {
+            let pin = pinned.get(&name).map(String::as_str);
+            // 锁定版本优先 → 版本号大的优先 → 同版本取目录形态；排序后取最后一个。
+            group.sort_by(|left, right| {
+                let pinned_rank = |candidate: &ModCandidate| {
+                    u8::from(pin.is_some() && candidate.version.as_deref() == pin)
+                };
+                pinned_rank(left)
+                    .cmp(&pinned_rank(right))
+                    .then_with(|| {
+                        compare_versions(left.version.as_deref(), right.version.as_deref())
+                    })
+                    .then_with(|| form_rank(&left.archive).cmp(&form_rank(&right.archive)))
+            });
+            group.pop().map(|winner| LoadedMod {
+                name,
+                version: winner.version,
+                archive: winner.archive,
+            })
+        })
+        .collect();
+    loaded.sort_by(|left, right| left.name.cmp(&right.name));
+    Ok(loaded)
+}
+
+/// 目录形态的候选：目录名就是 id（带版本号的目录**不收**），`info.json` 直接在目录下。
+fn directory_candidate(path: &Path) -> Option<ModCandidate> {
+    let folder = dir_name(path);
+    if folder.is_empty() || version_suffix(&folder).is_some() {
+        return None;
+    }
+    let info = info_json(path)?;
+    let name = info.0?;
+    Some(ModCandidate {
+        name,
+        version: info.1,
+        archive: Archive::Dir(path.to_path_buf()),
+    })
+}
+
+/// zip 形态的候选：文件名必须带版本号，包内条目要带 `<前缀>/`。
+fn zip_candidate(path: &Path) -> Option<ModCandidate> {
+    let stem = path.file_stem()?.to_str()?;
+    if version_suffix(stem).is_none() {
+        return None;
+    }
+    let (name, prefix, version) = zip_mod_info(path)?;
+    Some(ModCandidate {
+        name,
+        version,
+        archive: Archive::Zip {
+            path: path.to_path_buf(),
+            prefix,
+        },
+    })
+}
+
+/// 目录形态优先（同名同版本时）。
+fn form_rank(archive: &Archive) -> u8 {
+    match archive {
+        Archive::Dir(_) => 1,
+        Archive::Zip { .. } => 0,
+    }
+}
+
+/// 版本号比较：点分数字逐段比；没有版本的一律排最后。
+fn compare_versions(left: Option<&str>, right: Option<&str>) -> std::cmp::Ordering {
+    let key = |version: Option<&str>| -> Option<Vec<u64>> {
+        let version = version?;
+        Some(
+            version
+                .split('.')
+                .filter_map(|part| part.parse::<u64>().ok())
+                .collect(),
+        )
+    };
+    match (key(left), key(right)) {
+        (None, None) => std::cmp::Ordering::Equal,
+        (None, Some(_)) => std::cmp::Ordering::Less,
+        (Some(_), None) => std::cmp::Ordering::Greater,
+        (Some(left), Some(right)) => left.cmp(&right),
+    }
+}
+
+/// `<名字>_<版本>` 里的版本段——只有**长得像版本号**才认（全是数字、点分、至少两段）。
+///
+/// 这样 `some_mod.zip`（没有版本段的包名）不会被当成版本 `mod`，
+/// `NoEmptyBarrels_3`（名字里带下划线+数字）也不会被误拆（实测这台机器上真有这个 mod）。
+fn version_suffix(stem: &str) -> Option<&str> {
+    let (_, version) = stem.rsplit_once('_')?;
+    let looks_like_version = version.contains('.')
+        && version
+            .split('.')
+            .all(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_digit()));
+    looks_like_version.then_some(version)
+}
+
+/// `<名字>_<版本>` 里的名字段（zip 前缀用；目录名不带版本，不走这条）。
+fn name_without_version(stem: &str) -> String {
+    match version_suffix(stem) {
+        Some(_) => stem
+            .rsplit_once('_')
+            .map(|(name, _)| name)
+            .unwrap_or(stem)
+            .to_string(),
+        None => stem.to_string(),
+    }
 }
 
 fn dir_name(path: &Path) -> String {
@@ -370,6 +500,11 @@ fn zip_mod_info(path: &Path) -> Option<(String, String, Option<String>)> {
     let file = File::open(path).ok()?;
     let mut zip = zip::ZipArchive::new(file).ok()?;
     let first = zip.by_index(0).ok()?.name().to_string();
+    // mod zip 的条目都带 `<名字>_<版本>/` 前缀；`.modpack.zip` 这类包里直接躺着别的 zip
+    //（第一个条目连目录分隔都没有），不能当 mod 收——否则会造出一个名字很长的幻影 mod。
+    if !first.contains('/') {
+        return None;
+    }
     let prefix = first.split('/').next()?.to_string();
     if prefix.is_empty() {
         return None;
@@ -391,14 +526,26 @@ fn zip_mod_info(path: &Path) -> Option<(String, String, Option<String>)> {
                 .map(str::to_string);
         }
     }
-    let name = info_name.unwrap_or_else(|| prefix.split('_').next().unwrap_or(&prefix).to_string());
-    // 版本：info.json → 退回 zip 文件名 `<名字>_<版本>.zip` 的 `<版本>` 段。
-    let version = info_version.or_else(|| {
+    let prefix_version = version_suffix(&prefix).map(str::to_string);
+    // 版本：info.json → 退回 zip 文件名 `<名字>_<版本>.zip` 的 `<版本>` 段
+    //（同样要求「长得像版本号」，否则 `some_mod.zip` 会给出假版本 `mod`）。
+    let version = info_version.clone().or_else(|| {
         let stem = path.file_stem()?.to_str()?;
-        let (_, version) = stem.rsplit_once('_')?;
-        (!version.is_empty()).then(|| version.to_string())
+        version_suffix(stem).map(str::to_string)
     });
-    Some((name, format!("{prefix}/"), version))
+    // 既没有 `info.json`、前缀与文件名也都不像 `<名字>_<版本>`：这不是 mod zip。
+    if info_name.is_none()
+        && info_version.is_none()
+        && version.is_none()
+        && prefix_version.is_none()
+    {
+        return None;
+    }
+    let name = info_name.unwrap_or_else(|| {
+        // 名字也按 `<名字>_<版本>` 拆（zip 前缀就是 `<名字>_<版本>`）。
+        name_without_version(&prefix)
+    });
+    Some((name, format!("{prefix}/"), version.or(prefix_version)))
 }
 
 #[cfg(test)]
@@ -406,23 +553,43 @@ mod tests {
     use super::*;
 
     /// mod 版本：`info.json` 优先；包里没有 info.json 时退回 zip 文件名
-    /// `<名字>_<版本>.zip` 的版本段。
-    #[test]
-    fn scan_mod_files_reads_zip_versions() {
+    /// 一个临时 mod 目录 + 写 zip 的小工具。
+    fn write_zip(path: &Path, entries: &[(&str, &[u8])]) {
         use std::io::Write;
-        let dir = std::env::temp_dir().join(format!("metatorio-modscan-{}", std::process::id()));
+        let file = File::create(path).expect("建 zip");
+        let mut writer = zip::ZipWriter::new(file);
+        let options: zip::write::SimpleFileOptions = Default::default();
+        for (name, bytes) in entries {
+            writer.start_file(*name, options).expect("写条目");
+            writer.write_all(bytes).expect("写字节");
+        }
+        writer.finish().expect("收尾");
+    }
+
+    fn temp_mods_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("metatorio-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("建临时目录");
-        let write_zip = |path: &Path, entries: &[(&str, &[u8])]| {
-            let file = File::create(path).expect("建 zip");
-            let mut writer = zip::ZipWriter::new(file);
-            let options: zip::write::SimpleFileOptions = Default::default();
-            for (name, bytes) in entries {
-                writer.start_file(*name, options).expect("写条目");
-                writer.write_all(bytes).expect("写字节");
-            }
-            writer.finish().expect("收尾");
-        };
+        dir
+    }
+
+    fn write_mod_dir(root: &Path, id: &str, info: &str) {
+        let dir = root.join(id);
+        std::fs::create_dir_all(&dir).expect("建 mod 目录");
+        std::fs::write(dir.join("info.json"), info).expect("写 info.json");
+    }
+
+    fn find<'a>(mods: &'a [LoadedMod], name: &str) -> &'a LoadedMod {
+        mods.iter()
+            .find(|file| file.name == name)
+            .unwrap_or_else(|| panic!("扫到 {name}（实得 {mods:?}）"))
+    }
+
+    /// zip 形态：文件名必须带版本号（`<名字>_<版本>.zip`）；版本优先 `info.json`，
+    /// 没有 `info.json` 时用文件名里的版本段。
+    #[test]
+    fn zip_mods_need_a_version_in_the_file_name() {
+        let dir = temp_mods_dir("zipmods");
         write_zip(
             &dir.join("with-info_1.2.3.zip"),
             &[
@@ -437,36 +604,142 @@ mod tests {
             &dir.join("bare-mod_4.5.6.zip"),
             &[("bare-mod_4.5.6/graphics/x.png", b"png")],
         );
+        // 文件名没有版本号 → 不是 mod（`.modpack.zip`、`some_mod.zip` 都落在这一档）
+        write_zip(&dir.join("some_mod.zip"), &[("some_mod/data.lua", b"--")]);
+        // 条目名里连目录分隔都没有 → 不是 mod
+        write_zip(
+            &dir.join(".modpack.zip"),
+            &[("alien-biomes-graphics_0.8.0.zip", b"zip")],
+        );
 
-        let files = scan_mod_files(&dir).expect("扫描");
-        let find = |name: &str| {
-            files
-                .iter()
-                .find(|file| file.name == name)
-                .unwrap_or_else(|| panic!("扫到 {name}"))
-        };
-        assert_eq!(find("with-info").version.as_deref(), Some("9.9.9"));
-        assert_eq!(find("bare-mod").version.as_deref(), Some("4.5.6"));
+        let mods = loaded_mods(&dir).expect("扫描");
+        assert_eq!(
+            mods.iter().map(|m| m.name.as_str()).collect::<Vec<_>>(),
+            vec!["bare-mod", "with-info"]
+        );
+        assert_eq!(find(&mods, "with-info").version.as_deref(), Some("9.9.9"));
+        assert_eq!(find(&mods, "bare-mod").version.as_deref(), Some("4.5.6"));
+        assert!(matches!(
+            find(&mods, "with-info").archive,
+            Archive::Zip { .. }
+        ));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// `mod-list.json`：只取 `enabled: true` 的名字。
+    /// 目录形态：目录名**就是** mod id（带版本号的目录**不收**），`info.json` 直接躺在目录下，
+    /// 版本取 `info.json.version`；没有 `info.json` 的不算 mod。
     #[test]
-    fn enabled_mod_names_filters_by_enabled_flag() {
-        let dir = std::env::temp_dir().join(format!("metatorio-modlist-{}", std::process::id()));
+    fn folder_mods_must_be_named_by_id_and_hold_info_json() {
+        let dir = temp_mods_dir("dirmods");
+        write_mod_dir(
+            &dir,
+            "bodyguard-companion-drones",
+            r#"{"name":"bodyguard-companion-drones","version":"2.2.0"}"#,
+        );
+        // 带版本号的目录：游戏不接受，我们也不收
+        write_mod_dir(
+            &dir,
+            "pyalienlife_3.1.0",
+            r#"{"name":"pyalienlife","version":"3.1.0"}"#,
+        );
+        // 目录名虽然是 id，但没有 info.json → 不是 mod
+        std::fs::create_dir_all(dir.join("no-info-folder")).unwrap();
+
+        let mods = loaded_mods(&dir).expect("扫描");
+        assert_eq!(
+            mods.iter().map(|m| m.name.as_str()).collect::<Vec<_>>(),
+            vec!["bodyguard-companion-drones"]
+        );
+        assert_eq!(
+            find(&mods, "bodyguard-companion-drones").version.as_deref(),
+            Some("2.2.0")
+        );
+        assert!(matches!(
+            find(&mods, "bodyguard-companion-drones").archive,
+            Archive::Dir(_)
+        ));
         let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("建临时目录");
+    }
+
+    /// 同名多个候选：没锁版本 → 取**最新版本**（按版本号比，不是字符串比）；
+    /// 锁了版本 → 取那个版本；同版本时**目录形态优先**。
+    #[test]
+    fn duplicate_mods_pick_the_newest_or_the_pinned_version() {
+        let dir = temp_mods_dir("moddup");
+        // 同一 mod 的三个候选：zip 1.9.0、zip 1.10.0、目录（info.json 里写 1.9.0）
+        write_zip(
+            &dir.join("dup_1.9.0.zip"),
+            &[(
+                "dup_1.9.0/info.json",
+                br#"{"name":"dup","version":"1.9.0"}"#,
+            )],
+        );
+        write_zip(
+            &dir.join("dup_1.10.0.zip"),
+            &[(
+                "dup_1.10.0/info.json",
+                br#"{"name":"dup","version":"1.10.0"}"#,
+            )],
+        );
+        write_mod_dir(&dir, "dup", r#"{"name":"dup","version":"1.9.0"}"#);
+
+        // 没锁版本 → 1.10.0（字符串比会错选 1.9.0，所以这条同时在守版本号比较）
+        let mods = loaded_mods(&dir).expect("扫描");
+        assert_eq!(find(&mods, "dup").version.as_deref(), Some("1.10.0"));
+        assert!(matches!(find(&mods, "dup").archive, Archive::Zip { .. }));
+
+        // 锁到 1.9.0 → 取 1.9.0；同版本时目录形态优先
         std::fs::write(
             dir.join("mod-list.json"),
-            r#"{"mods":[{"name":"base","enabled":true},{"name":"off","enabled":false},{"name":"on","enabled":true}]}"#,
+            r#"{"mods":[{"name":"dup","enabled":true,"version":"1.9.0"}]}"#,
+        )
+        .unwrap();
+        let mods = loaded_mods(&dir).expect("扫描");
+        assert_eq!(find(&mods, "dup").version.as_deref(), Some("1.9.0"));
+        assert!(matches!(find(&mods, "dup").archive, Archive::Dir(_)));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `<名字>_<版本>` 的版本段必须长得像版本号。
+    #[test]
+    fn version_suffix_requires_a_version_like_tail() {
+        assert_eq!(version_suffix("pyalienlife_3.1.0"), Some("3.1.0"));
+        assert_eq!(version_suffix("mod_2026.07.06"), Some("2026.07.06"));
+        assert_eq!(version_suffix("some_mod"), None);
+        // 实测这台机器上真有 `NoEmptyBarrels_3` 这个 mod：`3` 不是版本，名字也不能被截断
+        assert_eq!(version_suffix("NoEmptyBarrels_3"), None);
+        assert_eq!(name_without_version("NoEmptyBarrels_3"), "NoEmptyBarrels_3");
+        assert_eq!(version_suffix("mod_1.2.x"), None);
+        assert_eq!(name_without_version("mod_1.2.3"), "mod");
+        assert_eq!(
+            compare_versions(Some("1.10.0"), Some("1.9.0")),
+            std::cmp::Ordering::Greater
+        );
+        assert_eq!(
+            compare_versions(Some("1.0.0"), None),
+            std::cmp::Ordering::Greater
+        );
+    }
+
+    /// `mod-list.json`：只取 `enabled: true` 的名字，并读出锁定版本。
+    #[test]
+    fn read_mod_list_reads_enabled_and_pinned_version() {
+        let dir = temp_mods_dir("modlist");
+        std::fs::write(
+            dir.join("mod-list.json"),
+            r#"{"mods":[{"name":"base","enabled":true},{"name":"off","enabled":false},
+                        {"name":"on","enabled":true,"version":"1.2.3"}]}"#,
         )
         .expect("写 mod-list");
         assert_eq!(
             enabled_mod_names(&dir),
             vec!["base".to_string(), "on".to_string()]
         );
+        let entries = read_mod_list(&dir);
+        assert_eq!(entries[2].version.as_deref(), Some("1.2.3"));
+        assert!(entries[0].version.is_none());
         // 没有这个文件（或不是标准布局）→ 空，不猜。
-        assert!(enabled_mod_names(&dir.join("nope")).is_empty());
+        assert!(read_mod_list(&dir.join("nope")).is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
