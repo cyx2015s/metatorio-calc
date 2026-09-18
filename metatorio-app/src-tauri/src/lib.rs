@@ -911,11 +911,10 @@ fn register_context_files(
     }
     // 翻译：合并后的 `{category}/{name}` 映射写入 locale.json（id 只由
     // dump 内容决定，翻译变化不影响上下文 id；缺失/历史缓存则补写）。
-    if !locale_path.is_file() {
-        if let Some(locale_raw) = locale_raw {
+    if !locale_path.is_file()
+        && let Some(locale_raw) = locale_raw {
             let _ = std::fs::write(&locale_path, locale_raw);
         }
-    }
     // 图标：新上下文，或历史注册时缺图标（早期路径 bug 留下的缓存）都要处理——
     // 重新导出同内容时 id 相同、注册被跳过，但图标仍需补齐。
     //
@@ -1002,8 +1001,8 @@ async fn register_context_and_activate(
 ) -> Result<ContextInfo, String> {
     let (id, needs_icons) =
         register_context_files(state, name, game_version, mods, raw, locale_raw, &icon)?;
-    if needs_icons {
-        if let IconSource::Render { game_root, mod_dir } = &icon {
+    if needs_icons
+        && let IconSource::Render { game_root, mod_dir } = &icon {
             let icon_root = {
                 let registry = state
                     .contexts
@@ -1061,7 +1060,6 @@ async fn register_context_and_activate(
                 }
             }
         }
-    }
     ensure_context_loaded_offlock(state, &id).await?;
     with_runtime(state, |runtime| {
         runtime.set_active_context(Some(id.clone()));
@@ -1355,7 +1353,7 @@ fn enabled_mods(mod_dir: Option<&Path>) -> Vec<ModEntry> {
     let Some(dir) = mod_dir else {
         return Vec::new();
     };
-    let enabled: std::collections::HashSet<String> = metatorio_icons::read_mod_list(&dir)
+    let enabled: std::collections::HashSet<String> = metatorio_icons::read_mod_list(dir)
         .into_iter()
         .filter(|entry| entry.enabled)
         .map(|entry| entry.name)
@@ -1363,7 +1361,7 @@ fn enabled_mods(mod_dir: Option<&Path>) -> Vec<ModEntry> {
     if enabled.is_empty() {
         return Vec::new();
     }
-    let Ok(mods) = metatorio_icons::loaded_mods(&dir) else {
+    let Ok(mods) = metatorio_icons::loaded_mods(dir) else {
         return Vec::new();
     };
     mods.into_iter()
@@ -1640,11 +1638,10 @@ fn icon(
     };
     for candidate in candidates {
         let path = cache_root.join(candidate);
-        if path.is_file() {
-            if let Ok(bytes) = std::fs::read(path) {
+        if path.is_file()
+            && let Ok(bytes) = std::fs::read(path) {
                 return Some(bytes);
             }
-        }
     }
     None
 }
@@ -1863,8 +1860,8 @@ pub(crate) fn resolve_index_entry(
                     let distance = typo_distance(&needle_chars, &chars);
                     best = Some(best.map_or(distance, |current: usize| current.min(distance)));
                 }
-                if let Some(distance) = best {
-                    if distance <= max_distance {
+                if let Some(distance) = best
+                    && distance <= max_distance {
                         typo.push((
                             (
                                 distance,
@@ -1874,7 +1871,6 @@ pub(crate) fn resolve_index_entry(
                             resolved(entry, "typo", Some(distance)),
                         ));
                     }
-                }
             }
             // 排序键 = (编辑距离, kind 优先级, 本地化名长度)，同键按名字稳定收尾。
             typo.sort_by(|left, right| left.0.cmp(&right.0).then(left.1.name.cmp(&right.1.name)));
@@ -2748,13 +2744,13 @@ fn prototype_detail(
         detail.allowed_module_categories =
             beacon.allowed_module_categories.clone().unwrap_or_default();
     }
-    if let Some(gen) = record.component::<GeneratorComponent>() {
-        detail.effectivity = Some(gen.effectivity);
-        detail.max_power_output_j = gen.max_power_output.map(|value| value.amount);
-        detail.maximum_temperature = Some(gen.maximum_temperature);
-        detail.burns_fluid = Some(gen.burns_fluid);
-        detail.fluid_usage_per_tick = Some(gen.fluid_usage_per_tick);
-        detail.fluid_filter = gen.fluid_box.filter.clone();
+    if let Some(r#gen) = record.component::<GeneratorComponent>() {
+        detail.effectivity = Some(r#gen.effectivity);
+        detail.max_power_output_j = r#gen.max_power_output.map(|value| value.amount);
+        detail.maximum_temperature = Some(r#gen.maximum_temperature);
+        detail.burns_fluid = Some(r#gen.burns_fluid);
+        detail.fluid_usage_per_tick = Some(r#gen.fluid_usage_per_tick);
+        detail.fluid_filter = r#gen.fluid_box.filter.clone();
     }
     if let Some(burner_gen) = record.component::<BurnerGeneratorComponent>() {
         detail.max_power_output_j = Some(burner_gen.max_power_output.amount);
@@ -3683,11 +3679,10 @@ where
     let mut errors = Vec::new();
     for command in commands {
         let outcome = execute(command).await;
-        if solve.is_none() {
-            if let Some(metatorio_runtime::CommandEffect::Solve(result)) = outcome.effect {
+        if solve.is_none()
+            && let Some(metatorio_runtime::CommandEffect::Solve(result)) = outcome.effect {
                 solve = Some(result);
             }
-        }
         errors.extend(outcome.errors);
         if let Ok(value) = serde_json::to_value(command) {
             serialized.push(value);
@@ -4237,11 +4232,11 @@ pub fn run(options: Options) {
 
 #[cfg(test)]
 mod tests {
+    use metatorio_runtime::SolveStatus;
     use metatorio_runtime::message::{
         ApplicationAction, FactoryTemplate, MechanicAction, MechanicListAction,
         RecipeMechanicAction,
     };
-    use metatorio_runtime::SolveStatus;
 
     use super::*;
 
@@ -4646,10 +4641,12 @@ mod tests {
         // 前半截时仍能找回来），所以这里只钉精确组。
         let by_name = resolve_index_entry(&entries, "iron-plate", 8);
         assert_eq!(by_name.exact.len(), 2, "item 与 recipe 都应返回");
-        assert!(by_name
-            .exact
-            .iter()
-            .all(|hit| hit.localized_name == "铁板" && hit.matched_by == "name-exact"));
+        assert!(
+            by_name
+                .exact
+                .iter()
+                .all(|hit| hit.localized_name == "铁板" && hit.matched_by == "name-exact")
+        );
         assert!(
             by_name
                 .partial
@@ -4662,10 +4659,12 @@ mod tests {
         // 方向二：口述名 → id。
         let by_localized = resolve_index_entry(&entries, "铁板", 8);
         assert_eq!(by_localized.exact.len(), 2);
-        assert!(by_localized
-            .exact
-            .iter()
-            .all(|hit| hit.name == "iron-plate" && hit.matched_by == "localized-exact"));
+        assert!(
+            by_localized
+                .exact
+                .iter()
+                .all(|hit| hit.name == "iron-plate" && hit.matched_by == "localized-exact")
+        );
         assert!(
             by_localized
                 .partial

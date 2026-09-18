@@ -96,7 +96,7 @@ impl Rgba8 {
     /// 直通 → 预乘（RGB × A）。游戏导出的图标就是预乘的，比对时要转换。
     pub fn premultiplied(&self) -> Rgba8 {
         let mut pixels = self.pixels.clone();
-        for chunk in pixels.chunks_exact_mut(4) {
+        for chunk in pixels.as_chunks_mut::<4>().0 {
             let alpha = chunk[3] as u32;
             for channel in &mut chunk[..3] {
                 *channel = ((*channel as u32 * alpha + 127) / 255) as u8;
@@ -108,7 +108,7 @@ impl Rgba8 {
     /// 预乘 → 直通（RGB ÷ A）；全透明像素保持全 0（无从还原，也无意义）。
     pub fn unpremultiplied(&self) -> Rgba8 {
         let mut pixels = self.pixels.clone();
-        for chunk in pixels.chunks_exact_mut(4) {
+        for chunk in pixels.as_chunks_mut::<4>().0 {
             let alpha = chunk[3] as u32;
             if alpha == 0 {
                 continue;

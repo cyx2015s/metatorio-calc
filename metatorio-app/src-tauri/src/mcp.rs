@@ -25,25 +25,25 @@
 use std::net::{IpAddr, SocketAddr};
 
 use axum::{
+    Router,
     extract::{Request, State},
     http::StatusCode,
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    Router,
 };
 use rmcp::{
+    ErrorData as McpError, ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::CallToolResult,
     tool, tool_handler, tool_router,
     transport::streamable_http_server::{
-        session::local::LocalSessionManager, StreamableHttpServerConfig, StreamableHttpService,
+        StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
     },
-    ErrorData as McpError, ServerHandler,
 };
 use schemars::JsonSchema;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
-use crate::{execute_command, AppState};
+use crate::{AppState, execute_command};
 use metatorio_core::{BeaconConfig, DualVar, IdWithQuality, ModuleConfig};
 use metatorio_runtime::document::AutoBeaconPlan;
 use metatorio_runtime::message::{
@@ -228,7 +228,7 @@ impl MetatorioMcp {
                         return Err(McpError::invalid_params(
                             format!("recompute failed: {error}"),
                             None,
-                        ))
+                        ));
                     }
                 }
             }
@@ -288,7 +288,7 @@ impl MetatorioMcp {
                     return Err(McpError::internal_error(
                         "mechanic 需要 project + factory".to_string(),
                         None,
-                    ))
+                    ));
                 }
             };
             let mut report = PageReport::default();
@@ -308,12 +308,11 @@ impl MetatorioMcp {
             };
             // `recompute` 与 `mechanic` 同时给出时，求解结果也算出来了，别丢掉。
             if let Some(mut solve) = solve {
-                if let Some(status) = solve.get_mut("status").and_then(|s| s.as_object_mut()) {
-                    if let Some(solved) = status.get_mut("solved").and_then(|s| s.as_object_mut()) {
+                if let Some(status) = solve.get_mut("status").and_then(|s| s.as_object_mut())
+                    && let Some(solved) = status.get_mut("solved").and_then(|s| s.as_object_mut()) {
                         report.page_key(solved, "mechanics", "solve.mechanics", page);
                         report.page_key(solved, "flows", "solve.flows", page);
                     }
-                }
                 object.insert("solve".to_string(), solve);
             }
             object.insert(
@@ -375,18 +374,16 @@ impl MetatorioMcp {
             }
         }
         // 工厂层可选带上重算结果：它的 mechanics/flows 同样按 page 截断。
-        if let Some(solve) = solve {
-            if let Some(object) = value.as_object_mut() {
+        if let Some(solve) = solve
+            && let Some(object) = value.as_object_mut() {
                 let mut solve = solve;
-                if let Some(status) = solve.get_mut("status").and_then(|s| s.as_object_mut()) {
-                    if let Some(solved) = status.get_mut("solved").and_then(|s| s.as_object_mut()) {
+                if let Some(status) = solve.get_mut("status").and_then(|s| s.as_object_mut())
+                    && let Some(solved) = status.get_mut("solved").and_then(|s| s.as_object_mut()) {
                         report.page_key(solved, "mechanics", "solve.mechanics", page);
                         report.page_key(solved, "flows", "solve.flows", page);
                     }
-                }
                 object.insert("solve".to_string(), solve);
             }
-        }
         // 顶层补充 revision 与分页元信息：版本便于判断新鲜度，page 说明截断情况。
         if let serde_json::Value::Object(object) = &mut value {
             object.insert(
@@ -483,7 +480,7 @@ impl MetatorioMcp {
                 return Err(McpError::internal_error(
                     "新建项目没有返回 id".to_string(),
                     None,
-                ))
+                ));
             }
         };
 
@@ -524,7 +521,7 @@ impl MetatorioMcp {
                     return Err(McpError::internal_error(
                         "新建工厂没有返回 id".to_string(),
                         None,
-                    ))
+                    ));
                 }
             };
             // 序列里最后一条是 `solve: auto-plan`：**不在请求里同步跑**，否则一次
@@ -649,11 +646,10 @@ impl MetatorioMcp {
             "auto_plan": { "status": status },
             "poll": poll,
         });
-        if let Some(request_id) = params.request_id {
-            if let Ok(mut cache) = app.state::<AppState>().dispatch_cache.lock() {
+        if let Some(request_id) = params.request_id
+            && let Ok(mut cache) = app.state::<AppState>().dispatch_cache.lock() {
                 cache.insert(request_id, payload.clone(), false);
             }
-        }
         Ok(CallToolResult::structured(payload))
     }
 
@@ -966,12 +962,11 @@ async fn dispatch_message<R: Runtime>(
     // 求解结果可能很长（机制/流各几百条）：同样按 page 截断并如实上报。
     let mut report = PageReport::default();
     let solve = solve.map(|mut solve| {
-        if let Some(status) = solve.get_mut("status").and_then(|s| s.as_object_mut()) {
-            if let Some(solved) = status.get_mut("solved").and_then(|s| s.as_object_mut()) {
+        if let Some(status) = solve.get_mut("status").and_then(|s| s.as_object_mut())
+            && let Some(solved) = status.get_mut("solved").and_then(|s| s.as_object_mut()) {
                 report.page_key(solved, "mechanics", "solve.mechanics", page);
                 report.page_key(solved, "flows", "solve.flows", page);
             }
-        }
         solve
     });
     // 协同：文档变了就通知 GUI 重新拉取。
@@ -1003,13 +998,11 @@ async fn dispatch_message<R: Runtime>(
     let is_error = !errors.is_empty();
     // 只记录**成功**的幂等结果：失败（尤其求解超时）必须允许用同一个 id
     // 重试，否则重试会一直回放失败。
-    if !is_error {
-        if let Some(request_id) = request_id {
-            if let Ok(mut cache) = app.state::<AppState>().dispatch_cache.lock() {
+    if !is_error
+        && let Some(request_id) = request_id
+            && let Ok(mut cache) = app.state::<AppState>().dispatch_cache.lock() {
                 cache.insert(request_id, payload.clone(), false);
             }
-        }
-    }
     let mut result = CallToolResult::structured(payload);
     if is_error {
         result.is_error = Some(true);
@@ -2270,36 +2263,38 @@ mod tests {
 
         // 合法名字全部通过：包括「索引里的模块既是 item 也是 module」的两种 kind，
         // 以及没有原型的虚拟流（电）。
-        assert!(validate_auto_plan_names(
-            &index,
-            &params(
-                exclude(&["speed-module-3"]),
-                vec![AutoPlanBeacon {
-                    beacon: module("beacon"),
-                    count: None,
-                    share: None,
-                    modules: vec![AutoPlanBeaconModule {
-                        module: module("speed-module-3"),
+        assert!(
+            validate_auto_plan_names(
+                &index,
+                &params(
+                    exclude(&["speed-module-3"]),
+                    vec![AutoPlanBeacon {
+                        beacon: module("beacon"),
                         count: None,
+                        share: None,
+                        modules: vec![AutoPlanBeaconModule {
+                            module: module("speed-module-3"),
+                            count: None,
+                        }],
                     }],
-                }],
-                vec![
-                    AutoPlanExternalInput {
-                        flow: DualVar::Item(module("iron-plate")),
-                        penalty: None,
-                    },
-                    AutoPlanExternalInput {
-                        flow: fluid("water"),
-                        penalty: None,
-                    },
-                    AutoPlanExternalInput {
-                        flow: DualVar::Electricity,
-                        penalty: None,
-                    },
-                ],
+                    vec![
+                        AutoPlanExternalInput {
+                            flow: DualVar::Item(module("iron-plate")),
+                            penalty: None,
+                        },
+                        AutoPlanExternalInput {
+                            flow: fluid("water"),
+                            penalty: None,
+                        },
+                        AutoPlanExternalInput {
+                            flow: DualVar::Electricity,
+                            penalty: None,
+                        },
+                    ],
+                )
             )
-        )
-        .is_ok());
+            .is_ok()
+        );
 
         // 剔除一个不存在的插件 → 报错，并把正确名字当候选给出来。
         let error = validate_auto_plan_names(
@@ -2404,9 +2399,11 @@ mod tests {
         assert!(resolve_bind("::", &[]).unwrap().1.is_none());
 
         // 非法地址 / 空串：报错带上开关名，便于排查。
-        assert!(resolve_bind("not-an-ip", &[])
-            .unwrap_err()
-            .contains("mcp-bind"));
+        assert!(
+            resolve_bind("not-an-ip", &[])
+                .unwrap_err()
+                .contains("mcp-bind")
+        );
         assert!(resolve_bind("  ", &[]).unwrap_err().contains("mcp-bind"));
         // 主机名不解析（只接受 IP 字面量与 localhost），避免依赖 DNS 结果。
         assert!(resolve_bind("mirac-pc", &[]).is_err());

@@ -1,9 +1,9 @@
 [package]
 name = "metatorio-app"
-version = "1.5.12"
+version = "1.5.13"
 description = "切向量化：异星工厂规划工具"
 authors = ["cyx2015s"]
-edition = "2021"
+edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

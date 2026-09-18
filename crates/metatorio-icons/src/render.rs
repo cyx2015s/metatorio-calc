@@ -742,7 +742,7 @@ pub(crate) fn apply_tint(image: &mut Rgba8, tint: Option<metatorio_data::Color>)
     if (r, g, b, a) == (255, 255, 255, 255) {
         return;
     }
-    for chunk in image.pixels.chunks_exact_mut(4) {
+    for chunk in image.pixels.as_chunks_mut::<4>().0 {
         chunk[0] = mul_div_255(chunk[0], r);
         chunk[1] = mul_div_255(chunk[1], g);
         chunk[2] = mul_div_255(chunk[2], b);

@@ -141,11 +141,10 @@ impl<R: Clone + Send + 'static> SolveJobs<R> {
         let mut snapshot = take_snapshot()?;
         let mut round = 0usize;
         loop {
-            if let Some(cached) = &slot.last {
-                if cached.matches(&snapshot) {
+            if let Some(cached) = &slot.last
+                && cached.matches(&snapshot) {
                     return Ok(cached.result.clone());
                 }
-            }
             let result = {
                 let task_snapshot = snapshot.clone();
                 let compute = compute.clone();
@@ -160,7 +159,7 @@ impl<R: Clone + Send + 'static> SolveJobs<R> {
                             "求解超时（等待超过 {} 秒，任务仍在后台运行）：请稍后重试，\
                              或先缩小目标 / 关闭自动规划后重算",
                             self.timeout.as_secs()
-                        ))
+                        ));
                     }
                 }
             };
@@ -190,8 +189,8 @@ impl<R: Clone + Send + 'static> SolveJobs<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex as StdMutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
     use metatorio_runtime::message::{

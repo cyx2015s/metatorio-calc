@@ -18,7 +18,7 @@
 
 use clap::Parser;
 
-use metatorio_app_lib::{mcp, Options};
+use metatorio_app_lib::{Options, mcp};
 
 /// 异星工厂规划工具：GUI（默认）或纯 MCP 服务（`--headless`）。
 #[derive(Debug, Parser)]

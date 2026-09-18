@@ -409,9 +409,7 @@ fn directory_candidate(path: &Path) -> Option<ModCandidate> {
 /// zip 形态的候选：文件名必须带版本号，包内条目要带 `<前缀>/`。
 fn zip_candidate(path: &Path) -> Option<ModCandidate> {
     let stem = path.file_stem()?.to_str()?;
-    if version_suffix(stem).is_none() {
-        return None;
-    }
+    version_suffix(stem)?;
     let (name, prefix, version) = zip_mod_info(path)?;
     Some(ModCandidate {
         name,
