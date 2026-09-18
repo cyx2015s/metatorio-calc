@@ -105,12 +105,19 @@ pub enum ScaleLaw {
     ExpectedTimesScale,
     /// 官方文档写的默认（**不乘 2**）：`层边长 × scale.unwrap_or((expected/2)/层边长)`
     DocDefault,
+    /// **按 `expected / 32` 缩放、上下限 [1, 2]**：没给 `scale` → 层边长；给了 `scale` →
+    /// `层边长 × scale × factor`，`factor = (expected / 32).clamp(1, 2)`。
+    /// 也就是「32 画布的图标是 ×1，64 及以上是 ×2」——实测里 32 画布的那批
+    /// （`recipe/pa-proton`、`recipe/empty-acetylene-canister`）确实要 ×1，而 64/256 画布的
+    /// （`*-recycling`、`space-connection`、科技）要 ×2。
+    ExpectedUnit,
 }
 
 impl ScaleLaw {
-    pub fn all() -> [ScaleLaw; 6] {
+    pub fn all() -> [ScaleLaw; 7] {
         [
             ScaleLaw::DoubledDocDefault,
+            ScaleLaw::ExpectedUnit,
             ScaleLaw::Natural,
             ScaleLaw::NaturalDouble,
             ScaleLaw::IgnoreScale,
@@ -127,6 +134,7 @@ impl ScaleLaw {
             ScaleLaw::IgnoreScale => "层边长（忽略 scale）",
             ScaleLaw::ExpectedTimesScale => "expected × scale",
             ScaleLaw::DocDefault => "文档默认（不乘 2）",
+            ScaleLaw::ExpectedUnit => "按 expected/32 缩放",
         }
     }
 }
@@ -402,8 +410,9 @@ pub fn render_icon_with(
                     .round()
                     .max(1.0) as u32;
                 let shift = layer.shift.unwrap_or_default();
-                let dx = (shift.0 * options.shift_pixels_per_unit).round() as i32;
-                let dy = (shift.1 * options.shift_pixels_per_unit).round() as i32;
+                let unit = shift_unit(options, expected);
+                let dx = (shift.0 * unit).round() as i32;
+                let dy = (shift.1 * unit).round() as i32;
                 let left = (expected as i32 - drawn as i32) / 2 + dx;
                 let top = (expected as i32 - drawn as i32) / 2 + dy;
                 placement.push((drawn, left, top));
@@ -558,6 +567,15 @@ fn layers_of(component: &IconComponent, type_default_size: u32) -> Vec<IconData>
     }
 }
 
+/// `shift` 的像素换算系数：`ExpectedUnit` 口径下它随 `expected/32` 变（64 画布 → 2 像素/单位、
+/// 32 画布 → 1 像素/单位、256 画布 → 8 像素/单位）；其余口径用选项里给的固定值。
+fn shift_unit(options: RenderOptions, expected: u32) -> f64 {
+    match options.scale_law {
+        ScaleLaw::ExpectedUnit => expected_factor(expected),
+        _ => options.shift_pixels_per_unit,
+    }
+}
+
 /// 层在画布上的绘制边长（像素，**未取整**）。定标时看的就是这个数。
 pub fn layer_drawn_size_exact(
     layer: &IconData,
@@ -575,7 +593,17 @@ pub fn layer_drawn_size_exact(
         ScaleLaw::IgnoreScale => natural,
         ScaleLaw::ExpectedTimesScale => expected as f64 * layer.scale.unwrap_or(1.0),
         ScaleLaw::DocDefault => natural * layer.scale.unwrap_or(doc_default),
+        ScaleLaw::ExpectedUnit => match layer.scale {
+            // 没给 scale：就画层自己的边长（不缩放）
+            None => natural,
+            Some(scale) => natural * scale * expected_factor(expected),
+        },
     }
+}
+
+/// `ExpectedUnit` 口径的倍率：`(expected / 32)`，上下限 `[1, 2]`。
+fn expected_factor(expected: u32) -> f64 {
+    (expected as f64 / 32.0).clamp(1.0, 2.0)
 }
 
 /// 层的边长（没写 `icon_size` 时按画布）。
@@ -599,8 +627,9 @@ pub fn layer_rect(
     let exact = layer_drawn_size_exact(layer, layer_size, expected, options.scale_law).max(1.0);
     let drawn = if floor { exact.floor() } else { exact.round() }.max(1.0);
     let shift = layer.shift.unwrap_or_default();
-    let cx = shift.0 * options.shift_pixels_per_unit;
-    let cy = shift.1 * options.shift_pixels_per_unit;
+    let unit = shift_unit(options, expected);
+    let cx = shift.0 * unit;
+    let cy = shift.1 * unit;
     let half = drawn / 2.0;
     (cx - half, cy - half, cx + half, cy + half)
 }
@@ -645,8 +674,9 @@ pub fn canvas_layout(
         let exact = layer_drawn_size_exact(layer, layer_size, expected, options.scale_law).max(1.0);
         let drawn = if floor { exact.floor() } else { exact.round() }.max(1.0) as i32;
         let shift = layer.shift.unwrap_or_default();
-        let cx = shift.0 * options.shift_pixels_per_unit;
-        let cy = shift.1 * options.shift_pixels_per_unit;
+        let unit = shift_unit(options, expected);
+        let cx = shift.0 * unit;
+        let cy = shift.1 * unit;
         let left = (cx - drawn as f64 / 2.0).floor() as i32;
         let top = (cy - drawn as f64 / 2.0).floor() as i32;
         rects.push((left, top, left + drawn, top + drawn));

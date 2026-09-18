@@ -28,12 +28,16 @@ cargo run -p metatorio-icons --example compare -- \
   --context "<contexts>/<id>" --game "D:\异星工厂\Factorio_2.1" [--mods <mod 目录>] \
   [--type item] [--limit 200] [--tolerance 2] [--types] [--save <目录>] \
   [--show <type>/<name> --pixels 36,2;40,2] [--sweep] [--sweep-multiplier] [--sweep-kernel] \
-  [--fit-scale] [--sheet <对照图.png> [--sheet-count 12]] [--render-only <目录>]
+  [--fit-scale] [--sheet <对照图.png> [--sheet-count 12]] [--render-only <目录>] \
+  [--check-canvas] [--canvas-sweep] [--normalize]
 ```
 
 `--sheet` 是**给人眼看的**：把匹配率最差的若干张拼成「左=我们 / 右=官方、白底=透明」的
 对照图——数字过关不等于看着像（`scale` 口径那条就是这么发现的），反过来也一样。
 `--render-only` 只跑应用注册上下文时的那一步并计时（不读参考图），用来估时间。
+`--check-canvas` / `--canvas-sweep` 只用官方参考图的**尺寸**（读 PNG 头，不解码）验画布口径，
+几千张也是秒级。`--normalize` 在两边尺寸不同时先把大的缩到小的再比——比的是**构图**而不是
+分辨率；实测影响很小（py 83.94% → 84.22%），说明那批尺寸不符的图标差异不只是分辨率。
 
 **性能实测**（release / debug 都测过，同一台机器、同一份 dump；`--render-only` 只跑应用
 注册上下文那一步，含解码/缩放/编码/写盘）：
@@ -135,6 +139,16 @@ cargo run -p metatorio-icons --example compare -- \
    - 效果（vanilla，`--tolerance 2`）：总体 91.5% → **92.4%**；`technology` 97.4% →
      **99.2%**、`quality` 92.8% → **96.5%**、`recipe` 79.8% → **81.8%**、
      `space-connection` 33.1% → 36.8%。
+   - **第三轮：追 py 那 265 张「画布尺寸对不上」的**（`--canvas-sweep`，把「尺寸倍数」与
+     「`shift` 单位」拆开扫）。结论：`×2 / 1 单位 = 2 像素` 在**两个上下文里都是最优**
+     （vanilla 尺寸 100%、py 97.95%；`×1` 两个上下文都近乎全错——单层图标会被画成一半）。
+     py 那 265 张的尺寸比例不集中在 1/2（`≈1/2` 71 张、`0.64` 119 张、`0.68` 49 张……），
+     看着像「官方在这类图标上写了更小的一份」。顺着这个猜了个口径
+     `factor = (expected/32).clamp(1, 2)`（32 画布 → ×1、64 及以上 → ×2）：
+     **尺寸一致率确实涨了（py 97.95% → 98.55%，vanilla 保持 100%），但逐像素反而掉**
+     （py 81.00% → **78.51%**，vanilla 持平 91.66%）——同一批图标「外接尺寸像 ×1、内容
+     像素像 ×2」，说明官方在这类图标上本身就不自洽（或者还有别的因子没找到）。
+     所以**保持 ×2**，那条口径留作候选（[`ScaleLaw::ExpectedUnit`]），工具留作证据。
    - 这条是**看图看出来的**：先把「最差 12 张」拼成「左=我们 / 右=官方」的对照图
      （`--sheet`），官方那侧缩放层明显更大一截，「包围盒反推」又不可靠（多层叠在一起），
      于是改成直接扫倍数。

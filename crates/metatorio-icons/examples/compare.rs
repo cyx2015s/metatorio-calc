@@ -171,6 +171,10 @@ struct Args {
     render_only: Option<PathBuf>,
     /// `--check-canvas`：拿官方参考图的尺寸检验「画布 = 层绘制矩形并集」这条规则。
     check_canvas: bool,
+    /// `--canvas-sweep`：扫「尺寸倍数 × shift 单位」四个组合的尺寸一致率。
+    canvas_sweep: bool,
+    /// `--normalize`：尺寸不一致时先把大的一方缩到小的一方再比（比构图，不比分辨率）。
+    normalize: bool,
     /// `--types`：额外打印「按原型类型」的完整统计（默认只按参考图目录汇总，输出有界）。
     types: bool,
     /// `--sheet <out.png>`：把匹配率最差的若干张拼成一张「左=我们 / 右=官方」对照图。
@@ -197,6 +201,8 @@ fn parse_args() -> Result<Args, String> {
     let mut sweep_multiplier = false;
     let mut render_only = None;
     let mut check_canvas = false;
+    let mut canvas_sweep = false;
+    let mut normalize = false;
     let mut types = false;
     let mut sheet = None;
     let mut sheet_count = 12usize;
@@ -231,6 +237,8 @@ fn parse_args() -> Result<Args, String> {
             "--sweep-multiplier" => sweep_multiplier = true,
             "--render-only" => render_only = Some(PathBuf::from(next("--render-only")?)),
             "--check-canvas" => check_canvas = true,
+            "--canvas-sweep" => canvas_sweep = true,
+            "--normalize" => normalize = true,
             "--types" => types = true,
             "--sheet" => sheet = Some(PathBuf::from(next("--sheet")?)),
             "--sheet-count" => {
@@ -269,6 +277,8 @@ fn parse_args() -> Result<Args, String> {
         sweep_multiplier,
         render_only,
         check_canvas,
+        canvas_sweep,
+        normalize,
         types,
         sheet,
         sheet_count,
@@ -308,6 +318,9 @@ fn main() -> Result<(), String> {
         .map(|record| record.name.clone())
         .collect();
 
+    if args.canvas_sweep {
+        return canvas_sweep(&store, &references, args.only_type.as_deref(), args.limit);
+    }
     if args.check_canvas {
         return check_canvas(&store, &references, args.only_type.as_deref(), args.limit);
     }
@@ -420,7 +433,13 @@ fn main() -> Result<(), String> {
                         .map_err(|error| format!("读参考图失败: {error}"))?;
                     let reference = Rgba8::decode_png(&bytes)
                         .map_err(|error| format!("解码参考图失败: {error}"))?;
-                    let stats = diff_against_official(&ours, &reference, args.tolerance);
+                    let (ours_compared, reference_compared) = if args.normalize {
+                        normalized_pair(&ours, &reference)
+                    } else {
+                        (ours.clone(), reference.clone())
+                    };
+                    let stats =
+                        diff_against_official(&ours_compared, &reference_compared, args.tolerance);
                     if (args.dump_only || args.save.is_some()) && !stats.is_exact() {
                         let dir = args.save.clone().unwrap_or_else(std::env::temp_dir);
                         std::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
@@ -937,6 +956,133 @@ fn fit_layer_scale(
     Ok(())
 }
 
+/// 尺寸不一致时的公平比较：把大的一方缩到小的一方的尺寸再比。
+///
+/// 官方导出有时只写一份更小的（半分辨率），此时逐像素比的是「分辨率」而不是「构图」。
+/// 归一化之后比的是**同一尺寸下的构图**，能看出「像不像官方那张图」。
+fn normalized_pair(ours: &Rgba8, reference: &Rgba8) -> (Rgba8, Rgba8) {
+    let target_w = ours.width.min(reference.width).max(1);
+    let target_h = ours.height.min(reference.height).max(1);
+    let fit = |image: &Rgba8| -> Rgba8 {
+        if image.width == target_w && image.height == target_h {
+            return image.clone();
+        }
+        let scale =
+            (target_w as f64 / image.width as f64).min(target_h as f64 / image.height as f64);
+        let scaled = image.scaled(scale);
+        if scaled.width == target_w && scaled.height == target_h {
+            scaled
+        } else {
+            scaled.scaled_bilinear(target_w, target_h)
+        }
+    };
+    (fit(ours), fit(reference))
+}
+
+/// `--canvas-sweep`：把「层绘制尺寸的倍数」与「`shift` 的像素单位」四个组合都对着官方
+/// 参考图**尺寸**跑一遍，看哪个组合最像官方。
+///
+/// 背景：官方有时只写半分辨率（py 的 `recipe/empty-acetylene-canister` 官方 35×35，
+/// 我们按「×2 / 1 单位 = 2 像素」算是 70×70），而 vanilla 那 463 张显式 scale 的原型又
+/// 明确偏好 ×2。把「尺寸倍数」和「shift 单位」拆开扫，能看出到底哪个因子不对。
+fn canvas_sweep(
+    store: &metatorio_data::store::PrototypeStore,
+    references: &ReferenceIndex,
+    only_type: Option<&str>,
+    limit: Option<usize>,
+) -> Result<(), String> {
+    let combos = [
+        (
+            "尺寸×2 / shift 2px（当前）",
+            ScaleLaw::DoubledDocDefault,
+            2.0,
+        ),
+        ("尺寸×2 / shift 1px", ScaleLaw::DoubledDocDefault, 1.0),
+        ("尺寸×1 / shift 2px", ScaleLaw::DocDefault, 2.0),
+        ("尺寸×1 / shift 1px", ScaleLaw::DocDefault, 1.0),
+        // 假设：倍率其实是 `expected/32`（64 画布 → ×2、32 画布 → ×1、256 画布 → ×8），
+        // 而且 shift 单位也随它走。
+        (
+            "按 expected/32（尺寸与 shift）",
+            ScaleLaw::ExpectedUnit,
+            2.0,
+        ),
+    ];
+    let mut stats = vec![(0usize, 0usize); combos.len()];
+    let mut per_type_miss: Vec<std::collections::BTreeMap<String, usize>> =
+        vec![Default::default(); combos.len()];
+    let mut visited = 0usize;
+    'outer: for records in store.groups.values() {
+        for record in records.values() {
+            if let Some(only) = only_type {
+                if record.type_ != only {
+                    continue;
+                }
+            }
+            if limit.is_some_and(|limit| visited >= limit) {
+                break 'outer;
+            }
+            let Some(component) = record.component::<metatorio_data::IconComponent>() else {
+                continue;
+            };
+            if component.icons.is_empty() && component.icon.is_none() {
+                continue;
+            }
+            let Some((_, reference_path)) =
+                references.resolve(&reference_folder(record), &record.name)
+            else {
+                continue;
+            };
+            let Some((width, height)) = png_size(&reference_path)? else {
+                continue;
+            };
+            visited += 1;
+            let expected = metatorio_icons::render::expected_icon_size(&record.type_);
+            for (index, (_, law, shift_unit)) in combos.iter().enumerate() {
+                let options = RenderOptions {
+                    scale_law: *law,
+                    shift_pixels_per_unit: *shift_unit,
+                    ..RenderOptions::default()
+                };
+                let Some((predicted_w, predicted_h, _, _)) =
+                    metatorio_icons::union_canvas(component, expected, options, true)
+                else {
+                    continue;
+                };
+                stats[index].1 += 1;
+                if (predicted_w, predicted_h) == (width, height) {
+                    stats[index].0 += 1;
+                } else {
+                    *per_type_miss[index]
+                        .entry(record.type_.clone())
+                        .or_default() += 1;
+                }
+            }
+        }
+    }
+    println!("\n=== 画布尺寸：尺寸倍数 × shift 单位（共 {visited} 张）===");
+    for (index, (name, _, _)) in combos.iter().enumerate() {
+        let (matched, total) = stats[index];
+        let mut miss: Vec<(&String, &usize)> = per_type_miss[index].iter().collect();
+        miss.sort_by(|left, right| right.1.cmp(left.1));
+        let top: Vec<String> = miss
+            .iter()
+            .take(5)
+            .map(|(type_, count)| format!("{type_} {count}"))
+            .collect();
+        println!(
+            "  {name:<24}: {matched}/{total}（{:.2}%）；算错最多的类型：{}",
+            if total == 0 {
+                0.0
+            } else {
+                matched as f64 * 100.0 / total as f64
+            },
+            top.join("、")
+        );
+    }
+    Ok(())
+}
+
 /// `--check-canvas`：用官方参考图的**尺寸**当标准，检验「画布 = 层绘制矩形并集包围盒」。
 ///
 /// 只看尺寸、不解码整张图（读 PNG 头 33 字节就够），所以几千张也是秒级；尺寸是硬指标，
@@ -955,6 +1101,8 @@ fn check_canvas(
     ];
     let mut stats = vec![(0usize, 0usize); variants.len()];
     let mut samples: Vec<String> = Vec::new();
+    // 并集口径算错时，「官方边长 / 我们边长」落在哪个比例上（1/2？1/4？其它？）。
+    let mut ratio_buckets: std::collections::BTreeMap<String, usize> = Default::default();
     let mut visited = 0usize;
     'outer: for records in store.groups.values() {
         for record in records.values() {
@@ -1006,11 +1154,28 @@ fn check_canvas(
                 stats[index].1 += 1;
                 if (predicted_w, predicted_h) == (width, height) {
                     stats[index].0 += 1;
-                } else if index == 0 && samples.len() < 12 {
-                    samples.push(format!(
-                        "{}/{}: 预测 {predicted_w}×{predicted_h}，官方 {width}×{height}",
-                        record.type_, record.name
-                    ));
+                } else if index == 0 {
+                    let ours = predicted_w.max(predicted_h) as f64;
+                    let official = width.max(height) as f64;
+                    let ratio = if ours > 0.0 { official / ours } else { 0.0 };
+                    let key = if (ratio - 1.0).abs() < 0.02 {
+                        "≈1".to_string()
+                    } else if (ratio - 0.5).abs() < 0.02 {
+                        "≈1/2".to_string()
+                    } else if (ratio - 0.25).abs() < 0.02 {
+                        "≈1/4".to_string()
+                    } else if (ratio - 0.75).abs() < 0.02 {
+                        "≈3/4".to_string()
+                    } else {
+                        format!("其它（{ratio:.2}）")
+                    };
+                    *ratio_buckets.entry(key).or_default() += 1;
+                    if samples.len() < 12 {
+                        samples.push(format!(
+                            "{}/{}: 预测 {predicted_w}×{predicted_h}，官方 {width}×{height}",
+                            record.type_, record.name
+                        ));
+                    }
                 }
             }
         }
@@ -1031,6 +1196,12 @@ fn check_canvas(
         println!("\n并集（向下取整）算错的前几个：");
         for sample in &samples {
             println!("  {sample}");
+        }
+    }
+    if !ratio_buckets.is_empty() {
+        println!("\n算错时「官方边长 / 我们边长」的比例分布：");
+        for (key, count) in &ratio_buckets {
+            println!("  {key}: {count} 张");
         }
     }
     Ok(())
