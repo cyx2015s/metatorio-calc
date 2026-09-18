@@ -35,6 +35,20 @@ impl Rgba8 {
         }
     }
 
+    /// 取 `(x, y)` 起 `width × height` 的一块（越界自动裁剪到图内；全在图外时返回 1×1 透明）。
+    pub fn crop(&self, x: u32, y: u32, width: u32, height: u32) -> Rgba8 {
+        let x = x.min(self.width.saturating_sub(1));
+        let y = y.min(self.height.saturating_sub(1));
+        let width = width.min(self.width - x).max(1);
+        let height = height.min(self.height - y).max(1);
+        let mut pixels = Vec::with_capacity((width as usize) * (height as usize) * 4);
+        for row in 0..height {
+            let start = (((y + row) * self.width + x) * 4) as usize;
+            pixels.extend_from_slice(&self.pixels[start..start + (width as usize) * 4]);
+        }
+        Rgba8::from_pixels(width, height, pixels)
+    }
+
     /// 取左上角 `size × size` 的方块（Factorio 的图标文件是「mipmap 横排」，
     /// level 0 就是左上角那一块）。
     pub fn top_left_tile(&self, size: u32) -> Rgba8 {

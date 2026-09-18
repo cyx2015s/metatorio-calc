@@ -20,6 +20,8 @@ pub mod compare;
 pub mod image;
 pub mod render;
 pub mod sources;
+/// 非原型图标：`utility-sprites` 里的 GUI 素材（空槽背景、`fuel_icon` …）。
+pub mod utility;
 
 pub use image::Rgba8;
 pub use render::{
@@ -29,6 +31,9 @@ pub use render::{
     render_record_icon_with, union_canvas,
 };
 pub use sources::{Archive, IconSources};
+pub use utility::{
+    UtilityParse, UtilityReport, UtilitySprite, parse_utility_sprites, render_utility_icons,
+};
 
 /// 测试辅助：从一份最小 dump 建原型仓库（加载失败要带出失败明细，不能静默）。
 #[cfg(test)]

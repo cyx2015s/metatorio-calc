@@ -711,7 +711,7 @@ pub fn union_canvas(
 }
 
 /// 乘色：RGB 按 tint 的比例、alpha 乘 tint.a。
-fn apply_tint(image: &mut Rgba8, tint: Option<metatorio_data::Color>) {
+pub(crate) fn apply_tint(image: &mut Rgba8, tint: Option<metatorio_data::Color>) {
     let Some(tint) = tint else { return };
     let metatorio_data::Color(r, g, b, a) = tint;
     if (r, g, b, a) == (255, 255, 255, 255) {

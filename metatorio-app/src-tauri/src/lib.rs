@@ -866,23 +866,41 @@ fn register_context_files(
 /// 用游戏数据把**所有带图标定义的原型**渲染进 `icon_root`（**同步重活**，调用方负责
 /// 放进阻塞线程池）。只吃普通数据（dump 字节 + 输出目录 + 游戏目录），不碰 runtime，
 /// 因此既可以放进 `spawn_blocking`，也能在测试里直接调用。
+///
+/// 返回 `(原型图标报告, 非原型 GUI 素材报告)`：后者来自 dump 的 `utility-sprites`
+/// （空槽背景、`fuel_icon` …，见 `crate::utility`），与原型无关但界面要用。
 fn render_icons_into(
     raw: &[u8],
     icon_root: &Path,
     game_root: &Path,
     mod_dir: Option<&Path>,
-) -> Result<metatorio_icons::RenderReport, String> {
+) -> Result<
+    (
+        metatorio_icons::RenderReport,
+        metatorio_icons::UtilityReport,
+    ),
+    String,
+> {
     let dump: serde_json::Value =
         serde_json::from_slice(raw).map_err(|error| format!("解析 dump 失败: {error}"))?;
     let store = metatorio_data::store::PrototypeStore::load(&dump)
         .map_err(|error| format!("加载原型仓库失败: {error}"))?;
     let sources = metatorio_icons::IconSources::from_game_root(game_root, mod_dir)?;
-    metatorio_icons::render_all_icons(
+    let icons = metatorio_icons::render_all_icons(
         &store,
         &sources,
         icon_root,
         metatorio_icons::RenderOptions::default(),
-    )
+    )?;
+    // 非原型图标：`utility-sprites` 里的 GUI 素材（空槽背景、燃料图标 …）。
+    let parsed = metatorio_icons::parse_utility_sprites(&dump);
+    let utility = metatorio_icons::render_utility_icons(
+        &sources,
+        &parsed.sprites,
+        parsed.skipped.len(),
+        icon_root,
+    )?;
+    Ok((icons, utility))
 }
 
 /// 注册上下文并激活：注册文件 → （必要时）自己渲染图标 → 锁外载入 store → 短暂上锁激活。
@@ -916,7 +934,7 @@ async fn register_context_and_activate(
             .await
             .map_err(|error| format!("图标渲染任务失败: {error}"))?;
             match render {
-                Ok(report) => {
+                Ok((report, utility)) => {
                     eprintln!(
                         "图标渲染完成：写出 {} 张（其中按官方规则推导 {} 张；{}），无图标定义 {}、\
                          推导失败 {}、缺文件 {}、解码失败 {}",
@@ -933,7 +951,15 @@ async fn register_context_and_activate(
                         report.missing_source,
                         report.decode_failed
                     );
-                    if report.written == 0 {
+                    eprintln!(
+                        "非原型图标（utility-sprites）：写出 {} 张，缺文件 {}、解码失败 {}、\
+                         形态不支持 {}",
+                        utility.written,
+                        utility.missing_source,
+                        utility.decode_failed,
+                        utility.unsupported
+                    );
+                    if report.written == 0 && utility.written == 0 {
                         // 一张都没渲染出来：别留一个空目录冒充「有图标」。
                         let _ = std::fs::remove_dir_all(&icon_root);
                     }
@@ -1383,7 +1409,8 @@ async fn delete_registered_context<R: TauriRuntime>(
 }
 
 /// Game icon PNG bytes for the given context's `<icons>/<ty>/<name>.png`
-/// (from `--dump-icon-sprites`)。图标在注册时已移入/拷入缓存，缓存自包含。
+/// （注册时由 `metatorio-icons` 自己渲染写盘；`ty = "utility"` 取的是**非原型** GUI 素材，
+/// 例如 `empty_module_slot`、`fuel_icon`）。图标缓存自包含，不依赖游戏目录。
 /// 前端显式传入 `context_id`（当前选中项目绑定的上下文，否则为激活上下文）。
 #[tauri::command]
 fn icon(
@@ -4139,8 +4166,8 @@ mod tests {
         };
         assert!(icon_root.is_dir(), "注册时应建出图标目录");
 
-        // (2) 渲染：产出 64×64、非空的 PNG。
-        let report = render_icons_into(&raw, &icon_root, &game, None).expect("渲染图标");
+        // (2) 渲染：产出 64×64、非空的 PNG；非原型素材是另一份计数。
+        let (report, utility) = render_icons_into(&raw, &icon_root, &game, None).expect("渲染图标");
         assert_eq!(report.written, 1, "{report:?}");
         assert_eq!(report.failed(), 0, "{report:?}");
         let bytes = std::fs::read(icon_root.join("item/iron-plate.png")).expect("读渲染结果");
@@ -4152,6 +4179,9 @@ mod tests {
             .filter(|pixel| pixel[3] > 0)
             .count();
         assert!(opaque > 100, "渲染结果几乎是空的：{opaque} 个非透明像素");
+        // 这份最小 dump 里没有 `utility-sprites`：如实报「没得画」，不是失败。
+        assert_eq!(utility.written, 0, "{utility:?}");
+        assert_eq!(utility.total, 0, "{utility:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

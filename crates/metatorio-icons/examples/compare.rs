@@ -175,6 +175,8 @@ struct Args {
     canvas_sweep: bool,
     /// `--normalize`：尺寸不一致时先把大的一方缩到小的一方再比（比构图，不比分辨率）。
     normalize: bool,
+    /// `--utility <目录>`：渲染 `utility-sprites`（非原型 GUI 素材）并打印计数。
+    utility: Option<PathBuf>,
     /// `--types`：额外打印「按原型类型」的完整统计（默认只按参考图目录汇总，输出有界）。
     types: bool,
     /// `--sheet <out.png>`：把匹配率最差的若干张拼成一张「左=我们 / 右=官方」对照图。
@@ -203,6 +205,7 @@ fn parse_args() -> Result<Args, String> {
     let mut check_canvas = false;
     let mut canvas_sweep = false;
     let mut normalize = false;
+    let mut utility = None;
     let mut types = false;
     let mut sheet = None;
     let mut sheet_count = 12usize;
@@ -239,6 +242,7 @@ fn parse_args() -> Result<Args, String> {
             "--check-canvas" => check_canvas = true,
             "--canvas-sweep" => canvas_sweep = true,
             "--normalize" => normalize = true,
+            "--utility" => utility = Some(PathBuf::from(next("--utility")?)),
             "--types" => types = true,
             "--sheet" => sheet = Some(PathBuf::from(next("--sheet")?)),
             "--sheet-count" => {
@@ -279,6 +283,7 @@ fn parse_args() -> Result<Args, String> {
         check_canvas,
         canvas_sweep,
         normalize,
+        utility,
         types,
         sheet,
         sheet_count,
@@ -318,6 +323,9 @@ fn main() -> Result<(), String> {
         .map(|record| record.name.clone())
         .collect();
 
+    if let Some(dir) = &args.utility {
+        return utility_only(&dump, &sources, dir);
+    }
     if args.canvas_sweep {
         return canvas_sweep(&store, &references, args.only_type.as_deref(), args.limit);
     }
@@ -977,6 +985,48 @@ fn normalized_pair(ours: &Rgba8, reference: &Rgba8) -> (Rgba8, Rgba8) {
         }
     };
     (fit(ours), fit(reference))
+}
+
+/// `--utility <目录>`：渲染 `utility-sprites` 里那些**非原型**的 GUI 素材
+/// （空槽背景、`fuel_icon` …）到 `<目录>/utility/<字段名>.png`。
+///
+/// 这类图标**没有官方参考图**（游戏的 `--dump-icon-sprites` 只导原型图标），所以验证方式是
+/// 「按定义裁切 + 人眼看」——渲染完自己打开图看。
+fn utility_only(
+    dump: &serde_json::Value,
+    sources: &IconSources,
+    out_dir: &Path,
+) -> Result<(), String> {
+    let parsed = metatorio_icons::parse_utility_sprites(dump);
+    let report = metatorio_icons::render_utility_icons(
+        sources,
+        &parsed.sprites,
+        parsed.skipped.len(),
+        out_dir,
+    )?;
+    println!("\n=== utility-sprites（非原型 GUI 素材）===");
+    println!(
+        "解析出 {} 个可渲染，写出 {}；缺文件 {}、解码失败 {}、形态不认识 {}",
+        report.total,
+        report.written,
+        report.missing_source,
+        report.decode_failed,
+        report.unsupported
+    );
+    if !parsed.skipped.is_empty() {
+        println!("形态不认识的（前 10）：");
+        for line in parsed.skipped.iter().take(10) {
+            println!("  {line}");
+        }
+    }
+    if !report.samples.is_empty() {
+        println!("渲染失败样本：");
+        for line in &report.samples {
+            println!("  {line}");
+        }
+    }
+    println!("输出目录：{}", out_dir.join("utility").display());
+    Ok(())
 }
 
 /// `--canvas-sweep`：把「层绘制尺寸的倍数」与「`shift` 的像素单位」四个组合都对着官方

@@ -81,6 +81,36 @@ cargo run -p metatorio-icons --example compare -- \
 - 测试 `context_registration_renders_icons_without_running_the_game` 串起「注册 → 渲染 →
   读回 PNG」整条链（本机没有 `<游戏>/data/base` 时打印 `[skip]` 跳过）。
 
+## 非原型图标（`utility-sprites`）
+
+界面上还有一类图标**不属于任何原型**：组装机选燃料按钮、插件/弹药/装甲/机器人槽的**空槽背景**、
+`fuel_icon`、`ammo_icon` 这些。它们在 dump 的 **`utility-sprites`** 节点里
+（形状是 `utility-sprites` → 原型 `default` → 575 个具名字段），不在原型体系里。
+
+实现：`crates/metatorio-icons/src/utility.rs`
+
+- 解析每个字段：`filename` + 尺寸（`size: 64` 或 `size: [w, h]`，也接受 `width`/`height`）+
+  位置（`x`/`y` 或 `position: [x, y]`）+ 可选 `scale`/`tint`；
+- 数组形态（SpriteVariations）取第一个；`layers`、`stripes`（动画帧）、`cursor_box` 这类
+  **不猜、如实计数**；
+- 输出到 `<图标目录>/utility/<字段名>.png`，和应用里 `icon` 命令的读取路径一致，
+  前端用 `type: "utility"` 请求即可（`empty_module_slot`、`empty_ammo_slot`、
+  `empty_gun_slot`、`empty_armor_slot`、`empty_robot_slot`、`empty_trash_slot`、
+  `empty_drop_cargo_slot`、`fuel_icon` …）。
+
+实测覆盖（两个上下文一致）：**解析出并写出 569 张，缺文件 0、解码失败 0，形态不支持 6 个**
+（`achievement_label` 三个、`arrow_button`、`cursor_box`、`platform_entity_build_animations`
+——它们是多层/逐帧的 GUI 部件，不是图标）。小 dump（没有 `utility-sprites`）时是「没得画」，
+不是失败。
+
+**验证方式**：游戏的 `--dump-icon-sprites` 只导出原型图标，**没有官方参考图可比对**，所以这类
+图标的验证是「按定义裁切」＋人眼看（`examples/compare.rs --utility <目录>` 渲染完自己打开图）。
+已看过 `empty_module_slot.png`（灰色空槽底 + 三个圆点 + 一条横条）与 `fuel_icon.png`
+（红色燃料警告三角）——与游戏里的一致。
+
+注册上下文时（`render_icons_into`）会顺带把这类图标一起写盘，并在 stderr 打一行
+`非原型图标（utility-sprites）：写出 N 张，缺文件 X、解码失败 Y、形态不支持 Z`。
+
 ## 已经查清的事实（都是实测，不是猜的）
 
 1. **游戏导出的图标是「预乘 alpha」**，源 PNG 是**直通 alpha**。
