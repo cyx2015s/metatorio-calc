@@ -323,6 +323,10 @@ cargo run -p metatorio-icons --example compare -- \
    用户自备 dump 的情况下留空**不猜**。旧缓存没有这两个字段也能载入（`#[serde(default)]`），
    UI 显示「版本未知 / 无 mod」。
 7. **mod 目录的挑法**（Factorio 的约定，用户给的规则 + 在本机实测）：
+   - **留空 mod 目录 = 不加载 mod**（原版 + DLC）：导出时我们给游戏写了自己的 `config.ini`，
+     游戏**不会**再去它的用户数据目录找 mod，所以「不给 mod 目录」是**故意**的语义，
+     代码里也**不允许**去猜 `<游戏>/mods`（`IconSources::from_game_root(game, None)` =
+     只注册 `data/*`；元数据 `mods` 为空表）。
    - **目录形态**：目录名必须**正好是 mod 的 id**（**带版本号的目录不接受**），`info.json`
      直接躺在目录下（不像 zip 会嵌一层 `<名字>_<版本>/`）；版本取 `info.json.version`，
      没有 `info.json` 的不算 mod。本机的 3 个目录 mod 都是这个形态。

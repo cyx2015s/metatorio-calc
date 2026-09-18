@@ -322,7 +322,11 @@ fn main() -> Result<(), String> {
         .map_err(|error| format!("加载原型仓库失败: {error}"))?;
     println!("原型   : {} 条", store.len());
 
-    let sources = IconSources::from_game_root(&args.game, args.mods.as_deref())?;
+    // 图标来源：`--mods` 给了就用它；没给则用游戏目录下的 `mods/`（**这是验收工具的方便**，
+    // 与应用的语义不同——应用里「不给 mod 目录」= 这个上下文不加载 mod，见
+    // `IconSources::from_game_root` 的文档）。工具输出里有「来源」一行，用了哪些一眼能看见。
+    let mod_dir = args.mods.clone().unwrap_or_else(|| args.game.join("mods"));
+    let sources = IconSources::from_game_root(&args.game, Some(&mod_dir))?;
     println!("来源   : {}", sources.root_names().join(", "));
 
     let mut references = ReferenceIndex::scan(&icons_root)?;

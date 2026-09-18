@@ -95,19 +95,20 @@ impl IconSources {
         Self::from_game_root(&game, mod_dir)
     }
 
-    /// `<游戏>/data/{base,core}` + mod 目录（默认 `<游戏>/mods`）。
+    /// `<游戏>/data/*`（base、core、以及 DLC 的 `space-age` 等）＋**调用方指定的** mod 目录。
     ///
-    /// `data/` 下的**每个子目录**都注册成一个来源：DLC（Space Age）就是
-    /// `<游戏>/data/space-age`，图标里写的是 `__space-age__/…`，与 base/core 同级。
+    /// `mod_dir = None` 表示**这个上下文不加载 mod**（导出时留空 mod 目录就是这个意思：
+    /// 我们给游戏写了自己的 `config.ini`，游戏只会读原版 + DLC 内容），此时**不去猜**
+    /// `<游戏>/mods`——那是「加载了 mod」的情形，语义不同。
+    ///
+    /// `data/` 下的**每个子目录**都注册成一个来源：图标里写的是 `__space-age__/…`
+    /// 这种形式，与 base/core 同级。
     pub fn from_game_root(game: &Path, mod_dir: Option<&Path>) -> Result<Self, String> {
         let data = game.join("data");
         let base = data.join("base");
         if !base.is_dir() {
             return Err(format!("找不到游戏数据目录: {}", base.display()));
         }
-        let mods = mod_dir
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| game.join("mods"));
         let mut sources = Self::default();
         sources.roots.insert("base".to_string(), Archive::Dir(base));
         if let Ok(entries) = std::fs::read_dir(&data) {
@@ -123,8 +124,10 @@ impl IconSources {
                 sources.roots.entry(name).or_insert(Archive::Dir(path));
             }
         }
-        for file in loaded_mods(&mods)? {
-            sources.roots.insert(file.name, file.archive);
+        if let Some(mods) = mod_dir {
+            for file in loaded_mods(mods)? {
+                sources.roots.insert(file.name, file.archive);
+            }
         }
         Ok(sources)
     }
