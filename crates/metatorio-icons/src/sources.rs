@@ -95,6 +95,9 @@ impl IconSources {
     pub fn read(&self, spec: &str) -> Result<Vec<u8>, String> {
         let (root, relative) =
             split_spec(spec).ok_or_else(|| format!("不是 __mod__/ 形式的资源路径: {spec}"))?;
+        if relative.is_empty() {
+            return Err(format!("资源路径归一化后为空: {spec}"));
+        }
         let archive = self.roots.get(root).ok_or_else(|| {
             let mut names = self.root_names();
             let total = names.len();
@@ -106,7 +109,7 @@ impl IconSources {
         })?;
         match archive {
             Archive::Dir(dir) => {
-                let path = dir.join(relative);
+                let path = dir.join(&relative);
                 std::fs::read(&path).map_err(|error| format!("读 {} 失败: {error}", path.display()))
             }
             Archive::Zip { path, prefix } => {
@@ -129,12 +132,31 @@ impl IconSources {
 }
 
 /// `__base__/graphics/x.png` → `("base", "graphics/x.png")`。
-pub fn split_spec(spec: &str) -> Option<(&str, &str)> {
+///
+/// 相对路径会做**斜杠归一化**：连续 `/` 折成一个。游戏自己的路径解析就能吃
+/// `__pyalienlifegraphics__/graphics/icons//x.png`（mod 数据里真有这种双斜杠），
+/// 我们不归一化的话 zip 里按条目名查就会失败——`Archive::Zip` 是按名字精确匹配的。
+pub fn split_spec(spec: &str) -> Option<(&str, String)> {
     let rest = spec.strip_prefix("__")?;
     let end = rest.find("__")?;
     let (root, tail) = rest.split_at(end);
     let relative = tail.strip_prefix("__")?.strip_prefix('/')?;
-    Some((root, relative))
+    Some((root, normalize_slashes(relative)))
+}
+
+/// 把连续 `/` 折成一个（同时也去掉开头多余的 `/`），其余字符原样保留。
+fn normalize_slashes(relative: &str) -> String {
+    let mut normalized = String::with_capacity(relative.len());
+    for segment in relative.split('/') {
+        if segment.is_empty() {
+            continue;
+        }
+        if !normalized.is_empty() {
+            normalized.push('/');
+        }
+        normalized.push_str(segment);
+    }
+    normalized
 }
 
 /// `<游戏>/bin/x64/factorio.exe` → `<游戏>`（往上找到含 `data` 的那一层）。
@@ -227,14 +249,46 @@ mod tests {
     fn split_spec_reads_mod_and_path() {
         assert_eq!(
             split_spec("__base__/graphics/icons/iron-plate.png"),
-            Some(("base", "graphics/icons/iron-plate.png"))
+            Some(("base", "graphics/icons/iron-plate.png".to_string()))
         );
         assert_eq!(
             split_spec("__aai-industry__/graphics/x.png"),
-            Some(("aai-industry", "graphics/x.png"))
+            Some(("aai-industry", "graphics/x.png".to_string()))
         );
         // 非资源路径（没有 __ 前缀）不该被当成来源路径。
         assert_eq!(split_spec("graphics/x.png"), None);
         assert_eq!(split_spec("__base__"), None);
+    }
+
+    /// 双斜杠必须归一化：py 的数据里确实有 `graphics/icons//x.png`，
+    /// 而 zip 条目是按名字精确匹配的，不归一化就会「缺文件」。
+    #[test]
+    fn split_spec_collapses_duplicate_slashes() {
+        assert_eq!(
+            split_spec("__pyalienlifegraphics__/graphics/icons//sap-extractor-mk01.png"),
+            Some((
+                "pyalienlifegraphics",
+                "graphics/icons/sap-extractor-mk01.png".to_string()
+            ))
+        );
+        assert_eq!(
+            split_spec("__base__//graphics///icons/x.png"),
+            Some(("base", "graphics/icons/x.png".to_string()))
+        );
+        assert_eq!(split_spec("__base__//"), Some(("base", String::new())));
+    }
+
+    /// 归一化后的路径要真的能读到文件（目录形式），空相对路径要报错而不是读整个目录。
+    #[test]
+    fn read_uses_the_normalized_path() {
+        let dir = std::env::temp_dir().join(format!("metatorio-sources-{}", std::process::id()));
+        let icons = dir.join("graphics/icons");
+        std::fs::create_dir_all(&icons).expect("建临时目录");
+        std::fs::write(icons.join("x.png"), b"png").expect("写临时文件");
+        let sources = IconSources::from_roots([("t".to_string(), Archive::Dir(dir.clone()))]);
+        assert_eq!(sources.read("__t__/graphics/icons//x.png").unwrap(), b"png");
+        assert!(sources.read("__t__//").is_err());
+        assert!(sources.read("__nope__/graphics/icons/x.png").is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
