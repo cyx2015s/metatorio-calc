@@ -21,6 +21,38 @@ fn load_dump() -> Value {
     serde_json::from_str(&text).expect("modded dump 解析失败")
 }
 
+/// mod 用 `0` 关掉一个可选表字段——真实样本：casting_ladle 0.2.1 的
+/// `data.raw["assembling-machine"]["foundry"].effect_receiver = 0`（注释：关闭熔炉自带产能）。
+///
+/// 游戏照常加载并把 `0` 当作「该字段没设置」；我们的加载器不允许因为一个字段的
+/// 这种写法就让全部原型加载失败，所以按游戏语义归一（`lenient::de_opt_struct_lenient`）。
+#[test]
+fn zero_for_an_optional_table_is_read_as_unset() {
+    let dump: Value = serde_json::from_str(
+        r#"{
+          "assembling-machine": {
+            "foundry": { "crafting_speed": 2.5, "effect_receiver": 0 }
+          }
+        }"#,
+    )
+    .expect("内联 dump 解析失败");
+
+    let store = PrototypeStore::load(&dump).expect("`effect_receiver = 0` 不应导致加载失败");
+    let foundry = store.entity("foundry").expect("foundry 实体记录");
+    let crafter = foundry
+        .component::<CraftingMachineComponent>()
+        .expect("foundry 应有制造机器组件");
+    assert!(
+        crafter.effect_receiver.is_none(),
+        "`0` 应读成「未设置」，而不是报 invalid type"
+    );
+    assert!(
+        (crafter.crafting_speed - 2.5).abs() < 1e-9,
+        "同一个组件的其它字段不受影响：{}",
+        crafter.crafting_speed
+    );
+}
+
 #[test]
 fn heavily_modded_dump_loads_all_concerned_prototypes() {
     let dump = load_dump();

@@ -27,6 +27,8 @@ pub struct GenStats {
     pub lenient_int_fields: usize,
     /// 使用宽松 Vec（内联函数或宏函数）的数组字段数。
     pub lenient_vec_fields: usize,
+    /// 使用宽松「可选表」（`null`/`false`/`0` → 未设置）的表字段数。
+    pub lenient_struct_fields: usize,
 }
 
 /// 组合字段组：多个原型链层重复声明的整组字段，提取为独立 Component。
@@ -218,6 +220,7 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
             &struct_name,
             t.properties.as_deref().unwrap_or(&[]),
             &composites,
+            &candidates,
             &mut stats,
         ));
     }
@@ -235,6 +238,7 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
                     &layer_name,
                     &layer.properties,
                     &composites,
+                    &candidates,
                     &mut stats,
                 ));
             }
@@ -251,6 +255,7 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
                 &comp_name,
                 &c.properties,
                 &composites,
+                &candidates,
                 &mut stats,
             ));
         }
@@ -575,6 +580,9 @@ fn collect_type_names(t: &TypeRef, out: &mut Vec<String>) {
 }
 
 /// 生成一个完整结构体（字段 + 附属函数：默认值函数）。
+///
+/// `generated_structs`：本次生成会真正产出的 struct 名集合（`candidates`）——
+/// 用来判断字段是不是「我们自己生成的表」，从而决定要不要走宽松可选表反序列化。
 fn emit_struct(
     schema: &Schema,
     config: &Config,
@@ -582,6 +590,7 @@ fn emit_struct(
     struct_name: &str,
     props: &[Property],
     composites: &[Composite],
+    generated_structs: &HashSet<String>,
     stats: &mut GenStats,
 ) -> String {
     let mut fields = String::new();
@@ -725,6 +734,9 @@ fn emit_struct(
                     helpers.push_str(&format!("fn {default_fn}() -> {ty} {{ {expr} }}\n"));
                     stats.locked_defaults += 1;
                 } else {
+                    // 可选「表」字段：`null` / `false` / `0` 按游戏语义当作未设置
+                    // （真实样本：mod 用 `effect_receiver = 0` 关掉熔炉自带产能）。
+                    let lenient_opt_table = prop.optional && generated_structs.contains(&ty);
                     let field_ty = if prop.optional {
                         format!("Option<{ty}>")
                     } else {
@@ -736,7 +748,14 @@ fn emit_struct(
                             prop.default.as_ref()
                         ));
                     }
-                    fields.push_str(&format!("{doc}    pub {field_name}: {field_ty},\n"));
+                    if lenient_opt_table {
+                        fields.push_str(&format!(
+                            "{doc}    #[serde(deserialize_with = \"crate::lenient::de_opt_struct_lenient\")]\n    pub {field_name}: {field_ty},\n"
+                        ));
+                        stats.lenient_struct_fields += 1;
+                    } else {
+                        fields.push_str(&format!("{doc}    pub {field_name}: {field_ty},\n"));
+                    }
                 }
                 stats.fields += 1;
             }

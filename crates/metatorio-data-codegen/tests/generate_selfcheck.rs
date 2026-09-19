@@ -107,6 +107,25 @@ fn generation_stats_are_reasonable() {
         code.contains("crate::types::EnergyAmount"),
         "自定义类型映射缺失"
     );
+    // 可选表字段带宽松反序列化：`null` / `false` / `0` 按游戏语义当作未设置
+    // （真实样本：casting_ladle 的 `effect_receiver = 0`）
+    assert!(
+        stats.lenient_struct_fields > 0,
+        "应有可选表字段走宽松反序列化"
+    );
+    assert!(
+        code.contains(
+            "    #[serde(deserialize_with = \"crate::lenient::de_opt_struct_lenient\")]\n    pub effect_receiver: Option<EffectReceiver>,"
+        ),
+        "effect_receiver 是可选表字段，应带宽松反序列化属性"
+    );
+    // 非可选的表字段不加：缺失/非法值必须继续报错，别把真问题吞掉
+    assert!(
+        !code.contains(
+            "    #[serde(deserialize_with = \"crate::lenient::de_opt_struct_lenient\")]\n    pub energy_source:"
+        ),
+        "非可选字段不应放宽"
+    );
 }
 
 #[test]

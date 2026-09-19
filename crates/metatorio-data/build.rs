@@ -18,11 +18,12 @@ fn main() {
     std::fs::write(Path::new(&out_dir).join("generated.rs"), code).expect("写入 generated.rs 失败");
 
     println!(
-        "cargo:warning=metatorio-data codegen: schema {}, {} 个关注类型, {} 个组件, {} 个字段, {} 个字段被忽略",
+        "cargo:warning=metatorio-data codegen: schema {}, {} 个关注类型, {} 个组件, {} 个字段（{} 个可选表字段按游戏容错）, {} 个字段被忽略",
         schema.application_version,
         stats.concerned_typenames,
         stats.component_structs,
         stats.fields,
+        stats.lenient_struct_fields,
         stats.skipped_fields,
     );
 

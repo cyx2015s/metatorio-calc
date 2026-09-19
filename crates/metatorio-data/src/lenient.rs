@@ -17,6 +17,8 @@
 //! pub flags: Vec<String>,
 //! ```
 
+use serde::Deserialize;
+use serde::de::value::MapAccessDeserializer;
 use serde::de::{Deserializer, Error, IgnoredAny, MapAccess, SeqAccess, Visitor};
 use std::fmt;
 use std::marker::PhantomData;
@@ -209,6 +211,89 @@ pub fn de_opt_vec_int<'de, T: LenientInt, D: Deserializer<'de>>(
     d.deserialize_option(V(PhantomData))
 }
 
+// ── 可选表（struct）─────────────────────────────────────────────
+
+/// 宽松「可选表」：`null` / `false` / `0` 一律当作**未设置**（`None`）。
+///
+/// 背景（游戏数据的事实）：Lua 里把可选表字段「关掉」的常见写法是直接赋 `0` 或 `false`。
+/// 实测样本（casting_ladle 0.2.1 的 `data-updates.lua` 第 6 行，注释写的是「关闭熔炉自带产能」）：
+/// ```lua
+/// data.raw["assembling-machine"]["foundry"].effect_receiver = 0
+/// ```
+/// 游戏本体照常加载（2.1.17 实测：该 mod 正常载入、日志无告警），并把这种**非表值**
+/// 当作「该字段没设置」——熔炉于是拿到 `effect_receiver` 的默认值（没有自带产能），
+/// 与该 mod 注释的意图一致。
+///
+/// serde 默认会在 `Option<EffectReceiver>` 上尝试把 `0` 解析成结构体，报
+/// `invalid type: integer 0, expected struct EffectReceiver`；而我们的加载器
+/// **任一字段失败即整体失败**，于是一个字段的写法差异拖垮全部 5024 个原型。
+/// 这里按游戏语义归一，只针对可选表字段。
+///
+/// 放宽的只有「零值」三兄弟（`null` / `false` / `0`）：`true`、非零数字、字符串、
+/// 数组仍然走严格解析并报出准确错误——不把真正的数据问题吞掉。
+///
+/// `#[serde(deserialize_with = "crate::lenient::de_opt_struct_lenient")]`
+pub fn de_opt_struct_lenient<'de, T: Deserialize<'de>, D: Deserializer<'de>>(
+    d: D,
+) -> Result<Option<T>, D::Error> {
+    struct V<T>(PhantomData<T>);
+    impl<'de, T: Deserialize<'de>> Visitor<'de> for V<T> {
+        type Value = Option<T>;
+        fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            f.write_str("一个可选的表（null / false / 0 视为未设置）")
+        }
+        fn visit_unit<E: Error>(self) -> Result<Option<T>, E> {
+            Ok(None)
+        }
+        fn visit_none<E: Error>(self) -> Result<Option<T>, E> {
+            Ok(None)
+        }
+        fn visit_some<D2: Deserializer<'de>>(self, d: D2) -> Result<Option<T>, D2::Error> {
+            d.deserialize_any(V(PhantomData))
+        }
+        fn visit_bool<E: Error>(self, v: bool) -> Result<Option<T>, E> {
+            if v {
+                Err(E::custom(
+                    "期望一个表，实际是 true；只有 false / 0 / null 表示「未设置」",
+                ))
+            } else {
+                Ok(None)
+            }
+        }
+        fn visit_i64<E: Error>(self, v: i64) -> Result<Option<T>, E> {
+            if v == 0 {
+                Ok(None)
+            } else {
+                Err(E::custom(format!(
+                    "期望一个表，实际是整数 {v}；只有 0 表示「未设置」"
+                )))
+            }
+        }
+        fn visit_u64<E: Error>(self, v: u64) -> Result<Option<T>, E> {
+            if v == 0 {
+                Ok(None)
+            } else {
+                Err(E::custom(format!(
+                    "期望一个表，实际是整数 {v}；只有 0 表示「未设置」"
+                )))
+            }
+        }
+        fn visit_f64<E: Error>(self, v: f64) -> Result<Option<T>, E> {
+            if v == 0.0 {
+                Ok(None)
+            } else {
+                Err(E::custom(format!(
+                    "期望一个表，实际是数字 {v}；只有 0 表示「未设置」"
+                )))
+            }
+        }
+        fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<Option<T>, A::Error> {
+            T::deserialize(MapAccessDeserializer::new(map)).map(Some)
+        }
+    }
+    d.deserialize_option(V(PhantomData))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -294,12 +379,72 @@ mod tests {
             names: Option<Vec<String>>,
             #[serde(deserialize_with = "crate::lenient::de_vec_int")]
             amounts: Vec<i32>,
+            #[serde(deserialize_with = "crate::lenient::de_opt_struct_lenient")]
+            limits: Option<Limits>,
         }
-        let s: Sample =
-            serde_json::from_str(r#"{"count": 3.75, "names": {}, "amounts": [1.9, -2.9]}"#)
-                .unwrap();
+        let s: Sample = serde_json::from_str(
+            r#"{"count": 3.75, "names": {}, "amounts": [1.9, -2.9], "limits": 0}"#,
+        )
+        .unwrap();
         assert_eq!(s.count, 3);
         assert_eq!(s.names, Some(vec![]));
         assert_eq!(s.amounts, vec![1, -2]);
+        assert!(s.limits.is_none());
+    }
+
+    #[derive(serde::Deserialize, Debug, Default)]
+    #[serde(default)]
+    struct Limits {
+        low: f64,
+        high: f64,
+    }
+
+    fn parse_limits(json: &str) -> Result<Option<Limits>, serde_json::Error> {
+        #[derive(serde::Deserialize, Debug, Default)]
+        #[serde(default)]
+        struct Holder {
+            #[serde(deserialize_with = "crate::lenient::de_opt_struct_lenient")]
+            limits: Option<Limits>,
+        }
+        serde_json::from_str::<Holder>(json).map(|h| h.limits)
+    }
+
+    /// 真实样本：mod 写 `effect_receiver = 0` 表示「关掉这个可选表」。
+    #[test]
+    fn zero_false_and_null_all_mean_unset() {
+        assert!(parse_limits(r#"{"limits": 0}"#).unwrap().is_none());
+        assert!(parse_limits(r#"{"limits": 0.0}"#).unwrap().is_none());
+        assert!(parse_limits(r#"{"limits": false}"#).unwrap().is_none());
+        assert!(parse_limits(r#"{"limits": null}"#).unwrap().is_none());
+        assert!(parse_limits(r#"{}"#).unwrap().is_none());
+        // 空表是「设置了一个空表」，不是「未设置」
+        let empty = parse_limits(r#"{"limits": {}}"#).unwrap().unwrap();
+        assert_eq!((empty.low, empty.high), (0.0, 0.0));
+    }
+
+    #[test]
+    fn real_table_is_still_parsed() {
+        let limits = parse_limits(r#"{"limits": {"low": -0.8, "high": 1000}}"#)
+            .unwrap()
+            .expect("表应被解析为 Some");
+        assert_eq!((limits.low, limits.high), (-0.8, 1000.0));
+    }
+
+    /// 非零值、`true`、字符串、数组仍必须报错：这些不是「未设置」的写法。
+    #[test]
+    fn non_zero_values_still_fail_loudly() {
+        for json in [
+            r#"{"limits": 5}"#,
+            r#"{"limits": true}"#,
+            r#"{"limits": "x"}"#,
+            r#"{"limits": [1, 2]}"#,
+        ] {
+            let err = parse_limits(json).expect_err(json);
+            let text = err.to_string();
+            assert!(
+                text.contains("表") || text.contains("expected"),
+                "{json} 的错误信息应说明期望一个表：{text}"
+            );
+        }
     }
 }
