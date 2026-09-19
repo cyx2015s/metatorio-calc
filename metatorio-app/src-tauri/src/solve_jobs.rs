@@ -142,9 +142,10 @@ impl<R: Clone + Send + 'static> SolveJobs<R> {
         let mut round = 0usize;
         loop {
             if let Some(cached) = &slot.last
-                && cached.matches(&snapshot) {
-                    return Ok(cached.result.clone());
-                }
+                && cached.matches(&snapshot)
+            {
+                return Ok(cached.result.clone());
+            }
             let result = {
                 let task_snapshot = snapshot.clone();
                 let compute = compute.clone();

@@ -230,7 +230,7 @@ mod tests {
             "METATORIO_HEADLESS",
             "METATORIO_SOLVE_TIMEOUT_MS",
         ] {
-            std::env::remove_var(key);
+            unsafe { std::env::remove_var(key) };
         }
 
         // 1) 默认值。
@@ -271,13 +271,15 @@ mod tests {
         assert_eq!(cli.solve_timeout_ms, Some(5000));
 
         // 3) 环境变量作为回退（旧用法继续有效）。
-        std::env::set_var("METATORIO_MCP_PORT", "8801");
-        std::env::set_var("METATORIO_MCP_BIND", "192.168.1.99");
-        std::env::set_var("METATORIO_MCP_ALLOW_HOSTS", "a.local,b.local");
-        std::env::set_var("METATORIO_MCP_TOOLS", "auto_plan,dispatch");
-        std::env::set_var("METATORIO_MCP_TOKEN", "from-env");
-        std::env::set_var("METATORIO_HEADLESS", "true");
-        std::env::set_var("METATORIO_SOLVE_TIMEOUT_MS", "7000");
+        unsafe {
+            std::env::set_var("METATORIO_MCP_PORT", "8801");
+            std::env::set_var("METATORIO_MCP_BIND", "192.168.1.99");
+            std::env::set_var("METATORIO_MCP_ALLOW_HOSTS", "a.local,b.local");
+            std::env::set_var("METATORIO_MCP_TOOLS", "auto_plan,dispatch");
+            std::env::set_var("METATORIO_MCP_TOKEN", "from-env");
+            std::env::set_var("METATORIO_HEADLESS", "true");
+            std::env::set_var("METATORIO_SOLVE_TIMEOUT_MS", "7000");
+        }
         let cli = Cli::try_parse_from(["metatorio-app"]).unwrap();
         assert_eq!(cli.mcp_port, 8801, "未给 CLI 时应回退到环境变量");
         assert_eq!(cli.mcp_bind, "192.168.1.99");
@@ -306,7 +308,7 @@ mod tests {
         assert_eq!(cli.mcp_token.as_deref(), Some("from-env"));
 
         // 5) 空 token = 不鉴权（main 里的 filter 把空串变成 None）。
-        std::env::set_var("METATORIO_MCP_TOKEN", "");
+        unsafe { std::env::set_var("METATORIO_MCP_TOKEN", "") };
         let cli = Cli::try_parse_from(["metatorio-app"]).unwrap();
         assert_eq!(cli.mcp_token.filter(|token| !token.trim().is_empty()), None);
 
@@ -319,7 +321,7 @@ mod tests {
             "METATORIO_HEADLESS",
             "METATORIO_SOLVE_TIMEOUT_MS",
         ] {
-            std::env::remove_var(key);
+            unsafe { std::env::remove_var(key) };
         }
     }
 }

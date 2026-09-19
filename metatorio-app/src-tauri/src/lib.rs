@@ -912,9 +912,10 @@ fn register_context_files(
     // 翻译：合并后的 `{category}/{name}` 映射写入 locale.json（id 只由
     // dump 内容决定，翻译变化不影响上下文 id；缺失/历史缓存则补写）。
     if !locale_path.is_file()
-        && let Some(locale_raw) = locale_raw {
-            let _ = std::fs::write(&locale_path, locale_raw);
-        }
+        && let Some(locale_raw) = locale_raw
+    {
+        let _ = std::fs::write(&locale_path, locale_raw);
+    }
     // 图标：新上下文，或历史注册时缺图标（早期路径 bug 留下的缓存）都要处理——
     // 重新导出同内容时 id 相同、注册被跳过，但图标仍需补齐。
     //
@@ -1001,65 +1002,64 @@ async fn register_context_and_activate(
 ) -> Result<ContextInfo, String> {
     let (id, needs_icons) =
         register_context_files(state, name, game_version, mods, raw, locale_raw, &icon)?;
-    if needs_icons
-        && let IconSource::Render { game_root, mod_dir } = &icon {
-            let icon_root = {
-                let registry = state
-                    .contexts
-                    .lock()
-                    .map_err(|_| "contexts 锁损坏".to_string())?;
-                registry.icon_root(&id)
-            };
-            // 渲染要解码/编码几千张 PNG（py 规模更久），绝不占着调用线程。
-            // 只把普通数据搬进阻塞任务（dump 复制一份，避免把借用带过 await）。
-            let dump = raw.to_vec();
-            let game_root = game_root.clone();
-            let mods = mod_dir.clone();
-            let render_root = icon_root.clone();
-            let render = tauri::async_runtime::spawn_blocking(move || {
-                render_icons_into(&dump, &render_root, &game_root, mods.as_deref())
-            })
-            .await
-            .map_err(|error| format!("图标渲染任务失败: {error}"))?;
-            match render {
-                Ok((report, utility)) => {
-                    eprintln!(
-                        "图标渲染完成：写出 {} 张（其中按官方规则推导 {} 张；{}），无图标定义 {}、\
+    if needs_icons && let IconSource::Render { game_root, mod_dir } = &icon {
+        let icon_root = {
+            let registry = state
+                .contexts
+                .lock()
+                .map_err(|_| "contexts 锁损坏".to_string())?;
+            registry.icon_root(&id)
+        };
+        // 渲染要解码/编码几千张 PNG（py 规模更久），绝不占着调用线程。
+        // 只把普通数据搬进阻塞任务（dump 复制一份，避免把借用带过 await）。
+        let dump = raw.to_vec();
+        let game_root = game_root.clone();
+        let mods = mod_dir.clone();
+        let render_root = icon_root.clone();
+        let render = tauri::async_runtime::spawn_blocking(move || {
+            render_icons_into(&dump, &render_root, &game_root, mods.as_deref())
+        })
+        .await
+        .map_err(|error| format!("图标渲染任务失败: {error}"))?;
+        match render {
+            Ok((report, utility)) => {
+                eprintln!(
+                    "图标渲染完成：写出 {} 张（其中按官方规则推导 {} 张；{}），无图标定义 {}、\
                          推导失败 {}、缺文件 {}、解码失败 {}",
-                        report.written,
-                        report.written_derived,
-                        report
-                            .by_type
-                            .iter()
-                            .map(|(type_, count)| format!("{type_} {count}"))
-                            .collect::<Vec<_>>()
-                            .join("、"),
-                        report.no_icon,
-                        report.derived_missing,
-                        report.missing_source,
-                        report.decode_failed
-                    );
-                    eprintln!(
-                        "非原型图标（utility-sprites）：写出 {} 张，缺文件 {}、解码失败 {}、\
+                    report.written,
+                    report.written_derived,
+                    report
+                        .by_type
+                        .iter()
+                        .map(|(type_, count)| format!("{type_} {count}"))
+                        .collect::<Vec<_>>()
+                        .join("、"),
+                    report.no_icon,
+                    report.derived_missing,
+                    report.missing_source,
+                    report.decode_failed
+                );
+                eprintln!(
+                    "非原型图标（utility-sprites）：写出 {} 张，缺文件 {}、解码失败 {}、\
                          形态不支持 {}",
-                        utility.written,
-                        utility.missing_source,
-                        utility.decode_failed,
-                        utility.unsupported
-                    );
-                    if report.written == 0 && utility.written == 0 {
-                        // 一张都没渲染出来：别留一个空目录冒充「有图标」。
-                        let _ = std::fs::remove_dir_all(&icon_root);
-                    }
-                }
-                // 图标是 best-effort：渲染失败不挡上下文注册，但必须说出来，
-                // 并且把空目录收掉（`icon_root` 不存在 = 前端用占位图标）。
-                Err(error) => {
-                    eprintln!("图标渲染失败（该上下文将没有图标）: {error}");
+                    utility.written,
+                    utility.missing_source,
+                    utility.decode_failed,
+                    utility.unsupported
+                );
+                if report.written == 0 && utility.written == 0 {
+                    // 一张都没渲染出来：别留一个空目录冒充「有图标」。
                     let _ = std::fs::remove_dir_all(&icon_root);
                 }
             }
+            // 图标是 best-effort：渲染失败不挡上下文注册，但必须说出来，
+            // 并且把空目录收掉（`icon_root` 不存在 = 前端用占位图标）。
+            Err(error) => {
+                eprintln!("图标渲染失败（该上下文将没有图标）: {error}");
+                let _ = std::fs::remove_dir_all(&icon_root);
+            }
         }
+    }
     ensure_context_loaded_offlock(state, &id).await?;
     with_runtime(state, |runtime| {
         runtime.set_active_context(Some(id.clone()));
@@ -1639,9 +1639,10 @@ fn icon(
     for candidate in candidates {
         let path = cache_root.join(candidate);
         if path.is_file()
-            && let Ok(bytes) = std::fs::read(path) {
-                return Some(bytes);
-            }
+            && let Ok(bytes) = std::fs::read(path)
+        {
+            return Some(bytes);
+        }
     }
     None
 }
@@ -1861,16 +1862,17 @@ pub(crate) fn resolve_index_entry(
                     best = Some(best.map_or(distance, |current: usize| current.min(distance)));
                 }
                 if let Some(distance) = best
-                    && distance <= max_distance {
-                        typo.push((
-                            (
-                                distance,
-                                typo_kind_rank(&entry.kind),
-                                entry.localized_name.chars().count(),
-                            ),
-                            resolved(entry, "typo", Some(distance)),
-                        ));
-                    }
+                    && distance <= max_distance
+                {
+                    typo.push((
+                        (
+                            distance,
+                            typo_kind_rank(&entry.kind),
+                            entry.localized_name.chars().count(),
+                        ),
+                        resolved(entry, "typo", Some(distance)),
+                    ));
+                }
             }
             // 排序键 = (编辑距离, kind 优先级, 本地化名长度)，同键按名字稳定收尾。
             typo.sort_by(|left, right| left.0.cmp(&right.0).then(left.1.name.cmp(&right.1.name)));
@@ -3680,9 +3682,10 @@ where
     for command in commands {
         let outcome = execute(command).await;
         if solve.is_none()
-            && let Some(metatorio_runtime::CommandEffect::Solve(result)) = outcome.effect {
-                solve = Some(result);
-            }
+            && let Some(metatorio_runtime::CommandEffect::Solve(result)) = outcome.effect
+        {
+            solve = Some(result);
+        }
         errors.extend(outcome.errors);
         if let Ok(value) = serde_json::to_value(command) {
             serialized.push(value);

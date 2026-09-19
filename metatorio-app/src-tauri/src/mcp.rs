@@ -309,10 +309,11 @@ impl MetatorioMcp {
             // `recompute` 与 `mechanic` 同时给出时，求解结果也算出来了，别丢掉。
             if let Some(mut solve) = solve {
                 if let Some(status) = solve.get_mut("status").and_then(|s| s.as_object_mut())
-                    && let Some(solved) = status.get_mut("solved").and_then(|s| s.as_object_mut()) {
-                        report.page_key(solved, "mechanics", "solve.mechanics", page);
-                        report.page_key(solved, "flows", "solve.flows", page);
-                    }
+                    && let Some(solved) = status.get_mut("solved").and_then(|s| s.as_object_mut())
+                {
+                    report.page_key(solved, "mechanics", "solve.mechanics", page);
+                    report.page_key(solved, "flows", "solve.flows", page);
+                }
                 object.insert("solve".to_string(), solve);
             }
             object.insert(
@@ -375,15 +376,17 @@ impl MetatorioMcp {
         }
         // 工厂层可选带上重算结果：它的 mechanics/flows 同样按 page 截断。
         if let Some(solve) = solve
-            && let Some(object) = value.as_object_mut() {
-                let mut solve = solve;
-                if let Some(status) = solve.get_mut("status").and_then(|s| s.as_object_mut())
-                    && let Some(solved) = status.get_mut("solved").and_then(|s| s.as_object_mut()) {
-                        report.page_key(solved, "mechanics", "solve.mechanics", page);
-                        report.page_key(solved, "flows", "solve.flows", page);
-                    }
-                object.insert("solve".to_string(), solve);
+            && let Some(object) = value.as_object_mut()
+        {
+            let mut solve = solve;
+            if let Some(status) = solve.get_mut("status").and_then(|s| s.as_object_mut())
+                && let Some(solved) = status.get_mut("solved").and_then(|s| s.as_object_mut())
+            {
+                report.page_key(solved, "mechanics", "solve.mechanics", page);
+                report.page_key(solved, "flows", "solve.flows", page);
             }
+            object.insert("solve".to_string(), solve);
+        }
         // 顶层补充 revision 与分页元信息：版本便于判断新鲜度，page 说明截断情况。
         if let serde_json::Value::Object(object) = &mut value {
             object.insert(
@@ -647,9 +650,10 @@ impl MetatorioMcp {
             "poll": poll,
         });
         if let Some(request_id) = params.request_id
-            && let Ok(mut cache) = app.state::<AppState>().dispatch_cache.lock() {
-                cache.insert(request_id, payload.clone(), false);
-            }
+            && let Ok(mut cache) = app.state::<AppState>().dispatch_cache.lock()
+        {
+            cache.insert(request_id, payload.clone(), false);
+        }
         Ok(CallToolResult::structured(payload))
     }
 
@@ -963,10 +967,11 @@ async fn dispatch_message<R: Runtime>(
     let mut report = PageReport::default();
     let solve = solve.map(|mut solve| {
         if let Some(status) = solve.get_mut("status").and_then(|s| s.as_object_mut())
-            && let Some(solved) = status.get_mut("solved").and_then(|s| s.as_object_mut()) {
-                report.page_key(solved, "mechanics", "solve.mechanics", page);
-                report.page_key(solved, "flows", "solve.flows", page);
-            }
+            && let Some(solved) = status.get_mut("solved").and_then(|s| s.as_object_mut())
+        {
+            report.page_key(solved, "mechanics", "solve.mechanics", page);
+            report.page_key(solved, "flows", "solve.flows", page);
+        }
         solve
     });
     // 协同：文档变了就通知 GUI 重新拉取。
@@ -1000,9 +1005,10 @@ async fn dispatch_message<R: Runtime>(
     // 重试，否则重试会一直回放失败。
     if !is_error
         && let Some(request_id) = request_id
-            && let Ok(mut cache) = app.state::<AppState>().dispatch_cache.lock() {
-                cache.insert(request_id, payload.clone(), false);
-            }
+        && let Ok(mut cache) = app.state::<AppState>().dispatch_cache.lock()
+    {
+        cache.insert(request_id, payload.clone(), false);
+    }
     let mut result = CallToolResult::structured(payload);
     if is_error {
         result.is_error = Some(true);
