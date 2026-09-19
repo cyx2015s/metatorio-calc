@@ -207,6 +207,18 @@
     return parts;
   }
 
+  /** keyed each 的键：**不能只用物品名**。
+   *
+   * 同一个配方可以多次产出同名物品（同名不同 `quality_min` 的概率产物），
+   * 实测反例：mod 的 `lead-acid-accumulator` / `lithium-accumulator` 各有 5 条
+   * `accumulator`（1 条必出 + uncommon/rare/epic/legendary 各一条）。
+   * Svelte 5 的 keyed each 会在运行时对键查重并抛 `each_key_duplicate`，
+   * 异常发生在卡片渲染过程中 → 整张卡什么都不显示（悬停无信息）。
+   * 序号兜底：列表每次悬停都从 detail 重算，位置即身份。 */
+  function flowKey(flow: FlowAmount, index: number): string {
+    return `${flow.kind}/${flow.name}/${flow.quality_min ?? ""}/${flow.quality_max ?? ""}#${index}`;
+  }
+
   // 溢出修正：卡片渲染后若超出视口右下，整体平移回屏。
   let cardEl = $state<HTMLDivElement | null>(null);
   let shift = $state({ dx: 0, dy: 0 });
@@ -386,7 +398,7 @@
         <div class="hc-flow">
           <span class="hc-label">原料</span>
           <div class="hc-flows">
-            {#each detail.ingredients as flow (flow.name)}
+            {#each detail.ingredients as flow, i (flowKey(flow, i))}
               <span class="hc-flow-item" title={flow.name}>
                 <Icon type={flow.kind} name={flow.name} size={20} />
                 <span class="hc-flow-copy">
@@ -402,7 +414,7 @@
         <div class="hc-flow">
           <span class="hc-label">产物</span>
           <div class="hc-flows">
-            {#each detail.results as flow (flow.name)}
+            {#each detail.results as flow, i (flowKey(flow, i))}
               <span class="hc-flow-item" title={flow.name}>
                 <Icon type={flow.kind} name={flow.name} size={20} />
                 <span class="hc-flow-copy">

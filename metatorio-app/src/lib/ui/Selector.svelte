@@ -541,7 +541,7 @@
           <div class="subgroup">
             <div class="sg-label">{section.subgroup}</div>
             <div class="sg-items">
-              {#each section.items as entry (entry.name)}
+              {#each section.items as entry (entry.kind + "/" + entry.name)}
                 <button
                   class="icon-btn"
                   class:active={selected === entry.name}
