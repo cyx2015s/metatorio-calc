@@ -34,7 +34,7 @@ pub fn item_tags(store: &PrototypeStore, name: &str) -> Vec<String> {
     {
         tags.push("plantable".to_string());
     }
-    if !item.fuel_category.is_empty() || item.fuel_value.is_some() {
+    if !item.fuel_categories.is_empty() || item.fuel_value.is_some() {
         tags.push("fuel".to_string());
     }
     if !item.rocket_launch_products.is_empty() {
@@ -44,29 +44,29 @@ pub fn item_tags(store: &PrototypeStore, name: &str) -> Vec<String> {
 }
 
 /// 物品燃料信息（燃料类别 + 热值；非燃料 → 空/None）。
-pub fn item_fuel_info(store: &PrototypeStore, name: &str) -> (String, Option<f64>) {
+pub fn item_fuel_info(store: &PrototypeStore, name: &str) -> (Vec<String>, Option<f64>) {
     let Some(item) = store
         .get(PrototypeGroup::Item, name)
         .and_then(|record| record.component::<ItemComponent>())
     else {
-        return (String::new(), None);
+        return (Vec::new(), None);
     };
     (
-        item.fuel_category.clone(),
+        item.fuel_categories.clone(),
         item.fuel_value.map(|v| v.amount),
     )
 }
 
 /// 流体燃料信息（热值 >0 才有；类别为空——流体按热值视为燃料）。
-pub fn fluid_fuel_info(store: &PrototypeStore, name: &str) -> (String, Option<f64>) {
+pub fn fluid_fuel_info(store: &PrototypeStore, name: &str) -> (Vec<String>, Option<f64>) {
     let Some(fluid) = store
         .get(PrototypeGroup::Fluid, name)
         .and_then(|record| record.component::<FluidComponent>())
     else {
-        return (String::new(), None);
+        return (Vec::new(), None);
     };
     let value = fluid.fuel_value().amount;
-    (String::new(), if value > 0.0 { Some(value) } else { None })
+    (Vec::new(), if value > 0.0 { Some(value) } else { None })
 }
 
 /// 流体的机制标签：fluid-fuel（有热值可燃烧）/ fluid-heat（有比热容可提热）。

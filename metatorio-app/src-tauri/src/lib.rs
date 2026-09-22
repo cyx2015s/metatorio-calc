@@ -342,7 +342,7 @@ pub struct IndexEntry {
     /// mining-machine→resource_categories、resource→category。
     pub categories: Vec<String>,
     /// 物品燃料类别（非燃料物品为空串）；供前端燃料选择筛选。
-    pub fuel_category: String,
+    pub fuel_categories: Vec<String>,
     /// 物品/流体燃料热值（焦耳；非燃料为 null）；供前端燃料选择筛选。
     pub fuel_value_j: Option<f64>,
     /// 科技等级上限：`U32(n)` → `Some(n)`，`Infinite` → `None`（无限）。
@@ -420,7 +420,7 @@ pub struct PrototypeDetail {
     /// 燃料能量（焦耳）。
     pub fuel_value_j: Option<f64>,
     /// 燃料类别（如 "chemical"）。
-    pub fuel_category: String,
+    pub fuel_categories: Vec<String>,
     /// 燃烧产物。
     pub burnt_result: String,
     /// 变质产物。
@@ -2358,7 +2358,7 @@ fn suggest_for_flow(store: &PrototypeStore, flow: DualVar) -> Vec<Suggestion> {
                 if item.fuel_value().amount > 0.0
                     && category
                         .iter()
-                        .any(|candidate| candidate == &item.fuel_category)
+                        .any(|candidate| item.fuel_categories.contains(candidate))
                 {
                     push("item-fuel", &record.name, "producer");
                 }
@@ -2445,12 +2445,12 @@ fn catalog_index_from_store(
                     } else {
                         Vec::new()
                     };
-                    let (fuel_category, fuel_value_j) = if kind == "item" {
+                    let (fuel_categories, fuel_value_j) = if kind == "item" {
                         item_fuel_info(store, name)
                     } else if kind == "fluid" {
                         fluid_fuel_info(store, name)
                     } else {
-                        (String::new(), None)
+                        (Vec::new(), None)
                     };
                     let technology_max_level = if kind == "technology" {
                         store
@@ -2474,7 +2474,7 @@ fn catalog_index_from_store(
                         icon_type: icon_type.to_string(),
                         module_slots: None,
                         categories,
-                        fuel_category,
+                        fuel_categories,
                         fuel_value_j,
                         technology_max_level,
                         technology_base_level,
@@ -2540,7 +2540,7 @@ fn catalog_index_from_store(
                         icon_type: "entity".to_string(),
                         module_slots: slots,
                         categories,
-                        fuel_category: String::new(),
+                        fuel_categories: Vec::new(),
                         fuel_value_j: None,
                         technology_max_level: None,
                         technology_base_level: 0,
@@ -2574,7 +2574,7 @@ fn catalog_index_from_store(
                         } else {
                             vec![module.category.clone()]
                         },
-                        fuel_category: String::new(),
+                        fuel_categories: Vec::new(),
                         fuel_value_j: None,
                         technology_max_level: None,
                         technology_base_level: 0,
@@ -2608,7 +2608,7 @@ fn catalog_index_from_store(
                         icon_type: "entity".to_string(),
                         module_slots: None,
                         categories,
-                        fuel_category: String::new(),
+                        fuel_categories: Vec::new(),
                         fuel_value_j: None,
                         technology_max_level: None,
                         technology_base_level: 0,
@@ -2629,7 +2629,7 @@ fn catalog_index_from_store(
             icon_type: "quality".to_string(),
             module_slots: None,
             categories: Vec::new(),
-            fuel_category: String::new(),
+            fuel_categories: Vec::new(),
             fuel_value_j: None,
             technology_max_level: None,
             technology_base_level: 0,
@@ -2686,7 +2686,7 @@ fn prototype_detail(
     if let Some(item) = record.component::<ItemComponent>() {
         detail.stack_size = Some(f64::from(item.stack_size));
         detail.fuel_value_j = item.fuel_value.map(|value| value.amount);
-        detail.fuel_category = item.fuel_category.clone();
+        detail.fuel_categories = item.fuel_categories.clone();
         detail.burnt_result = item.burnt_result.clone();
         detail.spoil_result = item.spoil_result.clone().unwrap_or_default();
         detail.spoil_ticks = item.spoil_ticks;
@@ -2756,7 +2756,7 @@ fn prototype_detail(
     }
     if let Some(burner_gen) = record.component::<BurnerGeneratorComponent>() {
         detail.max_power_output_j = Some(burner_gen.max_power_output.amount);
-        detail.fuel_category = burner_gen.burner.fuel_categories.join(", ");
+        detail.fuel_categories = burner_gen.burner.fuel_categories.clone();
         detail.machine_energy_source = Some("burner".to_string());
         detail.burner_fuel_categories = burner_gen.burner.fuel_categories.clone();
     }
@@ -4559,7 +4559,7 @@ mod tests {
             icon_type: String::new(),
             module_slots: None,
             categories: Vec::new(),
-            fuel_category: String::new(),
+            fuel_categories: Vec::new(),
             fuel_value_j: None,
             technology_max_level: None,
             technology_base_level: 0,
@@ -4617,7 +4617,7 @@ mod tests {
             icon_type: String::new(),
             module_slots: None,
             categories: Vec::new(),
-            fuel_category: String::new(),
+            fuel_categories: Vec::new(),
             fuel_value_j: None,
             technology_max_level: None,
             technology_base_level: 0,

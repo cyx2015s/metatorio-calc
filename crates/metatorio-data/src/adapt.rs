@@ -30,26 +30,37 @@ use serde_json::Value;
 /// 无 recipe 组或已是 2.1 形态返回 false。调用方据此决定是否克隆改写
 /// （避免对 2.1 dump 做无谓的深拷贝）。
 pub fn needs_adaptation(dump: &Value) -> bool {
-    let Some(recipes) = dump.get("recipe").and_then(Value::as_object) else {
-        return false;
-    };
-    recipes.values().any(|recipe| {
-        let Some(obj) = recipe.as_object() else {
-            return false;
-        };
-        if obj.contains_key("category") || obj.contains_key("additional_categories") {
-            return true;
-        }
-        obj.get("results")
-            .and_then(Value::as_array)
-            .is_some_and(|results| {
-                results.iter().any(|product| {
-                    product
-                        .as_object()
-                        .is_some_and(|p| p.contains_key("probability"))
+    if let Some(recipes) = dump.get("recipe").and_then(Value::as_object)
+        && recipes.values().any(|recipe| {
+            let Some(obj) = recipe.as_object() else {
+                return false;
+            };
+            if obj.contains_key("category") || obj.contains_key("additional_categories") {
+                return true;
+            }
+            obj.get("results")
+                .and_then(Value::as_array)
+                .is_some_and(|results| {
+                    results.iter().any(|product| {
+                        product
+                            .as_object()
+                            .is_some_and(|p| p.contains_key("probability"))
+                    })
                 })
-            })
-    })
+        })
+    {
+        return true;
+    }
+
+    if let Some(items) = dump.get("item").and_then(Value::as_object)
+        && items.values().any(|item| {
+            item.as_object()
+                .is_some_and(|i| i.contains_key("fuel_category"))
+        })
+    {
+        return true;
+    }
+    false
 }
 
 /// 把 2.0 形态的 dump 规范化到 2.1 schema 可加载的形态。
@@ -64,6 +75,11 @@ pub fn normalize_2_0_dump(dump: &mut Value) {
         for recipe in recipes.values_mut() {
             adapt_recipe_categories(recipe);
             adapt_recipe_product_probability(recipe);
+        }
+    }
+    if let Some(items) = root.get_mut("item").and_then(Value::as_object_mut) {
+        for item in items.values_mut() {
+            adapt_item_fuel_categories(item);
         }
     }
 }
@@ -150,6 +166,29 @@ pub fn adapt_recipe_product_probability(recipe: &mut Value) {
         }
         if let Some(probability) = product_obj.remove("probability") {
             product_obj.insert("independent_probability".to_string(), probability);
+        }
+    }
+}
+
+pub fn adapt_item_fuel_categories(item: &mut Value) {
+    let Some(obj) = item.as_object_mut() else {
+        return;
+    };
+    if obj.contains_key("fuel_categories") {
+        return; // 已是 2.1 形态
+    }
+    if let Some(fuel_category) = obj.remove("fuel_category") {
+        match fuel_category {
+            Value::String(category) => {
+                obj.insert(
+                    "fuel_categories".to_string(),
+                    Value::Array(vec![Value::String(category)]),
+                );
+            }
+            Value::Array(list) => {
+                obj.insert("fuel_categories".to_string(), Value::Array(list));
+            }
+            _ => {}
         }
     }
 }
@@ -443,6 +482,40 @@ mod tests {
             Some(&["smelting".to_string(), "crafting".to_string()][..]),
             "categories 应为合并结果: {:?}",
             component.categories
+        );
+    }
+
+    #[test]
+    fn normalized_fuel_categories_loads() {
+        let mut dump = serde_json::json!({
+            "item": {
+                "coal": { "type": "item", "name": "coal", "stack_size": 50, "fuel_category": "chemical" },
+                "wood": { "type": "item", "name": "wood", "stack_size": 100, "fuel_category": "biological" }
+            }
+        });
+        normalize_2_0_dump(&mut dump);
+        let store = crate::store::PrototypeStore::load(&dump).expect("规范化后应可加载");
+        let coal = store
+            .get(crate::store::PrototypeGroup::Item, "coal")
+            .expect("煤炭应在仓库中");
+        let coal_component = coal
+            .component::<crate::generated_components::ItemComponent>()
+            .expect("煤炭组件");
+        assert_eq!(
+            &coal_component.fuel_categories,
+            &["chemical".to_string()],
+            "煤炭 fuel_categories 应为单元素数组"
+        );
+        let wood = store
+            .get(crate::store::PrototypeGroup::Item, "wood")
+            .expect("木材应在仓库中");
+        let wood_component = wood
+            .component::<crate::generated_components::ItemComponent>()
+            .expect("木材组件");
+        assert_eq!(
+            &wood_component.fuel_categories,
+            &["biological".to_string()],
+            "木材 fuel_categories 应为原数组"
         );
     }
 }

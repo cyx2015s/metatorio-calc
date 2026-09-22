@@ -799,14 +799,14 @@ fn expand_item_fuel<C: Clone>(
         return;
     };
     let fuel_value = item.fuel_value().amount;
-    if fuel_value <= 0.0 || item.fuel_category.is_empty() {
+    if fuel_value <= 0.0 || item.fuel_categories.is_empty() {
         return;
     }
     let mut temp = TempFlow::new();
     temp.add(DualVar::Item(mechanic.item.clone()), -1.0);
     temp.add(
         DualVar::ItemFuel {
-            category: vec![item.fuel_category.clone()],
+            category: item.fuel_categories.clone(),
             has_burnt_result: !item.burnt_result.is_empty(),
         },
         fuel_value,
