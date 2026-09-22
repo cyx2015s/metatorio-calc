@@ -49,6 +49,7 @@
         return { type: "entity", name: entity.id, detailKind: "entity" };
       }
       if ("ItemFuel" in flow) return { type: "flow", name: "ItemFuel" };
+      if ("ItemFuelSupply" in flow) return { type: "flow", name: "ItemFuel" };
       if ("FluidFuel" in flow) return { type: "flow", name: "FluidFuel" };
       if ("FluidHeat" in flow) return { type: "flow", name: "FluidHeat" };
       if ("Pollution" in flow) return { type: "flow", name: "Pollution" };
@@ -66,7 +67,7 @@
   function isEnergyFlow(flow: DualVar): boolean {
     if (typeof flow === "string") return flow === "Electricity" || flow === "Heat";
     if (flow !== null && typeof flow === "object") {
-      return "FluidHeat" in flow || "FluidFuel" in flow || "ItemFuel" in flow;
+      return "FluidHeat" in flow || "FluidFuel" in flow || "ItemFuel" in flow || "ItemFuelSupply" in flow;
     }
     return false;
   }

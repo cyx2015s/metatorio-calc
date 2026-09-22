@@ -341,7 +341,7 @@ pub struct IndexEntry {
     /// 兼容性类别：machine→crafting_categories、recipe→categories、
     /// mining-machine→resource_categories、resource→category。
     pub categories: Vec<String>,
-    /// 物品燃料类别（非燃料物品为空串）；供前端燃料选择筛选。
+    /// 物品燃料类别（可多个；非燃料物品为空数组）；供前端燃料选择筛选。
     pub fuel_categories: Vec<String>,
     /// 物品/流体燃料热值（焦耳；非燃料为 null）；供前端燃料选择筛选。
     pub fuel_value_j: Option<f64>,
@@ -419,7 +419,7 @@ pub struct PrototypeDetail {
     pub stack_size: Option<f64>,
     /// 燃料能量（焦耳）。
     pub fuel_value_j: Option<f64>,
-    /// 燃料类别（如 "chemical"）。
+    /// 燃料类别（可多个，如 ["chemical"]）。
     pub fuel_categories: Vec<String>,
     /// 燃烧产物。
     pub burnt_result: String,
@@ -2350,7 +2350,7 @@ fn suggest_for_flow(store: &PrototypeStore, flow: DualVar) -> Vec<Suggestion> {
                 }
             }
         }
-        DualVar::ItemFuel { category, .. } => {
+        DualVar::ItemFuel { category, .. } | DualVar::ItemFuelSupply { category, .. } => {
             for record in store.group(PrototypeGroup::Item) {
                 let Some(item) = record.component::<ItemComponent>() else {
                     continue;
@@ -2402,7 +2402,7 @@ fn energy_source_kind(source: &metatorio_data::types::EnergySource) -> &'static 
 }
 
 /// Burner 能量源的燃料类别；非 burner 能量源返回空。供前端燃料选择筛选
-/// 物品的 `fuel_category`（配合 getDetail 返回）。
+/// burner 能量源的燃料类别（配合 getDetail 返回）。
 fn burner_fuel_categories_of(source: &metatorio_data::types::EnergySource) -> Vec<String> {
     match source {
         metatorio_data::types::EnergySource::Burner(burner) => burner.fuel_categories.clone(),

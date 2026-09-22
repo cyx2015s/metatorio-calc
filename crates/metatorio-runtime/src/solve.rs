@@ -1264,8 +1264,11 @@ fn solve_document(
 /// 1. 温度区间子类型：窄区间流可放宽为包含它的宽区间流（[T,T] ⊆ [T1,T2]）。
 /// 2. 定点温度互转：同种流体不同定点温度互转，消耗/产出对应 FluidHeat
 ///    平衡能量（加热消耗热量、冷却产出热量）。
-/// 3. 燃料子类型：无燃尽产物的燃料可提升为带燃尽产物的燃料——能接受
-///    带燃尽产物燃料的机器，自然也能接受无燃尽产物的燃料。
+/// 3. 燃料兼容：燃料物品的供给键（ItemFuelSupply，物品可声明多个类别）与
+///    burner 的需求键（ItemFuel，机器接受的类别集合）**有重叠**即生成零成本
+///    转换；带燃尽产物的燃料只能供给带燃尽产物物品栏的机器，无燃尽产物的
+///    燃料可供给任何机器。供给/需求分列两种 DualVar，转换严格单向，避免
+///    无关类别集合经中间键桥接。
 /// 4. filter 归并：带具体流体 filter 的 FluidHeat/FluidFuel 归并为空串
 ///    （"任意流体"）抽象流。
 ///
@@ -1378,73 +1381,60 @@ pub fn add_conversion_flows(
         }
     }
 
-    // 燃料子类型：false → true（无燃尽产物燃料可满足带燃尽产物机器）。
-    for key in seen.keys() {
-        if let DualVar::ItemFuel {
-            category,
-            has_burnt_result: false,
-        } = key
-        {
-            let mut flow = Flow::default();
-            flow.insert(
-                DualVar::ItemFuel {
-                    category: category.clone(),
-                    has_burnt_result: false,
-                },
-                -1.0,
-            );
-            flow.insert(
-                DualVar::ItemFuel {
-                    category: category.clone(),
-                    has_burnt_result: true,
-                },
-                1.0,
-            );
-            add_aux(flows, flow);
-        }
-    }
-
-    // 燃料类别子集转换：窄类别燃料可满足包含它的更多类别的机器需求
-    // （复刻流体温度区间子类型放宽）。如 coal(fuel_category=chemical) 可供给
-    // fuel_categories=(chemical, kr-vehicle-fuel, processed-chemical) 的锅炉。
-    // 类别集合以**精确顺序**的身份标识（ItemFuel 的身份就是 category Vec 本身），
-    // 故按出现的确切类别列表逐对生成 子集→超 集 的零成本转换。
+    // 燃料兼容：燃料物品的供给键（ItemFuelSupply，物品声明的类别集合）与
+    // burner 的需求键（ItemFuel，机器接受的类别集合）**只要有重叠**即兼容
+    // （factorio 2.1 起物品可声明多个燃料类别，与配方类似）。二者分列不同
+    // DualVar，转换因此严格单向（供给 → 需求），无关类别集合不会经中间键
+    // 互相桥接（重叠关系不可传递）。带燃尽产物的燃料只能供给带燃尽产物
+    // 物品栏的机器；无燃尽产物的燃料可供给任何机器。
     {
-        // 收集去重（精确向量相等）的燃料类别集合。
-        let mut category_sets: Vec<Vec<String>> = Vec::new();
+        let mut supplies: Vec<(Vec<String>, bool)> = Vec::new();
+        let mut demands: Vec<(Vec<String>, bool)> = Vec::new();
         for key in seen.keys() {
-            if let DualVar::ItemFuel { category, .. } = key
-                && !category.is_empty()
-                && !category_sets.contains(category)
-            {
-                category_sets.push(category.clone());
+            match key {
+                DualVar::ItemFuelSupply {
+                    category,
+                    has_burnt_result,
+                } if !category.is_empty()
+                    && !supplies.contains(&(category.clone(), *has_burnt_result)) =>
+                {
+                    supplies.push((category.clone(), *has_burnt_result));
+                }
+                DualVar::ItemFuel {
+                    category,
+                    has_burnt_result,
+                } if !category.is_empty()
+                    && !demands.contains(&(category.clone(), *has_burnt_result)) =>
+                {
+                    demands.push((category.clone(), *has_burnt_result));
+                }
+                _ => {}
             }
         }
-        let is_proper_subset =
-            |a: &Vec<String>, b: &Vec<String>| a.len() < b.len() && a.iter().all(|x| b.contains(x));
-        for s1 in &category_sets {
-            for s2 in &category_sets {
-                if s1 == s2 || !is_proper_subset(s1, s2) {
+        for (supply, supply_burnt) in &supplies {
+            for (demand, demand_burnt) in &demands {
+                if !supply.iter().any(|category| demand.contains(category)) {
                     continue;
                 }
-                for burnt in [false, true] {
-                    let mut flow = Flow::default();
-                    flow.insert(
-                        DualVar::ItemFuel {
-                            category: s1.clone(),
-                            has_burnt_result: burnt,
-                        },
-                        -1.0,
-                    );
-                    flow.insert(
-                        DualVar::ItemFuel {
-                            category: s2.clone(),
-                            has_burnt_result: burnt,
-                        },
-                        1.0,
-                    );
-                    add_aux(flows, flow);
+                if *supply_burnt && !*demand_burnt {
+                    continue;
                 }
+                let mut flow = Flow::default();
+                flow.insert(
+                    DualVar::ItemFuelSupply {
+                        category: supply.clone(),
+                        has_burnt_result: *supply_burnt,
+                    },
+                    -1.0,
+                );
+                flow.insert(
+                    DualVar::ItemFuel {
+                        category: demand.clone(),
+                        has_burnt_result: *demand_burnt,
+                    },
+                    1.0,
+                );
+                add_aux(flows, flow);
             }
         }
     }
@@ -3240,11 +3230,12 @@ mod tests {
         assert!(view.ignore);
     }
 
-    /// 燃料类别子集转换：单一化学燃料应能供给多类别（chemical + …）的锅炉。
-    /// 回归：KR/SE 里燃料使用者 fuel_categories 为多类别，煤炭 fuel_category
-    /// 只有 chemical，此前二者 ItemFuel 身份不相等 → 自动规划选不中燃煤发电。
+    /// 燃料兼容：燃料物品供给键（ItemFuelSupply，可多类别）与 burner 需求键
+    /// （ItemFuel）只要有重叠即可用。回归：KR/SE 里燃料使用者 fuel_categories
+    /// 为多类别，煤炭只有 chemical，此前二者 ItemFuel 身份不相等 → 自动规划
+    /// 选不中燃煤发电。
     #[test]
-    fn fuel_category_subset_conversion_allows_narrow_fuel() {
+    fn fuel_category_overlap_conversion_allows_multi_category_fuel() {
         let store = PrototypeStore::load(&serde_json::json!({})).expect("空 dump 应可加载");
         let narrow = vec!["chemical".to_string()];
         let wide = vec![
@@ -3253,7 +3244,7 @@ mod tests {
             "processed-chemical".to_string(),
         ];
         let mut flows = AIndexMap::default();
-        let fuel_var = ExpandedVarId {
+        let supply_var = ExpandedVarId {
             mechanic: MechanicId(1),
             variant: 0,
         };
@@ -3261,15 +3252,15 @@ mod tests {
             mechanic: MechanicId(2),
             variant: 0,
         };
-        let mut fuel_flow = Flow::default();
-        fuel_flow.insert(
-            DualVar::ItemFuel {
+        let mut supply_flow = Flow::default();
+        supply_flow.insert(
+            DualVar::ItemFuelSupply {
                 category: narrow.clone(),
                 has_burnt_result: false,
             },
             100.0,
         );
-        flows.insert(fuel_var, (fuel_flow, 1.0));
+        flows.insert(supply_var, (supply_flow, 1.0));
         let mut boiler_flow = Flow::default();
         boiler_flow.insert(
             DualVar::ItemFuel {
@@ -3281,7 +3272,7 @@ mod tests {
         flows.insert(boiler_var, (boiler_flow, 1.0));
         add_conversion_flows(&mut flows, &store, &Flow::default(), &Flow::default());
         let has_conversion = flows.values().any(|(flow, _)| {
-            flow.get(&DualVar::ItemFuel {
+            flow.get(&DualVar::ItemFuelSupply {
                 category: narrow.clone(),
                 has_burnt_result: false,
             })
@@ -3299,7 +3290,110 @@ mod tests {
         });
         assert!(
             has_conversion,
-            "应产出 化学 → 化学+kr-vehicle-fuel+processed-chemical 的零成本转换"
+            "单类别 chemical 供给应能供给 chemical + kr-vehicle-fuel + processed-chemical 的锅炉"
+        );
+    }
+
+    /// 多类别燃料（ItemFuelSupply 携带完整集合）与只接受其中一个类别的机器
+    /// 重叠即可兼容；与两个类别都不重叠的机器不兼容（重叠不可传递，供给与
+    /// 需求分列两种 DualVar 以避免经中间键桥接）。
+    #[test]
+    fn fuel_category_overlap_does_not_bridge_unrelated_categories() {
+        let store = PrototypeStore::load(&serde_json::json!({})).expect("空 dump 应可加载");
+        let ab = vec!["a".to_string(), "b".to_string()];
+        let a = vec!["a".to_string()];
+        let b = vec!["b".to_string()];
+        let supply = DualVar::ItemFuelSupply {
+            category: ab.clone(),
+            has_burnt_result: false,
+        };
+        let demand = |category: &Vec<String>| DualVar::ItemFuel {
+            category: category.clone(),
+            has_burnt_result: false,
+        };
+        let mut flows = AIndexMap::default();
+        let mut supply_flow = Flow::default();
+        supply_flow.insert(supply.clone(), 100.0);
+        flows.insert(
+            ExpandedVarId {
+                mechanic: MechanicId(1),
+                variant: 0,
+            },
+            (supply_flow, 1.0),
+        );
+        for (index, category) in [a.clone(), b.clone()].into_iter().enumerate() {
+            let mut flow = Flow::default();
+            flow.insert(demand(&category), -100.0);
+            flows.insert(
+                ExpandedVarId {
+                    mechanic: MechanicId(index as u64 + 2),
+                    variant: 0,
+                },
+                (flow, 1.0),
+            );
+        }
+        add_conversion_flows(&mut flows, &store, &Flow::default(), &Flow::default());
+        let has_edge = |to: &Vec<String>| {
+            flows.values().any(|(flow, _)| {
+                flow.get(&supply).copied().unwrap_or(0.0) < 0.0
+                    && flow.get(&demand(to)).copied().unwrap_or(0.0) > 0.0
+            })
+        };
+        assert!(has_edge(&a), "a+b 燃料应能供给只接受 a 的机器（重叠）");
+        assert!(has_edge(&b), "a+b 燃料应能供给只接受 b 的机器（重叠）");
+        let c = vec!["c".to_string()];
+        assert!(!has_edge(&c), "a+b 燃料不应供给只接受 c 的机器（无重叠）");
+    }
+
+    /// 带燃尽产物的燃料只能供给带燃尽产物物品栏的机器；无燃尽产物的燃料
+    /// 可供给任何机器。
+    #[test]
+    fn fuel_burnt_result_limits_compatibility() {
+        let store = PrototypeStore::load(&serde_json::json!({})).expect("空 dump 应可加载");
+        let category = vec!["chemical".to_string()];
+        let supply = |burnt: bool| DualVar::ItemFuelSupply {
+            category: category.clone(),
+            has_burnt_result: burnt,
+        };
+        let demand = |burnt: bool| DualVar::ItemFuel {
+            category: category.clone(),
+            has_burnt_result: burnt,
+        };
+        let mut flows = AIndexMap::default();
+        let mut supply_flow = Flow::default();
+        supply_flow.insert(supply(true), 100.0);
+        supply_flow.insert(supply(false), 100.0);
+        flows.insert(
+            ExpandedVarId {
+                mechanic: MechanicId(1),
+                variant: 0,
+            },
+            (supply_flow, 1.0),
+        );
+        for (index, burnt) in [false, true].into_iter().enumerate() {
+            let mut flow = Flow::default();
+            flow.insert(demand(burnt), -100.0);
+            flows.insert(
+                ExpandedVarId {
+                    mechanic: MechanicId(index as u64 + 2),
+                    variant: 0,
+                },
+                (flow, 1.0),
+            );
+        }
+        add_conversion_flows(&mut flows, &store, &Flow::default(), &Flow::default());
+        let has_edge = |from_burnt: bool, to_burnt: bool| {
+            flows.values().any(|(flow, _)| {
+                flow.get(&supply(from_burnt)).copied().unwrap_or(0.0) < 0.0
+                    && flow.get(&demand(to_burnt)).copied().unwrap_or(0.0) > 0.0
+            })
+        };
+        assert!(has_edge(false, false), "无燃尽产物燃料可供给无燃尽槽机器");
+        assert!(has_edge(false, true), "无燃尽产物燃料可供给带燃尽槽机器");
+        assert!(has_edge(true, true), "带燃尽产物燃料可供给带燃尽槽机器");
+        assert!(
+            !has_edge(true, false),
+            "带燃尽产物燃料不应供给无燃尽产物物品栏的机器"
         );
     }
 

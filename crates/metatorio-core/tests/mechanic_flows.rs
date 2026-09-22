@@ -59,13 +59,47 @@ fn item_fuel_preserves_burnt_result() {
 
     assert_eq!(flow[&DualVar::Item(id("coal"))], -1.0);
     assert_eq!(
-        flow[&DualVar::ItemFuel {
+        flow[&DualVar::ItemFuelSupply {
             category: vec!["chemical".to_string()],
             has_burnt_result: true,
         }],
         8_000_000.0
     );
     assert_eq!(flow[&DualVar::Item(id("ash"))], 1.0);
+}
+
+/// 多燃料类别物品：以完整类别集合作为**单个**供给键（一个变量），
+/// 与 burner 的兼容性（两集合有重叠）由求解器的零成本转换流表达。
+#[test]
+fn item_fuel_keeps_multi_category_supply_key() {
+    let dump = json!({
+        "item": {
+            "biofuel": {
+                "fuel_value": "2MJ",
+                "fuel_categories": ["chemical", "biological"],
+                "burnt_result": "ash"
+            }
+        }
+    });
+    let store = PrototypeStore::load(&dump).expect("dump should load");
+    let game = GameState {
+        max_quality: store.quality_order().len().saturating_sub(1),
+        ..Default::default()
+    };
+    let mechanic = Mechanic::ItemFuel(ItemFuelMechanic {
+        item: id("biofuel"),
+    });
+    let flow = flow_loaded(store, game, mechanic);
+    assert_eq!(flow[&DualVar::Item(id("biofuel"))], -1.0);
+    assert_eq!(flow[&DualVar::Item(id("ash"))], 1.0);
+    assert_eq!(
+        flow[&DualVar::ItemFuelSupply {
+            category: vec!["chemical".to_string(), "biological".to_string()],
+            has_burnt_result: true,
+        }],
+        2_000_000.0
+    );
+    assert_eq!(flow.len(), 3, "1 消耗 + 1 燃尽产物 + 1 燃料供给流");
 }
 
 #[test]

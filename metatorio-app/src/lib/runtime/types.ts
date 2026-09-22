@@ -31,6 +31,7 @@ export type DualVar =
   | "Electricity"
   | { FluidHeat: { filter: string } }
   | { ItemFuel: { category: string[]; has_burnt_result?: boolean } }
+  | { ItemFuelSupply: { category: string[]; has_burnt_result?: boolean } }
   | "RocketSlotCapacity"
   | "RocketWeightCapacity"
   | { Pollution: { name: string } }
@@ -57,6 +58,8 @@ export function dualVarLabel(flow: DualVar): string {
       if ("name" in inner) return String(inner.name);
       if ("id" in inner) return String(inner.id);
     }
+    // 燃料供给侧（ItemFuelSupply）与需求侧共用物品燃料的显示名/图标。
+    if (key === "ItemFuel" || key === "ItemFuelSupply") return "ItemFuel";
     return key;
   }
   return String(flow);
@@ -679,8 +682,8 @@ export interface IndexEntry {
   module_slots: number | null;
   /** 兼容性类别：machine→crafting_categories、recipe→categories、mining-machine→resource_categories、resource→category。 */
   categories: string[];
-  /** 物品燃料类别（非燃料物品为空串）。 */
-  fuel_category: string;
+  /** 物品燃料类别（可多个；非燃料物品为空数组）。 */
+  fuel_categories: string[];
   /** 物品/流体燃料热值（焦耳；非燃料为 null）。 */
   fuel_value_j: number | null;
   /** 科技等级上限：`(number)` = 有限上限，`null` = 无限科技。
@@ -735,8 +738,8 @@ export interface PrototypeDetail {
   stack_size: number | null;
   /** 燃料能量（焦耳）。 */
   fuel_value_j: number | null;
-  /** 燃料类别（如 "chemical"）。 */
-  fuel_category: string;
+  /** 燃料类别（可多个，如 ["chemical"]）。 */
+  fuel_categories: string[];
   /** 燃烧产物。 */
   burnt_result: string;
   /** 变质产物。 */

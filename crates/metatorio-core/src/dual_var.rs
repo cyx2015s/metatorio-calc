@@ -46,12 +46,23 @@ pub enum DualVar {
     FluidFuel {
         filter: String,
     },
-    /// 物品燃料流（**数值单位 = 焦耳 J**）。
+    /// 物品燃料需求流（**数值单位 = 焦耳 J**）：BurnerEnergySource / 用户流。
     ///
-    /// `category`：燃料类别；`has_burnt_result`：燃料是否带燃尽产物。
-    /// 带燃尽产物物品栏的机器只接受 `true` 的燃料流；`false`（无燃尽产物）
-    /// 可隐式转换为 `true`——子类型提升。
+    /// `category`：机器接受的燃料类别集合；`has_burnt_result`：机器是否带
+    /// 燃尽产物物品栏。燃料物品侧的供给见 `ItemFuelSupply`，二者由
+    /// `add_conversion_flows` 按"类别集合有重叠"生成零成本转换。
     ItemFuel {
+        category: Vec<String>,
+        #[serde(default)]
+        has_burnt_result: bool,
+    },
+    /// 物品燃料供给流（**数值单位 = 焦耳 J**）：燃料物品侧的燃料类别集合。
+    ///
+    /// 与需求侧 `ItemFuel` 分列，使"燃料与 BurnerEnergySource 的
+    /// fuel_categories 只要有重叠即兼容"能建模为 `ItemFuelSupply →
+    /// ItemFuel` 的单向零成本转换：供给侧不会成为中转，避免无关类别集合
+    /// 经中间键互相桥接（重叠关系不可传递）。
+    ItemFuelSupply {
         category: Vec<String>,
         #[serde(default)]
         has_burnt_result: bool,
@@ -77,6 +88,7 @@ impl DualVar {
                 | DualVar::FluidHeat { .. }
                 | DualVar::FluidFuel { .. }
                 | DualVar::ItemFuel { .. }
+                | DualVar::ItemFuelSupply { .. }
         )
     }
 }

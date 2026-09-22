@@ -802,16 +802,20 @@ fn expand_item_fuel<C: Clone>(
     if fuel_value <= 0.0 || item.fuel_categories.is_empty() {
         return;
     }
+    let has_burnt_result = !item.burnt_result.is_empty();
     let mut temp = TempFlow::new();
     temp.add(DualVar::Item(mechanic.item.clone()), -1.0);
+    // 燃料物品可声明多个燃料类别：以完整类别集合作为供给键。与 burner
+    // 需求键的兼容性（两集合**有重叠**即兼容）由求解器的零成本转换流
+    // 表达；供给与需求分列两种 DualVar，避免重叠关系被传递桥接。
     temp.add(
-        DualVar::ItemFuel {
+        DualVar::ItemFuelSupply {
             category: item.fuel_categories.clone(),
-            has_burnt_result: !item.burnt_result.is_empty(),
+            has_burnt_result,
         },
         fuel_value,
     );
-    if !item.burnt_result.is_empty() {
+    if has_burnt_result {
         temp.add(
             DualVar::Item(IdWithQuality::new(
                 &item.burnt_result,

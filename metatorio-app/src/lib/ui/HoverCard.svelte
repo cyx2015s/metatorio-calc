@@ -41,9 +41,13 @@
         value: t1 === t2 ? `${fmtNum(t1)}℃` : `${fmtNum(t1)}~${fmtNum(t2)}℃`,
       });
     }
-    if ("ItemFuel" in flow) {
-      const itemFuel = (flow as { ItemFuel: { category: string[] } }).ItemFuel;
-      rows.push({ label: "燃料类别", value: itemFuel.category.join(" / ") });
+    if ("ItemFuel" in flow || "ItemFuelSupply" in flow) {
+      const inner = flow as {
+        ItemFuel?: { category: string[] };
+        ItemFuelSupply?: { category: string[] };
+      };
+      const category = (inner.ItemFuel ?? inner.ItemFuelSupply)?.category ?? [];
+      rows.push({ label: "燃料类别", value: category.join(" / ") });
     }
     const fluidFilter =
       ("FluidFuel" in flow ? (flow as { FluidFuel: { filter: string } }).FluidFuel.filter : "") ||
@@ -61,7 +65,7 @@
   let flowHead = $derived(buildFlowHead(flow));
   function buildFlowHead(flow: import("$lib/runtime/types").DualVar | undefined) {
     if (!flow || typeof flow !== "object") return null;
-    if ("ItemFuel" in flow) {
+    if ("ItemFuel" in flow || "ItemFuelSupply" in flow) {
       return { title: "物品燃料", iconName: "ItemFuel", type: "flow", typeLabel: "燃料" };
     }
     if ("FluidFuel" in flow) {
@@ -282,12 +286,12 @@
       {#if detail.fuel_value_j != null && detail.fuel_value_j > 0}
         <div class="hc-row">
           <span>燃料</span>
-          <strong>{formatEnergy(detail.fuel_value_j)}{detail.fuel_category ? ` · ${detail.fuel_category}` : ""}</strong>
+          <strong>{formatEnergy(detail.fuel_value_j)}{detail.fuel_categories.length > 0 ? ` · ${detail.fuel_categories.join(" / ")}` : ""}</strong>
         </div>
-      {:else if detail.fuel_category && detail.fuel_value_j == null}
+      {:else if detail.fuel_categories.length > 0 && detail.fuel_value_j == null}
         <div class="hc-row">
           <span>燃料</span>
-          <strong>{detail.fuel_category}</strong>
+          <strong>{detail.fuel_categories.join(" / ")}</strong>
         </div>
       {/if}
       {#if detail.burnt_result}

@@ -15,6 +15,8 @@
 //! - [`adapt_recipe_product_probability`]：2.0 产物（`results` 数组元素）
 //!   的 `probability`（标量）在 2.1 迁移为 `independent_probability`
 //!   （产物概率信息改为 flatten 的 `probability_info` 结构）。
+//! - [`adapt_item_fuel_categories`]：2.0 item 的 `fuel_category`（标量）
+//!   在 2.1 变为 `fuel_categories`（数组，物品可声明多个燃料类别）。
 //!
 //! 后续可在此追加新层（如 result/result_count → results 数组、
 //! Lua map 形态 ingredients → 数组等），在 [`normalize_2_0_dump`] 中
@@ -170,6 +172,11 @@ pub fn adapt_recipe_product_probability(recipe: &mut Value) {
     }
 }
 
+/// 适配层：item 燃料类别字段数组化。
+///
+/// 2.0：`fuel_category: "chemical"`（标量）；
+/// 2.1：`fuel_categories: ["chemical", ...]`（数组，物品可声明多个类别）。
+/// 已是数组的 2.1 形态不动（幂等）。
 pub fn adapt_item_fuel_categories(item: &mut Value) {
     let Some(obj) = item.as_object_mut() else {
         return;

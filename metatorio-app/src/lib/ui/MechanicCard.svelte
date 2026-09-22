@@ -7,7 +7,6 @@
   import HoverIcon from "./HoverIcon.svelte";
   import Icon from "./Icon.svelte";
   import ModuleEditor from "./ModuleEditor.svelte";
-  import { dualVarLabel } from "$lib/runtime/types";
   import { compactNumber } from "$lib/format";
   import type { CatalogKind, MechanicEntry } from "$lib/runtime/types";
 
@@ -96,11 +95,12 @@
 
   let kind = $derived(entry.mechanic.type);
 
-  /** 流 → 渲染键（含品质：同物品不同品质的流是不同条目，避免 each key 冲突）。 */
+  /** 流 → 渲染键（含品质与完整形状：同物品不同品质、多燃料类别/多温度
+   *  展开出的不同流是不同条目，避免 each key 冲突）。 */
   function dualVarKey(flow: import("$lib/runtime/types").DualVar): string {
     const item = flow !== null && typeof flow === "object" ? (flow as { Item?: { id: string; quality?: string } }).Item : undefined;
     if (item) return `item:${item.id}:${item.quality ?? "normal"}`;
-    return dualVarLabel(flow);
+    return JSON.stringify(flow);
   }
   let primaryName = $derived(
     entry.mechanic.recipe?.id ??

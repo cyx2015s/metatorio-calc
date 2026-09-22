@@ -503,7 +503,7 @@
       return flow === "Electricity" || flow === "Heat";
     }
     if (flow !== null && typeof flow === "object") {
-      return "FluidHeat" in flow || "FluidFuel" in flow || "ItemFuel" in flow;
+      return "FluidHeat" in flow || "FluidFuel" in flow || "ItemFuel" in flow || "ItemFuelSupply" in flow;
     }
     return false;
   }
@@ -558,7 +558,7 @@
       if (flow === "RocketWeightCapacity") return "火箭运力（重量）";
     }
     if (flow !== null && typeof flow === "object") {
-      if ("ItemFuel" in flow) return "物品燃料";
+      if ("ItemFuel" in flow || "ItemFuelSupply" in flow) return "物品燃料";
       if ("FluidFuel" in flow) return "流体燃料";
       if ("FluidHeat" in flow) return "流体热量";
       if ("Pollution" in flow) {
@@ -572,9 +572,12 @@
   /** 抽象能量流的第二行说明（燃料类别/流体名）；无则空串。 */
   function flowLabelSub(flow: DualVar): string {
     if (flow !== null && typeof flow === "object") {
-      if ("ItemFuel" in flow) {
-        const itemFuel = flow as { ItemFuel: { category: string[] } };
-        return itemFuel.ItemFuel.category.join(" / ");
+      if ("ItemFuel" in flow || "ItemFuelSupply" in flow) {
+        const inner = flow as {
+          ItemFuel?: { category: string[] };
+          ItemFuelSupply?: { category: string[] };
+        };
+        return (inner.ItemFuel ?? inner.ItemFuelSupply)?.category.join(" / ") ?? "";
       }
       if ("FluidFuel" in flow || "FluidHeat" in flow) {
         const inner = flow as { FluidFuel?: { filter: string }; FluidHeat?: { filter: string } };
@@ -1020,9 +1023,10 @@
   }
 
   /** 指定机制燃料：流选择器（物品/流体页签）→ SetFuel。
-   *  burner 机器只吃物品燃料：按机器的燃料类别（burner_fuel_categories）
-   *  过滤物品的 fuel_category（无类别限制 → 全部燃料）；非 burner（流体/
-   *  热能量源）不做物品限定，流体页签可选。锅炉/反应堆/采矿机与制造机同规则。 */
+   *  burner 机器只吃物品燃料：机器的燃料类别（burner_fuel_categories）与
+   *  物品的燃料类别（fuel_categories，可多个）**有交集**才兼容（机器无类别
+   *  限制 → 全部燃料）；非 burner（流体/热能量源）不做物品限定，流体页签
+   *  可选。锅炉/反应堆/采矿机与制造机同规则。 */
   async function pickFuel(mechanic: MechanicId) {
     const entry = mechanics.find((candidate) => candidate.id === mechanic);
     const m = entry?.mechanic;
@@ -1058,7 +1062,8 @@
               candidate.kind === "item" &&
               candidate.fuel_value_j != null &&
               candidate.fuel_value_j > 0 &&
-              (categories.length === 0 || categories.includes(candidate.fuel_category)),
+              (categories.length === 0 ||
+                candidate.fuel_categories.some((category) => categories.includes(category))),
           )
           .map((candidate) => candidate.name);
         initialTab = "item";
