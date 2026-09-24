@@ -29,7 +29,8 @@ use crate::state::RuntimeError;
 /// 其它引用（可能来自别的上下文/旧 modpack）不受影响。
 pub fn validate_message(store: &PrototypeStore, message: &AppMessage) -> Result<(), RuntimeError> {
     match message {
-        AppMessage::Application(_) => Ok(()),
+        // 撤销/重做不改写任何带原型名的字段，无需校验。
+        AppMessage::Application(_) | AppMessage::History(_) => Ok(()),
         AppMessage::Project { action, .. } => validate_project(store, action),
         AppMessage::Factory { action, .. } => validate_factory(store, action),
     }

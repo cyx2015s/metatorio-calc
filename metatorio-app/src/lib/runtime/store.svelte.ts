@@ -11,6 +11,7 @@ import {
   catalogIndex,
   dispatch,
   getDocument,
+  historyState,
   listContexts,
   loadBundledDump,
   loadDump,
@@ -39,6 +40,8 @@ import type {
   ContextInfo,
   DispatchResult,
   FactoryId,
+  HistoryFocus,
+  HistoryStatus,
   IdWithQuality,
   InfiniteTechLevel,
   MechanicId,
@@ -99,6 +102,13 @@ class RuntimeStore {
   autoPlanning = $state(false);
   lastError = $state<string | null>(null);
   ready = $state(false);
+  /** 撤销/重做可用性（启动时 history_state 初始化，之后每次 dispatch 回执同步）。 */
+  history = $state<HistoryStatus>({
+    can_undo: false,
+    can_redo: false,
+    undo_label: null,
+    redo_label: null,
+  });
 
   /** 主题模式：system(跟随系统) / light / dark。不会写死，用户可选。 */
   theme = $state<"system" | "light" | "dark">("system");
@@ -203,6 +213,8 @@ class RuntimeStore {
     // 在同一个界面上实时并存协同。
     onDocumentChanged(() => {
       this.refresh().catch(() => {});
+      // 外部（MCP）也可能撤销/重做，同步历史可用性。
+      this.refreshHistory().catch(() => {});
     });
     // 命令阶段失败（自动保存写盘失败等）：没有专属事件，统一进「操作」错误条，
     // 否则失败只写 stderr，界面上完全看不出来。
@@ -216,6 +228,7 @@ class RuntimeStore {
       this.selectedProjectId = firstProject?.id ?? null;
       this.selectedFactoryId = firstProject?.factories[0]?.id ?? null;
       this.selectedMechanic = null;
+      await this.refreshHistory();
       await this.refreshContexts();
       // 及早拉取目录索引（含本地化显示名），保证产能/机制等面板在
       // 首个渲染就能用上译名，而不是回退到内部 id。
@@ -250,6 +263,7 @@ class RuntimeStore {
     try {
       result = await dispatch(message);
       this.revision = result.revision;
+      this.history = result.history;
       // 任何交互都可能改变可达性（显式标记/里程碑/无视开关/换上下文），
       // 整体失效缓存；选择器打开时按需重拉。
       this.accessibility = null;
@@ -280,6 +294,52 @@ class RuntimeStore {
     return result;
   }
 
+  /** 刷新撤销/重做可用性（启动时与外部改动后调用）。 */
+  async refreshHistory(): Promise<void> {
+    try {
+      this.history = await historyState();
+    } catch {
+      /* 后端不可用时保持原状态 */
+    }
+  }
+
+  /** 撤销一步；成功后按后端回传的 focus 聚焦到受影响的项目/工厂。 */
+  async undo(): Promise<void> {
+    await this.applyHistory("undo");
+  }
+
+  /** 重做一步。 */
+  async redo(): Promise<void> {
+    await this.applyHistory("redo");
+  }
+
+  private async applyHistory(action: "undo" | "redo"): Promise<void> {
+    if (this.busy) return;
+    if (action === "undo" && !this.history.can_undo) return;
+    if (action === "redo" && !this.history.can_redo) return;
+    const result = await this.send({ scope: "history", action });
+    // 无步可退/无步可进时后端返回 changed=false：不要动选中态。
+    if (result.changed) await this.applyHistoryFocus(result.history.focus);
+  }
+
+  /** 撤销/重做后把选中态落到受影响对象上（删除类则落回第一个项目）。 */
+  private async applyHistoryFocus(focus: HistoryFocus | undefined): Promise<void> {
+    const projects = this.document?.projects ?? [];
+    if (focus?.project != null && projects.some((p) => p.id === focus.project)) {
+      await this.selectProject(focus.project);
+      if (
+        focus.factory != null &&
+        this.selectedProject?.factories.some((f) => f.id === focus.factory)
+      ) {
+        await this.selectFactory(focus.factory);
+      }
+      return;
+    }
+    const first = projects[0] ?? null;
+    await this.selectProject(first?.id ?? null);
+    if (first?.factories[0]) await this.selectFactory(first.factories[0].id);
+  }
+
   /** 提取 AppMessage 内层动作键（scope=project/factory 时在 action.action，
    *  scope=application 时直接是 action）。用于判断是否需要重拉里程碑/产能。 */
   private static innerActionKeys(message: AppMessage): string[] {
@@ -287,7 +347,7 @@ class RuntimeStore {
       | { action?: Record<string, unknown> }
       | Record<string, unknown>
       | undefined;
-    if (!action) return [];
+    if (!action || typeof action !== "object") return [];
     const inner = (action as { action?: Record<string, unknown> }).action ?? action;
     return Object.keys(inner);
   }

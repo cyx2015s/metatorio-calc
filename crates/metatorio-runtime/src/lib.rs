@@ -32,4 +32,4 @@ pub use solve::{
     parse_document_file, productivity_view, solve_snapshot, solve_snapshot_with,
     write_document_file,
 };
-pub use state::{DispatchResult, RuntimeError, RuntimeState};
+pub use state::{DispatchResult, HistoryFocus, HistoryStatus, RuntimeError, RuntimeState};

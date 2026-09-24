@@ -387,7 +387,9 @@ export type AppMessage =
   | {
       scope: "factory";
       action: { project: ProjectId; factory: FactoryId; action: FactoryAction };
-    };
+    }
+  // 撤销/重做与普通编辑走同一条 dispatch 管线（GUI/MCP 统一）。
+  | { scope: "history"; action: "undo" | "redo" };
 
 // ── Document snapshot ─────────────────────────────────────────────
 
@@ -584,6 +586,24 @@ export interface DispatchResult {
     target_terms: number[];
     external_inputs: ExternalInputId[];
   };
+  /** 撤销/重做可用性；撤销/重做时还带受影响对象的聚焦提示。 */
+  history: HistoryStatus;
+}
+
+/** 撤销/重做后前端应聚焦的对象。 */
+export interface HistoryFocus {
+  project: ProjectId | null;
+  factory: FactoryId | null;
+}
+
+export interface HistoryStatus {
+  can_undo: boolean;
+  can_redo: boolean;
+  /** 下一步撤销/重做的动作标签；无可用步骤时为 null。 */
+  undo_label: string | null;
+  redo_label: string | null;
+  /** 本次若是撤销/重做，受影响的对象；其余为 null/undefined。 */
+  focus?: HistoryFocus;
 }
 
 // ── Solver output ─────────────────────────────────────────────────

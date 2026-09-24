@@ -16,6 +16,7 @@ fn set_fuel_temperature(fuel: &mut Option<Fuel>, temperature: Option<i32>) -> bo
     *t = temperature;
     true
 }
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::document::{
@@ -29,10 +30,10 @@ use crate::message::{
     AppMessage, ApplicationAction, BoilerMechanicAction, CleanupAction, CloseDecision,
     DeleteDecision, ExternalInputAction, FactoryAction, FactoryContextAction, FactoryTemplate,
     FlowAction, FluidFuelMechanicAction, FluidHeatMechanicAction, GeneratorMechanicAction,
-    ItemFuelMechanicAction, ItemLaunchMechanicAction, MechanicAction, MechanicListAction,
-    MiningMechanicAction, ModuleAction, PlanningAction, PlantMechanicAction, ProjectAction,
-    ReactorMechanicAction, RecipeMechanicAction, RuntimeCommand, SolarMechanicAction, SolveAction,
-    SpoilMechanicAction, TargetAction, TargetExpressionAction,
+    HistoryAction, ItemFuelMechanicAction, ItemLaunchMechanicAction, MechanicAction,
+    MechanicListAction, MiningMechanicAction, ModuleAction, PlanningAction, PlantMechanicAction,
+    ProjectAction, ReactorMechanicAction, RecipeMechanicAction, RuntimeCommand,
+    SolarMechanicAction, SolveAction, SpoilMechanicAction, TargetAction, TargetExpressionAction,
 };
 
 /// Mutable application state that is independent from any GUI framework.
@@ -45,6 +46,8 @@ pub struct RuntimeState {
     /// 当前上下文用——项目创建后自含上下文，不再依赖全局 active_context 回退）。
     pub active_context: Option<String>,
     next_id: u64,
+    /// 内存中的撤销/重做时间线。只快照 `AppDocument`；不落盘、不跨重启。
+    history: History,
 }
 
 impl Default for RuntimeState {
@@ -56,6 +59,7 @@ impl Default for RuntimeState {
 impl RuntimeState {
     pub fn new(document: AppDocument) -> Self {
         let mut state = Self {
+            history: History::new(&document),
             document,
             revision: 0,
             dirty_projects: BTreeSet::new(),
@@ -71,6 +75,14 @@ impl RuntimeState {
     /// All application-owned enums are matched explicitly.  Adding a new
     /// message variant therefore forces this dispatcher to be updated.
     pub fn dispatch(&mut self, message: AppMessage) -> Result<DispatchResult, RuntimeError> {
+        if let AppMessage::History(action) = message {
+            return match action {
+                HistoryAction::Undo => self.undo(),
+                HistoryAction::Redo => self.redo(),
+            };
+        }
+
+        let label = message_label(&message);
         let outcome = match message {
             AppMessage::Application(action) => self.apply_application(action)?,
             AppMessage::Project { project, action } => self.apply_project(project, action)?,
@@ -79,8 +91,128 @@ impl RuntimeState {
                 factory,
                 action,
             } => self.apply_factory(project, factory, action)?,
+            AppMessage::History(_) => unreachable!("history handled above"),
         };
 
+        self.commit(outcome, label)
+    }
+
+    /// 当前撤销/重做可用性（随每次 DispatchResult 回传，也供只读查询）。
+    pub fn history_status(&self) -> HistoryStatus {
+        HistoryStatus {
+            can_undo: self.history.can_undo(),
+            can_redo: self.history.can_redo(),
+            undo_label: self.history.undo_label().map(str::to_string),
+            redo_label: self.history.redo_label().map(str::to_string),
+            focus: None,
+        }
+    }
+
+    /// 撤销一步：把文档回退到上一个快照，按两份文档的差异补发副作用命令。
+    pub fn undo(&mut self) -> Result<DispatchResult, RuntimeError> {
+        if !self.history.can_undo() {
+            return self.finish(Outcome::none());
+        }
+        let before = self.history.current().clone();
+        let focus = self.history.undo();
+        self.restore_from_history();
+        let after = self.document.clone();
+        let outcome = self.outcome_for_diff(&before, &after);
+        let mut result = self.finish(outcome)?;
+        result.history.focus = focus;
+        Ok(result)
+    }
+
+    /// 重做一步（与 undo 对称）。
+    pub fn redo(&mut self) -> Result<DispatchResult, RuntimeError> {
+        if !self.history.can_redo() {
+            return self.finish(Outcome::none());
+        }
+        let before = self.history.current().clone();
+        let focus = self.history.redo();
+        self.restore_from_history();
+        let after = self.document.clone();
+        let outcome = self.outcome_for_diff(&before, &after);
+        let mut result = self.finish(outcome)?;
+        result.history.focus = focus;
+        Ok(result)
+    }
+
+    /// 把文档换成历史游标当前指向的快照，并保证 id 分配器只增不减。
+    fn restore_from_history(&mut self) {
+        self.document = self.history.current().clone();
+        let previous = self.next_id;
+        self.refresh_next_id();
+        self.next_id = self.next_id.max(previous);
+    }
+
+    /// 按两份文档的差异生成副作用：变化的项目落盘 + 重解（设置变化则整项目重解）。
+    fn outcome_for_diff(&mut self, before: &AppDocument, after: &AppDocument) -> Outcome {
+        let mut outcome = Outcome {
+            changed: true,
+            ..Outcome::default()
+        };
+        for project in &after.projects {
+            let previous = before.projects.iter().find(|p| p.id == project.id);
+            if previous == Some(project) {
+                continue;
+            }
+            self.dirty_projects.insert(project.id);
+            outcome.commands.push(RuntimeCommand::Persist {
+                project: project.id,
+                path: None,
+            });
+            outcome.commands.push(RuntimeCommand::EnsureQualityLimit {
+                project: project.id,
+            });
+            match previous {
+                // 新增项目或项目级设置变化：重解全部工厂。
+                None => {
+                    for factory in &project.factories {
+                        outcome.commands.push(RuntimeCommand::Recompute {
+                            project: project.id,
+                            factory: factory.id,
+                        });
+                    }
+                }
+                Some(previous) if previous.settings != project.settings => {
+                    for factory in &project.factories {
+                        outcome.commands.push(RuntimeCommand::Recompute {
+                            project: project.id,
+                            factory: factory.id,
+                        });
+                    }
+                }
+                Some(previous) => {
+                    for factory in &project.factories {
+                        if previous.factories.iter().find(|f| f.id == factory.id) != Some(factory) {
+                            outcome.commands.push(RuntimeCommand::Recompute {
+                                project: project.id,
+                                factory: factory.id,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        // 撤销「新建项目」时把脏标记一并收回。
+        for project in &before.projects {
+            if !after.projects.iter().any(|p| p.id == project.id) {
+                self.dirty_projects.remove(&project.id);
+            }
+        }
+        outcome
+    }
+
+    /// 提交一次编辑（有变化时记录历史快照），然后走统一的收尾流程。
+    fn commit(
+        &mut self,
+        outcome: Outcome,
+        label: &'static str,
+    ) -> Result<DispatchResult, RuntimeError> {
+        if outcome.changed {
+            self.history.record(&self.document, label);
+        }
         self.finish(outcome)
     }
 
@@ -130,7 +262,7 @@ impl RuntimeState {
         self.factory_mut(project, factory)?.mechanics = entries;
         let mut outcome = Outcome::solve_factory(project, factory);
         outcome.created.mechanics.extend(created);
-        self.finish(outcome)
+        self.commit(outcome, "自动规划")
     }
 
     /// 自动规划回写：替换机制列表，**并把工厂标记为严格供给**。
@@ -159,7 +291,10 @@ impl RuntimeState {
             .collect();
         if crate::auto_plan::same_mechanics(&existing, &mechanics) {
             // 标记与列表都没变 → changed = false；只补了标记 → 一次 Persist + 重解。
-            return self.finish(Outcome::solve_factory_if(strict_changed, project, factory));
+            return self.commit(
+                Outcome::solve_factory_if(strict_changed, project, factory),
+                "自动规划",
+            );
         }
         self.replace_factory_mechanics(project, factory, mechanics)
     }
@@ -196,13 +331,13 @@ impl RuntimeState {
                 });
             }
         }
-        self.finish(Outcome::solve_factory(project, factory))
+        self.commit(Outcome::solve_factory(project, factory), "清理机制")
     }
 
     /// 关闭（从工作区移除）一个项目（`RuntimeCommand::CloseProject` 的回写）。
     pub fn close_project(&mut self, project: ProjectId) -> Result<DispatchResult, RuntimeError> {
         self.remove_project(project)?;
-        self.finish(Outcome::meta_without_project())
+        self.commit(Outcome::meta_without_project(), "关闭项目")
     }
 
     /// 收尾：按 [`Outcome`] 的分类追加副作用命令。
@@ -242,6 +377,7 @@ impl RuntimeState {
             changed: outcome.changed,
             commands: outcome.commands,
             created: outcome.created,
+            history: self.history_status(),
         })
     }
 
@@ -1076,7 +1212,7 @@ impl RuntimeState {
             &mut self.project_mut(project_id)?.settings.milestones,
             milestones,
         );
-        self.finish(Outcome::solve_all_if(changed, project_id))
+        self.commit(Outcome::solve_all_if(changed, project_id), "默认里程碑")
     }
 
     /// 整体替换「枚举插件」列表（"使用最佳插件"等批量操作）。
@@ -1092,7 +1228,7 @@ impl RuntimeState {
             &mut self.project_mut(project_id)?.planning.enumerate_modules,
             modules,
         );
-        self.finish(Outcome::solve_all_if(changed, project_id))
+        self.commit(Outcome::solve_all_if(changed, project_id), "使用最佳插件")
     }
 
     fn factory_mut(
@@ -1171,6 +1307,8 @@ impl RuntimeState {
             self.document.projects.push(project);
         }
         self.refresh_next_id();
+        // 导入（打开项目文件）也是一步可撤销的编辑：把追加后的状态记入历史。
+        self.history.record(&self.document, "导入项目");
     }
 
     /// 当前文档任意项目是否已使用该 id（跨项目全局检查）。
@@ -1225,6 +1363,193 @@ pub struct DispatchResult {
     ///
     /// 供调用方（尤其 MCP agent）免去「创建后再读一遍文档」的往返。
     pub created: CreatedIds,
+    /// 撤销/重做可用性；撤销/重做时还带受影响对象的聚焦提示。
+    pub history: HistoryStatus,
+}
+
+/// 撤销/重做可用性（随每次 DispatchResult 回传）。
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct HistoryStatus {
+    pub can_undo: bool,
+    pub can_redo: bool,
+    /// 下一步撤销/重做的动作标签（供菜单/工具提示显示）。
+    pub undo_label: Option<String>,
+    pub redo_label: Option<String>,
+    /// 本次若是撤销/重做，受影响的对象（供前端聚焦）；其余为 None。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub focus: Option<HistoryFocus>,
+}
+
+/// 撤销/重做后前端应聚焦的对象。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct HistoryFocus {
+    pub project: Option<ProjectId>,
+    pub factory: Option<FactoryId>,
+}
+
+/// 历史一步：提交后的文档快照 + 该步的动作标签。
+#[derive(Debug, Clone, PartialEq)]
+struct HistorySnapshot {
+    document: AppDocument,
+    label: String,
+}
+
+/// 内存时间线：快照序列 + 游标。snapshots[cursor] 恒等于当前提交态。
+#[derive(Debug, Clone, PartialEq)]
+struct History {
+    snapshots: Vec<HistorySnapshot>,
+    cursor: usize,
+    capacity: usize,
+}
+
+impl History {
+    const CAPACITY: usize = 128;
+
+    fn new(document: &AppDocument) -> Self {
+        Self {
+            snapshots: vec![HistorySnapshot {
+                document: document.clone(),
+                label: "初始状态".to_string(),
+            }],
+            cursor: 0,
+            capacity: Self::CAPACITY,
+        }
+    }
+
+    fn current(&self) -> &AppDocument {
+        &self.snapshots[self.cursor].document
+    }
+
+    fn can_undo(&self) -> bool {
+        self.cursor > 0
+    }
+
+    fn can_redo(&self) -> bool {
+        self.cursor + 1 < self.snapshots.len()
+    }
+
+    fn undo_label(&self) -> Option<&str> {
+        self.can_undo()
+            .then(|| self.snapshots[self.cursor].label.as_str())
+    }
+
+    fn redo_label(&self) -> Option<&str> {
+        self.can_redo()
+            .then(|| self.snapshots[self.cursor + 1].label.as_str())
+    }
+
+    /// 记录一次提交后的状态；与当前快照相同时忽略（no-op 编辑不入历史）。
+    fn record(&mut self, document: &AppDocument, label: impl Into<String>) {
+        if self.current() == document {
+            return;
+        }
+        self.snapshots.truncate(self.cursor + 1);
+        self.snapshots.push(HistorySnapshot {
+            document: document.clone(),
+            label: label.into(),
+        });
+        self.cursor = self.snapshots.len() - 1;
+        while self.snapshots.len() > self.capacity {
+            self.snapshots.remove(0);
+            self.cursor = self.cursor.saturating_sub(1);
+        }
+    }
+
+    /// 回退一格，返回被撤销那一步的聚焦提示。
+    fn undo(&mut self) -> Option<HistoryFocus> {
+        if !self.can_undo() {
+            return None;
+        }
+        let focus = focus_between(
+            &self.snapshots[self.cursor - 1].document,
+            &self.snapshots[self.cursor].document,
+        );
+        self.cursor -= 1;
+        Some(focus)
+    }
+
+    /// 前进一格，返回被重做那一步的聚焦提示。
+    fn redo(&mut self) -> Option<HistoryFocus> {
+        if !self.can_redo() {
+            return None;
+        }
+        let focus = focus_between(
+            &self.snapshots[self.cursor].document,
+            &self.snapshots[self.cursor + 1].document,
+        );
+        self.cursor += 1;
+        Some(focus)
+    }
+}
+
+/// 从两份相邻文档推断「这一步改了谁」，供撤销/重做后前端聚焦。
+fn focus_between(before: &AppDocument, after: &AppDocument) -> HistoryFocus {
+    for project in &after.projects {
+        let previous = before.projects.iter().find(|p| p.id == project.id);
+        if previous == Some(project) {
+            continue;
+        }
+        let factory = match previous {
+            Some(previous) => {
+                let changed: Vec<FactoryId> = project
+                    .factories
+                    .iter()
+                    .filter(|f| previous.factories.iter().find(|p| p.id == f.id) != Some(f))
+                    .map(|f| f.id)
+                    .collect();
+                if changed.len() == 1 {
+                    Some(changed[0])
+                } else {
+                    None
+                }
+            }
+            None => None,
+        };
+        return HistoryFocus {
+            project: Some(project.id),
+            factory,
+        };
+    }
+    // after 里没有「新增/变化」的项目：这步是「删除/关闭项目」。返回被删项目
+    // 的 id——撤销把它恢复后前端即可聚焦；重做时它已不存在，前端会回退到首项目。
+    for project in &before.projects {
+        if !after.projects.iter().any(|p| p.id == project.id) {
+            return HistoryFocus {
+                project: Some(project.id),
+                factory: None,
+            };
+        }
+    }
+    HistoryFocus {
+        project: None,
+        factory: None,
+    }
+}
+
+/// 一步编辑的动作标签（供撤销/重做菜单显示）。
+fn message_label(message: &AppMessage) -> &'static str {
+    match message {
+        AppMessage::Application(action) => match action {
+            ApplicationAction::NewProject { .. } => "新建项目",
+            ApplicationAction::OpenProject { .. } => "打开项目",
+            ApplicationAction::CloseProject { .. } => "关闭项目",
+            ApplicationAction::DeleteProject { .. } => "删除项目",
+            ApplicationAction::ReorderProject { .. } => "重排项目",
+            _ => "应用操作",
+        },
+        AppMessage::Project { action, .. } => match action {
+            ProjectAction::SetName { .. } => "重命名项目",
+            ProjectAction::AddFactory { .. } => "新建工厂",
+            ProjectAction::CloneFactory { .. } => "克隆工厂",
+            ProjectAction::RemoveFactory { .. } => "删除工厂",
+            ProjectAction::ReorderFactory { .. } => "重排工厂",
+            ProjectAction::Planning(_) => "规划偏好",
+            _ => "项目设置",
+        },
+        AppMessage::Factory { .. } => "工厂操作",
+        AppMessage::History(_) => "撤销/重做",
+    }
 }
 
 /// 一次 dispatch 新建的对象 id。空表示没有新建任何对象。
@@ -2226,6 +2551,168 @@ mod tests {
             Some("ctx-x"),
             "新建项目应固定到当前上下文"
         );
+    }
+
+    // ── 撤销/重做 ──────────────────────────────────────────────────
+
+    #[test]
+    fn undo_and_redo_restore_document_and_keep_revision_forward() {
+        let (mut state, project, _factory) = state_with_factory();
+        let revision_before = state.revision;
+        state
+            .dispatch(AppMessage::Project {
+                project,
+                action: ProjectAction::SetName {
+                    name: "renamed".to_string(),
+                },
+            })
+            .unwrap();
+        let status = state.history_status();
+        assert!(status.can_undo && !status.can_redo);
+        assert_eq!(status.undo_label.as_deref(), Some("重命名项目"));
+
+        let undone = state.undo().unwrap();
+        assert_eq!(state.project(project).unwrap().name, "project");
+        assert!(
+            undone.revision > revision_before,
+            "撤销是文档变更，revision 必须前进"
+        );
+        assert!(
+            undone
+                .commands
+                .iter()
+                .any(|command| matches!(command, RuntimeCommand::Persist { .. })),
+            "撤销后应落盘：{:?}",
+            undone.commands
+        );
+        assert!(state.history_status().can_redo);
+
+        state.redo().unwrap();
+        assert_eq!(state.project(project).unwrap().name, "renamed");
+        assert!(!state.history_status().can_redo);
+    }
+
+    #[test]
+    fn undo_reports_the_affected_focus() {
+        let (mut state, project, _factory) = state_with_factory();
+        state
+            .dispatch(AppMessage::Project {
+                project,
+                action: ProjectAction::SetName {
+                    name: "x".to_string(),
+                },
+            })
+            .unwrap();
+        let undone = state.undo().unwrap();
+        assert_eq!(
+            undone.history.focus.and_then(|focus| focus.project),
+            Some(project)
+        );
+    }
+
+    #[test]
+    fn noop_edit_does_not_push_history() {
+        let (mut state, project, _factory) = state_with_factory();
+        let before = state.history_status().undo_label;
+        state
+            .dispatch(AppMessage::Project {
+                project,
+                action: ProjectAction::SetName {
+                    name: "project".to_string(),
+                },
+            })
+            .unwrap();
+        assert_eq!(
+            state.history_status().undo_label,
+            before,
+            "同名写入不应入历史"
+        );
+    }
+
+    #[test]
+    fn new_edit_clears_the_redo_stack() {
+        let (mut state, project, _factory) = state_with_factory();
+        let rename = |name: &str| AppMessage::Project {
+            project,
+            action: ProjectAction::SetName {
+                name: name.to_string(),
+            },
+        };
+        state.dispatch(rename("a")).unwrap();
+        state.undo().unwrap();
+        assert!(state.history_status().can_redo);
+        state.dispatch(rename("b")).unwrap();
+        assert!(!state.history_status().can_redo, "新编辑应清空重做栈");
+        state.redo().unwrap();
+        assert_eq!(state.project(project).unwrap().name, "b");
+    }
+
+    #[test]
+    fn undo_new_project_removes_it_and_redo_restores_it() {
+        let mut state = RuntimeState::default();
+        state
+            .dispatch(AppMessage::Application(ApplicationAction::NewProject {
+                name: "p".to_string(),
+            }))
+            .unwrap();
+        let project = state.document.projects[0].id;
+        state.undo().unwrap();
+        assert!(state.document.projects.is_empty());
+        state.redo().unwrap();
+        assert_eq!(state.document.projects[0].id, project);
+    }
+
+    #[test]
+    fn undo_does_not_reuse_object_ids() {
+        let mut state = RuntimeState::default();
+        state
+            .dispatch(AppMessage::Application(ApplicationAction::NewProject {
+                name: "first".to_string(),
+            }))
+            .unwrap();
+        let first = state.document.projects[0].id;
+        state.undo().unwrap();
+        state
+            .dispatch(AppMessage::Application(ApplicationAction::NewProject {
+                name: "second".to_string(),
+            }))
+            .unwrap();
+        let second = state.document.projects[0].id;
+        assert!(
+            second.0 > first.0,
+            "撤销后新建对象不能复用旧 id（{first:?} -> {second:?}）"
+        );
+    }
+
+    #[test]
+    fn undo_close_project_focuses_the_restored_project() {
+        let (mut state, project, _factory) = state_with_factory();
+        state.close_project(project).unwrap();
+        assert!(state.document.projects.is_empty());
+        let undone = state.undo().unwrap();
+        assert_eq!(state.document.projects.len(), 1);
+        assert_eq!(
+            undone.history.focus.and_then(|focus| focus.project),
+            Some(project)
+        );
+    }
+
+    #[test]
+    fn import_is_undoable() {
+        let mut state = RuntimeState::default();
+        let imported = AppDocument {
+            schema_version: crate::document::DOCUMENT_SCHEMA_VERSION,
+            projects: vec![ProjectDocument {
+                id: ProjectId(1),
+                name: "imported".to_string(),
+                ..ProjectDocument::default()
+            }],
+        };
+        state.import_projects(&imported);
+        assert_eq!(state.document.projects.len(), 1);
+        assert!(state.history_status().can_undo, "导入应记入历史");
+        state.undo().unwrap();
+        assert!(state.document.projects.is_empty(), "撤销导入应移除项目");
     }
 
     fn state_with_factory() -> (RuntimeState, ProjectId, FactoryId) {

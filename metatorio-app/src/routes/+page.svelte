@@ -1120,11 +1120,37 @@
         .catch(() => {});
     });
   }
+
+  /** 全局快捷键：Ctrl/Cmd+Z 撤销；Ctrl/Cmd+Shift+Z 或 Ctrl+Y 重做。
+   *  焦点在输入框/文本域/可编辑元素时交给浏览器处理文本撤销，不拦截。 */
+  function handleGlobalKeydown(event: KeyboardEvent): void {
+    if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+    const target = event.target as HTMLElement | null;
+    const tag = target?.tagName;
+    if (
+      tag === "INPUT" ||
+      tag === "TEXTAREA" ||
+      tag === "SELECT" ||
+      target?.isContentEditable === true
+    ) {
+      return;
+    }
+    const key = event.key.toLowerCase();
+    if (key === "z" && !event.shiftKey) {
+      event.preventDefault();
+      runtime.undo().catch(() => {});
+    } else if ((key === "z" && event.shiftKey) || key === "y") {
+      event.preventDefault();
+      runtime.redo().catch(() => {});
+    }
+  }
 </script>
 
 <svelte:head>
   <title>切向量化</title>
 </svelte:head>
+
+<svelte:window onkeydown={handleGlobalKeydown} />
 
 <div class="app">
   <!-- ══ 应用栏 ══ -->
@@ -1141,6 +1167,25 @@
       <button class="btn ghost" onclick={checkForUpdate} disabled={updating}>
         {updating ? "检查中…" : "检查更新"}
       </button>
+    </div>
+
+    <div class="menu-wrap">
+      <button
+        class="btn ghost"
+        title={runtime.history.undo_label
+          ? `撤销：${runtime.history.undo_label}（Ctrl+Z）`
+          : "没有可撤销的操作"}
+        onclick={() => runtime.undo().catch(() => {})}
+        disabled={!runtime.history.can_undo || runtime.busy}
+      >撤销</button>
+      <button
+        class="btn ghost"
+        title={runtime.history.redo_label
+          ? `重做：${runtime.history.redo_label}（Ctrl+Shift+Z / Ctrl+Y）`
+          : "没有可重做的操作"}
+        onclick={() => runtime.redo().catch(() => {})}
+        disabled={!runtime.history.can_redo || runtime.busy}
+      >重做</button>
     </div>
 
     {#if runtime.contextBusy}

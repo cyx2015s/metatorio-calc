@@ -1088,7 +1088,7 @@ pub fn mechanic_usage(result: &SolveResult) -> HashMap<MechanicId, f64> {
 /// 消息作用域里的项目 id（Application 级消息没有项目）。
 fn message_project(message: &AppMessage) -> Option<ProjectId> {
     match message {
-        AppMessage::Application(_) => None,
+        AppMessage::Application(_) | AppMessage::History(_) => None,
         AppMessage::Project { project, .. } | AppMessage::Factory { project, .. } => Some(*project),
     }
 }
@@ -1803,6 +1803,35 @@ mod tests {
         runtime
             .dispatch(AppMessage::Project { project, action })
             .unwrap();
+    }
+
+    /// 撤销/重做是可 dispatch 的消息（GUI 与 MCP 同一入口）：经 Runtime::dispatch
+    /// 走同一管线、不改可达性；撤销回退文档、重做再应用，且 revision 前进。
+    #[test]
+    fn history_messages_dispatch_through_the_runtime() {
+        use crate::message::HistoryAction;
+
+        let mut runtime = load_runtime();
+        let project = new_project(&mut runtime);
+        dispatch_project(
+            &mut runtime,
+            project,
+            ProjectAction::SetName {
+                name: "renamed".to_string(),
+            },
+        );
+        assert_eq!(runtime.state.project(project).unwrap().name, "renamed");
+
+        let undone = runtime
+            .dispatch(AppMessage::History(HistoryAction::Undo))
+            .unwrap();
+        assert!(undone.changed);
+        assert_eq!(runtime.state.project(project).unwrap().name, "test project");
+
+        runtime
+            .dispatch(AppMessage::History(HistoryAction::Redo))
+            .unwrap();
+        assert_eq!(runtime.state.project(project).unwrap().name, "renamed");
     }
 
     #[test]

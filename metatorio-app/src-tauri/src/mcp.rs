@@ -151,6 +151,8 @@ impl MetatorioMcp {
         求解时的结构化结果，`errors` 非空时 `isError` 为真（命令跑了但失败了）。  \
         **所有流量都是「每秒」**；项目的 time-scale 只影响界面显示。  \
         传 `request_id` 让重试幂等（同一个 id 只应用一次，重复调用回放上次的载荷）。  \
+        可用 scope=history、action=undo/redo 撤销/重做一次编辑；返回里的 `history` \
+        字段带 can_undo/can_redo、动作标签与聚焦对象。  \
         `solve` 的输出始终有界：`mechanics`/`flows` 按 `limit`（默认 50、上限 1000）+\
         `offset` 分页，`page.totals`/`page.truncated` 如实说明被截断的集合。  \
         这是**逃生通道**：常规规划请优先用 `auto_plan`（权威入口），不要一个个配方\
@@ -993,6 +995,7 @@ async fn dispatch_message<R: Runtime>(
         "revision": revision,
         "changed": outcome.changed || revision != outcome.revision,
         "created": &outcome.created,
+        "history": &outcome.history,
         "scheduled_commands": commands,
         "solve": solve,
         "errors": errors,

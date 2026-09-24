@@ -24,9 +24,20 @@ pub enum AppMessage {
         factory: FactoryId,
         action: FactoryAction,
     },
+    /// 撤销/重做：与普通编辑走同一条 dispatch 管线，GUI 与 MCP 共享同一入口
+    /// 与同一份历史（见 RuntimeState 的 undo/redo）。
+    History(HistoryAction),
 }
 
 pub type RuntimeMessage = AppMessage;
+
+/// 撤销/重做动作（scope = "history"）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum HistoryAction {
+    Undo,
+    Redo,
+}
 
 /// 文件、游戏数据上下文、更新与进程级操作。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

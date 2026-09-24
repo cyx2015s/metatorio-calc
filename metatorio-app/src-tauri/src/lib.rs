@@ -2902,6 +2902,12 @@ async fn get_document(app: AppHandle) -> Result<AppDocument, String> {
     run_blocking(app, |runtime| Ok(runtime.state.document.clone())).await
 }
 
+/// 撤销/重做可用性（前端启动时初始化按钮态；此后每次 dispatch 的回执里也带）。
+#[tauri::command]
+async fn history_state(app: AppHandle) -> Result<metatorio_runtime::HistoryStatus, String> {
+    run_blocking(app, |runtime| Ok(runtime.state.history_status())).await
+}
+
 /// 在阻塞线程池里以 `&mut Runtime` 执行一段逻辑（用于把重计算移出主线程）。
 async fn run_blocking<T: Send + 'static>(
     app: AppHandle,
@@ -4222,6 +4228,7 @@ pub fn run(options: Options) {
             allowed_modules,
             dispatch,
             get_document,
+            history_state,
             accessibility,
             milestones_ordered,
             productivity,

@@ -15,6 +15,7 @@ import type {
   ContextInfo,
   ContextList,
   DispatchResult,
+  HistoryStatus,
   Milestone,
   PrototypeDetail,
   SolveResult,
@@ -39,6 +40,11 @@ export async function dispatch(message: AppMessage): Promise<DispatchResult> {
 
 export async function getDocument(): Promise<AppDocument> {
   return call("get_document");
+}
+
+/** 撤销/重做可用性（启动时初始化按钮态；之后每次 dispatch 的回执里也带）。 */
+export async function historyState(): Promise<HistoryStatus> {
+  return call("history_state");
 }
 
 /** 项目可达性快照（选择器过滤用）：当前可达对象集合。 */
