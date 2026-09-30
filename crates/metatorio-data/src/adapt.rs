@@ -24,6 +24,22 @@
 
 use serde_json::Value;
 
+use crate::COMPONENT_LIST;
+
+/// 携带 `ItemComponent` 的顶层原型类型（item / capsule / module / tool / ammo ...）。
+///
+/// 适配层必须覆盖**全部**这些类型，而不是只处理 `item`：物品语义在游戏里
+/// 由继承树共享（`capsule` 继承 `item`）。典型反例：`bioflux` 是 capsule，
+/// 2.0 形态写着 `fuel_category: "food"`；只改 `item` 会漏掉它，于是求解器里
+/// 没有任何 food 类燃料供给，而虫巢（burner 类别 food）是需求方 →
+/// 自动规划判为不可解（实测复现，见 issue #6）。
+fn item_like_types() -> impl Iterator<Item = &'static str> {
+    COMPONENT_LIST
+        .iter()
+        .filter(|(_, components)| components.contains(&"ItemComponent"))
+        .map(|(typename, _)| *typename)
+}
+
 /// 只读检测 dump 是否需要适配（存在任意 2.0 特征）。
 ///
 /// 当前特征：recipe 使用 `category`/`additional_categories`，或任一
@@ -54,12 +70,17 @@ pub fn needs_adaptation(dump: &Value) -> bool {
         return true;
     }
 
-    if let Some(items) = dump.get("item").and_then(Value::as_object)
-        && items.values().any(|item| {
-            item.as_object()
-                .is_some_and(|i| i.contains_key("fuel_category"))
-        })
-    {
+    // 燃料类别：2.0 的 fuel_category 可能出现在任何类物品原型上
+    // （不止 item —— 例如 bioflux 是 capsule）。
+    if item_like_types().any(|typename| {
+        dump.get(typename)
+            .and_then(Value::as_object)
+            .is_some_and(|entries| {
+                entries.values().any(|entry| {
+                    entry.as_object().is_some_and(|obj| obj.contains_key("fuel_category"))
+                })
+            })
+    }) {
         return true;
     }
     false
@@ -79,9 +100,13 @@ pub fn normalize_2_0_dump(dump: &mut Value) {
             adapt_recipe_product_probability(recipe);
         }
     }
-    if let Some(items) = root.get_mut("item").and_then(Value::as_object_mut) {
-        for item in items.values_mut() {
-            adapt_item_fuel_categories(item);
+    // 燃料类别适配覆盖所有类物品组（不止 item），否则 capsule 类燃料
+    // （如 bioflux/food）会被漏掉。
+    for typename in item_like_types() {
+        if let Some(entries) = root.get_mut(typename).and_then(Value::as_object_mut) {
+            for item in entries.values_mut() {
+                adapt_item_fuel_categories(item);
+            }
         }
     }
 }
@@ -172,7 +197,7 @@ pub fn adapt_recipe_product_probability(recipe: &mut Value) {
     }
 }
 
-/// 适配层：item 燃料类别字段数组化。
+/// 适配层：类物品原型（item / capsule / module / ...）燃料类别字段数组化。
 ///
 /// 2.0：`fuel_category: "chemical"`（标量）；
 /// 2.1：`fuel_categories: ["chemical", ...]`（数组，物品可声明多个类别）。
@@ -523,6 +548,35 @@ mod tests {
             &wood_component.fuel_categories,
             &["biological".to_string()],
             "木材 fuel_categories 应为原数组"
+        );
+    }
+
+    #[test]
+    fn normalized_fuel_categories_covers_capsule() {
+        // bioflux 是 capsule（不是 item）且声明 fuel_category: "food"。
+        // 只适配 item 组会让它的 fuel_categories 为空 → 求解器里没有任何
+        // food 类燃料供给，而虫巢（burner 类别 food）需要它 → 自动规划判
+        // 不可解。见 issue #6。
+        let mut dump = serde_json::json!({
+            "item": {
+                "coal": { "type": "item", "name": "coal", "stack_size": 50, "fuel_category": "chemical" }
+            },
+            "capsule": {
+                "bioflux": { "type": "capsule", "name": "bioflux", "stack_size": 100, "fuel_category": "food", "fuel_value": "6MJ" }
+            }
+        });
+        normalize_2_0_dump(&mut dump);
+        let store = crate::store::PrototypeStore::load(&dump).expect("规范化后应可加载");
+        let bioflux = store
+            .get(crate::store::PrototypeGroup::Item, "bioflux")
+            .expect("bioflux 应在 Item 组中");
+        let component = bioflux
+            .component::<crate::generated_components::ItemComponent>()
+            .expect("bioflux 应有 ItemComponent");
+        assert_eq!(
+            &component.fuel_categories,
+            &["food".to_string()],
+            "capsule 型燃料的 fuel_categories 也应为数组"
         );
     }
 }
