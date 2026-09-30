@@ -1,7 +1,7 @@
-use good_lp::{IntoAffineExpression, Solution, variable};
+use good_lp::{IntoAffineExpression, variable};
 
 use crate::concept::{AIndexMap, AIndexSet, Flow, ItemIdent};
-use crate::ruiz::RuizSolver;
+use crate::ruiz::solve_pruned;
 use core::f64;
 
 use std::fmt::Debug;
@@ -557,8 +557,8 @@ where
 
             log::debug!("求解器：对应流变量: {:?}", flow_vars);
         }
-        let solution =
-            RuizSolver::new(optimization_expr.clone(), constraints, problem_variables).solve();
+        // 求解策略见 solve_pruned：clarabel 先解 → 剪枝 → 剪枝后子集交 microlp。
+        let solution = solve_pruned(optimization_expr.clone(), constraints, problem_variables);
 
         match solution {
             Ok(sol) => {
@@ -569,8 +569,9 @@ where
                 let mut prim_scale = Flow::default();
 
                 for (f_id, var) in &flow_vars {
-                    let cur_prim_scale = sol.prim_scales.get(var).cloned().unwrap_or(1.0);
-                    let value = sol.inner.value(*var) * cur_prim_scale / global_scale;
+                    let cur_prim_scale = sol.prim_scale(*var);
+                    // value 已是原问题空间的取值（后端与缩放都对调用方透明）。
+                    let value = sol.value(*var);
 
                     prim.insert(f_id.clone(), value);
 

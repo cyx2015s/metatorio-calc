@@ -955,7 +955,15 @@ pub fn plan_auto_plan(
     let store = &snapshot.store;
     let project_doc = &snapshot.project_doc;
     let factory_doc = &snapshot.factory_doc;
-    let game = make_game_state_with_accessibility(store, project_doc, accessibility);
+    let mut game = make_game_state_with_accessibility(store, project_doc, accessibility);
+    // 与 solve_document 保持一致：自动规划也必须带上星球/地表环境（太阳能倍率、
+    // 昼夜周期），否则展开出的电量相关流与真实求解不一致。
+    apply_environment_to_game_state(
+        store,
+        &mut game,
+        factory_doc.settings.planet.as_deref(),
+        factory_doc.settings.surface.as_deref(),
+    );
     let context = metatorio_core::Context::new(store, &game);
     let quality_level = |name: &str| game.qualities.iter().position(|c| c == name).unwrap_or(0);
     let options = crate::auto_plan::EnumerateOptions {

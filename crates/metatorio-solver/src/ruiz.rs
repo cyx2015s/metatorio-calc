@@ -4,7 +4,7 @@ use crate::concept::AIndexMap;
 
 use good_lp::{
     Constraint, Expression, IntoAffineExpression, ProblemVariables, ResolutionError, Solution,
-    SolverModel, Variable, VariableDefinition, microlp, solvers::microlp::MicroLpSolution,
+    SolverModel, Variable, VariableDefinition, microlp, solvers::clarabel::clarabel,
 };
 use rayon::prelude::*;
 
@@ -15,13 +15,47 @@ pub struct RuizSolver {
 }
 
 pub struct RuizSolution {
-    pub inner: MicroLpSolution,                // 原始结果
+    /// 原问题空间里每个变量（按传给求解器的 Variable）的取值。
+    /// 用显式取值表而不是直接暴露后端解对象：剪枝/换后端后变量会重编号，
+    /// 调用方不该关心后端是谁。
+    values: AIndexMap<Variable, f64>,
     pub prim_scales: AIndexMap<Variable, f64>, // 原始变量的系数分别乘了这些系数
     pub dual_scales: Vec<f64>,                 // 原始约束的系数分别乘了这些系数
-    pub cost: f64,                             // 原问题的目标值，应该没有获取原始值的需求吧……
+    pub cost: f64,                             // 原问题的目标值
     // 实际求解的问题是原问题的 global_scale 倍，
     // 因此原始变量需要除以 global_scale 才是原问题的结果
     pub global_scale: f64,
+}
+
+impl RuizSolution {
+    /// 变量在原问题空间的取值；没有记录（被剪枝）的变量为 0。
+    pub fn value(&self, var: Variable) -> f64 {
+        self.values.get(&var).copied().unwrap_or(0.0)
+    }
+
+    /// 变量的 Ruiz 缩放系数（未记录时为 1.0）。
+    pub fn prim_scale(&self, var: Variable) -> f64 {
+        self.prim_scales.get(&var).copied().unwrap_or(1.0)
+    }
+}
+
+/// 把后端解按 Ruiz 缩放恢复成原问题空间的取值表。
+///
+/// solution 所在问题的变量编号必须与 variables 一致（缩放问题是按同一顺序
+/// 重建的，因此 Variable 下标一一对应）。
+fn collect_values(
+    variables: &[Variable],
+    prim_scales: &AIndexMap<Variable, f64>,
+    global_scale: f64,
+    solution: &impl Solution,
+) -> AIndexMap<Variable, f64> {
+    variables
+        .iter()
+        .map(|&var| {
+            let prim_scale = prim_scales.get(&var).cloned().unwrap_or(1.0);
+            (var, solution.value(var) * prim_scale / global_scale)
+        })
+        .collect()
 }
 
 pub const MAGIC: f64 = 114.0;
@@ -43,6 +77,12 @@ impl RuizSolver {
         // 未缩放回退要用到原始目标函数，但下面的 linear_coefficients() 会
         // 消费 self.minimise，所以先留一份克隆。
         let original_minimise = self.minimise.clone();
+        // 变量列表（按编号顺序）：恢复取值时遍历它，不依赖后端变量编号。
+        let variable_list: Vec<Variable> = self
+            .variables
+            .iter_variables_with_def()
+            .map(|(var, _)| var)
+            .collect();
         // 每个变量，在每个约束中的系数
         let instant = Instant::now();
         let prim_coeffs = self
@@ -224,9 +264,11 @@ impl RuizSolver {
             .solve();
         match primary {
             Ok(solution) => {
+                let values =
+                    collect_values(&variable_list, &prim_scales, global_scale, &solution);
                 let cost = solution.eval(new_minimise);
                 Ok(RuizSolution {
-                    inner: solution,
+                    values,
                     prim_scales,
                     dual_scales,
                     global_scale,
@@ -251,9 +293,10 @@ impl RuizSolver {
                     .using(microlp)
                     .with_all(self.constraints)
                     .solve()?;
+                let values = collect_values(&variable_list, &identity_prim, 1.0, &solution);
                 let cost = solution.eval(original_minimise);
                 Ok(RuizSolution {
-                    inner: solution,
+                    values,
                     prim_scales: identity_prim,
                     dual_scales: identity_dual,
                     global_scale: 1.0,
@@ -263,6 +306,260 @@ impl RuizSolver {
             Err(err) => Err(err),
         }
     }
+}
+
+/// clarabel 解里小于「最大取值 × 该比例」的变量在剪枝时丢弃。
+const PRUNE_RATIO: f64 = 1e-7;
+
+/// 解析后的一行约束：sum(coeff * x) {==,<=} rhs（rhs = -表达式常数项）。
+struct ParsedRow {
+    is_equality: bool,
+    rhs: f64,
+    /// (原始变量下标, 系数)
+    terms: Vec<(usize, f64)>,
+}
+
+/// 由解析后的 LP 构建出的 good_lp 问题，以及新旧变量的对应关系。
+struct BuiltProblem {
+    variables: ProblemVariables,
+    objective: Expression,
+    constraints: Vec<Constraint>,
+    /// 第 k 个新变量对应的原始变量下标（顺序同 add_all 返回的 Variable）。
+    indices: Vec<usize>,
+    /// 新问题里按编号顺序的 Variable（下标从 0 起）。
+    vars_in_order: Vec<Variable>,
+    /// 第 k 个约束对应的原始行下标。
+    emitted_rows: Vec<usize>,
+    /// 剪枝后出现「不含任何变量、又不可能满足」的约束。
+    trivially_infeasible: bool,
+}
+
+/// 按 keep 选出的变量子集重建一个 good_lp 问题；keep = None 表示全量。
+fn build_problem(
+    defs: &[VariableDefinition],
+    objective: &[(usize, f64)],
+    rows: &[ParsedRow],
+    keep: Option<&[usize]>,
+) -> BuiltProblem {
+    let indices: Vec<usize> = match keep {
+        Some(keep) => keep.to_vec(),
+        None => (0..defs.len()).collect(),
+    };
+    let mut variables = ProblemVariables::new();
+    let vars_in_order: Vec<Variable> =
+        variables.add_all(indices.iter().map(|&index| defs[index].clone()));
+    let mut map: AIndexMap<usize, Variable> = AIndexMap::default();
+    for (pos, &orig) in indices.iter().enumerate() {
+        map.insert(orig, vars_in_order[pos]);
+    }
+    let fold = |terms: &[(usize, f64)]| -> Expression {
+        terms
+            .iter()
+            .filter_map(|(index, coeff)| map.get(index).map(|var| *var * *coeff))
+            .fold(Expression::from(0.0), |acc, term| acc + term)
+    };
+    let objective_expr = fold(objective);
+    let mut constraints = Vec::new();
+    let mut emitted_rows = Vec::new();
+    let mut trivially_infeasible = false;
+    for (row_index, row) in rows.iter().enumerate() {
+        let kept_terms = row
+            .terms
+            .iter()
+            .filter(|(index, _)| map.contains_key(index))
+            .count();
+        if kept_terms == 0 {
+            // 剪枝后这一行没有变量：只有恒真时才能丢。
+            if (row.is_equality && row.rhs.abs() > 1e-12) || (!row.is_equality && row.rhs < 0.0) {
+                trivially_infeasible = true;
+            }
+            continue;
+        }
+        let expr = fold(&row.terms);
+        let constraint = if row.is_equality {
+            expr.eq(row.rhs)
+        } else {
+            expr.leq(row.rhs)
+        };
+        constraints.push(constraint);
+        emitted_rows.push(row_index);
+    }
+    BuiltProblem {
+        variables,
+        objective: objective_expr,
+        constraints,
+        indices,
+        vars_in_order,
+        emitted_rows,
+        trivially_infeasible,
+    }
+}
+
+/// 求解策略（#6）：clarabel 先解 → 按其解剪枝 → 剪枝后的子集交 microlp。
+///
+/// 动机：microlp 在「列高度相似、系数跨度二十个数量级」的大 LP 上会返回内部
+/// 数值失败（Singular matrix），把有解误报成不可解。clarabel 是内点法，自带
+/// 均衡与正则化，通常能解出来；但内点解不是顶点解，所以再用它的解剪枝，把
+/// 剪枝后的小问题交给 microlp 求顶点解——**以剪枝后的结果为准**。
+///
+/// 失败处理：clarabel 报 Infeasible/Unbounded 原样透出；clarabel 自身数值失败
+/// 时回退原来的 Ruiz + microlp；剪枝后 microlp 仍失败则退回 clarabel 的近似可行解。
+pub fn solve_pruned(
+    minimise: Expression,
+    constraints: Vec<Constraint>,
+    variables: ProblemVariables,
+) -> Result<RuizSolution, ResolutionError> {
+    let defs: Vec<VariableDefinition> = variables
+        .iter_variables_with_def()
+        .map(|(_, def)| def.clone())
+        .collect();
+    let orig_vars: Vec<Variable> = variables
+        .iter_variables_with_def()
+        .map(|(var, _)| var)
+        .collect();
+    // good_lp 的 Variable::index() 是 crate 私有，这里按 iter 顺序自己建映射。
+    let index_of: AIndexMap<Variable, usize> = variables
+        .iter_variables_with_def()
+        .enumerate()
+        .map(|(index, (var, _))| (var, index))
+        .collect();
+    let objective: Vec<(usize, f64)> = minimise
+        .clone()
+        .linear_coefficients()
+        .filter_map(|(var, coeff)| index_of.get(&var).map(|&index| (index, coeff)))
+        .collect();
+    let rows: Vec<ParsedRow> = constraints
+        .iter()
+        .map(|constraint| ParsedRow {
+            is_equality: constraint.is_equality(),
+            rhs: -constraint.expression().constant(),
+            terms: constraint
+                .expression()
+                .linear_coefficients()
+                .filter_map(|(var, coeff)| index_of.get(&var).map(|&index| (index, coeff)))
+                .collect(),
+        })
+        .collect();
+
+    // 1) clarabel 解原始问题。
+    let full = build_problem(&defs, &objective, &rows, None);
+    // 全量阶段就有「不含变量、又不可能满足」的约束（例如目标物品根本不在
+    // 任何流里，于是目标约束退化成 0 == 1）→ 原问题不可行，不必交给后端。
+    if full.trivially_infeasible {
+        return Err(ResolutionError::Infeasible);
+    }
+    // 空问题 clarabel 会在内部 panic，直接走 Ruiz + microlp。
+    if defs.is_empty() {
+        return Ok(RuizSolution {
+            values: AIndexMap::default(),
+            prim_scales: AIndexMap::default(),
+            dual_scales: vec![1.0; rows.len()],
+            cost: 0.0,
+            global_scale: 1.0,
+        });
+    }
+    if rows.is_empty() {
+        return RuizSolver::new(minimise, constraints, variables).solve();
+    }
+    // clarabel 在退化输入上会 panic（qdldl 越界，见 clarabel-0.11.1），
+    // 作为主求解路径必须兜住：panic 与内部错误一样退到 Ruiz + microlp。
+    let clarabel_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+        full.variables
+            .minimise(full.objective)
+            .using(clarabel)
+            .with_all(full.constraints)
+            .solve()
+    }));
+    let clarabel_solution = match clarabel_result {
+        Ok(Ok(solution)) => solution,
+        Ok(Err(err @ (ResolutionError::Infeasible | ResolutionError::Unbounded))) => {
+            return Err(err);
+        }
+        Ok(Err(err)) => {
+            log::warn!("clarabel 求解失败（{err:?}），回退 Ruiz + microlp");
+            return RuizSolver::new(minimise, constraints, variables).solve();
+        }
+        Err(_) => {
+            log::warn!("clarabel 内部 panic，回退 Ruiz + microlp");
+            return RuizSolver::new(minimise, constraints, variables).solve();
+        }
+    };
+    let clarabel_values: Vec<f64> = orig_vars
+        .iter()
+        .map(|var| clarabel_solution.value(*var))
+        .collect();
+    if clarabel_values.iter().any(|value| !value.is_finite()) {
+        return Err(ResolutionError::Other("clarabel 返回非有限解"));
+    }
+
+    // 2) 剪枝：只保留用量显著的变量。
+    let max_abs = clarabel_values
+        .iter()
+        .fold(0.0f64, |acc, value| acc.max(value.abs()));
+    let threshold = max_abs * PRUNE_RATIO;
+    let keep: Vec<usize> = (0..defs.len())
+        .filter(|&index| clarabel_values[index].abs() > threshold)
+        .collect();
+    log::info!(
+        "clarabel 剪枝：{} 个变量保留 {} 个（阈值 {:.3e}）",
+        defs.len(),
+        keep.len(),
+        threshold
+    );
+
+
+    // 3) 剪枝后的子集交给 microlp（仍走 Ruiz 缩放；问题小，很快）。
+    let reduced = build_problem(&defs, &objective, &rows, Some(&keep));
+    let reduced_solution = if reduced.trivially_infeasible || reduced.indices.is_empty() {
+        None
+    } else {
+        match RuizSolver::new(reduced.objective, reduced.constraints, reduced.variables).solve() {
+            Ok(solution) => Some(solution),
+            Err(err) => {
+                log::warn!("剪枝后 microlp 仍失败（{err:?}），采用 clarabel 解");
+                None
+            }
+        }
+    };
+
+    let (values, prim_scales, dual_scales, global_scale) = match reduced_solution {
+        Some(solution) => {
+            let mut values = vec![0.0f64; defs.len()];
+            let mut prim_scales: AIndexMap<Variable, f64> = AIndexMap::default();
+            for (pos, &orig) in reduced.indices.iter().enumerate() {
+                let reduced_var = reduced.vars_in_order[pos];
+                values[orig] = solution.value(reduced_var);
+                prim_scales.insert(orig_vars[orig], solution.prim_scale(reduced_var));
+            }
+            let mut dual_scales = vec![1.0f64; rows.len()];
+            for (pos, &row_index) in reduced.emitted_rows.iter().enumerate() {
+                dual_scales[row_index] = solution.dual_scales.get(pos).copied().unwrap_or(1.0);
+            }
+            (values, prim_scales, dual_scales, solution.global_scale)
+        }
+        None => (
+            clarabel_values.clone(),
+            AIndexMap::default(),
+            vec![1.0f64; rows.len()],
+            1.0,
+        ),
+    };
+    let cost = objective
+        .iter()
+        .map(|(index, coeff)| coeff * values[*index])
+        .sum();
+    let values_map: AIndexMap<Variable, f64> = orig_vars
+        .iter()
+        .zip(values.iter())
+        .map(|(var, value)| (*var, *value))
+        .collect();
+    Ok(RuizSolution {
+        values: values_map,
+        prim_scales,
+        dual_scales,
+        cost,
+        global_scale,
+    })
 }
 
 /// 定位"变量上界未生效"缺陷：直接用 microlp（不经 Ruiz 缩放）求解同一 LP。
@@ -286,19 +583,12 @@ fn test_ruiz() {
         .solve()
         .unwrap();
 
-    // 注意：`solution.inner` 是 Ruiz 均衡缩放后的问题的解，
-    // 原变量值必须反缩放：value * prim_scale / global_scale
-    // （solver.rs 的 `SolverData::solve` 内部正是这样恢复的；
-    //   历史上本测试曾直接读取 inner.value 导致误读为 0.678，
-    //   实际最优为 x1=1.0, x2=0.375, x3=0，目标 1.375。）
-    let g = solution.global_scale;
-    let unscaled = |var: Variable| {
-        let p = solution.prim_scales.get(&var).copied().unwrap_or(1.0);
-        solution.inner.value(var) * p / g
-    };
-    let x1v = unscaled(x1);
-    let x2v = unscaled(x2);
-    let x3v = unscaled(x3);
+    // RuizSolution::value 已按 prim_scale / global_scale 还原回原问题空间；
+    // 历史上本测试曾直接读后端解导致误读为 0.678，实际最优为
+    // x1=1.0, x2=0.375, x3=0，目标 1.375。
+    let x1v = solution.value(x1);
+    let x2v = solution.value(x2);
+    let x3v = solution.value(x3);
 
     assert!((x1v - 1.0).abs() < 1e-5, "x1: {x1v}");
     assert!((x2v - 0.375).abs() < 1e-5, "x2: {x2v}");
@@ -341,11 +631,7 @@ fn global_scale_sensitivity() {
         match &result {
             Ok(sol) => {
                 let g = sol.global_scale;
-                let unscaled = |var: Variable| {
-                    let p = sol.prim_scales.get(&var).copied().unwrap_or(1.0);
-                    sol.inner.value(var) * p / g
-                };
-                let v3 = unscaled(x3);
+                let v3 = sol.value(x3);
                 let ok = (v3 - target_amount).abs() <= target_amount * 1e-3 + 1e-9;
                 eprintln!("目标 {target_amount}: Solved global={g:.3e} x3={v3:.6e} ok={ok}");
                 if !ok {
