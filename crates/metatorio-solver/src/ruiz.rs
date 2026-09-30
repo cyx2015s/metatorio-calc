@@ -340,7 +340,17 @@ impl RuizSolver {
 }
 
 /// clarabel 解里小于「最大取值 × 该比例」的变量在剪枝时丢弃。
-const PRUNE_RATIO: f64 = 1e-7;
+/// 剪枝比例：**从紧到松**依次尝试，取第一个「剪枝后子问题能解出来」的档。
+///
+/// 单一阈值两边都会踩坑（实测原版 nauvis / `transport-belt:legendary`）：
+/// - 太紧（1e-7 / 1e-9）：子问题丢掉配平必需的变量 → 解不出来 → 退回全量
+///   microlp → 全量在病态输入上给出的解自己不可复现 → 回写后文档无解；
+/// - 太松（0 = 全保留）：等于没剪 → microlp 又回到病态 → 同样失败；
+/// - 中间（1e-11）：保留 474 个变量，microlp 解出干净顶点解 → 回写 39 条，
+///   文档可解。
+///
+/// 所以这里的顺序必须**由紧到松**：先要最干净的解，解不出来再放宽。
+const PRUNE_RATIOS: [f64; 4] = [1e-7, 1e-9, 1e-11, 0.0];
 
 /// 解析后的一行约束：sum(coeff * x) {==,<=} rhs（rhs = -表达式常数项）。
 struct ParsedRow {
@@ -524,109 +534,145 @@ pub fn solve_pruned(
         return Err(ResolutionError::Other("clarabel 返回非有限解"));
     }
 
-    // 2) 剪枝：只保留用量显著的变量。
+    // 2) 剪枝：按「比例从紧到松」依次尝试，取第一个**子问题能解出来**的档。
+    //
+    // 为什么是一串而不是一个值（实测原版 nauvis / transport-belt:legendary）：
+    //   1e-7  → 保留太少，子问题丢变量解不出来 → 退回全量 microlp → 回写后无解
+    //   1e-9  → 同上
+    //   1e-11 → 保留 474 个变量，microlp 解出干净顶点解 → 回写 39 条，文档可解 ✔
+    //   0     → 全保留 = 全量，又回到病态 → 回写后无解
+    // 也就是说：剪枝是**为了数值条件数**，但不能把配平必需的变量剪掉；
+    // 单点阈值两边都会踩坑，所以按序列试到成功为止。
     let max_abs = clarabel_values
         .iter()
         .fold(0.0f64, |acc, value| acc.max(value.abs()));
-    let threshold = max_abs * PRUNE_RATIO;
-    let keep: Vec<usize> = (0..defs.len())
-        .filter(|&index| clarabel_values[index].abs() > threshold)
-        .collect();
-    log::info!(
-        "clarabel 剪枝：{} 个变量保留 {} 个（阈值 {:.3e}）",
-        defs.len(),
-        keep.len(),
-        threshold
-    );
-
-
-    // 3) 剪枝后的子集交给 microlp（仍走 Ruiz 缩放；问题小，很快）——
-    //    顶点解天然稀疏（没用到的变量精确为 0），是首选结果。
-    let reduced = build_problem(&defs, &objective, &rows, Some(&keep));
-    let reduced_solution = if reduced.trivially_infeasible || reduced.indices.is_empty() {
-        None
-    } else {
-        match RuizSolver::new(reduced.objective, reduced.constraints, reduced.variables).solve() {
-            Ok(solution) => Some(solution),
-            Err(err) => {
-                log::warn!("剪枝后 microlp 失败（{err:?}），改用整问题 microlp");
-                None
-            }
-        }
+    // 诊断用：设了 METATORIO_PRUNE_RATIO 就只试这一个比例。
+    let ratios: Vec<f64> = match std::env::var("METATORIO_PRUNE_RATIO")
+        .ok()
+        .and_then(|value| value.parse::<f64>().ok())
+    {
+        Some(ratio) => vec![ratio],
+        None => PRUNE_RATIOS.to_vec(),
     };
-
-    let (values, prim_scales, dual_scales, global_scale, report) = match reduced_solution {
-        Some(solution) => {
-            let mut values = vec![0.0f64; defs.len()];
-            let mut prim_scales: AIndexMap<Variable, f64> = AIndexMap::default();
-            for (pos, &orig) in reduced.indices.iter().enumerate() {
-                let reduced_var = reduced.vars_in_order[pos];
-                values[orig] = solution.value(reduced_var);
-                prim_scales.insert(orig_vars[orig], solution.prim_scale(reduced_var));
-            }
-            let mut dual_scales = vec![1.0f64; rows.len()];
-            for (pos, &row_index) in reduced.emitted_rows.iter().enumerate() {
-                dual_scales[row_index] = solution.dual_scales.get(pos).copied().unwrap_or(1.0);
-            }
-            (
-                values,
-                prim_scales,
-                dual_scales,
-                solution.global_scale,
-                SolveReport {
-                    dense_fallback: false,
-                    variables_before: defs.len(),
-                    variables_after: keep.len(),
-                    prune_threshold: threshold,
-                },
-            )
+    let mut last_keep: Vec<usize> = Vec::new();
+    for &ratio in &ratios {
+        let threshold = max_abs * ratio;
+        let keep: Vec<usize> = (0..defs.len())
+            .filter(|&index| clarabel_values[index].abs() > threshold)
+            .collect();
+        log::info!(
+            "clarabel 剪枝：{} 个变量保留 {} 个（比例 {:.1e}，阈值 {:.3e}）",
+            defs.len(),
+            keep.len(),
+            ratio,
+            threshold
+        );
+        if keep.is_empty() {
+            continue;
         }
-        // 剪枝后 microlp 不成 → 先整问题 microlp（同样是顶点解）。
-        None => match RuizSolver::new(minimise, constraints, variables).solve() {
-            Ok(solution) => {
-                let values: Vec<f64> = orig_vars.iter().map(|var| solution.value(*var)).collect();
-                let prim_scales: AIndexMap<Variable, f64> = orig_vars
-                    .iter()
-                    .map(|var| (*var, solution.prim_scale(*var)))
-                    .collect();
-                (
-                    values,
-                    prim_scales,
-                    solution.dual_scales.clone(),
-                    solution.global_scale,
-                    SolveReport {
-                        dense_fallback: false,
-                        variables_before: defs.len(),
-                        variables_after: defs.len(),
-                        prune_threshold: threshold,
-                    },
-                )
-            }
-            // 两条 microlp 路径都不成 → 只能退回 clarabel。**必须按剪枝集
-            // 掩码**：clarabel 是内点法，解是稠密的（没被用到的变量也会拿到
-            // ~1e-8 的尾值），直接拿来用会让自动规划回写一堆接近 0 的机制
-            // （实测：140 条里 47 条 |rate| < 1e-6）。
+        // 退路（clarabel 掩码）用**最松**的那一档：保留得最全，最不容易漏东西。
+        last_keep = keep.clone();
+        let reduced = build_problem(&defs, &objective, &rows, Some(&keep));
+        if reduced.trivially_infeasible {
+            continue;
+        }
+        let solution = match RuizSolver::new(
+            reduced.objective,
+            reduced.constraints,
+            reduced.variables,
+        )
+        .solve()
+        {
+            Ok(solution) => solution,
             Err(err) => {
-                log::warn!("整问题 microlp 也失败（{err:?}），退回按剪枝掩码的 clarabel 解");
-                let mut values = vec![0.0f64; defs.len()];
-                for &index in &keep {
-                    values[index] = clarabel_values[index];
-                }
-                (
-                    values,
-                    AIndexMap::default(),
-                    vec![1.0f64; rows.len()],
-                    1.0,
-                    SolveReport {
-                        dense_fallback: true,
-                        variables_before: defs.len(),
-                        variables_after: keep.len(),
-                        prune_threshold: threshold,
-                    },
-                )
+                log::warn!("剪枝（比例 {ratio:.1e}，保留 {}）求解失败：{err:?}", keep.len());
+                continue;
             }
+        };
+        let mut values = vec![0.0f64; defs.len()];
+        let mut prim_scales: AIndexMap<Variable, f64> = AIndexMap::default();
+        for (pos, &orig) in reduced.indices.iter().enumerate() {
+            let reduced_var = reduced.vars_in_order[pos];
+            values[orig] = solution.value(reduced_var);
+            prim_scales.insert(orig_vars[orig], solution.prim_scale(reduced_var));
+        }
+        let mut dual_scales = vec![1.0f64; rows.len()];
+        for (pos, &row_index) in reduced.emitted_rows.iter().enumerate() {
+            dual_scales[row_index] = solution.dual_scales.get(pos).copied().unwrap_or(1.0);
+        }
+        return Ok(assemble(
+            values,
+            prim_scales,
+            dual_scales,
+            solution.global_scale,
+            SolveReport {
+                dense_fallback: false,
+                variables_before: defs.len(),
+                variables_after: keep.len(),
+                prune_threshold: threshold,
+            },
+            &objective,
+            &orig_vars,
+        ));
+    }
+
+    // 3) 所有剪枝档都不成 → 整问题 microlp（同为顶点解）。
+    if let Ok(solution) = RuizSolver::new(minimise, constraints, variables).solve() {
+        let values: Vec<f64> = orig_vars.iter().map(|var| solution.value(*var)).collect();
+        let prim_scales: AIndexMap<Variable, f64> = orig_vars
+            .iter()
+            .map(|var| (*var, solution.prim_scale(*var)))
+            .collect();
+        return Ok(assemble(
+            values,
+            prim_scales,
+            solution.dual_scales.clone(),
+            solution.global_scale,
+            SolveReport {
+                dense_fallback: false,
+                variables_before: defs.len(),
+                variables_after: defs.len(),
+                prune_threshold: max_abs * ratios.last().copied().unwrap_or(PRUNE_RATIOS[0]),
+            },
+            &objective,
+            &orig_vars,
+        ));
+    }
+
+    // 4) 只能退回 clarabel。**必须按剪枝掩码**：clarabel 是内点法，解是稠密的
+    //    （没被用到的变量也会拿到 ~1e-8 的尾值），直接拿来用会让自动规划回写
+    //    一堆接近 0 的机制（实测：140 条里 47 条 |rate| < 1e-6）。
+    log::warn!("整问题 microlp 也失败，退回按剪枝掩码的 clarabel 解");
+    let mut values = vec![0.0f64; defs.len()];
+    for &index in &last_keep {
+        values[index] = clarabel_values[index];
+    }
+    Ok(assemble(
+        values,
+        AIndexMap::default(),
+        vec![1.0f64; rows.len()],
+        1.0,
+        SolveReport {
+            dense_fallback: true,
+            variables_before: defs.len(),
+            variables_after: last_keep.len(),
+            prune_threshold: max_abs * ratios.last().copied().unwrap_or(PRUNE_RATIOS[0]),
         },
-    };
+        &objective,
+        &orig_vars,
+    ))
+}
+
+/// 组装最终结果（各条返回路径共用）。
+fn assemble(
+    values: Vec<f64>,
+    prim_scales: AIndexMap<Variable, f64>,
+    dual_scales: Vec<f64>,
+    global_scale: f64,
+    report: SolveReport,
+    objective: &[(usize, f64)],
+    orig_vars: &[Variable],
+) -> RuizSolution {
     let cost = objective
         .iter()
         .map(|(index, coeff)| coeff * values[*index])
@@ -636,14 +682,14 @@ pub fn solve_pruned(
         .zip(values.iter())
         .map(|(var, value)| (*var, *value))
         .collect();
-    Ok(RuizSolution {
+    RuizSolution {
         values: values_map,
         prim_scales,
         dual_scales,
         cost,
         global_scale,
         report,
-    })
+    }
 }
 
 /// 定位"变量上界未生效"缺陷：直接用 microlp（不经 Ruiz 缩放）求解同一 LP。
