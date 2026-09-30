@@ -14,6 +14,25 @@ pub struct RuizSolver {
     variables: ProblemVariables,
 }
 
+/// 一次求解的剪枝/后端记录（随结果返回给上层）。
+///
+/// 求解器里有多处**启发式**剪枝。极端 mod 下如果结果看起来「少了一条关键
+/// 机制」，必须能判断它是被剪枝丢掉的，还是根本没有候选 / 真的不可解——
+/// 所以这些决策要随结果留痕，而不是只写日志（应用未安装 logger，`log`
+/// 宏是空操作，等于没记）。
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct SolveReport {
+    /// 结果是否退回了 clarabel 的**稠密内点解**——这种解带 ~1e-8 的数值尾值，
+    /// 上层必须用相对阈值过滤，否则会把尾值当成「在用」。
+    pub dense_fallback: bool,
+    /// 参与剪枝判定的变量数。
+    pub variables_before: usize,
+    /// 实际参与求解的变量数（未剪枝时与 before 相等）。
+    pub variables_after: usize,
+    /// 剪枝阈值（clarabel 解最大取值 × PRUNE_RATIO）；未剪枝为 0。
+    pub prune_threshold: f64,
+}
+
 pub struct RuizSolution {
     /// 原问题空间里每个变量（按传给求解器的 Variable）的取值。
     /// 用显式取值表而不是直接暴露后端解对象：剪枝/换后端后变量会重编号，
@@ -25,6 +44,8 @@ pub struct RuizSolution {
     // 实际求解的问题是原问题的 global_scale 倍，
     // 因此原始变量需要除以 global_scale 才是原问题的结果
     pub global_scale: f64,
+    /// 本次求解的剪枝/后端记录（见 [`SolveReport`]）。
+    pub report: SolveReport,
 }
 
 impl RuizSolution {
@@ -273,6 +294,11 @@ impl RuizSolver {
                     dual_scales,
                     global_scale,
                     cost,
+                    report: SolveReport {
+                        variables_before: variable_list.len(),
+                        variables_after: variable_list.len(),
+                        ..SolveReport::default()
+                    },
                 })
             }
             // 数值失败（如 microlp 的 "Singular matrix"）**不是**「无可行解」：
@@ -301,6 +327,11 @@ impl RuizSolver {
                     dual_scales: identity_dual,
                     global_scale: 1.0,
                     cost,
+                    report: SolveReport {
+                        variables_before: variable_list.len(),
+                        variables_after: variable_list.len(),
+                        ..SolveReport::default()
+                    },
                 })
             }
             Err(err) => Err(err),
@@ -456,6 +487,7 @@ pub fn solve_pruned(
             dual_scales: vec![1.0; rows.len()],
             cost: 0.0,
             global_scale: 1.0,
+            report: SolveReport::default(),
         });
     }
     if rows.is_empty() {
@@ -523,7 +555,7 @@ pub fn solve_pruned(
         }
     };
 
-    let (values, prim_scales, dual_scales, global_scale) = match reduced_solution {
+    let (values, prim_scales, dual_scales, global_scale, report) = match reduced_solution {
         Some(solution) => {
             let mut values = vec![0.0f64; defs.len()];
             let mut prim_scales: AIndexMap<Variable, f64> = AIndexMap::default();
@@ -536,7 +568,18 @@ pub fn solve_pruned(
             for (pos, &row_index) in reduced.emitted_rows.iter().enumerate() {
                 dual_scales[row_index] = solution.dual_scales.get(pos).copied().unwrap_or(1.0);
             }
-            (values, prim_scales, dual_scales, solution.global_scale)
+            (
+                values,
+                prim_scales,
+                dual_scales,
+                solution.global_scale,
+                SolveReport {
+                    dense_fallback: false,
+                    variables_before: defs.len(),
+                    variables_after: keep.len(),
+                    prune_threshold: threshold,
+                },
+            )
         }
         // 剪枝后 microlp 不成 → 先整问题 microlp（同样是顶点解）。
         None => match RuizSolver::new(minimise, constraints, variables).solve() {
@@ -551,6 +594,12 @@ pub fn solve_pruned(
                     prim_scales,
                     solution.dual_scales.clone(),
                     solution.global_scale,
+                    SolveReport {
+                        dense_fallback: false,
+                        variables_before: defs.len(),
+                        variables_after: defs.len(),
+                        prune_threshold: threshold,
+                    },
                 )
             }
             // 两条 microlp 路径都不成 → 只能退回 clarabel。**必须按剪枝集
@@ -563,7 +612,18 @@ pub fn solve_pruned(
                 for &index in &keep {
                     values[index] = clarabel_values[index];
                 }
-                (values, AIndexMap::default(), vec![1.0f64; rows.len()], 1.0)
+                (
+                    values,
+                    AIndexMap::default(),
+                    vec![1.0f64; rows.len()],
+                    1.0,
+                    SolveReport {
+                        dense_fallback: true,
+                        variables_before: defs.len(),
+                        variables_after: keep.len(),
+                        prune_threshold: threshold,
+                    },
+                )
             }
         },
     };
@@ -582,6 +642,7 @@ pub fn solve_pruned(
         dual_scales,
         cost,
         global_scale,
+        report,
     })
 }
 

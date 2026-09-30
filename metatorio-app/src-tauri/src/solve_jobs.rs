@@ -247,6 +247,7 @@ mod tests {
         SolveResult {
             project,
             factory,
+            report: Default::default(),
             status: SolveStatus::Solved {
                 cost: tag,
                 mechanics: Vec::new(),

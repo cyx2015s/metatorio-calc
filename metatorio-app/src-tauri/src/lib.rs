@@ -67,10 +67,12 @@ pub struct AppState {
     runtime: Mutex<Runtime>,
     /// 求解调度器：长求解在锁外跑，按 (project, factory) 单飞 + latest-wins。
     solve_jobs: solve_jobs::SolveJobs<metatorio_runtime::SolveResult>,
-    /// 自动规划调度器：产出 `(快照, 候选机制)`，回写前用快照校验版本。
+    /// 自动规划调度器：产出 `(快照, 候选机制, 候选过滤记录)`，回写前用快照
+    /// 校验版本；过滤记录随求解结果返回（见 `SolveDiagnostics`）。
     autoplan_jobs: solve_jobs::SolveJobs<(
         metatorio_runtime::SolveSnapshot,
         Vec<metatorio_core::Mechanic>,
+        metatorio_runtime::solve::AutoPlanReport,
     )>,
     /// 上下文载入的按键串行锁（同一上下文只读盘解析一次）。
     context_loads: solve_jobs::KeyLocks,
@@ -3666,6 +3668,20 @@ impl CommandOutcome {
     }
 }
 
+/// 把自动规划**回写前**的候选过滤决策补进求解结果（见 `SolveDiagnostics`）。
+///
+/// 为什么随结果返回而不是只写日志：应用没有安装 logger，`log` 宏是空操作。
+/// 极端 mod 下「结果少了一条关键机制」时必须能看出它是被阈值剪掉的。
+fn attach_auto_plan_report(
+    result: &mut metatorio_runtime::SolveResult,
+    report: &metatorio_runtime::solve::AutoPlanReport,
+) {
+    result.report.writeback_cutoff = report.cutoff;
+    result.report.candidates_total = report.candidates_total;
+    result.report.candidates_considered = report.candidates_considered;
+    result.report.candidates_used = report.candidates_used;
+}
+
 /// 逐条执行命令并汇总结果：第一个求解产出、命令的 JSON 序列化、全部错误。
 ///
 /// 抽出来是为了让「命令执行 → 工具回执」的汇总逻辑可单测（不需要 Tauri
@@ -3962,7 +3978,7 @@ async fn execute_command<R: TauriRuntime>(
                     },
                     move |snapshot| {
                         let accessibility = snapshot.resolve_accessibility();
-                        let mechanics =
+                        let (mechanics, auto_report) =
                             metatorio_runtime::solve::plan_auto_plan(snapshot, &accessibility)
                                 .map_err(|error| error.to_string())?;
                         if let Ok(runtime) = compute_app.state::<AppState>().runtime.lock() {
@@ -3973,11 +3989,11 @@ async fn execute_command<R: TauriRuntime>(
                                 accessibility,
                             );
                         }
-                        Ok((snapshot.clone(), mechanics))
+                        Ok((snapshot.clone(), mechanics, auto_report))
                     },
                 )
                 .await;
-            let (snapshot, mechanics) = match planned {
+            let (snapshot, mechanics, auto_report) = match planned {
                 Ok(planned) => planned,
                 Err(error) => {
                     emit(app, "solve-error", error.clone());
@@ -4012,7 +4028,8 @@ async fn execute_command<R: TauriRuntime>(
             };
             if !written.changed {
                 return match solve_factory_offlock(app, state, project, factory).await {
-                    Ok(result) => {
+                    Ok(mut result) => {
+                        attach_auto_plan_report(&mut result, &auto_report);
                         emit(app, "solve-result", result.clone());
                         CommandOutcome::done(Some(metatorio_runtime::CommandEffect::Solve(result)))
                     }
@@ -4026,6 +4043,10 @@ async fn execute_command<R: TauriRuntime>(
             let mut outcome = CommandOutcome::default();
             for command in &written.commands {
                 outcome.absorb(Box::pin(execute_command(app, state, command)).await);
+            }
+            // 回写产生的重解结果里补上本次自动规划的候选过滤决策。
+            if let Some(metatorio_runtime::CommandEffect::Solve(result)) = outcome.effect.as_mut() {
+                attach_auto_plan_report(result, &auto_report);
             }
             outcome
         }
@@ -4946,6 +4967,7 @@ mod tests {
                         metatorio_runtime::SolveResult {
                             project: ProjectId(1),
                             factory: FactoryId(2),
+                            report: Default::default(),
                             status: SolveStatus::NotSolved {
                                 no_provider: Vec::new(),
                                 no_consumer: Vec::new(),

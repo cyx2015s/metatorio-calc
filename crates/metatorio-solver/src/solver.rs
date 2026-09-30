@@ -1,7 +1,7 @@
 use good_lp::{IntoAffineExpression, variable};
 
 use crate::concept::{AIndexMap, AIndexSet, Flow, ItemIdent};
-use crate::ruiz::solve_pruned;
+use crate::ruiz::{SolveReport, solve_pruned};
 use core::f64;
 
 use std::fmt::Debug;
@@ -69,6 +69,8 @@ pub enum SolverSolution<I, R> {
         global_scale: f64,
         sum: Flow<I>,
         cost: f64,
+        /// 本次求解的剪枝/后端记录（见 [`SolveReport`]）。
+        report: SolveReport,
     },
     NotSolved {
         no_provider: Vec<I>,
@@ -595,6 +597,7 @@ where
                     sum,
                     cost: sol.cost,
                     global_scale,
+                    report: sol.report,
                 }
             }
             Err(err) => {

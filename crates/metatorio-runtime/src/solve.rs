@@ -36,6 +36,44 @@ pub struct SolveResult {
     pub project: ProjectId,
     pub factory: FactoryId,
     pub status: SolveStatus,
+    /// 求解/自动规划的诊断记录（剪枝决策、后端退路）。
+    ///
+    /// 动机：求解器与自动规划里有多处**启发式**剪枝（变量剪枝、候选回写
+    /// 阈值）。极端 mod 下如果结果看起来「少了一条关键机制」，必须能判断它是
+    /// 被剪枝丢掉的，还是根本没有候选 / 真的不可解。应用没有安装 logger
+    /// （log 宏是空操作），所以这些决策随结果返回给 GUI / MCP，而不是只写日志。
+    #[serde(default)]
+    pub report: SolveDiagnostics,
+}
+
+/// 见 [`SolveResult::report`]。
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct SolveDiagnostics {
+    /// 求解器是否退回了 clarabel 的稠密内点解（尾值需要相对阈值过滤）。
+    pub dense_fallback: bool,
+    /// 参与剪枝判定的变量数 / 实际参与求解的变量数。
+    pub variables_before: usize,
+    pub variables_after: usize,
+    /// 变量剪枝阈值（clarabel 解最大取值 × 1e-7）；未剪枝为 0。
+    pub prune_threshold: f64,
+    /// 自动规划回写候选的过滤阈值与数量。
+    pub writeback_cutoff: f64,
+    pub candidates_total: usize,
+    pub candidates_considered: usize,
+    pub candidates_used: usize,
+}
+
+impl SolveDiagnostics {
+    /// 从求解器报告构造（自动规划的回写字段随后补齐）。
+    fn from_solver(report: metatorio_solver::SolveReport) -> Self {
+        Self {
+            dense_fallback: report.dense_fallback,
+            variables_before: report.variables_before,
+            variables_after: report.variables_after,
+            prune_threshold: report.prune_threshold,
+            ..Self::default()
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -664,10 +702,16 @@ impl Runtime {
         let snapshot = self.solve_snapshot_inputs(project_id, factory_id)?;
         let accessibility = snapshot.resolve_accessibility();
         self.cache_accessibility(project_id, accessibility.clone());
-        let mechanics = plan_auto_plan(&snapshot, &accessibility)?;
+        let (mechanics, auto_report) = plan_auto_plan(&snapshot, &accessibility)?;
         self.state
             .apply_auto_plan(project_id, factory_id, mechanics)?;
-        self.solve_factory(project_id, factory_id)
+        let mut result = self.solve_factory(project_id, factory_id)?;
+        // 回写前的候选过滤决策随结果返回（见 SolveDiagnostics）。
+        result.report.writeback_cutoff = auto_report.cutoff;
+        result.report.candidates_total = auto_report.candidates_total;
+        result.report.candidates_considered = auto_report.candidates_considered;
+        result.report.candidates_used = auto_report.candidates_used;
+        Ok(result)
     }
 
     /// 统一执行一个 `RuntimeCommand`，返回结构化产出。
@@ -951,7 +995,7 @@ pub fn solve_snapshot_with(
 pub fn plan_auto_plan(
     snapshot: &SolveSnapshot,
     accessibility: &Accessibility,
-) -> Result<Vec<Mechanic>, RuntimeError> {
+) -> Result<(Vec<Mechanic>, AutoPlanReport), RuntimeError> {
     let store = &snapshot.store;
     let project_doc = &snapshot.project_doc;
     let factory_doc = &snapshot.factory_doc;
@@ -1053,7 +1097,10 @@ pub fn plan_auto_plan(
 
     let solution = problem.solve();
     let SolverSolution::Solved {
-        prim, prim_scale, ..
+        prim,
+        prim_scale,
+        report,
+        ..
     } = solution
     else {
         // 透出求解器给出的 description——区分「真的不可行」与「数值/求解器
@@ -1071,10 +1118,38 @@ pub fn plan_auto_plan(
             no_provider.len()
         )));
     };
-    // 保留被选中的候选（用量 > 阈值）。
-    let mut used = crate::auto_plan::used_candidates(&candidates, prim, prim_scale);
+    // 保留被选中的候选（用量 > 阈值）。阈值只在「稠密内点解」时用相对比例，
+    // 顶点解的阈值是绝对下限（避免误剪极端 mod 里的关键小流量）。
+    let filtered =
+        crate::auto_plan::used_candidates(&candidates, prim, prim_scale, report.dense_fallback);
+    let mut used = filtered.used;
     used.sort_by_key(|mechanic| crate::document::MechanicKind::of(mechanic) as u8);
-    Ok(used)
+    let candidates_used = used.len();
+    Ok((
+        used,
+        AutoPlanReport {
+            cutoff: filtered.cutoff,
+            candidates_total: candidates.len(),
+            candidates_considered: filtered.considered,
+            candidates_used,
+            dense_fallback: report.dense_fallback,
+        },
+    ))
+}
+
+/// 自动规划**写回前**的候选过滤记录（随 SolveResult 的 report 返回）。
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct AutoPlanReport {
+    /// 候选过滤阈值。
+    pub cutoff: f64,
+    /// 进入 LP 的候选总数。
+    pub candidates_total: usize,
+    /// 进入阈值判定的真实机制数（不含辅助转换流）。
+    pub candidates_considered: usize,
+    /// 判定为「使用中」并写回的机制数。
+    pub candidates_used: usize,
+    /// 这次是否是稠密内点解（相对阈值生效）。
+    pub dense_fallback: bool,
 }
 
 /// 一次求解结果里每机制的总用量（多温度变体求和）。
@@ -1216,10 +1291,12 @@ fn solve_document(
             dual_scale,
             sum,
             cost,
+            report,
             ..
         } => SolveResult {
             project: project_id,
             factory: factory_id,
+            report: SolveDiagnostics::from_solver(report),
             status: SolveStatus::Solved {
                 cost,
                 mechanics: prim
@@ -1258,6 +1335,7 @@ fn solve_document(
         } => SolveResult {
             project: project_id,
             factory: factory_id,
+            report: SolveDiagnostics::default(),
             status: SolveStatus::NotSolved {
                 no_provider,
                 no_consumer,

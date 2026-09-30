@@ -17,18 +17,42 @@ use metatorio_data::{
     ResourceEntityComponent, SolarPanelComponent, TechnologyComponent,
 };
 
+/// 回写候选的过滤结果（含决策记录，见 [`SolveDiagnostics`]）。
+pub struct UsedCandidates<T> {
+    /// 判定为「实际使用」的候选（保持原顺序）。
+    pub used: Vec<T>,
+    /// 本次使用的过滤阈值。
+    pub cutoff: f64,
+    /// 参与判定的真实机制数量（不含辅助变量）。
+    pub considered: usize,
+}
+
+/// 过滤阈值里的相对比例：只有**稠密内点解**才用它（见下）。
+const DENSE_TAIL_RATIO: f64 = 1e-6;
+/// 绝对下限：低于它的用量在任何场景下都视为数值噪声。
+const ABSOLUTE_FLOOR: f64 = 1e-9;
+
 /// 把求解结果中选中的流映射回候选机制。
 ///
 /// 过滤掉零成本转换流的辅助变量（`MechanicId(u64::MAX)`，非真实机制）
 /// 和用量低于阈值的流；剩余流一定落在候选索引范围内（`[]` 自带越界检查）。
 ///
-/// 判断"用量 > 阈值"用内部缩放值 `amount / scale`（剔除逐变量 Ruiz
+/// 判断「用量 > 阈值」用内部缩放值 `amount / scale`（剔除逐变量 Ruiz
 /// 缩放差异），避免单次产出大的配方因表观量小被误判为未使用。
+///
+/// **阈值分两档**（`dense` 由 [`metatorio_solver::SolveReport`] 给出）：
+/// - 顶点解（microlp）：没用到的变量精确为 0，用绝对下限即可。相对阈值
+///   在这里只会带来「误剪关键小流量」的风险——极端 mod 里一条只需微量催化
+///   的支路就是这种形状，概率不为 0。
+/// - 稠密解（clarabel 内点法退路）：变量会带 ~1e-8 的尾值，必须用「最大
+///   真实用量 × 1e-6」的相对阈值才过滤得掉。辅助变量（零成本转换流）不参与
+///   最大值统计，否则它们的搬运量会把阈值抬到真实机制之上。
 pub fn used_candidates<T: Clone>(
     candidates: &[T],
     prim: impl IntoIterator<Item = (ExpandedVarId, f64)>,
     prim_scale: impl IntoIterator<Item = (ExpandedVarId, f64)>,
-) -> Vec<T> {
+    dense: bool,
+) -> UsedCandidates<T> {
     let scales: std::collections::HashMap<ExpandedVarId, f64> = prim_scale.into_iter().collect();
     // 先算「用量 / 逐变量缩放」这个可比量，只看真实机制。
     let rates: Vec<(ExpandedVarId, f64)> = prim
@@ -39,20 +63,25 @@ pub fn used_candidates<T: Clone>(
             (id, amount / scale)
         })
         .collect();
-    // 阈值 = 最大真实用量的百万分之一（并保留 1e-9 的绝对下限）。
-    // 不能用固定绝对阈值：clarabel 这类内点法的解是稠密的，没被用到的变量
-    // 也会拿到 ~1e-8 的尾值，1e-9 会把它们全判成「使用中」，于是自动规划
-    // 回写一堆接近 0 的机制。辅助变量（零成本转换流）不参与最大值统计，
-    // 否则它们的搬运量会把阈值抬到真实机制之上。
+    let considered = rates.len();
     let max_rate = rates
         .iter()
         .fold(0.0f64, |acc, (_, rate)| acc.max(rate.abs()));
-    let cutoff = (max_rate * 1e-6).max(1e-9);
-    rates
+    let cutoff = if dense {
+        (max_rate * DENSE_TAIL_RATIO).max(ABSOLUTE_FLOOR)
+    } else {
+        ABSOLUTE_FLOOR
+    };
+    let used = rates
         .into_iter()
         .filter(|(_, rate)| rate.abs() > cutoff)
         .map(|(id, _)| candidates[id.mechanic.0 as usize].clone())
-        .collect()
+        .collect();
+    UsedCandidates {
+        used,
+        cutoff,
+        considered,
+    }
 }
 
 /// 每个插件类别中「最好」的插件：`ModuleComponent.tier` 最大者。
@@ -1358,7 +1387,8 @@ mod tests {
     #[test]
     fn used_candidates_filters_aux_and_subthreshold_flows() {
         // 索引 0 是零成本转换流的辅助变量（MechanicId(u64::MAX)），应被剔除；
-        // 索引 1 用量大于阈值保留；索引 2 用量接近 0 剔除。
+        // 索引 1 用量显然保留；索引 2 用量 1e-12（噪声）剔除；
+        // 索引 3 用量 1e-8：顶点解里保留、稠密解里按相对阈值剔除。
         let candidates = vec!["aux", "kept", "dropped", "tail"];
         let prim = vec![
             (
@@ -1422,8 +1452,22 @@ mod tests {
                 1.0,
             ),
         ];
-        let used = used_candidates(&candidates, prim, prim_scale);
-        assert_eq!(used, vec!["kept"]);
+        // 顶点解（microlp）：没被用到的变量精确为 0，用绝对下限即可。1e-8
+        // 在顶点解里**不**算噪声——极端 mod 的关键小流量就是这个量级，相对
+        // 阈值会把它误剪，所以 dense=false 时保留。
+        let vertex = used_candidates(&candidates, prim.clone(), prim_scale.clone(), false);
+        assert_eq!(vertex.used, vec!["kept", "tail"]);
+        assert_eq!(vertex.cutoff, 1e-9);
+        assert_eq!(vertex.considered, 3);
+
+        // 稠密解（clarabel 内点法退路）：必须用相对阈值才过滤得掉 ~1e-8 尾值。
+        let dense = used_candidates(&candidates, prim, prim_scale, true);
+        assert_eq!(dense.used, vec!["kept"]);
+        assert!(
+            (dense.cutoff - 2e-6).abs() < 1e-12,
+            "相对阈值应为最大用量 2.0 × 1e-6：cutoff={}",
+            dense.cutoff
+        );
     }
 
     #[test]
