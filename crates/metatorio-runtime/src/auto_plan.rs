@@ -30,14 +30,27 @@ pub fn used_candidates<T: Clone>(
     prim_scale: impl IntoIterator<Item = (ExpandedVarId, f64)>,
 ) -> Vec<T> {
     let scales: std::collections::HashMap<ExpandedVarId, f64> = prim_scale.into_iter().collect();
-    prim.into_iter()
-        .filter(|(id, amount)| {
-            if id.mechanic.0 == u64::MAX {
-                return false;
-            }
-            let scale = scales.get(id).copied().unwrap_or(1.0).max(1e-12);
-            *amount / scale > 1e-9
+    // 先算「用量 / 逐变量缩放」这个可比量，只看真实机制。
+    let rates: Vec<(ExpandedVarId, f64)> = prim
+        .into_iter()
+        .filter(|(id, _)| id.mechanic.0 != u64::MAX)
+        .map(|(id, amount)| {
+            let scale = scales.get(&id).copied().unwrap_or(1.0).max(1e-12);
+            (id, amount / scale)
         })
+        .collect();
+    // 阈值 = 最大真实用量的百万分之一（并保留 1e-9 的绝对下限）。
+    // 不能用固定绝对阈值：clarabel 这类内点法的解是稠密的，没被用到的变量
+    // 也会拿到 ~1e-8 的尾值，1e-9 会把它们全判成「使用中」，于是自动规划
+    // 回写一堆接近 0 的机制。辅助变量（零成本转换流）不参与最大值统计，
+    // 否则它们的搬运量会把阈值抬到真实机制之上。
+    let max_rate = rates
+        .iter()
+        .fold(0.0f64, |acc, (_, rate)| acc.max(rate.abs()));
+    let cutoff = (max_rate * 1e-6).max(1e-9);
+    rates
+        .into_iter()
+        .filter(|(_, rate)| rate.abs() > cutoff)
         .map(|(id, _)| candidates[id.mechanic.0 as usize].clone())
         .collect()
 }
@@ -1346,7 +1359,7 @@ mod tests {
     fn used_candidates_filters_aux_and_subthreshold_flows() {
         // 索引 0 是零成本转换流的辅助变量（MechanicId(u64::MAX)），应被剔除；
         // 索引 1 用量大于阈值保留；索引 2 用量接近 0 剔除。
-        let candidates = vec!["aux", "kept", "dropped"];
+        let candidates = vec!["aux", "kept", "dropped", "tail"];
         let prim = vec![
             (
                 ExpandedVarId {
@@ -1369,6 +1382,15 @@ mod tests {
                 },
                 1e-12,
             ),
+            (
+                ExpandedVarId {
+                    mechanic: MechanicId(3),
+                    variant: 0,
+                },
+                // 内点法（clarabel）稠密解的典型尾值：比旧阈值 1e-9 大，
+                // 但相对最大用量（2.0）可以忽略，必须被剔除。
+                1e-8,
+            ),
         ];
         let prim_scale = vec![
             (
@@ -1388,6 +1410,13 @@ mod tests {
             (
                 ExpandedVarId {
                     mechanic: MechanicId(2),
+                    variant: 0,
+                },
+                1.0,
+            ),
+            (
+                ExpandedVarId {
+                    mechanic: MechanicId(3),
                     variant: 0,
                 },
                 1.0,

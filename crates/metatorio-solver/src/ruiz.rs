@@ -508,7 +508,8 @@ pub fn solve_pruned(
     );
 
 
-    // 3) 剪枝后的子集交给 microlp（仍走 Ruiz 缩放；问题小，很快）。
+    // 3) 剪枝后的子集交给 microlp（仍走 Ruiz 缩放；问题小，很快）——
+    //    顶点解天然稀疏（没用到的变量精确为 0），是首选结果。
     let reduced = build_problem(&defs, &objective, &rows, Some(&keep));
     let reduced_solution = if reduced.trivially_infeasible || reduced.indices.is_empty() {
         None
@@ -516,7 +517,7 @@ pub fn solve_pruned(
         match RuizSolver::new(reduced.objective, reduced.constraints, reduced.variables).solve() {
             Ok(solution) => Some(solution),
             Err(err) => {
-                log::warn!("剪枝后 microlp 仍失败（{err:?}），采用 clarabel 解");
+                log::warn!("剪枝后 microlp 失败（{err:?}），改用整问题 microlp");
                 None
             }
         }
@@ -537,12 +538,34 @@ pub fn solve_pruned(
             }
             (values, prim_scales, dual_scales, solution.global_scale)
         }
-        None => (
-            clarabel_values.clone(),
-            AIndexMap::default(),
-            vec![1.0f64; rows.len()],
-            1.0,
-        ),
+        // 剪枝后 microlp 不成 → 先整问题 microlp（同样是顶点解）。
+        None => match RuizSolver::new(minimise, constraints, variables).solve() {
+            Ok(solution) => {
+                let values: Vec<f64> = orig_vars.iter().map(|var| solution.value(*var)).collect();
+                let prim_scales: AIndexMap<Variable, f64> = orig_vars
+                    .iter()
+                    .map(|var| (*var, solution.prim_scale(*var)))
+                    .collect();
+                (
+                    values,
+                    prim_scales,
+                    solution.dual_scales.clone(),
+                    solution.global_scale,
+                )
+            }
+            // 两条 microlp 路径都不成 → 只能退回 clarabel。**必须按剪枝集
+            // 掩码**：clarabel 是内点法，解是稠密的（没被用到的变量也会拿到
+            // ~1e-8 的尾值），直接拿来用会让自动规划回写一堆接近 0 的机制
+            // （实测：140 条里 47 条 |rate| < 1e-6）。
+            Err(err) => {
+                log::warn!("整问题 microlp 也失败（{err:?}），退回按剪枝掩码的 clarabel 解");
+                let mut values = vec![0.0f64; defs.len()];
+                for &index in &keep {
+                    values[index] = clarabel_values[index];
+                }
+                (values, AIndexMap::default(), vec![1.0f64; rows.len()], 1.0)
+            }
+        },
     };
     let cost = objective
         .iter()
