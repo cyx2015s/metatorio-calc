@@ -2580,18 +2580,23 @@
               </div>
               {#if beaconConfig}
                 <div class="prefs-row sub">
-                  <label class="me-num">
-                    数量
+                  <label class="me-num" title="插件塔的座数（不是塔内插件数）：塔内插件上限 = 塔数 × 每塔插件槽数">
+                    塔数
                     <input
                       type="number"
                       min="1"
                       value={String(beaconConfig.count)}
+                      title="插件塔的座数（不是塔内插件数）"
                       onchange={(event) => {
-                        const value = Number((event.currentTarget as HTMLInputElement).value);
+                        const input = event.currentTarget as HTMLInputElement;
+                        const value = Number(input.value);
                         if (Number.isFinite(value) && value > 0) {
                           runtime
                             .enumeratedBeaconModule(i, { "set-beacon-count": { beacon: 0, count: value } })
                             .catch(() => {});
+                        } else {
+                          input.value = String(beaconConfig.count);
+                          showNotice("插件塔座数必须是大于 0 的整数");
                         }
                       }}
                     />
@@ -2630,6 +2635,9 @@
                   >+ 插件</button>
                 </div>
                 {#if beaconConfig.modules.length > 0}
+                  <div class="prefs-hint">
+                    插件数量 = 全部插件塔加起来的总数（例：10 座塔 × 每塔 2 槽 → 填 20），不是每座塔的插件数
+                  </div>
                   <div class="prefs-row wrap">
                     {#each beaconConfig.modules as [module, count], mi (mi)}
                       <span class="prefs-chip">
@@ -2639,19 +2647,28 @@
                           type="number"
                           min="1"
                           value={String(count)}
+                          title="该插件在全部插件塔中的总数；上限 = 塔数 × 每塔插件槽数"
                           onchange={(event) => {
-                            const value = Number((event.currentTarget as HTMLInputElement).value);
-                            if (!Number.isFinite(value) || value < 1) return;
+                            const input = event.currentTarget as HTMLInputElement;
+                            const value = Number(input.value);
+                            if (!Number.isFinite(value) || value < 1) {
+                              input.value = String(count);
+                              showNotice("插件数量必须是大于 0 的整数");
+                              return;
+                            }
                             void (async () => {
-                              const slots =
-                                (await beaconModuleSlots(beacon?.id)) * beaconConfig.count;
+                              const perBeacon = await beaconModuleSlots(beacon?.id);
+                              const slots = perBeacon * beaconConfig.count;
                               const total =
                                 beaconConfig.modules.reduce(
                                   (sum, [, c], index) => sum + (index === mi ? 0 : c),
                                   0,
                                 ) + value;
                               if (slots > 0 && total > slots) {
-                                showNotice(`插件塔插件槽位不足（${slots} 个）`);
+                                input.value = String(count);
+                                showNotice(
+                                  `插件数量超出槽位上限：${beaconConfig.count} 座塔 × 每塔 ${perBeacon} 槽 = ${slots}`,
+                                );
                                 return;
                               }
                               runtime
@@ -3492,6 +3509,13 @@
 
   .prefs-row.wrap {
     flex-wrap: wrap;
+  }
+
+  /* #15：插件塔「插件数量」的口径说明（总数，不是每塔数） */
+  .prefs-hint {
+    color: var(--muted);
+    font-size: 10px;
+    line-height: 1.4;
   }
 
   .me-num {

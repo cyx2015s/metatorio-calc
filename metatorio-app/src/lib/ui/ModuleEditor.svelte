@@ -24,6 +24,8 @@
   } = $props();
 
   let machineDetail = $state<PrototypeDetail | null>(null);
+  /** #15：插件塔数量/插件数量校验失败时的可见提示（原先只有 console.warn，用户看不到）。 */
+  let beaconWarning = $state<string | null>(null);
 
   let modules = $derived(entry.mechanic.module_config?.modules ?? []);
   let beacons = $derived(entry.mechanic.module_config?.beacons ?? []);
@@ -50,9 +52,15 @@
   });
 
   function beaconCountChange(beacon: number, event: Event) {
-    const value = Number((event.currentTarget as HTMLInputElement).value);
+    const input = event.currentTarget as HTMLInputElement;
+    const value = Number(input.value);
     if (Number.isFinite(value) && value > 0) {
+      beaconWarning = null;
       runtime.moduleMessage(entry.id, { "set-beacon-count": { beacon, count: value } });
+    } else {
+      // 拒绝写入时把输入框还原，避免界面上的数字与文档不一致。
+      input.value = String(beacons[beacon]?.count ?? 1);
+      beaconWarning = "插件塔座数必须是大于 0 的整数";
     }
   }
 
@@ -64,22 +72,31 @@
   }
 
   function beaconModuleCountChange(beacon: number, module: number, event: Event) {
-    const value = Number((event.currentTarget as HTMLInputElement).value);
-    if (!Number.isFinite(value) || value < 0) return;
+    const input = event.currentTarget as HTMLInputElement;
+    const value = Number(input.value);
     const beaconCfg = beacons[beacon];
     if (!beaconCfg) return;
+    const current = beaconCfg.modules[module]?.[1] ?? 0;
+    if (!Number.isFinite(value) || value < 0) {
+      input.value = String(current);
+      beaconWarning = "插件数量必须是不小于 0 的整数";
+      return;
+    }
     void (async () => {
-      const slots = (await beaconSlotsOf(beaconCfg.beacon.id)) * beaconCfg.count;
+      const perBeacon = await beaconSlotsOf(beaconCfg.beacon.id);
+      const slots = perBeacon * beaconCfg.count;
       if (slots > 0) {
         const total =
           beaconCfg.modules.reduce((sum, [, count], index) => {
             return sum + (index === module ? 0 : count);
           }, 0) + value;
         if (total > slots) {
-          console.warn(`插件塔插件槽位不足（${slots} 个，已用 ${total}）`);
+          input.value = String(current);
+          beaconWarning = `插件数量超出槽位上限：${beaconCfg.count} 座塔 × 每塔 ${perBeacon} 槽 = ${slots}`;
           return;
         }
       }
+      beaconWarning = null;
       runtime.moduleMessage(entry.id, {
         "set-beacon-module-count": { beacon, module, count: value },
       });
@@ -138,6 +155,12 @@
           <span class="muted">该机器不受插件塔影响</span>
         {/if}
       </div>
+      {#if beaconWarning}
+        <div class="me-warn">{beaconWarning}</div>
+      {/if}
+      <div class="me-hint">
+        塔内「插件数量」= 全部插件塔加起来的总数（例：10 座塔 × 每塔 2 槽 → 填 20）
+      </div>
       {#each beacons as beacon, bi (bi)}
         <div class="me-beacon">
           <div class="me-beacon-head">
@@ -155,12 +178,13 @@
                 quality={beacon.beacon.quality}
               />
             </button>
-            <label class="me-num">
-              数量
+            <label class="me-num" title="插件塔的座数（不是塔内插件数）：塔内插件上限 = 塔数 × 每塔插件槽数">
+              塔数
               <input
                 type="number"
                 min="1"
                 value={String(beacon.count)}
+                title="插件塔的座数（不是塔内插件数）"
                 onchange={(event) => beaconCountChange(bi, event)}
               />
             </label>
@@ -191,6 +215,7 @@
                   type="number"
                   min="0"
                   value={String(count)}
+                  title="该插件在全部插件塔中的总数；上限 = 塔数 × 每塔插件槽数"
                   onchange={(event) => beaconModuleCountChange(bi, mi, event)}
                 />
                 <button
@@ -287,6 +312,19 @@
 
   .me-beacons-head .me-label {
     flex: 1;
+  }
+
+  /* #15：插件数量口径说明与校验失败提示 */
+  .me-hint {
+    color: var(--muted);
+    font-size: 10px;
+    line-height: 1.4;
+  }
+
+  .me-warn {
+    color: var(--danger);
+    font-size: 10px;
+    line-height: 1.4;
   }
 
   .me-beacon {

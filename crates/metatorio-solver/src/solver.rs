@@ -601,8 +601,15 @@ where
                 let err_string = match err {
                     good_lp::ResolutionError::Unbounded => "求解无界（目标可无限增大）".to_string(),
                     good_lp::ResolutionError::Infeasible => "无可行解（目标不可达）".to_string(),
-                    good_lp::ResolutionError::Other(_) => "求解器错误".to_string(),
-                    good_lp::ResolutionError::Str(s) => format!("求解器错误: {s}"),
+                    // 内部数值失败（如 microlp 的 "Singular matrix"）**不等于**
+                    // 无可行解：把二者区分开，界面/agent 才不会把求解器算不动
+                    // 说成「配方不可解」。
+                    good_lp::ResolutionError::Other(_) => {
+                        "求解器内部错误（不代表问题无可行解，可重试）".to_string()
+                    }
+                    good_lp::ResolutionError::Str(s) => {
+                        format!("求解器内部错误（不代表问题无可行解）：{s}")
+                    }
                 };
                 // 剪枝阶段缺的物品并入 NoProvider：这些流没有任何配方
                 // 能产出且外部也不供给，是求解失败的根因之一。

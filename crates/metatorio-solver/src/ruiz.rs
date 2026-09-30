@@ -40,6 +40,9 @@ impl RuizSolver {
     }
 
     pub fn solve(self) -> Result<RuizSolution, ResolutionError> {
+        // 未缩放回退要用到原始目标函数，但下面的 linear_coefficients() 会
+        // 消费 self.minimise，所以先留一份克隆。
+        let original_minimise = self.minimise.clone();
         // 每个变量，在每个约束中的系数
         let instant = Instant::now();
         let prim_coeffs = self
@@ -214,19 +217,51 @@ impl RuizSolver {
             }
         }
         log::debug!("Ruiz 预处理耗时: {:?}", instant.elapsed());
-        let solution = new_variables
+        let primary = new_variables
             .minimise(new_minimise.clone())
             .using(microlp)
             .with_all(new_constraints)
-            .solve()?;
-        let cost = solution.eval(new_minimise);
-        Ok(RuizSolution {
-            inner: solution,
-            prim_scales,
-            dual_scales,
-            global_scale,
-            cost,
-        })
+            .solve();
+        match primary {
+            Ok(solution) => {
+                let cost = solution.eval(new_minimise);
+                Ok(RuizSolution {
+                    inner: solution,
+                    prim_scales,
+                    dual_scales,
+                    global_scale,
+                    cost,
+                })
+            }
+            // 数值失败（如 microlp 的 "Singular matrix"）**不是**「无可行解」：
+            // 实测大 auto_plan LP 会被 Ruiz 缩放放大成病态矩阵，microlp 直接
+            // 放弃。退一步用**未缩放**的原始问题再解一次——数值路径不同，可能
+            // 绕开缩放引入的病态；真不可行时这一步同样报 Infeasible，不会更差。
+            Err(err) if matches!(err, ResolutionError::Other(_) | ResolutionError::Str(_)) => {
+                log::warn!("Ruiz 缩放后求解失败（{err:?}），改用未缩放问题重试一次");
+                let identity_prim: AIndexMap<Variable, f64> = self
+                    .variables
+                    .iter_variables_with_def()
+                    .map(|(var, _)| (var, 1.0))
+                    .collect();
+                let identity_dual = vec![1.0; self.constraints.len()];
+                let solution = self
+                    .variables
+                    .minimise(original_minimise.clone())
+                    .using(microlp)
+                    .with_all(self.constraints)
+                    .solve()?;
+                let cost = solution.eval(original_minimise);
+                Ok(RuizSolution {
+                    inner: solution,
+                    prim_scales: identity_prim,
+                    dual_scales: identity_dual,
+                    global_scale: 1.0,
+                    cost,
+                })
+            }
+            Err(err) => Err(err),
+        }
     }
 }
 
