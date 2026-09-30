@@ -4272,4 +4272,48 @@ mod tests {
             Err(error) => panic!("自动规划报错：{error}"),
         }
     }
+
+    /// 诊断：用**任意真实工程**复现「自动规划成功，但回写的机制集合自己解不出目标」。
+    ///
+    /// 通过环境变量提供输入，未设置时跳过（不依赖本机固定路径，可长期保留）：
+    /// - `AUTOPLAN_FIXTURE`：AppDocument JSON（工程文档）
+    /// - `AUTOPLAN_DUMP`：该工程绑定上下文的 `data-raw-dump.json`
+    ///
+    /// ```text
+    /// AUTOPLAN_FIXTURE=... AUTOPLAN_DUMP=... \
+    ///   cargo test -p metatorio-runtime --lib autoplan_writeback -- --ignored --nocapture
+    /// ```
+    #[test]
+    #[ignore = "需要真实工程 fixture + dump（AUTOPLAN_FIXTURE / AUTOPLAN_DUMP）"]
+    fn autoplan_writeback_fixture_solves() {
+        let (Ok(fixture), Ok(dump_path)) = (
+            std::env::var("AUTOPLAN_FIXTURE"),
+            std::env::var("AUTOPLAN_DUMP"),
+        ) else {
+            eprintln!("[skip] 未设置 AUTOPLAN_FIXTURE / AUTOPLAN_DUMP");
+            return;
+        };
+        let doc: crate::document::AppDocument =
+            serde_json::from_str(&std::fs::read_to_string(&fixture).expect("读 fixture"))
+                .expect("解析工程文档");
+        let project = doc.projects[0].id;
+        let factory = doc.projects[0].factories[0].id;
+        let context_id = doc.projects[0]
+            .context_id
+            .clone()
+            .expect("工程应绑定上下文");
+        let raw = std::fs::read(&dump_path).expect("读 dump");
+        let dump: serde_json::Value = serde_json::from_slice(&raw).expect("解析 dump");
+        let store = PrototypeStore::load(&dump).expect("dump 加载失败");
+        let mut runtime = Runtime::from_document(doc);
+        runtime.install_context(context_id, store);
+        let result = runtime.auto_plan(project, factory).expect("自动规划");
+        eprintln!("[fixture] report = {:?}", result.report);
+        match &result.status {
+            SolveStatus::Solved { mechanics, .. } => {
+                eprintln!("[fixture] Solved：写回 {} 条机制", mechanics.len());
+            }
+            other => panic!("自动规划回写后应可解，实际：{other:?}"),
+        }
+    }
 }
