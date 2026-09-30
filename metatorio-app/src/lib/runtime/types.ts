@@ -629,6 +629,10 @@ export interface SolveDiagnostics {
   variables_after: number;
   /** 变量剪枝阈值（clarabel 解最大取值 × 1e-7）；未剪枝为 0。 */
   prune_threshold: number;
+  /** 用原始 LP 复核该解的最大相对约束违反量（剪枝解未必满足原约束）。 */
+  solution_violation: number;
+  /** 与 clarabel 参考目标值的相对差：> 0 说明剪枝丢了更优解。 */
+  solution_objective_gap: number;
   /** 自动规划回写前自检：写回的机制集合自己能不能解出目标。 */
   writeback_verified: boolean;
   /** 自检失败、已放宽到 LP 解的全部非零机制。 */

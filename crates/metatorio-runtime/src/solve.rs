@@ -56,6 +56,10 @@ pub struct SolveDiagnostics {
     pub variables_after: usize,
     /// 变量剪枝阈值（clarabel 解最大取值 × 1e-7）；未剪枝为 0。
     pub prune_threshold: f64,
+    /// 用**原始 LP**复核这个解的最大相对约束违反量（剪枝解未必满足原约束）。
+    pub solution_violation: f64,
+    /// 与 clarabel 参考目标值的相对差：> 0 说明剪枝丢了更优解。
+    pub solution_objective_gap: f64,
     /// 自动规划回写前自检：写回的机制集合自己能不能解出目标。
     /// false 表示这次回写的方案**验证不过**（结果可能无解），需要人工/agent 判断。
     pub writeback_verified: bool,
@@ -76,6 +80,8 @@ impl SolveDiagnostics {
             variables_before: report.variables_before,
             variables_after: report.variables_after,
             prune_threshold: report.prune_threshold,
+            solution_violation: report.primal_violation,
+            solution_objective_gap: report.objective_gap,
             ..Self::default()
         }
     }

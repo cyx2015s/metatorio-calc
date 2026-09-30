@@ -31,6 +31,11 @@ pub struct SolveReport {
     pub variables_after: usize,
     /// 剪枝阈值（clarabel 解最大取值 × PRUNE_RATIO）；未剪枝为 0。
     pub prune_threshold: f64,
+    /// 用**原始 LP**（未剪枝的全部约束）评估这个解的最大相对违反量。
+    /// 剪枝是把变量钉成 0，子问题的解**未必**满足原问题约束。
+    pub primal_violation: f64,
+    /// 与 clarabel 参考目标值的相对差：> 0 说明比参考解更差（剪枝丢了更优解）。
+    pub objective_gap: f64,
 }
 
 pub struct RuizSolution {
@@ -533,6 +538,12 @@ pub fn solve_pruned(
     if clarabel_values.iter().any(|value| !value.is_finite()) {
         return Err(ResolutionError::Other("clarabel 返回非有限解"));
     }
+    // 参考目标值：clarabel 给出的可行点。最小化时它是原问题最优值的**上界**——
+    // 任何剪枝解只要不比它差，就说明剪枝没有丢掉更优解。
+    let clarabel_objective: f64 = objective
+        .iter()
+        .map(|(index, coeff)| coeff * clarabel_values[*index])
+        .sum();
 
     // 2) 剪枝：按「比例从紧到松」依次尝试，取第一个**子问题能解出来**的档。
     //
@@ -543,9 +554,25 @@ pub fn solve_pruned(
     //   0     → 全保留 = 全量，又回到病态 → 回写后无解
     // 也就是说：剪枝是**为了数值条件数**，但不能把配平必需的变量剪掉；
     // 单点阈值两边都会踩坑，所以按序列试到成功为止。
-    let max_abs = clarabel_values
+    // 变量「影响量」= |取值| × 该变量在所有约束里的最大系数。
+    //
+    // 不能拿 |取值| 的全局最大值当阈值：LP 里混着不同量纲（物品数、焦耳、温度…），
+    // 焦耳量级的燃料流会把阈值抬到 1e-4——对物品流来说很大，于是一批对**小量纲行**
+    // 至关重要的变量被剪掉：解虽然目标最优，却违反了原问题约束（实测最大相对违反
+    // 2.9e1）。用系数除掉量纲才是可比的。
+    let mut column_max = vec![0.0f64; defs.len()];
+    for row in &rows {
+        for (index, coeff) in &row.terms {
+            let slot = &mut column_max[*index];
+            *slot = slot.max(coeff.abs());
+        }
+    }
+    let impact: Vec<f64> = clarabel_values
         .iter()
-        .fold(0.0f64, |acc, value| acc.max(value.abs()));
+        .enumerate()
+        .map(|(index, value)| value.abs() * column_max[index])
+        .collect();
+    let max_impact = impact.iter().fold(0.0f64, |acc, value| acc.max(*value));
     // 诊断用：设了 METATORIO_PRUNE_RATIO 就只试这一个比例。
     let ratios: Vec<f64> = match std::env::var("METATORIO_PRUNE_RATIO")
         .ok()
@@ -556,9 +583,9 @@ pub fn solve_pruned(
     };
     let mut last_keep: Vec<usize> = Vec::new();
     for &ratio in &ratios {
-        let threshold = max_abs * ratio;
+        let threshold = max_impact * ratio;
         let keep: Vec<usize> = (0..defs.len())
-            .filter(|&index| clarabel_values[index].abs() > threshold)
+            .filter(|&index| impact[index] > threshold)
             .collect();
         log::info!(
             "clarabel 剪枝：{} 个变量保留 {} 个（比例 {:.1e}，阈值 {:.3e}）",
@@ -600,67 +627,135 @@ pub fn solve_pruned(
         for (pos, &row_index) in reduced.emitted_rows.iter().enumerate() {
             dual_scales[row_index] = solution.dual_scales.get(pos).copied().unwrap_or(1.0);
         }
-        return Ok(assemble(
-            values,
-            prim_scales,
-            dual_scales,
-            solution.global_scale,
-            SolveReport {
-                dense_fallback: false,
-                variables_before: defs.len(),
-                variables_after: keep.len(),
-                prune_threshold: threshold,
-            },
-            &objective,
-            &orig_vars,
-        ));
+        // **原问题校验**：剪枝后的解必须同时满足原问题的约束、且不比参考解差。
+        let (violation, objective_value) = evaluate_solution(&objective, &rows, &values);
+        let gap = (objective_value - clarabel_objective) / clarabel_objective.abs().max(1.0);
+        if violation <= ACCEPT_VIOLATION && gap <= ACCEPT_OBJECTIVE_GAP {
+            return Ok(assemble(
+                values,
+                prim_scales,
+                dual_scales,
+                solution.global_scale,
+                SolveReport {
+                    dense_fallback: false,
+                    variables_before: defs.len(),
+                    variables_after: keep.len(),
+                    prune_threshold: threshold,
+                    primal_violation: violation,
+                    objective_gap: gap,
+                },
+                &objective,
+                &orig_vars,
+            ));
+        }
+        // 剪枝改变了解（违反原约束，或目标变差）→ 换更松的一档，绝不当成求解完成。
+        log::warn!(
+            "剪枝（比例 {ratio:.1e}，保留 {}）未过原问题校验：违反 {violation:.3e}，目标差 {gap:.3e}",
+            keep.len()
+        );
     }
 
-    // 3) 所有剪枝档都不成 → 整问题 microlp（同为顶点解）。
+    // 3) 所有剪枝档都没过校验 → 整问题 microlp（同为顶点解）。
     if let Ok(solution) = RuizSolver::new(minimise, constraints, variables).solve() {
         let values: Vec<f64> = orig_vars.iter().map(|var| solution.value(*var)).collect();
         let prim_scales: AIndexMap<Variable, f64> = orig_vars
             .iter()
             .map(|var| (*var, solution.prim_scale(*var)))
             .collect();
+        let (violation, objective_value) = evaluate_solution(&objective, &rows, &values);
+        let gap = (objective_value - clarabel_objective) / clarabel_objective.abs().max(1.0);
+        if violation <= ACCEPT_VIOLATION && gap <= ACCEPT_OBJECTIVE_GAP {
+            return Ok(assemble(
+                values,
+                prim_scales,
+                solution.dual_scales.clone(),
+                solution.global_scale,
+                SolveReport {
+                    dense_fallback: false,
+                    variables_before: defs.len(),
+                    variables_after: defs.len(),
+                    prune_threshold: max_impact * ratios.last().copied().unwrap_or(PRUNE_RATIOS[0]),
+                    primal_violation: violation,
+                    objective_gap: gap,
+                },
+                &objective,
+                &orig_vars,
+            ));
+        }
+        log::warn!("整问题 microlp 未过原问题校验：违反 {violation:.3e}，目标差 {gap:.3e}");
+    }
+
+    // 4) 退回 clarabel 的解。**必须按剪枝掩码**：clarabel 是内点法，解是稠密的
+    //    （没被用到的变量也会拿到 ~1e-8 的尾值），直接拿来用会让自动规划回写
+    //    一堆接近 0 的机制（实测：140 条里 47 条 |rate| < 1e-6）。
+    let mut values = vec![0.0f64; defs.len()];
+    for &index in &last_keep {
+        values[index] = clarabel_values[index];
+    }
+    let (violation, objective_value) = evaluate_solution(&objective, &rows, &values);
+    let gap = (objective_value - clarabel_objective) / clarabel_objective.abs().max(1.0);
+    if violation <= ACCEPT_VIOLATION && gap <= ACCEPT_OBJECTIVE_GAP {
         return Ok(assemble(
             values,
-            prim_scales,
-            solution.dual_scales.clone(),
-            solution.global_scale,
+            AIndexMap::default(),
+            vec![1.0f64; rows.len()],
+            1.0,
             SolveReport {
-                dense_fallback: false,
+                dense_fallback: true,
                 variables_before: defs.len(),
-                variables_after: defs.len(),
-                prune_threshold: max_abs * ratios.last().copied().unwrap_or(PRUNE_RATIOS[0]),
+                variables_after: last_keep.len(),
+                prune_threshold: max_impact * ratios.last().copied().unwrap_or(PRUNE_RATIOS[0]),
+                primal_violation: violation,
+                objective_gap: gap,
             },
             &objective,
             &orig_vars,
         ));
     }
+    // 一条都没过校验 → **不算求解完成**（剪枝可能改变了解集）。
+    Err(ResolutionError::Str(format!(
+        "剪枝后的解均未通过原问题校验（最后一次：最大相对违反 {violation:.3e}，目标相对差 {gap:.3e}）：不能视为求解完成"
+    )))
+}
 
-    // 4) 只能退回 clarabel。**必须按剪枝掩码**：clarabel 是内点法，解是稠密的
-    //    （没被用到的变量也会拿到 ~1e-8 的尾值），直接拿来用会让自动规划回写
-    //    一堆接近 0 的机制（实测：140 条里 47 条 |rate| < 1e-6）。
-    log::warn!("整问题 microlp 也失败，退回按剪枝掩码的 clarabel 解");
-    let mut values = vec![0.0f64; defs.len()];
-    for &index in &last_keep {
-        values[index] = clarabel_values[index];
+/// 接受一个解的门槛：原问题相对违反量与目标相对差都不超过它。
+///
+/// 剪枝是**限制**：子问题即便可解，也可能已经不是原问题的最优解（甚至不满足原
+/// 问题的约束）。所以每条返回路径都要用**原始 LP**复核一遍，过了才算求解完成。
+const ACCEPT_VIOLATION: f64 = 1e-6;
+const ACCEPT_OBJECTIVE_GAP: f64 = 1e-6;
+
+/// 用**原始 LP**（未剪枝）评估一个解：返回 (最大相对约束违反量, 目标值)。
+fn evaluate_solution(objective: &[(usize, f64)], rows: &[ParsedRow], values: &[f64]) -> (f64, f64) {
+    let mut max_violation = 0.0f64;
+    for row in rows {
+        let lhs: f64 = row
+            .terms
+            .iter()
+            .map(|(index, coeff)| coeff * values[*index])
+            .sum();
+        let raw = if row.is_equality {
+            (lhs - row.rhs).abs()
+        } else {
+            (lhs - row.rhs).max(0.0)
+        };
+        // 按该行的**总量级**归一：取 max(|常数项|, Σ|系数×取值|)。
+        // - 不用「行内最大项」：项数多时和会比最大项大一个量级，会把正常残差放大；
+        // - 不加 1.0 下限：量级很小的行会被放大成虚假的「大违反」。
+        let magnitude: f64 = row
+            .terms
+            .iter()
+            .map(|(index, coeff)| (coeff * values[*index]).abs())
+            .sum();
+        let row_scale = magnitude.max(row.rhs.abs());
+        let denominator = if row_scale > 0.0 { row_scale } else { 1.0 };
+        max_violation = max_violation.max(raw / denominator);
     }
-    Ok(assemble(
-        values,
-        AIndexMap::default(),
-        vec![1.0f64; rows.len()],
-        1.0,
-        SolveReport {
-            dense_fallback: true,
-            variables_before: defs.len(),
-            variables_after: last_keep.len(),
-            prune_threshold: max_abs * ratios.last().copied().unwrap_or(PRUNE_RATIOS[0]),
-        },
-        &objective,
-        &orig_vars,
-    ))
+    let objective_value: f64 = objective
+        .iter()
+        .map(|(index, coeff)| coeff * values[*index])
+        .sum();
+    (max_violation, objective_value)
 }
 
 /// 组装最终结果（各条返回路径共用）。
