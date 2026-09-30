@@ -56,6 +56,11 @@ pub struct SolveDiagnostics {
     pub variables_after: usize,
     /// 变量剪枝阈值（clarabel 解最大取值 × 1e-7）；未剪枝为 0。
     pub prune_threshold: f64,
+    /// 自动规划回写前自检：写回的机制集合自己能不能解出目标。
+    /// false 表示这次回写的方案**验证不过**（结果可能无解），需要人工/agent 判断。
+    pub writeback_verified: bool,
+    /// 自检失败、已放宽到 LP 解的全部非零机制（会写回更多机制）。
+    pub writeback_widened: bool,
     /// 自动规划回写候选的过滤阈值与数量。
     pub writeback_cutoff: f64,
     pub candidates_total: usize,
@@ -706,7 +711,15 @@ impl Runtime {
         self.state
             .apply_auto_plan(project_id, factory_id, mechanics)?;
         let mut result = self.solve_factory(project_id, factory_id)?;
-        // 回写前的候选过滤决策随结果返回（见 SolveDiagnostics）。
+        // 回写前的决策随结果返回（见 SolveDiagnostics）。注意这些字段描述的是
+        // **规划这次 LP** 的剪枝，而不是回写后那次重解的（后者常常是 NotSolved，
+        // 会把字段留成默认 0）。
+        result.report.dense_fallback = auto_report.dense_fallback;
+        result.report.variables_before = auto_report.variables_before;
+        result.report.variables_after = auto_report.variables_after;
+        result.report.prune_threshold = auto_report.prune_threshold;
+        result.report.writeback_verified = auto_report.verified;
+        result.report.writeback_widened = auto_report.widened;
         result.report.writeback_cutoff = auto_report.cutoff;
         result.report.candidates_total = auto_report.candidates_total;
         result.report.candidates_considered = auto_report.candidates_considered;
@@ -1036,26 +1049,6 @@ pub fn plan_auto_plan(
         }));
     }
 
-    // 展开全部候选为一个 LP。
-    let expansion = metatorio_core::expand::expand(
-        candidates
-            .iter()
-            .enumerate()
-            .map(|(index, mechanic)| (index as u64, mechanic)),
-        &context,
-    );
-    let mut variant_counts: HashMap<MechanicId, u16> = HashMap::new();
-    let mut flows = AIndexMap::default();
-    for variable in expansion.variables {
-        let config = MechanicId(variable.prim_var.inner);
-        let variant = variant_counts.entry(config).or_default();
-        let flow_id = ExpandedVarId {
-            mechanic: config,
-            variant: *variant,
-        };
-        *variant = variant.saturating_add(1);
-        flows.insert(flow_id, (variable.flow, variable.cost));
-    }
     let target = factory_doc
         .targets
         .iter()
@@ -1076,25 +1069,10 @@ pub fn plan_auto_plan(
         }
         all_sources.extend(implicit);
     }
-    add_conversion_flows(&mut flows, store, &target, &all_sources);
-    let mut problem = SolverData::new_simple(target, flows);
-    problem.sources = all_sources;
-    // 自动规划默认严格供给。
-    problem.strict_source = true;
-    problem.strict_sink = factory_doc.strict_sink;
-    problem
-        .target
-        .extend(factory_doc.target_expressions.iter().map(|expression| {
-            TargetSpec {
-                constant: expression.constant,
-                coefficients: expression
-                    .terms
-                    .iter()
-                    .map(|term| (term.flow.clone(), term.coefficient))
-                    .collect(),
-            }
-        }));
 
+    // 展开全部候选为一个 LP。
+    let problem =
+        build_autoplan_problem(store, &context, factory_doc, &target, &all_sources, &candidates);
     let solution = problem.solve();
     let SolverSolution::Solved {
         prim,
@@ -1122,7 +1100,28 @@ pub fn plan_auto_plan(
     // 顶点解的阈值是绝对下限（避免误剪极端 mod 里的关键小流量）。
     let filtered =
         crate::auto_plan::used_candidates(&candidates, prim, prim_scale, report.dense_fallback);
+
+    // **回写前自检**：只用选中的机制重建 LP，确认它仍然可解。
+    // 全量 LP 可行 ≠ 回写子集可行——实测原版就能复现：125,608 个候选 →
+    // 回写 47 条 → 文档重解「无可行解」。自检失败就放宽到 LP 解的全部非零
+    // 机制（顶点解下就是解的支持集，必然可行）。
+    let feasible = |mechanics: &[Mechanic]| -> bool {
+        matches!(
+            build_autoplan_problem(store, &context, factory_doc, &target, &all_sources, mechanics)
+                .solve(),
+            SolverSolution::Solved { .. }
+        )
+    };
     let mut used = filtered.used;
+    let mut verified = feasible(&used);
+    let mut widened = false;
+    if !verified && !filtered.support.is_empty() && filtered.support.len() <= AUTOPLAN_VERIFY_LIMIT
+    {
+        // 记录在 report 里而不是打日志：应用没有安装 logger，log 宏是空操作。
+        widened = true;
+        used = filtered.support;
+        verified = feasible(&used);
+    }
     used.sort_by_key(|mechanic| crate::document::MechanicKind::of(mechanic) as u8);
     let candidates_used = used.len();
     Ok((
@@ -1132,9 +1131,68 @@ pub fn plan_auto_plan(
             candidates_total: candidates.len(),
             candidates_considered: filtered.considered,
             candidates_used,
+            verified,
+            widened,
             dense_fallback: report.dense_fallback,
+            variables_before: report.variables_before,
+            variables_after: report.variables_after,
+            prune_threshold: report.prune_threshold,
         },
     ))
+}
+
+/// 回写自检时允许「放宽到全部非零机制」的上限：稠密解的支持集可能接近全量
+/// 候选，那再解一次不值得，直接记 `verified = false` 交回上层。
+const AUTOPLAN_VERIFY_LIMIT: usize = 20_000;
+
+/// 用给定机制集合构建自动规划的 LP（目标 / 外部输入 / 严格供给口径与
+/// `plan_auto_plan` 完全一致）。抽出来是为了能做**回写前自检**。
+fn build_autoplan_problem(
+    store: &PrototypeStore,
+    context: &Context,
+    factory_doc: &FactoryDocument,
+    target: &Flow,
+    all_sources: &Flow,
+    mechanics: &[Mechanic],
+) -> SolverData<DualVar, ExpandedVarId> {
+    let expansion = metatorio_core::expand::expand(
+        mechanics
+            .iter()
+            .enumerate()
+            .map(|(index, mechanic)| (index as u64, mechanic)),
+        context,
+    );
+    let mut variant_counts: HashMap<MechanicId, u16> = HashMap::new();
+    let mut flows = AIndexMap::default();
+    for variable in expansion.variables {
+        let config = MechanicId(variable.prim_var.inner);
+        let variant = variant_counts.entry(config).or_default();
+        let flow_id = ExpandedVarId {
+            mechanic: config,
+            variant: *variant,
+        };
+        *variant = variant.saturating_add(1);
+        flows.insert(flow_id, (variable.flow, variable.cost));
+    }
+    add_conversion_flows(&mut flows, store, target, all_sources);
+    let mut problem = SolverData::new_simple(target.clone(), flows);
+    problem.sources = all_sources.clone();
+    // 自动规划默认严格供给。
+    problem.strict_source = true;
+    problem.strict_sink = factory_doc.strict_sink;
+    problem
+        .target
+        .extend(factory_doc.target_expressions.iter().map(|expression| {
+            TargetSpec {
+                constant: expression.constant,
+                coefficients: expression
+                    .terms
+                    .iter()
+                    .map(|term| (term.flow.clone(), term.coefficient))
+                    .collect(),
+            }
+        }));
+    problem
 }
 
 /// 自动规划**写回前**的候选过滤记录（随 SolveResult 的 report 返回）。
@@ -1148,8 +1206,16 @@ pub struct AutoPlanReport {
     pub candidates_considered: usize,
     /// 判定为「使用中」并写回的机制数。
     pub candidates_used: usize,
+    /// 回写前自检：写回的集合自己能不能解出目标。
+    pub verified: bool,
+    /// 自检失败、已放宽到 LP 解的全部非零机制。
+    pub widened: bool,
     /// 这次是否是稠密内点解（相对阈值生效）。
     pub dense_fallback: bool,
+    /// 求解器侧的变量剪枝记录。
+    pub variables_before: usize,
+    pub variables_after: usize,
+    pub prune_threshold: f64,
 }
 
 /// 一次求解结果里每机制的总用量（多温度变体求和）。

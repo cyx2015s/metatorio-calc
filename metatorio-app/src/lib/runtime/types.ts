@@ -629,6 +629,10 @@ export interface SolveDiagnostics {
   variables_after: number;
   /** 变量剪枝阈值（clarabel 解最大取值 × 1e-7）；未剪枝为 0。 */
   prune_threshold: number;
+  /** 自动规划回写前自检：写回的机制集合自己能不能解出目标。 */
+  writeback_verified: boolean;
+  /** 自检失败、已放宽到 LP 解的全部非零机制。 */
+  writeback_widened: boolean;
   /** 自动规划回写候选的过滤阈值与数量。 */
   writeback_cutoff: number;
   candidates_total: number;

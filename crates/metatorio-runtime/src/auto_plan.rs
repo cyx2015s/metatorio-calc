@@ -21,6 +21,12 @@ use metatorio_data::{
 pub struct UsedCandidates<T> {
     /// 判定为「实际使用」的候选（保持原顺序）。
     pub used: Vec<T>,
+    /// LP 解里**所有非零**的候选（顶点解下就是解的支持集）。
+    ///
+    /// 用途：回写自检失败时的放宽档。`used` 的阈值可能把「用量/缩放」很小
+    /// 但实际必需的机制滤掉（缩放系数很大时就会这样），此时回写出去的文档
+    /// 会变成无解。
+    pub support: Vec<T>,
     /// 本次使用的过滤阈值。
     pub cutoff: f64,
     /// 参与判定的真实机制数量（不含辅助变量）。
@@ -29,6 +35,8 @@ pub struct UsedCandidates<T> {
 
 /// 过滤阈值里的相对比例：只有**稠密内点解**才用它（见下）。
 const DENSE_TAIL_RATIO: f64 = 1e-6;
+/// 顶点解的相对比例：没用到的变量精确为 0，只留一点点余量给数值误差。
+const VERTEX_TAIL_RATIO: f64 = 1e-9;
 /// 绝对下限：低于它的用量在任何场景下都视为数值噪声。
 const ABSOLUTE_FLOOR: f64 = 1e-9;
 
@@ -37,48 +45,60 @@ const ABSOLUTE_FLOOR: f64 = 1e-9;
 /// 过滤掉零成本转换流的辅助变量（`MechanicId(u64::MAX)`，非真实机制）
 /// 和用量低于阈值的流；剩余流一定落在候选索引范围内（`[]` 自带越界检查）。
 ///
-/// 判断「用量 > 阈值」用内部缩放值 `amount / scale`（剔除逐变量 Ruiz
-/// 缩放差异），避免单次产出大的配方因表观量小被误判为未使用。
+/// 阈值判定用**原问题空间的取值** `amount`（`RuizSolution` 已还原），
+/// 相对「所有真实机制里最大的 amount」取比例。
+///
+/// 历史坑：这里原来用 `amount / scale`（逐变量 Ruiz 缩放后的值）当可比量，
+/// 但 `scale` 只是数值缩放系数、**与用量无关**——缩放系数很大时，一个真正
+/// 必需的机制会算出极小的比值而被丢掉，回写出去的文档于是「无解」（原版即可
+/// 复现：125,608 个候选 → 回写 47 条 → 文档重解 no_provider: molten-iron /
+/// electric-furnace / raw-fish / rail）。因此：
+///
+/// - `used` 只用于**缩小**回写集合，是否正确由 `plan_auto_plan` 的自检兜底
+///   （自检不过就放宽到 `support`）；
+/// - `support`（amount ≠ 0）在顶点解下就是 LP 解的支撑集，必然可行。
 ///
 /// **阈值分两档**（`dense` 由 [`metatorio_solver::SolveReport`] 给出）：
-/// - 顶点解（microlp）：没用到的变量精确为 0，用绝对下限即可。相对阈值
-///   在这里只会带来「误剪关键小流量」的风险——极端 mod 里一条只需微量催化
-///   的支路就是这种形状，概率不为 0。
-/// - 稠密解（clarabel 内点法退路）：变量会带 ~1e-8 的尾值，必须用「最大
-///   真实用量 × 1e-6」的相对阈值才过滤得掉。辅助变量（零成本转换流）不参与
-///   最大值统计，否则它们的搬运量会把阈值抬到真实机制之上。
+/// - 顶点解（microlp）：没用到的变量精确为 0，阈值取「最大 amount × 1e-9」；
+/// - 稠密解（clarabel 内点法退路）：变量带 ~1e-8 的尾值，取「最大 amount × 1e-6」。
+///   辅助变量（零成本转换流）不参与最大值统计，否则它们的搬运量会把阈值
+///   抬到真实机制之上。
 pub fn used_candidates<T: Clone>(
     candidates: &[T],
     prim: impl IntoIterator<Item = (ExpandedVarId, f64)>,
     prim_scale: impl IntoIterator<Item = (ExpandedVarId, f64)>,
     dense: bool,
 ) -> UsedCandidates<T> {
-    let scales: std::collections::HashMap<ExpandedVarId, f64> = prim_scale.into_iter().collect();
-    // 先算「用量 / 逐变量缩放」这个可比量，只看真实机制。
-    let rates: Vec<(ExpandedVarId, f64)> = prim
+    // prim_scale 不再参与「是否使用」的判定（见上方注释）；它仍由 solve.rs 用于
+    // 结果里的 rate 展示，这里保留参数以维持调用方签名。
+    let _ = prim_scale;
+    // 只看真实机制（辅助变量是零成本转换流，不是候选）。
+    let amounts: Vec<(ExpandedVarId, f64)> = prim
         .into_iter()
         .filter(|(id, _)| id.mechanic.0 != u64::MAX)
-        .map(|(id, amount)| {
-            let scale = scales.get(&id).copied().unwrap_or(1.0).max(1e-12);
-            (id, amount / scale)
-        })
         .collect();
-    let considered = rates.len();
-    let max_rate = rates
+    let considered = amounts.len();
+    let max_amount = amounts
         .iter()
-        .fold(0.0f64, |acc, (_, rate)| acc.max(rate.abs()));
+        .fold(0.0f64, |acc, (_, amount)| acc.max(amount.abs()));
     let cutoff = if dense {
-        (max_rate * DENSE_TAIL_RATIO).max(ABSOLUTE_FLOOR)
+        (max_amount * DENSE_TAIL_RATIO).max(ABSOLUTE_FLOOR)
     } else {
-        ABSOLUTE_FLOOR
+        (max_amount * VERTEX_TAIL_RATIO).max(ABSOLUTE_FLOOR)
     };
-    let used = rates
-        .into_iter()
-        .filter(|(_, rate)| rate.abs() > cutoff)
-        .map(|(id, _)| candidates[id.mechanic.0 as usize].clone())
-        .collect();
+    let mut used = Vec::new();
+    let mut support = Vec::new();
+    for (id, amount) in amounts {
+        if amount.abs() > cutoff {
+            used.push(candidates[id.mechanic.0 as usize].clone());
+        }
+        if amount != 0.0 {
+            support.push(candidates[id.mechanic.0 as usize].clone());
+        }
+    }
     UsedCandidates {
         used,
+        support,
         cutoff,
         considered,
     }
@@ -1457,7 +1477,8 @@ mod tests {
         // 阈值会把它误剪，所以 dense=false 时保留。
         let vertex = used_candidates(&candidates, prim.clone(), prim_scale.clone(), false);
         assert_eq!(vertex.used, vec!["kept", "tail"]);
-        assert_eq!(vertex.cutoff, 1e-9);
+        // 阈值现在基于 amount（最大 2.0）：顶点解 2.0 × 1e-9、稠密解 2.0 × 1e-6。
+        assert!((vertex.cutoff - 2e-9).abs() < 1e-15, "cutoff={}", vertex.cutoff);
         assert_eq!(vertex.considered, 3);
 
         // 稠密解（clarabel 内点法退路）：必须用相对阈值才过滤得掉 ~1e-8 尾值。
