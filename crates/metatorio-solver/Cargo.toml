@@ -7,7 +7,7 @@ license = "MIT"
 
 [dependencies]
 ahash = { version = "0.8", features = ["serde"] }
-good_lp = { version = "1.15", default-features = false, features = ["microlp", "clarabel"] }
+good_lp = { version = "1.15", default-features = false, features = ["highs"] }
 indexmap = { version = "2", features = ["rayon", "serde"] }
 log = "0.4"
 rayon = "1"

@@ -49,16 +49,17 @@ pub struct SolveResult {
 /// 见 [`SolveResult::report`]。
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SolveDiagnostics {
-    /// 求解器是否退回了 clarabel 的稠密内点解（尾值需要相对阈值过滤）。
+    /// 求解器是否返回了稠密（非顶点）解，尾值需要相对阈值过滤。
+    /// HiGHS 走单纯形 / crossover，恒为 false。
     pub dense_fallback: bool,
-    /// 参与剪枝判定的变量数 / 实际参与求解的变量数。
+    /// 求解变量数 / 解里非零的变量数（顶点解下就是支撑集大小）。
     pub variables_before: usize,
     pub variables_after: usize,
-    /// 变量剪枝阈值（clarabel 解最大取值 × 1e-7）；未剪枝为 0。
+    /// 剪枝阈值。HiGHS 不做剪枝，恒为 0。
     pub prune_threshold: f64,
-    /// 用**原始 LP**复核这个解的最大相对约束违反量（剪枝解未必满足原约束）。
+    /// 用**原始 LP**复核这个解的最大相对约束违反量。
     pub solution_violation: f64,
-    /// 与 clarabel 参考目标值的相对差：> 0 说明剪枝丢了更优解。
+    /// 目标值相对最优的差。HiGHS 给精确最优，恒为 0。
     pub solution_objective_gap: f64,
     /// 自动规划回写前自检：写回的机制集合自己能不能解出目标。
     /// false 表示这次回写的方案**验证不过**（结果可能无解），需要人工/agent 判断。
@@ -4269,6 +4270,7 @@ mod tests {
         match planned.auto_plan(project, factory) {
             Ok(result) => {
                 eprintln!("[auto_plan] {:?}", result.status);
+                eprintln!("[auto_plan] report = {:?}", result.report);
                 assert!(
                     matches!(result.status, SolveStatus::Solved { .. }),
                     "自动规划应解出可解方案，实际：{:?}",

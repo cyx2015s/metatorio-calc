@@ -46,11 +46,23 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
+            cmake \
+            libclang-dev \
             libwebkit2gtk-4.1-dev \
             libappindicator3-dev \
             librsvg2-dev \
             patchelf \
             libssl-dev
+
+      # HiGHS 是 C++（cmake 构建），其 Rust 绑定用 bindgen ⇒ 需要 libclang。
+      # Windows runner 一般自带 LLVM；缺了才装。
+      - name: Install LLVM (Windows, HiGHS bindgen)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          if (-not (Test-Path 'C:\Program Files\LLVM\bin\libclang.dll')) {
+            choco install llvm -y --no-progress
+          }
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4

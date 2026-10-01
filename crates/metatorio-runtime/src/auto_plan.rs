@@ -33,7 +33,8 @@ pub struct UsedCandidates<T> {
     pub considered: usize,
 }
 
-/// 过滤阈值里的相对比例：只有**稠密内点解**才用它（见下）。
+/// 过滤阈值里的相对比例：只有**稠密（非顶点）解**才用它（HiGHS 走单纯形，
+/// 正常路径用不到，保留给将来可能的 IPM 后端）。
 const DENSE_TAIL_RATIO: f64 = 1e-6;
 /// 顶点解的相对比例：没用到的变量精确为 0，只留一点点余量给数值误差。
 const VERTEX_TAIL_RATIO: f64 = 1e-9;
@@ -45,7 +46,7 @@ const ABSOLUTE_FLOOR: f64 = 1e-9;
 /// 过滤掉零成本转换流的辅助变量（`MechanicId(u64::MAX)`，非真实机制）
 /// 和用量低于阈值的流；剩余流一定落在候选索引范围内（`[]` 自带越界检查）。
 ///
-/// 阈值判定用**原问题空间的取值** `amount`（`RuizSolution` 已还原），
+/// 阈值判定用**原问题空间的取值** `amount`（`LpSolution` 已还原），
 /// 相对「所有真实机制里最大的 amount」取比例。
 ///
 /// 历史坑：这里原来用 `amount / scale`（逐变量 Ruiz 缩放后的值）当可比量，
@@ -59,8 +60,9 @@ const ABSOLUTE_FLOOR: f64 = 1e-9;
 /// - `support`（amount ≠ 0）在顶点解下就是 LP 解的支撑集，必然可行。
 ///
 /// **阈值分两档**（`dense` 由 [`metatorio_solver::SolveReport`] 给出）：
-/// - 顶点解（microlp）：没用到的变量精确为 0，阈值取「最大 amount × 1e-9」；
-/// - 稠密解（clarabel 内点法退路）：变量带 ~1e-8 的尾值，取「最大 amount × 1e-6」。
+/// - 顶点解（HiGHS 单纯形 / crossover，正常路径）：没用到的变量精确为 0，
+///   阈值取「最大 amount × 1e-9」；
+/// - 稠密解（理论上的 IPM 退路）：变量带 ~1e-8 的尾值，取「最大 amount × 1e-6」。
 ///   辅助变量（零成本转换流）不参与最大值统计，否则它们的搬运量会把阈值
 ///   抬到真实机制之上。
 pub fn used_candidates<T: Clone>(
@@ -1437,7 +1439,7 @@ mod tests {
                     mechanic: MechanicId(3),
                     variant: 0,
                 },
-                // 内点法（clarabel）稠密解的典型尾值：比旧阈值 1e-9 大，
+                // 稠密（IPM）解的典型尾值：比旧阈值 1e-9 大，
                 // 但相对最大用量（2.0）可以忽略，必须被剔除。
                 1e-8,
             ),
@@ -1472,7 +1474,7 @@ mod tests {
                 1.0,
             ),
         ];
-        // 顶点解（microlp）：没被用到的变量精确为 0，用绝对下限即可。1e-8
+        // 顶点解（HiGHS）：没被用到的变量精确为 0，用绝对下限即可。1e-8
         // 在顶点解里**不**算噪声——极端 mod 的关键小流量就是这个量级，相对
         // 阈值会把它误剪，所以 dense=false 时保留。
         let vertex = used_candidates(&candidates, prim.clone(), prim_scale.clone(), false);
@@ -1481,7 +1483,7 @@ mod tests {
         assert!((vertex.cutoff - 2e-9).abs() < 1e-15, "cutoff={}", vertex.cutoff);
         assert_eq!(vertex.considered, 3);
 
-        // 稠密解（clarabel 内点法退路）：必须用相对阈值才过滤得掉 ~1e-8 尾值。
+        // 稠密解（理论上的 IPM 退路）：必须用相对阈值才过滤得掉 ~1e-8 尾值。
         let dense = used_candidates(&candidates, prim, prim_scale, true);
         assert_eq!(dense.used, vec!["kept"]);
         assert!(

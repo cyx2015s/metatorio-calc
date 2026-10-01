@@ -1,7 +1,7 @@
 use good_lp::{IntoAffineExpression, variable};
 
 use crate::concept::{AIndexMap, AIndexSet, Flow, ItemIdent};
-use crate::ruiz::{SolveReport, solve_pruned};
+use crate::lp::{SolveReport, solve_lp};
 use core::f64;
 
 use std::fmt::Debug;
@@ -559,8 +559,8 @@ where
 
             log::debug!("求解器：对应流变量: {:?}", flow_vars);
         }
-        // 求解策略见 solve_pruned：clarabel 先解 → 剪枝 → 剪枝后子集交 microlp。
-        let solution = solve_pruned(optimization_expr.clone(), constraints, problem_variables);
+        // 求解策略见 solve_lp：HiGHS 单后端，直接给顶点解。
+        let solution = solve_lp(optimization_expr.clone(), constraints, problem_variables);
 
         match solution {
             Ok(sol) => {
@@ -605,9 +605,8 @@ where
                 let err_string = match err {
                     good_lp::ResolutionError::Unbounded => "求解无界（目标可无限增大）".to_string(),
                     good_lp::ResolutionError::Infeasible => "无可行解（目标不可达）".to_string(),
-                    // 内部数值失败（如 microlp 的 "Singular matrix"）**不等于**
-                    // 无可行解：把二者区分开，界面/agent 才不会把求解器算不动
-                    // 说成「配方不可解」。
+                    // 内部数值失败**不等于**无可行解：把二者区分开，界面/agent
+                    // 才不会把求解器算不动说成「配方不可解」。
                     good_lp::ResolutionError::Other(_) => {
                         "求解器内部错误（不代表问题无可行解，可重试）".to_string()
                     }
