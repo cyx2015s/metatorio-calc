@@ -33,11 +33,9 @@ pub struct UsedCandidates<T> {
     pub considered: usize,
 }
 
-/// 过滤阈值里的相对比例：只有**稠密（非顶点）解**才用它（HiGHS 走单纯形，
-/// 正常路径用不到，保留给将来可能的 IPM 后端）。
-const DENSE_TAIL_RATIO: f64 = 1e-6;
-/// 顶点解的相对比例：没用到的变量精确为 0，只留一点点余量给数值误差。
-const VERTEX_TAIL_RATIO: f64 = 1e-9;
+/// 相对比例：HiGHS 给的是精确顶点解，没用到的变量就是 0，这里只留一点点
+/// 余量给数值误差。
+const TAIL_RATIO: f64 = 1e-9;
 /// 绝对下限：低于它的用量在任何场景下都视为数值噪声。
 const ABSOLUTE_FLOOR: f64 = 1e-9;
 
@@ -51,29 +49,20 @@ const ABSOLUTE_FLOOR: f64 = 1e-9;
 ///
 /// 历史坑：这里原来用 `amount / scale`（逐变量 Ruiz 缩放后的值）当可比量，
 /// 但 `scale` 只是数值缩放系数、**与用量无关**——缩放系数很大时，一个真正
-/// 必需的机制会算出极小的比值而被丢掉，回写出去的文档于是「无解」（原版即可
-/// 复现：125,608 个候选 → 回写 47 条 → 文档重解 no_provider: molten-iron /
-/// electric-furnace / raw-fish / rail）。因此：
+/// 必需的机制会算出极小的比值而被丢掉，回写出去的文档于是「无解」。现在
+/// HiGHS 直接给**精确顶点解**，`amount` 本身没有缩放，直接用它即可。
 ///
 /// - `used` 只用于**缩小**回写集合，是否正确由 `plan_auto_plan` 的自检兜底
 ///   （自检不过就放宽到 `support`）；
-/// - `support`（amount ≠ 0）在顶点解下就是 LP 解的支撑集，必然可行。
+/// - `support`（amount ≠ 0）就是 LP 解的支撑集，必然可行。
 ///
-/// **阈值分两档**（`dense` 由 [`metatorio_solver::SolveReport`] 给出）：
-/// - 顶点解（HiGHS 单纯形 / crossover，正常路径）：没用到的变量精确为 0，
-///   阈值取「最大 amount × 1e-9」；
-/// - 稠密解（理论上的 IPM 退路）：变量带 ~1e-8 的尾值，取「最大 amount × 1e-6」。
-///   辅助变量（零成本转换流）不参与最大值统计，否则它们的搬运量会把阈值
-///   抬到真实机制之上。
+/// 阈值只有一档：顶点解里没用到的变量精确为 0，取「最大 amount × 1e-9」再
+/// 叠一个绝对下限。辅助变量（零成本转换流）不参与最大值统计，否则它们的
+/// 搬运量会把阈值抬到真实机制之上。
 pub fn used_candidates<T: Clone>(
     candidates: &[T],
     prim: impl IntoIterator<Item = (ExpandedVarId, f64)>,
-    prim_scale: impl IntoIterator<Item = (ExpandedVarId, f64)>,
-    dense: bool,
 ) -> UsedCandidates<T> {
-    // prim_scale 不再参与「是否使用」的判定（见上方注释）；它仍由 solve.rs 用于
-    // 结果里的 rate 展示，这里保留参数以维持调用方签名。
-    let _ = prim_scale;
     // 只看真实机制（辅助变量是零成本转换流，不是候选）。
     let amounts: Vec<(ExpandedVarId, f64)> = prim
         .into_iter()
@@ -83,11 +72,7 @@ pub fn used_candidates<T: Clone>(
     let max_amount = amounts
         .iter()
         .fold(0.0f64, |acc, (_, amount)| acc.max(amount.abs()));
-    let cutoff = if dense {
-        (max_amount * DENSE_TAIL_RATIO).max(ABSOLUTE_FLOOR)
-    } else {
-        (max_amount * VERTEX_TAIL_RATIO).max(ABSOLUTE_FLOOR)
-    };
+    let cutoff = (max_amount * TAIL_RATIO).max(ABSOLUTE_FLOOR);
     let mut used = Vec::new();
     let mut support = Vec::new();
     for (id, amount) in amounts {
@@ -1409,8 +1394,8 @@ mod tests {
     #[test]
     fn used_candidates_filters_aux_and_subthreshold_flows() {
         // 索引 0 是零成本转换流的辅助变量（MechanicId(u64::MAX)），应被剔除；
-        // 索引 1 用量显然保留；索引 2 用量 1e-12（噪声）剔除；
-        // 索引 3 用量 1e-8：顶点解里保留、稠密解里按相对阈值剔除。
+        // 索引 1 用量显然保留；索引 2 用量 1e-12（噪声）剔除；索引 3 用量 1e-8
+        // 相对最大用量 2.0 是 5e-9 > 阈值 2e-9，保留（顶点解没有「尾值」）。
         let candidates = vec!["aux", "kept", "dropped", "tail"];
         let prim = vec![
             (
@@ -1439,58 +1424,18 @@ mod tests {
                     mechanic: MechanicId(3),
                     variant: 0,
                 },
-                // 稠密（IPM）解的典型尾值：比旧阈值 1e-9 大，
-                // 但相对最大用量（2.0）可以忽略，必须被剔除。
                 1e-8,
             ),
         ];
-        let prim_scale = vec![
-            (
-                ExpandedVarId {
-                    mechanic: MechanicId(u64::MAX),
-                    variant: 0,
-                },
-                1.0,
-            ),
-            (
-                ExpandedVarId {
-                    mechanic: MechanicId(1),
-                    variant: 0,
-                },
-                1.0,
-            ),
-            (
-                ExpandedVarId {
-                    mechanic: MechanicId(2),
-                    variant: 0,
-                },
-                1.0,
-            ),
-            (
-                ExpandedVarId {
-                    mechanic: MechanicId(3),
-                    variant: 0,
-                },
-                1.0,
-            ),
-        ];
-        // 顶点解（HiGHS）：没被用到的变量精确为 0，用绝对下限即可。1e-8
-        // 在顶点解里**不**算噪声——极端 mod 的关键小流量就是这个量级，相对
-        // 阈值会把它误剪，所以 dense=false 时保留。
-        let vertex = used_candidates(&candidates, prim.clone(), prim_scale.clone(), false);
-        assert_eq!(vertex.used, vec!["kept", "tail"]);
-        // 阈值现在基于 amount（最大 2.0）：顶点解 2.0 × 1e-9、稠密解 2.0 × 1e-6。
-        assert!((vertex.cutoff - 2e-9).abs() < 1e-15, "cutoff={}", vertex.cutoff);
-        assert_eq!(vertex.considered, 3);
-
-        // 稠密解（理论上的 IPM 退路）：必须用相对阈值才过滤得掉 ~1e-8 尾值。
-        let dense = used_candidates(&candidates, prim, prim_scale, true);
-        assert_eq!(dense.used, vec!["kept"]);
+        let filtered = used_candidates(&candidates, prim);
+        assert_eq!(filtered.used, vec!["kept", "tail"]);
+        // 阈值 = 最大 amount（2.0）× 1e-9。
         assert!(
-            (dense.cutoff - 2e-6).abs() < 1e-12,
-            "相对阈值应为最大用量 2.0 × 1e-6：cutoff={}",
-            dense.cutoff
+            (filtered.cutoff - 2e-9).abs() < 1e-15,
+            "cutoff={}",
+            filtered.cutoff
         );
+        assert_eq!(filtered.considered, 3);
     }
 
     #[test]

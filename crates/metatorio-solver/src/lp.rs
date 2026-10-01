@@ -25,25 +25,16 @@ use good_lp::{
 
 /// 一次求解的记录（随结果返回给上层）。
 ///
-/// 求解器里有多处**启发式**剪枝。极端 mod 下如果结果看起来「少了一条关键
-/// 机制」，必须能判断它是被剪枝丢掉的，还是根本没有候选 / 真的不可解——
-/// 所以这些决策要随结果留痕，而不是只写日志（应用未安装 logger，`log`
-/// 宏是空操作，等于没记）。
+/// 应用没有安装 logger（`log` 宏是空操作），所以关键决策要随结果留痕。
+/// HiGHS 单后端不做剪枝，这里只留「支撑集大小 + 原问题校验残差」。
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct SolveReport {
-    /// 结果是否是内点法的**稠密解**（带 ~1e-8 数值尾值，上层要用相对阈值过滤）。
-    /// HiGHS 走单纯形 / crossover，给的是精确顶点解，恒为 `false`。
-    pub dense_fallback: bool,
     /// 参与求解的变量数。
     pub variables_before: usize,
     /// 解里非零的变量数（顶点解下就是支撑集大小）。
     pub variables_after: usize,
-    /// 剪枝阈值。HiGHS 不做剪枝，恒为 0（保留字段以维持上层诊断形状）。
-    pub prune_threshold: f64,
     /// 用**原始 LP**评估这个解的最大相对约束违反量。
     pub primal_violation: f64,
-    /// 目标值相对最优的差。HiGHS 给精确最优，恒为 0。
-    pub objective_gap: f64,
 }
 
 /// 求解结果（原问题空间）。
@@ -283,12 +274,9 @@ pub fn solve_lp(
         vec![1.0; rows.len()],
         cost,
         SolveReport {
-            dense_fallback: false,
             variables_before: defs.len(),
             variables_after: variables_used,
-            prune_threshold: 0.0,
             primal_violation: violation,
-            objective_gap: 0.0,
         },
         &orig_vars,
     ))
@@ -318,7 +306,6 @@ mod tests {
         assert_eq!(support.len(), 1, "退化最优面应只留一个顶点列：{support:?}");
         assert!((support[0] - 1.0).abs() < 1e-6, "该列取值应为 1：{support:?}");
         assert_eq!(solution.report.variables_after, 1);
-        assert!(!solution.report.dense_fallback);
     }
 
     /// 小但必要的变量不能被「取值大小」剪掉：单纯形解里它就是基变量。

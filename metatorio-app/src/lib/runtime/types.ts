@@ -612,27 +612,21 @@ export interface SolveResult {
   project: ProjectId;
   factory: FactoryId;
   status: SolveStatus;
-  /** 求解/自动规划的诊断（剪枝决策、后端退路）。见 SolveDiagnostics。 */
+  /** 求解/自动规划的诊断（支撑集大小、回写过滤）。见 SolveDiagnostics。 */
   report?: SolveDiagnostics;
 }
 
 /**
- * 求解/自动规划的剪枝记录。
+ * 求解/自动规划的诊断记录。
  *
- * 求解器与自动规划里有多处启发式剪枝；极端 mod 下如果结果「少了一条关键机制」，
- * 靠这些字段可以判断它是被阈值剪掉的，而不是根本没有候选 / 真的不可解。
+ * HiGHS 单后端不做剪枝；这些字段用于判断「回写少了一条关键机制」是候选过滤
+ * 阈值造成的，还是根本没有候选 / 真的不可解。
  */
 export interface SolveDiagnostics {
-  /** 求解器是否退回了 clarabel 的稠密内点解（尾值需要相对阈值过滤）。 */
-  dense_fallback: boolean;
   variables_before: number;
   variables_after: number;
-  /** 变量剪枝阈值（clarabel 解最大取值 × 1e-7）；未剪枝为 0。 */
-  prune_threshold: number;
-  /** 用原始 LP 复核该解的最大相对约束违反量（剪枝解未必满足原约束）。 */
+  /** 用原始 LP 复核该解的最大相对约束违反量。 */
   solution_violation: number;
-  /** 与 clarabel 参考目标值的相对差：> 0 说明剪枝丢了更优解。 */
-  solution_objective_gap: number;
   /** 自动规划回写前自检：写回的机制集合自己能不能解出目标。 */
   writeback_verified: boolean;
   /** 自检失败、已放宽到 LP 解的全部非零机制。 */

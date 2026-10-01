@@ -49,18 +49,11 @@ pub struct SolveResult {
 /// 见 [`SolveResult::report`]。
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SolveDiagnostics {
-    /// 求解器是否返回了稠密（非顶点）解，尾值需要相对阈值过滤。
-    /// HiGHS 走单纯形 / crossover，恒为 false。
-    pub dense_fallback: bool,
     /// 求解变量数 / 解里非零的变量数（顶点解下就是支撑集大小）。
     pub variables_before: usize,
     pub variables_after: usize,
-    /// 剪枝阈值。HiGHS 不做剪枝，恒为 0。
-    pub prune_threshold: f64,
     /// 用**原始 LP**复核这个解的最大相对约束违反量。
     pub solution_violation: f64,
-    /// 目标值相对最优的差。HiGHS 给精确最优，恒为 0。
-    pub solution_objective_gap: f64,
     /// 自动规划回写前自检：写回的机制集合自己能不能解出目标。
     /// false 表示这次回写的方案**验证不过**（结果可能无解），需要人工/agent 判断。
     pub writeback_verified: bool,
@@ -77,12 +70,9 @@ impl SolveDiagnostics {
     /// 从求解器报告构造（自动规划的回写字段随后补齐）。
     fn from_solver(report: metatorio_solver::SolveReport) -> Self {
         Self {
-            dense_fallback: report.dense_fallback,
             variables_before: report.variables_before,
             variables_after: report.variables_after,
-            prune_threshold: report.prune_threshold,
             solution_violation: report.primal_violation,
-            solution_objective_gap: report.objective_gap,
             ..Self::default()
         }
     }
@@ -721,10 +711,8 @@ impl Runtime {
         // 回写前的决策随结果返回（见 SolveDiagnostics）。注意这些字段描述的是
         // **规划这次 LP** 的剪枝，而不是回写后那次重解的（后者常常是 NotSolved，
         // 会把字段留成默认 0）。
-        result.report.dense_fallback = auto_report.dense_fallback;
         result.report.variables_before = auto_report.variables_before;
         result.report.variables_after = auto_report.variables_after;
-        result.report.prune_threshold = auto_report.prune_threshold;
         result.report.writeback_verified = auto_report.verified;
         result.report.writeback_widened = auto_report.widened;
         result.report.writeback_cutoff = auto_report.cutoff;
@@ -1081,15 +1069,10 @@ pub fn plan_auto_plan(
     let problem =
         build_autoplan_problem(store, &context, factory_doc, &target, &all_sources, &candidates);
     let solution = problem.solve();
-    let SolverSolution::Solved {
-        prim,
-        prim_scale,
-        report,
-        ..
-    } = solution
+    let SolverSolution::Solved { prim, report, .. } = solution
     else {
         // 透出求解器给出的 description——区分「真的不可行」与「数值/求解器
-        // 失败」（microlp 返回 Other/Str）是诊断自动规划失败的前提。
+        // 失败」是诊断自动规划失败的前提。
         let SolverSolution::NotSolved {
             no_provider,
             description,
@@ -1103,10 +1086,8 @@ pub fn plan_auto_plan(
             no_provider.len()
         )));
     };
-    // 保留被选中的候选（用量 > 阈值）。阈值只在「稠密内点解」时用相对比例，
-    // 顶点解的阈值是绝对下限（避免误剪极端 mod 里的关键小流量）。
-    let filtered =
-        crate::auto_plan::used_candidates(&candidates, prim, prim_scale, report.dense_fallback);
+    // 保留被选中的候选（用量 > 阈值）。HiGHS 给精确顶点解，这里只有一档阈值。
+    let filtered = crate::auto_plan::used_candidates(&candidates, prim);
 
     // **回写前自检**：只用选中的机制重建 LP，确认它仍然可解。
     // 全量 LP 可行 ≠ 回写子集可行——实测原版就能复现：125,608 个候选 →
@@ -1140,10 +1121,8 @@ pub fn plan_auto_plan(
             candidates_used,
             verified,
             widened,
-            dense_fallback: report.dense_fallback,
             variables_before: report.variables_before,
             variables_after: report.variables_after,
-            prune_threshold: report.prune_threshold,
         },
     ))
 }
@@ -1217,12 +1196,9 @@ pub struct AutoPlanReport {
     pub verified: bool,
     /// 自检失败、已放宽到 LP 解的全部非零机制。
     pub widened: bool,
-    /// 这次是否是稠密内点解（相对阈值生效）。
-    pub dense_fallback: bool,
-    /// 求解器侧的变量剪枝记录。
+    /// 求解器侧的变量记录（顶点解下 variables_after 就是支撑集大小）。
     pub variables_before: usize,
     pub variables_after: usize,
-    pub prune_threshold: f64,
 }
 
 /// 一次求解结果里每机制的总用量（多温度变体求和）。
