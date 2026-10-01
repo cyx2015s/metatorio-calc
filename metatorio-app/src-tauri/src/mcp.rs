@@ -22,7 +22,9 @@
 //! - 可选 bearer-token：配了 token（`--mcp-token` / `METATORIO_MCP_TOKEN`）时每个请求
 //!   必须带 `Authorization: Bearer <token>`（或裸 token）；回环 + 无 token 是允许的。
 
+use std::collections::BTreeSet;
 use std::net::{IpAddr, SocketAddr};
+use std::sync::{Arc, OnceLock};
 
 use axum::{
     Router,
@@ -34,13 +36,14 @@ use axum::{
 use rmcp::{
     ErrorData as McpError, ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
-    model::CallToolResult,
+    model::{CallToolResult, JsonObject},
     tool, tool_handler, tool_router,
     transport::streamable_http_server::{
         StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
     },
 };
 use schemars::JsonSchema;
+use serde_json::{Map, Value};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 use crate::{AppState, execute_command};
@@ -62,6 +65,372 @@ pub const DEFAULT_MCP_BIND: &str = "127.0.0.1";
 
 /// MCP 服务挂在这个路径下（例如 `http://127.0.0.1:8765/mcp`）。
 pub const MCP_PATH: &str = "/mcp";
+
+// ── AppMessage schema 投影 ─────────────────────────────────────────
+//
+// dispatch 直发 message: AppMessage 时，rmcp 会把整个协议图（46 个 $defs、89 个
+// $ref）内联进 inputSchema——实测 44 KB，占 MCP 工具面 77%（见 docs/mcp-design.md）。
+// 按 scope 拆工具**无效**：factory 一支仍有 30 KB，而且每个工具都要重复自己引用的
+// $defs，四个工具加起来比原来还大 7%。所以保留一个 dispatch，只把它的 inputSchema
+// 换成「只有动作名」的投影：44,092 字符 → 约 5 KB；整个工具面约 57 KB → 约 17 KB。
+//
+// 单一事实源不变：投影是 schemars 派生 schema 的**函数**，不是另一份手写文档
+// （手写会漂移，这正是当初从 V1 改成 JsonSchema 派生的原因）。测试
+// catalog_is_derived_from_the_schema 守住这一点。深层参数形状由 get_schema
+// 按动作名切片返回，且只带该动作可达的 $defs。
+
+/// 完整 AppMessage schema：schemars 派生，与 rmcp 的 schema_for_input 同款口径
+/// （draft2020_12）。进程内只建一次。
+fn app_message_schema() -> &'static Value {
+    static SCHEMA: OnceLock<Value> = OnceLock::new();
+    SCHEMA.get_or_init(|| {
+        let generator = schemars::generate::SchemaSettings::draft2020_12().into_generator();
+        serde_json::to_value(generator.into_root_schema_for::<AppMessage>())
+            .expect("AppMessage schema 应当可序列化")
+    })
+}
+
+/// AppMessage schema 的 $defs 表。
+fn schema_defs(schema: &Value) -> &Map<String, Value> {
+    schema
+        .get("$defs")
+        .and_then(Value::as_object)
+        .expect("AppMessage schema 应当带 $defs")
+}
+
+/// 解引用 {"$ref": "#/$defs/X"}；不是引用就原样返回。
+fn schema_deref<'a>(defs: &'a Map<String, Value>, node: &'a Value) -> Option<&'a Value> {
+    match node.get("$ref").and_then(Value::as_str) {
+        Some(reference) => defs.get(reference.strip_prefix("#/$defs/")?),
+        None => Some(node),
+    }
+}
+
+/// 深度优先找第一个 $ref。
+fn schema_first_ref(node: &Value) -> Option<&Value> {
+    if node.get("$ref").is_some() {
+        return Some(node);
+    }
+    match node {
+        Value::Object(object) => object.values().find_map(schema_first_ref),
+        Value::Array(items) => items.iter().find_map(schema_first_ref),
+        _ => None,
+    }
+}
+
+/// 节点里是否还套了另一个 *Action 枚举；有就返回它的 $defs 名。
+///
+/// 这是「分组」的判据。`FactoryAction::Flow(FlowAction)` 的载荷直接是 $ref，而
+/// `FactoryAction::Mechanic { mechanic, action }` 是两个字段的结构体变体，$ref 在
+/// 里面一层——所以必须看载荷里任意深度的引用，不能只看唯一字段。
+fn schema_sub_action(node: &Value) -> Option<&str> {
+    let reference = schema_first_ref(node)?.get("$ref")?.as_str()?;
+    let name = reference.strip_prefix("#/$defs/")?;
+    name.ends_with("Action").then_some(name)
+}
+
+/// 动作枚举的一个变体：名字 + 载荷 + 载荷里若还套 *Action 则是分组。
+struct ActionVariant<'a> {
+    name: String,
+    payload: &'a Value,
+    group: Option<&'a str>,
+}
+
+/// 拆一个动作枚举的变体。既处理结构体变体（oneOf + properties），也处理单元变体
+/// ——schemars 给单元变体的是小 `enum` 或 `const`，不是 oneOf 分支（`Undo`、`Redo`、
+/// `CheckForUpdate`、`LoadCachedContext` 都是这一类，漏掉就会静默少列动作）。
+fn action_variants<'a>(defs: &'a Map<String, Value>, node: &'a Value) -> Vec<ActionVariant<'a>> {
+    let Some(schema) = schema_deref(defs, node) else {
+        return Vec::new();
+    };
+    if let Some(Value::Array(names)) = schema.get("enum") {
+        if schema.get("oneOf").is_none() {
+            return names
+                .iter()
+                .filter_map(Value::as_str)
+                .map(|name| ActionVariant {
+                    name: name.to_string(),
+                    payload: schema,
+                    group: None,
+                })
+                .collect();
+        }
+    }
+    let Some(branches) = schema
+        .get("oneOf")
+        .or_else(|| schema.get("anyOf"))
+        .and_then(Value::as_array)
+    else {
+        return Vec::new();
+    };
+    let mut variants = Vec::new();
+    for branch in branches {
+        if let Some(name) = branch.get("const").and_then(Value::as_str) {
+            variants.push(ActionVariant {
+                name: name.to_string(),
+                payload: branch,
+                group: None,
+            });
+            continue;
+        }
+        if let Some(Value::Array(names)) = branch.get("enum") {
+            for name in names.iter().filter_map(Value::as_str) {
+                variants.push(ActionVariant {
+                    name: name.to_string(),
+                    payload: branch,
+                    group: None,
+                });
+            }
+            continue;
+        }
+        let Some(properties) = branch.get("properties").and_then(Value::as_object) else {
+            continue;
+        };
+        let Some(name) = properties.keys().next() else {
+            continue;
+        };
+        let payload = &properties[name];
+        variants.push(ActionVariant {
+            name: name.clone(),
+            payload,
+            group: schema_sub_action(payload),
+        });
+    }
+    variants
+}
+
+/// 递归收集叶子动作路径（点号表示嵌套，例如 `mechanic.recipe.set-recipe`）。
+fn collect_action_paths(
+    defs: &Map<String, Value>,
+    node: &Value,
+    prefix: &str,
+    out: &mut Vec<String>,
+    depth: usize,
+) {
+    if depth > 8 {
+        return;
+    }
+    for variant in action_variants(defs, node) {
+        let path = if prefix.is_empty() {
+            variant.name.clone()
+        } else {
+            format!("{prefix}.{}", variant.name)
+        };
+        match variant.group.and_then(|group| defs.get(group)) {
+            Some(next) => collect_action_paths(defs, next, &path, out, depth + 1),
+            None => out.push(path),
+        }
+    }
+}
+
+/// scope → 该 scope 的动作路径。顺序取自 schema 本身，因此稳定。
+fn action_tree() -> &'static Vec<(String, Vec<String>)> {
+    static TREE: OnceLock<Vec<(String, Vec<String>)>> = OnceLock::new();
+    TREE.get_or_init(|| {
+        let schema = app_message_schema();
+        let defs = schema_defs(schema);
+        // 注意：into_root_schema_for::<AppMessage>() 把 AppMessage 放在**根**上，
+        // 不在 $defs 里（$defs 只装被引用到的类型）。去 $defs 里找会静默拿到空树。
+        let Some(branches) = schema
+            .get("oneOf")
+            .or_else(|| schema.get("anyOf"))
+            .and_then(Value::as_array)
+        else {
+            return Vec::new();
+        };
+        branches
+            .iter()
+            .filter_map(|branch| {
+                let properties = branch.get("properties")?.as_object()?;
+                let scope = properties.get("scope")?.get("const")?.as_str()?.to_string();
+                let mut paths = Vec::new();
+                // project / factory 的 action 是内联对象（相邻标签 + 结构体变体），
+                // 真正的动作枚举在它里面一层；application / history 则直接就是 $ref。
+                collect_action_paths(
+                    defs,
+                    schema_first_ref(properties.get("action")?)?,
+                    "",
+                    &mut paths,
+                    0,
+                );
+                Some((scope, paths))
+            })
+            .collect()
+    })
+}
+
+/// 动作树渲染成紧凑文本：同一前缀下的叶子合成 `prefix.{a,b,c}`。
+fn format_action_tree() -> String {
+    let mut lines = Vec::new();
+    for (scope, paths) in action_tree() {
+        let mut plain: Vec<String> = Vec::new();
+        let mut grouped: Vec<(String, Vec<String>)> = Vec::new();
+        for path in paths {
+            match path.split_once('.') {
+                Some((head, tail)) => match grouped.iter_mut().find(|(name, _)| name == head) {
+                    Some((_, members)) => members.push(tail.to_string()),
+                    None => grouped.push((head.to_string(), vec![tail.to_string()])),
+                },
+                None => plain.push(path.clone()),
+            }
+        }
+        for (head, members) in grouped {
+            if members.len() == 1 {
+                plain.push(format!("{head}.{}", members[0]));
+            } else {
+                plain.push(format!("{head}.{{{}}}", members.join(",")));
+            }
+        }
+        lines.push(format!("{scope}：{}", plain.join("、")));
+    }
+    lines.join("
+")
+}
+
+/// dispatch 的 inputSchema：外层形状精确，动作体只给「有哪些动作」。
+///
+/// 它比真实接受面**宽**（`additionalProperties: true`），而不是窄——这很重要：
+/// 真实 AppMessage 仍由 serde 权威反序列化并给出精确报错，schema 只负责提前告诉
+/// 模型有哪些动作可选。窄 schema 会把合法调用挡在客户端侧，宽 schema 不会。
+fn dispatch_input_schema() -> Arc<JsonObject> {
+    let scopes: Vec<String> = action_tree().iter().map(|(scope, _)| scope.clone()).collect();
+    let total: usize = action_tree().iter().map(|(_, paths)| paths.len()).sum();
+    let description = format!(
+        "动作体。可用动作（{total} 个；点号表示嵌套，花括号是同一前缀下的并列项）：\n{}\n\
+         外层形状随 scope 不同：application 直接是动作名；project 先给 project，再给动作名；\
+         factory 先给 project 与 factory，再给动作名（mechanic 这类还要多一层）。\
+         深层参数形状用 get_schema 按动作名取，例如 get_schema {{\"action\": \"target.set-flow\"}}。",
+        format_action_tree()
+    );
+    let catalog = serde_json::json!({
+        "type": "object",
+        "required": ["message"],
+        "properties": {
+            "message": {
+                "type": "object",
+                "required": ["scope", "action"],
+                "properties": {
+                    "scope": { "type": "string", "enum": scopes },
+                    "action": { "type": ["object", "string"], "description": description },
+                },
+                "additionalProperties": true,
+            },
+            "request_id": {
+                "type": ["string", "null"],
+                "description": "幂等键：同一个 id 的重复调用只应用一次，重试直接回放上次的载荷。",
+            },
+            "limit": { "type": ["integer", "null"], "description": "分页上限（默认 50，上限 1000）。" },
+            "offset": { "type": ["integer", "null"], "description": "分页偏移。" },
+        },
+    });
+    match catalog {
+        Value::Object(map) => Arc::new(map),
+        _ => unreachable!("catalog schema 一定是对象"),
+    }
+}
+
+/// 遍历动作树，收集 (scope, 路径, 载荷)。只在 get_schema 被调用时跑，量级很小
+/// （实测 152 条叶子）。
+fn walk_action_payloads<'a>(
+    defs: &'a Map<String, Value>,
+    node: &'a Value,
+    scope: &str,
+    prefix: &str,
+    out: &mut Vec<(String, String, &'a Value)>,
+    depth: usize,
+) {
+    if depth > 8 {
+        return;
+    }
+    for variant in action_variants(defs, node) {
+        let path = if prefix.is_empty() {
+            variant.name.clone()
+        } else {
+            format!("{prefix}.{}", variant.name)
+        };
+        match variant.group.and_then(|group| defs.get(group)) {
+            Some(next) => walk_action_payloads(defs, next, scope, &path, out, depth + 1),
+            None => out.push((scope.to_string(), path, variant.payload)),
+        }
+    }
+}
+
+/// 收集从 node 出发可达的全部 $defs 名（传递闭包）。
+fn collect_reachable_defs(defs: &Map<String, Value>, node: &Value, out: &mut BTreeSet<String>) {
+    match node {
+        Value::Object(object) => {
+            if let Some(name) = object
+                .get("$ref")
+                .and_then(Value::as_str)
+                .and_then(|reference| reference.strip_prefix("#/$defs/"))
+            {
+                if out.insert(name.to_string()) {
+                    if let Some(target) = defs.get(name) {
+                        collect_reachable_defs(defs, target, out);
+                    }
+                }
+            }
+            for value in object.values() {
+                collect_reachable_defs(defs, value, out);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                collect_reachable_defs(defs, item, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// 按动作名取完整分支 schema，连同它可达的 $defs 一起返回，保证能独立解引用。
+///
+/// 精确路径优先（`mechanic.recipe.set-recipe`）；否则接受在该树里唯一的短名
+/// （`set-recipe`）——歧义时**拒绝**并让调用方给全路径，不猜。
+fn action_schema_slice(action: &str) -> Option<Value> {
+    let schema = app_message_schema();
+    let defs = schema_defs(schema);
+    let branches = schema
+        .get("oneOf")
+        .or_else(|| schema.get("anyOf"))
+        .and_then(Value::as_array)?;
+    let mut entries: Vec<(String, String, &Value)> = Vec::new();
+    for branch in branches {
+        let properties = branch.get("properties")?.as_object()?;
+        let scope = properties.get("scope")?.get("const")?.as_str()?;
+        walk_action_payloads(
+            defs,
+            schema_first_ref(properties.get("action")?)?,
+            scope,
+            "",
+            &mut entries,
+            0,
+        );
+    }
+    let found = entries.iter().find(|(_, path, _)| path == action).or_else(|| {
+        let mut matches = entries
+            .iter()
+            .filter(|(_, path, _)| path.rsplit('.').next() == Some(action));
+        let first = matches.next()?;
+        matches.next().is_none().then_some(first)
+    })?;
+    let (scope, path, payload) = found;
+    let mut reachable = BTreeSet::new();
+    collect_reachable_defs(defs, payload, &mut reachable);
+    let slice_defs: Map<String, Value> = reachable
+        .iter()
+        .filter_map(|name| defs.get(name).map(|value| (name.clone(), value.clone())))
+        .collect();
+    Some(serde_json::json!({
+        "scope": scope,
+        "action": path,
+        "schema": payload,
+        "$defs": slice_defs,
+        "hint": "把 schema 放到对应 scope 的 action 位置；$defs 用于解引用其中的 $ref。",
+    }))
+}
+
+// ── 工具面 ─────────────────────────────────────────────────────────
 
 // ── 工具面 ─────────────────────────────────────────────────────────
 
@@ -131,6 +500,14 @@ struct LocalizedNamesParams {
     context_id: Option<String>,
 }
 
+/// `get_schema` 的参数：不给 `action` 就只列动作树，给了就返回那一条动作的完整 schema。
+#[derive(Debug, serde::Deserialize, JsonSchema)]
+struct GetSchemaParams {
+    /// 动作名（可带点号路径，例如 `target.set-flow`）；省略 = 只列动作树。
+    #[serde(default)]
+    action: Option<String>,
+}
+
 /// MCP 服务端 handler。无状态：只持有取 [`AppState`] 需要的 [`AppHandle`]，
 /// 因此 rmcp 可以为每个请求新建一个。
 #[derive(Clone)]
@@ -156,7 +533,8 @@ impl MetatorioMcp {
         `solve` 的输出始终有界：`mechanics`/`flows` 按 `limit`（默认 50、上限 1000）+\
         `offset` 分页，`page.totals`/`page.truncated` 如实说明被截断的集合。  \
         这是**逃生通道**：常规规划请优先用 `auto_plan`（权威入口），不要一个个配方\
-        手工拼装——那样既费力又容易漏配严格供给。"
+        手工拼装——那样既费力又容易漏配严格供给。",
+        input_schema = dispatch_input_schema()
     )]
     async fn dispatch(
         &self,
@@ -657,6 +1035,42 @@ impl MetatorioMcp {
             cache.insert(request_id, payload.clone(), false);
         }
         Ok(CallToolResult::structured(payload))
+    }
+
+    /// 按需取动作的完整参数形状：`dispatch` 只暴露动作名（投影自同一份 schema），
+    /// 深层形状在这里按动作名切片返回，且只带该动作可达的 `$defs`。
+    #[tool(
+        description = "查询 `dispatch` 的动作 schema。不给 `action` → 返回完整动作树\
+        （scope → 动作路径）；给了 → 返回那一条动作的**完整** JSON Schema（含它可达的\
+        `$defs`），用来确认嵌套参数形状。例：{action:\"target.set-flow\"}、\
+        {action:\"mechanic.recipe.set-recipe\"}。短名也可用（`set-recipe`），\
+        但只在该动作在树里唯一时才接受。"
+    )]
+    async fn get_schema(
+        &self,
+        Parameters(params): Parameters<GetSchemaParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let requested = params
+            .action
+            .as_deref()
+            .map(str::trim)
+            .filter(|action| !action.is_empty());
+        let value = match requested {
+            None => serde_json::json!({
+                "actions": action_tree()
+                    .iter()
+                    .map(|(scope, paths)| (scope.clone(), serde_json::json!(paths)))
+                    .collect::<Map<String, Value>>(),
+                "hint": "把动作名传给 get_schema 取完整参数形状，例如 {action: \"target.set-flow\"}。",
+            }),
+            Some(action) => action_schema_slice(action).ok_or_else(|| {
+                McpError::invalid_params(
+                    format!("未知动作 {action}；不带 action 调用本工具可列出全部动作。"),
+                    None,
+                )
+            })?,
+        };
+        Ok(CallToolResult::structured(value))
     }
 
     /// 上下文索引：有哪些游戏数据上下文（dump/导出缓存）、激活的是哪个。
@@ -2619,5 +3033,117 @@ mod tests {
         assert_eq!(meta["limit"], 2);
         assert_eq!(meta["totals"]["mechanics"], 3);
         assert_eq!(meta["truncated"][0], "mechanics");
+    }
+
+    /// `dispatch` 的 inputSchema 是**投影**出来的，不是手写清单：动作树直接来自
+    /// schemars 的 AppMessage schema，所以加一个 serde 变体就会自动出现在工具面上，
+    /// 不存在「文档漂移」——这正是当初从 V1 手写描述改成 JsonSchema 派生的理由。
+    #[test]
+    fn catalog_is_derived_from_the_schema() {
+        let tree = action_tree();
+        let scopes: Vec<&str> = tree.iter().map(|(scope, _)| scope.as_str()).collect();
+        assert_eq!(tree.len(), 4, "AppMessage 应当正好 4 个 scope：{scopes:?}");
+        for scope in ["application", "project", "factory", "history"] {
+            assert!(scopes.contains(&scope), "缺少 scope {scope}：{scopes:?}");
+        }
+
+        // 单元变体必须接住：schemars 不给它们 oneOf 分支，漏掉就会静默少列动作。
+        let history = &tree.iter().find(|(scope, _)| scope == "history").unwrap().1;
+        assert_eq!(history, &vec!["undo".to_string(), "redo".to_string()]);
+
+        // 嵌套分组必须下钻到叶子，不能停在中转分组上。
+        let factory = &tree.iter().find(|(scope, _)| scope == "factory").unwrap().1;
+        assert!(
+            factory.iter().any(|path| path == "mechanic.recipe.set-recipe"),
+            "嵌套动作没被下钻：{factory:?}"
+        );
+        assert!(
+            !factory.iter().any(|path| path == "mechanic"),
+            "分组被当成了叶子：{factory:?}"
+        );
+
+        let leaves: usize = tree.iter().map(|(_, paths)| paths.len()).sum();
+        assert!(leaves >= 100, "只投影出 {leaves} 个动作，可能有整支被漏掉");
+
+        // 投影必须比被投影的 schema 明显小，否则这个投影就没有意义。
+        let full = serde_json::to_string(app_message_schema()).unwrap().len();
+        let catalog = serde_json::to_string(&*dispatch_input_schema()).unwrap().len();
+        assert!(catalog * 5 < full, "投影没变小：catalog {catalog} vs full {full}");
+    }
+
+    /// 切片必须自洽：返回的 `$defs` 要覆盖该分支里所有 `$ref`，否则调用方拿到的是
+    /// 一份解不开引用的 schema——那比不给还糟。
+    #[test]
+    fn action_slices_are_self_contained() {
+        let slice = action_schema_slice("mechanic.recipe.set-recipe").expect("应当找到嵌套动作");
+        assert_eq!(slice["scope"], "factory");
+        assert!(slice["schema"].is_object(), "{slice}");
+        let defs = slice["$defs"].as_object().expect("应当带 $defs");
+        for reference in refs_in(&slice["schema"]) {
+            assert!(defs.contains_key(&reference), "切片缺少 $defs.{reference}");
+        }
+        // 短名在该树里唯一时可用；找不到时必须是 None，不能瞎猜一个相近动作。
+        assert!(action_schema_slice("set-recipe").is_some());
+        assert!(action_schema_slice("没有这个动作").is_none());
+    }
+
+    /// 收集 schema 里出现的所有 `$ref` 名（测试辅助）。
+    fn refs_in(node: &serde_json::Value) -> Vec<String> {
+        let mut found = Vec::new();
+        let mut stack = vec![node];
+        while let Some(current) = stack.pop() {
+            match current {
+                serde_json::Value::Object(object) => {
+                    if let Some(name) = object
+                        .get("$ref")
+                        .and_then(|reference| reference.as_str())
+                        .and_then(|reference| reference.strip_prefix("#/$defs/"))
+                    {
+                        found.push(name.to_string());
+                    }
+                    stack.extend(object.values());
+                }
+                serde_json::Value::Array(items) => stack.extend(items.iter()),
+                _ => {}
+            }
+        }
+        found
+    }
+
+    /// 护栏：工具面的总量。`dispatch` 以前直发完整 AppMessage schema（44 KB，占整个
+    /// 工具面 77%），有客户读源码时就在这里卡住。这个测试把预算钉死，防止悄悄涨回去。
+    #[test]
+    fn tool_surface_stays_within_budget() {
+        let tools = MetatorioMcp::base_tool_router().list_all();
+        let mut total = 0usize;
+        let mut rows: Vec<(String, usize)> = Vec::new();
+        for tool in &tools {
+            // 与真实客户端一致：只转发 name / description / inputSchema。
+            let payload = serde_json::json!({
+                "name": tool.name.to_string(),
+                "description": tool.description.as_deref().unwrap_or(""),
+                "inputSchema": tool.input_schema,
+            });
+            // 与客户端实际计价口径一致：DSH 的 token 计量是 JSON 字符数（UTF-16）/ 4。
+            let size = serde_json::to_string(&payload).unwrap().chars().count();
+            total += size;
+            rows.push((tool.name.to_string(), size));
+        }
+        rows.sort_by_key(|(_, size)| std::cmp::Reverse(*size));
+        println!(
+            "工具面 {} 个，合计 {total} 字符（DSH 计量约 {} tokens）",
+            tools.len(),
+            total / 4
+        );
+        for (name, size) in &rows {
+            println!("  {name:26} {size:7}");
+        }
+        // 基线（2026-10）：7 个工具 17,118 字符。dispatch 投影前它是 44,710。
+        assert!(total < 22_000, "工具面涨到 {total} 字符：{rows:?}");
+        assert!(
+            rows[0].1 < 9_000,
+            "单个工具的 inputSchema 又成异类了（曾经是 44 KB 的 dispatch）：{:?}",
+            rows[0]
+        );
     }
 }
