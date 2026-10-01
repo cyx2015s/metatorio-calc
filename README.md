@@ -39,12 +39,62 @@
 
 我已经测试过了[太空探索](https://mods.factorio.com/mod/space-exploration)、 [K2](https://mods.factorio.com/mod/Krastorio2)、[Py](https://mods.factorio.com/mod/pymodpack)和[无主之地](https://mods.factorio.com/mod/nullius)系列，2.0版本和2.1版本的异星工厂游戏数据应该会正常加载，大部分功能都可正常使用。自动规划功能在原版+品质、DLC、太空探索+品质、Py下尝试求解（传说）物品的生产流程时可能失败，在状态空间较多时可能会内存超出，谨慎考虑添加枚举插件、枚举插件塔的数量！
 
-# 构建
+# 构建与开发环境
 
-使用 pnpm 构建运行：
+本仓库横跨 **Rust / C++ / TypeScript** 三种语言，先把工具链一次讲清楚。
+
+## 工具链一览
+
+| 组件 | 版本 | 用途 | 什么时候需要 |
+| --- | --- | --- | --- |
+| Rust | **≥ 1.85**（edition 2024；CI 用 stable） | 求解器内核（`crates/metatorio-solver` 等）+ Tauri 后端 | 编译一切 |
+| C++ 编译器 | 支持 C++11 即可（MSVC 2022 / GCC / Clang） | 编译 HiGHS 线性规划求解器 | 编译 `metatorio-solver` 时 |
+| CMake | **≥ 3.15**（实测 4.1 可用） | HiGHS 的构建系统 | 同上 |
+| Ninja（可选） | 任意 | 加速 HiGHS 的 CMake 构建 | 同上 |
+| LLVM / libclang | LLVM 14+ | `highs-sys` 用 bindgen 生成 C 绑定 | 同上 |
+| Node.js | LTS | 前端构建脚本 | 前端 / 打包 |
+| pnpm | 9.x | 前端包管理 | 前端 / 打包 |
+| Tauri v2 系统库 | 见下 | 桌面壳 | Linux 打包 |
+
+> **为什么会有 C++？** 求解器曾用纯 Rust 的 clarabel + microlp，但两者在
+> 「列高度相似、系数跨二十个数量级」的大 LP 上都不可靠（内点法给不出顶点、
+> 单纯形报 Singular matrix）。现在换成 [HiGHS](https://highs.dev/)（`good_lp`
+> 的 `highs` feature）。`highs` crate 内置 HiGHS 源码，`cargo build` 时会先用
+> CMake 把 C++ 编出来、再用 bindgen 生成绑定——所以工具链里多了 C++ / CMake /
+> LLVM。首次构建约 2 分钟，之后走 `target/` 缓存。
+
+## 按平台装齐
+
+**Windows**（VS 2022 生成工具即可）：
+
+```powershell
+winget install Kitware.CMake Ninja-build.Ninja LLVM.LLVM
+# 或：choco install cmake ninja llvm -y
+# 再把 C:\Program Files\LLVM\bin 加进 PATH（或设 LIBCLANG_PATH 指向它）
+```
+
+**Ubuntu / Debian**：
 
 ```sh
-pnpm tauri build
+sudo apt install build-essential cmake ninja-build clang libclang-dev
+# Tauri 还需要：
+sudo apt install libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev
+```
+
+## 常用命令
+
+```sh
+# 只跑求解器（最快，不碰前端）
+cargo test -p metatorio-solver
+
+# 全量 Rust 测试
+cargo test --workspace
+
+# 需要真实游戏数据的长用例（可选，约几分钟）
+cargo test --release -p metatorio-runtime --lib legendary_biter_egg -- --ignored --nocapture
+
+# 打包桌面应用
+cd metatorio-app && pnpm install && pnpm tauri build
 ```
 
 # 贡献

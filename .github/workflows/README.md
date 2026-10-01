@@ -5,6 +5,18 @@
 用 **Tauri** 编译并发布桌面应用（不再是旧的 egui 版），支持 **Linux（x86_64 → AppImage）** 和 **Windows（x86_64 → NSIS setup.exe）**。
 macOS 因签名需付费证书暂不构建。
 
+### 原生构建依赖（HiGHS）
+
+`metatorio-solver` 通过 `good_lp` 的 `highs` feature 依赖 [HiGHS](https://highs.dev/)。
+`highs` crate 内置其 C++ 源码，构建时会用 **CMake** 编译、用 **bindgen** 生成绑定，
+因此 CI 里必须装齐：
+
+- **Linux**：`cmake`、`ninja-build`、`clang`、`libclang-dev`（bindgen 需要 libclang）。
+- **Windows**：runner 一般自带 LLVM；workflow 会检查 `C:\Program Files\LLVM\bin\libclang.dll`，
+  缺失时 `choco install llvm`，并把该目录写进 `LIBCLANG_PATH`。
+
+改动这一块时请连同 `README.md` 的「构建与开发环境」一起更新。
+
 ### 触发器
 
 - **push tag `v*.*.*`**：构建并创建/更新 GitHub Release（含 updater 产物）。
