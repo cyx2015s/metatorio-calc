@@ -14,7 +14,7 @@
 use crate::generated_components::prototype_groups::prototype_group_from_type;
 use crate::generated_components::{
     BoilerComponent, COMPONENT_LIST, Component, ComponentValue, CraftingMachineComponent,
-    GeneratorComponent, ItemComponent, ItemSubGroupComponent, PrototypeBaseComponent,
+    FluidComponent, GeneratorComponent, ItemComponent, ItemSubGroupComponent, PrototypeBaseComponent,
     QualityComponent, RecipeComponent, TechnologyComponent, deserialize_component,
 };
 use crate::types::Product;
@@ -592,6 +592,22 @@ impl PrototypeStore {
                     }
                 }
             }
+            // 收集点 ③：流体自身的默认温度与最高温度。
+            //
+            // 少了这两项，`BoilerMechanic.temperature: None`（语义 = 用流体默认温度）
+            // 连自己工作在哪一档都不在表里，枚举层就没有落点；而发电机的可行温度
+            // 区间上界也来自这里。
+            for (name, record) in self
+                .groups
+                .get(&PrototypeGroup::Fluid)
+                .into_iter()
+                .flat_map(|group| group.iter())
+            {
+                if let Some(fluid) = record.component::<FluidComponent>() {
+                    add(&mut out, name, fluid.default_temperature);
+                    add(&mut out, name, fluid.max_temperature());
+                }
+            }
             for list in out.values_mut() {
                 list.sort_unstable();
                 list.dedup();
@@ -740,5 +756,56 @@ mod tests {
                 .contains(&"assembling-machine-1".to_string()),
             "entity 应落入 place_result 对应 item 的 组/小组：{entity_order:?}"
         );
+    }
+
+    /// 温度表必须收**流体自身**的默认温度与最高温度（收集点 ③）。
+    ///
+    /// 少了这两项，`BoilerMechanic.temperature: None`（语义 = 用流体默认温度）
+    /// 连自己工作在哪一档都不在表里，枚举层就没有落点；发电机的可行温度区间
+    /// 上下界也来自这里。
+    #[test]
+    fn fluid_temperatures_include_fluid_default_and_max() {
+        let dump = serde_json::json!({
+            "fluid": {
+                "steam": {
+                    "type": "fluid", "name": "steam",
+                    "default_temperature": 15, "max_temperature": 5000
+                }
+            }
+        });
+        let store = PrototypeStore::load(&dump).unwrap();
+        let temps = store
+            .fluid_temperatures()
+            .get("steam")
+            .cloned()
+            .unwrap_or_default();
+        assert!(temps.contains(&15), "缺流体默认温度：{temps:?}");
+        assert!(temps.contains(&5000), "缺流体最高温度：{temps:?}");
+    }
+
+    /// 锅炉的输出温度（`target_temperature`，挂在 output_fluid_box 的 filter 上）
+    /// 必须进表：它是「某个温度到底有没有产出点」的唯一来源。
+    #[test]
+    fn fluid_temperatures_include_boiler_target_temperature() {
+        let dump = serde_json::json!({
+            "fluid": {
+                "steam": { "type": "fluid", "name": "steam", "default_temperature": 15 }
+            },
+            "boiler": {
+                "heat-exchanger": {
+                    "type": "boiler", "name": "heat-exchanger",
+                    "target_temperature": 415,
+                    "fluid_box": { "filter": "water" },
+                    "output_fluid_box": { "filter": "steam" }
+                }
+            }
+        });
+        let store = PrototypeStore::load(&dump).unwrap();
+        let temps = store
+            .fluid_temperatures()
+            .get("steam")
+            .cloned()
+            .unwrap_or_default();
+        assert!(temps.contains(&415), "缺锅炉 target_temperature：{temps:?}");
     }
 }

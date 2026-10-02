@@ -1397,8 +1397,13 @@ fn solve_document(
 /// 零成本转换流：表达流之间的子类型关系，复刻原版 planner.rs:264-316 并扩展。
 ///
 /// 1. 温度区间子类型：窄区间流可放宽为包含它的宽区间流（[T,T] ⊆ [T1,T2]）。
-/// 2. 定点温度互转：同种流体不同定点温度互转，消耗/产出对应 FluidHeat
-///    平衡能量（加热消耗热量、冷却产出热量）。
+/// 2. 定点温度互转（**只降温**）：同种流体从高温定点降到低温定点，把显热排进
+///    对应 FluidHeat。升温方向被刻意移除——`FluidHeat` 无温度，模型无法表达
+///    「热源必须比目标更热」，升温边等于没有火用代价的自由升温，会让温度梯度
+///    自持周转（从单一温度热源净提取功），违反热力学第二定律。想要某个温度必须
+///    由原型声明的产出点提供（锅炉 `target_temperature` / 配方产物温度 /
+///    流体默认温度），由 `auto_plan::enumerate_energy` 铺开候选。守卫见
+///    `temperature_conversion_only_cools_never_heats`。
 /// 3. 燃料兼容：燃料物品的供给键（ItemFuelSupply，物品可声明多个类别）与
 ///    burner 的需求键（ItemFuel，机器接受的类别集合）**有重叠**即生成零成本
 ///    转换；带燃尽产物的燃料只能供给带燃尽产物物品栏的机器，无燃尽产物的
@@ -1484,10 +1489,23 @@ pub fn add_conversion_flows(
                 .unwrap_or(0.0);
             for &t1 in &fixed {
                 for &t2 in &fixed {
-                    if t1 == t2 {
+                    // **只保留降温**（t2 < t1）：把显热排进 FluidHeat。
+                    //
+                    // 升温边（t2 > t1，消耗 FluidHeat）被刻意移除。原因是它违反
+                    // 热力学第二定律：`FluidHeat` 是**无温度的标量**，模型无法表达
+                    // 「热源必须比目标更热」，于是「消耗热量把低温流体升到任意高温」
+                    // 就等于没有火用（exergy）代价的自由升温；而升温与降温按同一套
+                    // 显热计价、方向对称，温度梯度会变成可以自持周转的东西——汽轮机
+                    // 在高温端取功，排气冷却放出的热再拿去重新升温，等于从单一温度
+                    // 热源净提取功（卡诺上限被绕过）。
+                    //
+                    // 想要某个温度，必须由**原型声明**的产出点提供（锅炉
+                    // `target_temperature` / 配方产物温度 / 流体默认温度），并由枚举层
+                    // 在可行温度上铺开候选，见 `auto_plan::enumerate_energy`。
+                    if t2 >= t1 {
                         continue;
                     }
-                    // 1 单位流体从 t1 变到 t2 的热量差（加热为正 → 消耗热量）。
+                    // 1 单位流体从 t1 降到 t2 放出的热量（交给 FluidHeat）。
                     let heat = heat_capacity * (f64::from(t2) - f64::from(t1));
                     let mut flow = Flow::default();
                     flow.insert(
@@ -3558,6 +3576,50 @@ mod tests {
         assert!(
             !has_edge(true, false),
             "带燃尽产物燃料不应供给无燃尽产物物品栏的机器"
+        );
+    }
+
+    /// **热力学第二定律护栏**：定点温度互转只允许降温，不允许升温。
+    ///
+    /// `FluidHeat` 是**无温度的标量**，模型无法表达「热源必须比目标更热」。
+    /// 一旦允许「消耗热量把低温流体升到任意高温」，温度梯度就变成可以自持周转的
+    /// 东西——汽轮机在高温端取功、排气冷却放出的热再拿去重新升温，等于从单一温度
+    /// 热源净提取功，卡诺上限被绕过。想要某个温度，必须由原型声明的产出点提供
+    /// （锅炉 `target_temperature` / 配方产物温度 / 流体默认温度）。
+    #[test]
+    fn temperature_conversion_only_cools_never_heats() {
+        let store = PrototypeStore::load(&serde_json::json!({})).expect("空 dump 应可加载");
+        let cold = DualVar::Fluid {
+            name: "steam".to_string(),
+            temperature: [165, 165],
+        };
+        let hot = DualVar::Fluid {
+            name: "steam".to_string(),
+            temperature: [415, 415],
+        };
+        let mut flows = AIndexMap::default();
+        let mut flow = Flow::default();
+        flow.insert(cold.clone(), 100.0);
+        flow.insert(hot.clone(), 100.0);
+        flows.insert(
+            ExpandedVarId {
+                mechanic: MechanicId(1),
+                variant: 0,
+            },
+            (flow, 1.0),
+        );
+        add_conversion_flows(&mut flows, &store, &Flow::default(), &Flow::default());
+
+        let edge = |from: &DualVar, to: &DualVar| {
+            flows.values().any(|(flow, _)| {
+                flow.get(from).copied().unwrap_or(0.0) < 0.0
+                    && flow.get(to).copied().unwrap_or(0.0) > 0.0
+            })
+        };
+        assert!(edge(&hot, &cold), "降温（415 → 165）应保留");
+        assert!(
+            !edge(&cold, &hot),
+            "升温（165 → 415）必须不存在：那等于没有火用代价的自由升温"
         );
     }
 

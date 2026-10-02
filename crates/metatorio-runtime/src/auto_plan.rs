@@ -893,21 +893,66 @@ fn enumerate_energy(
             continue;
         }
         if let Some(generator) = record.component::<GeneratorComponent>() {
-            let Some(fluid) = generator.fluid_box.filter.clone() else {
+            let Some(fluid_name) = generator.fluid_box.filter.clone() else {
                 continue;
             };
-            let temperature = if generator.maximum_temperature > 0.0 {
-                generator.maximum_temperature
-            } else {
-                fluid_record(ctx, &fluid)
-                    .map(|f| f.default_temperature)
-                    .unwrap_or(0.0)
+            // 发电机的温度**不是一个点，而是一段可行区间**：`maximum_temperature`
+            // 只是出力上限的锚点（见 `ext::GeneratorComponent::get_output`，出力按
+            // `temperature - fluid.default_temperature` 线性增长，超过它就封顶），
+            // 原型在更低的输入温度上照样能跑，只是出力更低。
+            //
+            // 旧实现只枚举 `maximum_temperature` 一个落点，一旦上游产不出那个温度，
+            // 整条链就在温度边界上断掉、目标变成「无可行解」。实测：SE 汽轮机要
+            // 900°C 蒸汽，热交换机只产 415°C。这里改成在**原型声明的可行温度**上各
+            // 枚举一份，让求解器自己挑真正接得上的工作点。
+            //
+            // 这也是唯一不违反热力学第二定律的做法：想要某个温度只能由原型声明的
+            // 产出点提供（锅炉 target_temperature / 配方产物温度 / 流体默认温度），
+            // 不能靠消耗热量凭空升温——升温边已从 `add_conversion_flows` 移除。
+            let Some(fluid) = fluid_record(ctx, &fluid_name) else {
+                continue;
             };
-            out.push(Mechanic::Generator(metatorio_core::GeneratorMechanic {
-                generator: IdWithQuality::new(record.name.clone(), major_quality.clone()),
-                fluid,
-                temperature: Some(temperature as i32),
-            }));
+            let floor = generator
+                .fluid_box
+                .minimum_temperature
+                .unwrap_or(fluid.default_temperature);
+            // **刻意不设上限**。发电机自己会处理温度溢出（超出的品位只是被浪费掉），
+            // 但全局上不能假设「喂低温更划算」：高温流体可能本来就是你想要的某个链的
+            // 副产物，生产它再浪费一部分，有可能比专门生产低温流体更高效。这个取舍属于
+            // **求解器**，不属于枚举层——在枚举层砍掉，求解器就永远考虑不到那种方案了。
+            // 所以 > `maximum_temperature` 的档一律保留。
+            let mut temperatures: Vec<i32> = store
+                .fluid_temperatures()
+                .get(&fluid_name)
+                .map(Vec::as_slice)
+                .unwrap_or_default()
+                .iter()
+                .copied()
+                .filter(|temperature| {
+                    let temperature = f64::from(*temperature);
+                    // 只滤掉**不产电**的档：≤ 流体默认温度时 `get_output` 里的
+                    // `(temperature - default).max(0)` 恒为 0，造出来只是噪音；
+                    // 流体盒自己声明的最低温度也是硬约束。
+                    temperature > fluid.default_temperature && temperature >= floor
+                })
+                .collect();
+            if temperatures.is_empty() {
+                // 表里没有可用档位（上下文没载入 / 该流体没有温度记录）时退回旧行为，
+                // 至少不静默少一个候选。
+                let fallback = if generator.maximum_temperature > 0.0 {
+                    generator.maximum_temperature
+                } else {
+                    fluid.default_temperature
+                };
+                temperatures.push(fallback as i32);
+            }
+            for temperature in temperatures {
+                out.push(Mechanic::Generator(metatorio_core::GeneratorMechanic {
+                    generator: IdWithQuality::new(record.name.clone(), major_quality.clone()),
+                    fluid: fluid_name.clone(),
+                    temperature: Some(temperature),
+                }));
+            }
         }
         if let Some(_burner) = record.component::<BurnerGeneratorComponent>() {
             // 烧燃料发电机：无流体可枚举，交给用户手动配置
@@ -1467,5 +1512,74 @@ mod tests {
         );
         assert!(recipe_unlocked(&store, &accessibility, "enabled-recipe"));
         assert!(recipe_unlocked(&store, &accessibility, "locked-recipe"));
+    }
+
+    /// 发电机必须在**原型声明过的可行温度**上枚举，而不是被钉死在
+    /// `maximum_temperature` 一个点上。
+    ///
+    /// 实测故障：SE 汽轮机 `maximum_temperature = 900`，而唯一的热交换机只产
+    /// 415°C 蒸汽。旧实现因此只生成一个「要求 900°C、但没有任何产出点」的候选，
+    /// 写回后整条链在温度边界断裂，目标报「无可行解（目标不可达）」。
+    /// 现在 415°C 也在候选里，求解器可以退到那个工作点而不是整条链死掉。
+    #[test]
+    fn generators_are_enumerated_across_feasible_temperatures() {
+        let dump = serde_json::json!({
+            "fluid": {
+                "steam": {
+                    "type": "fluid", "name": "steam",
+                    "default_temperature": 15, "max_temperature": 5000
+                }
+            },
+            "boiler": {
+                "low-exchanger": {
+                    "type": "boiler", "name": "low-exchanger",
+                    "target_temperature": 165,
+                    "fluid_box": { "filter": "water" },
+                    "output_fluid_box": { "filter": "steam" }
+                },
+                "high-exchanger": {
+                    "type": "boiler", "name": "high-exchanger",
+                    "target_temperature": 415,
+                    "fluid_box": { "filter": "water" },
+                    "output_fluid_box": { "filter": "steam" }
+                }
+            },
+            "generator": {
+                "steam-turbine": {
+                    "type": "generator", "name": "steam-turbine",
+                    "maximum_temperature": 900,
+                    "fluid_usage_per_tick": 0.1,
+                    "effectivity": 1,
+                    "burns_fluid": false,
+                    "fluid_box": { "filter": "steam" }
+                }
+            }
+        });
+        let candidates = enumerate_on(None, &dump);
+        let temperatures: Vec<i32> = candidates
+            .iter()
+            .filter_map(|mechanic| match mechanic {
+                Mechanic::Generator(generator) => generator.temperature,
+                _ => None,
+            })
+            .collect();
+        assert!(
+            temperatures.contains(&415),
+            "发电机必须在锅炉真正产出的 415°C 上有候选：{temperatures:?}"
+        );
+        assert!(
+            temperatures.len() > 1,
+            "发电机不能被钉死在单个温度上：{temperatures:?}"
+        );
+        // 枚举层不设温度上限：发电机自己能浪费多余品位，而「高温流体是副产物、
+        // 浪费一部分反而更划算」是求解器该做的判断，不能在枚举阶段砍掉。
+        assert!(
+            temperatures.contains(&5000),
+            "高于 maximum_temperature 的档必须保留（该不该浪费品位是求解器的取舍）：{temperatures:?}"
+        );
+        assert!(
+            !temperatures.contains(&15),
+            "≤ 流体默认温度的档不产电，应当滤掉：{temperatures:?}"
+        );
     }
 }
