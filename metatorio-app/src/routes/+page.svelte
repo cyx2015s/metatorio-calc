@@ -621,6 +621,58 @@
     return {};
   }
 
+  /** 流体流的期望温度区间；非流体返回 null。 */
+  function fluidRangeOf(flow: DualVar): [number, number] | null {
+    if (flow !== null && typeof flow === "object" && "Fluid" in flow) {
+      return (flow as { Fluid: { temperature: [number, number] } }).Fluid.temperature;
+    }
+    return null;
+  }
+
+  /** 解析温度输入；非法返回 null（不把 NaN 写进文档）。 */
+  function parseTemperature(raw: string): number | null {
+    const value = Number(raw.trim());
+    return Number.isFinite(value) ? Math.round(value) : null;
+  }
+
+  /**
+   * 只改流体流的温度区间，流体名不动。`apply` 由调用方给出（目标 / 外部输入各走
+   * 自己的消息），两处行为因此不会漂移。
+   *
+   * 区间是**期望**而不是既成事实：下游只要产出落在 [lo, hi] 内就能满足它。默认区间
+   * 是流体的 [default_temperature, max_temperature]，所以新建流不会钉死在某个点上。
+   */
+  function setFluidRange(
+    flow: DualVar,
+    low: number,
+    high: number,
+    apply: (flow: DualVar) => void,
+  ) {
+    if (fluidRangeOf(flow) === null) return;
+    const name = (flow as { Fluid: { name: string } }).Fluid.name;
+    apply({ Fluid: { name, temperature: [Math.min(low, high), Math.max(low, high)] } });
+  }
+
+  function setTargetFluidRange(
+    target: import("$lib/runtime/types").FlowTarget,
+    low: number,
+    high: number,
+  ) {
+    setFluidRange(target.flow, low, high, (flow) =>
+      runtime.setTargetFlow(target.id, flow).catch(() => {}),
+    );
+  }
+
+  function setExternalInputFluidRange(
+    input: import("$lib/runtime/types").ExternalInput,
+    low: number,
+    high: number,
+  ) {
+    setFluidRange(input.flow, low, high, (flow) =>
+      runtime.setExternalInputFlow(input.id, flow).catch(() => {}),
+    );
+  }
+
   function editTarget(target: import("$lib/runtime/types").FlowTarget) {
     flowSelector = {
       title: "更改目标流",
@@ -1319,6 +1371,7 @@
             {#each dragTargets as target (target.id)}
               {@const icon = flowIcon(target.flow)}
               {@const q = flowQuality(target.flow)}
+              {@const fluidRange = fluidRangeOf(target.flow)}
               <div class="row-item one-line">
                 <!-- 图标承载两个动作：左键更改流、右键看建议（右键没有可见按钮，
                      靠 title 提示；「建议」按钮保留为可发现入口，同一个动作）。 -->
@@ -1336,6 +1389,33 @@
                 <span class="row-name" title={dualVarLabel(target.flow)}>
                   <span class="flow-name">{flowLabel(target.flow)}</span>
                 </span>
+                {#if fluidRange}
+                  <!-- 流体目标的**期望温度区间**：区间内任何产出都能满足它，所以不必
+                       钉死在一个温度点上（钉死会让目标在没人产出那个温度时直接不可解）。 -->
+                  <input
+                    class="num temp"
+                    type="text"
+                    inputmode="numeric"
+                    value={String(fluidRange[0])}
+                    title="期望温度下限（℃）"
+                    onchange={(event) => {
+                      const next = parseTemperature((event.currentTarget as HTMLInputElement).value);
+                      if (next !== null) setTargetFluidRange(target, next, fluidRange[1]);
+                    }}
+                  />
+                  <span class="temp-sep">~</span>
+                  <input
+                    class="num temp"
+                    type="text"
+                    inputmode="numeric"
+                    value={String(fluidRange[1])}
+                    title="期望温度上限（℃）"
+                    onchange={(event) => {
+                      const next = parseTemperature((event.currentTarget as HTMLInputElement).value);
+                      if (next !== null) setTargetFluidRange(target, fluidRange[0], next);
+                    }}
+                  />
+                {/if}
                 <input
                   class="num"
                   type="text"
@@ -1511,6 +1591,7 @@
             {#each dragInputs as input (input.id)}
               {@const icon = flowIcon(input.flow)}
               {@const q = flowQuality(input.flow)}
+              {@const fluidRange = fluidRangeOf(input.flow)}
               <div class="row-item">
                 <HoverIcon
                   type={icon.type}
@@ -1521,6 +1602,33 @@
                   flow={input.flow}
                 />
                 <span class="row-name" title={dualVarLabel(input.flow)}>{flowLabel(input.flow)}</span>
+                {#if fluidRange}
+                  <!-- 与目标行同一套语义：区间内任何温度的外部输入都算满足。
+                       外部输入本来就是"从外面买"，指定可接受温度区间比钉死一个温度更准。 -->
+                  <input
+                    class="num temp"
+                    type="text"
+                    inputmode="numeric"
+                    value={String(fluidRange[0])}
+                    title="期望温度下限（℃）"
+                    onchange={(event) => {
+                      const next = parseTemperature((event.currentTarget as HTMLInputElement).value);
+                      if (next !== null) setExternalInputFluidRange(input, next, fluidRange[1]);
+                    }}
+                  />
+                  <span class="temp-sep">~</span>
+                  <input
+                    class="num temp"
+                    type="text"
+                    inputmode="numeric"
+                    value={String(fluidRange[1])}
+                    title="期望温度上限（℃）"
+                    onchange={(event) => {
+                      const next = parseTemperature((event.currentTarget as HTMLInputElement).value);
+                      if (next !== null) setExternalInputFluidRange(input, fluidRange[0], next);
+                    }}
+                  />
+                {/if}
                 <input
                   class="num"
                   type="number"
@@ -3139,6 +3247,16 @@
     border-radius: var(--radius-sm);
     font-family: var(--mono);
     font-size: 10px;
+  }
+
+  /* 流体目标的期望温度区间：比数值输入窄一档，一行里放得下两个。 */
+  .num.temp {
+    width: 46px;
+  }
+
+  .temp-sep {
+    color: var(--faint);
+    font-size: 9px;
   }
 
   .empty-hint {

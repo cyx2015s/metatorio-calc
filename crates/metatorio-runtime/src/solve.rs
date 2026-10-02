@@ -3623,6 +3623,47 @@ mod tests {
         );
     }
 
+    /// 目标可以把流体温度声明成**区间**（默认就是 [default_temperature,
+    /// max_temperature]）：区间内任何定点产出都能满足它。
+    ///
+    /// 这是 GUI「目标可编辑流体温度范围」依赖的语义——目标写成一个点意味着
+    /// 「只有恰好这个温度才行」，而没人产出那个温度时整条链直接不可解。
+    #[test]
+    fn narrow_producer_satisfies_a_wide_fluid_target_range() {
+        let store = PrototypeStore::load(&serde_json::json!({})).expect("空 dump 应可加载");
+        let produced = DualVar::Fluid {
+            name: "steam".to_string(),
+            temperature: [415, 415],
+        };
+        let target = DualVar::Fluid {
+            name: "steam".to_string(),
+            temperature: [15, 5000],
+        };
+        let mut flows = AIndexMap::default();
+        let mut flow = Flow::default();
+        flow.insert(produced.clone(), 100.0);
+        flows.insert(
+            ExpandedVarId {
+                mechanic: MechanicId(1),
+                variant: 0,
+            },
+            (flow, 1.0),
+        );
+        // 目标区间要作为 ~target~ 传进去——转换图只认「求解中实际出现的流键」，
+        // 目标自己就是其中之一（~seen~ 从 target + sources + flows 收集）。
+        let mut target_flow = Flow::default();
+        target_flow.insert(target.clone(), -1.0);
+        add_conversion_flows(&mut flows, &store, &target_flow, &Flow::default());
+        let satisfies = flows.values().any(|(flow, _)| {
+            flow.get(&produced).copied().unwrap_or(0.0) < 0.0
+                && flow.get(&target).copied().unwrap_or(0.0) > 0.0
+        });
+        assert!(
+            satisfies,
+            "415°C 的产出必须能满足 [15, 5000] 的区间目标（窄 ⊆ 宽 的子类型规则）"
+        );
+    }
+
     /// 人体工学：新建工厂默认星球为 nauvis（避免"无星球"导致环境/隐式资源缺失）。
     #[test]
     fn new_factory_defaults_to_nauvis_planet() {

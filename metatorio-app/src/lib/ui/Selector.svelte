@@ -328,9 +328,14 @@
         return { Item: { id: name, quality } };
       case "fluid": {
         const detail = await runtime.getDetail("fluid", name);
-        const temperature =
+        // 默认取该流体的**完整可行温度区间** [default_temperature, max_temperature]：
+        // 下游任何落在区间内的产出都能满足它（靠转换图的 [T,T] ⊆ [T1,T2] 子类型规则），
+        // 所以新建流体流不必先猜一个温度点——猜错会让目标变成"没人能产出的那个温度"。
+        const low =
           detail?.default_temperature != null ? Math.round(detail.default_temperature) : 0;
-        return { Fluid: { name, temperature: [temperature, temperature] } };
+        const high =
+          detail?.maximum_temperature != null ? Math.round(detail.maximum_temperature) : low;
+        return { Fluid: { name, temperature: [low, Math.max(low, high)] } };
       }
       case "entity":
         return { Entity: { id: name, quality } };

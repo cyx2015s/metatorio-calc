@@ -2781,6 +2781,11 @@ fn prototype_detail(
     }
     if let Some(fluid) = record.component::<FluidComponent>() {
         detail.default_temperature = Some(fluid.default_temperature);
+        // 流体的最高温度。前端新建流体流时用它做默认区间上界
+        // （[default_temperature, max_temperature]），HoverCard 的"最高温度"也一并生效。
+        // `max_temperature()` 在没声明时回落到默认温度 → 区间退化成单点，符合"没有更高
+        // 温度可取"的实际语义。
+        detail.maximum_temperature = Some(fluid.max_temperature());
     }
     if let Some(quality) = record.component::<QualityComponent>() {
         detail.quality_level = Some(quality.level);
