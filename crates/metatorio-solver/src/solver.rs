@@ -55,6 +55,12 @@ where
     /// 供给，因此其消耗配方被整体剪掉——NoProvider 应如实报告它们，
     /// 而不是在剪枝后静默消失。
     pub pruned_missing: Vec<I>,
+    /// **不受配平约束**的坐标：污染这类量是「指标」而不是「物质」——它既不参与
+    /// 守恒，被吸收也不构成需求（没有污染时，吸收污染的建筑照样正常工作）。
+    ///
+    /// 由**调用方按类型语义**填（`DualVar::Pollution`），求解器不猜：`I` 是泛型，
+    /// 内核不认识具体变体。这是「平衡规则来自语义、不来自系数符号」的第一步。
+    pub unconstrained: AIndexSet<I>,
 }
 
 // TODO: warning: large size difference between variants
@@ -212,6 +218,7 @@ where
             strict_source: false,
             strict_sink: false,
             pruned_missing: Vec::new(),
+            unconstrained: AIndexSet::default(),
         }
     }
 
@@ -239,7 +246,6 @@ where
     /// 物品记录进 `pruned_missing`（调用方应只在第一轮传 true：后续轮次
     /// 缺少的物品往往是被第一轮剪枝连坐的间接原因，不是根因）。
     pub fn trim_flows(&mut self, record_missing: bool) -> bool {
-        let mut changed = false;
         if self.strict_source {
             // 在strict_source模式下，移除所有无法使用的配方
             let instant = std::time::Instant::now();
@@ -299,8 +305,6 @@ where
                 }
             }
 
-            let before = self.flows.len();
-
             let needed_by_target = self.target.iter().fold(
                 AIndexSet::default(),
                 |mut acc,
@@ -318,6 +322,21 @@ where
                 },
             );
 
+            // **只报告，不删除。**
+            //
+            // 删除以前在这里做，而且会**级联**：某物品没有生产者 → 删掉它的消费流 →
+            // 那条流产出的东西又没了生产者 → 再删……实测把「1W 电力」这种目标的整条链
+            // 剪空（燃料棒没生产者 → 剪反应堆 → 热量没生产者 → 剪热交换机 → 蒸汽没生产者
+            // → 剪汽轮机 → 电力没生产者），最后报出误导性的
+            // 「无供给：Electricity, uranium-fuel-cell」。
+            //
+            // 而且删除本来就是**不必要**的：严格供给下，一个「有消费者、没有生产者、
+            // 也不在 sources」的物品，其配平约束是 `-coef·var >= 0`（strict_sink 时
+            // `== 0`），变量非负，这个约束自己就把那些流的变量压成 0；HiGHS 返回的是
+            // 精确顶点解，不需要我们提前剪掉。省下的那点 LP 规模不值得这个风险。
+            //
+            // 保留**记录**（`pruned_missing`）：它是「哪些物品没有任何生产者」的唯一
+            // 来源，求解失败的诊断仍然需要它。
             for (i_id, entry) in &status {
                 if let ItemStatus::Pending {
                     providers,
@@ -325,39 +344,21 @@ where
                 } = entry
                     && providers.is_empty() // 没有生产这个物品的配方
                         && !self.sources.contains_key(i_id) // 外部也不能提供
-                        && !needed_by_target.contains(i_id)
-                // 目标也不需要
-                {
-                    // 记录剪枝原因（仅第一轮）：该物品/流没有任何提供者
-                    // （无配方产出、外部也不供给），其消耗配方整体不可用。
-                    if record_missing
+                        && !needed_by_target.contains(i_id) // 目标也不需要
+                        && record_missing
                         && !consumers.is_empty()
                         && !self.pruned_missing.contains(i_id)
-                    {
-                        self.pruned_missing.push(i_id.clone());
-                    }
-                    for f_id in consumers {
-                        self.flows.swap_remove(f_id);
-                        changed = true;
-                    }
+                {
+                    self.pruned_missing.push(i_id.clone());
                 }
             }
-
-            let after = self.flows.len();
-            if before != after {
-                log::debug!(
-                    "求解器：移除了 {} 个无法使用的配方 ({} -> {})",
-                    before - after,
-                    before,
-                    after
-                );
-            }
             log::debug!(
-                "求解器：移除无法使用的配方耗时 {} ms",
+                "求解器：统计无生产者物品耗时 {} ms",
                 instant.elapsed().as_millis()
             );
         }
-        changed
+        // 不再有任何「剪枝」变更：恒返回 false，调用方的 while 循环只跑一轮。
+        false
     }
 
     pub fn solve(mut self) -> SolverSolution<I, R> {
@@ -421,21 +422,26 @@ where
             self.flows.len()
         );
 
-        // 因为存在0开销转换流，必须限制产物为0.
-        // 目前约定的0开销转换流都表示其转换在其他建筑中隐式完成，所以不消耗代价，同理也必须完全配平，不允许有剩余。
-        let mut force_zero_items = AIndexSet::default();
+        // 辅助转换流的产物**不再强制配平**（原来这里把「零成本流的正系数产物」收集成
+        // `force_zero_items`，再对它们加 `expr == 0`）。那条约束是错的：
+        //
+        // 1. 辅助流全是 **1:1 重贴标签**（温度区间子类型、定点降温、燃料类别桥接、
+        //    filter 归并），变量非负、消耗 1 才能产出 1，凭空造物质不可能——它想防的
+        //    事不存在。
+        // 2. 它让任何**用宽键命名的目标**必然无解：目标的 broad 键正是由子类型边
+        //    （零成本、正系数）产出的，于是 `balance(目标键) == 0` 与
+        //    `target_expr == amount` 直接冲突。实测 `steam@[15,500]` 目标恒不可行，
+        //    而 `steam@[500,500]` 因为不存在 narrow≠broad 的自类型边反而可行。
+        // 3. 判据本身也坏：用 `cost == 0.0` 代理「这是辅助流」，但 `cost` 同时还在表达
+        //    「这个机制便宜」——`FluidFuel`/`FluidHeat` 的实例成本本来就是 0，于是两个
+        //    **真实机制**的产物也被强制配平了。辅助变量的正确标识是
+        //    `MechanicId(u64::MAX)`（`used_candidates` 已经在用）。
         for (f_id, flow_spec) in &self.flows {
             let var = flow_vars.get(f_id).unwrap();
             for (item_id, &amount) in &flow_spec.coefficients {
-                let entry = item_balances
+                *item_balances
                     .entry(item_id.clone())
-                    .or_insert(good_lp::Expression::from(0.0));
-                let val = amount;
-
-                *entry += val * *var;
-                if flow_spec.cost == 0.0 && amount > 0.0 {
-                    force_zero_items.insert(item_id.clone());
-                }
+                    .or_insert(good_lp::Expression::from(0.0)) += amount * *var;
             }
         }
         log::info!("求解器：一共有 {} 个物品需要平衡", item_balances.len(),);
@@ -481,14 +487,19 @@ where
             item_to_constraint.insert(item_id.clone(), constraints.len() - 1);
         };
         for (item_id, expr) in &item_balances {
-            // 所有目标都间接转移了，不再在此处做判断
-            {
+            // 污染这类「指标」完全不受约束：没有污染时吸收污染的建筑照样正常工作，
+            // 有污染时也不要求"吸收量 = 排放量"（那会把吸收变成了需求）。
+            if self.unconstrained.contains(item_id) {
+                continue;
+            }
+            // **目标物品由目标约束独占管辖**（下面 `target_expr == constant`），
+            // 不在这里配平。否则严格产出会对同一个表达式同时要求 `== 0` 和
+            // `== constant`，任何非零目标都必然不可行——严格产出模式因此从来没有
+            // 真正跑通过（这是它一直坏着的根因，也是 `force_zero_items` 当初被加进来的
+            // 原因：它在局部模拟「不允许剩余」，因为全局的严格产出是坏的）。
+            if !item_in_targets.contains(item_id) {
                 // 严格模式下，不能凭空输入。非严格模式下，有来源的物品不能有凭空输入。
                 // 非目标物品，不能为负
-                if force_zero_items.contains(item_id) {
-                    add_constraint(item_id, expr.clone().eq(0.0));
-                    continue;
-                }
                 if self.strict_source {
                     // 不能从外部借用
                     if self.strict_sink {
@@ -898,24 +909,112 @@ mod tests {
     }
 
     #[test]
-    fn solve_zero_cost_flow_must_balance() {
-        // 0 成本转换流的产出物必须完全配平：不能凭空产出目标
-        let mut target = AIndexMap::default();
-        target.insert("plate", 1.0);
-        let mut flows = AIndexMap::default();
-        let mut conv = AIndexMap::default();
-        conv.insert("ore", -1.0);
-        conv.insert("plate", 1.0);
-        flows.insert("conv", (conv, 0.0)); // 0 成本
-        let mut prod = AIndexMap::default();
-        prod.insert("raw", -1.0);
-        prod.insert("ore", 1.0);
-        flows.insert("prod", (prod, 1.0));
-        let solution = SolverData::new_simple(target, flows).solve();
+    fn zero_cost_conversion_products_are_not_force_balanced() {
+        // 0 成本转换流的产物**不强制配平**。
+        //
+        // 原来这里断言"0 成本转换流产出目标物品应不可行"——那正是 `force_zero_items`
+        // 的行为，而它是错的：目标的**宽键**正是由零成本子类型边产出的，强制配平会让
+        // `balance(目标键) == 0` 与 `target_expr == amount` 直接冲突，任何用区间
+        // 命名的流体目标都恒不可行（实测 `steam@[15,500]`）。
+        //
+        // 「不能凭空拿到目标」这个性质由 **strict_source** 保证，不是靠强制配平：
+        // 非严格模式允许借用无来源的 `raw`，严格模式不允许。两条一起钉住。
+        let build = || {
+            let mut target = AIndexMap::default();
+            target.insert("plate", 1.0);
+            let mut flows = AIndexMap::default();
+            let mut conv = AIndexMap::default();
+            conv.insert("ore", -1.0);
+            conv.insert("plate", 1.0);
+            flows.insert("conv", (conv, 0.0)); // 0 成本转换
+            let mut prod = AIndexMap::default();
+            prod.insert("raw", -1.0);
+            prod.insert("ore", 1.0);
+            flows.insert("prod", (prod, 1.0));
+            (target, flows)
+        };
+
+        let (target, flows) = build();
         assert!(
-            matches!(solution, SolverSolution::NotSolved { .. }),
-            "0 成本转换流产出目标物品应不可行"
+            matches!(
+                SolverData::new_simple(target, flows).solve(),
+                SolverSolution::Solved { .. }
+            ),
+            "非严格模式允许借用 raw，应当可行"
         );
+
+        let (target, flows) = build();
+        assert!(
+            matches!(
+                SolverData::new_simple(target, flows)
+                    .with_strict_source(true)
+                    .solve(),
+                SolverSolution::NotSolved { .. }
+            ),
+            "严格模式不允许凭空拿到 raw，应当不可行——这才是「不能凭空得到目标」的守卫"
+        );
+    }
+
+    #[test]
+    fn strict_sink_does_not_force_the_target_itself_to_balance() {
+        // 严格产出下**目标物品不参与逐项配平**——它由目标约束独占管辖。
+        //
+        // 否则同一个表达式会被同时要求 `== 0`（逐项配平）和 `== amount`（目标约束），
+        // 任何非零目标都必然不可行。严格产出模式因此从来没有真正跑通过——这也是
+        // `force_zero_items` 当初被加进来的原因：它在局部模拟「不允许剩余」，因为
+        // 全局的严格产出是坏的。
+        let build = || {
+            let mut target = AIndexMap::default();
+            target.insert("plate", 1.0);
+            let mut flows = AIndexMap::default();
+            let mut smelt = AIndexMap::default();
+            smelt.insert("ore", -1.0);
+            smelt.insert("plate", 1.0);
+            flows.insert("smelt", (smelt, 1.0));
+            (target, flows)
+        };
+        let mut sources = AIndexMap::default();
+        sources.insert("ore", 1.0); // 外部供矿，严格供给下也要有来源
+
+        let (target, flows) = build();
+        assert!(
+            matches!(
+                SolverData::new_simple(target, flows)
+                    .with_sources(sources)
+                    .with_strict_source(true)
+                    .with_strict_sink(true)
+                    .solve(),
+                SolverSolution::Solved { .. }
+            ),
+            "严格产出下目标物品由目标约束独占管辖，不能同时被要求配平为 0"
+        );
+    }
+
+    #[test]
+    fn unconstrained_items_are_never_balanced() {
+        // 「指标」类坐标（污染）完全不受配平约束：一个**消耗污染**、产出目标的建筑，
+        // 在没有污染来源时也必须能正常工作——吸收污染不等于「需要污染」。
+        //
+        // 不加 `unconstrained` 的话，严格模式下 `pollution` 会被要求 `== 0`，
+        // 于是吸收建筑根本跑不起来、目标不可达。
+        let build = || {
+            let mut target = AIndexMap::default();
+            target.insert("plate", 1.0);
+            let mut flows = AIndexMap::default();
+            let mut scrub = AIndexMap::default();
+            scrub.insert("pollution", -1.0); // 吸收污染
+            scrub.insert("plate", 1.0);
+            flows.insert("scrub", (scrub, 1.0));
+            (target, flows)
+        };
+
+        let (target, flows) = build();
+        let mut problem = SolverData::new_simple(target, flows);
+        problem.unconstrained.insert("pollution");
+        assert!(matches!(
+            problem.with_strict_sink(true).with_strict_source(true).solve(),
+            SolverSolution::Solved { .. }
+        ));
     }
 
     #[test]
@@ -965,8 +1064,12 @@ mod tests {
     }
 
     #[test]
-    fn trim_flows_removes_unusable_recipes_in_strict_mode() {
-        // strict_source：孤立配方（消耗无法获得的物品且目标不需要）被剪掉
+    fn trim_flows_reports_but_never_removes_unusable_recipes() {
+        // strict_source：孤立配方（消耗无法获得的物品且目标不需要）**只被记录，不被删除**。
+        //
+        // 删除曾经在这里做，而且会级联：删掉消费流 → 那条流产出的东西也没了生产者 →
+        // 再删……实测把「1W 电力」的整条链剪空。而配平约束自己就把这类流的变量压成 0
+        // （`-coef·var >= 0`、变量非负），不需要提前删。
         let mut target = AIndexMap::default();
         target.insert("plate", 1.0);
         let mut flows = AIndexMap::default();
@@ -989,8 +1092,11 @@ mod tests {
         let mut data = SolverData::new_simple(target, flows)
             .with_sources(sources)
             .with_strict_source(true);
-        assert!(data.trim_flows(true));
-        assert!(!data.flows.contains_key("react"));
+        assert!(!data.trim_flows(true), "不再有「剪枝」这个变更，返回值恒为 false");
+        assert!(
+            data.flows.contains_key("react"),
+            "不可用的配方也必须留着（删除会级联）"
+        );
         assert!(data.flows.contains_key("smelt"));
         assert!(data.flows.contains_key("miner"));
         assert!(

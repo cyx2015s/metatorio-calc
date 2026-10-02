@@ -7,7 +7,7 @@ use metatorio_core::{
 };
 use metatorio_data::store::{PrototypeGroup, PrototypeStore};
 use metatorio_data::{FluidComponent, LabComponent, PrototypeBaseComponent};
-use metatorio_solver::{AIndexMap, SolverData, SolverSolution, TargetSpec};
+use metatorio_solver::{AIndexMap, AIndexSet, SolverData, SolverSolution, TargetSpec};
 use serde::{Deserialize, Serialize};
 
 use crate::document::{
@@ -1133,6 +1133,17 @@ const AUTOPLAN_VERIFY_LIMIT: usize = 20_000;
 
 /// 用给定机制集合构建自动规划的 LP（目标 / 外部输入 / 严格供给口径与
 /// `plan_auto_plan` 完全一致）。抽出来是为了能做**回写前自检**。
+/// 不受配平约束的坐标（污染这类「指标」而不是「物质」）。
+/// 见 `SolverData::unconstrained`——没有污染时，吸收污染的建筑照样正常工作。
+fn unconstrained_items(flows: &AIndexMap<ExpandedVarId, (Flow, f64)>) -> AIndexSet<DualVar> {
+    flows
+        .values()
+        .flat_map(|(flow, _)| flow.keys())
+        .filter(|key| matches!(key, DualVar::Pollution { .. }))
+        .cloned()
+        .collect()
+}
+
 fn build_autoplan_problem(
     store: &PrototypeStore,
     context: &Context,
@@ -1161,7 +1172,9 @@ fn build_autoplan_problem(
         flows.insert(flow_id, (variable.flow, variable.cost));
     }
     add_conversion_flows(&mut flows, store, target, all_sources);
+    let unconstrained = unconstrained_items(&flows);
     let mut problem = SolverData::new_simple(target.clone(), flows);
+    problem.unconstrained = unconstrained;
     problem.sources = all_sources.clone();
     // 自动规划默认严格供给。
     problem.strict_source = true;
@@ -1315,7 +1328,9 @@ fn solve_document(
     // 零成本转换流（子类型关系，复刻原版 planner.rs:264-316 并扩展）：
     // 温度区间放宽、燃料子类型提升、filter 归并、定点温度互转（FluidHeat 平衡）。
     add_conversion_flows(&mut flows, prototype, &target, &all_sources);
+    let unconstrained = unconstrained_items(&flows);
     let mut problem = SolverData::new_simple(target, flows);
+    problem.unconstrained = unconstrained;
     problem.sources = all_sources;
     problem.strict_source = factory.strict_source;
     problem.strict_sink = factory.strict_sink;

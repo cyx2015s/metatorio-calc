@@ -73,14 +73,18 @@ pub fn used_candidates<T: Clone>(
         .iter()
         .fold(0.0f64, |acc, (_, amount)| acc.max(amount.abs()));
     let cutoff = (max_amount * TAIL_RATIO).max(ABSOLUTE_FLOOR);
+    // **不再按用量阈值丢弃候选。** HiGHS 给的是精确顶点解，未用到的变量精确为 0，
+    // 所以支撑集本身就是干净的；阈值唯一的作用是把「用量远小于主目标」的**必需**上游
+    // 机制误判成噪声丢掉——实测目标 1W 电力时整条核燃料链的用量在 1e-14 量级、低于
+    // 绝对下限 1e-9，回写出去的文档因此缺了反应堆的燃料生产者，随即「无解」。
+    // `cutoff` 仍然算出来放进报告，只作诊断信息，不再参与筛选。
     let mut used = Vec::new();
     let mut support = Vec::new();
     for (id, amount) in amounts {
-        if amount.abs() > cutoff {
-            used.push(candidates[id.mechanic.0 as usize].clone());
-        }
         if amount != 0.0 {
-            support.push(candidates[id.mechanic.0 as usize].clone());
+            let candidate = candidates[id.mechanic.0 as usize].clone();
+            used.push(candidate.clone());
+            support.push(candidate);
         }
     }
     UsedCandidates {
@@ -1437,11 +1441,16 @@ mod tests {
     }
 
     #[test]
-    fn used_candidates_filters_aux_and_subthreshold_flows() {
-        // 索引 0 是零成本转换流的辅助变量（MechanicId(u64::MAX)），应被剔除；
-        // 索引 1 用量显然保留；索引 2 用量 1e-12（噪声）剔除；索引 3 用量 1e-8
-        // 相对最大用量 2.0 是 5e-9 > 阈值 2e-9，保留（顶点解没有「尾值」）。
-        let candidates = vec!["aux", "kept", "dropped", "tail"];
+    fn used_candidates_uses_the_vertex_support() {
+        // 回写集合 = LP 解的**支撑集**（amount ≠ 0），不再按用量阈值筛。
+        //
+        // 阈值那一版会把「用量远小于主目标」的必需上游机制误判成噪声丢掉：实测目标
+        // 1W 电力时整条核燃料链的用量在 1e-14 量级、低于绝对下限 1e-9，回写出去的
+        // 文档因此缺了反应堆的燃料生产者，随即「无解」。HiGHS 给的是精确顶点解，
+        // 没用到的变量精确为 0，支撑集本身就是干净的——不需要再筛。
+        //
+        // 索引 0 是零成本转换流的辅助变量（MechanicId(u64::MAX)），仍然剔除。
+        let candidates = vec!["aux", "kept", "tiny", "tail", "zero"];
         let prim = vec![
             (
                 ExpandedVarId {
@@ -1471,16 +1480,18 @@ mod tests {
                 },
                 1e-8,
             ),
+            (
+                ExpandedVarId {
+                    mechanic: MechanicId(4),
+                    variant: 0,
+                },
+                0.0,
+            ),
         ];
         let filtered = used_candidates(&candidates, prim);
-        assert_eq!(filtered.used, vec!["kept", "tail"]);
-        // 阈值 = 最大 amount（2.0）× 1e-9。
-        assert!(
-            (filtered.cutoff - 2e-9).abs() < 1e-15,
-            "cutoff={}",
-            filtered.cutoff
-        );
-        assert_eq!(filtered.considered, 3);
+        assert_eq!(filtered.used, vec!["kept", "tiny", "tail"]);
+        assert_eq!(filtered.used, filtered.support, "used 应当就是支撑集");
+        assert_eq!(filtered.considered, 4);
     }
 
     #[test]

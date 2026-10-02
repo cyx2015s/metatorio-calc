@@ -117,6 +117,56 @@
     noticeTimer = setTimeout(() => (notice = null), 4000);
   }
 
+  // 顶端报错条：最多 3 行，过长省略；被截断时给一个复制按钮把完整内容取回来。
+  // 求解器的报错会把缺供给的物品全列出来，原文能把顶部撑满、挤掉下面的内容。
+  let errLines = $state<HTMLElement | null>(null);
+  let errTruncated = $state(false);
+
+  function errorStripText(): string {
+    return [
+      runtime.contextError ? `数据：${runtime.contextError}` : "",
+      runtime.lastError ? `操作：${runtime.lastError}` : "",
+      notice ? `提示：${notice}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  async function copyErrorStrip() {
+    try {
+      await navigator.clipboard.writeText(errorStripText());
+      showNotice("已复制完整报错");
+    } catch {
+      showNotice("复制失败：剪贴板不可用");
+    }
+  }
+
+  // 量「有没有被截断」：纵向溢出（超过 3 行）或任一行横向溢出（省略号生效）。
+  // 三个数据源都读一遍，任一变化就重新量；resize 时窗口宽度变了也要重量。
+  $effect(() => {
+    const node = errLines;
+    void runtime.contextError;
+    void runtime.lastError;
+    void notice;
+    if (!node) {
+      errTruncated = false;
+      return;
+    }
+    const measure = () => {
+      const vertical = node.scrollHeight > node.clientHeight + 1;
+      const horizontal = Array.from(node.children).some(
+        (child) => (child as HTMLElement).scrollWidth > (child as HTMLElement).clientWidth + 1,
+      );
+      errTruncated = vertical || horizontal;
+    };
+    const frame = requestAnimationFrame(measure);
+    window.addEventListener("resize", measure);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("resize", measure);
+    };
+  });
+
   // ── 应用更新 ────────────────────────────────────────────────────
   let updating = $state(false);
   async function checkForUpdate() {
@@ -1266,9 +1316,20 @@
 
   {#if runtime.contextError || runtime.lastError || notice}
     <div class="err-strip">
-      {#if runtime.contextError}<span>数据：{runtime.contextError}</span>{/if}
-      {#if runtime.lastError}<span>操作：{runtime.lastError}</span>{/if}
-      {#if notice}<span class="notice">提示：{notice}</span>{/if}
+      <div class="err-lines" bind:this={errLines}>
+        {#if runtime.contextError}
+          <span class="err-line" title={runtime.contextError}>数据：{runtime.contextError}</span>
+        {/if}
+        {#if runtime.lastError}
+          <span class="err-line" title={runtime.lastError}>操作：{runtime.lastError}</span>
+        {/if}
+        {#if notice}
+          <span class="err-line notice" title={notice}>提示：{notice}</span>
+        {/if}
+      </div>
+      {#if errTruncated}
+        <button class="err-copy" title="复制完整报错" onclick={copyErrorStrip}>复制</button>
+      {/if}
     </div>
   {/if}
 
@@ -3016,13 +3077,48 @@
 
   .err-strip {
     display: flex;
-    flex-wrap: wrap;
-    gap: 14px;
+    align-items: flex-start;
+    gap: 8px;
     padding: 6px 12px;
     color: var(--danger);
     background: var(--danger-dim);
     border-bottom: 1px solid var(--danger-line);
     font-size: 11px;
+  }
+
+  /* 报错条限高：最多 3 行。每条强制一行 + 省略号，裁掉的部分靠复制按钮取回
+     （悬停单行也能用 title 看到完整内容）。 */
+  .err-lines {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: calc(3 * 1.45em);
+    overflow: hidden;
+  }
+
+  .err-line {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .err-copy {
+    flex: 0 0 auto;
+    padding: 1px 6px;
+    color: inherit;
+    background: transparent;
+    border: 1px solid var(--danger-line);
+    border-radius: var(--radius-sm);
+    font-family: inherit;
+    font-size: 10px;
+    cursor: pointer;
+  }
+
+  .err-copy:hover {
+    background: color-mix(in srgb, var(--danger) 14%, transparent);
   }
 
   .warn-strip {
