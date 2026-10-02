@@ -34,6 +34,7 @@ use crate::message::{
     MechanicListAction, MiningMechanicAction, ModuleAction, PlanningAction, PlantMechanicAction,
     ProjectAction, ReactorMechanicAction, RecipeMechanicAction, RuntimeCommand,
     SolarMechanicAction, SolveAction, SpoilMechanicAction, TargetAction, TargetExpressionAction,
+    TileDisposeMechanicAction, TileExtractMechanicAction,
 };
 
 /// Mutable application state that is independent from any GUI framework.
@@ -1867,6 +1868,40 @@ fn apply_mechanic_action(
             };
             apply_fluid_heat_action(mechanic, action)
         }
+        MechanicAction::TileExtract(action) => {
+            let Mechanic::TileExtract(mechanic) = &mut entry.mechanic else {
+                return Err(kind_mismatch("tile-extract"));
+            };
+            apply_tile_extract_action(mechanic, action)
+        }
+        MechanicAction::TileDispose(action) => {
+            let Mechanic::TileDispose(mechanic) = &mut entry.mechanic else {
+                return Err(kind_mismatch("tile-dispose"));
+            };
+            apply_tile_dispose_action(mechanic, action)
+        }
+    }
+}
+
+fn apply_tile_extract_action(
+    mechanic: &mut metatorio_core::TileExtractMechanic,
+    action: TileExtractMechanicAction,
+) -> Result<bool, RuntimeError> {
+    match action {
+        TileExtractMechanicAction::SetTile { tile } => Ok(replace(&mut mechanic.tile, tile)),
+        TileExtractMechanicAction::SetMachine { machine } => {
+            Ok(replace(&mut mechanic.machine, machine))
+        }
+    }
+}
+
+fn apply_tile_dispose_action(
+    mechanic: &mut metatorio_core::TileDisposeMechanic,
+    action: TileDisposeMechanicAction,
+) -> Result<bool, RuntimeError> {
+    match action {
+        TileDisposeMechanicAction::SetTile { tile } => Ok(replace(&mut mechanic.tile, tile)),
+        TileDisposeMechanicAction::SetItem { item } => Ok(replace(&mut mechanic.item, item)),
     }
 }
 
@@ -1884,6 +1919,8 @@ fn kind_mismatch(kind: &'static str) -> RuntimeError {
         "solar" => "该机制不是 solar 类型",
         "fluid-fuel" => "该机制不是 fluid-fuel 类型",
         "fluid-heat" => "该机制不是 fluid-heat 类型",
+        "tile-extract" => "该机制不是 tile-extract 类型",
+        "tile-dispose" => "该机制不是 tile-dispose 类型",
         _ => "机制类型不匹配",
     };
     RuntimeError::InvalidOperation(message)

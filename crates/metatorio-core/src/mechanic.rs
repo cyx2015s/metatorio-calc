@@ -328,6 +328,36 @@ pub enum Mechanic {
     Solar(SolarMechanic),
     FluidFuel(FluidFuelMechanic),
     FluidHeat(FluidHeatMechanic),
+    TileExtract(TileExtractMechanic),
+    TileDispose(TileDisposeMechanic),
+}
+
+/// 地格抽取组件：在指定地格上放抽取机械，产出**该地格对应的流体**。
+///
+/// 地格决定产出什么（`TileComponent.fluid`：water / lava / heavy-oil / …），
+/// 机械决定产出多少（`OffshorePumpComponent.pumping_speed`）。原版里
+/// offshore-pump 的 `fluid_box` 没有 filter——抽什么由地格决定——所以这两件事
+/// 必须分开配置。原版 offshore-pump 的 `energy_source` 是 `void`（不耗电）。
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TileExtractMechanic {
+    /// 地格名（决定产出的流体）。
+    pub tile: String,
+    /// 抽取机械（决定速率）。
+    pub machine: IdWithQuality,
+}
+
+/// 地格销毁组件：把物品扔到指定地格上销毁（原版的岩浆）。
+///
+/// 判据是地格的 `TileComponent.destroys_dropped_items`——不是所有地格都能销毁，
+/// 所以地格必须显式指定。任何物品都可以扔进去。
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TileDisposeMechanic {
+    /// 地格名（必须有 `destroys_dropped_items`）。
+    pub tile: String,
+    /// 被销毁的物品。
+    pub item: IdWithQuality,
 }
 
 // ── 组件配置 struct（迁移自 metatorio-egui 的 XxxInstance，单例语义）──

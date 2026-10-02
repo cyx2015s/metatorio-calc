@@ -14,7 +14,8 @@ use crate::id::IdWithQuality;
 use crate::mechanic::{
     BoilerMechanic, FluidFuelMechanic, FluidHeatMechanic, Fuel, GeneratorMechanic,
     ItemFuelMechanic, ItemLaunchMechanic, Mechanic, MiningMechanic, ModuleConfig, PlantMechanic,
-    ReactorMechanic, RecipeMechanic, SolarMechanic, SpoilMechanic, quality_by_level,
+    ReactorMechanic, RecipeMechanic, SolarMechanic, SpoilMechanic, TileDisposeMechanic,
+    TileExtractMechanic, quality_by_level,
 };
 use crate::prim_var::Expansion;
 use crate::quality::calc_quality_distribution;
@@ -26,9 +27,9 @@ use metatorio_data::types::{
 };
 use metatorio_data::{
     AccumulatorComponent, BoilerComponent, CraftingMachineComponent, EntityComponent,
-    GeneratorComponent, ItemComponent, MinableProperties, MiningDrillComponent, PlantComponent,
-    ReactorComponent, RecipeComponent, ResourceEntityComponent, RocketSiloComponent,
-    SolarPanelComponent,
+    GeneratorComponent, ItemComponent, MinableProperties, MiningDrillComponent,
+    OffshorePumpComponent, PlantComponent, ReactorComponent, RecipeComponent,
+    ResourceEntityComponent, RocketSiloComponent, SolarPanelComponent, TileComponent,
 };
 
 /// Expand all mechanisms in the caller-provided order.
@@ -43,6 +44,12 @@ pub fn expand<'a, C: Clone>(
             Mechanic::Recipe(mechanic) => expand_recipe(config, mechanic, ctx, &mut expansion),
             Mechanic::Mining(mechanic) => expand_mining(config, mechanic, ctx, &mut expansion),
             Mechanic::Spoil(mechanic) => expand_spoil(config, mechanic, ctx, &mut expansion),
+            Mechanic::TileExtract(mechanic) => {
+                expand_tile_extract(config, mechanic, ctx, &mut expansion)
+            }
+            Mechanic::TileDispose(mechanic) => {
+                expand_tile_dispose(config, mechanic, ctx, &mut expansion)
+            }
             Mechanic::Plant(mechanic) => expand_plant(config, mechanic, ctx, &mut expansion),
             Mechanic::ItemFuel(mechanic) => expand_item_fuel(config, mechanic, ctx, &mut expansion),
             Mechanic::ItemLaunch(mechanic) => {
@@ -109,6 +116,13 @@ pub fn instance_cost(store: &PrototypeStore, mechanic: &Mechanic) -> f64 {
         }
         Mechanic::Generator(mechanic) => area(&mechanic.generator.id),
         Mechanic::Boiler(mechanic) => area(&mechanic.boiler.id),
+        Mechanic::TileExtract(mechanic) => area(&mechanic.machine.id),
+        // 每秒销毁 1 个物品 ≈ 1/16 格（一台机械臂/一段传送带的吞吐量级）。
+        // 纯估计值：真实吞吐依赖 mod 的机械臂与传送带数值。
+        Mechanic::TileDispose(mechanic) => {
+            let _ = mechanic;
+            1.0 / 16.0
+        }
         Mechanic::Reactor(mechanic) => area(&mechanic.reactor.id),
         Mechanic::Solar(mechanic) => area(&mechanic.solar_panel.id),
         Mechanic::Spoil(mechanic) => store
@@ -713,6 +727,79 @@ fn expand_spoil<C: Clone>(
             spoil_rate,
         );
     }
+    out.variables.extend(temp.into_variables(config));
+}
+
+fn expand_tile_extract<C: Clone>(
+    config: C,
+    mechanic: &TileExtractMechanic,
+    ctx: &Context,
+    out: &mut Expansion<C>,
+) {
+    // **地格决定产出什么流体，机械决定速率。** 原版 offshore-pump 的 `fluid_box`
+    // 没有 filter——抽什么由地格决定（`TileComponent.fluid`），所以两者必须分开配。
+    let Some(tile) = ctx
+        .prototype
+        .get(PrototypeGroup::Tile, &mechanic.tile)
+        .and_then(|record| record.component::<TileComponent>())
+    else {
+        return;
+    };
+    let Some(fluid_name) = tile.fluid.clone() else {
+        return;
+    };
+    let Some(fluid) = fluid_record(ctx, &fluid_name) else {
+        return;
+    };
+    let Some(pump) = ctx
+        .prototype
+        .entity(&mechanic.machine.id)
+        .and_then(|record| record.component::<OffshorePumpComponent>())
+    else {
+        return;
+    };
+
+    // `pumping_speed` 是「单位/刻」，×60 换成每秒；温度用该流体的默认温度。
+    // 原版 offshore-pump 的 `energy_source` 是 `void`——它不耗电，所以这里不计能耗。
+    let temperature = fluid.default_temperature as i32;
+    let mut temp = TempFlow::new();
+    add_fluid_interval(
+        &mut temp,
+        &fluid_name,
+        pump.pumping_speed * 60.0,
+        f64::from(temperature),
+        f64::from(temperature),
+    );
+    temp.scale(default_quality_multiplier(ctx, &mechanic.machine.quality));
+    out.variables.extend(temp.into_variables(config));
+}
+
+fn expand_tile_dispose<C: Clone>(
+    config: C,
+    mechanic: &TileDisposeMechanic,
+    ctx: &Context,
+    out: &mut Expansion<C>,
+) {
+    // 只有带 `destroys_dropped_items` 的地格能销毁东西（原版的岩浆），
+    // 所以地格必须显式指定、且必须校验——不是随便找个地格就能扔。
+    let Some(tile) = ctx
+        .prototype
+        .get(PrototypeGroup::Tile, &mechanic.tile)
+        .and_then(|record| record.component::<TileComponent>())
+    else {
+        return;
+    };
+    if !tile.destroys_dropped_items {
+        return;
+    }
+    if item_record(ctx, &mechanic.item.id).is_none() {
+        return;
+    }
+
+    // 消耗 1 单位/秒的物品，没有产出。成本由 `instance_cost` 给
+    // （1/16 格 每（个/秒），见那里的注释）。
+    let mut temp = TempFlow::new();
+    temp.add(DualVar::Item(mechanic.item.clone()), -1.0);
     out.variables.extend(temp.into_variables(config));
 }
 

@@ -28,7 +28,8 @@ pub use id::{IdWithQuality, NORMAL_QUALITY};
 pub use mechanic::{
     BeaconConfig, BoilerMechanic, FluidFuelMechanic, FluidHeatMechanic, Fuel, GeneratorMechanic,
     ItemFuelMechanic, ItemLaunchMechanic, Mechanic, MiningMechanic, ModuleConfig, PlantMechanic,
-    ReactorMechanic, RecipeMechanic, SolarMechanic, SpoilMechanic,
+    ReactorMechanic, RecipeMechanic, SolarMechanic, SpoilMechanic, TileDisposeMechanic,
+    TileExtractMechanic,
 };
 pub use prim_var::{AIndexMap, ExpandedVariable, Expansion, Flow, PrimVar};
 pub use productivity::{InfiniteTechLevel, ProductivityResult, compute_productivity};

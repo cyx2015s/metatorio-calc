@@ -15,6 +15,7 @@
 //! 了，而那条设置/条目依旧生效。
 
 use metatorio_core::{DualVar, Fuel, IdWithQuality};
+use metatorio_data::TileComponent;
 use metatorio_data::store::{PrototypeGroup, PrototypeStore};
 
 use crate::document::{AutoBeaconPlan, ExternalInput, FlowTarget, TargetExpression};
@@ -61,6 +62,29 @@ fn require_id(
 ) -> Result<(), RuntimeError> {
     require(store, group, kind, &id.id)?;
     require_quality(store, &id.quality)
+}
+
+fn require_tile(store: &PrototypeStore, tile: &str) -> Result<(), RuntimeError> {
+    require(store, PrototypeGroup::Tile, "地格", tile)
+}
+
+/// 可销毁物品的地格：必须带 `destroys_dropped_items`（原版的岩浆）。
+///
+/// 这是「不是随便找个地格就能把东西扔进去」的守卫——判据来自原型数据，
+/// 不是我们规定的。
+fn require_disposal_tile(store: &PrototypeStore, tile: &str) -> Result<(), RuntimeError> {
+    require_tile(store, tile)?;
+    let can_destroy = store
+        .get(PrototypeGroup::Tile, tile)
+        .and_then(|record| record.component::<TileComponent>())
+        .is_some_and(|tile| tile.destroys_dropped_items);
+    if can_destroy {
+        Ok(())
+    } else {
+        Err(RuntimeError::InvalidValue(format!(
+            "地格 {tile} 不能销毁物品（原型没有 destroys_dropped_items）"
+        )))
+    }
 }
 
 /// 品质名必须在该仓库的品质顺序里（仓库没有品质原型时不做限制）。
@@ -261,6 +285,22 @@ fn validate_mechanic(store: &PrototypeStore, action: &MechanicAction) -> Result<
         MechanicAction::Spoil(action) => match action {
             crate::message::SpoilMechanicAction::SetItem { item } => {
                 require_id(store, PrototypeGroup::Item, "物品", item)
+            }
+        },
+        MechanicAction::TileExtract(action) => match action {
+            crate::message::TileExtractMechanicAction::SetTile { tile } => {
+                require_tile(store, &tile)
+            }
+            crate::message::TileExtractMechanicAction::SetMachine { machine } => {
+                require_id(store, PrototypeGroup::Entity, "抽取机械", &machine)
+            }
+        },
+        MechanicAction::TileDispose(action) => match action {
+            crate::message::TileDisposeMechanicAction::SetTile { tile } => {
+                require_disposal_tile(store, &tile)
+            }
+            crate::message::TileDisposeMechanicAction::SetItem { item } => {
+                require_id(store, PrototypeGroup::Item, "物品", &item)
             }
         },
         MechanicAction::Plant(action) => match action {

@@ -3,14 +3,15 @@
 //! - 当前工厂生效的表面属性（显式地表 > 同名关联地表 > 星球自身）
 //! - 表面条件满足判定（配方/机器 surface_conditions，回退 surface-property 默认值）
 //! - 星球自动生成的 tile 集合（map_gen_settings）
-//! - 星球自动生成的可用流（autoplaced 资源 + 带流体 tile）——严格供给下也免费
+//! - 星球自动生成的可用流（autoplaced 资源实体）——严格供给下也免费。
+//!   地格流体**不再**走这条隐式路径，改由 `Mechanic::TileExtract` 显式产出。
 //! - 种植物要求的地表（tile_buildability_rules.required_tiles 碰撞层 ⊆ tile 碰撞层）
 
 use std::collections::{BTreeMap, HashSet};
 
 use metatorio_data::store::{PrototypeGroup, PrototypeRecord, PrototypeStore};
 use metatorio_data::{
-    EntityComponent, FluidComponent, ItemComponent, PlanetComponent, PlanetPrototypeMapGenSettings,
+    EntityComponent, ItemComponent, PlanetComponent, PlanetPrototypeMapGenSettings,
     SurfaceComponent, SurfaceCondition, SurfacePropertyComponent, TileComponent,
 };
 
@@ -182,35 +183,14 @@ pub fn planet_autoplaced_flows(store: &PrototypeStore, planet: &str) -> Flow {
             )))
             .or_insert(0.0) += 1.0;
     }
-    // 带流体的自动生成 tile → 流体流（默认温度）
-    for tile_name in planet_generated_tiles(store, planet) {
-        let Some(record) = store.get(PrototypeGroup::Tile, &tile_name) else {
-            continue;
-        };
-        let Some(fluid_name) = record
-            .component::<TileComponent>()
-            .and_then(|tile| tile.fluid.clone())
-        else {
-            continue;
-        };
-        let temperature = fluid_record_temperature(store, &fluid_name);
-        *flow
-            .entry(DualVar::Fluid {
-                name: fluid_name,
-                temperature,
-            })
-            .or_insert(0.0) += 1.0;
-    }
+    // **地格流体不再是隐式免费流。**
+    //
+    // 原来这里会把「自动生成且带流体的 tile」直接变成一条 free 的 `DualVar::Fluid`
+    // 来源（水就藏在这里）。现在改由 `Mechanic::TileExtract` 显式产出：
+    // 水会作为一个**机制**出现在机制面板上，并作为真实候选参与成本优化——mod 里
+    // 可能有别的产同种流体的方式，摆在明面上更利于解读，也才能比较贵贱。
+    // 判据与枚举见 `auto_plan::enumerate_tiles`。
     flow
-}
-
-fn fluid_record_temperature(store: &PrototypeStore, name: &str) -> [i32; 2] {
-    let temperature = store
-        .get(PrototypeGroup::Fluid, name)
-        .and_then(|record| record.component::<FluidComponent>())
-        .map(|fluid| fluid.default_temperature as i32)
-        .unwrap_or(0);
-    [temperature, temperature]
 }
 
 /// 种植物（plant_result 实体）要求的地表：`tile_buildability_rules.required_tiles`
@@ -401,14 +381,25 @@ mod tests {
     }
 
     #[test]
-    fn planet_autoplaced_flows_from_tiles() {
+    fn tiles_no_longer_supply_fluid_implicitly() {
+        // 地格流体曾经是一条**隐式免费流**（水就藏在这里）。现在改由
+        // `Mechanic::TileExtract` 显式产出——见 `auto_plan::enumerate_tiles`，
+        // 这样水会作为机制出现在面板上，并作为真实候选参与成本优化。
+        //
+        // 钉住两件事：
+        // 1. 隐式来源里**不再有任何流体**（否则水会绕过抽取机制）；
+        // 2. 地格本身仍然查得到（aquilo 生成 shallow-water），抽取机制才有得枚举。
         let store = test_store();
         let flows = planet_autoplaced_flows(&store, "aquilo");
-        // aquilo 生成 shallow-water → 水（默认温度）
-        assert!(flows.contains_key(&DualVar::Fluid {
-            name: "water".to_string(),
-            temperature: [15, 15],
-        }));
+        assert!(
+            !flows.keys().any(|key| matches!(key, DualVar::Fluid { .. })),
+            "地格流体不应再走隐式来源: {:?}",
+            flows.keys().collect::<Vec<_>>()
+        );
+        assert!(
+            planet_generated_tiles(&store, "aquilo").contains("shallow-water"),
+            "地格仍然要能查到，TileExtract 才有得枚举"
+        );
     }
 
     #[test]

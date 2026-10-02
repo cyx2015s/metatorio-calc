@@ -360,6 +360,8 @@ pub enum MechanicAction {
     Solar(SolarMechanicAction),
     FluidFuel(FluidFuelMechanicAction),
     FluidHeat(FluidHeatMechanicAction),
+    TileExtract(TileExtractMechanicAction),
+    TileDispose(TileDisposeMechanicAction),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -385,6 +387,22 @@ pub enum MiningMechanicAction {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum SpoilMechanicAction {
+    SetItem { item: IdWithQuality },
+}
+
+/// 地格抽取：换地格（决定产出哪种流体）或换机械（决定速率）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum TileExtractMechanicAction {
+    SetTile { tile: String },
+    SetMachine { machine: IdWithQuality },
+}
+
+/// 地格销毁：换地格（必须带 `destroys_dropped_items`）或换被销毁的物品。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum TileDisposeMechanicAction {
+    SetTile { tile: String },
     SetItem { item: IdWithQuality },
 }
 

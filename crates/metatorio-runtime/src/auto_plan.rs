@@ -13,8 +13,8 @@ use metatorio_data::types::{EffectType, EffectTypeLimitation, EnergySource, Modi
 use metatorio_data::{
     AccumulatorComponent, AssemblingMachineComponent, BoilerComponent, BurnerGeneratorComponent,
     CraftingMachineComponent, EntityComponent, FluidComponent, GeneratorComponent, ItemComponent,
-    MiningDrillComponent, ModuleComponent, ReactorComponent, RecipeComponent,
-    ResourceEntityComponent, SolarPanelComponent, TechnologyComponent,
+    MiningDrillComponent, ModuleComponent, OffshorePumpComponent, ReactorComponent, RecipeComponent,
+    ResourceEntityComponent, SolarPanelComponent, TechnologyComponent, TileComponent,
 };
 
 /// 回写候选的过滤结果（含决策记录，见 [`SolveDiagnostics`]）。
@@ -184,7 +184,88 @@ pub fn enumerate_all(
     enumerate_mining(store, ctx, options, &mut out);
     enumerate_simple(store, ctx, options, &mut out);
     enumerate_energy(store, ctx, options, &mut out);
+    enumerate_tiles(store, ctx, options, &mut out);
     out
+}
+
+/// 地格抽取机制（抽水 / 抽岩浆 / 抽油…）。
+///
+/// 判据全部来自原型数据：**地格**必须有 `TileComponent.fluid`（决定产出哪种流体）、
+/// 且必须是**当前星球会生成**的（`planet_generated_tiles`）；**机械**必须有
+/// `OffshorePumpComponent`（决定速率 `pumping_speed`）。原版 offshore-pump 的
+/// `fluid_box` 没有 filter——抽什么由地格决定——所以两者必须分开配。
+///
+/// 这也**取代**了原来 `planet_autoplaced_flows` 里那条「tile → 流体」的隐式免费流：
+/// 水从此由机制显式产出、出现在机制面板上，并作为真实候选参与成本优化（mod 里可能
+/// 有别的产同种流体的方式，显式更利于解读）。
+///
+/// **销毁**（`TileDispose`）也在同一趟里枚举：每颗星球只取**一个**
+/// `destroys_dropped_items` 的地格，再对该星球的全部物品展开——只需一个地格就能
+/// 代表这颗星球的销毁途径，按地格展开只会让候选数乘上地格数。
+fn enumerate_tiles(
+    store: &PrototypeStore,
+    ctx: &Context,
+    options: &EnumerateOptions,
+    out: &mut Vec<Mechanic>,
+) {
+    let major_quality = quality_name(ctx, options.major_quality);
+    let properties = surface_properties(store, options);
+    let Some(planet) = options.planet.as_deref() else {
+        return;
+    };
+    let generated = crate::planet::planet_generated_tiles(store, planet);
+    if generated.is_empty() {
+        return;
+    }
+    // 销毁：**每颗星球只取一个**可销毁的地格。有一个地格能销毁，就意味着这颗星球
+    // 上有便宜的销毁途径——按地格展开只会让候选数乘上地格数，没有任何新信息。
+    // 取到的那个地格再对所有物品展开（物品维度是必须的：销毁流要指名消耗什么）。
+    let mut disposal_tile: Option<String> = None;
+    for record in store.group(PrototypeGroup::Tile) {
+        if !generated.contains(&record.name) {
+            continue;
+        }
+        let Some(tile) = record.component::<TileComponent>() else {
+            continue;
+        };
+        if tile.destroys_dropped_items && disposal_tile.is_none() {
+            disposal_tile = Some(record.name.clone());
+        }
+        if tile.fluid.is_none() {
+            continue;
+        }
+        let machines = pick_machines(
+            store,
+            &options.machine_preferences,
+            options.alternative_count,
+            &major_quality,
+            |machine| {
+                machine.component::<OffshorePumpComponent>().is_some()
+                    && buildable_on_surface(store, machine, properties.as_ref())
+            },
+            |machine| {
+                machine
+                    .component::<OffshorePumpComponent>()
+                    .map(|pump| pump.pumping_speed)
+                    .unwrap_or(0.0)
+            },
+        );
+        for machine in machines {
+            out.push(Mechanic::TileExtract(metatorio_core::TileExtractMechanic {
+                tile: record.name.clone(),
+                machine,
+            }));
+        }
+    }
+
+    if let Some(tile) = disposal_tile {
+        for record in store.group(PrototypeGroup::Item) {
+            out.push(Mechanic::TileDispose(metatorio_core::TileDisposeMechanic {
+                tile: tile.clone(),
+                item: IdWithQuality::new(record.name.clone(), &major_quality),
+            }));
+        }
+    }
 }
 
 /// 当前工厂的表面属性（planet/surface 规则见 metatorio_runtime::planet）。
