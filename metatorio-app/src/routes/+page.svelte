@@ -1372,7 +1372,7 @@
               {@const icon = flowIcon(target.flow)}
               {@const q = flowQuality(target.flow)}
               {@const fluidRange = fluidRangeOf(target.flow)}
-              <div class="row-item one-line">
+              <div class="row-item one-line" class:has-range={fluidRange}>
                 <!-- 图标承载两个动作：左键更改流、右键看建议（右键没有可见按钮，
                      靠 title 提示；「建议」按钮保留为可发现入口，同一个动作）。 -->
                 <HoverIcon
@@ -1391,30 +1391,34 @@
                 </span>
                 {#if fluidRange}
                   <!-- 流体目标的**期望温度区间**：区间内任何产出都能满足它，所以不必
-                       钉死在一个温度点上（钉死会让目标在没人产出那个温度时直接不可解）。 -->
-                  <input
-                    class="num temp"
-                    type="text"
-                    inputmode="numeric"
-                    value={String(fluidRange[0])}
-                    title="期望温度下限（℃）"
-                    onchange={(event) => {
-                      const next = parseTemperature((event.currentTarget as HTMLInputElement).value);
-                      if (next !== null) setTargetFluidRange(target, next, fluidRange[1]);
-                    }}
-                  />
-                  <span class="temp-sep">~</span>
-                  <input
-                    class="num temp"
-                    type="text"
-                    inputmode="numeric"
-                    value={String(fluidRange[1])}
-                    title="期望温度上限（℃）"
-                    onchange={(event) => {
-                      const next = parseTemperature((event.currentTarget as HTMLInputElement).value);
-                      if (next !== null) setTargetFluidRange(target, fluidRange[0], next);
-                    }}
-                  />
+                       钉死在一个温度点上（钉死会让目标在没人产出那个温度时直接不可解）。
+                       两个输入包成一个 flex 项：外层的 gap 只算一次，行变窄时这一组
+                       整体换行，不会把「15」「~」「100」拆到两行去。 -->
+                  <span class="temp-range">
+                    <input
+                      class="num temp"
+                      type="text"
+                      inputmode="numeric"
+                      value={String(fluidRange[0])}
+                      title="期望温度下限（℃）"
+                      onchange={(event) => {
+                        const next = parseTemperature((event.currentTarget as HTMLInputElement).value);
+                        if (next !== null) setTargetFluidRange(target, next, fluidRange[1]);
+                      }}
+                    />
+                    <span class="temp-sep">~</span>
+                    <input
+                      class="num temp"
+                      type="text"
+                      inputmode="numeric"
+                      value={String(fluidRange[1])}
+                      title="期望温度上限（℃）"
+                      onchange={(event) => {
+                        const next = parseTemperature((event.currentTarget as HTMLInputElement).value);
+                        if (next !== null) setTargetFluidRange(target, fluidRange[0], next);
+                      }}
+                    />
+                  </span>
                 {/if}
                 <input
                   class="num"
@@ -1605,29 +1609,31 @@
                 {#if fluidRange}
                   <!-- 与目标行同一套语义：区间内任何温度的外部输入都算满足。
                        外部输入本来就是"从外面买"，指定可接受温度区间比钉死一个温度更准。 -->
-                  <input
-                    class="num temp"
-                    type="text"
-                    inputmode="numeric"
-                    value={String(fluidRange[0])}
-                    title="期望温度下限（℃）"
-                    onchange={(event) => {
-                      const next = parseTemperature((event.currentTarget as HTMLInputElement).value);
-                      if (next !== null) setExternalInputFluidRange(input, next, fluidRange[1]);
-                    }}
-                  />
-                  <span class="temp-sep">~</span>
-                  <input
-                    class="num temp"
-                    type="text"
-                    inputmode="numeric"
-                    value={String(fluidRange[1])}
-                    title="期望温度上限（℃）"
-                    onchange={(event) => {
-                      const next = parseTemperature((event.currentTarget as HTMLInputElement).value);
-                      if (next !== null) setExternalInputFluidRange(input, fluidRange[0], next);
-                    }}
-                  />
+                  <span class="temp-range">
+                    <input
+                      class="num temp"
+                      type="text"
+                      inputmode="numeric"
+                      value={String(fluidRange[0])}
+                      title="期望温度下限（℃）"
+                      onchange={(event) => {
+                        const next = parseTemperature((event.currentTarget as HTMLInputElement).value);
+                        if (next !== null) setExternalInputFluidRange(input, next, fluidRange[1]);
+                      }}
+                    />
+                    <span class="temp-sep">~</span>
+                    <input
+                      class="num temp"
+                      type="text"
+                      inputmode="numeric"
+                      value={String(fluidRange[1])}
+                      title="期望温度上限（℃）"
+                      onchange={(event) => {
+                        const next = parseTemperature((event.currentTarget as HTMLInputElement).value);
+                        if (next !== null) setExternalInputFluidRange(input, fluidRange[0], next);
+                      }}
+                    />
+                  </span>
                 {/if}
                 <input
                   class="num"
@@ -3162,7 +3168,7 @@
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: 4px;
     min-height: 28px;
     padding: 3px 6px;
     background: transparent;
@@ -3180,6 +3186,13 @@
   .row-item.one-line .row-name {
     flex: 1 1 auto;
     overflow: hidden;
+  }
+
+  /* 带温度区间的行在窄面板下允许换行：flex-wrap 是唯一能保证「永不横向溢出」的
+     机制。名称先自缩到 0；仍然放不下时整组控件换到第二行，而不是被右边缘切掉。
+     非流体行保持 nowrap（图标 + 名称 + 数值 + 动作固定一行，见上面的注释）。 */
+  .row-item.one-line.has-range {
+    flex-wrap: wrap;
   }
 
   .row-item:hover {
@@ -3249,9 +3262,18 @@
     font-size: 10px;
   }
 
-  /* 流体目标的期望温度区间：比数值输入窄一档，一行里放得下两个。 */
+  /* 流体流的期望温度区间。两个输入包在 .temp-range 里：外层 gap 只算一次、
+     组内只留 2px，行变窄时整组换行，不会把「15 ~ 100」拆到两行去。 */
+  .temp-range {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    flex: 0 0 auto;
+  }
+
   .num.temp {
-    width: 46px;
+    width: 36px;
+    text-align: center;
   }
 
   .temp-sep {
