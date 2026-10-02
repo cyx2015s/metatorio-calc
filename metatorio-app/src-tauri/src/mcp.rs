@@ -22,9 +22,7 @@
 //! - 可选 bearer-token：配了 token（`--mcp-token` / `METATORIO_MCP_TOKEN`）时每个请求
 //!   必须带 `Authorization: Bearer <token>`（或裸 token）；回环 + 无 token 是允许的。
 
-use std::collections::BTreeSet;
 use std::net::{IpAddr, SocketAddr};
-use std::sync::{Arc, OnceLock};
 
 use axum::{
     Router,
@@ -36,18 +34,19 @@ use axum::{
 use rmcp::{
     ErrorData as McpError, ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
-    model::{CallToolResult, JsonObject},
+    model::CallToolResult,
     tool, tool_handler, tool_router,
     transport::streamable_http_server::{
         StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
     },
 };
 use schemars::JsonSchema;
-use serde_json::{Map, Value};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 use crate::{AppState, execute_command};
 use metatorio_core::{BeaconConfig, DualVar, IdWithQuality, ModuleConfig};
+use metatorio_data::store::{PrototypeGroup, PrototypeStore};
+use metatorio_data::FluidComponent;
 use metatorio_runtime::document::AutoBeaconPlan;
 use metatorio_runtime::message::{
     AppMessage, ApplicationAction, DeleteDecision, FactoryAction, FactoryContextAction,
@@ -66,369 +65,20 @@ pub const DEFAULT_MCP_BIND: &str = "127.0.0.1";
 /// MCP 服务挂在这个路径下（例如 `http://127.0.0.1:8765/mcp`）。
 pub const MCP_PATH: &str = "/mcp";
 
-// ── AppMessage schema 投影 ─────────────────────────────────────────
+// dispatch 的 inputSchema **保持完整**：rmcp 会把整个 AppMessage 协议图
+// （46 个 $defs、89 个 $ref）内联进 tools/list，实测 44 KB、占工具面 77%。
 //
-// dispatch 直发 message: AppMessage 时，rmcp 会把整个协议图（46 个 $defs、89 个
-// $ref）内联进 inputSchema——实测 44 KB，占 MCP 工具面 77%（见 docs/mcp-design.md）。
-// 按 scope 拆工具**无效**：factory 一支仍有 30 KB，而且每个工具都要重复自己引用的
-// $defs，四个工具加起来比原来还大 7%。所以保留一个 dispatch，只把它的 inputSchema
-// 换成「只有动作名」的投影：44,092 字符 → 约 5 KB；整个工具面约 57 KB → 约 17 KB。
+// 曾经把它投影成「只有动作名」的薄壳，再配一个 `get_schema` 工具按需取切片，
+// 工具面从 57 KB 降到 17 KB（-70%）。**实测后回退了**：
+//   - 目标用户（AI agent）在上下文被压缩后不知道要先调 `get_schema`——
+//     实测约 40k token（1M 上下文的 4%）才建出一个项目，工厂还没建成；
+//   - 失败调用的响应本身就很大（一次 recompute 响应 16 KB），几次试错的
+//     代价就超过省下的 schema；
+//   - 而 `DispatchParams` 的文档注释里本来就有完整的调用示例，信息并不缺，
+//     缺的是「调用方会去哪找」——多一层间接就是多一次会失败的猜测。
 //
-// 单一事实源不变：投影是 schemars 派生 schema 的**函数**，不是另一份手写文档
-// （手写会漂移，这正是当初从 V1 改成 JsonSchema 派生的原因）。测试
-// catalog_is_derived_from_the_schema 守住这一点。深层参数形状由 get_schema
-// 按动作名切片返回，且只带该动作可达的 $defs。
-
-/// 完整 AppMessage schema：schemars 派生，与 rmcp 的 schema_for_input 同款口径
-/// （draft2020_12）。进程内只建一次。
-fn app_message_schema() -> &'static Value {
-    static SCHEMA: OnceLock<Value> = OnceLock::new();
-    SCHEMA.get_or_init(|| {
-        let generator = schemars::generate::SchemaSettings::draft2020_12().into_generator();
-        serde_json::to_value(generator.into_root_schema_for::<AppMessage>())
-            .expect("AppMessage schema 应当可序列化")
-    })
-}
-
-/// AppMessage schema 的 $defs 表。
-fn schema_defs(schema: &Value) -> &Map<String, Value> {
-    schema
-        .get("$defs")
-        .and_then(Value::as_object)
-        .expect("AppMessage schema 应当带 $defs")
-}
-
-/// 解引用 {"$ref": "#/$defs/X"}；不是引用就原样返回。
-fn schema_deref<'a>(defs: &'a Map<String, Value>, node: &'a Value) -> Option<&'a Value> {
-    match node.get("$ref").and_then(Value::as_str) {
-        Some(reference) => defs.get(reference.strip_prefix("#/$defs/")?),
-        None => Some(node),
-    }
-}
-
-/// 深度优先找第一个 $ref。
-fn schema_first_ref(node: &Value) -> Option<&Value> {
-    if node.get("$ref").is_some() {
-        return Some(node);
-    }
-    match node {
-        Value::Object(object) => object.values().find_map(schema_first_ref),
-        Value::Array(items) => items.iter().find_map(schema_first_ref),
-        _ => None,
-    }
-}
-
-/// 节点里是否还套了另一个 *Action 枚举；有就返回它的 $defs 名。
-///
-/// 这是「分组」的判据。`FactoryAction::Flow(FlowAction)` 的载荷直接是 $ref，而
-/// `FactoryAction::Mechanic { mechanic, action }` 是两个字段的结构体变体，$ref 在
-/// 里面一层——所以必须看载荷里任意深度的引用，不能只看唯一字段。
-fn schema_sub_action(node: &Value) -> Option<&str> {
-    let reference = schema_first_ref(node)?.get("$ref")?.as_str()?;
-    let name = reference.strip_prefix("#/$defs/")?;
-    name.ends_with("Action").then_some(name)
-}
-
-/// 动作枚举的一个变体：名字 + 载荷 + 载荷里若还套 *Action 则是分组。
-struct ActionVariant<'a> {
-    name: String,
-    payload: &'a Value,
-    group: Option<&'a str>,
-}
-
-/// 拆一个动作枚举的变体。既处理结构体变体（oneOf + properties），也处理单元变体
-/// ——schemars 给单元变体的是小 `enum` 或 `const`，不是 oneOf 分支（`Undo`、`Redo`、
-/// `CheckForUpdate`、`LoadCachedContext` 都是这一类，漏掉就会静默少列动作）。
-fn action_variants<'a>(defs: &'a Map<String, Value>, node: &'a Value) -> Vec<ActionVariant<'a>> {
-    let Some(schema) = schema_deref(defs, node) else {
-        return Vec::new();
-    };
-    if let Some(Value::Array(names)) = schema.get("enum") {
-        if schema.get("oneOf").is_none() {
-            return names
-                .iter()
-                .filter_map(Value::as_str)
-                .map(|name| ActionVariant {
-                    name: name.to_string(),
-                    payload: schema,
-                    group: None,
-                })
-                .collect();
-        }
-    }
-    let Some(branches) = schema
-        .get("oneOf")
-        .or_else(|| schema.get("anyOf"))
-        .and_then(Value::as_array)
-    else {
-        return Vec::new();
-    };
-    let mut variants = Vec::new();
-    for branch in branches {
-        if let Some(name) = branch.get("const").and_then(Value::as_str) {
-            variants.push(ActionVariant {
-                name: name.to_string(),
-                payload: branch,
-                group: None,
-            });
-            continue;
-        }
-        if let Some(Value::Array(names)) = branch.get("enum") {
-            for name in names.iter().filter_map(Value::as_str) {
-                variants.push(ActionVariant {
-                    name: name.to_string(),
-                    payload: branch,
-                    group: None,
-                });
-            }
-            continue;
-        }
-        let Some(properties) = branch.get("properties").and_then(Value::as_object) else {
-            continue;
-        };
-        let Some(name) = properties.keys().next() else {
-            continue;
-        };
-        let payload = &properties[name];
-        variants.push(ActionVariant {
-            name: name.clone(),
-            payload,
-            group: schema_sub_action(payload),
-        });
-    }
-    variants
-}
-
-/// 递归收集叶子动作路径（点号表示嵌套，例如 `mechanic.recipe.set-recipe`）。
-fn collect_action_paths(
-    defs: &Map<String, Value>,
-    node: &Value,
-    prefix: &str,
-    out: &mut Vec<String>,
-    depth: usize,
-) {
-    if depth > 8 {
-        return;
-    }
-    for variant in action_variants(defs, node) {
-        let path = if prefix.is_empty() {
-            variant.name.clone()
-        } else {
-            format!("{prefix}.{}", variant.name)
-        };
-        match variant.group.and_then(|group| defs.get(group)) {
-            Some(next) => collect_action_paths(defs, next, &path, out, depth + 1),
-            None => out.push(path),
-        }
-    }
-}
-
-/// scope → 该 scope 的动作路径。顺序取自 schema 本身，因此稳定。
-fn action_tree() -> &'static Vec<(String, Vec<String>)> {
-    static TREE: OnceLock<Vec<(String, Vec<String>)>> = OnceLock::new();
-    TREE.get_or_init(|| {
-        let schema = app_message_schema();
-        let defs = schema_defs(schema);
-        // 注意：into_root_schema_for::<AppMessage>() 把 AppMessage 放在**根**上，
-        // 不在 $defs 里（$defs 只装被引用到的类型）。去 $defs 里找会静默拿到空树。
-        let Some(branches) = schema
-            .get("oneOf")
-            .or_else(|| schema.get("anyOf"))
-            .and_then(Value::as_array)
-        else {
-            return Vec::new();
-        };
-        branches
-            .iter()
-            .filter_map(|branch| {
-                let properties = branch.get("properties")?.as_object()?;
-                let scope = properties.get("scope")?.get("const")?.as_str()?.to_string();
-                let mut paths = Vec::new();
-                // project / factory 的 action 是内联对象（相邻标签 + 结构体变体），
-                // 真正的动作枚举在它里面一层；application / history 则直接就是 $ref。
-                collect_action_paths(
-                    defs,
-                    schema_first_ref(properties.get("action")?)?,
-                    "",
-                    &mut paths,
-                    0,
-                );
-                Some((scope, paths))
-            })
-            .collect()
-    })
-}
-
-/// 动作树渲染成紧凑文本：同一前缀下的叶子合成 `prefix.{a,b,c}`。
-fn format_action_tree() -> String {
-    let mut lines = Vec::new();
-    for (scope, paths) in action_tree() {
-        let mut plain: Vec<String> = Vec::new();
-        let mut grouped: Vec<(String, Vec<String>)> = Vec::new();
-        for path in paths {
-            match path.split_once('.') {
-                Some((head, tail)) => match grouped.iter_mut().find(|(name, _)| name == head) {
-                    Some((_, members)) => members.push(tail.to_string()),
-                    None => grouped.push((head.to_string(), vec![tail.to_string()])),
-                },
-                None => plain.push(path.clone()),
-            }
-        }
-        for (head, members) in grouped {
-            if members.len() == 1 {
-                plain.push(format!("{head}.{}", members[0]));
-            } else {
-                plain.push(format!("{head}.{{{}}}", members.join(",")));
-            }
-        }
-        lines.push(format!("{scope}：{}", plain.join("、")));
-    }
-    lines.join("
-")
-}
-
-/// dispatch 的 inputSchema：外层形状精确，动作体只给「有哪些动作」。
-///
-/// 它比真实接受面**宽**（`additionalProperties: true`），而不是窄——这很重要：
-/// 真实 AppMessage 仍由 serde 权威反序列化并给出精确报错，schema 只负责提前告诉
-/// 模型有哪些动作可选。窄 schema 会把合法调用挡在客户端侧，宽 schema 不会。
-fn dispatch_input_schema() -> Arc<JsonObject> {
-    let scopes: Vec<String> = action_tree().iter().map(|(scope, _)| scope.clone()).collect();
-    let total: usize = action_tree().iter().map(|(_, paths)| paths.len()).sum();
-    let description = format!(
-        "动作体。可用动作（{total} 个；点号表示嵌套，花括号是同一前缀下的并列项）：\n{}\n\
-         外层形状随 scope 不同：application 直接是动作名；project 先给 project，再给动作名；\
-         factory 先给 project 与 factory，再给动作名（mechanic 这类还要多一层）。\
-         深层参数形状用 get_schema 按动作名取，例如 get_schema {{\"action\": \"target.set-flow\"}}。",
-        format_action_tree()
-    );
-    let catalog = serde_json::json!({
-        "type": "object",
-        "required": ["message"],
-        "properties": {
-            "message": {
-                "type": "object",
-                "required": ["scope", "action"],
-                "properties": {
-                    "scope": { "type": "string", "enum": scopes },
-                    "action": { "type": ["object", "string"], "description": description },
-                },
-                "additionalProperties": true,
-            },
-            "request_id": {
-                "type": ["string", "null"],
-                "description": "幂等键：同一个 id 的重复调用只应用一次，重试直接回放上次的载荷。",
-            },
-            "limit": { "type": ["integer", "null"], "description": "分页上限（默认 50，上限 1000）。" },
-            "offset": { "type": ["integer", "null"], "description": "分页偏移。" },
-        },
-    });
-    match catalog {
-        Value::Object(map) => Arc::new(map),
-        _ => unreachable!("catalog schema 一定是对象"),
-    }
-}
-
-/// 遍历动作树，收集 (scope, 路径, 载荷)。只在 get_schema 被调用时跑，量级很小
-/// （实测 152 条叶子）。
-fn walk_action_payloads<'a>(
-    defs: &'a Map<String, Value>,
-    node: &'a Value,
-    scope: &str,
-    prefix: &str,
-    out: &mut Vec<(String, String, &'a Value)>,
-    depth: usize,
-) {
-    if depth > 8 {
-        return;
-    }
-    for variant in action_variants(defs, node) {
-        let path = if prefix.is_empty() {
-            variant.name.clone()
-        } else {
-            format!("{prefix}.{}", variant.name)
-        };
-        match variant.group.and_then(|group| defs.get(group)) {
-            Some(next) => walk_action_payloads(defs, next, scope, &path, out, depth + 1),
-            None => out.push((scope.to_string(), path, variant.payload)),
-        }
-    }
-}
-
-/// 收集从 node 出发可达的全部 $defs 名（传递闭包）。
-fn collect_reachable_defs(defs: &Map<String, Value>, node: &Value, out: &mut BTreeSet<String>) {
-    match node {
-        Value::Object(object) => {
-            if let Some(name) = object
-                .get("$ref")
-                .and_then(Value::as_str)
-                .and_then(|reference| reference.strip_prefix("#/$defs/"))
-            {
-                if out.insert(name.to_string()) {
-                    if let Some(target) = defs.get(name) {
-                        collect_reachable_defs(defs, target, out);
-                    }
-                }
-            }
-            for value in object.values() {
-                collect_reachable_defs(defs, value, out);
-            }
-        }
-        Value::Array(items) => {
-            for item in items {
-                collect_reachable_defs(defs, item, out);
-            }
-        }
-        _ => {}
-    }
-}
-
-/// 按动作名取完整分支 schema，连同它可达的 $defs 一起返回，保证能独立解引用。
-///
-/// 精确路径优先（`mechanic.recipe.set-recipe`）；否则接受在该树里唯一的短名
-/// （`set-recipe`）——歧义时**拒绝**并让调用方给全路径，不猜。
-fn action_schema_slice(action: &str) -> Option<Value> {
-    let schema = app_message_schema();
-    let defs = schema_defs(schema);
-    let branches = schema
-        .get("oneOf")
-        .or_else(|| schema.get("anyOf"))
-        .and_then(Value::as_array)?;
-    let mut entries: Vec<(String, String, &Value)> = Vec::new();
-    for branch in branches {
-        let properties = branch.get("properties")?.as_object()?;
-        let scope = properties.get("scope")?.get("const")?.as_str()?;
-        walk_action_payloads(
-            defs,
-            schema_first_ref(properties.get("action")?)?,
-            scope,
-            "",
-            &mut entries,
-            0,
-        );
-    }
-    let found = entries.iter().find(|(_, path, _)| path == action).or_else(|| {
-        let mut matches = entries
-            .iter()
-            .filter(|(_, path, _)| path.rsplit('.').next() == Some(action));
-        let first = matches.next()?;
-        matches.next().is_none().then_some(first)
-    })?;
-    let (scope, path, payload) = found;
-    let mut reachable = BTreeSet::new();
-    collect_reachable_defs(defs, payload, &mut reachable);
-    let slice_defs: Map<String, Value> = reachable
-        .iter()
-        .filter_map(|name| defs.get(name).map(|value| (name.clone(), value.clone())))
-        .collect();
-    Some(serde_json::json!({
-        "scope": scope,
-        "action": path,
-        "schema": payload,
-        "$defs": slice_defs,
-        "hint": "把 schema 放到对应 scope 的 action 位置；$defs 用于解引用其中的 $ref。",
-    }))
-}
+// 结论：**省 token 不能以「调用方要额外查一次」为代价**。若将来再优化，
+// 判据必须是「每个**成功完成的任务**花了多少 token」，不是「工具面 token 数」。
 
 // ── 工具面 ─────────────────────────────────────────────────────────
 
@@ -500,14 +150,6 @@ struct LocalizedNamesParams {
     context_id: Option<String>,
 }
 
-/// `get_schema` 的参数：不给 `action` 就只列动作树，给了就返回那一条动作的完整 schema。
-#[derive(Debug, serde::Deserialize, JsonSchema)]
-struct GetSchemaParams {
-    /// 动作名（可带点号路径，例如 `target.set-flow`）；省略 = 只列动作树。
-    #[serde(default)]
-    action: Option<String>,
-}
-
 /// MCP 服务端 handler。无状态：只持有取 [`AppState`] 需要的 [`AppHandle`]，
 /// 因此 rmcp 可以为每个请求新建一个。
 #[derive(Clone)]
@@ -533,8 +175,7 @@ impl MetatorioMcp {
         `solve` 的输出始终有界：`mechanics`/`flows` 按 `limit`（默认 50、上限 1000）+\
         `offset` 分页，`page.totals`/`page.truncated` 如实说明被截断的集合。  \
         这是**逃生通道**：常规规划请优先用 `auto_plan`（权威入口），不要一个个配方\
-        手工拼装——那样既费力又容易漏配严格供给。",
-        input_schema = dispatch_input_schema()
+        手工拼装——那样既费力又容易漏配严格供给。"
     )]
     async fn dispatch(
         &self,
@@ -788,9 +429,12 @@ impl MetatorioMcp {
         主品质 / 插件 / 插件塔 / 外部输入，然后**异步**开跑自动规划并**立刻返回**。  \
         规划工厂请用这个入口，**不要**一个个配方手工往里加——规划器的强项是从目标\
         反推整条链，手工拼装既费力又容易漏配严格供给。  \
-        必填 `targets` = [{ item, quality?, amount }]：`item` 可给原型 id（`iron-plate`）\
-        或本地化名（`铁板`），分隔符不敏感；拼错或给出了非物品名会被拒绝并附候选\
-        （拿不准先用 `localized_names` 查）。  \
+        必填 `targets` = [{ item, quality?, temperature?, amount }]：`item` 可给原型 id\
+        （`iron-plate` / `steam`）或本地化名（`铁板` / `蒸汽`），分隔符不敏感。**物品和\
+        流体都接受**：流体目标用 `temperature: [下限, 上限]` 指定温度（省略则取原型的\
+        [默认温度, 最高温度]）——`[500,500]` = 只要 500°C 的蒸汽，`[15,500]` = 任意温度\
+        都行。拼错、或给了不存在的类型会被拒绝并附候选（拿不准先用 `localized_names`\
+        查）；物品给 `temperature`、流体给 `quality` 会**显式报错**，不静默忽略。  \
         **所有手写名字都在建任何东西之前按当前上下文校验**（`item`、`modules.exclude`、\
         `beacons[].beacon`、`beacons[].modules[].module`、`external_inputs[].flow`）：\
         错一个就整个调用失败并给候选，**一个对象都不建**——一个「悄悄什么也没做」\
@@ -831,14 +475,19 @@ impl MetatorioMcp {
                 return Ok(CallToolResult::structured(payload));
             }
         }
-        // 1) 目标名 → id：用当前/指定的上下文目录索引解析（只接受精确的物品原型）。
+        // 1) 目标名 → 流：用当前/指定的上下文目录索引解析（只接受精确命中的**物品或
+        //    流体**原型）。流体目标的温度区间默认取原型的 [default, max]，所以这里
+        //    还要拿到原型库。
         let state = app.state::<AppState>();
         let context_id = crate::resolve_context_id(&state, params.context_id.as_deref())
             .map_err(|error| McpError::invalid_params(error, None))?;
         let index = crate::catalog_index_for(&state, &context_id)
             .await
             .map_err(|error| McpError::invalid_params(format!("读取目录失败: {error}"), None))?;
-        let targets = resolve_auto_plan_targets(&index, &params.targets)
+        let store = crate::context_store_arc(&state, &context_id)
+            .await
+            .map_err(|error| McpError::invalid_params(format!("读取原型库失败: {error}"), None))?;
+        let targets = resolve_auto_plan_targets(&index, Some(store.as_ref()), &params.targets)
             .map_err(|error| McpError::invalid_params(error, None))?;
         // 手写名字（插件/插件塔/外部输入）全部先过一遍：不通过就一个对象都不建。
         validate_auto_plan_names(&index, &params)
@@ -1016,9 +665,10 @@ impl MetatorioMcp {
                 "planet": params.planet,
                 "major_quality": params.major_quality,
                 "context_id": params.context_id,
-                "targets": targets.iter().map(|(item, amount)| serde_json::json!({
-                    "item": item.id,
-                    "quality": item.quality,
+                // 目标是**流**（物品或带温度的流体），原样回显 `DualVar`：
+                // `{"Item":{"id":..,"quality":..}}` 或 `{"Fluid":{"name":..,"temperature":[lo,hi]}}`。
+                "targets": targets.iter().map(|(flow, amount)| serde_json::json!({
+                    "flow": flow,
                     "amount": amount,
                 })).collect::<Vec<_>>(),
                 "external_inputs": params.external_inputs.len(),
@@ -1035,42 +685,6 @@ impl MetatorioMcp {
             cache.insert(request_id, payload.clone(), false);
         }
         Ok(CallToolResult::structured(payload))
-    }
-
-    /// 按需取动作的完整参数形状：`dispatch` 只暴露动作名（投影自同一份 schema），
-    /// 深层形状在这里按动作名切片返回，且只带该动作可达的 `$defs`。
-    #[tool(
-        description = "查询 `dispatch` 的动作 schema。不给 `action` → 返回完整动作树\
-        （scope → 动作路径）；给了 → 返回那一条动作的**完整** JSON Schema（含它可达的\
-        `$defs`），用来确认嵌套参数形状。例：{action:\"target.set-flow\"}、\
-        {action:\"mechanic.recipe.set-recipe\"}。短名也可用（`set-recipe`），\
-        但只在该动作在树里唯一时才接受。"
-    )]
-    async fn get_schema(
-        &self,
-        Parameters(params): Parameters<GetSchemaParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let requested = params
-            .action
-            .as_deref()
-            .map(str::trim)
-            .filter(|action| !action.is_empty());
-        let value = match requested {
-            None => serde_json::json!({
-                "actions": action_tree()
-                    .iter()
-                    .map(|(scope, paths)| (scope.clone(), serde_json::json!(paths)))
-                    .collect::<Map<String, Value>>(),
-                "hint": "把动作名传给 get_schema 取完整参数形状，例如 {action: \"target.set-flow\"}。",
-            }),
-            Some(action) => action_schema_slice(action).ok_or_else(|| {
-                McpError::invalid_params(
-                    format!("未知动作 {action}；不带 action 调用本工具可列出全部动作。"),
-                    None,
-                )
-            })?,
-        };
-        Ok(CallToolResult::structured(value))
     }
 
     /// 上下文索引：有哪些游戏数据上下文（dump/导出缓存）、激活的是哪个。
@@ -1444,14 +1058,22 @@ enum DocSnapshot {
     },
 }
 
-/// 一个目标：物品（id **或**本地化名）+ 可选品质 + 每秒速率。
+/// 一个目标：**物品或流体**（原型 id 或本地化名）+ 可选品质 + 可选温度区间 + 每秒速率。
 #[derive(Debug, Clone, serde::Deserialize, JsonSchema)]
 struct AutoPlanTarget {
-    /// 物品名：原型 id（`iron-plate`）或本地化名（`铁板`）都行；分隔符不敏感。
+    /// 目标名：原型 id（`iron-plate` / `steam`）或本地化名（`铁板` / `蒸汽`）都行；
+    /// 分隔符不敏感。**物品和流体都接受**。
     item: String,
-    /// 品质（`normal` / `uncommon` / …）；省略 = `normal`。
+    /// 品质（`normal` / `uncommon` / …）；省略 = `normal`。仅物品有意义。
     #[serde(default)]
     quality: Option<String>,
+    /// 流体温度区间 `[下限, 上限]`；省略 = 原型的 `[default_temperature, max_temperature]`。
+    ///
+    /// 温度是流体流的**身份的一部分**（`DualVar::Fluid { name, temperature }`），
+    /// 所以流体目标必须能表达它：`[500, 500]` = 只要 500°C 的蒸汽，`[15, 500]` =
+    /// 任意温度都行。只对流体有意义。
+    #[serde(default)]
+    temperature: Option<[i32; 2]>,
     /// 目标速率（每秒；项目 time-scale 只影响显示）。
     amount: f64,
 }
@@ -1558,7 +1180,7 @@ fn auto_plan_body_messages(
     params: &AutoPlanParams,
     project: ProjectId,
     factory: FactoryId,
-    targets: &[(IdWithQuality, f64)],
+    targets: &[(DualVar, f64)],
 ) -> Vec<AppMessage> {
     let mut messages = Vec::new();
     if let Some(planet) = &params.planet {
@@ -1579,12 +1201,12 @@ fn auto_plan_body_messages(
             }),
         });
     }
-    for (item, amount) in targets {
+    for (flow, amount) in targets {
         messages.push(AppMessage::Factory {
             project,
             factory,
             action: FactoryAction::Flow(FlowAction::AddToTarget {
-                flow: DualVar::Item(item.clone()),
+                flow: flow.clone(),
                 amount: *amount,
             }),
         });
@@ -1657,29 +1279,78 @@ fn auto_plan_body_messages(
     messages
 }
 
-/// 把目标里的物品名解析成 `(IdWithQuality, amount)`：接受原型 id 或本地化名
-/// （分隔符不敏感），但**只接受精确命中的物品原型**——不猜：名字打错或指向配方时
+/// 把目标里的名字解析成 `(DualVar, amount)`：**物品和流体都接受**（原型 id 或
+/// 本地化名，分隔符不敏感），但**只接受精确命中的原型**——不猜：名字打错或指向配方时
 /// 报错并附候选（含错拼候选），因为错误的名字能通过校验、却会让计划悄悄跑偏。
+///
+/// 为什么要支持流体：`auto_plan` 是「常规规划的权威入口」，而**产出指定温度的流体**
+/// 恰恰是最需要自动规划的场景（也是求解器严格产出语义修好后第一个被验证的场景）。
+/// 之前它只收物品，调用方只能退回 `dispatch` 手工拼 `TargetAction::add`——实测
+/// 每次都先浪费两次 `auto_plan` 调用（"蒸汽是流体、不是物品"）。
+///
+/// 流体必须能表达温度：给了 `temperature` 就用它，没给则取原型的
+/// `[default_temperature, max_temperature]`（`store` 为 `None` 时直接报错要求显式给，
+/// 而不是塞一个猜的默认值）。物品/流体各自不该有的字段**显式报错**，不静默忽略。
 fn resolve_auto_plan_targets(
     index: &crate::CatalogIndex,
+    store: Option<&PrototypeStore>,
     targets: &[AutoPlanTarget],
-) -> Result<Vec<(IdWithQuality, f64)>, String> {
+) -> Result<Vec<(DualVar, f64)>, String> {
     let mut resolved = Vec::new();
     for target in targets {
         if !(target.amount.is_finite() && target.amount > 0.0) {
             return Err(format!(
-                "目标物品「{}」的 amount 必须是正数（每秒速率）",
+                "目标「{}」的 amount 必须是正数（每秒速率）",
                 target.item
             ));
         }
-        let name = require_index_entry(index, &["item"], "目标物品", &target.item)?;
-        let quality = target
-            .quality
-            .clone()
-            .unwrap_or_else(|| "normal".to_string());
-        resolved.push((IdWithQuality::new(name, quality), target.amount));
+        let (name, kind) =
+            require_index_entry_of(index, &["item", "fluid"], "目标", &target.item)?;
+        let flow = if kind == "fluid" {
+            if target.quality.is_some() {
+                return Err(format!("目标「{}」是流体，不接受 quality", target.item));
+            }
+            let temperature = match target.temperature {
+                Some(range) => range,
+                None => fluid_temperature_range(store, &name).ok_or_else(|| {
+                    format!(
+                        "目标「{}」是流体，必须给 temperature: [下限, 上限]",
+                        target.item
+                    )
+                })?,
+            };
+            if temperature[0] > temperature[1] {
+                return Err(format!(
+                    "目标「{}」的 temperature 下界 {} 大于上界 {}",
+                    target.item, temperature[0], temperature[1]
+                ));
+            }
+            DualVar::Fluid { name, temperature }
+        } else {
+            if target.temperature.is_some() {
+                return Err(format!("目标「{}」是物品，不接受 temperature", target.item));
+            }
+            let quality = target
+                .quality
+                .clone()
+                .unwrap_or_else(|| "normal".to_string());
+            DualVar::Item(IdWithQuality::new(name, quality))
+        };
+        resolved.push((flow, target.amount));
     }
     Ok(resolved)
+}
+
+/// 流体原型的 `[default_temperature, max_temperature]`——即界面「新建流体目标」用的
+/// 那个默认区间（"任意能产出的蒸汽"）。
+fn fluid_temperature_range(store: Option<&PrototypeStore>, name: &str) -> Option<[i32; 2]> {
+    let fluid = store?
+        .get(PrototypeGroup::Fluid, name)?
+        .component::<FluidComponent>()?;
+    Some([
+        fluid.default_temperature as i32,
+        fluid.max_temperature() as i32,
+    ])
 }
 
 /// 「近似候选」提示：把精确/模糊/错拼命中压成短标签，附在报错里。
@@ -1717,13 +1388,23 @@ fn require_index_entry(
     label: &str,
     name: &str,
 ) -> Result<String, String> {
+    require_index_entry_of(index, kinds, label, name).map(|(name, _)| name)
+}
+
+/// 同上，但把命中的**原型种类**一起返回（调用方要按种类走不同分支时用）。
+fn require_index_entry_of(
+    index: &crate::CatalogIndex,
+    kinds: &[&str],
+    label: &str,
+    name: &str,
+) -> Result<(String, String), String> {
     let outcome = crate::resolve_index_entry(&index.entries, name, 8);
     if let Some(hit) = outcome
         .exact
         .iter()
         .find(|hit| kinds.contains(&hit.kind.as_str()))
     {
-        return Ok(hit.name.clone());
+        return Ok((hit.name.clone(), hit.kind.clone()));
     }
     let hints = name_candidates(&outcome);
     Err(if hints.is_empty() {
@@ -2450,11 +2131,13 @@ mod tests {
                 AutoPlanTarget {
                     item: "iron-plate".to_string(),
                     quality: None,
+                    temperature: None,
                     amount: 60.0,
                 },
                 AutoPlanTarget {
                     item: "copper-plate".to_string(),
                     quality: Some("legendary".to_string()),
+                    temperature: None,
                     amount: 30.0,
                 },
             ],
@@ -2484,8 +2167,14 @@ mod tests {
             request_id: None,
         };
         let targets = vec![
-            (IdWithQuality::new("iron-plate", "normal"), 60.0),
-            (IdWithQuality::new("copper-plate", "legendary"), 30.0),
+            (
+                DualVar::Item(IdWithQuality::new("iron-plate", "normal")),
+                60.0,
+            ),
+            (
+                DualVar::Item(IdWithQuality::new("copper-plate", "legendary")),
+                30.0,
+            ),
         ];
         let messages = auto_plan_body_messages(&params, ProjectId(7), FactoryId(9), &targets);
 
@@ -2586,40 +2275,130 @@ mod tests {
         let target = |item: &str, amount: f64| AutoPlanTarget {
             item: item.to_string(),
             quality: None,
+            temperature: None,
             amount,
         };
 
         // id / 本地化名 / 分隔符变体都能解析到物品原型。
         for name in ["iron-plate", "铁板", "IRON_PLATE", "iron plate"] {
-            let resolved = resolve_auto_plan_targets(&index, &[target(name, 1.0)]).expect(name);
-            assert_eq!(resolved[0].0.id, "iron-plate");
-            assert_eq!(resolved[0].0.quality, "normal");
+            let resolved = resolve_auto_plan_targets(&index, None, &[target(name, 1.0)]).expect(name);
+            let DualVar::Item(item) = &resolved[0].0 else {
+                panic!("应当是物品流: {:?}", resolved[0].0)
+            };
+            assert_eq!(item.id, "iron-plate");
+            assert_eq!(item.quality, "normal");
             assert_eq!(resolved[0].1, 1.0);
         }
-        // 同名跨 item/recipe 时取物品（目标只能是物品）。
+        // 同名跨 item/recipe 时取物品（目标同时接受物品与流体）。
         let resolved =
-            resolve_auto_plan_targets(&index, &[target("processing unit", 5.0)]).unwrap();
-        assert_eq!(resolved[0].0.id, "processing-unit");
+            resolve_auto_plan_targets(&index, None, &[target("processing unit", 5.0)]).unwrap();
+        let DualVar::Item(item) = &resolved[0].0 else {
+            panic!("应当是物品流")
+        };
+        assert_eq!(item.id, "processing-unit");
         // 品质原样带上。
         let resolved = resolve_auto_plan_targets(
             &index,
+            None,
             &[AutoPlanTarget {
                 item: "铁板".to_string(),
                 quality: Some("legendary".to_string()),
+                temperature: None,
                 amount: 2.0,
             }],
         )
         .unwrap();
-        assert_eq!(resolved[0].0.quality, "legendary");
+        let DualVar::Item(item) = &resolved[0].0 else {
+            panic!("应当是物品流")
+        };
+        assert_eq!(item.quality, "legendary");
         // 拼错 → 报错并附错拼候选，不猜。
-        let error = resolve_auto_plan_targets(&index, &[target("iron-plte", 1.0)]).unwrap_err();
+        let error = resolve_auto_plan_targets(&index, None, &[target("iron-plte", 1.0)]).unwrap_err();
         assert!(error.contains("iron-plate"), "{error}");
         // 完全不认识 → 提示去查名字。
-        let error = resolve_auto_plan_targets(&index, &[target("nonsense-xyz", 1.0)]).unwrap_err();
+        let error = resolve_auto_plan_targets(&index, None, &[target("nonsense-xyz", 1.0)]).unwrap_err();
         assert!(error.contains("localized_names"), "{error}");
         // amount 必须是正数。
-        let error = resolve_auto_plan_targets(&index, &[target("iron-plate", 0.0)]).unwrap_err();
+        let error = resolve_auto_plan_targets(&index, None, &[target("iron-plate", 0.0)]).unwrap_err();
         assert!(error.contains("正数"), "{error}");
+    }
+
+    /// 流体目标：解析成 DualVar::Fluid，温度原样带上；物品/流体各自不该有的字段
+    /// **显式报错**，不静默忽略。
+    ///
+    /// 实测驱动：auto_plan 原先只收物品，而「产出指定温度的流体」恰恰是最需要自动
+    /// 规划的场景（也是严格产出语义修好后第一个被验证的场景）。调用方只能退回
+    /// dispatch 手工拼 TargetAction，实测每次先浪费两次 auto_plan 调用
+    /// （返回「蒸汽是流体、不是物品」）。
+    #[test]
+    fn auto_plan_accepts_fluid_targets() {
+        let entry = |kind: &str, name: &str, localized: &str| crate::IndexEntry {
+            kind: kind.to_string(),
+            name: name.to_string(),
+            localized_name: localized.to_string(),
+            group: String::new(),
+            subgroup: String::new(),
+            icon_type: String::new(),
+            module_slots: None,
+            categories: Vec::new(),
+            fuel_categories: Vec::new(),
+            fuel_value_j: None,
+            technology_max_level: None,
+            technology_base_level: 0,
+        };
+        let index = crate::CatalogIndex {
+            context_id: "c".to_string(),
+            qualities: vec!["normal".to_string()],
+            names: Default::default(),
+            entries: vec![
+                entry("item", "iron-plate", "铁板"),
+                entry("fluid", "steam", "蒸汽"),
+            ],
+        };
+        let target =
+            |name: &str, temperature: Option<[i32; 2]>, quality: Option<&str>| AutoPlanTarget {
+                item: name.to_string(),
+                quality: quality.map(str::to_string),
+                temperature,
+                amount: 1.0,
+            };
+        let fluid = |temperature: [i32; 2]| DualVar::Fluid {
+            name: "steam".to_string(),
+            temperature,
+        };
+
+        // 本地化名 + 温度区间。
+        let resolved =
+            resolve_auto_plan_targets(&index, None, &[target("蒸汽", Some([15, 500]), None)])
+                .unwrap();
+        assert_eq!(resolved[0].0, fluid([15, 500]));
+        // 精确温度也是合法的区间。
+        let resolved =
+            resolve_auto_plan_targets(&index, None, &[target("steam", Some([500, 500]), None)])
+                .unwrap();
+        assert_eq!(resolved[0].0, fluid([500, 500]));
+        // 流体没给温度、又拿不到原型库 → 报错要求显式给，不塞一个猜的默认值。
+        let error =
+            resolve_auto_plan_targets(&index, None, &[target("steam", None, None)]).unwrap_err();
+        assert!(error.contains("temperature"), "{error}");
+        // 区间反了 → 报错。
+        let error =
+            resolve_auto_plan_targets(&index, None, &[target("steam", Some([500, 15]), None)])
+                .unwrap_err();
+        assert!(error.contains("下界"), "{error}");
+        // 流体不接受 quality。
+        let error = resolve_auto_plan_targets(
+            &index,
+            None,
+            &[target("steam", Some([15, 500]), Some("legendary"))],
+        )
+        .unwrap_err();
+        assert!(error.contains("不接受 quality"), "{error}");
+        // 物品不接受 temperature（不静默忽略）。
+        let error =
+            resolve_auto_plan_targets(&index, None, &[target("iron-plate", Some([1, 2]), None)])
+                .unwrap_err();
+        assert!(error.contains("不接受 temperature"), "{error}");
     }
 
     /// `auto_plan` 的手写名字必须在**建任何东西之前**被挡住：两类实测过的静默失败
@@ -2660,6 +2439,7 @@ mod tests {
             targets: vec![AutoPlanTarget {
                 item: "iron-plate".to_string(),
                 quality: None,
+                temperature: None,
                 amount: 1.0,
             }],
             project_name: None,
@@ -3035,85 +2815,50 @@ mod tests {
         assert_eq!(meta["truncated"][0], "mechanics");
     }
 
-    /// `dispatch` 的 inputSchema 是**投影**出来的，不是手写清单：动作树直接来自
-    /// schemars 的 AppMessage schema，所以加一个 serde 变体就会自动出现在工具面上，
-    /// 不存在「文档漂移」——这正是当初从 V1 手写描述改成 JsonSchema 派生的理由。
+    /// dispatch 的 inputSchema **保持完整**：rmcp 直接内联 AppMessage 的协议图。
+    ///
+    /// 曾经把它投影成「只有动作名」的薄壳 + 一个 get_schema 工具按需取切片
+    /// （工具面 -70%），实测后回退了：调用方在上下文被压缩后不知道要先查 schema，
+    /// 约 40k token（1M 上下文的 4%）才建出一个项目。**省 token 不能以「调用方要
+    /// 额外查一次」为代价**——多一层间接就是多一次会失败的猜测。
+    ///
+    /// 这条测试钉住这个方向：不要再把它换成需要额外查询的投影。
     #[test]
-    fn catalog_is_derived_from_the_schema() {
-        let tree = action_tree();
-        let scopes: Vec<&str> = tree.iter().map(|(scope, _)| scope.as_str()).collect();
-        assert_eq!(tree.len(), 4, "AppMessage 应当正好 4 个 scope：{scopes:?}");
+    fn dispatch_schema_is_inlined_in_full() {
+        // 与 rmcp 的 schema_for_input 同款口径（draft2020_12）。
+        let generator = schemars::generate::SchemaSettings::draft2020_12().into_generator();
+        let schema = serde_json::to_value(generator.into_root_schema_for::<DispatchParams>())
+            .expect("DispatchParams schema 应当可序列化");
+        let text = schema.to_string();
+        let defs = schema.get("$defs").and_then(|node| node.as_object());
+        let count = defs.map(|defs| defs.len()).unwrap_or(0);
+        assert!(
+            count >= 40,
+            "完整 schema 应当内联整套协议图（约 46 个 $defs），实际 {count} 个"
+        );
+        assert!(
+            text.len() > 30_000,
+            "完整 schema 应当是 30 KB 量级，实际 {} 字节",
+            text.len()
+        );
+        // 深层动作名必须直接可见——调用方不该为了知道 add-to-target 再查一次。
+        assert!(
+            text.contains("add-to-target"),
+            "动作名应当在 schema 里直接可见"
+        );
+        // 四个 scope 都在（schemars 派生，不存在手写清单漂移）。
         for scope in ["application", "project", "factory", "history"] {
-            assert!(scopes.contains(&scope), "缺少 scope {scope}：{scopes:?}");
+            assert!(text.contains(scope), "schema 里缺少 scope {scope}");
         }
-
-        // 单元变体必须接住：schemars 不给它们 oneOf 分支，漏掉就会静默少列动作。
-        let history = &tree.iter().find(|(scope, _)| scope == "history").unwrap().1;
-        assert_eq!(history, &vec!["undo".to_string(), "redo".to_string()]);
-
-        // 嵌套分组必须下钻到叶子，不能停在中转分组上。
-        let factory = &tree.iter().find(|(scope, _)| scope == "factory").unwrap().1;
-        assert!(
-            factory.iter().any(|path| path == "mechanic.recipe.set-recipe"),
-            "嵌套动作没被下钻：{factory:?}"
-        );
-        assert!(
-            !factory.iter().any(|path| path == "mechanic"),
-            "分组被当成了叶子：{factory:?}"
-        );
-
-        let leaves: usize = tree.iter().map(|(_, paths)| paths.len()).sum();
-        assert!(leaves >= 100, "只投影出 {leaves} 个动作，可能有整支被漏掉");
-
-        // 投影必须比被投影的 schema 明显小，否则这个投影就没有意义。
-        let full = serde_json::to_string(app_message_schema()).unwrap().len();
-        let catalog = serde_json::to_string(&*dispatch_input_schema()).unwrap().len();
-        assert!(catalog * 5 < full, "投影没变小：catalog {catalog} vs full {full}");
     }
 
-    /// 切片必须自洽：返回的 `$defs` 要覆盖该分支里所有 `$ref`，否则调用方拿到的是
-    /// 一份解不开引用的 schema——那比不给还糟。
+    /// 量一遍工具面，并把明细打出来——**只测量，不设优化目标**。
+    ///
+    /// 尺寸不是要优化的指标（判据是「每个成功完成的任务花多少 token」，见上面
+    /// dispatch_schema_is_inlined_in_full 的说明）。这里只留一个很松的天花板，
+    /// 防止重复内联之类的意外把工具面搞爆。
     #[test]
-    fn action_slices_are_self_contained() {
-        let slice = action_schema_slice("mechanic.recipe.set-recipe").expect("应当找到嵌套动作");
-        assert_eq!(slice["scope"], "factory");
-        assert!(slice["schema"].is_object(), "{slice}");
-        let defs = slice["$defs"].as_object().expect("应当带 $defs");
-        for reference in refs_in(&slice["schema"]) {
-            assert!(defs.contains_key(&reference), "切片缺少 $defs.{reference}");
-        }
-        // 短名在该树里唯一时可用；找不到时必须是 None，不能瞎猜一个相近动作。
-        assert!(action_schema_slice("set-recipe").is_some());
-        assert!(action_schema_slice("没有这个动作").is_none());
-    }
-
-    /// 收集 schema 里出现的所有 `$ref` 名（测试辅助）。
-    fn refs_in(node: &serde_json::Value) -> Vec<String> {
-        let mut found = Vec::new();
-        let mut stack = vec![node];
-        while let Some(current) = stack.pop() {
-            match current {
-                serde_json::Value::Object(object) => {
-                    if let Some(name) = object
-                        .get("$ref")
-                        .and_then(|reference| reference.as_str())
-                        .and_then(|reference| reference.strip_prefix("#/$defs/"))
-                    {
-                        found.push(name.to_string());
-                    }
-                    stack.extend(object.values());
-                }
-                serde_json::Value::Array(items) => stack.extend(items.iter()),
-                _ => {}
-            }
-        }
-        found
-    }
-
-    /// 护栏：工具面的总量。`dispatch` 以前直发完整 AppMessage schema（44 KB，占整个
-    /// 工具面 77%），有客户读源码时就在这里卡住。这个测试把预算钉死，防止悄悄涨回去。
-    #[test]
-    fn tool_surface_stays_within_budget() {
+    fn tool_surface_is_measured() {
         let tools = MetatorioMcp::base_tool_router().list_all();
         let mut total = 0usize;
         let mut rows: Vec<(String, usize)> = Vec::new();
@@ -3138,12 +2883,7 @@ mod tests {
         for (name, size) in &rows {
             println!("  {name:26} {size:7}");
         }
-        // 基线（2026-10）：7 个工具 17,118 字符。dispatch 投影前它是 44,710。
-        assert!(total < 22_000, "工具面涨到 {total} 字符：{rows:?}");
-        assert!(
-            rows[0].1 < 9_000,
-            "单个工具的 inputSchema 又成异类了（曾经是 44 KB 的 dispatch）：{:?}",
-            rows[0]
-        );
+        // 很松的天花板：只挡「意外重复内联」这类事故，不挡刻意设计。
+        assert!(total < 150_000, "工具面涨到 {total} 字符：{rows:?}");
     }
 }
