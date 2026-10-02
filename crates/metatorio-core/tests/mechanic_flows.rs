@@ -4,7 +4,7 @@ use metatorio_core::dual_var::DualVar;
 use metatorio_core::expand::expand;
 use metatorio_core::mechanic::{
     BoilerMechanic, Fuel, GeneratorMechanic, ItemFuelMechanic, ItemLaunchMechanic, Mechanic,
-    PlantMechanic, ReactorMechanic, SpoilMechanic,
+    PlantMechanic, ReactorMechanic, SpoilMechanic, TileDisposeMechanic, TileExtractMechanic,
 };
 use metatorio_data::store::PrototypeStore;
 use serde_json::{Value, json};
@@ -129,6 +129,76 @@ fn spoil_changes_quality_and_consumes_the_source() {
     assert_eq!(
         flow[&DualVar::Item(IdWithQuality::new("spoiled", "uncommon"))],
         1.0
+    );
+}
+
+#[test]
+fn tile_extract_produces_the_tiles_fluid() {
+    // **地格决定产出什么流体**（原版 offshore-pump 的 fluid_box 没有 filter），
+    // 机械只决定速率：pumping_speed 20/刻 × 60 = 1200/s，温度 = 流体默认温度。
+    let flow = flow(
+        json!({
+            "tile": { "water": { "fluid": "water" } },
+            "fluid": { "water": { "default_temperature": 15.0, "max_temperature": 100.0 } },
+            "offshore-pump": { "offshore-pump": { "pumping_speed": 20.0 } }
+        }),
+        Mechanic::TileExtract(TileExtractMechanic {
+            tile: "water".to_string(),
+            machine: id("offshore-pump"),
+        }),
+    );
+
+    assert_eq!(
+        flow[&DualVar::Fluid {
+            name: "water".to_string(),
+            temperature: [15, 15],
+        }],
+        1200.0
+    );
+}
+
+#[test]
+fn tile_dispose_consumes_the_item_without_output() {
+    // 只有带 destroys_dropped_items 的地格能销毁（原版岩浆）。
+    // 消耗 1 单位/秒，**没有产出**——成本由 instance_cost 给（1/16 格 每（个/秒））。
+    let flow = flow(
+        json!({
+            "tile": { "lava": { "destroys_dropped_items": true } },
+            "item": { "stone": { "stack_size": 50 } }
+        }),
+        Mechanic::TileDispose(TileDisposeMechanic {
+            tile: "lava".to_string(),
+            item: id("stone"),
+        }),
+    );
+
+    assert_eq!(flow[&DualVar::Item(id("stone"))], -1.0);
+    assert_eq!(flow.len(), 1, "销毁只消耗物品、没有产出: {flow:?}");
+}
+
+#[test]
+fn tile_dispose_refuses_a_tile_that_cannot_destroy_items() {
+    // 没有 destroys_dropped_items 的地格 → **不生成任何变量**，而不是偷偷允许。
+    // 判据来自原型数据，不是我们规定的。
+    let dump = json!({
+        "tile": { "grass": {} },
+        "item": { "stone": { "stack_size": 50 } }
+    });
+    let store = PrototypeStore::load(&dump).expect("dump should load");
+    let game = GameState {
+        max_quality: store.quality_order().len().saturating_sub(1),
+        ..Default::default()
+    };
+    let ctx = Context::new(&store, &game);
+    let mechanic = Mechanic::TileDispose(TileDisposeMechanic {
+        tile: "grass".to_string(),
+        item: id("stone"),
+    });
+    let expansion = expand([(0usize, &mechanic)], &ctx);
+    assert_eq!(
+        expansion.len(),
+        0,
+        "不能销毁物品的地格不应产生任何变量"
     );
 }
 

@@ -1450,6 +1450,8 @@ class RuntimeStore {
         return this.mechanicMessage(mechanic, { recipe: { "set-machine": { machine: machineId } } });
       case "mining":
         return this.mechanicMessage(mechanic, { mining: { "set-machine": { machine: machineId } } });
+      case "tile-extract":
+        return this.setTileExtractMachine(mechanic, machine, quality);
       default:
         throw new Error(`${this.mechanicKind(mechanic)} 机制不支持设置机器`);
     }
@@ -1466,6 +1468,8 @@ class RuntimeStore {
         return this.mechanicMessage(mechanic, { spoil: { "set-item": { item: itemId } } });
       case "item-fuel":
         return this.mechanicMessage(mechanic, { "item-fuel": { "set-item": { item: itemId } } });
+      case "tile-dispose":
+        return this.setTileDisposeItem(mechanic, item, quality);
       case "item-launch":
         return this.mechanicMessage(mechanic, { "item-launch": { "set-item": { item: itemId } } });
       case "plant":
@@ -1495,6 +1499,38 @@ class RuntimeStore {
   /** 流体热机制：选择提热流体。 */
   async setFluidHeat(mechanic: MechanicId, fluid: string): Promise<void> {
     await this.mechanicMessage(mechanic, { "fluid-heat": { "set-fluid": { fluid } } });
+  }
+
+  /** 地格抽取：选择地格（**地格决定产出哪种流体**）。 */
+  async setTileExtractTile(mechanic: MechanicId, tile: string): Promise<void> {
+    await this.mechanicMessage(mechanic, { "tile-extract": { "set-tile": { tile } } });
+  }
+
+  /** 地格抽取：选择抽取机械（决定速率 pumping_speed）。 */
+  async setTileExtractMachine(
+    mechanic: MechanicId,
+    machine: string,
+    quality = "normal",
+  ): Promise<void> {
+    await this.mechanicMessage(mechanic, {
+      "tile-extract": { "set-machine": { machine: { id: machine, quality } } },
+    });
+  }
+
+  /** 地格销毁：选择可销毁物品的地格（后端要求 destroys_dropped_items）。 */
+  async setTileDisposeTile(mechanic: MechanicId, tile: string): Promise<void> {
+    await this.mechanicMessage(mechanic, { "tile-dispose": { "set-tile": { tile } } });
+  }
+
+  /** 地格销毁：选择被销毁的物品。 */
+  async setTileDisposeItem(
+    mechanic: MechanicId,
+    item: string,
+    quality = "normal",
+  ): Promise<void> {
+    await this.mechanicMessage(mechanic, {
+      "tile-dispose": { "set-item": { item: { id: item, quality } } },
+    });
   }
 
   /** 设置流体类机制的温度（流体燃料/流体热/发电机/锅炉）。 */

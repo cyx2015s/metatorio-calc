@@ -206,6 +206,8 @@ export type MechanicKind =
   | "solar"
   | "fluid-fuel"
   | "fluid-heat"
+  | "tile-extract"
+  | "tile-dispose"
   | "unsupported";
 
 export type MechanicListAction =
@@ -267,6 +269,16 @@ export type FluidHeatMechanicAction =
   | { "set-fluid": { fluid: string } }
   | { "set-temperature": { temperature: number | null } };
 
+/** 地格抽取：地格决定产出哪种流体，机械决定速率。 */
+export type TileExtractMechanicAction =
+  | { "set-tile": { tile: string } }
+  | { "set-machine": { machine: IdWithQuality } };
+
+/** 地格销毁：地格必须带 destroys_dropped_items（后端校验）。 */
+export type TileDisposeMechanicAction =
+  | { "set-tile": { tile: string } }
+  | { "set-item": { item: IdWithQuality } };
+
 export type MechanicAction =
   | { recipe: RecipeMechanicAction }
   | { mining: MiningMechanicAction }
@@ -279,7 +291,9 @@ export type MechanicAction =
   | { reactor: ReactorMechanicAction }
   | { solar: SolarMechanicAction }
   | { "fluid-fuel": FluidFuelMechanicAction }
-  | { "fluid-heat": FluidHeatMechanicAction };
+  | { "fluid-heat": FluidHeatMechanicAction }
+  | { "tile-extract": TileExtractMechanicAction }
+  | { "tile-dispose": TileDisposeMechanicAction };
 
 // 注意：unit 变体（clear-modules）在 serde 外部标签下序列化为裸字符串。
 export type ModuleAction =
@@ -549,6 +563,8 @@ export interface Mechanic {
   recipe?: IdWithQuality;
   machine?: IdWithQuality;
   resource?: string;
+  /** 地格名（tile-extract 决定产出哪种流体；tile-dispose 决定去哪销毁）。 */
+  tile?: string;
   item?: IdWithQuality;
   seed?: IdWithQuality;
   generator?: IdWithQuality;
@@ -871,4 +887,5 @@ export type CatalogKind =
   | "technology"
   | "planet"
   | "surface"
-  | "quality";
+  | "quality"
+  | "tile";

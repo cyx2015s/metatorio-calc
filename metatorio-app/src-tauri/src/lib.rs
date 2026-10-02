@@ -2552,6 +2552,27 @@ fn catalog_index_from_store(
         }
     }
 
+    // tile：地格机制（TileExtract / TileDispose）的选择器用。
+    // 直接遍历而不走 order_info——地格总数很小，且**不过滤**：让用户看到全部地格，
+    // 选错时由 validate.rs 给出「该地格没有 destroys_dropped_items」这类明确错误，
+    // 比在选择器里静默藏起来更好诊断。
+    for record in store.group(PrototypeGroup::Tile) {
+        out.push(IndexEntry {
+            kind: "tile".to_string(),
+            name: record.name.clone(),
+            localized_name: localized_name(locale, "tile", &record.name),
+            group: String::new(),
+            subgroup: String::new(),
+            icon_type: "entity".to_string(),
+            module_slots: None,
+            categories: Vec::new(),
+            fuel_categories: Vec::new(),
+            fuel_value_j: None,
+            technology_max_level: None,
+            technology_base_level: 0,
+        });
+    }
+
     // module：Item order_info 过滤 ModuleComponent
     if let Some(order) = store.order_info().get(&PrototypeGroup::Item) {
         for (big, subgroups) in order {

@@ -23,6 +23,8 @@
     solar: "太阳能",
     "fluid-fuel": "流体燃料",
     "fluid-heat": "流体热",
+    "tile-extract": "地格抽取",
+    "tile-dispose": "地格销毁",
   };
 
   let {
@@ -105,6 +107,7 @@
   let primaryName = $derived(
     entry.mechanic.recipe?.id ??
       entry.mechanic.item?.id ??
+      entry.mechanic.tile ??
       entry.mechanic.seed?.id ??
       entry.mechanic.resource ??
       entry.mechanic.generator?.id ??
@@ -121,7 +124,9 @@
         ? "entity"
         : kind === "fluid-fuel" || kind === "fluid-heat"
           ? "fluid"
-          : "item",
+          : kind === "tile-extract"
+            ? "entity"
+            : "item",
   );
   let machineName = $derived(entry.mechanic.machine?.id ?? "");
   let fluidName = $derived(entry.mechanic.fluid ?? "");
@@ -175,6 +180,10 @@
       case "fluid-fuel":
       case "fluid-heat":
         return "fluid";
+      case "tile-extract":
+        return "tile";
+      case "tile-dispose":
+        return "item";
       default:
         return "item";
     }

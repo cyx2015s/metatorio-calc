@@ -36,6 +36,8 @@
     { kind: "solar", label: "太阳能" },
     { kind: "fluid-fuel", label: "流体燃料" },
     { kind: "fluid-heat", label: "流体热" },
+    { kind: "tile-extract", label: "地格抽取" },
+    { kind: "tile-dispose", label: "地格销毁" },
   ];
 
   onMount(() => {
@@ -851,6 +853,23 @@
             undefined,
             entry?.mechanic.machine?.id,
             entry?.mechanic.machine?.quality,
+          );
+          break;
+        }
+        case "tile": {
+          // 地格：抽取与销毁的判据不同，标题与动作跟着变。
+          const isDispose = entry?.mechanic.type === "tile-dispose";
+          openSelector(
+            "tile",
+            isDispose ? "选择可销毁物品的地格" : "选择地格（决定产出哪种流体）",
+            (name) =>
+              isDispose
+                ? runtime.setTileDisposeTile(mechanic, name)
+                : runtime.setTileExtractTile(mechanic, name),
+            [{ kind: "tile", label: "地格" }],
+            undefined,
+            undefined,
+            entry?.mechanic.tile,
           );
           break;
         }
