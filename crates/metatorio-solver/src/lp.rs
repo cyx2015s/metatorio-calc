@@ -80,10 +80,14 @@ struct BuiltProblem {
 }
 
 /// 把解析后的 `objective/rows` 重建成一个 good_lp 问题。
+///
+/// `rhs_scale`：所有非零右端统一乘的系数（见 [`TARGET_CANONICAL_SCALE`]）。
+/// 只作用在约束右端；`trivially_infeasible` 的判定仍用原始 `row.rhs`。
 fn build_problem(
     defs: &[VariableDefinition],
     objective: &[(usize, f64)],
     rows: &[ParsedRow],
+    rhs_scale: f64,
 ) -> BuiltProblem {
     let mut variables = ProblemVariables::new();
     let vars_in_order: Vec<Variable> = variables.add_all(defs.iter().cloned());
@@ -104,10 +108,11 @@ fn build_problem(
             continue;
         }
         let expr = fold(&row.terms);
+        let rhs = row.rhs * rhs_scale;
         let constraint = if row.is_equality {
-            expr.eq(row.rhs)
+            expr.eq(rhs)
         } else {
-            expr.leq(row.rhs)
+            expr.leq(rhs)
         };
         constraints.push(constraint);
     }
@@ -118,6 +123,22 @@ fn build_problem(
         trivially_infeasible,
     }
 }
+
+/// 目标行归一化：把 LP 里最大的非零右端放大到至少这个量级再交给 HiGHS。
+///
+/// # 为什么需要
+///
+/// HiGHS 的可行性容差是**绝对**的（`primal_feasibility_tolerance`，默认 1e-7，
+/// 且作用在均衡缩放后的空间）。一条相对目标只有 ~1e-11 的**必需**小链，在目标
+/// 量级很小时会被求解器合法地压成精确 0（残差落在容差内），于是顶点解的支撑集
+/// 里有消费者、没有生产者，回写出去的文档就不可行。
+///
+/// 本 LP 除目标行外右端全为 0，所以把非零右端整体乘 `rhs_scale` 等价于把**整个
+/// 解**乘 `rhs_scale`（正齐次）；解完再除回来即可，是精确变换。只放大、不缩小：
+/// 目标本来很大时保持原样（缩小反而会把别的流量压到容差之下）。
+const TARGET_CANONICAL_SCALE: f64 = 1e4;
+/// 放大倍数的上限，避免目标小到离谱时溢出。
+const MAX_RHS_SCALE: f64 = 1e12;
 
 /// 接受一个解的门槛：原问题最大相对约束违反量不超过它。
 const ACCEPT_VIOLATION: f64 = 1e-6;
@@ -228,7 +249,16 @@ pub fn solve_lp(
         })
         .collect();
 
-    let full = build_problem(&defs, &objective, &rows);
+    // 目标行归一化（见 TARGET_CANONICAL_SCALE）：只放大、不缩小。
+    let max_rhs = rows
+        .iter()
+        .fold(0.0f64, |acc, row| acc.max(row.rhs.abs()));
+    let rhs_scale = if max_rhs > 0.0 {
+        (TARGET_CANONICAL_SCALE / max_rhs).clamp(1.0, MAX_RHS_SCALE)
+    } else {
+        1.0
+    };
+    let full = build_problem(&defs, &objective, &rows, rhs_scale);
     if full.trivially_infeasible {
         return Err(ResolutionError::Infeasible);
     }
@@ -251,7 +281,11 @@ pub fn solve_lp(
         .set_option("output_flag", false)
         .with_all(full.constraints)
         .solve()?;
-    let values: Vec<f64> = orig_vars.iter().map(|var| solution.value(*var)).collect();
+    // 求解在放大后的空间进行，这里除回原问题量级（rhs_scale = 1.0 时是无操作）。
+    let values: Vec<f64> = orig_vars
+        .iter()
+        .map(|var| solution.value(*var) / rhs_scale)
+        .collect();
     if values.iter().any(|value| !value.is_finite()) {
         return Err(ResolutionError::Other("HiGHS 返回非有限解"));
     }
@@ -264,9 +298,10 @@ pub fn solve_lp(
     }
     let variables_used = values.iter().filter(|value| value.abs() > 0.0).count();
     log::info!(
-        "HiGHS 求解完成：{} 个变量，支撑集 {} 个，耗时 {:.2?}",
+        "HiGHS 求解完成：{} 个变量，支撑集 {} 个，目标右端放大 {:.3e}×，耗时 {:.2?}",
         defs.len(),
         variables_used,
+        rhs_scale,
         instant.elapsed()
     );
     Ok(assemble(
@@ -349,5 +384,28 @@ mod tests {
             .count();
         assert!(support >= 1, "至少要有一个列在用：{support}");
         assert!(solution.value(xs[0]) <= 1.0 + 1e-6);
+    }
+
+    /// 目标量级远小于 HiGHS 绝对可行容差（1e-7）时，必须在放大后的空间求解、
+    /// 再除回原尺度。没有这层归一化，1e-9 的等式会被当成"在容差内"而解成 0：
+    /// 这正是「目标 1/s 的必需小链被压成 0、回写后不可行」的机制。
+    #[test]
+    fn tiny_target_is_solved_in_scaled_space() {
+        let mut vars = ProblemVariables::new();
+        let x = vars.add(variable().min(0.0));
+        let y = vars.add(variable().min(0.0));
+        let constraints = vec![x.into_expression().eq(1e-9), (y.clone() - x.clone()).eq(0.0)];
+        let solution = solve_lp(x.clone() + y.clone(), constraints, vars).expect("应可解");
+        let xv = solution.value(x);
+        let yv = solution.value(y);
+        assert!(xv > 0.0, "x 被解成 0（未放大目标右端）：{xv}");
+        assert!(
+            (xv / 1e-9 - 1.0).abs() < 1e-6,
+            "x 应解回 1e-9：{xv}"
+        );
+        assert!(
+            (yv / 1e-9 - 1.0).abs() < 1e-6,
+            "y 应解回 1e-9：{yv}"
+        );
     }
 }
