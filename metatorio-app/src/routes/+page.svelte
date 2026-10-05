@@ -2186,11 +2186,8 @@
         <button class="btn" title="自动规划：按规划偏好的枚举列表生成候选机制 → 选优 → 回写机制列表。总是按严格供给求解，并在完成后自动开启严格供给" onclick={() => runtime.autoPlan().catch(() => {})} disabled={runtime.autoPlanning || !factory}>
           {runtime.autoPlanning ? "规划中…" : "自动规划"}
         </button>
-        <button class="btn ghost" title="移除求解中用量低于阈值的机制" onclick={() => runtime.cleanup("remove-unused").catch(() => {})} disabled={!solved}>
+        <button class="btn ghost" title="移除本次求解中用量为 0 的机制" onclick={() => runtime.cleanup("remove-unused").catch(() => {})} disabled={!solved}>
           移除未用
-        </button>
-        <button class="btn ghost" title="移除未参与求解的机制" onclick={() => runtime.cleanup("remove-unsolvable").catch(() => {})} disabled={!solved}>
-          移除无解
         </button>
         <button class="btn ghost" title="按求解流量从大到小重排机制" onclick={() => runtime.cleanup("sort-by-solution-rate").catch(() => {})} disabled={!solved}>
           按流量排序

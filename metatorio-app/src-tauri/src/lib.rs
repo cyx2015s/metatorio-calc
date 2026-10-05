@@ -3957,15 +3957,16 @@ async fn execute_command<R: TauriRuntime>(
                 }
             };
             // 2) 锁内按用量回写（走 reducer 收尾：revision/dirty/Persist/Recompute）。
+            //    求解没成功时拒绝清理：没有"用没用"的信息，空表会把机制删光。
+            let Some(used) = metatorio_runtime::solve::mechanic_usage(&solved) else {
+                let error = "当前求解未成功（NotSolved），拒绝清理机制".to_string();
+                emit(app, "solve-error", error.clone());
+                return CommandOutcome::failed(error);
+            };
             let commands = match with_runtime(state, |runtime| {
                 runtime
                     .state
-                    .apply_cleanup(
-                        project,
-                        factory,
-                        action,
-                        &metatorio_runtime::solve::mechanic_usage(&solved),
-                    )
+                    .apply_cleanup(project, factory, action, &used)
                     .map(|outcome| outcome.commands)
                     .map_err(|error| error.to_string())
             }) {

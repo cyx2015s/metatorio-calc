@@ -762,8 +762,13 @@ impl Runtime {
         action: CleanupAction,
     ) -> Result<(), RuntimeError> {
         let result = self.solve_factory(project, factory)?;
-        self.state
-            .apply_cleanup(project, factory, action, &mechanic_usage(&result))?;
+        // 求解没成功时拒绝清理：此时没有"用没用"的信息，空表会把机制删光。
+        let Some(used) = mechanic_usage(&result) else {
+            return Err(RuntimeError::InvalidValue(
+                "当前求解未成功（NotSolved），拒绝清理机制".to_string(),
+            ));
+        };
+        self.state.apply_cleanup(project, factory, action, &used)?;
         Ok(())
     }
 }
@@ -1216,18 +1221,22 @@ pub struct AutoPlanReport {
 
 /// 一次求解结果里每机制的总用量（多温度变体求和）。
 ///
-/// 判断「接近 0」用内部缩放值 `amount / scale`（剔除逐变量缩放差异），避免
-/// 单次产出大的配方因表观量小被误判为未使用。清理（Cleanup）据此增删机制。
-pub fn mechanic_usage(result: &SolveResult) -> HashMap<MechanicId, f64> {
+/// `SolveStatus::Solved.mechanics` 是**所有 LP 变量**（含取值为 0 的），所以每个
+/// 进了 LP 的机制都会有一条记录；没进 LP 的（disabled 等）不出现。清理
+/// （Cleanup）的判据是「用量**恰为 0**」——后端只给精确顶点解，未用到的变量就是
+/// 精确的 0，不用阈值。
+///
+/// 求解不是 `Solved` 时返回 `None`：此时没有任何"这个机制用没用"的信息，
+/// 调用方必须**拒绝清理**，否则拿空表会把机制删光。
+pub fn mechanic_usage(result: &SolveResult) -> Option<HashMap<MechanicId, f64>> {
     let SolveStatus::Solved { mechanics, .. } = &result.status else {
-        return HashMap::new();
+        return None;
     };
     let mut used: HashMap<MechanicId, f64> = HashMap::new();
     for solution in mechanics {
-        let scaled = solution.amount.max(0.0) / solution.scale.max(1e-12);
-        *used.entry(solution.mechanic).or_default() += scaled;
+        *used.entry(solution.mechanic).or_default() += solution.amount.max(0.0);
     }
-    used
+    Some(used)
 }
 
 /// 消息作用域里的项目 id（Application 级消息没有项目）。
@@ -1811,6 +1820,23 @@ mod tests {
     use metatorio_core::IdWithQuality;
     use metatorio_data::store::PrototypeStore;
     use serde_json::json;
+
+    /// 求解不是 `Solved` 时没有任何"这个机制用没用"的信息：`mechanic_usage`
+    /// 必须返回 `None`，让调用方拒绝清理，而不是拿空表把机制删光。
+    #[test]
+    fn mechanic_usage_is_none_when_not_solved() {
+        let result = SolveResult {
+            project: ProjectId(1),
+            factory: FactoryId(2),
+            report: SolveDiagnostics::default(),
+            status: SolveStatus::NotSolved {
+                no_provider: vec![],
+                no_consumer: vec![],
+                description: "not solved".to_string(),
+            },
+        };
+        assert!(mechanic_usage(&result).is_none());
+    }
 
     fn load_runtime() -> Runtime {
         let mut runtime = Runtime::new();

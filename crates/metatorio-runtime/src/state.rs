@@ -302,8 +302,10 @@ impl RuntimeState {
 
     /// 求解后清理回写：按每机制用量删减/重排机制（同样走 reducer 收尾）。
     ///
-    /// - `RemoveUnused`：用量低于阈值（1e-9）的机制移除；
-    /// - `RemoveUnsolvable`：未出现在求解结果里的机制移除；
+    /// - `RemoveUnused` / `RemoveUnsolvable`：用量**恰为 0** 的机制移除。求解后端
+    ///   只给精确顶点解，未用到的变量就是精确的 0，所以不需要任何阈值——早先那个
+    ///   `1e-9` 是给内点法稠密尾值准备的，已随 clarabel 一起删掉；而"用量很小但
+    ///   必需"的上游机制（例如目标 1/s 时 ~3e-10 的链）必须原样保留；
     /// - `SortBySolutionRate`：按用量从大到小重排。
     pub fn apply_cleanup(
         &mut self,
@@ -315,13 +317,9 @@ impl RuntimeState {
         let factory_doc = self.factory_mut(project, factory)?;
         match action {
             CleanupAction::RemoveUnused | CleanupAction::RemoveUnsolvable => {
-                factory_doc.mechanics.retain(|entry| match action {
-                    CleanupAction::RemoveUnused => {
-                        used.get(&entry.id).copied().unwrap_or(0.0) >= 1e-9
-                    }
-                    CleanupAction::RemoveUnsolvable => used.contains_key(&entry.id),
-                    _ => unreachable!(),
-                });
+                factory_doc
+                    .mechanics
+                    .retain(|entry| used.get(&entry.id).copied().unwrap_or(0.0) != 0.0);
             }
             CleanupAction::SortBySolutionRate => {
                 factory_doc.mechanics.sort_by(|a, b| {
@@ -3041,7 +3039,7 @@ mod tests {
     #[test]
     fn cleanup_writeback_removes_and_reorders_by_usage() {
         let (mut state, project, factory) = state_with_factory();
-        for _ in 0..3 {
+        for _ in 0..4 {
             state
                 .dispatch(AppMessage::Factory {
                     project,
@@ -3060,10 +3058,13 @@ mod tests {
             .map(|entry| entry.id)
             .collect();
 
-        // 只有第 2、3 个机制有用；期望按用量降序重排成 [3, 2]。
+        // 判据是「用量恰为 0」：
+        // - ids[0] 给 1e-12（极小但非零）→ 精确解里它在用，必须**保留**；
+        // - ids[3] 没有记录（视为 0）→ 删掉。
         let mut used = HashMap::new();
         used.insert(ids[2], 10.0);
         used.insert(ids[1], 1.0);
+        used.insert(ids[0], 1e-12);
 
         let before = state.revision;
         let outcome = state
@@ -3077,7 +3078,11 @@ mod tests {
             .iter()
             .map(|entry| entry.id)
             .collect();
-        assert_eq!(remaining, vec![ids[1], ids[2]], "应删掉未使用的机制");
+        assert_eq!(
+            remaining,
+            vec![ids[0], ids[1], ids[2]],
+            "只应删掉用量为 0 的机制"
+        );
         assert!(outcome.commands.contains(&RuntimeCommand::Persist {
             project,
             path: None,
@@ -3099,7 +3104,7 @@ mod tests {
             .iter()
             .map(|entry| entry.id)
             .collect();
-        assert_eq!(reordered, vec![ids[2], ids[1]], "应按用量降序重排");
+        assert_eq!(reordered, vec![ids[2], ids[1], ids[0]], "应按用量降序重排");
     }
 
     /// `CloseProject` 命令（「保存后关闭」的第二步）必须真的把项目移出工作区。

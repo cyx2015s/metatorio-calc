@@ -606,8 +606,11 @@ pub enum FlowAction {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum CleanupAction {
+    /// 移除用量**恰为 0** 的机制（后端只给精确顶点解，未用到的就是精确 0）。
     RemoveUnused,
+    /// 历史别名，语义已与 [`Self::RemoveUnused`] 合并（同为"用量恰为 0"）。
     RemoveUnsolvable,
+    /// 按求解用量从大到小重排机制（不动机制集合）。
     SortBySolutionRate,
 }
 
