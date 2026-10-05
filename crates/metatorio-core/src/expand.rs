@@ -279,9 +279,10 @@ fn add_energy(
     usage: EnergyAmount,
     effects: &Effect,
     fuel: Option<&FuelSpec<'_>>,
+    is_assembling_machine: bool,
     fulfillment: &mut f64,
 ) {
-    for (key, value) in energy_source_as_flow(ctx, source, usage, effects, fuel, fulfillment) {
+    for (key, value) in energy_source_as_flow(ctx, source, usage, effects, fuel, is_assembling_machine, fulfillment) {
         temp.add(key, value);
     }
 }
@@ -428,6 +429,7 @@ fn expand_recipe<C: Clone>(
         effective_energy_usage(machine.energy_usage, energy_multiplier),
         &effects,
         fuel.as_ref(),
+        true,
         &mut fulfillment,
     );
     if let EnergySource::Electric(source) = &machine.energy_source
@@ -608,6 +610,7 @@ fn expand_mining<C: Clone>(
         machine.energy_usage,
         &effects,
         fuel.as_ref(),
+        false,
         &mut fulfillment,
     );
     if let EnergySource::Electric(source) = &machine.energy_source
@@ -1094,6 +1097,7 @@ fn expand_boiler<C: Clone>(
         boiler.energy_consumption,
         &Effect::default(),
         fuel.as_ref(),
+        false, 
         &mut fulfillment,
     );
 
@@ -1281,6 +1285,7 @@ fn expand_reactor<C: Clone>(
         reactor.consumption,
         &Effect::default(),
         fuel.as_ref(),
+        false, 
         &mut fulfillment,
     );
 
