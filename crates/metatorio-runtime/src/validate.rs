@@ -336,6 +336,7 @@ fn validate_mechanic(store: &PrototypeStore, action: &MechanicAction) -> Result<
                 require(store, PrototypeGroup::Fluid, "流体", fluid)
             }
             crate::message::BoilerMechanicAction::SetTemperature { .. } => Ok(()),
+            crate::message::BoilerMechanicAction::SetOutputTemperature { .. } => Ok(()),
             crate::message::BoilerMechanicAction::SetFuel { fuel } => require_fuel(store, fuel),
             crate::message::BoilerMechanicAction::SetFuelTemperature { .. } => Ok(()),
         },

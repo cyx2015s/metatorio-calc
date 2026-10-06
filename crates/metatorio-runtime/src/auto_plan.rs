@@ -1043,20 +1043,63 @@ fn enumerate_energy(
             // 烧燃料发电机：无流体可枚举，交给用户手动配置
         }
         if let Some(boiler) = record.component::<BoilerComponent>() {
-            let Some(fluid) = boiler.fluid_box.filter.clone() else {
-                continue;
-            };
-            // 只按原型自带模式枚举一个候选：热交换器等原型自带
-            // output-to-separate-pipe（水→蒸汽）；HeatFluidInside 是旧版
-            // 锅炉缺省，仅当原型没有 mode 字段时才可能是它。两种模式都枚举
-            // 会让 heat-exchanger 多出一条 Heat→FluidHeat 抽象流，与温度互转/
-            // 提热机制流线性相关 → 求解器奇异（已实测复现）。
-            out.push(Mechanic::Boiler(metatorio_core::BoilerMechanic {
-                boiler: IdWithQuality::new(record.name.clone(), major_quality.clone()),
-                fluid: fluid.clone(),
-                temperature: None,
-                fuel: None,
-            }));
+            match boiler
+                .mode
+                .unwrap_or(metatorio_data::types::BoilerMode::HeatFluidInside)
+            {
+                metatorio_data::types::BoilerMode::OutputToSeparatePipe => {
+                    // 换流体的锅炉（水→蒸汽）：输出温度由原型的
+                    // `target_temperature` 决定，枚举一个候选即可。
+                    let Some(fluid) = boiler.fluid_box.filter.clone() else {
+                        continue;
+                    };
+                    out.push(Mechanic::Boiler(metatorio_core::BoilerMechanic {
+                        boiler: IdWithQuality::new(record.name.clone(), major_quality.clone()),
+                        fluid,
+                        temperature: None,
+                        output_temperature: None,
+                        fuel: None,
+                    }));
+                }
+                metatorio_data::types::BoilerMode::HeatFluidInside => {
+                    // 连续加热（同一流体升温），输出温度可以任选：按流体温度表
+                    // 枚举**相邻档** T_i → T_{i+1}（T1→T2、T2→T3、T3→T4…）。
+                    // 原型有 filter 就只枚举那个流体；没有 filter 的通用加热器
+                    // （如 fluid-heater）枚举表里所有可升温的流体，让求解器挑。
+                    let fluids: Vec<String> = match boiler.fluid_box.filter.clone() {
+                        Some(filter) => vec![filter],
+                        None => store
+                            .fluid_temperatures()
+                            .iter()
+                            .filter(|(_, temperatures)| temperatures.len() >= 2)
+                            .map(|(name, _)| name.clone())
+                            .collect(),
+                    };
+                    for fluid_name in fluids {
+                        let temperatures = store
+                            .fluid_temperatures()
+                            .get(&fluid_name)
+                            .cloned()
+                            .unwrap_or_default();
+                        for pair in temperatures.windows(2) {
+                            let (lower, upper) = (pair[0], pair[1]);
+                            if upper <= lower {
+                                continue;
+                            }
+                            out.push(Mechanic::Boiler(metatorio_core::BoilerMechanic {
+                                boiler: IdWithQuality::new(
+                                    record.name.clone(),
+                                    major_quality.clone(),
+                                ),
+                                fluid: fluid_name.clone(),
+                                temperature: Some(lower),
+                                output_temperature: Some(upper),
+                                fuel: None,
+                            }));
+                        }
+                    }
+                }
+            }
         }
         if let Some(_reactor) = record.component::<ReactorComponent>() {
             out.push(Mechanic::Reactor(metatorio_core::ReactorMechanic {
@@ -1672,6 +1715,57 @@ mod tests {
         assert!(
             !temperatures.contains(&15),
             "≤ 流体默认温度的档不产电，应当滤掉：{temperatures:?}"
+        );
+    }
+
+    /// heat-fluid-inside 锅炉按流体温度表的**相邻档**枚举 (T_i → T_{i+1})：
+    /// 收集到 [15, 100, 200] 就枚举出 15→100、100→200 两组输入/输出温度。
+    #[test]
+    fn heat_fluid_inside_boilers_enumerate_adjacent_temperatures() {
+        let dump = serde_json::json!({
+            "fluid": {
+                "water": {
+                    "type": "fluid", "name": "water",
+                    "default_temperature": 15, "max_temperature": 200
+                }
+            },
+            "boiler": {
+                "preheater": {
+                    "type": "boiler", "name": "preheater",
+                    "mode": "output-to-separate-pipe",
+                    "target_temperature": 100,
+                    "fluid_box": { "filter": "water" },
+                    "output_fluid_box": { "filter": "water" }
+                },
+                "fluid-heater": {
+                    "type": "boiler", "name": "fluid-heater",
+                    "mode": "heat-fluid-inside",
+                    "energy_consumption": "6MW",
+                    "energy_source": { "type": "electric" },
+                    "fluid_box": { "production_type": "input-output" }
+                }
+            }
+        });
+        let candidates = enumerate_on(None, &dump);
+        let pairs: Vec<(Option<i32>, Option<i32>)> = candidates
+            .iter()
+            .filter_map(|mechanic| match mechanic {
+                Mechanic::Boiler(boiler) => Some((boiler.temperature, boiler.output_temperature)),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            pairs.contains(&(Some(15), Some(100))),
+            "应枚举 15→100：{pairs:?}"
+        );
+        assert!(
+            pairs.contains(&(Some(100), Some(200))),
+            "应枚举 100→200：{pairs:?}"
+        );
+        // output-to-separate-pipe 的锅炉仍然只出一个候选，输出温度交给原型。
+        assert!(
+            pairs.contains(&(None, None)),
+            "OTSP 锅炉应保持单候选（输出温度由原型决定）：{pairs:?}"
         );
     }
 }

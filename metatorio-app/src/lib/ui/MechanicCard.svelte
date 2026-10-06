@@ -321,6 +321,24 @@
           }}
         />
       </label>
+      {#if kind === "boiler"}
+        <label class="sub temp" title="heat-fluid-inside 模式的输出温度（留空 = 流体最高温度）；output-to-separate-pipe 模式忽略">
+          输出温度
+          <input
+            type="number"
+            step="1"
+            value={entry.mechanic.output_temperature ?? ""}
+            placeholder="最高"
+            onchange={(event) => {
+              const raw = (event.currentTarget as HTMLInputElement).value;
+              const value = raw === "" ? null : Number(raw);
+              if (value === null || Number.isFinite(value)) {
+                runtime.setBoilerOutputTemperature(entry.id, value).catch(() => {});
+              }
+            }}
+          />
+        </label>
+      {/if}
     {:else if kind === "reactor"}
       <label class="sub temp" title="相邻反应堆数量（0-8）">
         相邻

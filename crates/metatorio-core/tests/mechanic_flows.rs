@@ -283,6 +283,7 @@ fn boiler_output_mode_converts_fluid() {
             boiler: id("boiler"),
             fluid: "water".to_string(),
             temperature: Some(15),
+            output_temperature: None,
             fuel: None,
         }),
     );
@@ -298,6 +299,54 @@ fn boiler_output_mode_converts_fluid() {
             name: "steam".to_string(),
             temperature: [165, 165],
         }] > 0.0
+    );
+}
+
+/// heat-fluid-inside 模式：原型不换流体，把**同一种流体**从输入温度加热到
+/// 指定的输出温度（连续加热，输出温度任选）。流量由功率 / (比热容 × 温差) 决定。
+#[test]
+fn boiler_heat_fluid_inside_raises_same_fluid_temperature() {
+    let flow = flow(
+        json!({
+            "fluid": {
+                "water": { "default_temperature": 15.0, "max_temperature": 100.0, "heat_capacity": "1kJ" }
+            },
+            "boiler": {
+                "fluid-heater": {
+                    "mode": "heat-fluid-inside",
+                    "energy_consumption": "1MW",
+                    "energy_source": { "type": "electric" },
+                    "fluid_box": { "production_type": "input-output" }
+                }
+            }
+        }),
+        Mechanic::Boiler(BoilerMechanic {
+            boiler: id("fluid-heater"),
+            fluid: "water".to_string(),
+            temperature: Some(15),
+            output_temperature: Some(100),
+            fuel: None,
+        }),
+    );
+
+    let cold = flow[&DualVar::Fluid {
+        name: "water".to_string(),
+        temperature: [15, 15],
+    }];
+    let hot = flow[&DualVar::Fluid {
+        name: "water".to_string(),
+        temperature: [100, 100],
+    }];
+    assert!(cold < 0.0, "输入温度那一档应被消耗：{cold}");
+    assert!(hot > 0.0, "输出温度那一档应被产出：{hot}");
+    assert!(
+        (cold + hot).abs() < 1e-9,
+        "同流体升温不改变总量：{cold} vs {hot}"
+    );
+    // 1MW、比热容 1kJ/单位/℃、温差 85℃ ⇒ 1e6 / 1000 / 85 单位/秒
+    assert!(
+        (hot - 1_000_000.0 / 1000.0 / 85.0).abs() < 1e-6,
+        "流量应由功率/比热容/温差决定：{hot}"
     );
 }
 

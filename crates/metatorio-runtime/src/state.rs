@@ -2024,6 +2024,9 @@ fn apply_boiler_action(
         BoilerMechanicAction::SetTemperature { temperature } => {
             Ok(replace(&mut mechanic.temperature, temperature))
         }
+        BoilerMechanicAction::SetOutputTemperature { temperature } => {
+            Ok(replace(&mut mechanic.output_temperature, temperature))
+        }
         BoilerMechanicAction::SetFuel { fuel } => Ok(replace(&mut mechanic.fuel, fuel)),
         BoilerMechanicAction::SetFuelTemperature { temperature } => {
             Ok(set_fuel_temperature(&mut mechanic.fuel, temperature))

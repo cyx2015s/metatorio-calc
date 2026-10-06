@@ -1103,13 +1103,36 @@ fn expand_boiler<C: Clone>(
 
     match boiler.mode.unwrap_or(BoilerMode::HeatFluidInside) {
         BoilerMode::HeatFluidInside => {
-            // No material transfer happens in this mode. The useful result is
-            // heat added to the fluid already inside the input box.
-            temp.add(
-                DualVar::FluidHeat {
-                    filter: input_name.to_string(),
-                },
-                boiler.energy_consumption.amount * 60.0 * fulfillment,
+            // 连续加热：**同一个流体**从输入温度升到输出温度（原型不换流体，
+            // 也不声明 target_temperature）。输出温度可以任选——升得越高，
+            // 同样的功率能推动的流量越小：流量 = 功率 / (比热容 × 温差)。
+            // 未指定时用流体的最高温度（原版语义：fluid in the fluid box is
+            // continuously heated up to its max_temperature）。
+            let output_temperature = mechanic
+                .output_temperature
+                .map(f64::from)
+                .unwrap_or_else(|| input_fluid.max_temperature());
+            let temperature_difference = output_temperature - input_temperature;
+            let capacity = input_fluid.heat_capacity().amount;
+            if temperature_difference <= 0.0 || capacity <= 0.0 {
+                return;
+            }
+            let amount = boiler.energy_consumption.amount * 60.0 * fulfillment
+                / capacity
+                / temperature_difference;
+            add_fluid_interval(
+                &mut temp,
+                input_name,
+                -amount,
+                input_temperature,
+                input_temperature,
+            );
+            add_fluid_interval(
+                &mut temp,
+                input_name,
+                amount,
+                output_temperature,
+                output_temperature,
             );
         }
         BoilerMode::OutputToSeparatePipe => {

@@ -1491,6 +1491,13 @@ class RuntimeStore {
     });
   }
 
+  /** 锅炉 heat-fluid-inside 模式的输出温度；null = 流体最高温度。 */
+  async setBoilerOutputTemperature(mechanic: MechanicId, temperature: number | null): Promise<void> {
+    await this.mechanicMessage(mechanic, {
+      boiler: { "set-output-temperature": { temperature } },
+    });
+  }
+
   /** 流体燃料机制：选择热值流体。 */
   async setFluidFuel(mechanic: MechanicId, fluid: string): Promise<void> {
     await this.mechanicMessage(mechanic, { "fluid-fuel": { "set-fluid": { fluid } } });

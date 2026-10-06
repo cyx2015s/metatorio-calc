@@ -433,6 +433,12 @@ pub struct BoilerMechanic {
     pub fluid: String,
     /// 输入流体温度；None 使用流体默认温度。
     pub temperature: Option<i32>,
+    /// `HeatFluidInside` 模式的**输出**温度；None 使用流体最高温度。
+    ///
+    /// 该模式连续加热同一流体（原型不换流体、也没有 `target_temperature`），
+    /// 所以输出温度可以任选：升得越高，同样的功率能推动的流量越小。
+    /// `OutputToSeparatePipe` 模式忽略它（输出温度由原型 `target_temperature` 决定）。
+    pub output_temperature: Option<i32>,
     /// 明确燃料；None = 自动选择/无需燃料。
     pub fuel: Option<Fuel>,
 }

@@ -249,6 +249,7 @@ export type BoilerMechanicAction =
   | { "set-boiler": { boiler: IdWithQuality } }
   | { "set-fluid": { fluid: string } }
   | { "set-temperature": { temperature: number | null } }
+  | { "set-output-temperature": { temperature: number | null } }
   | { "set-fuel": { fuel: Fuel | null } }
   | { "set-fuel-temperature": { temperature: number | null } };
 
@@ -574,6 +575,8 @@ export interface Mechanic {
   accumulator?: IdWithQuality;
   fluid?: string;
   temperature?: number | null;
+  /** boiler 的 heat-fluid-inside 模式输出温度（null = 流体最高温度）。 */
+  output_temperature?: number | null;
   fuel?: Fuel | null;
   neighbours?: number;
   weight_mode?: boolean;
