@@ -505,9 +505,14 @@ impl PrototypeStore {
 
     /// 流体的可用温度表：流体名 → 排序去重的温度集合。
     ///
-    /// 收集点（报告制）：① 配方产物流体的温度（temperature/min/max）；
+    /// 收集点（报告制）：
+    /// ① 配方的流体温度——**输入**（ingredient）的 temperature / minimum_temperature
+    ///    / maximum_temperature（下游配方真正接受的温度区间上下界，heat-fluid-inside
+    ///    的锅炉要加热对齐的目标；区间内部的点永远不如边界划算）与**产物**（result）
+    ///    的 temperature；
     /// ② 机器流体盒的温度筛选（Boiler/Generator 的 fluid_box、CraftingMachine 的
-    /// fluid_boxes 的 minimum/maximum + Boiler.target_temperature 输出温度）。
+    ///    fluid_boxes 的 minimum/maximum + Boiler.target_temperature 输出温度）；
+    /// ③ 流体自身的默认温度与最高温度。
     /// 调用方可据此构造温度区间子类型或显式候选流；仓库本身不展开决策。
     pub fn fluid_temperatures(&self) -> &AIndexMap<String, Vec<i32>> {
         self.fluid_temps.get_or_init(|| {
@@ -534,7 +539,7 @@ impl PrototypeStore {
                     add(out, filter, t);
                 }
             };
-            // 收集点 1：配方产物流体温度
+            // 收集点 1：配方的流体温度——输入区间上下界（ingredient）+ 产物温度（result）
             for record in self
                 .groups
                 .get(&PrototypeGroup::Recipe)
@@ -807,5 +812,44 @@ mod tests {
             .cloned()
             .unwrap_or_default();
         assert!(temps.contains(&415), "缺锅炉 target_temperature：{temps:?}");
+    }
+
+    /// 配方**输入**流体的温度区间上下界必须进表。
+    ///
+    /// heat-fluid-inside 的锅炉要把流体加热到下游配方真正接受的温度上，而温度区间
+    /// 内部的点永远不如边界划算（升温单调变贵）：下界是"刚够用"，上界是"最高可用"，
+    /// 区间之外要么不被接受、要么更贵。所以打表只需收这两个边界。
+    #[test]
+    fn fluid_temperatures_include_recipe_input_bounds() {
+        let dump = serde_json::json!({
+            "fluid": {
+                "naphtha": {
+                    "type": "fluid", "name": "naphtha",
+                    "default_temperature": 25, "max_temperature": 500
+                }
+            },
+            "recipe": {
+                "reforming": {
+                    "type": "recipe", "name": "reforming",
+                    "ingredients": [{
+                        "type": "fluid", "name": "naphtha", "amount": 1,
+                        "minimum_temperature": 350, "maximum_temperature": 450
+                    }],
+                    "results": []
+                }
+            }
+        });
+        let store = PrototypeStore::load(&dump).unwrap();
+        let temps = store
+            .fluid_temperatures()
+            .get("naphtha")
+            .cloned()
+            .unwrap_or_default();
+        for temperature in [25, 350, 450, 500] {
+            assert!(
+                temps.contains(&temperature),
+                "缺输入区间边界/流体温度 {temperature}：{temps:?}"
+            );
+        }
     }
 }
