@@ -282,7 +282,15 @@ fn add_energy(
     is_assembling_machine: bool,
     fulfillment: &mut f64,
 ) {
-    for (key, value) in energy_source_as_flow(ctx, source, usage, effects, fuel, is_assembling_machine, fulfillment) {
+    for (key, value) in energy_source_as_flow(
+        ctx,
+        source,
+        usage,
+        effects,
+        fuel,
+        is_assembling_machine,
+        fulfillment,
+    ) {
         temp.add(key, value);
     }
 }
@@ -1007,18 +1015,32 @@ fn expand_generator<C: Clone>(
     let Some(fluid) = fluid_record(ctx, fluid_name) else {
         return;
     };
-    let temperature = mechanic
-        .temperature
-        .map(f64::from)
-        .unwrap_or(fluid.default_temperature);
-    let output = generator.get_output(fluid_name, fluid, temperature);
+    // 燃料型发电机（burns_fluid = true）的出力只取决于 fluid.fuel_value，与温度
+    // **无关**：它的输入就是"任意温度的燃料流体"，所以用**一个覆盖整个可行温度
+    // 区间**的变量，具体温度交给辅助的温度转换去挑（枚举层因此只需一个候选）。
+    // 温度型发电机（burns_fluid = false）出力随温度变化，必须钉在一个点上。
+    let (lower, upper) = match mechanic.temperature {
+        Some(temperature) => (f64::from(temperature), f64::from(temperature)),
+        None if generator.burns_fluid => (
+            generator
+                .fluid_box
+                .minimum_temperature
+                .unwrap_or(fluid.default_temperature),
+            fluid.max_temperature(),
+        ),
+        None => (fluid.default_temperature, fluid.default_temperature),
+    };
+    if upper < lower {
+        return;
+    }
+    let output = generator.get_output(fluid_name, fluid, lower);
     let mut temp = TempFlow::new();
     add_fluid_interval(
         &mut temp,
         fluid_name,
         -output.fluid_used_per_second,
-        temperature,
-        temperature,
+        lower,
+        upper,
     );
     temp.add(DualVar::Electricity, output.power_per_second);
     add_generator_spent_fluid(
@@ -1097,7 +1119,7 @@ fn expand_boiler<C: Clone>(
         boiler.energy_consumption,
         &Effect::default(),
         fuel.as_ref(),
-        false, 
+        false,
         &mut fulfillment,
     );
 
@@ -1308,7 +1330,7 @@ fn expand_reactor<C: Clone>(
         reactor.consumption,
         &Effect::default(),
         fuel.as_ref(),
-        false, 
+        false,
         &mut fulfillment,
     );
 

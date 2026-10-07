@@ -13,8 +13,9 @@ use metatorio_data::types::{EffectType, EffectTypeLimitation, EnergySource, Modi
 use metatorio_data::{
     AccumulatorComponent, AssemblingMachineComponent, BoilerComponent, BurnerGeneratorComponent,
     CraftingMachineComponent, EntityComponent, FluidComponent, GeneratorComponent, ItemComponent,
-    MiningDrillComponent, ModuleComponent, OffshorePumpComponent, ReactorComponent, RecipeComponent,
-    ResourceEntityComponent, SolarPanelComponent, TechnologyComponent, TileComponent,
+    MiningDrillComponent, ModuleComponent, OffshorePumpComponent, ReactorComponent,
+    RecipeComponent, ResourceEntityComponent, SolarPanelComponent, TechnologyComponent,
+    TileComponent,
 };
 
 /// 回写候选的过滤结果（含决策记录，见 [`SolveDiagnostics`]）。
@@ -242,6 +243,13 @@ fn enumerate_tiles(
             |machine| {
                 machine.component::<OffshorePumpComponent>().is_some()
                     && buildable_on_surface(store, machine, properties.as_ref())
+                    // 抽水机的可达性和普通机器一致：把抽水建筑用里程碑标记成
+                    // 不可达，就枚举不出任何能抽水的机器（与配方/采矿同规则）。
+                    && options.accessibility.as_ref().is_none_or(|accessibility| {
+                        accessibility.is_accessible(&metatorio_core::Accessible::Entity(
+                            machine.name.clone(),
+                        ))
+                    })
             },
             |machine| {
                 machine
@@ -981,68 +989,75 @@ fn enumerate_energy(
             let Some(fluid_name) = generator.fluid_box.filter.clone() else {
                 continue;
             };
-            // 发电机的温度**不是一个点，而是一段可行区间**：`maximum_temperature`
-            // 只是出力上限的锚点（见 `ext::GeneratorComponent::get_output`，出力按
-            // `temperature - fluid.default_temperature` 线性增长，超过它就封顶），
-            // 原型在更低的输入温度上照样能跑，只是出力更低。
-            //
-            // 旧实现只枚举 `maximum_temperature` 一个落点，一旦上游产不出那个温度，
-            // 整条链就在温度边界上断掉、目标变成「无可行解」。实测：SE 汽轮机要
-            // 900°C 蒸汽，热交换机只产 415°C。这里改成在**原型声明的可行温度**上各
-            // 枚举一份，让求解器自己挑真正接得上的工作点。
-            //
-            // 这也是唯一不违反热力学第二定律的做法：想要某个温度只能由原型声明的
-            // 产出点提供（锅炉 target_temperature / 配方产物温度 / 流体默认温度），
-            // 不能靠消耗热量凭空升温——升温边已从 `add_conversion_flows` 移除。
-            let Some(fluid) = fluid_record(ctx, &fluid_name) else {
-                continue;
-            };
-            let floor = generator
-                .fluid_box
-                .minimum_temperature
-                .unwrap_or(fluid.default_temperature);
-            // **刻意不设上限**。发电机自己会处理温度溢出（超出的品位只是被浪费掉），
-            // 但全局上不能假设「喂低温更划算」：高温流体可能本来就是你想要的某个链的
-            // 副产物，生产它再浪费一部分，有可能比专门生产低温流体更高效。这个取舍属于
-            // **求解器**，不属于枚举层——在枚举层砍掉，求解器就永远考虑不到那种方案了。
-            // 所以 > `maximum_temperature` 的档一律保留。
-            let mut temperatures: Vec<i32> = store
-                .fluid_temperatures()
-                .get(&fluid_name)
-                .map(Vec::as_slice)
-                .unwrap_or_default()
-                .iter()
-                .copied()
-                .filter(|temperature| {
-                    let temperature = f64::from(*temperature);
-                    // 温度型发电机（burns_fluid = false）：≤ 默认温度的档在
-                    // `get_output` 里 `(temperature - default).max(0)` 恒为 0，
-                    // 不产电，滤掉。
-                    // 燃料型发电机（burns_fluid = true）：出力来自 `fluid.fuel_value`，
-                    // **与温度无关**——加热不增加任何电量。所以默认温度必须是合法
-                    // 候选，否则求解器会被迫为一个无意义的温度铺一条加热链
-                    // （实测：规划器过一遍 heat-fluid-inside 的流体加热器）。
-                    // 流体盒自己声明的最低温度对两者都是硬约束。
-                    (generator.burns_fluid || temperature > fluid.default_temperature)
-                        && temperature >= floor
-                })
-                .collect();
-            if temperatures.is_empty() {
-                // 表里没有可用档位（上下文没载入 / 该流体没有温度记录）时退回旧行为，
-                // 至少不静默少一个候选。
-                let fallback = if generator.maximum_temperature > 0.0 {
-                    generator.maximum_temperature
-                } else {
-                    fluid.default_temperature
-                };
-                temperatures.push(fallback as i32);
-            }
-            for temperature in temperatures {
+            // 燃料型发电机（burns_fluid = true）：出力来自 fluid.fuel_value，与温度
+            // **无关**——加热不增加任何电量。所以不逐温度枚举，只出一个候选，由
+            // expand_generator 展开成"覆盖整个可行温度区间"的流体温度变量；具体
+            // 温度交给辅助的温度转换去挑（既少枚举，也不会逼求解器为无意义的温度
+            // 去加热燃料）。
+            if generator.burns_fluid {
                 out.push(Mechanic::Generator(metatorio_core::GeneratorMechanic {
                     generator: IdWithQuality::new(record.name.clone(), major_quality.clone()),
                     fluid: fluid_name.clone(),
-                    temperature: Some(temperature),
+                    temperature: None,
                 }));
+            } else {
+                // 发电机的温度**不是一个点，而是一段可行区间**：`maximum_temperature`
+                // 只是出力上限的锚点（见 `ext::GeneratorComponent::get_output`，出力按
+                // `temperature - fluid.default_temperature` 线性增长，超过它就封顶），
+                // 原型在更低的输入温度上照样能跑，只是出力更低。
+                //
+                // 旧实现只枚举 `maximum_temperature` 一个落点，一旦上游产不出那个温度，
+                // 整条链就在温度边界上断掉、目标变成「无可行解」。实测：SE 汽轮机要
+                // 900°C 蒸汽，热交换机只产 415°C。这里改成在**原型声明的可行温度**上各
+                // 枚举一份，让求解器自己挑真正接得上的工作点。
+                //
+                // 这也是唯一不违反热力学第二定律的做法：想要某个温度只能由原型声明的
+                // 产出点提供（锅炉 target_temperature / 配方产物温度 / 流体默认温度），
+                // 不能靠消耗热量凭空升温——升温边已从 `add_conversion_flows` 移除。
+                let Some(fluid) = fluid_record(ctx, &fluid_name) else {
+                    continue;
+                };
+                let floor = generator
+                    .fluid_box
+                    .minimum_temperature
+                    .unwrap_or(fluid.default_temperature);
+                // **刻意不设上限**。发电机自己会处理温度溢出（超出的品位只是被浪费掉），
+                // 但全局上不能假设「喂低温更划算」：高温流体可能本来就是你想要的某个链的
+                // 副产物，生产它再浪费一部分，有可能比专门生产低温流体更高效。这个取舍属于
+                // **求解器**，不属于枚举层——在枚举层砍掉，求解器就永远考虑不到那种方案了。
+                // 所以 > `maximum_temperature` 的档一律保留。
+                let mut temperatures: Vec<i32> = store
+                    .fluid_temperatures()
+                    .get(&fluid_name)
+                    .map(Vec::as_slice)
+                    .unwrap_or_default()
+                    .iter()
+                    .copied()
+                    .filter(|temperature| {
+                        let temperature = f64::from(*temperature);
+                        // 温度型发电机：≤ 默认温度的档在 get_output 里
+                        // (temperature - default).max(0) 恒为 0，不产电，滤掉；
+                        // 流体盒声明的最低温度是硬约束。
+                        temperature > fluid.default_temperature && temperature >= floor
+                    })
+                    .collect();
+                if temperatures.is_empty() {
+                    // 表里没有可用档位（上下文没载入 / 该流体没有温度记录）时退回旧行为，
+                    // 至少不静默少一个候选。
+                    let fallback = if generator.maximum_temperature > 0.0 {
+                        generator.maximum_temperature
+                    } else {
+                        fluid.default_temperature
+                    };
+                    temperatures.push(fallback as i32);
+                }
+                for temperature in temperatures {
+                    out.push(Mechanic::Generator(metatorio_core::GeneratorMechanic {
+                        generator: IdWithQuality::new(record.name.clone(), major_quality.clone()),
+                        fluid: fluid_name.clone(),
+                        temperature: Some(temperature),
+                    }));
+                }
             }
         }
         if let Some(_burner) = record.component::<BurnerGeneratorComponent>() {
@@ -1813,12 +1828,11 @@ mod tests {
         );
     }
 
-    /// 燃料型发电机（burns_fluid = true）出力来自 fuel_value，**与温度无关**：
-    /// 流体默认温度必须留在候选里，否则求解器会被迫为这个无意义的温度加热燃料
-    /// （实测症状：规划器过一遍 heat-fluid-inside 的流体加热器）。
-    /// 温度型发电机仍要滤掉 ≤ 默认温度的档（那些档不产电）。
+    /// 燃料型发电机（burns_fluid = true）出力来自 fuel_value、**与温度无关**：
+    /// 只出一个候选，由 expand_generator 展开成覆盖整个可行温度区间的变量，
+    /// 具体温度交给辅助转换去挑——既少枚举，也不会逼求解器加热燃料。
     #[test]
-    fn fuel_burning_generators_accept_the_default_temperature() {
+    fn fuel_burning_generators_use_one_full_interval_candidate() {
         let dump = serde_json::json!({
             "fluid": {
                 "fuel-oil": {
@@ -1838,16 +1852,17 @@ mod tests {
             }
         });
         let candidates = enumerate_on(None, &dump);
-        let temperatures: Vec<i32> = candidates
+        let temperatures: Vec<Option<i32>> = candidates
             .iter()
             .filter_map(|mechanic| match mechanic {
-                Mechanic::Generator(generator) => generator.temperature,
+                Mechanic::Generator(generator) => Some(generator.temperature),
                 _ => None,
             })
             .collect();
-        assert!(
-            temperatures.contains(&25),
-            "燃料型发电机必须能在流体默认温度上运行（否则会被迫加热燃料）：{temperatures:?}"
+        assert_eq!(
+            temperatures,
+            vec![None],
+            "燃料型发电机应只出一个覆盖完整温度区间的候选（temperature = None）：{temperatures:?}"
         );
     }
 }

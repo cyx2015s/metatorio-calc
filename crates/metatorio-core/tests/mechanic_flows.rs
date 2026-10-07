@@ -195,11 +195,7 @@ fn tile_dispose_refuses_a_tile_that_cannot_destroy_items() {
         item: id("stone"),
     });
     let expansion = expand([(0usize, &mechanic)], &ctx);
-    assert_eq!(
-        expansion.len(),
-        0,
-        "不能销毁物品的地格不应产生任何变量"
-    );
+    assert_eq!(expansion.len(), 0, "不能销毁物品的地格不应产生任何变量");
 }
 
 #[test]
@@ -348,6 +344,41 @@ fn boiler_heat_fluid_inside_raises_same_fluid_temperature() {
         (hot - 1_000_000.0 / 1000.0 / 85.0).abs() < 1e-6,
         "流量应由功率/比热容/温差决定：{hot}"
     );
+}
+
+/// 燃料型发电机（burns_fluid = true）：出力与温度无关，输入覆盖整个可行温度区间
+/// [默认温度, 最高温度]，具体温度交给辅助转换去挑。
+#[test]
+fn fuel_burning_generator_consumes_a_full_temperature_interval() {
+    let flow = flow(
+        json!({
+            "fluid": {
+                "fuel-oil": { "default_temperature": 25.0, "max_temperature": 500.0, "fuel_value": "1MJ" }
+            },
+            "generator": {
+                "fuel-turbine": {
+                    "type": "generator", "name": "fuel-turbine",
+                    "burns_fluid": true,
+                    "fluid_usage_per_tick": 0.1,
+                    "effectivity": 1,
+                    "fluid_box": { "filter": "fuel-oil" }
+                }
+            }
+        }),
+        Mechanic::Generator(GeneratorMechanic {
+            generator: id("fuel-turbine"),
+            fluid: "fuel-oil".to_string(),
+            temperature: None,
+        }),
+    );
+    assert!(
+        flow[&DualVar::Fluid {
+            name: "fuel-oil".to_string(),
+            temperature: [25, 500],
+        }] < 0.0,
+        "燃料应以 [25,500] 的区间被消耗"
+    );
+    assert!(flow[&DualVar::Electricity] > 0.0);
 }
 
 #[test]
