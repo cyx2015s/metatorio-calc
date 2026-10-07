@@ -150,11 +150,7 @@ const ABSOLUTE_VIOLATION: f64 = 1e-8;
 /// 相对量按该行的总量级归一：`max(|rhs|, Σ|系数×取值|)`。再叠加一个绝对下限：
 /// 没有它，`0 = 0` 这种**近乎空行**（rhs = 0、取值也只有 ~1e-12）会把残差按
 /// 自身量级归一成「相对违反 1.0」，把本来正确的解误杀。
-fn evaluate_solution(
-    objective: &[(usize, f64)],
-    rows: &[ParsedRow],
-    values: &[f64],
-) -> (f64, f64) {
+fn evaluate_solution(objective: &[(usize, f64)], rows: &[ParsedRow], values: &[f64]) -> (f64, f64) {
     let mut max_violation = 0.0f64;
     for row in rows {
         let lhs: f64 = row
@@ -250,9 +246,7 @@ pub fn solve_lp(
         .collect();
 
     // 目标行归一化（见 TARGET_CANONICAL_SCALE）：只放大、不缩小。
-    let max_rhs = rows
-        .iter()
-        .fold(0.0f64, |acc, row| acc.max(row.rhs.abs()));
+    let max_rhs = rows.iter().fold(0.0f64, |acc, row| acc.max(row.rhs.abs()));
     let rhs_scale = if max_rhs > 0.0 {
         (TARGET_CANONICAL_SCALE / max_rhs).clamp(1.0, MAX_RHS_SCALE)
     } else {
@@ -339,7 +333,10 @@ mod tests {
             .filter(|value| value.abs() > 0.0)
             .collect();
         assert_eq!(support.len(), 1, "退化最优面应只留一个顶点列：{support:?}");
-        assert!((support[0] - 1.0).abs() < 1e-6, "该列取值应为 1：{support:?}");
+        assert!(
+            (support[0] - 1.0).abs() < 1e-6,
+            "该列取值应为 1：{support:?}"
+        );
         assert_eq!(solution.report.variables_after, 1);
     }
 
@@ -394,18 +391,15 @@ mod tests {
         let mut vars = ProblemVariables::new();
         let x = vars.add(variable().min(0.0));
         let y = vars.add(variable().min(0.0));
-        let constraints = vec![x.into_expression().eq(1e-9), (y.clone() - x.clone()).eq(0.0)];
+        let constraints = vec![
+            x.into_expression().eq(1e-9),
+            (y.clone() - x.clone()).eq(0.0),
+        ];
         let solution = solve_lp(x.clone() + y.clone(), constraints, vars).expect("应可解");
         let xv = solution.value(x);
         let yv = solution.value(y);
         assert!(xv > 0.0, "x 被解成 0（未放大目标右端）：{xv}");
-        assert!(
-            (xv / 1e-9 - 1.0).abs() < 1e-6,
-            "x 应解回 1e-9：{xv}"
-        );
-        assert!(
-            (yv / 1e-9 - 1.0).abs() < 1e-6,
-            "y 应解回 1e-9：{yv}"
-        );
+        assert!((xv / 1e-9 - 1.0).abs() < 1e-6, "x 应解回 1e-9：{xv}");
+        assert!((yv / 1e-9 - 1.0).abs() < 1e-6, "y 应解回 1e-9：{yv}");
     }
 }

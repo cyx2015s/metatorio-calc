@@ -14,8 +14,9 @@
 use crate::generated_components::prototype_groups::prototype_group_from_type;
 use crate::generated_components::{
     BoilerComponent, COMPONENT_LIST, Component, ComponentValue, CraftingMachineComponent,
-    FluidComponent, GeneratorComponent, ItemComponent, ItemSubGroupComponent, PrototypeBaseComponent,
-    QualityComponent, RecipeComponent, TechnologyComponent, deserialize_component,
+    FluidComponent, GeneratorComponent, ItemComponent, ItemSubGroupComponent,
+    PrototypeBaseComponent, QualityComponent, RecipeComponent, TechnologyComponent,
+    deserialize_component,
 };
 use crate::types::Product;
 use serde_json::Value;

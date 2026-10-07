@@ -24,7 +24,7 @@ use metatorio_data::types::{Ingredient, Product, TechnologyMaxLevel};
 use metatorio_data::{
     BeaconComponent, BoilerComponent, BurnerGeneratorComponent, CraftingMachineComponent,
     EntityComponent, FluidComponent, GeneratorComponent, ItemComponent, MiningDrillComponent,
-    ModuleComponent, OffshorePumpComponent, PrototypeBaseComponent, QualityComponent,
+    ModuleComponent, PrototypeBaseComponent, QualityComponent,
     ReactorComponent, RecipeComponent, ResourceEntityComponent, TechnologyComponent,
 };
 use metatorio_runtime::{

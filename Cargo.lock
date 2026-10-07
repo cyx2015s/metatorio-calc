@@ -2414,7 +2414,7 @@ dependencies = [
 
 [[package]]
 name = "metatorio-app"
-version = "1.5.23"
+version = "1.5.24"
 dependencies = [
  "axum",
  "clap",

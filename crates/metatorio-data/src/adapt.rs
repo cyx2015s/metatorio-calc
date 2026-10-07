@@ -72,18 +72,17 @@ pub fn needs_adaptation(dump: &Value) -> bool {
 
     // 燃料类别：2.0 的 fuel_category 可能出现在任何类物品原型上
     // （不止 item —— 例如 bioflux 是 capsule）。
-    if item_like_types().any(|typename| {
+    item_like_types().any(|typename| {
         dump.get(typename)
             .and_then(Value::as_object)
             .is_some_and(|entries| {
                 entries.values().any(|entry| {
-                    entry.as_object().is_some_and(|obj| obj.contains_key("fuel_category"))
+                    entry
+                        .as_object()
+                        .is_some_and(|obj| obj.contains_key("fuel_category"))
                 })
             })
-    }) {
-        return true;
-    }
-    false
+    })
 }
 
 /// 把 2.0 形态的 dump 规范化到 2.1 schema 可加载的形态。

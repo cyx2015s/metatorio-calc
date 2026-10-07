@@ -1012,7 +1012,10 @@ mod tests {
         let mut problem = SolverData::new_simple(target, flows);
         problem.unconstrained.insert("pollution");
         assert!(matches!(
-            problem.with_strict_sink(true).with_strict_source(true).solve(),
+            problem
+                .with_strict_sink(true)
+                .with_strict_source(true)
+                .solve(),
             SolverSolution::Solved { .. }
         ));
     }
@@ -1092,7 +1095,10 @@ mod tests {
         let mut data = SolverData::new_simple(target, flows)
             .with_sources(sources)
             .with_strict_source(true);
-        assert!(!data.trim_flows(true), "不再有「剪枝」这个变更，返回值恒为 false");
+        assert!(
+            !data.trim_flows(true),
+            "不再有「剪枝」这个变更，返回值恒为 false"
+        );
         assert!(
             data.flows.contains_key("react"),
             "不可用的配方也必须留着（删除会级联）"

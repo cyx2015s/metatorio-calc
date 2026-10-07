@@ -289,18 +289,18 @@ fn validate_mechanic(store: &PrototypeStore, action: &MechanicAction) -> Result<
         },
         MechanicAction::TileExtract(action) => match action {
             crate::message::TileExtractMechanicAction::SetTile { tile } => {
-                require_tile(store, &tile)
+                require_tile(store, tile)
             }
             crate::message::TileExtractMechanicAction::SetMachine { machine } => {
-                require_id(store, PrototypeGroup::Entity, "抽取机械", &machine)
+                require_id(store, PrototypeGroup::Entity, "抽取机械", machine)
             }
         },
         MechanicAction::TileDispose(action) => match action {
             crate::message::TileDisposeMechanicAction::SetTile { tile } => {
-                require_disposal_tile(store, &tile)
+                require_disposal_tile(store, tile)
             }
             crate::message::TileDisposeMechanicAction::SetItem { item } => {
-                require_id(store, PrototypeGroup::Item, "物品", &item)
+                require_id(store, PrototypeGroup::Item, "物品", item)
             }
         },
         MechanicAction::Plant(action) => match action {

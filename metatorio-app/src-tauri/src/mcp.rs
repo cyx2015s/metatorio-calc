@@ -45,8 +45,8 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 use crate::{AppState, execute_command};
 use metatorio_core::{BeaconConfig, DualVar, IdWithQuality, ModuleConfig};
-use metatorio_data::store::{PrototypeGroup, PrototypeStore};
 use metatorio_data::FluidComponent;
+use metatorio_data::store::{PrototypeGroup, PrototypeStore};
 use metatorio_runtime::document::AutoBeaconPlan;
 use metatorio_runtime::message::{
     AppMessage, ApplicationAction, DeleteDecision, FactoryAction, FactoryContextAction,
@@ -1304,8 +1304,7 @@ fn resolve_auto_plan_targets(
                 target.item
             ));
         }
-        let (name, kind) =
-            require_index_entry_of(index, &["item", "fluid"], "目标", &target.item)?;
+        let (name, kind) = require_index_entry_of(index, &["item", "fluid"], "目标", &target.item)?;
         let flow = if kind == "fluid" {
             if target.quality.is_some() {
                 return Err(format!("目标「{}」是流体，不接受 quality", target.item));
@@ -2281,7 +2280,8 @@ mod tests {
 
         // id / 本地化名 / 分隔符变体都能解析到物品原型。
         for name in ["iron-plate", "铁板", "IRON_PLATE", "iron plate"] {
-            let resolved = resolve_auto_plan_targets(&index, None, &[target(name, 1.0)]).expect(name);
+            let resolved =
+                resolve_auto_plan_targets(&index, None, &[target(name, 1.0)]).expect(name);
             let DualVar::Item(item) = &resolved[0].0 else {
                 panic!("应当是物品流: {:?}", resolved[0].0)
             };
@@ -2313,13 +2313,16 @@ mod tests {
         };
         assert_eq!(item.quality, "legendary");
         // 拼错 → 报错并附错拼候选，不猜。
-        let error = resolve_auto_plan_targets(&index, None, &[target("iron-plte", 1.0)]).unwrap_err();
+        let error =
+            resolve_auto_plan_targets(&index, None, &[target("iron-plte", 1.0)]).unwrap_err();
         assert!(error.contains("iron-plate"), "{error}");
         // 完全不认识 → 提示去查名字。
-        let error = resolve_auto_plan_targets(&index, None, &[target("nonsense-xyz", 1.0)]).unwrap_err();
+        let error =
+            resolve_auto_plan_targets(&index, None, &[target("nonsense-xyz", 1.0)]).unwrap_err();
         assert!(error.contains("localized_names"), "{error}");
         // amount 必须是正数。
-        let error = resolve_auto_plan_targets(&index, None, &[target("iron-plate", 0.0)]).unwrap_err();
+        let error =
+            resolve_auto_plan_targets(&index, None, &[target("iron-plate", 0.0)]).unwrap_err();
         assert!(error.contains("正数"), "{error}");
     }
 
