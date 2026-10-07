@@ -1015,10 +1015,16 @@ fn enumerate_energy(
                 .copied()
                 .filter(|temperature| {
                     let temperature = f64::from(*temperature);
-                    // 只滤掉**不产电**的档：≤ 流体默认温度时 `get_output` 里的
-                    // `(temperature - default).max(0)` 恒为 0，造出来只是噪音；
-                    // 流体盒自己声明的最低温度也是硬约束。
-                    temperature > fluid.default_temperature && temperature >= floor
+                    // 温度型发电机（burns_fluid = false）：≤ 默认温度的档在
+                    // `get_output` 里 `(temperature - default).max(0)` 恒为 0，
+                    // 不产电，滤掉。
+                    // 燃料型发电机（burns_fluid = true）：出力来自 `fluid.fuel_value`，
+                    // **与温度无关**——加热不增加任何电量。所以默认温度必须是合法
+                    // 候选，否则求解器会被迫为一个无意义的温度铺一条加热链
+                    // （实测：规划器过一遍 heat-fluid-inside 的流体加热器）。
+                    // 流体盒自己声明的最低温度对两者都是硬约束。
+                    (generator.burns_fluid || temperature > fluid.default_temperature)
+                        && temperature >= floor
                 })
                 .collect();
             if temperatures.is_empty() {
@@ -1187,6 +1193,16 @@ pub fn recipe_unlocked(store: &PrototypeStore, accessible: &Accessibility, name:
     let Some(recipe) = record.component::<RecipeComponent>() else {
         return true;
     };
+    // 里程碑（unlocked = false）可以把任何对象**强制**标成不可达，优先级高于
+    // 依赖传播：这时连 `enabled` 配方也不能豁免。
+    //
+    // 少了这一句，`enabled` 配方会在此直接短路返回 true，用户"禁用某配方"的
+    // 里程碑形同虚设——实测：把基础传送带配方标记成不可达后，自动规划仍然
+    // 把它造了出来（enabled 的配方在可达性图里是根，但 forced_inaccessible
+    // 会把它剪掉，这里必须查图而不是只看 enabled）。
+    if !accessible.is_accessible(&Accessible::Recipe(name.to_string())) {
+        return false;
+    }
     if recipe.enabled {
         return true;
     }
@@ -1649,6 +1665,34 @@ mod tests {
         assert!(recipe_unlocked(&store, &accessibility, "locked-recipe"));
     }
 
+    /// 里程碑显式标记不可达（unlocked = false）的配方，即使 `enabled` 也必须不可用。
+    #[test]
+    fn recipe_unlocked_respects_forced_inaccessible_milestone() {
+        let dump = serde_json::json!({
+            "recipe": {
+                "belt": {
+                    "type": "recipe", "name": "belt", "enabled": true,
+                    "ingredients": [], "results": []
+                }
+            }
+        });
+        let store = PrototypeStore::load(&dump).expect("dump 加载失败");
+        let accessibility = metatorio_core::compute_accessibility(
+            &store,
+            &metatorio_core::AccessibilityOptions {
+                forced_inaccessible: std::iter::once(metatorio_core::Accessible::Recipe(
+                    "belt".to_string(),
+                ))
+                .collect(),
+                ..Default::default()
+            },
+        );
+        assert!(
+            !recipe_unlocked(&store, &accessibility, "belt"),
+            "里程碑标记不可达的 enabled 配方必须不可用"
+        );
+    }
+
     /// 发电机必须在**原型声明过的可行温度**上枚举，而不是被钉死在
     /// `maximum_temperature` 一个点上。
     ///
@@ -1766,6 +1810,44 @@ mod tests {
         assert!(
             pairs.contains(&(None, None)),
             "OTSP 锅炉应保持单候选（输出温度由原型决定）：{pairs:?}"
+        );
+    }
+
+    /// 燃料型发电机（burns_fluid = true）出力来自 fuel_value，**与温度无关**：
+    /// 流体默认温度必须留在候选里，否则求解器会被迫为这个无意义的温度加热燃料
+    /// （实测症状：规划器过一遍 heat-fluid-inside 的流体加热器）。
+    /// 温度型发电机仍要滤掉 ≤ 默认温度的档（那些档不产电）。
+    #[test]
+    fn fuel_burning_generators_accept_the_default_temperature() {
+        let dump = serde_json::json!({
+            "fluid": {
+                "fuel-oil": {
+                    "type": "fluid", "name": "fuel-oil",
+                    "default_temperature": 25, "max_temperature": 500,
+                    "fuel_value": "1MJ"
+                }
+            },
+            "generator": {
+                "fuel-turbine": {
+                    "type": "generator", "name": "fuel-turbine",
+                    "burns_fluid": true,
+                    "fluid_usage_per_tick": 0.1,
+                    "effectivity": 1,
+                    "fluid_box": { "filter": "fuel-oil" }
+                }
+            }
+        });
+        let candidates = enumerate_on(None, &dump);
+        let temperatures: Vec<i32> = candidates
+            .iter()
+            .filter_map(|mechanic| match mechanic {
+                Mechanic::Generator(generator) => generator.temperature,
+                _ => None,
+            })
+            .collect();
+        assert!(
+            temperatures.contains(&25),
+            "燃料型发电机必须能在流体默认温度上运行（否则会被迫加热燃料）：{temperatures:?}"
         );
     }
 }
