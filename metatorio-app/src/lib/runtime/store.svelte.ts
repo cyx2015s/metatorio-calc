@@ -348,7 +348,11 @@ class RuntimeStore {
       | Record<string, unknown>
       | undefined;
     if (!action || typeof action !== "object") return [];
-    const inner = (action as { action?: Record<string, unknown> }).action ?? action;
+    const inner = (action as { action?: Record<string, unknown> | string }).action ?? action;
+    // 无载荷动作本身就是字符串（如 "set-default-milestones"）：直接把它当键。
+    // 之前 `Object.keys("set-default-milestones")` 返回的是字符下标
+    // ["0","1",...]，于是 MILESTONE_KEYS 永远匹配不上、里程碑列表不刷新。
+    if (typeof inner === "string") return [inner];
     return Object.keys(inner);
   }
 

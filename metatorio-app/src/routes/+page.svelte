@@ -233,6 +233,9 @@
     initialQuality?: string;
     /** 精确名称过滤（如燃料选择：只允许匹配机器燃料类别且有热值的物品）。 */
     allowedNames?: string[];
+    /** 是否按项目可达性过滤。外部输入要允许"运行时才产生的特殊物品/流体"
+     *  （可达性图里没有这些节点），所以那些入口显式置 false。 */
+    respectAccessibility?: boolean;
     onSelectFlow: (flow: import("$lib/runtime/types").DualVar) => void;
   } | null>(null);
 
@@ -737,6 +740,7 @@
   function editExternalInput(input: import("$lib/runtime/types").ExternalInput) {
     flowSelector = {
       title: "更改外部输入流",
+      respectAccessibility: false,
       initialTab: flowTabOf(input.flow),
       ...flowInitialOf(input.flow),
       onSelectFlow: (flow) => runtime.setExternalInputFlow(input.id, flow).catch(() => {}),
@@ -1768,6 +1772,7 @@
           onclick={() =>
             (flowSelector = {
               title: "添加外部输入流",
+              respectAccessibility: false,
               onSelectFlow: (flow) => runtime.addExternalInputFlow(flow, 1).catch(() => {}),
             })}
           disabled={!runtime.activeContext}
@@ -2479,6 +2484,7 @@
     initialName={flowSelector.initialName}
     initialQuality={flowSelector.initialQuality}
     allowedNames={flowSelector.allowedNames}
+    respectAccessibility={flowSelector.respectAccessibility}
     onSelectFlow={flowSelector.onSelectFlow}
     onClose={() => (flowSelector = null)}
   />
