@@ -148,6 +148,25 @@
       alive = false;
     };
   });
+
+  // 锅炉工作模式：决定是否显示"输出温度"编辑框，也用于在卡片上标注模式。
+  // heat-fluid-inside 连续加热同一流体、输出温度可任选；output-to-separate-pipe
+  // 的输出温度由原型 target_temperature 固定，没有可编辑的输出温度。
+  let boilerMode = $state<string | null>(null);
+  $effect(() => {
+    const id = entry.mechanic.boiler?.id;
+    if (kind !== "boiler" || !id) {
+      boilerMode = null;
+      return;
+    }
+    let alive = true;
+    runtime.getDetail("boiler", id).then((detail) => {
+      if (alive) boilerMode = detail?.boiler_mode ?? null;
+    });
+    return () => {
+      alive = false;
+    };
+  });
   let primaryQuality = $derived(
     entry.mechanic.recipe?.quality ??
       entry.mechanic.item?.quality ??
@@ -190,7 +209,10 @@
   }
 
   function machineKind(): CatalogKind {
-    return kind === "mining" ? "mining-machine" : "machine";
+    if (kind === "mining") return "mining-machine";
+    // 抽水机（offshore pump）不在制造机目录里，按实体名做本地化。
+    if (kind === "tile-extract") return "entity";
+    return "machine";
   }
 
   /** 燃料显示名：Fuel::Item → 物品（带品质），Fuel::Fluid → 流体。 */
@@ -252,8 +274,13 @@
       </div>
       <div class="meta">
         <span class="chip">{kindLabel[kind] ?? kind}</span>
-        {#if !compact && (kind === "recipe" || kind === "mining") && machineLabel}
+        {#if !compact && (kind === "recipe" || kind === "mining" || kind === "tile-extract") && machineLabel}
           <span class="chip muted">{machineLabel}</span>
+        {/if}
+        {#if !compact && kind === "boiler" && boilerMode}
+          <span class="chip muted" title="锅炉工作模式">
+            {boilerMode === "heat-fluid-inside" ? "加热流体" : "产出独立管道"}
+          </span>
         {/if}
         {#if solution}
           <span
@@ -321,8 +348,8 @@
           }}
         />
       </label>
-      {#if kind === "boiler"}
-        <label class="sub temp" title="heat-fluid-inside 模式的输出温度（留空 = 流体最高温度）；output-to-separate-pipe 模式忽略">
+      {#if kind === "boiler" && boilerMode === "heat-fluid-inside"}
+        <label class="sub temp" title="heat-fluid-inside 模式的输出温度（留空 = 流体最高温度）">
           输出温度
           <input
             type="number"
@@ -339,6 +366,12 @@
           />
         </label>
       {/if}
+    {:else if kind === "tile-extract"}
+      <button class="icon-btn" class:empty={!machineName} title="抽水机" onclick={() => onPick("offshore-pump")}>
+        <HoverIcon type="entity" name={machineName || "offshore-pump"} size={24} quality={machineQuality} />
+      </button>
+      <span class="sub">{machineLabel || "选择抽水机"}</span>
+      <button class="btn ghost" title="更换抽水机" onclick={() => onPick("offshore-pump")}>更换</button>
     {:else if kind === "reactor"}
       <label class="sub temp" title="相邻反应堆数量（0-8）">
         相邻

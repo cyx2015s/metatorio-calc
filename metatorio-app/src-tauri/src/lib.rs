@@ -24,8 +24,8 @@ use metatorio_data::types::{Ingredient, Product, TechnologyMaxLevel};
 use metatorio_data::{
     BeaconComponent, BoilerComponent, BurnerGeneratorComponent, CraftingMachineComponent,
     EntityComponent, FluidComponent, GeneratorComponent, ItemComponent, MiningDrillComponent,
-    ModuleComponent, PrototypeBaseComponent, QualityComponent, ReactorComponent, RecipeComponent,
-    ResourceEntityComponent, TechnologyComponent,
+    ModuleComponent, OffshorePumpComponent, PrototypeBaseComponent, QualityComponent,
+    ReactorComponent, RecipeComponent, ResourceEntityComponent, TechnologyComponent,
 };
 use metatorio_runtime::{
     auto_plan,
@@ -479,6 +479,8 @@ pub struct PrototypeDetail {
     pub energy_consumption_j: Option<f64>,
     /// 锅炉目标温度。
     pub target_temperature: Option<f64>,
+    /// 锅炉工作模式（"heat-fluid-inside" / "output-to-separate-pipe"）。
+    pub boiler_mode: Option<String>,
     /// 反应堆相邻加成。
     pub neighbour_bonus: Option<f64>,
     /// 反应堆加热半径。
@@ -2490,6 +2492,7 @@ fn catalog_index_from_store(
     let entity_kinds = [
         ("machine", &["CraftingMachineComponent"][..], true),
         ("mining-machine", &["MiningDrillComponent"][..], true),
+        ("offshore-pump", &["OffshorePumpComponent"][..], false),
         (
             "generator",
             &["GeneratorComponent", "BurnerGeneratorComponent"][..],
@@ -2786,6 +2789,15 @@ fn prototype_detail(
     if let Some(boiler) = record.component::<BoilerComponent>() {
         detail.energy_consumption_j = Some(boiler.energy_consumption.amount);
         detail.target_temperature = boiler.target_temperature;
+        detail.boiler_mode = boiler.mode.map(|mode| {
+            match mode {
+                metatorio_data::types::BoilerMode::HeatFluidInside => "heat-fluid-inside",
+                metatorio_data::types::BoilerMode::OutputToSeparatePipe => {
+                    "output-to-separate-pipe"
+                }
+            }
+            .to_string()
+        });
         detail.fluid_filter = boiler.fluid_box.filter.clone();
         detail.machine_energy_source = Some(energy_source_kind(&boiler.energy_source).to_string());
         detail.burner_fuel_categories = burner_fuel_categories_of(&boiler.energy_source);

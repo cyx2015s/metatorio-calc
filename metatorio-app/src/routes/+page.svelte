@@ -860,6 +860,19 @@
           );
           break;
         }
+        case "offshore-pump": {
+          openSelector(
+            "offshore-pump",
+            "选择抽水机",
+            (name, quality) => runtime.setMachine(mechanic, name, quality),
+            [{ kind: "offshore-pump", label: "抽水机" }],
+            undefined,
+            undefined,
+            entry?.mechanic.machine?.id,
+            entry?.mechanic.machine?.quality,
+          );
+          break;
+        }
         case "tile": {
           // 地格：抽取与销毁的判据不同，标题与动作跟着变。
           const isDispose = entry?.mechanic.type === "tile-dispose";

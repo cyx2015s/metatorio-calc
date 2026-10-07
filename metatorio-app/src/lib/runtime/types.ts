@@ -157,6 +157,7 @@ export function accessibleKindFor(kind: string): string | null {
       return "space-location";
     case "entity":
     case "machine":
+    case "offshore-pump":
     case "mining-machine":
     case "generator":
     case "boiler":
@@ -853,6 +854,8 @@ export interface PrototypeDetail {
   energy_consumption_j: number | null;
   /** 锅炉目标温度。 */
   target_temperature: number | null;
+  /** 锅炉工作模式（"heat-fluid-inside" / "output-to-separate-pipe"）。 */
+  boiler_mode: string | null;
   /** 反应堆相邻加成。 */
   neighbour_bonus: number | null;
   /** 反应堆加热半径。 */
@@ -879,6 +882,7 @@ export type CatalogKind =
   | "module"
   | "machine"
   | "mining-machine"
+  | "offshore-pump"
   | "generator"
   | "boiler"
   | "reactor"
