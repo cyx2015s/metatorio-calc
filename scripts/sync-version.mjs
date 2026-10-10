@@ -5,9 +5,10 @@
 //   metatorio-app/src-tauri/tauri.conf.json
 //   metatorio-app/src-tauri/Cargo.toml
 //   metatorio-app/package.json
-//   Cargo.lock（metatorio-app 条目）
+//   crates/metatorio-headless/Cargo.toml   （headless 与 GUI 同版发布）
+//   Cargo.lock（metatorio-app 与 metatorio-headless 两个条目）
 // 不触碰 workspace 其它 crate（metatorio-core/data/runtime/solver）的独立版本。
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
@@ -15,6 +16,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const CONF = resolve(root, "metatorio-app/src-tauri/tauri.conf.json");
 const CARGO = resolve(root, "metatorio-app/src-tauri/Cargo.toml");
 const PKG = resolve(root, "metatorio-app/package.json");
+const HEADLESS_CARGO = resolve(root, "crates/metatorio-headless/Cargo.toml");
 const LOCK = resolve(root, "Cargo.lock");
 
 const target = process.argv[2];
@@ -46,26 +48,46 @@ if (next === current) {
   process.exit(0);
 }
 
+// 改一个 Cargo.toml 的 [package] version 行；返回是否成功。
+function bumpCargoToml(path, label) {
+  if (!existsSync(path)) {
+    console.warn("警告: 找不到 " + label + "（" + path + "），跳过");
+    return false;
+  }
+  const before = readFileSync(path, "utf8");
+  const after = before.replace(/^version\s*=\s*"[^"]*"/m, `version = "${next}"`);
+  if (after === before) {
+    console.warn("警告: 未能在 " + label + " 找到 [package] version");
+    return false;
+  }
+  writeFileSync(path, after);
+  return true;
+}
+
 // tauri.conf.json（版本来源）
 conf.version = next;
 writeFileSync(CONF, JSON.stringify(conf, null, 2) + "\n");
 
-// Cargo.toml —— [package] 的 version 行
-let cargo = readFileSync(CARGO, "utf8");
-cargo = cargo.replace(/^version\s*=\s*"[^"]*"/m, `version = "${next}"`);
-writeFileSync(CARGO, cargo);
+// Cargo.toml —— 应用的 [package] version
+bumpCargoToml(CARGO, "metatorio-app/src-tauri/Cargo.toml");
+// headless 与 GUI 同版发布；清单里两者的 version 因此总是一致
+bumpCargoToml(HEADLESS_CARGO, "crates/metatorio-headless/Cargo.toml");
 
 // package.json
 const pkg = JSON.parse(readFileSync(PKG, "utf8"));
 pkg.version = next;
 writeFileSync(PKG, JSON.stringify(pkg, null, 2) + "\n");
 
-// Cargo.lock —— metatorio-app 条目
+// Cargo.lock —— metatorio-app 与 metatorio-headless 条目（保留原有换行风格）
 let lock = readFileSync(LOCK, "utf8");
-lock = lock.replace(
-  /name = "metatorio-app"\nversion = "[^"]*"/,
-  `name = "metatorio-app"\nversion = "${next}"`,
-);
+for (const name of ["metatorio-app", "metatorio-headless"]) {
+  const pattern = new RegExp('(name = "' + name + '")(\\r?\\n)(version = ")[^"]*"');
+  if (!pattern.test(lock)) {
+    console.warn("警告: 未能在 Cargo.lock 找到 " + name + " 条目");
+    continue;
+  }
+  lock = lock.replace(pattern, "$1$2$3" + next + '"');
+}
 writeFileSync(LOCK, lock);
 
-console.log(`版本 ${current} -> ${next}`);
+console.log(`版本 ${current} -> ${next}（含 metatorio-headless）`);

@@ -4,7 +4,8 @@
 #   just version minor   # 次版本 +1（1.5.3 -> 1.6.0）
 #   just version patch   # 补丁 +1（1.5.3 -> 1.5.4）
 #   just version 1.6.0   # 直接指定目标版本号
-# 同步范围: tauri.conf.json / Cargo.toml / package.json / Cargo.lock(metatorio-app)。
+# 同步范围: tauri.conf.json / Cargo.toml / package.json /
+#          crates/metatorio-headless/Cargo.toml / Cargo.lock(两个条目)。
 # 不触碰 workspace 其它 crate 的独立版本。
 
 # Windows 下 just 默认找 `sh`；这里用 cmd 保证在 PowerShell/终端直接可跑。
