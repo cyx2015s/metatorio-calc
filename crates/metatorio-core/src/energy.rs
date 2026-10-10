@@ -118,7 +118,11 @@ pub fn energy_source_as_flow(
         EnergySource::Electric(source) => {
             add(&mut flow, DualVar::Electricity, -usage);
             if let Some(drain) = source.drain {
-                add(&mut flow, DualVar::Electricity, -drain.amount * 60.0 * (1.0 + effects.consumption));
+                add(
+                    &mut flow,
+                    DualVar::Electricity,
+                    -drain.amount * 60.0 * (1.0 + effects.consumption),
+                );
             } else if is_assembling_machine {
                 // https://lua-api.factorio.com/2.1.20/prototypes/CraftingMachinePrototype.html#energy_source
                 add(&mut flow, DualVar::Electricity, -usage / 30.0);

@@ -272,6 +272,7 @@ fn effective_energy_usage(usage: EnergyAmount, multiplier: f64) -> EnergyAmount 
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn add_energy(
     ctx: &Context,
     temp: &mut TempFlow,

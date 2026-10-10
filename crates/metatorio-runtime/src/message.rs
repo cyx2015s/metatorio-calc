@@ -436,13 +436,25 @@ pub enum GeneratorMechanicAction {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum BoilerMechanicAction {
-    SetBoiler { boiler: IdWithQuality },
-    SetFluid { fluid: String },
-    SetTemperature { temperature: Option<i32> },
+    SetBoiler {
+        boiler: IdWithQuality,
+    },
+    SetFluid {
+        fluid: String,
+    },
+    SetTemperature {
+        temperature: Option<i32>,
+    },
     /// `HeatFluidInside` 模式的输出温度（见 `BoilerMechanic::output_temperature`）。
-    SetOutputTemperature { temperature: Option<i32> },
-    SetFuel { fuel: Option<Fuel> },
-    SetFuelTemperature { temperature: Option<i32> },
+    SetOutputTemperature {
+        temperature: Option<i32>,
+    },
+    SetFuel {
+        fuel: Option<Fuel>,
+    },
+    SetFuelTemperature {
+        temperature: Option<i32>,
+    },
     // SetMode（工作模式）已移除：锅炉 mode 只读，运行/展开时从原型读取。
 }
 

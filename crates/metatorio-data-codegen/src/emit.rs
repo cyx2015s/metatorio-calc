@@ -583,6 +583,7 @@ fn collect_type_names(t: &TypeRef, out: &mut Vec<String>) {
 ///
 /// `generated_structs`：本次生成会真正产出的 struct 名集合（`candidates`）——
 /// 用来判断字段是不是「我们自己生成的表」，从而决定要不要走宽松可选表反序列化。
+#[allow(clippy::too_many_arguments)]
 fn emit_struct(
     schema: &Schema,
     config: &Config,

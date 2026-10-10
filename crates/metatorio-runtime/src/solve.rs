@@ -1071,11 +1071,16 @@ pub fn plan_auto_plan(
     }
 
     // 展开全部候选为一个 LP。
-    let problem =
-        build_autoplan_problem(store, &context, factory_doc, &target, &all_sources, &candidates);
+    let problem = build_autoplan_problem(
+        store,
+        &context,
+        factory_doc,
+        &target,
+        &all_sources,
+        &candidates,
+    );
     let solution = problem.solve();
-    let SolverSolution::Solved { prim, report, .. } = solution
-    else {
+    let SolverSolution::Solved { prim, report, .. } = solution else {
         // 透出求解器给出的 description——区分「真的不可行」与「数值/求解器
         // 失败」是诊断自动规划失败的前提。
         let SolverSolution::NotSolved {
@@ -1100,8 +1105,15 @@ pub fn plan_auto_plan(
     // 机制（顶点解下就是解的支持集，必然可行）。
     let feasible = |mechanics: &[Mechanic]| -> bool {
         matches!(
-            build_autoplan_problem(store, &context, factory_doc, &target, &all_sources, mechanics)
-                .solve(),
+            build_autoplan_problem(
+                store,
+                &context,
+                factory_doc,
+                &target,
+                &all_sources,
+                mechanics
+            )
+            .solve(),
             SolverSolution::Solved { .. }
         )
     };
