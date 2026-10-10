@@ -2498,12 +2498,14 @@ version = "0.1.0"
 dependencies = [
  "metatorio-core",
  "metatorio-data",
+ "metatorio-icons",
  "metatorio-runtime",
  "metatorio-solver",
  "schemars 1.2.2",
  "serde",
  "serde_json",
  "tokio",
+ "xxhash-rust",
 ]
 
 [[package]]

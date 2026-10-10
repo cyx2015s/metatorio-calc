@@ -10,8 +10,10 @@ edition = "2024"
 [dependencies]
 metatorio-core = { path = "../metatorio-core" }
 metatorio-data = { path = "../metatorio-data" }
+metatorio-icons = { path = "../metatorio-icons" }
 metatorio-runtime = { path = "../metatorio-runtime" }
 metatorio-solver = { path = "../metatorio-solver" }
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 schemars = { version = "1", features = ["chrono04"] }

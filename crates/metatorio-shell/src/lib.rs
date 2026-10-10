@@ -5,6 +5,7 @@
 //! 既能被 Tauri 前端复用，也能被真正的 headless 二进制复用——后者因此不必链接
 //! tauri/webview（Linux 上也就不会被迫链接 GTK）。
 
+pub mod app;
 pub mod host;
 pub mod options;
 pub mod solve_jobs;
