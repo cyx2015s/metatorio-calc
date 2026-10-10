@@ -2422,6 +2422,7 @@ dependencies = [
  "metatorio-data",
  "metatorio-icons",
  "metatorio-runtime",
+ "metatorio-shell",
  "metatorio-solver",
  "rmcp",
  "schemars 1.2.2",
@@ -2489,6 +2490,20 @@ dependencies = [
  "schemars 1.2.2",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "metatorio-shell"
+version = "0.1.0"
+dependencies = [
+ "metatorio-core",
+ "metatorio-data",
+ "metatorio-runtime",
+ "metatorio-solver",
+ "schemars 1.2.2",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

@@ -149,7 +149,7 @@ impl<R: Clone + Send + 'static> SolveJobs<R> {
             let result = {
                 let task_snapshot = snapshot.clone();
                 let compute = compute.clone();
-                let handle = tauri::async_runtime::spawn_blocking(move || compute(&task_snapshot));
+                let handle = tokio::task::spawn_blocking(move || compute(&task_snapshot));
                 // 等待上限：超时只放弃**等待**，阻塞任务继续跑完（句柄 drop
                 // 不取消任务）。这样调用方不会被一个失控求解钉住十分钟，重试
                 // 也只是重算一次，不会留下锁。

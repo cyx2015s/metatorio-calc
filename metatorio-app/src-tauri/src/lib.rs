@@ -53,8 +53,8 @@ use tauri_plugin_dialog::DialogExt;
 #[cfg(not(mobile))]
 pub mod mcp;
 
-/// 求解任务调度（把长求解移出 `Mutex<Runtime>`）。
-mod solve_jobs;
+/// 求解任务调度（把长求解移出 `Mutex<Runtime>`）——实现已抽到 `metatorio-shell`。
+use metatorio_shell::solve_jobs;
 
 /// Minimal embedded game-data dump so the app can solve out of the box.
 /// Replace with a real Factorio dump once data loading is wired to a
@@ -156,47 +156,8 @@ impl Default for AppState {
     }
 }
 
-/// 启动选项：由 bin 的 CLI 解析（CLI > 环境变量 > 默认）后传入。
-///
-/// lib 不依赖 clap：这样 `Options` 是普通数据，可单测，也便于将来换解析器；
-/// **参数的单一真相**在这里，`mcp::spawn_server` 与求解调度器都只认它，
-/// 不再各自去读环境变量。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Options {
-    /// MCP 监听地址；默认 `127.0.0.1`（只回环）。填本机局域网 IP 或 `0.0.0.0`
-    /// 才能被手机等其它设备访问——**非回环时必须有 token**（`run` 前的校验拦住）。
-    pub mcp_bind: String,
-    /// MCP 端点端口。
-    pub mcp_port: u16,
-    /// 额外允许的 `Host`（用主机名/mDNS 名访问时填）；具体 IP 由 `mcp_bind` 自动允许。
-    pub mcp_allow_hosts: Vec<String>,
-    /// 对外暴露哪些 MCP 工具；**空 = 全部**。用 `--mcp-tools a,b,c` 只开子集，
-    /// 例如只留 `auto_plan,dispatch,get_planning_state`——工具越少，agent 选择越准。
-    pub mcp_tools: Vec<String>,
-    /// MCP Bearer token；`None`/空 = 不鉴权（仅回环兜底；非回环会被拒绝启动）。
-    pub mcp_token: Option<String>,
-    /// 单次求解的等待上限（毫秒）；`None` = 内置默认 120s。
-    pub solve_timeout_ms: Option<u64>,
-    /// 无头：不创建窗口，只提供 MCP 端点（GUI 命令因此无人调用）。
-    pub headless: bool,
-    /// 是否启动 MCP 端点。默认开；`--no-mcp` 可关（只想要 GUI、不开本地端口）。
-    pub mcp: bool,
-}
-
-impl Default for Options {
-    fn default() -> Self {
-        Self {
-            mcp_bind: mcp::DEFAULT_MCP_BIND.to_string(),
-            mcp_port: mcp::DEFAULT_MCP_PORT,
-            mcp_allow_hosts: Vec::new(),
-            mcp_tools: Vec::new(),
-            mcp_token: None,
-            solve_timeout_ms: None,
-            headless: false,
-            mcp: true,
-        }
-    }
-}
+/// 启动选项：由 bin 的 CLI 解析后传入——定义已抽到 `metatorio-shell`。
+pub use metatorio_shell::Options;
 
 impl AppState {
     /// 按启动选项构造（目前只有求解等待上限需要覆盖）。

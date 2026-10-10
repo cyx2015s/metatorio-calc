@@ -54,16 +54,8 @@ use metatorio_runtime::message::{
 };
 use metatorio_runtime::{FactoryId, MechanicId, ProjectId};
 
-/// MCP 端点的默认回环端口（`--mcp-port` / `METATORIO_MCP_PORT` 可覆盖）。
-pub const DEFAULT_MCP_PORT: u16 = 8765;
-
-/// 默认只监听回环：这个端点能建项目、改目标、跑规划，默认不该被局域网里任何设备碰到。
-/// 要手机/其它设备接入就显式 `--mcp-bind <本机 IP>`（或 `0.0.0.0`），并且**必须**配
-/// token（启动前校验，见 bin 的 `validate`）。
-pub const DEFAULT_MCP_BIND: &str = "127.0.0.1";
-
-/// MCP 服务挂在这个路径下（例如 `http://127.0.0.1:8765/mcp`）。
-pub const MCP_PATH: &str = "/mcp";
+/// 端点常量已抽到 `metatorio-shell`（GUI 无关），这里再导出一次给 bin 用。
+pub use metatorio_shell::{DEFAULT_MCP_BIND, DEFAULT_MCP_PORT, MCP_PATH};
 
 // dispatch 的 inputSchema **保持完整**：rmcp 会把整个 AppMessage 协议图
 // （46 个 $defs、89 个 $ref）内联进 tools/list，实测 44 KB、占工具面 77%。

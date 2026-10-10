@@ -22,6 +22,7 @@ metatorio-core = { path = "../../crates/metatorio-core" }
 metatorio-data = { path = "../../crates/metatorio-data" }
 metatorio-icons = { path = "../../crates/metatorio-icons" }
 metatorio-runtime = { path = "../../crates/metatorio-runtime" }
+metatorio-shell = { path = "../../crates/metatorio-shell" }
 metatorio-solver = { path = "../../crates/metatorio-solver" }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
