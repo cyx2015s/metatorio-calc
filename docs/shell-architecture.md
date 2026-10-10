@@ -62,12 +62,15 @@ shell 与 tauri 不保证同一线程，也不保证谁先销毁；两边都可�
 
 ## 多前端 / 多包发布
 
-`metatorio-app` 与 `metatorio-headless` 是**两个独立包/二进制**：
+`metatorio-app` 与 `metatorio-headless` 是**两个独立包/二进制**，更新走同一份
+`latest.json`、同一把 minisign 密钥，只用不同的 `target` 键区分：
 
-- GUI 走 `tauri-plugin-updater`；
-- headless 可以不带更新器，或者也走 Tauri updater——**用自定义 `target`**
-  区分（例如 `windows-x86_64-gui` / `windows-x86_64-headless`），同一个
-  endpoint 也能各取各的清单，互不干扰。
+- GUI → 默认键（`windows-x86_64-nsis` / `linux-x86_64-appimage`），**配置不变**；
+- headless → `headless-{os}-{arch}`，由 `metatorio-shell::update` 处理
+  （headless 不链接 tauri，所以自带一份等价的查/验/替换逻辑）。
+
+细节（清单格式、CI 如何合并条目、如何加第三个产物）见
+[updates.md](updates.md)。
 
 ## 文件地图
 

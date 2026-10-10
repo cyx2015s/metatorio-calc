@@ -15,6 +15,10 @@ metatorio-runtime = { path = "../metatorio-runtime" }
 metatorio-solver = { path = "../metatorio-solver" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+base64 = "0.22"
+minisign-verify = "0.2"
+semver = "1"
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls", "json"] }
 schemars = { version = "1", features = ["chrono04"] }
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 rmcp = { version = "3.2", features = ["transport-streamable-http-server"] }

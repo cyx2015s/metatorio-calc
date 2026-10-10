@@ -1,6 +1,16 @@
-name: Build and Release (Tauri)
+name: Build and Release (Tauri + headless)
 
-# 编译并发布 Tauri 桌面应用（Linux + Windows），附带 tauri-plugin-updater 更新产物。
+# 编译并发布两个二进制（Linux + Windows）：
+#   1. Tauri 桌面应用（GUI）—— 附带 tauri-plugin-updater 更新产物；
+#   2. metatorio-headless（纯 MCP 服务，不链接 GUI 工具包）—— 单独签名，作为
+#      额外条目合并进同一份 latest.json。
+#
+# 更新清单的 target 键：
+#   GUI        → windows-x86_64 / linux-x86_64          （默认 target，保持不变）
+#   headless   → headless-windows-x86_64 / headless-linux-x86_64
+# headless 端用 `UpdaterBuilder::target("headless-...")` 或对应逻辑去查自己的键；
+# GUI 端配置/行为**完全不变**。
+#
 # macOS 因签名需要付费证书，暂不构建。
 on:
   push:
@@ -27,10 +37,14 @@ jobs:
           - platform: ubuntu-22.04
             args: '--bundles appimage'
             name: linux-x86_64
+            headless_file: metatorio-headless
+            headless_target: headless-linux-x86_64
           # Windows x86_64 → NSIS setup.exe（静默升级）
           - platform: windows-latest
             args: '--bundles nsis'
             name: windows-x86_64
+            headless_file: metatorio-headless.exe
+            headless_target: headless-windows-x86_64
 
     runs-on: ${{ matrix.platform }}
 
@@ -83,12 +97,21 @@ jobs:
         working-directory: metatorio-app
         run: pnpm install --frozen-lockfile
 
+      # 读取版本号（tag 用 v<version>）。
+      - name: Resolve version
+        id: meta
+        shell: bash
+        run: |
+          VERSION=$(jq -r .version metatorio-app/src-tauri/tauri.conf.json)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
       # Tauri 构建由 tauri-action 完成；它调用 `pnpm build`（beforeBuildCommand）并打包。
       # updater 签名密钥来自当前 environment（`environment:` 指定）或仓库：
       #   TAURI_SIGNING_PRIVATE_KEY          （`pnpm tauri signer generate` 生成的私钥）
       #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD （私钥密码）
       # 并把公钥写入 metatorio-app/src-tauri/tauri.conf.json 的 plugins.updater.pubkey。
-      - name: Build and release
+      - name: Build and release (GUI)
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -100,9 +123,86 @@ jobs:
           releaseName: 'metatorio v__VERSION__'
           releaseBody: |
             见各平台的安装包 / 更新镜像：
-            - Windows: NSIS setup.exe
-            - Linux: AppImage
+            - Windows: NSIS setup.exe（GUI）+ metatorio-headless.exe
+            - Linux: AppImage（GUI）+ metatorio-headless
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true
           args: ${{ matrix.args }}
+
+      # ── headless 二进制：构建 → 用同一把密钥签名 → 上传到同一个 release ──
+      # 关键：**不碰 GUI 的更新产物**，只是额外多两个 asset（二进制 + .sig）。
+      - name: Build headless binary
+        run: cargo build --release -p metatorio-headless
+
+      - name: Sign headless binary
+        working-directory: metatorio-app
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: pnpm tauri signer sign ../target/release/${{ matrix.headless_file }}
+
+      - name: Upload headless binary + signature
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ steps.meta.outputs.tag }}" \
+            "target/release/${{ matrix.headless_file }}" \
+            "target/release/${{ matrix.headless_file }}.sig" \
+            --clobber
+
+  # 两个平台的 GUI/headless 都上传完后，把 headless 条目合并进 latest.json。
+  # 放在单独 job 是为了避免两个 matrix 并行写同一份清单互相覆盖。
+  merge-updater-manifest:
+    needs: publish-tauri
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Resolve version
+        id: meta
+        shell: bash
+        run: |
+          VERSION=$(jq -r .version metatorio-app/src-tauri/tauri.conf.json)
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Merge headless entries into latest.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p dl && cd dl
+          gh release download "$TAG" -p latest.json
+          gh release download "$TAG" -p 'metatorio-headless*'
+          ls -la
+          python3 - <<'PY'
+          import json, os
+          tag = os.environ["TAG"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          path = "latest.json"
+          manifest = json.load(open(path))
+          platforms = manifest.setdefault("platforms", {})
+          mapping = {
+              "metatorio-headless": "headless-linux-x86_64",
+              "metatorio-headless.exe": "headless-windows-x86_64",
+          }
+          changed = []
+          for asset, key in mapping.items():
+              sig_path = asset + ".sig"
+              if not os.path.exists(sig_path):
+                  print(f"[skip] {sig_path} 不存在")
+                  continue
+              signature = open(sig_path).read().strip()
+              platforms[key] = {
+                  "signature": signature,
+                  "url": f"https://github.com/{repo}/releases/download/{tag}/{asset}",
+              }
+              changed.append(key)
+          json.dump(manifest, open(path, "w"), indent=2, ensure_ascii=False)
+          print("merged headless targets:", changed)
+          print("all platforms:", sorted(platforms))
+          PY
+          gh release upload "$TAG" latest.json --clobber
