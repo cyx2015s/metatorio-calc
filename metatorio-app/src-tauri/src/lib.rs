@@ -17,7 +17,9 @@ use metatorio_runtime::state::DispatchResult;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 
-use metatorio_shell::app::{AppState, CatalogIndex, ContextInfo, ContextList, PrototypeDetail, Suggestion};
+use metatorio_shell::app::{
+    AppState, CatalogIndex, ContextInfo, ContextList, PrototypeDetail, Suggestion,
+};
 use metatorio_shell::host::Host;
 
 pub use metatorio_shell::Options;
@@ -110,7 +112,11 @@ async fn implicit_sources(
 }
 
 #[tauri::command]
-async fn suggest(host: HostState<'_>, context_id: String, flow: DualVar) -> Result<Vec<Suggestion>, String> {
+async fn suggest(
+    host: HostState<'_>,
+    context_id: String,
+    flow: DualVar,
+) -> Result<Vec<Suggestion>, String> {
     metatorio_shell::app::suggest(&host_of(&host), context_id, flow).await
 }
 
@@ -142,8 +148,14 @@ async fn allowed_modules(
     machine: String,
     recipe: Option<String>,
 ) -> Result<Vec<String>, String> {
-    metatorio_shell::app::allowed_modules(&host_of(&host), context_id, machine_kind, machine, recipe)
-        .await
+    metatorio_shell::app::allowed_modules(
+        &host_of(&host),
+        context_id,
+        machine_kind,
+        machine,
+        recipe,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -324,7 +336,8 @@ pub fn run(options: Options) {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(move |app| {
             let state = Arc::new(AppState::with_options(&builder_options));
-            let host: Arc<TauriHost> = Arc::new(TauriHost::new(app.handle().clone(), state.clone()));
+            let host: Arc<TauriHost> =
+                Arc::new(TauriHost::new(app.handle().clone(), state.clone()));
             app.manage(host.clone());
             let shell_host: Arc<dyn Host> = host.clone();
             // 先把 MCP 端点起起来：恢复缓存上下文可能要读几十 MB 的 dump（真机上

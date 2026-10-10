@@ -24,6 +24,8 @@
 
 use std::net::{IpAddr, SocketAddr};
 
+use crate::app::*;
+use crate::host::Host;
 use axum::{
     Router,
     extract::{Request, State},
@@ -42,9 +44,6 @@ use rmcp::{
 };
 use schemars::JsonSchema;
 use std::sync::Arc;
-use crate::app::*;
-use crate::host::Host;
-
 
 use metatorio_core::{BeaconConfig, DualVar, IdWithQuality, ModuleConfig};
 use metatorio_data::FluidComponent;
@@ -235,7 +234,7 @@ impl MetatorioMcp {
         let solve = match (project, factory, params.recompute) {
             (Some(project), Some(factory), true) => {
                 let state = host.state();
-                match solve_factory_offlock(&host, &state, project, factory).await {
+                match solve_factory_offlock(&host, state, project, factory).await {
                     Ok(result) => Some(serde_json::to_value(&result).map_err(|error| {
                         McpError::internal_error(format!("solve 序列化失败: {error}"), None)
                     })?),
@@ -349,16 +348,11 @@ impl MetatorioMcp {
             project, factory, ..
         } = &snapshot
         {
-            let status = host
-                .state()
-                .auto_plans
-                .lock()
-                .ok()
-                .and_then(|plans| {
-                    plans
-                        .get(&(ProjectId(*project), FactoryId(*factory)))
-                        .cloned()
-                });
+            let status = host.state().auto_plans.lock().ok().and_then(|plans| {
+                plans
+                    .get(&(ProjectId(*project), FactoryId(*factory)))
+                    .cloned()
+            });
             if let Some(status) = status {
                 let auto_plan = match status {
                     AutoPlanState::Running => serde_json::json!({ "status": "running" }),
@@ -473,12 +467,12 @@ impl MetatorioMcp {
         //    流体**原型）。流体目标的温度区间默认取原型的 [default, max]，所以这里
         //    还要拿到原型库。
         let state = host.state();
-        let context_id = resolve_context_id(&state, params.context_id.as_deref())
+        let context_id = resolve_context_id(state, params.context_id.as_deref())
             .map_err(|error| McpError::invalid_params(error, None))?;
-        let index = catalog_index_for(&state, &context_id)
+        let index = catalog_index_for(state, &context_id)
             .await
             .map_err(|error| McpError::invalid_params(format!("读取目录失败: {error}"), None))?;
-        let store = context_store_arc(&state, &context_id)
+        let store = context_store_arc(state, &context_id)
             .await
             .map_err(|error| McpError::invalid_params(format!("读取原型库失败: {error}"), None))?;
         let targets = resolve_auto_plan_targets(&index, Some(store.as_ref()), &params.targets)
@@ -696,7 +690,7 @@ impl MetatorioMcp {
         let host = self.host.clone();
         let list = tokio::task::spawn_blocking(move || {
             let state = host.state();
-            context_list(&state)
+            context_list(state)
         })
         .await
         .map_err(|error| {
@@ -733,16 +727,15 @@ impl MetatorioMcp {
         let page = params.page.resolve();
         let state = self.host.state();
         // 只是读一次 runtime 里的激活上下文 id（短锁），无需阻塞线程。
-        let context_id = resolve_context_id(&state, params.context_id.as_deref())
+        let context_id = resolve_context_id(state, params.context_id.as_deref())
             .map_err(|error| McpError::invalid_params(error, None))?;
-        let index = catalog_index_for(&state, &context_id)
+        let index = catalog_index_for(state, &context_id)
             .await
             .map_err(|error| {
                 McpError::invalid_params(format!("list_prototypes 执行失败: {error}"), None)
             })?;
         let total = index.entries.len();
-        let matched =
-            filter_index_entries(index.entries, kind.as_deref(), needle.as_deref());
+        let matched = filter_index_entries(index.entries, kind.as_deref(), needle.as_deref());
         let matched_total = matched.len();
         // 分页在这里做（并在 page 元信息里如实上报），调用方不需要替我们兜底。
         let (entries, _) = page.slice(&matched);
@@ -808,9 +801,9 @@ impl MetatorioMcp {
             ));
         }
         let state = self.host.state();
-        let context_id = resolve_context_id(&state, params.context_id.as_deref())
+        let context_id = resolve_context_id(state, params.context_id.as_deref())
             .map_err(|error| McpError::invalid_params(error, None))?;
-        let index = catalog_index_for(&state, &context_id)
+        let index = catalog_index_for(state, &context_id)
             .await
             .map_err(|error| {
                 McpError::invalid_params(format!("localized_names 执行失败: {error}"), None)
@@ -1416,10 +1409,7 @@ fn require_index_entry_of(
 /// 校验不过就整个调用失败、一个对象都不建——这正是组合入口该有的原子性；等到配置
 /// 中途才报错，就得靠回滚来收拾半成品（回滚仍然保留，用来兜住 reducer 侧的失败）。
 /// 虚拟流（电/热/污染/燃料流）不是原型，不校验。
-fn validate_auto_plan_names(
-    index: &CatalogIndex,
-    params: &AutoPlanParams,
-) -> Result<(), String> {
+fn validate_auto_plan_names(index: &CatalogIndex, params: &AutoPlanParams) -> Result<(), String> {
     if let Some(modules) = &params.modules {
         for module in &modules.exclude {
             require_index_entry(index, &["module", "item"], "要剔除的插件", &module.id)?;
@@ -1531,7 +1521,7 @@ async fn apply_consistency_only(
     let state = host.state();
     for command in &outcome.commands {
         if is_consistency_command(command) {
-            let _ = execute_command(host, &state, command).await;
+            let _ = execute_command(host, state, command).await;
         }
     }
     // 文档变了就通知 GUI：外部 agent 建的项目要立刻出现在界面上。
@@ -1702,7 +1692,7 @@ async fn mechanic_level_value(
         })?;
     let config = serde_json::to_value(&entry.mechanic).unwrap_or(serde_json::Value::Null);
     let flow = mechanic_flow_for(
-        &host.state(),
+        host.state(),
         ProjectId(project),
         FactoryId(factory),
         MechanicId(mechanic),
@@ -1767,6 +1757,7 @@ async fn mechanic_level_value(
 /// 展开结果里正数是产出、负数是消耗（见 `mechanic_flow` 的约定），直接给 LLM 看
 /// `-2.0` 容易被读成「产出 2」。接近 0 的浮点残渣（`|v| <= 1e-12`）在展开侧已经
 /// 过滤过，这里不再重复判断。
+#[allow(clippy::type_complexity)]
 fn split_mechanic_flow(flow: &[(DualVar, f64)]) -> (Vec<(DualVar, f64)>, Vec<(DualVar, f64)>) {
     let mut inputs = Vec::new();
     let mut outputs = Vec::new();
@@ -2884,7 +2875,3 @@ mod tests {
         assert!(total < 150_000, "工具面涨到 {total} 字符：{rows:?}");
     }
 }
-
-
-
-

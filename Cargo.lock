@@ -2416,17 +2416,10 @@ dependencies = [
 name = "metatorio-app"
 version = "1.5.24"
 dependencies = [
- "axum",
  "clap",
  "metatorio-core",
- "metatorio-data",
- "metatorio-icons",
  "metatorio-runtime",
  "metatorio-shell",
- "metatorio-solver",
- "rmcp",
- "schemars 1.2.2",
- "serde",
  "serde_json",
  "tauri",
  "tauri-build",
@@ -2435,7 +2428,6 @@ dependencies = [
  "tauri-plugin-process",
  "tauri-plugin-updater",
  "tokio",
- "xxhash-rust",
 ]
 
 [[package]]

@@ -27,7 +27,11 @@ struct Cli {
     mcp_port: u16,
 
     /// 额外允许的 `Host`（可重复，或一个逗号分隔的环境变量）。
-    #[arg(long = "mcp-allow-host", env = "METATORIO_MCP_ALLOW_HOSTS", value_delimiter = ',')]
+    #[arg(
+        long = "mcp-allow-host",
+        env = "METATORIO_MCP_ALLOW_HOSTS",
+        value_delimiter = ','
+    )]
     mcp_allow_hosts: Vec<String>,
 
     /// 对外暴露哪些 MCP 工具（逗号分隔；留空 = 全部）。
@@ -53,11 +57,14 @@ impl Host for HeadlessHost {
         let base = if cfg!(target_os = "windows") {
             std::env::var_os("APPDATA").map(PathBuf::from)
         } else if cfg!(target_os = "macos") {
-            std::env::var_os("HOME").map(|home| PathBuf::from(home).join("Library/Application Support"))
+            std::env::var_os("HOME")
+                .map(|home| PathBuf::from(home).join("Library/Application Support"))
         } else {
             std::env::var_os("XDG_DATA_HOME")
                 .map(PathBuf::from)
-                .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share")))
+                .or_else(|| {
+                    std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share"))
+                })
         };
         base.unwrap_or_else(|| PathBuf::from(".")).join(IDENTIFIER)
     }

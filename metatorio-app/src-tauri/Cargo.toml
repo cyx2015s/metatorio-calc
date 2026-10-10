@@ -18,24 +18,15 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+# 业务逻辑全在 metatorio-shell（GUI 无关）；这里只留 Tauri 外壳真正用到的东西。
 metatorio-core = { path = "../../crates/metatorio-core" }
-metatorio-data = { path = "../../crates/metatorio-data" }
-metatorio-icons = { path = "../../crates/metatorio-icons" }
 metatorio-runtime = { path = "../../crates/metatorio-runtime" }
 metatorio-shell = { path = "../../crates/metatorio-shell" }
-metatorio-solver = { path = "../../crates/metatorio-solver" }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
-xxhash-rust = { version = "0.8", features = ["xxh3"] }
-serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# MCP server (merged into the app binary, Streamable-HTTP on localhost).
-rmcp = { version = "3.2", features = ["transport-streamable-http-server"] }
-# 工具参数派生 JsonSchema 需要直接依赖 schemars（derive 展开引用 ::schemars）。
-schemars = { version = "1", features = ["chrono04"] }
-axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
 tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "time", "sync"] }
 clap = { version = "4.6.6", features = ["derive", "env"] }

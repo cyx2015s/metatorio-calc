@@ -18,14 +18,16 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use crate::host::Host;
+use crate::options::Options;
 use metatorio_core::{Accessible, DualVar, IdWithQuality, Mechanic};
 use metatorio_data::store::{PrototypeGroup, PrototypeRecord, PrototypeStore};
 use metatorio_data::types::{Ingredient, Product, TechnologyMaxLevel};
 use metatorio_data::{
     BeaconComponent, BoilerComponent, BurnerGeneratorComponent, CraftingMachineComponent,
     EntityComponent, FluidComponent, GeneratorComponent, ItemComponent, MiningDrillComponent,
-    ModuleComponent, PrototypeBaseComponent, QualityComponent,
-    ReactorComponent, RecipeComponent, ResourceEntityComponent, TechnologyComponent,
+    ModuleComponent, PrototypeBaseComponent, QualityComponent, ReactorComponent, RecipeComponent,
+    ResourceEntityComponent, TechnologyComponent,
 };
 use metatorio_runtime::{
     auto_plan,
@@ -44,49 +46,41 @@ use metatorio_runtime::{
     state::DispatchResult,
 };
 use serde::{Deserialize, Serialize};
-use crate::host::Host;
-use crate::options::Options;
 
-
-
-/// 与本体合并的 MCP 服务器（localhost Streamable-HTTP 端点）。
-///
-/// `pub`：bin（main.rs）要用 `mcp::DEFAULT_MCP_PORT` / `MCP_PATH` 作为 CLI 默认值。
-
-
-/// 求解任务调度（把长求解移出 `Mutex<Runtime>`）——实现已抽到 `metatorio-shell`。
+// 求解任务调度（长求解移出 `Mutex<Runtime>`）；实现已抽到 `metatorio-shell`。
 use crate::solve_jobs;
 
 /// Minimal embedded game-data dump so the app can solve out of the box.
 /// Replace with a real Factorio dump once data loading is wired to a
 /// file dialog.
-pub(crate) const DEMO_DUMP: &str = include_str!("../../../metatorio-app/src-tauri/dumps/demo_dump.json");
+pub(crate) const DEMO_DUMP: &str =
+    include_str!("../../../metatorio-app/src-tauri/dumps/demo_dump.json");
 
 // ── Managed state ─────────────────────────────────────────────────
 
 pub struct AppState {
-pub(crate) runtime: Mutex<Runtime>,
+    pub(crate) runtime: Mutex<Runtime>,
     /// 求解调度器：长求解在锁外跑，按 (project, factory) 单飞 + latest-wins。
-pub(crate) solve_jobs: solve_jobs::SolveJobs<metatorio_runtime::SolveResult>,
+    pub(crate) solve_jobs: solve_jobs::SolveJobs<metatorio_runtime::SolveResult>,
     /// 自动规划调度器：产出 `(快照, 候选机制, 候选过滤记录)`，回写前用快照
     /// 校验版本；过滤记录随求解结果返回（见 `SolveDiagnostics`）。
-pub(crate) autoplan_jobs: solve_jobs::SolveJobs<(
+    pub(crate) autoplan_jobs: solve_jobs::SolveJobs<(
         metatorio_runtime::SolveSnapshot,
         Vec<metatorio_core::Mechanic>,
         metatorio_runtime::solve::AutoPlanReport,
     )>,
     /// 上下文载入的按键串行锁（同一上下文只读盘解析一次）。
-pub(crate) context_loads: solve_jobs::KeyLocks,
-pub(crate) contexts: Mutex<ContextRegistry>,
-pub(crate) project_paths: Mutex<HashMap<ProjectId, String>>,
+    pub(crate) context_loads: solve_jobs::KeyLocks,
+    pub(crate) contexts: Mutex<ContextRegistry>,
+    pub(crate) project_paths: Mutex<HashMap<ProjectId, String>>,
     /// 上下文 id → 本地化名映射（来自游戏 `--dump-prototype-locale` 的
     /// `prototype-locale.json`，键为 `"{type}/{name}"`）。
-pub(crate) locales: Mutex<HashMap<String, HashMap<String, String>>>,
+    pub(crate) locales: Mutex<HashMap<String, HashMap<String, String>>>,
     /// MCP `dispatch` 的幂等缓存：request_id → 上次返回的载荷。
-pub(crate) dispatch_cache: Mutex<DispatchCache>,
+    pub(crate) dispatch_cache: Mutex<DispatchCache>,
     /// 异步自动规划的状态（MCP 的 `auto_plan` 工具用）：按 (project, factory)
     /// 记录「运行中 / 完成（含求解结果）/ 失败」，供 agent 稍后查询。
-pub(crate) auto_plans: Mutex<HashMap<(ProjectId, FactoryId), AutoPlanState>>,
+    pub(crate) auto_plans: Mutex<HashMap<(ProjectId, FactoryId), AutoPlanState>>,
 }
 
 /// 一次**异步**自动规划的状态（`auto_plan` 工具立即返回后由 agent 轮询）。
@@ -125,7 +119,12 @@ impl DispatchCache {
         self.entries.get(request_id).cloned()
     }
 
-    pub(crate) fn insert(&mut self, request_id: String, payload: serde_json::Value, is_error: bool) {
+    pub(crate) fn insert(
+        &mut self,
+        request_id: String,
+        payload: serde_json::Value,
+        is_error: bool,
+    ) {
         if self
             .entries
             .insert(request_id.clone(), (payload, is_error))
@@ -156,9 +155,6 @@ impl Default for AppState {
         }
     }
 }
-
-/// 启动选项：由 bin 的 CLI 解析后传入——定义已抽到 `metatorio-shell`。
-
 
 impl AppState {
     /// 按启动选项构造（目前只有求解等待上限需要覆盖）。
@@ -744,7 +740,11 @@ pub(crate) fn load_store_from_dump(dump_path: &Path) -> Result<PrototypeStore, S
 }
 
 /// 同步版：调用方已持有 runtime 锁时用（读盘仍在锁内）。
-pub(crate) fn ensure_context_loaded(state: &AppState, runtime: &mut Runtime, id: &str) -> Result<(), String> {
+pub(crate) fn ensure_context_loaded(
+    state: &AppState,
+    runtime: &mut Runtime,
+    id: &str,
+) -> Result<(), String> {
     if runtime.context_store_by_id(id).is_some() {
         return Ok(());
     }
@@ -757,7 +757,10 @@ pub(crate) fn ensure_context_loaded(state: &AppState, runtime: &mut Runtime, id:
 /// 锁外版：读盘/解析在阻塞线程池上完成，只在最后短暂上锁装入 store。
 ///
 /// 同一上下文并发请求会串行（`context_loads`），避免大 dump 被解析多次。
-pub(crate) async fn ensure_context_loaded_offlock(state: &AppState, id: &str) -> Result<(), String> {
+pub(crate) async fn ensure_context_loaded_offlock(
+    state: &AppState,
+    id: &str,
+) -> Result<(), String> {
     if with_runtime(state, |runtime| {
         Ok(runtime.context_store_by_id(id).is_some())
     })? {
@@ -1064,7 +1067,11 @@ pub(crate) fn context_info_from(
     })
 }
 
-pub(crate) fn context_info_of(state: &AppState, runtime: &Runtime, id: &str) -> Option<ContextInfo> {
+pub(crate) fn context_info_of(
+    state: &AppState,
+    runtime: &Runtime,
+    id: &str,
+) -> Option<ContextInfo> {
     let registry = state.contexts.lock().ok()?;
     context_info_from(&registry, runtime, id)
 }
@@ -1112,7 +1119,11 @@ pub(crate) fn context_list_with(runtime: &Runtime, state: &AppState) -> ContextL
 }
 
 /// 调用方持有 runtime 锁时传 `Some(runtime)`，否则传 `None`。
-pub(crate) fn emit_contexts_changed(host: &Arc<dyn Host>, state: &AppState, runtime: Option<&Runtime>) {
+pub(crate) fn emit_contexts_changed(
+    host: &Arc<dyn Host>,
+    state: &AppState,
+    runtime: Option<&Runtime>,
+) {
     let list = match runtime {
         Some(runtime) => context_list_with(runtime, state),
         None => context_list(state),
@@ -1128,7 +1139,12 @@ pub(crate) fn game_export_dir(host: &Arc<dyn Host>) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-pub(crate) fn run_game(exe: &Path, config: &Path, args: &[&str], extra: &[String]) -> Result<(), String> {
+pub(crate) fn run_game(
+    exe: &Path,
+    config: &Path,
+    args: &[&str],
+    extra: &[String],
+) -> Result<(), String> {
     let mut command = std::process::Command::new(exe);
     command.args(args).arg("--config").arg(config);
     if !extra.is_empty() {
@@ -1363,19 +1379,6 @@ pub(crate) async fn load_game_context_and_activate(
 
 // ── Commands ──────────────────────────────────────────────────────
 
-/// Load the embedded demo prototype store as a context (idempotent by hash).
-// [moved to src-tauri: tauri command wrapper]
-
-/// Run the Factorio executable to export data + locale + icon sprites, then
-/// cache and activate the result as a context.
-// [moved to src-tauri: tauri command wrapper]
-
-/// Load a pre-generated `data-raw-dump.json` as a cached context.
-// [moved to src-tauri: tauri command wrapper]
-
-/// All cached contexts + the active context id.
-// [moved to src-tauri: tauri command wrapper]
-
 /// Activate a context (loading its store from cache on demand) and broadcast.
 ///
 /// GUI 命令与消息层（`ApplicationAction::SetActiveContext`）共用：上下文的
@@ -1388,13 +1391,13 @@ pub(crate) async fn activate_context(
     let state = host.state();
     if let Some(id) = &id {
         // 读盘解析在锁外完成，只在最后短暂上锁装入。
-        ensure_context_loaded_offlock(&state, id).await?;
+        ensure_context_loaded_offlock(state, id).await?;
     }
-    let list = with_runtime(&state, |runtime| {
+    let list = with_runtime(state, |runtime| {
         runtime.set_active_context(id.clone());
-        Ok(context_list_with(runtime, &state))
+        Ok(context_list_with(runtime, state))
     })?;
-    emit_contexts_changed(host, &state, None);
+    emit_contexts_changed(host, state, None);
     Ok(list)
 }
 
@@ -1420,8 +1423,8 @@ pub(crate) async fn rename_registered_context(
                 .rename(&id, name)
                 .ok_or_else(|| format!("上下文 {id} 不存在"))?;
         }
-        emit_contexts_changed(&host, &state, None);
-        Ok(context_list(&state))
+        emit_contexts_changed(&host, state, None);
+        Ok(context_list(state))
     })
     .await
     .map_err(|error| error.to_string())?
@@ -1457,18 +1460,12 @@ pub(crate) async fn delete_registered_context(
             .lock()
             .map_err(|_| "runtime 锁已损坏（poisoned）".to_string())?;
         runtime.remove_context(&id);
-        emit_contexts_changed(&host, &state, Some(&runtime));
-        Ok(context_list_with(&runtime, &state))
+        emit_contexts_changed(&host, state, Some(&runtime));
+        Ok(context_list_with(&runtime, state))
     })
     .await
     .map_err(|error| error.to_string())?
 }
-
-/// Game icon PNG bytes for the given context's `<icons>/<ty>/<name>.png`
-/// （注册时由 `metatorio-icons` 自己渲染写盘；`ty = "utility"` 取的是**非原型** GUI 素材，
-/// 例如 `empty_module_slot`、`fuel_icon`）。图标缓存自包含，不依赖游戏目录。
-/// 前端显式传入 `context_id`（当前选中项目绑定的上下文，否则为激活上下文）。
-// [moved to src-tauri: tauri command wrapper]
 
 /// 匹配用的归一化：小写 + 去掉分隔符（连字符/下划线/空白，含全角与 Unicode 破折号）。
 ///
@@ -1771,7 +1768,10 @@ pub(crate) fn filter_index_entries(
 ///
 /// MCP 的只读工具（list_prototypes / suggest）因此不必让 agent 先 list_contexts
 /// 再回填 id——省略参数就查它正在操作的那个上下文。
-pub(crate) fn resolve_context_id(state: &AppState, requested: Option<&str>) -> Result<String, String> {
+pub(crate) fn resolve_context_id(
+    state: &AppState,
+    requested: Option<&str>,
+) -> Result<String, String> {
     if let Some(id) = requested.map(str::trim).filter(|id| !id.is_empty()) {
         return Ok(id.to_string());
     }
@@ -1785,7 +1785,10 @@ pub(crate) fn resolve_context_id(state: &AppState, requested: Option<&str>) -> R
 
 /// 全量目录索引（含 order fallback 排序）：GUI 的 `catalog_index` 命令与 MCP 的
 /// `list_prototypes` 工具共用，避免两条路径的条目形状漂移。
-pub(crate) async fn catalog_index_for(state: &AppState, context_id: &str) -> Result<CatalogIndex, String> {
+pub(crate) async fn catalog_index_for(
+    state: &AppState,
+    context_id: &str,
+) -> Result<CatalogIndex, String> {
     if context_id.is_empty() {
         return Ok(CatalogIndex {
             context_id: String::new(),
@@ -1842,13 +1845,6 @@ pub(crate) async fn suggest_for(
         .map_err(|error| error.to_string())
 }
 
-/// 全量目录索引（含 order fallback 排序）：一次拉取，前端本地筛选/分组。
-// [moved to src-tauri: tauri command wrapper]
-
-/// 星球隐式可用输入（严格供给下也免费；外部输入显式覆盖后不显示）：
-/// 供前端在外部输入面板用虚线展示。
-// [moved to src-tauri: tauri command wrapper]
-
 /// 建议候选：给定一条流，列出能产出/消耗它的机制（配方/矿点/燃料/发电机）。
 #[derive(Debug, Clone, Serialize)]
 pub struct Suggestion {
@@ -1858,15 +1854,6 @@ pub struct Suggestion {
     /// "producer" = 产出该流；"consumer" = 消耗该流（作为原料）。
     pub role: String,
 }
-
-/// 建议系统：为一条流生成候选机制（对应 egui 的"推荐配方/矿点"模态框）。
-// [moved to src-tauri: tauri command wrapper]
-
-/// 单个机制在当前规划条件下的展开流（系数 = 1 时的每秒产/耗）。
-///
-/// 返回 `(DualVar, f64)` 列表：正值产出、负值消耗。无求解结果时
-/// 前端用它展示"假定系数为 1 时产出的资源"（复刻原版 egui 机制卡）。
-// [moved to src-tauri: tauri command wrapper]
 
 /// [`mechanic_flow`] 命令与 MCP `get_planning_state {mechanic}` 的**共用实现**：
 /// 两条路径必须给出同一份数（GUI 机制卡上显示的、和 agent 读到的不能是两套算法）。
@@ -1919,24 +1906,6 @@ pub(crate) fn mechanic_flow_from_snapshot(
     }
     Ok(flow.into_iter().filter(|(_, v)| v.abs() > 1e-12).collect())
 }
-
-/// 太阳能机制的配平信息（平均出力 / 周期溢出总电量 / 蓄电器配比）。
-///
-/// 使用当前工厂环境的星球太阳能系数与昼夜周期（同求解路径）。
-// [moved to src-tauri: tauri command wrapper]
-
-/// 指定机器/插件塔允许的插件列表（机制卡手动插件选择的鉴权）。
-///
-/// 规则（与自动规划 `module_allowed` 一致）：
-/// - 显式插件类别（allowed_module_categories）非空时，插件类别必须在其中
-///   （留空 = 全部支持）；
-/// - 禁止的效果类型（allowed_effects）缺失/为空时，插件对应效果属性为
-///   正面（≠0）即被拒绝；配方机制还叠加配方的 allow_speed/allow_productivity
-///   等开关。
-///
-/// `machine_kind`: "machine" | "mining-machine" | "beacon"。
-/// `recipe`: 可选配方名（仅 recipe 机制传入；采矿/插件塔为 None）。
-// [moved to src-tauri: tauri command wrapper]
 
 /// 生成候选机制（与 suggest 命令共用；AutoPlan 也用它）。
 ///
@@ -2077,7 +2046,9 @@ pub(crate) fn energy_source_kind(source: &metatorio_data::types::EnergySource) -
 
 /// Burner 能量源的燃料类别；非 burner 能量源返回空。供前端燃料选择筛选
 /// burner 能量源的燃料类别（配合 getDetail 返回）。
-pub(crate) fn burner_fuel_categories_of(source: &metatorio_data::types::EnergySource) -> Vec<String> {
+pub(crate) fn burner_fuel_categories_of(
+    source: &metatorio_data::types::EnergySource,
+) -> Vec<String> {
     match source {
         metatorio_data::types::EnergySource::Burner(burner) => burner.fuel_categories.clone(),
         _ => Vec::new(),
@@ -2335,9 +2306,6 @@ pub(crate) fn catalog_index_from_store(
     out
 }
 
-/// 悬停详情：按需拉取，前端缓存。
-// [moved to src-tauri: tauri command wrapper]
-
 pub(crate) fn ingredient_flow(ingredient: &metatorio_data::types::Ingredient) -> FlowAmount {
     use metatorio_data::types::Ingredient;
     match ingredient {
@@ -2407,19 +2375,6 @@ pub(crate) fn product_flow(product: &metatorio_data::types::Product) -> FlowAmou
     }
 }
 
-/// Accept one user message and execute its side effects.
-///
-/// 锁纪律：reducer 在**短临界区**内跑完即放锁；随后的 `RuntimeCommand` 各自
-/// 按需短暂上锁（求解/落盘/载入上下文都在锁外进行）。这样 MCP 工具调用与
-/// GUI 交互、以及不同工厂的求解之间不再互相阻塞。
-// [moved to src-tauri: tauri command wrapper]
-
-/// Current serializable document snapshot.
-// [moved to src-tauri: tauri command wrapper]
-
-/// 撤销/重做可用性（前端启动时初始化按钮态；此后每次 dispatch 的回执里也带）。
-// [moved to src-tauri: tauri command wrapper]
-
 /// 在阻塞线程池里以 `&mut Runtime` 执行一段逻辑（用于把重计算移出主线程）。
 pub(crate) async fn run_blocking<T: Send + 'static>(
     host: &Arc<dyn Host>,
@@ -2438,43 +2393,7 @@ pub(crate) async fn run_blocking<T: Send + 'static>(
     .map_err(|error| error.to_string())?
 }
 
-/// 项目可达性快照（选择器过滤用）：当前可达对象集合。
-///
-/// 由 runtime 用项目的用户显式覆盖（marked accessible/inaccessible、
-/// 里程碑、无视可达性）经 core 的 `compute_accessibility` 计算并缓存；
-/// `all_accessible` 时返回全部对象。项目未绑定上下文时返回错误（前端
-/// 应在此情况下不做可达性过滤）。
-// [moved to src-tauri: tauri command wrapper]
-
-/// 里程碑节点按依赖拓扑排序（依赖在前），供 UI 按序展示。
-// [moved to src-tauri: tauri command wrapper]
-
-/// 面向前端的产能视图：自动推算 + 用户覆盖，按来源（auto/user）区分，
-/// 供 UI 以虚线边框标注用户指定项。
-// [moved to src-tauri: tauri command wrapper]
-
 // ── Persistence ───────────────────────────────────────────────────
-
-/// OS file dialog for the Factorio executable (game-context loading).
-// [moved to src-tauri: tauri command wrapper]
-
-/// OS file dialog for a pre-generated `data-raw-dump.json`.
-// [moved to src-tauri: tauri command wrapper]
-
-/// OS folder dialog for a Factorio mod directory.
-// [moved to src-tauri: tauri command wrapper]
-
-/// OS 文件对话框：选一个工程文件路径。只返回路径——真正的导入走
-/// `ApplicationAction::OpenProject` 消息（`RuntimeCommand::LoadProject`），
-/// 这样 GUI 与 MCP agent 共用同一条导入路径。
-// [moved to src-tauri: tauri command wrapper]
-
-/// OS 文件对话框：选「另存为」的路径。只返回路径——写盘走
-/// `ApplicationAction::SaveProjectAs` 消息（`RuntimeCommand::Persist`）。
-// [moved to src-tauri: tauri command wrapper]
-
-/// 项目记忆的保存路径（未保存过返回 null），供界面显示"保存位置"。
-// [moved to src-tauri: tauri command wrapper]
 
 // ── Side effects ──────────────────────────────────────────────────
 
@@ -2935,7 +2854,11 @@ pub(crate) async fn factory_snapshot(
 ///
 /// 序列化 + 文件 IO 都不持 runtime 锁（大工程 JSON 序列化可能有几十毫秒，
 /// 不该阻塞 MCP / GUI 的其它交互）。
-pub(crate) async fn persist_project(state: &AppState, project: ProjectId, path: String) -> Result<(), String> {
+pub(crate) async fn persist_project(
+    state: &AppState,
+    project: ProjectId,
+    path: String,
+) -> Result<(), String> {
     let document = with_runtime(state, |runtime| {
         runtime
             .document_for_save(project)
@@ -3532,6 +3455,600 @@ pub(crate) async fn ensure_context_for_project_offlock(
     Ok(())
 }
 
+// ── 命令实现（原先的 #[tauri::command]，现由 src-tauri 的薄包装调用）──
+
+pub async fn load_bundled_dump(host: &Arc<dyn Host>) -> Result<ContextInfo, String> {
+    let state = host.state();
+    let info = register_context_and_activate(
+        state,
+        "内置示例".to_string(),
+        // 内嵌 dump：不知道它出自哪个游戏版本、开了哪些 mod —— 留空，不猜。
+        None,
+        Vec::new(),
+        DEMO_DUMP.as_bytes(),
+        None,
+        IconSource::None,
+    )
+    .await?;
+    emit_contexts_changed(host, state, None);
+    Ok(info)
+}
+
+pub async fn load_game_context(
+    host: &Arc<dyn Host>,
+    executable_path: String,
+    mod_dir: Option<String>,
+) -> Result<ContextInfo, String> {
+    let state = host.state();
+    let info =
+        load_game_context_and_activate(host, state, &executable_path, mod_dir.as_deref()).await?;
+    emit_contexts_changed(host, state, None);
+    Ok(info)
+}
+
+pub async fn load_dump(host: &Arc<dyn Host>, path: String) -> Result<ContextInfo, String> {
+    // 读盘 + 目录探测放在阻塞线程池（dump 可能几十 MB）。
+    let (name, raw, locale_raw, icon) = tokio::task::spawn_blocking(move || {
+        let raw = std::fs::read(&path).map_err(|error| error.to_string())?;
+        let name = Path::new(&path)
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or("dump")
+            .to_string();
+        // 翻译：dump 旁的游戏导出目录里通常有多个 `{category}-locale.json`。
+        let locale_raw = {
+            let map = Path::new(&path)
+                .parent()
+                .map(collect_locale_map)
+                .unwrap_or_default();
+            if map.is_empty() {
+                None
+            } else {
+                serde_json::to_vec(&map).ok()
+            }
+        };
+        // 图标根：优先 dump 旁的 icons/（旧约定），否则 dump 所在目录本身
+        // （导出时类型目录直接位于 script-output 根下）。
+        let icon = match Path::new(&path).parent() {
+            Some(parent) => {
+                let sibling = parent.join("icons");
+                if sibling.is_dir() {
+                    IconSource::Copy(sibling)
+                } else if parent.join("item").is_dir() {
+                    IconSource::Copy(parent.to_path_buf())
+                } else {
+                    IconSource::None
+                }
+            }
+            None => IconSource::None,
+        };
+        Ok::<_, String>((name, raw, locale_raw, icon))
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    let state = host.state();
+    // 用户自备 dump：不知道游戏版本与 mod 名单（dump 里没有这些信息）——留空，不猜。
+    let info = register_context_and_activate(
+        state,
+        name,
+        None,
+        Vec::new(),
+        &raw,
+        locale_raw.as_deref(),
+        icon,
+    )
+    .await?;
+    emit_contexts_changed(host, state, None);
+    Ok(info)
+}
+
+pub fn list_contexts(state: &AppState) -> ContextList {
+    context_list(state)
+}
+
+pub fn icon(state: &AppState, ty: String, name: String, context_id: String) -> Option<Vec<u8>> {
+    if context_id.is_empty() {
+        return None;
+    }
+    let cache_root = {
+        let registry = state.contexts.lock().ok()?;
+        registry.icon_root(&context_id)
+    };
+    if !cache_root.is_dir() {
+        return None;
+    }
+    let candidates: Vec<String> = if ty == "quality" {
+        // 品质图标只有 quality/ 目录；回退到 item/entity 会显示错误的物品图标。
+        vec![format!("quality/{name}.png")]
+    } else if ty == "planet" {
+        // Factorio 的 --dump-icon-sprites 把星球图标导出到 space-location/
+        // 目录（星球原型属于 space-location 类型），而不是 planet/。
+        vec![
+            format!("space-location/{name}.png"),
+            format!("planet/{name}.png"),
+            format!("item/{name}.png"),
+            format!("entity/{name}.png"),
+        ]
+    } else {
+        vec![
+            format!("{ty}/{name}.png"),
+            format!("item/{name}.png"),
+            format!("entity/{name}.png"),
+        ]
+    };
+    for candidate in candidates {
+        let path = cache_root.join(candidate);
+        if path.is_file()
+            && let Ok(bytes) = std::fs::read(path)
+        {
+            return Some(bytes);
+        }
+    }
+    None
+}
+
+pub async fn catalog_index(
+    host: &Arc<dyn Host>,
+    context_id: String,
+) -> Result<CatalogIndex, String> {
+    let state = host.state();
+    catalog_index_for(state, &context_id).await
+}
+
+pub async fn implicit_sources(
+    host: &Arc<dyn Host>,
+    project: ProjectId,
+    factory: FactoryId,
+) -> Result<Vec<DualVar>, String> {
+    let state = host.state();
+    let snapshot = factory_snapshot(state, project, factory).await?;
+    tokio::task::spawn_blocking(move || {
+        let factory_doc = &snapshot.factory_doc;
+        let Some(planet) = factory_doc.settings.planet.as_deref() else {
+            return Vec::new();
+        };
+        let mut implicit =
+            metatorio_runtime::planet::planet_autoplaced_flows(&snapshot.store, planet);
+        for input in &factory_doc.external_inputs {
+            implicit.shift_remove(&input.flow);
+        }
+        let mut keys: Vec<DualVar> = implicit.keys().cloned().collect();
+        keys.sort_by(|a, b| format!("{a:?}").cmp(&format!("{b:?}")));
+        keys
+    })
+    .await
+    .map_err(|error| error.to_string())
+}
+
+pub async fn suggest(
+    host: &Arc<dyn Host>,
+    context_id: String,
+    flow: DualVar,
+) -> Result<Vec<Suggestion>, String> {
+    let state = host.state();
+    suggest_for(state, &context_id, flow).await
+}
+
+pub async fn mechanic_flow(
+    host: &Arc<dyn Host>,
+    project: ProjectId,
+    factory: FactoryId,
+    mechanic: MechanicId,
+) -> Result<Vec<(DualVar, f64)>, String> {
+    let state = host.state();
+    mechanic_flow_for(state, project, factory, mechanic).await
+}
+
+pub async fn solar_balance(
+    host: &Arc<dyn Host>,
+    project: ProjectId,
+    factory: FactoryId,
+    mechanic: MechanicId,
+) -> Result<Option<metatorio_core::SolarBalance>, String> {
+    let state = host.state();
+    let snapshot = factory_snapshot(state, project, factory).await?;
+    tokio::task::spawn_blocking(move || {
+        let accessibility = snapshot.resolve_accessibility();
+        let store = &snapshot.store;
+        let factory_doc = &snapshot.factory_doc;
+        let entry = factory_doc
+            .mechanics
+            .iter()
+            .find(|entry| entry.id == mechanic)
+            .ok_or("机制不存在")?;
+        let Mechanic::Solar(mechanic) = &entry.mechanic else {
+            return Ok(None);
+        };
+        let mut game = metatorio_runtime::solve::make_game_state_with_accessibility(
+            store,
+            &snapshot.project_doc,
+            &accessibility,
+        );
+        metatorio_runtime::solve::apply_environment_to_game_state(
+            store,
+            &mut game,
+            factory_doc.settings.planet.as_deref(),
+            factory_doc.settings.surface.as_deref(),
+        );
+        let context = metatorio_core::Context::new(store, &game);
+        Ok(metatorio_core::solar_balance(&context, mechanic))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+pub async fn allowed_modules(
+    host: &Arc<dyn Host>,
+    context_id: String,
+    machine_kind: String,
+    machine: String,
+    recipe: Option<String>,
+) -> Result<Vec<String>, String> {
+    if context_id.is_empty() {
+        return Ok(Vec::new());
+    }
+    let state = host.state();
+    let store = context_store_arc(state, &context_id).await?;
+    tokio::task::spawn_blocking(move || {
+        let Some(record) = store.get(PrototypeGroup::Entity, &machine) else {
+            return Vec::new();
+        };
+        // 收集机器/采矿机/插件塔的插件类别与效果限制。
+        let (categories, effects) = match machine_kind.as_str() {
+            "mining-machine" => record
+                .component::<MiningDrillComponent>()
+                .map(|drill| {
+                    (
+                        drill.allowed_module_categories.clone(),
+                        drill.allowed_effects,
+                    )
+                })
+                .unwrap_or((None, None)),
+            "beacon" => record
+                .component::<BeaconComponent>()
+                .map(|beacon| {
+                    (
+                        beacon.allowed_module_categories.clone(),
+                        beacon.allowed_effects,
+                    )
+                })
+                .unwrap_or((None, None)),
+            _ => record
+                .component::<CraftingMachineComponent>()
+                .map(|machine| {
+                    (
+                        machine.allowed_module_categories.clone(),
+                        machine.allowed_effects,
+                    )
+                })
+                .unwrap_or((None, None)),
+        };
+        let recipe_component = recipe.as_deref().and_then(|name| {
+            store
+                .get(PrototypeGroup::Recipe, name)
+                .and_then(|record| record.component::<RecipeComponent>())
+        });
+        let mut out = Vec::new();
+        for item_record in store.group(PrototypeGroup::Item) {
+            let Some(module) = item_record.component::<ModuleComponent>() else {
+                continue;
+            };
+            if auto_plan::module_allowed(module, &categories, &effects, recipe_component) {
+                out.push(item_record.name.clone());
+            }
+        }
+        // 稳定排序（catalog 顺序由 order 决定，这里按名称保证可预测）。
+        out.sort();
+        out
+    })
+    .await
+    .map_err(|error| error.to_string())
+}
+
+pub fn prototype_detail(
+    state: &AppState,
+    context_id: String,
+    kind: String,
+    name: String,
+) -> Result<Option<PrototypeDetail>, String> {
+    let mut runtime = state
+        .runtime
+        .lock()
+        .map_err(|_| "runtime 锁已损坏（poisoned）".to_string())?;
+    if context_id.is_empty() {
+        return Ok(None);
+    }
+    ensure_context_loaded(state, &mut runtime, &context_id)?;
+    let store = runtime
+        .context_store_by_id(&context_id)
+        .ok_or("上下文未载入")?;
+    let record = match kind.as_str() {
+        "item" | "module" => store.get(PrototypeGroup::Item, &name),
+        "fluid" => store.get(PrototypeGroup::Fluid, &name),
+        "recipe" => store.get(PrototypeGroup::Recipe, &name),
+        "technology" => store.get(PrototypeGroup::Technology, &name),
+        "planet" => store.get(PrototypeGroup::Planet, &name),
+        "surface" => store.get(PrototypeGroup::Surface, &name),
+        "quality" => store.get(PrototypeGroup::Quality, &name),
+        _ => store.get(PrototypeGroup::Entity, &name),
+    };
+    let Some(record) = record else {
+        return Ok(None);
+    };
+    let locale = locale_map_of(state, &context_id);
+    let mut detail = PrototypeDetail {
+        name: record.name.clone(),
+        localized_name: localized_name(&locale, &kind, &record.name),
+        kind: kind.clone(),
+        ..Default::default()
+    };
+    if let Some(base) = record.component::<PrototypeBaseComponent>() {
+        detail.subgroup = base.subgroup.clone();
+        detail.order = base.order.clone();
+        detail.hidden = base.hidden;
+    }
+    if let Some(item) = record.component::<ItemComponent>() {
+        detail.stack_size = Some(f64::from(item.stack_size));
+        detail.fuel_value_j = item.fuel_value.map(|value| value.amount);
+        detail.fuel_categories = item.fuel_categories.clone();
+        detail.burnt_result = item.burnt_result.clone();
+        detail.spoil_result = item.spoil_result.clone().unwrap_or_default();
+        detail.spoil_ticks = item.spoil_ticks;
+        detail.plant_result = item.plant_result.clone().unwrap_or_default();
+        detail.launchable = !item.rocket_launch_products.is_empty();
+        detail.rocket_launch_products = item
+            .rocket_launch_products
+            .iter()
+            .map(|product| product.name.clone())
+            .collect();
+    }
+    if let Some(recipe) = record.component::<RecipeComponent>() {
+        detail.categories = effective_recipe_categories(recipe);
+        detail.category = Some(detail.categories.join(", "));
+        detail.energy_required = Some(recipe.energy_required);
+        detail.maximum_productivity = Some(recipe.maximum_productivity);
+        detail.surface_conditions = recipe
+            .surface_conditions
+            .iter()
+            .map(surface_condition_text)
+            .collect();
+        detail.ingredients = recipe.ingredients.iter().map(ingredient_flow).collect();
+        detail.results = recipe.results.iter().map(product_flow).collect();
+    }
+    if let Some(machine) = record.component::<CraftingMachineComponent>() {
+        detail.crafting_speed = Some(machine.crafting_speed);
+        detail.module_slots = machine.module_slots;
+        detail.allowed_module_categories = machine
+            .allowed_module_categories
+            .clone()
+            .unwrap_or_default();
+        detail.energy_usage_j = Some(machine.energy_usage.amount);
+        detail.categories = machine.crafting_categories.clone();
+        detail.machine_energy_source = Some(energy_source_kind(&machine.energy_source).to_string());
+        detail.burner_fuel_categories = burner_fuel_categories_of(&machine.energy_source);
+        let receiver = machine.effect_receiver.as_ref();
+        detail.uses_beacon_effects =
+            Some(receiver.is_none_or(|receiver| receiver.uses_beacon_effects));
+        detail.uses_module_effects =
+            Some(receiver.is_none_or(|receiver| receiver.uses_module_effects));
+    }
+    if let Some(drill) = record.component::<MiningDrillComponent>() {
+        detail.categories = drill.resource_categories.clone();
+        detail.module_slots = drill.module_slots;
+        detail.allowed_module_categories =
+            drill.allowed_module_categories.clone().unwrap_or_default();
+        detail.machine_energy_source = Some(energy_source_kind(&drill.energy_source).to_string());
+        detail.burner_fuel_categories = burner_fuel_categories_of(&drill.energy_source);
+        let receiver = drill.effect_receiver.as_ref();
+        detail.uses_beacon_effects =
+            Some(receiver.is_none_or(|receiver| receiver.uses_beacon_effects));
+        detail.uses_module_effects =
+            Some(receiver.is_none_or(|receiver| receiver.uses_module_effects));
+    }
+    if let Some(beacon) = record.component::<BeaconComponent>() {
+        detail.beacon_module_slots = Some(beacon.module_slots);
+        detail.allowed_module_categories =
+            beacon.allowed_module_categories.clone().unwrap_or_default();
+    }
+    if let Some(r#gen) = record.component::<GeneratorComponent>() {
+        detail.effectivity = Some(r#gen.effectivity);
+        detail.max_power_output_j = r#gen.max_power_output.map(|value| value.amount);
+        detail.maximum_temperature = Some(r#gen.maximum_temperature);
+        detail.burns_fluid = Some(r#gen.burns_fluid);
+        detail.fluid_usage_per_tick = Some(r#gen.fluid_usage_per_tick);
+        detail.fluid_filter = r#gen.fluid_box.filter.clone();
+    }
+    if let Some(burner_gen) = record.component::<BurnerGeneratorComponent>() {
+        detail.max_power_output_j = Some(burner_gen.max_power_output.amount);
+        detail.fuel_categories = burner_gen.burner.fuel_categories.clone();
+        detail.machine_energy_source = Some("burner".to_string());
+        detail.burner_fuel_categories = burner_gen.burner.fuel_categories.clone();
+    }
+    if let Some(boiler) = record.component::<BoilerComponent>() {
+        detail.energy_consumption_j = Some(boiler.energy_consumption.amount);
+        detail.target_temperature = boiler.target_temperature;
+        detail.boiler_mode = boiler.mode.map(|mode| {
+            match mode {
+                metatorio_data::types::BoilerMode::HeatFluidInside => "heat-fluid-inside",
+                metatorio_data::types::BoilerMode::OutputToSeparatePipe => {
+                    "output-to-separate-pipe"
+                }
+            }
+            .to_string()
+        });
+        detail.fluid_filter = boiler.fluid_box.filter.clone();
+        detail.machine_energy_source = Some(energy_source_kind(&boiler.energy_source).to_string());
+        detail.burner_fuel_categories = burner_fuel_categories_of(&boiler.energy_source);
+    }
+    if let Some(reactor) = record.component::<ReactorComponent>() {
+        detail.heat_output_j = Some(reactor.consumption.amount);
+        detail.neighbour_bonus = Some(reactor.neighbour_bonus);
+        detail.heating_radius = Some(reactor.heating_radius);
+        detail.machine_energy_source = Some(energy_source_kind(&reactor.energy_source).to_string());
+        detail.burner_fuel_categories = burner_fuel_categories_of(&reactor.energy_source);
+    }
+    if let Some(resource) = record.component::<ResourceEntityComponent>() {
+        detail.categories = vec![effective_resource_category(resource)];
+    }
+    if let Some(fluid) = record.component::<FluidComponent>() {
+        detail.default_temperature = Some(fluid.default_temperature);
+        // 流体的最高温度。前端新建流体流时用它做默认区间上界
+        // （[default_temperature, max_temperature]），HoverCard 的"最高温度"也一并生效。
+        // `max_temperature()` 在没声明时回落到默认温度 → 区间退化成单点，符合"没有更高
+        // 温度可取"的实际语义。
+        detail.maximum_temperature = Some(fluid.max_temperature());
+    }
+    if let Some(quality) = record.component::<QualityComponent>() {
+        detail.quality_level = Some(quality.level);
+        detail.quality_next = quality.next.clone();
+        detail.quality_next_probability = Some(quality.next_probability);
+        detail.quality_crafting_speed = quality.crafting_machine_speed_multiplier;
+        detail.quality_module_speed = quality.module_speed_multiplier;
+        detail.quality_module_productivity = quality.module_productivity_multiplier;
+    }
+    Ok(Some(detail))
+}
+
+pub async fn dispatch(host: &Arc<dyn Host>, message: AppMessage) -> Result<DispatchResult, String> {
+    let outcome = {
+        let state = host.state();
+        let mut runtime = state
+            .runtime
+            .lock()
+            .map_err(|_| "runtime 锁已损坏（poisoned）".to_string())?;
+        runtime
+            .dispatch(message)
+            .map_err(|error| error.to_string())?
+    };
+    // 与 MCP 的 `dispatch` 工具共用同一套汇总（`run_commands`）：求解产出、
+    // 命令序列化、失败收集。求解/上下文类命令自己会 emit（`solve-error` /
+    // `context-error`），其余（落盘、关闭项目…）只有回执——丢弃回执就等于
+    // **失败在界面上完全不可见**（例如自动保存写盘失败，用户以为已保存）。
+    let state = host.state();
+    let state_ref = &state;
+    let app_ref = host;
+    let (_solve, _commands, errors) = run_commands(&outcome.commands, move |command| {
+        // 闭包返回值不能借用参数，故克隆命令进 async 块。
+        let command = command.clone();
+        async move { execute_command(app_ref, state_ref, &command).await }
+    })
+    .await;
+    if !errors.is_empty() {
+        emit(host, "command-error", errors);
+    }
+    Ok(outcome)
+}
+
+pub async fn get_document(host: &Arc<dyn Host>) -> Result<AppDocument, String> {
+    run_blocking(host, |runtime| Ok(runtime.state.document.clone())).await
+}
+
+pub async fn history_state(
+    host: &Arc<dyn Host>,
+) -> Result<metatorio_runtime::HistoryStatus, String> {
+    run_blocking(host, |runtime| Ok(runtime.state.history_status())).await
+}
+
+pub async fn accessibility(
+    host: &Arc<dyn Host>,
+    project: ProjectId,
+) -> Result<Vec<Accessible>, String> {
+    let state = host.state();
+    ensure_context_for_project_offlock(state, project).await?;
+    // 锁内只取快照；可达性 BFS（py 上下文约 2.5s）在锁外算。
+    let snapshot = with_runtime(state, |runtime| {
+        runtime.project_snapshot(project).map_err(|e| e.to_string())
+    })?;
+    let (snapshot, accessibility, nodes) = tokio::task::spawn_blocking(move || {
+        let accessibility = snapshot.resolve_accessibility();
+        let nodes: Vec<Accessible> = accessibility.accessible().iter().cloned().collect();
+        (snapshot, accessibility, nodes)
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let _ = with_runtime(state, |runtime| {
+        runtime.cache_accessibility_if_current(
+            snapshot.project,
+            snapshot.revision,
+            snapshot.accessibility_epoch,
+            accessibility,
+        );
+        Ok(())
+    });
+    Ok(nodes)
+}
+
+pub async fn milestones_ordered(
+    host: &Arc<dyn Host>,
+    project: ProjectId,
+) -> Result<Vec<metatorio_runtime::Milestone>, String> {
+    let state = host.state();
+    ensure_context_for_project_offlock(state, project).await?;
+    let snapshot = with_runtime(state, |runtime| {
+        runtime.project_snapshot(project).map_err(|e| e.to_string())
+    })?;
+    tokio::task::spawn_blocking(move || metatorio_runtime::ordered_milestones(&snapshot))
+        .await
+        .map_err(|error| error.to_string())
+}
+
+pub async fn productivity(
+    host: &Arc<dyn Host>,
+    project: ProjectId,
+) -> Result<metatorio_runtime::ProductivityView, String> {
+    let state = host.state();
+    ensure_context_for_project_offlock(state, project).await?;
+    let snapshot = with_runtime(state, |runtime| {
+        runtime.project_snapshot(project).map_err(|e| e.to_string())
+    })?;
+    let (snapshot, accessibility, view) = tokio::task::spawn_blocking(move || {
+        let accessibility = snapshot.resolve_accessibility();
+        let view = metatorio_runtime::productivity_view(&snapshot, &accessibility);
+        (snapshot, accessibility, view)
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    let _ = with_runtime(state, |runtime| {
+        runtime.cache_accessibility_if_current(
+            snapshot.project,
+            snapshot.revision,
+            snapshot.accessibility_epoch,
+            accessibility,
+        );
+        Ok(())
+    });
+    Ok(view)
+}
+
+pub fn project_save_path(state: &AppState, project: ProjectId) -> Option<String> {
+    state.project_paths.lock().ok()?.get(&project).cloned()
+}
+
+/// 启动时恢复上下文注册表并激活最近使用的上下文（Tauri setup 与 headless 共用）。
+pub fn restore_contexts(host: &Arc<dyn Host>) {
+    let state = host.state();
+    let dir = host.app_data_dir().join("contexts");
+    {
+        let mut registry = state.contexts.lock().expect("contexts 锁");
+        registry.dir = dir;
+        registry.scan();
+    }
+    let newest: Option<String> = state.contexts.lock().ok().and_then(|registry| {
+        registry
+            .meta
+            .values()
+            .max_by_key(|meta| meta.created_at)
+            .map(|meta| meta.id.clone())
+    });
+    if let Some(id) = newest {
+        let mut runtime = state.runtime.lock().expect("runtime 锁");
+        if let Err(error) = ensure_context_loaded(state, &mut runtime, &id) {
+            eprintln!("载入缓存上下文失败：{error}");
+        } else {
+            runtime.set_active_context(Some(id));
+        }
+    }
+}
 
 // [moved to src-tauri: run()]
 
@@ -3689,7 +4206,9 @@ mod tests {
         assert_eq!((image.width, image.height), (64, 64));
         let opaque = image
             .pixels
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .filter(|pixel| pixel[3] > 0)
             .count();
         assert!(opaque > 100, "渲染结果几乎是空的：{opaque} 个非透明像素");
@@ -3836,10 +4355,14 @@ mod tests {
     #[test]
     fn context_reference_guard_is_exact() {
         let mut document = AppDocument::default();
-        let mut pinned = metatorio_runtime::document::ProjectDocument::default();
-        pinned.context_id = Some("hash-a".to_string());
-        let mut follows_active = metatorio_runtime::document::ProjectDocument::default();
-        follows_active.context_id = None;
+        let pinned = metatorio_runtime::document::ProjectDocument {
+            context_id: Some("hash-a".to_string()),
+            ..Default::default()
+        };
+        let follows_active = metatorio_runtime::document::ProjectDocument {
+            context_id: None,
+            ..Default::default()
+        };
         document.projects.push(pinned);
         document.projects.push(follows_active);
 
@@ -4658,602 +5181,3 @@ mod tests {
         );
     }
 }
-
-
-
-
-// ── 命令实现（原先的 #[tauri::command]，现由 src-tauri 的薄包装调用）──
-
-pub async fn load_bundled_dump(host: &Arc<dyn Host>) -> Result<ContextInfo, String> {
-    let state = host.state();
-    let info = register_context_and_activate(
-        &state,
-        "内置示例".to_string(),
-        // 内嵌 dump：不知道它出自哪个游戏版本、开了哪些 mod —— 留空，不猜。
-        None,
-        Vec::new(),
-        DEMO_DUMP.as_bytes(),
-        None,
-        IconSource::None,
-    )
-    .await?;
-    emit_contexts_changed(host, &state, None);
-    Ok(info)
-}
-
-pub async fn load_game_context(
-    host: &Arc<dyn Host>,
-    executable_path: String,
-    mod_dir: Option<String>,
-) -> Result<ContextInfo, String> {
-    let state = host.state();
-    let info =
-        load_game_context_and_activate(host, &state, &executable_path, mod_dir.as_deref()).await?;
-    emit_contexts_changed(host, &state, None);
-    Ok(info)
-}
-
-pub async fn load_dump(host: &Arc<dyn Host>, path: String) -> Result<ContextInfo, String> {
-    // 读盘 + 目录探测放在阻塞线程池（dump 可能几十 MB）。
-    let (name, raw, locale_raw, icon) = tokio::task::spawn_blocking(move || {
-        let raw = std::fs::read(&path).map_err(|error| error.to_string())?;
-        let name = Path::new(&path)
-            .file_stem()
-            .and_then(|stem| stem.to_str())
-            .unwrap_or("dump")
-            .to_string();
-        // 翻译：dump 旁的游戏导出目录里通常有多个 `{category}-locale.json`。
-        let locale_raw = {
-            let map = Path::new(&path)
-                .parent()
-                .map(collect_locale_map)
-                .unwrap_or_default();
-            if map.is_empty() {
-                None
-            } else {
-                serde_json::to_vec(&map).ok()
-            }
-        };
-        // 图标根：优先 dump 旁的 icons/（旧约定），否则 dump 所在目录本身
-        // （导出时类型目录直接位于 script-output 根下）。
-        let icon = match Path::new(&path).parent() {
-            Some(parent) => {
-                let sibling = parent.join("icons");
-                if sibling.is_dir() {
-                    IconSource::Copy(sibling)
-                } else if parent.join("item").is_dir() {
-                    IconSource::Copy(parent.to_path_buf())
-                } else {
-                    IconSource::None
-                }
-            }
-            None => IconSource::None,
-        };
-        Ok::<_, String>((name, raw, locale_raw, icon))
-    })
-    .await
-    .map_err(|error| error.to_string())??;
-    let state = host.state();
-    // 用户自备 dump：不知道游戏版本与 mod 名单（dump 里没有这些信息）——留空，不猜。
-    let info = register_context_and_activate(
-        &state,
-        name,
-        None,
-        Vec::new(),
-        &raw,
-        locale_raw.as_deref(),
-        icon,
-    )
-    .await?;
-    emit_contexts_changed(host, &state, None);
-    Ok(info)
-}
-
-pub fn list_contexts(state: &AppState) -> ContextList {
-    context_list(&state)
-}
-
-pub fn icon(
-    state: &AppState,
-    ty: String,
-    name: String,
-    context_id: String,
-) -> Option<Vec<u8>> {
-    if context_id.is_empty() {
-        return None;
-    }
-    let cache_root = {
-        let registry = state.contexts.lock().ok()?;
-        registry.icon_root(&context_id)
-    };
-    if !cache_root.is_dir() {
-        return None;
-    }
-    let candidates: Vec<String> = if ty == "quality" {
-        // 品质图标只有 quality/ 目录；回退到 item/entity 会显示错误的物品图标。
-        vec![format!("quality/{name}.png")]
-    } else if ty == "planet" {
-        // Factorio 的 --dump-icon-sprites 把星球图标导出到 space-location/
-        // 目录（星球原型属于 space-location 类型），而不是 planet/。
-        vec![
-            format!("space-location/{name}.png"),
-            format!("planet/{name}.png"),
-            format!("item/{name}.png"),
-            format!("entity/{name}.png"),
-        ]
-    } else {
-        vec![
-            format!("{ty}/{name}.png"),
-            format!("item/{name}.png"),
-            format!("entity/{name}.png"),
-        ]
-    };
-    for candidate in candidates {
-        let path = cache_root.join(candidate);
-        if path.is_file()
-            && let Ok(bytes) = std::fs::read(path)
-        {
-            return Some(bytes);
-        }
-    }
-    None
-}
-
-pub async fn catalog_index(host: &Arc<dyn Host>, context_id: String) -> Result<CatalogIndex, String> {
-    let state = host.state();
-    catalog_index_for(&state, &context_id).await
-}
-
-pub async fn implicit_sources(
-    host: &Arc<dyn Host>,
-    project: ProjectId,
-    factory: FactoryId,
-) -> Result<Vec<DualVar>, String> {
-    let state = host.state();
-    let snapshot = factory_snapshot(&state, project, factory).await?;
-    tokio::task::spawn_blocking(move || {
-        let factory_doc = &snapshot.factory_doc;
-        let Some(planet) = factory_doc.settings.planet.as_deref() else {
-            return Vec::new();
-        };
-        let mut implicit =
-            metatorio_runtime::planet::planet_autoplaced_flows(&snapshot.store, planet);
-        for input in &factory_doc.external_inputs {
-            implicit.shift_remove(&input.flow);
-        }
-        let mut keys: Vec<DualVar> = implicit.keys().cloned().collect();
-        keys.sort_by(|a, b| format!("{a:?}").cmp(&format!("{b:?}")));
-        keys
-    })
-    .await
-    .map_err(|error| error.to_string())
-}
-
-pub async fn suggest(
-    host: &Arc<dyn Host>,
-    context_id: String,
-    flow: DualVar,
-) -> Result<Vec<Suggestion>, String> {
-    let state = host.state();
-    suggest_for(&state, &context_id, flow).await
-}
-
-pub async fn mechanic_flow(
-    host: &Arc<dyn Host>,
-    project: ProjectId,
-    factory: FactoryId,
-    mechanic: MechanicId,
-) -> Result<Vec<(DualVar, f64)>, String> {
-    let state = host.state();
-    mechanic_flow_for(&state, project, factory, mechanic).await
-}
-
-pub async fn solar_balance(
-    host: &Arc<dyn Host>,
-    project: ProjectId,
-    factory: FactoryId,
-    mechanic: MechanicId,
-) -> Result<Option<metatorio_core::SolarBalance>, String> {
-    let state = host.state();
-    let snapshot = factory_snapshot(&state, project, factory).await?;
-    tokio::task::spawn_blocking(move || {
-        let accessibility = snapshot.resolve_accessibility();
-        let store = &snapshot.store;
-        let factory_doc = &snapshot.factory_doc;
-        let entry = factory_doc
-            .mechanics
-            .iter()
-            .find(|entry| entry.id == mechanic)
-            .ok_or("机制不存在")?;
-        let Mechanic::Solar(mechanic) = &entry.mechanic else {
-            return Ok(None);
-        };
-        let mut game = metatorio_runtime::solve::make_game_state_with_accessibility(
-            store,
-            &snapshot.project_doc,
-            &accessibility,
-        );
-        metatorio_runtime::solve::apply_environment_to_game_state(
-            store,
-            &mut game,
-            factory_doc.settings.planet.as_deref(),
-            factory_doc.settings.surface.as_deref(),
-        );
-        let context = metatorio_core::Context::new(store, &game);
-        Ok(metatorio_core::solar_balance(&context, mechanic))
-    })
-    .await
-    .map_err(|error| error.to_string())?
-}
-
-pub async fn allowed_modules(
-    host: &Arc<dyn Host>,
-    context_id: String,
-    machine_kind: String,
-    machine: String,
-    recipe: Option<String>,
-) -> Result<Vec<String>, String> {
-    if context_id.is_empty() {
-        return Ok(Vec::new());
-    }
-    let state = host.state();
-    let store = context_store_arc(&state, &context_id).await?;
-    tokio::task::spawn_blocking(move || {
-        let Some(record) = store.get(PrototypeGroup::Entity, &machine) else {
-            return Vec::new();
-        };
-        // 收集机器/采矿机/插件塔的插件类别与效果限制。
-        let (categories, effects) = match machine_kind.as_str() {
-            "mining-machine" => record
-                .component::<MiningDrillComponent>()
-                .map(|drill| {
-                    (
-                        drill.allowed_module_categories.clone(),
-                        drill.allowed_effects,
-                    )
-                })
-                .unwrap_or((None, None)),
-            "beacon" => record
-                .component::<BeaconComponent>()
-                .map(|beacon| {
-                    (
-                        beacon.allowed_module_categories.clone(),
-                        beacon.allowed_effects,
-                    )
-                })
-                .unwrap_or((None, None)),
-            _ => record
-                .component::<CraftingMachineComponent>()
-                .map(|machine| {
-                    (
-                        machine.allowed_module_categories.clone(),
-                        machine.allowed_effects,
-                    )
-                })
-                .unwrap_or((None, None)),
-        };
-        let recipe_component = recipe.as_deref().and_then(|name| {
-            store
-                .get(PrototypeGroup::Recipe, name)
-                .and_then(|record| record.component::<RecipeComponent>())
-        });
-        let mut out = Vec::new();
-        for item_record in store.group(PrototypeGroup::Item) {
-            let Some(module) = item_record.component::<ModuleComponent>() else {
-                continue;
-            };
-            if auto_plan::module_allowed(module, &categories, &effects, recipe_component) {
-                out.push(item_record.name.clone());
-            }
-        }
-        // 稳定排序（catalog 顺序由 order 决定，这里按名称保证可预测）。
-        out.sort();
-        out
-    })
-    .await
-    .map_err(|error| error.to_string())
-}
-
-pub fn prototype_detail(
-    state: &AppState,
-    context_id: String,
-    kind: String,
-    name: String,
-) -> Result<Option<PrototypeDetail>, String> {
-    let mut runtime = state
-        .runtime
-        .lock()
-        .map_err(|_| "runtime 锁已损坏（poisoned）".to_string())?;
-    if context_id.is_empty() {
-        return Ok(None);
-    }
-    ensure_context_loaded(&state, &mut runtime, &context_id)?;
-    let store = runtime
-        .context_store_by_id(&context_id)
-        .ok_or("上下文未载入")?;
-    let record = match kind.as_str() {
-        "item" | "module" => store.get(PrototypeGroup::Item, &name),
-        "fluid" => store.get(PrototypeGroup::Fluid, &name),
-        "recipe" => store.get(PrototypeGroup::Recipe, &name),
-        "technology" => store.get(PrototypeGroup::Technology, &name),
-        "planet" => store.get(PrototypeGroup::Planet, &name),
-        "surface" => store.get(PrototypeGroup::Surface, &name),
-        "quality" => store.get(PrototypeGroup::Quality, &name),
-        _ => store.get(PrototypeGroup::Entity, &name),
-    };
-    let Some(record) = record else {
-        return Ok(None);
-    };
-    let locale = locale_map_of(&state, &context_id);
-    let mut detail = PrototypeDetail {
-        name: record.name.clone(),
-        localized_name: localized_name(&locale, &kind, &record.name),
-        kind: kind.clone(),
-        ..Default::default()
-    };
-    if let Some(base) = record.component::<PrototypeBaseComponent>() {
-        detail.subgroup = base.subgroup.clone();
-        detail.order = base.order.clone();
-        detail.hidden = base.hidden;
-    }
-    if let Some(item) = record.component::<ItemComponent>() {
-        detail.stack_size = Some(f64::from(item.stack_size));
-        detail.fuel_value_j = item.fuel_value.map(|value| value.amount);
-        detail.fuel_categories = item.fuel_categories.clone();
-        detail.burnt_result = item.burnt_result.clone();
-        detail.spoil_result = item.spoil_result.clone().unwrap_or_default();
-        detail.spoil_ticks = item.spoil_ticks;
-        detail.plant_result = item.plant_result.clone().unwrap_or_default();
-        detail.launchable = !item.rocket_launch_products.is_empty();
-        detail.rocket_launch_products = item
-            .rocket_launch_products
-            .iter()
-            .map(|product| product.name.clone())
-            .collect();
-    }
-    if let Some(recipe) = record.component::<RecipeComponent>() {
-        detail.categories = effective_recipe_categories(recipe);
-        detail.category = Some(detail.categories.join(", "));
-        detail.energy_required = Some(recipe.energy_required);
-        detail.maximum_productivity = Some(recipe.maximum_productivity);
-        detail.surface_conditions = recipe
-            .surface_conditions
-            .iter()
-            .map(surface_condition_text)
-            .collect();
-        detail.ingredients = recipe.ingredients.iter().map(ingredient_flow).collect();
-        detail.results = recipe.results.iter().map(product_flow).collect();
-    }
-    if let Some(machine) = record.component::<CraftingMachineComponent>() {
-        detail.crafting_speed = Some(machine.crafting_speed);
-        detail.module_slots = machine.module_slots;
-        detail.allowed_module_categories = machine
-            .allowed_module_categories
-            .clone()
-            .unwrap_or_default();
-        detail.energy_usage_j = Some(machine.energy_usage.amount);
-        detail.categories = machine.crafting_categories.clone();
-        detail.machine_energy_source = Some(energy_source_kind(&machine.energy_source).to_string());
-        detail.burner_fuel_categories = burner_fuel_categories_of(&machine.energy_source);
-        let receiver = machine.effect_receiver.as_ref();
-        detail.uses_beacon_effects =
-            Some(receiver.is_none_or(|receiver| receiver.uses_beacon_effects));
-        detail.uses_module_effects =
-            Some(receiver.is_none_or(|receiver| receiver.uses_module_effects));
-    }
-    if let Some(drill) = record.component::<MiningDrillComponent>() {
-        detail.categories = drill.resource_categories.clone();
-        detail.module_slots = drill.module_slots;
-        detail.allowed_module_categories =
-            drill.allowed_module_categories.clone().unwrap_or_default();
-        detail.machine_energy_source = Some(energy_source_kind(&drill.energy_source).to_string());
-        detail.burner_fuel_categories = burner_fuel_categories_of(&drill.energy_source);
-        let receiver = drill.effect_receiver.as_ref();
-        detail.uses_beacon_effects =
-            Some(receiver.is_none_or(|receiver| receiver.uses_beacon_effects));
-        detail.uses_module_effects =
-            Some(receiver.is_none_or(|receiver| receiver.uses_module_effects));
-    }
-    if let Some(beacon) = record.component::<BeaconComponent>() {
-        detail.beacon_module_slots = Some(beacon.module_slots);
-        detail.allowed_module_categories =
-            beacon.allowed_module_categories.clone().unwrap_or_default();
-    }
-    if let Some(r#gen) = record.component::<GeneratorComponent>() {
-        detail.effectivity = Some(r#gen.effectivity);
-        detail.max_power_output_j = r#gen.max_power_output.map(|value| value.amount);
-        detail.maximum_temperature = Some(r#gen.maximum_temperature);
-        detail.burns_fluid = Some(r#gen.burns_fluid);
-        detail.fluid_usage_per_tick = Some(r#gen.fluid_usage_per_tick);
-        detail.fluid_filter = r#gen.fluid_box.filter.clone();
-    }
-    if let Some(burner_gen) = record.component::<BurnerGeneratorComponent>() {
-        detail.max_power_output_j = Some(burner_gen.max_power_output.amount);
-        detail.fuel_categories = burner_gen.burner.fuel_categories.clone();
-        detail.machine_energy_source = Some("burner".to_string());
-        detail.burner_fuel_categories = burner_gen.burner.fuel_categories.clone();
-    }
-    if let Some(boiler) = record.component::<BoilerComponent>() {
-        detail.energy_consumption_j = Some(boiler.energy_consumption.amount);
-        detail.target_temperature = boiler.target_temperature;
-        detail.boiler_mode = boiler.mode.map(|mode| {
-            match mode {
-                metatorio_data::types::BoilerMode::HeatFluidInside => "heat-fluid-inside",
-                metatorio_data::types::BoilerMode::OutputToSeparatePipe => {
-                    "output-to-separate-pipe"
-                }
-            }
-            .to_string()
-        });
-        detail.fluid_filter = boiler.fluid_box.filter.clone();
-        detail.machine_energy_source = Some(energy_source_kind(&boiler.energy_source).to_string());
-        detail.burner_fuel_categories = burner_fuel_categories_of(&boiler.energy_source);
-    }
-    if let Some(reactor) = record.component::<ReactorComponent>() {
-        detail.heat_output_j = Some(reactor.consumption.amount);
-        detail.neighbour_bonus = Some(reactor.neighbour_bonus);
-        detail.heating_radius = Some(reactor.heating_radius);
-        detail.machine_energy_source = Some(energy_source_kind(&reactor.energy_source).to_string());
-        detail.burner_fuel_categories = burner_fuel_categories_of(&reactor.energy_source);
-    }
-    if let Some(resource) = record.component::<ResourceEntityComponent>() {
-        detail.categories = vec![effective_resource_category(resource)];
-    }
-    if let Some(fluid) = record.component::<FluidComponent>() {
-        detail.default_temperature = Some(fluid.default_temperature);
-        // 流体的最高温度。前端新建流体流时用它做默认区间上界
-        // （[default_temperature, max_temperature]），HoverCard 的"最高温度"也一并生效。
-        // `max_temperature()` 在没声明时回落到默认温度 → 区间退化成单点，符合"没有更高
-        // 温度可取"的实际语义。
-        detail.maximum_temperature = Some(fluid.max_temperature());
-    }
-    if let Some(quality) = record.component::<QualityComponent>() {
-        detail.quality_level = Some(quality.level);
-        detail.quality_next = quality.next.clone();
-        detail.quality_next_probability = Some(quality.next_probability);
-        detail.quality_crafting_speed = quality.crafting_machine_speed_multiplier;
-        detail.quality_module_speed = quality.module_speed_multiplier;
-        detail.quality_module_productivity = quality.module_productivity_multiplier;
-    }
-    Ok(Some(detail))
-}
-
-pub async fn dispatch(host: &Arc<dyn Host>, message: AppMessage) -> Result<DispatchResult, String> {
-    let outcome = {
-        let state = host.state();
-        let mut runtime = state
-            .runtime
-            .lock()
-            .map_err(|_| "runtime 锁已损坏（poisoned）".to_string())?;
-        runtime
-            .dispatch(message)
-            .map_err(|error| error.to_string())?
-    };
-    // 与 MCP 的 `dispatch` 工具共用同一套汇总（`run_commands`）：求解产出、
-    // 命令序列化、失败收集。求解/上下文类命令自己会 emit（`solve-error` /
-    // `context-error`），其余（落盘、关闭项目…）只有回执——丢弃回执就等于
-    // **失败在界面上完全不可见**（例如自动保存写盘失败，用户以为已保存）。
-    let state = host.state();
-    let state_ref = &state;
-    let app_ref = host;
-    let (_solve, _commands, errors) = run_commands(&outcome.commands, move |command| {
-        // 闭包返回值不能借用参数，故克隆命令进 async 块。
-        let command = command.clone();
-        async move { execute_command(app_ref, state_ref, &command).await }
-    })
-    .await;
-    if !errors.is_empty() {
-        emit(host, "command-error", errors);
-    }
-    Ok(outcome)
-}
-
-pub async fn get_document(host: &Arc<dyn Host>) -> Result<AppDocument, String> {
-    run_blocking(host, |runtime| Ok(runtime.state.document.clone())).await
-}
-
-pub async fn history_state(host: &Arc<dyn Host>) -> Result<metatorio_runtime::HistoryStatus, String> {
-    run_blocking(host, |runtime| Ok(runtime.state.history_status())).await
-}
-
-pub async fn accessibility(host: &Arc<dyn Host>, project: ProjectId) -> Result<Vec<Accessible>, String> {
-    let state = host.state();
-    ensure_context_for_project_offlock(&state, project).await?;
-    // 锁内只取快照；可达性 BFS（py 上下文约 2.5s）在锁外算。
-    let snapshot = with_runtime(&state, |runtime| {
-        runtime.project_snapshot(project).map_err(|e| e.to_string())
-    })?;
-    let (snapshot, accessibility, nodes) = tokio::task::spawn_blocking(move || {
-        let accessibility = snapshot.resolve_accessibility();
-        let nodes: Vec<Accessible> = accessibility.accessible().iter().cloned().collect();
-        (snapshot, accessibility, nodes)
-    })
-    .await
-    .map_err(|error| error.to_string())?;
-    let _ = with_runtime(&state, |runtime| {
-        runtime.cache_accessibility_if_current(
-            snapshot.project,
-            snapshot.revision,
-            snapshot.accessibility_epoch,
-            accessibility,
-        );
-        Ok(())
-    });
-    Ok(nodes)
-}
-
-pub async fn milestones_ordered(
-    host: &Arc<dyn Host>,
-    project: ProjectId,
-) -> Result<Vec<metatorio_runtime::Milestone>, String> {
-    let state = host.state();
-    ensure_context_for_project_offlock(&state, project).await?;
-    let snapshot = with_runtime(&state, |runtime| {
-        runtime.project_snapshot(project).map_err(|e| e.to_string())
-    })?;
-    tokio::task::spawn_blocking(move || metatorio_runtime::ordered_milestones(&snapshot))
-        .await
-        .map_err(|error| error.to_string())
-}
-
-pub async fn productivity(
-    host: &Arc<dyn Host>,
-    project: ProjectId,
-) -> Result<metatorio_runtime::ProductivityView, String> {
-    let state = host.state();
-    ensure_context_for_project_offlock(&state, project).await?;
-    let snapshot = with_runtime(&state, |runtime| {
-        runtime.project_snapshot(project).map_err(|e| e.to_string())
-    })?;
-    let (snapshot, accessibility, view) = tokio::task::spawn_blocking(move || {
-        let accessibility = snapshot.resolve_accessibility();
-        let view = metatorio_runtime::productivity_view(&snapshot, &accessibility);
-        (snapshot, accessibility, view)
-    })
-    .await
-    .map_err(|error| error.to_string())?;
-    let _ = with_runtime(&state, |runtime| {
-        runtime.cache_accessibility_if_current(
-            snapshot.project,
-            snapshot.revision,
-            snapshot.accessibility_epoch,
-            accessibility,
-        );
-        Ok(())
-    });
-    Ok(view)
-}
-
-pub fn project_save_path(state: &AppState, project: ProjectId) -> Option<String> {
-    state.project_paths.lock().ok()?.get(&project).cloned()
-}
-
-
-
-
-/// 启动时恢复上下文注册表并激活最近使用的上下文（Tauri setup 与 headless 共用）。
-pub fn restore_contexts(host: &Arc<dyn Host>) {
-    let state = host.state();
-    let dir = host.app_data_dir().join("contexts");
-    {
-        let mut registry = state.contexts.lock().expect("contexts 锁");
-        registry.dir = dir;
-        registry.scan();
-    }
-    let newest: Option<String> = state.contexts.lock().ok().and_then(|registry| {
-        registry
-            .meta
-            .values()
-            .max_by_key(|meta| meta.created_at)
-            .map(|meta| meta.id.clone())
-    });
-    if let Some(id) = newest {
-        let mut runtime = state.runtime.lock().expect("runtime 锁");
-        if let Err(error) = ensure_context_loaded(state, &mut runtime, &id) {
-            eprintln!("载入缓存上下文失败：{error}");
-        } else {
-            runtime.set_active_context(Some(id));
-        }
-    }
-}
-
