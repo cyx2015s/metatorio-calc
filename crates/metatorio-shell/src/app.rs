@@ -5230,3 +5230,30 @@ pub fn project_save_path(state: &AppState, project: ProjectId) -> Option<String>
 
 
 
+
+/// 启动时恢复上下文注册表并激活最近使用的上下文（Tauri setup 与 headless 共用）。
+pub fn restore_contexts(host: &Arc<dyn Host>) {
+    let state = host.state();
+    let dir = host.app_data_dir().join("contexts");
+    {
+        let mut registry = state.contexts.lock().expect("contexts 锁");
+        registry.dir = dir;
+        registry.scan();
+    }
+    let newest: Option<String> = state.contexts.lock().ok().and_then(|registry| {
+        registry
+            .meta
+            .values()
+            .max_by_key(|meta| meta.created_at)
+            .map(|meta| meta.id.clone())
+    });
+    if let Some(id) = newest {
+        let mut runtime = state.runtime.lock().expect("runtime 锁");
+        if let Err(error) = ensure_context_loaded(state, &mut runtime, &id) {
+            eprintln!("载入缓存上下文失败：{error}");
+        } else {
+            runtime.set_active_context(Some(id));
+        }
+    }
+}
+

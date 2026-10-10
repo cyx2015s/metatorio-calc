@@ -202,7 +202,7 @@ mod tests {
     /// 造一个带项目/工厂的最小 runtime（内置示例 dump）。
     fn demo_runtime() -> (StdMutex<Runtime>, ProjectId, FactoryId) {
         let dump: serde_json::Value =
-            serde_json::from_str(crate::DEMO_DUMP).expect("内置示例 dump 应可解析");
+            serde_json::from_str(crate::app::DEMO_DUMP).expect("内置示例 dump 应可解析");
         let mut runtime = Runtime::new();
         runtime.install_context(
             "demo".to_string(),
