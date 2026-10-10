@@ -2496,11 +2496,13 @@ dependencies = [
 name = "metatorio-shell"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "metatorio-core",
  "metatorio-data",
  "metatorio-icons",
  "metatorio-runtime",
  "metatorio-solver",
+ "rmcp",
  "schemars 1.2.2",
  "serde",
  "serde_json",

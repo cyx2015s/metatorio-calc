@@ -1,0 +1,2890 @@
+//! Model Context Protocol 服务端（合并进主二进制）。
+//!
+//! 端点是一个本机 Streamable-HTTP 服务（决策见 `docs/mcp-design.md`）：它与 GUI 共享
+//! 同一份 [`AppState`]（也就是同一个 [`Runtime`]），所以外部 agent 与人是**在同一个
+//! 进程里操作同一批项目**。每个规划动作都是 `Runtime::dispatch(AppMessage)`——MCP 这
+//! 一层因此只是同一个 reducer 之上的薄封装，与具体框架无关。
+//!
+//! # 工具面的取向
+//!
+//! 底线是 `dispatch`（接受原始 `AppMessage` JSON 并转发给 runtime）：它**故意**做成
+//! 逃生通道，覆盖整个消息集（项目 / 工厂 / 机制 / 求解），不需要为每种操作设计参数
+//! 结构，因此永不失效。在它之上只包**实测高频**的友好工具（`auto_plan` 等）。
+//! 垂直领域的工具描述用中文写——面向玩家的术语（物品名、品质、插件塔）本来就是中文，
+//! 中文描述反而比英文更准，也少一层翻译损耗。
+//!
+//! # 安全
+//!
+//! - 默认只监听 `127.0.0.1`；绑到非回环地址（局域网/手机接入）时**必须有 token**，
+//!   见 `crate::Options::mcp_bind` 与 bin 的 `validate`。
+//! - rmcp 的 `StreamableHttpServerConfig` 另外限制 `Host` 头（防 DNS rebinding），
+//!   绑具体 IP 时把该 IP 加进白名单。
+//! - 可选 bearer-token：配了 token（`--mcp-token` / `METATORIO_MCP_TOKEN`）时每个请求
+//!   必须带 `Authorization: Bearer <token>`（或裸 token）；回环 + 无 token 是允许的。
+
+use std::net::{IpAddr, SocketAddr};
+
+use axum::{
+    Router,
+    extract::{Request, State},
+    http::StatusCode,
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
+};
+use rmcp::{
+    ErrorData as McpError, ServerHandler,
+    handler::server::{router::tool::ToolRouter, wrapper::Parameters},
+    model::CallToolResult,
+    tool, tool_handler, tool_router,
+    transport::streamable_http_server::{
+        StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
+    },
+};
+use schemars::JsonSchema;
+use std::sync::Arc;
+use crate::app::*;
+use crate::host::Host;
+
+
+use metatorio_core::{BeaconConfig, DualVar, IdWithQuality, ModuleConfig};
+use metatorio_data::FluidComponent;
+use metatorio_data::store::{PrototypeGroup, PrototypeStore};
+use metatorio_runtime::document::AutoBeaconPlan;
+use metatorio_runtime::message::{
+    AppMessage, ApplicationAction, DeleteDecision, FactoryAction, FactoryContextAction,
+    FactoryTemplate, FlowAction, PlanningAction, ProjectAction, RuntimeCommand, SolveAction,
+};
+use metatorio_runtime::{FactoryId, MechanicId, ProjectId};
+
+/// 端点常量已抽到 `metatorio-shell`（GUI 无关），这里再导出一次给 bin 用。
+pub use crate::{DEFAULT_MCP_BIND, DEFAULT_MCP_PORT, MCP_PATH};
+
+// dispatch 的 inputSchema **保持完整**：rmcp 会把整个 AppMessage 协议图
+// （46 个 $defs、89 个 $ref）内联进 tools/list，实测 44 KB、占工具面 77%。
+//
+// 曾经把它投影成「只有动作名」的薄壳，再配一个 `get_schema` 工具按需取切片，
+// 工具面从 57 KB 降到 17 KB（-70%）。**实测后回退了**：
+//   - 目标用户（AI agent）在上下文被压缩后不知道要先调 `get_schema`——
+//     实测约 40k token（1M 上下文的 4%）才建出一个项目，工厂还没建成；
+//   - 失败调用的响应本身就很大（一次 recompute 响应 16 KB），几次试错的
+//     代价就超过省下的 schema；
+//   - 而 `DispatchParams` 的文档注释里本来就有完整的调用示例，信息并不缺，
+//     缺的是「调用方会去哪找」——多一层间接就是多一次会失败的猜测。
+//
+// 结论：**省 token 不能以「调用方要额外查一次」为代价**。若将来再优化，
+// 判据必须是「每个**成功完成的任务**花了多少 token」，不是「工具面 token 数」。
+
+// ── 工具面 ─────────────────────────────────────────────────────────
+
+// ── 工具面 ─────────────────────────────────────────────────────────
+
+/// `dispatch`（逃生通道）的参数：一份原始 `AppMessage` JSON。
+#[derive(Debug, serde::Deserialize, JsonSchema)]
+struct DispatchParams {
+    /// 序列化的 `AppMessage`（**相邻标签**：`scope` 选分支，其余字段——包括
+    /// `project` / `factory`——都在 `action` 里面）：
+    ///
+    /// - `{ "scope": "application", "action": { "new-project": { "name": "…" } } }`
+    /// - `{ "scope": "project", "action": { "project": 1, "action": { "add-factory": { "name": "…", "template": "empty" } } } }`
+    /// - `{ "scope": "factory", "action": { "project": 1, "factory": 2, "action": { "flow": { "add-to-target": { "flow": { "Item": { "id": "iron-plate", "quality": "normal" } }, "amount": 60.0 } } } } }`
+    ///
+    /// `action` 与界面走 IPC 时发的是同一个值；完整消息集见 `metatorio-runtime`
+    /// 的 `AppMessage`。文档一有变化，GUI 会通过 `document-changed` 广播自动刷新。
+    ///
+    /// **单位**：所有流量（目标 amount、外部输入、求解结果 flows）都是
+    /// **每秒**；项目的 `time-scale`（seconds/minutes/hours）只影响界面显示，
+    /// 不改变数值。
+    message: AppMessage,
+    /// 幂等键（可选）：同一个 id 的重复调用只应用一次，重试直接拿回上次的
+    /// 载荷（返回里带 `idempotent_replay: true`）。调用超时后重试请带上它，
+    /// 避免重复添加目标 / 机制。
+    #[serde(default)]
+    request_id: Option<String>,
+    /// 每个集合的返回上限与偏移（默认 50、上限 1000）——求解结果里的
+    /// `mechanics` / `flows` 可能是几百条，必须由工具自己兜住。
+    #[serde(flatten)]
+    page: PageParams,
+}
+
+/// `list_prototypes` 的参数：某个游戏上下文里的领域词表，可按 kind 与名字子串收窄。
+#[derive(Debug, serde::Deserialize, JsonSchema)]
+struct ListPrototypesParams {
+    /// 要查询的游戏上下文 id；省略 = 当前激活的上下文。
+    #[serde(default)]
+    context_id: Option<String>,
+    /// 按条目 kind 精确过滤，例如 `item` / `fluid` / `recipe` / `technology` /
+    /// `machine` / `mining-machine` / `generator` / `boiler` / `reactor` /
+    /// `solar-panel` / `accumulator` / `beacon` / `resource` / `module` /
+    /// `planet` / `surface`。省略 = 全部 kind。
+    #[serde(default)]
+    kind: Option<String>,
+    /// 名字包含（大小写不敏感子串）；同时匹配 `name` 与 `localized_name`。
+    /// 省略 = 不过滤。
+    #[serde(default)]
+    name_contains: Option<String>,
+    /// 每个集合的返回上限与偏移（默认 50、上限 1000）。
+    #[serde(flatten)]
+    page: PageParams,
+}
+
+/// `localized_names` 的参数：原型 id 与/或本地化名。
+#[derive(Debug, serde::Deserialize, JsonSchema)]
+struct LocalizedNamesParams {
+    /// 要解析的名字，可混用原型 id（`iron-gear-wheel`）与本地化名（`铁齿轮`）。
+    queries: Vec<String>,
+    /// 限定条目 kind（`item` / `fluid` / `recipe` / `technology` / `machine` / …）；
+    /// 省略 = 全部。
+    #[serde(default)]
+    kind: Option<String>,
+    /// 每个查询的**模糊**命中上限（默认 8，最多 50）；精确命中不受此限制。
+    #[serde(default)]
+    limit_per_query: Option<usize>,
+    /// 游戏上下文 id；省略 = 当前激活上下文。
+    #[serde(default)]
+    context_id: Option<String>,
+}
+
+/// MCP 服务端 handler。无状态：只持有取 [`AppState`] 需要的 [`Arc<dyn Host>`]，
+/// 因此 rmcp 可以为每个请求新建一个。
+#[derive(Clone)]
+pub struct MetatorioMcp {
+    host: Arc<dyn Host>,
+}
+
+#[tool_router(router = base_tool_router)]
+impl MetatorioMcp {
+    /// 把一条 `AppMessage` 原样转发给规划 runtime（项目 / 工厂 / 机制 / 求解），
+    /// 与 GUI 的 dispatch 走同一条路径，返回新的 revision 与求解状态。这是**万能
+    /// 逃生通道**：任何规划动作都能用它完成。
+    #[tool(
+        description = "把一条 AppMessage 转发给切向量化（Metatorio）规划 runtime\
+        （项目 / 工厂 / 机制 / 求解），返回新的 revision。这是**万能逃生通道**，任何\
+        规划动作都能用它完成。  \
+        返回里 `created` 是本次调用新建对象的 id（不用再读一次），`solve` 是命令触发\
+        求解时的结构化结果，`errors` 非空时 `isError` 为真（命令跑了但失败了）。  \
+        **所有流量都是「每秒」**；项目的 time-scale 只影响界面显示。  \
+        传 `request_id` 让重试幂等（同一个 id 只应用一次，重复调用回放上次的载荷）。  \
+        可用 scope=history、action=undo/redo 撤销/重做一次编辑；返回里的 `history` \
+        字段带 can_undo/can_redo、动作标签与聚焦对象。  \
+        `solve` 的输出始终有界：`mechanics`/`flows` 按 `limit`（默认 50、上限 1000）+\
+        `offset` 分页，`page.totals`/`page.truncated` 如实说明被截断的集合。  \
+        这是**逃生通道**：常规规划请优先用 `auto_plan`（权威入口），不要一个个配方\
+        手工拼装——那样既费力又容易漏配严格供给。"
+    )]
+    async fn dispatch(
+        &self,
+        Parameters(params): Parameters<DispatchParams>,
+    ) -> Result<CallToolResult, McpError> {
+        dispatch_message(
+            &self.host,
+            params.message,
+            params.request_id,
+            params.page.resolve(),
+        )
+        .await
+    }
+
+    /// 读取当前规划状态（共享文档快照）。它是 `dispatch` 的读取对应物：让 agent 在
+    /// 动手前先看到项目 / 工厂 / 目标 / 机制以及它们分配到的 id。
+    #[tool(
+        description = "读取当前规划状态（共享文档快照）。**逐层读取**，任何一次调用都\
+        不会把上下文撑爆：  \
+        不给 `project` → 项目索引（id / 名称 / 规模计数）；  \
+        给 `project` → 该项目的设置与规划偏好 + 工厂索引；  \
+        给 `project`+`factory` → 该工厂的文档（机制 / 目标 / 目标表达式 / 外部输入）；  \
+        再加 `mechanic`（该工厂 `mechanics` 列表里的 id）→ **聚焦到这一个机制**：\
+        `config` 是它的零件（类型 / 机器 / 配方 / 插件 / 插件塔 / 燃料），`inputs`/\
+        `outputs` 是它在**系数 = 1 时每秒**的消耗与产出（已含机器速度、插件与插件塔\
+        效果，与求解同一份展开）。需要知道某个机制到底在消耗/产出什么时用它，\
+        **不要从机制名去猜**。  \
+        每个重复集合都按 `limit`（默认 50、上限 1000）+ `offset` 分页，返回始终带\
+        `page.totals`（截断前总数）与 `page.truncated`（哪些集合被截断），绝不静默\
+        丢数据。  \
+        `recompute`（需 project + factory）额外同步跑一次求解并附上结果（它的\
+        mechanics/flows 同样分页）。  \
+        给 `project`+`factory` 时若该工厂有异步自动规划（`auto_plan` 工具发起），\
+        返回里还会带 `auto_plan`：`{status: running|done|failed, revision?, result?,\
+        error?}` —— 轮询它来收取结果。  \
+        所有流量都是「每秒」（time-scale 只影响显示）。"
+    )]
+    async fn get_planning_state(
+        &self,
+        Parameters(params): Parameters<PlanningStateParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let host = self.host.clone();
+        let page = params.page.resolve();
+        let project = params.project.map(ProjectId);
+        let factory = params.factory.map(FactoryId);
+        // `recompute` / `mechanic` 只在 project + factory 同时给出时才有意义：其余
+        // 组合显式报错，而不是静默忽略（agent 之前无法察觉）。
+        if params.recompute && (project.is_none() || factory.is_none()) {
+            return Err(McpError::invalid_params(
+                "recompute 需要同时提供 project 与 factory".to_string(),
+                None,
+            ));
+        }
+        if params.mechanic.is_some() && (project.is_none() || factory.is_none()) {
+            return Err(McpError::invalid_params(
+                "mechanic 需要同时提供 project 与 factory（机制属于某个工厂）".to_string(),
+                None,
+            ));
+        }
+
+        // 1) 可选重算：与 GUI 走同一条锁外求解路径（不占 runtime 锁，可与
+        //    GUI / 其它 MCP 调用并行）。
+        let solve = match (project, factory, params.recompute) {
+            (Some(project), Some(factory), true) => {
+                let state = host.state();
+                match solve_factory_offlock(&host, &state, project, factory).await {
+                    Ok(result) => Some(serde_json::to_value(&result).map_err(|error| {
+                        McpError::internal_error(format!("solve 序列化失败: {error}"), None)
+                    })?),
+                    Err(error) => {
+                        return Err(McpError::invalid_params(
+                            format!("recompute failed: {error}"),
+                            None,
+                        ));
+                    }
+                }
+            }
+            _ => None,
+        };
+
+        // 2) 取文档快照（短锁，只克隆）+ 锁外序列化。
+        let (snapshot, revision) = {
+            let state = host.state();
+            let runtime = state.runtime.lock().map_err(|_| {
+                McpError::internal_error("runtime 锁已损坏（poisoned）".to_string(), None)
+            })?;
+            let revision = runtime.state.revision;
+            let snapshot = match (project, factory) {
+                (None, _) => DocSnapshot::Document(runtime.state.document.clone()),
+                (Some(p), None) => DocSnapshot::Project(
+                    runtime
+                        .state
+                        .project(p)
+                        .map_err(|error| {
+                            McpError::invalid_params(
+                                format!("get_planning_state 执行失败: {error}"),
+                                None,
+                            )
+                        })?
+                        .clone(),
+                ),
+                (Some(p), Some(f)) => {
+                    let factory_doc = runtime.state.factory(p, f).map_err(|error| {
+                        McpError::invalid_params(
+                            format!("get_planning_state 执行失败: {error}"),
+                            None,
+                        )
+                    })?;
+                    DocSnapshot::Factory {
+                        project: p.0,
+                        factory: f.0,
+                        factory_document: factory_doc.clone(),
+                    }
+                }
+            };
+            (snapshot, revision)
+        };
+
+        // 1.5) 指定 mechanic：再下一层，**聚焦到这一个机制**（配置 + 系数 = 1 的每秒
+        //      产/耗）。机制在文档里只有 machine/recipe/modules 这些零件，agent 光看
+        //      机制名推不出它到底消耗/产出什么，尤其是插件、插件塔、机器速度都参与之后。
+        if let Some(mechanic) = params.mechanic {
+            let (mechanic_project, mechanic_factory, factory_document) = match &snapshot {
+                DocSnapshot::Factory {
+                    project,
+                    factory,
+                    factory_document,
+                } => (*project, *factory, factory_document),
+                // 上面已要求 project + factory 同时给出；走到这里说明内部状态不一致。
+                _ => {
+                    return Err(McpError::internal_error(
+                        "mechanic 需要 project + factory".to_string(),
+                        None,
+                    ));
+                }
+            };
+            let mut report = PageReport::default();
+            let mut object = match mechanic_level_value(
+                &host,
+                mechanic_project,
+                mechanic_factory,
+                factory_document,
+                mechanic,
+                page,
+                &mut report,
+            )
+            .await?
+            {
+                serde_json::Value::Object(object) => object,
+                _ => serde_json::Map::new(),
+            };
+            // `recompute` 与 `mechanic` 同时给出时，求解结果也算出来了，别丢掉。
+            if let Some(mut solve) = solve {
+                if let Some(status) = solve.get_mut("status").and_then(|s| s.as_object_mut())
+                    && let Some(solved) = status.get_mut("solved").and_then(|s| s.as_object_mut())
+                {
+                    report.page_key(solved, "mechanics", "solve.mechanics", page);
+                    report.page_key(solved, "flows", "solve.flows", page);
+                }
+                object.insert("solve".to_string(), solve);
+            }
+            object.insert(
+                "revision".to_string(),
+                serde_json::Value::Number(revision.into()),
+            );
+            object.insert("page".to_string(), report.value(page));
+            return Ok(CallToolResult::structured(serde_json::Value::Object(
+                object,
+            )));
+        }
+
+        let (mut value, mut report) = planning_state_value(&snapshot, page);
+        // 工厂层：附上该工厂的**异步自动规划**状态（如果有），供 `auto_plan` 的
+        // 调用方轮询。这是「稍后查这个 project + factory」的落点：状态与结果都由
+        // 那次规划自己写入，不用猜、也不会与当前文档的 recompute 混淆。
+        if let DocSnapshot::Factory {
+            project, factory, ..
+        } = &snapshot
+        {
+            let status = host
+                .state()
+                .auto_plans
+                .lock()
+                .ok()
+                .and_then(|plans| {
+                    plans
+                        .get(&(ProjectId(*project), FactoryId(*factory)))
+                        .cloned()
+                });
+            if let Some(status) = status {
+                let auto_plan = match status {
+                    AutoPlanState::Running => serde_json::json!({ "status": "running" }),
+                    AutoPlanState::Failed(error) => {
+                        serde_json::json!({ "status": "failed", "error": error })
+                    }
+                    AutoPlanState::Done { revision, result } => {
+                        let mut result =
+                            serde_json::to_value(&*result).unwrap_or(serde_json::Value::Null);
+                        if let Some(solved) = result
+                            .get_mut("status")
+                            .and_then(|status| status.as_object_mut())
+                            .and_then(|status| status.get_mut("solved"))
+                            .and_then(|solved| solved.as_object_mut())
+                        {
+                            report.page_key(solved, "mechanics", "auto_plan.mechanics", page);
+                            report.page_key(solved, "flows", "auto_plan.flows", page);
+                        }
+                        serde_json::json!({
+                            "status": "done",
+                            "revision": revision,
+                            "result": result,
+                        })
+                    }
+                };
+                if let Some(object) = value.as_object_mut() {
+                    object.insert("auto_plan".to_string(), auto_plan);
+                }
+            }
+        }
+        // 工厂层可选带上重算结果：它的 mechanics/flows 同样按 page 截断。
+        if let Some(solve) = solve
+            && let Some(object) = value.as_object_mut()
+        {
+            let mut solve = solve;
+            if let Some(status) = solve.get_mut("status").and_then(|s| s.as_object_mut())
+                && let Some(solved) = status.get_mut("solved").and_then(|s| s.as_object_mut())
+            {
+                report.page_key(solved, "mechanics", "solve.mechanics", page);
+                report.page_key(solved, "flows", "solve.flows", page);
+            }
+            object.insert("solve".to_string(), solve);
+        }
+        // 顶层补充 revision 与分页元信息：版本便于判断新鲜度，page 说明截断情况。
+        if let serde_json::Value::Object(object) = &mut value {
+            object.insert(
+                "revision".to_string(),
+                serde_json::Value::Number(revision.into()),
+            );
+            object.insert("page".to_string(), report.value(page));
+        }
+        Ok(CallToolResult::structured(value))
+    }
+
+    /// 一站式入口：建项目/工厂 + 配好目标/星球/品质/插件/插件塔/外部输入，然后
+    /// **立刻返回**并异步跑自动规划。
+    ///
+    /// 群里的实测反馈：每次手拼 `dispatch` 序列既费人又费 AI（而且容易漏配严格
+    /// 供给）。这个入口把那条序列固定下来，并把「跑得久」的规划甩到后台。
+    #[tool(
+        description = "**权威一站式入口**：一条调用建好项目 + 工厂，配好目标 / 星球 / \
+        主品质 / 插件 / 插件塔 / 外部输入，然后**异步**开跑自动规划并**立刻返回**。  \
+        规划工厂请用这个入口，**不要**一个个配方手工往里加——规划器的强项是从目标\
+        反推整条链，手工拼装既费力又容易漏配严格供给。  \
+        必填 `targets` = [{ item, quality?, temperature?, amount }]：`item` 可给原型 id\
+        （`iron-plate` / `steam`）或本地化名（`铁板` / `蒸汽`），分隔符不敏感。**物品和\
+        流体都接受**：流体目标用 `temperature: [下限, 上限]` 指定温度（省略则取原型的\
+        [默认温度, 最高温度]）——`[500,500]` = 只要 500°C 的蒸汽，`[15,500]` = 任意温度\
+        都行。拼错、或给了不存在的类型会被拒绝并附候选（拿不准先用 `localized_names`\
+        查）；物品给 `temperature`、流体给 `quality` 会**显式报错**，不静默忽略。  \
+        **所有手写名字都在建任何东西之前按当前上下文校验**（`item`、`modules.exclude`、\
+        `beacons[].beacon`、`beacons[].modules[].module`、`external_inputs[].flow`）：\
+        错一个就整个调用失败并给候选，**一个对象都不建**——一个「悄悄什么也没做」\
+        （或把垃圾写进文档）的名字比报错危险得多。  \
+        可选：`planet`、`major_quality`、`modules` = {best, quality, exclude[]}、\
+        `beacons` = [{beacon:{id,quality}, count?, share?, modules:[{module,count?}]}]、\
+        `external_inputs` = [{flow, penalty?}]（**缺原料就在这里声明外部输入**——\
+        自动规划**永远**严格供给，没有开关）、`project_name`、`factory_name`、\
+        `context_id`、`request_id`（幂等重试）。  \
+        返回新建的 `project`/`factory` id、`{\"auto_plan\": {\"status\": \"running\"}}`\
+        与 `poll` 提示；稍后用 `get_planning_state` 带该 project + factory 读\
+        `auto_plan.status`（`running`/`done`/`failed`），done 时结果也在里面。  \
+        所有流量都是「每秒」。"
+    )]
+    async fn auto_plan(
+        &self,
+        Parameters(params): Parameters<AutoPlanParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let host = self.host.clone();
+        if params.targets.is_empty() {
+            return Err(McpError::invalid_params(
+                "targets 至少给一个目标".to_string(),
+                None,
+            ));
+        }
+        // 幂等回放：同一个 request_id 直接返回上次载荷（含 ids），不重复建项目。
+        if let Some(request_id) = &params.request_id {
+            let cached = host
+                .state()
+                .dispatch_cache
+                .lock()
+                .ok()
+                .and_then(|cache| cache.get(request_id));
+            if let Some((mut payload, false)) = cached {
+                if let serde_json::Value::Object(object) = &mut payload {
+                    object.insert("idempotent_replay".into(), serde_json::Value::Bool(true));
+                }
+                return Ok(CallToolResult::structured(payload));
+            }
+        }
+        // 1) 目标名 → 流：用当前/指定的上下文目录索引解析（只接受精确命中的**物品或
+        //    流体**原型）。流体目标的温度区间默认取原型的 [default, max]，所以这里
+        //    还要拿到原型库。
+        let state = host.state();
+        let context_id = resolve_context_id(&state, params.context_id.as_deref())
+            .map_err(|error| McpError::invalid_params(error, None))?;
+        let index = catalog_index_for(&state, &context_id)
+            .await
+            .map_err(|error| McpError::invalid_params(format!("读取目录失败: {error}"), None))?;
+        let store = context_store_arc(&state, &context_id)
+            .await
+            .map_err(|error| McpError::invalid_params(format!("读取原型库失败: {error}"), None))?;
+        let targets = resolve_auto_plan_targets(&index, Some(store.as_ref()), &params.targets)
+            .map_err(|error| McpError::invalid_params(error, None))?;
+        // 手写名字（插件/插件塔/外部输入）全部先过一遍：不通过就一个对象都不建。
+        validate_auto_plan_names(&index, &params)
+            .map_err(|error| McpError::invalid_params(error, None))?;
+
+        // 2) 建项目（拿 id）→ 配置 → 触发。**配置阶段任何一步失败都回滚刚建的项目**：
+        //    这个项目是本次调用自己建的、调用方还不知道它存在，留下一个「只配了一半」
+        //    的项目比直接报错更糟（实测：插件名写错一个字母就会留下半成品）。
+        let outcome = apply_consistency_only(
+            &host,
+            AppMessage::Application(ApplicationAction::NewProject {
+                name: params
+                    .project_name
+                    .clone()
+                    .unwrap_or_else(|| "自动规划".to_string()),
+            }),
+        )
+        .await?;
+        let project = match outcome.created.projects.first() {
+            Some(project) => *project,
+            None => {
+                return Err(McpError::internal_error(
+                    "新建项目没有返回 id".to_string(),
+                    None,
+                ));
+            }
+        };
+
+        let configured = async {
+            if let Some(context) = &params.context_id {
+                apply_consistency_only(
+                    &host,
+                    AppMessage::Project {
+                        project,
+                        action: ProjectAction::SetContext {
+                            context: Some(context.clone()),
+                        },
+                    },
+                )
+                .await?;
+            }
+            let factory = match apply_consistency_only(
+                &host,
+                AppMessage::Project {
+                    project,
+                    action: ProjectAction::AddFactory {
+                        name: params
+                            .factory_name
+                            .clone()
+                            .unwrap_or_else(|| "主工厂".to_string()),
+                        template: FactoryTemplate::DefaultMechanics,
+                    },
+                },
+            )
+            .await?
+            .created
+            .factories
+            .first()
+            .copied()
+            {
+                Some(factory) => factory,
+                None => {
+                    return Err(McpError::internal_error(
+                        "新建工厂没有返回 id".to_string(),
+                        None,
+                    ));
+                }
+            };
+            // 序列里最后一条是 `solve: auto-plan`：**不在请求里同步跑**，否则一次
+            // 调用要等几分钟（py 那种规模实测 70s+）。
+            let mut messages = auto_plan_body_messages(&params, project, factory, &targets);
+            let trigger = messages.pop();
+            let mut created_targets = Vec::new();
+            let mut created_inputs = Vec::new();
+            for message in &messages {
+                let outcome = apply_consistency_only(&host, message.clone()).await?;
+                created_targets.extend(outcome.created.targets.iter().map(|id| id.0));
+                created_inputs.extend(outcome.created.external_inputs.iter().map(|id| id.0));
+            }
+
+            // 3) 触发异步自动规划（状态写进 AppState，供 agent 稍后查询）。
+            let mut status = "running";
+            let mut trigger_commands = Vec::new();
+            if let Some(message) = trigger {
+                // 只走 reducer：AutoPlan 命令由后台任务执行（它不是一致性命令）。
+                trigger_commands = apply_consistency_only(&host, message).await?.commands;
+            }
+            let trigger_command = trigger_commands
+                .into_iter()
+                .find(|command| matches!(command, RuntimeCommand::AutoPlan { .. }));
+            match trigger_command {
+                Some(command) => spawn_auto_plan(host.clone(), project, factory, command),
+                None => {
+                    // reducer 没发出 AutoPlan（例如项目/工厂刚被别处删掉）：如实报告。
+                    status = "failed";
+                    if let Ok(mut plans) = host.state().auto_plans.lock() {
+                        plans.insert(
+                            (project, factory),
+                            AutoPlanState::Failed("未能触发自动规划命令".to_string()),
+                        );
+                    }
+                }
+            }
+            Ok::<_, McpError>((factory, status, created_targets, created_inputs))
+        }
+        .await;
+        let (factory, status, created_targets, created_inputs) = match configured {
+            Ok(configured) => configured,
+            Err(error) => {
+                // 回滚：只删本次调用刚建的项目。回滚自己也失败时**两个事实都报**，
+                // 不能让调用方以为项目已经收干净了。
+                let rolled_back = match apply_consistency_only(
+                    &host,
+                    AppMessage::Application(ApplicationAction::DeleteProject {
+                        project,
+                        decision: DeleteDecision::Confirm,
+                    }),
+                )
+                .await
+                {
+                    Ok(_) => true,
+                    Err(rollback) => {
+                        eprintln!("auto_plan 回滚项目 {project:?} 失败：{rollback}");
+                        false
+                    }
+                };
+                let suffix = if rolled_back {
+                    format!("（已回滚：本次新建的项目 {} 已删除）", project.0)
+                } else {
+                    format!("（回滚失败：项目 {} 仍留在文档里，请手动删除）", project.0)
+                };
+                let message = if error.message.is_empty() {
+                    format!("auto_plan 配置失败{suffix}")
+                } else {
+                    format!("{}{suffix}", error.message)
+                };
+                return Err(McpError::invalid_params(message, None));
+            }
+        };
+        let modules_best = params.modules.as_ref().is_some_and(|modules| modules.best);
+        let modules_excluded = params
+            .modules
+            .as_ref()
+            .map(|modules| modules.exclude.len())
+            .unwrap_or(0);
+        // 轮询提示要跟着**本次启动实际启用的工具**走：如果 get_planning_state 被
+        // `--mcp-tools` 关掉了，还让 agent 去调它就是把它指向一个不存在的工具。
+        let poll = if tool_router().get("get_planning_state").is_some() {
+            serde_json::json!({
+                "tool": "get_planning_state",
+                "arguments": { "project": project.0, "factory": factory.0 },
+                "hint": "规划在后台跑：稍后（普通上下文 2~5s 起，py 这类大上下文要几分钟）\
+                用 get_planning_state 查这个 project + factory，读 auto_plan.status\
+                （running/done/failed）；done 时求解结果在 auto_plan.result 里（已分页）。",
+            })
+        } else {
+            serde_json::json!({
+                "tool": null,
+                "arguments": { "project": project.0, "factory": factory.0 },
+                "hint": "规划在后台跑，但本次启动**没有启用 get_planning_state**：\
+                auto_plan 自己的状态与结果没有查询入口。要读的话请重启并把它加进 \
+                --mcp-tools（或留空启用全部），或改用 dispatch 自己触发一次求解。",
+            })
+        };
+        let payload = serde_json::json!({
+            "project": project.0,
+            "factory": factory.0,
+            "created": {
+                "project": project.0,
+                "factory": factory.0,
+                "targets": created_targets,
+                "external_inputs": created_inputs,
+            },
+            "applied": {
+                "planet": params.planet,
+                "major_quality": params.major_quality,
+                "context_id": params.context_id,
+                // 目标是**流**（物品或带温度的流体），原样回显 `DualVar`：
+                // `{"Item":{"id":..,"quality":..}}` 或 `{"Fluid":{"name":..,"temperature":[lo,hi]}}`。
+                "targets": targets.iter().map(|(flow, amount)| serde_json::json!({
+                    "flow": flow,
+                    "amount": amount,
+                })).collect::<Vec<_>>(),
+                "external_inputs": params.external_inputs.len(),
+                "modules_best": modules_best,
+                "modules_excluded": modules_excluded,
+                "beacons": params.beacons.len(),
+            },
+            "auto_plan": { "status": status },
+            "poll": poll,
+        });
+        if let Some(request_id) = params.request_id
+            && let Ok(mut cache) = host.state().dispatch_cache.lock()
+        {
+            cache.insert(request_id, payload.clone(), false);
+        }
+        Ok(CallToolResult::structured(payload))
+    }
+
+    /// 上下文索引：有哪些游戏数据上下文（dump/导出缓存）、激活的是哪个。
+    ///
+    /// agent 需要它才能理解 `project.context_id` 的含义，并在多个上下文之间
+    /// 切换（`dispatch` + `{"scope":"application","action":{"set-active-context":…}}`）。
+    #[tool(
+        description = "列出已注册的游戏数据上下文（id、显示名、来源、原型库是否已载入、\
+        当前激活的是哪个）。项目的 `context_id` 指向其中之一；切换用 dispatch \
+        {scope: application, action: {set-active-context: {context: id}}}。  \
+        上下文是「导出的游戏数据」按内容哈希得到的缓存——agent 不能创建，只能列举 / \
+        激活 / 重命名 / 删除已有的。"
+    )]
+    async fn list_contexts(&self) -> Result<CallToolResult, McpError> {
+        let host = self.host.clone();
+        let list = tokio::task::spawn_blocking(move || {
+            let state = host.state();
+            context_list(&state)
+        })
+        .await
+        .map_err(|error| {
+            McpError::internal_error(format!("list_contexts join 失败: {error}"), None)
+        })?;
+        let value = serde_json::to_value(&list).map_err(|error| {
+            McpError::internal_error(format!("list_contexts 序列化失败: {error}"), None)
+        })?;
+        Ok(CallToolResult::structured(value))
+    }
+
+    /// 领域词表：某个游戏上下文里有哪些原型（物品/流体/配方/科技/机器/…）。
+    ///
+    /// 消除 agent 的「盲猜字符串」：dispatch 里的 recipe/machine/item/fluid 名字
+    /// 必须真实存在（校验会拒绝不存在的名字），这里给出合法取值。
+    #[tool(
+        description = "列出某个游戏上下文里的原型（领域词表）：物品 / 流体 / 配方 / \
+        科技 / 机器 / 资源 / 品质…… 每条含 name、localized_name、group/subgroup、\
+        categories、燃料信息与插件槽。省略 `context_id` = 当前激活上下文。  \
+        用 `kind`（精确）与/或 `name_contains`（名字或本地化名的大小写不敏感子串，\
+        忽略 `-`/`_`/空格）收窄。  \
+        **返回始终有界**：`entries` 按 `limit`（默认 50、上限 1000）+ `offset` 翻页；\
+        `total` 是该上下文的全部条数，`matched` 是分页前的命中数，`page.truncated` \
+        说明是否被截断（被截断时另有 `entries_hint` 说明怎么收窄）。  \
+        要「id → 本地化名」或「群里说的名字 → id」请优先用 `localized_names`：它带\
+        排序（精确命中优先）且一次能解析多个名字。"
+    )]
+    async fn list_prototypes(
+        &self,
+        Parameters(params): Parameters<ListPrototypesParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let kind = params.kind;
+        let needle = params.name_contains;
+        let page = params.page.resolve();
+        let state = self.host.state();
+        // 只是读一次 runtime 里的激活上下文 id（短锁），无需阻塞线程。
+        let context_id = resolve_context_id(&state, params.context_id.as_deref())
+            .map_err(|error| McpError::invalid_params(error, None))?;
+        let index = catalog_index_for(&state, &context_id)
+            .await
+            .map_err(|error| {
+                McpError::invalid_params(format!("list_prototypes 执行失败: {error}"), None)
+            })?;
+        let total = index.entries.len();
+        let matched =
+            filter_index_entries(index.entries, kind.as_deref(), needle.as_deref());
+        let matched_total = matched.len();
+        // 分页在这里做（并在 page 元信息里如实上报），调用方不需要替我们兜底。
+        let (entries, _) = page.slice(&matched);
+        let mut report = PageReport::default();
+        report.record("entries", matched_total, entries.len());
+        let mut value = serde_json::json!({
+            "context_id": context_id,
+            "qualities": index.qualities,
+            "total": total,
+            "matched": matched_total,
+            "returned": entries.len(),
+            "entries": entries,
+            "page": report.value(page),
+        });
+        if entries.len() < matched_total {
+            // 与嵌套集合同一措辞：被截断就说清怎么收窄，别让调用方以为「就这么多」。
+            value["entries_hint"] =
+                serde_json::json!(truncation_hint(matched_total, entries.len()));
+        }
+        Ok(CallToolResult::structured(value))
+    }
+
+    /// 名字 ↔ 本地化名互查：把求解结果里的 id 换成人话，或把群友口述的名字换成 id。
+    #[tool(description = "原型名 ↔ 本地化名互查。`queries` 里可以给原始原型 id\
+        （如 `iron-gear-wheel`），也可以给玩家口中的本地化名（如 `铁齿轮`）；每个查询\
+        先精确匹配（先 id、再本地化名），然后按前缀/子串模糊匹配，每条命中都带\
+        `matched_by`，以便区分「精确命中」与「差不多」。  \
+        匹配时**忽略分隔符**：`processing unit`、`processing_unit`、`PROCESSING-UNIT` \
+        都能命中 `processing-unit`（返回的 `name` 始终是真实 id）。  \
+        用途：把求解结果按玩家的语言汇报（而不是甩 raw id）；把群里提到的物品名换成\
+        `dispatch` 需要的 id。  \
+        精确与模糊都为空时，`typo` 桶给**错拼候选**（查询 3 个字符以上，或非 ASCII\
+        查询 2 个字符——两个字的中文名就是一个完整的词），每条带编辑 `distance`\
+        （相邻换位算 1 步）。`typo_suggestion` 是**高置信度建议**，只在「最佳距离上\
+        名字唯一」时非空（同名跨多个原型组不算歧义——从 `typo` 里挑你要的 `kind`）；\
+        它是 null 说明有几个名字同样接近（`processing-unit-2` 与 `-3`）或都不够近——\
+        **去问人，不要猜**：一个错的 id 能顺利通过校验，然后悄悄算出一份错的计划。  \
+        上下文没有语言 dump 时 `localized_name` 为空（那就退回 `list_prototypes`）。\
+        一次查询的 `exact` 可能有多条：同一个名字可能同时是物品 / 配方 / 科技 / 实体，\
+        用 `kind` 收窄。  \
+        每个查询的各桶按 `limit_per_query`（默认 8、最多 50）截断，且每次调用最多接受\
+        50 个查询，因此返回始终有界。")]
+    async fn localized_names(
+        &self,
+        Parameters(params): Parameters<LocalizedNamesParams>,
+    ) -> Result<CallToolResult, McpError> {
+        // 每个查询的输出已经按 limit_per_query 限制；这里再限制一次「一次问多少
+        // 个名字」，避免批量调用本身变成上下文炸弹（超过就显式报错，不静默丢）。
+        const MAX_QUERIES: usize = 50;
+        if params.queries.is_empty() {
+            return Err(McpError::invalid_params(
+                "queries 不能为空".to_string(),
+                None,
+            ));
+        }
+        if params.queries.len() > MAX_QUERIES {
+            return Err(McpError::invalid_params(
+                format!(
+                    "一次最多解析 {MAX_QUERIES} 个名字（收到 {}），请分批调用",
+                    params.queries.len()
+                ),
+                None,
+            ));
+        }
+        let state = self.host.state();
+        let context_id = resolve_context_id(&state, params.context_id.as_deref())
+            .map_err(|error| McpError::invalid_params(error, None))?;
+        let index = catalog_index_for(&state, &context_id)
+            .await
+            .map_err(|error| {
+                McpError::invalid_params(format!("localized_names 执行失败: {error}"), None)
+            })?;
+        // kind 过滤只做一次（整个查询共用同一份索引子集）。
+        let entries = filter_index_entries(index.entries, params.kind.as_deref(), None);
+        let limit = params.limit_per_query.unwrap_or(8).clamp(1, 50);
+        let results: Vec<serde_json::Value> = params
+            .queries
+            .iter()
+            .map(|query| {
+                let resolved = resolve_index_entry(&entries, query, limit);
+                serde_json::json!({
+                    "query": query,
+                    // 精确 + 模糊命中的总数（模糊部分在截断前计数；typo 单独统计）。
+                    "matched": resolved.exact.len() + resolved.partial_matched,
+                    // 模糊结果被 limit 截断时置 true：要更全就调大 limit_per_query，
+                    // 或用 `list_prototypes` 的 name_contains 自己筛。
+                    "partial_truncated": resolved.partial_matched > resolved.partial.len(),
+                    "exact": resolved.exact,
+                    "partial": resolved.partial,
+                    // 错拼候选：只在精确与模糊都为空时才有内容。typo_suggestion 是
+                    // 「高置信度结果」——只有最佳距离上**名字唯一**时才非空（同名跨
+                    // item/recipe 不算歧义）；为 null 说明有几个同样接近的名字
+                    // （processing-unit-2 与 -3）或都没凑到，需要问人。
+                    "typo": resolved.typo,
+                    "typo_matched": resolved.typo_matched,
+                    "typo_best_distance": resolved.typo_best_distance,
+                    "typo_best_name_count": resolved.typo_best_name_count,
+                    "typo_suggestion": resolved.typo_suggestion,
+                })
+            })
+            .collect();
+        Ok(CallToolResult::structured(serde_json::json!({
+            "context_id": context_id,
+            "kind": params.kind,
+            "results": results,
+        })))
+    }
+}
+
+/// 本次启动启用的工具集（`--mcp-tools` 没给 = 全部）。`serve` 在开始服务前设置。
+static ENABLED_TOOLS: std::sync::OnceLock<Option<std::collections::HashSet<String>>> =
+    std::sync::OnceLock::new();
+
+/// 过滤后的工具路由：进程内只建一次，未启用的工具用 rmcp 内置的 `disabled` 集合关掉
+/// （`tools/list` 不列出、调用被拒），因此不需要手写 `ServerHandler`。
+fn tool_router() -> ToolRouter<MetatorioMcp> {
+    static ROUTER: std::sync::OnceLock<ToolRouter<MetatorioMcp>> = std::sync::OnceLock::new();
+    ROUTER
+        .get_or_init(|| {
+            let mut router = MetatorioMcp::base_tool_router();
+            if let Some(Some(enabled)) = ENABLED_TOOLS.get() {
+                for tool in router.list_all() {
+                    if !enabled.contains(tool.name.as_ref()) {
+                        router.disable_route(tool.name.clone());
+                    }
+                }
+            }
+            router
+        })
+        .clone()
+}
+
+/// 全部工具名（用于 `--mcp-tools` 的校验与报错提示）。名字来自宏生成的路由，
+/// 因此**不可能**与真实工具面漂移：加一个 `#[tool]` 方法，这里自动跟着变。
+pub fn all_tool_names() -> Vec<String> {
+    MetatorioMcp::base_tool_router()
+        .list_all()
+        .into_iter()
+        .map(|tool| tool.name.to_string())
+        .collect()
+}
+
+/// 解析 `--mcp-tools`：空（或只给 `all`）= 全部启用；否则给出要启用的子集。
+///
+/// 名字写错**直接报错并列出合法名字**，不退化成「静默全开」或「静默少开一个」——
+/// 后两者都会让调用方以为某个工具在，实际却不在。
+pub fn resolve_tools(requested: &[String]) -> Result<Vec<String>, String> {
+    let mut wanted: Vec<String> = Vec::new();
+    for name in requested {
+        let name = name.trim();
+        if name.is_empty() {
+            continue;
+        }
+        if name.eq_ignore_ascii_case("all") {
+            return Ok(Vec::new());
+        }
+        if !wanted.iter().any(|existing| existing == name) {
+            wanted.push(name.to_string());
+        }
+    }
+    if wanted.is_empty() {
+        return Ok(Vec::new());
+    }
+    let known = all_tool_names();
+    let unknown: Vec<&String> = wanted
+        .iter()
+        .filter(|name| !known.iter().any(|known| known == *name))
+        .collect();
+    if !unknown.is_empty() {
+        return Err(format!(
+            "--mcp-tools 里有不存在的工具：{}。可用工具：{}（或写 `all` / 留空表示全部）",
+            unknown
+                .iter()
+                .map(|name| name.as_str())
+                .collect::<Vec<_>>()
+                .join("、"),
+            known.join("、")
+        ));
+    }
+    Ok(wanted)
+}
+
+/// 用宏生成的 `list_tools` / `call_tool` / `get_tool`，路由换成上面那个过滤过的。
+#[tool_handler(router = tool_router())]
+impl ServerHandler for MetatorioMcp {}
+
+/// `dispatch` 工具的实际逻辑：与具体 Tauri runtime 解耦，便于用 mock host 测试。
+///
+/// `request_id` 为幂等键：重复的 id 不重新应用消息，直接回放上次的载荷。
+/// `page` 决定返回里 `solve` 的 mechanics/flows 上限（求解可能产出几百条，
+/// 实测 py 上一次自动规划就有 757 条机制）。
+async fn dispatch_message(
+    host: &Arc<dyn Host>,
+    message: AppMessage,
+    request_id: Option<String>,
+    page: Page,
+) -> Result<CallToolResult, McpError> {
+    // 0) 幂等回放：同一 request_id 已经执行过就直接返回上次的载荷。
+    if let Some(request_id) = &request_id {
+        let cached = host
+            .state()
+            .dispatch_cache
+            .lock()
+            .ok()
+            .and_then(|cache| cache.get(request_id));
+        if let Some((mut payload, is_error)) = cached {
+            if let serde_json::Value::Object(object) = &mut payload {
+                object.insert(
+                    "idempotent_replay".to_string(),
+                    serde_json::Value::Bool(true),
+                );
+            }
+            let mut result = CallToolResult::structured(payload);
+            if is_error {
+                result.is_error = Some(true);
+            }
+            return Ok(result);
+        }
+    }
+
+    // 1) reducer：短临界区（放进阻塞线程池，避免占用 tokio worker）。
+    let reduce_app = host.clone();
+    let outcome = tokio::task::spawn_blocking(move || {
+        let state = reduce_app.state();
+        let mut runtime = state
+            .runtime
+            .lock()
+            .map_err(|_| "runtime 锁已损坏（poisoned）".to_string())?;
+        runtime.dispatch(message).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| McpError::internal_error(format!("dispatch join 失败: {error}"), None))?
+    .map_err(|error| McpError::invalid_params(format!("dispatch 执行失败: {error}"), None))?;
+
+    // 2) 副作用：求解在锁外跑（不阻塞 GUI 与其它 MCP 调用）。
+    let state = host.state();
+    let state_ref = &state;
+    let (solve, commands, errors) = run_commands(&outcome.commands, move |command| {
+        // 闭包返回值不能借用参数，故克隆命令进 async 块。
+        let command = command.clone();
+        async move { execute_command(host, state_ref, &command).await }
+    })
+    .await;
+    let solve = solve.and_then(|result| serde_json::to_value(&result).ok());
+    // 求解结果可能很长（机制/流各几百条）：同样按 page 截断并如实上报。
+    let mut report = PageReport::default();
+    let solve = solve.map(|mut solve| {
+        if let Some(status) = solve.get_mut("status").and_then(|s| s.as_object_mut())
+            && let Some(solved) = status.get_mut("solved").and_then(|s| s.as_object_mut())
+        {
+            report.page_key(solved, "mechanics", "solve.mechanics", page);
+            report.page_key(solved, "flows", "solve.flows", page);
+        }
+        solve
+    });
+    // 协同：文档变了就通知 GUI 重新拉取。
+    // 命令执行本身也可能改文档（如自动规划回写机制），因此用当前 revision
+    // 判定，而不只看 reducer 的 `changed`。
+    let revision = {
+        let state = host.state();
+        state
+            .runtime
+            .lock()
+            .map(|runtime| runtime.state.revision)
+            .unwrap_or(outcome.revision)
+    };
+    if outcome.changed || revision != outcome.revision {
+        host.emit("document-changed", serde_json::json!(revision));
+    }
+
+    let payload = serde_json::json!({
+        "revision": revision,
+        "changed": outcome.changed || revision != outcome.revision,
+        "created": &outcome.created,
+        "history": &outcome.history,
+        "scheduled_commands": commands,
+        "solve": solve,
+        "errors": errors,
+        "page": report.value(page),
+    });
+    // 有失败时把结果标记为错误：agent 必须能区分「命令跑了但失败了」
+    // 与「命令跑了且成功但恰好没有求解产出」。
+    let is_error = !errors.is_empty();
+    // 只记录**成功**的幂等结果：失败（尤其求解超时）必须允许用同一个 id
+    // 重试，否则重试会一直回放失败。
+    if !is_error
+        && let Some(request_id) = request_id
+        && let Ok(mut cache) = host.state().dispatch_cache.lock()
+    {
+        cache.insert(request_id, payload.clone(), false);
+    }
+    let mut result = CallToolResult::structured(payload);
+    if is_error {
+        result.is_error = Some(true);
+    }
+    Ok(result)
+}
+
+/// `get_planning_state` 的读取层级（锁内只克隆，序列化在锁外）。
+enum DocSnapshot {
+    Document(metatorio_runtime::AppDocument),
+    Project(metatorio_runtime::ProjectDocument),
+    Factory {
+        project: u64,
+        factory: u64,
+        factory_document: metatorio_runtime::FactoryDocument,
+    },
+}
+
+/// 一个目标：**物品或流体**（原型 id 或本地化名）+ 可选品质 + 可选温度区间 + 每秒速率。
+#[derive(Debug, Clone, serde::Deserialize, JsonSchema)]
+struct AutoPlanTarget {
+    /// 目标名：原型 id（`iron-plate` / `steam`）或本地化名（`铁板` / `蒸汽`）都行；
+    /// 分隔符不敏感。**物品和流体都接受**。
+    item: String,
+    /// 品质（`normal` / `uncommon` / …）；省略 = `normal`。仅物品有意义。
+    #[serde(default)]
+    quality: Option<String>,
+    /// 流体温度区间 `[下限, 上限]`；省略 = 原型的 `[default_temperature, max_temperature]`。
+    ///
+    /// 温度是流体流的**身份的一部分**（`DualVar::Fluid { name, temperature }`），
+    /// 所以流体目标必须能表达它：`[500, 500]` = 只要 500°C 的蒸汽，`[15, 500]` =
+    /// 任意温度都行。只对流体有意义。
+    #[serde(default)]
+    temperature: Option<[i32; 2]>,
+    /// 目标速率（每秒；项目 time-scale 只影响显示）。
+    amount: f64,
+}
+
+/// 插件策略。
+#[derive(Debug, Default, Clone, serde::Deserialize, JsonSchema)]
+struct AutoPlanModules {
+    /// 用「每类别 tier 最高的插件」填充枚举列表（需要 `quality`）。
+    #[serde(default)]
+    best: bool,
+    /// `best` 使用的品质；省略 = 工厂主品质。
+    #[serde(default)]
+    quality: Option<String>,
+    /// 从枚举列表里剔除的插件（在 `best` 之后应用，例如排除效率 3）。
+    #[serde(default)]
+    exclude: Vec<IdWithQuality>,
+}
+
+/// 插件塔方案（自动规划叠加的插件塔配置）。
+#[derive(Debug, Clone, serde::Deserialize, JsonSchema)]
+struct AutoPlanBeacon {
+    /// 插件塔本体（id + 品质）。
+    beacon: IdWithQuality,
+    /// 插件塔数量；省略 = 1。
+    #[serde(default)]
+    count: Option<usize>,
+    /// 共享比例（平均一个塔覆盖几台机器）；省略 = 1.0。
+    #[serde(default)]
+    share: Option<f64>,
+    /// 塔内插件（数量是「塔内插件数」，不是塔数量）。
+    #[serde(default)]
+    modules: Vec<AutoPlanBeaconModule>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, JsonSchema)]
+struct AutoPlanBeaconModule {
+    module: IdWithQuality,
+    #[serde(default)]
+    count: Option<usize>,
+}
+
+/// 外部输入：手动指定原料来源（**这才是「放宽严格供给」的正确做法**——
+/// 自动规划总是严格供给，缺什么就在这里声明什么，而不是关掉严格供给）。
+#[derive(Debug, Clone, serde::Deserialize, JsonSchema)]
+struct AutoPlanExternalInput {
+    /// 流（`{"Item":{"id":"iron-plate","quality":"normal"}}` / `{"Fluid":{…}}` / `"Electricity"`）。
+    flow: DualVar,
+    /// 惩罚系数；省略 = 1.0。
+    #[serde(default)]
+    penalty: Option<f64>,
+}
+
+/// `auto_plan` 的参数：把群里 bot 实际用过的配置序列收敛成**一个入口**。
+///
+/// 一次调用内部依次执行：新建项目 → （可选绑定上下文）→ 新建工厂 →
+/// 星球/主品质 → 目标（多个）→ 外部输入 → 插件策略 → 插件塔方案 → 触发自动规划。
+/// 与逐条 `dispatch` 相比，人只需记一个工具、AI 只需一次调用。
+#[derive(Debug, Clone, serde::Deserialize, JsonSchema)]
+struct AutoPlanParams {
+    /// 目标列表（至少一个）。
+    targets: Vec<AutoPlanTarget>,
+    /// 项目名；省略 = “自动规划”。
+    #[serde(default)]
+    project_name: Option<String>,
+    /// 工厂名；省略 = “主工厂”。
+    #[serde(default)]
+    factory_name: Option<String>,
+    /// 星球（工厂设置，如 `nauvis` / `vulcanus`）；省略 = 保持新工厂默认（nauvis）。
+    #[serde(default)]
+    planet: Option<String>,
+    /// 主品质（工厂设置）；省略 = `normal`。
+    #[serde(default)]
+    major_quality: Option<String>,
+    /// 插件策略（最佳 / 剔除）。
+    #[serde(default)]
+    modules: Option<AutoPlanModules>,
+    /// 枚举插件塔方案。
+    #[serde(default)]
+    beacons: Vec<AutoPlanBeacon>,
+    /// 外部输入（手动指定原料来源）。
+    #[serde(default)]
+    external_inputs: Vec<AutoPlanExternalInput>,
+    /// 绑定到某个游戏上下文 id；省略 = 当前激活上下文。
+    #[serde(default)]
+    context_id: Option<String>,
+    /// 幂等键：同一个 id 的重复调用只应用一次，重试直接拿回上次载荷。
+    #[serde(default)]
+    request_id: Option<String>,
+}
+
+/// 组装 `auto_plan` 在「项目与工厂都已建好」之后要依次执行的消息序列
+/// （纯函数：`project`/`factory` id 由工具按 `created` 回填后传入）。
+///
+/// **这里不建工厂**：工厂必须由工具先建，才能拿到 id 去组装工厂级消息；本函数若
+/// 再发一条 `add-factory`，一个 `auto_plan` 调用就会给项目留下两个工厂（一个是
+/// 刚配好的、一个是空模板）——实测踩到过：项目里凭空多出一个 12 机制的 `主工厂`。
+///
+/// 顺序有讲究：
+/// 1. **星球/主品质在目标之前**：它们决定求解环境（太阳能系数、允许的品质档）；
+/// 2. 目标 → 外部输入：先确定「要什么」，再声明「从哪来」；
+/// 3. `best` 模块（整体替换枚举列表）**在剔除之前**，否则剔除会被覆盖；
+/// 4. 插件塔方案次之，最后才是 `solve: auto-plan` 触发。
+fn auto_plan_body_messages(
+    params: &AutoPlanParams,
+    project: ProjectId,
+    factory: FactoryId,
+    targets: &[(DualVar, f64)],
+) -> Vec<AppMessage> {
+    let mut messages = Vec::new();
+    if let Some(planet) = &params.planet {
+        messages.push(AppMessage::Factory {
+            project,
+            factory,
+            action: FactoryAction::Context(FactoryContextAction::SetPlanet {
+                planet: Some(planet.clone()),
+            }),
+        });
+    }
+    if let Some(quality) = &params.major_quality {
+        messages.push(AppMessage::Factory {
+            project,
+            factory,
+            action: FactoryAction::Context(FactoryContextAction::SetMajorQuality {
+                quality: quality.clone(),
+            }),
+        });
+    }
+    for (flow, amount) in targets {
+        messages.push(AppMessage::Factory {
+            project,
+            factory,
+            action: FactoryAction::Flow(FlowAction::AddToTarget {
+                flow: flow.clone(),
+                amount: *amount,
+            }),
+        });
+    }
+    for input in &params.external_inputs {
+        messages.push(AppMessage::Factory {
+            project,
+            factory,
+            action: FactoryAction::Flow(FlowAction::AddToExternalInput {
+                flow: input.flow.clone(),
+                penalty: input.penalty.unwrap_or(1.0),
+            }),
+        });
+    }
+    if let Some(modules) = &params.modules {
+        if modules.best {
+            let quality = modules
+                .quality
+                .clone()
+                .or_else(|| params.major_quality.clone())
+                .unwrap_or_else(|| "normal".to_string());
+            messages.push(AppMessage::Project {
+                project,
+                action: ProjectAction::Planning(PlanningAction::UseBestModules { quality }),
+            });
+        }
+        for module in &modules.exclude {
+            messages.push(AppMessage::Project {
+                project,
+                action: ProjectAction::Planning(PlanningAction::RemoveEnumeratedModule {
+                    module: module.clone(),
+                }),
+            });
+        }
+    }
+    for (index, beacon) in params.beacons.iter().enumerate() {
+        // 新项目的枚举插件塔列表从空开始，因此这里逐个 append，index 即序号。
+        messages.push(AppMessage::Project {
+            project,
+            action: ProjectAction::Planning(PlanningAction::AddEnumeratedBeacon),
+        });
+        let plan = AutoBeaconPlan {
+            module_config: ModuleConfig {
+                modules: Vec::new(),
+                beacons: vec![BeaconConfig {
+                    beacon: beacon.beacon.clone(),
+                    count: beacon.count.unwrap_or(1),
+                    share: beacon.share.unwrap_or(1.0),
+                    modules: beacon
+                        .modules
+                        .iter()
+                        .map(|entry| (entry.module.clone(), entry.count.unwrap_or(1)))
+                        .collect(),
+                }],
+            },
+        };
+        messages.push(AppMessage::Project {
+            project,
+            action: ProjectAction::Planning(PlanningAction::SetEnumeratedBeacon {
+                beacon: index,
+                plan,
+            }),
+        });
+    }
+    messages.push(AppMessage::Factory {
+        project,
+        factory,
+        action: FactoryAction::Solve(SolveAction::AutoPlan),
+    });
+    messages
+}
+
+/// 把目标里的名字解析成 `(DualVar, amount)`：**物品和流体都接受**（原型 id 或
+/// 本地化名，分隔符不敏感），但**只接受精确命中的原型**——不猜：名字打错或指向配方时
+/// 报错并附候选（含错拼候选），因为错误的名字能通过校验、却会让计划悄悄跑偏。
+///
+/// 为什么要支持流体：`auto_plan` 是「常规规划的权威入口」，而**产出指定温度的流体**
+/// 恰恰是最需要自动规划的场景（也是求解器严格产出语义修好后第一个被验证的场景）。
+/// 之前它只收物品，调用方只能退回 `dispatch` 手工拼 `TargetAction::add`——实测
+/// 每次都先浪费两次 `auto_plan` 调用（"蒸汽是流体、不是物品"）。
+///
+/// 流体必须能表达温度：给了 `temperature` 就用它，没给则取原型的
+/// `[default_temperature, max_temperature]`（`store` 为 `None` 时直接报错要求显式给，
+/// 而不是塞一个猜的默认值）。物品/流体各自不该有的字段**显式报错**，不静默忽略。
+fn resolve_auto_plan_targets(
+    index: &CatalogIndex,
+    store: Option<&PrototypeStore>,
+    targets: &[AutoPlanTarget],
+) -> Result<Vec<(DualVar, f64)>, String> {
+    let mut resolved = Vec::new();
+    for target in targets {
+        if !(target.amount.is_finite() && target.amount > 0.0) {
+            return Err(format!(
+                "目标「{}」的 amount 必须是正数（每秒速率）",
+                target.item
+            ));
+        }
+        let (name, kind) = require_index_entry_of(index, &["item", "fluid"], "目标", &target.item)?;
+        let flow = if kind == "fluid" {
+            if target.quality.is_some() {
+                return Err(format!("目标「{}」是流体，不接受 quality", target.item));
+            }
+            let temperature = match target.temperature {
+                Some(range) => range,
+                None => fluid_temperature_range(store, &name).ok_or_else(|| {
+                    format!(
+                        "目标「{}」是流体，必须给 temperature: [下限, 上限]",
+                        target.item
+                    )
+                })?,
+            };
+            if temperature[0] > temperature[1] {
+                return Err(format!(
+                    "目标「{}」的 temperature 下界 {} 大于上界 {}",
+                    target.item, temperature[0], temperature[1]
+                ));
+            }
+            DualVar::Fluid { name, temperature }
+        } else {
+            if target.temperature.is_some() {
+                return Err(format!("目标「{}」是物品，不接受 temperature", target.item));
+            }
+            let quality = target
+                .quality
+                .clone()
+                .unwrap_or_else(|| "normal".to_string());
+            DualVar::Item(IdWithQuality::new(name, quality))
+        };
+        resolved.push((flow, target.amount));
+    }
+    Ok(resolved)
+}
+
+/// 流体原型的 `[default_temperature, max_temperature]`——即界面「新建流体目标」用的
+/// 那个默认区间（"任意能产出的蒸汽"）。
+fn fluid_temperature_range(store: Option<&PrototypeStore>, name: &str) -> Option<[i32; 2]> {
+    let fluid = store?
+        .get(PrototypeGroup::Fluid, name)?
+        .component::<FluidComponent>()?;
+    Some([
+        fluid.default_temperature as i32,
+        fluid.max_temperature() as i32,
+    ])
+}
+
+/// 「近似候选」提示：把精确/模糊/错拼命中压成短标签，附在报错里。
+fn name_candidates(outcome: &ResolvedQuery) -> Vec<String> {
+    let mut hints: Vec<String> = outcome
+        .exact
+        .iter()
+        .chain(outcome.partial.iter())
+        .take(5)
+        .map(|hit| format!("{} [{}]", hit.name, hit.kind))
+        .collect();
+    hints.extend(outcome.typo.iter().take(3).map(|hit| {
+        format!(
+            "{} [{}]（错拼? d={}）",
+            hit.name,
+            hit.kind,
+            hit.distance.unwrap_or(0)
+        )
+    }));
+    hints
+}
+
+/// 手写名字必须**精确命中** `kinds` 里的某一种原型，命中则返回规范原型名，否则报错
+/// 并附候选（id / 本地化名 / 错拼都行，分隔符不敏感）。
+///
+/// 为什么要在入口挡：`auto_plan` 的参数是**人和 AI 手打的名字**，而写错的名字不一定
+/// 会报错——实测两种情况都很危险：
+/// - `remove-enumerated-module` 对不存在的插件是**静默 no-op**（`retain` 找不到就报
+///   「无变化」），调用方以为「已排除」；
+/// - `add-to-external-input` 更直接把不存在的物品**原样写进文档**，自动规划照常
+///   「成功」，那条外部输入其实什么也没接上。
+fn require_index_entry(
+    index: &CatalogIndex,
+    kinds: &[&str],
+    label: &str,
+    name: &str,
+) -> Result<String, String> {
+    require_index_entry_of(index, kinds, label, name).map(|(name, _)| name)
+}
+
+/// 同上，但把命中的**原型种类**一起返回（调用方要按种类走不同分支时用）。
+fn require_index_entry_of(
+    index: &CatalogIndex,
+    kinds: &[&str],
+    label: &str,
+    name: &str,
+) -> Result<(String, String), String> {
+    let outcome = resolve_index_entry(&index.entries, name, 8);
+    if let Some(hit) = outcome
+        .exact
+        .iter()
+        .find(|hit| kinds.contains(&hit.kind.as_str()))
+    {
+        return Ok((hit.name.clone(), hit.kind.clone()));
+    }
+    let hints = name_candidates(&outcome);
+    Err(if hints.is_empty() {
+        format!("{label}「{name}」不存在于当前游戏上下文：用 localized_names 查一下正确名字")
+    } else {
+        format!(
+            "{label}「{name}」不存在于当前游戏上下文，近似候选：{}",
+            hints.join("、")
+        )
+    })
+}
+
+/// `auto_plan` 里**所有手写名字的参数**在「建任何东西之前」统一过一遍：插件剔除项、
+/// 插件塔与其插件、外部输入的物品/流体/实体。
+///
+/// 校验不过就整个调用失败、一个对象都不建——这正是组合入口该有的原子性；等到配置
+/// 中途才报错，就得靠回滚来收拾半成品（回滚仍然保留，用来兜住 reducer 侧的失败）。
+/// 虚拟流（电/热/污染/燃料流）不是原型，不校验。
+fn validate_auto_plan_names(
+    index: &CatalogIndex,
+    params: &AutoPlanParams,
+) -> Result<(), String> {
+    if let Some(modules) = &params.modules {
+        for module in &modules.exclude {
+            require_index_entry(index, &["module", "item"], "要剔除的插件", &module.id)?;
+        }
+    }
+    for (position, beacon) in params.beacons.iter().enumerate() {
+        let label = format!("第 {} 个插件塔", position + 1);
+        require_index_entry(index, &["beacon", "entity"], &label, &beacon.beacon.id)?;
+        for module in &beacon.modules {
+            require_index_entry(
+                index,
+                &["module", "item"],
+                &format!("{label}里的插件"),
+                &module.module.id,
+            )?;
+        }
+    }
+    for input in &params.external_inputs {
+        match &input.flow {
+            DualVar::Item(item) => {
+                require_index_entry(index, &["item"], "外部输入物品", &item.id)?;
+            }
+            DualVar::Fluid { name, .. } => {
+                require_index_entry(index, &["fluid"], "外部输入流体", name)?;
+            }
+            DualVar::Entity(entity) => {
+                require_index_entry(index, &["entity"], "外部输入实体", &entity.id)?;
+            }
+            // 电 / 热 / 污染 / 燃料流 / 自定义流都是虚拟流，没有对应原型。
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// 分页参数：所有返回集合的工具共用（`limit` 默认 50、上限 1000）。
+///
+/// 群里的实测反馈：以前「截断」是调用方（bash/客户端）替我们兜的——一条查询就能让
+/// 上下文爆炸。现在**工具自己保证有上界**，并在 `page` 元信息里如实说明哪些集合被
+/// 截断了、截断前有多少条，调用方据此翻页或收窄查询。
+#[derive(Debug, Clone, Copy, Default, serde::Deserialize, JsonSchema)]
+struct PageParams {
+    /// 每个集合最多返回多少条（默认 50，上限 1000）。
+    #[serde(default)]
+    limit: Option<usize>,
+    /// 从第几条开始返回（配合 `limit` 翻页）。
+    #[serde(default)]
+    offset: Option<usize>,
+}
+
+impl PageParams {
+    const DEFAULT_LIMIT: usize = 50;
+    const MAX_LIMIT: usize = 1000;
+
+    fn resolve(&self) -> Page {
+        Page {
+            offset: self.offset.unwrap_or(0),
+            limit: self
+                .limit
+                .unwrap_or(Self::DEFAULT_LIMIT)
+                .clamp(1, Self::MAX_LIMIT),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Page {
+    offset: usize,
+    limit: usize,
+}
+
+impl Page {
+    /// 按页切一个数组，返回 `(页内元素, 截断前总数)`。
+    fn slice<T: Clone>(&self, items: &[T]) -> (Vec<T>, usize) {
+        let total = items.len();
+        let start = self.offset.min(total);
+        let end = (start + self.limit).min(total);
+        (items[start..end].to_vec(), total)
+    }
+}
+
+/// 分页记账：把每个被截断集合的「截断前总数」与「是否被截断」汇总进 `page` 元信息。
+#[derive(Debug, Default)]
+struct PageReport {
+    totals: serde_json::Map<String, serde_json::Value>,
+    truncated: Vec<String>,
+}
+
+/// 走一步 reducer（短锁），并且**只执行便宜的收敛命令**（品质上限 / 机器兼容 /
+/// 插件钳制），跳过 `Recompute`/`Persist`/`AutoPlan`——组合入口先要把文档配好，
+/// 而每配一步就跑一次整厂求解会让「立即返回」变成几分钟（py 实测一次 70s+）。
+/// 最后那次 `solve: auto-plan` 会统一落盘与重解。
+async fn apply_consistency_only(
+    host: &Arc<dyn Host>,
+    message: AppMessage,
+) -> Result<metatorio_runtime::state::DispatchResult, McpError> {
+    let reduce_app = host.clone();
+    let outcome = tokio::task::spawn_blocking(move || {
+        let state = reduce_app.state();
+        let mut runtime = state
+            .runtime
+            .lock()
+            .map_err(|_| "runtime 锁已损坏（poisoned）".to_string())?;
+        runtime.dispatch(message).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| McpError::internal_error(format!("dispatch join 失败: {error}"), None))?
+    .map_err(|error| McpError::invalid_params(format!("auto_plan 配置失败: {error}"), None))?;
+    let state = host.state();
+    for command in &outcome.commands {
+        if is_consistency_command(command) {
+            let _ = execute_command(host, &state, command).await;
+        }
+    }
+    // 文档变了就通知 GUI：外部 agent 建的项目要立刻出现在界面上。
+    host.emit("document-changed", serde_json::json!(outcome.revision));
+    Ok(outcome)
+}
+
+/// 被截断时的收窄提示（扁平列表与嵌套集合共用同一措辞）。
+fn truncation_hint(total: usize, returned: usize) -> String {
+    format!("已截断：共 {total} 条，本页 {returned} 条。用 offset/limit 翻页，或收窄查询")
+}
+
+impl PageReport {
+    fn record(&mut self, path: &str, total: usize, returned: usize) {
+        self.totals
+            .insert(path.to_string(), serde_json::json!(total));
+        if returned < total {
+            self.truncated.push(path.to_string());
+        }
+    }
+
+    /// 对 JSON 对象里的某个数组键分页（键不存在或不是数组时跳过）。
+    fn page_key(
+        &mut self,
+        object: &mut serde_json::Map<String, serde_json::Value>,
+        key: &str,
+        path: &str,
+        page: Page,
+    ) {
+        let (total, kept) = match object.get_mut(key) {
+            Some(serde_json::Value::Array(items)) => {
+                let total = items.len();
+                let start = page.offset.min(total);
+                let end = (start + page.limit).min(total);
+                let kept = items[start..end].to_vec();
+                *items = kept.clone();
+                (total, kept)
+            }
+            _ => return,
+        };
+        if kept.len() < total {
+            // 截断时给出明确的收窄提示，避免调用方以为「就这么多」。
+            object.insert(
+                format!("{key}_hint"),
+                serde_json::json!(truncation_hint(total, kept.len())),
+            );
+        }
+        self.record(path, total, kept.len());
+    }
+
+    fn value(&self, page: Page) -> serde_json::Value {
+        serde_json::json!({
+            "offset": page.offset,
+            "limit": page.limit,
+            "totals": self.totals,
+            "truncated": self.truncated,
+        })
+    }
+}
+
+/// 构造 `get_planning_state` 的载荷：**逐层只给下一层的索引**，最内层才给细节。
+///
+/// 这是对「一条查询让上下文爆炸」的结构性修法：原来读整个文档会把每层工厂的每条
+/// 机制一起倒出来（真实 py 上下文里一次自动规划就能写出 757 条机制），逐层索引 +
+/// 每层分页后，任何一次调用的返回量都由 `page` 决定。抽成纯函数以便单测。
+fn planning_state_value(snapshot: &DocSnapshot, page: Page) -> (serde_json::Value, PageReport) {
+    let mut report = PageReport::default();
+    let value = match snapshot {
+        // 无 project：项目索引（复用 list_projects 的紧凑摘要）。
+        DocSnapshot::Document(document) => {
+            let projects = project_summary(document);
+            let (kept, total) = page.slice(&projects);
+            report.record("projects", total, kept.len());
+            serde_json::json!({ "level": "document", "projects": kept })
+        }
+        // 单个 project：项目设置/规划偏好 + **工厂索引**（工厂细节要指名 factory）。
+        DocSnapshot::Project(project) => {
+            let factories = factory_summary(project);
+            let (kept, total) = page.slice(&factories);
+            report.record("factories", total, kept.len());
+            serde_json::json!({
+                "level": "project",
+                "project": project.id.0,
+                "name": project.name,
+                "context_id": project.context_id,
+                "settings": project.settings,
+                "planning": project.planning,
+                "factories": kept,
+            })
+        }
+        // project + factory：工厂文档（重复集合按 page 截断）。
+        DocSnapshot::Factory {
+            project,
+            factory,
+            factory_document,
+        } => {
+            let mut document = match serde_json::to_value(factory_document) {
+                Ok(serde_json::Value::Object(object)) => object,
+                _ => serde_json::Map::new(),
+            };
+            for (key, path) in [
+                ("mechanics", "mechanics"),
+                ("targets", "targets"),
+                ("target_expressions", "target_expressions"),
+                ("external_inputs", "external_inputs"),
+            ] {
+                report.page_key(&mut document, key, path, page);
+            }
+            serde_json::json!({
+                "level": "factory",
+                "project": project,
+                "factory": factory,
+                "factory_document": serde_json::Value::Object(document),
+            })
+        }
+    };
+    (value, report)
+}
+
+/// `get_planning_state` 的参数（都可选；全不给 = 整个文档的项目索引）。
+#[derive(Debug, serde::Deserialize, JsonSchema)]
+struct PlanningStateParams {
+    /// 项目 id；省略 = 返回项目索引。
+    #[serde(default)]
+    project: Option<u64>,
+    /// 工厂 id；需要 `project`，返回该工厂的文档。
+    #[serde(default)]
+    factory: Option<u64>,
+    /// 机制 id（取自该工厂的 `mechanics`）；需要 `project` + `factory`，
+    /// 只返回这一个机制的配置 + 它在系数 = 1 时每秒的消耗/产出。
+    #[serde(default)]
+    mechanic: Option<u64>,
+    /// 与 `project` + `factory` 同时给出时，同步跑一次求解并附上结果。
+    #[serde(default)]
+    recompute: bool,
+    /// 每个集合的返回上限与偏移（默认 50、上限 1000）。
+    #[serde(flatten)]
+    page: PageParams,
+}
+
+/// 「机制层」载荷：一个机制的**配置** + 它在**系数 = 1** 时的每秒产/耗。
+///
+/// 为什么要这一层：文档里的机制只有 `machine` / `recipe` / `module_config` 这些零件，
+/// agent 光看机制名（甚至看零件）也推不出「一个系数到底消耗什么、产出什么」——机器
+/// 速度、插件、插件塔都参与之后更是如此。这里给的是 GUI 机制卡显示的**同一份展开
+/// 结果**（[`mechanic_flow_for`]），不是另写一套近似。
+async fn mechanic_level_value(
+    host: &Arc<dyn Host>,
+    project: u64,
+    factory: u64,
+    factory_document: &metatorio_runtime::FactoryDocument,
+    mechanic: u64,
+    page: Page,
+    report: &mut PageReport,
+) -> Result<serde_json::Value, McpError> {
+    let entry = factory_document
+        .mechanics
+        .iter()
+        .find(|entry| entry.id == MechanicId(mechanic))
+        .ok_or_else(|| {
+            McpError::invalid_params(
+                format!(
+                    "机制 {mechanic} 不在工厂 {factory} 里：先 get_planning_state \
+                     {{project, factory}} 读 mechanics 列表拿 id"
+                ),
+                None,
+            )
+        })?;
+    let config = serde_json::to_value(&entry.mechanic).unwrap_or(serde_json::Value::Null);
+    let flow = mechanic_flow_for(
+        &host.state(),
+        ProjectId(project),
+        FactoryId(factory),
+        MechanicId(mechanic),
+    )
+    .await
+    .map_err(|error| {
+        McpError::invalid_params(format!("读取机制 {mechanic} 的流失败: {error}"), None)
+    })?;
+
+    let (inputs, outputs) = split_mechanic_flow(&flow);
+    let (inputs, inputs_total) = page.slice(&inputs);
+    let (outputs, outputs_total) = page.slice(&outputs);
+    report.record("mechanic.inputs", inputs_total, inputs.len());
+    report.record("mechanic.outputs", outputs_total, outputs.len());
+
+    let encode = |items: Vec<(DualVar, f64)>| {
+        items
+            .into_iter()
+            .map(|(flow, amount)| serde_json::json!({ "flow": flow, "amount": amount }))
+            .collect::<Vec<_>>()
+    };
+    let mut object = serde_json::Map::new();
+    object.insert("level".to_string(), serde_json::json!("mechanic"));
+    object.insert("project".to_string(), serde_json::json!(project));
+    object.insert("factory".to_string(), serde_json::json!(factory));
+    object.insert("mechanic".to_string(), serde_json::json!(mechanic));
+    object.insert("enabled".to_string(), serde_json::json!(entry.enabled));
+    object.insert("config".to_string(), config);
+    object.insert(
+        "rate_note".to_string(),
+        serde_json::json!(
+            "系数（求解里的 amount）= 1 时每秒的量：inputs 是消耗、outputs 是产出，\
+             已含机器速度、插件与插件塔效果（与求解同一份展开）"
+        ),
+    );
+    object.insert(
+        "inputs".to_string(),
+        serde_json::json!(encode(inputs.clone())),
+    );
+    object.insert(
+        "outputs".to_string(),
+        serde_json::json!(encode(outputs.clone())),
+    );
+    // 与其它集合同一口径：截断了就说清怎么收窄，绝不静默丢。
+    if inputs.len() < inputs_total {
+        object.insert(
+            "inputs_hint".to_string(),
+            serde_json::json!(truncation_hint(inputs_total, inputs.len())),
+        );
+    }
+    if outputs.len() < outputs_total {
+        object.insert(
+            "outputs_hint".to_string(),
+            serde_json::json!(truncation_hint(outputs_total, outputs.len())),
+        );
+    }
+    Ok(serde_json::Value::Object(object))
+}
+
+/// 把展开出来的带符号流拆成 `(消耗, 产出)`，两边都是**正数**：符号改由数组名承载。
+///
+/// 展开结果里正数是产出、负数是消耗（见 `mechanic_flow` 的约定），直接给 LLM 看
+/// `-2.0` 容易被读成「产出 2」。接近 0 的浮点残渣（`|v| <= 1e-12`）在展开侧已经
+/// 过滤过，这里不再重复判断。
+fn split_mechanic_flow(flow: &[(DualVar, f64)]) -> (Vec<(DualVar, f64)>, Vec<(DualVar, f64)>) {
+    let mut inputs = Vec::new();
+    let mut outputs = Vec::new();
+    for (flow, amount) in flow {
+        if *amount < 0.0 {
+            inputs.push((flow.clone(), -amount));
+        } else {
+            outputs.push((flow.clone(), *amount));
+        }
+    }
+    (inputs, outputs)
+}
+
+/// 项目级索引条目：只给「有哪些项目、各自多大」，不给内容。
+fn project_summary(document: &metatorio_runtime::AppDocument) -> Vec<serde_json::Value> {
+    document
+        .projects
+        .iter()
+        .map(|project| {
+            serde_json::json!({
+                "id": project.id.0,
+                "name": project.name,
+                "context_id": project.context_id,
+                "factories": project.factories.len(),
+                "mechanics": project
+                    .factories
+                    .iter()
+                    .map(|factory| factory.mechanics.len())
+                    .sum::<usize>(),
+                "targets": project
+                    .factories
+                    .iter()
+                    .map(|factory| factory.targets.len())
+                    .sum::<usize>(),
+            })
+        })
+        .collect()
+}
+
+/// 工厂级索引条目：规模与关键设置，供 agent 决定去读哪一个工厂。
+fn factory_summary(project: &metatorio_runtime::ProjectDocument) -> Vec<serde_json::Value> {
+    project
+        .factories
+        .iter()
+        .map(|factory| {
+            serde_json::json!({
+                "id": factory.id.0,
+                "name": factory.name,
+                "planet": factory.settings.planet,
+                "surface": factory.settings.surface,
+                "major_quality": factory.settings.major_quality,
+                "strict_source": factory.strict_source,
+                "strict_sink": factory.strict_sink,
+                "mechanics": factory.mechanics.len(),
+                "targets": factory.targets.iter().map(|target| serde_json::json!({
+                    "id": target.id.0,
+                    "flow": target.flow,
+                    "amount": target.amount,
+                })).collect::<Vec<_>>(),
+                "external_inputs": factory.external_inputs.len(),
+                "target_expressions": factory.target_expressions.len(),
+            })
+        })
+        .collect()
+}
+
+// ── Server lifecycle ───────────────────────────────────────────────
+
+/// MCP 端点的启动配置（由 `Options` 组装后传入，见 `run`）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServerConfig {
+    /// 监听地址：`127.0.0.1`（默认）/ 本机 IP / `0.0.0.0`，或 `localhost`。
+    pub bind: String,
+    /// 监听端口。
+    pub port: u16,
+    /// Bearer token；`None`/空 = 不鉴权（只允许出现在回环绑定上）。
+    pub token: Option<String>,
+    /// 额外允许的 `Host`（主机名/mDNS 名）；IP 由 `bind` 自动允许。
+    pub allow_hosts: Vec<String>,
+    /// 要启用的工具名；**空 = 全部启用**（见 `--mcp-tools`）。
+    pub tools: Vec<String>,
+}
+
+/// 把 `--mcp-bind` 解析成「监听地址 + Host 白名单」。
+///
+/// 白名单来自 rmcp 的 DNS-rebinding 防护（默认只认回环 Host）：绑到具体 IP 时把该 IP
+/// 加进去，客户端用 `http://<那个 IP>:<port>/mcp` 就不会被 Host 校验拦下。绑到
+/// `0.0.0.0`/`::` 时无从枚举本机地址，返回 `None` 表示**关闭**这项校验——此时调用方
+/// 已明确要求对所有网卡开放，访问控制只剩 token（启动日志会写明这一点）。
+///
+/// `pub` 是为了让 bin 的 `validate` 复用同一份解析（非回环必须有 token 的判断要用它），
+/// 而不是各写一份「什么算回环」。
+pub fn resolve_bind(
+    bind: &str,
+    allow_hosts: &[String],
+) -> Result<(IpAddr, Option<Vec<String>>), String> {
+    let bind = bind.trim();
+    if bind.is_empty() {
+        return Err("--mcp-bind 不能为空".to_string());
+    }
+    let addr: IpAddr = if bind.eq_ignore_ascii_case("localhost") {
+        IpAddr::from([127, 0, 0, 1])
+    } else {
+        bind.parse().map_err(|_| {
+            format!(
+                "--mcp-bind `{bind}` 不是合法地址：只接受 IP 字面量（`127.0.0.1` / \
+                 `0.0.0.0` / `192.168.1.23`）或 `localhost`"
+            )
+        })?
+    };
+    if addr.is_unspecified() {
+        return Ok((addr, None));
+    }
+    let mut hosts = vec![
+        "localhost".to_string(),
+        "127.0.0.1".to_string(),
+        "::1".to_string(),
+    ];
+    hosts.push(addr.to_string());
+    for host in allow_hosts {
+        let host = host.trim();
+        if !host.is_empty() && !hosts.iter().any(|existing| existing == host) {
+            hosts.push(host.to_string());
+        }
+    }
+    Ok((addr, Some(hosts)))
+}
+
+/// 猜一个「手机该连的地址」：绑到 `0.0.0.0` 时本机可能有多个网卡，这里 connect 一个
+/// 公网地址（UDP，不发包）让内核挑一条出口路由，得到最可能的局域网 IP。**只是提示**，
+/// 多网卡/无默认路由时会不准（返回 `None`，日志里就写占位符）。
+fn guess_lan_ip() -> Option<IpAddr> {
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("8.8.8.8:80").ok()?;
+    socket.local_addr().ok().map(|addr| addr.ip())
+}
+
+/// 在独立的 tokio runtime 线程上启动 MCP 服务（发后不理：进程退出时线程随之结束）。
+///
+/// 监听地址 / 端口 / token / Host 白名单都由启动选项（CLI 或环境变量）解析后传入——
+/// 这里不再自己读环境变量，避免出现「CLI 指定了但服务仍按 env 起」的双份真相。
+pub fn spawn_server(host: Arc<dyn Host>, config: ServerConfig) {
+    std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("构建 MCP 的 tokio runtime 失败");
+        runtime.block_on(serve(host, config));
+    });
+}
+
+/// 组装 axum router + listener，一直服务到进程退出。
+async fn serve(host: Arc<dyn Host>, config: ServerConfig) {
+    let token = config.token.filter(|token| !token.is_empty());
+    let (bind, allowed_hosts) = match resolve_bind(&config.bind, &config.allow_hosts) {
+        Ok(resolved) => resolved,
+        Err(error) => {
+            eprintln!("metatorio MCP server 未启动：{error}");
+            return;
+        }
+    };
+
+    let server_config = StreamableHttpServerConfig::default()
+        // Stateless for every protocol version: each request gets a fresh
+        // handler, shared state lives in the managed `AppState`.
+        .with_legacy_session_mode(false)
+        // Simple request/response tools reply as `application/json`.
+        .with_json_response(true);
+    let server_config = match &allowed_hosts {
+        Some(hosts) => server_config.with_allowed_hosts(hosts.clone()),
+        None => server_config.disable_allowed_hosts(),
+    };
+
+    // 先按 `--mcp-tools` 定下要启用的工具（必须在处理任何请求之前设置）。
+    match resolve_tools(&config.tools) {
+        Ok(names) if names.is_empty() => {
+            ENABLED_TOOLS.set(None).ok();
+        }
+        Ok(names) => {
+            let all = all_tool_names();
+            let chosen: Vec<&String> = all
+                .iter()
+                .filter(|name| names.iter().any(|wanted| wanted == *name))
+                .collect();
+            eprintln!(
+                "  --mcp-tools 只启用 {} 个工具：{}（其余 {} 个对客户端不可见）",
+                chosen.len(),
+                chosen
+                    .iter()
+                    .map(|name| name.as_str())
+                    .collect::<Vec<_>>()
+                    .join("、"),
+                all.len() - chosen.len()
+            );
+            // 配置自相矛盾时点名提醒：auto_plan 的返回里带 get_planning_state 的轮询
+            // 提示，而异步结果只有它能读到。
+            if chosen.iter().any(|name| name.as_str() == "auto_plan")
+                && !chosen
+                    .iter()
+                    .any(|name| name.as_str() == "get_planning_state")
+            {
+                eprintln!(
+                    "  注意：启用了 auto_plan 却没有 get_planning_state——异步规划的结果\
+                     没有查询入口，agent 只能另开一次求解或重跑规划"
+                );
+            }
+            ENABLED_TOOLS
+                .set(Some(
+                    names
+                        .into_iter()
+                        .collect::<std::collections::HashSet<String>>(),
+                ))
+                .ok();
+        }
+        Err(error) => {
+            eprintln!("metatorio MCP server 未启动：{error}");
+            return;
+        }
+    }
+
+    let service = StreamableHttpService::new(
+        move || Ok(MetatorioMcp { host: host.clone() }),
+        LocalSessionManager::default().into(),
+        server_config,
+    );
+
+    let router = Router::new()
+        .nest_service(MCP_PATH, service)
+        .layer(middleware::from_fn_with_state(token.clone(), require_token));
+
+    let addr = SocketAddr::new(bind, config.port);
+    let listener = match tokio::net::TcpListener::bind(addr).await {
+        Ok(listener) => listener,
+        Err(error) => {
+            eprintln!("metatorio MCP 服务绑定 {addr} 失败：{error}");
+            return;
+        }
+    };
+    eprintln!(
+        "metatorio MCP 服务已启动：http://{addr}{MCP_PATH}{}",
+        if token.is_some() {
+            "（已启用 token 鉴权）"
+        } else {
+            "（无 token 鉴权；仅回环）"
+        }
+    );
+    // 手机等其它设备要连的地址、以及最容易踩的坑，直接打在启动日志里：这个端点不再
+    // 只给本机用时，「手机上填什么」完全取决于它。
+    if !bind.is_loopback() {
+        let reachable = if bind.is_unspecified() {
+            guess_lan_ip()
+                .map(|ip| ip.to_string())
+                .unwrap_or_else(|| "<本机局域网 IP>".to_string())
+        } else {
+            bind.to_string()
+        };
+        eprintln!(
+            "  其它设备（手机/局域网）：http://{reachable}:{}{MCP_PATH}",
+            config.port
+        );
+        match &allowed_hosts {
+            Some(hosts) => eprintln!("  Host 白名单：{}", hosts.join(", ")),
+            None => eprintln!(
+                "  注意：绑定 {bind} 时 Host 校验已关闭（无法枚举本机地址），访问控制只靠 token"
+            ),
+        }
+        if token.is_none() {
+            eprintln!(
+                "  危险：没有 token——这个端点能改文档、跑规划，暴露到局域网前请加 --mcp-token"
+            );
+        }
+    }
+    if let Err(error) = axum::serve(listener, router).await {
+        eprintln!("metatorio MCP 服务出错：{error}");
+    }
+}
+
+/// Bearer token 闸门：`token` 为 `None`（没配置）时直接放行；否则请求必须带
+/// `Authorization: Bearer <token>`（或裸 token）。
+async fn require_token(
+    State(token): State<Option<String>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    if let Some(token) = token {
+        let authorized = request
+            .headers()
+            .get("authorization")
+            .and_then(|value| value.to_str().ok())
+            .map(|header| header.strip_prefix("Bearer ").unwrap_or(header))
+            .is_some_and(|presented| presented == token);
+        if !authorized {
+            return (StatusCode::UNAUTHORIZED, "unauthorized").into_response();
+        }
+    }
+    next.run(request).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use metatorio_core::{DualVar, IdWithQuality};
+    use metatorio_runtime::document::{AppDocument, FactoryDocument, FlowTarget, ProjectDocument};
+    use metatorio_runtime::id::{FactoryId, ProjectId, TargetId};
+
+    /// 索引工具必须「小而有信息」：只给规模与关键字段，不含机制明细。
+    #[test]
+    fn summaries_are_compact_and_informative() {
+        let mut factory = FactoryDocument {
+            id: FactoryId(2),
+            name: "f".to_string(),
+            ..Default::default()
+        };
+        factory.targets.push(FlowTarget {
+            id: TargetId(3),
+            flow: DualVar::Item(IdWithQuality::new("iron-plate", "normal")),
+            amount: 60.0,
+        });
+        let mut project = ProjectDocument {
+            id: ProjectId(1),
+            name: "p".to_string(),
+            ..Default::default()
+        };
+        project.factories.push(factory);
+        let document = AppDocument {
+            schema_version: metatorio_runtime::DOCUMENT_SCHEMA_VERSION,
+            projects: vec![project.clone()],
+        };
+
+        let projects = project_summary(&document);
+        assert_eq!(projects.len(), 1);
+        assert_eq!(projects[0]["id"], 1);
+        assert_eq!(projects[0]["factories"], 1);
+        assert_eq!(projects[0]["targets"], 1);
+        assert!(projects[0].get("factories_document").is_none());
+
+        let factories = factory_summary(&project);
+        assert_eq!(factories.len(), 1);
+        assert_eq!(factories[0]["id"], 2);
+        assert_eq!(factories[0]["targets"][0]["amount"], 60.0);
+        assert_eq!(
+            factories[0]["targets"][0]["flow"]["Item"]["id"],
+            "iron-plate"
+        );
+        assert!(factories[0].get("mechanics").is_some());
+    }
+
+    /// `auto_plan` 的消息序列：顺序与形状就是这个工具的契约——星球/品质在目标
+    /// 之前（决定求解环境）、`best` 在剔除之前（否则剔除被整体替换覆盖）、
+    /// 插件塔逐条 append（索引即序号）、最后必须触发 `solve: auto-plan`。
+    #[test]
+    fn auto_plan_body_messages_are_ordered_and_complete() {
+        let params = AutoPlanParams {
+            targets: vec![
+                AutoPlanTarget {
+                    item: "iron-plate".to_string(),
+                    quality: None,
+                    temperature: None,
+                    amount: 60.0,
+                },
+                AutoPlanTarget {
+                    item: "copper-plate".to_string(),
+                    quality: Some("legendary".to_string()),
+                    temperature: None,
+                    amount: 30.0,
+                },
+            ],
+            project_name: Some("p".to_string()),
+            factory_name: Some("f".to_string()),
+            planet: Some("vulcanus".to_string()),
+            major_quality: Some("legendary".to_string()),
+            modules: Some(AutoPlanModules {
+                best: true,
+                quality: None,
+                exclude: vec![IdWithQuality::new("efficiency-module-3", "normal")],
+            }),
+            beacons: vec![AutoPlanBeacon {
+                beacon: IdWithQuality::new("beacon", "legendary"),
+                count: Some(2),
+                share: Some(8.0),
+                modules: vec![AutoPlanBeaconModule {
+                    module: IdWithQuality::new("speed-module-3", "legendary"),
+                    count: Some(2),
+                }],
+            }],
+            external_inputs: vec![AutoPlanExternalInput {
+                flow: DualVar::Item(IdWithQuality::new("iron-plate", "normal")),
+                penalty: None,
+            }],
+            context_id: Some("ctx".to_string()),
+            request_id: None,
+        };
+        let targets = vec![
+            (
+                DualVar::Item(IdWithQuality::new("iron-plate", "normal")),
+                60.0,
+            ),
+            (
+                DualVar::Item(IdWithQuality::new("copper-plate", "legendary")),
+                30.0,
+            ),
+        ];
+        let messages = auto_plan_body_messages(&params, ProjectId(7), FactoryId(9), &targets);
+
+        // 星球 → 主品质 → 两个目标 → 外部输入 → best → 剔除 → 插件塔×2 → 触发。
+        assert_eq!(messages.len(), 10, "{messages:#?}");
+        let encoded: Vec<serde_json::Value> = messages
+            .iter()
+            .map(|message| serde_json::to_value(message).unwrap())
+            .collect();
+        // 工厂由工具先建（要拿 id），本序列**绝不能再建工厂**：否则一个项目里会多出
+        // 一个空模板工厂（实测踩到）。这条断言就是那个回归的守卫。
+        assert!(
+            !encoded
+                .iter()
+                .any(|message| message["action"]["action"].get("add-factory").is_some()),
+            "auto_plan 的配置序列里不该再有 add-factory：{encoded:#?}"
+        );
+        assert_eq!(
+            encoded[0]["action"]["action"]["context"]["set-planet"]["planet"],
+            "vulcanus"
+        );
+        assert_eq!(
+            encoded[1]["action"]["action"]["context"]["set-major-quality"]["quality"],
+            "legendary"
+        );
+        // 目标是「物品 + 品质 + 每秒速率」，两个目标各一条消息。
+        assert_eq!(
+            encoded[2]["action"]["action"]["flow"]["add-to-target"]["flow"]["Item"]["id"],
+            "iron-plate"
+        );
+        assert_eq!(
+            encoded[2]["action"]["action"]["flow"]["add-to-target"]["amount"],
+            serde_json::json!(60.0)
+        );
+        assert_eq!(
+            encoded[3]["action"]["action"]["flow"]["add-to-target"]["flow"]["Item"]["quality"],
+            "legendary"
+        );
+        // 外部输入：penalty 省略时默认 1.0（严格供给下靠它声明原料来源）。
+        assert_eq!(
+            encoded[4]["action"]["action"]["flow"]["add-to-external-input"]["penalty"],
+            serde_json::json!(1.0)
+        );
+        // best 用工厂主品质（modules.quality 省略），且在剔除之前。
+        assert_eq!(
+            encoded[5]["action"]["action"]["planning"]["use-best-modules"]["quality"],
+            "legendary"
+        );
+        assert_eq!(
+            encoded[6]["action"]["action"]["planning"]["remove-enumerated-module"]["module"]["id"],
+            "efficiency-module-3"
+        );
+        // 插件塔：先 append 空方案，再把方案写进该索引（index = 0）。
+        assert_eq!(
+            encoded[7]["action"]["action"]["planning"],
+            "add-enumerated-beacon"
+        );
+        let plan = &encoded[8]["action"]["action"]["planning"]["set-enumerated-beacon"];
+        assert_eq!(plan["beacon"], serde_json::json!(0));
+        let beacon = &plan["plan"]["module_config"]["beacons"][0];
+        assert_eq!(beacon["beacon"]["id"], "beacon");
+        assert_eq!(beacon["count"], serde_json::json!(2));
+        assert_eq!(beacon["share"], serde_json::json!(8.0));
+        assert_eq!(beacon["modules"][0][0]["id"], "speed-module-3");
+        assert_eq!(beacon["modules"][0][1], serde_json::json!(2));
+        // 最后一条必须是触发（否则整个入口等于没跑规划）。
+        assert_eq!(encoded[9]["action"]["action"]["solve"], "auto-plan");
+    }
+
+    /// 目标名解析：id 与本地化名都行、分隔符不敏感；**不猜**——指向配方或拼错时
+    /// 报错并给出候选（错误的名字能过校验，却会让计划悄悄跑偏）。
+    #[test]
+    fn auto_plan_targets_resolve_strictly_with_hints() {
+        let entry = |kind: &str, name: &str, localized: &str| IndexEntry {
+            kind: kind.to_string(),
+            name: name.to_string(),
+            localized_name: localized.to_string(),
+            group: String::new(),
+            subgroup: String::new(),
+            icon_type: String::new(),
+            module_slots: None,
+            categories: Vec::new(),
+            fuel_categories: Vec::new(),
+            fuel_value_j: None,
+            technology_max_level: None,
+            technology_base_level: 0,
+        };
+        let index = CatalogIndex {
+            context_id: "c".to_string(),
+            qualities: vec!["normal".to_string()],
+            names: Default::default(),
+            entries: vec![
+                entry("item", "processing-unit", "处理器"),
+                entry("recipe", "processing-unit", "处理器"),
+                entry("item", "iron-plate", "铁板"),
+            ],
+        };
+        let target = |item: &str, amount: f64| AutoPlanTarget {
+            item: item.to_string(),
+            quality: None,
+            temperature: None,
+            amount,
+        };
+
+        // id / 本地化名 / 分隔符变体都能解析到物品原型。
+        for name in ["iron-plate", "铁板", "IRON_PLATE", "iron plate"] {
+            let resolved =
+                resolve_auto_plan_targets(&index, None, &[target(name, 1.0)]).expect(name);
+            let DualVar::Item(item) = &resolved[0].0 else {
+                panic!("应当是物品流: {:?}", resolved[0].0)
+            };
+            assert_eq!(item.id, "iron-plate");
+            assert_eq!(item.quality, "normal");
+            assert_eq!(resolved[0].1, 1.0);
+        }
+        // 同名跨 item/recipe 时取物品（目标同时接受物品与流体）。
+        let resolved =
+            resolve_auto_plan_targets(&index, None, &[target("processing unit", 5.0)]).unwrap();
+        let DualVar::Item(item) = &resolved[0].0 else {
+            panic!("应当是物品流")
+        };
+        assert_eq!(item.id, "processing-unit");
+        // 品质原样带上。
+        let resolved = resolve_auto_plan_targets(
+            &index,
+            None,
+            &[AutoPlanTarget {
+                item: "铁板".to_string(),
+                quality: Some("legendary".to_string()),
+                temperature: None,
+                amount: 2.0,
+            }],
+        )
+        .unwrap();
+        let DualVar::Item(item) = &resolved[0].0 else {
+            panic!("应当是物品流")
+        };
+        assert_eq!(item.quality, "legendary");
+        // 拼错 → 报错并附错拼候选，不猜。
+        let error =
+            resolve_auto_plan_targets(&index, None, &[target("iron-plte", 1.0)]).unwrap_err();
+        assert!(error.contains("iron-plate"), "{error}");
+        // 完全不认识 → 提示去查名字。
+        let error =
+            resolve_auto_plan_targets(&index, None, &[target("nonsense-xyz", 1.0)]).unwrap_err();
+        assert!(error.contains("localized_names"), "{error}");
+        // amount 必须是正数。
+        let error =
+            resolve_auto_plan_targets(&index, None, &[target("iron-plate", 0.0)]).unwrap_err();
+        assert!(error.contains("正数"), "{error}");
+    }
+
+    /// 流体目标：解析成 DualVar::Fluid，温度原样带上；物品/流体各自不该有的字段
+    /// **显式报错**，不静默忽略。
+    ///
+    /// 实测驱动：auto_plan 原先只收物品，而「产出指定温度的流体」恰恰是最需要自动
+    /// 规划的场景（也是严格产出语义修好后第一个被验证的场景）。调用方只能退回
+    /// dispatch 手工拼 TargetAction，实测每次先浪费两次 auto_plan 调用
+    /// （返回「蒸汽是流体、不是物品」）。
+    #[test]
+    fn auto_plan_accepts_fluid_targets() {
+        let entry = |kind: &str, name: &str, localized: &str| IndexEntry {
+            kind: kind.to_string(),
+            name: name.to_string(),
+            localized_name: localized.to_string(),
+            group: String::new(),
+            subgroup: String::new(),
+            icon_type: String::new(),
+            module_slots: None,
+            categories: Vec::new(),
+            fuel_categories: Vec::new(),
+            fuel_value_j: None,
+            technology_max_level: None,
+            technology_base_level: 0,
+        };
+        let index = CatalogIndex {
+            context_id: "c".to_string(),
+            qualities: vec!["normal".to_string()],
+            names: Default::default(),
+            entries: vec![
+                entry("item", "iron-plate", "铁板"),
+                entry("fluid", "steam", "蒸汽"),
+            ],
+        };
+        let target =
+            |name: &str, temperature: Option<[i32; 2]>, quality: Option<&str>| AutoPlanTarget {
+                item: name.to_string(),
+                quality: quality.map(str::to_string),
+                temperature,
+                amount: 1.0,
+            };
+        let fluid = |temperature: [i32; 2]| DualVar::Fluid {
+            name: "steam".to_string(),
+            temperature,
+        };
+
+        // 本地化名 + 温度区间。
+        let resolved =
+            resolve_auto_plan_targets(&index, None, &[target("蒸汽", Some([15, 500]), None)])
+                .unwrap();
+        assert_eq!(resolved[0].0, fluid([15, 500]));
+        // 精确温度也是合法的区间。
+        let resolved =
+            resolve_auto_plan_targets(&index, None, &[target("steam", Some([500, 500]), None)])
+                .unwrap();
+        assert_eq!(resolved[0].0, fluid([500, 500]));
+        // 流体没给温度、又拿不到原型库 → 报错要求显式给，不塞一个猜的默认值。
+        let error =
+            resolve_auto_plan_targets(&index, None, &[target("steam", None, None)]).unwrap_err();
+        assert!(error.contains("temperature"), "{error}");
+        // 区间反了 → 报错。
+        let error =
+            resolve_auto_plan_targets(&index, None, &[target("steam", Some([500, 15]), None)])
+                .unwrap_err();
+        assert!(error.contains("下界"), "{error}");
+        // 流体不接受 quality。
+        let error = resolve_auto_plan_targets(
+            &index,
+            None,
+            &[target("steam", Some([15, 500]), Some("legendary"))],
+        )
+        .unwrap_err();
+        assert!(error.contains("不接受 quality"), "{error}");
+        // 物品不接受 temperature（不静默忽略）。
+        let error =
+            resolve_auto_plan_targets(&index, None, &[target("iron-plate", Some([1, 2]), None)])
+                .unwrap_err();
+        assert!(error.contains("不接受 temperature"), "{error}");
+    }
+
+    /// `auto_plan` 的手写名字必须在**建任何东西之前**被挡住：两类实测过的静默失败
+    /// ——`remove-enumerated-module` 对不存在的插件是 no-op（`retain` 找不到就报
+    /// 「无变化」），`add-to-external-input` 更把不存在的物品**原样写进文档**、自动规划
+    /// 照常报「成功」。两者都会让调用方以为配置生效了，所以这里必须报错并给候选。
+    #[test]
+    fn auto_plan_rejects_unknown_names_before_creating_anything() {
+        let entry = |kind: &str, name: &str, localized: &str| IndexEntry {
+            kind: kind.to_string(),
+            name: name.to_string(),
+            localized_name: localized.to_string(),
+            group: String::new(),
+            subgroup: String::new(),
+            icon_type: String::new(),
+            module_slots: None,
+            categories: Vec::new(),
+            fuel_categories: Vec::new(),
+            fuel_value_j: None,
+            technology_max_level: None,
+            technology_base_level: 0,
+        };
+        let index = CatalogIndex {
+            context_id: "c".to_string(),
+            qualities: vec!["normal".to_string()],
+            names: Default::default(),
+            entries: vec![
+                entry("item", "iron-plate", "铁板"),
+                entry("module", "speed-module-3", "速度插件 3"),
+                entry("beacon", "beacon", "插件塔"),
+                entry("fluid", "water", "水"),
+            ],
+        };
+        let module = |id: &str| IdWithQuality::new(id, "normal");
+        let params = |modules: Option<AutoPlanModules>,
+                      beacons: Vec<AutoPlanBeacon>,
+                      inputs: Vec<AutoPlanExternalInput>| AutoPlanParams {
+            targets: vec![AutoPlanTarget {
+                item: "iron-plate".to_string(),
+                quality: None,
+                temperature: None,
+                amount: 1.0,
+            }],
+            project_name: None,
+            factory_name: None,
+            planet: None,
+            major_quality: None,
+            modules,
+            beacons,
+            external_inputs: inputs,
+            context_id: None,
+            request_id: None,
+        };
+        let fluid = |name: &str| DualVar::Fluid {
+            name: name.to_string(),
+            temperature: [15, 15],
+        };
+        let exclude = |ids: &[&str]| {
+            Some(AutoPlanModules {
+                best: false,
+                quality: None,
+                exclude: ids.iter().map(|id| module(id)).collect(),
+            })
+        };
+
+        // 合法名字全部通过：包括「索引里的模块既是 item 也是 module」的两种 kind，
+        // 以及没有原型的虚拟流（电）。
+        assert!(
+            validate_auto_plan_names(
+                &index,
+                &params(
+                    exclude(&["speed-module-3"]),
+                    vec![AutoPlanBeacon {
+                        beacon: module("beacon"),
+                        count: None,
+                        share: None,
+                        modules: vec![AutoPlanBeaconModule {
+                            module: module("speed-module-3"),
+                            count: None,
+                        }],
+                    }],
+                    vec![
+                        AutoPlanExternalInput {
+                            flow: DualVar::Item(module("iron-plate")),
+                            penalty: None,
+                        },
+                        AutoPlanExternalInput {
+                            flow: fluid("water"),
+                            penalty: None,
+                        },
+                        AutoPlanExternalInput {
+                            flow: DualVar::Electricity,
+                            penalty: None,
+                        },
+                    ],
+                )
+            )
+            .is_ok()
+        );
+
+        // 剔除一个不存在的插件 → 报错，并把正确名字当候选给出来。
+        let error = validate_auto_plan_names(
+            &index,
+            &params(exclude(&["speed-module-99"]), Vec::new(), Vec::new()),
+        )
+        .unwrap_err();
+        assert!(error.contains("speed-module-3"), "{error}");
+        assert!(error.contains("要剔除的插件"), "{error}");
+        // 外部输入写错物品 → 报错（否则垃圾会被原样写进文档）。
+        let error = validate_auto_plan_names(
+            &index,
+            &params(
+                None,
+                Vec::new(),
+                vec![AutoPlanExternalInput {
+                    flow: DualVar::Item(module("iron-plte")),
+                    penalty: None,
+                }],
+            ),
+        )
+        .unwrap_err();
+        assert!(error.contains("iron-plate"), "{error}");
+        assert!(error.contains("外部输入物品"), "{error}");
+        // 外部输入写错流体。
+        let error = validate_auto_plan_names(
+            &index,
+            &params(
+                None,
+                Vec::new(),
+                vec![AutoPlanExternalInput {
+                    flow: fluid("watter"),
+                    penalty: None,
+                }],
+            ),
+        )
+        .unwrap_err();
+        assert!(error.contains("water"), "{error}");
+        // 插件塔写错。
+        let error = validate_auto_plan_names(
+            &index,
+            &params(
+                None,
+                vec![AutoPlanBeacon {
+                    beacon: module("beacon-99"),
+                    count: None,
+                    share: None,
+                    modules: Vec::new(),
+                }],
+                Vec::new(),
+            ),
+        )
+        .unwrap_err();
+        assert!(error.contains("插件塔"), "{error}");
+        // 完全不着边际的名字 → 提示去查名字（不许猜一个相近的原型）。
+        let error = validate_auto_plan_names(
+            &index,
+            &params(exclude(&["zzzzzzzz"]), Vec::new(), Vec::new()),
+        )
+        .unwrap_err();
+        assert!(error.contains("localized_names"), "{error}");
+    }
+
+    /// `--mcp-bind` 解析：默认/`localhost` → 回环；本机 IP → 该 IP 进 Host 白名单；
+    /// `0.0.0.0` → 无从枚举地址，返回 `None`（关闭 Host 校验，启动日志会写明）；
+    /// 非法地址必须报错，而不是静默退化成回环。
+    #[test]
+    fn bind_parsing_is_explicit_about_hosts_and_wildcards() {
+        // 默认：回环，白名单只含回环名。
+        let (addr, hosts) = resolve_bind("127.0.0.1", &[]).unwrap();
+        assert!(addr.is_loopback());
+        let hosts = hosts.expect("回环也要给白名单");
+        assert!(hosts.contains(&"127.0.0.1".to_string()));
+        assert!(hosts.contains(&"localhost".to_string()));
+
+        // localhost 归一化成 127.0.0.1。
+        assert_eq!(
+            resolve_bind("localhost", &[]).unwrap().0,
+            resolve_bind("127.0.0.1", &[]).unwrap().0
+        );
+
+        // 具体局域网 IP：该 IP 必须在白名单里（手机用 http://<IP>:port 访问）。
+        let (addr, hosts) = resolve_bind(" 192.168.1.23 ", &[]).unwrap();
+        assert_eq!(addr.to_string(), "192.168.1.23");
+        let hosts = hosts.unwrap();
+        assert!(hosts.contains(&"192.168.1.23".to_string()));
+        // 额外 Host（主机名/mDNS）会追加，且不重复。
+        let (_, hosts) = resolve_bind(
+            "192.168.1.23",
+            &["mirac-pc.local".to_string(), " 192.168.1.23 ".to_string()],
+        )
+        .unwrap();
+        let hosts = hosts.unwrap();
+        assert!(hosts.contains(&"mirac-pc.local".to_string()));
+        assert_eq!(
+            hosts.iter().filter(|host| *host == "192.168.1.23").count(),
+            1
+        );
+
+        // 所有网卡：白名单为 None = 关闭 Host 校验（日志里会说明）。
+        assert!(resolve_bind("0.0.0.0", &[]).unwrap().1.is_none());
+        assert!(resolve_bind("::", &[]).unwrap().1.is_none());
+
+        // 非法地址 / 空串：报错带上开关名，便于排查。
+        assert!(
+            resolve_bind("not-an-ip", &[])
+                .unwrap_err()
+                .contains("mcp-bind")
+        );
+        assert!(resolve_bind("  ", &[]).unwrap_err().contains("mcp-bind"));
+        // 主机名不解析（只接受 IP 字面量与 localhost），避免依赖 DNS 结果。
+        assert!(resolve_bind("mirac-pc", &[]).is_err());
+    }
+
+    /// 展开结果是**带符号**的一串流（正=产出、负=消耗），直接给 LLM 看 `-2.0` 容易
+    /// 被读成「产出 2」。这里按数组名承载方向、数值一律正数。
+    #[test]
+    fn mechanic_flow_splits_into_positive_inputs_and_outputs() {
+        let iron = DualVar::Item(IdWithQuality::new("iron-plate", "normal"));
+        let gear = DualVar::Item(IdWithQuality::new("iron-gear-wheel", "normal"));
+        let water = DualVar::Fluid {
+            name: "water".to_string(),
+            temperature: [15, 15],
+        };
+
+        let (inputs, outputs) = split_mechanic_flow(&[
+            (iron.clone(), -2.0),
+            (gear.clone(), 1.0),
+            (water.clone(), -0.5),
+        ]);
+        assert_eq!(inputs.len(), 2);
+        assert_eq!(outputs.len(), 1);
+        // 消耗是正数（方向由 inputs 数组承载）。
+        assert_eq!(inputs[0], (iron, 2.0));
+        assert_eq!(inputs[1], (water, 0.5));
+        assert_eq!(outputs[0], (gear, 1.0));
+
+        // 只有消耗（例如采矿机吃电）或只有产出（例如太阳能）都不能丢。
+        let (inputs, outputs) = split_mechanic_flow(&[(DualVar::Electricity, -0.09)]);
+        assert_eq!(inputs.len(), 1);
+        assert!(outputs.is_empty());
+    }
+
+    /// `--mcp-tools` 的解析：空 = 全部；`all` = 全部；子集原样；**写错就报错并列出
+    /// 可用工具**（绝不静默全开、也不静默少开——两者都会让调用方以为某个工具在）。
+    #[test]
+    fn tool_selection_is_explicit_and_never_silently_wrong() {
+        let all = all_tool_names();
+        for expected in ["auto_plan", "dispatch", "get_planning_state"] {
+            assert!(all.contains(&expected.to_string()), "{all:?}");
+        }
+
+        // 空 / 只给空白 / `all` → 全部（用空列表表示）。
+        assert!(resolve_tools(&[]).unwrap().is_empty());
+        assert!(resolve_tools(&["  ".to_string()]).unwrap().is_empty());
+        assert!(resolve_tools(&["all".to_string()]).unwrap().is_empty());
+        assert!(resolve_tools(&["ALL".to_string()]).unwrap().is_empty());
+
+        // 子集：保留顺序、去重、去空白。
+        let chosen = resolve_tools(&[
+            " auto_plan ".to_string(),
+            "dispatch".to_string(),
+            "auto_plan".to_string(),
+        ])
+        .unwrap();
+        assert_eq!(
+            chosen,
+            vec!["auto_plan".to_string(), "dispatch".to_string()]
+        );
+
+        // 群内 agent 推荐的「三个核心」是可用的组合。
+        let core = resolve_tools(&[
+            "auto_plan".to_string(),
+            "dispatch".to_string(),
+            "get_planning_state".to_string(),
+        ])
+        .unwrap();
+        assert_eq!(core.len(), 3);
+
+        // 写错 → 报错，且错误里既有那个错名字，也有可用工具清单。
+        let error = resolve_tools(&["no-such-tool".to_string()]).unwrap_err();
+        assert!(error.contains("no-such-tool"), "{error}");
+        assert!(error.contains("auto_plan"), "{error}");
+        assert!(error.contains("all"), "{error}");
+    }
+
+    /// 分页参数：默认 50、下限 1、上限 1000；offset 原样传递。
+    #[test]
+    fn page_params_are_defaulted_and_clamped() {
+        assert_eq!(PageParams::default().resolve().limit, 50);
+        assert_eq!(PageParams::default().resolve().offset, 0);
+        assert_eq!(
+            PageParams {
+                limit: Some(0),
+                offset: None
+            }
+            .resolve()
+            .limit,
+            1
+        );
+        assert_eq!(
+            PageParams {
+                limit: Some(9_999),
+                offset: None
+            }
+            .resolve()
+            .limit,
+            1000
+        );
+        let paged = PageParams {
+            limit: Some(10),
+            offset: Some(7),
+        }
+        .resolve();
+        assert_eq!((paged.limit, paged.offset), (10, 7));
+        // 切片语义：起始位置超出总数时返回空页，而不是 panic 或倒回开头。
+        assert!(paged.slice(&[1, 2, 3]).0.is_empty());
+    }
+
+    /// `get_planning_state` 逐层只给下一层索引，最内层才给细节并分页——这是
+    /// 「一条查询把上下文撑爆」的结构性修法（原来读整个文档会把每层工厂的每条
+    /// 机制一起倒出来）。
+    #[test]
+    fn planning_state_is_level_by_level_and_paged() {
+        let document: AppDocument = serde_json::from_value(serde_json::json!({
+            "schema_version": metatorio_runtime::DOCUMENT_SCHEMA_VERSION,
+            "projects": [{
+                "id": 1,
+                "name": "p",
+                "factories": [{
+                    "id": 2,
+                    "name": "f",
+                    "targets": [
+                        { "id": 3, "flow": { "Item": { "id": "iron-plate", "quality": "normal" } }, "amount": 1.0 },
+                        { "id": 4, "flow": { "Item": { "id": "copper-plate", "quality": "normal" } }, "amount": 2.0 },
+                    ],
+                    "mechanics": [
+                        { "id": 5, "mechanic": { "type": "recipe" } },
+                        { "id": 6, "mechanic": { "type": "recipe" } },
+                        { "id": 7, "mechanic": { "type": "mining" } },
+                    ]
+                }]
+            }]
+        }))
+        .unwrap();
+        let project = document.projects[0].clone();
+        let factory_document = project.factories[0].clone();
+        let page = PageParams {
+            limit: Some(2),
+            offset: None,
+        }
+        .resolve();
+
+        // 文档层：项目索引（没有工厂/机制明细）。
+        let (value, report) = planning_state_value(&DocSnapshot::Document(document), page);
+        assert_eq!(value["level"], "document");
+        assert_eq!(value["projects"].as_array().unwrap().len(), 1);
+        assert!(
+            value["projects"][0]["mechanics"].is_number(),
+            "项目索引里的 mechanics 是数量而不是明细数组：{}",
+            value["projects"][0]
+        );
+        assert_eq!(report.totals["projects"], 1);
+        assert!(report.truncated.is_empty(), "1 条项目不该被截断");
+
+        // 项目层：设置/规划偏好 + 工厂索引（同样没有机制明细）。
+        let (value, _) = planning_state_value(&DocSnapshot::Project(project), page);
+        assert_eq!(value["level"], "project");
+        assert_eq!(value["name"], "p");
+        assert!(value.get("settings").is_some() && value.get("planning").is_some());
+        assert_eq!(value["factories"].as_array().unwrap().len(), 1);
+        assert!(
+            value["factories"][0]["mechanics"].is_number(),
+            "工厂索引里的 mechanics 是数量，项目层不该泄漏机制明细：{}",
+            value["factories"][0]
+        );
+        assert!(value["factories"][0]["targets"].is_array());
+
+        // 工厂层：给细节，但重复集合按 page 截断且如实上报（3 条机制 → 2 条）。
+        let (value, report) = planning_state_value(
+            &DocSnapshot::Factory {
+                project: 1,
+                factory: 2,
+                factory_document,
+            },
+            page,
+        );
+        assert_eq!(value["level"], "factory");
+        let document = &value["factory_document"];
+        assert_eq!(document["mechanics"].as_array().unwrap().len(), 2);
+        assert_eq!(document["targets"].as_array().unwrap().len(), 2);
+        assert_eq!(report.totals["mechanics"], 3);
+        assert_eq!(report.totals["targets"], 2);
+        assert!(
+            report.truncated.contains(&"mechanics".to_string()),
+            "{:?}",
+            report.truncated
+        );
+        assert!(
+            !report.truncated.contains(&"targets".to_string()),
+            "刚好放得下就不该标成截断"
+        );
+        assert!(
+            document["mechanics_hint"]
+                .as_str()
+                .unwrap()
+                .contains("共 3 条"),
+            "被截断的集合要带收窄提示：{}",
+            document["mechanics_hint"]
+        );
+        // page 元信息本身要能自证：截断前总数 + 被截断的集合名。
+        let meta = report.value(page);
+        assert_eq!(meta["limit"], 2);
+        assert_eq!(meta["totals"]["mechanics"], 3);
+        assert_eq!(meta["truncated"][0], "mechanics");
+    }
+
+    /// dispatch 的 inputSchema **保持完整**：rmcp 直接内联 AppMessage 的协议图。
+    ///
+    /// 曾经把它投影成「只有动作名」的薄壳 + 一个 get_schema 工具按需取切片
+    /// （工具面 -70%），实测后回退了：调用方在上下文被压缩后不知道要先查 schema，
+    /// 约 40k token（1M 上下文的 4%）才建出一个项目。**省 token 不能以「调用方要
+    /// 额外查一次」为代价**——多一层间接就是多一次会失败的猜测。
+    ///
+    /// 这条测试钉住这个方向：不要再把它换成需要额外查询的投影。
+    #[test]
+    fn dispatch_schema_is_inlined_in_full() {
+        // 与 rmcp 的 schema_for_input 同款口径（draft2020_12）。
+        let generator = schemars::generate::SchemaSettings::draft2020_12().into_generator();
+        let schema = serde_json::to_value(generator.into_root_schema_for::<DispatchParams>())
+            .expect("DispatchParams schema 应当可序列化");
+        let text = schema.to_string();
+        let defs = schema.get("$defs").and_then(|node| node.as_object());
+        let count = defs.map(|defs| defs.len()).unwrap_or(0);
+        assert!(
+            count >= 40,
+            "完整 schema 应当内联整套协议图（约 46 个 $defs），实际 {count} 个"
+        );
+        assert!(
+            text.len() > 30_000,
+            "完整 schema 应当是 30 KB 量级，实际 {} 字节",
+            text.len()
+        );
+        // 深层动作名必须直接可见——调用方不该为了知道 add-to-target 再查一次。
+        assert!(
+            text.contains("add-to-target"),
+            "动作名应当在 schema 里直接可见"
+        );
+        // 四个 scope 都在（schemars 派生，不存在手写清单漂移）。
+        for scope in ["application", "project", "factory", "history"] {
+            assert!(text.contains(scope), "schema 里缺少 scope {scope}");
+        }
+    }
+
+    /// 量一遍工具面，并把明细打出来——**只测量，不设优化目标**。
+    ///
+    /// 尺寸不是要优化的指标（判据是「每个成功完成的任务花多少 token」，见上面
+    /// dispatch_schema_is_inlined_in_full 的说明）。这里只留一个很松的天花板，
+    /// 防止重复内联之类的意外把工具面搞爆。
+    #[test]
+    fn tool_surface_is_measured() {
+        let tools = MetatorioMcp::base_tool_router().list_all();
+        let mut total = 0usize;
+        let mut rows: Vec<(String, usize)> = Vec::new();
+        for tool in &tools {
+            // 与真实客户端一致：只转发 name / description / inputSchema。
+            let payload = serde_json::json!({
+                "name": tool.name.to_string(),
+                "description": tool.description.as_deref().unwrap_or(""),
+                "inputSchema": tool.input_schema,
+            });
+            // 与客户端实际计价口径一致：DSH 的 token 计量是 JSON 字符数（UTF-16）/ 4。
+            let size = serde_json::to_string(&payload).unwrap().chars().count();
+            total += size;
+            rows.push((tool.name.to_string(), size));
+        }
+        rows.sort_by_key(|(_, size)| std::cmp::Reverse(*size));
+        println!(
+            "工具面 {} 个，合计 {total} 字符（DSH 计量约 {} tokens）",
+            tools.len(),
+            total / 4
+        );
+        for (name, size) in &rows {
+            println!("  {name:26} {size:7}");
+        }
+        // 很松的天花板：只挡「意外重复内联」这类事故，不挡刻意设计。
+        assert!(total < 150_000, "工具面涨到 {total} 字符：{rows:?}");
+    }
+}
+
+
+
+

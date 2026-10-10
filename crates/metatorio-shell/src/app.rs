@@ -60,33 +60,33 @@ use crate::solve_jobs;
 /// Minimal embedded game-data dump so the app can solve out of the box.
 /// Replace with a real Factorio dump once data loading is wired to a
 /// file dialog.
-const DEMO_DUMP: &str = include_str!("../../../metatorio-app/src-tauri/dumps/demo_dump.json");
+pub(crate) const DEMO_DUMP: &str = include_str!("../../../metatorio-app/src-tauri/dumps/demo_dump.json");
 
 // ── Managed state ─────────────────────────────────────────────────
 
 pub struct AppState {
-    runtime: Mutex<Runtime>,
+pub(crate) runtime: Mutex<Runtime>,
     /// 求解调度器：长求解在锁外跑，按 (project, factory) 单飞 + latest-wins。
-    solve_jobs: solve_jobs::SolveJobs<metatorio_runtime::SolveResult>,
+pub(crate) solve_jobs: solve_jobs::SolveJobs<metatorio_runtime::SolveResult>,
     /// 自动规划调度器：产出 `(快照, 候选机制, 候选过滤记录)`，回写前用快照
     /// 校验版本；过滤记录随求解结果返回（见 `SolveDiagnostics`）。
-    autoplan_jobs: solve_jobs::SolveJobs<(
+pub(crate) autoplan_jobs: solve_jobs::SolveJobs<(
         metatorio_runtime::SolveSnapshot,
         Vec<metatorio_core::Mechanic>,
         metatorio_runtime::solve::AutoPlanReport,
     )>,
     /// 上下文载入的按键串行锁（同一上下文只读盘解析一次）。
-    context_loads: solve_jobs::KeyLocks,
-    contexts: Mutex<ContextRegistry>,
-    project_paths: Mutex<HashMap<ProjectId, String>>,
+pub(crate) context_loads: solve_jobs::KeyLocks,
+pub(crate) contexts: Mutex<ContextRegistry>,
+pub(crate) project_paths: Mutex<HashMap<ProjectId, String>>,
     /// 上下文 id → 本地化名映射（来自游戏 `--dump-prototype-locale` 的
     /// `prototype-locale.json`，键为 `"{type}/{name}"`）。
-    locales: Mutex<HashMap<String, HashMap<String, String>>>,
+pub(crate) locales: Mutex<HashMap<String, HashMap<String, String>>>,
     /// MCP `dispatch` 的幂等缓存：request_id → 上次返回的载荷。
-    dispatch_cache: Mutex<DispatchCache>,
+pub(crate) dispatch_cache: Mutex<DispatchCache>,
     /// 异步自动规划的状态（MCP 的 `auto_plan` 工具用）：按 (project, factory)
     /// 记录「运行中 / 完成（含求解结果）/ 失败」，供 agent 稍后查询。
-    auto_plans: Mutex<HashMap<(ProjectId, FactoryId), AutoPlanState>>,
+pub(crate) auto_plans: Mutex<HashMap<(ProjectId, FactoryId), AutoPlanState>>,
 }
 
 /// 一次**异步**自动规划的状态（`auto_plan` 工具立即返回后由 agent 轮询）。
@@ -112,7 +112,7 @@ pub enum AutoPlanState {
 /// 工具调用超时后 agent 会重试；没有幂等键时「添加目标/机制」会被重复应用。
 /// agent 传 `request_id` 后，同一个 id 只应用一次，重试直接拿回上次的载荷。
 #[derive(Default)]
-struct DispatchCache {
+pub(crate) struct DispatchCache {
     order: std::collections::VecDeque<String>,
     entries: HashMap<String, (serde_json::Value, bool)>,
 }
@@ -121,11 +121,11 @@ impl DispatchCache {
     /// 最多记住多少次调用（超出后淘汰最早的）。
     const CAPACITY: usize = 256;
 
-    fn get(&self, request_id: &str) -> Option<(serde_json::Value, bool)> {
+    pub(crate) fn get(&self, request_id: &str) -> Option<(serde_json::Value, bool)> {
         self.entries.get(request_id).cloned()
     }
 
-    fn insert(&mut self, request_id: String, payload: serde_json::Value, is_error: bool) {
+    pub(crate) fn insert(&mut self, request_id: String, payload: serde_json::Value, is_error: bool) {
         if self
             .entries
             .insert(request_id.clone(), (payload, is_error))
@@ -232,7 +232,7 @@ pub(crate) fn spawn_auto_plan(
 /// the raw dump, so identical exports dedupe and ids are stable across
 /// machines.
 #[derive(Default)]
-struct ContextRegistry {
+pub(crate) struct ContextRegistry {
     dir: PathBuf,
     meta: HashMap<String, ContextMeta>,
 }
@@ -249,7 +249,7 @@ pub struct ModEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct ContextMeta {
+pub(crate) struct ContextMeta {
     id: String,
     name: String,
     created_at: u64,
@@ -565,7 +565,7 @@ impl ContextRegistry {
 }
 
 /// Delete a directory tree off the UI thread (fire-and-forget).
-fn spawn_delete(dir: PathBuf) {
+pub(crate) fn spawn_delete(dir: PathBuf) {
     std::thread::spawn(move || {
         if let Err(error) = std::fs::remove_dir_all(&dir) {
             eprintln!("failed to purge {dir:?}: {error}");
@@ -573,32 +573,32 @@ fn spawn_delete(dir: PathBuf) {
     });
 }
 
-fn read_manifest(path: &Path) -> Option<ContextMeta> {
+pub(crate) fn read_manifest(path: &Path) -> Option<ContextMeta> {
     let raw = std::fs::read_to_string(path).ok()?;
     serde_json::from_str(&raw).ok()
 }
 
-fn write_manifest(path: &Path, meta: &ContextMeta) {
+pub(crate) fn write_manifest(path: &Path, meta: &ContextMeta) {
     if let Ok(json) = serde_json::to_string_pretty(meta) {
         let _ = std::fs::write(path, json);
     }
 }
 
-fn now_secs() -> u64 {
+pub(crate) fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or(0)
 }
 
-fn context_id_of(raw: &[u8]) -> String {
+pub(crate) fn context_id_of(raw: &[u8]) -> String {
     format!("{:016x}", xxhash_rust::xxh3::xxh3_64(raw))
 }
 
 /// 解析单个 `{category}-locale.json`（游戏导出格式，见 metatorio-egui 的
 /// `LOCALE_CATEGORIES`）：顶层是 `{"names": {name: label}, "descriptions": …}`。
 /// 容忍顶层直接就是 `{name: label}` 的扁平形式。产出 `"{category}/{name}" → label`。
-fn parse_locale_category(raw: &[u8], category: &str) -> HashMap<String, String> {
+pub(crate) fn parse_locale_category(raw: &[u8], category: &str) -> HashMap<String, String> {
     let Ok(value) = serde_json::from_slice::<serde_json::Value>(raw) else {
         return HashMap::new();
     };
@@ -617,7 +617,7 @@ fn parse_locale_category(raw: &[u8], category: &str) -> HashMap<String, String> 
 }
 
 /// 解析合并格式的 locale.json（本应用缓存：顶层即 `"{category}/{name}" → label`）。
-fn parse_flat_locale_map(raw: &[u8]) -> HashMap<String, String> {
+pub(crate) fn parse_flat_locale_map(raw: &[u8]) -> HashMap<String, String> {
     let Ok(value) = serde_json::from_slice::<serde_json::Value>(raw) else {
         return HashMap::new();
     };
@@ -635,7 +635,7 @@ fn parse_flat_locale_map(raw: &[u8]) -> HashMap<String, String> {
 
 /// 扫描目录合并翻译：逐类读取 `*-locale.json`（游戏导出格式），也接受
 /// 单独的 `locale.json`（本应用已合并的缓存格式）。
-fn collect_locale_map(dir: &Path) -> HashMap<String, String> {
+pub(crate) fn collect_locale_map(dir: &Path) -> HashMap<String, String> {
     let mut map = HashMap::new();
     let Ok(entries) = std::fs::read_dir(dir) else {
         return map;
@@ -664,7 +664,7 @@ fn collect_locale_map(dir: &Path) -> HashMap<String, String> {
 }
 
 /// 读上下文缓存的 locale.json（合并格式）并缓存到 AppState（缺失/解析失败 = 空映射）。
-fn locale_map_of(state: &AppState, id: &str) -> HashMap<String, String> {
+pub(crate) fn locale_map_of(state: &AppState, id: &str) -> HashMap<String, String> {
     {
         let locales = state.locales.lock().ok();
         if let Some(map) = locales.and_then(|locales| locales.get(id).cloned()) {
@@ -695,7 +695,7 @@ fn locale_map_of(state: &AppState, id: &str) -> HashMap<String, String> {
 ///   `entity` / `item` / `recipe` / `fluid` / `technology`。
 ///
 /// 都查不到时返回空串（调用方自己决定显示原 id）。
-fn localized_name(map: &HashMap<String, String>, kind: &str, name: &str) -> String {
+pub(crate) fn localized_name(map: &HashMap<String, String>, kind: &str, name: &str) -> String {
     let section = match kind {
         "planet" => "space-location",
         other => other,
@@ -723,7 +723,7 @@ fn localized_name(map: &HashMap<String, String>, kind: &str, name: &str) -> Stri
 // ── Context loading / registration ────────────────────────────────
 
 /// 上下文的 dump 文件路径（短暂持有 registry 锁）。
-fn context_dump_path(state: &AppState, id: &str) -> Result<PathBuf, String> {
+pub(crate) fn context_dump_path(state: &AppState, id: &str) -> Result<PathBuf, String> {
     let registry = state
         .contexts
         .lock()
@@ -736,7 +736,7 @@ fn context_dump_path(state: &AppState, id: &str) -> Result<PathBuf, String> {
 
 /// 读 dump 并构建原型仓库。**不碰 runtime / runtime 锁**，可在锁外或阻塞
 /// 线程池上执行（大 dump 解析可达数秒）。
-fn load_store_from_dump(dump_path: &Path) -> Result<PrototypeStore, String> {
+pub(crate) fn load_store_from_dump(dump_path: &Path) -> Result<PrototypeStore, String> {
     let raw = std::fs::read(dump_path).map_err(|error| error.to_string())?;
     let dump: serde_json::Value =
         serde_json::from_slice(&raw).map_err(|error| error.to_string())?;
@@ -744,7 +744,7 @@ fn load_store_from_dump(dump_path: &Path) -> Result<PrototypeStore, String> {
 }
 
 /// 同步版：调用方已持有 runtime 锁时用（读盘仍在锁内）。
-fn ensure_context_loaded(state: &AppState, runtime: &mut Runtime, id: &str) -> Result<(), String> {
+pub(crate) fn ensure_context_loaded(state: &AppState, runtime: &mut Runtime, id: &str) -> Result<(), String> {
     if runtime.context_store_by_id(id).is_some() {
         return Ok(());
     }
@@ -757,7 +757,7 @@ fn ensure_context_loaded(state: &AppState, runtime: &mut Runtime, id: &str) -> R
 /// 锁外版：读盘/解析在阻塞线程池上完成，只在最后短暂上锁装入 store。
 ///
 /// 同一上下文并发请求会串行（`context_loads`），避免大 dump 被解析多次。
-async fn ensure_context_loaded_offlock(state: &AppState, id: &str) -> Result<(), String> {
+pub(crate) async fn ensure_context_loaded_offlock(state: &AppState, id: &str) -> Result<(), String> {
     if with_runtime(state, |runtime| {
         Ok(runtime.context_store_by_id(id).is_some())
     })? {
@@ -785,7 +785,7 @@ async fn ensure_context_loaded_offlock(state: &AppState, id: &str) -> Result<(),
 /// **不再调用游戏的 `--dump-icon-sprites`**：Steam 版启动时要用户确认，自动导出会被
 /// 打断；图标改为在**本进程内**用 dump 里的 `IconData` 定义自己渲染
 /// （[`metatorio_icons`]），渲染结果与官方导出的差异由 `examples/compare.rs` 量化。
-enum IconSource {
+pub(crate) enum IconSource {
     None,
     /// 外部已经准备好的图标目录 → 拷贝（例如用户自己用游戏导出的贴图目录）。
     Copy(PathBuf),
@@ -799,10 +799,10 @@ enum IconSource {
 /// 图标缓存布局版本：口径变化时 +1，让旧缓存重新渲染（见 `register_context_files`）。
 /// 1 → 2：从「按原型 `type` 建目录」改成「按归类建目录」（`item/`、`entity/`、
 /// `space-location/`），否则物品子类型与实体的图标前端全都取不到。
-const ICON_LAYOUT_VERSION: u32 = 2;
+pub(crate) const ICON_LAYOUT_VERSION: u32 = 2;
 
 /// 图标缓存目录里的布局版本标记（`.layout`）。
-fn read_layout_marker(icon_root: &Path) -> Option<u32> {
+pub(crate) fn read_layout_marker(icon_root: &Path) -> Option<u32> {
     std::fs::read_to_string(icon_root.join(".layout"))
         .ok()?
         .trim()
@@ -810,7 +810,7 @@ fn read_layout_marker(icon_root: &Path) -> Option<u32> {
         .ok()
 }
 
-fn write_layout_marker(icon_root: &Path) -> Result<(), String> {
+pub(crate) fn write_layout_marker(icon_root: &Path) -> Result<(), String> {
     std::fs::write(
         icon_root.join(".layout"),
         format!("{ICON_LAYOUT_VERSION}\n"),
@@ -818,7 +818,7 @@ fn write_layout_marker(icon_root: &Path) -> Result<(), String> {
     .map_err(|error| format!("写布局标记失败: {error}"))
 }
 
-fn copy_dir(src: &Path, dst: &Path) {
+pub(crate) fn copy_dir(src: &Path, dst: &Path) {
     if !src.is_dir() {
         return;
     }
@@ -843,7 +843,7 @@ fn copy_dir(src: &Path, dst: &Path) {
 ///
 /// 不碰 runtime，也不长时间持有 registry 锁（几十 MB 的 dump 写入与图标目录
 /// 拷贝都在锁外完成；注册表只在开头做一次 check-and-set）。
-fn register_context_files(
+pub(crate) fn register_context_files(
     state: &AppState,
     name: String,
     game_version: Option<String>,
@@ -915,7 +915,7 @@ fn register_context_files(
 ///
 /// 返回 `(原型图标报告, 非原型 GUI 素材报告)`：后者来自 dump 的 `utility-sprites`
 /// （空槽背景、`fuel_icon` …，见 `crate::utility`），与原型无关但界面要用。
-fn render_icons_into(
+pub(crate) fn render_icons_into(
     raw: &[u8],
     icon_root: &Path,
     game_root: &Path,
@@ -954,7 +954,7 @@ fn render_icons_into(
 }
 
 /// 注册上下文并激活：注册文件 → （必要时）自己渲染图标 → 锁外载入 store → 短暂上锁激活。
-async fn register_context_and_activate(
+pub(crate) async fn register_context_and_activate(
     state: &AppState,
     name: String,
     game_version: Option<String>,
@@ -1030,7 +1030,7 @@ async fn register_context_and_activate(
     })
 }
 
-fn context_info_from(
+pub(crate) fn context_info_from(
     registry: &ContextRegistry,
     runtime: &Runtime,
     id: &str,
@@ -1064,14 +1064,14 @@ fn context_info_from(
     })
 }
 
-fn context_info_of(state: &AppState, runtime: &Runtime, id: &str) -> Option<ContextInfo> {
+pub(crate) fn context_info_of(state: &AppState, runtime: &Runtime, id: &str) -> Option<ContextInfo> {
     let registry = state.contexts.lock().ok()?;
     context_info_from(&registry, runtime, id)
 }
 
 /// 构建上下文列表。调用方若已持有 runtime 锁，请用
 /// [`context_list_with`]（避免 std Mutex 不可重入导致死锁）。
-fn context_list(state: &AppState) -> ContextList {
+pub(crate) fn context_list(state: &AppState) -> ContextList {
     let runtime = state.runtime.lock().ok();
     let Some(runtime) = runtime.as_ref() else {
         return ContextList {
@@ -1086,14 +1086,14 @@ fn context_list(state: &AppState) -> ContextList {
 ///
 /// 抽成纯函数是为了可单测：GUI 命令与消息层共用同一条守卫，避免 agent 走
 /// dispatch 时绕过「先解除关联」的限制。
-fn context_referenced(document: &AppDocument, id: &str) -> bool {
+pub(crate) fn context_referenced(document: &AppDocument, id: &str) -> bool {
     document
         .projects
         .iter()
         .any(|project| project.context_id.as_deref() == Some(id))
 }
 
-fn context_list_with(runtime: &Runtime, state: &AppState) -> ContextList {
+pub(crate) fn context_list_with(runtime: &Runtime, state: &AppState) -> ContextList {
     let registry = state.contexts.lock().ok();
     let Some(registry) = registry.as_ref() else {
         return ContextList {
@@ -1112,7 +1112,7 @@ fn context_list_with(runtime: &Runtime, state: &AppState) -> ContextList {
 }
 
 /// 调用方持有 runtime 锁时传 `Some(runtime)`，否则传 `None`。
-fn emit_contexts_changed(host: &Arc<dyn Host>, state: &AppState, runtime: Option<&Runtime>) {
+pub(crate) fn emit_contexts_changed(host: &Arc<dyn Host>, state: &AppState, runtime: Option<&Runtime>) {
     let list = match runtime {
         Some(runtime) => context_list_with(runtime, state),
         None => context_list(state),
@@ -1122,13 +1122,13 @@ fn emit_contexts_changed(host: &Arc<dyn Host>, state: &AppState, runtime: Option
 
 // ── Game export (executable) ──────────────────────────────────────
 
-fn game_export_dir(host: &Arc<dyn Host>) -> Result<PathBuf, String> {
+pub(crate) fn game_export_dir(host: &Arc<dyn Host>) -> Result<PathBuf, String> {
     let dir = host.app_data_dir().join("game-export");
     std::fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
     Ok(dir)
 }
 
-fn run_game(exe: &Path, config: &Path, args: &[&str], extra: &[String]) -> Result<(), String> {
+pub(crate) fn run_game(exe: &Path, config: &Path, args: &[&str], extra: &[String]) -> Result<(), String> {
     let mut command = std::process::Command::new(exe);
     command.args(args).arg("--config").arg(config);
     if !extra.is_empty() {
@@ -1149,7 +1149,7 @@ fn run_game(exe: &Path, config: &Path, args: &[&str], extra: &[String]) -> Resul
 /// `None` 表示本次没导出贴图（无头/无图形环境），上下文照常可用、只是没图标。
 /// 一次游戏导出的产物：dump 字节、翻译、图标来源，以及**要记进上下文元数据**的
 /// 游戏版本与启用 mod（路径不进元数据）。
-struct GameExport {
+pub(crate) struct GameExport {
     name: String,
     game_version: Option<String>,
     mods: Vec<ModEntry>,
@@ -1164,7 +1164,7 @@ struct GameExport {
 /// 覆盖常见布局：`<root>/bin/x64/factorio(.exe)`、`<root>/bin/factorio`、
 /// `<root>/factorio`。找不到 `data/` 目录时返回 `None`（不写 `read-data`，
 /// 让游戏按自己的默认逻辑找数据）。
-fn factorio_data_dir(exe: &Path) -> Option<PathBuf> {
+pub(crate) fn factorio_data_dir(exe: &Path) -> Option<PathBuf> {
     let mut dir = exe.parent()?;
     if dir
         .file_name()
@@ -1182,7 +1182,7 @@ fn factorio_data_dir(exe: &Path) -> Option<PathBuf> {
     data.is_dir().then_some(data)
 }
 
-fn export_game_context(
+pub(crate) fn export_game_context(
     host: &Arc<dyn Host>,
     executable_path: &str,
     mod_dir: Option<&str>,
@@ -1281,7 +1281,7 @@ fn export_game_context(
 /// 跑一次 `factorio --version` 拿版本号（`Version: 2.1.17 (build …)` 的第一行）。
 ///
 /// 拿不到就返回 `None`——**不猜**（不写进上下文，UI 显示「版本未知」）。
-fn game_version_of(exe: &Path) -> Option<String> {
+pub(crate) fn game_version_of(exe: &Path) -> Option<String> {
     let output = std::process::Command::new(exe)
         .arg("--version")
         .output()
@@ -1302,7 +1302,7 @@ fn game_version_of(exe: &Path) -> Option<String> {
 /// zip 文件名必须带版本号、同名多版本取 mod-list 锁定的那个、否则取最新）。
 /// `mod_dir = None` 表示**这次导出不加载 mod**（原版 + DLC）→ 空表，**不去猜** `<游戏>/mods`。
 /// `mod-list.json` 读不到 → 也空表（不知道哪些启用，不猜）。
-fn enabled_mods(mod_dir: Option<&Path>) -> Vec<ModEntry> {
+pub(crate) fn enabled_mods(mod_dir: Option<&Path>) -> Vec<ModEntry> {
     let Some(dir) = mod_dir else {
         return Vec::new();
     };
@@ -1327,7 +1327,7 @@ fn enabled_mods(mod_dir: Option<&Path>) -> Vec<ModEntry> {
 }
 
 /// 导出 → 注册 → 锁外载入 → 激活。
-async fn load_game_context_and_activate(
+pub(crate) async fn load_game_context_and_activate(
     host: &Arc<dyn Host>,
     state: &AppState,
     executable_path: &str,
@@ -1381,7 +1381,7 @@ async fn load_game_context_and_activate(
 /// GUI 命令与消息层（`ApplicationAction::SetActiveContext`）共用：上下文的
 /// 注册表/缓存只有 app 层能碰，把它做成单一实现，避免「GUI 能切、agent 不能」
 /// 或两条路径行为漂移。
-async fn activate_context(
+pub(crate) async fn activate_context(
     host: &Arc<dyn Host>,
     id: Option<String>,
 ) -> Result<ContextList, String> {
@@ -1399,7 +1399,7 @@ async fn activate_context(
 }
 
 /// 重命名已注册的上下文（只改显示名；写 manifest 在阻塞线程上）。
-async fn rename_registered_context(
+pub(crate) async fn rename_registered_context(
     host: &Arc<dyn Host>,
     id: String,
     name: String,
@@ -1429,7 +1429,7 @@ async fn rename_registered_context(
 
 /// 删除已注册的上下文：被任何项目引用时拒绝（提示先解除关联），否则清磁盘
 /// 缓存并在有 store 时一并卸载。
-async fn delete_registered_context(
+pub(crate) async fn delete_registered_context(
     host: &Arc<dyn Host>,
     id: String,
 ) -> Result<ContextList, String> {
@@ -1476,7 +1476,7 @@ async fn delete_registered_context(
 /// `processing_unit`、`processing unit`，中文 mod 名里也常夹空格。因此**只对
 /// 比较用的字符串**去掉这些字符；返回给调用方的 `name` / `localized_name`
 /// 仍是原型原名（要拿它去 dispatch）。
-fn normalize_for_match(value: &str) -> String {
+pub(crate) fn normalize_for_match(value: &str) -> String {
     value
         .chars()
         .flat_map(char::to_lowercase)
@@ -1484,7 +1484,7 @@ fn normalize_for_match(value: &str) -> String {
         .collect()
 }
 
-fn is_separator(ch: char) -> bool {
+pub(crate) fn is_separator(ch: char) -> bool {
     ch.is_whitespace()
         || matches!(
             ch,
@@ -1502,7 +1502,7 @@ fn is_separator(ch: char) -> bool {
 /// 只用于给错拼候选排序：同一个名字跨多个原型组时，让 `typo_suggestion` 落在最
 /// 可能的那个组上（否则可能给出 `kind: technology` 这种突兀的默认），调用方仍可
 /// 用 `kind` 参数或从 `typo` 列表里自选。
-fn typo_kind_rank(kind: &str) -> u8 {
+pub(crate) fn typo_kind_rank(kind: &str) -> u8 {
     match kind {
         "item" | "module" => 0,
         "fluid" => 1,
@@ -1513,7 +1513,7 @@ fn typo_kind_rank(kind: &str) -> u8 {
 
 /// 打字错误的编辑距离（OSA：相邻字符换位算 1 步——这是最常见的手误，
 /// 纯 Levenshtein 会把它算成 2，从而漏掉 `chemcial` 这类错拼）。
-fn typo_distance(left: &[char], right: &[char]) -> usize {
+pub(crate) fn typo_distance(left: &[char], right: &[char]) -> usize {
     if left.is_empty() {
         return right.len();
     }
@@ -1771,7 +1771,7 @@ pub(crate) fn filter_index_entries(
 ///
 /// MCP 的只读工具（list_prototypes / suggest）因此不必让 agent 先 list_contexts
 /// 再回填 id——省略参数就查它正在操作的那个上下文。
-fn resolve_context_id(state: &AppState, requested: Option<&str>) -> Result<String, String> {
+pub(crate) fn resolve_context_id(state: &AppState, requested: Option<&str>) -> Result<String, String> {
     if let Some(id) = requested.map(str::trim).filter(|id| !id.is_empty()) {
         return Ok(id.to_string());
     }
@@ -1785,7 +1785,7 @@ fn resolve_context_id(state: &AppState, requested: Option<&str>) -> Result<Strin
 
 /// 全量目录索引（含 order fallback 排序）：GUI 的 `catalog_index` 命令与 MCP 的
 /// `list_prototypes` 工具共用，避免两条路径的条目形状漂移。
-async fn catalog_index_for(state: &AppState, context_id: &str) -> Result<CatalogIndex, String> {
+pub(crate) async fn catalog_index_for(state: &AppState, context_id: &str) -> Result<CatalogIndex, String> {
     if context_id.is_empty() {
         return Ok(CatalogIndex {
             context_id: String::new(),
@@ -1810,7 +1810,7 @@ async fn catalog_index_for(state: &AppState, context_id: &str) -> Result<Catalog
 
 /// 物品大组的本地化名（`"item-group/<id>" → 中文名`）：大组不是可选的目录条目，
 /// 但选择器的分组标题要显示它（配 `item-group/<id>` 图标）。
-fn item_group_names(
+pub(crate) fn item_group_names(
     store: &PrototypeStore,
     locale: &HashMap<String, String>,
 ) -> std::collections::BTreeMap<String, String> {
@@ -1828,7 +1828,7 @@ fn item_group_names(
 
 /// 一条流（物品/流体）的候选机制建议：GUI 的 `suggest` 命令与 MCP 的 `suggest`
 /// 工具共用。
-async fn suggest_for(
+pub(crate) async fn suggest_for(
     state: &AppState,
     context_id: &str,
     flow: DualVar,
@@ -1945,7 +1945,7 @@ pub(crate) fn mechanic_flow_from_snapshot(
 /// - consumer：把该流作为原料的配方
 ///
 /// 其余能量类流沿用旧逻辑（只列生产者）。
-fn suggest_for_flow(store: &PrototypeStore, flow: DualVar) -> Vec<Suggestion> {
+pub(crate) fn suggest_for_flow(store: &PrototypeStore, flow: DualVar) -> Vec<Suggestion> {
     let mut out = Vec::new();
     let mut push = |kind: &str, name: &str, role: &str| {
         out.push(Suggestion {
@@ -2045,7 +2045,7 @@ fn suggest_for_flow(store: &PrototypeStore, flow: DualVar) -> Vec<Suggestion> {
 
 /// 科技的最低等级：名字以 `-<number>` 结尾时取该数字（Factorio 规则），
 /// 否则为 0（非升级档科技）。
-fn technology_base_level(name: &str) -> u32 {
+pub(crate) fn technology_base_level(name: &str) -> u32 {
     name.rsplit_once('-')
         .and_then(|(_, suffix)| suffix.parse::<u32>().ok())
         .unwrap_or(0)
@@ -2056,7 +2056,7 @@ fn technology_base_level(name: &str) -> u32 {
 /// - `Some(n)`：有效上限 n。
 ///
 /// max_level 未显式声明时默认等于该科技的最低等级（自身），即单次研究。
-fn technology_max_level_value(tech: &TechnologyComponent, name: &str) -> Option<u32> {
+pub(crate) fn technology_max_level_value(tech: &TechnologyComponent, name: &str) -> Option<u32> {
     match tech.max_level {
         Some(TechnologyMaxLevel::Infinite) => None,
         Some(TechnologyMaxLevel::U32(level)) => Some(level),
@@ -2065,7 +2065,7 @@ fn technology_max_level_value(tech: &TechnologyComponent, name: &str) -> Option<
 }
 
 /// 能量源类型字符串（electric/burner/fluid/heat/void）；前端据此决定是否显示燃料。
-fn energy_source_kind(source: &metatorio_data::types::EnergySource) -> &'static str {
+pub(crate) fn energy_source_kind(source: &metatorio_data::types::EnergySource) -> &'static str {
     match source {
         metatorio_data::types::EnergySource::Electric(_) => "electric",
         metatorio_data::types::EnergySource::Burner(_) => "burner",
@@ -2077,14 +2077,14 @@ fn energy_source_kind(source: &metatorio_data::types::EnergySource) -> &'static 
 
 /// Burner 能量源的燃料类别；非 burner 能量源返回空。供前端燃料选择筛选
 /// burner 能量源的燃料类别（配合 getDetail 返回）。
-fn burner_fuel_categories_of(source: &metatorio_data::types::EnergySource) -> Vec<String> {
+pub(crate) fn burner_fuel_categories_of(source: &metatorio_data::types::EnergySource) -> Vec<String> {
     match source {
         metatorio_data::types::EnergySource::Burner(burner) => burner.fuel_categories.clone(),
         _ => Vec::new(),
     }
 }
 
-fn catalog_index_from_store(
+pub(crate) fn catalog_index_from_store(
     store: &PrototypeStore,
     locale: &HashMap<String, String>,
 ) -> Vec<IndexEntry> {
@@ -2338,7 +2338,7 @@ fn catalog_index_from_store(
 /// 悬停详情：按需拉取，前端缓存。
 // [moved to src-tauri: tauri command wrapper]
 
-fn ingredient_flow(ingredient: &metatorio_data::types::Ingredient) -> FlowAmount {
+pub(crate) fn ingredient_flow(ingredient: &metatorio_data::types::Ingredient) -> FlowAmount {
     use metatorio_data::types::Ingredient;
     match ingredient {
         Ingredient::Item(item) => FlowAmount {
@@ -2362,7 +2362,7 @@ fn ingredient_flow(ingredient: &metatorio_data::types::Ingredient) -> FlowAmount
     }
 }
 
-fn product_flow(product: &metatorio_data::types::Product) -> FlowAmount {
+pub(crate) fn product_flow(product: &metatorio_data::types::Product) -> FlowAmount {
     use metatorio_data::types::{Product, Production};
     match product {
         Product::Item(item) => {
@@ -2421,7 +2421,7 @@ fn product_flow(product: &metatorio_data::types::Product) -> FlowAmount {
 // [moved to src-tauri: tauri command wrapper]
 
 /// 在阻塞线程池里以 `&mut Runtime` 执行一段逻辑（用于把重计算移出主线程）。
-async fn run_blocking<T: Send + 'static>(
+pub(crate) async fn run_blocking<T: Send + 'static>(
     host: &Arc<dyn Host>,
     f: impl FnOnce(&mut Runtime) -> Result<T, String> + Send + 'static,
 ) -> Result<T, String> {
@@ -2479,7 +2479,7 @@ async fn run_blocking<T: Send + 'static>(
 // ── Side effects ──────────────────────────────────────────────────
 
 /// 机器变化后按槽位上限钳制插件数量（超出直接截断，经 reducer 落盘）。
-fn clamp_modules(
+pub(crate) fn clamp_modules(
     state: &AppState,
     runtime: &mut Runtime,
     project: ProjectId,
@@ -2550,14 +2550,14 @@ fn clamp_modules(
     Ok(())
 }
 
-fn emit<T: Serialize>(host: &Arc<dyn Host>, event: &str, payload: T) {
+pub(crate) fn emit<T: Serialize>(host: &Arc<dyn Host>, event: &str, payload: T) {
     let payload = serde_json::to_value(payload).unwrap_or(serde_json::Value::Null);
     host.emit(event, payload);
 }
 
 /// 在实体组里挑选一台机器：优先项目规划偏好的机器偏好，其次按给定
 /// 排序分数（如 crafting_speed）取最优；都不满足返回 None。
-fn pick_entity<
+pub(crate) fn pick_entity<
     F: Fn(&metatorio_data::store::PrototypeRecord) -> bool,
     S: Fn(&metatorio_data::store::PrototypeRecord) -> f64,
 >(
@@ -2587,14 +2587,14 @@ fn pick_entity<
     Some(candidates[0].0.name.clone())
 }
 
-fn categories_overlap(required: &[String], available: &[String]) -> bool {
+pub(crate) fn categories_overlap(required: &[String], available: &[String]) -> bool {
     required.is_empty()
         || available
             .iter()
             .any(|available| required.contains(available))
 }
 
-fn quality_level_of(qualities: &[String], name: &str) -> usize {
+pub(crate) fn quality_level_of(qualities: &[String], name: &str) -> usize {
     qualities
         .iter()
         .position(|candidate| candidate == name)
@@ -2603,7 +2603,7 @@ fn quality_level_of(qualities: &[String], name: &str) -> usize {
 
 /// 品质为空（新机制/首次自动推断尚未设过品质）时归一化为 "normal"，
 /// 避免 UI 显示空品质（空串既不是 normal 也显示不出角标）。
-fn quality_or_normal(quality: &str) -> &str {
+pub(crate) fn quality_or_normal(quality: &str) -> &str {
     if quality.is_empty() {
         "normal"
     } else {
@@ -2611,7 +2611,7 @@ fn quality_or_normal(quality: &str) -> &str {
     }
 }
 
-fn flow_quality_level(qualities: &[String], flow: &DualVar) -> usize {
+pub(crate) fn flow_quality_level(qualities: &[String], flow: &DualVar) -> usize {
     let name = match flow {
         DualVar::Item(id) | DualVar::Entity(id) => &id.quality,
         _ => return 0,
@@ -2635,7 +2635,7 @@ fn flow_quality_level(qualities: &[String], flow: &DualVar) -> usize {
 ///
 /// 注意 `Mechanic` 是 `#[non_exhaustive]`，新增带品质的机制时这个 `_` 会静默
 /// 漏掉——上面枚举的就是它唯一会吞掉的分支（Solar 曾在此被漏掉）。
-fn mechanic_quality_level(qualities: &[String], mechanic: &Mechanic) -> usize {
+pub(crate) fn mechanic_quality_level(qualities: &[String], mechanic: &Mechanic) -> usize {
     let mut ids: Vec<&IdWithQuality> = match mechanic {
         Mechanic::Recipe(mechanic) => vec![&mechanic.recipe, &mechanic.machine],
         Mechanic::Mining(mechanic) => vec![&mechanic.machine],
@@ -2663,7 +2663,7 @@ fn mechanic_quality_level(qualities: &[String], mechanic: &Mechanic) -> usize {
 }
 
 /// 带插件配置的机制（只有配方与采矿有）。
-fn module_config_of(mechanic: &Mechanic) -> Option<&metatorio_core::ModuleConfig> {
+pub(crate) fn module_config_of(mechanic: &Mechanic) -> Option<&metatorio_core::ModuleConfig> {
     match mechanic {
         Mechanic::Recipe(mechanic) => Some(&mechanic.module_config),
         Mechanic::Mining(mechanic) => Some(&mechanic.module_config),
@@ -2674,7 +2674,7 @@ fn module_config_of(mechanic: &Mechanic) -> Option<&metatorio_core::ModuleConfig
 /// 项目品质上限自动提升：文档中出现高于当前上限的品质时（目标/外部输入/
 /// 机制），把 `ProjectSettings.quality_limit` 提升到该品质。这样"显式要求
 /// uncommon 目标"不会被默认的 normal 上限静默判死。
-fn ensure_quality_limit(
+pub(crate) fn ensure_quality_limit(
     state: &AppState,
     runtime: &mut Runtime,
     project: ProjectId,
@@ -2752,7 +2752,7 @@ fn ensure_quality_limit(
 /// - 当前机器兼容（类别匹配）→ 不动；
 /// - 不兼容或未设置 → 挑选默认机器（项目规划偏好优先，其次最高 crafting_speed），
 ///   通过 reducer 重新 SetMachine（保持原品质）。
-fn ensure_machine_compat(
+pub(crate) fn ensure_machine_compat(
     state: &AppState,
     runtime: &mut Runtime,
     project: ProjectId,
@@ -2890,7 +2890,7 @@ fn ensure_machine_compat(
 }
 
 /// 短暂持有 runtime 锁执行一段逻辑（**不得跨 `await`**）。
-fn with_runtime<T>(
+pub(crate) fn with_runtime<T>(
     state: &AppState,
     f: impl FnOnce(&mut Runtime) -> Result<T, String>,
 ) -> Result<T, String> {
@@ -2902,7 +2902,7 @@ fn with_runtime<T>(
 }
 
 /// 取上下文 store 的 `Arc`（必要时先锁外载入）。之后的重计算可锁外进行。
-async fn context_store_arc(
+pub(crate) async fn context_store_arc(
     state: &AppState,
     context_id: &str,
 ) -> Result<Arc<PrototypeStore>, String> {
@@ -2935,7 +2935,7 @@ pub(crate) async fn factory_snapshot(
 ///
 /// 序列化 + 文件 IO 都不持 runtime 锁（大工程 JSON 序列化可能有几十毫秒，
 /// 不该阻塞 MCP / GUI 的其它交互）。
-async fn persist_project(state: &AppState, project: ProjectId, path: String) -> Result<(), String> {
+pub(crate) async fn persist_project(state: &AppState, project: ProjectId, path: String) -> Result<(), String> {
     let document = with_runtime(state, |runtime| {
         runtime
             .document_for_save(project)
@@ -3009,7 +3009,7 @@ pub(crate) async fn solve_factory_offlock(
 /// 未来的其它适配层）的显式回执——否则调用方只能看到 `solve: null`，无法区分
 /// 「无解」「参数无效」「什么都没做」。
 #[derive(Default)]
-struct CommandOutcome {
+pub(crate) struct CommandOutcome {
     /// 求解类命令的结构化产出。
     effect: Option<metatorio_runtime::CommandEffect>,
     /// 失败信息（按发生顺序累积；GUI 事件不受影响）。
@@ -3044,7 +3044,7 @@ impl CommandOutcome {
 ///
 /// 为什么随结果返回而不是只写日志：应用没有安装 logger，`log` 宏是空操作。
 /// 极端 mod 下「结果少了一条关键机制」时必须能看出它是被阈值剪掉的。
-fn attach_auto_plan_report(
+pub(crate) fn attach_auto_plan_report(
     result: &mut metatorio_runtime::SolveResult,
     report: &metatorio_runtime::solve::AutoPlanReport,
 ) {
@@ -3100,7 +3100,7 @@ where
 ///
 /// 返回 [`CommandOutcome`]：求解类命令带上 `CommandEffect` 供 MCP 等非 GUI
 /// 消费方直接取用；任何失败都会记录在 `errors` 里（同时仍 emit 事件）。
-async fn execute_command(
+pub(crate) async fn execute_command(
     host: &Arc<dyn Host>,
     state: &AppState,
     command: &RuntimeCommand,
@@ -3513,7 +3513,7 @@ async fn execute_command(
 }
 
 /// 确保项目上下文已载入：读盘解析在锁外完成。
-async fn ensure_context_for_project_offlock(
+pub(crate) async fn ensure_context_for_project_offlock(
     state: &AppState,
     project: ProjectId,
 ) -> Result<(), String> {
@@ -5227,5 +5227,6 @@ pub async fn productivity(
 pub fn project_save_path(state: &AppState, project: ProjectId) -> Option<String> {
     state.project_paths.lock().ok()?.get(&project).cloned()
 }
+
 
 

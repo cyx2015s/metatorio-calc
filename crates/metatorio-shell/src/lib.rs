@@ -7,6 +7,7 @@
 
 pub mod app;
 pub mod host;
+pub mod mcp;
 pub mod options;
 pub mod solve_jobs;
 

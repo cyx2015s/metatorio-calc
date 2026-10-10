@@ -5,7 +5,7 @@ edition = "2024"
 
 # GUI 无关的 shell 层：状态、命令/副作用循环、MCP 服务端。
 # 刻意**不依赖任何 GUI 框架**（tauri/egui/...）：这样同一个 shell 既能被 Tauri
-# 前端复用，也能被真正的 headless 二进制复用（见 crate 文档）。
+# 前端复用，也能被真正的 headless 二进制复用。
 
 [dependencies]
 metatorio-core = { path = "../metatorio-core" }
@@ -13,8 +13,10 @@ metatorio-data = { path = "../metatorio-data" }
 metatorio-icons = { path = "../metatorio-icons" }
 metatorio-runtime = { path = "../metatorio-runtime" }
 metatorio-solver = { path = "../metatorio-solver" }
-xxhash-rust = { version = "0.8", features = ["xxh3"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 schemars = { version = "1", features = ["chrono04"] }
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+rmcp = { version = "3.2", features = ["transport-streamable-http-server"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
 tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "time", "sync"] }
