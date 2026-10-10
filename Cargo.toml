@@ -8,5 +8,6 @@ members = [
     "crates/metatorio-runtime",
     "crates/metatorio-icons",
     "crates/metatorio-shell",
+    "crates/metatorio-headless",
     "metatorio-app/src-tauri",
 ]
