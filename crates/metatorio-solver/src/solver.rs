@@ -618,8 +618,11 @@ where
                     good_lp::ResolutionError::Infeasible => "无可行解（目标不可达）".to_string(),
                     // 内部数值失败**不等于**无可行解：把二者区分开，界面/agent
                     // 才不会把求解器算不动说成「配方不可解」。
-                    good_lp::ResolutionError::Other(_) => {
-                        "求解器内部错误（不代表问题无可行解，可重试）".to_string()
+                    // 带上 good_lp/后端给的原因（ModelError / PresolveError /
+                    // SolveError / NoSolutionFound …）：否则排查时只看到「内部错误」，
+                    // 不知道是模型构造、预求解还是求解阶段出的问题。
+                    good_lp::ResolutionError::Other(reason) => {
+                        format!("求解器内部错误（不代表问题无可行解，可重试）：{reason}")
                     }
                     good_lp::ResolutionError::Str(s) => {
                         format!("求解器内部错误（不代表问题无可行解）：{s}")

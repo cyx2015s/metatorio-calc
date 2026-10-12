@@ -124,6 +124,89 @@ fn build_problem(
     }
 }
 
+/// 求解失败时换策略重试的阶梯（第一项 = 默认选项）。
+///
+/// # 为什么需要
+///
+/// HiGHS 的单纯形在退化模型上会偶发**循环**（cycling），此时它会主动放弃求解并
+/// 返回 kUnknown / NoSolutionFound 这类**非终止**状态——它**不代表无可行解**。
+/// （HiGHS 作者在 ERGO-Code/HiGHS#1528 的结论就是「换个策略重跑」。）
+///
+/// 真实案例：带插件塔的两个科研瓶目标，默认选项稳定报「内部错误」；关掉均衡缩放
+/// （simplex_scale_strategy=0）后两个都能解出；再不行就同时关 presolve。
+/// 这些选项只影响**数值路径**，不改变模型，解仍要过原问题校验才会被采用。
+#[derive(Clone, Copy, Debug)]
+enum SolverAttempt {
+    /// 默认策略（presolve 与均衡缩放都由 HiGHS 自己选）。
+    Default,
+    /// 关掉均衡缩放：换一条枢轴路径，绕开循环。
+    NoScaling,
+    /// 同时关掉 presolve 与缩放：前两组都失败时的兜底。
+    NoScalingNoPresolve,
+}
+
+const SOLVER_ATTEMPTS: &[SolverAttempt] = &[
+    SolverAttempt::Default,
+    SolverAttempt::NoScaling,
+    SolverAttempt::NoScalingNoPresolve,
+];
+
+/// 解 LP；遇到非终止失败按 SOLVER_ATTEMPTS 换策略重试。
+///
+/// 每次重试都重建模型：good_lp 的 variables/constraints 是按值消耗的，重建比克隆
+/// 直白，代价也远小于一次求解。Infeasible / Unbounded 是**定论**，不重试。
+fn solve_with_retry(
+    defs: &[VariableDefinition],
+    objective: &[(usize, f64)],
+    rows: &[ParsedRow],
+    rhs_scale: f64,
+) -> Result<impl good_lp::Solution, ResolutionError> {
+    let mut last: Option<ResolutionError> = None;
+    for (index, attempt) in SOLVER_ATTEMPTS.iter().enumerate() {
+        let full = build_problem(defs, objective, rows, rhs_scale);
+        let mut model = full
+            .variables
+            .minimise(full.objective)
+            .using(highs)
+            // 默认 output_flag = true 会把 HiGHS 日志打到控制台，关掉。
+            .set_option("output_flag", false);
+        match attempt {
+            SolverAttempt::Default => {}
+            SolverAttempt::NoScaling => {
+                model = model.set_option("simplex_scale_strategy", 0);
+            }
+            SolverAttempt::NoScalingNoPresolve => {
+                model = model.set_option("presolve", "off");
+                model = model.set_option("simplex_scale_strategy", 0);
+            }
+        }
+        match model.with_all(full.constraints).solve() {
+            Ok(solution) => {
+                if index > 0 {
+                    log::warn!("求解在默认选项下失败，改用 {attempt:?} 后成功");
+                }
+                return Ok(solution);
+            }
+            Err(error) => {
+                // 无可行解 / 无界是定论：换策略没有意义。
+                let retryable =
+                    matches!(error, ResolutionError::Other(_) | ResolutionError::Str(_));
+                if retryable && index + 1 < SOLVER_ATTEMPTS.len() {
+                    log::warn!(
+                        "求解失败（第 {} 次尝试，{attempt:?}）：{error:?}；换策略重试",
+                        index + 1
+                    );
+                }
+                last = Some(error);
+                if !retryable {
+                    break;
+                }
+            }
+        }
+    }
+    Err(last.unwrap_or(ResolutionError::Other("求解未执行")))
+}
+
 /// 目标行归一化：把 LP 里最大的非零右端放大到至少这个量级再交给 HiGHS。
 ///
 /// # 为什么需要
@@ -267,14 +350,7 @@ pub fn solve_lp(
     }
 
     let instant = Instant::now();
-    let solution = full
-        .variables
-        .minimise(full.objective)
-        .using(highs)
-        // 默认 output_flag = true 会把 HiGHS 日志打到控制台，关掉。
-        .set_option("output_flag", false)
-        .with_all(full.constraints)
-        .solve()?;
+    let solution = solve_with_retry(&defs, &objective, &rows, rhs_scale)?;
     // 求解在放大后的空间进行，这里除回原问题量级（rhs_scale = 1.0 时是无操作）。
     let values: Vec<f64> = orig_vars
         .iter()
@@ -391,11 +467,8 @@ mod tests {
         let mut vars = ProblemVariables::new();
         let x = vars.add(variable().min(0.0));
         let y = vars.add(variable().min(0.0));
-        let constraints = vec![
-            x.into_expression().eq(1e-9),
-            (y.clone() - x.clone()).eq(0.0),
-        ];
-        let solution = solve_lp(x.clone() + y.clone(), constraints, vars).expect("应可解");
+        let constraints = vec![x.into_expression().eq(1e-9), (y - x).eq(0.0)];
+        let solution = solve_lp(x + y, constraints, vars).expect("应可解");
         let xv = solution.value(x);
         let yv = solution.value(y);
         assert!(xv > 0.0, "x 被解成 0（未放大目标右端）：{xv}");

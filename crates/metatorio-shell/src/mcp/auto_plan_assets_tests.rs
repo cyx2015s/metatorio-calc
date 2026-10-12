@@ -6,6 +6,8 @@ use serde_json::{Value, json};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
+mod import_location_tests;
+
 const BASE: &str = "data-raw-dump.json";
 const MODDED: &str = "data-raw-dump-heavily-modded.json";
 // Each solve enumerates the full context. Serialize tests to keep memory bounded
@@ -576,78 +578,12 @@ async fn impossible_temperature_is_reported_as_async_failure() {
     assert!(state["auto_plan"].get("result").is_none());
 }
 
-/// Explore every recipe-produced item in a stable order. Unavailable targets are
-/// legitimate in a given planet/context; successful plans must satisfy all the
-/// same feasibility assertions as the regression tests. Save every outcome so
-/// a survey cannot conceal its failed cases behind a passing test summary.
-/// AUTOPLAN_SWEEP_OFFSET/LIMIT allow bounded runs and reproducible shards.
+/// Only explicitly declared import locations, using the item's own planet.
+/// Aquilo is excluded. The report retains every unavailable target for review.
 #[tokio::test]
-#[ignore = "exhaustive real-context survey; potentially hours; supports offset/limit"]
-async fn stress_all_recipe_products() {
-    let _permit = GATE.acquire().await.unwrap();
-    let offset = std::env::var("AUTOPLAN_SWEEP_OFFSET")
-        .ok()
-        .map(|s| s.parse::<usize>().unwrap())
-        .unwrap_or(0);
-    let limit = std::env::var("AUTOPLAN_SWEEP_LIMIT")
-        .ok()
-        .map(|s| s.parse::<usize>().unwrap())
-        .unwrap_or(usize::MAX);
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join(format!("../../local/auto-plan-sweep-{offset}.jsonl"));
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    let mut output = std::fs::File::create(path).unwrap();
-    use std::io::Write;
-    let mut solved = 0;
-    let mut tested = 0;
-    for asset in [BASE, MODDED] {
-        // Read the asset only to discover targets; the handler still uses the
-        // full, unmodified PrototypeStore, not a reduced synthetic fixture.
-        let raw: Value = serde_json::from_slice(
-            &std::fs::read(
-                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("../../assets")
-                    .join(asset),
-            )
-            .unwrap(),
-        )
-        .unwrap();
-        let mut items = std::collections::BTreeSet::new();
-        for recipe in raw["recipe"].as_object().unwrap().values() {
-            if let Some(products) = recipe["results"].as_array() {
-                for product in products {
-                    if product["type"] == "item" {
-                        items.insert(product["name"].as_str().unwrap().to_string());
-                    }
-                }
-            }
-        }
-        drop(raw);
-        for item in items.into_iter().skip(offset).take(limit) {
-            let mcp = handler(asset);
-            let begun = Instant::now();
-            let ids = start(&mcp, json!({"targets":[{"item":item,"amount":1.0}]})).await;
-            let state = finish(&mcp, &ids).await;
-            if state["auto_plan"]["status"] == "done" {
-                assert_solved(&mcp, &ids, &state);
-                solved += 1;
-            } else {
-                assert!(!state["auto_plan"]["error"].as_str().unwrap().is_empty());
-            }
-            tested += 1;
-            let row = json!({"asset":asset,"item":item,"elapsed_ms":begun.elapsed().as_millis(),
-                "status":state["auto_plan"]["status"],"error":state["auto_plan"]["error"],
-                "report":state["auto_plan"]["result"]["report"]});
-            writeln!(output, "{row}").unwrap();
-            output.flush().unwrap();
-            eprintln!("survey {tested}: {asset}/{item}: {}", row["status"]);
-        }
-    }
-    assert!(tested > 0, "empty survey shard");
-    eprintln!(
-        "survey totals: {solved} solved, {} failed, {tested} tested",
-        tested - solved
-    );
+#[ignore = "real import-location sweep; run with --release; supports offset/limit"]
+async fn stress_import_location_products() {
+    import_location_tests::run_import_location_sweep().await;
 }
 
 #[tokio::test]
@@ -813,7 +749,7 @@ async fn stress_modules_beacons_quality_and_scale() {
             for beacons in [
                 json!([]),
                 json!([{"beacon":{"id":"beacon","quality":quality},
-                "count":8,"share":0.5,"modules":[{"module":{"id":"speed-module-3","quality":quality},"count":2}]}]),
+                "count":8,"share":8.0,"modules":[{"module":{"id":"speed-module-3","quality":quality},"count":16}]}]),
             ] {
                 if tested >= limit {
                     return;
