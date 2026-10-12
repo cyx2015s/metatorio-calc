@@ -448,19 +448,25 @@ impl MetatorioMcp {
                 None,
             ));
         }
-        // 幂等回放：同一个 request_id 直接返回上次载荷（含 ids），不重复建项目。
+        // 幂等：必须在任何 await **之前**占位。旧写法只在入口「读」缓存、到配置完成
+        // 才「写」，中间隔着异步读目录，于是并发重试都能查空、各建一个项目
+        // （见 mcp::auto_plan_assets_tests::simultaneous_same_request_id_*）。
+        let mut claim: Option<RequestClaim> = None;
         if let Some(request_id) = &params.request_id {
-            let cached = host
-                .state()
-                .dispatch_cache
-                .lock()
-                .ok()
-                .and_then(|cache| cache.get(request_id));
-            if let Some((mut payload, false)) = cached {
-                if let serde_json::Value::Object(object) = &mut payload {
-                    object.insert("idempotent_replay".into(), serde_json::Value::Bool(true));
+            match claim_request_id(&host, request_id).await {
+                Claimed::Replay(mut payload, _is_error) => {
+                    if let serde_json::Value::Object(object) = &mut payload {
+                        object.insert("idempotent_replay".into(), serde_json::Value::Bool(true));
+                    }
+                    return Ok(CallToolResult::structured(payload));
                 }
-                return Ok(CallToolResult::structured(payload));
+                Claimed::Busy => {
+                    return Err(McpError::internal_error(
+                        format!("同一 request_id（{request_id}）的请求仍在处理中，请稍后重试"),
+                        None,
+                    ));
+                }
+                Claimed::Own(owned) => claim = Some(owned),
             }
         }
         // 1) 目标名 → 流：用当前/指定的上下文目录索引解析（只接受精确命中的**物品或
@@ -667,10 +673,8 @@ impl MetatorioMcp {
             "auto_plan": { "status": status },
             "poll": poll,
         });
-        if let Some(request_id) = params.request_id
-            && let Ok(mut cache) = host.state().dispatch_cache.lock()
-        {
-            cache.insert(request_id, payload.clone(), false);
+        if let Some(claim) = claim.as_mut() {
+            claim.finish(payload.clone(), false);
         }
         Ok(CallToolResult::structured(payload))
     }
@@ -933,26 +937,30 @@ async fn dispatch_message(
     request_id: Option<String>,
     page: Page,
 ) -> Result<CallToolResult, McpError> {
-    // 0) 幂等回放：同一 request_id 已经执行过就直接返回上次的载荷。
+    // 0) 幂等：同一临界区里占位后再往下——并发同 id 也不能重复应用消息。
+    let mut claim: Option<RequestClaim> = None;
     if let Some(request_id) = &request_id {
-        let cached = host
-            .state()
-            .dispatch_cache
-            .lock()
-            .ok()
-            .and_then(|cache| cache.get(request_id));
-        if let Some((mut payload, is_error)) = cached {
-            if let serde_json::Value::Object(object) = &mut payload {
-                object.insert(
-                    "idempotent_replay".to_string(),
-                    serde_json::Value::Bool(true),
-                );
+        match claim_request_id(host, request_id).await {
+            Claimed::Replay(mut payload, is_error) => {
+                if let serde_json::Value::Object(object) = &mut payload {
+                    object.insert(
+                        "idempotent_replay".to_string(),
+                        serde_json::Value::Bool(true),
+                    );
+                }
+                let mut result = CallToolResult::structured(payload);
+                if is_error {
+                    result.is_error = Some(true);
+                }
+                return Ok(result);
             }
-            let mut result = CallToolResult::structured(payload);
-            if is_error {
-                result.is_error = Some(true);
+            Claimed::Busy => {
+                return Err(McpError::internal_error(
+                    format!("同一 request_id（{request_id}）的请求仍在处理中，请稍后重试"),
+                    None,
+                ));
             }
-            return Ok(result);
+            Claimed::Own(owned) => claim = Some(owned),
         }
     }
 
@@ -1020,12 +1028,9 @@ async fn dispatch_message(
     // 与「命令跑了且成功但恰好没有求解产出」。
     let is_error = !errors.is_empty();
     // 只记录**成功**的幂等结果：失败（尤其求解超时）必须允许用同一个 id
-    // 重试，否则重试会一直回放失败。
-    if !is_error
-        && let Some(request_id) = request_id
-        && let Ok(mut cache) = host.state().dispatch_cache.lock()
-    {
-        cache.insert(request_id, payload.clone(), false);
+    // 重试，否则重试会一直回放失败（finish 内部按 is_error 决定写结果还是释放占位）。
+    if let Some(claim) = claim.as_mut() {
+        claim.finish(payload.clone(), is_error);
     }
     let mut result = CallToolResult::structured(payload);
     if is_error {
@@ -2055,6 +2060,9 @@ async fn require_token(
     }
     next.run(request).await
 }
+
+#[cfg(test)]
+mod auto_plan_assets_tests;
 
 #[cfg(test)]
 mod tests {

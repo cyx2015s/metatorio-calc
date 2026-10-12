@@ -99,6 +99,8 @@ cd metatorio-app && pnpm install && pnpm tauri build
 
 # 贡献
 
+自动规划的真实上下文回归、极端倍率、插件塔组合及全产物遍历测试，见 [测试说明与实测结果](docs/auto-plan-testing.md)。
+
 欢迎提交各种 issue、pull request 或在其他社交网站上联系我反馈问题和提供建议。
 
 # 许可

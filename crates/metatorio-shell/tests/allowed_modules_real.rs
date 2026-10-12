@@ -21,10 +21,11 @@ fn module_allowed(
     recipe: Option<&RecipeComponent>,
 ) -> bool {
     // 与 auto_plan::module_allowed 相同的逻辑（此处独立复制便于验证命令路径）。
-    if let Some(categories) = machine_categories {
-        if !categories.is_empty() && !categories.contains(&module.category) {
-            return false;
-        }
+    if let Some(categories) = machine_categories
+        && !categories.is_empty()
+        && !categories.contains(&module.category)
+    {
+        return false;
     }
     let recipe_allowed = |kind: metatorio_data::types::EffectType, recipe_allow: bool| {
         recipe_allow && machine_allowed_effects.is_none_or(|limits| limits[kind])
@@ -95,7 +96,7 @@ fn real_dump_machine_with_recipe_allows_modules() {
             module,
             &machine.allowed_module_categories,
             &machine.allowed_effects,
-            Some(&recipe),
+            Some(recipe),
         ) {
             allowed.push(item_record.name.clone());
         }

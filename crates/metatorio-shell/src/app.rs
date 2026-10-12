@@ -101,40 +101,228 @@ pub enum AutoPlanState {
     Failed(String),
 }
 
-/// MCP `dispatch` 的幂等缓存（有界 FIFO）。
+/// MCP `dispatch` / `auto_plan` 的幂等缓存（有界 FIFO）。
 ///
 /// 工具调用超时后 agent 会重试；没有幂等键时「添加目标/机制」会被重复应用。
 /// agent 传 `request_id` 后，同一个 id 只应用一次，重试直接拿回上次的载荷。
+///
+/// **并发**重试同样只能应用一次：所以一个键在「出结果」之前先有一个**处理中
+/// 占位**（见 [`DispatchCache::reserve`]）。占位由 [`RequestClaim`] 持有——
+/// 正常结束写入结果，失败或提前返回则释放，让重试能重新处理。
 #[derive(Default)]
 pub(crate) struct DispatchCache {
     order: std::collections::VecDeque<String>,
-    entries: HashMap<String, (serde_json::Value, bool)>,
+    entries: HashMap<String, CacheSlot>,
+}
+
+enum CacheSlot {
+    /// 同 id 的请求正在处理；等待者持有这个 Notify 等它结束。
+    InFlight(Arc<tokio::sync::Notify>),
+    /// 已出结果（载荷 + 是否错误）。
+    Ready(serde_json::Value, bool),
+}
+
+/// [`DispatchCache::reserve`] 的结果。
+pub(crate) enum Reservation {
+    /// 已有结果，直接回放。
+    Ready(serde_json::Value, bool),
+    /// 同 id 的请求正在处理：等它结束后回放，或在它失败/取消后自己接手。
+    Wait(Arc<tokio::sync::Notify>),
+    /// 本次调用拿到处理权：结束后必须 [`RequestClaim::finish`]。
+    Proceed,
 }
 
 impl DispatchCache {
-    /// 最多记住多少次调用（超出后淘汰最早的）。
+    /// 最多记住多少次调用（超出后淘汰最早的**已完成**条目）。
     const CAPACITY: usize = 256;
 
+    /// 取已缓存的结果（只认已完成的条目）。
     pub(crate) fn get(&self, request_id: &str) -> Option<(serde_json::Value, bool)> {
-        self.entries.get(request_id).cloned()
+        match self.entries.get(request_id) {
+            Some(CacheSlot::Ready(payload, is_error)) => Some((payload.clone(), *is_error)),
+            _ => None,
+        }
     }
 
-    pub(crate) fn insert(
+    /// 这个键是否正被某个请求处理。
+    pub(crate) fn is_in_flight(&self, request_id: &str) -> bool {
+        matches!(self.entries.get(request_id), Some(CacheSlot::InFlight(_)))
+    }
+
+    /// 占用幂等键：已完成 → 回放；处理中 → 等待；否则本次调用负责处理。
+    ///
+    /// 这一步必须在任何 `.await` **之前**完成。旧写法只在入口「读」缓存、在配置
+    /// 完成之后才「写」，中间隔着异步读目录，于是并发重试都能查空、各建一个项目
+    /// （见 `mcp::auto_plan_assets_tests::simultaneous_same_request_id_*`）。
+    pub(crate) fn reserve(&mut self, request_id: &str) -> Reservation {
+        match self.entries.get(request_id) {
+            Some(CacheSlot::Ready(payload, is_error)) => {
+                Reservation::Ready(payload.clone(), *is_error)
+            }
+            Some(CacheSlot::InFlight(notify)) => Reservation::Wait(notify.clone()),
+            None => {
+                self.entries.insert(
+                    request_id.to_string(),
+                    CacheSlot::InFlight(Arc::new(tokio::sync::Notify::new())),
+                );
+                self.order.push_back(request_id.to_string());
+                Reservation::Proceed
+            }
+        }
+    }
+
+    /// 处理完成：写入结果并唤醒等待者。
+    pub(crate) fn complete(
         &mut self,
-        request_id: String,
+        request_id: &str,
         payload: serde_json::Value,
         is_error: bool,
     ) {
-        if self
+        let notify = match self
             .entries
-            .insert(request_id.clone(), (payload, is_error))
-            .is_none()
+            .insert(request_id.to_string(), CacheSlot::Ready(payload, is_error))
         {
-            self.order.push_back(request_id);
+            Some(CacheSlot::InFlight(notify)) => Some(notify),
+            _ => None,
+        };
+        self.evict();
+        if let Some(notify) = notify {
+            notify.notify_waiters();
         }
-        while self.order.len() > Self::CAPACITY {
-            if let Some(oldest) = self.order.pop_front() {
-                self.entries.remove(&oldest);
+    }
+
+    /// 处理失败/取消：撤掉占位（**不**记录结果），让同 id 能重试。
+    pub(crate) fn release(&mut self, request_id: &str) {
+        let notify = match self.entries.remove(request_id) {
+            Some(CacheSlot::InFlight(notify)) => Some(notify),
+            Some(other) => {
+                // 已有结果就不删了（不该发生，保守处理）。
+                self.entries.insert(request_id.to_string(), other);
+                None
+            }
+            None => None,
+        };
+        self.order.retain(|id| id != request_id);
+        if let Some(notify) = notify {
+            notify.notify_waiters();
+        }
+    }
+
+    /// 超容量时淘汰最早的**已完成**条目；处理中的不能淘汰（等待者还持有它的 Notify）。
+    fn evict(&mut self) {
+        while self.entries.len() > Self::CAPACITY {
+            let Some(index) = self
+                .order
+                .iter()
+                .position(|id| matches!(self.entries.get(id), Some(CacheSlot::Ready(..))))
+            else {
+                break;
+            };
+            if let Some(id) = self.order.remove(index) {
+                self.entries.remove(&id);
+            }
+        }
+    }
+}
+
+/// [`claim_request_id`] 的结果。
+pub(crate) enum Claimed {
+    /// 已有结果：直接回放（第二项表示「这个结果本身是错误」）。
+    Replay(serde_json::Value, bool),
+    /// 本次调用拿到处理权。
+    Own(RequestClaim),
+    /// 同 id 的请求长时间没有结束（对端可能卡住）。
+    Busy,
+}
+
+/// 幂等键的处理权守卫。
+///
+/// 正常结束走 [`RequestClaim::finish`]；若处理函数提前返回（任何 `?` / 错误路径），
+/// `Drop` 会释放占位——**绝不能把一个键永久占住**，否则同 id 的重试会一直等。
+pub(crate) struct RequestClaim {
+    host: Arc<dyn Host>,
+    request_id: String,
+    /// 已结算（写结果或释放）：Drop 不必再动。
+    settled: bool,
+}
+
+impl RequestClaim {
+    /// 处理完成。`is_error` 为真时只释放占位（失败必须允许同 id 重试）。
+    pub(crate) fn finish(&mut self, payload: serde_json::Value, is_error: bool) {
+        if let Ok(mut cache) = self.host.state().dispatch_cache.lock() {
+            if is_error {
+                cache.release(&self.request_id);
+            } else {
+                cache.complete(&self.request_id, payload, false);
+            }
+        }
+        self.settled = true;
+    }
+}
+
+impl Drop for RequestClaim {
+    fn drop(&mut self) {
+        if self.settled {
+            return;
+        }
+        if let Ok(mut cache) = self.host.state().dispatch_cache.lock() {
+            cache.release(&self.request_id);
+        }
+    }
+}
+
+/// 为 `request_id` 取得幂等处理权。
+///
+/// 「读缓存」与「占位」必须在**同一个**临界区里完成（[`DispatchCache::reserve`]），
+/// 否则并发请求会同时看到「没有结果」而各跑一遍。
+pub(crate) async fn claim_request_id(host: &Arc<dyn Host>, request_id: &str) -> Claimed {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    loop {
+        let reservation = {
+            let mut cache = match host.state().dispatch_cache.lock() {
+                Ok(cache) => cache,
+                // 锁坏了不能让请求卡死：退化为「无幂等」继续处理。
+                Err(_) => {
+                    return Claimed::Own(RequestClaim {
+                        host: host.clone(),
+                        request_id: request_id.to_string(),
+                        settled: true,
+                    });
+                }
+            };
+            cache.reserve(request_id)
+        };
+        match reservation {
+            Reservation::Ready(payload, is_error) => return Claimed::Replay(payload, is_error),
+            Reservation::Proceed => {
+                return Claimed::Own(RequestClaim {
+                    host: host.clone(),
+                    request_id: request_id.to_string(),
+                    settled: false,
+                });
+            }
+            Reservation::Wait(notify) => {
+                // 先注册等待者、再复查状态：对端若在我们拿到 Notify 之后完成，
+                // 这次复查就能看到结果；否则 `notify_waiters` 会唤醒我们。两边都不漏。
+                let notified = notify.notified();
+                tokio::pin!(notified);
+                notified.as_mut().enable();
+                {
+                    if let Ok(cache) = host.state().dispatch_cache.lock() {
+                        if let Some((payload, is_error)) = cache.get(request_id) {
+                            return Claimed::Replay(payload, is_error);
+                        }
+                        if !cache.is_in_flight(request_id) {
+                            // 对端失败/取消：自己接手。
+                            continue;
+                        }
+                    }
+                }
+                let now = std::time::Instant::now();
+                if now >= deadline {
+                    return Claimed::Busy;
+                }
+                let _ = tokio::time::timeout(deadline - now, notified).await;
             }
         }
     }
@@ -4871,21 +5059,32 @@ mod tests {
         );
     }
 
-    /// 幂等缓存：同一 request_id 回放上次载荷；超过容量淘汰最早的。
+    /// 幂等缓存：同一 request_id 回放上次载荷、失败释放占位、超容量淘汰最早的。
     #[test]
     fn dispatch_cache_replays_and_evicts() {
         let mut cache = DispatchCache::default();
         assert!(cache.get("a").is_none());
-        cache.insert("a".to_string(), serde_json::json!({ "revision": 1 }), false);
+        // 第一个请求拿到处理权，第二个同 id 只能等——并发去重的关键。
+        assert!(matches!(cache.reserve("a"), Reservation::Proceed));
+        assert!(matches!(cache.reserve("a"), Reservation::Wait(_)));
+        cache.complete("a", serde_json::json!({ "revision": 1 }), false);
         let (payload, is_error) = cache.get("a").expect("应命中");
         assert_eq!(payload["revision"], 1);
         assert!(!is_error);
 
-        cache.insert("b".to_string(), serde_json::json!({}), true);
-        assert!(cache.get("b").expect("应命中").1, "错误结果同样记录");
+        // 失败/取消：撤掉占位、不记录结果，同 id 可以再来一次。
+        assert!(matches!(cache.reserve("b"), Reservation::Proceed));
+        cache.release("b");
+        assert!(cache.get("b").is_none(), "失败不记录结果");
+        assert!(
+            matches!(cache.reserve("b"), Reservation::Proceed),
+            "释放后应能重新处理"
+        );
 
         for index in 0..DispatchCache::CAPACITY {
-            cache.insert(format!("k{index}"), serde_json::json!({}), false);
+            let key = format!("k{index}");
+            cache.reserve(&key);
+            cache.complete(&key, serde_json::json!({}), false);
         }
         assert!(cache.get("a").is_none(), "最早的条目应被淘汰");
     }
