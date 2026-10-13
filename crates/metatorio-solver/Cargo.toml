@@ -6,12 +6,15 @@ description = "Metatorio 求解器内核：线性规划求解与组合枚举，�
 license = "MIT"
 
 [features]
+default = ["highs"]
+highs = ["dep:good_lp", "good_lp/highs", "dep:highs", "dep:highs-sys"]
+rust-lp = ["rational-lp", "dep:serde_json", "dep:num-rational", "dep:num-traits"]
 rational-lp = ["dep:metatorio-lp"]
-lp-experiments = ["dep:highs", "dep:highs-sys", "dep:serde_json", "rational-lp", "dep:num-rational", "dep:num-traits"]
+lp-experiments = ["highs", "rust-lp"]
 
 [dependencies]
 ahash = { version = "0.8", features = ["serde"] }
-good_lp = { version = "1.15", default-features = false, features = ["highs"] }
+good_lp = { version = "1.15", default-features = false, optional = true }
 indexmap = { version = "2", features = ["rayon", "serde"] }
 log = "0.4"
 rayon = "1"
@@ -29,32 +32,32 @@ required-features = ["lp-experiments"]
 
 [[example]]
 name = "lp_certify"
-required-features = ["lp-experiments"]
+required-features = ["rust-lp"]
 
 [[example]]
 name = "lp_from_zero"
-required-features = ["lp-experiments"]
+required-features = ["rust-lp"]
 
 [[example]]
 name = "lp_dual_from_zero"
-required-features = ["lp-experiments"]
+required-features = ["rust-lp"]
 
 [[example]]
 name = "lp_float_propose"
-required-features = ["lp-experiments"]
+required-features = ["rust-lp"]
 
 [[example]]
 name = "lp_rust_support"
-required-features = ["lp-experiments"]
+required-features = ["rust-lp"]
 
 [[example]]
 name = "lp_cross_verify"
-required-features = ["lp-experiments"]
+required-features = ["rust-lp"]
 
 [[example]]
 name = "lp_verify_witnesses"
-required-features = ["lp-experiments"]
+required-features = ["rust-lp"]
 
 [[example]]
 name = "lp_refine_candidate"
-required-features = ["lp-experiments"]
+required-features = ["rust-lp"]

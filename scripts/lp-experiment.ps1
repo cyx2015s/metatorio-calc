@@ -3,6 +3,7 @@ param(
     [switch]$ReplayOnly,
     [switch]$PipelineOnly,
     [switch]$RequireSolved,
+    [switch]$NativeFree,
     [ValidateSet('highs', 'hybrid-exact', 'rust-exact', 'rust-verified', 'rust-certified')]
     [string]$Backend = 'highs',
     [ValidateSet('default', 'no-scaling', 'no-scaling-no-presolve', 'tight', 'tight-no-presolve', 'raw-rhs', 'ipx', 'ipx-no-presolve', 'support-refine')]
@@ -14,6 +15,10 @@ param(
 $ErrorActionPreference = 'Stop'
 if ($PipelineOnly -and $ReplayOnly) { throw 'PipelineOnly and ReplayOnly are mutually exclusive.' }
 if ($RequestOffset -lt 0 -or $RequestLimit -lt 1) { throw 'Invalid request selection.' }
+if ($NativeFree -and (!$PipelineOnly -or $ReplayOnly -or $Backend -notlike 'rust-*')) {
+    throw 'NativeFree requires PipelineOnly and a Rust backend.'
+}
+$cargoFeatures = if ($NativeFree) { @('--no-default-features', '--features', 'rust-lp') } else { @('--features', 'lp-experiments') }
 $root = Split-Path -Parent $PSScriptRoot
 if (!$CorpusDirectory) { $CorpusDirectory = Join-Path $root "local/lp-exp/run-$(Get-Date -Format yyyyMMdd-HHmmss)" }
 $CorpusDirectory = [IO.Path]::GetFullPath($CorpusDirectory)
@@ -39,16 +44,25 @@ try {
             rustc = (& rustc --version)
             assets_sha256 = (Get-FileHash -LiteralPath (Join-Path $root 'assets/data-raw-dump.json') -Algorithm SHA256).Hash
             requests_sha256 = (Get-FileHash -LiteralPath $env:LP_REQUESTS -Algorithm SHA256).Hash
+            native_free_build = [bool]$NativeFree
             backend = $Backend
             require_solved = [bool]$RequireSolved
             request_offset = $RequestOffset
             request_limit = $RequestLimit
         } | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8NoBOM (Join-Path $CorpusDirectory 'provenance.json')
-        & cargo test --release -p metatorio-shell --features lp-experiments --lib experiment_capture_failure_requests -- --ignored --nocapture *> (Join-Path $CorpusDirectory 'capture.log')
+        if ($NativeFree) {
+            $dependencyTree = @(& cargo tree -p metatorio-shell @cargoFeatures --edges normal,build --prefix none --format '{p}')
+            if ($LASTEXITCODE -ne 0) { throw 'Dependency graph inspection failed.' }
+            $dependencyTree | Set-Content -Encoding utf8NoBOM (Join-Path $CorpusDirectory 'dependency-tree.txt')
+            if ($dependencyTree | Where-Object { $_ -match '^(highs(-sys)?|good_lp) v' }) {
+                throw 'NativeFree dependency graph still contains a native LP backend.'
+            }
+        }
+        & cargo test --release -p metatorio-shell @cargoFeatures --lib experiment_capture_failure_requests -- --ignored --nocapture *> (Join-Path $CorpusDirectory 'capture.log')
         if ($LASTEXITCODE -ne 0) { throw "Capture failed; see $CorpusDirectory/capture.log" }
     }
     if (!$ReplayOnly -and $RequireSolved -and $Backend -eq 'rust-certified') {
-        & cargo build --release -p metatorio-solver --features lp-experiments --example lp_verify_witnesses
+        & cargo build --release -p metatorio-solver @cargoFeatures --example lp_verify_witnesses
         if ($LASTEXITCODE -ne 0) { throw 'Exact witness verifier build failed.' }
         & (Join-Path $root 'target/release/examples/lp_verify_witnesses.exe') $CorpusDirectory | Set-Content -Encoding utf8NoBOM (Join-Path $CorpusDirectory 'witness-verification.json')
         if ($LASTEXITCODE -ne 0) { throw 'Independent exact witness verification failed.' }

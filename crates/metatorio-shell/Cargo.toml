@@ -4,7 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-lp-experiments = ["metatorio-solver/lp-experiments"]
+default = ["highs"]
+highs = ["metatorio-solver/highs", "metatorio-runtime/highs"]
+rust-lp = ["metatorio-solver/rust-lp", "metatorio-runtime/rust-lp"]
+lp-experiments = ["highs", "rust-lp", "metatorio-solver/lp-experiments"]
 
 # GUI 无关的 shell 层：状态、命令/副作用循环、MCP 服务端。
 # 刻意**不依赖任何 GUI 框架**（tauri/egui/...）：这样同一个 shell 既能被 Tauri
@@ -14,8 +17,8 @@ lp-experiments = ["metatorio-solver/lp-experiments"]
 metatorio-core = { path = "../metatorio-core" }
 metatorio-data = { path = "../metatorio-data" }
 metatorio-icons = { path = "../metatorio-icons" }
-metatorio-runtime = { path = "../metatorio-runtime" }
-metatorio-solver = { path = "../metatorio-solver" }
+metatorio-runtime = { path = "../metatorio-runtime", default-features = false }
+metatorio-solver = { path = "../metatorio-solver", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"

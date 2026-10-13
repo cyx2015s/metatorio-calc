@@ -7,10 +7,11 @@
 pub mod comb;
 pub mod concept;
 pub mod lp;
-#[cfg(feature = "lp-experiments")]
+#[cfg(feature = "rust-lp")]
 pub mod lp_experiments;
-#[cfg(feature = "lp-experiments")]
+#[cfg(feature = "rust-lp")]
 mod lp_hybrid;
+pub mod lp_model;
 #[cfg(feature = "rational-lp")]
 pub use metatorio_lp as lp_rational;
 pub mod solver;

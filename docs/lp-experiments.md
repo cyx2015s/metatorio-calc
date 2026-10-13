@@ -398,3 +398,42 @@ cargo run --release -p metatorio-solver --features lp-experiments --example lp_v
 全部修复后的整批复验位于 `local/lp-exp/rust-certified-scaled-pipeline-24`：**24 done / 0 failed**，实际规划、回写、保存工厂重解全部通过。脚本自动完成 **96/96** 见证离线复核，其中 66 个精确最优；最大向上舍入归一化目标差距 `3.761086338897564e-15`，全部浮点回写检查通过。24 个完整候选模型中仍为 15 个精确最优、9 个严格可行且满足差距预算。逐请求范围及结果在 `summary.json`，离线结果在 `witness-verification.json`。
 
 这次全测试耗时 653.42 秒，最长请求 54.630 秒，比首次统一入口回放更慢。两轮实时模型的生成系数、搜索路径及并行负载没有严格控制，不能将差值归因于单项修改，也不能宣称这次缩放改善了速度。下一阶段性能比较必须固定输入并隔离运行；本阶段确认的是新增大产量失败已修复，且原有困难请求的数学门禁仍全部通过。默认后端继续为 HiGHS，纯 Rust 路径通过 `rust-certified` 显式启用。
+
+## 第十阶段：建模层及应用构建脱离原生 LP 依赖
+
+新增 `metatorio-solver::lp_model`，提供应用实际使用的连续变量、稀疏表达式、约束和错误类型。生产的配方/源/汇/目标建模迁入这一层，不再通过 `good_lp` 表达式构造模型。重复变量系数仍合并，微小非零系数保留；不等式方向和常数项在构造阶段转换，非有限表达式和未声明变量在提交给后端前拒绝。目标常数项现在正确加入返回成本，新增独立回归覆盖这项行为。公共 `solve_lp` 的参数类型因此变为本仓库 `lp_model` 的类型，原生适配器在内部转换为 `good_lp`。
+
+新增 `highs` 和 `rust-lp` 构建 feature，默认仍启用 `highs`；`lp-experiments` 同时启用两者。原生重试、原生 replay 及混合支持集实验按 `highs` 隔离；原始矩阵、Rust 桥接及离线证明校验按 `rust-lp` 提供。runtime、shell、headless 的依赖禁用隐式默认 feature，并显式向下传播后端选择。只有 `rust-lp` 时，无需环境变量就默认运行 `rust-certified`；不能运行的原生后端返回明确错误。
+
+完整纯 Rust headless release 构建成功，生成程序可执行并返回版本。对所选 headless 的 normal/build 依赖图检查确认没有 `highs`、`highs-sys` 或 `good_lp`，留档 `local/lp-exp/native-free-headless-dependencies.txt`。这是应用 LP 构建图已经脱离原生求解器的证据；操作系统、TLS 等依赖仍由应用自身需要决定。
+
+纯 Rust 构建在没有设置后端环境变量时通过 **33 项求解器测试、76 项 runtime 测试（2 ignored）、80 项真实资产回归（5 ignored）**。资产检查仍验证实际回写和保存工厂重解均有严格可行性及合格差距上界。默认 HiGHS 的 27 项求解器测试通过。核心算法本阶段没有修改，资产/表达式组合测试用于检查应用建模迁移。
+
+```powershell
+cargo build --release -p metatorio-headless --no-default-features --features rust-lp
+cargo test -p metatorio-solver --no-default-features --features rust-lp --lib
+cargo tree -p metatorio-headless --no-default-features --features rust-lp --edges normal,build
+./scripts/lp-experiment.ps1 -Backend rust-certified -NativeFree -PipelineOnly -RequireSolved
+```
+
+脚本新增 `-NativeFree`，限于 Rust 的完整规划验收，先保存并检查所选 shell 的依赖图，再捕获全部 LP、执行真实规划回归及离线精确见证复核。原生重放仍通过默认实验构建使用。各纯 Rust 回放/验证示例的 required-features 改为 `rust-lp`，无需原生构建工具即可提供这些 LP 功能。更完整的构建说明在 `crates/metatorio-solver/README.md`。
+
+GUI 外壳 `metatorio-app` 同样新增后端 feature 传播，默认依然启用 HiGHS。`cargo check -p metatorio-app --no-default-features --features rust-lp` 成功；其 normal/build 依赖图同样没有 HiGHS、highs-sys 或 good_lp，留档 `native-free-gui-dependencies.txt`。这里确认了纯 Rust LP 的 GUI 编译检查，没有声称完成 GUI release 打包或实际窗口交互测试。
+
+纯 Rust 的其余 shell 库回归 **42 passed / 1 ignored**，默认 HiGHS 资产回归 **80 passed / 4 ignored**，双后端求解器 **35 passed**。42 组数量级请求在纯 Rust 默认后端全部通过。静态检查涵盖纯 Rust 求解器所有目标、纯 Rust shell 库/测试和双后端求解器所有目标。对应日志以 `local/lp-exp/native-isolation-` 开头。一次新的纯构建捕获在保存依赖图时因编码参数拼写错误终止，尚未执行求解；修正后保留原目录并在 `native-free-pipeline-24-v2` 重新启动。
+
+`native-free-pipeline-24-v2` 最终 **24 done / 0 failed**，所选 shell 依赖图通过无原生 LP 包门禁。所有 **96/96** 精确见证离线复核通过，66 个精确最优，最大向上舍入归一化目标差距 `3.761086338897564e-15`，所有浮点回写检查通过。24 个完整候选模型仍为 15 个精确最优、9 个严格可行且满足预算。整批约 554.38 秒，最长请求 48.342 秒；期间其他验证并行，不能据此比较稳定性能。结果、依赖图、原始矩阵、候选和最终证据均留档，逐例结果在 `summary.json`。
+
+默认 GUI 编译检查也通过，确认 feature 传播保留 HiGHS 默认路径。本阶段只把求解器的构建依赖和建模接口拆开，没有宣称已经解决任意大模型、所有星球目标或精确分解的取消延迟。接下来继续扩展品质/插件塔组合及星球特产覆盖，并在固定输入上评估性能与退化路径。
+
+### 新的品质/插件塔困难用例（尚未解决）
+
+随后执行 30 组完整组合（五档品质 × 三档需求 × 有/无插件塔），在第 20 组失败：BASE 的史诗品质 `electronic-circuit = 1e-6`、自动最佳模块、8 个共享插件塔、16 个同品质速度模块。前 19 组的实际规划/回写完成；不能将这一轮报告为 30 组通过。目录 `local/lp-exp/native-free-quality-beacon-30` 保留全部捕获和失败证据。
+
+失败矩阵为 `lp-28848-1791870312995272300-76.json`，254,897 列、1,321 行，SHA-256 `937957E3D1D382E415776A28506E43D5CB55543BCB5749A3AABCA2574248C85C`。完整 Rust 浮点搜索 2,222 次换基、约 14.07 秒，得到 947 个基本结构变量、154 个非零值。认证入口选择了 154 列支持集，随后进行了 116 次精确换基，记录耗时 123.41 秒，仍未满足预算。应用的 120 秒等待门禁失败。
+
+停止见证严格原始可行、严格对偶可行，但归一化差距约 `1.1505968821603244e-11`，大于 `1e-12`；`accepted=false`。离线校验器独立复算后明确拒绝该模型的差距预算，日志 `witness-rejection.log`。从停止基重新生成并缩放对偶会得到零缩放和较弱下界，不能解决问题。
+
+将停止时的 176 维结构基作为固定输入继续精确优化，在另外约 121.24 秒、124 次换基后扩大到 252 维，仍只是严格原始可行，未证明精确最优；留档 `warm-refinement.json` 和日志。这条观察指向小支持集进入完整模型后的大量退化换基，不能通过放宽约束或差距预算规避。下一步对照完整浮点基的修复及更准确的浮点定价路径。
+
+保留原始 947 维浮点基直接精确修复的对照也未在预算内完成：20 次可行性修复约 125.67 秒，原始可行性仍未成立；留档 `full-basis-refinement.json`。因此没有将这条对照切入应用，没有增加 120 秒预算。后续优先测试更严格且可配置的浮点定价，以及减少原始候选精确违反的搜索路径；这些候选仍须通过同一个完整模型证书门禁。

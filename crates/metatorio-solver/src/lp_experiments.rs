@@ -5,12 +5,14 @@ use std::{
     fs, io,
     path::Path,
     sync::atomic::{AtomicU64, Ordering},
-    time::Instant,
 };
 
-use good_lp::VariableDefinition;
+use crate::lp_model::VariableDefinition;
+#[cfg(feature = "highs")]
 use highs::{RowProblem, Sense};
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "highs")]
+use std::time::Instant;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Column {
@@ -605,6 +607,7 @@ pub struct ReplayResult {
     pub loaded_nonzeros: i64,
 }
 
+#[cfg(feature = "highs")]
 pub fn replay(snapshot: &Snapshot, options: ReplayOptions) -> Result<ReplayResult, String> {
     snapshot.check()?;
     if !options.rhs_scale.is_finite() || options.rhs_scale <= 0.0 {
@@ -816,6 +819,7 @@ mod tests {
         );
     }
     #[test]
+    #[cfg(feature = "highs")]
     fn compensated_cancellation_and_scaled_finite_bound() {
         assert_eq!(
             dot([(1e16, 1.0), (1.0, 1.0), (-1e16, 1.0)].into_iter()),
@@ -907,6 +911,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "highs")]
     fn small_matrix_option_is_applied_before_loading() {
         let mut snapshot = model();
         snapshot.rows[0].terms[0].1 = 1e-10f64.to_bits();

@@ -1,9 +1,9 @@
-//! Experimental application bridge: HiGHS proposes support/basis, Rust verifies
-//! and repairs. A feasible result does not imply full-model optimality.
-use crate::{
-    lp_experiments::{ReplayOptions, Snapshot, replay},
-    lp_rational as exact,
-};
+//! Rust candidate search and exact certification for application models.
+//! Optional HiGHS support/basis experiments remain behind the highs feature.
+#[cfg(feature = "highs")]
+use crate::lp_experiments::{ReplayOptions, replay};
+use crate::{lp_experiments::Snapshot, lp_rational as exact};
+#[cfg(feature = "highs")]
 use num_traits::Zero;
 use std::time::Instant;
 
@@ -18,10 +18,10 @@ impl From<String> for Failure {
     }
 }
 impl Failure {
-    pub(crate) fn resolution_error(self) -> good_lp::ResolutionError {
+    pub(crate) fn resolution_error(self) -> crate::lp_model::ResolutionError {
         match self {
-            Self::Infeasible => good_lp::ResolutionError::Infeasible,
-            Self::Other(message) => good_lp::ResolutionError::Str(message),
+            Self::Infeasible => crate::lp_model::ResolutionError::Infeasible,
+            Self::Other(message) => crate::lp_model::ResolutionError::Str(message),
         }
     }
 }
@@ -206,6 +206,7 @@ fn validated_result(
     })
 }
 
+#[cfg(feature = "highs")]
 pub(crate) fn solve(
     snapshot: &Snapshot,
     captured: Option<&std::path::Path>,
@@ -328,6 +329,7 @@ pub(crate) fn solve(
     validated_result(snapshot, solution, certificate, pivots)
 }
 
+#[cfg(any(feature = "highs", test))]
 fn feasible_candidate(
     model: &exact::Model,
     basis: exact::Basis,

@@ -14,14 +14,19 @@ edition = "2024"
 name = "metatorio_app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+default = ["highs"]
+highs = ["metatorio-runtime/highs", "metatorio-shell/highs"]
+rust-lp = ["metatorio-runtime/rust-lp", "metatorio-shell/rust-lp"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
 # 业务逻辑全在 metatorio-shell（GUI 无关）；这里只留 Tauri 外壳真正用到的东西。
 metatorio-core = { path = "../../crates/metatorio-core" }
-metatorio-runtime = { path = "../../crates/metatorio-runtime" }
-metatorio-shell = { path = "../../crates/metatorio-shell" }
+metatorio-runtime = { path = "../../crates/metatorio-runtime", default-features = false }
+metatorio-shell = { path = "../../crates/metatorio-shell", default-features = false }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"

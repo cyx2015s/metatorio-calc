@@ -7,7 +7,7 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 mod import_location_tests;
-#[cfg(feature = "lp-experiments")]
+#[cfg(feature = "rust-lp")]
 mod lp_experiment_tests;
 
 const BASE: &str = "data-raw-dump.json";
@@ -107,7 +107,9 @@ async fn finish(mcp: &MetatorioMcp, ids: &Value) -> Value {
 }
 
 fn assert_certified(result: &metatorio_runtime::SolveResult) {
-    if std::env::var("METATORIO_LP_BACKEND").as_deref() == Ok("rust-certified") {
+    if (cfg!(feature = "rust-lp") && !cfg!(feature = "highs"))
+        || std::env::var("METATORIO_LP_BACKEND").as_deref() == Ok("rust-certified")
+    {
         assert!(result.report.exact_primal_verified);
         let gap = result
             .report

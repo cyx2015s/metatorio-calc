@@ -1,4 +1,4 @@
-//! 线性规划求解：生产默认后端 HiGHS，lp-experiments 可选择 Rust 实验后端。
+//! 连续 LP 的应用适配：可选 HiGHS 与 Rust 浮点搜索/精确认证后端。
 //!
 //! # 为什么删掉了 Ruiz 缩放 / clarabel / microlp
 //!
@@ -18,15 +18,16 @@
 use std::time::Instant;
 
 use crate::concept::AIndexMap;
-use good_lp::{
-    Constraint, Expression, IntoAffineExpression, ProblemVariables, ResolutionError, Solution,
-    SolverModel, Variable, VariableDefinition, solvers::highs::highs,
+use crate::lp_model::{
+    Constraint, Expression, ProblemVariables, ResolutionError, Variable, VariableDefinition,
 };
+#[cfg(feature = "highs")]
+use good_lp::{Solution, SolverModel, solvers::highs::highs};
 
 /// 一次求解的记录（随结果返回给上层）。
 ///
 /// 应用没有安装 logger（`log` 宏是空操作），所以关键决策要随结果留痕。
-/// HiGHS 单后端不做剪枝，这里只留「支撑集大小 + 原问题校验残差」。
+/// 保留原问题校验、支撑集大小，以及 Rust 后端的精确可行性和目标差距证据。
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct SolveReport {
     /// 参与求解的变量数。
@@ -46,7 +47,7 @@ pub struct SolveReport {
 /// 求解结果（原问题空间）。
 pub struct LpSolution {
     values: AIndexMap<Variable, f64>,
-    /// 上层按约束下标读原始对偶；HiGHS 不做外部缩放，恒为 1.0。
+    /// 上层按约束下标读取还原比例；两个后端都已还原原问题空间，恒为 1.0。
     pub dual_scales: Vec<f64>,
     pub cost: f64,
     /// 与 `dual_scales` 同理，恒为 1.0（保留给上层的取值还原路径）。
@@ -61,7 +62,7 @@ impl LpSolution {
         self.values.get(&var).copied().unwrap_or(0.0)
     }
 
-    /// HiGHS 直接在原问题上求解，没有 Ruiz 缩放，恒为 1.0。
+    /// 后端已经还原原问题空间的值，恒为 1.0。
     pub fn prim_scale(&self, _var: Variable) -> f64 {
         1.0
     }
@@ -76,10 +77,12 @@ struct ParsedRow {
 }
 
 /// 由解析后的 LP 构建出的 good_lp 问题。
+#[cfg(feature = "highs")]
 struct BuiltProblem {
-    variables: ProblemVariables,
-    objective: Expression,
-    constraints: Vec<Constraint>,
+    variables: good_lp::ProblemVariables,
+    vars_in_order: Vec<good_lp::Variable>,
+    objective: good_lp::Expression,
+    constraints: Vec<good_lp::Constraint>,
     /// 出现「不含任何变量、又不可能满足」的约束（例如目标物品根本不在任何流里，
     /// 目标约束退化成 0 == 1）→ 原问题不可行，不必交给后端。
     trivially_infeasible: bool,
@@ -89,19 +92,30 @@ struct BuiltProblem {
 ///
 /// `rhs_scale`：所有非零右端统一乘的系数（见 [`TARGET_CANONICAL_SCALE`]）。
 /// 只作用在约束右端；`trivially_infeasible` 的判定仍用原始 `row.rhs`。
+#[cfg(feature = "highs")]
 fn build_problem(
     defs: &[VariableDefinition],
     objective: &[(usize, f64)],
     rows: &[ParsedRow],
     rhs_scale: f64,
 ) -> BuiltProblem {
-    let mut variables = ProblemVariables::new();
-    let vars_in_order: Vec<Variable> = variables.add_all(defs.iter().cloned());
-    let fold = |terms: &[(usize, f64)]| -> Expression {
+    let mut variables = good_lp::ProblemVariables::new();
+    let vars_in_order: Vec<_> = defs
+        .iter()
+        .map(|d| {
+            variables.add(
+                good_lp::variable()
+                    .min(d.get_min())
+                    .max(d.get_max())
+                    .name(d.get_name()),
+            )
+        })
+        .collect();
+    let fold = |terms: &[(usize, f64)]| -> good_lp::Expression {
         terms
             .iter()
             .map(|(index, coeff)| vars_in_order[*index] * *coeff)
-            .fold(Expression::from(0.0), |acc, term| acc + term)
+            .fold(good_lp::Expression::from(0.0), |acc, term| acc + term)
     };
     let objective_expr = fold(objective);
     let mut constraints = Vec::new();
@@ -123,6 +137,7 @@ fn build_problem(
         constraints.push(constraint);
     }
     BuiltProblem {
+        vars_in_order,
         variables,
         objective: objective_expr,
         constraints,
@@ -142,6 +157,7 @@ fn build_problem(
 /// （simplex_scale_strategy=0）后两个都能解出；再不行就同时关 presolve。
 /// 这些选项只影响**数值路径**，不改变模型，解仍要过原问题校验才会被采用。
 #[derive(Clone, Copy, Debug)]
+#[cfg(feature = "highs")]
 enum SolverAttempt {
     /// 默认策略（presolve 与均衡缩放都由 HiGHS 自己选）。
     Default,
@@ -151,6 +167,7 @@ enum SolverAttempt {
     NoScalingNoPresolve,
 }
 
+#[cfg(feature = "highs")]
 const SOLVER_ATTEMPTS: &[SolverAttempt] = &[
     SolverAttempt::Default,
     SolverAttempt::NoScaling,
@@ -161,12 +178,13 @@ const SOLVER_ATTEMPTS: &[SolverAttempt] = &[
 ///
 /// 每次重试都重建模型：good_lp 的 variables/constraints 是按值消耗的，重建比克隆
 /// 直白，代价也远小于一次求解。Infeasible / Unbounded 是**定论**，不重试。
+#[cfg(feature = "highs")]
 fn solve_with_retry(
     defs: &[VariableDefinition],
     objective: &[(usize, f64)],
     rows: &[ParsedRow],
     rhs_scale: f64,
-) -> Result<impl good_lp::Solution, ResolutionError> {
+) -> Result<Vec<f64>, ResolutionError> {
     let mut last: Option<ResolutionError> = None;
     for (index, attempt) in SOLVER_ATTEMPTS.iter().enumerate() {
         let full = build_problem(defs, objective, rows, rhs_scale);
@@ -191,9 +209,19 @@ fn solve_with_retry(
                 if index > 0 {
                     log::warn!("求解在默认选项下失败，改用 {attempt:?} 后成功");
                 }
-                return Ok(solution);
+                return Ok(full
+                    .vars_in_order
+                    .iter()
+                    .map(|v| solution.value(*v))
+                    .collect());
             }
             Err(error) => {
+                let error = match error {
+                    good_lp::ResolutionError::Infeasible => ResolutionError::Infeasible,
+                    good_lp::ResolutionError::Unbounded => ResolutionError::Unbounded,
+                    good_lp::ResolutionError::Other(s) => ResolutionError::Other(s),
+                    good_lp::ResolutionError::Str(s) => ResolutionError::Str(s),
+                };
                 // 无可行解 / 无界是定论：换策略没有意义。
                 let retryable =
                     matches!(error, ResolutionError::Other(_) | ResolutionError::Str(_));
@@ -293,10 +321,9 @@ fn assemble(
     }
 }
 
-/// 求解一个线性规划：**HiGHS 一个后端**，直接给顶点解。
-///
-/// 失败处理：HiGHS 报 Infeasible/Unbounded 原样透出；解没过原问题校验则明确报
-/// 「不能视为求解完成」，而不是返回一个不满足原约束的「成功」。
+/// 使用所选后端求解连续 LP。默认构建选择 HiGHS；只有 rust-lp 的构建
+/// 默认选择 Rust 认证路径。计算未完成与已经证明的不可行分别返回错误，
+/// 所有返回值都须满足应用对原问题空间的校验。
 pub fn solve_lp(
     minimise: Expression,
     constraints: Vec<Constraint>,
@@ -306,12 +333,12 @@ pub fn solve_lp(
         minimise,
         constraints,
         variables,
-        #[cfg(feature = "lp-experiments")]
+        #[cfg(feature = "rust-lp")]
         Vec::new(),
     )
 }
 
-#[cfg(feature = "lp-experiments")]
+#[cfg(feature = "rust-lp")]
 pub(crate) fn solve_lp_named(
     minimise: Expression,
     constraints: Vec<Constraint>,
@@ -325,7 +352,7 @@ fn solve_lp_impl(
     minimise: Expression,
     constraints: Vec<Constraint>,
     variables: ProblemVariables,
-    #[cfg(feature = "lp-experiments")] labels: Vec<String>,
+    #[cfg(feature = "rust-lp")] labels: Vec<String>,
 ) -> Result<LpSolution, ResolutionError> {
     let defs: Vec<VariableDefinition> = variables
         .iter_variables_with_def()
@@ -335,7 +362,18 @@ fn solve_lp_impl(
         .iter_variables_with_def()
         .map(|(var, _)| var)
         .collect();
-    // good_lp 的 Variable::index() 是 crate 私有，这里按 iter 顺序自己建映射。
+    for expression in std::iter::once(&minimise).chain(constraints.iter().map(|c| c.expression())) {
+        if !expression.constant().is_finite()
+            || expression
+                .linear_coefficients()
+                .any(|(v, a)| v.0 >= defs.len() || !a.is_finite())
+        {
+            return Err(ResolutionError::Other(
+                "invalid LP expression: nonfinite value or undeclared variable",
+            ));
+        }
+    }
+    // Backend-independent variable numbering follows declaration order.
     let index_of: AIndexMap<Variable, usize> = variables
         .iter_variables_with_def()
         .enumerate()
@@ -366,11 +404,19 @@ fn solve_lp_impl(
     } else {
         1.0
     };
-    #[cfg(feature = "lp-experiments")]
+    #[cfg(feature = "rust-lp")]
+    let backend = std::env::var("METATORIO_LP_BACKEND").unwrap_or_else(|_| {
+        if cfg!(feature = "highs") {
+            "highs".into()
+        } else {
+            "rust-certified".into()
+        }
+    });
+    #[cfg(feature = "rust-lp")]
     if std::env::var_os("METATORIO_LP_CAPTURE_DIR").is_some()
         || matches!(
-            std::env::var("METATORIO_LP_BACKEND").as_deref(),
-            Ok("hybrid-exact" | "rust-exact" | "rust-verified" | "rust-certified")
+            backend.as_str(),
+            "hybrid-exact" | "rust-exact" | "rust-verified" | "rust-certified"
         )
     {
         use crate::lp_experiments::{Row, Snapshot, capture, column};
@@ -401,11 +447,10 @@ fn solve_lp_impl(
         };
         let captured = capture(&snapshot);
         if matches!(
-            std::env::var("METATORIO_LP_BACKEND").as_deref(),
-            Ok("hybrid-exact" | "rust-exact" | "rust-verified" | "rust-certified")
+            backend.as_str(),
+            "hybrid-exact" | "rust-exact" | "rust-verified" | "rust-certified"
         ) {
             let start = Instant::now();
-            let backend = std::env::var("METATORIO_LP_BACKEND").unwrap_or_default();
             let result = if backend == "rust-exact" {
                 crate::lp_hybrid::solve_rust(&snapshot)
                     .map_err(crate::lp_hybrid::Failure::resolution_error)
@@ -416,11 +461,21 @@ fn solve_lp_impl(
                 crate::lp_hybrid::solve_rust_certified(&snapshot, captured.as_deref())
                     .map_err(crate::lp_hybrid::Failure::resolution_error)
             } else {
-                crate::lp_hybrid::solve(&snapshot, captured.as_deref())
-                    .map_err(ResolutionError::Str)
+                #[cfg(feature = "highs")]
+                {
+                    crate::lp_hybrid::solve(&snapshot, captured.as_deref())
+                        .map_err(ResolutionError::Str)
+                }
+                #[cfg(not(feature = "highs"))]
+                {
+                    Err(ResolutionError::Other(
+                        "hybrid-exact requires the highs feature",
+                    ))
+                }
             }?;
             let used = result.values.iter().filter(|x| **x != 0.0).count();
             let (violation, cost) = evaluate_solution(&objective, &rows, &result.values);
+            let cost = cost + minimise.constant();
             if violation > ACCEPT_VIOLATION {
                 return Err(ResolutionError::Str(format!(
                     "Rust 精确解转回浮点后未通过应用校验：{violation:.3e}"
@@ -454,64 +509,86 @@ fn solve_lp_impl(
             ));
         }
     }
-    let full = build_problem(&defs, &objective, &rows, rhs_scale);
-    if full.trivially_infeasible {
-        return Err(ResolutionError::Infeasible);
+    #[cfg(not(feature = "highs"))]
+    {
+        Err(ResolutionError::Other(
+            "requested LP backend is unavailable; use rust-certified",
+        ))
     }
-    if defs.is_empty() {
-        return Ok(assemble(
-            Vec::new(),
-            vec![1.0; rows.len()],
-            0.0,
-            SolveReport::default(),
-            &orig_vars,
-        ));
-    }
+    #[cfg(feature = "highs")]
+    {
+        let full = build_problem(&defs, &objective, &rows, rhs_scale);
+        if full.trivially_infeasible {
+            return Err(ResolutionError::Infeasible);
+        }
+        if defs.is_empty() {
+            return Ok(assemble(
+                Vec::new(),
+                vec![1.0; rows.len()],
+                minimise.constant(),
+                SolveReport::default(),
+                &orig_vars,
+            ));
+        }
 
-    let instant = Instant::now();
-    let solution = solve_with_retry(&defs, &objective, &rows, rhs_scale)?;
-    // 求解在放大后的空间进行，这里除回原问题量级（rhs_scale = 1.0 时是无操作）。
-    let values: Vec<f64> = orig_vars
-        .iter()
-        .map(|var| solution.value(*var) / rhs_scale)
-        .collect();
-    if values.iter().any(|value| !value.is_finite()) {
-        return Err(ResolutionError::Other("HiGHS 返回非有限解"));
+        let instant = Instant::now();
+        let solution = solve_with_retry(&defs, &objective, &rows, rhs_scale)?;
+        // 求解在放大后的空间进行，这里除回原问题量级（rhs_scale = 1.0 时是无操作）。
+        let values: Vec<f64> = solution.iter().map(|value| value / rhs_scale).collect();
+        if values.iter().any(|value| !value.is_finite()) {
+            return Err(ResolutionError::Other("HiGHS 返回非有限解"));
+        }
+        // **原问题校验**：HiGHS 有 presolve + postsolve，解未必在原空间完全满足约束。
+        let (violation, cost) = evaluate_solution(&objective, &rows, &values);
+        let cost = cost + minimise.constant();
+        if violation > ACCEPT_VIOLATION {
+            return Err(ResolutionError::Str(format!(
+                "HiGHS 解未通过原问题校验（最大相对违反 {violation:.3e}）：不能视为求解完成"
+            )));
+        }
+        let variables_used = values.iter().filter(|value| value.abs() > 0.0).count();
+        log::info!(
+            "HiGHS 求解完成：{} 个变量，支撑集 {} 个，目标右端放大 {:.3e}×，耗时 {:.2?}",
+            defs.len(),
+            variables_used,
+            rhs_scale,
+            instant.elapsed()
+        );
+        Ok(assemble(
+            values,
+            vec![1.0; rows.len()],
+            cost,
+            SolveReport {
+                variables_before: defs.len(),
+                variables_after: variables_used,
+                primal_violation: violation,
+                ..SolveReport::default()
+            },
+            &orig_vars,
+        ))
     }
-    // **原问题校验**：HiGHS 有 presolve + postsolve，解未必在原空间完全满足约束。
-    let (violation, cost) = evaluate_solution(&objective, &rows, &values);
-    if violation > ACCEPT_VIOLATION {
-        return Err(ResolutionError::Str(format!(
-            "HiGHS 解未通过原问题校验（最大相对违反 {violation:.3e}）：不能视为求解完成"
-        )));
-    }
-    let variables_used = values.iter().filter(|value| value.abs() > 0.0).count();
-    log::info!(
-        "HiGHS 求解完成：{} 个变量，支撑集 {} 个，目标右端放大 {:.3e}×，耗时 {:.2?}",
-        defs.len(),
-        variables_used,
-        rhs_scale,
-        instant.elapsed()
-    );
-    Ok(assemble(
-        values,
-        vec![1.0; rows.len()],
-        cost,
-        SolveReport {
-            variables_before: defs.len(),
-            variables_after: variables_used,
-            primal_violation: violation,
-            ..SolveReport::default()
-        },
-        &orig_vars,
-    ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use good_lp::*;
+    use crate::lp_model::*;
 
+    #[test]
+    fn objective_constant_and_invalid_expression_are_preserved() {
+        let mut vars = ProblemVariables::new();
+        let x = vars.add(variable().min(0));
+        let solution = solve_lp(2.0 * x + 7.0, vec![x.into_expression().eq(3.0)], vars).unwrap();
+        assert_eq!(solution.cost, 13.0);
+        assert!(matches!(
+            solve_lp(Expression::from(f64::NAN), vec![], ProblemVariables::new()),
+            Err(ResolutionError::Other(_))
+        ));
+        assert!(matches!(
+            solve_lp(x.into_expression(), vec![], ProblemVariables::new()),
+            Err(ResolutionError::Other(_))
+        ));
+    }
     /// 退化最优面（50 个等效列，和为 1）应被压到**一个**顶点列：单纯形直接给
     /// 基本解（支撑集 = 1），不再需要「剪枝比例扫描 + 第二后端」。
     #[test]

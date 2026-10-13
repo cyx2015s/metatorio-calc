@@ -1,8 +1,8 @@
-use good_lp::{IntoAffineExpression, variable};
+use crate::lp_model::{IntoAffineExpression, variable};
 
 use crate::concept::{AIndexMap, AIndexSet, Flow, ItemIdent};
 use crate::lp::SolveReport;
-#[cfg(not(feature = "lp-experiments"))]
+#[cfg(not(feature = "rust-lp"))]
 use crate::lp::solve_lp;
 use core::f64;
 
@@ -399,7 +399,7 @@ where
             instant.elapsed()
         );
 
-        let mut problem_variables = good_lp::ProblemVariables::new();
+        let mut problem_variables = crate::lp_model::ProblemVariables::new();
         let mut item_in_targets = AIndexSet::default();
         for target in &self.target {
             for (i_id, _coef) in target.coefficients.iter() {
@@ -414,7 +414,7 @@ where
         let mut sink_vars = AIndexMap::default();
         for f_id in self.flows.keys() {
             let definition = variable().min(0);
-            #[cfg(feature = "lp-experiments")]
+            #[cfg(feature = "rust-lp")]
             let definition = definition.name(format!("flow:{f_id:?}"));
             let var = problem_variables.add(definition);
             flow_vars.insert(f_id.clone(), var);
@@ -446,31 +446,31 @@ where
             for (item_id, &amount) in &flow_spec.coefficients {
                 *item_balances
                     .entry(item_id.clone())
-                    .or_insert(good_lp::Expression::from(0.0)) += amount * *var;
+                    .or_insert(crate::lp_model::Expression::from(0.0)) += amount * *var;
             }
         }
         log::info!("求解器：一共有 {} 个物品需要平衡", item_balances.len(),);
 
         for (item_id, _) in &self.sources {
             let definition = variable().min(0);
-            #[cfg(feature = "lp-experiments")]
+            #[cfg(feature = "rust-lp")]
             let definition = definition.name(format!("source:{item_id:?}"));
             let var = problem_variables.add(definition);
             source_vars.insert(item_id.clone(), var);
             let entry = item_balances
                 .entry(item_id.clone())
-                .or_insert(good_lp::Expression::from(0.0));
+                .or_insert(crate::lp_model::Expression::from(0.0));
             *entry += 1.0 * var;
         }
         for (item_id, _) in &self.sinks {
             let definition = variable().min(0);
-            #[cfg(feature = "lp-experiments")]
+            #[cfg(feature = "rust-lp")]
             let definition = definition.name(format!("sink:{item_id:?}"));
             let var = problem_variables.add(definition);
             sink_vars.insert(item_id.clone(), var);
             let entry = item_balances
                 .entry(item_id.clone())
-                .or_insert(good_lp::Expression::from(0.0));
+                .or_insert(crate::lp_model::Expression::from(0.0));
             *entry -= 1.0 * var;
         }
         let mut no_providers: AIndexSet<I> = item_balances.keys().cloned().collect();
@@ -493,7 +493,7 @@ where
         }
         let mut constraints = Vec::new();
         let mut item_to_constraint = AIndexMap::default();
-        let mut add_constraint = |item_id: &I, constraint: good_lp::Constraint| {
+        let mut add_constraint = |item_id: &I, constraint: crate::lp_model::Constraint| {
             constraints.push(constraint);
             item_to_constraint.insert(item_id.clone(), constraints.len() - 1);
         };
@@ -536,7 +536,7 @@ where
         }
         // 添加求解目标的限制
 
-        let mut target_exprs = vec![good_lp::Expression::from(0.0); self.target.len()];
+        let mut target_exprs = vec![crate::lp_model::Expression::from(0.0); self.target.len()];
         for item in &item_in_targets {
             for (target_idx, target) in self.target.iter().enumerate() {
                 if let Some(&coef) = target.coefficients.get(item) {
@@ -548,7 +548,7 @@ where
                         * item_balances
                             .get(item)
                             .cloned()
-                            .unwrap_or(good_lp::Expression::from(0.0));
+                            .unwrap_or(crate::lp_model::Expression::from(0.0));
                 }
             }
         }
@@ -557,7 +557,7 @@ where
             let constant = target.constant;
             constraints.push(target_expr.clone().eq(constant));
         }
-        let mut optimization_expr = good_lp::Expression::from(0.0);
+        let mut optimization_expr = crate::lp_model::Expression::from(0.0);
         for (flow_id, flow_spec) in &self.flows {
             let var = flow_vars.get(flow_id).unwrap();
             optimization_expr += flow_spec.cost * *var;
@@ -581,10 +581,10 @@ where
 
             log::debug!("求解器：对应流变量: {:?}", flow_vars);
         }
-        // 求解策略见 solve_lp：HiGHS 单后端，直接给顶点解。
-        #[cfg(not(feature = "lp-experiments"))]
+        // 求解与原问题校验交给 solve_lp 的所选后端。
+        #[cfg(not(feature = "rust-lp"))]
         let solution = solve_lp(optimization_expr.clone(), constraints, problem_variables);
-        #[cfg(feature = "lp-experiments")]
+        #[cfg(feature = "rust-lp")]
         let solution = {
             let mut labels: Vec<_> = (0..constraints.len()).map(|i| format!("r{i}")).collect();
             for (item, index) in &item_to_constraint {
@@ -643,17 +643,21 @@ where
             Err(err) => {
                 log::error!("求解器：求解失败，错误信息: {:?}", err);
                 let err_string = match err {
-                    good_lp::ResolutionError::Unbounded => "求解无界（目标可无限增大）".to_string(),
-                    good_lp::ResolutionError::Infeasible => "无可行解（目标不可达）".to_string(),
+                    crate::lp_model::ResolutionError::Unbounded => {
+                        "求解无界（目标可无限增大）".to_string()
+                    }
+                    crate::lp_model::ResolutionError::Infeasible => {
+                        "无可行解（目标不可达）".to_string()
+                    }
                     // 内部数值失败**不等于**无可行解：把二者区分开，界面/agent
                     // 才不会把求解器算不动说成「配方不可解」。
                     // 带上 good_lp/后端给的原因（ModelError / PresolveError /
                     // SolveError / NoSolutionFound …）：否则排查时只看到「内部错误」，
                     // 不知道是模型构造、预求解还是求解阶段出的问题。
-                    good_lp::ResolutionError::Other(reason) => {
+                    crate::lp_model::ResolutionError::Other(reason) => {
                         format!("求解器内部错误（不代表问题无可行解，可重试）：{reason}")
                     }
-                    good_lp::ResolutionError::Str(s) => {
+                    crate::lp_model::ResolutionError::Str(s) => {
                         format!("求解器内部错误（不代表问题无可行解）：{s}")
                     }
                 };
