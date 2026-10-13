@@ -2539,6 +2539,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "metatorio-lp"
+version = "0.1.0"
+dependencies = [
+ "num-bigint",
+ "num-integer",
+ "num-rational",
+ "num-traits",
+ "serde",
+]
+
+[[package]]
 name = "metatorio-runtime"
 version = "0.1.0"
 dependencies = [
@@ -2582,8 +2593,7 @@ dependencies = [
  "highs-sys",
  "indexmap 2.14.0",
  "log",
- "num-bigint",
- "num-integer",
+ "metatorio-lp",
  "num-rational",
  "num-traits",
  "rayon",

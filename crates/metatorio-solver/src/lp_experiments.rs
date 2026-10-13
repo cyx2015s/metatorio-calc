@@ -119,6 +119,39 @@ fn dot(terms: impl Iterator<Item = (f64, f64)>) -> f64 {
 }
 
 impl Snapshot {
+    pub fn exact_model(&self) -> crate::lp_rational::Model {
+        use crate::lp_rational::{Column, Model, Row};
+        let mut costs = vec![0.0; self.columns.len()];
+        for (i, bits) in &self.objective {
+            costs[*i] += f64::from_bits(*bits);
+        }
+        Model {
+            columns: self
+                .columns
+                .iter()
+                .zip(costs)
+                .map(|(c, cost)| Column {
+                    lower: f64::from_bits(c.lower_bits),
+                    upper: f64::from_bits(c.upper_bits),
+                    cost,
+                })
+                .collect(),
+            rows: self
+                .rows
+                .iter()
+                .map(|r| Row {
+                    equality: r.equality,
+                    rhs: f64::from_bits(r.rhs_bits),
+                    terms: r
+                        .terms
+                        .iter()
+                        .map(|(i, a)| (*i, f64::from_bits(*a)))
+                        .collect(),
+                })
+                .collect(),
+            offset: f64::from_bits(self.objective_offset_bits),
+        }
+    }
     /// Freeze zero columns outside the current support. Include every column of
     /// a violated row so missing producers can enter. No magnitude cutoff is
     /// used. A restricted optimum is not evidence of global optimality.

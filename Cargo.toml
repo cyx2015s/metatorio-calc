@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/metatorio-lp",
     "crates/metatorio-solver",
     "crates/metatorio-data",
     "crates/metatorio-data-codegen", 

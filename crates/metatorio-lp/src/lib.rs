@@ -3,10 +3,11 @@
 //! A basis is a hint, not a proof; verification always checks the original LP.
 use num_bigint::BigInt;
 use num_integer::Integer;
-use num_rational::BigRational as Rational;
+pub use num_rational::BigRational as Rational;
 use num_traits::{Signed, ToPrimitive, Zero};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+mod basis;
 
 #[derive(Clone, Debug)]
 pub struct Column {
@@ -57,6 +58,17 @@ pub struct Optimization {
 pub struct PivotProgress {
     pub pivots: usize,
     pub basis_dimension: usize,
+}
+#[derive(Debug, Serialize)]
+pub struct InfeasibilityCertificate {
+    pub margin: String,
+    pub row_duals: Vec<(usize, String)>,
+}
+#[derive(Debug)]
+pub struct TwoPhaseResult {
+    pub phase1: Optimization,
+    pub phase2: Option<Optimization>,
+    pub infeasibility: Option<InfeasibilityCertificate>,
 }
 #[derive(Debug, Serialize)]
 pub struct Certificate {
@@ -157,6 +169,9 @@ fn solve(mut matrix: Vec<Vec<Rational>>, mut rhs: Vec<Rational>) -> Result<Vec<R
 
 impl Model {
     fn reduced_costs(&self, solution: &ExactSolution) -> Pricing {
+        self.pricing(solution, false)
+    }
+    fn pricing(&self, solution: &ExactSolution, zero_cost: bool) -> Pricing {
         // All binary inputs have power-of-two denominators. Share one exact
         // denominator across prices, avoiding a costly GCD for every term.
         let power = self
@@ -181,7 +196,13 @@ impl Model {
         let mut reduced: Vec<_> = self
             .columns
             .iter()
-            .map(|c| binary_integer(c.cost, power) * &denominator)
+            .map(|c| {
+                if zero_cost {
+                    BigInt::zero()
+                } else {
+                    binary_integer(c.cost, power) * &denominator
+                }
+            })
             .collect();
         for (row, y) in self.rows.iter().zip(&solution.row_duals) {
             if y.is_zero() {
@@ -196,6 +217,153 @@ impl Model {
             numerators: reduced,
             denominator: denominator << power,
         }
+    }
+
+    /// An exact Farkas alternative for x>=0, Ax<=b and equality rows:
+    /// y<=0 on inequalities, A^T y<=0, and b^T y>0 contradict feasibility.
+    /// Original objective coefficients do not participate in this proof.
+    pub fn verify_infeasibility(
+        &self,
+        row_duals: &[Rational],
+    ) -> Result<Option<InfeasibilityCertificate>, String> {
+        self.check()?;
+        if row_duals.len() != self.rows.len()
+            || self
+                .columns
+                .iter()
+                .any(|c| c.lower != 0.0 || c.upper != f64::INFINITY)
+        {
+            return Err(
+                "Farkas verifier requires matching rows and nonnegative unbounded-above columns"
+                    .into(),
+            );
+        }
+        let dual = ExactSolution {
+            values: vec![Rational::zero(); self.columns.len()],
+            row_duals: row_duals.to_vec(),
+            basis_dimension: 0,
+        };
+        let prices = self.pricing(&dual, true);
+        if prices.numerators.iter().any(|z| z.is_negative()) {
+            return Ok(None);
+        }
+        let mut margin = Rational::zero();
+        for (row, y) in self.rows.iter().zip(row_duals) {
+            if !row.equality && y.is_positive() {
+                return Ok(None);
+            }
+            margin += rational(row.rhs)? * y;
+        }
+        if !margin.is_positive() {
+            return Ok(None);
+        }
+        Ok(Some(InfeasibilityCertificate {
+            margin: margin.to_string(),
+            row_duals: row_duals
+                .iter()
+                .enumerate()
+                .filter(|(_, y)| !y.is_zero())
+                .map(|(i, y)| (i, y.to_string()))
+                .collect(),
+        }))
+    }
+
+    pub fn solve(&self, max_pivots: usize) -> Result<TwoPhaseResult, String> {
+        self.solve_with_observer(max_pivots, |_, _| true)
+    }
+    /// Exact two-phase simplex from zero, with no floating solver or basis hint.
+    /// The observer receives true during Phase I; limits leave status undetermined.
+    pub fn solve_with_observer(
+        &self,
+        max_pivots: usize,
+        mut observer: impl FnMut(bool, PivotProgress) -> bool,
+    ) -> Result<TwoPhaseResult, String> {
+        self.check()?;
+        if self
+            .columns
+            .iter()
+            .any(|c| c.lower != 0.0 || c.upper != f64::INFINITY)
+        {
+            return Err(
+                "two-phase prototype requires nonnegative columns without upper bounds".into(),
+            );
+        }
+        let count = self.columns.len();
+        let mut auxiliary = self.clone();
+        auxiliary.offset = 0.0;
+        for column in &mut auxiliary.columns {
+            column.cost = 0.0;
+        }
+        let mut basis = Basis {
+            columns: vec![BasisStatus::Lower; count],
+            rows: vec![BasisStatus::Basic; self.rows.len()],
+        };
+        let mut artificial = Vec::new();
+        for (i, row) in auxiliary.rows.iter_mut().enumerate() {
+            if (row.equality && row.rhs != 0.0) || row.rhs < 0.0 {
+                let column = auxiliary.columns.len();
+                auxiliary.columns.push(Column {
+                    lower: 0.0,
+                    upper: f64::INFINITY,
+                    cost: 1.0,
+                });
+                row.terms
+                    .push((column, if row.rhs < 0.0 { -1.0 } else { 1.0 }));
+                basis.columns.push(BasisStatus::Basic);
+                basis.rows[i] = BasisStatus::Upper;
+                artificial.push((column, i));
+            }
+        }
+        let phase1 = auxiliary
+            .optimize_from_basis_with_observer(basis, max_pivots, |p| observer(true, p))?;
+        if phase1.stop_reason.is_some() {
+            return Ok(TwoPhaseResult {
+                phase1,
+                phase2: None,
+                infeasibility: None,
+            });
+        }
+        if phase1.unbounded_ray.is_some() {
+            return Err("nonnegative artificial objective cannot be unbounded below".into());
+        }
+        let objective: Rational = artificial
+            .iter()
+            .map(|(i, _)| phase1.solution.values[*i].clone())
+            .sum();
+        if objective.is_positive() {
+            let proof = self
+                .verify_infeasibility(&phase1.solution.row_duals)?
+                .ok_or("auxiliary optimum has no valid original Farkas certificate")?;
+            return Ok(TwoPhaseResult {
+                phase1,
+                phase2: None,
+                infeasibility: Some(proof),
+            });
+        }
+        if !objective.is_zero() {
+            return Err("invalid negative artificial objective".into());
+        }
+        let mut basis = phase1.basis.clone();
+        // Each artificial column has exactly one signed unit entry. If basic,
+        // deleting it and its corresponding active row leaves a nonsingular
+        // cofactor. Promote that row slack (fixed at zero for equality rows).
+        for (column, row) in artificial {
+            if basis.columns[column] == BasisStatus::Basic {
+                if basis.rows[row] == BasisStatus::Basic {
+                    return Err("basic artificial column has no active original row".into());
+                }
+                basis.rows[row] = BasisStatus::Basic;
+            }
+        }
+        basis.columns.truncate(count);
+        let remaining = max_pivots.saturating_sub(phase1.pivots);
+        let phase2 =
+            self.optimize_from_basis_with_observer(basis, remaining, |p| observer(false, p))?;
+        Ok(TwoPhaseResult {
+            phase1,
+            phase2: Some(phase2),
+            infeasibility: None,
+        })
     }
 
     /// Exact primal simplex for the application's nonnegative, unbounded-above
@@ -226,6 +394,8 @@ impl Model {
                 "exact simplex prototype requires nonnegative columns without upper bounds".into(),
             );
         }
+        self.reconstruct(&basis)?;
+        let mut system = basis::System::new(self, &basis)?;
         let mut seen = HashSet::new();
         let mut bland = false;
         for iteration in 0..=max_pivots {
@@ -242,7 +412,7 @@ impl Model {
                 bland = true;
                 seen.clear();
             }
-            let solution = self.reconstruct(&basis)?;
+            let solution = system.reconstruct(self)?;
             let certificate = self.certify(&solution)?;
             if !certificate.primal_feasible {
                 return Err(
@@ -309,38 +479,8 @@ impl Model {
                     stop_reason: Some("exact simplex pivot limit reached".into()),
                 });
             }
-            let columns: Vec<_> = basis
-                .columns
-                .iter()
-                .enumerate()
-                .filter_map(|(i, s)| (*s == BasisStatus::Basic).then_some(i))
-                .collect();
-            let rows: Vec<_> = basis
-                .rows
-                .iter()
-                .enumerate()
-                .filter_map(|(i, s)| (*s != BasisStatus::Basic).then_some(i))
-                .collect();
-            let mut positions = vec![None; self.columns.len()];
-            for (j, i) in columns.iter().enumerate() {
-                positions[*i] = Some(j);
-            }
-            let mut matrix = vec![vec![Rational::zero(); columns.len()]; rows.len()];
-            let mut rhs = vec![Rational::zero(); rows.len()];
-            for (j, i) in rows.iter().enumerate() {
-                for (column, a) in &self.rows[*i].terms {
-                    if let Some(k) = positions[*column] {
-                        matrix[j][k] += rational(*a)?;
-                    }
-                    if *column == entering {
-                        rhs[j] -= rational(*a)?;
-                    }
-                }
-                if entering == self.columns.len() + i {
-                    rhs[j] -= rational(1.0)?;
-                }
-            }
-            let basic_direction = solve(matrix, rhs)?;
+            let columns = system.columns.clone();
+            let basic_direction = system.direction(self, entering)?;
             let mut direction = vec![Rational::zero(); self.columns.len()];
             for (i, d) in columns.iter().zip(&basic_direction) {
                 direction[*i] = d.clone();
@@ -432,6 +572,7 @@ impl Model {
             } else {
                 basis.rows[entering - self.columns.len()] = BasisStatus::Basic;
             }
+            system.update(self, &basis, entering, leaving)?;
         }
         unreachable!()
     }
@@ -923,5 +1064,120 @@ mod tests {
         let resumed = model.optimize_from_basis(stopped.basis, 10).unwrap();
         assert!(resumed.stop_reason.is_none());
         assert!(model.certify(&resumed.solution).unwrap().optimal);
+    }
+    #[test]
+    fn phase_one_starts_from_zero_and_removes_redundant_artificials() {
+        let model = Model {
+            columns: vec![column(1.0)],
+            rows: vec![
+                Row {
+                    equality: true,
+                    rhs: 1.0,
+                    terms: vec![(0, 1.0)],
+                },
+                Row {
+                    equality: true,
+                    rhs: 2.0,
+                    terms: vec![(0, 2.0)],
+                },
+                Row {
+                    equality: true,
+                    rhs: 0.0,
+                    terms: vec![],
+                },
+            ],
+            offset: 0.0,
+        };
+        let result = model.solve(30).unwrap();
+        assert!(result.infeasibility.is_none());
+        let optimum = result.phase2.unwrap();
+        assert_eq!(optimum.basis.columns.len(), 1);
+        assert!(model.certify(&optimum.solution).unwrap().optimal);
+        assert_eq!(optimum.solution.values[0].to_string(), "1");
+    }
+    #[test]
+    fn phase_one_proves_inconsistent_equalities_and_impossible_empty_row() {
+        let model = Model {
+            columns: vec![column(100.0)],
+            rows: vec![
+                Row {
+                    equality: true,
+                    rhs: 1.0,
+                    terms: vec![(0, 1.0)],
+                },
+                Row {
+                    equality: true,
+                    rhs: 2.0,
+                    terms: vec![(0, 1.0)],
+                },
+            ],
+            offset: 7.0,
+        };
+        let result = model.solve(30).unwrap();
+        assert!(result.phase2.is_none());
+        assert!(result.infeasibility.is_some());
+        assert!(
+            model
+                .verify_infeasibility(&result.phase1.solution.row_duals)
+                .unwrap()
+                .is_some()
+        );
+        let feasible = Model {
+            rows: vec![model.rows[0].clone(), model.rows[0].clone()],
+            ..model.clone()
+        };
+        assert!(
+            feasible
+                .verify_infeasibility(&result.phase1.solution.row_duals)
+                .unwrap()
+                .is_none()
+        );
+        let empty = Model {
+            columns: vec![],
+            rows: vec![Row {
+                equality: false,
+                rhs: -1.0,
+                terms: vec![],
+            }],
+            offset: 0.0,
+        };
+        assert!(empty.solve(10).unwrap().infeasibility.is_some());
+    }
+    #[test]
+    fn phase_one_handles_negative_rhs_and_preserves_nonterminal_limits() {
+        let model = Model {
+            columns: vec![column(2.0)],
+            rows: vec![Row {
+                equality: false,
+                rhs: -1.0,
+                terms: vec![(0, -1.0)],
+            }],
+            offset: 0.0,
+        };
+        let stopped = model.solve(0).unwrap();
+        assert!(stopped.phase1.stop_reason.is_some());
+        assert!(stopped.phase2.is_none());
+        assert!(stopped.infeasibility.is_none());
+        let result = model.solve(30).unwrap();
+        assert!(
+            model
+                .certify(&result.phase2.unwrap().solution)
+                .unwrap()
+                .optimal
+        );
+        let unbounded = Model {
+            columns: vec![column(-1.0)],
+            rows: vec![],
+            offset: 0.0,
+        };
+        assert!(
+            unbounded
+                .solve(10)
+                .unwrap()
+                .phase2
+                .unwrap()
+                .unbounded_ray
+                .is_some()
+        );
     }
 }
