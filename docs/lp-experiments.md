@@ -356,3 +356,45 @@ cargo build --release -p metatorio-solver --features lp-experiments --example lp
 ./target/release/examples/lp_rust_support.exe $snapshot $floatingCandidate $supportResult 120
 ./target/release/examples/lp_cross_verify.exe $snapshot $fullPrimalBasis $fullDualBasis $certificate scale
 ```
+
+## 第九阶段：统一 Rust 认证入口与完整实际回写门禁
+
+`metatorio-lp::Model::certify_candidate_with_observer` 将前一阶段分散的步骤合并：完整候选精确重构、对偶下界缩放、必要时以非零支持重建小基并精确恢复可行性、完整模型独立校验；预算仍不满足时才继续完整模型精确优化。受限模型失败不会直接成为原模型不可行结论。`CertifiedResult` 保留原始解、独立对偶、原始基、精确证书、换基统计及未完成原因。
+
+新实验后端 `rust-certified` 采用有理数预算 `1/10^12`，比较 `(原始目标-对偶目标)/max(1,abs(原始目标))`。所有原始约束和变量边界仍严格满足；这个预算只控制目标差距，不是约束容差。现有 `rust-verified` 继续要求差距精确为零。`certified_relative_gap` 作为向上舍入后的报告字段加入求解器和运行时诊断，接受判断使用有理数原值；`exact_optimality_verified` 只在零差距时成立。运行时字段仍描述返回工厂的模型，完整候选规划模型另存证书。
+
+同一统一入口第一次连续通过全部真实请求：`local/lp-exp/rust-certified-pipeline-24` 中 **24 done / 0 failed**，全部实际规划、回写及保存工厂重解通过。最长请求 39.436 秒；请求 2/10/18 分别为 32.668/21.253/33.991 秒。总测试约 431.16 秒。期间有编译和检查任务并行，时间仅为本机单次观测，未改变应用 120 秒超时。逐例摘要在该目录 `summary.json`。
+
+每次 LP 在 `rust-candidates/` 留档原始 Rust 浮点候选，在 `rust-certificates/` 留档精确原始向量、精确行对偶、原始基、证书和预算。`lp_verify_witnesses` 不执行搜索、不依赖候选基或保存的成功标志，重新读取每个原始 LP 和两个有理数向量，检查全部原始约束、弱对偶下界、预算及浮点回写值，并核对保存的证书与实际复算结果。
+
+离线复核 **96/96 LP** 通过，覆盖完整候选规划及三次回写/重解：66 个差距精确为零，另 30 个具有严格上下界，最大向上舍入归一化差距为 `3.761086338897564e-15`。单看 24 个完整候选模型，其中 15 个精确最优、9 个在上述预算内。不要将返回工厂最优性与完整候选模型混用。原始结果在 `witness-verification.json`。
+
+额外负向检验复制一份实际证据，只把等式中一个精确变量增加 `2^-200`，离线校验器仍明确拒绝；原证据没有修改。对照目录 `local/lp-exp/witness-tiny-corruption`。这说明接受门禁没有把浮点舍入后“看不见”的残差当作严格满足。
+
+核心新增测试覆盖精确预算边界、非二进制差距向上舍入、有限正差距不冒充零差距、受限模型不可行后仍从完整模型恢复可行性。核心 33 项测试、`rust-certified` 下求解器 32 项测试及 shell/runtime/solver 的 Clippy 检查通过。后续通用真实资产回归还会检查正常求解和保存工厂重解均具有严格原始可行性及合格的差距上界。
+
+```powershell
+# 严格门禁现在自动运行离线见证校验器。
+./scripts/lp-experiment.ps1 -Backend rust-certified -PipelineOnly -RequireSolved
+
+# 单独复核既有证据，不重新搜索或调用原生求解器。
+cargo run --release -p metatorio-solver --features lp-experiments --example lp_verify_witnesses -- local/lp-exp/rust-certified-pipeline-24
+```
+
+首次整批运行之后补齐了支持集浮点搜索换基计数，因此该首次日志中的 `pivots` 为完整浮点搜索加精确换基，不含支持集浮点搜索；此后总计数包含三部分。数学接受条件及证据不受这项诊断修正影响。默认生产后端尚未切换，原生依赖也尚未从应用构建图中移除；继续扩大跨资产、星球、品质和数量级覆盖，再推进正式后端配置与原生依赖隔离。
+
+### 扩展回归暴露的问题及修复
+
+真实资产组先暴露了不可行状态传播遗漏：`legendary_machines_do_not_supply_missing_product_quality` 的完整模型已经产生 Farkas 证明，组合入口却丢弃了这份证明，导致应用得到内部未完成错误。现在 `CertifiedResult.infeasibility` 保留完整原模型证明，三个 Rust 桥接入口通过类型化错误将其映射为不可行。受限支持集的不可行仍不能作为完整模型结论；无效输入及计算未完成保持独立错误。
+
+数量级回归随后在 MODDED 的 `plastic-bar = 1e9` 失败，原浮点候选产生精确奇异基。此前 RHS 统一缩放只会放大小需求，现在改为现有二次幂缩放函数，对大、小 RHS 都归一化。新增核心测试对 `2^-120`、`1`、`2^120` 的同一齐次模型检查搜索基及换基次数一致，并逐个验证精确最优；新增真实大产量塑料测试纳入常规资产组。
+
+修复前后实时生成的模型存在行系数差异，因此额外对修复前保存的原始文件重新搜索。固定输入 SHA-256 为 `170BB6020952B62AE4A2D35C545653095EB40E7DA4447ADF73F974ED4FA56561`，新算法 865 次浮点换基后得到完整精确最优证书；结果为 `local/lp-exp/rust-scale-singular-frozen-fixed.json`。该固定输入回放没有放宽约束。修复后的实际规划另有 4/4 LP 离线精确最优证明，保存在 `rust-scale-singular-after/witness-verification.json`。
+
+最终数量级测试覆盖 BASE/MODDED × 三种产品 × 七档需求（`1e-9` 到 `1e9`），42 组请求全部通过；真实资产组 **80 passed / 0 failed / 5 ignored**。日志分别为 `rust-certified-scale-fixed.log`、`rust-certified-asset-suite-scaled.log`。核心 **35** 项、实验求解器 **33** 项测试通过，核心所有目标、shell 库/测试及离线校验入口 Clippy 通过。这些是当前已覆盖集合的结果，不构成对所有游戏目标的可解保证。
+
+应用构建隔离还需要独立阶段：当前 `good_lp` 无条件启用 HiGHS，且本地检出的 `good_lp` 明确拒绝不启用任何求解器的构建；仅删除 `highs` feature 不足以获得纯 Rust 应用。后续应将应用模型与错误类型从原生桥接层分离，令 HiGHS 成为可选对照后端，并检查 runtime/shell 的 feature 传播。核心 `metatorio-lp` 本身已没有原生求解器依赖。
+
+全部修复后的整批复验位于 `local/lp-exp/rust-certified-scaled-pipeline-24`：**24 done / 0 failed**，实际规划、回写、保存工厂重解全部通过。脚本自动完成 **96/96** 见证离线复核，其中 66 个精确最优；最大向上舍入归一化目标差距 `3.761086338897564e-15`，全部浮点回写检查通过。24 个完整候选模型中仍为 15 个精确最优、9 个严格可行且满足差距预算。逐请求范围及结果在 `summary.json`，离线结果在 `witness-verification.json`。
+
+这次全测试耗时 653.42 秒，最长请求 54.630 秒，比首次统一入口回放更慢。两轮实时模型的生成系数、搜索路径及并行负载没有严格控制，不能将差值归因于单项修改，也不能宣称这次缩放改善了速度。下一阶段性能比较必须固定输入并隔离运行；本阶段确认的是新增大产量失败已修复，且原有困难请求的数学门禁仍全部通过。默认后端继续为 HiGHS，纯 Rust 路径通过 `rust-certified` 显式启用。

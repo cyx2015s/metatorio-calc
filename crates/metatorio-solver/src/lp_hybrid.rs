@@ -7,6 +7,25 @@ use crate::{
 use num_traits::Zero;
 use std::time::Instant;
 
+#[derive(Debug)]
+pub(crate) enum Failure {
+    Infeasible,
+    Other(String),
+}
+impl From<String> for Failure {
+    fn from(message: String) -> Self {
+        Self::Other(message)
+    }
+}
+impl Failure {
+    pub(crate) fn resolution_error(self) -> good_lp::ResolutionError {
+        match self {
+            Self::Infeasible => good_lp::ResolutionError::Infeasible,
+            Self::Other(message) => good_lp::ResolutionError::Str(message),
+        }
+    }
+}
+
 pub(crate) struct Result {
     pub values: Vec<f64>,
     pub certificate: exact::Certificate,
@@ -14,7 +33,7 @@ pub(crate) struct Result {
 }
 
 /// Pure Rust cold start; no native candidate search or fallback.
-pub(crate) fn solve_rust(snapshot: &Snapshot) -> std::result::Result<Result, String> {
+pub(crate) fn solve_rust(snapshot: &Snapshot) -> std::result::Result<Result, Failure> {
     snapshot.check()?;
     let model = snapshot.exact_model();
     let start = Instant::now();
@@ -22,20 +41,37 @@ pub(crate) fn solve_rust(snapshot: &Snapshot) -> std::result::Result<Result, Str
         model.solve_dual_with_observer(10000, |_| start.elapsed().as_secs_f64() < 120.0)?;
     let certificate = model.certify(&result.solution)?;
     if !certificate.optimal {
+        if result.infeasibility.is_some() {
+            return Err(Failure::Infeasible);
+        }
         return Err(format!(
             "Rust cold start incomplete: {:?}; exact infeasibility={}",
             result.stop_reason,
             result.infeasibility.is_some()
-        ));
+        )
+        .into());
     }
-    validated_result(snapshot, result.solution, certificate, result.pivots)
+    validated_result(snapshot, result.solution, certificate, result.pivots).map_err(Failure::Other)
 }
 
 /// Native-free floating search, followed by exact full-model correction.
 pub(crate) fn solve_rust_verified(
     snapshot: &Snapshot,
     captured: Option<&std::path::Path>,
-) -> std::result::Result<Result, String> {
+) -> std::result::Result<Result, Failure> {
+    solve_rust_proposal(snapshot, captured, false)
+}
+pub(crate) fn solve_rust_certified(
+    snapshot: &Snapshot,
+    captured: Option<&std::path::Path>,
+) -> std::result::Result<Result, Failure> {
+    solve_rust_proposal(snapshot, captured, true)
+}
+fn solve_rust_proposal(
+    snapshot: &Snapshot,
+    captured: Option<&std::path::Path>,
+    certified: bool,
+) -> std::result::Result<Result, Failure> {
     snapshot.check()?;
     let model = snapshot.exact_model();
     let start = Instant::now();
@@ -58,6 +94,7 @@ pub(crate) fn solve_rust_verified(
                     "original_snapshot":source,"model_scope":"full","basis":proposal.basis,
                     "pivots":proposal.pivots,"stop_reason":proposal.stop_reason,
                     "diagnostic":proposal.diagnostic,"proposal_seconds":start.elapsed().as_secs_f64(),
+                    "values_bits":proposal.values.iter().map(|x|x.to_bits()).collect::<Vec<_>>(),
                 }),
             )?;
             Ok(())
@@ -66,15 +103,75 @@ pub(crate) fn solve_rust_verified(
             eprintln!("[LP-RUST-CANDIDATE-CAPTURE-ERROR] {error}");
         }
     }
+    if certified {
+        let budget = exact::Rational::new(1.into(), 1_000_000_000_000u64.into());
+        let result = model.certify_candidate_with_observer(&proposal, 1000, &budget, |_, _| {
+            start.elapsed().as_secs_f64() < 120.0
+        })?;
+        if let Some(source) = captured {
+            let save = || -> std::result::Result<(), Box<dyn std::error::Error>> {
+                let directory = source
+                    .parent()
+                    .ok_or("capture has no parent")?
+                    .join("rust-certificates");
+                std::fs::create_dir_all(&directory)?;
+                let file = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(directory.join(source.file_name().ok_or("capture has no filename")?))?;
+                serde_json::to_writer(
+                    std::io::BufWriter::new(file),
+                    &serde_json::json!({
+                        "original_snapshot":source,"model_scope":"full","certificate":result.certificate,
+                        "accepted":result.accepted,"gap_budget":budget.to_string(),
+                        "relative_gap":result.relative_gap.as_ref().map(ToString::to_string),
+                        "primal_basis":result.primal_basis,"row_duals":result.solution.row_duals.iter().map(ToString::to_string).collect::<Vec<_>>(),
+                        "values":result.solution.values.iter().map(ToString::to_string).collect::<Vec<_>>(),
+                        "exact_pivots":result.exact_pivots,"support_columns":result.support_columns,"stop_reason":result.stop_reason,
+                        "support_search_pivots":result.support_search_pivots,
+                        "infeasibility":result.infeasibility,
+                        "elapsed_seconds":start.elapsed().as_secs_f64()
+                    }),
+                )?;
+                Ok(())
+            };
+            if let Err(error) = save() {
+                eprintln!("[LP-RUST-CERTIFICATE-CAPTURE-ERROR] {error}");
+            }
+        }
+        if result.infeasibility.is_some() {
+            return Err(Failure::Infeasible);
+        }
+        if !result.accepted {
+            return Err(format!(
+                "Rust certification incomplete: {:?}; full primal={} dual={}",
+                result.stop_reason,
+                result.certificate.primal_feasible,
+                result.certificate.dual_feasible
+            )
+            .into());
+        }
+        return validated_result(
+            snapshot,
+            result.solution,
+            result.certificate,
+            proposal.pivots + result.support_search_pivots + result.exact_pivots,
+        )
+        .map_err(Failure::Other);
+    }
     let result = model.refine_basis_with_observer(proposal.basis, 1000, |_, _| {
         start.elapsed().as_secs_f64() < 120.0
     })?;
     if !result.certificate.optimal {
+        if result.infeasibility.is_some() {
+            return Err(Failure::Infeasible);
+        }
         return Err(format!(
             "Rust verified solve incomplete: {:?}; exact infeasibility={}",
             result.stop_reason,
             result.infeasibility.is_some()
-        ));
+        )
+        .into());
     }
     validated_result(
         snapshot,
@@ -82,6 +179,7 @@ pub(crate) fn solve_rust_verified(
         result.certificate,
         proposal.pivots + result.repair_pivots + result.optimization_pivots,
     )
+    .map_err(Failure::Other)
 }
 
 fn validated_result(
@@ -268,6 +366,37 @@ fn feasible_candidate(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn rust_bridges_distinguish_verified_infeasibility_from_invalid_input() {
+        let snapshot = Snapshot {
+            format_version: 1,
+            columns: vec![],
+            rows: vec![crate::lp_experiments::Row {
+                label: "impossible equality".into(),
+                equality: true,
+                rhs_bits: 1.0f64.to_bits(),
+                terms: vec![],
+            }],
+            objective: vec![],
+            objective_offset_bits: 0.0f64.to_bits(),
+            production_rhs_scale_bits: 1.0f64.to_bits(),
+        };
+        assert!(matches!(solve_rust(&snapshot), Err(Failure::Infeasible)));
+        assert!(matches!(
+            solve_rust_verified(&snapshot, None),
+            Err(Failure::Infeasible)
+        ));
+        assert!(matches!(
+            solve_rust_certified(&snapshot, None),
+            Err(Failure::Infeasible)
+        ));
+        let mut invalid = snapshot;
+        invalid.format_version = 999;
+        assert!(matches!(
+            solve_rust_certified(&invalid, None),
+            Err(Failure::Other(_))
+        ));
+    }
     #[test]
     fn candidate_classification_preserves_feasibility_without_claiming_optimality() {
         let model = exact::Model {

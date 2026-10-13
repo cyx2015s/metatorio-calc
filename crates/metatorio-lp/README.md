@@ -59,6 +59,35 @@ application bridge and a hybrid exact-repair bridge live in metatorio-solver. Se
 The opt-in `rust-verified` backend uses Rust floating search plus exact refinement
 without calling HiGHS, and accepts only a complete-model exact optimum.
 
+`certify_candidate_with_observer` combines full-model dual reconstruction with
+small-support primal repair. It accepts only exact original-model feasibility
+and an exact rational comparison of the objective gap against a caller-supplied
+budget. The normalized gap is `(primal - dual) / max(1, abs(primal))`. This API
+requires nonnegative objective costs and nonnegative unbounded-above variables.
+A positive accepted gap is reported separately from exact optimality. Keep
+`result.solution` when exporting witnesses: its primal and dual can originate
+from different bases. Reporting conversion rounds the gap upward.
+
+```rust
+use metatorio_lp::{CertifiedResult, Model, Rational};
+use std::time::{Duration, Instant};
+
+fn solve(model: &Model) -> Result<CertifiedResult, String> {
+    let start = Instant::now();
+    let alive = || start.elapsed() < Duration::from_secs(120);
+    let proposal = model.float_candidate_with_observer(20_000, |_| alive())?;
+    let budget = Rational::new(1.into(), 1_000_000_000_000u64.into());
+    model.certify_candidate_with_observer(&proposal, 1_000, &budget, |_, _| alive())
+}
+// Inspect result.accepted before using values. A stopped result is not a proof
+// that the model is infeasible; its certificate retains the established facts.
+```
+
+The opt-in application backend `rust-certified` uses this budget of `1/10^12`,
+requires strict original-model primal feasibility, and checks rounded writeback
+values independently. It reports `certified_relative_gap` alongside the existing
+exact feasibility/optimality fields. The default production backend is unchanged.
+
 ```powershell
 cargo test -p metatorio-lp
 cargo clippy -p metatorio-lp --all-targets -- -D warnings

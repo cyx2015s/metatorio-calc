@@ -1,4 +1,4 @@
-//! 线性规划求解：唯一后端 HiGHS。
+//! 线性规划求解：生产默认后端 HiGHS，lp-experiments 可选择 Rust 实验后端。
 //!
 //! # 为什么删掉了 Ruiz 缩放 / clarabel / microlp
 //!
@@ -39,6 +39,8 @@ pub struct SolveReport {
     pub exact_primal_verified: bool,
     /// Full original LP has an exact primal/dual optimality certificate.
     pub exact_optimality_verified: bool,
+    /// Upward-rounded full-model exact gap / max(1, abs(primal objective)).
+    pub certified_relative_gap: Option<f64>,
 }
 
 /// 求解结果（原问题空间）。
@@ -368,7 +370,7 @@ fn solve_lp_impl(
     if std::env::var_os("METATORIO_LP_CAPTURE_DIR").is_some()
         || matches!(
             std::env::var("METATORIO_LP_BACKEND").as_deref(),
-            Ok("hybrid-exact" | "rust-exact" | "rust-verified")
+            Ok("hybrid-exact" | "rust-exact" | "rust-verified" | "rust-certified")
         )
     {
         use crate::lp_experiments::{Row, Snapshot, capture, column};
@@ -400,18 +402,23 @@ fn solve_lp_impl(
         let captured = capture(&snapshot);
         if matches!(
             std::env::var("METATORIO_LP_BACKEND").as_deref(),
-            Ok("hybrid-exact" | "rust-exact" | "rust-verified")
+            Ok("hybrid-exact" | "rust-exact" | "rust-verified" | "rust-certified")
         ) {
             let start = Instant::now();
             let backend = std::env::var("METATORIO_LP_BACKEND").unwrap_or_default();
             let result = if backend == "rust-exact" {
                 crate::lp_hybrid::solve_rust(&snapshot)
+                    .map_err(crate::lp_hybrid::Failure::resolution_error)
             } else if backend == "rust-verified" {
                 crate::lp_hybrid::solve_rust_verified(&snapshot, captured.as_deref())
+                    .map_err(crate::lp_hybrid::Failure::resolution_error)
+            } else if backend == "rust-certified" {
+                crate::lp_hybrid::solve_rust_certified(&snapshot, captured.as_deref())
+                    .map_err(crate::lp_hybrid::Failure::resolution_error)
             } else {
                 crate::lp_hybrid::solve(&snapshot, captured.as_deref())
-            }
-            .map_err(ResolutionError::Str)?;
+                    .map_err(ResolutionError::Str)
+            }?;
             let used = result.values.iter().filter(|x| **x != 0.0).count();
             let (violation, cost) = evaluate_solution(&objective, &rows, &result.values);
             if violation > ACCEPT_VIOLATION {
@@ -438,6 +445,10 @@ fn solve_lp_impl(
                     primal_violation: violation,
                     exact_primal_verified: result.certificate.primal_feasible,
                     exact_optimality_verified: result.certificate.optimal,
+                    certified_relative_gap: result
+                        .certificate
+                        .relative_gap_upper_bound()
+                        .map_err(ResolutionError::Str)?,
                 },
                 &orig_vars,
             ));

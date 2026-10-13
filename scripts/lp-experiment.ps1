@@ -3,7 +3,7 @@ param(
     [switch]$ReplayOnly,
     [switch]$PipelineOnly,
     [switch]$RequireSolved,
-    [ValidateSet('highs', 'hybrid-exact', 'rust-exact', 'rust-verified')]
+    [ValidateSet('highs', 'hybrid-exact', 'rust-exact', 'rust-verified', 'rust-certified')]
     [string]$Backend = 'highs',
     [ValidateSet('default', 'no-scaling', 'no-scaling-no-presolve', 'tight', 'tight-no-presolve', 'raw-rhs', 'ipx', 'ipx-no-presolve', 'support-refine')]
     [string]$Strategy = 'support-refine',
@@ -46,6 +46,12 @@ try {
         } | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8NoBOM (Join-Path $CorpusDirectory 'provenance.json')
         & cargo test --release -p metatorio-shell --features lp-experiments --lib experiment_capture_failure_requests -- --ignored --nocapture *> (Join-Path $CorpusDirectory 'capture.log')
         if ($LASTEXITCODE -ne 0) { throw "Capture failed; see $CorpusDirectory/capture.log" }
+    }
+    if (!$ReplayOnly -and $RequireSolved -and $Backend -eq 'rust-certified') {
+        & cargo build --release -p metatorio-solver --features lp-experiments --example lp_verify_witnesses
+        if ($LASTEXITCODE -ne 0) { throw 'Exact witness verifier build failed.' }
+        & (Join-Path $root 'target/release/examples/lp_verify_witnesses.exe') $CorpusDirectory | Set-Content -Encoding utf8NoBOM (Join-Path $CorpusDirectory 'witness-verification.json')
+        if ($LASTEXITCODE -ne 0) { throw 'Independent exact witness verification failed.' }
     }
     if ($PipelineOnly) {
         Get-Content -LiteralPath (Join-Path $CorpusDirectory "request-outcomes-$RequestOffset.jsonl") | ForEach-Object {

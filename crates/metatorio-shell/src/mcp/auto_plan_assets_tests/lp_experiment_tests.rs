@@ -84,12 +84,21 @@ async fn experiment_capture_failure_requests() {
             assert_solved(&mcp, &ids, &state);
             if matches!(
                 std::env::var("METATORIO_LP_BACKEND").as_deref(),
-                Ok("hybrid-exact" | "rust-exact" | "rust-verified")
+                Ok("hybrid-exact" | "rust-exact" | "rust-verified" | "rust-certified")
             ) {
                 assert_eq!(
                     state["auto_plan"]["result"]["report"]["exact_primal_verified"],
                     true
                 );
+                if std::env::var("METATORIO_LP_BACKEND").as_deref() == Ok("rust-certified") {
+                    let gap = state["auto_plan"]["result"]["report"]["certified_relative_gap"]
+                        .as_f64()
+                        .expect("missing certified gap");
+                    assert!(
+                        (0.0..=1e-12f64.next_up()).contains(&gap),
+                        "unaccepted certified gap {gap}"
+                    );
+                }
                 if matches!(
                     std::env::var("METATORIO_LP_BACKEND").as_deref(),
                     Ok("rust-exact" | "rust-verified")

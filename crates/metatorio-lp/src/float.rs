@@ -189,11 +189,11 @@ impl Model {
             .map(|(r, s)| r.rhs * s)
             .collect();
         let rhs_max = rhs.iter().fold(0.0f64, |a, b| a.max(b.abs()));
-        let rhs_scale = if rhs_max > 0.0 {
-            (1.0 / rhs_max).clamp(1.0, 1e20)
-        } else {
-            1.0
-        };
+        // Normalize in both directions. Large demands otherwise amplify
+        // primal-update roundoff and may drive a numerically plausible but
+        // exactly singular sequence of degenerate pivots. Power-of-two scaling
+        // also keeps homogeneous binary-scaled demands on the same search path.
+        let rhs_scale = power_scale(rhs_max);
         let mut basic_values: Vec<_> = rhs.iter().map(|x| x * rhs_scale).collect();
         if costs.iter().chain(&basic_values).any(|x| !x.is_finite())
             || rows.iter().flatten().any(|(_, a)| !a.is_finite())
@@ -438,6 +438,46 @@ impl Model {
 mod tests {
     use super::*;
     use crate::{Column, Row};
+    #[test]
+    fn rhs_scaling_preserves_the_search_for_tiny_and_large_demands() {
+        let mut previous: Option<FloatCandidate> = None;
+        for exponent in [-120, 0, 120] {
+            let demand = 2.0f64.powi(exponent);
+            let model = Model {
+                columns: [5.0, 2.0, 0.0]
+                    .into_iter()
+                    .map(|cost| Column {
+                        lower: 0.0,
+                        upper: f64::INFINITY,
+                        cost,
+                    })
+                    .collect(),
+                rows: vec![
+                    Row {
+                        equality: true,
+                        rhs: demand,
+                        terms: vec![(0, 1.0), (2, 1.0)],
+                    },
+                    Row {
+                        equality: false,
+                        rhs: 0.0,
+                        terms: vec![(1, -1.0), (2, 2.0)],
+                    },
+                ],
+                offset: 0.0,
+            };
+            let candidate = model.float_candidate_with_observer(20, |_| true).unwrap();
+            let solution = model.reconstruct(&candidate.basis).unwrap();
+            assert!(model.certify(&solution).unwrap().optimal);
+            assert_eq!(solution.values[2], crate::rational(demand).unwrap());
+            if let Some(previous) = previous {
+                assert_eq!(previous.basis.columns, candidate.basis.columns);
+                assert_eq!(previous.basis.rows, candidate.basis.rows);
+                assert_eq!(previous.pivots, candidate.pivots);
+            }
+            previous = Some(candidate);
+        }
+    }
     #[test]
     fn generated_feasible_models_match_independent_exact_cold_start() {
         let mut state = 17u64;

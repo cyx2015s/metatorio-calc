@@ -106,10 +106,25 @@ async fn finish(mcp: &MetatorioMcp, ids: &Value) -> Value {
     }
 }
 
+fn assert_certified(result: &metatorio_runtime::SolveResult) {
+    if std::env::var("METATORIO_LP_BACKEND").as_deref() == Ok("rust-certified") {
+        assert!(result.report.exact_primal_verified);
+        let gap = result
+            .report
+            .certified_relative_gap
+            .expect("missing full-model gap bound");
+        assert!(
+            (0.0..=1e-12f64.next_up()).contains(&gap),
+            "unaccepted certified gap {gap}"
+        );
+    }
+}
+
 fn assert_solved(mcp: &MetatorioMcp, ids: &Value, state: &Value) -> f64 {
     assert_eq!(state["auto_plan"]["status"], "done", "{state}");
     let result: metatorio_runtime::SolveResult =
         serde_json::from_value(state["auto_plan"]["result"].clone()).unwrap();
+    assert_certified(&result);
     assert!(
         result.report.writeback_verified,
         "writeback verification: {:?}",
@@ -166,6 +181,7 @@ fn assert_solved(mcp: &MetatorioMcp, ids: &Value, state: &Value) -> f64 {
     let rechecked = runtime
         .solve_factory(project, factory)
         .expect("solve written document");
+    assert_certified(&rechecked);
     let SolveStatus::Solved { cost: new_cost, .. } = rechecked.status else {
         panic!("written factory is infeasible: {rechecked:?}");
     };
@@ -774,6 +790,7 @@ async fn stress_scale_invariance() {
         for item in ["iron-plate", "electronic-circuit", "plastic-bar"] {
             let mut unit_cost = None;
             for amount in [1e-9, 1e-6, 0.001, 1.0, 1000.0, 1e6, 1e9] {
+                eprintln!("[LP-SCALE] {asset}/{item}/{amount}");
                 let ids = start(&mcp, json!({"targets":[{"item":item,"amount":amount}]})).await;
                 let cost = assert_solved(&mcp, &ids, &finish(&mcp, &ids).await) / amount;
                 let baseline: f64 = *unit_cost.get_or_insert(cost);
@@ -784,4 +801,13 @@ async fn stress_scale_invariance() {
             }
         }
     }
+}
+
+#[tokio::test]
+async fn modded_large_plastic_target_preserves_solvability() {
+    success(
+        MODDED,
+        json!({"targets":[{"item":"plastic-bar","amount":1e9}]}),
+    )
+    .await;
 }
