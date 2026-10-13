@@ -25,7 +25,7 @@ fn indices(basis: &Basis) -> (Vec<usize>, Vec<usize>) {
     )
 }
 fn matrix(model: &Model, columns: &[usize], rows: &[usize]) -> Result<Vec<Vec<Rational>>, String> {
-    if columns.len() != rows.len() || columns.len() > 256 {
+    if columns.len() != rows.len() || columns.len() > super::MAX_BASIS_DIMENSION {
         return Err("compressed basis dimension exceeds limit or is not square".into());
     }
     let mut positions = vec![None; model.columns.len()];

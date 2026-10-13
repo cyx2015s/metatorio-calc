@@ -8,9 +8,18 @@ use std::{
 };
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
-    if args.len() != 3 {
-        return Err("usage: lp_dual_from_zero snapshot.json result.json seconds".into());
+    if !(3..=4).contains(&args.len()) {
+        return Err(
+            "usage: lp_dual_from_zero snapshot.json result.json seconds [first|largest|large-pivot|edge]".into(),
+        );
     }
+    let rule = match args.get(3).map(String::as_str).unwrap_or("first") {
+        "first" => metatorio_solver::lp_rational::DualPivotRule::FirstViolation,
+        "largest" => metatorio_solver::lp_rational::DualPivotRule::LargestViolation,
+        "large-pivot" => metatorio_solver::lp_rational::DualPivotRule::FirstViolationLargePivot,
+        "edge" => metatorio_solver::lp_rational::DualPivotRule::SteepestEdge,
+        _ => return Err("unknown dual pivot rule".into()),
+    };
     let snapshot: Snapshot = serde_json::from_reader(BufReader::new(fs::File::open(&args[0])?))?;
     snapshot.check()?;
     let seconds: f64 = args[2].parse()?;
@@ -19,7 +28,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let model = snapshot.exact_model();
     let start = Instant::now();
-    let result = model.solve_dual_with_observer(10000, |p| {
+    let result = model.solve_dual_with_rule(rule, 10000, |p| {
         if p.pivots % 10 == 0 {
             eprintln!(
                 "[DUAL-ZERO] pivots={} basis={} seconds={:.2}",
@@ -39,12 +48,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 certificate.optimal,
                 start.elapsed().as_secs_f64()
             );
-            serde_json::json!({"model_scope":"full", "model_semantics":"exact binary rational values of captured f64 coefficients", "pivots":result.pivots,"basis":result.basis,"stop_reason":result.stop_reason,"infeasibility":result.infeasibility,"certificate":certificate,"elapsed_seconds":start.elapsed().as_secs_f64(),
+            serde_json::json!({"pivot_rule":format!("{rule:?}"),"model_scope":"full", "model_semantics":"exact binary rational values of captured f64 coefficients", "pivots":result.pivots,"basis":result.basis,"stop_reason":result.stop_reason,"infeasibility":result.infeasibility,"certificate":certificate,"elapsed_seconds":start.elapsed().as_secs_f64(),
                 "exact_nonzero_values":result.solution.values.iter().enumerate().filter(|(_,v)| !v.is_zero()).map(|(i,v)| (i,v.to_string())).collect::<Vec<_>>(),
                 "rounded_validation":snapshot.validate(&result.solution.approximate()?)})
         }
         Err(error) => {
-            serde_json::json!({"model_scope":"full","error":error,"elapsed_seconds":start.elapsed().as_secs_f64()})
+            serde_json::json!({"pivot_rule":format!("{rule:?}"),"model_scope":"full","error":error,"elapsed_seconds":start.elapsed().as_secs_f64()})
         }
     };
     serde_json::to_writer(BufWriter::new(fs::File::create(&args[1])?), &output)?;

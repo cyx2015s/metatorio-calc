@@ -55,7 +55,10 @@ fn validated_result(
     })
 }
 
-pub(crate) fn solve(snapshot: &Snapshot) -> std::result::Result<Result, String> {
+pub(crate) fn solve(
+    snapshot: &Snapshot,
+    captured: Option<&std::path::Path>,
+) -> std::result::Result<Result, String> {
     snapshot.check()?;
     let options = ReplayOptions {
         name: "hybrid-seed".into(),
@@ -111,6 +114,34 @@ pub(crate) fn solve(snapshot: &Snapshot) -> std::result::Result<Result, String> 
             ..options
         },
     )?;
+    // Persist the actual candidate before inspecting it, including rejected or
+    // singular hints. A retry may otherwise produce a different native basis.
+    if let Some(source) = captured {
+        let save = || -> std::result::Result<(), Box<dyn std::error::Error>> {
+            let directory = source
+                .parent()
+                .ok_or("capture has no parent")?
+                .join("candidates");
+            std::fs::create_dir_all(&directory)?;
+            let path = directory.join(source.file_name().ok_or("capture has no filename")?);
+            let file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(path)?;
+            serde_json::to_writer(
+                std::io::BufWriter::new(file),
+                &serde_json::json!({
+                    "original_snapshot":source,"restricted_snapshot":restricted,
+                    "selected_columns":selected,"refined":refined,
+                    "seed_status":seed.status,"seed_options":seed.options,
+                }),
+            )?;
+            Ok(())
+        };
+        if let Err(error) = save() {
+            eprintln!("[LP-CANDIDATE-CAPTURE-ERROR] {error}");
+        }
+    }
     if refined.basis_status != 0 {
         return Err("hybrid candidate has no valid basis".into());
     }

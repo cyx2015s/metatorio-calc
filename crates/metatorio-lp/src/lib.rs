@@ -9,7 +9,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 mod basis;
 mod dual;
-pub use dual::DualRepair;
+pub use dual::{DualPivotRule, DualRepair};
+const MAX_BASIS_DIMENSION: usize = 256;
 
 #[derive(Clone, Debug)]
 pub struct Column {
@@ -135,7 +136,7 @@ fn binary_integer(value: f64, power: usize) -> BigInt {
 /// Zero pivots are rejected exactly, without a numerical tolerance.
 fn solve(mut matrix: Vec<Vec<Rational>>, mut rhs: Vec<Rational>) -> Result<Vec<Rational>, String> {
     let n = rhs.len();
-    if n > 256 || matrix.len() != n || matrix.iter().any(|row| row.len() != n) {
+    if n > MAX_BASIS_DIMENSION || matrix.len() != n || matrix.iter().any(|row| row.len() != n) {
         return Err("dense exact basis requires a square matrix of at most 256 columns".into());
     }
     for k in 0..n {
@@ -572,6 +573,19 @@ impl Model {
                     stop_reason: None,
                 });
             };
+            if solution.basis_dimension >= MAX_BASIS_DIMENSION
+                && entering < self.columns.len()
+                && leaving >= self.columns.len()
+            {
+                return Ok(Optimization {
+                    solution,
+                    basis,
+                    pivots: iteration,
+                    unbounded_ray: None,
+                    bland_fallback: bland,
+                    stop_reason: Some("exact basis dimension limit reached".into()),
+                });
+            }
             if leaving < self.columns.len() {
                 basis.columns[leaving] = BasisStatus::Lower;
             } else {
@@ -633,7 +647,7 @@ impl Model {
             .enumerate()
             .filter_map(|(i, s)| (*s != BasisStatus::Basic).then_some(i))
             .collect();
-        if columns.len() != rows.len() || columns.len() > 256 {
+        if columns.len() != rows.len() || columns.len() > MAX_BASIS_DIMENSION {
             return Err("structural basis is not square or exceeds prototype limit".into());
         }
         let mut positions = vec![None; self.columns.len()];

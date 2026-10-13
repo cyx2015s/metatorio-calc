@@ -534,10 +534,8 @@ pub(crate) fn column(definition: &VariableDefinition, index: usize) -> Column {
     }
 }
 
-pub(crate) fn capture(snapshot: &Snapshot) {
-    let Some(directory) = std::env::var_os("METATORIO_LP_CAPTURE_DIR") else {
-        return;
-    };
+pub(crate) fn capture(snapshot: &Snapshot) -> Option<std::path::PathBuf> {
+    let directory = std::env::var_os("METATORIO_LP_CAPTURE_DIR")?;
     static SERIAL: AtomicU64 = AtomicU64::new(0);
     let run = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -558,12 +556,18 @@ pub(crate) fn capture(snapshot: &Snapshot) {
         Ok(())
     };
     match save() {
-        Ok(()) => eprintln!(
-            "[LP-CAPTURE] {filename}: {} columns, {} rows",
-            snapshot.columns.len(),
-            snapshot.rows.len()
-        ),
-        Err(error) => eprintln!("[LP-CAPTURE-ERROR] {error}"),
+        Ok(()) => {
+            eprintln!(
+                "[LP-CAPTURE] {filename}: {} columns, {} rows",
+                snapshot.columns.len(),
+                snapshot.rows.len()
+            );
+            Some(Path::new(&directory).join(&filename))
+        }
+        Err(error) => {
+            eprintln!("[LP-CAPTURE-ERROR] {error}");
+            None
+        }
     }
 }
 

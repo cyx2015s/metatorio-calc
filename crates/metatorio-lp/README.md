@@ -9,6 +9,9 @@ primal simplex for optimization. `optimize_from_basis` accepts an existing basis
 For nonnegative objective costs, `solve_dual_with_observer` starts directly from
 zero with exact dual simplex, without artificial variables or a candidate basis.
 This path builds and updates its inverse from the empty structural basis.
+`solve_dual_with_rule` exposes experimental leaving-row / ratio-tie strategies.
+They retain exact ratio comparisons and certificates; none is assumed faster for
+every model. Hitting the structural dimension cap preserves a nonterminal basis.
 `repair_dual_feasible_basis` repairs primal violations in an exactly dual-feasible
 basis using exact dual simplex. A rejected hint does not imply infeasibility;
 ratio-test failure requires a verified Farkas certificate. Repeated bases and

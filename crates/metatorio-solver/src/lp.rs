@@ -397,7 +397,7 @@ fn solve_lp_impl(
             objective_offset_bits: minimise.constant().to_bits(),
             production_rhs_scale_bits: rhs_scale.to_bits(),
         };
-        capture(&snapshot);
+        let captured = capture(&snapshot);
         if matches!(
             std::env::var("METATORIO_LP_BACKEND").as_deref(),
             Ok("hybrid-exact" | "rust-exact")
@@ -407,7 +407,7 @@ fn solve_lp_impl(
             let result = if backend == "rust-exact" {
                 crate::lp_hybrid::solve_rust(&snapshot)
             } else {
-                crate::lp_hybrid::solve(&snapshot)
+                crate::lp_hybrid::solve(&snapshot, captured.as_deref())
             }
             .map_err(ResolutionError::Str)?;
             let used = result.values.iter().filter(|x| **x != 0.0).count();
