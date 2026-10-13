@@ -3,7 +3,7 @@ param(
     [switch]$ReplayOnly,
     [switch]$PipelineOnly,
     [switch]$RequireSolved,
-    [ValidateSet('highs', 'hybrid-exact', 'rust-exact')]
+    [ValidateSet('highs', 'hybrid-exact', 'rust-exact', 'rust-verified')]
     [string]$Backend = 'highs',
     [ValidateSet('default', 'no-scaling', 'no-scaling-no-presolve', 'tight', 'tight-no-presolve', 'raw-rhs', 'ipx', 'ipx-no-presolve', 'support-refine')]
     [string]$Strategy = 'support-refine',

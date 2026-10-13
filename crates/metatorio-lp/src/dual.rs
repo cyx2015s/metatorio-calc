@@ -70,13 +70,22 @@ impl Model {
         max_pivots: usize,
         observer: impl FnMut(PivotProgress) -> bool,
     ) -> Result<DualRepair, String> {
-        self.repair_dual_inner(
+        self.repair_dual_feasible_basis_with_rule(
             basis,
+            DualPivotRule::FirstViolation,
             max_pivots,
             observer,
-            false,
-            DualPivotRule::FirstViolation,
         )
+    }
+    /// Warm repair with an explicit exact leaving-row / ratio-tie strategy.
+    pub fn repair_dual_feasible_basis_with_rule(
+        &self,
+        basis: Basis,
+        rule: DualPivotRule,
+        max_pivots: usize,
+        observer: impl FnMut(PivotProgress) -> bool,
+    ) -> Result<DualRepair, String> {
+        self.repair_dual_inner(basis, max_pivots, observer, false, rule)
     }
     fn repair_dual_inner(
         &self,
@@ -251,7 +260,12 @@ impl Model {
                     infeasibility: Some(proof),
                 });
             };
-            if solution.basis_dimension >= super::MAX_BASIS_DIMENSION
+            let dimension_limit = if cache {
+                super::MAX_BASIS_DIMENSION
+            } else {
+                super::MAX_RECONSTRUCTION_DIMENSION
+            };
+            if solution.basis_dimension >= dimension_limit
                 && entering < self.columns.len()
                 && leaving >= self.columns.len()
             {
@@ -372,13 +386,27 @@ mod tests {
         };
         basis.columns[n - 1] = BasisStatus::Lower;
         basis.rows[n - 1] = BasisStatus::Basic;
-        let result = model.repair_dual_feasible_basis(basis.clone(), 10).unwrap();
+        let result = model
+            .repair_dual_inner(
+                basis.clone(),
+                10,
+                |_| true,
+                true,
+                DualPivotRule::FirstViolation,
+            )
+            .unwrap();
         assert_eq!(result.pivots, 0);
         assert!(result.stop_reason.unwrap().contains("dimension"));
         assert_eq!(result.basis.columns, basis.columns);
         assert_eq!(result.basis.rows, basis.rows);
         assert!(model.certify(&result.solution).unwrap().dual_feasible);
         assert!(!model.certify(&result.solution).unwrap().primal_feasible);
+        let warm = model
+            .repair_dual_feasible_basis_with_observer(basis.clone(), 10, |_| true)
+            .unwrap();
+        assert_eq!(warm.pivots, 1);
+        assert_eq!(warm.solution.basis_dimension, n);
+        assert!(model.certify(&warm.solution).unwrap().optimal);
         for c in &mut model.columns {
             c.cost = 0.0;
         }
@@ -392,6 +420,12 @@ mod tests {
         assert_eq!(result.basis.columns, basis.columns);
         assert!(model.certify(&result.solution).unwrap().primal_feasible);
         assert!(!model.certify(&result.solution).unwrap().optimal);
+        let warm = model
+            .optimize_without_inverse_with_observer(basis, 10, |_| true)
+            .unwrap();
+        assert_eq!(warm.pivots, 1);
+        assert_eq!(warm.solution.basis_dimension, n);
+        assert!(model.certify(&warm.solution).unwrap().optimal);
     }
     #[test]
     fn integer_edge_merit_matches_direct_rational_norm() {

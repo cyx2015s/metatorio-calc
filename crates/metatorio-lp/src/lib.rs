@@ -9,8 +9,15 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 mod basis;
 mod dual;
+mod float;
+mod refine;
 pub use dual::{DualPivotRule, DualRepair};
+pub use float::{FloatCandidate, FloatProgress};
+pub use refine::Refinement;
 const MAX_BASIS_DIMENSION: usize = 256;
+// A single candidate reconstruction does not build a dense exact inverse.
+// Keep a separate, larger guard from the iterative inverse-update prototype.
+const MAX_RECONSTRUCTION_DIMENSION: usize = 2048;
 
 #[derive(Clone, Debug)]
 pub struct Column {
@@ -136,8 +143,13 @@ fn binary_integer(value: f64, power: usize) -> BigInt {
 /// Zero pivots are rejected exactly, without a numerical tolerance.
 fn solve(mut matrix: Vec<Vec<Rational>>, mut rhs: Vec<Rational>) -> Result<Vec<Rational>, String> {
     let n = rhs.len();
-    if n > MAX_BASIS_DIMENSION || matrix.len() != n || matrix.iter().any(|row| row.len() != n) {
-        return Err("dense exact basis requires a square matrix of at most 256 columns".into());
+    if n > MAX_RECONSTRUCTION_DIMENSION
+        || matrix.len() != n
+        || matrix.iter().any(|row| row.len() != n)
+    {
+        return Err(
+            "dense exact reconstruction requires a square matrix of at most 2048 columns".into(),
+        );
     }
     for k in 0..n {
         let pivot = (k..n)
@@ -391,9 +403,28 @@ impl Model {
     /// stop reason. A limit never proves infeasibility or discards the candidate.
     pub fn optimize_from_basis_with_observer(
         &self,
+        basis: Basis,
+        max_pivots: usize,
+        observer: impl FnMut(PivotProgress) -> bool,
+    ) -> Result<Optimization, String> {
+        self.optimize_inner(basis, max_pivots, observer, true)
+    }
+    /// Optimize a larger feasible basis by solving only the required systems,
+    /// without constructing a dense exact inverse.
+    pub fn optimize_without_inverse_with_observer(
+        &self,
+        basis: Basis,
+        max_pivots: usize,
+        observer: impl FnMut(PivotProgress) -> bool,
+    ) -> Result<Optimization, String> {
+        self.optimize_inner(basis, max_pivots, observer, false)
+    }
+    fn optimize_inner(
+        &self,
         mut basis: Basis,
         max_pivots: usize,
         mut observer: impl FnMut(PivotProgress) -> bool,
+        cache: bool,
     ) -> Result<Optimization, String> {
         self.check()?;
         if self
@@ -405,8 +436,12 @@ impl Model {
                 "exact simplex prototype requires nonnegative columns without upper bounds".into(),
             );
         }
-        self.reconstruct(&basis)?;
-        let mut system = basis::System::new(self, &basis)?;
+        let mut system = if cache {
+            self.reconstruct(&basis)?;
+            Some(basis::System::new(self, &basis)?)
+        } else {
+            None
+        };
         let mut seen = HashSet::new();
         let mut bland = false;
         for iteration in 0..=max_pivots {
@@ -423,7 +458,10 @@ impl Model {
                 bland = true;
                 seen.clear();
             }
-            let solution = system.reconstruct(self)?;
+            let solution = match &system {
+                Some(system) => system.reconstruct(self)?,
+                None => self.reconstruct(&basis)?,
+            };
             let certificate = self.certify(&solution)?;
             if !certificate.primal_feasible {
                 return Err(
@@ -490,8 +528,10 @@ impl Model {
                     stop_reason: Some("exact simplex pivot limit reached".into()),
                 });
             }
-            let columns = system.columns.clone();
-            let basic_direction = system.direction(self, entering)?;
+            let (columns, basic_direction) = match &system {
+                Some(system) => (system.columns.clone(), system.direction(self, entering)?),
+                None => basis::System::uncached_direction(self, &basis, entering)?,
+            };
             let mut direction = vec![Rational::zero(); self.columns.len()];
             for (i, d) in columns.iter().zip(&basic_direction) {
                 direction[*i] = d.clone();
@@ -573,7 +613,12 @@ impl Model {
                     stop_reason: None,
                 });
             };
-            if solution.basis_dimension >= MAX_BASIS_DIMENSION
+            let dimension_limit = if cache {
+                MAX_BASIS_DIMENSION
+            } else {
+                MAX_RECONSTRUCTION_DIMENSION
+            };
+            if solution.basis_dimension >= dimension_limit
                 && entering < self.columns.len()
                 && leaving >= self.columns.len()
             {
@@ -596,7 +641,9 @@ impl Model {
             } else {
                 basis.rows[entering - self.columns.len()] = BasisStatus::Basic;
             }
-            system.update(self, &basis, entering, leaving)?;
+            if let Some(system) = &mut system {
+                system.update(self, &basis, entering, leaving)?;
+            }
         }
         unreachable!()
     }
@@ -647,7 +694,7 @@ impl Model {
             .enumerate()
             .filter_map(|(i, s)| (*s != BasisStatus::Basic).then_some(i))
             .collect();
-        if columns.len() != rows.len() || columns.len() > MAX_BASIS_DIMENSION {
+        if columns.len() != rows.len() || columns.len() > MAX_RECONSTRUCTION_DIMENSION {
             return Err("structural basis is not square or exceeds prototype limit".into());
         }
         let mut positions = vec![None; self.columns.len()];
@@ -691,14 +738,20 @@ impl Model {
         for (column, value) in columns.iter().zip(basic) {
             values[*column] = value;
         }
-        let transpose = (0..columns.len())
-            .map(|j| matrix.iter().map(|row| row[j].clone()).collect())
-            .collect();
         let costs = columns
             .iter()
             .map(|i| rational(self.columns[*i].cost))
             .collect::<Result<Vec<_>, _>>()?;
-        let dual = solve(transpose, costs)?;
+        // The primal solve already checked nonsingularity. A zero objective
+        // has exactly zero duals and needs no second factorization.
+        let dual = if costs.iter().all(|c| c.is_zero()) {
+            vec![Rational::zero(); columns.len()]
+        } else {
+            let transpose = (0..columns.len())
+                .map(|j| matrix.iter().map(|row| row[j].clone()).collect())
+                .collect();
+            solve(transpose, costs)?
+        };
         let mut row_duals = vec![Rational::zero(); self.rows.len()];
         for (row, value) in rows.iter().zip(dual) {
             row_duals[*row] = value;

@@ -368,7 +368,7 @@ fn solve_lp_impl(
     if std::env::var_os("METATORIO_LP_CAPTURE_DIR").is_some()
         || matches!(
             std::env::var("METATORIO_LP_BACKEND").as_deref(),
-            Ok("hybrid-exact" | "rust-exact")
+            Ok("hybrid-exact" | "rust-exact" | "rust-verified")
         )
     {
         use crate::lp_experiments::{Row, Snapshot, capture, column};
@@ -400,12 +400,14 @@ fn solve_lp_impl(
         let captured = capture(&snapshot);
         if matches!(
             std::env::var("METATORIO_LP_BACKEND").as_deref(),
-            Ok("hybrid-exact" | "rust-exact")
+            Ok("hybrid-exact" | "rust-exact" | "rust-verified")
         ) {
             let start = Instant::now();
             let backend = std::env::var("METATORIO_LP_BACKEND").unwrap_or_default();
             let result = if backend == "rust-exact" {
                 crate::lp_hybrid::solve_rust(&snapshot)
+            } else if backend == "rust-verified" {
+                crate::lp_hybrid::solve_rust_verified(&snapshot, captured.as_deref())
             } else {
                 crate::lp_hybrid::solve(&snapshot, captured.as_deref())
             }

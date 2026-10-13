@@ -84,12 +84,21 @@ async fn experiment_capture_failure_requests() {
             assert_solved(&mcp, &ids, &state);
             if matches!(
                 std::env::var("METATORIO_LP_BACKEND").as_deref(),
-                Ok("hybrid-exact" | "rust-exact")
+                Ok("hybrid-exact" | "rust-exact" | "rust-verified")
             ) {
                 assert_eq!(
                     state["auto_plan"]["result"]["report"]["exact_primal_verified"],
                     true
                 );
+                if matches!(
+                    std::env::var("METATORIO_LP_BACKEND").as_deref(),
+                    Ok("rust-exact" | "rust-verified")
+                ) {
+                    assert_eq!(
+                        state["auto_plan"]["result"]["report"]["exact_optimality_verified"],
+                        true
+                    );
+                }
             }
         } else {
             assert!(

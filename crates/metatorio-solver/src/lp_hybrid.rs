@@ -31,6 +31,59 @@ pub(crate) fn solve_rust(snapshot: &Snapshot) -> std::result::Result<Result, Str
     validated_result(snapshot, result.solution, certificate, result.pivots)
 }
 
+/// Native-free floating search, followed by exact full-model correction.
+pub(crate) fn solve_rust_verified(
+    snapshot: &Snapshot,
+    captured: Option<&std::path::Path>,
+) -> std::result::Result<Result, String> {
+    snapshot.check()?;
+    let model = snapshot.exact_model();
+    let start = Instant::now();
+    let proposal =
+        model.float_candidate_with_observer(20000, |_| start.elapsed().as_secs_f64() < 120.0)?;
+    if let Some(source) = captured {
+        let save = || -> std::result::Result<(), Box<dyn std::error::Error>> {
+            let directory = source
+                .parent()
+                .ok_or("capture has no parent")?
+                .join("rust-candidates");
+            std::fs::create_dir_all(&directory)?;
+            let file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(directory.join(source.file_name().ok_or("capture has no filename")?))?;
+            serde_json::to_writer(
+                std::io::BufWriter::new(file),
+                &serde_json::json!({
+                    "original_snapshot":source,"model_scope":"full","basis":proposal.basis,
+                    "pivots":proposal.pivots,"stop_reason":proposal.stop_reason,
+                    "diagnostic":proposal.diagnostic,"proposal_seconds":start.elapsed().as_secs_f64(),
+                }),
+            )?;
+            Ok(())
+        };
+        if let Err(error) = save() {
+            eprintln!("[LP-RUST-CANDIDATE-CAPTURE-ERROR] {error}");
+        }
+    }
+    let result = model.refine_basis_with_observer(proposal.basis, 1000, |_, _| {
+        start.elapsed().as_secs_f64() < 120.0
+    })?;
+    if !result.certificate.optimal {
+        return Err(format!(
+            "Rust verified solve incomplete: {:?}; exact infeasibility={}",
+            result.stop_reason,
+            result.infeasibility.is_some()
+        ));
+    }
+    validated_result(
+        snapshot,
+        result.solution,
+        result.certificate,
+        proposal.pivots + result.repair_pivots + result.optimization_pivots,
+    )
+}
+
 fn validated_result(
     snapshot: &Snapshot,
     solution: exact::ExactSolution,

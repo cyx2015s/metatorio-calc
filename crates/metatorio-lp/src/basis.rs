@@ -25,7 +25,7 @@ fn indices(basis: &Basis) -> (Vec<usize>, Vec<usize>) {
     )
 }
 fn matrix(model: &Model, columns: &[usize], rows: &[usize]) -> Result<Vec<Vec<Rational>>, String> {
-    if columns.len() != rows.len() || columns.len() > super::MAX_BASIS_DIMENSION {
+    if columns.len() != rows.len() || columns.len() > super::MAX_RECONSTRUCTION_DIMENSION {
         return Err("compressed basis dimension exceeds limit or is not square".into());
     }
     let mut positions = vec![None; model.columns.len()];
@@ -92,6 +92,9 @@ impl System {
             return Err("basis dimensions differ from model".into());
         }
         let (columns, rows) = indices(basis);
+        if columns.len() > super::MAX_BASIS_DIMENSION {
+            return Err("exact inverse dimension limit exceeded".into());
+        }
         let inverse = invert(matrix(model, &columns, &rows)?)?;
         Ok(Self {
             columns,
@@ -151,6 +154,30 @@ impl System {
             })
             .collect::<Result<Vec<_>, String>>()?;
         Ok(product(&self.inverse, &rhs))
+    }
+    pub fn uncached_direction(
+        model: &Model,
+        basis: &Basis,
+        entering: usize,
+    ) -> Result<(Vec<usize>, Vec<Rational>), String> {
+        let (columns, rows) = indices(basis);
+        let rhs = rows
+            .iter()
+            .map(|row| {
+                let mut value = Rational::zero();
+                if entering == model.columns.len() + row {
+                    value -= rational(1.0)?;
+                }
+                for (i, a) in &model.rows[*row].terms {
+                    if *i == entering {
+                        value -= rational(*a)?;
+                    }
+                }
+                Ok(value)
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        let values = super::solve(matrix(model, &columns, &rows)?, rhs)?;
+        Ok((columns, values))
     }
     /// Row of the full basis inverse for a structural variable or basic slack.
     /// Multiplying this functional by b gives that variable's current value.
@@ -248,6 +275,9 @@ impl System {
         let mut rows = self.rows.clone();
         let structural_enter = entering < model.columns.len();
         let structural_leave = leaving < model.columns.len();
+        if structural_enter && !structural_leave && n >= super::MAX_BASIS_DIMENSION {
+            return Err("exact inverse dimension limit exceeded".into());
+        }
         let inverse = match (structural_enter, structural_leave) {
             (true, true) => {
                 let p = columns

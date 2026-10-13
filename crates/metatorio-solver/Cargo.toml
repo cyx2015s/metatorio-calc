@@ -38,3 +38,11 @@ required-features = ["lp-experiments"]
 [[example]]
 name = "lp_dual_from_zero"
 required-features = ["lp-experiments"]
+
+[[example]]
+name = "lp_float_propose"
+required-features = ["lp-experiments"]
+
+[[example]]
+name = "lp_refine_candidate"
+required-features = ["lp-experiments"]

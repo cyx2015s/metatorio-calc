@@ -19,21 +19,36 @@ execution limits return a nonterminal candidate, which may remain infeasible.
 Every returned optimality claim must be confirmed by `Model::certify`; limits
 preserve a nonterminal result. The observer API supports application cancellation.
 
+`float_candidate_with_observer` searches the full model in Rust with power-of-two
+scaling, floating dual simplex, a two-pass ratio test and periodic structural
+refactorization. Its basis and stop reason are **unverified hints**.
+`refine_basis_with_observer` reconstructs that basis exactly, repairs feasibility,
+and optimizes with the original costs. Auxiliary cost shifts preserve useful
+dual prices when possible; zero costs provide a fallback feasibility objective.
+Only the final original-model certificate establishes optimality. The optional
+`refine_basis_with_rule` selects an exact repair strategy for experiments.
+
 Coefficients are interpreted as the exact binary rational values of the input
 `f64`s. Exact solutions are retained as rational numbers; conversion to `f64` is a
 separate operation and introduces rounding.
 
 The simplex currently supports nonnegative variables without finite upper bounds,
 equality rows and `<=` rows. The certificate/reconstruction APIs additionally
-support finite variable bounds. Structural basis dimension is currently limited
-to 256. The basis inverse uses exact row/column/border/deletion updates, with
+support finite variable bounds. Cached exact inverse updates remain limited to
+256 structural columns. Reconstruction and uncached repair/optimization support
+up to 2,048 structural columns; floating search allows up to 4,096 rows.
+The basis inverse uses exact row/column/border/deletion updates, with
 independent reconstruction tests. Pricing uses a common integer denominator.
+These are prototype resource guards, not scalability guarantees. Observer time
+budgets are checked between pivots; one exact factorization can exceed a budget.
 
 This is an experimental core, not the default application backend. Large-model
 Phase I still needs better degeneracy handling and sparse factorization; complete
 pure Rust large-model application validation remains outstanding. An opt-in
 application bridge and a hybrid exact-repair bridge live in metatorio-solver. See
 `docs/lp-experiments.md` in the repository root for measured results and scope.
+The opt-in `rust-verified` backend uses Rust floating search plus exact refinement
+without calling HiGHS, and accepts only a complete-model exact optimum.
 
 ```powershell
 cargo test -p metatorio-lp
