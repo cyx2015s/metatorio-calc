@@ -86,3 +86,71 @@ cargo check --release -p metatorio-shell --features lp-experiments --tests
 4. **独立 Rust 搜索内核**：逐步实现稀疏存储、基分解/更新、修正单纯形、退化处理和可逆 presolve。每替换一个模块，都运行冻结矩阵差分；保留 HiGHS 作参照。
 
 首个更高精度版本的成功条件应是：目标样本完成真实回写，数值不确定与不可行分开报告，保留必要的微小流量，并提供可审查的残差/证书。更强大的 LP/QP/MIP 功能在这个基础稳定后逐步扩展。
+
+## 第二阶段：Rust 精确基与精确单纯形（2026-10-13）
+
+新增 `rational-lp` 功能和 `lp_rational` 模块。这个核心没有 HiGHS 调用：
+
+- 使用纯 Rust 大整数/有理数重新构造基础矩阵，消去基本行松弛变量，精确求出原始解和行对偶。
+- 检查每条原始行、每个变量边界，对完整候选列进行精确定价；只有原始可行性、对偶可行性及目标差严格为 0 时标记最优。
+- 全量定价使用共享分母整数运算，避免每个矩阵乘积都约分；覆盖最小非零浮点、最小正常数、极大值和普通小数的独立有理数对照测试。
+- 实现针对应用当前变量形式的精确原始单纯形：变量下界 0、无有限上界，等式与 `<=` 行；用 Dantzig 选列，检测到重复基后永久切换到 Bland 选列。
+- 返回无界前独立验证精确改善射线。换基上限或外部停止保留当前可行解、基和非终止原因，可以继续求解，不转换为不可行。
+
+输入语义是捕获的 `f64` 模型的**精确二进制有理数值**，不是从游戏原始数据恢复的十进制或整数比例。最终转回 `f64` 时仍有舍入；精确证书对应保存的有理数解。`metatorio-solver` 目前整体仍依赖 good_lp/HiGHS，Rust 核心本身不调用它们；独立求解 crate 的提取仍待完成。
+
+### 精确检查改变了上一轮结论的适用范围
+
+24 个冻结模型全部做了精确基重构与原模型检查：
+
+| 检查层次 | 通过记录数 |
+|---|---:|
+| 上一轮浮点预算下可行 | 24/24 |
+| 这组候选基重构后的严格原始可行 | 15/24 |
+| 这组支持子问题原始/对偶严格最优 | 15/24 |
+| 这组支持解的行对偶证明完整模型最优 | 0/24 |
+
+剩余 9 个候选基存在严格意义上的行或边界违反；这只否定这些候选基，不证明模型不可行。其余 15 个原始解严格可行，但支持子问题的这组对偶未覆盖完整模型的改善列，也不证明原始解不是全局最优。完整汇总为 `local/lp-exp/exact-summary.json`。
+
+共享分母优化前后，首批样本的精确判定和改善列计数保持一致：史诗级生物室完整检查从 39.26 秒降至 0.16 秒，传奇级堆叠机械臂从 269.51 秒降至 0.56 秒。时间来自本机实验日志，包含相同原模型定价，基础矩阵重构时间另算。
+
+### 第一个完整模型的 Rust 精确最优证书
+
+对请求 4（稀有品质插件塔设置、Fulgora、普通电磁工厂目标）的 **2,032 变量、373 行完整模型**运行 Rust 精确单纯形。初始候选基来自上一轮已保存的 22 列支持 LP，这次运行没有调用 C++ 求解：
+
+- 仅 Bland 选列在 120 秒内执行了 422 次换基，尚未收敛；该实验报告非终止，未报不可行。
+- Dantzig + 重复基检测退路执行 99 次换基得到完整模型精确最优证书，初测 19.13 秒、最终版复跑 30.27 秒，本例没有触发 Bland 退路。
+- 完整原始约束和边界严格满足，对偶符号严格满足，精确目标差为 0。
+- 转成 `f64` 后目标值约 `3988.917887719224`，通过原应用行校验且无边界违反。
+- 另有经典退化循环样例实际触发重复基检测/Bland 退路，并得到精确最优解；无界射线、有限上界证书、微小缺口和非终止恢复也有测试。
+
+证据位于 `local/lp-exp/corpus-20261013/replay-support-refine-20261013-084337/request-4/rust-simplex-final.json`；该文件保留完整基、精确非零原始解、行对偶和原模型证书。
+
+从该文件的基重新启动后，0 次换基、约 0.30 秒再次通过完整最优证书，记录为同目录的 `rust-simplex-resumed.json`。
+
+```powershell
+$env:CMAKE_GENERATOR = 'Ninja'
+cargo build --release -p metatorio-solver --features lp-experiments --example lp_certify
+$cases = Get-Content local/lp-exp/corpus-20261013/request-outcomes-0.jsonl |
+    ForEach-Object { $_ | ConvertFrom-Json }
+$caseDir = 'local/lp-exp/corpus-20261013/replay-support-refine-20261013-084337/request-4'
+
+# 只重构已保存的基，并检查完整原模型。
+./target/release/examples/lp_certify.exe $cases[4].snapshot_paths[0] `
+    "$caseDir/support-refine.json" "$caseDir/exact-check.json"
+
+# 由 Rust 在完整候选列上换基，例程提供 120 秒非终止运行限额。
+./target/release/examples/lp_certify.exe $cases[4].snapshot_paths[0] `
+    "$caseDir/support-refine.json" "$caseDir/rust-simplex-final.json" --solve
+
+# 从保存的完整基继续；已经最优的基应以 0 次换基重新通过证书。
+./target/release/examples/lp_certify.exe $cases[4].snapshot_paths[0] `
+    "$caseDir/support-refine.json" "$caseDir/resumed.json" `
+    --resume "$caseDir/rust-simplex-final.json"
+```
+
+这是候选基与精确核心分层的起点。[SoPlex 的官方精确 LP 说明](https://soplex.zib.de/doc-7.0.0/html/EXACT.php)也介绍了浮点搜索与精确求解结合的方向；本原型尚未实现其迭代修正和精度提升能力。
+
+### 仍需完成
+
+下一步优先补齐 Phase I/双重单纯形修复，使 Rust 能从零启动，并处理当前 9 个不严格可行的候选基。然后改进基分解复用、稀疏更新与全量定价的缓存，扩展到全部冻结模型，再接入真实规划回写。当前稠密精确基础矩阵限制为 256 个结构基本变量，尚无完整 presolve、生产适用的运行限额/取消接口、全应用回归验证或独立无 C++ 依赖的 crate；整个特化 Rust 求解器目标仍未完成。

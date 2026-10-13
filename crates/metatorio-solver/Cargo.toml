@@ -6,7 +6,8 @@ description = "Metatorio 求解器内核：线性规划求解与组合枚举，�
 license = "MIT"
 
 [features]
-lp-experiments = ["dep:highs", "dep:highs-sys", "dep:serde_json"]
+rational-lp = ["dep:num-rational", "dep:num-traits", "dep:num-bigint", "dep:num-integer"]
+lp-experiments = ["dep:highs", "dep:highs-sys", "dep:serde_json", "rational-lp"]
 
 [dependencies]
 ahash = { version = "0.8", features = ["serde"] }
@@ -18,7 +19,15 @@ serde = { version = "1", features = ["derive"] }
 highs = { version = "2.4", optional = true }
 highs-sys = { version = "1.15", optional = true }
 serde_json = { version = "1", optional = true }
+num-rational = { version = "0.4", optional = true }
+num-traits = { version = "0.2", optional = true }
+num-bigint = { version = "0.4", optional = true }
+num-integer = { version = "0.1", optional = true }
 
 [[example]]
 name = "lp_replay"
+required-features = ["lp-experiments"]
+
+[[example]]
+name = "lp_certify"
 required-features = ["lp-experiments"]

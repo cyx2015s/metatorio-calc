@@ -9,6 +9,8 @@ pub mod concept;
 pub mod lp;
 #[cfg(feature = "lp-experiments")]
 pub mod lp_experiments;
+#[cfg(feature = "rational-lp")]
+pub mod lp_rational;
 pub mod solver;
 
 pub use comb::*;
