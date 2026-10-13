@@ -193,6 +193,49 @@ impl System {
         }
         Ok(result)
     }
+    pub fn cached_functional(
+        &self,
+        model: &Model,
+        variable: usize,
+    ) -> Result<Vec<Rational>, String> {
+        let mut result = vec![Rational::zero(); model.rows.len()];
+        if variable < model.columns.len() {
+            let p = self
+                .columns
+                .iter()
+                .position(|i| *i == variable)
+                .ok_or("functional requires a basic column")?;
+            for (j, row) in self.rows.iter().enumerate() {
+                result[*row] = self.inverse[p][j].clone();
+            }
+        } else {
+            let row = variable - model.columns.len();
+            if row >= model.rows.len() || self.rows.contains(&row) {
+                return Err("functional requires a basic row slack".into());
+            }
+            let mut positions = vec![None; model.columns.len()];
+            for (j, column) in self.columns.iter().enumerate() {
+                positions[*column] = Some(j);
+            }
+            let mut coefficients = vec![Rational::zero(); self.columns.len()];
+            for (column, a) in &model.rows[row].terms {
+                if let Some(j) = positions[*column] {
+                    coefficients[j] += rational(*a)?;
+                }
+            }
+            result[row] = rational(1.0)?;
+            for (j, active) in self.rows.iter().enumerate() {
+                result[*active] = -self
+                    .inverse
+                    .iter()
+                    .zip(&coefficients)
+                    .filter(|(r, a)| !r[j].is_zero() && !a.is_zero())
+                    .map(|(r, a)| &r[j] * a)
+                    .sum::<Rational>();
+            }
+        }
+        Ok(result)
+    }
     pub fn update(
         &mut self,
         model: &Model,
@@ -409,6 +452,14 @@ mod tests {
             let independent = model.reconstruct(&basis).unwrap();
             assert_eq!(updated.values, independent.values);
             assert_eq!(updated.row_duals, independent.row_duals);
+            for (variable, status) in basis.columns.iter().chain(&basis.rows).enumerate() {
+                if *status == BasisStatus::Basic {
+                    assert_eq!(
+                        system.cached_functional(&model, variable).unwrap(),
+                        System::functional(&model, &basis, variable).unwrap()
+                    );
+                }
+            }
         }
     }
 }

@@ -34,3 +34,7 @@ required-features = ["lp-experiments"]
 [[example]]
 name = "lp_from_zero"
 required-features = ["lp-experiments"]
+
+[[example]]
+name = "lp_dual_from_zero"
+required-features = ["lp-experiments"]

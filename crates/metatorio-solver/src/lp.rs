@@ -35,6 +35,10 @@ pub struct SolveReport {
     pub variables_after: usize,
     /// 用**原始 LP**评估这个解的最大相对约束违反量。
     pub primal_violation: f64,
+    /// Full original LP verified with exact binary-rational coefficients.
+    pub exact_primal_verified: bool,
+    /// Full original LP has an exact primal/dual optimality certificate.
+    pub exact_optimality_verified: bool,
 }
 
 /// 求解结果（原问题空间）。
@@ -361,7 +365,12 @@ fn solve_lp_impl(
         1.0
     };
     #[cfg(feature = "lp-experiments")]
-    if std::env::var_os("METATORIO_LP_CAPTURE_DIR").is_some() {
+    if std::env::var_os("METATORIO_LP_CAPTURE_DIR").is_some()
+        || matches!(
+            std::env::var("METATORIO_LP_BACKEND").as_deref(),
+            Ok("hybrid-exact" | "rust-exact")
+        )
+    {
         use crate::lp_experiments::{Row, Snapshot, capture, column};
         let mut objective_terms: Vec<_> =
             objective.iter().map(|(i, a)| (*i, a.to_bits())).collect();
@@ -389,6 +398,48 @@ fn solve_lp_impl(
             production_rhs_scale_bits: rhs_scale.to_bits(),
         };
         capture(&snapshot);
+        if matches!(
+            std::env::var("METATORIO_LP_BACKEND").as_deref(),
+            Ok("hybrid-exact" | "rust-exact")
+        ) {
+            let start = Instant::now();
+            let backend = std::env::var("METATORIO_LP_BACKEND").unwrap_or_default();
+            let result = if backend == "rust-exact" {
+                crate::lp_hybrid::solve_rust(&snapshot)
+            } else {
+                crate::lp_hybrid::solve(&snapshot)
+            }
+            .map_err(ResolutionError::Str)?;
+            let used = result.values.iter().filter(|x| **x != 0.0).count();
+            let (violation, cost) = evaluate_solution(&objective, &rows, &result.values);
+            if violation > ACCEPT_VIOLATION {
+                return Err(ResolutionError::Str(format!(
+                    "Rust 精确解转回浮点后未通过应用校验：{violation:.3e}"
+                )));
+            }
+            eprintln!(
+                "[LP-EXACT backend={backend}] columns={} support={} pivots={} full_primal={} full_optimal={} elapsed={:.2}s",
+                defs.len(),
+                used,
+                result.pivots,
+                result.certificate.primal_feasible,
+                result.certificate.optimal,
+                start.elapsed().as_secs_f64()
+            );
+            return Ok(assemble(
+                result.values,
+                vec![1.0; rows.len()],
+                cost,
+                SolveReport {
+                    variables_before: defs.len(),
+                    variables_after: used,
+                    primal_violation: violation,
+                    exact_primal_verified: result.certificate.primal_feasible,
+                    exact_optimality_verified: result.certificate.optimal,
+                },
+                &orig_vars,
+            ));
+        }
     }
     let full = build_problem(&defs, &objective, &rows, rhs_scale);
     if full.trivially_infeasible {
@@ -437,6 +488,7 @@ fn solve_lp_impl(
             variables_before: defs.len(),
             variables_after: variables_used,
             primal_violation: violation,
+            ..SolveReport::default()
         },
         &orig_vars,
     ))

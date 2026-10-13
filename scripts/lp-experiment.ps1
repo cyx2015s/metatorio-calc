@@ -1,16 +1,23 @@
 param(
     [string]$CorpusDirectory,
     [switch]$ReplayOnly,
+    [switch]$PipelineOnly,
+    [switch]$RequireSolved,
+    [ValidateSet('highs', 'hybrid-exact', 'rust-exact')]
+    [string]$Backend = 'highs',
     [ValidateSet('default', 'no-scaling', 'no-scaling-no-presolve', 'tight', 'tight-no-presolve', 'raw-rhs', 'ipx', 'ipx-no-presolve', 'support-refine')]
     [string]$Strategy = 'support-refine',
     [double]$TimeLimit = 20,
-    [int]$RequestLimit = 24
+    [int]$RequestLimit = 24,
+    [int]$RequestOffset = 0
 )
 $ErrorActionPreference = 'Stop'
+if ($PipelineOnly -and $ReplayOnly) { throw 'PipelineOnly and ReplayOnly are mutually exclusive.' }
+if ($RequestOffset -lt 0 -or $RequestLimit -lt 1) { throw 'Invalid request selection.' }
 $root = Split-Path -Parent $PSScriptRoot
 if (!$CorpusDirectory) { $CorpusDirectory = Join-Path $root "local/lp-exp/run-$(Get-Date -Format yyyyMMdd-HHmmss)" }
 $CorpusDirectory = [IO.Path]::GetFullPath($CorpusDirectory)
-$names = @('CMAKE_GENERATOR', 'METATORIO_LP_CAPTURE_DIR', 'LP_REQUEST_LIMIT', 'LP_REQUEST_OFFSET', 'LP_REQUESTS')
+$names = @('CMAKE_GENERATOR', 'METATORIO_LP_CAPTURE_DIR', 'METATORIO_LP_BACKEND', 'LP_REQUIRE_SOLVED', 'LP_REQUEST_LIMIT', 'LP_REQUEST_OFFSET', 'LP_REQUESTS')
 $saved = @{}
 foreach ($name in $names) { $saved[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
 Push-Location $root
@@ -21,10 +28,10 @@ try {
         New-Item -ItemType Directory -Path $CorpusDirectory | Out-Null
         $env:METATORIO_LP_CAPTURE_DIR = $CorpusDirectory
         $env:LP_REQUEST_LIMIT = "$RequestLimit"
-        $env:LP_REQUEST_OFFSET = '0'
+        $env:LP_REQUEST_OFFSET = "$RequestOffset"
+        $env:METATORIO_LP_BACKEND = $Backend
+        $env:LP_REQUIRE_SOLVED = if ($RequireSolved) { '1' } else { '0' }
         $env:LP_REQUESTS = Join-Path $root 'crates/metatorio-shell/src/mcp/auto_plan_assets_tests/fixtures/lp-failure-requests.jsonl'
-        & cargo test --release -p metatorio-shell --features lp-experiments --lib experiment_capture_failure_requests -- --ignored --nocapture *> (Join-Path $CorpusDirectory 'capture.log')
-        if ($LASTEXITCODE -ne 0) { throw "Capture failed; see $CorpusDirectory/capture.log" }
         @{
             captured_at = (Get-Date).ToUniversalTime().ToString('o')
             git_head = (& git rev-parse HEAD)
@@ -32,11 +39,25 @@ try {
             rustc = (& rustc --version)
             assets_sha256 = (Get-FileHash -LiteralPath (Join-Path $root 'assets/data-raw-dump.json') -Algorithm SHA256).Hash
             requests_sha256 = (Get-FileHash -LiteralPath $env:LP_REQUESTS -Algorithm SHA256).Hash
+            backend = $Backend
+            require_solved = [bool]$RequireSolved
+            request_offset = $RequestOffset
+            request_limit = $RequestLimit
         } | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8NoBOM (Join-Path $CorpusDirectory 'provenance.json')
+        & cargo test --release -p metatorio-shell --features lp-experiments --lib experiment_capture_failure_requests -- --ignored --nocapture *> (Join-Path $CorpusDirectory 'capture.log')
+        if ($LASTEXITCODE -ne 0) { throw "Capture failed; see $CorpusDirectory/capture.log" }
+    }
+    if ($PipelineOnly) {
+        Get-Content -LiteralPath (Join-Path $CorpusDirectory "request-outcomes-$RequestOffset.jsonl") | ForEach-Object {
+            $case = $_ | ConvertFrom-Json
+            [pscustomobject]@{ request_index = $case.request_index; status = $case.status; elapsed_ms = $case.elapsed_ms; error = $case.error_summary }
+        } | Format-Table
+        Write-Host "Evidence: $CorpusDirectory"
+        return
     }
     & cargo build --release -p metatorio-solver --features lp-experiments --example lp_replay
     if ($LASTEXITCODE -ne 0) { throw 'Replay build failed.' }
-    $outcomes = @(Get-Content -LiteralPath (Join-Path $CorpusDirectory 'request-outcomes-0.jsonl') | ForEach-Object { $_ | ConvertFrom-Json })
+    $outcomes = @(Get-Content -LiteralPath (Join-Path $CorpusDirectory "request-outcomes-$RequestOffset.jsonl") | ForEach-Object { $_ | ConvertFrom-Json })
     $replayDir = Join-Path $CorpusDirectory "replay-$Strategy-$(Get-Date -Format yyyyMMdd-HHmmss)"
     New-Item -ItemType Directory -Path $replayDir | Out-Null
     $summary = foreach ($case in $outcomes) {

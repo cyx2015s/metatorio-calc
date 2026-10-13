@@ -54,6 +54,14 @@ pub struct SolveDiagnostics {
     pub variables_after: usize,
     /// 用**原始 LP**复核这个解的最大相对约束违反量。
     pub solution_violation: f64,
+    /// Exact certificate for the returned factory LP. After auto-plan this is
+    /// the written-back factory, not the full candidate planning model.
+    #[serde(default)]
+    pub exact_primal_verified: bool,
+    /// Optimality over the returned factory's mechanisms only; this does not
+    /// establish optimality over all auto-plan candidates.
+    #[serde(default)]
+    pub exact_optimality_verified: bool,
     /// 自动规划回写前自检：写回的机制集合自己能不能解出目标。
     /// false 表示这次回写的方案**验证不过**（结果可能无解），需要人工/agent 判断。
     pub writeback_verified: bool,
@@ -73,6 +81,8 @@ impl SolveDiagnostics {
             variables_before: report.variables_before,
             variables_after: report.variables_after,
             solution_violation: report.primal_violation,
+            exact_primal_verified: report.exact_primal_verified,
+            exact_optimality_verified: report.exact_optimality_verified,
             ..Self::default()
         }
     }

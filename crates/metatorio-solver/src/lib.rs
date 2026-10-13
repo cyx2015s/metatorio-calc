@@ -9,6 +9,8 @@ pub mod concept;
 pub mod lp;
 #[cfg(feature = "lp-experiments")]
 pub mod lp_experiments;
+#[cfg(feature = "lp-experiments")]
+mod lp_hybrid;
 #[cfg(feature = "rational-lp")]
 pub use metatorio_lp as lp_rational;
 pub mod solver;

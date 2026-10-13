@@ -140,7 +140,8 @@ fn solve(mut matrix: Vec<Vec<Rational>>, mut rhs: Vec<Rational>) -> Result<Vec<R
     }
     for k in 0..n {
         let pivot = (k..n)
-            .find(|i| !matrix[*i][k].is_zero())
+            .filter(|i| !matrix[*i][k].is_zero())
+            .min_by_key(|i| matrix[*i][k..].iter().filter(|a| !a.is_zero()).count())
             .ok_or("exactly singular basis")?;
         matrix.swap(k, pivot);
         rhs.swap(k, pivot);
@@ -151,18 +152,25 @@ fn solve(mut matrix: Vec<Vec<Rational>>, mut rhs: Vec<Rational>) -> Result<Vec<R
             let factor = &matrix[i][k] / &matrix[k][k];
             matrix[i][k] = Rational::zero();
             for j in k + 1..n {
+                if matrix[k][j].is_zero() {
+                    continue;
+                }
                 let product = &factor * &matrix[k][j];
                 matrix[i][j] -= product;
             }
-            let product = &factor * &rhs[k];
-            rhs[i] -= product;
+            if !rhs[k].is_zero() {
+                let product = &factor * &rhs[k];
+                rhs[i] -= product;
+            }
         }
     }
     let mut result = vec![Rational::zero(); n];
     for i in (0..n).rev() {
         let mut value = rhs[i].clone();
         for (j, x) in result.iter().enumerate().skip(i + 1) {
-            value -= &matrix[i][j] * x;
+            if !matrix[i][j].is_zero() && !x.is_zero() {
+                value -= &matrix[i][j] * x;
+            }
         }
         result[i] = value / &matrix[i][i];
     }

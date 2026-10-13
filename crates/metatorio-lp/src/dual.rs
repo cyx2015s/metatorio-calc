@@ -15,6 +15,27 @@ pub struct DualRepair {
     pub infeasibility: Option<InfeasibilityCertificate>,
 }
 impl Model {
+    /// Start without a candidate basis or artificial variables. Nonnegative
+    /// costs make the zero structural solution dual feasible; fixed equality
+    /// slacks can initially violate either side of zero.
+    pub fn solve_dual_with_observer(
+        &self,
+        max_pivots: usize,
+        observer: impl FnMut(PivotProgress) -> bool,
+    ) -> Result<DualRepair, String> {
+        if self.columns.iter().any(|c| c.cost < 0.0) {
+            return Err("dual cold start requires nonnegative objective costs".into());
+        }
+        self.repair_dual_inner(
+            Basis {
+                columns: vec![BasisStatus::Lower; self.columns.len()],
+                rows: vec![BasisStatus::Basic; self.rows.len()],
+            },
+            max_pivots,
+            observer,
+            true,
+        )
+    }
     pub fn repair_dual_feasible_basis(
         &self,
         basis: Basis,
@@ -27,9 +48,18 @@ impl Model {
     /// Failed ratio tests require an independently verified original Farkas ray.
     pub fn repair_dual_feasible_basis_with_observer(
         &self,
+        basis: Basis,
+        max_pivots: usize,
+        observer: impl FnMut(PivotProgress) -> bool,
+    ) -> Result<DualRepair, String> {
+        self.repair_dual_inner(basis, max_pivots, observer, false)
+    }
+    fn repair_dual_inner(
+        &self,
         mut basis: Basis,
         max_pivots: usize,
         mut observer: impl FnMut(PivotProgress) -> bool,
+        cache: bool,
     ) -> Result<DualRepair, String> {
         self.check()?;
         if self
@@ -40,9 +70,19 @@ impl Model {
             return Err("dual repair requires nonnegative columns without upper bounds".into());
         }
 
+        // Cold start has an empty inverse, so caching avoids repeated solves
+        // without paying the expensive dense initialization of a warm basis.
+        let mut system = if cache {
+            Some(basis::System::new(self, &basis)?)
+        } else {
+            None
+        };
         let mut seen = HashSet::new();
         for iteration in 0..=max_pivots {
-            let solution = self.reconstruct(&basis)?;
+            let solution = match &system {
+                Some(system) => system.reconstruct(self)?,
+                None => self.reconstruct(&basis)?,
+            };
             let certificate = self.certify(&solution)?;
             if !certificate.dual_feasible {
                 return Err(
@@ -113,7 +153,10 @@ impl Model {
             }
             let (leaving, increase) =
                 leaving.ok_or("failed primal check has no violating basic variable")?;
-            let mut ray = basis::System::functional(self, &basis, leaving)?;
+            let mut ray = match &system {
+                Some(system) => system.cached_functional(self, leaving)?,
+                None => basis::System::functional(self, &basis, leaving)?,
+            };
             if increase {
                 for y in &mut ray {
                     *y = -y.clone();
@@ -180,6 +223,9 @@ impl Model {
             } else {
                 basis.rows[entering - self.columns.len()] = BasisStatus::Basic;
             }
+            if let Some(system) = &mut system {
+                system.update(self, &basis, entering, leaving)?;
+            }
         }
         unreachable!()
     }
@@ -189,6 +235,49 @@ impl Model {
 mod tests {
     use super::*;
     use crate::{Column, Row};
+    #[test]
+    fn dual_cold_start_solves_a_production_chain_without_artificials() {
+        let model = Model {
+            columns: vec![column(3.0), column(1.0), column(0.0)],
+            rows: vec![
+                Row {
+                    equality: true,
+                    rhs: 1e-15,
+                    terms: vec![(0, 1.0), (2, 1.0)],
+                },
+                Row {
+                    equality: false,
+                    rhs: 0.0,
+                    terms: vec![(2, 2.0), (1, -1.0)],
+                },
+            ],
+            offset: 0.0,
+        };
+        let result = model.solve_dual_with_observer(20, |_| true).unwrap();
+        assert!(model.certify(&result.solution).unwrap().optimal);
+        assert!(result.solution.values[0].is_zero());
+        assert_eq!(result.solution.values[2], rational(1e-15).unwrap());
+        let mut infeasible = model.clone();
+        infeasible.rows.push(Row {
+            equality: false,
+            rhs: -1.0,
+            terms: vec![],
+        });
+        assert!(
+            infeasible
+                .solve_dual_with_observer(20, |_| true)
+                .unwrap()
+                .infeasibility
+                .is_some()
+        );
+        let mut negative_cost = model;
+        negative_cost.columns[0].cost = -1.0;
+        assert!(
+            negative_cost
+                .solve_dual_with_observer(20, |_| true)
+                .is_err()
+        );
+    }
     fn column(cost: f64) -> Column {
         Column {
             lower: 0.0,

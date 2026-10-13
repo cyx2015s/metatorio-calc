@@ -82,6 +82,15 @@ async fn experiment_capture_failure_requests() {
         *counts.entry(status.to_string()).or_insert(0usize) += 1;
         if status == "done" {
             assert_solved(&mcp, &ids, &state);
+            if matches!(
+                std::env::var("METATORIO_LP_BACKEND").as_deref(),
+                Ok("hybrid-exact" | "rust-exact")
+            ) {
+                assert_eq!(
+                    state["auto_plan"]["result"]["report"]["exact_primal_verified"],
+                    true
+                );
+            }
         } else {
             assert!(
                 state["auto_plan"]["error"]
@@ -93,4 +102,11 @@ async fn experiment_capture_failure_requests() {
         }
     }
     eprintln!("[LP-REQUEST-OUTCOMES] {counts:?}; diagnostic collection only");
+    if std::env::var("LP_REQUIRE_SOLVED").as_deref() == Ok("1") {
+        assert_eq!(
+            counts.get("failed").copied().unwrap_or(0),
+            0,
+            "strict experimental pipeline regression failed; inspect saved request outcomes"
+        );
+    }
 }

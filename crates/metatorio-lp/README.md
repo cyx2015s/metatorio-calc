@@ -6,6 +6,9 @@ This crate has no HiGHS, good_lp, native-library or C++ build dependency.
 `Model::solve` starts from zero with an artificial-variable Phase I, verifies an
 original-model Farkas certificate before returning infeasibility, and uses exact
 primal simplex for optimization. `optimize_from_basis` accepts an existing basis.
+For nonnegative objective costs, `solve_dual_with_observer` starts directly from
+zero with exact dual simplex, without artificial variables or a candidate basis.
+This path builds and updates its inverse from the empty structural basis.
 `repair_dual_feasible_basis` repairs primal violations in an exactly dual-feasible
 basis using exact dual simplex. A rejected hint does not imply infeasibility;
 ratio-test failure requires a verified Farkas certificate. Repeated bases and
@@ -25,7 +28,8 @@ independent reconstruction tests. Pricing uses a common integer denominator.
 
 This is an experimental core, not the default application backend. Large-model
 Phase I still needs better degeneracy handling and sparse factorization; complete
-application writeback/regression validation remains outstanding. See
+pure Rust large-model application validation remains outstanding. An opt-in
+application bridge and a hybrid exact-repair bridge live in metatorio-solver. See
 `docs/lp-experiments.md` in the repository root for measured results and scope.
 
 ```powershell
