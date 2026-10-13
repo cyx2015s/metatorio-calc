@@ -1,5 +1,5 @@
 //! Exact compressed basis inverse, including row-slack exchanges.
-use super::{Basis, BasisStatus, ExactSolution, Model, Rational, rational};
+use super::{Basis, BasisStatus, ExactSolution, Model, Rational, SolveControl, rational};
 use num_traits::Zero;
 
 pub(super) struct System {
@@ -14,7 +14,16 @@ pub(super) struct Factored {
     pub factor: super::factor::Factorization,
 }
 impl Factored {
+    #[cfg(test)]
     pub fn direction(&self, model: &Model, entering: usize) -> Result<Vec<Rational>, String> {
+        self.direction_with_control(model, entering, &SolveControl::default())
+    }
+    pub fn direction_with_control(
+        &self,
+        model: &Model,
+        entering: usize,
+        control: &SolveControl,
+    ) -> Result<Vec<Rational>, String> {
         let rhs = self
             .rows
             .iter()
@@ -31,9 +40,18 @@ impl Factored {
                 Ok(value)
             })
             .collect::<Result<Vec<_>, String>>()?;
-        self.factor.solve(&rhs)
+        self.factor.solve_with_control(&rhs, control)
     }
+    #[cfg(test)]
     pub fn functional(&self, model: &Model, variable: usize) -> Result<Vec<Rational>, String> {
+        self.functional_with_control(model, variable, &SolveControl::default())
+    }
+    pub fn functional_with_control(
+        &self,
+        model: &Model,
+        variable: usize,
+        control: &SolveControl,
+    ) -> Result<Vec<Rational>, String> {
         let mut rhs = vec![Rational::zero(); self.columns.len()];
         let mut result = vec![Rational::zero(); model.rows.len()];
         if variable < model.columns.len() {
@@ -59,7 +77,11 @@ impl Factored {
             }
             result[row] = rational(1.0)?;
         }
-        for (row, value) in self.rows.iter().zip(self.factor.solve_transpose(&rhs)?) {
+        for (row, value) in self
+            .rows
+            .iter()
+            .zip(self.factor.solve_transpose_with_control(&rhs, control)?)
+        {
             result[*row] = value;
         }
         Ok(result)

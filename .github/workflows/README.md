@@ -5,11 +5,13 @@
 用 **Tauri** 编译并发布桌面应用（不再是旧的 egui 版），支持 **Linux（x86_64 → AppImage）** 和 **Windows（x86_64 → NSIS setup.exe）**。
 macOS 因签名需付费证书暂不构建。
 
-### 原生构建依赖（HiGHS）
+### 可选原生构建依赖（HiGHS）
 
-`metatorio-solver` 通过 `good_lp` 的 `highs` feature 依赖 [HiGHS](https://highs.dev/)。
+默认构建使用纯 Rust `rust-certified`，不依赖 HiGHS。启用 `highs` 或
+`lp-experiments` 时，`metatorio-solver` 通过 `good_lp` 的 `highs` feature
+依赖 [HiGHS](https://highs.dev/)。
 `highs` crate 内置其 C++ 源码，构建时会用 **CMake** 编译、用 **bindgen** 生成绑定，
-因此 CI 里必须装齐：
+因此运行可选原生后端的 CI 需要装齐以下工具；现有发布 workflow 仍保留这些安装步骤：
 
 - **Linux**：`cmake`、`ninja-build`、`clang`、`libclang-dev`（bindgen 需要 libclang）。
 - **Windows**：runner 一般自带 LLVM；workflow 会检查 `C:\Program Files\LLVM\bin\libclang.dll`，

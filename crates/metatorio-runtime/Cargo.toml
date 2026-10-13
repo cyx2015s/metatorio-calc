@@ -6,7 +6,7 @@ description = "Metatorio application document model and framework-independent me
 license = "MIT"
 
 [features]
-default = ["highs"]
+default = ["rust-lp"]
 highs = ["metatorio-solver/highs"]
 rust-lp = ["metatorio-solver/rust-lp"]
 

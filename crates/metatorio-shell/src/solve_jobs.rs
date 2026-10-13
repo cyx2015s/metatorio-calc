@@ -84,7 +84,8 @@ impl KeyLocks {
 pub struct SolveJobs<R> {
     slots: Mutex<HashMap<SolveKey, Arc<Mutex<Slot<R>>>>>,
     /// 单次求解的等待上限：超时返回可重试错误，后台任务继续跑完
-    /// （结果丢弃；重试会重新算）。默认 120s，`METATORIO_SOLVE_TIMEOUT_MS` 可调。
+    /// （结果丢弃；重试会重新算）。普通重算默认 120s，异步 auto_plan 默认
+    /// 600s；`METATORIO_SOLVE_TIMEOUT_MS` 可调。
     timeout: Duration,
 }
 
@@ -92,22 +93,30 @@ impl<R> Default for SolveJobs<R> {
     fn default() -> Self {
         Self {
             slots: Mutex::new(HashMap::new()),
-            timeout: solve_timeout_from_env(),
+            timeout: solve_timeout_from_env(Duration::from_secs(120)),
         }
     }
 }
 
 /// 默认求解等待上限（毫秒），可用 `METATORIO_SOLVE_TIMEOUT_MS` 覆盖。
-fn solve_timeout_from_env() -> Duration {
-    const DEFAULT: Duration = Duration::from_secs(120);
+fn solve_timeout_from_env(default: Duration) -> Duration {
     std::env::var("METATORIO_SOLVE_TIMEOUT_MS")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
         .map(Duration::from_millis)
-        .unwrap_or(DEFAULT)
+        .unwrap_or(default)
 }
 
 impl<R: Clone + Send + 'static> SolveJobs<R> {
+    /// MCP auto_plan returns its running state immediately; its background job
+    /// can wait longer than an ordinary synchronous recompute. Explicit timeout
+    /// configuration still takes precedence over this default.
+    pub fn for_auto_plan() -> Self {
+        Self {
+            slots: Mutex::new(HashMap::new()),
+            timeout: solve_timeout_from_env(Duration::from_secs(600)),
+        }
+    }
     /// 覆盖等待上限（`--solve-timeout-ms` 或测试用）。
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;

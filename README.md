@@ -48,7 +48,7 @@
 | 组件 | 版本 | 用途 | 什么时候需要 |
 | --- | --- | --- | --- |
 | Rust | **≥ 1.85**（edition 2024；CI 用 stable） | 求解器内核（`crates/metatorio-solver` 等）+ Tauri 后端 | 编译一切 |
-| C++ 编译器 | 支持 C++11 即可（MSVC 2022 / GCC / Clang） | 编译 HiGHS 线性规划求解器 | 编译 `metatorio-solver` 时 |
+| C++ 编译器 | 支持 C++11 即可（MSVC 2022 / GCC / Clang） | 编译可选 HiGHS 后端 | 启用 `highs` 或 `lp-experiments` 时 |
 | CMake | **≥ 3.15**（实测 4.1 可用） | HiGHS 的构建系统 | 同上 |
 | Ninja（可选） | 任意 | 加速 HiGHS 的 CMake 构建 | 同上 |
 | LLVM / libclang | LLVM 14+ | `highs-sys` 用 bindgen 生成 C 绑定 | 同上 |
@@ -56,12 +56,12 @@
 | pnpm | 9.x | 前端包管理 | 前端 / 打包 |
 | Tauri v2 系统库 | 见下 | 桌面壳 | Linux 打包 |
 
-> **为什么会有 C++？** 求解器曾用纯 Rust 的 clarabel + microlp，但两者在
-> 「列高度相似、系数跨二十个数量级」的大 LP 上都不可靠（内点法给不出顶点、
-> 单纯形报 Singular matrix）。现在换成 [HiGHS](https://highs.dev/)（`good_lp`
-> 的 `highs` feature）。`highs` crate 内置 HiGHS 源码，`cargo build` 时会先用
-> CMake 把 C++ 编出来、再用 bindgen 生成绑定——所以工具链里多了 C++ / CMake /
-> LLVM。首次构建约 2 分钟，之后走 `target/` 缓存。
+> 默认求解后端为本项目的纯 Rust `rust-certified`，对原 LP 做精确可行性认证，
+> 并要求归一化目标差距不超过 `1e-12`。普通构建不需要 HiGHS 的 C++ 工具链。
+> [HiGHS](https://highs.dev/) 通过 `highs` feature 保留为可选后端；启用时，
+> `highs-sys` 会用 CMake 编译内置源码，再用 bindgen 生成绑定，因此需要上表的
+> C++ / CMake / LLVM。仅使用 HiGHS 可传 `--no-default-features --features highs`；
+> 同时编译两个后端时，设置 `METATORIO_LP_BACKEND=highs` 选择 HiGHS。
 
 ## 按平台装齐
 

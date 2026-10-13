@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-default = ["highs"]
+default = ["rust-lp"]
 highs = ["metatorio-solver/highs", "metatorio-runtime/highs"]
 rust-lp = ["metatorio-solver/rust-lp", "metatorio-runtime/rust-lp"]
 lp-experiments = ["highs", "rust-lp", "metatorio-solver/lp-experiments"]

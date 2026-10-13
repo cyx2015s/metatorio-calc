@@ -333,7 +333,7 @@ impl Default for AppState {
         Self {
             runtime: Mutex::new(Runtime::new()),
             solve_jobs: solve_jobs::SolveJobs::default(),
-            autoplan_jobs: solve_jobs::SolveJobs::default(),
+            autoplan_jobs: solve_jobs::SolveJobs::for_auto_plan(),
             context_loads: solve_jobs::KeyLocks::default(),
             contexts: Mutex::new(ContextRegistry::default()),
             project_paths: Mutex::new(HashMap::new()),

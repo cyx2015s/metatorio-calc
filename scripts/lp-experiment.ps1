@@ -4,6 +4,7 @@ param(
     [switch]$PipelineOnly,
     [switch]$RequireSolved,
     [switch]$NativeFree,
+    [switch]$UseDefaultBackend,
     [ValidateSet('highs', 'hybrid-exact', 'rust-exact', 'rust-verified', 'rust-certified')]
     [string]$Backend = 'highs',
     [ValidateSet('default', 'no-scaling', 'no-scaling-no-presolve', 'tight', 'tight-no-presolve', 'raw-rhs', 'ipx', 'ipx-no-presolve', 'support-refine')]
@@ -13,12 +14,15 @@ param(
     [int]$RequestOffset = 0
 )
 $ErrorActionPreference = 'Stop'
+if ($UseDefaultBackend -and (!$NativeFree -or !$RequireSolved -or $Backend -ne 'rust-certified')) {
+    throw 'UseDefaultBackend requires NativeFree, RequireSolved and rust-certified expectations.'
+}
 if ($PipelineOnly -and $ReplayOnly) { throw 'PipelineOnly and ReplayOnly are mutually exclusive.' }
 if ($RequestOffset -lt 0 -or $RequestLimit -lt 1) { throw 'Invalid request selection.' }
 if ($NativeFree -and (!$PipelineOnly -or $ReplayOnly -or $Backend -notlike 'rust-*')) {
     throw 'NativeFree requires PipelineOnly and a Rust backend.'
 }
-$cargoFeatures = if ($NativeFree) { @('--no-default-features', '--features', 'rust-lp') } else { @('--features', 'lp-experiments') }
+$cargoFeatures = if ($UseDefaultBackend) { @() } elseif ($NativeFree) { @('--no-default-features', '--features', 'rust-lp') } else { @('--features', 'lp-experiments') }
 $root = Split-Path -Parent $PSScriptRoot
 if (!$CorpusDirectory) { $CorpusDirectory = Join-Path $root "local/lp-exp/run-$(Get-Date -Format yyyyMMdd-HHmmss)" }
 $CorpusDirectory = [IO.Path]::GetFullPath($CorpusDirectory)
@@ -34,7 +38,7 @@ try {
         $env:METATORIO_LP_CAPTURE_DIR = $CorpusDirectory
         $env:LP_REQUEST_LIMIT = "$RequestLimit"
         $env:LP_REQUEST_OFFSET = "$RequestOffset"
-        $env:METATORIO_LP_BACKEND = $Backend
+        if ($UseDefaultBackend) { Remove-Item Env:METATORIO_LP_BACKEND -ErrorAction SilentlyContinue } else { $env:METATORIO_LP_BACKEND = $Backend }
         $env:LP_REQUIRE_SOLVED = if ($RequireSolved) { '1' } else { '0' }
         $env:LP_REQUESTS = Join-Path $root 'crates/metatorio-shell/src/mcp/auto_plan_assets_tests/fixtures/lp-failure-requests.jsonl'
         @{
@@ -45,6 +49,8 @@ try {
             assets_sha256 = (Get-FileHash -LiteralPath (Join-Path $root 'assets/data-raw-dump.json') -Algorithm SHA256).Hash
             requests_sha256 = (Get-FileHash -LiteralPath $env:LP_REQUESTS -Algorithm SHA256).Hash
             native_free_build = [bool]$NativeFree
+            backend_environment_unset = [bool]$UseDefaultBackend
+            default_features = [bool]$UseDefaultBackend
             backend = $Backend
             require_solved = [bool]$RequireSolved
             request_offset = $RequestOffset
@@ -115,5 +121,11 @@ try {
     Write-Host "Evidence: $replayDir"
 } finally {
     Pop-Location
-    foreach ($name in $names) { [Environment]::SetEnvironmentVariable($name, $saved[$name], 'Process') }
+    foreach ($name in $names) {
+        if ($null -eq $saved[$name]) {
+            Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue
+        } else {
+            [Environment]::SetEnvironmentVariable($name, $saved[$name], 'Process')
+        }
+    }
 }

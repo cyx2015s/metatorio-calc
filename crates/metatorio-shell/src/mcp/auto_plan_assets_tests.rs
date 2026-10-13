@@ -90,7 +90,7 @@ async fn poll(mcp: &MetatorioMcp, ids: &Value, limit: usize, offset: usize) -> V
 async fn finish(mcp: &MetatorioMcp, ids: &Value) -> Value {
     assert_eq!(ids["auto_plan"]["status"], "running");
     assert_eq!(ids["poll"]["arguments"]["project"], ids["project"]);
-    let deadline = Instant::now() + Duration::from_secs(180);
+    let deadline = Instant::now() + Duration::from_secs(660);
     loop {
         let state = poll(mcp, ids, 1000, 0).await;
         match state["auto_plan"]["status"].as_str() {
@@ -100,7 +100,7 @@ async fn finish(mcp: &MetatorioMcp, ids: &Value) -> Value {
         }
         assert!(
             Instant::now() < deadline,
-            "auto_plan did not finish within 180s: {ids}"
+            "auto_plan did not finish within 660s: {ids}"
         );
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
@@ -839,6 +839,18 @@ async fn legendary_large_circuit_preserves_solvability() {
         BASE,
         json!({"targets":[{"item":"electronic-circuit","quality":"legendary","amount":1e6}],
             "major_quality":"legendary","modules":{"best":true,"quality":"legendary"}}),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn legendary_large_circuit_with_shared_beacons_preserves_solvability() {
+    success(
+        BASE,
+        json!({"targets":[{"item":"electronic-circuit","quality":"legendary","amount":1e6}],
+            "major_quality":"legendary","modules":{"best":true,"quality":"legendary"},
+            "beacons":[{"beacon":{"id":"beacon","quality":"legendary"},"count":8,"share":8.0,
+                "modules":[{"module":{"id":"speed-module-3","quality":"legendary"},"count":16}]}]}),
     )
     .await;
 }

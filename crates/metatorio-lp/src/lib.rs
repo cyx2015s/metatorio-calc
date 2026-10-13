@@ -9,8 +9,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 mod basis;
 mod certified;
+mod control;
 mod dual;
 mod factor;
+pub use control::SolveControl;
 mod float;
 mod refine;
 pub use certified::CertifiedResult;
@@ -410,7 +412,7 @@ impl Model {
         max_pivots: usize,
         observer: impl FnMut(PivotProgress) -> bool,
     ) -> Result<Optimization, String> {
-        self.optimize_inner(basis, max_pivots, observer, true)
+        self.optimize_inner(basis, max_pivots, observer, true, &SolveControl::default())
     }
     /// Optimize a larger feasible basis by solving only the required systems,
     /// without constructing a dense exact inverse.
@@ -420,7 +422,16 @@ impl Model {
         max_pivots: usize,
         observer: impl FnMut(PivotProgress) -> bool,
     ) -> Result<Optimization, String> {
-        self.optimize_inner(basis, max_pivots, observer, false)
+        self.optimize_inner(basis, max_pivots, observer, false, &SolveControl::default())
+    }
+    pub fn optimize_without_inverse_with_control(
+        &self,
+        basis: Basis,
+        max_pivots: usize,
+        observer: impl FnMut(PivotProgress) -> bool,
+        control: &SolveControl,
+    ) -> Result<Optimization, String> {
+        self.optimize_inner(basis, max_pivots, observer, false, control)
     }
     fn optimize_inner(
         &self,
@@ -428,7 +439,9 @@ impl Model {
         max_pivots: usize,
         mut observer: impl FnMut(PivotProgress) -> bool,
         cache: bool,
+        control: &SolveControl,
     ) -> Result<Optimization, String> {
+        control.check()?;
         self.check()?;
         if self
             .columns
@@ -448,6 +461,7 @@ impl Model {
         let mut seen = HashSet::new();
         let mut bland = false;
         for iteration in 0..=max_pivots {
+            control.check()?;
             if !bland
                 && !seen.insert(
                     basis
@@ -464,7 +478,8 @@ impl Model {
             let (solution, factored) = match &system {
                 Some(system) => (system.reconstruct(self)?, None),
                 None => {
-                    let (solution, factor) = self.reconstruct_factored(&basis)?;
+                    let (solution, factor) =
+                        self.reconstruct_factored_with_control(&basis, control)?;
                     (solution, Some(factor))
                 }
             };
@@ -540,7 +555,7 @@ impl Model {
                     let factored = factored.as_ref().ok_or("missing exact factorization")?;
                     (
                         factored.columns.clone(),
-                        factored.direction(self, entering)?,
+                        factored.direction_with_control(self, entering, control)?,
                     )
                 }
             };
@@ -697,6 +712,23 @@ impl Model {
         &self,
         basis: &Basis,
     ) -> Result<(ExactSolution, basis::Factored), String> {
+        self.reconstruct_factored_with_control(basis, &SolveControl::default())
+    }
+    /// Interrupted reconstruction returns an error, never a partial solution.
+    pub fn reconstruct_with_control(
+        &self,
+        basis: &Basis,
+        control: &SolveControl,
+    ) -> Result<ExactSolution, String> {
+        self.reconstruct_factored_with_control(basis, control)
+            .map(|(solution, _)| solution)
+    }
+    fn reconstruct_factored_with_control(
+        &self,
+        basis: &Basis,
+        control: &SolveControl,
+    ) -> Result<(ExactSolution, basis::Factored), String> {
+        control.check()?;
         self.check()?;
         if basis.columns.len() != self.columns.len() || basis.rows.len() != self.rows.len() {
             return Err("basis dimensions differ from model".into());
@@ -722,6 +754,9 @@ impl Model {
         }
         let mut values = vec![Rational::zero(); self.columns.len()];
         for (i, (column, status)) in self.columns.iter().zip(&basis.columns).enumerate() {
+            if i % 1024 == 0 {
+                control.check()?;
+            }
             values[i] = match status {
                 BasisStatus::Basic => Rational::zero(),
                 BasisStatus::Lower => rational(column.lower)?,
@@ -733,6 +768,7 @@ impl Model {
         let mut matrix = vec![vec![Rational::zero(); columns.len()]; rows.len()];
         let mut rhs = Vec::with_capacity(rows.len());
         for (i, original) in rows.iter().enumerate() {
+            control.check()?;
             let row = &self.rows[*original];
             if !row.equality
                 && basis.rows[*original] != BasisStatus::Upper
@@ -753,8 +789,8 @@ impl Model {
             }
             rhs.push(value);
         }
-        let factor = factor::Factorization::new(matrix)?;
-        let basic = factor.solve(&rhs)?;
+        let factor = factor::Factorization::new_with_control(matrix, control)?;
+        let basic = factor.solve_with_control(&rhs, control)?;
         for (column, value) in columns.iter().zip(basic) {
             values[*column] = value;
         }
@@ -767,7 +803,7 @@ impl Model {
         let dual = if costs.iter().all(|c| c.is_zero()) {
             vec![Rational::zero(); columns.len()]
         } else {
-            factor.solve_transpose(&costs)?
+            factor.solve_transpose_with_control(&costs, control)?
         };
         let mut row_duals = vec![Rational::zero(); self.rows.len()];
         for (row, value) in rows.iter().zip(dual) {

@@ -1,7 +1,7 @@
 //! Replay the combined exact certification path from a saved floating hint.
 use metatorio_solver::{
     lp_experiments::Snapshot,
-    lp_rational::{FloatCandidate, Rational},
+    lp_rational::{FloatCandidate, Rational, SolveControl},
 };
 use std::{fs, io::BufReader, time::Instant};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -27,7 +27,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let start = Instant::now();
     let budget = Rational::new(1.into(), 1_000_000_000_000u64.into());
-    let result = snapshot.exact_model().certify_candidate_with_observer(
+    let duration = std::time::Duration::try_from_secs_f64(seconds)?;
+    let deadline = start.checked_add(duration).ok_or("time budget overflow")?;
+    let control = SolveControl::with_deadline(deadline);
+    let result = snapshot.exact_model().certify_candidate_with_control(
         &candidate,
         1000,
         &budget,
@@ -38,7 +41,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
             start.elapsed().as_secs_f64() < seconds
         },
-    )?;
+        &control,
+    );
+    let result = match result {
+        Ok(result) => result,
+        Err(error) => {
+            serde_json::to_writer(
+                std::io::BufWriter::new(fs::File::create(&args[2])?),
+                &serde_json::json!({"accepted":false,"terminal_status_established":false,
+                    "error":error,"elapsed_seconds":start.elapsed().as_secs_f64()}),
+            )?;
+            return Err(error.into());
+        }
+    };
     let output = serde_json::json!({"accepted":result.accepted,"certificate":result.certificate,
         "values":result.solution.values.iter().map(ToString::to_string).collect::<Vec<_>>(),
         "row_duals":result.solution.row_duals.iter().map(ToString::to_string).collect::<Vec<_>>(),

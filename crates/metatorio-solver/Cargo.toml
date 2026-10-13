@@ -6,7 +6,7 @@ description = "Metatorio 求解器内核：线性规划求解与组合枚举，�
 license = "MIT"
 
 [features]
-default = ["highs"]
+default = ["rust-lp"]
 highs = ["dep:good_lp", "good_lp/highs", "dep:highs", "dep:highs-sys"]
 rust-lp = ["rational-lp", "dep:serde_json", "dep:num-rational", "dep:num-traits"]
 rational-lp = ["dep:metatorio-lp"]
@@ -65,3 +65,7 @@ required-features = ["rust-lp"]
 [[example]]
 name = "lp_certified_candidate"
 required-features = ["rust-lp"]
+
+[[example]]
+name = "lp_application_replay"
+required-features = ["lp-experiments"]

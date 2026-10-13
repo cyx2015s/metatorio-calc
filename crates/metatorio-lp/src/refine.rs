@@ -1,7 +1,7 @@
 //! Exact correction of an untrusted candidate basis, preserving full-model scope.
 use crate::{
     Basis, BasisStatus, Certificate, DualPivotRule, ExactSolution, InfeasibilityCertificate, Model,
-    PivotProgress, Rational, rational,
+    PivotProgress, Rational, SolveControl, rational,
 };
 use num_traits::{Signed, ToPrimitive};
 #[derive(Debug)]
@@ -72,32 +72,73 @@ impl Model {
     /// Select the exact repair strategy; final certification always uses self.
     pub fn refine_basis_with_rule(
         &self,
+        basis: Basis,
+        rule: DualPivotRule,
+        max_pivots: usize,
+        observer: impl FnMut(bool, PivotProgress) -> bool,
+    ) -> Result<Refinement, String> {
+        self.refine_basis_with_rule_control(
+            basis,
+            rule,
+            max_pivots,
+            observer,
+            &SolveControl::default(),
+        )
+    }
+    /// Unlike a pivot observer stop, cooperative interruption can return Err
+    /// before a new exact solution is available. It never proves infeasibility.
+    pub fn refine_basis_with_control(
+        &self,
+        basis: Basis,
+        max_pivots: usize,
+        observer: impl FnMut(bool, PivotProgress) -> bool,
+        control: &SolveControl,
+    ) -> Result<Refinement, String> {
+        self.refine_basis_with_rule_control(
+            basis,
+            DualPivotRule::FirstViolation,
+            max_pivots,
+            observer,
+            control,
+        )
+    }
+    fn refine_basis_with_rule_control(
+        &self,
         mut basis: Basis,
         rule: DualPivotRule,
         max_pivots: usize,
         mut observer: impl FnMut(bool, PivotProgress) -> bool,
+        control: &SolveControl,
     ) -> Result<Refinement, String> {
-        let mut solution = self.reconstruct(&basis)?;
+        let mut solution = self.reconstruct_with_control(&basis, control)?;
         let mut certificate = self.certify(&solution)?;
         let mut repair_pivots = 0;
         if !certificate.primal_feasible {
             let preserve_objective = certificate.dual_feasible;
             let repaired = if preserve_objective {
-                self.repair_dual_feasible_basis_with_rule(basis, rule, max_pivots, |p| {
-                    observer(true, p)
-                })?
+                self.repair_dual_feasible_basis_with_control(
+                    basis,
+                    rule,
+                    max_pivots,
+                    |p| observer(true, p),
+                    control,
+                )?
             } else {
                 let feasibility = self.feasibility_objective(&basis, &solution);
-                feasibility.repair_dual_feasible_basis_with_rule(basis, rule, max_pivots, |p| {
-                    observer(true, p)
-                })?
+                feasibility.repair_dual_feasible_basis_with_control(
+                    basis,
+                    rule,
+                    max_pivots,
+                    |p| observer(true, p),
+                    control,
+                )?
             };
             repair_pivots = repaired.pivots;
             basis = repaired.basis;
             solution = if preserve_objective {
                 repaired.solution
             } else {
-                self.reconstruct(&basis)?
+                self.reconstruct_with_control(&basis, control)?
             };
             certificate = self.certify(&solution)?;
             if !certificate.primal_feasible {
@@ -125,7 +166,7 @@ impl Model {
                 unbounded_ray: None,
             });
         }
-        let optimized = self.optimize_without_inverse_with_observer(
+        let optimized = self.optimize_without_inverse_with_control(
             basis,
             max_pivots.saturating_sub(repair_pivots),
             |p| {
@@ -137,6 +178,7 @@ impl Model {
                     },
                 )
             },
+            control,
         )?;
         let certificate = self.certify(&optimized.solution)?;
         Ok(Refinement {

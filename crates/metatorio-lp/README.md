@@ -57,12 +57,16 @@ up to 2,048 structural columns; floating search allows up to 4,096 rows.
 The basis inverse uses exact row/column/border/deletion updates, with
 independent reconstruction tests. Pricing uses a common integer denominator.
 These are prototype resource guards, not scalability guarantees. Observer time
-budgets are checked between pivots; one exact factorization can exceed a budget.
+budgets are checked between pivots. The controlled entry points additionally
+check `SolveControl` deadlines or cancellation flags during uncached exact LU
+and triangular solves; large scans and individual rational operations can still
+overrun an observation point. Interrupted work returns an error without claiming
+infeasibility or optimality. Existing APIs retain their previous observer behavior.
 
-This is an experimental core, not the default application backend. Large-model
-Phase I still needs better degeneracy handling and sparse factorization; complete
-pure Rust large-model application validation remains outstanding. An opt-in
-application bridge and a hybrid exact-repair bridge live in metatorio-solver. See
+This core powers the default `rust-certified` application backend. Large-model
+Phase I still needs better degeneracy handling and sparse factorization; broader
+planet/quality coverage and performance work remain. The application bridge and
+an optional hybrid exact-repair bridge live in metatorio-solver. See
 `docs/lp-experiments.md` in the repository root for measured results and scope.
 The opt-in `rust-verified` backend uses Rust floating search plus exact refinement
 without calling HiGHS, and accepts only a complete-model exact optimum.
@@ -91,10 +95,11 @@ fn solve(model: &Model) -> Result<CertifiedResult, String> {
 // that the model is infeasible; its certificate retains the established facts.
 ```
 
-The opt-in application backend `rust-certified` uses this budget of `1/10^12`,
+The default application backend `rust-certified` uses this budget of `1/10^12`,
 requires strict original-model primal feasibility, and checks rounded writeback
 values independently. It reports `certified_relative_gap` alongside the existing
-exact feasibility/optimality fields. The default production backend is unchanged.
+exact feasibility/optimality fields. It certifies the binary f64 coefficients
+passed to the LP, rather than recovering pre-rounding game data.
 
 ```powershell
 cargo test -p metatorio-lp

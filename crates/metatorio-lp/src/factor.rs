@@ -1,5 +1,5 @@
 //! Exact sparsity-ordered LU shared by primal and transpose solves.
-use crate::{MAX_RECONSTRUCTION_DIMENSION, Rational};
+use crate::{MAX_RECONSTRUCTION_DIMENSION, Rational, SolveControl};
 use num_traits::Zero;
 
 pub(crate) struct Factorization {
@@ -9,7 +9,15 @@ pub(crate) struct Factorization {
 }
 
 impl Factorization {
-    pub fn new(mut matrix: Vec<Vec<Rational>>) -> Result<Self, String> {
+    #[cfg(test)]
+    pub fn new(matrix: Vec<Vec<Rational>>) -> Result<Self, String> {
+        Self::new_with_control(matrix, &SolveControl::default())
+    }
+    pub fn new_with_control(
+        mut matrix: Vec<Vec<Rational>>,
+        control: &SolveControl,
+    ) -> Result<Self, String> {
+        control.check()?;
         let n = matrix.len();
         if n > MAX_RECONSTRUCTION_DIMENSION || matrix.iter().any(|r| r.len() != n) {
             return Err("exact factorization dimension invalid".into());
@@ -20,6 +28,7 @@ impl Factorization {
             .map(|j| matrix.iter().filter(|r| !r[j].is_zero()).count())
             .collect();
         for k in 0..n {
+            control.check()?;
             // Eliminate sparse columns first, especially singleton chains.
             // Counts cover only the active trailing submatrix, updated exactly
             // for cancellation and fill. No small coefficient is dropped.
@@ -47,6 +56,7 @@ impl Factorization {
                 if matrix[i][k].is_zero() {
                     continue;
                 }
+                control.check()?;
                 let multiplier = &matrix[i][k] / &matrix[k][k];
                 for j in &nonzeros {
                     let was_zero = matrix[i][*j].is_zero();
@@ -70,7 +80,16 @@ impl Factorization {
         })
     }
 
+    #[cfg(test)]
     pub fn solve(&self, rhs: &[Rational]) -> Result<Vec<Rational>, String> {
+        self.solve_with_control(rhs, &SolveControl::default())
+    }
+    pub fn solve_with_control(
+        &self,
+        rhs: &[Rational],
+        control: &SolveControl,
+    ) -> Result<Vec<Rational>, String> {
+        control.check()?;
         let n = self.lu.len();
         if rhs.len() != n {
             return Err("exact factor RHS dimension invalid".into());
@@ -78,6 +97,7 @@ impl Factorization {
         let mut x: Vec<_> = self.permutation.iter().map(|i| rhs[*i].clone()).collect();
         // P A Q = L U; solve the triangular systems, then undo Q.
         for i in 0..n {
+            control.check()?;
             for j in 0..i {
                 if !self.lu[i][j].is_zero() && !x[j].is_zero() {
                     let product = &self.lu[i][j] * &x[j];
@@ -86,6 +106,7 @@ impl Factorization {
             }
         }
         for i in (0..n).rev() {
+            control.check()?;
             for j in i + 1..n {
                 if !self.lu[i][j].is_zero() && !x[j].is_zero() {
                     let product = &self.lu[i][j] * &x[j];
@@ -101,7 +122,16 @@ impl Factorization {
         Ok(result)
     }
 
+    #[cfg(test)]
     pub fn solve_transpose(&self, rhs: &[Rational]) -> Result<Vec<Rational>, String> {
+        self.solve_transpose_with_control(rhs, &SolveControl::default())
+    }
+    pub fn solve_transpose_with_control(
+        &self,
+        rhs: &[Rational],
+        control: &SolveControl,
+    ) -> Result<Vec<Rational>, String> {
+        control.check()?;
         let n = self.lu.len();
         if rhs.len() != n {
             return Err("exact transpose RHS dimension invalid".into());
@@ -113,6 +143,7 @@ impl Factorization {
             .collect();
         // Q^T A^T P^T = U^T L^T; solve, then undo P.
         for i in 0..n {
+            control.check()?;
             for j in 0..i {
                 if !self.lu[j][i].is_zero() && !x[j].is_zero() {
                     let product = &self.lu[j][i] * &x[j];
@@ -122,6 +153,7 @@ impl Factorization {
             x[i] /= &self.lu[i][i];
         }
         for i in (0..n).rev() {
+            control.check()?;
             for j in i + 1..n {
                 if !self.lu[j][i].is_zero() && !x[j].is_zero() {
                     let product = &self.lu[j][i] * &x[j];
@@ -141,6 +173,45 @@ impl Factorization {
 mod tests {
     use super::*;
     use crate::{rational, solve};
+    #[test]
+    fn deadline_interrupts_dense_elimination_and_both_solve_directions() {
+        let n = 88;
+        let matrix = (0..n)
+            .map(|i| {
+                (0..n)
+                    .map(|j| Rational::new(1.into(), (i + j + 1).into()))
+                    .collect()
+            })
+            .collect();
+        let control = SolveControl::with_deadline(
+            std::time::Instant::now() + std::time::Duration::from_millis(1),
+        );
+        let result = Factorization::new_with_control(matrix, &control);
+        assert!(matches!(result, Err(message) if message.contains("cancelled")));
+        let matrix = vec![
+            vec![rational(2.0).unwrap(), rational(1.0).unwrap()],
+            vec![rational(1.0).unwrap(), rational(3.0).unwrap()],
+        ];
+        let factor = Factorization::new(matrix).unwrap();
+        let rhs = vec![rational(1.0).unwrap(); 2];
+        let expired = SolveControl::with_deadline(std::time::Instant::now());
+        assert!(
+            factor
+                .solve_with_control(&rhs, &expired)
+                .unwrap_err()
+                .contains("cancelled")
+        );
+        assert!(
+            factor
+                .solve_transpose_with_control(&rhs, &expired)
+                .unwrap_err()
+                .contains("cancelled")
+        );
+        assert_eq!(
+            factor.solve(&rhs).unwrap(),
+            factor.solve_transpose(&rhs).unwrap()
+        );
+    }
     #[test]
     fn both_solve_directions_match_independent_elimination_with_row_swaps() {
         let mut state = 11u64;

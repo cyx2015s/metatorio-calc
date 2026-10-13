@@ -15,7 +15,7 @@ name = "metatorio_app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]
-default = ["highs"]
+default = ["rust-lp"]
 highs = ["metatorio-runtime/highs", "metatorio-shell/highs"]
 rust-lp = ["metatorio-runtime/rust-lp", "metatorio-shell/rust-lp"]
 

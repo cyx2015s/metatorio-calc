@@ -262,6 +262,24 @@ const ACCEPT_VIOLATION: f64 = 1e-6;
 /// 绝对可行性余量：相对违反量之外再给一个绝对下限（见 [`evaluate_solution`]）。
 const ABSOLUTE_VIOLATION: f64 = 1e-8;
 
+fn select_backend(requested: Option<&str>) -> Result<&str, ResolutionError> {
+    let name = match requested {
+        Some(name) => name,
+        None if cfg!(feature = "rust-lp") => "rust-certified",
+        None if cfg!(feature = "highs") => "highs",
+        None => return Err(ResolutionError::Other("no LP backend enabled")),
+    };
+    match name {
+        "highs" if cfg!(feature = "highs") => Ok(name),
+        "rust-certified" | "rust-verified" | "rust-exact" if cfg!(feature = "rust-lp") => Ok(name),
+        "hybrid-exact" if cfg!(feature = "rust-lp") && cfg!(feature = "highs") => Ok(name),
+        "highs" | "hybrid-exact" | "rust-certified" | "rust-verified" | "rust-exact" => Err(
+            ResolutionError::Str(format!("LP backend {name} is unavailable in this build")),
+        ),
+        _ => Err(ResolutionError::Str(format!("unknown LP backend: {name}"))),
+    }
+}
+
 /// 用**原始 LP**评估一个解：返回 (最大相对约束违反量, 目标值)。
 ///
 /// 相对量按该行的总量级归一：`max(|rhs|, Σ|系数×取值|)`。再叠加一个绝对下限：
@@ -321,8 +339,8 @@ fn assemble(
     }
 }
 
-/// 使用所选后端求解连续 LP。默认构建选择 HiGHS；只有 rust-lp 的构建
-/// 默认选择 Rust 认证路径。计算未完成与已经证明的不可行分别返回错误，
+/// 使用所选后端求解连续 LP。启用 rust-lp 的构建默认选择 Rust 认证路径；
+/// 仅启用 highs 时默认选择 HiGHS。计算未完成与已经证明的不可行分别返回错误，
 /// 所有返回值都须满足应用对原问题空间的校验。
 pub fn solve_lp(
     minimise: Expression,
@@ -404,18 +422,20 @@ fn solve_lp_impl(
     } else {
         1.0
     };
-    #[cfg(feature = "rust-lp")]
-    let backend = std::env::var("METATORIO_LP_BACKEND").unwrap_or_else(|_| {
-        if cfg!(feature = "highs") {
-            "highs".into()
-        } else {
-            "rust-certified".into()
+    let requested = match std::env::var("METATORIO_LP_BACKEND") {
+        Ok(value) => Some(value),
+        Err(std::env::VarError::NotPresent) => None,
+        Err(std::env::VarError::NotUnicode(_)) => {
+            return Err(ResolutionError::Other(
+                "invalid LP backend environment value",
+            ));
         }
-    });
+    };
+    let backend = select_backend(requested.as_deref())?;
     #[cfg(feature = "rust-lp")]
     if std::env::var_os("METATORIO_LP_CAPTURE_DIR").is_some()
         || matches!(
-            backend.as_str(),
+            backend,
             "hybrid-exact" | "rust-exact" | "rust-verified" | "rust-certified"
         )
     {
@@ -447,7 +467,7 @@ fn solve_lp_impl(
         };
         let captured = capture(&snapshot);
         if matches!(
-            backend.as_str(),
+            backend,
             "hybrid-exact" | "rust-exact" | "rust-verified" | "rust-certified"
         ) {
             let start = Instant::now();
@@ -511,12 +531,13 @@ fn solve_lp_impl(
     }
     #[cfg(not(feature = "highs"))]
     {
-        Err(ResolutionError::Other(
-            "requested LP backend is unavailable; use rust-certified",
-        ))
+        Err(ResolutionError::Str(format!(
+            "LP backend {backend} is unavailable in this build"
+        )))
     }
     #[cfg(feature = "highs")]
     {
+        debug_assert_eq!(backend, "highs");
         let full = build_problem(&defs, &objective, &rows, rhs_scale);
         if full.trivially_infeasible {
             return Err(ResolutionError::Infeasible);
@@ -573,6 +594,28 @@ fn solve_lp_impl(
 mod tests {
     use super::*;
     use crate::lp_model::*;
+
+    #[test]
+    fn backend_selection_prefers_certified_rust_and_rejects_unavailable_choices() {
+        if cfg!(feature = "rust-lp") {
+            assert_eq!(select_backend(None).unwrap(), "rust-certified");
+        } else if cfg!(feature = "highs") {
+            assert_eq!(select_backend(None).unwrap(), "highs");
+        }
+        for (name, available) in [
+            ("highs", cfg!(feature = "highs")),
+            ("rust-certified", cfg!(feature = "rust-lp")),
+            ("rust-verified", cfg!(feature = "rust-lp")),
+            ("rust-exact", cfg!(feature = "rust-lp")),
+            (
+                "hybrid-exact",
+                cfg!(feature = "rust-lp") && cfg!(feature = "highs"),
+            ),
+        ] {
+            assert_eq!(select_backend(Some(name)).is_ok(), available, "{name}");
+        }
+        assert!(select_backend(Some("ruts-certified")).is_err());
+    }
 
     #[test]
     fn objective_constant_and_invalid_expression_are_preserved() {

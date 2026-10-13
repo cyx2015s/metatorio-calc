@@ -82,15 +82,17 @@ async fn experiment_capture_failure_requests() {
         *counts.entry(status.to_string()).or_insert(0usize) += 1;
         if status == "done" {
             assert_solved(&mcp, &ids, &state);
+            let backend =
+                std::env::var("METATORIO_LP_BACKEND").unwrap_or_else(|_| "rust-certified".into());
             if matches!(
-                std::env::var("METATORIO_LP_BACKEND").as_deref(),
-                Ok("hybrid-exact" | "rust-exact" | "rust-verified" | "rust-certified")
+                backend.as_str(),
+                "hybrid-exact" | "rust-exact" | "rust-verified" | "rust-certified"
             ) {
                 assert_eq!(
                     state["auto_plan"]["result"]["report"]["exact_primal_verified"],
                     true
                 );
-                if std::env::var("METATORIO_LP_BACKEND").as_deref() == Ok("rust-certified") {
+                if backend == "rust-certified" {
                     let gap = state["auto_plan"]["result"]["report"]["certified_relative_gap"]
                         .as_f64()
                         .expect("missing certified gap");
@@ -99,10 +101,7 @@ async fn experiment_capture_failure_requests() {
                         "unaccepted certified gap {gap}"
                     );
                 }
-                if matches!(
-                    std::env::var("METATORIO_LP_BACKEND").as_deref(),
-                    Ok("rust-exact" | "rust-verified")
-                ) {
+                if matches!(backend.as_str(), "rust-exact" | "rust-verified") {
                     assert_eq!(
                         state["auto_plan"]["result"]["report"]["exact_optimality_verified"],
                         true

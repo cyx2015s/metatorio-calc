@@ -70,15 +70,34 @@ impl Model {
         candidate: &FloatCandidate,
         max_pivots: usize,
         gap_budget: &Rational,
-        mut observer: impl FnMut(&str, usize) -> bool,
+        observer: impl FnMut(&str, usize) -> bool,
     ) -> Result<CertifiedResult, String> {
+        self.certify_candidate_with_control(
+            candidate,
+            max_pivots,
+            gap_budget,
+            observer,
+            &crate::SolveControl::default(),
+        )
+    }
+    /// Cooperative interruption is separate from progress stops and may return
+    /// Err during a reconstruction, without creating a partial certificate.
+    pub fn certify_candidate_with_control(
+        &self,
+        candidate: &FloatCandidate,
+        max_pivots: usize,
+        gap_budget: &Rational,
+        mut observer: impl FnMut(&str, usize) -> bool,
+        control: &crate::SolveControl,
+    ) -> Result<CertifiedResult, String> {
+        control.check()?;
         if gap_budget.is_negative() {
             return Err("negative objective-gap budget".into());
         }
         if !observer("reconstruct", 0) {
             return Err("certified solve cancelled before reconstruction".into());
         }
-        let initial = self.reconstruct(&candidate.basis)?;
+        let initial = self.reconstruct_with_control(&candidate.basis, control)?;
         let (adjusted, _) = self.scale_to_dual_feasible(&initial)?;
         let initial_result = self.certified_result(
             adjusted.clone(),
@@ -87,6 +106,7 @@ impl Model {
             0,
             self.columns.len(),
         )?;
+        control.check()?;
         if initial_result.accepted {
             return Ok(initial_result);
         }
@@ -101,15 +121,26 @@ impl Model {
         let mut support_columns = self.columns.len();
         let mut support_search_pivots = 0;
         if !initial_result.certificate.primal_feasible {
+            if !observer("support-search", 0) {
+                return Ok(CertifiedResult {
+                    stop_reason: Some(
+                        "certified observer requested stop before support search".into(),
+                    ),
+                    ..initial_result
+                });
+            }
             let (restricted, selected) = self.candidate_support(&candidate.values)?;
             support_columns = selected.len();
-            let proposal = restricted
-                .float_candidate_with_observer(20000, |p| observer("support-search", p.pivots))?;
+            let proposal = restricted.float_candidate_with_observer(20000, |p| {
+                !control.is_cancelled() && observer("support-search", p.pivots)
+            })?;
             support_search_pivots = proposal.pivots;
-            let repaired =
-                restricted.refine_basis_with_observer(proposal.basis, max_pivots, |_, p| {
-                    observer("support-refine", p.pivots)
-                })?;
+            let repaired = restricted.refine_basis_with_control(
+                proposal.basis,
+                max_pivots,
+                |_, p| observer("support-refine", p.pivots),
+                control,
+            )?;
             exact_pivots += repaired.repair_pivots + repaired.optimization_pivots;
             if repaired.certificate.primal_feasible {
                 let mut values = vec![Rational::zero(); self.columns.len()];
@@ -147,10 +178,22 @@ impl Model {
             // Failure of a restricted model is not an original-model proof.
             // The remaining full-model refinement retains all original columns.
         }
-        let refined = self.refine_basis_with_observer(
+        if !observer("full-refine", exact_pivots) {
+            return Ok(CertifiedResult {
+                exact_pivots,
+                support_search_pivots,
+                support_columns,
+                stop_reason: Some(
+                    "certified observer requested stop before full refinement".into(),
+                ),
+                ..initial_result
+            });
+        }
+        let refined = self.refine_basis_with_control(
             primal_basis,
             max_pivots.saturating_sub(exact_pivots),
             |_, p| observer("full-refine", exact_pivots + p.pivots),
+            control,
         )?;
         exact_pivots += refined.repair_pivots + refined.optimization_pivots;
         let mut result = self.certified_result(
@@ -351,6 +394,14 @@ mod tests {
         assert!(rational(reported).unwrap() >= gap);
         assert!(rational(reported.next_down()).unwrap() < gap);
         let tighter = &gap - Rational::new(1.into(), crate::BigInt::from(1) << 200usize);
+        let stopped = model
+            .certify_candidate_with_observer(&candidate, 20, &tighter, |phase, _| {
+                phase != "full-refine"
+            })
+            .unwrap();
+        assert!(!stopped.accepted && stopped.exact_pivots == 0);
+        assert!(stopped.certificate.primal_feasible && stopped.certificate.dual_feasible);
+        assert_eq!(stopped.relative_gap.as_ref(), Some(&gap));
         let result = model
             .certify_candidate_with_observer(&candidate, 0, &tighter, |_, _| true)
             .unwrap();
@@ -444,6 +495,19 @@ mod tests {
             diagnostic: None,
         };
         let mut full = false;
+        let stopped = model
+            .certify_candidate_with_observer(&candidate, 20, &Rational::zero(), |phase, _| {
+                phase != "support-search"
+            })
+            .unwrap();
+        assert!(!stopped.accepted && !stopped.certificate.primal_feasible);
+        assert_eq!(stopped.support_search_pivots, 0);
+        assert_eq!(stopped.exact_pivots, 0);
+        assert!(stopped.infeasibility.is_none());
+        assert_eq!(
+            stopped.stop_reason.as_deref(),
+            Some("certified observer requested stop before support search")
+        );
         let result = model
             .certify_candidate_with_observer(&candidate, 20, &Rational::zero(), |phase, _| {
                 full |= phase == "full-refine";

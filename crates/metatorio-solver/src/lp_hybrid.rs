@@ -78,6 +78,9 @@ struct AttemptConfig {
     index: usize,
     full_refinement: bool,
 }
+// Independent of MCP response waiting: a slow search is unfinished work, not
+// evidence that the production model cannot be solved.
+const RUST_SEARCH_SECONDS: f64 = 300.0;
 fn publish_certificate(captured: Option<&std::path::Path>, attempt: usize) {
     let Some(source) = captured else {
         return;
@@ -147,7 +150,7 @@ fn solve_rust_proposal(
     let mut last = Err(Failure::Other("Rust search budget exhausted".into()));
     let mut last_attempt = 0;
     for (index, (options, full_refinement)) in choices.into_iter().enumerate() {
-        if start.elapsed().as_secs_f64() >= 120.0 {
+        if start.elapsed().as_secs_f64() >= RUST_SEARCH_SECONDS {
             break;
         }
         if index > 0 {
@@ -171,6 +174,41 @@ fn solve_rust_proposal(
             },
             &mut work,
         );
+        if let Err(Failure::Other(message)) = &last {
+            eprintln!(
+                "[LP-RUST-ATTEMPT-STOP] attempt={} seconds={:.2} reason={message}",
+                index + 1,
+                start.elapsed().as_secs_f64()
+            );
+            if let Some(source) = captured {
+                let save = || -> std::result::Result<(), Box<dyn std::error::Error>> {
+                    let directory = source
+                        .parent()
+                        .ok_or("capture has no parent")?
+                        .join("rust-attempt-errors")
+                        .join(index.to_string());
+                    std::fs::create_dir_all(&directory)?;
+                    let file = std::fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .open(
+                            directory.join(source.file_name().ok_or("capture has no filename")?),
+                        )?;
+                    serde_json::to_writer(
+                        std::io::BufWriter::new(file),
+                        &serde_json::json!({
+                            "search_attempt":index+1,"error":message,"elapsed_seconds":start.elapsed().as_secs_f64(),
+                            "full_refinement":full_refinement,"ratio_tolerance":options.ratio_tolerance,
+                            "primal_tolerance":options.primal_tolerance,"terminal_status_established":false
+                        }),
+                    )?;
+                    Ok(())
+                };
+                if let Err(error) = save() {
+                    eprintln!("[LP-RUST-ATTEMPT-ERROR-CAPTURE-ERROR] {error}");
+                }
+            }
+        }
         if last.is_ok() || matches!(&last, Err(Failure::Infeasible)) {
             publish_certificate(captured, index);
             return last;
@@ -188,12 +226,16 @@ fn solve_rust_proposal_attempt(
     work: &mut SearchWork,
 ) -> std::result::Result<Result, Failure> {
     let options = attempt.options;
-    // Reserve time for other hints when a preliminary support repair stalls.
+    // Healthy hints may need longer reconstruction, while later hints retain
+    // time for the final complete-model repair within the shared budget.
     let deadline = if certified && !attempt.full_refinement {
-        (start.elapsed().as_secs_f64() + 30.0).min(120.0)
+        let allowance = if attempt.index == 0 { 45.0 } else { 90.0 };
+        (start.elapsed().as_secs_f64() + allowance).min(RUST_SEARCH_SECONDS - 60.0)
     } else {
-        120.0
+        RUST_SEARCH_SECONDS
     };
+    let control =
+        exact::SolveControl::with_deadline(start + std::time::Duration::from_secs_f64(deadline));
     snapshot.check()?;
     let model = snapshot.exact_model();
     let proposal = model.float_candidate_with_options(options, 20000, |_| {
@@ -233,12 +275,22 @@ fn solve_rust_proposal_attempt(
         }
     }
     if certified {
+        let allow_support = attempt.full_refinement
+            || (proposal.diagnostic.is_none()
+                && proposal.stop_reason
+                    == "floating primal tolerances met; exact verification required");
         let budget = exact::Rational::new(1.into(), 1_000_000_000_000u64.into());
-        let result =
-            model.certify_candidate_with_observer(&proposal, 1000, &budget, |phase, _| {
+        let result = model.certify_candidate_with_control(
+            &proposal,
+            1000,
+            &budget,
+            |phase, _| {
                 start.elapsed().as_secs_f64() < deadline
                     && (attempt.full_refinement || phase != "full-refine")
-            })?;
+                    && (allow_support || !matches!(phase, "support-search" | "support-refine"))
+            },
+            &control,
+        )?;
         work.exact += result.exact_pivots;
         work.support += result.support_search_pivots;
         if let Some(source) = captured {
@@ -295,9 +347,12 @@ fn solve_rust_proposal_attempt(
         )
         .map_err(Failure::Other);
     }
-    let result = model.refine_basis_with_observer(proposal.basis, 1000, |_, _| {
-        start.elapsed().as_secs_f64() < 120.0
-    })?;
+    let result = model.refine_basis_with_control(
+        proposal.basis,
+        1000,
+        |_, _| start.elapsed().as_secs_f64() < deadline,
+        &control,
+    )?;
     if !result.certificate.optimal {
         if result.infeasibility.is_some() {
             return Err(Failure::Infeasible);

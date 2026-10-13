@@ -12,3 +12,23 @@ members = [
     "crates/metatorio-headless",
     "metatorio-app/src-tauri",
 ]
+
+# The default LP backend performs large floating and rational calculations.
+# Keep its hot path optimized in desktop development builds as well.
+[profile.dev.package.metatorio-lp]
+opt-level = 3
+
+[profile.dev.package.metatorio-solver]
+opt-level = 3
+
+[profile.dev.package.num-bigint]
+opt-level = 3
+
+[profile.dev.package.num-rational]
+opt-level = 3
+
+[profile.dev.package.num-integer]
+opt-level = 3
+
+[profile.dev.package.num-traits]
+opt-level = 3

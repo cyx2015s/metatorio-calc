@@ -1,7 +1,7 @@
 //! Exact dual-feasible basis repair for nonnegative planning models.
 use super::{
     Basis, BasisStatus, BigInt, ExactSolution, InfeasibilityCertificate, Model, PivotProgress,
-    Rational, basis, rational,
+    Rational, SolveControl, basis, rational,
 };
 use num_integer::Integer;
 use num_traits::{Signed, Zero};
@@ -52,6 +52,7 @@ impl Model {
             observer,
             true,
             rule,
+            &SolveControl::default(),
         )
     }
     pub fn repair_dual_feasible_basis(
@@ -85,7 +86,24 @@ impl Model {
         max_pivots: usize,
         observer: impl FnMut(PivotProgress) -> bool,
     ) -> Result<DualRepair, String> {
-        self.repair_dual_inner(basis, max_pivots, observer, false, rule)
+        self.repair_dual_inner(
+            basis,
+            max_pivots,
+            observer,
+            false,
+            rule,
+            &SolveControl::default(),
+        )
+    }
+    pub fn repair_dual_feasible_basis_with_control(
+        &self,
+        basis: Basis,
+        rule: DualPivotRule,
+        max_pivots: usize,
+        observer: impl FnMut(PivotProgress) -> bool,
+        control: &SolveControl,
+    ) -> Result<DualRepair, String> {
+        self.repair_dual_inner(basis, max_pivots, observer, false, rule, control)
     }
     fn repair_dual_inner(
         &self,
@@ -94,7 +112,9 @@ impl Model {
         mut observer: impl FnMut(PivotProgress) -> bool,
         cache: bool,
         rule: DualPivotRule,
+        control: &SolveControl,
     ) -> Result<DualRepair, String> {
+        control.check()?;
         self.check()?;
         if self
             .columns
@@ -113,10 +133,12 @@ impl Model {
         };
         let mut seen = HashSet::new();
         for iteration in 0..=max_pivots {
+            control.check()?;
             let (solution, factored) = match &system {
                 Some(system) => (system.reconstruct(self)?, None),
                 None => {
-                    let (solution, factor) = self.reconstruct_factored(&basis)?;
+                    let (solution, factor) =
+                        self.reconstruct_factored_with_control(&basis, control)?;
                     (solution, Some(factor))
                 }
             };
@@ -201,7 +223,7 @@ impl Model {
                 None => factored
                     .as_ref()
                     .ok_or("missing exact factorization")?
-                    .functional(self, leaving)?,
+                    .functional_with_control(self, leaving, control)?,
             };
             if increase {
                 for y in &mut ray {
@@ -399,6 +421,7 @@ mod tests {
                 |_| true,
                 true,
                 DualPivotRule::FirstViolation,
+                &SolveControl::default(),
             )
             .unwrap();
         assert_eq!(result.pivots, 0);

@@ -8,7 +8,7 @@ description = "切向量化：纯 MCP 服务（无 GUI，不链接 tauri/webview
 # 链接 GTK，也不需要 xvfb——这是「真 headless」的关键。
 
 [features]
-default = ["highs"]
+default = ["rust-lp"]
 highs = ["metatorio-shell/highs"]
 rust-lp = ["metatorio-shell/rust-lp"]
 
