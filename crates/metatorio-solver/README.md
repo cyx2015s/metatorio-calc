@@ -40,9 +40,9 @@ These witnesses certify the binary floating coefficients received by the LP;
 they do not recover the game's pre-rounding rational recipe data. The core
 `metatorio-lp` supports additional exact LP operations and has its own README.
 
-The certified/verified application search uses a shared 300-second cooperative
+The certified/verified application search uses a shared 1,200-second cooperative
 work budget, independent of the MCP response. Async auto_plan returns `running`
-immediately and its background scheduler waits up to 600 seconds per solve by
+immediately and its background scheduler waits up to 1,800 seconds per solve by
 default; ordinary synchronous recompute retains its 120-second default.
 `METATORIO_SOLVE_TIMEOUT_MS` or `--solve-timeout-ms` explicitly overrides scheduler
 waiting. Waiting limits are separate from LP work and do not prove infeasibility.
@@ -60,12 +60,32 @@ optimization with the default search as a final attempt. Earlier attempts
 retain full-model certification; preliminary drifted or stopped hints skip
 support correction. All share the same work budget and exact acceptance policy.
 The first preliminary attempt has 45 seconds, later attempts have 90 seconds,
-and preliminary deadlines stop at 240 seconds to reserve final repair time.
+and preliminary deadlines stop at 1,140 seconds to reserve final repair time.
 Observers may veto support/full repair before construction starts. Verified infeasibility
 terminates immediately. Retry hints are captured in `rust-retries/<index>/`,
 and attempt witnesses in `rust-attempt-certificates/<index>/`; only the selected
 attempt is published in `rust-certificates/` for independent verification.
-See `docs/lp-experiments.md` for evidence and remaining coverage limits.
+
+An exact sparse zero-propagation precheck can prove missing-supply contradictions.
+After the first incomplete hint, constraint generation tries a relaxation that
+starts with demand rows, then adds exactly violated original rows. Low-degree
+rows are preferred to dense shared-resource rows; after 32 rounds the frontier
+widens. It keeps every supplier occurring in selected rows and restores omitted
+zero columns when new rows need them. Singular relaxation hints can restart from
+the exact all-slack basis. Recovery validates and reuses retained exact bases;
+20-second progress stops preserve completed pivots. A certified primal basis may
+have an independent dual, so an invalid warm hint falls back to another proposal
+or cold start. A full feasible primal basis can continue exact original-cost
+optimization to close an excessive gap without repeating Phase I. Recovery has
+at most 256 rounds and uses the remaining shared budget minus 60 seconds reserved
+for final repair, consuming time otherwise available to later hints. Each active floating model remains limited to 4,096
+rows; larger original models can succeed through smaller relaxations. Accepted
+primal/dual witnesses and lifted Farkas multipliers always undergo complete
+original-model checks. Recovery witnesses are published directly in
+`rust-certificates/`; failed relaxation snapshots, when capture is enabled, live
+in `rust-row-relaxations/`.
+See `docs/lp-experiments.md` and `docs/lp-specialty-smoke-fix.md` for evidence
+and remaining coverage limits.
 
 `lp_verify_witnesses capture-directory` requires every original model to have
 an accepted feasible witness within the exact gap budget. The explicit

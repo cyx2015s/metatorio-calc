@@ -54,6 +54,11 @@ equality rows and `<=` rows. The certificate/reconstruction APIs additionally
 support finite variable bounds. Cached exact inverse updates remain limited to
 256 structural columns. Reconstruction and uncached repair/optimization support
 up to 2,048 structural columns; floating search allows up to 4,096 rows.
+The independent `prove_zero_propagation_infeasible` precheck uses sparse sign
+propagation on homogeneous rows to establish zero columns. It returns an
+original-model Farkas certificate only after exact verification; `None` means
+unknown. It does not require a dense basis and can run beyond the floating row
+guard. `solve_dual_with_control` adds cooperative cancellation to cold starts.
 The basis inverse uses exact row/column/border/deletion updates, with
 independent reconstruction tests. Pricing uses a common integer denominator.
 These are prototype resource guards, not scalability guarantees. Observer time

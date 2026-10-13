@@ -383,7 +383,7 @@ async fn stress_import_location_quality_matrix() {
     );
     assert!(
         unexpected.is_empty(),
-        "best-module candidate regression(s): {unexpected:#?}"
+        "quality matrix solver/normal-target/best-module regression(s): {unexpected:#?}"
     );
 }
 
@@ -403,6 +403,79 @@ async fn standard_beacon_regression(item_name: &str, best: bool) {
     assert!(
         run_case(item, &config, &mut output).await.cost.is_some(),
         "locally feasible normal target failed with the standard 8/8/16 beacon layout: {item_name}, best={best}"
+    );
+}
+
+/// The specialty smoke sweep previously left these cases
+/// unproved (singular hints, dense row guards, or exhausted search budgets).
+#[tokio::test]
+#[ignore = "full specialty recovery sweep, including the unfinished legendary seed case"]
+async fn specialty_smoke_internal_errors_have_certified_outcomes() {
+    let _permit = GATE.acquire().await.unwrap();
+    let mut output = report_file("specialty-certified-outcomes", 0);
+    let mut cases = vec![
+        (BASE, "recycler", "uncommon", false),
+        (BASE, "overgrowth-jellynut-soil", "epic", true),
+        (BASE, "overgrowth-yumako-soil", "epic", true),
+        (BASE, "artificial-yumako-soil", "epic", true),
+        (BASE, "overgrowth-yumako-soil", "legendary", true),
+        (BASE, "overgrowth-jellynut-soil", "legendary", true),
+    ];
+    for target in ["rare", "epic", "legendary"] {
+        for best in [false, true] {
+            cases.push((MODDED, "stack-inserter", target, best));
+        }
+    }
+    cases.push((BASE, "yumako-seed", "legendary", true));
+    let mut internal_errors = Vec::new();
+    for (asset, name, target, best) in cases {
+        let item = import_targets()
+            .iter()
+            .find(|t| t.asset == asset && t.item == name)
+            .unwrap();
+        let config = Configuration {
+            major: "normal",
+            target,
+            best,
+            layout: 0,
+        };
+        let outcome = run_case(item, &config, &mut output).await;
+        if outcome.internal_error {
+            internal_errors.push(format!("{name}, {config:?}"));
+        }
+    }
+    assert!(
+        internal_errors.is_empty(),
+        "uncertified specialty outcomes: {internal_errors:?}"
+    );
+}
+
+#[tokio::test]
+#[ignore = "full heavily modded asset solver regression"]
+async fn modded_stack_inserter_quality_solver_regression() {
+    let _permit = GATE.acquire().await.unwrap();
+    let item = import_targets()
+        .iter()
+        .find(|t| t.asset == MODDED && t.item == "stack-inserter")
+        .unwrap();
+    let mut output = report_file("specialty-modded-stack", 0);
+    let mut internal_errors = Vec::new();
+    for target in ["rare", "epic", "legendary"] {
+        for best in [false, true] {
+            let config = Configuration {
+                major: "normal",
+                target,
+                best,
+                layout: 0,
+            };
+            if run_case(item, &config, &mut output).await.internal_error {
+                internal_errors.push(format!("{config:?}"));
+            }
+        }
+    }
+    assert!(
+        internal_errors.is_empty(),
+        "uncertified modded stack outcomes: {internal_errors:?}"
     );
 }
 

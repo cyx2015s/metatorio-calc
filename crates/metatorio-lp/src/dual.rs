@@ -40,6 +40,16 @@ impl Model {
         max_pivots: usize,
         observer: impl FnMut(PivotProgress) -> bool,
     ) -> Result<DualRepair, String> {
+        self.solve_dual_with_control(rule, max_pivots, observer, &SolveControl::default())
+    }
+    /// Cold start with the same cooperative control as warm basis repair.
+    pub fn solve_dual_with_control(
+        &self,
+        rule: DualPivotRule,
+        max_pivots: usize,
+        observer: impl FnMut(PivotProgress) -> bool,
+        control: &SolveControl,
+    ) -> Result<DualRepair, String> {
         if self.columns.iter().any(|c| c.cost < 0.0) {
             return Err("dual cold start requires nonnegative objective costs".into());
         }
@@ -52,7 +62,7 @@ impl Model {
             observer,
             true,
             rule,
-            &SolveControl::default(),
+            control,
         )
     }
     pub fn repair_dual_feasible_basis(

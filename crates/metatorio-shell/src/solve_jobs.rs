@@ -85,7 +85,7 @@ pub struct SolveJobs<R> {
     slots: Mutex<HashMap<SolveKey, Arc<Mutex<Slot<R>>>>>,
     /// 单次求解的等待上限：超时返回可重试错误，后台任务继续跑完
     /// （结果丢弃；重试会重新算）。普通重算默认 120s，异步 auto_plan 默认
-    /// 600s；`METATORIO_SOLVE_TIMEOUT_MS` 可调。
+    /// 1800s；`METATORIO_SOLVE_TIMEOUT_MS` 可调。
     timeout: Duration,
 }
 
@@ -114,7 +114,7 @@ impl<R: Clone + Send + 'static> SolveJobs<R> {
     pub fn for_auto_plan() -> Self {
         Self {
             slots: Mutex::new(HashMap::new()),
-            timeout: solve_timeout_from_env(Duration::from_secs(600)),
+            timeout: solve_timeout_from_env(Duration::from_secs(1800)),
         }
     }
     /// 覆盖等待上限（`--solve-timeout-ms` 或测试用）。

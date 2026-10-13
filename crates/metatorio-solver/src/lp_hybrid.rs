@@ -80,7 +80,7 @@ struct AttemptConfig {
 }
 // Independent of MCP response waiting: a slow search is unfinished work, not
 // evidence that the production model cannot be solved.
-const RUST_SEARCH_SECONDS: f64 = 300.0;
+const RUST_SEARCH_SECONDS: f64 = 1200.0;
 fn publish_certificate(captured: Option<&std::path::Path>, attempt: usize) {
     let Some(source) = captured else {
         return;
@@ -115,6 +115,39 @@ fn solve_rust_proposal(
 ) -> std::result::Result<Result, Failure> {
     snapshot.check()?;
     let start = Instant::now();
+    let control = exact::SolveControl::with_deadline(
+        start + std::time::Duration::from_secs_f64(RUST_SEARCH_SECONDS),
+    );
+    let feasibility_model = snapshot.exact_model();
+    let proof = feasibility_model.prove_zero_propagation_infeasible(&control)?;
+    if let Some(proof) = proof {
+        if let Some(source) = captured {
+            let save = || -> std::result::Result<(), Box<dyn std::error::Error>> {
+                let directory = source
+                    .parent()
+                    .ok_or("capture has no parent")?
+                    .join("rust-certificates");
+                std::fs::create_dir_all(&directory)?;
+                let file = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(directory.join(source.file_name().ok_or("capture has no filename")?))?;
+                serde_json::to_writer(
+                    std::io::BufWriter::new(file),
+                    &serde_json::json!({
+                        "original_snapshot": source, "model_scope": "full", "accepted": false,
+                    "infeasibility": proof, "phase": "feasibility-precheck",
+                        "elapsed_seconds": start.elapsed().as_secs_f64()
+                    }),
+                )?;
+                Ok(())
+            };
+            if let Err(error) = save() {
+                eprintln!("[LP-RUST-CERTIFICATE-CAPTURE-ERROR] {error}");
+            }
+        }
+        return Err(Failure::Infeasible);
+    }
     let mut work = SearchWork::default();
     let choices = if certified {
         vec![
@@ -174,6 +207,22 @@ fn solve_rust_proposal(
             },
             &mut work,
         );
+        if index == 0 && matches!(&last, Err(Failure::Other(_))) {
+            let remaining = RUST_SEARCH_SECONDS - start.elapsed().as_secs_f64();
+            if remaining > 0.0 {
+                let deadline = Instant::now()
+                    + std::time::Duration::from_secs_f64((remaining - 60.0).max(0.0));
+                eprintln!(
+                    "[LP-RUST-ROW-GENERATION] retrying failed hint with constraint relaxation"
+                );
+                match crate::lp_row_generation::solve(snapshot, captured, deadline, !certified) {
+                    result @ Ok(_) | result @ Err(Failure::Infeasible) => return result,
+                    Err(Failure::Other(error)) => {
+                        eprintln!("[LP-RUST-ROW-GENERATION-STOP] {error}")
+                    }
+                }
+            }
+        }
         if let Err(Failure::Other(message)) = &last {
             eprintln!(
                 "[LP-RUST-ATTEMPT-STOP] attempt={} seconds={:.2} reason={message}",

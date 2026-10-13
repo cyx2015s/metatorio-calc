@@ -14,6 +14,7 @@ mod dual;
 mod factor;
 pub use control::SolveControl;
 mod float;
+mod presolve;
 mod refine;
 pub use certified::CertifiedResult;
 pub use dual::{DualPivotRule, DualRepair};

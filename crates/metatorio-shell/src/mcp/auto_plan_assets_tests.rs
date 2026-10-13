@@ -90,7 +90,7 @@ async fn poll(mcp: &MetatorioMcp, ids: &Value, limit: usize, offset: usize) -> V
 async fn finish(mcp: &MetatorioMcp, ids: &Value) -> Value {
     assert_eq!(ids["auto_plan"]["status"], "running");
     assert_eq!(ids["poll"]["arguments"]["project"], ids["project"]);
-    let deadline = Instant::now() + Duration::from_secs(660);
+    let deadline = Instant::now() + Duration::from_secs(1860);
     loop {
         let state = poll(mcp, ids, 1000, 0).await;
         match state["auto_plan"]["status"].as_str() {
@@ -100,7 +100,7 @@ async fn finish(mcp: &MetatorioMcp, ids: &Value) -> Value {
         }
         assert!(
             Instant::now() < deadline,
-            "auto_plan did not finish within 660s: {ids}"
+            "auto_plan did not finish within 1860s: {ids}"
         );
         tokio::time::sleep(Duration::from_millis(25)).await;
     }

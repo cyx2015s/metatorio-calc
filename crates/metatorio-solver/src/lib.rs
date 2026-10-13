@@ -12,6 +12,8 @@ pub mod lp_experiments;
 #[cfg(feature = "rust-lp")]
 mod lp_hybrid;
 pub mod lp_model;
+#[cfg(feature = "rust-lp")]
+mod lp_row_generation;
 #[cfg(feature = "rational-lp")]
 pub use metatorio_lp as lp_rational;
 pub mod solver;
