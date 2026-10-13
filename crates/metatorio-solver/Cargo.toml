@@ -5,6 +5,9 @@ edition = "2024"
 description = "Metatorio 求解器内核：线性规划求解与组合枚举，无 UI 依赖"
 license = "MIT"
 
+[features]
+lp-experiments = ["dep:highs", "dep:highs-sys", "dep:serde_json"]
+
 [dependencies]
 ahash = { version = "0.8", features = ["serde"] }
 good_lp = { version = "1.15", default-features = false, features = ["highs"] }
@@ -12,3 +15,10 @@ indexmap = { version = "2", features = ["rayon", "serde"] }
 log = "0.4"
 rayon = "1"
 serde = { version = "1", features = ["derive"] }
+highs = { version = "2.4", optional = true }
+highs-sys = { version = "1.15", optional = true }
+serde_json = { version = "1", optional = true }
+
+[[example]]
+name = "lp_replay"
+required-features = ["lp-experiments"]

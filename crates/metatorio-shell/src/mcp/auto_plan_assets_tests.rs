@@ -7,6 +7,8 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 mod import_location_tests;
+#[cfg(feature = "lp-experiments")]
+mod lp_experiment_tests;
 
 const BASE: &str = "data-raw-dump.json";
 const MODDED: &str = "data-raw-dump-heavily-modded.json";

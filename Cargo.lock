@@ -2578,10 +2578,13 @@ version = "0.1.0"
 dependencies = [
  "ahash",
  "good_lp",
+ "highs",
+ "highs-sys",
  "indexmap 2.14.0",
  "log",
  "rayon",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

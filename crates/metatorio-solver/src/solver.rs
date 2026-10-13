@@ -1,7 +1,9 @@
 use good_lp::{IntoAffineExpression, variable};
 
 use crate::concept::{AIndexMap, AIndexSet, Flow, ItemIdent};
-use crate::lp::{SolveReport, solve_lp};
+use crate::lp::SolveReport;
+#[cfg(not(feature = "lp-experiments"))]
+use crate::lp::solve_lp;
 use core::f64;
 
 use std::fmt::Debug;
@@ -411,7 +413,10 @@ where
         // 物品汇变量
         let mut sink_vars = AIndexMap::default();
         for f_id in self.flows.keys() {
-            let var = problem_variables.add(variable().min(0));
+            let definition = variable().min(0);
+            #[cfg(feature = "lp-experiments")]
+            let definition = definition.name(format!("flow:{f_id:?}"));
+            let var = problem_variables.add(definition);
             flow_vars.insert(f_id.clone(), var);
         }
 
@@ -447,7 +452,10 @@ where
         log::info!("求解器：一共有 {} 个物品需要平衡", item_balances.len(),);
 
         for (item_id, _) in &self.sources {
-            let var = problem_variables.add(variable().min(0));
+            let definition = variable().min(0);
+            #[cfg(feature = "lp-experiments")]
+            let definition = definition.name(format!("source:{item_id:?}"));
+            let var = problem_variables.add(definition);
             source_vars.insert(item_id.clone(), var);
             let entry = item_balances
                 .entry(item_id.clone())
@@ -455,7 +463,10 @@ where
             *entry += 1.0 * var;
         }
         for (item_id, _) in &self.sinks {
-            let var = problem_variables.add(variable().min(0));
+            let definition = variable().min(0);
+            #[cfg(feature = "lp-experiments")]
+            let definition = definition.name(format!("sink:{item_id:?}"));
+            let var = problem_variables.add(definition);
             sink_vars.insert(item_id.clone(), var);
             let entry = item_balances
                 .entry(item_id.clone())
@@ -571,7 +582,25 @@ where
             log::debug!("求解器：对应流变量: {:?}", flow_vars);
         }
         // 求解策略见 solve_lp：HiGHS 单后端，直接给顶点解。
+        #[cfg(not(feature = "lp-experiments"))]
         let solution = solve_lp(optimization_expr.clone(), constraints, problem_variables);
+        #[cfg(feature = "lp-experiments")]
+        let solution = {
+            let mut labels: Vec<_> = (0..constraints.len()).map(|i| format!("r{i}")).collect();
+            for (item, index) in &item_to_constraint {
+                labels[*index] = format!("balance:{item:?}");
+            }
+            let start = constraints.len() - self.target.len();
+            for (index, target) in self.target.iter().enumerate() {
+                labels[start + index] = format!("target:{target:?}");
+            }
+            crate::lp::solve_lp_named(
+                optimization_expr.clone(),
+                constraints,
+                problem_variables,
+                labels,
+            )
+        };
 
         match solution {
             Ok(sol) => {

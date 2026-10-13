@@ -7,6 +7,8 @@
 pub mod comb;
 pub mod concept;
 pub mod lp;
+#[cfg(feature = "lp-experiments")]
+pub mod lp_experiments;
 pub mod solver;
 
 pub use comb::*;

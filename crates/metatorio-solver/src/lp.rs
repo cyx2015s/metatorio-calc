@@ -296,6 +296,31 @@ pub fn solve_lp(
     constraints: Vec<Constraint>,
     variables: ProblemVariables,
 ) -> Result<LpSolution, ResolutionError> {
+    solve_lp_impl(
+        minimise,
+        constraints,
+        variables,
+        #[cfg(feature = "lp-experiments")]
+        Vec::new(),
+    )
+}
+
+#[cfg(feature = "lp-experiments")]
+pub(crate) fn solve_lp_named(
+    minimise: Expression,
+    constraints: Vec<Constraint>,
+    variables: ProblemVariables,
+    labels: Vec<String>,
+) -> Result<LpSolution, ResolutionError> {
+    solve_lp_impl(minimise, constraints, variables, labels)
+}
+
+fn solve_lp_impl(
+    minimise: Expression,
+    constraints: Vec<Constraint>,
+    variables: ProblemVariables,
+    #[cfg(feature = "lp-experiments")] labels: Vec<String>,
+) -> Result<LpSolution, ResolutionError> {
     let defs: Vec<VariableDefinition> = variables
         .iter_variables_with_def()
         .map(|(_, def)| def.clone())
@@ -335,6 +360,36 @@ pub fn solve_lp(
     } else {
         1.0
     };
+    #[cfg(feature = "lp-experiments")]
+    if std::env::var_os("METATORIO_LP_CAPTURE_DIR").is_some() {
+        use crate::lp_experiments::{Row, Snapshot, capture, column};
+        let mut objective_terms: Vec<_> =
+            objective.iter().map(|(i, a)| (*i, a.to_bits())).collect();
+        objective_terms.sort_by_key(|(i, _)| *i);
+        let snapshot = Snapshot {
+            format_version: 1,
+            columns: defs.iter().enumerate().map(|(i, d)| column(d, i)).collect(),
+            rows: rows
+                .iter()
+                .enumerate()
+                .map(|(i, row)| {
+                    let mut terms: Vec<_> =
+                        row.terms.iter().map(|(i, a)| (*i, a.to_bits())).collect();
+                    terms.sort_by_key(|(i, _)| *i);
+                    Row {
+                        label: labels.get(i).cloned().unwrap_or_else(|| format!("r{i}")),
+                        equality: row.is_equality,
+                        rhs_bits: row.rhs.to_bits(),
+                        terms,
+                    }
+                })
+                .collect(),
+            objective: objective_terms,
+            objective_offset_bits: minimise.constant().to_bits(),
+            production_rhs_scale_bits: rhs_scale.to_bits(),
+        };
+        capture(&snapshot);
+    }
     let full = build_problem(&defs, &objective, &rows, rhs_scale);
     if full.trivially_infeasible {
         return Err(ResolutionError::Infeasible);
