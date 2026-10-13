@@ -6,6 +6,10 @@ This crate has no HiGHS, good_lp, native-library or C++ build dependency.
 `Model::solve` starts from zero with an artificial-variable Phase I, verifies an
 original-model Farkas certificate before returning infeasibility, and uses exact
 primal simplex for optimization. `optimize_from_basis` accepts an existing basis.
+`repair_dual_feasible_basis` repairs primal violations in an exactly dual-feasible
+basis using exact dual simplex. A rejected hint does not imply infeasibility;
+ratio-test failure requires a verified Farkas certificate. Repeated bases and
+execution limits return a nonterminal candidate, which may remain infeasible.
 Every returned optimality claim must be confirmed by `Model::certify`; limits
 preserve a nonterminal result. The observer API supports application cancellation.
 

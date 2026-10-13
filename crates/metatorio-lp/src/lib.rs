@@ -8,6 +8,8 @@ use num_traits::{Signed, ToPrimitive, Zero};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 mod basis;
+mod dual;
+pub use dual::DualRepair;
 
 #[derive(Clone, Debug)]
 pub struct Column {

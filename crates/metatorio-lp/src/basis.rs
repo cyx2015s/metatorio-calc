@@ -152,6 +152,47 @@ impl System {
             .collect::<Result<Vec<_>, String>>()?;
         Ok(product(&self.inverse, &rhs))
     }
+    /// Row of the full basis inverse for a structural variable or basic slack.
+    /// Multiplying this functional by b gives that variable's current value.
+    pub fn functional(
+        model: &Model,
+        basis: &Basis,
+        variable: usize,
+    ) -> Result<Vec<Rational>, String> {
+        let (columns, rows) = indices(basis);
+        let mut rhs = vec![Rational::zero(); columns.len()];
+        let mut result = vec![Rational::zero(); model.rows.len()];
+        if variable < model.columns.len() {
+            let p = columns
+                .iter()
+                .position(|i| *i == variable)
+                .ok_or("functional requires a basic column")?;
+            rhs[p] = rational(1.0)?;
+        } else {
+            let row = variable - model.columns.len();
+            if row >= model.rows.len() || rows.contains(&row) {
+                return Err("functional requires a basic row slack".into());
+            }
+            let mut positions = vec![None; model.columns.len()];
+            for (j, column) in columns.iter().enumerate() {
+                positions[*column] = Some(j);
+            }
+            for (column, a) in &model.rows[row].terms {
+                if let Some(j) = positions[*column] {
+                    rhs[j] -= rational(*a)?;
+                }
+            }
+            result[row] = rational(1.0)?;
+        }
+        let matrix = matrix(model, &columns, &rows)?;
+        let transpose = (0..columns.len())
+            .map(|j| matrix.iter().map(|r| r[j].clone()).collect())
+            .collect();
+        for (row, value) in rows.iter().zip(super::solve(transpose, rhs)?) {
+            result[*row] = value;
+        }
+        Ok(result)
+    }
     pub fn update(
         &mut self,
         model: &Model,
