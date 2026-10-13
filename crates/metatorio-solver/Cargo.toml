@@ -61,3 +61,7 @@ required-features = ["rust-lp"]
 [[example]]
 name = "lp_refine_candidate"
 required-features = ["rust-lp"]
+
+[[example]]
+name = "lp_certified_candidate"
+required-features = ["rust-lp"]

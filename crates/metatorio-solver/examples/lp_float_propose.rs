@@ -1,5 +1,5 @@
 //! Native-free floating basis proposal followed by independent exact checking.
-use metatorio_solver::lp_experiments::Snapshot;
+use metatorio_solver::{lp_experiments::Snapshot, lp_rational::FloatOptions};
 use std::{
     fs,
     io::{BufReader, BufWriter},
@@ -7,8 +7,10 @@ use std::{
 };
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
-    if args.len() != 3 {
-        return Err("usage: lp_float_propose snapshot.json output.json seconds".into());
+    if !(3..=5).contains(&args.len()) {
+        return Err(
+            "usage: lp_float_propose snapshot.json output.json seconds [ratio-tolerance] [primal-tolerance]".into(),
+        );
     }
     let snapshot: Snapshot = serde_json::from_reader(BufReader::new(fs::File::open(&args[0])?))?;
     snapshot.check()?;
@@ -18,7 +20,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let model = snapshot.exact_model();
     let start = Instant::now();
-    let proposal = model.float_candidate_with_observer(20000, |p| {
+    let options = FloatOptions {
+        primal_tolerance: args.get(4).map(|s| s.parse()).transpose()?.unwrap_or(1e-9),
+        ratio_tolerance: args.get(3).map(|s| s.parse()).transpose()?.unwrap_or(1e-9),
+    };
+    let proposal = model.float_candidate_with_options(options, 20000, |p| {
         if p.pivots % 100 == 0 {
             eprintln!(
                 "[FLOAT] pivots={} structural={} seconds={:.2}",
@@ -35,7 +41,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         proposal.pivots, proposal_seconds, proposal.stop_reason
     );
     println!("diagnostic: {:?}", proposal.diagnostic);
-    let mut output = serde_json::json!({"model_scope":"full","basis":proposal.basis,"pivots":proposal.pivots,"proposal_seconds":proposal_seconds,"stop_reason":proposal.stop_reason,"diagnostic":proposal.diagnostic,"values_bits":proposal.values.iter().map(|v|v.to_bits()).collect::<Vec<_>>(),"rounded_validation":snapshot.validate(&proposal.values)});
+    let mut output = serde_json::json!({"primal_tolerance":options.primal_tolerance,"ratio_tolerance":options.ratio_tolerance,"model_scope":"full","basis":proposal.basis,"pivots":proposal.pivots,"proposal_seconds":proposal_seconds,"stop_reason":proposal.stop_reason,"diagnostic":proposal.diagnostic,"values_bits":proposal.values.iter().map(|v|v.to_bits()).collect::<Vec<_>>(),"rounded_validation":snapshot.validate(&proposal.values)});
     let start = Instant::now();
     match model.reconstruct(&proposal.basis) {
         Ok(solution) => {

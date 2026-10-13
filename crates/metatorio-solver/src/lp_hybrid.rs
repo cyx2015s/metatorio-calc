@@ -67,22 +67,150 @@ pub(crate) fn solve_rust_certified(
 ) -> std::result::Result<Result, Failure> {
     solve_rust_proposal(snapshot, captured, true)
 }
+#[derive(Default)]
+struct SearchWork {
+    floating: usize,
+    exact: usize,
+    support: usize,
+}
+struct AttemptConfig {
+    options: exact::FloatOptions,
+    index: usize,
+    full_refinement: bool,
+}
+fn publish_certificate(captured: Option<&std::path::Path>, attempt: usize) {
+    let Some(source) = captured else {
+        return;
+    };
+    let save = || -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let parent = source.parent().ok_or("capture has no parent")?;
+        let name = source.file_name().ok_or("capture has no filename")?;
+        let original = parent
+            .join("rust-attempt-certificates")
+            .join(attempt.to_string())
+            .join(name);
+        if !original.exists() {
+            return Ok(());
+        }
+        let directory = parent.join("rust-certificates");
+        std::fs::create_dir_all(&directory)?;
+        let mut output = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(directory.join(name))?;
+        std::io::copy(&mut std::fs::File::open(original)?, &mut output)?;
+        Ok(())
+    };
+    if let Err(error) = save() {
+        eprintln!("[LP-RUST-CERTIFICATE-CAPTURE-ERROR] {error}");
+    }
+}
 fn solve_rust_proposal(
     snapshot: &Snapshot,
     captured: Option<&std::path::Path>,
     certified: bool,
 ) -> std::result::Result<Result, Failure> {
     snapshot.check()?;
-    let model = snapshot.exact_model();
     let start = Instant::now();
-    let proposal =
-        model.float_candidate_with_observer(20000, |_| start.elapsed().as_secs_f64() < 120.0)?;
+    let mut work = SearchWork::default();
+    let choices = if certified {
+        vec![
+            (exact::FloatOptions::default(), false),
+            (
+                exact::FloatOptions {
+                    ratio_tolerance: 1e-12,
+                    primal_tolerance: 1e-12,
+                },
+                false,
+            ),
+            (
+                exact::FloatOptions {
+                    ratio_tolerance: 1e-14,
+                    primal_tolerance: 1e-12,
+                },
+                false,
+            ),
+            (exact::FloatOptions::default(), true),
+        ]
+    } else {
+        vec![
+            (
+                exact::FloatOptions {
+                    ratio_tolerance: 1e-12,
+                    primal_tolerance: 1e-12,
+                },
+                true,
+            ),
+            (exact::FloatOptions::default(), true),
+        ]
+    };
+    let mut last = Err(Failure::Other("Rust search budget exhausted".into()));
+    let mut last_attempt = 0;
+    for (index, (options, full_refinement)) in choices.into_iter().enumerate() {
+        if start.elapsed().as_secs_f64() >= 120.0 {
+            break;
+        }
+        if index > 0 {
+            eprintln!(
+                "[LP-RUST-RETRY] attempt={} ratio={} primal={} full_refinement={full_refinement}",
+                index + 1,
+                options.ratio_tolerance,
+                options.primal_tolerance
+            );
+        }
+        last_attempt = index;
+        last = solve_rust_proposal_attempt(
+            snapshot,
+            captured,
+            certified,
+            start,
+            AttemptConfig {
+                options,
+                index,
+                full_refinement,
+            },
+            &mut work,
+        );
+        if last.is_ok() || matches!(&last, Err(Failure::Infeasible)) {
+            publish_certificate(captured, index);
+            return last;
+        }
+    }
+    publish_certificate(captured, last_attempt);
+    last
+}
+fn solve_rust_proposal_attempt(
+    snapshot: &Snapshot,
+    captured: Option<&std::path::Path>,
+    certified: bool,
+    start: Instant,
+    attempt: AttemptConfig,
+    work: &mut SearchWork,
+) -> std::result::Result<Result, Failure> {
+    let options = attempt.options;
+    // Reserve time for other hints when a preliminary support repair stalls.
+    let deadline = if certified && !attempt.full_refinement {
+        (start.elapsed().as_secs_f64() + 30.0).min(120.0)
+    } else {
+        120.0
+    };
+    snapshot.check()?;
+    let model = snapshot.exact_model();
+    let proposal = model.float_candidate_with_options(options, 20000, |_| {
+        start.elapsed().as_secs_f64() < deadline
+    })?;
+    work.floating += proposal.pivots;
     if let Some(source) = captured {
         let save = || -> std::result::Result<(), Box<dyn std::error::Error>> {
-            let directory = source
-                .parent()
-                .ok_or("capture has no parent")?
-                .join("rust-candidates");
+            let directory =
+                source
+                    .parent()
+                    .ok_or("capture has no parent")?
+                    .join(if attempt.index == 0 {
+                        "rust-candidates".to_string()
+                    } else {
+                        format!("rust-retries/{}", attempt.index)
+                    });
             std::fs::create_dir_all(&directory)?;
             let file = std::fs::OpenOptions::new()
                 .write(true)
@@ -91,10 +219,11 @@ fn solve_rust_proposal(
             serde_json::to_writer(
                 std::io::BufWriter::new(file),
                 &serde_json::json!({
-                    "original_snapshot":source,"model_scope":"full","basis":proposal.basis,
+                    "search_attempt":attempt.index + 1,"original_snapshot":source,"model_scope":"full","basis":proposal.basis,
                     "pivots":proposal.pivots,"stop_reason":proposal.stop_reason,
                     "diagnostic":proposal.diagnostic,"proposal_seconds":start.elapsed().as_secs_f64(),
                     "values_bits":proposal.values.iter().map(|x|x.to_bits()).collect::<Vec<_>>(),
+                    "ratio_tolerance":options.ratio_tolerance,"primal_tolerance":options.primal_tolerance,
                 }),
             )?;
             Ok(())
@@ -105,15 +234,20 @@ fn solve_rust_proposal(
     }
     if certified {
         let budget = exact::Rational::new(1.into(), 1_000_000_000_000u64.into());
-        let result = model.certify_candidate_with_observer(&proposal, 1000, &budget, |_, _| {
-            start.elapsed().as_secs_f64() < 120.0
-        })?;
+        let result =
+            model.certify_candidate_with_observer(&proposal, 1000, &budget, |phase, _| {
+                start.elapsed().as_secs_f64() < deadline
+                    && (attempt.full_refinement || phase != "full-refine")
+            })?;
+        work.exact += result.exact_pivots;
+        work.support += result.support_search_pivots;
         if let Some(source) = captured {
             let save = || -> std::result::Result<(), Box<dyn std::error::Error>> {
                 let directory = source
                     .parent()
                     .ok_or("capture has no parent")?
-                    .join("rust-certificates");
+                    .join("rust-attempt-certificates")
+                    .join(attempt.index.to_string());
                 std::fs::create_dir_all(&directory)?;
                 let file = std::fs::OpenOptions::new()
                     .write(true)
@@ -123,6 +257,8 @@ fn solve_rust_proposal(
                     std::io::BufWriter::new(file),
                     &serde_json::json!({
                         "original_snapshot":source,"model_scope":"full","certificate":result.certificate,
+                        "search_attempt":attempt.index + 1,"floating_attempt_pivots":work.floating,
+                        "ratio_tolerance":options.ratio_tolerance,"primal_tolerance":options.primal_tolerance,
                         "accepted":result.accepted,"gap_budget":budget.to_string(),
                         "relative_gap":result.relative_gap.as_ref().map(ToString::to_string),
                         "primal_basis":result.primal_basis,"row_duals":result.solution.row_duals.iter().map(ToString::to_string).collect::<Vec<_>>(),
@@ -155,7 +291,7 @@ fn solve_rust_proposal(
             snapshot,
             result.solution,
             result.certificate,
-            proposal.pivots + result.support_search_pivots + result.exact_pivots,
+            work.floating + work.support + work.exact,
         )
         .map_err(Failure::Other);
     }
@@ -177,7 +313,7 @@ fn solve_rust_proposal(
         snapshot,
         result.solution,
         result.certificate,
-        proposal.pivots + result.repair_pivots + result.optimization_pivots,
+        work.floating + result.repair_pivots + result.optimization_pivots,
     )
     .map_err(Failure::Other)
 }

@@ -19,13 +19,15 @@ fn vector(value: &serde_json::Value) -> Result<Vec<Rational>, Box<dyn std::error
 }
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
-    if args.len() != 1 {
-        return Err("usage: lp_verify_witnesses capture-directory".into());
+    let allow_infeasible = args.len() == 2 && args[1] == "--allow-infeasible";
+    if args.len() != 1 && !allow_infeasible {
+        return Err("usage: lp_verify_witnesses capture-directory [--allow-infeasible]".into());
     }
     let directory = PathBuf::from(&args[0]);
     let budget = Rational::new(1.into(), 1_000_000_000_000u64.into());
     let mut count = 0;
     let mut optima = 0;
+    let mut infeasible = 0;
     let mut maximum_gap = 0.0f64;
     for entry in fs::read_dir(&directory)? {
         let entry = entry?;
@@ -40,6 +42,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let witness: serde_json::Value = serde_json::from_reader(BufReader::new(fs::File::open(
             directory.join("rust-certificates").join(&name),
         )?))?;
+        if allow_infeasible && !witness["infeasibility"].is_null() {
+            let proof = &witness["infeasibility"];
+            let mut multipliers = vec![Rational::from_integer(0.into()); snapshot.rows.len()];
+            let mut seen = std::collections::HashSet::new();
+            let entries: Vec<(usize, String)> = serde_json::from_value(proof["row_duals"].clone())?;
+            for (row, value) in entries {
+                if row >= multipliers.len() || !seen.insert(row) {
+                    return Err(format!("invalid Farkas row index: {text}").into());
+                }
+                multipliers[row] = value.parse()?;
+            }
+            let verified = snapshot
+                .exact_model()
+                .verify_infeasibility(&multipliers)?
+                .ok_or_else(|| format!("invalid original-model Farkas witness: {text}"))?;
+            if witness["accepted"] != false || serde_json::to_value(&verified)? != *proof {
+                return Err(format!("stored infeasibility proof mismatch: {text}").into());
+            }
+            count += 1;
+            infeasible += 1;
+            continue;
+        }
         let solution = ExactSolution {
             values: vector(&witness["values"])?,
             row_duals: vector(&witness["row_duals"])?,
@@ -78,7 +102,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!(
         "{}",
         serde_json::json!({"verified_models":count,"exact_optima":optima,"gap_budget":budget.to_string(),
-        "maximum_relative_gap_upper_bound":maximum_gap,"all_primal_and_dual_feasible":true,"all_rounded_checks_passed":true})
+        "verified_infeasible_models":infeasible,"verified_feasible_models":count-infeasible,
+        "maximum_relative_gap_upper_bound":maximum_gap,"all_primal_and_dual_feasible":infeasible==0,"all_rounded_checks_passed":true})
     );
     Ok(())
 }

@@ -15,7 +15,7 @@ mod float;
 mod refine;
 pub use certified::CertifiedResult;
 pub use dual::{DualPivotRule, DualRepair};
-pub use float::{FloatCandidate, FloatProgress};
+pub use float::{FloatCandidate, FloatOptions, FloatProgress};
 pub use refine::Refinement;
 const MAX_BASIS_DIMENSION: usize = 256;
 // A single candidate reconstruction does not build a dense exact inverse.

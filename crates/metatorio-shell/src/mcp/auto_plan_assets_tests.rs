@@ -813,3 +813,32 @@ async fn modded_large_plastic_target_preserves_solvability() {
     )
     .await;
 }
+
+#[tokio::test]
+async fn epic_small_circuit_with_shared_beacons_preserves_solvability() {
+    success(BASE, epic_beacon_request(1e-6)).await;
+}
+
+#[tokio::test]
+async fn epic_unit_circuit_with_shared_beacons_preserves_solvability() {
+    success(BASE, epic_beacon_request(1.0)).await;
+}
+
+fn epic_beacon_request(amount: f64) -> Value {
+    json!({
+        "targets":[{"item":"electronic-circuit","quality":"epic","amount":amount}],
+        "major_quality":"epic","modules":{"best":true,"quality":"epic"},
+        "beacons":[{"beacon":{"id":"beacon","quality":"epic"},"count":8,"share":8.0,
+            "modules":[{"module":{"id":"speed-module-3","quality":"epic"},"count":16}]}]
+    })
+}
+
+#[tokio::test]
+async fn legendary_large_circuit_preserves_solvability() {
+    success(
+        BASE,
+        json!({"targets":[{"item":"electronic-circuit","quality":"legendary","amount":1e6}],
+            "major_quality":"legendary","modules":{"best":true,"quality":"legendary"}}),
+    )
+    .await;
+}

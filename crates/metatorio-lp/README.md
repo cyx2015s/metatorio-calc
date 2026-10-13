@@ -28,6 +28,14 @@ dual prices when possible; zero costs provide a fallback feasibility objective.
 Only the final original-model certificate establishes optimality. The optional
 `refine_basis_with_rule` selects an exact repair strategy for experiments.
 
+`float_candidate_with_options` accepts `FloatOptions` for the floating primal
+stopping threshold and Harris ratio error budget. Defaults preserve the earlier
+`1e-9` search. These are hint-generation parameters, not constraint tolerances
+or the exact objective-gap acceptance policy. The certified application checks
+the default hint first, then tighter primal/ratio settings, before permitting
+full exact optimization as a final attempt. Every hint remains subject to full
+original-model verification, within one shared observer budget.
+
 Reconstruction and uncached pivots reuse an exact LU factorization for primal,
 dual and direction solves. Exact active-column counts guide column ordering to
 reduce fill; row and column permutations are retained in both solve directions.

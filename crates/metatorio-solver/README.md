@@ -37,10 +37,26 @@ The application integration still uses a 120-second observer budget. Individual
 exact factorizations are not interruptible mid-operation. Dense factor storage
 and dimension limits remain, so passing the current corpus is not a guarantee
 for every asset or arbitrary LP size.
-The expanded quality/beacon sweep currently has an unresolved timeout for an
-epic electronic-circuit target of `1e-6` with eight shared beacons. Its feasible
-witness exceeds the objective-gap budget and is correctly rejected. See
-`docs/lp-experiments.md` for the frozen input and repair diagnostics.
+Epic electronic-circuit targets of `1e-6` and `1` with eight shared beacons are
+regular regressions. Tighter search produces exact optima on frozen former
+timeout inputs, but can also produce singular hints on other models. The
+certified application therefore checks the default hint, then primal/ratio
+settings of `1e-12`/`1e-12` and `1e-12`/`1e-14`, before permitting full exact
+optimization with the default search as a final attempt. Earlier attempts
+retain support correction and full-model certification. All share the same
+120-second observer budget and exact acceptance policy. Each preliminary
+attempt has a 30-second observer budget to reserve time for subsequent hints;
+individual factorizations can overrun an observation point. Verified infeasibility
+terminates immediately. Retry hints are captured in `rust-retries/<index>/`,
+and attempt witnesses in `rust-attempt-certificates/<index>/`; only the selected
+attempt is published in `rust-certificates/` for independent verification.
+See `docs/lp-experiments.md` for evidence and remaining coverage limits.
+
+`lp_verify_witnesses capture-directory` requires every original model to have
+an accepted feasible witness within the exact gap budget. The explicit
+`--allow-infeasible` option additionally rechecks saved Farkas multipliers
+against the original model; it is intended for mixed outcome surveys and is
+not used by the successful-planning gate in `lp-experiment.ps1`.
 
 Full actual planning regression with automatic witness verification:
 

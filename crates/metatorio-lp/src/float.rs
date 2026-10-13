@@ -16,6 +16,21 @@ pub struct FloatProgress {
     pub structural_columns: usize,
 }
 
+/// Search heuristics only; original-model certification is unchanged.
+#[derive(Debug, Clone, Copy)]
+pub struct FloatOptions {
+    pub ratio_tolerance: f64,
+    pub primal_tolerance: f64,
+}
+impl Default for FloatOptions {
+    fn default() -> Self {
+        Self {
+            ratio_tolerance: 1e-9,
+            primal_tolerance: 1e-9,
+        }
+    }
+}
+
 fn power_scale(maximum: f64) -> f64 {
     if maximum == 0.0 {
         1.0
@@ -129,8 +144,22 @@ impl Model {
     pub fn float_candidate_with_observer(
         &self,
         max_pivots: usize,
+        observer: impl FnMut(FloatProgress) -> bool,
+    ) -> Result<FloatCandidate, String> {
+        self.float_candidate_with_options(FloatOptions::default(), max_pivots, observer)
+    }
+    pub fn float_candidate_with_options(
+        &self,
+        options: FloatOptions,
+        max_pivots: usize,
         mut observer: impl FnMut(FloatProgress) -> bool,
     ) -> Result<FloatCandidate, String> {
+        if [options.ratio_tolerance, options.primal_tolerance]
+            .iter()
+            .any(|v| !v.is_finite() || *v <= 0.0)
+        {
+            return Err("floating search tolerances must be finite and positive".into());
+        }
         self.check()?;
         let n = self.columns.len();
         let m = self.rows.len();
@@ -250,7 +279,7 @@ impl Model {
                 break "nonfinite floating iterate";
             }
             let mut leaving = None;
-            let mut violation = 1e-9;
+            let mut violation = options.primal_tolerance;
             for i in 0..m {
                 let fixed = ids[i] >= n && self.rows[ids[i] - n].equality;
                 let amount = if fixed {
@@ -318,7 +347,7 @@ impl Model {
                     return;
                 }
                 let ratio = price.max(0.0) / (-direction);
-                relaxed_step=relaxed_step.min((price.max(0.0)+1e-9*scale)/(-direction));
+                relaxed_step=relaxed_step.min((price.max(0.0)+options.ratio_tolerance*scale)/(-direction));
                 eligible.push((id,ratio,-direction));
             };
             for j in 0..n {
@@ -439,6 +468,32 @@ mod tests {
     use super::*;
     use crate::{Column, Row};
     #[test]
+    fn invalid_search_tolerances_are_rejected() {
+        let model = Model {
+            columns: vec![],
+            rows: vec![],
+            offset: 0.0,
+        };
+        for value in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            for options in [
+                FloatOptions {
+                    ratio_tolerance: value,
+                    ..FloatOptions::default()
+                },
+                FloatOptions {
+                    primal_tolerance: value,
+                    ..FloatOptions::default()
+                },
+            ] {
+                assert!(
+                    model
+                        .float_candidate_with_options(options, 10, |_| true)
+                        .is_err()
+                );
+            }
+        }
+    }
+    #[test]
     fn rhs_scaling_preserves_the_search_for_tiny_and_large_demands() {
         let mut previous: Option<FloatCandidate> = None;
         for exponent in [-120, 0, 120] {
@@ -527,6 +582,23 @@ mod tests {
             let exact = model.solve_dual_with_observer(200, |_| true).unwrap();
             let certificate = model.certify(&exact.solution).unwrap();
             assert!(certificate.optimal, "cold case {case}");
+            for tolerance in [1e-12, 1e-14] {
+                let proposal = model
+                    .float_candidate_with_options(
+                        FloatOptions {
+                            ratio_tolerance: tolerance,
+                            primal_tolerance: tolerance,
+                        },
+                        200,
+                        |_| true,
+                    )
+                    .unwrap();
+                let refined = model
+                    .refine_basis_with_observer(proposal.basis, 200, |_, _| true)
+                    .unwrap();
+                assert!(refined.certificate.optimal, "strict search case {case}");
+                assert_eq!(refined.certificate.objective, certificate.objective);
+            }
             assert_eq!(
                 refined.certificate.objective, certificate.objective,
                 "case {case}"
