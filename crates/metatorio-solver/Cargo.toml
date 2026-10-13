@@ -44,5 +44,13 @@ name = "lp_float_propose"
 required-features = ["lp-experiments"]
 
 [[example]]
+name = "lp_rust_support"
+required-features = ["lp-experiments"]
+
+[[example]]
+name = "lp_cross_verify"
+required-features = ["lp-experiments"]
+
+[[example]]
 name = "lp_refine_candidate"
 required-features = ["lp-experiments"]

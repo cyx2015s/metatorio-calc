@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 mod basis;
 mod dual;
+mod factor;
 mod float;
 mod refine;
 pub use dual::{DualPivotRule, DualRepair};
@@ -458,9 +459,12 @@ impl Model {
                 bland = true;
                 seen.clear();
             }
-            let solution = match &system {
-                Some(system) => system.reconstruct(self)?,
-                None => self.reconstruct(&basis)?,
+            let (solution, factored) = match &system {
+                Some(system) => (system.reconstruct(self)?, None),
+                None => {
+                    let (solution, factor) = self.reconstruct_factored(&basis)?;
+                    (solution, Some(factor))
+                }
             };
             let certificate = self.certify(&solution)?;
             if !certificate.primal_feasible {
@@ -530,7 +534,13 @@ impl Model {
             }
             let (columns, basic_direction) = match &system {
                 Some(system) => (system.columns.clone(), system.direction(self, entering)?),
-                None => basis::System::uncached_direction(self, &basis, entering)?,
+                None => {
+                    let factored = factored.as_ref().ok_or("missing exact factorization")?;
+                    (
+                        factored.columns.clone(),
+                        factored.direction(self, entering)?,
+                    )
+                }
             };
             let mut direction = vec![Rational::zero(); self.columns.len()];
             for (i, d) in columns.iter().zip(&basic_direction) {
@@ -678,6 +688,13 @@ impl Model {
     /// Eliminate basic row slacks and solve the remaining structural basis.
     /// Reconstruct nonbasic columns at their actual bounds, not rounded values.
     pub fn reconstruct(&self, basis: &Basis) -> Result<ExactSolution, String> {
+        self.reconstruct_factored(basis)
+            .map(|(solution, _)| solution)
+    }
+    fn reconstruct_factored(
+        &self,
+        basis: &Basis,
+    ) -> Result<(ExactSolution, basis::Factored), String> {
         self.check()?;
         if basis.columns.len() != self.columns.len() || basis.rows.len() != self.rows.len() {
             return Err("basis dimensions differ from model".into());
@@ -734,7 +751,8 @@ impl Model {
             }
             rhs.push(value);
         }
-        let basic = solve(matrix.clone(), rhs)?;
+        let factor = factor::Factorization::new(matrix)?;
+        let basic = factor.solve(&rhs)?;
         for (column, value) in columns.iter().zip(basic) {
             values[*column] = value;
         }
@@ -747,20 +765,74 @@ impl Model {
         let dual = if costs.iter().all(|c| c.is_zero()) {
             vec![Rational::zero(); columns.len()]
         } else {
-            let transpose = (0..columns.len())
-                .map(|j| matrix.iter().map(|row| row[j].clone()).collect())
-                .collect();
-            solve(transpose, costs)?
+            factor.solve_transpose(&costs)?
         };
         let mut row_duals = vec![Rational::zero(); self.rows.len()];
         for (row, value) in rows.iter().zip(dual) {
             row_duals[*row] = value;
         }
-        Ok(ExactSolution {
+        let solution = ExactSolution {
             values,
             row_duals,
             basis_dimension: columns.len(),
-        })
+        };
+        Ok((
+            solution,
+            basis::Factored {
+                columns,
+                rows,
+                factor,
+            },
+        ))
+    }
+
+    /// For nonnegative costs and nonnegative unbounded-above variables, shrink
+    /// a dual witness toward zero to obtain an exact lower bound. This keeps
+    /// the original costs unchanged. It does not prove primal feasibility or
+    /// optimality; callers must check the returned solution's certificate/gap.
+    pub fn scale_to_dual_feasible(
+        &self,
+        solution: &ExactSolution,
+    ) -> Result<(ExactSolution, Rational), String> {
+        self.check()?;
+        if solution.values.len() != self.columns.len()
+            || solution.row_duals.len() != self.rows.len()
+            || self
+                .columns
+                .iter()
+                .any(|c| c.lower != 0.0 || c.upper != f64::INFINITY || c.cost < 0.0)
+        {
+            return Err(
+                "dual scaling requires matching dimensions and nonnegative columns/costs".into(),
+            );
+        }
+        let mut scale = rational(1.0)?;
+        if self
+            .rows
+            .iter()
+            .zip(&solution.row_duals)
+            .any(|(r, y)| !r.equality && y.is_positive())
+        {
+            scale = Rational::zero();
+        } else {
+            let reduced = self.reduced_costs(solution);
+            for (column, price) in self.columns.iter().zip(reduced.numerators) {
+                if price.is_negative() {
+                    let cost = rational(column.cost)?;
+                    let rc = Rational::new(price, reduced.denominator.clone());
+                    scale = scale.min(&cost / (&cost - rc));
+                }
+            }
+        }
+        let adjusted = ExactSolution {
+            values: solution.values.clone(),
+            row_duals: solution.row_duals.iter().map(|y| y * &scale).collect(),
+            basis_dimension: solution.basis_dimension,
+        };
+        if !self.certify(&adjusted)?.dual_feasible {
+            return Err("scaled dual failed independent verification".into());
+        }
+        Ok((adjusted, scale))
     }
 
     /// Exact primal feasibility and weak-duality bound against every original
@@ -878,6 +950,51 @@ impl ExactSolution {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn exact_dual_scaling_provides_a_bound_without_changing_costs() {
+        use super::*;
+        let mut model = Model {
+            columns: [8.0, 4.0]
+                .into_iter()
+                .map(|cost| Column {
+                    lower: 0.0,
+                    upper: f64::INFINITY,
+                    cost,
+                })
+                .collect(),
+            rows: vec![Row {
+                equality: true,
+                rhs: 1.0,
+                terms: vec![(0, 1.0), (1, 0.5)],
+            }],
+            offset: 9.0,
+        };
+        let solution = ExactSolution {
+            values: vec![rational(1.0).unwrap(), Rational::zero()],
+            row_duals: vec![rational(8.5).unwrap()],
+            basis_dimension: 1,
+        };
+        assert!(!model.certify(&solution).unwrap().dual_feasible);
+        let (adjusted, scale) = model.scale_to_dual_feasible(&solution).unwrap();
+        assert_eq!(scale, Rational::new(16.into(), 17.into()));
+        let certificate = model.certify(&adjusted).unwrap();
+        assert!(certificate.optimal);
+        assert_eq!(certificate.objective, "17");
+        assert_eq!(model.columns[1].cost, 4.0);
+        model.columns[1].cost = 0.0;
+        let (adjusted, scale) = model.scale_to_dual_feasible(&solution).unwrap();
+        assert!(scale.is_zero());
+        let certificate = model.certify(&adjusted).unwrap();
+        assert!(certificate.primal_feasible && certificate.dual_feasible);
+        assert!(!certificate.optimal);
+        assert_eq!(certificate.objective_gap.as_deref(), Some("8"));
+        model.rows[0].equality = false;
+        model.columns[1].cost = 4.0;
+        let (_, scale) = model.scale_to_dual_feasible(&solution).unwrap();
+        assert!(scale.is_zero());
+        model.columns[1].cost = -1.0;
+        assert!(model.scale_to_dual_feasible(&solution).is_err());
+    }
     use super::*;
     fn column(cost: f64) -> Column {
         Column {

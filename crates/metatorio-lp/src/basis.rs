@@ -8,6 +8,64 @@ pub(super) struct System {
     inverse: Vec<Vec<Rational>>,
 }
 
+pub(super) struct Factored {
+    pub columns: Vec<usize>,
+    pub rows: Vec<usize>,
+    pub factor: super::factor::Factorization,
+}
+impl Factored {
+    pub fn direction(&self, model: &Model, entering: usize) -> Result<Vec<Rational>, String> {
+        let rhs = self
+            .rows
+            .iter()
+            .map(|row| {
+                let mut value = Rational::zero();
+                if entering == model.columns.len() + row {
+                    value -= rational(1.0)?;
+                }
+                for (i, a) in &model.rows[*row].terms {
+                    if *i == entering {
+                        value -= rational(*a)?;
+                    }
+                }
+                Ok(value)
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        self.factor.solve(&rhs)
+    }
+    pub fn functional(&self, model: &Model, variable: usize) -> Result<Vec<Rational>, String> {
+        let mut rhs = vec![Rational::zero(); self.columns.len()];
+        let mut result = vec![Rational::zero(); model.rows.len()];
+        if variable < model.columns.len() {
+            let p = self
+                .columns
+                .iter()
+                .position(|i| *i == variable)
+                .ok_or("functional requires a basic column")?;
+            rhs[p] = rational(1.0)?;
+        } else {
+            let row = variable - model.columns.len();
+            if row >= model.rows.len() || self.rows.contains(&row) {
+                return Err("functional requires a basic row slack".into());
+            }
+            let mut positions = vec![None; model.columns.len()];
+            for (j, column) in self.columns.iter().enumerate() {
+                positions[*column] = Some(j);
+            }
+            for (column, a) in &model.rows[row].terms {
+                if let Some(j) = positions[*column] {
+                    rhs[j] -= rational(*a)?;
+                }
+            }
+            result[row] = rational(1.0)?;
+        }
+        for (row, value) in self.rows.iter().zip(self.factor.solve_transpose(&rhs)?) {
+            result[*row] = value;
+        }
+        Ok(result)
+    }
+}
+
 fn indices(basis: &Basis) -> (Vec<usize>, Vec<usize>) {
     (
         basis
@@ -155,6 +213,7 @@ impl System {
             .collect::<Result<Vec<_>, String>>()?;
         Ok(product(&self.inverse, &rhs))
     }
+    #[cfg(test)]
     pub fn uncached_direction(
         model: &Model,
         basis: &Basis,
@@ -480,6 +539,7 @@ mod tests {
             system.update(&model, &basis, entering, leaving).unwrap();
             let updated = system.reconstruct(&model).unwrap();
             let independent = model.reconstruct(&basis).unwrap();
+            let (_, factored) = model.reconstruct_factored(&basis).unwrap();
             assert_eq!(updated.values, independent.values);
             assert_eq!(updated.row_duals, independent.row_duals);
             for (variable, status) in basis.columns.iter().chain(&basis.rows).enumerate() {
@@ -488,6 +548,15 @@ mod tests {
                         system.cached_functional(&model, variable).unwrap(),
                         System::functional(&model, &basis, variable).unwrap()
                     );
+                    assert_eq!(
+                        factored.functional(&model, variable).unwrap(),
+                        System::functional(&model, &basis, variable).unwrap()
+                    );
+                } else {
+                    let (columns, direction) =
+                        System::uncached_direction(&model, &basis, variable).unwrap();
+                    assert_eq!(factored.columns, columns);
+                    assert_eq!(factored.direction(&model, variable).unwrap(), direction);
                 }
             }
         }

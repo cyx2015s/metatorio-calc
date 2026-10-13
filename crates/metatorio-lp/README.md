@@ -28,6 +28,15 @@ dual prices when possible; zero costs provide a fallback feasibility objective.
 Only the final original-model certificate establishes optimality. The optional
 `refine_basis_with_rule` selects an exact repair strategy for experiments.
 
+Reconstruction and uncached pivots reuse an exact LU factorization for primal,
+dual and direction solves. Exact active-column counts guide column ordering to
+reduce fill; row and column permutations are retained in both solve directions.
+Storage remains dense. `scale_to_dual_feasible` can obtain a verified lower bound
+from an approximate-basis dual witness by exact contraction toward zero, for the
+nonnegative-cost model class. It never changes costs and never asserts primal
+feasibility or zero objective gap. Primal and dual witnesses may come from
+different bases; `certify` checks both against the complete original model.
+
 Coefficients are interpreted as the exact binary rational values of the input
 `f64`s. Exact solutions are retained as rational numbers; conversion to `f64` is a
 separate operation and introduces rounding.

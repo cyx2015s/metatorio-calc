@@ -113,9 +113,12 @@ impl Model {
         };
         let mut seen = HashSet::new();
         for iteration in 0..=max_pivots {
-            let solution = match &system {
-                Some(system) => system.reconstruct(self)?,
-                None => self.reconstruct(&basis)?,
+            let (solution, factored) = match &system {
+                Some(system) => (system.reconstruct(self)?, None),
+                None => {
+                    let (solution, factor) = self.reconstruct_factored(&basis)?;
+                    (solution, Some(factor))
+                }
             };
             let certificate = self.certify(&solution)?;
             if !certificate.dual_feasible {
@@ -195,7 +198,10 @@ impl Model {
             };
             let mut ray = match &system {
                 Some(system) => system.cached_functional(self, leaving)?,
-                None => basis::System::functional(self, &basis, leaving)?,
+                None => factored
+                    .as_ref()
+                    .ok_or("missing exact factorization")?
+                    .functional(self, leaving)?,
             };
             if increase {
                 for y in &mut ray {

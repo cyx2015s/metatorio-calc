@@ -491,6 +491,23 @@ mod tests {
                 refined.certificate.objective, certificate.objective,
                 "case {case}"
             );
+            let mut scaled = model.clone();
+            for (r, row) in scaled.rows.iter_mut().enumerate() {
+                let scale = 2.0f64.powi(((case * 11 + r * 17) % 81) as i32 - 40);
+                row.rhs *= scale;
+                for (_, a) in &mut row.terms {
+                    *a *= scale;
+                }
+            }
+            let proposal = scaled.float_candidate_with_observer(200, |_| true).unwrap();
+            let refined = scaled
+                .refine_basis_with_observer(proposal.basis, 200, |_, _| true)
+                .unwrap();
+            assert!(refined.certificate.optimal, "scaled case {case}");
+            assert_eq!(
+                refined.certificate.objective, certificate.objective,
+                "scaled case {case}"
+            );
         }
     }
     #[test]
