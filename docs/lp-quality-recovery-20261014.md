@@ -76,7 +76,9 @@
 
 最终记录：`local/auto-plan-fulgora-user-independent-dual-repair-four-20261014-0.jsonl`、`local/fulgora-user-independent-dual-repair-four-20261014.log`、`local/lp-exp/fulgora-user-independent-dual-repair-four-20261014` 与独立验证日志 `local/fulgora-user-independent-dual-repair-four-verify-20261014.log`。
 
-## 检查与结果更新入口
+## 阶段收尾与后续入口
+
+2026-10-14 用户确认当前版本达到实际可用水准、GUI 响应时间可以接受，停止本轮 LP 实验。人工土壤 GUI 验证、旧测试未确认项及历史结果的证据范围统一记录在 [实验收尾](lp-experiments.md)；论文调研见 [路线评估](lp-research-direction-20261014.md)。下列命令仅供日后复现，不在收尾时执行。
 
 无分数消元独立对照包含随机有理矩阵的正向/转置解、奇异性，以及 40 维缩放和行列置换后的已知解。块三角分解独立对照包含 48 维行列置换、相依循环块、正向/转置解和数值奇异性。当前核心 55、默认求解器 38 及相关集成测试通过；Rust/HiGHS 双特性求解器 40 项与相关集成测试通过；Clippy 全目标和 headless 编译检查通过。单元测试通过不代表所有待测特产已修复；其实际结果按下方记录。
 
