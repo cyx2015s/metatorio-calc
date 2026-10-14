@@ -11,6 +11,22 @@ impl Model {
         &self,
         control: &SolveControl,
     ) -> Result<Option<InfeasibilityCertificate>, String> {
+        Ok(self.zero_propagation_analysis(control)?.1)
+    }
+
+    /// Columns forced to zero by homogeneous rows and nonnegative bounds.
+    /// This is a search reduction; final witnesses must still cover self.
+    pub fn zero_forced_columns_with_control(
+        &self,
+        control: &SolveControl,
+    ) -> Result<Vec<bool>, String> {
+        Ok(self.zero_propagation_analysis(control)?.0)
+    }
+
+    fn zero_propagation_analysis(
+        &self,
+        control: &SolveControl,
+    ) -> Result<(Vec<bool>, Option<InfeasibilityCertificate>), String> {
         control.check()?;
         self.check()?;
         if self
@@ -18,7 +34,7 @@ impl Model {
             .iter()
             .any(|c| c.lower != 0.0 || c.upper != f64::INFINITY)
         {
-            return Ok(None);
+            return Ok((vec![false; self.columns.len()], None));
         }
         let mut incidence = vec![Vec::new(); self.columns.len()];
         let mut counts = vec![(0usize, 0usize); self.rows.len()];
@@ -70,7 +86,8 @@ impl Model {
                 sign
             };
             if sign * row.rhs > 0.0 {
-                return self.zero_propagation_witness(i, sign, &forcing, &order, control);
+                let proof = self.zero_propagation_witness(i, sign, &forcing, &order, control)?;
+                return Ok((forcing.iter().map(Option::is_some).collect(), proof));
             }
             if row.rhs != 0.0 {
                 continue;
@@ -91,7 +108,7 @@ impl Model {
                 }
             }
         }
-        Ok(None)
+        Ok((forcing.iter().map(Option::is_some).collect(), None))
     }
 
     fn zero_propagation_witness(

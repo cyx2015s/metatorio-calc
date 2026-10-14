@@ -81,19 +81,66 @@ pub(crate) fn solve(
         // preserves the old dual-feasible basis. Repair the new deficits instead
         // of discarding hundreds of exact pivots at every frontier expansion.
         let mut warm_proposal = None;
+        let mut warm_verified = None;
         if let Some(previous) = &warm_basis {
             let basis = exact::Basis {
                 columns: columns.iter().map(|j| previous.columns[*j]).collect(),
                 rows: selected.iter().map(|i| previous.rows[*i]).collect(),
             };
-            let warm_started = Instant::now();
-            if let Ok(repaired) = relaxed.repair_dual_feasible_basis_with_control(
-                basis,
-                exact::DualPivotRule::FirstViolationLargePivot,
-                1000,
-                |_| warm_started.elapsed().as_secs_f64() < 20.0,
-                &control,
+            // Continue the previous basis in floating arithmetic before paying
+            // for repeated large-rational LU repairs. Never replace the retained
+            // exact basis with an unaccepted hint or relax the certificate gate.
+            let hint_deadline = deadline.min(Instant::now() + std::time::Duration::from_secs(10));
+            if let Ok(hint) = relaxed.float_candidate_with_basis(
+                &basis,
+                exact::FloatOptions {
+                    ratio_tolerance: 1e-12,
+                    primal_tolerance: 1e-12,
+                },
+                20000,
+                |_| Instant::now() < hint_deadline,
             ) {
+                let hint_control = exact::SolveControl::with_deadline(
+                    deadline.min(Instant::now() + std::time::Duration::from_secs(5)),
+                );
+                if let Ok(verified) = relaxed.certify_candidate_with_control(
+                    &hint,
+                    1000,
+                    &budget,
+                    |_, _| !hint_control.is_cancelled(),
+                    &hint_control,
+                ) {
+                    if let Some(proof) = verified.infeasibility {
+                        return lift_infeasibility(&model, &selected, proof, captured);
+                    }
+                    if verified.accepted {
+                        eprintln!(
+                            "[LP-RUST-ROW-FLOAT-WARM] round={} pivots={}",
+                            round + 1,
+                            hint.pivots
+                        );
+                        pivots += hint.pivots;
+                        warm_proposal = Some(exact::FloatCandidate {
+                            basis: verified.primal_basis.clone(),
+                            values: verified.solution.approximate()?,
+                            pivots: 0,
+                            stop_reason: "certified floating warm relaxation".into(),
+                            diagnostic: None,
+                        });
+                        warm_verified = Some(verified);
+                    }
+                }
+            }
+            let warm_started = Instant::now();
+            if warm_proposal.is_none()
+                && let Ok(repaired) = relaxed.repair_dual_feasible_basis_with_control(
+                    basis,
+                    exact::DualPivotRule::FirstViolationLargePivot,
+                    1000,
+                    |_| warm_started.elapsed().as_secs_f64() < 20.0,
+                    &control,
+                )
+            {
                 if let Some(proof) = repaired.infeasibility {
                     return lift_infeasibility(&model, &selected, proof, captured);
                 }
@@ -147,13 +194,16 @@ pub(crate) fn solve(
         };
         let refinement_deadline = deadline.min(Instant::now() + std::time::Duration::from_secs(5));
         let refinement_control = exact::SolveControl::with_deadline(refinement_deadline);
-        let refined = relaxed.certify_candidate_with_control(
-            &proposal,
-            1000,
-            &budget,
-            |_, _| !refinement_control.is_cancelled(),
-            &refinement_control,
-        );
+        let refined = match warm_verified {
+            Some(verified) => Ok(verified),
+            None => relaxed.certify_candidate_with_control(
+                &proposal,
+                1000,
+                &budget,
+                |_, _| !refinement_control.is_cancelled(),
+                &refinement_control,
+            ),
+        };
         let refined = match refined {
             Ok(r) if r.accepted || r.infeasibility.is_some() => r,
             unfinished => {
@@ -432,7 +482,7 @@ fn lift_infeasibility(
     Err(Failure::Infeasible)
 }
 
-fn save(captured: Option<&std::path::Path>, witness: &serde_json::Value) {
+pub(crate) fn save(captured: Option<&std::path::Path>, witness: &serde_json::Value) {
     let Some(source) = captured else {
         return;
     };

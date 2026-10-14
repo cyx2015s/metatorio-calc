@@ -6,10 +6,14 @@ use std::{
     time::Instant,
 };
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args: Vec<_> = std::env::args().skip(1).collect();
+    let mut args: Vec<_> = std::env::args().skip(1).collect();
+    let hint_only = args.last().is_some_and(|s| s == "--hint-only");
+    if hint_only {
+        args.pop();
+    }
     if !(3..=5).contains(&args.len()) {
         return Err(
-            "usage: lp_float_propose snapshot.json output.json seconds [ratio-tolerance] [primal-tolerance]".into(),
+            "usage: lp_float_propose snapshot.json output.json seconds [ratio-tolerance] [primal-tolerance] [--hint-only]".into(),
         );
     }
     let snapshot: Snapshot = serde_json::from_reader(BufReader::new(fs::File::open(&args[0])?))?;
@@ -42,6 +46,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     println!("diagnostic: {:?}", proposal.diagnostic);
     let mut output = serde_json::json!({"primal_tolerance":options.primal_tolerance,"ratio_tolerance":options.ratio_tolerance,"model_scope":"full","basis":proposal.basis,"pivots":proposal.pivots,"proposal_seconds":proposal_seconds,"stop_reason":proposal.stop_reason,"diagnostic":proposal.diagnostic,"values_bits":proposal.values.iter().map(|v|v.to_bits()).collect::<Vec<_>>(),"rounded_validation":snapshot.validate(&proposal.values)});
+    if hint_only {
+        output["exact_verification"] = "not_run".into();
+        serde_json::to_writer(BufWriter::new(fs::File::create(&args[1])?), &output)?;
+        return Ok(());
+    }
     let start = Instant::now();
     match model.reconstruct(&proposal.basis) {
         Ok(solution) => {

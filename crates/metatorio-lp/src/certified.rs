@@ -97,15 +97,195 @@ impl Model {
         if !observer("reconstruct", 0) {
             return Err("certified solve cancelled before reconstruction".into());
         }
-        let initial = self.reconstruct_with_control(&candidate.basis, control)?;
+        // Degenerate floating bases may retain hundreds of zero-flow columns.
+        // Rebase a much smaller support before factoring that large exact block.
+        // A restricted failure proves nothing here; all acceptance and further
+        // refinement still use self, with every original column restored.
+        let basics = candidate
+            .basis
+            .columns
+            .iter()
+            .filter(|s| **s == BasisStatus::Basic)
+            .count();
+        // Block triangular reconstruction can make a large degenerate basis
+        // cheap. Check its full witness before replacing it with a support
+        // hint, which may lose useful original-model dual prices.
+        if basics >= 32 {
+            if let Ok(original) = self.reconstruct_with_control(&candidate.basis, control) {
+                let (adjusted, scale) = self.scale_to_dual_feasible(&original)?;
+                let result = self.certified_result(
+                    adjusted,
+                    candidate.basis.clone(),
+                    gap_budget,
+                    0,
+                    self.columns.len(),
+                )?;
+                if result.accepted {
+                    return Ok(result);
+                }
+                // A one-sided feasible original basis already has a direct
+                // exact repair path. Support rebasing can discard its useful
+                // dual witness and turn a tiny bound repair into cold search.
+                if result.certificate.primal_feasible || scale == rational(1.0)? {
+                    if !observer("verify", 0) || !observer("full-refine", 0) {
+                        return Ok(CertifiedResult {
+                            stop_reason: Some(
+                                "certified observer requested stop before full refinement".into(),
+                            ),
+                            ..result
+                        });
+                    }
+                    let mut primal_basis = candidate.basis.clone();
+                    let mut feasibility_pivots = 0;
+                    if !result.certificate.primal_feasible
+                        && scale == rational(1.0)?
+                        && !gap_budget.is_zero()
+                    {
+                        // Original duals already provide a rigorous lower
+                        // bound. Repair only primal feasibility with stable
+                        // zero-cost pivots, then check the ORIGINAL gap before
+                        // paying for exact original-cost optimization.
+                        let mut feasibility = self.clone();
+                        for column in &mut feasibility.columns {
+                            column.cost = 0.0;
+                        }
+                        feasibility.offset = 0.0;
+                        let repaired = feasibility.repair_dual_feasible_basis_with_control(
+                            primal_basis,
+                            crate::DualPivotRule::FirstViolationLargePivot,
+                            max_pivots,
+                            |p| observer("full-refine", p.pivots),
+                            control,
+                        )?;
+                        feasibility_pivots = repaired.pivots;
+                        primal_basis = repaired.basis;
+                        let mut combined = self.certified_result(
+                            ExactSolution {
+                                row_duals: result.solution.row_duals.clone(),
+                                ..repaired.solution
+                            },
+                            primal_basis.clone(),
+                            gap_budget,
+                            feasibility_pivots,
+                            self.columns.len(),
+                        )?;
+                        combined.stop_reason = repaired.stop_reason;
+                        // Costs were the only auxiliary change; Farkas
+                        // multipliers still cover every original constraint.
+                        combined.infeasibility = repaired.infeasibility;
+                        if combined.accepted
+                            || combined.infeasibility.is_some()
+                            || !combined.certificate.primal_feasible
+                        {
+                            return Ok(combined);
+                        }
+                    }
+                    let refined = self.refine_basis_with_control(
+                        primal_basis,
+                        max_pivots.saturating_sub(feasibility_pivots),
+                        |_, p| observer("full-refine", feasibility_pivots + p.pivots),
+                        control,
+                    )?;
+                    let pivots =
+                        feasibility_pivots + refined.repair_pivots + refined.optimization_pivots;
+                    let mut full = self.certified_result(
+                        refined.solution.clone(),
+                        refined.basis.clone(),
+                        gap_budget,
+                        pivots,
+                        self.columns.len(),
+                    )?;
+                    let combined = self.certified_result(
+                        ExactSolution {
+                            row_duals: result.solution.row_duals,
+                            ..refined.solution
+                        },
+                        refined.basis,
+                        gap_budget,
+                        pivots,
+                        self.columns.len(),
+                    )?;
+                    if combined
+                        .relative_gap
+                        .as_ref()
+                        .is_some_and(|g| full.relative_gap.as_ref().is_none_or(|old| g < old))
+                    {
+                        full = combined;
+                    }
+                    full.stop_reason = refined.stop_reason;
+                    full.infeasibility = refined.infeasibility;
+                    return Ok(full);
+                }
+            }
+            control.check()?;
+        }
+        let support = candidate.values.iter().filter(|v| **v != 0.0).count();
+        let compacted = if basics >= 32
+            && support.saturating_mul(2) < basics
+            && observer("compact-search", 0)
+        {
+            // This only proposes a basis, so a small deficit must not pull an
+            // entire high-degree supplier row into the support. Missing columns
+            // are restored before reconstruction/refinement against self.
+            let (restricted, selected) = self.candidate_support(&candidate.values, false)?;
+            if selected.len() < basics {
+                match restricted.float_candidate_with_options(
+                    crate::FloatOptions {
+                        ratio_tolerance: 1e-12,
+                        primal_tolerance: 1e-12,
+                    },
+                    20000,
+                    |p| !control.is_cancelled() && observer("compact-search", p.pivots),
+                ) {
+                    Ok(hint) => {
+                        let mut basis = Basis {
+                            columns: vec![BasisStatus::Lower; self.columns.len()],
+                            rows: hint.basis.rows,
+                        };
+                        let mut values = vec![0.0; self.columns.len()];
+                        for (new, &old) in selected.iter().enumerate() {
+                            basis.columns[old] = hint.basis.columns[new];
+                            values[old] = hint.values[new];
+                        }
+                        Some(FloatCandidate {
+                            basis,
+                            values,
+                            pivots: hint.pivots,
+                            stop_reason: hint.stop_reason,
+                            diagnostic: hint.diagnostic,
+                        })
+                    }
+                    Err(_) => None,
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let original_candidate = candidate;
+        let mut candidate = compacted.as_ref().unwrap_or(original_candidate);
+        let mut compacted_used = compacted.is_some();
+        control.check()?;
+        let initial = match self.reconstruct_with_control(&candidate.basis, control) {
+            Ok(solution) => solution,
+            Err(_) if compacted.is_some() && !control.is_cancelled() => {
+                candidate = original_candidate;
+                compacted_used = false;
+                self.reconstruct_with_control(&candidate.basis, control)?
+            }
+            Err(error) => return Err(error),
+        };
         let (adjusted, _) = self.scale_to_dual_feasible(&initial)?;
-        let initial_result = self.certified_result(
+        let compact_pivots = compacted.as_ref().map_or(0, |hint| hint.pivots);
+        let mut initial_result = self.certified_result(
             adjusted.clone(),
             candidate.basis.clone(),
             gap_budget,
             0,
             self.columns.len(),
         )?;
+        initial_result.support_search_pivots = compact_pivots;
         control.check()?;
         if initial_result.accepted {
             return Ok(initial_result);
@@ -119,8 +299,8 @@ impl Model {
         let mut primal_basis = candidate.basis.clone();
         let mut exact_pivots = 0;
         let mut support_columns = self.columns.len();
-        let mut support_search_pivots = 0;
-        if !initial_result.certificate.primal_feasible {
+        let mut support_search_pivots = compact_pivots;
+        if !initial_result.certificate.primal_feasible && !compacted_used {
             if !observer("support-search", 0) {
                 return Ok(CertifiedResult {
                     stop_reason: Some(
@@ -129,12 +309,12 @@ impl Model {
                     ..initial_result
                 });
             }
-            let (restricted, selected) = self.candidate_support(&candidate.values)?;
+            let (restricted, selected) = self.candidate_support(&candidate.values, true)?;
             support_columns = selected.len();
             let proposal = restricted.float_candidate_with_observer(20000, |p| {
                 !control.is_cancelled() && observer("support-search", p.pivots)
             })?;
-            support_search_pivots = proposal.pivots;
+            support_search_pivots += proposal.pivots;
             let repaired = restricted.refine_basis_with_control(
                 proposal.basis,
                 max_pivots,
@@ -258,12 +438,29 @@ impl Model {
             infeasibility: None,
         })
     }
-    fn candidate_support(&self, values: &[f64]) -> Result<(Self, Vec<usize>), String> {
+    fn candidate_support(
+        &self,
+        values: &[f64],
+        include_deficits: bool,
+    ) -> Result<(Self, Vec<usize>), String> {
         if values.len() != self.columns.len() || values.iter().any(|x| !x.is_finite()) {
             return Err("support requires a finite full vector".into());
         }
-        let mut keep: Vec<_> = values.iter().map(|x| *x != 0.0).collect();
-        for row in &self.rows {
+        // Compact rebasing is only a hint. Exclude negative/noise-size flows
+        // from that search, then restore EVERY original column before exact
+        // reconstruction and repair. This cutoff is not a feasibility tolerance
+        // and may omit a genuinely necessary tiny supplier.
+        let mut keep: Vec<_> = values
+            .iter()
+            .map(|x| {
+                if include_deficits {
+                    *x != 0.0
+                } else {
+                    *x > 1e-9
+                }
+            })
+            .collect();
+        for row in self.rows.iter().filter(|_| include_deficits) {
             let mut sum = 0.0f64;
             let mut correction = 0.0;
             let mut magnitude = 0.0;
@@ -326,6 +523,182 @@ impl Model {
 mod tests {
     use super::*;
     use crate::Column;
+    #[test]
+    fn degenerate_hint_restores_omitted_cheaper_and_tiny_supplier_columns() {
+        let mut model = Model {
+            columns: vec![
+                Column {
+                    lower: 0.0,
+                    upper: f64::INFINITY,
+                    cost: 3.0
+                };
+                34
+            ],
+            rows: vec![],
+            offset: 0.0,
+        };
+        model.columns[0].cost = 2.0;
+        model.columns[1].cost = 1.0;
+        model.rows.push(Row {
+            equality: true,
+            rhs: 1.0,
+            terms: vec![(0, 1.0), (1, 1.0)],
+        });
+        for j in 2..34 {
+            model.rows.push(Row {
+                equality: true,
+                rhs: 0.0,
+                terms: vec![(j, 1.0)],
+            });
+        }
+        let mut basis = Basis {
+            columns: vec![BasisStatus::Basic; 34],
+            rows: vec![BasisStatus::Upper; 33],
+        };
+        basis.columns[1] = BasisStatus::Lower;
+        let mut values = vec![0.0; 34];
+        values[0] = 1.0;
+        let hint = FloatCandidate {
+            basis,
+            values,
+            pivots: 0,
+            stop_reason: "test hint".into(),
+            diagnostic: None,
+        };
+        let stopped = model
+            .certify_candidate_with_observer(
+                &hint,
+                100,
+                &Rational::new(1.into(), 1_000_000_000_000u64.into()),
+                |phase, _| phase != "full-refine",
+            )
+            .unwrap();
+        assert!(!stopped.accepted);
+        assert!(stopped.certificate.primal_feasible && stopped.certificate.dual_feasible);
+        assert_eq!(stopped.certificate.objective, "2");
+        let result = model
+            .certify_candidate_with_observer(
+                &hint,
+                100,
+                &Rational::new(1.into(), 1_000_000_000_000u64.into()),
+                |_, _| true,
+            )
+            .unwrap();
+        assert!(result.accepted && result.certificate.optimal);
+        assert!(result.solution.values[0].is_zero());
+        assert_eq!(result.solution.values[1], rational(1.0).unwrap());
+        assert_eq!(result.certificate.objective, "1");
+
+        // The small support lacks a required supplier and is infeasible. Its
+        // stopped floating hint must be repaired on the full original model.
+        model.columns[0].cost = 1.0;
+        model.rows[0].terms = vec![(0, 1.0)];
+        model.rows.insert(
+            1,
+            Row {
+                equality: false,
+                rhs: 0.0,
+                terms: vec![(0, 1.0), (1, -1.0)],
+            },
+        );
+        let mut missing_supplier = hint;
+        missing_supplier.basis.rows.insert(1, BasisStatus::Basic);
+        let stopped = model
+            .certify_candidate_with_observer(
+                &missing_supplier,
+                100,
+                &Rational::zero(),
+                |phase, _| phase != "full-refine",
+            )
+            .unwrap();
+        assert!(!stopped.accepted && stopped.infeasibility.is_none());
+        let repaired = model
+            .certify_candidate_with_observer(&missing_supplier, 100, &Rational::zero(), |_, _| true)
+            .unwrap();
+        assert!(repaired.accepted && repaired.certificate.optimal);
+        assert_eq!(repaired.certificate.objective, "2");
+        assert_eq!(repaired.solution.values[0], rational(1.0).unwrap());
+        assert_eq!(repaired.solution.values[1], rational(1.0).unwrap());
+
+        // A positive flow below the rebasing cutoff can be indispensable.
+        // Omitting it must cause full repair, never a false infeasibility or
+        // acceptance with a relaxed original constraint.
+        model.rows[1].terms[1].1 = -1e15;
+        missing_supplier.values[1] = 1e-15;
+        let stopped = model
+            .certify_candidate_with_observer(
+                &missing_supplier,
+                100,
+                &Rational::zero(),
+                |phase, _| phase != "full-refine",
+            )
+            .unwrap();
+        assert!(!stopped.accepted && stopped.infeasibility.is_none());
+        let repaired = model
+            .certify_candidate_with_observer(&missing_supplier, 100, &Rational::zero(), |_, _| true)
+            .unwrap();
+        assert!(repaired.accepted && repaired.certificate.optimal);
+        assert_eq!(
+            repaired.solution.values[1],
+            rational(1.0).unwrap() / rational(1e15).unwrap()
+        );
+    }
+    #[test]
+    fn auxiliary_primal_optimum_must_pass_original_gap_or_continue_original_optimization() {
+        let mut model = Model {
+            columns: (0..35)
+                .map(|_| Column {
+                    lower: 0.0,
+                    upper: f64::INFINITY,
+                    cost: 3.0,
+                })
+                .collect(),
+            rows: vec![Row {
+                equality: true,
+                rhs: -1.0,
+                terms: vec![(0, 1.0), (1, -1.0), (2, -1000.0)],
+            }],
+            offset: 0.0,
+        };
+        model.columns[0].cost = 0.0;
+        model.columns[1].cost = 1.0;
+        model.columns[2].cost = 10000.0;
+        for j in 3..35 {
+            model.rows.push(Row {
+                equality: true,
+                rhs: 0.0,
+                terms: vec![(j, 1.0)],
+            });
+        }
+        let mut basis = Basis {
+            columns: vec![BasisStatus::Basic; 35],
+            rows: vec![BasisStatus::Upper; 33],
+        };
+        basis.columns[1] = BasisStatus::Lower;
+        basis.columns[2] = BasisStatus::Lower;
+        let mut values = vec![0.0; 35];
+        values[0] = -1.0;
+        let hint = FloatCandidate {
+            basis,
+            values,
+            pivots: 0,
+            stop_reason: "test hint".into(),
+            diagnostic: None,
+        };
+        let budget = Rational::new(1.into(), 1_000_000_000_000u64.into());
+        let stopped = model
+            .certify_candidate_with_observer(&hint, 1, &budget, |_, _| true)
+            .unwrap();
+        assert!(stopped.certificate.primal_feasible && stopped.certificate.dual_feasible);
+        assert_eq!(stopped.certificate.objective, "10");
+        assert!(!stopped.accepted && stopped.infeasibility.is_none());
+        let result = model
+            .certify_candidate_with_observer(&hint, 10, &budget, |_, _| true)
+            .unwrap();
+        assert!(result.accepted && result.certificate.optimal);
+        assert_eq!(result.certificate.objective, "1");
+        assert_eq!(result.solution.values[1], rational(1.0).unwrap());
+    }
     #[test]
     fn full_infeasibility_certificate_survives_the_combined_entry_point() {
         let model = Model {

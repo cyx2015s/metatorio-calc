@@ -67,13 +67,20 @@ and attempt witnesses in `rust-attempt-certificates/<index>/`; only the selected
 attempt is published in `rust-certificates/` for independent verification.
 
 An exact sparse zero-propagation precheck can prove missing-supply contradictions.
-After the first incomplete hint, constraint generation tries a relaxation that
+After the three preliminary certified hints remain incomplete, exact column generation can recover a small
+master problem. Only a fully validated floating primal vector seeds it; otherwise
+it starts from demand rows and exact missing-supplier rays. It uses at most 900
+seconds of the shared budget, reserving final repair time. Restricted failures
+are lifted and checked against every original column before reporting infeasibility.
+If column recovery remains incomplete, constraint generation tries a relaxation that
 starts with demand rows, then adds exactly violated original rows. Low-degree
 rows are preferred to dense shared-resource rows; after 32 rounds the frontier
 widens. It keeps every supplier occurring in selected rows and restores omitted
 zero columns when new rows need them. Singular relaxation hints can restart from
 the exact all-slack basis. Recovery validates and reuses retained exact bases;
-20-second progress stops preserve completed pivots. A certified primal basis may
+20-second progress stops preserve completed pivots. Before exact warm repair,
+floating search can continue from the retained basis; only its independently
+certified result replaces the retained state. A certified primal basis may
 have an independent dual, so an invalid warm hint falls back to another proposal
 or cold start. A full feasible primal basis can continue exact original-cost
 optimization to close an excessive gap without repeating Phase I. Recovery has

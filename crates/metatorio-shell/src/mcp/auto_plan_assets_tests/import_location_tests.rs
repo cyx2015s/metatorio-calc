@@ -489,6 +489,75 @@ async fn electromagnetic_science_no_modules_standard_beacons_regression() {
     standard_beacon_regression("electromagnetic-science-pack", false).await;
 }
 
+/// Match the supplied project: legendary machines/modules, two beacon layouts,
+/// ignored productivity bonuses, strict supply and strict output. Keep each
+/// quality's outcome even when another case exhausts its solver budget.
+#[tokio::test]
+#[ignore = "full strict-output Fulgora quality comparison"]
+async fn fulgora_strict_quality_comparison() {
+    use metatorio_runtime::{AppDocument, FlowTarget, Runtime, TargetId};
+    let _permit = GATE.acquire().await.unwrap();
+    let template: AppDocument =
+        serde_json::from_str(include_str!("fixtures/fulgora-strict-quality.json")).unwrap();
+    let label =
+        std::env::var("FULGORA_TEST_REPORT").unwrap_or_else(|_| "fulgora-strict-quality".into());
+    let mut output = report_file(&label, 0);
+    let requested = std::env::var("FULGORA_TEST_QUALITY").ok();
+    let context = if let Some(path) = std::env::var_os("FULGORA_CONTEXT_DUMP") {
+        let dump = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        PrototypeStore::load(&dump).unwrap()
+    } else {
+        store(BASE).clone()
+    };
+    let mut failed = Vec::new();
+    for quality in ["normal", "legendary", "uncommon", "mixed"] {
+        if requested.as_deref().is_some_and(|wanted| wanted != quality) {
+            continue;
+        }
+        let mut document = template.clone();
+        let project = &mut document.projects[0];
+        let project_id = project.id;
+        let factory = &mut project.factories[0];
+        let factory_id = factory.id;
+        assert!(factory.strict_source && factory.strict_sink);
+        if quality != "mixed" {
+            factory.target_expressions.clear();
+            factory.targets = vec![FlowTarget {
+                id: TargetId(10000),
+                flow: DualVar::Item(IdWithQuality::new("electromagnetic-science-pack", quality)),
+                amount: 240.0,
+            }];
+        }
+        let mut runtime = Runtime::from_document(document);
+        runtime.install_context("asset".into(), context.clone());
+        let begun = Instant::now();
+        eprintln!("[FULGORA-STRICT] quality={quality} amount=240");
+        let result = runtime.auto_plan(project_id, factory_id);
+        let record = match result {
+            Ok(result) => {
+                assert_certified(&result);
+                assert!(result.report.writeback_verified);
+                assert!(matches!(result.status, SolveStatus::Solved { .. }));
+                json!({"quality":quality,"status":"solved","result":result})
+            }
+            Err(error) => {
+                failed.push(format!("{quality}: {error}"));
+                json!({"quality":quality,"status":"failed","error":error.to_string()})
+            }
+        };
+        let mut record = record;
+        record["elapsed_ms"] = json!(begun.elapsed().as_millis());
+        serde_json::to_writer(&mut output, &record).unwrap();
+        writeln!(&mut output).unwrap();
+        output.flush().unwrap();
+        eprintln!(
+            "[FULGORA-STRICT] quality={quality} status={} ms={}",
+            record["status"], record["elapsed_ms"]
+        );
+    }
+    assert!(failed.is_empty(), "strict Fulgora failures: {failed:?}");
+}
+
 #[tokio::test]
 async fn legendary_machines_do_not_supply_missing_product_quality() {
     let _permit = GATE.acquire().await.unwrap();

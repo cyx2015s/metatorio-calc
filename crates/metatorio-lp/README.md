@@ -111,3 +111,24 @@ cargo test -p metatorio-lp
 cargo clippy -p metatorio-lp --all-targets -- -D warnings
 cargo tree -p metatorio-lp
 ```
+
+Floating search also accepts a warm basis through `float_candidate_with_basis`.
+Its output remains an unverified hint. Exact structural blocks of dimension 32
+or larger use sparsity-ordered fraction-free integer elimination, including
+transpose solves; smaller blocks retain rational LU. Neither path drops small
+coefficients or changes the original-model certificate requirements. Structural
+blocks first undergo exact row matching and dependency decomposition; independent
+and triangular blocks are solved separately in both directions. A large basis
+may therefore require only small exact factorizations. Original bases are checked
+before replacing them with support hints.
+
+`solve_column_generation_with_control` solves restricted masters and prices
+missing columns exactly. A restricted Farkas ray is lifted and checked against
+every original column; counterexample columns are added instead of reporting
+false infeasibility. Accepted primal/dual witnesses always cover the complete
+original model and the requested rational gap budget.
+
+`float_candidate_after_zero_propagation_with_control` excludes columns that
+homogeneous rows force to zero, and restores all original column/row identities
+in its returned hint. Original-model dual repair and certification remain
+necessary: the reduced model's duals do not cover omitted columns.

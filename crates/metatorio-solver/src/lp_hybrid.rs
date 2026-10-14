@@ -72,6 +72,7 @@ struct SearchWork {
     floating: usize,
     exact: usize,
     support: usize,
+    first_values: Option<Vec<f64>>,
 }
 struct AttemptConfig {
     options: exact::FloatOptions,
@@ -207,7 +208,35 @@ fn solve_rust_proposal(
             },
             &mut work,
         );
-        if index == 0 && matches!(&last, Err(Failure::Other(_))) {
+        let recover_now = if certified { index == 2 } else { index == 0 };
+        if recover_now && matches!(&last, Err(Failure::Other(_))) {
+            let remaining = (RUST_SEARCH_SECONDS - start.elapsed().as_secs_f64() - 60.0).max(0.0);
+            if remaining > 0.0 {
+                let deadline =
+                    Instant::now() + std::time::Duration::from_secs_f64(remaining.min(900.0));
+                eprintln!("[LP-RUST-COLUMNS] recovering failed hint with exact column pricing");
+                let seed = work.first_values.as_deref().filter(|values| {
+                    let check = snapshot.validate(values);
+                    check.finite
+                        && check.maximum_bound_violation == 0.0
+                        && check.maximum_relative_violation == 0.0
+                });
+                match recover_columns(snapshot, captured, seed, deadline, !certified) {
+                    result @ Ok(_) | result @ Err(Failure::Infeasible) => return result,
+                    Err(Failure::Other(error)) => eprintln!("[LP-RUST-COLUMNS-STOP] {error}"),
+                }
+            }
+        }
+        // Exhaust the cheap original-model hint strategies before spending the
+        // remaining budget on constraint generation. Otherwise the first loose
+        // hint can starve tighter hints that solve quality loops directly.
+        if recover_now && matches!(&last, Err(Failure::Other(_))) {
+            if let Err(Failure::Other(reason)) = &last {
+                eprintln!(
+                    "[LP-RUST-HINT-STOP] seconds={:.2} reason={reason}",
+                    start.elapsed().as_secs_f64()
+                );
+            }
             let remaining = RUST_SEARCH_SECONDS - start.elapsed().as_secs_f64();
             if remaining > 0.0 {
                 let deadline = Instant::now()
@@ -287,10 +316,22 @@ fn solve_rust_proposal_attempt(
         exact::SolveControl::with_deadline(start + std::time::Duration::from_secs_f64(deadline));
     snapshot.check()?;
     let model = snapshot.exact_model();
-    let proposal = model.float_candidate_with_options(options, 20000, |_| {
-        start.elapsed().as_secs_f64() < deadline
-    })?;
+    let proposal = if attempt.index == 2 {
+        model.float_candidate_after_zero_propagation_with_control(
+            options,
+            20000,
+            |_| start.elapsed().as_secs_f64() < deadline,
+            &control,
+        )?
+    } else {
+        model.float_candidate_with_options(options, 20000, |_| {
+            start.elapsed().as_secs_f64() < deadline
+        })?
+    };
     work.floating += proposal.pivots;
+    if attempt.index == 0 {
+        work.first_values = Some(proposal.values.clone());
+    }
     if let Some(source) = captured {
         let save = || -> std::result::Result<(), Box<dyn std::error::Error>> {
             let directory =
@@ -335,8 +376,11 @@ fn solve_rust_proposal_attempt(
             &budget,
             |phase, _| {
                 start.elapsed().as_secs_f64() < deadline
-                    && (attempt.full_refinement || phase != "full-refine")
-                    && (allow_support || !matches!(phase, "support-search" | "support-refine"))
+                    && (allow_support
+                        || !matches!(
+                            phase,
+                            "compact-search" | "support-search" | "support-refine" | "full-refine"
+                        ))
             },
             &control,
         )?;
@@ -420,6 +464,66 @@ fn solve_rust_proposal_attempt(
         work.floating + result.repair_pivots + result.optimization_pivots,
     )
     .map_err(Failure::Other)
+}
+
+fn recover_columns(
+    snapshot: &Snapshot,
+    captured: Option<&std::path::Path>,
+    seed: Option<&[f64]>,
+    deadline: Instant,
+    require_optimal: bool,
+) -> std::result::Result<Result, Failure> {
+    let budget = if require_optimal {
+        exact::Rational::from_integer(0.into())
+    } else {
+        exact::Rational::new(1.into(), 1_000_000_000_000u64.into())
+    };
+    let result = snapshot
+        .exact_model()
+        .solve_column_generation_with_control(
+            seed,
+            &budget,
+            &exact::SolveControl::with_deadline(deadline),
+        )?;
+    if let Some(proof) = result.infeasibility {
+        crate::lp_row_generation::save(
+            captured,
+            &serde_json::json!({
+                "model_scope":"full","accepted":false,"phase":"column-generation","infeasibility":proof,
+            }),
+        );
+        return Err(Failure::Infeasible);
+    }
+    if !result.accepted {
+        return Err("column generation has no accepted full-model certificate"
+            .to_string()
+            .into());
+    }
+    let values = result.solution.approximate()?;
+    let rounded = snapshot.validate(&values);
+    if !rounded.finite
+        || rounded.maximum_bound_violation != 0.0
+        || rounded.maximum_relative_violation != 0.0
+    {
+        return Err("column generation rounded full-model check failed"
+            .to_string()
+            .into());
+    }
+    crate::lp_row_generation::save(
+        captured,
+        &serde_json::json!({
+            "model_scope":"full","accepted":true,"phase":"column-generation","certificate":result.certificate,
+            "gap_budget":budget.to_string(),"relative_gap":result.relative_gap.as_ref().map(ToString::to_string),
+            "values":result.solution.values.iter().map(ToString::to_string).collect::<Vec<_>>(),
+            "row_duals":result.solution.row_duals.iter().map(ToString::to_string).collect::<Vec<_>>(),
+            "primal_basis":result.primal_basis,"support_columns":result.support_columns,
+        }),
+    );
+    Ok(Result {
+        values,
+        certificate: result.certificate,
+        pivots: result.exact_pivots + result.support_search_pivots,
+    })
 }
 
 fn validated_result(

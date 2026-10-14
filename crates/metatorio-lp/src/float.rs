@@ -139,6 +139,79 @@ fn refactor(
 }
 
 impl Model {
+    /// Search without exactly forced-zero columns, then restore original basis
+    /// identities. The reduced search does not certify the original duals.
+    pub fn float_candidate_after_zero_propagation_with_control(
+        &self,
+        options: FloatOptions,
+        max_pivots: usize,
+        mut observer: impl FnMut(FloatProgress) -> bool,
+        control: &crate::SolveControl,
+    ) -> Result<FloatCandidate, String> {
+        let zero = self.zero_forced_columns_with_control(control)?;
+        if !zero.iter().any(|v| *v) {
+            return self.float_candidate_with_options(options, max_pivots, |p| {
+                !control.is_cancelled() && observer(p)
+            });
+        }
+        let selected: Vec<_> = (0..self.columns.len()).filter(|j| !zero[*j]).collect();
+        let mut positions = vec![None; self.columns.len()];
+        for (j, old) in selected.iter().enumerate() {
+            positions[*old] = Some(j);
+        }
+        let rows: Vec<_> = self
+            .rows
+            .iter()
+            .enumerate()
+            .filter_map(|(i, r)| {
+                (r.rhs != 0.0 || r.terms.iter().any(|(j, a)| !zero[*j] && *a != 0.0)).then_some(i)
+            })
+            .collect();
+        let reduced = Model {
+            columns: selected.iter().map(|j| self.columns[*j].clone()).collect(),
+            rows: rows
+                .iter()
+                .map(|i| crate::Row {
+                    equality: self.rows[*i].equality,
+                    rhs: self.rows[*i].rhs,
+                    terms: self.rows[*i]
+                        .terms
+                        .iter()
+                        .filter_map(|(j, a)| positions[*j].map(|p| (p, *a)))
+                        .collect(),
+                })
+                .collect(),
+            offset: self.offset,
+        };
+        eprintln!(
+            "[LP-FLOAT-ZERO-PRESOLVE] columns={} -> {} rows={} -> {}",
+            self.columns.len(),
+            selected.len(),
+            self.rows.len(),
+            rows.len()
+        );
+        let hint = reduced.float_candidate_with_options(options, max_pivots, |p| {
+            !control.is_cancelled() && observer(p)
+        })?;
+        let mut basis = Basis {
+            columns: vec![BasisStatus::Lower; self.columns.len()],
+            rows: vec![BasisStatus::Basic; self.rows.len()],
+        };
+        let mut values = vec![0.0; self.columns.len()];
+        for (j, old) in selected.iter().enumerate() {
+            basis.columns[*old] = hint.basis.columns[j];
+            values[*old] = hint.values[j];
+        }
+        for (i, old) in rows.iter().enumerate() {
+            basis.rows[*old] = hint.basis.rows[i];
+        }
+        Ok(FloatCandidate {
+            basis,
+            values,
+            ..hint
+        })
+    }
+
     /// Propose a basis with a native-free, scaled floating dual simplex.
     /// No stop reason constitutes a feasibility, optimality or Farkas proof.
     pub fn float_candidate_with_observer(
@@ -150,6 +223,28 @@ impl Model {
     }
     pub fn float_candidate_with_options(
         &self,
+        options: FloatOptions,
+        max_pivots: usize,
+        observer: impl FnMut(FloatProgress) -> bool,
+    ) -> Result<FloatCandidate, String> {
+        self.float_candidate_from_basis(None, options, max_pivots, observer)
+    }
+
+    /// Continue floating search from a supplied basis. This remains only a
+    /// hint: the caller must certify every outcome against the original model.
+    pub fn float_candidate_with_basis(
+        &self,
+        basis: &Basis,
+        options: FloatOptions,
+        max_pivots: usize,
+        observer: impl FnMut(FloatProgress) -> bool,
+    ) -> Result<FloatCandidate, String> {
+        self.float_candidate_from_basis(Some(basis), options, max_pivots, observer)
+    }
+
+    fn float_candidate_from_basis(
+        &self,
+        basis: Option<&Basis>,
         options: FloatOptions,
         max_pivots: usize,
         mut observer: impl FnMut(FloatProgress) -> bool,
@@ -229,13 +324,53 @@ impl Model {
         {
             return Err("floating scaling overflow".into());
         }
-        let mut ids: Vec<_> = (n..n + m).collect();
+        let mut ids: Vec<_> = if let Some(basis) = basis {
+            if basis.columns.len() != n
+                || basis.rows.len() != m
+                || basis
+                    .columns
+                    .iter()
+                    .any(|s| !matches!(s, BasisStatus::Basic | BasisStatus::Lower))
+                || basis
+                    .rows
+                    .iter()
+                    .any(|s| !matches!(s, BasisStatus::Basic | BasisStatus::Upper))
+            {
+                return Err("unsupported floating warm basis".into());
+            }
+            let ids: Vec<_> = basis
+                .columns
+                .iter()
+                .enumerate()
+                .filter_map(|(j, s)| (*s == BasisStatus::Basic).then_some(j))
+                .chain(
+                    basis
+                        .rows
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, s)| (*s == BasisStatus::Basic).then_some(n + i)),
+                )
+                .collect();
+            if ids.len() != m {
+                return Err("nonsquare floating warm basis".into());
+            }
+            ids
+        } else {
+            (n..n + m).collect()
+        };
         let mut basic = vec![false; n + m];
-        basic[n..].fill(true);
-        let mut inverse = vec![0.0; m * m];
-        for i in 0..m {
-            inverse[i * m + i] = 1.0;
+        for &id in &ids {
+            basic[id] = true;
         }
+        let mut inverse = if basis.is_some() {
+            refactor(m, n, &ids, &columns)?
+        } else {
+            let mut inverse = vec![0.0; m * m];
+            for i in 0..m {
+                inverse[i * m + i] = 1.0;
+            }
+            inverse
+        };
         let mut duals = vec![0.0; m];
         let mut prices = costs.clone();
         let mut price_scales = costs.clone();
@@ -467,6 +602,63 @@ impl Model {
 mod tests {
     use super::*;
     use crate::{Column, Row};
+    #[test]
+    fn warm_basis_repairs_an_added_supplier_constraint() {
+        let mut model = Model {
+            columns: [0.0, 1.0]
+                .into_iter()
+                .map(|cost| Column {
+                    lower: 0.0,
+                    upper: f64::INFINITY,
+                    cost,
+                })
+                .collect(),
+            rows: vec![Row {
+                equality: false,
+                rhs: -1.0,
+                terms: vec![(0, -1.0)],
+            }],
+            offset: 0.0,
+        };
+        let previous = model.float_candidate_with_observer(20, |_| true).unwrap();
+        assert!(
+            model
+                .certify(&model.reconstruct(&previous.basis).unwrap())
+                .unwrap()
+                .optimal
+        );
+        model.rows.push(Row {
+            equality: false,
+            rhs: 0.0,
+            terms: vec![(0, 1.0), (1, -1.0)],
+        });
+        let mut basis = previous.basis;
+        basis.rows.push(BasisStatus::Basic);
+        let hint = model
+            .float_candidate_with_basis(&basis, FloatOptions::default(), 20, |_| true)
+            .unwrap();
+        let solution = model.reconstruct(&hint.basis).unwrap();
+        assert!(model.certify(&solution).unwrap().optimal);
+        assert_eq!(solution.values, vec![crate::rational(1.0).unwrap(); 2]);
+        let cold = model.float_candidate_with_observer(20, |_| true).unwrap();
+        assert!(hint.pivots < cold.pivots);
+        let stopped = model
+            .float_candidate_with_basis(&basis, FloatOptions::default(), 20, |_| false)
+            .unwrap();
+        assert!(
+            !model
+                .certify(&model.reconstruct(&stopped.basis).unwrap())
+                .unwrap()
+                .primal_feasible
+        );
+        basis.rows.clear();
+        assert!(
+            model
+                .float_candidate_with_basis(&basis, FloatOptions::default(), 20, |_| true)
+                .is_err()
+        );
+    }
+
     #[test]
     fn invalid_search_tolerances_are_rejected() {
         let model = Model {
@@ -735,5 +927,70 @@ mod tests {
                 .primal_feasible
         );
         assert!(result.stop_reason.contains("not an infeasibility proof"));
+    }
+    #[test]
+    fn zero_reduced_hint_restores_full_identities_and_requires_full_dual_repair() {
+        let model = Model {
+            columns: vec![
+                Column {
+                    lower: 0.0,
+                    upper: f64::INFINITY,
+                    cost: 0.0,
+                },
+                Column {
+                    lower: 0.0,
+                    upper: f64::INFINITY,
+                    cost: 2.0,
+                },
+            ],
+            rows: vec![
+                Row {
+                    equality: true,
+                    rhs: 0.0,
+                    terms: vec![(0, 1e-30)],
+                },
+                Row {
+                    equality: true,
+                    rhs: 1.0,
+                    terms: vec![(0, 1.0), (1, 1.0)],
+                },
+            ],
+            offset: 0.0,
+        };
+        let control = crate::SolveControl::default();
+        assert_eq!(
+            model.zero_forced_columns_with_control(&control).unwrap(),
+            vec![true, false]
+        );
+        let hint = model
+            .float_candidate_after_zero_propagation_with_control(
+                FloatOptions::default(),
+                100,
+                |_| true,
+                &control,
+            )
+            .unwrap();
+        assert_eq!(hint.values, vec![0.0, 1.0]);
+        assert_eq!(hint.basis.rows.len(), model.rows.len());
+        assert_eq!(hint.basis.columns.len(), model.columns.len());
+        let raw = model
+            .certify(&model.reconstruct(&hint.basis).unwrap())
+            .unwrap();
+        assert!(raw.primal_feasible);
+        assert!(
+            !raw.dual_feasible,
+            "reduced dual must not be accepted as a full proof"
+        );
+        let full = model
+            .certify_candidate_with_control(
+                &hint,
+                100,
+                &crate::rational(0.0).unwrap(),
+                |_, _| true,
+                &control,
+            )
+            .unwrap();
+        assert!(full.accepted && full.certificate.optimal);
+        assert_eq!(full.certificate.objective, "2");
     }
 }
