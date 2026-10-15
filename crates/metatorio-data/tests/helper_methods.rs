@@ -179,6 +179,40 @@ fn generator_temperature_diff() {
 }
 
 #[test]
+fn consumers_reject_temperatures_outside_input_bounds_inclusively() {
+    let f = fluid(15.0, 1000.0, 5_000_000.0);
+    for burns_fluid in [false, true] {
+        let g = GeneratorComponent {
+            burns_fluid,
+            fluid_usage_per_tick: 1.0,
+            maximum_temperature: 165.0,
+            minimum_input_temperature: Some(100.0),
+            maximum_input_temperature: Some(500.0),
+            ..Default::default()
+        };
+        for temperature in [99.0, 100.0, 300.0, 500.0, 501.0] {
+            let output = g.get_output("steam", &f, temperature);
+            let accepted = (100.0..=500.0).contains(&temperature);
+            assert_eq!(output.power_per_second > 0.0, accepted);
+            assert_eq!(output.fluid_used_per_second > 0.0, accepted);
+        }
+    }
+    let b = BoilerComponent {
+        target_temperature: Some(600.0),
+        energy_consumption: energy(1_000_000.0),
+        minimum_input_temperature: Some(100.0),
+        maximum_input_temperature: Some(500.0),
+        ..Default::default()
+    };
+    for temperature in [99.0, 100.0, 500.0, 501.0] {
+        assert_eq!(
+            b.heating_output(&f, &f, temperature).is_some(),
+            (100.0..=500.0).contains(&temperature)
+        );
+    }
+}
+
+#[test]
 fn boiler_heating_output() {
     let b = BoilerComponent {
         energy_consumption: energy(1_000_000.0),

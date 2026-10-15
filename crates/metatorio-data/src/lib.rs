@@ -12,7 +12,7 @@
 /// 宽松反序列化：整数向 0 舍入、空 map 视为空 Vec（Lua→JSON 兼容）。
 pub mod lenient;
 
-/// 2.0 dump → 2.1 schema 数据适配器（就地规范化）。
+/// 历史 dump → 当前 schema 数据适配器（就地规范化）。
 pub mod adapt;
 
 /// 预定义类型：schema 中需要自定义反序列化的类型（codegen 的 custom_type_map 引用）。

@@ -1,9 +1,9 @@
-//! Factorio 2.0 dump → 2.1 数据适配层。
+//! 历史 Factorio dump → 当前 2.1.22 schema 数据适配层。
 //!
-//! 仓库 schema 面向 2.1.x（prototype-api.json 2.1.14）。Factorio 2.0
+//! 仓库 schema 面向 2.1.22。Factorio 2.0 及早期 2.1
 //! 导出的 data-raw-dump.json 字段形态与 2.1 schema 有差异，直接
 //! 反序列化会失败或漏读。本插件提供**就地规范化**（每个适配层一个
-//! 独立函数，便于按需增删），把 2.0 形态改写为 2.1 schema 期望的形态。
+//! 独立函数，便于按需增删），把历史形态改写为当前 schema 期望的形态。
 //!
 //! 差异来源：官方 schema 更新 commit 86317bd（wube/factorio-data
 //! "added version 2.1.7"）对 prototype-api.json 的字段变更——从 schema
@@ -17,9 +17,11 @@
 //!   （产物概率信息改为 flatten 的 `probability_info` 结构）。
 //! - [`adapt_item_fuel_categories`]：2.0 item 的 `fuel_category`（标量）
 //!   在 2.1 变为 `fuel_categories`（数组，物品可声明多个燃料类别）。
+//! - [`adapt_input_temperatures`]：2.1.22 将输入限温从流体盒移到消费者，
+//!   并以缺失值替代流体能量源的零值不限温哨兵。
 //!
 //! 后续可在此追加新层（如 result/result_count → results 数组、
-//! Lua map 形态 ingredients → 数组等），在 [`normalize_2_0_dump`] 中
+//! Lua map 形态 ingredients → 数组等），在 [`normalize_dump`] 中
 //! 按序调用。
 
 use serde_json::Value;
@@ -40,13 +42,13 @@ fn item_like_types() -> impl Iterator<Item = &'static str> {
         .map(|(typename, _)| *typename)
 }
 
-/// 只读检测 dump 是否需要适配（存在任意 2.0 特征）。
+/// 只读检测 dump 是否需要适配（存在历史版本字段或不限温哨兵值）。
 ///
 /// 当前特征：recipe 使用 `category`/`additional_categories`，或任一
 /// 产物的概率用 2.0 的 `probability` 标量（2.1 用
 /// `independent_probability`）。全量遍历 recipe 组，命中即返回 true；
-/// 无 recipe 组或已是 2.1 形态返回 false。调用方据此决定是否克隆改写
-/// （避免对 2.1 dump 做无谓的深拷贝）。
+/// 也检测 2.1.22 之前的流体盒温度字段。调用方据此决定是否克隆改写，
+/// 避免对当前版本 dump 做无谓的深拷贝。
 pub fn needs_adaptation(dump: &Value) -> bool {
     if let Some(recipes) = dump.get("recipe").and_then(Value::as_object)
         && recipes.values().any(|recipe| {
@@ -82,7 +84,97 @@ pub fn needs_adaptation(dump: &Value) -> bool {
                         .is_some_and(|obj| obj.contains_key("fuel_category"))
                 })
             })
+    }) || temperature_entries(dump).any(|(typename, entry)| {
+        temperature_boxes(typename)
+            .iter()
+            .any(|(box_name, _)| entry.get(*box_name).is_some_and(has_legacy_temperature))
+            || entry.get("energy_source").is_some_and(|source| {
+                source.get("type").and_then(Value::as_str) == Some("fluid")
+                    && (source.get("fluid_box").is_some_and(has_legacy_temperature)
+                        || source.get("maximum_temperature").and_then(Value::as_f64) == Some(0.0))
+            })
     })
+}
+
+fn temperature_entries(dump: &Value) -> impl Iterator<Item = (&str, &Value)> {
+    dump.as_object()
+        .into_iter()
+        .flat_map(|root| root.iter())
+        .flat_map(|(typename, entries)| {
+            entries
+                .as_object()
+                .into_iter()
+                .flat_map(|entries| entries.values())
+                .map(move |entry| (typename.as_str(), entry))
+        })
+}
+
+fn temperature_boxes(typename: &str) -> &'static [(&'static str, &'static str)] {
+    match typename {
+        "boiler" | "generator" => &[("fluid_box", "input")],
+        "mining-drill" | "fusion-generator" | "fusion-reactor" => &[("input_fluid_box", "input")],
+        "thruster" => &[
+            ("fuel_fluid_box", "fuel"),
+            ("oxidizer_fluid_box", "oxidizer"),
+        ],
+        _ => &[],
+    }
+}
+
+fn has_legacy_temperature(box_: &Value) -> bool {
+    box_.get("minimum_temperature").is_some() || box_.get("maximum_temperature").is_some()
+}
+
+/// 迁移到当前 schema；保留独立的 2.0 迁移入口，供调用方按需使用。
+pub fn normalize_dump(dump: &mut Value) {
+    normalize_2_0_dump(dump);
+    adapt_input_temperatures(dump);
+}
+
+/// 2.1.22 将流体盒温度限制移到消费者；新字段优先，迁移可重复执行。
+/// 流体热源旧的 maximum_temperature=0 表示不限温，现在以缺失表示。
+pub fn adapt_input_temperatures(dump: &mut Value) {
+    let Some(root) = dump.as_object_mut() else {
+        return;
+    };
+    for (typename, entries) in root {
+        let Some(entries) = entries.as_object_mut() else {
+            continue;
+        };
+        for entry in entries.values_mut() {
+            for (box_name, suffix) in temperature_boxes(typename) {
+                move_temperature_bounds(entry, box_name, suffix);
+            }
+            if let Some(source) = entry.get_mut("energy_source")
+                && source.get("type").and_then(Value::as_str) == Some("fluid")
+            {
+                move_temperature_bounds(source, "fluid_box", "input");
+                if source.get("maximum_temperature").and_then(Value::as_f64) == Some(0.0) {
+                    source
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("maximum_temperature");
+                }
+            }
+        }
+    }
+}
+
+fn move_temperature_bounds(entry: &mut Value, box_name: &str, suffix: &str) {
+    let Some(entry) = entry.as_object_mut() else {
+        return;
+    };
+    for bound in ["minimum", "maximum"] {
+        let value = entry
+            .get_mut(box_name)
+            .and_then(Value::as_object_mut)
+            .and_then(|box_| box_.remove(&format!("{bound}_temperature")));
+        if let Some(value) = value {
+            entry
+                .entry(format!("{bound}_{suffix}_temperature"))
+                .or_insert(value);
+        }
+    }
 }
 
 /// 把 2.0 形态的 dump 规范化到 2.1 schema 可加载的形态。

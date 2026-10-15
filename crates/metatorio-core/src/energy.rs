@@ -208,8 +208,22 @@ pub fn energy_source_as_flow(
                     // 所以消耗"任意温度"的该流体——用覆盖整个可行温度区间的变量，
                     // 具体温度交给辅助的温度转换去挑（与燃料型发电机同一范式）。
                     // 利用流体热（burns_fluid = false）：热量随温度变化，必须钉在一点。
+                    let lower = source
+                        .minimum_input_temperature
+                        .unwrap_or(fluid.default_temperature)
+                        .max(fluid.default_temperature);
+                    let upper = source
+                        .maximum_input_temperature
+                        .unwrap_or_else(|| fluid.max_temperature())
+                        .min(fluid.max_temperature());
+                    if lower > upper
+                        || (!burns_fluid && (spec.temperature < lower || spec.temperature > upper))
+                    {
+                        *fulfillment = 0.0;
+                        return flow;
+                    }
                     let temperature = if burns_fluid {
-                        (fluid.default_temperature, fluid.max_temperature())
+                        (lower, upper)
                     } else {
                         (spec.temperature, spec.temperature)
                     };

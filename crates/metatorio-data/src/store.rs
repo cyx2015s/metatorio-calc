@@ -143,15 +143,13 @@ impl PrototypeStore {
     /// 推导聚合标签，按 `(group, name)` 合并（同键重复时组件并集，罕见）。
     /// 任一原型反序列化失败 → 返回 [`LoadError`]（含全部失败明细）。
     ///
-    /// 加载前先做 [`crate::adapt::normalize_2_0_dump`]：把 Factorio 2.0
-    /// 导出的字段形态改写为 2.1 schema 期望的形态（当前适配层：
-    /// recipe 的 category + additional_categories → categories 数组）。
-    /// 只有检测到 2.0 特征时才克隆并改写；已是 2.1 的 dump 直接复用。
+    /// 加载前先做 [`crate::adapt::normalize_dump`]，迁移历史字段到当前 schema。
+    /// 只有检测到旧字段时才克隆并改写，当前版本的 dump 直接复用。
     pub fn load(dump: &Value) -> Result<Self, LoadError> {
         let mut normalized;
         let dump = if crate::adapt::needs_adaptation(dump) {
             normalized = dump.clone();
-            crate::adapt::normalize_2_0_dump(&mut normalized);
+            crate::adapt::normalize_dump(&mut normalized);
             &normalized
         } else {
             dump
@@ -511,8 +509,7 @@ impl PrototypeStore {
     ///    / maximum_temperature（下游配方真正接受的温度区间上下界，heat-fluid-inside
     ///    的锅炉要加热对齐的目标；区间内部的点永远不如边界划算）与**产物**（result）
     ///    的 temperature；
-    /// ② 机器流体盒的温度筛选（Boiler/Generator 的 fluid_box、CraftingMachine 的
-    ///    fluid_boxes 的 minimum/maximum + Boiler.target_temperature 输出温度）；
+    /// ② 机器及流体能量源的输入温度限制，以及 Boiler.target_temperature；
     /// ③ 流体自身的默认温度与最高温度。
     /// 调用方可据此构造温度区间子类型或显式候选流；仓库本身不展开决策。
     pub fn fluid_temperatures(&self) -> &AIndexMap<String, Vec<i32>> {
@@ -528,15 +525,17 @@ impl PrototypeStore {
                     out.insert(name.to_string(), vec![t]);
                 }
             };
-            let add_box = |out: &mut AIndexMap<String, Vec<i32>>,
-                           box_: &crate::generated_components::FluidBox| {
+            let add_bounds = |out: &mut AIndexMap<String, Vec<i32>>,
+                              box_: &crate::generated_components::FluidBox,
+                              minimum: Option<f64>,
+                              maximum: Option<f64>| {
                 let Some(filter) = &box_.filter else {
                     return;
                 };
-                if let Some(t) = box_.minimum_temperature {
+                if let Some(t) = minimum {
                     add(out, filter, t);
                 }
-                if let Some(t) = box_.maximum_temperature {
+                if let Some(t) = maximum {
                     add(out, filter, t);
                 }
             };
@@ -570,7 +569,7 @@ impl PrototypeStore {
                     }
                 }
             }
-            // 收集点 2：机器流体盒温度筛选
+            // 收集点 2：2.1.22 的消费者输入温度筛选（不再位于 FluidBox）。
             for record in self
                 .groups
                 .get(&PrototypeGroup::Entity)
@@ -578,8 +577,12 @@ impl PrototypeStore {
                 .flat_map(|m| m.values())
             {
                 if let Some(b) = record.component::<BoilerComponent>() {
-                    add_box(&mut out, &b.fluid_box);
-                    add_box(&mut out, &b.output_fluid_box);
+                    add_bounds(
+                        &mut out,
+                        &b.fluid_box,
+                        b.minimum_input_temperature,
+                        b.maximum_input_temperature,
+                    );
                     if let Some(t) = b.target_temperature
                         && let Some(filter) = &b.output_fluid_box.filter
                     {
@@ -587,16 +590,74 @@ impl PrototypeStore {
                     }
                 }
                 if let Some(g) = record.component::<GeneratorComponent>() {
-                    add_box(&mut out, &g.fluid_box);
+                    add_bounds(
+                        &mut out,
+                        &g.fluid_box,
+                        g.minimum_input_temperature,
+                        g.maximum_input_temperature,
+                    );
                     if let Some(filter) = &g.fluid_box.filter {
                         add(&mut out, filter, g.maximum_temperature);
                     }
                 }
-                if let Some(c) = record.component::<CraftingMachineComponent>() {
-                    for box_ in &c.fluid_boxes {
-                        add_box(&mut out, box_);
-                    }
+                macro_rules! input_bounds {
+                    ($($component:ty),*) => {$(
+                        if let Some(c) = record.component::<$component>() {
+                            add_bounds(
+                                &mut out, &c.input_fluid_box,
+                                c.minimum_input_temperature, c.maximum_input_temperature,
+                            );
+                        }
+                    )*};
                 }
+                input_bounds!(
+                    crate::FusionGeneratorComponent,
+                    crate::FusionReactorComponent
+                );
+                if let Some(c) = record.component::<crate::MiningDrillComponent>()
+                    && let Some(box_) = &c.input_fluid_box
+                {
+                    add_bounds(
+                        &mut out,
+                        box_,
+                        c.minimum_input_temperature,
+                        c.maximum_input_temperature,
+                    );
+                }
+                if let Some(c) = record.component::<crate::ThrusterComponent>() {
+                    add_bounds(
+                        &mut out,
+                        &c.fuel_fluid_box,
+                        c.minimum_fuel_temperature,
+                        c.maximum_fuel_temperature,
+                    );
+                    add_bounds(
+                        &mut out,
+                        &c.oxidizer_fluid_box,
+                        c.minimum_oxidizer_temperature,
+                        c.maximum_oxidizer_temperature,
+                    );
+                }
+                macro_rules! source_bounds {
+                    ($($component:ty),*) => {$(
+                        if let Some(c) = record.component::<$component>()
+                            && let crate::types::EnergySource::Fluid(source) = &c.energy_source
+                        {
+                            add_bounds(
+                                &mut out, &source.fluid_box,
+                                source.minimum_input_temperature, source.maximum_input_temperature,
+                            );
+                        }
+                    )*};
+                }
+                source_bounds!(
+                    BoilerComponent,
+                    CraftingMachineComponent,
+                    crate::MiningDrillComponent,
+                    crate::ReactorComponent,
+                    crate::OffshorePumpComponent,
+                    crate::AgriculturalTowerComponent
+                );
             }
             // 收集点 ③：流体自身的默认温度与最高温度。
             //

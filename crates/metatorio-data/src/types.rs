@@ -636,7 +636,9 @@ pub struct FluidEnergySource {
     pub effectivity: f64,
     pub scale_fluid_usage: Option<bool>,
     pub fluid_usage_per_tick: f64,
-    pub maximum_temperature: f64,
+    pub maximum_temperature: Option<f64>,
+    pub minimum_input_temperature: Option<f64>,
+    pub maximum_input_temperature: Option<f64>,
     pub burns_fluid: Option<bool>,
     pub spent_fluid: SpentFluidSpecification,
 }

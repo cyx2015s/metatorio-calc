@@ -1019,10 +1019,10 @@ fn enumerate_energy(
                     continue;
                 };
                 let floor = generator
-                    .fluid_box
-                    .minimum_temperature
+                    .minimum_input_temperature
                     .unwrap_or(fluid.default_temperature);
-                // **刻意不设上限**。发电机自己会处理温度溢出（超出的品位只是被浪费掉），
+                // maximum_temperature 只封顶出力；maximum_input_temperature 才是输入硬上限。
+                // 未指定输入硬上限时，发电机自己会处理温度溢出（超出的品位只是被浪费掉），
                 // 但全局上不能假设「喂低温更划算」：高温流体可能本来就是你想要的某个链的
                 // 副产物，生产它再浪费一部分，有可能比专门生产低温流体更高效。这个取舍属于
                 // **求解器**，不属于枚举层——在枚举层砍掉，求解器就永远考虑不到那种方案了。
@@ -1039,7 +1039,11 @@ fn enumerate_energy(
                         // 温度型发电机：≤ 默认温度的档在 get_output 里
                         // (temperature - default).max(0) 恒为 0，不产电，滤掉；
                         // 流体盒声明的最低温度是硬约束。
-                        temperature > fluid.default_temperature && temperature >= floor
+                        temperature > fluid.default_temperature
+                            && temperature >= floor
+                            && generator
+                                .maximum_input_temperature
+                                .is_none_or(|max| temperature <= max)
                     })
                     .collect();
                 if temperatures.is_empty() {
@@ -1050,7 +1054,14 @@ fn enumerate_energy(
                     } else {
                         fluid.default_temperature
                     };
-                    temperatures.push(fallback as i32);
+                    if fallback > fluid.default_temperature
+                        && fallback >= floor
+                        && generator
+                            .maximum_input_temperature
+                            .is_none_or(|max| fallback <= max)
+                    {
+                        temperatures.push(fallback as i32);
+                    }
                 }
                 for temperature in temperatures {
                     out.push(Mechanic::Generator(metatorio_core::GeneratorMechanic {
@@ -1776,6 +1787,41 @@ mod tests {
             !temperatures.contains(&15),
             "≤ 流体默认温度的档不产电，应当滤掉：{temperatures:?}"
         );
+    }
+
+    #[test]
+    fn generator_candidates_respect_new_and_migrated_input_limits() {
+        for legacy in [false, true] {
+            let mut dump = serde_json::json!({
+                "fluid": {"steam": {"default_temperature": 15, "max_temperature": 1000}},
+                "generator": {"turbine": {
+                    "fluid_box": {"filter": "steam"}, "maximum_temperature": 165,
+                    "minimum_input_temperature": 100, "maximum_input_temperature": 500
+                }}
+            });
+            if legacy {
+                let entry = dump["generator"]["turbine"].as_object_mut().unwrap();
+                let minimum = entry.remove("minimum_input_temperature").unwrap();
+                let maximum = entry.remove("maximum_input_temperature").unwrap();
+                entry["fluid_box"]["minimum_temperature"] = minimum;
+                entry["fluid_box"]["maximum_temperature"] = maximum;
+            }
+            let temperatures: Vec<_> = enumerate_on(None, &dump)
+                .into_iter()
+                .filter_map(|mechanic| match mechanic {
+                    Mechanic::Generator(g) => g.temperature,
+                    _ => None,
+                })
+                .collect();
+            assert!(temperatures.contains(&100));
+            assert!(temperatures.contains(&500), "效率封顶不等于输入限温");
+            assert!(
+                temperatures
+                    .iter()
+                    .all(|temperature| (100..=500).contains(temperature)),
+                "{temperatures:?}"
+            );
+        }
     }
 
     /// heat-fluid-inside 锅炉按流体温度表的**相邻档**枚举 (T_i → T_{i+1})：

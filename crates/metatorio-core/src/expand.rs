@@ -647,7 +647,17 @@ fn expand_mining<C: Clone>(
     if let Some(fluid) = &minable.required_fluid {
         let amount = scale * minable.fluid_amount / 10.0;
         let default = fluid_temperature(ctx, fluid);
-        add_fluid_interval(&mut temp, fluid, -amount, default, default);
+        let lower = machine
+            .minimum_input_temperature
+            .unwrap_or(default)
+            .max(default);
+        let upper = machine
+            .maximum_input_temperature
+            .unwrap_or_else(|| fluid_max_temperature(ctx, fluid));
+        if upper < lower {
+            return;
+        }
+        add_fluid_interval(&mut temp, fluid, -amount, lower, upper);
     }
 
     let quality_distribution =
@@ -1024,10 +1034,13 @@ fn expand_generator<C: Clone>(
         Some(temperature) => (f64::from(temperature), f64::from(temperature)),
         None if generator.burns_fluid => (
             generator
-                .fluid_box
-                .minimum_temperature
-                .unwrap_or(fluid.default_temperature),
-            fluid.max_temperature(),
+                .minimum_input_temperature
+                .unwrap_or(fluid.default_temperature)
+                .max(fluid.default_temperature),
+            generator
+                .maximum_input_temperature
+                .unwrap_or_else(|| fluid.max_temperature())
+                .min(fluid.max_temperature()),
         ),
         None => (fluid.default_temperature, fluid.default_temperature),
     };
@@ -1110,6 +1123,15 @@ fn expand_boiler<C: Clone>(
         .temperature
         .map(f64::from)
         .unwrap_or(input_fluid.default_temperature);
+    if boiler
+        .minimum_input_temperature
+        .is_some_and(|min| input_temperature < min)
+        || boiler
+            .maximum_input_temperature
+            .is_some_and(|max| input_temperature > max)
+    {
+        return;
+    }
     let fuel = explicit_fuel(ctx, mechanic.fuel.as_ref());
     let mut fulfillment = 1.0;
     let mut temp = TempFlow::new();

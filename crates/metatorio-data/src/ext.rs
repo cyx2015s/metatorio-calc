@@ -611,6 +611,18 @@ impl GeneratorComponent {
         fluid: &FluidComponent,
         temperature: f64,
     ) -> GeneratorOutput {
+        if self
+            .minimum_input_temperature
+            .is_some_and(|min| temperature < min)
+            || self
+                .maximum_input_temperature
+                .is_some_and(|max| temperature > max)
+        {
+            return GeneratorOutput {
+                fluid_used_per_second: 0.0,
+                power_per_second: 0.0,
+            };
+        }
         let effectivity = if self.effectivity > 0.0 {
             self.effectivity
         } else {
@@ -716,6 +728,15 @@ impl BoilerComponent {
         output_fluid: &FluidComponent,
         input_temperature: f64,
     ) -> Option<FluidHeatingOutput> {
+        if self
+            .minimum_input_temperature
+            .is_some_and(|min| input_temperature < min)
+            || self
+                .maximum_input_temperature
+                .is_some_and(|max| input_temperature > max)
+        {
+            return None;
+        }
         let target_temperature = self.target_temperature?;
         let temperature_difference = target_temperature - input_temperature;
         if temperature_difference <= 0.0 {
