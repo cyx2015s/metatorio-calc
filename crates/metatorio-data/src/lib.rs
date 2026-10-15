@@ -1,3 +1,5 @@
+#![feature(mut_restriction)]
+
 //! metatorio-data：Factorio 原型数据 crate。
 //!
 //! 架构（两层）：

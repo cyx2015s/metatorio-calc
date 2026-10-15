@@ -124,7 +124,7 @@ pub type ReverseOrderInfo = AIndexMap<String, (usize, usize, usize)>;
 pub struct PrototypeStore {
     science_packs: OnceLock<std::collections::BTreeSet<String>>,
     /// 按聚合组分类：组 → (name → 记录)。主键语义 (PrototypeGroup, name) 不变。
-    pub groups: AIndexMap<PrototypeGroup, AIndexMap<String, PrototypeRecord>>,
+    pub mut(self) groups: AIndexMap<PrototypeGroup, AIndexMap<String, PrototypeRecord>>,
     /// 惰性派生：每组的排序信息（大组 → 小组 → 条目，加载后不可变）。
     order_info: OnceLock<AIndexMap<PrototypeGroup, OrderInfo>>,
     /// 惰性派生：每组的反查索引（条目名 → 三层索引）。
