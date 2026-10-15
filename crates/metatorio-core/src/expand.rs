@@ -133,7 +133,7 @@ pub fn instance_cost(store: &PrototypeStore, mechanic: &Mechanic) -> f64 {
             })
             .unwrap_or(16.0),
         // 流体燃料/流体热：转换机制，几乎无成本（复刻原版 cost()=0）。
-        Mechanic::FluidFuel(_) | Mechanic::FluidHeat(_) => 0.0,
+        Mechanic::FluidFuel(_) | Mechanic::FluidHeat(_) | Mechanic::ItemFuel(_) => 0.0,
         _ => 16.0,
     }
 }
