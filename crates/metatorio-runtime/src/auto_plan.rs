@@ -14,8 +14,8 @@ use metatorio_data::{
     AccumulatorComponent, AssemblingMachineComponent, BoilerComponent, BurnerGeneratorComponent,
     CraftingMachineComponent, EntityComponent, FluidComponent, GeneratorComponent, ItemComponent,
     MiningDrillComponent, ModuleComponent, OffshorePumpComponent, ReactorComponent,
-    RecipeComponent, ResourceEntityComponent, SolarPanelComponent, TechnologyComponent,
-    TileComponent,
+    RecipeComponent, ResourceEntityComponent, RocketSiloComponent, SolarPanelComponent,
+    TechnologyComponent, TileComponent,
 };
 
 /// 回写候选的过滤结果（含决策记录，见 [`SolveDiagnostics`]）。
@@ -192,7 +192,7 @@ pub fn enumerate_all(
 /// 地格抽取机制（抽水 / 抽岩浆 / 抽油…）。
 ///
 /// 判据全部来自原型数据：**地格**必须有 `TileComponent.fluid`（决定产出哪种流体）、
-/// 且必须是**当前星球会生成**的（`planet_generated_tiles`）；**机械**必须有
+/// 且必须是当前环境初始生成或递归铺设可达的（`surface_available_tiles`）；**机械**必须有
 /// `OffshorePumpComponent`（决定速率 `pumping_speed`）。原版 offshore-pump 的
 /// `fluid_box` 没有 filter——抽什么由地格决定——所以两者必须分开配。
 ///
@@ -200,9 +200,9 @@ pub fn enumerate_all(
 /// 水从此由机制显式产出、出现在机制面板上，并作为真实候选参与成本优化（mod 里可能
 /// 有别的产同种流体的方式，显式更利于解读）。
 ///
-/// **销毁**（`TileDispose`）也在同一趟里枚举：每颗星球只取**一个**
-/// `destroys_dropped_items` 的地格，再对该星球的全部物品展开——只需一个地格就能
-/// 代表这颗星球的销毁途径，按地格展开只会让候选数乘上地格数。
+/// **销毁**（`TileDispose`）也在同一趟里枚举：当前环境只取**一个**
+/// `destroys_dropped_items` 的地格，再对全部物品展开——只需一个地格就能
+/// 代表该环境的销毁途径，按地格展开只会让候选数乘上地格数。
 fn enumerate_tiles(
     store: &PrototypeStore,
     ctx: &Context,
@@ -211,14 +211,15 @@ fn enumerate_tiles(
 ) {
     let major_quality = quality_name(ctx, options.major_quality);
     let properties = surface_properties(store, options);
-    let Some(planet) = options.planet.as_deref() else {
-        return;
-    };
-    let generated = crate::planet::planet_generated_tiles(store, planet);
+    let generated = crate::planet::surface_available_tiles(
+        store,
+        options.planet.as_deref(),
+        options.surface.as_deref(),
+    );
     if generated.is_empty() {
         return;
     }
-    // 销毁：**每颗星球只取一个**可销毁的地格。有一个地格能销毁，就意味着这颗星球
+    // 销毁：**当前环境只取一个**可销毁的地格。有一个地格能销毁，就意味着该环境
     // 上有便宜的销毁途径——按地格展开只会让候选数乘上地格数，没有任何新信息。
     // 取到的那个地格再对所有物品展开（物品维度是必须的：销毁流要指名消耗什么）。
     let mut disposal_tile: Option<String> = None;
@@ -242,14 +243,7 @@ fn enumerate_tiles(
             &major_quality,
             |machine| {
                 machine.component::<OffshorePumpComponent>().is_some()
-                    && buildable_on_surface(store, machine, properties.as_ref())
-                    // 抽水机的可达性和普通机器一致：把抽水建筑用里程碑标记成
-                    // 不可达，就枚举不出任何能抽水的机器（与配方/采矿同规则）。
-                    && options.accessibility.as_ref().is_none_or(|accessibility| {
-                        accessibility.is_accessible(&metatorio_core::Accessible::Entity(
-                            machine.name.clone(),
-                        ))
-                    })
+                    && entity_available(store, machine, options, properties.as_ref())
             },
             |machine| {
                 machine
@@ -306,19 +300,33 @@ fn buildable_on_surface(
     crate::planet::surface_condition_satisfied(store, &entity.surface_conditions, properties)
 }
 
+/// 在排名/截取替代机器之前过滤，避免未解锁的高速机器占满候选名额。
+fn entity_available(
+    store: &PrototypeStore,
+    record: &PrototypeRecord,
+    options: &EnumerateOptions,
+    properties: Option<&std::collections::BTreeMap<String, f64>>,
+) -> bool {
+    buildable_on_surface(store, record, properties)
+        && options.accessibility.as_ref().is_none_or(|accessibility| {
+            accessibility.is_accessible(&Accessible::Entity(record.name.clone()))
+        })
+}
+
 /// 当前表面可用的枚举插件塔方案：方案里**每个**插件塔实体都要能在此建造。
 fn buildable_beacon_plans<'a>(
     store: &PrototypeStore,
-    plans: &'a [crate::document::AutoBeaconPlan],
+    options: &'a EnumerateOptions,
     properties: Option<&std::collections::BTreeMap<String, f64>>,
 ) -> Vec<&'a crate::document::AutoBeaconPlan> {
-    plans
+    options
+        .enumerate_beacons
         .iter()
         .filter(|plan| {
             plan.module_config.beacons.iter().all(|bc| {
                 store
                     .get(PrototypeGroup::Entity, &bc.beacon.id)
-                    .is_none_or(|record| buildable_on_surface(store, record, properties))
+                    .is_some_and(|record| entity_available(store, record, options, properties))
             })
         })
         .collect()
@@ -630,7 +638,7 @@ fn enumerate_recipes(
     // 手动模式认为所有配方可用）。
     let properties = surface_properties(store, options);
     // 只在能建造的插件塔方案里枚举（插件塔实体本身也有表面条件）。
-    let beacons = buildable_beacon_plans(store, &options.enumerate_beacons, properties.as_ref());
+    let beacons = buildable_beacon_plans(store, options, properties.as_ref());
     for record in store.group(PrototypeGroup::Recipe) {
         let Some(recipe) = record.component::<RecipeComponent>() else {
             continue;
@@ -665,7 +673,7 @@ fn enumerate_recipes(
                 record
                     .component::<CraftingMachineComponent>()
                     .is_some_and(|machine| machine_fits_recipe(machine, recipe))
-                    && buildable_on_surface(store, record, properties.as_ref())
+                    && entity_available(store, record, options, properties.as_ref())
             },
             |record| {
                 record
@@ -675,19 +683,11 @@ fn enumerate_recipes(
                     .unwrap_or(0.0)
             },
         );
-        let mut kept_any = false;
         for machine in &machines {
             let machine_name = &machine.id;
             let Some(machine_record) = store.get(PrototypeGroup::Entity, machine_name) else {
                 continue;
             };
-            // 机器可达性过滤：当前项目科技未解锁的机器不枚举。
-            if let Some(accessibility) = &options.accessibility
-                && !accessibility
-                    .is_accessible(&metatorio_core::Accessible::Entity(machine_name.clone()))
-            {
-                continue;
-            }
             let Some(machine_component) = machine_record.component::<CraftingMachineComponent>()
             else {
                 continue;
@@ -747,24 +747,6 @@ fn enumerate_recipes(
                     push_with_beacons(out, base, modules, &beacons, uses_beacons);
                 }
             }
-            kept_any = true;
-        }
-        // 无解锁的机器（全被可达性过滤）：退化为评分最低的一台——配方出现即
-        // 视为有对应组装机（mod 合理设计），不管替代数量设置与可达性。
-        // 机器列表本身已按表面条件过滤，因此退化候选仍然是**可落地**的。
-        if !kept_any && let Some(machine) = machines.last() {
-            let uses_beacons = store
-                .get(PrototypeGroup::Entity, &machine.id)
-                .and_then(|record| record.component::<CraftingMachineComponent>())
-                .and_then(|machine| machine.effect_receiver.as_ref())
-                .is_none_or(|receiver| receiver.uses_beacon_effects);
-            let base = Mechanic::Recipe(metatorio_core::RecipeMechanic {
-                recipe: IdWithQuality::new(record.name.clone(), quality_name(ctx, 0)),
-                machine: machine.clone(),
-                module_config: ModuleConfig::default(),
-                fuel: None,
-            });
-            push_with_beacons(out, base, Vec::new(), &beacons, uses_beacons);
         }
     }
 }
@@ -777,10 +759,13 @@ fn enumerate_mining(
     options: &EnumerateOptions,
     out: &mut Vec<Mechanic>,
 ) {
-    let quality_range = options.quality_limit + 1;
+    // 平台的星岩已作为星块物品输入，不存在下方星球的地面矿藏。
+    if crate::planet::is_space_platform(options.surface.as_deref()) {
+        return;
+    }
     let major_quality = quality_name(ctx, options.major_quality);
     let properties = surface_properties(store, options);
-    let beacons = buildable_beacon_plans(store, &options.enumerate_beacons, properties.as_ref());
+    let beacons = buildable_beacon_plans(store, options, properties.as_ref());
     for record in store.group(PrototypeGroup::Entity) {
         if record.type_ != "resource" {
             continue;
@@ -788,6 +773,9 @@ fn enumerate_mining(
         let Some(resource) = record.component::<ResourceEntityComponent>() else {
             continue;
         };
+        if !buildable_on_surface(store, record, properties.as_ref()) {
+            continue;
+        }
         let category = if resource.category.is_empty() {
             "basic-solid".to_string()
         } else {
@@ -803,7 +791,7 @@ fn enumerate_mining(
                 drill_record
                     .component::<MiningDrillComponent>()
                     .is_some_and(|drill| drill.resource_categories.contains(&category))
-                    && buildable_on_surface(store, drill_record, properties.as_ref())
+                    && entity_available(store, drill_record, options, properties.as_ref())
             },
             |drill_record| {
                 drill_record
@@ -818,13 +806,6 @@ fn enumerate_mining(
             let Some(drill_record) = store.get(PrototypeGroup::Entity, machine_name) else {
                 continue;
             };
-            // 采矿机可达性过滤：当前项目科技未解锁的机器不枚举。
-            if let Some(accessibility) = &options.accessibility
-                && !accessibility
-                    .is_accessible(&metatorio_core::Accessible::Entity(machine_name.clone()))
-            {
-                continue;
-            }
             let Some(drill) = drill_record.component::<MiningDrillComponent>() else {
                 continue;
             };
@@ -862,23 +843,20 @@ fn enumerate_mining(
             let module_slots = drill.module_slots.map(|slots| slots as usize).unwrap_or(0);
             let combos = module_combinations(allowed_modules.len(), module_slots, quality_involved);
             for (comb, dup) in combos {
-                for quality in 0..quality_range {
-                    let mut modules = Vec::new();
-                    for (module_id, module) in allowed_modules.iter().enumerate() {
-                        for _ in 0..(comb.get(module_id).copied().unwrap_or(0) * dup) {
-                            modules.push(module.clone());
-                        }
+                let mut modules = Vec::new();
+                for (module_id, module) in allowed_modules.iter().enumerate() {
+                    for _ in 0..(comb.get(module_id).copied().unwrap_or(0) * dup) {
+                        modules.push(module.clone());
                     }
-                    let base = Mechanic::Mining(metatorio_core::MiningMechanic {
-                        resource: record.name.clone(),
-                        machine: machine.clone(),
-                        module_config: ModuleConfig::default(),
-                        fuel: None,
-                    });
-                    // 采矿按资源品质展开（矿藏实体无品质，品质作用于产出）
-                    let _ = quality;
-                    push_with_beacons(out, base, modules, &beacons, uses_beacons);
                 }
+                let base = Mechanic::Mining(metatorio_core::MiningMechanic {
+                    resource: record.name.clone(),
+                    machine: machine.clone(),
+                    module_config: ModuleConfig::default(),
+                    fuel: None,
+                });
+                // 矿藏没有品质；产出品质由插件效果在展开层决定，勿按品质上限重复同一配置。
+                push_with_beacons(out, base, modules, &beacons, uses_beacons);
             }
         }
     }
@@ -893,6 +871,13 @@ fn enumerate_simple(
     out: &mut Vec<Mechanic>,
 ) {
     let quality_range = options.quality_limit + 1;
+    let properties = surface_properties(store, options);
+    let ground = !crate::planet::is_space_platform(options.surface.as_deref());
+    // 发射产物依赖可用的发射井，不能仅凭物品存在 rocket_launch_products 就枚举。
+    let can_launch = store.group(PrototypeGroup::Entity).any(|record| {
+        record.component::<RocketSiloComponent>().is_some()
+            && entity_available(store, record, options, properties.as_ref())
+    });
     // 变质 / 种植 / 物品燃料 / 火箭发射
     let science_packs = metatorio_core::science::science_pack_names(store);
     for record in store.group(PrototypeGroup::Item) {
@@ -920,7 +905,7 @@ fn enumerate_simple(
                 }));
             }
             // 种子可用性：种植物要求的 tile 与星球生成 tile 交集，回退 default_import_location
-            if has_plant {
+            if has_plant && ground {
                 let plant_entity = item.plant_result.as_deref().unwrap_or("");
                 let available = crate::planet::seed_available_on_planet(
                     store,
@@ -928,7 +913,11 @@ fn enumerate_simple(
                     plant_entity,
                     options.planet.as_deref(),
                 );
-                if available {
+                if available
+                    && store.entity(plant_entity).is_some_and(|record| {
+                        buildable_on_surface(store, record, properties.as_ref())
+                    })
+                {
                     out.push(Mechanic::Plant(metatorio_core::PlantMechanic {
                         seed: id.clone(),
                     }));
@@ -939,7 +928,7 @@ fn enumerate_simple(
                     item: id.clone(),
                 }));
             }
-            if has_launch {
+            if has_launch && can_launch {
                 out.push(Mechanic::ItemLaunch(metatorio_core::ItemLaunchMechanic {
                     item: id.clone(),
                     weight_mode: false,

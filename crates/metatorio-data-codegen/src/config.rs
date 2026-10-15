@@ -139,8 +139,8 @@ pub const DEFAULT_IGNORED_TYPES: &[&str] = &[
     "CloudsEffectProperties",
     "CloudsTextureCoordinateTransformation",
     "ClusterTriggerItem",
-    "CollisionLayerID",
-    "CollisionMaskConnector",
+    // "CollisionLayerID", // 地格放置条件
+    // "CollisionMaskConnector",
     // "Color",
     "ColorFilterData",
     "ColorHintSpecification",
@@ -400,7 +400,7 @@ pub const DEFAULT_IGNORED_TYPES: &[&str] = &[
     // "PipeConnectionDefinition",
     // "PipeConnectionType",
     "PipePictures",
-    "PlaceAsTile",
+    // "PlaceAsTile", // 可放置地格的递归可达性
     "PlaceEquipmentTipTrigger",
     "PlanTrainPathTipTrigger",
     // "PlanetPrototypeMapGenSettings",  // 星球 map_gen_settings（自动生成的 tile/资源）
@@ -537,7 +537,7 @@ pub const DEFAULT_IGNORED_TYPES: &[&str] = &[
     "SpaceDustEffectProperties",
     "SpaceLocationAsteroidSpawnDefinition",
     // "SpaceLocationID",
-    "SpacePlatformTileDefinition",
+    // "SpacePlatformTileDefinition", // 平台启动包的初始地格
     "SpacePlatformsModifier",
     "SpaceTileEffectParameters",
     "SpacingItem",
@@ -939,7 +939,7 @@ pub const DEFAULT_CONCERNED_TYPENAMES: &[&str] = &[
     "space-connection",
     "space-location",
     // "space-platform-hub",
-    // "space-platform-starter-pack",
+    "space-platform-starter-pack",
     // "spectator-controller",
     // "speech-bubble",
     // "spider-leg",

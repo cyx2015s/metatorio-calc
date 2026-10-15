@@ -3035,6 +3035,15 @@ mod tests {
     fn auto_plan_always_solves_strict_even_when_the_factory_is_not_strict() {
         let mut runtime = load_runtime();
         let project = new_project(&mut runtime);
+        // 此测试只验证供给语义，显式解锁合成仓库中没有制造来源的机器。
+        dispatch_project(
+            &mut runtime,
+            project,
+            ProjectAction::AddMilestone {
+                node: Accessible::Entity("assembling-machine-1".to_string()),
+                unlocked: true,
+            },
+        );
         dispatch_project(
             &mut runtime,
             project,
@@ -3129,6 +3138,14 @@ mod tests {
     fn auto_plan_command_forces_strict_source_end_to_end() {
         let mut runtime = load_runtime();
         let project = new_project(&mut runtime);
+        dispatch_project(
+            &mut runtime,
+            project,
+            ProjectAction::AddMilestone {
+                node: Accessible::Entity("assembling-machine-1".to_string()),
+                unlocked: true,
+            },
+        );
         dispatch_project(
             &mut runtime,
             project,

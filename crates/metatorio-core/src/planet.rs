@@ -21,11 +21,16 @@ use crate::prim_var::Flow;
 
 /// 地面使用资源实体；太空平台仅使用当前地点轨道可采集的星块物品。
 pub fn implicit_source_flows(store: &PrototypeStore, planet: &str, surface: Option<&str>) -> Flow {
-    if surface == Some("space-platform") {
+    if is_space_platform(surface) {
         orbit_asteroid_flows(store, planet)
     } else {
         planet_autoplaced_flows(store, planet)
     }
+}
+
+/// 地表原型名判定；低重力/真空的普通星球仍有自己的地面资源。
+pub fn is_space_platform(surface: Option<&str>) -> bool {
+    surface == Some("space-platform")
 }
 
 /// 从轨道生成表追踪死亡碎裂链，只将 asteroid-chunk 的物品产物视为免费来源。
@@ -204,6 +209,70 @@ pub fn planet_generated_tiles(store: &PrototypeStore, planet: &str) -> HashSet<S
             && map_gen.autoplace_controls.contains_key(control)
         {
             tiles.insert(record.name.clone());
+        }
+    }
+    tiles
+}
+
+/// 当前环境存在的地格：初始地格 + 物品铺地规则的传递闭包。
+/// 只判断地形可达性，不将铺地物品视为免费生产物品。
+pub fn surface_available_tiles(
+    store: &PrototypeStore,
+    planet: Option<&str>,
+    surface: Option<&str>,
+) -> HashSet<String> {
+    use metatorio_data::SpacePlatformStarterPackComponent;
+
+    let mut tiles = if is_space_platform(surface) {
+        // 平台的背景地格由游戏固定为 empty-space；启动包另行铺设初始平台。
+        let mut initial = HashSet::from(["empty-space".to_owned()]);
+        for record in store.group(PrototypeGroup::Item) {
+            if let Some(pack) = record.component::<SpacePlatformStarterPackComponent>()
+                && Some(pack.surface.as_deref().unwrap_or("space-platform")) == surface
+            {
+                initial.extend(pack.tiles.iter().map(|tile| tile.tile.clone()));
+            }
+        }
+        initial
+    } else {
+        planet
+            .map(|planet| planet_generated_tiles(store, planet))
+            .unwrap_or_default()
+    };
+    tiles.retain(|name| store.get(PrototypeGroup::Tile, name).is_some());
+    let rules: Vec<_> = store
+        .group(PrototypeGroup::Item)
+        .filter_map(|record| record.component::<ItemComponent>()?.place_as_tile.as_ref())
+        .filter(|rule| store.get(PrototypeGroup::Tile, &rule.result).is_some())
+        .collect();
+    let mut pending: Vec<_> = tiles.iter().cloned().collect();
+    while let Some(name) = pending.pop() {
+        let Some(tile) = store
+            .get(PrototypeGroup::Tile, &name)
+            .and_then(|record| record.component::<TileComponent>())
+        else {
+            continue;
+        };
+        if !tile.allows_being_covered {
+            continue;
+        }
+        for rule in &rules {
+            if tiles.contains(&rule.result) {
+                continue;
+            }
+            if !rule.tile_condition.is_empty() && !rule.tile_condition.contains(&name) {
+                continue;
+            }
+            let collides = rule
+                .condition
+                .layers
+                .keys()
+                .any(|layer| tile.collision_mask.layers.contains_key(layer));
+            if collides != rule.invert {
+                continue;
+            }
+            tiles.insert(rule.result.clone());
+            pending.push(rule.result.clone());
         }
     }
     tiles
