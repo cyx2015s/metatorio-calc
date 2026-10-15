@@ -204,6 +204,15 @@ pub fn energy_source_as_flow(
                     let Some(fluid) = fluid_record(ctx, spec.fuel) else {
                         return flow;
                     };
+                    // 烧燃料（burns_fluid）：出力只取决于 fuel_value，**与温度无关**，
+                    // 所以消耗"任意温度"的该流体——用覆盖整个可行温度区间的变量，
+                    // 具体温度交给辅助的温度转换去挑（与燃料型发电机同一范式）。
+                    // 利用流体热（burns_fluid = false）：热量随温度变化，必须钉在一点。
+                    let temperature = if burns_fluid {
+                        (fluid.default_temperature, fluid.max_temperature())
+                    } else {
+                        (spec.temperature, spec.temperature)
+                    };
                     let (requested, fuel_emissions_multiplier) = if burns_fluid {
                         let fuel_value = fluid.fuel_value().amount;
                         if fuel_value <= 0.0 {
@@ -226,7 +235,7 @@ pub fn energy_source_as_flow(
                         &mut flow,
                         DualVar::Fluid {
                             name: spec.fuel.to_string(),
-                            temperature: [spec.temperature as i32; 2],
+                            temperature: [temperature.0 as i32, temperature.1 as i32],
                         },
                         -used,
                     );

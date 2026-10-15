@@ -284,6 +284,32 @@ impl RuntimeState {
         mechanics: Vec<Mechanic>,
     ) -> Result<DispatchResult, RuntimeError> {
         let strict_changed = replace(&mut self.factory_mut(project, factory)?.strict_source, true);
+        if self.project(project)?.planning.preserve_existing_mechanics {
+            let mut known: std::collections::HashSet<String> = self
+                .factory(project, factory)?
+                .mechanics
+                .iter()
+                .map(|entry| format!("{:?}", entry.mechanic))
+                .collect();
+            let mut added = Vec::new();
+            for mechanic in mechanics {
+                if known.insert(format!("{mechanic:?}")) {
+                    added.push(MechanicEntry {
+                        id: self.allocate_id(),
+                        enabled: true,
+                        mechanic,
+                    });
+                }
+            }
+            let changed = strict_changed || !added.is_empty();
+            let mut outcome = Outcome::solve_factory_if(changed, project, factory);
+            outcome
+                .created
+                .mechanics
+                .extend(added.iter().map(|entry| entry.id));
+            self.factory_mut(project, factory)?.mechanics.extend(added);
+            return self.commit(outcome, "自动规划（保留已有机制）");
+        }
         let existing: Vec<Mechanic> = self
             .factory(project, factory)?
             .mechanics
@@ -2079,9 +2105,6 @@ fn apply_fluid_fuel_action(
             }
             Ok(replace(&mut mechanic.fluid, fluid))
         }
-        FluidFuelMechanicAction::SetTemperature { temperature } => {
-            Ok(replace(&mut mechanic.temperature, temperature))
-        }
     }
 }
 
@@ -2263,6 +2286,9 @@ fn apply_planning_action(
     action: PlanningAction,
 ) -> Result<bool, RuntimeError> {
     match action {
+        PlanningAction::SetPreserveExistingMechanics { preserve } => {
+            Ok(replace(&mut planning.preserve_existing_mechanics, preserve))
+        }
         PlanningAction::SetAlternativeCount { count } => {
             if count == 0 {
                 return Err(RuntimeError::InvalidValue(
@@ -2958,6 +2984,58 @@ mod tests {
         );
     }
 
+    #[test]
+    fn preserving_auto_plan_appends_without_changing_existing_ids_or_enabled_flags() {
+        let (mut state, project, factory) = state_with_factory();
+        let make = |name: &str| {
+            Mechanic::Recipe(metatorio_core::RecipeMechanic {
+                recipe: metatorio_core::IdWithQuality::new(name, "normal"),
+                machine: metatorio_core::IdWithQuality::new("machine", "normal"),
+                module_config: Default::default(),
+                fuel: None,
+            })
+        };
+        let original = make("original");
+        let disabled = make("disabled");
+        let added = make("added");
+        state
+            .replace_factory_mechanics(project, factory, vec![original.clone(), disabled])
+            .unwrap();
+        state.factory_mut(project, factory).unwrap().mechanics[1].enabled = false;
+        let before = state.factory(project, factory).unwrap().mechanics.clone();
+        let toggled = state
+            .dispatch(AppMessage::Project {
+                project,
+                action: ProjectAction::Planning(PlanningAction::SetPreserveExistingMechanics {
+                    preserve: true,
+                }),
+            })
+            .unwrap();
+        assert!(toggled.changed);
+        assert!(
+            state
+                .project(project)
+                .unwrap()
+                .planning
+                .preserve_existing_mechanics
+        );
+        let result = state
+            .apply_auto_plan(project, factory, vec![added.clone(), added.clone()])
+            .unwrap();
+        let after = &state.factory(project, factory).unwrap().mechanics;
+        assert_eq!(&after[..2], before.as_slice());
+        assert_eq!(after.len(), 3);
+        assert_eq!(result.created.mechanics.len(), 1);
+        assert!(state.factory(project, factory).unwrap().strict_source);
+        let result = state
+            .apply_auto_plan(project, factory, vec![original, added])
+            .unwrap();
+        assert!(!result.changed);
+        assert!(result.commands.is_empty());
+        let old: PlanningPreferences = serde_json::from_str("{}").unwrap();
+        assert!(!old.preserve_existing_mechanics);
+    }
+
     /// 自动规划回写：替换机制**并**把工厂标记为严格供给；三态行为都要对——
     /// - 机制不同 → 换列表 + 补标记（同一次 finish：一次 revision/Persist/Recompute）；
     /// - 机制等价但未严格供给 → **不动机制列表**（保住机制 id，前端选择态不失效），
@@ -3545,20 +3623,12 @@ mod tests {
         };
 
         let mechanic = add_mechanic(&mut state, MechanicKind::FluidFuel);
-        // 流体燃料：设置流体与温度
+        // 流体燃料只选流体：热值由流体本身决定，没有可编辑温度
         act(
             &mut state,
             mechanic,
             MechanicAction::FluidFuel(FluidFuelMechanicAction::SetFluid {
                 fluid: "rocket-fuel".to_string(),
-            }),
-        )
-        .unwrap();
-        act(
-            &mut state,
-            mechanic,
-            MechanicAction::FluidFuel(FluidFuelMechanicAction::SetTemperature {
-                temperature: Some(25),
             }),
         )
         .unwrap();
@@ -3568,7 +3638,6 @@ mod tests {
             panic!("expected fluid-fuel mechanic");
         };
         assert_eq!(fuel.fluid, "rocket-fuel");
-        assert_eq!(fuel.temperature, Some(25));
 
         // 空流体拒绝
         let mechanic = add_mechanic(&mut state, MechanicKind::FluidHeat);
@@ -3585,8 +3654,8 @@ mod tests {
         let error = act(
             &mut state,
             mechanic,
-            MechanicAction::FluidFuel(FluidFuelMechanicAction::SetTemperature {
-                temperature: None,
+            MechanicAction::FluidFuel(FluidFuelMechanicAction::SetFluid {
+                fluid: "rocket-fuel".to_string(),
             }),
         );
         assert!(matches!(error, Err(RuntimeError::InvalidOperation(_))));

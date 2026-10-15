@@ -6,6 +6,94 @@ use std::{
     path::{Path, PathBuf},
 };
 
+/// User's two-mechanism factory, evaluated without changing its external inputs.
+/// The mod dump is deliberately supplied outside the repository fixture.
+#[tokio::test]
+#[ignore = "requires AMMONIA_CONTEXT_DUMP; real modded quantum-dot regression"]
+async fn ammonia_quantum_dot_existing_and_auto_plan() {
+    use metatorio_runtime::{AppDocument, Runtime};
+    let _permit = GATE.acquire().await.unwrap();
+    let path = std::env::var_os("AMMONIA_CONTEXT_DUMP").expect("AMMONIA_CONTEXT_DUMP");
+    let dump = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    let context = PrototypeStore::load(&dump).unwrap();
+    let template: AppDocument =
+        serde_json::from_str(include_str!("fixtures/ammonia-quantum-dot.json")).unwrap();
+    let report = std::env::var_os("AMMONIA_TEST_REPORT").expect("AMMONIA_TEST_REPORT");
+    let mut output = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(report)
+        .unwrap();
+    let mut failures = Vec::new();
+    let space_control = std::env::var("AMMONIA_TEST_SURFACE").is_ok();
+    let preserve_control = std::env::var("AMMONIA_PRESERVE_EXISTING").as_deref() == Ok("1");
+    for strict in [false, true] {
+        for auto in [false, true] {
+            // The saved non-strict case is enough to prove the environment
+            // mismatch. Strict original-environment search is a separate hard LP.
+            if !space_control && !preserve_control && strict && auto {
+                continue;
+            }
+            if std::env::var("AMMONIA_EXISTING_ONLY").as_deref() == Ok("1") && auto {
+                continue;
+            }
+            let mut document = template.clone();
+            let project = &mut document.projects[0];
+            let project_id = project.id;
+            project.planning.preserve_existing_mechanics = preserve_control;
+            project.context_id = Some("asset".into());
+            let factory = &mut project.factories[0];
+            let factory_id = factory.id;
+            factory.strict_sink = strict;
+            if let Ok(surface) = std::env::var("AMMONIA_TEST_SURFACE") {
+                factory.settings.surface = Some(surface);
+                // The space control must not inherit free planetary deposits.
+                factory.settings.planet = None;
+            }
+            let mut runtime = Runtime::from_document(document);
+            runtime.install_context("asset".into(), context.clone());
+            let begun = Instant::now();
+            eprintln!("[AMMONIA] strict={strict} auto={auto}");
+            let result = if auto {
+                runtime.auto_plan(project_id, factory_id)
+            } else {
+                runtime.solve_factory(project_id, factory_id)
+            };
+            let record = match result {
+                Ok(result) => {
+                    if matches!(result.status, SolveStatus::Solved { .. }) {
+                        assert_certified(&result);
+                        if auto {
+                            assert!(result.report.writeback_verified);
+                        }
+                    } else {
+                        failures.push(format!("strict={strict} auto={auto}: {:?}", result.status));
+                    }
+                    json!({"result":result})
+                }
+                Err(error) => {
+                    if !space_control && !preserve_control && auto {
+                        assert!(error.to_string().contains("quantum-dot-catalyst"));
+                        assert!(error.to_string().contains("地表条件"));
+                    } else {
+                        failures.push(format!("strict={strict} auto={auto}: {error}"));
+                    }
+                    json!({"error":error.to_string()})
+                }
+            };
+            let record = json!({"strict":strict,"auto":auto,"elapsed_ms":begun.elapsed().as_millis(),"outcome":record});
+            serde_json::to_writer(&mut output, &record).unwrap();
+            writeln!(output).unwrap();
+            output.flush().unwrap();
+            eprintln!(
+                "[AMMONIA] finished strict={strict} auto={auto} ms={}",
+                begun.elapsed().as_millis()
+            );
+        }
+    }
+    assert!(failures.is_empty(), "quantum-dot failures: {failures:?}");
+}
+
 fn snapshots(directory: &Path) -> BTreeSet<PathBuf> {
     std::fs::read_dir(directory)
         .unwrap()

@@ -2204,6 +2204,14 @@
         <button class="btn" title="自动规划：按规划偏好的枚举列表生成候选机制 → 选优 → 回写机制列表。总是按严格供给求解，并在完成后自动开启严格供给" onclick={() => runtime.autoPlan().catch(() => {})} disabled={runtime.autoPlanning || !factory}>
           {runtime.autoPlanning ? "规划中…" : "自动规划"}
         </button>
+        {#if planning}
+          <label class="check-row" title="开启后，已有的已启用机制也参与优化，并保留原列表、只追加新机制；未使用的机制可用“移除未用”清理。手动机制沿用手动工厂规则，不受自动枚举的地表条件过滤。此为项目级偏好。">
+            <input type="checkbox" checked={planning.preserve_existing_mechanics ?? false}
+              disabled={runtime.autoPlanning || !factory}
+              onchange={(event) => runtime.setPreserveExistingMechanics(event.currentTarget.checked).catch(() => {})} />
+            保留已有机制
+          </label>
+        {/if}
         <button class="btn ghost" title="移除本次求解中用量为 0 的机制" onclick={() => runtime.cleanup("remove-unused").catch(() => {})} disabled={!solved}>
           移除未用
         </button>

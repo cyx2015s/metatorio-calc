@@ -477,7 +477,6 @@ pub enum SolarMechanicAction {
 #[serde(rename_all = "kebab-case")]
 pub enum FluidFuelMechanicAction {
     SetFluid { fluid: String },
-    SetTemperature { temperature: Option<i32> },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -544,6 +543,9 @@ pub enum ModuleAction {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum PlanningAction {
+    SetPreserveExistingMechanics {
+        preserve: bool,
+    },
     SetAlternativeCount {
         count: usize,
     },

@@ -300,6 +300,9 @@ impl Default for MechanicEntry {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PlanningPreferences {
+    /// Include enabled manual mechanisms as candidates, and append results
+    /// without replacing existing entries. Manual surface exceptions are kept.
+    pub preserve_existing_mechanics: bool,
     pub alternative_count: usize,
     pub machine_preferences: Vec<IdWithQuality>,
     pub enumerate_modules: Vec<IdWithQuality>,
@@ -312,6 +315,7 @@ impl Default for PlanningPreferences {
             // 每种配方默认枚举 3 台候选机器：不同机器的运行条件不同
             // （如 cryogenic-plant 需要氟利昂冷却，雷星无法自产），只枚举
             // 速度最快的 1 台会漏掉真正可行的替代机器，导致链路断裂。
+            preserve_existing_mechanics: false,
             alternative_count: 3,
             machine_preferences: Vec::new(),
             enumerate_modules: Vec::new(),

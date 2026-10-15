@@ -1364,12 +1364,16 @@ fn expand_fluid_fuel<C: Clone>(
     if fuel_value <= 0.0 {
         return;
     }
-    let temperature = mechanic
-        .temperature
-        .map(f64::from)
-        .unwrap_or(fluid.default_temperature);
+    // 燃料只看热值、与温度**无关**：用一个覆盖整个可行温度区间的变量，
+    // 具体温度交给辅助的温度转换去挑（与燃料型发电机同一范式）。
     let mut temp = TempFlow::new();
-    add_fluid_interval(&mut temp, &mechanic.fluid, -1.0, temperature, temperature);
+    add_fluid_interval(
+        &mut temp,
+        &mechanic.fluid,
+        -1.0,
+        fluid.default_temperature,
+        fluid.max_temperature(),
+    );
     temp.add(
         DualVar::FluidFuel {
             filter: mechanic.fluid.clone(),

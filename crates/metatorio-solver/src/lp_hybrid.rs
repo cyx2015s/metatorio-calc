@@ -73,6 +73,7 @@ struct SearchWork {
     exact: usize,
     support: usize,
     first_values: Option<Vec<f64>>,
+    incumbent: Option<Vec<exact::Rational>>,
 }
 struct AttemptConfig {
     options: exact::FloatOptions,
@@ -209,6 +210,19 @@ fn solve_rust_proposal(
             &mut work,
         );
         let recover_now = if certified { index == 2 } else { index == 0 };
+        if certified
+            && recover_now
+            && matches!(&last, Err(Failure::Other(_)))
+            && std::env::var("METATORIO_LP_COST_BOUNDS").as_deref() == Ok("1")
+            && let Some(incumbent) = &work.incumbent
+        {
+            let deadline = (start + std::time::Duration::from_secs_f64(RUST_SEARCH_SECONDS))
+                .min(Instant::now() + std::time::Duration::from_secs(15));
+            match recover_cost_bounds(snapshot, captured, incumbent, deadline) {
+                Ok(result) => return Ok(result),
+                Err(error) => eprintln!("[LP-RUST-COST-BOUNDS-STOP] {error}"),
+            }
+        }
         if recover_now && matches!(&last, Err(Failure::Other(_))) {
             let remaining = (RUST_SEARCH_SECONDS - start.elapsed().as_secs_f64() - 60.0).max(0.0);
             if remaining > 0.0 {
@@ -386,6 +400,12 @@ fn solve_rust_proposal_attempt(
         )?;
         work.exact += result.exact_pivots;
         work.support += result.support_search_pivots;
+        if !result.accepted
+            && result.certificate.primal_feasible
+            && std::env::var("METATORIO_LP_COST_BOUNDS").as_deref() == Ok("1")
+        {
+            work.incumbent = Some(result.solution.values.clone());
+        }
         if let Some(source) = captured {
             let save = || -> std::result::Result<(), Box<dyn std::error::Error>> {
                 let directory = source
@@ -464,6 +484,49 @@ fn solve_rust_proposal_attempt(
         work.floating + result.repair_pivots + result.optimization_pivots,
     )
     .map_err(Failure::Other)
+}
+
+/// Experimental bounded hint. Failures are deliberately strings, never an
+/// original-model infeasibility outcome from the incumbent-restricted search.
+fn recover_cost_bounds(
+    snapshot: &Snapshot,
+    captured: Option<&std::path::Path>,
+    incumbent: &[exact::Rational],
+    deadline: Instant,
+) -> std::result::Result<Result, String> {
+    let model = snapshot.exact_model();
+    let control = exact::SolveControl::with_deadline(deadline);
+    let proposal = model
+        .cost_bounded_float_candidate_with_control(incumbent, &control)?
+        .ok_or("cost-bounded hint has no liftable original basis")?;
+    let budget = exact::Rational::new(1.into(), 1_000_000_000_000u64.into());
+    let result = model.certify_candidate_with_control(
+        &proposal,
+        1000,
+        &budget,
+        |_, _| !control.is_cancelled(),
+        &control,
+    )?;
+    if !result.accepted {
+        return Err("cost-bounded hint has no accepted ORIGINAL-model certificate".into());
+    }
+    let validated = validated_result(
+        snapshot,
+        result.solution.clone(),
+        result.certificate,
+        proposal.pivots + result.exact_pivots + result.support_search_pivots,
+    )?;
+    crate::lp_row_generation::save(
+        captured,
+        &serde_json::json!({
+            "model_scope":"full","accepted":true,"phase":"cost-bounded-hint",
+            "certificate":validated.certificate,"gap_budget":budget.to_string(),
+            "values":result.solution.values.iter().map(ToString::to_string).collect::<Vec<_>>(),
+            "row_duals":result.solution.row_duals.iter().map(ToString::to_string).collect::<Vec<_>>(),
+            "primal_basis":result.primal_basis,
+        }),
+    );
+    Ok(validated)
 }
 
 fn recover_columns(

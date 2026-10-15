@@ -67,5 +67,9 @@ name = "lp_certified_candidate"
 required-features = ["rust-lp"]
 
 [[example]]
+name = "lp_cost_bounds"
+required-features = ["rust-lp"]
+
+[[example]]
 name = "lp_application_replay"
 required-features = ["lp-experiments"]

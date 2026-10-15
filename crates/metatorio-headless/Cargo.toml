@@ -1,6 +1,6 @@
 [package]
 name = "metatorio-headless"
-version = "1.5.27"
+version = "1.5.28"
 edition = "2024"
 description = "切向量化：纯 MCP 服务（无 GUI，不链接 tauri/webview/GTK）"
 

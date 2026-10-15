@@ -240,15 +240,16 @@ pub struct SolarMechanic {
     pub accumulator: IdWithQuality,
 }
 
-/// 流体燃料机制：把指定温度的热值流体燃烧为"流体燃料"抽象能量流。
+/// 流体燃料机制：把热值流体燃烧为"流体燃料"抽象能量流。
 /// 复刻原版 FluidFuelMechanic（fluid.rs）——擦除具体流体，减少 LP 空间膨胀；
 /// 代价是流体污染倍率等属性无法体现（边缘需求）。
+///
+/// **只看热值，与温度无关**：输入是"任意温度的该流体"，用覆盖整个可行温度
+/// 区间的变量表达，具体温度交给辅助的温度转换去挑——所以没有温度字段。
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FluidFuelMechanic {
     pub fluid: String,
-    /// 流体温度；None = 流体默认温度。
-    pub temperature: Option<i32>,
 }
 
 /// 流体热量机制：把高于默认温度的流体提取为"流体热量"抽象能量流。
@@ -305,6 +306,9 @@ pub enum Fuel {
     /// 物品燃料（如 burner 煤炭），带品质。
     Item { item: IdWithQuality },
     /// 流体燃料（热值流体）；`temperature` 为 None 时用流体默认温度。
+    ///
+    /// **烧燃料（burns_fluid）时该温度会被忽略**：燃料只看热值，输入取整个可行
+    /// 温度区间。它只在"利用流体热"（burns_fluid = false，热量随温度变化）时生效。
     Fluid {
         fluid: String,
         #[serde(default)]

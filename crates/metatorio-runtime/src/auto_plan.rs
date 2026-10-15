@@ -946,9 +946,10 @@ fn enumerate_simple(
             continue;
         };
         if fluid.fuel_value().amount > 0.0 {
+            // 燃料只看热值、与温度无关 → 每个热值流体只需**一个**候选
+            // （展开时用覆盖整个可行温度区间的变量，温度交给温度转换去挑）。
             out.push(Mechanic::FluidFuel(metatorio_core::FluidFuelMechanic {
                 fluid: record.name.clone(),
-                temperature: Some(fluid.default_temperature as i32),
             }));
         }
         // 提热流体：用最高温度（高于默认温度才产热）

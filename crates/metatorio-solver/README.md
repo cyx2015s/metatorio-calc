@@ -115,3 +115,11 @@ and uses default Cargo features. Native replay remains available through
 `scripts/lp-compare-backends.ps1` and `scripts/lp-summarize-backends.py`. Summaries
 audit numerical input bits and distinguish strict bounds from the application
 bound tolerance; rejected solves do not count as faster successful solves.
+
+The optional experiment `METATORIO_LP_COST_BOUNDS=1` tries an incumbent-budget
+hint only after the three original hints fail and a full exact feasible incumbent
+has been retained. It shares the overall deadline with a cooperative 15-second
+allowance, and accepts only an original-model certificate. It is disabled by
+default pending paired measurements. `lp_cost_bounds` compares floating hints
+on a frozen snapshot using an independently checked incumbent; see
+`docs/lp-ammonia-cost-bounds-20261015.md` for the application case and controls.

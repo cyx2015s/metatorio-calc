@@ -1,0 +1,179 @@
+{
+  "schema_version": 1,
+  "projects": [
+    {
+      "id": 1,
+      "name": "新项目",
+      "settings": {
+        "time_scale": "seconds",
+        "milestones": [],
+        "recipe_productivity": [],
+        "infinite_levels": [],
+        "ignore_productivity": true,
+        "mining_productivity": 0.0,
+        "all_accessible": false,
+        "quality_limit": null
+      },
+      "planning": {
+        "alternative_count": 3,
+        "machine_preferences": [],
+        "enumerate_modules": [],
+        "enumerate_beacons": []
+      },
+      "context_id": "735f5019abddbeba",
+      "factories": [
+        {
+          "id": 2,
+          "name": "新工厂",
+          "settings": {
+            "planet": "nauvis",
+            "surface": null,
+            "major_quality": "normal",
+            "debug": false
+          },
+          "targets": [
+            {
+              "id": 3,
+              "flow": {
+                "Item": {
+                  "id": "quantum-dot-catalyst",
+                  "quality": "normal"
+                }
+              },
+              "amount": 1.0
+            }
+          ],
+          "target_expressions": [],
+          "external_inputs": [
+            {
+              "id": 5,
+              "flow": {
+                "Fluid": {
+                  "name": "neutron-flux",
+                  "temperature": [
+                    25,
+                    25
+                  ]
+                }
+              },
+              "penalty": 1.0
+            },
+            {
+              "id": 8,
+              "flow": {
+                "Item": {
+                  "id": "europium-plate",
+                  "quality": "normal"
+                }
+              },
+              "penalty": 1.0
+            },
+            {
+              "id": 9,
+              "flow": {
+                "Item": {
+                  "id": "lutetium-plate",
+                  "quality": "normal"
+                }
+              },
+              "penalty": 1.0
+            },
+            {
+              "id": 10,
+              "flow": {
+                "Item": {
+                  "id": "dysprosium-plate",
+                  "quality": "normal"
+                }
+              },
+              "penalty": 1.0
+            },
+            {
+              "id": 11,
+              "flow": {
+                "Item": {
+                  "id": "superconductor",
+                  "quality": "normal"
+                }
+              },
+              "penalty": 1.0
+            },
+            {
+              "id": 12,
+              "flow": {
+                "Item": {
+                  "id": "gallium-nitride",
+                  "quality": "normal"
+                }
+              },
+              "penalty": 1.0
+            },
+            {
+              "id": 13,
+              "flow": {
+                "Item": {
+                  "id": "electronic-grade-silicon",
+                  "quality": "normal"
+                }
+              },
+              "penalty": 1.0
+            },
+            {
+              "id": 14,
+              "flow": {
+                "Item": {
+                  "id": "quantum-processor",
+                  "quality": "normal"
+                }
+              },
+              "penalty": 1.0
+            },
+            {
+              "id": 15,
+              "flow": {
+                "Item": {
+                  "id": "metallic-hydrogen",
+                  "quality": "normal"
+                }
+              },
+              "penalty": 1.0
+            }
+          ],
+          "mechanics": [
+            {
+              "id": 4,
+              "enabled": true,
+              "mechanic": {
+                "type": "recipe",
+                "recipe": {
+                  "id": "quantum-dot-catalyst",
+                  "quality": "normal"
+                },
+                "machine": {
+                  "id": "neutron-flux-charger",
+                  "quality": "normal"
+                },
+                "module_config": {
+                  "modules": [],
+                  "beacons": []
+                },
+                "fuel": null
+              }
+            },
+            {
+              "id": 6,
+              "enabled": true,
+              "mechanic": {
+                "type": "fluid-fuel",
+                "fluid": "neutron-flux",
+                "temperature": null
+              }
+            }
+          ],
+          "strict_source": true,
+          "strict_sink": false
+        }
+      ]
+    }
+  ]
+}

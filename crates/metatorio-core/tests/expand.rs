@@ -24,7 +24,7 @@ fn fluid_dump() -> Value {
         },
         "fluid": {
             "water": { "default_temperature": 15.0 },
-            "steam": { "default_temperature": 100.0, "heat_capacity": "1kJ" }
+            "steam": { "default_temperature": 100.0, "max_temperature": 500.0, "heat_capacity": "1kJ" }
         },
         "recipe": {
             "iron-plate": {
@@ -117,7 +117,6 @@ fn fluid_fuel_and_fluid_heat_mechanics_expand() {
 
     let fuel = Mechanic::FluidFuel(FluidFuelMechanic {
         fluid: "steam".to_string(),
-        temperature: Some(165),
     });
     let heat = Mechanic::FluidHeat(FluidHeatMechanic {
         fluid: "steam".to_string(),
@@ -134,10 +133,12 @@ fn fluid_fuel_and_fluid_heat_mechanics_expand() {
         .iter()
         .find(|v| v.prim_var.inner == "fuel")
         .expect("fluid-fuel 机制应展开");
+    // 燃料只看热值：消耗覆盖**整个可行温度区间**的该流体（default..max），
+    // 而不是钉在某个温度点上。
     assert_eq!(
         fuel_var.flow.get(&DualVar::Fluid {
             name: "steam".to_string(),
-            temperature: [165, 165],
+            temperature: [100, 500],
         }),
         Some(&-1.0)
     );

@@ -2243,6 +2243,20 @@ pub(crate) fn burner_fuel_categories_of(
     }
 }
 
+/// 流体能量源是否"烧燃料"（burns_fluid）：为 true 时该机器的出力只取决于流体的
+/// 热值、与温度无关，前端据此**隐藏"燃料温度"输入框**（那个温度只在
+/// burns_fluid = false、即利用流体热时才有意义）。非流体能量源返回 None。
+pub(crate) fn fluid_burns_fluid_of(
+    source: &metatorio_data::types::EnergySource,
+) -> Option<bool> {
+    match source {
+        metatorio_data::types::EnergySource::Fluid(fluid) => {
+            Some(fluid.burns_fluid.unwrap_or(false))
+        }
+        _ => None,
+    }
+}
+
 pub(crate) fn catalog_index_from_store(
     store: &PrototypeStore,
     locale: &HashMap<String, String>,
@@ -4067,6 +4081,7 @@ pub fn prototype_detail(
         detail.fluid_filter = boiler.fluid_box.filter.clone();
         detail.machine_energy_source = Some(energy_source_kind(&boiler.energy_source).to_string());
         detail.burner_fuel_categories = burner_fuel_categories_of(&boiler.energy_source);
+        detail.burns_fluid = fluid_burns_fluid_of(&boiler.energy_source);
     }
     if let Some(reactor) = record.component::<ReactorComponent>() {
         detail.heat_output_j = Some(reactor.consumption.amount);

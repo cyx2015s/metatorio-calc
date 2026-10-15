@@ -153,15 +153,22 @@
   // heat-fluid-inside 连续加热同一流体、输出温度可任选；output-to-separate-pipe
   // 的输出温度由原型 target_temperature 固定，没有可编辑的输出温度。
   let boilerMode = $state<string | null>(null);
+  // 锅炉的流体能量源是否"烧燃料"：true 时出力只取决于热值、与温度无关，
+  // 因此不显示"燃料温度"输入框（那个温度只在利用流体热时才有意义）。
+  let boilerBurnsFluid = $state<boolean | null>(null);
   $effect(() => {
     const id = entry.mechanic.boiler?.id;
     if (kind !== "boiler" || !id) {
       boilerMode = null;
+      boilerBurnsFluid = null;
       return;
     }
     let alive = true;
     runtime.getDetail("boiler", id).then((detail) => {
-      if (alive) boilerMode = detail?.boiler_mode ?? null;
+      if (alive) {
+        boilerMode = detail?.boiler_mode ?? null;
+        boilerBurnsFluid = detail?.burns_fluid ?? null;
+      }
     });
     return () => {
       alive = false;
@@ -411,7 +418,7 @@
           · 建议 {solarBalanceInfo.recommended_accumulators.toFixed(2)} 蓄电器/面板
         </span>
       {/if}
-    {:else if kind === "fluid-fuel" || kind === "fluid-heat"}
+    {:else if kind === "fluid-heat"}
       <label class="sub temp" title="流体温度（留空 = 默认温度）">
         温度
         <input
@@ -435,7 +442,7 @@
   {/if}
 
   <!-- 机制细节：燃料 / 燃料温度 / 火箭重量模式（recipe/mining 的燃料已在头部行） -->
-  {#if kind === "item-launch" || (kind === "boiler" && fuelIsFluid(entry.mechanic.fuel))}
+  {#if kind === "item-launch" || (kind === "boiler" && fuelIsFluid(entry.mechanic.fuel) && boilerBurnsFluid !== true)}
     <div class="row2b">
       {#if kind === "item-launch"}
         <button

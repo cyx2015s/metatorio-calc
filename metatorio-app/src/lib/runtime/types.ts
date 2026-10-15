@@ -263,9 +263,7 @@ export type SolarMechanicAction =
   | { "set-solar-panel": { solar_panel: IdWithQuality } }
   | { "set-accumulator": { accumulator: IdWithQuality } };
 
-export type FluidFuelMechanicAction =
-  | { "set-fluid": { fluid: string } }
-  | { "set-temperature": { temperature: number | null } };
+export type FluidFuelMechanicAction = { "set-fluid": { fluid: string } };
 
 export type FluidHeatMechanicAction =
   | { "set-fluid": { fluid: string } }
@@ -314,6 +312,7 @@ export type ModuleAction =
 
 // 项目级自动规划偏好（全局，不绑定到单个机制）。
 export type PlanningAction =
+  | { "set-preserve-existing-mechanics": { preserve: boolean } }
   | { "set-alternative-count": { count: number } }
   | { "add-machine-preference": { machine: IdWithQuality } }
   | { "remove-machine-preference": { machine: IdWithQuality } }
@@ -425,6 +424,7 @@ export interface ProjectDocument {
 }
 
 export interface PlanningPreferences {
+  preserve_existing_mechanics: boolean;
   alternative_count: number;
   machine_preferences: IdWithQuality[];
   enumerate_modules: IdWithQuality[];

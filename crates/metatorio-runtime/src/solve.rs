@@ -1049,9 +1049,12 @@ pub fn plan_auto_plan(
         accessibility: Some(accessibility.clone()),
     };
     let candidates = crate::auto_plan::enumerate_all(store, &context, &options);
-    let (candidates, dropped): (Vec<_>, Vec<_>) = candidates
+    let (mut candidates, dropped): (Vec<_>, Vec<_>) = candidates
         .into_iter()
         .partition(|m| crate::auto_plan::mechanic_accessible(store, accessibility, m));
+    if project_doc.planning.preserve_existing_mechanics && !factory_doc.mechanics.is_empty() {
+        include_existing_candidates(&mut candidates, factory_doc);
+    }
     if candidates.is_empty() {
         return Err(RuntimeError::InvalidValue(if dropped.is_empty() {
             "没有可枚举的机制候选".to_string()
@@ -1105,8 +1108,13 @@ pub fn plan_auto_plan(
         else {
             return Err(RuntimeError::InvalidValue("自动规划求解失败".to_string()));
         };
+        let environment_note = if project_doc.planning.preserve_existing_mechanics {
+            String::new()
+        } else {
+            existing_recipe_surface_note(store, factory_doc)
+        };
         return Err(RuntimeError::InvalidValue(format!(
-            "自动规划无解：{description}；无供给 {} 项：{no_provider:?}",
+            "自动规划无解：{description}{environment_note}；无供给 {} 项：{no_provider:?}",
             no_provider.len()
         )));
     };
@@ -1173,6 +1181,80 @@ fn unconstrained_items(flows: &AIndexMap<ExpandedVarId, (Flow, f64)>) -> AIndexS
         .filter(|key| matches!(key, DualVar::Pollution { .. }))
         .cloned()
         .collect()
+}
+
+/// Explicit preservation keeps enabled manual routes alongside generated ones.
+/// Disabled entries retain their state during append-only writeback.
+fn include_existing_candidates(candidates: &mut Vec<Mechanic>, factory: &FactoryDocument) {
+    let disabled: std::collections::HashSet<_> = factory
+        .mechanics
+        .iter()
+        .filter(|entry| !entry.enabled)
+        .map(|entry| format!("{:?}", entry.mechanic))
+        .collect();
+    // Track only the manual routes, not a large debug string for every generated
+    // candidate in a potentially hundred-thousand-column enumeration.
+    let mut missing: std::collections::HashSet<_> = factory
+        .mechanics
+        .iter()
+        .filter(|entry| entry.enabled)
+        .map(|entry| format!("{:?}", entry.mechanic))
+        .collect();
+    // Do not let enumeration silently re-enable an identical disabled entry.
+    candidates.retain(|mechanic| {
+        let key = format!("{mechanic:?}");
+        if disabled.contains(&key) {
+            return false;
+        }
+        missing.remove(&key);
+        true
+    });
+    for entry in factory.mechanics.iter().filter(|entry| entry.enabled) {
+        if missing.remove(&format!("{:?}", entry.mechanic)) {
+            candidates.push(entry.mechanic.clone());
+        }
+    }
+}
+
+/// Manual factory solving permits surface exceptions, while enumeration honors
+/// conditions. Explain the distinction on failure without rejecting legal alternatives.
+fn existing_recipe_surface_note(store: &PrototypeStore, factory: &FactoryDocument) -> String {
+    let Some(properties) = crate::planet::surface_properties_of(
+        store,
+        factory.settings.planet.as_deref(),
+        factory.settings.surface.as_deref(),
+    ) else {
+        return String::new();
+    };
+    let mut rejected = Vec::new();
+    for entry in factory.mechanics.iter().filter(|entry| entry.enabled) {
+        let Mechanic::Recipe(mechanic) = &entry.mechanic else {
+            continue;
+        };
+        let Some(recipe) = store
+            .get(PrototypeGroup::Recipe, &mechanic.recipe.id)
+            .and_then(|record| record.component::<metatorio_data::RecipeComponent>())
+        else {
+            continue;
+        };
+        if !crate::planet::surface_condition_satisfied(
+            store,
+            &recipe.surface_conditions,
+            &properties,
+        ) {
+            let message = format!("{} {:?}", mechanic.recipe.id, recipe.surface_conditions);
+            if !rejected.contains(&message) {
+                rejected.push(message);
+            }
+        }
+    }
+    if rejected.is_empty() {
+        return String::new();
+    }
+    format!(
+        "；现有工厂配方不满足当前星球/地表条件，自动规划未枚举这些配方（手动重算不执行此过滤）：{}",
+        rejected.join("；")
+    )
 }
 
 fn build_autoplan_problem(
@@ -1846,6 +1928,73 @@ mod tests {
     use metatorio_core::IdWithQuality;
     use metatorio_data::store::PrototypeStore;
     use serde_json::json;
+
+    #[test]
+    fn existing_candidates_are_deduplicated_and_disabled_entries_stay_excluded() {
+        let make = |name: &str| {
+            Mechanic::Recipe(metatorio_core::RecipeMechanic {
+                recipe: IdWithQuality::new(name, "normal"),
+                machine: IdWithQuality::new("machine", "normal"),
+                module_config: Default::default(),
+                fuel: None,
+            })
+        };
+        let manual = make("manual");
+        let disabled = make("disabled");
+        let generated = make("generated");
+        let factory = FactoryDocument {
+            mechanics: vec![
+                crate::document::MechanicEntry {
+                    id: MechanicId(1),
+                    enabled: true,
+                    mechanic: manual.clone(),
+                },
+                crate::document::MechanicEntry {
+                    id: MechanicId(2),
+                    enabled: false,
+                    mechanic: disabled.clone(),
+                },
+            ],
+            ..Default::default()
+        };
+        let mut candidates = vec![generated.clone(), disabled.clone()];
+        include_existing_candidates(&mut candidates, &factory);
+        assert_eq!(candidates, vec![generated, manual]);
+        let first = candidates.clone();
+        include_existing_candidates(&mut candidates, &factory);
+        assert_eq!(candidates, first);
+        assert!(!factory.mechanics[1].enabled);
+    }
+
+    #[test]
+    fn failed_planning_explains_existing_recipe_surface_mismatch() {
+        let store=PrototypeStore::load(&json!({
+            "recipe":{"space-only":{"type":"recipe","name":"space-only","ingredients":[],"results":[],"surface_conditions":[{"property":"gravity","min":0,"max":0}]}},
+            "planet":{"nauvis":{"type":"planet","name":"nauvis","surface_properties":{"gravity":10}}},
+            "surface":{"space-platform":{"type":"surface","name":"space-platform","surface_properties":{"gravity":0}}}
+        })).unwrap();
+        let mut factory = FactoryDocument::default();
+        factory.settings.planet = Some("nauvis".into());
+        factory.mechanics.push(crate::document::MechanicEntry {
+            id: MechanicId(1),
+            enabled: true,
+            mechanic: Mechanic::Recipe(metatorio_core::RecipeMechanic {
+                recipe: IdWithQuality::new("space-only", "normal"),
+                machine: IdWithQuality::new("machine", "normal"),
+                module_config: Default::default(),
+                fuel: None,
+            }),
+        });
+        let note = existing_recipe_surface_note(&store, &factory);
+        assert!(note.contains("space-only") && note.contains("gravity"));
+        factory.settings.planet = None;
+        factory.settings.surface = Some("space-platform".into());
+        assert!(existing_recipe_surface_note(&store, &factory).is_empty());
+        factory.settings.surface = None;
+        factory.settings.planet = Some("nauvis".into());
+        factory.mechanics[0].enabled = false;
+        assert!(existing_recipe_surface_note(&store, &factory).is_empty());
+    }
 
     /// 求解不是 `Solved` 时没有任何"这个机制用没用"的信息：`mechanic_usage`
     /// 必须返回 `None`，让调用方拒绝清理，而不是拿空表把机制删光。

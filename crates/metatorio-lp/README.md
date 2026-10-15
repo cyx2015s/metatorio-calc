@@ -132,3 +132,11 @@ original model and the requested rational gap budget.
 homogeneous rows force to zero, and restores all original column/row identities
 in its returned hint. Original-model dual repair and certification remain
 necessary: the reduced model's duals do not cover omitted columns.
+
+`cost_bounds_with_control` verifies a full-model feasible incumbent, derives
+exact nonnegative-cost budget bounds, and propagates row intervals. Zero-cost
+columns stay unbounded unless rows establish an upper bound; objective offsets
+do not consume the budget. `cost_bounded_float_candidate_with_control` uses at
+most 64 outward-rounded upper rows as an untrusted search aid, then drops their
+basic slacks. Final certification must use the original model. A bounded-search
+failure is never an original-model infeasibility certificate.

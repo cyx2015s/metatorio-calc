@@ -1544,14 +1544,9 @@ class RuntimeStore {
     });
   }
 
-  /** 设置流体类机制的温度（流体燃料/流体热/发电机/锅炉）。 */
+  /** 设置流体类机制的温度（流体热/发电机/锅炉）。流体燃料只看热值，没有温度可编辑。 */
   async setMechanicTemperature(mechanic: MechanicId, temperature: number | null): Promise<void> {
     const kind = this.mechanicKind(mechanic);
-    if (kind === "fluid-fuel") {
-      return this.mechanicMessage(mechanic, {
-        "fluid-fuel": { "set-temperature": { temperature } },
-      });
-    }
     if (kind === "fluid-heat") {
       return this.mechanicMessage(mechanic, {
         "fluid-heat": { "set-temperature": { temperature } },
@@ -1676,6 +1671,10 @@ class RuntimeStore {
 
   async setAlternativeCount(count: number): Promise<void> {
     await this.planningMessage({ "set-alternative-count": { count } });
+  }
+
+  async setPreserveExistingMechanics(preserve: boolean): Promise<void> {
+    await this.planningMessage({ "set-preserve-existing-mechanics": { preserve } });
   }
 
   async addMachinePreference(machine: IdWithQuality): Promise<void> {
