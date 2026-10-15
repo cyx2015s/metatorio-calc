@@ -41,6 +41,17 @@ pub fn expand<'a, C: Clone>(
     for (config, mechanic) in mechanics {
         let before = expansion.variables.len();
         match mechanic {
+            Mechanic::VirtualScience(mechanic) => {
+                if crate::science::science_pack_names(ctx.prototype).contains(&mechanic.item.id)
+                    && let Some(value) =
+                        crate::science::science_value(ctx.prototype, &mechanic.item)
+                {
+                    let mut temp = TempFlow::new();
+                    temp.add(DualVar::Item(mechanic.item.clone()), -1.0);
+                    temp.add(DualVar::VirtualScience(mechanic.item.id.clone()), value);
+                    expansion.variables.extend(temp.into_variables(config));
+                }
+            }
             Mechanic::Recipe(mechanic) => expand_recipe(config, mechanic, ctx, &mut expansion),
             Mechanic::Mining(mechanic) => expand_mining(config, mechanic, ctx, &mut expansion),
             Mechanic::Spoil(mechanic) => expand_spoil(config, mechanic, ctx, &mut expansion),
@@ -133,7 +144,10 @@ pub fn instance_cost(store: &PrototypeStore, mechanic: &Mechanic) -> f64 {
             })
             .unwrap_or(16.0),
         // 流体燃料/流体热：转换机制，几乎无成本（复刻原版 cost()=0）。
-        Mechanic::FluidFuel(_) | Mechanic::FluidHeat(_) | Mechanic::ItemFuel(_) => 0.0,
+        Mechanic::FluidFuel(_)
+        | Mechanic::FluidHeat(_)
+        | Mechanic::ItemFuel(_)
+        | Mechanic::VirtualScience(_) => 0.0,
         _ => 16.0,
     }
 }

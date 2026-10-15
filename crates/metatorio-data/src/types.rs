@@ -1019,7 +1019,7 @@ pub struct TriggerEffects(pub Vec<TriggerEffect>);
 ///
 /// Factorio 两种形态混用：`space-location`（直接 `probability`）与
 /// `space-connection`（按 `spawn_points` 距离分布）。可达性分析只关心
-/// **生成哪种星岩实体**（`asteroid` 名），其余字段（概率/距离/速度/
+/// **生成哪种星岩实体**（`asteroid` 名）；轨道来源还读取 probability，距离/速度/
 /// 角度/类型标记）宽松吸收在此忽略。
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
@@ -1027,6 +1027,8 @@ pub struct AsteroidSpawnDefinition {
     /// 生成的星岩/小行星实体名（如 `metallic-asteroid-chunk`、
     /// `huge-promethium-asteroid`）。
     pub asteroid: Option<String>,
+    /// 静止轨道的生成概率；连接上的生成表可能只声明 spawn_points。
+    pub probability: Option<f64>,
 }
 
 impl<'de> serde::Deserialize<'de> for TriggerEffects {

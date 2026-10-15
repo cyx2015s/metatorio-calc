@@ -478,6 +478,11 @@ impl QualityComponent {
         self.tool_durability_multiplier
             .unwrap_or(1.0 + self.level as f64)
     }
+
+    pub fn science_capacity_multiplier(&self) -> f64 {
+        self.science_capacity_multiplier
+            .unwrap_or_else(|| self.tool_durability_multiplier())
+    }
 }
 
 // ── Recipe ────────────────────────────────────────────────────────

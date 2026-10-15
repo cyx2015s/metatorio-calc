@@ -84,6 +84,7 @@
 
   const flowTabs = [
     { id: "item", label: "物品" },
+    { id: "virtual-science", label: "虚拟科研" },
     { id: "fluid", label: "流体" },
     { id: "entity", label: "实体" },
     { id: "electricity", label: "电" },
@@ -123,14 +124,15 @@
   // 目录模式下用 activeKind；流模式下仅 item/fluid/entity 走目录
   let catalogKind = $derived(
     flowMode
-      ? flowTab === "item" || flowTab === "fluid" || flowTab === "entity"
+      ? flowTab === "virtual-science" ? "item" : flowTab === "item" || flowTab === "fluid" || flowTab === "entity"
         ? (flowTab as CatalogKind)
         : null
       : activeKind,
   );
   let entries = $derived(
     catalogKind
-      ? (runtime.catalogIndex?.entries ?? []).filter((entry) => entry.kind === catalogKind)
+      ? (runtime.catalogIndex?.entries ?? []).filter((entry) => entry.kind === catalogKind
+          && (!flowMode || flowTab !== "virtual-science" || entry.categories.includes("science-pack")))
       : [],
   );
   let groups = $derived([...new Set(entries.map((entry) => entry.group))]);
@@ -324,6 +326,8 @@
 
   async function buildCatalogFlow(name: string): Promise<DualVar | null> {
     switch (flowTab) {
+      case "virtual-science":
+        return { VirtualScience: name };
       case "item":
         return { Item: { id: name, quality } };
       case "fluid": {

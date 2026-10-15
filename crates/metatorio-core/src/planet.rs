@@ -19,6 +19,93 @@ use crate::dual_var::DualVar;
 use crate::id::{IdWithQuality, NORMAL_QUALITY};
 use crate::prim_var::Flow;
 
+/// 地面使用资源实体；太空平台仅使用当前地点轨道可采集的星块物品。
+pub fn implicit_source_flows(store: &PrototypeStore, planet: &str, surface: Option<&str>) -> Flow {
+    if surface == Some("space-platform") {
+        orbit_asteroid_flows(store, planet)
+    } else {
+        planet_autoplaced_flows(store, planet)
+    }
+}
+
+/// 从轨道生成表追踪死亡碎裂链，只将 asteroid-chunk 的物品产物视为免费来源。
+/// 不采用空间连接生成表，也不将可攻击的星岩实体直接交给采矿机制。
+pub fn orbit_asteroid_flows(store: &PrototypeStore, location: &str) -> Flow {
+    use metatorio_data::types::{Product, TriggerEffect};
+    use metatorio_data::{
+        AsteroidChunkComponent, EntityWithHealthComponent, SpaceLocationComponent,
+    };
+    let mut flow = Flow::default();
+    let Some(location) = store
+        .get(PrototypeGroup::Planet, location)
+        .or_else(|| store.get(PrototypeGroup::SpaceLocation, location))
+        .and_then(|record| record.component::<SpaceLocationComponent>())
+    else {
+        return flow;
+    };
+    let mut pending: Vec<String> = location
+        .asteroid_spawn_definitions
+        .iter()
+        .filter(|definition| {
+            definition
+                .probability
+                .is_none_or(|probability| probability > 0.0)
+        })
+        .filter_map(|definition| definition.asteroid.clone())
+        .collect();
+    let mut visited = HashSet::new();
+    while let Some(name) = pending.pop() {
+        if !visited.insert(name.clone()) {
+            continue;
+        }
+        if let Some(chunk) = store
+            .get(PrototypeGroup::AsteroidChunk, &name)
+            .and_then(|record| record.component::<AsteroidChunkComponent>())
+            && let Some(minable) = &chunk.minable
+        {
+            let mut add = |name: &str| {
+                if store.item(name).is_some() {
+                    flow.insert(DualVar::Item(IdWithQuality::new(name, NORMAL_QUALITY)), 0.0);
+                }
+            };
+            if let Some(result) = &minable.result
+                && minable.count.unwrap_or(1) > 0
+            {
+                add(result);
+            }
+            for product in &minable.results {
+                if let Product::Item(item) = product
+                    && item.normalized_output().base > 0.0
+                {
+                    add(&item.name);
+                }
+            }
+        }
+        if let Some(health) = store
+            .entity(&name)
+            .and_then(|record| record.component::<EntityWithHealthComponent>())
+        {
+            for effect in health
+                .dying_trigger_effect
+                .iter()
+                .chain(health.damaged_trigger_effect.iter())
+                .flat_map(|effects| &effects.0)
+            {
+                match effect {
+                    TriggerEffect::CreateAsteroidChunk {
+                        asteroid_name: Some(name),
+                    }
+                    | TriggerEffect::CreateEntity {
+                        entity_name: Some(name),
+                    } => pending.push(name.clone()),
+                    _ => {}
+                }
+            }
+        }
+    }
+    flow
+}
+
 /// 当前工厂生效的表面属性：
 /// 1. 显式设置地表 → 该地表的 surface_properties；
 /// 2. 否则星球存在同名关联地表 → 关联地表的 surface_properties；

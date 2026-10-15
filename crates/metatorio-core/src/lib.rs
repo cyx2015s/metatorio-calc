@@ -14,6 +14,7 @@ pub mod planet;
 pub mod prim_var;
 pub mod productivity;
 pub mod quality;
+pub mod science;
 pub mod temp_flow;
 
 pub use accessibility::{
@@ -29,7 +30,7 @@ pub use mechanic::{
     BeaconConfig, BoilerMechanic, FluidFuelMechanic, FluidHeatMechanic, Fuel, GeneratorMechanic,
     ItemFuelMechanic, ItemLaunchMechanic, Mechanic, MiningMechanic, ModuleConfig, PlantMechanic,
     ReactorMechanic, RecipeMechanic, SolarMechanic, SpoilMechanic, TileDisposeMechanic,
-    TileExtractMechanic,
+    TileExtractMechanic, VirtualScienceMechanic,
 };
 pub use prim_var::{AIndexMap, ExpandedVariable, Expansion, Flow, PrimVar};
 pub use productivity::{InfiniteTechLevel, ProductivityResult, compute_productivity};

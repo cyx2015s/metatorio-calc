@@ -25,6 +25,7 @@ export interface IdWithQuality {
 export type DualVar =
   | "Unknown"
   | { Item: IdWithQuality }
+  | { VirtualScience: string }
   | { Fluid: { name: string; temperature: [number, number] } }
   | { Entity: IdWithQuality }
   | "Heat"
@@ -53,6 +54,7 @@ export function dualVarLabel(flow: DualVar): string {
     const record = flow as Record<string, unknown>;
     const key = Object.keys(record)[0];
     const value = record[key];
+    if (key === "VirtualScience") return `虚拟科研（${String(value)}）`;
     if (value !== null && typeof value === "object") {
       const inner = value as Record<string, unknown>;
       if ("name" in inner) return String(inner.name);
@@ -195,6 +197,7 @@ export type ProjectAction =
   | { planning: PlanningAction };
 
 export type MechanicKind =
+  | "virtual-science"
   | "recipe"
   | "mining"
   | "spoil"
@@ -280,6 +283,7 @@ export type TileDisposeMechanicAction =
   | { "set-item": { item: IdWithQuality } };
 
 export type MechanicAction =
+  | { "virtual-science": ItemFuelMechanicAction }
   | { recipe: RecipeMechanicAction }
   | { mining: MiningMechanicAction }
   | { spoil: SpoilMechanicAction }

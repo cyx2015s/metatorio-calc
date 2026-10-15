@@ -16,6 +16,7 @@
     spoil: "变质",
     plant: "种植",
     "item-fuel": "物品燃料",
+    "virtual-science": "虚拟科研",
     "item-launch": "发射",
     generator: "发电机",
     boiler: "锅炉",

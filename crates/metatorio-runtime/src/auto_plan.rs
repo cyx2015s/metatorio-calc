@@ -894,6 +894,7 @@ fn enumerate_simple(
 ) {
     let quality_range = options.quality_limit + 1;
     // 变质 / 种植 / 物品燃料 / 火箭发射
+    let science_packs = metatorio_core::science::science_pack_names(store);
     for record in store.group(PrototypeGroup::Item) {
         let Some(item) = record.component::<ItemComponent>() else {
             continue;
@@ -902,11 +903,17 @@ fn enumerate_simple(
         let has_plant = item.plant_result.as_deref().is_some_and(|r| !r.is_empty());
         let has_fuel = item.fuel_value().amount > 0.0;
         let has_launch = !item.rocket_launch_products.is_empty();
-        if !has_spoil && !has_plant && !has_fuel && !has_launch {
+        let has_science = science_packs.contains(&record.name);
+        if !has_spoil && !has_plant && !has_fuel && !has_launch && !has_science {
             continue;
         }
         for quality in 0..quality_range {
             let id = IdWithQuality::new(record.name.clone(), quality_name(ctx, quality));
+            if has_science {
+                out.push(Mechanic::VirtualScience(
+                    metatorio_core::VirtualScienceMechanic { item: id.clone() },
+                ));
+            }
             if has_spoil {
                 out.push(Mechanic::Spoil(metatorio_core::SpoilMechanic {
                     item: id.clone(),

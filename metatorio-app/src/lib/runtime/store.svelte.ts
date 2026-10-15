@@ -1088,6 +1088,7 @@ class RuntimeStore {
       recipe: "recipe",
       resource: "mining",
       "item-fuel": "item-fuel",
+      "virtual-science": "virtual-science",
       generator: "generator",
     };
     const kind = kindMap[candidate.kind];
@@ -1097,7 +1098,7 @@ class RuntimeStore {
     if (id == null) return;
     if (candidate.kind === "recipe") await this.setRecipe(id, candidate.name);
     else if (candidate.kind === "resource") await this.setResource(id, candidate.name);
-    else if (candidate.kind === "item-fuel") await this.setItem(id, candidate.name);
+    else if (candidate.kind === "item-fuel" || candidate.kind === "virtual-science") await this.setItem(id, candidate.name);
     else if (candidate.kind === "generator") await this.setGenerator(id, candidate.name);
   }
 
@@ -1472,6 +1473,8 @@ class RuntimeStore {
         return this.mechanicMessage(mechanic, { spoil: { "set-item": { item: itemId } } });
       case "item-fuel":
         return this.mechanicMessage(mechanic, { "item-fuel": { "set-item": { item: itemId } } });
+      case "virtual-science":
+        return this.mechanicMessage(mechanic, { "virtual-science": { "set-item": { item: itemId } } });
       case "tile-dispose":
         return this.setTileDisposeItem(mechanic, item, quality);
       case "item-launch":

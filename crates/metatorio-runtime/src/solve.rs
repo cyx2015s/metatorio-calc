@@ -1080,7 +1080,11 @@ pub fn plan_auto_plan(
         .collect();
     let mut all_sources = sources.clone();
     if let Some(planet) = factory_doc.settings.planet.as_deref() {
-        let mut implicit = crate::planet::planet_autoplaced_flows(store, planet);
+        let mut implicit = crate::planet::implicit_source_flows(
+            store,
+            planet,
+            factory_doc.settings.surface.as_deref(),
+        );
         for key in all_sources.keys() {
             implicit.shift_remove(key);
         }
@@ -1435,7 +1439,11 @@ fn solve_document(
     // 星球自带资源免费可用（严格供给下也不例外），除非外部输入显式覆盖。
     let mut implicit_sources = Flow::default();
     if let Some(planet) = factory.settings.planet.as_deref() {
-        implicit_sources = crate::planet::planet_autoplaced_flows(prototype, planet);
+        implicit_sources = crate::planet::implicit_source_flows(
+            prototype,
+            planet,
+            factory.settings.surface.as_deref(),
+        );
         for key in sources.keys() {
             implicit_sources.shift_remove(key);
         }

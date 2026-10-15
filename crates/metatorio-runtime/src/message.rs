@@ -348,6 +348,7 @@ pub enum MechanicListAction {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum MechanicAction {
+    VirtualScience(ItemFuelMechanicAction),
     Recipe(RecipeMechanicAction),
     Mining(MiningMechanicAction),
     Spoil(SpoilMechanicAction),

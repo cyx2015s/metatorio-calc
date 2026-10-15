@@ -77,6 +77,8 @@ pub enum DualVar {
     Custom {
         name: String,
     },
+    /// 按科研包原型名区分的科研价值，不带品质。
+    VirtualScience(String),
 }
 
 impl DualVar {

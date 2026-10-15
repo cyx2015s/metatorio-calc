@@ -40,6 +40,9 @@ pub fn item_tags(store: &PrototypeStore, name: &str) -> Vec<String> {
     if !item.rocket_launch_products.is_empty() {
         tags.push("launchable".to_string());
     }
+    if metatorio_core::science::science_pack_names(store).contains(name) {
+        tags.push("science-pack".to_string());
+    }
     tags
 }
 

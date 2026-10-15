@@ -2112,6 +2112,7 @@ pub(crate) fn suggest_for_flow(store: &PrototypeStore, flow: DualVar) -> Vec<Sug
         });
     };
     match flow {
+        DualVar::VirtualScience(name) => push("virtual-science", &name, "producer"),
         DualVar::Item(item) => {
             let target = item.id.as_str();
             for record in store.group(PrototypeGroup::Recipe) {
@@ -2246,9 +2247,7 @@ pub(crate) fn burner_fuel_categories_of(
 /// 流体能量源是否"烧燃料"（burns_fluid）：为 true 时该机器的出力只取决于流体的
 /// 热值、与温度无关，前端据此**隐藏"燃料温度"输入框**（那个温度只在
 /// burns_fluid = false、即利用流体热时才有意义）。非流体能量源返回 None。
-pub(crate) fn fluid_burns_fluid_of(
-    source: &metatorio_data::types::EnergySource,
-) -> Option<bool> {
+pub(crate) fn fluid_burns_fluid_of(source: &metatorio_data::types::EnergySource) -> Option<bool> {
     match source {
         metatorio_data::types::EnergySource::Fluid(fluid) => {
             Some(fluid.burns_fluid.unwrap_or(false))
@@ -2763,6 +2762,7 @@ pub(crate) fn mechanic_quality_level(qualities: &[String], mechanic: &Mechanic) 
         Mechanic::Spoil(mechanic) => vec![&mechanic.item],
         Mechanic::Plant(mechanic) => vec![&mechanic.seed],
         Mechanic::ItemFuel(mechanic) => vec![&mechanic.item],
+        Mechanic::VirtualScience(mechanic) => vec![&mechanic.item],
         Mechanic::ItemLaunch(mechanic) => vec![&mechanic.item],
         Mechanic::Generator(mechanic) => vec![&mechanic.generator],
         Mechanic::Boiler(mechanic) => vec![&mechanic.boiler],
@@ -3809,8 +3809,11 @@ pub async fn implicit_sources(
         let Some(planet) = factory_doc.settings.planet.as_deref() else {
             return Vec::new();
         };
-        let mut implicit =
-            metatorio_runtime::planet::planet_autoplaced_flows(&snapshot.store, planet);
+        let mut implicit = metatorio_runtime::planet::implicit_source_flows(
+            &snapshot.store,
+            planet,
+            factory_doc.settings.surface.as_deref(),
+        );
         for input in &factory_doc.external_inputs {
             implicit.shift_remove(&input.flow);
         }

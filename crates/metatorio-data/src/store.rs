@@ -122,6 +122,7 @@ pub type ReverseOrderInfo = AIndexMap<String, (usize, usize, usize)>;
 /// 原型仓库：按 (PrototypeGroup, name) 索引的全部原型记录。
 #[derive(Debug, Clone, Default)]
 pub struct PrototypeStore {
+    science_packs: OnceLock<std::collections::BTreeSet<String>>,
     /// 按聚合组分类：组 → (name → 记录)。主键语义 (PrototypeGroup, name) 不变。
     pub groups: AIndexMap<PrototypeGroup, AIndexMap<String, PrototypeRecord>>,
     /// 惰性派生：每组的排序信息（大组 → 小组 → 条目，加载后不可变）。
@@ -219,6 +220,7 @@ impl PrototypeStore {
 
         if failures.is_empty() {
             Ok(Self {
+                science_packs: OnceLock::new(),
                 groups: records,
                 order_info: OnceLock::new(),
                 reverse_order_info: OnceLock::new(),
@@ -233,6 +235,31 @@ impl PrototypeStore {
                 total,
             })
         }
+    }
+
+    /// 实验室或科技声明使用的科研包原型名（缓存，不带品质）。
+    pub fn science_pack_names(&self) -> &std::collections::BTreeSet<String> {
+        self.science_packs.get_or_init(|| {
+            let mut names = std::collections::BTreeSet::new();
+            for record in self.group(PrototypeGroup::Entity) {
+                if let Some(lab) = record.component::<crate::LabComponent>() {
+                    names.extend(lab.inputs.iter().cloned());
+                }
+            }
+            for record in self.group(PrototypeGroup::Technology) {
+                if let Some(tech) = record.component::<TechnologyComponent>()
+                    && let Some(unit) = &tech.unit
+                {
+                    names.extend(
+                        unit.ingredients
+                            .iter()
+                            .map(|ingredient| ingredient.0.clone()),
+                    );
+                }
+            }
+            names.retain(|name| self.item(name).is_some());
+            names
+        })
     }
 
     /// 按名字查 Entity 组记录。

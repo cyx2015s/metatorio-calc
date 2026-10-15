@@ -31,6 +31,7 @@
     quality?: string;
   } {
     if (flow !== null && typeof flow === "object") {
+      if ("VirtualScience" in flow) return { type: "item", name: String(flow.VirtualScience), detailKind: "item" };
       if ("Item" in flow) {
         const item = (flow as { Item: { id: string; quality?: string } }).Item;
         return {
@@ -103,6 +104,8 @@
 
   const meta = $derived(flowMeta(flow));
   const displayName = $derived(
+    typeof flow === "object" && "VirtualScience" in flow
+      ? `虚拟科研（${runtime.localizedName("item", String(flow.VirtualScience))}）` :
     meta.type === "item" || meta.type === "fluid" || meta.type === "entity"
       ? runtime.localizedName(meta.type, meta.name)
       : meta.name,
@@ -126,8 +129,10 @@
     {size}
     detailKind={meta.detailKind}
     quality={meta.quality}
+    {flow}
   />
   <span class="mono">{qtyText(flow, amount, scale)}</span>
+  {#if typeof flow === "object" && "VirtualScience" in flow}<span>科研</span>{/if}
 </span>
 
 <style>

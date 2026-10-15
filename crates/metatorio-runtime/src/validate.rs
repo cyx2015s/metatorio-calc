@@ -226,6 +226,7 @@ fn validate_factory(store: &PrototypeStore, action: &FactoryAction) -> Result<()
 /// 所以它必须报错而不是放行。
 fn require_flow(store: &PrototypeStore, flow: &DualVar) -> Result<(), RuntimeError> {
     match flow {
+        DualVar::VirtualScience(name) => require_science_pack(store, name),
         DualVar::Item(item) => require_id(store, PrototypeGroup::Item, "物品", item),
         DualVar::Entity(entity) => require_id(store, PrototypeGroup::Entity, "实体", entity),
         DualVar::Fluid { name, .. } => require(store, PrototypeGroup::Fluid, "流体", name),
@@ -239,6 +240,17 @@ fn require_flow(store: &PrototypeStore, flow: &DualVar) -> Result<(), RuntimeErr
 
 fn validate_target(store: &PrototypeStore, target: &FlowTarget) -> Result<(), RuntimeError> {
     require_flow(store, &target.flow)
+}
+
+fn require_science_pack(store: &PrototypeStore, name: &str) -> Result<(), RuntimeError> {
+    require(store, PrototypeGroup::Item, "科研包", name)?;
+    if metatorio_core::science::science_pack_names(store).contains(name) {
+        Ok(())
+    } else {
+        Err(RuntimeError::InvalidValue(format!(
+            "物品 {name} 不是实验室或科技使用的科研包"
+        )))
+    }
 }
 
 fn validate_expression(
@@ -311,6 +323,12 @@ fn validate_mechanic(store: &PrototypeStore, action: &MechanicAction) -> Result<
         MechanicAction::ItemFuel(action) => match action {
             crate::message::ItemFuelMechanicAction::SetItem { item } => {
                 require_id(store, PrototypeGroup::Item, "物品", item)
+            }
+        },
+        MechanicAction::VirtualScience(action) => match action {
+            crate::message::ItemFuelMechanicAction::SetItem { item } => {
+                require_science_pack(store, &item.id)?;
+                require_quality(store, &item.quality)
             }
         },
         MechanicAction::ItemLaunch(action) => match action {

@@ -29,6 +29,7 @@
     { kind: "spoil", label: "变质" },
     { kind: "plant", label: "种植" },
     { kind: "item-fuel", label: "物品燃料" },
+    { kind: "virtual-science", label: "虚拟科研" },
     { kind: "item-launch", label: "火箭发射" },
     { kind: "generator", label: "发电机" },
     { kind: "boiler", label: "锅炉" },
@@ -83,6 +84,7 @@
         recipe: "配方",
         resource: "矿点",
         "item-fuel": "燃料",
+        "virtual-science": "虚拟科研",
         generator: "发电机",
       }[kind] ?? kind
     );
@@ -91,13 +93,13 @@
   function suggestionIcon(kind: string): { type: string; detailKind: string } {
     if (kind === "recipe") return { type: "recipe", detailKind: "recipe" };
     if (kind === "resource") return { type: "entity", detailKind: "resource" };
-    if (kind === "item-fuel") return { type: "item", detailKind: "item" };
+    if (kind === "item-fuel" || kind === "virtual-science") return { type: "item", detailKind: "item" };
     return { type: "entity", detailKind: "generator" };
   }
 
   function suggestionName(kind: string, name: string): string {
     const localizeKind =
-      kind === "recipe" ? "recipe" : kind === "resource" ? "resource" : kind === "item-fuel" ? "item" : "generator";
+      kind === "recipe" ? "recipe" : kind === "resource" ? "resource" : kind === "item-fuel" || kind === "virtual-science" ? "item" : "generator";
     return runtime.localizedName(localizeKind, name);
   }
 
@@ -383,6 +385,18 @@
   let targetExpressions = $derived(factory?.target_expressions ?? []);
   let externalInputs = $derived(factory?.external_inputs ?? []);
   let implicitInputs = $derived(runtime.implicitSourcesCache);
+  let implicitPromotions = $state<Record<string, boolean>>({});
+  async function promoteImplicitInput(flow: DualVar, penalty: number) {
+    const key = JSON.stringify(flow);
+    if (implicitPromotions[key]
+      || factory?.external_inputs.some((input) => JSON.stringify(input.flow) === key)) return;
+    implicitPromotions[key] = true;
+    try {
+      await runtime.addExternalInputFlow(flow, penalty);
+    } finally {
+      delete implicitPromotions[key];
+    }
+  }
   // 拖拽排序的本地镜像（文档变化时同步；拖拽期间由 dndzone 更新）
   let dragTargets = $state<import("$lib/runtime/types").FlowTarget[]>([]);
   let dragInputs = $state<import("$lib/runtime/types").ExternalInput[]>([]);
@@ -530,6 +544,7 @@
   let notSolved = $derived(solve != null && "not-solved" in solve.status);
 
   function flowIcon(flow: DualVar): { type: string; name: string } {
+    if (typeof flow === "object" && "VirtualScience" in flow) return { type: "item", name: String(flow.VirtualScience) };
     const item = itemOf(flow);
     if (item) return { type: "item", name: item.id };
     if (flow !== null && typeof flow === "object") {
@@ -601,6 +616,7 @@
 
   /** 流的显示名：物品/流体/实体优先本地化名，否则内部 id。 */
   function flowLabel(flow: DualVar): string {
+    if (typeof flow === "object" && "VirtualScience" in flow) return `虚拟科研（${runtime.localizedName("item", String(flow.VirtualScience))}）`;
     const icon = flowIcon(flow);
     if (icon.type === "item" || icon.type === "fluid" || icon.type === "entity") {
       return runtime.localizedName(icon.type, icon.name);
@@ -645,6 +661,7 @@
 
   /** 流 → 流选择器初始页签（编辑目标/外部输入时预选）。 */
   function flowTabOf(flow: DualVar): string {
+    if (typeof flow === "object" && "VirtualScience" in flow) return "virtual-science";
     const item = itemOf(flow);
     if (item) return "item";
     if (flow !== null && typeof flow === "object") {
@@ -661,6 +678,7 @@
 
   /** 流 → 初始选中条目/品质（物品/实体/流体类）。 */
   function flowInitialOf(flow: DualVar): { initialName?: string; initialQuality?: string } {
+    if (typeof flow === "object" && "VirtualScience" in flow) return { initialName: String(flow.VirtualScience) };
     const item = itemOf(flow);
     if (item) return { initialName: item.id, initialQuality: item.quality };
     if (flow !== null && typeof flow === "object") {
@@ -969,7 +987,7 @@
           // 按机制类型过滤物品：变质/种植/燃料/发射
           const mechKind = entry?.mechanic.type;
           const filter =
-            mechKind === "spoil"
+            mechKind === "virtual-science" ? ["science-pack"] : mechKind === "spoil"
               ? ["spoilable"]
               : mechKind === "plant"
                 ? ["plantable"]
@@ -979,7 +997,7 @@
                     ? ["launchable"]
                     : [];
           const title =
-            mechKind === "spoil"
+            mechKind === "virtual-science" ? "选择科研包" : mechKind === "spoil"
               ? "选择会变质的物品"
               : mechKind === "plant"
                 ? "选择种子"
@@ -1760,12 +1778,12 @@
           {/each}
         </div>
         {#if implicitInputs.length > 0}
-          <div class="implicit-hint">星球自带（隐式免费，外部输入可覆盖）</div>
+          <div class="implicit-hint">环境自带（隐式免费，编辑成本可转为手动输入）</div>
           <div class="rows">
             {#each implicitInputs as flow (dualVarLabel(flow))}
               {@const icon = flowIcon(flow)}
               {@const q = flowQuality(flow)}
-              <div class="row-item implicit" title="星球自动生成的可用资源，严格供给下也免费">
+              <div class="row-item implicit" title="当前地表或轨道的可用资源，严格供给下也免费">
                 <HoverIcon
                   type={icon.type}
                   name={icon.name}
@@ -1776,6 +1794,24 @@
                 />
                 <span class="row-name">{flowLabel(flow)}</span>
                 <span class="chip">隐式</span>
+                <input
+                  class="num"
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  value="0"
+                  aria-label={`外部成本：${flowLabel(flow)}`}
+                  title="编辑成本后保存为手动外部输入"
+                  disabled={implicitPromotions[JSON.stringify(flow)]}
+                  onchange={(event) => {
+                    const raw = event.currentTarget.value.trim();
+                    const value = Number(raw);
+                    if (raw === "" || !Number.isFinite(value) || value < 0) return;
+                    const internal = isEnergyFlow(flow) ? value / 1e6 : value * currentTimeFactor();
+                    promoteImplicitInput(flow, internal).catch(() => {});
+                  }}
+                />
+                <button class="btn ghost" title="以零成本保存为手动外部输入" disabled={implicitPromotions[JSON.stringify(flow)]} onclick={() => promoteImplicitInput(flow, 0).catch(() => {})}>设为手动</button>
               </div>
             {/each}
           </div>

@@ -334,6 +334,14 @@ pub enum Mechanic {
     FluidHeat(FluidHeatMechanic),
     TileExtract(TileExtractMechanic),
     TileDispose(TileDisposeMechanic),
+    VirtualScience(VirtualScienceMechanic),
+}
+
+/// 将带品质的科研包兑换为同名、不带品质的科研价值。
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct VirtualScienceMechanic {
+    pub item: IdWithQuality,
 }
 
 /// 地格抽取组件：在指定地格上放抽取机械，产出**该地格对应的流体**。

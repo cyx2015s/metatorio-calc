@@ -1826,6 +1826,14 @@ fn apply_mechanic_action(
             };
             apply_recipe_action(mechanic, action)
         }
+        MechanicAction::VirtualScience(action) => {
+            let Mechanic::VirtualScience(mechanic) = &mut entry.mechanic else {
+                return Err(kind_mismatch("virtual-science"));
+            };
+            match action {
+                ItemFuelMechanicAction::SetItem { item } => Ok(replace(&mut mechanic.item, item)),
+            }
+        }
         MechanicAction::Mining(action) => {
             let Mechanic::Mining(mechanic) = &mut entry.mechanic else {
                 return Err(kind_mismatch("mining"));

@@ -46,7 +46,7 @@
   let flowActive = $derived(
     !!flow &&
       typeof flow === "object" &&
-      ("ItemFuel" in flow || "FluidFuel" in flow || "FluidHeat" in flow || "Fluid" in flow),
+      ("ItemFuel" in flow || "FluidFuel" in flow || "FluidHeat" in flow || "Fluid" in flow || "VirtualScience" in flow),
   );
   let enabled = $derived(
     (!!detailKind && detailKind !== "flow" && detailKind !== "quality") || flowActive,

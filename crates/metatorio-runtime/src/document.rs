@@ -348,11 +348,12 @@ pub enum MechanicKind {
     FluidHeat,
     TileExtract,
     TileDispose,
+    VirtualScience,
     Unsupported,
 }
 
 impl MechanicKind {
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
         Self::Recipe,
         Self::Mining,
         Self::Spoil,
@@ -367,6 +368,7 @@ impl MechanicKind {
         Self::FluidHeat,
         Self::TileExtract,
         Self::TileDispose,
+        Self::VirtualScience,
     ];
 
     pub fn default_mechanic(self) -> Option<Mechanic> {
@@ -385,6 +387,7 @@ impl MechanicKind {
             Self::FluidHeat => Mechanic::FluidHeat(Default::default()),
             Self::TileExtract => Mechanic::TileExtract(Default::default()),
             Self::TileDispose => Mechanic::TileDispose(Default::default()),
+            Self::VirtualScience => Mechanic::VirtualScience(Default::default()),
             Self::Unsupported => return None,
         })
     }
@@ -405,6 +408,7 @@ impl MechanicKind {
             Mechanic::FluidHeat(_) => Self::FluidHeat,
             Mechanic::TileExtract(_) => Self::TileExtract,
             Mechanic::TileDispose(_) => Self::TileDispose,
+            Mechanic::VirtualScience(_) => Self::VirtualScience,
             _ => Self::Unsupported,
         }
     }

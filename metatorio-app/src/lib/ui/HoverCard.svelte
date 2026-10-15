@@ -65,6 +65,10 @@
   let flowHead = $derived(buildFlowHead(flow));
   function buildFlowHead(flow: import("$lib/runtime/types").DualVar | undefined) {
     if (!flow || typeof flow !== "object") return null;
+    if ("VirtualScience" in flow) {
+      const name = String(flow.VirtualScience);
+      return { title: `虚拟科研（${runtime.localizedName("item", name)}）`, iconName: name, type: "item", typeLabel: "科研价值" };
+    }
     if ("ItemFuel" in flow || "ItemFuelSupply" in flow) {
       return { title: "物品燃料", iconName: "ItemFuel", type: "flow", typeLabel: "燃料" };
     }
