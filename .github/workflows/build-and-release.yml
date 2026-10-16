@@ -47,12 +47,17 @@ jobs:
             headless_target: headless-windows-x86_64
 
     runs-on: ${{ matrix.platform }}
+    env:
+      RUSTUP_TOOLCHAIN: nightly
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
+
+      - name: Install Rust nightly
+        run: rustup toolchain install nightly --profile minimal
 
       # Tauri v2 在 Linux 上需要这几个系统库。
       - name: Install Linux dependencies

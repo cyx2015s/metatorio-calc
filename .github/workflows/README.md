@@ -5,6 +5,8 @@
 用 **Tauri** 编译并发布桌面应用（不再是旧的 egui 版），支持 **Linux（x86_64 → AppImage）** 和 **Windows（x86_64 → NSIS setup.exe）**。
 macOS 因签名需付费证书暂不构建。
 
+Linux 和 Windows 的 GUI、headless 构建统一使用 **Rust nightly**。workflow 显式安装 nightly，并通过 job 级的 `RUSTUP_TOOLCHAIN=nightly` 让 Tauri action 和 Cargo 使用同一工具链。
+
 ### 可选原生构建依赖（HiGHS）
 
 默认构建使用纯 Rust `rust-certified`，不依赖 HiGHS。启用 `highs` 或
