@@ -1363,6 +1363,8 @@ fn message_project(message: &AppMessage) -> Option<ProjectId> {
 /// 若是则需失效 `accessibilities` 缓存；否则保留（可达性计算耗时，不每次重算）。
 fn message_affects_accessibility(message: &AppMessage) -> bool {
     match message {
+        // 撤销/重做也会恢复里程碑、上下文和无视可达性设置。
+        AppMessage::History(_) => true,
         AppMessage::Project { action, .. } => matches!(
             action,
             ProjectAction::SetAllAccessible { .. }

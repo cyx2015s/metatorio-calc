@@ -24,7 +24,7 @@ use metatorio_data::{
     AssemblingMachineComponent, AsteroidChunkComponent, BoilerComponent, EnemySpawnerComponent,
     EntityComponent, EntityWithHealthComponent, ItemComponent, PlantComponent,
     PrototypeBaseComponent, RecipeComponent, SpaceConnectionComponent, SpaceLocationComponent,
-    TechnologyComponent,
+    TechnologyComponent, TileComponent,
 };
 
 use crate::dual_var::DualVar;
@@ -169,13 +169,18 @@ pub struct GraphData {
     /// 变质产物名 → 可变质成它的物品名（`item.spoil_result`，隐含
     /// "spoil.<item>" 配方，对应 yafc 的 getSpoilRecipe）。
     spoil_sources: HashMap<String, Vec<String>>,
+    /// 燃烧产物 → 可燃烧成它的燃料物品（ItemFuel 机制）。
+    burnt_sources: HashMap<String, Vec<String>>,
+    /// 抽取流体 → 存在对应可达地格的星球/轨道地点。
+    /// 与资源物品分表，避免同名物品误解锁。
+    tile_fluid_sources: HashMap<String, Vec<Accessible>>,
     /// 实体名 → 放置后成为该实体的物品名（`item.place_result`）。
     items_by_place_result: HashMap<String, Vec<String>>,
     /// 科技名 → 科技依赖的物品。
     tech_units: HashMap<String, Vec<String>>,
     /// 配方/品质/空间名 → 解锁它的科技名（UnlockRecipe/UnlockQuality/UnlockSpaceLocation）。
     techs_by_unlock: HashMap<String, Vec<String>>,
-    /// 资源实体/星球流体名 → 生成它的星球列表（planet_autoplaced_flows +
+    /// 资源实体/物品名 → 生成它的星球列表（autoplace +
     /// seed_available_on_planet）。星球解锁（planet-discovery-<p> 科技可达，
     /// nauvis 恒解锁）后该资源可自由移动到任何星球 → 根。
     resource_planets: HashMap<String, Vec<String>>,
@@ -201,9 +206,8 @@ pub struct GraphData {
     fixed_recipes: HashMap<String, Vec<String>>,
 }
 
-/// 资源实体/星球流体名 → 生成它的星球列表。
+/// 资源实体/物品名 → 生成它的星球列表。
 /// 收集**所有**在该星球自动放置的可采集实体（不限 resource 类）：
-/// - 星球流体（带流体 tile）；
 /// - 可挖掘实体（矿藏/岩石/卵筏等）→ 实体本身 + minable 产物；
 /// - 击杀掉落（loot）实体 → 实体本身 + loot 产物；
 /// - 虫巢（unit-spawner）→ 捕获产物（captured_spawner_entity 产卵器）；
@@ -215,12 +219,6 @@ fn build_resource_planets(store: &PrototypeStore) -> HashMap<String, Vec<String>
     for planet_record in store.group(PrototypeGroup::Planet) {
         let planet = &planet_record.name;
         let map_gen = crate::planet::planet_map_gen(store, planet);
-        // 星球流体（planet_autoplaced_flows 的流体部分；矿藏实体由下方统一处理）
-        for (flow, _) in crate::planet::planet_autoplaced_flows(store, planet) {
-            if let Some(Accessible::Fluid(name)) = Accessible::from_flow(&flow) {
-                map.entry(name).or_default().push(planet.clone());
-            }
-        }
         // 所有自动放置实体（autoplace 命中该星球）的可采集内容
         if let Some(map_gen) = &map_gen {
             let entity_settings: std::collections::HashSet<String> = map_gen
@@ -319,6 +317,8 @@ pub fn build_graph(store: &PrototypeStore) -> GraphData {
     let mut recipes_by_product: HashMap<String, Vec<String>> = HashMap::new();
     let mut resources_by_product: HashMap<String, Vec<String>> = HashMap::new();
     let mut spoil_sources: HashMap<String, Vec<String>> = HashMap::new();
+    let mut burnt_sources: HashMap<String, Vec<String>> = HashMap::new();
+    let mut tile_fluid_sources: HashMap<String, Vec<Accessible>> = HashMap::new();
     let mut items_by_place_result: HashMap<String, Vec<String>> = HashMap::new();
     let mut techs_by_unlock: HashMap<String, Vec<String>> = HashMap::new();
     let mut tech_units: HashMap<String, Vec<String>> = HashMap::new();
@@ -328,6 +328,12 @@ pub fn build_graph(store: &PrototypeStore) -> GraphData {
 
     for record in store.group(PrototypeGroup::Item) {
         if let Some(item) = record.component::<ItemComponent>() {
+            if let Some(result) = fuel_burnt_result(item) {
+                burnt_sources
+                    .entry(result.to_owned())
+                    .or_default()
+                    .push(record.name.clone());
+            }
             if !item.place_result.is_empty() {
                 items_by_place_result
                     .entry(item.place_result.clone())
@@ -348,6 +354,36 @@ pub fn build_graph(store: &PrototypeStore) -> GraphData {
                     .entry(product.name.clone())
                     .or_default()
                     .push(record.name.clone());
+            }
+        }
+    }
+    // 地格流体已经从隐式外部输入中移到 TileExtract；可达性直接读取地格，
+    // 与机制自动枚举复用初始生成 + 递归铺设闭包，不再依赖隐式输入的流形状。
+    let platform_tiles =
+        crate::planet::surface_available_tiles(store, None, Some("space-platform"));
+    for group in [PrototypeGroup::Planet, PrototypeGroup::SpaceLocation] {
+        for location in store.group(group) {
+            let mut tiles = platform_tiles.clone();
+            if group == PrototypeGroup::Planet {
+                tiles.extend(crate::planet::surface_available_tiles(
+                    store,
+                    Some(&location.name),
+                    None,
+                ));
+            }
+            let source = space_node(store, &location.name);
+            for tile in tiles {
+                if let Some(fluid) = store
+                    .get(PrototypeGroup::Tile, &tile)
+                    .and_then(|record| record.component::<TileComponent>())
+                    .and_then(|tile| tile.fluid.as_ref())
+                    .filter(|name| !name.is_empty())
+                {
+                    let locations = tile_fluid_sources.entry(fluid.clone()).or_default();
+                    if !locations.contains(&source) {
+                        locations.push(source.clone());
+                    }
+                }
             }
         }
     }
@@ -577,6 +613,8 @@ pub fn build_graph(store: &PrototypeStore) -> GraphData {
         recipes_by_product,
         resources_by_product,
         spoil_sources,
+        burnt_sources,
+        tile_fluid_sources,
         items_by_place_result,
         tech_units,
         techs_by_unlock,
@@ -588,6 +626,14 @@ pub fn build_graph(store: &PrototypeStore) -> GraphData {
         boiler_outputs,
         fixed_recipes,
     }
+}
+
+/// 与 ItemFuel 展开一致：无热值或无燃料类别的物品不会产生燃烧产物。
+fn fuel_burnt_result(item: &ItemComponent) -> Option<&str> {
+    (item.fuel_value().amount > 0.0
+        && !item.fuel_categories.is_empty()
+        && !item.burnt_result.is_empty())
+    .then_some(item.burnt_result.as_str())
 }
 
 /// 空间地点名 → 可达性节点：星球（planet，planet 是 space-location 子类）
@@ -841,6 +887,13 @@ fn requirements(store: &PrototypeStore, graph: &GraphData, node: &Accessible) ->
                         .map(|source| Requirement::Node(Accessible::Item(source.clone()))),
                 );
             }
+            if let Some(fuels) = graph.burnt_sources.get(name) {
+                any.extend(
+                    fuels
+                        .iter()
+                        .map(|fuel| Requirement::Node(Accessible::Item(fuel.clone()))),
+                );
+            }
             // 星球资源（可挖掘/loot/捕获产物）：星球解锁即可获取
             if let Some(planets) = graph.resource_planets.get(name) {
                 any.extend(
@@ -876,12 +929,12 @@ fn requirements(store: &PrototypeStore, graph: &GraphData, node: &Accessible) ->
                         .map(|entity| Requirement::Node(Accessible::Entity(entity.clone()))),
                 );
             }
-            // 星球流体（如某星球生成的水/岩浆）：星球解锁即可获取
-            if let Some(planets) = graph.resource_planets.get(name) {
+            // 初始生成或递归铺设可达的地格流体：对应星球/轨道地点解锁即可获取。
+            if let Some(locations) = graph.tile_fluid_sources.get(name) {
                 any.extend(
-                    planets
+                    locations
                         .iter()
-                        .map(|planet| Requirement::Node(Accessible::Planet(planet.clone()))),
+                        .map(|location| Requirement::Node(location.clone())),
                 );
             }
             // 锅炉产流体：能产出该流体的锅炉实体可达 + 其输入流体（若限定）可达。
@@ -1046,6 +1099,24 @@ fn collect_nodes(store: &PrototypeStore) -> Vec<Accessible> {
         .group(PrototypeGroup::Fluid)
         .map(|record| record.name.clone())
         .collect();
+    // 非配方机制的产物也必须入图（含关注类型之外、仅通过名称引用的物品）。
+    for record in store.group(PrototypeGroup::Item) {
+        if let Some(result) = record
+            .component::<ItemComponent>()
+            .and_then(fuel_burnt_result)
+        {
+            items.insert(result.to_owned());
+        }
+    }
+    for record in store.group(PrototypeGroup::Tile) {
+        if let Some(fluid) = record
+            .component::<TileComponent>()
+            .and_then(|tile| tile.fluid.as_ref())
+            && !fluid.is_empty()
+        {
+            fluids.insert(fluid.clone());
+        }
+    }
     for record in store.group(PrototypeGroup::Recipe) {
         let Some(recipe) = record.component::<RecipeComponent>() else {
             continue;
