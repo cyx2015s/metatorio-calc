@@ -1,5 +1,15 @@
 # 图标渲染：为什么自己做、怎么做、怎么验证
 
+## 当前实现补充（2026-10-16）
+
+地格选择器、抽取机制卡片与悬浮详情统一请求 `tile/<name>.png`；科技、星球、地表等详情也使用各自的图标类型。虚拟流 `FluidFuel` 使用已有的 `fluid-fuel.png`。
+
+地格优先使用显式 `icon/icons`；缺省时使用 `variants.material_background`，无材质背景时从 `main` 的最小地格贴图取首格。这条 `main` 路径用于补齐水、岩浆、平台等地格，是界面预览策略。读取图集 `x/y` 与 `scale`，裁出 32 游戏像素的一格，应用地格 `tint` 后缩放为 64×64；`map_color` 不作为地形染色。此实现解决缺图，尚不宣称与官方导出逐像素一致。下文历史比对数字不包含本次新增的地格图标。
+
+缓存布局版本已升级到 3。部分缺文件、解码失败或配方推导失败会写 `.incomplete`，重新导入同一上下文时保留可用图标并重试；补齐后清除该标记。前端不缓存请求失败或空结果，清空缓存后的旧请求也不能写回新缓存；重新导入同一上下文会通知已挂载图标刷新，图片解码失败则回到占位块。
+
+前端回归命令：`pnpm test:icons`（Node.js 22.18+ 或 24+）。Rust 测试同时覆盖地形图集裁切、显式图标优先、真实 dump 字段保留，以及缺文件/损坏文件修复后的缓存补齐。
+
 ## 背景
 
 上下文（游戏数据）的导出流程原本是：调用 `factorio.exe --dump-data`（原型数据）、
@@ -210,7 +220,7 @@ cargo run -p metatorio-icons --example compare -- \
     里所有带 `icon` 的 description 都过了一遍，只有这两处写了「否则用……」）：
     - **配方**：没有 `icons`/`icon` 时用 `main_product` 或**唯一产物**的图标；「多产物且没有
       `main_product`」或「没有产物」时官方要求**必须显式给 `icon`**，也就是没有推导；
-    - **地块**：没有 `icons`/`icon` 时用 `variants.material_background` 当图标（**还没实现**）。
+    - **地块**：没有 `icons`/`icon` 时用 `variants.material_background` 当图标；当前也支持从 `main` 取首格作为预览（见上方实现补充）。
     `item → place_result` 这条**官方文档里没有**：`ItemPrototype::icon` 写的是
     "Only loaded, and mandatory if `icons` is not defined"，实测两个上下文里也**没有任何
     物品缺图标定义**（vanilla + py 的「无图标定义」清单里一个 item 都没有），所以不实现。
@@ -303,14 +313,7 @@ cargo run -p metatorio-icons --example compare -- \
 1. **实现画布的并集包围盒规则**（事实 3 最后一条）：画布 = 所有层绘制矩形（含 `shift`）的
    并集、取偶数。这一条能同时修掉 `space-connection`（66×66）与 py 那批 66×68 的配方
    （合计 py 有 3926 张落在 50~80% 档，多数是这类画布错位）。
-2. 补上**地块**的推导：官方文档写明「没给 `icon`/`icons` 就用 `variants.material_background`」，
-   vanilla 150 张、py 62 张（现在全是「推导也画不出」）。需要 codegen 先放行
-   `TilePrototype::variants.material_background`（`count`/`line_length`/`picture`/`scale`/`x`/`y`）
-   与 `map_color`：实测色块地块（`black-/blue-/red-refined-concrete`）的官方图标 ≈ 素材
-   ×`map_color`（`blue` 的 `map_color = {r:0.155, g:0.54, b:0.898, a:0.5}`，官方图标均值
-   `(34,66,93)` 对素材均值 `(95,93,88)`），但**确切的取色/帧/缩放口径还没定下来**——
-   在没定下来之前不画，免得画出「颜色不对」的图标冒充正确。
-   （另外：应用的目录索引里根本没有 `tile` 这一类，所以这块不影响界面。）
+2. 地格生成与目录索引已补齐（见上方实现补充）；后续可继续与官方导出定标取帧、裁切和颜色口径。
 3. 修**数据层的 Sprite 图标**：`airborne-pollutant` / `burner-usage` 的 `icon` 是 `Sprite`
    而不是文件名，现在被当成「没有图标定义」（vanilla 3 张、py 1 张；同样不在目录索引里）。
 4. 查 py 那 97 张 `<50%` 的：`*-pyvoid` 已经查清（底层 `icon_size = 1`、官方就是 1×1，

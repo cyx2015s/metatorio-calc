@@ -990,7 +990,8 @@ pub(crate) enum IconSource {
 /// 图标缓存布局版本：口径变化时 +1，让旧缓存重新渲染（见 `register_context_files`）。
 /// 1 → 2：从「按原型 `type` 建目录」改成「按归类建目录」（`item/`、`entity/`、
 /// `space-location/`），否则物品子类型与实体的图标前端全都取不到。
-pub(crate) const ICON_LAYOUT_VERSION: u32 = 2;
+/// 3：补齐地格图标，重建历史缺图缓存。
+pub(crate) const ICON_LAYOUT_VERSION: u32 = 3;
 
 /// 图标缓存目录里的布局版本标记（`.layout`）。
 pub(crate) fn read_layout_marker(icon_root: &Path) -> Option<u32> {
@@ -1082,10 +1083,11 @@ pub(crate) fn register_context_files(
         && read_layout_marker(&icon_root) != Some(ICON_LAYOUT_VERSION);
     if layout_stale {
         eprintln!("图标缓存布局版本不符，重新渲染：{}", icon_root.display());
-        let _ = std::fs::remove_dir_all(&icon_root);
+        std::fs::remove_dir_all(&icon_root)
+            .map_err(|error| format!("清理旧图标缓存失败: {error}"))?;
     }
     let mut needs_icons = false;
-    if !icon_root.is_dir() {
+    if !icon_root.is_dir() || icon_root.join(".incomplete").is_file() {
         needs_icons = true;
         match icon {
             IconSource::None => {}
@@ -1137,6 +1139,21 @@ pub(crate) fn render_icons_into(
         parsed.skipped.len(),
         icon_root,
     )?;
+    // 缺素材/解码失败是可恢复的：保留已经生成的图标，下次重新导入时重试。
+    // 无定义和不支持的 GUI 形态不参与此标记，避免永久不支持的原型反复重建。
+    let incomplete = icon_root.join(".incomplete");
+    if icons.missing_source
+        + icons.decode_failed
+        + icons.derived_missing
+        + utility.missing_source
+        + utility.decode_failed
+        > 0
+    {
+        std::fs::create_dir_all(icon_root).map_err(|error| error.to_string())?;
+        std::fs::write(&incomplete, b"retry\n").map_err(|error| error.to_string())?;
+    } else if incomplete.exists() {
+        std::fs::remove_file(&incomplete).map_err(|error| error.to_string())?;
+    }
     // 记下布局版本：下次布局口径变了就能认出这份缓存是旧的（见 `register_context_files`）。
     if icons.written > 0 || utility.written > 0 {
         write_layout_marker(icon_root)?;
@@ -1201,6 +1218,9 @@ pub(crate) async fn register_context_and_activate(
                     utility.decode_failed,
                     utility.unsupported
                 );
+                for sample in report.samples.iter().chain(&utility.samples) {
+                    eprintln!("图标未生成: {sample}");
+                }
                 if report.written == 0 && utility.written == 0 {
                     // 一张都没渲染出来：别留一个空目录冒充「有图标」。
                     let _ = std::fs::remove_dir_all(&icon_root);
@@ -2408,7 +2428,7 @@ pub(crate) fn catalog_index_from_store(
             localized_name: localized_name(locale, "tile", &record.name),
             group: String::new(),
             subgroup: String::new(),
-            icon_type: "entity".to_string(),
+            icon_type: "tile".to_string(),
             module_slots: None,
             categories: Vec::new(),
             fuel_categories: Vec::new(),
@@ -4445,6 +4465,79 @@ mod tests {
         assert!(needs_icons, "布局版本不符必须重新渲染");
         assert!(!icon_root.join("module").exists(), "旧布局的目录要被丢掉");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn incomplete_icon_cache_retries_and_tile_catalog_reads_generated_pngs() {
+        let root =
+            std::env::temp_dir().join(format!("metatorio-icon-retry-{}", std::process::id()));
+        let game = root.join("game");
+        let base = game.join("data/base");
+        std::fs::create_dir_all(&base).unwrap();
+        let png = metatorio_icons::Rgba8::from_pixels(64, 64, vec![255; 64 * 64 * 4])
+            .encode_png()
+            .unwrap();
+        std::fs::write(base.join("good.png"), &png).unwrap();
+        let dump = serde_json::json!({
+            "item": {"good": {"icon": "__base__/good.png"}, "recover": {"icon": "__base__/recover.png"}},
+            "tile": {"water": {"variants": {"main": [{"picture": "__base__/good.png", "size": 1, "scale": 0.5}]}}}
+        });
+        let raw = serde_json::to_vec(&dump).unwrap();
+        let state = AppState::default();
+        state.contexts.lock().unwrap().dir = root.join("contexts");
+        let source = IconSource::Render {
+            game_root: game.clone(),
+            mod_dir: None,
+        };
+        let register = || {
+            register_context_files(
+                &state,
+                "retry".into(),
+                None,
+                Vec::new(),
+                &raw,
+                None,
+                &source,
+            )
+            .unwrap()
+        };
+        let (id, needed) = register();
+        assert!(needed);
+        let icons = state.contexts.lock().unwrap().icon_root(&id);
+        let (report, _) = render_icons_into(&raw, &icons, &game, None).unwrap();
+        assert_eq!(report.missing_source, 1);
+        assert!(icons.join(".incomplete").is_file());
+        assert_eq!(read_layout_marker(&icons), Some(ICON_LAYOUT_VERSION));
+        assert!(register().1, "部分缺图必须重试");
+        assert!(icons.join("item/good.png").is_file(), "重试前保留可用图标");
+        let store = PrototypeStore::load(&dump).unwrap();
+        let catalog = catalog_index_from_store(&store, &HashMap::new());
+        let tile = catalog
+            .iter()
+            .find(|entry| entry.kind == "tile" && entry.name == "water")
+            .unwrap();
+        assert_eq!(tile.icon_type, "tile");
+        assert!(
+            icon(
+                &state,
+                tile.icon_type.clone(),
+                tile.name.clone(),
+                id.clone()
+            )
+            .is_some()
+        );
+        // 缺文件变成损坏文件仍需重试；之后修复，不改变 dump/id 也能补齐。
+        std::fs::write(base.join("recover.png"), b"bad png").unwrap();
+        let (report, _) = render_icons_into(&raw, &icons, &game, None).unwrap();
+        assert_eq!(report.decode_failed, 1);
+        assert!(register().1);
+        std::fs::write(base.join("recover.png"), &png).unwrap();
+        let (report, _) = render_icons_into(&raw, &icons, &game, None).unwrap();
+        assert_eq!(report.missing_source + report.decode_failed, 0);
+        assert!(!icons.join(".incomplete").exists());
+        assert!(!register().1, "补齐后应复用完整缓存");
+        assert!(icon(&state, "item".into(), "recover".into(), id).is_some());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// 导出时启用的 mod：只收 `mod-list.json` 里 enabled 的（去掉 `base`），

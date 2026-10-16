@@ -16,6 +16,17 @@ use serde_json::Value;
 
 use crate::{FluidBox, SpentFluidSpecification};
 
+/// TileMainPictures 继承的贴图布局字段在 dump 中是平铺的。
+/// MaterialTextureParameters 与 TileSpriteLayout 的布局字段同形。
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct TileMainPictures {
+    #[serde(flatten)]
+    pub layout: crate::MaterialTextureParameters,
+    #[serde(deserialize_with = "crate::lenient::de_int")]
+    pub size: u32,
+}
+
 // ── 能量 ────────────────────────────────────────────────────────────
 
 /// 能量数量，单位为焦耳（J）；功率则为焦耳每刻（J/tick）。

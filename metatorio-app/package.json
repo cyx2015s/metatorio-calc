@@ -1,9 +1,10 @@
 {
   "name": "metatorio-app",
-  "version": "1.5.30",
+  "version": "1.5.31",
   "description": "",
   "type": "module",
   "scripts": {
+    "test:icons": "node --test tests/icons.test.mjs",
     "dev": "vite dev",
     "build": "vite build",
     "preview": "vite preview",

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { iconTypeForKind } from "./icon-types";
   // 单个机制卡片：主选择器（配方/资源/物品/设备）为图标按钮，
   // 机器为图标按钮，插件配置在展开区（ModuleEditor）。
   import { runtime } from "$lib/runtime/store.svelte.ts";
@@ -118,17 +119,7 @@
       entry.mechanic.fluid ??
       "",
   );
-  let primaryIcon = $derived(
-    kind === "recipe"
-      ? "recipe"
-      : kind === "mining" || kind === "generator" || kind === "boiler" || kind === "reactor" || kind === "solar"
-        ? "entity"
-        : kind === "fluid-fuel" || kind === "fluid-heat"
-          ? "fluid"
-          : kind === "tile-extract"
-            ? "entity"
-            : "item",
-  );
+  let primaryIcon = $derived(iconTypeForKind(primaryKind()));
   let machineName = $derived(entry.mechanic.machine?.id ?? "");
   let fluidName = $derived(entry.mechanic.fluid ?? "");
 

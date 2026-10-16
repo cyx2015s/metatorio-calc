@@ -4,14 +4,7 @@
   // 都没有时回退到首字母占位块。
   import { runtime } from "$lib/runtime/store.svelte.ts";
 
-  const synthetic: Record<string, string> = {
-    Electricity: "/icons/electricity.png",
-    Heat: "/icons/heat.png",
-    FluidHeat: "/icons/fluid-heat.png",
-    ItemFuel: "/icons/item-fuel.png",
-    RocketSlotCapacity: "/icons/rocket-capacity.png",
-    RocketWeightCapacity: "/icons/rocket-capacity.png",
-  };
+  import { syntheticIconUrls } from "./icon-types";
 
   let {
     type = "item",
@@ -42,16 +35,16 @@
       lastKey = key;
       url = null;
     }
-    const syntheticUrl = synthetic[name];
+    const syntheticUrl = syntheticIconUrls[name];
     if (syntheticUrl) {
       url = syntheticUrl;
       return;
     }
     if (!type || !name) return;
     let alive = true;
-    runtime.getIcon(type, name).then((iconUrl) => {
-      if (alive) url = iconUrl;
-    });
+    runtime.getIcon(type, name)
+      .then((iconUrl) => { if (alive) url = iconUrl; })
+      .catch(() => { if (alive) url = null; });
     return () => {
       alive = false;
     };
@@ -63,6 +56,7 @@
     class="icon"
     class:bare={bare || type === "quality"}
     src={url}
+    onerror={() => { url = null; }}
     alt={name}
     title={title || undefined}
     style={`width:${size}px;height:${size}px`}

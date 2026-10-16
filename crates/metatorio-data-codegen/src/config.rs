@@ -357,7 +357,7 @@ pub const DEFAULT_IGNORED_TYPES: &[&str] = &[
     // "MapPosition",
     // "MapTick",
     "MaterialAmountType",
-    "MaterialTextureParameters",
+    // "MaterialTextureParameters", // 地格图标的材质背景
     "MathExpression",
     // "MaxCargoBayUnloadingDistanceModifier",
     // "MaxFailedAttemptsPerTickPerConstructionQueueModifier",
@@ -605,17 +605,17 @@ pub const DEFAULT_IGNORED_TYPES: &[&str] = &[
     // "TileID",
     "TileIDRestriction",
     "TileLightPictures",
-    "TileMainPictures",
+    // "TileMainPictures",
     "TilePosition",
     "TileRenderLayer",
-    "TileSpriteLayout",
+    // "TileSpriteLayout",
     "TileSpriteLayoutVariant",
     "TileTransitionSpritesheetLayout",
     "TileTransitionVariantLayout",
     "TileTransitions",
     "TileTransitionsBetweenTransitions",
     "TileTransitionsToTiles",
-    "TileTransitionsVariants",
+    // "TileTransitionsVariants", // 保留 main / material_background，跳过过渡装饰
     "TimeElapsedTipTrigger",
     "TimeSinceLastTipActivationTipTrigger",
     "TintProcessionBezierControlPoint",
@@ -1053,6 +1053,8 @@ impl Default for Config {
                 .map(|s| s.to_string())
                 .collect(),
             custom_type_map: vec![
+                // 此嵌套类型继承 TileSpriteLayout；生成器的嵌套 struct 不展开继承。
+                map_type!("TileMainPictures", "crate::types::TileMainPictures"),
                 // 能量字符串（"5MJ"、"300kW"）→ 预定义解析类型（自定义 Deserialize）
                 map_type!("Energy", "crate::types::EnergyAmount"),
                 map_type!("Color", "crate::types::Color"),
@@ -1245,7 +1247,6 @@ pub const DEFAULT_FIELD_RULES: &[FieldRule] = &[
     skip!("SurfacePropertyPrototype", "localised_unit_key"),
     skip!("TilePrototype", "effect_color"),
     skip!("TilePrototype", "effect_is_opaque"),
-    skip!("TilePrototype", "tint"),
 ];
 
 impl Config {

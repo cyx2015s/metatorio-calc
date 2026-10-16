@@ -1,3 +1,4 @@
+import { IconCache } from "./icon-cache";
 // Svelte 5 rune-based store bridging the frontend to the Tauri runtime.
 //
 // `runtime` is a singleton: the UI reads its $state fields reactively and
@@ -152,7 +153,7 @@ class RuntimeStore {
   contextError = $state<string | null>(null);
 
   /** 图标缓存：`type/name` → blob URL（或 null 表示无图标）。 */
-  private icons = new Map<string, Promise<string | null>>();
+  private icons = new IconCache(loadIcon);
   /** 图标缓存失效版本：缓存清空/目录加载后自增，驱动 <Icon> 组件重新拉取，
    *  修复"总流平衡等面板偶发首字母占位"（瞬时 null 被缓存后不再刷新）。 */
   iconRevision = $state(0);
@@ -171,8 +172,6 @@ class RuntimeStore {
     string,
     { hash: string; flows: { flow: import("./types").DualVar; amount: number }[] }
   >();
-  /** 图标对象 URL 列表，用于卸载时释放。 */
-  private iconUrls: string[] = [];
 
   /** 当前上下文的全量目录索引（前端本地筛选）。 */
   catalogIndex = $state<CatalogIndex | null>(null);
@@ -201,6 +200,7 @@ class RuntimeStore {
       this.solving = null;
     });
     onContextsChanged(() => {
+      this.clearIconCache();
       this.contextBusy = false;
       this.contextError = null;
       this.refreshContexts().catch(() => {});
@@ -447,6 +447,7 @@ class RuntimeStore {
   async loadContextFromDump(path: string): Promise<void> {
     await this.runContext(async () => {
       await loadDump(path);
+      this.clearIconCache();
       await this.refreshContexts();
     });
   }
@@ -454,6 +455,7 @@ class RuntimeStore {
   async loadContextFromExecutable(exe: string, modDir?: string | null): Promise<void> {
     await this.runContext(async () => {
       await loadGameContext(exe, modDir);
+      this.clearIconCache();
       await this.refreshContexts();
     });
   }
@@ -593,34 +595,10 @@ class RuntimeStore {
 
   /** 取物品图标（blob URL）；无图标时返回 null。带缓存（按上下文 id 区分）。 */
   getIcon(type: string, name: string): Promise<string | null> {
-    // 上下文已项目级绑定：同一 type/name 在不同上下文可能指向不同 mod 图标。
-    const ctxId = this.effectiveContextId;
-    // 上下文未就绪时直接返回 null 且不缓存，避免把空上下文的"无图标"结果
-    // 污染缓存，导致上下文就绪后仍停在占位图。
-    if (!ctxId) return Promise.resolve(null);
-    const key = `${ctxId}/${type}/${name}`;
-    let entry = this.icons.get(key);
-    if (!entry) {
-      entry = loadIcon(type, name, ctxId).then((bytes) => {
-        if (!bytes || bytes.length === 0) {
-          // 不要缓存瞬时 null：下一次调用仍会重试，避免图标短暂缺失后
-          // 变成"永久占位"。
-          this.icons.delete(key);
-          return null;
-        }
-        const blob = new Blob([new Uint8Array(bytes)], { type: "image/png" });
-        const url = URL.createObjectURL(blob);
-        this.iconUrls.push(url);
-        return url;
-      });
-      this.icons.set(key, entry);
-    }
-    return entry;
+    return this.icons.get(this.effectiveContextId, type, name);
   }
 
   private clearIconCache(): void {
-    for (const url of this.iconUrls) URL.revokeObjectURL(url);
-    this.iconUrls = [];
     this.icons.clear();
     this.iconRevision++;
   }

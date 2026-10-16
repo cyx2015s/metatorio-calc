@@ -18,7 +18,7 @@
 //! **没有图标定义时的推导**：官方只对两种原型写明了推导规则（官方 schema 全文只有这两处，
 //! 见 `crates/metatorio-data/schema/prototype-api.json`）：
 //! - 配方：用 `main_product` 或**唯一产物**的图标（[`derived_product`]）；
-//! - 地块：用 `variants.material_background`（**还没实现**）。
+//! - 地块：用 `variants.material_background`，无材质背景时取 `main` 的首个地格贴图。
 //!
 //! 其余类型官方写的是「图标必填」或压根没有图标字段，没有推导可做；item → `place_result`
 //! 这条**官方文档里没有**（`ItemPrototype::icon` 是 "Only loaded, and mandatory if `icons`
@@ -26,7 +26,7 @@
 
 use metatorio_data::store::{PrototypeGroup, PrototypeRecord, PrototypeStore};
 use metatorio_data::types::Product;
-use metatorio_data::{IconComponent, IconData, RecipeComponent};
+use metatorio_data::{IconComponent, IconData, RecipeComponent, TileComponent};
 
 use std::path::Path;
 
@@ -314,6 +314,9 @@ pub fn render_record_icon_with(
             .expect("has_icon_definition 已确认组件存在");
         return render_icon_with(component, expected, sources, options);
     }
+    if let Some(tile) = record.component::<TileComponent>() {
+        return render_tile_icon(tile, sources);
+    }
     let product = derived_product(store, record).ok_or_else(|| IconRenderError::NoIcon {
         detail: no_icon_detail(record),
     })?;
@@ -326,6 +329,65 @@ pub fn render_record_icon_with(
         })?;
     // 画布尺寸按**配方**的规格（产物是 item/fluid，默认同为 64）。
     render_icon_with(component, expected, sources, options)
+}
+
+/// 从地形贴图取确定的一格（32 游戏像素），而不是把整张变体图集缩成图标。
+/// 显式 icon/icons 在调用方优先；map_color 仅用于地图，不参与地形染色。
+fn render_tile_icon(tile: &TileComponent, sources: &IconSources) -> Result<Rgba8, IconRenderError> {
+    let variants = &tile.variants;
+    let texture = variants
+        .material_background
+        .as_ref()
+        .map(|picture| {
+            (
+                picture.picture.as_str(),
+                picture.x.unwrap_or(0),
+                picture.y.unwrap_or(0),
+                picture.scale,
+            )
+        })
+        .or_else(|| {
+            variants
+                .main
+                .iter()
+                .min_by_key(|picture| picture.size)
+                .map(|picture| {
+                    (
+                        picture.layout.picture.as_str(),
+                        picture.layout.x.unwrap_or(0),
+                        picture.layout.y.unwrap_or(0),
+                        picture.layout.scale,
+                    )
+                })
+        })
+        .filter(|(path, _, _, scale)| !path.is_empty() && scale.is_finite() && *scale > 0.0)
+        .ok_or_else(|| IconRenderError::NoIcon {
+            detail: "地格没有可用的 material_background 或 main 贴图".into(),
+        })?;
+    let (spec, x, y, scale) = texture;
+    let source = sources.decode(spec).map_err(|error| match error {
+        SourceError::Read(error) => IconRenderError::MissingSource {
+            layer: 0,
+            spec: spec.into(),
+            error,
+        },
+        SourceError::Decode(error) => IconRenderError::Decode {
+            layer: 0,
+            spec: spec.into(),
+            error,
+        },
+    })?;
+    let size = (32.0 / scale).round().max(1.0) as u32;
+    if x < 0 || y < 0 || x as u32 >= source.width || y as u32 >= source.height {
+        return Err(IconRenderError::Decode {
+            layer: 0,
+            spec: spec.into(),
+            error: "地格贴图起点超出图集".into(),
+        });
+    }
+    let mut image = source.crop(x as u32, y as u32, size, size);
+    apply_tint(&mut image, tile.tint);
+    Ok(image.scaled_bilinear(64, 64))
 }
 
 fn product_name(product: &Product) -> &str {
@@ -758,6 +820,96 @@ fn mul_div_255(value: u8, factor: u8) -> u8 {
 mod tests {
     use super::*;
     use metatorio_data::Color;
+
+    #[test]
+    fn tile_icons_use_first_tile_offsets_tint_and_explicit_icon_precedence() {
+        let dir = std::env::temp_dir().join(format!("metatorio-tile-icons-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut atlas = Rgba8::from_pixels(96, 64, vec![255; 96 * 64 * 4]);
+        for y in 32..64 {
+            for x in 32..64 {
+                let i = ((y * 96 + x) * 4) as usize;
+                atlas.pixels[i..i + 4].copy_from_slice(&[200, 100, 60, 255]);
+            }
+        }
+        std::fs::write(dir.join("atlas.png"), atlas.encode_png().unwrap()).unwrap();
+        let sources = IconSources::from_roots([("t".into(), crate::Archive::Dir(dir.clone()))]);
+        let dump = serde_json::json!({"tile": {
+            "main": {"tint": [0.5, 1, 1], "variants": {"main": [
+                {"picture": "__t__/missing-large.png", "size": 4},
+                {"picture": "__t__/atlas.png", "x": 32, "y": 32, "size": 1, "count": 2}
+            ]}},
+            "material": {"map_color": [0, 0, 0], "variants": {
+                "material_background": {"picture": "__t__/atlas.png", "x": 32, "y": 32, "count": 2},
+                "main": [{"picture": "__t__/missing.png", "size": 1}]
+            }},
+            "explicit": {"icon": "__t__/atlas.png", "icon_size": 16, "variants": {"main": [{"picture": "__t__/missing.png", "size": 1}]}},
+            "missing": {"variants": {"main": [{"picture": "__t__/missing.png", "size": 1}]}},
+            "invalid-offset": {"variants": {"main": [{"picture": "__t__/atlas.png", "x": 999, "size": 1}]}}
+        }});
+        let store = crate::test_support::store_from_json(dump);
+        let render = |name| {
+            render_record_icon(
+                &store,
+                store.get(PrototypeGroup::Tile, name).unwrap(),
+                &sources,
+            )
+        };
+        let main = render("main").unwrap();
+        assert_eq!((main.width, main.height), (64, 64));
+        assert!(
+            main.pixels
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .all(|p| *p == [100, 100, 60, 255])
+        );
+        let material = render("material").unwrap();
+        assert!(
+            material
+                .pixels
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .all(|p| *p == [200, 100, 60, 255])
+        );
+        assert_eq!(render("explicit").unwrap().pixels, vec![255; 16 * 16 * 4]);
+        assert!(matches!(
+            render("missing"),
+            Err(IconRenderError::MissingSource { .. })
+        ));
+        assert!(matches!(
+            render("invalid-offset"),
+            Err(IconRenderError::Decode { .. })
+        ));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn real_tile_graphics_survive_data_loading() {
+        let dump =
+            serde_json::from_str(include_str!("../../../assets/data-raw-dump.json")).unwrap();
+        let store = crate::test_support::store_from_json(dump);
+        let mut derived = 0;
+        for record in store
+            .group(PrototypeGroup::Tile)
+            .filter(|record| !has_icon_definition(record))
+        {
+            let tile = record.component::<TileComponent>().unwrap();
+            assert!(
+                tile.variants.material_background.is_some()
+                    || tile
+                        .variants
+                        .main
+                        .iter()
+                        .any(|picture| !picture.layout.picture.is_empty()),
+                "{}",
+                record.name
+            );
+            derived += 1;
+        }
+        assert!(derived >= 150);
+    }
 
     #[test]
     fn expected_sizes_follow_the_official_table() {

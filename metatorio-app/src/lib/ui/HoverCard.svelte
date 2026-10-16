@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { iconTypeForKind } from "./icon-types";
   // 悬停信息卡片：显示原型名称、类型与关键参数（数据来自后端 prototype_detail，
   // 按 (kind, name) 缓存）。配方为核心内容，参考原 egui PrototypeHover：
   // 时间/类别/表面条件/产能上限 + 原料/产物（概率折算、产能额外、品质范围偏移、
@@ -147,14 +148,6 @@
     quality: "品质",
   };
 
-  function iconTypeOf(kind: string): string {
-    if (kind === "recipe") return "recipe";
-    if (kind === "fluid") return "fluid";
-    if (kind === "item" || kind === "module") return "item";
-    if (kind === "quality") return "quality";
-    return "entity";
-  }
-
   function formatPower(joulesPerTick: number): string {
     const watts = joulesPerTick * 60;
     if (watts >= 1e6) return `${(watts / 1e6).toFixed(2)} MW`;
@@ -255,7 +248,7 @@
   >
     {#if detail}
     <div class="hc-head">
-      <Icon type={iconTypeOf(detail.kind)} name={detail.name} size={32} />
+      <Icon type={iconTypeForKind(detail.kind)} name={detail.name} size={32} />
       <div class="hc-title">
         <strong>{detail.localized_name || detail.name}</strong>
         {#if detail.localized_name}<small>{detail.name}</small>{/if}
