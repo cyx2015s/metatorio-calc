@@ -140,21 +140,23 @@
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    padding: 2px 6px 2px 2px;
-    background: var(--bg);
+    min-height: 26px;
+    padding: 1px 7px 1px 2px;
+    background: var(--input-bg);
     border: 1px solid var(--line);
     border-radius: var(--radius-sm);
-    font-size: 11px;
+    font-size: 10.5px;
   }
 
   .flow-chip.out {
-    border-color: var(--accent-line);
-    background: color-mix(in srgb, var(--card) 88%, var(--accent) 5%);
+    border-color: var(--ok-line);
+    background: color-mix(in srgb, var(--input-bg) 94%, var(--ok) 5%);
   }
 
   .flow-chip .mono {
-    color: var(--muted);
+    color: var(--text);
     font-family: var(--mono);
-    font-size: 11px;
+    font-size: 10.5px;
+    font-weight: 550;
   }
 </style>

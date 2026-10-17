@@ -248,7 +248,7 @@
   >
     {#if detail}
     <div class="hc-head">
-      <Icon type={iconTypeForKind(detail.kind)} name={detail.name} size={32} />
+      <Icon type={iconTypeForKind(detail.kind)} name={detail.name} size={32} title={detail.localized_name || detail.name} />
       <div class="hc-title">
         <strong>{detail.localized_name || detail.name}</strong>
         {#if detail.localized_name}<small>{detail.name}</small>{/if}
@@ -265,7 +265,7 @@
     </div>
     {:else}
       <div class="hc-head">
-        <Icon type={flowHead?.type ?? "flow"} name={flowHead?.iconName ?? "ItemFuel"} size={32} />
+        <Icon type={flowHead?.type ?? "flow"} name={flowHead?.iconName ?? "ItemFuel"} size={32} title={flowHead?.title ?? "抽象流"} />
         <div class="hc-title">
           <strong>{flowHead?.title ?? "抽象流"}</strong>
           <small>{flowHead?.typeLabel ?? kindLabel[kind] ?? kind}</small>
@@ -316,7 +316,7 @@
             <div class="hc-flows">
               {#each detail.rocket_launch_products as name (name)}
                 <span class="hc-flow-item" title={name}>
-                  <Icon type="item" name={name} size={20} />
+                  <Icon type="item" name={name} size={20} title={runtime.localizedName("item", name)} />
                   <span class="hc-flow-copy">
                     <span class="hc-flow-name">{runtime.localizedName("item", name)}</span>
                   </span>
@@ -401,7 +401,7 @@
           <div class="hc-flows">
             {#each detail.ingredients as flow, i (flowKey(flow, i))}
               <span class="hc-flow-item" title={flow.name}>
-                <Icon type={flow.kind} name={flow.name} size={20} />
+                <Icon type={flow.kind} name={flow.name} size={20} title={`${flowName(flow)} · ${flowMeta(flow, true).join(" · ")}`} />
                 <span class="hc-flow-copy">
                   <span class="hc-flow-name">{flowName(flow)}</span>
                   <span class="hc-flow-meta">{flowMeta(flow, true).join(" · ")}</span>
@@ -417,7 +417,7 @@
           <div class="hc-flows">
             {#each detail.results as flow, i (flowKey(flow, i))}
               <span class="hc-flow-item" title={flow.name}>
-                <Icon type={flow.kind} name={flow.name} size={20} />
+                <Icon type={flow.kind} name={flow.name} size={20} title={`${flowName(flow)} · ${flowMeta(flow, false).join(" · ")}`} />
                 <span class="hc-flow-copy">
                   <span class="hc-flow-name">{flowName(flow)}</span>
                   <span class="hc-flow-meta">{flowMeta(flow, false).join(" · ")}</span>
@@ -436,38 +436,37 @@
   .hover-card {
     position: fixed;
     z-index: 60;
-    width: min(300px, calc(100vw - 28px));
+    width: min(320px, calc(100vw - 28px));
     max-height: calc(100vh - 24px);
     overflow-y: auto;
-    padding: 10px;
+    padding: 12px;
     background: var(--panel);
-    border: 1px solid var(--accent-line);
+    border: 1px solid var(--line-strong);
     border-radius: var(--radius);
-    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.4);
-    pointer-events: none;
-    /* 显式左对齐：fixed 定位仍会继承祖先 text-align（如某些容器居中），
-       导致同名悬停信息在不同位置显示不一致。 */
+    box-shadow: var(--shadow-strong);
     text-align: left;
+    pointer-events: none;
   }
 
   .hc-head {
     display: flex;
     align-items: center;
-    gap: 9px;
-    padding-bottom: 8px;
+    gap: 10px;
+    padding-bottom: 9px;
     border-bottom: 1px solid var(--line);
   }
 
   .hc-title {
+    min-width: 0;
+    flex: 1;
     display: grid;
     gap: 2px;
-    flex: 1;
-    min-width: 0;
   }
 
   .hc-title strong {
     overflow: hidden;
-    font-size: 12px;
+    font-size: 12.5px;
+    font-weight: 700;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -480,32 +479,33 @@
   .hc-badge {
     display: inline-flex;
     align-items: center;
-    margin-left: 6px;
+    width: fit-content;
+    margin-top: 2px;
     padding: 1px 6px;
-    border-radius: 8px;
+    border-radius: 999px;
     font-size: 9px;
     font-weight: 600;
   }
 
   .hc-badge.accessible {
-    color: #7fd18a;
-    background: color-mix(in srgb, #7fd18a 18%, transparent);
+    color: var(--ok);
+    background: var(--ok-dim);
   }
 
   .hc-badge.inaccessible {
     color: var(--danger);
-    background: color-mix(in srgb, var(--danger) 18%, transparent);
+    background: var(--danger-dim);
   }
 
   .hc-badge.hidden {
     color: var(--muted);
-    background: color-mix(in srgb, var(--muted) 20%, transparent);
+    background: var(--card);
   }
 
   .hc-body {
     display: grid;
     gap: 3px;
-    padding-top: 7px;
+    padding-top: 8px;
   }
 
   .hc-row {
@@ -514,6 +514,7 @@
     gap: 10px;
     color: var(--muted);
     font-size: 11px;
+    line-height: 1.45;
   }
 
   .hc-row strong {
@@ -526,11 +527,11 @@
   .hc-flow {
     display: grid;
     gap: 4px;
-    margin-top: 3px;
+    margin-top: 4px;
   }
 
   .hc-label {
-    color: var(--muted);
+    color: var(--faint);
     font-size: 9px;
     font-weight: 700;
     letter-spacing: 0.1em;
@@ -544,33 +545,37 @@
   }
 
   .hc-flow-item {
+    width: 100%;
     display: flex;
     align-items: center;
-    width: 100%;
-    gap: 6px;
-    padding: 2px 6px 2px 2px;
-    background: var(--card);
+    gap: 7px;
+    padding: 3px 7px 3px 3px;
+    background: var(--input-bg);
     border: 1px solid var(--line);
     border-radius: var(--radius-sm);
   }
 
   .hc-flow-copy {
+    min-width: 0;
+    flex: 1;
     display: grid;
     gap: 1px;
-    flex: 1;
-    min-width: 0;
   }
 
   .hc-flow-name {
     overflow: hidden;
-    font-size: 10px;
+    font-size: 10.5px;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
   .hc-flow-meta {
+    overflow: hidden;
     color: var(--muted);
     font-family: var(--mono);
     font-size: 9px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
+
 </style>

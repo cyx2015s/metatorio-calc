@@ -23,6 +23,12 @@
 
   let url = $state<string | null>(null);
   let lastKey = $state("");
+  // 名称防御：目录条目/分组键偶尔会以非字符串形态传入（历史上选择器把
+  // 分组对象传给 name，导致渲染期 name.slice 抛错、整块 UI 不渲染）。
+  // 统一转成字符串，占位符与 alt/title 都使用这个安全值。
+  let label = $derived(typeof name === "string" ? name : name == null ? "" : String(name));
+  // 没有显式 tooltip 时回退到名称，保证每个图标至少有可辨识的悬停信息。
+  let tip = $derived(title || label || undefined);
 
   $effect(() => {
     const ctxId = runtime.effectiveContextId;
@@ -57,8 +63,8 @@
     class:bare={bare || type === "quality"}
     src={url}
     onerror={() => { url = null; }}
-    alt={name}
-    title={title || undefined}
+    alt={label}
+    title={tip}
     style={`width:${size}px;height:${size}px`}
     draggable="false"
   />
@@ -66,9 +72,9 @@
   <span
     class="icon placeholder"
     class:bare={bare || type === "quality"}
-    title={title || undefined}
+    title={tip}
     style={`width:${size}px;height:${size}px;font-size:${Math.max(9, Math.round(size * 0.32))}px`}
-  >{name ? name.slice(0, 2) : "?"}</span>
+  >{label ? label.slice(0, 2) : "?"}</span>
 {/if}
 
 <style>

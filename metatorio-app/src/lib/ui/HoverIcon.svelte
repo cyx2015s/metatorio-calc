@@ -41,6 +41,15 @@
   /** 该图标是否可交互（左键/右键任一有动作）：可交互时按按钮语义实现
    * （role/tabindex/键盘）。 */
   let interactive = $derived(!!onClick || !!onContextMenu);
+  /** 悬停信息兜底：任何图标至少有「本地化名称」可辨认；调用方可覆盖为更完整的动作说明。 */
+  let tip = $derived(
+    title ||
+      (name
+        ? detailKind && detailKind !== "flow" && detailKind !== "quality"
+          ? runtime.localizedName(detailKind, name)
+          : runtime.localizedName(type, name) || name
+        : undefined),
+  );
 
   // 抽象流（无原型详情）也会触发悬停，只要它能提供具体参数（定温流体/燃料类别等）。
   let flowActive = $derived(
@@ -89,6 +98,8 @@
   class="hover-icon"
   class:clickable={interactive}
   type={interactive ? "button" : undefined}
+  title={tip}
+  aria-label={interactive ? tip || name : undefined}
   onmouseenter={enter}
   onmousemove={move}
   onmouseleave={leave}
@@ -109,7 +120,7 @@
       }
     : undefined}
 >
-  <Icon {type} {name} {size} {title} />
+  <Icon {type} {name} {size} title={tip} />
   {#if quality && quality !== "normal"}
     <span class="quality-corner" style={`--corner:${Math.max(10, Math.round(size / 2))}px`}>
       <Icon type="quality" name={quality} size={Math.max(10, Math.round(size / 2))} title={runtime.localizedName("quality", quality)} />

@@ -421,7 +421,7 @@
         {title}
         {#if loading}<span class="spinner"></span>{/if}
       </div>
-      <button class="btn ghost" onclick={onClose}>关闭</button>
+      <button class="btn ghost" title="关闭选择器（Esc）" onclick={onClose}>关闭</button>
     </div>
 
     {#if flowMode}
@@ -430,6 +430,7 @@
           <button
             class:active={flowTab === option.id}
             class="tab"
+            title={`选择${option.label}类流`}
             onclick={() => {
               flowTab = option.id;
               resetView();
@@ -443,6 +444,7 @@
           <button
             class:active={activeKind === option.kind}
             class="tab"
+            title={`浏览${option.label}目录`}
             onclick={() => {
               activeKind = option.kind;
               resetView();
@@ -458,6 +460,8 @@
         bind:value={query}
         class="search"
         placeholder="搜索内部 id 或中文名…"
+        title="按内部 id 或中文名搜索原型"
+        aria-label="搜索原型"
         spellcheck="false"
       />
 
@@ -471,7 +475,7 @@
               title={q}
               onclick={() => pickQuality(q)}
             >
-              <HoverIcon type="quality" name={q} size={22} detailKind="quality" />
+              <HoverIcon type="quality" name={q} size={22} detailKind="quality" title={runtime.localizedName("quality", q)} />
               <span class="q-name">{runtime.localizedName("quality", q)}</span>
             </button>
           {/each}
@@ -486,10 +490,16 @@
             <button
               class:active={activeGroup === group}
               class="gtab"
-              title={runtime.localizedName("item-group", group)}
+              title={`${runtime.localizedName("item-group", group)}（${group}）`}
+              aria-label={runtime.localizedName("item-group", group)}
               onclick={() => (activeGroup = activeGroup === group ? null : group)}
             >
-              <Icon type="item-group" name={group} size={68} />
+              <Icon
+                type="item-group"
+                name={group}
+                size={68}
+                title={runtime.localizedName("item-group", group)}
+              />
             </button>
           {/each}
         </div>
@@ -500,7 +510,7 @@
       {#if isDirect}
         {@const flow = directFlows[flowTab]!}
         <div class="direct-panel">
-          <Icon type="flow" name={flow} size={40} />
+          <Icon type="flow" name={flow} size={40} title={flow} />
           <div class="direct-copy">
             <strong>{flow}</strong>
             <small>点击添加该流</small>
@@ -509,11 +519,11 @@
         </div>
       {:else if isCustom}
         <div class="custom-panel">
-          <select bind:value={customVariant}>
+          <select bind:value={customVariant} title="选择自定义流类型" aria-label="自定义流类型">
             <option value="Custom">自定义</option>
             <option value="Pollution">污染</option>
           </select>
-          <input bind:value={customName} placeholder="流名称" spellcheck="false" />
+          <input bind:value={customName} placeholder="流名称" title="自定义流名称" aria-label="自定义流名称" spellcheck="false" />
           <button class="btn primary" onclick={commitCustom} disabled={!customName.trim()}>添加</button>
         </div>
       {:else if visible.length === 0}
@@ -530,13 +540,14 @@
             <button
               class="row"
               class:active={selected === entry.name}
+              title={`选择：${labelOf(entry)}（${entry.name}）`}
               onclick={() => toggleSelect(entry.name)}
               ondblclick={() => commitFast(entry.name)}
               onmouseenter={(event) => showHover(event, entry)}
               onmousemove={(event) => showHover(event, entry)}
               onmouseleave={() => (hover = null)}
             >
-              <Icon type={entry.icon_type} name={entry.name} size={28} />
+              <Icon type={entry.icon_type} name={entry.name} size={28} title={labelOf(entry)} />
               <span class="row-name">{labelOf(entry)}</span>
               {#if entry.localized_name}<span class="row-sub">{entry.name}</span>{/if}
               {#if entry.subgroup && !entry.localized_name}
@@ -554,13 +565,15 @@
                 <button
                   class="icon-btn"
                   class:active={selected === entry.name}
+                  title={`选择：${labelOf(entry)}（${entry.name}）`}
+                  aria-label={labelOf(entry)}
                   onclick={() => toggleSelect(entry.name)}
                   ondblclick={() => commitFast(entry.name)}
                   onmouseenter={(event) => showHover(event, entry)}
                   onmousemove={(event) => showHover(event, entry)}
                   onmouseleave={() => (hover = null)}
                 >
-                  <Icon type={entry.icon_type} name={entry.name} size={34} />
+                  <Icon type={entry.icon_type} name={entry.name} size={34} title={labelOf(entry)} />
                 </button>
               {/each}
             </div>
@@ -606,44 +619,52 @@
     display: grid;
     place-items: center;
     padding: 24px;
-    background: rgba(4, 7, 8, 0.72);
-    backdrop-filter: blur(3px);
+    background: var(--backdrop);
+    backdrop-filter: blur(4px);
   }
 
   .modal {
-    width: min(640px, 100%);
-    max-height: min(700px, calc(100vh - 48px));
+    width: min(700px, 100%);
+    max-height: min(760px, calc(100vh - 48px));
     display: flex;
     flex-direction: column;
-    padding: 14px;
+    padding: 16px;
     background: var(--panel);
-    border: 1px solid var(--accent-line);
+    border: 1px solid var(--line-strong);
     border-radius: var(--radius);
-    box-shadow: 0 22px 60px rgba(0, 0, 0, 0.5);
+    box-shadow: var(--shadow-strong);
   }
 
   .modal-head {
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    margin-bottom: 10px;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--line);
   }
 
   .modal-title {
+    min-width: 0;
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 12px;
+    overflow: hidden;
+    font-size: 14px;
     font-weight: 700;
+    letter-spacing: 0.02em;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .spinner {
-    width: 11px;
-    height: 11px;
-    border: 2px solid var(--accent-line);
-    border-top-color: var(--accent);
+    width: 10px;
+    height: 10px;
+    border: 1px solid var(--line-strong);
+    border-top-color: var(--text);
     border-radius: 50%;
-    animation: spin 0.7s linear infinite;
+    animation: spin 700ms linear infinite;
   }
 
   @keyframes spin {
@@ -655,53 +676,52 @@
   .kind-tabs {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px;
+    gap: 2px;
+    padding: 3px;
     margin-bottom: 8px;
+    background: var(--input-bg);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
   }
 
   .tab {
-    padding: 5px 9px;
+    min-height: 27px;
+    padding: 0 9px;
     color: var(--muted);
-    background: var(--card);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-sm);
-    font-size: 11px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    font-size: 10.5px;
     cursor: pointer;
   }
 
   .tab:hover {
-    border-color: var(--accent-line);
+    color: var(--text);
+    background: var(--card-hover);
   }
 
   .tab.active {
-    color: var(--accent);
-    background: var(--accent-dim);
-    border-color: var(--accent-line);
+    color: var(--accent-ink);
+    background: var(--accent);
+    font-weight: 700;
   }
 
   .search {
-    min-height: 32px;
-    max-width: 100%;
+    width: 100%;
+    min-height: 34px;
     padding: 0 10px;
-    background: var(--bg);
+    margin-bottom: 9px;
+    color: var(--text);
+    background: var(--input-bg);
     border: 1px solid var(--line-strong);
     border-radius: var(--radius-sm);
     font-size: 12px;
   }
 
   .search:focus {
+    border-color: var(--accent);
     outline: none;
-    border-color: var(--accent-line);
-  }
-
-  /* 大组分 tab */
-  .group-tabs {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-    margin: 8px 0 2px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid var(--line);
+    box-shadow: 0 0 0 1px var(--accent);
   }
 
   .quality-row {
@@ -709,109 +729,141 @@
     align-items: center;
     flex-wrap: wrap;
     gap: 4px;
-    margin: 8px 0 2px;
+    margin-bottom: 9px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--line);
   }
 
   .q-label {
-    color: var(--muted);
-    font-size: 10px;
+    margin-right: 4px;
+    color: var(--faint);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
   }
 
   .q-chip {
+    min-height: 28px;
     display: inline-flex;
     align-items: center;
-    gap: 3px;
-    padding: 2px 7px 2px 2px;
-    background: var(--card);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-sm);
+    gap: 5px;
+    padding: 1px 8px 1px 2px;
+    color: var(--muted);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 999px;
     cursor: pointer;
   }
 
   .q-chip:hover {
-    border-color: var(--accent-line);
+    color: var(--text);
+    background: var(--card-hover);
   }
 
   .q-chip.active {
+    color: var(--text);
     background: var(--accent-dim);
-    border-color: var(--accent);
+    border-color: var(--accent-line);
   }
 
   .q-name {
-    font-size: 10px;
+    font-size: 10.5px;
+  }
+
+  .group-tabs {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 6px 0 8px;
+    margin-bottom: 4px;
+    border-bottom: 1px solid var(--line);
   }
 
   .gtab {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 2px;
-    color: var(--muted);
-    background: transparent;
-    border: 1px solid var(--line);
+    width: 74px;
+    height: 74px;
+    display: grid;
+    place-items: center;
+    padding: 3px;
+    background: var(--input-bg);
+    border: 1px solid transparent;
     border-radius: var(--radius-sm);
     cursor: pointer;
   }
 
   .gtab:hover {
-    border-color: var(--accent-line);
+    border-color: var(--line-strong);
+    background: var(--card-hover);
   }
 
   .gtab.active {
-    color: var(--accent);
-    background: var(--accent-dim);
-    border-color: var(--accent-line);
+    border-color: var(--accent);
+    box-shadow: inset 0 0 0 1px var(--accent);
   }
 
   .body {
-    flex: 1;
-    min-height: 120px;
-    margin-top: 8px;
+    flex: 1 1 auto;
+    min-height: 0;
     overflow-y: auto;
+    padding-right: 2px;
   }
 
   .subgroup {
-    display: grid;
-    gap: 6px;
-    margin-bottom: 10px;
+    padding: 6px 0 10px;
   }
 
   .sg-label {
-    color: var(--muted);
+    margin-bottom: 5px;
+    color: var(--faint);
     font-size: 9px;
     font-weight: 700;
-    letter-spacing: 0.1em;
+    letter-spacing: 0.11em;
     text-transform: uppercase;
-    border-bottom: 1px solid var(--line);
-    padding-bottom: 3px;
   }
 
-  /* 小组内图标换行 */
   .sg-items {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 3px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(42px, 1fr));
+    gap: 5px;
   }
 
   .sg-items .icon-btn {
-    padding: 3px;
+    width: 100%;
+    height: 46px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: var(--input-bg);
+  }
+
+  .sg-items .icon-btn:hover {
+    border-color: var(--line-strong);
+    background: var(--card-hover);
+  }
+
+  .sg-items .icon-btn.active {
+    border-color: var(--accent);
+    box-shadow: inset 0 0 0 1px var(--accent);
   }
 
   .search-list {
     display: grid;
-    align-content: start;
     gap: 2px;
   }
 
   .row {
+    width: 100%;
+    min-height: 40px;
     display: flex;
     align-items: center;
     gap: 9px;
     padding: 4px 7px;
-    text-align: left;
+    color: var(--text);
     background: transparent;
     border: 1px solid transparent;
     border-radius: var(--radius-sm);
+    text-align: left;
     cursor: pointer;
   }
 
@@ -822,96 +874,112 @@
 
   .row.active {
     background: var(--accent-dim);
-    border-color: var(--accent);
+    border-color: var(--accent-line);
   }
 
   .row-name {
+    flex: 1;
+    min-width: 0;
     overflow: hidden;
-    font-size: 12px;
+    font-size: 11.5px;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
   .row-sub {
+    flex: 0 1 auto;
     overflow: hidden;
-    margin-left: auto;
     color: var(--faint);
-    font-size: 10px;
+    font-family: var(--mono);
+    font-size: 9px;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
   .empty {
-    padding: 28px;
+    padding: 36px 12px;
+    color: var(--faint);
+    font-size: 11.5px;
     text-align: center;
-    color: var(--muted);
-    font-size: 11px;
   }
 
   .direct-panel,
   .custom-panel {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 22px;
+    gap: 10px;
+    padding: 12px;
+    background: var(--input-bg);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
   }
 
   .direct-copy {
-    display: grid;
-    gap: 3px;
     flex: 1;
+    display: grid;
+    gap: 2px;
   }
 
   .direct-copy strong {
-    font-size: 13px;
+    font-size: 12px;
   }
 
   .direct-copy small {
     color: var(--muted);
-    font-size: 11px;
+    font-size: 10.5px;
   }
 
   .custom-panel {
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: 120px 1fr auto;
+    gap: 6px;
   }
 
   .custom-panel select,
   .custom-panel input {
-    min-height: 30px;
-    max-width: 100%;
-    padding: 0 9px;
-    background: var(--bg);
+    min-height: 32px;
+    padding: 0 8px;
+    color: var(--text);
+    background: var(--panel);
     border: 1px solid var(--line-strong);
     border-radius: var(--radius-sm);
-    font-size: 12px;
-  }
-
-  .custom-panel input {
-    flex: 1;
-    min-width: 140px;
+    font-size: 11.5px;
   }
 
   .modal-foot {
+    flex: 0 0 auto;
     display: flex;
     align-items: center;
-    gap: 8px;
-    margin-top: 10px;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 12px;
     padding-top: 10px;
     border-top: 1px solid var(--line);
   }
 
   .foot-hint {
-    flex: 1;
+    min-width: 0;
     overflow: hidden;
-    color: var(--muted);
+    color: var(--faint);
     font-size: 10px;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
   .foot-actions {
-    display: inline-flex;
-    gap: 6px;
     flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
   }
+
+  @media (max-width: 640px) {
+    .custom-panel {
+      grid-template-columns: 1fr;
+    }
+    .foot-hint {
+      display: none;
+    }
+  }
+
 </style>

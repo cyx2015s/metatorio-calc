@@ -238,7 +238,8 @@
     <button
       class="icon-btn"
       class:empty={!primaryName}
-      title={kindLabel[kind] ?? kind}
+      title={`${kindLabel[kind] ?? kind}：${primaryLabel || "未设置"} · 点击更换`}
+      aria-label={`更换${kindLabel[kind] ?? kind}`}
       onclick={() => onPick(primaryKind())}
     >
       <HoverIcon
@@ -254,7 +255,8 @@
       <button
         class="icon-btn"
         class:empty={!machineName}
-        title="机器"
+        title={machineName ? `机器：${machineLabel} · 点击更换` : "选择机器"}
+        aria-label="更换机器"
         onclick={() => onPick(machineKind())}
       >
         <HoverIcon
@@ -307,11 +309,21 @@
       {/if}
     {/if}
 
-    <button class="btn ghost" class:on={entry.enabled} onclick={onToggleEnabled} title={entry.enabled ? "停用" : "启用"}>
-      {entry.enabled ? "启用" : "停用"}
+    <button
+      class="toggle-pill"
+      class:on={entry.enabled}
+      role="switch"
+      aria-checked={entry.enabled}
+      title={entry.enabled ? "已启用 · 点击停用该机制" : "已停用 · 点击启用该机制"}
+      onclick={onToggleEnabled}
+    >
+      <span class="toggle-dot"></span>
+      {entry.enabled ? "已启用" : "已停用"}
     </button>
-    <button class="btn ghost" onclick={onClone} title="克隆机制">克隆</button>
-    <button class="btn ghost danger" onclick={onRemove} title="移除机制">移除</button>
+    <span class="card-actions">
+      <button class="icon-btn" title="克隆该机制（复制配方 / 机器 / 插件配置）" aria-label="克隆机制" onclick={onClone}>⧉</button>
+      <button class="icon-btn danger" title="移除该机制" aria-label="移除机制" onclick={onRemove}>×</button>
+    </span>
   </div>
 
   {#if mechanicFlows.length > 0}
@@ -327,7 +339,7 @@
   {#if kind !== "recipe" && kind !== "mining"}
   <div class="row2">
     {#if kind === "generator" || kind === "boiler"}
-      <button class="icon-btn" class:empty={!fluidName} title="流体" onclick={() => onPick("fluid")}>
+      <button class="icon-btn" class:empty={!fluidName} title={`流体：${fluidLabel || "未选择"} · 点击更换`} onclick={() => onPick("fluid")}>
         <HoverIcon type="fluid" name={fluidName || "fluid"} size={24} detailKind={fluidName ? "fluid" : undefined} />
       </button>
       <span class="sub">{fluidLabel || "选择流体"}</span>
@@ -366,7 +378,7 @@
         </label>
       {/if}
     {:else if kind === "tile-extract"}
-      <button class="icon-btn" class:empty={!machineName} title="抽水机" onclick={() => onPick("offshore-pump")}>
+      <button class="icon-btn" class:empty={!machineName} title={`抽水机：${machineLabel || "未选择"} · 点击更换`} onclick={() => onPick("offshore-pump")}>
         <HoverIcon type="entity" name={machineName || "offshore-pump"} size={24} quality={machineQuality} />
       </button>
       <span class="sub">{machineLabel || "选择抽水机"}</span>
@@ -389,7 +401,14 @@
         />
       </label>
     {:else if kind === "solar"}
-      <button class="icon-btn" class:empty={!entry.mechanic.accumulator?.id} title="蓄电器" onclick={() => onPick("accumulator")}>
+      <button
+        class="icon-btn"
+        class:empty={!entry.mechanic.accumulator?.id}
+        title={entry.mechanic.accumulator?.id
+          ? `蓄电器：${runtime.localizedName("entity", entry.mechanic.accumulator.id)} · 点击更换`
+          : "选择蓄电器"}
+        onclick={() => onPick("accumulator")}
+      >
         <HoverIcon
           type="entity"
           name={entry.mechanic.accumulator?.id || "accumulator"}
@@ -469,15 +488,31 @@
   {/if}
 
   {#if kind === "recipe" || kind === "mining"}
-    <div class="row3">
-      <ModuleEditor
-        {entry}
-        onPickModule={(slot) => onPick("module", slot)}
-        onPickBeacon={(beacon) => onPick("beacon", beacon)}
-        onPickBeaconModule={(beacon, module) => onPick("beacon-module", beacon, module)}
-        {onAddBeacon}
-      />
-    </div>
+    <details class="advanced">
+      <summary title="展开/收起插件与插件塔配置">
+        <span class="advanced-caret"></span>
+        <span>插件与插件塔</span>
+        <span class="advanced-meta">
+          {#if (entry.mechanic.module_config?.modules.length ?? 0) > 0}
+            {entry.mechanic.module_config?.modules.length} 插件
+          {:else}
+            无插件
+          {/if}
+          {#if (entry.mechanic.module_config?.beacons.length ?? 0) > 0}
+            · {entry.mechanic.module_config?.beacons.length} 插件塔
+          {/if}
+        </span>
+      </summary>
+      <div class="row3">
+        <ModuleEditor
+          {entry}
+          onPickModule={(slot) => onPick("module", slot)}
+          onPickBeacon={(beacon) => onPick("beacon", beacon)}
+          onPickBeaconModule={(beacon, module) => onPick("beacon-module", beacon, module)}
+          {onAddBeacon}
+        />
+      </div>
+    </details>
   {/if}
   {/if}
 </div>
@@ -485,12 +520,21 @@
 <style>
   .mech-card {
     display: grid;
-    gap: 6px;
-    padding: 6px 8px;
+    gap: 7px;
+    padding: 10px 12px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    transition: border-color 100ms ease, background 100ms ease;
+  }
+
+  .mech-card:hover {
+    border-color: var(--line-strong);
   }
 
   .mech-card.off {
-    opacity: 0.55;
+    opacity: 0.64;
+    filter: grayscale(0.35);
   }
 
   .row1,
@@ -511,19 +555,20 @@
     align-items: center;
     flex-wrap: wrap;
     gap: 4px;
-    padding-top: 2px;
+    padding-top: 1px;
   }
 
   .row2b {
     display: flex;
     align-items: center;
-    gap: 6px;
     flex-wrap: wrap;
-    min-height: 24px;
+    gap: 6px;
+    min-height: 22px;
   }
 
   .row3 {
-    padding-top: 8px;
+    padding-top: 9px;
+    margin-top: 1px;
     border-top: 1px solid var(--line);
   }
 
@@ -534,8 +579,9 @@
 
   .name {
     overflow: hidden;
-    font-size: 12px;
-    font-weight: 600;
+    font-size: 12.5px;
+    font-weight: 650;
+    letter-spacing: 0.01em;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -543,13 +589,15 @@
   .meta {
     display: flex;
     align-items: center;
-    gap: 6px;
-    margin-top: 3px;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-top: 4px;
   }
 
   .amount {
-    color: var(--accent);
+    color: var(--ok);
     font-size: 10px;
+    font-weight: 550;
   }
 
   .sub {
@@ -568,23 +616,138 @@
   }
 
   .sub.temp input {
-    width: 56px;
-    min-height: 22px;
-    padding: 0 4px;
-    text-align: right;
-    background: var(--card);
+    width: 58px;
+    min-height: 24px;
+    padding: 0 5px;
+    color: var(--text);
+    background: var(--input-bg);
     border: 1px solid var(--line-strong);
     border-radius: var(--radius-sm);
     font-family: var(--mono);
     font-size: 10px;
+    text-align: right;
+  }
+
+  .sub.temp input:focus {
+    border-color: var(--accent);
+    outline: none;
+    box-shadow: 0 0 0 1px var(--accent);
   }
 
   .solar-balance {
+    color: var(--faint);
     font-family: var(--mono);
-    font-size: 10px;
+    font-size: 9.5px;
   }
 
   .spacer {
     flex: 1;
   }
+
+  /* 启用开关：状态明确，点击即切换；与「克隆/移除」图标动作分离。 */
+  .toggle-pill {
+    flex: 0 0 auto;
+    height: 24px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 8px;
+    color: var(--muted);
+    background: transparent;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: color 90ms ease, background 90ms ease, border-color 90ms ease;
+  }
+
+  .toggle-pill:hover {
+    color: var(--text);
+    background: var(--card-hover);
+    border-color: var(--line-strong);
+  }
+
+  .toggle-pill .toggle-dot {
+    width: 6px;
+    height: 6px;
+    flex: 0 0 auto;
+    background: var(--faint);
+    border-radius: 50%;
+  }
+
+  .toggle-pill.on {
+    color: var(--ok);
+    background: var(--ok-dim);
+    border-color: var(--ok-line);
+  }
+
+  .toggle-pill.on .toggle-dot {
+    background: var(--ok);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--ok) 18%, transparent);
+  }
+
+  .card-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 1px;
+  }
+
+  .card-actions .icon-btn {
+    width: 24px;
+    height: 24px;
+    font-size: 12px;
+  }
+
+  /* 高级配置默认收起，避免每张卡都被插件槽撑高。 */
+  .advanced {
+    margin-top: 1px;
+  }
+
+  .advanced > summary {
+    min-height: 26px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 4px 2px;
+    color: var(--muted);
+    border-radius: var(--radius-sm);
+    font-size: 10px;
+    font-weight: 600;
+    list-style: none;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .advanced > summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .advanced > summary:hover {
+    color: var(--text);
+    background: var(--card-hover);
+  }
+
+  .advanced-caret {
+    width: 0;
+    height: 0;
+    border-top: 4px solid transparent;
+    border-bottom: 4px solid transparent;
+    border-left: 5px solid currentColor;
+    transition: transform 90ms ease;
+  }
+
+  .advanced[open] .advanced-caret {
+    transform: rotate(90deg);
+  }
+
+  .advanced-meta {
+    margin-left: auto;
+    color: var(--faint);
+    font-family: var(--mono);
+    font-size: 9px;
+    font-weight: 500;
+  }
+
 </style>

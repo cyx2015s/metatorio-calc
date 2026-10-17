@@ -238,6 +238,10 @@ class RuntimeStore {
     }
     this.ready = true;
     this.refreshOrderedMilestones().catch(() => {});
+    // 首屏也要拉取与项目/工厂相关、但只在 dispatch 后刷新的派生数据；
+    // 否则重新打开应用后「环境自带」外部输入与产能视图会直到第一次编辑才出现。
+    this.refreshProductivity().catch(() => {});
+    this.refreshImplicitSources().catch(() => {});
     // 首屏目录/上下文刷新后同步一次：目录索引会触发后端载入 store，
     // 再刷新上下文列表以清除「未载入」徽标（初始化时序里列表先于 store 载入）。
     await this.syncEffectiveContext();

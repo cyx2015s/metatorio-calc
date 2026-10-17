@@ -55,6 +55,15 @@
   // 添加机制菜单用 fixed 定位（视口坐标），脱离滚动容器，避免开合时
   // 改变机制列表滚动区域的高度。
   let addMechMenuPos = $state<{ top: number; right: number } | null>(null);
+  // 二级菜单 / 抽屉：项目、工厂、机制工具、游戏数据、环境与项目设置。
+  // 主界面只保留高频操作，低频/批量操作收进这些菜单。
+  let projectMenuOpen = $state(false);
+  let factoryMenuOpen = $state(false);
+  let mechMenuOpen = $state(false);
+  let appMenuOpen = $state(false);
+  let dataOpen = $state(false);
+  let settingsOpen = $state(false);
+  let settingsTab = $state<"factory" | "project">("factory");
   let newProjectOpen = $state(false);
   let newProjectName = $state("新项目");
   let newFactoryOpen = $state(false);
@@ -242,12 +251,12 @@
   } | null>(null);
 
   // ── 左侧栏面板折叠状态 ───────────────────────────────────────────
-  // 每个可设置项可独立下拉展开/收起；默认展开常用的（目标/工厂环境/
-  // 项目设置），收起常为空的（目标表达式/外部输入）。
+  // 每个可设置项可独立下拉展开/收起；默认展开目标与外部输入（生产 → 供给
+  // 的主信息流），收起低频的表达式。环境/项目设置已移到右上角抽屉。
   let panels = $state({
     targets: true,
     expressions: false,
-    inputs: false,
+    inputs: true,
     env: true,
     settings: true,
     subMilestones: true,
@@ -380,6 +389,28 @@
   let project = $derived(runtime.selectedProject);
   let planning = $derived(project?.planning ?? null);
   let factory = $derived(runtime.selectedFactory);
+  /** 当前项目绑定的游戏上下文（未绑定时回退到全局激活上下文）。 */
+  let projectContext = $derived(
+    (project?.context_id
+      ? runtime.contexts.find((context) => context.id === project?.context_id)
+      : null) ?? runtime.activeContext,
+  );
+  /** 当前主题的可读标签（应用菜单里显示当前选中项）。 */
+  let themeLabel = $derived(
+    runtime.theme === "system" ? "跟随系统" : runtime.theme === "light" ? "亮色" : "深色",
+  );
+  function closeMenus() {
+    projectMenuOpen = false;
+    factoryMenuOpen = false;
+    mechMenuOpen = false;
+    appMenuOpen = false;
+    addMechMenuPos = null;
+  }
+  function openSettings(tab: "factory" | "project") {
+    settingsTab = tab;
+    settingsOpen = true;
+    closeMenus();
+  }
   let mechanics = $derived(factory?.mechanics ?? []);
   let targets = $derived(factory?.targets ?? []);
   let targetExpressions = $derived(factory?.target_expressions ?? []);
@@ -1280,6 +1311,10 @@
   /** 全局快捷键：Ctrl/Cmd+Z 撤销；Ctrl/Cmd+Shift+Z 或 Ctrl+Y 重做。
    *  焦点在输入框/文本域/可编辑元素时交给浏览器处理文本撤销，不拦截。 */
   function handleGlobalKeydown(event: KeyboardEvent): void {
+    if (event.key === "Escape" && (projectMenuOpen || factoryMenuOpen || mechMenuOpen || appMenuOpen)) {
+      closeMenus();
+      return;
+    }
     if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
     const target = event.target as HTMLElement | null;
     const tag = target?.tagName;
@@ -1311,61 +1346,208 @@
 <div class="app">
   <!-- ══ 应用栏 ══ -->
   <header class="appbar">
-    <div class="brand">
+    <div class="brand" title="切向量化 · 异星工厂产线求解器">
       <span class="brand-mark">切</span>
       <span class="brand-name">向量化</span>
     </div>
 
-    <div class="menu-wrap">
-      <button class="btn" onclick={openLoadGame} disabled={runtime.contextBusy}>
-        加载游戏
-      </button>
-      <button class="btn ghost" onclick={checkForUpdate} disabled={updating}>
-        {updating ? "检查中…" : "检查更新"}
-      </button>
-    </div>
-
+    <!-- 项目：切换 / 新建 / 导入 / 保存 / 关闭都收进一个菜单 -->
     <div class="menu-wrap">
       <button
-        class="btn ghost"
+        class="project-trigger"
+        aria-expanded={projectMenuOpen}
+        title={project ? `当前项目：${project.name} · 点击切换或管理项目` : "选择或新建项目"}
+        onclick={() => {
+          projectMenuOpen = !projectMenuOpen;
+          factoryMenuOpen = false;
+          appMenuOpen = false;
+        }}
+      >
+        <span class="trigger-label">项目</span>
+        <span class="trigger-value">{project?.name ?? "未选择项目"}</span>
+        <span class="caret">{projectMenuOpen ? "▴" : "▾"}</span>
+      </button>
+      {#if projectMenuOpen}
+        <div class="menu-catcher" aria-hidden="true" onclick={() => (projectMenuOpen = false)}></div>
+        <div class="menu project-menu">
+          <div class="menu-label">切换项目</div>
+          {#each runtime.document?.projects ?? [] as item (item.id)}
+            <button
+              class:active={item.id === runtime.selectedProject?.id}
+              title={item.id === runtime.selectedProject?.id ? "当前项目" : `切换到项目：${item.name}`}
+              onclick={() => {
+                projectMenuOpen = false;
+                runtime.selectProject(item.id).catch(() => {});
+              }}
+            >
+              <span class="menu-item-main">{item.name}</span>
+              <span class="menu-meta">{item.factories.length} 工厂</span>
+            </button>
+          {:else}
+            <div class="menu-empty">还没有项目</div>
+          {/each}
+          <div class="menu-sep"></div>
+          <button onclick={() => { projectMenuOpen = false; newProjectOpen = true; }}>新建项目…</button>
+          <button
+            disabled={runtime.busy}
+            onclick={() => { projectMenuOpen = false; runtime.openProject().catch(() => {}); }}
+          >导入项目…</button>
+          {#if project}
+            <div class="menu-sep"></div>
+            <button onclick={() => { projectMenuOpen = false; promptRenameProject(); }}>重命名项目…</button>
+            <button
+              disabled={runtime.busy}
+              title={runtime.projectSavePath(project.id) ? `保存到 ${runtime.projectSavePath(project.id)}` : "保存项目（首次保存会询问位置）"}
+              onclick={() => { projectMenuOpen = false; runtime.saveCurrentProject().catch(() => {}); }}
+            >保存项目</button>
+            <button
+              disabled={runtime.busy}
+              onclick={() => { projectMenuOpen = false; runtime.saveProjectAs().catch(() => {}); }}
+            >另存为…</button>
+            <button
+              class="danger"
+              onclick={() => {
+                projectMenuOpen = false;
+                closeProjectState = { project: project.id, name: project.name };
+              }}
+            >关闭项目…</button>
+          {/if}
+        </div>
+      {/if}
+    </div>
+
+    <!-- 工厂切换与当前工厂操作 -->
+    {#if project}
+      <div class="factory-bar">
+        <span class="bar-label">工厂</span>
+        <div class="factory-tabs">
+          {#each project.factories as item (item.id)}
+            <button
+              class="ftab"
+              class:active={item.id === runtime.selectedFactory?.id}
+              title={item.id === runtime.selectedFactory?.id ? `当前工厂：${item.name}` : `切换到工厂：${item.name}`}
+              onclick={() => runtime.selectFactory(item.id).catch(() => {})}
+            >{item.name}</button>
+          {/each}
+          <button class="ftab add" title="新建工厂" onclick={() => (newFactoryOpen = true)}>+</button>
+        </div>
+        {#if factory}
+          <div class="menu-wrap">
+            <button
+              class="icon-btn subtle"
+              title={`当前工厂操作：${factory.name}（重命名 / 克隆 / 删除）`}
+              aria-expanded={factoryMenuOpen}
+              onclick={() => {
+                factoryMenuOpen = !factoryMenuOpen;
+                projectMenuOpen = false;
+                appMenuOpen = false;
+              }}
+            >⋯</button>
+            {#if factoryMenuOpen}
+              <div class="menu-catcher" aria-hidden="true" onclick={() => (factoryMenuOpen = false)}></div>
+              <div class="menu factory-menu">
+                <div class="menu-label">{factory.name}</div>
+                <button onclick={() => { factoryMenuOpen = false; promptRenameFactory(factory.name); }}>重命名工厂…</button>
+                <button onclick={() => { factoryMenuOpen = false; runtime.cloneFactory(factory.id).catch(() => {}); }}>克隆工厂</button>
+                <button class="danger" onclick={() => { factoryMenuOpen = false; runtime.removeFactory(factory.id).catch(() => {}); }}>删除工厂…</button>
+              </div>
+            {/if}
+          </div>
+        {/if}
+      </div>
+    {/if}
+
+    <span class="spacer"></span>
+
+    <!-- 数据状态：点击打开游戏数据/上下文管理 -->
+    <button
+      class="status-pill"
+      class:busy={runtime.contextBusy}
+      title={projectContext
+        ? `游戏数据：${projectContext.name}（${contextSummary(projectContext)}）\n点击管理数据上下文`
+        : "尚未加载游戏数据 · 点击载入或选择上下文"}
+      onclick={() => { dataOpen = true; closeMenus(); }}
+    >
+      <span class="status-dot"></span>
+      <span class="status-text">
+        {runtime.contextBusy ? "正在加载数据…" : projectContext?.name ?? "未加载游戏数据"}
+      </span>
+      <span class="status-action">数据</span>
+    </button>
+
+    <div class="undo-group">
+      <button
+        class="icon-btn"
         title={runtime.history.undo_label
           ? `撤销：${runtime.history.undo_label}（Ctrl+Z）`
           : "没有可撤销的操作"}
+        aria-label="撤销"
         onclick={() => runtime.undo().catch(() => {})}
         disabled={!runtime.history.can_undo || runtime.busy}
-      >撤销</button>
+      >↶</button>
       <button
-        class="btn ghost"
+        class="icon-btn"
         title={runtime.history.redo_label
           ? `重做：${runtime.history.redo_label}（Ctrl+Shift+Z / Ctrl+Y）`
           : "没有可重做的操作"}
+        aria-label="重做"
         onclick={() => runtime.redo().catch(() => {})}
         disabled={!runtime.history.can_redo || runtime.busy}
-      >重做</button>
+      >↷</button>
     </div>
 
-    {#if runtime.contextBusy}
-      <span class="chip warn">正在加载数据…</span>
-    {:else if runtime.activeContext}
-      <span class="chip ok">{runtime.activeContext.name}</span>
-    {:else}
-      <span class="chip">未加载游戏数据</span>
-    {/if}
-    {#if appVersion}
-      <span class="chip mono" title="当前版本">v{appVersion}</span>
-    {/if}
-    <label class="theme-picker" title="主题">
-      <span class="muted">主题</span>
-      <select
-        value={runtime.theme}
-        onchange={(event) =>
-          runtime.setTheme((event.currentTarget as HTMLSelectElement).value as "system" | "light" | "dark")}
-      >
-        <option value="system">跟随系统</option>
-        <option value="light">亮色</option>
-        <option value="dark">深色</option>
-      </select>
-    </label>
+    <button
+      class="btn ghost settings-btn"
+      title="打开工厂环境、约束与项目设置"
+      onclick={() => openSettings("factory")}
+    >设置</button>
+
+    <!-- 应用菜单：外观 / 加载数据 / 更新 / 版本 -->
+    <div class="menu-wrap">
+      <button
+        class="icon-btn"
+        aria-label="应用菜单"
+        aria-expanded={appMenuOpen}
+        title="应用菜单：外观、加载数据、检查更新、版本"
+        onclick={() => {
+          appMenuOpen = !appMenuOpen;
+          projectMenuOpen = false;
+          factoryMenuOpen = false;
+        }}
+      >⋯</button>
+      {#if appMenuOpen}
+        <div class="menu-catcher" aria-hidden="true" onclick={() => (appMenuOpen = false)}></div>
+        <div class="menu app-menu">
+          <div class="menu-label">外观</div>
+          <div class="theme-switch" role="group" aria-label="主题">
+            <button
+              class:active={runtime.theme === "system"}
+              title="跟随系统深色 / 亮色外观"
+              onclick={() => runtime.setTheme("system")}
+            >系统</button>
+            <button
+              class:active={runtime.theme === "light"}
+              title="使用亮色外观"
+              onclick={() => runtime.setTheme("light")}
+            >亮色</button>
+            <button
+              class:active={runtime.theme === "dark"}
+              title="使用深色外观"
+              onclick={() => runtime.setTheme("dark")}
+            >深色</button>
+          </div>
+          <div class="menu-sep"></div>
+          <button onclick={() => { appMenuOpen = false; openSettings("factory"); }}>环境与项目设置…</button>
+          <button onclick={() => { appMenuOpen = false; openLoadGame(); }}>加载游戏数据…</button>
+          <button disabled={updating} onclick={() => { appMenuOpen = false; checkForUpdate(); }}>
+            {updating ? "正在检查更新…" : "检查更新…"}
+          </button>
+          <div class="menu-note">
+            切向量化 v{appVersion || "—"} · 当前 {themeLabel}
+          </div>
+        </div>
+      {/if}
+    </div>
   </header>
 
   {#if runtime.contextError || runtime.lastError || notice}
@@ -1387,83 +1569,10 @@
     </div>
   {/if}
 
-  <!-- ══ 项目 / 工厂页签 ══ -->
-  <nav class="tabs">
-    {#each runtime.document?.projects ?? [] as item (item.id)}
-      {@const savePath = runtime.projectSavePath(item.id)}
-      <div class:active={item.id === runtime.selectedProject?.id} class="tab-cluster">
-        <button
-          class="tab"
-          title={savePath ? `保存位置：${savePath}` : "尚未保存"}
-          onclick={() => runtime.selectProject(item.id).catch(() => {})}
-        >{item.name}</button>
-        {#if item.id === runtime.selectedProject?.id}
-          <button class="tab-x" title="重命名项目" onclick={promptRenameProject}>✎</button>
-        {/if}
-      </div>
-    {/each}
-    <button class="tab add" title="新建项目" onclick={() => (newProjectOpen = true)}>+</button>
-    <!-- 项目级操作（保存/导入/关闭都是对单个项目的，放在项目 tab 行） -->
-    <span class="tabs-sep"></span>
-    <button class="btn ghost" title="从文件导入项目（追加到当前）" onclick={() => runtime.openProject().catch(() => {})} disabled={runtime.busy}>
-      导入项目
-    </button>
-    {#if project}
-      {@const savePath = runtime.projectSavePath(project.id)}
-      <button
-        class="btn ghost"
-        title={savePath ? `保存到 ${savePath}` : "保存（首次将选择位置）"}
-        onclick={() => runtime.saveCurrentProject().catch(() => {})}
-        disabled={runtime.busy}
-      >保存</button>
-      <button
-        class="btn ghost"
-        title="另存为（选择新位置）"
-        onclick={() => runtime.saveProjectAs().catch(() => {})}
-        disabled={runtime.busy}
-      >另存为</button>
-      <button
-        class="btn ghost"
-        title="关闭项目（不删除文件）"
-        onclick={() =>
-          (closeProjectState = { project: project.id, name: project.name })}
-      >关闭</button>
-    {/if}
-  </nav>
-
-  {#if project}
-    <nav class="tabs sub">
-      {#each project.factories as item (item.id)}
-        <div class:active={item.id === runtime.selectedFactory?.id} class="tab-cluster">
-          <button
-            class="tab"
-            onclick={() => runtime.selectFactory(item.id).catch(() => {})}
-          >{item.name}</button>
-          <button
-            class="tab-x"
-            title="重命名工厂"
-            onclick={() => promptRenameFactory(item.name)}
-          >✎</button>
-          <button
-            class="tab-x"
-            title="克隆工厂"
-            onclick={() => runtime.cloneFactory(item.id).catch(() => {})}
-          >⧉</button>
-          <button
-            class="tab-x"
-            title="删除工厂"
-            onclick={() => runtime.removeFactory(item.id).catch(() => {})}
-          >×</button>
-        </div>
-      {/each}
-      <button class="tab add" title="新建工厂" onclick={() => (newFactoryOpen = true)}>+</button>
-    </nav>
-  {/if}
-
   <!-- ══ 工作区 ══ -->
   <main class="workspace">
-    <!-- 左栏：目标 / 外部输入 / 项目设置 -->
-    <aside class="col">
+    <!-- 左栏：生产目标 / 外部输入 / 目标表达式（低频设置收进右上角抽屉） -->
+    <aside class="col rail rail-left">
       {#if factory}
         <section class="panel">
           <button
@@ -1488,8 +1597,8 @@
               {@const q = flowQuality(target.flow)}
               {@const fluidRange = fluidRangeOf(target.flow)}
               <div class="row-item one-line" class:has-range={fluidRange}>
-                <!-- 图标承载两个动作：左键更改流、右键看建议（右键没有可见按钮，
-                     靠 title 提示；「建议」按钮保留为可发现入口，同一个动作）。 -->
+                <!-- 图标承载两个动作：左键更改流、右键查看供给建议。
+                     右键没有可见按钮，靠 title / 悬停卡片提示；移除动作在行尾悬浮出现。 -->
                 <HoverIcon
                   type={icon.type}
                   name={icon.name}
@@ -1539,6 +1648,8 @@
                   class="num"
                   type="text"
                   inputmode="decimal"
+                  title={`目标产量：${flowLabel(target.flow)}（按项目时间刻度）`}
+                  aria-label={`目标产量：${flowLabel(target.flow)}`}
                   value={isEnergyFlow(target.flow)
                     ? formatPowerValue(Math.abs(target.amount))
                     : String(Number((target.amount * currentTimeFactor()).toFixed(6)))}
@@ -1553,8 +1664,14 @@
                     }
                   }}
                 />
-                <button class="btn ghost up" title="建议能产出该流的机制（等同右键图标）" onclick={() => openSuggestions(target.flow)}>建议</button>
-                <button class="btn ghost up" title="移除目标" onclick={() => runtime.removeTarget(target.id).catch(() => {})}>×</button>
+                <span class="row-actions">
+                  <button
+                    class="icon-btn danger"
+                    title={`移除目标「${flowLabel(target.flow)}」`}
+                    aria-label="移除目标"
+                    onclick={() => runtime.removeTarget(target.id).catch(() => {})}
+                  >×</button>
+                </span>
               </div>
             {:else}
               <div class="empty-hint">还没有目标流</div>
@@ -1569,6 +1686,165 @@
               })}
             disabled={!runtime.activeContext}
           >+ 添加目标</button>
+          {/if}
+        </section>
+
+        <section class="panel">
+          <button
+            class="title panel-toggle"
+            aria-expanded={panels.inputs}
+            onclick={() => (panels.inputs = !panels.inputs)}
+          >
+            <span class="toggle-label">
+              <span class="chev">{panels.inputs ? "▾" : "▸"}</span>
+              外部输入 <span class="count">{externalInputs.length}</span>
+            </span>
+          </button>
+          {#if panels.inputs}
+          <div
+            class="rows"
+            use:dndzone={{ items: dragInputs, flipDurationMs: 120 }}
+            onconsider={handleInputsConsider}
+            onfinalize={handleInputsFinalize}
+          >
+            {#each dragInputs as input (input.id)}
+              {@const icon = flowIcon(input.flow)}
+              {@const q = flowQuality(input.flow)}
+              {@const fluidRange = fluidRangeOf(input.flow)}
+              <div class="row-item">
+                <HoverIcon
+                  type={icon.type}
+                  name={icon.name}
+                  size={26}
+                  detailKind={flowDetailKind(icon)}
+                  quality={q ?? undefined}
+                  flow={input.flow}
+                  title={`外部输入：${flowLabel(input.flow)} · 点击更改`}
+                  onClick={() => editExternalInput(input)}
+                />
+                <span class="row-name" title={dualVarLabel(input.flow)}>{flowLabel(input.flow)}</span>
+                {#if fluidRange}
+                  <!-- 与目标行同一套语义：区间内任何温度的外部输入都算满足。
+                       外部输入本来就是"从外面买"，指定可接受温度区间比钉死一个温度更准。 -->
+                  <span class="temp-range">
+                    <input
+                      class="num temp"
+                      type="text"
+                      inputmode="numeric"
+                      value={String(fluidRange[0])}
+                      title="期望温度下限（℃）"
+                      onchange={(event) => {
+                        const next = parseTemperature((event.currentTarget as HTMLInputElement).value);
+                        if (next !== null) setExternalInputFluidRange(input, next, fluidRange[1]);
+                      }}
+                    />
+                    <span class="temp-sep">~</span>
+                    <input
+                      class="num temp"
+                      type="text"
+                      inputmode="numeric"
+                      value={String(fluidRange[1])}
+                      title="期望温度上限（℃）"
+                      onchange={(event) => {
+                        const next = parseTemperature((event.currentTarget as HTMLInputElement).value);
+                        if (next !== null) setExternalInputFluidRange(input, fluidRange[0], next);
+                      }}
+                    />
+                  </span>
+                {/if}
+                <input
+                  class="num"
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  title={`外部输入成本：获得 1 个「${flowLabel(input.flow)}」的代价（按项目时间刻度）`}
+                  aria-label={`外部输入成本：${flowLabel(input.flow)}`}
+                  value={isEnergyFlow(input.flow)
+                    ? String(Number((input.penalty * 1e6).toFixed(6)))
+                    : String(Number((input.penalty / currentTimeFactor()).toFixed(6)))}
+                  onchange={(event) => {
+                    const raw = (event.currentTarget as HTMLInputElement).value;
+                    const value = Number(raw);
+                    if (!Number.isFinite(value)) return;
+                    // 能量流：输入为"每 MW 成本"，内部存"每 W 成本"（除以 1e6）。
+                    // 非能量：输入为"当前单位下产出 1 个的代价"，内部存"每秒产出 1 个的代价"。
+                    const internal = isEnergyFlow(input.flow)
+                      ? value / 1e6
+                      : value * currentTimeFactor();
+                    runtime.setExternalInputPenalty(input.id, internal).catch(() => {});
+                  }}
+                />
+                <span class="row-actions">
+                  <button
+                    class="icon-btn danger"
+                    title={`移除外部输入「${flowLabel(input.flow)}」`}
+                    aria-label="移除外部输入"
+                    onclick={() => runtime.removeExternalInput(input.id).catch(() => {})}
+                  >×</button>
+                </span>
+              </div>
+            {:else}
+              <div class="empty-hint">还没有外部输入</div>
+          {/each}
+        </div>
+        {#if implicitInputs.length > 0}
+          <div class="implicit-hint">环境自带（隐式免费，编辑成本可转为手动输入）</div>
+          <div class="rows">
+            {#each implicitInputs as flow (dualVarLabel(flow))}
+              {@const icon = flowIcon(flow)}
+              {@const q = flowQuality(flow)}
+              <div class="row-item one-line implicit" title="当前地表或轨道的可用资源，严格供给下也免费">
+                <HoverIcon
+                  type={icon.type}
+                  name={icon.name}
+                  size={24}
+                  detailKind={flowDetailKind(icon)}
+                  quality={q ?? undefined}
+                  flow={flow}
+                  title={`环境自带：${flowLabel(flow)} · 严格供给下也免费`}
+                />
+                <span class="row-name" title={flowLabel(flow)}>{flowLabel(flow)}</span>
+                <span class="chip">隐式</span>
+                <input
+                  class="num"
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  value="0"
+                  aria-label={`外部成本：${flowLabel(flow)}`}
+                  title="编辑成本后保存为手动外部输入"
+                  disabled={implicitPromotions[JSON.stringify(flow)]}
+                  onchange={(event) => {
+                    const raw = event.currentTarget.value.trim();
+                    const value = Number(raw);
+                    if (raw === "" || !Number.isFinite(value) || value < 0) return;
+                    const internal = isEnergyFlow(flow) ? value / 1e6 : value * currentTimeFactor();
+                    promoteImplicitInput(flow, internal).catch(() => {});
+                  }}
+                />
+                <span class="row-actions">
+                  <button
+                    class="icon-btn"
+                    title={`以零成本把「${flowLabel(flow)}」保存为手动外部输入`}
+                    aria-label="设为手动外部输入"
+                    disabled={implicitPromotions[JSON.stringify(flow)]}
+                    onclick={() => promoteImplicitInput(flow, 0).catch(() => {})}
+                  >+</button>
+                </span>
+              </div>
+            {/each}
+          </div>
+        {/if}
+        <button
+          class="btn"
+          onclick={() =>
+            (flowSelector = {
+              title: "添加外部输入流",
+              respectAccessibility: false,
+              onSelectFlow: (flow) => runtime.addExternalInputFlow(flow, 1).catch(() => {}),
+            })}
+          disabled={!runtime.activeContext}
+        >+ 添加外部输入</button>
           {/if}
         </section>
 
@@ -1594,6 +1870,8 @@
                       class="num"
                       type="number"
                       step="0.1"
+                      title="目标表达式的常数项"
+                      aria-label="目标表达式常数"
                       value={String(expression.constant)}
                       onchange={(event) => {
                         const value = Number((event.currentTarget as HTMLInputElement).value);
@@ -1637,6 +1915,7 @@
                           detailKind={flowDetailKind(icon)}
                           quality={flowQuality(term.flow) ?? undefined}
                           flow={term.flow}
+                          title={`表达式项：${flowLabel(term.flow)} · 点击更换流`}
                         />
                       </button>
                       <span class="row-name" title={dualVarLabel(term.flow)}>{flowLabel(term.flow)}</span>
@@ -1644,6 +1923,8 @@
                         class="num"
                         type="number"
                         step="0.1"
+                        title={`表达式系数：${flowLabel(term.flow)}`}
+                        aria-label={`表达式系数：${flowLabel(term.flow)}`}
                         value={String(term.coefficient)}
                         onchange={(event) => {
                           const value = Number((event.currentTarget as HTMLInputElement).value);
@@ -1689,160 +1970,438 @@
           {/if}
         </section>
 
-        <section class="panel">
-          <button
-            class="title panel-toggle"
-            aria-expanded={panels.inputs}
-            onclick={() => (panels.inputs = !panels.inputs)}
-          >
-            <span class="toggle-label">
-              <span class="chev">{panels.inputs ? "▾" : "▸"}</span>
-              外部输入 <span class="count">{externalInputs.length}</span>
-            </span>
-          </button>
-          {#if panels.inputs}
-          <div
-            class="rows"
-            use:dndzone={{ items: dragInputs, flipDurationMs: 120 }}
-            onconsider={handleInputsConsider}
-            onfinalize={handleInputsFinalize}
-          >
-            {#each dragInputs as input (input.id)}
-              {@const icon = flowIcon(input.flow)}
-              {@const q = flowQuality(input.flow)}
-              {@const fluidRange = fluidRangeOf(input.flow)}
-              <div class="row-item">
-                <HoverIcon
-                  type={icon.type}
-                  name={icon.name}
-                  size={26}
-                  detailKind={flowDetailKind(icon)}
-                  quality={q ?? undefined}
-                  flow={input.flow}
-                />
-                <span class="row-name" title={dualVarLabel(input.flow)}>{flowLabel(input.flow)}</span>
-                {#if fluidRange}
-                  <!-- 与目标行同一套语义：区间内任何温度的外部输入都算满足。
-                       外部输入本来就是"从外面买"，指定可接受温度区间比钉死一个温度更准。 -->
-                  <span class="temp-range">
-                    <input
-                      class="num temp"
-                      type="text"
-                      inputmode="numeric"
-                      value={String(fluidRange[0])}
-                      title="期望温度下限（℃）"
-                      onchange={(event) => {
-                        const next = parseTemperature((event.currentTarget as HTMLInputElement).value);
-                        if (next !== null) setExternalInputFluidRange(input, next, fluidRange[1]);
-                      }}
-                    />
-                    <span class="temp-sep">~</span>
-                    <input
-                      class="num temp"
-                      type="text"
-                      inputmode="numeric"
-                      value={String(fluidRange[1])}
-                      title="期望温度上限（℃）"
-                      onchange={(event) => {
-                        const next = parseTemperature((event.currentTarget as HTMLInputElement).value);
-                        if (next !== null) setExternalInputFluidRange(input, fluidRange[0], next);
-                      }}
-                    />
-                  </span>
-                {/if}
-                <input
-                  class="num"
-                  type="number"
-                  step="0.1"
-                  min="0"
-                  value={isEnergyFlow(input.flow)
-                    ? String(Number((input.penalty * 1e6).toFixed(6)))
-                    : String(Number((input.penalty / currentTimeFactor()).toFixed(6)))}
-                  onchange={(event) => {
-                    const raw = (event.currentTarget as HTMLInputElement).value;
-                    const value = Number(raw);
-                    if (!Number.isFinite(value)) return;
-                    // 能量流：输入为"每 MW 成本"，内部存"每 W 成本"（除以 1e6）。
-                    // 非能量：输入为"当前单位下产出 1 个的代价"，内部存"每秒产出 1 个的代价"。
-                    const internal = isEnergyFlow(input.flow)
-                      ? value / 1e6
-                      : value * currentTimeFactor();
-                    runtime.setExternalInputPenalty(input.id, internal).catch(() => {});
-                  }}
-                />
-                <button class="btn ghost" title="更改外部输入流" onclick={() => editExternalInput(input)}>更改</button>
-                <button class="btn ghost" title="移除" onclick={() => runtime.removeExternalInput(input.id).catch(() => {})}>×</button>
-              </div>
-            {:else}
-              <div class="empty-hint">还没有外部输入</div>
-          {/each}
+      {:else}
+        <div class="rail-empty">
+          <strong>还没有选中的工厂</strong>
+          <span>在顶部选择一个工厂，或点「+」新建工厂开始规划。</span>
         </div>
-        {#if implicitInputs.length > 0}
-          <div class="implicit-hint">环境自带（隐式免费，编辑成本可转为手动输入）</div>
-          <div class="rows">
-            {#each implicitInputs as flow (dualVarLabel(flow))}
-              {@const icon = flowIcon(flow)}
-              {@const q = flowQuality(flow)}
-              <div class="row-item implicit" title="当前地表或轨道的可用资源，严格供给下也免费">
+      {/if}
+    </aside>
+
+    <!-- 中栏：机制列表 -->
+    <section class="col center">
+      <div class="toolbar">
+        <button
+          class="btn primary"
+          title="自动规划：按规划偏好的枚举列表生成候选机制 → 选优 → 回写机制列表。总是按严格供给求解，并在完成后自动开启严格供给"
+          onclick={() => runtime.autoPlan().catch(() => {})}
+          disabled={runtime.autoPlanning || !factory}
+        >
+          {runtime.autoPlanning ? "规划中…" : "自动规划"}
+        </button>
+        {#if factory}
+          <button
+            class="btn"
+            title="选择机制类型并添加到当前工厂"
+            onclick={(event) => {
+              const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+              if (addMechMenuPos) {
+                addMechMenuPos = null;
+                return;
+              }
+              // 下拉菜单：优先向下，底部空间不足时向上翻转。
+              const estimate = mechKinds.length * 30 + 18;
+              const below = window.innerHeight - rect.bottom - 8;
+              const above = rect.top - 8;
+              addMechMenuPos = {
+                top:
+                  below >= estimate || below >= above
+                    ? rect.bottom + 4
+                    : Math.max(8, rect.top - estimate),
+                right: Math.max(8, window.innerWidth - rect.right),
+              };
+            }}
+          >
+            + 添加机制{addMechMenuPos ? " ▴" : " ▾"}
+          </button>
+        {/if}
+        {#if !runtime.activeContext}
+          <span class="chip warn">未载入游戏数据</span>
+        {/if}
+        <span class="spacer"></span>
+        <div class="toolbar-stats">
+          <span class="chip">{mechanics.length} 机制</span>
+          <span class="chip">{targets.length} 目标</span>
+          {#if runtime.solveError}<span class="chip warn">求解错误</span>{/if}
+        </div>
+        <div class="menu-wrap">
+          <button
+            class="icon-btn"
+            aria-label="更多机制操作"
+            aria-expanded={mechMenuOpen}
+            title="更多机制操作：保留已有机制、清理未用、按流量排序、配方合并"
+            onclick={() => {
+              mechMenuOpen = !mechMenuOpen;
+              projectMenuOpen = false;
+              factoryMenuOpen = false;
+              appMenuOpen = false;
+            }}
+          >⋯</button>
+          {#if mechMenuOpen}
+            <div class="menu-catcher" aria-hidden="true" onclick={() => (mechMenuOpen = false)}></div>
+            <div class="menu toolbar-menu">
+              <div class="menu-label">机制列表</div>
+              {#if planning}
+                <label
+                  class="menu-check"
+                  title="开启后，已有的已启用机制也参与优化并保留原列表，只追加新机制；未使用的机制可用「移除未用」清理。"
+                >
+                  <input
+                    type="checkbox"
+                    checked={planning.preserve_existing_mechanics ?? false}
+                    disabled={runtime.autoPlanning || !factory}
+                    onchange={(event) => runtime.setPreserveExistingMechanics(event.currentTarget.checked).catch(() => {})}
+                  />
+                  保留已有机制
+                </label>
+              {/if}
+              <button
+                disabled={!solved}
+                title="移除本次求解中用量为 0 的机制"
+                onclick={() => { mechMenuOpen = false; runtime.cleanup("remove-unused").catch(() => {}); }}
+              >移除未用</button>
+              <button
+                disabled={!solved}
+                title="按求解流量从大到小重排机制"
+                onclick={() => { mechMenuOpen = false; runtime.cleanup("sort-by-solution-rate").catch(() => {}); }}
+              >按流量排序</button>
+              <button
+                class:active={mergeRecipes}
+                title="同配方不同品质合并成一张卡"
+                onclick={() => (mergeRecipes = !mergeRecipes)}
+              >
+                配方合并
+                <span class="menu-mark">{mergeRecipes ? "✓" : ""}</span>
+              </button>
+            </div>
+          {/if}
+        </div>
+      </div>
+
+      <div
+        class="mech-list"
+        use:dndzone={{ items: dragMechanics, flipDurationMs: 120 }}
+        onconsider={handleMechanicsConsider}
+        onfinalize={handleMechanicsFinalize}
+      >
+        {#each mechGroups as group (group.key)}
+          {#if group.entries.length > 1}
+            <!-- 配方合并组：标题（配方名 + 机器名），子机制完整显示 -->
+            <div class="mech-group">
+              <div class="mech-group-head">
+                <span class="mech-group-title" title={groupTitle(group.entries)}>
+                  {groupTitle(group.entries)}
+                </span>
+                {#if groupMachine(group.entries)}
+                  <span class="chip">{groupMachine(group.entries)}</span>
+                {/if}
+                <span class="chip muted">{group.entries.length} 品质</span>
+              </div>
+              {#each group.entries as entry (entry.id)}
+                <div class="mech-group-row">
+                  <MechanicCard
+                    {entry}
+                    project={project?.id ?? 0}
+                    factory={factory?.id ?? 0}
+                    solution={solveMap.get(entry.id) ?? null}
+                    onPick={(kind, a, b) => pickForMechanic(entry.id, kind, a, b)}
+                    onToggleEnabled={() => runtime.setMechanicEnabled(entry.id, !entry.enabled).catch(() => {})}
+                    onRemove={() => runtime.removeMechanic(entry.id).catch(() => {})}
+                    onModuleSlot={(slot, module) => runtime.setModuleSlot(entry.id, slot, module).catch(() => {})}
+                    onAddBeacon={() => addBeacon(entry.id)}
+                    onPickFuel={() => pickFuel(entry.id)}
+                    onClone={() => runtime.cloneMechanic(entry.id).catch(() => {})}
+                  />
+                </div>
+              {/each}
+            </div>
+          {:else}
+            <!-- 单条机制：不嵌套，直接完整卡片 -->
+            {#each group.entries as entry (entry.id)}
+              <MechanicCard
+                {entry}
+                project={project?.id ?? 0}
+                factory={factory?.id ?? 0}
+                solution={solveMap.get(entry.id) ?? null}
+                onPick={(kind, a, b) => pickForMechanic(entry.id, kind, a, b)}
+                onToggleEnabled={() => runtime.setMechanicEnabled(entry.id, !entry.enabled).catch(() => {})}
+                onRemove={() => runtime.removeMechanic(entry.id).catch(() => {})}
+                onModuleSlot={(slot, module) => runtime.setModuleSlot(entry.id, slot, module).catch(() => {})}
+                onAddBeacon={() => addBeacon(entry.id)}
+                onPickFuel={() => pickFuel(entry.id)}
+                onClone={() => runtime.cloneMechanic(entry.id).catch(() => {})}
+              />
+            {/each}
+          {/if}
+        {:else}
+          <div class="empty-state">
+            {#if project && factory}
+              <strong>还没有机制</strong>
+              <span class="muted">从「+ 添加机制」开始，或让「自动规划」生成候选。</span>
+            {:else if project}
+              <strong>选择一个工厂</strong>
+              <span class="muted">在顶部工厂栏切换，或点「+」新建工厂。</span>
+            {:else}
+              <strong>新建或打开一个项目</strong>
+              <span class="muted">项目栏在左上角；首次使用请先在「数据」里加载游戏数据。</span>
+            {/if}
+          </div>
+        {/each}
+      </div>
+    </section>
+
+    {#if addMechMenuPos}
+      <div class="menu-catcher" aria-hidden="true" onclick={() => (addMechMenuPos = null)}></div>
+      <div class="menu fixed" style={`top:${addMechMenuPos.top}px;right:${addMechMenuPos.right}px`}>
+        {#each mechKinds as option (option.kind)}
+          <button
+            onclick={() => {
+              addMechMenuPos = null;
+              runtime.addMechanic(option.kind).catch(() => {});
+            }}
+          >{option.label}</button>
+        {/each}
+      </div>
+    {/if}
+
+    <!-- 右栏：求解结果（数据上下文移到顶部「数据」入口） -->
+    <aside class="col rail rail-right">
+      <section class="panel solve-panel">
+        <div class="solve-head">
+          <div class="title">求解结果</div>
+          {#if runtime.solving}
+            <span class="chip warn"><span class="status-dot"></span>求解中</span>
+          {:else if solved}
+            <span class="chip ok"><span class="status-dot"></span>已求解</span>
+          {:else if notSolved}
+            <span class="chip warn"><span class="status-dot"></span>未求解</span>
+          {:else}
+            <span class="chip">待求解</span>
+          {/if}
+        </div>
+        {#if runtime.solveError}
+          <div class="err-box prominent" title="最近一次求解/自动规划失败">
+            <strong>求解失败</strong>：{runtime.solveError}
+          </div>
+        {/if}
+        {#if solve && "solved" in solve.status}
+          {@const status = solve.status.solved}
+          {@const activeFlows = status.flows.filter((b) => Math.abs(b.amount) / Math.max(b.scale ?? 1, 1e-12) > 1e-9)}
+          <div class="cost-block">
+            <span class="eyebrow">总成本</span>
+            <strong class="mono cost-value">{status.cost.toFixed(3)}</strong>
+            <span class="cost-note">机器碰撞箱面积之和 · 结果随编辑自动刷新</span>
+          </div>
+          <div class="section-head">
+            <span>总流平衡</span>
+            <span class="count">{activeFlows.length} 条</span>
+          </div>
+          <div class="rows compact">
+            {#each activeFlows as balance (balance.flow)}
+              {@const icon = flowIcon(balance.flow)}
+              {@const q = flowQuality(balance.flow)}
+              <div class="row-item one-line result-row">
+                <!-- 与目标面板同一套图标语义：左键/右键都可查看建议。 -->
                 <HoverIcon
                   type={icon.type}
                   name={icon.name}
-                  size={24}
+                  size={22}
                   detailKind={flowDetailKind(icon)}
                   quality={q ?? undefined}
-                  flow={flow}
+                  flow={balance.flow}
+                  title="查看能供给或消耗该流的机制"
+                  onClick={() => openSuggestions(balance.flow)}
+                  onContextMenu={() => openSuggestions(balance.flow)}
                 />
-                <span class="row-name">{flowLabel(flow)}</span>
-                <span class="chip">隐式</span>
-                <input
-                  class="num"
-                  type="number"
-                  step="0.1"
-                  min="0"
-                  value="0"
-                  aria-label={`外部成本：${flowLabel(flow)}`}
-                  title="编辑成本后保存为手动外部输入"
-                  disabled={implicitPromotions[JSON.stringify(flow)]}
-                  onchange={(event) => {
-                    const raw = event.currentTarget.value.trim();
-                    const value = Number(raw);
-                    if (raw === "" || !Number.isFinite(value) || value < 0) return;
-                    const internal = isEnergyFlow(flow) ? value / 1e6 : value * currentTimeFactor();
-                    promoteImplicitInput(flow, internal).catch(() => {});
-                  }}
-                />
-                <button class="btn ghost" title="以零成本保存为手动外部输入" disabled={implicitPromotions[JSON.stringify(flow)]} onclick={() => promoteImplicitInput(flow, 0).catch(() => {})}>设为手动</button>
+                <span class="row-name" title={dualVarLabel(balance.flow)}>
+                  <span class="flow-name">{flowLabel(balance.flow)}</span>
+                  {#if flowLabelSub(balance.flow)}
+                    <span class="flow-sub">{flowLabelSub(balance.flow)}</span>
+                  {/if}
+                </span>
+                <strong class:amount-pos={balance.amount > 0} class="mono amount">{formatFlowAmount(balance.flow, balance.amount)}</strong>
+                <span class="row-actions">
+                  <button class="icon-btn" title={`建议：查看能供给或消耗「${flowLabel(balance.flow)}」的机制`} aria-label="查看建议" onclick={() => openSuggestions(balance.flow)}>✦</button>
+                </span>
               </div>
             {/each}
           </div>
+        {:else if solve && "not-solved" in solve.status}
+          {@const status = solve.status["not-solved"]}
+          <div class="err-box">
+            <div><strong>未求解</strong>：{status.description}</div>
+            {#if status.no_provider.length > 0}
+              <div>无供给：{status.no_provider.map(dualVarLabel).join(", ")}</div>
+            {/if}
+            {#if status.no_consumer.length > 0}
+              <div>无消耗：{status.no_consumer.map(dualVarLabel).join(", ")}</div>
+            {/if}
+          </div>
+        {:else}
+          <div class="empty-hint">改动目标、外部输入或机制后会自动重新求解。</div>
         {/if}
-        <button
-          class="btn"
-          onclick={() =>
-            (flowSelector = {
-              title: "添加外部输入流",
-              respectAccessibility: false,
-              onSelectFlow: (flow) => runtime.addExternalInputFlow(flow, 1).catch(() => {}),
-            })}
-          disabled={!runtime.activeContext}
-        >+ 添加外部输入</button>
-          {/if}
-        </section>
-      {/if}
+      </section>
+    </aside>
+  </main>
+</div>
 
-      {#if factory}
-        <section class="panel">
+  <!-- ══ 游戏数据（上下文与缓存管理） ══ -->
+  {#if dataOpen}
+    <div
+      class="backdrop"
+      role="button"
+      tabindex="0"
+      onclick={(event) => { if (event.target === event.currentTarget) dataOpen = false; }}
+      onkeydown={(event) => backdropKeydown(event, () => (dataOpen = false))}
+    >
+      <div class="modal data-modal" role="dialog" aria-modal="true" aria-label="游戏数据与上下文">
+        <header class="modal-head">
+          <div class="modal-heading">
+            <span class="eyebrow">游戏数据</span>
+            <strong>上下文与缓存</strong>
+          </div>
+          <button class="icon-btn" title="关闭游戏数据" aria-label="关闭游戏数据" onclick={() => (dataOpen = false)}>×</button>
+        </header>
+
+        <div class="data-actions">
+          <button class="btn primary" onclick={() => { dataOpen = false; openLoadGame(); }}>加载游戏数据…</button>
           <button
-            class="title panel-toggle"
-            aria-expanded={panels.env}
-            onclick={() => (panels.env = !panels.env)}
-          >
-            <span class="toggle-label">
-              <span class="chev">{panels.env ? "▾" : "▸"}</span>
-              工厂环境
-            </span>
-          </button>
-          {#if panels.env}
+            class="btn"
+            title="载入应用内置的示例数据（若当前构建包含）"
+            onclick={() => runtime.loadDemoData().catch(() => {})}
+          >载入内置示例</button>
+        </div>
+
+        {#if project && project.context_id && !runtime.contexts.some((c) => c.id === project.context_id)}
+          <div class="warn-strip">当前项目引用的游戏上下文已删除或不存在，请从下方列表选一个并点「应用」重新绑定。</div>
+        {/if}
+
+        {#if runtime.contexts.length === 0}
+          <div class="empty-state">
+            <strong>还没有游戏上下文</strong>
+            <span class="muted">加载 Factorio 可执行文件，或导入一份数据缓存后即可选择。</span>
+            <button class="btn primary" onclick={() => { dataOpen = false; openLoadGame(); }}>加载游戏数据</button>
+          </div>
+        {:else}
+          <div class="context-list">
+            {#each runtime.contexts as context (context.id)}
+              <div
+                class="ctx-row data-row"
+                class:active={project
+                  ? project?.context_id === context.id
+                  : runtime.activeContext?.id === context.id}
+              >
+                <div class="ctx-main">
+                  <div class="ctx-name">
+                    <span class="ctx-name-text">{context.name}</span>
+                    {#if project?.context_id === context.id}<span class="chip ok">项目使用中</span>{/if}
+                    {#if runtime.activeContext?.id === context.id}<span class="chip">全局激活</span>{/if}
+                    {#if !context.loaded}<span class="chip">未载入</span>{/if}
+                  </div>
+                  <div class="ctx-meta" title={contextTitle(context)}>{contextSummary(context)}</div>
+                  {#if context.mods.length > 0}
+                    <div class="ctx-mods" title={contextTitle(context)}>
+                      {context.mods.slice(0, 5).map((mod) => mod.name).join(" · ")}{context.mods.length > 5 ? ` 等 ${context.mods.length} 个` : ""}
+                    </div>
+                  {/if}
+                </div>
+                <div class="ctx-actions">
+                  <button
+                    class="btn"
+                    title={project
+                      ? (project?.context_id === context.id
+                          ? "当前项目已使用此上下文"
+                          : "把当前项目改用此上下文")
+                      : (runtime.activeContext?.id === context.id
+                          ? "当前为新项目默认上下文"
+                          : "设为新项目默认上下文")}
+                    disabled={project
+                      ? project?.context_id === context.id || runtime.contextBusy
+                      : runtime.activeContext?.id === context.id || runtime.contextBusy}
+                    onclick={() => {
+                      if (project) {
+                        runtime.setProjectContext(project.id, context.id).catch(() => {});
+                      } else {
+                        runtime.setActiveContext(context.id).catch(() => {});
+                      }
+                    }}
+                  >应用</button>
+                  <button class="icon-btn" title="重命名上下文" aria-label="重命名上下文" onclick={() => renameContextPrompt(context)}>✎</button>
+                  <button
+                    class="icon-btn danger"
+                    title="删除该上下文的缓存"
+                    aria-label="删除上下文缓存"
+                    onclick={() =>
+                      (confirmState = {
+                        message: `删除上下文「${context.name}」的缓存？`,
+                        confirmLabel: "删除",
+                        danger: true,
+                        action: () => runtime.deleteContext(context.id).catch(() => {}),
+                      })}
+                  >×</button>
+                </div>
+              </div>
+            {/each}
+          </div>
+          {#if project}
+            {@const projCtx = runtime.contexts.find((c) => c.id === project.context_id)}
+            {#if projCtx && projCtx.icon_root}
+              <div class="kv"><span>图标目录</span><span class="mono small" title={projCtx.icon_root}>{projCtx.icon_root}</span></div>
+            {/if}
+          {/if}
+        {/if}
+
+        <footer class="modal-foot">
+          <span class="muted">上下文只决定可用原型与图标；项目文档独立保存。</span>
+          <button class="btn ghost" onclick={() => (dataOpen = false)}>关闭</button>
+        </footer>
+      </div>
+    </div>
+  {/if}
+
+  <!-- ══ 设置抽屉（工厂环境 / 项目设置） ══ -->
+  {#if settingsOpen}
+    <div
+      class="backdrop drawer"
+      role="button"
+      tabindex="0"
+      onclick={(event) => { if (event.target === event.currentTarget) settingsOpen = false; }}
+      onkeydown={(event) => backdropKeydown(event, () => (settingsOpen = false))}
+    >
+      <div class="drawer-panel" role="dialog" aria-modal="true" aria-label="环境与项目设置">
+        <header class="drawer-head">
+          <div class="drawer-heading">
+            <span class="eyebrow">工厂与项目</span>
+            <strong>{settingsTab === "factory" ? (factory?.name ?? "工厂环境") : (project?.name ?? "项目设置")}</strong>
+          </div>
+          <button class="icon-btn" title="关闭设置" aria-label="关闭设置" onclick={() => (settingsOpen = false)}>×</button>
+        </header>
+
+        <div class="segmented" role="tablist" aria-label="设置分类">
+          <button
+            class:active={settingsTab === "factory"}
+            role="tab"
+            aria-selected={settingsTab === "factory"}
+            title="星球、地表、主品质以及严格供给 / 严格消耗"
+            onclick={() => (settingsTab = "factory")}
+          >环境与约束</button>
+          <button
+            class:active={settingsTab === "project"}
+            role="tab"
+            aria-selected={settingsTab === "project"}
+            title="时间刻度、品质上限、里程碑、产能与规划偏好"
+            onclick={() => (settingsTab = "project")}
+          >项目设置</button>
+        </div>
+
+        <div class="drawer-body">
+          {#if settingsTab === "factory"}
+            {#if factory}
+              <section class="drawer-section">
+                <div class="section-head">
+                  <span>工厂环境</span>
+                  <span class="count">影响可用资源、光照与默认品质</span>
+                </div>
           <div class="env-row">
             <button
               class="icon-btn"
@@ -1935,23 +2494,16 @@
             />
             严格消耗（未出现在目标中的物品必须配平）
           </label>
-          {/if}
-        </section>
-      {/if}
-
-      {#if project}
-        <section class="panel project-settings">
-          <button
-            class="title panel-toggle"
-            aria-expanded={panels.settings}
-            onclick={() => (panels.settings = !panels.settings)}
-          >
-            <span class="toggle-label">
-              <span class="chev">{panels.settings ? "▾" : "▸"}</span>
-              项目设置 <span class="count">全局</span>
-            </span>
-          </button>
-          {#if panels.settings}
+              </section>
+            {:else}
+              <div class="rail-empty"><strong>当前没有选中的工厂</strong><span>先在顶部选择一个工厂。</span></div>
+            {/if}
+          {:else if project}
+            <section class="drawer-section">
+              <div class="section-head">
+                <span>项目设置</span>
+                <span class="count">对所有工厂生效</span>
+              </div>
           <div class="field">
             <label for="time-scale">时间刻度</label>
             <select
@@ -2229,290 +2781,14 @@
             {/if}
           </div>
           <button class="btn" onclick={() => (prefsOpen = true)}>规划偏好…</button>
-          {/if}
-        </section>
-      {/if}
-    </aside>
-
-    <!-- 中栏：机制列表 -->
-    <section class="col center">
-      <div class="toolbar">
-        <button class="btn" title="自动规划：按规划偏好的枚举列表生成候选机制 → 选优 → 回写机制列表。总是按严格供给求解，并在完成后自动开启严格供给" onclick={() => runtime.autoPlan().catch(() => {})} disabled={runtime.autoPlanning || !factory}>
-          {runtime.autoPlanning ? "规划中…" : "自动规划"}
-        </button>
-        {#if planning}
-          <label class="check-row" title="开启后，已有的已启用机制也参与优化，并保留原列表、只追加新机制；未使用的机制可用“移除未用”清理。手动机制沿用手动工厂规则，不受自动枚举的地表条件过滤。此为项目级偏好。">
-            <input type="checkbox" checked={planning.preserve_existing_mechanics ?? false}
-              disabled={runtime.autoPlanning || !factory}
-              onchange={(event) => runtime.setPreserveExistingMechanics(event.currentTarget.checked).catch(() => {})} />
-            保留已有机制
-          </label>
-        {/if}
-        <button class="btn ghost" title="移除本次求解中用量为 0 的机制" onclick={() => runtime.cleanup("remove-unused").catch(() => {})} disabled={!solved}>
-          移除未用
-        </button>
-        <button class="btn ghost" title="按求解流量从大到小重排机制" onclick={() => runtime.cleanup("sort-by-solution-rate").catch(() => {})} disabled={!solved}>
-          按流量排序
-        </button>
-        <button
-          class="btn ghost"
-          class:on={mergeRecipes}
-          title="配方合并：同配方不同品质合并成一张卡"
-          onclick={() => (mergeRecipes = !mergeRecipes)}
-        >配方合并</button>
-        {#if factory}
-          <button
-            class="btn"
-            onclick={(event) => {
-              const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-              if (addMechMenuPos) {
-                addMechMenuPos = null;
-                return;
-              }
-              // 下拉菜单：优先向下，底部空间不足时向上翻转。
-              const estimate = mechKinds.length * 30 + 18;
-              const below = window.innerHeight - rect.bottom - 8;
-              const above = rect.top - 8;
-              addMechMenuPos = {
-                top:
-                  below >= estimate || below >= above
-                    ? rect.bottom + 4
-                    : Math.max(8, rect.top - estimate),
-                right: Math.max(8, window.innerWidth - rect.right),
-              };
-            }}
-          >
-            + 添加机制{addMechMenuPos ? " ▴" : " ▾"}
-          </button>
-        {/if}
-        {#if !runtime.activeContext}
-          <span class="muted">先加载游戏数据（左上角「游戏数据」）</span>
-        {/if}
-        <span class="spacer"></span>
-        <span class="chip">{mechanics.length} 机制</span>
-        <span class="chip">{targets.length} 目标</span>
-        {#if solved}<span class="chip ok">已求解</span>{/if}
-        {#if notSolved}<span class="chip warn">未求解</span>{/if}
-        {#if runtime.solveError}<span class="chip warn">求解错误</span>{/if}
-      </div>
-
-      <div
-        class="mech-list"
-        use:dndzone={{ items: dragMechanics, flipDurationMs: 120 }}
-        onconsider={handleMechanicsConsider}
-        onfinalize={handleMechanicsFinalize}
-      >
-        {#each mechGroups as group (group.key)}
-          {#if group.entries.length > 1}
-            <!-- 配方合并组：标题（配方名 + 机器名），子机制完整显示 -->
-            <div class="mech-group">
-              <div class="mech-group-head">
-                <span class="mech-group-title" title={groupTitle(group.entries)}>
-                  {groupTitle(group.entries)}
-                </span>
-                {#if groupMachine(group.entries)}
-                  <span class="chip">{groupMachine(group.entries)}</span>
-                {/if}
-                <span class="chip muted">{group.entries.length} 品质</span>
-              </div>
-              {#each group.entries as entry (entry.id)}
-                <div class="mech-group-row">
-                  <MechanicCard
-                    {entry}
-                    project={project?.id ?? 0}
-                    factory={factory?.id ?? 0}
-                    solution={solveMap.get(entry.id) ?? null}
-                    onPick={(kind, a, b) => pickForMechanic(entry.id, kind, a, b)}
-                    onToggleEnabled={() => runtime.setMechanicEnabled(entry.id, !entry.enabled).catch(() => {})}
-                    onRemove={() => runtime.removeMechanic(entry.id).catch(() => {})}
-                    onModuleSlot={(slot, module) => runtime.setModuleSlot(entry.id, slot, module).catch(() => {})}
-                    onAddBeacon={() => addBeacon(entry.id)}
-                    onPickFuel={() => pickFuel(entry.id)}
-                    onClone={() => runtime.cloneMechanic(entry.id).catch(() => {})}
-                  />
-                </div>
-              {/each}
-            </div>
+            </section>
           {:else}
-            <!-- 单条机制：不嵌套，直接完整卡片 -->
-            {#each group.entries as entry (entry.id)}
-              <MechanicCard
-                {entry}
-                project={project?.id ?? 0}
-                factory={factory?.id ?? 0}
-                solution={solveMap.get(entry.id) ?? null}
-                onPick={(kind, a, b) => pickForMechanic(entry.id, kind, a, b)}
-                onToggleEnabled={() => runtime.setMechanicEnabled(entry.id, !entry.enabled).catch(() => {})}
-                onRemove={() => runtime.removeMechanic(entry.id).catch(() => {})}
-                onModuleSlot={(slot, module) => runtime.setModuleSlot(entry.id, slot, module).catch(() => {})}
-                onAddBeacon={() => addBeacon(entry.id)}
-                onPickFuel={() => pickFuel(entry.id)}
-                onClone={() => runtime.cloneMechanic(entry.id).catch(() => {})}
-              />
-            {/each}
+            <div class="rail-empty"><strong>当前没有选中的项目</strong><span>先新建或打开一个项目。</span></div>
           {/if}
-        {:else}
-          <div class="empty-state">
-            {#if factory}
-              <span class="muted">还没有机制，点下方「添加机制」</span>
-            {:else}
-              <span class="muted">选择或新建一个工厂</span>
-            {/if}
-          </div>
-        {/each}
+        </div>
       </div>
-    </section>
-
-    {#if addMechMenuPos}
-      <div class="menu-catcher" aria-hidden="true" onclick={() => (addMechMenuPos = null)}></div>
-      <div class="menu fixed" style={`top:${addMechMenuPos.top}px;right:${addMechMenuPos.right}px`}>
-        {#each mechKinds as option (option.kind)}
-          <button
-            onclick={() => {
-              addMechMenuPos = null;
-              runtime.addMechanic(option.kind).catch(() => {});
-            }}
-          >{option.label}</button>
-        {/each}
-      </div>
-    {/if}
-
-    <!-- 右栏：求解结果 / 数据上下文 -->
-    <aside class="col">
-      <section class="panel">
-        <div class="title">求解结果</div>
-        {#if runtime.solveError}
-          <div class="err-box prominent" title="最近一次求解/自动规划失败">
-            <strong>求解失败</strong>：{runtime.solveError}
-          </div>
-        {/if}
-        {#if solve && "solved" in solve.status}
-          {@const status = solve.status.solved}
-          <div class="kv">
-            <span>总成本</span><strong class="mono">{status.cost.toFixed(3)}</strong>
-          </div>
-          <div class="subtitle">总流平衡</div>
-          <div class="rows compact">
-            {#each status.flows.filter((b) => Math.abs(b.amount) / Math.max(b.scale ?? 1, 1e-12) > 1e-9) as balance (balance.flow)}
-              {@const icon = flowIcon(balance.flow)}
-              {@const q = flowQuality(balance.flow)}
-              <div class="row-item one-line">
-                <!-- 与目标面板同一套图标语义：右键 = 建议。这里流是被求解的结果、
-                     不可更改，所以左键保持原来的「建议」（同一个动作）。 -->
-                <HoverIcon
-                  type={icon.type}
-                  name={icon.name}
-                  size={22}
-                  detailKind={flowDetailKind(icon)}
-                  quality={q ?? undefined}
-                  flow={balance.flow}
-                  title="左键/右键建议能供给或消耗它的机制"
-                  onClick={() => openSuggestions(balance.flow)}
-                  onContextMenu={() => openSuggestions(balance.flow)}
-                />
-                <span class="row-name" title={dualVarLabel(balance.flow)}>
-                  <span class="flow-name">{flowLabel(balance.flow)}</span>
-                  {#if flowLabelSub(balance.flow)}
-                    <span class="flow-sub">{flowLabelSub(balance.flow)}</span>
-                  {/if}
-                </span>
-                <strong class:amount-pos={balance.amount > 0} class="mono amount">{formatFlowAmount(balance.flow, balance.amount)}</strong>
-                <button class="btn ghost up" title="建议能产出该流的机制（等同右键图标）" onclick={() => openSuggestions(balance.flow)}>建议</button>
-              </div>
-            {/each}
-          </div>
-        {:else if solve && "not-solved" in solve.status}
-          {@const status = solve.status["not-solved"]}
-          <div class="err-box">
-            <div><strong>未求解</strong>：{status.description}</div>
-            {#if status.no_provider.length > 0}
-              <div>无供给：{status.no_provider.map(dualVarLabel).join(", ")}</div>
-            {/if}
-            {#if status.no_consumer.length > 0}
-              <div>无消耗：{status.no_consumer.map(dualVarLabel).join(", ")}</div>
-            {/if}
-          </div>
-        {:else}
-          <div class="empty-hint">改动数据会自动重新求解</div>
-        {/if}
-      </section>
-
-      <section class="panel">
-        <div class="title">游戏上下文 <span class="count">{runtime.contexts.length}</span></div>
-        {#if project && project.context_id && !runtime.contexts.some((c) => c.id === project.context_id)}
-          <div class="warn-strip">当前项目引用的游戏上下文已删除或不存在，请从下方列表选一个并点「应用」重新绑定。</div>
-        {/if}
-        {#if runtime.contexts.length === 0}
-          <div class="empty-hint">尚未加载任何游戏上下文。请先加载一个（左上角「加载游戏」或「从文件导入 Dump」）以创建。</div>
-        {:else}
-          <div class="rows compact">
-            {#each runtime.contexts as context (context.id)}
-              <div
-                class="ctx-row"
-                class:active={project
-                  ? project?.context_id === context.id
-                  : runtime.activeContext?.id === context.id}
-              >
-                <div class="ctx-main">
-                  <div class="ctx-name">
-                    {context.name}
-                    {#if project?.context_id === context.id}<span class="chip ok">项目上下文</span>{/if}
-                    {#if !context.loaded}<span class="chip">未载入</span>{/if}
-                  </div>
-                  <div class="ctx-meta" title={contextTitle(context)}>{contextSummary(context)}</div>
-                </div>
-                <div class="ctx-actions">
-                  <button
-                    class="btn ghost"
-                    title={project
-                      ? (project?.context_id === context.id
-                          ? "当前项目已用此上下文"
-                          : "把选中项目改用此上下文")
-                      : (runtime.activeContext?.id === context.id
-                          ? "当前为新项目默认上下文"
-                          : "设为新项目默认上下文")}
-                    disabled={project
-                      ? project?.context_id === context.id || runtime.contextBusy
-                      : runtime.activeContext?.id === context.id || runtime.contextBusy}
-                    onclick={() => {
-                      if (project) {
-                        runtime.setProjectContext(project.id, context.id).catch(() => {});
-                      } else {
-                        runtime.setActiveContext(context.id).catch(() => {});
-                      }
-                    }}
-                  >应用</button>
-                  <button
-                    class="btn ghost"
-                    title="重命名"
-                    onclick={() => renameContextPrompt(context)}
-                  >改名</button>
-                  <button
-                    class="btn ghost danger"
-                    title="删除缓存"
-                    onclick={() =>
-                      (confirmState = {
-                        message: `删除上下文「${context.name}」的缓存？`,
-                        confirmLabel: "删除",
-                        danger: true,
-                        action: () => runtime.deleteContext(context.id).catch(() => {}),
-                      })}
-                  >删除</button>
-                </div>
-              </div>
-            {/each}
-          </div>
-          {#if project}
-            {@const projCtx = runtime.contexts.find((c) => c.id === project.context_id)}
-            {#if projCtx && projCtx.icon_root}
-              <div class="kv"><span>图标目录</span><span class="mono small" title={projCtx.icon_root}>{projCtx.icon_root}</span></div>
-            {/if}
-          {/if}
-        {/if}
-      </section>
-    </aside>
-  </main>
-</div>
+    </div>
+  {/if}
 
 <!-- ══ 选择器 ══ -->
 {#if selector}
@@ -2822,7 +3098,7 @@
                   {#if beacon}
                     <HoverIcon type="entity" name={beacon.id} size={24} detailKind="beacon" quality={beacon.quality} />
                   {:else}
-                    <Icon type="entity" name="beacon" size={24} />
+                    <Icon type="entity" name="beacon" size={24} title="选择插件塔" />
                   {/if}
                 </button>
                 <span class="prefs-name">{beacon ? runtime.localizedName("beacon", beacon.id) : "未选插件塔"}</span>
@@ -3045,18 +3321,27 @@
 {/if}
 
 <style>
+  /* ── 应用骨架 ───────────────────────────────────────────────── */
+
   .app {
     display: flex;
     flex-direction: column;
     height: 100vh;
+    overflow: hidden;
+    background: var(--bg);
   }
 
+  /* ── 顶栏：项目 / 工厂 / 数据 / 全局动作 ─────────────────────── */
+
   .appbar {
+    position: relative;
+    z-index: 20;
+    flex: 0 0 auto;
+    height: 52px;
     display: flex;
-    flex-wrap: wrap;
     align-items: center;
-    gap: 6px;
-    padding: 4px 10px;
+    gap: 10px;
+    padding: 0 14px;
     background: var(--panel);
     border-bottom: 1px solid var(--line);
   }
@@ -3064,58 +3349,305 @@
   .brand {
     display: flex;
     align-items: center;
-    gap: 6px;
-    margin-right: 6px;
+    gap: 8px;
+    flex: 0 0 auto;
+    user-select: none;
   }
 
   .brand-mark {
     display: grid;
     place-items: center;
-    width: 20px;
-    height: 20px;
-    color: #0f1f19;
+    width: 24px;
+    height: 24px;
+    color: var(--accent-ink);
     background: var(--accent);
-    border-radius: 5px;
-    font-size: 11px;
+    border-radius: 4px;
+    font-size: 12px;
     font-weight: 800;
+    line-height: 1;
   }
 
   .brand-name {
+    color: var(--text);
     font-size: 11px;
-    font-weight: 800;
-    letter-spacing: 0.14em;
+    font-weight: 750;
+    letter-spacing: 0.2em;
   }
 
   .spacer {
-    flex: 1;
+    flex: 1 1 auto;
   }
 
   .menu-wrap {
     position: relative;
+    display: inline-flex;
+    align-items: center;
   }
+
+  .menu-catcher {
+    position: fixed;
+    z-index: 39;
+    inset: 0;
+  }
+
+  /* 项目切换按钮：把项目名做成可点的主入口。 */
+  .project-trigger {
+    height: 34px;
+    max-width: 290px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 9px 0 10px;
+    color: var(--text);
+    background: var(--panel-elev);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: border-color 90ms ease, background 90ms ease;
+  }
+
+  .project-trigger:hover {
+    background: var(--card-hover);
+    border-color: var(--line-strong);
+  }
+
+  .trigger-label {
+    color: var(--faint);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+  }
+
+  .trigger-value {
+    min-width: 0;
+    overflow: hidden;
+    font-size: 12px;
+    font-weight: 650;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .caret {
+    flex: 0 0 auto;
+    color: var(--faint);
+    font-size: 9px;
+  }
+
+  /* 工厂段：与左侧项目区分，用竖线隔开。 */
+  .factory-bar {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding-left: 10px;
+    border-left: 1px solid var(--line);
+  }
+
+  .bar-label {
+    flex: 0 0 auto;
+    color: var(--faint);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+  }
+
+  .factory-tabs {
+    min-width: 0;
+    max-width: min(42vw, 620px);
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+
+  .factory-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .ftab {
+    height: 32px;
+    max-width: 190px;
+    display: inline-flex;
+    align-items: center;
+    padding: 0 11px;
+    overflow: hidden;
+    color: var(--muted);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    font-size: 11.5px;
+    font-weight: 550;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: color 90ms ease, background 90ms ease, border-color 90ms ease;
+  }
+
+  .ftab:hover {
+    color: var(--text);
+    background: var(--card-hover);
+  }
+
+  .ftab.active {
+    color: var(--text);
+    background: var(--accent-dim);
+    border-color: var(--line-strong);
+    font-weight: 700;
+  }
+
+  .ftab.add {
+    width: 28px;
+    padding: 0;
+    justify-content: center;
+    color: var(--faint);
+    font-size: 15px;
+  }
+
+  .ftab.add:hover {
+    color: var(--text);
+  }
+
+  .icon-btn.subtle {
+    color: var(--faint);
+  }
+
+  /* 数据状态 pill */
+  .status-pill {
+    height: 32px;
+    max-width: 260px;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 0 10px;
+    color: var(--text);
+    background: var(--panel-elev);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    cursor: pointer;
+    transition: border-color 90ms ease, background 90ms ease;
+  }
+
+  .status-pill:hover {
+    background: var(--card-hover);
+    border-color: var(--line-strong);
+  }
+
+  .status-pill .status-dot {
+    background: var(--ok);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 16%, transparent);
+  }
+
+  .status-pill.busy .status-dot {
+    background: var(--warn);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 16%, transparent);
+  }
+
+  .status-text {
+    min-width: 0;
+    overflow: hidden;
+    font-size: 11px;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .status-action {
+    flex: 0 0 auto;
+    padding-left: 7px;
+    color: var(--faint);
+    border-left: 1px solid var(--line);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+  }
+
+  .undo-group {
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+  }
+
+  .undo-group .icon-btn {
+    width: 28px;
+    height: 30px;
+    border: none;
+    border-radius: 0;
+    font-size: 15px;
+  }
+
+  .undo-group .icon-btn + .icon-btn {
+    border-left: 1px solid var(--line);
+  }
+
+  .settings-btn {
+    height: 30px;
+    padding: 0 9px;
+    border-color: transparent;
+  }
+
+  /* ── 菜单 ───────────────────────────────────────────────────── */
 
   .menu {
     position: absolute;
-    z-index: 30;
+    z-index: 40;
     top: calc(100% + 6px);
     left: 0;
-    min-width: 210px;
-    padding: 5px;
+    min-width: 232px;
+    max-height: min(520px, calc(100vh - 76px));
+    overflow-y: auto;
     display: grid;
-    gap: 2px;
+    gap: 1px;
+    padding: 6px;
     background: var(--panel);
     border: 1px solid var(--line-strong);
     border-radius: var(--radius);
-    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+    box-shadow: var(--shadow-strong);
+  }
+
+  .menu.app-menu {
+    left: auto;
+    right: 0;
+    width: 238px;
+  }
+
+  .menu.project-menu {
+    width: 292px;
+  }
+
+  .menu.factory-menu,
+  .menu.toolbar-menu {
+    left: auto;
+    right: 0;
+    width: 220px;
+  }
+
+  .menu-label {
+    padding: 5px 8px 4px;
+    color: var(--faint);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
   }
 
   .menu button {
-    padding: 7px 9px;
-    text-align: left;
+    width: 100%;
+    min-height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 8px;
+    color: var(--text);
     background: transparent;
     border: none;
     border-radius: var(--radius-sm);
-    font-size: 11px;
+    font-size: 11.5px;
+    text-align: left;
     cursor: pointer;
   }
 
@@ -3123,50 +3655,140 @@
     background: var(--card-hover);
   }
 
-  .add-wrap {
-    padding-top: 2px;
+  .menu button.active {
+    background: var(--accent-dim);
+    box-shadow: inset 2px 0 0 var(--accent);
   }
 
-  /* fixed 定位的弹出菜单：完全脱离布局，不参与任何滚动区域 */
-  .menu-catcher {
-    position: fixed;
-    z-index: 29;
-    inset: 0;
+  .menu button.danger {
+    color: var(--danger);
   }
 
+  .menu button.danger:hover {
+    background: var(--danger-dim);
+  }
+
+  .menu button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .menu-item-main {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .menu-meta {
+    flex: 0 0 auto;
+    color: var(--faint);
+    font-family: var(--mono);
+    font-size: 9px;
+  }
+
+  .menu-empty {
+    padding: 7px 8px;
+    color: var(--faint);
+    font-size: 11px;
+  }
+
+  .menu-sep {
+    height: 1px;
+    margin: 5px 4px;
+    background: var(--line);
+  }
+
+  .menu-note {
+    padding: 7px 8px 3px;
+    margin-top: 4px;
+    color: var(--faint);
+    border-top: 1px solid var(--line);
+    font-family: var(--mono);
+    font-size: 9px;
+    line-height: 1.5;
+  }
+
+  .theme-switch {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 2px;
+    padding: 2px;
+    background: var(--input-bg);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+  }
+
+  .theme-switch button {
+    min-height: 26px;
+    justify-content: center;
+    padding: 0 6px;
+    color: var(--muted);
+    font-size: 10.5px;
+    text-align: center;
+  }
+
+  .theme-switch button.active {
+    color: var(--accent-ink);
+    background: var(--accent);
+    box-shadow: none;
+    font-weight: 700;
+  }
+
+  .menu-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 30px;
+    padding: 6px 8px;
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    font-size: 11.5px;
+    cursor: pointer;
+  }
+
+  .menu-check:hover {
+    background: var(--card-hover);
+  }
+
+  .menu-check input {
+    margin: 0;
+    accent-color: var(--accent);
+  }
+
+  .menu-mark {
+    margin-left: auto;
+    color: var(--ok);
+    font-family: var(--mono);
+    font-size: 11px;
+  }
+
+  /* 添加机制菜单：fixed 定位，脱离滚动容器。 */
   .menu.fixed {
     position: fixed;
-    z-index: 30;
-    /* 覆盖基类 .menu 的 left: 0：fixed 定位用 right 锚定，left 必须 auto，
-       否则 left:0 + right 会同时生效把面板拉伸到整个视口宽。 */
+    z-index: 40;
     left: auto;
     width: max-content;
-    min-width: 190px;
-    max-width: min(320px, calc(100vw - 16px));
-    max-height: min(420px, 60vh);
+    min-width: 200px;
+    max-width: min(340px, calc(100vw - 16px));
+    max-height: min(460px, 64vh);
     overflow-y: auto;
-    padding: 5px;
-    display: grid;
-    gap: 2px;
-    background: var(--panel);
-    border: 1px solid var(--line-strong);
-    border-radius: var(--radius);
-    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
   }
 
+  /* ── 顶栏错误条 ─────────────────────────────────────────────── */
+
   .err-strip {
+    flex: 0 0 auto;
     display: flex;
     align-items: flex-start;
-    gap: 8px;
-    padding: 6px 12px;
+    gap: 10px;
+    padding: 6px 14px;
     color: var(--danger);
     background: var(--danger-dim);
     border-bottom: 1px solid var(--danger-line);
     font-size: 11px;
   }
 
-  /* 报错条限高：最多 3 行。每条强制一行 + 省略号，裁掉的部分靠复制按钮取回
-     （悬停单行也能用 title 看到完整内容）。 */
   .err-lines {
     flex: 1 1 auto;
     min-width: 0;
@@ -3184,14 +3806,18 @@
     white-space: nowrap;
   }
 
+  .err-line.notice {
+    color: var(--muted);
+  }
+
   .err-copy {
     flex: 0 0 auto;
-    padding: 1px 6px;
+    height: 22px;
+    padding: 0 7px;
     color: inherit;
     background: transparent;
     border: 1px solid var(--danger-line);
     border-radius: var(--radius-sm);
-    font-family: inherit;
     font-size: 10px;
     cursor: pointer;
   }
@@ -3204,112 +3830,29 @@
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
-    padding: 6px 10px;
-    margin: 0 12px 8px;
+    padding: 8px 10px;
+    margin: 0 0 10px;
     color: var(--warn);
     background: var(--warn-dim);
     border: 1px solid var(--warn-line);
     border-radius: var(--radius-sm);
     font-size: 11px;
+    line-height: 1.45;
   }
 
-  .tabs {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-    padding: 6px 12px 0;
-    background: var(--panel);
-    border-bottom: 1px solid var(--line);
-  }
-
-  .tabs.sub {
-    background: var(--bg);
-  }
-
-  .tab {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 6px 10px;
-    color: var(--muted);
-    background: transparent;
-    border: 1px solid transparent;
-    border-bottom: none;
-    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
-    font-size: 11px;
-    cursor: pointer;
-    max-width: 180px;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-  }
-
-  .tab:hover {
-    color: var(--text);
-  }
-
-  .tab.active {
-    color: var(--text);
-    background: var(--bg);
-    border-color: var(--line);
-  }
-
-  .tab-cluster {
-    display: inline-flex;
-    align-items: center;
-    gap: 2px;
-    background: transparent;
-    border: 1px solid transparent;
-    border-bottom: none;
-    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
-    max-width: 200px;
-  }
-
-  .tab-cluster.active {
-    background: var(--bg);
-    border-color: var(--line);
-  }
-
-  .tab-cluster .tab {
-    max-width: 160px;
-    border: none;
-    border-radius: 0;
-  }
-
-  .tab-cluster .tab:hover {
-    background: transparent;
-  }
-
-  .tabs:not(.sub) .tab.active {
-    background: var(--bg);
-  }
-
-  .tab.add {
-    color: var(--faint);
-    font-size: 14px;
-  }
-
-  .tab-x {
-    padding: 0 2px;
-    color: var(--faint);
-    background: transparent;
-    border: none;
-    font-size: 12px;
-    cursor: pointer;
-  }
-
-  .tab-x:hover {
-    color: var(--danger);
-  }
+  /* ── 工作区 ─────────────────────────────────────────────────── */
 
   .workspace {
-    flex: 1;
+    flex: 1 1 auto;
     min-height: 0;
     display: grid;
-    grid-template-columns: 330px minmax(420px, 1fr) 300px;
-    gap: 0;
-    padding: 10px 0;
+    grid-template-columns: 324px minmax(440px, 1fr) 312px;
     overflow: hidden;
+    background-color: var(--bg);
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 56px 56px;
   }
 
   .col {
@@ -3317,70 +3860,174 @@
     min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;
-    display: grid;
-    align-content: start;
-    gap: 10px;
-    padding: 0 12px;
   }
 
-  /* 分区竖分隔线 */
-  .col + .col {
+  .rail {
+    display: flex;
+    flex-direction: column;
+    background: var(--panel);
+  }
+
+  .rail-left {
+    border-right: 1px solid var(--line);
+  }
+
+  .rail-right {
     border-left: 1px solid var(--line);
   }
 
+  .rail .panel {
+    padding: 14px 16px;
+    background: transparent;
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .rail .panel:last-child {
+    border-bottom: 0;
+  }
+
+  .rail-left .panel:first-child .title {
+    font-size: 12px;
+    letter-spacing: 0.08em;
+  }
+
+  .rail-empty {
+    display: grid;
+    gap: 8px;
+    margin: 16px;
+    padding: 18px 16px;
+    color: var(--muted);
+    border: 1px dashed var(--line-strong);
+    border-radius: var(--radius);
+    font-size: 11.5px;
+    line-height: 1.55;
+  }
+
+  .rail-empty strong {
+    color: var(--text);
+    font-size: 12px;
+  }
+
+  .center {
+    display: flex;
+    flex-direction: column;
+    padding: 0 16px 28px;
+  }
+
+  /* ── 面板标题 / 折叠 ────────────────────────────────────────── */
+
+  .panel-toggle {
+    width: 100%;
+    display: block;
+    margin: 0 0 10px;
+    padding: 0;
+    color: var(--text);
+    background: none;
+    border: 0;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .panel-toggle:hover {
+    color: var(--text);
+  }
+
+  .panel-toggle:hover .chev {
+    color: var(--text);
+  }
+
+  .toggle-label {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+  }
+
+  .chev {
+    width: 9px;
+    flex: 0 0 auto;
+    color: var(--faint);
+    font-size: 9px;
+    transition: color 90ms ease;
+  }
+
+  .panel-toggle .count {
+    margin-left: auto;
+    color: var(--faint);
+    font-family: var(--mono);
+    font-size: 9px;
+    font-weight: 500;
+    letter-spacing: 0;
+  }
+
+  /* ── 列表行 ─────────────────────────────────────────────────── */
+
   .rows {
     display: grid;
-    gap: 4px;
-    margin-bottom: 8px;
+    gap: 1px;
+    margin-bottom: 10px;
   }
 
   .rows.compact {
-    gap: 2px;
+    gap: 1px;
   }
 
   .row-item {
     min-width: 0;
+    min-height: 32px;
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 4px;
-    min-height: 28px;
+    gap: 7px;
     padding: 3px 6px;
-    background: transparent;
     border: 1px solid transparent;
     border-radius: var(--radius-sm);
+    transition: background 80ms ease, border-color 80ms ease;
   }
 
-  /* 一行式行（目标 / 求解流）：图标 + 名称 + 数值 + 动作固定占一行，名称自己
-     以省略号收缩。否则动作按钮会被挤到第二行，同一行里同时出现「点图标」和
-     「点按钮」两种语义，看起来像两件事。 */
+  .row-item:hover,
+  .row-item:focus-within {
+    background: var(--card-hover);
+    border-color: var(--line);
+  }
+
   .row-item.one-line {
     flex-wrap: nowrap;
   }
 
   .row-item.one-line .row-name {
-    flex: 1 1 auto;
+    flex: 1 1 30px;
     overflow: hidden;
   }
 
-  /* 带温度区间的行在窄面板下允许换行：flex-wrap 是唯一能保证「永不横向溢出」的
-     机制。名称先自缩到 0；仍然放不下时整组控件换到第二行，而不是被右边缘切掉。
-     非流体行保持 nowrap（图标 + 名称 + 数值 + 动作固定一行，见上面的注释）。 */
   .row-item.one-line.has-range {
     flex-wrap: wrap;
   }
 
-  .row-item:hover {
-    background: var(--card-hover);
-    border-color: var(--line);
-  }
-
   .row-item .row-name {
-    flex: 1 1 90px;
+    /* 基准宽度刻意取小：flex 换行用基准值判断是否放得下，基准 90px 会让
+       「图标 + 名称 + 温度区间 + 数值 + 动作」在 1024 宽度下提前换行。
+       名称仍会 flex-grow 填满剩余空间，只是不再把数值挤到第二行。 */
+    flex: 1 1 30px;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     gap: 0;
+  }
+
+  .row-name {
     min-width: 0;
+    overflow: hidden;
+    font-size: 11.5px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .flow-name {
@@ -3390,55 +4037,69 @@
   }
 
   .flow-sub {
+    overflow: hidden;
     color: var(--faint);
     font-size: 9px;
-    overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .row-actions {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 1px;
+    opacity: 0;
+    transform: translateX(2px);
+    transition: opacity 90ms ease, transform 90ms ease;
+  }
+
+  .row-item:hover .row-actions,
+  .row-item:focus-within .row-actions {
+    opacity: 1;
+    transform: none;
+  }
+
+  .row-actions .icon-btn {
+    width: 20px;
+    height: 22px;
+    font-size: 11px;
   }
 
   .row-item.implicit {
     border-style: dashed;
     border-color: var(--accent-line);
-    background: color-mix(in srgb, var(--card) 82%, var(--accent) 6%);
-    opacity: 1;
+    background: color-mix(in srgb, var(--panel) 92%, var(--accent) 4%);
   }
 
   .implicit-hint {
-    margin-top: 6px;
+    margin: 10px 0 4px;
     color: var(--faint);
     font-size: 9px;
-    letter-spacing: 0.05em;
-  }
-
-  .btn.up {
-    padding: 2px 6px;
-    line-height: 1;
-  }
-
-  .row-name {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    font-size: 11px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
   }
 
   .num {
     width: 68px;
-    min-height: 24px;
+    min-height: 26px;
     padding: 0 6px;
-    text-align: right;
-    background: var(--bg);
+    color: var(--text);
+    background: var(--input-bg);
     border: 1px solid var(--line-strong);
     border-radius: var(--radius-sm);
     font-family: var(--mono);
-    font-size: 10px;
+    font-size: 10.5px;
+    text-align: right;
   }
 
-  /* 流体流的期望温度区间。两个输入包在 .temp-range 里：外层 gap 只算一次、
-     组内只留 2px，行变窄时整组换行，不会把「15 ~ 100」拆到两行去。 */
+  .num:focus {
+    border-color: var(--accent);
+    outline: none;
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+
   .temp-range {
     display: inline-flex;
     align-items: center;
@@ -3447,7 +4108,7 @@
   }
 
   .num.temp {
-    width: 36px;
+    width: 38px;
     text-align: center;
   }
 
@@ -3460,435 +4121,17 @@
     padding: 14px 4px;
     color: var(--faint);
     font-size: 11px;
+    line-height: 1.55;
   }
 
-  .center {
-    display: flex;
-    flex-direction: column;
-  }
-
-  .toolbar {
-    position: sticky;
-    top: 0;
-    z-index: 5;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 0 8px;
-    margin-bottom: 8px;
-    background: var(--bg);
-    border-bottom: 1px solid var(--line);
-  }
-
-  .mech-list {
-    display: grid;
-    align-content: start;
-    gap: 0;
-  }
-
-  /* 机制组：由内嵌卡片改为「分组标题 + 底部分隔线」的扁平 section。 */
-  .mech-group {
-    display: grid;
-    gap: 0;
-    padding: 0 0 6px;
-    background: transparent;
-    border: none;
-    border-bottom: 1px solid var(--line);
-  }
-
-  .mech-group-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 6px;
-    padding: 4px 6px 4px;
-  }
-
-  .mech-group-title {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    color: var(--muted);
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .mech-group-row + .mech-group-row {
-    border-top: 1px solid var(--line);
-  }
-
-  .mech-group-row .mech-card {
-    padding: 6px 8px;
-    background: transparent;
-    border: none;
-    border-radius: 0;
-  }
-
-  /* 单条机制（未合并）：同样扁平化为行式，避免浮起卡片。 */
-  .mech-list > .mech-card {
-    padding: 8px;
-    margin: 0;
-    background: transparent;
-    border: none;
-    border-radius: 0;
-    border-bottom: 1px solid var(--line);
-  }
-
-  .panel.project-settings {
-    /* 项目级设置与工厂级生产设置视觉区分：左侧品牌色强调条 */
-    border-left: 3px solid var(--accent-line);
-    background: color-mix(in srgb, var(--panel) 94%, var(--accent) 4%);
-  }
-
-  .empty-state {
-    padding: 30px;
-    text-align: center;
-    border: 1px dashed var(--line-strong);
-    border-radius: var(--radius);
-  }
-
-  .kv {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 8px;
-    padding: 4px 0;
-    color: var(--muted);
-    font-size: 11px;
-  }
-
-  .kv strong {
-    color: var(--text);
-  }
-
-  .kv .small {
-    overflow: hidden;
-    max-width: 180px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .subtitle {
-    margin: 10px 0 5px;
-    color: var(--muted);
-    font-size: 9px;
-    font-weight: 700;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-  }
-
-  .amount {
-    font-size: 10px;
-  }
-
-  .amount-pos {
-    color: var(--accent);
-  }
-
-  .ctx-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 8px;
-    background: var(--card);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-sm);
-  }
-
-  .ctx-row.active {
-    border-color: var(--accent-line);
-    background: var(--accent-dim);
-  }
-
-  .ctx-main {
-    min-width: 0;
-    flex: 1;
-    overflow: hidden;
-  }
-
-  .ctx-name {
-    min-width: 0;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    overflow: hidden;
-    font-size: 11px;
-    font-weight: 600;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .ctx-meta {
-    min-width: 0;
-    overflow: hidden;
-    margin-top: 2px;
-    color: var(--faint);
-    font-size: 9px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .ctx-actions {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    gap: 2px;
-    flex: 0 0 auto;
-    max-width: 50%;
-  }
-
-  .check {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    margin: 10px 0;
-    color: var(--text);
-    font-size: 11px;
-    cursor: pointer;
-  }
-
-  .backdrop {
-    position: fixed;
-    z-index: 50;
-    inset: 0;
-    display: grid;
-    place-items: center;
-    padding: 24px;
-    background: rgba(4, 7, 8, 0.72);
-  }
-
-  /* 低于选择器（z 40）的弹层：允许从其中再打开选择器 */
-  .backdrop.low {
-    z-index: 30;
-  }
-
-  .prefs-modal {
-    width: min(430px, 100%);
-    max-height: min(680px, calc(100vh - 48px));
-    display: grid;
-    gap: 10px;
-    padding: 14px;
-    overflow-y: auto;
-    background: var(--panel);
-    border: 1px solid var(--accent-line);
-    border-radius: var(--radius);
-  }
-
-  .prefs-section {
-    display: grid;
-    gap: 6px;
-    padding-top: 8px;
-    border-top: 1px solid var(--line);
-  }
-
-  .prefs-title {
-    color: var(--muted);
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.05em;
-  }
-
-  .prefs-list {
-    display: grid;
-    gap: 3px;
-    min-width: 0;
-  }
-
-  .prefs-item {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    padding: 2px 6px 2px 2px;
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: var(--radius-sm);
-    min-width: 0;
-  }
-
-  .prefs-item:hover {
-    background: var(--card-hover);
-    border-color: var(--line);
-  }
-
-  .prefs-name {
-    flex: 1 1 auto;
-    min-width: 0;
-    overflow: hidden;
-    font-size: 11px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .prefs-item.column {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 4px;
-    padding: 5px 6px;
-  }
-
-  /* 嵌套可折叠子面板（里程碑 / 产能）。 */
-  .subpanel {
-    margin-top: 10px;
-    padding-top: 6px;
-    border-top: 1px solid var(--line);
-  }
-
-  .subpanel .panel-toggle {
-    margin-bottom: 6px;
-  }
-
-  /* 推断（自动）产能项：虚线边框（与外部输入面板的隐式行一致）。 */
-  .prefs-item.inferred {
-    border-style: dashed;
-    border-color: var(--accent-line);
-    background: color-mix(in srgb, var(--card) 84%, var(--accent) 8%);
-  }
-
-  /* 用户指定的产能项：实线，辅以强调色表示是自己指定的。 */
-  .prefs-item.user-specified {
-    border-style: solid;
-    border-color: var(--accent-line);
-    background: color-mix(in srgb, var(--card) 92%, var(--accent) 6%);
-  }
-
-  .badge {
-    flex: 0 0 auto;
-    font-size: 9px;
-    letter-spacing: 0.05em;
-    color: var(--faint);
-    padding: 1px 5px;
-    border-radius: calc(var(--radius-sm) - 2px);
-    border: 1px solid var(--line);
-    white-space: nowrap;
-    max-width: 48px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .prefs-row {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-  }
-
-  .prefs-add-row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-top: 5px;
-  }
-
-  /* 左侧栏可折叠面板标题（复用 .title 基类的 flex / 间距）。 */
-  .panel-toggle {
-    width: 100%;
-    border: none;
-    background: none;
-    padding: 0;
-    margin: 0 0 8px;
-    cursor: pointer;
-    text-align: left;
-    font: inherit;
-    color: var(--text);
-  }
-
-  .panel-toggle:hover {
-    color: var(--accent);
-  }
-
-  .panel-toggle .count {
-    margin-left: auto;
-  }
-
-  .toggle-label {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    width: 100%;
-  }
-
-  .chev {
-    color: var(--muted);
-    font-size: 10px;
-    width: 12px;
-    flex: 0 0 auto;
-  }
-
-  .prefs-row.sub {
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-
-  .prefs-row.wrap {
-    flex-wrap: wrap;
-  }
-
-  /* #15：插件塔「插件数量」的口径说明（总数，不是每塔数） */
-  .prefs-hint {
-    color: var(--muted);
-    font-size: 10px;
-    line-height: 1.4;
-  }
-
-  .me-num {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    color: var(--muted);
-    font-size: 10px;
-  }
-
-  .me-num input {
-    width: 52px;
-    min-height: 22px;
-    padding: 0 4px;
-    text-align: right;
-    background: var(--card);
-    border: 1px solid var(--line-strong);
-    border-radius: var(--radius-sm);
-    font-family: var(--mono);
-    font-size: 10px;
-  }
-
-  .prefs-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 1px 5px 1px 2px;
-    background: var(--bg);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-sm);
-    font-size: 10px;
-  }
-
-  .prefs-chip-x {
-    width: 13px;
-    height: 13px;
-    display: grid;
-    place-items: center;
-    padding: 0;
-    color: var(--danger);
-    background: transparent;
-    border: none;
-    font-size: 9px;
-    line-height: 1;
-    cursor: pointer;
-  }
-
-  .env-row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
+  /* ── 目标表达式 ─────────────────────────────────────────────── */
 
   .expr-card {
     display: grid;
-    gap: 6px;
-    padding: 7px;
-    background: var(--bg);
+    gap: 7px;
+    margin-bottom: 6px;
+    padding: 8px;
+    background: var(--input-bg);
     border: 1px solid var(--line);
     border-radius: var(--radius-sm);
   }
@@ -3903,8 +4146,8 @@
   .expr-const {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
-    color: var(--muted);
+    gap: 6px;
+    color: var(--faint);
     font-size: 10px;
   }
 
@@ -3914,46 +4157,734 @@
   }
 
   .expr-term {
+    min-width: 0;
     display: flex;
     align-items: center;
     gap: 6px;
+  }
+
+  /* ── 中栏工具条 ─────────────────────────────────────────────── */
+
+  .toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 0 10px;
+    background: color-mix(in srgb, var(--bg) 92%, transparent);
+    border-bottom: 1px solid var(--line);
+    backdrop-filter: blur(8px);
+  }
+
+  .toolbar-stats {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .toolbar .menu-wrap {
+    margin-left: 2px;
+  }
+
+  /* ── 机制列表 ───────────────────────────────────────────────── */
+
+  .mech-list {
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-top: 10px;
+  }
+
+  .mech-group {
+    overflow: hidden;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+  }
+
+  .mech-group-head {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 7px 10px;
+    background: var(--panel-elev);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .mech-group-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-overflow: ellipsis;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .mech-group-row + .mech-group-row {
+    border-top: 1px solid var(--line);
+  }
+
+  /* 分组内的机制卡去掉自己的外框，由分组容器统一承载边界。 */
+  .mech-group-row :global(.mech-card) {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .mech-group-row :global(.mech-card:hover) {
+    background: color-mix(in srgb, var(--panel) 82%, var(--text) 4%);
+  }
+
+  /* 顶层机制卡由 MechanicCard 自己提供边框；这里只保证悬停/间距一致。 */
+  .mech-list > :global(.mech-card) {
+    margin-bottom: 0;
+  }
+
+  .empty-state {
+    display: grid;
+    justify-items: center;
+    gap: 6px;
+    padding: 56px 24px;
+    color: var(--muted);
+    border: 1px dashed var(--line-strong);
+    border-radius: var(--radius);
+    text-align: center;
+  }
+
+  .empty-state strong {
+    color: var(--text);
+    font-size: 12.5px;
+  }
+
+  .empty-state .muted {
+    max-width: 360px;
+    font-size: 11.5px;
+    line-height: 1.6;
+  }
+
+  /* ── 右栏：求解结果 ─────────────────────────────────────────── */
+
+  .solve-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+
+  .solve-head .title {
+    margin: 0;
+  }
+
+  .cost-block {
+    display: grid;
+    gap: 2px;
+    padding: 12px;
+    margin-bottom: 14px;
+    background: var(--input-bg);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+  }
+
+  .cost-value {
+    color: var(--text);
+    font-size: 26px;
+    font-weight: 650;
+    letter-spacing: -0.045em;
+    line-height: 1.15;
+  }
+
+  .cost-note {
+    color: var(--faint);
+    font-size: 9px;
+    line-height: 1.45;
+  }
+
+  .section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin: 14px 0 6px;
+    color: var(--faint);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+  }
+
+  .section-head .count {
+    font-family: var(--mono);
+    font-weight: 500;
+    letter-spacing: 0;
+  }
+
+  .amount {
+    flex: 0 0 auto;
+    color: var(--muted);
+    font-size: 10.5px;
+    font-weight: 550;
+    text-align: right;
+  }
+
+  .amount-pos {
+    color: var(--ok);
+  }
+
+  .result-row .row-actions {
+    opacity: 0;
+  }
+
+  .result-row:hover .row-actions,
+  .result-row:focus-within .row-actions {
+    opacity: 1;
+  }
+
+  /* ── 游戏数据模态 ───────────────────────────────────────────── */
+
+  .backdrop {
+    position: fixed;
+    z-index: 50;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    background: var(--backdrop);
+    backdrop-filter: blur(4px);
+  }
+
+  .backdrop.low {
+    z-index: 30;
+  }
+
+  .modal {
+    width: min(560px, 100%);
+    max-height: min(760px, calc(100vh - 48px));
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 16px;
+    overflow: hidden;
+    background: var(--panel);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-strong);
+  }
+
+  .modal.data-modal {
+    width: min(780px, 100%);
+  }
+
+  .modal-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .modal-heading {
+    display: grid;
+    gap: 3px;
+  }
+
+  .modal-heading strong {
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+
+  .data-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .context-list {
+    display: grid;
+    gap: 6px;
+    min-height: 0;
+    overflow-y: auto;
+    padding-right: 2px;
+  }
+
+  .ctx-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    background: var(--panel-elev);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+  }
+
+  .ctx-row.active {
+    background: var(--accent-dim);
+    border-color: var(--accent-line);
+    box-shadow: inset 2px 0 0 var(--accent);
+  }
+
+  .ctx-main {
+    min-width: 0;
+    flex: 1;
+    display: grid;
+    gap: 3px;
+  }
+
+  .ctx-name {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    overflow: hidden;
+    font-size: 12px;
+    font-weight: 650;
+  }
+
+  .ctx-name-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ctx-meta {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 9.5px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ctx-mods {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--faint);
+    font-size: 9px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ctx-actions {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+  }
+
+  .modal-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding-top: 10px;
+    border-top: 1px solid var(--line);
+    font-size: 10px;
+  }
+
+  .kv {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 5px 0;
+    color: var(--muted);
+    font-size: 10.5px;
+  }
+
+  .kv .small {
+    overflow: hidden;
+    max-width: 220px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* ── 设置抽屉 ───────────────────────────────────────────────── */
+
+  .backdrop.drawer {
+    z-index: 24;
+    display: flex;
+    justify-content: flex-end;
+    align-items: stretch;
+    padding: 0;
+    background: var(--backdrop);
+    backdrop-filter: blur(3px);
+  }
+
+  .drawer-panel {
+    width: min(468px, 100%);
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--panel);
+    border-left: 1px solid var(--line-strong);
+    box-shadow: var(--shadow-strong);
+    animation: drawer-in 140ms ease-out;
+  }
+
+  @keyframes drawer-in {
+    from {
+      transform: translateX(18px);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+
+  .drawer-head {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px 18px 12px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .drawer-heading {
+    display: grid;
+    gap: 3px;
     min-width: 0;
   }
 
-  .prod-input {
-    width: 56px;
-    min-height: 22px;
-    padding: 0 4px;
-    text-align: right;
-    background: var(--bg);
+  .drawer-heading strong {
+    overflow: hidden;
+    font-size: 14px;
+    font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .segmented {
+    flex: 0 0 auto;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2px;
+    margin: 12px 18px 0;
+    padding: 3px;
+    background: var(--input-bg);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+  }
+
+  .segmented button {
+    min-height: 30px;
+    padding: 0 10px;
+    color: var(--muted);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 550;
+    cursor: pointer;
+    transition: background 90ms ease, color 90ms ease;
+  }
+
+  .segmented button:hover {
+    color: var(--text);
+    background: var(--card-hover);
+  }
+
+  .segmented button.active {
+    color: var(--accent-ink);
+    background: var(--accent);
+    font-weight: 700;
+  }
+
+  .drawer-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 6px 18px 28px;
+  }
+
+  .drawer-section {
+    display: grid;
+    gap: 4px;
+    padding-top: 12px;
+  }
+
+  .drawer-section > .section-head {
+    margin-top: 4px;
+  }
+
+  /* 抽屉里的动作按钮保持内容宽度，避免在 grid 里被拉成整行横条。 */
+  .drawer-section > .btn,
+  .drawer-section .field > .btn {
+    justify-self: start;
+    align-self: start;
+  }
+
+  .env-row {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-height: 42px;
+    padding: 7px 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .env-row:last-of-type {
+    border-bottom: 0;
+  }
+
+  .env-row .sub {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text);
+    font-size: 11.5px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .drawer-section .subpanel {
+    margin-top: 16px;
+    padding-top: 8px;
+    border-top: 1px solid var(--line);
+  }
+
+  .drawer-section .subpanel > .panel-toggle {
+    margin-bottom: 8px;
+    padding: 7px 8px;
+    background: var(--input-bg);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+  }
+
+  .drawer-section .subpanel > .panel-toggle:hover {
+    background: var(--card-hover);
+    border-color: var(--line-strong);
+  }
+
+  /* ── 设置项列表（里程碑 / 产能 / 插件塔） ───────────────────── */
+
+  .prefs-list {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .prefs-item {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 4px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+  }
+
+  .prefs-item:hover {
+    background: var(--card-hover);
+    border-color: var(--line);
+  }
+
+  .prefs-item.column {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+    padding: 8px;
+    border-color: var(--line);
+    background: var(--input-bg);
+  }
+
+  .prefs-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    font-size: 11.5px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .prefs-row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+
+  .prefs-row.sub,
+  .prefs-row.wrap {
+    flex-wrap: wrap;
+  }
+
+  .prefs-title {
+    margin: 6px 0 2px;
+    color: var(--faint);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .prefs-hint {
+    color: var(--faint);
+    font-size: 9.5px;
+    line-height: 1.45;
+  }
+
+  .prefs-item.inferred {
+    border-style: dashed;
+    border-color: var(--accent-line);
+  }
+
+  .prefs-item.user-specified {
+    border-style: solid;
+    border-color: var(--accent-line);
+    background: color-mix(in srgb, var(--input-bg) 94%, var(--accent) 4%);
+  }
+
+  .prefs-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 5px 1px 2px;
+    background: var(--input-bg);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    font-size: 10px;
+  }
+
+  .prefs-chip-x {
+    width: 14px;
+    height: 14px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    color: var(--danger);
+    background: transparent;
+    border: none;
+    font-size: 10px;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .prod-input,
+  .me-num input,
+  .chip-num {
+    min-height: 24px;
+    padding: 0 5px;
+    color: var(--text);
+    background: var(--input-bg);
     border: 1px solid var(--line-strong);
     border-radius: var(--radius-sm);
     font-family: var(--mono);
     font-size: 10px;
+    text-align: right;
   }
 
+  .prod-input {
+    width: 58px;
+  }
+
+  .me-num {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--muted);
+    font-size: 10px;
+  }
+
+  .me-num input {
+    width: 52px;
+  }
+
+  .chip-num {
+    width: 42px;
+  }
+
+  .badge {
+    flex: 0 0 auto;
+    max-width: 54px;
+    padding: 1px 5px;
+    overflow: hidden;
+    color: var(--faint);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    font-size: 9px;
+    letter-spacing: 0.04em;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* ── 通用弹窗 ───────────────────────────────────────────────── */
+
   .mini-modal {
-    width: min(340px, 100%);
+    width: min(352px, 100%);
     display: grid;
-    gap: 10px;
-    padding: 14px;
+    gap: 12px;
+    padding: 16px;
     background: var(--panel);
-    border: 1px solid var(--accent-line);
+    border: 1px solid var(--line-strong);
     border-radius: var(--radius);
+    box-shadow: var(--shadow-strong);
   }
 
   .mini-modal.load-game {
-    width: min(460px, 100%);
+    width: min(480px, 100%);
+  }
+
+  .mini-title {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+
+  .confirm-text {
+    color: var(--muted);
+    font-size: 11.5px;
+    line-height: 1.55;
+  }
+
+  .mini-modal input {
+    min-height: 32px;
+    padding: 0 9px;
+    color: var(--text);
+    background: var(--input-bg);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+  }
+
+  .mini-modal input:focus {
+    border-color: var(--accent);
+    outline: none;
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+
+  .mini-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
   }
 
   .path-field {
     display: grid;
-    gap: 4px;
+    gap: 5px;
   }
 
   .path-label {
-    font-size: 11px;
-    color: var(--muted);
+    color: var(--faint);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
   }
 
   .path-row {
@@ -3967,34 +4898,87 @@
   }
 
   .err-text {
-    color: var(--danger, #e5484d);
+    color: var(--danger);
     font-size: 11px;
-    line-height: 1.4;
+    line-height: 1.45;
   }
 
-  .mini-title {
-    font-size: 12px;
-    font-weight: 700;
-  }
-
-  .confirm-text {
-    color: var(--muted);
-    font-size: 11px;
-    line-height: 1.5;
-  }
-
-  .mini-modal input {
-    min-height: 30px;
-    padding: 0 9px;
-    background: var(--bg);
+  /* 规划偏好弹窗：略高于设置抽屉、低于选择器。 */
+  .prefs-modal {
+    width: min(460px, 100%);
+    max-height: min(720px, calc(100vh - 48px));
+    display: grid;
+    gap: 12px;
+    padding: 16px;
+    overflow-y: auto;
+    background: var(--panel);
     border: 1px solid var(--line-strong);
-    border-radius: var(--radius-sm);
-    font-size: 12px;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-strong);
   }
 
-  .mini-actions {
-    display: flex;
-    justify-content: flex-end;
+  .prefs-section {
+    display: grid;
     gap: 6px;
+    padding-top: 10px;
+    border-top: 1px solid var(--line);
   }
+
+  /* ── 响应式：窄窗口先压缩两侧栏，再让行内动作常显 ──────────── */
+
+  @media (max-width: 1360px) {
+    .workspace {
+      grid-template-columns: 292px minmax(400px, 1fr) 280px;
+    }
+    .factory-tabs {
+      max-width: 34vw;
+    }
+    .status-text {
+      max-width: 150px;
+    }
+  }
+
+  @media (max-width: 1120px) {
+    .workspace {
+      grid-template-columns: 270px minmax(360px, 1fr) 260px;
+    }
+    .trigger-label,
+    .bar-label {
+      display: none;
+    }
+    .project-trigger {
+      max-width: 180px;
+    }
+    .settings-btn {
+      display: none;
+    }
+    .row-item {
+      gap: 6px;
+    }
+    .num {
+      width: 60px;
+    }
+    .num.temp {
+      width: 32px;
+    }
+    .temp-range {
+      gap: 1px;
+    }
+  }
+
+  @media (max-width: 920px) {
+    .workspace {
+      grid-template-columns: 1fr;
+      overflow-y: auto;
+    }
+    .rail-left,
+    .rail-right {
+      border: 0;
+      border-top: 1px solid var(--line);
+    }
+    .center {
+      order: -1;
+    }
+  }
+
 </style>

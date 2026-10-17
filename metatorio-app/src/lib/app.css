@@ -1,66 +1,88 @@
-/* Metatorio compact design system.
-   Professional engineering-tool aesthetic: dense, flat, precise.
-   Dark graphite baseline + teal accent; numbers in a monospace/table font.
-   Flattened cards, minimal radius, borders express structure (not "cards"). */
+/* Metatorio monochrome design system.
+   Pure black / pure white surfaces with a single neutral accent, crisp rules,
+   tabular numerals and tight vertical rhythm. Semantic colors (ok/warn/danger)
+   remain, but only for state — never for decoration. */
 
 :root {
   color-scheme: dark;
-  /* 圆角：工程化、平整。主面板 4px、小控件 3px。 */
-  --radius: 4px;
-  --radius-sm: 3px;
-  --mono: "JetBrains Mono", "SFMono-Regular", Consolas, "Cascadia Mono", monospace;
-  --sans: "Inter", "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
 
-  /* 深色石墨 + 青绿 accent（默认/基座）。 */
-  --bg: #0c0e0f;
-  --panel: #131617;
-  --panel-elev: #191d1e;
-  --card: #1b1f20;
-  --card-hover: #23282a;
-  --line: #262b2c;
-  --line-strong: #3a4242;
-  --text: #dbe3e0;
-  --muted: #82908c;
-  --faint: #5f6d69;
-  --accent: #6fe0bd;
-  --accent-dim: #1b352c;
-  --accent-line: #37705b;
-  --warn: #e0b071;
-  --warn-dim: #241f14;
-  --warn-line: #7c6236;
-  --danger: #e2a09a;
-  --danger-dim: #211819;
-  --danger-line: #583332;
-  --icon-bg: #1c2322;
-  /* 更平的阴影：专业工具少用投影。 */
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.28);
-  --shadow-strong: 0 6px 18px rgba(0, 0, 0, 0.42);
+  --radius: 6px;
+  --radius-sm: 4px;
+  --mono: "JetBrains Mono", "SFMono-Regular", Consolas, "Cascadia Mono", monospace;
+  --sans: "Inter", "IBM Plex Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+
+  /* 深色：真正的黑底 + 纯白文字。面板只靠 1px 线分层，不靠彩色。 */
+  --bg: #000000;
+  --panel: #070707;
+  --panel-elev: #0c0c0c;
+  --card: #0f0f0f;
+  --card-hover: #171717;
+  --line: #242424;
+  --line-strong: #414141;
+  --text: #fafafa;
+  --muted: #a3a3a3;
+  --faint: #7d7d7d;
+  --accent: #ffffff;
+  --accent-ink: #000000;
+  --accent-dim: #161616;
+  --accent-line: #555555;
+  --ok: #5ee08f;
+  --ok-dim: #0c1f14;
+  --ok-line: #2f6b49;
+  --warn: #f2c464;
+  --warn-dim: #1f180a;
+  --warn-line: #6f5726;
+  --danger: #ff8a80;
+  --danger-dim: #21100f;
+  --danger-line: #6b2b27;
+  --icon-bg: #1a1a1a;
+  --input-bg: #0a0a0a;
+  --grid: rgba(255, 255, 255, 0.035);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-strong: 0 18px 48px rgba(0, 0, 0, 0.72);
+  --focus: #ffffff;
+  --backdrop: rgba(0, 0, 0, 0.76);
 }
 
-/* 浅色主题：由前端根据主题模式（light/dark/system）设置 data-theme。 */
+/* 浅色：纯白底 + 近黑文字，线用中性灰，禁止颜色污染主层级。 */
 :root[data-theme="light"] {
   color-scheme: light;
-  --bg: #f2f4f3;
+
+  --bg: #ffffff;
   --panel: #ffffff;
-  --card: #eaeceb;
-  --card-hover: #e2e6e3;
-  --line: #d9dcda;
-  --line-strong: #bfc5c1;
-  --text: #1d2422;
-  --muted: #5d6a65;
-  --faint: #8b9691;
-  --accent: #17815f;
-  --accent-dim: #e0f2ea;
-  --accent-line: #96cdbb;
-  --warn: #92621c;
-  --warn-dim: #f6ecda;
-  --warn-line: #d0b17a;
-  --danger: #b0453b;
-  --danger-dim: #fbeae7;
-  --danger-line: #d6a19b;
-  --icon-bg: #e6e9e7;
-  --shadow: 0 1px 2px rgba(20, 30, 26, 0.08);
-  --shadow-strong: 0 6px 18px rgba(20, 30, 26, 0.16);
+  --panel-elev: #fafafa;
+  --card: #f5f5f5;
+  --card-hover: #ededed;
+  --line: #e3e3e3;
+  --line-strong: #c3c3c3;
+  --text: #050505;
+  --muted: #4f4f4f;
+  --faint: #737373;
+  --accent: #000000;
+  --accent-ink: #ffffff;
+  --accent-dim: #f1f1f1;
+  --accent-line: #9a9a9a;
+  --ok: #137a3d;
+  --ok-dim: #eaf7ee;
+  --ok-line: #a9d9b9;
+  --warn: #8a5a00;
+  --warn-dim: #fdf5e3;
+  --warn-line: #e4c98d;
+  --danger: #ad2117;
+  --danger-dim: #fdecea;
+  --danger-line: #e4b3ae;
+  --icon-bg: #ededed;
+  --input-bg: #ffffff;
+  --grid: rgba(0, 0, 0, 0.045);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-strong: 0 18px 48px rgba(0, 0, 0, 0.14);
+  --focus: #000000;
+  --backdrop: rgba(255, 255, 255, 0.78);
+}
+
+html,
+body {
+  height: 100%;
 }
 
 body {
@@ -69,7 +91,9 @@ body {
   background: var(--bg);
   font-family: var(--sans);
   font-size: 12px;
+  line-height: 1.45;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 button {
@@ -78,7 +102,8 @@ button {
 }
 
 input,
-select {
+select,
+textarea {
   font: inherit;
   color: var(--text);
 }
@@ -89,43 +114,114 @@ select {
   box-sizing: border-box;
 }
 
-/* 一般操作：文字按钮（紧凑） */
+::selection {
+  color: var(--accent-ink);
+  background: var(--accent);
+}
+
+:focus-visible {
+  outline: 1px solid var(--focus);
+  outline-offset: 1px;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ── 排版工具 ─────────────────────────────────────────────────── */
+
+.eyebrow {
+  color: var(--faint);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.mono {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 按钮 ─────────────────────────────────────────────────────── */
+
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
-  min-height: 24px;
-  padding: 0 8px;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 10px;
   color: var(--text);
   background: transparent;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-sm);
-  font-size: 11px;
-  cursor: pointer;
+  font-size: 11.5px;
+  font-weight: 550;
+  line-height: 1;
   white-space: nowrap;
-  transition: background 80ms, border-color 80ms, color 80ms;
+  cursor: pointer;
+  transition: background 90ms ease, border-color 90ms ease, color 90ms ease;
 }
 
 .btn:hover {
   background: var(--card-hover);
-  border-color: var(--accent-line);
+  border-color: var(--muted);
+}
+
+.btn:active {
+  background: var(--accent-dim);
 }
 
 .btn:disabled {
-  cursor: wait;
-  opacity: 0.5;
+  cursor: not-allowed;
+  opacity: 0.42;
 }
 
 .btn.primary {
-  color: var(--bg);
+  color: var(--accent-ink);
   background: var(--accent);
   border-color: var(--accent);
   font-weight: 700;
 }
 
 .btn.primary:hover {
-  filter: brightness(1.06);
+  background: color-mix(in srgb, var(--accent) 88%, var(--text));
+  border-color: color-mix(in srgb, var(--accent) 88%, var(--text));
+}
+
+.btn.ghost {
+  color: var(--muted);
+  background: transparent;
+  border-color: transparent;
+}
+
+.btn.ghost:hover {
+  color: var(--text);
+  background: var(--card-hover);
+  border-color: transparent;
 }
 
 .btn.danger {
@@ -134,82 +230,122 @@ select {
   border-color: var(--danger-line);
 }
 
-.btn.ghost {
-  background: transparent;
-  border-color: transparent;
-  color: var(--muted);
-}
-
-.btn.ghost:hover {
+.btn.on {
   color: var(--text);
-  background: var(--card);
+  background: var(--accent-dim);
+  border-color: var(--accent-line);
 }
 
-/* 游戏内物品：图标按钮 */
 .icon-btn {
+  width: 26px;
+  height: 26px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 2px;
+  flex: 0 0 auto;
+  padding: 0;
+  color: var(--muted);
   background: transparent;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
+  font-size: 13px;
+  line-height: 1;
   cursor: pointer;
+  transition: color 90ms ease, background 90ms ease, border-color 90ms ease;
 }
 
 .icon-btn:hover {
+  color: var(--text);
   background: var(--card-hover);
-  border-color: var(--accent-line);
+  border-color: var(--line);
+}
+
+.icon-btn:active {
+  background: var(--accent-dim);
+}
+
+.icon-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+.icon-btn.danger:hover,
+.icon-btn.danger:focus-visible {
+  color: var(--danger);
+  background: var(--danger-dim);
+  border-color: var(--danger-line);
 }
 
 .icon-btn.empty {
   border-color: var(--line-strong);
 }
 
+/* ── 表单 ─────────────────────────────────────────────────────── */
+
 .field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 5px;
   min-width: 0;
 }
 
-.field > label {
-  color: var(--muted);
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-/* 分组字段标题（非单个控件，不能用 <label>，避免 a11y 警告）。 */
+.field > label,
 .field > .field-label {
-  color: var(--muted);
+  color: var(--faint);
   font-size: 9px;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 
 .field > input,
 .field > select {
-  min-height: 26px;
-  max-width: 100%;
+  width: 100%;
+  min-height: 28px;
   padding: 0 8px;
-  background: var(--bg);
+  color: var(--text);
+  background: var(--input-bg);
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-sm);
-  font-size: 11px;
+  font-size: 11.5px;
 }
 
+.field > input:focus,
+.field > select:focus {
+  border-color: var(--accent);
+  outline: none;
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 8px 0;
+  color: var(--text);
+  font-size: 11.5px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.check input {
+  margin: 2px 0 0;
+  accent-color: var(--accent);
+}
+
+/* ── 容器 ─────────────────────────────────────────────────────── */
+
 .panel {
+  min-width: 0;
+  padding: 12px;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 10px;
   box-shadow: var(--shadow);
 }
 
 .card {
+  min-width: 0;
   background: var(--card);
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
@@ -221,30 +357,70 @@ select {
   gap: 8px;
 }
 
-.muted {
-  color: var(--muted);
-}
-
-.mono {
-  font-family: var(--mono);
-}
-
 .title {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  min-height: 22px;
   margin-bottom: 8px;
   color: var(--text);
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
 }
 
 .title .count {
-  color: var(--muted);
+  color: var(--faint);
   font-size: 10px;
   font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+/* ── 状态 ─────────────────────────────────────────────────────── */
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  display: inline-block;
+  background: var(--faint);
+  border-radius: 50%;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 21px;
+  padding: 1px 7px;
+  color: var(--muted);
+  background: var(--panel-elev);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.chip .status-dot {
+  background: currentColor;
+}
+
+.chip.ok {
+  color: var(--ok);
+  background: var(--ok-dim);
+  border-color: var(--ok-line);
+}
+
+.chip.warn {
+  color: var(--warn);
+  background: var(--warn-dim);
+  border-color: var(--warn-line);
+}
+
+.chip.muted {
+  color: var(--faint);
 }
 
 .err-box {
@@ -254,44 +430,18 @@ select {
   background: var(--danger-dim);
   border: 1px solid var(--danger-line);
   border-radius: var(--radius-sm);
-  font-size: 11px;
+  font-size: 11.5px;
   line-height: 1.5;
   word-break: break-word;
 }
 
-/* 求解面板顶部的醒目错误横幅（求解/自动规划失败常驻显示）。 */
 .err-box.prominent {
-  margin: 0 0 8px;
-  border-width: 1px;
-  box-shadow: 0 0 0 1px var(--danger-line);
+  margin: 0 0 10px;
+  box-shadow: inset 3px 0 0 var(--danger);
 }
 
-.chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 7px;
-  color: var(--muted);
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  font-size: 10px;
-  white-space: nowrap;
-}
+/* ── 数值：等宽 + 表格数字，纵向严格对齐 ───────────────────────── */
 
-.chip.ok {
-  color: var(--accent);
-  background: var(--accent-dim);
-  border-color: var(--accent-line);
-}
-
-.chip.warn {
-  color: var(--warn);
-  background: var(--warn-dim);
-  border-color: var(--warn-line);
-}
-
-/* 数值：等宽 + 表格数字，纵向可对齐比较。 */
 .num,
 input.num {
   font-family: var(--mono);
@@ -299,7 +449,7 @@ input.num {
   letter-spacing: -0.01em;
 }
 
-/* app bar 主题选择器（紧凑）。 */
+/* 旧版主题选择器（保留给外部/未来入口）。 */
 .theme-picker {
   display: inline-flex;
   align-items: center;

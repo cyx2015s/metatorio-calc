@@ -131,7 +131,7 @@
           </div>
         {:else}
           <button class="icon-btn empty" title={`空插件槽 ${i + 1}`} onclick={() => onPickModule(i)}>
-            <Icon type="item" name="+" size={22} />
+            <Icon type="item" name="+" size={22} title={`空插件槽 ${i + 1}`} />
           </button>
         {/if}
       {/each}
@@ -188,7 +188,7 @@
                 onchange={(event) => beaconCountChange(bi, event)}
               />
             </label>
-            <label class="me-num">
+            <label class="me-num" title="插件塔效果共享比例：1 = 全部机器均摊，数值越大单机受到的效果越多">
               共享
               <input
                 type="number"
@@ -230,6 +230,7 @@
             {/each}
             <button
               class="btn"
+              title="向这座插件塔添加一种插件"
               onclick={() => onPickBeaconModule(bi, beacon.modules.length)}
             >+ 塔内插件</button>
           </div>
@@ -248,11 +249,11 @@
 <style>
   .module-editor {
     display: grid;
-    gap: 5px;
+    gap: 7px;
   }
 
   .me-label {
-    color: var(--muted);
+    color: var(--faint);
     font-size: 9px;
     font-weight: 700;
     letter-spacing: 0.1em;
@@ -262,7 +263,8 @@
   .me-slots {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px;
+    gap: 5px;
+    align-items: center;
   }
 
   .me-slots-row {
@@ -301,7 +303,7 @@
 
   .me-beacons {
     display: grid;
-    gap: 5px;
+    gap: 7px;
   }
 
   .me-beacons-head {
@@ -314,24 +316,23 @@
     flex: 1;
   }
 
-  /* #15：插件数量口径说明与校验失败提示 */
   .me-hint {
-    color: var(--muted);
-    font-size: 10px;
-    line-height: 1.4;
+    color: var(--faint);
+    font-size: 9.5px;
+    line-height: 1.5;
   }
 
   .me-warn {
     color: var(--danger);
     font-size: 10px;
-    line-height: 1.4;
+    line-height: 1.45;
   }
 
   .me-beacon {
     display: grid;
-    gap: 5px;
-    padding: 6px;
-    background: var(--bg);
+    gap: 6px;
+    padding: 8px;
+    background: var(--input-bg);
     border: 1px solid var(--line);
     border-radius: var(--radius-sm);
   }
@@ -353,21 +354,28 @@
 
   .me-num input {
     width: 52px;
-    min-height: 22px;
-    padding: 0 4px;
-    text-align: right;
-    background: var(--card);
+    min-height: 24px;
+    padding: 0 5px;
+    color: var(--text);
+    background: var(--input-bg);
     border: 1px solid var(--line-strong);
     border-radius: var(--radius-sm);
     font-family: var(--mono);
     font-size: 10px;
+    text-align: right;
+  }
+
+  .me-num input:focus {
+    border-color: var(--accent);
+    outline: none;
+    box-shadow: 0 0 0 1px var(--accent);
   }
 
   .me-beacon-modules {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 4px;
+    gap: 5px;
     padding-left: 2px;
   }
 
@@ -376,20 +384,22 @@
     align-items: center;
     gap: 4px;
     padding: 2px 6px 2px 2px;
-    background: var(--card);
+    background: var(--panel);
     border: 1px solid var(--line);
     border-radius: var(--radius-sm);
   }
 
   .me-beacon-module input {
-    width: 40px;
-    min-height: 20px;
+    width: 42px;
+    min-height: 22px;
     padding: 0 4px;
-    text-align: right;
-    background: var(--bg);
+    color: var(--text);
+    background: var(--input-bg);
     border: 1px solid var(--line-strong);
-    border-radius: var(--radius-sm);
+    border-radius: 3px;
     font-family: var(--mono);
     font-size: 10px;
+    text-align: right;
   }
+
 </style>
