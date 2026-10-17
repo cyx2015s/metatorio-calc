@@ -236,6 +236,12 @@ textarea {
   border-color: var(--accent-line);
 }
 
+/* 单独占一行的动作按钮：撑满整行并居中，避免在窄侧栏里缩成小色块。 */
+.btn.block {
+  width: 100%;
+  justify-content: center;
+}
+
 .icon-btn {
   width: 26px;
   height: 26px;
