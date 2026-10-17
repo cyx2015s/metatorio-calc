@@ -4293,6 +4293,10 @@
   /* ── 机制列表 ───────────────────────────────────────────────── */
 
   .mech-list {
+    /* 关键：机制列表必须按内容高度撑开，由 .center 负责滚动。
+       若它作为可收缩 flex 项被压到剩余高度，内部的 .mech-group 会因
+       overflow:hidden（自动最小尺寸为 0）被压成一条 2px 的横线。 */
+    flex: 0 0 auto;
     min-height: 0;
     display: flex;
     flex-direction: column;
@@ -4301,6 +4305,7 @@
   }
 
   .mech-group {
+    flex: 0 0 auto;
     overflow: hidden;
     background: var(--panel);
     border: 1px solid var(--line);
@@ -4346,6 +4351,7 @@
 
   /* 顶层机制卡由 MechanicCard 自己提供边框；这里只保证悬停/间距一致。 */
   .mech-list > :global(.mech-card) {
+    flex: 0 0 auto;
     margin-bottom: 0;
   }
 
