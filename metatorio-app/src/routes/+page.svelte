@@ -2822,8 +2822,8 @@
             <option value="Segoe UI"></option>
           </datalist>
           <div class="font-preview ui">
-            <strong>切向量化 Metatorio</strong>
-            <span>生产目标 5.0/s · 电磁矩阵 · 已启用 · 128.426</span>
+            <strong>切向量化</strong>
+            <span>生产目标 5.0/s · 电磁科技包（粉瓶）· 已启用 · 114.514</span>
           </div>
         </div>
 
