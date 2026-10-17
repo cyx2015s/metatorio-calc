@@ -43,6 +43,7 @@
 
   onMount(() => {
     runtime.initTheme();
+    runtime.initFonts();
     runtime.init().catch(() => {});
     runtime.clearCatalogCache();
     getVersion().then((v) => (appVersion = v)).catch(() => {});
@@ -62,6 +63,8 @@
   let mechMenuOpen = $state(false);
   let appMenuOpen = $state(false);
   let dataOpen = $state(false);
+  /** 字体设置弹窗（纯前端偏好，存 localStorage）。 */
+  let fontSettingsOpen = $state(false);
   /** 左栏编辑范围：工厂（目标/输入/环境）或项目（全局设置）。 */
   let leftTab = $state<"factory" | "project">("factory");
   let newProjectOpen = $state(false);
@@ -1306,6 +1309,10 @@
       closeMenus();
       return;
     }
+    if (event.key === "Escape" && fontSettingsOpen) {
+      fontSettingsOpen = false;
+      return;
+    }
     if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
     const target = event.target as HTMLElement | null;
     const tag = target?.tagName;
@@ -1493,7 +1500,7 @@
         class="icon-btn"
         aria-label="应用菜单"
         aria-expanded={appMenuOpen}
-        title="应用菜单：外观、加载数据、检查更新、版本"
+        title="应用菜单：外观、字体、加载数据、检查更新、版本"
         onclick={() => {
           appMenuOpen = !appMenuOpen;
           projectMenuOpen = false;
@@ -1521,6 +1528,10 @@
               onclick={() => runtime.setTheme("dark")}
             >深色</button>
           </div>
+          <button
+            title="分别选择界面字体与代码字体，设置只保存在本机"
+            onclick={() => { appMenuOpen = false; fontSettingsOpen = true; }}
+          >字体设置…</button>
           <div class="menu-sep"></div>
           <button onclick={() => { appMenuOpen = false; openLoadGame(); }}>加载游戏数据…</button>
           <button disabled={updating} onclick={() => { appMenuOpen = false; checkForUpdate(); }}>
@@ -2771,6 +2782,82 @@
           <span class="muted">上下文只决定可用原型与图标；项目文档独立保存。</span>
           <button class="btn ghost" onclick={() => (dataOpen = false)}>关闭</button>
         </footer>
+      </div>
+    </div>
+  {/if}
+
+  <!-- ══ 字体设置（纯前端，localStorage） ══ -->
+  {#if fontSettingsOpen}
+    <div
+      class="backdrop"
+      role="button"
+      tabindex="0"
+      onclick={(event) => { if (event.target === event.currentTarget) fontSettingsOpen = false; }}
+      onkeydown={(event) => backdropKeydown(event, () => (fontSettingsOpen = false))}
+    >
+      <div class="mini-modal font-modal" role="dialog" aria-modal="true" aria-label="字体设置">
+        <div class="mini-title">字体设置</div>
+        <p class="font-hint">分别指定界面文字与数值/代码使用的字体。设置只保存在本机浏览器中，不写入项目文件。</p>
+
+        <div class="font-section">
+          <label for="ui-font">界面字体</label>
+          <input
+            id="ui-font"
+            type="text"
+            list="ui-font-presets"
+            value={runtime.uiFont}
+            placeholder="默认：Inter / 系统 UI"
+            spellcheck="false"
+            oninput={(event) => runtime.setUiFont(event.currentTarget.value)}
+          />
+          <datalist id="ui-font-presets">
+            <option value="system-ui"></option>
+            <option value="Microsoft YaHei"></option>
+            <option value="Noto Sans SC"></option>
+            <option value="PingFang SC"></option>
+            <option value="LXGW WenKai"></option>
+            <option value="Sarasa Gothic SC"></option>
+            <option value="Inter"></option>
+            <option value="IBM Plex Sans"></option>
+            <option value="Segoe UI"></option>
+          </datalist>
+          <div class="font-preview ui">
+            <strong>切向量化 Metatorio</strong>
+            <span>生产目标 5.0/s · 电磁矩阵 · 已启用 · 128.426</span>
+          </div>
+        </div>
+
+        <div class="font-section">
+          <label for="mono-font">代码字体</label>
+          <input
+            id="mono-font"
+            type="text"
+            list="mono-font-presets"
+            value={runtime.monoFont}
+            placeholder="默认：JetBrains Mono / 等宽"
+            spellcheck="false"
+            oninput={(event) => runtime.setMonoFont(event.currentTarget.value)}
+          />
+          <datalist id="mono-font-presets">
+            <option value="JetBrains Mono"></option>
+            <option value="Cascadia Code"></option>
+            <option value="Fira Code"></option>
+            <option value="Sarasa Term SC Nerd"></option>
+            <option value="Consolas"></option>
+            <option value="SF Mono"></option>
+            <option value="Sarasa Mono SC"></option>
+            <option value="ui-monospace"></option>
+          </datalist>
+          <div class="font-preview mono">
+            <span>SC 128.426 · iron-plate 43.8/s · 1,234.56 · 0x1F600</span>
+          </div>
+        </div>
+
+        <p class="font-hint">输入系统已安装的字体名；留空恢复默认。也可以直接粘贴完整的 font-family 列表（逗号分隔）。</p>
+        <div class="mini-actions">
+          <button class="btn ghost" onclick={() => runtime.resetFonts()}>恢复默认</button>
+          <button class="btn primary" onclick={() => (fontSettingsOpen = false)}>完成</button>
+        </div>
       </div>
     </div>
   {/if}
@@ -4816,6 +4903,71 @@
     width: min(480px, 100%);
   }
 
+  .font-modal {
+    width: min(520px, 100%);
+  }
+
+  .font-section {
+    display: grid;
+    gap: 5px;
+  }
+
+  .font-section > label {
+    color: var(--faint);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .font-section input {
+    width: 100%;
+    font-size: 12px;
+  }
+
+  .font-preview {
+    min-width: 0;
+    display: grid;
+    gap: 3px;
+    padding: 9px 11px;
+    overflow: hidden;
+    background: var(--input-bg);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+  }
+
+  .font-preview.ui {
+    font-family: var(--sans);
+  }
+
+  .font-preview.mono {
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+
+  .font-preview strong {
+    overflow: hidden;
+    font-size: 14px;
+    font-weight: 650;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .font-preview span {
+    overflow: hidden;
+    color: var(--muted);
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .font-hint {
+    margin: 0;
+    color: var(--muted);
+    font-size: 10px;
+    line-height: 1.55;
+  }
+
   .mini-title {
     font-size: 13px;
     font-weight: 700;
@@ -4911,15 +5063,19 @@
     .status-text {
       max-width: 150px;
     }
-    /* 侧栏变窄后给目标名称留出空间，避免「石油气」被温度区间挤成省略号。 */
+    /* 侧栏变窄后给目标名称留出空间，避免「石油气」被温度区间挤成省略号；
+       较宽的界面字体（如 Microsoft YaHei）下也优先保证名称完整。 */
     .row-item {
-      gap: 6px;
+      gap: 5px;
     }
     .num {
-      width: 64px;
+      width: 60px;
     }
     .num.temp {
-      width: 34px;
+      width: 32px;
+    }
+    .row-actions .icon-btn {
+      width: 18px;
     }
     .temp-range {
       gap: 1px;
@@ -4938,7 +5094,7 @@
       max-width: 180px;
     }
     .row-item {
-      gap: 6px;
+      gap: 5px;
     }
     .num {
       width: 60px;

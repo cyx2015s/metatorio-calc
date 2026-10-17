@@ -79,6 +79,36 @@ const PRODUCTIVITY_KEYS = new Set([
   "remove-infinite-tech-level",
 ]);
 
+const UI_FONT_FALLBACK = `"Inter", "IBM Plex Sans", "Segoe UI", system-ui, -apple-system, sans-serif`;
+const MONO_FONT_FALLBACK = `"JetBrains Mono", "SFMono-Regular", Consolas, "Cascadia Mono", monospace`;
+const GENERIC_FONT_FAMILIES = new Set([
+  "serif",
+  "sans-serif",
+  "monospace",
+  "cursive",
+  "fantasy",
+  "system-ui",
+  "ui-serif",
+  "ui-sans-serif",
+  "ui-monospace",
+  "ui-rounded",
+  "math",
+  "emoji",
+  "fangsong",
+]);
+
+/** 把用户输入的字体族转成安全的 CSS 字体栈。允许直接粘贴完整 stack（含逗号）。 */
+function fontStack(name: string, fallback: string): string {
+  const raw = name.replace(/[;{}]/g, "").trim();
+  if (!raw) return "";
+  const family = raw.includes(",")
+    ? raw
+    : GENERIC_FONT_FAMILIES.has(raw.toLowerCase())
+      ? raw
+      : `"${raw.replace(/"/g, "")}"`;
+  return `${family}, ${fallback}`;
+}
+
 class RuntimeStore {
   document = $state<AppDocument | null>(null);
   // 前端持有 UI 选择态（后端不再存储任何选择）。选中 id 为 0 时表示未选；
@@ -145,6 +175,52 @@ class RuntimeStore {
     this.theme = mode;
     localStorage.setItem(RuntimeStore.THEME_KEY, mode);
     this.applyTheme();
+  }
+
+  /** 界面 / 代码字体：纯前端偏好，保存在 localStorage，不进入项目文档或后端。 */
+  uiFont = $state("");
+  monoFont = $state("");
+  private static readonly UI_FONT_KEY = "metatorio-ui-font";
+  private static readonly MONO_FONT_KEY = "metatorio-mono-font";
+
+  private applyFonts(): void {
+    if (typeof document === "undefined") return;
+    const root = document.documentElement.style;
+    const ui = fontStack(this.uiFont, UI_FONT_FALLBACK);
+    const mono = fontStack(this.monoFont, MONO_FONT_FALLBACK);
+    if (ui) root.setProperty("--sans", ui);
+    else root.removeProperty("--sans");
+    if (mono) root.setProperty("--mono", mono);
+    else root.removeProperty("--mono");
+  }
+
+  /** 启动时读回本地字体设置；空字符串表示使用 app.css 的默认字体。 */
+  initFonts(): void {
+    this.uiFont = localStorage.getItem(RuntimeStore.UI_FONT_KEY) ?? "";
+    this.monoFont = localStorage.getItem(RuntimeStore.MONO_FONT_KEY) ?? "";
+    this.applyFonts();
+  }
+
+  setUiFont(name: string): void {
+    this.uiFont = name.replace(/[;{}]/g, "").trim();
+    if (this.uiFont) localStorage.setItem(RuntimeStore.UI_FONT_KEY, this.uiFont);
+    else localStorage.removeItem(RuntimeStore.UI_FONT_KEY);
+    this.applyFonts();
+  }
+
+  setMonoFont(name: string): void {
+    this.monoFont = name.replace(/[;{}]/g, "").trim();
+    if (this.monoFont) localStorage.setItem(RuntimeStore.MONO_FONT_KEY, this.monoFont);
+    else localStorage.removeItem(RuntimeStore.MONO_FONT_KEY);
+    this.applyFonts();
+  }
+
+  resetFonts(): void {
+    this.uiFont = "";
+    this.monoFont = "";
+    localStorage.removeItem(RuntimeStore.UI_FONT_KEY);
+    localStorage.removeItem(RuntimeStore.MONO_FONT_KEY);
+    this.applyFonts();
   }
 
   contexts = $state<ContextInfo[]>([]);
