@@ -455,14 +455,6 @@ fn expand_recipe<C: Clone>(
         true,
         &mut fulfillment,
     );
-    if let EnergySource::Electric(source) = &machine.energy_source
-        && source.drain.is_none()
-    {
-        temp.add(
-            DualVar::Electricity,
-            -machine.energy_usage.amount * energy_multiplier * 60.0 / 30.0,
-        );
-    }
 
     let module_consumption = mechanic
         .module_config
@@ -636,14 +628,6 @@ fn expand_mining<C: Clone>(
         false,
         &mut fulfillment,
     );
-    if let EnergySource::Electric(source) = &machine.energy_source
-        && source.drain.is_none()
-    {
-        temp.add(
-            DualVar::Electricity,
-            -machine.energy_usage.amount * 60.0 / 30.0,
-        );
-    }
 
     let base_speed = machine.mining_speed / minable.mining_time;
     let scale = base_speed * (1.0 + effects.speed).max(0.0) * fulfillment;
