@@ -289,7 +289,7 @@
                 {#if beacon.modules.length > 1}<small>+{beacon.modules.length - 1}种</small>{/if}
               {/each}
               {#if beacons.length > 1}<small>+{beacons.length - 1}组</small>{/if}
-              {#if !moduleGroups.length && !beacons.length}<span>＋ 插件 / 信标</span>{/if}
+              {#if !moduleGroups.length && !beacons.length}<span>＋ 插件 / 插件塔</span>{/if}
               <span class="disclosure">▾</span>
             </button>
           {/snippet}

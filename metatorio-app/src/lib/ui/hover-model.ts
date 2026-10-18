@@ -6,7 +6,7 @@ export const statLabels: Record<string, string> = {
   "crafting-speed": "制作速度", "mining-speed": "采矿速度", "module-slots": "插件槽", "power": "额定功耗",
   "pumping-rate": "抽取速率", "resource-drain": "资源消耗率", "heat-capacity": "比热容 / 单位",
   "fuel-value": "燃料热值", "effect-speed": "速度加成", "effect-productivity": "产能加成", "effect-quality": "品质概率加成",
-  "effect-consumption": "能耗加成", "effect-pollution": "污染加成", "beacon-effectivity": "信标分配效率",
+  "effect-consumption": "能耗加成", "effect-pollution": "污染加成", "beacon-effectivity": "插件塔分配效率",
   "beacon-profile-1": "1 塔衰减系数", "beacon-profile-4": "4 塔衰减系数", "beacon-profile-8": "8 塔衰减系数",
   "buffer-capacity": "储能容量", "science-value": "每瓶科研单位", "solar-peak": "峰值发电（未计星球）",
   "crafting-multiplier": "制造机速度倍率", "module-speed-multiplier": "速度插件倍率",

@@ -11,7 +11,27 @@ const url = `http://127.0.0.1:${port}`;
 async function seed(page, count) {
  await page.addInitScript(({count})=>{
   const q=(id,quality='normal')=>({id,quality});
-  const names={'iron-plate':'铁板','iron-ore':'铁矿石','steel-plate':'钢材','assembling-machine-2':'组装机 2 型','speed-module-3':'速度插件 3','quality-module-3':'品质插件 3','beacon':'信标','water':'水','steam':'蒸汽','boiler':'锅炉','nuclear-reactor':'核反应堆','solar-panel':'太阳能板','accumulator':'蓄电池','coal':'煤炭','land':'土地','lava':'岩浆','normal':'普通','rare':'稀有','legendary':'传说'};
+  const names = {
+    "iron-plate": "铁板",
+    "iron-ore": "铁矿石",
+    "steel-plate": "钢材",
+    "assembling-machine-2": "组装机 2 型",
+    "speed-module-3": "速度插件 3",
+    "quality-module-3": "品质插件 3",
+    beacon: "插件塔",
+    water: "水",
+    steam: "蒸汽",
+    boiler: "锅炉",
+    "nuclear-reactor": "核反应堆",
+    "solar-panel": "太阳能板",
+    accumulator: "蓄电池",
+    coal: "煤炭",
+    land: "土地",
+    lava: "岩浆",
+    normal: "普通",
+    rare: "稀有",
+    legendary: "传说",
+  };
   const config={modules:[q('quality-module-3','rare'),q('quality-module-3','rare'),q('speed-module-3','legendary')],beacons:[{beacon:q('beacon','rare'),count:8,share:8,modules:[[q('speed-module-3','legendary'),16]]}]};
   const variants=[
    {type:'recipe',recipe:q('iron-plate'),machine:q('assembling-machine-2'),module_config:config},

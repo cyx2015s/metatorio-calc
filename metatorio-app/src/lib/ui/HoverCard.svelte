@@ -10,7 +10,7 @@
     kind: string; detail: PrototypeDetail | null; x: number; y: number;
     flow?: DualVar; quality?: string; flowRate?: number; rateBasis?: "solution" | "unit"; onEnter?: () => void; onLeave?: () => void;
   } = $props();
-  const labels: Record<string, string> = {item:"物品",fluid:"流体",recipe:"配方",module:"插件",machine:"制造机","mining-machine":"采矿机","offshore-pump":"抽水机",generator:"发电机",boiler:"锅炉",reactor:"反应堆",beacon:"信标",resource:"资源",entity:"实体",technology:"科技",planet:"星球",surface:"地表",quality:"品质",tile:"地格","solar-panel":"太阳能板",accumulator:"蓄电器"};
+  const labels: Record<string, string> = {item:"物品",fluid:"流体",recipe:"配方",module:"插件",machine:"制造机","mining-machine":"采矿机","offshore-pump":"抽水机",generator:"发电机",boiler:"锅炉",reactor:"反应堆",beacon:"插件塔",resource:"资源",entity:"实体",technology:"科技",planet:"星球",surface:"地表",quality:"品质",tile:"地格","solar-panel":"太阳能板",accumulator:"蓄电器"};
   const flowLabels: Record<string,string> = {Electricity:"电力",Heat:"热量",RocketSlotCapacity:"火箭槽位运力",RocketWeightCapacity:"火箭重量运力",ItemFuel:"物品燃料",ItemFuelSupply:"物品燃料供给",FluidFuel:"流体燃料",FluidHeat:"流体热量",Pollution:"污染",Custom:"自定义流"};
   const flowHelp: Record<string,string> = {
     Electricity:"电力按功率（W = J/s）结算，不随项目时间刻度改变。", Heat:"热量按热功率（W = J/s）配平。",
@@ -139,7 +139,7 @@
         {#if detail.categories?.length}<span>类别</span><strong>{detail.categories.join(" / ")}</strong>{/if}
         {#if detail.surface_conditions?.length}<span>表面条件</span><strong>{detail.surface_conditions.join("；")}</strong>{/if}
         {#if detail.allowed_module_categories?.length}<span>允许插件类别</span><strong>{detail.allowed_module_categories.join(" / ")}</strong>{/if}
-        {#if detail.uses_module_effects != null}<span>机器插件 / 信标</span><strong>{detail.uses_module_effects ? "接受" : "不接受"} / {detail.uses_beacon_effects !== false ? "接受" : "不接受"}</strong>{/if}
+        {#if detail.uses_module_effects != null}<span>机器插件 / 插件塔</span><strong>{detail.uses_module_effects ? "接受" : "不接受"} / {detail.uses_beacon_effects !== false ? "接受" : "不接受"}</strong>{/if}
         {#if detail.fuel_categories?.length}<span>燃料类别</span><strong>{detail.fuel_categories.join(" / ")}</strong>{/if}
         {#if detail.burner_fuel_categories?.length}<span>可用燃料</span><strong>{detail.burner_fuel_categories.join(" / ")}</strong>{/if}
         {#if detail.fluid_filter}<span>流体限制</span><strong>{runtime.localizedName("fluid",detail.fluid_filter)}</strong>{/if}

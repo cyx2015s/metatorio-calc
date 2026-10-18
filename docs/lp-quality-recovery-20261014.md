@@ -8,7 +8,7 @@
 
 - Fulgora；主品质 legendary，品质上限 legendary。工程绑定 `4527d92175d455b6`，应用缓存元数据为 vanilla-2.1 / 2.1.17 / 无模组；其原始 dump SHA256 为 `996325fa266d44fbb90bf84c656ff54b19d3deeee070b5437f00d99c06339ee8`，与仓库基础资产不同。本地只读副本 `local/fulgora-user-context-2.1.17-20261014.json` 用于精确复现；早期基线使用仓库基础资产，结果单独列出。
 - 最佳插件：legendary 产能 3、品质 3、速度 3。
-- 两组 legendary 信标：数量/共享/legendary 速度 3 数量为 8/8/16 与 1/8/1。
+- 两组 legendary 插件塔：数量/共享/legendary 速度 3 数量为 8/8/16 与 1/8/1。
 - `ignore_productivity=true`，保留文件中的科技/可达性设置。
 - 严格供给与严格输出均开启；普通、传说、精良（uncommon）单品质目标均为 **240 个/秒**。
 - 混品控制组保留原表达式：normal/uncommon/rare/epic/legendary 系数 1/2/3/4/6，总目标 240。这是加权表达式目标，不等同于每种都要求 240 个/秒。
