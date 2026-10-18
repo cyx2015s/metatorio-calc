@@ -1887,44 +1887,40 @@ fn productivity_for_game(
     }
 }
 
-/// 根据工厂环境（星球/地表）写入太阳能倍率与昼夜周期。
-///
-/// 规则（复刻需求设计）：
-/// - 同时设置星球与地表（太空平台等）：用"太空中的太阳能"系数
-///   （space-location 的 solar_power_in_space，是倍率，直接使用）；
-/// - 否则（星球表面）：用"大气中的太阳能"系数。surface_properties
-///   的 `solar-power` 是**百分比**（surface-property 默认值 100 即
-///   nauvis 的 100%），需 ÷100 换算为倍率；缺失回退 1.0。
-/// - day-night-cycle 来自星球 surface_properties，缺失回退 25200。
+/// surface 在当前模型中表示所在星球的轨道类型；轨道持续满日照。
+/// 原型中的太阳能系数为百分比，昼夜周期为 tick。原型缺省值优先于应用回退。
 pub fn apply_environment_to_game_state(
     store: &PrototypeStore,
     game: &mut GameState,
     planet: Option<&str>,
     surface: Option<&str>,
 ) {
-    if surface.is_some() {
-        // 太空：solar_power_in_space（找不到 space-location 时回退 1.0）
-        if let Some(planet_name) = planet
-            && let Some(record) = store.get(
-                metatorio_data::store::PrototypeGroup::SpaceLocation,
-                planet_name,
-            )
-            && let Some(component) = record.component::<metatorio_data::SpaceLocationComponent>()
-        {
-            game.solar_power_multiplier = component.solar_power_in_space;
-        }
-    } else if let Some(planet_name) = planet
-        && let Some(record) = store.get(metatorio_data::store::PrototypeGroup::Planet, planet_name)
-        && let Some(component) = record.component::<metatorio_data::PlanetComponent>()
-    {
-        if let Some(&value) = component.surface_properties.get("solar-power") {
-            // 百分比 → 倍率（nauvis 默认 100 → 1.0）
-            game.solar_power_multiplier = value / 100.0;
-        }
-        if let Some(&cycle) = component.surface_properties.get("day-night-cycle") {
-            game.day_night_cycle = cycle;
-        }
-    }
+    use metatorio_data::store::PrototypeGroup;
+    use metatorio_data::{SpaceLocationComponent, SurfacePropertyComponent};
+    game.solar_continuous_daylight = surface.is_some();
+    game.surface_properties =
+        crate::planet::surface_properties_of(store, planet, surface).unwrap_or_default();
+    let property = |name: &str| {
+        game.surface_properties.get(name).copied().or_else(|| {
+            store
+                .get(PrototypeGroup::SurfaceProperty, name)
+                .and_then(|record| record.component::<SurfacePropertyComponent>())
+                .map(|property| property.default_value)
+        })
+    };
+    game.solar_power_multiplier = if surface.is_some() {
+        planet
+            .and_then(|name| {
+                store
+                    .get(PrototypeGroup::Planet, name)
+                    .or_else(|| store.get(PrototypeGroup::SpaceLocation, name))
+            })
+            .and_then(|record| record.component::<SpaceLocationComponent>())
+            .map_or(1.0, |location| location.solar_power_in_space / 100.0)
+    } else {
+        property("solar-power").map_or(1.0, |value| value / 100.0)
+    };
+    game.day_night_cycle = property("day-night-cycle").unwrap_or(25_200.0);
 }
 
 #[cfg(test)]

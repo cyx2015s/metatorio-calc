@@ -704,6 +704,8 @@ export interface FlowBalance {
 // ── Solar 配平信息（solar_balance 命令）──────────────────────────
 
 export interface SolarBalance {
+  /** 恒定满日照，无昼夜储能需求。 */
+  continuous_daylight?: boolean;
   /** 满日照峰值功率（J/s，含星球太阳能系数与品质倍率）。 */
   peak_power: number;
   /** 周期平均稳定出力（J/s）。 */

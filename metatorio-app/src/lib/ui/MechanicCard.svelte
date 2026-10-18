@@ -85,7 +85,11 @@
       solarBalanceInfo = null;
       return;
     }
+    // Environment changes must invalidate the displayed solar calculation too.
+    const settings = runtime.document?.projects.find(p => p.id === project)?.factories.find(f => f.id === factory)?.settings;
+    void settings;
     let alive = true;
+    solarBalanceInfo = null;
     solarBalance(project, factory, entry.id)
       .then((info) => {
         if (alive) solarBalanceInfo = info;
@@ -99,6 +103,8 @@
   });
 
   let kind = $derived(entry.mechanic.type);
+  let solarOrbit = $derived(runtime.document?.projects.find(p => p.id === project)?.factories.find(f => f.id === factory)?.settings.surface != null);
+  let solarContinuous = $derived(solarOrbit || !!solarBalanceInfo?.continuous_daylight);
 
   /** 流 → 渲染键（含品质与完整形状：同物品不同品质、多燃料类别/多温度
    *  展开出的不同流是不同条目，避免 each key 冲突）。 */
@@ -267,7 +273,7 @@
         <button class="icon-btn" title={`流体：${fluidLabel || "未选择"}`} aria-label={`更换流体：${fluidLabel || "未选择"}`} onclick={() => onPick("fluid")}>
           <HoverIcon type="fluid" name={fluidName || "+"} size={26} detailKind={fluidName ? "fluid" : undefined} />
         </button>
-      {:else if kind === "solar"}
+      {:else if kind === "solar" && !solarContinuous}
         <button class="icon-btn" title="更换蓄电器" aria-label="更换蓄电器" onclick={() => onPick("accumulator")}>
           <HoverIcon type="entity" name={entry.mechanic.accumulator?.id || "+"} size={26} quality={entry.mechanic.accumulator?.quality} detailKind={entry.mechanic.accumulator ? "accumulator" : undefined} />
         </button>
@@ -379,7 +385,7 @@
                   />
                 </label>
               {:else if kind === "solar"}
-                <button
+                {#if !solarContinuous}<button
                   class="icon-btn"
                   class:empty={!entry.mechanic.accumulator?.id}
                   title={entry.mechanic.accumulator?.id
@@ -399,12 +405,16 @@
                   {entry.mechanic.accumulator?.id
                     ? runtime.localizedName("entity", entry.mechanic.accumulator.id)
                     : "选择蓄电器"}
-                </span>
+                </span>{/if}
                 {#if solarBalanceInfo}
                   <span class="sub solar-balance" title={`峰值 ${compactNumber(solarBalanceInfo.peak_power)} J/s · 周期 ${solarBalanceInfo.cycle_seconds}s`}>
-                    平均 {compactNumber(solarBalanceInfo.average_power)} J/s
-                    · 溢出 {compactNumber(solarBalanceInfo.surplus_per_cycle)} J
-                    · 建议 {solarBalanceInfo.recommended_accumulators.toFixed(2)} 蓄电器/面板
+                    {#if solarContinuous}
+                      持续发电 {compactNumber(solarBalanceInfo.average_power)} W · 无需蓄电器
+                    {:else}
+                      平均 {compactNumber(solarBalanceInfo.average_power)} W
+                      · 储能 {compactNumber(solarBalanceInfo.surplus_per_cycle)} J
+                      · 建议 {solarBalanceInfo.recommended_accumulators.toFixed(2)} 蓄电器/面板
+                    {/if}
                   </span>
                 {/if}
               {:else if kind === "fluid-heat"}

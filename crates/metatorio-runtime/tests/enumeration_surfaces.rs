@@ -182,7 +182,10 @@ fn energy_equipment_and_launch_infrastructure_obey_surface_and_accessibility() {
             Mechanic::Generator(m) => ("generator", vec![m.generator.id]),
             Mechanic::Boiler(m) => ("boiler", vec![m.boiler.id]),
             Mechanic::Reactor(m) => ("reactor", vec![m.reactor.id]),
-            Mechanic::Solar(m) => ("solar", vec![m.solar_panel.id, m.accumulator.id]),
+            Mechanic::Solar(m) => {
+                assert!(m.accumulator.id.is_empty(), "轨道不应要求蓄电器");
+                ("solar", vec![m.solar_panel.id])
+            }
             _ => continue,
         };
         checked.insert(kind);

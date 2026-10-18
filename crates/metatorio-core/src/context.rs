@@ -37,8 +37,12 @@ pub struct GameState {
     pub mining_productivity: f64,
     /// 当前规划环境中的太阳能倍率（星球/地表属性已由 runtime 注入）。
     pub solar_power_multiplier: f64,
-    /// 当前规划环境的昼夜周期（秒）。
+    /// 当前规划环境的昼夜周期（tick，60 tick = 1 s）。
     pub day_night_cycle: f64,
+    /// 显式轨道表面持续满日照，不需要昼夜储能。
+    pub solar_continuous_daylight: bool,
+    /// 当前表面属性，供使用自定义 solar_coefficient_property 的面板查询。
+    pub surface_properties: std::collections::BTreeMap<String, f64>,
     /// Factorio 在无法从配方推导物品重量时使用的默认重量。
     pub default_item_weight: f64,
     /// 未指定火箭仓时使用的重量运力上限。
@@ -54,6 +58,8 @@ impl Default for GameState {
             mining_productivity: 0.0,
             solar_power_multiplier: 1.0,
             day_night_cycle: 25_200.0,
+            solar_continuous_daylight: false,
+            surface_properties: Default::default(),
             default_item_weight: 100.0,
             rocket_lift_weight: 1_000_000.0,
         }

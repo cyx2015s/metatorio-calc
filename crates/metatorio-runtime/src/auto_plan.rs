@@ -1138,7 +1138,7 @@ fn enumerate_energy(
             }));
         }
     }
-    // 太阳能：所有太阳能板 × 蓄电器组合（按品质展开）。
+    // 轨道恒定发电只枚举面板；地面需要储能时才组合蓄电器。
     // 太阳能板按满日照功率排序、蓄电器按容量排序，限制候选数量避免组合爆炸。
     let mut panels: Vec<(String, f64)> = Vec::new();
     let mut accumulators: Vec<(String, f64)> = Vec::new();
@@ -1163,7 +1163,9 @@ fn enumerate_energy(
                 .buffer_capacity
                 .map(|energy| energy.amount)
                 .unwrap_or(0.0);
-            accumulators.push((record.name.clone(), capacity));
+            if capacity > 0.0 {
+                accumulators.push((record.name.clone(), capacity));
+            }
         }
     }
     // 每种设备最多取 alternative_count 个（按功率/容量降序）。
@@ -1181,7 +1183,19 @@ fn enumerate_energy(
     let panel_names = pick_top(&mut panels, options.alternative_count.max(1));
     let accumulator_names = pick_top(&mut accumulators, options.alternative_count.max(1));
     for panel in &panel_names {
-        for accumulator in &accumulator_names {
+        let component = store
+            .entity(panel)
+            .and_then(|record| record.component::<SolarPanelComponent>())
+            .unwrap();
+        let needs_storage = options.surface.is_none()
+            && ctx.game.day_night_cycle != 0.0
+            && component.performance_at_day != component.performance_at_night;
+        let storage = if needs_storage {
+            accumulator_names.clone()
+        } else {
+            vec![String::new()]
+        };
+        for accumulator in &storage {
             for quality in 0..quality_range {
                 out.push(Mechanic::Solar(metatorio_core::SolarMechanic {
                     solar_panel: IdWithQuality::new(panel.clone(), quality_name(ctx, quality)),

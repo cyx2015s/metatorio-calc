@@ -1233,48 +1233,18 @@ fn expand_solar<C: Clone>(
     ctx: &Context,
     out: &mut Expansion<C>,
 ) {
-    let Some(panel) = ctx
-        .prototype
-        .entity(&mechanic.solar_panel.id)
-        .and_then(|record| record.component::<SolarPanelComponent>())
-    else {
+    let Some(balance) = solar_balance(ctx, mechanic) else {
         return;
     };
-    let Some(accumulator) = ctx
-        .prototype
-        .entity(&mechanic.accumulator.id)
-        .and_then(|record| record.component::<AccumulatorComponent>())
-    else {
-        return;
-    };
-    // 昼夜配平：Factorio 官方数据太阳能板平均出力为峰值的 0.7
-    // （60 kW 峰值 → 42 kW 平均，含黄昏/黎明渐变），与 day_night_cycle
-    // 长度无关（周期只缩放时间轴，不改变昼夜占比）。
-    let day_fraction = 0.7;
-    let performance =
-        panel.performance_at_day * day_fraction + panel.performance_at_night * (1.0 - day_fraction);
-    let coefficient = ctx.game.solar_power_multiplier.max(0.0);
-    let production_per_second = panel.production.amount * 60.0 * coefficient * performance;
-    if production_per_second <= 0.0 {
+    if balance.average_power <= 0.0 {
         return;
     }
-    // 蓄电器用于吸收昼夜波动；平均稳定出力仍是周期平均太阳能功率。
-    // 配平所需的周期溢出总电量由 solar_balance() 计算（机制面板展示）。
-    let _capacity = accumulator
-        .energy_source
-        .buffer_capacity
-        .map(|energy| energy.amount)
-        .unwrap_or(0.0);
     let mut temp = TempFlow::new();
-    temp.add(DualVar::Electricity, production_per_second);
-    temp.scale(default_quality_multiplier(
-        ctx,
-        &mechanic.solar_panel.quality,
-    ));
+    temp.add(DualVar::Electricity, balance.average_power);
     out.variables.extend(temp.into_variables(config));
 }
 
-/// 太阳能配平信息（机制面板展示用，不参与 LP）。
+/// 太阳能配平信息：界面、LP 出力与设备成本共用同一计算。
 ///
 /// 昼夜结构（[Factorio 官方默认](https://wiki.factorio.com/Game-day)，
 /// 与实测 dawn=0.75/dusk=0.25/morning=0.55/evening=0.45 一致）：
@@ -1287,47 +1257,73 @@ fn expand_solar<C: Clone>(
 ///   与社区 25:21 ≈ 0.84 的配比吻合。
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct SolarBalance {
+    /// 轨道持续满日照，无需蓄电器。
+    pub continuous_daylight: bool,
     /// 满日照峰值功率（J/s，含星球太阳能系数与品质倍率）。
     pub peak_power: f64,
-    /// 周期平均稳定出力（J/s）= 峰值 × (7/10×perf_day + 3/10×perf_night)。
+    /// 稳定出力（W）：地面按昼夜加权，轨道按白天性能。
     pub average_power: f64,
     /// 一个昼夜周期的秒数。
     pub cycle_seconds: f64,
     /// 一个周期溢出的总电量（J）——蓄电器需要储存的能量。
     pub surplus_per_cycle: f64,
-    /// 蓄电器容量（J）。
+    /// 单台蓄电器品质生效容量（J）；不需要储能时为 0。
     pub accumulator_capacity: f64,
     /// 推荐蓄电器数量（每块面板）= surplus / capacity。
     pub recommended_accumulators: f64,
 }
 
-/// 计算太阳能机制的配平信息；面板/蓄电器原型缺失时返回 None。
+/// 计算太阳能机制的配平信息；仅需要储能时才要求有效蓄电器。
 pub fn solar_balance(ctx: &Context, mechanic: &SolarMechanic) -> Option<SolarBalance> {
     let panel = ctx
         .prototype
         .entity(&mechanic.solar_panel.id)
         .and_then(|record| record.component::<SolarPanelComponent>())?;
-    let accumulator = ctx
-        .prototype
-        .entity(&mechanic.accumulator.id)
-        .and_then(|record| record.component::<AccumulatorComponent>())?;
     let quality = default_quality_multiplier(ctx, &mechanic.solar_panel.quality);
-    let coefficient = ctx.game.solar_power_multiplier.max(0.0);
+    let coefficient = solar_coefficient(ctx, panel).max(0.0);
     let peak = panel.production.amount * 60.0 * coefficient * quality;
     // 自定义性能曲线：昼夜各段按 performance 加权（不能直接用 0.7）。
     let perf_day = panel.performance_at_day;
     let perf_night = panel.performance_at_night;
-    let average = peak * (0.7 * perf_day + 0.3 * perf_night);
-    let cycle_seconds = ctx.game.day_night_cycle.max(1.0) / 60.0;
+    let continuous = ctx.game.solar_continuous_daylight || ctx.game.day_night_cycle == 0.0;
+    let average = peak
+        * if continuous {
+            perf_day
+        } else {
+            0.7 * perf_day + 0.3 * perf_night
+        };
+    let cycle_seconds = if continuous {
+        0.0
+    } else {
+        ctx.game.day_night_cycle.max(0.0) / 60.0
+    };
     // 蓄电器需储能量 = 21/125 × 峰值 × 周期 × |perf_day − perf_night|：
     // 无论白天还是夜晚性能更高，昼夜波动都需要储能（只取幅度）。
     let surplus = 0.168 * peak * cycle_seconds * (perf_day - perf_night).abs();
-    let capacity = accumulator
-        .energy_source
-        .buffer_capacity
-        .map(|energy| energy.amount)
-        .unwrap_or(0.0);
+    let capacity = if surplus > 0.0 {
+        let accumulator = ctx
+            .prototype
+            .entity(&mechanic.accumulator.id)
+            .and_then(|record| record.component::<AccumulatorComponent>())?;
+        let multiplier = ctx
+            .prototype
+            .get(PrototypeGroup::Quality, &mechanic.accumulator.quality)
+            .and_then(|record| record.component::<metatorio_data::QualityComponent>())
+            .map_or(1.0, |quality| quality.accumulator_capacity_multiplier());
+        let capacity = accumulator
+            .energy_source
+            .buffer_capacity
+            .map_or(0.0, |energy| energy.amount)
+            * multiplier;
+        if capacity <= 0.0 || !capacity.is_finite() {
+            return None;
+        }
+        capacity
+    } else {
+        0.0
+    };
     Some(SolarBalance {
+        continuous_daylight: continuous,
         peak_power: peak,
         average_power: average,
         cycle_seconds,
@@ -1339,6 +1335,32 @@ pub fn solar_balance(ctx: &Context, mechanic: &SolarMechanic) -> Option<SolarBal
             0.0
         },
     })
+}
+
+/// Custom panel properties override the ordinary ground/orbit solar multiplier.
+fn solar_coefficient(ctx: &Context, panel: &SolarPanelComponent) -> f64 {
+    if panel.solar_coefficient_property == "solar-power" {
+        return ctx.game.solar_power_multiplier;
+    }
+    let default = ctx
+        .prototype
+        .get(
+            PrototypeGroup::SurfaceProperty,
+            &panel.solar_coefficient_property,
+        )
+        .and_then(|record| record.component::<metatorio_data::SurfacePropertyComponent>())
+        .map(|property| property.default_value);
+    match default {
+        Some(default) if default > 0.0 => {
+            ctx.game
+                .surface_properties
+                .get(&panel.solar_coefficient_property)
+                .copied()
+                .unwrap_or(default)
+                / default
+        }
+        _ => 0.0,
+    }
 }
 
 fn expand_reactor<C: Clone>(

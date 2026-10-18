@@ -87,7 +87,7 @@ async function seed(page, count) {
      return {kind:args.kind,name:args.name,localized_name:names[args.name]||args.name,module_slots:3,beacon_module_slots:2,uses_beacon_effects:true,machine_energy_source:'electric',boiler_mode:'heat-fluid-inside',boiler_burns_fluid:false,ingredients:[],results:args.kind==='recipe'?[product,{...product,productivity:2}]:[],categories:[],fuel_value_j:null,fuel_categories:[],rocket_launch_products:[],surface_conditions:[],calculation:{stats:args.kind==='recipe'?[stat('craft-time',2,'seconds')]:[],qualities,tile}};
     }
     if(command==='allowed_modules') return ['speed-module-3','quality-module-3'];
-    if(command==='solar_balance') return {peak_power:60000,average_power:42000,surplus_per_cycle:100,cycle_seconds:420,recommended_accumulators:0.84};
+    if(command==='solar_balance') return doc.projects[0]?.factories[0]?.settings.surface ? {continuous_daylight:true,peak_power:180000,average_power:180000,surplus_per_cycle:0,cycle_seconds:0,recommended_accumulators:0,accumulator_capacity:0} : {continuous_daylight:false,peak_power:60000,average_power:42000,surplus_per_cycle:100,cycle_seconds:420,recommended_accumulators:0.84,accumulator_capacity:5000000};
     if(command==='mechanic_flow') {
      const output=(name,quality,n)=>[{Item:q(name,quality)},n];
      const base=[['Electricity',-24000],[{Pollution:{name:'pollution'}},0.12],output('iron-ore','normal',-2),output('iron-plate','normal',1),output('iron-plate','rare',0.1),output('iron-plate','legendary',0.01)];
@@ -287,6 +287,29 @@ async function run() {
     await pause(200);
     assert.ok(await longPage.locator('.mech-card').count()<35, 'resize restores the column scroll root');
     assert.deepEqual(errors,[]);
+    // Switching the same factory into orbit updates solar details and removes storage controls.
+    await longPage.locator('[data-mechanic-row="6"]').scrollIntoViewIfNeeded();
+    await longPage.waitForSelector('[data-mechanic-id="6"]');
+    assert.equal(await longPage.locator('[data-mechanic-id="6"] [aria-label="更换蓄电器"]').count(),1);
+    await longPage.evaluate(async () => {
+      const {runtime}=await import('/src/lib/runtime/store.svelte.ts');
+      window.__layoutDocument.projects[0].factories[0].settings.surface='space-platform';
+      await runtime.refresh();
+    });
+    await waitFor(async()=>await longPage.locator('[data-mechanic-id="6"] [aria-label="更换蓄电器"]').count()===0);
+    await longPage.locator('[data-mechanic-id="6"] .settings-button').click();
+    const solarDialog=longPage.getByRole('dialog',{name:'太阳能设置',exact:true});
+    await solarDialog.waitFor();
+    await waitFor(async()=>/持续发电.*W.*无需蓄电器/.test(await solarDialog.textContent()));
+    assert.equal(await solarDialog.getByText('选择蓄电器',{exact:true}).count(),0);
+    await longPage.keyboard.press('Escape');
+    await solarDialog.waitFor({state:'detached'});
+    await longPage.evaluate(async () => {
+      const {runtime}=await import('/src/lib/runtime/store.svelte.ts');
+      window.__layoutDocument.projects[0].factories[0].settings.surface=null;
+      await runtime.refresh();
+    });
+    await waitFor(async()=>await longPage.locator('[data-mechanic-id="6"] [aria-label="更换蓄电器"]').count()===1);
     const selectionChecks = await longPage.evaluate(async () => {
       const {runtime} = await import('/src/lib/runtime/store.svelte.ts');
       const doc = window.__layoutDocument;
