@@ -188,7 +188,7 @@
                 onchange={(event) => beaconCountChange(bi, event)}
               />
             </label>
-            <label class="me-num" title="插件塔效果共享比例：1 = 全部机器均摊，数值越大单机受到的效果越多">
+            <label class="me-num" title="每座插件塔平均覆盖的机器数；1 表示不共享。只用于分摊耗电和面积，不改变插件效果">
               共享
               <input
                 type="number"

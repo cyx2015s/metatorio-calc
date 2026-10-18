@@ -13,6 +13,7 @@
     amount,
     scale = 1,
     size = 22,
+    showName = false,
   }: {
     flow: DualVar;
     /** 每秒流量（正 = 产出，负 = 消耗）。 */
@@ -21,6 +22,7 @@
     scale?: number;
     /** 图标边长。 */
     size?: number;
+    showName?: boolean;
   } = $props();
 
   /** 流 → 图标 (type, name, detailKind, quality)。 */
@@ -113,7 +115,7 @@
   /** tooltip 用：能量流显示功率文本，否则显示刻度缩放值。 */
   const tipText = $derived(
     isEnergyFlow(flow)
-      ? `${powerValue(Math.abs(amount * scale))}J/s`
+      ? powerValue(Math.abs(amount * scale))
       : `${(Math.abs(amount) * scale * timeFactor).toFixed(2)}${timeUnit}`,
   );
 </script>
@@ -131,6 +133,7 @@
     quality={meta.quality}
     {flow}
   />
+  {#if showName}<span class="flow-name">{displayName}{meta.quality ? `（${runtime.localizedName("quality", meta.quality)}）` : ""}</span>{/if}
   <span class="mono">{qtyText(flow, amount, scale)}</span>
   {#if typeof flow === "object" && "VirtualScience" in flow}<span>科研</span>{/if}
 </span>
@@ -147,6 +150,8 @@
     border-radius: var(--radius-sm);
     font-size: 10.5px;
   }
+
+  .flow-name { font-size: 11px; }
 
   .flow-chip.out {
     border-color: var(--ok-line);

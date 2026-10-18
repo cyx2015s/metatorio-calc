@@ -21,6 +21,7 @@
   import HoverIcon from "$lib/ui/HoverIcon.svelte";
   import Icon from "$lib/ui/Icon.svelte";
   import Selector from "$lib/ui/Selector.svelte";
+  import MechanicRow from "$lib/ui/MechanicRow.svelte";
   import MechanicCard from "$lib/ui/MechanicCard.svelte";
 
   const mechKinds: { kind: import("$lib/runtime/types").MechanicKind; label: string }[] = [
@@ -548,14 +549,16 @@
       .reorderExternalInputs(event.detail.items.map((input) => input.id))
       .catch(() => {});
   }
-  function handleMechanicsConsider(event: CustomEvent<{ items: import("$lib/runtime/types").MechanicEntry[] }>) {
-    dragMechanics = event.detail.items;
+  type MechanicGroup = { id: string; key: string; entries: import("$lib/runtime/types").MechanicEntry[] };
+  let dragGroups = $state<MechanicGroup[]>([]);
+  $effect(() => { dragGroups = mechGroups.map((group) => ({ ...group, id: group.key })); });
+  function handleMechanicsConsider(event: CustomEvent<{ items: MechanicGroup[] }>) {
+    dragGroups = event.detail.items;
   }
-  function handleMechanicsFinalize(event: CustomEvent<{ items: import("$lib/runtime/types").MechanicEntry[] }>) {
-    dragMechanics = event.detail.items;
-    runtime
-      .reorderMechanics(event.detail.items.map((entry) => entry.id))
-      .catch(() => {});
+  function handleMechanicsFinalize(event: CustomEvent<{ items: MechanicGroup[] }>) {
+    dragGroups = event.detail.items;
+    dragMechanics = event.detail.items.flatMap((group) => group.entries);
+    runtime.reorderMechanics(dragMechanics.map((entry) => entry.id)).catch(() => {});
   }
   let solve = $derived(runtime.solve);
   let solveMap = $derived(
@@ -2507,11 +2510,11 @@
 
       <div
         class="mech-list"
-        use:dndzone={{ items: dragMechanics, flipDurationMs: 120 }}
+        use:dndzone={{ items: dragGroups, type: "mechanic-groups", flipDurationMs: 120 }}
         onconsider={handleMechanicsConsider}
         onfinalize={handleMechanicsFinalize}
       >
-        {#each mechGroups as group (group.key)}
+        {#each dragGroups as group (group.id)}
           {#if group.entries.length > 1}
             <!-- 配方合并组：标题（配方名 + 机器名），子机制完整显示 -->
             <div class="mech-group">
@@ -2522,42 +2525,49 @@
                 {#if groupMachine(group.entries)}
                   <span class="chip">{groupMachine(group.entries)}</span>
                 {/if}
-                <span class="chip muted">{group.entries.length} 品质</span>
+                <span class="chip muted">{group.entries.length} 变体</span>
               </div>
               {#each group.entries as entry (entry.id)}
                 <div class="mech-group-row">
+                  <MechanicRow mechanicId={entry.id} virtualize={mechanics.length > 80}>
+                    {#snippet children(pin)}
+                      <MechanicCard
+                        {entry}
+                        onInteractionChange={pin}
+                        project={project?.id ?? 0}
+                        factory={factory?.id ?? 0}
+                        solution={solveMap.get(entry.id) ?? null}
+                        onPick={(kind, a, b) => pickForMechanic(entry.id, kind, a, b)}
+                        onToggleEnabled={() => runtime.setMechanicEnabled(entry.id, !entry.enabled).catch(() => {})}
+                        onRemove={() => runtime.removeMechanic(entry.id).catch(() => {})}
+                        onAddBeacon={() => addBeacon(entry.id)}
+                        onPickFuel={() => pickFuel(entry.id)}
+                        onClone={() => runtime.cloneMechanic(entry.id).catch(() => {})}
+                      />
+                    {/snippet}
+                  </MechanicRow>
+                </div>
+              {/each}
+            </div>
+          {:else}
+            {#each group.entries as entry (entry.id)}
+              <MechanicRow mechanicId={entry.id} virtualize={mechanics.length > 80}>
+                {#snippet children(pin)}
                   <MechanicCard
                     {entry}
+                    onInteractionChange={pin}
                     project={project?.id ?? 0}
                     factory={factory?.id ?? 0}
                     solution={solveMap.get(entry.id) ?? null}
                     onPick={(kind, a, b) => pickForMechanic(entry.id, kind, a, b)}
                     onToggleEnabled={() => runtime.setMechanicEnabled(entry.id, !entry.enabled).catch(() => {})}
                     onRemove={() => runtime.removeMechanic(entry.id).catch(() => {})}
-                    onModuleSlot={(slot, module) => runtime.setModuleSlot(entry.id, slot, module).catch(() => {})}
                     onAddBeacon={() => addBeacon(entry.id)}
                     onPickFuel={() => pickFuel(entry.id)}
                     onClone={() => runtime.cloneMechanic(entry.id).catch(() => {})}
                   />
-                </div>
-              {/each}
-            </div>
-          {:else}
-            <!-- 单条机制：不嵌套，直接完整卡片 -->
-            {#each group.entries as entry (entry.id)}
-              <MechanicCard
-                {entry}
-                project={project?.id ?? 0}
-                factory={factory?.id ?? 0}
-                solution={solveMap.get(entry.id) ?? null}
-                onPick={(kind, a, b) => pickForMechanic(entry.id, kind, a, b)}
-                onToggleEnabled={() => runtime.setMechanicEnabled(entry.id, !entry.enabled).catch(() => {})}
-                onRemove={() => runtime.removeMechanic(entry.id).catch(() => {})}
-                onModuleSlot={(slot, module) => runtime.setModuleSlot(entry.id, slot, module).catch(() => {})}
-                onAddBeacon={() => addBeacon(entry.id)}
-                onPickFuel={() => pickFuel(entry.id)}
-                onClone={() => runtime.cloneMechanic(entry.id).catch(() => {})}
-              />
+                {/snippet}
+              </MechanicRow>
             {/each}
           {/if}
         {:else}
@@ -4387,8 +4397,8 @@
     min-height: 0;
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    padding-top: 10px;
+    gap: 4px;
+    padding-top: 6px;
   }
 
   .mech-group {
@@ -4437,7 +4447,7 @@
   }
 
   /* 顶层机制卡由 MechanicCard 自己提供边框；这里只保证悬停/间距一致。 */
-  .mech-list > :global(.mech-card) {
+  .mech-list > :global(.mechanic-row) {
     flex: 0 0 auto;
     margin-bottom: 0;
   }

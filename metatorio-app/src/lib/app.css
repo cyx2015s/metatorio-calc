@@ -6,6 +6,7 @@
 :root {
   color-scheme: dark;
 
+  --mechanic-row-height: 72px;
   --radius: 6px;
   --radius-sm: 4px;
   --mono: "JetBrains Mono", "SFMono-Regular", Consolas, "Cascadia Mono", monospace;
