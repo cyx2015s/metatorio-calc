@@ -86,11 +86,64 @@ pub fn expand<'a, C: Clone>(
         } else {
             instance_cost(ctx.prototype, mechanic)
         };
+        let heating = mechanic_heating(ctx, mechanic);
         for variable in &mut expansion.variables[before..] {
             variable.cost = cost;
+            if heating > 0.0 {
+                *variable.flow.entry(DualVar::Heat).or_default() -= heating;
+            }
         }
     }
     expansion
+}
+
+/// 每单位机制实际占用实体的持续供暖功率（W）。独立于工作速度、插件能耗
+/// 和品质；在温度分支全部展开后叠加，避免被产出倍率缩放或覆盖已有热流。
+fn mechanic_heating(ctx: &Context, mechanic: &Mechanic) -> f64 {
+    if !ctx.game.entities_require_heating {
+        return 0.0;
+    }
+    let entity = |name: &str| {
+        entity_component(ctx, name).map_or(0.0, |entity| entity.heating_energy().amount * 60.0)
+    };
+    let beacons = |modules: &ModuleConfig| {
+        modules
+            .beacons
+            .iter()
+            .map(|beacon| entity(&beacon.beacon.id) * beacon.count as f64 / beacon.share.max(1.0))
+            .sum::<f64>()
+    };
+    match mechanic {
+        Mechanic::Recipe(mechanic) => {
+            entity(&mechanic.machine.id) + beacons(&mechanic.module_config)
+        }
+        Mechanic::Mining(mechanic) => {
+            entity(&mechanic.machine.id) + beacons(&mechanic.module_config)
+        }
+        Mechanic::TileExtract(mechanic) => entity(&mechanic.machine.id),
+        Mechanic::Generator(mechanic) => entity(&mechanic.generator.id),
+        Mechanic::Boiler(mechanic) => entity(&mechanic.boiler.id),
+        Mechanic::Reactor(mechanic) => entity(&mechanic.reactor.id),
+        Mechanic::Solar(mechanic) => {
+            entity(&mechanic.solar_panel.id)
+                + solar_balance(ctx, mechanic).map_or(0.0, |balance| {
+                    balance.recommended_accumulators * entity(&mechanic.accumulator.id)
+                })
+        }
+        // 种植变量代表一株生长中的植物，没有额外建模农业塔或机械臂。
+        Mechanic::Plant(mechanic) => item_record(ctx, &mechanic.seed.id)
+            .and_then(|seed| seed.plant_result.as_deref())
+            .map_or(0.0, entity),
+        // 这些变量是物品/能量转换，不代表另一台实体。发射所消耗的运力
+        // 已由火箭井配方生产，本体供暖也在那里计入，不能按发射次数重计。
+        Mechanic::ItemLaunch(_)
+        | Mechanic::ItemFuel(_)
+        | Mechanic::FluidFuel(_)
+        | Mechanic::FluidHeat(_)
+        | Mechanic::Spoil(_)
+        | Mechanic::TileDispose(_)
+        | Mechanic::VirtualScience(_) => 0.0,
+    }
 }
 
 /// 实体碰撞箱面积（用于成本，复科旧实现）。

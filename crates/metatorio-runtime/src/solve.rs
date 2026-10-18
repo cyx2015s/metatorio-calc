@@ -1896,8 +1896,13 @@ pub fn apply_environment_to_game_state(
     surface: Option<&str>,
 ) {
     use metatorio_data::store::PrototypeGroup;
-    use metatorio_data::{SpaceLocationComponent, SurfacePropertyComponent};
+    use metatorio_data::{PlanetComponent, SpaceLocationComponent, SurfacePropertyComponent};
     game.solar_continuous_daylight = surface.is_some();
+    game.entities_require_heating = surface.is_none()
+        && planet
+            .and_then(|name| store.get(PrototypeGroup::Planet, name))
+            .and_then(|record| record.component::<PlanetComponent>())
+            .is_some_and(|planet| planet.entities_require_heating);
     game.surface_properties =
         crate::planet::surface_properties_of(store, planet, surface).unwrap_or_default();
     let property = |name: &str| {

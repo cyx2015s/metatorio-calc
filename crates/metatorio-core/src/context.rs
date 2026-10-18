@@ -41,6 +41,8 @@ pub struct GameState {
     pub day_night_cycle: f64,
     /// 显式轨道表面持续满日照，不需要昼夜储能。
     pub solar_continuous_daylight: bool,
+    /// 当前地面星球要求实体供暖；轨道环境始终为 false。
+    pub entities_require_heating: bool,
     /// 当前表面属性，供使用自定义 solar_coefficient_property 的面板查询。
     pub surface_properties: std::collections::BTreeMap<String, f64>,
     /// Factorio 在无法从配方推导物品重量时使用的默认重量。
@@ -59,6 +61,7 @@ impl Default for GameState {
             solar_power_multiplier: 1.0,
             day_night_cycle: 25_200.0,
             solar_continuous_daylight: false,
+            entities_require_heating: false,
             surface_properties: Default::default(),
             default_item_weight: 100.0,
             rocket_lift_weight: 1_000_000.0,
