@@ -1066,6 +1066,7 @@ impl<'de> serde::Deserialize<'de> for TriggerEffects {
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum Modifier {
     MiningWithFluid(BoolModifer),
+    #[serde(rename = "unlock-space-platforms")]
     SpacePlatforms(BoolModifer),
     ChangeRecipeProductivity(ChangeRecipeProductivityModifier),
     BeaconDistribution(SimpleModifier),
@@ -1090,6 +1091,7 @@ pub struct SimpleModifier {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BoolModifer {
+    /// Required by the inherited BoolModifier schema, including unlock effects.
     pub modifier: bool,
 }
 

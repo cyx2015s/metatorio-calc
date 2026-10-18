@@ -49,8 +49,8 @@ pub enum Accessible {
     Item(String),
     Fluid(String),
     Entity(String),
-    /// 星球（普通节点）：nauvis 恒解锁（根）；其他星球 = 需要
-    /// `planet-discovery-<星球>` 科技。星球解锁后其资源可自由移动。
+    /// 星球：由 unlock-space-location 效果解锁，不推测科技名称。
+    /// 未声明解锁效果的 Nauvis 作为默认起点；其他起点可通过里程碑覆盖。
     Planet(String),
     Electricity,
     Heat,
@@ -178,11 +178,11 @@ pub struct GraphData {
     items_by_place_result: HashMap<String, Vec<String>>,
     /// 科技名 → 科技依赖的物品。
     tech_units: HashMap<String, Vec<String>>,
-    /// 配方/品质/空间名 → 解锁它的科技名（UnlockRecipe/UnlockQuality/UnlockSpaceLocation）。
-    techs_by_unlock: HashMap<String, Vec<String>>,
+    /// 带类别的配方/品质/地点节点 → 解锁科技；不同原型类别允许同名。
+    techs_by_unlock: HashMap<Accessible, Vec<String>>,
     /// 资源实体/物品名 → 生成它的星球列表（autoplace +
-    /// seed_available_on_planet）。星球解锁（planet-discovery-<p> 科技可达，
-    /// nauvis 恒解锁）后该资源可自由移动到任何星球 → 根。
+    /// seed_available_on_planet）。星球经解锁效果可达（或为默认起点）后，
+    /// 其资源可作为后续生产的来源。
     resource_planets: HashMap<String, Vec<String>>,
     /// 实体名 → 会产生它的触发实体（反查生成的实体）。如星岩碎片 ← 小星岩。
     generated_by: HashMap<String, Vec<String>>,
@@ -320,7 +320,7 @@ pub fn build_graph(store: &PrototypeStore) -> GraphData {
     let mut burnt_sources: HashMap<String, Vec<String>> = HashMap::new();
     let mut tile_fluid_sources: HashMap<String, Vec<Accessible>> = HashMap::new();
     let mut items_by_place_result: HashMap<String, Vec<String>> = HashMap::new();
-    let mut techs_by_unlock: HashMap<String, Vec<String>> = HashMap::new();
+    let mut techs_by_unlock: HashMap<Accessible, Vec<String>> = HashMap::new();
     let mut tech_units: HashMap<String, Vec<String>> = HashMap::new();
     let mut launch_sources: HashMap<String, Vec<String>> = HashMap::new();
     let mut boiler_outputs: HashMap<String, Vec<(String, String)>> = HashMap::new();
@@ -462,15 +462,15 @@ pub fn build_graph(store: &PrototypeStore) -> GraphData {
         for effect in &tech.effects {
             match effect {
                 Modifier::UnlockRecipe(unlock) => techs_by_unlock
-                    .entry(unlock.recipe.clone())
+                    .entry(Accessible::Recipe(unlock.recipe.clone()))
                     .or_default()
                     .push(record.name.clone()),
                 Modifier::UnlockQuality(unlock) => techs_by_unlock
-                    .entry(unlock.quality.clone())
+                    .entry(Accessible::Quality(unlock.quality.clone()))
                     .or_default()
                     .push(record.name.clone()),
                 Modifier::UnlockSpaceLocation(unlock) => techs_by_unlock
-                    .entry(unlock.space_location.clone())
+                    .entry(space_node(store, &unlock.space_location))
                     .or_default()
                     .push(record.name.clone()),
                 _ => {}
@@ -637,7 +637,7 @@ fn fuel_burnt_result(item: &ItemComponent) -> Option<&str> {
 }
 
 /// 空间地点名 → 可达性节点：星球（planet，planet 是 space-location 子类）
-/// 归 Planet 组（planet-discovery 科技）；深空地点 → Space（unlock 科技）。
+/// 归 Planet 组；深空地点归 Space。两类都按 unlock-space-location 效果解锁。
 fn space_node(store: &PrototypeStore, name: &str) -> Accessible {
     if store.get(PrototypeGroup::Planet, name).is_some() {
         Accessible::Planet(name.to_string())
@@ -824,7 +824,7 @@ fn requirements(store: &PrototypeStore, graph: &GraphData, node: &Accessible) ->
                     // （并非解锁就能制造）。hidden 且 enabled 的配方视为可达。
                     let mut any: Vec<Requirement> = graph
                         .techs_by_unlock
-                        .get(name)
+                        .get(node)
                         .cloned()
                         .unwrap_or_default()
                         .into_iter()
@@ -1027,7 +1027,7 @@ fn requirements(store: &PrototypeStore, graph: &GraphData, node: &Accessible) ->
             } else {
                 let any: Vec<Requirement> = graph
                     .techs_by_unlock
-                    .get(name)
+                    .get(node)
                     .cloned()
                     .unwrap_or_default()
                     .into_iter()
@@ -1036,25 +1036,22 @@ fn requirements(store: &PrototypeStore, graph: &GraphData, node: &Accessible) ->
                 Requirement::Any(any)
             }
         }
-        Accessible::Space(name) => {
-            let any: Vec<Requirement> = graph
-                .techs_by_unlock
-                .get(name)
-                .cloned()
-                .unwrap_or_default()
-                .into_iter()
-                .map(|tech| Requirement::Node(Accessible::Tech(tech)))
-                .collect();
-            Requirement::Any(any)
-        }
-        Accessible::Planet(name) => {
-            // nauvis 初始解锁（根）；其他星球需要 planet-discovery-<星球> 科技。
-            if name == "nauvis" {
+        Accessible::Space(_) | Accessible::Planet(_) => {
+            if let Some(techs) = graph.techs_by_unlock.get(node) {
+                Requirement::Any(
+                    techs
+                        .iter()
+                        .cloned()
+                        .map(|tech| Requirement::Node(Accessible::Tech(tech)))
+                        .collect(),
+                )
+            } else if matches!(node, Accessible::Planet(name) if name == "nauvis") {
+                // Product default, not an engine-discoverable starting location:
+                // prototype dumps do not include scenario/force unlock state.
+                // Explicit unlock effects take precedence, even for Nauvis.
                 Requirement::All(Vec::new())
             } else {
-                Requirement::All(vec![Requirement::Node(Accessible::Tech(format!(
-                    "planet-discovery-{name}"
-                )))])
+                Requirement::Any(Vec::new())
             }
         }
         Accessible::Electricity | Accessible::Heat => Requirement::All(Vec::new()),
