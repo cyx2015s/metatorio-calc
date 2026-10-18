@@ -161,6 +161,7 @@ impl MetatorioMcp {
         规划动作都能用它完成。  \
         返回里 `created` 是本次调用新建对象的 id（不用再读一次），`solve` 是命令触发\
         求解时的结构化结果，`errors` 非空时 `isError` 为真（命令跑了但失败了）。  \
+        `new-project` 同时创建一个默认空工厂，id 分别位于 `created.projects` 与 `created.factories`。  \
         **所有流量都是「每秒」**；项目的 time-scale 只影响界面显示。  \
         传 `request_id` 让重试幂等（同一个 id 只应用一次，重复调用回放上次的载荷）。  \
         可用 scope=history、action=undo/redo 撤销/重做一次编辑；返回里的 `history` \
@@ -511,6 +512,18 @@ impl MetatorioMcp {
         };
 
         let configured = async {
+            // auto_plan retains its single DefaultMechanics factory. The empty
+            // factory returned by ordinary NewProject is only a GUI/dispatch default.
+            for factory in &outcome.created.factories {
+                apply_consistency_only(
+                    &host,
+                    AppMessage::Project {
+                        project,
+                        action: ProjectAction::RemoveFactory { factory: *factory },
+                    },
+                )
+                .await?;
+            }
             if let Some(context) = &params.context_id {
                 apply_consistency_only(
                     &host,

@@ -55,8 +55,17 @@ fn frontend_json_one_click_demo_runs_end_to_end() {
             "action": { "new-project": { "name": "Demo project" } }
         }),
     );
-    let _ = r;
-    let project = runtime.state.document.projects[0].id;
+    let project = r.created.projects[0];
+    let default_factory = r.created.factories[0];
+    assert_eq!(runtime.state.project(project).unwrap().factories.len(), 1);
+    assert!(
+        runtime
+            .state
+            .factory(project, default_factory)
+            .unwrap()
+            .mechanics
+            .is_empty()
+    );
 
     // 2. Add factory (struct variant: fields are wrapped under "action").
     let r = dispatch(
@@ -69,7 +78,8 @@ fn frontend_json_one_click_demo_runs_end_to_end() {
             }
         }),
     );
-    let factory = runtime.state.project(project).unwrap().factories[0].id;
+    let factory = r.created.factories[0];
+    assert_ne!(factory, default_factory);
     assert!(
         r.commands
             .contains(&RuntimeCommand::Recompute { project, factory })

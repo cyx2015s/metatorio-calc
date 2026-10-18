@@ -43,6 +43,7 @@ pub enum HistoryAction {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum ApplicationAction {
+    /// 新建项目及一个默认空工厂，两个 id 都由 created 回传。
     NewProject {
         name: String,
     },

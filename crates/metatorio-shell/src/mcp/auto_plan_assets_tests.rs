@@ -421,6 +421,43 @@ async fn concurrent_same_request_id_applies_dispatch_once() {
 }
 
 #[tokio::test]
+async fn dispatch_new_project_returns_its_empty_factory_and_replays_ids() {
+    let _permit = GATE.acquire().await.unwrap();
+    let mcp = handler(BASE);
+    let args = json!({
+        "message": {"scope":"application", "action":{"new-project":{"name":"空工厂"}}},
+        "request_id":"project-with-default-factory"
+    });
+    let a = payload(
+        mcp.dispatch(Parameters(serde_json::from_value(args.clone()).unwrap()))
+            .await
+            .unwrap(),
+    );
+    let b = payload(
+        mcp.dispatch(Parameters(serde_json::from_value(args).unwrap()))
+            .await
+            .unwrap(),
+    );
+    assert_eq!(a["created"]["projects"].as_array().unwrap().len(), 1);
+    assert_eq!(a["created"]["factories"].as_array().unwrap().len(), 1);
+    assert_eq!(a["created"], b["created"]);
+    assert_eq!(b["idempotent_replay"], true);
+    let runtime = mcp.host.state().runtime.lock().unwrap();
+    let projects = &runtime.state.document.projects;
+    assert_eq!(projects.len(), 1);
+    assert_eq!(
+        projects[0].id.0,
+        a["created"]["projects"][0].as_u64().unwrap()
+    );
+    assert_eq!(projects[0].factories.len(), 1);
+    let factory = &projects[0].factories[0];
+    assert_eq!(factory.id.0, a["created"]["factories"][0].as_u64().unwrap());
+    assert!(factory.mechanics.is_empty());
+    assert!(factory.targets.is_empty());
+    assert!(factory.external_inputs.is_empty());
+}
+
+#[tokio::test]
 async fn repeated_planning_keeps_equivalent_document_revision() {
     let _permit = GATE.acquire().await.unwrap();
     let mcp = handler(BASE);

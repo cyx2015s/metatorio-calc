@@ -326,9 +326,21 @@ class RuntimeStore {
   }
 
   async refresh(): Promise<void> {
+    const previousProject = this.selectedProjectId;
+    const previousFactory = this.selectedFactoryId;
     this.document = await getDocument();
-    // 前端持有选择态：文档刷新后若选中项已被删除（删除工厂/项目），清除选择。
+    // 保留有效选择；删除、导入或外部编辑后自动补全缺失选择。
     this.pruneSelection();
+    if (previousProject !== this.selectedProjectId || previousFactory !== this.selectedFactoryId) {
+      this.restoreSolveForSelection();
+      this.refreshImplicitSources().catch(() => {});
+    }
+    if (previousProject !== this.selectedProjectId) {
+      this.accessibility = null;
+      this.refreshOrderedMilestones().catch(() => {});
+      this.refreshProductivity().catch(() => {});
+      this.syncEffectiveContext().catch(() => {});
+    }
     this.refreshProjectPaths().catch(() => {});
   }
 
@@ -618,7 +630,7 @@ class RuntimeStore {
       }
       // 前端持有选择态：选中最后导入的那个项目。
       this.selectedProjectId = added[added.length - 1].id;
-      this.selectedFactoryId = null;
+      this.selectedFactoryId = added[added.length - 1].factories[0]?.id ?? null;
       this.selectedMechanic = null;
       await this.refreshProjectPaths();
       this.restoreSolveForSelection();
@@ -809,18 +821,9 @@ class RuntimeStore {
   // ── 项目 / 工厂 ─────────────────────────────────────────────────
 
   async newProject(name: string): Promise<void> {
-    await this.send({ scope: "application", action: { "new-project": { name } } });
-    // 前端持有选择态：新建项目后选中它（文档里最后一个）。
-    const projects = this.document?.projects ?? [];
-    this.selectedProjectId = projects[projects.length - 1]?.id ?? null;
-    this.selectedFactoryId = null;
-    this.selectedMechanic = null;
-    this.accessibility = null;
-    this.restoreSolveForSelection();
-    this.refreshOrderedMilestones().catch(() => {});
-    this.refreshProductivity().catch(() => {});
-    this.refreshImplicitSources().catch(() => {});
-    this.syncEffectiveContext().catch(() => {});
+    const result = await this.send({ scope: "application", action: { "new-project": { name } } });
+    const project = result.created.projects[0];
+    if (project != null) await this.selectProject(project);
   }
 
   /** 关闭项目：decision = "discard"（不保存关闭）| "save"（先保存再关闭）。 */
@@ -890,9 +893,12 @@ class RuntimeStore {
 
   async selectProject(project: ProjectId | null): Promise<void> {
     // 前端持有选择态：只更新本地 `$state`，不再向后端同步（后端无 UI 状态）。
-    const changed = this.selectedProjectId !== project;
-    this.selectedProjectId = project;
-    this.selectedFactoryId = null;
+    const projects = this.document?.projects ?? [];
+    const next = projects.find((entry) => entry.id === project) ?? projects[0];
+    const changed = this.selectedProjectId !== (next?.id ?? null);
+    this.selectedProjectId = next?.id ?? null;
+    if (changed) this.selectedFactoryId = null;
+    this.pruneSelection();
     this.selectedMechanic = null;
     this.accessibility = null;
     this.restoreSolveForSelection();
@@ -907,8 +913,10 @@ class RuntimeStore {
   }
 
   async selectFactory(factory: FactoryId | null): Promise<void> {
-    const changed = this.selectedFactoryId !== factory;
-    this.selectedFactoryId = factory;
+    const factories = this.selectedProject?.factories ?? [];
+    const next = factories.find((entry) => entry.id === factory) ?? factories[0];
+    const changed = this.selectedFactoryId !== (next?.id ?? null);
+    this.selectedFactoryId = next?.id ?? null;
     this.selectedMechanic = null;
     this.restoreSolveForSelection();
     if (changed) this.refreshImplicitSources().catch(() => {});
@@ -1872,22 +1880,19 @@ class RuntimeStore {
     return this.selectedProject?.context_id ?? "";
   }
 
-  /** 前端持有选择态：若当前选中的项目/工厂已不在文档中（被删除），清除选择。 */
+  /** 保留有效选择；有项目/工厂时始终补全选择，只有列表为空时才为 null。 */
   private pruneSelection(): void {
     const projects = this.document?.projects ?? [];
-    if (this.selectedProjectId != null && !projects.some((p) => p.id === this.selectedProjectId)) {
-      this.selectedProjectId = null;
-      this.selectedFactoryId = null;
+    const project = projects.find((entry) => entry.id === this.selectedProjectId) ?? projects[0];
+    const projectId = project?.id ?? null;
+    const factories = project?.factories ?? [];
+    const factory = factories.find((entry) => entry.id === this.selectedFactoryId) ?? factories[0];
+    const factoryId = factory?.id ?? null;
+    if (projectId !== this.selectedProjectId || factoryId !== this.selectedFactoryId) {
       this.selectedMechanic = null;
-      return;
     }
-    if (this.selectedFactoryId != null) {
-      const factories = this.selectedProject?.factories ?? [];
-      if (!factories.some((f) => f.id === this.selectedFactoryId)) {
-        this.selectedFactoryId = null;
-        this.selectedMechanic = null;
-      }
-    }
+    this.selectedProjectId = projectId;
+    this.selectedFactoryId = factoryId;
   }
 
   private requireProject(): ProjectId {

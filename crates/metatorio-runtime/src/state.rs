@@ -410,16 +410,21 @@ impl RuntimeState {
         match action {
             ApplicationAction::NewProject { name } => {
                 let id = self.allocate_id();
+                let factory_id = self.allocate_id();
+                let factory =
+                    self.new_factory(factory_id, "新工厂".to_string(), FactoryTemplate::Empty);
                 let project = ProjectDocument {
                     id,
                     name: non_empty(name, "Unnamed project"),
                     // 固定到当前上下文：项目创建后自含上下文，不依赖全局回退。
                     context_id: self.active_context.clone(),
+                    factories: vec![factory],
                     ..ProjectDocument::default()
                 };
                 self.document.projects.push(project);
                 let mut outcome = Outcome::meta(id);
                 outcome.created.project(id);
+                outcome.created.factory(factory_id);
                 Ok(outcome)
             }
             ApplicationAction::OpenProject { path } => {
@@ -2722,16 +2727,29 @@ mod tests {
     #[test]
     fn undo_new_project_removes_it_and_redo_restores_it() {
         let mut state = RuntimeState::default();
-        state
+        let result = state
             .dispatch(AppMessage::Application(ApplicationAction::NewProject {
                 name: "p".to_string(),
             }))
             .unwrap();
         let project = state.document.projects[0].id;
+        let factories = &state.document.projects[0].factories;
+        assert_eq!(result.created.projects, vec![project]);
+        assert_eq!(factories.len(), 1);
+        let factory = &factories[0];
+        let factory_id = factory.id;
+        assert_eq!(result.created.factories, vec![factory_id]);
+        assert!(factory.mechanics.is_empty());
+        assert!(factory.targets.is_empty());
+        assert!(factory.external_inputs.is_empty());
+        assert!(factory.target_expressions.is_empty());
+        assert_eq!(factory.settings.planet.as_deref(), Some("nauvis"));
+        assert_ne!(project.0, factory_id.0);
         state.undo().unwrap();
         assert!(state.document.projects.is_empty());
         state.redo().unwrap();
         assert_eq!(state.document.projects[0].id, project);
+        assert_eq!(state.document.projects[0].factories[0].id, factory_id);
     }
 
     #[test]

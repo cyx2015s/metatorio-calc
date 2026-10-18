@@ -94,6 +94,14 @@ async function seed(page, count) {
      return args.mechanic===1 ? [...base,...Array.from({length:18},(_,i)=>output(`extra-${i}`,'normal',i+1))] : base;
     }
     if(command==='dispatch') {
+     if(args.message.action?.['new-project']) {
+      const id=Math.max(0,...doc.projects.map(p=>p.id))+10;
+      const created=structuredClone(project);
+      created.id=id; created.name=args.message.action['new-project'].name;
+      created.factories=[{...structuredClone(project.factories[0]),id:id+1,mechanics:[],targets:[],external_inputs:[],target_expressions:[]}];
+      doc.projects.push(created);
+      return {revision:1,changed:true,created:{projects:[id],factories:[id+1]},commands:[],history};
+     }
      const action=args.message.action?.action;
      if(action?.['mechanic-list']?.['set-enabled']) {const a=action['mechanic-list']['set-enabled']; mechanics.find(m=>m.id===a.mechanic).enabled=a.enabled;}
      if(action?.['mechanic-list']?.reorder) {const a=action['mechanic-list'].reorder; const i=mechanics.findIndex(m=>m.id===a.mechanic); mechanics.splice(a.position,0,...mechanics.splice(i,1));}
@@ -279,7 +287,43 @@ async function run() {
     await pause(200);
     assert.ok(await longPage.locator('.mech-card').count()<35, 'resize restores the column scroll root');
     assert.deepEqual(errors,[]);
-    console.log(JSON.stringify({rows:1000,initialMounted:mounted,initialFlowRequests:requests,rowHeight:72,checks:'layout, nested selectors, focus, parameters, group reorder, virtual mounting'},null,2));
+    const selectionChecks = await longPage.evaluate(async () => {
+      const {runtime} = await import('/src/lib/runtime/store.svelte.ts');
+      const doc = window.__layoutDocument;
+      const original = structuredClone(doc.projects[0]);
+      const other = structuredClone(original);
+      other.id=10001; other.name='第二项目';
+      other.factories=other.factories.map(f=>({...f,id:10002}));
+      other.factories.push({...structuredClone(other.factories[0]),id:10003});
+      doc.projects.push(other);
+      const seen=[];
+      const snapshot=()=>seen.push([runtime.selectedProjectId,runtime.selectedFactoryId]);
+      await runtime.refresh(); snapshot(); // refresh preserves the current selection
+      await runtime.selectProject(10001); snapshot(); // switching selects its first factory
+      await runtime.selectFactory(10003);
+      await runtime.selectProject(10001); snapshot(); // selecting the same tab keeps its factory
+      await runtime.selectFactory(null); snapshot(); // null cannot leave a nonempty list unselected
+      await runtime.selectProject(null); snapshot();
+      await runtime.selectProject(10001);
+      await runtime.selectFactory(10003);
+      doc.projects[1].factories.pop();
+      await runtime.refresh(); snapshot(); // external factory removal falls back
+      doc.projects.pop();
+      await runtime.refresh(); snapshot(); // external project removal falls back
+      doc.projects[0].factories=[];
+      await runtime.refresh(); snapshot(); // an empty project may have no factory
+      doc.projects[0].factories=[structuredClone(original.factories[0])];
+      await runtime.refresh(); snapshot(); // an externally added factory is selected
+      doc.projects=[];
+      await runtime.refresh(); snapshot(); // no projects means both ids are null
+      doc.projects=[original];
+      await runtime.refresh(); snapshot(); // reopen/import fills both ids
+      await runtime.newProject('带默认工厂'); snapshot();
+      return seen;
+    });
+    assert.deepEqual(selectionChecks, [[1,2],[10001,10002],[10001,10003],[10001,10002],[1,2],[10001,10002],[1,2],[1,null],[1,2],[null,null],[1,2],[11,12]]);
+    assert.deepEqual(errors,[]);
+    console.log(JSON.stringify({rows:1000,initialMounted:mounted,initialFlowRequests:requests,rowHeight:72,checks:'layout, nested selectors, focus, parameters, group reorder, virtual mounting, project/factory selection'},null,2));
   } finally {
     await browser?.close();
     server.kill();
