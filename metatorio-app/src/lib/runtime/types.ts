@@ -739,7 +739,13 @@ export interface ContextList {
   contexts: ContextInfo[];
 }
 
+export interface TileCapabilities { fluid: string | null; destroys_dropped_items: boolean; }
+
+export interface CalculationStat { key: string; value: number; unit: "number" | "seconds" | "watts" | "joules" | "joules-per-degree" | "percent" | "multiplier" | "per-second"; }
+export interface CalculationDetail { surface_properties?: Record<string, number>; research?: {units: number | null; unit_seconds: number; ingredients: {name: string; per_unit: number; total: number | null}[]; prerequisites: string[]}; stats: CalculationStat[]; qualities: { quality: string; stats: CalculationStat[] }[]; tile?: TileCapabilities; }
+
 export interface IndexEntry {
+  tile?: TileCapabilities;
   kind: string;
   name: string;
   /** 本地化显示名（`--dump-prototype-locale`；无翻译时为空串）。 */
@@ -772,6 +778,7 @@ export interface CatalogIndex {
 }
 
 export interface FlowAmount {
+  base_rate?: number | null;
   kind: "item" | "fluid";
   name: string;
   /** 单次期望量（概率已折算）。 */
@@ -781,7 +788,7 @@ export interface FlowAmount {
   /** 有概率时的原始量区间（amount_min/amount_max）。 */
   amount_min: number | null;
   amount_max: number | null;
-  /** 每次产能结算的额外产量（仅产物）。 */
+  /** 产能加成作用的期望产量基数（仅产物），不是已结算额外产量。 */
   productivity: number;
   /** 流体温度。 */
   temperature: number | null;
@@ -796,6 +803,7 @@ export interface FlowAmount {
 
 /** 悬停详情（按需拉取 + 前端缓存）。 */
 export interface PrototypeDetail {
+  calculation?: CalculationDetail;
   name: string;
   /** 本地化显示名（无翻译时为空串）。 */
   localized_name: string;

@@ -240,6 +240,8 @@ class RuntimeStore {
   private syncedContextId = "";
   /** 悬停详情缓存：`kind/name` → 详情。 */
   private detailCache = new Map<string, PrototypeDetail>();
+  private detailRequests = new Map<string, Promise<PrototypeDetail | null>>();
+  private detailGeneration = 0;
   /** 机制展开流缓存：`contextId:project:factory:mechanicId` → {机制内容hash, 流}。
    *  每次 dispatch 后 refresh() 会用全新对象引用刷新机制列表，导致每个
    *  MechanicCard 都重新拉取展开流。按机制**内容哈希**缓存，内容不变时不重发
@@ -712,16 +714,21 @@ class RuntimeStore {
 
   /** 悬停详情：按 (context, kind, name) 缓存（上下文项目级绑定）。 */
   async getDetail(kind: string, name: string): Promise<PrototypeDetail | null> {
-    const key = `${this.effectiveContextId}/${kind}/${name}`;
+    const context = this.effectiveContextId;
+    const key = `${context}/${kind}/${name}`;
     const cached = this.detailCache.get(key);
     if (cached) return cached;
-    try {
-      const detail = await prototypeDetail(kind, name, this.effectiveContextId);
-      if (detail) this.detailCache.set(key, detail);
+    const pending = this.detailRequests.get(key);
+    if (pending) return pending;
+    const generation = this.detailGeneration;
+    const request = prototypeDetail(kind, name, context).then((detail) => {
+      if (detail && generation === this.detailGeneration) this.detailCache.set(key, detail);
       return detail;
-    } catch {
-      return null;
-    }
+    }).catch(() => null).finally(() => {
+      if (this.detailRequests.get(key) === request) this.detailRequests.delete(key);
+    });
+    this.detailRequests.set(key, request);
+    return request;
   }
 
   /**
@@ -795,6 +802,8 @@ class RuntimeStore {
     this.localizedNameMap.clear();
     this.localizedNameContext = "";
     this.detailCache.clear();
+    this.detailGeneration++;
+    this.detailRequests.clear();
   }
 
   // ── 项目 / 工厂 ─────────────────────────────────────────────────

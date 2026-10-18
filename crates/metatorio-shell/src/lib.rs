@@ -9,6 +9,7 @@ pub mod app;
 pub mod host;
 pub mod mcp;
 pub mod options;
+pub mod prototype_calculation;
 pub mod solve_jobs;
 pub mod update;
 

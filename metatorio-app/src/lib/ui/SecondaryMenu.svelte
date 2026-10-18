@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { dismissHover } from "./hover-controller";
   import { tick, type Snippet } from "svelte";
 
   let { title, trigger, children, onOpenChange }: {
@@ -70,7 +71,7 @@
 </script>
 
 <span class="menu-anchor" bind:this={anchor}>
-  {@render trigger(() => { open = !open; }, open)}
+  {@render trigger(() => { dismissHover(); open = !open; }, open)}
 </span>
 {#if open}
   <div use:portal bind:this={panel} class="secondary-menu" role="dialog" aria-label={title}

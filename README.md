@@ -105,6 +105,7 @@ cd metatorio-app && pnpm install && pnpm tauri build
 自动规划的真实上下文回归、极端倍率、插件塔组合及全产物遍历测试，见 [测试说明与实测结果](docs/auto-plan-testing.md)。
 
 机制卡布局、长列表挂载策略与浏览器回归，见 [机制工作区](docs/mechanic-workspace.md)。
+悬停计算详情、消息分层和地格选择边界，见 [悬停详情](docs/hover-details.md)。
 
 欢迎提交各种 issue、pull request 或在其他社交网站上联系我反馈问题和提供建议。
 

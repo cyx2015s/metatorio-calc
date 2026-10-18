@@ -569,3 +569,23 @@ mod tests {
         assert!(!flows.contains_key(&DualVar::Entity(IdWithQuality::new("rock", "normal"))));
     }
 }
+
+/// Shared physical tile capabilities for UI filtering and command validation.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct TileCapabilities {
+    pub fluid: Option<String>,
+    pub destroys_dropped_items: bool,
+}
+
+pub fn tile_capabilities(store: &PrototypeStore, name: &str) -> Option<TileCapabilities> {
+    let tile = store
+        .get(PrototypeGroup::Tile, name)?
+        .component::<TileComponent>()?;
+    Some(TileCapabilities {
+        fluid: tile
+            .fluid
+            .clone()
+            .filter(|name| store.get(PrototypeGroup::Fluid, name).is_some()),
+        destroys_dropped_items: tile.destroys_dropped_items,
+    })
+}

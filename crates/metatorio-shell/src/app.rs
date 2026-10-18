@@ -475,6 +475,8 @@ pub struct GroupCount {
 /// 目录索引条目：一次性下发到前端，筛选/分组/排序全部前端本地做。
 #[derive(Debug, Clone, Serialize)]
 pub struct IndexEntry {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tile: Option<metatorio_core::planet::TileCapabilities>,
     pub kind: String,
     pub name: String,
     /// 本地化显示名（来自 `--dump-prototype-locale`；无翻译时为空串）。
@@ -530,6 +532,8 @@ pub struct ResolvedName {
 /// 配方原料/产物条目（含概率/产能/品质修饰）。
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct FlowAmount {
+    /// Expected units per second at speed 1; absent when cycle time is unknown.
+    pub base_rate: Option<f64>,
     pub kind: String,
     pub name: String,
     /// 单次期望量（概率已折算）。
@@ -539,7 +543,7 @@ pub struct FlowAmount {
     /// 有概率时的原始量区间（amount_min/amount_max）。
     pub amount_min: Option<f64>,
     pub amount_max: Option<f64>,
-    /// 每次产能结算的额外产量（仅产物）。
+    /// 产能加成作用的期望产量基数（仅产物），不是已结算额外产量。
     pub productivity: f64,
     /// 流体温度。
     pub temperature: Option<f64>,
@@ -554,6 +558,7 @@ pub struct FlowAmount {
 
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct PrototypeDetail {
+    pub calculation: crate::prototype_calculation::CalculationDetail,
     pub name: String,
     pub localized_name: String,
     pub kind: String,
@@ -2332,6 +2337,7 @@ pub(crate) fn catalog_index_from_store(
                         0
                     };
                     out.push(IndexEntry {
+                        tile: None,
                         kind: kind.to_string(),
                         name: name.clone(),
                         localized_name: localized_name(locale, kind, name),
@@ -2399,6 +2405,7 @@ pub(crate) fn catalog_index_from_store(
                         _ => Vec::new(),
                     };
                     out.push(IndexEntry {
+                        tile: None,
                         kind: kind.to_string(),
                         name: name.clone(),
                         localized_name: localized_name(locale, kind, name),
@@ -2418,11 +2425,10 @@ pub(crate) fn catalog_index_from_store(
     }
 
     // tile：地格机制（TileExtract / TileDispose）的选择器用。
-    // 直接遍历而不走 order_info——地格总数很小，且**不过滤**：让用户看到全部地格，
-    // 选错时由 validate.rs 给出「该地格没有 destroys_dropped_items」这类明确错误，
-    // 比在选择器里静默藏起来更好诊断。
+    // 能力随索引一起下发；前端按用途过滤，不为每块地格发送详情请求。
     for record in store.group(PrototypeGroup::Tile) {
         out.push(IndexEntry {
+            tile: metatorio_core::planet::tile_capabilities(store, &record.name),
             kind: "tile".to_string(),
             name: record.name.clone(),
             localized_name: localized_name(locale, "tile", &record.name),
@@ -2450,6 +2456,7 @@ pub(crate) fn catalog_index_from_store(
                         continue;
                     };
                     out.push(IndexEntry {
+                        tile: None,
                         kind: "module".to_string(),
                         name: name.clone(),
                         localized_name: localized_name(locale, "module", name),
@@ -2488,6 +2495,7 @@ pub(crate) fn catalog_index_from_store(
                         .map(|resource| vec![effective_resource_category(resource)])
                         .unwrap_or_default();
                     out.push(IndexEntry {
+                        tile: None,
                         kind: "resource".to_string(),
                         name: name.clone(),
                         localized_name: localized_name(locale, "resource", name),
@@ -2509,6 +2517,7 @@ pub(crate) fn catalog_index_from_store(
     // quality
     for name in store.quality_order() {
         out.push(IndexEntry {
+            tile: None,
             kind: "quality".to_string(),
             name: name.clone(),
             localized_name: localized_name(locale, "quality", name),
@@ -3995,6 +4004,7 @@ pub fn prototype_detail(
         "planet" => store.get(PrototypeGroup::Planet, &name),
         "surface" => store.get(PrototypeGroup::Surface, &name),
         "quality" => store.get(PrototypeGroup::Quality, &name),
+        "tile" => store.get(PrototypeGroup::Tile, &name),
         _ => store.get(PrototypeGroup::Entity, &name),
     };
     let Some(record) = record else {
@@ -4039,6 +4049,16 @@ pub fn prototype_detail(
             .collect();
         detail.ingredients = recipe.ingredients.iter().map(ingredient_flow).collect();
         detail.results = recipe.results.iter().map(product_flow).collect();
+        if recipe.energy_required > 0.0 {
+            for flow in detail
+                .ingredients
+                .iter_mut()
+                .chain(detail.results.iter_mut())
+            {
+                let rate = flow.amount / recipe.energy_required;
+                flow.base_rate = rate.is_finite().then_some(rate);
+            }
+        }
     }
     if let Some(machine) = record.component::<CraftingMachineComponent>() {
         detail.crafting_speed = Some(machine.crafting_speed);
@@ -4116,6 +4136,42 @@ pub fn prototype_detail(
     if let Some(resource) = record.component::<ResourceEntityComponent>() {
         detail.categories = vec![effective_resource_category(resource)];
     }
+    if record.has("ResourceEntityComponent")
+        && let Some(entity) = record.component::<EntityComponent>()
+        && let Some(minable) = entity.minable()
+    {
+        detail.energy_required = Some(minable.mining_time);
+        detail.results = minable.results.iter().map(product_flow).collect();
+        if let Some(result) = &minable.result {
+            detail.results.push(FlowAmount {
+                kind: "item".into(),
+                name: result.clone(),
+                amount: f64::from(minable.count.unwrap_or(1)),
+                probability: 1.0,
+                ..Default::default()
+            });
+        }
+        if let Some(fluid) = &minable.required_fluid {
+            detail.ingredients.push(FlowAmount {
+                kind: "fluid".into(),
+                name: fluid.clone(),
+                amount: minable.fluid_amount / 10.0,
+                probability: 1.0,
+                ..Default::default()
+            });
+        }
+        if minable.mining_time > 0.0 {
+            for flow in detail
+                .ingredients
+                .iter_mut()
+                .chain(detail.results.iter_mut())
+            {
+                let rate = flow.amount / minable.mining_time;
+                flow.base_rate = rate.is_finite().then_some(rate);
+            }
+        }
+    }
+
     if let Some(fluid) = record.component::<FluidComponent>() {
         detail.default_temperature = Some(fluid.default_temperature);
         // 流体的最高温度。前端新建流体流时用它做默认区间上界
@@ -4132,6 +4188,7 @@ pub fn prototype_detail(
         detail.quality_module_speed = quality.module_speed_multiplier;
         detail.quality_module_productivity = quality.module_productivity_multiplier;
     }
+    detail.calculation = crate::prototype_calculation::calculation_detail(store, record);
     Ok(Some(detail))
 }
 
@@ -4675,6 +4732,7 @@ mod tests {
     #[test]
     fn index_entry_filter_matches_kind_and_name() {
         let entry = |kind: &str, name: &str, localized: &str| IndexEntry {
+            tile: None,
             kind: kind.to_string(),
             name: name.to_string(),
             localized_name: localized.to_string(),
@@ -4733,6 +4791,7 @@ mod tests {
     /// 测试用目录条目（只填与匹配相关的字段）。
     fn index_entry(kind: &str, name: &str, localized: &str) -> IndexEntry {
         IndexEntry {
+            tile: None,
             kind: kind.to_string(),
             name: name.to_string(),
             localized_name: localized.to_string(),

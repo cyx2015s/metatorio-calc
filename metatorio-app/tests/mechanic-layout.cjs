@@ -11,7 +11,7 @@ const url = `http://127.0.0.1:${port}`;
 async function seed(page, count) {
  await page.addInitScript(({count})=>{
   const q=(id,quality='normal')=>({id,quality});
-  const names={'iron-plate':'铁板','iron-ore':'铁矿石','steel-plate':'钢材','assembling-machine-2':'组装机 2 型','speed-module-3':'速度插件 3','quality-module-3':'品质插件 3','beacon':'信标','water':'水','steam':'蒸汽','boiler':'锅炉','nuclear-reactor':'核反应堆','solar-panel':'太阳能板','accumulator':'蓄电池','coal':'煤炭','normal':'普通','rare':'稀有','legendary':'传说'};
+  const names={'iron-plate':'铁板','iron-ore':'铁矿石','steel-plate':'钢材','assembling-machine-2':'组装机 2 型','speed-module-3':'速度插件 3','quality-module-3':'品质插件 3','beacon':'信标','water':'水','steam':'蒸汽','boiler':'锅炉','nuclear-reactor':'核反应堆','solar-panel':'太阳能板','accumulator':'蓄电池','coal':'煤炭','land':'土地','lava':'岩浆','normal':'普通','rare':'稀有','legendary':'传说'};
   const config={modules:[q('quality-module-3','rare'),q('quality-module-3','rare'),q('speed-module-3','legendary')],beacons:[{beacon:q('beacon','rare'),count:8,share:8,modules:[[q('speed-module-3','legendary'),16]]}]};
   const variants=[
    {type:'recipe',recipe:q('iron-plate'),machine:q('assembling-machine-2'),module_config:config},
@@ -38,6 +38,7 @@ async function seed(page, count) {
   let callbacks=new Map(),callbackId=1; const calls=[]; window.__layoutCalls=calls; window.__layoutDocument=doc;
   const index={context_id:'test',qualities:['normal','rare','legendary'],names:{},entries:[]};
   for(const [name,localized_name] of Object.entries(names)) for(const kind of ['item','entity','recipe','machine','module','fluid','quality','beacon','mining-machine','generator','boiler','reactor','solar-panel','accumulator','tile','resource']) index.entries.push({kind,name,localized_name,group:'test',subgroup:'test',icon_type:kind==='fluid'?'fluid':'item',module_slots:3,categories:['crafting','basic-solid'],fuel_categories:[],fuel_value_j:null,technology_base_level:0,technology_max_level:null});
+  for(const entry of index.entries) if(entry.kind==='tile') {entry.tile={fluid:entry.name==='water'?'water':null,destroys_dropped_items:entry.name==='lava'}; if(entry.name==='water') entry.localized_name='湖面';}
   const history={can_undo:false,can_redo:false};
   window.__TAURI_INTERNALS__={
    transformCallback(callback){const id=callbackId++;callbacks.set(id,callback);return id;},
@@ -58,7 +59,13 @@ async function seed(page, count) {
     if(command==='project_save_path') return null;
     if(command==='milestones_ordered' || command==='implicit_sources' || command==='accessibility') return [];
     if(command==='productivity') return {recipes:[],mining:0,auto_mining:0,infinite_levels:[],ignore:false};
-    if(command==='prototype_detail') return {kind:args.kind,name:args.name,localized_name:names[args.name]||args.name,module_slots:3,beacon_module_slots:2,uses_beacon_effects:true,machine_energy_source:'electric',boiler_mode:'heat-fluid-inside',boiler_burns_fluid:false,ingredients:[],results:[],categories:[],fuel_value_j:null,fuel_categories:[],rocket_launch_products:[],surface_conditions:[]};
+    if(command==='prototype_detail') {
+     const stat=(key,value,unit)=>({key,value,unit});
+     const tile=args.kind==='tile'?{fluid:args.name==='water'?'water':null,destroys_dropped_items:args.name==='lava'}:undefined;
+     const qualities=args.kind==='module' ? ['normal','rare','legendary'].map((quality,i)=>({quality,stats:[stat('effect-speed',0.5*(i+1),'percent'),stat('effect-consumption',0.7,'percent')]})):[];
+     const product={kind:'item',name:'iron-plate',amount:2,base_rate:1,probability:0.5,productivity:1,amount_min:2,amount_max:6,quality_min:'rare',quality_max:'legendary',quality_change:1,temperature:null,min_temperature:null,max_temperature:null};
+     return {kind:args.kind,name:args.name,localized_name:names[args.name]||args.name,module_slots:3,beacon_module_slots:2,uses_beacon_effects:true,machine_energy_source:'electric',boiler_mode:'heat-fluid-inside',boiler_burns_fluid:false,ingredients:[],results:args.kind==='recipe'?[product,product]:[],categories:[],fuel_value_j:null,fuel_categories:[],rocket_launch_products:[],surface_conditions:[],calculation:{stats:args.kind==='recipe'?[stat('craft-time',2,'seconds')]:[],qualities,tile}};
+    }
     if(command==='allowed_modules') return ['speed-module-3','quality-module-3'];
     if(command==='solar_balance') return {peak_power:60000,average_power:42000,surplus_per_cycle:100,cycle_seconds:420,recommended_accumulators:0.84};
     if(command==='mechanic_flow') {
@@ -111,6 +118,54 @@ async function run() {
     await page.waitForSelector('.mech-card[data-mechanic-id="1"]');
     await waitFor(async () => (await page.locator('.mech-card .amount').count()) === 65);
     await checkRows(page);
+    // The same cached detail must display the quality of the hovered icon.
+    await page.locator('[data-mechanic-id="1"] .config-preview .hover-icon').first().hover();
+    await page.getByRole('tooltip').waitFor();
+    assert.ok((await page.getByRole('tooltip').textContent()).includes('稀有基础值'));
+    assert.ok((await page.getByRole('tooltip').textContent()).includes('+100%'));
+    await page.getByRole('tooltip').hover();
+    await pause(200);
+    assert.equal(await page.getByRole('tooltip').count(),1,'tooltip can be entered for scrolling');
+    await page.mouse.move(1200,80);
+    await page.getByRole('tooltip').waitFor({state:'detached'});
+    await page.locator('[data-mechanic-id="1"] .flow-strip .hover-icon').first().hover();
+    await page.getByRole('tooltip').waitFor();
+    assert.match(await page.getByRole('tooltip').textContent(),/实际消耗.*8 kW/);
+    await page.mouse.move(1200,80);
+    await page.getByRole('tooltip').waitFor({state:'detached'});
+    // Repeated product names remain legal and probability/productivity are visible.
+    await page.locator('[data-mechanic-id="1"] .primary .hover-icon').hover();
+    await page.getByRole('tooltip').waitFor();
+    assert.equal(await page.getByRole('tooltip').locator('.flow-row').count(),2);
+    assert.match(await page.getByRole('tooltip').textContent(),/概率 50%/);
+    assert.match(await page.getByRole('tooltip').textContent(),/产能有效 1/);
+    if(process.env.UI_TEST_SCREENSHOT) await page.screenshot({path:process.env.UI_TEST_SCREENSHOT});
+    await page.setViewportSize({width:800,height:600});
+    const bounds=await page.getByRole('tooltip').boundingBox();
+    assert.ok(bounds.x>=0 && bounds.y>=0 && bounds.x+bounds.width<=800 && bounds.y+bounds.height<=600,'tooltip remains inside a resized viewport');
+    await page.setViewportSize({width:1600,height:1000});
+    await page.mouse.move(1200,80);
+    await page.getByRole('tooltip').waitFor({state:'detached'});
+    // Physical capabilities are enforced even when all prototypes are accessible.
+    for(const [id,expected] of [[15,'湖面'],[16,'岩浆']]) {
+      const row=page.locator(`[data-mechanic-row="${id}"]`);
+      await row.scrollIntoViewIfNeeded();
+      await row.locator(id===15?'.primary':'[aria-label="选择可销毁物品的地格"]').click();
+      const selector=page.locator('.backdrop [aria-modal="true"]');
+      await selector.waitFor();
+      assert.equal(await selector.locator('.search-list > button').count(),1);
+      assert.equal(await selector.locator('.search-list > button').getAttribute('aria-label'),expected);
+      const calls=await page.evaluate(()=>window.__layoutCalls.filter(call=>call.command==='prototype_detail').length);
+      if(id===15) {
+        await selector.getByRole('textbox').fill('水');
+        assert.equal(await selector.locator('.search-list > button').count(),1,'tile search includes its output fluid name');
+      }
+      await selector.getByRole('textbox').fill('土地');
+      assert.equal(await selector.locator('.sg-items > button, .search-list > button').count(),0);
+      assert.equal(await page.evaluate(()=>window.__layoutCalls.filter(call=>call.command==='prototype_detail').length),calls,'tile filtering makes no detail requests');
+      await page.keyboard.press('Escape');
+    }
+    await page.locator('.center').evaluate(node=>node.scrollTop=0);
     assert.equal(await page.locator('.mechanic-row').count(), 65);
     const first = page.locator('[data-mechanic-id="1"]');
     assert.match(await first.locator('.config-preview').getAttribute('title'), /8 座塔（1 组配置）/);
@@ -122,6 +177,13 @@ async function run() {
     await editor.waitFor();
     await editor.locator('[title="插件槽 1（点击更换）"]').click();
     await page.locator('.backdrop [aria-modal="true"]').waitFor();
+    const prototypePicker=page.locator('.backdrop [aria-modal="true"]');
+    await prototypePicker.locator('.q-chip[title="legendary"]').click();
+    await prototypePicker.locator('.sg-items > button[aria-label="品质插件 3"]').hover();
+    await page.getByRole('tooltip').waitFor();
+    assert.match(await page.getByRole('tooltip').textContent(),/传说基础值/);
+    assert.match(await page.getByRole('tooltip').textContent(),/\+150%/);
+    assert.equal(await page.evaluate(()=>window.__layoutCalls.filter(call=>call.command==='prototype_detail' && call.args.kind==='module' && call.args.name==='quality-module-3').length),1,'quality changes reuse the same prototype detail');
     await page.keyboard.press('Escape');
     await page.locator('.backdrop [aria-modal="true"]').waitFor({state:'detached'});
     assert.equal(await editor.count(), 1, 'closing the prototype selector must retain the module editor');

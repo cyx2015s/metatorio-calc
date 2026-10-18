@@ -227,6 +227,7 @@
     title: string;
     kinds: { kind: CatalogKind; label: string }[];
     categoryFilter?: string[];
+    tilePurpose?: "extract" | "dispose";
     allowedNames?: string[];
     /** 编辑模式：预选当前条目/品质（允许只改品质或只改条目后确认）。 */
     initialName?: string;
@@ -934,6 +935,7 @@
             undefined,
             entry?.mechanic.tile,
           );
+          if (selector) selector.tilePurpose = isDispose ? "dispose" : "extract";
           break;
         }
         case "mining-machine": {
@@ -2879,6 +2881,7 @@
     title={selector.title}
     kindOptions={selector.kinds}
     categoryFilter={selector.categoryFilter}
+    tilePurpose={selector.tilePurpose}
     allowedNames={selector.allowedNames}
     initialName={selector.initialName}
     initialQuality={selector.initialQuality}

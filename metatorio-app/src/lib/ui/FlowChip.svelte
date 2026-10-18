@@ -14,6 +14,7 @@
     scale = 1,
     size = 22,
     showName = false,
+    solved = false,
   }: {
     flow: DualVar;
     /** 每秒流量（正 = 产出，负 = 消耗）。 */
@@ -23,6 +24,7 @@
     /** 图标边长。 */
     size?: number;
     showName?: boolean;
+    solved?: boolean;
   } = $props();
 
   /** 流 → 图标 (type, name, detailKind, quality)。 */
@@ -132,6 +134,8 @@
     detailKind={meta.detailKind}
     quality={meta.quality}
     {flow}
+    flowRate={amount * scale}
+    rateBasis={solved ? "solution" : "unit"}
   />
   {#if showName}<span class="flow-name">{displayName}{meta.quality ? `（${runtime.localizedName("quality", meta.quality)}）` : ""}</span>{/if}
   <span class="mono">{qtyText(flow, amount, scale)}</span>

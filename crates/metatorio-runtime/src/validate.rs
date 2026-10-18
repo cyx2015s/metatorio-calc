@@ -15,7 +15,6 @@
 //! 了，而那条设置/条目依旧生效。
 
 use metatorio_core::{DualVar, Fuel, IdWithQuality};
-use metatorio_data::TileComponent;
 use metatorio_data::store::{PrototypeGroup, PrototypeStore};
 
 use crate::document::{AutoBeaconPlan, ExternalInput, FlowTarget, TargetExpression};
@@ -74,9 +73,7 @@ fn require_tile(store: &PrototypeStore, tile: &str) -> Result<(), RuntimeError> 
 /// 不是我们规定的。
 fn require_disposal_tile(store: &PrototypeStore, tile: &str) -> Result<(), RuntimeError> {
     require_tile(store, tile)?;
-    let can_destroy = store
-        .get(PrototypeGroup::Tile, tile)
-        .and_then(|record| record.component::<TileComponent>())
+    let can_destroy = metatorio_core::planet::tile_capabilities(store, tile)
         .is_some_and(|tile| tile.destroys_dropped_items);
     if can_destroy {
         Ok(())
@@ -301,7 +298,16 @@ fn validate_mechanic(store: &PrototypeStore, action: &MechanicAction) -> Result<
         },
         MechanicAction::TileExtract(action) => match action {
             crate::message::TileExtractMechanicAction::SetTile { tile } => {
-                require_tile(store, tile)
+                require_tile(store, tile)?;
+                if metatorio_core::planet::tile_capabilities(store, tile)
+                    .is_some_and(|tile| tile.fluid.is_some())
+                {
+                    Ok(())
+                } else {
+                    Err(RuntimeError::InvalidValue(format!(
+                        "地格 {tile} 不能抽取流体（原型没有有效 fluid）"
+                    )))
+                }
             }
             crate::message::TileExtractMechanicAction::SetMachine { machine } => {
                 require_id(store, PrototypeGroup::Entity, "抽取机械", machine)
@@ -768,5 +774,45 @@ mod tests {
             },
         ));
         assert!(validate_message(&store, &bad).is_err());
+    }
+
+    #[test]
+    fn tile_mechanic_selection_rejects_physically_invalid_capabilities() {
+        let store = PrototypeStore::load(&serde_json::json!({
+            "tile":{"water":{"fluid":"water"},"land":{},"lava":{"destroys_dropped_items":true},"bad":{"fluid":"missing"}},
+            "fluid":{"water":{}}
+        })).unwrap();
+        for (tile, extract, dispose) in [
+            ("water", true, false),
+            ("land", false, false),
+            ("lava", false, true),
+            ("bad", false, false),
+            ("missing", false, false),
+        ] {
+            let message = |action| AppMessage::Factory {
+                project: crate::id::ProjectId(1),
+                factory: crate::id::FactoryId(1),
+                action: FactoryAction::Mechanic {
+                    mechanic: crate::id::MechanicId(1),
+                    action,
+                },
+            };
+            let extract_message = message(MechanicAction::TileExtract(
+                crate::message::TileExtractMechanicAction::SetTile { tile: tile.into() },
+            ));
+            let dispose_message = message(MechanicAction::TileDispose(
+                crate::message::TileDisposeMechanicAction::SetTile { tile: tile.into() },
+            ));
+            assert_eq!(
+                validate_message(&store, &extract_message).is_ok(),
+                extract,
+                "extract {tile}"
+            );
+            assert_eq!(
+                validate_message(&store, &dispose_message).is_ok(),
+                dispose,
+                "dispose {tile}"
+            );
+        }
     }
 }

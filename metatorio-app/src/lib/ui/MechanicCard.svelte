@@ -259,6 +259,10 @@
           onclick={() => onPick(kind === "tile-extract" ? "offshore-pump" : machineKind())}>
           <HoverIcon type="entity" name={machineName || "+"} size={28} detailKind={machineName ? machineKind() : undefined} quality={machineQuality} />
         </button>
+      {:else if kind === "tile-dispose"}
+        <button class="icon-btn" title="选择可销毁物品的地格" aria-label="选择可销毁物品的地格" onclick={() => onPick("tile")}>
+          <HoverIcon type="tile" name={entry.mechanic.tile || "+"} size={26} detailKind={entry.mechanic.tile ? "tile" : undefined} />
+        </button>
       {:else if kind === "generator" || kind === "boiler"}
         <button class="icon-btn" title={`流体：${fluidLabel || "未选择"}`} aria-label={`更换流体：${fluidLabel || "未选择"}`} onclick={() => onPick("fluid")}>
           <HoverIcon type="fluid" name={fluidName || "+"} size={26} detailKind={fluidName ? "fluid" : undefined} />
@@ -274,13 +278,13 @@
             <button class="config-preview" onclick={toggle} aria-expanded={open} aria-haspopup="dialog"
               title={`编辑插件与插件塔：${entry.mechanic.module_config?.modules.length ?? 0} 个机器插件，${beaconCount} 座塔（${beacons.length} 组配置）`}>
               {#each moduleGroups.slice(0, 2) as group}
-                <span class="preview-item"><HoverIcon type="item" name={group.item.id} quality={group.item.quality} size={20} /><small>×{group.count}</small></span>
+                <span class="preview-item"><HoverIcon type="item" name={group.item.id} detailKind="module" quality={group.item.quality} size={20} /><small>×{group.count}</small></span>
               {/each}
               {#if moduleGroups.length > 2}<small>+{moduleGroups.length - 2}种</small>{/if}
               {#each beacons.slice(0, 1) as beacon}
-                <span class="preview-item"><HoverIcon type="entity" name={beacon.beacon.id} quality={beacon.beacon.quality} size={20} /><small>×{beacon.count}</small></span>
+                <span class="preview-item"><HoverIcon type="entity" name={beacon.beacon.id} detailKind="beacon" quality={beacon.beacon.quality} size={20} /><small>×{beacon.count}</small></span>
                 {#each beacon.modules.slice(0, 1) as [module, count]}
-                  <span class="preview-item tower-module" title="塔内插件总数"><HoverIcon type="item" name={module.id} quality={module.quality} size={20} /><small>×{count}</small></span>
+                  <span class="preview-item tower-module" title="塔内插件总数"><HoverIcon type="item" name={module.id} detailKind="module" quality={module.quality} size={20} /><small>×{count}</small></span>
                 {/each}
                 {#if beacon.modules.length > 1}<small>+{beacon.modules.length - 1}种</small>{/if}
               {/each}
@@ -487,7 +491,7 @@
         <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
         <div class="flow-strip" tabindex="0" role="region" aria-label={`${lane.label}流量，可横向滚动`}>
           {#each lane.items as item (dualVarKey(item.flow))}
-            <FlowChip flow={item.flow} amount={item.amount} {scale} />
+            <FlowChip flow={item.flow} amount={item.amount} {scale} solved={solution !== null} />
           {:else}<span class="no-flow">{loadingFlows ? "加载中…" : "—"}</span>{/each}
         </div>
       </div>
@@ -498,7 +502,7 @@
         <p>{solution ? "当前求解用量下的流量" : "未求解：以下为单位机制流量"}</p>
         {#each [{ label: "输入", items: inputs }, { label: "输出", items: outputs }] as lane}
           <h4>{lane.label}（{lane.items.length}）</h4>
-          {#each lane.items as item (dualVarKey(item.flow))}<FlowChip flow={item.flow} amount={item.amount} {scale} showName />{/each}
+          {#each lane.items as item (dualVarKey(item.flow))}<FlowChip flow={item.flow} amount={item.amount} {scale} solved={solution !== null} showName />{/each}
         {/each}
       </div>
     </SecondaryMenu>

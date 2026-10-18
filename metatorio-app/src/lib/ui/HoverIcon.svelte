@@ -2,6 +2,8 @@
   // 带悬停详情的游戏内图标：鼠标悬停显示信息卡片（详情按需拉取 + 缓存）。
   // `detailKind` 是目录 kind（item/recipe/fluid/machine/module/...）；
   // 缺省或为合成流（flow/quality）时不启用悬停。
+  import { onDestroy, onMount } from "svelte";
+  import { dismissHover, registerHoverDismiss } from "./hover-controller";
   import { runtime } from "$lib/runtime/store.svelte.ts";
   import Icon from "./Icon.svelte";
   import HoverCard from "./HoverCard.svelte";
@@ -17,6 +19,8 @@
     onClick,
     onContextMenu,
     flow,
+    flowRate,
+    rateBasis,
   }: {
     type?: string;
     name?: string;
@@ -33,6 +37,8 @@
     /** 当前流（抽象能量流/定温流体等）。传入时悬停卡片会显示流的具体参数
      * （流体实际温度、ItemFuel 类别列表等），无原型详情也能弹出。 */
     flow?: import("$lib/runtime/types").DualVar;
+    flowRate?: number;
+    rateBasis?: "solution" | "unit";
   } = $props();
 
   let hoverActive = $state(false);
@@ -52,27 +58,24 @@
   );
 
   // 抽象流（无原型详情）也会触发悬停，只要它能提供具体参数（定温流体/燃料类别等）。
-  let flowActive = $derived(
-    !!flow &&
-      typeof flow === "object" &&
-      ("ItemFuel" in flow || "FluidFuel" in flow || "FluidHeat" in flow || "Fluid" in flow || "VirtualScience" in flow),
-  );
-  let enabled = $derived(
-    (!!detailKind && detailKind !== "flow" && detailKind !== "quality") || flowActive,
-  );
+  let flowActive = $derived(!!flow && flow !== "Unknown");
+  let enabled = $derived((!!detailKind && detailKind !== "flow") || flowActive);
+  let leaveTimer: ReturnType<typeof setTimeout> | undefined;
+  function keepOpen() { clearTimeout(leaveTimer); }
+  onDestroy(() => clearTimeout(leaveTimer));
+  onMount(() => registerHoverDismiss(() => { keepOpen(); hoverActive = false; }));
 
   function enter(event: MouseEvent) {
     if (!enabled || !name) return;
+    dismissHover();
+    keepOpen();
     hoverActive = true;
     pos = { x: event.clientX, y: event.clientY };
   }
 
-  function move(event: MouseEvent) {
-    if (hoverActive) pos = { x: event.clientX, y: event.clientY };
-  }
-
   function leave() {
-    hoverActive = false;
+    clearTimeout(leaveTimer);
+    leaveTimer = setTimeout(() => { hoverActive = false; }, 160);
   }
 
   $effect(() => {
@@ -81,6 +84,7 @@
       return;
     }
     let alive = true;
+    detail = null;
     runtime.getDetail(detailKind, name).then((value) => {
       if (alive) detail = value;
     });
@@ -101,7 +105,6 @@
   title={tip}
   aria-label={interactive ? tip || name : undefined}
   onmouseenter={enter}
-  onmousemove={move}
   onmouseleave={leave}
   onclick={onClick}
   oncontextmenu={onContextMenu
@@ -129,7 +132,7 @@
 </svelte:element>
 
 {#if hoverActive && (detail || flowActive)}
-  <HoverCard kind={detailKind ?? ""} {detail} x={pos.x} y={pos.y} {flow} />
+  <HoverCard kind={detailKind ?? ""} {detail} x={pos.x} y={pos.y} {flow} {quality} {flowRate} {rateBasis} onEnter={keepOpen} onLeave={leave} />
 {/if}
 
 <style>

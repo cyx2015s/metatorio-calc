@@ -8,6 +8,8 @@
   // 带品质的场景（物品/配方/实体类）支持"物品 + 品质"任意顺序选择：
   // 点击条目只是选中（高亮，不退出），点品质 chips 设定品质，最后按
   // 「确定」提交（双击条目 = 立即提交）；「取消」/Esc/点背景 = 提前退出。
+  import { onDestroy, onMount } from "svelte";
+  import { dismissHover, registerHoverDismiss } from "./hover-controller";
   import { runtime } from "$lib/runtime/store.svelte.ts";
   import HoverIcon from "./HoverIcon.svelte";
   import Icon from "./Icon.svelte";
@@ -25,6 +27,7 @@
     kindOptions = [],
     flowMode = false,
     categoryFilter,
+    tilePurpose,
     allowedNames,
     respectAccessibility = true,
     multiLevelTechOnly = false,
@@ -42,6 +45,7 @@
     flowMode?: boolean;
     /** 机器/资源类目录的类别过滤（如配方 categories）；空数组=不过滤。 */
     categoryFilter?: string[];
+    tilePurpose?: "extract" | "dispose";
     /** 精确名称过滤（如发电机/锅炉的流体箱过滤）；空数组=不过滤。 */
     allowedNames?: string[];
     /** 按项目可达性过滤（不可达条目隐藏）；项目"无视可达性"时自动跳过。
@@ -165,13 +169,17 @@
           const needle = query.trim().toLowerCase();
           return (
             entry.name.toLowerCase().includes(needle) ||
-            entry.localized_name.toLowerCase().includes(needle)
+            entry.localized_name.toLowerCase().includes(needle) ||
+            (!!entry.tile?.fluid && (entry.tile.fluid.toLowerCase().includes(needle) || runtime.localizedName("fluid", entry.tile.fluid).toLowerCase().includes(needle)))
           );
         })
       : activeGroup
         ? entries.filter((entry) => entry.group === activeGroup)
         : entries
     ).filter((entry) => {
+      if (tilePurpose && entry.kind === "tile") {
+        if (tilePurpose === "extract" ? !entry.tile?.fluid : !entry.tile?.destroys_dropped_items) return false;
+      }
       if (allowedNames && allowedNames.length > 0) {
         if (!allowedNames.includes(entry.name)) return false;
       }
@@ -209,7 +217,7 @@
    *  预置不算"点过"，自动确认按"两个都没点过"判定。 */
   let presetMode = $derived(initialName != null || initialQuality != null);
   let selectedEntry = $derived(
-    selected ? entries.find((entry) => entry.name === selected) ?? null : null,
+    selected ? visible.find((entry) => entry.name === selected) ?? null : null,
   );
   /** 当前品质的本地化名（normal 或未选中时不展示）。 */
   let qualityLabel = $derived(
@@ -258,6 +266,7 @@
       return;
     }
     let alive = true;
+    hoverDetail = null;
     runtime.getDetail(hover.kind, hover.name).then((detail) => {
       if (alive) hoverDetail = detail;
     });
@@ -301,7 +310,7 @@
 
   /** 提交当前选择（条目 + 当前品质）。 */
   async function confirm() {
-    if (!selected) return;
+    if (!selected || !visible.some((entry) => entry.name === selected)) return;
     if (flowMode && onSelectFlow) {
       const flow = await buildCatalogFlow(selected);
       if (flow) {
@@ -363,7 +372,15 @@
     onClose();
   }
 
+  let hoverLeaveTimer: ReturnType<typeof setTimeout> | undefined;
+  function keepHover() { clearTimeout(hoverLeaveTimer); }
+  function leaveHover() { clearTimeout(hoverLeaveTimer); hoverLeaveTimer = setTimeout(() => hover = null, 160); }
+  onDestroy(() => clearTimeout(hoverLeaveTimer));
+  onMount(() => { dismissHover(); return registerHoverDismiss(() => { keepHover(); hover = null; }); });
   function showHover(event: MouseEvent, entry: IndexEntry) {
+    keepHover();
+    if (hover?.kind === entry.kind && hover.name === entry.name) return;
+    dismissHover();
     hover = { x: event.clientX, y: event.clientY, kind: entry.kind, name: entry.name };
   }
 
@@ -416,6 +433,7 @@
     aria-label={title}
     tabindex="-1"
   >
+    {#if tilePurpose}<div class="filter-hint">{tilePurpose === "extract" ? "仅显示能产出流体的地格" : "仅显示允许销毁物品的地格"} · {visible.length} 项</div>{/if}
     <div class="modal-head">
       <div class="modal-title">
         {title}
@@ -510,7 +528,7 @@
       {#if isDirect}
         {@const flow = directFlows[flowTab]!}
         <div class="direct-panel">
-          <Icon type="flow" name={flow} size={40} title={flow} />
+          <HoverIcon type="flow" name={flow} size={40} title={flow} flow={flow as DualVar} />
           <div class="direct-copy">
             <strong>{flow}</strong>
             <small>点击添加该流</small>
@@ -534,21 +552,28 @@
               ? "没有适配当前配方/资源的选项"
               : "没有匹配的原型"}
         </div>
-      {:else if searching}
+      {:else if searching || catalogKind === "tile"}
         <div class="search-list">
           {#each visible as entry (entry.kind + entry.name)}
             <button
               class="row"
+              aria-label={labelOf(entry)}
               class:active={selected === entry.name}
               title={`选择：${labelOf(entry)}（${entry.name}）`}
               onclick={() => toggleSelect(entry.name)}
               ondblclick={() => commitFast(entry.name)}
               onmouseenter={(event) => showHover(event, entry)}
               onmousemove={(event) => showHover(event, entry)}
-              onmouseleave={() => (hover = null)}
+              onmouseleave={leaveHover}
             >
               <Icon type={entry.icon_type} name={entry.name} size={28} title={labelOf(entry)} />
               <span class="row-name">{labelOf(entry)}</span>
+              {#if entry.tile}
+                <span class="tile-use">
+                  {#if entry.tile.fluid}<Icon type="fluid" name={entry.tile.fluid} size={20} /><span>→ {runtime.localizedName("fluid",entry.tile.fluid)}</span>{/if}
+                  {#if entry.tile.destroys_dropped_items}<span>可销毁物品</span>{/if}
+                </span>
+              {/if}
               {#if entry.localized_name}<span class="row-sub">{entry.name}</span>{/if}
               {#if entry.subgroup && !entry.localized_name}
                 <span class="row-sub">{entry.subgroup}</span>
@@ -571,7 +596,7 @@
                   ondblclick={() => commitFast(entry.name)}
                   onmouseenter={(event) => showHover(event, entry)}
                   onmousemove={(event) => showHover(event, entry)}
-                  onmouseleave={() => (hover = null)}
+                  onmouseleave={leaveHover}
                 >
                   <Icon type={entry.icon_type} name={entry.name} size={34} title={labelOf(entry)} />
                 </button>
@@ -595,7 +620,7 @@
             class="btn primary"
             title="按 E 或 Enter 确认"
             onclick={confirm}
-            disabled={!selected}
+            disabled={!selectedEntry}
           >
             确定{selectedEntry
               ? ` · ${labelOf(selectedEntry)}${qualityLabel ? `（${qualityLabel}）` : ""}`
@@ -608,10 +633,14 @@
 </div>
 
 {#if hover}
-  <HoverCard kind={hover.kind} detail={hoverDetail} x={hover.x} y={hover.y} />
+  <HoverCard kind={hover.kind} detail={hoverDetail} x={hover.x} y={hover.y} {quality} onEnter={keepHover} onLeave={leaveHover} />
 {/if}
 
 <style>
+  .tile-use { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted); }
+
+  .filter-hint { font-size: 11px; color: var(--muted); padding-bottom: 8px; }
+
   .backdrop {
     position: fixed;
     z-index: 40;

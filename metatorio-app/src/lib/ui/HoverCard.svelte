@@ -1,581 +1,201 @@
 <script lang="ts">
-  import { iconTypeForKind } from "./icon-types";
-  // 悬停信息卡片：显示原型名称、类型与关键参数（数据来自后端 prototype_detail，
-  // 按 (kind, name) 缓存）。配方为核心内容，参考原 egui PrototypeHover：
-  // 时间/类别/表面条件/产能上限 + 原料/产物（概率折算、产能额外、品质范围偏移、
-  // 流体温度），一次尽量显示全。卡片超出视口时整体平移回屏。
   import { runtime } from "$lib/runtime/store.svelte.ts";
+  import { iconTypeForKind } from "./icon-types";
+  import { compactNumber } from "$lib/format";
+  import { detailStats, formatStat, statLabels } from "./hover-model";
+  import { accessibleKind, accessibleKindFor, accessibleName, dualVarLabel, type DualVar, type FlowAmount, type PrototypeDetail } from "$lib/runtime/types";
   import Icon from "./Icon.svelte";
-  import type { FlowAmount, PrototypeDetail } from "$lib/runtime/types";
-  import {
-    accessibleKind,
-    accessibleKindFor,
-    accessibleName,
-  } from "$lib/runtime/types";
 
-  let {
-    kind,
-    detail,
-    x,
-    y,
-    flow,
-  }: {
-    kind: string;
-    detail: PrototypeDetail | null;
-    x: number;
-    y: number;
-    /** 当前悬停的流（抽象能量流/定温流体等）——按流显示具体参数。 */
-    flow?: import("$lib/runtime/types").DualVar;
+  let { kind, detail, x, y, flow, quality = "normal", flowRate, rateBasis, onEnter, onLeave }: {
+    kind: string; detail: PrototypeDetail | null; x: number; y: number;
+    flow?: DualVar; quality?: string; flowRate?: number; rateBasis?: "solution" | "unit"; onEnter?: () => void; onLeave?: () => void;
   } = $props();
-
-  // 流相关的实际参数：流体实际使用温度、ItemFuel 实际类别列表、流体燃料过滤器。
-  let flowRows = $derived(buildFlowRows(flow));
-
-  function buildFlowRows(flow: import("$lib/runtime/types").DualVar | undefined) {
-    if (!flow || typeof flow !== "object") return [];
-    const rows: { label: string; value: string }[] = [];
-    if ("Fluid" in flow) {
-      const fluid = (flow as { Fluid: { name: string; temperature: [number, number] } }).Fluid;
-      const [t1, t2] = fluid.temperature;
-      rows.push({
-        label: "温度",
-        value: t1 === t2 ? `${fmtNum(t1)}℃` : `${fmtNum(t1)}~${fmtNum(t2)}℃`,
-      });
-    }
-    if ("ItemFuel" in flow || "ItemFuelSupply" in flow) {
-      const inner = flow as {
-        ItemFuel?: { category: string[] };
-        ItemFuelSupply?: { category: string[] };
-      };
-      const category = (inner.ItemFuel ?? inner.ItemFuelSupply)?.category ?? [];
-      rows.push({ label: "燃料类别", value: category.join(" / ") });
-    }
-    const fluidFilter =
-      ("FluidFuel" in flow ? (flow as { FluidFuel: { filter: string } }).FluidFuel.filter : "") ||
-      ("FluidHeat" in flow ? (flow as { FluidHeat: { filter: string } }).FluidHeat.filter : "");
-    if ("FluidFuel" in flow || "FluidHeat" in flow) {
-      rows.push({
-        label: "流体",
-        value: fluidFilter ? runtime.localizedName("fluid", fluidFilter) || fluidFilter : "任意流体",
-      });
-    }
-    return rows;
-  }
-
-  // 抽象流（无原型详情）时卡片的标题 / 图标名 / 类型标签。
-  let flowHead = $derived(buildFlowHead(flow));
-  function buildFlowHead(flow: import("$lib/runtime/types").DualVar | undefined) {
-    if (!flow || typeof flow !== "object") return null;
-    if ("VirtualScience" in flow) {
-      const name = String(flow.VirtualScience);
-      return { title: `虚拟科研（${runtime.localizedName("item", name)}）`, iconName: name, type: "item", typeLabel: "科研价值" };
-    }
-    if ("ItemFuel" in flow || "ItemFuelSupply" in flow) {
-      return { title: "物品燃料", iconName: "ItemFuel", type: "flow", typeLabel: "燃料" };
-    }
-    if ("FluidFuel" in flow) {
-      return { title: "流体燃料", iconName: "FluidFuel", type: "flow", typeLabel: "燃料" };
-    }
-    if ("FluidHeat" in flow) {
-      return { title: "流体热量", iconName: "FluidHeat", type: "flow", typeLabel: "热量" };
-    }
-    if ("Fluid" in flow) {
-      const name = (flow as { Fluid: { name: string } }).Fluid.name;
-      return {
-        title: runtime.localizedName("fluid", name) || name,
-        iconName: name,
-        type: "fluid",
-        typeLabel: "流体",
-      };
-    }
-    return null;
-  }
-
-
-  // ── 可达性状态 ──────────────────────────────────────────────────
-  // 显示当前选中项目下的原型可达/不可达；项目"无视可达性"或上下文未载入
-  // （无可达性数据）时显示"未知"（不标注）。
+  const labels: Record<string, string> = {item:"物品",fluid:"流体",recipe:"配方",module:"插件",machine:"制造机","mining-machine":"采矿机","offshore-pump":"抽水机",generator:"发电机",boiler:"锅炉",reactor:"反应堆",beacon:"信标",resource:"资源",entity:"实体",technology:"科技",planet:"星球",surface:"地表",quality:"品质",tile:"地格","solar-panel":"太阳能板",accumulator:"蓄电器"};
+  const flowLabels: Record<string,string> = {Electricity:"电力",Heat:"热量",RocketSlotCapacity:"火箭槽位运力",RocketWeightCapacity:"火箭重量运力",ItemFuel:"物品燃料",ItemFuelSupply:"物品燃料供给",FluidFuel:"流体燃料",FluidHeat:"流体热量",Pollution:"污染",Custom:"自定义流"};
+  const flowHelp: Record<string,string> = {
+    Electricity:"电力按功率（W = J/s）结算，不随项目时间刻度改变。", Heat:"热量按热功率（W = J/s）配平。",
+    ItemFuel:"抽象燃料需求按热值结算，并要求燃料类别匹配。", ItemFuelSupply:"抽象燃料供给按热值与匹配类别参与配平，不是具体物品数量。",
+    FluidFuel:"流体燃料按燃烧热值结算。", FluidHeat:"流体热量取决于比热与相对默认温度的温差。",
+    RocketSlotCapacity:"堆叠槽位运力，按物品堆叠数量消耗；与重量运力分别配平。", RocketWeightCapacity:"重量运力，按物品原型重量消耗；与堆叠槽位运力分别配平。",
+    VirtualScience:"科研单位由科技瓶品质和科研容量换算，不包含实验室速度、品质或产能。", Pollution:"污染流按项目时间刻度显示；排放与可用的消耗途径参与配平。",
+  };
+  let flowKey = $derived(typeof flow === "string" ? flow : flow ? Object.keys(flow)[0] : "");
+  let inner = $derived(flow && typeof flow === "object" ? (flow as Record<string, unknown>)[flowKey] as Record<string, unknown> | string : undefined);
+  let virtualScience = $derived(flowKey === "VirtualScience");
+  let heading = $derived(virtualScience ? `虚拟科研 · ${runtime.localizedName("item", String(inner))}` : detail?.localized_name || detail?.name || flowLabels[flowKey] || dualVarLabel(flow ?? "Unknown"));
+  let iconName = $derived(detail?.name || (virtualScience ? String(inner) : flowKey === "ItemFuelSupply" ? "ItemFuel" : flowKey));
+  let iconType = $derived(detail ? iconTypeForKind(detail.kind) : virtualScience ? "item" : "flow");
+  let stats = $derived(detailStats(detail, quality));
+  const propertyLabels: Record<string,string> = { gravity:"重力",pressure:"气压","magnetic-field":"磁场","solar-power":"太阳能系数","day-night-cycle":"昼夜周期","robot-energy-usage":"机器人能耗系数" };
+  let research = $derived(detail?.calculation?.research);
+  let properties = $derived(Object.entries(detail?.calculation?.surface_properties ?? {}));
+  let tile = $derived(detail?.calculation?.tile);
+  let actualPower = $derived(["Electricity","Heat","ItemFuel","ItemFuelSupply","FluidFuel","FluidHeat"].includes(flowKey));
   let accessibleState = $state<"accessible" | "inaccessible" | "unknown">("unknown");
   $effect(() => {
-    if (!detail) {
-      accessibleState = "unknown";
-      return;
-    }
-    if (runtime.allAccessible) {
-      accessibleState = "accessible";
-      return;
-    }
-    const mapKind = accessibleKindFor(detail.kind);
-    if (mapKind == null) {
-      accessibleState = "unknown";
-      return;
-    }
+    accessibleState = "unknown";
+    const current = detail;
+    if (!current) return;
+    if (runtime.allAccessible) { accessibleState = "accessible"; return; }
+    const mapped = accessibleKindFor(current.kind);
+    if (!mapped) return;
     let alive = true;
     runtime.ensureAccessibility().then((nodes) => {
-      if (!alive) return;
-      if (nodes == null) {
-        accessibleState = "unknown";
-        return;
-      }
-      const ok = nodes.some(
-        (node) =>
-          `${accessibleKind(node)}/${accessibleName(node)}` ===
-          `${mapKind}/${detail.name}`,
-      );
-      accessibleState = ok ? "accessible" : "inaccessible";
+      if (alive && nodes) accessibleState = nodes.some((node) => `${accessibleKind(node)}/${accessibleName(node)}` === `${mapped}/${current.name}`) ? "accessible" : "inaccessible";
     });
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   });
-
-  const kindLabel: Record<string, string> = {
-    item: "物品",
-    fluid: "流体",
-    recipe: "配方",
-    module: "插件",
-    machine: "制造机",
-    "mining-machine": "采矿机",
-    generator: "发电机",
-    boiler: "锅炉",
-    reactor: "反应堆",
-    beacon: "插件塔",
-    resource: "资源",
-    entity: "实体",
-    technology: "科技",
-    planet: "星球",
-    surface: "地表",
-    quality: "品质",
-  };
-
-  function formatPower(joulesPerTick: number): string {
-    const watts = joulesPerTick * 60;
-    if (watts >= 1e6) return `${(watts / 1e6).toFixed(2)} MW`;
-    if (watts >= 1e3) return `${(watts / 1e3).toFixed(1)} kW`;
-    return `${watts.toFixed(0)} W`;
-  }
-
-  /** 能量（焦耳）→ 可读文本。 */
-  function formatEnergy(joules: number): string {
-    if (joules >= 1e9) return `${(joules / 1e9).toFixed(2)} GJ`;
-    if (joules >= 1e6) return `${(joules / 1e6).toFixed(1)} MJ`;
-    if (joules >= 1e3) return `${(joules / 1e3).toFixed(1)} kJ`;
-    return `${joules.toFixed(0)} J`;
-  }
-
-  function formatMultiplier(value: number): string {
-    return `×${value.toFixed(2)}`;
-  }
-
-  /** 数字显示：整数不带小数，小数额外保留 3 位去尾零。 */
-  function fmtNum(value: number): string {
-    if (Number.isInteger(value)) return String(value);
-    return value.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
-  }
-
-  function flowName(flow: FlowAmount): string {
-    return runtime.localizedName(flow.kind, flow.name);
-  }
-
-  function qualityLabel(name: string | null): string {
-    return name ? runtime.localizedName("quality", name) : "";
-  }
-
-  /** 原料/产物的元信息片段：期望量、概率、产能额外、品质范围/偏移、温度。 */
-  function flowMeta(flow: FlowAmount, isIngredient: boolean): string[] {
-    const parts: string[] = isIngredient
-      ? [`${fmtNum(flow.amount)}`]
-      : [`${fmtNum(flow.amount - flow.productivity)} + ${fmtNum(flow.productivity)}`];
-    const qmin = qualityLabel(flow.quality_min);
-    const qmax = qualityLabel(flow.quality_max);
-    if (qmin || qmax) {
-      let quality = qmin ? (qmax && qmin !== qmax ? `${qmin}~${qmax}` : qmin) : (qmax || "");
-      if (flow.quality_change) {
-        quality += ` 偏移${flow.quality_change > 0 ? "+" : ""}${flow.quality_change}`;
-      }
-      parts.push(`品质 ${quality}`);
-    }
-    if (flow.temperature != null) {
-      parts.push(`@${fmtNum(flow.temperature)}℃`);
-    }
-    if (flow.min_temperature != null && flow.max_temperature != null) {
-      parts.push(`${fmtNum(flow.min_temperature)}~${fmtNum(flow.max_temperature)}℃`);
-    } else if (flow.min_temperature != null) {
-      parts.push(`≥${fmtNum(flow.min_temperature)}℃`);
-    } else if (flow.max_temperature != null) {
-      parts.push(`≤${fmtNum(flow.max_temperature)}℃`);
-    }
-    return parts;
-  }
-
-  /** keyed each 的键：**不能只用物品名**。
-   *
-   * 同一个配方可以多次产出同名物品（同名不同 `quality_min` 的概率产物），
-   * 实测反例：mod 的 `lead-acid-accumulator` / `lithium-accumulator` 各有 5 条
-   * `accumulator`（1 条必出 + uncommon/rare/epic/legendary 各一条）。
-   * Svelte 5 的 keyed each 会在运行时对键查重并抛 `each_key_duplicate`，
-   * 异常发生在卡片渲染过程中 → 整张卡什么都不显示（悬停无信息）。
-   * 序号兜底：列表每次悬停都从 detail 重算，位置即身份。 */
-  function flowKey(flow: FlowAmount, index: number): string {
-    return `${flow.kind}/${flow.name}/${flow.quality_min ?? ""}/${flow.quality_max ?? ""}#${index}`;
-  }
-
-  // 溢出修正：卡片渲染后若超出视口右下，整体平移回屏。
-  let cardEl = $state<HTMLDivElement | null>(null);
-  let shift = $state({ dx: 0, dy: 0 });
+  let viewport = $state({ width: typeof window === "undefined" ? 1024 : window.innerWidth, height: typeof window === "undefined" ? 768 : window.innerHeight });
+  let card = $state<HTMLDivElement>();
+  let dimensions = $state({ width: 440, height: 0 });
   $effect(() => {
-    const el = cardEl;
-    if (!el) return;
-    void x;
-    void y;
-    // 用「原始锚点 + 卡片尺寸」算修正量（尺寸与位置无关），
-    // 不能依赖已修正位置，否则修正→再溢出→再修正无限振荡卡死主线程。
-    const w = el.offsetWidth;
-    const h = el.offsetHeight;
-    const left = x + 14;
-    const top = y + 14;
-    const dx = Math.min(0, window.innerWidth - 8 - (left + w));
-    const dy = Math.min(0, window.innerHeight - 8 - (top + h));
-    if (dx !== shift.dx || dy !== shift.dy) shift = { dx, dy };
+    if (!card) return;
+    const element = card;
+    const observer = new ResizeObserver(() => { dimensions = {width:element.offsetWidth,height:element.offsetHeight}; });
+    observer.observe(element);
+    return () => observer.disconnect();
   });
+  // Keep the panel on one side of the pointer; clamping a tall panel over the
+  // source icon would make that icon impossible to click.
+  let above = $derived(viewport.height - y - 22 < 200 && y > viewport.height - y);
+  let maxHeight = $derived(Math.max(80, above ? y - 22 : viewport.height - y - 22));
+  let left = $derived(Math.max(8,
+    x + 14 + dimensions.width <= viewport.width - 8 ? x + 14 : x - dimensions.width - 14 >= 8 ? x - dimensions.width - 14 : viewport.width - dimensions.width - 8));
+  let top = $derived(Math.max(8, above ? y - Math.min(dimensions.height, maxHeight) - 14 : y + 14));
+  function portal(node: HTMLElement) { document.body.appendChild(node); return {destroy:() => node.remove()}; }
+  function nameOf(flow: FlowAmount) { return runtime.localizedName(flow.kind, flow.name) || flow.name; }
+  function flowNotes(entry: FlowAmount, output: boolean) {
+    const notes: string[] = [];
+    if (output && entry.probability !== 1) notes.push(`概率 ${compactNumber(entry.probability * 100)}%`);
+    if (entry.amount_min != null && entry.amount_max != null) notes.push(`原始 ${entry.amount_min}～${entry.amount_max}`);
+    else if (entry.amount_min != null) notes.push(`原始 ≥${entry.amount_min}`);
+    else if (entry.amount_max != null) notes.push(`原始 ≤${entry.amount_max}`);
+    if (output && entry.productivity !== entry.amount) notes.push(`产能有效 ${compactNumber(entry.productivity)}`);
+    const qmin = entry.quality_min ? runtime.localizedName("quality", entry.quality_min) : "";
+    const qmax = entry.quality_max ? runtime.localizedName("quality", entry.quality_max) : "";
+    if (qmin && qmax) notes.push(`品质 ${qmin}${qmax !== qmin ? `～${qmax}` : ""}`);
+    else if (qmin) notes.push(`品质下限 ${qmin}`);
+    else if (qmax) notes.push(`品质上限 ${qmax}`);
+    if (entry.quality_change) notes.push(`品质偏移 ${entry.quality_change > 0 ? "+" : ""}${entry.quality_change}`);
+    if (entry.temperature != null) notes.push(`${entry.temperature}℃`);
+    if (entry.min_temperature != null || entry.max_temperature != null) notes.push(`${entry.min_temperature ?? "不限"}～${entry.max_temperature ?? "不限"}℃`);
+    return notes.join(" · ");
+  }
+  let scale = $derived(runtime.selectedProject?.settings.time_scale ?? "seconds");
+  let factor = $derived(scale === "minutes" ? 60 : scale === "hours" ? 3600 : 1);
+  let unit = $derived(scale === "minutes" ? "/min" : scale === "hours" ? "/h" : "/s");
 </script>
 
-{#if detail || flowRows.length > 0}
-  <div
-    bind:this={cardEl}
-    class="hover-card"
-    style={`left:${Math.max(8, x + 14 + shift.dx)}px;top:${Math.max(8, y + 14 + shift.dy)}px`}
-  >
-    {#if detail}
-    <div class="hc-head">
-      <Icon type={iconTypeForKind(detail.kind)} name={detail.name} size={32} title={detail.localized_name || detail.name} />
-      <div class="hc-title">
-        <strong>{detail.localized_name || detail.name}</strong>
-        {#if detail.localized_name}<small>{detail.name}</small>{/if}
-        <small>
-          {kindLabel[kind] ?? kind}
-          {#if detail.hidden}<span class="hc-badge hidden">隐藏</span>{/if}
-        </small>
-        {#if accessibleState !== "unknown"}
-          <span class="hc-badge {accessibleState}">
-            {accessibleState === "accessible" ? "可达" : "不可达"}
-          </span>
-        {/if}
+<svelte:window onresize={() => viewport = {width:window.innerWidth,height:window.innerHeight}} />
+
+{#if detail || flow}
+  <!-- The panel can be entered to scroll or select long calculation details. -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div use:portal bind:this={card} class="hover-card" role="tooltip" style:left={`${left}px`} style:top={`${top}px`} style:max-height={`${maxHeight}px`} onmouseenter={onEnter} onmouseleave={onLeave}>
+    <header>
+      <Icon type={iconType} name={iconName} size={30} />
+      <div class="heading"><strong>{heading}</strong><code>{detail?.name || flowKey}</code></div>
+      <div class="badges"><span>{labels[kind] || (virtualScience ? "科研价值" : "计算流")}</span>
+        {#if quality !== "normal"}<span>{runtime.localizedName("quality",quality)}</span>{/if}
+        {#if detail?.hidden}<span>隐藏</span>{/if}
+        {#if accessibleState !== "unknown"}<span class:unavailable={accessibleState === "inaccessible"}>{accessibleState === "accessible" ? "可达" : "不可达"}</span>{/if}
       </div>
-    </div>
-    {:else}
-      <div class="hc-head">
-        <Icon type={flowHead?.type ?? "flow"} name={flowHead?.iconName ?? "ItemFuel"} size={32} title={flowHead?.title ?? "抽象流"} />
-        <div class="hc-title">
-          <strong>{flowHead?.title ?? "抽象流"}</strong>
-          <small>{flowHead?.typeLabel ?? kindLabel[kind] ?? kind}</small>
-        </div>
+    </header>
+    {#if flowRate != null}
+      <div class="actual"><span>{rateBasis === "unit" ? "单位机制" : "实际"}{flowRate < 0 || Object.is(flowRate,-0) ? "消耗" : "产出"}</span><strong>{actualPower ? formatStat({key:"flow",value:Math.abs(flowRate),unit:"watts"}) : `${compactNumber(Math.abs(flowRate) * factor)} ${unit}`}</strong></div>
+    {/if}
+    {#if flowHelp[flowKey]}<p class="note">{flowHelp[flowKey]}</p>{/if}
+    {#if inner && typeof inner === "object"}
+      <div class="facts">
+        {#if "temperature" in inner}<span>当前流温度</span><strong>{(inner.temperature as number[])[0] === (inner.temperature as number[])[1] ? (inner.temperature as number[])[0] : (inner.temperature as number[]).join("～")}℃</strong>{/if}
+        {#if "category" in inner}<span>燃料类别</span><strong>{(inner.category as string[]).join(" / ") || "任意"}</strong>{/if}
+        {#if "filter" in inner}<span>流体限制</span><strong>{inner.filter ? runtime.localizedName("fluid",String(inner.filter)) : "任意流体"}</strong>{/if}
+        {#if "name" in inner && ["Pollution","Custom"].includes(flowKey)}<span>流名称</span><strong>{String(inner.name)}</strong>{/if}
       </div>
     {/if}
-    <div class="hc-body">
-      {#each flowRows as row}
-        <div class="hc-row"><span>{row.label}</span><strong>{row.value}</strong></div>
+    {#if tile}
+      <section class="tile-capabilities"><strong>地格用途</strong>
+        <div><span>抽取流体</span>{#if tile.fluid}<Icon type="fluid" name={tile.fluid} size={20} /><b>{runtime.localizedName("fluid",tile.fluid)}</b>{:else}<b>不支持</b>{/if}</div>
+        <div><span>销毁物品</span><b>{tile.destroys_dropped_items ? "支持" : "不支持"}</b></div>
+      </section>
+    {/if}
+    {#if properties.length}
+      <section><h4>表面属性<small>用于环境条件匹配的原型值</small></h4><div class="stats">{#each properties as [key,value]}<div><span>{propertyLabels[key] || key}</span><strong>{compactNumber(value)}</strong></div>{/each}</div></section>
+    {/if}
+    {#if research}
+      <section><h4>科研需求<small>未计实验室速度、品质与产能</small></h4>
+        <div class="facts"><span>研究单位数</span><strong>{research.units == null ? "由等级公式决定" : compactNumber(research.units)}</strong><span>每单位时间（速度 1）</span><strong>{compactNumber(research.unit_seconds)} s</strong></div>
+        {#each research.ingredients as ingredient}<div class="flow-row"><Icon type="item" name={ingredient.name} size={22} /><span class="flow-copy">{runtime.localizedName("item",ingredient.name)}</span><span class="quantity">{ingredient.per_unit}/单位{#if ingredient.total != null}<small>共 {compactNumber(ingredient.total)}</small>{/if}</span></div>{/each}
+        {#if research.prerequisites.length}<div class="facts"><span>前置科技</span><strong>{research.prerequisites.map((name) => runtime.localizedName("technology",name)).join(" / ")}</strong></div>{/if}
+      </section>
+    {/if}
+    {#if stats.length}
+      <section><h4>{detail?.calculation?.qualities.some((entry) => entry.quality === quality) ? `${runtime.localizedName("quality", quality)}基础值` : "原型基础值"}<small>未计插件与工厂环境</small></h4>
+        <div class="stats">{#each stats as stat (stat.key)}<div><span>{statLabels[stat.key] || stat.key}</span><strong>{formatStat(stat)}{stat.key.includes("temperature") ? "℃" : ""}</strong></div>{/each}</div>
+      </section>
+    {/if}
+    {#if detail}
+      <div class="facts">
+        {#if detail.categories?.length}<span>类别</span><strong>{detail.categories.join(" / ")}</strong>{/if}
+        {#if detail.surface_conditions?.length}<span>表面条件</span><strong>{detail.surface_conditions.join("；")}</strong>{/if}
+        {#if detail.allowed_module_categories?.length}<span>允许插件类别</span><strong>{detail.allowed_module_categories.join(" / ")}</strong>{/if}
+        {#if detail.uses_module_effects != null}<span>机器插件 / 信标</span><strong>{detail.uses_module_effects ? "接受" : "不接受"} / {detail.uses_beacon_effects !== false ? "接受" : "不接受"}</strong>{/if}
+        {#if detail.fuel_categories?.length}<span>燃料类别</span><strong>{detail.fuel_categories.join(" / ")}</strong>{/if}
+        {#if detail.burner_fuel_categories?.length}<span>可用燃料</span><strong>{detail.burner_fuel_categories.join(" / ")}</strong>{/if}
+        {#if detail.fluid_filter}<span>流体限制</span><strong>{runtime.localizedName("fluid",detail.fluid_filter)}</strong>{/if}
+        {#if detail.boiler_mode}<span>锅炉模式</span><strong>{detail.boiler_mode === "heat-fluid-inside" ? "加热流体" : "独立输出"}</strong>{/if}
+        {#if detail.quality_next}<span>下一品质</span><strong>{runtime.localizedName("quality",detail.quality_next)} · {compactNumber((detail.quality_next_probability ?? 0) * 100)}%</strong>{/if}
+      </div>
+      {#each [{label:"燃烧产物",kind:"item",name:detail.burnt_result},{label:"变质产物",kind:"item",name:detail.spoil_result},{label:"种植实体",kind:"entity",name:detail.plant_result},...(detail.rocket_launch_products ?? []).map((name) => ({label:"火箭产物",kind:"item",name}))] as reference}
+        {#if reference.name}<div class="reference"><span>{reference.label}</span><Icon type={reference.kind} name={reference.name} size={20} /><strong>{runtime.localizedName(reference.kind,reference.name)}</strong></div>{/if}
       {/each}
-      {#if detail}
-      {#if detail.stack_size != null}
-        <div class="hc-row"><span>堆叠</span><strong>{detail.stack_size}</strong></div>
-      {/if}
-      {#if detail.fuel_value_j != null && detail.fuel_value_j > 0}
-        <div class="hc-row">
-          <span>燃料</span>
-          <strong>{formatEnergy(detail.fuel_value_j)}{detail.fuel_categories.length > 0 ? ` · ${detail.fuel_categories.join(" / ")}` : ""}</strong>
-        </div>
-      {:else if detail.fuel_categories.length > 0 && detail.fuel_value_j == null}
-        <div class="hc-row">
-          <span>燃料</span>
-          <strong>{detail.fuel_categories.join(" / ")}</strong>
-        </div>
-      {/if}
-      {#if detail.burnt_result}
-        <div class="hc-row">
-          <span>燃烧产物</span>
-          <strong>{runtime.localizedName("item", detail.burnt_result)}</strong>
-        </div>
-      {/if}
-      {#if detail.spoil_result}
-        <div class="hc-row">
-          <span>变质</span>
-          <strong>{runtime.localizedName("item", detail.spoil_result)}{detail.spoil_ticks != null ? `（${fmtNum(detail.spoil_ticks / 60)} 秒）` : ""}</strong>
-        </div>
-      {/if}
-      {#if detail.plant_result}
-        <div class="hc-row">
-          <span>种植</span>
-          <strong>{runtime.localizedName("entity", detail.plant_result)}</strong>
-        </div>
-      {/if}
-      {#if detail.launchable}
-        {#if detail.rocket_launch_products.length > 0}
-          <div class="hc-flow">
-            <span class="hc-label">发射产物</span>
-            <div class="hc-flows">
-              {#each detail.rocket_launch_products as name (name)}
-                <span class="hc-flow-item" title={name}>
-                  <Icon type="item" name={name} size={20} title={runtime.localizedName("item", name)} />
-                  <span class="hc-flow-copy">
-                    <span class="hc-flow-name">{runtime.localizedName("item", name)}</span>
-                  </span>
-                </span>
+      {#each [{label:"原料",items:detail.ingredients ?? [],output:false},{label:"产物",items:detail.results ?? [],output:true}] as section}
+        {#if section.items.length}
+          <section class="recipe-flows"><h4>{section.label}<small>期望量 / 次 · 速度 1 时的基准速率</small></h4>
+            <div class="flow-table">
+              {#each section.items as entry, i (`${entry.kind}/${entry.name}#${i}`)}
+                <div class="flow-row" title={flowNotes(entry,section.output)}>
+                  <Icon type={entry.kind} name={entry.name} size={22} />
+                  <div class="flow-copy"><strong>{nameOf(entry)}</strong>{#if flowNotes(entry,section.output)}<small>{flowNotes(entry,section.output)}</small>{/if}</div>
+                  <div class="quantity"><strong>{compactNumber(entry.amount)}</strong>{#if entry.base_rate != null}<small>{compactNumber(entry.base_rate)}/s</small>{/if}</div>
+                </div>
               {/each}
             </div>
-          </div>
-        {:else}
-          <div class="hc-row"><span>发射</span><strong>可火箭发射</strong></div>
+          </section>
         {/if}
-      {/if}
-      {#if detail.category}
-        <div class="hc-row"><span>类别</span><strong>{detail.category}</strong></div>
-      {/if}
-      {#if detail.energy_required != null}
-        <div class="hc-row"><span>时间</span><strong>{detail.energy_required}s</strong></div>
-      {/if}
-      {#if detail.maximum_productivity != null && detail.maximum_productivity !== 3}
-        <div class="hc-row"><span>产能上限</span><strong>×{fmtNum(detail.maximum_productivity)}</strong></div>
-      {/if}
-      {#if detail.surface_conditions.length > 0}
-        <div class="hc-row"><span>表面条件</span><strong>{detail.surface_conditions.join("；")}</strong></div>
-      {/if}
-      {#if detail.crafting_speed != null}
-        <div class="hc-row"><span>速度</span><strong>{detail.crafting_speed}</strong></div>
-      {/if}
-      {#if detail.module_slots != null}
-        <div class="hc-row"><span>插件槽</span><strong>{detail.module_slots}</strong></div>
-      {/if}
-      {#if detail.energy_usage_j != null}
-        <div class="hc-row"><span>能耗</span><strong>{formatPower(detail.energy_usage_j)}</strong></div>
-      {/if}
-      {#if detail.max_power_output_j != null}
-        <div class="hc-row"><span>出力</span><strong>{formatPower(detail.max_power_output_j)}</strong></div>
-      {/if}
-      {#if detail.heat_output_j != null}
-        <div class="hc-row"><span>热输出</span><strong>{formatPower(detail.heat_output_j)}</strong></div>
-      {/if}
-      {#if detail.effectivity != null && detail.effectivity !== 1}
-        <div class="hc-row"><span>效率</span><strong>×{fmtNum(detail.effectivity)}</strong></div>
-      {/if}
-      {#if detail.maximum_temperature != null}
-        <div class="hc-row"><span>最高温度</span><strong>{fmtNum(detail.maximum_temperature)}℃</strong></div>
-      {/if}
-      {#if detail.energy_consumption_j != null}
-        <div class="hc-row"><span>能耗</span><strong>{formatPower(detail.energy_consumption_j)}</strong></div>
-      {/if}
-      {#if detail.target_temperature != null}
-        <div class="hc-row"><span>目标温度</span><strong>{fmtNum(detail.target_temperature)}℃</strong></div>
-      {/if}
-      {#if detail.neighbour_bonus != null}
-        <div class="hc-row"><span>相邻加成</span><strong>×{fmtNum(detail.neighbour_bonus)}</strong></div>
-      {/if}
-      {#if detail.heating_radius != null}
-        <div class="hc-row"><span>加热半径</span><strong>{fmtNum(detail.heating_radius)}</strong></div>
-      {/if}
-      {#if detail.fluid_filter}
-        <div class="hc-row">
-          <span>流体</span>
-          <strong>{runtime.localizedName("fluid", detail.fluid_filter)}</strong>
-        </div>
-      {/if}
-      {#if detail.default_temperature != null}
-        <div class="hc-row"><span>默认温度</span><strong>{detail.default_temperature}°C</strong></div>
-      {/if}
-      {#if detail.quality_level != null}
-        <div class="hc-row"><span>等级</span><strong>Lv.{detail.quality_level}</strong></div>
-        {#if detail.quality_next}
-          <div class="hc-row">
-            <span>下一品质</span>
-            <strong>{detail.quality_next}
-              {#if detail.quality_next_probability != null}
-                （{Math.round(detail.quality_next_probability * 100)}%）
-              {/if}
-            </strong>
-          </div>
-        {/if}
-      {/if}
-      {#if detail.ingredients.length > 0}
-        <div class="hc-flow">
-          <span class="hc-label">原料</span>
-          <div class="hc-flows">
-            {#each detail.ingredients as flow, i (flowKey(flow, i))}
-              <span class="hc-flow-item" title={flow.name}>
-                <Icon type={flow.kind} name={flow.name} size={20} title={`${flowName(flow)} · ${flowMeta(flow, true).join(" · ")}`} />
-                <span class="hc-flow-copy">
-                  <span class="hc-flow-name">{flowName(flow)}</span>
-                  <span class="hc-flow-meta">{flowMeta(flow, true).join(" · ")}</span>
-                </span>
-              </span>
-            {/each}
-          </div>
-        </div>
-      {/if}
-      {#if detail.results.length > 0}
-        <div class="hc-flow">
-          <span class="hc-label">产物</span>
-          <div class="hc-flows">
-            {#each detail.results as flow, i (flowKey(flow, i))}
-              <span class="hc-flow-item" title={flow.name}>
-                <Icon type={flow.kind} name={flow.name} size={20} title={`${flowName(flow)} · ${flowMeta(flow, false).join(" · ")}`} />
-                <span class="hc-flow-copy">
-                  <span class="hc-flow-name">{flowName(flow)}</span>
-                  <span class="hc-flow-meta">{flowMeta(flow, false).join(" · ")}</span>
-                </span>
-              </span>
-            {/each}
-          </div>
-        </div>
-      {/if}
-      {/if}
-    </div>
+      {/each}
+      {#if detail.results?.some((entry) => entry.productivity !== entry.amount)}<p class="note">“产能有效”是产能加成作用的基数，不是额外产量。</p>{/if}
+    {/if}
   </div>
 {/if}
 
 <style>
-  .hover-card {
-    position: fixed;
-    z-index: 60;
-    width: min(320px, calc(100vw - 28px));
-    max-height: calc(100vh - 24px);
-    overflow-y: auto;
-    padding: 12px;
-    background: var(--panel);
-    border: 1px solid var(--line-strong);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow-strong);
-    text-align: left;
-    pointer-events: none;
-  }
-
-  .hc-head {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding-bottom: 9px;
-    border-bottom: 1px solid var(--line);
-  }
-
-  .hc-title {
-    min-width: 0;
-    flex: 1;
-    display: grid;
-    gap: 2px;
-  }
-
-  .hc-title strong {
-    overflow: hidden;
-    font-size: 12.5px;
-    font-weight: 700;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .hc-title small {
-    color: var(--muted);
-    font-size: 10px;
-  }
-
-  .hc-badge {
-    display: inline-flex;
-    align-items: center;
-    width: fit-content;
-    margin-top: 2px;
-    padding: 1px 6px;
-    border-radius: 999px;
-    font-size: 9px;
-    font-weight: 600;
-  }
-
-  .hc-badge.accessible {
-    color: var(--ok);
-    background: var(--ok-dim);
-  }
-
-  .hc-badge.inaccessible {
-    color: var(--danger);
-    background: var(--danger-dim);
-  }
-
-  .hc-badge.hidden {
-    color: var(--muted);
-    background: var(--card);
-  }
-
-  .hc-body {
-    display: grid;
-    gap: 3px;
-    padding-top: 8px;
-  }
-
-  .hc-row {
-    display: flex;
-    justify-content: space-between;
-    gap: 10px;
-    color: var(--muted);
-    font-size: 11px;
-    line-height: 1.45;
-  }
-
-  .hc-row strong {
-    color: var(--text);
-    font-family: var(--mono);
-    font-size: 10px;
-    text-align: right;
-  }
-
-  .hc-flow {
-    display: grid;
-    gap: 4px;
-    margin-top: 4px;
-  }
-
-  .hc-label {
-    color: var(--faint);
-    font-size: 9px;
-    font-weight: 700;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-  }
-
-  .hc-flows {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-  }
-
-  .hc-flow-item {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    padding: 3px 7px 3px 3px;
-    background: var(--input-bg);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-sm);
-  }
-
-  .hc-flow-copy {
-    min-width: 0;
-    flex: 1;
-    display: grid;
-    gap: 1px;
-  }
-
-  .hc-flow-name {
-    overflow: hidden;
-    font-size: 10.5px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .hc-flow-meta {
-    overflow: hidden;
-    color: var(--muted);
-    font-family: var(--mono);
-    font-size: 9px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
+  .hover-card { position: fixed; z-index: 80; width: min(440px, calc(100vw - 16px)); max-height: calc(100dvh - 16px); overflow: auto; padding: 10px; color: var(--text); background: var(--panel); border: 1px solid var(--line-strong); border-radius: var(--radius); box-shadow: var(--shadow-strong); text-align: left; font-size: 11px; line-height: 1.35; }
+  header { display: flex; align-items: center; gap: 8px; padding-bottom: 7px; border-bottom: 1px solid var(--line); }
+  .heading { min-width: 0; flex: 1; display: grid; gap: 2px; }
+  .heading strong { font-size: 13px; overflow-wrap: anywhere; }
+  code { font: 10px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+  .badges { display: grid; gap: 3px; flex: 0 0 auto; font-size: 10px; text-align: right; color: var(--muted); }
+  .unavailable { color: var(--warn); }
+  section { margin-top: 8px; }
+  h4 { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; margin: 0 0 5px; font-size: 11px; }
+  h4 small { color: var(--muted); font-size: 10px; font-weight: 400; }
+  .stats { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 3px 10px; }
+  .stats > div { display: flex; align-items: baseline; justify-content: space-between; gap: 5px; padding: 3px 0; border-bottom: 1px solid var(--line); min-width: 0; }
+  .stats span, .facts > span, .reference > span, .tile-capabilities span { color: var(--muted); }
+  .stats strong, .quantity, .actual strong { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .facts { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 4px 12px; margin-top: 7px; }
+  .facts strong { text-align: right; overflow-wrap: anywhere; font-weight: 500; }
+  .actual { display: flex; justify-content: space-between; margin-top: 7px; padding: 5px 7px; background: var(--accent-dim); border-radius: var(--radius-sm); }
+  .tile-capabilities > div, .reference { display: flex; align-items: center; gap: 6px; margin-top: 5px; }
+  .tile-capabilities span, .reference > span { min-width: 72px; }
+  .flow-table { display: grid; }
+  .flow-row { display: flex; align-items: center; gap: 6px; padding: 4px 0; border-top: 1px solid var(--line); }
+  .flow-copy { flex: 1; min-width: 0; display: grid; gap: 2px; }
+  .flow-copy strong { font-weight: 500; overflow-wrap: anywhere; }
+  .flow-copy small { color: var(--muted); font-size: 10px; overflow-wrap: anywhere; }
+  .quantity { display: grid; gap: 2px; text-align: right; }
+  .quantity small, .note { color: var(--muted); font-size: 10px; }
+  .note { margin: 6px 0 0; }
+  @media (max-width: 460px) { .stats { grid-template-columns: 1fr; } }
 </style>
