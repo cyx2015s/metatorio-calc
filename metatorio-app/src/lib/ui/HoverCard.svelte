@@ -64,13 +64,8 @@
   let top = $derived(Math.max(8, above ? y - Math.min(dimensions.height, maxHeight) - 14 : y + 14));
   function portal(node: HTMLElement) { document.body.appendChild(node); return {destroy:() => node.remove()}; }
   function nameOf(flow: FlowAmount) { return runtime.localizedName(flow.kind, flow.name) || flow.name; }
-  function flowNotes(entry: FlowAmount, output: boolean) {
+  function flowNotes(entry: FlowAmount) {
     const notes: string[] = [];
-    if (output && entry.probability !== 1) notes.push(`概率 ${compactNumber(entry.probability * 100)}%`);
-    if (entry.amount_min != null && entry.amount_max != null) notes.push(`原始 ${entry.amount_min}～${entry.amount_max}`);
-    else if (entry.amount_min != null) notes.push(`原始 ≥${entry.amount_min}`);
-    else if (entry.amount_max != null) notes.push(`原始 ≤${entry.amount_max}`);
-    if (output && entry.productivity !== entry.amount) notes.push(`产能有效 ${compactNumber(entry.productivity)}`);
     const qmin = entry.quality_min ? runtime.localizedName("quality", entry.quality_min) : "";
     const qmax = entry.quality_max ? runtime.localizedName("quality", entry.quality_max) : "";
     if (qmin && qmax) notes.push(`品质 ${qmin}${qmax !== qmin ? `～${qmax}` : ""}`);
@@ -154,17 +149,17 @@
           <section class="recipe-flows"><h4>{section.label}<small>期望量 / 次 · 速度 1 时的基准速率</small></h4>
             <div class="flow-table">
               {#each section.items as entry, i (`${entry.kind}/${entry.name}#${i}`)}
-                <div class="flow-row" title={flowNotes(entry,section.output)}>
+                <div class="flow-row" title={flowNotes(entry)}>
                   <Icon type={entry.kind} name={entry.name} size={22} />
-                  <div class="flow-copy"><strong>{nameOf(entry)}</strong>{#if flowNotes(entry,section.output)}<small>{flowNotes(entry,section.output)}</small>{/if}</div>
-                  <div class="quantity"><strong>{compactNumber(entry.amount)}</strong>{#if entry.base_rate != null}<small>{compactNumber(entry.base_rate)}/s</small>{/if}</div>
+                  <div class="flow-copy"><strong>{nameOf(entry)}</strong>{#if flowNotes(entry)}<small>{flowNotes(entry)}</small>{/if}</div>
+                  <div class="quantity"><strong>{#if section.output}{compactNumber(entry.amount - entry.productivity)} + {compactNumber(entry.productivity)}{:else}{compactNumber(entry.amount)}{/if}</strong>{#if entry.base_rate != null}<small>{compactNumber(entry.base_rate)}/s</small>{/if}</div>
                 </div>
               {/each}
             </div>
           </section>
         {/if}
       {/each}
-      {#if detail.results?.some((entry) => entry.productivity !== entry.amount)}<p class="note">“产能有效”是产能加成作用的基数，不是额外产量。</p>{/if}
+      {#if detail.results?.length}<p class="note">产物数量 = 不受产能加成部分 + 可享受产能加成部分，均为期望数量；右侧速率为两部分之和。</p>{/if}
     {/if}
   </div>
 {/if}

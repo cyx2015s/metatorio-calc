@@ -84,7 +84,7 @@ async function seed(page, count) {
      const tile=args.kind==='tile'?{fluid:args.name==='water'?'water':null,destroys_dropped_items:args.name==='lava'}:undefined;
      const qualities=args.kind==='module' ? ['normal','rare','legendary'].map((quality,i)=>({quality,stats:[stat('effect-speed',0.5*(i+1),'percent'),stat('effect-consumption',0.7,'percent')]})):[];
      const product={kind:'item',name:'iron-plate',amount:2,base_rate:1,probability:0.5,productivity:1,amount_min:2,amount_max:6,quality_min:'rare',quality_max:'legendary',quality_change:1,temperature:null,min_temperature:null,max_temperature:null};
-     return {kind:args.kind,name:args.name,localized_name:names[args.name]||args.name,module_slots:3,beacon_module_slots:2,uses_beacon_effects:true,machine_energy_source:'electric',boiler_mode:'heat-fluid-inside',boiler_burns_fluid:false,ingredients:[],results:args.kind==='recipe'?[product,product]:[],categories:[],fuel_value_j:null,fuel_categories:[],rocket_launch_products:[],surface_conditions:[],calculation:{stats:args.kind==='recipe'?[stat('craft-time',2,'seconds')]:[],qualities,tile}};
+     return {kind:args.kind,name:args.name,localized_name:names[args.name]||args.name,module_slots:3,beacon_module_slots:2,uses_beacon_effects:true,machine_energy_source:'electric',boiler_mode:'heat-fluid-inside',boiler_burns_fluid:false,ingredients:[],results:args.kind==='recipe'?[product,{...product,productivity:2}]:[],categories:[],fuel_value_j:null,fuel_categories:[],rocket_launch_products:[],surface_conditions:[],calculation:{stats:args.kind==='recipe'?[stat('craft-time',2,'seconds')]:[],qualities,tile}};
     }
     if(command==='allowed_modules') return ['speed-module-3','quality-module-3'];
     if(command==='solar_balance') return {peak_power:60000,average_power:42000,surplus_per_cycle:100,cycle_seconds:420,recommended_accumulators:0.84};
@@ -153,12 +153,15 @@ async function run() {
     assert.match(await page.getByRole('tooltip').textContent(),/实际消耗.*8 kW/);
     await page.mouse.move(1200,80);
     await page.getByRole('tooltip').waitFor({state:'detached'});
-    // Repeated product names remain legal and probability/productivity are visible.
+    // Repeated products retain their productivity split without raw probability metadata.
     await page.locator('[data-mechanic-id="1"] .primary .hover-icon').hover();
     await page.getByRole('tooltip').waitFor();
     assert.equal(await page.getByRole('tooltip').locator('.flow-row').count(),2);
-    assert.match(await page.getByRole('tooltip').textContent(),/概率 50%/);
-    assert.match(await page.getByRole('tooltip').textContent(),/产能有效 1/);
+    const productRows=page.getByRole('tooltip').locator('.flow-row');
+    assert.equal(await productRows.nth(0).locator('.quantity strong').textContent(),'1 + 1');
+    assert.equal(await productRows.nth(1).locator('.quantity strong').textContent(),'0 + 2');
+    assert.doesNotMatch(await page.getByRole('tooltip').textContent(),/概率|原始|50%/);
+    assert.match(await page.getByRole('tooltip').textContent(),/不受产能加成部分 \+ 可享受产能加成部分/);
     if(process.env.UI_TEST_SCREENSHOT) await page.screenshot({path:process.env.UI_TEST_SCREENSHOT});
     await page.setViewportSize({width:800,height:600});
     const bounds=await page.getByRole('tooltip').boundingBox();
