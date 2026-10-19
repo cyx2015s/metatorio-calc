@@ -172,8 +172,11 @@ async function run() {
     assert.match(await page.getByRole('tooltip').textContent(),/不受产能加成部分 \+ 可享受产能加成部分/);
     if(process.env.UI_TEST_SCREENSHOT) await page.screenshot({path:process.env.UI_TEST_SCREENSHOT});
     await page.setViewportSize({width:800,height:600});
-    const bounds=await page.getByRole('tooltip').boundingBox();
-    assert.ok(bounds.x>=0 && bounds.y>=0 && bounds.x+bounds.width<=800 && bounds.y+bounds.height<=600,'tooltip remains inside a resized viewport');
+    // The resize event and ResizeObserver update Svelte geometry asynchronously.
+    await waitFor(async()=>{
+      const bounds=await page.getByRole('tooltip').boundingBox();
+      return bounds && bounds.x>=0 && bounds.y>=0 && bounds.x+bounds.width<=800 && bounds.y+bounds.height<=600;
+    });
     await page.setViewportSize({width:1600,height:1000});
     await page.mouse.move(1200,80);
     await page.getByRole('tooltip').waitFor({state:'detached'});

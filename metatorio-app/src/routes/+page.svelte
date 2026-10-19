@@ -25,6 +25,7 @@
   import Selector from "$lib/ui/Selector.svelte";
   import MechanicRow from "$lib/ui/MechanicRow.svelte";
   import MechanicCard from "$lib/ui/MechanicCard.svelte";
+  import MechanicFilter from "$lib/ui/MechanicFilter.svelte";
 
   const mechKinds: { kind: import("$lib/runtime/types").MechanicKind; label: string }[] = [
     { kind: "recipe", label: "配方" },
@@ -476,6 +477,15 @@
   // 机制列表：配方合并开关（同配方×机器合并成一张卡，品质变体并列）；
   // 其他机制类型始终单条展示，不额外嵌套。
   let mergeRecipes = $state(true);
+  let filterOpen = $state(false);
+  let filterResult = $state<{scope: string; ids: number[] | null}>({scope: "", ids: null});
+  let filterScope = $derived(`${project?.id ?? 0}:${factory?.id ?? 0}`);
+  let filterActive = $derived(filterResult.scope === filterScope && filterResult.ids !== null);
+  let visibleMechanics = $derived.by(() => {
+    if (!filterActive) return dragMechanics;
+    const ids = new Set(filterResult.ids ?? []);
+    return dragMechanics.filter(entry => ids.has(entry.id));
+  });
 
   /** 聚合键：合并开启时仅 recipe 按 (配方, 机器) 聚合；其余类型各自独立。 */
   function mechGroupKey(entry: import("$lib/runtime/types").MechanicEntry): string {
@@ -494,7 +504,7 @@
         entries: import("$lib/runtime/types").MechanicEntry[];
       }[] = [];
       const index = new Map<string, number>();
-      for (const entry of dragMechanics) {
+      for (const entry of visibleMechanics) {
         const key = mechGroupKey(entry);
         const existing = index.get(key);
         if (existing !== undefined) {
@@ -538,9 +548,11 @@
   let dragGroups = $state<MechanicGroup[]>([]);
   $effect(() => { dragGroups = mechGroups.map((group) => ({ ...group, id: group.key })); });
   function handleMechanicsConsider(event: CustomEvent<{ items: MechanicGroup[] }>) {
+    if (filterActive) return;
     dragGroups = event.detail.items;
   }
   function handleMechanicsFinalize(event: CustomEvent<{ items: MechanicGroup[] }>) {
+    if (filterActive) return;
     dragGroups = event.detail.items;
     dragMechanics = event.detail.items.flatMap((group) => group.entries);
     runtime.reorderMechanics(dragMechanics.map((entry) => entry.id)).catch(() => {});
@@ -2410,6 +2422,9 @@
             + 添加机制{addMechMenuPos ? " ▴" : " ▾"}
           </button>
         {/if}
+        <button class="btn" class:active={filterOpen || filterActive} aria-expanded={filterOpen}
+          title="按消耗或产出对象筛选机制；仅影响显示，不改变工厂或求解"
+          onclick={() => filterOpen = !filterOpen} disabled={!factory}>筛选{filterActive ? " · 已启用" : ""}</button>
         {#if !runtime.activeContext}
           <span class="chip warn">未载入游戏数据</span>
         {/if}
@@ -2452,12 +2467,12 @@
               {/if}
               <button
                 disabled={!solved}
-                title="移除本次求解中用量为 0 的机制"
+                title="移除整个工厂中本次求解用量为 0 的机制，不受显示筛选影响"
                 onclick={() => { mechMenuOpen = false; runtime.cleanup("remove-unused").catch(() => {}); }}
               >移除未用</button>
               <button
                 disabled={!solved}
-                title="按求解流量从大到小重排机制"
+                title="按求解流量从大到小重排整个工厂的机制，不受显示筛选影响"
                 onclick={() => { mechMenuOpen = false; runtime.cleanup("sort-by-solution-rate").catch(() => {}); }}
               >按流量排序</button>
               <button
@@ -2473,9 +2488,17 @@
         </div>
       </div>
 
+      {#if project && factory}
+        {#key filterScope}
+          <MechanicFilter project={project.id} factory={factory.id} entries={mechanics} expanded={filterOpen}
+            onChange={ids => filterResult = {scope: filterScope, ids}} />
+        {/key}
+      {/if}
+      {#if filterActive}<div class="muted filter-order-note">筛选中暂停手动拖拽排序，清除筛选后恢复。</div>{/if}
+
       <div
         class="mech-list"
-        use:dndzone={{ items: dragGroups, type: "mechanic-groups", flipDurationMs: 120 }}
+        use:dndzone={{ items: dragGroups, type: "mechanic-groups", flipDurationMs: 120, dragDisabled: filterActive }}
         onconsider={handleMechanicsConsider}
         onfinalize={handleMechanicsFinalize}
       >
@@ -2537,7 +2560,10 @@
           {/if}
         {:else}
           <div class="empty-state">
-            {#if project && factory}
+            {#if filterActive}
+              <strong>没有匹配的机制</strong>
+              <span class="muted">可更换消耗或产出条件，或清除筛选查看全部机制。读取进度见筛选栏。</span>
+            {:else if project && factory}
               <strong>还没有机制</strong>
               <span class="muted">从「+ 添加机制」开始，或让「自动规划」生成候选。</span>
             {:else if project}
@@ -4342,6 +4368,7 @@
     flex: 0 0 auto;
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 8px;
     padding: 12px 0 10px;
     background: color-mix(in srgb, var(--bg) 92%, transparent);
@@ -4354,6 +4381,7 @@
     align-items: center;
     gap: 4px;
   }
+  .filter-order-note { flex: 0 0 auto; font-size: 12px; padding-top: 6px; }
 
   .toolbar .menu-wrap {
     margin-left: 2px;

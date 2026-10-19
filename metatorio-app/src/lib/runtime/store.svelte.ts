@@ -1,6 +1,7 @@
 import { IconCache } from "./icon-cache";
 import { richTextPlain } from "$lib/rich-text";
 import { lookupName } from "$lib/display-labels";
+import { MechanicFlowCache } from "$lib/mechanic-filter";
 // Svelte 5 rune-based store bridging the frontend to the Tauri runtime.
 //
 // `runtime` is a singleton: the UI reads its $state fields reactively and
@@ -244,14 +245,11 @@ class RuntimeStore {
   private detailCache = new Map<string, PrototypeDetail>();
   private detailRequests = new Map<string, Promise<PrototypeDetail | null>>();
   private detailGeneration = 0;
-  /** 机制展开流缓存：`contextId:project:factory:mechanicId` → {机制内容hash, 流}。
+  /** 机制展开流缓存：上下文/项目/工厂/机制身份 + 配置/项目设置/环境签名。
    *  每次 dispatch 后 refresh() 会用全新对象引用刷新机制列表，导致每个
    *  MechanicCard 都重新拉取展开流。按机制**内容哈希**缓存，内容不变时不重发
-   *  IPC（py 大厂几百机制时，这是主线程卡顿/滞后的主要来源之一）。 */
-  private mechanicFlowCache = new Map<
-    string,
-    { hash: string; flows: { flow: import("./types").DualVar; amount: number }[] }
-  >();
+   *  IPC；卡片和筛选共享已完成及进行中的请求，失败可重试。 */
+  private mechanicFlowCache = new MechanicFlowCache();
 
   /** 当前上下文的全量目录索引（前端本地筛选）。 */
   catalogIndex = $state<CatalogIndex | null>(null);
@@ -747,7 +745,7 @@ class RuntimeStore {
 
   /**
    * 单个机制的展开流，带内容哈希缓存。`mechanic` 为机制配置对象（按当前
-   * 内容判断是否需要重拉）。上下文/项目/工厂/机制 id 与**配置内容**都参与
+   * 内容判断是否需要重拉）。上下文/项目/工厂/机制 id 与配置、项目设置、环境都参与
    * 缓存键：配置不变（仅引用刷新）时直接复用，避免每次 dispatch 后所有
    * MechanicCard 重发 `mechanicFlow` IPC。
    */
@@ -757,18 +755,23 @@ class RuntimeStore {
     mechanicId: number,
     mechanic: unknown,
   ): Promise<{ flow: import("./types").DualVar; amount: number }[]> {
-    const key = `${this.activeContextId || ""}:${project}:${factory}:${mechanicId}`;
-    const hash = JSON.stringify(mechanic);
-    const cached = this.mechanicFlowCache.get(key);
-    if (cached && cached.hash === hash) return cached.flows;
     try {
-      const flows = await mechanicFlow(project, factory, mechanicId);
-      const result = flows.map(([flow, amount]) => ({ flow, amount }));
-      this.mechanicFlowCache.set(key, { hash, flows: result });
-      return result;
+      return await this.loadMechanicFlow(project, factory, mechanicId, mechanic);
     } catch {
       return [];
     }
+  }
+
+  /** Same cache as mechanism cards, but preserve failures for filter progress/retry. */
+  loadMechanicFlow(project: number, factory: number, mechanicId: number, mechanic: unknown) {
+    const document = this.document?.projects.find(entry => entry.id === project);
+    const environment = document?.factories.find(entry => entry.id === factory)?.settings;
+    const key = JSON.stringify([document?.context_id ?? this.effectiveContextId, project, factory, mechanicId]);
+    const hash = JSON.stringify([mechanic, document?.settings, environment]);
+    return this.mechanicFlowCache.get(key, hash, async () => {
+      const flows = await mechanicFlow(project, factory, mechanicId);
+      return flows.map(([flow, amount]) => ({flow, amount}));
+    });
   }
 
   /** 换上下文/项目后清空机制流缓存（同一 id 在不同上下文含义可能不同）。
