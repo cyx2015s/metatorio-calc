@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "test:icons": "node --test tests/icons.test.mjs",
+    "test:rich-text": "node --test tests/rich-text.test.mjs",
+    "test:rich-text-browser": "node tests/rich-text-browser.cjs",
     "dev": "vite dev",
     "build": "vite build",
     "preview": "vite preview",

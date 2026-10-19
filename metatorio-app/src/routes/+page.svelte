@@ -1,4 +1,5 @@
 <script lang="ts">
+  import RichText from "$lib/ui/RichText.svelte";
   // Metatorio 主界面：紧凑布局，圆角卡片分区；游戏内物品一律图标按钮，
   // 一般操作一律文字按钮。
   import { onMount } from "svelte";
@@ -644,11 +645,11 @@
   }
 
   /** 流的显示名：物品/流体/实体优先本地化名，否则内部 id。 */
-  function flowLabel(flow: DualVar): string {
-    if (typeof flow === "object" && "VirtualScience" in flow) return `虚拟科研（${runtime.localizedName("item", String(flow.VirtualScience))}）`;
+  function flowLabel(flow: DualVar, rich = false): string {
+    if (typeof flow === "object" && "VirtualScience" in flow) return `虚拟科研（${rich ? runtime.richName("item", String(flow.VirtualScience)) : runtime.localizedName("item", String(flow.VirtualScience))}）`;
     const icon = flowIcon(flow);
     if (icon.type === "item" || icon.type === "fluid" || icon.type === "entity") {
-      return runtime.localizedName(icon.type, icon.name);
+      return rich ? runtime.richName(icon.type, icon.name) : runtime.localizedName(icon.type, icon.name);
     }
     // 抽象能量流的中文名
     if (typeof flow === "string") {
@@ -1736,7 +1737,7 @@
                   onContextMenu={() => openSuggestions(target.flow)}
                 />
                 <span class="row-name" title={dualVarLabel(target.flow)}>
-                  <span class="flow-name">{flowLabel(target.flow)}</span>
+                  <span class="flow-name"><RichText text={flowLabel(target.flow, true)} /></span>
                 </span>
                 {#if fluidRange}
                   <!-- 流体目标的**期望温度区间**：区间内任何产出都能满足它，所以不必
@@ -1848,7 +1849,7 @@
                   title={`外部输入：${flowLabel(input.flow)} · 点击更改`}
                   onClick={() => editExternalInput(input)}
                 />
-                <span class="row-name" title={dualVarLabel(input.flow)}>{flowLabel(input.flow)}</span>
+                <span class="row-name" title={dualVarLabel(input.flow)}><RichText text={flowLabel(input.flow, true)} /></span>
                 {#if fluidRange}
                   <!-- 与目标行同一套语义：区间内任何温度的外部输入都算满足。
                        外部输入本来就是"从外面买"，指定可接受温度区间比钉死一个温度更准。 -->
@@ -1929,7 +1930,7 @@
                   flow={flow}
                   title={`环境自带：${flowLabel(flow)} · 严格供给下也免费`}
                 />
-                <span class="row-name" title={flowLabel(flow)}>{flowLabel(flow)}</span>
+                <span class="row-name" title={flowLabel(flow)}><RichText text={flowLabel(flow, true)} /></span>
                 <span class="chip">隐式</span>
                 <input
                   class="num"
@@ -2045,7 +2046,7 @@
                           title={`表达式项：${flowLabel(term.flow)} · 点击更换流`}
                         />
                       </button>
-                      <span class="row-name" title={dualVarLabel(term.flow)}>{flowLabel(term.flow)}</span>
+                      <span class="row-name" title={dualVarLabel(term.flow)}><RichText text={flowLabel(term.flow, true)} /></span>
                       <input
                         class="num"
                         type="number"
@@ -2269,7 +2270,7 @@
               {#each runtime.productivityInfo?.recipes ?? [] as entry, i (entry.recipe)}
                 <div class="prefs-item {entry.source === "user" ? "user-specified" : "inferred"}">
                   <HoverIcon type="recipe" name={entry.recipe} size={22} detailKind="recipe" />
-                  <span class="prefs-name">{runtime.localizedName("recipe", entry.recipe)}</span>
+                  <span class="prefs-name"><RichText text={runtime.richName("recipe", entry.recipe)} /></span>
                   <input
                     class="prod-input"
                     type="number"
@@ -2317,7 +2318,7 @@
               {#each project.settings.infinite_levels as entry (entry.tech)}
                 <div class="prefs-item user-specified">
                   <HoverIcon type="technology" name={entry.tech} size={22} detailKind="technology" />
-                  <span class="prefs-name">{runtime.localizedName("technology", entry.tech)}</span>
+                  <span class="prefs-name"><RichText text={runtime.richName("technology", entry.tech)} /></span>
                   <input
                     class="prod-input"
                     type="number"
@@ -2653,7 +2654,7 @@
                   onContextMenu={() => openSuggestions(balance.flow)}
                 />
                 <span class="row-name" title={dualVarLabel(balance.flow)}>
-                  <span class="flow-name">{flowLabel(balance.flow)}</span>
+                  <span class="flow-name"><RichText text={flowLabel(balance.flow, true)} /></span>
                   {#if flowLabelSub(balance.flow)}
                     <span class="flow-sub">{flowLabelSub(balance.flow)}</span>
                   {/if}
@@ -3106,7 +3107,7 @@
           {#each planning.machine_preferences as pref, i (i)}
             <div class="prefs-item">
               <HoverIcon type="entity" name={pref.id} size={22} detailKind="machine" quality={pref.quality} />
-              <span class="prefs-name">{runtime.localizedName("machine", pref.id)}</span>
+              <span class="prefs-name"><RichText text={runtime.richName("machine", pref.id)} /></span>
               <button
                 class="btn ghost"
                 title="移除"
@@ -3132,7 +3133,7 @@
           {#each planning.enumerate_modules as module, i (i)}
             <div class="prefs-item">
               <HoverIcon type="item" name={module.id} size={22} detailKind="module" quality={module.quality} />
-              <span class="prefs-name">{runtime.localizedName("module", module.id)}</span>
+              <span class="prefs-name"><RichText text={runtime.richName("module", module.id)} /></span>
               <button
                 class="btn ghost"
                 title="移除"
@@ -3331,7 +3332,7 @@
 {#if suggestions}
   <div class="backdrop low" role="button" tabindex="0" onclick={(e) => { if (e.target === e.currentTarget) suggestions = null; }} onkeydown={(e) => backdropKeydown(e, () => (suggestions = null))}>
     <div class="prefs-modal">
-      <div class="mini-title">建议：{flowLabel(suggestions.flow)}</div>
+      <div class="mini-title">建议：<RichText text={flowLabel(suggestions.flow, true)} /></div>
       {#if suggestions.loading}
         <span class="muted">生成中…</span>
       {:else if suggestions.items.length === 0}

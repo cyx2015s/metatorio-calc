@@ -14,6 +14,8 @@
   import HoverIcon from "./HoverIcon.svelte";
   import Icon from "./Icon.svelte";
   import HoverCard from "./HoverCard.svelte";
+  import RichText from "./RichText.svelte";
+  import { normalizeSearch, richTextPlain } from "$lib/rich-text";
   import type { CatalogKind, DualVar, IndexEntry } from "$lib/runtime/types";
   import {
     accessibleKind,
@@ -141,6 +143,14 @@
   );
   let groups = $derived([...new Set(entries.map((entry) => entry.group))]);
   let searching = $derived(query.trim().length > 0);
+  // Build once per catalog/filter context, not once per keystroke and entry.
+  let searchIndex = $derived(entries.map((entry) => ({ entry, keys: [
+    normalizeSearch(entry.name),
+    normalizeSearch(entry.localized_name, (kind, name) => runtime.localizedName(kind, name)),
+    normalizeSearch(entry.localized_name), // Embedded prototype IDs are aliases too.
+    entry.tile?.fluid ? normalizeSearch(`${entry.tile.fluid} ${runtime.localizedName("fluid", entry.tile.fluid)}`) : "",
+  ] })));
+  let searchNeedle = $derived(normalizeSearch(query));
 
   // ── 可达性过滤 ──────────────────────────────────────────────────
   // 选中项目"无视可达性"时不拉取也不过滤；否则惰性拉取可达性快照
@@ -165,14 +175,7 @@
 
   let visible = $derived(
     (searching
-      ? entries.filter((entry) => {
-          const needle = query.trim().toLowerCase();
-          return (
-            entry.name.toLowerCase().includes(needle) ||
-            entry.localized_name.toLowerCase().includes(needle) ||
-            (!!entry.tile?.fluid && (entry.tile.fluid.toLowerCase().includes(needle) || runtime.localizedName("fluid", entry.tile.fluid).toLowerCase().includes(needle)))
-          );
-        })
+      ? searchIndex.filter(({ keys }) => !!searchNeedle && keys.some((key) => key.includes(searchNeedle))).map(({ entry }) => entry)
       : activeGroup
         ? entries.filter((entry) => entry.group === activeGroup)
         : entries
@@ -282,7 +285,7 @@
   }
 
   function labelOf(entry: IndexEntry): string {
-    return entry.localized_name || entry.name;
+    return richTextPlain(entry.localized_name || entry.name, (kind, name) => runtime.localizedName(kind, name)).trim();
   }
 
   /** 点击条目：无品质 → 点击即确认；有品质 → 仅选中（品质主动点过且
@@ -494,7 +497,7 @@
               onclick={() => pickQuality(q)}
             >
               <HoverIcon type="quality" name={q} size={22} detailKind="quality" title={runtime.localizedName("quality", q)} />
-              <span class="q-name">{runtime.localizedName("quality", q)}</span>
+              <span class="q-name"><RichText text={runtime.richName("quality", q)} /></span>
             </button>
           {/each}
         </div>
@@ -567,7 +570,7 @@
               onmouseleave={leaveHover}
             >
               <Icon type={entry.icon_type} name={entry.name} size={28} title={labelOf(entry)} />
-              <span class="row-name">{labelOf(entry)}</span>
+              <span class="row-name"><RichText text={entry.localized_name || entry.name} /></span>
               {#if entry.tile}
                 <span class="tile-use">
                   {#if entry.tile.fluid}<Icon type="fluid" name={entry.tile.fluid} size={20} /><span>→ {runtime.localizedName("fluid",entry.tile.fluid)}</span>{/if}

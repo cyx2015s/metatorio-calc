@@ -1,4 +1,5 @@
 import { IconCache } from "./icon-cache";
+import { richTextPlain } from "$lib/rich-text";
 // Svelte 5 rune-based store bridging the frontend to the Tauri runtime.
 //
 // `runtime` is a singleton: the UI reads its $state fields reactively and
@@ -802,10 +803,17 @@ class RuntimeStore {
     this.localizedNameContext = key;
   }
 
-  localizedName(kind: string, name: string): string {
+  /** Raw Factorio markup, for RichText only. IPC/prototype IDs remain unchanged. */
+  richName(kind: string, name: string): string {
     this.ensureLocalizedNameMap();
-    const localized = this.localizedNameMap.get(`${kind}/${name}`);
+    const keyKind = kind === "space-location" ? "planet" : kind;
+    const localized = this.localizedNameMap.get(`${keyKind}/${name}`);
     return localized || name;
+  }
+
+  /** Plain visible label, safe for titles, aria labels and ordinary controls. */
+  localizedName(kind: string, name: string): string {
+    return richTextPlain(this.richName(kind, name), (kind, name) => richTextPlain(this.richName(kind, name))).trim();
   }
 
   /** 换上下文后清空索引/详情缓存。 */

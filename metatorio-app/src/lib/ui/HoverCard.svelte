@@ -5,6 +5,7 @@
   import { detailStats, formatStat, statLabels } from "./hover-model";
   import { accessibleKind, accessibleKindFor, accessibleName, dualVarLabel, type DualVar, type FlowAmount, type PrototypeDetail } from "$lib/runtime/types";
   import Icon from "./Icon.svelte";
+  import RichText from "./RichText.svelte";
 
   let { kind, detail, x, y, flow, quality = "normal", flowRate, rateBasis, onEnter, onLeave }: {
     kind: string; detail: PrototypeDetail | null; x: number; y: number;
@@ -22,7 +23,7 @@
   let flowKey = $derived(typeof flow === "string" ? flow : flow ? Object.keys(flow)[0] : "");
   let inner = $derived(flow && typeof flow === "object" ? (flow as Record<string, unknown>)[flowKey] as Record<string, unknown> | string : undefined);
   let virtualScience = $derived(flowKey === "VirtualScience");
-  let heading = $derived(virtualScience ? `虚拟科研 · ${runtime.localizedName("item", String(inner))}` : detail?.localized_name || detail?.name || flowLabels[flowKey] || dualVarLabel(flow ?? "Unknown"));
+  let heading = $derived(virtualScience ? `虚拟科研 · ${runtime.richName("item", String(inner))}` : detail?.localized_name || detail?.name || flowLabels[flowKey] || dualVarLabel(flow ?? "Unknown"));
   let iconName = $derived(detail?.name || (virtualScience ? String(inner) : flowKey === "ItemFuelSupply" ? "ItemFuel" : flowKey));
   let iconType = $derived(detail ? iconTypeForKind(detail.kind) : virtualScience ? "item" : "flow");
   let stats = $derived(detailStats(detail, quality));
@@ -63,7 +64,6 @@
     x + 14 + dimensions.width <= viewport.width - 8 ? x + 14 : x - dimensions.width - 14 >= 8 ? x - dimensions.width - 14 : viewport.width - dimensions.width - 8));
   let top = $derived(Math.max(8, above ? y - Math.min(dimensions.height, maxHeight) - 14 : y + 14));
   function portal(node: HTMLElement) { document.body.appendChild(node); return {destroy:() => node.remove()}; }
-  function nameOf(flow: FlowAmount) { return runtime.localizedName(flow.kind, flow.name) || flow.name; }
   function flowNotes(entry: FlowAmount) {
     const notes: string[] = [];
     const qmin = entry.quality_min ? runtime.localizedName("quality", entry.quality_min) : "";
@@ -89,9 +89,9 @@
   <div use:portal bind:this={card} class="hover-card" role="tooltip" style:left={`${left}px`} style:top={`${top}px`} style:max-height={`${maxHeight}px`} onmouseenter={onEnter} onmouseleave={onLeave}>
     <header>
       <Icon type={iconType} name={iconName} size={30} />
-      <div class="heading"><strong>{heading}</strong><code>{detail?.name || flowKey}</code></div>
+      <div class="heading"><strong><RichText text={heading} /></strong><code>{detail?.name || flowKey}</code></div>
       <div class="badges"><span>{labels[kind] || (virtualScience ? "科研价值" : "计算流")}</span>
-        {#if quality !== "normal"}<span>{runtime.localizedName("quality",quality)}</span>{/if}
+        {#if quality !== "normal"}<span><RichText text={runtime.richName("quality",quality)} /></span>{/if}
         {#if detail?.hidden}<span>隐藏</span>{/if}
         {#if accessibleState !== "unknown"}<span class:unavailable={accessibleState === "inaccessible"}>{accessibleState === "accessible" ? "可达" : "不可达"}</span>{/if}
       </div>
@@ -110,7 +110,7 @@
     {/if}
     {#if tile}
       <section class="tile-capabilities"><strong>地格用途</strong>
-        <div><span>抽取流体</span>{#if tile.fluid}<Icon type="fluid" name={tile.fluid} size={20} /><b>{runtime.localizedName("fluid",tile.fluid)}</b>{:else}<b>不支持</b>{/if}</div>
+        <div><span>抽取流体</span>{#if tile.fluid}<Icon type="fluid" name={tile.fluid} size={20} /><b><RichText text={runtime.richName("fluid",tile.fluid)} /></b>{:else}<b>不支持</b>{/if}</div>
         <div><span>销毁物品</span><b>{tile.destroys_dropped_items ? "支持" : "不支持"}</b></div>
       </section>
     {/if}
@@ -120,7 +120,7 @@
     {#if research}
       <section><h4>科研需求<small>未计实验室速度、品质与产能</small></h4>
         <div class="facts"><span>研究单位数</span><strong>{research.units == null ? "由等级公式决定" : compactNumber(research.units)}</strong><span>每单位时间（速度 1）</span><strong>{compactNumber(research.unit_seconds)} s</strong></div>
-        {#each research.ingredients as ingredient}<div class="flow-row"><Icon type="item" name={ingredient.name} size={22} /><span class="flow-copy">{runtime.localizedName("item",ingredient.name)}</span><span class="quantity">{ingredient.per_unit}/单位{#if ingredient.total != null}<small>共 {compactNumber(ingredient.total)}</small>{/if}</span></div>{/each}
+        {#each research.ingredients as ingredient}<div class="flow-row"><Icon type="item" name={ingredient.name} size={22} /><span class="flow-copy"><RichText text={runtime.richName("item",ingredient.name)} /></span><span class="quantity">{ingredient.per_unit}/单位{#if ingredient.total != null}<small>共 {compactNumber(ingredient.total)}</small>{/if}</span></div>{/each}
         {#if research.prerequisites.length}<div class="facts"><span>前置科技</span><strong>{research.prerequisites.map((name) => runtime.localizedName("technology",name)).join(" / ")}</strong></div>{/if}
       </section>
     {/if}
@@ -137,12 +137,12 @@
         {#if detail.uses_module_effects != null}<span>机器插件 / 插件塔</span><strong>{detail.uses_module_effects ? "接受" : "不接受"} / {detail.uses_beacon_effects !== false ? "接受" : "不接受"}</strong>{/if}
         {#if detail.fuel_categories?.length}<span>燃料类别</span><strong>{detail.fuel_categories.join(" / ")}</strong>{/if}
         {#if detail.burner_fuel_categories?.length}<span>可用燃料</span><strong>{detail.burner_fuel_categories.join(" / ")}</strong>{/if}
-        {#if detail.fluid_filter}<span>流体限制</span><strong>{runtime.localizedName("fluid",detail.fluid_filter)}</strong>{/if}
+        {#if detail.fluid_filter}<span>流体限制</span><strong><RichText text={runtime.richName("fluid",detail.fluid_filter)} /></strong>{/if}
         {#if detail.boiler_mode}<span>锅炉模式</span><strong>{detail.boiler_mode === "heat-fluid-inside" ? "加热流体" : "独立输出"}</strong>{/if}
-        {#if detail.quality_next}<span>下一品质</span><strong>{runtime.localizedName("quality",detail.quality_next)} · {compactNumber((detail.quality_next_probability ?? 0) * 100)}%</strong>{/if}
+        {#if detail.quality_next}<span>下一品质</span><strong><RichText text={runtime.richName("quality",detail.quality_next)} /> · {compactNumber((detail.quality_next_probability ?? 0) * 100)}%</strong>{/if}
       </div>
       {#each [{label:"燃烧产物",kind:"item",name:detail.burnt_result},{label:"变质产物",kind:"item",name:detail.spoil_result},{label:"种植实体",kind:"entity",name:detail.plant_result},...(detail.rocket_launch_products ?? []).map((name) => ({label:"火箭产物",kind:"item",name}))] as reference}
-        {#if reference.name}<div class="reference"><span>{reference.label}</span><Icon type={reference.kind} name={reference.name} size={20} /><strong>{runtime.localizedName(reference.kind,reference.name)}</strong></div>{/if}
+        {#if reference.name}<div class="reference"><span>{reference.label}</span><Icon type={reference.kind} name={reference.name} size={20} /><strong><RichText text={runtime.richName(reference.kind,reference.name)} /></strong></div>{/if}
       {/each}
       {#each [{label:"原料",items:detail.ingredients ?? [],output:false},{label:"产物",items:detail.results ?? [],output:true}] as section}
         {#if section.items.length}
@@ -151,7 +151,7 @@
               {#each section.items as entry, i (`${entry.kind}/${entry.name}#${i}`)}
                 <div class="flow-row" title={flowNotes(entry)}>
                   <Icon type={entry.kind} name={entry.name} size={22} />
-                  <div class="flow-copy"><strong>{nameOf(entry)}</strong>{#if flowNotes(entry)}<small>{flowNotes(entry)}</small>{/if}</div>
+                  <div class="flow-copy"><strong><RichText text={runtime.richName(entry.kind, entry.name)} /></strong>{#if flowNotes(entry)}<small>{flowNotes(entry)}</small>{/if}</div>
                   <div class="quantity"><strong>{#if section.output}{compactNumber(entry.amount - entry.productivity)} + {compactNumber(entry.productivity)}{:else}{compactNumber(entry.amount)}{/if}</strong>{#if entry.base_rate != null}<small>{compactNumber(entry.base_rate)}/s</small>{/if}</div>
                 </div>
               {/each}

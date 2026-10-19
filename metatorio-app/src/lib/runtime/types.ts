@@ -751,6 +751,7 @@ export interface IndexEntry {
   kind: string;
   name: string;
   /** 本地化显示名（`--dump-prototype-locale`；无翻译时为空串）。 */
+  /** Raw Factorio rich text. Use RichText for rendering, richTextPlain for attributes/search. */
   localized_name: string;
   group: string;
   subgroup: string;
@@ -808,6 +809,7 @@ export interface PrototypeDetail {
   calculation?: CalculationDetail;
   name: string;
   /** 本地化显示名（无翻译时为空串）。 */
+  /** Raw Factorio rich text; never HTML. */
   localized_name: string;
   kind: string;
   subgroup: string | null;

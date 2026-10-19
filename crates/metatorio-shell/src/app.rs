@@ -1687,8 +1687,15 @@ pub(crate) async fn delete_registered_context(
 /// 比较用的字符串**去掉这些字符；返回给调用方的 `name` / `localized_name`
 /// 仍是原型原名（要拿它去 dispatch）。
 pub(crate) fn normalize_for_match(value: &str) -> String {
-    value
+    crate::rich_text::plain_text(value)
         .chars()
+        .map(|ch| {
+            if ('\u{ff01}'..='\u{ff5e}').contains(&ch) {
+                char::from_u32(ch as u32 - 0xfee0).unwrap()
+            } else {
+                ch
+            }
+        })
         .flat_map(char::to_lowercase)
         .filter(|ch| !is_separator(*ch))
         .collect()
@@ -1703,7 +1710,34 @@ pub(crate) fn is_separator(ch: char) -> bool {
                 | '\u{2212}'               // 减号
                 | '\u{ff0d}'               // 全角连字符
                 | '\u{ff3f}' // 全角下划线
+                | '\u{00ad}' | '\u{200b}'..='\u{200d}' | '\u{2060}' | '\u{feff}'
         )
+}
+
+fn catalog_label_map(entries: &[IndexEntry]) -> HashMap<(&str, &str), &str> {
+    entries
+        .iter()
+        .map(|entry| {
+            (
+                (entry.kind.as_str(), entry.name.as_str()),
+                entry.localized_name.as_str(),
+            )
+        })
+        .collect()
+}
+
+fn normalized_catalog_label(value: &str, labels: &HashMap<(&str, &str), &str>) -> String {
+    normalize_for_match(&crate::rich_text::plain_text_with(value, |kind, name| {
+        let kind = if kind == "space-location" {
+            "planet"
+        } else {
+            kind
+        };
+        labels
+            .get(&(kind, name))
+            .filter(|label| !label.is_empty())
+            .map(|label| crate::rich_text::plain_text(label))
+    }))
 }
 
 /// typo 桶的 kind 优先级：口述一个名字时最可能指的是**物品/插件**，其次是流体，
@@ -1806,6 +1840,7 @@ pub(crate) fn resolve_index_entry(
     if needle.is_empty() {
         return ResolvedQuery::default();
     }
+    let labels = catalog_label_map(entries);
     let needle_chars: Vec<char> = needle.chars().collect();
     let resolved =
         |entry: &IndexEntry, matched_by: &'static str, distance: Option<usize>| ResolvedName {
@@ -1822,7 +1857,7 @@ pub(crate) fn resolve_index_entry(
     let mut partial: Vec<(u8, usize, ResolvedName)> = Vec::new();
     for entry in entries {
         let name = normalize_for_match(&entry.name);
-        let localized = normalize_for_match(&entry.localized_name);
+        let localized = normalized_catalog_label(&entry.localized_name, &labels);
         if name == needle {
             exact.push(resolved(entry, "name-exact", None));
             continue;
@@ -1839,12 +1874,14 @@ pub(crate) fn resolve_index_entry(
             (2, "localized-contains")
         } else if name.contains(&needle) {
             (3, "name-contains")
+        } else if normalize_for_match(&entry.localized_name).contains(&needle) {
+            (2, "localized-contains") // Embedded prototype IDs remain searchable aliases.
         } else {
             continue;
         };
         partial.push((
             rank,
-            entry.localized_name.chars().count(),
+            localized.chars().count(),
             resolved(entry, matched_by, None),
         ));
     }
@@ -1880,7 +1917,7 @@ pub(crate) fn resolve_index_entry(
         if max_distance > 0 {
             for entry in entries {
                 let name = normalize_for_match(&entry.name);
-                let localized = normalize_for_match(&entry.localized_name);
+                let localized = normalized_catalog_label(&entry.localized_name, &labels);
                 let mut best: Option<usize> = None;
                 for candidate in [&name, &localized] {
                     // **按字符**比较长度，不能拿 `str::len()`（UTF-8 字节数）去比
@@ -1901,7 +1938,7 @@ pub(crate) fn resolve_index_entry(
                         (
                             distance,
                             typo_kind_rank(&entry.kind),
-                            entry.localized_name.chars().count(),
+                            localized.chars().count(),
                         ),
                         resolved(entry, "typo", Some(distance)),
                     ));
@@ -1958,22 +1995,35 @@ pub(crate) fn filter_index_entries(
     kind: Option<&str>,
     needle: Option<&str>,
 ) -> Vec<IndexEntry> {
+    if needle.is_some_and(|value| !value.trim().is_empty() && normalize_for_match(value).is_empty())
+    {
+        return Vec::new();
+    }
     let kind = kind
         .map(|kind| kind.trim().to_lowercase())
         .filter(|kind| !kind.is_empty());
     let needle = needle
         .map(normalize_for_match)
         .filter(|needle| !needle.is_empty());
+    if needle.is_none() {
+        return entries
+            .into_iter()
+            .filter(|entry| kind.as_deref().is_none_or(|kind| entry.kind == kind))
+            .collect();
+    }
+    let labels = catalog_label_map(&entries);
     entries
-        .into_iter()
+        .iter()
         .filter(|entry| kind.as_deref().is_none_or(|kind| entry.kind == kind))
         .filter(|entry| match &needle {
             Some(needle) => {
                 normalize_for_match(&entry.name).contains(needle)
                     || normalize_for_match(&entry.localized_name).contains(needle)
+                    || normalized_catalog_label(&entry.localized_name, &labels).contains(needle)
             }
             None => true,
         })
+        .cloned()
         .collect()
 }
 
@@ -4811,6 +4861,41 @@ mod tests {
     /// （群里说的「铁板」落到 `iron-plate`）。两者共用一套匹配/排序口径，因此这里
     /// 逐条钉住：精确优先、跨组同名都返回、模糊按「本地化前缀 → 原型前缀 →
     /// 本地化子串 → 原型子串」排序、大小写不敏感、空查询不匹配、截断要如实上报。
+    #[test]
+    fn rich_text_search_uses_visible_words_and_keeps_raw_labels() {
+        let raw = "[color=#FF4040]量[/color][color=#FFA020]子[/color]点催化剂";
+        let entries = vec![
+            index_entry("item", "quantum-dot-catalyst", raw),
+            index_entry("item", "iron-plate", "铁板"),
+            index_entry("item", "reference", "[item=iron-plate]催化剂"),
+        ];
+        for query in ["量子点催化剂", "[font=default-bold]量子点催化剂[/font]"] {
+            let result = resolve_index_entry(&entries, query, 10);
+            assert_eq!(result.exact.len(), 1);
+            assert_eq!(result.exact[0].localized_name, raw);
+            assert_eq!(result.exact[0].name, "quantum-dot-catalyst");
+        }
+        for query in ["量子点", "ＱＵＡＮＴＵＭ＿ＤＯＴ", "铁板催化剂"] {
+            assert_eq!(
+                filter_index_entries(entries.clone(), Some("item"), Some(query)).len(),
+                1,
+                "{query}"
+            );
+        }
+        assert_eq!(
+            resolve_index_entry(&entries, "铁板催化剂", 10).exact[0].name,
+            "reference"
+        );
+        let typo = resolve_index_entry(&entries, "量子点催化济", 10);
+        assert_eq!(typo.typo_suggestion.unwrap().name, "quantum-dot-catalyst");
+        for query in ["FF4040", "FFA020", "[color=red][/color]"] {
+            assert!(
+                filter_index_entries(entries.clone(), None, Some(query)).is_empty(),
+                "{query}"
+            );
+        }
+    }
+
     #[test]
     fn resolve_index_entry_handles_both_directions() {
         let entries = vec![

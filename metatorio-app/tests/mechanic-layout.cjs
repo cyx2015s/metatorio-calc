@@ -116,8 +116,8 @@ async function seed(page, count) {
 
 }
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-async function waitFor(check) {
-  for (let i = 0; i < 100; i++) { if (await check()) return; await pause(50); }
+async function waitFor(check, attempts = 100) {
+  for (let i = 0; i < attempts; i++) { if (await check()) return; await pause(50); }
   throw Error("Timed out waiting for UI state");
 }
 async function checkRows(page) {
@@ -352,4 +352,5 @@ async function run() {
     server.kill();
   }
 }
-run().catch(error=>{console.error(error);process.exitCode=1});
+if (require.main === module) run().catch(error=>{console.error(error);process.exitCode=1});
+module.exports = { seed, waitFor };

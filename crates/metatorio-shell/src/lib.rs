@@ -10,6 +10,7 @@ pub mod host;
 pub mod mcp;
 pub mod options;
 pub mod prototype_calculation;
+mod rich_text;
 pub mod solve_jobs;
 pub mod update;
 

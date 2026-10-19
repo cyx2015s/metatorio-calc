@@ -3,6 +3,7 @@
   // 虚拟流（电/热/燃料/火箭运力）用 /static/icons 下的合成图标；
   // 都没有时回退到首字母占位块。
   import { runtime } from "$lib/runtime/store.svelte.ts";
+  import { richTextPlain } from "$lib/rich-text";
 
   import { syntheticIconUrls } from "./icon-types";
 
@@ -12,6 +13,7 @@
     size = 28,
     title,
     bare = false,
+    fallbackLabel,
   }: {
     type?: string;
     name?: string;
@@ -19,6 +21,8 @@
     title?: string;
     /** 无底色（品质图标等叠加场景）：背景透明、去掉圆角底。 */
     bare?: boolean;
+    /** Inline rich-text references retain readable content if no icon exists. */
+    fallbackLabel?: string;
   } = $props();
 
   let url = $state<string | null>(null);
@@ -28,7 +32,7 @@
   // 统一转成字符串，占位符与 alt/title 都使用这个安全值。
   let label = $derived(typeof name === "string" ? name : name == null ? "" : String(name));
   // 没有显式 tooltip 时回退到名称，保证每个图标至少有可辨识的悬停信息。
-  let tip = $derived(title || label || undefined);
+  let tip = $derived(richTextPlain(title || label) || undefined);
 
   $effect(() => {
     const ctxId = runtime.effectiveContextId;
@@ -68,6 +72,8 @@
     style={`width:${size}px;height:${size}px`}
     draggable="false"
   />
+{:else if fallbackLabel}
+  <span class="text-fallback" title={tip}>{fallbackLabel}</span>
 {:else}
   <span
     class="icon placeholder"
@@ -78,6 +84,7 @@
 {/if}
 
 <style>
+  .text-fallback { font: inherit; white-space: normal; overflow-wrap: anywhere; min-width: 0; }
   .icon {
     display: inline-block;
     flex: 0 0 auto;
