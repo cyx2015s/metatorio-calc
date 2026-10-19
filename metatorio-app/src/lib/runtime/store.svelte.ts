@@ -1,5 +1,6 @@
 import { IconCache } from "./icon-cache";
 import { richTextPlain } from "$lib/rich-text";
+import { lookupName } from "$lib/display-labels";
 // Svelte 5 rune-based store bridging the frontend to the Tauri runtime.
 //
 // `runtime` is a singleton: the UI reads its $state fields reactively and
@@ -779,36 +780,33 @@ class RuntimeStore {
   /** 本地化显示名（无翻译/未加载索引时回退内部 id）。O(1) Map 查找，避免大
    * 目录下每次重渲染对 entries 做 O(N) 线性 .find。 */
   private localizedNameMap = new Map<string, string>();
-  private localizedNameContext = "";
+  private localizedNameIndex: CatalogIndex | null = null;
 
   private ensureLocalizedNameMap(): void {
     const ci = this.catalogIndex;
     if (!ci) {
       this.localizedNameMap.clear();
-      this.localizedNameContext = "";
+      this.localizedNameIndex = null;
       return;
     }
-    // 目录/上下文变化时重建一次；按 context_id 判断是否需要重建。
-    const key = ci.context_id;
-    if (key === this.localizedNameContext) return;
+    // 同一上下文重新加载翻译时也必须重建，不能只比较 context_id。
+    if (ci === this.localizedNameIndex) return;
     const map = new Map<string, string>();
     for (const entry of ci.entries) {
       map.set(`${entry.kind}/${entry.name}`, entry.localized_name);
     }
-    // 非条目的名字（物品大组 `item-group/<id>`）：选择器的分组标题要用它。
+    // 非条目的名字：分组、类别、表面属性等，保留完整命名空间。
     for (const [name, localized] of Object.entries(ci.names ?? {})) {
       map.set(name, localized);
     }
     this.localizedNameMap = map;
-    this.localizedNameContext = key;
+    this.localizedNameIndex = ci;
   }
 
   /** Raw Factorio markup, for RichText only. IPC/prototype IDs remain unchanged. */
   richName(kind: string, name: string): string {
     this.ensureLocalizedNameMap();
-    const keyKind = kind === "space-location" ? "planet" : kind;
-    const localized = this.localizedNameMap.get(`${keyKind}/${name}`);
-    return localized || name;
+    return lookupName(this.localizedNameMap, kind, name);
   }
 
   /** Plain visible label, safe for titles, aria labels and ordinary controls. */
@@ -820,7 +818,7 @@ class RuntimeStore {
   clearCatalogCache(): void {
     this.catalogIndex = null;
     this.localizedNameMap.clear();
-    this.localizedNameContext = "";
+    this.localizedNameIndex = null;
     this.detailCache.clear();
     this.detailGeneration++;
     this.detailRequests.clear();

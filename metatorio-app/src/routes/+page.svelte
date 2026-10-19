@@ -1,5 +1,6 @@
 <script lang="ts">
   import RichText from "$lib/ui/RichText.svelte";
+  import { flowName, describeFlow, mechanicPrototype } from "$lib/display-labels";
   // Metatorio 主界面：紧凑布局，圆角卡片分区；游戏内物品一律图标按钮，
   // 一般操作一律文字按钮。
   import { onMount } from "svelte";
@@ -435,33 +436,15 @@
   function groupTitle(entries: import("$lib/runtime/types").MechanicEntry[]): string {
     const first = entries[0]?.mechanic;
     if (!first) return "";
-    const name =
-      first.recipe?.id ??
-      first.item?.id ??
-      first.seed?.id ??
-      first.resource ??
-      first.generator?.id ??
-      first.boiler?.id ??
-      first.reactor?.id ??
-      first.fluid ??
-      "";
-    const kind = first.type;
-    if (kind === "recipe") return runtime.localizedName("recipe", name) || name;
-    if (kind === "mining") return runtime.localizedName("resource", name) || name;
-    if (kind === "generator" || kind === "boiler" || kind === "reactor") {
-      return runtime.localizedName("entity", name) || name;
-    }
-    if (kind === "fluid-fuel" || kind === "fluid-heat") {
-      return runtime.localizedName("fluid", name) || name;
-    }
-    return runtime.localizedName("item", name) || name;
+    const ref = mechanicPrototype(first);
+    return runtime.localizedName(ref.kind, ref.name);
   }
 
   /** 组的机器名（配方/采矿有机器；其余无）。 */
   function groupMachine(entries: import("$lib/runtime/types").MechanicEntry[]): string {
     const machine = entries[0]?.mechanic.machine?.id;
     if (!machine) return "";
-    return runtime.localizedName("machine", machine) || machine;
+    return runtime.localizedName("entity", machine) || machine;
   }
 
   /** 插件塔原型的插件槽数（getDetail 异步；未知时默认 2，与 Factorio 一致）。 */
@@ -646,28 +629,7 @@
 
   /** 流的显示名：物品/流体/实体优先本地化名，否则内部 id。 */
   function flowLabel(flow: DualVar, rich = false): string {
-    if (typeof flow === "object" && "VirtualScience" in flow) return `虚拟科研（${rich ? runtime.richName("item", String(flow.VirtualScience)) : runtime.localizedName("item", String(flow.VirtualScience))}）`;
-    const icon = flowIcon(flow);
-    if (icon.type === "item" || icon.type === "fluid" || icon.type === "entity") {
-      return rich ? runtime.richName(icon.type, icon.name) : runtime.localizedName(icon.type, icon.name);
-    }
-    // 抽象能量流的中文名
-    if (typeof flow === "string") {
-      if (flow === "Electricity") return "电力";
-      if (flow === "Heat") return "热量";
-      if (flow === "RocketSlotCapacity") return "火箭运力（槽位）";
-      if (flow === "RocketWeightCapacity") return "火箭运力（重量）";
-    }
-    if (flow !== null && typeof flow === "object") {
-      if ("ItemFuel" in flow || "ItemFuelSupply" in flow) return "物品燃料";
-      if ("FluidFuel" in flow) return "流体燃料";
-      if ("FluidHeat" in flow) return "流体热量";
-      if ("Pollution" in flow) {
-        const pollution = (flow as { Pollution: { name: string } }).Pollution;
-        return `污染（${pollution.name}）`;
-      }
-    }
-    return dualVarLabel(flow);
+    return flowName(flow, (kind, name) => rich ? runtime.richName(kind, name) : runtime.localizedName(kind, name));
   }
 
   /** 抽象能量流的第二行说明（燃料类别/流体名）；无则空串。 */
@@ -678,7 +640,7 @@
           ItemFuel?: { category: string[] };
           ItemFuelSupply?: { category: string[] };
         };
-        return (inner.ItemFuel ?? inner.ItemFuelSupply)?.category.join(" / ") ?? "";
+        return (inner.ItemFuel ?? inner.ItemFuelSupply)?.category.map(id=>runtime.localizedName("fuel-category",id)).join(" / ") ?? "";
       }
       if ("FluidFuel" in flow || "FluidHeat" in flow) {
         const inner = flow as { FluidFuel?: { filter: string }; FluidHeat?: { filter: string } };
@@ -1736,7 +1698,7 @@
                   onClick={() => editTarget(target)}
                   onContextMenu={() => openSuggestions(target.flow)}
                 />
-                <span class="row-name" title={dualVarLabel(target.flow)}>
+                <span class="row-name" title={describeFlow(target.flow, (kind,name)=>runtime.localizedName(kind,name))}>
                   <span class="flow-name"><RichText text={flowLabel(target.flow, true)} /></span>
                 </span>
                 {#if fluidRange}
@@ -1849,7 +1811,7 @@
                   title={`外部输入：${flowLabel(input.flow)} · 点击更改`}
                   onClick={() => editExternalInput(input)}
                 />
-                <span class="row-name" title={dualVarLabel(input.flow)}><RichText text={flowLabel(input.flow, true)} /></span>
+                <span class="row-name" title={describeFlow(input.flow, (kind,name)=>runtime.localizedName(kind,name))}><RichText text={flowLabel(input.flow, true)} /></span>
                 {#if fluidRange}
                   <!-- 与目标行同一套语义：区间内任何温度的外部输入都算满足。
                        外部输入本来就是"从外面买"，指定可接受温度区间比钉死一个温度更准。 -->
@@ -2046,7 +2008,7 @@
                           title={`表达式项：${flowLabel(term.flow)} · 点击更换流`}
                         />
                       </button>
-                      <span class="row-name" title={dualVarLabel(term.flow)}><RichText text={flowLabel(term.flow, true)} /></span>
+                      <span class="row-name" title={describeFlow(term.flow, (kind,name)=>runtime.localizedName(kind,name))}><RichText text={flowLabel(term.flow, true)} /></span>
                       <input
                         class="num"
                         type="number"
@@ -2134,9 +2096,9 @@
                 runtime.setQualityLimit(value === "" ? null : value).catch(() => {});
               }}
             >
-              <option value="">normal（当前上限）</option>
+              <option value="">{runtime.localizedName("quality", "normal")}（当前上限）</option>
               {#each runtime.catalogIndex?.qualities ?? [] as q (q)}
-                <option value={q}>{q}</option>
+                <option value={q}>{runtime.localizedName("quality", q)}</option>
               {/each}
             </select>
           </div>
@@ -2168,7 +2130,7 @@
                     detailKind={accessibleKind(milestone.node)}
                   />
                   <span class="prefs-name">
-                    {runtime.localizedName(accessibleKind(milestone.node), accessibleName(milestone.node))}
+                    <RichText text={typeof milestone.node === "string" ? flowName(milestone.node, (kind,name)=>runtime.richName(kind,name)) : runtime.richName(accessibleKind(milestone.node), accessibleName(milestone.node))} />
                   </span>
                   <label class="check" title={milestone.unlocked ? "点击锁定该里程碑及其依赖" : "点击解锁该里程碑"}>
                     <input
@@ -2653,7 +2615,7 @@
                   onClick={() => openSuggestions(balance.flow)}
                   onContextMenu={() => openSuggestions(balance.flow)}
                 />
-                <span class="row-name" title={dualVarLabel(balance.flow)}>
+                <span class="row-name" title={describeFlow(balance.flow, (kind,name)=>runtime.localizedName(kind,name))}>
                   <span class="flow-name"><RichText text={flowLabel(balance.flow, true)} /></span>
                   {#if flowLabelSub(balance.flow)}
                     <span class="flow-sub">{flowLabelSub(balance.flow)}</span>
@@ -2671,10 +2633,10 @@
           <div class="err-box">
             <div><strong>未求解</strong>：{status.description}</div>
             {#if status.no_provider.length > 0}
-              <div>无供给：{status.no_provider.map(dualVarLabel).join(", ")}</div>
+              <div>无供给：{status.no_provider.map(flow => describeFlow(flow, (kind,name)=>runtime.localizedName(kind,name))).join(", ")}</div>
             {/if}
             {#if status.no_consumer.length > 0}
-              <div>无消耗：{status.no_consumer.map(dualVarLabel).join(", ")}</div>
+              <div>无消耗：{status.no_consumer.map(flow => describeFlow(flow, (kind,name)=>runtime.localizedName(kind,name))).join(", ")}</div>
             {/if}
           </div>
         {:else}
@@ -2705,11 +2667,11 @@
 
         <div class="data-actions">
           <button class="btn primary" onclick={() => { dataOpen = false; openLoadGame(); }}>加载游戏数据…</button>
-          <button
+          <!-- <button
             class="btn"
             title="载入应用内置的示例数据（若当前构建包含）"
             onclick={() => runtime.loadDemoData().catch(() => {})}
-          >载入内置示例</button>
+          >载入内置示例</button> -->
         </div>
 
         {#if project && project.context_id && !runtime.contexts.some((c) => c.id === project.context_id)}

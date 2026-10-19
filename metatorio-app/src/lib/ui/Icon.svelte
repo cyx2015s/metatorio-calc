@@ -32,7 +32,8 @@
   // 统一转成字符串，占位符与 alt/title 都使用这个安全值。
   let label = $derived(typeof name === "string" ? name : name == null ? "" : String(name));
   // 没有显式 tooltip 时回退到名称，保证每个图标至少有可辨识的悬停信息。
-  let tip = $derived(richTextPlain(title || label) || undefined);
+  let displayLabel = $derived(runtime.localizedName(type, label));
+  let tip = $derived(richTextPlain(title || displayLabel) || undefined);
 
   $effect(() => {
     const ctxId = runtime.effectiveContextId;
@@ -67,7 +68,7 @@
     class:bare={bare || type === "quality"}
     src={url}
     onerror={() => { url = null; }}
-    alt={label}
+    alt={displayLabel}
     title={tip}
     style={`width:${size}px;height:${size}px`}
     draggable="false"

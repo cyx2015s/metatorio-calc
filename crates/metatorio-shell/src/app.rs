@@ -506,8 +506,7 @@ pub struct CatalogIndex {
     /// 可用品质（normal 起，按 order）。
     pub qualities: Vec<String>,
     /// **不在 `entries` 里的本地化名**：`"<section>/<name>" → 中文名`。
-    /// 目前装的是物品大组（`item-group/<id>`）——选择器的大组分隔用它的图标与名字显示，
-    /// 而大组本身不是一个可选的目录条目。
+    /// 包含分组、燃料/插件/配方/资源类别、表面属性等辅助原型，严格保留所属命名空间。
     pub names: std::collections::BTreeMap<String, String>,
     pub entries: Vec<IndexEntry>,
 }
@@ -2067,29 +2066,39 @@ pub(crate) async fn catalog_index_for(
     tokio::task::spawn_blocking(move || CatalogIndex {
         context_id: context_id.clone(),
         qualities: store.quality_order().to_vec(),
-        names: item_group_names(&store, &locale),
+        names: auxiliary_names(&locale),
         entries: catalog_index_from_store(&store, &locale),
     })
     .await
     .map_err(|error| error.to_string())
 }
 
-/// 物品大组的本地化名（`"item-group/<id>" → 中文名`）：大组不是可选的目录条目，
-/// 但选择器的分组标题要显示它（配 `item-group/<id>` 图标）。
-pub(crate) fn item_group_names(
-    store: &PrototypeStore,
+/// 非目录条目的显示名称。严格保留 section，不能套用 entity/item 跨组回退。
+pub(crate) fn auxiliary_names(
     locale: &HashMap<String, String>,
 ) -> std::collections::BTreeMap<String, String> {
-    let mut names = std::collections::BTreeMap::new();
-    if let Some(groups) = store.groups.get(&PrototypeGroup::ItemGroup) {
-        for name in groups.keys() {
-            let localized = localized_name(locale, "item-group", name);
-            if !localized.is_empty() {
-                names.insert(format!("item-group/{name}"), localized);
-            }
-        }
-    }
-    names
+    locale
+        .iter()
+        .filter(|(key, value)| {
+            !value.is_empty()
+                && key.split_once('/').is_some_and(|(section, _)| {
+                    matches!(
+                        section,
+                        "item-group"
+                            | "item-subgroup"
+                            | "fuel-category"
+                            | "module-category"
+                            | "recipe-category"
+                            | "resource-category"
+                            | "surface-property"
+                            | "airborne-pollutant"
+                            | "space-location"
+                            | "virtual-signal"
+                    )
+                })
+        })
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect()
 }
 
 /// 一条流（物品/流体）的候选机制建议：GUI 的 `suggest` 命令与 MCP 的 `suggest`
@@ -4095,7 +4104,14 @@ pub fn prototype_detail(
         detail.surface_conditions = recipe
             .surface_conditions
             .iter()
-            .map(surface_condition_text)
+            .map(|condition| {
+                let mut display = condition.clone();
+                if let Some(label) = locale.get(&format!("surface-property/{}", condition.property))
+                {
+                    display.property = crate::rich_text::plain_text(label);
+                }
+                surface_condition_text(&display)
+            })
             .collect();
         detail.ingredients = recipe.ingredients.iter().map(ingredient_flow).collect();
         detail.results = recipe.results.iter().map(product_flow).collect();
@@ -4857,10 +4873,78 @@ mod tests {
         }
     }
 
-    /// 名字解析的两个方向：id → 本地化名（把求解结果翻译成人话）、口述名 → id
-    /// （群里说的「铁板」落到 `iron-plate`）。两者共用一套匹配/排序口径，因此这里
-    /// 逐条钉住：精确优先、跨组同名都返回、模糊按「本地化前缀 → 原型前缀 →
-    /// 本地化子串 → 原型子串」排序、大小写不敏感、空查询不匹配、截断要如实上报。
+    #[test]
+    fn auxiliary_names_keep_categories_separate_and_only_export_display_sections() {
+        let locale: HashMap<String, String> = [
+            ("item-group/logistics", "物流"),
+            ("item-subgroup/belts", "传送带"),
+            ("fuel-category/chemical", "[color=red]化学燃料[/color]"),
+            ("module-category/speed", "速度"),
+            ("recipe-category/crafting", "制造"),
+            ("resource-category/solid", "固体矿物"),
+            ("surface-property/pressure", "气压"),
+            ("space-location/edge", "边缘"),
+            ("airborne-pollutant/pollution", "污染"),
+            ("virtual-signal/signal-A", "信号 A"),
+            ("item/chemical", "同名物品"),
+            ("unrelated/secret", "其他文本"),
+            ("fuel-category/empty", ""),
+        ]
+        .into_iter()
+        .map(|(key, value)| (key.into(), value.into()))
+        .collect();
+        let names = auxiliary_names(&locale);
+        assert_eq!(names.len(), 10);
+        assert_eq!(
+            names["fuel-category/chemical"],
+            "[color=red]化学燃料[/color]"
+        );
+        assert_eq!(names["item-subgroup/belts"], "传送带");
+        assert!(!names.contains_key("item/chemical"));
+        assert!(!names.contains_key("fuel-category/empty"));
+    }
+
+    #[test]
+    fn recipe_condition_labels_are_localized_without_changing_prototype_constraints() {
+        let dump = serde_json::json!({"recipe": {"test": {
+            "surface_conditions": [{"property": "pressure", "min": 10}, {"property": "custom", "max": 50}]
+        }}});
+        let state = AppState::default();
+        state
+            .runtime
+            .lock()
+            .unwrap()
+            .install_context("test".into(), PrototypeStore::load(&dump).unwrap());
+        state.locales.lock().unwrap().insert(
+            "test".into(),
+            HashMap::from([
+                (
+                    "surface-property/pressure".into(),
+                    "[color=red]气压[/color]".into(),
+                ),
+                ("item/custom".into(), "同名物品".into()),
+            ]),
+        );
+        let detail = prototype_detail(&state, "test".into(), "recipe".into(), "test".into())
+            .unwrap()
+            .unwrap();
+        assert_eq!(detail.surface_conditions, ["气压: ≥ 10", "custom: ≤ 50"]);
+        let runtime = state.runtime.lock().unwrap();
+        let record = runtime
+            .context_store_by_id("test")
+            .unwrap()
+            .get(PrototypeGroup::Recipe, "test")
+            .unwrap();
+        assert_eq!(
+            record
+                .component::<RecipeComponent>()
+                .unwrap()
+                .surface_conditions[0]
+                .property,
+            "pressure"
+        );
+    }
+
     #[test]
     fn rich_text_search_uses_visible_words_and_keeps_raw_labels() {
         let raw = "[color=#FF4040]量[/color][color=#FFA020]子[/color]点催化剂";
@@ -4896,6 +4980,7 @@ mod tests {
         }
     }
 
+    /// 名字解析的两个方向共用排序规则：精确优先，跨组同名保留，截断如实上报。
     #[test]
     fn resolve_index_entry_handles_both_directions() {
         let entries = vec![

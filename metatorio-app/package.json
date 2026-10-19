@@ -7,6 +7,8 @@
     "test:icons": "node --test tests/icons.test.mjs",
     "test:rich-text": "node --test tests/rich-text.test.mjs",
     "test:rich-text-browser": "node tests/rich-text-browser.cjs",
+    "test:labels": "node --test tests/display-labels.test.mjs",
+    "test:labels-browser": "node tests/localized-labels-browser.cjs",
     "dev": "vite dev",
     "build": "vite build",
     "preview": "vite preview",

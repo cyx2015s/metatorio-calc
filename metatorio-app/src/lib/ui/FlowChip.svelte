@@ -1,5 +1,6 @@
 <script lang="ts">
   import RichText from "./RichText.svelte";
+  import { flowName } from "$lib/display-labels";
   // 统一流展示 chip：机制卡/求解结果共用。
   // 图标用正常大小的 HoverIcon（悬停详情 + 品质角标），数量带 +- 号，
   // 能量流用功率文本（W/kW/MW）。
@@ -108,14 +109,8 @@
   }
 
   const meta = $derived(flowMeta(flow));
-  const displayName = $derived(
-    typeof flow === "object" && "VirtualScience" in flow
-      ? `虚拟科研（${runtime.localizedName("item", String(flow.VirtualScience))}）` :
-    meta.type === "item" || meta.type === "fluid" || meta.type === "entity"
-      ? runtime.localizedName(meta.type, meta.name)
-      : meta.name,
-  );
-  const richDisplayName = $derived(typeof flow === "object" && "VirtualScience" in flow ? `虚拟科研（${runtime.richName("item", String(flow.VirtualScience))}）` : ["item", "fluid", "entity"].includes(meta.type) ? runtime.richName(meta.type, meta.name) : meta.name);
+  const displayName = $derived(flowName(flow, (kind,name)=>runtime.localizedName(kind,name)));
+  const richDisplayName = $derived(flowName(flow, (kind,name)=>runtime.richName(kind,name)));
   /** tooltip 用：能量流显示功率文本，否则显示刻度缩放值。 */
   const tipText = $derived(
     isEnergyFlow(flow)

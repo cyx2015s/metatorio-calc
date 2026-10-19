@@ -3,7 +3,8 @@
   import { iconTypeForKind } from "./icon-types";
   import { compactNumber } from "$lib/format";
   import { detailStats, formatStat, statLabels } from "./hover-model";
-  import { accessibleKind, accessibleKindFor, accessibleName, dualVarLabel, type DualVar, type FlowAmount, type PrototypeDetail } from "$lib/runtime/types";
+  import { accessibleKind, accessibleKindFor, accessibleName, type DualVar, type FlowAmount, type PrototypeDetail } from "$lib/runtime/types";
+  import { flowName } from "$lib/display-labels";
   import Icon from "./Icon.svelte";
   import RichText from "./RichText.svelte";
 
@@ -12,7 +13,6 @@
     flow?: DualVar; quality?: string; flowRate?: number; rateBasis?: "solution" | "unit"; onEnter?: () => void; onLeave?: () => void;
   } = $props();
   const labels: Record<string, string> = {item:"物品",fluid:"流体",recipe:"配方",module:"插件",machine:"制造机","mining-machine":"采矿机","offshore-pump":"抽水机",generator:"发电机",boiler:"锅炉",reactor:"反应堆",beacon:"插件塔",resource:"资源",entity:"实体",technology:"科技",planet:"星球",surface:"地表",quality:"品质",tile:"地格","solar-panel":"太阳能板",accumulator:"蓄电器"};
-  const flowLabels: Record<string,string> = {Electricity:"电力",Heat:"热量",RocketSlotCapacity:"火箭槽位运力",RocketWeightCapacity:"火箭重量运力",ItemFuel:"物品燃料",ItemFuelSupply:"物品燃料供给",FluidFuel:"流体燃料",FluidHeat:"流体热量",Pollution:"污染",Custom:"自定义流"};
   const flowHelp: Record<string,string> = {
     Electricity:"电力按功率（W = J/s）结算，不随项目时间刻度改变。", Heat:"热量按热功率（W = J/s）配平。",
     ItemFuel:"抽象燃料需求按热值结算，并要求燃料类别匹配。", ItemFuelSupply:"抽象燃料供给按热值与匹配类别参与配平，不是具体物品数量。",
@@ -23,7 +23,7 @@
   let flowKey = $derived(typeof flow === "string" ? flow : flow ? Object.keys(flow)[0] : "");
   let inner = $derived(flow && typeof flow === "object" ? (flow as Record<string, unknown>)[flowKey] as Record<string, unknown> | string : undefined);
   let virtualScience = $derived(flowKey === "VirtualScience");
-  let heading = $derived(virtualScience ? `虚拟科研 · ${runtime.richName("item", String(inner))}` : detail?.localized_name || detail?.name || flowLabels[flowKey] || dualVarLabel(flow ?? "Unknown"));
+  let heading = $derived(virtualScience ? `虚拟科研 · ${runtime.richName("item", String(inner))}` : detail?.localized_name || detail?.name || flowName(flow ?? "Unknown", (kind, name) => runtime.richName(kind, name)));
   let iconName = $derived(detail?.name || (virtualScience ? String(inner) : flowKey === "ItemFuelSupply" ? "ItemFuel" : flowKey));
   let iconType = $derived(detail ? iconTypeForKind(detail.kind) : virtualScience ? "item" : "flow");
   let stats = $derived(detailStats(detail, quality));
@@ -103,9 +103,9 @@
     {#if inner && typeof inner === "object"}
       <div class="facts">
         {#if "temperature" in inner}<span>当前流温度</span><strong>{(inner.temperature as number[])[0] === (inner.temperature as number[])[1] ? (inner.temperature as number[])[0] : (inner.temperature as number[]).join("～")}℃</strong>{/if}
-        {#if "category" in inner}<span>燃料类别</span><strong>{(inner.category as string[]).join(" / ") || "任意"}</strong>{/if}
+        {#if "category" in inner}<span>燃料类别</span><strong><RichText text={(inner.category as string[]).map(id=>runtime.richName("fuel-category",id)).join(" / ") || "任意"} /></strong>{/if}
         {#if "filter" in inner}<span>流体限制</span><strong>{inner.filter ? runtime.localizedName("fluid",String(inner.filter)) : "任意流体"}</strong>{/if}
-        {#if "name" in inner && ["Pollution","Custom"].includes(flowKey)}<span>流名称</span><strong>{String(inner.name)}</strong>{/if}
+        {#if "name" in inner && ["Pollution","Custom"].includes(flowKey)}<span>流名称</span><strong><RichText text={flowKey === "Pollution" ? runtime.richName("airborne-pollutant",String(inner.name)) : String(inner.name)} /></strong>{/if}
       </div>
     {/if}
     {#if tile}
@@ -115,7 +115,7 @@
       </section>
     {/if}
     {#if properties.length}
-      <section><h4>表面属性<small>用于环境条件匹配的原型值</small></h4><div class="stats">{#each properties as [key,value]}<div><span>{propertyLabels[key] || key}</span><strong>{compactNumber(value)}</strong></div>{/each}</div></section>
+      <section><h4>表面属性<small>用于环境条件匹配的原型值</small></h4><div class="stats">{#each properties as [key,value]}<div><span><RichText text={runtime.richName("surface-property",key) !== key ? runtime.richName("surface-property",key) : propertyLabels[key] || key} /></span><strong>{compactNumber(value)}</strong></div>{/each}</div></section>
     {/if}
     {#if research}
       <section><h4>科研需求<small>未计实验室速度、品质与产能</small></h4>
@@ -131,12 +131,12 @@
     {/if}
     {#if detail}
       <div class="facts">
-        {#if detail.categories?.length}<span>类别</span><strong>{detail.categories.join(" / ")}</strong>{/if}
+        {#if detail.categories?.length}<span>类别</span><strong><RichText text={detail.categories.map(id=>runtime.richName(kind === "resource" || kind === "mining-machine" ? "resource-category" : "recipe-category", id)).join(" / ")} /></strong>{/if}
         {#if detail.surface_conditions?.length}<span>表面条件</span><strong>{detail.surface_conditions.join("；")}</strong>{/if}
-        {#if detail.allowed_module_categories?.length}<span>允许插件类别</span><strong>{detail.allowed_module_categories.join(" / ")}</strong>{/if}
+        {#if detail.allowed_module_categories?.length}<span>允许插件类别</span><strong><RichText text={detail.allowed_module_categories.map(id=>runtime.richName("module-category",id)).join(" / ")} /></strong>{/if}
         {#if detail.uses_module_effects != null}<span>机器插件 / 插件塔</span><strong>{detail.uses_module_effects ? "接受" : "不接受"} / {detail.uses_beacon_effects !== false ? "接受" : "不接受"}</strong>{/if}
-        {#if detail.fuel_categories?.length}<span>燃料类别</span><strong>{detail.fuel_categories.join(" / ")}</strong>{/if}
-        {#if detail.burner_fuel_categories?.length}<span>可用燃料</span><strong>{detail.burner_fuel_categories.join(" / ")}</strong>{/if}
+        {#if detail.fuel_categories?.length}<span>燃料类别</span><strong><RichText text={detail.fuel_categories.map(id=>runtime.richName("fuel-category",id)).join(" / ")} /></strong>{/if}
+        {#if detail.burner_fuel_categories?.length}<span>可用燃料</span><strong><RichText text={detail.burner_fuel_categories.map(id=>runtime.richName("fuel-category",id)).join(" / ")} /></strong>{/if}
         {#if detail.fluid_filter}<span>流体限制</span><strong><RichText text={runtime.richName("fluid",detail.fluid_filter)} /></strong>{/if}
         {#if detail.boiler_mode}<span>锅炉模式</span><strong>{detail.boiler_mode === "heat-fluid-inside" ? "加热流体" : "独立输出"}</strong>{/if}
         {#if detail.quality_next}<span>下一品质</span><strong><RichText text={runtime.richName("quality",detail.quality_next)} /> · {compactNumber((detail.quality_next_probability ?? 0) * 100)}%</strong>{/if}

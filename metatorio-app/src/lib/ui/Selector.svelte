@@ -493,7 +493,7 @@
             <button
               class:active={quality === q}
               class="q-chip"
-              title={q}
+              title={runtime.localizedName("quality", q)}
               onclick={() => pickQuality(q)}
             >
               <HoverIcon type="quality" name={q} size={22} detailKind="quality" title={runtime.localizedName("quality", q)} />
@@ -579,7 +579,7 @@
               {/if}
               {#if entry.localized_name}<span class="row-sub">{entry.name}</span>{/if}
               {#if entry.subgroup && !entry.localized_name}
-                <span class="row-sub">{entry.subgroup}</span>
+                <span class="row-sub"><RichText text={runtime.richName("item-subgroup", entry.subgroup)} /></span>
               {/if}
             </button>
           {/each}
@@ -587,7 +587,7 @@
       {:else}
         {#each bySubgroup as section (section.subgroup)}
           <div class="subgroup">
-            <div class="sg-label">{section.subgroup}</div>
+            <div class="sg-label"><RichText text={runtime.richName("item-subgroup", section.subgroup)} /></div>
             <div class="sg-items">
               {#each section.items as entry (entry.kind + "/" + entry.name)}
                 <button
