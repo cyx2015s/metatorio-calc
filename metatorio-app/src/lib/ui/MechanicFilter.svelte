@@ -1,64 +1,27 @@
 <script lang="ts">
-  import { untrack } from "svelte";
   import { runtime } from "$lib/runtime/store.svelte.ts";
   import { presentFlow } from "$lib/dual-var";
   import { normalizeSearch } from "$lib/rich-text";
-  import { flowObjectKey, matchesMechanic, type ExpandedFlow, type FlowFilter } from "$lib/mechanic-filter";
+  import { flowObjectKey, type FlowFilter } from "$lib/mechanic-filter";
   import type { DualVar, MechanicEntry } from "$lib/runtime/types";
+  import type { MechanicWorkspaceState } from "$lib/mechanics/workspace.svelte";
   import FlowRef from "./FlowRef.svelte";
 
-  let { project, factory, entries, expanded, onChange }: {
-    project: number; factory: number; entries: MechanicEntry[]; expanded: boolean;
-    onChange: (ids: number[] | null) => void;
+  let { workspace, entries, expanded }: {
+    workspace: MechanicWorkspaceState; entries: MechanicEntry[]; expanded: boolean;
   } = $props();
   type Side = "input" | "output";
-  let input = $state<FlowFilter | null>(null);
-  let output = $state<FlowFilter | null>(null);
   let picker = $state<Side | null>(null);
   let query = $state("");
-  let index = $state<Map<number, ExpandedFlow[]>>(new Map());
-  let failures = $state<number[]>([]);
-  let completed = $state(0);
-  let retry = $state(0);
-  let active = $derived(!!input || !!output);
-  let pending = $derived(completed < entries.length);
+  let input = $derived(workspace.input);
+  let output = $derived(workspace.output);
+  let index = $derived(workspace.index);
+  let failures = $derived(workspace.failures);
+  let completed = $derived(workspace.completed);
+  let active = $derived(workspace.active);
+  let pending = $derived(workspace.pending);
+  let matching = $derived(workspace.matchingIds);
   const label = (flow: DualVar) => presentFlow(flow, (kind, name) => runtime.localizedName(kind, name)).description;
-
-  // Expand only when this feature is used, in bounded batches. Cards use the
-  // same cache, including in-flight requests. Never classify a failed read as empty.
-  $effect(() => {
-    if ((!expanded && !active) || !project || !factory) return;
-    const snapshot = entries.map(entry => ({id: entry.id, mechanic: JSON.parse(JSON.stringify(entry.mechanic))}));
-    const document = runtime.document?.projects.find(entry => entry.id === project);
-    JSON.stringify([document?.settings, runtime.effectiveContextId, document?.context_id, document?.factories.find(entry => entry.id === factory)?.settings]);
-    void retry;
-    untrack(() => { index = new Map(); failures = []; completed = 0; });
-    let alive = true;
-    (async () => {
-      for (let offset = 0; offset < snapshot.length && alive; offset += 6) {
-        const batch = await Promise.allSettled(snapshot.slice(offset, offset + 6).map(async entry => ({
-          id: entry.id, flows: await runtime.loadMechanicFlow(project, factory, entry.id, entry.mechanic),
-        })));
-        if (!alive) return;
-        const next = new Map(untrack(() => index));
-        const errors = [...untrack(() => failures)];
-        batch.forEach((result, i) => {
-          if (result.status === "fulfilled") next.set(result.value.id, result.value.flows);
-          else errors.push(snapshot[offset + i].id);
-        });
-        index = next;
-        failures = errors;
-        completed = Math.min(offset + batch.length, snapshot.length);
-      }
-    })();
-    return () => { alive = false; };
-  });
-
-  let matching = $derived(entries.filter(entry => {
-    const flows = index.get(entry.id);
-    return flows !== undefined && matchesMechanic(flows, input, output);
-  }).map(entry => entry.id));
-  $effect(() => { onChange(active ? matching : null); });
 
   let candidates = $derived.by(() => {
     const objects = new Map<string, DualVar>();
@@ -72,7 +35,7 @@
   });
 
   function setFilter(side: Side, filter: FlowFilter | null) {
-    if (side === "input") input = filter; else output = filter;
+    workspace.setFilter(side, filter);
   }
   function valueOf(flow: DualVar): {quality?: string; temperature?: [number, number]} {
     return typeof flow === "string" ? {} : Object.values(flow)[0] as {quality?: string; temperature?: [number, number]};
@@ -147,9 +110,9 @@
     <div class="filter-status" role="status">
       {#if active}<strong>显示 {matching.length} / {entries.length} 个机制</strong>{/if}
       {#if pending}<span>正在读取 {completed} / {entries.length} · 结果逐步补齐</span>{/if}
-      {#if failures.length}<span class="warn">{failures.length} 个机制读取失败，尚未判定</span><button class="btn" onclick={() => retry += 1}>重试</button>{/if}
+      {#if failures.length}<span class="warn">{failures.length} 个机制读取失败，尚未判定</span><button class="btn" onclick={() => workspace.retry += 1}>重试</button>{/if}
       {#if expanded && !pending && !failures.length}<span class="muted">消耗与产出取交集 · 先筛选变体，再合并配方</span>{/if}
-      {#if active}<button class="btn" onclick={() => { input = null; output = null; picker = null; }}>清除筛选</button>{/if}
+      {#if active}<button class="btn" onclick={() => { workspace.clearFilters(); picker = null; }}>清除筛选</button>{/if}
     </div>
   </section>
 {/if}

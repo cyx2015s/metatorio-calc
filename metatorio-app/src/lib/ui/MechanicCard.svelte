@@ -10,6 +10,7 @@
   import { groupModules } from "./mechanic-layout";
   import ModuleEditor from "./ModuleEditor.svelte";
   import { compactNumber } from "$lib/format";
+  import type { MechanicActions } from "$lib/mechanics/actions";
   import type { CatalogKind, MechanicEntry } from "$lib/runtime/types";
 
   const kindLabel: Record<string, string> = {
@@ -35,12 +36,7 @@
     solution = null,
     project,
     factory,
-    onPick,
-    onToggleEnabled,
-    onRemove,
-    onAddBeacon,
-    onPickFuel,
-    onClone,
+    actions,
     onInteractionChange,
   }: {
     entry: MechanicEntry;
@@ -48,14 +44,16 @@
     /** 当前项目/工厂 id（加载机制展开流用）。 */
     project: number;
     factory: number;
-    onPick: (kind: CatalogKind | "beacon-module", a?: number, b?: number) => void;
-    onToggleEnabled: () => void;
-    onRemove: () => void;
-    onAddBeacon: () => void;
-    onPickFuel: () => void;
-    onClone: () => void;
+    actions: MechanicActions;
     onInteractionChange?: (active: boolean) => void;
   } = $props();
+
+  const onPick = (kind: CatalogKind | 'beacon-module', a?: number, b?: number) => actions.pick(entry.id, kind, a, b);
+  const onToggleEnabled = () => actions.commands.setMechanicEnabled(entry.id, !entry.enabled).catch(() => {});
+  const onRemove = () => actions.commands.removeMechanic(entry.id).catch(() => {});
+  const onClone = () => actions.commands.cloneMechanic(entry.id).catch(() => {});
+  const onAddBeacon = () => actions.addBeacon(entry.id);
+  const onPickFuel = () => actions.pickFuel(entry.id);
 
   // 机制展开流（系数 1 时每秒产/耗；正值产出、负值消耗）。
   // 有求解结果时按实际用量缩放显示；无求解结果时显示系数 1 的原始流。
@@ -299,7 +297,7 @@
               <span class="disclosure">▾</span>
             </button>
           {/snippet}
-          <ModuleEditor {entry} onPickModule={(slot) => onPick("module", slot)} onPickBeacon={(beacon) => onPick("beacon", beacon)}
+          <ModuleEditor {entry} {actions} onPickModule={(slot) => onPick("module", slot)} onPickBeacon={(beacon) => onPick("beacon", beacon)}
             onPickBeaconModule={(beacon, module) => onPick("beacon-module", beacon, module)} {onAddBeacon} />
         </SecondaryMenu>
       {/if}
@@ -317,7 +315,7 @@
           {#if hasFuel}
             <div class="setting-line"><span>燃料</span>
               <button class="btn" onclick={onPickFuel}>{fuelLabel(entry.mechanic.fuel)}</button>
-              {#if entry.mechanic.fuel}<button class="btn ghost" onclick={() => runtime.setFuel(entry.id, null).catch(() => {})}>恢复自动</button>{/if}
+              {#if entry.mechanic.fuel}<button class="btn ghost" onclick={() => actions.commands.setFuel(entry.id, null).catch(() => {})}>恢复自动</button>{/if}
             </div>
           {/if}
             {#if ["generator", "boiler", "tile-extract", "reactor", "solar", "fluid-heat"].includes(kind)}
@@ -338,7 +336,7 @@
                       const raw = (event.currentTarget as HTMLInputElement).value;
                       const value = raw === "" ? null : Number(raw);
                       if (value === null || Number.isFinite(value)) {
-                        runtime.setMechanicTemperature(entry.id, value).catch(() => {});
+                        actions.commands.setMechanicTemperature(entry.id, value).catch(() => {});
                       }
                     }}
                   />
@@ -355,7 +353,7 @@
                         const raw = (event.currentTarget as HTMLInputElement).value;
                         const value = raw === "" ? null : Number(raw);
                         if (value === null || Number.isFinite(value)) {
-                          runtime.setBoilerOutputTemperature(entry.id, value).catch(() => {});
+                          actions.commands.setBoilerOutputTemperature(entry.id, value).catch(() => {});
                         }
                       }}
                     />
@@ -379,7 +377,7 @@
                     onchange={(event) => {
                       const value = Number((event.currentTarget as HTMLInputElement).value);
                       if (Number.isFinite(value) && value >= 0 && value <= 8) {
-                        runtime.setNeighbours(entry.id, value).catch(() => {});
+                        actions.commands.setNeighbours(entry.id, value).catch(() => {});
                       }
                     }}
                   />
@@ -429,7 +427,7 @@
                       const raw = (event.currentTarget as HTMLInputElement).value;
                       const value = raw === "" ? null : Number(raw);
                       if (value === null || Number.isFinite(value)) {
-                        runtime.setMechanicTemperature(entry.id, value).catch(() => {});
+                        actions.commands.setMechanicTemperature(entry.id, value).catch(() => {});
                       }
                     }}
                   />
@@ -449,7 +447,7 @@
                     class:on={entry.mechanic.weight_mode ?? false}
                     title="火箭运力模式：按堆叠槽位 或 按重量"
                     onclick={() =>
-                      runtime.setWeightMode(entry.id, !(entry.mechanic.weight_mode ?? false)).catch(() => {})}
+                      actions.commands.setWeightMode(entry.id, !(entry.mechanic.weight_mode ?? false)).catch(() => {})}
                   >{entry.mechanic.weight_mode ? "按重量" : "按堆叠槽位"}</button>
                 {:else if kind === "boiler" || kind === "reactor"}
                   {#if kind === "boiler" && fuelIsFluid(entry.mechanic.fuel)}
@@ -464,7 +462,7 @@
                           const raw = (event.currentTarget as HTMLInputElement).value;
                           const value = raw === "" ? null : Number(raw);
                           if (value === null || Number.isFinite(value)) {
-                            runtime.setFuelTemperature(entry.id, value).catch(() => {});
+                            actions.commands.setFuelTemperature(entry.id, value).catch(() => {});
                           }
                         }}
                       />

@@ -6,16 +6,19 @@
   import { runtime } from "$lib/runtime/store.svelte.ts";
   import HoverIcon from "./HoverIcon.svelte";
   import Icon from "./Icon.svelte";
+  import type { MechanicActions } from "$lib/mechanics/actions";
   import type { MechanicEntry, PrototypeDetail } from "$lib/runtime/types";
 
   let {
     entry,
+    actions,
     onPickModule,
     onPickBeacon,
     onPickBeaconModule,
     onAddBeacon,
   }: {
     entry: MechanicEntry;
+    actions: MechanicActions;
     onPickModule: (slot: number) => void;
     onPickBeacon: (beacon: number) => void;
     onPickBeaconModule: (beacon: number, module: number) => void;
@@ -56,7 +59,7 @@
     const value = Number(input.value);
     if (Number.isFinite(value) && value > 0) {
       beaconWarning = null;
-      runtime.moduleMessage(entry.id, { "set-beacon-count": { beacon, count: value } });
+      actions.commands.moduleMessage(entry.id, { "set-beacon-count": { beacon, count: value } });
     } else {
       // 拒绝写入时把输入框还原，避免界面上的数字与文档不一致。
       input.value = String(beacons[beacon]?.count ?? 1);
@@ -67,7 +70,7 @@
   function beaconShareChange(beacon: number, event: Event) {
     const value = Number((event.currentTarget as HTMLInputElement).value);
     if (Number.isFinite(value) && value > 0) {
-      runtime.moduleMessage(entry.id, { "set-beacon-share": { beacon, share: value } });
+      actions.commands.moduleMessage(entry.id, { "set-beacon-share": { beacon, share: value } });
     }
   }
 
@@ -97,7 +100,7 @@
         }
       }
       beaconWarning = null;
-      runtime.moduleMessage(entry.id, {
+      actions.commands.moduleMessage(entry.id, {
         "set-beacon-module-count": { beacon, module, count: value },
       });
     })();
@@ -126,7 +129,7 @@
             <button
               class="me-x"
               title="移除插件"
-              onclick={() => runtime.setModuleSlot(entry.id, i, null).catch(() => {})}
+              onclick={() => actions.commands.setModuleSlot(entry.id, i, null).catch(() => {})}
             >×</button>
           </div>
         {:else}
@@ -201,7 +204,7 @@
             <button
               class="btn ghost danger"
               title="移除插件塔"
-              onclick={() => runtime.moduleMessage(entry.id, { "remove-beacon": { beacon: bi } }).catch(() => {})}
+              onclick={() => actions.commands.moduleMessage(entry.id, { "remove-beacon": { beacon: bi } }).catch(() => {})}
             >×</button>
           </div>
 

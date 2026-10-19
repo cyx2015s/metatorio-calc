@@ -85,8 +85,48 @@ const url = `http://127.0.0.1:${port}`;
     assert.equal(await modal.locator('.kind-tabs .active').textContent(), '制造机');
     assert.equal(await modal.locator('.q-chip.active .q-name').textContent(), '普通');
     assert.equal(await selectedName(), '组装机 2 型');
+    // The same editor policy can be used outside cards. A delayed picker must
+    // not open in a different factory; an existing callback retains its target.
+    const shared = await page.evaluate(async () => {
+      const {createMechanicActions} = await import('/src/lib/mechanics/actions.ts');
+      const {MechanicCommands} = await import('/src/lib/runtime/mechanic-commands.ts');
+      const document = structuredClone(window.__layoutDocument), requests = [], messages = [];
+      const host = {
+        document, selectedProjectId: 1, selectedFactoryId: 2, effectiveContextId: 'test',
+        getDetail: async () => ({categories: ['crafting']}),
+        localizedName: (_kind, name) => name,
+        mechanicCommands(scope) {
+          return new MechanicCommands({
+            send: async message => { messages.push(message); },
+            getFactory: ({project, factory}) => document.projects.find(p => p.id === project)?.factories.find(f => f.id === factory) ?? null,
+          }, scope);
+        },
+      };
+      const actions = createMechanicActions(host, {project: 1, factory: 2}, {
+        select: request => requests.push(request), selectFlow: request => requests.push(request), notice() {},
+      });
+      await actions.pick(15, 'tile');
+      const extract = requests.at(-1);
+      await actions.pick(16, 'tile');
+      const dispose = requests.at(-1);
+      host.selectedFactoryId = 999;
+      await extract.onSelect('water', 'normal');
+      await dispose.onSelect('lava', 'normal');
+      host.selectedFactoryId = 2;
+      let resolveDetail;
+      host.getDetail = () => new Promise(resolve => { resolveDetail = resolve; });
+      const pending = actions.pick(1, 'machine');
+      host.selectedFactoryId = 999;
+      resolveDetail({categories: ['crafting']});
+      await pending;
+      return {purposes: [extract.tilePurpose, dispose.tilePurpose], requests: requests.length, messages};
+    });
+    assert.deepEqual(shared.purposes, ['extract', 'dispose']);
+    assert.equal(shared.requests, 2, 'a stale asynchronous picker must not open');
+    assert.ok(shared.messages.every(message => message.action.project === 1 && message.action.factory === 2));
+    assert.deepEqual(shared.messages.map(message => Object.keys(message.action.action.mechanic.action)[0]), ['tile-extract', 'tile-dispose']);
     assert.deepEqual(errors, []);
-    console.log('Selector sessions passed: initial values, editable drafts, catalog refresh preservation, open-request replacement, complete reset and close/reopen.');
+    console.log('Selector sessions passed: draft lifecycle, shared editor policies, tile purposes, scoped callbacks and stale asynchronous requests.');
   } finally {
     await browser?.close();
     server.kill();

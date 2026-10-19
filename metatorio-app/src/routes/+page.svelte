@@ -1,6 +1,6 @@
 <script lang="ts">
   import RichText from "$lib/ui/RichText.svelte";
-  import { flowName, mechanicPrototype } from "$lib/display-labels";
+  import { flowName } from "$lib/display-labels";
   // Metatorio 主界面：紧凑布局，圆角卡片分区；游戏内物品一律图标按钮，
   // 一般操作一律文字按钮。
   import { onMount } from "svelte";
@@ -9,7 +9,7 @@
   import { check as updaterCheck } from "@tauri-apps/plugin-updater";
   import { relaunch } from "@tauri-apps/plugin-process";
   import { runtime } from "$lib/runtime/store.svelte.ts";
-  import { allowedModules, pickGameExecutable, pickModDir, suggest } from "$lib/runtime/client";
+  import { pickGameExecutable, pickModDir, suggest } from "$lib/runtime/client";
   import { itemOf, accessibleKind, accessibleName } from "$lib/runtime/types";
   import { signedCompactNumber } from "$lib/format";
   import type {
@@ -23,9 +23,8 @@
   import HoverIcon from "$lib/ui/HoverIcon.svelte";
   import Icon from "$lib/ui/Icon.svelte";
   import Selector from "$lib/ui/Selector.svelte";
-  import MechanicRow from "$lib/ui/MechanicRow.svelte";
-  import MechanicCard from "$lib/ui/MechanicCard.svelte";
-  import MechanicFilter from "$lib/ui/MechanicFilter.svelte";
+  import MechanicWorkspace from "$lib/ui/MechanicWorkspace.svelte";
+  import { createMechanicActions } from "$lib/mechanics/actions";
   import FlowRef from "$lib/ui/FlowRef.svelte";
   import DiagnosticView from "$lib/ui/DiagnosticView.svelte";
   import { diagnosticFrom, diagnosticText } from "$lib/diagnostic";
@@ -431,41 +430,22 @@
       delete implicitPromotions[key];
     }
   }
+  let mechanicProjectId = $derived(project?.id ?? null);
+  let mechanicFactoryId = $derived(factory?.id ?? null);
+  let actions = $derived(mechanicProjectId !== null && mechanicFactoryId !== null ? createMechanicActions(runtime,
+    {project: mechanicProjectId, factory: mechanicFactoryId}, {
+      select: request => selector = request,
+      selectFlow: request => flowSelector = request,
+      notice: showNotice,
+    }) : null);
   // 拖拽排序的本地镜像（文档变化时同步；拖拽期间由 dndzone 更新）
   let dragTargets = $state<import("$lib/runtime/types").FlowTarget[]>([]);
   let dragInputs = $state<import("$lib/runtime/types").ExternalInput[]>([]);
-  let dragMechanics = $state<import("$lib/runtime/types").MechanicEntry[]>([]);
-  // 机制列表始终聚合：同配方×机器合并成一张卡，品质变体紧凑排列。
-
-  /** 组的显示名（首个条目的配方/资源/物品名）。 */
-  function groupTitle(entries: import("$lib/runtime/types").MechanicEntry[]): string {
-    const first = entries[0]?.mechanic;
-    if (!first) return "";
-    const ref = mechanicPrototype(first);
-    return runtime.localizedName(ref.kind, ref.name);
-  }
-
-  /** 组的机器名（配方/采矿有机器；其余无）。 */
-  function groupMachine(entries: import("$lib/runtime/types").MechanicEntry[]): string {
-    const machine = entries[0]?.mechanic.machine?.id;
-    if (!machine) return "";
-    return runtime.localizedName("entity", machine) || machine;
-  }
-
   /** 插件塔原型的插件槽数（getDetail 异步；未知时默认 2，与 Factorio 一致）。 */
   async function beaconModuleSlots(beaconId: string | undefined): Promise<number> {
     if (!beaconId) return 2;
     const detail = await runtime.getDetail("beacon", beaconId);
     return detail?.beacon_module_slots ?? detail?.module_slots ?? 2;
-  }
-
-  /** 机器原型的插件槽数（catalogIndex；未知时 0）。 */
-  function machineModuleSlots(machineId: string | undefined): number {
-    if (!machineId) return 0;
-    const entry = runtime.catalogIndex?.entries.find(
-      (candidate) => candidate.kind === "machine" && candidate.name === machineId,
-    );
-    return entry?.module_slots ?? 0;
   }
 
   /** 科技等级信息（catalogIndex）：base = 名字后缀最低等级，max = 有效上限
@@ -482,53 +462,13 @@
   // 其他机制类型始终单条展示，不额外嵌套。
   let mergeRecipes = $state(true);
   let filterOpen = $state(false);
-  let filterResult = $state<{scope: string; ids: number[] | null}>({scope: "", ids: null});
-  let filterScope = $derived(`${project?.id ?? 0}:${factory?.id ?? 0}`);
-  let filterActive = $derived(filterResult.scope === filterScope && filterResult.ids !== null);
-  let visibleMechanics = $derived.by(() => {
-    if (!filterActive) return dragMechanics;
-    const ids = new Set(filterResult.ids ?? []);
-    return dragMechanics.filter(entry => ids.has(entry.id));
-  });
+  let filterActive = $state(false);
 
-  /** 聚合键：合并开启时仅 recipe 按 (配方, 机器) 聚合；其余类型各自独立。 */
-  function mechGroupKey(entry: import("$lib/runtime/types").MechanicEntry): string {
-    if (!mergeRecipes) return `single:${entry.id}`;
-    const m = entry.mechanic;
-    if (m.type === "recipe") return `recipe:${m.recipe?.id ?? ""}:${m.machine?.id ?? ""}`;
-    // 非 recipe 机制：永不合并（每机制独立一组）。
-    return `single:${entry.id}`;
-  }
-
-  /** 网格分组：保持原始顺序，同键条目聚成一组（不同品质放一行）。 */
-  let mechGroups = $derived(
-    (() => {
-      const groups: {
-        key: string;
-        entries: import("$lib/runtime/types").MechanicEntry[];
-      }[] = [];
-      const index = new Map<string, number>();
-      for (const entry of visibleMechanics) {
-        const key = mechGroupKey(entry);
-        const existing = index.get(key);
-        if (existing !== undefined) {
-          groups[existing].entries.push(entry);
-        } else {
-          index.set(key, groups.length);
-          groups.push({ key, entries: [entry] });
-        }
-      }
-      return groups;
-    })(),
-  );
   $effect(() => {
     dragTargets = targets;
   });
   $effect(() => {
     dragInputs = externalInputs;
-  });
-  $effect(() => {
-    dragMechanics = mechanics;
   });
   function handleTargetsConsider(event: CustomEvent<{ items: import("$lib/runtime/types").FlowTarget[] }>) {
     dragTargets = event.detail.items;
@@ -547,19 +487,6 @@
     runtime
       .reorderExternalInputs(event.detail.items.map((input) => input.id))
       .catch(() => {});
-  }
-  type MechanicGroup = { id: string; key: string; entries: import("$lib/runtime/types").MechanicEntry[] };
-  let dragGroups = $state<MechanicGroup[]>([]);
-  $effect(() => { dragGroups = mechGroups.map((group) => ({ ...group, id: group.key })); });
-  function handleMechanicsConsider(event: CustomEvent<{ items: MechanicGroup[] }>) {
-    if (filterActive) return;
-    dragGroups = event.detail.items;
-  }
-  function handleMechanicsFinalize(event: CustomEvent<{ items: MechanicGroup[] }>) {
-    if (filterActive) return;
-    dragGroups = event.detail.items;
-    dragMechanics = event.detail.items.flatMap((group) => group.entries);
-    runtime.reorderMechanics(dragMechanics.map((entry) => entry.id)).catch(() => {});
   }
   let solve = $derived(runtime.solve);
   let solveMap = $derived(
@@ -791,446 +718,6 @@
     } catch {
       /* lastError 已展示 */
     }
-  }
-
-  // ── 机制拾取器分发 ──────────────────────────────────────────────
-  async function pickForMechanic(
-    mechanic: MechanicId,
-    kind: CatalogKind | "beacon-module",
-    a?: number,
-    b?: number,
-  ) {
-    const entry = mechanics.find((candidate) => candidate.id === mechanic);
-    try {
-      switch (kind) {
-        case "recipe":
-          openSelector(
-            "recipe",
-            "选择配方",
-            (name, quality) => runtime.setRecipe(mechanic, name, quality),
-            [],
-            [],
-            undefined,
-            entry?.mechanic.recipe?.id,
-            entry?.mechanic.recipe?.quality,
-          );
-          break;
-        case "machine": {
-          // 机器列表按当前配方的 categories 过滤（组装机/电炉/火箭发射井等）
-          const recipeId = entry?.mechanic.recipe?.id;
-          const filter = recipeId
-            ? (await runtime.getDetail("recipe", recipeId))?.categories ?? []
-            : [];
-          openSelector(
-            "machine",
-            "选择机器",
-            (name, quality) => runtime.setMachine(mechanic, name, quality),
-            [{ kind: "machine", label: "制造机" }],
-            filter,
-            undefined,
-            entry?.mechanic.machine?.id,
-            entry?.mechanic.machine?.quality,
-          );
-          break;
-        }
-        case "offshore-pump": {
-          openSelector(
-            "offshore-pump",
-            "选择抽水机",
-            (name, quality) => runtime.setMachine(mechanic, name, quality),
-            [{ kind: "offshore-pump", label: "抽水机" }],
-            undefined,
-            undefined,
-            entry?.mechanic.machine?.id,
-            entry?.mechanic.machine?.quality,
-          );
-          break;
-        }
-        case "tile": {
-          // 地格：抽取与销毁的判据不同，标题与动作跟着变。
-          const isDispose = entry?.mechanic.type === "tile-dispose";
-          openSelector(
-            "tile",
-            isDispose ? "选择可销毁物品的地格" : "选择地格（决定产出哪种流体）",
-            (name) =>
-              isDispose
-                ? runtime.setTileDisposeTile(mechanic, name)
-                : runtime.setTileExtractTile(mechanic, name),
-            [{ kind: "tile", label: "地格" }],
-            undefined,
-            undefined,
-            entry?.mechanic.tile,
-          );
-          if (selector) selector.tilePurpose = isDispose ? "dispose" : "extract";
-          break;
-        }
-        case "mining-machine": {
-          // 采矿机列表按当前资源的 category 过滤
-          const resource = entry?.mechanic.resource;
-          const filter = resource
-            ? (await runtime.getDetail("resource", resource))?.categories ?? []
-            : [];
-          openSelector(
-            "mining-machine",
-            "选择采矿机",
-            (name, quality) => runtime.setMachine(mechanic, name, quality),
-            [{ kind: "mining-machine", label: "采矿机" }],
-            filter,
-            undefined,
-            entry?.mechanic.machine?.id,
-            entry?.mechanic.machine?.quality,
-          );
-          break;
-        }
-        case "resource": {
-          // 资源列表按当前采矿机的 resource_categories 过滤
-          const machineId = entry?.mechanic.machine?.id;
-          const filter = machineId
-            ? (await runtime.getDetail("mining-machine", machineId))?.categories ?? []
-            : [];
-          openSelector(
-            "resource",
-            "选择资源",
-            (name) => runtime.setResource(mechanic, name),
-            [{ kind: "resource", label: "资源" }],
-            filter,
-            undefined,
-            entry?.mechanic.resource,
-          );
-          break;
-        }
-        case "fluid": {
-          // 按机制类型过滤：流体燃料/流体热有专用标签；发电机/锅炉按流体箱过滤
-          const mechKind = entry?.mechanic.type;
-          if (mechKind === "fluid-fuel") {
-            openSelector(
-              "fluid",
-              "选择热值流体（燃料）",
-              (name) => runtime.setFluidFuel(mechanic, name),
-              [],
-              ["fluid-fuel"],
-            );
-            break;
-          }
-          if (mechKind === "fluid-heat") {
-            openSelector(
-              "fluid",
-              "选择提热流体",
-              (name) => runtime.setFluidHeat(mechanic, name),
-              [],
-              ["fluid-heat"],
-            );
-            break;
-          }
-          const entityId =
-            mechKind === "generator"
-              ? entry?.mechanic.generator?.id
-              : mechKind === "boiler"
-                ? entry?.mechanic.boiler?.id
-                : undefined;
-          const filter = entityId ? await fluidFilterOf(mechKind, entityId) : [];
-          openSelector(
-            "fluid",
-            "选择流体",
-            (name) => runtime.setFluid(mechanic, name),
-            [],
-            [],
-            filter,
-          );
-          break;
-        }
-        case "item": {
-          // 按机制类型过滤物品：变质/种植/燃料/发射
-          const mechKind = entry?.mechanic.type;
-          const filter =
-            mechKind === "virtual-science" ? ["science-pack"] : mechKind === "spoil"
-              ? ["spoilable"]
-              : mechKind === "plant"
-                ? ["plantable"]
-                : mechKind === "item-fuel"
-                  ? ["fuel"]
-                  : mechKind === "item-launch"
-                    ? ["launchable"]
-                    : [];
-          const title =
-            mechKind === "virtual-science" ? "选择科研包" : mechKind === "spoil"
-              ? "选择会变质的物品"
-              : mechKind === "plant"
-                ? "选择种子"
-                : mechKind === "item-fuel"
-                  ? "选择燃料"
-                  : mechKind === "item-launch"
-                    ? "选择发射物品"
-                    : "选择物品";
-          openSelector(
-            "item",
-            title,
-            (name, quality) => runtime.setItem(mechanic, name, quality),
-            [],
-            filter,
-            undefined,
-            entry?.mechanic.item?.id,
-            entry?.mechanic.item?.quality,
-          );
-          break;
-        }
-        case "generator":
-          openSelector(
-            "generator",
-            "选择发电机",
-            (name, quality) => runtime.setGenerator(mechanic, name, quality),
-            [],
-            [],
-            undefined,
-            entry?.mechanic.generator?.id,
-            entry?.mechanic.generator?.quality,
-          );
-          break;
-        case "boiler":
-          openSelector(
-            "boiler",
-            "选择锅炉",
-            (name, quality) => runtime.setBoiler(mechanic, name, quality),
-            [],
-            [],
-            undefined,
-            entry?.mechanic.boiler?.id,
-            entry?.mechanic.boiler?.quality,
-          );
-          break;
-        case "reactor":
-          openSelector(
-            "reactor",
-            "选择反应堆",
-            (name, quality) => runtime.setReactor(mechanic, name, quality),
-            [],
-            [],
-            undefined,
-            entry?.mechanic.reactor?.id,
-            entry?.mechanic.reactor?.quality,
-          );
-          break;
-        case "solar-panel":
-          openSelector(
-            "solar-panel",
-            "选择太阳能板",
-            (name, quality) => runtime.setSolarPanel(mechanic, name, quality),
-            [],
-            [],
-            undefined,
-            entry?.mechanic.solar_panel?.id,
-            entry?.mechanic.solar_panel?.quality,
-          );
-          break;
-        case "accumulator":
-          openSelector(
-            "accumulator",
-            "选择蓄电器",
-            (name, quality) => runtime.setAccumulator(mechanic, name, quality),
-          );
-          break;
-        case "module": {
-          // 机器插件：按机器允许的插件鉴权（类别 + 效果类型 + 配方开关）
-          // 过滤；添加前校验槽数。
-          const machineId = entry?.mechanic.machine?.id;
-          const detailKind = entry?.mechanic.type === "mining" ? "mining-machine" : "machine";
-          const slots = machineModuleSlots(machineId);
-          const filled = entry?.mechanic.module_config?.modules.length ?? 0;
-          if (a != null && a >= filled && slots > 0 && filled >= slots) {
-            showNotice(`插件槽已满（${slots} 个）`);
-            break;
-          }
-          const recipeId = entry?.mechanic.type === "recipe" ? (entry?.mechanic.recipe?.id ?? null) : null;
-          const allowed = machineId
-            ? await allowedModules(detailKind, machineId, recipeId, runtime.effectiveContextId)
-            : [];
-          // 已选机器但鉴权后无可用插件：用不可能匹配的哨兵让选择器显示空。
-          const allowedNames =
-            machineId && allowed.length === 0 ? [""] : allowed.length > 0 ? allowed : undefined;
-          // 编辑已有槽位：预选当前插件（只改品质也可确认）。
-          const currentModule =
-            a != null ? entry?.mechanic.module_config?.modules[a] : undefined;
-          openSelector(
-            "module",
-            machineId ? "选择插件" : "选择插件（先选择机器）",
-            (name, quality) => runtime.setModuleSlot(mechanic, a ?? 0, name, quality),
-            [],
-            [],
-            allowedNames,
-            currentModule?.id,
-            currentModule?.quality,
-          );
-          break;
-        }
-        case "beacon": {
-          const beacon = a ?? 0;
-          openSelector("beacon", "选择插件塔", (name, quality) =>
-            runtime
-              .moduleMessage(mechanic, {
-                "set-beacon": { beacon, value: { id: name, quality } },
-              })
-              .catch(() => {}),
-          );
-          break;
-        }
-        case "beacon-module": {
-          const beacon = a ?? 0;
-          const moduleIdx = b ?? 0;
-          const beaconCfg = entry?.mechanic.module_config?.beacons[beacon];
-          const beaconModuleCount = beaconCfg?.modules.length ?? 0;
-          // 添加新塔内插件前校验：总数量 ≤ 插件塔插件槽数 × 插件塔数量。
-          if (moduleIdx >= beaconModuleCount && beaconCfg) {
-            const beaconSlots =
-              (await beaconModuleSlots(beaconCfg.beacon.id)) * beaconCfg.count;
-            const total = beaconCfg.modules.reduce((sum, [, count]) => sum + count, 0);
-            if (beaconSlots > 0 && total >= beaconSlots) {
-              showNotice(`插件塔插件已满（${beaconSlots} 个槽位）`);
-              break;
-            }
-          }
-          // 塔内插件按该插件塔允许的插件鉴权过滤（类别 + 效果类型；与机器同理）
-          const beaconId = beaconCfg?.beacon.id;
-          const allowed = beaconId
-            ? await allowedModules("beacon", beaconId, null, runtime.effectiveContextId)
-            : [];
-          // 已选插件塔但鉴权后无可用插件：用不可能匹配的哨兵让选择器显示空。
-          const allowedNames =
-            beaconId && allowed.length === 0 ? [""] : allowed.length > 0 ? allowed : undefined;
-          openSelector(
-            "module",
-            beaconId ? "选择塔内插件" : "选择塔内插件（先选择插件塔）",
-            (name, quality) => {
-              const value = { id: name, quality };
-              if (moduleIdx >= beaconModuleCount) {
-                runtime
-                  .moduleMessage(mechanic, { "add-beacon-module": { beacon, module: value } })
-                  .catch(() => {});
-              } else {
-                runtime
-                  .moduleMessage(mechanic, {
-                    "set-beacon-module": { beacon, module: moduleIdx, value },
-                  })
-                  .catch(() => {});
-              }
-            },
-            [],
-            [],
-            allowedNames,
-          );
-          break;
-        }
-        default:
-          break;
-      }
-    } catch {
-      /* 过滤信息拉取失败时仍打开选择器（不过滤） */
-    }
-  }
-
-  /** 发电机/锅炉允许的流体（流体箱 filter；无则空 = 不限制）。 */
-  async function fluidFilterOf(mechKind: string | undefined, entityId: string): Promise<string[]> {
-    const detailKind = mechKind === "generator" ? "generator" : "boiler";
-    const detail = await runtime.getDetail(detailKind, entityId);
-    return detail?.fluid_filter ? [detail.fluid_filter] : [];
-  }
-
-  /** 指定机制燃料：流选择器（物品/流体页签）→ SetFuel。
-   *  burner 机器只吃物品燃料：机器的燃料类别（burner_fuel_categories）与
-   *  物品的燃料类别（fuel_categories，可多个）**有交集**才兼容（机器无类别
-   *  限制 → 全部燃料）；非 burner（流体/热能量源）不做物品限定，流体页签
-   *  可选。锅炉/反应堆/采矿机与制造机同规则。 */
-  async function pickFuel(mechanic: MechanicId) {
-    const entry = mechanics.find((candidate) => candidate.id === mechanic);
-    const m = entry?.mechanic;
-    const type = m?.type;
-    // 依机制类型确定要查的实体详情 kind + 设备 id（各组件字段不同）。
-    let entityKind: CatalogKind | null = null;
-    let entityId: string | null = null;
-    if (type === "recipe") {
-      entityKind = "machine";
-      entityId = m?.machine?.id ?? null;
-    } else if (type === "mining") {
-      entityKind = "mining-machine";
-      entityId = m?.machine?.id ?? null;
-    } else if (type === "boiler") {
-      entityKind = "boiler";
-      entityId = m?.boiler?.id ?? null;
-    } else if (type === "reactor") {
-      entityKind = "reactor";
-      entityId = m?.reactor?.id ?? null;
-    }
-
-    let allowedNames: string[] | undefined;
-    let initialTab: string | undefined;
-    if (entityKind && entityId) {
-      const detail = await runtime.getDetail(entityKind, entityId);
-      const categories = detail?.burner_fuel_categories ?? [];
-      const energySource = detail?.machine_energy_source;
-      if (energySource === "burner" || categories.length > 0) {
-        // burner 机器：只允许物品燃料（有热值），且（无类别限制 或 类别匹配）。
-        allowedNames = (runtime.catalogIndex?.entries ?? [])
-          .filter(
-            (candidate) =>
-              candidate.kind === "item" &&
-              candidate.fuel_value_j != null &&
-              candidate.fuel_value_j > 0 &&
-              (categories.length === 0 ||
-                candidate.fuel_categories.some((category) => categories.includes(category))),
-          )
-          .map((candidate) => candidate.name);
-        initialTab = "item";
-      } else if (energySource === "fluid") {
-        // 流体能量源（如某些锅炉/发电机）：只允许有热值的流体燃料。
-        allowedNames = (runtime.catalogIndex?.entries ?? [])
-          .filter(
-            (candidate) =>
-              candidate.kind === "fluid" &&
-              candidate.fuel_value_j != null &&
-              candidate.fuel_value_j > 0,
-          )
-          .map((candidate) => candidate.name);
-        initialTab = "fluid";
-      }
-    }
-    flowSelector = {
-      title: "选择燃料",
-      initialTab,
-      allowedNames,
-      onSelectFlow: (flow) => {
-        const item = itemOf(flow);
-        if (item) {
-          // 物品燃料：带品质。
-          runtime.setFuel(mechanic, { kind: "item", item }).catch(() => {});
-          return;
-        }
-        if (flow !== null && typeof flow === "object" && "Fluid" in flow) {
-          const fluid = (flow as { Fluid: { name: string } }).Fluid.name;
-          runtime.setFuel(mechanic, { kind: "fluid", fluid }).catch(() => {});
-          return;
-        }
-        runtime.setFuel(mechanic, null).catch(() => {});
-      },
-    };
-  }
-
-  /** 添加插件塔：直接打开插件塔选择器（不再先加空配置行），重复插件塔拒绝。 */
-  function addBeacon(mechanic: MechanicId) {
-    const entry = mechanics.find((candidate) => candidate.id === mechanic);
-    openSelector("beacon", "选择插件塔（添加）", (name, quality) => {
-      const existing = entry?.mechanic.module_config?.beacons ?? [];
-      // 重复按 IdWithQuality 判等：同种插件塔不同品质允许并存
-      if (
-        existing.some(
-          (beacon) => beacon.beacon.id === name && beacon.beacon.quality === quality,
-        )
-      ) {
-        showNotice(`插件塔 ${name}（${runtime.localizedName("quality", quality)}）已添加，不能重复`);
-        return;
-      }
-      runtime
-        .moduleMessage(mechanic, { "add-beacon": { beacon: { id: name, quality } } })
-        .catch(() => {});
-    });
   }
 
   /** 全局快捷键：Ctrl/Cmd+Z 撤销；Ctrl/Cmd+Shift+Z 或 Ctrl+Y 重做。
@@ -2375,12 +1862,12 @@
               <button
                 disabled={!solved}
                 title="移除整个工厂中本次求解用量为 0 的机制，不受显示筛选影响"
-                onclick={() => { mechMenuOpen = false; runtime.cleanup("remove-unused").catch(() => {}); }}
+                onclick={() => { mechMenuOpen = false; actions?.commands.cleanup("remove-unused").catch(() => {}); }}
               >移除未用</button>
               <button
                 disabled={!solved}
                 title="按求解流量从大到小重排整个工厂的机制，不受显示筛选影响"
-                onclick={() => { mechMenuOpen = false; runtime.cleanup("sort-by-solution-rate").catch(() => {}); }}
+                onclick={() => { mechMenuOpen = false; actions?.commands.cleanup("sort-by-solution-rate").catch(() => {}); }}
               >按流量排序</button>
               <button
                 class:active={mergeRecipes}
@@ -2395,94 +1882,10 @@
         </div>
       </div>
 
-      {#if project && factory}
-        {#key filterScope}
-          <MechanicFilter project={project.id} factory={factory.id} entries={mechanics} expanded={filterOpen}
-            onChange={ids => filterResult = {scope: filterScope, ids}} />
-        {/key}
-      {/if}
-      {#if filterActive}<div class="muted filter-order-note">筛选中暂停手动拖拽排序，清除筛选后恢复。</div>{/if}
+      <MechanicWorkspace project={project?.id ?? null} factory={factory?.id ?? null}
+        entries={mechanics} solutions={solveMap} {actions} {filterOpen} {mergeRecipes}
+        onFilterActiveChange={active => filterActive = active} />
 
-      <div
-        class="mech-list"
-        use:dndzone={{ items: dragGroups, type: "mechanic-groups", flipDurationMs: 120, dragDisabled: filterActive }}
-        onconsider={handleMechanicsConsider}
-        onfinalize={handleMechanicsFinalize}
-      >
-        {#each dragGroups as group (group.id)}
-          {#if group.entries.length > 1}
-            <!-- 配方合并组：标题（配方名 + 机器名），子机制完整显示 -->
-            <div class="mech-group">
-              <div class="mech-group-head">
-                <span class="mech-group-title" title={groupTitle(group.entries)}>
-                  {groupTitle(group.entries)}
-                </span>
-                {#if groupMachine(group.entries)}
-                  <span class="chip">{groupMachine(group.entries)}</span>
-                {/if}
-                <span class="chip muted">{group.entries.length} 变体</span>
-              </div>
-              {#each group.entries as entry (entry.id)}
-                <div class="mech-group-row">
-                  <MechanicRow mechanicId={entry.id} virtualize={mechanics.length > 80}>
-                    {#snippet children(pin)}
-                      <MechanicCard
-                        {entry}
-                        onInteractionChange={pin}
-                        project={project?.id ?? 0}
-                        factory={factory?.id ?? 0}
-                        solution={solveMap.get(entry.id) ?? null}
-                        onPick={(kind, a, b) => pickForMechanic(entry.id, kind, a, b)}
-                        onToggleEnabled={() => runtime.setMechanicEnabled(entry.id, !entry.enabled).catch(() => {})}
-                        onRemove={() => runtime.removeMechanic(entry.id).catch(() => {})}
-                        onAddBeacon={() => addBeacon(entry.id)}
-                        onPickFuel={() => pickFuel(entry.id)}
-                        onClone={() => runtime.cloneMechanic(entry.id).catch(() => {})}
-                      />
-                    {/snippet}
-                  </MechanicRow>
-                </div>
-              {/each}
-            </div>
-          {:else}
-            {#each group.entries as entry (entry.id)}
-              <MechanicRow mechanicId={entry.id} virtualize={mechanics.length > 80}>
-                {#snippet children(pin)}
-                  <MechanicCard
-                    {entry}
-                    onInteractionChange={pin}
-                    project={project?.id ?? 0}
-                    factory={factory?.id ?? 0}
-                    solution={solveMap.get(entry.id) ?? null}
-                    onPick={(kind, a, b) => pickForMechanic(entry.id, kind, a, b)}
-                    onToggleEnabled={() => runtime.setMechanicEnabled(entry.id, !entry.enabled).catch(() => {})}
-                    onRemove={() => runtime.removeMechanic(entry.id).catch(() => {})}
-                    onAddBeacon={() => addBeacon(entry.id)}
-                    onPickFuel={() => pickFuel(entry.id)}
-                    onClone={() => runtime.cloneMechanic(entry.id).catch(() => {})}
-                  />
-                {/snippet}
-              </MechanicRow>
-            {/each}
-          {/if}
-        {:else}
-          <div class="empty-state">
-            {#if filterActive}
-              <strong>没有匹配的机制</strong>
-              <span class="muted">可更换消耗或产出条件，或清除筛选查看全部机制。读取进度见筛选栏。</span>
-            {:else if project && factory}
-              <strong>还没有机制</strong>
-              <span class="muted">从「+ 添加机制」开始，或让「自动规划」生成候选。</span>
-            {:else if project}
-              <strong>选择一个工厂</strong>
-              <span class="muted">在顶部工厂栏切换，或点「+」新建工厂。</span>
-            {:else}
-              <strong>新建或打开一个项目</strong>
-              <span class="muted">项目栏在左上角；首次使用请先在「数据」里加载游戏数据。</span>
-            {/if}
-          </div>
-        {/each}
-      </div>
     </section>
 
     {#if addMechMenuPos}
@@ -2492,7 +1895,7 @@
           <button
             onclick={() => {
               addMechMenuPos = null;
-              runtime.addMechanic(option.kind).catch(() => {});
+              actions?.commands.addMechanic(option.kind).catch(() => {});
             }}
           >{option.label}</button>
         {/each}
@@ -4234,76 +3637,12 @@
     align-items: center;
     gap: 4px;
   }
-  .filter-order-note { flex: 0 0 auto; font-size: 12px; padding-top: 6px; }
 
   .toolbar .menu-wrap {
     margin-left: 2px;
   }
 
   /* ── 机制列表 ───────────────────────────────────────────────── */
-
-  .mech-list {
-    /* 关键：机制列表必须按内容高度撑开，由 .center 负责滚动。
-       若它作为可收缩 flex 项被压到剩余高度，内部的 .mech-group 会因
-       overflow:hidden（自动最小尺寸为 0）被压成一条 2px 的横线。 */
-    flex: 0 0 auto;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    padding-top: 6px;
-  }
-
-  .mech-group {
-    flex: 0 0 auto;
-    overflow: hidden;
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-  }
-
-  .mech-group-head {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    padding: 7px 10px;
-    background: var(--panel-elev);
-    border-bottom: 1px solid var(--line);
-  }
-
-  .mech-group-title {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    color: var(--muted);
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-overflow: ellipsis;
-    text-transform: uppercase;
-    white-space: nowrap;
-  }
-
-  .mech-group-row + .mech-group-row {
-    border-top: 1px solid var(--line);
-  }
-
-  /* 分组内的机制卡去掉自己的外框，由分组容器统一承载边界。 */
-  .mech-group-row :global(.mech-card) {
-    border: 0;
-    border-radius: 0;
-    background: transparent;
-  }
-
-  .mech-group-row :global(.mech-card:hover) {
-    background: color-mix(in srgb, var(--panel) 82%, var(--text) 4%);
-  }
-
-  /* 顶层机制卡由 MechanicCard 自己提供边框；这里只保证悬停/间距一致。 */
-  .mech-list > :global(.mechanic-row) {
-    flex: 0 0 auto;
-    margin-bottom: 0;
-  }
 
   .empty-state {
     display: grid;

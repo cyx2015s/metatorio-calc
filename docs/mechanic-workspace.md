@@ -1,5 +1,22 @@
 # 机制工作区
 
+## 展示与编辑边界
+
+当前默认视图为 `list`，保留既有列表外观；暂不显示只有一个选项的视图切换器。
+
+- `MechanicWorkspace.svelte` 是展示入口，负责公共筛选、空状态和视图分发。`mechanics/workspace.ts` 定义默认视图及 `MechanicViewProps`。
+- `mechanics/workspace.svelte.ts` 持有与视图无关的筛选条件、展开索引、加载进度及失败重试。筛选 UI 只负责编辑条件。更换渲染器无需重建工作区；切换项目/工厂会清空条件，并丢弃旧批次结果。修改环境会重新建立索引。
+- `MechanicListView.svelte` 独占配方分组、拖拽镜像、排序及行虚拟挂载。先筛选具体机制，再进行列表分组；分组保留全部机制 ID 和各自配置。筛选时暂停手动排序。
+- `mechanics/actions.ts` 提供通用 `pick`、`pickFuel`、`addBeacon` 编辑意图，包括选择器预选、兼容性过滤、地格用途与插件槽校验。页面仅承接选择器请求和提示，不再分发机制类型。异步查询完成后若已切换工厂，不打开过期选择器。
+- `runtime/mechanic-commands.ts` 是不依赖 Svelte、DOM 或当前选中对象的写操作接口：通过固定项目/工厂发送编辑消息，覆盖新增、克隆、删除、启用、排序、清理、各类参数与插件配置。`runtime.mechanicCommands(scope)` 创建实例，原有 runtime 方法委托给同一实现。多步排序跨越异步刷新时仍读取原工厂的最新快照；原工厂已删除时拒绝发送。
+- `MechanicCard` 和 `ModuleEditor` 通过同一 `actions.commands` 写回，继续复用 runtime 的原型详情、本地化、图标及流缓存。
+
+后续添加表格或网络图时，扩展 `MechanicViewMode`，在工作区增加渲染分支并传入 `MechanicViewProps`。工具栏中的视图状态应放在渲染器之外；展示偏好不进入工厂文档或撤销历史。每种视图独立管理布局、滚动或缩放，不修改底层机制来实现视觉聚合。
+
+需要全工厂流信息的视图可令 `MechanicWorkspaceSource.needsAllFlows` 为真，复用每批 6 个请求的共享索引。普通列表仍按可见行懒加载，打开筛选才补全索引。索引使用 `runtime.loadMechanicFlow` 的同一在途请求缓存，失败不能按空流处理。索引中是系数为 1、每秒的净流，实际流量需乘相应求解用量；未求解与求解用量为 0 应区分。网络图的关系聚合不能丢弃品质、温度或燃料约束，也不能把依赖边当作求解器输出的点对点物流分配。
+
+## 列表布局
+
 机制卡采用固定 72 CSS px 的两行布局，左侧保留各机制类型自己的配置，右侧统一展示流量。
 
 - 第一行：机制图标、设备或流体等相关图标、机器插件与插件塔图标预览、机制参数入口。名称和品质保留在悬停详情及无障碍标签中。
@@ -31,6 +48,8 @@ pnpm build
 pnpm test:icons
 pnpm test:layout
 pnpm test:selector-browser
+pnpm test:mechanic-commands
+pnpm test:mechanic-filter-browser
 ```
 
 `test:layout` 需要独立的 Playwright 环境，默认从 Node 模块路径加载 `playwright`；也可设置 `PLAYWRIGHT_MODULE` 为现有包的绝对目录。`BROWSER_EXECUTABLE` 可指定本机 Chrome/Chromium 的可执行文件，否则使用 Playwright 自带浏览器。测试自行启动和关闭本机 Vite 服务，端口可通过 `UI_TEST_PORT` 指定（默认 5197）。
@@ -38,3 +57,5 @@ pnpm test:selector-browser
 浏览器回归使用模拟 IPC，覆盖 65 个混合机制和 1000 行长列表：固定行高、窄窗口、插件选择器返回、焦点恢复、温度写回、全部流量、启用切换、合并组键盘拖拽、视口挂载与编辑保留。它不验证原型数据或 LP 求解正确性，也不替代真实游戏图标下的人工阅读检查。
 
 `test:selector-browser` 默认使用端口 5200，验证目录/流选择器的初始值、草稿编辑、目录刷新保留草稿、未关闭时替换请求后的完整重置，以及关闭后重新打开的预选恢复。测试通过程序点击被遮挡的背景入口模拟替换正在编辑的请求，以覆盖正常模态交互不易触发的复用路径。
+
+共享操作回归还覆盖选择器策略在卡片之外复用、抽取/销毁地格用途、切换工厂后的异步过期请求，以及回调绑定原工厂。`test:mechanic-commands` 验证作用域不可随选择漂移、不同机制类型的消息路由、多步排序读取最新快照、原工厂删除、派发失败中止及插件配置写回。

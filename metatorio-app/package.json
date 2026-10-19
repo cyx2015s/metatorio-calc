@@ -11,6 +11,7 @@
     "test:labels-browser": "node tests/localized-labels-browser.cjs",
     "test:selector-browser": "node tests/selector-session-browser.cjs",
     "test:mechanic-filter": "node --test tests/mechanic-filter.test.mjs",
+    "test:mechanic-commands": "node --test tests/mechanic-commands.test.mjs",
     "test:mechanic-filter-browser": "node tests/mechanic-filter-browser.cjs",
     "test:dual-var": "node --test tests/dual-var.test.mjs",
     "test:dual-var-browser": "node tests/dual-var-browser.cjs",
