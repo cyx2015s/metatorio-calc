@@ -25,6 +25,14 @@ const url = `http://127.0.0.1:${port}`;
       window.__pngExports = [];
       let failed = false;
       window.__TAURI_INTERNALS__.invoke = async (command, args) => {
+        if (command === 'icon') {
+          const canvas = document.createElement('canvas');
+          canvas.width = canvas.height = 32;
+          const ctx = canvas.getContext('2d');
+          ctx.fillStyle = args.ty === 'quality' ? '#237bea' : '#b8b8b8';
+          ctx.fillRect(0, 0, 32, 32);
+          return Array.from(atob(canvas.toDataURL().split(',')[1]), c => c.charCodeAt(0));
+        }
         if (command === 'save_network_png') {
           window.__pngExports.push(args);
           return new Promise((resolve, reject) => {
@@ -74,6 +82,24 @@ const url = `http://127.0.0.1:${port}`;
     await ready();
     if (process.env.NETWORK_TEST_TRACE) console.log('network ready');
     assert.ok(await graph.locator('canvas').count() > 0, 'Cytoscape rendered a real canvas');
+    const nodeIcons = () => graph.locator('.network-canvas').evaluate(node => {
+      const cy = node._cyreg.cy;
+      const normal = cy.nodes().filter(n => n.data('kind') === 'flow' && n.data('label') === '铁板\n普通').first();
+      const rare = cy.nodes().filter(n => n.data('kind') === 'flow' && n.data('label') === '铁板\n稀有').first();
+      const merged = cy.nodes().filter(n => n.data('kind') === 'mechanic' && n.data('label').includes('个机制') && n.data('label').startsWith('铁板')).first();
+      const layers = n => n.pstyle('background-image').value.length;
+      return {normal: layers(normal), rare: layers(rare), merged: layers(merged), width: merged.width(),
+        zoom: cy.zoom(), pan: cy.pan(), positions: cy.nodes().map(n => [n.id(), n.position()])};
+    });
+    await waitFor(async () => (await nodeIcons()).rare === 2 && (await nodeIcons()).merged === 3);
+    const originalIcons = await nodeIcons();
+    assert.equal(originalIcons.normal, 1, 'ordinary quality needs no corner badge');
+    await graph.getByLabel('网络图标大小', {exact: true}).selectOption('2');
+    await waitFor(async () => (await nodeIcons()).width === originalIcons.width * 2);
+    const largeIcons = await nodeIcons();
+    assert.equal(largeIcons.zoom, originalIcons.zoom, 'icon size is independent of viewport zoom');
+    assert.deepEqual(largeIcons.pan, originalIcons.pan);
+    assert.deepEqual(largeIcons.positions, originalIcons.positions, 'changing icon size does not rearrange nodes');
     assert.equal(await graph.locator('.network-credit a').getAttribute('href'), 'https://github.com/YoisakiKanade222');
     assert.equal(await graph.getByRole('link', {name: '来源与许可', exact: true}).count(), 0);
     // Inspect the real renderer behind the canvas, rather than only CSS or
@@ -159,6 +185,7 @@ const url = `http://127.0.0.1:${port}`;
     await ready();
     assert.equal(await graph.getByRole('textbox', {name: '搜索网络节点'}).inputValue(), '铁板');
     assert.ok(await graph.getByRole('checkbox', {name: '能量与污染', exact: true}).isChecked());
+    assert.equal(await graph.getByLabel('网络图标大小', {exact: true}).inputValue(), '2');
     assert.equal(await graph.locator('.network-details .mech-card').count(), 1, 'selection survives switching views');
     assert.equal(await card.getAttribute('data-mechanic-id'), '2', 'the edited group member survives switching views');
     await page.getByRole('button', {name: '列表', exact: true}).click();

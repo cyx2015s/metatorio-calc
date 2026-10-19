@@ -4,7 +4,7 @@
   import type { ElkNode } from 'elkjs/lib/elk-api';
   import { runtime } from '$lib/runtime/store.svelte';
   import { saveNetworkPng } from '$lib/runtime/client';
-  import { buildNetwork, networkRate, type NetworkNode, type NetworkEdge, type NetworkViewState } from '$lib/mechanics/network';
+  import { buildNetwork, networkRate, networkIconQualities, type NetworkNode, type NetworkEdge, type NetworkViewState } from '$lib/mechanics/network';
   import type { MechanicViewProps } from '$lib/mechanics/workspace';
   import { mechanicPrototype } from '$lib/display-labels';
   import { presentFlow } from '$lib/dual-var';
@@ -24,6 +24,7 @@
   let showUtilities = $state(untrack(() => viewState.showUtilities));
   let onlyEnabled = $state(untrack(() => viewState.onlyEnabled));
   let query = $state(untrack(() => viewState.query));
+  let iconScale = $state(untrack(() => viewState.iconScale ?? 1));
   let selected = $state<string | undefined>(untrack(() => viewState.selected));
   let selectedMechanic = $state<number | null>(untrack(() => viewState.selectedMechanic ?? null));
   let renderRevision = $state(0);
@@ -72,8 +73,8 @@
     return [
       {selector: 'node', style: {label: 'data(label)', color: p.text, 'font-size': 11, 'font-family': uiFont,
         'text-wrap': 'wrap', 'text-max-width': '150px', 'text-valign': 'bottom', 'text-margin-y': 5,
-        width: 38, height: 38, 'background-color': '#477761', 'border-width': 2, 'border-color': p.line}},
-      {selector: 'node[kind="mechanic"]', style: {shape: 'round-rectangle', width: 52, height: 48, 'background-color': '#99703b'}},
+        width: 38 * iconScale, height: 38 * iconScale, 'background-color': '#477761', 'border-width': 2, 'border-color': p.line}},
+      {selector: 'node[kind="mechanic"]', style: {shape: 'round-rectangle', width: 52 * iconScale, height: 48 * iconScale, 'background-color': '#99703b'}},
       {selector: 'node[fluid]', style: {'background-color': '#3b78a4'}},
       {selector: 'node[utility]', style: {'background-color': '#79599d'}},
       {selector: 'node[kind="external"]', style: {shape: 'round-rectangle', 'background-color': '#69717b'}},
@@ -139,7 +140,7 @@
     themeObserver.observe(globalThis.document.documentElement, {attributes: true, attributeFilter: ['data-theme', 'class', 'style']});
     return () => {
       mounted = false; generation++; saveViewport(true);
-      Object.assign(viewState, {collapse, showUtilities, onlyEnabled, query, selected: selectedId, selectedMechanic});
+      Object.assign(viewState, {collapse, showUtilities, onlyEnabled, query, iconScale, selected: selectedId, selectedMechanic});
       observer.disconnect(); themeObserver.disconnect(); cy?.destroy(); elk?.terminateWorker(); cy = undefined;
     };
   });
@@ -157,6 +158,8 @@
     return () => { clearTimeout(timer); if (generation === revision) generation++; };
   });
   $effect(() => { needle; matches; renderRevision; highlight(); });
+  // Size changes only restyle the existing canvas; no layout, pan or zoom reset.
+  $effect(() => { if (ready && cy) { iconScale; cy.style(styles()); } });
 
   async function draw(snapshot: typeof model, revision: number, reset = false) {
     if (!cy || !elk || !mounted || revision !== generation) return;
@@ -175,7 +178,10 @@
       'elk.algorithm': 'layered', 'elk.direction': 'RIGHT', 'elk.edgeRouting': 'ORTHOGONAL',
       'elk.spacing.nodeNode': '45', 'elk.layered.spacing.nodeNodeBetweenLayers': '100',
       'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
-    }, children: material.map(node => ({id: node.id, width: node.kind === 'mechanic' ? 145 : 115, height: 100})),
+    // Reserve the largest supported icon plus its multiline caption up front,
+    // so changing icon size remains layout-free without covering other labels.
+    }, children: material.map(node => ({id: node.id, width: node.kind === 'mechanic' ? 145 : 115,
+      height: Math.max(100, (node.kind === 'mechanic' ? 48 : 38) * 2 + 16 + node.label.split('\n').length * 13)})),
       edges: snapshot.edges.filter(edge => !edge.utility).map(edge => ({id: edge.id, sources: [edge.source], targets: [edge.target]}))});
     if (!cy || !mounted || revision !== generation) return;
     const positions = new Map(laidOut.children?.map(node => [node.id, {x: (node.x ?? 0) + 75, y: (node.y ?? 0) + 45}]));
@@ -210,7 +216,21 @@
         const name = info?.name ?? ref?.name, type = info?.type ?? (ref ? iconTypeForKind(ref.kind) : undefined);
         if (!name || !type) return;
         const url = syntheticIconUrls[name] ?? await runtime.getIcon(type, name);
-        if (url && cy && mounted && revision === generation) cy.getElementById(node.id).data('icon', url);
+        const qualities = networkIconQualities(node);
+        const badges = qualities.length > 1 ? qualities : qualities.filter(quality => quality !== 'normal');
+        const qualityUrls = await Promise.all(badges.map(quality => runtime.getIcon('quality', quality)));
+        if (url && cy && mounted && revision === generation) {
+          const images = qualityUrls.filter((url): url is string => !!url);
+          const badgeSize = Math.min(45, 100 / Math.max(1, images.length));
+          cy.getElementById(node.id).data('icon', url).style({
+            'background-image': [url, ...images],
+            'background-fit': ['contain', ...images.map(() => 'none' as const)],
+            'background-width': ['auto', ...images.map(() => `${badgeSize}%`)],
+            'background-height': ['auto', ...images.map(() => `${badgeSize}%`)],
+            'background-position-x': ['50%', ...images.map((_, i) => `${images.length === 1 ? 0 : i * 100 / (images.length - 1)}%`)],
+            'background-position-y': ['50%', ...images.map(() => '100%')],
+          });
+        }
       }));
     }
   }
@@ -245,6 +265,11 @@
     <button class="btn" disabled={!ready} onclick={() => cy?.fit(undefined, 35)}>适应窗口</button>
     {#if needle}<button class="btn" disabled={!ready || !matches.length} onclick={() => choose(matches[0].id)}>定位匹配</button>{/if}
     <button class="btn" disabled={!ready || busy || exporting} onclick={exportPng}>{exporting ? '导出中…' : '导出 PNG'}</button>
+    <label title="只调整图标大小，保持节点位置和画布缩放">图标大小
+      <select aria-label="网络图标大小" bind:value={iconScale}>
+        {#each [0.75, 1, 1.25, 1.5, 2] as scale}<option value={scale}>{scale * 100}%</option>{/each}
+      </select>
+    </label>
     <label><input type="checkbox" bind:checked={collapse} />折叠中间流</label>
     <label><input type="checkbox" bind:checked={showUtilities} />能量与污染</label>
     <label><input type="checkbox" bind:checked={onlyEnabled} />仅启用</label>

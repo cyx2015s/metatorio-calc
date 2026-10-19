@@ -29,6 +29,21 @@ export interface NetworkEdge {
   utility: boolean;
 }
 export interface NetworkModel { nodes: NetworkNode[]; edges: NetworkEdge[]; solved: boolean }
+
+/** Qualities of the pictured prototype, not of an unrelated machine or input. */
+export function networkIconQualities(node: NetworkNode): string[] {
+  if (node.flow) {
+    const quality = presentFlow(node.flow, (_kind, name) => name).quality;
+    return quality ? [quality] : [];
+  }
+  return [...new Set(node.entries.flatMap(({mechanic: m}) => {
+    const prototype = m.type === 'recipe' ? m.recipe : m.type === 'solar' ? m.solar_panel
+      : m.type === 'generator' ? m.generator : m.type === 'boiler' ? m.boiler
+      : m.type === 'reactor' ? m.reactor : m.type === 'plant' ? m.seed
+      : ['spoil', 'item-fuel', 'item-launch', 'virtual-science'].includes(m.type) ? m.item : undefined;
+    return prototype ? [prototype.quality] : [];
+  }))];
+}
 export interface NetworkSource {
   entries: MechanicEntry[];
   index: ReadonlyMap<number, ExpandedFlow[]>;
@@ -150,6 +165,10 @@ export function buildNetwork(source: NetworkSource): NetworkModel {
     node.search = node.entries.map(entry => `${JSON.stringify(entry.mechanic)} ${entry.id}`).join(' ') + ` ${node.label}`;
     node.label += `\n${mechanicKindLabels[node.entries[0].mechanic.type] ?? node.entries[0].mechanic.type}`;
     if (node.entries.length > 1) node.label += ` · ${node.entries.length} 个机制`;
+    const qualities = networkIconQualities(node);
+    if (qualities.length > 1 || qualities.some(quality => quality !== 'normal')) {
+      node.label += `\n${qualities.map(quality => source.localize('quality', quality)).join(' / ')}`;
+    }
     const machine = node.entries[0].mechanic.machine;
     if (machine) node.label += `\n${source.localize('entity', machine.id)}`;
   }
@@ -221,6 +240,7 @@ export interface NetworkViewState {
   query: string;
   selected?: string;
   selectedMechanic?: number | null;
+  iconScale?: number;
 }
 export function createNetworkViewState(): NetworkViewState {
   return {positions: new Map(), collapse: true, showUtilities: false, onlyEnabled: false, query: ''};

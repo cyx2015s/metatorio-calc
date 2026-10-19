@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildNetwork, networkFlowKey, networkCompatible, networkRate } from '../src/lib/mechanics/network.ts';
+import { buildNetwork, networkFlowKey, networkCompatible, networkRate, networkIconQualities } from '../src/lib/mechanics/network.ts';
 
 const item = (id, quality = 'normal') => ({Item: {id, quality}});
 const fluid = (name, ...temperature) => ({Fluid: {name, temperature}});
@@ -9,6 +9,18 @@ const entry = (id, type = 'recipe', extra = {}) => ({id, enabled: true,
 const base = overrides => ({entries: [], index: new Map(), visibleIds: null, solutions: new Map(), solved: false,
   targets: [], externalInputs: [], implicitInputs: [], localize: (_kind, name) => name, timeScale: 'seconds',
   mergeRecipes: false, collapse: false, showUtilities: true, onlyEnabled: false, ...overrides});
+
+test('icon quality follows the depicted prototype and preserves mixed groups', () => {
+  const node = entries => ({entries});
+  assert.deepEqual(networkIconQualities({flow: item('iron', 'rare'), entries: []}), ['rare']);
+  assert.deepEqual(networkIconQualities({flow: fluid('water', 15, 15), entries: []}), []);
+  assert.deepEqual(networkIconQualities(node([entry(1), entry(2, 'recipe', {recipe: {id: 'smelt', quality: 'rare'}}), entry(3)])), ['normal', 'rare']);
+  assert.deepEqual(networkIconQualities(node([entry(1, 'mining', {resource: 'ore', machine: {id: 'drill', quality: 'legendary'}})])), []);
+  assert.deepEqual(networkIconQualities(node([entry(1, 'tile-dispose', {tile: 'lava', item: {id: 'iron', quality: 'rare'}})])), []);
+  for (const [type, field] of [['solar', 'solar_panel'], ['generator', 'generator'], ['boiler', 'boiler'], ['reactor', 'reactor'], ['plant', 'seed'], ['spoil', 'item'], ['virtual-science', 'item']]) {
+    assert.deepEqual(networkIconQualities(node([entry(1, type, {[field]: {id: 'prototype', quality: 'legendary'}})])), ['legendary']);
+  }
+});
 
 test('exact flow nodes preserve quality, temperature, entity and virtual science identities', () => {
   const flows = [item('iron'), item('iron', 'rare'), fluid('water', 15, 15), fluid('water', 15, 100),
