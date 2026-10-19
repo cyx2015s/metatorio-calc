@@ -220,6 +220,7 @@ export interface NetworkViewState {
   onlyEnabled: boolean;
   query: string;
   selected?: string;
+  selectedMechanic?: number | null;
 }
 export function createNetworkViewState(): NetworkViewState {
   return {positions: new Map(), collapse: true, showUtilities: false, onlyEnabled: false, query: ''};

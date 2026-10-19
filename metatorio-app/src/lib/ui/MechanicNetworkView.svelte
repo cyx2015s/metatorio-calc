@@ -23,7 +23,7 @@
   let onlyEnabled = $state(untrack(() => viewState.onlyEnabled));
   let query = $state(untrack(() => viewState.query));
   let selected = $state<string | undefined>(untrack(() => viewState.selected));
-  let selectedMechanic = $state<number | null>(null);
+  let selectedMechanic = $state<number | null>(untrack(() => viewState.selectedMechanic ?? null));
   let renderRevision = $state(0);
   let cy: Core | undefined;
   let elk: {layout: (graph: ElkNode) => Promise<ElkNode>; terminateWorker: () => void} | undefined;
@@ -39,14 +39,19 @@
     mergeRecipes, collapse, showUtilities, onlyEnabled}));
   const needle = $derived(normalizeSearch(query));
   const matches = $derived(model.nodes.filter(node => !needle || normalizeSearch(node.search).includes(needle)));
-  const selectedNode = $derived(model.nodes.find(node => node.id === selected));
-  const selectedEdge = $derived(model.edges.find(edge => edge.id === selected));
+  // Recipe/machine edits change a merged node's ID. Keep the editor attached to
+  // the stable mechanism identity, including when it moves to another group.
+  const selectedNode = $derived(selectedMechanic === null
+    ? model.nodes.find(node => node.id === selected)
+    : model.nodes.find(node => node.entries.some(entry => entry.id === selectedMechanic)));
+  const selectedId = $derived(selectedNode?.id ?? (selectedMechanic === null ? selected : undefined));
+  const selectedEdge = $derived(selectedMechanic === null ? model.edges.find(edge => edge.id === selected) : undefined);
   const editing = $derived(selectedNode?.entries.find(entry => entry.id === selectedMechanic) ?? selectedNode?.entries[0]);
   const neighbours = $derived.by(() => {
     const ids = new Set<string>();
     for (const edge of model.edges) {
-      if (edge.source === selected) ids.add(edge.target);
-      if (edge.target === selected) ids.add(edge.source);
+      if (edge.source === selectedId) ids.add(edge.target);
+      if (edge.target === selectedId) ids.add(edge.source);
     }
     return model.nodes.filter(node => ids.has(node.id));
   });
@@ -90,13 +95,17 @@
     if (savePositions) for (const node of cy.nodes()) viewState.positions.set(node.id(), {...node.position()});
   }
   function choose(id: string) {
-    selected = id; selectedMechanic = null;
+    selectObject(id);
     const element = cy?.getElementById(id);
     cy?.elements().unselect(); element?.select();
     if (element?.isNode() && cy) {
       if (cy.zoom() < 0.65) cy.zoom(0.85);
       cy.animate({center: {eles: element}, duration: 150});
     }
+  }
+  function selectObject(id?: string) {
+    selected = id;
+    selectedMechanic = model.nodes.find(node => node.id === id)?.entries[0]?.id ?? null;
   }
   function highlight() {
     if (!cy || cy.destroyed()) return;
@@ -113,8 +122,8 @@
       cy = graph.default({container, elements: [], style: styles(), layout: {name: 'preset'},
         minZoom: 0.08, maxZoom: 3, pixelRatio: 'auto', textureOnViewport: false});
       elk = new layout.default({workerFactory: () => new worker.default()});
-      cy.on('tap', 'node, edge', event => { selected = event.target.id(); selectedMechanic = null; });
-      cy.on('tap', event => { if (event.target === cy) selected = undefined; });
+      cy.on('tap', 'node, edge', event => selectObject(event.target.id()));
+      cy.on('tap', event => { if (event.target === cy) selectObject(); });
       cy.on('pan zoom', () => saveViewport());
       cy.on('dragfree', 'node', event => {
         const node = event.target;
@@ -128,7 +137,7 @@
     themeObserver.observe(globalThis.document.documentElement, {attributes: true, attributeFilter: ['data-theme', 'class', 'style']});
     return () => {
       mounted = false; generation++; saveViewport(true);
-      Object.assign(viewState, {collapse, showUtilities, onlyEnabled, query, selected});
+      Object.assign(viewState, {collapse, showUtilities, onlyEnabled, query, selected: selectedId, selectedMechanic});
       observer.disconnect(); themeObserver.disconnect(); cy?.destroy(); elk?.terminateWorker(); cy = undefined;
     };
   });
@@ -150,7 +159,15 @@
   async function draw(snapshot: typeof model, revision: number, reset = false) {
     if (!cy || !elk || !mounted || revision !== generation) return;
     busy = true; error = '';
-    if (!reset) saveViewport(true);
+    if (!reset) {
+      saveViewport(true);
+      // A renamed group should stay where the user was editing it. Existing
+      // destination groups retain their own position.
+      const oldPosition = cy.$(':selected').nodes().first().position();
+      if (selectedId && oldPosition && !viewState.positions.has(selectedId)) {
+        viewState.positions.set(selectedId, {...oldPosition});
+      }
+    }
     const material = snapshot.nodes.filter(node => !node.utility);
     const laidOut = await elk.layout({id: 'root', layoutOptions: {
       'elk.algorithm': 'layered', 'elk.direction': 'RIGHT', 'elk.edgeRouting': 'ORTHOGONAL',
@@ -180,7 +197,7 @@
         if (focus) cy.center(cy.getElementById(focus.id));
       }
     }
-    if (selected) cy.getElementById(selected).select();
+    if (selectedId) cy.getElementById(selectedId).select();
     busy = false; renderRevision++;
     // Icon requests are deduplicated by the existing runtime cache. Old generations
     // cannot add icons after a document, context, factory or view change.
@@ -241,14 +258,14 @@
     <summary>节点目录 · {matches.length}{needle ? ' 个匹配' : ' 个节点'}（可用键盘选择）</summary>
     <div class="node-options">
       {#each matches.slice(0, 100) as node (node.id)}
-        <button class="btn" class:active={selected === node.id} onclick={() => choose(node.id)}>{node.label.replaceAll('\n', ' · ')}</button>
+        <button class="btn" class:active={selectedId === node.id} onclick={() => choose(node.id)}>{node.label.replaceAll('\n', ' · ')}</button>
       {/each}
       {#if matches.length > 100}<span>仅列出前 100 个，请搜索缩小范围。</span>{/if}
     </div>
   </details>
   {#if selectedNode || selectedEdge}
     <section class="network-details" aria-label="网络对象详情">
-      <button class="icon-btn close" aria-label="关闭网络详情" onclick={() => selected = undefined}>×</button>
+      <button class="icon-btn close" aria-label="关闭网络详情" onclick={() => selectObject()}>×</button>
       {#if selectedNode}
         {#if selectedNode.flow}<FlowRef flow={selectedNode.flow} />{:else}<strong>{selectedNode.label.replaceAll('\n', ' · ')}</strong>{/if}
         {#if selectedNode.kind === 'external'}<p>{selectedNode.implicit ? '隐式外部输入 · 成本 0' : `手动外部输入 · 成本 ${selectedNode.external?.penalty}`}</p>{/if}

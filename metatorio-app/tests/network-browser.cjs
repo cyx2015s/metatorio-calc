@@ -26,6 +26,13 @@ const url = `http://127.0.0.1:${port}`;
       let failed = false;
       window.__TAURI_INTERNALS__.invoke = async (command, args) => {
         const value = await raw(command, args);
+        if (command === 'dispatch') {
+          const edit = args.message.action?.action?.mechanic;
+          const entry = window.__layoutDocument.projects[0].factories[0].mechanics.find(entry => entry.id === edit?.mechanic);
+          const action = edit?.action?.recipe;
+          if (action?.['set-recipe']) entry.mechanic.recipe = action['set-recipe'].recipe;
+          if (action?.['set-machine']) entry.mechanic.machine = action['set-machine'].machine;
+        }
         if (command !== 'mechanic_flow') return value;
         if (args.mechanic === 95 && !failed) { failed = true; throw Error('retryable expansion failure'); }
         const item = (id, quality = 'normal') => ({Item: {id, quality}});
@@ -110,6 +117,29 @@ const url = `http://127.0.0.1:${port}`;
       .some(call => call.args.message.action.factory === 2 && call.args.message.action.action['mechanic-list']?.['set-enabled']?.mechanic === 1));
     await card.getByRole('switch', {name: '启用机制', exact: true}).click();
     await ready();
+    // The second member must remain the editor target when an edit changes
+    // its merged graph ID, and when it rejoins an existing group afterwards.
+    await graph.locator('.variant-options').getByRole('button', {name: '机制 #2', exact: true}).click();
+    const editor = await card.elementHandle();
+    const editPrototype = async (button, name) => {
+      await card.locator(button).click();
+      const modal = page.locator('.backdrop [aria-modal="true"]');
+      await modal.getByRole('textbox', {name: '搜索原型'}).fill(name);
+      await modal.getByRole('button', {name, exact: true}).dblclick();
+      await modal.waitFor({state: 'hidden'});
+      await ready();
+      assert.equal(await editor.evaluate(node => node.isConnected), true, 'editing does not remount the card');
+      assert.equal(await card.getAttribute('data-mechanic-id'), '2', 'keep the same mechanism, not the first group member');
+      assert.equal(await graph.locator('.network-canvas').evaluate(node => {
+        const cy = node._cyreg.cy;
+        return cy.$(':selected').length === 1 && cy.$(':selected').first().isNode();
+      }), true, 'selection follows the changed graph node');
+    };
+    await editPrototype('.primary', '钢材');
+    await editPrototype('.machine-button', '锅炉');
+    await editPrototype('.primary', '铁板');
+    await editPrototype('.machine-button', '组装机 2 型');
+    assert.equal(await graph.locator('.variant-options .active').textContent(), '机制 #2');
     await page.getByRole('button', {name: '列表', exact: true}).click();
     assert.equal(await graph.count(), 0);
     await page.locator('.center').evaluate(node => { node.scrollTop = 1200; });
@@ -119,6 +149,7 @@ const url = `http://127.0.0.1:${port}`;
     assert.equal(await graph.getByRole('textbox', {name: '搜索网络节点'}).inputValue(), '铁板');
     assert.ok(await graph.getByRole('checkbox', {name: '能量与污染', exact: true}).isChecked());
     assert.equal(await graph.locator('.network-details .mech-card').count(), 1, 'selection survives switching views');
+    assert.equal(await card.getAttribute('data-mechanic-id'), '2', 'the edited group member survives switching views');
     await page.getByRole('button', {name: '列表', exact: true}).click();
     await waitFor(async () => Math.abs(await page.locator('.center').evaluate(node => node.scrollTop) - 1200) < 2);
     await page.getByRole('button', {name: '网络', exact: true}).click();
