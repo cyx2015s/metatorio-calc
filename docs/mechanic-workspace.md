@@ -2,7 +2,7 @@
 
 ## 展示与编辑边界
 
-当前默认视图为 `list`，保留既有列表外观；暂不显示只有一个选项的视图切换器。
+当前默认视图为 `list`，保留既有列表外观；工具栏提供「列表／网络」切换。
 
 - `MechanicWorkspace.svelte` 是展示入口，负责公共筛选、空状态和视图分发。`mechanics/workspace.ts` 定义默认视图及 `MechanicViewProps`。
 - `mechanics/workspace.svelte.ts` 持有与视图无关的筛选条件、展开索引、加载进度及失败重试。筛选 UI 只负责编辑条件。更换渲染器无需重建工作区；切换项目/工厂会清空条件，并丢弃旧批次结果。修改环境会重新建立索引。
@@ -11,9 +11,22 @@
 - `runtime/mechanic-commands.ts` 是不依赖 Svelte、DOM 或当前选中对象的写操作接口：通过固定项目/工厂发送编辑消息，覆盖新增、克隆、删除、启用、排序、清理、各类参数与插件配置。`runtime.mechanicCommands(scope)` 创建实例，原有 runtime 方法委托给同一实现。多步排序跨越异步刷新时仍读取原工厂的最新快照；原工厂已删除时拒绝发送。
 - `MechanicCard` 和 `ModuleEditor` 通过同一 `actions.commands` 写回，继续复用 runtime 的原型详情、本地化、图标及流缓存。
 
-后续添加表格或网络图时，扩展 `MechanicViewMode`，在工作区增加渲染分支并传入 `MechanicViewProps`。工具栏中的视图状态应放在渲染器之外；展示偏好不进入工厂文档或撤销历史。每种视图独立管理布局、滚动或缩放，不修改底层机制来实现视觉聚合。
+后续添加其他视图时，扩展 `MechanicViewMode`，在工作区增加渲染分支并传入 `MechanicViewProps`。工具栏中的视图状态放在渲染器之外；展示偏好不进入工厂文档或撤销历史。每种视图独立管理布局、滚动或缩放，不修改底层机制来实现视觉聚合。
 
 需要全工厂流信息的视图可令 `MechanicWorkspaceSource.needsAllFlows` 为真，复用每批 6 个请求的共享索引。普通列表仍按可见行懒加载，打开筛选才补全索引。索引使用 `runtime.loadMechanicFlow` 的同一在途请求缓存，失败不能按空流处理。索引中是系数为 1、每秒的净流，实际流量需乘相应求解用量；未求解与求解用量为 0 应区分。网络图的关系聚合不能丢弃品质、温度或燃料约束，也不能把依赖边当作求解器输出的点对点物流分配。
+
+## 网络视图
+
+参考客户 **stduuzurl / yoisaki kanade** 的独立网络可视化器（`playground/recipe-graph`），由 [YoisakiKanade222](https://github.com/YoisakiKanade222) 提供原始设计与实现参考。集成采用 Svelte 组件与现有工作区数据，不引入其 Python 代理或独立 Bridge。2026-10-19 从该公开 GitHub 个人页确认账号及公开用户 ID `327975025`，本次集成提交使用 `Co-authored-by: YoisakiKanade222 <327975025+YoisakiKanade222@users.noreply.github.com>`。
+
+- 绘图使用 Cytoscape.js（MIT），分层布局使用 ELK.js（EPL-2.0，可选用该许可；依赖中保留原始许可）。两者按需导入，静态打包后可离线使用；初始列表不加载绘图引擎。ELK 使用独立 Web Worker，卸载时终止，布局不占用页面主线程。
+- 机制、流和外部来源构成关系图。目标金边，隐式来源虚线，显式来源实线。默认隐藏公共能量与污染流；开启后其节点置于主生产链下方，相关边弱显且不参与主链布局。若电力或热量本身是目标，则始终作为主链显示。
+- 品质、流体温度区间、燃料供需及燃尽产物约束保持不同身份。紫色虚线只表示与 Rust 规则一致的区间包含、燃料兼容和具名到任意流体能量转换，不表示已求解的转运量；不重新实现依赖原型数据的降温与提热辅助变量。
+- 可选折叠仅用于非目标、非公共流，且生产与消费端各唯一的中间节点；边保留流身份以及两端各自的数量。多个物质不会变成一条无身份的边。
+- 求解后使用各机制的实际用量；未求解时同组变体分别列出单位量，不能把替代方案的单位量相加。禁用与实际用量为零保留不同状态。
+- 筛选和配方合并共用既有入口。点击机制可直接使用原机制卡编辑，原型选择器、插件塔及所有写操作仍由共享 actions 完成。搜索高亮画布，并提供可键盘选择的节点目录和流详情。
+- 工厂各自保存节点位置、缩放、平移、选择和图内选项，切换视图时恢复；列表和网络视图还各自保存工作区滚动位置。组件卸载清理 Cytoscape、ELK 与观察器，旧布局/图标请求不能更新新图。
+- PNG 导出的是**当前筛选和图内选项生成的整张网络图**，不受缩放和平移裁切。搜索只高亮，不删节点。大图渲染或导出失败会显示错误。
 
 ## 列表布局
 
@@ -50,6 +63,8 @@ pnpm test:layout
 pnpm test:selector-browser
 pnpm test:mechanic-commands
 pnpm test:mechanic-filter-browser
+pnpm test:network
+pnpm test:network-browser
 ```
 
 `test:layout` 需要独立的 Playwright 环境，默认从 Node 模块路径加载 `playwright`；也可设置 `PLAYWRIGHT_MODULE` 为现有包的绝对目录。`BROWSER_EXECUTABLE` 可指定本机 Chrome/Chromium 的可执行文件，否则使用 Playwright 自带浏览器。测试自行启动和关闭本机 Vite 服务，端口可通过 `UI_TEST_PORT` 指定（默认 5197）。
@@ -59,3 +74,5 @@ pnpm test:mechanic-filter-browser
 `test:selector-browser` 默认使用端口 5200，验证目录/流选择器的初始值、草稿编辑、目录刷新保留草稿、未关闭时替换请求后的完整重置，以及关闭后重新打开的预选恢复。测试通过程序点击被遮挡的背景入口模拟替换正在编辑的请求，以覆盖正常模态交互不易触发的复用路径。
 
 共享操作回归还覆盖选择器策略在卡片之外复用、抽取/销毁地格用途、切换工厂后的异步过期请求，以及回调绑定原工厂。`test:mechanic-commands` 验证作用域不可随选择漂移、不同机制类型的消息路由、多步排序读取最新快照、原工厂删除、派发失败中止及插件配置写回。
+
+`test:network` 验证精确流身份、方向性兼容、实际/单位量口径、筛选后分组、折叠流、显式/隐式来源和千机制规模。`test:network-browser` 默认端口 5203，使用真实 Cytoscape 画布和 ELK Worker，模拟 IPC 验证懒加载、共享缓存及失败重试、图内编辑、筛选与跨视图状态、工作区滚动恢复、PNG 全图导出与缩放无关、窄窗口和无 CDN 请求。它不验证真实 LP 求解结果；设置 `NETWORK_SCREENSHOT` 可保存截图，测试图标来自模拟 IPC 的占位图。构建后设置 `NETWORK_PREVIEW=1` 可对生产静态资源运行同一套完整回归，验证分包与 Worker 路径。

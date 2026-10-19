@@ -1,0 +1,18 @@
+Network view dependencies
+
+Cytoscape.js 3.34.4
+Copyright (c) 2016-2026, The Cytoscape Consortium.
+License: MIT (see cytoscape-MIT.txt)
+Source: https://github.com/cytoscape/cytoscape.js
+Published package: https://registry.npmjs.org/cytoscape/-/cytoscape-3.34.4.tgz
+
+ELK.js 0.12.0
+Copyright (c) TypeFox and other contributors (see package source headers).
+License used: Eclipse Public License 2.0 (see elkjs-EPL-2.0.txt)
+Unmodified dependency, bundled by Vite; no ELK source modifications.
+Source: https://github.com/kieler/elkjs
+Published source package: https://registry.npmjs.org/elkjs/-/elkjs-0.12.0.tgz
+
+Original network visualizer reference and design:
+stduuzurl / yoisaki kanade, GitHub: https://github.com/YoisakiKanade222
+Local reference: playground/recipe-graph

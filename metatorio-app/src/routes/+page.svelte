@@ -25,6 +25,7 @@
   import Selector from "$lib/ui/Selector.svelte";
   import MechanicWorkspace from "$lib/ui/MechanicWorkspace.svelte";
   import { createMechanicActions } from "$lib/mechanics/actions";
+  import { DEFAULT_MECHANIC_VIEW, type MechanicViewMode } from "$lib/mechanics/workspace";
   import FlowRef from "$lib/ui/FlowRef.svelte";
   import DiagnosticView from "$lib/ui/DiagnosticView.svelte";
   import { diagnosticFrom, diagnosticText } from "$lib/diagnostic";
@@ -461,6 +462,7 @@
   // 机制列表：配方合并开关（同配方×机器合并成一张卡，品质变体并列）；
   // 其他机制类型始终单条展示，不额外嵌套。
   let mergeRecipes = $state(true);
+  let mechanicView = $state<MechanicViewMode>(DEFAULT_MECHANIC_VIEW);
   let filterOpen = $state(false);
   let filterActive = $state(false);
 
@@ -1819,6 +1821,10 @@
         <button class="btn" class:active={filterOpen || filterActive} aria-expanded={filterOpen}
           title="按消耗或产出对象筛选机制；仅影响显示，不改变工厂或求解"
           onclick={() => filterOpen = !filterOpen} disabled={!factory}>筛选{filterActive ? " · 已启用" : ""}</button>
+        <div class="view-switch" role="group" aria-label="机制展示方式">
+          <button class="btn" class:active={mechanicView === 'list'} aria-pressed={mechanicView === 'list'} onclick={() => mechanicView = 'list'}>列表</button>
+          <button class="btn" class:active={mechanicView === 'network'} aria-pressed={mechanicView === 'network'} onclick={() => mechanicView = 'network'}>网络</button>
+        </div>
         {#if !runtime.activeContext}
           <span class="chip warn">未载入游戏数据</span>
         {/if}
@@ -1883,7 +1889,7 @@
       </div>
 
       <MechanicWorkspace project={project?.id ?? null} factory={factory?.id ?? null}
-        entries={mechanics} solutions={solveMap} {actions} {filterOpen} {mergeRecipes}
+        entries={mechanics} solutions={solveMap} {solved} {actions} {filterOpen} {mergeRecipes} view={mechanicView}
         onFilterActiveChange={active => filterActive = active} />
 
     </section>
@@ -3401,6 +3407,9 @@
     flex-direction: column;
     padding: 0 16px 28px;
   }
+
+  .view-switch { display: inline-flex; gap: 2px; }
+  .view-switch .active { background: var(--accent-dim); border-color: var(--accent); font-weight: 600; }
 
   /* ── 面板标题 / 折叠 ────────────────────────────────────────── */
 

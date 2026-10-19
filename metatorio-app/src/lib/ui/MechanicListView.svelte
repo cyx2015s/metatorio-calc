@@ -6,8 +6,9 @@
   import type { MechanicViewProps } from '$lib/mechanics/workspace';
   import MechanicCard from './MechanicCard.svelte';
   import MechanicRow from './MechanicRow.svelte';
+  import { rememberMechanicScroll } from '$lib/mechanics/view-scroll';
 
-  let {project, factory, entries, visibleIds, mergeRecipes, actions, solutions}: {
+  let {project, factory, entries, visibleIds, mergeRecipes, actions, solutions, scrollState}: {
     mergeRecipes: boolean;
   } & MechanicViewProps = $props();
   let filterActive = $derived(visibleIds !== null);
@@ -83,6 +84,7 @@
 {/snippet}
       <div
         class="mech-list"
+        use:rememberMechanicScroll={scrollState}
         use:dndzone={{ items: dragGroups, type: "mechanic-groups", flipDurationMs: 120, dragDisabled: filterActive }}
         onconsider={handleMechanicsConsider}
         onfinalize={handleMechanicsFinalize}

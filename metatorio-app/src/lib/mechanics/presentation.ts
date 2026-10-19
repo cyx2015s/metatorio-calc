@@ -1,0 +1,17 @@
+export const mechanicKindLabels: Record<string, string> = {
+    recipe: "配方",
+    mining: "采矿",
+    spoil: "变质",
+    plant: "种植",
+    "item-fuel": "物品燃料",
+    "virtual-science": "虚拟科研",
+    "item-launch": "发射",
+    generator: "发电机",
+    boiler: "锅炉",
+    reactor: "反应堆",
+    solar: "太阳能",
+    "fluid-fuel": "流体燃料",
+    "fluid-heat": "流体热",
+    "tile-extract": "地格抽取",
+    "tile-dispose": "地格销毁",
+};

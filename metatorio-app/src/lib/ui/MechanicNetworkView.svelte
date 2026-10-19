@@ -1,0 +1,284 @@
+<script lang="ts">
+  import { onMount, untrack } from 'svelte';
+  import type { Core, ElementDefinition, StylesheetJson } from 'cytoscape';
+  import type { ElkNode } from 'elkjs/lib/elk-api';
+  import { runtime } from '$lib/runtime/store.svelte';
+  import { buildNetwork, networkRate, type NetworkNode, type NetworkEdge, type NetworkViewState } from '$lib/mechanics/network';
+  import type { MechanicViewProps } from '$lib/mechanics/workspace';
+  import { mechanicPrototype } from '$lib/display-labels';
+  import { presentFlow } from '$lib/dual-var';
+  import { normalizeSearch } from '$lib/rich-text';
+  import { iconTypeForKind, syntheticIconUrls } from './icon-types';
+  import FlowRef from './FlowRef.svelte';
+  import MechanicCard from './MechanicCard.svelte';
+  import { rememberMechanicScroll } from '$lib/mechanics/view-scroll';
+
+  let {project, factory, entries, visibleIds, solutions, solved, actions, workspace, mergeRecipes, viewState, scrollState}: MechanicViewProps & {
+    mergeRecipes: boolean; viewState: NetworkViewState;
+  } = $props();
+  let container = $state<HTMLDivElement>();
+  let ready = $state(false), busy = $state(false), error = $state('');
+  let collapse = $state(untrack(() => viewState.collapse));
+  let showUtilities = $state(untrack(() => viewState.showUtilities));
+  let onlyEnabled = $state(untrack(() => viewState.onlyEnabled));
+  let query = $state(untrack(() => viewState.query));
+  let selected = $state<string | undefined>(untrack(() => viewState.selected));
+  let selectedMechanic = $state<number | null>(null);
+  let renderRevision = $state(0);
+  let cy: Core | undefined;
+  let elk: {layout: (graph: ElkNode) => Promise<ElkNode>; terminateWorker: () => void} | undefined;
+  let generation = 0, mounted = true;
+  const document = $derived(runtime.document?.projects.find(p => p.id === project));
+  const factoryDocument = $derived(document?.factories.find(f => f.id === factory));
+  const timeScale = $derived(document?.settings.time_scale ?? 'seconds');
+  const model = $derived(buildNetwork({entries, visibleIds, index: workspace.index, solutions, solved,
+    targets: [...(factoryDocument?.targets.map(t => t.flow) ?? []),
+      ...(factoryDocument?.target_expressions.flatMap(expression => expression.terms.map(term => term.flow)) ?? [])],
+    externalInputs: factoryDocument?.external_inputs ?? [], implicitInputs: runtime.implicitSourcesCache,
+    localize: (kind, name) => runtime.localizedName(kind, name), timeScale,
+    mergeRecipes, collapse, showUtilities, onlyEnabled}));
+  const needle = $derived(normalizeSearch(query));
+  const matches = $derived(model.nodes.filter(node => !needle || normalizeSearch(node.search).includes(needle)));
+  const selectedNode = $derived(model.nodes.find(node => node.id === selected));
+  const selectedEdge = $derived(model.edges.find(edge => edge.id === selected));
+  const editing = $derived(selectedNode?.entries.find(entry => entry.id === selectedMechanic) ?? selectedNode?.entries[0]);
+  const neighbours = $derived.by(() => {
+    const ids = new Set<string>();
+    for (const edge of model.edges) {
+      if (edge.source === selected) ids.add(edge.target);
+      if (edge.target === selected) ids.add(edge.source);
+    }
+    return model.nodes.filter(node => ids.has(node.id));
+  });
+
+  function palette(): Record<string, string> {
+    const style = getComputedStyle(container!);
+    const color = (key: string, fallback: string) => style.getPropertyValue(key).trim() || fallback;
+    return {text: color('--text', '#ccd3df'), muted: color('--muted', '#7e8b9d'),
+      panel: color('--panel', '#202632'), line: color('--line-strong', '#627084')};
+  }
+  function styles(): StylesheetJson {
+    const p = palette();
+    return [
+      {selector: 'node', style: {label: 'data(label)', color: p.text, 'font-size': 11,
+        'text-wrap': 'wrap', 'text-max-width': '150px', 'text-valign': 'bottom', 'text-margin-y': 5,
+        width: 38, height: 38, 'background-color': '#477761', 'border-width': 2, 'border-color': p.line}},
+      {selector: 'node[kind="mechanic"]', style: {shape: 'round-rectangle', width: 52, height: 48, 'background-color': '#99703b'}},
+      {selector: 'node[fluid]', style: {'background-color': '#3b78a4'}},
+      {selector: 'node[utility]', style: {'background-color': '#79599d'}},
+      {selector: 'node[kind="external"]', style: {shape: 'round-rectangle', 'background-color': '#69717b'}},
+      {selector: 'node[implicit]', style: {'border-style': 'dashed'}},
+      {selector: 'node[target]', style: {'border-color': '#d49b14', 'border-width': 4}},
+      {selector: 'node[disabled], node[unused]', style: {opacity: 0.45, 'border-style': 'dotted'}},
+      {selector: 'node[icon]', style: {'background-image': 'data(icon)', 'background-fit': 'contain', 'background-clip': 'none'}},
+      {selector: 'edge', style: {width: 1.5, 'line-color': p.muted, 'target-arrow-color': p.muted,
+        'target-arrow-shape': 'triangle', 'curve-style': 'bezier', label: 'data(label)', color: p.text,
+        'font-size': 10, 'text-wrap': 'wrap', 'text-max-width': '240px', 'text-background-color': p.panel,
+        'text-background-opacity': 0.9, 'text-background-padding': '2px'}},
+      {selector: 'edge[utility]', style: {opacity: 0.3, label: '', 'curve-style': 'straight'}},
+      {selector: 'edge[kind="compatibility"]', style: {'line-style': 'dashed', 'line-color': '#9673af', 'target-arrow-color': '#9673af', 'font-size': 9}},
+      {selector: ':selected, .search-match', style: {'border-color': '#d49b14', 'border-width': 4, 'line-color': '#d49b14', 'target-arrow-color': '#d49b14'}},
+    ];
+  }
+  function saveViewport() {
+    if (!cy || cy.destroyed() || !cy.nodes().length) return;
+    viewState.zoom = cy.zoom(); viewState.pan = {...cy.pan()};
+    for (const node of cy.nodes()) viewState.positions.set(node.id(), {...node.position()});
+  }
+  function choose(id: string) {
+    selected = id; selectedMechanic = null;
+    const element = cy?.getElementById(id);
+    cy?.elements().unselect(); element?.select();
+    if (element?.isNode() && cy) {
+      if (cy.zoom() < 0.65) cy.zoom(0.85);
+      cy.animate({center: {eles: element}, duration: 150});
+    }
+  }
+  function highlight() {
+    if (!cy || cy.destroyed()) return;
+    cy.batch(() => {
+      cy!.nodes().removeClass('search-match');
+      if (needle) for (const node of matches) cy!.getElementById(node.id).addClass('search-match');
+    });
+  }
+
+  onMount(() => {
+    mounted = true;
+    void Promise.all([import('cytoscape'), import('elkjs/lib/elk-api.js'), import('elkjs/lib/elk-worker.min.js?worker')]).then(([graph, layout, worker]) => {
+      if (!mounted || !container) return;
+      cy = graph.default({container, elements: [], style: styles(), layout: {name: 'preset'},
+        minZoom: 0.08, maxZoom: 3, wheelSensitivity: 0.2, pixelRatio: 1, textureOnViewport: true});
+      elk = new layout.default({workerFactory: () => new worker.default()});
+      cy.on('tap', 'node, edge', event => { selected = event.target.id(); selectedMechanic = null; });
+      cy.on('tap', event => { if (event.target === cy) selected = undefined; });
+      cy.on('pan zoom dragfree', saveViewport);
+      ready = true;
+    }).catch(reason => { if (mounted) error = `无法加载网络绘图库：${String(reason)}`; });
+    const observer = new ResizeObserver(() => cy?.resize());
+    observer.observe(container!);
+    const themeObserver = new MutationObserver(() => { if (cy && !cy.destroyed()) cy.style(styles()); });
+    themeObserver.observe(globalThis.document.documentElement, {attributes: true, attributeFilter: ['data-theme', 'class', 'style']});
+    return () => {
+      mounted = false; generation++; saveViewport();
+      Object.assign(viewState, {collapse, showUtilities, onlyEnabled, query, selected});
+      observer.disconnect(); themeObserver.disconnect(); cy?.destroy(); elk?.terminateWorker(); cy = undefined;
+    };
+  });
+
+  $effect(() => {
+    if (!ready) return;
+    const snapshot = model;
+    runtime.iconRevision;
+    const revision = ++generation;
+    const timer = setTimeout(() => {
+      void draw(snapshot, revision).catch(reason => {
+        if (revision === generation && mounted) { error = `网络布局失败：${String(reason)}`; busy = false; }
+      });
+    }, 100);
+    return () => { clearTimeout(timer); if (generation === revision) generation++; };
+  });
+  $effect(() => { needle; matches; renderRevision; highlight(); });
+
+  async function draw(snapshot: typeof model, revision: number, reset = false) {
+    if (!cy || !elk || !mounted || revision !== generation) return;
+    busy = true; error = '';
+    if (!reset) saveViewport();
+    const material = snapshot.nodes.filter(node => !node.utility);
+    const laidOut = await elk.layout({id: 'root', layoutOptions: {
+      'elk.algorithm': 'layered', 'elk.direction': 'RIGHT', 'elk.edgeRouting': 'ORTHOGONAL',
+      'elk.spacing.nodeNode': '45', 'elk.layered.spacing.nodeNodeBetweenLayers': '100',
+      'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
+    }, children: material.map(node => ({id: node.id, width: node.kind === 'mechanic' ? 145 : 115, height: 100})),
+      edges: snapshot.edges.filter(edge => !edge.utility).map(edge => ({id: edge.id, sources: [edge.source], targets: [edge.target]}))});
+    if (!cy || !mounted || revision !== generation) return;
+    const positions = new Map(laidOut.children?.map(node => [node.id, {x: (node.x ?? 0) + 75, y: (node.y ?? 0) + 45}]));
+    const bottom = Math.max(0, ...[...positions.values()].map(p => p.y)) + 140;
+    snapshot.nodes.filter(node => node.utility).forEach((node, i) => positions.set(node.id, {x: 80 + i * 150, y: bottom}));
+    const hadViewport = viewState.zoom !== undefined;
+    const elements: ElementDefinition[] = snapshot.nodes.map(node => ({data: {id: node.id, label: node.label, kind: node.kind,
+      ...(node.flow && typeof node.flow !== 'string' && 'Fluid' in node.flow ? {fluid: true} : {}),
+      ...(node.utility ? {utility: true} : {}), ...(node.target ? {target: true} : {}),
+      ...(node.implicit ? {implicit: true} : {}), ...(node.disabled ? {disabled: true} : {}), ...(node.unused ? {unused: true} : {})},
+      position: viewState.positions.get(node.id) ?? positions.get(node.id)}));
+    elements.push(...snapshot.edges.map(edge => ({data: {id: edge.id, source: edge.source, target: edge.target,
+      label: edge.label, kind: edge.kind, ...(edge.utility ? {utility: true} : {})}})));
+    cy.batch(() => { cy!.elements().remove(); cy!.add(elements); });
+    if (hadViewport) { cy.zoom(viewState.zoom!); cy.pan(viewState.pan ?? {x: 0, y: 0}); }
+    else {
+      cy.fit(undefined, 35);
+      if (cy.zoom() < 0.4) {
+        const focus = snapshot.nodes.find(node => node.target) ?? snapshot.nodes.find(node => node.kind === 'mechanic');
+        cy.zoom(0.65);
+        if (focus) cy.center(cy.getElementById(focus.id));
+      }
+    }
+    if (selected) cy.getElementById(selected).select();
+    busy = false; renderRevision++;
+    // Icon requests are deduplicated by the existing runtime cache. Old generations
+    // cannot add icons after a document, context, factory or view change.
+    for (let offset = 0; offset < snapshot.nodes.length && revision === generation && mounted; offset += 8) {
+      await Promise.all(snapshot.nodes.slice(offset, offset + 8).map(async node => {
+        const info = node.flow ? presentFlow(node.flow, (k, n) => runtime.localizedName(k, n)) : undefined;
+        const ref = node.entries[0] ? mechanicPrototype(node.entries[0].mechanic) : undefined;
+        const name = info?.name ?? ref?.name, type = info?.type ?? (ref ? iconTypeForKind(ref.kind) : undefined);
+        if (!name || !type) return;
+        const url = syntheticIconUrls[name] ?? await runtime.getIcon(type, name);
+        if (url && cy && mounted && revision === generation) cy.getElementById(node.id).data('icon', url);
+      }));
+    }
+  }
+  function relayout() {
+    viewState.positions.clear(); viewState.zoom = undefined;
+    void draw(model, ++generation, true).catch(reason => { error = `网络布局失败：${String(reason)}`; busy = false; });
+  }
+  async function exportPng() {
+    if (!cy || busy) return;
+    try {
+      const blob = await cy.png({output: 'blob-promise', full: true, scale: 1, bg: palette().panel});
+      const url = URL.createObjectURL(blob), anchor = globalThis.document.createElement('a');
+      anchor.href = url; anchor.download = `metatorio-network-${project}-${factory}.png`; anchor.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (reason) { error = `导出失败：${String(reason)}`; }
+  }
+  function edgeDescription(edge: NetworkEdge) {
+    return edge.kind === 'compatibility' ? '可能的兼容转换，未表示实际分配量。'
+      : edge.kind === 'collapsed' ? '中间流的依赖折叠；产出与消耗分别计量，不代表点对点运输分配。'
+      : edge.kind === 'external' ? '可用的外部来源；此边不表示实际导入数量。' : edge.label;
+  }
+</script>
+
+<section class="network-view" use:rememberMechanicScroll={scrollState} aria-label="机制网络视图" data-network-ready={ready && !busy && renderRevision > 0}>
+  <div class="network-toolbar">
+    <input aria-label="搜索网络节点" placeholder="搜索名称、ID、品质或温度…" bind:value={query} />
+    <button class="btn" disabled={!ready || busy} onclick={relayout}>重排</button>
+    <button class="btn" disabled={!ready} onclick={() => cy?.fit(undefined, 35)}>适应窗口</button>
+    {#if needle}<button class="btn" disabled={!ready || !matches.length} onclick={() => choose(matches[0].id)}>定位匹配</button>{/if}
+    <button class="btn" disabled={!ready || busy} onclick={exportPng}>导出 PNG</button>
+    <label><input type="checkbox" bind:checked={collapse} />折叠中间流</label>
+    <label><input type="checkbox" bind:checked={showUtilities} />能量与污染</label>
+    <label><input type="checkbox" bind:checked={onlyEnabled} />仅启用</label>
+  </div>
+  <div class="network-status" role="status">
+    <span>{model.nodes.filter(node => node.kind === 'mechanic').length} 个机制节点 · {model.edges.length} 条关系</span>
+    <span>{solved ? '实际求解流量' : '未求解：单位机制流量；分组变体分别列量'}</span>
+    {#if !ready}<span>加载绘图库…</span>{:else if busy}<span>布局中…</span>{/if}
+    {#if workspace.pending}<span>展开 {workspace.completed} / {entries.length}</span>{/if}
+    {#if workspace.failures.length}<span class="warn">{workspace.failures.length} 个机制展开失败</span><button class="btn" onclick={() => workspace.retry++}>重试展开</button>{/if}
+  </div>
+  {#if error}<div class="network-error" role="alert">{error}<button class="btn" onclick={relayout}>重试布局</button></div>{/if}
+  <div class="network-canvas" bind:this={container} aria-label="生产网络画布"></div>
+  <div class="network-legend">方框：机制／外部来源 · 圆形：流 · 金边：目标 · 虚线来源：隐式输入 · 紫色虚线：兼容关系。未显示求解器的降温与提热辅助变量。</div>
+  <div class="network-credit">参考 stduuzurl / yoisaki kanade（YoisakiKanade222）的网络可视化器 · <a href="/licenses/network-notice.txt" target="_blank" rel="noopener noreferrer">来源与许可</a></div>
+  <details class="node-directory" open={!!needle}>
+    <summary>节点目录 · {matches.length}{needle ? ' 个匹配' : ' 个节点'}（可用键盘选择）</summary>
+    <div class="node-options">
+      {#each matches.slice(0, 100) as node (node.id)}
+        <button class="btn" class:active={selected === node.id} onclick={() => choose(node.id)}>{node.label.replaceAll('\n', ' · ')}</button>
+      {/each}
+      {#if matches.length > 100}<span>仅列出前 100 个，请搜索缩小范围。</span>{/if}
+    </div>
+  </details>
+  {#if selectedNode || selectedEdge}
+    <section class="network-details" aria-label="网络对象详情">
+      <button class="icon-btn close" aria-label="关闭网络详情" onclick={() => selected = undefined}>×</button>
+      {#if selectedNode}
+        {#if selectedNode.flow}<FlowRef flow={selectedNode.flow} />{:else}<strong>{selectedNode.label.replaceAll('\n', ' · ')}</strong>{/if}
+        {#if selectedNode.kind === 'external'}<p>{selectedNode.implicit ? '隐式外部输入 · 成本 0' : `手动外部输入 · 成本 ${selectedNode.external?.penalty}`}</p>{/if}
+        {#if selectedNode.entries.length > 1}
+          <div class="variant-options">{#each selectedNode.entries as entry (entry.id)}<button class="btn" class:active={editing?.id === entry.id} onclick={() => selectedMechanic = entry.id}>机制 #{entry.id}</button>{/each}</div>
+        {/if}
+        {#if editing}<div class="edit-card"><MechanicCard entry={editing} {project} {factory} {actions} solution={solutions.get(editing.id) ?? (solved ? {amount: 0, cost: 0} : null)} /></div>{/if}
+        {#if neighbours.length}<p>相邻对象</p><div class="node-options">{#each neighbours as node (node.id)}<button class="btn" onclick={() => choose(node.id)}>{node.label.replaceAll('\n', ' · ')}</button>{/each}</div>{/if}
+      {:else if selectedEdge}
+        {#if selectedEdge.flow}<FlowRef flow={selectedEdge.flow} />{/if}
+        <p>{edgeDescription(selectedEdge)}</p>
+        {#each selectedEdge.contributions as item, i (`${item.mechanic}:${i}`)}
+          <p>机制 #{item.mechanic} · {item.unitAmount < 0 ? '消耗' : '产出'} {networkRate(selectedEdge.flow!, solved ? item.amount : item.unitAmount, timeScale)}</p>
+        {/each}
+      {/if}
+    </section>
+  {/if}
+</section>
+
+<style>
+  .network-view { flex: 1 0 auto; min-width: 0; margin-top: 6px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); overflow: hidden; }
+  .network-toolbar, .network-status, .node-options, .variant-options { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .network-toolbar { padding: 8px; border-bottom: 1px solid var(--line); }
+  .network-toolbar > input { min-width: 130px; width: 210px; max-width: 100%; }
+  .network-toolbar label { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; }
+  .network-status { padding: 5px 8px; color: var(--muted); font-size: 11px; }
+  .network-canvas { height: clamp(360px, 62vh, 820px); width: 100%; position: relative; }
+  .network-legend, .node-directory { font-size: 11px; color: var(--muted); padding: 8px; border-top: 1px solid var(--line); }
+  .network-credit { color: var(--muted); font-size: 10px; padding: 0 8px 6px; }
+  .node-directory summary { cursor: pointer; }
+  .node-options { padding-top: 6px; max-height: 200px; overflow: auto; }
+  .node-options .btn { white-space: normal; text-align: left; font-size: 11px; max-width: 100%; overflow-wrap: anywhere; }
+  .network-details { padding: 10px; border-top: 1px solid var(--line); position: relative; }
+  .network-details p { font-size: 12px; color: var(--muted); margin: 8px 0; }
+  .close { float: right; }
+  .variant-options { margin: 6px 0; }
+  .edit-card { margin-top: 8px; overflow-x: auto; }
+  .edit-card :global(.mech-card) { min-width: 610px; }
+  .network-error { padding: 8px; color: var(--warn); }
+  .warn { color: var(--warn); }
+</style>

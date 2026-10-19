@@ -7,6 +7,9 @@ const host = process.env.TAURI_DEV_HOST;
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   plugins: [sveltekit()],
+  // Prebundle lazy graph engines before the dev server is ready, so opening
+  // the network view for the first time does not trigger a dependency reload.
+  optimizeDeps: { include: ["cytoscape", "elkjs/lib/elk-api.js"] },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //

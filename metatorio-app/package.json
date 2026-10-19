@@ -12,6 +12,8 @@
     "test:selector-browser": "node tests/selector-session-browser.cjs",
     "test:mechanic-filter": "node --test tests/mechanic-filter.test.mjs",
     "test:mechanic-commands": "node --test tests/mechanic-commands.test.mjs",
+    "test:network": "node --test tests/network.test.mjs",
+    "test:network-browser": "node tests/network-browser.cjs",
     "test:mechanic-filter-browser": "node tests/mechanic-filter-browser.cjs",
     "test:dual-var": "node --test tests/dual-var.test.mjs",
     "test:dual-var-browser": "node tests/dual-var-browser.cjs",
@@ -29,6 +31,8 @@
     "@tauri-apps/plugin-opener": "^2",
     "@tauri-apps/plugin-process": "^2",
     "@tauri-apps/plugin-updater": "^2",
+    "cytoscape": "^3.34.4",
+    "elkjs": "^0.12.0",
     "svelte-dnd-action": "^0.9.78"
   },
   "devDependencies": {
