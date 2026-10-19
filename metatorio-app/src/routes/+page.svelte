@@ -2838,7 +2838,10 @@
   {/if}
 
 <!-- ══ 选择器 ══ -->
+<!-- Each new request object identifies a fresh editing session. Mutating a
+     filter within that request must preserve the user's current draft. -->
 {#if selector}
+  {#key selector}
   <Selector
     kind={selector.kind}
     title={selector.title}
@@ -2854,9 +2857,11 @@
     multiLevelTechOnly={selector.multiLevelTechOnly}
     onClose={() => (selector = null)}
   />
+  {/key}
 {/if}
 
 {#if flowSelector}
+  {#key flowSelector}
   <Selector
     kind="item"
     title={flowSelector.title}
@@ -2869,6 +2874,7 @@
     onSelectFlow={flowSelector.onSelectFlow}
     onClose={() => (flowSelector = null)}
   />
+  {/key}
 {/if}
 
 <!-- ══ 新建项目 / 新建工厂 ══ -->

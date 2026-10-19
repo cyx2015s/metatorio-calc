@@ -8,7 +8,7 @@
   // 带品质的场景（物品/配方/实体类）支持"物品 + 品质"任意顺序选择：
   // 点击条目只是选中（高亮，不退出），点品质 chips 设定品质，最后按
   // 「确定」提交（双击条目 = 立即提交）；「取消」/Esc/点背景 = 提前退出。
-  import { onDestroy, onMount } from "svelte";
+  import { onDestroy, onMount, untrack } from "svelte";
   import { dismissHover, registerHoverDismiss } from "./hover-controller";
   import { runtime } from "$lib/runtime/store.svelte.ts";
   import HoverIcon from "./HoverIcon.svelte";
@@ -108,13 +108,15 @@
     "rocket-weight": "RocketWeightCapacity",
   };
 
-  let activeKind = $state<CatalogKind>(kind);
+  // A mounted selector is one editing session. Props seed its draft once;
+  // callers must remount (keyed session) when opening a different request.
+  let activeKind = $state<CatalogKind>(untrack(() => kind));
   let flowTab = $state<FlowTab>(
-    (flowTabs.some((tab) => tab.id === initialTab) ? initialTab : "item") as FlowTab,
+    untrack(() => (flowTabs.some((tab) => tab.id === initialTab) ? initialTab : "item") as FlowTab),
   );
   let customVariant = $state<"Pollution" | "Custom">("Custom");
   let customName = $state("");
-  let quality = $state(initialQuality || "normal");
+  let quality = $state(untrack(() => initialQuality || "normal"));
   /** 用户是否主动点过品质 chips（区别于默认 normal）——点过再点条目即自动确认。 */
   let qualityPicked = $state(false);
   let query = $state("");
@@ -122,7 +124,7 @@
   let loading = $state(false);
   let searchBox = $state<HTMLInputElement | null>(null);
   /** 已选中（待确认）的条目名；null = 未选。 */
-  let selected = $state<string | null>(initialName || null);
+  let selected = $state<string | null>(untrack(() => initialName || null));
 
   let hover = $state<{ x: number; y: number; kind: string; name: string } | null>(null);
   let hoverDetail = $state<import("$lib/runtime/types").PrototypeDetail | null>(null);
@@ -237,13 +239,6 @@
     }
     return [...map.entries()].map(([subgroup, items]) => ({ subgroup, items }));
   }
-
-  $effect(() => {
-    activeKind = kind;
-    activeGroup = null;
-    query = "";
-    selected = initialName || null;
-  });
 
   $effect(() => {
     searchBox?.focus();

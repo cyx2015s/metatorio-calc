@@ -209,7 +209,7 @@ async function run() {
     await editor.locator('[title="插件槽 1（点击更换）"]').click();
     await page.locator('.backdrop [aria-modal="true"]').waitFor();
     const prototypePicker=page.locator('.backdrop [aria-modal="true"]');
-    await prototypePicker.locator('.q-chip[title="legendary"]').click();
+    await prototypePicker.locator('.q-chip[title="传说"]').click();
     await prototypePicker.locator('.sg-items > button[aria-label="品质插件 3"]').hover();
     await page.getByRole('tooltip').waitFor();
     assert.match(await page.getByRole('tooltip').textContent(),/传说基础值/);
