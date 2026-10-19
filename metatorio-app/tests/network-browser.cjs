@@ -13,13 +13,15 @@ const url = `http://127.0.0.1:${port}`;
   try {
     await waitFor(async () => { try { return (await fetch(url)).ok; } catch { return false; } }, 600);
     browser = await chromium.launch({headless: true, ...(process.env.BROWSER_EXECUTABLE ? {executablePath: process.env.BROWSER_EXECUTABLE} : {})});
-    const page = await browser.newPage({viewport: {width: 1600, height: 1100}, acceptDownloads: true});
+    const page = await browser.newPage({viewport: {width: 1600, height: 1100}, deviceScaleFactor: 2, acceptDownloads: true});
     page.setDefaultTimeout(30000);
     const errors = [], requests = [];
     page.on('pageerror', error => errors.push(String(error)));
     page.on('request', request => requests.push(request.url()));
     await seed(page, 96);
     await page.addInitScript(() => {
+      localStorage.setItem('metatorio-ui-font', 'Courier New');
+      localStorage.setItem('metatorio-mono-font', 'Consolas');
       const raw = window.__TAURI_INTERNALS__.invoke;
       let failed = false;
       window.__TAURI_INTERNALS__.invoke = async (command, args) => {
@@ -54,6 +56,42 @@ const url = `http://127.0.0.1:${port}`;
     };
     await ready();
     assert.ok(await graph.locator('canvas').count() > 0, 'Cytoscape rendered a real canvas');
+    assert.equal(await graph.locator('.network-credit a').getAttribute('href'), 'https://github.com/YoisakiKanade222');
+    assert.equal(await graph.getByRole('link', {name: '来源与许可', exact: true}).count(), 0);
+    // Inspect the real renderer behind the canvas, rather than only CSS or
+    // requested options. _cyreg is test-only access to the pinned Cytoscape API.
+    const renderer = async () => graph.locator('.network-canvas').evaluate(node => {
+      const cy = node._cyreg.cy;
+      const canvas = [...node.querySelectorAll('canvas')].find(canvas => canvas.clientWidth > 0);
+      return {zoom: cy.zoom(), ratio: canvas.width / canvas.clientWidth,
+        nodeFont: cy.nodes().first().style('font-family'),
+        rateFont: cy.edges('[kind="flow"]').first().style('font-family')};
+    });
+    assert.ok((await renderer()).ratio >= 1.9, 'canvas backing pixels follow the high-DPI screen');
+    assert.ok((await renderer()).nodeFont.includes('Courier New'), 'labels use the saved global UI font');
+    assert.ok((await renderer()).rateFont.includes('Consolas'), 'quantities use the saved global code font');
+    await graph.locator('.network-canvas').hover({position: {x: 150, y: 150}});
+    const zoomBefore = (await renderer()).zoom;
+    for (let i = 0; i < 12; i++) {
+      await page.mouse.wheel(0, -100);
+      await page.waitForTimeout(20);
+    }
+    await waitFor(async () => (await renderer()).zoom > zoomBefore * 1.25);
+    const viewportNodeScans = await graph.locator('.network-canvas').evaluate(node => {
+      const cy = node._cyreg.cy, original = cy.nodes;
+      let scans = 0;
+      cy.nodes = function (...args) { scans++; return original.apply(this, args); };
+      try { cy.panBy({x: 3, y: 0}); } finally { cy.nodes = original; }
+      return scans;
+    });
+    assert.equal(viewportNodeScans, 0, 'panning must not scan or copy every node position');
+    await page.getByRole('button', {name: '应用菜单', exact: true}).click();
+    await page.getByRole('button', {name: '字体设置…', exact: true}).click();
+    const fontSettings = page.getByRole('dialog', {name: '字体设置', exact: true});
+    await fontSettings.getByLabel('界面字体', {exact: true}).fill('Arial');
+    await fontSettings.getByLabel('代码字体', {exact: true}).fill('Courier New');
+    await page.keyboard.press('Escape');
+    await waitFor(async () => (await renderer()).nodeFont.includes('Arial') && (await renderer()).rateFont.includes('Courier New'));
     assert.equal(await page.evaluate(() => new Set(window.__layoutCalls.filter(c => c.command === 'mechanic_flow').map(c => c.args.mechanic)).size), 96);
     await graph.getByRole('checkbox', {name: '能量与污染', exact: true}).check();
     await ready();

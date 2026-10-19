@@ -59,8 +59,11 @@
   }
   function styles(): StylesheetJson {
     const p = palette();
+    const computed = getComputedStyle(container!);
+    const uiFont = computed.fontFamily;
+    const monoFont = computed.getPropertyValue('--mono').trim() || uiFont;
     return [
-      {selector: 'node', style: {label: 'data(label)', color: p.text, 'font-size': 11,
+      {selector: 'node', style: {label: 'data(label)', color: p.text, 'font-size': 11, 'font-family': uiFont,
         'text-wrap': 'wrap', 'text-max-width': '150px', 'text-valign': 'bottom', 'text-margin-y': 5,
         width: 38, height: 38, 'background-color': '#477761', 'border-width': 2, 'border-color': p.line}},
       {selector: 'node[kind="mechanic"]', style: {shape: 'round-rectangle', width: 52, height: 48, 'background-color': '#99703b'}},
@@ -73,17 +76,18 @@
       {selector: 'node[icon]', style: {'background-image': 'data(icon)', 'background-fit': 'contain', 'background-clip': 'none'}},
       {selector: 'edge', style: {width: 1.5, 'line-color': p.muted, 'target-arrow-color': p.muted,
         'target-arrow-shape': 'triangle', 'curve-style': 'bezier', label: 'data(label)', color: p.text,
-        'font-size': 10, 'text-wrap': 'wrap', 'text-max-width': '240px', 'text-background-color': p.panel,
+        'font-size': 10, 'font-family': monoFont, 'text-wrap': 'wrap', 'text-max-width': '240px', 'text-background-color': p.panel,
         'text-background-opacity': 0.9, 'text-background-padding': '2px'}},
       {selector: 'edge[utility]', style: {opacity: 0.3, label: '', 'curve-style': 'straight'}},
-      {selector: 'edge[kind="compatibility"]', style: {'line-style': 'dashed', 'line-color': '#9673af', 'target-arrow-color': '#9673af', 'font-size': 9}},
+      {selector: 'edge[kind="collapsed"]', style: {'font-family': uiFont}},
+      {selector: 'edge[kind="compatibility"]', style: {'line-style': 'dashed', 'line-color': '#9673af', 'target-arrow-color': '#9673af', 'font-size': 9, 'font-family': uiFont}},
       {selector: ':selected, .search-match', style: {'border-color': '#d49b14', 'border-width': 4, 'line-color': '#d49b14', 'target-arrow-color': '#d49b14'}},
     ];
   }
-  function saveViewport() {
-    if (!cy || cy.destroyed() || !cy.nodes().length) return;
+  function saveViewport(savePositions = false) {
+    if (!cy || cy.destroyed() || renderRevision === 0) return;
     viewState.zoom = cy.zoom(); viewState.pan = {...cy.pan()};
-    for (const node of cy.nodes()) viewState.positions.set(node.id(), {...node.position()});
+    if (savePositions) for (const node of cy.nodes()) viewState.positions.set(node.id(), {...node.position()});
   }
   function choose(id: string) {
     selected = id; selectedMechanic = null;
@@ -107,11 +111,15 @@
     void Promise.all([import('cytoscape'), import('elkjs/lib/elk-api.js'), import('elkjs/lib/elk-worker.min.js?worker')]).then(([graph, layout, worker]) => {
       if (!mounted || !container) return;
       cy = graph.default({container, elements: [], style: styles(), layout: {name: 'preset'},
-        minZoom: 0.08, maxZoom: 3, wheelSensitivity: 0.2, pixelRatio: 1, textureOnViewport: true});
+        minZoom: 0.08, maxZoom: 3, pixelRatio: 'auto', textureOnViewport: false});
       elk = new layout.default({workerFactory: () => new worker.default()});
       cy.on('tap', 'node, edge', event => { selected = event.target.id(); selectedMechanic = null; });
       cy.on('tap', event => { if (event.target === cy) selected = undefined; });
-      cy.on('pan zoom dragfree', saveViewport);
+      cy.on('pan zoom', () => saveViewport());
+      cy.on('dragfree', 'node', event => {
+        const node = event.target;
+        viewState.positions.set(node.id(), {...node.position()});
+      });
       ready = true;
     }).catch(reason => { if (mounted) error = `无法加载网络绘图库：${String(reason)}`; });
     const observer = new ResizeObserver(() => cy?.resize());
@@ -119,7 +127,7 @@
     const themeObserver = new MutationObserver(() => { if (cy && !cy.destroyed()) cy.style(styles()); });
     themeObserver.observe(globalThis.document.documentElement, {attributes: true, attributeFilter: ['data-theme', 'class', 'style']});
     return () => {
-      mounted = false; generation++; saveViewport();
+      mounted = false; generation++; saveViewport(true);
       Object.assign(viewState, {collapse, showUtilities, onlyEnabled, query, selected});
       observer.disconnect(); themeObserver.disconnect(); cy?.destroy(); elk?.terminateWorker(); cy = undefined;
     };
@@ -142,7 +150,7 @@
   async function draw(snapshot: typeof model, revision: number, reset = false) {
     if (!cy || !elk || !mounted || revision !== generation) return;
     busy = true; error = '';
-    if (!reset) saveViewport();
+    if (!reset) saveViewport(true);
     const material = snapshot.nodes.filter(node => !node.utility);
     const laidOut = await elk.layout({id: 'root', layoutOptions: {
       'elk.algorithm': 'layered', 'elk.direction': 'RIGHT', 'elk.edgeRouting': 'ORTHOGONAL',
@@ -228,7 +236,7 @@
   {#if error}<div class="network-error" role="alert">{error}<button class="btn" onclick={relayout}>重试布局</button></div>{/if}
   <div class="network-canvas" bind:this={container} aria-label="生产网络画布"></div>
   <div class="network-legend">方框：机制／外部来源 · 圆形：流 · 金边：目标 · 虚线来源：隐式输入 · 紫色虚线：兼容关系。未显示求解器的降温与提热辅助变量。</div>
-  <div class="network-credit">参考 stduuzurl / yoisaki kanade（YoisakiKanade222）的网络可视化器 · <a href="/licenses/network-notice.txt" target="_blank" rel="noopener noreferrer">来源与许可</a></div>
+  <div class="network-credit">参考 <a href="https://github.com/YoisakiKanade222" target="_blank" rel="noopener noreferrer">stduuzurl / yoisaki kanade（YoisakiKanade222）</a> 的网络可视化器</div>
   <details class="node-directory" open={!!needle}>
     <summary>节点目录 · {matches.length}{needle ? ' 个匹配' : ' 个节点'}（可用键盘选择）</summary>
     <div class="node-options">
