@@ -46,27 +46,6 @@ export function itemOf(flow: DualVar): IdWithQuality | undefined {
   return undefined;
 }
 
-export function dualVarLabel(flow: DualVar): string {
-  const item = itemOf(flow);
-  if (item) return item.id;
-  if (typeof flow === "string") return flow;
-  if (flow !== null && typeof flow === "object") {
-    const record = flow as Record<string, unknown>;
-    const key = Object.keys(record)[0];
-    const value = record[key];
-    if (key === "VirtualScience") return `虚拟科研（${String(value)}）`;
-    if (value !== null && typeof value === "object") {
-      const inner = value as Record<string, unknown>;
-      if ("name" in inner) return String(inner.name);
-      if ("id" in inner) return String(inner.id);
-    }
-    // 燃料供给侧（ItemFuelSupply）与需求侧共用物品燃料的显示名/图标。
-    if (key === "ItemFuel" || key === "ItemFuelSupply") return "ItemFuel";
-    return key;
-  }
-  return String(flow);
-}
-
 /** 流的品质（Item/Entity 且非 normal 时返回；否则 null）。 */
 export function flowQuality(flow: DualVar): string | null {
   if (flow !== null && typeof flow === "object") {
@@ -638,6 +617,15 @@ export interface SolveResult {
   status: SolveStatus;
   /** 求解/自动规划的诊断（支撑集大小、回写过滤）。见 SolveDiagnostics。 */
   report?: SolveDiagnostics;
+}
+
+/** Structured domain failures keep flow identities intact across IPC/events. */
+export interface RuntimeDiagnostic {
+  code: string;
+  message: string;
+  no_provider: DualVar[];
+  no_consumer: DualVar[];
+  flows: DualVar[];
 }
 
 /**

@@ -1,6 +1,6 @@
 <script lang="ts">
   import RichText from "$lib/ui/RichText.svelte";
-  import { flowName, describeFlow, mechanicPrototype } from "$lib/display-labels";
+  import { flowName, mechanicPrototype } from "$lib/display-labels";
   // Metatorio 主界面：紧凑布局，圆角卡片分区；游戏内物品一律图标按钮，
   // 一般操作一律文字按钮。
   import { onMount } from "svelte";
@@ -10,7 +10,7 @@
   import { relaunch } from "@tauri-apps/plugin-process";
   import { runtime } from "$lib/runtime/store.svelte.ts";
   import { allowedModules, pickGameExecutable, pickModDir, suggest } from "$lib/runtime/client";
-  import { dualVarLabel, flowQuality, itemOf, accessibleKind, accessibleName } from "$lib/runtime/types";
+  import { itemOf, accessibleKind, accessibleName } from "$lib/runtime/types";
   import { signedCompactNumber } from "$lib/format";
   import type {
     Accessible,
@@ -26,6 +26,10 @@
   import MechanicRow from "$lib/ui/MechanicRow.svelte";
   import MechanicCard from "$lib/ui/MechanicCard.svelte";
   import MechanicFilter from "$lib/ui/MechanicFilter.svelte";
+  import FlowRef from "$lib/ui/FlowRef.svelte";
+  import DiagnosticView from "$lib/ui/DiagnosticView.svelte";
+  import { diagnosticFrom, diagnosticText } from "$lib/diagnostic";
+  import { isEnergyFlow, presentFlow } from "$lib/dual-var";
 
   const mechKinds: { kind: import("$lib/runtime/types").MechanicKind; label: string }[] = [
     { kind: "recipe", label: "配方" },
@@ -145,7 +149,7 @@
   function errorStripText(): string {
     return [
       runtime.contextError ? `数据：${runtime.contextError}` : "",
-      runtime.lastError ? `操作：${runtime.lastError}` : "",
+      runtime.lastError ? `操作：${diagnosticText(runtime.lastDiagnostic?.message === runtime.lastError ? runtime.lastDiagnostic : diagnosticFrom(runtime.lastError), (kind, name) => runtime.localizedName(kind, name))}` : "",
       notice ? `提示：${notice}` : "",
     ]
       .filter(Boolean)
@@ -568,41 +572,6 @@
   let solved = $derived(solve != null && "solved" in solve.status);
   let notSolved = $derived(solve != null && "not-solved" in solve.status);
 
-  function flowIcon(flow: DualVar): { type: string; name: string } {
-    if (typeof flow === "object" && "VirtualScience" in flow) return { type: "item", name: String(flow.VirtualScience) };
-    const item = itemOf(flow);
-    if (item) return { type: "item", name: item.id };
-    if (flow !== null && typeof flow === "object") {
-      if ("Fluid" in flow) {
-        const fluid = (flow as { Fluid: { name: string } }).Fluid;
-        return { type: "fluid", name: fluid.name };
-      }
-      if ("Entity" in flow) {
-        const entity = (flow as { Entity: { id: string } }).Entity;
-        return { type: "entity", name: entity.id };
-      }
-    }
-    return { type: "flow", name: dualVarLabel(flow) };
-  }
-
-  function flowDetailKind(icon: { type: string }): string | undefined {
-    if (icon.type === "item") return "item";
-    if (icon.type === "fluid") return "fluid";
-    if (icon.type === "entity") return "entity";
-    return undefined;
-  }
-
-  /** 能量类流（数值单位为瓦特 J/s）：Electricity / Heat / 抽象燃料热量。 */
-  function isEnergyFlow(flow: DualVar): boolean {
-    if (typeof flow === "string") {
-      return flow === "Electricity" || flow === "Heat";
-    }
-    if (flow !== null && typeof flow === "object") {
-      return "FluidHeat" in flow || "FluidFuel" in flow || "ItemFuel" in flow || "ItemFuelSupply" in flow;
-    }
-    return false;
-  }
-
   /** 瓦特 → 可读功率文本（数值为 J/s，直接换算，不乘 60）。 */
   function formatPowerValue(watts: number): string {
     if (watts >= 1e6) return `${(watts / 1e6).toFixed(2)} MW`;
@@ -640,28 +609,10 @@
   }
 
   /** 流的显示名：物品/流体/实体优先本地化名，否则内部 id。 */
-  function flowLabel(flow: DualVar, rich = false): string {
-    return flowName(flow, (kind, name) => rich ? runtime.richName(kind, name) : runtime.localizedName(kind, name));
+  function flowLabel(flow: DualVar): string {
+    return presentFlow(flow, (kind, name) => runtime.localizedName(kind, name)).description;
   }
 
-  /** 抽象能量流的第二行说明（燃料类别/流体名）；无则空串。 */
-  function flowLabelSub(flow: DualVar): string {
-    if (flow !== null && typeof flow === "object") {
-      if ("ItemFuel" in flow || "ItemFuelSupply" in flow) {
-        const inner = flow as {
-          ItemFuel?: { category: string[] };
-          ItemFuelSupply?: { category: string[] };
-        };
-        return (inner.ItemFuel ?? inner.ItemFuelSupply)?.category.map(id=>runtime.localizedName("fuel-category",id)).join(" / ") ?? "";
-      }
-      if ("FluidFuel" in flow || "FluidHeat" in flow) {
-        const inner = flow as { FluidFuel?: { filter: string }; FluidHeat?: { filter: string } };
-        const filter = inner.FluidFuel?.filter ?? inner.FluidHeat?.filter ?? "";
-        return filter ? runtime.localizedName("fluid", filter) || filter : "任意流体";
-      }
-    }
-    return "";
-  }
 
   /** 流 → 流选择器初始页签（编辑目标/外部输入时预选）。 */
   function flowTabOf(flow: DualVar): string {
@@ -1527,12 +1478,12 @@
 
   {#if runtime.contextError || runtime.lastError || notice}
     <div class="err-strip">
-      <div class="err-lines" bind:this={errLines}>
+      <div class="err-lines" class:structured={runtime.lastDiagnostic && (runtime.lastDiagnostic.flows.length + runtime.lastDiagnostic.no_provider.length + runtime.lastDiagnostic.no_consumer.length > 0)} bind:this={errLines}>
         {#if runtime.contextError}
           <span class="err-line" title={runtime.contextError}>数据：{runtime.contextError}</span>
         {/if}
         {#if runtime.lastError}
-          <span class="err-line" title={runtime.lastError}>操作：{runtime.lastError}</span>
+          <div><strong>操作失败</strong><DiagnosticView diagnostic={runtime.lastDiagnostic?.message === runtime.lastError ? runtime.lastDiagnostic : diagnosticFrom(runtime.lastError)} onFlowClick={openSuggestions} /></div>
         {/if}
         {#if notice}
           <span class="err-line notice" title={notice}>提示：{notice}</span>
@@ -1693,26 +1644,12 @@
             onfinalize={handleTargetsFinalize}
           >
             {#each dragTargets as target (target.id)}
-              {@const icon = flowIcon(target.flow)}
-              {@const q = flowQuality(target.flow)}
+
               {@const fluidRange = fluidRangeOf(target.flow)}
               <div class="row-item one-line" class:has-range={fluidRange}>
                 <!-- 图标承载两个动作：左键更改流、右键查看供给建议。
                      右键没有可见按钮，靠 title / 悬停卡片提示；移除动作在行尾悬浮出现。 -->
-                <HoverIcon
-                  type={icon.type}
-                  name={icon.name}
-                  size={26}
-                  detailKind={flowDetailKind(icon)}
-                  quality={q ?? undefined}
-                  flow={target.flow}
-                  title="左键更改流 · 右键建议能供给它的机制"
-                  onClick={() => editTarget(target)}
-                  onContextMenu={() => openSuggestions(target.flow)}
-                />
-                <span class="row-name" title={describeFlow(target.flow, (kind,name)=>runtime.localizedName(kind,name))}>
-                  <span class="flow-name"><RichText text={flowLabel(target.flow, true)} /></span>
-                </span>
+                <FlowRef flow={target.flow} grow showQualifiers={false} size={26} showBadge={!fluidRange} title="左键更改流 · 右键建议能供给它的机制" onClick={() => editTarget(target)} onContextMenu={() => openSuggestions(target.flow)} />
                 {#if fluidRange}
                   <!-- 流体目标的**期望温度区间**：区间内任何产出都能满足它，所以不必
                        钉死在一个温度点上（钉死会让目标在没人产出那个温度时直接不可解）。
@@ -1809,21 +1746,10 @@
             onfinalize={handleInputsFinalize}
           >
             {#each dragInputs as input (input.id)}
-              {@const icon = flowIcon(input.flow)}
-              {@const q = flowQuality(input.flow)}
+
               {@const fluidRange = fluidRangeOf(input.flow)}
               <div class="row-item">
-                <HoverIcon
-                  type={icon.type}
-                  name={icon.name}
-                  size={26}
-                  detailKind={flowDetailKind(icon)}
-                  quality={q ?? undefined}
-                  flow={input.flow}
-                  title={`外部输入：${flowLabel(input.flow)} · 点击更改`}
-                  onClick={() => editExternalInput(input)}
-                />
-                <span class="row-name" title={describeFlow(input.flow, (kind,name)=>runtime.localizedName(kind,name))}><RichText text={flowLabel(input.flow, true)} /></span>
+                <FlowRef flow={input.flow} grow showQualifiers={false} size={26} showBadge={!fluidRange} title="外部输入 · 点击更改" onClick={() => editExternalInput(input)} />
                 {#if fluidRange}
                   <!-- 与目标行同一套语义：区间内任何温度的外部输入都算满足。
                        外部输入本来就是"从外面买"，指定可接受温度区间比钉死一个温度更准。 -->
@@ -1891,20 +1817,10 @@
         {#if implicitInputs.length > 0}
           <div class="implicit-hint">环境自带（隐式免费，编辑成本可转为手动输入）</div>
           <div class="rows">
-            {#each implicitInputs as flow (dualVarLabel(flow))}
-              {@const icon = flowIcon(flow)}
-              {@const q = flowQuality(flow)}
+            {#each implicitInputs as flow (JSON.stringify(flow))}
+
               <div class="row-item one-line implicit" title="当前地表或轨道的可用资源，严格供给下也免费">
-                <HoverIcon
-                  type={icon.type}
-                  name={icon.name}
-                  size={24}
-                  detailKind={flowDetailKind(icon)}
-                  quality={q ?? undefined}
-                  flow={flow}
-                  title={`环境自带：${flowLabel(flow)} · 严格供给下也免费`}
-                />
-                <span class="row-name" title={flowLabel(flow)}><RichText text={flowLabel(flow, true)} /></span>
+                <FlowRef flow={flow} grow showQualifiers={false} size={24} title="环境自带 · 严格供给下也免费" />
                 <span class="chip">隐式</span>
                 <input
                   class="num"
@@ -1993,7 +1909,7 @@
                 </div>
                 <div class="expr-terms">
                   {#each expression.terms as term, ti (term.id)}
-                    {@const icon = flowIcon(term.flow)}
+
                     <div class="expr-term">
                       <button
                         class="icon-btn"
@@ -2010,17 +1926,8 @@
                           };
                         }}
                       >
-                        <HoverIcon
-                          type={icon.type}
-                          name={icon.name}
-                          size={20}
-                          detailKind={flowDetailKind(icon)}
-                          quality={flowQuality(term.flow) ?? undefined}
-                          flow={term.flow}
-                          title={`表达式项：${flowLabel(term.flow)} · 点击更换流`}
-                        />
+                        <FlowRef flow={term.flow} size={20} nested showQualifiers={false} />
                       </button>
-                      <span class="row-name" title={describeFlow(term.flow, (kind,name)=>runtime.localizedName(kind,name))}><RichText text={flowLabel(term.flow, true)} /></span>
                       <input
                         class="num"
                         type="number"
@@ -2609,7 +2516,7 @@
         </div>
         {#if runtime.solveError}
           <div class="err-box prominent" title="最近一次求解/自动规划失败">
-            <strong>求解失败</strong>：{runtime.solveError}
+            <strong>求解失败</strong><DiagnosticView diagnostic={runtime.solveDiagnostic?.message === runtime.solveError ? runtime.solveDiagnostic : diagnosticFrom(runtime.solveError)} onFlowClick={openSuggestions} />
           </div>
         {/if}
         {#if solve && "solved" in solve.status}
@@ -2626,27 +2533,10 @@
           </div>
           <div class="rows compact">
             {#each activeFlows as balance (balance.flow)}
-              {@const icon = flowIcon(balance.flow)}
-              {@const q = flowQuality(balance.flow)}
+
               <div class="row-item one-line result-row">
                 <!-- 与目标面板同一套图标语义：左键/右键都可查看建议。 -->
-                <HoverIcon
-                  type={icon.type}
-                  name={icon.name}
-                  size={22}
-                  detailKind={flowDetailKind(icon)}
-                  quality={q ?? undefined}
-                  flow={balance.flow}
-                  title="查看能供给或消耗该流的机制"
-                  onClick={() => openSuggestions(balance.flow)}
-                  onContextMenu={() => openSuggestions(balance.flow)}
-                />
-                <span class="row-name" title={describeFlow(balance.flow, (kind,name)=>runtime.localizedName(kind,name))}>
-                  <span class="flow-name"><RichText text={flowLabel(balance.flow, true)} /></span>
-                  {#if flowLabelSub(balance.flow)}
-                    <span class="flow-sub">{flowLabelSub(balance.flow)}</span>
-                  {/if}
-                </span>
+                <FlowRef flow={balance.flow} grow showQualifiers={false} size={22} title="查看能供给或消耗该流的机制" onClick={() => openSuggestions(balance.flow)} onContextMenu={() => openSuggestions(balance.flow)} />
                 <strong class:amount-pos={balance.amount > 0} class="mono amount">{formatFlowAmount(balance.flow, balance.amount)}</strong>
                 <span class="row-actions">
                   <button class="icon-btn" title={`建议：查看能供给或消耗「${flowLabel(balance.flow)}」的机制`} aria-label="查看建议" onclick={() => openSuggestions(balance.flow)}>✦</button>
@@ -2657,13 +2547,8 @@
         {:else if solve && "not-solved" in solve.status}
           {@const status = solve.status["not-solved"]}
           <div class="err-box">
-            <div><strong>未求解</strong>：{status.description}</div>
-            {#if status.no_provider.length > 0}
-              <div>无供给：{status.no_provider.map(flow => describeFlow(flow, (kind,name)=>runtime.localizedName(kind,name))).join(", ")}</div>
-            {/if}
-            {#if status.no_consumer.length > 0}
-              <div>无消耗：{status.no_consumer.map(flow => describeFlow(flow, (kind,name)=>runtime.localizedName(kind,name))).join(", ")}</div>
-            {/if}
+            <strong>未求解</strong>
+            <DiagnosticView diagnostic={{code: "not-solved", message: status.description, no_provider: status.no_provider, no_consumer: status.no_consumer, flows: []}} onFlowClick={openSuggestions} />
           </div>
         {:else}
           <div class="empty-hint">改动目标、外部输入或机制后会自动重新求解。</div>
@@ -3326,7 +3211,7 @@
 {#if suggestions}
   <div class="backdrop low" role="button" tabindex="0" onclick={(e) => { if (e.target === e.currentTarget) suggestions = null; }} onkeydown={(e) => backdropKeydown(e, () => (suggestions = null))}>
     <div class="prefs-modal">
-      <div class="mini-title">建议：<RichText text={flowLabel(suggestions.flow, true)} /></div>
+      <div class="mini-title">建议：<FlowRef flow={suggestions.flow} /></div>
       {#if suggestions.loading}
         <span class="muted">生成中…</span>
       {:else if suggestions.items.length === 0}
@@ -3883,6 +3768,7 @@
   .err-line.notice {
     color: var(--muted);
   }
+  .err-lines.structured { max-height: min(260px, 35vh); overflow: auto; }
 
   .err-copy {
     flex: 0 0 auto;
@@ -4198,47 +4084,14 @@
     flex-wrap: nowrap;
   }
 
-  .row-item.one-line .row-name {
-    flex: 1 1 30px;
-    overflow: hidden;
-  }
 
   .row-item.one-line.has-range {
     flex-wrap: wrap;
   }
 
-  .row-item .row-name {
-    /* 基准宽度刻意取小：flex 换行用基准值判断是否放得下，基准 90px 会让
-       「图标 + 名称 + 温度区间 + 数值 + 动作」在 1024 宽度下提前换行。
-       名称仍会 flex-grow 填满剩余空间，只是不再把数值挤到第二行。 */
-    flex: 1 1 30px;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0;
-  }
 
-  .row-name {
-    min-width: 0;
-    overflow: hidden;
-    font-size: 11.5px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
 
-  .flow-name {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
 
-  .flow-sub {
-    overflow: hidden;
-    color: var(--faint);
-    font-size: 9px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
 
   .row-actions {
     flex: 0 0 auto;

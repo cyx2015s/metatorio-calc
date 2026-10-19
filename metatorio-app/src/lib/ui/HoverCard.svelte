@@ -5,12 +5,14 @@
   import { detailStats, formatStat, statLabels } from "./hover-model";
   import { accessibleKind, accessibleKindFor, accessibleName, type DualVar, type FlowAmount, type PrototypeDetail } from "$lib/runtime/types";
   import { flowName } from "$lib/display-labels";
+  import { isEnergyFlow, presentFlow, type FlowMatch } from "$lib/dual-var";
   import Icon from "./Icon.svelte";
   import RichText from "./RichText.svelte";
 
-  let { kind, detail, x, y, flow, quality = "normal", flowRate, rateBasis, onEnter, onLeave }: {
+  let { kind, detail, x, y, flow, quality = "normal", flowRate, rateBasis, match, onEnter, onLeave }: {
     kind: string; detail: PrototypeDetail | null; x: number; y: number;
     flow?: DualVar; quality?: string; flowRate?: number; rateBasis?: "solution" | "unit"; onEnter?: () => void; onLeave?: () => void;
+    match?: FlowMatch;
   } = $props();
   const labels: Record<string, string> = {item:"物品",fluid:"流体",recipe:"配方",module:"插件",machine:"制造机","mining-machine":"采矿机","offshore-pump":"抽水机",generator:"发电机",boiler:"锅炉",reactor:"反应堆",beacon:"插件塔",resource:"资源",entity:"实体",technology:"科技",planet:"星球",surface:"地表",quality:"品质",tile:"地格","solar-panel":"太阳能板",accumulator:"蓄电器"};
   const flowHelp: Record<string,string> = {
@@ -21,9 +23,10 @@
     VirtualScience:"科研单位由科技瓶品质和科研容量换算，不包含实验室速度、品质或产能。", Pollution:"污染流按项目时间刻度显示；排放与可用的消耗途径参与配平。",
   };
   let flowKey = $derived(typeof flow === "string" ? flow : flow ? Object.keys(flow)[0] : "");
+  let flowInfo = $derived(flow ? presentFlow(flow, (kind, name) => runtime.localizedName(kind, name), match) : null);
   let inner = $derived(flow && typeof flow === "object" ? (flow as Record<string, unknown>)[flowKey] as Record<string, unknown> | string : undefined);
   let virtualScience = $derived(flowKey === "VirtualScience");
-  let heading = $derived(virtualScience ? `虚拟科研 · ${runtime.richName("item", String(inner))}` : detail?.localized_name || detail?.name || flowName(flow ?? "Unknown", (kind, name) => runtime.richName(kind, name)));
+  let heading = $derived(flow ? flowName(flow, (kind, name) => runtime.richName(kind, name)) : detail?.localized_name || detail?.name || "未指定");
   let iconName = $derived(detail?.name || (virtualScience ? String(inner) : flowKey === "ItemFuelSupply" ? "ItemFuel" : flowKey));
   let iconType = $derived(detail ? iconTypeForKind(detail.kind) : virtualScience ? "item" : "flow");
   let stats = $derived(detailStats(detail, quality));
@@ -31,7 +34,7 @@
   let research = $derived(detail?.calculation?.research);
   let properties = $derived(Object.entries(detail?.calculation?.surface_properties ?? {}));
   let tile = $derived(detail?.calculation?.tile);
-  let actualPower = $derived(["Electricity","Heat","ItemFuel","ItemFuelSupply","FluidFuel","FluidHeat"].includes(flowKey));
+  let actualPower = $derived(flow ? isEnergyFlow(flow) : false);
   let accessibleState = $state<"accessible" | "inaccessible" | "unknown">("unknown");
   $effect(() => {
     accessibleState = "unknown";
@@ -89,8 +92,9 @@
   <div use:portal bind:this={card} class="hover-card" role="tooltip" style:left={`${left}px`} style:top={`${top}px`} style:max-height={`${maxHeight}px`} onmouseenter={onEnter} onmouseleave={onLeave}>
     <header>
       <Icon type={iconType} name={iconName} size={30} />
-      <div class="heading"><strong><RichText text={heading} /></strong><code>{detail?.name || flowKey}</code></div>
-      <div class="badges"><span>{labels[kind] || (virtualScience ? "科研价值" : "计算流")}</span>
+      <div class="heading"><strong>{#if flowKey === "Custom"}{heading}{:else}<RichText text={heading} />{/if}</strong><code>{flowInfo?.identifier || detail?.name || flowKey}</code></div>
+      <div class="badges"><span>{flowInfo?.kindLabel || labels[kind] || "计算流"}</span>
+        {#if match}<span>筛选条件</span>{/if}
         {#if quality !== "normal"}<span><RichText text={runtime.richName("quality",quality)} /></span>{/if}
         {#if detail?.hidden}<span>隐藏</span>{/if}
         {#if accessibleState !== "unknown"}<span class:unavailable={accessibleState === "inaccessible"}>{accessibleState === "accessible" ? "可达" : "不可达"}</span>{/if}
@@ -100,12 +104,9 @@
       <div class="actual"><span>{rateBasis === "unit" ? "单位机制" : "实际"}{flowRate < 0 || Object.is(flowRate,-0) ? "消耗" : "产出"}</span><strong>{actualPower ? formatStat({key:"flow",value:Math.abs(flowRate),unit:"watts"}) : `${compactNumber(Math.abs(flowRate) * factor)} ${unit}`}</strong></div>
     {/if}
     {#if flowHelp[flowKey]}<p class="note">{flowHelp[flowKey]}</p>{/if}
-    {#if inner && typeof inner === "object"}
+    {#if flowInfo?.facts.length}
       <div class="facts">
-        {#if "temperature" in inner}<span>当前流温度</span><strong>{(inner.temperature as number[])[0] === (inner.temperature as number[])[1] ? (inner.temperature as number[])[0] : (inner.temperature as number[]).join("～")}℃</strong>{/if}
-        {#if "category" in inner}<span>燃料类别</span><strong><RichText text={(inner.category as string[]).map(id=>runtime.richName("fuel-category",id)).join(" / ") || "任意"} /></strong>{/if}
-        {#if "filter" in inner}<span>流体限制</span><strong>{inner.filter ? runtime.localizedName("fluid",String(inner.filter)) : "任意流体"}</strong>{/if}
-        {#if "name" in inner && ["Pollution","Custom"].includes(flowKey)}<span>流名称</span><strong><RichText text={flowKey === "Pollution" ? runtime.richName("airborne-pollutant",String(inner.name)) : String(inner.name)} /></strong>{/if}
+        {#each flowInfo.facts as fact}<span>{fact.label}</span><strong>{fact.value}</strong>{/each}
       </div>
     {/if}
     {#if tile}
@@ -125,7 +126,7 @@
       </section>
     {/if}
     {#if stats.length}
-      <section><h4>{detail?.calculation?.qualities.some((entry) => entry.quality === quality) ? `${runtime.localizedName("quality", quality)}基础值` : "原型基础值"}<small>未计插件与工厂环境</small></h4>
+      <section><h4>{detail?.calculation?.qualities.some((entry) => entry.quality === quality) ? `${runtime.localizedName("quality", quality)}基础值` : "原型基础值"}<small>{match && flowInfo?.wildcard && flowInfo.kind !== "Fluid" ? "普通品质参考值；匹配不限品质" : "未计插件与工厂环境"}</small></h4>
         <div class="stats">{#each stats as stat (stat.key)}<div><span>{statLabels[stat.key] || stat.key}</span><strong>{formatStat(stat)}{stat.key.includes("temperature") ? "℃" : ""}</strong></div>{/each}</div>
       </section>
     {/if}

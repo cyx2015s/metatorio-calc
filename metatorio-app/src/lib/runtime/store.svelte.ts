@@ -2,6 +2,7 @@ import { IconCache } from "./icon-cache";
 import { richTextPlain } from "$lib/rich-text";
 import { lookupName } from "$lib/display-labels";
 import { MechanicFlowCache } from "$lib/mechanic-filter";
+import { diagnosticFrom } from "$lib/diagnostic";
 // Svelte 5 rune-based store bridging the frontend to the Tauri runtime.
 //
 // `runtime` is a singleton: the UI reads its $state fields reactively and
@@ -55,6 +56,7 @@ import type {
   ProjectId,
   PrototypeDetail,
   SolveResult,
+  RuntimeDiagnostic,
   TargetId,
   TimeScale,
   ExternalInputId,
@@ -124,6 +126,7 @@ class RuntimeStore {
   projectPaths = $state<Map<ProjectId, string>>(new Map());
   solve = $state<SolveResult | null>(null);
   solveError = $state<string | null>(null);
+  solveDiagnostic = $state<RuntimeDiagnostic | null>(null);
   /** 求解结果缓存：`${project}:${factory}` → 结果，切换项目/工厂时恢复。 */
   private solveCache = new Map<string, SolveResult>();
   revision = $state(0);
@@ -135,6 +138,12 @@ class RuntimeStore {
    *  只在真正执行自动规划时置为 true，避免后台自动重算把「自动规划」按钮误禁用。 */
   autoPlanning = $state(false);
   lastError = $state<string | null>(null);
+  lastDiagnostic = $state<RuntimeDiagnostic | null>(null);
+
+  private setOperationError(error: unknown): void {
+    this.lastDiagnostic = diagnosticFrom(error);
+    this.lastError = this.lastDiagnostic.message;
+  }
   ready = $state(false);
   /** 撤销/重做可用性（启动时 history_state 初始化，之后每次 dispatch 回执同步）。 */
   history = $state<HistoryStatus>({
@@ -266,6 +275,7 @@ class RuntimeStore {
     onSolveResult((result) => {
       this.solve = result;
       this.solveError = null;
+      this.solveDiagnostic = null;
       this.solving = null;
       // 缓存到当前工厂：切换回来时直接恢复，不重复求解。
       const [project, factory] = this.currentFactoryKey();
@@ -274,7 +284,8 @@ class RuntimeStore {
       }
     });
     onSolveError((message) => {
-      this.solveError = message;
+      this.solveDiagnostic = diagnosticFrom(message);
+      this.solveError = this.solveDiagnostic.message;
       this.solving = null;
     });
     onContextsChanged(() => {
@@ -297,7 +308,9 @@ class RuntimeStore {
     // 命令阶段失败（自动保存写盘失败等）：没有专属事件，统一进「操作」错误条，
     // 否则失败只写 stderr，界面上完全看不出来。
     onCommandError((errors) => {
-      this.lastError = errors.join("；");
+      const diagnostics = errors.map(diagnosticFrom);
+      this.setOperationError(diagnostics.length === 1 ? diagnostics[0] : {code: "command-failed", message: diagnostics.map(error => error.message).join("；"),
+        no_provider: diagnostics.flatMap(error => error.no_provider), no_consumer: diagnostics.flatMap(error => error.no_consumer), flows: diagnostics.flatMap(error => error.flows)});
     });
     try {
       this.document = await getDocument();
@@ -312,7 +325,7 @@ class RuntimeStore {
       // 首个渲染就能用上译名，而不是回退到内部 id。
       await this.loadCatalogIndex();
     } catch (error) {
-      this.lastError = String(error);
+      this.setOperationError(error);
     }
     this.ready = true;
     this.refreshOrderedMilestones().catch(() => {});
@@ -352,6 +365,7 @@ class RuntimeStore {
   async send(message: AppMessage): Promise<DispatchResult> {
     this.busy = true;
     this.lastError = null;
+    this.lastDiagnostic = null;
     const prevProject = this.selectedProjectId;
     let result: DispatchResult;
     try {
@@ -363,7 +377,7 @@ class RuntimeStore {
       this.accessibility = null;
       await this.refresh();
     } catch (error) {
-      this.lastError = String(error);
+      this.setOperationError(error);
       throw error;
     } finally {
       this.busy = false;
@@ -640,7 +654,7 @@ class RuntimeStore {
       this.syncEffectiveContext().catch(() => {});
       return true;
     } catch (error) {
-      this.lastError = String(error);
+      this.setOperationError(error);
       throw error;
     } finally {
       this.busy = false;
@@ -658,7 +672,7 @@ class RuntimeStore {
       await this.refreshProjectPaths();
       return true;
     } catch (error) {
-      this.lastError = String(error);
+      this.setOperationError(error);
       throw error;
     } finally {
       this.busy = false;
@@ -678,7 +692,7 @@ class RuntimeStore {
       await this.refreshProjectPaths();
       return true;
     } catch (error) {
-      this.lastError = String(error);
+      this.setOperationError(error);
       throw error;
     } finally {
       this.busy = false;
@@ -715,7 +729,7 @@ class RuntimeStore {
         this.iconRevision++;
         return this.catalogIndex;
       } catch (error) {
-        this.lastError = String(error);
+        this.setOperationError(error);
         return null;
       } finally {
         this.catalogLoadPromise = null;
@@ -1842,7 +1856,8 @@ class RuntimeStore {
       this.solving = null;
       // 求解失败：写入 solveError 让求解面板醒目显示
       // （后端失败会发 solve-error 事件覆盖；dispatch 校验失败走这里）。
-      this.solveError = String(error);
+      this.solveDiagnostic = diagnosticFrom(error);
+      this.solveError = this.solveDiagnostic.message;
       throw error;
     }
   }
@@ -1861,7 +1876,8 @@ class RuntimeStore {
       this.solving = null;
       // 自动规划失败：同时写入 solveError，让求解面板醒目显示
       // （后端失败会发 solve-error 事件覆盖；dispatch 校验失败走这里）。
-      this.solveError = String(error);
+      this.solveDiagnostic = diagnosticFrom(error);
+      this.solveError = this.solveDiagnostic.message;
       throw error;
     } finally {
       this.autoPlanning = false;

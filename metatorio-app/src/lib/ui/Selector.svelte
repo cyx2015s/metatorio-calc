@@ -15,6 +15,7 @@
   import Icon from "./Icon.svelte";
   import HoverCard from "./HoverCard.svelte";
   import RichText from "./RichText.svelte";
+  import FlowRef from "./FlowRef.svelte";
   import { normalizeSearch, richTextPlain } from "$lib/rich-text";
   import type { CatalogKind, DualVar, IndexEntry } from "$lib/runtime/types";
   import {
@@ -526,9 +527,8 @@
       {#if isDirect}
         {@const flow = directFlows[flowTab]!}
         <div class="direct-panel">
-          <HoverIcon type="flow" name={flow} size={40} title={flow} flow={flow as DualVar} />
+          <FlowRef flow={flow as DualVar} size={40} />
           <div class="direct-copy">
-            <strong>{flow}</strong>
             <small>点击添加该流</small>
           </div>
           <button class="btn primary" onclick={() => commitDirect(flow)}>添加</button>
@@ -947,9 +947,6 @@
     gap: 2px;
   }
 
-  .direct-copy strong {
-    font-size: 12px;
-  }
 
   .direct-copy small {
     color: var(--muted);

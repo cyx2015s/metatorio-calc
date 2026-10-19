@@ -358,7 +358,18 @@ impl MetatorioMcp {
                 let auto_plan = match status {
                     AutoPlanState::Running => serde_json::json!({ "status": "running" }),
                     AutoPlanState::Failed(error) => {
-                        serde_json::json!({ "status": "failed", "error": error })
+                        let mut diagnostic = serde_json::to_value(&error).unwrap_or_default();
+                        if let Some(object) = diagnostic.as_object_mut() {
+                            for field in ["no_provider", "no_consumer", "flows"] {
+                                report.page_key(
+                                    object,
+                                    field,
+                                    &format!("auto_plan.diagnostic.{field}"),
+                                    page,
+                                );
+                            }
+                        }
+                        serde_json::json!({ "status": "failed", "error": error.message, "diagnostic": diagnostic })
                     }
                     AutoPlanState::Done { revision, result } => {
                         let mut result =
@@ -593,7 +604,7 @@ impl MetatorioMcp {
                     if let Ok(mut plans) = host.state().auto_plans.lock() {
                         plans.insert(
                             (project, factory),
-                            AutoPlanState::Failed("未能触发自动规划命令".to_string()),
+                            AutoPlanState::Failed("未能触发自动规划命令".into()),
                         );
                     }
                 }
@@ -985,16 +996,23 @@ async fn dispatch_message(
             .runtime
             .lock()
             .map_err(|_| "runtime 锁已损坏（poisoned）".to_string())?;
-        runtime.dispatch(message).map_err(|error| error.to_string())
+        runtime
+            .dispatch(message)
+            .map_err(metatorio_runtime::Diagnostic::from)
     })
     .await
     .map_err(|error| McpError::internal_error(format!("dispatch join 失败: {error}"), None))?
-    .map_err(|error| McpError::invalid_params(format!("dispatch 执行失败: {error}"), None))?;
+    .map_err(|error| {
+        McpError::invalid_params(
+            format!("dispatch 执行失败: {error}"),
+            serde_json::to_value(&error).ok(),
+        )
+    })?;
 
     // 2) 副作用：求解在锁外跑（不阻塞 GUI 与其它 MCP 调用）。
     let state = host.state();
     let state_ref = &state;
-    let (solve, commands, errors) = run_commands(&outcome.commands, move |command| {
+    let (solve, commands, errors, diagnostics) = run_commands(&outcome.commands, move |command| {
         // 闭包返回值不能借用参数，故克隆命令进 async 块。
         let command = command.clone();
         async move { execute_command(host, state_ref, &command).await }
@@ -1034,7 +1052,7 @@ async fn dispatch_message(
         "history": &outcome.history,
         "scheduled_commands": commands,
         "solve": solve,
-        "errors": errors,
+        "errors": errors, "diagnostics": diagnostics,
         "page": report.value(page),
     });
     // 有失败时把结果标记为错误：agent 必须能区分「命令跑了但失败了」

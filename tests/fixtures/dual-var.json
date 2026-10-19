@@ -1,0 +1,17 @@
+[
+  {"flow":{"Item":{"id":"iron","quality":"rare"}},"type":"item","name":"iron"},
+  {"flow":{"Entity":{"id":"iron","quality":"legendary"}},"type":"entity","name":"iron","badge":"实体"},
+  {"flow":{"Fluid":{"name":"steam","temperature":[165,500]}},"type":"fluid","name":"steam","badge":"165～500℃"},
+  {"flow":{"VirtualScience":"science"},"type":"item","name":"science","badge":"科研"},
+  {"flow":{"ItemFuel":{"category":["chemical"],"has_burnt_result":true}},"type":"flow","name":"ItemFuel","badge":"需"},
+  {"flow":{"ItemFuelSupply":{"category":["chemical"],"has_burnt_result":true}},"type":"flow","name":"ItemFuel","badge":"供"},
+  {"flow":{"FluidHeat":{"filter":"steam"}},"type":"flow","name":"FluidHeat"},
+  {"flow":{"FluidFuel":{"filter":""}},"type":"flow","name":"FluidFuel"},
+  {"flow":{"Pollution":{"name":"pollution"}},"type":"flow","name":"Pollution"},
+  {"flow":{"Custom":{"name":"[item=iron]<literal>"}},"type":"flow","name":"Custom"},
+  {"flow":"Unknown","type":"flow","name":"Unknown"},
+  {"flow":"Electricity","type":"flow","name":"Electricity"},
+  {"flow":"Heat","type":"flow","name":"Heat"},
+  {"flow":"RocketSlotCapacity","type":"flow","name":"RocketSlotCapacity","badge":"槽位"},
+  {"flow":"RocketWeightCapacity","type":"flow","name":"RocketWeightCapacity","badge":"重量"}
+]

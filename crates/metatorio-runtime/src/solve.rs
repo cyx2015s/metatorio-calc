@@ -1106,6 +1106,7 @@ pub fn plan_auto_plan(
         // 失败」是诊断自动规划失败的前提。
         let SolverSolution::NotSolved {
             no_provider,
+            no_consumer,
             description,
             ..
         } = solution
@@ -1117,10 +1118,13 @@ pub fn plan_auto_plan(
         } else {
             existing_recipe_surface_note(store, factory_doc)
         };
-        return Err(RuntimeError::InvalidValue(format!(
-            "自动规划无解：{description}{environment_note}；无供给 {} 项：{no_provider:?}",
-            no_provider.len()
-        )));
+        let mut diagnostic = crate::Diagnostic::new(
+            "auto-plan-not-solved",
+            format!("自动规划未求解：{description}{environment_note}"),
+        );
+        diagnostic.no_provider = no_provider;
+        diagnostic.no_consumer = no_consumer;
+        return Err(RuntimeError::Diagnostic(Box::new(diagnostic)));
     };
     // 保留被选中的候选（用量 > 阈值）。HiGHS 给精确顶点解，这里只有一档阈值。
     let filtered = crate::auto_plan::used_candidates(&candidates, prim);
@@ -1246,7 +1250,16 @@ fn existing_recipe_surface_note(store: &PrototypeStore, factory: &FactoryDocumen
             &recipe.surface_conditions,
             &properties,
         ) {
-            let message = format!("{} {:?}", mechanic.recipe.id, recipe.surface_conditions);
+            let message = format!(
+                "{}：{}",
+                mechanic.recipe.id,
+                recipe
+                    .surface_conditions
+                    .iter()
+                    .map(crate::prototype::surface_condition_text)
+                    .collect::<Vec<_>>()
+                    .join("、")
+            );
             if !rejected.contains(&message) {
                 rejected.push(message);
             }
@@ -3128,6 +3141,22 @@ mod tests {
         let error = runtime
             .run_command(&command)
             .expect_err("严格供给下缺失原料应让自动规划失败");
+        let diagnostic = crate::Diagnostic::from(error.clone());
+        assert_eq!(diagnostic.code, "auto-plan-not-solved");
+        assert!(
+            diagnostic
+                .no_provider
+                .contains(&DualVar::Item(IdWithQuality::new("iron-plate", "normal")))
+        );
+        assert!(!diagnostic.message.contains("Item("));
+        let value = serde_json::to_value(&diagnostic).unwrap();
+        assert!(
+            value["no_provider"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|flow| flow["Item"]["id"] == "iron-plate")
+        );
         assert!(
             error.to_string().contains("无供给"),
             "错误应指出缺失的供给：{error}"

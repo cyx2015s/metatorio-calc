@@ -6,6 +6,7 @@
 //! them and schedules persistence or solving as needed.
 
 pub mod auto_plan;
+pub mod diagnostic;
 pub mod document;
 pub mod id;
 pub mod message;
@@ -16,6 +17,7 @@ pub mod solve;
 pub mod state;
 pub mod validate;
 
+pub use diagnostic::Diagnostic;
 pub use document::{
     AppDocument, AutoBeaconPlan, DOCUMENT_SCHEMA_VERSION, ExternalInput, FactoryDocument,
     FactorySettings, FlowTarget, InfiniteTechLevel, MechanicEntry, MechanicKind, Milestone,

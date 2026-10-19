@@ -8,6 +8,7 @@
   import Icon from "./Icon.svelte";
   import HoverCard from "./HoverCard.svelte";
   import type { PrototypeDetail } from "$lib/runtime/types";
+  import type { FlowMatch } from "$lib/dual-var";
 
   let {
     type = "item",
@@ -21,6 +22,8 @@
     flow,
     flowRate,
     rateBasis,
+    match,
+    focusable = false,
   }: {
     type?: string;
     name?: string;
@@ -39,6 +42,8 @@
     flow?: import("$lib/runtime/types").DualVar;
     flowRate?: number;
     rateBasis?: "solution" | "unit";
+    match?: FlowMatch;
+    focusable?: boolean;
   } = $props();
 
   let hoverActive = $state(false);
@@ -58,19 +63,20 @@
   );
 
   // 抽象流（无原型详情）也会触发悬停，只要它能提供具体参数（定温流体/燃料类别等）。
-  let flowActive = $derived(!!flow && flow !== "Unknown");
+  let flowActive = $derived(!!flow);
   let enabled = $derived((!!detailKind && detailKind !== "flow") || flowActive);
   let leaveTimer: ReturnType<typeof setTimeout> | undefined;
   function keepOpen() { clearTimeout(leaveTimer); }
   onDestroy(() => clearTimeout(leaveTimer));
   onMount(() => registerHoverDismiss(() => { keepOpen(); hoverActive = false; }));
 
-  function enter(event: MouseEvent) {
+  function enter(event: MouseEvent | FocusEvent) {
     if (!enabled || !name) return;
     dismissHover();
     keepOpen();
     hoverActive = true;
-    pos = { x: event.clientX, y: event.clientY };
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    pos = event instanceof MouseEvent ? { x: event.clientX, y: event.clientY } : {x: rect.left, y: rect.bottom};
   }
 
   function leave() {
@@ -97,13 +103,18 @@
 <!-- 悬停工具提示容器：非可点击态用 span + 鼠标悬停展示详情，非"可交互"语义，
      此规则对该场景是误报，抑制。 -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
+<!-- svelte-ignore a11y_no_noninteractive_tabindex (Object references reveal details on keyboard focus.) -->
 <svelte:element
   this={interactive ? "button" : "span"}
   class="hover-icon"
   class:clickable={interactive}
   type={interactive ? "button" : undefined}
   title={tip}
-  aria-label={interactive ? tip || name : undefined}
+  aria-label={tip || name}
+  role={!interactive && focusable ? "img" : undefined}
+  tabindex={!interactive && focusable && enabled ? 0 : undefined}
+  onfocus={enter}
+  onblur={leave}
   onmouseenter={enter}
   onmouseleave={leave}
   onclick={onClick}
@@ -132,7 +143,7 @@
 </svelte:element>
 
 {#if hoverActive && (detail || flowActive)}
-  <HoverCard kind={detailKind ?? ""} {detail} x={pos.x} y={pos.y} {flow} {quality} {flowRate} {rateBasis} onEnter={keepOpen} onLeave={leave} />
+  <HoverCard kind={detailKind ?? ""} {detail} x={pos.x} y={pos.y} {flow} {quality} {flowRate} {rateBasis} {match} onEnter={keepOpen} onLeave={leave} />
 {/if}
 
 <style>

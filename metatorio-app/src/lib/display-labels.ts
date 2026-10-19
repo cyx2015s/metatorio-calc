@@ -27,31 +27,6 @@ export function flowName(flow: DualVar, localize: Localize): string {
   return flowLabels[key] || key;
 }
 
-/** Human-facing diagnostics retain quality, temperature and fuel constraints. */
-export function describeFlow(flow: DualVar, localize: Localize): string {
-  const name=flowName(flow,localize);
-  if (typeof flow === "string") return name;
-  const key=Object.keys(flow)[0], value=Object.values(flow)[0];
-  if (key === "Item" || key === "Entity") {
-    const quality=(value as IdWithQuality).quality;
-    return name+(quality && quality!=="normal" ? `（${localize("quality",quality)}）` : "");
-  }
-  if (key === "Fluid") {
-    const range=(value as {temperature:[number,number]}).temperature;
-    return range ? `${name}（${range[0]===range[1]?range[0]:range.join("～")}℃）` : name;
-  }
-  if (key === "ItemFuel" || key === "ItemFuelSupply") {
-    const fuel=value as {category:string[];has_burnt_result?:boolean};
-    const categories=fuel.category.map(id=>localize("fuel-category",id)).join(" / ") || "任意";
-    return `${name}（${categories}${fuel.has_burnt_result ? "；有燃烧产物" : ""}）`;
-  }
-  if (key === "FluidHeat" || key === "FluidFuel") {
-    const filter=(value as {filter:string}).filter;
-    return `${name}（${filter?localize("fluid",filter):"任意流体"}）`;
-  }
-  return name;
-}
-
 export function mechanicPrototype(mechanic: Mechanic): {kind:string;name:string} {
   switch(mechanic.type) {
     case "recipe": return {kind:"recipe",name:mechanic.recipe?.id || ""};

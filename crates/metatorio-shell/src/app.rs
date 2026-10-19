@@ -64,11 +64,14 @@ pub struct AppState {
     pub(crate) solve_jobs: solve_jobs::SolveJobs<metatorio_runtime::SolveResult>,
     /// 自动规划调度器：产出 `(快照, 候选机制, 候选过滤记录)`，回写前用快照
     /// 校验版本；过滤记录随求解结果返回（见 `SolveDiagnostics`）。
-    pub(crate) autoplan_jobs: solve_jobs::SolveJobs<(
-        metatorio_runtime::SolveSnapshot,
-        Vec<metatorio_core::Mechanic>,
-        metatorio_runtime::solve::AutoPlanReport,
-    )>,
+    pub(crate) autoplan_jobs: solve_jobs::SolveJobs<
+        (
+            metatorio_runtime::SolveSnapshot,
+            Vec<metatorio_core::Mechanic>,
+            metatorio_runtime::solve::AutoPlanReport,
+        ),
+        metatorio_runtime::Diagnostic,
+    >,
     /// 上下文载入的按键串行锁（同一上下文只读盘解析一次）。
     pub(crate) context_loads: solve_jobs::KeyLocks,
     pub(crate) contexts: Mutex<ContextRegistry>,
@@ -98,7 +101,7 @@ pub enum AutoPlanState {
         result: Box<metatorio_runtime::SolveResult>,
     },
     /// 失败（无解 / 版本冲突 / 上下文缺失等）：原样带上错误信息。
-    Failed(String),
+    Failed(metatorio_runtime::Diagnostic),
 }
 
 /// MCP `dispatch` / `auto_plan` 的幂等缓存（有界 FIFO）。
@@ -392,14 +395,20 @@ pub(crate) fn spawn_auto_plan(
         let revision =
             with_runtime(host.state(), |runtime| Ok(runtime.state.revision)).unwrap_or(0);
         let next = if !outcome.errors.is_empty() {
-            AutoPlanState::Failed(outcome.errors.join("；"))
+            AutoPlanState::Failed(
+                outcome
+                    .diagnostics
+                    .into_iter()
+                    .next()
+                    .unwrap_or_else(|| outcome.errors.join("；").into()),
+            )
         } else {
             match outcome.effect {
                 Some(metatorio_runtime::CommandEffect::Solve(result)) => AutoPlanState::Done {
                     revision,
                     result: Box::new(result),
                 },
-                _ => AutoPlanState::Failed("自动规划没有产出求解结果".to_string()),
+                _ => AutoPlanState::Failed("自动规划没有产出求解结果".into()),
             }
         };
         if let Ok(mut plans) = host.state().auto_plans.lock() {
@@ -3227,6 +3236,7 @@ pub(crate) struct CommandOutcome {
     effect: Option<metatorio_runtime::CommandEffect>,
     /// 失败信息（按发生顺序累积；GUI 事件不受影响）。
     errors: Vec<String>,
+    diagnostics: Vec<metatorio_runtime::Diagnostic>,
 }
 
 impl CommandOutcome {
@@ -3234,13 +3244,16 @@ impl CommandOutcome {
         Self {
             effect,
             errors: Vec::new(),
+            diagnostics: Vec::new(),
         }
     }
 
-    fn failed(error: impl Into<String>) -> Self {
+    fn failed(error: impl Into<metatorio_runtime::Diagnostic>) -> Self {
+        let diagnostic = error.into();
         Self {
             effect: None,
-            errors: vec![error.into()],
+            errors: vec![diagnostic.message.clone()],
+            diagnostics: vec![diagnostic],
         }
     }
 
@@ -3250,6 +3263,7 @@ impl CommandOutcome {
             self.effect = other.effect;
         }
         self.errors.extend(other.errors);
+        self.diagnostics.extend(other.diagnostics);
     }
 }
 
@@ -3282,6 +3296,7 @@ pub(crate) async fn run_commands<F, Fut>(
     Option<metatorio_runtime::SolveResult>,
     Vec<serde_json::Value>,
     Vec<String>,
+    Vec<metatorio_runtime::Diagnostic>,
 )
 where
     F: FnMut(&RuntimeCommand) -> Fut,
@@ -3290,6 +3305,7 @@ where
     let mut solve = None;
     let mut serialized = Vec::new();
     let mut errors = Vec::new();
+    let mut diagnostics = Vec::new();
     for command in commands {
         let outcome = execute(command).await;
         if solve.is_none()
@@ -3298,11 +3314,12 @@ where
             solve = Some(result);
         }
         errors.extend(outcome.errors);
+        diagnostics.extend(outcome.diagnostics);
         if let Ok(value) = serde_json::to_value(command) {
             serialized.push(value);
         }
     }
-    (solve, serialized, errors)
+    (solve, serialized, errors, diagnostics)
 }
 
 /// Execute the side effects of one [`RuntimeCommand`] on the shared runtime,
@@ -3564,13 +3581,13 @@ pub(crate) async fn execute_command(
                             .map_err(|_| "runtime 锁已损坏（poisoned）".to_string())?;
                         runtime
                             .solve_snapshot_inputs(project, factory)
-                            .map_err(|error| error.to_string())
+                            .map_err(metatorio_runtime::Diagnostic::from)
                     },
                     move |snapshot| {
                         let accessibility = snapshot.resolve_accessibility();
                         let (mechanics, auto_report) =
                             metatorio_runtime::solve::plan_auto_plan(snapshot, &accessibility)
-                                .map_err(|error| error.to_string())?;
+                                .map_err(metatorio_runtime::Diagnostic::from)?;
                         if let Ok(runtime) = compute_host.state().runtime.lock() {
                             runtime.cache_accessibility_if_current(
                                 snapshot.project,
@@ -4258,7 +4275,10 @@ pub fn prototype_detail(
     Ok(Some(detail))
 }
 
-pub async fn dispatch(host: &Arc<dyn Host>, message: AppMessage) -> Result<DispatchResult, String> {
+pub async fn dispatch(
+    host: &Arc<dyn Host>,
+    message: AppMessage,
+) -> Result<DispatchResult, metatorio_runtime::Diagnostic> {
     let outcome = {
         let state = host.state();
         let mut runtime = state
@@ -4267,7 +4287,7 @@ pub async fn dispatch(host: &Arc<dyn Host>, message: AppMessage) -> Result<Dispa
             .map_err(|_| "runtime 锁已损坏（poisoned）".to_string())?;
         runtime
             .dispatch(message)
-            .map_err(|error| error.to_string())?
+            .map_err(metatorio_runtime::Diagnostic::from)?
     };
     // 与 MCP 的 `dispatch` 工具共用同一套汇总（`run_commands`）：求解产出、
     // 命令序列化、失败收集。求解/上下文类命令自己会 emit（`solve-error` /
@@ -4276,14 +4296,15 @@ pub async fn dispatch(host: &Arc<dyn Host>, message: AppMessage) -> Result<Dispa
     let state = host.state();
     let state_ref = &state;
     let app_ref = host;
-    let (_solve, _commands, errors) = run_commands(&outcome.commands, move |command| {
-        // 闭包返回值不能借用参数，故克隆命令进 async 块。
-        let command = command.clone();
-        async move { execute_command(app_ref, state_ref, &command).await }
-    })
-    .await;
+    let (_solve, _commands, errors, diagnostics) =
+        run_commands(&outcome.commands, move |command| {
+            // 闭包返回值不能借用参数，故克隆命令进 async 块。
+            let command = command.clone();
+            async move { execute_command(app_ref, state_ref, &command).await }
+        })
+        .await;
     if !errors.is_empty() {
-        emit(host, "command-error", errors);
+        emit(host, "command-error", diagnostics);
     }
     Ok(outcome)
 }
@@ -5282,11 +5303,13 @@ mod tests {
                 factory: FactoryId(2),
             },
         ];
-        let (solve, serialized, errors) = run_commands(&commands, |command| {
+        let (solve, serialized, errors, diagnostics) = run_commands(&commands, |command| {
             let failed = matches!(command, RuntimeCommand::CheckForUpdate);
             async move {
                 if failed {
-                    CommandOutcome::failed("boom")
+                    let mut diagnostic = metatorio_runtime::Diagnostic::new("test", "boom");
+                    diagnostic.flows.push(DualVar::Heat);
+                    CommandOutcome::failed(diagnostic)
                 } else {
                     CommandOutcome::done(Some(metatorio_runtime::CommandEffect::Solve(
                         metatorio_runtime::SolveResult {
@@ -5307,7 +5330,102 @@ mod tests {
 
         assert!(solve.is_some(), "应保留求解产出");
         assert_eq!(errors, vec!["boom".to_string()], "错误必须被收集");
+        assert_eq!(diagnostics[0].message, "boom");
+        assert_eq!(diagnostics[0].flows, vec![DualVar::Heat]);
         assert_eq!(serialized.len(), 2, "每条命令都应序列化");
+    }
+
+    #[tokio::test]
+    async fn autoplan_failure_emits_structured_flow_diagnostic() {
+        #[derive(Default)]
+        struct DiagnosticHost {
+            state: AppState,
+            events: Mutex<Vec<(String, serde_json::Value)>>,
+        }
+        impl Host for DiagnosticHost {
+            fn state(&self) -> &AppState {
+                &self.state
+            }
+            fn app_data_dir(&self) -> PathBuf {
+                PathBuf::new()
+            }
+            fn emit(&self, event: &str, payload: serde_json::Value) {
+                self.events.lock().unwrap().push((event.into(), payload));
+            }
+        }
+        let concrete = Arc::new(DiagnosticHost::default());
+        let (project, factory) = {
+            let mut runtime = concrete.state.runtime.lock().unwrap();
+            runtime.install_context(
+                "test".into(),
+                PrototypeStore::load(&serde_json::from_str(DEMO_DUMP).unwrap()).unwrap(),
+            );
+            runtime.set_active_context(Some("test".into()));
+            runtime
+                .dispatch(AppMessage::Application(ApplicationAction::NewProject {
+                    name: "p".into(),
+                }))
+                .unwrap();
+            let project = runtime.state.document.projects[0].id;
+            let factory = runtime.state.document.projects[0].factories[0].id;
+            runtime
+                .dispatch(AppMessage::Project {
+                    project,
+                    action: ProjectAction::SetAllAccessible { enabled: true },
+                })
+                .unwrap();
+            runtime
+                .dispatch(AppMessage::Factory {
+                    project,
+                    factory,
+                    action: FactoryAction::Flow(metatorio_runtime::FlowAction::AddToTarget {
+                        flow: DualVar::Item(IdWithQuality::new("iron-gear-wheel", "normal")),
+                        amount: 1.0,
+                    }),
+                })
+                .unwrap();
+            (project, factory)
+        };
+        let host: Arc<dyn Host> = concrete.clone();
+        spawn_auto_plan(
+            host,
+            project,
+            factory,
+            RuntimeCommand::AutoPlan { project, factory },
+        );
+        let diagnostic = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                if let Some(AutoPlanState::Failed(diagnostic)) = concrete
+                    .state
+                    .auto_plans
+                    .lock()
+                    .unwrap()
+                    .get(&(project, factory))
+                    .cloned()
+                {
+                    break diagnostic;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(diagnostic.code, "auto-plan-not-solved");
+        assert!(
+            diagnostic
+                .no_provider
+                .contains(&DualVar::Item(IdWithQuality::new("iron-plate", "normal")))
+        );
+        let events = concrete.events.lock().unwrap();
+        let (_, payload) = events
+            .iter()
+            .find(|(name, _)| name == "solve-error")
+            .unwrap();
+        assert_eq!(
+            serde_json::from_value::<metatorio_runtime::Diagnostic>(payload.clone()).unwrap(),
+            diagnostic
+        );
+        assert!(!diagnostic.message.contains("Item("));
     }
 
     /// 品质上限自动提升必须看到**文档里显式引用的每一个品质**，包括那些

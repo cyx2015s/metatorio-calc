@@ -6,6 +6,9 @@ export const syntheticIconUrls: Record<string, string> = {
   ItemFuel: "/icons/item-fuel.png",
   RocketSlotCapacity: "/icons/rocket-capacity.png",
   RocketWeightCapacity: "/icons/rocket-capacity.png",
+  Pollution: "/icons/pollution.svg",
+  Custom: "/icons/custom-flow.svg",
+  Unknown: "/icons/unknown-flow.svg",
 };
 
 /** 原型归类必须与 Rust 图标生成目录一致，机器/资源等实体子类归入 entity。 */

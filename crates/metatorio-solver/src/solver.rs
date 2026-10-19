@@ -670,13 +670,8 @@ where
                 let mut description = err_string;
                 if !self.pruned_missing.is_empty() {
                     description.push_str(&format!(
-                        "；剪枝阶段缺少供给的物品/流 {} 个：{}",
+                        "；剪枝阶段缺少供给的物品/流 {} 个（见无供给列表）",
                         self.pruned_missing.len(),
-                        self.pruned_missing
-                            .iter()
-                            .map(|item| format!("{item:?}"))
-                            .collect::<Vec<_>>()
-                            .join(", ")
                     ));
                 }
                 SolverSolution::NotSolved {
@@ -904,9 +899,9 @@ mod tests {
     }
 
     #[test]
-    fn pruning_reports_missing_item_in_description_and_no_provider() {
+    fn pruning_keeps_missing_identity_in_no_provider_instead_of_debug_description() {
         // 严格供给：配方消耗 "uranium-ore"，但没有任何配方产出它、外部
-        // 也不供给 → 剪枝应移除该配方，并在失败描述里报告缺少的物品。
+        // 也不供给 → 缺失对象必须放在结构化集合，描述只说明原因与数量。
         let mut target = AIndexMap::default();
         target.insert("uranium-fuel-cell", 1.0);
         let mut flows = AIndexMap::default();
@@ -930,8 +925,8 @@ mod tests {
             "NoProvider 应包含剪枝阶段缺的物品: {no_provider:?}"
         );
         assert!(
-            description.contains("uranium-ore"),
-            "描述应报告剪枝阶段缺少的物品: {description}"
+            description.contains("1 个") && !description.contains("uranium-ore"),
+            "描述不应再拼接内部对象的 Debug 文本: {description}"
         );
     }
 

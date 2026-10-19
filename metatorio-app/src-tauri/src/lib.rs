@@ -170,7 +170,10 @@ fn prototype_detail(
 }
 
 #[tauri::command]
-async fn dispatch(host: HostState<'_>, message: AppMessage) -> Result<DispatchResult, String> {
+async fn dispatch(
+    host: HostState<'_>,
+    message: AppMessage,
+) -> Result<DispatchResult, metatorio_runtime::Diagnostic> {
     metatorio_shell::app::dispatch(&host_of(&host), message).await
 }
 

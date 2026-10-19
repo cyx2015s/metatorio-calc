@@ -19,6 +19,7 @@ import type {
   Milestone,
   PrototypeDetail,
   SolveResult,
+  RuntimeDiagnostic,
 } from "./types";
 
 function inTauri(): boolean {
@@ -193,8 +194,8 @@ export function onSolveResult(handler: (result: SolveResult) => void): Promise<(
   return listen<SolveResult>("solve-result", (event) => handler(event.payload));
 }
 
-export function onSolveError(handler: (message: string) => void): Promise<() => void> {
-  return listen<string>("solve-error", (event) => handler(event.payload));
+export function onSolveError(handler: (message: string | RuntimeDiagnostic) => void): Promise<() => void> {
+  return listen<string | RuntimeDiagnostic>("solve-error", (event) => handler(event.payload));
 }
 
 export function onContextsChanged(handler: (list: ContextList) => void): Promise<() => void> {
@@ -219,6 +220,6 @@ export function onDocumentChanged(handler: (revision: number) => void): Promise<
  * 求解/上下文类命令自己会发 `solve-error` / `context-error`；落盘（自动保存）、
  * 关闭项目等没有专属事件——没有这个广播，它们的失败在界面上完全不可见。
  */
-export function onCommandError(handler: (errors: string[]) => void): Promise<() => void> {
-  return listen<string[]>("command-error", (event) => handler(event.payload));
+export function onCommandError(handler: (errors: (string | RuntimeDiagnostic)[]) => void): Promise<() => void> {
+  return listen<(string | RuntimeDiagnostic)[]>("command-error", (event) => handler(event.payload));
 }

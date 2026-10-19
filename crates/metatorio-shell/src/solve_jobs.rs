@@ -81,19 +81,21 @@ impl KeyLocks {
 ///
 /// `R` 是这次「求解」的产出：重算产 [`SolveResult`]，自动规划产
 /// `(快照, 候选机制)`（快照用于回写前的版本校验）。
-pub struct SolveJobs<R> {
+pub struct SolveJobs<R, E = String> {
     slots: Mutex<HashMap<SolveKey, Arc<Mutex<Slot<R>>>>>,
     /// 单次求解的等待上限：超时返回可重试错误，后台任务继续跑完
     /// （结果丢弃；重试会重新算）。普通重算默认 120s，异步 auto_plan 默认
     /// 1800s；`METATORIO_SOLVE_TIMEOUT_MS` 可调。
     timeout: Duration,
+    error: std::marker::PhantomData<fn() -> E>,
 }
 
-impl<R> Default for SolveJobs<R> {
+impl<R, E> Default for SolveJobs<R, E> {
     fn default() -> Self {
         Self {
             slots: Mutex::new(HashMap::new()),
             timeout: solve_timeout_from_env(Duration::from_secs(120)),
+            error: std::marker::PhantomData,
         }
     }
 }
@@ -107,7 +109,7 @@ fn solve_timeout_from_env(default: Duration) -> Duration {
         .unwrap_or(default)
 }
 
-impl<R: Clone + Send + 'static> SolveJobs<R> {
+impl<R: Clone + Send + 'static, E: From<String> + Send + 'static> SolveJobs<R, E> {
     /// MCP auto_plan returns its running state immediately; its background job
     /// can wait longer than an ordinary synchronous recompute. Explicit timeout
     /// configuration still takes precedence over this default.
@@ -115,6 +117,7 @@ impl<R: Clone + Send + 'static> SolveJobs<R> {
         Self {
             slots: Mutex::new(HashMap::new()),
             timeout: solve_timeout_from_env(Duration::from_secs(1800)),
+            error: std::marker::PhantomData,
         }
     }
     /// 覆盖等待上限（`--solve-timeout-ms` 或测试用）。
@@ -137,10 +140,10 @@ impl<R: Clone + Send + 'static> SolveJobs<R> {
     ///
     /// - `take_snapshot`：在 runtime 锁内取快照（微秒级），每次调用都会重新取。
     /// - `compute`：锁外纯计算，跑在阻塞线程池上；应自行回填可达性缓存。
-    pub async fn run<F, G>(&self, key: SolveKey, take_snapshot: F, compute: G) -> Result<R, String>
+    pub async fn run<F, G>(&self, key: SolveKey, take_snapshot: F, compute: G) -> Result<R, E>
     where
-        F: Fn() -> Result<SolveSnapshot, String> + Send + Sync + 'static,
-        G: Fn(&SolveSnapshot) -> Result<R, String> + Send + Sync + 'static,
+        F: Fn() -> Result<SolveSnapshot, E> + Send + Sync + 'static,
+        G: Fn(&SolveSnapshot) -> Result<R, E> + Send + Sync + 'static,
     {
         let slot = self.slot(key).await;
         // 同键串行：等锁期间文档可能已被别人算过，因此快照要在拿到锁之后取。
@@ -163,13 +166,16 @@ impl<R: Clone + Send + 'static> SolveJobs<R> {
                 // 不取消任务）。这样调用方不会被一个失控求解钉住十分钟，重试
                 // 也只是重算一次，不会留下锁。
                 match tokio::time::timeout(self.timeout, handle).await {
-                    Ok(joined) => joined.map_err(|error| format!("求解任务 join 失败: {error}"))?,
+                    Ok(joined) => {
+                        joined.map_err(|error| E::from(format!("求解任务 join 失败: {error}")))?
+                    }
                     Err(_) => {
                         return Err(format!(
                             "求解超时（等待超过 {} 秒，任务仍在后台运行）：请稍后重试，\
                              或先缩小目标 / 关闭自动规划后重算",
                             self.timeout.as_secs()
-                        ));
+                        )
+                        .into());
                     }
                 }
             };

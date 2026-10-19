@@ -1637,6 +1637,7 @@ impl CreatedIds {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuntimeError {
+    Diagnostic(Box<crate::Diagnostic>),
     ProjectNotFound(ProjectId),
     FactoryNotFound {
         project: ProjectId,
@@ -1664,6 +1665,7 @@ pub enum RuntimeError {
 impl fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Diagnostic(diagnostic) => fmt::Display::fmt(diagnostic, f),
             Self::ProjectNotFound(id) => write!(f, "找不到项目 {}", id.0),
             Self::FactoryNotFound { project, factory } => {
                 write!(f, "项目 {} 里找不到工厂 {}", project.0, factory.0)

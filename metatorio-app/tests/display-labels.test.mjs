@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { lookupName, flowName, describeFlow, mechanicPrototype } from '../src/lib/display-labels.ts';
+import { lookupName, flowName, mechanicPrototype } from '../src/lib/display-labels.ts';
 
 const names = new Map(Object.entries({
   'item/iron-plate': '铁板', 'entity/drill': '采矿机', 'item/module': '插件',
@@ -36,17 +36,6 @@ for (const [flow, expected] of [
   [{FluidFuel:{filter:'steam'}},'流体燃料'],
   [{FluidHeat:{filter:'steam'}},'流体热量'],
 ]) test(`human flow name: ${JSON.stringify(flow)}`, () => assert.equal(flowName(flow, localize), expected));
-
-test('diagnostics retain quality, temperature and fuel restrictions', () => {
-  assert.equal(describeFlow({Item:{id:'iron-plate',quality:'rare'}},localize),'铁板（稀有）');
-  assert.equal(describeFlow({Item:{id:'iron-plate',quality:'normal'}},localize),'铁板');
-  assert.equal(describeFlow({Fluid:{name:'steam',temperature:[165,500]}},localize),'蒸汽（165～500℃）');
-  assert.equal(describeFlow({Fluid:{name:'steam',temperature:[165,165]}},localize),'蒸汽（165℃）');
-  assert.equal(describeFlow({ItemFuel:{category:['chemical'],has_burnt_result:true}},localize),'物品燃料（化学燃料；有燃烧产物）');
-  assert.equal(describeFlow({ItemFuelSupply:{category:[]}},localize),'物品燃料供给（任意）');
-  assert.equal(describeFlow({FluidHeat:{filter:'steam'}},localize),'流体热量（蒸汽）');
-  assert.equal(describeFlow({FluidFuel:{filter:''}},localize),'流体燃料（任意流体）');
-});
 
 test('synthetic icon labels are Chinese without changing prototype IDs', () => {
   assert.equal(localize('flow','Electricity'),'电力');

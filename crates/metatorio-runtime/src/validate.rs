@@ -222,17 +222,21 @@ fn validate_factory(store: &PrototypeStore, action: &FactoryAction) -> Result<()
 /// `#[serde(default)]`，漏填 `flow` 的消息能反序列化成功、然后把这个占位写进文档，
 /// 所以它必须报错而不是放行。
 fn require_flow(store: &PrototypeStore, flow: &DualVar) -> Result<(), RuntimeError> {
-    match flow {
+    let result = match flow {
         DualVar::VirtualScience(name) => require_science_pack(store, name),
         DualVar::Item(item) => require_id(store, PrototypeGroup::Item, "物品", item),
         DualVar::Entity(entity) => require_id(store, PrototypeGroup::Entity, "实体", entity),
         DualVar::Fluid { name, .. } => require(store, PrototypeGroup::Fluid, "流体", name),
         DualVar::Unknown => Err(RuntimeError::InvalidValue(
-            "流未指定（DualVar::Unknown）：目标 / 外部输入必须给出具体的物品、流体或实体"
-                .to_string(),
+            "流未指定：目标 / 外部输入必须给出具体的物品、流体或实体".to_string(),
         )),
         _ => Ok(()),
-    }
+    };
+    result.map_err(|error| {
+        let mut diagnostic = crate::Diagnostic::new("invalid-flow", error.to_string());
+        diagnostic.flows.push(flow.clone());
+        RuntimeError::Diagnostic(Box::new(diagnostic))
+    })
 }
 
 fn validate_target(store: &PrototypeStore, target: &FlowTarget) -> Result<(), RuntimeError> {
@@ -413,6 +417,30 @@ fn validate_module(store: &PrototypeStore, action: &ModuleAction) -> Result<(), 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn invalid_flows_preserve_complete_identity_in_diagnostics() {
+        for flow in [
+            DualVar::Item(IdWithQuality::new("missing-item", "normal")),
+            DualVar::Fluid {
+                name: "missing-fluid".into(),
+                temperature: [165, 500],
+            },
+            DualVar::VirtualScience("coal".into()),
+            DualVar::Unknown,
+        ] {
+            let error = require_flow(&store(), &flow).unwrap_err();
+            let diagnostic = crate::Diagnostic::from(error);
+            assert_eq!(diagnostic.code, "invalid-flow");
+            assert_eq!(diagnostic.flows, vec![flow]);
+            assert!(!diagnostic.message.contains("DualVar::"));
+            let json = serde_json::to_value(&diagnostic).unwrap();
+            assert_eq!(
+                serde_json::from_value::<crate::Diagnostic>(json).unwrap(),
+                diagnostic
+            );
+        }
+    }
     use serde_json::json;
 
     fn store() -> PrototypeStore {
@@ -711,7 +739,8 @@ mod tests {
             amount: 1.0,
         }));
         let error = validate_message(&store, &unknown).unwrap_err();
-        assert!(error.to_string().contains("Unknown"), "{error}");
+        assert!(error.to_string().contains("流未指定"), "{error}");
+        assert_eq!(crate::Diagnostic::from(error).flows, vec![DualVar::Unknown]);
 
         // Target::Add / SetFlow。
         let ok = factory(FactoryAction::Target(TargetAction::Add {

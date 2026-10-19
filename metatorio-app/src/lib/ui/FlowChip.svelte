@@ -1,12 +1,10 @@
 <script lang="ts">
-  import RichText from "./RichText.svelte";
-  import { flowName } from "$lib/display-labels";
+  import FlowRef from "./FlowRef.svelte";
+  import { isEnergyFlow, presentFlow } from "$lib/dual-var";
   // 统一流展示 chip：机制卡/求解结果共用。
   // 图标用正常大小的 HoverIcon（悬停详情 + 品质角标），数量带 +- 号，
   // 能量流用功率文本（W/kW/MW）。
-  import HoverIcon from "./HoverIcon.svelte";
   import { runtime } from "$lib/runtime/store.svelte.ts";
-  import { dualVarLabel } from "$lib/runtime/types";
   import { signedCompactNumber } from "$lib/format";
   import type { DualVar } from "$lib/runtime/types";
 
@@ -28,56 +26,6 @@
     showName?: boolean;
     solved?: boolean;
   } = $props();
-
-  /** 流 → 图标 (type, name, detailKind, quality)。 */
-  function flowMeta(flow: DualVar): {
-    type: string;
-    name: string;
-    detailKind?: string;
-    quality?: string;
-  } {
-    if (flow !== null && typeof flow === "object") {
-      if ("VirtualScience" in flow) return { type: "item", name: String(flow.VirtualScience), detailKind: "item" };
-      if ("Item" in flow) {
-        const item = (flow as { Item: { id: string; quality?: string } }).Item;
-        return {
-          type: "item",
-          name: item.id,
-          detailKind: "item",
-          quality: item.quality && item.quality !== "normal" ? item.quality : undefined,
-        };
-      }
-      if ("Fluid" in flow) {
-        const fluid = (flow as { Fluid: { name: string } }).Fluid;
-        return { type: "fluid", name: fluid.name, detailKind: "fluid" };
-      }
-      if ("Entity" in flow) {
-        const entity = (flow as { Entity: { id: string } }).Entity;
-        return { type: "entity", name: entity.id, detailKind: "entity" };
-      }
-      if ("ItemFuel" in flow) return { type: "flow", name: "ItemFuel" };
-      if ("ItemFuelSupply" in flow) return { type: "flow", name: "ItemFuel" };
-      if ("FluidFuel" in flow) return { type: "flow", name: "FluidFuel" };
-      if ("FluidHeat" in flow) return { type: "flow", name: "FluidHeat" };
-      if ("Pollution" in flow) return { type: "flow", name: "Pollution" };
-    }
-    if (typeof flow === "string") {
-      if (flow === "Electricity") return { type: "flow", name: "Electricity" };
-      if (flow === "Heat") return { type: "flow", name: "Heat" };
-      if (flow === "RocketSlotCapacity") return { type: "flow", name: "RocketSlotCapacity" };
-      if (flow === "RocketWeightCapacity") return { type: "flow", name: "RocketWeightCapacity" };
-    }
-    return { type: "flow", name: dualVarLabel(flow) };
-  }
-
-  /** 能量类流（数值单位为瓦特 J/s）。 */
-  function isEnergyFlow(flow: DualVar): boolean {
-    if (typeof flow === "string") return flow === "Electricity" || flow === "Heat";
-    if (flow !== null && typeof flow === "object") {
-      return "FluidHeat" in flow || "FluidFuel" in flow || "ItemFuel" in flow || "ItemFuelSupply" in flow;
-    }
-    return false;
-  }
 
   /** 项目时间刻度：秒/分/时。能量（W/kW/MW）始终按秒（功率），其它流按刻度缩放。 */
   const timeScale = $derived(runtime.selectedProject?.settings.time_scale ?? "seconds");
@@ -108,9 +56,7 @@
     return `${num}${timeUnit}`;
   }
 
-  const meta = $derived(flowMeta(flow));
-  const displayName = $derived(flowName(flow, (kind,name)=>runtime.localizedName(kind,name)));
-  const richDisplayName = $derived(flowName(flow, (kind,name)=>runtime.richName(kind,name)));
+  const info = $derived(presentFlow(flow, (kind,name)=>runtime.localizedName(kind,name)));
   /** tooltip 用：能量流显示功率文本，否则显示刻度缩放值。 */
   const tipText = $derived(
     isEnergyFlow(flow)
@@ -122,21 +68,10 @@
 <span
   class="flow-chip"
   class:out={amount > 0}
-  title={`${displayName}${meta.quality ? `（${runtime.localizedName("quality", meta.quality)}）` : ""} ${amount > 0 ? "产出" : "消耗"} ${tipText}`}
+  title={`${info.description} ${amount > 0 ? "产出" : "消耗"} ${tipText}`}
 >
-  <HoverIcon
-    type={meta.type}
-    name={meta.name}
-    {size}
-    detailKind={meta.detailKind}
-    quality={meta.quality}
-    {flow}
-    flowRate={amount * scale}
-    rateBasis={solved ? "solution" : "unit"}
-  />
-  {#if showName}<span class="flow-name"><RichText text={richDisplayName} />{meta.quality ? `（${runtime.localizedName("quality", meta.quality)}）` : ""}</span>{/if}
+  <FlowRef {flow} {size} {showName} showQualifiers={showName} flowRate={amount * scale} rateBasis={solved ? "solution" : "unit"} />
   <span class="mono">{qtyText(flow, amount, scale)}</span>
-  {#if typeof flow === "object" && "VirtualScience" in flow}<span>科研</span>{/if}
 </span>
 
 <style>
@@ -152,7 +87,6 @@
     font-size: 10.5px;
   }
 
-  .flow-name { font-size: 11px; }
 
   .flow-chip.out {
     border-color: var(--ok-line);

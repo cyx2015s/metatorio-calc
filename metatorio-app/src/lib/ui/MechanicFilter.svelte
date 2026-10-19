@@ -1,10 +1,11 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import { runtime } from "$lib/runtime/store.svelte.ts";
-  import { describeFlow } from "$lib/display-labels";
+  import { presentFlow } from "$lib/dual-var";
   import { normalizeSearch } from "$lib/rich-text";
   import { flowObjectKey, matchesMechanic, type ExpandedFlow, type FlowFilter } from "$lib/mechanic-filter";
   import type { DualVar, MechanicEntry } from "$lib/runtime/types";
+  import FlowRef from "./FlowRef.svelte";
 
   let { project, factory, entries, expanded, onChange }: {
     project: number; factory: number; entries: MechanicEntry[]; expanded: boolean;
@@ -21,7 +22,7 @@
   let retry = $state(0);
   let active = $derived(!!input || !!output);
   let pending = $derived(completed < entries.length);
-  const label = (flow: DualVar) => describeFlow(flow, (kind, name) => runtime.localizedName(kind, name));
+  const label = (flow: DualVar) => presentFlow(flow, (kind, name) => runtime.localizedName(kind, name)).description;
 
   // Expand only when this feature is used, in bounded batches. Cards use the
   // same cache, including in-flight requests. Never classify a failed read as empty.
@@ -110,7 +111,7 @@
             <span>{direction === "input" ? "消耗" : "产出"}</span>
             <button class="btn choose-flow" aria-label={`选择${direction === "input" ? "消耗" : "产出"}对象`}
               aria-expanded={picker === direction} onclick={() => { picker = picker === direction ? null : direction; query = ""; }}>
-              {filter ? filterLabel(filter) : "不限 · 选择对象"}
+              {#if filter}<FlowRef flow={filter.flow} match={filter} nested showQualifiers={false} />{:else}不限 · 选择对象{/if}
             </button>
             {#if filter}
               {#if valueOf(filter.flow).quality !== undefined}
@@ -137,7 +138,7 @@
           <button class="btn" onclick={() => picker = null}>关闭候选</button>
           <div class="flow-options">
             {#each candidates as flow (flowObjectKey(flow))}
-              <button class="flow-option" onclick={() => { setFilter(picker!, {flow}); picker = null; }}>{filterLabel({flow})}</button>
+              <button class="flow-option" aria-label={filterLabel({flow})} onclick={() => { setFilter(picker!, {flow}); picker = null; }}><FlowRef {flow} match={{}} nested showQualifiers={false} /></button>
             {:else}<span class="muted">{pending ? "正在读取机制流…" : "没有符合条件的对象"}</span>{/each}
           </div>
         </div>
@@ -158,7 +159,7 @@
   .filter-fields, .filter-field, .filter-status { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
   .filter-fields { gap: 8px 16px; }
   .filter-field > span { font-size: 12px; color: var(--muted); }
-  .choose-flow { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .choose-flow { max-width: 240px; white-space: nowrap; }
   select { max-width: 150px; }
   .filter-status { font-size: 12px; color: var(--muted); margin-top: 4px; }
   .filter-status strong { color: var(--text); }
