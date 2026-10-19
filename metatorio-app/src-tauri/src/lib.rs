@@ -305,6 +305,33 @@ async fn pick_project_save_path(app: AppHandle) -> Result<Option<String>, String
     .map_err(|error| error.to_string())?
 }
 
+/// GUI-only export: the native dialog selects the destination; success is
+/// returned only after the PNG has actually been written.
+#[tauri::command]
+async fn save_network_png(
+    app: AppHandle,
+    file_name: String,
+    bytes: Vec<u8>,
+) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(picked) = app
+            .dialog()
+            .file()
+            .set_file_name(&file_name)
+            .add_filter("PNG 图片", &["png"])
+            .blocking_save_file()
+        else {
+            return Ok(None);
+        };
+        let path = picked.into_path().map_err(|error| error.to_string())?;
+        std::fs::write(&path, bytes)
+            .map_err(|error| format!("无法保存到 {}：{error}", path.display()))?;
+        Ok(Some(path.to_string_lossy().into_owned()))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run(options: Options) {
     // 无头模式：在 build 之前清空窗口配置——setup 照常跑（注册表扫描、恢复最近
@@ -376,6 +403,7 @@ pub fn run(options: Options) {
             productivity,
             pick_project_file,
             pick_project_save_path,
+            save_network_png,
             project_save_path,
         ])
         .run(context)

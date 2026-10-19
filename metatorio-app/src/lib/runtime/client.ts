@@ -43,6 +43,11 @@ export async function getDocument(): Promise<AppDocument> {
   return call("get_document");
 }
 
+/** Native save dialog; null means cancelled, a path means writing succeeded. */
+export async function saveNetworkPng(fileName: string, bytes: Uint8Array): Promise<string | null> {
+  return call("save_network_png", { fileName, bytes: Array.from(bytes) });
+}
+
 /** 撤销/重做可用性（启动时初始化按钮态；之后每次 dispatch 的回执里也带）。 */
 export async function historyState(): Promise<HistoryStatus> {
   return call("history_state");

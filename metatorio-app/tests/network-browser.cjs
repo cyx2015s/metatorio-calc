@@ -2,7 +2,6 @@ const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const {seed, waitFor} = require('./mechanic-layout.cjs');
 const assert = require('node:assert/strict');
 const path = require('node:path');
-const fs = require('node:fs/promises');
 const {spawn} = require('node:child_process');
 const appRoot = path.resolve(__dirname, '..'), port = Number(process.env.UI_TEST_PORT || 5203);
 const url = `http://127.0.0.1:${port}`;
@@ -23,8 +22,19 @@ const url = `http://127.0.0.1:${port}`;
       localStorage.setItem('metatorio-ui-font', 'Courier New');
       localStorage.setItem('metatorio-mono-font', 'Consolas');
       const raw = window.__TAURI_INTERNALS__.invoke;
+      window.__pngExports = [];
       let failed = false;
       window.__TAURI_INTERNALS__.invoke = async (command, args) => {
+        if (command === 'save_network_png') {
+          window.__pngExports.push(args);
+          return new Promise((resolve, reject) => {
+            window.__finishPngSave = mode => {
+              window.__finishPngSave = null;
+              if (mode === 'error') reject(Error('模拟磁盘写入失败'));
+              else resolve(mode === 'cancel' ? null : `C:\\Exports\\${args.fileName}`);
+            };
+          });
+        }
         const value = await raw(command, args);
         if (command === 'dispatch') {
           const edit = args.message.action?.action?.mechanic;
@@ -62,6 +72,7 @@ const url = `http://127.0.0.1:${port}`;
       }
     };
     await ready();
+    if (process.env.NETWORK_TEST_TRACE) console.log('network ready');
     assert.ok(await graph.locator('canvas').count() > 0, 'Cytoscape rendered a real canvas');
     assert.equal(await graph.locator('.network-credit a').getAttribute('href'), 'https://github.com/YoisakiKanade222');
     assert.equal(await graph.getByRole('link', {name: '来源与许可', exact: true}).count(), 0);
@@ -156,19 +167,36 @@ const url = `http://127.0.0.1:${port}`;
     await ready();
     await graph.getByRole('button', {name: '重排', exact: true}).click();
     await ready();
-    const downloadPromise = page.waitForEvent('download');
-    await graph.getByRole('button', {name: '导出 PNG', exact: true}).click();
-    const download = await downloadPromise;
-    const png = await fs.readFile(await download.path());
+    const exportPng = async (mode = 'success') => {
+      if (process.env.NETWORK_TEST_TRACE) console.log(`export start: ${mode}`);
+      await graph.getByRole('button', {name: '导出 PNG', exact: true}).click();
+      await waitFor(async () => await page.evaluate(() => !!window.__finishPngSave));
+      if (process.env.NETWORK_TEST_TRACE) console.log('save dialog pending');
+      assert.ok(await graph.getByRole('button', {name: '导出中…', exact: true}).isDisabled());
+      assert.match(await graph.locator('.export-status').textContent(), /请选择保存位置/);
+      // Signature and dimensions are in the first 24 bytes; avoid serializing
+      // the entire image through Playwright just to inspect its header.
+      const bytes = await page.evaluate(() => window.__pngExports.at(-1).bytes.slice(0, 24));
+      await page.evaluate(mode => window.__finishPngSave(mode), mode);
+      await graph.getByRole('button', {name: '导出 PNG', exact: true}).waitFor();
+      return Buffer.from(bytes);
+    };
+    const png = await exportPng();
+    assert.equal(await graph.locator('.export-status').textContent(), 'PNG 已保存到：C:\\Exports\\metatorio-network-1-2.png');
     assert.equal(png.subarray(1, 4).toString(), 'PNG');
     assert.ok(png.readUInt32BE(16) > 100 && png.readUInt32BE(20) > 100);
     await graph.locator('.network-canvas').hover({position: {x: 150, y: 150}});
     await page.mouse.wheel(0, -500);
     await page.waitForTimeout(200);
-    const secondDownloadPromise = page.waitForEvent('download');
-    await graph.getByRole('button', {name: '导出 PNG', exact: true}).click();
-    const secondPng = await fs.readFile(await (await secondDownloadPromise).path());
+    const secondPng = await exportPng();
     assert.deepEqual([secondPng.readUInt32BE(16), secondPng.readUInt32BE(20)], [png.readUInt32BE(16), png.readUInt32BE(20)], 'whole-network export ignores viewport zoom');
+    await exportPng('cancel');
+    assert.equal(await graph.locator('.export-status').textContent(), '已取消导出');
+    await exportPng('error');
+    assert.match(await graph.getByRole('alert').textContent(), /PNG 导出失败.*模拟磁盘写入失败/);
+    assert.equal(await graph.getByRole('button', {name: '重试布局', exact: true}).count(), 0, 'export errors do not claim the graph layout failed');
+    await exportPng();
+    assert.equal(await graph.getByRole('alert').count(), 0, 'export can be retried after a write failure');
     if (process.env.NETWORK_SCREENSHOT) {
       await graph.getByRole('button', {name: '定位匹配', exact: true}).click();
       await page.waitForTimeout(200);

@@ -3,6 +3,7 @@
   import type { Core, ElementDefinition, StylesheetJson } from 'cytoscape';
   import type { ElkNode } from 'elkjs/lib/elk-api';
   import { runtime } from '$lib/runtime/store.svelte';
+  import { saveNetworkPng } from '$lib/runtime/client';
   import { buildNetwork, networkRate, type NetworkNode, type NetworkEdge, type NetworkViewState } from '$lib/mechanics/network';
   import type { MechanicViewProps } from '$lib/mechanics/workspace';
   import { mechanicPrototype } from '$lib/display-labels';
@@ -18,6 +19,7 @@
   } = $props();
   let container = $state<HTMLDivElement>();
   let ready = $state(false), busy = $state(false), error = $state('');
+  let exporting = $state(false), exportStatus = $state(''), exportError = $state('');
   let collapse = $state(untrack(() => viewState.collapse));
   let showUtilities = $state(untrack(() => viewState.showUtilities));
   let onlyEnabled = $state(untrack(() => viewState.onlyEnabled));
@@ -217,13 +219,17 @@
     void draw(model, ++generation, true).catch(reason => { error = `网络布局失败：${String(reason)}`; busy = false; });
   }
   async function exportPng() {
-    if (!cy || busy) return;
+    if (!cy || busy || exporting) return;
+    exporting = true; exportError = ''; exportStatus = '正在生成 PNG…';
     try {
       const blob = await cy.png({output: 'blob-promise', full: true, scale: 1, bg: palette().panel});
-      const url = URL.createObjectURL(blob), anchor = globalThis.document.createElement('a');
-      anchor.href = url; anchor.download = `metatorio-network-${project}-${factory}.png`; anchor.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } catch (reason) { error = `导出失败：${String(reason)}`; }
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      exportStatus = '请选择保存位置并确认保存…';
+      const path = await saveNetworkPng(`metatorio-network-${project}-${factory}.png`, bytes);
+      exportStatus = path === null ? '已取消导出' : `PNG 已保存到：${path}`;
+    } catch (reason) {
+      exportStatus = ''; exportError = `PNG 导出失败：${String(reason)}`;
+    } finally { exporting = false; }
   }
   function edgeDescription(edge: NetworkEdge) {
     return edge.kind === 'compatibility' ? '可能的兼容转换，未表示实际分配量。'
@@ -238,7 +244,7 @@
     <button class="btn" disabled={!ready || busy} onclick={relayout}>重排</button>
     <button class="btn" disabled={!ready} onclick={() => cy?.fit(undefined, 35)}>适应窗口</button>
     {#if needle}<button class="btn" disabled={!ready || !matches.length} onclick={() => choose(matches[0].id)}>定位匹配</button>{/if}
-    <button class="btn" disabled={!ready || busy} onclick={exportPng}>导出 PNG</button>
+    <button class="btn" disabled={!ready || busy || exporting} onclick={exportPng}>{exporting ? '导出中…' : '导出 PNG'}</button>
     <label><input type="checkbox" bind:checked={collapse} />折叠中间流</label>
     <label><input type="checkbox" bind:checked={showUtilities} />能量与污染</label>
     <label><input type="checkbox" bind:checked={onlyEnabled} />仅启用</label>
@@ -251,6 +257,8 @@
     {#if workspace.failures.length}<span class="warn">{workspace.failures.length} 个机制展开失败</span><button class="btn" onclick={() => workspace.retry++}>重试展开</button>{/if}
   </div>
   {#if error}<div class="network-error" role="alert">{error}<button class="btn" onclick={relayout}>重试布局</button></div>{/if}
+  <div class="export-status" role="status" aria-live="polite" aria-atomic="true">{exportStatus}</div>
+  {#if exportError}<div class="network-error" role="alert">{exportError}</div>{/if}
   <div class="network-canvas" bind:this={container} aria-label="生产网络画布"></div>
   <div class="network-legend">方框：机制／外部来源 · 圆形：流 · 金边：目标 · 虚线来源：隐式输入 · 紫色虚线：兼容关系。未显示求解器的降温与提热辅助变量。</div>
   <div class="network-credit">参考 <a href="https://github.com/YoisakiKanade222" target="_blank" rel="noopener noreferrer">stduuzurl / yoisaki kanade（YoisakiKanade222）</a> 的网络可视化器</div>
@@ -305,5 +313,7 @@
   .edit-card { margin-top: 8px; overflow-x: auto; }
   .edit-card :global(.mech-card) { min-width: 610px; }
   .network-error { padding: 8px; color: var(--warn); }
+  .export-status { font-size: 12px; padding: 0 8px; overflow-wrap: anywhere; user-select: text; }
+  .export-status:not(:empty) { padding-block: 8px; }
   .warn { color: var(--warn); }
 </style>
