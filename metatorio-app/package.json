@@ -14,6 +14,8 @@
     "test:mechanic-commands": "node --test tests/mechanic-commands.test.mjs",
     "test:network": "node --test tests/network.test.mjs",
     "test:network-browser": "node tests/network-browser.cjs",
+    "test:external-inputs": "node --test tests/external-input-shortcuts.test.mjs",
+    "test:external-inputs-browser": "node tests/external-inputs-browser.cjs",
     "test:mechanic-filter-browser": "node tests/mechanic-filter-browser.cjs",
     "test:dual-var": "node --test tests/dual-var.test.mjs",
     "test:dual-var-browser": "node tests/dual-var-browser.cjs",

@@ -24,6 +24,7 @@
   import Icon from "$lib/ui/Icon.svelte";
   import Selector from "$lib/ui/Selector.svelte";
   import MechanicWorkspace from "$lib/ui/MechanicWorkspace.svelte";
+  import { createExternalInputShortcuts, DISABLED_RESOURCE_PENALTY, FREE_ENERGY_FLOWS } from "$lib/external-input-shortcuts";
   import { createMechanicActions } from "$lib/mechanics/actions";
   import { DEFAULT_MECHANIC_VIEW, type MechanicViewMode } from "$lib/mechanics/workspace";
   import FlowRef from "$lib/ui/FlowRef.svelte";
@@ -419,14 +420,27 @@
   let targetExpressions = $derived(factory?.target_expressions ?? []);
   let externalInputs = $derived(factory?.external_inputs ?? []);
   let implicitInputs = $derived(runtime.implicitSourcesCache);
+  const inputShortcuts = $derived(project && factory ? createExternalInputShortcuts({
+    send: message => runtime.send(message),
+    getFactory: scope => runtime.document?.projects.find(project => project.id === scope.project)?.factories.find(factory => factory.id === scope.factory) ?? null,
+  }, {project: project.id, factory: factory.id}) : null);
+  let addingFreeEnergy = $state(false);
+  const hasFreeEnergy = $derived(FREE_ENERGY_FLOWS.every(flow => externalInputs.some(input => input.flow === flow && input.penalty === 0)));
+  async function addFreeEnergy() {
+    if (addingFreeEnergy || !inputShortcuts) return;
+    addingFreeEnergy = true;
+    try { await inputShortcuts.addFreeEnergy(); }
+    finally { addingFreeEnergy = false; }
+  }
   let implicitPromotions = $state<Record<string, boolean>>({});
+  const implicitPromotionKey = (flow: DualVar) => `${project?.id}:${factory?.id}:${JSON.stringify(flow)}`;
   async function promoteImplicitInput(flow: DualVar, penalty: number) {
-    const key = JSON.stringify(flow);
-    if (implicitPromotions[key]
-      || factory?.external_inputs.some((input) => JSON.stringify(input.flow) === key)) return;
+    const key = implicitPromotionKey(flow), shortcuts = inputShortcuts;
+    if (!shortcuts || implicitPromotions[key]
+      || factory?.external_inputs.some((input) => JSON.stringify(input.flow) === JSON.stringify(flow))) return;
     implicitPromotions[key] = true;
     try {
-      await runtime.addExternalInputFlow(flow, penalty);
+      await shortcuts.setCost(flow, penalty);
     } finally {
       delete implicitPromotions[key];
     }
@@ -1216,7 +1230,7 @@
         </section>
 
 
-        <section class="panel">
+        <section class="panel" aria-label="外部输入">
           <button
             class="title panel-toggle"
             aria-expanded={panels.inputs}
@@ -1228,6 +1242,13 @@
             </span>
           </button>
           {#if panels.inputs}
+          <div class="external-shortcuts">
+            <button class="btn" onclick={() => addFreeEnergy().catch(() => {})}
+              disabled={addingFreeEnergy || hasFreeEnergy || !runtime.activeContext}
+              title={hasFreeEnergy ? "电力和热量已配置为零成本外部输入" : "将电力和热量设为零成本外部输入，复用已有条目"}>
+              + 免费电力与热量
+            </button>
+          </div>
           <div
             class="rows"
             use:dndzone={{ items: dragInputs, flipDurationMs: 120 }}
@@ -1239,6 +1260,7 @@
               {@const fluidRange = fluidRangeOf(input.flow)}
               <div class="row-item">
                 <FlowRef flow={input.flow} grow showQualifiers={false} size={26} showBadge={!fluidRange} title="外部输入 · 点击更改" onClick={() => editExternalInput(input)} />
+                {#if input.penalty === DISABLED_RESOURCE_PENALTY}<span class="chip" title="使用极高成本抑制该来源">已禁用</span>{/if}
                 {#if fluidRange}
                   <!-- 与目标行同一套语义：区间内任何温度的外部输入都算满足。
                        外部输入本来就是"从外面买"，指定可接受温度区间比钉死一个温度更准。 -->
@@ -1291,6 +1313,10 @@
                   }}
                 />
                 <span class="row-actions">
+                  {#if input.penalty === DISABLED_RESOURCE_PENALTY}
+                    <button class="icon-btn" aria-label={`撤销禁用：${flowLabel(input.flow)}`} title="移除极高成本覆盖，当前环境若提供该资源则恢复免费输入"
+                      onclick={() => runtime.removeExternalInput(input.id).catch(() => {})}>↶</button>
+                  {/if}
                   <button
                     class="icon-btn danger"
                     title={`移除外部输入「${flowLabel(input.flow)}」`}
@@ -1319,7 +1345,7 @@
                   value="0"
                   aria-label={`外部成本：${flowLabel(flow)}`}
                   title="编辑成本后保存为手动外部输入"
-                  disabled={implicitPromotions[JSON.stringify(flow)]}
+                  disabled={implicitPromotions[implicitPromotionKey(flow)]}
                   onchange={(event) => {
                     const raw = event.currentTarget.value.trim();
                     const value = Number(raw);
@@ -1333,9 +1359,13 @@
                     class="icon-btn"
                     title={`以零成本把「${flowLabel(flow)}」保存为手动外部输入`}
                     aria-label="设为手动外部输入"
-                    disabled={implicitPromotions[JSON.stringify(flow)]}
+                    disabled={implicitPromotions[implicitPromotionKey(flow)]}
                     onclick={() => promoteImplicitInput(flow, 0).catch(() => {})}
                   >+</button>
+                  <button class="icon-btn danger" aria-label={`禁用环境资源：${flowLabel(flow)}`}
+                    title="将外部输入成本设为 10¹²，优先使用其他来源"
+                    disabled={implicitPromotions[implicitPromotionKey(flow)]}
+                    onclick={() => promoteImplicitInput(flow, DISABLED_RESOURCE_PENALTY).catch(() => {})}>⊘</button>
                 </span>
               </div>
             {/each}
@@ -3401,6 +3431,9 @@
     color: var(--text);
     font-size: 12px;
   }
+
+  .external-shortcuts { display: flex; gap: 6px; margin: 0 0 8px; }
+  .external-shortcuts .btn { flex: 1; font-size: 11px; }
 
   .center {
     display: flex;
