@@ -11,11 +11,12 @@
   import type { MechanicScrollState } from '$lib/mechanics/view-scroll';
 
   let {project, factory, entries, solutions, solved, actions, filterOpen, mergeRecipes,
-    view = DEFAULT_MECHANIC_VIEW, onFilterActiveChange}: {
+    view = DEFAULT_MECHANIC_VIEW, onFilterActiveChange, onFilterClose}: {
     project: number | null; factory: number | null; entries: MechanicEntry[];
     solutions: MechanicSolutionMap; solved: boolean; actions: MechanicActions | null;
     filterOpen: boolean; mergeRecipes: boolean; view?: MechanicViewMode;
     onFilterActiveChange: (active: boolean) => void;
+    onFilterClose: () => void;
   } = $props();
 
   // Filters live outside the renderer: changing views must not reset the query.
@@ -44,21 +45,21 @@
   $effect(() => { onFilterActiveChange(filterActive); });
 </script>
 
-{#if project !== null && factory !== null && actions}
+{#if project !== null && factory !== null && actions && view !== 'network'}
   {#key scope}
     <MechanicFilter {workspace} {entries} expanded={filterOpen} />
   {/key}
 {/if}
 {#if filterActive && view === 'list'}<div class="filter-order-note">筛选中暂停手动拖拽排序，清除筛选后恢复。</div>{/if}
 
-{#if project !== null && factory !== null && actions && entries.length > 0 && (visibleIds === null || visibleIds.length > 0)}
+{#if project !== null && factory !== null && actions && view === 'network'}
+  {#key scope}
+    <MechanicNetworkView {project} {factory} {entries} {visibleIds} {mergeRecipes} {actions} {solutions} {solved} {workspace} {scrollState} {filterOpen} {onFilterClose} viewState={networkState} />
+  {/key}
+{:else if project !== null && factory !== null && actions && entries.length > 0 && (visibleIds === null || visibleIds.length > 0)}
   {#if view === 'list'}
     {#key scope}
       <MechanicListView {project} {factory} {entries} {visibleIds} {mergeRecipes} {actions} {solutions} {solved} {workspace} {scrollState} />
-    {/key}
-  {:else if view === 'network'}
-    {#key scope}
-      <MechanicNetworkView {project} {factory} {entries} {visibleIds} {mergeRecipes} {actions} {solutions} {solved} {workspace} {scrollState} viewState={networkState} />
     {/key}
   {/if}
 {:else}

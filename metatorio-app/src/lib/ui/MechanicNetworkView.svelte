@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, untrack } from 'svelte';
+  import { onMount, untrack, tick } from 'svelte';
   import type { Core, ElementDefinition, StylesheetJson } from 'cytoscape';
   import type { ElkNode } from 'elkjs/lib/elk-api';
   import { runtime } from '$lib/runtime/store.svelte';
@@ -11,13 +11,19 @@
   import { normalizeSearch } from '$lib/rich-text';
   import { iconTypeForKind, syntheticIconUrls } from './icon-types';
   import FlowRef from './FlowRef.svelte';
-  import MechanicCard from './MechanicCard.svelte';
+  import MechanicEditor from './MechanicEditor.svelte';
+  import MechanicFilter from './MechanicFilter.svelte';
   import { rememberMechanicScroll } from '$lib/mechanics/view-scroll';
 
-  let {project, factory, entries, visibleIds, solutions, solved, actions, workspace, mergeRecipes, viewState, scrollState}: MechanicViewProps & {
-    mergeRecipes: boolean; viewState: NetworkViewState;
+  let {project, factory, entries, visibleIds, solutions, solved, actions, workspace, mergeRecipes, viewState, scrollState, filterOpen, onFilterClose}: MechanicViewProps & {
+    mergeRecipes: boolean; viewState: NetworkViewState; filterOpen: boolean; onFilterClose: () => void;
   } = $props();
   let container = $state<HTMLDivElement>();
+  let detailsPanel = $state<HTMLElement>(), searchBox = $state<HTMLDivElement>();
+  let searchOpen = $state(false), searchIndex = $state(0);
+  let popupLeft = $state(8), popupTop = $state(8);
+  let positionFrame = 0;
+  const searchResultsId = $derived(`network-search-${project}-${factory}`);
   let ready = $state(false), busy = $state(false), error = $state('');
   let exporting = $state(false), exportStatus = $state(''), exportError = $state('');
   let collapse = $state(untrack(() => viewState.collapse));
@@ -98,6 +104,7 @@
     if (savePositions) for (const node of cy.nodes()) viewState.positions.set(node.id(), {...node.position()});
   }
   function choose(id: string) {
+    searchOpen = false;
     selectObject(id);
     const element = cy?.getElementById(id);
     cy?.elements().unselect(); element?.select();
@@ -107,8 +114,39 @@
     }
   }
   function selectObject(id?: string) {
+    const changed = selectedId !== id;
     selected = id;
-    selectedMechanic = model.nodes.find(node => node.id === id)?.entries[0]?.id ?? null;
+    if (!id || changed || selectedMechanic === null) selectedMechanic = model.nodes.find(node => node.id === id)?.entries[0]?.id ?? null;
+    if (!id) cy?.elements().unselect();
+    schedulePosition();
+    if (id && changed) void tick().then(() => detailsPanel?.focus({preventScroll: true}));
+  }
+  function positionPopup() {
+    if (!cy || !container || !detailsPanel || !selectedId) return;
+    const element = cy.getElementById(selectedId);
+    if (element.empty()) return;
+    const bounds = element.isNode() ? element.renderedBoundingBox({includeLabels: false}) : undefined;
+    const point = bounds ? {x: bounds.x2, y: bounds.y1} : element.renderedMidpoint();
+    const width = detailsPanel.offsetWidth, height = detailsPanel.offsetHeight;
+    const x = point.x + 12 + width <= container.clientWidth ? point.x + 12 : (bounds?.x1 ?? point.x) - width - 12;
+    popupLeft = Math.max(8, Math.min(x, container.clientWidth - width - 8));
+    popupTop = Math.max(8, Math.min(point.y, container.clientHeight - height - 8));
+  }
+  function schedulePosition() {
+    cancelAnimationFrame(positionFrame);
+    positionFrame = requestAnimationFrame(positionPopup);
+  }
+  function searchKey(event: KeyboardEvent) {
+    if (event.key === 'Escape') {
+      event.preventDefault(); event.stopPropagation(); searchOpen = false;
+    } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault(); searchOpen = true;
+      const count = Math.min(100, matches.length);
+      searchIndex = count ? (searchIndex + (event.key === 'ArrowDown' ? 1 : count - 1)) % count : 0;
+      void tick().then(() => globalThis.document.getElementById(`${searchResultsId}-${searchIndex}`)?.scrollIntoView({block: 'nearest'}));
+    } else if (event.key === 'Enter' && searchOpen && matches[searchIndex]) {
+      event.preventDefault(); choose(matches[searchIndex].id);
+    }
   }
   function highlight() {
     if (!cy || cy.destroyed()) return;
@@ -127,19 +165,33 @@
       elk = new layout.default({workerFactory: () => new worker.default()});
       cy.on('tap', 'node, edge', event => selectObject(event.target.id()));
       cy.on('tap', event => { if (event.target === cy) selectObject(); });
-      cy.on('pan zoom', () => saveViewport());
+      cy.on('pan zoom', () => { saveViewport(); schedulePosition(); });
+      cy.on('position', 'node', schedulePosition);
       cy.on('dragfree', 'node', event => {
         const node = event.target;
         viewState.positions.set(node.id(), {...node.position()});
       });
       ready = true;
     }).catch(reason => { if (mounted) error = `无法加载网络绘图库：${String(reason)}`; });
-    const observer = new ResizeObserver(() => cy?.resize());
+    const observer = new ResizeObserver(() => { cy?.resize(); schedulePosition(); });
     observer.observe(container!);
-    const themeObserver = new MutationObserver(() => { if (cy && !cy.destroyed()) cy.style(styles()); });
+    const themeObserver = new MutationObserver(() => { if (cy && !cy.destroyed()) { cy.style(styles()); schedulePosition(); } });
     themeObserver.observe(globalThis.document.documentElement, {attributes: true, attributeFilter: ['data-theme', 'class', 'style']});
+    const outsideSearch = (event: PointerEvent) => {
+      if (!searchBox?.contains(event.target as Node)) searchOpen = false;
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || (event.target as Element)?.closest('[aria-modal="true"], .secondary-menu')) return;
+      if (filterOpen) { onFilterClose(); return; }
+      if (selectedId) { selectObject(); container?.focus({preventScroll: true}); }
+    };
+    globalThis.document.addEventListener('pointerdown', outsideSearch);
+    window.addEventListener('keydown', escape);
     return () => {
       mounted = false; generation++; saveViewport(true);
+      cancelAnimationFrame(positionFrame);
+      globalThis.document.removeEventListener('pointerdown', outsideSearch);
+      window.removeEventListener('keydown', escape);
       Object.assign(viewState, {collapse, showUtilities, onlyEnabled, query, iconScale, selected: selectedId, selectedMechanic});
       observer.disconnect(); themeObserver.disconnect(); cy?.destroy(); elk?.terminateWorker(); cy = undefined;
     };
@@ -158,8 +210,19 @@
     return () => { clearTimeout(timer); if (generation === revision) generation++; };
   });
   $effect(() => { needle; matches; renderRevision; highlight(); });
+  $effect(() => { if (searchIndex >= Math.min(100, matches.length)) searchIndex = 0; });
+  $effect(() => {
+    selectedId; renderRevision;
+    schedulePosition();
+  });
+  $effect(() => {
+    if (!detailsPanel) return;
+    const observer = new ResizeObserver(schedulePosition);
+    observer.observe(detailsPanel);
+    return () => observer.disconnect();
+  });
   // Size changes only restyle the existing canvas; no layout, pan or zoom reset.
-  $effect(() => { if (ready && cy) { iconScale; cy.style(styles()); } });
+  $effect(() => { if (ready && cy) { iconScale; cy.style(styles()); schedulePosition(); } });
 
   async function draw(snapshot: typeof model, revision: number, reset = false) {
     if (!cy || !elk || !mounted || revision !== generation) return;
@@ -206,6 +269,7 @@
       }
     }
     if (selectedId) cy.getElementById(selectedId).select();
+    schedulePosition();
     busy = false; renderRevision++;
     // Icon requests are deduplicated by the existing runtime cache. Old generations
     // cannot add icons after a document, context, factory or view change.
@@ -260,7 +324,24 @@
 
 <section class="network-view" use:rememberMechanicScroll={scrollState} aria-label="机制网络视图" data-network-ready={ready && !busy && renderRevision > 0}>
   <div class="network-toolbar">
-    <input aria-label="搜索网络节点" placeholder="搜索名称、ID、品质或温度…" bind:value={query} />
+    <div class="network-search" bind:this={searchBox}>
+      <input aria-label="搜索网络节点" placeholder="搜索名称、ID、品质或温度…"
+        role="combobox" aria-autocomplete="list" aria-expanded={searchOpen} aria-controls={searchResultsId}
+        aria-activedescendant={searchOpen && matches[searchIndex] ? `${searchResultsId}-${searchIndex}` : undefined}
+        bind:value={query} onfocus={() => searchOpen = true} oninput={() => { searchOpen = true; searchIndex = 0; }} onkeydown={searchKey} />
+      {#if searchOpen}
+        <div class="search-dropdown">
+          <div class="search-count">{matches.length} 个{needle ? '匹配' : '节点'}</div>
+          <div id={searchResultsId} class="search-results" role="listbox" aria-label="网络节点搜索结果">
+            {#each matches.slice(0, 100) as node, i (node.id)}
+              <button id={`${searchResultsId}-${i}`} class="search-result" role="option" aria-selected={searchIndex === i}
+                onpointermove={() => searchIndex = i} onpointerdown={event => event.preventDefault()} onclick={() => choose(node.id)}>{node.label.replaceAll('\n', ' · ')}</button>
+            {:else}<span class="no-matches">没有匹配的节点</span>{/each}
+          </div>
+          {#if matches.length > 100}<div class="search-count">仅列出前 100 个，请搜索缩小范围。</div>{/if}
+        </div>
+      {/if}
+    </div>
     <button class="btn" disabled={!ready || busy} onclick={relayout}>重排</button>
     <button class="btn" disabled={!ready} onclick={() => cy?.fit(undefined, 35)}>适应窗口</button>
     {#if needle}<button class="btn" disabled={!ready || !matches.length} onclick={() => choose(matches[0].id)}>定位匹配</button>{/if}
@@ -284,29 +365,29 @@
   {#if error}<div class="network-error" role="alert">{error}<button class="btn" onclick={relayout}>重试布局</button></div>{/if}
   <div class="export-status" role="status" aria-live="polite" aria-atomic="true">{exportStatus}</div>
   {#if exportError}<div class="network-error" role="alert">{exportError}</div>{/if}
-  <div class="network-canvas" bind:this={container} aria-label="生产网络画布"></div>
-  <div class="network-legend">方框：机制／外部来源 · 圆形：流 · 金边：目标 · 虚线来源：隐式输入 · 紫色虚线：兼容关系。未显示求解器的降温与提热辅助变量。</div>
-  <div class="network-credit">参考 <a href="https://github.com/YoisakiKanade222" target="_blank" rel="noopener noreferrer">stduuzurl / yoisaki kanade（YoisakiKanade222）</a> 的网络可视化器</div>
-  <details class="node-directory" open={!!needle}>
-    <summary>节点目录 · {matches.length}{needle ? ' 个匹配' : ' 个节点'}（可用键盘选择）</summary>
-    <div class="node-options">
-      {#each matches.slice(0, 100) as node (node.id)}
-        <button class="btn" class:active={selectedId === node.id} onclick={() => choose(node.id)}>{node.label.replaceAll('\n', ' · ')}</button>
-      {/each}
-      {#if matches.length > 100}<span>仅列出前 100 个，请搜索缩小范围。</span>{/if}
-    </div>
-  </details>
+  <div class="network-stage">
+    <!-- Keyboard focus returns here when the node editor is closed. -->
+    <div class="network-canvas" bind:this={container} role="group" tabindex="-1" aria-label="生产网络画布"></div>
+    {#if !model.nodes.length && ready}
+      <div class="network-empty">{workspace.active ? '没有匹配的机制，可更换条件或清除筛选。' : '还没有机制，可添加机制或使用自动规划。'}</div>
+    {/if}
+    {#if filterOpen || workspace.active}
+      <div class="network-filter">
+        {#if filterOpen}<header><strong>机制流筛选</strong><button class="icon-btn" aria-label="收起机制筛选" onclick={onFilterClose}>×</button></header>{/if}
+        <MechanicFilter {workspace} {entries} expanded={filterOpen} />
+      </div>
+    {/if}
   {#if selectedNode || selectedEdge}
-    <section class="network-details" aria-label="网络对象详情">
-      <button class="icon-btn close" aria-label="关闭网络详情" onclick={() => selectObject()}>×</button>
+    <div class="network-details" role="dialog" aria-label="网络对象详情" tabindex="-1" bind:this={detailsPanel} style:left={`${popupLeft}px`} style:top={`${popupTop}px`}>
+      <button class="icon-btn close" aria-label="关闭网络详情" onclick={() => { selectObject(); container?.focus({preventScroll: true}); }}>×</button>
       {#if selectedNode}
         {#if selectedNode.flow}<FlowRef flow={selectedNode.flow} />{:else}<strong>{selectedNode.label.replaceAll('\n', ' · ')}</strong>{/if}
         {#if selectedNode.kind === 'external'}<p>{selectedNode.implicit ? '隐式外部输入 · 成本 0' : `手动外部输入 · 成本 ${selectedNode.external?.penalty}`}</p>{/if}
         {#if selectedNode.entries.length > 1}
           <div class="variant-options">{#each selectedNode.entries as entry (entry.id)}<button class="btn" class:active={editing?.id === entry.id} onclick={() => selectedMechanic = entry.id}>机制 #{entry.id}</button>{/each}</div>
         {/if}
-        {#if editing}<div class="edit-card"><MechanicCard entry={editing} {project} {factory} {actions} solution={solutions.get(editing.id) ?? (solved ? {amount: 0, cost: 0} : null)} /></div>{/if}
-        {#if neighbours.length}<p>相邻对象</p><div class="node-options">{#each neighbours as node (node.id)}<button class="btn" onclick={() => choose(node.id)}>{node.label.replaceAll('\n', ' · ')}</button>{/each}</div>{/if}
+        {#if editing}<div class="edit-card"><MechanicEditor entry={editing} {project} {factory} {actions} solution={solutions.get(editing.id) ?? (solved ? {amount: 0, cost: 0} : null)} /></div>{/if}
+        {#if neighbours.length}<details class="neighbours"><summary>相邻对象</summary><div class="node-options">{#each neighbours as node (node.id)}<button class="btn" onclick={() => choose(node.id)}>{node.label.replaceAll('\n', ' · ')}</button>{/each}</div></details>{/if}
       {:else if selectedEdge}
         {#if selectedEdge.flow}<FlowRef flow={selectedEdge.flow} />{/if}
         <p>{edgeDescription(selectedEdge)}</p>
@@ -314,29 +395,47 @@
           <p>机制 #{item.mechanic} · {item.unitAmount < 0 ? '消耗' : '产出'} {networkRate(selectedEdge.flow!, solved ? item.amount : item.unitAmount, timeScale)}</p>
         {/each}
       {/if}
-    </section>
+    </div>
   {/if}
+  </div>
+  <div class="network-legend">方框：机制／外部来源 · 圆形：流 · 金边：目标 · 虚线来源：隐式输入 · 紫色虚线：兼容关系。未显示求解器的降温与提热辅助变量。</div>
+  <div class="network-credit">参考 <a href="https://github.com/YoisakiKanade222" target="_blank" rel="noopener noreferrer">stduuzurl / yoisaki kanade（YoisakiKanade222）</a> 的网络可视化器</div>
+
 </section>
 
 <style>
   .network-view { flex: 1 0 auto; min-width: 0; margin-top: 6px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); overflow: hidden; }
   .network-toolbar, .network-status, .node-options, .variant-options { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
   .network-toolbar { padding: 8px; border-bottom: 1px solid var(--line); }
-  .network-toolbar > input { min-width: 130px; width: 210px; max-width: 100%; }
+  .network-search { position: relative; min-width: 130px; width: 210px; max-width: 100%; }
+  .network-search input { width: 100%; box-sizing: border-box; }
+  .search-dropdown { position: absolute; z-index: 22; top: calc(100% + 6px); left: 0; width: min(430px, calc(100vw - 32px));
+    max-width: calc(100vw - 32px); background: var(--panel); border: 1px solid var(--line-strong); border-radius: var(--radius); box-shadow: var(--shadow-strong); }
+  .search-count, .no-matches { padding: 6px 8px; color: var(--muted); font-size: 11px; }
+  .search-results { max-height: min(320px, 45vh); overflow: auto; display: grid; }
+  .search-result { text-align: left; padding: 7px 8px; color: var(--text); background: none; border: 0; font: inherit; font-size: 11px; cursor: pointer; overflow-wrap: anywhere; }
+  .search-result:hover, .search-result[aria-selected="true"] { background: var(--card); }
   .network-toolbar label { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; }
   .network-status { padding: 5px 8px; color: var(--muted); font-size: 11px; }
+  .network-stage { position: relative; min-width: 0; }
   .network-canvas { height: clamp(360px, 62vh, 820px); width: 100%; position: relative; }
-  .network-legend, .node-directory { font-size: 11px; color: var(--muted); padding: 8px; border-top: 1px solid var(--line); }
+  .network-legend { font-size: 11px; color: var(--muted); padding: 8px; border-top: 1px solid var(--line); }
   .network-credit { color: var(--muted); font-size: 10px; padding: 0 8px 6px; }
-  .node-directory summary { cursor: pointer; }
+  .neighbours summary { cursor: pointer; color: var(--muted); font-size: 11px; margin-top: 8px; }
   .node-options { padding-top: 6px; max-height: 200px; overflow: auto; }
   .node-options .btn { white-space: normal; text-align: left; font-size: 11px; max-width: 100%; overflow-wrap: anywhere; }
-  .network-details { padding: 10px; border-top: 1px solid var(--line); position: relative; }
+  .network-details { position: absolute; z-index: 15; width: min(420px, calc(100% - 16px)); max-height: calc(100% - 16px); overflow: auto;
+    box-sizing: border-box; padding: 10px; color: var(--text); background: var(--panel); border: 1px solid var(--line-strong); border-radius: var(--radius); box-shadow: var(--shadow-strong); }
+  .network-details > strong { display: block; padding-right: 24px; font-size: 12px; overflow-wrap: anywhere; }
+  .network-filter { position: absolute; z-index: 20; top: 8px; right: 8px; width: min(640px, calc(100% - 16px)); max-height: calc(100% - 16px); overflow: auto; background: var(--panel); border: 1px solid var(--line-strong); border-radius: var(--radius); box-shadow: var(--shadow-strong); }
+  .network-filter header { display: flex; justify-content: space-between; align-items: center; padding: 4px 8px; font-size: 12px; }
+  .network-filter :global(.mechanic-filter) { margin: 0; border: 0; }
+  .network-empty { position: absolute; inset: 45% 12px auto; text-align: center; color: var(--muted); pointer-events: none; }
   .network-details p { font-size: 12px; color: var(--muted); margin: 8px 0; }
   .close { float: right; }
   .variant-options { margin: 6px 0; }
-  .edit-card { margin-top: 8px; overflow-x: auto; }
-  .edit-card :global(.mech-card) { min-width: 610px; }
+  .edit-card { margin-top: 8px; }
+  .edit-card :global(.identity) { padding-inline: 0; }
   .network-error { padding: 8px; color: var(--warn); }
   .export-status { font-size: 12px; padding: 0 8px; overflow-wrap: anywhere; user-select: text; }
   .export-status:not(:empty) { padding-block: 8px; }

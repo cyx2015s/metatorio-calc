@@ -1890,7 +1890,7 @@
 
       <MechanicWorkspace project={project?.id ?? null} factory={factory?.id ?? null}
         entries={mechanics} solutions={solveMap} {solved} {actions} {filterOpen} {mergeRecipes} view={mechanicView}
-        onFilterActiveChange={active => filterActive = active} />
+        onFilterActiveChange={active => filterActive = active} onFilterClose={() => filterOpen = false} />
 
     </section>
 
