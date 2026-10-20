@@ -438,7 +438,7 @@ impl Model {
             infeasibility: None,
         })
     }
-    fn candidate_support(
+    pub(super) fn candidate_support(
         &self,
         values: &[f64],
         include_deficits: bool,

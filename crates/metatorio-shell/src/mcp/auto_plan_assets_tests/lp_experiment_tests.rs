@@ -105,6 +105,70 @@ fn snapshots(directory: &Path) -> BTreeSet<PathBuf> {
         .collect()
 }
 
+/// Read-only project replay. Overrides change only the first target's item and
+/// quality; all enumeration, imports, costs and strictness stay in the fixture.
+#[tokio::test]
+#[ignore = "requires unique LP_BENCH_REPORT; optional LP_BENCH_PROJECT; serialized real-asset benchmark"]
+async fn project_file_auto_plan_benchmark() {
+    use metatorio_runtime::{AppDocument, Runtime};
+    let _permit = GATE.acquire().await.unwrap();
+    let mut output = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(std::env::var_os("LP_BENCH_REPORT").expect("LP_BENCH_REPORT"))
+        .unwrap();
+    let begun = Instant::now();
+    let context = if let Some(path) = std::env::var_os("LP_BENCH_CONTEXT_DUMP") {
+        let dump = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        PrototypeStore::load(&dump).unwrap()
+    } else {
+        store(BASE).clone()
+    };
+    let mut source: Value = if let Some(path) = std::env::var_os("LP_BENCH_PROJECT") {
+        serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
+    } else {
+        serde_json::from_str(include_str!("fixtures/legendary-biter-prod.json")).unwrap()
+    };
+    let target = &mut source["projects"][0]["factories"][0]["targets"][0]["flow"]["Item"];
+    if let Ok(item) = std::env::var("LP_BENCH_TARGET") {
+        target["id"] = item.into();
+    }
+    if let Ok(quality) = std::env::var("LP_BENCH_QUALITY") {
+        target["quality"] = quality.into();
+    }
+    let mut document: AppDocument = serde_json::from_value(source).unwrap();
+    let project = &mut document.projects[0];
+    project.context_id = Some("asset".into());
+    let project_id = project.id;
+    let factory_id = project.factories[0].id;
+    let input = serde_json::to_value(&project).unwrap();
+    let mut runtime = Runtime::from_document(document);
+    runtime.install_context("asset".into(), context);
+    let load_ms = begun.elapsed().as_millis();
+    eprintln!(
+        "[PROJECT-BENCH] load_ms={load_ms} targets={}",
+        input["factories"][0]["targets"]
+    );
+    let begun = Instant::now();
+    let result = runtime.auto_plan(project_id, factory_id);
+    let outcome = match &result {
+        Ok(value) => json!({"result": value}),
+        Err(error) => json!({"error": error.to_string()}),
+    };
+    let elapsed_ms = begun.elapsed().as_millis();
+    serde_json::to_writer(
+        &mut output,
+        &json!({"load_ms":load_ms,"elapsed_ms":elapsed_ms,"input":input,"outcome":outcome}),
+    )
+    .unwrap();
+    output.flush().unwrap();
+    eprintln!("[PROJECT-BENCH] auto_plan_ms={elapsed_ms}");
+    let result = result.expect("project replay must return a certified result");
+    assert_certified(&result);
+    assert!(result.report.writeback_verified);
+    assert!(matches!(result.status, SolveStatus::Solved { .. }));
+}
+
 #[tokio::test]
 #[ignore = "full lengden legendary LDS 120/s; serialized real-asset optimization benchmark"]
 async fn lengden_legendary_lds_auto_plan() {
@@ -233,21 +297,12 @@ async fn experiment_capture_failure_requests() {
                 std::env::var("METATORIO_LP_BACKEND").unwrap_or_else(|_| "rust-certified".into());
             if matches!(
                 backend.as_str(),
-                "hybrid-exact" | "rust-exact" | "rust-verified" | "rust-certified"
+                "hybrid-exact" | "rust-exact" | "rust-verified"
             ) {
                 assert_eq!(
                     state["auto_plan"]["result"]["report"]["exact_primal_verified"],
                     true
                 );
-                if backend == "rust-certified" {
-                    let gap = state["auto_plan"]["result"]["report"]["certified_relative_gap"]
-                        .as_f64()
-                        .expect("missing certified gap");
-                    assert!(
-                        (0.0..=1e-12f64.next_up()).contains(&gap),
-                        "unaccepted certified gap {gap}"
-                    );
-                }
                 if matches!(backend.as_str(), "rust-exact" | "rust-verified") {
                     assert_eq!(
                         state["auto_plan"]["result"]["report"]["exact_optimality_verified"],

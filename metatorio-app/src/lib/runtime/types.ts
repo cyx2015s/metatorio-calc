@@ -639,6 +639,15 @@ export interface SolveDiagnostics {
   variables_after: number;
   /** 用原始 LP 复核该解的最大相对约束违反量。 */
   solution_violation: number;
+  /** 以下证书描述回写后的工厂 LP。容差可行不代表精确最优。 */
+  exact_primal_verified?: boolean;
+  exact_optimality_verified?: boolean;
+  certified_relative_gap?: number | null;
+  relative_primal_verified?: boolean;
+  maximum_relative_balance_error?: number | null;
+  balance_tolerance?: number | null;
+  /** 容差点成本与精确对偶下界的相对差，用于停止搜索。 */
+  relative_duality_gap?: number | null;
   /** 自动规划回写前自检：写回的机制集合自己能不能解出目标。 */
   writeback_verified: boolean;
   /** 自检失败、已放宽到 LP 解的全部非零机制。 */

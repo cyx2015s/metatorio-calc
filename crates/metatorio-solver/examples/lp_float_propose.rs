@@ -9,10 +9,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args: Vec<_> = std::env::args().skip(1).collect();
     let hint_only = args.iter().any(|s| s == "--hint-only");
     let relevant = args.iter().any(|s| s == "--relevant");
-    args.retain(|s| s != "--hint-only" && s != "--relevant");
+    let reverse_columns = args.iter().any(|s| s == "--reverse-columns");
+    args.retain(|s| s != "--hint-only" && s != "--relevant" && s != "--reverse-columns");
+    if relevant && reverse_columns {
+        return Err("relevance mapping and reversed columns must be measured separately".into());
+    }
     if !(3..=5).contains(&args.len()) {
         return Err(
-            "usage: lp_float_propose snapshot.json output.json seconds [ratio-tolerance] [primal-tolerance] [--hint-only] [--relevant]".into(),
+            "usage: lp_float_propose snapshot.json output.json seconds [ratio-tolerance] [primal-tolerance] [--hint-only] [--relevant | --reverse-columns]".into(),
         );
     }
     let snapshot: Snapshot = serde_json::from_reader(BufReader::new(fs::File::open(&args[0])?))?;
@@ -38,8 +42,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         start.elapsed().as_secs_f64() < seconds
     };
+    let mut search = model.clone();
+    if reverse_columns {
+        search.columns.reverse();
+        let n = search.columns.len();
+        for row in &mut search.rows {
+            for (j, _) in &mut row.terms {
+                *j = n - 1 - *j;
+            }
+        }
+    }
     let reduction = if relevant {
-        Some(model.relevance_reduction_with_control(
+        Some(search.relevance_reduction_with_control(
             &metatorio_solver::lp_rational::SolveControl::with_deadline(
                 start + std::time::Duration::from_secs_f64(seconds),
             ),
@@ -47,7 +61,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         None
     };
-    let proposal = if let Some(reduced) = &reduction {
+    let mut proposal = if let Some(reduced) = &reduction {
         println!(
             "relevance: columns={} -> {} rows={} -> {}",
             model.columns.len(),
@@ -61,8 +75,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .float_candidate_with_options(options, 20000, observer)?,
         )?
     } else {
-        model.float_candidate_with_options(options, 20000, observer)?
+        search.float_candidate_with_options(options, 20000, observer)?
     };
+    if reverse_columns {
+        proposal.basis.columns.reverse();
+        proposal.values.reverse();
+    }
     let proposal_seconds = start.elapsed().as_secs_f64();
     println!(
         "float: pivots={} seconds={:.2} reason={}",

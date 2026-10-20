@@ -110,7 +110,28 @@ fn assert_certified(result: &metatorio_runtime::SolveResult) {
     if (cfg!(feature = "rust-lp") && !cfg!(feature = "highs"))
         || std::env::var("METATORIO_LP_BACKEND").as_deref() == Ok("rust-certified")
     {
-        assert!(result.report.exact_primal_verified);
+        if !result.report.exact_primal_verified {
+            assert!(
+                result.report.relative_primal_verified,
+                "missing full-model relative feasibility evidence"
+            );
+            assert!(
+                result
+                    .report
+                    .maximum_relative_balance_error
+                    .is_some_and(|e| (0.0..=1e-12f64.next_up()).contains(&e))
+            );
+            assert!(
+                result
+                    .report
+                    .relative_duality_gap
+                    .is_some_and(|g| (0.0..=1e-12f64.next_up()).contains(&g))
+            );
+            assert_eq!(result.report.balance_tolerance, Some(1e-12));
+            assert!(!result.report.exact_optimality_verified);
+            assert!(result.report.certified_relative_gap.is_none());
+            return;
+        }
         let gap = result
             .report
             .certified_relative_gap

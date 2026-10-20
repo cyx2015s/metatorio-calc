@@ -12,7 +12,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     if !(4..=5).contains(&args.len()) {
         return Err(
-            "usage: lp_refine_candidate snapshot.json candidate.json output.json seconds [first|largest|large-pivot|zero-large-pivot]".into(),
+            "usage: lp_refine_candidate snapshot.json candidate.json output.json seconds [first|largest|edge|large-pivot|zero-first|zero-largest|zero-edge|zero-large-pivot]".into(),
         );
     }
     let snapshot: Snapshot = serde_json::from_reader(BufReader::new(fs::File::open(&args[0])?))?;
@@ -25,7 +25,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("invalid time budget".into());
     }
     let original = snapshot.exact_model();
-    let auxiliary = args.get(4).is_some_and(|s| s == "zero-large-pivot");
+    let auxiliary = args.get(4).is_some_and(|s| s.starts_with("zero-"));
     let mut model = original.clone();
     if auxiliary {
         for column in &mut model.columns {
@@ -34,8 +34,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         model.offset = 0.0;
     }
     let rule = match args.get(4).map(String::as_str).unwrap_or("first") {
-        "first" => DualPivotRule::FirstViolation,
-        "largest" => DualPivotRule::LargestViolation,
+        "first" | "zero-first" => DualPivotRule::FirstViolation,
+        "largest" | "zero-largest" => DualPivotRule::LargestViolation,
+        "edge" | "zero-edge" => DualPivotRule::SteepestEdge,
         "large-pivot" | "zero-large-pivot" => DualPivotRule::FirstViolationLargePivot,
         _ => return Err("unknown repair strategy".into()),
     };

@@ -67,6 +67,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "validation":validation,"values_bits":values.iter().map(|v|v.to_bits()).collect::<Vec<_>>(),
                 "report":{"exact_primal_verified":solution.report.exact_primal_verified,
                     "exact_optimality_verified":solution.report.exact_optimality_verified,
+                    "relative_primal_verified":solution.report.relative_primal_verified,
+                    "maximum_relative_balance_error":solution.report.maximum_relative_balance_error,
+                    "balance_tolerance":solution.report.balance_tolerance,
+                    "relative_duality_gap":solution.report.relative_duality_gap,
                     "certified_relative_gap":solution.report.certified_relative_gap,
                     "primal_violation":solution.report.primal_violation,"support":solution.report.variables_after}})
         }

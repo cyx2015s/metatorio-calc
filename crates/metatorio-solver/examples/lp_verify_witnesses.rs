@@ -29,6 +29,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut optima = 0;
     let mut infeasible = 0;
     let mut maximum_gap = 0.0f64;
+    let mut relative_models = 0;
+    let mut maximum_balance_error = 0.0f64;
     for entry in fs::read_dir(&directory)? {
         let entry = entry?;
         let name = entry.file_name();
@@ -70,6 +72,54 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             basis_dimension: 0,
         };
         let certificate = snapshot.exact_model().certify(&solution)?;
+        if witness["acceptance_mode"] == "relative-balance" {
+            let model = snapshot.exact_model();
+            let control = Default::default();
+            let verified =
+                model.verify_relative_with_control(&solution, &budget, &budget, &control)?;
+            let rounded_solution = ExactSolution {
+                values: solution
+                    .approximate()?
+                    .into_iter()
+                    .map(|value| Rational::from_float(value).ok_or("nonfinite rounded value"))
+                    .collect::<Result<_, _>>()?,
+                row_duals: solution.row_duals.clone(),
+                basis_dimension: 0,
+            };
+            let rounded = model.verify_relative_with_control(
+                &rounded_solution,
+                &budget,
+                &budget,
+                &control,
+            )?;
+            if !verified.accepted
+                || !rounded.accepted
+                || witness["accepted"] != true
+                || witness["certificate"] != serde_json::to_value(&certificate)?
+                || witness["relative"] != serde_json::to_value(&verified)?
+                || witness["rounded_relative"] != serde_json::to_value(&rounded)?
+            {
+                return Err(format!("invalid relative-balance witness: {text}").into());
+            }
+            maximum_balance_error = maximum_balance_error
+                .max(verified.balance_error_upper_bound()?)
+                .max(rounded.balance_error_upper_bound()?);
+            maximum_gap = maximum_gap
+                .max(
+                    verified
+                        .duality_gap_upper_bound()?
+                        .ok_or("missing original duality bound")?,
+                )
+                .max(
+                    rounded
+                        .duality_gap_upper_bound()?
+                        .ok_or("missing rounded duality bound")?,
+                );
+            relative_models += usize::from(!certificate.primal_feasible);
+            optima += usize::from(certificate.optimal);
+            count += 1;
+            continue;
+        }
         let gap = certificate
             .relative_gap()?
             .ok_or("witness does not establish full feasibility")?;
@@ -102,8 +152,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!(
         "{}",
         serde_json::json!({"verified_models":count,"exact_optima":optima,"gap_budget":budget.to_string(),
-        "verified_infeasible_models":infeasible,"verified_feasible_models":count-infeasible,
-        "maximum_relative_gap_upper_bound":maximum_gap,"all_primal_and_dual_feasible":infeasible==0,"all_rounded_checks_passed":true})
+        "verified_infeasible_models":infeasible,"verified_feasible_models":count-infeasible-relative_models,
+        "verified_relative_feasible_models":relative_models,"maximum_relative_balance_error":maximum_balance_error,
+        "maximum_relative_gap_upper_bound":maximum_gap,"all_primal_and_dual_feasible":infeasible==0 && relative_models==0,"all_within_verified_budgets":true,"all_rounded_checks_passed":true})
     );
     Ok(())
 }

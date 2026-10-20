@@ -42,6 +42,12 @@ pub struct SolveReport {
     pub exact_optimality_verified: bool,
     /// Upward-rounded full-model exact gap / max(1, abs(primal objective)).
     pub certified_relative_gap: Option<f64>,
+    /// Full-model relative row balance, including the actual rounded output.
+    pub relative_primal_verified: bool,
+    pub maximum_relative_balance_error: Option<f64>,
+    pub balance_tolerance: Option<f64>,
+    /// Stopping gap for a toleranced primal point; not an exact optimum bound.
+    pub relative_duality_gap: Option<f64>,
 }
 
 /// 求解结果（原问题空间）。
@@ -494,6 +500,32 @@ fn solve_lp_impl(
                 }
             }?;
             let used = result.values.iter().filter(|x| **x != 0.0).count();
+            let balance_error = result
+                .relative
+                .as_ref()
+                .map(|(a, b)| {
+                    Ok::<_, String>(
+                        a.balance_error_upper_bound()?
+                            .max(b.balance_error_upper_bound()?),
+                    )
+                })
+                .transpose()
+                .map_err(ResolutionError::Str)?;
+            let relative_gap = result
+                .relative
+                .as_ref()
+                .map(|(a, b)| {
+                    Ok::<_, String>(
+                        a.duality_gap_upper_bound()?
+                            .ok_or("missing relative duality gap")?
+                            .max(
+                                b.duality_gap_upper_bound()?
+                                    .ok_or("missing rounded relative duality gap")?,
+                            ),
+                    )
+                })
+                .transpose()
+                .map_err(ResolutionError::Str)?;
             let (violation, cost) = evaluate_solution(&objective, &rows, &result.values);
             let cost = cost + minimise.constant();
             if violation > ACCEPT_VIOLATION {
@@ -524,6 +556,13 @@ fn solve_lp_impl(
                         .certificate
                         .relative_gap_upper_bound()
                         .map_err(ResolutionError::Str)?,
+                    relative_primal_verified: result
+                        .relative
+                        .as_ref()
+                        .is_some_and(|(a, b)| a.accepted && b.accepted),
+                    maximum_relative_balance_error: balance_error,
+                    balance_tolerance: balance_error.map(|_| 1e-12),
+                    relative_duality_gap: relative_gap,
                 },
                 &orig_vars,
             ));

@@ -30,6 +30,7 @@ pub(crate) struct Result {
     pub values: Vec<f64>,
     pub certificate: exact::Certificate,
     pub pivots: usize,
+    pub relative: Option<(exact::RelativeVerification, exact::RelativeVerification)>,
 }
 
 /// Pure Rust cold start; no native candidate search or fallback.
@@ -398,6 +399,57 @@ fn solve_rust_proposal_attempt(
             eprintln!("[LP-RUST-CANDIDATE-CAPTURE-ERROR] {error}");
         }
     }
+    if certified && std::env::var("METATORIO_LP_BALANCE_MODE").as_deref() != Ok("exact") {
+        let budget = exact::Rational::new(1.into(), 1_000_000_000_000u64.into());
+        match model.relative_candidate_with_control(&proposal, &budget, &budget, &control) {
+            Ok(Some(result)) => {
+                let values = result.solution.approximate()?;
+                if let Some(source) = captured {
+                    let save = || -> std::result::Result<(), Box<dyn std::error::Error>> {
+                        let directory = source
+                            .parent()
+                            .ok_or("capture has no parent")?
+                            .join("rust-attempt-certificates")
+                            .join(attempt.index.to_string());
+                        std::fs::create_dir_all(&directory)?;
+                        let file = std::fs::OpenOptions::new()
+                            .write(true)
+                            .create_new(true)
+                            .open(
+                                directory
+                                    .join(source.file_name().ok_or("capture has no filename")?),
+                            )?;
+                        serde_json::to_writer(
+                            std::io::BufWriter::new(file),
+                            &serde_json::json!({
+                                "original_snapshot":source,"model_scope":"full","certificate":result.certificate,
+                                "search_attempt":attempt.index+1,"accepted":true,"acceptance_mode":"relative-balance",
+                                "gap_budget":budget.to_string(),"balance_budget":budget.to_string(),
+                                "relative":result.relative,"rounded_relative":result.rounded_relative,
+                                "primal_basis":result.basis,"values":result.solution.values.iter().map(ToString::to_string).collect::<Vec<_>>(),
+                                "row_duals":result.solution.row_duals.iter().map(ToString::to_string).collect::<Vec<_>>(),
+                                "exact_pivots":0,"support_search_pivots":result.search_pivots,
+                                "elapsed_seconds":start.elapsed().as_secs_f64()
+                            }),
+                        )?;
+                        Ok(())
+                    };
+                    if let Err(error) = save() {
+                        eprintln!("[LP-RUST-CERTIFICATE-CAPTURE-ERROR] {error}");
+                    }
+                }
+                return Ok(Result {
+                    values,
+                    certificate: result.certificate,
+                    pivots: work.floating + result.search_pivots,
+                    relative: Some((result.relative, result.rounded_relative)),
+                });
+            }
+            Err(error) if control.is_cancelled() => return Err(error.into()),
+            Err(error) => eprintln!("[LP-RELATIVE-CANDIDATE-STOP] {error}"),
+            Ok(None) => {}
+        }
+    }
     if certified {
         let allow_support = attempt.full_refinement
             || (proposal.diagnostic.is_none()
@@ -606,6 +658,7 @@ fn recover_columns(
         values,
         certificate: result.certificate,
         pivots: result.exact_pivots + result.support_search_pivots,
+        relative: None,
     })
 }
 
@@ -630,6 +683,7 @@ fn validated_result(
         values,
         certificate,
         pivots,
+        relative: None,
     })
 }
 

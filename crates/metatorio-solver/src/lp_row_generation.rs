@@ -395,6 +395,7 @@ pub(crate) fn solve(
                 }),
             );
             return Ok(super::lp_hybrid::Result {
+                relative: None,
                 values,
                 certificate,
                 pivots,

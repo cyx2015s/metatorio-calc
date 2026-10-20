@@ -30,6 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let duration = std::time::Duration::try_from_secs_f64(seconds)?;
     let deadline = start.checked_add(duration).ok_or("time budget overflow")?;
     let control = SolveControl::with_deadline(deadline);
+    let stop_before_refine = std::env::var("LP_CERTIFY_STOP_BEFORE_REFINE").as_deref() == Ok("1");
     let result = snapshot.exact_model().certify_candidate_with_control(
         &candidate,
         1000,
@@ -40,6 +41,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 start.elapsed().as_secs_f64()
             );
             start.elapsed().as_secs_f64() < seconds
+                && !(stop_before_refine && phase == "full-refine")
         },
         &control,
     );

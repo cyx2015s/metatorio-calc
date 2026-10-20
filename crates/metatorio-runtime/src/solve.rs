@@ -65,6 +65,14 @@ pub struct SolveDiagnostics {
     /// Verified bound for this returned factory LP, rounded upward for display.
     #[serde(default)]
     pub certified_relative_gap: Option<f64>,
+    #[serde(default)]
+    pub relative_primal_verified: bool,
+    #[serde(default)]
+    pub maximum_relative_balance_error: Option<f64>,
+    #[serde(default)]
+    pub balance_tolerance: Option<f64>,
+    #[serde(default)]
+    pub relative_duality_gap: Option<f64>,
     /// 自动规划回写前自检：写回的机制集合自己能不能解出目标。
     /// false 表示这次回写的方案**验证不过**（结果可能无解），需要人工/agent 判断。
     pub writeback_verified: bool,
@@ -87,6 +95,10 @@ impl SolveDiagnostics {
             exact_primal_verified: report.exact_primal_verified,
             exact_optimality_verified: report.exact_optimality_verified,
             certified_relative_gap: report.certified_relative_gap,
+            relative_primal_verified: report.relative_primal_verified,
+            maximum_relative_balance_error: report.maximum_relative_balance_error,
+            balance_tolerance: report.balance_tolerance,
+            relative_duality_gap: report.relative_duality_gap,
             ..Self::default()
         }
     }
