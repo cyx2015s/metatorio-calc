@@ -74,6 +74,10 @@ shell 与 tauri 不保证同一线程，也不保证谁先销毁；两边都可�
 
 ## 文件地图
 
+工程文件打开由 shell 的 `open_project_file` 统一处理；GUI 返回项目 ID 并管理选中状态，
+系统参数／拖放请求则由 Tauri 原生队列保存到前端就绪。关联、去重和读写边界详见
+[工程文件与加载链路](project-files.md)。
+
 | 关注点 | 位置 |
 |---|---|
 | 共享状态 `AppState`、上下文注册表、目录/详情/本地化 | `crates/metatorio-shell/src/app.rs` |

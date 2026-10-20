@@ -18,81 +18,11 @@
 
 use clap::Parser;
 
-use metatorio_app_lib::{Options, mcp};
+use metatorio_app_lib::Options;
+#[cfg(test)]
+use metatorio_app_lib::mcp;
 
-/// 异星工厂规划工具：GUI（默认）或纯 MCP 服务（`--headless`）。
-#[derive(Debug, Parser)]
-#[command(name = "metatorio-app", version, about, long_about = None)]
-struct Cli {
-    /// 不创建窗口，只提供 MCP 端点（无界面；Linux 仍会初始化 GTK，需要 xvfb）。
-    #[arg(long, env = "METATORIO_HEADLESS")]
-    headless: bool,
-
-    /// MCP 监听地址：默认 `127.0.0.1`（只有本机能连）。要让手机/其它设备接入就填本机
-    /// 局域网 IP（`192.168.1.23`）或 `0.0.0.0`（所有网卡）——**非回环必须配 token**。
-    #[arg(long, env = "METATORIO_MCP_BIND", default_value_t = mcp::DEFAULT_MCP_BIND.to_string())]
-    mcp_bind: String,
-
-    /// MCP 端点端口。
-    #[arg(long, env = "METATORIO_MCP_PORT", default_value_t = mcp::DEFAULT_MCP_PORT)]
-    mcp_port: u16,
-
-    /// 额外允许的 `Host`（可重复，或一个逗号分隔的环境变量）：用主机名/mDNS 名访问时
-    /// 填，例如 `--mcp-allow-host mirac-pc.local`。IP 由 `--mcp-bind` 自动允许。
-    #[arg(
-        long = "mcp-allow-host",
-        env = "METATORIO_MCP_ALLOW_HOSTS",
-        value_delimiter = ','
-    )]
-    mcp_allow_hosts: Vec<String>,
-
-    /// 对外暴露哪些 MCP 工具（逗号分隔；**留空 = 全部**）。工具越少，agent 选得越准：
-    /// 例如 `--mcp-tools auto_plan,dispatch,get_planning_state` 只留「权威入口 + 万能
-    /// 逃生通道 + 读取」。名字写错会拒绝启动并列出可用工具。
-    #[arg(long = "mcp-tools", env = "METATORIO_MCP_TOOLS", value_delimiter = ',')]
-    mcp_tools: Vec<String>,
-
-    /// MCP 鉴权 token（`Authorization: Bearer <token>` 或裸 token）。
-    /// 不提供 = 不鉴权，此时只允许监听回环地址。
-    #[arg(long, env = "METATORIO_MCP_TOKEN")]
-    mcp_token: Option<String>,
-
-    /// 单次求解的等待上限（毫秒）；超时返回可重试错误，后台任务继续跑完。
-    #[arg(long, env = "METATORIO_SOLVE_TIMEOUT_MS")]
-    solve_timeout_ms: Option<u64>,
-
-    /// 不启动 MCP 端点（只想要 GUI、不开本地端口时用）。
-    #[arg(long = "no-mcp", env = "METATORIO_NO_MCP")]
-    no_mcp: bool,
-}
-
-/// 参数组合校验。两条都是**拒绝启动**而不是警告：静默跑出一个「没有窗口也没有接口」
-/// 的进程最难排查；而把能改文档、跑规划的端点暴露到回环之外却**没有 token**，等于把
-/// 规划器交给整个局域网（家用网段里任何设备都能扫到）。
-fn validate(cli: &Cli) -> Result<(), String> {
-    if cli.headless && cli.no_mcp {
-        return Err("--headless 与 --no-mcp 不能同时使用：那样既没有窗口也没有 MCP".to_string());
-    }
-    if cli.no_mcp {
-        // 端点没开，绑哪儿、有没有 token 都无所谓（不校验，免得拦下无害的组合）。
-        return Ok(());
-    }
-    let (bind, _) = mcp::resolve_bind(&cli.mcp_bind, &cli.mcp_allow_hosts)?;
-    // 工具名必须真实存在：写错就报错，而不是「静默全开」或「静默少开一个」。
-    mcp::resolve_tools(&cli.mcp_tools)?;
-    let has_token = cli
-        .mcp_token
-        .as_deref()
-        .is_some_and(|token| !token.trim().is_empty());
-    if !bind.is_loopback() && !has_token {
-        return Err(format!(
-            "--mcp-bind {} 会把 MCP 端点暴露到回环之外，必须同时提供 --mcp-token\
-             （或 METATORIO_MCP_TOKEN）：这个端点能建项目、改目标、跑规划",
-            cli.mcp_bind
-        ));
-    }
-    Ok(())
-}
+use metatorio_app_lib::launch::{Cli, validate};
 
 fn main() {
     let cli = Cli::parse();
@@ -100,17 +30,20 @@ fn main() {
         eprintln!("参数错误：{message}");
         std::process::exit(2);
     }
-    metatorio_app_lib::run(Options {
-        mcp_bind: cli.mcp_bind.clone(),
-        mcp_port: cli.mcp_port,
-        mcp_allow_hosts: cli.mcp_allow_hosts.clone(),
-        mcp_tools: cli.mcp_tools.clone(),
-        // 空串等于没给：与原来「env 存在但为空 → 不鉴权」的行为一致。
-        mcp_token: cli.mcp_token.filter(|token| !token.trim().is_empty()),
-        solve_timeout_ms: cli.solve_timeout_ms,
-        headless: cli.headless,
-        mcp: !cli.no_mcp,
-    });
+    metatorio_app_lib::run_with_project_files(
+        Options {
+            mcp_bind: cli.mcp_bind.clone(),
+            mcp_port: cli.mcp_port,
+            mcp_allow_hosts: cli.mcp_allow_hosts.clone(),
+            mcp_tools: cli.mcp_tools.clone(),
+            // 空串等于没给：与原来「env 存在但为空 → 不鉴权」的行为一致。
+            mcp_token: cli.mcp_token.filter(|token| !token.trim().is_empty()),
+            solve_timeout_ms: cli.solve_timeout_ms,
+            headless: cli.headless,
+            mcp: !cli.no_mcp,
+        },
+        cli.files,
+    );
 }
 
 #[cfg(test)]
@@ -130,6 +63,7 @@ mod tests {
     #[test]
     fn mcp_tools_selection_is_validated() {
         let cli = |tools: Vec<&str>| Cli {
+            files: Vec::new(),
             headless: true,
             mcp_bind: mcp::DEFAULT_MCP_BIND.to_string(),
             mcp_port: mcp::DEFAULT_MCP_PORT,
@@ -160,6 +94,7 @@ mod tests {
     #[test]
     fn headless_without_mcp_is_rejected() {
         let cli = |headless, no_mcp| Cli {
+            files: Vec::new(),
             headless,
             mcp_bind: mcp::DEFAULT_MCP_BIND.to_string(),
             mcp_port: mcp::DEFAULT_MCP_PORT,
@@ -186,6 +121,7 @@ mod tests {
     #[test]
     fn non_loopback_bind_requires_a_token() {
         let cli = |bind: &str, token: Option<&str>, no_mcp| Cli {
+            files: Vec::new(),
             headless: false,
             mcp_bind: bind.to_string(),
             mcp_port: mcp::DEFAULT_MCP_PORT,

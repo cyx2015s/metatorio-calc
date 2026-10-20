@@ -16,6 +16,7 @@
     "test:network-browser": "node tests/network-browser.cjs",
     "test:external-inputs": "node --test tests/external-input-shortcuts.test.mjs",
     "test:external-inputs-browser": "node tests/external-inputs-browser.cjs",
+    "test:project-files-browser": "node tests/project-files-browser.cjs",
     "test:mechanic-filter-browser": "node tests/mechanic-filter-browser.cjs",
     "test:dual-var": "node --test tests/dual-var.test.mjs",
     "test:dual-var-browser": "node tests/dual-var-browser.cjs",

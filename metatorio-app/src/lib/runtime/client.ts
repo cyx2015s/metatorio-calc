@@ -177,9 +177,19 @@ export async function allowedModules(
 
 // ── Persistence ───────────────────────────────────────────────────
 //
-// 打开/保存只保留**文件对话框**命令（返回路径）与 `project_save_path` 读取；
-// 真正的读盘 + 导入 / 写盘走 AppMessage（`open-project` / `save-project` /
-// `save-project-as`），因此 MCP agent 与 GUI 共享同一条持久化路径。
+// GUI open returns explicit imported/reused IDs. Its shell implementation is
+// shared with AppMessage::OpenProject; saving retains the message path.
+
+export interface ProjectFileOpen { path: string; projects: number[]; reused: boolean }
+export function openProjectFile(path: string): Promise<ProjectFileOpen> {
+  return call("open_project_file", {path});
+}
+export function takeProjectOpenRequests(): Promise<string[]> {
+  return call("take_project_open_requests");
+}
+export function onProjectOpenRequested(handler: () => void): Promise<() => void> {
+  return listen("project-open-requested", handler);
+}
 
 export async function pickProjectFile(): Promise<string | null> {
   return call("pick_project_file");

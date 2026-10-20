@@ -21,6 +21,7 @@ metatorio-runtime = { path = "../metatorio-runtime", default-features = false }
 metatorio-solver = { path = "../metatorio-solver", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+dunce = "1"
 base64 = "0.22"
 minisign-verify = "0.2"
 semver = "1"

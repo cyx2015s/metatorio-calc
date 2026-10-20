@@ -30,6 +30,9 @@ import {
   onSolveError,
   onSolveResult,
   pickProjectFile,
+  openProjectFile,
+  onProjectOpenRequested,
+  takeProjectOpenRequests,
   pickProjectSavePath,
   prototypeDetail,
   projectSavePath,
@@ -132,6 +135,11 @@ class RuntimeStore {
   private solveCache = new Map<string, SolveResult>();
   revision = $state(0);
   busy = $state(false);
+  openingProjectPath = $state<string | null>(null);
+  fileOpenNotice = $state<string | null>(null);
+  private fileOpenQueue: Promise<unknown> = Promise.resolve();
+  private nativeOpenTask: Promise<void> | null = null;
+  private nativeOpenPending = false;
   /** 正在求解/自动规划的 (project, factory)；null = 空闲。按工厂区分，避免
    *  切换工厂时误判"当前在算"而锁死按钮。 */
   solving = $state<{ project: ProjectId; factory: FactoryId } | null>(null);
@@ -273,6 +281,7 @@ class RuntimeStore {
 
   /** Subscribe to backend events; call once at app start. */
   async init(): Promise<void> {
+    await onProjectOpenRequested(() => { if (this.ready) void this.consumeProjectOpenRequests(); });
     onSolveResult((result) => {
       this.solve = result;
       this.solveError = null;
@@ -337,6 +346,7 @@ class RuntimeStore {
     // 首屏目录/上下文刷新后同步一次：目录索引会触发后端载入 store，
     // 再刷新上下文列表以清除「未载入」徽标（初始化时序里列表先于 store 载入）。
     await this.syncEffectiveContext();
+    await this.consumeProjectOpenRequests();
   }
 
   async refresh(): Promise<void> {
@@ -534,13 +544,13 @@ class RuntimeStore {
    * 项目上下文未变时无操作（幂等；可按当前项目切换/新建触发）。
    */
   private async syncEffectiveContext(): Promise<void> {
-    const ctxId = this.effectiveContextId;
+    const ctxId = this.effectiveContextId || this.activeContext?.id || "";
     if (ctxId === this.syncedContextId) return;
     this.syncedContextId = ctxId;
     try {
       // 先载入 store（catalog_index 后端会 ensure_context_loaded），
       // 再刷新列表：列表里的 loaded 才会反映真实载入状态。
-      if (ctxId) await this.loadCatalogIndex();
+      if (ctxId && !await this.loadCatalogIndex()) this.syncedContextId = "";
       await this.refreshContexts();
     } catch {
       /* 刷新失败不阻塞界面 */
@@ -626,34 +636,60 @@ class RuntimeStore {
 
   // ── 文件 ────────────────────────────────────────────────────────
 
+  /** Requests are queued natively until listeners and initial state are ready. */
+  private consumeProjectOpenRequests(): Promise<void> {
+    this.nativeOpenPending = true;
+    if (this.nativeOpenTask) return this.nativeOpenTask;
+    this.nativeOpenTask = (async () => {
+      while (this.nativeOpenPending) {
+        this.nativeOpenPending = false;
+        const paths = await takeProjectOpenRequests();
+        const errors: string[] = [];
+        for (const path of paths) {
+          try { await this.openProjectPath(path); } catch (error) { errors.push(String(error)); }
+        }
+        if (errors.length) this.setOperationError(errors.join('\n'));
+      }
+    })().catch(error => { this.setOperationError(error); }).finally(() => { this.nativeOpenTask = null; });
+    return this.nativeOpenTask;
+  }
+
+  /** Dialogs, startup arguments and OS drop/open events share one serial queue. */
+  openProjectPath(path: string): Promise<boolean> {
+    const task = this.fileOpenQueue.then(async () => {
+      this.openingProjectPath = path;
+      this.fileOpenNotice = null;
+      this.busy = true;
+      this.lastError = null; this.lastDiagnostic = null;
+      try {
+        const opened = await openProjectFile(path);
+        await this.refresh();
+        await this.refreshHistory();
+        await this.refreshProjectPaths();
+        const project = opened.projects.at(-1);
+        if (project == null) throw new Error(`工程「${path}」没有可打开的项目`);
+        await this.selectProject(project);
+        if (opened.reused) this.fileOpenNotice = `此工程已打开，已切换到现有项目：${opened.path}`;
+        else if (opened.projects.length > 1) this.fileOpenNotice = `已导入 ${opened.projects.length} 个项目；请分别另存为，避免覆盖原工程合集。`;
+        return true;
+      } catch (error) {
+        this.setOperationError(error);
+        throw error;
+      } finally {
+        this.openingProjectPath = null;
+        this.busy = false;
+      }
+    });
+    this.fileOpenQueue = task.catch(() => {});
+    return task;
+  }
+
   async openProject(): Promise<boolean> {
     this.busy = true;
     try {
       const path = await pickProjectFile();
       if (!path) return false;
-      // 导入走消息（后端 LoadProject：锁外解析 + 短锁内导入 + 注册保存路径 +
-      // document-changed）。新项目 id 由「导入前后的 id 差集」得出——命令阶段
-      // 的导入结果不在 DispatchResult.created 里（那是 reducer 的产出）。
-      const before = new Set((this.document?.projects ?? []).map((project) => project.id));
-      await this.send({ scope: "application", action: { "open-project": { path } } });
-      const added = (this.document?.projects ?? []).filter((project) => !before.has(project.id));
-      if (added.length === 0) {
-        // 导入失败时命令层只会 emit solve-error（dispatch 命令不回传命令失败），
-        // 因此这里显式区分「没导入任何东西」与「导入成功」，避免误选已有项目。
-        this.lastError = `没有从 ${path} 导入任何项目（文件为空或解析失败，详见错误面板）`;
-        return false;
-      }
-      // 前端持有选择态：选中最后导入的那个项目。
-      this.selectedProjectId = added[added.length - 1].id;
-      this.selectedFactoryId = added[added.length - 1].factories[0]?.id ?? null;
-      this.selectedMechanic = null;
-      await this.refreshProjectPaths();
-      this.restoreSolveForSelection();
-      this.refreshOrderedMilestones().catch(() => {});
-      this.refreshProductivity().catch(() => {});
-      this.refreshImplicitSources().catch(() => {});
-      this.syncEffectiveContext().catch(() => {});
-      return true;
+      return await this.openProjectPath(path);
     } catch (error) {
       this.setOperationError(error);
       throw error;
@@ -713,30 +749,35 @@ class RuntimeStore {
   }
 
   /** 目录索引：一次拉取当前上下文的全量目录（前端本地筛选/分组）。 */
-  private catalogLoadPromise: Promise<CatalogIndex | null> | null = null;
+  private catalogLoads = new Map<string, Promise<CatalogIndex | null>>();
 
   async loadCatalogIndex(): Promise<CatalogIndex | null> {
-    const contextId = this.effectiveContextId;
+    const contextId = this.effectiveContextId || this.activeContext?.id || "";
     if (this.catalogIndex?.context_id === contextId && contextId) {
       return this.catalogIndex;
     }
     // 合并并发加载（init 的 await 与上下文切换的 fire-and-forget 可能同时触发）。
-    if (this.catalogLoadPromise) return this.catalogLoadPromise;
-    this.catalogLoadPromise = (async () => {
+    const pending = this.catalogLoads.get(contextId);
+    if (pending) return pending;
+    const request = (async () => {
       try {
-        this.catalogIndex = await catalogIndex(contextId);
+        const index = await catalogIndex(contextId);
         // 目录（含该上下文图标）就绪后，让已渲染的 <Icon> 重新拉取，
         // 修复"首屏/上下文未就绪时图标被瞬时 null 缓存"导致的占位。
-        this.iconRevision++;
-        return this.catalogIndex;
+        if ((this.effectiveContextId || this.activeContext?.id || "") === contextId) {
+          this.catalogIndex = index;
+          this.iconRevision++;
+        }
+        return index;
       } catch (error) {
-        this.setOperationError(error);
+        if ((this.effectiveContextId || this.activeContext?.id || "") === contextId) this.setOperationError(error);
         return null;
       } finally {
-        this.catalogLoadPromise = null;
+        this.catalogLoads.delete(contextId);
       }
     })();
-    return this.catalogLoadPromise;
+    this.catalogLoads.set(contextId, request);
+    return request;
   }
 
   /** 悬停详情：按 (context, kind, name) 缓存（上下文项目级绑定）。 */

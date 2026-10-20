@@ -793,7 +793,8 @@ impl Runtime {
 /// 移出 runtime 锁。
 pub fn parse_document_file(path: &Path) -> Result<serde_json::Value, RuntimeError> {
     let raw = std::fs::read_to_string(path).map_err(|error| RuntimeError::Io(error.to_string()))?;
-    serde_json::from_str(&raw).map_err(|error| RuntimeError::DataLoad(error.to_string()))
+    serde_json::from_str(raw.strip_prefix('\u{feff}').unwrap_or(&raw))
+        .map_err(|error| RuntimeError::DataLoad(error.to_string()))
 }
 
 /// 把文档写入文件（**不涉及 Runtime / 锁**，可锁外执行）。

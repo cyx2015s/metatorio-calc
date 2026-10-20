@@ -71,6 +71,7 @@ async function seed(page, count) {
     }
     if(command==='plugin:event|unlisten') return;
     if(command==='plugin:app|version') return '1.5.33';
+    if(command==='take_project_open_requests') return [];
     if(command==='get_document') return structuredClone(doc);
     if(command==='history_state') return history;
     if(command==='list_contexts') return {active:'test',contexts:[ctx]};

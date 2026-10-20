@@ -76,6 +76,9 @@ pub struct AppState {
     pub(crate) context_loads: solve_jobs::KeyLocks,
     pub(crate) contexts: Mutex<ContextRegistry>,
     pub(crate) project_paths: Mutex<HashMap<ProjectId, String>>,
+    /// Canonical source file -> projects opened from it, including collections.
+    project_files: Mutex<HashMap<String, Vec<ProjectId>>>,
+    project_loads: solve_jobs::KeyLocks,
     /// 上下文 id → 本地化名映射（来自游戏 `--dump-prototype-locale` 的
     /// `prototype-locale.json`，键为 `"{type}/{name}"`）。
     pub(crate) locales: Mutex<HashMap<String, HashMap<String, String>>>,
@@ -340,6 +343,8 @@ impl Default for AppState {
             context_loads: solve_jobs::KeyLocks::default(),
             contexts: Mutex::new(ContextRegistry::default()),
             project_paths: Mutex::new(HashMap::new()),
+            project_files: Mutex::new(HashMap::new()),
+            project_loads: solve_jobs::KeyLocks::default(),
             locales: Mutex::new(HashMap::new()),
             dispatch_cache: Mutex::new(DispatchCache::default()),
             auto_plans: Mutex::new(HashMap::new()),
@@ -3149,6 +3154,122 @@ pub(crate) async fn factory_snapshot(
     })
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct ProjectFileOpen {
+    pub path: String,
+    pub projects: Vec<ProjectId>,
+    pub reused: bool,
+}
+
+/// Shared GUI / message file-open path. Never overwrite an unrelated unsaved
+/// project's destination, and don't discard in-memory edits on repeated opens.
+pub async fn open_project_file(
+    host: &Arc<dyn Host>,
+    path: String,
+) -> Result<ProjectFileOpen, String> {
+    let requested = path.clone();
+    let canonical = tokio::task::spawn_blocking(move || dunce::canonicalize(&requested))
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| format!("无法打开工程「{path}」：{error}"))?;
+    let path = canonical.to_string_lossy().into_owned();
+    let state = host.state();
+    let _guard = state.project_loads.lock(path.clone()).await;
+    let known = state
+        .project_files
+        .lock()
+        .map_err(|error| error.to_string())?
+        .get(&path)
+        .cloned()
+        .unwrap_or_default();
+    let existing = with_runtime(state, |runtime| {
+        Ok(known
+            .into_iter()
+            .filter(|id| {
+                runtime
+                    .state
+                    .document
+                    .projects
+                    .iter()
+                    .any(|project| project.id == *id)
+            })
+            .collect::<Vec<_>>())
+    })?;
+    if !existing.is_empty() {
+        return Ok(ProjectFileOpen {
+            path,
+            projects: existing,
+            reused: true,
+        });
+    }
+    let value =
+        tokio::task::spawn_blocking(move || metatorio_runtime::parse_document_file(&canonical))
+            .await
+            .map_err(|error| error.to_string())?
+            .map_err(|error| format!("读取工程「{path}」失败：{error}"))?;
+    if metatorio_runtime::migrate::is_old_project_format(&value) {
+        let active = with_runtime(state, |runtime| Ok(runtime.active_context().map(str::to_string)))?
+            .ok_or_else(|| format!("旧版工程「{path}」需要游戏数据才能迁移品质和配方。请先加载对应游戏数据，再重新打开。"))?;
+        ensure_context_loaded_offlock(state, &active).await?;
+    } else {
+        value
+            .get("projects")
+            .and_then(serde_json::Value::as_array)
+            .filter(|projects| !projects.is_empty())
+            .ok_or_else(|| format!("「{path}」不是有效工程：未包含任何项目。"))?;
+        if let Some(version) = value
+            .get("schema_version")
+            .and_then(serde_json::Value::as_u64)
+        {
+            if version > metatorio_runtime::document::DOCUMENT_SCHEMA_VERSION as u64 {
+                return Err(format!(
+                    "工程「{path}」的格式版本 {version} 高于当前软件支持的版本，请更新软件。"
+                ));
+            }
+        }
+    }
+    let projects = with_runtime(state, |runtime| {
+        let before = runtime
+            .state
+            .document
+            .projects
+            .iter()
+            .map(|project| project.id)
+            .collect::<Vec<_>>();
+        runtime
+            .import_document_value(value)
+            .map_err(|error| format!("导入工程「{path}」失败：{error}"))?;
+        Ok(runtime
+            .state
+            .document
+            .projects
+            .iter()
+            .filter(|project| !before.contains(&project.id))
+            .map(|project| project.id)
+            .collect::<Vec<_>>())
+    })?;
+    // Saves are per-project. A collection must be saved as separate files rather
+    // than silently overwriting the source collection with a single project.
+    if projects.len() == 1 {
+        state
+            .project_paths
+            .lock()
+            .map_err(|error| error.to_string())?
+            .insert(projects[0], path.clone());
+    }
+    state
+        .project_files
+        .lock()
+        .map_err(|error| error.to_string())?
+        .insert(path.clone(), projects.clone());
+    emit(host, "document-changed", ());
+    Ok(ProjectFileOpen {
+        path,
+        projects,
+        reused: false,
+    })
+}
+
 /// 保存项目到文件：锁内取文档快照 → 锁外原子写盘 → 锁内清 dirty。
 ///
 /// 序列化 + 文件 IO 都不持 runtime 锁（大工程 JSON 序列化可能有几十毫秒，
@@ -3164,8 +3285,11 @@ pub(crate) async fn persist_project(
             .map_err(|error| error.to_string())
     })?;
     let write_path = PathBuf::from(&path);
-    tokio::task::spawn_blocking(move || {
+    let saved_path = tokio::task::spawn_blocking(move || {
         metatorio_runtime::write_document_file(&document, &write_path)
+            .map_err(|error| error.to_string())?;
+        dunce::canonicalize(&write_path)
+            .map(|path| path.to_string_lossy().into_owned())
             .map_err(|error| error.to_string())
     })
     .await
@@ -3175,7 +3299,14 @@ pub(crate) async fn persist_project(
         Ok(())
     })?;
     if let Ok(mut paths) = state.project_paths.lock() {
-        paths.insert(project, path);
+        paths.insert(project, saved_path.clone());
+    }
+    if let Ok(mut files) = state.project_files.lock() {
+        files.retain(|_, projects| {
+            projects.retain(|id| *id != project);
+            !projects.is_empty()
+        });
+        files.insert(saved_path, vec![project]);
     }
     Ok(())
 }
@@ -3657,43 +3788,10 @@ pub(crate) async fn execute_command(
             }
             outcome
         }
-        RuntimeCommand::LoadProject { path } => {
-            // 读盘 + JSON 解析在锁外；迁移/导入在短锁内。
-            let load_path = PathBuf::from(path.clone());
-            let parsed = tokio::task::spawn_blocking(move || {
-                metatorio_runtime::parse_document_file(&load_path)
-                    .map_err(|error| error.to_string())
-            })
-            .await
-            .map_err(|error| error.to_string());
-            let value = match parsed {
-                Ok(Ok(value)) => value,
-                Ok(Err(error)) | Err(error) => {
-                    emit(host, "solve-error", error.clone());
-                    return CommandOutcome::failed(error);
-                }
-            };
-            match with_runtime(state, |runtime| {
-                runtime
-                    .import_document_value(value)
-                    .map_err(|error| error.to_string())?;
-                Ok(runtime.state.document.clone())
-            }) {
-                Ok(document) => {
-                    if let Ok(mut paths) = state.project_paths.lock() {
-                        for project in &document.projects {
-                            paths.entry(project.id).or_insert_with(|| path.clone());
-                        }
-                    }
-                    emit(host, "document-changed", ());
-                    CommandOutcome::default()
-                }
-                Err(error) => {
-                    emit(host, "solve-error", error.clone());
-                    CommandOutcome::failed(error)
-                }
-            }
-        }
+        RuntimeCommand::LoadProject { path } => match open_project_file(host, path.clone()).await {
+            Ok(_) => CommandOutcome::default(),
+            Err(error) => CommandOutcome::failed(error),
+        },
         RuntimeCommand::CloseProject { project } => {
             let project = *project;
             let outcome = with_runtime(state, |runtime| {
@@ -4431,6 +4529,220 @@ mod tests {
     };
 
     use super::*;
+
+    struct FileHost {
+        state: AppState,
+        dir: PathBuf,
+    }
+    impl Host for FileHost {
+        fn state(&self) -> &AppState {
+            &self.state
+        }
+        fn app_data_dir(&self) -> PathBuf {
+            self.dir.clone()
+        }
+        fn emit(&self, _: &str, _: serde_json::Value) {}
+    }
+    fn file_host() -> Arc<FileHost> {
+        let dir = std::env::temp_dir().join(format!(
+            "metatorio-file-open-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        Arc::new(FileHost {
+            state: AppState::default(),
+            dir,
+        })
+    }
+    fn fixture_project(id: u64) -> metatorio_runtime::document::ProjectDocument {
+        metatorio_runtime::document::ProjectDocument {
+            id: ProjectId(id),
+            name: format!("p{id}"),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn opening_project_does_not_attach_unrelated_unsaved_projects_and_reuses_edits() {
+        let host = file_host();
+        host.state
+            .runtime
+            .lock()
+            .unwrap()
+            .import_document_value(
+                serde_json::to_value(AppDocument {
+                    projects: vec![fixture_project(1)],
+                    ..Default::default()
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        let file = host.dir.join("中文 空格.metatorio");
+        let document = AppDocument {
+            projects: vec![fixture_project(1)],
+            ..Default::default()
+        };
+        // Exercise UTF-8 BOM compatibility through the real file reader.
+        std::fs::write(
+            &file,
+            format!("\u{feff}{}", serde_json::to_string(&document).unwrap()),
+        )
+        .unwrap();
+        let app: Arc<dyn Host> = host.clone();
+        let result = open_project_file(&app, file.to_string_lossy().into())
+            .await
+            .unwrap();
+        assert_eq!(result.projects.len(), 1);
+        assert_ne!(result.projects[0], ProjectId(1));
+        assert!(project_save_path(&host.state, ProjectId(1)).is_none());
+        assert_eq!(
+            project_save_path(&host.state, result.projects[0]).unwrap(),
+            result.path
+        );
+        host.state
+            .runtime
+            .lock()
+            .unwrap()
+            .state
+            .document
+            .projects
+            .last_mut()
+            .unwrap()
+            .name = "unsaved edit".into();
+        let alias = host.dir.join(".").join("中文 空格.metatorio");
+        let repeated = open_project_file(&app, alias.to_string_lossy().into())
+            .await
+            .unwrap();
+        assert!(repeated.reused);
+        assert_eq!(repeated.projects, result.projects);
+        assert_eq!(
+            host.state
+                .runtime
+                .lock()
+                .unwrap()
+                .state
+                .document
+                .projects
+                .last()
+                .unwrap()
+                .name,
+            "unsaved edit"
+        );
+        std::fs::remove_dir_all(&host.dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn collection_imports_have_no_unsafe_single_project_save_destination() {
+        let host = file_host();
+        let file = host.dir.join("collection.json");
+        std::fs::write(
+            &file,
+            serde_json::to_vec(&AppDocument {
+                projects: vec![fixture_project(1), fixture_project(2)],
+                ..Default::default()
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let app: Arc<dyn Host> = host.clone();
+        let result = open_project_file(&app, file.to_string_lossy().into())
+            .await
+            .unwrap();
+        assert_eq!(result.projects.len(), 2);
+        assert!(
+            result
+                .projects
+                .iter()
+                .all(|project| project_save_path(&host.state, *project).is_none())
+        );
+        assert!(open_project_file(&app, result.path).await.unwrap().reused);
+        std::fs::remove_dir_all(&host.dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn invalid_project_files_report_paths_and_leave_the_document_unchanged() {
+        let host = file_host();
+        let app: Arc<dyn Host> = host.clone();
+        for content in [
+            "not json",
+            "{}",
+            r#"{"projects":[]}"#,
+            r#"{"schema_version":999,"projects":[{}]}"#,
+        ] {
+            let file = host.dir.join("invalid.metatorio");
+            std::fs::write(&file, content).unwrap();
+            let error = open_project_file(&app, file.to_string_lossy().into())
+                .await
+                .unwrap_err();
+            assert!(error.contains("invalid.metatorio"), "{error}");
+            assert!(
+                host.state
+                    .runtime
+                    .lock()
+                    .unwrap()
+                    .state
+                    .document
+                    .projects
+                    .is_empty()
+            );
+        }
+        let error = open_project_file(
+            &app,
+            host.dir.join("missing.metatorio").to_string_lossy().into(),
+        )
+        .await
+        .unwrap_err();
+        assert!(error.contains("missing.metatorio"));
+        let error = open_project_file(&app, host.dir.to_string_lossy().into())
+            .await
+            .unwrap_err();
+        assert!(error.contains("读取工程"));
+        std::fs::remove_dir_all(&host.dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn concurrent_file_opens_are_deduplicated_and_save_as_updates_origin() {
+        let host = file_host();
+        let app: Arc<dyn Host> = host.clone();
+        let file = host.dir.join("p.metatorio");
+        std::fs::write(
+            &file,
+            serde_json::to_vec(&AppDocument {
+                projects: vec![fixture_project(1)],
+                ..Default::default()
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let path = file.to_string_lossy().into_owned();
+        let (a, b) = tokio::join!(
+            open_project_file(&app, path.clone()),
+            open_project_file(&app, path.clone())
+        );
+        let (a, b) = (a.unwrap(), b.unwrap());
+        assert_eq!(a.projects, b.projects);
+        assert_ne!(a.reused, b.reused);
+        let new_file = host.dir.join("saved-as.metatorio");
+        persist_project(
+            &host.state,
+            a.projects[0],
+            new_file.to_string_lossy().into(),
+        )
+        .await
+        .unwrap();
+        assert!(
+            open_project_file(&app, new_file.to_string_lossy().into())
+                .await
+                .unwrap()
+                .reused
+        );
+        assert!(!open_project_file(&app, path).await.unwrap().reused);
+        std::fs::remove_dir_all(&host.dir).unwrap();
+    }
 
     /// 机制流（MCP `get_planning_state {mechanic}` 与 GUI 机制卡读的同一份）的语义：
     /// **系数 = 1 时每秒**的产/耗。用演示 dump（2 铁板 → 1 铁齿轮）断言两件事：

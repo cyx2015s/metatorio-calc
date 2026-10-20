@@ -399,11 +399,10 @@
   let planning = $derived(project?.planning ?? null);
   let factory = $derived(runtime.selectedFactory);
   /** 当前项目绑定的游戏上下文（未绑定时回退到全局激活上下文）。 */
-  let projectContext = $derived(
-    (project?.context_id
-      ? runtime.contexts.find((context) => context.id === project?.context_id)
-      : null) ?? runtime.activeContext,
-  );
+  let projectContext = $derived(project?.context_id
+    ? runtime.contexts.find((context) => context.id === project?.context_id) ?? null
+    : runtime.activeContext);
+  const missingProjectContext = $derived(!!project?.context_id && !projectContext);
   /** 当前主题的可读标签（应用菜单里显示当前选中项）。 */
   let themeLabel = $derived(
     runtime.theme === "system" ? "跟随系统" : runtime.theme === "light" ? "亮色" : "深色",
@@ -978,6 +977,17 @@
       {/if}
     </div>
   </header>
+
+  {#if runtime.openingProjectPath || runtime.fileOpenNotice || missingProjectContext}
+    <div class="file-feedback" role="status" aria-live="polite">
+      {#if runtime.openingProjectPath}<span title={runtime.openingProjectPath}>正在打开工程：{runtime.openingProjectPath}</span>
+      {:else if runtime.fileOpenNotice}<span>{runtime.fileOpenNotice}</span><button class="icon-btn" aria-label="关闭文件提示" onclick={() => runtime.fileOpenNotice = null}>×</button>{/if}
+      {#if missingProjectContext}
+        <span>工程已打开，但引用的游戏数据不在本机缓存中。请选择或加载对应的数据。</span>
+        <button class="btn" onclick={() => dataOpen = true}>选择游戏数据</button>
+      {/if}
+    </div>
+  {/if}
 
   {#if runtime.contextError || runtime.lastError || notice}
     <div class="err-strip">
@@ -3434,6 +3444,9 @@
 
   .external-shortcuts { display: flex; gap: 6px; margin: 0 0 8px; }
   .external-shortcuts .btn { flex: 1; font-size: 11px; }
+  .file-feedback { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; padding: 4px 16px;
+    border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+  .file-feedback > span { min-width: 0; overflow-wrap: anywhere; }
 
   .center {
     display: flex;

@@ -30,6 +30,15 @@
       "appimage"
     ],
     "createUpdaterArtifacts": true,
+    "fileAssociations": [
+      {
+        "ext": ["metatorio"],
+        "name": "Metatorio Project",
+        "description": "切向量化工程",
+        "role": "Editor",
+        "mimeType": "application/x-metatorio-project"
+      }
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

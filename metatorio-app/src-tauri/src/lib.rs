@@ -24,6 +24,8 @@ use metatorio_shell::host::Host;
 
 pub use metatorio_shell::Options;
 pub use metatorio_shell::mcp;
+pub mod launch;
+mod project_files;
 
 /// 用 `AppHandle` 实现 shell 的 `Host`：GUI 副作用（emit / 应用数据目录）在这里落地。
 ///
@@ -276,7 +278,7 @@ async fn pick_project_file(app: AppHandle) -> Result<Option<String>, String> {
         let picked = app
             .dialog()
             .file()
-            .add_filter("Metatorio 工程", &["json", "fpp"])
+            .add_filter("Metatorio 工程", &["metatorio", "json", "fpp"])
             .blocking_pick_file();
         Ok(picked
             .and_then(|picked| picked.into_path().ok())
@@ -294,8 +296,9 @@ async fn pick_project_save_path(app: AppHandle) -> Result<Option<String>, String
         let picked = app
             .dialog()
             .file()
-            .set_file_name("metatorio-project.json")
-            .add_filter("Metatorio 工程", &["json", "fpp"])
+            .set_file_name("metatorio-project.metatorio")
+            .add_filter("Metatorio 工程", &["metatorio"])
+            .add_filter("JSON 工程（兼容）", &["json"])
             .blocking_save_file();
         Ok(picked
             .and_then(|picked| picked.into_path().ok())
@@ -332,8 +335,25 @@ async fn save_network_png(
     .map_err(|error| error.to_string())?
 }
 
+#[tauri::command]
+fn take_project_open_requests(app: AppHandle) -> Result<Vec<String>, String> {
+    app.state::<project_files::OpenRequests>().take()
+}
+
+#[tauri::command]
+async fn open_project_file(
+    host: HostState<'_>,
+    path: String,
+) -> Result<metatorio_shell::app::ProjectFileOpen, String> {
+    metatorio_shell::app::open_project_file(&host_of(&host), path).await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run(options: Options) {
+    run_with_project_files(options, Vec::new());
+}
+
+pub fn run_with_project_files(options: Options, files: Vec<PathBuf>) {
     // 无头模式：在 build 之前清空窗口配置——setup 照常跑（注册表扫描、恢复最近
     // 上下文、启动 MCP），但一个窗口都不建。
     let mut context = tauri::generate_context!();
@@ -359,11 +379,43 @@ pub fn run(options: Options) {
         tools: options.mcp_tools.clone(),
     };
     let builder_options = options.clone();
-    tauri::Builder::default()
+    let requests = project_files::OpenRequests::default();
+    let cwd = std::env::current_dir().unwrap_or_default();
+    requests.push(files.into_iter().map(|path| {
+        if path.is_absolute() {
+            path
+        } else {
+            cwd.join(path)
+        }
+    }));
+    let mut builder = tauri::Builder::default().manage(requests);
+    #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
+    if !options.headless {
+        // First plugin: a second GUI launch only forwards files to this window.
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+            match launch::requested_paths(args, std::path::Path::new(&cwd)) {
+                Ok(files) => project_files::request(app, files),
+                Err(error) => {
+                    let _ = app.emit("command-error", vec![error]);
+                }
+            }
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }));
+    }
+    builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) = event {
+                project_files::request(window.app_handle(), paths.clone());
+            }
+        })
         .setup(move |app| {
             let state = Arc::new(AppState::with_options(&builder_options));
             let host: Arc<TauriHost> =
@@ -405,6 +457,8 @@ pub fn run(options: Options) {
             pick_project_save_path,
             save_network_png,
             project_save_path,
+            open_project_file,
+            take_project_open_requests,
         ])
         .run(context)
         .expect("error while running tauri application");
