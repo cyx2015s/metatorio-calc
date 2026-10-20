@@ -1,0 +1,195 @@
+{
+  "schema_version": 1,
+  "projects": [
+    {
+      "id": 1,
+      "name": "传说！",
+      "settings": {
+        "time_scale": "seconds",
+        "milestones": [],
+        "recipe_productivity": [],
+        "infinite_levels": [
+          {
+            "tech": "thermal-decomposition-efficiency",
+            "level": 3
+          },
+          {
+            "tech": "aluminum-precision-tooling",
+            "level": 4
+          },
+          {
+            "tech": "dispersed-solar-energy",
+            "level": 3
+          },
+          {
+            "tech": "processing-unit-productivity",
+            "level": 1
+          },
+          {
+            "tech": "plastic-bar-productivity",
+            "level": 2
+          },
+          {
+            "tech": "low-density-structure-productivity",
+            "level": 3
+          },
+          {
+            "tech": "asteroid-productivity",
+            "level": 1
+          },
+          {
+            "tech": "rocket-part-productivity",
+            "level": 1
+          },
+          {
+            "tech": "steel-plate-productivity",
+            "level": 4
+          },
+          {
+            "tech": "mining-productivity-3",
+            "level": 25
+          },
+          {
+            "tech": "biomass-productivity",
+            "level": 0
+          },
+          {
+            "tech": "planet-science-pack-productivity",
+            "level": 0
+          }
+        ],
+        "ignore_productivity": false,
+        "mining_productivity": 0.0,
+        "all_accessible": false,
+        "quality_limit": "legendary"
+      },
+      "planning": {
+        "preserve_existing_mechanics": false,
+        "alternative_count": 3,
+        "machine_preferences": [
+          {
+            "id": "advanced-assembly-system",
+            "quality": "normal"
+          },
+          {
+            "id": "advanced-refinery",
+            "quality": "normal"
+          },
+          {
+            "id": "cryogenic-plant",
+            "quality": "normal"
+          },
+          {
+            "id": "electromagnetic-plant",
+            "quality": "normal"
+          },
+          {
+            "id": "centrifuge-2",
+            "quality": "normal"
+          },
+          {
+            "id": "gas-distillation-tower",
+            "quality": "normal"
+          },
+          {
+            "id": "rare-earth-processing-plant",
+            "quality": "normal"
+          },
+          {
+            "id": "blast-furnace",
+            "quality": "normal"
+          },
+          {
+            "id": "electrolyzer",
+            "quality": "normal"
+          },
+          {
+            "id": "thermal-decomposer",
+            "quality": "normal"
+          }
+        ],
+        "enumerate_modules": [
+          {
+            "id": "productivity-module-3",
+            "quality": "normal"
+          },
+          {
+            "id": "quality-module-3",
+            "quality": "normal"
+          },
+          {
+            "id": "speed-module-3",
+            "quality": "normal"
+          }
+        ],
+        "enumerate_beacons": [
+          {
+            "module_config": {
+              "modules": [],
+              "beacons": [
+                {
+                  "modules": [
+                    [
+                      {
+                        "id": "speed-module-3",
+                        "quality": "normal"
+                      },
+                      2
+                    ]
+                  ],
+                  "beacon": {
+                    "id": "beacon",
+                    "quality": "normal"
+                  },
+                  "count": 4,
+                  "share": 8.0
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "context_id": "0ac4e1f02224603e",
+      "factories": [
+        {
+          "id": 2,
+          "name": "新工厂",
+          "settings": {
+            "planet": "nauvis",
+            "surface": null,
+            "major_quality": "normal",
+            "debug": false
+          },
+          "targets": [
+            {
+              "id": 3,
+              "flow": {
+                "Item": {
+                  "id": "low-density-structure",
+                  "quality": "legendary"
+                }
+              },
+              "amount": 120.0
+            }
+          ],
+          "target_expressions": [],
+          "external_inputs": [
+            {
+              "id": 4,
+              "flow": "Electricity",
+              "penalty": 0.0
+            },
+            {
+              "id": 5,
+              "flow": "Heat",
+              "penalty": 0.0
+            }
+          ],
+          "mechanics": [],
+          "strict_source": false,
+          "strict_sink": false
+        }
+      ]
+    }
+  ]
+}

@@ -229,7 +229,7 @@ async fn run_case(
         let error = state["auto_plan"]["error"].as_str().unwrap();
         assert!(!error.is_empty());
         assert!(
-            error.starts_with("自动规划无解："),
+            error.starts_with("自动规划未求解："),
             "infrastructure error must not be counted as an infeasible target: {error}"
         );
         CaseOutcome {
@@ -588,7 +588,7 @@ async fn legendary_machines_do_not_supply_missing_product_quality() {
                 state["auto_plan"]["error"]
                     .as_str()
                     .unwrap()
-                    .starts_with("自动规划无解：无可行解"),
+                    .starts_with("自动规划未求解：无可行解"),
                 "expected infeasibility, not an internal error: {state}"
             );
         }

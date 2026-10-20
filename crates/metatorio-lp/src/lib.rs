@@ -19,6 +19,8 @@ pub use control::SolveControl;
 pub use cost_bounds::CostBounds;
 mod float;
 mod presolve;
+mod relevance;
+pub use relevance::RelevanceReduction;
 mod refine;
 pub use certified::CertifiedResult;
 pub use dual::{DualPivotRule, DualRepair};

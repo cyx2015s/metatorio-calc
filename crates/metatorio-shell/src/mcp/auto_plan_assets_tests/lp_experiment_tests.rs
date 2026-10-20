@@ -106,6 +106,65 @@ fn snapshots(directory: &Path) -> BTreeSet<PathBuf> {
 }
 
 #[tokio::test]
+#[ignore = "full lengden legendary LDS 120/s; serialized real-asset optimization benchmark"]
+async fn lengden_legendary_lds_auto_plan() {
+    use metatorio_runtime::{AppDocument, Runtime};
+    let _permit = GATE.acquire().await.unwrap();
+    let context = if let Some(path) = std::env::var_os("LENGDEN_CONTEXT_DUMP") {
+        let dump = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        PrototypeStore::load(&dump).unwrap()
+    } else {
+        store(BASE).clone()
+    };
+    let mut document: AppDocument =
+        serde_json::from_str(include_str!("fixtures/lengden-legendary-lds.json")).unwrap();
+    let project = &mut document.projects[0];
+    project.context_id = Some("asset".into());
+    let project_id = project.id;
+    let factory_id = project.factories[0].id;
+    let missing_machines: Vec<_> = project
+        .planning
+        .machine_preferences
+        .iter()
+        .filter(|m| {
+            context
+                .get(metatorio_data::store::PrototypeGroup::Entity, &m.id)
+                .is_none()
+        })
+        .map(|m| m.id.clone())
+        .collect();
+    let settings = serde_json::to_value(&project.settings).unwrap();
+    eprintln!(
+        "[LENGDEN] missing machine preferences={} target=legendary low-density-structure 120/s",
+        missing_machines.len()
+    );
+    let mut runtime = Runtime::from_document(document);
+    runtime.install_context("asset".into(), context);
+    let begun = Instant::now();
+    let result = runtime.auto_plan(project_id, factory_id);
+    let record = match &result {
+        Ok(result) => json!({"result":result}),
+        Err(error) => json!({"error":error.to_string()}),
+    };
+    let record = json!({"elapsed_ms":begun.elapsed().as_millis(),"missing_machine_preferences":missing_machines,"project_settings":settings,"outcome":record});
+    let path = std::env::var_os("LENGDEN_TEST_REPORT").expect("LENGDEN_TEST_REPORT");
+    serde_json::to_writer_pretty(
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .unwrap(),
+        &record,
+    )
+    .unwrap();
+    let result = result.expect("lengden auto-plan must have a certified result");
+    assert_certified(&result);
+    assert!(result.report.writeback_verified);
+    assert!(matches!(result.status, SolveStatus::Solved { .. }));
+    eprintln!("[LENGDEN] solved ms={}", begun.elapsed().as_millis());
+}
+
+#[tokio::test]
 #[ignore = "captures historical failing requests; diagnostic outcomes are not pass-rate assertions"]
 async fn experiment_capture_failure_requests() {
     let _permit = GATE.acquire().await.unwrap();
@@ -201,7 +260,7 @@ async fn experiment_capture_failure_requests() {
                 state["auto_plan"]["error"]
                     .as_str()
                     .unwrap()
-                    .starts_with("自动规划无解："),
+                    .starts_with("自动规划未求解："),
                 "infrastructure failure: {state}"
             );
         }

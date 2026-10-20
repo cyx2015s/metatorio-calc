@@ -72,4 +72,4 @@ required-features = ["rust-lp"]
 
 [[example]]
 name = "lp_application_replay"
-required-features = ["lp-experiments"]
+required-features = ["rust-lp"]

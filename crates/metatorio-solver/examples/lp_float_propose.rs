@@ -7,13 +7,12 @@ use std::{
 };
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args: Vec<_> = std::env::args().skip(1).collect();
-    let hint_only = args.last().is_some_and(|s| s == "--hint-only");
-    if hint_only {
-        args.pop();
-    }
+    let hint_only = args.iter().any(|s| s == "--hint-only");
+    let relevant = args.iter().any(|s| s == "--relevant");
+    args.retain(|s| s != "--hint-only" && s != "--relevant");
     if !(3..=5).contains(&args.len()) {
         return Err(
-            "usage: lp_float_propose snapshot.json output.json seconds [ratio-tolerance] [primal-tolerance] [--hint-only]".into(),
+            "usage: lp_float_propose snapshot.json output.json seconds [ratio-tolerance] [primal-tolerance] [--hint-only] [--relevant]".into(),
         );
     }
     let snapshot: Snapshot = serde_json::from_reader(BufReader::new(fs::File::open(&args[0])?))?;
@@ -28,8 +27,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         primal_tolerance: args.get(4).map(|s| s.parse()).transpose()?.unwrap_or(1e-9),
         ratio_tolerance: args.get(3).map(|s| s.parse()).transpose()?.unwrap_or(1e-9),
     };
-    let proposal = model.float_candidate_with_options(options, 20000, |p| {
-        if p.pivots % 100 == 0 {
+    let observer = |p: metatorio_solver::lp_rational::FloatProgress| {
+        if p.pivots.is_multiple_of(100) {
             eprintln!(
                 "[FLOAT] pivots={} structural={} seconds={:.2}",
                 p.pivots,
@@ -38,7 +37,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
         start.elapsed().as_secs_f64() < seconds
-    })?;
+    };
+    let reduction = if relevant {
+        Some(model.relevance_reduction_with_control(
+            &metatorio_solver::lp_rational::SolveControl::with_deadline(
+                start + std::time::Duration::from_secs_f64(seconds),
+            ),
+        )?)
+    } else {
+        None
+    };
+    let proposal = if let Some(reduced) = &reduction {
+        println!(
+            "relevance: columns={} -> {} rows={} -> {}",
+            model.columns.len(),
+            reduced.columns.len(),
+            model.rows.len(),
+            reduced.rows.len()
+        );
+        reduced.lift_candidate(
+            reduced
+                .model
+                .float_candidate_with_options(options, 20000, observer)?,
+        )?
+    } else {
+        model.float_candidate_with_options(options, 20000, observer)?
+    };
     let proposal_seconds = start.elapsed().as_secs_f64();
     println!(
         "float: pivots={} seconds={:.2} reason={}",
@@ -46,6 +70,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     println!("diagnostic: {:?}", proposal.diagnostic);
     let mut output = serde_json::json!({"primal_tolerance":options.primal_tolerance,"ratio_tolerance":options.ratio_tolerance,"model_scope":"full","basis":proposal.basis,"pivots":proposal.pivots,"proposal_seconds":proposal_seconds,"stop_reason":proposal.stop_reason,"diagnostic":proposal.diagnostic,"values_bits":proposal.values.iter().map(|v|v.to_bits()).collect::<Vec<_>>(),"rounded_validation":snapshot.validate(&proposal.values)});
+    if let Some(reduced) = &reduction {
+        output["relevance"] = serde_json::json!({"columns":reduced.columns,"rows":reduced.rows,"free_suppliers":reduced.free_suppliers});
+    }
     if hint_only {
         output["exact_verification"] = "not_run".into();
         serde_json::to_writer(BufWriter::new(fs::File::create(&args[1])?), &output)?;

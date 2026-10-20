@@ -330,7 +330,27 @@ fn solve_rust_proposal_attempt(
         exact::SolveControl::with_deadline(start + std::time::Duration::from_secs_f64(deadline));
     snapshot.check()?;
     let model = snapshot.exact_model();
-    let proposal = if attempt.index == 2 {
+    // Reduce the first search only; retain the original-matrix retries for
+    // numerical diversity. The environment switch also supports paired replays.
+    let relevance_mode = std::env::var("METATORIO_LP_RELEVANCE").ok();
+    let eligible = model
+        .columns
+        .iter()
+        .all(|column| column.cost >= 0.0 && column.lower == 0.0 && column.upper == f64::INFINITY);
+    let use_relevance = eligible
+        && match relevance_mode.as_deref() {
+            Some("0") => false,
+            Some("1") => true,
+            _ => attempt.index == 0,
+        };
+    let proposal = if use_relevance {
+        model.float_candidate_after_relevance_with_control(
+            options,
+            20000,
+            |_| start.elapsed().as_secs_f64() < deadline,
+            &control,
+        )?
+    } else if attempt.index == 2 {
         model.float_candidate_after_zero_propagation_with_control(
             options,
             20000,
