@@ -13,6 +13,7 @@
   import FlowRef from './FlowRef.svelte';
   import MechanicEditor from './MechanicEditor.svelte';
   import MechanicFilter from './MechanicFilter.svelte';
+  import SecondaryMenu from './SecondaryMenu.svelte';
   import { rememberMechanicScroll } from '$lib/mechanics/view-scroll';
 
   let {project, factory, entries, visibleIds, solutions, solved, actions, workspace, mergeRecipes, viewState, scrollState, filterOpen, onFilterClose}: MechanicViewProps & {
@@ -368,6 +369,22 @@
   <div class="network-stage">
     <!-- Keyboard focus returns here when the node editor is closed. -->
     <div class="network-canvas" bind:this={container} role="group" tabindex="-1" aria-label="生产网络画布"></div>
+    <div class="network-help">
+      <SecondaryMenu title="图例与来源">
+        {#snippet trigger(toggle, open)}
+          <button class="help-button" aria-label="图例与来源" aria-expanded={open} aria-haspopup="dialog" onclick={toggle}>ⓘ 图例</button>
+        {/snippet}
+        <dl class="network-legend">
+          <dt>方框</dt><dd>机制／外部来源</dd>
+          <dt>圆形</dt><dd>流</dd>
+          <dt>金边</dt><dd>目标</dd>
+          <dt>虚线来源</dt><dd>隐式输入</dd>
+          <dt>紫色虚线</dt><dd>兼容关系，不表示实际分配量</dd>
+        </dl>
+        <p class="network-note">未显示求解器的降温与提热辅助变量。</p>
+        <p class="network-credit">参考 <a href="https://github.com/YoisakiKanade222" target="_blank" rel="noopener noreferrer">stduuzurl / yoisaki kanade（YoisakiKanade222）</a> 的网络可视化器</p>
+      </SecondaryMenu>
+    </div>
     {#if !model.nodes.length && ready}
       <div class="network-empty">{workspace.active ? '没有匹配的机制，可更换条件或清除筛选。' : '还没有机制，可添加机制或使用自动规划。'}</div>
     {/if}
@@ -398,13 +415,11 @@
     </div>
   {/if}
   </div>
-  <div class="network-legend">方框：机制／外部来源 · 圆形：流 · 金边：目标 · 虚线来源：隐式输入 · 紫色虚线：兼容关系。未显示求解器的降温与提热辅助变量。</div>
-  <div class="network-credit">参考 <a href="https://github.com/YoisakiKanade222" target="_blank" rel="noopener noreferrer">stduuzurl / yoisaki kanade（YoisakiKanade222）</a> 的网络可视化器</div>
 
 </section>
 
 <style>
-  .network-view { flex: 1 0 auto; min-width: 0; margin-top: 6px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); overflow: hidden; }
+  .network-view { display: flex; flex-direction: column; flex: 1 0 auto; min-width: 0; margin-top: 6px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); overflow: hidden; }
   .network-toolbar, .network-status, .node-options, .variant-options { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
   .network-toolbar { padding: 8px; border-bottom: 1px solid var(--line); }
   .network-search { position: relative; min-width: 130px; width: 210px; max-width: 100%; }
@@ -417,10 +432,16 @@
   .search-result:hover, .search-result[aria-selected="true"] { background: var(--card); }
   .network-toolbar label { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; }
   .network-status { padding: 5px 8px; color: var(--muted); font-size: 11px; }
-  .network-stage { position: relative; min-width: 0; }
-  .network-canvas { height: clamp(360px, 62vh, 820px); width: 100%; position: relative; }
-  .network-legend { font-size: 11px; color: var(--muted); padding: 8px; border-top: 1px solid var(--line); }
-  .network-credit { color: var(--muted); font-size: 10px; padding: 0 8px 6px; }
+  .network-stage { position: relative; min-width: 0; min-height: 360px; flex: 1 0 clamp(360px, 62vh, 820px); }
+  .network-canvas { position: absolute; inset: 0; height: 100%; width: 100%; }
+  .network-help { position: absolute; right: 8px; bottom: 8px; z-index: 10; }
+  .help-button { min-height: 24px; padding: 2px 7px; font: inherit; font-size: 11px; cursor: pointer;
+    color: var(--muted); background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-sm); }
+  .help-button:hover { color: var(--text); border-color: var(--line-strong); }
+  .network-legend { display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; font-size: 12px; margin: 0; }
+  .network-legend dt { color: var(--muted); }
+  .network-legend dd { margin: 0; }
+  .network-note, .network-credit { color: var(--muted); font-size: 11px; line-height: 1.6; margin: 10px 0 0; }
   .neighbours summary { cursor: pointer; color: var(--muted); font-size: 11px; margin-top: 8px; }
   .node-options { padding-top: 6px; max-height: 200px; overflow: auto; }
   .node-options .btn { white-space: normal; text-align: left; font-size: 11px; max-width: 100%; overflow-wrap: anywhere; }
