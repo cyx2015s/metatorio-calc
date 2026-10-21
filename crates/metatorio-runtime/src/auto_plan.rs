@@ -1220,6 +1220,32 @@ pub fn mechanic_accessible(
     recipe_unlocked(store, accessible, &mechanic.recipe.id)
 }
 
+/// Recipe eligibility currently depends on recipe ID alone, not its module,
+/// machine or quality variant. Cache within this immutable planning snapshot;
+/// later projects/milestones must compute fresh answers. Retain in place so
+/// rejected variants do not occupy another large vector during LP solving.
+pub(crate) fn filter_accessible_candidates(
+    store: &PrototypeStore,
+    accessible: &Accessibility,
+    mut candidates: Vec<Mechanic>,
+) -> (Vec<Mechanic>, usize) {
+    let original_len = candidates.len();
+    let mut recipes = std::collections::HashMap::<String, bool>::new();
+    candidates.retain(|candidate| {
+        let Mechanic::Recipe(recipe) = candidate else {
+            return mechanic_accessible(store, accessible, candidate);
+        };
+        if let Some(answer) = recipes.get(&recipe.recipe.id) {
+            return *answer;
+        }
+        let answer = mechanic_accessible(store, accessible, candidate);
+        recipes.insert(recipe.recipe.id.clone(), answer);
+        answer
+    });
+    let dropped = original_len - candidates.len();
+    (candidates, dropped)
+}
+
 /// 配方是否已解锁：`enabled`、任一 `unlock-recipe` 科技可达，**或** 某个
 /// 以它为 `fixed_recipe` 的建筑可达（解锁建筑即解锁其固定配方，py 的
 /// bioport→guano 等 hidden+enabled=false 配方属此类）。
@@ -1728,6 +1754,66 @@ mod tests {
             !recipe_unlocked(&store, &accessibility, "belt"),
             "里程碑标记不可达的 enabled 配方必须不可用"
         );
+    }
+
+    #[test]
+    fn cached_candidate_filter_preserves_variants_order_and_changed_milestones() {
+        let store = PrototypeStore::load(&serde_json::json!({
+            "recipe": {
+                "enabled": {"type":"recipe","name":"enabled","enabled":true},
+                "blocked": {"type":"recipe","name":"blocked","enabled":true},
+                "locked": {"type":"recipe","name":"locked","enabled":false}
+            },
+            "technology": {
+                "unlocker": {"type":"technology","name":"unlocker","enabled":true,
+                    "effects":[{"type":"unlock-recipe","recipe":"locked"}],
+                    "unit":{"count":1,"time":1,"ingredients":[]}}
+            }
+        }))
+        .unwrap();
+        let mut candidates = Vec::new();
+        for (index, name) in ["enabled", "blocked", "locked", "enabled", "blocked"]
+            .into_iter()
+            .enumerate()
+        {
+            candidates.push(Mechanic::Recipe(metatorio_core::RecipeMechanic {
+                recipe: IdWithQuality::new(name, if index < 3 { "normal" } else { "legendary" }),
+                machine: IdWithQuality::new(format!("machine-{index}"), "normal"),
+                module_config: ModuleConfig {
+                    modules: vec![IdWithQuality::new("module", "legendary"); index],
+                    beacons: vec![],
+                },
+                fuel: None,
+            }));
+        }
+        candidates.insert(
+            1,
+            Mechanic::Solar(metatorio_core::SolarMechanic {
+                solar_panel: IdWithQuality::new("panel", "normal"),
+                accumulator: IdWithQuality::new("accumulator", "normal"),
+            }),
+        );
+        for options in [
+            metatorio_core::AccessibilityOptions {
+                forced_inaccessible: [Accessible::Recipe("blocked".into())].into_iter().collect(),
+                ..Default::default()
+            },
+            metatorio_core::AccessibilityOptions {
+                all_accessible: true,
+                ..Default::default()
+            },
+        ] {
+            let accessibility = metatorio_core::compute_accessibility(&store, &options);
+            let expected: Vec<_> = candidates
+                .iter()
+                .filter(|m| mechanic_accessible(&store, &accessibility, m))
+                .cloned()
+                .collect();
+            let (actual, dropped) =
+                filter_accessible_candidates(&store, &accessibility, candidates.clone());
+            assert_eq!(actual, expected);
+            assert_eq!(dropped, candidates.len() - expected.len());
+        }
     }
 
     /// 发电机必须在**原型声明过的可行温度**上枚举，而不是被钉死在

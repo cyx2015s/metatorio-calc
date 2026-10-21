@@ -8,6 +8,69 @@ use std::{
 };
 
 use crate::lp_model::VariableDefinition;
+
+/// Isolated replay of the existing row-frontier recovery, without waiting for
+/// failed dense hints or column pricing. This is diagnostic, not backend policy.
+#[cfg(feature = "rust-lp")]
+pub fn replay_row_frontier(
+    snapshot: &Snapshot,
+    source: &Path,
+    seconds: f64,
+) -> Result<serde_json::Value, String> {
+    replay_row_frontier_inner(snapshot, source, seconds, None)
+}
+
+/// Diagnostic-only override; does not change the production recovery policy.
+#[cfg(feature = "rust-lp")]
+pub fn replay_row_frontier_with_round_limit(
+    snapshot: &Snapshot,
+    source: &Path,
+    seconds: f64,
+    round_limit: usize,
+) -> Result<serde_json::Value, String> {
+    replay_row_frontier_inner(snapshot, source, seconds, Some(round_limit))
+}
+
+#[cfg(feature = "rust-lp")]
+fn replay_row_frontier_inner(
+    snapshot: &Snapshot,
+    source: &Path,
+    seconds: f64,
+    round_limit: Option<usize>,
+) -> Result<serde_json::Value, String> {
+    snapshot.check()?;
+    if !seconds.is_finite() || seconds <= 0.0 || round_limit == Some(0) {
+        return Err("invalid row-frontier replay budget".into());
+    }
+    let begun = std::time::Instant::now();
+    let deadline = begun
+        .checked_add(
+            std::time::Duration::try_from_secs_f64(seconds)
+                .map_err(|_| "invalid row-frontier duration")?,
+        )
+        .ok_or("row-frontier deadline overflow")?;
+    let result = match round_limit {
+        Some(limit) => crate::lp_row_generation::solve_with_round_limit(
+            snapshot,
+            Some(source),
+            deadline,
+            false,
+            limit,
+        ),
+        None => crate::lp_row_generation::solve(snapshot, Some(source), deadline, false),
+    };
+    Ok(match result {
+        Ok(result) => serde_json::json!({"status":"solved","certificate":result.certificate,
+            "elapsed_seconds":begun.elapsed().as_secs_f64(),"pivots":result.pivots,
+            "values_bits":result.values.iter().map(|v|v.to_bits()).collect::<Vec<_>>()}),
+        Err(crate::lp_hybrid::Failure::Infeasible) => {
+            serde_json::json!({"status":"proven-infeasible",
+            "elapsed_seconds":begun.elapsed().as_secs_f64()})
+        }
+        Err(crate::lp_hybrid::Failure::Other(error)) => serde_json::json!({"status":"unfinished",
+            "elapsed_seconds":begun.elapsed().as_secs_f64(),"error":error}),
+    })
+}
 #[cfg(feature = "highs")]
 use highs::{RowProblem, Sense};
 use serde::{Deserialize, Serialize};

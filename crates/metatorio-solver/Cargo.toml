@@ -77,3 +77,23 @@ required-features = ["rust-lp"]
 [[example]]
 name = "lp_hint_profile"
 required-features = ["rust-lp"]
+
+[[example]]
+name = "lp_column_seed"
+required-features = ["rust-lp"]
+
+[[example]]
+name = "lp_relative_hint"
+required-features = ["rust-lp"]
+
+[[example]]
+name = "lp_zero_projection"
+required-features = ["rust-lp"]
+
+[[example]]
+name = "lp_row_frontier"
+required-features = ["rust-lp"]
+
+[[example]]
+name = "lp_compare_snapshots"
+required-features = ["rust-lp"]

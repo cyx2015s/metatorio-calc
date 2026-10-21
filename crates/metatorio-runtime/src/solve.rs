@@ -1036,6 +1036,16 @@ pub fn plan_auto_plan(
     snapshot: &SolveSnapshot,
     accessibility: &Accessibility,
 ) -> Result<(Vec<Mechanic>, AutoPlanReport), RuntimeError> {
+    let profile = std::env::var_os("METATORIO_PLAN_PROFILE").is_some();
+    let profile_start = std::time::Instant::now();
+    let phase = |stage: &str, count: usize| {
+        if profile {
+            eprintln!(
+                "[AUTO-PLAN-PHASE] stage={stage} seconds={:.6} count={count}",
+                profile_start.elapsed().as_secs_f64()
+            );
+        }
+    };
     let store = &snapshot.store;
     let project_doc = &snapshot.project_doc;
     let factory_doc = &snapshot.factory_doc;
@@ -1061,20 +1071,22 @@ pub fn plan_auto_plan(
         surface: factory_doc.settings.surface.clone(),
         accessibility: Some(accessibility.clone()),
     };
+    phase("environment-ready", 0);
     let candidates = crate::auto_plan::enumerate_all(store, &context, &options);
-    let (mut candidates, dropped): (Vec<_>, Vec<_>) = candidates
-        .into_iter()
-        .partition(|m| crate::auto_plan::mechanic_accessible(store, accessibility, m));
+    phase("enumerated", candidates.len());
+    let (mut candidates, dropped) =
+        crate::auto_plan::filter_accessible_candidates(store, accessibility, candidates);
     if project_doc.planning.preserve_existing_mechanics && !factory_doc.mechanics.is_empty() {
         include_existing_candidates(&mut candidates, factory_doc);
     }
+    phase("accessibility-filtered", candidates.len());
     if candidates.is_empty() {
-        return Err(RuntimeError::InvalidValue(if dropped.is_empty() {
+        return Err(RuntimeError::InvalidValue(if dropped == 0 {
             "没有可枚举的机制候选".to_string()
         } else {
             format!(
                 "所有 {} 个候选机制都不可达（目标依赖的科技未解锁？可用\"无视可达性\"开关或显式标记可达）",
-                dropped.len()
+                dropped
             )
         }));
     }
@@ -1113,7 +1125,9 @@ pub fn plan_auto_plan(
         &all_sources,
         &candidates,
     );
+    phase("expanded", problem.flows.len());
     let solution = problem.solve();
+    phase("first-solve-returned", 0);
     let SolverSolution::Solved { prim, report, .. } = solution else {
         // 透出求解器给出的 description——区分「真的不可行」与「数值/求解器
         // 失败」是诊断自动规划失败的前提。
@@ -1147,7 +1161,8 @@ pub fn plan_auto_plan(
     // 回写 47 条 → 文档重解「无可行解」。自检失败就放宽到 LP 解的全部非零
     // 机制（顶点解下就是解的支持集，必然可行）。
     let feasible = |mechanics: &[Mechanic]| -> bool {
-        matches!(
+        phase("writeback-check-start", mechanics.len());
+        let solved = matches!(
             build_autoplan_problem(
                 store,
                 &context,
@@ -1158,7 +1173,9 @@ pub fn plan_auto_plan(
             )
             .solve(),
             SolverSolution::Solved { .. }
-        )
+        );
+        phase("writeback-check-end", mechanics.len());
+        solved
     };
     let mut used = filtered.used;
     let mut verified = feasible(&used);
@@ -1172,6 +1189,7 @@ pub fn plan_auto_plan(
     }
     used.sort_by_key(|mechanic| crate::document::MechanicKind::of(mechanic) as u8);
     let candidates_used = used.len();
+    phase("complete", candidates_used);
     Ok((
         used,
         AutoPlanReport {

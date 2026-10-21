@@ -38,16 +38,17 @@ impl Model {
         let mut exact_pivots = 0;
         let mut float_pivots = 0;
         let mut feasibility_rule = crate::DualPivotRule::FirstViolationLargePivot;
-        for round in 0..512 {
+        // A round may add columns or resume an interrupted Phase I basis.
+        // Neither a fixed round count nor the number of nonbasic columns is
+        // an algorithmic dimension limit. The caller's control bounds search;
+        // individual factorization paths retain their own resource guards.
+        for round in 0usize.. {
             control.check()?;
             let selected: Vec<_> = included
                 .iter()
                 .enumerate()
                 .filter_map(|(j, yes)| yes.then_some(j))
                 .collect();
-            if selected.len() > 4096 {
-                return Err("column generation working column limit exceeded".into());
-            }
             let mut positions = vec![None; self.columns.len()];
             for (j, &old) in selected.iter().enumerate() {
                 positions[old] = Some(j);
@@ -278,7 +279,7 @@ impl Model {
                 missing.len()
             );
         }
-        Err("column generation round limit reached; no terminal status established".into())
+        unreachable!()
     }
 
     fn column_generation_prices(
@@ -321,6 +322,39 @@ mod tests {
             .collect()
     }
     #[test]
+    fn more_than_4096_selected_columns_can_have_a_one_dimensional_basis() {
+        let count = 4097;
+        let model = Model {
+            columns: columns(&(1..=count).map(|v| v as f64).collect::<Vec<_>>()),
+            rows: vec![Row {
+                equality: true,
+                rhs: 1.0,
+                terms: (0..count).map(|j| (j, 1.0)).collect(),
+            }],
+            offset: 0.0,
+        };
+        let result = model
+            .solve_column_generation_with_control(
+                Some(&vec![1.0; count]),
+                &Rational::zero(),
+                &SolveControl::with_deadline(Instant::now() + std::time::Duration::from_secs(10)),
+            )
+            .unwrap();
+        assert!(result.accepted && result.certificate.optimal);
+        assert_eq!(result.support_columns, count);
+        assert_eq!(result.solution.values[0], rational(1.0).unwrap());
+        assert!(result.solution.values[1..].iter().all(Zero::is_zero));
+        assert_eq!(result.certificate.objective, "1");
+        assert!(model.certify(&result.solution).unwrap().optimal);
+
+        let cancelled = model.solve_column_generation_with_control(
+            Some(&vec![1.0; count]),
+            &Rational::zero(),
+            &SolveControl::with_deadline(Instant::now()),
+        );
+        assert!(matches!(cancelled, Err(error) if error.contains("cancelled")));
+    }
+    #[test]
     fn missing_supplier_ray_adds_original_columns_and_keeps_many_empty_rows() {
         let mut rows = vec![
             Row {
@@ -344,17 +378,22 @@ mod tests {
             rows,
             offset: 0.0,
         };
-        let result = model
-            .solve_column_generation_with_control(
-                Some(&[1.0, 0.0]),
-                &Rational::zero(),
-                &SolveControl::default(),
-            )
-            .unwrap();
-        assert!(result.accepted && result.certificate.optimal);
-        assert_eq!(result.solution.values, vec![rational(1.0).unwrap(); 2]);
-        assert_eq!(result.certificate.objective, "3");
-        assert_eq!(result.solution.row_duals.len(), 4202);
+        // A seed selects columns only: neither a negative value nor a missing
+        // supplier is a feasible primal point. All must lead to the same full
+        // original-model optimum, without trusting the proposed magnitudes.
+        for seed in [[1.0, 0.0], [-1e-20, 0.0], [1e-30, 0.0]] {
+            let result = model
+                .solve_column_generation_with_control(
+                    Some(&seed),
+                    &Rational::zero(),
+                    &SolveControl::default(),
+                )
+                .unwrap();
+            assert!(result.accepted && result.certificate.optimal);
+            assert_eq!(result.solution.values, vec![rational(1.0).unwrap(); 2]);
+            assert_eq!(result.certificate.objective, "3");
+            assert_eq!(result.solution.row_duals.len(), 4202);
+        }
     }
     #[test]
     fn omitted_cheaper_column_is_added_before_accepting_a_restricted_optimum() {

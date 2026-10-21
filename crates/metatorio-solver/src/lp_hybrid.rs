@@ -227,15 +227,22 @@ fn solve_rust_proposal(
         if recover_now && matches!(&last, Err(Failure::Other(_))) {
             let remaining = (RUST_SEARCH_SECONDS - start.elapsed().as_secs_f64() - 60.0).max(0.0);
             if remaining > 0.0 {
-                let deadline =
-                    Instant::now() + std::time::Duration::from_secs_f64(remaining.min(900.0));
-                eprintln!("[LP-RUST-COLUMNS] recovering failed hint with exact column pricing");
                 let seed = work.first_values.as_deref().filter(|values| {
                     let check = snapshot.validate(values);
                     check.finite
                         && check.maximum_bound_violation == 0.0
                         && check.maximum_relative_violation == 0.0
                 });
+                // Cold pricing has no useful incumbent support and can grow a
+                // large Phase I subsystem before finding a feasible chain.
+                // Preserve time for constraint generation; seeded recovery keeps
+                // its established budget. Neither stop establishes infeasibility.
+                let seconds = remaining.min(if seed.is_some() { 900.0 } else { 60.0 });
+                let deadline = Instant::now() + std::time::Duration::from_secs_f64(seconds);
+                eprintln!(
+                    "[LP-RUST-COLUMNS] recovering failed hint with exact column pricing seed={} seconds={seconds:.2}",
+                    seed.is_some()
+                );
                 match recover_columns(snapshot, captured, seed, deadline, !certified) {
                     result @ Ok(_) | result @ Err(Failure::Infeasible) => return result,
                     Err(Failure::Other(error)) => eprintln!("[LP-RUST-COLUMNS-STOP] {error}"),

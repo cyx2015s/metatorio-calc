@@ -126,6 +126,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if gap > budget {
             return Err(format!("objective-gap budget failed: {text}").into());
         }
+        // An exact rational certificate does not by itself certify the f64
+        // output. Apply the same no-absolute-floor row budget on this path too.
+        let rounded_solution = ExactSolution {
+            values: solution
+                .approximate()?
+                .into_iter()
+                .map(|value| Rational::from_float(value).ok_or("nonfinite rounded value"))
+                .collect::<Result<_, _>>()?,
+            row_duals: solution.row_duals.clone(),
+            basis_dimension: 0,
+        };
+        let pure_relative = snapshot.exact_model().verify_relative_with_control(
+            &rounded_solution,
+            &budget,
+            &budget,
+            &Default::default(),
+        )?;
+        if !pure_relative.accepted {
+            return Err(format!("rounded full-model pure-relative budget failed: {text}").into());
+        }
+        maximum_balance_error =
+            maximum_balance_error.max(pure_relative.balance_error_upper_bound()?);
+        maximum_gap = maximum_gap.max(
+            pure_relative
+                .duality_gap_upper_bound()?
+                .ok_or("missing rounded duality comparison")?,
+        );
         let rounded = snapshot.validate(&solution.approximate()?);
         if !rounded.finite
             || rounded.maximum_relative_violation != 0.0

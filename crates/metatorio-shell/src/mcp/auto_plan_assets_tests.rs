@@ -9,6 +9,8 @@ use std::time::{Duration, Instant};
 mod import_location_tests;
 #[cfg(feature = "rust-lp")]
 mod lp_experiment_tests;
+#[cfg(feature = "rust-lp")]
+mod morning_matrix;
 
 const BASE: &str = "data-raw-dump.json";
 const MODDED: &str = "data-raw-dump-heavily-modded.json";

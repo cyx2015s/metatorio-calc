@@ -52,10 +52,8 @@ where
     pub strict_source: bool,
     // 如果是严格模式，相比普通模式有如下限制：没有出现在target中的物品必须配平
     pub strict_sink: bool,
-    /// 剪枝阶段（trim_flows）因缺少提供者而被移除配方所对应的缺失
-    /// 物品/流。用于失败诊断：这些物品没有任何配方能产出、外部也不
-    /// 供给，因此其消耗配方被整体剪掉——NoProvider 应如实报告它们，
-    /// 而不是在剪枝后静默消失。
+    /// 缺少提供者且外部不供给的物品，用于失败诊断。
+    /// trim_flows 只记录它们，不删除其消费流或改变原始 LP。
     pub pruned_missing: Vec<I>,
     /// **不受配平约束**的坐标：污染这类量是「指标」而不是「物质」——它既不参与
     /// 守恒，被吸收也不构成需求（没有污染时，吸收污染的建筑照样正常工作）。
@@ -244,122 +242,55 @@ where
         self
     }
 
-    /// 剪枝一轮。`record_missing` 为 true 时把本轮因缺少提供者而剪掉的
-    /// 物品记录进 `pruned_missing`（调用方应只在第一轮传 true：后续轮次
-    /// 缺少的物品往往是被第一轮剪枝连坐的间接原因，不是根因）。
+    /// Record structurally missing providers without deleting any flow.
+    /// Only existence matters; retaining every provider/consumer ID can be
+    /// expensive for free source items consumed by millions of candidates.
     pub fn trim_flows(&mut self, record_missing: bool) -> bool {
-        if self.strict_source {
-            // 在strict_source模式下，移除所有无法使用的配方
-            let instant = std::time::Instant::now();
-            let mut status = AIndexMap::default();
-            enum ItemStatus<R> {
-                Pending {
-                    providers: AIndexSet<R>,
-                    consumers: AIndexSet<R>,
-                },
-                Usable,
-            }
-
-            for (
-                f_id,
-                FlowSpec {
-                    coefficients,
-                    cost: _,
-                    fixed: _,
-                },
-            ) in &self.flows
-            {
-                for (item_id, &amount) in coefficients {
-                    let entry =
-                        status
-                            .entry(item_id.clone())
-                            .or_insert_with(|| ItemStatus::Pending {
-                                providers: AIndexSet::default(),
-                                consumers: AIndexSet::default(),
-                            });
-                    if amount > 0.0 {
-                        // 生产这个物品的配方
-                        match entry {
-                            ItemStatus::Pending { providers, .. } => {
-                                providers.insert(f_id.clone());
-                            }
-                            ItemStatus::Usable => {}
-                        }
-                    }
-                    if amount < 0.0 {
-                        // 消耗这个物品的配方
-                        match entry {
-                            ItemStatus::Pending { consumers, .. } => {
-                                consumers.insert(f_id.clone());
-                            }
-                            ItemStatus::Usable => {}
-                        }
-                    }
-                    match entry {
-                        ItemStatus::Pending {
-                            providers,
-                            consumers,
-                        } if !providers.is_empty() && !consumers.is_empty() => {
-                            *entry = ItemStatus::Usable;
-                        }
-                        _ => {}
-                    }
-                }
-            }
-
-            let needed_by_target = self.target.iter().fold(
-                AIndexSet::default(),
-                |mut acc,
-                 TargetSpec {
-                     constant,
-                     coefficients,
-                 }| {
-                    for (i_id, coef) in coefficients {
-                        if *coef * constant > 0.0 {
-                            // 系数与常数同号，说明目标需要这个物品
-                            acc.insert(i_id.clone());
-                        }
-                    }
-                    acc
-                },
-            );
-
-            // **只报告，不删除。**
-            //
-            // 删除以前在这里做，而且会**级联**：某物品没有生产者 → 删掉它的消费流 →
-            // 那条流产出的东西又没了生产者 → 再删……实测把「1W 电力」这种目标的整条链
-            // 剪空（燃料棒没生产者 → 剪反应堆 → 热量没生产者 → 剪热交换机 → 蒸汽没生产者
-            // → 剪汽轮机 → 电力没生产者），最后报出误导性的
-            // 「无供给：Electricity, uranium-fuel-cell」。
-            //
-            // 而且删除本来就是**不必要**的：严格供给下，一个「有消费者、没有生产者、
-            // 也不在 sources」的物品，其配平约束是 `-coef·var >= 0`（strict_sink 时
-            // `== 0`），变量非负，这个约束自己就把那些流的变量压成 0；HiGHS 返回的是
-            // 精确顶点解，不需要我们提前剪掉。省下的那点 LP 规模不值得这个风险。
-            //
-            // 保留**记录**（`pruned_missing`）：它是「哪些物品没有任何生产者」的唯一
-            // 来源，求解失败的诊断仍然需要它。
-            for (i_id, entry) in &status {
-                if let ItemStatus::Pending {
-                    providers,
-                    consumers,
-                } = entry
-                    && providers.is_empty() // 没有生产这个物品的配方
-                        && !self.sources.contains_key(i_id) // 外部也不能提供
-                        && !needed_by_target.contains(i_id) // 目标也不需要
-                        && record_missing
-                        && !consumers.is_empty()
-                        && !self.pruned_missing.contains(i_id)
-                {
-                    self.pruned_missing.push(i_id.clone());
-                }
-            }
-            log::debug!(
-                "求解器：统计无生产者物品耗时 {} ms",
-                instant.elapsed().as_millis()
-            );
+        if !self.strict_source || !record_missing {
+            return false;
         }
-        // 不再有任何「剪枝」变更：恒返回 false，调用方的 while 循环只跑一轮。
+        let instant = Instant::now();
+        let mut status: AIndexMap<I, (bool, bool)> = AIndexMap::default();
+        for flow in self.flows.values() {
+            for (item, &amount) in &flow.coefficients {
+                let signs = (amount > 0.0, amount < 0.0);
+                if let Some(entry) = status.get_mut(item) {
+                    entry.0 |= signs.0;
+                    entry.1 |= signs.1;
+                } else {
+                    // Clone each item key only once, not once per incidence.
+                    status.insert(item.clone(), signs);
+                }
+            }
+        }
+        let needed_by_target: AIndexSet<_> = self
+            .target
+            .iter()
+            .flat_map(|target| {
+                target
+                    .coefficients
+                    .iter()
+                    .filter_map(|(item, coefficient)| {
+                        (*coefficient * target.constant > 0.0).then_some(item.clone())
+                    })
+            })
+            .collect();
+        // This is diagnostic only. The original balance constraints force
+        // unusable flows to zero; deleting them here would break supply cycles.
+        for (item, &(has_provider, has_consumer)) in &status {
+            if !has_provider
+                && has_consumer
+                && !self.sources.contains_key(item)
+                && !needed_by_target.contains(item)
+                && !self.pruned_missing.contains(item)
+            {
+                self.pruned_missing.push(item.clone());
+            }
+        }
+        log::debug!(
+            "求解器：统计无生产者物品耗时 {} ms",
+            instant.elapsed().as_millis()
+        );
         false
     }
 
@@ -379,6 +310,17 @@ where
             };
         }
 
+        let profile = std::env::var_os("METATORIO_PLAN_PROFILE").is_some();
+        let profile_start = Instant::now();
+        let phase = |stage: &str, count: usize| {
+            if profile {
+                eprintln!(
+                    "[SOLVER-PREP-PHASE] stage={stage} seconds={:.6} count={count}",
+                    profile_start.elapsed().as_secs_f64()
+                );
+            }
+        };
+        phase("diagnostics-start", self.flows.len());
         log::info!("求解器：开始剪枝");
         let mut count = 0;
         let instant = Instant::now();
@@ -390,6 +332,7 @@ where
             first_round = false;
         }
         let len_after = self.flows.len();
+        phase("diagnostics-end", len_after);
         log::info!(
             "求解器：剪枝完成，共执行了 {} 次剪枝操作，移除了 {} 个配方 ({} -> {})，耗时 {:.2?}",
             count,
@@ -419,6 +362,7 @@ where
             let var = problem_variables.add(definition);
             flow_vars.insert(f_id.clone(), var);
         }
+        phase("variables-ready", flow_vars.len());
 
         let mut item_balances = AIndexMap::default();
 
@@ -450,6 +394,7 @@ where
             }
         }
         log::info!("求解器：一共有 {} 个物品需要平衡", item_balances.len(),);
+        phase("balances-ready", item_balances.len());
 
         for (item_id, _) in &self.sources {
             let definition = variable().min(0);
@@ -582,6 +527,7 @@ where
             log::debug!("求解器：对应流变量: {:?}", flow_vars);
         }
         // 求解与原问题校验交给 solve_lp 的所选后端。
+        phase("model-ready", constraints.len());
         #[cfg(not(feature = "rust-lp"))]
         let solution = solve_lp(optimization_expr.clone(), constraints, problem_variables);
         #[cfg(feature = "rust-lp")]
@@ -1156,5 +1102,36 @@ mod tests {
         let mut data = SolverData::new_simple(target, flows);
         assert!(!data.trim_flows(false));
         assert!(data.flows.contains_key("react"));
+    }
+
+    #[test]
+    fn missing_provider_diagnostics_handle_late_producers_and_external_sources() {
+        let target = [("goal", 1.0)].into_iter().collect();
+        let mut flows = AIndexMap::default();
+        for id in 0..512 {
+            let coefficients = [
+                ("external", -1.0),
+                ("late", -1.0),
+                ("missing", -1.0),
+                ("zero", 0.0),
+                ("goal", 1.0),
+            ]
+            .into_iter()
+            .collect();
+            flows.insert(id, (coefficients, 1.0));
+        }
+        flows.insert(512, ([("late", 1.0)].into_iter().collect(), 1.0));
+        let mut data = SolverData::new_simple(target, flows)
+            .with_strict_source(true)
+            .with_sources([("external", 0.0)].into_iter().collect());
+        data.pruned_missing.push("previous");
+        assert!(!data.trim_flows(false));
+        assert_eq!(data.pruned_missing, vec!["previous"]);
+        assert!(!data.trim_flows(true));
+        assert_eq!(data.pruned_missing, vec!["previous", "missing"]);
+        assert!(!data.trim_flows(true));
+        assert_eq!(data.pruned_missing, vec!["previous", "missing"]);
+        assert_eq!(data.flows.len(), 513);
+        assert_eq!(data.flows[&0].coefficients["missing"], -1.0);
     }
 }

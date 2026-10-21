@@ -2471,7 +2471,7 @@ dependencies = [
 
 [[package]]
 name = "metatorio-app"
-version = "1.5.44"
+version = "1.5.45"
 dependencies = [
  "clap",
  "metatorio-core",
@@ -2522,7 +2522,7 @@ dependencies = [
 
 [[package]]
 name = "metatorio-headless"
-version = "1.5.44"
+version = "1.5.45"
 dependencies = [
  "clap",
  "metatorio-shell",
