@@ -364,6 +364,20 @@ fn solve_rust_proposal_attempt(
         })?
     };
     work.floating += proposal.pivots;
+    // A healthy floating search is not yet a certificate. Give its exact
+    // verification a separate window instead of discarding a good basis just
+    // because the search consumed most of the short attempt allowance.
+    let deadline = if certified
+        && !attempt.full_refinement
+        && proposal.diagnostic.is_none()
+        && proposal.stop_reason == "floating primal tolerances met; exact verification required"
+    {
+        deadline.max((start.elapsed().as_secs_f64() + 45.0).min(RUST_SEARCH_SECONDS - 60.0))
+    } else {
+        deadline
+    };
+    let control =
+        exact::SolveControl::with_deadline(start + std::time::Duration::from_secs_f64(deadline));
     if attempt.index == 0 {
         work.first_values = Some(proposal.values.clone());
     }

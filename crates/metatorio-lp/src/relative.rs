@@ -83,7 +83,9 @@ impl Model {
         control: &SolveControl,
     ) -> Result<RelativeVerification, String> {
         let mut maximum = Rational::zero();
-        for row in &self.rows {
+        // An exact primal certificate has already proved every row. Only
+        // inexact candidates need a second pass to quantify their residuals.
+        for row in self.rows.iter().filter(|_| !certificate.primal_feasible) {
             control.check()?;
             let mut activity = Rational::zero();
             let mut magnitude = Rational::zero();
@@ -162,13 +164,15 @@ impl Model {
         // The fast path targets roundoff-sized primal residuals with an already
         // valid dual witness. Leave dual repair to the existing exact pipeline;
         // an unpromising compact search must not delay that repair.
-        if !self.certify(&original)?.dual_feasible {
+        let original_certificate = self.certify(&original)?;
+        if !original_certificate.dual_feasible {
             return Ok(None);
         }
         let row_duals = original.row_duals.clone();
         let check = |mut solution: ExactSolution,
                      basis: Basis,
-                     pivots|
+                     pivots,
+                     certificate: Option<Certificate>|
          -> Result<Option<RelativeCandidate>, String> {
             for x in &mut solution.values {
                 if x.is_negative() {
@@ -176,7 +180,12 @@ impl Model {
                 }
             }
             solution.row_duals.clone_from(&row_duals);
-            let certificate = self.certify(&solution)?;
+            // Clamping changes the point only when an original bound failed.
+            // Otherwise its already computed certificate remains valid.
+            let certificate = match certificate.filter(|c| c.violated_bounds == 0) {
+                Some(certificate) => certificate,
+                None => self.certify(&solution)?,
+            };
             let relative = self.verify_relative_certificate(
                 &solution,
                 &certificate,
@@ -210,7 +219,7 @@ impl Model {
                 search_pivots: pivots,
             }))
         };
-        if let Some(result) = check(original, hint.basis.clone(), 0)? {
+        if let Some(result) = check(original, hint.basis.clone(), 0, Some(original_certificate))? {
             return Ok(Some(result));
         }
         let (restricted, selected) = self.candidate_support(&hint.values, false)?;
@@ -237,7 +246,7 @@ impl Model {
             Err(error) if control.is_cancelled() => return Err(error),
             Err(_) => return Ok(None),
         };
-        check(solution, basis, compact.pivots)
+        check(solution, basis, compact.pivots, None)
     }
 }
 
@@ -382,5 +391,61 @@ mod tests {
             .unwrap();
         assert!(!verified.accepted);
         assert_eq!(verified.maximum_relative_balance_error, "1");
+    }
+
+    fn hint(values: Vec<f64>) -> FloatCandidate {
+        FloatCandidate {
+            basis: Basis {
+                columns: vec![BasisStatus::Basic; 2],
+                rows: vec![BasisStatus::Upper; 2],
+            },
+            values,
+            pivots: 2,
+            stop_reason: "test basis hint".into(),
+            diagnostic: None,
+        }
+    }
+
+    #[test]
+    fn reused_exact_certificate_still_checks_the_rounded_output() {
+        let mut m = model();
+        let budget = rational(1e-12).unwrap();
+        let control = SolveControl::default();
+        let accepted = m
+            .relative_candidate_with_control(&hint(vec![1.0; 2]), &budget, &budget, &control)
+            .unwrap()
+            .unwrap();
+        assert!(accepted.certificate.optimal);
+        assert!(accepted.rounded_relative.accepted);
+        m.rows[0].rhs = 1e-300;
+        m.rows[0].terms[0].1 = 1e100;
+        // The exact basis solution is valid, but its required 1e-400 flows
+        // underflow to zero. Reusing a certificate must not accept that output.
+        assert!(
+            m.relative_candidate_with_control(&hint(vec![0.0; 2]), &budget, &budget, &control)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn clamping_a_negative_value_invalidates_the_cached_primal_certificate() {
+        let mut m = model();
+        m.rows[1].rhs = 1.0 + 1e-14;
+        let budget = rational(1e-12).unwrap();
+        let result = m
+            .relative_candidate_with_control(
+                &hint(vec![1.0, 0.0]),
+                &budget,
+                &budget,
+                &SolveControl::default(),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(result.certificate.violated_bounds, 0);
+        assert_eq!(result.certificate.violated_rows, 1);
+        assert!(!result.certificate.primal_feasible);
+        assert!(result.relative.accepted);
+        assert!(result.rounded_relative.accepted);
     }
 }
