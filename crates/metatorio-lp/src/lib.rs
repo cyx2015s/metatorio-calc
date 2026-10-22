@@ -21,6 +21,7 @@ mod float;
 mod presolve;
 mod relative;
 mod relevance;
+mod restricted;
 pub use relative::{RelativeCandidate, RelativeVerification};
 pub use relevance::RelevanceReduction;
 mod refine;
@@ -841,6 +842,16 @@ impl Model {
         &self,
         solution: &ExactSolution,
     ) -> Result<(ExactSolution, Rational), String> {
+        self.scale_to_dual_feasible_certified(solution)
+            .map(|(adjusted, scale, _)| (adjusted, scale))
+    }
+
+    /// Reuse the full certificate already required to validate dual scaling.
+    /// This is the certificate of the returned adjusted solution, not the hint.
+    pub(crate) fn scale_to_dual_feasible_certified(
+        &self,
+        solution: &ExactSolution,
+    ) -> Result<(ExactSolution, Rational, Certificate), String> {
         self.check()?;
         if solution.values.len() != self.columns.len()
             || solution.row_duals.len() != self.rows.len()
@@ -876,10 +887,11 @@ impl Model {
             row_duals: solution.row_duals.iter().map(|y| y * &scale).collect(),
             basis_dimension: solution.basis_dimension,
         };
-        if !self.certify(&adjusted)?.dual_feasible {
+        let certificate = self.certify(&adjusted)?;
+        if !certificate.dual_feasible {
             return Err("scaled dual failed independent verification".into());
         }
-        Ok((adjusted, scale))
+        Ok((adjusted, scale, certificate))
     }
 
     /// Exact primal feasibility and weak-duality bound against every original

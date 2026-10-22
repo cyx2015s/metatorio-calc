@@ -1,7 +1,6 @@
 //! Restricted-master search, with every terminal certificate lifted to self.
 use crate::{
-    Basis, BasisStatus, CertifiedResult, ExactSolution, FloatOptions, Model, Rational, Row,
-    SolveControl,
+    Basis, BasisStatus, CertifiedResult, ExactSolution, FloatOptions, Model, Rational, SolveControl,
 };
 use num_traits::{Signed, Zero};
 use std::time::Instant;
@@ -28,6 +27,7 @@ impl Model {
         if seed.is_some_and(|s| s.len() != self.columns.len()) {
             return Err("column generation seed dimension mismatch".into());
         }
+        let mut index = None;
         let mut included = vec![false; self.columns.len()];
         if let Some(seed) = seed {
             for (j, v) in seed.iter().enumerate() {
@@ -49,36 +49,14 @@ impl Model {
                 .enumerate()
                 .filter_map(|(j, yes)| yes.then_some(j))
                 .collect();
-            let mut positions = vec![None; self.columns.len()];
-            for (j, &old) in selected.iter().enumerate() {
-                positions[old] = Some(j);
-            }
-            // A dropped row is homogeneous and has no participating column.
-            // Its value is exactly zero after lifting the primal vector.
-            let rows: Vec<_> = self
-                .rows
-                .iter()
-                .enumerate()
-                .filter_map(|(i, r)| {
-                    (r.rhs != 0.0 || r.terms.iter().any(|(j, a)| included[*j] && *a != 0.0))
-                        .then_some(i)
-                })
-                .collect();
-            let working = Model {
-                columns: selected.iter().map(|j| self.columns[*j].clone()).collect(),
-                rows: rows
-                    .iter()
-                    .map(|i| Row {
-                        equality: self.rows[*i].equality,
-                        rhs: self.rows[*i].rhs,
-                        terms: self.rows[*i]
-                            .terms
-                            .iter()
-                            .filter_map(|(j, a)| positions[*j].map(|p| (p, *a)))
-                            .collect(),
-                    })
-                    .collect(),
-                offset: self.offset,
+            let (working, rows) = if !selected.is_empty() && selected.len() < self.columns.len() / 4
+            {
+                if index.is_none() {
+                    index = Some(crate::restricted::RestrictedIndex::new(self, control)?);
+                }
+                index.as_ref().unwrap().build(&selected, control)?
+            } else {
+                crate::restricted::RestrictedIndex::by_rows(self, &selected, control)?
             };
             let began = Instant::now();
             let (solution, basis, proof) = if let Some(previous) = &warm {
@@ -243,8 +221,7 @@ impl Model {
                     );
                     continue;
                 }
-                let (adjusted, _) = self.scale_to_dual_feasible(&lifted)?;
-                let certificate = self.certify(&adjusted)?;
+                let (adjusted, _, certificate) = self.scale_to_dual_feasible_certified(&lifted)?;
                 if !certificate.primal_feasible {
                     return Err("column generation full primal lift failed".into());
                 }
@@ -302,7 +279,14 @@ impl Model {
             .collect();
         // All prices share one positive denominator; integer comparisons retain
         // even tiny improving columns. There is no numerical pricing cutoff.
-        missing.sort_unstable_by(|a, b| a.1.cmp(b.1).then_with(|| a.0.cmp(&b.0)));
+        let compare = |a: &(usize, &crate::BigInt), b: &(usize, &crate::BigInt)| {
+            a.1.cmp(b.1).then_with(|| a.0.cmp(&b.0))
+        };
+        if missing.len() > 64 {
+            missing.select_nth_unstable_by(64, compare);
+            missing.truncate(64);
+        }
+        missing.sort_unstable_by(compare);
         Ok(missing.into_iter().take(64).map(|(j, _)| j).collect())
     }
 }
@@ -310,7 +294,7 @@ impl Model {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Column, rational};
+    use crate::{Column, Row, rational};
     fn columns(costs: &[f64]) -> Vec<Column> {
         costs
             .iter()
@@ -320,6 +304,239 @@ mod tests {
                 cost: *cost,
             })
             .collect()
+    }
+    #[test]
+    fn sparse_master_and_dense_fallback_find_the_full_certified_optimum() {
+        let n = 128;
+        let model = Model {
+            columns: columns(&(0..n).map(|j| (j / 8 + 1) as f64).collect::<Vec<_>>()),
+            rows: (0..8)
+                .map(|i| Row {
+                    equality: true,
+                    rhs: 1.0,
+                    // Preserve duplicate terms rather than aggregate with floats.
+                    terms: (i..n)
+                        .step_by(8)
+                        .flat_map(|j| [(j, 0.5), (j, 0.5)])
+                        .collect(),
+                })
+                .collect(),
+            offset: 0.0,
+        };
+        let seed: Vec<_> = (0..n).map(|j| if j >= 120 { 1.0 } else { 0.0 }).collect();
+        let result = model
+            .solve_column_generation_with_control(
+                Some(&seed),
+                &Rational::zero(),
+                &SolveControl::with_deadline(Instant::now() + std::time::Duration::from_secs(10)),
+            )
+            .unwrap();
+        assert!(result.accepted && result.certificate.optimal);
+        assert_eq!(result.certificate.objective, "8");
+        assert!(result.support_columns >= n / 4);
+        for (j, value) in result.solution.values.iter().enumerate() {
+            assert_eq!(*value, rational(if j < 8 { 1.0 } else { 0.0 }).unwrap());
+        }
+        assert!(model.certify(&result.solution).unwrap().optimal);
+    }
+    #[test]
+    #[ignore = "small release microbenchmark; run explicitly, not a performance assertion"]
+    fn small_exact_pricing_benchmark() {
+        use std::{hint::black_box, time::Instant};
+        let n = 16_384;
+        let model = Model {
+            columns: columns(&vec![1.0; n]),
+            rows: vec![Row {
+                equality: true,
+                rhs: 1.0,
+                terms: (0..n)
+                    .map(|j| (j, 2.0 + ((j * 7919) % n) as f64 / 16384.0))
+                    .collect(),
+            }],
+            offset: 0.0,
+        };
+        let duals = vec![rational(1.0).unwrap()];
+        let included = vec![false; n];
+        let mut partial = Vec::new();
+        let mut full = Vec::new();
+        for run in 0..7 {
+            for method in [run % 2, 1 - run % 2] {
+                let began = Instant::now();
+                for _ in 0..5 {
+                    let result = if method == 0 {
+                        model
+                            .column_generation_prices(&duals, false, &included)
+                            .unwrap()
+                    } else {
+                        let prices = model.pricing(
+                            &ExactSolution {
+                                values: vec![],
+                                row_duals: duals.clone(),
+                                basis_dimension: 0,
+                            },
+                            false,
+                        );
+                        let mut missing: Vec<_> = prices
+                            .numerators
+                            .iter()
+                            .enumerate()
+                            .filter(|(j, p)| !included[*j] && p.is_negative())
+                            .collect();
+                        missing.sort_unstable_by(|a, b| a.1.cmp(b.1).then_with(|| a.0.cmp(&b.0)));
+                        missing.into_iter().take(64).map(|(j, _)| j).collect()
+                    };
+                    assert_eq!(result.len(), 64);
+                    black_box(result);
+                }
+                if method == 0 {
+                    partial.push(began.elapsed());
+                } else {
+                    full.push(began.elapsed());
+                }
+            }
+        }
+        partial.sort();
+        full.sort();
+        eprintln!(
+            "[EXACT-PRICE-BENCH] n=16384 nnz=16384 iterations=5 partial_median_us={} full_sort_median_us={}",
+            partial[3].as_micros(),
+            full[3].as_micros()
+        );
+    }
+    #[test]
+    fn partial_pricing_selection_matches_full_exact_order_with_ties_and_tiny_prices() {
+        let n = 300;
+        let model = Model {
+            columns: columns(&vec![1.0; n]),
+            rows: vec![Row {
+                equality: true,
+                rhs: 1.0,
+                terms: (0..n)
+                    .flat_map(|j| [(j, 1.0), (j, ((j * 73) % 19) as f64 * 1e-30)])
+                    .collect(),
+            }],
+            offset: 0.0,
+        };
+        let included: Vec<_> = (0..n).map(|j| j % 7 == 0).collect();
+        for zero_cost in [false, true] {
+            let duals = vec![rational(1.0).unwrap()];
+            let prices = model.pricing(
+                &ExactSolution {
+                    values: vec![],
+                    row_duals: duals.clone(),
+                    basis_dimension: 0,
+                },
+                zero_cost,
+            );
+            let mut expected: Vec<_> = (0..n)
+                .filter(|j| !included[*j] && prices.numerators[*j].is_negative())
+                .collect();
+            expected.sort_unstable_by(|a, b| {
+                prices.numerators[*a]
+                    .cmp(&prices.numerators[*b])
+                    .then_with(|| a.cmp(b))
+            });
+            expected.truncate(64);
+            assert_eq!(
+                model
+                    .column_generation_prices(&duals, zero_cost, &included)
+                    .unwrap(),
+                expected
+            );
+        }
+    }
+    #[test]
+    fn active_family_expansion_misses_an_optimum_until_global_pricing() {
+        // Abstract production families A and B, with pure and mixed variants.
+        // Positive costs and nonnegative variables alone do not make the
+        // family selected by the coarse model safe to keep exclusively.
+        let production_model = |outputs: &[f64]| Model {
+            columns: columns(&vec![1.0; outputs.len()]),
+            rows: vec![Row {
+                equality: true,
+                rhs: 1.0,
+                terms: outputs.iter().copied().enumerate().collect(),
+            }],
+            offset: 0.0,
+        };
+        for (outputs, expected) in [
+            (vec![2.0, 1.0], "1/2"),           // A pure, B pure: choose A.
+            (vec![2.0, 3.0, 1.0], "1/3"),      // Expand A only: still choose A.
+            (vec![2.0, 3.0, 1.0, 4.0], "1/4"), // B mixed wins globally.
+        ] {
+            let model = production_model(&outputs);
+            let result = model.solve_dual_with_observer(100, |_| true).unwrap();
+            let certificate = model.certify(&result.solution).unwrap();
+            assert!(certificate.optimal);
+            assert_eq!(certificate.objective, expected);
+        }
+
+        let full = production_model(&[2.0, 3.0, 1.0, 4.0]);
+        let result = full
+            .solve_column_generation_with_control(
+                Some(&[1.0, 1.0, 1.0, 0.0]),
+                &Rational::zero(),
+                &SolveControl::default(),
+            )
+            .unwrap();
+        assert!(result.accepted && result.certificate.optimal);
+        assert_eq!(result.certificate.objective, "1/4");
+        assert_eq!(result.solution.values[3].to_string(), "1/4");
+        assert!(full.certify(&result.solution).unwrap().optimal);
+    }
+    #[test]
+    fn infeasible_pure_variants_do_not_prove_mixed_variants_infeasible() {
+        // Net production U=(1,-2), V=(-2,1), mixed=(1,1).
+        // Each resource must have net production >= 1. U and V cannot
+        // supply both resources, whereas one mixed column supplies both.
+        let full = Model {
+            columns: columns(&[1.0, 1.0, 1.0]),
+            rows: vec![
+                Row {
+                    equality: false,
+                    rhs: -1.0,
+                    terms: vec![(0, -1.0), (1, 2.0), (2, -1.0)],
+                },
+                Row {
+                    equality: false,
+                    rhs: -1.0,
+                    terms: vec![(0, 2.0), (1, -1.0), (2, -1.0)],
+                },
+            ],
+            offset: 0.0,
+        };
+        let pure = Model {
+            columns: full.columns[..2].to_vec(),
+            rows: full
+                .rows
+                .iter()
+                .map(|row| Row {
+                    terms: row.terms.iter().copied().filter(|(j, _)| *j < 2).collect(),
+                    ..row.clone()
+                })
+                .collect(),
+            offset: 0.0,
+        };
+        let coarse = pure.solve_dual_with_observer(100, |_| true).unwrap();
+        assert!(coarse.infeasibility.is_some());
+        // DualRepair.solution holds the current basis solution, not the ray.
+        // Adding both inequalities supplies an explicit Farkas multiplier.
+        let ray = vec![rational(-1.0).unwrap(); 2];
+        assert!(pure.verify_infeasibility(&ray).unwrap().is_some());
+        assert!(full.verify_infeasibility(&ray).unwrap().is_none());
+
+        let result = full
+            .solve_column_generation_with_control(
+                Some(&[1.0, 1.0, 0.0]),
+                &Rational::zero(),
+                &SolveControl::default(),
+            )
+            .unwrap();
+        assert!(result.accepted && result.certificate.optimal);
+        assert!(result.infeasibility.is_none());
+        assert_eq!(result.certificate.objective, "1");
+        assert_eq!(result.solution.values[2], rational(1.0).unwrap());
+        assert!(full.certify(&result.solution).unwrap().optimal);
     }
     #[test]
     fn more_than_4096_selected_columns_can_have_a_one_dimensional_basis() {
