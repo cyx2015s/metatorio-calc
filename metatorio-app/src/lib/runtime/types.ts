@@ -909,3 +909,13 @@ export type CatalogKind =
   | "surface"
   | "quality"
   | "tile";
+/** Complete LP dimensions for one auto-plan run; null until model construction. */
+export interface AutoPlanProgress {
+  project: ProjectId;
+  factory: FactoryId;
+  run_id: number;
+  running: boolean;
+  stage: "preparing" | "enumerating" | "building" | "solving" | "verifying";
+  variables: number | null;
+  constraints: number | null;
+}

@@ -3693,6 +3693,9 @@ pub(crate) async fn execute_command(
         RuntimeCommand::AutoPlan { project, factory } => {
             // 自动规划：枚举候选 → LP → 回写被选中的机制 → 重解。
             let (project, factory) = (*project, *factory);
+            let progress =
+                crate::auto_plan_progress::PlanningProgress::start(host.clone(), project, factory);
+            let observe_progress = progress.observer();
             if let Err(error) = ensure_context_for_project_offlock(state, project).await {
                 emit(host, "solve-error", error.clone());
                 return CommandOutcome::failed(error);
@@ -3717,8 +3720,12 @@ pub(crate) async fn execute_command(
                     move |snapshot| {
                         let accessibility = snapshot.resolve_accessibility();
                         let (mechanics, auto_report) =
-                            metatorio_runtime::solve::plan_auto_plan(snapshot, &accessibility)
-                                .map_err(metatorio_runtime::Diagnostic::from)?;
+                            metatorio_runtime::solve::plan_auto_plan_with_progress(
+                                snapshot,
+                                &accessibility,
+                                &observe_progress,
+                            )
+                            .map_err(metatorio_runtime::Diagnostic::from)?;
                         if let Ok(runtime) = compute_host.state().runtime.lock() {
                             runtime.cache_accessibility_if_current(
                                 snapshot.project,

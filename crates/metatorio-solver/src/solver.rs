@@ -37,6 +37,13 @@ pub struct FlowSpec<I: ItemIdent> {
     pub fixed: Option<f64>, // 如果是Some(v)，表示这个原始变量必须是v
 }
 
+/// Dimensions of the complete LP, including external source/sink variables.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProblemSize {
+    pub variables: usize,
+    pub constraints: usize,
+}
+
 #[derive(Debug, Clone)]
 pub struct SolverData<I, R>
 where
@@ -294,7 +301,15 @@ where
         false
     }
 
-    pub fn solve(mut self) -> SolverSolution<I, R> {
+    pub fn solve(self) -> SolverSolution<I, R> {
+        self.solve_with_progress(|_| {})
+    }
+
+    /// Report actual LP dimensions once built, before entering any backend.
+    pub fn solve_with_progress(
+        mut self,
+        mut progress: impl FnMut(ProblemSize),
+    ) -> SolverSolution<I, R> {
         if self.flows.is_empty() {
             return SolverSolution::NotSolved {
                 no_provider: vec![],
@@ -528,6 +543,10 @@ where
         }
         // 求解与原问题校验交给 solve_lp 的所选后端。
         phase("model-ready", constraints.len());
+        progress(ProblemSize {
+            variables: problem_variables.iter_variables_with_def().count(),
+            constraints: constraints.len(),
+        });
         #[cfg(not(feature = "rust-lp"))]
         let solution = solve_lp(optimization_expr.clone(), constraints, problem_variables);
         #[cfg(feature = "rust-lp")]
@@ -740,6 +759,30 @@ mod tests {
         b.insert("x", 4.0);
         let r = flow_add(&a, &b, -0.5);
         assert!((r["x"] + 2.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn progress_reports_full_lp_including_external_source_and_balance_constraints() {
+        let target = AIndexMap::from_iter([("plate", 1.0)]);
+        let flows = AIndexMap::from_iter([(
+            "smelt",
+            (AIndexMap::from_iter([("ore", -1.0), ("plate", 1.0)]), 1.0),
+        )]);
+        let mut sizes = Vec::new();
+        let result = SolverData::new_simple(target, flows)
+            .with_sources(AIndexMap::from_iter([("ore", 2.0)]))
+            .with_strict_source(true)
+            .with_strict_sink(true)
+            .solve_with_progress(|size| sizes.push(size));
+        assert!(matches!(result, SolverSolution::Solved { .. }));
+        // Mechanism + external source; ore balance + source bound row + target.
+        assert_eq!(
+            sizes,
+            vec![ProblemSize {
+                variables: 2,
+                constraints: 3
+            }]
+        );
     }
 
     #[test]

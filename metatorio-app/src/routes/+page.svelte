@@ -1,4 +1,5 @@
 <script lang="ts">
+  import AutoPlanProgress from "$lib/ui/AutoPlanProgress.svelte";
   import RichText from "$lib/ui/RichText.svelte";
   import { flowName } from "$lib/display-labels";
   // Metatorio 主界面：紧凑布局，圆角卡片分区；游戏内物品一律图标按钮，
@@ -1832,6 +1833,9 @@
         >
           {runtime.autoPlanning ? "规划中…" : "自动规划"}
         </button>
+        {#if runtime.autoPlanning}
+          <AutoPlanProgress progress={runtime.autoPlanProgress} />
+        {/if}
         {#if factory}
           <button
             class="btn"

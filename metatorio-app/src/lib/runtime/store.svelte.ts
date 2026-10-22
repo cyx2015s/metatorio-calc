@@ -29,6 +29,7 @@ import {
   onDocumentChanged,
   onSolveError,
   onSolveResult,
+  onAutoPlanProgress,
   pickProjectFile,
   openProjectFile,
   onProjectOpenRequested,
@@ -43,6 +44,7 @@ import {
 } from "./client";
 import type {
   Accessible,
+  AutoPlanProgress,
   AppDocument,
   AppMessage,
   CatalogIndex,
@@ -145,7 +147,17 @@ class RuntimeStore {
   solving = $state<{ project: ProjectId; factory: FactoryId } | null>(null);
   /** 自动规划是否正在进行。它与全局 `busy`（任何交互都会短暂置位）解耦，
    *  只在真正执行自动规划时置为 true，避免后台自动重算把「自动规划」按钮误禁用。 */
-  autoPlanning = $state(false);
+  private autoPlanningLocally = $state(false);
+  private autoPlanProgressByFactory = $state<Record<string, AutoPlanProgress>>({});
+  private latestAutoPlanRuns = new Map<string, { id: number; finished: boolean }>();
+
+  get autoPlanProgress(): AutoPlanProgress | null {
+    return this.autoPlanProgressByFactory[`${this.selectedProjectId}:${this.selectedFactoryId}`] ?? null;
+  }
+
+  get autoPlanning(): boolean {
+    return this.autoPlanningLocally || this.autoPlanProgress !== null;
+  }
   lastError = $state<string | null>(null);
   lastDiagnostic = $state<RuntimeDiagnostic | null>(null);
 
@@ -282,6 +294,15 @@ class RuntimeStore {
   /** Subscribe to backend events; call once at app start. */
   async init(): Promise<void> {
     await onProjectOpenRequested(() => { if (this.ready) void this.consumeProjectOpenRequests(); });
+    await onAutoPlanProgress((progress) => {
+      const key = `${progress.project}:${progress.factory}`;
+      const latest = this.latestAutoPlanRuns.get(key);
+      if (latest && (progress.run_id < latest.id ||
+          (progress.run_id === latest.id && latest.finished))) return;
+      this.latestAutoPlanRuns.set(key, { id: progress.run_id, finished: !progress.running });
+      if (progress.running) this.autoPlanProgressByFactory[key] = progress;
+      else delete this.autoPlanProgressByFactory[key];
+    });
     onSolveResult((result) => {
       this.solve = result;
       this.solveError = null;
@@ -1780,7 +1801,7 @@ class RuntimeStore {
   async autoPlan(): Promise<void> {
     const { project, factory } = this.requireFactory();
     this.solving = { project, factory };
-    this.autoPlanning = true;
+    this.autoPlanningLocally = true;
     try {
       await this.send({
         scope: "factory",
@@ -1794,7 +1815,7 @@ class RuntimeStore {
       this.solveError = this.solveDiagnostic.message;
       throw error;
     } finally {
-      this.autoPlanning = false;
+      this.autoPlanningLocally = false;
     }
   }
 

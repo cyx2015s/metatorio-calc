@@ -6,6 +6,7 @@
 //! tauri/webview（Linux 上也就不会被迫链接 GTK）。
 
 pub mod app;
+mod auto_plan_progress;
 pub mod host;
 pub mod mcp;
 pub mod options;

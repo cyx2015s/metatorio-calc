@@ -1026,16 +1026,59 @@ pub fn solve_snapshot_with(
     )
 }
 
-/// 自动规划的**纯计算**部分：完整状态空间枚举候选 → 构建 LP → 返回被选中的
-/// 机制列表（按种类排序），**不修改任何文档**。
-///
-/// 与 [`solve_snapshot`] 一样只依赖快照，因此可以锁外执行（真实 dump 上可能
-/// 需要数十秒）。回写请走 [`RuntimeState::apply_auto_plan`]——它会把工厂标记为
-/// 严格供给，因为这里的 LP **总是**用 `strict_source = true`（见下方设置）。
+/// Stages of auto-planning; dimensions become known after LP construction.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum AutoPlanStage {
+    Preparing,
+    Enumerating,
+    Building,
+    Solving,
+    Verifying,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AutoPlanProgress {
+    pub stage: AutoPlanStage,
+    pub variables: Option<usize>,
+    pub constraints: Option<usize>,
+}
+
+impl AutoPlanProgress {
+    pub fn preparing() -> Self {
+        Self {
+            stage: AutoPlanStage::Preparing,
+            variables: None,
+            constraints: None,
+        }
+    }
+    fn sized(stage: AutoPlanStage, size: metatorio_solver::ProblemSize) -> Self {
+        Self {
+            stage,
+            variables: Some(size.variables),
+            constraints: Some(size.constraints),
+        }
+    }
+}
+
+/// 自动规划的纯计算部分：枚举、求解并验证候选，不修改文档。
+/// 可锁外执行；回写走 `RuntimeState::apply_auto_plan`，保持严格供给。
 pub fn plan_auto_plan(
     snapshot: &SolveSnapshot,
     accessibility: &Accessibility,
 ) -> Result<(Vec<Mechanic>, AutoPlanReport), RuntimeError> {
+    plan_auto_plan_with_progress(snapshot, accessibility, |_| {})
+}
+
+pub fn plan_auto_plan_with_progress(
+    snapshot: &SolveSnapshot,
+    accessibility: &Accessibility,
+    mut progress: impl FnMut(AutoPlanProgress),
+) -> Result<(Vec<Mechanic>, AutoPlanReport), RuntimeError> {
+    progress(AutoPlanProgress {
+        stage: AutoPlanStage::Enumerating,
+        ..AutoPlanProgress::preparing()
+    });
     let profile = std::env::var_os("METATORIO_PLAN_PROFILE").is_some();
     let profile_start = std::time::Instant::now();
     let phase = |stage: &str, count: usize| {
@@ -1117,6 +1160,10 @@ pub fn plan_auto_plan(
     }
 
     // 展开全部候选为一个 LP。
+    progress(AutoPlanProgress {
+        stage: AutoPlanStage::Building,
+        ..AutoPlanProgress::preparing()
+    });
     let problem = build_autoplan_problem(
         store,
         &context,
@@ -1126,7 +1173,9 @@ pub fn plan_auto_plan(
         &candidates,
     );
     phase("expanded", problem.flows.len());
-    let solution = problem.solve();
+    let solution = problem.solve_with_progress(|size| {
+        progress(AutoPlanProgress::sized(AutoPlanStage::Solving, size))
+    });
     phase("first-solve-returned", 0);
     let SolverSolution::Solved { prim, report, .. } = solution else {
         // 透出求解器给出的 description——区分「真的不可行」与「数值/求解器
@@ -1160,7 +1209,7 @@ pub fn plan_auto_plan(
     // 全量 LP 可行 ≠ 回写子集可行——实测原版就能复现：125,608 个候选 →
     // 回写 47 条 → 文档重解「无可行解」。自检失败就放宽到 LP 解的全部非零
     // 机制（顶点解下就是解的支持集，必然可行）。
-    let feasible = |mechanics: &[Mechanic]| -> bool {
+    let mut feasible = |mechanics: &[Mechanic]| -> bool {
         phase("writeback-check-start", mechanics.len());
         let solved = matches!(
             build_autoplan_problem(
@@ -1171,7 +1220,10 @@ pub fn plan_auto_plan(
                 &all_sources,
                 mechanics
             )
-            .solve(),
+            .solve_with_progress(|size| progress(AutoPlanProgress::sized(
+                AutoPlanStage::Verifying,
+                size
+            ))),
             SolverSolution::Solved { .. }
         );
         phase("writeback-check-end", mechanics.len());
@@ -3292,6 +3344,75 @@ mod tests {
                 .is_empty(),
             "自动规划应回写被选中的机制"
         );
+    }
+
+    #[test]
+    fn auto_plan_progress_covers_full_model_and_writeback_verification() {
+        let mut runtime = load_runtime();
+        let project = new_project(&mut runtime);
+        dispatch_project(
+            &mut runtime,
+            project,
+            ProjectAction::AddMilestone {
+                node: Accessible::Entity("assembling-machine-1".into()),
+                unlocked: true,
+            },
+        );
+        dispatch_project(
+            &mut runtime,
+            project,
+            ProjectAction::AddFactory {
+                name: "progress".into(),
+                template: crate::message::FactoryTemplate::Empty,
+            },
+        );
+        let factory = runtime.state.project(project).unwrap().factories[0].id;
+        for flow in [
+            DualVar::Item(IdWithQuality::new("iron-plate", "normal")),
+            DualVar::Electricity,
+        ] {
+            runtime
+                .dispatch(AppMessage::Factory {
+                    project,
+                    factory,
+                    action: FactoryAction::Flow(FlowAction::AddToExternalInput {
+                        flow,
+                        penalty: 1.0,
+                    }),
+                })
+                .unwrap();
+        }
+        runtime
+            .dispatch(AppMessage::Factory {
+                project,
+                factory,
+                action: FactoryAction::Flow(FlowAction::AddToTarget {
+                    flow: DualVar::Item(IdWithQuality::new("iron-gear-wheel", "normal")),
+                    amount: 1.0,
+                }),
+            })
+            .unwrap();
+        let snapshot = runtime.solve_snapshot_inputs(project, factory).unwrap();
+        let accessibility = snapshot.resolve_accessibility();
+        let mut updates = Vec::new();
+        let (mechanics, report) =
+            plan_auto_plan_with_progress(&snapshot, &accessibility, |update| updates.push(update))
+                .unwrap();
+        assert!(!mechanics.is_empty() && report.verified);
+        assert_eq!(
+            updates.iter().map(|u| u.stage).collect::<Vec<_>>(),
+            vec![
+                AutoPlanStage::Enumerating,
+                AutoPlanStage::Building,
+                AutoPlanStage::Solving,
+                AutoPlanStage::Verifying,
+            ]
+        );
+        assert_eq!(updates[0].variables, None);
+        assert_eq!(updates[2].variables, Some(report.variables_before));
+        assert!(updates[2].constraints.unwrap() > 0);
+        assert!(updates[3].variables.unwrap() > 0);
+        assert!(updates[3].constraints.unwrap() > 0);
     }
 
     /// 求解快照必须与 runtime 解耦：取了快照之后文档怎么改，快照算出来的

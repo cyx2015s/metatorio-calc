@@ -8,6 +8,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type {
   Accessible,
+  AutoPlanProgress,
   AppDocument,
   AppMessage,
   CatalogIndex,
@@ -204,6 +205,10 @@ export async function projectSavePath(project: number): Promise<string | null> {
 }
 
 // ── Events ────────────────────────────────────────────────────────
+
+export function onAutoPlanProgress(handler: (progress: AutoPlanProgress) => void): Promise<() => void> {
+  return listen<AutoPlanProgress>("auto-plan-progress", (event) => handler(event.payload));
+}
 
 export function onSolveResult(handler: (result: SolveResult) => void): Promise<() => void> {
   return listen<SolveResult>("solve-result", (event) => handler(event.payload));
