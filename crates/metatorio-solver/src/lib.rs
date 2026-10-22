@@ -6,6 +6,7 @@
 
 pub mod comb;
 pub mod concept;
+pub mod control;
 pub mod lp;
 #[cfg(feature = "rust-lp")]
 pub mod lp_experiments;

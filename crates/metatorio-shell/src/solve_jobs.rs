@@ -22,6 +22,7 @@ use std::time::Duration;
 
 use metatorio_data::store::PrototypeStore;
 use metatorio_runtime::{FactoryId, ProjectId, SolveSnapshot};
+use metatorio_solver::control::CancellationToken;
 use tokio::sync::Mutex;
 
 /// 求解的调度键：一个工厂的求解彼此无关，因此按工厂并行。
@@ -83,8 +84,8 @@ impl KeyLocks {
 /// `(快照, 候选机制)`（快照用于回写前的版本校验）。
 pub struct SolveJobs<R, E = String> {
     slots: Mutex<HashMap<SolveKey, Arc<Mutex<Slot<R>>>>>,
-    /// 单次求解的等待上限：超时返回可重试错误，后台任务继续跑完
-    /// （结果丢弃；重试会重新算）。普通重算默认 120s，异步 auto_plan 默认
+    /// 单次求解及键锁等待的上限：超时请求协作取消，旧任务退出前同键
+    /// 重试不得开始。普通重算默认 120s，异步 auto_plan 默认
     /// 1800s；`METATORIO_SOLVE_TIMEOUT_MS` 可调。
     timeout: Duration,
     error: std::marker::PhantomData<fn() -> E>,
@@ -147,7 +148,9 @@ impl<R: Clone + Send + 'static, E: From<String> + Send + 'static> SolveJobs<R, E
     {
         let slot = self.slot(key).await;
         // 同键串行：等锁期间文档可能已被别人算过，因此快照要在拿到锁之后取。
-        let mut slot = slot.lock().await;
+        let mut slot = tokio::time::timeout(self.timeout, slot.lock_owned())
+            .await
+            .map_err(|_| E::from("求解排队超时：同一工厂的前次任务尚未退出，请稍后重试".into()))?;
 
         let compute = Arc::new(compute);
         let mut snapshot = take_snapshot()?;
@@ -161,17 +164,31 @@ impl<R: Clone + Send + 'static, E: From<String> + Send + 'static> SolveJobs<R, E
             let result = {
                 let task_snapshot = snapshot.clone();
                 let compute = compute.clone();
-                let handle = tokio::task::spawn_blocking(move || compute(&task_snapshot));
-                // 等待上限：超时只放弃**等待**，阻塞任务继续跑完（句柄 drop
-                // 不取消任务）。这样调用方不会被一个失控求解钉住十分钟，重试
-                // 也只是重算一次，不会留下锁。
+                let cancellation = CancellationToken::default();
+                // Also cancel when the caller drops/aborts this future. The
+                // worker owns the key guard until it really exits, including
+                // non-cooperative preprocessing and native backend calls.
+                struct CancelOnDrop(CancellationToken);
+                impl Drop for CancelOnDrop {
+                    fn drop(&mut self) {
+                        self.0.cancel();
+                    }
+                }
+                let _cancel_on_drop = CancelOnDrop(cancellation.clone());
+                let handle = tokio::task::spawn_blocking(move || {
+                    let result = cancellation.scope(|| compute(&task_snapshot));
+                    (slot, result)
+                });
                 match tokio::time::timeout(self.timeout, handle).await {
                     Ok(joined) => {
-                        joined.map_err(|error| E::from(format!("求解任务 join 失败: {error}")))?
+                        let (returned_slot, result) = joined
+                            .map_err(|error| E::from(format!("求解任务 join 失败: {error}")))?;
+                        slot = returned_slot;
+                        result
                     }
                     Err(_) => {
                         return Err(format!(
-                            "求解超时（等待超过 {} 秒，任务仍在后台运行）：请稍后重试，\
+                            "求解超时（等待超过 {} 秒，已请求取消；退出前同键重试将等待）：请稍后重试，\
                              或先缩小目标 / 关闭自动规划后重算",
                             self.timeout.as_secs()
                         )
@@ -498,6 +515,107 @@ mod tests {
             .await;
         let error = result.expect_err("超时应报错");
         assert!(error.contains("超时"), "错误应说明超时：{error}");
+    }
+
+    #[tokio::test]
+    async fn timed_out_worker_keeps_key_until_exit_and_observes_cancellation() {
+        let (runtime, project, factory) = demo_runtime();
+        let runtime = Arc::new(runtime);
+        let jobs = SolveJobs::<SolveResult>::default().with_timeout(Duration::from_millis(50));
+        let (stopped_tx, stopped_rx) = tokio::sync::oneshot::channel();
+        let stopped_tx = Arc::new(StdMutex::new(Some(stopped_tx)));
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let release_rx = Arc::new(StdMutex::new(release_rx));
+        let result = jobs
+            .run(
+                (project, factory),
+                snapshot_fn(&runtime, project, factory),
+                move |_| {
+                    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+                    while metatorio_solver::control::check_cancelled().is_ok() {
+                        assert!(
+                            std::time::Instant::now() < deadline,
+                            "worker did not observe cancellation"
+                        );
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                    let _ = stopped_tx.lock().unwrap().take().unwrap().send(());
+                    // Simulate a non-preemptible phase still unwinding after cancellation.
+                    let _ = release_rx.lock().unwrap().recv();
+                    Ok(fake_result(project, factory, 1.0))
+                },
+            )
+            .await;
+        assert!(result.unwrap_err().contains("超时"));
+        tokio::time::timeout(Duration::from_secs(2), stopped_rx)
+            .await
+            .unwrap()
+            .unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let count = calls.clone();
+        let retry = jobs
+            .run(
+                (project, factory),
+                snapshot_fn(&runtime, project, factory),
+                move |_| {
+                    count.fetch_add(1, Ordering::SeqCst);
+                    Ok(fake_result(project, factory, 2.0))
+                },
+            )
+            .await;
+        assert!(retry.unwrap_err().contains("排队超时"));
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        release_tx.send(()).unwrap();
+        let result = jobs
+            .run(
+                (project, factory),
+                snapshot_fn(&runtime, project, factory),
+                move |_| Ok(fake_result(project, factory, 2.0)),
+            )
+            .await
+            .unwrap();
+        assert_eq!(cost_of(&result), 2.0, "cancelled result must not be cached");
+    }
+
+    #[tokio::test]
+    async fn aborted_caller_cancels_its_worker() {
+        let (runtime, project, factory) = demo_runtime();
+        let runtime = Arc::new(runtime);
+        let jobs = Arc::new(SolveJobs::<SolveResult>::default());
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let started_tx = Arc::new(StdMutex::new(Some(started_tx)));
+        let (stopped_tx, stopped_rx) = tokio::sync::oneshot::channel();
+        let stopped_tx = Arc::new(StdMutex::new(Some(stopped_tx)));
+        let task = tokio::spawn(async move {
+            jobs.run(
+                (project, factory),
+                snapshot_fn(&runtime, project, factory),
+                move |_| {
+                    let _ = started_tx.lock().unwrap().take().unwrap().send(());
+                    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+                    while metatorio_solver::control::check_cancelled().is_ok() {
+                        assert!(
+                            std::time::Instant::now() < deadline,
+                            "worker did not observe cancellation"
+                        );
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                    let _ = stopped_tx.lock().unwrap().take().unwrap().send(());
+                    Err("cancelled".to_string())
+                },
+            )
+            .await
+        });
+        tokio::time::timeout(Duration::from_secs(2), started_rx)
+            .await
+            .unwrap()
+            .unwrap();
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        tokio::time::timeout(Duration::from_secs(2), stopped_rx)
+            .await
+            .unwrap()
+            .unwrap();
     }
 
     /// 失败不缓存：下一次请求必须重新尝试。

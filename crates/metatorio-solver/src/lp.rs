@@ -193,6 +193,7 @@ fn solve_with_retry(
 ) -> Result<Vec<f64>, ResolutionError> {
     let mut last: Option<ResolutionError> = None;
     for (index, attempt) in SOLVER_ATTEMPTS.iter().enumerate() {
+        crate::control::check_cancelled().map_err(ResolutionError::Str)?;
         let full = build_problem(defs, objective, rows, rhs_scale);
         let mut model = full
             .variables
@@ -378,6 +379,7 @@ fn solve_lp_impl(
     variables: ProblemVariables,
     #[cfg(feature = "rust-lp")] labels: Vec<String>,
 ) -> Result<LpSolution, ResolutionError> {
+    crate::control::check_cancelled().map_err(ResolutionError::Str)?;
     let defs: Vec<VariableDefinition> = variables
         .iter_variables_with_def()
         .map(|(_, def)| def.clone())
@@ -499,6 +501,7 @@ fn solve_lp_impl(
                     ))
                 }
             }?;
+            crate::control::check_cancelled().map_err(ResolutionError::Str)?;
             let used = result.values.iter().filter(|x| **x != 0.0).count();
             let balance_error = result
                 .relative
@@ -593,6 +596,7 @@ fn solve_lp_impl(
 
         let instant = Instant::now();
         let solution = solve_with_retry(&defs, &objective, &rows, rhs_scale)?;
+        crate::control::check_cancelled().map_err(ResolutionError::Str)?;
         // 求解在放大后的空间进行，这里除回原问题量级（rhs_scale = 1.0 时是无操作）。
         let values: Vec<f64> = solution.iter().map(|value| value / rhs_scale).collect();
         if values.iter().any(|value| !value.is_finite()) {

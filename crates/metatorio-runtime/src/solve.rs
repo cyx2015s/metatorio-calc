@@ -1005,8 +1005,14 @@ pub fn ordered_milestones(snapshot: &ProjectSnapshot) -> Vec<crate::document::Mi
         .collect()
 }
 
+fn check_solve_cancelled() -> Result<(), RuntimeError> {
+    metatorio_solver::control::check_cancelled()
+        .map_err(|_| RuntimeError::InvalidOperation("求解已取消，计算未完成"))
+}
+
 /// 纯函数求解：只依赖快照，不碰 `Runtime`、不持锁。可达性按需现算。
 pub fn solve_snapshot(snapshot: &SolveSnapshot) -> Result<SolveResult, RuntimeError> {
+    check_solve_cancelled()?;
     let accessibility = snapshot.resolve_accessibility();
     solve_snapshot_with(snapshot, &accessibility)
 }
@@ -1016,6 +1022,7 @@ pub fn solve_snapshot_with(
     snapshot: &SolveSnapshot,
     accessibility: &Accessibility,
 ) -> Result<SolveResult, RuntimeError> {
+    check_solve_cancelled()?;
     solve_document(
         &snapshot.store,
         &snapshot.project_doc,
@@ -1075,6 +1082,7 @@ pub fn plan_auto_plan_with_progress(
     accessibility: &Accessibility,
     mut progress: impl FnMut(AutoPlanProgress),
 ) -> Result<(Vec<Mechanic>, AutoPlanReport), RuntimeError> {
+    check_solve_cancelled()?;
     progress(AutoPlanProgress {
         stage: AutoPlanStage::Enumerating,
         ..AutoPlanProgress::preparing()
@@ -1116,6 +1124,7 @@ pub fn plan_auto_plan_with_progress(
     };
     phase("environment-ready", 0);
     let candidates = crate::auto_plan::enumerate_all(store, &context, &options);
+    check_solve_cancelled()?;
     phase("enumerated", candidates.len());
     let (mut candidates, dropped) =
         crate::auto_plan::filter_accessible_candidates(store, accessibility, candidates);
@@ -1173,10 +1182,12 @@ pub fn plan_auto_plan_with_progress(
         &candidates,
     );
     phase("expanded", problem.flows.len());
+    check_solve_cancelled()?;
     let solution = problem.solve_with_progress(|size| {
         progress(AutoPlanProgress::sized(AutoPlanStage::Solving, size))
     });
     phase("first-solve-returned", 0);
+    check_solve_cancelled()?;
     let SolverSolution::Solved { prim, report, .. } = solution else {
         // 透出求解器给出的 description——区分「真的不可行」与「数值/求解器
         // 失败」是诊断自动规划失败的前提。
@@ -1231,6 +1242,7 @@ pub fn plan_auto_plan_with_progress(
     };
     let mut used = filtered.used;
     let mut verified = feasible(&used);
+    check_solve_cancelled()?;
     let mut widened = false;
     if !verified && !filtered.support.is_empty() && filtered.support.len() <= AUTOPLAN_VERIFY_LIMIT
     {
@@ -1238,6 +1250,7 @@ pub fn plan_auto_plan_with_progress(
         widened = true;
         used = filtered.support;
         verified = feasible(&used);
+        check_solve_cancelled()?;
     }
     used.sort_by_key(|mechanic| crate::document::MechanicKind::of(mechanic) as u8);
     let candidates_used = used.len();
@@ -1489,6 +1502,7 @@ fn solve_document(
     factory_id: FactoryId,
     accessibility: &metatorio_core::Accessibility,
 ) -> Result<SolveResult, RuntimeError> {
+    check_solve_cancelled()?;
     let mut game = make_game_state_with_accessibility(prototype, project, accessibility);
     apply_environment_to_game_state(
         prototype,
@@ -1570,7 +1584,9 @@ fn solve_document(
             }
         }));
 
+    check_solve_cancelled()?;
     let solution = problem.solve();
+    check_solve_cancelled()?;
     Ok(match solution {
         SolverSolution::Solved {
             prim,
@@ -3413,6 +3429,42 @@ mod tests {
         assert!(updates[2].constraints.unwrap() > 0);
         assert!(updates[3].variables.unwrap() > 0);
         assert!(updates[3].constraints.unwrap() > 0);
+    }
+
+    #[test]
+    fn cancelled_snapshot_and_auto_plan_remain_unfinished() {
+        let mut runtime = load_runtime();
+        let project = new_project(&mut runtime);
+        runtime
+            .dispatch(AppMessage::Project {
+                project,
+                action: ProjectAction::AddFactory {
+                    name: "f".into(),
+                    template: crate::message::FactoryTemplate::Empty,
+                },
+            })
+            .unwrap();
+        let factory = runtime.state.project(project).unwrap().factories[0].id;
+        let snapshot = runtime.solve_snapshot_inputs(project, factory).unwrap();
+        let access = snapshot.resolve_accessibility();
+        let token = metatorio_solver::control::CancellationToken::default();
+        token.cancel();
+        token.scope(|| {
+            assert!(matches!(
+                solve_snapshot(&snapshot),
+                Err(RuntimeError::InvalidOperation("求解已取消，计算未完成"))
+            ));
+            assert!(matches!(
+                plan_auto_plan_with_progress(&snapshot, &access, |_| panic!(
+                    "cancelled planning must not start"
+                )),
+                Err(RuntimeError::InvalidOperation("求解已取消，计算未完成"))
+            ));
+        });
+        assert!(
+            solve_snapshot(&snapshot).is_ok(),
+            "cancellation must not leak into the next solve"
+        );
     }
 
     /// 求解快照必须与 runtime 解耦：取了快照之后文档怎么改，快照算出来的

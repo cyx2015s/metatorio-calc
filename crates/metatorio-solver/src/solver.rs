@@ -614,6 +614,9 @@ where
                     crate::lp_model::ResolutionError::Infeasible => {
                         "无可行解（目标不可达）".to_string()
                     }
+                    crate::lp_model::ResolutionError::UnsupportedModel(reason) => {
+                        format!("当前求解后端不支持此模型（不代表无可行解）：{reason}")
+                    }
                     // 内部数值失败**不等于**无可行解：把二者区分开，界面/agent
                     // 才不会把求解器算不动说成「配方不可解」。
                     // 带上 good_lp/后端给的原因（ModelError / PresolveError /

@@ -100,8 +100,9 @@ fn solve_inner(
     require_optimal: bool,
     round_limit: Option<usize>,
 ) -> std::result::Result<super::lp_hybrid::Result, Failure> {
+    crate::control::check_cancelled()?;
     let model = snapshot.exact_model();
-    let control = exact::SolveControl::with_deadline(deadline);
+    let control = crate::control::exact_control(deadline);
     let mut selected: Vec<_> = model
         .rows
         .iter()
@@ -191,9 +192,9 @@ fn solve_inner(
                     primal_tolerance: 1e-12,
                 },
                 20000,
-                |_| Instant::now() < hint_deadline,
+                |_| Instant::now() < hint_deadline && !control.is_cancelled(),
             ) {
-                let hint_control = exact::SolveControl::with_deadline(
+                let hint_control = crate::control::exact_control(
                     deadline.min(Instant::now() + std::time::Duration::from_secs(5)),
                 );
                 if let Ok(verified) = relaxed.certify_candidate_with_control(
@@ -287,7 +288,7 @@ fn solve_inner(
         };
         let proposal_pivots = proposal.as_ref().map_or(0, |p| p.pivots);
         let refinement_deadline = deadline.min(Instant::now() + std::time::Duration::from_secs(5));
-        let refinement_control = exact::SolveControl::with_deadline(refinement_deadline);
+        let refinement_control = crate::control::exact_control(refinement_deadline);
         let refined = match warm_verified {
             Some(verified) => Ok(verified),
             None => proposal.and_then(|proposal| {

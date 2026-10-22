@@ -67,6 +67,10 @@ fn replay_row_frontier_inner(
             serde_json::json!({"status":"proven-infeasible",
             "elapsed_seconds":begun.elapsed().as_secs_f64()})
         }
+        Err(crate::lp_hybrid::Failure::UnsupportedModel(error)) => {
+            serde_json::json!({"status":"unsupported-model",
+            "elapsed_seconds":begun.elapsed().as_secs_f64(),"error":error})
+        }
         Err(crate::lp_hybrid::Failure::Other(error)) => serde_json::json!({"status":"unfinished",
             "elapsed_seconds":begun.elapsed().as_secs_f64(),"error":error}),
     })

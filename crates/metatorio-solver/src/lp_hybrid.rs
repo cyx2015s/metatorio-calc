@@ -10,6 +10,7 @@ use std::time::Instant;
 #[derive(Debug)]
 pub(crate) enum Failure {
     Infeasible,
+    UnsupportedModel(String),
     Other(String),
 }
 impl From<String> for Failure {
@@ -21,6 +22,9 @@ impl Failure {
     pub(crate) fn resolution_error(self) -> crate::lp_model::ResolutionError {
         match self {
             Self::Infeasible => crate::lp_model::ResolutionError::Infeasible,
+            Self::UnsupportedModel(message) => {
+                crate::lp_model::ResolutionError::UnsupportedModel(message)
+            }
             Self::Other(message) => crate::lp_model::ResolutionError::Str(message),
         }
     }
@@ -35,11 +39,18 @@ pub(crate) struct Result {
 
 /// Pure Rust cold start; no native candidate search or fallback.
 pub(crate) fn solve_rust(snapshot: &Snapshot) -> std::result::Result<Result, Failure> {
+    crate::control::check_cancelled()?;
     snapshot.check()?;
     let model = snapshot.exact_model();
     let start = Instant::now();
-    let result =
-        model.solve_dual_with_observer(10000, |_| start.elapsed().as_secs_f64() < 120.0)?;
+    let control = crate::control::exact_control(start + std::time::Duration::from_secs(120));
+    let result = model.solve_dual_with_control(
+        exact::DualPivotRule::FirstViolation,
+        10000,
+        |_| !control.is_cancelled(),
+        &control,
+    )?;
+    crate::control::check_cancelled()?;
     let certificate = model.certify(&result.solution)?;
     if !certificate.optimal {
         if result.infeasibility.is_some() {
@@ -116,12 +127,37 @@ fn solve_rust_proposal(
     captured: Option<&std::path::Path>,
     certified: bool,
 ) -> std::result::Result<Result, Failure> {
+    crate::control::check_cancelled()?;
     snapshot.check()?;
     let start = Instant::now();
-    let control = exact::SolveControl::with_deadline(
+    let control = crate::control::exact_control(
         start + std::time::Duration::from_secs_f64(RUST_SEARCH_SECONDS),
     );
     let feasibility_model = snapshot.exact_model();
+    // Snapshot validation already checked the matrix. Aggregation can still
+    // overflow finite objective entries; do not classify that as unsupported.
+    if feasibility_model
+        .columns
+        .iter()
+        .any(|c| !c.cost.is_finite())
+    {
+        return Err(Failure::Other(
+            "non-finite aggregated objective cost".into(),
+        ));
+    }
+    // These deterministic restrictions are shared by all proposal/recovery
+    // strategies. Reject once, before spending time on prechecks or retries.
+    // Inspect aggregated costs, not individual snapshot objective entries.
+    if let Some((index, _)) = feasibility_model
+        .columns
+        .iter()
+        .enumerate()
+        .find(|(_, c)| c.lower != 0.0 || c.upper != f64::INFINITY || c.cost < 0.0)
+    {
+        return Err(Failure::UnsupportedModel(format!(
+            "Rust candidate search requires zero lower bounds, infinite upper bounds and nonnegative costs (column {index})"
+        )));
+    }
     let proof = feasibility_model.prove_zero_propagation_infeasible(&control)?;
     if let Some(proof) = proof {
         if let Some(source) = captured {
@@ -186,6 +222,7 @@ fn solve_rust_proposal(
     let mut last = Err(Failure::Other("Rust search budget exhausted".into()));
     let mut last_attempt = 0;
     for (index, (options, full_refinement)) in choices.into_iter().enumerate() {
+        crate::control::check_cancelled()?;
         if start.elapsed().as_secs_f64() >= RUST_SEARCH_SECONDS {
             break;
         }
@@ -210,6 +247,7 @@ fn solve_rust_proposal(
             },
             &mut work,
         );
+        crate::control::check_cancelled()?;
         let recover_now = if certified { index == 2 } else { index == 0 };
         if certified
             && recover_now
@@ -244,9 +282,13 @@ fn solve_rust_proposal(
                     seed.is_some()
                 );
                 match recover_columns(snapshot, captured, seed, deadline, !certified) {
-                    result @ Ok(_) | result @ Err(Failure::Infeasible) => return result,
+                    result @ Ok(_)
+                    | result @ Err(Failure::Infeasible | Failure::UnsupportedModel(_)) => {
+                        return result;
+                    }
                     Err(Failure::Other(error)) => eprintln!("[LP-RUST-COLUMNS-STOP] {error}"),
                 }
+                crate::control::check_cancelled()?;
             }
         }
         // Exhaust the cheap original-model hint strategies before spending the
@@ -267,7 +309,10 @@ fn solve_rust_proposal(
                     "[LP-RUST-ROW-GENERATION] retrying failed hint with constraint relaxation"
                 );
                 match crate::lp_row_generation::solve(snapshot, captured, deadline, !certified) {
-                    result @ Ok(_) | result @ Err(Failure::Infeasible) => return result,
+                    result @ Ok(_)
+                    | result @ Err(Failure::Infeasible | Failure::UnsupportedModel(_)) => {
+                        return result;
+                    }
                     Err(Failure::Other(error)) => {
                         eprintln!("[LP-RUST-ROW-GENERATION-STOP] {error}")
                     }
@@ -335,7 +380,8 @@ fn solve_rust_proposal_attempt(
         RUST_SEARCH_SECONDS
     };
     let control =
-        exact::SolveControl::with_deadline(start + std::time::Duration::from_secs_f64(deadline));
+        crate::control::exact_control(start + std::time::Duration::from_secs_f64(deadline));
+    crate::control::check_cancelled()?;
     snapshot.check()?;
     let model = snapshot.exact_model();
     // Reduce the first search only; retain the original-matrix retries for
@@ -355,19 +401,25 @@ fn solve_rust_proposal_attempt(
         model.float_candidate_after_relevance_with_control(
             options,
             20000,
-            |_| start.elapsed().as_secs_f64() < deadline,
+            |_| {
+                start.elapsed().as_secs_f64() < deadline
+                    && crate::control::check_cancelled().is_ok()
+            },
             &control,
         )?
     } else if attempt.index == 2 {
         model.float_candidate_after_zero_propagation_with_control(
             options,
             20000,
-            |_| start.elapsed().as_secs_f64() < deadline,
+            |_| {
+                start.elapsed().as_secs_f64() < deadline
+                    && crate::control::check_cancelled().is_ok()
+            },
             &control,
         )?
     } else {
         model.float_candidate_with_options(options, 20000, |_| {
-            start.elapsed().as_secs_f64() < deadline
+            start.elapsed().as_secs_f64() < deadline && crate::control::check_cancelled().is_ok()
         })?
     };
     work.floating += proposal.pivots;
@@ -384,7 +436,7 @@ fn solve_rust_proposal_attempt(
         deadline
     };
     let control =
-        exact::SolveControl::with_deadline(start + std::time::Duration::from_secs_f64(deadline));
+        crate::control::exact_control(start + std::time::Duration::from_secs_f64(deadline));
     if attempt.index == 0 {
         work.first_values = Some(proposal.values.clone());
     }
@@ -483,6 +535,7 @@ fn solve_rust_proposal_attempt(
             &budget,
             |phase, _| {
                 start.elapsed().as_secs_f64() < deadline
+                    && crate::control::check_cancelled().is_ok()
                     && (allow_support
                         || !matches!(
                             phase,
@@ -556,7 +609,9 @@ fn solve_rust_proposal_attempt(
     let result = model.refine_basis_with_control(
         proposal.basis,
         1000,
-        |_, _| start.elapsed().as_secs_f64() < deadline,
+        |_, _| {
+            start.elapsed().as_secs_f64() < deadline && crate::control::check_cancelled().is_ok()
+        },
         &control,
     )?;
     if !result.certificate.optimal {
@@ -587,8 +642,9 @@ fn recover_cost_bounds(
     incumbent: &[exact::Rational],
     deadline: Instant,
 ) -> std::result::Result<Result, String> {
+    crate::control::check_cancelled()?;
     let model = snapshot.exact_model();
-    let control = exact::SolveControl::with_deadline(deadline);
+    let control = crate::control::exact_control(deadline);
     let proposal = model
         .cost_bounded_float_candidate_with_control(incumbent, &control)?
         .ok_or("cost-bounded hint has no liftable original basis")?;
@@ -629,6 +685,7 @@ fn recover_columns(
     deadline: Instant,
     require_optimal: bool,
 ) -> std::result::Result<Result, Failure> {
+    crate::control::check_cancelled()?;
     let budget = if require_optimal {
         exact::Rational::from_integer(0.into())
     } else {
@@ -639,7 +696,7 @@ fn recover_columns(
         .solve_column_generation_with_control(
             seed,
             &budget,
-            &exact::SolveControl::with_deadline(deadline),
+            &crate::control::exact_control(deadline),
         )?;
     if let Some(proof) = result.infeasibility {
         crate::lp_row_generation::save(
@@ -689,6 +746,7 @@ fn validated_result(
     certificate: exact::Certificate,
     pivots: usize,
 ) -> std::result::Result<Result, String> {
+    crate::control::check_cancelled()?;
     if !certificate.primal_feasible {
         return Err("exact full-model verification failed".into());
     }
@@ -713,6 +771,7 @@ pub(crate) fn solve(
     snapshot: &Snapshot,
     captured: Option<&std::path::Path>,
 ) -> std::result::Result<Result, String> {
+    crate::control::check_cancelled()?;
     snapshot.check()?;
     let options = ReplayOptions {
         name: "hybrid-seed".into(),
@@ -727,6 +786,7 @@ pub(crate) fn solve(
     let mut seed = replay(snapshot, options.clone())?;
     if seed.status != "Optimal" {
         for presolve in [true, false] {
+            crate::control::check_cancelled()?;
             let candidate = replay(
                 snapshot,
                 ReplayOptions {
@@ -758,6 +818,7 @@ pub(crate) fn solve(
         .map(|x| f64::from_bits(*x))
         .collect();
     let (restricted, selected) = snapshot.restrict_support(&seed_values)?;
+    crate::control::check_cancelled()?;
     let refined = replay(
         &restricted,
         ReplayOptions {
@@ -837,7 +898,9 @@ fn feasible_candidate(
     basis: exact::Basis,
 ) -> std::result::Result<(exact::ExactSolution, usize), String> {
     let start = Instant::now();
-    let initial = model.reconstruct(&basis)?;
+    crate::control::check_cancelled()?;
+    let control = crate::control::exact_control(start + std::time::Duration::from_secs(120));
+    let initial = model.reconstruct_with_control(&basis, &control)?;
     let initial_certificate = model.certify(&initial)?;
     eprintln!(
         "[LP-EXACT-CANDIDATE] columns={} primal={} dual={}",
@@ -849,12 +912,22 @@ fn feasible_candidate(
         (initial, 0)
     } else {
         let result = if initial_certificate.dual_feasible {
-            model.repair_dual_feasible_basis_with_observer(basis, 1000, |_| {
-                start.elapsed().as_secs_f64() < 120.0
-            })?
+            model.repair_dual_feasible_basis_with_control(
+                basis,
+                exact::DualPivotRule::FirstViolation,
+                1000,
+                |_| !control.is_cancelled(),
+                &control,
+            )?
         } else {
-            model.solve_dual_with_observer(10000, |_| start.elapsed().as_secs_f64() < 120.0)?
+            model.solve_dual_with_control(
+                exact::DualPivotRule::FirstViolation,
+                10000,
+                |_| !control.is_cancelled(),
+                &control,
+            )?
         };
+        crate::control::check_cancelled()?;
         if !model.certify(&result.solution)?.primal_feasible {
             return Err(format!(
                 "hybrid support repair incomplete: {:?}; restricted infeasibility={}",
@@ -870,6 +943,93 @@ fn feasible_candidate(
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn one_column_snapshot(lower: f64, upper: f64, cost: f64) -> Snapshot {
+        Snapshot {
+            format_version: 1,
+            columns: vec![crate::lp_experiments::Column {
+                label: "x".into(),
+                lower_bits: lower.to_bits(),
+                upper_bits: upper.to_bits(),
+                integer: false,
+            }],
+            rows: vec![crate::lp_experiments::Row {
+                label: "x=1".into(),
+                equality: true,
+                rhs_bits: 1.0f64.to_bits(),
+                terms: vec![(0, 1.0f64.to_bits())],
+            }],
+            objective: vec![(0, cost.to_bits())],
+            objective_offset_bits: 0.0f64.to_bits(),
+            production_rhs_scale_bits: 1.0f64.to_bits(),
+        }
+    }
+
+    #[test]
+    fn unsupported_models_are_not_retried_or_reported_infeasible() {
+        for (lower, upper, cost) in [
+            (1.0, f64::INFINITY, 1.0),
+            (f64::NEG_INFINITY, f64::INFINITY, 1.0),
+            (0.0, 2.0, 1.0),
+            (0.0, f64::INFINITY, -1.0),
+        ] {
+            let snapshot = one_column_snapshot(lower, upper, cost);
+            for certified in [false, true] {
+                let error = match solve_rust_proposal(&snapshot, None, certified) {
+                    Err(error) => error,
+                    Ok(_) => panic!("unsupported search model accepted"),
+                };
+                assert!(matches!(
+                    error.resolution_error(),
+                    crate::lp_model::ResolutionError::UnsupportedModel(_)
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn capability_check_uses_aggregated_cost_and_preserves_invalid_input() {
+        let mut snapshot = one_column_snapshot(0.0, f64::INFINITY, 2.0);
+        snapshot.objective.push((0, (-1.0f64).to_bits()));
+        let result = solve_rust_certified(&snapshot, None).unwrap();
+        assert!(result.certificate.optimal);
+        assert_eq!(result.values, vec![1.0]);
+        snapshot.columns[0].lower_bits = f64::NAN.to_bits();
+        assert!(matches!(
+            solve_rust_certified(&snapshot, None),
+            Err(Failure::Other(_))
+        ));
+        let mut overflow = one_column_snapshot(0.0, f64::INFINITY, f64::MAX);
+        overflow.objective.push((0, f64::MAX.to_bits()));
+        assert!(matches!(
+            solve_rust_certified(&overflow, None),
+            Err(Failure::Other(_))
+        ));
+    }
+
+    #[test]
+    fn cancellation_reaches_all_rust_entrypoints_and_does_not_leak() {
+        let snapshot = one_column_snapshot(0.0, f64::INFINITY, 1.0);
+        let token = crate::control::CancellationToken::default();
+        token.cancel();
+        token.scope(|| {
+            for result in [
+                solve_rust(&snapshot),
+                solve_rust_verified(&snapshot, None),
+                solve_rust_certified(&snapshot, None),
+            ] {
+                assert!(
+                    matches!(result, Err(Failure::Other(message)) if message.contains("cancelled"))
+                );
+            }
+        });
+        assert!(
+            solve_rust_certified(&snapshot, None)
+                .unwrap()
+                .certificate
+                .optimal
+        );
+    }
+
     #[test]
     fn rust_bridges_distinguish_verified_infeasibility_from_invalid_input() {
         let snapshot = Snapshot {

@@ -198,6 +198,9 @@ impl Constraint {
 pub enum ResolutionError {
     Unbounded,
     Infeasible,
+    /// The selected search backend cannot handle this model representation.
+    /// This is neither an infeasibility proof nor a retryable numerical failure.
+    UnsupportedModel(String),
     Other(&'static str),
     Str(String),
 }
@@ -206,6 +209,7 @@ impl std::fmt::Display for ResolutionError {
         match self {
             Self::Unbounded => f.write_str("unbounded LP"),
             Self::Infeasible => f.write_str("infeasible LP"),
+            Self::UnsupportedModel(s) => write!(f, "unsupported LP model: {s}"),
             Self::Other(s) => f.write_str(s),
             Self::Str(s) => f.write_str(s),
         }

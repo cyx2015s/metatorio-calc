@@ -77,7 +77,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(error) => {
             serde_json::json!({"backend":backend,"snapshot":args[0],"elapsed_seconds":elapsed,
             "columns":ids.len(),"rows":snapshot.rows.len(),
-            "status":match &error { ResolutionError::Infeasible=>"infeasible", ResolutionError::Unbounded=>"unbounded",_=>"rejected" },
+            "status":match &error { ResolutionError::Infeasible=>"infeasible", ResolutionError::Unbounded=>"unbounded",ResolutionError::UnsupportedModel(_)=>"unsupported-model",_=>"rejected" },
             "error":error.to_string()})
         }
     };

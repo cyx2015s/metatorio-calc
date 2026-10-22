@@ -112,9 +112,8 @@ impl Model {
         // hint, which may lose useful original-model dual prices.
         if basics >= 32 {
             if let Ok(original) = self.reconstruct_with_control(&candidate.basis, control) {
-                let (adjusted, scale) = self.scale_to_dual_feasible(&original)?;
-                let result = self.certified_result(
-                    adjusted,
+                let (result, scale) = self.scaled_certified_result(
+                    &original,
                     candidate.basis.clone(),
                     gap_budget,
                     0,
@@ -276,10 +275,9 @@ impl Model {
             }
             Err(error) => return Err(error),
         };
-        let (adjusted, _) = self.scale_to_dual_feasible(&initial)?;
         let compact_pivots = compacted.as_ref().map_or(0, |hint| hint.pivots);
-        let mut initial_result = self.certified_result(
-            adjusted.clone(),
+        let (mut initial_result, _) = self.scaled_certified_result(
+            &initial,
             candidate.basis.clone(),
             gap_budget,
             0,
@@ -334,7 +332,7 @@ impl Model {
                 }
                 let combined = ExactSolution {
                     values,
-                    row_duals: adjusted.row_duals.clone(),
+                    row_duals: initial_result.solution.row_duals.clone(),
                     basis_dimension: repaired.solution.basis_dimension,
                 };
                 let mut result = self.certified_result(
@@ -385,7 +383,7 @@ impl Model {
         )?;
         if !result.accepted {
             let combined = ExactSolution {
-                row_duals: adjusted.row_duals,
+                row_duals: initial_result.solution.row_duals,
                 ..refined.solution
             };
             let other = self.certified_result(
@@ -423,20 +421,29 @@ impl Model {
         support_columns: usize,
     ) -> Result<CertifiedResult, String> {
         let certificate = self.certify(&solution)?;
-        let relative_gap = certificate.relative_gap()?;
-        let accepted = relative_gap.as_ref().is_some_and(|gap| gap <= budget);
-        Ok(CertifiedResult {
+        VerifiedSolution {
             solution,
-            primal_basis,
             certificate,
-            relative_gap,
-            accepted,
-            exact_pivots,
-            support_search_pivots: 0,
-            support_columns,
-            stop_reason: None,
-            infeasibility: None,
-        })
+        }
+        .into_result(primal_basis, budget, exact_pivots, support_columns)
+    }
+    // The certificate is obtained here together with its adjusted solution.
+    // Callers cannot supply a stale certificate for a changed/combined witness.
+    fn scaled_certified_result(
+        &self,
+        solution: &ExactSolution,
+        primal_basis: Basis,
+        budget: &Rational,
+        exact_pivots: usize,
+        support_columns: usize,
+    ) -> Result<(CertifiedResult, Rational), String> {
+        let (solution, scale, certificate) = self.scale_to_dual_feasible_certified(solution)?;
+        let result = VerifiedSolution {
+            solution,
+            certificate,
+        }
+        .into_result(primal_basis, budget, exact_pivots, support_columns)?;
+        Ok((result, scale))
     }
     pub(super) fn candidate_support(
         &self,
@@ -516,6 +523,38 @@ impl Model {
             },
             selected,
         ))
+    }
+}
+
+/// A full-model certificate paired with the exact solution that produced it.
+/// Kept private so entry points never accept an independently supplied proof.
+struct VerifiedSolution {
+    solution: ExactSolution,
+    certificate: Certificate,
+}
+
+impl VerifiedSolution {
+    fn into_result(
+        self,
+        primal_basis: Basis,
+        budget: &Rational,
+        exact_pivots: usize,
+        support_columns: usize,
+    ) -> Result<CertifiedResult, String> {
+        let relative_gap = self.certificate.relative_gap()?;
+        let accepted = relative_gap.as_ref().is_some_and(|gap| gap <= budget);
+        Ok(CertifiedResult {
+            solution: self.solution,
+            primal_basis,
+            certificate: self.certificate,
+            relative_gap,
+            accepted,
+            exact_pivots,
+            support_search_pivots: 0,
+            support_columns,
+            stop_reason: None,
+            infeasibility: None,
+        })
     }
 }
 
@@ -727,59 +766,96 @@ mod tests {
     }
     #[test]
     fn rational_budget_boundary_and_display_rounding_are_separate() {
-        let model = Model {
-            columns: [1.0, 0.125]
-                .into_iter()
-                .map(|cost| Column {
+        // Exercise both the small-basis path and the >=32-basic early path.
+        for basics in [1, 32] {
+            let mut model = Model {
+                columns: [1.0, 0.125]
+                    .into_iter()
+                    .map(|cost| Column {
+                        lower: 0.0,
+                        upper: f64::INFINITY,
+                        cost,
+                    })
+                    .collect(),
+                rows: vec![Row {
+                    equality: true,
+                    rhs: 1.0,
+                    terms: vec![(0, 7.0), (1, 1.0)],
+                }],
+                offset: 0.0,
+            };
+            let mut candidate = FloatCandidate {
+                basis: Basis {
+                    columns: vec![BasisStatus::Basic, BasisStatus::Lower],
+                    rows: vec![BasisStatus::Upper],
+                },
+                values: vec![1.0 / 7.0, 0.0],
+                pivots: 0,
+                stop_reason: "test hint".into(),
+                diagnostic: None,
+            };
+            for _ in 1..basics {
+                let column = model.columns.len();
+                model.columns.push(Column {
                     lower: 0.0,
                     upper: f64::INFINITY,
-                    cost,
+                    cost: 0.0,
+                });
+                model.rows.push(Row {
+                    equality: true,
+                    rhs: 0.0,
+                    terms: vec![(column, 1.0)],
+                });
+                candidate.basis.columns.push(BasisStatus::Basic);
+                candidate.basis.rows.push(BasisStatus::Upper);
+                candidate.values.push(0.0);
+            }
+            let original = model.reconstruct(&candidate.basis).unwrap();
+            assert!(!model.certify(&original).unwrap().dual_feasible);
+            let gap = Rational::new(1.into(), 56.into());
+            let result = model
+                .certify_candidate_with_observer(&candidate, 0, &gap, |_, _| true)
+                .unwrap();
+            assert!(result.accepted && !result.certificate.optimal);
+            assert_eq!(result.relative_gap.as_ref(), Some(&gap));
+            assert_eq!(result.exact_pivots, 0);
+            assert_ne!(result.solution.row_duals, original.row_duals);
+            let independently_verified = model.certify(&result.solution).unwrap();
+            assert!(independently_verified.primal_feasible && independently_verified.dual_feasible);
+            assert_eq!(
+                independently_verified.relative_gap().unwrap(),
+                Some(gap.clone())
+            );
+            assert_eq!(
+                independently_verified.objective,
+                result.certificate.objective
+            );
+            assert_eq!(
+                independently_verified.dual_objective,
+                result.certificate.dual_objective
+            );
+            let reported = result
+                .certificate
+                .relative_gap_upper_bound()
+                .unwrap()
+                .unwrap();
+            assert!(rational(reported).unwrap() >= gap);
+            assert!(rational(reported.next_down()).unwrap() < gap);
+            let tighter = &gap - Rational::new(1.into(), crate::BigInt::from(1) << 200usize);
+            let stopped = model
+                .certify_candidate_with_observer(&candidate, 20, &tighter, |phase, _| {
+                    phase != "full-refine"
                 })
-                .collect(),
-            rows: vec![Row {
-                equality: true,
-                rhs: 1.0,
-                terms: vec![(0, 7.0), (1, 1.0)],
-            }],
-            offset: 0.0,
-        };
-        let candidate = FloatCandidate {
-            basis: Basis {
-                columns: vec![BasisStatus::Basic, BasisStatus::Lower],
-                rows: vec![BasisStatus::Upper],
-            },
-            values: vec![1.0 / 7.0, 0.0],
-            pivots: 0,
-            stop_reason: "test hint".into(),
-            diagnostic: None,
-        };
-        let gap = Rational::new(1.into(), 56.into());
-        let result = model
-            .certify_candidate_with_observer(&candidate, 0, &gap, |_, _| true)
-            .unwrap();
-        assert!(result.accepted && !result.certificate.optimal);
-        assert_eq!(result.relative_gap.as_ref(), Some(&gap));
-        let reported = result
-            .certificate
-            .relative_gap_upper_bound()
-            .unwrap()
-            .unwrap();
-        assert!(rational(reported).unwrap() >= gap);
-        assert!(rational(reported.next_down()).unwrap() < gap);
-        let tighter = &gap - Rational::new(1.into(), crate::BigInt::from(1) << 200usize);
-        let stopped = model
-            .certify_candidate_with_observer(&candidate, 20, &tighter, |phase, _| {
-                phase != "full-refine"
-            })
-            .unwrap();
-        assert!(!stopped.accepted && stopped.exact_pivots == 0);
-        assert!(stopped.certificate.primal_feasible && stopped.certificate.dual_feasible);
-        assert_eq!(stopped.relative_gap.as_ref(), Some(&gap));
-        let result = model
-            .certify_candidate_with_observer(&candidate, 0, &tighter, |_, _| true)
-            .unwrap();
-        assert!(!result.accepted);
-        assert!(result.certificate.primal_feasible && result.certificate.dual_feasible);
+                .unwrap();
+            assert!(!stopped.accepted && stopped.exact_pivots == 0);
+            assert!(stopped.certificate.primal_feasible && stopped.certificate.dual_feasible);
+            assert_eq!(stopped.relative_gap.as_ref(), Some(&gap));
+            let result = model
+                .certify_candidate_with_observer(&candidate, 0, &tighter, |_, _| true)
+                .unwrap();
+            assert!(!result.accepted);
+            assert!(result.certificate.primal_feasible && result.certificate.dual_feasible);
+        }
     }
     #[test]
     fn gap_budget_is_exact_and_does_not_claim_zero_gap() {
