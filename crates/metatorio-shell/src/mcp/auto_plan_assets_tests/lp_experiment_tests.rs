@@ -158,7 +158,8 @@ async fn project_file_auto_plan_benchmark() {
     let elapsed_ms = begun.elapsed().as_millis();
     serde_json::to_writer(
         &mut output,
-        &json!({"load_ms":load_ms,"elapsed_ms":elapsed_ms,"input":input,"outcome":outcome}),
+        &json!({"load_ms":load_ms,"elapsed_ms":elapsed_ms,"input":input,"outcome":outcome,
+            "document_after":runtime.document_for_save(project_id).ok()}),
     )
     .unwrap();
     output.flush().unwrap();

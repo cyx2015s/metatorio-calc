@@ -134,6 +134,17 @@ fn assert_certified(result: &metatorio_runtime::SolveResult) {
             assert!(result.report.certified_relative_gap.is_none());
             return;
         }
+        if let Some(optimization) = &result.report.optimization
+            && !optimization.optimality_proven
+        {
+            assert!(!result.report.exact_optimality_verified);
+            assert_ne!(
+                optimization.termination_reason,
+                metatorio_solver::OptimizationTermination::Optimal
+            );
+            // Anytime results require primal feasibility, not a dual bound.
+            return;
+        }
         let gap = result
             .report
             .certified_relative_gap

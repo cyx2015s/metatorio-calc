@@ -7,9 +7,11 @@ pub use num_rational::BigRational as Rational;
 use num_traits::{Signed, ToPrimitive, Zero};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+mod anytime;
 mod basis;
 mod certified;
 mod columns;
+pub use anytime::{AnytimeResult, PivotCostChange};
 mod control;
 mod cost_bounds;
 mod dual;
@@ -30,6 +32,7 @@ mod restricted;
 mod route;
 mod route_search;
 mod sparse_float_basis;
+mod surplus;
 pub use relative::{RelativeCandidate, RelativeVerification};
 pub use relevance::RelevanceReduction;
 pub use route::RouteOptions;
@@ -447,11 +450,40 @@ impl Model {
     }
     fn optimize_inner(
         &self,
+        basis: Basis,
+        max_pivots: usize,
+        observer: impl FnMut(PivotProgress) -> bool,
+        cache: bool,
+        control: &SolveControl,
+    ) -> Result<Optimization, String> {
+        self.optimize_inner_with_checkpoint(
+            basis,
+            max_pivots,
+            observer,
+            cache,
+            control,
+            &mut |_, _, _, _, _, _| Ok(()),
+        )
+    }
+
+    // A checkpoint sees only a reconstructed, exactly certified feasible point.
+    // Structural column and constrained-row indexes come from the factorization:
+    // observers can retain sparse incumbents without scanning or copying zeros.
+    pub(crate) fn optimize_inner_with_checkpoint(
+        &self,
         mut basis: Basis,
         max_pivots: usize,
         mut observer: impl FnMut(PivotProgress) -> bool,
         cache: bool,
         control: &SolveControl,
+        checkpoint: &mut dyn FnMut(
+            &Basis,
+            &ExactSolution,
+            &Certificate,
+            usize,
+            &[usize],
+            &[usize],
+        ) -> Result<(), String>,
     ) -> Result<Optimization, String> {
         control.check()?;
         self.check()?;
@@ -500,6 +532,21 @@ impl Model {
                     "basis is not exactly primal feasible; phase I or dual repair required".into(),
                 );
             }
+            let (basic_columns, constrained_rows) = match &system {
+                Some(system) => (&system.columns, &system.rows),
+                None => {
+                    let factor = factored.as_ref().ok_or("missing exact factorization")?;
+                    (&factor.columns, &factor.rows)
+                }
+            };
+            checkpoint(
+                &basis,
+                &solution,
+                &certificate,
+                iteration,
+                basic_columns,
+                constrained_rows,
+            )?;
             if !observer(PivotProgress {
                 pivots: iteration,
                 basis_dimension: solution.basis_dimension,

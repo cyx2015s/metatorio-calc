@@ -34,7 +34,9 @@ pub(crate) struct Result {
     pub values: Vec<f64>,
     pub certificate: exact::Certificate,
     pub pivots: usize,
+    pub floating_search_pivots: usize,
     pub relative: Option<(exact::RelativeVerification, exact::RelativeVerification)>,
+    pub optimization: Option<crate::lp::OptimizationReport>,
 }
 
 /// Pure Rust cold start; no native candidate search or fallback.
@@ -77,7 +79,28 @@ pub(crate) fn solve_rust_certified(
     snapshot: &Snapshot,
     captured: Option<&std::path::Path>,
 ) -> std::result::Result<Result, Failure> {
-    solve_rust_proposal(snapshot, captured, true)
+    let started = Instant::now();
+    let mut result = solve_rust_proposal(snapshot, captured, true)?;
+    if result.optimization.is_none() {
+        result.optimization = Some(crate::lp::OptimizationReport {
+            optimality_proven: result.certificate.optimal,
+            termination_reason: if result.certificate.optimal {
+                crate::lp::OptimizationTermination::Optimal
+            } else {
+                crate::lp::OptimizationTermination::SearchStopped
+            },
+            elapsed_seconds: started.elapsed().as_secs_f64(),
+            time_limit_seconds: rust_search_seconds(),
+            recent_pivot_cost_changes: Vec::new(),
+            floating_search_pivots: Some(result.floating_search_pivots),
+            optimization_pivots: result.relative.as_ref().map(|_| 0),
+            improving_pivots: result.relative.as_ref().map(|_| 0),
+            optimization_elapsed_seconds: result.relative.as_ref().map(|_| 0.0),
+            first_feasible_seconds: Some(started.elapsed().as_secs_f64()),
+            ..Default::default()
+        });
+    }
+    Ok(result)
 }
 #[derive(Default)]
 struct SearchWork {
@@ -95,7 +118,24 @@ struct AttemptConfig {
 }
 // Independent of MCP response waiting: a slow search is unfinished work, not
 // evidence that the production model cannot be solved.
-const RUST_SEARCH_SECONDS: f64 = 1200.0;
+fn rust_search_seconds() -> f64 {
+    search_seconds(std::env::var("METATORIO_LP_SEARCH_SECONDS").ok().as_deref())
+}
+fn search_seconds(value: Option<&str>) -> f64 {
+    value
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|seconds| seconds.is_finite() && *seconds > 0.0)
+        .filter(|seconds| {
+            std::time::Duration::try_from_secs_f64(*seconds)
+                .ok()
+                .and_then(|duration| Instant::now().checked_add(duration))
+                .is_some()
+        })
+        .unwrap_or(300.0)
+}
+fn recovery_reserve_seconds() -> f64 {
+    rust_search_seconds().min(60.0) / 4.0
+}
 fn publish_certificate(captured: Option<&std::path::Path>, attempt: usize) {
     let Some(source) = captured else {
         return;
@@ -132,7 +172,7 @@ fn solve_rust_proposal(
     snapshot.check()?;
     let start = Instant::now();
     let control = crate::control::exact_control(
-        start + std::time::Duration::from_secs_f64(RUST_SEARCH_SECONDS),
+        start + std::time::Duration::from_secs_f64(rust_search_seconds()),
     );
     let feasibility_model = snapshot.exact_model();
     // Snapshot validation already checked the matrix. Aggregation can still
@@ -224,7 +264,7 @@ fn solve_rust_proposal(
     let mut last_attempt = 0;
     for (index, (options, full_refinement)) in choices.into_iter().enumerate() {
         crate::control::check_cancelled()?;
-        if start.elapsed().as_secs_f64() >= RUST_SEARCH_SECONDS {
+        if start.elapsed().as_secs_f64() >= rust_search_seconds() {
             break;
         }
         if index > 0 {
@@ -249,6 +289,38 @@ fn solve_rust_proposal(
             &mut work,
         );
         crate::control::check_cancelled()?;
+        // Preserve the broad floating search that solves ordinary models well.
+        // A narrow route is a feasibility fallback, not a replacement for that
+        // search's much better objective/basis on easy instances.
+        if certified
+            && index == 0
+            && work.feasible_basis.is_none()
+            && matches!(&last, Err(Failure::Other(_)))
+            && !control.is_cancelled()
+            && std::env::var("METATORIO_LP_ROUTE").as_deref() != Ok("0")
+        {
+            match feasibility_model.float_candidate_after_route_with_control(
+                options,
+                20000,
+                |_| crate::control::check_cancelled().is_ok(),
+                &control,
+            ) {
+                Ok(route) => {
+                    return optimize_anytime(
+                        snapshot,
+                        &feasibility_model,
+                        &route.candidate.basis,
+                        work.floating + route.candidate.pivots,
+                        start,
+                        start + std::time::Duration::from_secs_f64(rust_search_seconds()),
+                    );
+                }
+                Err(error) => {
+                    crate::control::check_cancelled()?;
+                    eprintln!("[LP-ROUTE-FALLBACK-STOP] {error}");
+                }
+            }
+        }
         let recover_now = if certified {
             index == 2 || work.feasible_basis.is_some()
         } else {
@@ -260,7 +332,7 @@ fn solve_rust_proposal(
             && std::env::var("METATORIO_LP_COST_BOUNDS").as_deref() == Ok("1")
             && let Some(incumbent) = &work.incumbent
         {
-            let deadline = (start + std::time::Duration::from_secs_f64(RUST_SEARCH_SECONDS))
+            let deadline = (start + std::time::Duration::from_secs_f64(rust_search_seconds()))
                 .min(Instant::now() + std::time::Duration::from_secs(15));
             match recover_cost_bounds(snapshot, captured, incumbent, deadline) {
                 Ok(result) => return Ok(result),
@@ -268,7 +340,10 @@ fn solve_rust_proposal(
             }
         }
         if recover_now && matches!(&last, Err(Failure::Other(_))) {
-            let remaining = (RUST_SEARCH_SECONDS - start.elapsed().as_secs_f64() - 60.0).max(0.0);
+            let remaining = (rust_search_seconds()
+                - start.elapsed().as_secs_f64()
+                - recovery_reserve_seconds())
+            .max(0.0);
             if remaining > 0.0 {
                 let seed = work.first_values.as_deref().filter(|values| {
                     let check = snapshot.validate(values);
@@ -296,6 +371,7 @@ fn solve_rust_proposal(
                     captured,
                     seed,
                     work.feasible_basis.as_ref(),
+                    start,
                     deadline,
                     !certified,
                 ) {
@@ -318,10 +394,12 @@ fn solve_rust_proposal(
                     start.elapsed().as_secs_f64()
                 );
             }
-            let remaining = RUST_SEARCH_SECONDS - start.elapsed().as_secs_f64();
+            let remaining = rust_search_seconds() - start.elapsed().as_secs_f64();
             if remaining > 0.0 {
                 let deadline = Instant::now()
-                    + std::time::Duration::from_secs_f64((remaining - 60.0).max(0.0));
+                    + std::time::Duration::from_secs_f64(
+                        (remaining - recovery_reserve_seconds()).max(0.0),
+                    );
                 eprintln!(
                     "[LP-RUST-ROW-GENERATION] retrying failed hint with constraint relaxation"
                 );
@@ -392,9 +470,10 @@ fn solve_rust_proposal_attempt(
     // time for the final complete-model repair within the shared budget.
     let deadline = if certified && !attempt.full_refinement {
         let allowance = if attempt.index == 0 { 45.0 } else { 90.0 };
-        (start.elapsed().as_secs_f64() + allowance).min(RUST_SEARCH_SECONDS - 60.0)
+        (start.elapsed().as_secs_f64() + allowance)
+            .min(rust_search_seconds() - recovery_reserve_seconds())
     } else {
-        RUST_SEARCH_SECONDS
+        rust_search_seconds()
     };
     let control =
         crate::control::exact_control(start + std::time::Duration::from_secs_f64(deadline));
@@ -418,9 +497,17 @@ fn solve_rust_proposal_attempt(
     // This path reads only the current model; no previous plan is required.
     let route = if attempt.index == 0
         && eligible
-        && std::env::var("METATORIO_LP_ROUTE").as_deref() != Ok("0")
+        && std::env::var("METATORIO_LP_ROUTE").as_deref() == Ok("1")
     {
-        let route_control = control.limited_to(Instant::now() + std::time::Duration::from_secs(10));
+        // Feasibility is the first priority in anytime mode. A separate ten
+        // second route cap can waste a nearly complete cold start under load.
+        let route_control = if certified {
+            crate::control::exact_control(
+                start + std::time::Duration::from_secs_f64(rust_search_seconds()),
+            )
+        } else {
+            control.limited_to(Instant::now() + std::time::Duration::from_secs(10))
+        };
         match model.float_candidate_after_route_with_control(
             options,
             20000,
@@ -428,6 +515,16 @@ fn solve_rust_proposal_attempt(
             &route_control,
         ) {
             Ok(route) => {
+                if certified {
+                    return optimize_anytime(
+                        snapshot,
+                        &model,
+                        &route.candidate.basis,
+                        work.floating + route.candidate.pivots,
+                        start,
+                        start + std::time::Duration::from_secs_f64(rust_search_seconds()),
+                    );
+                }
                 work.feasible_basis = Some(route.candidate.basis.clone());
                 if std::env::var("METATORIO_LP_COST_BOUNDS").as_deref() == Ok("1") {
                     work.incumbent = Some(route.solution.values);
@@ -451,34 +548,33 @@ fn solve_rust_proposal_attempt(
         None
     };
     let route_primal_verified = route.is_some();
+    let floating_base = work.floating;
+    let mut observe_search = |progress: exact::FloatProgress| {
+        // Interrupted floating factorization may return Err instead of a
+        // candidate. Keep its observed work rather than displaying zero.
+        work.floating = work.floating.max(floating_base + progress.pivots);
+        start.elapsed().as_secs_f64() < deadline && crate::control::check_cancelled().is_ok()
+    };
     let proposal = if let Some(route) = route {
         route
     } else if use_relevance {
         model.float_candidate_after_relevance_with_control(
             options,
             20000,
-            |_| {
-                start.elapsed().as_secs_f64() < deadline
-                    && crate::control::check_cancelled().is_ok()
-            },
+            &mut observe_search,
             &control,
         )?
     } else if attempt.index == 2 {
         model.float_candidate_after_zero_propagation_with_control(
             options,
             20000,
-            |_| {
-                start.elapsed().as_secs_f64() < deadline
-                    && crate::control::check_cancelled().is_ok()
-            },
+            &mut observe_search,
             &control,
         )?
     } else {
-        model.float_candidate_with_options(options, 20000, |_| {
-            start.elapsed().as_secs_f64() < deadline && crate::control::check_cancelled().is_ok()
-        })?
+        model.float_candidate_with_options(options, 20000, &mut observe_search)?
     };
-    work.floating += proposal.pivots;
+    work.floating = work.floating.max(floating_base + proposal.pivots);
     // A healthy floating search is not yet a certificate. Give its exact
     // verification a separate window instead of discarding a good basis just
     // because the search consumed most of the short attempt allowance.
@@ -489,7 +585,10 @@ fn solve_rust_proposal_attempt(
                 && proposal.stop_reason
                     == "floating primal tolerances met; exact verification required"))
     {
-        deadline.max((start.elapsed().as_secs_f64() + 45.0).min(RUST_SEARCH_SECONDS - 60.0))
+        deadline.max(
+            (start.elapsed().as_secs_f64() + 45.0)
+                .min(rust_search_seconds() - recovery_reserve_seconds()),
+        )
     } else {
         deadline
     };
@@ -530,6 +629,8 @@ fn solve_rust_proposal_attempt(
             eprintln!("[LP-RUST-CANDIDATE-CAPTURE-ERROR] {error}");
         }
     }
+    // Keep the existing full-model balance/gap checks on the broad floating
+    // proposal. Exact-only experiments can still disable this fast path.
     if certified && std::env::var("METATORIO_LP_BALANCE_MODE").as_deref() != Ok("exact") {
         let budget = exact::Rational::new(1.into(), 1_000_000_000_000u64.into());
         match model.relative_candidate_with_control(&proposal, &budget, &budget, &control) {
@@ -573,7 +674,9 @@ fn solve_rust_proposal_attempt(
                     values,
                     certificate: result.certificate,
                     pivots: work.floating + result.search_pivots,
+                    floating_search_pivots: work.floating + result.search_pivots,
                     relative: Some((result.relative, result.rounded_relative)),
+                    optimization: None,
                 });
             }
             Err(error) if control.is_cancelled() => return Err(error.into()),
@@ -582,6 +685,22 @@ fn solve_rust_proposal_attempt(
         }
     }
     if certified {
+        // Do not let a strict certification search consume a known feasible
+        // hint and then discard it while trying to prove optimality.
+        if let Ok(initial) = model.reconstruct_with_control(&proposal.basis, &control) {
+            let certificate = model.certify(&initial)?;
+            if certificate.primal_feasible {
+                return optimize_anytime(
+                    snapshot,
+                    &model,
+                    &proposal.basis,
+                    work.floating,
+                    start,
+                    start + std::time::Duration::from_secs_f64(rust_search_seconds()),
+                );
+            }
+        }
+        crate::control::check_cancelled()?;
         let allow_support = attempt.full_refinement
             || route_primal_verified
             || (proposal.diagnostic.is_none()
@@ -652,6 +771,16 @@ fn solve_rust_proposal_attempt(
         }
         if result.infeasibility.is_some() {
             return Err(Failure::Infeasible);
+        }
+        if result.certificate.primal_feasible {
+            return optimize_anytime(
+                snapshot,
+                &model,
+                &result.primal_basis,
+                work.floating + work.support,
+                start,
+                start + std::time::Duration::from_secs_f64(rust_search_seconds()),
+            );
         }
         if !result.accepted {
             return Err(format!(
@@ -747,6 +876,7 @@ fn recover_columns(
     captured: Option<&std::path::Path>,
     seed: Option<&[f64]>,
     basis: Option<&exact::Basis>,
+    started: Instant,
     deadline: Instant,
     require_optimal: bool,
 ) -> std::result::Result<Result, Failure> {
@@ -758,6 +888,9 @@ fn recover_columns(
     };
     let model = snapshot.exact_model();
     let control = crate::control::exact_control(deadline);
+    if !require_optimal && let Some(basis) = basis {
+        return optimize_anytime(snapshot, &model, basis, 0, started, deadline);
+    }
     let result = if let Some(basis) = basis {
         model.solve_column_generation_from_basis_with_control(basis, &budget, &control)
     } else {
@@ -801,8 +934,56 @@ fn recover_columns(
         values,
         certificate: result.certificate,
         pivots: result.exact_pivots + result.support_search_pivots,
+        floating_search_pivots: result.support_search_pivots,
         relative: None,
+        optimization: None,
     })
+}
+
+fn optimize_anytime(
+    snapshot: &Snapshot,
+    model: &exact::Model,
+    basis: &exact::Basis,
+    floating_search_pivots: usize,
+    started: Instant,
+    deadline: Instant,
+) -> std::result::Result<Result, Failure> {
+    let control = crate::control::exact_control(deadline);
+    let optimization_started = Instant::now();
+    let first_feasible_seconds = Some(started.elapsed().as_secs_f64());
+    let result = model.optimize_anytime_from_basis_with_control(basis, 100_000, &control)?;
+    let report = crate::lp::OptimizationReport {
+        optimality_proven: result.certificate.optimal,
+        termination_reason: if result.certificate.optimal {
+            crate::lp::OptimizationTermination::Optimal
+        } else if result.timed_out {
+            crate::lp::OptimizationTermination::TimeLimit
+        } else {
+            crate::lp::OptimizationTermination::SearchStopped
+        },
+        elapsed_seconds: started.elapsed().as_secs_f64(),
+        time_limit_seconds: rust_search_seconds(),
+        floating_search_pivots: Some(floating_search_pivots),
+        optimization_pivots: Some(result.pivots),
+        improving_pivots: Some(result.improving_pivots),
+        optimization_elapsed_seconds: Some(optimization_started.elapsed().as_secs_f64()),
+        first_feasible_seconds,
+        recent_pivot_cost_changes: result
+            .recent_pivot_cost_changes
+            .into_iter()
+            .map(|p| crate::lp::PivotCostChange {
+                pivot: p.pivot,
+                cost_before: p.cost_before,
+                cost_after: p.cost_after,
+                decrease: p.decrease,
+            })
+            .collect(),
+    };
+    let mut validated =
+        validated_result(snapshot, result.solution, result.certificate, result.pivots)?;
+    validated.floating_search_pivots = floating_search_pivots;
+    validated.optimization = Some(report);
+    Ok(validated)
 }
 
 fn validated_result(
@@ -827,7 +1008,9 @@ fn validated_result(
         values,
         certificate,
         pivots,
+        floating_search_pivots: 0,
         relative: None,
+        optimization: None,
     })
 }
 
@@ -1008,6 +1191,28 @@ fn feasible_candidate(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn search_budget_defaults_to_five_minutes_without_forcing_easy_solves_to_wait() {
+        assert_eq!(search_seconds(None), 300.0);
+        for invalid in ["0", "-1", "NaN", "inf", "1e300", "invalid"] {
+            assert_eq!(search_seconds(Some(invalid)), 300.0);
+        }
+        assert_eq!(search_seconds(Some("60")), 60.0);
+        assert_eq!(search_seconds(Some("900")), 900.0);
+    }
+
+    #[test]
+    fn legacy_optimization_report_does_not_invent_missing_pivot_counts() {
+        let report: crate::lp::OptimizationReport = serde_json::from_value(serde_json::json!({
+            "optimality_proven":false, "termination_reason":"time-limit",
+            "elapsed_seconds":60.5, "time_limit_seconds":60.0, "recent_pivot_cost_changes":[]
+        }))
+        .unwrap();
+        assert_eq!(report.floating_search_pivots, None);
+        assert_eq!(report.optimization_pivots, None);
+        assert_eq!(report.improving_pivots, None);
+        assert_eq!(report.optimization_elapsed_seconds, None);
+    }
     fn one_column_snapshot(lower: f64, upper: f64, cost: f64) -> Snapshot {
         Snapshot {
             format_version: 1,
@@ -1027,6 +1232,56 @@ mod tests {
             objective_offset_bits: 0.0f64.to_bits(),
             production_rhs_scale_bits: 1.0f64.to_bits(),
         }
+    }
+
+    #[test]
+    fn application_anytime_returns_checked_incumbent_with_honest_status() {
+        let mut snapshot = one_column_snapshot(0.0, f64::INFINITY, 2.0);
+        snapshot.columns.push(snapshot.columns[0].clone());
+        snapshot.rows[0].terms.push((1, 1.0f64.to_bits()));
+        snapshot.objective.push((1, 1.0f64.to_bits()));
+        let basis = exact::Basis {
+            columns: vec![exact::BasisStatus::Basic, exact::BasisStatus::Lower],
+            rows: vec![exact::BasisStatus::Upper],
+        };
+        let now = Instant::now();
+        let timed =
+            optimize_anytime(&snapshot, &snapshot.exact_model(), &basis, 7, now, now).unwrap();
+        assert_eq!(timed.values, vec![1.0, 0.0]);
+        assert!(timed.certificate.primal_feasible && !timed.certificate.optimal);
+        let report = timed.optimization.unwrap();
+        assert_eq!(report.floating_search_pivots, Some(7));
+        assert_eq!(report.optimization_pivots, Some(0));
+        assert_eq!(report.improving_pivots, Some(0));
+        assert_eq!(
+            report.termination_reason,
+            crate::lp::OptimizationTermination::TimeLimit
+        );
+        assert!(!report.optimality_proven && report.recent_pivot_cost_changes.is_empty());
+        assert_eq!(
+            snapshot.validate(&timed.values).maximum_relative_violation,
+            0.0
+        );
+        let finished = optimize_anytime(
+            &snapshot,
+            &snapshot.exact_model(),
+            &basis,
+            7,
+            now,
+            now + std::time::Duration::from_secs(10),
+        )
+        .unwrap();
+        let report = finished.optimization.unwrap();
+        assert_eq!(report.floating_search_pivots, Some(7));
+        assert_eq!(report.optimization_pivots, Some(1));
+        assert_eq!(report.improving_pivots, Some(1));
+        assert!(report.optimality_proven);
+        assert_eq!(
+            report.termination_reason,
+            crate::lp::OptimizationTermination::Optimal
+        );
+        assert_eq!(report.recent_pivot_cost_changes.len(), 1);
+        assert_eq!(report.recent_pivot_cost_changes[0].decrease, 1.0);
     }
 
     #[test]

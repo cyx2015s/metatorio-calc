@@ -540,6 +540,8 @@ fn solve_inner(
                 );
                 return Ok(super::lp_hybrid::Result {
                     relative: None,
+                    optimization: None,
+                    floating_search_pivots: 0,
                     values,
                     certificate,
                     pivots,

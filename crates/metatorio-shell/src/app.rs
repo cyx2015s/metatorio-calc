@@ -3408,6 +3408,7 @@ pub(crate) fn attach_auto_plan_report(
 ) {
     result.report.variables_before = report.variables_before;
     result.report.variables_after = report.variables_after;
+    result.report.planning_optimization = report.planning_optimization.clone();
     result.report.writeback_verified = report.verified;
     result.report.writeback_widened = report.widened;
     result.report.writeback_cutoff = report.cutoff;
@@ -4536,6 +4537,64 @@ mod tests {
     };
 
     use super::*;
+
+    #[test]
+    fn attach_auto_plan_report_preserves_full_candidate_timeout() {
+        let factory_optimization = metatorio_solver::OptimizationReport {
+            optimality_proven: true,
+            termination_reason: metatorio_solver::OptimizationTermination::Optimal,
+            elapsed_seconds: 0.2,
+            time_limit_seconds: 30.0,
+            recent_pivot_cost_changes: vec![],
+            ..Default::default()
+        };
+        let planning_optimization = metatorio_solver::OptimizationReport {
+            optimality_proven: false,
+            termination_reason: metatorio_solver::OptimizationTermination::TimeLimit,
+            elapsed_seconds: 30.1,
+            time_limit_seconds: 30.0,
+            recent_pivot_cost_changes: vec![metatorio_solver::PivotCostChange {
+                pivot: 42,
+                cost_before: 10.0,
+                cost_after: 8.0,
+                decrease: 2.0,
+            }],
+            ..Default::default()
+        };
+        let mut result = metatorio_runtime::SolveResult {
+            project: ProjectId(1),
+            factory: FactoryId(2),
+            report: metatorio_runtime::solve::SolveDiagnostics {
+                exact_optimality_verified: true,
+                optimization: Some(factory_optimization.clone()),
+                ..Default::default()
+            },
+            status: SolveStatus::Solved {
+                cost: 8.0,
+                mechanics: vec![],
+                flows: vec![],
+            },
+        };
+        let report = metatorio_runtime::solve::AutoPlanReport {
+            variables_before: 100,
+            variables_after: 2,
+            planning_optimization: Some(planning_optimization.clone()),
+            ..Default::default()
+        };
+        attach_auto_plan_report(&mut result, &report);
+        assert_eq!(result.report.optimization, Some(factory_optimization));
+        assert_eq!(
+            result.report.planning_optimization,
+            Some(planning_optimization)
+        );
+        assert!(result.report.exact_optimality_verified);
+        let json = serde_json::to_value(&result).unwrap();
+        assert_eq!(
+            json["report"]["planning_optimization"]["termination_reason"],
+            "time-limit"
+        );
+        assert_eq!(json["report"]["variables_before"], 100);
+    }
 
     struct FileHost {
         state: AppState,

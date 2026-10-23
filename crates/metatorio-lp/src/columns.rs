@@ -1,10 +1,11 @@
 //! Restricted-master search, with every terminal certificate lifted to self.
 use crate::{
-    Basis, BasisStatus, CertifiedResult, ExactSolution, FloatOptions, Model, Rational, SolveControl,
+    AnytimeResult, Basis, BasisStatus, CertifiedResult, ExactSolution, FloatOptions, Model,
+    PivotCostChange, Rational, SolveControl,
 };
-use num_traits::{Signed, Zero};
+use num_traits::{Signed, ToPrimitive, Zero};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     time::Instant,
 };
 
@@ -97,7 +98,509 @@ fn truncate_prices(candidates: &mut Vec<(usize, &crate::BigInt)>, limit: usize) 
     candidates.sort_unstable_by(compare);
 }
 
+// Only structural basics and constrained rows are retained at each certified
+// pivot. In particular, a million omitted/lower-bound zeros are never cloned.
+struct PrimalCheckpoint {
+    columns: Vec<(usize, Rational)>,
+    rows: Vec<(usize, BasisStatus, Rational)>,
+}
+
+/// Sparse, budgeted hints only. Exact pricing remains complete and independent
+/// of this cache. Opposite signs connect both input suppliers and consumers of
+/// currently unused inequality byproducts; no recipe/item semantics are assumed.
+#[derive(Default)]
+struct ComplementaryAdmission {
+    candidates: HashMap<(usize, bool), Vec<usize>>,
+}
+
+impl ComplementaryAdmission {
+    fn expand(
+        &mut self,
+        model: &Model,
+        index: &crate::restricted::RestrictedIndex<'_>,
+        seeds: &[usize],
+        included: &[bool],
+        families: &[u64],
+        budget: usize,
+        control: &SolveControl,
+    ) -> Result<Vec<usize>, String> {
+        let mut queue: VecDeque<_> = seeds.iter().copied().collect();
+        let mut chosen: HashSet<_> = seeds.iter().copied().collect();
+        let mut requested = HashSet::new();
+        let mut additions = Vec::new();
+        while let Some(column) = queue.pop_front() {
+            control.check()?;
+            for (row, coefficient) in index.column_entries(column) {
+                if coefficient == 0.0 || !requested.insert((row, coefficient < 0.0)) {
+                    continue;
+                }
+                let positive = coefficient < 0.0;
+                if !self.candidates.contains_key(&(row, positive)) {
+                    let compare = |a: &(u64, usize, f64), b: &(u64, usize, f64)| {
+                        a.2.total_cmp(&b.2).then_with(|| a.1.cmp(&b.1))
+                    };
+                    let mut best: Vec<(u64, usize, f64)> = Vec::new();
+                    for (p, &(j, a)) in model.rows[row].terms.iter().enumerate() {
+                        if p % 4096 == 0 {
+                            control.check()?;
+                        }
+                        if a == 0.0 || (a > 0.0) != positive {
+                            continue;
+                        }
+                        let candidate = (families[j], j, model.columns[j].cost / a.abs());
+                        if let Some(previous) = best.iter_mut().find(|v| v.0 == candidate.0) {
+                            if compare(&candidate, previous).is_lt() {
+                                *previous = candidate;
+                            }
+                        } else if best.len() < 8 {
+                            best.push(candidate);
+                        } else {
+                            let worst = best
+                                .iter()
+                                .enumerate()
+                                .max_by(|a, b| compare(a.1, b.1))
+                                .unwrap()
+                                .0;
+                            if compare(&candidate, &best[worst]).is_lt() {
+                                best[worst] = candidate;
+                            }
+                        }
+                    }
+                    best.sort_unstable_by(compare);
+                    self.candidates.insert(
+                        (row, positive),
+                        best.into_iter().map(|(_, j, _)| j).collect(),
+                    );
+                }
+                let candidates = &self.candidates[&(row, positive)];
+                for &j in candidates.iter().filter(|j| !included[**j]).take(2) {
+                    if chosen.insert(j) {
+                        additions.push(j);
+                        queue.push_back(j);
+                        if additions.len() == budget {
+                            return Ok(additions);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(additions)
+    }
+}
+
+impl PrimalCheckpoint {
+    fn lift(self, model: &Model) -> (ExactSolution, Basis) {
+        let mut values = vec![Rational::zero(); model.columns.len()];
+        let mut duals = vec![Rational::zero(); model.rows.len()];
+        let mut basis = Basis {
+            columns: vec![BasisStatus::Lower; model.columns.len()],
+            rows: vec![BasisStatus::Basic; model.rows.len()],
+        };
+        let dimension = self.columns.len();
+        for (j, value) in self.columns {
+            values[j] = value;
+            basis.columns[j] = BasisStatus::Basic;
+        }
+        for (i, status, value) in self.rows {
+            duals[i] = value;
+            basis.rows[i] = status;
+        }
+        (
+            ExactSolution {
+                values,
+                row_duals: duals,
+                basis_dimension: dimension,
+            },
+            basis,
+        )
+    }
+}
+
 impl Model {
+    /// Improve an original-model feasible basis while preserving a certified
+    /// incumbent through deadline interruption. External cancellation is an
+    /// error. Initial and final verification may finish after the deadline;
+    /// they remain cancellable and never return an unverified point.
+    ///
+    /// This entry point performs only original-cost primal optimization. Each
+    /// restricted segment starts with the incumbent, so its individual pivot
+    /// decreases are comparable, but segment starts themselves are not pivots.
+    pub fn optimize_anytime_from_basis_with_control(
+        &self,
+        basis: &Basis,
+        max_pivots: usize,
+        control: &SolveControl,
+    ) -> Result<AnytimeResult, String> {
+        self.optimize_anytime_from_basis_impl(basis, max_pivots, control, |_| {})
+    }
+
+    fn optimize_anytime_from_basis_impl(
+        &self,
+        basis: &Basis,
+        max_pivots: usize,
+        control: &SolveControl,
+        checkpoint_observer: impl FnMut(usize),
+    ) -> Result<AnytimeResult, String> {
+        self.optimize_anytime_from_basis_options(
+            basis,
+            max_pivots,
+            control,
+            std::env::var("METATORIO_LP_ANYTIME_ENRICHMENT").as_deref() != Ok("0"),
+            checkpoint_observer,
+        )
+    }
+
+    fn optimize_anytime_from_basis_options(
+        &self,
+        basis: &Basis,
+        max_pivots: usize,
+        control: &SolveControl,
+        enrichment: bool,
+        mut checkpoint_observer: impl FnMut(usize),
+    ) -> Result<AnytimeResult, String> {
+        let began = Instant::now();
+        let profile = std::env::var_os("METATORIO_LP_ANYTIME_PROFILE").is_some();
+        if profile {
+            eprintln!(
+                "[LP-ANYTIME] stage=initial-verification start columns={} rows={} enrichment={enrichment}",
+                self.columns.len(),
+                self.rows.len()
+            );
+        }
+        let verification = control.without_deadline();
+        verification.check()?;
+        self.check()?;
+        if self
+            .columns
+            .iter()
+            .any(|c| c.lower != 0.0 || c.upper != f64::INFINITY || c.cost < 0.0)
+        {
+            return Err("anytime optimization requires nonnegative costs and nonnegative columns without upper bounds".into());
+        }
+        let solution = self.reconstruct_with_control(basis, &verification)?;
+        let certificate = self.certify(&solution)?;
+        verification.check()?;
+        if !certificate.primal_feasible {
+            return Err("anytime initial basis is not original-model primal feasible".into());
+        }
+        if profile {
+            eprintln!(
+                "[LP-ANYTIME] stage=initial-verification seconds={:.6} cost={} optimal={}",
+                began.elapsed().as_secs_f64(),
+                certificate.objective,
+                certificate.optimal
+            );
+        }
+        let mut result = AnytimeResult {
+            solution,
+            basis: basis.clone(),
+            certificate,
+            pivots: 0,
+            improving_pivots: 0,
+            timed_out: false,
+            recent_pivot_cost_changes: Vec::new(),
+        };
+        let mut included: Vec<_> = basis
+            .columns
+            .iter()
+            .map(|s| *s == BasisStatus::Basic)
+            .collect();
+        let mut index = None;
+        let mut complements = ComplementaryAdmission::default();
+        let mut allow_stall_yield = enrichment;
+        // This slot survives interrupted factorization/update/solve operations.
+        let mut latest = None;
+        let search = (|| -> Result<(), String> {
+            if result.certificate.optimal || max_pivots == 0 {
+                return Ok(());
+            }
+            control.check()?;
+            if enrichment
+                && std::env::var("METATORIO_LP_ANYTIME_SURPLUS_PAIR").as_deref() != Ok("0")
+                && self.rows.iter().filter(|row| row.rhs != 0.0).count() == 1
+            {
+                let pair_began = Instant::now();
+                index = Some(crate::restricted::RestrictedIndex::new(self, control)?);
+                let admissions = self.initial_surplus_columns(
+                    &result.solution,
+                    &result.basis,
+                    index.as_ref().unwrap(),
+                    control,
+                )?;
+                if profile {
+                    eprintln!(
+                        "[LP-ANYTIME] stage=initial-surplus-pair columns={admissions:?} seconds={:.6} total={:.6}",
+                        pair_began.elapsed().as_secs_f64(),
+                        began.elapsed().as_secs_f64()
+                    );
+                }
+                for j in admissions {
+                    included[j] = true;
+                }
+            }
+            let mut policy = ColumnSelectionPolicy::new(self, control)?;
+            for round in 0usize.. {
+                control.check()?;
+                let build_began = Instant::now();
+                let selected: Vec<_> = included
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(j, yes)| yes.then_some(j))
+                    .collect();
+                if profile {
+                    eprintln!(
+                        "[LP-ANYTIME] round={} stage=master-build start columns={} total={:.6}",
+                        round + 1,
+                        selected.len(),
+                        began.elapsed().as_secs_f64()
+                    );
+                }
+                let (working, rows) =
+                    if !selected.is_empty() && selected.len() < self.columns.len() / 4 {
+                        if index.is_none() {
+                            index = Some(crate::restricted::RestrictedIndex::new(self, control)?);
+                        }
+                        index.as_ref().unwrap().build(&selected, control)?
+                    } else {
+                        crate::restricted::RestrictedIndex::by_rows(self, &selected, control)?
+                    };
+                let warm = Basis {
+                    columns: selected.iter().map(|j| result.basis.columns[*j]).collect(),
+                    rows: rows.iter().map(|i| result.basis.rows[*i]).collect(),
+                };
+                if profile {
+                    eprintln!(
+                        "[LP-ANYTIME] round={} stage=master-build columns={} rows={} seconds={:.6} total={:.6}",
+                        round + 1,
+                        selected.len(),
+                        rows.len(),
+                        build_began.elapsed().as_secs_f64(),
+                        began.elapsed().as_secs_f64()
+                    );
+                }
+                let remaining = max_pivots.saturating_sub(result.pivots);
+                let mut previous: Option<Rational> = None;
+                let improving_before = result.improving_pivots;
+                let zero_streak = std::cell::Cell::new(0usize);
+                let optimize_began = Instant::now();
+                if profile {
+                    eprintln!(
+                        "[LP-ANYTIME] round={} stage=primal-optimize start total={:.6}",
+                        round + 1,
+                        began.elapsed().as_secs_f64()
+                    );
+                }
+                let optimized = working.optimize_inner_with_checkpoint(
+                    warm,
+                    remaining,
+                    |_| !allow_stall_yield || zero_streak.get() < 64,
+                    true,
+                    control,
+                    &mut |basis, solution, certificate, iteration, columns, constrained| {
+                        verification.check()?;
+                        let objective: Rational = certificate
+                            .objective
+                            .parse()
+                            .map_err(|_| "invalid exact checkpoint objective")?;
+                        if let Some(before) = &previous {
+                            if iteration == 0 || objective > *before {
+                                return Err("invalid nonmonotone primal pivot checkpoint".into());
+                            }
+                            result.pivots += 1;
+                            let decrease = before - &objective;
+                            if decrease.is_positive() {
+                                result.improving_pivots += 1;
+                                zero_streak.set(0);
+                            } else {
+                                zero_streak.set(zero_streak.get() + 1);
+                            }
+                            if let (Some(cost_before), Some(cost_after), Some(decrease)) =
+                                (before.to_f64(), objective.to_f64(), decrease.to_f64())
+                            {
+                                if cost_before.is_finite()
+                                    && cost_after.is_finite()
+                                    && decrease.is_finite()
+                                {
+                                    result.recent_pivot_cost_changes.push(PivotCostChange {
+                                        pivot: result.pivots,
+                                        cost_before,
+                                        cost_after,
+                                        decrease,
+                                    });
+                                    if result.recent_pivot_cost_changes.len() > 8 {
+                                        result.recent_pivot_cost_changes.remove(0);
+                                    }
+                                }
+                            }
+                        }
+                        previous = Some(objective);
+                        latest = Some(PrimalCheckpoint {
+                            columns: columns
+                                .iter()
+                                .map(|j| (selected[*j], solution.values[*j].clone()))
+                                .collect(),
+                            rows: constrained
+                                .iter()
+                                .map(|i| (rows[*i], basis.rows[*i], solution.row_duals[*i].clone()))
+                                .collect(),
+                        });
+                        checkpoint_observer(result.pivots);
+                        Ok(())
+                    },
+                )?;
+                if profile {
+                    eprintln!(
+                        "[LP-ANYTIME] round={} stage=primal-optimize seconds={:.6} pivots={} improving={} zero_streak={} total={:.6}",
+                        round + 1,
+                        optimize_began.elapsed().as_secs_f64(),
+                        result.pivots,
+                        result.improving_pivots,
+                        zero_streak.get(),
+                        began.elapsed().as_secs_f64()
+                    );
+                }
+                if optimized.unbounded_ray.is_some() {
+                    return Err("nonnegative-cost anytime master unexpectedly unbounded".into());
+                }
+                // One original-model lift/certificate per master segment, never
+                // per pivot. Omitted rows are identically zero at this support.
+                let (solution, basis) = latest
+                    .take()
+                    .ok_or("missing feasible anytime checkpoint")?
+                    .lift(self);
+                let certify_began = Instant::now();
+                let certificate = self.certify(&solution)?;
+                verification.check()?;
+                if profile {
+                    eprintln!(
+                        "[LP-ANYTIME] round={} stage=original-certificate seconds={:.6} cost={} total={:.6}",
+                        round + 1,
+                        certify_began.elapsed().as_secs_f64(),
+                        certificate.objective,
+                        began.elapsed().as_secs_f64()
+                    );
+                }
+                if !certificate.primal_feasible {
+                    return Err(
+                        "anytime original-model checkpoint lift is not primal feasible".into(),
+                    );
+                }
+                result.solution = solution;
+                result.basis = basis;
+                result.certificate = certificate;
+                if result.certificate.optimal || result.pivots >= max_pivots {
+                    return Ok(());
+                }
+                control.check()?;
+                let pricing_began = Instant::now();
+                let mut missing = self.column_generation_diverse_prices(
+                    &result.solution.row_duals,
+                    false,
+                    &included,
+                    &mut policy,
+                    control,
+                )?;
+                let priced = missing.len();
+                let mut complement_count = 0;
+                let pricing_seconds = pricing_began.elapsed().as_secs_f64();
+                let enrichment_began = Instant::now();
+                if enrichment
+                    && (result.improving_pivots == improving_before || zero_streak.get() >= 64)
+                {
+                    if index.is_none() {
+                        index = Some(crate::restricted::RestrictedIndex::new(self, control)?);
+                    }
+                    let mut seeds = missing.clone();
+                    if optimized.stop_reason.is_some() {
+                        // This certificate already priced the original model.
+                        // Existing negative columns can also need complementary
+                        // nonnegative columns; do not repeat global pricing.
+                        seeds.extend(
+                            result
+                                .certificate
+                                .first_improving_columns
+                                .iter()
+                                .map(|(j, _)| *j),
+                        );
+                    }
+                    let extra = complements.expand(
+                        self,
+                        index.as_ref().unwrap(),
+                        &seeds,
+                        &included,
+                        &policy.families,
+                        128,
+                        control,
+                    )?;
+                    complement_count = extra.len();
+                    missing.extend(extra);
+                }
+                if missing.is_empty() {
+                    if optimized.stop_reason.is_some() {
+                        // A yielded master need not yet have valid global
+                        // prices. Resume it without the heuristic segment cap;
+                        // no missing column is an optimality claim here.
+                        allow_stall_yield = false;
+                        if profile {
+                            eprintln!(
+                                "[LP-ANYTIME] round={} stage=resume-master reason=no-new-columns total={:.6}",
+                                round + 1,
+                                began.elapsed().as_secs_f64()
+                            );
+                        }
+                        continue;
+                    }
+                    return Err(
+                        "anytime master has no improving missing column without an exact optimum"
+                            .into(),
+                    );
+                }
+                allow_stall_yield = enrichment;
+                if profile {
+                    eprintln!(
+                        "[LP-ANYTIME] round={} stage=global-pricing seconds={:.6} negative={} complementary={} enrichment_seconds={:.6} total={:.6}",
+                        round + 1,
+                        pricing_seconds,
+                        priced,
+                        complement_count,
+                        enrichment_began.elapsed().as_secs_f64(),
+                        began.elapsed().as_secs_f64()
+                    );
+                }
+                for j in missing {
+                    included[j] = true;
+                }
+            }
+            unreachable!()
+        })();
+        verification.check()?;
+        if let Err(error) = search {
+            // A numeric/logic failure is never converted into a time limit.
+            if !control.deadline_expired()
+                || error != "exact operation cancelled; no terminal status established"
+            {
+                return Err(error);
+            }
+        }
+        if let Some(checkpoint) = latest {
+            let (solution, basis) = checkpoint.lift(self);
+            let certificate = self.certify(&solution)?;
+            verification.check()?;
+            if !certificate.primal_feasible {
+                return Err(
+                    "anytime interrupted checkpoint failed original-model primal verification"
+                        .into(),
+                );
+            }
+            result.solution = solution;
+            result.basis = basis;
+            result.certificate = certificate;
+        }
+        verification.check()?;
+        result.timed_out = control.deadline_expired();
+        Ok(result)
+    }
+
     /// Generate columns from exact missing-supplier rays or dual prices. A
     /// restricted infeasibility is never returned as an original-model proof.
     pub fn solve_column_generation_with_control(
@@ -664,6 +1167,201 @@ mod tests {
                 cost: *cost,
             })
             .collect()
+    }
+
+    fn anytime_fixture() -> (Model, Basis) {
+        (
+            Model {
+                columns: columns(&[2.0, 1.0, 2.0, 1.0]),
+                rows: vec![
+                    Row {
+                        equality: true,
+                        rhs: 1.0,
+                        terms: vec![(0, 1.0), (1, 1.0)],
+                    },
+                    Row {
+                        equality: true,
+                        rhs: 1.0,
+                        terms: vec![(2, 1.0), (3, 1.0)],
+                    },
+                ],
+                offset: 0.0,
+            },
+            Basis {
+                columns: vec![
+                    BasisStatus::Basic,
+                    BasisStatus::Lower,
+                    BasisStatus::Basic,
+                    BasisStatus::Lower,
+                ],
+                rows: vec![BasisStatus::Upper; 2],
+            },
+        )
+    }
+
+    fn byproduct_chain(length: usize) -> (Model, Basis) {
+        // Existing production supplies X and unused B. A new X route consumes
+        // C0; zero-cost conversions need C1,...,B and an external supply S.
+        // Initially only the final X column is negative-priced. Converters
+        // have zero price and the external supplier has positive price.
+        assert!(length > 0);
+        let exploit = length + 1;
+        let supplier = length + 2;
+        let mut costs = vec![0.0; length + 3];
+        costs[0] = 10.0;
+        costs[1] = 1.0;
+        costs[supplier] = 1.0;
+        let mut rows = vec![Row {
+            equality: true,
+            rhs: 1.0,
+            terms: vec![(0, 1.0), (1, 1.0)],
+        }];
+        for resource in 0..length {
+            rows.push(Row {
+                equality: false,
+                rhs: 0.0,
+                terms: vec![(resource + 1, 1.0), (resource + 2, -1.0)],
+            });
+        }
+        rows.push(Row {
+            equality: false,
+            rhs: 0.0,
+            terms: vec![(exploit, 1.0), (0, -1.0)],
+        });
+        rows.push(Row {
+            equality: false,
+            rhs: 0.0,
+            terms: vec![(exploit, 1.0), (supplier, -1.0)],
+        });
+        let mut basis = Basis {
+            columns: vec![BasisStatus::Lower; costs.len()],
+            rows: vec![BasisStatus::Basic; rows.len()],
+        };
+        basis.columns[0] = BasisStatus::Basic;
+        basis.rows[0] = BasisStatus::Upper;
+        (
+            Model {
+                columns: columns(&costs),
+                rows,
+                offset: 0.0,
+            },
+            basis,
+        )
+    }
+
+    #[test]
+    fn complementary_zero_price_chain_uses_unused_byproduct_without_extra_master_rounds() {
+        let (model, basis) = byproduct_chain(3);
+        let initial = model.reconstruct(&basis).unwrap();
+        let prices = model.reduced_costs(&initial);
+        assert!(prices.numerators[1].is_negative());
+        assert!(
+            prices.numerators[2].is_zero()
+                && prices.numerators[3].is_zero()
+                && prices.numerators[4].is_zero()
+        );
+        assert!(prices.numerators[5].is_positive());
+        let mut baseline_checkpoints = Vec::new();
+        let baseline = model
+            .optimize_anytime_from_basis_options(&basis, 5, &SolveControl::default(), false, |p| {
+                baseline_checkpoints.push(p)
+            })
+            .unwrap();
+        let mut enriched_checkpoints = Vec::new();
+        let enriched = model
+            .optimize_anytime_from_basis_options(&basis, 5, &SolveControl::default(), true, |p| {
+                enriched_checkpoints.push(p)
+            })
+            .unwrap();
+        assert_eq!(baseline.certificate.objective, "6");
+        assert_eq!(enriched.certificate.objective, "6");
+        assert!(baseline.certificate.optimal && enriched.certificate.optimal);
+        assert_eq!(enriched.pivots, 5);
+        assert_eq!(enriched.improving_pivots, 1);
+        assert_eq!(baseline.improving_pivots, 1);
+        // Identical true pivots, but admission of the zero/positive-price chain
+        // saves three complete master builds, original certificates and prices.
+        assert!(baseline_checkpoints.len() >= enriched_checkpoints.len() + 3);
+        assert_eq!(enriched.solution.values[4], rational(0.5).unwrap());
+        assert_eq!(enriched.solution.values[5], rational(0.5).unwrap());
+        assert!(model.certify(&enriched.solution).unwrap().primal_feasible);
+    }
+
+    #[test]
+    fn stalled_master_with_no_missing_price_resumes_instead_of_claiming_error() {
+        let (model, basis) = byproduct_chain(65);
+        let result = model
+            .optimize_anytime_from_basis_options(
+                &basis,
+                100,
+                &SolveControl::default(),
+                true,
+                |_| {},
+            )
+            .unwrap();
+        assert!(result.certificate.optimal);
+        assert_eq!(result.certificate.objective, "6");
+        assert_eq!(result.improving_pivots, 1);
+        assert_eq!(result.pivots, 67);
+    }
+
+    #[test]
+    fn anytime_deadline_during_master_returns_its_last_certified_pivot() {
+        let (model, basis) = anytime_fixture();
+        let deadline = Instant::now() + std::time::Duration::from_secs(1);
+        let control = SolveControl::with_deadline(deadline);
+        let mut reached = false;
+        let result = model
+            .optimize_anytime_from_basis_impl(&basis, 100, &control, |pivots| {
+                if pivots == 1 {
+                    reached = true;
+                    std::thread::sleep(
+                        deadline.saturating_duration_since(Instant::now())
+                            + std::time::Duration::from_millis(1),
+                    );
+                }
+            })
+            .unwrap();
+        assert!(reached && result.timed_out && result.certificate.primal_feasible);
+        assert_eq!(result.pivots, 1);
+        assert_eq!(result.certificate.objective, "3");
+        assert!(!result.certificate.optimal);
+        assert_eq!(result.recent_pivot_cost_changes.len(), 1);
+        assert_eq!(result.recent_pivot_cost_changes[0].decrease, 1.0);
+        assert!(model.certify(&result.solution).unwrap().primal_feasible);
+        assert_eq!(
+            model.reconstruct(&result.basis).unwrap().values,
+            result.solution.values
+        );
+    }
+
+    #[test]
+    fn anytime_explicit_cancel_after_improvement_returns_error() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+        let (model, basis) = anytime_fixture();
+        let flag = Arc::new(AtomicBool::new(false));
+        let control = SolveControl::default().with_cancellation(flag.clone());
+        let result = model.optimize_anytime_from_basis_impl(&basis, 100, &control, |pivots| {
+            if pivots == 1 {
+                flag.store(true, Ordering::Relaxed);
+            }
+        });
+        assert!(result.unwrap_err().contains("cancelled"));
+    }
+
+    #[test]
+    fn anytime_does_not_hide_nonfinite_model_error_behind_expired_deadline() {
+        let (mut model, basis) = anytime_fixture();
+        model.columns[0].cost = f64::NAN;
+        let result = model.optimize_anytime_from_basis_with_control(
+            &basis,
+            100,
+            &SolveControl::with_deadline(Instant::now()),
+        );
+        assert!(result.unwrap_err().contains("invalid continuous column"));
     }
 
     #[test]

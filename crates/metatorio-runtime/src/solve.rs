@@ -62,6 +62,12 @@ pub struct SolveDiagnostics {
     /// establish optimality over all auto-plan candidates.
     #[serde(default)]
     pub exact_optimality_verified: bool,
+    /// Optimization of the returned factory LP (after auto-plan writeback).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub optimization: Option<metatorio_solver::OptimizationReport>,
+    /// Optimization of the full candidate LP, before auto-plan writeback.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub planning_optimization: Option<metatorio_solver::OptimizationReport>,
     /// Verified bound for this returned factory LP, rounded upward for display.
     #[serde(default)]
     pub certified_relative_gap: Option<f64>,
@@ -94,6 +100,7 @@ impl SolveDiagnostics {
             solution_violation: report.primal_violation,
             exact_primal_verified: report.exact_primal_verified,
             exact_optimality_verified: report.exact_optimality_verified,
+            optimization: report.optimization,
             certified_relative_gap: report.certified_relative_gap,
             relative_primal_verified: report.relative_primal_verified,
             maximum_relative_balance_error: report.maximum_relative_balance_error,
@@ -739,6 +746,7 @@ impl Runtime {
         // 会把字段留成默认 0）。
         result.report.variables_before = auto_report.variables_before;
         result.report.variables_after = auto_report.variables_after;
+        result.report.planning_optimization = auto_report.planning_optimization;
         result.report.writeback_verified = auto_report.verified;
         result.report.writeback_widened = auto_report.widened;
         result.report.writeback_cutoff = auto_report.cutoff;
@@ -1266,6 +1274,7 @@ pub fn plan_auto_plan_with_progress(
             widened,
             variables_before: report.variables_before,
             variables_after: report.variables_after,
+            planning_optimization: report.optimization.clone(),
         },
     ))
 }
@@ -1421,7 +1430,7 @@ fn build_autoplan_problem(
 }
 
 /// 自动规划**写回前**的候选过滤记录（随 SolveResult 的 report 返回）。
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct AutoPlanReport {
     /// 候选过滤阈值。
     pub cutoff: f64,
@@ -1438,6 +1447,8 @@ pub struct AutoPlanReport {
     /// 求解器侧的变量记录（顶点解下 variables_after 就是支撑集大小）。
     pub variables_before: usize,
     pub variables_after: usize,
+    /// Full candidate optimization, retained across the writeback subset solve.
+    pub planning_optimization: Option<metatorio_solver::OptimizationReport>,
 }
 
 /// 一次求解结果里每机制的总用量（多温度变体求和）。
@@ -2051,6 +2062,62 @@ mod tests {
     use metatorio_core::IdWithQuality;
     use metatorio_data::store::PrototypeStore;
     use serde_json::json;
+
+    #[test]
+    fn optimization_diagnostics_roundtrip_keeps_planning_and_factory_evidence_separate() {
+        let factory = metatorio_solver::OptimizationReport {
+            optimality_proven: true,
+            termination_reason: metatorio_solver::OptimizationTermination::Optimal,
+            elapsed_seconds: 0.2,
+            time_limit_seconds: 30.0,
+            recent_pivot_cost_changes: vec![],
+            ..Default::default()
+        };
+        let planning = metatorio_solver::OptimizationReport {
+            optimality_proven: false,
+            termination_reason: metatorio_solver::OptimizationTermination::TimeLimit,
+            elapsed_seconds: 30.1,
+            time_limit_seconds: 30.0,
+            recent_pivot_cost_changes: vec![metatorio_solver::PivotCostChange {
+                pivot: 42,
+                cost_before: 10.0,
+                cost_after: 8.0,
+                decrease: 2.0,
+            }],
+            ..Default::default()
+        };
+        let mut diagnostics = SolveDiagnostics::from_solver(metatorio_solver::SolveReport {
+            exact_optimality_verified: true,
+            optimization: Some(factory.clone()),
+            ..Default::default()
+        });
+        diagnostics.planning_optimization = Some(planning.clone());
+        let value = serde_json::to_value(&diagnostics).unwrap();
+        assert_eq!(value["optimization"]["termination_reason"], "optimal");
+        assert_eq!(
+            value["planning_optimization"]["termination_reason"],
+            "time-limit"
+        );
+        assert_eq!(
+            value["planning_optimization"]["recent_pivot_cost_changes"][0]["decrease"],
+            2.0
+        );
+        let roundtrip: SolveDiagnostics = serde_json::from_value(value).unwrap();
+        assert_eq!(roundtrip.optimization, Some(factory));
+        assert_eq!(roundtrip.planning_optimization, Some(planning));
+        assert!(roundtrip.exact_optimality_verified);
+    }
+
+    #[test]
+    fn legacy_diagnostics_do_not_infer_optimization_from_subset_certificate() {
+        let mut value = serde_json::to_value(SolveDiagnostics::default()).unwrap();
+        assert!(value.get("optimization").is_none());
+        assert!(value.get("planning_optimization").is_none());
+        value["exact_optimality_verified"] = json!(true);
+        let legacy: SolveDiagnostics = serde_json::from_value(value).unwrap();
+        assert!(legacy.optimization.is_none());
+        assert!(legacy.planning_optimization.is_none());
+    }
 
     #[test]
     fn existing_candidates_are_deduplicated_and_disabled_entries_stay_excluded() {
@@ -3471,6 +3538,22 @@ mod tests {
     /// 都是当时的结果。这是「锁外求解 + revision 戳」的前提。
     #[test]
     fn solve_snapshot_is_decoupled_from_later_document_edits() {
+        // Independent solves have different wall times; compare all semantic
+        // results and certificate evidence while ignoring only this telemetry.
+        fn semantic(mut result: SolveResult) -> SolveResult {
+            for report in [
+                &mut result.report.optimization,
+                &mut result.report.planning_optimization,
+            ] {
+                if let Some(report) = report {
+                    report.elapsed_seconds = 0.0;
+                    report.optimization_elapsed_seconds =
+                        report.optimization_elapsed_seconds.map(|_| 0.0);
+                    report.first_feasible_seconds = report.first_feasible_seconds.map(|_| 0.0);
+                }
+            }
+            result
+        }
         let mut runtime = load_runtime();
         let project = new_project(&mut runtime);
         runtime
@@ -3543,10 +3626,14 @@ mod tests {
             })
             .unwrap();
         let after = runtime.solve_factory(project, factory).unwrap();
-        assert_ne!(after, before, "改目标量后求解结果应变化");
+        assert_ne!(
+            semantic(after.clone()),
+            semantic(before.clone()),
+            "改目标量后求解结果应变化"
+        );
         assert_eq!(
-            solve_snapshot(&snapshot).unwrap(),
-            before,
+            semantic(solve_snapshot(&snapshot).unwrap()),
+            semantic(before),
             "快照必须与后续文档改动解耦"
         );
         assert!(snapshot.revision < runtime.state.revision);
@@ -3558,7 +3645,10 @@ mod tests {
             "solve_factory 应回填可达性缓存"
         );
         assert_eq!(snapshot.revision, runtime.state.revision);
-        assert_eq!(solve_snapshot(&snapshot).unwrap(), after);
+        assert_eq!(
+            semantic(solve_snapshot(&snapshot).unwrap()),
+            semantic(after)
+        );
     }
 
     /// 落盘必须是「临时文件 + 改名」，且能覆盖已存在的文件（Windows 上

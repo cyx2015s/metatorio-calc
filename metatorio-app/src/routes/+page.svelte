@@ -1,5 +1,6 @@
 <script lang="ts">
   import AutoPlanProgress from "$lib/ui/AutoPlanProgress.svelte";
+  import OptimizationSummary from "$lib/ui/OptimizationSummary.svelte";
   import RichText from "$lib/ui/RichText.svelte";
   import { flowName } from "$lib/display-labels";
   // Metatorio 主界面：紧凑布局，圆角卡片分区；游戏内物品一律图标按钮，
@@ -1980,6 +1981,7 @@
             <strong class="mono cost-value">{status.cost.toFixed(3)}</strong>
             <span class="cost-note">机器碰撞箱面积之和 · 结果随编辑自动刷新</span>
           </div>
+          <OptimizationSummary report={solve.report} />
           <div class="section-head">
             <span>总流平衡</span>
             <span class="count">{activeFlows.length} 条</span>

@@ -10,6 +10,12 @@ pub(crate) struct RestrictedIndex<'a> {
 }
 
 impl<'a> RestrictedIndex<'a> {
+    pub(crate) fn column_entries(&self, column: usize) -> impl Iterator<Item = (usize, f64)> + '_ {
+        self.entries[self.offsets[column]..self.offsets[column + 1]]
+            .iter()
+            .map(|&(row, term)| (row, self.model.rows[row].terms[term].1))
+    }
+
     /// Caller validates the model before constructing the index.
     pub(crate) fn new(model: &'a Model, control: &SolveControl) -> Result<Self, String> {
         control.check()?;

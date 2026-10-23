@@ -642,6 +642,10 @@ export interface SolveDiagnostics {
   /** 以下证书描述回写后的工厂 LP。容差可行不代表精确最优。 */
   exact_primal_verified?: boolean;
   exact_optimality_verified?: boolean;
+  /** 回写后的工厂 LP 的优化结果。 */
+  optimization?: OptimizationReport | null;
+  /** 回写前完整候选 LP 的优化结果；自动规划优先显示此报告。 */
+  planning_optimization?: OptimizationReport | null;
   certified_relative_gap?: number | null;
   relative_primal_verified?: boolean;
   maximum_relative_balance_error?: number | null;
@@ -657,6 +661,31 @@ export interface SolveDiagnostics {
   candidates_total: number;
   candidates_considered: number;
   candidates_used: number;
+}
+
+export interface OptimizationReport {
+  optimality_proven: boolean;
+  termination_reason: "optimal" | "time-limit" | "search-stopped";
+  elapsed_seconds: number;
+  time_limit_seconds: number;
+  /** 浮点目标搜索和可行性路线搜索的换基数；旧报告可能没有计数。 */
+  floating_search_pivots?: number | null;
+  /** 原模型可行解上完成认证的精确优化换基数。 */
+  optimization_pivots?: number | null;
+  /** 精确优化换基中成本严格下降的次数。 */
+  improving_pivots?: number | null;
+  /** 精确优化阶段耗时，可能尚未完成一次换基。 */
+  optimization_elapsed_seconds?: number | null;
+  /** 首次获得已验证可行解所耗时间。 */
+  first_feasible_seconds?: number | null;
+  recent_pivot_cost_changes: PivotCostChange[];
+}
+
+export interface PivotCostChange {
+  pivot: number;
+  cost_before: number;
+  cost_after: number;
+  decrease: number;
 }
 
 export type SolveStatus =

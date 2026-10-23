@@ -44,12 +44,28 @@ impl SolveControl {
     }
 
     pub fn is_cancelled(&self) -> bool {
+        self.is_explicitly_cancelled() || self.deadline_expired()
+    }
+
+    /// External cancellation is distinct from an optimization time limit.
+    pub fn is_explicitly_cancelled(&self) -> bool {
         self.cancellation
             .as_ref()
             .is_some_and(|flag| flag.load(Ordering::Relaxed))
-            || self
-                .deadline
-                .is_some_and(|deadline| Instant::now() >= deadline)
+    }
+
+    pub fn deadline_expired(&self) -> bool {
+        self.deadline
+            .is_some_and(|deadline| Instant::now() >= deadline)
+    }
+
+    /// Finish checking an already available incumbent after its search budget
+    /// expires, while continuing to honor explicit user cancellation.
+    pub(crate) fn without_deadline(&self) -> Self {
+        Self {
+            deadline: None,
+            cancellation: self.cancellation.clone(),
+        }
     }
 
     pub(crate) fn check(&self) -> Result<(), String> {

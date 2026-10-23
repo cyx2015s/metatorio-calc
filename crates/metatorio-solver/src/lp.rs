@@ -11,8 +11,8 @@
 //! - clarabel 是内点法，给的是最优面的**解析中心**而不是顶点；而回写需要稀疏的
 //!   顶点解（支撑集 = 实际用到的机制）。clarabel 也没有 crossover 选项。
 //!
-//! HiGHS 一个后端同时覆盖这两点：自带 presolve 与均衡缩放，单纯形直接给精确
-//! 顶点解，必要时用内点法并在之后做 crossover。于是阈值扫描、提纯、基识别、
+//! HiGHS 一个后端同时覆盖这两点：自带 presolve 与均衡缩放，单纯形给出浮点
+//! 基本解，必要时用内点法并在之后做 crossover；精确性须另行有理数认证。阈值扫描、提纯、基识别、
 //! Ruiz 缩放全部删除。参数见 <https://ergo-code.github.io/HiGHS/dev/options/definitions/>。
 
 use std::time::Instant;
@@ -28,7 +28,7 @@ use good_lp::{Solution, SolverModel, solvers::highs::highs};
 ///
 /// 应用没有安装 logger（`log` 宏是空操作），所以关键决策要随结果留痕。
 /// 保留原问题校验、支撑集大小，以及 Rust 后端的精确可行性和目标差距证据。
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct SolveReport {
     /// 参与求解的变量数。
     pub variables_before: usize,
@@ -48,6 +48,46 @@ pub struct SolveReport {
     pub balance_tolerance: Option<f64>,
     /// Stopping gap for a toleranced primal point; not an exact optimum bound.
     pub relative_duality_gap: Option<f64>,
+    pub optimization: Option<OptimizationReport>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum OptimizationTermination {
+    Optimal,
+    TimeLimit,
+    #[default]
+    SearchStopped,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct PivotCostChange {
+    pub pivot: usize,
+    pub cost_before: f64,
+    pub cost_after: f64,
+    pub decrease: f64,
+}
+
+/// Evidence for the model searched, before any planner subset is written back.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct OptimizationReport {
+    pub optimality_proven: bool,
+    pub termination_reason: OptimizationTermination,
+    pub elapsed_seconds: f64,
+    pub time_limit_seconds: f64,
+    pub recent_pivot_cost_changes: Vec<PivotCostChange>,
+    /// Candidate and feasibility search pivots, outside the cost trace.
+    #[serde(default)]
+    pub floating_search_pivots: Option<usize>,
+    /// Completed and certified original-cost primal optimization pivots.
+    #[serde(default)]
+    pub optimization_pivots: Option<usize>,
+    #[serde(default)]
+    pub improving_pivots: Option<usize>,
+    #[serde(default)]
+    pub optimization_elapsed_seconds: Option<f64>,
+    #[serde(default)]
+    pub first_feasible_seconds: Option<f64>,
 }
 
 /// 求解结果（原问题空间）。
@@ -566,6 +606,7 @@ fn solve_lp_impl(
                     maximum_relative_balance_error: balance_error,
                     balance_tolerance: balance_error.map(|_| 1e-12),
                     relative_duality_gap: relative_gap,
+                    optimization: result.optimization,
                 },
                 &orig_vars,
             ));

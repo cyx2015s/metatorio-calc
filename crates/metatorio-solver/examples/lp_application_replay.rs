@@ -65,7 +65,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "elapsed_seconds":elapsed,"columns":ids.len(),"rows":snapshot.rows.len(),"cost":solution.cost,
                 "strict_bounds_met":validation.maximum_bound_violation == 0.0,
                 "validation":validation,"values_bits":values.iter().map(|v|v.to_bits()).collect::<Vec<_>>(),
-                "report":{"exact_primal_verified":solution.report.exact_primal_verified,
+                "report":{"optimization":solution.report.optimization, "exact_primal_verified":solution.report.exact_primal_verified,
                     "exact_optimality_verified":solution.report.exact_optimality_verified,
                     "relative_primal_verified":solution.report.relative_primal_verified,
                     "maximum_relative_balance_error":solution.report.maximum_relative_balance_error,
