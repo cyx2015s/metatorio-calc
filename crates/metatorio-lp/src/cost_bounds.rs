@@ -156,10 +156,9 @@ impl Model {
         // Prefer bounds tightened by material balance beyond the plain U/c cap.
         selected.sort_by(|(j, _, score), (k, _, other)| score.cmp(other).then(j.cmp(k)));
         let mut search = self.clone();
-        for (j, upper, _) in selected
-            .into_iter()
-            .take(64.min(4096usize.saturating_sub(self.rows.len())))
-        {
+        // The floating basis no longer allocates a dense row-square inverse.
+        // Bound the hint batch, not the total model row count.
+        for (j, upper, _) in selected.into_iter().take(64) {
             let Some(mut value) = upper.to_f64().filter(|v| v.is_finite()) else {
                 continue;
             };
@@ -233,6 +232,27 @@ mod tests {
             .unwrap();
         assert_eq!(b.budget, r(6.0));
         assert_eq!(b.upper, vec![Some(r(3.0)), None]);
+    }
+    #[test]
+    fn bounded_hint_is_not_disabled_by_the_old_dense_row_limit() {
+        let mut rows = vec![Row {
+            equality: true,
+            rhs: 1.0,
+            terms: vec![(0, 1.0)],
+        }];
+        rows.extend((0..4096).map(|_| Row {
+            equality: false,
+            rhs: 2.0,
+            terms: vec![(0, 1.0)],
+        }));
+        let m = model(&[1.0], rows);
+        let hint = m
+            .cost_bounded_float_candidate_with_control(&[r(1.0)], &SolveControl::default())
+            .unwrap()
+            .expect("a valid upper-bound hint must still be attempted");
+        assert_eq!(hint.basis.rows.len(), m.rows.len());
+        let solution = m.reconstruct(&hint.basis).unwrap();
+        assert!(m.certify(&solution).unwrap().optimal);
     }
     #[test]
     fn lower_bounds_spend_budget_and_equality_bounds_free_supplier() {

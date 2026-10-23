@@ -1,5 +1,6 @@
 //! Floating-point basis search. Every outcome is only an unverified hint.
 //! Positive diagonal scaling preserves basis identities, not exact arithmetic.
+use crate::sparse_float_basis::SparseFloatBasis;
 use crate::{Basis, BasisStatus, Model};
 
 #[derive(Debug)]
@@ -37,105 +38,6 @@ fn power_scale(maximum: f64) -> f64 {
     } else {
         2.0f64.powi((-maximum.log2().floor() as i32).clamp(-500, 500))
     }
-}
-
-// Rebuild through the structural block; basic row slacks eliminate all other
-// rows. The resulting full inverse uses the current (noncanonical) basis order.
-fn refactor(
-    m: usize,
-    n: usize,
-    ids: &[usize],
-    columns: &[Vec<(usize, f64)>],
-) -> Result<Vec<f64>, String> {
-    let structural: Vec<_> = ids
-        .iter()
-        .enumerate()
-        .filter(|(_, id)| **id < n)
-        .map(|(p, id)| (p, *id))
-        .collect();
-    let mut slack_position = vec![None; m];
-    for (p, id) in ids.iter().enumerate() {
-        if *id >= n {
-            slack_position[*id - n] = Some(p);
-        }
-    }
-    let active: Vec<_> = (0..m).filter(|r| slack_position[*r].is_none()).collect();
-    let k = structural.len();
-    if active.len() != k {
-        return Err("nonsquare floating structural block".into());
-    }
-    let mut active_position = vec![None; m];
-    for (i, r) in active.iter().enumerate() {
-        active_position[*r] = Some(i);
-    }
-    let width = 2 * k;
-    let mut work = vec![0.0; k * width];
-    let mut row_terms = vec![Vec::new(); m];
-    for (j, (_, id)) in structural.iter().enumerate() {
-        for (r, a) in &columns[*id] {
-            row_terms[*r].push((j, *a));
-            if let Some(i) = active_position[*r] {
-                work[i * width + j] += a;
-            }
-        }
-    }
-    for i in 0..k {
-        work[i * width + k + i] = 1.0;
-    }
-    for p in 0..k {
-        let q = (p..k)
-            .max_by(|i, j| {
-                work[i * width + p]
-                    .abs()
-                    .total_cmp(&work[j * width + p].abs())
-            })
-            .unwrap();
-        if work[q * width + p].abs() < 1e-14 {
-            return Err("unstable floating refactor pivot".into());
-        }
-        for j in 0..width {
-            work.swap(p * width + j, q * width + j);
-        }
-        let pivot = work[p * width + p];
-        for j in p + 1..width {
-            work[p * width + j] /= pivot;
-        }
-        work[p * width + p] = 1.0;
-        for i in 0..k {
-            if i == p {
-                continue;
-            }
-            let factor = work[i * width + p];
-            if factor == 0.0 {
-                continue;
-            }
-            for j in p + 1..width {
-                work[i * width + j] -= factor * work[p * width + j];
-            }
-            work[i * width + p] = 0.0;
-        }
-    }
-    let mut inverse = vec![0.0; m * m];
-    for (i, (position, _)) in structural.iter().enumerate() {
-        for (j, r) in active.iter().enumerate() {
-            inverse[position * m + r] = work[i * width + k + j];
-        }
-    }
-    for r in 0..m {
-        if let Some(position) = slack_position[r] {
-            inverse[position * m + r] = 1.0;
-            for (j, active_row) in active.iter().enumerate() {
-                inverse[position * m + active_row] = -row_terms[r]
-                    .iter()
-                    .map(|(i, a)| a * work[i * width + k + j])
-                    .sum::<f64>();
-            }
-        }
-    }
-    if inverse.iter().any(|x| !x.is_finite()) {
-        return Err("nonfinite floating refactor".into());
-    }
-    Ok(inverse)
 }
 
 impl Model {
@@ -258,9 +160,6 @@ impl Model {
         self.check()?;
         let n = self.columns.len();
         let m = self.rows.len();
-        if m > 4096 {
-            return Err("floating candidate dense row limit exceeded".into());
-        }
         if self
             .columns
             .iter()
@@ -362,15 +261,13 @@ impl Model {
         for &id in &ids {
             basic[id] = true;
         }
-        let mut inverse = if basis.is_some() {
-            refactor(m, n, &ids, &columns)?
-        } else {
-            let mut inverse = vec![0.0; m * m];
-            for i in 0..m {
-                inverse[i * m + i] = 1.0;
-            }
-            inverse
-        };
+        let mut structural_columns = ids.iter().filter(|id| **id < n).count();
+        let mut factor = SparseFloatBasis::factor_with_observer(m, n, &ids, &columns, || {
+            observer(FloatProgress {
+                pivots: 0,
+                structural_columns,
+            })
+        })?;
         let mut duals = vec![0.0; m];
         let mut prices = costs.clone();
         let mut price_scales = costs.clone();
@@ -382,9 +279,9 @@ impl Model {
         let mut needs_recompute = true;
         let stop_reason = loop {
             if pivots > 0 && pivots % 128 == 0 && last_refactor != Some(pivots) {
-                match refactor(m, n, &ids, &columns) {
-                    Ok(rebuilt) => inverse = rebuilt,
-                    Err(_) => break "floating basis refactorization failed",
+                match SparseFloatBasis::factor_with_observer(m, n, &ids, &columns, || observer(FloatProgress { pivots, structural_columns })) {
+                    Ok(rebuilt) => factor = rebuilt,
+                    Err(error) => { diagnostic = Some(error); break "floating basis refactorization failed"; },
                 }
                 last_refactor = Some(pivots);
                 needs_recompute = true;
@@ -393,24 +290,29 @@ impl Model {
             // incremental updates do not silently accumulate unchecked drift.
             if needs_recompute || pivots % 32 == 0 {
                 needs_recompute = false;
-                duals.fill(0.0);
+                let scaled_rhs: Vec<_> = rhs.iter().map(|a| a * rhs_scale).collect();
+                let basic_costs: Vec<_> = ids.iter().map(|&id| if id < n { costs[id] } else { 0.0 }).collect();
+                basic_values = factor.solve(&scaled_rhs)?;
+                duals = factor.solve_transpose(&basic_costs)?;
+                // Preserve the inverse-based pricing scale without storing
+                // the inverse. Absolute triangular bounds can be much wider
+                // after cancellation, admitting poor pivots in the ratio test.
+                // Only nonbasic inequality slacks use this scale; basic slacks
+                // have zero basic cost and therefore zero scale here.
                 dual_scales.fill(0.0);
                 for i in 0..m {
-                    basic_values[i] = inverse[i * m..(i + 1) * m]
-                        .iter()
-                        .zip(&rhs)
-                        .map(|(a, b)| a * b * rhs_scale)
-                        .sum();
-                    let cost = if ids[i] < n { costs[ids[i]] } else { 0.0 };
-                    if cost != 0.0 {
-                        for j in 0..m {
-                            duals[j] += cost * inverse[i * m + j];
-                            dual_scales[j] += (cost * inverse[i * m + j]).abs();
-                        }
+                    if basic[n + i] || self.rows[i].equality { continue; }
+                    if i % 32 == 0 && !observer(FloatProgress { pivots, structural_columns }) {
+                        return Err("floating observer requested stop during pricing scale reconstruction".into());
                     }
+                    let mut unit = vec![0.0; m];
+                    unit[i] = 1.0;
+                    let inverse_column = factor.solve(&unit)?;
+                    dual_scales[i] = inverse_column.iter().zip(&basic_costs)
+                        .map(|(a, c)| (a * c).abs()).sum();
                 }
             }
-            if basic_values.iter().chain(&duals).any(|x| !x.is_finite()) {
+            if basic_values.iter().chain(&duals).chain(&dual_scales).any(|x| !x.is_finite()) {
                 break "nonfinite floating iterate";
             }
             let mut leaving = None;
@@ -435,7 +337,7 @@ impl Model {
             }
             if !observer(FloatProgress {
                 pivots,
-                structural_columns: ids.iter().filter(|i| **i < n).count(),
+                structural_columns,
             }) {
                 break "floating observer requested stop";
             }
@@ -449,7 +351,9 @@ impl Model {
             } else {
                 -1.0
             };
-            let functional = &inverse[leaving * m..(leaving + 1) * m];
+            let mut unit = vec![0.0; m];
+            unit[leaving] = 1.0;
+            let functional = factor.solve_transpose(&unit)?;
             for i in 0..m {
                 let y = duals[i];
                 let w = orientation * functional[i];
@@ -502,8 +406,8 @@ impl Model {
             }
             if dual_drift {
                 if last_refactor != Some(pivots)
-                    && let Ok(rebuilt) = refactor(m, n, &ids, &columns) {
-                        inverse = rebuilt;
+                    && let Ok(rebuilt) = SparseFloatBasis::factor_with_observer(m, n, &ids, &columns, || observer(FloatProgress { pivots, structural_columns })) {
+                        factor = rebuilt;
                         last_refactor = Some(pivots);
                         needs_recompute = true;
                         continue;
@@ -517,19 +421,13 @@ impl Model {
             let Some((entering, _, _)) = entering else {
                 break "no stable floating entering column; not an infeasibility proof";
             };
-            let mut direction = vec![0.0; m];
+            let mut entering_column = vec![0.0; m];
             if entering < n {
-                for i in 0..m {
-                    direction[i] = columns[entering]
-                        .iter()
-                        .map(|(r, a)| inverse[i * m + *r] * a)
-                        .sum();
-                }
+                for &(r, a) in &columns[entering] { entering_column[r] += a; }
             } else {
-                for i in 0..m {
-                    direction[i] = inverse[i * m + entering - n];
-                }
+                entering_column[entering - n] = 1.0;
             }
+            let direction = factor.solve(&entering_column)?;
             let pivot = direction[leaving];
             if !pivot.is_finite() || pivot.abs() < 1e-12 {
                 break "unstable floating pivot";
@@ -541,22 +439,21 @@ impl Model {
                 -duals[entering - n]
             };
             for j in 0..m {
-                duals[j] += entering_price / pivot * inverse[leaving * m + j];
-                dual_scales[j] += (entering_price / pivot * inverse[leaving * m + j]).abs();
-                inverse[leaving * m + j] /= pivot;
+                duals[j] += entering_price / pivot * functional[j];
+                dual_scales[j] += (entering_price / pivot * functional[j]).abs();
             }
             for i in 0..m {
                 if i == leaving || direction[i] == 0.0 {
                     continue;
                 }
                 basic_values[i] -= direction[i] * step;
-                for j in 0..m {
-                    inverse[i * m + j] -= direction[i] * inverse[leaving * m + j];
-                }
             }
+            factor.update(leaving, &direction)?;
             basic_values[leaving] = step;
             basic[ids[leaving]] = false;
             basic[entering] = true;
+            structural_columns += usize::from(entering < n);
+            structural_columns -= usize::from(ids[leaving] < n);
             ids[leaving] = entering;
             pivots += 1;
         }
@@ -644,13 +541,8 @@ mod tests {
         assert!(hint.pivots < cold.pivots);
         let stopped = model
             .float_candidate_with_basis(&basis, FloatOptions::default(), 20, |_| false)
-            .unwrap();
-        assert!(
-            !model
-                .certify(&model.reconstruct(&stopped.basis).unwrap())
-                .unwrap()
-                .primal_feasible
-        );
+            .unwrap_err();
+        assert!(stopped.contains("observer requested stop"));
         basis.rows.clear();
         assert!(
             model
@@ -841,38 +733,6 @@ mod tests {
         };
         let solution = model.reconstruct(&basis).unwrap();
         assert!(model.certify(&solution).unwrap().optimal);
-    }
-    #[test]
-    fn structural_refactor_rebuilds_the_full_mixed_basis_inverse() {
-        let columns = vec![
-            vec![(0, 2.0), (1, 3.0), (2, 5.0), (3, 7.0)],
-            vec![(0, 3.0), (1, 4.0), (2, 7.0), (3, 11.0)],
-        ];
-        let ids = vec![0, 3, 1, 5];
-        let inverse = refactor(4, 2, &ids, &columns).unwrap();
-        for r in 0..4 {
-            for c in 0..4 {
-                let product: f64 = ids
-                    .iter()
-                    .enumerate()
-                    .map(|(j, id)| {
-                        let a = if *id < 2 {
-                            columns[*id]
-                                .iter()
-                                .find(|(i, _)| *i == r)
-                                .map_or(0.0, |(_, a)| *a)
-                        } else if *id - 2 == r {
-                            1.0
-                        } else {
-                            0.0
-                        };
-                        a * inverse[j * 4 + c]
-                    })
-                    .sum();
-                assert!((product - if r == c { 1.0 } else { 0.0 }).abs() < 1e-12);
-            }
-        }
-        assert!(refactor(2, 2, &[0, 1], &[vec![(0, 1.0)], vec![(0, 2.0)]]).is_err());
     }
     #[test]
     fn scaled_chain_proposes_an_exactly_optimal_basis() {

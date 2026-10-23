@@ -18,6 +18,7 @@ mod factor_blocks;
 pub use control::SolveControl;
 pub use cost_bounds::CostBounds;
 mod float;
+mod sparse_float_basis;
 mod presolve;
 mod relative;
 mod relevance;

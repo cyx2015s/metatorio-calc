@@ -77,7 +77,7 @@ fn main() {
                         .optimal
                 );
                 println!(
-                    "empty rows={m}: float+exact-check={}us dense-inverse-bytes={}",
+                    "empty rows={m}: float+exact-check={}us legacy-dense-inverse-bytes={}",
                     start.elapsed().as_micros(),
                     m * m * 8
                 );
