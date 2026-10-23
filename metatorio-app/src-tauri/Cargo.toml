@@ -15,8 +15,11 @@ name = "metatorio_app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]
-default = ["rust-lp"]
+default = ["all-lp"]
+all-lp = ["clarabel", "highs", "microlp", "rust-lp"]
+clarabel = ["metatorio-runtime/clarabel", "metatorio-shell/clarabel"]
 highs = ["metatorio-runtime/highs", "metatorio-shell/highs"]
+microlp = ["metatorio-runtime/microlp", "metatorio-shell/microlp"]
 rust-lp = ["metatorio-runtime/rust-lp", "metatorio-shell/rust-lp"]
 
 [build-dependencies]

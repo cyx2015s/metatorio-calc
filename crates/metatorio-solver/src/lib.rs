@@ -15,6 +15,7 @@ mod lp_hybrid;
 pub mod lp_model;
 #[cfg(feature = "rust-lp")]
 mod lp_row_generation;
+pub mod lp_solver;
 #[cfg(feature = "rational-lp")]
 pub use metatorio_lp as lp_rational;
 pub mod solver;
@@ -22,4 +23,5 @@ pub mod solver;
 pub use comb::*;
 pub use concept::*;
 pub use lp::*;
+pub use lp_solver::LpSolver;
 pub use solver::*;

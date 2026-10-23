@@ -1,4 +1,5 @@
 use metatorio_core::{Accessible, DualVar, IdWithQuality, Mechanic, ModuleConfig};
+use metatorio_solver::LpSolver;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -71,6 +72,13 @@ pub struct ProjectSettings {
     pub mining_productivity: f64,
     pub all_accessible: bool,
     pub quality_limit: Option<String>,
+    /// 项目级 LP 后端。旧文档没有该字段时沿用 rust-certified。
+    #[serde(default = "legacy_project_solver")]
+    pub solver: LpSolver,
+}
+
+fn legacy_project_solver() -> LpSolver {
+    LpSolver::RustCertified
 }
 
 impl Default for ProjectSettings {
@@ -84,6 +92,7 @@ impl Default for ProjectSettings {
             mining_productivity: 0.0,
             all_accessible: false,
             quality_limit: None,
+            solver: LpSolver::default(),
         }
     }
 }
@@ -417,6 +426,17 @@ impl MechanicKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_project_settings_stay_on_rust_and_new_projects_pick_a_compiled_solver() {
+        let legacy: ProjectSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(legacy.solver, LpSolver::RustCertified);
+        let fresh = ProjectSettings::default();
+        assert!(fresh.solver.is_available());
+        assert_eq!(fresh.solver, LpSolver::default());
+        let encoded = serde_json::to_value(&fresh).unwrap();
+        assert_eq!(encoded["solver"], fresh.solver.as_str());
+    }
 
     #[test]
     fn all_current_core_mechanics_have_runtime_defaults() {

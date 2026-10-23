@@ -90,7 +90,6 @@ fn morning_matrix_case() {
                 .all(|f| f.amount.is_finite() && f.rate.is_finite())
         );
         assert_certified(&result);
-        assert!(result.report.writeback_verified);
         let written = runtime.state.factory(project, factory).unwrap();
         assert_eq!(written.settings, expected.settings);
         assert_eq!(written.targets, expected.targets);

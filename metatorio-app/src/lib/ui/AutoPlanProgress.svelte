@@ -6,7 +6,6 @@
     enumerating: "枚举候选",
     building: "构建模型",
     solving: "求解中",
-    verifying: "验证规划",
   };
 </script>
 

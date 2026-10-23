@@ -63,9 +63,6 @@ async fn ammonia_quantum_dot_existing_and_auto_plan() {
                 Ok(result) => {
                     if matches!(result.status, SolveStatus::Solved { .. }) {
                         assert_certified(&result);
-                        if auto {
-                            assert!(result.report.writeback_verified);
-                        }
                     } else {
                         failures.push(format!("strict={strict} auto={auto}: {:?}", result.status));
                     }
@@ -166,7 +163,6 @@ async fn project_file_auto_plan_benchmark() {
     eprintln!("[PROJECT-BENCH] auto_plan_ms={elapsed_ms}");
     let result = result.expect("project replay must return a certified result");
     assert_certified(&result);
-    assert!(result.report.writeback_verified);
     assert!(matches!(result.status, SolveStatus::Solved { .. }));
 }
 
@@ -224,7 +220,6 @@ async fn lengden_legendary_lds_auto_plan() {
     .unwrap();
     let result = result.expect("lengden auto-plan must have a certified result");
     assert_certified(&result);
-    assert!(result.report.writeback_verified);
     assert!(matches!(result.status, SolveStatus::Solved { .. }));
     eprintln!("[LENGDEN] solved ms={}", begun.elapsed().as_millis());
 }

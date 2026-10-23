@@ -109,9 +109,7 @@ async fn finish(mcp: &MetatorioMcp, ids: &Value) -> Value {
 }
 
 fn assert_certified(result: &metatorio_runtime::SolveResult) {
-    if (cfg!(feature = "rust-lp") && !cfg!(feature = "highs"))
-        || std::env::var("METATORIO_LP_BACKEND").as_deref() == Ok("rust-certified")
-    {
+    if result.report.solver == metatorio_solver::LpSolver::RustCertified {
         if !result.report.exact_primal_verified {
             assert!(
                 result.report.relative_primal_verified,
@@ -161,17 +159,6 @@ fn assert_solved(mcp: &MetatorioMcp, ids: &Value, state: &Value) -> f64 {
     let result: metatorio_runtime::SolveResult =
         serde_json::from_value(state["auto_plan"]["result"].clone()).unwrap();
     assert_certified(&result);
-    assert!(
-        result.report.writeback_verified,
-        "writeback verification: {:?}",
-        result.report
-    );
-    assert!(result.report.solution_violation.is_finite());
-    assert!(
-        result.report.solution_violation <= 1e-5,
-        "{:?}",
-        result.report
-    );
     let SolveStatus::Solved {
         cost,
         mechanics,

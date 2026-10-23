@@ -123,6 +123,7 @@ fn settings_of(proj: &Value, store: Option<&PrototypeStore>) -> Value {
         "mining_productivity": proj.get("mining_productivity").cloned().unwrap_or(json!(0.0)),
         "all_accessible": proj.get("all_accessible").cloned().unwrap_or(json!(false)),
         "quality_limit": Value::Null,
+        "solver": metatorio_solver::LpSolver::default().as_str(),
     })
 }
 

@@ -55,6 +55,7 @@ import type {
   HistoryStatus,
   IdWithQuality,
   InfiniteTechLevel,
+  LpSolver,
   MechanicId,
   MechanicKind,
   Milestone,
@@ -1061,6 +1062,14 @@ class RuntimeStore {
     await this.send({
       scope: "project",
       action: { project, action: { "set-quality-limit": { quality } } },
+    });
+  }
+
+  async setSolver(solver: LpSolver): Promise<void> {
+    const project = this.requireProject();
+    await this.send({
+      scope: "project",
+      action: { project, action: { "set-solver": { solver } } },
     });
   }
 

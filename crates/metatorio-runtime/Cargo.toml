@@ -6,8 +6,11 @@ description = "Metatorio application document model and framework-independent me
 license = "MIT"
 
 [features]
-default = ["rust-lp"]
+default = ["all-lp"]
+all-lp = ["clarabel", "highs", "microlp", "rust-lp"]
+clarabel = ["metatorio-solver/clarabel"]
 highs = ["metatorio-solver/highs"]
+microlp = ["metatorio-solver/microlp"]
 rust-lp = ["metatorio-solver/rust-lp"]
 
 [dependencies]

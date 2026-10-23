@@ -28,6 +28,7 @@ pub use id::{
     ExternalInputId, FactoryId, MechanicId, ProjectId, TargetExpressionId, TargetId, TargetTermId,
 };
 pub use message::*;
+pub use metatorio_solver::LpSolver;
 pub use solve::{
     CommandEffect, ExpandedVarId, FlowBalance, MechanicSolution, ProductivityView, ProjectSnapshot,
     RecipeProductivityView, Runtime, SolveResult, SolveSnapshot, SolveStatus, ordered_milestones,

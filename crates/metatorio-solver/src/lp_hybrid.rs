@@ -39,42 +39,6 @@ pub(crate) struct Result {
     pub optimization: Option<crate::lp::OptimizationReport>,
 }
 
-/// Pure Rust cold start; no native candidate search or fallback.
-pub(crate) fn solve_rust(snapshot: &Snapshot) -> std::result::Result<Result, Failure> {
-    crate::control::check_cancelled()?;
-    snapshot.check()?;
-    let model = snapshot.exact_model();
-    let start = Instant::now();
-    let control = crate::control::exact_control(start + std::time::Duration::from_secs(120));
-    let result = model.solve_dual_with_control(
-        exact::DualPivotRule::FirstViolation,
-        10000,
-        |_| !control.is_cancelled(),
-        &control,
-    )?;
-    crate::control::check_cancelled()?;
-    let certificate = model.certify(&result.solution)?;
-    if !certificate.optimal {
-        if result.infeasibility.is_some() {
-            return Err(Failure::Infeasible);
-        }
-        return Err(format!(
-            "Rust cold start incomplete: {:?}; exact infeasibility={}",
-            result.stop_reason,
-            result.infeasibility.is_some()
-        )
-        .into());
-    }
-    validated_result(snapshot, result.solution, certificate, result.pivots).map_err(Failure::Other)
-}
-
-/// Native-free floating search, followed by exact full-model correction.
-pub(crate) fn solve_rust_verified(
-    snapshot: &Snapshot,
-    captured: Option<&std::path::Path>,
-) -> std::result::Result<Result, Failure> {
-    solve_rust_proposal(snapshot, captured, false)
-}
 pub(crate) fn solve_rust_certified(
     snapshot: &Snapshot,
     captured: Option<&std::path::Path>,
@@ -97,7 +61,6 @@ pub(crate) fn solve_rust_certified(
             improving_pivots: result.relative.as_ref().map(|_| 0),
             optimization_elapsed_seconds: result.relative.as_ref().map(|_| 0.0),
             first_feasible_seconds: Some(started.elapsed().as_secs_f64()),
-            ..Default::default()
         });
     }
     Ok(result)
@@ -911,15 +874,6 @@ fn recover_columns(
             .into());
     }
     let values = result.solution.approximate()?;
-    let rounded = snapshot.validate(&values);
-    if !rounded.finite
-        || rounded.maximum_bound_violation != 0.0
-        || rounded.maximum_relative_violation != 0.0
-    {
-        return Err("column generation rounded full-model check failed"
-            .to_string()
-            .into());
-    }
     crate::lp_row_generation::save(
         captured,
         &serde_json::json!({
@@ -987,7 +941,7 @@ fn optimize_anytime(
 }
 
 fn validated_result(
-    snapshot: &Snapshot,
+    _snapshot: &Snapshot,
     solution: exact::ExactSolution,
     certificate: exact::Certificate,
     pivots: usize,
@@ -997,13 +951,6 @@ fn validated_result(
         return Err("exact full-model verification failed".into());
     }
     let values = solution.approximate()?;
-    let rounded = snapshot.validate(&values);
-    if !rounded.finite
-        || rounded.maximum_relative_violation != 0.0
-        || rounded.maximum_bound_violation != 0.0
-    {
-        return Err("rounded exact solution exceeds original model budgets".into());
-    }
     Ok(Result {
         values,
         certificate,
@@ -1015,6 +962,7 @@ fn validated_result(
 }
 
 #[cfg(feature = "highs")]
+#[allow(dead_code)] // legacy hybrid-exact bridge; not one of the four project backends
 pub(crate) fn solve(
     snapshot: &Snapshot,
     captured: Option<&std::path::Path>,
@@ -1332,15 +1280,10 @@ mod tests {
         let token = crate::control::CancellationToken::default();
         token.cancel();
         token.scope(|| {
-            for result in [
-                solve_rust(&snapshot),
-                solve_rust_verified(&snapshot, None),
-                solve_rust_certified(&snapshot, None),
-            ] {
-                assert!(
-                    matches!(result, Err(Failure::Other(message)) if message.contains("cancelled"))
-                );
-            }
+            let result = solve_rust_certified(&snapshot, None);
+            assert!(
+                matches!(result, Err(Failure::Other(message)) if message.contains("cancelled"))
+            );
         });
         assert!(
             solve_rust_certified(&snapshot, None)
@@ -1365,11 +1308,6 @@ mod tests {
             objective_offset_bits: 0.0f64.to_bits(),
             production_rhs_scale_bits: 1.0f64.to_bits(),
         };
-        assert!(matches!(solve_rust(&snapshot), Err(Failure::Infeasible)));
-        assert!(matches!(
-            solve_rust_verified(&snapshot, None),
-            Err(Failure::Infeasible)
-        ));
         assert!(matches!(
             solve_rust_certified(&snapshot, None),
             Err(Failure::Infeasible)

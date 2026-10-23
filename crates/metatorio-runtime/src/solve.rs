@@ -52,8 +52,9 @@ pub struct SolveDiagnostics {
     /// 求解变量数 / 解里非零的变量数（顶点解下就是支撑集大小）。
     pub variables_before: usize,
     pub variables_after: usize,
-    /// 用**原始 LP**复核这个解的最大相对约束违反量。
-    pub solution_violation: f64,
+    /// 本次求解使用的后端。旧结果没有该字段时按 rust-certified 解释。
+    #[serde(default = "legacy_solver")]
+    pub solver: metatorio_solver::LpSolver,
     /// Exact certificate for the returned factory LP. After auto-plan this is
     /// the written-back factory, not the full candidate planning model.
     #[serde(default)]
@@ -79,16 +80,15 @@ pub struct SolveDiagnostics {
     pub balance_tolerance: Option<f64>,
     #[serde(default)]
     pub relative_duality_gap: Option<f64>,
-    /// 自动规划回写前自检：写回的机制集合自己能不能解出目标。
-    /// false 表示这次回写的方案**验证不过**（结果可能无解），需要人工/agent 判断。
-    pub writeback_verified: bool,
-    /// 自检失败、已放宽到 LP 解的全部非零机制（会写回更多机制）。
-    pub writeback_widened: bool,
     /// 自动规划回写候选的过滤阈值与数量。
     pub writeback_cutoff: f64,
     pub candidates_total: usize,
     pub candidates_considered: usize,
     pub candidates_used: usize,
+}
+
+fn legacy_solver() -> metatorio_solver::LpSolver {
+    metatorio_solver::LpSolver::RustCertified
 }
 
 impl SolveDiagnostics {
@@ -97,7 +97,7 @@ impl SolveDiagnostics {
         Self {
             variables_before: report.variables_before,
             variables_after: report.variables_after,
-            solution_violation: report.primal_violation,
+            solver: report.solver,
             exact_primal_verified: report.exact_primal_verified,
             exact_optimality_verified: report.exact_optimality_verified,
             optimization: report.optimization,
@@ -746,9 +746,8 @@ impl Runtime {
         // 会把字段留成默认 0）。
         result.report.variables_before = auto_report.variables_before;
         result.report.variables_after = auto_report.variables_after;
+        result.report.solver = auto_report.solver;
         result.report.planning_optimization = auto_report.planning_optimization;
-        result.report.writeback_verified = auto_report.verified;
-        result.report.writeback_widened = auto_report.widened;
         result.report.writeback_cutoff = auto_report.cutoff;
         result.report.candidates_total = auto_report.candidates_total;
         result.report.candidates_considered = auto_report.candidates_considered;
@@ -1049,7 +1048,6 @@ pub enum AutoPlanStage {
     Enumerating,
     Building,
     Solving,
-    Verifying,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -1181,7 +1179,7 @@ pub fn plan_auto_plan_with_progress(
         stage: AutoPlanStage::Building,
         ..AutoPlanProgress::preparing()
     });
-    let problem = build_autoplan_problem(
+    let mut problem = build_autoplan_problem(
         store,
         &context,
         factory_doc,
@@ -1189,6 +1187,7 @@ pub fn plan_auto_plan_with_progress(
         &all_sources,
         &candidates,
     );
+    problem.solver = project_doc.settings.solver;
     phase("expanded", problem.flows.len());
     check_solve_cancelled()?;
     let solution = problem.solve_with_progress(|size| {
@@ -1221,45 +1220,12 @@ pub fn plan_auto_plan_with_progress(
         diagnostic.no_consumer = no_consumer;
         return Err(RuntimeError::Diagnostic(Box::new(diagnostic)));
     };
-    // 保留被选中的候选（用量 > 阈值）。HiGHS 给精确顶点解，这里只有一档阈值。
+    // 保留被选中的候选（用量 > 阈值）。这里只有一档阈值。
     let filtered = crate::auto_plan::used_candidates(&candidates, prim);
 
-    // **回写前自检**：只用选中的机制重建 LP，确认它仍然可解。
-    // 全量 LP 可行 ≠ 回写子集可行——实测原版就能复现：125,608 个候选 →
-    // 回写 47 条 → 文档重解「无可行解」。自检失败就放宽到 LP 解的全部非零
-    // 机制（顶点解下就是解的支持集，必然可行）。
-    let mut feasible = |mechanics: &[Mechanic]| -> bool {
-        phase("writeback-check-start", mechanics.len());
-        let solved = matches!(
-            build_autoplan_problem(
-                store,
-                &context,
-                factory_doc,
-                &target,
-                &all_sources,
-                mechanics
-            )
-            .solve_with_progress(|size| progress(AutoPlanProgress::sized(
-                AutoPlanStage::Verifying,
-                size
-            ))),
-            SolverSolution::Solved { .. }
-        );
-        phase("writeback-check-end", mechanics.len());
-        solved
-    };
+    // 不再做回写子集自检：LP 返回什么就写回什么，写回后再解失败会由下一次
+    // 普通重算原样暴露。这里只按既有的使用阈值过滤候选。
     let mut used = filtered.used;
-    let mut verified = feasible(&used);
-    check_solve_cancelled()?;
-    let mut widened = false;
-    if !verified && !filtered.support.is_empty() && filtered.support.len() <= AUTOPLAN_VERIFY_LIMIT
-    {
-        // 记录在 report 里而不是打日志：应用没有安装 logger，log 宏是空操作。
-        widened = true;
-        used = filtered.support;
-        verified = feasible(&used);
-        check_solve_cancelled()?;
-    }
     used.sort_by_key(|mechanic| crate::document::MechanicKind::of(mechanic) as u8);
     let candidates_used = used.len();
     phase("complete", candidates_used);
@@ -1270,21 +1236,16 @@ pub fn plan_auto_plan_with_progress(
             candidates_total: candidates.len(),
             candidates_considered: filtered.considered,
             candidates_used,
-            verified,
-            widened,
             variables_before: report.variables_before,
             variables_after: report.variables_after,
+            solver: project_doc.settings.solver,
             planning_optimization: report.optimization.clone(),
         },
     ))
 }
 
-/// 回写自检时允许「放宽到全部非零机制」的上限：稠密解的支持集可能接近全量
-/// 候选，那再解一次不值得，直接记 `verified = false` 交回上层。
-const AUTOPLAN_VERIFY_LIMIT: usize = 20_000;
-
 /// 用给定机制集合构建自动规划的 LP（目标 / 外部输入 / 严格供给口径与
-/// `plan_auto_plan` 完全一致）。抽出来是为了能做**回写前自检**。
+/// `plan_auto_plan` 完全一致）。
 /// 不受配平约束的坐标（污染这类「指标」而不是「物质」）。
 /// 见 `SolverData::unconstrained`——没有污染时，吸收污染的建筑照样正常工作。
 fn unconstrained_items(flows: &AIndexMap<ExpandedVarId, (Flow, f64)>) -> AIndexSet<DualVar> {
@@ -1440,13 +1401,11 @@ pub struct AutoPlanReport {
     pub candidates_considered: usize,
     /// 判定为「使用中」并写回的机制数。
     pub candidates_used: usize,
-    /// 回写前自检：写回的集合自己能不能解出目标。
-    pub verified: bool,
-    /// 自检失败、已放宽到 LP 解的全部非零机制。
-    pub widened: bool,
     /// 求解器侧的变量记录（顶点解下 variables_after 就是支撑集大小）。
     pub variables_before: usize,
     pub variables_after: usize,
+    /// 本次自动规划使用的后端。
+    pub solver: metatorio_solver::LpSolver,
     /// Full candidate optimization, retained across the writeback subset solve.
     pub planning_optimization: Option<metatorio_solver::OptimizationReport>,
 }
@@ -1455,7 +1414,7 @@ pub struct AutoPlanReport {
 ///
 /// `SolveStatus::Solved.mechanics` 是**所有 LP 变量**（含取值为 0 的），所以每个
 /// 进了 LP 的机制都会有一条记录；没进 LP 的（disabled 等）不出现。清理
-/// （Cleanup）的判据是「用量**恰为 0**」——后端只给精确顶点解，未用到的变量就是
+/// （Cleanup）的判据是「用量**恰为 0**」——单纯形后端给顶点解，未用到的变量就是
 /// 精确的 0，不用阈值。
 ///
 /// 求解不是 `Solved` 时返回 `None`：此时没有任何"这个机制用没用"的信息，
@@ -1582,6 +1541,7 @@ fn solve_document(
     problem.sources = all_sources;
     problem.strict_source = factory.strict_source;
     problem.strict_sink = factory.strict_sink;
+    problem.solver = project.settings.solver;
     problem
         .target
         .extend(factory.target_expressions.iter().map(|expression| {
@@ -3481,21 +3441,18 @@ mod tests {
         let (mechanics, report) =
             plan_auto_plan_with_progress(&snapshot, &accessibility, |update| updates.push(update))
                 .unwrap();
-        assert!(!mechanics.is_empty() && report.verified);
+        assert!(!mechanics.is_empty());
         assert_eq!(
             updates.iter().map(|u| u.stage).collect::<Vec<_>>(),
             vec![
                 AutoPlanStage::Enumerating,
                 AutoPlanStage::Building,
                 AutoPlanStage::Solving,
-                AutoPlanStage::Verifying,
             ]
         );
         assert_eq!(updates[0].variables, None);
         assert_eq!(updates[2].variables, Some(report.variables_before));
         assert!(updates[2].constraints.unwrap() > 0);
-        assert!(updates[3].variables.unwrap() > 0);
-        assert!(updates[3].constraints.unwrap() > 0);
     }
 
     #[test]

@@ -162,6 +162,7 @@ export type ProjectAction =
   | { "set-time-scale": { time_scale: TimeScale } }
   | { "set-all-accessible": { enabled: boolean } }
   | { "set-quality-limit": { quality: string | null } }
+  | { "set-solver": { solver: LpSolver } }
   | { "set-mining-productivity": { productivity: number } }
   | { "set-context": { context: string | null } }
   | { "add-milestone": { node: Accessible; unlocked: boolean } }
@@ -471,7 +472,11 @@ export interface ProjectSettings {
   mining_productivity: number;
   all_accessible: boolean;
   quality_limit: string | null;
+  /** 项目级 LP 后端。旧文档缺省为 rust-certified。 */
+  solver: LpSolver;
 }
+
+export type LpSolver = "clarabel" | "highs" | "microlp" | "rust-certified";
 
 export interface FactoryDocument {
   id: FactoryId;
@@ -637,8 +642,8 @@ export interface RuntimeDiagnostic {
 export interface SolveDiagnostics {
   variables_before: number;
   variables_after: number;
-  /** 用原始 LP 复核该解的最大相对约束违反量。 */
-  solution_violation: number;
+  /** 本次求解实际使用的后端。 */
+  solver?: LpSolver;
   /** 以下证书描述回写后的工厂 LP。容差可行不代表精确最优。 */
   exact_primal_verified?: boolean;
   exact_optimality_verified?: boolean;
@@ -652,10 +657,6 @@ export interface SolveDiagnostics {
   balance_tolerance?: number | null;
   /** 容差点成本与精确对偶下界的相对差，用于停止搜索。 */
   relative_duality_gap?: number | null;
-  /** 自动规划回写前自检：写回的机制集合自己能不能解出目标。 */
-  writeback_verified: boolean;
-  /** 自检失败、已放宽到 LP 解的全部非零机制。 */
-  writeback_widened: boolean;
   /** 自动规划回写候选的过滤阈值与数量。 */
   writeback_cutoff: number;
   candidates_total: number;
@@ -944,7 +945,7 @@ export interface AutoPlanProgress {
   factory: FactoryId;
   run_id: number;
   running: boolean;
-  stage: "preparing" | "enumerating" | "building" | "solving" | "verifying";
+  stage: "preparing" | "enumerating" | "building" | "solving";
   variables: number | null;
   constraints: number | null;
 }

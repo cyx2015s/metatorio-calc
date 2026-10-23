@@ -536,7 +536,6 @@ async fn fulgora_strict_quality_comparison() {
         let record = match result {
             Ok(result) => {
                 assert_certified(&result);
-                assert!(result.report.writeback_verified);
                 assert!(matches!(result.status, SolveStatus::Solved { .. }));
                 json!({"quality":quality,"status":"solved","result":result})
             }

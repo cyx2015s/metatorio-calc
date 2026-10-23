@@ -6,8 +6,11 @@ description = "Metatorio 求解器内核：线性规划求解与组合枚举，�
 license = "MIT"
 
 [features]
-default = ["rust-lp"]
+default = ["all-lp"]
+all-lp = ["clarabel", "highs", "microlp", "rust-lp"]
+clarabel = ["dep:good_lp", "good_lp/clarabel"]
 highs = ["dep:good_lp", "good_lp/highs", "dep:highs", "dep:highs-sys"]
+microlp = ["dep:good_lp", "good_lp/microlp"]
 rust-lp = ["rational-lp", "dep:serde_json", "dep:num-rational", "dep:num-traits"]
 rational-lp = ["dep:metatorio-lp"]
 lp-experiments = ["highs", "rust-lp"]
@@ -19,6 +22,7 @@ indexmap = { version = "2", features = ["rayon", "serde"] }
 log = "0.4"
 rayon = "1"
 serde = { version = "1", features = ["derive"] }
+schemars = "1"
 highs = { version = "2.4", optional = true }
 highs-sys = { version = "1.15", optional = true }
 serde_json = { version = "1", optional = true }

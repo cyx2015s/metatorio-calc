@@ -1537,6 +1537,23 @@
             </select>
           </div>
           <div class="field">
+            <label for="lp-solver">线性规划后端</label>
+            <select
+              id="lp-solver"
+              value={project.settings.solver}
+              onchange={(event) =>
+                runtime
+                  .setSolver((event.currentTarget as HTMLSelectElement).value as import("$lib/runtime/types").LpSolver)
+                  .catch(() => {})}
+            >
+              <option value="highs">HiGHS</option>
+              <option value="clarabel">Clarabel</option>
+              <option value="microlp">microlp</option>
+              <option value="rust-certified">Rust（certified）</option>
+            </select>
+            <span class="muted">项目级设置；切换后重新求解全部工厂。</span>
+          </div>
+          <div class="field">
             <label for="quality-limit">品质上限（超出会自动提升）</label>
             <select
               id="quality-limit"

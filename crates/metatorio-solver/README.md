@@ -1,42 +1,28 @@
 # Metatorio continuous LP solver
 
 Production planning uses backend-independent variables, sparse expressions and
-constraints from `lp_model`. The default build enables `rust-lp` and selects
-`rust-certified`: specialized Rust floating search and exact rational
-certification, without a native LP dependency. HiGHS is an optional feature.
+constraints from `lp_model`. A project selects its LP backend in project
+settings; the default build compiles four choices:
+
+- `clarabel` (pure Rust interior point)
+- `highs` (native simplex)
+- `microlp` (pure Rust simplex)
+- `rust-certified` (legacy pure Rust path)
 
 ```powershell
 cargo build --release -p metatorio-headless
 cargo test -p metatorio-solver --lib
-cargo tree -p metatorio-headless --edges normal,build
-# GUI shell supports the same backend feature selection.
-cargo check -p metatorio-app
-# Optional native-only build selects HiGHS by default.
-cargo build --release -p metatorio-headless --no-default-features --features highs
+# Compile one backend only, for example:
+cargo check -p metatorio-solver --no-default-features --features microlp
 ```
 
-With only `rust-lp` enabled, the application defaults to `rust-certified` without
-an environment variable. If both `highs` and `rust-lp` are enabled, Rust remains
-the default and `METATORIO_LP_BACKEND=highs` selects HiGHS. Explicitly
-requesting a native backend in a Rust-only build returns an unavailable-backend
-error. Unknown backend names also return an error. `lp-experiments` enables both
-backends for comparison.
+The adapter no longer performs a post-solve original-model check, certificate
+rejection, retry ladder or writeback self-check. The chosen backend's result is
+returned directly; infeasible, unbounded, numerical failure and timeout are
+reported as the backend reports them. The legacy `rust-certified` backend still
+uses its internal exact machinery, but the adapter does not re-validate it.
 
-Workspace development builds optimize the LP core, solver adapter and num
-arithmetic libraries at level 3; other application code retains its development
-profile. This keeps desktop development builds usable with the Rust backend.
-
-The Rust certified path requires nonnegative costs and nonnegative variables
-without finite upper bounds, matching the current production-planning model.
-It reconstructs exact rational primal and dual witnesses for the original f64
-input. Every original constraint must be exactly satisfied. Acceptance compares
-the normalized objective gap `(primal-dual)/max(1,abs(primal))` against the exact
-rational budget `1/10^12`. A positive gap is recorded separately from exact
-optimality. Values converted back to f64 must also pass application validation
-and actual factory writeback checks. Numerical failure or a work limit is not
-an infeasibility claim; only a complete-model proof produces that status.
-
-These witnesses certify the binary floating coefficients received by the LP;
+These guarantees apply to the binary floating coefficients received by the LP;
 they do not recover the game's pre-rounding rational recipe data. The core
 `metatorio-lp` supports additional exact LP operations and has its own README.
 

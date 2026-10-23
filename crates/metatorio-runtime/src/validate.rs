@@ -109,6 +109,13 @@ fn validate_project(store: &PrototypeStore, action: &ProjectAction) -> Result<()
         ProjectAction::SetQualityLimit {
             quality: Some(quality),
         } => require_quality(store, quality),
+        ProjectAction::SetSolver { solver } => {
+            if solver.is_available() {
+                Ok(())
+            } else {
+                Err(RuntimeError::InvalidValue(solver.unavailable_reason()))
+            }
+        }
 
         ProjectAction::SetRecipeProductivity { productivity } => {
             require(store, PrototypeGroup::Recipe, "配方", &productivity.recipe)

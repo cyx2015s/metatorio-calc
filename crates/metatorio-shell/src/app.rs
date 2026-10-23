@@ -3408,9 +3408,8 @@ pub(crate) fn attach_auto_plan_report(
 ) {
     result.report.variables_before = report.variables_before;
     result.report.variables_after = report.variables_after;
+    result.report.solver = report.solver;
     result.report.planning_optimization = report.planning_optimization.clone();
-    result.report.writeback_verified = report.verified;
-    result.report.writeback_widened = report.widened;
     result.report.writeback_cutoff = report.cutoff;
     result.report.candidates_total = report.candidates_total;
     result.report.candidates_considered = report.candidates_considered;

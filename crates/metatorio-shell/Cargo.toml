@@ -4,8 +4,11 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-default = ["rust-lp"]
+default = ["all-lp"]
+all-lp = ["clarabel", "highs", "microlp", "rust-lp"]
+clarabel = ["metatorio-solver/clarabel", "metatorio-runtime/clarabel"]
 highs = ["metatorio-solver/highs", "metatorio-runtime/highs"]
+microlp = ["metatorio-solver/microlp", "metatorio-runtime/microlp"]
 rust-lp = ["metatorio-solver/rust-lp", "metatorio-runtime/rust-lp"]
 lp-experiments = ["highs", "rust-lp", "metatorio-solver/lp-experiments"]
 

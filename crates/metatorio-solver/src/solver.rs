@@ -2,8 +2,6 @@ use crate::lp_model::{IntoAffineExpression, variable};
 
 use crate::concept::{AIndexMap, AIndexSet, Flow, ItemIdent};
 use crate::lp::SolveReport;
-#[cfg(not(feature = "rust-lp"))]
-use crate::lp::solve_lp;
 use core::f64;
 
 use std::fmt::Debug;
@@ -68,6 +66,8 @@ where
     /// 由**调用方按类型语义**填（`DualVar::Pollution`），求解器不猜：`I` 是泛型，
     /// 内核不认识具体变体。这是「平衡规则来自语义、不来自系数符号」的第一步。
     pub unconstrained: AIndexSet<I>,
+    /// Project-level LP backend. Defaults to the legacy Rust certified backend.
+    pub solver: crate::lp_solver::LpSolver,
 }
 
 // TODO: warning: large size difference between variants
@@ -226,7 +226,13 @@ where
             strict_sink: false,
             pruned_missing: Vec::new(),
             unconstrained: AIndexSet::default(),
+            solver: crate::lp_solver::LpSolver::default(),
         }
+    }
+
+    pub fn with_solver(mut self, solver: crate::lp_solver::LpSolver) -> Self {
+        self.solver = solver;
+        self
     }
 
     pub fn with_sources(mut self, sources: Flow<I>) -> Self {
@@ -547,9 +553,6 @@ where
             variables: problem_variables.iter_variables_with_def().count(),
             constraints: constraints.len(),
         });
-        #[cfg(not(feature = "rust-lp"))]
-        let solution = solve_lp(optimization_expr.clone(), constraints, problem_variables);
-        #[cfg(feature = "rust-lp")]
         let solution = {
             let mut labels: Vec<_> = (0..constraints.len()).map(|i| format!("r{i}")).collect();
             for (item, index) in &item_to_constraint {
@@ -563,6 +566,7 @@ where
                 optimization_expr.clone(),
                 constraints,
                 problem_variables,
+                self.solver,
                 labels,
             )
         };

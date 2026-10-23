@@ -708,6 +708,10 @@ impl RuntimeState {
                 );
                 Ok(Outcome::solve_all_if(changed, project_id))
             }
+            ProjectAction::SetSolver { solver } => {
+                let changed = replace(&mut self.project_mut(project_id)?.settings.solver, solver);
+                Ok(Outcome::solve_all_if(changed, project_id))
+            }
             ProjectAction::SetContext { context } => {
                 let changed = replace(&mut self.project_mut(project_id)?.context_id, context);
                 Ok(Outcome::solve_all_if(changed, project_id))
