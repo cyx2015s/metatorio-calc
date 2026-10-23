@@ -2,8 +2,8 @@
 //! No coefficient is dropped by tolerance: numerical failures remain hints.
 use std::collections::{BTreeMap, BTreeSet};
 
-const MAX_ENTRIES: usize = 2_000_000;
-const MAX_ELIMINATION_WORK: usize = 100_000_000;
+// Match the periodic refactor interval in float.rs; this bounds only the
+// product-form update chain, independently of matrix dimensions and sparsity.
 const MAX_ETAS: usize = 128;
 const MIN_PIVOT: f64 = 1e-14;
 
@@ -19,7 +19,6 @@ pub(crate) struct SparseFloatBasis {
     upper: Vec<Vec<(usize, f64)>>,
     diagonal: Vec<f64>,
     etas: Vec<Eta>,
-    entries: usize,
 }
 
 impl SparseFloatBasis {
@@ -38,17 +37,6 @@ impl SparseFloatBasis {
         n: usize,
         ids: &[usize],
         columns: &[Vec<(usize, f64)>],
-        observer: impl FnMut() -> bool,
-    ) -> Result<Self, String> {
-        Self::factor_with_limit(m, n, ids, columns, MAX_ENTRIES, observer)
-    }
-
-    fn factor_with_limit(
-        m: usize,
-        n: usize,
-        ids: &[usize],
-        columns: &[Vec<(usize, f64)>],
-        limit: usize,
         mut observer: impl FnMut() -> bool,
     ) -> Result<Self, String> {
         if ids.len() != m || columns.len() != n {
@@ -57,14 +45,8 @@ impl SparseFloatBasis {
         if !observer() {
             return Err("floating observer requested stop during sparse factorization".into());
         }
-        // Every nonsingular basis needs at least one entry per row. Enforce
-        // the storage budget before allocating row and incidence containers.
-        if m > limit {
-            return Err("floating sparse basis storage limit exceeded".into());
-        }
         let mut rows = vec![BTreeMap::<usize, f64>::new(); m];
         let mut incidence = vec![BTreeSet::new(); m];
-        let mut entries = 0usize;
         let mut seen = BTreeSet::new();
         for (j, &id) in ids.iter().enumerate() {
             if j % 128 == 0 && !observer() {
@@ -84,15 +66,10 @@ impl SparseFloatBasis {
                 }
                 if value == 0.0 {
                     if rows[i].remove(&j).is_some() {
-                        entries -= 1;
                         incidence[j].remove(&i);
                     }
                 } else {
                     if previous == 0.0 {
-                        if entries == limit {
-                            return Err("floating sparse basis storage limit exceeded".into());
-                        }
-                        entries += 1;
                         incidence[j].insert(i);
                     }
                     rows[i].insert(j, value);
@@ -145,13 +122,14 @@ impl SparseFloatBasis {
                 lower[i].push((p, multiplier));
                 for (&j, &a) in pivot_row.range(p + 1..) {
                     work += 1;
-                    if work % 4096 == 0 && !observer() {
-                        return Err(
-                            "floating observer requested stop during sparse factorization".into(),
-                        );
-                    }
-                    if work > MAX_ELIMINATION_WORK {
-                        return Err("floating sparse elimination work limit exceeded".into());
+                    if work == 4096 {
+                        work = 0;
+                        if !observer() {
+                            return Err(
+                                "floating observer requested stop during sparse factorization"
+                                    .into(),
+                            );
+                        }
                     }
                     let previous = rows[i].get(&j).copied().unwrap_or(0.0);
                     let value = previous - multiplier * a;
@@ -160,15 +138,10 @@ impl SparseFloatBasis {
                     }
                     if value == 0.0 {
                         if rows[i].remove(&j).is_some() {
-                            entries -= 1;
                             incidence[j].remove(&i);
                         }
                     } else {
                         if previous == 0.0 {
-                            if entries == limit {
-                                return Err("floating sparse basis fill limit exceeded".into());
-                            }
-                            entries += 1;
                             incidence[j].insert(i);
                         }
                         rows[i].insert(j, value);
@@ -189,7 +162,6 @@ impl SparseFloatBasis {
             upper,
             diagonal,
             etas: Vec::new(),
-            entries,
         })
     }
 
@@ -269,15 +241,9 @@ impl SparseFloatBasis {
         if position >= direction.len() || direction[position].abs() < 1e-12 {
             return Err("unstable floating eta pivot".into());
         }
-        let count = direction
-            .iter()
-            .enumerate()
-            .filter(|(i, a)| *i != position && **a != 0.0)
-            .count();
-        if self.etas.len() >= MAX_ETAS || self.entries.saturating_add(count + 1) > MAX_ENTRIES {
-            return Err("floating sparse eta storage limit exceeded".into());
+        if self.etas.len() >= MAX_ETAS {
+            return Err("floating sparse eta chain requires refactorization".into());
         }
-        self.entries += count + 1;
         self.etas.push(Eta {
             position,
             pivot: direction[position],
@@ -489,7 +455,7 @@ mod tests {
     }
 
     #[test]
-    fn singular_unstable_nonfinite_storage_and_cancel_fail_explicitly() {
+    fn singular_unstable_nonfinite_and_cancel_fail_explicitly() {
         assert!(
             SparseFloatBasis::factor(2, 2, &[0, 1], &[vec![(0, 1.0)], vec![(0, 2.0)]]).is_err()
         );
@@ -500,19 +466,6 @@ mod tests {
         );
         assert!(SparseFloatBasis::factor(1, 1, &[0], &[vec![(0, 1.0), (0, -1.0)]]).is_err());
         assert!(SparseFloatBasis::factor(2, 0, &[0, 0], &[]).is_err());
-        let error = SparseFloatBasis::factor_with_limit(2, 0, &[0, 1], &[], 1, || true)
-            .err()
-            .unwrap();
-        assert!(error.contains("storage limit"));
-        let columns = vec![
-            vec![(0, 2.0), (1, 1.0)],
-            vec![(0, 1.0), (2, 1.0)],
-            vec![(1, 1.0), (2, 1.0)],
-        ];
-        let error = SparseFloatBasis::factor_with_limit(3, 3, &[0, 1, 2], &columns, 6, || true)
-            .err()
-            .unwrap();
-        assert!(error.contains("fill limit"), "{error}");
         let error = SparseFloatBasis::factor_with_observer(3, 0, &[0, 1, 2], &[], || false)
             .err()
             .unwrap();
@@ -528,7 +481,7 @@ mod tests {
             factor
                 .update(0, &[1.0])
                 .unwrap_err()
-                .contains("storage limit")
+                .contains("requires refactorization")
         );
     }
 
@@ -537,7 +490,10 @@ mod tests {
         let m = 8192;
         let ids: Vec<_> = (0..m).rev().collect();
         let factor = SparseFloatBasis::factor(m, 0, &ids, &[]).unwrap();
-        assert_eq!(factor.entries, m);
+        let stored = factor.diagonal.len()
+            + factor.lower.iter().map(Vec::len).sum::<usize>()
+            + factor.upper.iter().map(Vec::len).sum::<usize>();
+        assert_eq!(stored, m);
         assert!(factor.lower.iter().all(Vec::is_empty));
         assert!(factor.upper.iter().all(Vec::is_empty));
         let rhs: Vec<_> = (0..m).map(|i| i as f64).collect();

@@ -13,16 +13,20 @@ mod columns;
 mod control;
 mod cost_bounds;
 mod dual;
+// Retained as independent dense references for exact-factor regression tests.
+#[cfg(test)]
 mod factor;
+#[cfg(test)]
 mod factor_blocks;
+mod sparse_exact_factor;
 pub use control::SolveControl;
 pub use cost_bounds::CostBounds;
 mod float;
-mod sparse_float_basis;
 mod presolve;
 mod relative;
 mod relevance;
 mod restricted;
+mod sparse_float_basis;
 pub use relative::{RelativeCandidate, RelativeVerification};
 pub use relevance::RelevanceReduction;
 mod refine;
@@ -30,10 +34,6 @@ pub use certified::CertifiedResult;
 pub use dual::{DualPivotRule, DualRepair};
 pub use float::{FloatCandidate, FloatOptions, FloatProgress};
 pub use refine::Refinement;
-const MAX_BASIS_DIMENSION: usize = 256;
-// A single candidate reconstruction does not build a dense exact inverse.
-// Keep a separate, larger guard from the iterative inverse-update prototype.
-const MAX_RECONSTRUCTION_DIMENSION: usize = 2048;
 
 #[derive(Clone, Debug)]
 pub struct Column {
@@ -155,17 +155,13 @@ fn binary_integer(value: f64, power: usize) -> BigInt {
     if bits >> 63 == 1 { -integer } else { integer }
 }
 
-/// Exact Gaussian elimination, with a dimension limit for this dense prototype.
+/// Independent dense Gaussian elimination used only as a small-test oracle.
 /// Zero pivots are rejected exactly, without a numerical tolerance.
+#[cfg(test)]
 fn solve(mut matrix: Vec<Vec<Rational>>, mut rhs: Vec<Rational>) -> Result<Vec<Rational>, String> {
     let n = rhs.len();
-    if n > MAX_RECONSTRUCTION_DIMENSION
-        || matrix.len() != n
-        || matrix.iter().any(|row| row.len() != n)
-    {
-        return Err(
-            "dense exact reconstruction requires a square matrix of at most 2048 columns".into(),
-        );
+    if matrix.len() != n || matrix.iter().any(|row| row.len() != n) {
+        return Err("dense test oracle requires a square matrix".into());
     }
     for k in 0..n {
         let pivot = (k..n)
@@ -425,15 +421,15 @@ impl Model {
     ) -> Result<Optimization, String> {
         self.optimize_inner(basis, max_pivots, observer, true, &SolveControl::default())
     }
-    /// Optimize a larger feasible basis by solving only the required systems,
-    /// without constructing a dense exact inverse.
+    /// Compatibility entry point using the same sparse incremental basis as
+    /// optimize_from_basis; neither entry point constructs an exact inverse.
     pub fn optimize_without_inverse_with_observer(
         &self,
         basis: Basis,
         max_pivots: usize,
         observer: impl FnMut(PivotProgress) -> bool,
     ) -> Result<Optimization, String> {
-        self.optimize_inner(basis, max_pivots, observer, false, &SolveControl::default())
+        self.optimize_inner(basis, max_pivots, observer, true, &SolveControl::default())
     }
     pub fn optimize_without_inverse_with_control(
         &self,
@@ -442,7 +438,7 @@ impl Model {
         observer: impl FnMut(PivotProgress) -> bool,
         control: &SolveControl,
     ) -> Result<Optimization, String> {
-        self.optimize_inner(basis, max_pivots, observer, false, control)
+        self.optimize_inner(basis, max_pivots, observer, true, control)
     }
     fn optimize_inner(
         &self,
@@ -463,9 +459,8 @@ impl Model {
                 "exact simplex prototype requires nonnegative columns without upper bounds".into(),
             );
         }
-        let mut system = if cache {
-            self.reconstruct(&basis)?;
-            Some(basis::System::new(self, &basis)?)
+        let mut system = if cache && self.prefers_incremental_basis(&basis) {
+            Some(basis::System::new_with_control(self, &basis, control)?)
         } else {
             None
         };
@@ -487,7 +482,7 @@ impl Model {
                 seen.clear();
             }
             let (solution, factored) = match &system {
-                Some(system) => (system.reconstruct(self)?, None),
+                Some(system) => (system.reconstruct_with_control(self, control)?, None),
                 None => {
                     let (solution, factor) =
                         self.reconstruct_factored_with_control(&basis, control)?;
@@ -561,7 +556,10 @@ impl Model {
                 });
             }
             let (columns, basic_direction) = match &system {
-                Some(system) => (system.columns.clone(), system.direction(self, entering)?),
+                Some(system) => (
+                    system.columns.clone(),
+                    system.direction_with_control(self, entering, control)?,
+                ),
                 None => {
                     let factored = factored.as_ref().ok_or("missing exact factorization")?;
                     (
@@ -651,24 +649,6 @@ impl Model {
                     stop_reason: None,
                 });
             };
-            let dimension_limit = if cache {
-                MAX_BASIS_DIMENSION
-            } else {
-                MAX_RECONSTRUCTION_DIMENSION
-            };
-            if solution.basis_dimension >= dimension_limit
-                && entering < self.columns.len()
-                && leaving >= self.columns.len()
-            {
-                return Ok(Optimization {
-                    solution,
-                    basis,
-                    pivots: iteration,
-                    unbounded_ray: None,
-                    bland_fallback: bland,
-                    stop_reason: Some("exact basis dimension limit reached".into()),
-                });
-            }
             if leaving < self.columns.len() {
                 basis.columns[leaving] = BasisStatus::Lower;
             } else {
@@ -680,10 +660,23 @@ impl Model {
                 basis.rows[entering - self.columns.len()] = BasisStatus::Basic;
             }
             if let Some(system) = &mut system {
-                system.update(self, &basis, entering, leaving)?;
+                system.update_with_control(self, &basis, entering, leaving, control)?;
+            } else if cache && self.prefers_incremental_basis(&basis) {
+                system = Some(basis::System::new_with_control(self, &basis, control)?);
             }
         }
         unreachable!()
+    }
+    // A slack-heavy full basis has linear overhead in every constraint, while
+    // the compressed structural factor can be much smaller. This chooses the
+    // representation only; it never rejects a basis or limits its dimension.
+    fn prefers_incremental_basis(&self, basis: &Basis) -> bool {
+        basis
+            .columns
+            .iter()
+            .filter(|status| **status == BasisStatus::Basic)
+            .count()
+            >= self.rows.len().div_ceil(2)
     }
     pub fn check(&self) -> Result<(), String> {
         if !self.offset.is_finite() {
@@ -756,8 +749,8 @@ impl Model {
             .enumerate()
             .filter_map(|(i, s)| (*s != BasisStatus::Basic).then_some(i))
             .collect();
-        if columns.len() != rows.len() || columns.len() > MAX_RECONSTRUCTION_DIMENSION {
-            return Err("structural basis is not square or exceeds prototype limit".into());
+        if columns.len() != rows.len() {
+            return Err("structural basis is not square".into());
         }
         let mut positions = vec![None; self.columns.len()];
         for (i, column) in columns.iter().enumerate() {
@@ -776,7 +769,7 @@ impl Model {
                 BasisStatus::Zero => return Err("nonbasic zero outside column bounds".into()),
             };
         }
-        let mut matrix = vec![vec![Rational::zero(); columns.len()]; rows.len()];
+        let mut matrix = vec![std::collections::BTreeMap::new(); rows.len()];
         let mut rhs = Vec::with_capacity(rows.len());
         for (i, original) in rows.iter().enumerate() {
             control.check()?;
@@ -791,16 +784,23 @@ impl Model {
                 return Err("nonzero equality row cannot have zero activity".into());
             }
             let mut value = rational(row.rhs)?;
-            for (column, coefficient) in &row.terms {
+            for (term, (column, coefficient)) in row.terms.iter().enumerate() {
+                if term % 1024 == 0 {
+                    control.check()?;
+                }
                 if let Some(j) = positions[*column] {
-                    matrix[i][j] += rational(*coefficient)?;
+                    let value = matrix[i].entry(j).or_insert_with(Rational::zero);
+                    *value += rational(*coefficient)?;
+                    if value.is_zero() {
+                        matrix[i].remove(&j);
+                    }
                 } else if !values[*column].is_zero() {
                     value -= rational(*coefficient)? * &values[*column];
                 }
             }
             rhs.push(value);
         }
-        let factor = factor::Factorization::new_with_control(matrix, control)?;
+        let factor = sparse_exact_factor::SparseExactFactor::new(matrix, control)?;
         let basic = factor.solve_with_control(&rhs, control)?;
         for (column, value) in columns.iter().zip(basic) {
             values[*column] = value;

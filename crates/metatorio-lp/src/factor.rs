@@ -1,5 +1,5 @@
 //! Exact sparsity-ordered LU shared by primal and transpose solves.
-use crate::{MAX_RECONSTRUCTION_DIMENSION, Rational, SolveControl};
+use crate::{Rational, SolveControl};
 use num_bigint::BigInt;
 use num_integer::Integer;
 use num_traits::Zero;
@@ -178,7 +178,7 @@ impl Factorization {
     ) -> Result<Self, String> {
         control.check()?;
         let n = matrix.len();
-        if n > MAX_RECONSTRUCTION_DIMENSION || matrix.iter().any(|r| r.len() != n) {
+        if matrix.iter().any(|r| r.len() != n) {
             return Err("exact factorization dimension invalid".into());
         }
         if n >= 32 {

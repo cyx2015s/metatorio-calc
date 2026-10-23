@@ -100,7 +100,7 @@ impl Model {
             basis,
             max_pivots,
             observer,
-            false,
+            true,
             rule,
             &SolveControl::default(),
         )
@@ -113,7 +113,7 @@ impl Model {
         observer: impl FnMut(PivotProgress) -> bool,
         control: &SolveControl,
     ) -> Result<DualRepair, String> {
-        self.repair_dual_inner(basis, max_pivots, observer, false, rule, control)
+        self.repair_dual_inner(basis, max_pivots, observer, true, rule, control)
     }
     fn repair_dual_inner(
         &self,
@@ -134,10 +134,9 @@ impl Model {
             return Err("dual repair requires nonnegative columns without upper bounds".into());
         }
 
-        // Cold start has an empty inverse, so caching avoids repeated solves
-        // without paying the expensive dense initialization of a warm basis.
-        let mut system = if cache {
-            Some(basis::System::new(self, &basis)?)
+        // Reuse the sparse factor for all solves at the current basis.
+        let mut system = if cache && self.prefers_incremental_basis(&basis) {
+            Some(basis::System::new_with_control(self, &basis, control)?)
         } else {
             None
         };
@@ -145,7 +144,7 @@ impl Model {
         for iteration in 0..=max_pivots {
             control.check()?;
             let (solution, factored) = match &system {
-                Some(system) => (system.reconstruct(self)?, None),
+                Some(system) => (system.reconstruct_with_control(self, control)?, None),
                 None => {
                     let (solution, factor) =
                         self.reconstruct_factored_with_control(&basis, control)?;
@@ -224,12 +223,19 @@ impl Model {
                 rule,
                 DualPivotRule::LargestViolation | DualPivotRule::SteepestEdge
             ) {
-                self.priced_dual_violation(&basis, &solution, rule, system.as_ref())?
+                self.priced_dual_violation(
+                    &basis,
+                    &solution,
+                    rule,
+                    system.as_ref(),
+                    factored.as_ref(),
+                    control,
+                )?
             } else {
                 leaving.ok_or("failed primal check has no violating basic variable")?
             };
             let mut ray = match &system {
-                Some(system) => system.cached_functional(self, leaving)?,
+                Some(system) => system.cached_functional_with_control(self, leaving, control)?,
                 None => factored
                     .as_ref()
                     .ok_or("missing exact factorization")?
@@ -298,23 +304,6 @@ impl Model {
                     infeasibility: Some(proof),
                 });
             };
-            let dimension_limit = if cache {
-                super::MAX_BASIS_DIMENSION
-            } else {
-                super::MAX_RECONSTRUCTION_DIMENSION
-            };
-            if solution.basis_dimension >= dimension_limit
-                && entering < self.columns.len()
-                && leaving >= self.columns.len()
-            {
-                return Ok(DualRepair {
-                    solution,
-                    basis,
-                    pivots: iteration,
-                    infeasibility: None,
-                    stop_reason: Some("exact basis dimension limit reached".into()),
-                });
-            }
             if leaving < self.columns.len() {
                 basis.columns[leaving] = BasisStatus::Lower;
             } else {
@@ -326,7 +315,9 @@ impl Model {
                 basis.rows[entering - self.columns.len()] = BasisStatus::Basic;
             }
             if let Some(system) = &mut system {
-                system.update(self, &basis, entering, leaving)?;
+                system.update_with_control(self, &basis, entering, leaving, control)?;
+            } else if cache && self.prefers_incremental_basis(&basis) {
+                system = Some(basis::System::new_with_control(self, &basis, control)?);
             }
         }
         unreachable!()
@@ -337,13 +328,17 @@ impl Model {
         solution: &ExactSolution,
         rule: DualPivotRule,
         system: Option<&basis::System>,
+        factored: Option<&basis::Factored>,
+        control: &SolveControl,
     ) -> Result<(usize, bool), String> {
         let mut best: Option<(usize, bool, Rational)> = None;
         let mut consider = |index, increase, magnitude: Rational| -> Result<(), String> {
             let magnitude = if rule == DualPivotRule::SteepestEdge {
                 let ray = match system {
-                    Some(system) => system.cached_functional(self, index)?,
-                    None => basis::System::functional(self, basis, index)?,
+                    Some(system) => system.cached_functional_with_control(self, index, control)?,
+                    None => factored
+                        .ok_or("missing exact factorization")?
+                        .functional_with_control(self, index, control)?,
                 };
                 edge_merit(&magnitude, &ray)?
             } else {
@@ -405,8 +400,8 @@ mod tests {
     use super::*;
     use crate::{Column, Row};
     #[test]
-    fn dimension_limits_preserve_primal_and_dual_candidates() {
-        let n = crate::MAX_BASIS_DIMENSION + 1;
+    fn sparse_primal_and_dual_pivots_cross_former_dimension_limits() {
+        let n = 4097;
         let mut model = Model {
             columns: (0..n).map(|_| column(1.0)).collect(),
             rows: (0..n)
@@ -434,18 +429,28 @@ mod tests {
                 &SolveControl::default(),
             )
             .unwrap();
-        assert_eq!(result.pivots, 0);
-        assert!(result.stop_reason.unwrap().contains("dimension"));
-        assert_eq!(result.basis.columns, basis.columns);
-        assert_eq!(result.basis.rows, basis.rows);
-        assert!(model.certify(&result.solution).unwrap().dual_feasible);
-        assert!(!model.certify(&result.solution).unwrap().primal_feasible);
+        assert_eq!(result.pivots, 1);
+        assert!(result.stop_reason.is_none());
+        assert_eq!(result.solution.basis_dimension, n);
+        assert!(model.certify(&result.solution).unwrap().optimal);
         let warm = model
             .repair_dual_feasible_basis_with_observer(basis.clone(), 10, |_| true)
             .unwrap();
         assert_eq!(warm.pivots, 1);
         assert_eq!(warm.solution.basis_dimension, n);
         assert!(model.certify(&warm.solution).unwrap().optimal);
+        let fresh = model
+            .repair_dual_inner(
+                basis.clone(),
+                10,
+                |_| true,
+                false,
+                DualPivotRule::FirstViolation,
+                &SolveControl::default(),
+            )
+            .unwrap();
+        assert_eq!(fresh.solution.values, warm.solution.values);
+        assert_eq!(fresh.solution.row_duals, warm.solution.row_duals);
         for c in &mut model.columns {
             c.cost = 0.0;
         }
@@ -454,17 +459,21 @@ mod tests {
             r.equality = false;
         }
         let result = model.optimize_from_basis(basis.clone(), 10).unwrap();
-        assert_eq!(result.pivots, 0);
-        assert!(result.stop_reason.unwrap().contains("dimension"));
-        assert_eq!(result.basis.columns, basis.columns);
-        assert!(model.certify(&result.solution).unwrap().primal_feasible);
-        assert!(!model.certify(&result.solution).unwrap().optimal);
+        assert_eq!(result.pivots, 1);
+        assert!(result.stop_reason.is_none());
+        assert_eq!(result.solution.basis_dimension, n);
+        assert!(model.certify(&result.solution).unwrap().optimal);
         let warm = model
-            .optimize_without_inverse_with_observer(basis, 10, |_| true)
+            .optimize_without_inverse_with_observer(basis.clone(), 10, |_| true)
             .unwrap();
         assert_eq!(warm.pivots, 1);
         assert_eq!(warm.solution.basis_dimension, n);
         assert!(model.certify(&warm.solution).unwrap().optimal);
+        let fresh = model
+            .optimize_inner(basis, 10, |_| true, false, &SolveControl::default())
+            .unwrap();
+        assert_eq!(fresh.solution.values, warm.solution.values);
+        assert_eq!(fresh.solution.row_duals, warm.solution.row_duals);
     }
     #[test]
     fn integer_edge_merit_matches_direct_rational_norm() {
