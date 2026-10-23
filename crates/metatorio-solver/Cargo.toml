@@ -47,6 +47,14 @@ name = "lp_float_propose"
 required-features = ["rust-lp"]
 
 [[example]]
+name = "lp_route_propose"
+required-features = ["rust-lp"]
+
+[[example]]
+name = "lp_column_geometry"
+required-features = ["rust-lp"]
+
+[[example]]
 name = "lp_rust_support"
 required-features = ["rust-lp"]
 

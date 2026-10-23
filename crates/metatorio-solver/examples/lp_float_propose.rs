@@ -22,6 +22,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let snapshot: Snapshot = serde_json::from_reader(BufReader::new(fs::File::open(&args[0])?))?;
     snapshot.check()?;
     let seconds: f64 = args[2].parse()?;
+    // Diagnostic prefix comparison; production budgets are unchanged.
+    let max_pivots = std::env::var("LP_FLOAT_MAX_PIVOTS")
+        .ok()
+        .map(|value| value.parse::<usize>())
+        .transpose()?
+        .unwrap_or(20000);
     if !seconds.is_finite() || seconds <= 0.0 {
         return Err("invalid time limit".into());
     }
@@ -72,10 +78,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         reduced.lift_candidate(
             reduced
                 .model
-                .float_candidate_with_options(options, 20000, observer)?,
+                .float_candidate_with_options(options, max_pivots, observer)?,
         )?
     } else {
-        search.float_candidate_with_options(options, 20000, observer)?
+        search.float_candidate_with_options(options, max_pivots, observer)?
     };
     if reverse_columns {
         proposal.basis.columns.reverse();

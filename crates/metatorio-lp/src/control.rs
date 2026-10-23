@@ -31,6 +31,18 @@ impl SolveControl {
         self
     }
 
+    /// Bound a child search without extending the parent's deadline or losing
+    /// its external cancellation flag.
+    pub fn limited_to(&self, deadline: Instant) -> Self {
+        Self {
+            deadline: Some(
+                self.deadline
+                    .map_or(deadline, |parent| parent.min(deadline)),
+            ),
+            cancellation: self.cancellation.clone(),
+        }
+    }
+
     pub fn is_cancelled(&self) -> bool {
         self.cancellation
             .as_ref()
@@ -53,6 +65,21 @@ impl SolveControl {
 mod tests {
     use super::*;
     use crate::{Basis, BasisStatus, Column, FloatCandidate, Model, Rational, Row};
+
+    #[test]
+    fn child_deadline_retains_parent_deadline_and_cancellation() {
+        let flag = Arc::new(AtomicBool::new(false));
+        let parent = SolveControl::with_deadline(Instant::now()).with_cancellation(flag.clone());
+        assert!(
+            parent
+                .limited_to(Instant::now() + std::time::Duration::from_secs(60))
+                .is_cancelled()
+        );
+        let parent = SolveControl::default().with_cancellation(flag.clone());
+        let child = parent.limited_to(Instant::now() + std::time::Duration::from_secs(60));
+        flag.store(true, Ordering::Relaxed);
+        assert!(child.is_cancelled());
+    }
 
     fn model() -> (Model, Basis) {
         (

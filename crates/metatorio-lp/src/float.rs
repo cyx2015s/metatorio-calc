@@ -2,6 +2,52 @@
 //! Positive diagonal scaling preserves basis identities, not exact arithmetic.
 use crate::sparse_float_basis::SparseFloatBasis;
 use crate::{Basis, BasisStatus, Model};
+use rayon::prelude::*;
+use std::sync::OnceLock;
+use std::time::Instant;
+
+// Optional diagnostics only: no extra model scans are performed per pivot.
+struct FloatProfile {
+    started: Option<Instant>,
+    pivots: usize,
+    zero_steps: usize,
+    stop: String,
+}
+impl FloatProfile {
+    fn new() -> Self {
+        Self {
+            started: std::env::var_os("METATORIO_LP_FLOAT_PROFILE").map(|_| Instant::now()),
+            pivots: 0,
+            zero_steps: 0,
+            stop: "returned error before candidate".into(),
+        }
+    }
+    fn timer(&self) -> Option<Instant> {
+        self.started.map(|_| Instant::now())
+    }
+    fn phase(&self, phase: &str, timer: Option<Instant>) {
+        if let Some(timer) = timer {
+            eprintln!(
+                "[LP-FLOAT-PROFILE] phase={phase} pivots={} ms={:.3}",
+                self.pivots,
+                timer.elapsed().as_secs_f64() * 1000.0
+            );
+        }
+    }
+}
+impl Drop for FloatProfile {
+    fn drop(&mut self) {
+        if let Some(started) = self.started {
+            eprintln!(
+                "[LP-FLOAT-PROFILE] phase=stop pivots={} zero_steps={} ms={:.3} reason={}",
+                self.pivots,
+                self.zero_steps,
+                started.elapsed().as_secs_f64() * 1000.0,
+                self.stop
+            );
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct FloatCandidate {
@@ -38,6 +84,77 @@ fn power_scale(maximum: f64) -> f64 {
     } else {
         2.0f64.powi((-maximum.log2().floor() as i32).clamp(-500, 500))
     }
+}
+
+// Partition by disjoint output columns, retaining the original row/term order.
+// Moving the row terms here avoids retaining another complete matrix copy.
+fn partition_pricing_rows(
+    rows: Vec<Vec<(usize, f64)>>,
+    width: usize,
+) -> Vec<Vec<Vec<(usize, f64)>>> {
+    let m = rows.len();
+    let mut blocks = vec![vec![Vec::new(); m]; 4];
+    for (i, row) in rows.into_iter().enumerate() {
+        for (j, a) in row {
+            blocks[j / width][i].push((j % width, a));
+        }
+    }
+    blocks
+}
+
+fn blocked_float_pricing(
+    costs: &[f64],
+    blocks: &[Vec<Vec<(usize, f64)>>],
+    width: usize,
+    duals: &[f64],
+    functional: &[f64],
+    orientation: f64,
+    prices: &mut [f64],
+    scales: &mut [f64],
+    directions: &mut [f64],
+    pool: &rayon::ThreadPool,
+) {
+    pool.install(|| {
+        prices
+            .par_chunks_mut(width)
+            .zip(scales.par_chunks_mut(width))
+            .zip(directions.par_chunks_mut(width))
+            .enumerate()
+            .for_each(|(block, ((prices, scales), directions))| {
+                let offset = block * width;
+                prices.copy_from_slice(&costs[offset..offset + prices.len()]);
+                for (scale, cost) in scales.iter_mut().zip(&costs[offset..]) {
+                    *scale = 1.0 + cost.abs();
+                }
+                directions.fill(0.0);
+                for (i, row) in blocks[block].iter().enumerate() {
+                    let y = duals[i];
+                    let w = orientation * functional[i];
+                    if y == 0.0 && w == 0.0 {
+                        continue;
+                    }
+                    for &(j, a) in row {
+                        prices[j] -= y * a;
+                        scales[j] += (y * a).abs();
+                        directions[j] += w * a;
+                    }
+                }
+            });
+    });
+}
+
+fn float_pricing_pool(columns: usize) -> Option<&'static rayon::ThreadPool> {
+    if columns < 100_000 {
+        return None;
+    }
+    static POOL: OnceLock<Option<rayon::ThreadPool>> = OnceLock::new();
+    POOL.get_or_init(|| {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(std::thread::available_parallelism().map_or(1, |n| n.get().min(4)))
+            .build()
+            .ok()
+    })
+    .as_ref()
 }
 
 impl Model {
@@ -151,6 +268,8 @@ impl Model {
         max_pivots: usize,
         mut observer: impl FnMut(FloatProgress) -> bool,
     ) -> Result<FloatCandidate, String> {
+        let mut profile = FloatProfile::new();
+        let build_timer = profile.timer();
         if [options.ratio_tolerance, options.primal_tolerance]
             .iter()
             .any(|v| !v.is_finite() || *v <= 0.0)
@@ -262,27 +381,43 @@ impl Model {
             basic[id] = true;
         }
         let mut structural_columns = ids.iter().filter(|id| **id < n).count();
+        profile.phase("column-build-and-scaling", build_timer);
+        let factor_timer = profile.timer();
         let mut factor = SparseFloatBasis::factor_with_observer(m, n, &ids, &columns, || {
             observer(FloatProgress {
                 pivots: 0,
                 structural_columns,
             })
         })?;
+        profile.phase("initial-factor", factor_timer);
         let mut duals = vec![0.0; m];
         let mut prices = costs.clone();
         let mut price_scales = costs.clone();
+        let pricing_pool = float_pricing_pool(n);
+        let pricing_width = n.div_ceil(4).max(1);
+        let (rows, pricing_blocks) = if pricing_pool.is_some() {
+            (
+                Vec::new(),
+                Some(partition_pricing_rows(rows, pricing_width)),
+            )
+        } else {
+            (rows, None)
+        };
         let mut dual_scales = vec![0.0; m];
         let mut directions = vec![0.0; n];
         let mut pivots = 0;
         let mut diagnostic = None;
         let mut last_refactor = None;
         let mut needs_recompute = true;
+        let mut last_profile_pivot = None;
         let stop_reason = loop {
             if pivots > 0 && pivots % 128 == 0 && last_refactor != Some(pivots) {
+                let factor_timer = profile.timer();
                 match SparseFloatBasis::factor_with_observer(m, n, &ids, &columns, || observer(FloatProgress { pivots, structural_columns })) {
                     Ok(rebuilt) => factor = rebuilt,
                     Err(error) => { diagnostic = Some(error); break "floating basis refactorization failed"; },
                 }
+                profile.phase("periodic-refactor", factor_timer);
                 last_refactor = Some(pivots);
                 needs_recompute = true;
             }
@@ -290,10 +425,16 @@ impl Model {
             // incremental updates do not silently accumulate unchecked drift.
             if needs_recompute || pivots % 32 == 0 {
                 needs_recompute = false;
+                let basic_timer = profile.timer();
                 let scaled_rhs: Vec<_> = rhs.iter().map(|a| a * rhs_scale).collect();
                 let basic_costs: Vec<_> = ids.iter().map(|&id| if id < n { costs[id] } else { 0.0 }).collect();
                 basic_values = factor.solve(&scaled_rhs)?;
+                profile.phase("recompute-basic", basic_timer);
+                let dual_timer = profile.timer();
                 duals = factor.solve_transpose(&basic_costs)?;
+                profile.phase("recompute-dual", dual_timer);
+                let pricing_timer = profile.timer();
+                let mut pricing_solves = 0usize;
                 // Preserve the inverse-based pricing scale without storing
                 // the inverse. Absolute triangular bounds can be much wider
                 // after cancellation, admitting poor pivots in the ratio test.
@@ -308,8 +449,12 @@ impl Model {
                     let mut unit = vec![0.0; m];
                     unit[i] = 1.0;
                     let inverse_column = factor.solve(&unit)?;
+                    pricing_solves += 1;
                     dual_scales[i] = inverse_column.iter().zip(&basic_costs)
                         .map(|(a, c)| (a * c).abs()).sum();
+                }
+                if let Some(timer) = pricing_timer {
+                    eprintln!("[LP-FLOAT-PROFILE] phase=recompute-pricing-scale pivots={pivots} solves={pricing_solves} ms={:.3}", timer.elapsed().as_secs_f64() * 1000.0);
                 }
             }
             if basic_values.iter().chain(&duals).chain(&dual_scales).any(|x| !x.is_finite()) {
@@ -317,6 +462,7 @@ impl Model {
             }
             let mut leaving = None;
             let mut violation = options.primal_tolerance;
+            let mut worst_basic_violation = 0.0f64;
             for i in 0..m {
                 let fixed = ids[i] >= n && self.rows[ids[i] - n].equality;
                 let amount = if fixed {
@@ -324,10 +470,24 @@ impl Model {
                 } else {
                     (-basic_values[i]).max(0.0)
                 };
+                if profile.started.is_some() {
+                    worst_basic_violation = worst_basic_violation.max(amount);
+                }
                 if amount > violation {
                     violation = amount;
                     leaving = Some(i);
                 }
+            }
+            if profile.started.is_some() && pivots % 100 == 0 && last_profile_pivot != Some(pivots) {
+                last_profile_pivot = Some(pivots);
+                let (mut positive, mut negative) = (0usize, 0usize);
+                for (id, value) in ids.iter().zip(&basic_values) {
+                    if *id < n {
+                        positive += usize::from(*value > 0.0);
+                        negative += usize::from(*value < 0.0);
+                    }
+                }
+                eprintln!("[LP-FLOAT-PROFILE] phase=progress pivots={pivots} structural={structural_columns} support={} positive={positive} negative={negative} worst_basic_violation={worst_basic_violation:e} zero_steps={}", positive + negative, profile.zero_steps);
             }
             let Some(leaving) = leaving else {
                 break "floating primal tolerances met; exact verification required";
@@ -341,11 +501,6 @@ impl Model {
             }) {
                 break "floating observer requested stop";
             }
-            prices.copy_from_slice(&costs);
-            for (scale, cost) in price_scales.iter_mut().zip(&costs) {
-                *scale = 1.0 + cost.abs();
-            }
-            directions.fill(0.0);
             let orientation = if basic_values[leaving] < 0.0 {
                 1.0
             } else {
@@ -354,16 +509,24 @@ impl Model {
             let mut unit = vec![0.0; m];
             unit[leaving] = 1.0;
             let functional = factor.solve_transpose(&unit)?;
-            for i in 0..m {
-                let y = duals[i];
-                let w = orientation * functional[i];
-                if y == 0.0 && w == 0.0 {
-                    continue;
+            if let Some(pool) = pricing_pool {
+                blocked_float_pricing(&costs, pricing_blocks.as_ref().unwrap(), pricing_width, &duals, &functional, orientation,
+                    &mut prices, &mut price_scales, &mut directions, pool);
+            } else {
+                prices.copy_from_slice(&costs);
+                for (scale, cost) in price_scales.iter_mut().zip(&costs) {
+                    *scale = 1.0 + cost.abs();
                 }
-                for (j, a) in &rows[i] {
-                    prices[*j] -= y * a;
-                    price_scales[*j] += (y * a).abs();
-                    directions[*j] += w * a;
+                directions.fill(0.0);
+                for i in 0..m {
+                    let y = duals[i];
+                    let w = orientation * functional[i];
+                    if y == 0.0 && w == 0.0 { continue; }
+                    for (j, a) in &rows[i] {
+                        prices[*j] -= y * a;
+                        price_scales[*j] += (y * a).abs();
+                        directions[*j] += w * a;
+                    }
                 }
             }
             let mut eligible = Vec::new();
@@ -405,12 +568,17 @@ impl Model {
                 }
             }
             if dual_drift {
+                let factor_timer = profile.timer();
                 if last_refactor != Some(pivots)
                     && let Ok(rebuilt) = SparseFloatBasis::factor_with_observer(m, n, &ids, &columns, || observer(FloatProgress { pivots, structural_columns })) {
                         factor = rebuilt;
                         last_refactor = Some(pivots);
                         needs_recompute = true;
+                        profile.phase("drift-refactor", factor_timer);
                         continue;
+                }
+                if last_refactor != Some(pivots) {
+                    profile.phase("failed-drift-refactor", factor_timer);
                 }
                 break "floating dual drift; exact verification required";
             }
@@ -433,6 +601,9 @@ impl Model {
                 break "unstable floating pivot";
             }
             let step = basic_values[leaving] / pivot;
+            if profile.started.is_some() && step == 0.0 {
+                profile.zero_steps += 1;
+            }
             let entering_price = if entering < n {
                 prices[entering]
             } else {
@@ -456,8 +627,10 @@ impl Model {
             structural_columns -= usize::from(ids[leaving] < n);
             ids[leaving] = entering;
             pivots += 1;
+            profile.pivots = pivots;
         }
         .to_string();
+        profile.stop.clone_from(&stop_reason);
         let mut values = vec![0.0; n];
         for (id, value) in ids.iter().zip(&basic_values) {
             if *id < n {
@@ -499,6 +672,67 @@ impl Model {
 mod tests {
     use super::*;
     use crate::{Column, Row};
+    #[test]
+    fn parallel_block_scatter_pricing_matches_sequential_scatter_exactly() {
+        let rows = [
+            vec![(0, 1.0), (1, 1e-24), (2, 0.25)],
+            vec![(0, -1.0), (1, 2.0), (1, -2.0)],
+            vec![(2, 4.0), (3, 1.0)],
+            vec![(0, -0.0), (3, 1e14)],
+        ];
+        let costs: [f64; 4] = [0.0, 2.0, 0.125, 0.0];
+        let width = costs.len().div_ceil(4);
+        let blocks = partition_pricing_rows(rows.to_vec(), width);
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(4)
+            .build()
+            .unwrap();
+        for duals in [[1.0, 1.0, -0.5, 0.0], [0.0, -0.0, 0.0, 0.0]] {
+            for functional in [[1.0, 1.0, 0.0, -0.0], [0.0, 0.0, 2.0, 1e-14]] {
+                for orientation in [1.0, -1.0] {
+                    let mut expected_prices = costs.to_vec();
+                    let mut expected_scales: Vec<_> = costs.iter().map(|c| 1.0 + c.abs()).collect();
+                    let mut expected_directions = vec![0.0; costs.len()];
+                    for (i, row) in rows.iter().enumerate() {
+                        let y = duals[i];
+                        let w = orientation * functional[i];
+                        if y == 0.0 && w == 0.0 {
+                            continue;
+                        }
+                        for &(j, a) in row {
+                            expected_prices[j] -= y * a;
+                            expected_scales[j] += (y * a).abs();
+                            expected_directions[j] += w * a;
+                        }
+                    }
+                    let (mut prices, mut scales, mut directions) =
+                        (vec![0.0; 4], vec![0.0; 4], vec![0.0; 4]);
+                    blocked_float_pricing(
+                        &costs,
+                        &blocks,
+                        width,
+                        &duals,
+                        &functional,
+                        orientation,
+                        &mut prices,
+                        &mut scales,
+                        &mut directions,
+                        &pool,
+                    );
+                    for (actual, expected) in [
+                        (&prices, &expected_prices),
+                        (&scales, &expected_scales),
+                        (&directions, &expected_directions),
+                    ] {
+                        assert_eq!(
+                            actual.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                            expected.iter().map(|v| v.to_bits()).collect::<Vec<_>>()
+                        );
+                    }
+                }
+            }
+        }
+    }
     #[test]
     fn warm_basis_repairs_an_added_supplier_constraint() {
         let mut model = Model {

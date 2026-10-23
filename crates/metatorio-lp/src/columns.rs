@@ -3,7 +3,99 @@ use crate::{
     Basis, BasisStatus, CertifiedResult, ExactSolution, FloatOptions, Model, Rational, SolveControl,
 };
 use num_traits::{Signed, Zero};
-use std::time::Instant;
+use std::{
+    collections::{HashMap, HashSet},
+    time::Instant,
+};
+
+/// Families only influence admission order. Even a hash collision must never
+/// remove a column from exact pricing or from the eventual admission fallback.
+struct ColumnSelectionPolicy {
+    families: Vec<u64>,
+    admitted_families: HashSet<u64>,
+    batch_limit: usize,
+    last_limit: usize,
+    last_unique: usize,
+}
+
+impl ColumnSelectionPolicy {
+    fn new(model: &Model, control: &SolveControl) -> Result<Self, String> {
+        control.check()?;
+        let mut families = vec![0xcbf29ce484222325u64; model.columns.len()];
+        let mut signs = vec![0u8; model.columns.len()];
+        let mut touched = Vec::new();
+        for (i, row) in model.rows.iter().enumerate() {
+            control.check()?;
+            for (p, &(j, coefficient)) in row.terms.iter().enumerate() {
+                if p % 4096 == 0 {
+                    control.check()?;
+                }
+                if coefficient == 0.0 {
+                    continue;
+                }
+                if signs[j] == 0 {
+                    touched.push(j);
+                }
+                signs[j] |= if coefficient.is_sign_negative() { 1 } else { 2 };
+            }
+            for (p, j) in touched.drain(..).enumerate() {
+                if p % 4096 == 0 {
+                    control.check()?;
+                }
+                // Row order is fixed; coefficient magnitudes, term ordering,
+                // duplicate terms, labels and initial supports do not enter.
+                families[j] = families[j]
+                    .wrapping_mul(0x100000001b3)
+                    .wrapping_add(i as u64)
+                    .wrapping_mul(0x100000001b3)
+                    .wrapping_add(u64::from(signs[j]));
+                signs[j] = 0;
+            }
+        }
+        Ok(Self {
+            families,
+            admitted_families: HashSet::new(),
+            batch_limit: 32.min(model.columns.len()),
+            last_limit: 0,
+            last_unique: 0,
+        })
+    }
+
+    fn expand(&mut self) {
+        self.batch_limit = self.batch_limit.saturating_mul(2).min(self.families.len());
+    }
+
+    fn record_batch(&mut self, selected: &[usize]) {
+        let mut unique = HashSet::new();
+        let mut new_families = 0;
+        for &j in selected {
+            let family = self.families[j];
+            unique.insert(family);
+            if self.admitted_families.insert(family) {
+                new_families += 1;
+            }
+        }
+        self.last_limit = self.batch_limit;
+        self.last_unique = unique.len();
+        // Repeated module variants or directions across rounds warrant a
+        // wider next batch. Expansion is monotone and has no fixed cap below
+        // the original column count; all exact-negative columns remain eligible.
+        if new_families <= selected.len() / 2 {
+            self.expand();
+        }
+    }
+}
+
+fn truncate_prices(candidates: &mut Vec<(usize, &crate::BigInt)>, limit: usize) {
+    let compare = |a: &(usize, &crate::BigInt), b: &(usize, &crate::BigInt)| {
+        a.1.cmp(b.1).then_with(|| a.0.cmp(&b.0))
+    };
+    if candidates.len() > limit {
+        candidates.select_nth_unstable_by(limit, compare);
+        candidates.truncate(limit);
+    }
+    candidates.sort_unstable_by(compare);
+}
 
 impl Model {
     /// Generate columns from exact missing-supplier rays or dual prices. A
@@ -14,6 +106,32 @@ impl Model {
         budget: &Rational,
         control: &SolveControl,
     ) -> Result<CertifiedResult, String> {
+        self.solve_column_generation_impl(seed, None, budget, control)
+    }
+
+    /// Continue from an exactly verified original-model primal-feasible basis.
+    /// All basic structural columns, including zero-valued ones, enter the
+    /// initial restricted master. Global exact pricing still certifies the
+    /// original model; a feasible basis is not an optimality certificate.
+    pub fn solve_column_generation_from_basis_with_control(
+        &self,
+        basis: &Basis,
+        budget: &Rational,
+        control: &SolveControl,
+    ) -> Result<CertifiedResult, String> {
+        self.solve_column_generation_impl(None, Some(basis), budget, control)
+    }
+
+    fn solve_column_generation_impl(
+        &self,
+        seed: Option<&[f64]>,
+        initial_basis: Option<&Basis>,
+        budget: &Rational,
+        control: &SolveControl,
+    ) -> Result<CertifiedResult, String> {
+        let search_began = Instant::now();
+        let profile = std::env::var_os("METATORIO_LP_COLUMN_PROFILE").is_some();
+        let mut first_feasible_reported = false;
         control.check()?;
         self.check()?;
         if budget.is_negative()
@@ -27,17 +145,79 @@ impl Model {
         if seed.is_some_and(|s| s.len() != self.columns.len()) {
             return Err("column generation seed dimension mismatch".into());
         }
+        if let Some(basis) = initial_basis {
+            if basis.columns.len() != self.columns.len() || basis.rows.len() != self.rows.len() {
+                return Err("column generation initial basis dimension mismatch".into());
+            }
+            if basis
+                .columns
+                .iter()
+                .any(|s| !matches!(s, BasisStatus::Basic | BasisStatus::Lower))
+                || basis
+                    .rows
+                    .iter()
+                    .any(|s| !matches!(s, BasisStatus::Basic | BasisStatus::Upper))
+            {
+                return Err("column generation initial basis has unsupported statuses".into());
+            }
+            let basic_count = basis
+                .columns
+                .iter()
+                .chain(&basis.rows)
+                .filter(|s| **s == BasisStatus::Basic)
+                .count();
+            if basic_count != self.rows.len() {
+                return Err("column generation initial basis is not square".into());
+            }
+            let initial = self.reconstruct_with_control(basis, control)?;
+            control.check()?;
+            let certificate = self.certify(&initial)?;
+            control.check()?;
+            if !certificate.primal_feasible {
+                return Err(
+                    "column generation initial basis is not original-model primal feasible".into(),
+                );
+            }
+        }
         let mut index = None;
         let mut included = vec![false; self.columns.len()];
+        if seed.is_none()
+            && initial_basis.is_none()
+            && !std::env::var("METATORIO_LP_ROUTE").is_ok_and(|value| value == "0")
+        {
+            match self.route_columns_with_control(control) {
+                Ok(route) => {
+                    for j in route {
+                        included[j] = true;
+                    }
+                }
+                Err(error) => {
+                    control.check()?;
+                    eprintln!("[LP-EXACT-COLUMNS] route hint unavailable: {error}; starting empty");
+                }
+            }
+        }
         if let Some(seed) = seed {
             for (j, v) in seed.iter().enumerate() {
                 included[j] = v.is_finite() && *v != 0.0;
             }
         }
-        let mut warm: Option<Basis> = None;
+        if let Some(basis) = initial_basis {
+            for (j, status) in basis.columns.iter().enumerate() {
+                included[j] = *status == BasisStatus::Basic;
+            }
+        }
+        let mut warm: Option<Basis> = initial_basis.cloned();
         let mut exact_pivots = 0;
         let mut float_pivots = 0;
         let mut feasibility_rule = crate::DualPivotRule::FirstViolationLargePivot;
+        let legacy_selection =
+            std::env::var("METATORIO_LP_COLUMN_SELECTION").is_ok_and(|value| value == "legacy");
+        let mut selection_policy = if legacy_selection {
+            None
+        } else {
+            Some(ColumnSelectionPolicy::new(self, control)?)
+        };
         // A round may add columns or resume an interrupted Phase I basis.
         // Neither a fixed round count nor the number of nonbasic columns is
         // an algorithmic dimension limit. The caller's control bounds search;
@@ -198,7 +378,16 @@ impl Model {
                         infeasibility: Some(proof),
                     });
                 }
-                self.column_generation_prices(&ray, true, &included)?
+                let missing = if let Some(policy) = &mut selection_policy {
+                    self.column_generation_diverse_prices(&ray, true, &included, policy, control)?
+                } else {
+                    self.column_generation_prices(&ray, true, &included)?
+                };
+                if std::env::var("METATORIO_LP_ROUTE").is_ok_and(|value| value == "0") {
+                    missing
+                } else {
+                    self.column_generation_close_farkas_routes(missing, &included, control)?
+                }
             } else {
                 let working_certificate = working.certify(&solution)?;
                 if !working_certificate.primal_feasible
@@ -219,11 +408,24 @@ impl Model {
                         working_certificate.violated_rows,
                         working_certificate.violated_dual_signs
                     );
+                    if let Some(policy) = &mut selection_policy {
+                        policy.expand();
+                    }
                     continue;
                 }
                 let (adjusted, _, certificate) = self.scale_to_dual_feasible_certified(&lifted)?;
                 if !certificate.primal_feasible {
                     return Err("column generation full primal lift failed".into());
+                }
+                if profile && !first_feasible_reported {
+                    eprintln!(
+                        "[LP-EXACT-COLUMNS-PROFILE] first_feasible_s={:.6} round={} support={} cost={}",
+                        search_began.elapsed().as_secs_f64(),
+                        round + 1,
+                        selected.len(),
+                        certificate.objective
+                    );
+                    first_feasible_reported = true;
                 }
                 let gap = certificate.relative_gap()?;
                 if gap.as_ref().is_some_and(|g| g <= budget) {
@@ -240,13 +442,41 @@ impl Model {
                         infeasibility: None,
                     });
                 }
-                self.column_generation_prices(&lifted.row_duals, false, &included)?
+                if let Some(policy) = &mut selection_policy {
+                    self.column_generation_diverse_prices(
+                        &lifted.row_duals,
+                        false,
+                        &included,
+                        policy,
+                        control,
+                    )?
+                } else {
+                    self.column_generation_prices(&lifted.row_duals, false, &included)?
+                }
             };
             if missing.is_empty() {
                 return Err("column generation has no certified terminal outcome or improving missing column".into());
             }
             for &j in &missing {
                 included[j] = true;
+            }
+            if profile {
+                if let Some(policy) = &selection_policy {
+                    eprintln!(
+                        "[LP-EXACT-COLUMNS-PROFILE] round={} selected={} unique_families={} batch_limit={} next_batch_limit={}",
+                        round + 1,
+                        missing.len(),
+                        policy.last_unique,
+                        policy.last_limit,
+                        policy.batch_limit
+                    );
+                } else {
+                    eprintln!(
+                        "[LP-EXACT-COLUMNS-PROFILE] round={} selected={} selection=legacy",
+                        round + 1,
+                        missing.len()
+                    );
+                }
             }
             eprintln!(
                 "[LP-EXACT-COLUMNS] round={} columns={} rows={} added={}",
@@ -289,6 +519,136 @@ impl Model {
         missing.sort_unstable_by(compare);
         Ok(missing.into_iter().take(64).map(|(j, _)| j).collect())
     }
+
+    /// Complete only Farkas repair proposals. Phase-II pricing stays small;
+    /// neither route ranking nor its failure can discard an exact-negative
+    /// column selected to escape a restricted infeasibility.
+    fn column_generation_close_farkas_routes(
+        &self,
+        missing: Vec<usize>,
+        included: &[bool],
+        control: &SolveControl,
+    ) -> Result<Vec<usize>, String> {
+        control.check()?;
+        let mut chosen = vec![false; self.columns.len()];
+        let mut expanded = Vec::with_capacity(missing.len());
+        for j in missing {
+            if !included[j] && !chosen[j] {
+                chosen[j] = true;
+                expanded.push(j);
+            }
+        }
+        if expanded.is_empty() {
+            return Ok(expanded);
+        }
+        let mut requests = Vec::new();
+        for (i, row) in self.rows.iter().enumerate() {
+            control.check()?;
+            let flipped = row.equality && row.rhs > 0.0;
+            let mut requested = [false; 2];
+            for (p, &(j, coefficient)) in row.terms.iter().enumerate() {
+                if p % 4096 == 0 {
+                    control.check()?;
+                }
+                if !chosen[j] || coefficient == 0.0 {
+                    continue;
+                }
+                let canonical_positive = (coefficient > 0.0) != flipped;
+                if canonical_positive || (row.equality && row.rhs == 0.0) {
+                    // Opposite ORIGINAL sign provides a consumed input or
+                    // disposes of a homogeneous equality byproduct. Preserve
+                    // even the smallest nonzero structural coefficients.
+                    requested[usize::from(coefficient < 0.0)] = true;
+                }
+            }
+            for (positive, yes) in requested.into_iter().enumerate() {
+                if yes {
+                    requests.push((i, positive != 0));
+                }
+            }
+        }
+        if requests.is_empty() {
+            return Ok(expanded);
+        }
+        match self.route_columns_for_rows_with_control(
+            &requests,
+            crate::RouteOptions::default(),
+            control,
+        ) {
+            Ok(route) => {
+                for (p, j) in route.into_iter().enumerate() {
+                    if p % 4096 == 0 {
+                        control.check()?;
+                    }
+                    if !included[j] && !chosen[j] {
+                        chosen[j] = true;
+                        expanded.push(j);
+                    }
+                }
+            }
+            Err(error) => {
+                control.check()?;
+                eprintln!(
+                    "[LP-EXACT-COLUMNS] Farkas route closure unavailable: {error}; keeping exact-priced columns"
+                );
+            }
+        }
+        Ok(expanded)
+    }
+
+    fn column_generation_diverse_prices(
+        &self,
+        duals: &[Rational],
+        zero_cost: bool,
+        included: &[bool],
+        policy: &mut ColumnSelectionPolicy,
+        control: &SolveControl,
+    ) -> Result<Vec<usize>, String> {
+        control.check()?;
+        let prices = self.pricing(
+            &ExactSolution {
+                values: vec![],
+                row_duals: duals.to_vec(),
+                basis_dimension: 0,
+            },
+            zero_cost,
+        );
+        control.check()?;
+        let mut missing = Vec::new();
+        let mut best_by_family: HashMap<u64, (usize, &crate::BigInt)> = HashMap::new();
+        for (j, price) in prices.numerators.iter().enumerate() {
+            if j % 4096 == 0 {
+                control.check()?;
+            }
+            // Keep exact sign eligibility, including arbitrarily tiny prices.
+            if included[j] || !price.is_negative() {
+                continue;
+            }
+            missing.push((j, price));
+            let best = best_by_family
+                .entry(policy.families[j])
+                .or_insert((j, price));
+            if price < best.1 || (price == best.1 && j < best.0) {
+                *best = (j, price);
+            }
+        }
+        let limit = policy.batch_limit.min(missing.len());
+        let mut representatives: Vec<_> = best_by_family.into_values().collect();
+        truncate_prices(&mut representatives, limit);
+        control.check()?;
+        let mut selected: Vec<_> = representatives.into_iter().map(|(j, _)| j).collect();
+        if selected.len() < limit {
+            let representatives: HashSet<_> = selected.iter().copied().collect();
+            missing.retain(|(j, _)| !representatives.contains(j));
+            truncate_prices(&mut missing, limit - selected.len());
+            selected.extend(missing.into_iter().map(|(j, _)| j));
+        }
+        control.check()?;
+        // No exclusion persists across rounds. Each nonempty exact-negative
+        // set admits at least one new column, even if every family hash agrees.
+        policy.record_batch(&selected);
+        Ok(selected)
+    }
 }
 
 #[cfg(test)]
@@ -304,6 +664,334 @@ mod tests {
                 cost: *cost,
             })
             .collect()
+    }
+
+    #[test]
+    fn farkas_route_closure_supplies_all_inputs_and_disposes_equality_byproducts() {
+        // Missing column 0 needs A and a tiny amount of B, produces the
+        // demanded output and a waste. B itself needs C from column 3.
+        let model = Model {
+            columns: columns(&[1.0, 1.0, 1.0, 1.0, 1.0]),
+            rows: vec![
+                Row {
+                    equality: false,
+                    rhs: -1.0,
+                    terms: vec![(0, -1.0)],
+                },
+                Row {
+                    equality: true,
+                    rhs: 0.0,
+                    terms: vec![(0, 1.0), (1, -1.0)],
+                },
+                Row {
+                    equality: true,
+                    rhs: 0.0,
+                    terms: vec![(0, 1e-200), (2, -1.0)],
+                },
+                Row {
+                    equality: true,
+                    rhs: 0.0,
+                    terms: vec![(2, 1.0), (3, -1.0)],
+                },
+                Row {
+                    equality: true,
+                    rhs: 0.0,
+                    terms: vec![(0, -1.0), (4, 1.0)],
+                },
+            ],
+            offset: 0.0,
+        };
+        let included = [false, true, false, false, false];
+        let expanded = model
+            .column_generation_close_farkas_routes(
+                vec![0, 0, 1],
+                &included,
+                &SolveControl::default(),
+            )
+            .unwrap();
+        assert_eq!(expanded, vec![0, 2, 3, 4]);
+        assert!(expanded.iter().all(|j| !included[*j]));
+        assert_eq!(
+            expanded.iter().copied().collect::<HashSet<_>>().len(),
+            expanded.len()
+        );
+    }
+    #[test]
+    fn diverse_pricing_keeps_other_signed_patterns_ahead_of_module_variants() {
+        let model = Model {
+            columns: columns(&vec![0.0; 102]),
+            rows: vec![
+                Row {
+                    equality: true,
+                    rhs: 0.0,
+                    terms: (0..100)
+                        .map(|j| (j, 10.0 + j as f64 * 1e-6))
+                        .chain([(100, -1.0)])
+                        .collect(),
+                },
+                Row {
+                    equality: true,
+                    rhs: 0.0,
+                    terms: vec![(100, 2.0), (101, 1.0)],
+                },
+            ],
+            offset: 0.0,
+        };
+        let control = SolveControl::default();
+        let mut policy = ColumnSelectionPolicy::new(&model, &control).unwrap();
+        policy.batch_limit = 3;
+        let selected = model
+            .column_generation_diverse_prices(
+                &[rational(1.0).unwrap(), rational(1.0).unwrap()],
+                true,
+                &[false; 102],
+                &mut policy,
+                &control,
+            )
+            .unwrap();
+        assert_eq!(selected, vec![99, 100, 101]);
+        assert_eq!(policy.last_unique, 3);
+        assert_eq!(policy.batch_limit, 3);
+    }
+
+    #[test]
+    fn diversity_admission_eventually_covers_all_improving_columns_even_with_hash_collisions() {
+        let n = 257;
+        let model = Model {
+            columns: columns(&vec![0.0; n]),
+            rows: vec![Row {
+                equality: true,
+                rhs: 0.0,
+                terms: (0..n).map(|j| (j, (j + 1) as f64)).collect(),
+            }],
+            offset: 0.0,
+        };
+        let control = SolveControl::default();
+        let mut policy = ColumnSelectionPolicy::new(&model, &control).unwrap();
+        // Deliberate collision: a family signature is never an equivalence
+        // proof and must never become a persistent exclusion.
+        policy.families.fill(0);
+        let mut included = vec![false; n];
+        let mut batches = Vec::new();
+        loop {
+            let selected = model
+                .column_generation_diverse_prices(
+                    &[rational(1.0).unwrap()],
+                    true,
+                    &included,
+                    &mut policy,
+                    &control,
+                )
+                .unwrap();
+            if selected.is_empty() {
+                break;
+            }
+            batches.push(selected.len());
+            for j in selected {
+                assert!(!included[j]);
+                included[j] = true;
+            }
+            assert!(batches.len() <= n);
+        }
+        assert!(included.iter().all(|yes| *yes));
+        assert_eq!(batches, vec![32, 64, 128, 33]);
+    }
+
+    #[test]
+    fn diversity_families_survive_column_units_and_preserve_tiny_exact_negatives() {
+        let make = |scale: f64| Model {
+            columns: columns(&[0.0, 0.0, 0.0, 0.0]),
+            rows: vec![
+                Row {
+                    equality: true,
+                    rhs: 0.0,
+                    terms: vec![(0, 4.0 * scale), (1, 3.0), (2, -1e-200)],
+                },
+                Row {
+                    equality: true,
+                    rhs: 0.0,
+                    terms: vec![(2, 2e-200), (3, 1e-250)],
+                },
+            ],
+            offset: 0.0,
+        };
+        let control = SolveControl::default();
+        let mut signatures = None;
+        for scale in [1e-100, 1.0, 1e100] {
+            let model = make(scale);
+            let mut policy = ColumnSelectionPolicy::new(&model, &control).unwrap();
+            if let Some(expected) = &signatures {
+                assert_eq!(&policy.families, expected);
+            } else {
+                signatures = Some(policy.families.clone());
+            }
+            policy.batch_limit = 3;
+            let selected = model
+                .column_generation_diverse_prices(
+                    &[rational(1.0).unwrap(), rational(1.0).unwrap()],
+                    true,
+                    &[false; 4],
+                    &mut policy,
+                    &control,
+                )
+                .unwrap();
+            assert_eq!(selected.len(), 3);
+            assert!(selected.contains(&2));
+            assert!(selected.contains(&3));
+            assert_eq!(policy.last_unique, 3);
+        }
+    }
+
+    #[test]
+    fn incomplete_and_repeated_directions_expand_batches_deterministically() {
+        let model = Model {
+            columns: columns(&vec![0.0; 200]),
+            rows: vec![],
+            offset: 0.0,
+        };
+        let mut policy = ColumnSelectionPolicy::new(&model, &SolveControl::default()).unwrap();
+        assert_eq!(policy.batch_limit, 32);
+        policy.expand();
+        assert_eq!(policy.batch_limit, 64);
+        policy.record_batch(&[0, 1, 2, 3]);
+        assert_eq!(policy.last_limit, 64);
+        assert_eq!(policy.last_unique, 1);
+        assert_eq!(policy.batch_limit, 128);
+        policy.record_batch(&[4]);
+        assert_eq!(policy.batch_limit, 200);
+    }
+
+    #[test]
+    fn diversity_cache_honors_cancellation() {
+        use std::sync::{Arc, atomic::AtomicBool};
+        let control = SolveControl::default().with_cancellation(Arc::new(AtomicBool::new(true)));
+        let model = Model {
+            columns: columns(&[1.0]),
+            rows: vec![Row {
+                equality: true,
+                rhs: 1.0,
+                terms: vec![(0, 1.0)],
+            }],
+            offset: 0.0,
+        };
+        assert!(ColumnSelectionPolicy::new(&model, &control).is_err());
+    }
+
+    #[test]
+    fn diverse_pricing_finds_original_optimum_through_a_material_cycle() {
+        let model = Model {
+            columns: columns(&[4.0, 1.0, 0.25, 10.0]),
+            rows: vec![
+                Row {
+                    equality: false,
+                    rhs: 0.0,
+                    terms: vec![(0, -1.0), (1, 1.0), (2, -1.0)],
+                },
+                Row {
+                    equality: false,
+                    rhs: -1.0,
+                    terms: vec![(1, -2.0), (2, 1.0), (3, -1.0)],
+                },
+            ],
+            offset: 0.0,
+        };
+        let result = model
+            .solve_column_generation_with_control(
+                Some(&[0.0, 0.0, 0.0, 1.0]),
+                &Rational::zero(),
+                &SolveControl::default(),
+            )
+            .unwrap();
+        assert!(result.accepted && result.certificate.optimal);
+        assert_eq!(result.certificate.objective, "5/4");
+        assert!(model.certify(&result.solution).unwrap().optimal);
+    }
+    #[test]
+    fn feasible_nonoptimal_original_basis_expands_to_full_optimum() {
+        let model = Model {
+            columns: columns(&[4.0, 1.0]),
+            rows: vec![Row {
+                equality: true,
+                rhs: 1.0,
+                terms: vec![(0, 1.0), (1, 1.0)],
+            }],
+            offset: 0.0,
+        };
+        let basis = Basis {
+            columns: vec![BasisStatus::Basic, BasisStatus::Lower],
+            rows: vec![BasisStatus::Upper],
+        };
+        let initial = model.certify(&model.reconstruct(&basis).unwrap()).unwrap();
+        assert!(initial.primal_feasible && !initial.optimal);
+        let result = model
+            .solve_column_generation_from_basis_with_control(
+                &basis,
+                &Rational::zero(),
+                &SolveControl::default(),
+            )
+            .unwrap();
+        assert!(result.accepted && result.certificate.optimal);
+        assert_eq!(result.certificate.objective, "1");
+        assert_eq!(result.support_search_pivots, 0);
+        assert_eq!(result.support_columns, 2);
+        assert!(model.certify(&result.solution).unwrap().optimal);
+    }
+    #[test]
+    fn original_basis_must_be_supported_square_and_exactly_primal_feasible() {
+        let model = Model {
+            columns: columns(&[1.0]),
+            rows: vec![Row {
+                equality: false,
+                rhs: -1.0,
+                terms: vec![(0, -1.0)],
+            }],
+            offset: 0.0,
+        };
+        let infeasible = Basis {
+            columns: vec![BasisStatus::Lower],
+            rows: vec![BasisStatus::Basic],
+        };
+        let error = model
+            .solve_column_generation_from_basis_with_control(
+                &infeasible,
+                &Rational::zero(),
+                &SolveControl::default(),
+            )
+            .err()
+            .expect("infeasible basis must be rejected");
+        assert!(error.contains("not original-model primal feasible"));
+        for invalid in [
+            Basis {
+                columns: vec![],
+                rows: vec![BasisStatus::Basic],
+            },
+            Basis {
+                columns: vec![BasisStatus::Zero],
+                rows: vec![BasisStatus::Basic],
+            },
+            Basis {
+                columns: vec![BasisStatus::Basic],
+                rows: vec![BasisStatus::Basic],
+            },
+        ] {
+            assert!(
+                model
+                    .solve_column_generation_from_basis_with_control(
+                        &invalid,
+                        &Rational::zero(),
+                        &SolveControl::default()
+                    )
+                    .is_err()
+            );
+        }
+        let seeded = model
+            .solve_column_generation_with_control(
+                Some(&[1.0]),
+                &Rational::zero(),
+                &SolveControl::default(),
+            )
+            .unwrap();
+        assert!(seeded.accepted && seeded.certificate.optimal);
     }
     #[test]
     fn sparse_master_and_dense_fallback_find_the_full_certified_optimum() {

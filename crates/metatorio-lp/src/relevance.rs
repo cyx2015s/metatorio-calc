@@ -184,12 +184,20 @@ impl Model {
             self.rows.len(),
             reduced.rows.len()
         );
-        let hint = reduced
+        let projected = reduced.model.free_supply_projection_with_control(control)?;
+        eprintln!(
+            "[LP-FREE-SUPPLY] columns={} -> {} rows={} -> {}",
+            reduced.model.columns.len(),
+            projected.model.columns.len(),
+            reduced.model.rows.len(),
+            projected.model.rows.len()
+        );
+        let hint = projected
             .model
             .float_candidate_with_options(options, max_pivots, |p| {
                 !control.is_cancelled() && observer(p)
             })?;
-        reduced.lift_candidate(hint)
+        reduced.lift_candidate(projected.lift_candidate(hint)?)
     }
 }
 

@@ -86,6 +86,7 @@ struct SearchWork {
     support: usize,
     first_values: Option<Vec<f64>>,
     incumbent: Option<Vec<exact::Rational>>,
+    feasible_basis: Option<exact::Basis>,
 }
 struct AttemptConfig {
     options: exact::FloatOptions,
@@ -248,7 +249,11 @@ fn solve_rust_proposal(
             &mut work,
         );
         crate::control::check_cancelled()?;
-        let recover_now = if certified { index == 2 } else { index == 0 };
+        let recover_now = if certified {
+            index == 2 || work.feasible_basis.is_some()
+        } else {
+            index == 0
+        };
         if certified
             && recover_now
             && matches!(&last, Err(Failure::Other(_)))
@@ -275,13 +280,25 @@ fn solve_rust_proposal(
                 // large Phase I subsystem before finding a feasible chain.
                 // Preserve time for constraint generation; seeded recovery keeps
                 // its established budget. Neither stop establishes infeasibility.
-                let seconds = remaining.min(if seed.is_some() { 900.0 } else { 60.0 });
+                let seconds = remaining.min(if seed.is_some() || work.feasible_basis.is_some() {
+                    900.0
+                } else {
+                    60.0
+                });
                 let deadline = Instant::now() + std::time::Duration::from_secs_f64(seconds);
                 eprintln!(
-                    "[LP-RUST-COLUMNS] recovering failed hint with exact column pricing seed={} seconds={seconds:.2}",
-                    seed.is_some()
+                    "[LP-RUST-COLUMNS] recovering failed hint with exact column pricing seed={} warm_basis={} seconds={seconds:.2}",
+                    seed.is_some(),
+                    work.feasible_basis.is_some()
                 );
-                match recover_columns(snapshot, captured, seed, deadline, !certified) {
+                match recover_columns(
+                    snapshot,
+                    captured,
+                    seed,
+                    work.feasible_basis.as_ref(),
+                    deadline,
+                    !certified,
+                ) {
                     result @ Ok(_)
                     | result @ Err(Failure::Infeasible | Failure::UnsupportedModel(_)) => {
                         return result;
@@ -397,7 +414,46 @@ fn solve_rust_proposal_attempt(
             Some("1") => true,
             _ => attempt.index == 0,
         };
-    let proposal = if use_relevance {
+    // Find a small feasible route before pricing every enumerated variant.
+    // This path reads only the current model; no previous plan is required.
+    let route = if attempt.index == 0
+        && eligible
+        && std::env::var("METATORIO_LP_ROUTE").as_deref() != Ok("0")
+    {
+        let route_control = control.limited_to(Instant::now() + std::time::Duration::from_secs(10));
+        match model.float_candidate_after_route_with_control(
+            options,
+            20000,
+            |_| crate::control::check_cancelled().is_ok(),
+            &route_control,
+        ) {
+            Ok(route) => {
+                work.feasible_basis = Some(route.candidate.basis.clone());
+                if std::env::var("METATORIO_LP_COST_BOUNDS").as_deref() == Ok("1") {
+                    work.incumbent = Some(route.solution.values);
+                }
+                Some(route.candidate)
+            }
+            Err(error) => {
+                crate::control::check_cancelled()?;
+                if control.is_cancelled() {
+                    return Err(
+                        "original-model hint search cancelled; no terminal status established"
+                            .to_string()
+                            .into(),
+                    );
+                }
+                eprintln!("[LP-ROUTE-STOP] {error}; continuing original-model hint search");
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let route_primal_verified = route.is_some();
+    let proposal = if let Some(route) = route {
+        route
+    } else if use_relevance {
         model.float_candidate_after_relevance_with_control(
             options,
             20000,
@@ -428,8 +484,10 @@ fn solve_rust_proposal_attempt(
     // because the search consumed most of the short attempt allowance.
     let deadline = if certified
         && !attempt.full_refinement
-        && proposal.diagnostic.is_none()
-        && proposal.stop_reason == "floating primal tolerances met; exact verification required"
+        && (route_primal_verified
+            || (proposal.diagnostic.is_none()
+                && proposal.stop_reason
+                    == "floating primal tolerances met; exact verification required"))
     {
         deadline.max((start.elapsed().as_secs_f64() + 45.0).min(RUST_SEARCH_SECONDS - 60.0))
     } else {
@@ -525,6 +583,7 @@ fn solve_rust_proposal_attempt(
     }
     if certified {
         let allow_support = attempt.full_refinement
+            || route_primal_verified
             || (proposal.diagnostic.is_none()
                 && proposal.stop_reason
                     == "floating primal tolerances met; exact verification required");
@@ -546,6 +605,11 @@ fn solve_rust_proposal_attempt(
         )?;
         work.exact += result.exact_pivots;
         work.support += result.support_search_pivots;
+        if !result.accepted && result.certificate.primal_feasible {
+            // Preserve degenerate basic columns as well as positive flow.
+            // Column recovery independently revalidates the original basis.
+            work.feasible_basis = Some(result.primal_basis.clone());
+        }
         if !result.accepted
             && result.certificate.primal_feasible
             && std::env::var("METATORIO_LP_COST_BOUNDS").as_deref() == Ok("1")
@@ -682,6 +746,7 @@ fn recover_columns(
     snapshot: &Snapshot,
     captured: Option<&std::path::Path>,
     seed: Option<&[f64]>,
+    basis: Option<&exact::Basis>,
     deadline: Instant,
     require_optimal: bool,
 ) -> std::result::Result<Result, Failure> {
@@ -691,13 +756,13 @@ fn recover_columns(
     } else {
         exact::Rational::new(1.into(), 1_000_000_000_000u64.into())
     };
-    let result = snapshot
-        .exact_model()
-        .solve_column_generation_with_control(
-            seed,
-            &budget,
-            &crate::control::exact_control(deadline),
-        )?;
+    let model = snapshot.exact_model();
+    let control = crate::control::exact_control(deadline);
+    let result = if let Some(basis) = basis {
+        model.solve_column_generation_from_basis_with_control(basis, &budget, &control)
+    } else {
+        model.solve_column_generation_with_control(seed, &budget, &control)
+    }?;
     if let Some(proof) = result.infeasibility {
         crate::lp_row_generation::save(
             captured,
