@@ -52,7 +52,7 @@ pub struct SolveDiagnostics {
     /// 求解变量数 / 解里非零的变量数（顶点解下就是支撑集大小）。
     pub variables_before: usize,
     pub variables_after: usize,
-    /// 本次求解使用的后端。旧结果没有该字段时按 rust-certified 解释。
+    /// 本次求解使用的后端。旧结果没有该字段时按 Rust based（rust-certified）解释。
     #[serde(default = "legacy_solver")]
     pub solver: metatorio_solver::LpSolver,
     /// Exact certificate for the returned factory LP. After auto-plan this is
@@ -88,7 +88,7 @@ pub struct SolveDiagnostics {
 }
 
 fn legacy_solver() -> metatorio_solver::LpSolver {
-    metatorio_solver::LpSolver::RustCertified
+    metatorio_solver::LpSolver::RustBased
 }
 
 impl SolveDiagnostics {

@@ -72,13 +72,13 @@ pub struct ProjectSettings {
     pub mining_productivity: f64,
     pub all_accessible: bool,
     pub quality_limit: Option<String>,
-    /// 项目级 LP 后端。旧文档没有该字段时沿用 rust-certified。
+    /// 项目级 LP 后端。旧文档没有该字段时沿用 Rust based（序列化 id 为 rust-certified）。
     #[serde(default = "legacy_project_solver")]
     pub solver: LpSolver,
 }
 
 fn legacy_project_solver() -> LpSolver {
-    LpSolver::RustCertified
+    LpSolver::RustBased
 }
 
 impl Default for ProjectSettings {
@@ -430,7 +430,7 @@ mod tests {
     #[test]
     fn legacy_project_settings_stay_on_rust_and_new_projects_pick_a_compiled_solver() {
         let legacy: ProjectSettings = serde_json::from_str("{}").unwrap();
-        assert_eq!(legacy.solver, LpSolver::RustCertified);
+        assert_eq!(legacy.solver, LpSolver::RustBased);
         let fresh = ProjectSettings::default();
         assert!(fresh.solver.is_available());
         assert_eq!(fresh.solver, LpSolver::default());

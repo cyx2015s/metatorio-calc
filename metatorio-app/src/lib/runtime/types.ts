@@ -472,7 +472,7 @@ export interface ProjectSettings {
   mining_productivity: number;
   all_accessible: boolean;
   quality_limit: string | null;
-  /** 项目级 LP 后端。旧文档缺省为 rust-certified。 */
+  /** 项目级 LP 后端。旧文档缺省为 Rust based（序列化 id 仍为 rust-certified）。 */
   solver: LpSolver;
 }
 

@@ -12,7 +12,10 @@ pub enum LpSolver {
     Clarabel,
     Highs,
     Microlp,
-    RustCertified,
+    /// Legacy Rust path. The serialized id remains `rust-certified` so existing
+    /// project files keep loading; `rust-based` is accepted as an alias.
+    #[serde(rename = "rust-certified", alias = "rust-based")]
+    RustBased,
 }
 
 impl Default for LpSolver {
@@ -26,25 +29,20 @@ impl Default for LpSolver {
         } else if cfg!(feature = "microlp") {
             Self::Microlp
         } else {
-            Self::RustCertified
+            Self::RustBased
         }
     }
 }
 
 impl LpSolver {
-    pub const ALL: [Self; 4] = [
-        Self::Clarabel,
-        Self::Highs,
-        Self::Microlp,
-        Self::RustCertified,
-    ];
+    pub const ALL: [Self; 4] = [Self::Clarabel, Self::Highs, Self::Microlp, Self::RustBased];
 
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Clarabel => "clarabel",
             Self::Highs => "highs",
             Self::Microlp => "microlp",
-            Self::RustCertified => "rust-certified",
+            Self::RustBased => "rust-certified",
         }
     }
 
@@ -53,7 +51,7 @@ impl LpSolver {
             Self::Clarabel => "Clarabel",
             Self::Highs => "HiGHS",
             Self::Microlp => "microlp",
-            Self::RustCertified => "Rust (certified)",
+            Self::RustBased => "Rust based",
         }
     }
 
@@ -62,14 +60,14 @@ impl LpSolver {
             Self::Clarabel => cfg!(feature = "clarabel"),
             Self::Highs => cfg!(feature = "highs"),
             Self::Microlp => cfg!(feature = "microlp"),
-            Self::RustCertified => cfg!(feature = "rust-lp"),
+            Self::RustBased => cfg!(feature = "rust-lp"),
         }
     }
 
     pub fn unavailable_reason(self) -> String {
         format!(
             "LP backend {} is unavailable in this build (missing Cargo feature)",
-            self.as_str()
+            self.label()
         )
     }
 }
@@ -88,7 +86,7 @@ impl std::str::FromStr for LpSolver {
             "clarabel" => Ok(Self::Clarabel),
             "highs" => Ok(Self::Highs),
             "microlp" => Ok(Self::Microlp),
-            "rust-certified" => Ok(Self::RustCertified),
+            "rust-certified" | "rust-based" => Ok(Self::RustBased),
             _ => Err(format!("unknown LP solver: {value}")),
         }
     }

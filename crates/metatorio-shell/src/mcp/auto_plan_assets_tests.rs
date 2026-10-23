@@ -109,7 +109,7 @@ async fn finish(mcp: &MetatorioMcp, ids: &Value) -> Value {
 }
 
 fn assert_certified(result: &metatorio_runtime::SolveResult) {
-    if result.report.solver == metatorio_solver::LpSolver::RustCertified {
+    if result.report.solver == metatorio_solver::LpSolver::RustBased {
         if !result.report.exact_primal_verified {
             assert!(
                 result.report.relative_primal_verified,

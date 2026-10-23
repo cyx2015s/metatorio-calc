@@ -21,7 +21,7 @@ pub struct SolveReport {
     pub variables_after: usize,
     /// 本次实际选用的后端。
     pub solver: LpSolver,
-    /// 以下字段由仍带证书的 rust-certified 后端填写；其他后端保持默认值。
+    /// 以下字段由仍带证书的 Rust based 后端填写；其他后端保持默认值。
     pub exact_primal_verified: bool,
     pub exact_optimality_verified: bool,
     pub certified_relative_gap: Option<f64>,
@@ -234,7 +234,7 @@ mod good_lp_backend {
                 #[cfg(not(feature = "microlp"))]
                 return Err(ResolutionError::Str(solver.unavailable_reason()));
             }
-            LpSolver::RustCertified => Err(ResolutionError::Str(solver.unavailable_reason())),
+            LpSolver::RustBased => Err(ResolutionError::Str(solver.unavailable_reason())),
         }
     }
 }
@@ -263,7 +263,7 @@ fn assemble(
 
 /// 使用默认后端求解连续 LP；项目级调用走 solve_lp_named 并传入项目设置。
 /// 默认值由编译进来的 feature 决定：优先 HiGHS，其次 Clarabel、microlp，
-/// 最后才是 rust-certified。
+/// 最后才是 Rust based。
 pub fn solve_lp(
     minimise: Expression,
     constraints: Vec<Constraint>,
@@ -362,7 +362,7 @@ fn solve_lp_impl(
     }
 
     #[cfg(feature = "rust-lp")]
-    if solver == LpSolver::RustCertified {
+    if solver == LpSolver::RustBased {
         return solve_rust_backend(minimise, defs, orig_vars, objective, rows, labels, solver);
     }
 
@@ -517,7 +517,7 @@ mod tests {
                     LpSolver::Clarabel => cfg!(feature = "clarabel"),
                     LpSolver::Highs => cfg!(feature = "highs"),
                     LpSolver::Microlp => cfg!(feature = "microlp"),
-                    LpSolver::RustCertified => cfg!(feature = "rust-lp"),
+                    LpSolver::RustBased => cfg!(feature = "rust-lp"),
                 }
             );
         }

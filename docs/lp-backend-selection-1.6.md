@@ -9,11 +9,11 @@
 | `clarabel` | Clarabel | 纯 Rust 内点法 |
 | `highs` | HiGHS | 原生单纯形 |
 | `microlp` | microlp | 纯 Rust 单纯形 |
-| `rust-certified` | 旧 Rust 路径 | 当前仍保留内部证书 |
+| `rust-certified` | Rust based（序列化 id 仍为 `rust-certified`） | 当前仍保留内部证书 |
 
 默认构建启用四个 feature。新项目使用编译进来的首选后端（有 HiGHS 时默认
-`highs`，否则 Clarabel / microlp / rust-certified）；旧文档没有 `solver`
-字段时按 `rust-certified` 解释。
+`highs`，否则 Clarabel / microlp / Rust based）；旧文档没有 `solver`
+字段时按 Rust based（序列化 id `rust-certified`）解释。
 
 ## 不再做的事
 

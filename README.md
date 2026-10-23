@@ -62,8 +62,8 @@
 | Tauri v2 系统库 | 见下 | 桌面壳 | Linux 打包 |
 
 > 默认构建编译四个项目级后端：Clarabel、HiGHS、microlp 和旧的
-> `rust-certified`。新项目默认使用 HiGHS；旧文档没有 `solver` 字段时沿用
-> `rust-certified`。HiGHS 会通过 CMake 编译内置源码，再用 bindgen 生成绑定，
+> `Rust based`（序列化 id 仍为 `rust-certified`）。新项目默认使用 HiGHS；
+> 旧文档没有 `solver` 字段时沿用 Rust based。HiGHS 会通过 CMake 编译内置源码，再用 bindgen 生成绑定，
 > 因此需要上表的 C++ / CMake / LLVM。纯 Rust 构建可传
 > `--no-default-features --features clarabel,microlp,rust-lp`，或只启用一个后端。
 > 后端在项目设置中选择，不再读取 `METATORIO_LP_BACKEND`。

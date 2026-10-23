@@ -7,7 +7,7 @@ settings; the default build compiles four choices:
 - `clarabel` (pure Rust interior point)
 - `highs` (native simplex)
 - `microlp` (pure Rust simplex)
-- `rust-certified` (legacy pure Rust path)
+- `rust-certified` (displayed as `Rust based`; legacy pure Rust path)
 
 ```powershell
 cargo build --release -p metatorio-headless
@@ -19,7 +19,7 @@ cargo check -p metatorio-solver --no-default-features --features microlp
 The adapter no longer performs a post-solve original-model check, certificate
 rejection, retry ladder or writeback self-check. The chosen backend's result is
 returned directly; infeasible, unbounded, numerical failure and timeout are
-reported as the backend reports them. The legacy `rust-certified` backend still
+reported as the backend reports them. The legacy `Rust based` backend still
 uses its internal exact machinery, but the adapter does not re-validate it.
 
 These guarantees apply to the binary floating coefficients received by the LP;

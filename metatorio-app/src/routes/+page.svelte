@@ -1546,10 +1546,10 @@
                   .setSolver((event.currentTarget as HTMLSelectElement).value as import("$lib/runtime/types").LpSolver)
                   .catch(() => {})}
             >
-              <option value="highs">HiGHS</option>
+              <option value="highs">HiGHS（推荐）</option>
               <option value="clarabel">Clarabel</option>
               <option value="microlp">microlp</option>
-              <option value="rust-certified">Rust（certified）</option>
+              <option value="rust-certified">Rust based</option>
             </select>
             <span class="muted">项目级设置；切换后重新求解全部工厂。</span>
           </div>

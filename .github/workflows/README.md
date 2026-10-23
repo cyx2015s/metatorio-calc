@@ -9,9 +9,10 @@ Linux 和 Windows 的 GUI、headless 构建统一使用 **Rust nightly**。workf
 
 ### 可选原生构建依赖（HiGHS）
 
-默认构建使用纯 Rust `rust-certified`，不依赖 HiGHS。启用 `highs` 或
-`lp-experiments` 时，`metatorio-solver` 通过 `good_lp` 的 `highs` feature
-依赖 [HiGHS](https://highs.dev/)。
+默认构建包含 HiGHS（以及 Clarabel、microlp、Rust based）。纯 Rust 构建可用
+`--no-default-features --features clarabel,microlp,rust-lp`。启用 `highs` 时，
+`metatorio-solver` 通过 `good_lp` 的 `highs` feature 依赖
+[HiGHS](https://highs.dev/)。
 `highs` crate 内置其 C++ 源码，构建时会用 **CMake** 编译、用 **bindgen** 生成绑定，
 因此运行可选原生后端的 CI 需要装齐以下工具；现有发布 workflow 仍保留这些安装步骤：
 
