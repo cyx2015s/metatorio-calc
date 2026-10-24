@@ -229,7 +229,7 @@ fn universe_expression_reordering_uses_the_same_wire_contract_as_shared_panels()
 fn universe_preview_preserves_locations_disabled_entries_and_individual_errors() {
     use metatorio_core::{
         IdWithQuality, ItemFuelMechanic, LocalLocatedMechanic, LocatedMechanic, Location, Mechanic,
-        RecipeMechanic, TransferLocatedMechanic,
+        TransferLocatedMechanic,
     };
     use metatorio_runtime::document::{ProjectDocument, UniverseDocument, UniverseMechanicEntry};
     use metatorio_runtime::id::MechanicId;
@@ -256,9 +256,9 @@ fn universe_preview_preserves_locations_disabled_entries_and_individual_errors()
             UniverseMechanicEntry {
                 id: MechanicId(3),
                 enabled: true,
-                mechanic: LocatedMechanic::Local(LocalLocatedMechanic {
+                mechanic: LocatedMechanic::Transfer(TransferLocatedMechanic {
                     location: Location::Space,
-                    mechanic: Mechanic::Recipe(RecipeMechanic::default()),
+                    item: IdWithQuality::new("coal", "normal"),
                 }),
             },
         ],

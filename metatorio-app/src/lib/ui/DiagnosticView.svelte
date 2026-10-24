@@ -4,17 +4,19 @@
   import { presentFlow } from "$lib/dual-var";
   import { normalizeSearch } from "$lib/rich-text";
   import FlowRef from "./FlowRef.svelte";
-  let { diagnostic, onFlowClick }: { diagnostic: RuntimeDiagnostic; onFlowClick?: (flow: DualVar) => void } = $props();
+  import LocationIcon from './LocationIcon.svelte';
+  let { diagnostic, onFlowClick }: { diagnostic: RuntimeDiagnostic; onFlowClick?: (flow: DualVar,location?:import("$lib/runtime/types").Location) => void } = $props();
   let query = $state("");
   let sections = $derived([
-    {label: "无供给", flows: diagnostic.no_provider},
-    {label: "无消耗", flows: diagnostic.no_consumer},
-    {label: "关联对象", flows: diagnostic.flows},
+    {label: "无供给", flows: [...diagnostic.no_provider.map(flow=>({flow,location:undefined as import("$lib/runtime/types").Location|undefined})),...(diagnostic.located_no_provider??[])]},
+    {label: "无消耗", flows: [...diagnostic.no_consumer.map(flow=>({flow,location:undefined as import("$lib/runtime/types").Location|undefined})),...(diagnostic.located_no_consumer??[])]},
+    {label: "关联对象", flows: diagnostic.flows.map(flow=>({flow,location:undefined as import("$lib/runtime/types").Location|undefined}))},
   ]);
   let total = $derived(sections.reduce((sum, section) => sum + section.flows.length, 0));
   let needle = $derived(normalizeSearch(query));
-  function matches(flow: DualVar) {
-    return !needle || normalizeSearch(`${presentFlow(flow, (kind, name) => runtime.localizedName(kind, name)).description} ${JSON.stringify(flow)}`).includes(needle);
+  function matches(row:{flow:DualVar;location?:import("$lib/runtime/types").Location}) {
+    const flow=row.flow;
+    return !needle || normalizeSearch(`${presentFlow(flow, (kind, name) => runtime.localizedName(kind, name)).description} ${JSON.stringify(flow)} ${JSON.stringify(row.location)}`).includes(needle);
   }
 </script>
 
@@ -28,8 +30,7 @@
           <strong>{section.label} <small>{section.flows.filter(matches).length}/{section.flows.length}</small></strong>
           <div class="diagnostic-flows">
             {#each section.flows.filter(matches) as flow, i (i)}
-              <FlowRef {flow} onClick={onFlowClick ? () => onFlowClick?.(flow) : undefined}
-                title={onFlowClick ? "查看供给与消耗建议" : undefined} />
+              <div class="located-row">{#if flow.location}<LocationIcon location={flow.location} size={22}/>{/if}<FlowRef flow={flow.flow} onClick={onFlowClick?()=>onFlowClick?.(flow.flow,flow.location):undefined} title={onFlowClick?"查看供给与消耗建议":undefined}/></div>
             {:else}<span class="muted">没有匹配的对象</span>{/each}
           </div>
         </div>
@@ -39,6 +40,7 @@
 </section>
 
 <style>
+  .located-row{display:flex;align-items:center;gap:5px}
   .diagnostic { min-width: 0; }
   .diagnostic-message { white-space: pre-wrap; overflow-wrap: anywhere; }
   input { width: 100%; min-width: 0; margin-top: 7px; }

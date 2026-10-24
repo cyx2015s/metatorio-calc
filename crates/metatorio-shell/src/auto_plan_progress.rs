@@ -19,15 +19,23 @@ pub(crate) struct PlanningProgress {
     host: Arc<dyn Host>,
     project: ProjectId,
     factory: FactoryId,
+    universe: Option<metatorio_runtime::UniverseId>,
     run_id: u64,
     state: Arc<Mutex<State>>,
 }
 
-fn send(host: &dyn Host, project: ProjectId, factory: FactoryId, run_id: u64, state: &State) {
+fn send(
+    host: &dyn Host,
+    project: ProjectId,
+    factory: FactoryId,
+    universe: Option<metatorio_runtime::UniverseId>,
+    run_id: u64,
+    state: &State,
+) {
     host.emit(
         "auto-plan-progress",
         serde_json::json!({
-            "project": project, "factory": factory, "run_id": run_id,
+            "project": project, "factory": factory, "universe":universe, "run_id": run_id,
             "running": state.active, "stage": state.progress.stage,
             "variables": state.progress.variables, "constraints": state.progress.constraints,
         }),
@@ -36,26 +44,43 @@ fn send(host: &dyn Host, project: ProjectId, factory: FactoryId, run_id: u64, st
 
 impl PlanningProgress {
     pub(crate) fn start(host: Arc<dyn Host>, project: ProjectId, factory: FactoryId) -> Self {
+        Self::start_scoped(host, project, factory, None)
+    }
+    pub(crate) fn start_universe(
+        host: Arc<dyn Host>,
+        project: ProjectId,
+        universe: metatorio_runtime::UniverseId,
+    ) -> Self {
+        Self::start_scoped(host, project, FactoryId(universe.0), Some(universe))
+    }
+    fn start_scoped(
+        host: Arc<dyn Host>,
+        project: ProjectId,
+        factory: FactoryId,
+        universe: Option<metatorio_runtime::UniverseId>,
+    ) -> Self {
         let state = State {
             active: true,
             progress: AutoPlanProgress::preparing(),
         };
         let run_id = NEXT_RUN.fetch_add(1, Ordering::Relaxed);
-        send(host.as_ref(), project, factory, run_id, &state);
+        send(host.as_ref(), project, factory, universe, run_id, &state);
         Self {
             host,
             project,
             factory,
+            universe,
             run_id,
             state: Arc::new(Mutex::new(state)),
         }
     }
 
     pub(crate) fn observer(&self) -> Box<dyn Fn(AutoPlanProgress) + Send + Sync> {
-        let (host, project, factory, run_id, state) = (
+        let (host, project, factory, universe, run_id, state) = (
             self.host.clone(),
             self.project,
             self.factory,
+            self.universe,
             self.run_id,
             self.state.clone(),
         );
@@ -64,7 +89,7 @@ impl PlanningProgress {
                 && state.active
             {
                 state.progress = progress;
-                send(host.as_ref(), project, factory, run_id, &state);
+                send(host.as_ref(), project, factory, universe, run_id, &state);
             }
         })
     }
@@ -78,6 +103,7 @@ impl Drop for PlanningProgress {
                 self.host.as_ref(),
                 self.project,
                 self.factory,
+                self.universe,
                 self.run_id,
                 &state,
             );

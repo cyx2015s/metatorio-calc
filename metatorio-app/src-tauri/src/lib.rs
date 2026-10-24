@@ -204,7 +204,7 @@ async fn auto_plan_universe(
     host: HostState<'_>,
     project: ProjectId,
     universe: UniverseId,
-) -> Result<metatorio_runtime::UniverseSolveResult, String> {
+) -> Result<metatorio_runtime::UniverseSolveResult, metatorio_runtime::Diagnostic> {
     let host = host_of(&host);
     let state = host.state();
     metatorio_shell::app::auto_plan_universe_offlock(&host, state, project, universe).await

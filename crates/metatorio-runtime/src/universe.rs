@@ -8,14 +8,13 @@
 
 use std::collections::{BTreeSet, HashMap};
 
-use crate::prototype::{effective_module_slots, effective_recipe_categories};
 use metatorio_core::{
     AIndexMap, Context, DualVar, Flow, IdWithQuality, LocatedDualVar, LocatedMechanic, Location,
     Mechanic,
 };
 use metatorio_data::store::PrototypeGroup;
 use metatorio_data::store::PrototypeStore;
-use metatorio_data::{CraftingMachineComponent, RecipeComponent};
+
 use metatorio_solver::{Flow as SolverFlow, SolverData, SolverSolution, TargetSpec};
 use serde::{Deserialize, Serialize};
 
@@ -27,6 +26,9 @@ use crate::solve::{
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct UniverseVarId(pub u64);
+fn identity_scale() -> f64 {
+    1.0
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LocatedMechanicSolution {
@@ -34,6 +36,8 @@ pub struct LocatedMechanicSolution {
     pub location: Location,
     pub amount: f64,
     pub rate: f64,
+    #[serde(default = "identity_scale")]
+    pub scale: f64,
     pub cost: f64,
 }
 
@@ -42,6 +46,8 @@ pub struct LocatedFlow {
     pub flow: LocatedDualVar,
     pub amount: f64,
     pub rate: f64,
+    #[serde(default = "identity_scale")]
+    pub scale: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -61,6 +67,8 @@ pub enum UniverseSolveStatus {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UniverseSolveResult {
+    #[serde(default)]
+    pub revision: u64,
     pub project: ProjectId,
     pub universe: UniverseId,
     pub status: UniverseSolveStatus,
@@ -79,52 +87,6 @@ enum VarOrigin {
         location: Location,
     },
     Conversion,
-}
-
-/// Reject configurations that the prototype data says cannot run. The factory
-/// path normally fixes these via EnsureMachineCompat; universes expand directly,
-/// so an incompatible recipe/machine pair must not silently enter the LP.
-fn ensure_local_mechanic_supported(
-    store: &PrototypeStore,
-    mechanic: &Mechanic,
-) -> Result<(), String> {
-    let Mechanic::Recipe(recipe) = mechanic else {
-        return Ok(());
-    };
-    if recipe.recipe.id.is_empty() || recipe.machine.id.is_empty() {
-        return Err("宇宙工厂的配方机制尚未设置配方或机器".to_string());
-    }
-    let Some(recipe_record) = store.get(PrototypeGroup::Recipe, &recipe.recipe.id) else {
-        return Err(format!("配方 {} 不存在", recipe.recipe.id));
-    };
-    let Some(recipe_component) = recipe_record.component::<RecipeComponent>() else {
-        return Err(format!("配方 {} 缺少配方数据", recipe.recipe.id));
-    };
-    let categories = effective_recipe_categories(recipe_component);
-    let machine_ok = store
-        .get(PrototypeGroup::Entity, &recipe.machine.id)
-        .and_then(|record| record.component::<CraftingMachineComponent>())
-        .is_some_and(|machine| {
-            categories
-                .iter()
-                .any(|category| machine.crafting_categories.contains(category))
-        });
-    if !machine_ok {
-        return Err(format!(
-            "机器 {} 不能制造配方 {}",
-            recipe.machine.id, recipe.recipe.id
-        ));
-    }
-    let slots = effective_module_slots(store, &recipe.machine.id, &recipe.machine.quality);
-    if recipe.module_config.modules.len() > slots {
-        return Err(format!(
-            "机器 {} 只有 {} 个插件槽，机制配置了 {} 个插件",
-            recipe.machine.id,
-            slots,
-            recipe.module_config.modules.len()
-        ));
-    }
-    Ok(())
 }
 
 pub(crate) fn environment_for(location: &Location) -> (Option<&str>, Option<&str>) {
@@ -267,7 +229,6 @@ pub fn expand_located_mechanic(
 ) -> Result<Vec<(SolverFlow<LocatedDualVar>, f64)>, String> {
     match mechanic {
         LocatedMechanic::Local(local) => {
-            ensure_local_mechanic_supported(store, &local.mechanic)?;
             let (planet, surface) = environment_for(&local.location);
             let mut game = base.clone();
             apply_environment_to_game_state(store, &mut game, planet, surface);
@@ -373,6 +334,7 @@ pub fn preview_universe(
                                 flow,
                                 amount,
                                 rate: amount,
+                                scale: 1.0,
                             })
                             .collect(),
                     }
@@ -406,6 +368,16 @@ pub fn solve_universe(
     universe: &UniverseDocument,
     accessibility: &metatorio_core::Accessibility,
 ) -> Result<UniverseSolveResult, String> {
+    solve_universe_with_progress(store, project, universe, accessibility, |_| {})
+}
+pub fn solve_universe_with_progress(
+    store: &PrototypeStore,
+    project: &ProjectDocument,
+    universe: &UniverseDocument,
+    accessibility: &metatorio_core::Accessibility,
+    progress: impl FnMut(metatorio_solver::ProblemSize),
+) -> Result<UniverseSolveResult, String> {
+    crate::solve::check_solve_cancelled().map_err(|e| e.to_string())?;
     let base = make_game_state_with_accessibility(store, project, accessibility);
     let mut flows: metatorio_core::AIndexMap<UniverseVarId, (SolverFlow<LocatedDualVar>, f64)> =
         metatorio_core::AIndexMap::default();
@@ -464,8 +436,8 @@ pub fn solve_universe(
             expression_flows.insert(term.flow.clone(), 1.0);
         }
     }
-    let mut conversion_target = target.clone();
-    conversion_target.extend(expression_flows.iter().map(|(flow, _)| (flow.clone(), 1.0)));
+    let conversion_target =
+        crate::solve::conversion_targets(&target, expression_flows.keys().cloned());
 
     // Space items may become the same item at any planet for free. Include
     // implicit asteroid sources and space targets, not only mechanic flows.
@@ -559,18 +531,26 @@ pub fn solve_universe(
     problem.unconstrained = unconstrained;
     problem.solver = project.settings.solver;
     let flow_specs = problem.flows.clone();
-    let solution = problem.solve();
+    crate::solve::check_solve_cancelled().map_err(|e| e.to_string())?;
+    let solution = problem.solve_with_progress(progress);
+    crate::solve::check_solve_cancelled().map_err(|e| e.to_string())?;
 
-    let (prim, report, cost) = match solution {
+    let (prim, prim_scale, dual_scale, report, cost) = match solution {
         SolverSolution::Solved {
-            prim, report, cost, ..
-        } => (prim, report, cost),
+            prim,
+            prim_scale,
+            dual_scale,
+            report,
+            cost,
+            ..
+        } => (prim, prim_scale, dual_scale, report, cost),
         SolverSolution::NotSolved {
             no_provider,
             no_consumer,
             description,
         } => {
             return Ok(UniverseSolveResult {
+                revision: 0,
                 project: project.id,
                 universe: universe.id,
                 status: UniverseSolveStatus::NotSolved {
@@ -584,7 +564,7 @@ pub fn solve_universe(
     };
 
     let mut flow_totals: SolverFlow<LocatedDualVar> = SolverFlow::default();
-    let mut mechanic_amounts: HashMap<MechanicId, (Location, f64, f64)> = HashMap::new();
+    let mut mechanic_amounts: HashMap<MechanicId, (Location, f64, f64, f64)> = HashMap::new();
     for (id, value) in &prim {
         let Some(spec) = flow_specs.get(id) else {
             continue;
@@ -601,49 +581,51 @@ pub fn solve_universe(
                 } => {
                     let entry = mechanic_amounts
                         .entry(*mechanic)
-                        .or_insert_with(|| (location.clone(), 0.0, *cost));
+                        .or_insert_with(|| (location.clone(), 0.0, 0.0, *cost));
                     entry.1 += value;
+                    entry.2 += value / prim_scale.get(id).copied().unwrap_or(1.0).max(1e-12);
                 }
                 VarOrigin::Transfer { mechanic, location } => {
                     let entry = mechanic_amounts
                         .entry(*mechanic)
-                        .or_insert_with(|| (location.clone(), 0.0, 0.0));
+                        .or_insert_with(|| (location.clone(), 0.0, 0.0, 0.0));
                     entry.1 += value;
+                    entry.2 += value / prim_scale.get(id).copied().unwrap_or(1.0).max(1e-12);
                 }
                 VarOrigin::Conversion => {}
             }
         }
     }
 
-    let mut diagnostics = SolveDiagnostics::default();
-    diagnostics.variables_before = flow_specs.len();
-    diagnostics.variables_after = prim.values().filter(|value| **value != 0.0).count();
-    diagnostics.solver = report.solver;
-    diagnostics.optimization = report.optimization.clone();
-    diagnostics.exact_primal_verified = report.exact_primal_verified;
-    diagnostics.exact_optimality_verified = report.exact_optimality_verified;
+    let diagnostics = SolveDiagnostics::from_solver(report);
 
     Ok(UniverseSolveResult {
+        revision: 0,
         project: project.id,
         universe: universe.id,
         status: UniverseSolveStatus::Solved {
             cost,
             flows: flow_totals
                 .into_iter()
-                .map(|(flow, amount)| LocatedFlow {
-                    flow,
-                    amount,
-                    rate: amount,
+                .map(|(flow, amount)| {
+                    let scale = dual_scale.get(&flow).copied().unwrap_or(1.0);
+                    LocatedFlow {
+                        flow,
+                        amount,
+                        rate: amount / scale.max(1e-12),
+                        scale,
+                    }
                 })
                 .collect(),
             mechanics: mechanic_amounts
                 .into_iter()
                 .map(
-                    |(mechanic, (location, amount, cost))| LocatedMechanicSolution {
+                    |(mechanic, (location, amount, rate, cost))| LocatedMechanicSolution {
                         mechanic,
                         location,
                         amount,
-                        rate: amount,
+                        rate,
+                        scale: if rate != 0.0 { amount / rate } else { 1.0 },
                         cost,
                     },
                 )

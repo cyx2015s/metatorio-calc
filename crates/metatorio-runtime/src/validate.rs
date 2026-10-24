@@ -55,7 +55,10 @@ fn validate_universe(
 ) -> Result<(), RuntimeError> {
     use crate::message::UniverseAction;
     match action {
-        UniverseAction::AddLocalMechanic { location, .. } => validate_location(store, location),
+        UniverseAction::AddLocalMechanic { location, .. }
+        | UniverseAction::SetMechanicLocation { location, .. } => {
+            validate_location(store, location)
+        }
         UniverseAction::AddTransfer { location, item } => {
             validate_location(store, location)?;
             require_id(store, PrototypeGroup::Item, "物品", item)
@@ -64,7 +67,9 @@ fn validate_universe(
             require_id(store, PrototypeGroup::Item, "物品", item)
         }
         UniverseAction::Mechanic { action, .. } => validate_mechanic(store, action),
-        UniverseAction::AddTarget { flow, .. }
+        UniverseAction::AddTargetExpressionTerm { flow, .. }
+        | UniverseAction::SetTargetExpressionTermFlow { flow, .. }
+        | UniverseAction::AddTarget { flow, .. }
         | UniverseAction::AddExternalInput { flow, .. }
         | UniverseAction::SetExternalInputFlow { flow, .. } => {
             validate_location(store, &flow.location)?;

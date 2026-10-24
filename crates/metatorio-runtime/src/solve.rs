@@ -94,7 +94,7 @@ fn legacy_solver() -> metatorio_solver::LpSolver {
 
 impl SolveDiagnostics {
     /// 从求解器报告构造（自动规划的回写字段随后补齐）。
-    fn from_solver(report: metatorio_solver::SolveReport) -> Self {
+    pub(crate) fn from_solver(report: metatorio_solver::SolveReport) -> Self {
         Self {
             variables_before: report.variables_before,
             variables_after: report.variables_after,
@@ -161,6 +161,7 @@ pub struct FlowBalance {
 /// `RuntimeCommand` → 调 `Runtime::run_command`，无需依赖框架。
 #[derive(Debug, Clone, PartialEq)]
 pub enum CommandEffect {
+    UniverseSolve(crate::universe::UniverseSolveResult),
     /// 求解/自动规划的结果（Recompute / AutoPlan）。
     Solve(SolveResult),
     /// 运行时内部操作（校验/回退/钳制/清理等）：已改动文档，但无对外结果；
@@ -240,6 +241,33 @@ impl Runtime {
         self.accessibility_epoch.fetch_add(1, Ordering::SeqCst);
     }
 
+    pub fn dispatch_scoped_mechanic(
+        &mut self,
+        universe: Option<crate::UniverseId>,
+        message: AppMessage,
+    ) -> Result<DispatchResult, RuntimeError> {
+        let message = if let (
+            Some(universe),
+            AppMessage::Factory {
+                project,
+                action: crate::message::FactoryAction::Mechanic { mechanic, action },
+                ..
+            },
+        ) = (universe, &message)
+        {
+            AppMessage::Universe {
+                project: *project,
+                universe,
+                action: crate::message::UniverseAction::Mechanic {
+                    mechanic: *mechanic,
+                    action: action.clone(),
+                },
+            }
+        } else {
+            message
+        };
+        self.dispatch(message)
+    }
     pub fn dispatch(&mut self, message: AppMessage) -> Result<DispatchResult, RuntimeError> {
         // 只对可能改变可达性的消息失效 `accessibilities` 缓存（可达性计算耗时，
         // 不应每次交互都重算）。其余（改目标/机制/偏好等）保留缓存。
@@ -672,6 +700,30 @@ impl Runtime {
         .map_err(RuntimeError::InvalidValue)
     }
 
+    pub fn universe_snapshot_inputs(
+        &self,
+        project: ProjectId,
+        universe: crate::UniverseId,
+    ) -> Result<UniverseSnapshot, RuntimeError> {
+        Ok(UniverseSnapshot {
+            inputs: self.project_snapshot(project)?,
+            universe_doc: self.state.universe(project, universe)?.clone(),
+        })
+    }
+    pub fn universe_document_matches(&self, snapshot: &UniverseSnapshot) -> bool {
+        self.accessibility_epoch.load(Ordering::SeqCst) == snapshot.accessibility_epoch
+            && self
+                .context_arc(snapshot.project)
+                .is_ok_and(|s| Arc::ptr_eq(&s, &snapshot.store))
+            && self.state.project(snapshot.project).is_ok_and(|p| {
+                p.settings == snapshot.project_doc.settings
+                    && p.planning == snapshot.project_doc.planning
+            })
+            && self
+                .state
+                .universe(snapshot.project, snapshot.universe_doc.id)
+                .is_ok_and(|u| u == &snapshot.universe_doc)
+    }
     /// 项目级读取快照（不含工厂）：供可达性/产能/里程碑等**只读重计算**
     /// 在锁外执行。
     pub fn project_snapshot(&self, project_id: ProjectId) -> Result<ProjectSnapshot, RuntimeError> {
@@ -775,145 +827,21 @@ impl Runtime {
         Ok(result)
     }
 
-    /// Auto-plan each location of a universe with the normal factory planner,
-    /// then recompute the joint universe. Transfers are preserved; local
-    /// mechanics at a planned location are replaced by the planner output.
+    /// Plan the joint located problem, commit its support, then verify the written universe.
     pub fn auto_plan_universe(
         &mut self,
         project_id: ProjectId,
         universe_id: crate::id::UniverseId,
     ) -> Result<crate::universe::UniverseSolveResult, RuntimeError> {
-        use crate::document::{LocatedTargetExpression, UniverseDocument, UniverseMechanicEntry};
-        use metatorio_core::{LocatedMechanic, Location, TransferLocatedMechanic};
-
-        let snapshot = self.project_snapshot(project_id)?;
+        let snapshot = self.universe_snapshot_inputs(project_id, universe_id)?;
         let accessibility = snapshot.resolve_accessibility();
         self.cache_accessibility(project_id, accessibility.clone());
-        let project_doc = &snapshot.project_doc;
-        let store = &snapshot.store;
-        let universe_doc = project_doc
-            .universes
-            .iter()
-            .find(|universe| universe.id == universe_id)
-            .cloned()
-            .ok_or(RuntimeError::UniverseNotFound {
-                project: project_id,
-                universe: universe_id,
-            })?;
-
-        // Enumerate the full candidate set: every planet's local mechanics,
-        // plus all Space mechanics, plus a transfer edge for every item from
-        // each planet. One joint universe LP then chooses among all of them.
-        let mut locations: Vec<Location> = store
-            .group(PrototypeGroup::Planet)
-            .map(|record| Location::planet(record.name.clone()))
-            .collect();
-        locations.push(Location::Space);
-        let mut entries: Vec<UniverseMechanicEntry> = Vec::new();
-        let mut mechanics_by_id: HashMap<MechanicId, LocatedMechanic> = HashMap::new();
-        let mut next_mechanic = 1u64;
-        for location in &locations {
-            let (planet, surface) = crate::universe::environment_for(location);
-            let mut game = make_game_state_with_accessibility(store, project_doc, &accessibility);
-            apply_environment_to_game_state(store, &mut game, planet, surface);
-            let context = Context::new(store, &game);
-            let major_quality = game
-                .qualities
-                .iter()
-                .position(|quality| quality == &project_doc.settings.major_quality)
-                .unwrap_or(0);
-            let options = crate::auto_plan::EnumerateOptions {
-                alternative_count: project_doc.planning.alternative_count,
-                machine_preferences: project_doc.planning.machine_preferences.clone(),
-                enumerate_modules: project_doc.planning.enumerate_modules.clone(),
-                enumerate_beacons: project_doc.planning.enumerate_beacons.clone(),
-                quality_limit: game.max_quality,
-                major_quality,
-                planet: planet.map(str::to_string),
-                surface: surface.map(str::to_string),
-                accessibility: Some(accessibility.clone()),
-            };
-            let candidates = crate::auto_plan::enumerate_all(store, &context, &options);
-            let (candidates, _) =
-                crate::auto_plan::filter_accessible_candidates(store, &accessibility, candidates);
-            for mechanic in candidates {
-                let id = MechanicId(next_mechanic);
-                next_mechanic += 1;
-                let located = LocatedMechanic::Local(metatorio_core::LocalLocatedMechanic {
-                    location: location.clone(),
-                    mechanic: mechanic.clone(),
-                });
-                mechanics_by_id.insert(id, located.clone());
-                entries.push(UniverseMechanicEntry {
-                    id,
-                    enabled: true,
-                    mechanic: located,
-                });
-            }
-            if let Location::Planet(_) = location {
-                for record in store.group(PrototypeGroup::Item) {
-                    let weight = store
-                        .item_weight(&record.name)
-                        .map(|weight| weight.weight)
-                        .unwrap_or(store.weight_constants().default_item_weight);
-                    if weight <= 0.0 {
-                        continue;
-                    }
-                    let id = MechanicId(next_mechanic);
-                    next_mechanic += 1;
-                    let located = LocatedMechanic::Transfer(TransferLocatedMechanic {
-                        location: location.clone(),
-                        item: IdWithQuality::new(&record.name, &project_doc.settings.major_quality),
-                    });
-                    mechanics_by_id.insert(id, located.clone());
-                    entries.push(UniverseMechanicEntry {
-                        id,
-                        enabled: true,
-                        mechanic: located,
-                    });
-                }
-            }
-        }
-        if entries.is_empty() {
-            return Err(RuntimeError::InvalidValue(
-                "没有可枚举的宇宙工厂机制候选".to_string(),
-            ));
-        }
-
-        let temp = UniverseDocument {
-            id: universe_id,
-            name: universe_doc.name.clone(),
-            external_inputs: universe_doc.external_inputs.clone(),
-            mechanics: entries,
-            targets: universe_doc.targets.clone(),
-            target_expressions: universe_doc
-                .target_expressions
-                .iter()
-                .map(|expression| LocatedTargetExpression {
-                    id: expression.id,
-                    constant: expression.constant,
-                    terms: expression.terms.clone(),
-                })
-                .collect(),
-            strict_source: true,
-            strict_sink: universe_doc.strict_sink,
-        };
-        let planned = crate::universe::solve_universe(store, project_doc, &temp, &accessibility)
-            .map_err(RuntimeError::InvalidValue)?;
-        let crate::universe::UniverseSolveStatus::Solved { mechanics, .. } = planned.status else {
-            return Err(RuntimeError::InvalidValue(
-                "宇宙自动规划未求解：候选集合无可行解".to_string(),
-            ));
-        };
-        let used: Vec<LocatedMechanic> = mechanics
-            .into_iter()
-            .filter(|solution| solution.amount > 1e-9)
-            .filter_map(|solution| mechanics_by_id.get(&solution.mechanic).cloned())
-            .collect();
-
+        let (mechanics, report) = plan_universe_with_progress(&snapshot, &accessibility, |_| {})?;
         self.state
-            .replace_universe_mechanics(project_id, universe_id, used)?;
-        self.solve_universe(project_id, universe_id)
+            .apply_universe_auto_plan(project_id, universe_id, mechanics)?;
+        let mut result = self.solve_universe(project_id, universe_id)?;
+        attach_universe_plan_report(&mut result, &report);
+        Ok(result)
     }
 
     /// 统一执行一个 `RuntimeCommand`，返回结构化产出。
@@ -924,6 +852,12 @@ impl Runtime {
     /// 此处返回 [`CommandEffect::Nothing`]。
     pub fn run_command(&mut self, command: &RuntimeCommand) -> Result<CommandEffect, RuntimeError> {
         match command {
+            RuntimeCommand::RecomputeUniverse { project, universe } => Ok(
+                CommandEffect::UniverseSolve(self.solve_universe(*project, *universe)?),
+            ),
+            RuntimeCommand::AutoPlanUniverse { project, universe } => Ok(
+                CommandEffect::UniverseSolve(self.auto_plan_universe(*project, *universe)?),
+            ),
             RuntimeCommand::Recompute { project, factory } => Ok(CommandEffect::Solve(
                 self.solve_factory(*project, *factory)?,
             )),
@@ -938,14 +872,33 @@ impl Runtime {
                 self.cleanup_factory(*project, *factory, *action)?;
                 Ok(CommandEffect::Mutated)
             }
+            RuntimeCommand::CleanupUniverse {
+                project,
+                universe,
+                action,
+            } => {
+                let result = self.solve_universe(*project, *universe)?;
+                let crate::universe::UniverseSolveStatus::Solved { mechanics, .. } = result.status
+                else {
+                    return Err(RuntimeError::InvalidValue(
+                        "当前求解未成功，拒绝清理机制".into(),
+                    ));
+                };
+                let used = mechanics
+                    .into_iter()
+                    .map(|m| (m.mechanic, m.amount))
+                    .collect();
+                self.state
+                    .apply_universe_cleanup(*project, *universe, *action, &used)?;
+                Ok(CommandEffect::Mutated)
+            }
             _ => Ok(CommandEffect::Nothing),
         }
     }
 
     /// 求解后清理：按最近一次求解结果删减/重排机制。
-    /// - RemoveUnused：用量低于阈值（1e-9）的机制移除；
-    /// - RemoveUnsolvable：未出现在求解变量中的机制移除；
-    /// - SortBySolutionRate：按总流量从大到小重排机制。
+    /// - RemoveUnused / RemoveUnsolvable：用量恰为零或未进入求解的机制移除；
+    /// - SortBySolutionRate：按用量从大到小重排机制。
     ///
     /// 求解部分（可能很慢）可先用 [`solve_factory`](Self::solve_factory) 或锁外
     /// 路径算好，再调 [`RuntimeState::apply_cleanup`] 只做回写。
@@ -1053,6 +1006,210 @@ impl SolveSnapshot {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct UniverseSnapshot {
+    pub inputs: ProjectSnapshot,
+    pub universe_doc: crate::document::UniverseDocument,
+}
+impl std::ops::Deref for UniverseSnapshot {
+    type Target = ProjectSnapshot;
+    fn deref(&self) -> &Self::Target {
+        &self.inputs
+    }
+}
+
+pub fn attach_universe_plan_report(
+    result: &mut crate::universe::UniverseSolveResult,
+    report: &AutoPlanReport,
+) {
+    result.report.planning_optimization = report.planning_optimization.clone();
+    result.report.candidates_total = report.candidates_total;
+    result.report.candidates_considered = report.candidates_considered;
+    result.report.candidates_used = report.candidates_used;
+    result.report.writeback_cutoff = report.cutoff;
+}
+pub fn plan_universe_with_progress(
+    snapshot: &UniverseSnapshot,
+    accessibility: &Accessibility,
+    mut progress: impl FnMut(AutoPlanProgress),
+) -> Result<(Vec<metatorio_core::LocatedMechanic>, AutoPlanReport), RuntimeError> {
+    use crate::document::{LocatedTargetExpression, UniverseDocument, UniverseMechanicEntry};
+    use metatorio_core::{LocatedMechanic, Location, TransferLocatedMechanic};
+    check_solve_cancelled()?;
+    progress(AutoPlanProgress {
+        stage: AutoPlanStage::Enumerating,
+        ..AutoPlanProgress::preparing()
+    });
+    let project_doc = &snapshot.project_doc;
+    let store = &snapshot.store;
+    let universe_doc = &snapshot.universe_doc;
+    let universe_id = universe_doc.id;
+    // Enumerate the full candidate set: every planet's local mechanics,
+    // plus all Space mechanics, plus a transfer edge for every item from
+    // each planet. One joint universe LP then chooses among all of them.
+    let mut locations: Vec<Location> = store
+        .group(PrototypeGroup::Planet)
+        .map(|record| Location::planet(record.name.clone()))
+        .collect();
+    locations.push(Location::Space);
+    let mut entries: Vec<UniverseMechanicEntry> = Vec::new();
+    let mut mechanics_by_id: HashMap<MechanicId, LocatedMechanic> = HashMap::new();
+    let mut next_mechanic = 1u64;
+    for location in &locations {
+        check_solve_cancelled()?;
+        let (planet, surface) = crate::universe::environment_for(location);
+        let mut game = make_game_state_with_accessibility(store, project_doc, &accessibility);
+        apply_environment_to_game_state(store, &mut game, planet, surface);
+        let context = Context::new(store, &game);
+        let major_quality = game
+            .qualities
+            .iter()
+            .position(|quality| quality == &project_doc.settings.major_quality)
+            .unwrap_or(0);
+        let options = crate::auto_plan::EnumerateOptions {
+            alternative_count: project_doc.planning.alternative_count,
+            machine_preferences: project_doc.planning.machine_preferences.clone(),
+            enumerate_modules: project_doc.planning.enumerate_modules.clone(),
+            enumerate_beacons: project_doc.planning.enumerate_beacons.clone(),
+            quality_limit: game.max_quality,
+            major_quality,
+            planet: planet.map(str::to_string),
+            surface: surface.map(str::to_string),
+            accessibility: Some(accessibility.clone()),
+        };
+        let candidates = crate::auto_plan::enumerate_all(store, &context, &options);
+        let (candidates, _) =
+            crate::auto_plan::filter_accessible_candidates(store, &accessibility, candidates);
+        for mechanic in candidates {
+            let id = MechanicId(next_mechanic);
+            next_mechanic += 1;
+            let located = LocatedMechanic::Local(metatorio_core::LocalLocatedMechanic {
+                location: location.clone(),
+                mechanic: mechanic.clone(),
+            });
+            mechanics_by_id.insert(id, located.clone());
+            entries.push(UniverseMechanicEntry {
+                id,
+                enabled: true,
+                mechanic: located,
+            });
+        }
+        if let Location::Planet(_) = location {
+            for record in store.group(PrototypeGroup::Item) {
+                for quality in game.qualities.iter().take(game.max_quality + 1) {
+                    let weight = store
+                        .item_weight(&record.name)
+                        .map(|weight| weight.weight)
+                        .unwrap_or(store.weight_constants().default_item_weight);
+                    if weight <= 0.0 {
+                        continue;
+                    }
+                    let id = MechanicId(next_mechanic);
+                    next_mechanic += 1;
+                    let located = LocatedMechanic::Transfer(TransferLocatedMechanic {
+                        location: location.clone(),
+                        item: IdWithQuality::new(&record.name, quality),
+                    });
+                    mechanics_by_id.insert(id, located.clone());
+                    entries.push(UniverseMechanicEntry {
+                        id,
+                        enabled: true,
+                        mechanic: located,
+                    });
+                }
+            }
+        }
+    }
+    if project_doc.planning.preserve_existing_mechanics {
+        let mut known: std::collections::HashSet<String> = entries
+            .iter()
+            .map(|e| serde_json::to_string(&e.mechanic).unwrap())
+            .collect();
+        for entry in universe_doc.mechanics.iter().filter(|e| e.enabled) {
+            if known.insert(serde_json::to_string(&entry.mechanic).unwrap()) {
+                let id = MechanicId(next_mechanic);
+                next_mechanic += 1;
+                mechanics_by_id.insert(id, entry.mechanic.clone());
+                entries.push(UniverseMechanicEntry {
+                    id,
+                    enabled: true,
+                    mechanic: entry.mechanic.clone(),
+                });
+            }
+        }
+    }
+    if entries.is_empty() {
+        return Err(RuntimeError::InvalidValue(
+            "没有可枚举的宇宙工厂机制候选".to_string(),
+        ));
+    }
+
+    let candidates_total = entries.len();
+    progress(AutoPlanProgress {
+        stage: AutoPlanStage::Building,
+        ..AutoPlanProgress::preparing()
+    });
+    let temp = UniverseDocument {
+        id: universe_id,
+        name: universe_doc.name.clone(),
+        external_inputs: universe_doc.external_inputs.clone(),
+        mechanics: entries,
+        targets: universe_doc.targets.clone(),
+        target_expressions: universe_doc
+            .target_expressions
+            .iter()
+            .map(|expression| LocatedTargetExpression {
+                id: expression.id,
+                constant: expression.constant,
+                terms: expression.terms.clone(),
+            })
+            .collect(),
+        strict_source: true,
+        strict_sink: universe_doc.strict_sink,
+    };
+    check_solve_cancelled()?;
+    let planned = crate::universe::solve_universe_with_progress(
+        store,
+        project_doc,
+        &temp,
+        accessibility,
+        |size| progress(AutoPlanProgress::sized(AutoPlanStage::Solving, size)),
+    )
+    .map_err(RuntimeError::InvalidValue)?;
+    check_solve_cancelled()?;
+    let mechanics = match planned.status {
+        crate::universe::UniverseSolveStatus::Solved { mechanics, .. } => mechanics,
+        crate::universe::UniverseSolveStatus::NotSolved {
+            description,
+            no_provider,
+            no_consumer,
+        } => {
+            let mut diagnostic = crate::Diagnostic::new(
+                "auto-plan-not-solved",
+                format!("宇宙自动规划未求解：{description}"),
+            );
+            diagnostic.located_no_provider = no_provider;
+            diagnostic.located_no_consumer = no_consumer;
+            return Err(RuntimeError::Diagnostic(Box::new(diagnostic)));
+        }
+    };
+    let used: Vec<LocatedMechanic> = mechanics
+        .into_iter()
+        .filter(|m| m.amount != 0.0)
+        .filter_map(|m| mechanics_by_id.get(&m.mechanic).cloned())
+        .collect();
+    let report = AutoPlanReport {
+        candidates_total,
+        candidates_considered: candidates_total,
+        candidates_used: used.len(),
+        variables_before: planned.report.variables_before,
+        variables_after: planned.report.variables_after,
+        solver: planned.report.solver,
+        planning_optimization: planned.report.optimization,
+        ..Default::default()
+    };
+    Ok((used, report))
+}
 /// 项目级读取快照：与 [`SolveSnapshot`] 同构，但不需要工厂。
 ///
 /// 供可达性 / 产能 / 里程碑排序等**只读重计算**在锁外执行——这些计算在
@@ -1173,7 +1330,7 @@ pub fn ordered_milestones(snapshot: &ProjectSnapshot) -> Vec<crate::document::Mi
         .collect()
 }
 
-fn check_solve_cancelled() -> Result<(), RuntimeError> {
+pub(crate) fn check_solve_cancelled() -> Result<(), RuntimeError> {
     metatorio_solver::control::check_cancelled()
         .map_err(|_| RuntimeError::InvalidOperation("求解已取消，计算未完成"))
 }
@@ -1501,6 +1658,16 @@ fn existing_recipe_surface_note(store: &PrototypeStore, factory: &FactoryDocumen
     )
 }
 
+pub(crate) fn conversion_targets<K: Clone + Eq + std::hash::Hash>(
+    target: &AIndexMap<K, f64>,
+    terms: impl Iterator<Item = K>,
+) -> AIndexMap<K, f64> {
+    let mut keys = target.clone();
+    for key in terms {
+        keys.entry(key).or_insert(1.0);
+    }
+    keys
+}
 fn build_autoplan_problem(
     store: &PrototypeStore,
     context: &Context,
@@ -1528,7 +1695,14 @@ fn build_autoplan_problem(
         *variant = variant.saturating_add(1);
         flows.insert(flow_id, (variable.flow, variable.cost));
     }
-    add_conversion_flows(&mut flows, store, target, all_sources);
+    let conversion_target = conversion_targets(
+        target,
+        factory_doc
+            .target_expressions
+            .iter()
+            .flat_map(|e| e.terms.iter().map(|t| t.flow.clone())),
+    );
+    add_conversion_flows(&mut flows, store, &conversion_target, all_sources);
     let unconstrained = unconstrained_items(&flows);
     let mut problem = SolverData::new_simple(target.clone(), flows);
     problem.unconstrained = unconstrained;
@@ -1697,7 +1871,14 @@ fn solve_document(
     all_sources.extend(sources.clone());
     // 零成本转换流（子类型关系，复刻原版 planner.rs:264-316 并扩展）：
     // 温度区间放宽、燃料子类型提升、filter 归并、定点温度互转（FluidHeat 平衡）。
-    add_conversion_flows(&mut flows, prototype, &target, &all_sources);
+    let conversion_target = conversion_targets(
+        &target,
+        factory
+            .target_expressions
+            .iter()
+            .flat_map(|e| e.terms.iter().map(|t| t.flow.clone())),
+    );
+    add_conversion_flows(&mut flows, prototype, &conversion_target, &all_sources);
     let unconstrained = unconstrained_items(&flows);
     let mut problem = SolverData::new_simple(target, flows);
     problem.unconstrained = unconstrained;

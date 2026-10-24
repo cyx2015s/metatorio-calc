@@ -13,6 +13,8 @@ pub mod options;
 pub mod prototype_calculation;
 mod rich_text;
 pub mod solve_jobs;
+#[cfg(test)]
+mod universe_tests;
 pub mod update;
 
 pub use host::Host;

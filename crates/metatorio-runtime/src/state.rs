@@ -309,6 +309,7 @@ impl RuntimeState {
                 .factory(project, factory)?
                 .mechanics
                 .iter()
+                .filter(|entry| entry.enabled)
                 .map(|entry| format!("{:?}", entry.mechanic))
                 .collect();
             let mut added = Vec::new();
@@ -409,15 +410,27 @@ impl RuntimeState {
                             factory: factory.id,
                         });
                     }
+                    for universe in &self.project(project)?.universes {
+                        outcome.commands.push(RuntimeCommand::RecomputeUniverse {
+                            project,
+                            universe: universe.id,
+                        });
+                    }
                 } else if let Some(factory) = outcome.factory {
                     outcome
                         .commands
                         .push(RuntimeCommand::Recompute { project, factory });
                 }
+                if let Some(universe) = outcome.universe {
+                    outcome
+                        .commands
+                        .push(RuntimeCommand::RecomputeUniverse { project, universe });
+                }
             }
         }
 
         Ok(DispatchResult {
+            universe_solve: None,
             revision: self.revision,
             changed: outcome.changed,
             commands: outcome.commands,
@@ -838,7 +851,32 @@ impl RuntimeState {
         use metatorio_core::TransferLocatedMechanic;
 
         self.universe(project_id, universe_id)?;
-        match action {
+        let recompute = !matches!(
+            &action,
+            UniverseAction::ReorderMechanic { .. }
+                | UniverseAction::ReorderTarget { .. }
+                | UniverseAction::ReorderTargetExpression { .. }
+                | UniverseAction::ReorderTargetExpressionTerm { .. }
+                | UniverseAction::ReorderExternalInput { .. }
+        );
+        let mut outcome = match action {
+            UniverseAction::Solve(action) => Ok(Outcome::command(match action {
+                SolveAction::Recompute => RuntimeCommand::RecomputeUniverse {
+                    project: project_id,
+                    universe: universe_id,
+                },
+                SolveAction::AutoPlan => RuntimeCommand::AutoPlanUniverse {
+                    project: project_id,
+                    universe: universe_id,
+                },
+            })),
+            UniverseAction::Cleanup(action) => {
+                Ok(Outcome::command(RuntimeCommand::CleanupUniverse {
+                    project: project_id,
+                    universe: universe_id,
+                    action,
+                }))
+            }
             UniverseAction::AddExternalInput { flow, penalty } => {
                 if !penalty.is_finite() || penalty < 0.0 {
                     return Err(RuntimeError::InvalidValue(
@@ -1077,6 +1115,16 @@ impl RuntimeState {
                 Ok(Outcome::meta_if(changed, project_id))
             }
             UniverseAction::Mechanic { mechanic, action } => {
+                let compat = matches!(
+                    &action,
+                    MechanicAction::Recipe(RecipeMechanicAction::SetRecipe { .. })
+                        | MechanicAction::Mining(MiningMechanicAction::SetResource { .. })
+                );
+                let clamp = matches!(
+                    &action,
+                    MechanicAction::Recipe(RecipeMechanicAction::SetMachine { .. })
+                        | MechanicAction::Mining(MiningMechanicAction::SetMachine { .. })
+                );
                 let universe = self.universe_mut(project_id, universe_id)?;
                 let entry = universe
                     .mechanics
@@ -1093,7 +1141,19 @@ impl RuntimeState {
                     ));
                 };
                 let changed = apply_mechanic_action(&mut local.mechanic, action)?;
-                Ok(Outcome::meta_if(changed, project_id))
+                let mut outcome = Outcome::meta_if(changed, project_id);
+                if changed && (compat || clamp) {
+                    outcome
+                        .commands
+                        .push(RuntimeCommand::RepairUniverseMechanic {
+                            project: project_id,
+                            universe: universe_id,
+                            mechanic,
+                            compat,
+                            clamp,
+                        });
+                }
+                Ok(outcome)
             }
             UniverseAction::AddTarget { flow, amount } => {
                 validate_finite("目标速率", amount)?;
@@ -1302,7 +1362,11 @@ impl RuntimeState {
                 let changed = replace(&mut term.coefficient, coefficient);
                 Ok(Outcome::meta_if(changed, project_id))
             }
+        }?;
+        if outcome.changed && recompute {
+            outcome.universe = Some(universe_id);
         }
+        Ok(outcome)
     }
 
     fn apply_factory(
@@ -1892,55 +1956,89 @@ impl RuntimeState {
             .ok_or(RuntimeError::UniverseNotFound { project, universe })
     }
 
-    /// Replace all universe mechanics (used by global universe auto-plan).
-    pub fn replace_universe_mechanics(
+    pub fn apply_universe_auto_plan(
         &mut self,
         project: ProjectId,
-        universe: crate::id::UniverseId,
+        universe: crate::UniverseId,
         mechanics: Vec<LocatedMechanic>,
-    ) -> Result<(), RuntimeError> {
-        use crate::document::UniverseMechanicEntry;
-        let ids: Vec<MechanicId> = (0..mechanics.len()).map(|_| self.allocate_id()).collect();
-        let universe = self.universe_mut(project, universe)?;
-        universe.mechanics = mechanics
-            .into_iter()
-            .zip(ids)
-            .map(|(mechanic, id)| UniverseMechanicEntry {
-                id,
-                enabled: true,
-                mechanic,
-            })
-            .collect();
-        Ok(())
+    ) -> Result<DispatchResult, RuntimeError> {
+        let preserve = self.project(project)?.planning.preserve_existing_mechanics;
+        let original = self.universe(project, universe)?.mechanics.clone();
+        let mut available = original.clone();
+        let mut output = if preserve {
+            original.clone()
+        } else {
+            Vec::new()
+        };
+        for mechanic in mechanics {
+            if preserve && output.iter().any(|e| e.enabled && e.mechanic == mechanic) {
+                continue;
+            }
+            let entry = if let Some(i) = available
+                .iter()
+                .position(|e| e.mechanic == mechanic && e.enabled)
+            {
+                available.remove(i)
+            } else {
+                crate::document::UniverseMechanicEntry {
+                    id: self.allocate_id(),
+                    enabled: true,
+                    mechanic,
+                }
+            };
+            output.push(entry);
+        }
+        let doc = self.universe_mut(project, universe)?;
+        // Equivalent plans keep the original order and IDs.
+        if !preserve
+            && original.len() == output.len()
+            && original.iter().all(|a| output.iter().any(|b| a == b))
+        {
+            output = original.clone();
+        }
+        let changed = doc.mechanics != output || !doc.strict_source;
+        doc.mechanics = output;
+        doc.strict_source = true;
+        let mut outcome = Outcome::meta_if(changed, project);
+        if changed {
+            outcome.universe = Some(universe);
+        }
+        if changed {
+            outcome.created.mechanics.extend(
+                doc.mechanics
+                    .iter()
+                    .filter(|e| !original.iter().any(|old| old.id == e.id))
+                    .map(|e| e.id),
+            );
+        }
+        self.commit(outcome, "宇宙自动规划")
     }
-
-    /// Replace local mechanics at one location (used by universe auto-plan).
-    pub fn replace_universe_location_mechanics(
+    pub fn apply_universe_cleanup(
         &mut self,
         project: ProjectId,
-        universe: crate::id::UniverseId,
-        location: &Location,
-        mechanics: Vec<Mechanic>,
-    ) -> Result<(), RuntimeError> {
-        use crate::document::UniverseMechanicEntry;
-        let ids: Vec<MechanicId> = (0..mechanics.len()).map(|_| self.allocate_id()).collect();
-        let universe = self.universe_mut(project, universe)?;
-        universe.mechanics.retain(|entry| {
-            !matches!(&entry.mechanic, LocatedMechanic::Local(local) if &local.location == location)
-        });
-        for (mechanic, id) in mechanics.into_iter().zip(ids) {
-            universe.mechanics.push(UniverseMechanicEntry {
-                id,
-                enabled: true,
-                mechanic: LocatedMechanic::Local(LocalLocatedMechanic {
-                    location: location.clone(),
-                    mechanic,
-                }),
-            });
+        universe: crate::UniverseId,
+        action: CleanupAction,
+        used: &HashMap<MechanicId, f64>,
+    ) -> Result<DispatchResult, RuntimeError> {
+        let doc = self.universe_mut(project, universe)?;
+        let before = doc.mechanics.clone();
+        match action {
+            CleanupAction::RemoveUnused | CleanupAction::RemoveUnsolvable => doc
+                .mechanics
+                .retain(|e| used.get(&e.id).copied().unwrap_or(0.0) != 0.0),
+            CleanupAction::SortBySolutionRate => doc.mechanics.sort_by(|a, b| {
+                used.get(&b.id)
+                    .unwrap_or(&0.0)
+                    .total_cmp(used.get(&a.id).unwrap_or(&0.0))
+            }),
         }
-        Ok(())
+        let changed = before != doc.mechanics;
+        let mut outcome = Outcome::meta_if(changed, project);
+        if changed {
+            outcome.universe = Some(universe);
+        }
+        self.commit(outcome, "清理宇宙机制")
     }
-
     pub fn allocate_id<T: From<u64>>(&mut self) -> T {
         let id = self.next_id;
         self.next_id = self.next_id.saturating_add(1);
@@ -2155,6 +2253,8 @@ impl RuntimeState {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct DispatchResult {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub universe_solve: Option<crate::universe::UniverseSolveResult>,
     pub revision: u64,
     pub changed: bool,
     pub commands: Vec<RuntimeCommand>,
@@ -2183,6 +2283,8 @@ pub struct HistoryStatus {
 /// 撤销/重做后前端应聚焦的对象。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct HistoryFocus {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub universe: Option<crate::UniverseId>,
     pub project: Option<ProjectId>,
     pub factory: Option<FactoryId>,
 }
@@ -2289,6 +2391,20 @@ fn focus_between(before: &AppDocument, after: &AppDocument) -> HistoryFocus {
         if previous == Some(project) {
             continue;
         }
+        let changed_universes: Vec<_> = project
+            .universes
+            .iter()
+            .filter(|u| {
+                previous.is_none_or(|p| p.universes.iter().find(|old| old.id == u.id) != Some(u))
+            })
+            .collect();
+        if changed_universes.len() == 1 {
+            return HistoryFocus {
+                project: Some(project.id),
+                factory: None,
+                universe: Some(changed_universes[0].id),
+            };
+        }
         let factory = match previous {
             Some(previous) => {
                 let changed: Vec<FactoryId> = project
@@ -2306,6 +2422,7 @@ fn focus_between(before: &AppDocument, after: &AppDocument) -> HistoryFocus {
             None => None,
         };
         return HistoryFocus {
+            universe: None,
             project: Some(project.id),
             factory,
         };
@@ -2315,12 +2432,14 @@ fn focus_between(before: &AppDocument, after: &AppDocument) -> HistoryFocus {
     for project in &before.projects {
         if !after.projects.iter().any(|p| p.id == project.id) {
             return HistoryFocus {
+                universe: None,
                 project: Some(project.id),
                 factory: None,
             };
         }
     }
     HistoryFocus {
+        universe: None,
         project: None,
         factory: None,
     }
@@ -2512,6 +2631,7 @@ struct Outcome {
     changed: bool,
     project: Option<ProjectId>,
     factory: Option<FactoryId>,
+    universe: Option<crate::UniverseId>,
     recompute_all: bool,
     commands: Vec<RuntimeCommand>,
     /// 本次新建的对象 id（随 [`DispatchResult`] 回传）。

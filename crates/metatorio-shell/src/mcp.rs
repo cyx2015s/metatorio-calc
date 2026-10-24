@@ -215,6 +215,78 @@ impl MetatorioMcp {
         let page = params.page.resolve();
         let project = params.project.map(ProjectId);
         let factory = params.factory.map(FactoryId);
+        if let Some(id) = params.universe {
+            if factory.is_some() {
+                return Err(McpError::invalid_params(
+                    "factory 和 universe 不能同时提供",
+                    None,
+                ));
+            }
+            let project =
+                project.ok_or_else(|| McpError::invalid_params("universe 需要 project", None))?;
+            let universe = metatorio_runtime::UniverseId(id);
+            crate::app::ensure_context_for_project_offlock(host.state(), project)
+                .await
+                .map_err(|e| McpError::invalid_params(e, None))?;
+            let solve = if params.recompute {
+                Some(
+                    crate::app::solve_universe_offlock(&host, host.state(), project, universe)
+                        .await
+                        .map_err(|e| McpError::invalid_params(e, None))?,
+                )
+            } else {
+                None
+            };
+            let (doc, revision) = crate::app::with_runtime(host.state(), |r| {
+                Ok((
+                    r.state
+                        .universe(project, universe)
+                        .map_err(|e| e.to_string())?
+                        .clone(),
+                    r.state.revision,
+                ))
+            })
+            .map_err(|e| McpError::invalid_params(e, None))?;
+            let mut value = if let Some(mechanic) = params.mechanic {
+                let entry = doc
+                    .mechanics
+                    .iter()
+                    .find(|e| e.id.0 == mechanic)
+                    .ok_or_else(|| McpError::invalid_params("机制不在该宇宙工厂中", None))?;
+                let preview = crate::app::universe_preview_offlock(&host, project, universe)
+                    .await
+                    .map_err(|e| McpError::invalid_params(e, None))?;
+                serde_json::json!({"project":project,"universe":universe,"mechanic":entry,"expansion":preview.mechanics.iter().find(|e|e.id.0==mechanic),"solve":solve,"revision":revision})
+            } else {
+                serde_json::json!({"project":project,"universe":doc,"solve":solve,"revision":revision})
+            };
+            let mut report = PageReport::default();
+            if let Some(object) = value.get_mut("universe").and_then(|u| u.as_object_mut()) {
+                for key in [
+                    "mechanics",
+                    "targets",
+                    "target_expressions",
+                    "external_inputs",
+                ] {
+                    report.page_key(object, key, &format!("universe.{key}"), page);
+                }
+            }
+            if let Some(object) = value
+                .get_mut("solve")
+                .and_then(|r| r.get_mut("status"))
+                .and_then(|s| s.as_object_mut())
+            {
+                for key in ["mechanics", "flows", "no_provider", "no_consumer"] {
+                    report.page_key(object, key, &format!("solve.{key}"), page);
+                }
+            }
+            value
+                .as_object_mut()
+                .unwrap()
+                .insert("page".into(), report.value(page));
+            return Ok(CallToolResult::structured(value));
+        }
+
         // `recompute` / `mechanic` 只在 project + factory 同时给出时才有意义：其余
         // 组合显式报错，而不是静默忽略（agent 之前无法察觉）。
         if params.recompute && (project.is_none() || factory.is_none()) {
@@ -1012,12 +1084,13 @@ async fn dispatch_message(
     // 2) 副作用：求解在锁外跑（不阻塞 GUI 与其它 MCP 调用）。
     let state = host.state();
     let state_ref = &state;
-    let (solve, commands, errors, diagnostics) = run_commands(&outcome.commands, move |command| {
-        // 闭包返回值不能借用参数，故克隆命令进 async 块。
-        let command = command.clone();
-        async move { execute_command(host, state_ref, &command).await }
-    })
-    .await;
+    let (solve, universe_solve, commands, errors, diagnostics) =
+        run_commands(&outcome.commands, move |command| {
+            // 闭包返回值不能借用参数，故克隆命令进 async 块。
+            let command = command.clone();
+            async move { execute_command(host, state_ref, &command).await }
+        })
+        .await;
     let solve = solve.and_then(|result| serde_json::to_value(&result).ok());
     // 求解结果可能很长（机制/流各几百条）：同样按 page 截断并如实上报。
     let mut report = PageReport::default();
@@ -1052,6 +1125,7 @@ async fn dispatch_message(
         "history": &outcome.history,
         "scheduled_commands": commands,
         "solve": solve,
+        "universe_solve":universe_solve,
         "errors": errors, "diagnostics": diagnostics,
         "page": report.value(page),
     });
@@ -1637,6 +1711,9 @@ fn planning_state_value(snapshot: &DocSnapshot, page: Page) -> (serde_json::Valu
             let factories = factory_summary(project);
             let (kept, total) = page.slice(&factories);
             report.record("factories", total, kept.len());
+            let universes:Vec<_>=project.universes.iter().map(|u|serde_json::json!({"id":u.id,"name":u.name,"mechanics":u.mechanics.len(),"targets":u.targets.len(),"external_inputs":u.external_inputs.len()})).collect();
+            let (kept_universes, total_universes) = page.slice(&universes);
+            report.record("universes", total_universes, kept_universes.len());
             serde_json::json!({
                 "level": "project",
                 "project": project.id.0,
@@ -1645,6 +1722,7 @@ fn planning_state_value(snapshot: &DocSnapshot, page: Page) -> (serde_json::Valu
                 "settings": project.settings,
                 "planning": project.planning,
                 "factories": kept,
+                "universes":kept_universes,
             })
         }
         // project + factory：工厂文档（重复集合按 page 截断）。
@@ -1679,6 +1757,9 @@ fn planning_state_value(snapshot: &DocSnapshot, page: Page) -> (serde_json::Valu
 /// `get_planning_state` 的参数（都可选；全不给 = 整个文档的项目索引）。
 #[derive(Debug, serde::Deserialize, JsonSchema)]
 struct PlanningStateParams {
+    /// 宇宙工厂 id；与 factory 互斥。
+    #[serde(default)]
+    universe: Option<u64>,
     /// 项目 id；省略 = 返回项目索引。
     #[serde(default)]
     project: Option<u64>,
@@ -1817,6 +1898,7 @@ fn project_summary(document: &metatorio_runtime::AppDocument) -> Vec<serde_json:
                 "name": project.name,
                 "context_id": project.context_id,
                 "factories": project.factories.len(),
+                "universes":project.universes.len(),
                 "mechanics": project
                     .factories
                     .iter()
@@ -2219,7 +2301,7 @@ mod tests {
             "vulcanus"
         );
         assert_eq!(
-            encoded[1]["action"]["action"]["context"]["set-major-quality"]["quality"],
+            encoded[1]["action"]["action"]["set-major-quality"]["quality"],
             "legendary"
         );
         // 目标是「物品 + 品质 + 每秒速率」，两个目标各一条消息。
@@ -2914,5 +2996,25 @@ mod tests {
         }
         // 很松的天花板：只挡「意外重复内联」这类事故，不挡刻意设计。
         assert!(total < 150_000, "工具面涨到 {total} 字符：{rows:?}");
+    }
+
+    #[test]
+    fn universe_workspaces_are_discoverable_and_have_a_distinct_query_scope() {
+        let document: AppDocument = serde_json::from_value(
+            serde_json::json!({"projects":[{"id":1,"universes":[{"id":3,"name":"宇宙"}]}]}),
+        )
+        .unwrap();
+        let (index, _) = planning_state_value(
+            &DocSnapshot::Project(document.projects[0].clone()),
+            PageParams::default().resolve(),
+        );
+        assert_eq!(index["universes"][0]["id"], 3);
+        assert_eq!(index["universes"][0]["name"], "宇宙");
+        let params: PlanningStateParams = serde_json::from_value(
+            serde_json::json!({"project":1,"universe":3,"mechanic":9,"recompute":true}),
+        )
+        .unwrap();
+        assert_eq!(params.universe, Some(3));
+        assert_eq!(params.factory, None);
     }
 }

@@ -1,3 +1,5 @@
+import {onUniverseSolveResult,onUniverseSolveError} from './client';
+import {universeSolveSignatures} from '$lib/mechanics/universe-signature';
 import { universeView } from "$lib/mechanics/located";
 import { universePreview, type UniversePreview } from "./client";
 import { MechanicCommands, type MechanicScope } from "./mechanic-commands";
@@ -146,6 +148,7 @@ class RuntimeStore {
   selectedMechanic = $state<MechanicId | null>(null);
   universeSolve = $state<UniverseSolveResult | null>(null);
   universeSolveError = $state<string | null>(null);
+  universeSolveDiagnostic=$state<RuntimeDiagnostic|null>(null);
   private universeSolveCache = new Map<string, UniverseSolveResult>();
   private universeSolveGeneration = 0;
   /** 项目 id → 保存路径（记忆路径，未保存过无条目）。 */
@@ -172,7 +175,7 @@ class RuntimeStore {
   private latestAutoPlanRuns = new Map<string, { id: number; finished: boolean }>();
 
   get autoPlanProgress(): AutoPlanProgress | null {
-    return this.autoPlanProgressByFactory[`${this.selectedProjectId}:${this.selectedFactoryId}`] ?? null;
+    return this.autoPlanProgressByFactory[`${this.selectedUniverseId!=null?"universe:":""}${this.selectedProjectId}:${this.selectedUniverseId??this.selectedFactoryId}`] ?? null;
   }
 
   get autoPlanning(): boolean {
@@ -315,7 +318,7 @@ class RuntimeStore {
   async init(): Promise<void> {
     await onProjectOpenRequested(() => { if (this.ready) void this.consumeProjectOpenRequests(); });
     await onAutoPlanProgress((progress) => {
-      const key = `${progress.project}:${progress.factory}`;
+      const key = `${progress.universe!=null?"universe:":""}${progress.project}:${progress.universe??progress.factory}`;
       const latest = this.latestAutoPlanRuns.get(key);
       if (latest && (progress.run_id < latest.id ||
           (progress.run_id === latest.id && latest.finished))) return;
@@ -323,6 +326,15 @@ class RuntimeStore {
       if (progress.running) this.autoPlanProgressByFactory[key] = progress;
       else delete this.autoPlanProgressByFactory[key];
     });
+    onUniverseSolveResult(async result=>{
+      if(result.revision!=null && result.revision<this.revision)return;
+      this.revision=Math.max(this.revision,result.revision??0);
+      await this.refresh();
+      if(result.revision!=null && result.revision<this.revision)return;
+      this.universeSolveCache.set(`${result.project}:${result.universe}`,result);
+      if(this.selectedProjectId===result.project&&this.selectedUniverseId===result.universe){this.universeSolve=result;this.universeSolveError=null;this.universeSolveDiagnostic=null;this.universeSolving=false;}
+    });
+    onUniverseSolveError(error=>{if(this.selectedProjectId===error.project&&this.selectedUniverseId===error.universe){this.universeSolveDiagnostic=diagnosticFrom(error.message);this.universeSolveError=this.universeSolveDiagnostic.message;this.universeSolving=false;}});
     onSolveResult((result) => {
       this.solve = result;
       this.solveError = null;
@@ -344,7 +356,7 @@ class RuntimeStore {
       this.clearIconCache();
       this.contextBusy = false;
       this.contextError = null;
-      this.refreshContexts().catch(() => {});
+      this.refreshContexts().then(()=>{if(this.selectedUniverseId!=null)void this.solveSelectedUniverse();}).catch(() => {});
     });
     onContextError((message) => {
       this.contextError = message;
@@ -352,8 +364,8 @@ class RuntimeStore {
     });
     // 外部（MCP dispatch）改动文档后，拉取最新快照，实现「外部 agent + 用户」
     // 在同一个界面上实时并存协同。
-    onDocumentChanged(() => {
-      this.universeOperationVersion++;
+    onDocumentChanged((revision) => {
+      if(typeof revision==='number')this.revision=Math.max(this.revision,revision);
       this.refresh().catch(() => {});
       // 外部（MCP）也可能撤销/重做，同步历史可用性。
       this.refreshHistory().catch(() => {});
@@ -393,14 +405,16 @@ class RuntimeStore {
   }
 
   async refresh(): Promise<void> {
-    const universeSignature = (document: AppDocument | null) => JSON.stringify(document?.projects.map(p=>[p.id,p.context_id,p.settings,p.universes]));
-    const beforeUniverse = universeSignature(this.document);
+    const beforeUniverse = universeSolveSignatures(this.document);
     const previousProject = this.selectedProjectId;
     const previousFactory = this.selectedFactoryId;
     this.document = await getDocument();
-    const universeChanged = beforeUniverse !== universeSignature(this.document);
+    const afterUniverse = universeSolveSignatures(this.document);
+    for(const key of this.universeSolveCache.keys())if(beforeUniverse.get(key)!==afterUniverse.get(key))this.universeSolveCache.delete(key);
+    const selectedKey=`${this.selectedProjectId}:${this.selectedUniverseId}`;
+    const universeChanged = beforeUniverse.get(selectedKey)!==afterUniverse.get(selectedKey);
     if (universeChanged) {
-      this.universeSolveCache.clear(); this.universeSolveGeneration++;
+      this.universeSolveGeneration++;
       this.universeSolve = null; this.universeSolving = false;
     }
 
@@ -417,13 +431,7 @@ class RuntimeStore {
       this.syncEffectiveContext().catch(() => {});
     }
     this.refreshProjectPaths().catch(() => {});
-    if (universeChanged && this.selectedUniverseId != null) {
-      const project=this.selectedProjectId, universe=this.selectedUniverseId;
-      clearTimeout(this.universeSolveTimer);
-      this.universeSolveTimer=setTimeout(()=>{
-        if(this.selectedProjectId===project && this.selectedUniverseId===universe && !this.universeSolve) void this.solveSelectedUniverse();
-      },180);
-    }
+
   }
 
   /** Send one AppMessage to the Rust runtime and refresh the snapshot.
@@ -440,12 +448,16 @@ class RuntimeStore {
     let result: DispatchResult;
     try {
       result = await dispatch(message);
-      this.revision = result.revision;
+      this.revision = Math.max(this.revision,result.revision);
       this.history = result.history;
       // 任何交互都可能改变可达性（显式标记/里程碑/无视开关/换上下文），
       // 整体失效缓存；选择器打开时按需重拉。
       this.accessibility = null;
       await this.refresh();
+      if(result.universe_solve && (result.universe_solve.revision??result.revision)>=this.revision){
+        const solved=result.universe_solve;this.universeSolveCache.set(`${solved.project}:${solved.universe}`,solved);
+        if(this.selectedProjectId===solved.project&&this.selectedUniverseId===solved.universe){this.universeSolve=solved;this.universeSolveError=null;this.universeSolveDiagnostic=null;this.universeSolving=false;}
+      }
     } catch (error) {
       this.setOperationError(error);
       throw error;
@@ -505,6 +517,7 @@ class RuntimeStore {
     const projects = this.document?.projects ?? [];
     if (focus?.project != null && projects.some((p) => p.id === focus.project)) {
       await this.selectProject(focus.project);
+      if(focus.universe!=null && this.selectedProject?.universes.some(u=>u.id===focus.universe)){await this.selectUniverse(focus.universe);return;}
       if (
         focus.factory != null &&
         this.selectedProject?.factories.some((f) => f.id === focus.factory)
@@ -895,13 +908,6 @@ class RuntimeStore {
     this.universePreviewCache.clear(); this.universeSolveCache.clear();
     this.universeOperationVersion++; this.universeSolveGeneration++;
     this.universeSolve = null; this.universeSolving = false;
-    if(this.selectedUniverseId != null) {
-      const project=this.selectedProjectId,universe=this.selectedUniverseId;
-      clearTimeout(this.universeSolveTimer);
-      this.universeSolveTimer=setTimeout(()=>{
-        if(this.selectedProjectId===project && this.selectedUniverseId===universe)void this.solveSelectedUniverse();
-      },180);
-    }
     this.mechanicFlowCache.clear();
   }
 
@@ -1024,7 +1030,6 @@ class RuntimeStore {
 
   async selectUniverse(universe: UniverseId | null): Promise<void> {
     this.universeSolving = false;
-    clearTimeout(this.universeSolveTimer);
     if (universe != null && this.selectedUniverseId == null) {
       this.previousFactoryId = this.selectedFactoryId;
     }
@@ -1146,12 +1151,12 @@ class RuntimeStore {
       planned = result;
       this.universeSolve = result;
     } catch (error) {
-      if (generation !== this.universeSolveGeneration) return;
-      this.universeSolveError = error instanceof Error ? error.message : String(error);
+      if (generation !== this.universeSolveGeneration || this.selectedProjectId!==project || this.selectedUniverseId!==universe) return;
+      this.universeSolveDiagnostic=diagnosticFrom(error);this.universeSolveError=this.universeSolveDiagnostic.message;
     } finally {
       this.busy = false;
       const current = operation === this.universeOperationVersion;
-      await this.refresh();
+      await this.refresh();await this.refreshHistory();
       if (current && operation === this.universeOperationVersion && planned && this.selectedProjectId === project && this.selectedUniverseId === universe) {
         this.universeSolve = planned;
         this.universeSolveCache.set(`${project}:${universe}`, planned);
@@ -1165,7 +1170,6 @@ class RuntimeStore {
     const generation = ++this.universeSolveGeneration;
     this.universeSolveError = null;
     this.universeSolving = true;
-    clearTimeout(this.universeSolveTimer);
     try {
       const result = await solveUniverse(project, universe);
       if (generation !== this.universeSolveGeneration) return;
@@ -1176,7 +1180,7 @@ class RuntimeStore {
       if (generation !== this.universeSolveGeneration) return;
       if (this.selectedProjectId !== project || this.selectedUniverseId !== universe) return;
       this.universeSolve = null;
-      this.universeSolveError = error instanceof Error ? error.message : String(error);
+      this.universeSolveDiagnostic=diagnosticFrom(error);this.universeSolveError=this.universeSolveDiagnostic.message;
     } finally {
       if (generation === this.universeSolveGeneration) this.universeSolving = false;
     }
@@ -1480,23 +1484,17 @@ class RuntimeStore {
   }
 
   /** 采纳建议：新增对应机制并设置主项（机器由兼容回退自动推断）。 */
-  async addSuggestion(candidate: { kind: string; name: string }): Promise<void> {
-    const kindMap: Record<string, import("./types").MechanicKind> = {
-      recipe: "recipe",
-      resource: "mining",
-      "item-fuel": "item-fuel",
-      "virtual-science": "virtual-science",
-      generator: "generator",
-    };
-    const kind = kindMap[candidate.kind];
-    if (!kind) throw new Error(`未知建议类型 ${candidate.kind}`);
-    await this.addMechanic(kind);
-    const id = this.selectedFactory?.mechanics.at(-1)?.id;
-    if (id == null) return;
-    if (candidate.kind === "recipe") await this.setRecipe(id, candidate.name);
-    else if (candidate.kind === "resource") await this.setResource(id, candidate.name);
-    else if (candidate.kind === "item-fuel" || candidate.kind === "virtual-science") await this.setItem(id, candidate.name);
-    else if (candidate.kind === "generator") await this.setGenerator(id, candidate.name);
+  async addSuggestion(candidate:{kind:string;name:string},destination?:MechanicScope,location?:Location):Promise<void>{
+    const scope:MechanicScope=destination??(this.selectedUniverseId!=null?{project:this.requireProject(),factory:this.selectedUniverseId,kind:'universe' as const}:this.requireFactory());
+    const kind=({recipe:'recipe',resource:'mining','item-fuel':'item-fuel','virtual-science':'virtual-science',generator:'generator'} as Record<string,import('./types').MechanicKind>)[candidate.kind];
+    if(!kind)throw new Error(`未知建议类型 ${candidate.kind}`);
+    const result=await this.send(scope.kind==='universe'?{scope:'universe',action:{project:scope.project,universe:scope.factory,action:{'add-local-mechanic':{location:location??this.universeAddLocation,kind}}}}:{scope:'factory',action:{project:scope.project,factory:scope.factory,action:{'mechanic-list':{add:{kind}}}}});
+    const id=result.created.mechanics.at(-1);if(id==null)return;
+    const commands=this.mechanicCommands(scope);
+    if(candidate.kind==='recipe')await commands.setRecipe(id,candidate.name);
+    else if(candidate.kind==='resource')await commands.setResource(id,candidate.name);
+    else if(candidate.kind==='generator')await commands.setGenerator(id,candidate.name);
+    else await commands.setItem(id,candidate.name);
   }
 
   // ── 目标表达式（常数 + 线性项求和） ──────────────────────────────
@@ -1780,12 +1778,11 @@ class RuntimeStore {
 
   universeSolving = $state(false);
   private universeOperationVersion = 0;
-  private universeSolveTimer: ReturnType<typeof setTimeout> | undefined;
+
   universeAddLocation = $state<Location>({kind: 'planet', name: 'nauvis'});
   private universePreviewCache = new Map<string, Promise<UniversePreview>>();
   loadUniversePreview(project: number, universe: number): Promise<UniversePreview> {
-    const p = this.document?.projects.find(p => p.id === project);
-    const key = JSON.stringify([project, universe, p?.context_id, this.effectiveContextId, p?.settings, p?.universes?.find(u => u.id === universe)]);
+    const key = JSON.stringify([project, universe, this.effectiveContextId, universeSolveSignatures(this.document).get(`${project}:${universe}`)]);
     let pending = this.universePreviewCache.get(key);
     if (!pending) {
       if (this.universePreviewCache.size > 8) this.universePreviewCache.clear();
@@ -1799,17 +1796,9 @@ class RuntimeStore {
     if (kind === 'universe') { const u = p?.universes?.find(u => u.id === factory); return u ? universeView(u) : null; }
     return p?.factories.find(f => f.id === factory) ?? null;
   }
-  async dispatchUniverse(project: number, universe: number, action: UniverseAction) {
-    if (this.selectedProjectId === project && this.selectedUniverseId === universe) this.universeSolveGeneration++;
-    await this.send({scope: 'universe', action: {project, universe, action}});
-    this.universeSolveCache.delete(`${project}:${universe}`);
-    if (this.selectedProjectId === project && this.selectedUniverseId === universe) {
-      this.universeSolve = null;
-      clearTimeout(this.universeSolveTimer);
-      this.universeSolveTimer = setTimeout(() => {
-        if (this.selectedProjectId === project && this.selectedUniverseId === universe) void this.solveSelectedUniverse();
-      }, 180);
-    }
+  async dispatchUniverse(project:number,universe:number,action:UniverseAction){
+    this.universeSolveGeneration++;
+    await this.send({scope:'universe',action:{project,universe,action}});
   }
   /** Scope captured once; a universe projection never becomes the selected factory. */
   mechanicCommands(scope: MechanicScope = this.requireFactory()): MechanicCommands {
@@ -1830,20 +1819,7 @@ class RuntimeStore {
           }
           return send({mechanic: action.mechanic});
         }
-        if ('cleanup' in action) {
-          const result = this.universeSolveCache.get(`${scope.project}:${scope.factory}`) ?? (this.universeSolve?.project === scope.project && this.universeSolve?.universe === scope.factory ? this.universeSolve : null);
-          const status = result?.status;
-          if (status?.status !== 'solved') return;
-          const amounts = new Map(status.mechanics.map(m => [m.mechanic,m.amount]));
-          const entries = [...(this.mechanicFactory(scope)?.mechanics ?? [])];
-          if (action.cleanup === 'remove-unused') {
-            for (const entry of entries) if (!(amounts.get(entry.id) ?? 0)) await send({'remove-mechanic':{mechanic:entry.id}});
-          } else {
-            entries.sort((a,b)=>(amounts.get(b.id)??0)-(amounts.get(a.id)??0));
-            for (let position=entries.length-1;position>=0;position--) await send({'reorder-mechanic':{mechanic:entries[position].id,position}});
-          }
-          return;
-        }
+        if ('cleanup' in action) return send({cleanup:action.cleanup});
         if ('mechanic-list' in action) {
           const list = action['mechanic-list'];
           if ('add' in list) return send({'add-local-mechanic': {location: this.universeAddLocation, kind: list.add.kind}});

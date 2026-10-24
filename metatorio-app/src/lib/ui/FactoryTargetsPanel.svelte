@@ -13,7 +13,7 @@
   import { flowSelectionInitial } from '$lib/mechanics/flow-selection';
   let {scope, targets, expressions, selectFlow, onSuggest}: {scope: MechanicScope; targets: FlowTarget[]; expressions: TargetExpression[];
     selectFlow: (request: MechanicFlowSelection & {initialName?:string;initialQuality?:string}) => void;
-    onSuggest?: (flow: DualVar) => void} = $props();
+    onSuggest?: (flow: DualVar,location?:Location) => void} = $props();
   let targetsOpen=$state(true), expressionsOpen=$state(false), rows=$state<FlowTarget[]>([]);
   $effect(() => { rows=targets; });
   let exprRows=$state<TargetExpression[]>([]);
@@ -61,7 +61,7 @@
       {#each rows as target (target.id)}
         <div class="row-item one-line">
           {#if target.location}<LocationPicker value={target.location} label="目标地点" onChange={location=>setTarget(target,target.flow,location)} />{/if}
-          <FlowRef flow={target.flow} title="左键更改流 · 右键查看建议" grow showQualifiers={false} showBadge={!(typeof target.flow==='object' && 'Fluid' in target.flow)} size={26} onClick={()=>editTarget(target)} onContextMenu={()=>onSuggest?.(target.flow)} />
+          <FlowRef flow={target.flow} title="左键更改流 · 右键查看建议" grow showQualifiers={false} showBadge={!(typeof target.flow==='object' && 'Fluid' in target.flow)} size={26} onClick={()=>editTarget(target)} onContextMenu={()=>onSuggest?.(target.flow,target.location)} />
           <FlowRangeEditor flow={target.flow} onChange={flow=>setTarget(target,flow)} />
           <span class="target-value">
           <input class="num" type="text" inputmode="decimal" aria-label="目标数量" value={isEnergyFlow(target.flow)?networkRate(target.flow,target.amount,"seconds"):target.amount*factor} onchange={e=>{

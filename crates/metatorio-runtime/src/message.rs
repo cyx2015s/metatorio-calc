@@ -258,6 +258,8 @@ pub enum FactoryAction {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum UniverseAction {
+    Solve(SolveAction),
+    Cleanup(CleanupAction),
     AddExternalInput {
         flow: LocatedDualVar,
         penalty: f64,
@@ -811,6 +813,26 @@ pub enum SolveAction {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum RuntimeCommand {
+    RecomputeUniverse {
+        project: ProjectId,
+        universe: UniverseId,
+    },
+    AutoPlanUniverse {
+        project: ProjectId,
+        universe: UniverseId,
+    },
+    CleanupUniverse {
+        project: ProjectId,
+        universe: UniverseId,
+        action: CleanupAction,
+    },
+    RepairUniverseMechanic {
+        project: ProjectId,
+        universe: UniverseId,
+        mechanic: MechanicId,
+        compat: bool,
+        clamp: bool,
+    },
     Recompute {
         project: ProjectId,
         factory: FactoryId,

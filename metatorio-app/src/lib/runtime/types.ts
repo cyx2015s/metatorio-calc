@@ -387,6 +387,8 @@ export type FactoryAction =
 // (newtype variants like Application put the payload directly under
 // "action").  Keep in sync with crates/metatorio-runtime/src/message.rs.
 export type UniverseAction =
+  | {solve:"recompute"|"auto-plan"}
+  | {cleanup:CleanupAction}
   | { 'add-external-input': {flow:LocatedDualVar;penalty:number} }
   | { 'remove-external-input': {input:ExternalInputId} }
   | { 'set-external-input-flow': {input:ExternalInputId;flow:LocatedDualVar} }
@@ -571,6 +573,7 @@ export interface UniverseDocument {
 }
 
 export interface LocatedMechanicSolution {
+  scale?:number;
   mechanic: MechanicId;
   location: Location;
   amount: number;
@@ -579,12 +582,14 @@ export interface LocatedMechanicSolution {
 }
 
 export interface LocatedFlow {
+  scale?:number;
   flow: LocatedDualVar;
   amount: number;
   rate: number;
 }
 
 export interface UniverseSolveResult {
+  revision?:number;
   project: ProjectId;
   universe: UniverseId;
   status:
@@ -700,6 +705,7 @@ export type Fuel =
 // ── Runtime replies ───────────────────────────────────────────────
 
 export interface DispatchResult {
+  universe_solve?:UniverseSolveResult;
   revision: number;
   changed: boolean;
   commands: unknown[];
@@ -720,6 +726,7 @@ export interface DispatchResult {
 
 /** 撤销/重做后前端应聚焦的对象。 */
 export interface HistoryFocus {
+  universe?:UniverseId|null;
   project: ProjectId | null;
   factory: FactoryId | null;
 }
@@ -746,6 +753,8 @@ export interface SolveResult {
 
 /** Structured domain failures keep flow identities intact across IPC/events. */
 export interface RuntimeDiagnostic {
+  located_no_provider?:LocatedDualVar[];
+  located_no_consumer?:LocatedDualVar[];
   code: string;
   message: string;
   no_provider: DualVar[];
@@ -1061,6 +1070,7 @@ export type CatalogKind =
   | "tile";
 /** Complete LP dimensions for one auto-plan run; null until model construction. */
 export interface AutoPlanProgress {
+  universe?:UniverseId|null;
   project: ProjectId;
   factory: FactoryId;
   run_id: number;

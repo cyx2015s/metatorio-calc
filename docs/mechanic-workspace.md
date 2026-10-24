@@ -114,8 +114,9 @@ MechanicWorkspace / MechanicListView / MechanicNetworkView 不区分独立 UI �
 火箭转移连接地面与太空；太空物品到地面的免费投送显示为兼容虚线，明确不是求解器报告的
 实际物流分配量。编辑、筛选与视图切换继续保留原机制 ID 的节点焦点。
 
-宇宙编辑按 180ms 防抖自动重算；普通文档刷新不会无条件丢弃宇宙求解结果。
-自动规划回写、撤销及外部消息改变宇宙数据时失效缓存，迟到结果不能覆盖后续编辑。
+宇宙编辑由后端命令统一重算，不再依赖前端防抖定时器。计算输入改变时按工作区失效缓存，
+重命名、排序和时间显示单位不清空结果。自动规划的作业、提交、诊断与回归见
+[工作区一致性链路](workspace-parity.md)。
 
 宇宙外部输入以 `LocatedExternalInput { id, flow: LocatedDualVar, penalty }` 存入
 `UniverseDocument.external_inputs`，旧文件缺失该字段时为空。手动输入按完整的地点、

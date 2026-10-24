@@ -72,6 +72,20 @@ pub struct AppState {
         ),
         metatorio_runtime::Diagnostic,
     >,
+    pub(crate) universe_jobs: solve_jobs::SolveJobs<
+        metatorio_runtime::universe::UniverseSolveResult,
+        String,
+        metatorio_runtime::solve::UniverseSnapshot,
+    >,
+    pub(crate) universe_plan_jobs: solve_jobs::SolveJobs<
+        (
+            metatorio_runtime::solve::UniverseSnapshot,
+            Vec<metatorio_core::LocatedMechanic>,
+            metatorio_runtime::solve::AutoPlanReport,
+        ),
+        metatorio_runtime::Diagnostic,
+        metatorio_runtime::solve::UniverseSnapshot,
+    >,
     /// 上下文载入的按键串行锁（同一上下文只读盘解析一次）。
     pub(crate) context_loads: solve_jobs::KeyLocks,
     pub(crate) contexts: Mutex<ContextRegistry>,
@@ -339,6 +353,8 @@ impl Default for AppState {
         Self {
             runtime: Mutex::new(Runtime::new()),
             solve_jobs: solve_jobs::SolveJobs::default(),
+            universe_jobs: solve_jobs::SolveJobs::default(),
+            universe_plan_jobs: solve_jobs::SolveJobs::for_auto_plan(),
             autoplan_jobs: solve_jobs::SolveJobs::for_auto_plan(),
             context_loads: solve_jobs::KeyLocks::default(),
             contexts: Mutex::new(ContextRegistry::default()),
@@ -358,6 +374,8 @@ impl AppState {
         let mut state = Self::default();
         if let Some(ms) = options.solve_timeout_ms {
             let timeout = std::time::Duration::from_millis(ms);
+            state.universe_jobs = solve_jobs::SolveJobs::default().with_timeout(timeout);
+            state.universe_plan_jobs = solve_jobs::SolveJobs::default().with_timeout(timeout);
             state.solve_jobs = solve_jobs::SolveJobs::default().with_timeout(timeout);
             state.autoplan_jobs = solve_jobs::SolveJobs::default().with_timeout(timeout);
         }
@@ -2708,6 +2726,16 @@ pub(crate) fn clamp_modules(
     factory: FactoryId,
     mechanic: MechanicId,
 ) -> Result<(), String> {
+    clamp_modules_scoped(state, runtime, project, factory, mechanic, None)
+}
+pub(crate) fn clamp_modules_scoped(
+    state: &AppState,
+    runtime: &mut Runtime,
+    project: ProjectId,
+    factory: FactoryId,
+    mechanic: MechanicId,
+    universe: Option<metatorio_runtime::UniverseId>,
+) -> Result<(), String> {
     let context_id = runtime
         .state
         .project(project)
@@ -2724,20 +2752,36 @@ pub(crate) fn clamp_modules(
         .ok_or_else(|| "上下文未载入".to_string())?
         .clone();
 
-    let entry = runtime
-        .state
-        .factory(project, factory)
-        .map_err(|error| error.to_string())?
-        .mechanics
-        .iter()
-        .find(|entry| entry.id == mechanic)
-        .cloned()
-        .ok_or_else(|| "机制不存在".to_string())?;
+    let mechanism = if let Some(universe) = universe {
+        let e = runtime
+            .state
+            .universe(project, universe)
+            .map_err(|e| e.to_string())?
+            .mechanics
+            .iter()
+            .find(|e| e.id == mechanic)
+            .ok_or("机制不存在")?;
+        let metatorio_core::LocatedMechanic::Local(local) = &e.mechanic else {
+            return Ok(());
+        };
+        local.mechanic.clone()
+    } else {
+        runtime
+            .state
+            .factory(project, factory)
+            .map_err(|e| e.to_string())?
+            .mechanics
+            .iter()
+            .find(|e| e.id == mechanic)
+            .ok_or("机制不存在")?
+            .mechanic
+            .clone()
+    };
 
     // 只有配方/采矿机制带插件槽（`module_config`）；其余机制没有可钳制的插件。
     // 这里一次判定同时给出「哪种机制」，避免第二个 match 依赖此处的提前 return
     // 才能安全地把 `_` 当成 Mining。
-    let (module_count, max, is_recipe) = match &entry.mechanic {
+    let (module_count, max, is_recipe) = match &mechanism {
         Mechanic::Recipe(recipe) => (
             recipe.module_config.modules.len(),
             effective_module_slots(&store, &recipe.machine.id, &recipe.machine.quality),
@@ -2763,11 +2807,14 @@ pub(crate) fn clamp_modules(
         }))
     };
     runtime
-        .dispatch(AppMessage::Factory {
-            project,
-            factory,
-            action: FactoryAction::Mechanic { mechanic, action },
-        })
+        .dispatch_scoped_mechanic(
+            universe,
+            AppMessage::Factory {
+                project,
+                factory,
+                action: FactoryAction::Mechanic { mechanic, action },
+            },
+        )
         .map_err(|error| error.to_string())?;
     Ok(())
 }
@@ -2949,6 +2996,11 @@ pub(crate) fn ensure_quality_limit(
             for target in &factory.targets {
                 max_level = max_level.max(flow_quality_level(&qualities, &target.flow));
             }
+            for expression in &factory.target_expressions {
+                for term in &expression.terms {
+                    max_level = max_level.max(flow_quality_level(&qualities, &term.flow));
+                }
+            }
             for input in &factory.external_inputs {
                 max_level = max_level.max(flow_quality_level(&qualities, &input.flow));
             }
@@ -2957,6 +3009,9 @@ pub(crate) fn ensure_quality_limit(
             }
         }
         for universe in &project_doc.universes {
+            for input in &universe.external_inputs {
+                max_level = max_level.max(flow_quality_level(&qualities, &input.flow.flow));
+            }
             for target in &universe.targets {
                 max_level = max_level.max(flow_quality_level(&qualities, &target.flow.flow));
             }
@@ -3004,6 +3059,16 @@ pub(crate) fn ensure_machine_compat(
     factory: FactoryId,
     mechanic: MechanicId,
 ) -> Result<(), String> {
+    ensure_machine_compat_scoped(state, runtime, project, factory, mechanic, None)
+}
+pub(crate) fn ensure_machine_compat_scoped(
+    state: &AppState,
+    runtime: &mut Runtime,
+    project: ProjectId,
+    factory: FactoryId,
+    mechanic: MechanicId,
+    universe: Option<metatorio_runtime::UniverseId>,
+) -> Result<(), String> {
     let context_id = runtime
         .state
         .project(project)
@@ -3027,17 +3092,33 @@ pub(crate) fn ensure_machine_compat(
         .machine_preferences
         .clone();
 
-    let entry = runtime
-        .state
-        .factory(project, factory)
-        .map_err(|error| error.to_string())?
-        .mechanics
-        .iter()
-        .find(|entry| entry.id == mechanic)
-        .cloned()
-        .ok_or_else(|| "机制不存在".to_string())?;
+    let mechanism = if let Some(universe) = universe {
+        let e = runtime
+            .state
+            .universe(project, universe)
+            .map_err(|e| e.to_string())?
+            .mechanics
+            .iter()
+            .find(|e| e.id == mechanic)
+            .ok_or("机制不存在")?;
+        let metatorio_core::LocatedMechanic::Local(local) = &e.mechanic else {
+            return Ok(());
+        };
+        local.mechanic.clone()
+    } else {
+        runtime
+            .state
+            .factory(project, factory)
+            .map_err(|e| e.to_string())?
+            .mechanics
+            .iter()
+            .find(|e| e.id == mechanic)
+            .ok_or("机制不存在")?
+            .mechanic
+            .clone()
+    };
 
-    match &entry.mechanic {
+    match &mechanism {
         Mechanic::Recipe(recipe) => {
             let recipe_categories = store
                 .get(PrototypeGroup::Recipe, &recipe.recipe.id)
@@ -3075,16 +3156,19 @@ pub(crate) fn ensure_machine_compat(
                 let machine =
                     IdWithQuality::new(machine, quality_or_normal(&recipe.machine.quality));
                 runtime
-                    .dispatch(AppMessage::Factory {
-                        project,
-                        factory,
-                        action: FactoryAction::Mechanic {
-                            mechanic,
-                            action: MechanicAction::Recipe(RecipeMechanicAction::SetMachine {
-                                machine,
-                            }),
+                    .dispatch_scoped_mechanic(
+                        universe,
+                        AppMessage::Factory {
+                            project,
+                            factory,
+                            action: FactoryAction::Mechanic {
+                                mechanic,
+                                action: MechanicAction::Recipe(RecipeMechanicAction::SetMachine {
+                                    machine,
+                                }),
+                            },
                         },
-                    })
+                    )
                     .map_err(|error| error.to_string())?;
             }
         }
@@ -3116,22 +3200,25 @@ pub(crate) fn ensure_machine_compat(
                 let machine =
                     IdWithQuality::new(machine, quality_or_normal(&mining.machine.quality));
                 runtime
-                    .dispatch(AppMessage::Factory {
-                        project,
-                        factory,
-                        action: FactoryAction::Mechanic {
-                            mechanic,
-                            action: MechanicAction::Mining(MiningMechanicAction::SetMachine {
-                                machine,
-                            }),
+                    .dispatch_scoped_mechanic(
+                        universe,
+                        AppMessage::Factory {
+                            project,
+                            factory,
+                            action: FactoryAction::Mechanic {
+                                mechanic,
+                                action: MechanicAction::Mining(MiningMechanicAction::SetMachine {
+                                    machine,
+                                }),
+                            },
                         },
-                    })
+                    )
                     .map_err(|error| error.to_string())?;
             }
         }
         _ => {}
     }
-    Ok(())
+    clamp_modules_scoped(state, runtime, project, factory, mechanic, universe)
 }
 
 /// 短暂持有 runtime 锁执行一段逻辑（**不得跨 `await`**）。
@@ -3378,26 +3465,79 @@ pub(crate) async fn solve_factory_offlock(
         .await
 }
 
-/// 在阻塞线程池中对宇宙工厂按地点执行自动规划，并返回联合求解结果。
 pub async fn auto_plan_universe_offlock(
     host: &Arc<dyn Host>,
-    _state: &AppState,
-    project: metatorio_runtime::ProjectId,
+    state: &AppState,
+    project: ProjectId,
     universe: metatorio_runtime::UniverseId,
-) -> Result<metatorio_runtime::UniverseSolveResult, String> {
-    let host = host.clone();
-    tokio::task::spawn_blocking(move || {
-        let mut runtime = host
-            .state()
-            .runtime
-            .lock()
-            .map_err(|_| "runtime 锁已损坏（poisoned）".to_string())?;
+) -> Result<metatorio_runtime::universe::UniverseSolveResult, metatorio_runtime::Diagnostic> {
+    ensure_context_for_project_offlock(state, project).await?;
+    let progress = crate::auto_plan_progress::PlanningProgress::start_universe(
+        host.clone(),
+        project,
+        universe,
+    );
+    let observe = progress.observer();
+    let take = host.clone();
+    let cache = host.clone();
+    let (snapshot, mechanics, report) = state
+        .universe_plan_jobs
+        .run(
+            (project, FactoryId(universe.0)),
+            move || {
+                with_runtime(take.state(), |r| {
+                    r.universe_snapshot_inputs(project, universe)
+                        .map_err(|e| e.to_string())
+                })
+                .map_err(metatorio_runtime::Diagnostic::from)
+            },
+            move |snapshot| {
+                let accessibility = snapshot.resolve_accessibility();
+                let (mechanics, report) = metatorio_runtime::solve::plan_universe_with_progress(
+                    snapshot,
+                    &accessibility,
+                    &observe,
+                )
+                .map_err(metatorio_runtime::Diagnostic::from)?;
+                if let Ok(runtime) = cache.state().runtime.lock() {
+                    runtime.cache_accessibility_if_current(
+                        project,
+                        snapshot.revision,
+                        snapshot.accessibility_epoch,
+                        accessibility,
+                    );
+                }
+                Ok((snapshot.clone(), mechanics, report))
+            },
+        )
+        .await?;
+    let written = with_runtime(state, |runtime| {
+        if !runtime.universe_document_matches(&snapshot) {
+            return Err("该宇宙工厂或项目设置在规划期间被修改，已放弃回写，请重试".into());
+        }
         runtime
-            .auto_plan_universe(project, universe)
-            .map_err(|error| error.to_string())
-    })
-    .await
-    .map_err(|error| error.to_string())?
+            .state
+            .apply_universe_auto_plan(project, universe, mechanics)
+            .map_err(|e| e.to_string())
+    })?;
+    for command in &written.commands {
+        if !matches!(command, RuntimeCommand::RecomputeUniverse { .. }) {
+            let outcome = Box::pin(execute_command(host, state, command)).await;
+            if !outcome.errors.is_empty() {
+                return Err(outcome
+                    .diagnostics
+                    .into_iter()
+                    .next()
+                    .unwrap_or_else(|| outcome.errors.join("\n").into()));
+            }
+        }
+    }
+    let mut result = solve_universe_offlock(host, state, project, universe).await?;
+    metatorio_runtime::solve::attach_universe_plan_report(&mut result, &report);
+    emit(host, "universe-solve-result", result.clone());
+    let revision = with_runtime(state, |r| Ok(r.state.revision))?;
+    emit(host, "document-changed", revision);
+    Ok(result)
 }
 
 pub async fn universe_preview_offlock(
@@ -3405,6 +3545,7 @@ pub async fn universe_preview_offlock(
     project: ProjectId,
     universe: metatorio_runtime::UniverseId,
 ) -> Result<metatorio_runtime::universe::UniversePreview, String> {
+    ensure_context_for_project_offlock(host.state(), project).await?;
     let host = host.clone();
     tokio::task::spawn_blocking(move || {
         let runtime = host.state().runtime.lock().map_err(|e| e.to_string())?;
@@ -3431,36 +3572,44 @@ pub async fn universe_preview_offlock(
 /// 锁外求解一个宇宙工厂：锁内只取快照，重型 LP 在阻塞线程池执行。
 pub async fn solve_universe_offlock(
     host: &Arc<dyn Host>,
-    _state: &AppState,
-    project: metatorio_runtime::ProjectId,
+    state: &AppState,
+    project: ProjectId,
     universe: metatorio_runtime::UniverseId,
-) -> Result<metatorio_runtime::UniverseSolveResult, String> {
-    let host = host.clone();
-    tokio::task::spawn_blocking(move || {
-        let runtime = host
-            .state()
-            .runtime
-            .lock()
-            .map_err(|_| "runtime 锁已损坏（poisoned）".to_string())?;
-        let snapshot = runtime
-            .project_snapshot(project)
-            .map_err(|error| error.to_string())?;
-        let universe_doc = runtime
-            .state
-            .universe(project, universe)
-            .map_err(|error| error.to_string())?
-            .clone();
-        let accessibility = snapshot.resolve_accessibility();
-        drop(runtime);
-        metatorio_runtime::solve_universe(
-            &snapshot.store,
-            &snapshot.project_doc,
-            &universe_doc,
-            &accessibility,
+) -> Result<metatorio_runtime::universe::UniverseSolveResult, String> {
+    ensure_context_for_project_offlock(state, project).await?;
+    let take = host.clone();
+    let cache = host.clone();
+    state
+        .universe_jobs
+        .run(
+            (project, FactoryId(universe.0)),
+            move || {
+                with_runtime(take.state(), |r| {
+                    r.universe_snapshot_inputs(project, universe)
+                        .map_err(|e| e.to_string())
+                })
+            },
+            move |snapshot| {
+                let accessibility = snapshot.resolve_accessibility();
+                let mut result = metatorio_runtime::solve_universe(
+                    &snapshot.store,
+                    &snapshot.project_doc,
+                    &snapshot.universe_doc,
+                    &accessibility,
+                )?;
+                if let Ok(runtime) = cache.state().runtime.lock() {
+                    runtime.cache_accessibility_if_current(
+                        project,
+                        snapshot.revision,
+                        snapshot.accessibility_epoch,
+                        accessibility,
+                    );
+                }
+                result.revision = snapshot.revision;
+                Ok(result)
+            },
         )
-    })
-    .await
-    .map_err(|error| error.to_string())?
+        .await
 }
 
 /// 一条（或一组嵌套）命令的执行结果。
@@ -3532,6 +3681,7 @@ pub(crate) async fn run_commands<F, Fut>(
     mut execute: F,
 ) -> (
     Option<metatorio_runtime::SolveResult>,
+    Option<metatorio_runtime::universe::UniverseSolveResult>,
     Vec<serde_json::Value>,
     Vec<String>,
     Vec<metatorio_runtime::Diagnostic>,
@@ -3541,15 +3691,24 @@ where
     Fut: std::future::Future<Output = CommandOutcome>,
 {
     let mut solve = None;
+    let mut universe_solve = None;
     let mut serialized = Vec::new();
     let mut errors = Vec::new();
     let mut diagnostics = Vec::new();
     for command in commands {
         let outcome = execute(command).await;
-        if solve.is_none()
-            && let Some(metatorio_runtime::CommandEffect::Solve(result)) = outcome.effect
-        {
-            solve = Some(result);
+        match outcome.effect {
+            Some(metatorio_runtime::CommandEffect::Solve(result)) => {
+                if solve.is_none() {
+                    solve = Some(result);
+                }
+            }
+            Some(metatorio_runtime::CommandEffect::UniverseSolve(result)) => {
+                if universe_solve.is_none() {
+                    universe_solve = Some(result);
+                }
+            }
+            _ => {}
         }
         errors.extend(outcome.errors);
         diagnostics.extend(outcome.diagnostics);
@@ -3557,7 +3716,7 @@ where
             serialized.push(value);
         }
     }
-    (solve, serialized, errors, diagnostics)
+    (solve, universe_solve, serialized, errors, diagnostics)
 }
 
 /// Execute the side effects of one [`RuntimeCommand`] on the shared runtime,
@@ -3574,6 +3733,116 @@ pub(crate) async fn execute_command(
     command: &RuntimeCommand,
 ) -> CommandOutcome {
     match command {
+        RuntimeCommand::RecomputeUniverse { project, universe } => {
+            match solve_universe_offlock(host, state, *project, *universe).await {
+                Ok(result) => {
+                    emit(host, "universe-solve-result", result.clone());
+                    CommandOutcome::done(Some(metatorio_runtime::CommandEffect::UniverseSolve(
+                        result,
+                    )))
+                }
+                Err(error) => {
+                    emit(
+                        host,
+                        "universe-solve-error",
+                        serde_json::json!({"project":project,"universe":universe,"message":error}),
+                    );
+                    CommandOutcome::failed(error)
+                }
+            }
+        }
+        RuntimeCommand::AutoPlanUniverse { project, universe } => {
+            match Box::pin(auto_plan_universe_offlock(host, state, *project, *universe)).await {
+                Ok(r) => {
+                    CommandOutcome::done(Some(metatorio_runtime::CommandEffect::UniverseSolve(r)))
+                }
+                Err(e) => CommandOutcome::failed(e),
+            }
+        }
+        RuntimeCommand::CleanupUniverse {
+            project,
+            universe,
+            action,
+        } => {
+            if let Err(e) = ensure_context_for_project_offlock(state, *project).await {
+                return CommandOutcome::failed(e);
+            }
+            let snapshot = match with_runtime(state, |r| {
+                r.universe_snapshot_inputs(*project, *universe)
+                    .map_err(|e| e.to_string())
+            }) {
+                Ok(s) => s,
+                Err(e) => return CommandOutcome::failed(e),
+            };
+            let result = match solve_universe_offlock(host, state, *project, *universe).await {
+                Ok(r) => r,
+                Err(e) => return CommandOutcome::failed(e),
+            };
+            let metatorio_runtime::universe::UniverseSolveStatus::Solved { mechanics, .. } =
+                result.status
+            else {
+                return CommandOutcome::failed("当前求解未成功，拒绝清理机制");
+            };
+            let used = mechanics
+                .into_iter()
+                .map(|m| (m.mechanic, m.amount))
+                .collect();
+            let written = with_runtime(state, |r| {
+                if !r.universe_document_matches(&snapshot) {
+                    return Err("清理期间文档已变化，已放弃清理".into());
+                }
+                r.state
+                    .apply_universe_cleanup(*project, *universe, *action, &used)
+                    .map_err(|e| e.to_string())
+            });
+            match written {
+                Err(e) => CommandOutcome::failed(e),
+                Ok(w) => {
+                    let mut out = CommandOutcome::default();
+                    for c in &w.commands {
+                        out.absorb(Box::pin(execute_command(host, state, c)).await);
+                    }
+                    out
+                }
+            }
+        }
+        RuntimeCommand::RepairUniverseMechanic {
+            project,
+            universe,
+            mechanic,
+            compat,
+            clamp,
+        } => {
+            if let Err(e) = ensure_context_for_project_offlock(state, *project).await {
+                return CommandOutcome::failed(e);
+            }
+            match with_runtime(state, |r| {
+                if *compat {
+                    ensure_machine_compat_scoped(
+                        state,
+                        r,
+                        *project,
+                        FactoryId(universe.0),
+                        *mechanic,
+                        Some(*universe),
+                    )?;
+                }
+                if *clamp {
+                    clamp_modules_scoped(
+                        state,
+                        r,
+                        *project,
+                        FactoryId(universe.0),
+                        *mechanic,
+                        Some(*universe),
+                    )?;
+                }
+                Ok(())
+            }) {
+                Ok(()) => CommandOutcome::default(),
+                Err(e) => CommandOutcome::failed(e),
+            }
+        }
         RuntimeCommand::Recompute { project, factory } => {
             let (project, factory) = (*project, *factory);
             // 先确保项目的上下文 store 在内存里（读盘在锁外完成）。
@@ -4491,7 +4760,7 @@ pub async fn dispatch(
     host: &Arc<dyn Host>,
     message: AppMessage,
 ) -> Result<DispatchResult, metatorio_runtime::Diagnostic> {
-    let outcome = {
+    let mut outcome = {
         let state = host.state();
         let mut runtime = state
             .runtime
@@ -4508,7 +4777,7 @@ pub async fn dispatch(
     let state = host.state();
     let state_ref = &state;
     let app_ref = host;
-    let (_solve, _commands, errors, diagnostics) =
+    let (_solve, universe_solve, _commands, errors, diagnostics) =
         run_commands(&outcome.commands, move |command| {
             // 闭包返回值不能借用参数，故克隆命令进 async 块。
             let command = command.clone();
@@ -4518,6 +4787,13 @@ pub async fn dispatch(
     if !errors.is_empty() {
         emit(host, "command-error", diagnostics);
     }
+    outcome.universe_solve = universe_solve;
+    with_runtime(state, |r| {
+        outcome.revision = r.state.revision;
+        outcome.history = r.state.history_status();
+        Ok(())
+    })
+    .map_err(metatorio_runtime::Diagnostic::from)?;
     Ok(outcome)
 }
 
@@ -5787,30 +6063,31 @@ mod tests {
                 factory: FactoryId(2),
             },
         ];
-        let (solve, serialized, errors, diagnostics) = run_commands(&commands, |command| {
-            let failed = matches!(command, RuntimeCommand::CheckForUpdate);
-            async move {
-                if failed {
-                    let mut diagnostic = metatorio_runtime::Diagnostic::new("test", "boom");
-                    diagnostic.flows.push(DualVar::Heat);
-                    CommandOutcome::failed(diagnostic)
-                } else {
-                    CommandOutcome::done(Some(metatorio_runtime::CommandEffect::Solve(
-                        metatorio_runtime::SolveResult {
-                            project: ProjectId(1),
-                            factory: FactoryId(2),
-                            report: Default::default(),
-                            status: SolveStatus::NotSolved {
-                                no_provider: Vec::new(),
-                                no_consumer: Vec::new(),
-                                description: "test".to_string(),
+        let (solve, _universe_solve, serialized, errors, diagnostics) =
+            run_commands(&commands, |command| {
+                let failed = matches!(command, RuntimeCommand::CheckForUpdate);
+                async move {
+                    if failed {
+                        let mut diagnostic = metatorio_runtime::Diagnostic::new("test", "boom");
+                        diagnostic.flows.push(DualVar::Heat);
+                        CommandOutcome::failed(diagnostic)
+                    } else {
+                        CommandOutcome::done(Some(metatorio_runtime::CommandEffect::Solve(
+                            metatorio_runtime::SolveResult {
+                                project: ProjectId(1),
+                                factory: FactoryId(2),
+                                report: Default::default(),
+                                status: SolveStatus::NotSolved {
+                                    no_provider: Vec::new(),
+                                    no_consumer: Vec::new(),
+                                    description: "test".to_string(),
+                                },
                             },
-                        },
-                    )))
+                        )))
+                    }
                 }
-            }
-        })
-        .await;
+            })
+            .await;
 
         assert!(solve.is_some(), "应保留求解产出");
         assert_eq!(errors, vec!["boom".to_string()], "错误必须被收集");

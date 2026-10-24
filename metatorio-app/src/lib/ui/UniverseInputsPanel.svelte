@@ -1,4 +1,5 @@
 <script lang="ts">
+  import {dndzone} from 'svelte-dnd-action';
   import { runtime } from '$lib/runtime/store.svelte';
   import type { DualVar, LocatedDualVar, Location, UniverseAction, UniverseDocument } from '$lib/runtime/types';
   import { flowSelectionInitial } from '$lib/mechanics/flow-selection';
@@ -14,6 +15,9 @@
   let pending=$state<Record<string,boolean>>({});
   const key=(flow:LocatedDualVar)=>JSON.stringify([locationKey(flow.location),flow.flow]);
   const inputs=$derived(universe.external_inputs??[]);
+  let dragInputs=$state<typeof universe.external_inputs>([]);
+  $effect(()=>{dragInputs=inputs;});
+  const hasFreeEnergy=$derived(["Electricity","Heat"].every(flow=>inputs.some(i=>key(i.flow)===key({location:runtime.universeAddLocation,flow:flow as DualVar})&&i.penalty===0)));
   const implicit=$derived(sources.filter(flow=>!inputs.some(input=>key(input.flow)===key(flow))));
   const factor=$derived(runtime.selectedProject?.settings.time_scale==='minutes'?60:runtime.selectedProject?.settings.time_scale==='hours'?3600:1);
   $effect(()=>{
@@ -45,8 +49,11 @@
 <section class="inputs-panel" aria-label="外部输入">
   <button class="panel-toggle" aria-expanded={open} onclick={()=>open=!open}><span>{open?'▾':'▸'}　外部输入</span><span class="muted">{inputs.length}</span></button>
   {#if open}
-    <div class="shortcuts"><button class="btn" onclick={()=>freeEnergy().catch(()=>{})} disabled={!!pending[`energy:${project}:${universe.id}`]}>+ 免费电力与热量</button><LocationPicker value={runtime.universeAddLocation} label="外部输入默认地点" onChange={location=>runtime.universeAddLocation=location}/></div>
-    {#each inputs as input (input.id)}
+    <div class="shortcuts"><button class="btn" onclick={()=>freeEnergy().catch(()=>{})} disabled={hasFreeEnergy||!!pending[`energy:${project}:${universe.id}`]}>+ 免费电力与热量</button><LocationPicker value={runtime.universeAddLocation} label="外部输入默认地点" onChange={location=>runtime.universeAddLocation=location}/></div>
+    <div use:dndzone={{items:dragInputs,type:`universe-inputs-${project}-${universe.id}`,flipDurationMs:120}} onconsider={e=>dragInputs=e.detail.items} onfinalize={async e=>{
+      dragInputs=e.detail.items;const send=writer(),order=dragInputs.map(i=>i.id);for(let position=order.length-1;position>=0;position--)await send({'reorder-external-input':{input:order[position],position}});
+    }}>
+    {#each dragInputs as input (input.id)}
       <div class="input-row">
         <LocationPicker value={input.flow.location} label="外部输入地点" onChange={location=>setFlow(input,input.flow.flow,location)}/>
         <FlowRef flow={input.flow.flow} grow size={24} showBadge={!(typeof input.flow.flow==='object'&&'Fluid' in input.flow.flow)} onClick={()=>choose(input)} />
@@ -56,6 +63,7 @@
         <button class="icon-btn danger" aria-label="移除外部输入" title="移除覆盖；若环境提供该资源，将恢复免费输入" onclick={()=>writer()({'remove-external-input':{input:input.id}}).catch(()=>{})}>×</button>
       </div>
     {:else}<div class="muted hint">还没有外部输入</div>{/each}
+    </div>
     {#if loading}<div class="muted hint">读取环境来源…</div>{/if}
     {#if error}<div class="error" role="status">{error}</div>{/if}
     {#if implicit.length}<div class="muted hint">环境自带（隐式免费，编辑成本可转为手动输入）</div>{/if}

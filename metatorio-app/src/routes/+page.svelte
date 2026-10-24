@@ -95,18 +95,19 @@
   // 建议系统弹窗
   let suggestions = $state<{
     flow: DualVar;
+    location?:import("$lib/runtime/types").Location;
+    scope:import("$lib/runtime/mechanic-commands").MechanicScope;
     items: import("$lib/runtime/types").Suggestion[];
     loading: boolean;
   } | null>(null);
 
-  async function openSuggestions(flow: DualVar) {
-    suggestions = { flow, items: [], loading: true };
-    try {
-      const items = await suggest(flow, runtime.effectiveContextId);
-      suggestions = { flow, items, loading: false };
-    } catch {
-      suggestions = { flow, items: [], loading: false };
-    }
+  let suggestionGeneration=0;
+  async function openSuggestions(flow:DualVar,location?:import('$lib/runtime/types').Location){
+    if(!project||!actions)return;
+    const scope={...actions.commands.scope},generation=++suggestionGeneration;
+    suggestions={flow,location,scope,items:[],loading:true};
+    try{const items=await suggest(flow,runtime.effectiveContextId);if(generation===suggestionGeneration&&suggestions)suggestions={flow,location,scope,items,loading:false};}
+    catch{if(generation===suggestionGeneration&&suggestions)suggestions={flow,location,scope,items:[],loading:false};}
   }
 
   function suggestionKindLabel(kind: string): string {
@@ -1140,7 +1141,7 @@
           </label>
           </section>
           {/if}
-        {#if actions}<FactoryTargetsPanel scope={actions.commands.scope} {targets} expressions={targetExpressions} selectFlow={request=>flowSelector=request} onSuggest={universe ? undefined : openSuggestions} />{/if}
+        {#if actions}<FactoryTargetsPanel scope={actions.commands.scope} {targets} expressions={targetExpressions} selectFlow={request=>flowSelector=request} onSuggest={openSuggestions} />{/if}
 
 
         {#if universe && project}<UniverseInputsPanel project={project.id} {universe} selectFlow={request=>flowSelector={...request,respectAccessibility:false}} />{/if}
@@ -1783,7 +1784,7 @@
 
     <!-- 右栏：求解结果（数据上下文移到顶部「数据」入口） -->
     <aside class="col rail rail-right">
-      <SolvePanel solve={universe ? null : solve} universeSolve={universe ? runtime.universeSolve : null} error={universe ? runtime.universeSolveError : runtime.solveError} busy={universe ? universeBusy || runtime.universeSolving : !!runtime.solving} onSuggest={universe ? undefined : openSuggestions} />
+      <SolvePanel solve={universe ? null : solve} universeSolve={universe ? runtime.universeSolve : null} error={universe ? runtime.universeSolveError : runtime.solveError} diagnostic={universe?runtime.universeSolveDiagnostic:null} busy={universe ? universeBusy || runtime.universeSolving : !!runtime.solving} onSuggest={openSuggestions} />
     </aside>
 
   </main>
@@ -2489,7 +2490,7 @@
                   title="添加该机制"
                   onclick={() =>
                     runtime
-                      .addSuggestion(candidate)
+                      .addSuggestion(candidate,suggestions?.scope,suggestions?.location)
                       .catch(() => {})
                       .then(() => (suggestions = null))}
                 >添加</button>
@@ -2518,7 +2519,7 @@
                   title="添加该机制"
                   onclick={() =>
                     runtime
-                      .addSuggestion(candidate)
+                      .addSuggestion(candidate,suggestions?.scope,suggestions?.location)
                       .catch(() => {})
                       .then(() => (suggestions = null))}
                 >添加</button>

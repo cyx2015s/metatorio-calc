@@ -18,7 +18,7 @@ const appRoot=path.resolve(__dirname,'..'),port=5214,url=`http://127.0.0.1:${por
    const local=(id,location)=>({id,enabled:true,mechanic:{type:'local',location,mechanic:structuredClone(p.factories[0].mechanics[0].mechanic)}});
    p.universes=[{id:7,name:'宇宙工厂',external_inputs:[],strict_source:true,strict_sink:false,mechanics:[local(101,planet('nauvis')),local(102,planet('fulgora')),{id:103,enabled:true,mechanic:{type:'transfer',location:planet('nauvis'),item:q('iron-plate')}}],targets:[{id:201,flow:{location:planet('nauvis'),flow:{Fluid:{name:'water',temperature:[15,100]}}},amount:1},{id:202,flow:{location:{kind:'space'},flow},amount:2}],target_expressions:[{id:301,constant:1,terms:[{id:401,flow:{location:planet('fulgora'),flow},coefficient:1},{id:402,flow:{location:{kind:'space'},flow},coefficient:2}]}]}];
    const u=p.universes[0],raw=window.__TAURI_INTERNALS__.invoke;let next=500;
-   window.__universeWrites=[];window.__locationIcons=[];
+   window.__universeWrites=[];window.__universeSolves=0;window.__locationIcons=[];
    window.__TAURI_INTERNALS__.invoke=async(command,args={})=>{
     if(command==='icon'){
      window.__locationIcons.push(args);
@@ -27,14 +27,18 @@ const appRoot=path.resolve(__dirname,'..'),port=5214,url=`http://127.0.0.1:${por
      ctx.fillRect(0,0,64,64);ctx.fillStyle='#fff';ctx.font='bold 14px sans-serif';ctx.fillText(args.name.slice(0,3),6,35);
      return Array.from(atob(canvas.toDataURL().split(',')[1]),c=>c.charCodeAt(0));
     }
+    if(command==='suggest')return [{kind:'recipe',name:'iron-plate',role:'producer'}];
     if(command==='solve_universe' ||command==='auto_plan_universe') {
+     window.__universeSolves++;
      if(command==='auto_plan_universe'&&!u.mechanics.some(e=>e.id===104))u.mechanics.push(local(104,planet('nauvis')));
      await new Promise(r=>setTimeout(r,40));
      return {project:1,universe:7,status:{status:'solved',cost:12.345,mechanics:u.mechanics.map(e=>({mechanic:e.id,location:e.mechanic.location,amount:0.5,cost:4,rate:0.5})),flows:u.targets.map(t=>({flow:t.flow,amount:t.amount,rate:t.amount}))}};
     }
     if(command==='universe_preview')return {mechanics:u.mechanics.map(e=>({id:e.id,error:null,flows:e.mechanic.type==='transfer'?[{flow:{location:e.mechanic.location,flow},amount:-1,rate:-1},{flow:{location:{kind:'space'},flow},amount:1,rate:1}]:[{flow:{location:e.mechanic.location,flow},amount:e.id===102?-1:1,rate:1}]})),sources:[{location:planet('nauvis'),flow},{location:planet('fulgora'),flow},{location:{kind:'space'},flow}]};
     if(command==='dispatch'&&args.message.scope==='universe'){
-     const message=JSON.parse(JSON.stringify(args.message)),a=message.action.action;window.__universeWrites.push(message);
+     const message=JSON.parse(JSON.stringify(args.message)),a=message.action.action;window.__universeWrites.push(message);const created=[];
+     if(a['add-local-mechanic']){const entry=local(next++,a['add-local-mechanic'].location);created.push(entry.id);u.mechanics.push(entry);}
+     if(a['reorder-external-input']){const v=a['reorder-external-input'],i=u.external_inputs.findIndex(e=>e.id===v.input);u.external_inputs.splice(v.position,0,...u.external_inputs.splice(i,1));}
      if(a['add-external-input'])u.external_inputs.push({id:next++,...a['add-external-input']});
      if(a['set-external-input-penalty']){const v=a['set-external-input-penalty'];u.external_inputs.find(i=>i.id===v.input).penalty=v.penalty;}
      if(a['set-external-input-flow']){const v=a['set-external-input-flow'];u.external_inputs.find(i=>i.id===v.input).flow=v.flow;}
@@ -53,7 +57,7 @@ const appRoot=path.resolve(__dirname,'..'),port=5214,url=`http://127.0.0.1:${por
      if(a['set-target-expression-term-flow']){const v=a['set-target-expression-term-flow'];u.target_expressions.find(e=>e.id===v.expression).terms.find(t=>t.id===v.term).flow=v.flow;}
      if(a['reorder-target-expression-term']){const v=a['reorder-target-expression-term'],e=u.target_expressions.find(e=>e.id===v.expression),i=e.terms.findIndex(t=>t.id===v.term);e.terms.splice(v.position,0,...e.terms.splice(i,1));}
      if(a['add-target'])u.targets.push({id:next++,flow:a['add-target'].flow,amount:a['add-target'].amount});
-     return {revision:1,changed:true,created:{},commands:[],history:{can_undo:true,can_redo:false}};
+     return {revision:1,changed:true,created:{mechanics:created,external_inputs:[]},universe_solve:Object.keys(a).some(k=>k.startsWith('reorder-'))?undefined:await window.__TAURI_INTERNALS__.invoke('solve_universe'),commands:[],history:{can_undo:true,can_redo:false}};
     }
     const value=await raw(command,args);
     if(command==='catalog_index') for(const name of ['nauvis','fulgora'])value.entries.push({kind:'planet',name,localized_name:name,categories:[],group:'environment',subgroup:'planet',order:name});
@@ -83,9 +87,14 @@ const appRoot=path.resolve(__dirname,'..'),port=5214,url=`http://127.0.0.1:${por
   await inputsPanel.getByRole('button',{name:'+ 免费电力与热量',exact:true}).click();
   await waitFor(async()=>page.evaluate(()=>window.__layoutDocument.projects[0].universes[0].external_inputs.length===2));
   assert.ok(await page.evaluate(()=>window.__layoutDocument.projects[0].universes[0].external_inputs.every(i=>i.penalty===0&&i.flow.location.name==='nauvis')));
+  assert.equal(await inputsPanel.getByRole('button',{name:'+ 免费电力与热量',exact:true}).isDisabled(),true);
+  const inputRows=inputsPanel.locator('.input-row:not(.implicit)');await waitFor(async()=>(await inputRows.count())===2);await inputRows.first().focus();await page.keyboard.press('Space');await page.keyboard.press('ArrowDown');await page.keyboard.press('Space');
+  await waitFor(async()=>page.evaluate(()=>window.__layoutDocument.projects[0].universes[0].external_inputs[0].flow.flow==='Heat'));
   const card=page.locator('[data-mechanic-id="101"]');
+  const solvesBefore=await page.evaluate(()=>window.__universeSolves);
   await card.getByRole('switch').click();
   await waitFor(async()=>page.evaluate(()=>window.__universeWrites.some(w=>w.action.action['set-mechanic-enabled'])));
+  await page.waitForTimeout(250);assert.equal(await page.evaluate(()=>window.__universeSolves),solvesBefore+1,'backend dispatch supplies result without timer-based duplicate solve');
   await card.getByRole('button',{name:'机制地点',exact:true}).click();await page.getByRole('dialog',{name:'机制地点',exact:true}).getByRole('button',{name:'fulgora',exact:true}).click();
   await waitFor(async()=>page.evaluate(()=>window.__layoutDocument.projects[0].universes[0].mechanics[0].mechanic.location.name==='fulgora'));
   await page.mouse.move(1200,80);await page.getByRole('tooltip').waitFor({state:'detached'});
@@ -125,6 +134,10 @@ const appRoot=path.resolve(__dirname,'..'),port=5214,url=`http://127.0.0.1:${por
   await waitFor(async()=>(await page.locator('.cost-value').textContent())==='12.345');
   if(process.env.UNIVERSE_NETWORK_SCREENSHOT)await page.screenshot({path:process.env.UNIVERSE_NETWORK_SCREENSHOT});
   assert.equal(await page.evaluate(()=>JSON.stringify(window.__layoutDocument.projects[0].factories)),before);
+  await page.locator('.targets-panel .row-item').first().locator('.hover-icon').first().click({button:'right'});
+  await page.getByRole('button',{name:'添加',exact:true}).click();
+  await waitFor(async()=>page.evaluate(()=>window.__universeWrites.some(w=>w.action.action['add-local-mechanic'])));
+  assert.equal(await page.evaluate(()=>window.__layoutDocument.projects[0].universes[0].mechanics.at(-1).mechanic.location.kind),'space');
   await page.getByRole('button',{name:'65 机制 · 混合品质',exact:true}).click();await page.getByRole('button',{name:'列表',exact:true}).click();await page.locator('.mech-card').first().waitFor();
   assert.equal(await page.getByLabel('机制地点').count(),0);
   assert.deepEqual(errors,[]);

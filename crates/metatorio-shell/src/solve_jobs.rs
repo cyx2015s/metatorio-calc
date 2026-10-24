@@ -25,6 +25,33 @@ use metatorio_runtime::{FactoryId, ProjectId, SolveSnapshot};
 use metatorio_solver::control::CancellationToken;
 use tokio::sync::Mutex;
 
+pub trait JobSnapshot: Clone + Send + Sync + 'static {
+    fn revision(&self) -> u64;
+    fn epoch(&self) -> u64;
+    fn store(&self) -> &Arc<PrototypeStore>;
+}
+impl JobSnapshot for SolveSnapshot {
+    fn revision(&self) -> u64 {
+        self.revision
+    }
+    fn epoch(&self) -> u64 {
+        self.accessibility_epoch
+    }
+    fn store(&self) -> &Arc<PrototypeStore> {
+        &self.store
+    }
+}
+impl JobSnapshot for metatorio_runtime::solve::UniverseSnapshot {
+    fn revision(&self) -> u64 {
+        self.revision
+    }
+    fn epoch(&self) -> u64 {
+        self.accessibility_epoch
+    }
+    fn store(&self) -> &Arc<PrototypeStore> {
+        &self.store
+    }
+}
 /// 求解的调度键：一个工厂的求解彼此无关，因此按工厂并行。
 pub type SolveKey = (ProjectId, FactoryId);
 
@@ -49,10 +76,10 @@ struct Cached<R> {
 }
 
 impl<R> Cached<R> {
-    fn matches(&self, snapshot: &SolveSnapshot) -> bool {
-        self.revision == snapshot.revision
-            && self.accessibility_epoch == snapshot.accessibility_epoch
-            && Arc::ptr_eq(&self.store, &snapshot.store)
+    fn matches(&self, snapshot: &impl JobSnapshot) -> bool {
+        self.revision == snapshot.revision()
+            && self.accessibility_epoch == snapshot.epoch()
+            && Arc::ptr_eq(&self.store, snapshot.store())
     }
 }
 
@@ -82,16 +109,16 @@ impl KeyLocks {
 ///
 /// `R` 是这次「求解」的产出：重算产 [`SolveResult`]，自动规划产
 /// `(快照, 候选机制)`（快照用于回写前的版本校验）。
-pub struct SolveJobs<R, E = String> {
+pub struct SolveJobs<R, E = String, S = SolveSnapshot> {
     slots: Mutex<HashMap<SolveKey, Arc<Mutex<Slot<R>>>>>,
     /// 单次求解及键锁等待的上限：超时请求协作取消，旧任务退出前同键
     /// 重试不得开始。普通重算默认 120s，异步 auto_plan 默认
     /// 1800s；`METATORIO_SOLVE_TIMEOUT_MS` 可调。
     timeout: Duration,
-    error: std::marker::PhantomData<fn() -> E>,
+    error: std::marker::PhantomData<fn() -> (E, S)>,
 }
 
-impl<R, E> Default for SolveJobs<R, E> {
+impl<R, E, S> Default for SolveJobs<R, E, S> {
     fn default() -> Self {
         Self {
             slots: Mutex::new(HashMap::new()),
@@ -110,7 +137,9 @@ fn solve_timeout_from_env(default: Duration) -> Duration {
         .unwrap_or(default)
 }
 
-impl<R: Clone + Send + 'static, E: From<String> + Send + 'static> SolveJobs<R, E> {
+impl<R: Clone + Send + 'static, E: From<String> + Send + 'static, S: JobSnapshot>
+    SolveJobs<R, E, S>
+{
     /// MCP auto_plan returns its running state immediately; its background job
     /// can wait longer than an ordinary synchronous recompute. Explicit timeout
     /// configuration still takes precedence over this default.
@@ -143,8 +172,8 @@ impl<R: Clone + Send + 'static, E: From<String> + Send + 'static> SolveJobs<R, E
     /// - `compute`：锁外纯计算，跑在阻塞线程池上；应自行回填可达性缓存。
     pub async fn run<F, G>(&self, key: SolveKey, take_snapshot: F, compute: G) -> Result<R, E>
     where
-        F: Fn() -> Result<SolveSnapshot, E> + Send + Sync + 'static,
-        G: Fn(&SolveSnapshot) -> Result<R, E> + Send + Sync + 'static,
+        F: Fn() -> Result<S, E> + Send + Sync + 'static,
+        G: Fn(&S) -> Result<R, E> + Send + Sync + 'static,
     {
         let slot = self.slot(key).await;
         // 同键串行：等锁期间文档可能已被别人算过，因此快照要在拿到锁之后取。
@@ -199,15 +228,23 @@ impl<R: Clone + Send + 'static, E: From<String> + Send + 'static> SolveJobs<R, E
             match result {
                 Ok(result) => {
                     slot.last = Some(Cached {
-                        revision: snapshot.revision,
-                        accessibility_epoch: snapshot.accessibility_epoch,
-                        store: snapshot.store.clone(),
+                        revision: snapshot.revision(),
+                        accessibility_epoch: snapshot.epoch(),
+                        store: snapshot.store().clone(),
                         result: result.clone(),
                     });
                     // 求解期间文档又变了：用新快照再算一轮（latest-wins）。
                     let next = take_snapshot()?;
-                    if next.revision == snapshot.revision || round + 1 >= MAX_ROUNDS {
+                    if next.revision() == snapshot.revision()
+                        && next.epoch() == snapshot.epoch()
+                        && Arc::ptr_eq(next.store(), snapshot.store())
+                    {
                         return Ok(result);
+                    }
+                    if round + 1 >= MAX_ROUNDS {
+                        return Err(E::from(
+                            "求解期间文档持续变化，已丢弃过期结果，请重试".into(),
+                        ));
                     }
                     snapshot = next;
                     round += 1;

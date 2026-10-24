@@ -5,6 +5,10 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Diagnostic {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub located_no_provider: Vec<metatorio_core::LocatedDualVar>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub located_no_consumer: Vec<metatorio_core::LocatedDualVar>,
     pub code: String,
     pub message: String,
     #[serde(default)]
@@ -18,6 +22,8 @@ pub struct Diagnostic {
 impl Diagnostic {
     pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
+            located_no_provider: Vec::new(),
+            located_no_consumer: Vec::new(),
             code: code.into(),
             message: message.into(),
             no_provider: Vec::new(),
