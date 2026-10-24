@@ -106,6 +106,21 @@ cargo test --release -p metatorio-runtime --lib legendary_biter_egg -- --ignored
 cd metatorio-app && pnpm install && pnpm tauri build
 ```
 
+更新 Tauri 时需要同时更新 Rust 与前端依赖。`cargo update` 不会更新 npm 包；
+对应的 `tauri` / `@tauri-apps/api` 和各插件需要保持相同的主次版本，补丁版本可以不同。
+在仓库根目录更新 Cargo 依赖后，到前端目录更新对应包，并提交两侧锁文件：
+
+```sh
+cargo update
+cd metatorio-app
+pnpm update @tauri-apps/api @tauri-apps/cli @tauri-apps/plugin-opener @tauri-apps/plugin-process @tauri-apps/plugin-updater
+pnpm tauri build
+```
+
+前端安装与更新命令应在 `metatorio-app` 内运行，不要在仓库根目录另建 npm 工程。
+Windows 若遇到 CMake 不支持 `Visual Studio 18 2026` 生成器，可更新 CMake，
+或在已安装 Ninja 时，于当前 PowerShell 会话设置 `$env:CMAKE_GENERATOR = 'Ninja'` 后重试。
+
 # 贡献
 
 自动规划的真实上下文回归、极端倍率、插件塔组合及全产物遍历测试，见 [测试说明与实测结果](docs/auto-plan-testing.md)。
