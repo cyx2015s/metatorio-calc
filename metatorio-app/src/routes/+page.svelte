@@ -494,6 +494,7 @@
   // 机制列表：配方合并开关（同配方×机器合并成一张卡，品质变体并列）；
   // 其他机制类型始终单条展示，不额外嵌套。
   let mergeRecipes = $state(true);
+  let groupLocations = $state(false);
   let mechanicView = $state<MechanicViewMode>(DEFAULT_MECHANIC_VIEW);
   let filterOpen = $state(false);
   let filterActive = $state(false);
@@ -1694,11 +1695,21 @@
         <button class="btn" class:active={filterOpen || filterActive} aria-expanded={filterOpen}
           title="按消耗或产出对象筛选机制；仅影响显示，不改变工厂或求解"
           onclick={() => filterOpen = !filterOpen} disabled={!factory}>筛选{filterActive ? " · 已启用" : ""}</button>
-        {#if universe}<button class="btn" disabled={universeBusy} onclick={()=>runUniverse()}>求解</button><button class="btn" onclick={()=>{selector={kind:"item",kinds:[],title:"选择火箭转移物品",onSelect:(name,quality)=>runtime.addUniverseTransfer(runtime.universeAddLocation.kind==="planet"?runtime.universeAddLocation:{kind:"planet",name:"nauvis"},{id:name,quality})}}}>+ 火箭转移</button>{/if}
+        {#if universe}
+          <button class="btn" disabled={universeBusy} onclick={()=>runUniverse()}>求解</button>
+          {#each ['rocket-export','orbital-drop'] as direction}
+            <button class="btn" disabled={runtime.universeAddLocation.kind !== 'planet'}
+              title={direction==='rocket-export'?'从左栏所选星球发往太空；消耗物品与火箭载荷':'从太空投送到左栏所选星球；每件代价为堆叠数量的倒数'}
+              onclick={()=>{const location=runtime.universeAddLocation;if(location.kind!=='planet')return;selector={kind:"item",kinds:[],title:direction==='rocket-export'?"选择火箭发运物品":"选择轨道投送物品",onSelect:(name,quality)=>direction==='rocket-export'?runtime.addUniverseRocketExport(location,{id:name,quality}):runtime.addUniverseOrbitalDrop(location,{id:name,quality})}}}>
+              + {direction==='rocket-export'?'火箭发运':'轨道投送'}
+            </button>
+          {/each}
+        {/if}
         <div class="view-switch" role="group" aria-label="机制展示方式">
           <button class="btn" class:active={mechanicView === 'list'} aria-pressed={mechanicView === 'list'} onclick={() => mechanicView = 'list'}>列表</button>
           <button class="btn" class:active={mechanicView === 'network'} aria-pressed={mechanicView === 'network'} onclick={() => mechanicView = 'network'}>网络</button>
         </div>
+        {#if universe}<label class="check"><input type="checkbox" bind:checked={groupLocations}/>按地点聚类</label>{/if}
         {#if !runtime.activeContext}
           <span class="chip warn">未载入游戏数据</span>
         {/if}
@@ -1763,7 +1774,7 @@
       </div>
 
       <MechanicWorkspace project={project?.id ?? null} factory={factory?.id ?? null}
-        entries={mechanics} solutions={solveMap} {solved} {actions} {filterOpen} {mergeRecipes} view={mechanicView}
+        entries={mechanics} solutions={solveMap} {solved} {actions} {filterOpen} {mergeRecipes} groupLocations={!!universe && groupLocations} view={mechanicView}
         onFilterActiveChange={active => filterActive = active} onFilterClose={() => filterOpen = false} />
 
     </section>

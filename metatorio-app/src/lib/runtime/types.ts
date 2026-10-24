@@ -397,9 +397,10 @@ export type UniverseAction =
   | { "reorder-target-expression": {expression: TargetExpressionId; position: number} }
   | { "reorder-target-expression-term": {expression: TargetExpressionId; term: TargetTermId; position: number} }
   | { "clone-mechanic": { mechanic: MechanicId } }
-  | { "set-transfer-item": { mechanic: MechanicId; item: IdWithQuality } }
+  | { "set-transport-item": { mechanic: MechanicId; item: IdWithQuality } }
   | { "add-local-mechanic": { location: Location; kind: MechanicKind } }
-  | { "add-transfer": { location: Location; item: IdWithQuality } }
+  | { "add-rocket-export": { location: Location; item: IdWithQuality } }
+  | { "add-orbital-drop": { location: Location; item: IdWithQuality } }
   | { "remove-mechanic": { mechanic: MechanicId } }
   | { "reorder-mechanic": { mechanic: MechanicId; position: number } }
   | { "set-mechanic-enabled": { mechanic: MechanicId; enabled: boolean } }
@@ -535,7 +536,7 @@ export interface LocatedDualVar {
 
 export type LocatedMechanic =
   | { type: "local"; location: Location; mechanic: Mechanic }
-  | { type: "transfer"; location: Location; item: IdWithQuality };
+  | { type: "rocket-export" | "orbital-drop"; location: Location; item: IdWithQuality };
 
 export interface UniverseMechanicEntry {
   id: MechanicId;
@@ -653,7 +654,7 @@ export interface Suggestion {
 
 export interface MechanicEntry {
   location?: Location;
-  transfer?: boolean;
+  transport?: "rocket-export" | "orbital-drop";
   id: MechanicId;
   enabled: boolean;
   mechanic: Mechanic;

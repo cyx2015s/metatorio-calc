@@ -94,7 +94,7 @@ fn universe_external_inputs_override_only_the_same_location_and_survive_history_
 }
 
 #[test]
-fn universe_manual_space_input_overrides_free_asteroids_and_keeps_free_delivery() {
+fn universe_manual_space_input_overrides_free_asteroids_with_explicit_delivery() {
     use metatorio_core::{DualVar, IdWithQuality, LocatedDualVar, Location};
     use metatorio_runtime::{
         document::{LocatedExternalInput, LocatedTarget, ProjectDocument, UniverseDocument},
@@ -114,6 +114,18 @@ fn universe_manual_space_input_overrides_free_asteroids_and_keeps_free_delivery(
         flow: LocatedDualVar::new(Location::planet("nauvis"), flow.clone()),
         amount: 2.0,
     });
+    universe
+        .mechanics
+        .push(metatorio_runtime::document::UniverseMechanicEntry {
+            id: metatorio_runtime::MechanicId(3),
+            enabled: true,
+            mechanic: metatorio_core::LocatedMechanic::OrbitalDrop(
+                metatorio_core::OrbitalCargoMechanic {
+                    location: Location::planet("nauvis"),
+                    item: IdWithQuality::new("chunk", "normal"),
+                },
+            ),
+        });
     let project = ProjectDocument::default();
     let solve_cost =
         |u: &UniverseDocument| match solve_universe(&store, &project, u, &Default::default())
@@ -123,15 +135,15 @@ fn universe_manual_space_input_overrides_free_asteroids_and_keeps_free_delivery(
             UniverseSolveStatus::Solved { cost, .. } => cost,
             status => panic!("{status:?}"),
         };
-    assert_eq!(solve_cost(&universe), 0.0);
+    assert!((solve_cost(&universe) - 0.04).abs() < 1e-6);
     universe.external_inputs.push(LocatedExternalInput {
         id: ExternalInputId(2),
         flow: LocatedDualVar::new(Location::Space, flow),
         penalty: 7.0,
     });
-    assert!((solve_cost(&universe) - 14.0).abs() < 1e-6);
+    assert!((solve_cost(&universe) - 14.04).abs() < 1e-6);
     universe.external_inputs.clear();
-    assert_eq!(solve_cost(&universe), 0.0);
+    assert!((solve_cost(&universe) - 0.04).abs() < 1e-6);
 }
 #[test]
 fn universe_editor_commands_clone_and_transfer_edits_are_undoable_and_scoped() {
@@ -157,12 +169,12 @@ fn universe_editor_commands_clone_and_transfer_edits_are_undoable_and_scoped() {
     };
     send(
         &mut runtime,
-        json!({"add-transfer":{"location":{"kind":"planet","name":"nauvis"},"item":{"id":"iron","quality":"normal"}}}),
+        json!({"add-rocket-export":{"location":{"kind":"planet","name":"nauvis"},"item":{"id":"iron","quality":"normal"}}}),
     );
     let m = runtime.state.universe(p, u).unwrap().mechanics[0].id;
     send(
         &mut runtime,
-        json!({"set-transfer-item":{"mechanic":m,"item":{"id":"copper","quality":"normal"}}}),
+        json!({"set-transport-item":{"mechanic":m,"item":{"id":"copper","quality":"normal"}}}),
     );
     send(&mut runtime, json!({"clone-mechanic":{"mechanic":m}}));
     let entries = &runtime.state.universe(p, u).unwrap().mechanics;
@@ -173,7 +185,7 @@ fn universe_editor_commands_clone_and_transfer_edits_are_undoable_and_scoped() {
     assert_eq!(runtime.state.universe(p, u).unwrap().mechanics.len(), 1);
     assert_eq!(runtime.state.document.projects[0].factories[0], factory);
     let before = runtime.state.document.clone();
-    let invalid:AppMessage=serde_json::from_value(json!({"scope":"universe","action":{"project":p,"universe":u,"action":{"set-transfer-item":{"mechanic":m,"item":{"id":"missing","quality":"normal"}}}}})).unwrap();
+    let invalid:AppMessage=serde_json::from_value(json!({"scope":"universe","action":{"project":p,"universe":u,"action":{"set-transport-item":{"mechanic":m,"item":{"id":"missing","quality":"normal"}}}}})).unwrap();
     assert!(runtime.dispatch(invalid).is_err());
     assert_eq!(runtime.state.document, before);
 }
@@ -229,7 +241,7 @@ fn universe_expression_reordering_uses_the_same_wire_contract_as_shared_panels()
 fn universe_preview_preserves_locations_disabled_entries_and_individual_errors() {
     use metatorio_core::{
         IdWithQuality, ItemFuelMechanic, LocalLocatedMechanic, LocatedMechanic, Location, Mechanic,
-        TransferLocatedMechanic,
+        OrbitalCargoMechanic,
     };
     use metatorio_runtime::document::{ProjectDocument, UniverseDocument, UniverseMechanicEntry};
     use metatorio_runtime::id::MechanicId;
@@ -248,7 +260,7 @@ fn universe_preview_preserves_locations_disabled_entries_and_individual_errors()
             UniverseMechanicEntry {
                 id: MechanicId(2),
                 enabled: true,
-                mechanic: LocatedMechanic::Transfer(TransferLocatedMechanic {
+                mechanic: LocatedMechanic::RocketExport(OrbitalCargoMechanic {
                     location: Location::planet("nauvis"),
                     item,
                 }),
@@ -256,7 +268,7 @@ fn universe_preview_preserves_locations_disabled_entries_and_individual_errors()
             UniverseMechanicEntry {
                 id: MechanicId(3),
                 enabled: true,
-                mechanic: LocatedMechanic::Transfer(TransferLocatedMechanic {
+                mechanic: LocatedMechanic::RocketExport(OrbitalCargoMechanic {
                     location: Location::Space,
                     item: IdWithQuality::new("coal", "normal"),
                 }),

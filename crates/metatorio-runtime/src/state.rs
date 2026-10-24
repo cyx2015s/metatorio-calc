@@ -848,7 +848,7 @@ impl RuntimeState {
             LocatedTarget, LocatedTargetExpression, LocatedTargetTerm, UniverseMechanicEntry,
         };
         use crate::message::UniverseAction;
-        use metatorio_core::TransferLocatedMechanic;
+        use metatorio_core::OrbitalCargoMechanic;
 
         self.universe(project_id, universe_id)?;
         let recompute = !matches!(
@@ -940,7 +940,7 @@ impl RuntimeState {
                 outcome.created.mechanic(id);
                 Ok(outcome)
             }
-            UniverseAction::SetTransferItem { mechanic, item } => {
+            UniverseAction::SetTransportItem { mechanic, item } => {
                 let entry = self
                     .universe_mut(project_id, universe_id)?
                     .mechanics
@@ -951,8 +951,10 @@ impl RuntimeState {
                         universe: universe_id,
                         mechanic,
                     })?;
-                let LocatedMechanic::Transfer(transfer) = &mut entry.mechanic else {
-                    return Err(RuntimeError::InvalidValue("机制不是火箭转移".into()));
+                let (LocatedMechanic::RocketExport(transfer)
+                | LocatedMechanic::OrbitalDrop(transfer)) = &mut entry.mechanic
+                else {
+                    return Err(RuntimeError::InvalidValue("机制不是轨道货运".into()));
                 };
                 let changed = replace(&mut transfer.item, item);
                 Ok(Outcome::meta_if(changed, project_id))
@@ -977,13 +979,20 @@ impl RuntimeState {
                 outcome.created.mechanic(mechanic_id);
                 Ok(outcome)
             }
-            UniverseAction::AddTransfer { location, item } => {
+            action @ (UniverseAction::AddRocketExport { .. }
+            | UniverseAction::AddOrbitalDrop { .. }) => {
+                let is_drop = matches!(&action, UniverseAction::AddOrbitalDrop { .. });
+                let (UniverseAction::AddRocketExport { location, item }
+                | UniverseAction::AddOrbitalDrop { location, item }) = action
+                else {
+                    unreachable!()
+                };
                 if item.id.is_empty() {
                     return Err(RuntimeError::InvalidValue("物品不能为空".to_string()));
                 }
                 if !matches!(location, Location::Planet(_)) {
                     return Err(RuntimeError::InvalidValue(
-                        "火箭转移的起点必须是星球".to_string(),
+                        "轨道货运的地点必须是星球".to_string(),
                     ));
                 }
                 let mechanic_id = self.allocate_id();
@@ -992,10 +1001,11 @@ impl RuntimeState {
                     .push(UniverseMechanicEntry {
                         id: mechanic_id,
                         enabled: true,
-                        mechanic: LocatedMechanic::Transfer(TransferLocatedMechanic {
-                            location,
-                            item,
-                        }),
+                        mechanic: if is_drop {
+                            LocatedMechanic::OrbitalDrop(OrbitalCargoMechanic { location, item })
+                        } else {
+                            LocatedMechanic::RocketExport(OrbitalCargoMechanic { location, item })
+                        },
                     });
                 let mut outcome = Outcome::meta(project_id);
                 outcome.created.mechanic(mechanic_id);
@@ -1065,9 +1075,12 @@ impl RuntimeState {
                         .iter_mut()
                         .find(|entry| entry.id == mechanic)
                     {
-                        if matches!(entry.mechanic, LocatedMechanic::Transfer(_)) {
+                        if matches!(
+                            entry.mechanic,
+                            LocatedMechanic::RocketExport(_) | LocatedMechanic::OrbitalDrop(_)
+                        ) {
                             return Err(RuntimeError::InvalidValue(
-                                "火箭转移的起点必须是星球".to_string(),
+                                "轨道货运的地点必须是星球".to_string(),
                             ));
                         }
                     }
@@ -1084,7 +1097,8 @@ impl RuntimeState {
                     })?;
                 let changed = match &mut entry.mechanic {
                     LocatedMechanic::Local(local) => replace(&mut local.location, location),
-                    LocatedMechanic::Transfer(transfer) => {
+                    LocatedMechanic::RocketExport(transfer)
+                    | LocatedMechanic::OrbitalDrop(transfer) => {
                         replace(&mut transfer.location, location)
                     }
                 };
@@ -1108,7 +1122,7 @@ impl RuntimeState {
                     })?;
                 let LocatedMechanic::Local(local) = &mut entry.mechanic else {
                     return Err(RuntimeError::InvalidValue(
-                        "火箭转移不支持普通机制编辑".to_string(),
+                        "轨道货运不支持普通机制编辑".to_string(),
                     ));
                 };
                 let changed = replace(&mut local.mechanic, parsed);
@@ -1137,7 +1151,7 @@ impl RuntimeState {
                     })?;
                 let LocatedMechanic::Local(local) = &mut entry.mechanic else {
                     return Err(RuntimeError::InvalidValue(
-                        "火箭转移不支持普通机制编辑".to_string(),
+                        "轨道货运不支持普通机制编辑".to_string(),
                     ));
                 };
                 let changed = apply_mechanic_action(&mut local.mechanic, action)?;
@@ -2468,7 +2482,8 @@ fn message_label(message: &AppMessage) -> &'static str {
         AppMessage::Factory { .. } => "工厂操作",
         AppMessage::Universe { action, .. } => match action {
             crate::message::UniverseAction::AddLocalMechanic { .. } => "添加宇宙机制",
-            crate::message::UniverseAction::AddTransfer { .. } => "添加火箭转移",
+            crate::message::UniverseAction::AddRocketExport { .. } => "添加火箭发运",
+            crate::message::UniverseAction::AddOrbitalDrop { .. } => "添加轨道投送",
             _ => "宇宙工厂操作",
         },
         AppMessage::History(_) => "撤销/重做",

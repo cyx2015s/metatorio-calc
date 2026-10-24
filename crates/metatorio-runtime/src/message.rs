@@ -291,7 +291,7 @@ pub enum UniverseAction {
     CloneMechanic {
         mechanic: MechanicId,
     },
-    SetTransferItem {
+    SetTransportItem {
         mechanic: MechanicId,
         item: IdWithQuality,
     },
@@ -300,8 +300,13 @@ pub enum UniverseAction {
         location: Location,
         kind: crate::document::MechanicKind,
     },
-    /// 添加一个星球 -> 太空的火箭转移。
-    AddTransfer {
+    /// 添加一个星球 -> 太空的火箭发运。
+    AddRocketExport {
+        location: Location,
+        item: IdWithQuality,
+    },
+    /// 太空 -> 星球的显式轨道投送，按物品堆叠计价。
+    AddOrbitalDrop {
         location: Location,
         item: IdWithQuality,
     },

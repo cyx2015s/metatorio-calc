@@ -97,11 +97,11 @@ pnpm test:network-browser
 `FactoryTargetsPanel` 统一目标、目标表达式、FlowRef、流选择器、温度区间、数量单位与拖拽。
 右栏统一由 `SolvePanel` 展示成本、优化诊断、流平衡与不可解原因；宇宙结果额外显示地点。
 
-`mechanics/located.ts` 将 LocatedMechanic 投影为展示条目，保留原 ID、地点与 transfer 标识。
+`mechanics/located.ts` 将 LocatedMechanic 投影为展示条目，保留原 ID、地点与 transport 方向标识。
 该投影不写回文档，也不替换 runtime 的 selectedFactory。写操作经捕获的
 `MechanicScope.kind = universe` 转换成 universe 消息；普通工厂仍走原 factory 消息。
 两种模式复用 MechanicCommands / createMechanicActions 的选择器、兼容过滤、插件与参数编辑。
-转移条目显示为火箭转移，用同一 MechanicEditor 编辑物品与地点，不暴露普通发射的槽位开关。
+货运条目显示为火箭发运（星球 → 太空）或轨道投送（太空 → 星球），用同一 MechanicEditor 编辑物品与地点，不暴露普通发射的槽位开关。
 新增的克隆、转移物品编辑及表达式排序消息均参与既有撤销历史。
 
 MechanicWorkspace / MechanicListView / MechanicNetworkView 不区分独立 UI 实现。
@@ -111,8 +111,8 @@ MechanicWorkspace / MechanicListView / MechanicNetworkView 不区分独立 UI �
 单条配置失败不会抹掉其他条目的展开结果。
 
 网络流节点的身份包含地点、品质和温度。不同地点的机制不合并，温度/燃料兼容关系不跨地点。
-火箭转移连接地面与太空；太空物品到地面的免费投送显示为兼容虚线，明确不是求解器报告的
-实际物流分配量。编辑、筛选与视图切换继续保留原机制 ID 的节点焦点。
+两个方向都显示为有实际用量的机制节点，不再创建太空物品到地面的隐式转换或兼容虚线。
+轨道投送每件代价为堆叠数量的倒数；火箭发运代价为零，并消耗本地火箭载荷。编辑、筛选与视图切换继续保留原机制 ID 的节点焦点。
 
 宇宙编辑由后端命令统一重算，不再依赖前端防抖定时器。计算输入改变时按工作区失效缓存，
 重命名、排序和时间显示单位不清空结果。自动规划的作业、提交、诊断与回归见
@@ -139,3 +139,7 @@ planet 图标，太空使用 `space-platform-starter-pack` 图标。文字名称
 
 转移求解测试验证运力收支和非负约束：LP 允许分数次制造，1200 运力的配方为 1000 重量
 转移只需执行 1000/1200 次，但零成本等价解也可以多生产运力；不强制余量恰为零或 200。
+
+地点聚类为纯前端偏好：列表按地点显示图标标题并暂停手动排序；网络先对每个地点内部
+布局，再根据跨地点运输边排列各地点，使用复合节点显示分区。配方合并、筛选和节点编辑
+仍按原 ID 工作；关闭聚类不修改文档顺序或数值。

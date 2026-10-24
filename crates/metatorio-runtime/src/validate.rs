@@ -59,11 +59,12 @@ fn validate_universe(
         | UniverseAction::SetMechanicLocation { location, .. } => {
             validate_location(store, location)
         }
-        UniverseAction::AddTransfer { location, item } => {
+        UniverseAction::AddRocketExport { location, item }
+        | UniverseAction::AddOrbitalDrop { location, item } => {
             validate_location(store, location)?;
             require_id(store, PrototypeGroup::Item, "物品", item)
         }
-        UniverseAction::SetTransferItem { item, .. } => {
+        UniverseAction::SetTransportItem { item, .. } => {
             require_id(store, PrototypeGroup::Item, "物品", item)
         }
         UniverseAction::Mechanic { action, .. } => validate_mechanic(store, action),

@@ -206,7 +206,7 @@ export function createMechanicActions(runtime: typeof Runtime, scope: MechanicSc
           // 按机制类型过滤物品：变质/种植/燃料/发射
           const mechKind = entry?.mechanic.type;
           const filter =
-            entry?.transfer ? [] : mechKind === "virtual-science" ? ["science-pack"] : mechKind === "spoil"
+            entry?.transport ? [] : mechKind === "virtual-science" ? ["science-pack"] : mechKind === "spoil"
               ? ["spoilable"]
               : mechKind === "plant"
                 ? ["plantable"]

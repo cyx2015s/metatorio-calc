@@ -3026,7 +3026,8 @@ pub(crate) fn ensure_quality_limit(
                         max_level =
                             max_level.max(mechanic_quality_level(&qualities, &local.mechanic));
                     }
-                    metatorio_core::LocatedMechanic::Transfer(transfer) => {
+                    metatorio_core::LocatedMechanic::RocketExport(transfer)
+                    | metatorio_core::LocatedMechanic::OrbitalDrop(transfer) => {
                         max_level =
                             max_level.max(quality_level_of(&qualities, &transfer.item.quality));
                     }

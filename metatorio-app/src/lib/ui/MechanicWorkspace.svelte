@@ -10,11 +10,11 @@
   import { createNetworkViewState, type NetworkViewState } from '$lib/mechanics/network';
   import type { MechanicScrollState } from '$lib/mechanics/view-scroll';
 
-  let {project, factory, entries, solutions, solved, actions, filterOpen, mergeRecipes,
+  let {project, factory, entries, solutions, solved, actions, filterOpen, mergeRecipes, groupLocations = false,
     view = DEFAULT_MECHANIC_VIEW, onFilterActiveChange, onFilterClose}: {
     project: number | null; factory: number | null; entries: MechanicEntry[];
     solutions: MechanicSolutionMap; solved: boolean; actions: MechanicActions | null;
-    filterOpen: boolean; mergeRecipes: boolean; view?: MechanicViewMode;
+    filterOpen: boolean; mergeRecipes: boolean; groupLocations?: boolean; view?: MechanicViewMode;
     onFilterActiveChange: (active: boolean) => void;
     onFilterClose: () => void;
   } = $props();
@@ -50,16 +50,16 @@
     <MechanicFilter {workspace} {entries} expanded={filterOpen} />
   {/key}
 {/if}
-{#if filterActive && view === 'list'}<div class="filter-order-note">筛选中暂停手动拖拽排序，清除筛选后恢复。</div>{/if}
+{#if (filterActive || groupLocations) && view === 'list'}<div class="filter-order-note">筛选或地点聚类时暂停手动排序，关闭后恢复原始顺序。</div>{/if}
 
 {#if project !== null && factory !== null && actions && view === 'network'}
   {#key scope}
-    <MechanicNetworkView {project} {factory} {entries} {visibleIds} {mergeRecipes} {actions} {solutions} {solved} {workspace} {scrollState} {filterOpen} {onFilterClose} viewState={networkState} />
+    <MechanicNetworkView {project} {factory} {entries} {visibleIds} {mergeRecipes} {groupLocations} {actions} {solutions} {solved} {workspace} {scrollState} {filterOpen} {onFilterClose} viewState={networkState} />
   {/key}
 {:else if project !== null && factory !== null && actions && entries.length > 0 && (visibleIds === null || visibleIds.length > 0)}
   {#if view === 'list'}
     {#key scope}
-      <MechanicListView {project} {factory} {entries} {visibleIds} {mergeRecipes} {actions} {solutions} {solved} {workspace} {scrollState} />
+      <MechanicListView {project} {factory} {entries} {visibleIds} {mergeRecipes} {groupLocations} {actions} {solutions} {solved} {workspace} {scrollState} />
     {/key}
   {/if}
 {:else}

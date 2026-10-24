@@ -1034,7 +1034,7 @@ pub fn plan_universe_with_progress(
     mut progress: impl FnMut(AutoPlanProgress),
 ) -> Result<(Vec<metatorio_core::LocatedMechanic>, AutoPlanReport), RuntimeError> {
     use crate::document::{LocatedTargetExpression, UniverseDocument, UniverseMechanicEntry};
-    use metatorio_core::{LocatedMechanic, Location, TransferLocatedMechanic};
+    use metatorio_core::{LocatedMechanic, Location, OrbitalCargoMechanic};
     check_solve_cancelled()?;
     progress(AutoPlanProgress {
         stage: AutoPlanStage::Enumerating,
@@ -1045,7 +1045,7 @@ pub fn plan_universe_with_progress(
     let universe_doc = &snapshot.universe_doc;
     let universe_id = universe_doc.id;
     // Enumerate the full candidate set: every planet's local mechanics,
-    // plus all Space mechanics, plus a transfer edge for every item from
+    // plus Space mechanics and both cargo directions for every item quality at
     // each planet. One joint universe LP then chooses among all of them.
     let mut locations: Vec<Location> = store
         .group(PrototypeGroup::Planet)
@@ -1097,25 +1097,29 @@ pub fn plan_universe_with_progress(
         if let Location::Planet(_) = location {
             for record in store.group(PrototypeGroup::Item) {
                 for quality in game.qualities.iter().take(game.max_quality + 1) {
+                    let item = IdWithQuality::new(&record.name, quality);
                     let weight = store
                         .item_weight(&record.name)
-                        .map(|weight| weight.weight)
+                        .map(|w| w.weight)
                         .unwrap_or(store.weight_constants().default_item_weight);
-                    if weight <= 0.0 {
-                        continue;
-                    }
-                    let id = MechanicId(next_mechanic);
-                    next_mechanic += 1;
-                    let located = LocatedMechanic::Transfer(TransferLocatedMechanic {
+                    let cargo = OrbitalCargoMechanic {
                         location: location.clone(),
-                        item: IdWithQuality::new(&record.name, quality),
-                    });
-                    mechanics_by_id.insert(id, located.clone());
-                    entries.push(UniverseMechanicEntry {
-                        id,
-                        enabled: true,
-                        mechanic: located,
-                    });
+                        item,
+                    };
+                    let mut transports = vec![LocatedMechanic::OrbitalDrop(cargo.clone())];
+                    if weight > 0.0 {
+                        transports.push(LocatedMechanic::RocketExport(cargo));
+                    }
+                    for located in transports {
+                        let id = MechanicId(next_mechanic);
+                        next_mechanic += 1;
+                        mechanics_by_id.insert(id, located.clone());
+                        entries.push(UniverseMechanicEntry {
+                            id,
+                            enabled: true,
+                            mechanic: located,
+                        });
+                    }
                 }
             }
         }

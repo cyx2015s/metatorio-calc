@@ -28,7 +28,7 @@ pub use dual_var::DualVar;
 pub use expand::{SolarBalance, instance_cost, solar_balance};
 pub use id::{IdWithQuality, NORMAL_QUALITY};
 pub use location::{
-    LocalLocatedMechanic, LocatedDualVar, LocatedMechanic, Location, TransferLocatedMechanic,
+    LocalLocatedMechanic, LocatedDualVar, LocatedMechanic, Location, OrbitalCargoMechanic,
 };
 pub use mechanic::{
     BeaconConfig, BoilerMechanic, FluidFuelMechanic, FluidHeatMechanic, Fuel, GeneratorMechanic,

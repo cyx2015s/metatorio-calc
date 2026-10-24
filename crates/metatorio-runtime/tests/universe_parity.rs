@@ -161,7 +161,7 @@ fn invalid_location_parity() {
 #[test]
 fn rare_transfer_candidate_parity() {
     let plate = json!({"Item":{"id":"plate","quality":"rare"}});
-    let universe = json!({"id":3,"strict_source":true,"mechanics":[{"id":20,"mechanic":{"type":"transfer","location":location(),"item":{"id":"plate","quality":"rare"}}}],"targets":[{"id":30,"flow":{"location":{"kind":"space"},"flow":plate},"amount":1}],"external_inputs":[{"id":31,"flow":{"location":location(),"flow":plate},"penalty":0},{"id":32,"flow":{"location":location(),"flow":"RocketWeightCapacity"},"penalty":0}]});
+    let universe = json!({"id":3,"strict_source":true,"mechanics":[{"id":20,"mechanic":{"type":"rocket-export","location":location(),"item":{"id":"plate","quality":"rare"}}}],"targets":[{"id":30,"flow":{"location":{"kind":"space"},"flow":plate},"amount":1}],"external_inputs":[{"id":31,"flow":{"location":location(),"flow":plate},"penalty":0},{"id":32,"flow":{"location":location(),"flow":"RocketWeightCapacity"},"penalty":0}]});
     let mut r = setup(json!({"id":2}), universe);
     let before = r.solve_universe(ProjectId(1), UniverseId(3)).unwrap();
     r.state.document.projects[0]

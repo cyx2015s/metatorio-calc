@@ -2,15 +2,14 @@
 //!
 //! Locations are part of the LP coordinates: a `LocatedDualVar` is balanced
 //! independently at each planet/space location. Local mechanics are expanded
-//! with the environment of their own location; transfers consume local rocket
-//! weight capacity and the item, then create the same item in space. Space
-//! items can fan out to the same item at every planet for free.
+//! with their own environment. Rocket exports consume local items and rocket
+//! weight capacity. Orbital drops consume Space items and deliver them to one
+//! planet, charging one unit per stack. Both directions are explicit mechanics.
 
 use std::collections::{BTreeSet, HashMap};
 
 use metatorio_core::{
-    AIndexMap, Context, DualVar, Flow, IdWithQuality, LocatedDualVar, LocatedMechanic, Location,
-    Mechanic,
+    Context, DualVar, Flow, IdWithQuality, LocatedDualVar, LocatedMechanic, Location, Mechanic,
 };
 use metatorio_data::store::PrototypeGroup;
 use metatorio_data::store::PrototypeStore;
@@ -82,11 +81,11 @@ enum VarOrigin {
         location: Location,
         cost: f64,
     },
-    Transfer {
+    Transport {
         mechanic: MechanicId,
         location: Location,
+        cost: f64,
     },
-    Conversion,
 }
 
 pub(crate) fn environment_for(location: &Location) -> (Option<&str>, Option<&str>) {
@@ -241,9 +240,9 @@ pub fn expand_located_mechanic(
                     .collect(),
             )
         }
-        LocatedMechanic::Transfer(transfer) => {
+        LocatedMechanic::RocketExport(transfer) => {
             if !matches!(transfer.location, Location::Planet(_)) {
-                return Err("火箭转移的起点必须是星球".into());
+                return Err("火箭发运的起点必须是星球".into());
             }
             let weight = store
                 .item_weight(&transfer.item.id)
@@ -251,7 +250,7 @@ pub fn expand_located_mechanic(
                 .unwrap_or(store.weight_constants().default_item_weight);
             if weight <= 0.0 {
                 return Err(format!(
-                    "火箭转移物品 {} 的重量必须大于 0",
+                    "火箭发运物品 {} 的重量必须大于 0",
                     transfer.item.id
                 ));
             }
@@ -272,6 +271,27 @@ pub fn expand_located_mechanic(
                 1.0,
             );
             Ok(vec![(flow, 0.0)])
+        }
+        LocatedMechanic::OrbitalDrop(cargo) => {
+            if !matches!(cargo.location, Location::Planet(_)) {
+                return Err("轨道投送的终点必须是星球".into());
+            }
+            let stack_size = store
+                .get(PrototypeGroup::Item, &cargo.item.id)
+                .and_then(|record| record.component::<metatorio_data::ItemComponent>())
+                .map(|item| item.stack_size)
+                .filter(|size| *size > 0)
+                .ok_or_else(|| format!("轨道投送物品 {} 缺少有效堆叠数量", cargo.item.id))?;
+            let mut flow = SolverFlow::default();
+            flow.insert(
+                LocatedDualVar::new(Location::Space, DualVar::Item(cargo.item.clone())),
+                -1.0,
+            );
+            flow.insert(
+                LocatedDualVar::new(cargo.location.clone(), DualVar::Item(cargo.item.clone())),
+                1.0,
+            );
+            Ok(vec![(flow, 1.0 / f64::from(stack_size))])
         }
     }
 }
@@ -398,9 +418,11 @@ pub fn solve_universe_with_progress(
                     location: local.location.clone(),
                     cost,
                 },
-                LocatedMechanic::Transfer(transfer) => VarOrigin::Transfer {
+                LocatedMechanic::RocketExport(transfer)
+                | LocatedMechanic::OrbitalDrop(transfer) => VarOrigin::Transport {
                     mechanic: entry.id,
                     location: transfer.location.clone(),
+                    cost,
                 },
             };
             origins.insert(id, origin);
@@ -438,53 +460,6 @@ pub fn solve_universe_with_progress(
     }
     let conversion_target =
         crate::solve::conversion_targets(&target, expression_flows.keys().cloned());
-
-    // Space items may become the same item at any planet for free. Include
-    // implicit asteroid sources and space targets, not only mechanic flows.
-    let planet_locations: Vec<Location> = locations
-        .iter()
-        .filter(|location| matches!(location, Location::Planet(_)))
-        .cloned()
-        .collect();
-    let mut space_items: AIndexMap<IdWithQuality, ()> = AIndexMap::default();
-    let mut collect_space_item = |located: &LocatedDualVar| {
-        if located.location == Location::Space
-            && let DualVar::Item(item) = &located.flow
-        {
-            space_items.insert(item.clone(), ());
-        }
-    };
-    for (_, (flow, _)) in &flows {
-        for located in flow.keys() {
-            collect_space_item(located);
-        }
-    }
-    for located in sources.keys() {
-        collect_space_item(located);
-    }
-    for located in target.keys() {
-        collect_space_item(located);
-    }
-    for located in expression_flows.keys() {
-        collect_space_item(located);
-    }
-    for item in space_items.into_keys() {
-        for planet in &planet_locations {
-            let id = UniverseVarId(next_id);
-            next_id += 1;
-            let mut located = SolverFlow::default();
-            located.insert(
-                LocatedDualVar::new(Location::Space, DualVar::Item(item.clone())),
-                -1.0,
-            );
-            located.insert(
-                LocatedDualVar::new(planet.clone(), DualVar::Item(item.clone())),
-                1.0,
-            );
-            flows.insert(id, (located, 0.0));
-            origins.insert(id, VarOrigin::Conversion);
-        }
-    }
 
     // Temperature/fuel/heat subtype conversions are location-local; a global
     // set would create illegal cross-location shortcuts.
@@ -585,14 +560,17 @@ pub fn solve_universe_with_progress(
                     entry.1 += value;
                     entry.2 += value / prim_scale.get(id).copied().unwrap_or(1.0).max(1e-12);
                 }
-                VarOrigin::Transfer { mechanic, location } => {
+                VarOrigin::Transport {
+                    mechanic,
+                    location,
+                    cost,
+                } => {
                     let entry = mechanic_amounts
                         .entry(*mechanic)
-                        .or_insert_with(|| (location.clone(), 0.0, 0.0, 0.0));
+                        .or_insert_with(|| (location.clone(), 0.0, 0.0, *cost));
                     entry.1 += value;
                     entry.2 += value / prim_scale.get(id).copied().unwrap_or(1.0).max(1e-12);
                 }
-                VarOrigin::Conversion => {}
             }
         }
     }
@@ -646,7 +624,7 @@ mod tests {
     }
 
     #[test]
-    fn local_recipe_and_space_to_planet_conversion_solve() {
+    fn local_recipe_and_explicit_orbital_drop_solve() {
         let store = PrototypeStore::load(&json!({
             "item": {
                 "iron-ore": { "type": "item", "name": "iron-ore", "stack_size": 50 }
@@ -690,7 +668,17 @@ mod tests {
         let universe = UniverseDocument {
             id: UniverseId(3),
             name: "test".into(),
-            mechanics: vec![mechanic(Location::Space)],
+            mechanics: vec![
+                mechanic(Location::Space),
+                UniverseMechanicEntry {
+                    id: MechanicId(5),
+                    enabled: true,
+                    mechanic: LocatedMechanic::OrbitalDrop(metatorio_core::OrbitalCargoMechanic {
+                        location: Location::planet("nauvis"),
+                        item: item("iron-ore"),
+                    }),
+                },
+            ],
             targets: vec![LocatedTarget {
                 id: crate::id::TargetId(4),
                 flow: LocatedDualVar::new(
@@ -787,7 +775,7 @@ mod tests {
                 UniverseMechanicEntry {
                     id: MechanicId(4),
                     enabled: true,
-                    mechanic: LocatedMechanic::Transfer(metatorio_core::TransferLocatedMechanic {
+                    mechanic: LocatedMechanic::RocketExport(metatorio_core::OrbitalCargoMechanic {
                         location: Location::planet("nauvis"),
                         item: item("iron-ore"),
                     }),
@@ -838,7 +826,7 @@ mod tests {
         );
     }
     #[test]
-    fn space_implicit_source_reaches_a_planet_target() {
+    fn space_implicit_source_requires_explicit_drop_to_reach_planet() {
         let store = PrototypeStore::load(&json!({
             "item": {
                 "iron-chunk": { "type": "item", "name": "iron-chunk", "stack_size": 50 }
@@ -853,7 +841,7 @@ mod tests {
             settings: ProjectSettings::default(),
             ..ProjectDocument::default()
         };
-        let universe = UniverseDocument {
+        let mut universe = UniverseDocument {
             id: UniverseId(3),
             name: "source".into(),
             mechanics: Vec::new(),
@@ -867,9 +855,22 @@ mod tests {
             }],
             target_expressions: Vec::new(),
             external_inputs: vec![],
-            strict_source: false,
+            strict_source: true,
             strict_sink: false,
         };
+        let result = solve_universe(&store, &project, &universe, &Default::default()).unwrap();
+        assert!(matches!(
+            result.status,
+            UniverseSolveStatus::NotSolved { .. }
+        ));
+        universe.mechanics.push(UniverseMechanicEntry {
+            id: MechanicId(6),
+            enabled: true,
+            mechanic: LocatedMechanic::OrbitalDrop(metatorio_core::OrbitalCargoMechanic {
+                location: Location::planet("nauvis"),
+                item: item("iron-chunk"),
+            }),
+        });
         let result = solve_universe(&store, &project, &universe, &Default::default()).unwrap();
         assert!(
             matches!(result.status, UniverseSolveStatus::Solved { .. }),

@@ -1,4 +1,6 @@
 <script lang="ts">
+  import {layoutLocations} from "$lib/mechanics/location-layout";
+  import {locationLabel} from "$lib/mechanics/located";
   import { onMount, untrack, tick } from 'svelte';
   import type { Core, ElementDefinition, StylesheetJson } from 'cytoscape';
   import type { ElkNode } from 'elkjs/lib/elk-api';
@@ -17,8 +19,8 @@
   import SecondaryMenu from './SecondaryMenu.svelte';
   import { rememberMechanicScroll } from '$lib/mechanics/view-scroll';
 
-  let {project, factory, entries, visibleIds, solutions, solved, actions, workspace, mergeRecipes, viewState, scrollState, filterOpen, onFilterClose}: MechanicViewProps & {
-    mergeRecipes: boolean; viewState: NetworkViewState; filterOpen: boolean; onFilterClose: () => void;
+  let {project, factory, entries, visibleIds, solutions, solved, actions, workspace, mergeRecipes, groupLocations = false, viewState, scrollState, filterOpen, onFilterClose}: MechanicViewProps & {
+    mergeRecipes: boolean; groupLocations?: boolean; viewState: NetworkViewState; filterOpen: boolean; onFilterClose: () => void;
   } = $props();
   let container = $state<HTMLDivElement>();
   let detailsPanel = $state<HTMLElement>(), searchBox = $state<HTMLDivElement>();
@@ -38,7 +40,8 @@
   let renderRevision = $state(0);
   let cy: Core | undefined;
   let elk: {layout: (graph: ElkNode) => Promise<ElkNode>; terminateWorker: () => void} | undefined;
-  let generation = 0, mounted = true;
+  let generation = 0, mounted = true, renderedGrouping = untrack(()=>groupLocations);
+  let renderedOwners = new Map<string,string>();
   const document = $derived(runtime.document?.projects.find(p => p.id === project));
   const factoryDocument = $derived(actions.commands.scope.kind === "universe" ? null : document?.factories.find(f => f.id === factory));
   const universeDocument = $derived(actions.commands.scope.kind === 'universe' ? document?.universes?.find(u => u.id === factory) : null);
@@ -94,6 +97,7 @@
       {selector: 'node', style: {label: 'data(label)', color: p.text, 'font-size': 11, 'font-family': uiFont,
         'text-wrap': 'wrap', 'text-max-width': '150px', 'text-valign': 'bottom', 'text-margin-y': 5,
         width: 38 * iconScale, height: 38 * iconScale, 'background-color': '#477761', 'border-width': 2, 'border-color': p.line}},
+      {selector: 'node[kind="location"]', style: {shape:'round-rectangle', 'background-opacity':0.06, 'background-color':p.text, 'border-style':'dashed', 'border-width':1, padding:'35px', 'text-valign':'top', 'font-size':16, 'font-weight':600, 'text-margin-y':-10}},
       {selector: 'node[kind="mechanic"]', style: {shape: 'round-rectangle', width: 52 * iconScale, height: 48 * iconScale, 'background-color': '#99703b'}},
       {selector: 'node[fluid]', style: {'background-color': '#3b78a4'}},
       {selector: 'node[utility]', style: {'background-color': '#79599d'}},
@@ -115,7 +119,11 @@
   function saveViewport(savePositions = false) {
     if (!cy || cy.destroyed() || renderRevision === 0) return;
     viewState.zoom = cy.zoom(); viewState.pan = {...cy.pan()};
-    if (savePositions) for (const node of cy.nodes()) viewState.positions.set(node.id(), {...node.position()});
+    if (savePositions) {
+      for (const node of cy.nodes().filter(n=>!n.isParent())) {
+        viewState.positions.set(node.id(), {...node.position()});
+      }
+    }
   }
   function choose(id: string) {
     searchOpen = false;
@@ -177,13 +185,14 @@
       cy = graph.default({container, elements: [], style: styles(), layout: {name: 'preset'},
         minZoom: 0.08, maxZoom: 3, pixelRatio: 'auto', textureOnViewport: false});
       elk = new layout.default({workerFactory: () => new worker.default()});
-      cy.on('tap', 'node, edge', event => selectObject(event.target.id()));
+      cy.on('tap', 'node, edge', event => {if(event.target.isNode() && event.target.isParent()) return; selectObject(event.target.id());});
       cy.on('tap', event => { if (event.target === cy) selectObject(); });
       cy.on('pan zoom', () => { saveViewport(); schedulePosition(); });
       cy.on('position', 'node', schedulePosition);
       cy.on('dragfree', 'node', event => {
         const node = event.target;
-        viewState.positions.set(node.id(), {...node.position()});
+        if(node.isParent()) for(const child of node.descendants()) viewState.positions.set(child.id(), {...child.position()});
+        else viewState.positions.set(node.id(), {...node.position()});
       });
       ready = true;
     }).catch(reason => { if (mounted) error = `无法加载网络绘图库：${String(reason)}`; });
@@ -214,10 +223,11 @@
   $effect(() => {
     if (!ready) return;
     const snapshot = model;
+    const grouping = groupLocations;
     runtime.iconRevision;
     const revision = ++generation;
     const timer = setTimeout(() => {
-      void draw(snapshot, revision).catch(reason => {
+      void draw(snapshot, revision, false, grouping).catch(reason => {
         if (revision === generation && mounted) { error = `网络布局失败：${String(reason)}`; busy = false; }
       });
     }, 100);
@@ -238,9 +248,10 @@
   // Size changes only restyle the existing canvas; no layout, pan or zoom reset.
   $effect(() => { if (ready && cy) { iconScale; cy.style(styles()); schedulePosition(); } });
 
-  async function draw(snapshot: typeof model, revision: number, reset = false) {
+  async function draw(snapshot: typeof model, revision: number, reset = false, grouping = groupLocations) {
     if (!cy || !elk || !mounted || revision !== generation) return;
     busy = true; error = '';
+    if(renderedGrouping !== grouping){reset=true;viewState.positions.clear();viewState.zoom=undefined;}
     if (!reset) {
       saveViewport(true);
       // A renamed group should stay where the user was editing it. Existing
@@ -251,7 +262,7 @@
       }
     }
     const material = snapshot.nodes.filter(node => !node.utility);
-    const laidOut = await elk.layout({id: 'root', layoutOptions: {
+    const laidOut = grouping ? {children:[]} : await elk.layout({id: 'root', layoutOptions: {
       'elk.algorithm': 'layered', 'elk.direction': 'RIGHT', 'elk.edgeRouting': 'ORTHOGONAL',
       'elk.spacing.nodeNode': '45', 'elk.layered.spacing.nodeNodeBetweenLayers': '100',
       'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
@@ -261,15 +272,27 @@
       height: Math.max(100, (node.kind === 'mechanic' ? 48 : 38) * 2 + 16 + node.label.split('\n').length * 13)})),
       edges: snapshot.edges.filter(edge => !edge.utility).map(edge => ({id: edge.id, sources: [edge.source], targets: [edge.target]}))});
     if (!cy || !mounted || revision !== generation) return;
-    const positions = new Map(laidOut.children?.map(node => [node.id, {x: (node.x ?? 0) + 75, y: (node.y ?? 0) + 45}]));
+    let positions = new Map(laidOut.children?.map(node => [node.id, {x: (node.x ?? 0) + 75, y: (node.y ?? 0) + 45}]));
     const bottom = Math.max(0, ...[...positions.values()].map(p => p.y)) + 140;
     snapshot.nodes.filter(node => node.utility).forEach((node, i) => positions.set(node.id, {x: 80 + i * 150, y: bottom}));
+    const clustered = grouping ? await layoutLocations(snapshot, graph=>elk!.layout(graph)) : null;
+    if (!cy || !mounted || revision !== generation) return;
+    if(clustered) {
+      positions = clustered.positions;
+      // A moved/new node must join its new location rather than stretch that
+      // location's box back to a saved position in another cluster.
+      if(clustered.owner.size!==renderedOwners.size || [...clustered.owner].some(([id,owner])=>renderedOwners.get(id)!==owner)) viewState.positions.clear();
+      renderedOwners = clustered.owner;
+    } else renderedOwners.clear();
+    renderedGrouping = grouping;
     const hadViewport = viewState.zoom !== undefined;
     const elements: ElementDefinition[] = snapshot.nodes.map(node => ({data: {id: node.id, label: node.label, kind: node.kind,
+      ...(clustered?.owner.has(node.id)?{parent:clustered.owner.get(node.id)}:{}),
       ...(node.flow && typeof node.flow !== 'string' && 'Fluid' in node.flow ? {fluid: true} : {}),
       ...(node.utility ? {utility: true} : {}), ...(node.target ? {target: true} : {}),
       ...(node.implicit ? {implicit: true} : {}), ...(node.disabled ? {disabled: true} : {}), ...(node.unused ? {unused: true} : {})},
       position: viewState.positions.get(node.id) ?? positions.get(node.id)}));
+    if(clustered) elements.unshift(...clustered.groups.map(group=>({data:{id:group.id,kind:'location',label:locationLabel(group.location,(k,n)=>runtime.localizedName(k,n))},selectable:false})));
     elements.push(...snapshot.edges.map(edge => ({data: {id: edge.id, source: edge.source, target: edge.target,
       label: edge.label, kind: edge.kind, ...(edge.utility ? {utility: true} : {})}})));
     cy.batch(() => { cy!.elements().remove(); cy!.add(elements); });

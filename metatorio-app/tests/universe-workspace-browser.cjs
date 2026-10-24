@@ -16,7 +16,7 @@ const appRoot=path.resolve(__dirname,'..'),port=5214,url=`http://127.0.0.1:${por
   await page.addInitScript(()=>{
    const doc=window.__layoutDocument,p=doc.projects[0],planet=name=>({kind:'planet',name}),q=id=>({id,quality:'normal'}),flow={Item:q('iron-plate')};
    const local=(id,location)=>({id,enabled:true,mechanic:{type:'local',location,mechanic:structuredClone(p.factories[0].mechanics[0].mechanic)}});
-   p.universes=[{id:7,name:'宇宙工厂',external_inputs:[],strict_source:true,strict_sink:false,mechanics:[local(101,planet('nauvis')),local(102,planet('fulgora')),{id:103,enabled:true,mechanic:{type:'transfer',location:planet('nauvis'),item:q('iron-plate')}}],targets:[{id:201,flow:{location:planet('nauvis'),flow:{Fluid:{name:'water',temperature:[15,100]}}},amount:1},{id:202,flow:{location:{kind:'space'},flow},amount:2}],target_expressions:[{id:301,constant:1,terms:[{id:401,flow:{location:planet('fulgora'),flow},coefficient:1},{id:402,flow:{location:{kind:'space'},flow},coefficient:2}]}]}];
+   p.universes=[{id:7,name:'宇宙工厂',external_inputs:[],strict_source:true,strict_sink:false,mechanics:[local(101,planet('nauvis')),local(102,planet('fulgora')),{id:103,enabled:true,mechanic:{type:'rocket-export',location:planet('nauvis'),item:q('iron-plate')}}],targets:[{id:201,flow:{location:planet('nauvis'),flow:{Fluid:{name:'water',temperature:[15,100]}}},amount:1},{id:202,flow:{location:{kind:'space'},flow},amount:2}],target_expressions:[{id:301,constant:1,terms:[{id:401,flow:{location:planet('fulgora'),flow},coefficient:1},{id:402,flow:{location:{kind:'space'},flow},coefficient:2}]}]}];
    const u=p.universes[0],raw=window.__TAURI_INTERNALS__.invoke;let next=500;
    window.__universeWrites=[];window.__universeSolves=0;window.__locationIcons=[];
    window.__TAURI_INTERNALS__.invoke=async(command,args={})=>{
@@ -34,9 +34,10 @@ const appRoot=path.resolve(__dirname,'..'),port=5214,url=`http://127.0.0.1:${por
      await new Promise(r=>setTimeout(r,40));
      return {project:1,universe:7,status:{status:'solved',cost:12.345,mechanics:u.mechanics.map(e=>({mechanic:e.id,location:e.mechanic.location,amount:0.5,cost:4,rate:0.5})),flows:u.targets.map(t=>({flow:t.flow,amount:t.amount,rate:t.amount}))}};
     }
-    if(command==='universe_preview')return {mechanics:u.mechanics.map(e=>({id:e.id,error:null,flows:e.mechanic.type==='transfer'?[{flow:{location:e.mechanic.location,flow},amount:-1,rate:-1},{flow:{location:{kind:'space'},flow},amount:1,rate:1}]:[{flow:{location:e.mechanic.location,flow},amount:e.id===102?-1:1,rate:1}]})),sources:[{location:planet('nauvis'),flow},{location:planet('fulgora'),flow},{location:{kind:'space'},flow}]};
+    if(command==='universe_preview')return {mechanics:u.mechanics.map(e=>({id:e.id,error:null,flows:e.mechanic.type==='rocket-export'?[{flow:{location:e.mechanic.location,flow},amount:-1,rate:-1},{flow:{location:{kind:'space'},flow},amount:1,rate:1}]:[{flow:{location:e.mechanic.location,flow},amount:e.id===102?-1:1,rate:1}]})),sources:[{location:planet('nauvis'),flow},{location:planet('fulgora'),flow},{location:{kind:'space'},flow}]};
     if(command==='dispatch'&&args.message.scope==='universe'){
      const message=JSON.parse(JSON.stringify(args.message)),a=message.action.action;window.__universeWrites.push(message);const created=[];
+     for(const type of ['rocket-export','orbital-drop']) if(a[`add-${type}`]){const entry={id:next++,enabled:true,mechanic:{type,...a[`add-${type}`]}};created.push(entry.id);u.mechanics.push(entry);}
      if(a['add-local-mechanic']){const entry=local(next++,a['add-local-mechanic'].location);created.push(entry.id);u.mechanics.push(entry);}
      if(a['reorder-external-input']){const v=a['reorder-external-input'],i=u.external_inputs.findIndex(e=>e.id===v.input);u.external_inputs.splice(v.position,0,...u.external_inputs.splice(i,1));}
      if(a['add-external-input'])u.external_inputs.push({id:next++,...a['add-external-input']});
@@ -49,7 +50,7 @@ const appRoot=path.resolve(__dirname,'..'),port=5214,url=`http://127.0.0.1:${por
      if(a['clone-mechanic']){const e=structuredClone(find(a['clone-mechanic'].mechanic));e.id=next++;u.mechanics.push(e);}
      if(a['remove-mechanic'])u.mechanics=u.mechanics.filter(e=>e.id!==a['remove-mechanic'].mechanic);
      if(a.mechanic){const e=find(a.mechanic.mechanic),edit=a.mechanic.action.recipe;if(edit?.['set-recipe'])e.mechanic.mechanic.recipe=edit['set-recipe'].recipe;if(edit?.['set-machine'])e.mechanic.mechanic.machine=edit['set-machine'].machine;}
-     if(a['set-transfer-item']){const v=a['set-transfer-item'];find(v.mechanic).mechanic.item=v.item;}
+     if(a['set-transport-item']){const v=a['set-transport-item'];find(v.mechanic).mechanic.item=v.item;}
      if(a['set-target-flow']){const v=a['set-target-flow'];u.targets.find(t=>t.id===v.target).flow=v.flow;}
      if(a['set-target-amount']){const v=a['set-target-amount'];u.targets.find(t=>t.id===v.target).amount=v.amount;}
      if(a['reorder-target']){const v=a['reorder-target'],i=u.targets.findIndex(t=>t.id===v.target);u.targets.splice(v.position,0,...u.targets.splice(i,1));}
@@ -133,6 +134,22 @@ const appRoot=path.resolve(__dirname,'..'),port=5214,url=`http://127.0.0.1:${por
   await waitFor(async()=>(await page.locator('.edit-card [data-mechanic-editor]').getAttribute('data-mechanic-editor'))===editing);
   await waitFor(async()=>(await page.locator('.cost-value').textContent())==='12.345');
   if(process.env.UNIVERSE_NETWORK_SCREENSHOT)await page.screenshot({path:process.env.UNIVERSE_NETWORK_SCREENSHOT});
+  await page.getByLabel('按地点聚类').check();
+  await waitFor(async()=>canvas.evaluate(el=>el._cyreg.cy.nodes('[kind="location"]').length===3));
+  assert.ok(await canvas.evaluate(el=>el._cyreg.cy.nodes().filter(n=>n.data('kind')!=='location').every(n=>n.parent().length===1)));
+  await page.getByRole('button',{name:'列表',exact:true}).click();
+  assert.equal(await page.locator('.location-heading').count(),2);
+  const originalOrder=await page.evaluate(()=>window.__layoutDocument.projects[0].universes[0].mechanics.map(e=>e.id));
+  await page.getByLabel('按地点聚类').uncheck();assert.equal(await page.locator('.location-heading').count(),0);
+  assert.deepEqual(await page.evaluate(()=>window.__layoutDocument.projects[0].universes[0].mechanics.map(e=>e.id)),originalOrder);
+  for(const label of ['火箭发运','轨道投送']) {
+   await page.getByRole('button',{name:`+ ${label}`,exact:true}).click();
+   const dialog=page.getByRole('dialog',{name:`选择${label}物品`,exact:true});await dialog.waitFor();
+   await dialog.getByLabel('搜索原型').fill('iron-plate');
+   await dialog.getByRole('button',{name:'铁板',exact:true}).dblclick();
+   await dialog.waitFor({state:'detached'});
+  }
+  assert.deepEqual(await page.evaluate(()=>window.__layoutDocument.projects[0].universes[0].mechanics.slice(-2).map(e=>e.mechanic.type)),['rocket-export','orbital-drop']);
   assert.equal(await page.evaluate(()=>JSON.stringify(window.__layoutDocument.projects[0].factories)),before);
   await page.locator('.targets-panel .row-item').first().locator('.hover-icon').first().click({button:'right'});
   await page.getByRole('button',{name:'添加',exact:true}).click();

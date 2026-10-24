@@ -1,4 +1,5 @@
 <script lang="ts">
+  import {transportLabel} from "$lib/mechanics/located";
   import { runtime } from "$lib/runtime/store.svelte.ts";
   import { mechanicPrototype } from "$lib/display-labels";
   import { mechanicKindLabels as kindLabel } from "$lib/mechanics/presentation";
@@ -53,7 +54,7 @@
   const scale = $derived(solution ? Math.max(0, solution.amount) : 1);
 </script>
 
-<article data-mechanic-id={entry.id} class="mech-card" class:off={!entry.enabled} aria-label={`${entry.transfer ? "火箭转移" : kindLabel[kind]}：${primaryLabel}`}>
+<article data-mechanic-id={entry.id} class="mech-card" class:off={!entry.enabled} aria-label={`${entry.transport ? transportLabel(entry.transport) : kindLabel[kind]}：${primaryLabel}`}>
   <MechanicEditor {entry} {solution} {project} {factory} {actions} onInteractionChange={active => editorActive = active} />
   <div class="flow-lanes" aria-label="机制流量">
     {#each [{ label: "输入", items: inputs }, { label: "输出", items: outputs }] as lane}
@@ -63,7 +64,7 @@
         <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
         <div class="flow-strip" tabindex="0" role="region" aria-label={`${lane.label}流量，可横向滚动`}>
           {#each lane.items as item (JSON.stringify([item.location, dualVarKey(item.flow)]))}
-            {#if entry.transfer && item.location}<LocationIcon location={item.location} size={18} />{/if}<FlowChip flow={item.flow} amount={item.amount} {scale} solved={solution !== null} />
+            {#if entry.transport && item.location}<LocationIcon location={item.location} size={18} />{/if}<FlowChip flow={item.flow} amount={item.amount} {scale} solved={solution !== null} />
           {:else}<span class="no-flow">{loadingFlows ? "加载中…" : "—"}</span>{/each}
         </div>
       </div>
@@ -74,7 +75,7 @@
         <p>{solution ? "当前求解用量下的流量" : "未求解：以下为单位机制流量"}</p>
         {#each [{ label: "输入", items: inputs }, { label: "输出", items: outputs }] as lane}
           <h4>{lane.label}（{lane.items.length}）</h4>
-          {#each lane.items as item (JSON.stringify([item.location, dualVarKey(item.flow)]))}{#if entry.transfer && item.location}<LocationIcon location={item.location} size={18} />{/if}<FlowChip flow={item.flow} amount={item.amount} {scale} solved={solution !== null} showName />{/each}
+          {#each lane.items as item (JSON.stringify([item.location, dualVarKey(item.flow)]))}{#if entry.transport && item.location}<LocationIcon location={item.location} size={18} />{/if}<FlowChip flow={item.flow} amount={item.amount} {scale} solved={solution !== null} showName />{/each}
         {/each}
       </div>
     </SecondaryMenu>

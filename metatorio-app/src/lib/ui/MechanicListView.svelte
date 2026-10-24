@@ -1,4 +1,6 @@
 <script lang="ts">
+  import {locationKey, locationLabel} from "$lib/mechanics/located";
+  import LocationIcon from "./LocationIcon.svelte";
   import { dndzone } from 'svelte-dnd-action';
   import { runtime } from '$lib/runtime/store.svelte';
   import { mechanicPrototype } from '$lib/display-labels';
@@ -8,8 +10,8 @@
   import MechanicRow from './MechanicRow.svelte';
   import { rememberMechanicScroll } from '$lib/mechanics/view-scroll';
 
-  let {project, factory, entries, visibleIds, mergeRecipes, actions, solutions, scrollState}: {
-    mergeRecipes: boolean;
+  let {project, factory, entries, visibleIds, mergeRecipes, groupLocations = false, actions, solutions, scrollState}: {
+    mergeRecipes: boolean; groupLocations?: boolean;
   } & MechanicViewProps = $props();
   let filterActive = $derived(visibleIds !== null);
   let dragMechanics = $state<MechanicEntry[]>([]);
@@ -56,18 +58,18 @@
           groups.push({ key, entries: [entry] });
         }
       }
-      return groups;
+      return groupLocations ? [...groups].sort((a,b)=>locationKey(a.entries[0].location).localeCompare(locationKey(b.entries[0].location))) : groups;
     })(),
   );
   type MechanicGroup = { id: string; key: string; entries: import("$lib/runtime/types").MechanicEntry[] };
   let dragGroups = $state<MechanicGroup[]>([]);
   $effect(() => { dragGroups = mechGroups.map((group) => ({ ...group, id: group.key })); });
   function handleMechanicsConsider(event: CustomEvent<{ items: MechanicGroup[] }>) {
-    if (filterActive) return;
+    if (filterActive || groupLocations) return;
     dragGroups = event.detail.items;
   }
   function handleMechanicsFinalize(event: CustomEvent<{ items: MechanicGroup[] }>) {
-    if (filterActive) return;
+    if (filterActive || groupLocations) return;
     dragGroups = event.detail.items;
     dragMechanics = event.detail.items.flatMap((group) => group.entries);
     actions.commands.reorderMechanics(dragMechanics.map((entry) => entry.id)).catch(() => {});
@@ -82,14 +84,8 @@
     {/snippet}
   </MechanicRow>
 {/snippet}
-      <div
-        class="mech-list"
-        use:rememberMechanicScroll={scrollState}
-        use:dndzone={{ items: dragGroups, type: "mechanic-groups", flipDurationMs: 120, dragDisabled: filterActive }}
-        onconsider={handleMechanicsConsider}
-        onfinalize={handleMechanicsFinalize}
-      >
-        {#each dragGroups as group (group.id)}
+
+{#snippet renderGroup(group: MechanicGroup)}
           {#if group.entries.length > 1}
             <!-- 配方合并组：标题（配方名 + 机器名），子机制完整显示 -->
             <div class="mech-group">
@@ -113,9 +109,30 @@
               {@render row(entry)}
             {/each}
           {/if}
+{/snippet}
+      <div
+        class="mech-list"
+        use:rememberMechanicScroll={scrollState}
+        use:dndzone={{ items: dragGroups, type: "mechanic-groups", flipDurationMs: 120, dragDisabled: filterActive || groupLocations }}
+        onconsider={handleMechanicsConsider}
+        onfinalize={handleMechanicsFinalize}
+      >
+        {#each dragGroups as group, i (group.id)}
+          {@const location = group.entries[0].location}
+          {#if groupLocations}
+          <div class="mechanic-list-item">
+          {#if groupLocations && location && (i === 0 || locationKey(dragGroups[i-1].entries[0].location) !== locationKey(location))}
+            <div class="location-heading"><LocationIcon {location} size={24}/><strong>{locationLabel(location,(k,n)=>runtime.localizedName(k,n))}</strong></div>
+          {/if}
+          {@render renderGroup(group)}
+          </div>
+          {:else}
+            {@render renderGroup(group)}
+          {/if}
         {/each}
       </div>
 <style>
+  .location-heading { display: flex; align-items: center; gap: 8px; padding: 10px 6px 4px; color: var(--text); }
   .mech-list {
     /* 关键：机制列表必须按内容高度撑开，由 .center 负责滚动。
        若它作为可收缩 flex 项被压到剩余高度，内部的 .mech-group 会因

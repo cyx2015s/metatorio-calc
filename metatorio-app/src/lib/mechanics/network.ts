@@ -1,4 +1,4 @@
-import {locationKey, locationLabel} from "./located.ts";
+import {locationKey, locationLabel, transportLabel} from "./located.ts";
 import type { Location, LocatedDualVar } from "../runtime/types";
 import type { DualVar, ExternalInput, MechanicEntry, TimeScale } from '../runtime/types';
 import type { ExpandedFlow } from '../mechanic-filter';
@@ -171,7 +171,8 @@ export function buildNetwork(source: NetworkSource): NetworkModel {
     node.unused = source.solved && node.entries.every(entry => !entry.enabled || !source.solutions.get(entry.id)?.amount);
     node.search = node.entries.map(entry => `${JSON.stringify(entry.mechanic)} ${entry.id}`).join(' ') + ` ${node.label}`;
     if (node.location) node.search += ` ${locationLabel(node.location,source.localize)}`;
-    node.label += `\n${node.entries[0].transfer ? "火箭转移" : mechanicKindLabels[node.entries[0].mechanic.type] ?? node.entries[0].mechanic.type}`;
+    if (node.entries[0].transport) node.search += ` ${transportLabel(node.entries[0].transport)}`;
+    node.label += `\n${node.entries[0].transport ? transportLabel(node.entries[0].transport) : mechanicKindLabels[node.entries[0].mechanic.type] ?? node.entries[0].mechanic.type}`;
     if (node.entries.length > 1) node.label += ` · ${node.entries.length} 个机制`;
     const qualities = networkIconQualities(node);
     if (qualities.length > 1 || qualities.some(quality => quality !== 'normal')) {
@@ -195,7 +196,7 @@ export function buildNetwork(source: NetworkSource): NetworkModel {
   ];
   for (const input of externals) {
     if (!source.showUtilities && isUtility(input.flow)) continue;
-    if (!usedFlows.some(node => (locationKey(node.location) === locationKey(input.location) || (input.location?.kind === 'space' && node.location?.kind === 'planet' && typeof input.flow === 'object' && 'Item' in input.flow)) && (networkFlowKey(node.flow!) === networkFlowKey(input.flow) || networkCompatible(input.flow, node.flow!)))) continue;
+    if (!usedFlows.some(node => locationKey(node.location) === locationKey(input.location) && (networkFlowKey(node.flow!) === networkFlowKey(input.flow) || networkCompatible(input.flow, node.flow!)))) continue;
     const flow = flowNode(input.flow, input.location), id = input.implicit ? `implicit:${flow.id}` : `external:${input.external!.id}`;
     const info = presentFlow(input.flow, source.localize);
     nodes.set(id, {id, kind: 'external', label: input.implicit ? '隐式输入' : '外部输入',
@@ -204,18 +205,6 @@ export function buildNetwork(source: NetworkSource): NetworkModel {
   }
   // Do not union overlapping temperature intervals or fuel category sets.
   const flows = [...nodes.values()].filter(node => node.kind === 'flow');
-  // Universe's zero-cost space -> planet item conversions are compatibility,
-  // never solved delivery quantities or a way to transport fluids/energy.
-  if (source.locatedTargets) {
-    const destinations = new Map<string, NetworkNode[]>();
-    for (const node of flows) if (node.location?.kind === 'planet' && typeof node.flow === 'object' && 'Item' in node.flow) {
-      const key=networkFlowKey(node.flow), group=destinations.get(key) ?? [];
-      group.push(node); destinations.set(key,group);
-    }
-    for (const from of flows) if (from.location?.kind === 'space' && typeof from.flow === 'object' && 'Item' in from.flow) {
-      for (const to of destinations.get(networkFlowKey(from.flow)) ?? []) edge(from.id,to.id,from.flow,'compatibility').label='太空投送 · 免费（非实际分配量）';
-    }
-  }
   const families = new Map<string, NetworkNode[]>();
   for (const node of flows) {
     const flow = node.flow!;

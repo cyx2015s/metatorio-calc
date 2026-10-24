@@ -1065,8 +1065,11 @@ class RuntimeStore {
     await this.universeAction({ "add-local-mechanic": { location, kind } });
   }
 
-  async addUniverseTransfer(location: Location, item: IdWithQuality): Promise<void> {
-    await this.universeAction({ "add-transfer": { location, item } });
+  async addUniverseOrbitalDrop(location: Location, item: IdWithQuality): Promise<void> {
+    await this.universeAction({ "add-orbital-drop": { location, item } });
+  }
+  async addUniverseRocketExport(location: Location, item: IdWithQuality): Promise<void> {
+    await this.universeAction({ "add-rocket-export": { location, item } });
   }
 
   async removeUniverseMechanic(mechanic: MechanicId): Promise<void> {
@@ -1814,8 +1817,8 @@ class RuntimeStore {
         if ('mechanic' in action) {
           const {mechanic, action: edit} = action.mechanic;
           const entry = this.mechanicFactory(scope)?.mechanics.find(e => e.id === mechanic);
-          if (entry?.transfer && typeof edit === 'object' && 'item-launch' in edit && typeof edit['item-launch'] === 'object' && 'set-item' in edit['item-launch']) {
-            return send({'set-transfer-item': {mechanic, item: edit['item-launch']['set-item'].item}});
+          if (entry?.transport && typeof edit === 'object' && 'item-launch' in edit && typeof edit['item-launch'] === 'object' && 'set-item' in edit['item-launch']) {
+            return send({'set-transport-item': {mechanic, item: edit['item-launch']['set-item'].item}});
           }
           return send({mechanic: action.mechanic});
         }

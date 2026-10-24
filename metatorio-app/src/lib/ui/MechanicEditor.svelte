@@ -1,4 +1,5 @@
 <script lang="ts">
+  import {transportLabel} from "$lib/mechanics/located";
   import LocationPicker from "./LocationPicker.svelte";
   import { iconTypeForKind } from "./icon-types";
   // Shared mechanism configuration and actions; no flow expansion or flow UI.
@@ -206,14 +207,14 @@
   let hasMachine = $derived(kind === "recipe" || kind === "mining" || kind === "tile-extract");
   let hasModules = $derived(kind === "recipe" || kind === "mining");
   let hasFuel = $derived(((kind === "recipe" || kind === "mining") && machineEnergySource === "burner") || kind === "boiler" || kind === "reactor");
-  let hasSettings = $derived(!entry.transfer && (hasFuel || ["generator", "boiler", "reactor", "solar", "fluid-heat", "item-launch"].includes(kind)));
-  let amountUnit = $derived(entry.transfer ? "件/s" : hasMachine || ["generator", "boiler", "reactor", "solar"].includes(kind) ? "台" : "系数");
+  let hasSettings = $derived(!entry.transport && (hasFuel || ["generator", "boiler", "reactor", "solar", "fluid-heat", "item-launch"].includes(kind)));
+  let amountUnit = $derived(entry.transport ? "件/s" : hasMachine || ["generator", "boiler", "reactor", "solar"].includes(kind) ? "台" : "系数");
 </script>
 
-<div class="identity" class:off={!entry.enabled} data-mechanic-editor={entry.id} aria-label={`${entry.transfer ? "火箭转移" : kindLabel[kind]}：${primaryLabel}`}>
+<div class="identity" class:off={!entry.enabled} data-mechanic-editor={entry.id} aria-label={`${entry.transport ? transportLabel(entry.transport) : kindLabel[kind]}：${primaryLabel}`}>
     <div class="configuration">
-      {#if entry.location}<LocationPicker value={entry.location} planetsOnly={entry.transfer} label="机制地点" onChange={location => actions.setLocation(entry.id, location).catch(() => {})} />{/if}
-      <button class="icon-btn primary" title={`更换${entry.transfer ? "火箭转移" : kindLabel[kind]}：${primaryLabel || "未设置"}`} aria-label={`更换${entry.transfer ? "火箭转移" : kindLabel[kind]}：${primaryLabel || "未设置"}`} onclick={() => onPick(primaryKind())}>
+      {#if entry.location}<LocationPicker value={entry.location} planetsOnly={!!entry.transport} label="机制地点" onChange={location => actions.setLocation(entry.id, location).catch(() => {})} />{/if}
+      <button class="icon-btn primary" title={`更换${entry.transport ? transportLabel(entry.transport) : kindLabel[kind]}：${primaryLabel || "未设置"}`} aria-label={`更换${entry.transport ? transportLabel(entry.transport) : kindLabel[kind]}：${primaryLabel || "未设置"}`} onclick={() => onPick(primaryKind())}>
         <HoverIcon type={primaryIcon} name={primaryName || "+"} size={28} detailKind={primaryName ? primaryKind() : undefined} quality={primaryQuality} />
       </button>
       {#if hasMachine}
@@ -260,7 +261,7 @@
         </SecondaryMenu>
       {/if}
       {#if hasSettings}
-        <SecondaryMenu title={`${entry.transfer ? "火箭转移" : kindLabel[kind]}设置`} onOpenChange={(open) => menus.settings = open}>
+        <SecondaryMenu title={`${entry.transport ? transportLabel(entry.transport) : kindLabel[kind]}设置`} onOpenChange={(open) => menus.settings = open}>
           {#snippet trigger(toggle, open)}
             <button class="settings-button" onclick={toggle} aria-expanded={open} aria-haspopup="dialog" title="编辑机制参数">
               {#if entry.mechanic.fuel}<Icon type={entry.mechanic.fuel.kind === "fluid" ? "fluid" : "item"}
@@ -434,7 +435,7 @@
       {/if}
     </div>
     <div class="metadata">
-      <span class="kind-label">{entry.transfer ? "火箭转移" : kindLabel[kind]}</span>
+      <span class="kind-label">{entry.transport ? transportLabel(entry.transport) : kindLabel[kind]}</span>
       {#if solution}
         <span class="amount mono" title={`用量 ${solution.amount} · 单位成本 ${solution.cost} · 总成本 ${solution.amount * solution.cost}`}>
           <strong>{compactNumber(solution.amount)}</strong> {amountUnit}

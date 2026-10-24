@@ -95,19 +95,18 @@ impl Default for LocalLocatedMechanic {
     }
 }
 
-/// A rocket transfer from one planet to space.
+/// Cargo transported between a planet and space.
 ///
-/// It consumes the item and `RocketWeightCapacity` at `location`, then creates
-/// the same item at `Location::Space`. The item identity (including quality)
-/// does not change.
+/// `location` is the planet: the origin of RocketExport, or destination of OrbitalDrop.
+/// Both directions preserve the item identity, including quality.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
-pub struct TransferLocatedMechanic {
+pub struct OrbitalCargoMechanic {
     pub location: Location,
     pub item: IdWithQuality,
 }
 
-impl Default for TransferLocatedMechanic {
+impl Default for OrbitalCargoMechanic {
     fn default() -> Self {
         Self {
             location: Location::Space,
@@ -116,12 +115,13 @@ impl Default for TransferLocatedMechanic {
     }
 }
 
-/// The two kinds of a universe-factory mechanism.
+/// Local production and both explicit directions of orbital cargo transport.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum LocatedMechanic {
     Local(LocalLocatedMechanic),
-    Transfer(TransferLocatedMechanic),
+    RocketExport(OrbitalCargoMechanic),
+    OrbitalDrop(OrbitalCargoMechanic),
 }
 
 impl Default for LocatedMechanic {
@@ -134,7 +134,7 @@ impl LocatedMechanic {
     pub fn location(&self) -> &Location {
         match self {
             Self::Local(mechanic) => &mechanic.location,
-            Self::Transfer(mechanic) => &mechanic.location,
+            Self::RocketExport(mechanic) | Self::OrbitalDrop(mechanic) => &mechanic.location,
         }
     }
 }
