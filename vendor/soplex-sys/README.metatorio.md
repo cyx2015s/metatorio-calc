@@ -17,7 +17,8 @@ Changes in `build.rs`:
   because this crate links `static=soplex`;
 - drop the unconditional `z.lib` link (the bundled SoPlex is built without
   zlib; Windows has no `z.lib`);
-- disable shared libraries and add `rerun-if-changed` for the C interface.
+- disable shared libraries and add `rerun-if-changed` for the C interface;
+- enable Boost.Multiprecision from `vendor/boost` and disable GMP/MPFR/quadmath.
 
-The bundled build still disables GMP, Boost and quadmath. This is a
-floating-point SoPlex, not its rational exact mode.
+With Boost.Multiprecision active, SoPlex's rational path uses `cpp_rational`.
+This is exact rational mode, not the floating-point solver.

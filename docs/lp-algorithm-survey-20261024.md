@@ -102,7 +102,7 @@
 
 SoPlex 的浮点搜索、LP iterative refinement、precision boosting、rational LU/reconstruction 和 exact parsing/checking 在同一个实现里，最省去自行组合“浮点找基 + 有理数认证”的工作。代价是原生依赖、精确百万列扫描和大整数膨胀仍需实测；输入必须保持有理数语义，不能先转 f64 再转 rational。
 
-本地已接入 **patched `vendor/soplex-sys`**（`soplex` feature）：补丁修正 C++17、MSVC `/EHsc` 和 Windows `libsoplex.lib` 链接名；适配器把模型写成稀疏 MPS，走 SoPlex 的 file reader。当前是**浮点 SoPlex，不是 exact rational 模式**；精确模式仍需带 GMP 的原生 SoPlex 或独立精确检查器。
+本地已接入 **patched `vendor/soplex-sys`**（`soplex` feature）：补丁修正 C++17、MSVC `/EHsc` 和 Windows `libsoplex.lib` 链接名，并带 `vendor/boost` 的 Boost.Multiprecision。适配器把模型写成稀疏 MPS，走 SoPlex 的 file reader，并设置 rational read/solve/check/sync、feas/opt tolerance = 0；当前走 **exact rational 模式**。
 
 ### 方案 A（推荐，速度+精度）：HiGHS 候选 + Rust 精确终检
 

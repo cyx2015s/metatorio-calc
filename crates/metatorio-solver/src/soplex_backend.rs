@@ -1,8 +1,10 @@
 //! Optional SoPlex backend through the patched vendored `soplex-sys`.
 //!
 //! The safe binding's add-column API is dense, so the production model is
-//! written as a sparse MPS file and read through SoPlex's file reader. This is
-//! a floating-point path: the vendored build disables GMP/Boost/quadmath.
+//! written as a sparse MPS file and read through SoPlex's file reader. The
+//! vendored build enables Boost.Multiprecision and this adapter requests
+//! rational read/solve/check modes with zero tolerances. SoPlex certifies the
+//! MPS model exactly, then returns the primal values as `f64` for the LP model.
 use std::{
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
@@ -151,10 +153,18 @@ pub(crate) fn solve(
     write_mps(&path, defs, objective, rows)?;
 
     let solved = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        use soplex_rs::{BoolParam, Model, RealParam, Verbosity};
+        use soplex_rs::{
+            BoolParam, CheckMode, Model, ReadMode, RealParam, SolveMode, SyncMode, Verbosity,
+        };
         let mut model = Model::new();
         model.set_verbosity(Verbosity::Error);
         model.set_bool_param(BoolParam::ForceBasic, true);
+        model.set_read_mode(ReadMode::Rational);
+        model.set_solve_mode(SolveMode::Rational);
+        model.set_check_mode(CheckMode::Rational);
+        model.set_sync_mode(SyncMode::Auto);
+        model.set_real_param(RealParam::FeasTol, 0.0);
+        model.set_real_param(RealParam::OptTol, 0.0);
         model.set_real_param(RealParam::TimeLimit, time_limit_seconds());
         let path = path
             .to_str()

@@ -7,14 +7,15 @@ settings; the default build enables five choices:
 - `clarabel` (pure Rust interior point)
 - `highs` (native simplex)
 - `microlp` (pure Rust simplex)
-- `soplex` (bundled patched SoPlex, floating-point MPS path)
+- `soplex` (bundled patched SoPlex, exact rational MPS path)
 - `rust-certified` (displayed as `Rust based`; legacy pure Rust path)
 
 The SoPlex option builds the vendored `vendor/soplex-sys` patch (C++17, MSVC
-exceptions, Windows library-name alias), then writes a sparse MPS file and reads
-it through SoPlex's file reader. This is a
-floating-point path; rational exact mode needs an exact-capable SoPlex build and
-is not used here.
+exceptions, Windows library-name alias) with the vendored Boost.Multiprecision
+headers from `vendor/boost`. It writes a sparse MPS file, reads it through
+SoPlex's file reader, and sets read/solve/check/sync modes plus zero feasibility
+and optimality tolerances for SoPlex's exact rational path. SoPlex certifies the
+MPS model exactly, then returns primal values as `f64` for the LP model.
 
 ```powershell
 cargo build --release -p metatorio-headless

@@ -9,7 +9,7 @@
 | `clarabel` | Clarabel | 纯 Rust 内点法 |
 | `highs` | HiGHS | 原生单纯形 |
 | `microlp` | microlp | 纯 Rust 单纯形 |
-| `soplex` | SoPlex | 内置 patched `soplex-sys`，MPS 浮点路径 |
+| `soplex` | SoPlex | 内置 patched `soplex-sys`，exact rational MPS 路径 |
 | `rust-certified` | Rust based（序列化 id 仍为 `rust-certified`） | 当前仍保留内部证书 |
 
 默认构建启用五个 feature。新项目使用编译进来的首选后端（有 HiGHS 时默认
@@ -17,9 +17,9 @@
 字段时按 Rust based（序列化 id `rust-certified`）解释。
 
 SoPlex 选项通过本地 `vendor/soplex-sys` patch 内置编译（C++17、MSVC `/EHsc`、
-Windows `libsoplex.lib` 链接名修正），适配器写稀疏 MPS 并走 SoPlex 的 file
-reader。这里是**浮点 SoPlex**，不是 exact rational 模式；精确模式需要带 GMP
-的 SoPlex 构建，当前未接入。
+Windows `libsoplex.lib` 链接名修正），并带上 `vendor/boost` 的
+Boost.Multiprecision 头文件。适配器写稀疏 MPS，把 read/solve/check/sync
+模式设为 rational，feas/opt tolerance 设为 0，走精确有理数路径。
 
 ## 不再做的事
 

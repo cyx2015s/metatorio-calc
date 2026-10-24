@@ -65,7 +65,8 @@
 > `Rust based`（序列化 id 仍为 `rust-certified`）。新项目默认使用 HiGHS；
 > 旧文档没有 `solver` 字段时沿用 Rust based。HiGHS 和 SoPlex 都会通过 CMake
 > 编译内置 C++ 源码；SoPlex 使用本地 `vendor/soplex-sys` patch 修正 C++17、
-> /EHsc 和 Windows 库名。因此默认构建需要上表的 C++ / CMake / LLVM。
+> /EHsc 和 Windows 库名，并用 `vendor/boost` 启用 exact rational 模式。
+> 因此默认构建需要上表的 C++ / CMake / LLVM。
 > 纯 Rust 构建可传
 > `--no-default-features --features clarabel,microlp,rust-lp`，或只启用一个后端。
 > 后端在项目设置中选择，不再读取 `METATORIO_LP_BACKEND`。

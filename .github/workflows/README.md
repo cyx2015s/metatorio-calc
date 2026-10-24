@@ -11,7 +11,8 @@ Linux 和 Windows 的 GUI、headless 构建统一使用 **Rust nightly**。workf
 
 默认构建包含 HiGHS、SoPlex（以及 Clarabel、microlp、Rust based）。纯 Rust 构建可用
 `--no-default-features --features clarabel,microlp,rust-lp`。SoPlex 通过本地
-`vendor/soplex-sys` patch 一起编译，因此同样需要 C++ / CMake / bindgen。启用 `highs` 时，
+`vendor/soplex-sys` patch 和 `vendor/boost` 头文件一起编译，因此同样需要
+C++ / CMake / bindgen。启用 `highs` 时，
 `metatorio-solver` 通过 `good_lp` 的 `highs` feature 依赖
 [HiGHS](https://highs.dev/)。
 `highs` crate 内置其 C++ 源码，构建时会用 **CMake** 编译、用 **bindgen** 生成绑定，

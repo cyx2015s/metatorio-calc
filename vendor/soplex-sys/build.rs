@@ -1,5 +1,5 @@
-use std::env;
 use cmake::Config;
+use std::env;
 
 fn target_has_feature(feature: &str) -> bool {
     env::var("CARGO_CFG_TARGET_FEATURE")
@@ -17,11 +17,27 @@ fn build_and_link_soplex() {
     let msvc = target.contains("msvc");
     let crt_static = target_has_feature("crt-static");
 
+    let manifest = std::path::PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    let boost_root = env::var_os("SOPLEX_BOOST_ROOT")
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            let vendored = manifest.join("..").join("..").join("vendor").join("boost");
+            vendored.is_dir().then_some(vendored)
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "SoPlex exact mode requires Boost headers; set SOPLEX_BOOST_ROOT                  or place them in vendor/boost"
+            )
+        });
+
     let mut config = Config::new("soplex");
     config
         .profile(build_type)
+        .define("BOOST", "on")
+        .define("BOOST_ROOT", &boost_root)
+        .define("BOOST_INCLUDEDIR", &boost_root)
+        .define("MPFR", "off")
         .define("GMP", "off")
-        .define("BOOST", "off")
         .define("QUADMATH", "off")
         .define("PAPILO", "off")
         .define("BUILD_SHARED_LIBS", "OFF");
@@ -74,6 +90,7 @@ fn build_and_link_soplex() {
         println!("cargo:rustc-link-lib=dylib=stdc++");
     }
     println!("cargo:rerun-if-changed=soplex/src/soplex_interface.h");
+    println!("cargo:rerun-if-env-changed=SOPLEX_BOOST_ROOT");
 }
 
 fn main() {
