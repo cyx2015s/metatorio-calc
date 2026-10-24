@@ -14,7 +14,8 @@ Changes in `build.rs`:
   release CRT / iterator-debug settings used by `highs-sys`;
 - set the MSVC runtime to match Rust's `crt-static` setting;
 - create `soplex.lib` as an alias of SoPlex's actual `libsoplex.lib` output,
-  because this crate links `static=soplex`;
+  because this crate links `static=soplex`; the alias is always overwritten so
+  an older non-Boost build cannot survive a rebuild;
 - drop the unconditional `z.lib` link (the bundled SoPlex is built without
   zlib; Windows has no `z.lib`);
 - disable shared libraries and add `rerun-if-changed` for the C interface;

@@ -70,9 +70,9 @@ fn build_and_link_soplex() {
         let library = dst.join("lib").join("libsoplex.lib");
         if library.is_file() {
             let alias = dst.join("lib").join("soplex.lib");
-            if !alias.exists() {
-                std::fs::copy(&library, &alias).expect("copy libsoplex.lib to soplex.lib");
-            }
+            // Always overwrite: an older non-Boost build may have left a stale
+            // soplex.lib here, and linking that silently disables rational support.
+            std::fs::copy(&library, &alias).expect("copy libsoplex.lib to soplex.lib");
         } else {
             panic!("SoPlex build did not produce {}", library.display());
         }
