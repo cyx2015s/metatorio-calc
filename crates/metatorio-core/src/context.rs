@@ -45,10 +45,6 @@ pub struct GameState {
     pub entities_require_heating: bool,
     /// 当前表面属性，供使用自定义 solar_coefficient_property 的面板查询。
     pub surface_properties: std::collections::BTreeMap<String, f64>,
-    /// Factorio 在无法从配方推导物品重量时使用的默认重量。
-    pub default_item_weight: f64,
-    /// 未指定火箭仓时使用的重量运力上限。
-    pub rocket_lift_weight: f64,
 }
 
 impl Default for GameState {
@@ -63,8 +59,6 @@ impl Default for GameState {
             solar_continuous_daylight: false,
             entities_require_heating: false,
             surface_properties: Default::default(),
-            default_item_weight: 100.0,
-            rocket_lift_weight: 1_000_000.0,
         }
     }
 }

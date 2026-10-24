@@ -770,8 +770,8 @@ export interface ContextList {
 
 export interface TileCapabilities { fluid: string | null; destroys_dropped_items: boolean; }
 
-export interface CalculationStat { key: string; value: number; unit: "number" | "seconds" | "watts" | "joules" | "joules-per-degree" | "percent" | "multiplier" | "per-second"; }
-export interface CalculationDetail { surface_properties?: Record<string, number>; research?: {units: number | null; unit_seconds: number; ingredients: {name: string; per_unit: number; total: number | null}[]; prerequisites: string[]}; stats: CalculationStat[]; qualities: { quality: string; stats: CalculationStat[] }[]; tile?: TileCapabilities; }
+export interface CalculationStat { key: string; value: number; unit: "number" | "seconds" | "watts" | "joules" | "joules-per-degree" | "percent" | "multiplier" | "per-second" | "grams"; }
+export interface CalculationDetail { item_weight?: { weight: number; source: "explicit" | "cursor" | "recipe" | "default"; recipe?: string; fallback?: string }; surface_properties?: Record<string, number>; research?: {units: number | null; unit_seconds: number; ingredients: {name: string; per_unit: number; total: number | null}[]; prerequisites: string[]}; stats: CalculationStat[]; qualities: { quality: string; stats: CalculationStat[] }[]; tile?: TileCapabilities; }
 
 export interface IndexEntry {
   tile?: TileCapabilities;

@@ -6,6 +6,8 @@
   "scripts": {
     "test:optimization": "node --test tests/optimization.test.mjs",
     "test:auto-plan-progress-browser": "node tests/auto-plan-progress-browser.cjs",
+    "test:item-weight": "node --test tests/item-weight.test.mjs",
+    "test:item-weight-browser": "node tests/item-weight-browser.cjs",
     "test:icons": "node --test tests/icons.test.mjs",
     "test:rich-text": "node --test tests/rich-text.test.mjs",
     "test:rich-text-browser": "node tests/rich-text-browser.cjs",

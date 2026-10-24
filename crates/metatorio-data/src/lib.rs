@@ -23,6 +23,9 @@ pub mod types;
 /// Phase 3：原型仓库（按 (group, name) 索引的组件化原型记录）。
 pub mod store;
 
+/// Recipe-derived item weights and their calculation provenance.
+pub mod item_weight;
+
 /// Phase 4：扩展方法，默认值 getter、辅助
 pub mod ext;
 

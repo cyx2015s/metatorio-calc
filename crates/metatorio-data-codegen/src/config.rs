@@ -311,7 +311,7 @@ pub const DEFAULT_IGNORED_TYPES: &[&str] = &[
     // "ItemIDFilter",
     // "ItemIngredientPrototype",
     // "ItemProductPrototype",
-    "ItemPrototypeFlags",
+    // "ItemPrototypeFlags",
     // "ItemStackIndex",
     // "ItemSubGroupID",
     // "ItemToPlace",

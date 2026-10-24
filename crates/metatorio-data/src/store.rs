@@ -122,6 +122,8 @@ pub type ReverseOrderInfo = AIndexMap<String, (usize, usize, usize)>;
 /// 原型仓库：按 (PrototypeGroup, name) 索引的全部原型记录。
 #[derive(Debug, Clone, Default)]
 pub struct PrototypeStore {
+    pub(crate) item_weights: OnceLock<AIndexMap<String, crate::item_weight::ItemWeight>>,
+    pub(crate) weight_constants: crate::item_weight::WeightConstants,
     science_packs: OnceLock<std::collections::BTreeSet<String>>,
     /// 按聚合组分类：组 → (name → 记录)。主键语义 (PrototypeGroup, name) 不变。
     pub mut(self) groups: AIndexMap<PrototypeGroup, AIndexMap<String, PrototypeRecord>>,
@@ -220,6 +222,8 @@ impl PrototypeStore {
 
         if failures.is_empty() {
             Ok(Self {
+                item_weights: OnceLock::new(),
+                weight_constants: crate::item_weight::WeightConstants::from_dump(dump),
                 science_packs: OnceLock::new(),
                 groups: records,
                 order_info: OnceLock::new(),
@@ -319,7 +323,10 @@ impl PrototypeStore {
 
     /// 复刻原始实现：recipe 自身缺 order/subgroup 时，从主产物派生
     /// （单产物 → main_product → 与配方同名的产物），优先 item，其次 fluid。
-    fn recipe_derived_order(&self, record: &PrototypeRecord) -> (Option<String>, String) {
+    pub(crate) fn recipe_derived_order(
+        &self,
+        record: &PrototypeRecord,
+    ) -> (Option<String>, String) {
         let Some(recipe) = record.component::<RecipeComponent>() else {
             return (None, String::new());
         };

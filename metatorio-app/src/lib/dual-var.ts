@@ -55,7 +55,7 @@ export function presentFlow(flow: DualVar, localize: Localize, match?: FlowMatch
     fact('流体限制', filter ? localize('fluid', filter) : '任意流体');
   } else if (kind === 'RocketSlotCapacity' || kind === 'RocketWeightCapacity') {
     info.badge = kind === 'RocketSlotCapacity' ? '槽位' : '重量'; info.kindLabel = '火箭运力';
-    fact('计量', kind === 'RocketSlotCapacity' ? '堆叠槽位' : '物品重量');
+    fact('计量', kind === 'RocketSlotCapacity' ? '堆叠槽位' : '物品重量（g）');
   } else if (kind === 'Unknown') info.kindLabel = '未指定的流';
   info.description = [info.kindLabel, info.label, ...info.qualifiers].join(' · ');
   return info;

@@ -1,7 +1,8 @@
 import type { CalculationStat, PrototypeDetail } from "$lib/runtime/types";
-import { compactNumber } from "$lib/format";
+import { compactNumber } from "../format.ts";
 
 export const statLabels: Record<string, string> = {
+  "item-weight": "单件重量", "stack-weight": "每组重量", "rocket-item-capacity": "标准火箭载量（件）",
   "craft-time": "制作时间", "mining-time": "开采时间", "productivity-cap": "产能加成上限",
   "crafting-speed": "制作速度", "mining-speed": "采矿速度", "module-slots": "插件槽", "power": "额定功耗",
   "pumping-rate": "抽取速率", "resource-drain": "资源消耗率", "heat-capacity": "比热容 / 单位",
@@ -18,6 +19,10 @@ export const statLabels: Record<string, string> = {
 export function formatStat(stat: CalculationStat): string {
   const {value, unit} = stat;
   if (!Number.isFinite(value)) return "—";
+  if (unit === "grams") {
+    const scale = Math.abs(value) >= 1e6 ? 1e6 : Math.abs(value) >= 1e3 ? 1e3 : 1;
+    return `${compactNumber(value / scale)} ${scale === 1e6 ? "t" : scale === 1e3 ? "kg" : "g"}`;
+  }
   if (unit === "percent") return `${value > 0 && stat.key.startsWith("effect-") ? "+" : ""}${compactNumber(value * 100)}%`;
   if (unit === "multiplier") return `×${compactNumber(value)}`;
   if (["watts", "joules", "joules-per-degree"].includes(unit)) {

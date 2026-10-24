@@ -532,7 +532,7 @@ fn expand_recipe<C: Clone>(
             let lift_weight = if silo.lift_weight > 0.0 {
                 silo.lift_weight
             } else {
-                ctx.game.rocket_lift_weight
+                ctx.prototype.weight_constants().default_rocket_lift_weight
             };
             temp.add(DualVar::RocketWeightCapacity, lift_weight / parts);
         } else {
@@ -1013,20 +1013,24 @@ fn expand_item_launch<C: Clone>(
     };
 
     let (item_count, capacity, capacity_var) = if mechanic.weight_mode {
-        let weight = item.weight.unwrap_or(ctx.game.default_item_weight);
+        let weight = ctx
+            .prototype
+            .item_weight(&mechanic.item.id)
+            .map(|value| value.weight)
+            .unwrap_or(ctx.prototype.weight_constants().default_item_weight);
         let lift_weight = if silo.lift_weight > 0.0 {
             silo.lift_weight
         } else {
-            ctx.game.rocket_lift_weight
+            ctx.prototype.weight_constants().default_rocket_lift_weight
         };
         if weight <= 0.0 || lift_weight <= 0.0 {
             return;
         }
-        (
-            lift_weight / weight,
-            lift_weight,
-            DualVar::RocketWeightCapacity,
-        )
+        let item_count = (lift_weight / weight).floor();
+        if item_count < 1.0 {
+            return;
+        }
+        (item_count, lift_weight, DualVar::RocketWeightCapacity)
     } else {
         let slots = silo
             .to_be_inserted_to_rocket_inventory_size

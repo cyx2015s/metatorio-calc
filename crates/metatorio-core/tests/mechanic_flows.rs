@@ -492,6 +492,35 @@ fn item_launch_uses_rocket_silo_capacity() {
     assert_eq!(flow[&DualVar::Item(id("science"))], 1000.0);
 }
 
+#[test]
+fn weighted_launch_uses_resolved_weight_and_whole_items_at_every_quality() {
+    for quality in ["normal", "legendary"] {
+        let dump = json!({
+            "utility-constants":{"default":{"default_item_weight":500,"default_rocket_lift_weight":1200}},
+            "item":{"raw":{"weight":1000},"payload":{"stack_size":10,"rocket_launch_products":[{"name":"science","amount":2}]}},
+            "recipe":{"payload":{"allow_productivity":true,"ingredients":[{"type":"item","name":"raw","amount":1}],"results":[{"type":"item","name":"payload","amount":1}]}},
+            "rocket-silo":{"silo":{"launch_to_space_platforms":true,"lift_weight":1200}}
+        });
+        let result = flow(
+            dump,
+            Mechanic::ItemLaunch(ItemLaunchMechanic {
+                item: IdWithQuality::new("payload", quality),
+                weight_mode: true,
+            }),
+        );
+        // Intermediate 500 > simple 120: no rounding, only 2 whole items fit.
+        assert_eq!(
+            result[&DualVar::Item(IdWithQuality::new("payload", quality))],
+            -2.0
+        );
+        assert_eq!(result[&DualVar::RocketWeightCapacity], -1200.0);
+        assert_eq!(
+            result[&DualVar::Item(IdWithQuality::new("science", quality))],
+            4.0
+        );
+    }
+}
+
 /// 回归：组装机为 rocket-silo 时，配方应额外产出火箭发射载荷（虚拟物品）。
 /// 此前 expand_recipe 只按普通机器展开，导致 ItemLaunch 消耗的容量无来源。
 #[test]

@@ -19,7 +19,7 @@
     Electricity:"电力按功率（W = J/s）结算，不随项目时间刻度改变。", Heat:"热量按热功率（W = J/s）配平。",
     ItemFuel:"抽象燃料需求按热值结算，并要求燃料类别匹配。", ItemFuelSupply:"抽象燃料供给按热值与匹配类别参与配平，不是具体物品数量。",
     FluidFuel:"流体燃料按燃烧热值结算。", FluidHeat:"流体热量取决于比热与相对默认温度的温差。",
-    RocketSlotCapacity:"堆叠槽位运力，按物品堆叠数量消耗；与重量运力分别配平。", RocketWeightCapacity:"重量运力，按物品原型重量消耗；与堆叠槽位运力分别配平。",
+    RocketSlotCapacity:"堆叠槽位运力，按物品堆叠数量消耗；与重量运力分别配平。", RocketWeightCapacity:"重量运力以克（g）结算，使用原型指定或由配方推导的重量；与堆叠槽位运力分别配平。",
     VirtualScience:"科研单位由科技瓶品质和科研容量换算，不包含实验室速度、品质或产能。", Pollution:"污染流按项目时间刻度显示；排放与可用的消耗途径参与配平。",
   };
   let flowKey = $derived(typeof flow === "string" ? flow : flow ? Object.keys(flow)[0] : "");
@@ -125,6 +125,13 @@
         {#if research.prerequisites.length}<div class="facts"><span>前置科技</span><strong>{research.prerequisites.map((name) => runtime.localizedName("technology",name)).join(" / ")}</strong></div>{/if}
       </section>
     {/if}
+    {#if detail?.calculation?.item_weight}
+      {@const weight = detail.calculation.item_weight}
+      <div class="facts"><span>重量来源</span><strong>{weight.source === "explicit" ? "原型指定" : weight.source === "cursor" ? "光标生成物品（零重量）" : weight.source === "recipe" ? "由配方推导" : "默认重量"}</strong></div>
+      {#if weight.recipe}<div class="flow-row"><Icon type="recipe" name={weight.recipe} size={22} /><RichText text={runtime.richName("recipe", weight.recipe)} /></div>{/if}
+      {#if weight.fallback}<div class="facts"><span>回退原因</span><strong>{({"no-recipe":"无可用于重量计算的配方", "recipe-cycle":"配方依赖循环", "zero-recipe-weight":"原料总重量为零", "zero-product-count":"物品产物期望数量为零", "invalid-recipe-weight":"无法推导有效重量"} as Record<string,string>)[weight.fallback] ?? weight.fallback}</strong></div>{/if}
+      <p class="weight-note">重量不随品质变化；载量按默认火箭运力估算，发射时按火箭仓实际运力结算。</p>
+    {/if}
     {#if stats.length}
       <section><h4>{detail?.calculation?.qualities.some((entry) => entry.quality === quality) ? `${runtime.localizedName("quality", quality)}基础值` : "原型基础值"}<small>{match && flowInfo?.wildcard && flowInfo.kind !== "Fluid" ? "普通品质参考值；匹配不限品质" : "未计插件与工厂环境"}</small></h4>
         <div class="stats">{#each stats as stat (stat.key)}<div><span>{statLabels[stat.key] || stat.key}</span><strong>{formatStat(stat)}{stat.key.includes("temperature") ? "℃" : ""}</strong></div>{/each}</div>
@@ -176,6 +183,7 @@
   section { margin-top: 8px; }
   h4 { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; margin: 0 0 5px; font-size: 11px; }
   h4 small { color: var(--muted); font-size: 10px; font-weight: 400; }
+  .weight-note { margin: 3px 0 6px; color: var(--muted); font-size: 11px; line-height: 1.4; }
   .stats { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 3px 10px; }
   .stats > div { display: flex; align-items: baseline; justify-content: space-between; gap: 5px; padding: 3px 0; border-bottom: 1px solid var(--line); min-width: 0; }
   .stats span, .facts > span, .reference > span, .tile-capabilities span { color: var(--muted); }

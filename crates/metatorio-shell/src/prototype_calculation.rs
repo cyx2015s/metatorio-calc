@@ -25,6 +25,7 @@ pub enum StatUnit {
     Percent,
     Multiplier,
     PerSecond,
+    Grams,
 }
 #[derive(Debug, Clone, Serialize)]
 pub struct CalculationStat {
@@ -39,6 +40,8 @@ pub struct QualityCalculation {
 }
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct CalculationDetail {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub item_weight: Option<metatorio_data::item_weight::ItemWeight>,
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub surface_properties: std::collections::BTreeMap<String, f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -75,6 +78,28 @@ pub fn calculation_detail(store: &PrototypeStore, record: &PrototypeRecord) -> C
             .flatten(),
         ..Default::default()
     };
+    if record.group == PrototypeGroup::Item
+        && let Some(weight) = store.item_weight(&record.name)
+    {
+        stat(&mut detail.stats, "item-weight", weight.weight, Grams);
+        if let Some(item) = record.component::<metatorio_data::ItemComponent>() {
+            stat(
+                &mut detail.stats,
+                "stack-weight",
+                weight.weight * f64::from(item.stack_size),
+                Grams,
+            );
+        }
+        if weight.weight > 0.0 {
+            stat(
+                &mut detail.stats,
+                "rocket-item-capacity",
+                (store.weight_constants().default_rocket_lift_weight / weight.weight).floor(),
+                Number,
+            );
+        }
+        detail.item_weight = Some(weight.clone());
+    }
     if let Some(planet) = record.component::<PlanetComponent>() {
         detail.surface_properties = planet.surface_properties.clone();
     }
@@ -338,6 +363,26 @@ pub fn calculation_detail(store: &PrototypeStore, record: &PrototypeRecord) -> C
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn item_weight_hover_uses_the_same_cached_value_as_expansion() {
+        let s = PrototypeStore::load(&json!({
+            "item":{"raw":{"weight":1000},"out":{"stack_size":100}},
+            "recipe":{"out":{"allow_productivity":true,"ingredients":[{"type":"item","name":"raw","amount":1}],"results":[{"type":"item","name":"out","amount":1}]}}
+        })).unwrap();
+        let detail = calculation_detail(&s, s.item("out").unwrap());
+        let find = |key| {
+            detail
+                .stats
+                .iter()
+                .find(|stat| stat.key == key)
+                .unwrap()
+                .value
+        };
+        assert_eq!(find("item-weight"), 500.0);
+        assert_eq!(find("stack-weight"), 50_000.0);
+        assert_eq!(find("rocket-item-capacity"), 2000.0);
+        assert_eq!(detail.item_weight.unwrap().recipe.as_deref(), Some("out"));
+    }
     fn store() -> PrototypeStore {
         PrototypeStore::load(&json!({
             "quality": {"normal":{"level":0,"order":"a","next":"rare"},"rare":{"level":2,"order":"b","module_speed_multiplier":4,"science_capacity_multiplier":5,"tool_durability_multiplier":8}},
