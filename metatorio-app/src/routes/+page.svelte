@@ -26,6 +26,7 @@
   import Icon from "$lib/ui/Icon.svelte";
   import Selector from "$lib/ui/Selector.svelte";
   import MechanicWorkspace from "$lib/ui/MechanicWorkspace.svelte";
+  import UniverseWorkspace from "$lib/ui/UniverseWorkspace.svelte";
   import { createExternalInputShortcuts, DISABLED_RESOURCE_PENALTY, FREE_ENERGY_FLOWS } from "$lib/external-input-shortcuts";
   import { createMechanicActions } from "$lib/mechanics/actions";
   import { DEFAULT_MECHANIC_VIEW, type MechanicViewMode } from "$lib/mechanics/workspace";
@@ -82,6 +83,8 @@
   let newProjectName = $state("新项目");
   let newFactoryOpen = $state(false);
   let newFactoryName = $state("新工厂");
+  let newUniverseOpen = $state(false);
+  let newUniverseName = $state("新宇宙工厂");
   // 规划偏好弹窗（机器偏好/替代数量/枚举插件与插件塔）
   let prefsOpen = $state(false);
   // 建议系统弹窗
@@ -726,6 +729,17 @@
     }
   }
 
+  async function createUniverse() {
+    const name = newUniverseName.trim();
+    if (!name) return;
+    newUniverseOpen = false;
+    try {
+      await runtime.addUniverse(name);
+    } catch {
+      // the runtime store already exposes the command error.
+    }
+  }
+
   async function createFactory() {
     const name = newFactoryName.trim();
     if (!name) return;
@@ -862,7 +876,16 @@
               onclick={() => runtime.selectFactory(item.id).catch(() => {})}
             >{item.name}</button>
           {/each}
+          {#each project.universes ?? [] as item (item.id)}
+            <button
+              class="ftab universe"
+              class:active={item.id === runtime.selectedUniverseId}
+              title={item.id === runtime.selectedUniverseId ? `当前宇宙工厂：${item.name}` : `切换到宇宙工厂：${item.name}`}
+              onclick={() => runtime.selectUniverse(item.id).catch(() => {})}
+            >{item.name}</button>
+          {/each}
           <button class="ftab add" title="新建工厂" onclick={() => (newFactoryOpen = true)}>+</button>
+          <button class="ftab add universe-add" title="新建宇宙工厂" onclick={() => (newUniverseOpen = true)}>✦</button>
         </div>
         {#if factory}
           <div class="menu-wrap">
@@ -1102,24 +1125,6 @@
                 onclick={() => runtime.setFactorySurface(null).catch(() => {})}
               >×</button>
             {/if}
-          </div>
-          <div class="env-row">
-            <button
-              class="icon-btn"
-              title={`主品质：${runtime.localizedName("quality", factory.settings.major_quality || "normal")}`}
-              onclick={() =>
-                openSelector("quality", "选择主品质", (name) =>
-                  runtime.setFactoryMajorQuality(name),
-                )}
-            >
-              <HoverIcon
-                type="quality"
-                name={factory.settings.major_quality || "normal"}
-                size={24}
-                detailKind="quality"
-              />
-            </button>
-            <span class="sub">主品质：{runtime.localizedName("quality", factory.settings.major_quality || "normal")}</span>
           </div>
           <label class="check">
             <input
@@ -1535,6 +1540,20 @@
               <option value="minutes">分钟</option>
               <option value="hours">小时</option>
             </select>
+          </div>
+          <div class="field">
+            <label for="major-quality">主品质（项目级）</label>
+            <button
+              id="major-quality"
+              class="btn block"
+              onclick={() =>
+                openSelector("quality", "选择主品质", (name) =>
+                  runtime.setProjectMajorQuality(name),
+                )}
+            >
+              {runtime.localizedName("quality", project?.settings.major_quality || "normal")}
+            </button>
+            <span class="muted">所有普通工厂与宇宙工厂共享。</span>
           </div>
           <div class="field">
             <label for="lp-solver">线性规划后端</label>
@@ -2327,6 +2346,28 @@
   </div>
 {/if}
 
+{#if runtime.selectedUniverse}
+  <UniverseWorkspace universe={runtime.selectedUniverse} />
+{/if}
+
+{#if newUniverseOpen}
+  <div class="backdrop" role="button" tabindex="0" onclick={(e) => { if (e.target === e.currentTarget) newUniverseOpen = false; }} onkeydown={(e) => backdropKeydown(e, () => (newUniverseOpen = false))}>
+    <div class="mini-modal">
+      <div class="mini-title">新建宇宙工厂</div>
+      <input
+        bind:value={newUniverseName}
+        onkeydown={(event) => {
+          if (event.key === "Enter") createUniverse();
+        }}
+      />
+      <div class="mini-actions">
+        <button class="btn ghost" onclick={() => (newUniverseOpen = false)}>取消</button>
+        <button class="btn primary" onclick={createUniverse}>创建</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
 {#if newFactoryOpen}
   <div class="backdrop" role="button" tabindex="0" onclick={(e) => { if (e.target === e.currentTarget) newFactoryOpen = false; }} onkeydown={(e) => backdropKeydown(e, () => (newFactoryOpen = false))}>
     <div class="mini-modal">
@@ -2508,7 +2549,7 @@
           title="用每插件类别中最高 tier 的插件（工厂主品质）替换枚举列表"
           onclick={() =>
             runtime
-              .applyBestModules(factory?.settings.major_quality || "normal")
+              .applyBestModules(project?.settings.major_quality || "normal")
               .catch(() => {})}
         >使用最佳插件</button>
       </div>

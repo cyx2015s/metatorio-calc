@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use metatorio_core::{Accessible, DualVar};
 use metatorio_runtime::document::AppDocument;
-use metatorio_runtime::id::{FactoryId, MechanicId, ProjectId};
+use metatorio_runtime::id::{FactoryId, MechanicId, ProjectId, UniverseId};
 use metatorio_runtime::message::AppMessage;
 use metatorio_runtime::state::DispatchResult;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -177,6 +177,17 @@ async fn dispatch(
     message: AppMessage,
 ) -> Result<DispatchResult, metatorio_runtime::Diagnostic> {
     metatorio_shell::app::dispatch(&host_of(&host), message).await
+}
+
+#[tauri::command]
+async fn solve_universe(
+    host: HostState<'_>,
+    project: ProjectId,
+    universe: UniverseId,
+) -> Result<metatorio_runtime::UniverseSolveResult, String> {
+    let host = host_of(&host);
+    let state = host.state();
+    metatorio_shell::app::solve_universe_offlock(&host, state, project, universe).await
 }
 
 #[tauri::command]
@@ -448,6 +459,7 @@ pub fn run_with_project_files(options: Options, files: Vec<PathBuf>) {
             solar_balance,
             allowed_modules,
             dispatch,
+            solve_universe,
             get_document,
             history_state,
             accessibility,

@@ -1,13 +1,16 @@
-use metatorio_core::{Accessible, DualVar, IdWithQuality, Mechanic, ModuleConfig};
+use metatorio_core::{
+    Accessible, DualVar, IdWithQuality, LocatedDualVar, LocatedMechanic, Mechanic, ModuleConfig,
+};
 use metatorio_solver::LpSolver;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::id::{
     ExternalInputId, FactoryId, MechanicId, ProjectId, TargetExpressionId, TargetId, TargetTermId,
+    UniverseId,
 };
 
-pub const DOCUMENT_SCHEMA_VERSION: u32 = 1;
+pub const DOCUMENT_SCHEMA_VERSION: u32 = 2;
 
 /// 可序列化的应用文档。选中项、对话框、求解结果与文件路径**故意**不放进这个结构里。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -26,6 +29,26 @@ impl Default for AppDocument {
     }
 }
 
+impl AppDocument {
+    /// 旧工程把主品质放在工厂设置里；新版以第一个工厂为准迁移到项目。
+    /// 新工程不会写入 `legacy_major_quality`，所以这里只会影响旧文档。
+    pub fn migrate_legacy_major_quality(&mut self) {
+        for project in &mut self.projects {
+            let legacy = project
+                .factories
+                .first()
+                .map(|factory| factory.settings.legacy_major_quality.clone())
+                .unwrap_or_default();
+            if !legacy.is_empty() {
+                project.settings.major_quality = legacy;
+            }
+            for factory in &mut project.factories {
+                factory.settings.legacy_major_quality.clear();
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ProjectDocument {
@@ -36,6 +59,8 @@ pub struct ProjectDocument {
     /// 该项目使用的游戏上下文（缓存 id）。`None` = 使用应用当前激活的上下文。
     pub context_id: Option<String>,
     pub factories: Vec<FactoryDocument>,
+    /// 宇宙工厂与普通工厂并列；两者共享项目级品质/里程碑/求解器。
+    pub universes: Vec<UniverseDocument>,
 }
 
 impl Default for ProjectDocument {
@@ -47,6 +72,7 @@ impl Default for ProjectDocument {
             planning: PlanningPreferences::default(),
             context_id: None,
             factories: Vec::new(),
+            universes: Vec::new(),
         }
     }
 }
@@ -72,6 +98,9 @@ pub struct ProjectSettings {
     pub mining_productivity: f64,
     pub all_accessible: bool,
     pub quality_limit: Option<String>,
+    /// 项目级主品质：所有工厂/宇宙工厂共享同一品质口径。
+    #[serde(default = "default_major_quality")]
+    pub major_quality: String,
     /// 项目级 LP 后端。旧文档没有该字段时沿用 Rust based（序列化 id 为 rust-certified）。
     #[serde(default = "legacy_project_solver")]
     pub solver: LpSolver,
@@ -79,6 +108,10 @@ pub struct ProjectSettings {
 
 fn legacy_project_solver() -> LpSolver {
     LpSolver::RustBased
+}
+
+fn default_major_quality() -> String {
+    "normal".to_string()
 }
 
 impl Default for ProjectSettings {
@@ -92,6 +125,7 @@ impl Default for ProjectSettings {
             mining_productivity: 0.0,
             all_accessible: false,
             quality_limit: None,
+            major_quality: default_major_quality(),
             solver: LpSolver::default(),
         }
     }
@@ -178,12 +212,78 @@ impl Default for FactoryDocument {
     }
 }
 
+/// 稳定的宇宙工厂机制条目（顺序与 ID 属于应用层）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UniverseMechanicEntry {
+    pub id: MechanicId,
+    pub enabled: bool,
+    pub mechanic: LocatedMechanic,
+}
+
+impl Default for UniverseMechanicEntry {
+    fn default() -> Self {
+        Self {
+            id: MechanicId::default(),
+            enabled: true,
+            mechanic: LocatedMechanic::default(),
+        }
+    }
+}
+
+/// 宇宙工厂的一个目标：目标流本身带地点。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LocatedTarget {
+    pub id: TargetId,
+    pub flow: LocatedDualVar,
+    pub amount: f64,
+}
+
+impl Default for LocatedTarget {
+    fn default() -> Self {
+        Self {
+            id: TargetId::default(),
+            flow: LocatedDualVar::default(),
+            amount: 0.0,
+        }
+    }
+}
+
+/// 跨地点联合规划的宇宙工厂。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UniverseDocument {
+    pub id: UniverseId,
+    pub name: String,
+    pub mechanics: Vec<UniverseMechanicEntry>,
+    pub targets: Vec<LocatedTarget>,
+    pub strict_source: bool,
+    pub strict_sink: bool,
+}
+
+impl Default for UniverseDocument {
+    fn default() -> Self {
+        Self {
+            id: UniverseId::default(),
+            name: "Unnamed universe".to_string(),
+            mechanics: Vec::new(),
+            targets: Vec::new(),
+            strict_source: false,
+            strict_sink: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FactorySettings {
     pub planet: Option<String>,
     pub surface: Option<String>,
-    pub major_quality: String,
+    /// 旧版工厂级主品质，只用于加载旧工程时迁移到项目设置；
+    /// 新工程不再序列化该字段。
+    #[serde(rename = "major_quality", default, skip_serializing)]
+    pub legacy_major_quality: String,
     /// **遗留字段**：仅在旧版 metatorio-egui 工程里被写入，迁移时原样搬运，
     /// 当前**没有任何读取方**（求解、可达性、UI 都不用）。保留是为了工程文件
     /// 与旧格式迁移的兼容；`FactoryContextAction::SetDebug` 是它唯一的写入口，
@@ -196,7 +296,7 @@ impl Default for FactorySettings {
         Self {
             planet: None,
             surface: None,
-            major_quality: "normal".to_string(),
+            legacy_major_quality: String::new(),
             debug: false,
         }
     }
@@ -436,6 +536,30 @@ mod tests {
         assert_eq!(fresh.solver, LpSolver::default());
         let encoded = serde_json::to_value(&fresh).unwrap();
         assert_eq!(encoded["solver"], fresh.solver.as_str());
+    }
+
+    #[test]
+    fn legacy_factory_major_quality_migrates_to_the_project() {
+        let json = serde_json::json!({
+            "projects": [{
+                "id": 1,
+                "name": "legacy",
+                "factories": [{
+                    "id": 2,
+                    "name": "old",
+                    "settings": { "major_quality": "epic" }
+                }]
+            }]
+        });
+        let mut document: AppDocument = serde_json::from_value(json).unwrap();
+        document.migrate_legacy_major_quality();
+        assert_eq!(document.projects[0].settings.major_quality, "epic");
+        let encoded = serde_json::to_value(&document).unwrap();
+        assert!(
+            encoded["projects"][0]["factories"][0]["settings"]
+                .get("major_quality")
+                .is_none()
+        );
     }
 
     #[test]

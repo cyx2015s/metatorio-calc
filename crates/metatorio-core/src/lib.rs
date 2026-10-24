@@ -9,6 +9,7 @@ pub mod dual_var;
 pub mod energy;
 pub mod expand;
 pub mod id;
+pub mod location;
 pub mod mechanic;
 pub mod planet;
 pub mod prim_var;
@@ -26,6 +27,9 @@ pub use context::{Context, GameState};
 pub use dual_var::DualVar;
 pub use expand::{SolarBalance, instance_cost, solar_balance};
 pub use id::{IdWithQuality, NORMAL_QUALITY};
+pub use location::{
+    LocalLocatedMechanic, LocatedDualVar, LocatedMechanic, Location, TransferLocatedMechanic,
+};
 pub use mechanic::{
     BeaconConfig, BoilerMechanic, FluidFuelMechanic, FluidHeatMechanic, Fuel, GeneratorMechanic,
     ItemFuelMechanic, ItemLaunchMechanic, Mechanic, MiningMechanic, ModuleConfig, PlantMechanic,

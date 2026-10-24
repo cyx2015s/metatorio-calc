@@ -1,4 +1,4 @@
-use metatorio_core::{Accessible, DualVar, Fuel, IdWithQuality};
+use metatorio_core::{Accessible, DualVar, Fuel, IdWithQuality, LocatedDualVar, Location};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -8,6 +8,7 @@ use crate::document::{
 };
 use crate::id::{
     ExternalInputId, FactoryId, MechanicId, ProjectId, TargetExpressionId, TargetId, TargetTermId,
+    UniverseId,
 };
 
 /// 与框架无关的「用户意图」。渲染层应当发出这些消息，而不是直接改项目文档。
@@ -23,6 +24,12 @@ pub enum AppMessage {
         project: ProjectId,
         factory: FactoryId,
         action: FactoryAction,
+    },
+    /// 宇宙工厂：与普通工厂并列，使用 LocatedMechanic / LocatedDualVar。
+    Universe {
+        project: ProjectId,
+        universe: UniverseId,
+        action: UniverseAction,
     },
     /// 撤销/重做：与普通编辑走同一条 dispatch 管线，GUI 与 MCP 共享同一入口
     /// 与同一份历史（见 RuntimeState 的 undo/redo）。
@@ -135,6 +142,23 @@ pub enum ProjectAction {
         factory: FactoryId,
         position: usize,
     },
+    AddUniverse {
+        name: String,
+    },
+    CloneUniverse {
+        universe: UniverseId,
+    },
+    RemoveUniverse {
+        universe: UniverseId,
+    },
+    ReorderUniverse {
+        universe: UniverseId,
+        position: usize,
+    },
+    RenameUniverse {
+        universe: UniverseId,
+        name: String,
+    },
     SetTimeScale {
         time_scale: TimeScale,
     },
@@ -181,6 +205,10 @@ pub enum ProjectAction {
     SetQualityLimit {
         quality: Option<String>,
     },
+    /// 项目级主品质（所有工厂/宇宙工厂共享）。
+    SetMajorQuality {
+        quality: String,
+    },
     /// 选择该项目使用的 LP 后端。
     SetSolver {
         solver: metatorio_solver::LpSolver,
@@ -226,12 +254,73 @@ pub enum FactoryAction {
     Solve(SolveAction),
 }
 
+/// 宇宙工厂的动作。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum UniverseAction {
+    /// 添加一个本地机制；实际机制由 `kind.default_mechanic()` 生成。
+    AddLocalMechanic {
+        location: Location,
+        kind: crate::document::MechanicKind,
+    },
+    /// 添加一个星球 -> 太空的火箭转移。
+    AddTransfer {
+        location: Location,
+        item: IdWithQuality,
+    },
+    RemoveMechanic {
+        mechanic: MechanicId,
+    },
+    ReorderMechanic {
+        mechanic: MechanicId,
+        position: usize,
+    },
+    SetMechanicEnabled {
+        mechanic: MechanicId,
+        enabled: bool,
+    },
+    SetStrictSource {
+        strict: bool,
+    },
+    SetStrictSink {
+        strict: bool,
+    },
+    /// 高级入口：用 JSON 整体替换 Local 承载的原机制（用于尚无专用编辑器的种类）。
+    SetLocalMechanic {
+        mechanic: MechanicId,
+        mechanic_json: String,
+    },
+    /// 修改 Local 承载的原机制；Transfer 不支持这个入口。
+    Mechanic {
+        mechanic: MechanicId,
+        action: MechanicAction,
+    },
+    AddTarget {
+        flow: LocatedDualVar,
+        amount: f64,
+    },
+    RemoveTarget {
+        target: TargetId,
+    },
+    SetTargetFlow {
+        target: TargetId,
+        flow: LocatedDualVar,
+    },
+    SetTargetAmount {
+        target: TargetId,
+        amount: f64,
+    },
+    ReorderTarget {
+        target: TargetId,
+        position: usize,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum FactoryContextAction {
     SetPlanet { planet: Option<String> },
     SetSurface { surface: Option<String> },
-    SetMajorQuality { quality: String },
     SetDebug { enabled: bool },
 }
 
@@ -581,7 +670,7 @@ pub enum PlanningAction {
     /// - **品质必须由调用方显式给出**，运行时不做任何推断。品质是特殊维度：
     ///   「解锁了某个品质」不等于「能大规模量产该品质的插件」（产能、废料、
     ///   配方链都可能卡住），所以不能拿「项目品质上限」之类的东西当默认值。
-    ///   GUI 的「使用最佳插件」传当前工厂的主品质（`factory.settings.major_quality`），
+    ///   GUI 的「使用最佳插件」传项目主品质（`project.settings.major_quality`），
     ///   与品质无关的调用方应传 `normal`；
     /// - 候选按**当前可达性**过滤（不可达插件不进枚举列表）；
     /// - 同类别 tier 并列时取名字最小者，保证确定性与幂等。

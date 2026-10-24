@@ -58,7 +58,8 @@ impl Default for RuntimeState {
 }
 
 impl RuntimeState {
-    pub fn new(document: AppDocument) -> Self {
+    pub fn new(mut document: AppDocument) -> Self {
+        document.migrate_legacy_major_quality();
         let mut state = Self {
             history: History::new(&document),
             document,
@@ -92,6 +93,11 @@ impl RuntimeState {
                 factory,
                 action,
             } => self.apply_factory(project, factory, action)?,
+            AppMessage::Universe {
+                project,
+                universe,
+                action,
+            } => self.apply_universe(project, universe, action)?,
             AppMessage::History(_) => unreachable!("history handled above"),
         };
 
@@ -235,6 +241,18 @@ impl RuntimeState {
             .iter()
             .find(|candidate| candidate.id == factory)
             .ok_or(RuntimeError::FactoryNotFound { project, factory })
+    }
+
+    pub fn universe(
+        &self,
+        project: ProjectId,
+        universe: crate::id::UniverseId,
+    ) -> Result<&crate::document::UniverseDocument, RuntimeError> {
+        self.project(project)?
+            .universes
+            .iter()
+            .find(|candidate| candidate.id == universe)
+            .ok_or(RuntimeError::UniverseNotFound { project, universe })
     }
 
     /// 用给定机制整体替换工厂的机制列表（自动规划回写用）。
@@ -585,6 +603,75 @@ impl RuntimeState {
                 let changed = move_item(&mut project.factories, index, position);
                 Ok(Outcome::meta_if(changed, project_id))
             }
+            ProjectAction::AddUniverse { name } => {
+                let universe_id = self.allocate_id();
+                let universe = crate::document::UniverseDocument {
+                    id: universe_id,
+                    name: non_empty(name, "Unnamed universe"),
+                    ..crate::document::UniverseDocument::default()
+                };
+                self.project_mut(project_id)?.universes.push(universe);
+                let mut outcome = Outcome::meta(project_id);
+                outcome.created.universe(universe_id);
+                Ok(outcome)
+            }
+            ProjectAction::CloneUniverse { universe } => {
+                let source = self
+                    .project(project_id)?
+                    .universes
+                    .iter()
+                    .find(|candidate| candidate.id == universe)
+                    .cloned()
+                    .ok_or(RuntimeError::UniverseNotFound {
+                        project: project_id,
+                        universe,
+                    })?;
+                let clone = self.clone_universe(source);
+                let clone_id = clone.id;
+                self.project_mut(project_id)?.universes.push(clone);
+                let mut outcome = Outcome::meta(project_id);
+                outcome.created.universe(clone_id);
+                Ok(outcome)
+            }
+            ProjectAction::RemoveUniverse { universe } => {
+                let project = self.project_mut(project_id)?;
+                let index = project
+                    .universes
+                    .iter()
+                    .position(|candidate| candidate.id == universe)
+                    .ok_or(RuntimeError::UniverseNotFound {
+                        project: project_id,
+                        universe,
+                    })?;
+                project.universes.remove(index);
+                Ok(Outcome::meta(project_id))
+            }
+            ProjectAction::ReorderUniverse { universe, position } => {
+                let project = self.project_mut(project_id)?;
+                let index = project
+                    .universes
+                    .iter()
+                    .position(|candidate| candidate.id == universe)
+                    .ok_or(RuntimeError::UniverseNotFound {
+                        project: project_id,
+                        universe,
+                    })?;
+                let changed = move_item(&mut project.universes, index, position);
+                Ok(Outcome::meta_if(changed, project_id))
+            }
+            ProjectAction::RenameUniverse { universe, name } => {
+                let target = self
+                    .project_mut(project_id)?
+                    .universes
+                    .iter_mut()
+                    .find(|candidate| candidate.id == universe)
+                    .ok_or(RuntimeError::UniverseNotFound {
+                        project: project_id,
+                        universe,
+                    })?;
+                let changed = replace(&mut target.name, non_empty(name, "Unnamed universe"));
+                Ok(Outcome::meta_if(changed, project_id))
+            }
             ProjectAction::SetTimeScale { time_scale } => {
                 let changed = replace(
                     &mut self.project_mut(project_id)?.settings.time_scale,
@@ -701,6 +788,16 @@ impl RuntimeState {
                 entries.retain(|entry| entry.tech != tech);
                 Ok(Outcome::solve_all_if(before != entries.len(), project_id))
             }
+            ProjectAction::SetMajorQuality { quality } => {
+                if quality.is_empty() {
+                    return Err(RuntimeError::InvalidValue("品质不能为空".to_string()));
+                }
+                let changed = replace(
+                    &mut self.project_mut(project_id)?.settings.major_quality,
+                    quality,
+                );
+                Ok(Outcome::solve_all_if(changed, project_id))
+            }
             ProjectAction::SetQualityLimit { quality } => {
                 let changed = replace(
                     &mut self.project_mut(project_id)?.settings.quality_limit,
@@ -722,6 +819,232 @@ impl RuntimeState {
                 let changed =
                     apply_planning_action(&mut self.project_mut(project_id)?.planning, action)?;
                 Ok(Outcome::solve_all_if(changed, project_id))
+            }
+        }
+    }
+
+    fn apply_universe(
+        &mut self,
+        project_id: ProjectId,
+        universe_id: crate::id::UniverseId,
+        action: crate::message::UniverseAction,
+    ) -> Result<Outcome, RuntimeError> {
+        use crate::document::{LocatedTarget, UniverseMechanicEntry};
+        use crate::message::UniverseAction;
+        use metatorio_core::{
+            LocalLocatedMechanic, LocatedMechanic, Location, TransferLocatedMechanic,
+        };
+
+        self.universe(project_id, universe_id)?;
+        match action {
+            UniverseAction::AddLocalMechanic { location, kind } => {
+                let mechanic_id = self.allocate_id();
+                let mechanic = kind
+                    .default_mechanic()
+                    .ok_or(RuntimeError::UnsupportedMechanic)?;
+                self.universe_mut(project_id, universe_id)?
+                    .mechanics
+                    .push(UniverseMechanicEntry {
+                        id: mechanic_id,
+                        enabled: true,
+                        mechanic: LocatedMechanic::Local(LocalLocatedMechanic {
+                            location,
+                            mechanic,
+                        }),
+                    });
+                let mut outcome = Outcome::meta(project_id);
+                outcome.created.mechanic(mechanic_id);
+                Ok(outcome)
+            }
+            UniverseAction::AddTransfer { location, item } => {
+                if item.id.is_empty() {
+                    return Err(RuntimeError::InvalidValue("物品不能为空".to_string()));
+                }
+                if !matches!(location, Location::Planet(_)) {
+                    return Err(RuntimeError::InvalidValue(
+                        "火箭转移的起点必须是星球".to_string(),
+                    ));
+                }
+                let mechanic_id = self.allocate_id();
+                self.universe_mut(project_id, universe_id)?
+                    .mechanics
+                    .push(UniverseMechanicEntry {
+                        id: mechanic_id,
+                        enabled: true,
+                        mechanic: LocatedMechanic::Transfer(TransferLocatedMechanic {
+                            location,
+                            item,
+                        }),
+                    });
+                let mut outcome = Outcome::meta(project_id);
+                outcome.created.mechanic(mechanic_id);
+                Ok(outcome)
+            }
+            UniverseAction::RemoveMechanic { mechanic } => {
+                let universe = self.universe_mut(project_id, universe_id)?;
+                let index = universe
+                    .mechanics
+                    .iter()
+                    .position(|entry| entry.id == mechanic)
+                    .ok_or(RuntimeError::UniverseMechanicNotFound {
+                        project: project_id,
+                        universe: universe_id,
+                        mechanic,
+                    })?;
+                universe.mechanics.remove(index);
+                Ok(Outcome::meta(project_id))
+            }
+            UniverseAction::ReorderMechanic { mechanic, position } => {
+                let universe = self.universe_mut(project_id, universe_id)?;
+                let index = universe
+                    .mechanics
+                    .iter()
+                    .position(|entry| entry.id == mechanic)
+                    .ok_or(RuntimeError::UniverseMechanicNotFound {
+                        project: project_id,
+                        universe: universe_id,
+                        mechanic,
+                    })?;
+                let changed = move_item(&mut universe.mechanics, index, position);
+                Ok(Outcome::meta_if(changed, project_id))
+            }
+            UniverseAction::SetMechanicEnabled { mechanic, enabled } => {
+                let universe = self.universe_mut(project_id, universe_id)?;
+                let entry = universe
+                    .mechanics
+                    .iter_mut()
+                    .find(|entry| entry.id == mechanic)
+                    .ok_or(RuntimeError::UniverseMechanicNotFound {
+                        project: project_id,
+                        universe: universe_id,
+                        mechanic,
+                    })?;
+                let changed = replace(&mut entry.enabled, enabled);
+                Ok(Outcome::meta_if(changed, project_id))
+            }
+            UniverseAction::SetStrictSource { strict } => {
+                let changed = replace(
+                    &mut self.universe_mut(project_id, universe_id)?.strict_source,
+                    strict,
+                );
+                Ok(Outcome::meta_if(changed, project_id))
+            }
+            UniverseAction::SetStrictSink { strict } => {
+                let changed = replace(
+                    &mut self.universe_mut(project_id, universe_id)?.strict_sink,
+                    strict,
+                );
+                Ok(Outcome::meta_if(changed, project_id))
+            }
+            UniverseAction::SetLocalMechanic {
+                mechanic,
+                mechanic_json,
+            } => {
+                let parsed: metatorio_core::Mechanic = serde_json::from_str(&mechanic_json)
+                    .map_err(|error| RuntimeError::InvalidValue(error.to_string()))?;
+                let universe = self.universe_mut(project_id, universe_id)?;
+                let entry = universe
+                    .mechanics
+                    .iter_mut()
+                    .find(|entry| entry.id == mechanic)
+                    .ok_or(RuntimeError::UniverseMechanicNotFound {
+                        project: project_id,
+                        universe: universe_id,
+                        mechanic,
+                    })?;
+                let LocatedMechanic::Local(local) = &mut entry.mechanic else {
+                    return Err(RuntimeError::InvalidValue(
+                        "火箭转移不支持普通机制编辑".to_string(),
+                    ));
+                };
+                let changed = replace(&mut local.mechanic, parsed);
+                Ok(Outcome::meta_if(changed, project_id))
+            }
+            UniverseAction::Mechanic { mechanic, action } => {
+                let universe = self.universe_mut(project_id, universe_id)?;
+                let entry = universe
+                    .mechanics
+                    .iter_mut()
+                    .find(|entry| entry.id == mechanic)
+                    .ok_or(RuntimeError::UniverseMechanicNotFound {
+                        project: project_id,
+                        universe: universe_id,
+                        mechanic,
+                    })?;
+                let LocatedMechanic::Local(local) = &mut entry.mechanic else {
+                    return Err(RuntimeError::InvalidValue(
+                        "火箭转移不支持普通机制编辑".to_string(),
+                    ));
+                };
+                let changed = apply_mechanic_action(&mut local.mechanic, action)?;
+                Ok(Outcome::meta_if(changed, project_id))
+            }
+            UniverseAction::AddTarget { flow, amount } => {
+                validate_finite("目标速率", amount)?;
+                let target_id = self.allocate_id();
+                self.universe_mut(project_id, universe_id)?
+                    .targets
+                    .push(LocatedTarget {
+                        id: target_id,
+                        flow,
+                        amount,
+                    });
+                let mut outcome = Outcome::meta(project_id);
+                outcome.created.target(target_id);
+                Ok(outcome)
+            }
+            UniverseAction::RemoveTarget { target } => {
+                let universe = self.universe_mut(project_id, universe_id)?;
+                let index = universe
+                    .targets
+                    .iter()
+                    .position(|candidate| candidate.id == target)
+                    .ok_or(RuntimeError::UniverseTargetNotFound {
+                        universe: universe_id,
+                        target,
+                    })?;
+                universe.targets.remove(index);
+                Ok(Outcome::meta(project_id))
+            }
+            UniverseAction::SetTargetFlow { target, flow } => {
+                let universe = self.universe_mut(project_id, universe_id)?;
+                let entry = universe
+                    .targets
+                    .iter_mut()
+                    .find(|candidate| candidate.id == target)
+                    .ok_or(RuntimeError::UniverseTargetNotFound {
+                        universe: universe_id,
+                        target,
+                    })?;
+                let changed = replace(&mut entry.flow, flow);
+                Ok(Outcome::meta_if(changed, project_id))
+            }
+            UniverseAction::SetTargetAmount { target, amount } => {
+                validate_finite("目标速率", amount)?;
+                let universe = self.universe_mut(project_id, universe_id)?;
+                let entry = universe
+                    .targets
+                    .iter_mut()
+                    .find(|candidate| candidate.id == target)
+                    .ok_or(RuntimeError::UniverseTargetNotFound {
+                        universe: universe_id,
+                        target,
+                    })?;
+                let changed = replace(&mut entry.amount, amount);
+                Ok(Outcome::meta_if(changed, project_id))
+            }
+            UniverseAction::ReorderTarget { target, position } => {
+                let universe = self.universe_mut(project_id, universe_id)?;
+                let index = universe
+                    .targets
+                    .iter()
+                    .position(|candidate| candidate.id == target)
+                    .ok_or(RuntimeError::UniverseTargetNotFound {
+                        universe: universe_id,
+                        target,
+                    })?;
+                let changed = move_item(&mut universe.targets, index, position);
+                Ok(Outcome::meta_if(changed, project_id))
             }
         }
     }
@@ -797,7 +1120,7 @@ impl RuntimeState {
                         factory: factory_id,
                         mechanic,
                     })?;
-                let changed = apply_mechanic_action(entry, action)?;
+                let changed = apply_mechanic_action(&mut entry.mechanic, action)?;
                 let mut outcome = Outcome::solve_factory_if(changed, project_id, factory_id);
                 if changed {
                     if needs_compat {
@@ -1190,6 +1513,21 @@ impl RuntimeState {
         factory
     }
 
+    fn clone_universe(
+        &mut self,
+        mut universe: crate::document::UniverseDocument,
+    ) -> crate::document::UniverseDocument {
+        universe.id = self.allocate_id();
+        for mechanic in &mut universe.mechanics {
+            mechanic.id = self.allocate_id();
+        }
+        for target in &mut universe.targets {
+            target.id = self.allocate_id();
+        }
+        universe.name.push_str(" copy");
+        universe
+    }
+
     fn clone_factory(&mut self, mut factory: FactoryDocument) -> FactoryDocument {
         factory.id = self.allocate_id();
         for target in &mut factory.targets {
@@ -1277,6 +1615,18 @@ impl RuntimeState {
             .ok_or(RuntimeError::FactoryNotFound { project, factory })
     }
 
+    fn universe_mut(
+        &mut self,
+        project: ProjectId,
+        universe: crate::id::UniverseId,
+    ) -> Result<&mut crate::document::UniverseDocument, RuntimeError> {
+        self.project_mut(project)?
+            .universes
+            .iter_mut()
+            .find(|candidate| candidate.id == universe)
+            .ok_or(RuntimeError::UniverseNotFound { project, universe })
+    }
+
     pub fn allocate_id<T: From<u64>>(&mut self) -> T {
         let id = self.next_id;
         self.next_id = self.next_id.saturating_add(1);
@@ -1338,6 +1688,21 @@ impl RuntimeState {
                     }
                 }
             }
+            for universe in &mut project.universes {
+                if remap_all || self.project_contains_id(universe.id.0) {
+                    universe.id = self.allocate_id();
+                }
+                for mechanic in &mut universe.mechanics {
+                    if remap_all || self.project_contains_id(mechanic.id.0) {
+                        mechanic.id = self.allocate_id();
+                    }
+                }
+                for target in &mut universe.targets {
+                    if remap_all || self.project_contains_id(target.id.0) {
+                        target.id = self.allocate_id();
+                    }
+                }
+            }
             self.document.projects.push(project);
         }
         self.refresh_next_id();
@@ -1357,6 +1722,11 @@ impl RuntimeState {
                             .any(|e| e.id.0 == id || e.terms.iter().any(|t| t.id.0 == id))
                         || f.external_inputs.iter().any(|i| i.id.0 == id)
                         || f.mechanics.iter().any(|m| m.id.0 == id)
+                })
+                || p.universes.iter().any(|u| {
+                    u.id.0 == id
+                        || u.mechanics.iter().any(|m| m.id.0 == id)
+                        || u.targets.iter().any(|t| t.id.0 == id)
                 })
         })
     }
@@ -1381,6 +1751,15 @@ impl RuntimeState {
                 }
                 for mechanic in &factory.mechanics {
                     max_id = max_id.max(mechanic.id.0);
+                }
+            }
+            for universe in &project.universes {
+                max_id = max_id.max(universe.id.0);
+                for mechanic in &universe.mechanics {
+                    max_id = max_id.max(mechanic.id.0);
+                }
+                for target in &universe.targets {
+                    max_id = max_id.max(target.id.0);
                 }
             }
         }
@@ -1582,6 +1961,11 @@ fn message_label(message: &AppMessage) -> &'static str {
             _ => "项目设置",
         },
         AppMessage::Factory { .. } => "工厂操作",
+        AppMessage::Universe { action, .. } => match action {
+            crate::message::UniverseAction::AddLocalMechanic { .. } => "添加宇宙机制",
+            crate::message::UniverseAction::AddTransfer { .. } => "添加火箭转移",
+            _ => "宇宙工厂操作",
+        },
         AppMessage::History(_) => "撤销/重做",
     }
 }
@@ -1592,6 +1976,7 @@ fn message_label(message: &AppMessage) -> &'static str {
 pub struct CreatedIds {
     pub projects: Vec<ProjectId>,
     pub factories: Vec<FactoryId>,
+    pub universes: Vec<crate::id::UniverseId>,
     pub mechanics: Vec<MechanicId>,
     pub targets: Vec<TargetId>,
     pub target_expressions: Vec<TargetExpressionId>,
@@ -1603,6 +1988,7 @@ impl CreatedIds {
     pub fn is_empty(&self) -> bool {
         self.projects.is_empty()
             && self.factories.is_empty()
+            && self.universes.is_empty()
             && self.mechanics.is_empty()
             && self.targets.is_empty()
             && self.target_expressions.is_empty()
@@ -1616,6 +2002,10 @@ impl CreatedIds {
 
     fn factory(&mut self, id: FactoryId) {
         self.factories.push(id);
+    }
+
+    fn universe(&mut self, id: crate::id::UniverseId) {
+        self.universes.push(id);
     }
 
     fn mechanic(&mut self, id: MechanicId) {
@@ -1647,6 +2037,19 @@ pub enum RuntimeError {
         project: ProjectId,
         factory: FactoryId,
     },
+    UniverseNotFound {
+        project: ProjectId,
+        universe: crate::id::UniverseId,
+    },
+    UniverseMechanicNotFound {
+        project: ProjectId,
+        universe: crate::id::UniverseId,
+        mechanic: MechanicId,
+    },
+    UniverseTargetNotFound {
+        universe: crate::id::UniverseId,
+        target: TargetId,
+    },
     MechanicNotFound {
         project: ProjectId,
         factory: FactoryId,
@@ -1673,6 +2076,21 @@ impl fmt::Display for RuntimeError {
             Self::ProjectNotFound(id) => write!(f, "找不到项目 {}", id.0),
             Self::FactoryNotFound { project, factory } => {
                 write!(f, "项目 {} 里找不到工厂 {}", project.0, factory.0)
+            }
+            Self::UniverseNotFound { project, universe } => {
+                write!(f, "项目 {} 里找不到宇宙工厂 {}", project.0, universe.0)
+            }
+            Self::UniverseMechanicNotFound {
+                project,
+                universe,
+                mechanic,
+            } => write!(
+                f,
+                "项目 {} 的宇宙工厂 {} 里找不到机制 {}",
+                project.0, universe.0, mechanic.0
+            ),
+            Self::UniverseTargetNotFound { universe, target } => {
+                write!(f, "宇宙工厂 {} 里找不到目标 {}", universe.0, target.0)
             }
             Self::MechanicNotFound {
                 project,
@@ -1809,12 +2227,6 @@ fn apply_factory_context(
     Ok(match action {
         FactoryContextAction::SetPlanet { planet } => replace(&mut settings.planet, planet),
         FactoryContextAction::SetSurface { surface } => replace(&mut settings.surface, surface),
-        FactoryContextAction::SetMajorQuality { quality } => {
-            if quality.is_empty() {
-                return Err(RuntimeError::InvalidValue("品质不能为空".to_string()));
-            }
-            replace(&mut settings.major_quality, quality)
-        }
         FactoryContextAction::SetDebug { enabled } => replace(&mut settings.debug, enabled),
     })
 }
@@ -1825,20 +2237,20 @@ fn apply_factory_context(
 /// protocol error instead of a runtime dispatch decision.
 /// Only recipe and mining mechanics carry a module configuration.
 fn apply_mechanic_action(
-    entry: &mut MechanicEntry,
+    mechanic: &mut Mechanic,
     action: MechanicAction,
 ) -> Result<bool, RuntimeError> {
     // Each MechanicAction variant names its mechanic kind explicitly; the
     // dispatch validates that the target mechanic matches before touching it.
     match action {
         MechanicAction::Recipe(action) => {
-            let Mechanic::Recipe(mechanic) = &mut entry.mechanic else {
+            let Mechanic::Recipe(mechanic) = mechanic else {
                 return Err(kind_mismatch("recipe"));
             };
             apply_recipe_action(mechanic, action)
         }
         MechanicAction::VirtualScience(action) => {
-            let Mechanic::VirtualScience(mechanic) = &mut entry.mechanic else {
+            let Mechanic::VirtualScience(mechanic) = mechanic else {
                 return Err(kind_mismatch("virtual-science"));
             };
             match action {
@@ -1846,79 +2258,79 @@ fn apply_mechanic_action(
             }
         }
         MechanicAction::Mining(action) => {
-            let Mechanic::Mining(mechanic) = &mut entry.mechanic else {
+            let Mechanic::Mining(mechanic) = mechanic else {
                 return Err(kind_mismatch("mining"));
             };
             apply_mining_action(mechanic, action)
         }
         MechanicAction::Spoil(action) => {
-            let Mechanic::Spoil(mechanic) = &mut entry.mechanic else {
+            let Mechanic::Spoil(mechanic) = mechanic else {
                 return Err(kind_mismatch("spoil"));
             };
             apply_spoil_action(mechanic, action)
         }
         MechanicAction::Plant(action) => {
-            let Mechanic::Plant(mechanic) = &mut entry.mechanic else {
+            let Mechanic::Plant(mechanic) = mechanic else {
                 return Err(kind_mismatch("plant"));
             };
             apply_plant_action(mechanic, action)
         }
         MechanicAction::ItemFuel(action) => {
-            let Mechanic::ItemFuel(mechanic) = &mut entry.mechanic else {
+            let Mechanic::ItemFuel(mechanic) = mechanic else {
                 return Err(kind_mismatch("item-fuel"));
             };
             apply_item_fuel_action(mechanic, action)
         }
         MechanicAction::ItemLaunch(action) => {
-            let Mechanic::ItemLaunch(mechanic) = &mut entry.mechanic else {
+            let Mechanic::ItemLaunch(mechanic) = mechanic else {
                 return Err(kind_mismatch("item-launch"));
             };
             apply_item_launch_action(mechanic, action)
         }
         MechanicAction::Generator(action) => {
-            let Mechanic::Generator(mechanic) = &mut entry.mechanic else {
+            let Mechanic::Generator(mechanic) = mechanic else {
                 return Err(kind_mismatch("generator"));
             };
             apply_generator_action(mechanic, action)
         }
         MechanicAction::Boiler(action) => {
-            let Mechanic::Boiler(mechanic) = &mut entry.mechanic else {
+            let Mechanic::Boiler(mechanic) = mechanic else {
                 return Err(kind_mismatch("boiler"));
             };
             apply_boiler_action(mechanic, action)
         }
         MechanicAction::Reactor(action) => {
-            let Mechanic::Reactor(mechanic) = &mut entry.mechanic else {
+            let Mechanic::Reactor(mechanic) = mechanic else {
                 return Err(kind_mismatch("reactor"));
             };
             apply_reactor_action(mechanic, action)
         }
         MechanicAction::Solar(action) => {
-            let Mechanic::Solar(mechanic) = &mut entry.mechanic else {
+            let Mechanic::Solar(mechanic) = mechanic else {
                 return Err(kind_mismatch("solar"));
             };
             apply_solar_action(mechanic, action)
         }
         MechanicAction::FluidFuel(action) => {
-            let Mechanic::FluidFuel(mechanic) = &mut entry.mechanic else {
+            let Mechanic::FluidFuel(mechanic) = mechanic else {
                 return Err(kind_mismatch("fluid-fuel"));
             };
             apply_fluid_fuel_action(mechanic, action)
         }
         MechanicAction::FluidHeat(action) => {
-            let Mechanic::FluidHeat(mechanic) = &mut entry.mechanic else {
+            let Mechanic::FluidHeat(mechanic) = mechanic else {
                 return Err(kind_mismatch("fluid-heat"));
             };
             apply_fluid_heat_action(mechanic, action)
         }
         MechanicAction::TileExtract(action) => {
-            let Mechanic::TileExtract(mechanic) = &mut entry.mechanic else {
+            let Mechanic::TileExtract(mechanic) = mechanic else {
                 return Err(kind_mismatch("tile-extract"));
             };
             apply_tile_extract_action(mechanic, action)
         }
         MechanicAction::TileDispose(action) => {
-            let Mechanic::TileDispose(mechanic) = &mut entry.mechanic else {
+            let Mechanic::TileDispose(mechanic) = mechanic else {
                 return Err(kind_mismatch("tile-dispose"));
             };
             apply_tile_dispose_action(mechanic, action)

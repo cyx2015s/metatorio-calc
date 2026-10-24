@@ -33,6 +33,43 @@ pub fn validate_message(store: &PrototypeStore, message: &AppMessage) -> Result<
         AppMessage::Application(_) | AppMessage::History(_) => Ok(()),
         AppMessage::Project { action, .. } => validate_project(store, action),
         AppMessage::Factory { action, .. } => validate_factory(store, action),
+        AppMessage::Universe { action, .. } => validate_universe(store, action),
+    }
+}
+
+fn validate_location(
+    store: &PrototypeStore,
+    location: &metatorio_core::Location,
+) -> Result<(), RuntimeError> {
+    match location {
+        metatorio_core::Location::Planet(name) => {
+            require(store, PrototypeGroup::Planet, "星球", name)
+        }
+        metatorio_core::Location::Space => Ok(()),
+    }
+}
+
+fn validate_universe(
+    store: &PrototypeStore,
+    action: &crate::message::UniverseAction,
+) -> Result<(), RuntimeError> {
+    use crate::message::UniverseAction;
+    match action {
+        UniverseAction::AddLocalMechanic { location, .. } => validate_location(store, location),
+        UniverseAction::AddTransfer { location, item } => {
+            validate_location(store, location)?;
+            require_id(store, PrototypeGroup::Item, "物品", item)
+        }
+        UniverseAction::Mechanic { action, .. } => validate_mechanic(store, action),
+        UniverseAction::AddTarget { flow, .. } => {
+            validate_location(store, &flow.location)?;
+            require_flow(store, &flow.flow)
+        }
+        UniverseAction::SetTargetFlow { flow, .. } => {
+            validate_location(store, &flow.location)?;
+            require_flow(store, &flow.flow)
+        }
+        _ => Ok(()),
     }
 }
 
@@ -109,6 +146,7 @@ fn validate_project(store: &PrototypeStore, action: &ProjectAction) -> Result<()
         ProjectAction::SetQualityLimit {
             quality: Some(quality),
         } => require_quality(store, quality),
+        ProjectAction::SetMajorQuality { quality } => require_quality(store, quality),
         ProjectAction::SetSolver { solver } => {
             if solver.is_available() {
                 Ok(())
@@ -188,7 +226,6 @@ fn validate_factory(store: &PrototypeStore, action: &FactoryAction) -> Result<()
                 Some(surface) => require(store, PrototypeGroup::Surface, "地表", surface),
                 None => Ok(()),
             },
-            FactoryContextAction::SetMajorQuality { quality } => require_quality(store, quality),
             FactoryContextAction::SetDebug { .. } => Ok(()),
         },
         FactoryAction::Mechanic { action, .. } => validate_mechanic(store, action),

@@ -111,12 +111,13 @@ def make_manifest(run):
                            for name, temperature in [('water', 15), ('crude-oil', 25)]]
         inputs += extra or []
         assert not any(x['flow'] == {'Item': {'id': item, 'quality': quality}} for x in inputs)
-        factory = {'id': 2, 'name': tag, 'settings': {'planet': planet, 'major_quality': major},
+        factory = {'id': 2, 'name': tag, 'settings': {'planet': planet},
                    'targets': [{'id': 3, 'flow': {'Item': {'id': item, 'quality': quality}}, 'amount': 1.0}],
                    'strict_source': True, 'strict_sink': strict,
                    'external_inputs': [dict(x, id=100 + i) for i, x in enumerate(inputs)]}
         project = {'id': 1, 'name': 'Morning regression', 'context_id': 'matrix',
-                   'settings': {'quality_limit': 'legendary', 'ignore_productivity': True},
+                   'settings': {'quality_limit': 'legendary', 'ignore_productivity': True,
+                                'major_quality': major},
                    'planning': {'preserve_existing_mechanics': False, 'alternative_count': 3,
                                 'enumerate_beacons': plans}, 'factories': [factory]}
         index = len(cases)
@@ -125,7 +126,7 @@ def make_manifest(run):
                 'planet': planet, 'item': item, 'quality': quality, 'major_quality': major,
                 'module_quality': major, 'layout': layout_name, 'strict_sink': strict,
                 'best_modules': True, 'recheck': index % 40 == 0,
-                'document': {'schema_version': 1, 'projects': [project]}}
+                'document': {'schema_version': 2, 'projects': [project]}}
         case['directory'] = str((run / case['id']).resolve())
         cases.append(case)
 
@@ -393,12 +394,13 @@ def audit_inputs(run):
                   'amount': 1.0}
         assert factory['targets'] == [target]
         assert factory['settings']['planet'] == case['planet']
-        assert factory['settings']['major_quality'] == case['major_quality']
+        assert project['settings']['major_quality'] == case['major_quality']
         assert factory['strict_source'] and factory['strict_sink'] == case['strict_sink']
         assert case['best_modules'] and case['module_quality'] == case['major_quality']
         assert not any(i['flow'] == target['flow'] for i in factory['external_inputs'])
         assert project['planning']['enumerate_beacons'] == layouts[case['layout']]
-        assert project['settings'] == {'quality_limit': 'legendary', 'ignore_productivity': True}
+        assert project['settings'] == {'quality_limit': 'legendary', 'ignore_productivity': True,
+                                          'major_quality': case['major_quality']}
         if factory['name'] == 'breadth':
             key = (case['context'], case['planet'], case['item'])
             pair = (case['quality'], case['layout'])
@@ -432,6 +434,7 @@ def audit_inputs(run):
         assert all(m['quality'] == case['module_quality'] for m in modules)
         assert effective['planning']['enumerate_beacons'] == layouts[case['layout']]
         f = effective['factories'][0]
+        assert effective['settings']['major_quality'] == case['major_quality']
         assert f['settings'] == {'debug': False, 'surface': None, **factory['settings']}
         for key in ['targets', 'strict_source', 'strict_sink', 'external_inputs']:
             assert f[key] == factory[key], (case['id'], key)

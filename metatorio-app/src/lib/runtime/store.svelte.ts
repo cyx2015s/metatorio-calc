@@ -41,6 +41,7 @@ import {
   productivity,
   implicitSources,
   mechanicFlow,
+  solveUniverse,
 } from "./client";
 import type {
   Accessible,
@@ -51,6 +52,12 @@ import type {
   ContextInfo,
   DispatchResult,
   FactoryId,
+  UniverseId,
+  UniverseDocument,
+  UniverseSolveResult,
+  UniverseAction,
+  LocatedDualVar,
+  Location,
   HistoryFocus,
   HistoryStatus,
   IdWithQuality,
@@ -128,7 +135,12 @@ class RuntimeStore {
   // 返回文档对象，便于模板直接读取。
   selectedProjectId = $state<ProjectId | null>(null);
   selectedFactoryId = $state<FactoryId | null>(null);
+  selectedUniverseId = $state<UniverseId | null>(null);
+  private previousFactoryId: FactoryId | null = null;
   selectedMechanic = $state<MechanicId | null>(null);
+  universeSolve = $state<UniverseSolveResult | null>(null);
+  universeSolveError = $state<string | null>(null);
+  private universeSolveCache = new Map<string, UniverseSolveResult>();
   /** 项目 id → 保存路径（记忆路径，未保存过无条目）。 */
   projectPaths = $state<Map<ProjectId, string>>(new Map());
   solve = $state<SolveResult | null>(null);
@@ -952,6 +964,119 @@ class RuntimeStore {
     this.refreshImplicitSources().catch(() => {});
   }
 
+
+  async addUniverse(name: string): Promise<void> {
+    const project = this.requireProject();
+    const result = await this.send({
+      scope: "project",
+      action: { project, action: { "add-universe": { name } } },
+    });
+    this.selectedUniverseId = result.created.universes.at(-1) ?? null;
+    this.selectedFactoryId = null;
+    this.universeSolve = null;
+  }
+
+  async removeUniverse(universe: UniverseId): Promise<void> {
+    const project = this.requireProject();
+    await this.send({
+      scope: "project",
+      action: { project, action: { "remove-universe": { universe } } },
+    });
+    if (this.selectedUniverseId === universe) this.selectedUniverseId = null;
+  }
+
+  async selectUniverse(universe: UniverseId | null): Promise<void> {
+    if (universe != null && this.selectedUniverseId == null) {
+      this.previousFactoryId = this.selectedFactoryId;
+    }
+    this.selectedUniverseId = universe;
+    this.selectedMechanic = null;
+    this.universeSolveError = null;
+    if (universe != null) {
+      this.selectedFactoryId = null;
+      const key = `${this.selectedProjectId}:${universe}`;
+      this.universeSolve = this.universeSolveCache.get(key) ?? null;
+      if (!this.universeSolve) void this.solveSelectedUniverse();
+    } else {
+      this.selectedFactoryId = this.previousFactoryId;
+      this.previousFactoryId = null;
+      this.universeSolve = null;
+      await this.restoreSolveForSelection();
+    }
+  }
+
+  private requireUniverse(): { project: ProjectId; universe: UniverseId } {
+    const project = this.requireProject();
+    const universe = this.selectedUniverseId;
+    if (universe == null) throw new Error("没有选中的宇宙工厂");
+    return { project, universe };
+  }
+
+  private async universeAction(action: UniverseAction): Promise<void> {
+    const { project, universe } = this.requireUniverse();
+    await this.send({ scope: "universe", action: { project, universe, action } });
+    this.universeSolve = null;
+    this.universeSolveError = null;
+    this.universeSolveCache.delete(`${project}:${universe}`);
+  }
+
+  async addUniverseLocal(location: Location, kind: MechanicKind): Promise<void> {
+    await this.universeAction({ "add-local-mechanic": { location, kind } });
+  }
+
+  async addUniverseTransfer(location: Location, item: IdWithQuality): Promise<void> {
+    await this.universeAction({ "add-transfer": { location, item } });
+  }
+
+  async removeUniverseMechanic(mechanic: MechanicId): Promise<void> {
+    await this.universeAction({ "remove-mechanic": { mechanic } });
+  }
+
+  async setUniverseMechanicEnabled(mechanic: MechanicId, enabled: boolean): Promise<void> {
+    await this.universeAction({ "set-mechanic-enabled": { mechanic, enabled } });
+  }
+
+  async updateUniverseMechanic(mechanic: MechanicId, action: import("./types").MechanicAction): Promise<void> {
+    await this.universeAction({ mechanic: { mechanic, action } });
+  }
+
+  async setUniverseMechanicJson(mechanic: MechanicId, mechanicJson: string): Promise<void> {
+    await this.universeAction({ "set-local-mechanic": { mechanic, mechanic_json: mechanicJson } });
+  }
+
+  async setUniverseStrictSource(strict: boolean): Promise<void> {
+    await this.universeAction({ "set-strict-source": { strict } });
+  }
+
+  async setUniverseStrictSink(strict: boolean): Promise<void> {
+    await this.universeAction({ "set-strict-sink": { strict } });
+  }
+
+  async addUniverseTarget(flow: LocatedDualVar, amount: number): Promise<void> {
+    await this.universeAction({ "add-target": { flow, amount } });
+  }
+
+  async removeUniverseTarget(target: TargetId): Promise<void> {
+    await this.universeAction({ "remove-target": { target } });
+  }
+
+  async setUniverseTargetAmount(target: TargetId, amount: number): Promise<void> {
+    await this.universeAction({ "set-target-amount": { target, amount } });
+  }
+
+  async solveSelectedUniverse(): Promise<void> {
+    const { project, universe } = this.requireUniverse();
+    this.universeSolveError = null;
+    try {
+      const result = await solveUniverse(project, universe);
+      this.universeSolve = result;
+      this.universeSolveCache.set(`${project}:${universe}`, result);
+    } catch (error) {
+      this.universeSolve = null;
+      this.universeSolveError = error instanceof Error ? error.message : String(error);
+    }
+  }
+
   async removeFactory(factory: FactoryId): Promise<void> {
     const project = this.requireProject();
     await this.send({
@@ -1004,6 +1129,7 @@ class RuntimeStore {
     const next = factories.find((entry) => entry.id === factory) ?? factories[0];
     const changed = this.selectedFactoryId !== (next?.id ?? null);
     this.selectedFactoryId = next?.id ?? null;
+    this.selectedUniverseId = null;
     this.selectedMechanic = null;
     this.restoreSolveForSelection();
     if (changed) this.refreshImplicitSources().catch(() => {});
@@ -1210,11 +1336,11 @@ class RuntimeStore {
     });
   }
 
-  async setFactoryMajorQuality(quality: string): Promise<void> {
-    const { project, factory } = this.requireFactory();
+  async setProjectMajorQuality(quality: string): Promise<void> {
+    const project = this.requireProject();
     await this.send({
-      scope: "factory",
-      action: { project, factory, action: { context: { "set-major-quality": { quality } } } },
+      scope: "project",
+      action: { project, action: { "set-major-quality": { quality } } },
     });
   }
 
@@ -1843,6 +1969,13 @@ class RuntimeStore {
     );
   }
 
+  get selectedUniverse() {
+    const project = this.selectedProject;
+    return (
+      project?.universes?.find((universe) => universe.id === this.selectedUniverseId) ?? null
+    );
+  }
+
   /** 前端解析的"有效上下文 id"：当前选中项目绑定的上下文（项目级上下文唯一来源）。
    *  用于图标/目录/详情等需按上下文取数据的命令（后端不再持有该选择）。 */
   get effectiveContextId(): string {
@@ -1862,6 +1995,10 @@ class RuntimeStore {
     }
     this.selectedProjectId = projectId;
     this.selectedFactoryId = factoryId;
+    const universes = project?.universes ?? [];
+    if (!universes.some((entry) => entry.id === this.selectedUniverseId)) {
+      this.selectedUniverseId = null;
+    }
   }
 
   private requireProject(): ProjectId {

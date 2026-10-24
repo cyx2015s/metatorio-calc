@@ -10,6 +10,7 @@
 
 export type ProjectId = number;
 export type FactoryId = number;
+export type UniverseId = number;
 export type MechanicId = number;
 export type TargetId = number;
 export type ExternalInputId = number;
@@ -159,9 +160,15 @@ export type ProjectAction =
   | { "clone-factory": { factory: FactoryId } }
   | { "remove-factory": { factory: FactoryId } }
   | { "reorder-factory": { factory: FactoryId; position: number } }
+  | { "add-universe": { name: string } }
+  | { "clone-universe": { universe: UniverseId } }
+  | { "remove-universe": { universe: UniverseId } }
+  | { "reorder-universe": { universe: UniverseId; position: number } }
+  | { "rename-universe": { universe: UniverseId; name: string } }
   | { "set-time-scale": { time_scale: TimeScale } }
   | { "set-all-accessible": { enabled: boolean } }
   | { "set-quality-limit": { quality: string | null } }
+  | { "set-major-quality": { quality: string } }
   | { "set-solver": { solver: LpSolver } }
   | { "set-mining-productivity": { productivity: number } }
   | { "set-context": { context: string | null } }
@@ -358,8 +365,7 @@ export type CleanupAction = "remove-unused" | "remove-unsolvable" | "sort-by-sol
 
 export type FactoryContextAction =
   | { "set-planet": { planet: string | null } }
-  | { "set-surface": { surface: string | null } }
-  | { "set-major-quality": { quality: string } };
+  | { "set-surface": { surface: string | null } };
 
 export type FactoryAction =
   | { "set-name": { name: string } }
@@ -380,12 +386,32 @@ export type FactoryAction =
 //   { scope: "project", action: { project: 1, action: {...} } }
 // (newtype variants like Application put the payload directly under
 // "action").  Keep in sync with crates/metatorio-runtime/src/message.rs.
+export type UniverseAction =
+  | { "add-local-mechanic": { location: Location; kind: MechanicKind } }
+  | { "add-transfer": { location: Location; item: IdWithQuality } }
+  | { "remove-mechanic": { mechanic: MechanicId } }
+  | { "reorder-mechanic": { mechanic: MechanicId; position: number } }
+  | { "set-mechanic-enabled": { mechanic: MechanicId; enabled: boolean } }
+  | { "set-strict-source": { strict: boolean } }
+  | { "set-strict-sink": { strict: boolean } }
+  | { "set-local-mechanic": { mechanic: MechanicId; mechanic_json: string } }
+  | { mechanic: { mechanic: MechanicId; action: MechanicAction } }
+  | { "add-target": { flow: LocatedDualVar; amount: number } }
+  | { "remove-target": { target: TargetId } }
+  | { "set-target-flow": { target: TargetId; flow: LocatedDualVar } }
+  | { "set-target-amount": { target: TargetId; amount: number } }
+  | { "reorder-target": { target: TargetId; position: number } };
+
 export type AppMessage =
   | { scope: "application"; action: ApplicationAction }
   | { scope: "project"; action: { project: ProjectId; action: ProjectAction } }
   | {
       scope: "factory";
       action: { project: ProjectId; factory: FactoryId; action: FactoryAction };
+    }
+  | {
+      scope: "universe";
+      action: { project: ProjectId; universe: UniverseId; action: UniverseAction };
     }
   // 撤销/重做与普通编辑走同一条 dispatch 管线（GUI/MCP 统一）。
   | { scope: "history"; action: "undo" | "redo" };
@@ -405,6 +431,7 @@ export interface ProjectDocument {
   /** 项目绑定的游戏上下文（缓存 id）；null = 跟随应用当前激活的上下文。 */
   context_id: string | null;
   factories: FactoryDocument[];
+  universes: UniverseDocument[];
 }
 
 export interface PlanningPreferences {
@@ -472,11 +499,68 @@ export interface ProjectSettings {
   mining_productivity: number;
   all_accessible: boolean;
   quality_limit: string | null;
+  /** 项目级主品质：所有工厂/宇宙工厂共享。 */
+  major_quality: string;
   /** 项目级 LP 后端。旧文档缺省为 Rust based（序列化 id 仍为 rust-certified）。 */
   solver: LpSolver;
 }
 
 export type LpSolver = "clarabel" | "highs" | "microlp" | "soplex" | "rust-certified";
+
+export type Location = { kind: "planet"; name: string } | { kind: "space" };
+
+export interface LocatedDualVar {
+  location: Location;
+  flow: DualVar;
+}
+
+export type LocatedMechanic =
+  | { type: "local"; location: Location; mechanic: Mechanic }
+  | { type: "transfer"; location: Location; item: IdWithQuality };
+
+export interface UniverseMechanicEntry {
+  id: MechanicId;
+  enabled: boolean;
+  mechanic: LocatedMechanic;
+}
+
+export interface LocatedTarget {
+  id: TargetId;
+  flow: LocatedDualVar;
+  amount: number;
+}
+
+export interface UniverseDocument {
+  id: UniverseId;
+  name: string;
+  mechanics: UniverseMechanicEntry[];
+  targets: LocatedTarget[];
+  strict_source: boolean;
+  strict_sink: boolean;
+}
+
+export interface LocatedMechanicSolution {
+  mechanic: MechanicId;
+  location: Location;
+  amount: number;
+  rate: number;
+  cost: number;
+}
+
+export interface LocatedFlow {
+  flow: LocatedDualVar;
+  amount: number;
+  rate: number;
+}
+
+export interface UniverseSolveResult {
+  project: ProjectId;
+  universe: UniverseId;
+  status:
+    | { status: "solved"; cost: number; flows: LocatedFlow[]; mechanics: LocatedMechanicSolution[] }
+    | { status: "not-solved"; description: string; no_provider: LocatedDualVar[]; no_consumer: LocatedDualVar[] };
+  report: SolveDiagnostics;
+}
 
 export interface FactoryDocument {
   id: FactoryId;
@@ -493,7 +577,6 @@ export interface FactoryDocument {
 export interface FactorySettings {
   planet: string | null;
   surface: string | null;
-  major_quality: string;
   /** 遗留字段：只由旧版 egui 工程写入，当前无读取方；不镜像 `set-debug` 动作。 */
   debug: boolean;
 }
@@ -588,6 +671,7 @@ export interface DispatchResult {
   created: {
     projects: ProjectId[];
     factories: FactoryId[];
+    universes: UniverseId[];
     mechanics: MechanicId[];
     targets: TargetId[];
     target_expressions: number[];

@@ -1216,12 +1216,11 @@ fn auto_plan_body_messages(
         });
     }
     if let Some(quality) = &params.major_quality {
-        messages.push(AppMessage::Factory {
+        messages.push(AppMessage::Project {
             project,
-            factory,
-            action: FactoryAction::Context(FactoryContextAction::SetMajorQuality {
+            action: ProjectAction::SetMajorQuality {
                 quality: quality.clone(),
-            }),
+            },
         });
     }
     for (flow, amount) in targets {
@@ -1844,7 +1843,7 @@ fn factory_summary(project: &metatorio_runtime::ProjectDocument) -> Vec<serde_js
                 "name": factory.name,
                 "planet": factory.settings.planet,
                 "surface": factory.settings.surface,
-                "major_quality": factory.settings.major_quality,
+                "major_quality": project.settings.major_quality,
                 "strict_source": factory.strict_source,
                 "strict_sink": factory.strict_sink,
                 "mechanics": factory.mechanics.len(),

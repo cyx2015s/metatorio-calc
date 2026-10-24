@@ -15,17 +15,19 @@ pub mod planet;
 pub mod prototype;
 pub mod solve;
 pub mod state;
+pub mod universe;
 pub mod validate;
 
 pub use diagnostic::Diagnostic;
 pub use document::{
     AppDocument, AutoBeaconPlan, DOCUMENT_SCHEMA_VERSION, ExternalInput, FactoryDocument,
-    FactorySettings, FlowTarget, InfiniteTechLevel, MechanicEntry, MechanicKind, Milestone,
-    PlanningPreferences, ProjectDocument, ProjectSettings, RecipeProductivity, TargetExpression,
-    TargetTerm, TimeScale,
+    FactorySettings, FlowTarget, InfiniteTechLevel, LocatedTarget, MechanicEntry, MechanicKind,
+    Milestone, PlanningPreferences, ProjectDocument, ProjectSettings, RecipeProductivity,
+    TargetExpression, TargetTerm, TimeScale, UniverseDocument, UniverseMechanicEntry,
 };
 pub use id::{
     ExternalInputId, FactoryId, MechanicId, ProjectId, TargetExpressionId, TargetId, TargetTermId,
+    UniverseId,
 };
 pub use message::*;
 pub use metatorio_solver::LpSolver;
@@ -36,3 +38,6 @@ pub use solve::{
     write_document_file,
 };
 pub use state::{DispatchResult, HistoryFocus, HistoryStatus, RuntimeError, RuntimeState};
+pub use universe::{
+    LocatedFlow, LocatedMechanicSolution, UniverseSolveResult, UniverseSolveStatus, solve_universe,
+};

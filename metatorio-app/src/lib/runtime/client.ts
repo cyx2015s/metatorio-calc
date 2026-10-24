@@ -20,6 +20,8 @@ import type {
   Milestone,
   PrototypeDetail,
   SolveResult,
+  UniverseSolveResult,
+  UniverseId,
   RuntimeDiagnostic,
 } from "./types";
 
@@ -42,6 +44,10 @@ export async function dispatch(message: AppMessage): Promise<DispatchResult> {
 
 export async function getDocument(): Promise<AppDocument> {
   return call("get_document");
+}
+
+export async function solveUniverse(project: number, universe: UniverseId): Promise<UniverseSolveResult> {
+  return call("solve_universe", { project, universe });
 }
 
 /** Native save dialog; null means cancelled, a path means writing succeeded. */

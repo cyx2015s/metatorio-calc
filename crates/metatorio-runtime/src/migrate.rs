@@ -73,7 +73,7 @@ pub fn migrate_old_project(
         .collect::<Vec<_>>();
 
     Ok(json!({
-        "schema_version": 1,
+        "schema_version": 2,
         "projects": [{
             "id": 1,
             "name": name,

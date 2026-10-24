@@ -3356,6 +3356,41 @@ pub(crate) async fn solve_factory_offlock(
         .await
 }
 
+/// 锁外求解一个宇宙工厂：锁内只取快照，重型 LP 在阻塞线程池执行。
+pub async fn solve_universe_offlock(
+    host: &Arc<dyn Host>,
+    _state: &AppState,
+    project: metatorio_runtime::ProjectId,
+    universe: metatorio_runtime::UniverseId,
+) -> Result<metatorio_runtime::UniverseSolveResult, String> {
+    let host = host.clone();
+    tokio::task::spawn_blocking(move || {
+        let runtime = host
+            .state()
+            .runtime
+            .lock()
+            .map_err(|_| "runtime 锁已损坏（poisoned）".to_string())?;
+        let snapshot = runtime
+            .project_snapshot(project)
+            .map_err(|error| error.to_string())?;
+        let universe_doc = runtime
+            .state
+            .universe(project, universe)
+            .map_err(|error| error.to_string())?
+            .clone();
+        let accessibility = snapshot.resolve_accessibility();
+        drop(runtime);
+        metatorio_runtime::solve_universe(
+            &snapshot.store,
+            &snapshot.project_doc,
+            &universe_doc,
+            &accessibility,
+        )
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 /// 一条（或一组嵌套）命令的执行结果。
 ///
 /// 失败时 GUI 侧已经 `emit` 了错误事件；`errors` 是给**发起方**（MCP 工具、
@@ -6048,12 +6083,11 @@ mod tests {
             })
             .unwrap();
         runtime
-            .dispatch(AppMessage::Factory {
+            .dispatch(AppMessage::Project {
                 project,
-                factory,
-                action: FactoryAction::Context(FactoryContextAction::SetMajorQuality {
+                action: ProjectAction::SetMajorQuality {
                     quality: "legendary".to_string(),
-                }),
+                },
             })
             .unwrap();
 
@@ -6168,12 +6202,11 @@ mod tests {
                 })
                 .unwrap();
             runtime
-                .dispatch(AppMessage::Factory {
+                .dispatch(AppMessage::Project {
                     project,
-                    factory,
-                    action: FactoryAction::Context(FactoryContextAction::SetMajorQuality {
+                    action: ProjectAction::SetMajorQuality {
                         quality: "legendary".to_string(),
-                    }),
+                    },
                 })
                 .unwrap();
             runtime

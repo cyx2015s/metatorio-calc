@@ -194,7 +194,7 @@ async fn run_case(
             factory.settings.planet.as_deref(),
             Some(item.planet.as_str())
         );
-        assert_eq!(factory.settings.major_quality, config.major);
+        assert_eq!(project.settings.major_quality, config.major);
         assert_eq!(
             factory.targets[0].flow,
             DualVar::Item(IdWithQuality::new(&item.item, config.target))

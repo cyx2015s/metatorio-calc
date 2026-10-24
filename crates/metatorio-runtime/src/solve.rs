@@ -529,7 +529,7 @@ impl Runtime {
 
     /// 导入一个已解析的工程 JSON（迁移 + 追加到当前文档）。锁内调用。
     pub fn import_document_value(&mut self, value: serde_json::Value) -> Result<(), RuntimeError> {
-        let document: AppDocument = if crate::migrate::is_old_project_format(&value) {
+        let mut document: AppDocument = if crate::migrate::is_old_project_format(&value) {
             // 当前激活上下文 → 品质顺序 + 绑定 id + 里程碑节点分类。
             let context_id = self.active_context.clone();
             let store = context_id
@@ -552,6 +552,7 @@ impl Runtime {
             serde_json::from_value(value)
                 .map_err(|error| RuntimeError::DataLoad(error.to_string()))?
         };
+        document.migrate_legacy_major_quality();
         self.state.import_projects(&document);
         Ok(())
     }
@@ -650,6 +651,24 @@ impl Runtime {
         }
         self.cache_accessibility(project, accessibility);
         true
+    }
+
+    /// 求解一个宇宙工厂（项目级设置 + 地点环境 + 全部 located mechanics）。
+    pub fn solve_universe(
+        &self,
+        project: ProjectId,
+        universe: crate::id::UniverseId,
+    ) -> Result<crate::universe::UniverseSolveResult, RuntimeError> {
+        let snapshot = self.project_snapshot(project)?;
+        let universe_doc = self.state.universe(project, universe)?.clone();
+        let accessibility = snapshot.resolve_accessibility();
+        crate::universe::solve_universe(
+            &snapshot.store,
+            &snapshot.project_doc,
+            &universe_doc,
+            &accessibility,
+        )
+        .map_err(RuntimeError::InvalidValue)
     }
 
     /// 项目级读取快照（不含工厂）：供可达性/产能/里程碑等**只读重计算**
@@ -1123,7 +1142,7 @@ pub fn plan_auto_plan_with_progress(
         enumerate_modules: project_doc.planning.enumerate_modules.clone(),
         enumerate_beacons: project_doc.planning.enumerate_beacons.clone(),
         quality_limit: game.max_quality,
-        major_quality: quality_level(&factory_doc.settings.major_quality),
+        major_quality: quality_level(&project_doc.settings.major_quality),
         planet: factory_doc.settings.planet.clone(),
         surface: factory_doc.settings.surface.clone(),
         accessibility: Some(accessibility.clone()),
@@ -1434,7 +1453,9 @@ pub fn mechanic_usage(result: &SolveResult) -> Option<HashMap<MechanicId, f64>> 
 fn message_project(message: &AppMessage) -> Option<ProjectId> {
     match message {
         AppMessage::Application(_) | AppMessage::History(_) => None,
-        AppMessage::Project { project, .. } | AppMessage::Factory { project, .. } => Some(*project),
+        AppMessage::Project { project, .. }
+        | AppMessage::Factory { project, .. }
+        | AppMessage::Universe { project, .. } => Some(*project),
     }
 }
 
@@ -2751,10 +2772,10 @@ mod tests {
         }
         let revision = runtime.state.revision;
         // 品质由调用方给出——GUI 传的就是当前工厂的主品质。
-        let factory_quality = |runtime: &Runtime| {
+        let project_quality = |runtime: &Runtime| {
             runtime
                 .state
-                .factory(project, factory)
+                .project(project)
                 .unwrap()
                 .settings
                 .major_quality
@@ -2766,7 +2787,7 @@ mod tests {
         };
 
         let result = runtime
-            .dispatch(use_best(factory_quality(&runtime)))
+            .dispatch(use_best(project_quality(&runtime)))
             .unwrap();
 
         let enumerated = |runtime: &Runtime| {
@@ -2808,26 +2829,23 @@ mod tests {
 
         // 幂等：同一仓库 + 同一品质 → 集合不变 → 无变化、无副作用命令。
         let again = runtime
-            .dispatch(use_best(factory_quality(&runtime)))
+            .dispatch(use_best(project_quality(&runtime)))
             .unwrap();
         assert!(!again.changed, "集合未变不应报 changed");
         assert!(again.commands.is_empty(), "{:?}", again.commands);
 
         // 换工厂主品质（GUI 的品质来源）→ 枚举列表按新品质重写。
         runtime
-            .dispatch(AppMessage::Factory {
+            .dispatch(AppMessage::Project {
                 project,
-                factory,
-                action: crate::message::FactoryAction::Context(
-                    crate::message::FactoryContextAction::SetMajorQuality {
-                        quality: "rare".to_string(),
-                    },
-                ),
+                action: crate::message::ProjectAction::SetMajorQuality {
+                    quality: "rare".to_string(),
+                },
             })
             .unwrap();
-        assert_eq!(factory_quality(&runtime), "rare");
+        assert_eq!(project_quality(&runtime), "rare");
         runtime
-            .dispatch(use_best(factory_quality(&runtime)))
+            .dispatch(use_best(project_quality(&runtime)))
             .unwrap();
         assert!(
             enumerated(&runtime)
@@ -2847,7 +2865,7 @@ mod tests {
             },
         );
         runtime
-            .dispatch(use_best(factory_quality(&runtime)))
+            .dispatch(use_best(project_quality(&runtime)))
             .unwrap();
         assert!(
             enumerated(&runtime)

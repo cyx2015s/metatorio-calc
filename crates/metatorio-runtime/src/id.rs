@@ -36,6 +36,7 @@ macro_rules! id_type {
 
 id_type!(ProjectId);
 id_type!(FactoryId);
+id_type!(UniverseId);
 id_type!(MechanicId);
 id_type!(TargetId);
 id_type!(TargetExpressionId);
