@@ -5,11 +5,12 @@ edition = "2024"
 
 [features]
 default = ["all-lp"]
-all-lp = ["clarabel", "highs", "microlp", "rust-lp"]
+all-lp = ["clarabel", "highs", "microlp", "rust-lp", "soplex"]
 clarabel = ["metatorio-solver/clarabel", "metatorio-runtime/clarabel"]
 highs = ["metatorio-solver/highs", "metatorio-runtime/highs"]
 microlp = ["metatorio-solver/microlp", "metatorio-runtime/microlp"]
 rust-lp = ["metatorio-solver/rust-lp", "metatorio-runtime/rust-lp"]
+soplex = ["metatorio-solver/soplex", "metatorio-runtime/soplex"]
 lp-experiments = ["highs", "rust-lp", "metatorio-solver/lp-experiments"]
 
 # GUI 无关的 shell 层：状态、命令/副作用循环、MCP 服务端。

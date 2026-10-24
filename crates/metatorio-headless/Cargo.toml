@@ -9,11 +9,12 @@ description = "切向量化：纯 MCP 服务（无 GUI，不链接 tauri/webview
 
 [features]
 default = ["all-lp"]
-all-lp = ["clarabel", "highs", "microlp", "rust-lp"]
+all-lp = ["clarabel", "highs", "microlp", "rust-lp", "soplex"]
 clarabel = ["metatorio-shell/clarabel"]
 highs = ["metatorio-shell/highs"]
 microlp = ["metatorio-shell/microlp"]
 rust-lp = ["metatorio-shell/rust-lp"]
+soplex = ["metatorio-shell/soplex"]
 
 [dependencies]
 metatorio-shell = { path = "../metatorio-shell", default-features = false }

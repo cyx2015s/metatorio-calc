@@ -1547,6 +1547,7 @@
                   .catch(() => {})}
             >
               <option value="highs">HiGHS（推荐）</option>
+              <option value="soplex">SoPlex</option>
               <option value="clarabel">Clarabel</option>
               <option value="microlp">microlp</option>
               <option value="rust-certified">Rust based</option>

@@ -1,0 +1,1 @@
+CXXFLAGS        +=      -fp-model=precise -std=c++14

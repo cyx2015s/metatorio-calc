@@ -2,18 +2,26 @@
 
 Production planning uses backend-independent variables, sparse expressions and
 constraints from `lp_model`. A project selects its LP backend in project
-settings; the default build compiles four choices:
+settings; the default build enables five choices:
 
 - `clarabel` (pure Rust interior point)
 - `highs` (native simplex)
 - `microlp` (pure Rust simplex)
+- `soplex` (bundled patched SoPlex, floating-point MPS path)
 - `rust-certified` (displayed as `Rust based`; legacy pure Rust path)
+
+The SoPlex option builds the vendored `vendor/soplex-sys` patch (C++17, MSVC
+exceptions, Windows library-name alias), then writes a sparse MPS file and reads
+it through SoPlex's file reader. This is a
+floating-point path; rational exact mode needs an exact-capable SoPlex build and
+is not used here.
 
 ```powershell
 cargo build --release -p metatorio-headless
 cargo test -p metatorio-solver --lib
 # Compile one backend only, for example:
 cargo check -p metatorio-solver --no-default-features --features microlp
+
 ```
 
 The adapter no longer performs a post-solve original-model check, certificate

@@ -476,7 +476,7 @@ export interface ProjectSettings {
   solver: LpSolver;
 }
 
-export type LpSolver = "clarabel" | "highs" | "microlp" | "rust-certified";
+export type LpSolver = "clarabel" | "highs" | "microlp" | "soplex" | "rust-certified";
 
 export interface FactoryDocument {
   id: FactoryId;

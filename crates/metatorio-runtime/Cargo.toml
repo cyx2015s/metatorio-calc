@@ -7,11 +7,12 @@ license = "MIT"
 
 [features]
 default = ["all-lp"]
-all-lp = ["clarabel", "highs", "microlp", "rust-lp"]
+all-lp = ["clarabel", "highs", "microlp", "rust-lp", "soplex"]
 clarabel = ["metatorio-solver/clarabel"]
 highs = ["metatorio-solver/highs"]
 microlp = ["metatorio-solver/microlp"]
 rust-lp = ["metatorio-solver/rust-lp"]
+soplex = ["metatorio-solver/soplex"]
 
 [dependencies]
 metatorio-data = { path = "../metatorio-data" }

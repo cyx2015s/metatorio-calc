@@ -12,6 +12,7 @@ pub enum LpSolver {
     Clarabel,
     Highs,
     Microlp,
+    Soplex,
     /// Legacy Rust path. The serialized id remains `rust-certified` so existing
     /// project files keep loading; `rust-based` is accepted as an alias.
     #[serde(rename = "rust-certified", alias = "rust-based")]
@@ -28,6 +29,8 @@ impl Default for LpSolver {
             Self::Clarabel
         } else if cfg!(feature = "microlp") {
             Self::Microlp
+        } else if cfg!(feature = "soplex") {
+            Self::Soplex
         } else {
             Self::RustBased
         }
@@ -35,13 +38,20 @@ impl Default for LpSolver {
 }
 
 impl LpSolver {
-    pub const ALL: [Self; 4] = [Self::Clarabel, Self::Highs, Self::Microlp, Self::RustBased];
+    pub const ALL: [Self; 5] = [
+        Self::Clarabel,
+        Self::Highs,
+        Self::Microlp,
+        Self::Soplex,
+        Self::RustBased,
+    ];
 
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Clarabel => "clarabel",
             Self::Highs => "highs",
             Self::Microlp => "microlp",
+            Self::Soplex => "soplex",
             Self::RustBased => "rust-certified",
         }
     }
@@ -51,6 +61,7 @@ impl LpSolver {
             Self::Clarabel => "Clarabel",
             Self::Highs => "HiGHS",
             Self::Microlp => "microlp",
+            Self::Soplex => "SoPlex",
             Self::RustBased => "Rust based",
         }
     }
@@ -60,6 +71,7 @@ impl LpSolver {
             Self::Clarabel => cfg!(feature = "clarabel"),
             Self::Highs => cfg!(feature = "highs"),
             Self::Microlp => cfg!(feature = "microlp"),
+            Self::Soplex => cfg!(feature = "soplex"),
             Self::RustBased => cfg!(feature = "rust-lp"),
         }
     }
@@ -86,6 +98,7 @@ impl std::str::FromStr for LpSolver {
             "clarabel" => Ok(Self::Clarabel),
             "highs" => Ok(Self::Highs),
             "microlp" => Ok(Self::Microlp),
+            "soplex" => Ok(Self::Soplex),
             "rust-certified" | "rust-based" => Ok(Self::RustBased),
             _ => Err(format!("unknown LP solver: {value}")),
         }

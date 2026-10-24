@@ -16,11 +16,12 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]
 default = ["all-lp"]
-all-lp = ["clarabel", "highs", "microlp", "rust-lp"]
+all-lp = ["clarabel", "highs", "microlp", "rust-lp", "soplex"]
 clarabel = ["metatorio-runtime/clarabel", "metatorio-shell/clarabel"]
 highs = ["metatorio-runtime/highs", "metatorio-shell/highs"]
 microlp = ["metatorio-runtime/microlp", "metatorio-shell/microlp"]
 rust-lp = ["metatorio-runtime/rust-lp", "metatorio-shell/rust-lp"]
+soplex = ["metatorio-runtime/soplex", "metatorio-shell/soplex"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

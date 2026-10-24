@@ -9,11 +9,17 @@
 | `clarabel` | Clarabel | 纯 Rust 内点法 |
 | `highs` | HiGHS | 原生单纯形 |
 | `microlp` | microlp | 纯 Rust 单纯形 |
+| `soplex` | SoPlex | 内置 patched `soplex-sys`，MPS 浮点路径 |
 | `rust-certified` | Rust based（序列化 id 仍为 `rust-certified`） | 当前仍保留内部证书 |
 
-默认构建启用四个 feature。新项目使用编译进来的首选后端（有 HiGHS 时默认
-`highs`，否则 Clarabel / microlp / Rust based）；旧文档没有 `solver`
+默认构建启用五个 feature。新项目使用编译进来的首选后端（有 HiGHS 时默认
+`highs`，否则 Clarabel / microlp / SoPlex / Rust based）；旧文档没有 `solver`
 字段时按 Rust based（序列化 id `rust-certified`）解释。
+
+SoPlex 选项通过本地 `vendor/soplex-sys` patch 内置编译（C++17、MSVC `/EHsc`、
+Windows `libsoplex.lib` 链接名修正），适配器写稀疏 MPS 并走 SoPlex 的 file
+reader。这里是**浮点 SoPlex**，不是 exact rational 模式；精确模式需要带 GMP
+的 SoPlex 构建，当前未接入。
 
 ## 不再做的事
 
@@ -31,16 +37,18 @@
 ## 构建
 
 ```powershell
-# 四个后端
+# 五个后端
 cargo build -p metatorio-headless
 
 # 只编一个纯 Rust 后端
 cargo build -p metatorio-headless --no-default-features --features microlp
+
 ```
 
 ## 代码入口
 
 - `metatorio-solver/src/lp_solver.rs`：枚举、feature 可用性、默认值；
-- `metatorio-solver/src/lp.rs`：四个后端的直接分发；
+- `metatorio-solver/src/lp.rs`：五个后端的直接分发；
+- `metatorio-solver/src/soplex_backend.rs`：SoPlex MPS 适配；
 - `metatorio-runtime/src/document.rs`：项目设置；
 - `metatorio-app/src/routes/+page.svelte`：项目设置中的后端下拉框。

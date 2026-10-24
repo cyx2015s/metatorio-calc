@@ -7,10 +7,11 @@ license = "MIT"
 
 [features]
 default = ["all-lp"]
-all-lp = ["clarabel", "highs", "microlp", "rust-lp"]
+all-lp = ["clarabel", "highs", "microlp", "rust-lp", "soplex"]
 clarabel = ["dep:good_lp", "good_lp/clarabel"]
 highs = ["dep:good_lp", "good_lp/highs", "dep:highs", "dep:highs-sys"]
 microlp = ["dep:good_lp", "good_lp/microlp"]
+soplex = ["dep:soplex-rs"]
 rust-lp = ["rational-lp", "dep:serde_json", "dep:num-rational", "dep:num-traits"]
 rational-lp = ["dep:metatorio-lp"]
 lp-experiments = ["highs", "rust-lp"]
@@ -29,6 +30,7 @@ serde_json = { version = "1", optional = true }
 num-rational = { version = "0.4", optional = true }
 num-traits = { version = "0.2", optional = true }
 metatorio-lp = { path = "../metatorio-lp", optional = true }
+soplex-rs = { version = "0.3.4", optional = true }
 
 [[example]]
 name = "lp_replay"

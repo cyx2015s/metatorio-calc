@@ -94,11 +94,11 @@ impl LpSolution {
 }
 
 /// 解析后的一行约束：sum(coeff * x) {==,<=} rhs（rhs = -表达式常数项）。
-struct ParsedRow {
-    is_equality: bool,
-    rhs: f64,
+pub(crate) struct ParsedRow {
+    pub(crate) is_equality: bool,
+    pub(crate) rhs: f64,
     /// (变量下标, 系数)
-    terms: Vec<(usize, f64)>,
+    pub(crate) terms: Vec<(usize, f64)>,
 }
 
 #[cfg(any(feature = "clarabel", feature = "highs", feature = "microlp"))]
@@ -234,7 +234,9 @@ mod good_lp_backend {
                 #[cfg(not(feature = "microlp"))]
                 return Err(ResolutionError::Str(solver.unavailable_reason()));
             }
-            LpSolver::RustBased => Err(ResolutionError::Str(solver.unavailable_reason())),
+            LpSolver::Soplex | LpSolver::RustBased => {
+                Err(ResolutionError::Str(solver.unavailable_reason()))
+            }
         }
     }
 }
@@ -364,6 +366,30 @@ fn solve_lp_impl(
     #[cfg(feature = "rust-lp")]
     if solver == LpSolver::RustBased {
         return solve_rust_backend(minimise, defs, orig_vars, objective, rows, labels, solver);
+    }
+
+    #[cfg(feature = "soplex")]
+    if solver == LpSolver::Soplex {
+        let values = crate::soplex_backend::solve(&defs, &objective, &rows)?;
+        crate::control::check_cancelled().map_err(ResolutionError::Str)?;
+        let cost = objective
+            .iter()
+            .map(|(index, coeff)| coeff * values[*index])
+            .sum::<f64>()
+            + minimise.constant();
+        let variables_used = values.iter().filter(|value| **value != 0.0).count();
+        return Ok(assemble(
+            values,
+            vec![1.0; rows.len()],
+            cost,
+            SolveReport {
+                variables_before: defs.len(),
+                variables_after: variables_used,
+                solver,
+                ..SolveReport::default()
+            },
+            &orig_vars,
+        ));
     }
 
     #[cfg(any(feature = "clarabel", feature = "highs", feature = "microlp"))]
@@ -517,6 +543,7 @@ mod tests {
                     LpSolver::Clarabel => cfg!(feature = "clarabel"),
                     LpSolver::Highs => cfg!(feature = "highs"),
                     LpSolver::Microlp => cfg!(feature = "microlp"),
+                    LpSolver::Soplex => cfg!(feature = "soplex"),
                     LpSolver::RustBased => cfg!(feature = "rust-lp"),
                 }
             );

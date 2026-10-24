@@ -16,6 +16,8 @@ pub mod lp_model;
 #[cfg(feature = "rust-lp")]
 mod lp_row_generation;
 pub mod lp_solver;
+#[cfg(feature = "soplex")]
+mod soplex_backend;
 #[cfg(feature = "rational-lp")]
 pub use metatorio_lp as lp_rational;
 pub mod solver;

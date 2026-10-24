@@ -13,6 +13,11 @@ members = [
     "metatorio-app/src-tauri",
 ]
 
+[patch.crates-io]
+# Locally patched SoPlex 7.1.2 build: C++17/EHsc on MSVC and the
+# libsoplex.lib -> soplex.lib link-name fix. See vendor/soplex-sys/README.metatorio.md.
+soplex-sys = { path = "vendor/soplex-sys" }
+
 # The default LP backend performs large floating and rational calculations.
 # Keep its hot path optimized in desktop development builds as well.
 [profile.dev.package.metatorio-lp]

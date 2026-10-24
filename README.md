@@ -53,7 +53,7 @@
 | 组件 | 版本 | 用途 | 什么时候需要 |
 | --- | --- | --- | --- |
 | Rust | **≥ 1.85**（edition 2024；CI 用 stable） | 求解器内核（`crates/metatorio-solver` 等）+ Tauri 后端 | 编译一切 |
-| C++ 编译器 | 支持 C++11 即可（MSVC 2022 / GCC / Clang） | 编译默认构建中的 HiGHS 后端 | 默认功能或启用 `highs` 时 |
+| C++ 编译器 | 支持 C++11 即可（MSVC 2022 / GCC / Clang） | 编译默认构建中的 HiGHS / SoPlex 后端 | 默认功能或启用 `highs` / `soplex` 时 |
 | CMake | **≥ 3.15**（实测 4.1 可用） | HiGHS 的构建系统 | 同上 |
 | Ninja（可选） | 任意 | 加速 HiGHS 的 CMake 构建 | 同上 |
 | LLVM / libclang | LLVM 14+ | `highs-sys` 用 bindgen 生成 C 绑定 | 同上 |
@@ -61,10 +61,12 @@
 | pnpm | 9.x | 前端包管理 | 前端 / 打包 |
 | Tauri v2 系统库 | 见下 | 桌面壳 | Linux 打包 |
 
-> 默认构建编译四个项目级后端：Clarabel、HiGHS、microlp 和旧的
+> 默认构建启用五个项目级后端：Clarabel、HiGHS、microlp、SoPlex 和旧的
 > `Rust based`（序列化 id 仍为 `rust-certified`）。新项目默认使用 HiGHS；
-> 旧文档没有 `solver` 字段时沿用 Rust based。HiGHS 会通过 CMake 编译内置源码，再用 bindgen 生成绑定，
-> 因此需要上表的 C++ / CMake / LLVM。纯 Rust 构建可传
+> 旧文档没有 `solver` 字段时沿用 Rust based。HiGHS 和 SoPlex 都会通过 CMake
+> 编译内置 C++ 源码；SoPlex 使用本地 `vendor/soplex-sys` patch 修正 C++17、
+> /EHsc 和 Windows 库名。因此默认构建需要上表的 C++ / CMake / LLVM。
+> 纯 Rust 构建可传
 > `--no-default-features --features clarabel,microlp,rust-lp`，或只启用一个后端。
 > 后端在项目设置中选择，不再读取 `METATORIO_LP_BACKEND`。
 
