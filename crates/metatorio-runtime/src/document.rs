@@ -287,6 +287,14 @@ impl Default for LocatedTargetTerm {
     }
 }
 
+/// 宇宙工厂的手动外部输入；成本覆盖同地点的隐式来源。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct LocatedExternalInput {
+    pub id: ExternalInputId,
+    pub flow: LocatedDualVar,
+    pub penalty: f64,
+}
+
 /// 跨地点联合规划的宇宙工厂。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -296,6 +304,7 @@ pub struct UniverseDocument {
     pub mechanics: Vec<UniverseMechanicEntry>,
     pub targets: Vec<LocatedTarget>,
     pub target_expressions: Vec<LocatedTargetExpression>,
+    pub external_inputs: Vec<LocatedExternalInput>,
     pub strict_source: bool,
     pub strict_sink: bool,
 }
@@ -308,6 +317,7 @@ impl Default for UniverseDocument {
             mechanics: Vec::new(),
             targets: Vec::new(),
             target_expressions: Vec::new(),
+            external_inputs: Vec::new(),
             strict_source: false,
             strict_sink: false,
         }

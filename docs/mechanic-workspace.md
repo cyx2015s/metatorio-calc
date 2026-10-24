@@ -117,6 +117,18 @@ MechanicWorkspace / MechanicListView / MechanicNetworkView 不区分独立 UI �
 宇宙编辑按 180ms 防抖自动重算；普通文档刷新不会无条件丢弃宇宙求解结果。
 自动规划回写、撤销及外部消息改变宇宙数据时失效缓存，迟到结果不能覆盖后续编辑。
 
+宇宙外部输入以 `LocatedExternalInput { id, flow: LocatedDualVar, penalty }` 存入
+`UniverseDocument.external_inputs`，旧文件缺失该字段时为空。手动输入按完整的地点、
+品质、温度流键覆盖隐式来源；不同地点互不覆盖。新增、编辑、排序和删除走宇宙消息，
+参与撤销历史与 ID 分配/导入/克隆，自动规划保留这些来源与成本。没有机制而只有外部
+输入的目标也允许进入 LP。极高成本仍只是抑制来源，不是硬禁止。
+
+`UniverseInputsPanel` 显示 `universe_preview` 的隐式来源，修改成本或点击 + 可固化，
+删除手动覆盖后恢复环境来源；支持添加任意流、温度范围和指定地点的免费电力/热量。
+地点选择统一用 `LocationPicker` 的图标网格，展示使用 `LocationIcon`：星球复用既有
+planet 图标，太空使用 `space-platform-starter-pack` 图标。文字名称保留在悬停与无障碍
+标签中。网络画布用右上角地点徽标，左下角继续保留品质徽标，搜索仍匹配地点名称。
+
 新增验证：
 
 - `cargo test -p metatorio-runtime --no-default-features --features microlp --test universe_workspace --lib universe`
@@ -124,5 +136,5 @@ MechanicWorkspace / MechanicListView / MechanicNetworkView 不区分独立 UI �
 - `pnpm test:universe-workspace-browser`（真实 Svelte + 模拟 IPC，三栏、编辑、目标/表达式拖拽、
   温度、规划回写、网络节点焦点、普通工厂隔离）
 
-同时修正旧转移求解测试的整次数假设：LP 允许分数次制造，1200 运力的配方为 1000 重量
-转移只需执行 1000/1200 次，因此净运力应为零，而不是强行留下 200；生产规则未改变。
+转移求解测试验证运力收支和非负约束：LP 允许分数次制造，1200 运力的配方为 1000 重量
+转移只需执行 1000/1200 次，但零成本等价解也可以多生产运力；不强制余量恰为零或 200。

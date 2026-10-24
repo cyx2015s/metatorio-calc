@@ -10,6 +10,7 @@
   import FlowRef from './FlowRef.svelte';
   import FlowRangeEditor from './FlowRangeEditor.svelte';
   import LocationPicker from './LocationPicker.svelte';
+  import { flowSelectionInitial } from '$lib/mechanics/flow-selection';
   let {scope, targets, expressions, selectFlow, onSuggest}: {scope: MechanicScope; targets: FlowTarget[]; expressions: TargetExpression[];
     selectFlow: (request: MechanicFlowSelection & {initialName?:string;initialQuality?:string}) => void;
     onSuggest?: (flow: DualVar) => void} = $props();
@@ -25,13 +26,7 @@
       : runtime.send({scope:'factory',action:{project:destination.project,factory:destination.factory,action:normal}})).catch(() => {});
   }
   function choose(title: string, current: DualVar | undefined, apply: (flow:DualVar) => void) {
-    const item=typeof current==='object' && 'Item' in current ? current.Item as {id:string;quality:string} : undefined;
-    const fluid=typeof current==='object' && 'Fluid' in current ? current.Fluid as {name:string} : undefined;
-    const key = typeof current === 'string' ? current : current ? Object.keys(current)[0] : 'Item';
-    const tabs: Record<string,string> = {Item:'item',Entity:'entity',Fluid:'fluid',VirtualScience:'virtual-science',Electricity:'electricity',Heat:'heat',RocketSlotCapacity:'rocket-slot',RocketWeightCapacity:'rocket-weight',ItemFuel:'item-fuel',ItemFuelSupply:'item-fuel',FluidHeat:'fluid-heat',FluidFuel:'fluid-fuel',Pollution:'custom',Custom:'custom'};
-    const entity=typeof current==='object' && 'Entity' in current ? current.Entity as {id:string;quality:string} : undefined;
-    const science=typeof current==='object' && 'VirtualScience' in current ? String(current.VirtualScience) : undefined;
-    selectFlow({title,initialTab:tabs[key] ?? 'item',initialName:item?.id ?? fluid?.name ?? entity?.id ?? science,initialQuality:item?.quality ?? entity?.quality,onSelectFlow:apply});
+    selectFlow({title,...flowSelectionInitial(current),onSelectFlow:apply});
   }
   function setTarget(target:FlowTarget, flow:DualVar, location=target.location) {
     return writer()({target:{'set-flow':{target:target.id,flow}}},{'set-target-flow':{target:target.id,flow:{location:location ?? runtime.universeAddLocation,flow}}});

@@ -883,6 +883,7 @@ impl Runtime {
         let temp = UniverseDocument {
             id: universe_id,
             name: universe_doc.name.clone(),
+            external_inputs: universe_doc.external_inputs.clone(),
             mechanics: entries,
             targets: universe_doc.targets.clone(),
             target_expressions: universe_doc

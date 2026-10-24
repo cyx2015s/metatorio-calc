@@ -19,6 +19,8 @@ export interface MechanicSelection {
 export interface MechanicFlowSelection {
   title: string;
   initialTab?: string;
+  initialName?: string;
+  initialQuality?: string;
   allowedNames?: string[];
   onSelectFlow: (flow: DualVar) => void;
 }

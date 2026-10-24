@@ -15,6 +15,19 @@ test('located projection keeps IDs, location and transfer identity without mutat
   assert.deepEqual(view.target_expressions[0].terms[0].location,planet('fulgora'));
   assert.equal(JSON.stringify(universe),before);
 });
+
+test('located external inputs preserve location and replace only matching implicit network sources',()=>{
+  const flow={location:planet('nauvis'),flow:item};
+  const external={id:88,flow,penalty:9};
+  assert.deepEqual(universeView({...universe,external_inputs:[external]}).external_inputs,[{id:88,flow:item,location:planet('nauvis'),penalty:9}]);
+  const model=buildNetwork(source({locatedTargets:[flow,{location:space,flow:item}],locatedExternalInputs:[external],locatedImplicitInputs:[flow,{location:space,flow:item}]}));
+  const inputs=model.nodes.filter(n=>n.kind==='external');
+  assert.equal(inputs.length,2);
+  assert.equal(inputs.find(n=>n.location.kind==='planet').implicit,false);
+  assert.equal(inputs.find(n=>n.location.kind==='space').implicit,true);
+  assert.equal(inputs.find(n=>n.location.kind==='planet').external.penalty,9);
+  assert.ok(model.nodes.filter(n=>n.location?.kind==='planet').every(n=>n.search.includes(n.location.name)));
+});
 test('same recipe on different planets never merges and equal items never share a flow node',()=>{
   const model=buildNetwork(source({index:new Map([[1,[{location:planet('nauvis'),flow:item,amount:1}]],[2,[{location:planet('fulgora'),flow:item,amount:-1}]]])}));
   assert.equal(model.nodes.filter(n=>n.kind==='mechanic').length,3);

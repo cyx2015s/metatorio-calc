@@ -258,6 +258,25 @@ pub enum FactoryAction {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum UniverseAction {
+    AddExternalInput {
+        flow: LocatedDualVar,
+        penalty: f64,
+    },
+    RemoveExternalInput {
+        input: ExternalInputId,
+    },
+    SetExternalInputFlow {
+        input: ExternalInputId,
+        flow: LocatedDualVar,
+    },
+    SetExternalInputPenalty {
+        input: ExternalInputId,
+        penalty: f64,
+    },
+    ReorderExternalInput {
+        input: ExternalInputId,
+        position: usize,
+    },
     ReorderTargetExpression {
         expression: TargetExpressionId,
         position: usize,

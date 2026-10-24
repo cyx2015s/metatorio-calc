@@ -56,6 +56,7 @@ export interface NetworkSource {
   targets: DualVar[];
   locatedTargets?: LocatedDualVar[];
   locatedImplicitInputs?: LocatedDualVar[];
+  locatedExternalInputs?: {id:number;flow:LocatedDualVar;penalty:number}[];
   externalInputs: ExternalInput[];
   implicitInputs: DualVar[];
   localize: Localize;
@@ -132,8 +133,8 @@ export function buildNetwork(source: NetworkSource): NetworkModel {
     const id = `f:${location ? locationKey(location) + "|" : ""}${networkFlowKey(flow)}`;
     if (!nodes.has(id)) {
       const info = presentFlow(flow, source.localize);
-      nodes.set(id, {id, kind: 'flow', label: [...(location ? [locationLabel(location, source.localize)] : []), info.label, ...info.qualifiers].join('\n'),
-        search: `${info.description} ${networkFlowKey(flow)}`, utility: isUtility(flow, location), entries: [], flow, location,
+      nodes.set(id, {id, kind: 'flow', label: [info.label, ...info.qualifiers].join('\n'),
+        search: `${location ? locationLabel(location,source.localize) : ""} ${info.description} ${networkFlowKey(flow)}`, utility: isUtility(flow, location), entries: [], flow, location,
         target: targetKeys.has(scopedKey(flow, location))});
     }
     return nodes.get(id)!;
@@ -153,7 +154,7 @@ export function buildNetwork(source: NetworkSource): NetworkModel {
     let node = nodes.get(id);
     if (!node) {
       const ref = mechanicPrototype(m), name = source.localize(ref.kind, ref.name) || m.type;
-      node = {id, kind: 'mechanic', label: name, search: '', utility: false, entries: []};
+      node = {id, kind: 'mechanic', label: name, search: '', utility: false, entries: [], location:entry.location};
       nodes.set(id, node);
     }
     node.entries.push(entry);
@@ -169,7 +170,7 @@ export function buildNetwork(source: NetworkSource): NetworkModel {
     node.disabled = node.entries.every(entry => !entry.enabled);
     node.unused = source.solved && node.entries.every(entry => !entry.enabled || !source.solutions.get(entry.id)?.amount);
     node.search = node.entries.map(entry => `${JSON.stringify(entry.mechanic)} ${entry.id}`).join(' ') + ` ${node.label}`;
-    if (node.entries[0].location) node.label += `\n${locationLabel(node.entries[0].location, source.localize)}`;
+    if (node.location) node.search += ` ${locationLabel(node.location,source.localize)}`;
     node.label += `\n${node.entries[0].transfer ? "火箭转移" : mechanicKindLabels[node.entries[0].mechanic.type] ?? node.entries[0].mechanic.type}`;
     if (node.entries.length > 1) node.label += ` · ${node.entries.length} 个机制`;
     const qualities = networkIconQualities(node);
@@ -189,7 +190,8 @@ export function buildNetwork(source: NetworkSource): NetworkModel {
     ...source.externalInputs.map(external => ({flow: external.flow, external, implicit: false, location: undefined as Location | undefined})),
     ...source.implicitInputs.filter(flow => !source.externalInputs.some(input => networkFlowKey(input.flow) === networkFlowKey(flow)))
       .map(flow => ({flow, external: undefined, implicit: true, location: undefined as Location | undefined})),
-    ...(source.locatedImplicitInputs ?? []).map(input => ({flow: input.flow, location: input.location, external: undefined, implicit: true})),
+    ...(source.locatedExternalInputs ?? []).map(input=>({flow:input.flow.flow, location:input.flow.location, external:{...input,flow:input.flow.flow},implicit:false})),
+    ...(source.locatedImplicitInputs ?? []).filter(input=>!(source.locatedExternalInputs??[]).some(e=>scopedKey(e.flow.flow,e.flow.location)===scopedKey(input.flow,input.location))).map(input => ({flow: input.flow, location: input.location, external: undefined, implicit: true})),
   ];
   for (const input of externals) {
     if (!source.showUtilities && isUtility(input.flow)) continue;
@@ -197,7 +199,7 @@ export function buildNetwork(source: NetworkSource): NetworkModel {
     const flow = flowNode(input.flow, input.location), id = input.implicit ? `implicit:${flow.id}` : `external:${input.external!.id}`;
     const info = presentFlow(input.flow, source.localize);
     nodes.set(id, {id, kind: 'external', label: input.implicit ? '隐式输入' : '外部输入',
-      search: `${info.description} ${input.implicit ? '隐式' : '外部'}`, utility: flow.utility, entries: [], ...input});
+      search: `${input.location ? locationLabel(input.location,source.localize) : ''} ${info.description} ${input.implicit ? '隐式' : '外部'}`, utility: flow.utility, entries: [], ...input});
     edge(id, flow.id, input.flow, 'external');
   }
   // Do not union overlapping temperature intervals or fuel category sets.

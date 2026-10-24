@@ -16,18 +16,29 @@ const appRoot=path.resolve(__dirname,'..'),port=5214,url=`http://127.0.0.1:${por
   await page.addInitScript(()=>{
    const doc=window.__layoutDocument,p=doc.projects[0],planet=name=>({kind:'planet',name}),q=id=>({id,quality:'normal'}),flow={Item:q('iron-plate')};
    const local=(id,location)=>({id,enabled:true,mechanic:{type:'local',location,mechanic:structuredClone(p.factories[0].mechanics[0].mechanic)}});
-   p.universes=[{id:7,name:'宇宙工厂',strict_source:true,strict_sink:false,mechanics:[local(101,planet('nauvis')),local(102,planet('fulgora')),{id:103,enabled:true,mechanic:{type:'transfer',location:planet('nauvis'),item:q('iron-plate')}}],targets:[{id:201,flow:{location:planet('nauvis'),flow:{Fluid:{name:'water',temperature:[15,100]}}},amount:1},{id:202,flow:{location:{kind:'space'},flow},amount:2}],target_expressions:[{id:301,constant:1,terms:[{id:401,flow:{location:planet('fulgora'),flow},coefficient:1},{id:402,flow:{location:{kind:'space'},flow},coefficient:2}]}]}];
+   p.universes=[{id:7,name:'宇宙工厂',external_inputs:[],strict_source:true,strict_sink:false,mechanics:[local(101,planet('nauvis')),local(102,planet('fulgora')),{id:103,enabled:true,mechanic:{type:'transfer',location:planet('nauvis'),item:q('iron-plate')}}],targets:[{id:201,flow:{location:planet('nauvis'),flow:{Fluid:{name:'water',temperature:[15,100]}}},amount:1},{id:202,flow:{location:{kind:'space'},flow},amount:2}],target_expressions:[{id:301,constant:1,terms:[{id:401,flow:{location:planet('fulgora'),flow},coefficient:1},{id:402,flow:{location:{kind:'space'},flow},coefficient:2}]}]}];
    const u=p.universes[0],raw=window.__TAURI_INTERNALS__.invoke;let next=500;
-   window.__universeWrites=[];
+   window.__universeWrites=[];window.__locationIcons=[];
    window.__TAURI_INTERNALS__.invoke=async(command,args={})=>{
-    if(command==='solve_universe'||command==='auto_plan_universe') {
+    if(command==='icon'){
+     window.__locationIcons.push(args);
+     const canvas=document.createElement('canvas');canvas.width=canvas.height=64;const ctx=canvas.getContext('2d');
+     ctx.fillStyle=args.ty==='planet'?'#348ba8':args.name==='space-platform-starter-pack'?'#795f91':'#9b9b9b';
+     ctx.fillRect(0,0,64,64);ctx.fillStyle='#fff';ctx.font='bold 14px sans-serif';ctx.fillText(args.name.slice(0,3),6,35);
+     return Array.from(atob(canvas.toDataURL().split(',')[1]),c=>c.charCodeAt(0));
+    }
+    if(command==='solve_universe' ||command==='auto_plan_universe') {
      if(command==='auto_plan_universe'&&!u.mechanics.some(e=>e.id===104))u.mechanics.push(local(104,planet('nauvis')));
      await new Promise(r=>setTimeout(r,40));
      return {project:1,universe:7,status:{status:'solved',cost:12.345,mechanics:u.mechanics.map(e=>({mechanic:e.id,location:e.mechanic.location,amount:0.5,cost:4,rate:0.5})),flows:u.targets.map(t=>({flow:t.flow,amount:t.amount,rate:t.amount}))}};
     }
-    if(command==='universe_preview')return {mechanics:u.mechanics.map(e=>({id:e.id,error:null,flows:e.mechanic.type==='transfer'?[{flow:{location:e.mechanic.location,flow},amount:-1,rate:-1},{flow:{location:{kind:'space'},flow},amount:1,rate:1}]:[{flow:{location:e.mechanic.location,flow},amount:e.id===102?-1:1,rate:1}]})),sources:[]};
+    if(command==='universe_preview')return {mechanics:u.mechanics.map(e=>({id:e.id,error:null,flows:e.mechanic.type==='transfer'?[{flow:{location:e.mechanic.location,flow},amount:-1,rate:-1},{flow:{location:{kind:'space'},flow},amount:1,rate:1}]:[{flow:{location:e.mechanic.location,flow},amount:e.id===102?-1:1,rate:1}]})),sources:[{location:planet('nauvis'),flow},{location:planet('fulgora'),flow},{location:{kind:'space'},flow}]};
     if(command==='dispatch'&&args.message.scope==='universe'){
      const message=JSON.parse(JSON.stringify(args.message)),a=message.action.action;window.__universeWrites.push(message);
+     if(a['add-external-input'])u.external_inputs.push({id:next++,...a['add-external-input']});
+     if(a['set-external-input-penalty']){const v=a['set-external-input-penalty'];u.external_inputs.find(i=>i.id===v.input).penalty=v.penalty;}
+     if(a['set-external-input-flow']){const v=a['set-external-input-flow'];u.external_inputs.find(i=>i.id===v.input).flow=v.flow;}
+     if(a['remove-external-input'])u.external_inputs=u.external_inputs.filter(i=>i.id!==a['remove-external-input'].input);
      const find=id=>u.mechanics.find(e=>e.id===id);
      if(a['set-mechanic-enabled']){const v=a['set-mechanic-enabled'];find(v.mechanic).enabled=v.enabled;}
      if(a['set-mechanic-location']){const v=a['set-mechanic-location'];find(v.mechanic).mechanic.location=v.location;}
@@ -57,10 +68,25 @@ const appRoot=path.resolve(__dirname,'..'),port=5214,url=`http://127.0.0.1:${por
   assert.equal(await page.locator('.universe-page').count(),0);
   assert.equal(await page.locator('.mech-card').count(),3);
   await waitFor(async()=>(await page.locator('.cost-value').textContent())==='12.345');
+  const inputsPanel=page.getByRole('region',{name:'外部输入',exact:true});
+  await waitFor(async()=>(await inputsPanel.locator('.implicit').count())===3);
+  assert.equal(await inputsPanel.locator('select').count(),0);
+  await inputsPanel.locator('.implicit').first().getByRole('spinbutton').fill('2');
+  await inputsPanel.locator('.implicit').first().getByRole('spinbutton').press('Tab');
+  await waitFor(async()=>page.evaluate(()=>window.__layoutDocument.projects[0].universes[0].external_inputs.length===1));
+  await waitFor(async()=>(await inputsPanel.locator('.implicit').count())===2);
+  await inputsPanel.getByRole('button',{name:'外部输入地点',exact:true}).click();
+  await page.getByRole('dialog',{name:'外部输入地点',exact:true}).getByRole('button',{name:'太空',exact:true}).click();
+  await waitFor(async()=>page.evaluate(()=>window.__layoutDocument.projects[0].universes[0].external_inputs[0].flow.location.kind==='space'));
+  await inputsPanel.getByRole('button',{name:'移除外部输入',exact:true}).click();
+  await waitFor(async()=>(await inputsPanel.locator('.implicit').count())===3);
+  await inputsPanel.getByRole('button',{name:'+ 免费电力与热量',exact:true}).click();
+  await waitFor(async()=>page.evaluate(()=>window.__layoutDocument.projects[0].universes[0].external_inputs.length===2));
+  assert.ok(await page.evaluate(()=>window.__layoutDocument.projects[0].universes[0].external_inputs.every(i=>i.penalty===0&&i.flow.location.name==='nauvis')));
   const card=page.locator('[data-mechanic-id="101"]');
   await card.getByRole('switch').click();
   await waitFor(async()=>page.evaluate(()=>window.__universeWrites.some(w=>w.action.action['set-mechanic-enabled'])));
-  await card.getByLabel('机制地点').selectOption('fulgora');
+  await card.getByRole('button',{name:'机制地点',exact:true}).click();await page.getByRole('dialog',{name:'机制地点',exact:true}).getByRole('button',{name:'fulgora',exact:true}).click();
   await waitFor(async()=>page.evaluate(()=>window.__layoutDocument.projects[0].universes[0].mechanics[0].mechanic.location.name==='fulgora'));
   await page.mouse.move(1200,80);await page.getByRole('tooltip').waitFor({state:'detached'});
   await card.getByLabel('克隆机制').click();
@@ -87,13 +113,14 @@ const appRoot=path.resolve(__dirname,'..'),port=5214,url=`http://127.0.0.1:${por
   const canvas=page.getByRole('group',{name:'生产网络画布'});await canvas.waitFor();
   await waitFor(async()=>canvas.evaluate(el=>!!el._cyreg?.cy&&el._cyreg.cy.nodes().length>=5),600);
   const labels=await canvas.evaluate(el=>el._cyreg.cy.nodes().map(n=>n.data('label')));
-  assert.ok(labels.some(s=>s.includes('fulgora')));assert.ok(labels.some(s=>s.includes('太空')));
+  assert.ok(labels.every(s=>!s.includes('fulgora')));await waitFor(async()=>canvas.evaluate(el=>el._cyreg.cy.nodes().some(n=>String(n.style('background-width')).includes('40%'))));
+  assert.ok(await page.evaluate(()=>window.__locationIcons.some(i=>i.ty==='item'&&i.name==='space-platform-starter-pack')));
   await canvas.evaluate(el=>el._cyreg.cy.nodes().filter(n=>n.data('kind')==='mechanic').first().emit('tap'));
   await page.locator('.edit-card [data-mechanic-editor]').waitFor();
   const editing=await page.locator('.edit-card [data-mechanic-editor]').getAttribute('data-mechanic-editor');
   await page.locator('.edit-card').getByRole('switch').click();
   await waitFor(async()=>(await page.locator('.edit-card [data-mechanic-editor]').getAttribute('data-mechanic-editor'))===editing);
-  await page.locator('.edit-card').getByLabel('机制地点').selectOption('nauvis');
+  await page.locator('.edit-card').getByRole('button',{name:'机制地点',exact:true}).click();await page.getByRole('dialog',{name:'机制地点',exact:true}).getByRole('button',{name:'nauvis',exact:true}).click();
   await waitFor(async()=>(await page.locator('.edit-card [data-mechanic-editor]').getAttribute('data-mechanic-editor'))===editing);
   await waitFor(async()=>(await page.locator('.cost-value').textContent())==='12.345');
   if(process.env.UNIVERSE_NETWORK_SCREENSHOT)await page.screenshot({path:process.env.UNIVERSE_NETWORK_SCREENSHOT});

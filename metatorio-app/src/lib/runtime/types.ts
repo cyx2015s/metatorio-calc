@@ -387,6 +387,11 @@ export type FactoryAction =
 // (newtype variants like Application put the payload directly under
 // "action").  Keep in sync with crates/metatorio-runtime/src/message.rs.
 export type UniverseAction =
+  | { 'add-external-input': {flow:LocatedDualVar;penalty:number} }
+  | { 'remove-external-input': {input:ExternalInputId} }
+  | { 'set-external-input-flow': {input:ExternalInputId;flow:LocatedDualVar} }
+  | { 'set-external-input-penalty': {input:ExternalInputId;penalty:number} }
+  | { 'reorder-external-input': {input:ExternalInputId;position:number} }
   | { "reorder-target-expression": {expression: TargetExpressionId; position: number} }
   | { "reorder-target-expression-term": {expression: TargetExpressionId; term: TargetTermId; position: number} }
   | { "clone-mechanic": { mechanic: MechanicId } }
@@ -560,6 +565,7 @@ export interface UniverseDocument {
   mechanics: UniverseMechanicEntry[];
   targets: LocatedTarget[];
   target_expressions: LocatedTargetExpression[];
+  external_inputs: {id:ExternalInputId;flow:LocatedDualVar;penalty:number}[];
   strict_source: boolean;
   strict_sink: boolean;
 }
@@ -627,6 +633,7 @@ export interface TargetExpression {
 }
 
 export interface ExternalInput {
+  location?: Location;
   id: ExternalInputId;
   flow: DualVar;
   penalty: number;

@@ -839,6 +839,48 @@ impl RuntimeState {
 
         self.universe(project_id, universe_id)?;
         match action {
+            UniverseAction::AddExternalInput { flow, penalty } => {
+                if !penalty.is_finite() || penalty < 0.0 {
+                    return Err(RuntimeError::InvalidValue(
+                        "外部输入成本必须为非负有限数".into(),
+                    ));
+                }
+                let id = self.allocate_id();
+                self.universe_mut(project_id, universe_id)?
+                    .external_inputs
+                    .push(crate::document::LocatedExternalInput { id, flow, penalty });
+                let mut outcome = Outcome::meta(project_id);
+                outcome.created.external_input(id);
+                Ok(outcome)
+            }
+            UniverseAction::RemoveExternalInput { input } => {
+                let inputs = &mut self.universe_mut(project_id, universe_id)?.external_inputs;
+                let changed = remove_by_id(inputs, input)?;
+                Ok(Outcome::meta_if(changed, project_id))
+            }
+            UniverseAction::SetExternalInputFlow { input, flow } => {
+                let inputs = &mut self.universe_mut(project_id, universe_id)?.external_inputs;
+                let index = index_by_id(inputs, input)?;
+                let changed = replace(&mut inputs[index].flow, flow);
+                Ok(Outcome::meta_if(changed, project_id))
+            }
+            UniverseAction::SetExternalInputPenalty { input, penalty } => {
+                if !penalty.is_finite() || penalty < 0.0 {
+                    return Err(RuntimeError::InvalidValue(
+                        "外部输入成本必须为非负有限数".into(),
+                    ));
+                }
+                let inputs = &mut self.universe_mut(project_id, universe_id)?.external_inputs;
+                let index = index_by_id(inputs, input)?;
+                let changed = replace(&mut inputs[index].penalty, penalty);
+                Ok(Outcome::meta_if(changed, project_id))
+            }
+            UniverseAction::ReorderExternalInput { input, position } => {
+                let inputs = &mut self.universe_mut(project_id, universe_id)?.external_inputs;
+                let index = index_by_id(inputs, input)?;
+                let changed = move_item(inputs, index, position);
+                Ok(Outcome::meta_if(changed, project_id))
+            }
             UniverseAction::CloneMechanic { mechanic } => {
                 let mut entry = self
                     .universe(project_id, universe_id)?
@@ -1738,6 +1780,15 @@ impl RuntimeState {
         for target in &mut universe.targets {
             target.id = self.allocate_id();
         }
+        for input in &mut universe.external_inputs {
+            input.id = self.allocate_id();
+        }
+        for expression in &mut universe.target_expressions {
+            expression.id = self.allocate_id();
+            for term in &mut expression.terms {
+                term.id = self.allocate_id();
+            }
+        }
         universe.name.push_str(" copy");
         universe
     }
@@ -1927,6 +1978,9 @@ impl RuntimeState {
             }
             for universe in &project.universes {
                 take(universe.id.0);
+                for input in &universe.external_inputs {
+                    take(input.id.0);
+                }
                 for mechanic in &universe.mechanics {
                     take(mechanic.id.0);
                 }
@@ -1996,6 +2050,21 @@ impl RuntimeState {
                 if remap_all || self.project_contains_id(universe.id.0) {
                     universe.id = self.allocate_id();
                 }
+                for input in &mut universe.external_inputs {
+                    if remap_all || self.project_contains_id(input.id.0) {
+                        input.id = self.allocate_id();
+                    }
+                }
+                for expression in &mut universe.target_expressions {
+                    if remap_all || self.project_contains_id(expression.id.0) {
+                        expression.id = self.allocate_id();
+                    }
+                    for term in &mut expression.terms {
+                        if remap_all || self.project_contains_id(term.id.0) {
+                            term.id = self.allocate_id();
+                        }
+                    }
+                }
                 for mechanic in &mut universe.mechanics {
                     if remap_all || self.project_contains_id(mechanic.id.0) {
                         mechanic.id = self.allocate_id();
@@ -2029,6 +2098,7 @@ impl RuntimeState {
                 })
                 || p.universes.iter().any(|u| {
                     u.id.0 == id
+                        || u.external_inputs.iter().any(|i| i.id.0 == id)
                         || u.mechanics.iter().any(|m| m.id.0 == id)
                         || u.targets.iter().any(|t| t.id.0 == id)
                         || u.target_expressions
@@ -2062,6 +2132,9 @@ impl RuntimeState {
             }
             for universe in &project.universes {
                 max_id = max_id.max(universe.id.0);
+                for input in &universe.external_inputs {
+                    max_id = max_id.max(input.id.0);
+                }
                 for mechanic in &universe.mechanics {
                     max_id = max_id.max(mechanic.id.0);
                 }
@@ -3233,6 +3306,13 @@ impl HasId for FlowTarget {
 impl HasId for TargetExpression {
     type Id = TargetExpressionId;
 
+    fn id(&self) -> Self::Id {
+        self.id
+    }
+}
+
+impl HasId for crate::document::LocatedExternalInput {
+    type Id = ExternalInputId;
     fn id(&self) -> Self::Id {
         self.id
     }

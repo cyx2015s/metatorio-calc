@@ -11,6 +11,7 @@
   import { normalizeSearch } from '$lib/rich-text';
   import { iconTypeForKind, syntheticIconUrls } from './icon-types';
   import FlowRef from './FlowRef.svelte';
+  import LocationIcon from './LocationIcon.svelte';
   import MechanicEditor from './MechanicEditor.svelte';
   import MechanicFilter from './MechanicFilter.svelte';
   import SecondaryMenu from './SecondaryMenu.svelte';
@@ -53,6 +54,7 @@
   const model = $derived(buildNetwork({entries, visibleIds, index: workspace.index, solutions, solved,
     locatedTargets: [...(universeDocument?.targets.map(t => t.flow) ?? []), ...(universeDocument?.target_expressions.flatMap(e => e.terms.map(t => t.flow)) ?? [])],
     locatedImplicitInputs: locatedSources,
+    locatedExternalInputs: universeDocument?.external_inputs??[],
     targets: [...(factoryDocument?.targets.map(t => t.flow) ?? []),
       ...(factoryDocument?.target_expressions.flatMap(expression => expression.terms.map(term => term.flow)) ?? [])],
     externalInputs: factoryDocument?.external_inputs ?? [], implicitInputs: universeDocument ? [] : runtime.implicitSourcesCache,
@@ -295,16 +297,17 @@
         const qualities = networkIconQualities(node);
         const badges = qualities.length > 1 ? qualities : qualities.filter(quality => quality !== 'normal');
         const qualityUrls = await Promise.all(badges.map(quality => runtime.getIcon('quality', quality)));
+        const locationUrl = node.location ? await runtime.getIcon(node.location.kind==='planet'?'planet':'item',node.location.kind==='planet'?node.location.name:'space-platform-starter-pack') : null;
         if (url && cy && mounted && revision === generation) {
           const images = qualityUrls.filter((url): url is string => !!url);
           const badgeSize = Math.min(45, 100 / Math.max(1, images.length));
           cy.getElementById(node.id).data('icon', url).style({
-            'background-image': [url, ...images],
-            'background-fit': ['contain', ...images.map(() => 'none' as const)],
-            'background-width': ['auto', ...images.map(() => `${badgeSize}%`)],
-            'background-height': ['auto', ...images.map(() => `${badgeSize}%`)],
-            'background-position-x': ['50%', ...images.map((_, i) => `${images.length === 1 ? 0 : i * 100 / (images.length - 1)}%`)],
-            'background-position-y': ['50%', ...images.map(() => '100%')],
+            'background-image': [url, ...images, ...(locationUrl?[locationUrl]:[])],
+            'background-fit': ['contain', ...images.map(() => 'none' as const), ...(locationUrl?['none' as const]:[])],
+            'background-width': ['auto', ...images.map(() => `${badgeSize}%`), ...(locationUrl?['40%']:[])],
+            'background-height': ['auto', ...images.map(() => `${badgeSize}%`), ...(locationUrl?['40%']:[])],
+            'background-position-x': ['50%', ...images.map((_, i) => `${images.length === 1 ? 0 : i * 100 / (images.length - 1)}%`), ...(locationUrl?['100%']:[])],
+            'background-position-y': ['50%', ...images.map(() => '100%'), ...(locationUrl?['0%']:[])],
           });
         }
       }));
@@ -347,7 +350,7 @@
           <div id={searchResultsId} class="search-results" role="listbox" aria-label="网络节点搜索结果">
             {#each matches.slice(0, 100) as node, i (node.id)}
               <button id={`${searchResultsId}-${i}`} class="search-result" role="option" aria-selected={searchIndex === i}
-                onpointermove={() => searchIndex = i} onpointerdown={event => event.preventDefault()} onclick={() => choose(node.id)}>{node.label.replaceAll('\n', ' · ')}</button>
+                onpointermove={() => searchIndex = i} onpointerdown={event => event.preventDefault()} onclick={() => choose(node.id)}>{#if node.location}<LocationIcon location={node.location} size={18}/>{/if}{node.label.replaceAll('\n', ' · ')}</button>
             {:else}<span class="no-matches">没有匹配的节点</span>{/each}
           </div>
           {#if matches.length > 100}<div class="search-count">仅列出前 100 个，请搜索缩小范围。</div>{/if}
@@ -409,13 +412,14 @@
     <div class="network-details" role="dialog" aria-label="网络对象详情" tabindex="-1" bind:this={detailsPanel} style:left={`${popupLeft}px`} style:top={`${popupTop}px`}>
       <button class="icon-btn close" aria-label="关闭网络详情" onclick={() => { selectObject(); container?.focus({preventScroll: true}); }}>×</button>
       {#if selectedNode}
+        {#if selectedNode.location}<LocationIcon location={selectedNode.location}/>{/if}
         {#if selectedNode.flow}<FlowRef flow={selectedNode.flow} />{:else}<strong>{selectedNode.label.replaceAll('\n', ' · ')}</strong>{/if}
         {#if selectedNode.kind === 'external'}<p>{selectedNode.implicit ? '隐式外部输入 · 成本 0' : `手动外部输入 · 成本 ${selectedNode.external?.penalty}`}</p>{/if}
         {#if selectedNode.entries.length > 1}
           <div class="variant-options">{#each selectedNode.entries as entry (entry.id)}<button class="btn" class:active={editing?.id === entry.id} onclick={() => selectedMechanic = entry.id}>机制 #{entry.id}</button>{/each}</div>
         {/if}
         {#if editing}<div class="edit-card"><MechanicEditor entry={editing} {project} {factory} {actions} solution={solutions.get(editing.id) ?? (solved ? {amount: 0, cost: 0} : null)} /></div>{/if}
-        {#if neighbours.length}<details class="neighbours"><summary>相邻对象</summary><div class="node-options">{#each neighbours as node (node.id)}<button class="btn" onclick={() => choose(node.id)}>{node.label.replaceAll('\n', ' · ')}</button>{/each}</div></details>{/if}
+        {#if neighbours.length}<details class="neighbours"><summary>相邻对象</summary><div class="node-options">{#each neighbours as node (node.id)}<button class="btn" onclick={() => choose(node.id)}>{#if node.location}<LocationIcon location={node.location} size={18}/>{/if}{node.label.replaceAll('\n', ' · ')}</button>{/each}</div></details>{/if}
       {:else if selectedEdge}
         {#if selectedEdge.flow}<FlowRef flow={selectedEdge.flow} />{/if}
         <p>{edgeDescription(selectedEdge)}</p>

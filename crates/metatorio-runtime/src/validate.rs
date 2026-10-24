@@ -64,7 +64,9 @@ fn validate_universe(
             require_id(store, PrototypeGroup::Item, "物品", item)
         }
         UniverseAction::Mechanic { action, .. } => validate_mechanic(store, action),
-        UniverseAction::AddTarget { flow, .. } => {
+        UniverseAction::AddTarget { flow, .. }
+        | UniverseAction::AddExternalInput { flow, .. }
+        | UniverseAction::SetExternalInputFlow { flow, .. } => {
             validate_location(store, &flow.location)?;
             require_flow(store, &flow.flow)
         }

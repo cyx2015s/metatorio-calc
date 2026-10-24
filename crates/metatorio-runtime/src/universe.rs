@@ -189,6 +189,9 @@ pub(crate) fn used_locations(universe: &UniverseDocument) -> BTreeSet<Location> 
     for entry in &universe.mechanics {
         locations.insert(entry.mechanic.location().clone());
     }
+    for input in &universe.external_inputs {
+        locations.insert(input.flow.location.clone());
+    }
     for target in &universe.targets {
         locations.insert(target.flow.location.clone());
     }
@@ -443,6 +446,13 @@ pub fn solve_universe(
         for (flow, penalty) in locate_flow(location, source_flow) {
             sources.insert(flow, penalty);
         }
+    }
+    // Explicit inputs override the same located implicit source.
+    for input in &universe.external_inputs {
+        if !input.penalty.is_finite() || input.penalty < 0.0 {
+            return Err("外部输入成本必须为非负有限数".into());
+        }
+        sources.insert(input.flow.clone(), input.penalty);
     }
     let mut target: SolverFlow<LocatedDualVar> = SolverFlow::default();
     for target_entry in &universe.targets {
@@ -726,6 +736,7 @@ mod tests {
                     },
                 ],
             }],
+            external_inputs: vec![],
             strict_source: false,
             strict_sink: false,
         };
@@ -806,11 +817,17 @@ mod tests {
                 amount: 1.0,
             }],
             target_expressions: Vec::new(),
+            external_inputs: vec![],
             strict_source: false,
             strict_sink: false,
         };
         let result = solve_universe(&store, &project, &universe, &Default::default()).unwrap();
-        let UniverseSolveStatus::Solved { cost, flows, .. } = result.status else {
+        let UniverseSolveStatus::Solved {
+            cost,
+            flows,
+            mechanics,
+        } = result.status
+        else {
             panic!("transfer universe should solve: {result:?}");
         };
         assert!(cost >= 0.0);
@@ -819,13 +836,21 @@ mod tests {
                 && flow.flow.flow == DualVar::Item(item("iron-ore"))
                 && flow.amount > 0.9
         }));
-        // One craft produces 1200 capacity; the continuous LP needs only
-        // 1000/1200 crafts for this transfer, so net capacity balances to zero.
+        // The LP may choose surplus capacity among zero-cost optima.
+        // Transfers must never overdraw the local capacity.
+        let amount = |id| {
+            mechanics
+                .iter()
+                .find(|m| m.mechanic == MechanicId(id))
+                .map_or(0.0, |m| m.amount)
+        };
+        let expected_capacity = 1200.0 * amount(2) - 1000.0 * amount(4);
         assert!(
             flows.iter().any(|flow| {
                 flow.flow.location == Location::planet("nauvis")
                     && flow.flow.flow == DualVar::RocketWeightCapacity
-                    && flow.amount.abs() < 0.01
+                    && flow.amount >= -0.01
+                    && (flow.amount - expected_capacity).abs() < 0.01
             }),
             "{flows:?}"
         );
@@ -859,6 +884,7 @@ mod tests {
                 amount: 1.0,
             }],
             target_expressions: Vec::new(),
+            external_inputs: vec![],
             strict_source: false,
             strict_sink: false,
         };

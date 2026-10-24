@@ -30,6 +30,7 @@
   import FactoryTargetsPanel from "$lib/ui/FactoryTargetsPanel.svelte";
   import SolvePanel from "$lib/ui/SolvePanel.svelte";
   import LocationPicker from "$lib/ui/LocationPicker.svelte";
+  import UniverseInputsPanel from "$lib/ui/UniverseInputsPanel.svelte";
   import {universeView} from "$lib/mechanics/located";
   import { createExternalInputShortcuts, DISABLED_RESOURCE_PENALTY, FREE_ENERGY_FLOWS } from "$lib/external-input-shortcuts";
   import { createMechanicActions } from "$lib/mechanics/actions";
@@ -1142,6 +1143,7 @@
         {#if actions}<FactoryTargetsPanel scope={actions.commands.scope} {targets} expressions={targetExpressions} selectFlow={request=>flowSelector=request} onSuggest={universe ? undefined : openSuggestions} />{/if}
 
 
+        {#if universe && project}<UniverseInputsPanel project={project.id} {universe} selectFlow={request=>flowSelector={...request,respectAccessibility:false}} />{/if}
         {#if !universe}<section class="panel" aria-label="外部输入">
           <button
             class="title panel-toggle"

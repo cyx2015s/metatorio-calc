@@ -13,7 +13,7 @@ export function locatedEntries(universe: UniverseDocument): MechanicEntry[] {
 }
 export function universeView(universe: UniverseDocument): FactoryDocument {
   return {id: universe.id, name: universe.name, mechanics: locatedEntries(universe),
-    settings: {planet: null, surface: null, debug: false}, external_inputs: [],
+    settings: {planet: null, surface: null, debug: false}, external_inputs: (universe.external_inputs??[]).map(i=>({...i,location:i.flow.location,flow:i.flow.flow})),
     targets: universe.targets.map(t => ({...t, location: t.flow.location, flow: t.flow.flow})),
     target_expressions: universe.target_expressions.map(e => ({...e, terms: e.terms.map(t => ({...t, location: t.flow.location, flow: t.flow.flow}))})),
     strict_source: universe.strict_source, strict_sink: universe.strict_sink};

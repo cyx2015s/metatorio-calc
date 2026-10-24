@@ -5,7 +5,7 @@
   let { title, trigger, children, onOpenChange }: {
     title: string;
     trigger: Snippet<[() => void, boolean]>;
-    children: Snippet;
+    children: Snippet<[() => void]>;
     onOpenChange?: (open: boolean) => void;
   } = $props();
   let open = $state(false);
@@ -77,7 +77,7 @@
   <div use:portal bind:this={panel} class="secondary-menu" role="dialog" aria-label={title}
     tabindex="-1" style:left={`${left}px`} style:top={`${top}px`}>
     <header><strong>{title}</strong><button class="icon-btn" aria-label="关闭" onclick={() => close(true)}>×</button></header>
-    <div class="menu-content">{@render children()}</div>
+    <div class="menu-content">{@render children(() => close(true))}</div>
   </div>
 {/if}
 

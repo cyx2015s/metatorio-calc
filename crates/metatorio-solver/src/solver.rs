@@ -316,7 +316,7 @@ where
         mut self,
         mut progress: impl FnMut(ProblemSize),
     ) -> SolverSolution<I, R> {
-        if self.flows.is_empty() {
+        if self.flows.is_empty() && self.sources.is_empty() {
             return SolverSolution::NotSolved {
                 no_provider: vec![],
                 no_consumer: vec![],

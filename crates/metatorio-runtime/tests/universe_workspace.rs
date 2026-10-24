@@ -7,6 +7,132 @@ fn dispatch(runtime: &mut Runtime, value: Value) {
         .dispatch(serde_json::from_value::<AppMessage>(value).unwrap())
         .unwrap();
 }
+
+#[test]
+fn universe_external_inputs_override_only_the_same_location_and_survive_history_and_import() {
+    let mut runtime = Runtime::new();
+    runtime.install_context(
+        "test".into(),
+        PrototypeStore::load(&json!({"planet":{"nauvis":{},"fulgora":{}}})).unwrap(),
+    );
+    runtime.set_active_context(Some("test".into()));
+    dispatch(
+        &mut runtime,
+        json!({"scope":"application","action":{"new-project":{"name":"test"}}}),
+    );
+    let p = runtime.state.document.projects[0].id;
+    dispatch(
+        &mut runtime,
+        json!({"scope":"project","action":{"project":p,"action":{"add-universe":{"name":"宇宙"}}}}),
+    );
+    let u = runtime.state.document.projects[0].universes[0].id;
+    let send = |runtime: &mut Runtime, action: Value| {
+        dispatch(
+            runtime,
+            json!({"scope":"universe","action":{"project":p,"universe":u,"action":action}}),
+        )
+    };
+    for (planet, penalty) in [("nauvis", 2.0), ("fulgora", 5.0)] {
+        let flow = json!({"location":{"kind":"planet","name":planet},"flow":"Electricity"});
+        send(
+            &mut runtime,
+            json!({"add-external-input":{"flow":flow,"penalty":penalty}}),
+        );
+        send(
+            &mut runtime,
+            json!({"add-target":{"flow":flow,"amount":3.0}}),
+        );
+    }
+    send(&mut runtime, json!({"set-strict-source":{"strict":true}}));
+    let result = runtime.solve_universe(p, u).unwrap();
+    let metatorio_runtime::universe::UniverseSolveStatus::Solved { cost, .. } = result.status
+    else {
+        panic!("{result:?}")
+    };
+    assert!((cost - 21.0).abs() < 1e-6, "{cost}");
+    let id = runtime.state.universe(p, u).unwrap().external_inputs[0].id;
+    send(
+        &mut runtime,
+        json!({"set-external-input-penalty":{"input":id,"penalty":0}}),
+    );
+    dispatch(&mut runtime, json!({"scope":"history","action":"undo"}));
+    assert_eq!(
+        runtime.state.universe(p, u).unwrap().external_inputs[0].penalty,
+        2.0
+    );
+    let before = runtime.state.document.clone();
+    let invalid=serde_json::from_value(json!({"scope":"universe","action":{"project":p,"universe":u,"action":{"set-external-input-penalty":{"input":id,"penalty":-1}}}})).unwrap();
+    assert!(runtime.dispatch(invalid).is_err());
+    assert_eq!(runtime.state.document, before);
+    send(
+        &mut runtime,
+        json!({"set-external-input-flow":{"input":id,"flow":{"location":{"kind":"space"},"flow":"Heat"}}}),
+    );
+    assert_eq!(
+        runtime.state.universe(p, u).unwrap().external_inputs[0]
+            .flow
+            .location,
+        metatorio_core::Location::Space
+    );
+    dispatch(
+        &mut runtime,
+        json!({"scope":"project","action":{"project":p,"action":{"clone-universe":{"universe":u}}}}),
+    );
+    let cloned = &runtime.state.document.projects[0].universes[1];
+    assert_ne!(cloned.external_inputs[0].id, id);
+    let mut imported = Runtime::new();
+    imported.state.import_projects(&runtime.state.document);
+    let imported_id = imported.state.document.projects[0].universes[0].external_inputs[0].id;
+    let wire = serde_json::to_value(&imported.state.document).unwrap();
+    assert!(wire["projects"][0]["universes"][0]["external_inputs"].is_array());
+    send(&mut runtime, json!({"remove-external-input":{"input":id}}));
+    assert_eq!(
+        runtime.state.universe(p, u).unwrap().external_inputs.len(),
+        1
+    );
+    assert_eq!(imported_id, id);
+}
+
+#[test]
+fn universe_manual_space_input_overrides_free_asteroids_and_keeps_free_delivery() {
+    use metatorio_core::{DualVar, IdWithQuality, LocatedDualVar, Location};
+    use metatorio_runtime::{
+        document::{LocatedExternalInput, LocatedTarget, ProjectDocument, UniverseDocument},
+        id::{ExternalInputId, TargetId},
+        universe::{UniverseSolveStatus, solve_universe},
+    };
+    let store=PrototypeStore::load(&json!({"item":{"chunk":{"stack_size":50}},"asteroid-chunk":{"direct":{"minable":{"mining_time":1,"result":"chunk"}}}})).unwrap();
+    let flow = DualVar::Item(IdWithQuality {
+        id: "chunk".into(),
+        quality: "normal".into(),
+    });
+    // Old files have no external_inputs field and still load normally.
+    let mut universe: UniverseDocument = serde_json::from_value(json!({"targets":[]})).unwrap();
+    universe.strict_source = true;
+    universe.targets.push(LocatedTarget {
+        id: TargetId(1),
+        flow: LocatedDualVar::new(Location::planet("nauvis"), flow.clone()),
+        amount: 2.0,
+    });
+    let project = ProjectDocument::default();
+    let solve_cost =
+        |u: &UniverseDocument| match solve_universe(&store, &project, u, &Default::default())
+            .unwrap()
+            .status
+        {
+            UniverseSolveStatus::Solved { cost, .. } => cost,
+            status => panic!("{status:?}"),
+        };
+    assert_eq!(solve_cost(&universe), 0.0);
+    universe.external_inputs.push(LocatedExternalInput {
+        id: ExternalInputId(2),
+        flow: LocatedDualVar::new(Location::Space, flow),
+        penalty: 7.0,
+    });
+    assert!((solve_cost(&universe) - 14.0).abs() < 1e-6);
+    universe.external_inputs.clear();
+    assert_eq!(solve_cost(&universe), 0.0);
+}
 #[test]
 fn universe_editor_commands_clone_and_transfer_edits_are_undoable_and_scoped() {
     let mut runtime = Runtime::new();

@@ -5,6 +5,7 @@
   import type { MechanicEntry } from "$lib/runtime/types";
   import type { MechanicActions } from "$lib/mechanics/actions";
   import FlowChip from "./FlowChip.svelte";
+  import LocationIcon from "./LocationIcon.svelte";
   import SecondaryMenu from "./SecondaryMenu.svelte";
   import MechanicEditor from "./MechanicEditor.svelte";
 
@@ -62,7 +63,7 @@
         <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
         <div class="flow-strip" tabindex="0" role="region" aria-label={`${lane.label}流量，可横向滚动`}>
           {#each lane.items as item (JSON.stringify([item.location, dualVarKey(item.flow)]))}
-            {#if entry.transfer && item.location}<span class="flow-location">{item.location.kind === "space" ? "太空" : runtime.localizedName("planet",item.location.name)}</span>{/if}<FlowChip flow={item.flow} amount={item.amount} {scale} solved={solution !== null} />
+            {#if entry.transfer && item.location}<LocationIcon location={item.location} size={18} />{/if}<FlowChip flow={item.flow} amount={item.amount} {scale} solved={solution !== null} />
           {:else}<span class="no-flow">{loadingFlows ? "加载中…" : "—"}</span>{/each}
         </div>
       </div>
@@ -73,7 +74,7 @@
         <p>{solution ? "当前求解用量下的流量" : "未求解：以下为单位机制流量"}</p>
         {#each [{ label: "输入", items: inputs }, { label: "输出", items: outputs }] as lane}
           <h4>{lane.label}（{lane.items.length}）</h4>
-          {#each lane.items as item (JSON.stringify([item.location, dualVarKey(item.flow)]))}{#if entry.transfer && item.location}<span class="flow-location">{item.location.kind === "space" ? "太空" : runtime.localizedName("planet",item.location.name)}</span>{/if}<FlowChip flow={item.flow} amount={item.amount} {scale} solved={solution !== null} showName />{/each}
+          {#each lane.items as item (JSON.stringify([item.location, dualVarKey(item.flow)]))}{#if entry.transfer && item.location}<LocationIcon location={item.location} size={18} />{/if}<FlowChip flow={item.flow} amount={item.amount} {scale} solved={solution !== null} showName />{/each}
         {/each}
       </div>
     </SecondaryMenu>
@@ -94,7 +95,6 @@
   .lane-label small { margin-left: 2px; font-family: var(--mono); font-size: 10px; }
   .flow-strip { display: flex; flex: 1; align-items: center; gap: 4px; min-width: 0; height: 34px; overflow-x: auto; overflow-y: hidden; }
   .flow-strip :global(.flow-chip) { flex: 0 0 auto; }
-  .flow-location { font-size:10px; color:var(--muted); white-space:nowrap; }
   .no-flow { color: var(--muted); font-size: 11px; }
   .flow-lanes :global(.menu-anchor) { position: absolute; top: 23px; right: 4px; }
   .all-flows { width: 22px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: var(--radius-sm); background: none; color: var(--muted); font-size: 12px; cursor: pointer; }
