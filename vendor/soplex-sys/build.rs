@@ -81,6 +81,12 @@ fn build_and_link_soplex() {
     println!("cargo:rustc-link-search=native={}/lib", dst.display());
     println!("cargo:rustc-link-search=native={}/lib64", dst.display());
     println!("cargo:rustc-link-lib=static=soplex");
+    // SoPlex's zstr uses zlib when CMake finds it (normal on Linux/macOS).
+    // Windows has no z.lib in the build environment, and the bundled CMake
+    // build there does not enable zlib, so only link it on non-Windows targets.
+    if !target.contains("windows") {
+        println!("cargo:rustc-link-lib=z");
+    }
     let apple = target.contains("apple");
     let linux = target.contains("linux");
     let mingw = target.contains("pc-windows-gnu");

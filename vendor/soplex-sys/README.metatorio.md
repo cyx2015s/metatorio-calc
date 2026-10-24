@@ -16,8 +16,8 @@ Changes in `build.rs`:
 - create `soplex.lib` as an alias of SoPlex's actual `libsoplex.lib` output,
   because this crate links `static=soplex`; the alias is always overwritten so
   an older non-Boost build cannot survive a rebuild;
-- drop the unconditional `z.lib` link (the bundled SoPlex is built without
-  zlib; Windows has no `z.lib`);
+- link zlib only on non-Windows targets: Linux/macOS SoPlex finds zlib and
+  needs it for `zstr`, while the Windows build has no `z.lib`;
 - disable shared libraries and add `rerun-if-changed` for the C interface;
 - enable Boost.Multiprecision from `vendor/boost` and disable GMP/MPFR/quadmath.
 
