@@ -50,6 +50,10 @@ export async function solveUniverse(project: number, universe: UniverseId): Prom
   return call("solve_universe", { project, universe });
 }
 
+export async function autoPlanUniverse(project: number, universe: UniverseId): Promise<UniverseSolveResult> {
+  return call("auto_plan_universe", { project, universe });
+}
+
 /** Native save dialog; null means cancelled, a path means writing succeeded. */
 export async function saveNetworkPng(fileName: string, bytes: Uint8Array): Promise<string | null> {
   return call("save_network_png", { fileName, bytes: Array.from(bytes) });

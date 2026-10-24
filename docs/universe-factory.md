@@ -27,6 +27,14 @@ Transfer is the only rocket edge; it requires a Rocket Silo recipe to produce
 ## UI
 
 The project header lists universe factories next to normal factories. `✦`
-creates one; selecting it opens the universe workspace. The workspace can add
-local mechanics, configure recipe/mining/fuel mechanics, add transfers, add
-located targets, and solve with the project LP backend.
+creates one; selecting it opens the universe workspace. Environment and strict
+constraints are not edited here: every local mechanic owns its location's
+environment. The workspace shares the factory workflow where it applies:
+
+- list/grid views and text filtering for located mechanics;
+- target and located target-expression editing;
+- local mechanic editing (recipe/mining/item-fuel inline, advanced JSON for the
+  remaining kinds), transfers, enable/disable/delete;
+- per-location automatic planning using the normal factory planner, followed by
+  a joint universe solve;
+- solve results grouped by location.

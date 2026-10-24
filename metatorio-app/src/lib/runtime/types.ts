@@ -400,7 +400,14 @@ export type UniverseAction =
   | { "remove-target": { target: TargetId } }
   | { "set-target-flow": { target: TargetId; flow: LocatedDualVar } }
   | { "set-target-amount": { target: TargetId; amount: number } }
-  | { "reorder-target": { target: TargetId; position: number } };
+  | { "reorder-target": { target: TargetId; position: number } }
+  | { "add-target-expression": { location: Location } }
+  | { "remove-target-expression": { expression: TargetExpressionId } }
+  | { "set-target-expression-constant": { expression: TargetExpressionId; constant: number } }
+  | { "add-target-expression-term": { expression: TargetExpressionId; flow: DualVar } }
+  | { "remove-target-expression-term": { expression: TargetExpressionId; term: TargetTermId } }
+  | { "set-target-expression-term-flow": { expression: TargetExpressionId; term: TargetTermId; flow: DualVar } }
+  | { "set-target-expression-term-coefficient": { expression: TargetExpressionId; term: TargetTermId; coefficient: number } };
 
 export type AppMessage =
   | { scope: "application"; action: ApplicationAction }
@@ -530,11 +537,19 @@ export interface LocatedTarget {
   amount: number;
 }
 
+export interface LocatedTargetExpression {
+  id: TargetExpressionId;
+  location: Location;
+  constant: number;
+  terms: TargetTerm[];
+}
+
 export interface UniverseDocument {
   id: UniverseId;
   name: string;
   mechanics: UniverseMechanicEntry[];
   targets: LocatedTarget[];
+  target_expressions: LocatedTargetExpression[];
   strict_source: boolean;
   strict_sink: boolean;
 }

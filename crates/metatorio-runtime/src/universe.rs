@@ -8,12 +8,15 @@
 
 use std::collections::{BTreeSet, HashMap};
 
+use crate::prototype::{effective_module_slots, effective_recipe_categories};
 use metatorio_core::{
     AIndexMap, Context, DualVar, Flow, IdWithQuality, LocatedDualVar, LocatedMechanic, Location,
+    Mechanic,
 };
 use metatorio_data::store::PrototypeGroup;
 use metatorio_data::store::PrototypeStore;
-use metatorio_solver::{Flow as SolverFlow, SolverData, SolverSolution};
+use metatorio_data::{CraftingMachineComponent, RecipeComponent};
+use metatorio_solver::{Flow as SolverFlow, SolverData, SolverSolution, TargetSpec};
 use serde::{Deserialize, Serialize};
 
 use crate::document::{ProjectDocument, UniverseDocument};
@@ -78,7 +81,53 @@ enum VarOrigin {
     Conversion,
 }
 
-fn environment_for(location: &Location) -> (Option<&str>, Option<&str>) {
+/// Reject configurations that the prototype data says cannot run. The factory
+/// path normally fixes these via EnsureMachineCompat; universes expand directly,
+/// so an incompatible recipe/machine pair must not silently enter the LP.
+fn ensure_local_mechanic_supported(
+    store: &PrototypeStore,
+    mechanic: &Mechanic,
+) -> Result<(), String> {
+    let Mechanic::Recipe(recipe) = mechanic else {
+        return Ok(());
+    };
+    if recipe.recipe.id.is_empty() || recipe.machine.id.is_empty() {
+        return Err("宇宙工厂的配方机制尚未设置配方或机器".to_string());
+    }
+    let Some(recipe_record) = store.get(PrototypeGroup::Recipe, &recipe.recipe.id) else {
+        return Err(format!("配方 {} 不存在", recipe.recipe.id));
+    };
+    let Some(recipe_component) = recipe_record.component::<RecipeComponent>() else {
+        return Err(format!("配方 {} 缺少配方数据", recipe.recipe.id));
+    };
+    let categories = effective_recipe_categories(recipe_component);
+    let machine_ok = store
+        .get(PrototypeGroup::Entity, &recipe.machine.id)
+        .and_then(|record| record.component::<CraftingMachineComponent>())
+        .is_some_and(|machine| {
+            categories
+                .iter()
+                .any(|category| machine.crafting_categories.contains(category))
+        });
+    if !machine_ok {
+        return Err(format!(
+            "机器 {} 不能制造配方 {}",
+            recipe.machine.id, recipe.recipe.id
+        ));
+    }
+    let slots = effective_module_slots(store, &recipe.machine.id, &recipe.machine.quality);
+    if recipe.module_config.modules.len() > slots {
+        return Err(format!(
+            "机器 {} 只有 {} 个插件槽，机制配置了 {} 个插件",
+            recipe.machine.id,
+            slots,
+            recipe.module_config.modules.len()
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn environment_for(location: &Location) -> (Option<&str>, Option<&str>) {
     match location {
         Location::Planet(name) => (Some(name.as_str()), None),
         Location::Space => (None, Some("space-platform")),
@@ -131,7 +180,7 @@ fn planet_source_flows(store: &PrototypeStore, planet: &str) -> Flow {
 }
 
 /// Return all locations mentioned by mechanics and targets.
-fn used_locations(universe: &UniverseDocument) -> BTreeSet<Location> {
+pub(crate) fn used_locations(universe: &UniverseDocument) -> BTreeSet<Location> {
     let mut locations = BTreeSet::new();
     // Space is always available: its asteroid chunks are global implicit
     // sources and can feed planet targets even without an explicit space
@@ -222,6 +271,7 @@ pub fn solve_universe(
         }
         match &entry.mechanic {
             LocatedMechanic::Local(local) => {
+                ensure_local_mechanic_supported(store, &local.mechanic)?;
                 let (planet, surface) = environment_for(&local.location);
                 let mut game = base.clone();
                 apply_environment_to_game_state(store, &mut game, planet, surface);
@@ -307,6 +357,17 @@ pub fn solve_universe(
     for target_entry in &universe.targets {
         *target.entry(target_entry.flow.clone()).or_insert(0.0) += target_entry.amount;
     }
+    let mut expression_flows: SolverFlow<LocatedDualVar> = SolverFlow::default();
+    for expression in &universe.target_expressions {
+        for term in &expression.terms {
+            expression_flows.insert(
+                LocatedDualVar::new(expression.location.clone(), term.flow.clone()),
+                1.0,
+            );
+        }
+    }
+    let mut conversion_target = target.clone();
+    conversion_target.extend(expression_flows.iter().map(|(flow, _)| (flow.clone(), 1.0)));
 
     // Space items may become the same item at any planet for free. Include
     // implicit asteroid sources and space targets, not only mechanic flows.
@@ -334,6 +395,9 @@ pub fn solve_universe(
     for located in target.keys() {
         collect_space_item(located);
     }
+    for located in expression_flows.keys() {
+        collect_space_item(located);
+    }
     for item in space_items.into_keys() {
         for planet in &planet_locations {
             let id = UniverseVarId(next_id);
@@ -357,7 +421,7 @@ pub fn solve_universe(
     add_located_conversion_flows(
         &mut flows,
         &locations,
-        &target,
+        &conversion_target,
         &sources,
         store,
         &mut next_id,
@@ -370,13 +434,32 @@ pub fn solve_universe(
         .flat_map(|(flow, _)| flow.keys())
         .chain(sources.keys())
         .chain(target.keys())
+        .chain(expression_flows.keys())
     {
         if matches!(located.flow, DualVar::Pollution { .. }) {
             unconstrained.insert(located.clone());
         }
     }
 
+    let expression_targets: Vec<TargetSpec<LocatedDualVar>> = universe
+        .target_expressions
+        .iter()
+        .map(|expression| TargetSpec {
+            constant: expression.constant,
+            coefficients: expression
+                .terms
+                .iter()
+                .map(|term| {
+                    (
+                        LocatedDualVar::new(expression.location.clone(), term.flow.clone()),
+                        term.coefficient,
+                    )
+                })
+                .collect(),
+        })
+        .collect();
     let mut problem = SolverData::new_simple(target, flows);
+    problem.target.extend(expression_targets);
     problem.sources = sources;
     problem.strict_source = universe.strict_source;
     problem.strict_sink = universe.strict_sink;
@@ -479,7 +562,7 @@ pub fn solve_universe(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::document::{LocatedTarget, ProjectSettings, UniverseMechanicEntry};
+    use crate::document::{LocatedTarget, ProjectSettings, TargetTerm, UniverseMechanicEntry};
     use metatorio_core::{LocalLocatedMechanic, LocatedMechanic, Mechanic, RecipeMechanic};
     use serde_json::json;
 
@@ -540,6 +623,16 @@ mod tests {
                     DualVar::Item(item("iron-ore")),
                 ),
                 amount: 1.0,
+            }],
+            target_expressions: vec![crate::document::LocatedTargetExpression {
+                id: crate::id::TargetExpressionId(6),
+                location: Location::planet("nauvis"),
+                constant: 1.0,
+                terms: vec![TargetTerm {
+                    id: crate::id::TargetTermId(7),
+                    flow: DualVar::Item(item("iron-ore")),
+                    coefficient: 1.0,
+                }],
             }],
             strict_source: false,
             strict_sink: false,
@@ -620,6 +713,7 @@ mod tests {
                 flow: LocatedDualVar::new(Location::Space, DualVar::Item(item("iron-ore"))),
                 amount: 1.0,
             }],
+            target_expressions: Vec::new(),
             strict_source: false,
             strict_sink: false,
         };
@@ -633,6 +727,16 @@ mod tests {
                 && flow.flow.flow == DualVar::Item(item("iron-ore"))
                 && flow.amount > 0.9
         }));
+        // One silo craft produces 1200 capacity; transferring one 1000-weight
+        // item consumes 1000, so the net local capacity is 200.
+        assert!(
+            flows.iter().any(|flow| {
+                flow.flow.location == Location::planet("nauvis")
+                    && flow.flow.flow == DualVar::RocketWeightCapacity
+                    && (flow.amount - 200.0).abs() < 0.01
+            }),
+            "{flows:?}"
+        );
     }
     #[test]
     fn space_implicit_source_reaches_a_planet_target() {
@@ -662,6 +766,7 @@ mod tests {
                 ),
                 amount: 1.0,
             }],
+            target_expressions: Vec::new(),
             strict_source: false,
             strict_sink: false,
         };

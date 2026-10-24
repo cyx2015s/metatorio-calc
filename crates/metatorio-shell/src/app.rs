@@ -2956,6 +2956,28 @@ pub(crate) fn ensure_quality_limit(
                 max_level = max_level.max(mechanic_quality_level(&qualities, &entry.mechanic));
             }
         }
+        for universe in &project_doc.universes {
+            for target in &universe.targets {
+                max_level = max_level.max(flow_quality_level(&qualities, &target.flow.flow));
+            }
+            for expression in &universe.target_expressions {
+                for term in &expression.terms {
+                    max_level = max_level.max(flow_quality_level(&qualities, &term.flow));
+                }
+            }
+            for entry in &universe.mechanics {
+                match &entry.mechanic {
+                    metatorio_core::LocatedMechanic::Local(local) => {
+                        max_level =
+                            max_level.max(mechanic_quality_level(&qualities, &local.mechanic));
+                    }
+                    metatorio_core::LocatedMechanic::Transfer(transfer) => {
+                        max_level =
+                            max_level.max(quality_level_of(&qualities, &transfer.item.quality));
+                    }
+                }
+            }
+        }
     }
     if max_level > current_level {
         let quality = qualities[max_level].clone();
@@ -3354,6 +3376,28 @@ pub(crate) async fn solve_factory_offlock(
             },
         )
         .await
+}
+
+/// 在阻塞线程池中对宇宙工厂按地点执行自动规划，并返回联合求解结果。
+pub async fn auto_plan_universe_offlock(
+    host: &Arc<dyn Host>,
+    _state: &AppState,
+    project: metatorio_runtime::ProjectId,
+    universe: metatorio_runtime::UniverseId,
+) -> Result<metatorio_runtime::UniverseSolveResult, String> {
+    let host = host.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut runtime = host
+            .state()
+            .runtime
+            .lock()
+            .map_err(|_| "runtime 锁已损坏（poisoned）".to_string())?;
+        runtime
+            .auto_plan_universe(project, universe)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 /// 锁外求解一个宇宙工厂：锁内只取快照，重型 LP 在阻塞线程池执行。

@@ -3,7 +3,9 @@ use std::{
     fmt,
 };
 
-use metatorio_core::{BeaconConfig, Fuel, Mechanic, ModuleConfig};
+use metatorio_core::{
+    BeaconConfig, Fuel, LocalLocatedMechanic, LocatedMechanic, Location, Mechanic, ModuleConfig,
+};
 
 /// 设置流体燃料的温度。仅 `Fuel::Fluid` 有意义（物品燃料无温度，忽略）。
 fn set_fuel_temperature(fuel: &mut Option<Fuel>, temperature: Option<i32>) -> bool {
@@ -829,11 +831,9 @@ impl RuntimeState {
         universe_id: crate::id::UniverseId,
         action: crate::message::UniverseAction,
     ) -> Result<Outcome, RuntimeError> {
-        use crate::document::{LocatedTarget, UniverseMechanicEntry};
+        use crate::document::{LocatedTarget, LocatedTargetExpression, UniverseMechanicEntry};
         use crate::message::UniverseAction;
-        use metatorio_core::{
-            LocalLocatedMechanic, LocatedMechanic, Location, TransferLocatedMechanic,
-        };
+        use metatorio_core::TransferLocatedMechanic;
 
         self.universe(project_id, universe_id)?;
         match action {
@@ -1044,6 +1044,115 @@ impl RuntimeState {
                         target,
                     })?;
                 let changed = move_item(&mut universe.targets, index, position);
+                Ok(Outcome::meta_if(changed, project_id))
+            }
+            UniverseAction::AddTargetExpression { location } => {
+                let expression_id = self.allocate_id();
+                self.universe_mut(project_id, universe_id)?
+                    .target_expressions
+                    .push(LocatedTargetExpression {
+                        id: expression_id,
+                        location,
+                        constant: 1.0,
+                        terms: Vec::new(),
+                    });
+                let mut outcome = Outcome::meta(project_id);
+                outcome.created.expression(expression_id);
+                Ok(outcome)
+            }
+            UniverseAction::RemoveTargetExpression { expression } => {
+                let universe = self.universe_mut(project_id, universe_id)?;
+                let index = universe
+                    .target_expressions
+                    .iter()
+                    .position(|candidate| candidate.id == expression)
+                    .ok_or(RuntimeError::InvalidValue("目标表达式不存在".to_string()))?;
+                universe.target_expressions.remove(index);
+                Ok(Outcome::meta(project_id))
+            }
+            UniverseAction::SetTargetExpressionConstant {
+                expression,
+                constant,
+            } => {
+                validate_finite("目标表达式常数", constant)?;
+                let universe = self.universe_mut(project_id, universe_id)?;
+                let entry = universe
+                    .target_expressions
+                    .iter_mut()
+                    .find(|candidate| candidate.id == expression)
+                    .ok_or(RuntimeError::InvalidValue("目标表达式不存在".to_string()))?;
+                let changed = replace(&mut entry.constant, constant);
+                Ok(Outcome::meta_if(changed, project_id))
+            }
+            UniverseAction::AddTargetExpressionTerm { expression, flow } => {
+                let term_id = self.allocate_id();
+                let universe = self.universe_mut(project_id, universe_id)?;
+                let entry = universe
+                    .target_expressions
+                    .iter_mut()
+                    .find(|candidate| candidate.id == expression)
+                    .ok_or(RuntimeError::InvalidValue("目标表达式不存在".to_string()))?;
+                entry.terms.push(TargetTerm {
+                    id: term_id,
+                    flow,
+                    coefficient: 1.0,
+                });
+                let mut outcome = Outcome::meta(project_id);
+                outcome.created.term(term_id);
+                Ok(outcome)
+            }
+            UniverseAction::RemoveTargetExpressionTerm { expression, term } => {
+                let universe = self.universe_mut(project_id, universe_id)?;
+                let entry = universe
+                    .target_expressions
+                    .iter_mut()
+                    .find(|candidate| candidate.id == expression)
+                    .ok_or(RuntimeError::InvalidValue("目标表达式不存在".to_string()))?;
+                let index = entry
+                    .terms
+                    .iter()
+                    .position(|candidate| candidate.id == term)
+                    .ok_or(RuntimeError::InvalidValue("目标表达式项不存在".to_string()))?;
+                entry.terms.remove(index);
+                Ok(Outcome::meta(project_id))
+            }
+            UniverseAction::SetTargetExpressionTermFlow {
+                expression,
+                term,
+                flow,
+            } => {
+                let universe = self.universe_mut(project_id, universe_id)?;
+                let entry = universe
+                    .target_expressions
+                    .iter_mut()
+                    .find(|candidate| candidate.id == expression)
+                    .ok_or(RuntimeError::InvalidValue("目标表达式不存在".to_string()))?;
+                let term = entry
+                    .terms
+                    .iter_mut()
+                    .find(|candidate| candidate.id == term)
+                    .ok_or(RuntimeError::InvalidValue("目标表达式项不存在".to_string()))?;
+                let changed = replace(&mut term.flow, flow);
+                Ok(Outcome::meta_if(changed, project_id))
+            }
+            UniverseAction::SetTargetExpressionTermCoefficient {
+                expression,
+                term,
+                coefficient,
+            } => {
+                validate_finite("目标项系数", coefficient)?;
+                let universe = self.universe_mut(project_id, universe_id)?;
+                let entry = universe
+                    .target_expressions
+                    .iter_mut()
+                    .find(|candidate| candidate.id == expression)
+                    .ok_or(RuntimeError::InvalidValue("目标表达式不存在".to_string()))?;
+                let term = entry
+                    .terms
+                    .iter_mut()
+                    .find(|candidate| candidate.id == term)
+                    .ok_or(RuntimeError::InvalidValue("目标表达式项不存在".to_string()))?;
+                let changed = replace(&mut term.coefficient, coefficient);
                 Ok(Outcome::meta_if(changed, project_id))
             }
         }
@@ -1627,6 +1736,33 @@ impl RuntimeState {
             .ok_or(RuntimeError::UniverseNotFound { project, universe })
     }
 
+    /// Replace local mechanics at one location (used by universe auto-plan).
+    pub fn replace_universe_location_mechanics(
+        &mut self,
+        project: ProjectId,
+        universe: crate::id::UniverseId,
+        location: &Location,
+        mechanics: Vec<Mechanic>,
+    ) -> Result<(), RuntimeError> {
+        use crate::document::UniverseMechanicEntry;
+        let ids: Vec<MechanicId> = (0..mechanics.len()).map(|_| self.allocate_id()).collect();
+        let universe = self.universe_mut(project, universe)?;
+        universe.mechanics.retain(|entry| {
+            !matches!(&entry.mechanic, LocatedMechanic::Local(local) if &local.location == location)
+        });
+        for (mechanic, id) in mechanics.into_iter().zip(ids) {
+            universe.mechanics.push(UniverseMechanicEntry {
+                id,
+                enabled: true,
+                mechanic: LocatedMechanic::Local(LocalLocatedMechanic {
+                    location: location.clone(),
+                    mechanic,
+                }),
+            });
+        }
+        Ok(())
+    }
+
     pub fn allocate_id<T: From<u64>>(&mut self) -> T {
         let id = self.next_id;
         self.next_id = self.next_id.saturating_add(1);
@@ -1638,6 +1774,47 @@ impl RuntimeState {
     /// 与现有项目 id 冲突时整体重分配：项目 → 工厂 → 目标/表达式/项 →
     /// 外部输入 → 机制（所有子 id 同步映射，保持引用一致）。
     pub fn import_projects(&mut self, imported: &AppDocument) {
+        // Reserve ids above both documents. Otherwise a freshly allocated id can
+        // collide with another imported object that has not been pushed yet.
+        let mut imported_max = 0u64;
+        let mut take = |id: u64| imported_max = imported_max.max(id);
+        for project in &imported.projects {
+            take(project.id.0);
+            for factory in &project.factories {
+                take(factory.id.0);
+                for target in &factory.targets {
+                    take(target.id.0);
+                }
+                for expression in &factory.target_expressions {
+                    take(expression.id.0);
+                    for term in &expression.terms {
+                        take(term.id.0);
+                    }
+                }
+                for input in &factory.external_inputs {
+                    take(input.id.0);
+                }
+                for mechanic in &factory.mechanics {
+                    take(mechanic.id.0);
+                }
+            }
+            for universe in &project.universes {
+                take(universe.id.0);
+                for mechanic in &universe.mechanics {
+                    take(mechanic.id.0);
+                }
+                for target in &universe.targets {
+                    take(target.id.0);
+                }
+                for expression in &universe.target_expressions {
+                    take(expression.id.0);
+                    for term in &expression.terms {
+                        take(term.id.0);
+                    }
+                }
+            }
+        }
+        self.next_id = self.next_id.max(imported_max.saturating_add(1));
         for project in &imported.projects {
             let mut project = project.clone();
             let project_id_collides = self.document.projects.iter().any(|p| p.id == project.id);
@@ -1727,6 +1904,9 @@ impl RuntimeState {
                     u.id.0 == id
                         || u.mechanics.iter().any(|m| m.id.0 == id)
                         || u.targets.iter().any(|t| t.id.0 == id)
+                        || u.target_expressions
+                            .iter()
+                            .any(|e| e.id.0 == id || e.terms.iter().any(|t| t.id.0 == id))
                 })
         })
     }
@@ -1760,6 +1940,12 @@ impl RuntimeState {
                 }
                 for target in &universe.targets {
                     max_id = max_id.max(target.id.0);
+                }
+                for expression in &universe.target_expressions {
+                    max_id = max_id.max(expression.id.0);
+                    for term in &expression.terms {
+                        max_id = max_id.max(term.id.0);
+                    }
                 }
             }
         }
@@ -3223,6 +3409,43 @@ mod tests {
         assert!(state.document.projects.is_empty(), "撤销导入应移除项目");
     }
 
+    #[test]
+    fn import_reserves_ids_for_all_incoming_universes() {
+        let (mut state, _project, _factory) = state_with_factory();
+        state.next_id = 11;
+        let imported = AppDocument {
+            schema_version: crate::document::DOCUMENT_SCHEMA_VERSION,
+            projects: vec![ProjectDocument {
+                id: ProjectId(100),
+                name: "imported".to_string(),
+                universes: vec![
+                    crate::document::UniverseDocument {
+                        id: crate::id::UniverseId(2),
+                        ..Default::default()
+                    },
+                    crate::document::UniverseDocument {
+                        id: crate::id::UniverseId(11),
+                        ..Default::default()
+                    },
+                ],
+                ..ProjectDocument::default()
+            }],
+        };
+        state.import_projects(&imported);
+        let ids: Vec<u64> = state
+            .document
+            .projects
+            .iter()
+            .flat_map(|project| project.universes.iter().map(|universe| universe.id.0))
+            .collect();
+        let unique: std::collections::BTreeSet<u64> = ids.iter().copied().collect();
+        assert_eq!(ids.len(), 2);
+        assert_eq!(
+            unique.len(),
+            ids.len(),
+            "导入后 universe id 必须唯一: {ids:?}"
+        );
+    }
     fn state_with_factory() -> (RuntimeState, ProjectId, FactoryId) {
         let mut state = RuntimeState::default();
         state

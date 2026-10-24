@@ -774,6 +774,120 @@ impl Runtime {
         Ok(result)
     }
 
+    /// Auto-plan each location of a universe with the normal factory planner,
+    /// then recompute the joint universe. Transfers are preserved; local
+    /// mechanics at a planned location are replaced by the planner output.
+    pub fn auto_plan_universe(
+        &mut self,
+        project_id: ProjectId,
+        universe_id: crate::id::UniverseId,
+    ) -> Result<crate::universe::UniverseSolveResult, RuntimeError> {
+        use crate::document::{FactorySettings, FlowTarget, MechanicEntry, TargetExpression};
+        use metatorio_core::LocatedMechanic;
+
+        let universe_doc = self
+            .state
+            .project(project_id)?
+            .universes
+            .iter()
+            .find(|universe| universe.id == universe_id)
+            .cloned()
+            .ok_or(RuntimeError::UniverseNotFound {
+                project: project_id,
+                universe: universe_id,
+            })?;
+        let locations = crate::universe::used_locations(&universe_doc);
+        for location in locations {
+            let targets: Vec<FlowTarget> = universe_doc
+                .targets
+                .iter()
+                .filter(|target| &target.flow.location == &location)
+                .map(|target| FlowTarget {
+                    id: target.id,
+                    flow: target.flow.flow.clone(),
+                    amount: target.amount,
+                })
+                .collect();
+            let expressions: Vec<TargetExpression> = universe_doc
+                .target_expressions
+                .iter()
+                .filter(|expression| &expression.location == &location)
+                .map(|expression| TargetExpression {
+                    id: expression.id,
+                    constant: expression.constant,
+                    terms: expression.terms.clone(),
+                })
+                .collect();
+            if targets.is_empty() && expressions.is_empty() {
+                continue;
+            }
+            let mechanics: Vec<MechanicEntry> = universe_doc
+                .mechanics
+                .iter()
+                .filter_map(|entry| match &entry.mechanic {
+                    LocatedMechanic::Local(local) if &local.location == &location => {
+                        Some(MechanicEntry {
+                            id: entry.id,
+                            enabled: entry.enabled,
+                            mechanic: local.mechanic.clone(),
+                        })
+                    }
+                    _ => None,
+                })
+                .collect();
+            let (planet, surface) = crate::universe::environment_for(&location);
+            let factory = FactoryDocument {
+                id: FactoryId(0),
+                name: format!("universe {} {:?}", universe_id.0, location),
+                settings: FactorySettings {
+                    planet: planet.map(str::to_string),
+                    surface: surface.map(str::to_string),
+                    ..FactorySettings::default()
+                },
+                targets,
+                target_expressions: expressions,
+                mechanics,
+                ..FactoryDocument::default()
+            };
+            let snapshot = self.snapshot_for_factory(project_id, factory)?;
+            let accessibility = snapshot.resolve_accessibility();
+            self.cache_accessibility(project_id, accessibility.clone());
+            let (planned, _) = plan_auto_plan(&snapshot, &accessibility)?;
+            self.state.replace_universe_location_mechanics(
+                project_id,
+                universe_id,
+                &location,
+                planned,
+            )?;
+        }
+        self.solve_universe(project_id, universe_id)
+    }
+
+    fn snapshot_for_factory(
+        &self,
+        project_id: ProjectId,
+        factory_doc: FactoryDocument,
+    ) -> Result<SolveSnapshot, RuntimeError> {
+        let project_doc = self.state.project(project_id)?.clone();
+        Ok(SolveSnapshot {
+            project: project_id,
+            factory: factory_doc.id,
+            revision: self.state.revision,
+            accessibility_epoch: self.accessibility_epoch.load(Ordering::SeqCst),
+            store: self.context_arc(project_id)?,
+            graph: self.graph_for_project(project_id)?,
+            accessibility_options: accessibility_options(&project_doc.settings),
+            accessibility: self
+                .accessibilities
+                .lock()
+                .unwrap()
+                .get(&project_id)
+                .cloned(),
+            project_doc,
+            factory_doc,
+        })
+    }
+
     /// 统一执行一个 `RuntimeCommand`，返回结构化产出。
     ///
     /// 这里只处理**纯运行时**命令（求解/自动规划/清理），返回 [`CommandEffect`]

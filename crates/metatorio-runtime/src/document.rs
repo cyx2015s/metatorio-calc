@@ -1,5 +1,6 @@
 use metatorio_core::{
-    Accessible, DualVar, IdWithQuality, LocatedDualVar, LocatedMechanic, Mechanic, ModuleConfig,
+    Accessible, DualVar, IdWithQuality, LocatedDualVar, LocatedMechanic, Location, Mechanic,
+    ModuleConfig,
 };
 use metatorio_solver::LpSolver;
 use schemars::JsonSchema;
@@ -250,6 +251,27 @@ impl Default for LocatedTarget {
     }
 }
 
+/// 带地点的目标表达式：常数与各项都在同一地点结算。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct LocatedTargetExpression {
+    pub id: TargetExpressionId,
+    pub location: Location,
+    pub constant: f64,
+    pub terms: Vec<TargetTerm>,
+}
+
+impl Default for LocatedTargetExpression {
+    fn default() -> Self {
+        Self {
+            id: TargetExpressionId::default(),
+            location: Location::Space,
+            constant: 1.0,
+            terms: Vec::new(),
+        }
+    }
+}
+
 /// 跨地点联合规划的宇宙工厂。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -258,6 +280,7 @@ pub struct UniverseDocument {
     pub name: String,
     pub mechanics: Vec<UniverseMechanicEntry>,
     pub targets: Vec<LocatedTarget>,
+    pub target_expressions: Vec<LocatedTargetExpression>,
     pub strict_source: bool,
     pub strict_sink: bool,
 }
@@ -269,6 +292,7 @@ impl Default for UniverseDocument {
             name: "Unnamed universe".to_string(),
             mechanics: Vec::new(),
             targets: Vec::new(),
+            target_expressions: Vec::new(),
             strict_source: false,
             strict_sink: false,
         }

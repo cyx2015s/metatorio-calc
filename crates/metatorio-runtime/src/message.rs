@@ -314,6 +314,34 @@ pub enum UniverseAction {
         target: TargetId,
         position: usize,
     },
+    AddTargetExpression {
+        location: Location,
+    },
+    RemoveTargetExpression {
+        expression: TargetExpressionId,
+    },
+    SetTargetExpressionConstant {
+        expression: TargetExpressionId,
+        constant: f64,
+    },
+    AddTargetExpressionTerm {
+        expression: TargetExpressionId,
+        flow: DualVar,
+    },
+    RemoveTargetExpressionTerm {
+        expression: TargetExpressionId,
+        term: TargetTermId,
+    },
+    SetTargetExpressionTermFlow {
+        expression: TargetExpressionId,
+        term: TargetTermId,
+        flow: DualVar,
+    },
+    SetTargetExpressionTermCoefficient {
+        expression: TargetExpressionId,
+        term: TargetTermId,
+        coefficient: f64,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

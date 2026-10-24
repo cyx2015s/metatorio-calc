@@ -191,6 +191,17 @@ async fn solve_universe(
 }
 
 #[tauri::command]
+async fn auto_plan_universe(
+    host: HostState<'_>,
+    project: ProjectId,
+    universe: UniverseId,
+) -> Result<metatorio_runtime::UniverseSolveResult, String> {
+    let host = host_of(&host);
+    let state = host.state();
+    metatorio_shell::app::auto_plan_universe_offlock(&host, state, project, universe).await
+}
+
+#[tauri::command]
 async fn get_document(host: HostState<'_>) -> Result<AppDocument, String> {
     metatorio_shell::app::get_document(&host_of(&host)).await
 }
@@ -460,6 +471,7 @@ pub fn run_with_project_files(options: Options, files: Vec<PathBuf>) {
             allowed_modules,
             dispatch,
             solve_universe,
+            auto_plan_universe,
             get_document,
             history_state,
             accessibility,

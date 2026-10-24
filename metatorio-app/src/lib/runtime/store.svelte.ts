@@ -42,6 +42,7 @@ import {
   implicitSources,
   mechanicFlow,
   solveUniverse,
+  autoPlanUniverse,
 } from "./client";
 import type {
   Accessible,
@@ -72,6 +73,9 @@ import type {
   SolveResult,
   RuntimeDiagnostic,
   TargetId,
+  TargetExpressionId,
+  TargetTermId,
+  DualVar,
   TimeScale,
   ExternalInputId,
 } from "./types";
@@ -141,6 +145,7 @@ class RuntimeStore {
   universeSolve = $state<UniverseSolveResult | null>(null);
   universeSolveError = $state<string | null>(null);
   private universeSolveCache = new Map<string, UniverseSolveResult>();
+  private universeSolveGeneration = 0;
   /** 项目 id → 保存路径（记忆路径，未保存过无条目）。 */
   projectPaths = $state<Map<ProjectId, string>>(new Map());
   solve = $state<SolveResult | null>(null);
@@ -384,6 +389,11 @@ class RuntimeStore {
   }
 
   async refresh(): Promise<void> {
+    // Any document refresh may have changed a universe (including undo/redo and
+    // external dispatches), so cached universe solutions are no longer trusted.
+    this.universeSolveCache.clear();
+    this.universeSolveGeneration += 1;
+    if (this.selectedUniverseId != null) this.universeSolve = null;
     const previousProject = this.selectedProjectId;
     const previousFactory = this.selectedFactoryId;
     this.document = await getDocument();
@@ -967,10 +977,12 @@ class RuntimeStore {
 
   async addUniverse(name: string): Promise<void> {
     const project = this.requireProject();
+    const previousFactory = this.selectedFactoryId;
     const result = await this.send({
       scope: "project",
       action: { project, action: { "add-universe": { name } } },
     });
+    this.previousFactoryId = previousFactory;
     this.selectedUniverseId = result.created.universes.at(-1) ?? null;
     this.selectedFactoryId = null;
     this.universeSolve = null;
@@ -982,7 +994,7 @@ class RuntimeStore {
       scope: "project",
       action: { project, action: { "remove-universe": { universe } } },
     });
-    if (this.selectedUniverseId === universe) this.selectedUniverseId = null;
+    if (this.selectedUniverseId === universe) await this.selectUniverse(null);
   }
 
   async selectUniverse(universe: UniverseId | null): Promise<void> {
@@ -1017,7 +1029,8 @@ class RuntimeStore {
     await this.send({ scope: "universe", action: { project, universe, action } });
     this.universeSolve = null;
     this.universeSolveError = null;
-    this.universeSolveCache.delete(`${project}:${universe}`);
+    this.universeSolveGeneration += 1;
+    this.universeSolveCache.clear();
   }
 
   async addUniverseLocal(location: Location, kind: MechanicKind): Promise<void> {
@@ -1064,14 +1077,72 @@ class RuntimeStore {
     await this.universeAction({ "set-target-amount": { target, amount } });
   }
 
+  async addUniverseTargetExpression(location: Location): Promise<void> {
+    await this.universeAction({ "add-target-expression": { location } });
+  }
+
+  async removeUniverseTargetExpression(expression: TargetExpressionId): Promise<void> {
+    await this.universeAction({ "remove-target-expression": { expression } });
+  }
+
+  async setUniverseTargetExpressionConstant(expression: TargetExpressionId, constant: number): Promise<void> {
+    await this.universeAction({ "set-target-expression-constant": { expression, constant } });
+  }
+
+  async addUniverseTargetExpressionTerm(expression: TargetExpressionId, flow: DualVar): Promise<void> {
+    await this.universeAction({ "add-target-expression-term": { expression, flow } });
+  }
+
+  async removeUniverseTargetExpressionTerm(expression: TargetExpressionId, term: TargetTermId): Promise<void> {
+    await this.universeAction({ "remove-target-expression-term": { expression, term } });
+  }
+
+  async setUniverseTargetExpressionTermFlow(expression: TargetExpressionId, term: TargetTermId, flow: DualVar): Promise<void> {
+    await this.universeAction({ "set-target-expression-term-flow": { expression, term, flow } });
+  }
+
+  async setUniverseTargetExpressionTermCoefficient(expression: TargetExpressionId, term: TargetTermId, coefficient: number): Promise<void> {
+    await this.universeAction({ "set-target-expression-term-coefficient": { expression, term, coefficient } });
+  }
+
+  async autoPlanSelectedUniverse(): Promise<void> {
+    const { project, universe } = this.requireUniverse();
+    const generation = ++this.universeSolveGeneration;
+    this.universeSolveError = null;
+    this.busy = true;
+    let planned: UniverseSolveResult | null = null;
+    try {
+      const result = await autoPlanUniverse(project, universe);
+      if (generation !== this.universeSolveGeneration) return;
+      if (this.selectedProjectId !== project || this.selectedUniverseId !== universe) return;
+      planned = result;
+      this.universeSolve = result;
+    } catch (error) {
+      if (generation !== this.universeSolveGeneration) return;
+      this.universeSolveError = error instanceof Error ? error.message : String(error);
+    } finally {
+      this.busy = false;
+      await this.refresh();
+      if (planned && this.selectedProjectId === project && this.selectedUniverseId === universe) {
+        this.universeSolve = planned;
+        this.universeSolveCache.set(`${project}:${universe}`, planned);
+      }
+    }
+  }
+
   async solveSelectedUniverse(): Promise<void> {
     const { project, universe } = this.requireUniverse();
+    const generation = ++this.universeSolveGeneration;
     this.universeSolveError = null;
     try {
       const result = await solveUniverse(project, universe);
+      if (generation !== this.universeSolveGeneration) return;
+      if (this.selectedProjectId !== project || this.selectedUniverseId !== universe) return;
       this.universeSolve = result;
       this.universeSolveCache.set(`${project}:${universe}`, result);
     } catch (error) {
+      if (generation !== this.universeSolveGeneration) return;
+      if (this.selectedProjectId !== project || this.selectedUniverseId !== universe) return;
       this.universeSolve = null;
       this.universeSolveError = error instanceof Error ? error.message : String(error);
     }
@@ -1988,15 +2059,18 @@ class RuntimeStore {
     const project = projects.find((entry) => entry.id === this.selectedProjectId) ?? projects[0];
     const projectId = project?.id ?? null;
     const factories = project?.factories ?? [];
-    const factory = factories.find((entry) => entry.id === this.selectedFactoryId) ?? factories[0];
+    const universes = project?.universes ?? [];
+    const universeSelected = universes.some((entry) => entry.id === this.selectedUniverseId);
+    const factory = universeSelected
+      ? null
+      : factories.find((entry) => entry.id === this.selectedFactoryId) ?? factories[0];
     const factoryId = factory?.id ?? null;
     if (projectId !== this.selectedProjectId || factoryId !== this.selectedFactoryId) {
       this.selectedMechanic = null;
     }
     this.selectedProjectId = projectId;
     this.selectedFactoryId = factoryId;
-    const universes = project?.universes ?? [];
-    if (!universes.some((entry) => entry.id === this.selectedUniverseId)) {
+    if (!universeSelected) {
       this.selectedUniverseId = null;
     }
   }
