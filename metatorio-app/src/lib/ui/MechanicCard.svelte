@@ -22,18 +22,19 @@
   // 有求解结果时按实际用量缩放显示；无求解结果时显示系数 1 的原始流。
   // 依赖 entry.mechanic 整体：配方/机器/插件配置变化时重新加载。
   let loadingFlows = $state(true);
-  let mechanicFlows = $state<{ flow: import("$lib/runtime/types").DualVar; amount: number }[]>([]);
+  let mechanicFlows = $state<import("$lib/mechanic-filter").ExpandedFlow[]>([]);
   $effect(() => {
     const mechanic = entry.mechanic;
+    void entry.location;
+    void runtime.selectedProject?.settings;
     loadingFlows = true;
     let alive = true;
-    runtime
-      .getMechanicFlow(project, factory, entry.id, mechanic)
+    actions.loadFlow(entry.id, mechanic)
       .then((flows) => {
         if (!alive) return;
         mechanicFlows = flows;
         loadingFlows = false;
-      });
+      }).catch(() => { if (alive) { mechanicFlows = []; loadingFlows = false; } });
     return () => {
       alive = false;
     };
@@ -51,7 +52,7 @@
   const scale = $derived(solution ? Math.max(0, solution.amount) : 1);
 </script>
 
-<article data-mechanic-id={entry.id} class="mech-card" class:off={!entry.enabled} aria-label={`${kindLabel[kind]}：${primaryLabel}`}>
+<article data-mechanic-id={entry.id} class="mech-card" class:off={!entry.enabled} aria-label={`${entry.transfer ? "火箭转移" : kindLabel[kind]}：${primaryLabel}`}>
   <MechanicEditor {entry} {solution} {project} {factory} {actions} onInteractionChange={active => editorActive = active} />
   <div class="flow-lanes" aria-label="机制流量">
     {#each [{ label: "输入", items: inputs }, { label: "输出", items: outputs }] as lane}
@@ -60,8 +61,8 @@
         <!-- Scroll regions must be keyboard focusable, including when they contain no buttons. -->
         <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
         <div class="flow-strip" tabindex="0" role="region" aria-label={`${lane.label}流量，可横向滚动`}>
-          {#each lane.items as item (dualVarKey(item.flow))}
-            <FlowChip flow={item.flow} amount={item.amount} {scale} solved={solution !== null} />
+          {#each lane.items as item (JSON.stringify([item.location, dualVarKey(item.flow)]))}
+            {#if entry.transfer && item.location}<span class="flow-location">{item.location.kind === "space" ? "太空" : runtime.localizedName("planet",item.location.name)}</span>{/if}<FlowChip flow={item.flow} amount={item.amount} {scale} solved={solution !== null} />
           {:else}<span class="no-flow">{loadingFlows ? "加载中…" : "—"}</span>{/each}
         </div>
       </div>
@@ -72,7 +73,7 @@
         <p>{solution ? "当前求解用量下的流量" : "未求解：以下为单位机制流量"}</p>
         {#each [{ label: "输入", items: inputs }, { label: "输出", items: outputs }] as lane}
           <h4>{lane.label}（{lane.items.length}）</h4>
-          {#each lane.items as item (dualVarKey(item.flow))}<FlowChip flow={item.flow} amount={item.amount} {scale} solved={solution !== null} showName />{/each}
+          {#each lane.items as item (JSON.stringify([item.location, dualVarKey(item.flow)]))}{#if entry.transfer && item.location}<span class="flow-location">{item.location.kind === "space" ? "太空" : runtime.localizedName("planet",item.location.name)}</span>{/if}<FlowChip flow={item.flow} amount={item.amount} {scale} solved={solution !== null} showName />{/each}
         {/each}
       </div>
     </SecondaryMenu>
@@ -93,6 +94,7 @@
   .lane-label small { margin-left: 2px; font-family: var(--mono); font-size: 10px; }
   .flow-strip { display: flex; flex: 1; align-items: center; gap: 4px; min-width: 0; height: 34px; overflow-x: auto; overflow-y: hidden; }
   .flow-strip :global(.flow-chip) { flex: 0 0 auto; }
+  .flow-location { font-size:10px; color:var(--muted); white-space:nowrap; }
   .no-flow { color: var(--muted); font-size: 11px; }
   .flow-lanes :global(.menu-anchor) { position: absolute; top: 23px; right: 4px; }
   .all-flows { width: 22px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: var(--radius-sm); background: none; color: var(--muted); font-size: 12px; cursor: pointer; }

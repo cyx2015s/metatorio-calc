@@ -33,7 +33,7 @@
   function mechGroupKey(entry: import("$lib/runtime/types").MechanicEntry): string {
     if (!mergeRecipes) return `single:${entry.id}`;
     const m = entry.mechanic;
-    if (m.type === "recipe") return `recipe:${m.recipe?.id ?? ""}:${m.machine?.id ?? ""}`;
+    if (m.type === "recipe") return `recipe:${JSON.stringify(entry.location)}:${m.recipe?.id ?? ""}:${m.machine?.id ?? ""}`;
     // 非 recipe 机制：永不合并（每机制独立一组）。
     return `single:${entry.id}`;
   }

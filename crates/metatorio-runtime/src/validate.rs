@@ -60,6 +60,9 @@ fn validate_universe(
             validate_location(store, location)?;
             require_id(store, PrototypeGroup::Item, "物品", item)
         }
+        UniverseAction::SetTransferItem { item, .. } => {
+            require_id(store, PrototypeGroup::Item, "物品", item)
+        }
         UniverseAction::Mechanic { action, .. } => validate_mechanic(store, action),
         UniverseAction::AddTarget { flow, .. } => {
             validate_location(store, &flow.location)?;

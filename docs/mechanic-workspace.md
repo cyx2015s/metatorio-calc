@@ -13,7 +13,7 @@
 
 后续添加其他视图时，扩展 `MechanicViewMode`，在工作区增加渲染分支并传入 `MechanicViewProps`。工具栏中的视图状态放在渲染器之外；展示偏好不进入工厂文档或撤销历史。每种视图独立管理布局、滚动或缩放，不修改底层机制来实现视觉聚合。
 
-需要全工厂流信息的视图可令 `MechanicWorkspaceSource.needsAllFlows` 为真，复用每批 6 个请求的共享索引。普通列表仍按可见行懒加载，打开筛选才补全索引。索引使用 `runtime.loadMechanicFlow` 的同一在途请求缓存，失败不能按空流处理。索引中是系数为 1、每秒的净流，实际流量需乘相应求解用量；未求解与求解用量为 0 应区分。网络图的关系聚合不能丢弃品质、温度或燃料约束，也不能把依赖边当作求解器输出的点对点物流分配。
+需要全工厂流信息的视图可令 `MechanicWorkspaceSource.needsAllFlows` 为真，复用每批 6 个请求的共享索引。普通列表仍按可见行懒加载，打开筛选才补全索引。索引经 `actions.loadFlow` 使用普通工厂的 `runtime.loadMechanicFlow` 或宇宙预览的同一在途请求缓存，失败不能按空流处理。索引中是系数为 1、每秒的净流，实际流量需乘相应求解用量；未求解与求解用量为 0 应区分。网络图的关系聚合不能丢弃品质、温度或燃料约束，也不能把依赖边当作求解器输出的点对点物流分配。
 
 ## 网络视图
 
@@ -88,3 +88,41 @@ pnpm test:network-browser
 网络浮层回归覆盖真实画布节点点击、只渲染左侧编辑器、平移时跟随节点、编辑后稳定保留机制 ID、原型选择器/子菜单的焦点层级、搜索下拉框及 Escape、筛选不改变画布尺寸、零匹配后继续筛选，以及窄窗口下浮层保持在画布内。
 
 `test:network` 验证精确流身份、方向性兼容、实际/单位量口径、筛选后分组、折叠流、显式/隐式来源和千机制规模。`test:network-browser` 默认端口 5203，使用真实 Cytoscape 画布和 ELK Worker，模拟 IPC 验证懒加载、共享缓存及失败重试、图内编辑、筛选与跨视图状态、工作区滚动恢复、PNG 全图导出与缩放无关、窄窗口和无 CDN 请求。还在 2 倍像素比下验证画布分辨率、滚轮响应、平移时不遍历节点、保存的全局字体及实时字体修改。它不验证真实 LP 求解结果；设置 `NETWORK_SCREENSHOT` 可保存截图，测试图标来自模拟 IPC 的占位图。构建后设置 `NETWORK_PREVIEW=1` 可对生产静态资源运行同一套完整回归，验证分包与 Worker 路径。
+
+
+## 普通工厂与宇宙工厂共用工作区
+
+两种模式使用页面中的同一个三栏结构与中栏工具栏，不再用 `UniverseWorkspace`
+覆盖普通页面。`FactorySidebar` 提供工厂/项目 tab，项目设置仍在同一处编辑；
+`FactoryTargetsPanel` 统一目标、目标表达式、FlowRef、流选择器、温度区间、数量单位与拖拽。
+右栏统一由 `SolvePanel` 展示成本、优化诊断、流平衡与不可解原因；宇宙结果额外显示地点。
+
+`mechanics/located.ts` 将 LocatedMechanic 投影为展示条目，保留原 ID、地点与 transfer 标识。
+该投影不写回文档，也不替换 runtime 的 selectedFactory。写操作经捕获的
+`MechanicScope.kind = universe` 转换成 universe 消息；普通工厂仍走原 factory 消息。
+两种模式复用 MechanicCommands / createMechanicActions 的选择器、兼容过滤、插件与参数编辑。
+转移条目显示为火箭转移，用同一 MechanicEditor 编辑物品与地点，不暴露普通发射的槽位开关。
+新增的克隆、转移物品编辑及表达式排序消息均参与既有撤销历史。
+
+MechanicWorkspace / MechanicListView / MechanicNetworkView 不区分独立 UI 实现。
+列表合并键包含地点；普通工厂仍按可见卡懒加载。宇宙的 `universe_preview` 一次返回所有
+条目的单位地点流、太阳能配平信息和隐式来源，前端按上下文、项目设置、宇宙内容合并在途请求并缓存。
+后端 `expand_located_mechanic` 同时供预览和 LP 使用，预览不运行求解器，包含停用条目，
+单条配置失败不会抹掉其他条目的展开结果。
+
+网络流节点的身份包含地点、品质和温度。不同地点的机制不合并，温度/燃料兼容关系不跨地点。
+火箭转移连接地面与太空；太空物品到地面的免费投送显示为兼容虚线，明确不是求解器报告的
+实际物流分配量。编辑、筛选与视图切换继续保留原机制 ID 的节点焦点。
+
+宇宙编辑按 180ms 防抖自动重算；普通文档刷新不会无条件丢弃宇宙求解结果。
+自动规划回写、撤销及外部消息改变宇宙数据时失效缓存，迟到结果不能覆盖后续编辑。
+
+新增验证：
+
+- `cargo test -p metatorio-runtime --no-default-features --features microlp --test universe_workspace --lib universe`
+- `pnpm test:universe-workspace`（地点隔离、合并与转移关系）
+- `pnpm test:universe-workspace-browser`（真实 Svelte + 模拟 IPC，三栏、编辑、目标/表达式拖拽、
+  温度、规划回写、网络节点焦点、普通工厂隔离）
+
+同时修正旧转移求解测试的整次数假设：LP 允许分数次制造，1200 运力的配方为 1000 重量
+转移只需执行 1000/1200 次，因此净运力应为零，而不是强行留下 200；生产规则未改变。

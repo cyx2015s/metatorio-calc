@@ -1,6 +1,6 @@
 import type { DualVar } from './runtime/types';
 
-export interface ExpandedFlow { flow: DualVar; amount: number }
+export interface ExpandedFlow { location?: import("./runtime/types").Location; flow: DualVar; amount: number }
 export interface FlowFilter { flow: DualVar; quality?: string; temperature?: [number, number] }
 
 /** Stable object identity; quality and temperature are optional refinements. */

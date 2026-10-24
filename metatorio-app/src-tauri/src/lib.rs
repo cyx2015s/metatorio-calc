@@ -191,6 +191,15 @@ async fn solve_universe(
 }
 
 #[tauri::command]
+async fn universe_preview(
+    host: HostState<'_>,
+    project: ProjectId,
+    universe: UniverseId,
+) -> Result<metatorio_runtime::universe::UniversePreview, String> {
+    metatorio_shell::app::universe_preview_offlock(&host_of(&host), project, universe).await
+}
+
+#[tauri::command]
 async fn auto_plan_universe(
     host: HostState<'_>,
     project: ProjectId,
@@ -472,6 +481,7 @@ pub fn run_with_project_files(options: Options, files: Vec<PathBuf>) {
             dispatch,
             solve_universe,
             auto_plan_universe,
+            universe_preview,
             get_document,
             history_state,
             accessibility,

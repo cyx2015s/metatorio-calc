@@ -1,6 +1,6 @@
 import type { AppMessage, FactoryDocument, FactoryId, MechanicId, MechanicKind, ProjectId } from './types';
 
-export interface MechanicScope { readonly project: ProjectId; readonly factory: FactoryId }
+export interface MechanicScope { readonly project: ProjectId; readonly factory: FactoryId; readonly kind?: "universe" }
 export interface MechanicCommandHost {
   send(message: AppMessage): Promise<unknown>;
   getFactory(scope: MechanicScope): FactoryDocument | null;

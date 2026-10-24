@@ -33,9 +33,8 @@ export function createMechanicActions(runtime: typeof Runtime, scope: MechanicSc
 
   const commands = runtime.mechanicCommands(scope);
   scope = commands.scope;
-  const isCurrent = () => runtime.selectedProjectId === scope.project && runtime.selectedFactoryId === scope.factory;
-  const getEntry = (id: MechanicId) => runtime.document?.projects.find(p => p.id === scope.project)
-    ?.factories.find(f => f.id === scope.factory)?.mechanics.find(entry => entry.id === id);
+  const isCurrent = () => runtime.selectedProjectId === scope.project && (scope.kind === "universe" ? runtime.selectedUniverseId : runtime.selectedFactoryId) === scope.factory;
+  const getEntry = (id: MechanicId) => runtime.mechanicFactory(scope)?.mechanics.find(entry => entry.id === id);
   const showNotice = ui.notice;
   function openSelector(kind: CatalogKind, title: string, onSelect: (name: string, quality: string) => void,
     kinds: {kind: CatalogKind; label: string}[] = [], categoryFilter?: string[], allowedNames?: string[],
@@ -205,7 +204,7 @@ export function createMechanicActions(runtime: typeof Runtime, scope: MechanicSc
           // 按机制类型过滤物品：变质/种植/燃料/发射
           const mechKind = entry?.mechanic.type;
           const filter =
-            mechKind === "virtual-science" ? ["science-pack"] : mechKind === "spoil"
+            entry?.transfer ? [] : mechKind === "virtual-science" ? ["science-pack"] : mechKind === "spoil"
               ? ["spoilable"]
               : mechKind === "plant"
                 ? ["plantable"]
@@ -494,6 +493,14 @@ export function createMechanicActions(runtime: typeof Runtime, scope: MechanicSc
     });
   }
 
-  return {commands, pick, pickFuel, addBeacon};
+  async function loadFlow(id: number, mechanic: import('../runtime/types').Mechanic) {
+    if (scope.kind !== 'universe') return runtime.loadMechanicFlow(scope.project, scope.factory, id, mechanic);
+    const preview = await runtime.loadUniversePreview(scope.project, scope.factory);
+    const entry = preview.mechanics.find(e => e.id === id);
+    if (entry?.error) throw new Error(entry.error);
+    return (entry?.flows ?? []).map(f => ({flow: f.flow.flow, location: f.flow.location, amount: f.amount}));
+  }
+  const setLocation = (id: number, location: import('../runtime/types').Location) => runtime.dispatchUniverse(scope.project, scope.factory, {'set-mechanic-location': {mechanic: id, location}});
+  return {commands, pick, pickFuel, addBeacon, loadFlow, setLocation};
 }
 export type MechanicActions = ReturnType<typeof createMechanicActions>;

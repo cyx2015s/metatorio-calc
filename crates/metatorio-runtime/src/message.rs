@@ -258,6 +258,22 @@ pub enum FactoryAction {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum UniverseAction {
+    ReorderTargetExpression {
+        expression: TargetExpressionId,
+        position: usize,
+    },
+    ReorderTargetExpressionTerm {
+        expression: TargetExpressionId,
+        term: TargetTermId,
+        position: usize,
+    },
+    CloneMechanic {
+        mechanic: MechanicId,
+    },
+    SetTransferItem {
+        mechanic: MechanicId,
+        item: IdWithQuality,
+    },
     /// 添加一个本地机制；实际机制由 `kind.default_mechanic()` 生成。
     AddLocalMechanic {
         location: Location,

@@ -1,3 +1,5 @@
+import {locationKey, locationLabel} from "./located.ts";
+import type { Location, LocatedDualVar } from "../runtime/types";
 import type { DualVar, ExternalInput, MechanicEntry, TimeScale } from '../runtime/types';
 import type { ExpandedFlow } from '../mechanic-filter';
 import type { MechanicSolutionMap } from './workspace';
@@ -7,6 +9,7 @@ import { compactNumber } from '../format.ts';
 import { mechanicKindLabels } from './presentation.ts';
 
 export interface NetworkNode {
+  location?: Location;
   id: string;
   kind: 'mechanic' | 'flow' | 'external';
   label: string;
@@ -51,6 +54,8 @@ export interface NetworkSource {
   solutions: MechanicSolutionMap;
   solved: boolean;
   targets: DualVar[];
+  locatedTargets?: LocatedDualVar[];
+  locatedImplicitInputs?: LocatedDualVar[];
   externalInputs: ExternalInput[];
   implicitInputs: DualVar[];
   localize: Localize;
@@ -119,16 +124,17 @@ function utility(flow: DualVar): boolean {
 export function buildNetwork(source: NetworkSource): NetworkModel {
   const nodes = new Map<string, NetworkNode>(), edges = new Map<string, NetworkEdge>();
   const visible = source.visibleIds === null ? null : new Set(source.visibleIds);
-  const targetKeys = new Set(source.targets.map(networkFlowKey));
+  const scopedKey = (flow: DualVar, location?: Location) => `${locationKey(location)}|${networkFlowKey(flow)}`;
+  const targetKeys = new Set([...source.targets.map(flow => scopedKey(flow)), ...(source.locatedTargets ?? []).map(f => scopedKey(f.flow, f.location))]);
   // Power/heat goals are the main chain for that factory, not optional clutter.
-  const isUtility = (flow: DualVar) => utility(flow) && !targetKeys.has(networkFlowKey(flow));
-  const flowNode = (flow: DualVar) => {
-    const id = `f:${networkFlowKey(flow)}`;
+  const isUtility = (flow: DualVar, location?: Location) => utility(flow) && !targetKeys.has(scopedKey(flow, location));
+  const flowNode = (flow: DualVar, location?: Location) => {
+    const id = `f:${location ? locationKey(location) + "|" : ""}${networkFlowKey(flow)}`;
     if (!nodes.has(id)) {
       const info = presentFlow(flow, source.localize);
-      nodes.set(id, {id, kind: 'flow', label: [info.label, ...info.qualifiers].join('\n'),
-        search: `${info.description} ${networkFlowKey(flow)}`, utility: isUtility(flow), entries: [], flow,
-        target: targetKeys.has(networkFlowKey(flow))});
+      nodes.set(id, {id, kind: 'flow', label: [...(location ? [locationLabel(location, source.localize)] : []), info.label, ...info.qualifiers].join('\n'),
+        search: `${info.description} ${networkFlowKey(flow)}`, utility: isUtility(flow, location), entries: [], flow, location,
+        target: targetKeys.has(scopedKey(flow, location))});
     }
     return nodes.get(id)!;
   };
@@ -142,7 +148,7 @@ export function buildNetwork(source: NetworkSource): NetworkModel {
     if (visible && !visible.has(entry.id) || source.onlyEnabled && !entry.enabled) continue;
     const m = entry.mechanic;
     const group = source.mergeRecipes && m.type === 'recipe'
-      ? JSON.stringify(['recipe', m.recipe?.id, m.machine?.id]) : String(entry.id);
+      ? JSON.stringify(['recipe', locationKey(entry.location), m.recipe?.id, m.machine?.id]) : String(entry.id);
     const id = `m:${group}`;
     let node = nodes.get(id);
     if (!node) {
@@ -152,8 +158,8 @@ export function buildNetwork(source: NetworkSource): NetworkModel {
     }
     node.entries.push(entry);
     for (const item of source.index.get(entry.id) ?? []) {
-      if (!Number.isFinite(item.amount) || item.amount === 0 || !source.showUtilities && isUtility(item.flow)) continue;
-      const flow = flowNode(item.flow);
+      if (!Number.isFinite(item.amount) || item.amount === 0 || !source.showUtilities && isUtility(item.flow, item.location ?? entry.location)) continue;
+      const flow = flowNode(item.flow, item.location ?? entry.location);
       const link = item.amount < 0 ? edge(flow.id, id, item.flow) : edge(id, flow.id, item.flow);
       const scale = source.solved ? (entry.enabled ? source.solutions.get(entry.id)?.amount ?? 0 : 0) : 1;
       link.contributions.push({mechanic: entry.id, unitAmount: item.amount, amount: item.amount * scale});
@@ -163,7 +169,8 @@ export function buildNetwork(source: NetworkSource): NetworkModel {
     node.disabled = node.entries.every(entry => !entry.enabled);
     node.unused = source.solved && node.entries.every(entry => !entry.enabled || !source.solutions.get(entry.id)?.amount);
     node.search = node.entries.map(entry => `${JSON.stringify(entry.mechanic)} ${entry.id}`).join(' ') + ` ${node.label}`;
-    node.label += `\n${mechanicKindLabels[node.entries[0].mechanic.type] ?? node.entries[0].mechanic.type}`;
+    if (node.entries[0].location) node.label += `\n${locationLabel(node.entries[0].location, source.localize)}`;
+    node.label += `\n${node.entries[0].transfer ? "火箭转移" : mechanicKindLabels[node.entries[0].mechanic.type] ?? node.entries[0].mechanic.type}`;
     if (node.entries.length > 1) node.label += ` · ${node.entries.length} 个机制`;
     const qualities = networkIconQualities(node);
     if (qualities.length > 1 || qualities.some(quality => quality !== 'normal')) {
@@ -176,16 +183,18 @@ export function buildNetwork(source: NetworkSource): NetworkModel {
   if (source.visibleIds === null) for (const flow of source.targets) {
     if (source.showUtilities || !isUtility(flow)) flowNode(flow);
   }
+  if (source.visibleIds === null) for (const target of source.locatedTargets ?? []) { if (source.showUtilities || !isUtility(target.flow, target.location)) flowNode(target.flow, target.location); }
   const usedFlows = [...nodes.values()].filter(node => node.flow);
   const externals = [
-    ...source.externalInputs.map(external => ({flow: external.flow, external, implicit: false})),
+    ...source.externalInputs.map(external => ({flow: external.flow, external, implicit: false, location: undefined as Location | undefined})),
     ...source.implicitInputs.filter(flow => !source.externalInputs.some(input => networkFlowKey(input.flow) === networkFlowKey(flow)))
-      .map(flow => ({flow, external: undefined, implicit: true})),
+      .map(flow => ({flow, external: undefined, implicit: true, location: undefined as Location | undefined})),
+    ...(source.locatedImplicitInputs ?? []).map(input => ({flow: input.flow, location: input.location, external: undefined, implicit: true})),
   ];
   for (const input of externals) {
     if (!source.showUtilities && isUtility(input.flow)) continue;
-    if (!usedFlows.some(node => networkFlowKey(node.flow!) === networkFlowKey(input.flow) || networkCompatible(input.flow, node.flow!))) continue;
-    const flow = flowNode(input.flow), id = input.implicit ? `implicit:${flow.id}` : `external:${input.external!.id}`;
+    if (!usedFlows.some(node => (locationKey(node.location) === locationKey(input.location) || (input.location?.kind === 'space' && node.location?.kind === 'planet' && typeof input.flow === 'object' && 'Item' in input.flow)) && (networkFlowKey(node.flow!) === networkFlowKey(input.flow) || networkCompatible(input.flow, node.flow!)))) continue;
+    const flow = flowNode(input.flow, input.location), id = input.implicit ? `implicit:${flow.id}` : `external:${input.external!.id}`;
     const info = presentFlow(input.flow, source.localize);
     nodes.set(id, {id, kind: 'external', label: input.implicit ? '隐式输入' : '外部输入',
       search: `${info.description} ${input.implicit ? '隐式' : '外部'}`, utility: flow.utility, entries: [], ...input});
@@ -193,6 +202,18 @@ export function buildNetwork(source: NetworkSource): NetworkModel {
   }
   // Do not union overlapping temperature intervals or fuel category sets.
   const flows = [...nodes.values()].filter(node => node.kind === 'flow');
+  // Universe's zero-cost space -> planet item conversions are compatibility,
+  // never solved delivery quantities or a way to transport fluids/energy.
+  if (source.locatedTargets) {
+    const destinations = new Map<string, NetworkNode[]>();
+    for (const node of flows) if (node.location?.kind === 'planet' && typeof node.flow === 'object' && 'Item' in node.flow) {
+      const key=networkFlowKey(node.flow), group=destinations.get(key) ?? [];
+      group.push(node); destinations.set(key,group);
+    }
+    for (const from of flows) if (from.location?.kind === 'space' && typeof from.flow === 'object' && 'Item' in from.flow) {
+      for (const to of destinations.get(networkFlowKey(from.flow)) ?? []) edge(from.id,to.id,from.flow,'compatibility').label='太空投送 · 免费（非实际分配量）';
+    }
+  }
   const families = new Map<string, NetworkNode[]>();
   for (const node of flows) {
     const flow = node.flow!;
@@ -200,7 +221,7 @@ export function buildNetwork(source: NetworkSource): NetworkModel {
     const family = 'Fluid' in flow ? `fluid:${(flow.Fluid as {name: string}).name}`
       : 'ItemFuelSupply' in flow || 'ItemFuel' in flow ? 'fuel'
       : 'FluidHeat' in flow ? 'fluid-heat' : 'FluidFuel' in flow ? 'fluid-fuel' : undefined;
-    if (family) { const group = families.get(family) ?? []; group.push(node); families.set(family, group); }
+    if (family) { const group = families.get(`${locationKey(node.location)}|${family}`) ?? []; group.push(node); families.set(`${locationKey(node.location)}|${family}`, group); }
   }
   for (const group of families.values()) for (const from of group) for (const to of group) {
     if (from.id !== to.id && networkCompatible(from.flow!, to.flow!)) edge(from.id, to.id, from.flow!, 'compatibility').label = '兼容';

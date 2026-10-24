@@ -39,12 +39,23 @@
   let elk: {layout: (graph: ElkNode) => Promise<ElkNode>; terminateWorker: () => void} | undefined;
   let generation = 0, mounted = true;
   const document = $derived(runtime.document?.projects.find(p => p.id === project));
-  const factoryDocument = $derived(document?.factories.find(f => f.id === factory));
+  const factoryDocument = $derived(actions.commands.scope.kind === "universe" ? null : document?.factories.find(f => f.id === factory));
+  const universeDocument = $derived(actions.commands.scope.kind === 'universe' ? document?.universes?.find(u => u.id === factory) : null);
+  let locatedSources = $state<import('$lib/runtime/types').LocatedDualVar[]>([]);
+  $effect(() => {
+    void universeDocument; void document?.settings;
+    if (!universeDocument) { locatedSources = []; return; }
+    let alive = true;
+    runtime.loadUniversePreview(project, factory).then(p => {if (alive) locatedSources = p.sources;}).catch(() => {if (alive) locatedSources = [];});
+    return () => {alive = false;};
+  });
   const timeScale = $derived(document?.settings.time_scale ?? 'seconds');
   const model = $derived(buildNetwork({entries, visibleIds, index: workspace.index, solutions, solved,
+    locatedTargets: [...(universeDocument?.targets.map(t => t.flow) ?? []), ...(universeDocument?.target_expressions.flatMap(e => e.terms.map(t => t.flow)) ?? [])],
+    locatedImplicitInputs: locatedSources,
     targets: [...(factoryDocument?.targets.map(t => t.flow) ?? []),
       ...(factoryDocument?.target_expressions.flatMap(expression => expression.terms.map(term => term.flow)) ?? [])],
-    externalInputs: factoryDocument?.external_inputs ?? [], implicitInputs: runtime.implicitSourcesCache,
+    externalInputs: factoryDocument?.external_inputs ?? [], implicitInputs: universeDocument ? [] : runtime.implicitSourcesCache,
     localize: (kind, name) => runtime.localizedName(kind, name), timeScale,
     mergeRecipes, collapse, showUtilities, onlyEnabled}));
   const needle = $derived(normalizeSearch(query));

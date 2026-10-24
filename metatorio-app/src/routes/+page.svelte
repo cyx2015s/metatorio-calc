@@ -26,7 +26,11 @@
   import Icon from "$lib/ui/Icon.svelte";
   import Selector from "$lib/ui/Selector.svelte";
   import MechanicWorkspace from "$lib/ui/MechanicWorkspace.svelte";
-  import UniverseWorkspace from "$lib/ui/UniverseWorkspace.svelte";
+  import FactorySidebar from "$lib/ui/FactorySidebar.svelte";
+  import FactoryTargetsPanel from "$lib/ui/FactoryTargetsPanel.svelte";
+  import SolvePanel from "$lib/ui/SolvePanel.svelte";
+  import LocationPicker from "$lib/ui/LocationPicker.svelte";
+  import {universeView} from "$lib/mechanics/located";
   import { createExternalInputShortcuts, DISABLED_RESOURCE_PENALTY, FREE_ENERGY_FLOWS } from "$lib/external-input-shortcuts";
   import { createMechanicActions } from "$lib/mechanics/actions";
   import { DEFAULT_MECHANIC_VIEW, type MechanicViewMode } from "$lib/mechanics/workspace";
@@ -402,7 +406,15 @@
   // ── 派生数据 ────────────────────────────────────────────────────
   let project = $derived(runtime.selectedProject);
   let planning = $derived(project?.planning ?? null);
-  let factory = $derived(runtime.selectedFactory);
+  const universe = $derived(runtime.selectedUniverse);
+  let factory = $derived(universe ? universeView(universe) : runtime.selectedFactory);
+  let universeBusy = $state(false);
+  async function runUniverse(auto=false) {
+    if (universeBusy) return;
+    universeBusy=true;
+    try {if(auto) await runtime.autoPlanSelectedUniverse(); else await runtime.solveSelectedUniverse();}
+    finally {universeBusy=false;}
+  }
   /** 当前项目绑定的游戏上下文（未绑定时回退到全局激活上下文）。 */
   let projectContext = $derived(project?.context_id
     ? runtime.contexts.find((context) => context.id === project?.context_id) ?? null
@@ -452,7 +464,7 @@
   let mechanicProjectId = $derived(project?.id ?? null);
   let mechanicFactoryId = $derived(factory?.id ?? null);
   let actions = $derived(mechanicProjectId !== null && mechanicFactoryId !== null ? createMechanicActions(runtime,
-    {project: mechanicProjectId, factory: mechanicFactoryId}, {
+    {project: mechanicProjectId, factory: mechanicFactoryId, ...(universe ? {kind: "universe" as const} : {})}, {
       select: request => selector = request,
       selectFlow: request => flowSelector = request,
       notice: showNotice,
@@ -508,15 +520,12 @@
       .reorderExternalInputs(event.detail.items.map((input) => input.id))
       .catch(() => {});
   }
-  let solve = $derived(runtime.solve);
-  let solveMap = $derived(
-    new Map(
-      (solve != null && "solved" in solve.status ? solve.status.solved.mechanics : []).map(
-        (m) => [m.mechanic, { amount: m.amount, cost: m.cost }] as const,
-      ),
-    ),
-  );
-  let solved = $derived(solve != null && "solved" in solve.status);
+  let solve = $derived(universe ? null : runtime.solve);
+  let solveMap = $derived(new Map(
+    universe && runtime.universeSolve?.status.status === "solved" ? runtime.universeSolve.status.mechanics.map(m => [m.mechanic,{amount:m.amount,cost:m.cost}] as const)
+    : solve && "solved" in solve.status ? solve.status.solved.mechanics.map(m => [m.mechanic,{amount:m.amount,cost:m.cost}] as const) : []
+  ));
+  let solved = $derived(universe ? runtime.universeSolve?.status.status === "solved" : solve != null && "solved" in solve.status);
   let notSolved = $derived(solve != null && "not-solved" in solve.status);
 
   /** 瓦特 → 可读功率文本（数值为 J/s，直接换算，不乘 60）。 */
@@ -1038,34 +1047,18 @@
     <!-- 左栏：生产目标 / 外部输入 / 目标表达式（低频设置收进右上角抽屉） -->
     <!-- 左栏：工厂 / 项目 双 tab -->
     <aside class="col rail rail-left">
-      <div class="rail-tabs" role="tablist" aria-label="左栏编辑范围">
-        <button
-          class="rail-tab"
-          class:active={leftTab === "factory"}
-          role="tab"
-          aria-selected={leftTab === "factory"}
-          title="编辑当前工厂：环境、目标、外部输入与目标表达式"
-          onclick={() => (leftTab = "factory")}
-        >
-          <span class="rail-tab-main">工厂</span>
-          <span class="rail-tab-sub">{factory?.name ?? "未选择工厂"}</span>
-        </button>
-        <button
-          class="rail-tab"
-          class:active={leftTab === "project"}
-          role="tab"
-          aria-selected={leftTab === "project"}
-          title="编辑整个项目：时间刻度、品质、里程碑、产能与规划插件"
-          onclick={() => (leftTab = "project")}
-        >
-          <span class="rail-tab-main">项目</span>
-          <span class="rail-tab-sub">{project?.name ?? "未选择项目"}</span>
-        </button>
-      </div>
+      <FactorySidebar bind:tab={leftTab} factoryName={factory?.name ?? "未选择工厂"} projectName={project?.name ?? "未选择项目"}>
+      {#snippet factoryContent()}
 
-      {#if leftTab === "factory"}
         {#if factory}
-          <section class="panel">
+          {#if universe}
+          <section class="panel universe-settings"><div class="section-head"><span>环境与约束</span><span class="count">跨星球 · 太空</span></div>
+            <div class="env-row"><span>新增条目地点</span><LocationPicker value={runtime.universeAddLocation} onChange={location=>runtime.universeAddLocation=location} /></div>
+            <label class="check"><input type="checkbox" checked={universe.strict_source} onchange={e=>runtime.dispatchUniverse(project!.id,universe.id,{'set-strict-source':{strict:e.currentTarget.checked}})} />严格供给（只允许环境资源作为外部来源）</label>
+            <label class="check"><input type="checkbox" checked={universe.strict_sink} onchange={e=>runtime.dispatchUniverse(project!.id,universe.id,{'set-strict-sink':{strict:e.currentTarget.checked}})} />严格消耗（未出现在目标中的物品必须配平）</label>
+          </section>
+          {:else}
+<section class="panel">
             <div class="section-head">
               <span>环境与约束</span>
               <span class="count">星球 · 地表 · 品质</span>
@@ -1145,109 +1138,11 @@
             严格消耗（未出现在目标中的物品必须配平）
           </label>
           </section>
-        <section class="panel">
-          <button
-            class="title panel-toggle"
-            aria-expanded={panels.targets}
-            onclick={() => (panels.targets = !panels.targets)}
-          >
-            <span class="toggle-label">
-              <span class="chev">{panels.targets ? "▾" : "▸"}</span>
-              目标 <span class="count">{targets.length}</span>
-            </span>
-          </button>
-          {#if panels.targets}
-          <div
-            class="rows"
-            use:dndzone={{ items: dragTargets, flipDurationMs: 120 }}
-            onconsider={handleTargetsConsider}
-            onfinalize={handleTargetsFinalize}
-          >
-            {#each dragTargets as target (target.id)}
-
-              {@const fluidRange = fluidRangeOf(target.flow)}
-              <div class="row-item one-line" class:has-range={fluidRange}>
-                <!-- 图标承载两个动作：左键更改流、右键查看供给建议。
-                     右键没有可见按钮，靠 title / 悬停卡片提示；移除动作在行尾悬浮出现。 -->
-                <FlowRef flow={target.flow} grow showQualifiers={false} size={26} showBadge={!fluidRange} title="左键更改流 · 右键建议能供给它的机制" onClick={() => editTarget(target)} onContextMenu={() => openSuggestions(target.flow)} />
-                {#if fluidRange}
-                  <!-- 流体目标的**期望温度区间**：区间内任何产出都能满足它，所以不必
-                       钉死在一个温度点上（钉死会让目标在没人产出那个温度时直接不可解）。
-                       两个输入包成一个 flex 项：外层的 gap 只算一次，行变窄时这一组
-                       整体换行，不会把「15」「~」「100」拆到两行去。 -->
-                  <span class="temp-range">
-                    <input
-                      class="num temp"
-                      type="text"
-                      inputmode="numeric"
-                      value={String(fluidRange[0])}
-                      title="期望温度下限（℃）"
-                      onchange={(event) => {
-                        const next = parseTemperature((event.currentTarget as HTMLInputElement).value);
-                        if (next !== null) setTargetFluidRange(target, next, fluidRange[1]);
-                      }}
-                    />
-                    <span class="temp-sep">~</span>
-                    <input
-                      class="num temp"
-                      type="text"
-                      inputmode="numeric"
-                      value={String(fluidRange[1])}
-                      title="期望温度上限（℃）"
-                      onchange={(event) => {
-                        const next = parseTemperature((event.currentTarget as HTMLInputElement).value);
-                        if (next !== null) setTargetFluidRange(target, fluidRange[0], next);
-                      }}
-                    />
-                  </span>
-                {/if}
-                <input
-                  class="num"
-                  type="text"
-                  inputmode="decimal"
-                  title={`目标产量：${flowLabel(target.flow)}（按项目时间刻度）`}
-                  aria-label={`目标产量：${flowLabel(target.flow)}`}
-                  value={isEnergyFlow(target.flow)
-                    ? formatPowerValue(Math.abs(target.amount))
-                    : String(Number((target.amount * currentTimeFactor()).toFixed(6)))}
-                  onchange={(event) => {
-                    const raw = (event.currentTarget as HTMLInputElement).value;
-                    // 能量流按功率解析；非能量流输入为"当前单位下的产能"，内部转回每秒。
-                    const value = isEnergyFlow(target.flow)
-                      ? parsePowerInput(raw)
-                      : Number(raw) / currentTimeFactor();
-                    if (value !== null && Number.isFinite(value)) {
-                      runtime.setTargetAmount(target.id, value).catch(() => {});
-                    }
-                  }}
-                />
-                <span class="row-actions">
-                  <button
-                    class="icon-btn danger"
-                    title={`移除目标「${flowLabel(target.flow)}」`}
-                    aria-label="移除目标"
-                    onclick={() => runtime.removeTarget(target.id).catch(() => {})}
-                  >×</button>
-                </span>
-              </div>
-            {:else}
-              <div class="empty-hint">还没有目标流</div>
-            {/each}
-          </div>
-          <button
-            class="btn block"
-            onclick={() =>
-              (flowSelector = {
-                title: "添加目标流",
-                onSelectFlow: (flow) => runtime.addTargetFlow(flow, 1).catch(() => {}),
-              })}
-            disabled={!runtime.activeContext}
-          >+ 添加目标</button>
           {/if}
-        </section>
+        {#if actions}<FactoryTargetsPanel scope={actions.commands.scope} {targets} expressions={targetExpressions} selectFlow={request=>flowSelector=request} onSuggest={universe ? undefined : openSuggestions} />{/if}
 
 
-        <section class="panel" aria-label="外部输入">
+        {#if !universe}<section class="panel" aria-label="外部输入">
           <button
             class="title panel-toggle"
             aria-expanded={panels.inputs}
@@ -1399,128 +1294,19 @@
           disabled={!runtime.activeContext}
         >+ 添加外部输入</button>
           {/if}
-        </section>
+        </section>{/if}
 
 
-        <section class="panel">
-          <button
-            class="title panel-toggle"
-            aria-expanded={panels.expressions}
-            onclick={() => (panels.expressions = !panels.expressions)}
-          >
-            <span class="toggle-label">
-              <span class="chev">{panels.expressions ? "▾" : "▸"}</span>
-              目标表达式 <span class="count">{targetExpressions.length}</span>
-            </span>
-          </button>
-          {#if panels.expressions}
-          <div class="rows">
-            {#each targetExpressions as expression, ei (expression.id)}
-              <div class="expr-card">
-                <div class="expr-head">
-                  <label class="expr-const">
-                    常数
-                    <input
-                      class="num"
-                      type="number"
-                      step="0.1"
-                      title="目标表达式的常数项"
-                      aria-label="目标表达式常数"
-                      value={String(expression.constant)}
-                      onchange={(event) => {
-                        const value = Number((event.currentTarget as HTMLInputElement).value);
-                        if (Number.isFinite(value)) {
-                          runtime
-                            .setTargetExpressionConstant(expression.id, value)
-                            .catch(() => {});
-                        }
-                      }}
-                    />
-                  </label>
-                  <button
-                    class="btn ghost"
-                    title="移除表达式"
-                    onclick={() => runtime.removeTargetExpression(expression.id).catch(() => {})}
-                  >×</button>
-                </div>
-                <div class="expr-terms">
-                  {#each expression.terms as term, ti (term.id)}
 
-                    <div class="expr-term">
-                      <button
-                        class="icon-btn"
-                        title="更换流的种类"
-                        onclick={() => {
-                          flowSelector = {
-                            title: "更改目标表达式的流",
-                            initialTab: flowTabOf(term.flow),
-                            ...flowInitialOf(term.flow),
-                            onSelectFlow: (flow) =>
-                              runtime
-                                .setTargetExpressionTermFlow(expression.id, term.id, flow)
-                                .catch(() => {}),
-                          };
-                        }}
-                      >
-                        <FlowRef flow={term.flow} size={20} nested showQualifiers={false} />
-                      </button>
-                      <input
-                        class="num"
-                        type="number"
-                        step="0.1"
-                        title={`表达式系数：${flowLabel(term.flow)}`}
-                        aria-label={`表达式系数：${flowLabel(term.flow)}`}
-                        value={String(term.coefficient)}
-                        onchange={(event) => {
-                          const value = Number((event.currentTarget as HTMLInputElement).value);
-                          if (Number.isFinite(value)) {
-                            runtime
-                              .setTargetExpressionTermCoefficient(expression.id, term.id, value)
-                              .catch(() => {});
-                          }
-                        }}
-                      />
-                      <button
-                        class="btn ghost"
-                        title="移除项"
-                        onclick={() =>
-                          runtime
-                            .removeTargetExpressionTerm(expression.id, term.id)
-                            .catch(() => {})}
-                      >×</button>
-                    </div>
-                  {:else}
-                    <span class="muted">还没有项（仅常数）</span>
-                  {/each}
-                </div>
-                <button
-                  class="btn block"
-                  onclick={() =>
-                    (flowSelector = {
-                      title: "添加目标表达式项",
-                      onSelectFlow: (flow) =>
-                        runtime.addTargetExpressionTerm(expression.id, flow).catch(() => {}),
-                    })}
-                >+ 添加项</button>
-              </div>
-            {:else}
-              <div class="empty-hint">目标表达式 = 常数 + Σ(流 × 系数)</div>
-            {/each}
-          </div>
-          <button
-            class="btn block"
-            onclick={() => runtime.addTargetExpression().catch(() => {})}
-            disabled={!runtime.activeContext}
-          >+ 添加表达式</button>
-          {/if}
-        </section>
         {:else}
           <div class="rail-empty">
             <strong>还没有选中的工厂</strong>
             <span>在顶部选择一个工厂，或点「+」新建工厂开始规划。</span>
           </div>
         {/if}
-      {:else if project}
+      {/snippet}
+      {#snippet projectContent()}
+      {#if project}
         <section class="panel">
           <div class="section-head">
             <span>显示与精度</span>
@@ -1858,6 +1644,8 @@
           <span>在左上角「项目」菜单中新建或打开项目。</span>
         </div>
       {/if}
+      {/snippet}
+      </FactorySidebar>
     </aside>
 
     <!-- 中栏：机制列表 -->
@@ -1866,10 +1654,10 @@
         <button
           class="btn primary"
           title="自动规划：按规划偏好的枚举列表生成候选机制 → 选优 → 回写机制列表。总是按严格供给求解，并在完成后自动开启严格供给"
-          onclick={() => runtime.autoPlan().catch(() => {})}
-          disabled={runtime.autoPlanning || !factory}
+          onclick={() => universe ? runUniverse(true) : runtime.autoPlan().catch(() => {})}
+          disabled={universeBusy || runtime.autoPlanning || !factory}
         >
-          {runtime.autoPlanning ? "规划中…" : "自动规划"}
+          {universeBusy || runtime.autoPlanning ? "规划中…" : "自动规划"}
         </button>
         {#if runtime.autoPlanning}
           <AutoPlanProgress progress={runtime.autoPlanProgress} />
@@ -1903,6 +1691,7 @@
         <button class="btn" class:active={filterOpen || filterActive} aria-expanded={filterOpen}
           title="按消耗或产出对象筛选机制；仅影响显示，不改变工厂或求解"
           onclick={() => filterOpen = !filterOpen} disabled={!factory}>筛选{filterActive ? " · 已启用" : ""}</button>
+        {#if universe}<button class="btn" disabled={universeBusy} onclick={()=>runUniverse()}>求解</button><button class="btn" onclick={()=>{selector={kind:"item",kinds:[],title:"选择火箭转移物品",onSelect:(name,quality)=>runtime.addUniverseTransfer(runtime.universeAddLocation.kind==="planet"?runtime.universeAddLocation:{kind:"planet",name:"nauvis"},{id:name,quality})}}}>+ 火箭转移</button>{/if}
         <div class="view-switch" role="group" aria-label="机制展示方式">
           <button class="btn" class:active={mechanicView === 'list'} aria-pressed={mechanicView === 'list'} onclick={() => mechanicView = 'list'}>列表</button>
           <button class="btn" class:active={mechanicView === 'network'} aria-pressed={mechanicView === 'network'} onclick={() => mechanicView = 'network'}>网络</button>
@@ -1941,7 +1730,7 @@
                   <input
                     type="checkbox"
                     checked={planning.preserve_existing_mechanics ?? false}
-                    disabled={runtime.autoPlanning || !factory}
+                    disabled={universeBusy || runtime.autoPlanning || !factory}
                     onchange={(event) => runtime.setPreserveExistingMechanics(event.currentTarget.checked).catch(() => {})}
                   />
                   保留已有机制
@@ -1992,64 +1781,9 @@
 
     <!-- 右栏：求解结果（数据上下文移到顶部「数据」入口） -->
     <aside class="col rail rail-right">
-      <section class="panel solve-panel">
-        <div class="solve-head">
-          <div class="title">求解结果</div>
-          {#if runtime.solving}
-            <span class="chip warn"><span class="status-dot"></span>求解中</span>
-          {:else if solved}
-            <span class="chip ok"><span class="status-dot"></span>已求解</span>
-          {:else if notSolved}
-            <span class="chip warn"><span class="status-dot"></span>未求解</span>
-          {:else}
-            <span class="chip">待求解</span>
-          {/if}
-        </div>
-        {#if runtime.solveError}
-          <div class="err-box prominent" title="最近一次求解/自动规划失败">
-            <strong>求解失败</strong><DiagnosticView diagnostic={runtime.solveDiagnostic?.message === runtime.solveError ? runtime.solveDiagnostic : diagnosticFrom(runtime.solveError)} onFlowClick={openSuggestions} />
-          </div>
-        {/if}
-        {#if solve && "solved" in solve.status}
-          {@const status = solve.status.solved}
-          {@const activeFlows = status.flows.filter((b) => Math.abs(b.amount) / Math.max(b.scale ?? 1, 1e-12) > 1e-9)}
-          <div class="cost-block">
-            <span class="eyebrow">总成本</span>
-            <strong class="mono cost-value">{status.cost.toFixed(3)}</strong>
-            <span class="cost-note">机器碰撞箱面积之和 · 结果随编辑自动刷新</span>
-          </div>
-          <OptimizationSummary report={solve.report} />
-          <div class="section-head">
-            <span>总流平衡</span>
-            <span class="count">{activeFlows.length} 条</span>
-          </div>
-          <div class="rows compact">
-            {#each activeFlows as balance (balance.flow)}
-
-              <div class="row-item one-line result-row">
-                <!-- 与目标面板同一套图标语义：左键/右键都可查看建议。 -->
-                <FlowRef flow={balance.flow} grow showQualifiers={false} size={22} title="查看能供给或消耗该流的机制" onClick={() => openSuggestions(balance.flow)} onContextMenu={() => openSuggestions(balance.flow)} />
-                <strong class:amount-pos={balance.amount > 0} class="mono amount">{formatFlowAmount(balance.flow, balance.amount)}</strong>
-                <span class="row-actions">
-                  <button class="icon-btn" title={`建议：查看能供给或消耗「${flowLabel(balance.flow)}」的机制`} aria-label="查看建议" onclick={() => openSuggestions(balance.flow)}>✦</button>
-                </span>
-              </div>
-            {/each}
-          </div>
-        {:else if solve && "not-solved" in solve.status}
-          {@const status = solve.status["not-solved"]}
-          <div class="err-box">
-            <strong>未求解</strong>
-            <DiagnosticView diagnostic={{code: "not-solved", message: status.description, no_provider: status.no_provider, no_consumer: status.no_consumer, flows: []}} onFlowClick={openSuggestions} />
-          </div>
-        {:else}
-          <div class="empty-hint">改动目标、外部输入或机制后会自动重新求解。</div>
-        {/if}
-      </section>
+      <SolvePanel solve={universe ? null : solve} universeSolve={universe ? runtime.universeSolve : null} error={universe ? runtime.universeSolveError : runtime.solveError} busy={universe ? universeBusy || runtime.universeSolving : !!runtime.solving} onSuggest={universe ? undefined : openSuggestions} />
     </aside>
-    {#if runtime.selectedUniverse}
-      <UniverseWorkspace universe={runtime.selectedUniverse} />
-    {/if}
+
   </main>
 </div>
 
@@ -3350,64 +3084,6 @@
     border-left: 1px solid var(--line);
   }
 
-  /* 左栏顶部：工厂 / 项目 双 tab，滚动时保持可见。 */
-  .rail-tabs {
-    position: sticky;
-    top: 0;
-    z-index: 6;
-    flex: 0 0 auto;
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    background: var(--panel);
-    border-bottom: 1px solid var(--line);
-  }
-
-  .rail-tab {
-    min-width: 0;
-    display: grid;
-    gap: 1px;
-    justify-items: start;
-    padding: 9px 15px 8px;
-    color: var(--muted);
-    background: transparent;
-    border: 0;
-    border-bottom: 2px solid transparent;
-    font: inherit;
-    text-align: left;
-    cursor: pointer;
-    transition: color 90ms ease, background 90ms ease, border-color 90ms ease;
-  }
-
-  .rail-tab:hover {
-    color: var(--text);
-    background: var(--panel-elev);
-  }
-
-  .rail-tab.active {
-    color: var(--text);
-    border-bottom-color: var(--accent);
-  }
-
-  .rail-tab-main {
-    font-size: 11px;
-    font-weight: 750;
-    letter-spacing: 0.1em;
-  }
-
-  .rail-tab-sub {
-    max-width: 100%;
-    overflow: hidden;
-    color: var(--faint);
-    font-size: 9px;
-    line-height: 1.3;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .rail-tab.active .rail-tab-sub {
-    color: var(--muted);
-  }
-
   .rail .panel {
     padding: 14px 16px;
     background: transparent;
@@ -3580,10 +3256,6 @@
     margin-bottom: 10px;
   }
 
-  .rows.compact {
-    gap: 1px;
-  }
-
   .row-item {
     min-width: 0;
     min-height: 32px;
@@ -3605,11 +3277,6 @@
 
   .row-item.one-line {
     flex-wrap: nowrap;
-  }
-
-
-  .row-item.one-line.has-range {
-    flex-wrap: wrap;
   }
 
 
@@ -3696,45 +3363,6 @@
     line-height: 1.55;
   }
 
-  /* ── 目标表达式 ─────────────────────────────────────────────── */
-
-  .expr-card {
-    display: grid;
-    gap: 7px;
-    margin-bottom: 6px;
-    padding: 8px;
-    background: var(--input-bg);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-sm);
-  }
-
-  .expr-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-  }
-
-  .expr-const {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    color: var(--faint);
-    font-size: 10px;
-  }
-
-  .expr-terms {
-    display: grid;
-    gap: 3px;
-  }
-
-  .expr-term {
-    min-width: 0;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-
   /* ── 中栏工具条 ─────────────────────────────────────────────── */
 
   .toolbar {
@@ -3786,44 +3414,6 @@
     line-height: 1.6;
   }
 
-  /* ── 右栏：求解结果 ─────────────────────────────────────────── */
-
-  .solve-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    margin-bottom: 12px;
-  }
-
-  .solve-head .title {
-    margin: 0;
-  }
-
-  .cost-block {
-    display: grid;
-    gap: 2px;
-    padding: 12px;
-    margin-bottom: 14px;
-    background: var(--input-bg);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-sm);
-  }
-
-  .cost-value {
-    color: var(--text);
-    font-size: 26px;
-    font-weight: 650;
-    letter-spacing: -0.045em;
-    line-height: 1.15;
-  }
-
-  .cost-note {
-    color: var(--faint);
-    font-size: 9px;
-    line-height: 1.45;
-  }
-
   .section-head {
     display: flex;
     align-items: center;
@@ -3841,27 +3431,6 @@
     font-family: var(--mono);
     font-weight: 500;
     letter-spacing: 0;
-  }
-
-  .amount {
-    flex: 0 0 auto;
-    color: var(--muted);
-    font-size: 10.5px;
-    font-weight: 550;
-    text-align: right;
-  }
-
-  .amount-pos {
-    color: var(--ok);
-  }
-
-  .result-row .row-actions {
-    opacity: 0;
-  }
-
-  .result-row:hover .row-actions,
-  .result-row:focus-within .row-actions {
-    opacity: 1;
   }
 
   /* ── 游戏数据模态 ───────────────────────────────────────────── */

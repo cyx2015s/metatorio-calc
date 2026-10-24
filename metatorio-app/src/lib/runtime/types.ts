@@ -387,6 +387,10 @@ export type FactoryAction =
 // (newtype variants like Application put the payload directly under
 // "action").  Keep in sync with crates/metatorio-runtime/src/message.rs.
 export type UniverseAction =
+  | { "reorder-target-expression": {expression: TargetExpressionId; position: number} }
+  | { "reorder-target-expression-term": {expression: TargetExpressionId; term: TargetTermId; position: number} }
+  | { "clone-mechanic": { mechanic: MechanicId } }
+  | { "set-transfer-item": { mechanic: MechanicId; item: IdWithQuality } }
   | { "add-local-mechanic": { location: Location; kind: MechanicKind } }
   | { "add-transfer": { location: Location; item: IdWithQuality } }
   | { "remove-mechanic": { mechanic: MechanicId } }
@@ -603,12 +607,14 @@ export interface FactorySettings {
 }
 
 export interface FlowTarget {
+  location?: Location;
   id: TargetId;
   flow: DualVar;
   amount: number;
 }
 
 export interface TargetTerm {
+  location?: Location;
   id: TargetTermId;
   flow: DualVar;
   coefficient: number;
@@ -634,6 +640,8 @@ export interface Suggestion {
 }
 
 export interface MechanicEntry {
+  location?: Location;
+  transfer?: boolean;
   id: MechanicId;
   enabled: boolean;
   mechanic: Mechanic;

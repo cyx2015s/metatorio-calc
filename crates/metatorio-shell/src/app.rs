@@ -3400,6 +3400,34 @@ pub async fn auto_plan_universe_offlock(
     .map_err(|error| error.to_string())?
 }
 
+pub async fn universe_preview_offlock(
+    host: &Arc<dyn Host>,
+    project: ProjectId,
+    universe: metatorio_runtime::UniverseId,
+) -> Result<metatorio_runtime::universe::UniversePreview, String> {
+    let host = host.clone();
+    tokio::task::spawn_blocking(move || {
+        let runtime = host.state().runtime.lock().map_err(|e| e.to_string())?;
+        let snapshot = runtime
+            .project_snapshot(project)
+            .map_err(|e| e.to_string())?;
+        let document = runtime
+            .state
+            .universe(project, universe)
+            .map_err(|e| e.to_string())?
+            .clone();
+        drop(runtime);
+        Ok(metatorio_runtime::universe::preview_universe(
+            &snapshot.store,
+            &snapshot.project_doc,
+            &document,
+            &snapshot.resolve_accessibility(),
+        ))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// 锁外求解一个宇宙工厂：锁内只取快照，重型 LP 在阻塞线程池执行。
 pub async fn solve_universe_offlock(
     host: &Arc<dyn Host>,

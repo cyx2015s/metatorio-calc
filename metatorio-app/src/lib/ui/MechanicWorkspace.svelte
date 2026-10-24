@@ -20,7 +20,7 @@
   } = $props();
 
   // Filters live outside the renderer: changing views must not reset the query.
-  let scope = $derived(`${project ?? 0}:${factory ?? 0}`);
+  let scope = $derived(`${actions?.commands.scope.kind ?? "factory"}:${project ?? 0}:${factory ?? 0}`);
   const networkStates = new Map<string, NetworkViewState>();
   const scrollStates = new Map<string, MechanicScrollState>();
   let scrollState = $derived.by(() => {
@@ -34,10 +34,10 @@
   });
   const workspace = new MechanicWorkspaceState(() => {
     const document = runtime.document?.projects.find(entry => entry.id === project);
-    return {project, factory, entries, expanded: filterOpen, needsAllFlows: view === 'network',
+    return {project, factory, entries, scopeKey: scope, expanded: filterOpen, needsAllFlows: view === 'network',
       environmentKey: JSON.stringify([document?.context_id, runtime.effectiveContextId, document?.settings,
-        document?.factories.find(entry => entry.id === factory)?.settings])};
-  }, (project, factory, id, mechanic) => runtime.loadMechanicFlow(project, factory, id, mechanic));
+        actions?.commands.scope.kind === "universe" ? document?.universes?.find(entry => entry.id === factory) : document?.factories.find(entry => entry.id === factory)?.settings])};
+  }, (project, factory, id, mechanic) => actions!.loadFlow(id, mechanic));
   $effect(() => { workspace.syncScope(); });
   $effect(() => workspace.loadIndex());
   let visibleIds = $derived(workspace.visibleIds);

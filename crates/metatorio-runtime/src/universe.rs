@@ -256,6 +256,146 @@ fn add_located_conversion_flows(
     }
 }
 
+/// Read-only view data uses exactly the same per-mechanism expansion as the LP.
+pub fn expand_located_mechanic(
+    store: &PrototypeStore,
+    base: &metatorio_core::GameState,
+    mechanic: &LocatedMechanic,
+) -> Result<Vec<(SolverFlow<LocatedDualVar>, f64)>, String> {
+    match mechanic {
+        LocatedMechanic::Local(local) => {
+            ensure_local_mechanic_supported(store, &local.mechanic)?;
+            let (planet, surface) = environment_for(&local.location);
+            let mut game = base.clone();
+            apply_environment_to_game_state(store, &mut game, planet, surface);
+            let context = Context::new(store, &game);
+            Ok(
+                metatorio_core::expand::expand([(0usize, &local.mechanic)], &context)
+                    .variables
+                    .into_iter()
+                    .map(|v| (locate_flow(&local.location, v.flow), v.cost))
+                    .collect(),
+            )
+        }
+        LocatedMechanic::Transfer(transfer) => {
+            if !matches!(transfer.location, Location::Planet(_)) {
+                return Err("火箭转移的起点必须是星球".into());
+            }
+            let weight = store
+                .item_weight(&transfer.item.id)
+                .map(|w| w.weight)
+                .unwrap_or(store.weight_constants().default_item_weight);
+            if weight <= 0.0 {
+                return Err(format!(
+                    "火箭转移物品 {} 的重量必须大于 0",
+                    transfer.item.id
+                ));
+            }
+            let mut flow = SolverFlow::default();
+            flow.insert(
+                LocatedDualVar::new(
+                    transfer.location.clone(),
+                    DualVar::Item(transfer.item.clone()),
+                ),
+                -1.0,
+            );
+            flow.insert(
+                LocatedDualVar::new(transfer.location.clone(), DualVar::RocketWeightCapacity),
+                -weight,
+            );
+            flow.insert(
+                LocatedDualVar::new(Location::Space, DualVar::Item(transfer.item.clone())),
+                1.0,
+            );
+            Ok(vec![(flow, 0.0)])
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct UniversePreviewEntry {
+    pub id: MechanicId,
+    pub flows: Vec<LocatedFlow>,
+    pub error: Option<String>,
+    pub solar_balance: Option<metatorio_core::SolarBalance>,
+}
+#[derive(Debug, Serialize)]
+pub struct UniversePreview {
+    pub mechanics: Vec<UniversePreviewEntry>,
+    pub sources: Vec<LocatedDualVar>,
+}
+fn located_solar_balance(
+    store: &PrototypeStore,
+    base: &metatorio_core::GameState,
+    mechanic: &LocatedMechanic,
+) -> Option<metatorio_core::SolarBalance> {
+    let LocatedMechanic::Local(local) = mechanic else {
+        return None;
+    };
+    let Mechanic::Solar(solar) = &local.mechanic else {
+        return None;
+    };
+    let (planet, surface) = environment_for(&local.location);
+    let mut game = base.clone();
+    apply_environment_to_game_state(store, &mut game, planet, surface);
+    metatorio_core::solar_balance(&Context::new(store, &game), solar)
+}
+
+pub fn preview_universe(
+    store: &PrototypeStore,
+    project: &ProjectDocument,
+    universe: &UniverseDocument,
+    accessibility: &metatorio_core::Accessibility,
+) -> UniversePreview {
+    let base = make_game_state_with_accessibility(store, project, accessibility);
+    let mechanics = universe
+        .mechanics
+        .iter()
+        .map(
+            |entry| match expand_located_mechanic(store, &base, &entry.mechanic) {
+                Ok(variants) => {
+                    let mut total = SolverFlow::default();
+                    for (flow, _) in variants {
+                        for (key, amount) in flow {
+                            *total.entry(key).or_insert(0.0) += amount;
+                        }
+                    }
+                    UniversePreviewEntry {
+                        id: entry.id,
+                        error: None,
+                        solar_balance: located_solar_balance(store, &base, &entry.mechanic),
+                        flows: total
+                            .into_iter()
+                            .map(|(flow, amount)| LocatedFlow {
+                                flow,
+                                amount,
+                                rate: amount,
+                            })
+                            .collect(),
+                    }
+                }
+                Err(error) => UniversePreviewEntry {
+                    id: entry.id,
+                    flows: vec![],
+                    error: Some(error),
+                    solar_balance: None,
+                },
+            },
+        )
+        .collect();
+    let sources = used_locations(universe)
+        .iter()
+        .flat_map(|location| {
+            let flow = match location {
+                Location::Planet(name) => planet_source_flows(store, name),
+                Location::Space => space_source_flows(store),
+            };
+            locate_flow(location, flow).into_keys()
+        })
+        .collect();
+    UniversePreview { mechanics, sources }
+}
+
 /// Build and solve a universe factory with the project's selected backend.
 pub fn solve_universe(
     store: &PrototypeStore,
@@ -268,81 +408,27 @@ pub fn solve_universe(
         metatorio_core::AIndexMap::default();
     let mut origins = HashMap::new();
     let mut next_id = 0u64;
-    let mut next_variant: HashMap<MechanicId, u16> = HashMap::new();
 
     for entry in &universe.mechanics {
         if !entry.enabled {
             continue;
         }
-        match &entry.mechanic {
-            LocatedMechanic::Local(local) => {
-                ensure_local_mechanic_supported(store, &local.mechanic)?;
-                let (planet, surface) = environment_for(&local.location);
-                let mut game = base.clone();
-                apply_environment_to_game_state(store, &mut game, planet, surface);
-                let context = Context::new(store, &game);
-                let expansion =
-                    metatorio_core::expand::expand([(entry.id, &local.mechanic)], &context);
-                for variable in expansion.variables {
-                    let id = UniverseVarId(next_id);
-                    next_id += 1;
-                    let variant = *next_variant.entry(entry.id).or_default();
-                    *next_variant.get_mut(&entry.id).unwrap() = variant.saturating_add(1);
-                    flows.insert(
-                        id,
-                        (locate_flow(&local.location, variable.flow), variable.cost),
-                    );
-                    origins.insert(
-                        id,
-                        VarOrigin::Local {
-                            mechanic: entry.id,
-                            location: local.location.clone(),
-                            cost: variable.cost,
-                        },
-                    );
-                }
-            }
-            LocatedMechanic::Transfer(transfer) => {
-                let Location::Planet(_) = &transfer.location else {
-                    return Err("火箭转移的起点必须是星球".to_string());
-                };
-                let weight = store
-                    .item_weight(&transfer.item.id)
-                    .map(|weight| weight.weight)
-                    .unwrap_or(store.weight_constants().default_item_weight);
-                if weight <= 0.0 {
-                    return Err(format!(
-                        "火箭转移物品 {} 的重量必须大于 0",
-                        transfer.item.id
-                    ));
-                }
-                let id = UniverseVarId(next_id);
-                next_id += 1;
-                let mut located = SolverFlow::default();
-                located.insert(
-                    LocatedDualVar::new(
-                        transfer.location.clone(),
-                        DualVar::Item(transfer.item.clone()),
-                    ),
-                    -1.0,
-                );
-                located.insert(
-                    LocatedDualVar::new(transfer.location.clone(), DualVar::RocketWeightCapacity),
-                    -weight,
-                );
-                located.insert(
-                    LocatedDualVar::new(Location::Space, DualVar::Item(transfer.item.clone())),
-                    1.0,
-                );
-                flows.insert(id, (located, 0.0));
-                origins.insert(
-                    id,
-                    VarOrigin::Transfer {
-                        mechanic: entry.id,
-                        location: transfer.location.clone(),
-                    },
-                );
-            }
+        for (flow, cost) in expand_located_mechanic(store, &base, &entry.mechanic)? {
+            let id = UniverseVarId(next_id);
+            next_id += 1;
+            flows.insert(id, (flow, cost));
+            let origin = match &entry.mechanic {
+                LocatedMechanic::Local(local) => VarOrigin::Local {
+                    mechanic: entry.id,
+                    location: local.location.clone(),
+                    cost,
+                },
+                LocatedMechanic::Transfer(transfer) => VarOrigin::Transfer {
+                    mechanic: entry.id,
+                    location: transfer.location.clone(),
+                },
+            };
+            origins.insert(id, origin);
         }
     }
 
@@ -733,13 +819,13 @@ mod tests {
                 && flow.flow.flow == DualVar::Item(item("iron-ore"))
                 && flow.amount > 0.9
         }));
-        // One silo craft produces 1200 capacity; transferring one 1000-weight
-        // item consumes 1000, so the net local capacity is 200.
+        // One craft produces 1200 capacity; the continuous LP needs only
+        // 1000/1200 crafts for this transfer, so net capacity balances to zero.
         assert!(
             flows.iter().any(|flow| {
                 flow.flow.location == Location::planet("nauvis")
                     && flow.flow.flow == DualVar::RocketWeightCapacity
-                    && (flow.amount - 200.0).abs() < 0.01
+                    && flow.amount.abs() < 0.01
             }),
             "{flows:?}"
         );

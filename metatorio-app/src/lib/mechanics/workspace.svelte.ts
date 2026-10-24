@@ -10,6 +10,7 @@ export interface MechanicWorkspaceSource {
   /** A view may request a full index even when the filter panel is closed. */
   needsAllFlows?: boolean;
   environmentKey: string;
+  scopeKey?: string;
 }
 
 /** Shared query and expansion state; the workspace owns its reactive lifecycle. */
@@ -35,8 +36,8 @@ export class MechanicWorkspaceState {
   }
 
   syncScope() {
-    const {project, factory} = this.source();
-    const scope = `${project ?? 0}:${factory ?? 0}`;
+    const {project, factory, scopeKey} = this.source();
+    const scope = scopeKey ?? `${project ?? 0}:${factory ?? 0}`;
     if (scope === this.previousScope) return;
     this.previousScope = scope;
     untrack(() => { this.clearFilters(); this.index = new Map(); this.failures = []; this.completed = 0; });

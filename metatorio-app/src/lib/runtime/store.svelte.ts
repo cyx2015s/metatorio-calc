@@ -1,3 +1,5 @@
+import { universeView } from "$lib/mechanics/located";
+import { universePreview, type UniversePreview } from "./client";
 import { MechanicCommands, type MechanicScope } from "./mechanic-commands";
 import { IconCache } from "./icon-cache";
 import { richTextPlain } from "$lib/rich-text";
@@ -338,6 +340,7 @@ class RuntimeStore {
       this.solving = null;
     });
     onContextsChanged(() => {
+      this.clearMechanicFlowCache();
       this.clearIconCache();
       this.contextBusy = false;
       this.contextError = null;
@@ -350,6 +353,7 @@ class RuntimeStore {
     // 外部（MCP dispatch）改动文档后，拉取最新快照，实现「外部 agent + 用户」
     // 在同一个界面上实时并存协同。
     onDocumentChanged(() => {
+      this.universeOperationVersion++;
       this.refresh().catch(() => {});
       // 外部（MCP）也可能撤销/重做，同步历史可用性。
       this.refreshHistory().catch(() => {});
@@ -389,14 +393,17 @@ class RuntimeStore {
   }
 
   async refresh(): Promise<void> {
-    // Any document refresh may have changed a universe (including undo/redo and
-    // external dispatches), so cached universe solutions are no longer trusted.
-    this.universeSolveCache.clear();
-    this.universeSolveGeneration += 1;
-    if (this.selectedUniverseId != null) this.universeSolve = null;
+    const universeSignature = (document: AppDocument | null) => JSON.stringify(document?.projects.map(p=>[p.id,p.context_id,p.settings,p.universes]));
+    const beforeUniverse = universeSignature(this.document);
     const previousProject = this.selectedProjectId;
     const previousFactory = this.selectedFactoryId;
     this.document = await getDocument();
+    const universeChanged = beforeUniverse !== universeSignature(this.document);
+    if (universeChanged) {
+      this.universeSolveCache.clear(); this.universeSolveGeneration++;
+      this.universeSolve = null; this.universeSolving = false;
+    }
+
     // 保留有效选择；删除、导入或外部编辑后自动补全缺失选择。
     this.pruneSelection();
     if (previousProject !== this.selectedProjectId || previousFactory !== this.selectedFactoryId) {
@@ -410,6 +417,13 @@ class RuntimeStore {
       this.syncEffectiveContext().catch(() => {});
     }
     this.refreshProjectPaths().catch(() => {});
+    if (universeChanged && this.selectedUniverseId != null) {
+      const project=this.selectedProjectId, universe=this.selectedUniverseId;
+      clearTimeout(this.universeSolveTimer);
+      this.universeSolveTimer=setTimeout(()=>{
+        if(this.selectedProjectId===project && this.selectedUniverseId===universe && !this.universeSolve) void this.solveSelectedUniverse();
+      },180);
+    }
   }
 
   /** Send one AppMessage to the Rust runtime and refresh the snapshot.
@@ -418,6 +432,7 @@ class RuntimeStore {
    * 「刚刚创建了什么」的调用方使用（如 openProject 选出新导入的项目）。
    */
   async send(message: AppMessage): Promise<DispatchResult> {
+    this.universeOperationVersion++;
     this.busy = true;
     this.lastError = null;
     this.lastDiagnostic = null;
@@ -877,6 +892,16 @@ class RuntimeStore {
   /** 换上下文/项目后清空机制流缓存（同一 id 在不同上下文含义可能不同）。
    *  具体缓存按 (项目, 工厂, id) 隔离，故仅在幂等上有益。 */
   clearMechanicFlowCache(): void {
+    this.universePreviewCache.clear(); this.universeSolveCache.clear();
+    this.universeOperationVersion++; this.universeSolveGeneration++;
+    this.universeSolve = null; this.universeSolving = false;
+    if(this.selectedUniverseId != null) {
+      const project=this.selectedProjectId,universe=this.selectedUniverseId;
+      clearTimeout(this.universeSolveTimer);
+      this.universeSolveTimer=setTimeout(()=>{
+        if(this.selectedProjectId===project && this.selectedUniverseId===universe)void this.solveSelectedUniverse();
+      },180);
+    }
     this.mechanicFlowCache.clear();
   }
 
@@ -998,6 +1023,8 @@ class RuntimeStore {
   }
 
   async selectUniverse(universe: UniverseId | null): Promise<void> {
+    this.universeSolving = false;
+    clearTimeout(this.universeSolveTimer);
     if (universe != null && this.selectedUniverseId == null) {
       this.previousFactoryId = this.selectedFactoryId;
     }
@@ -1025,12 +1052,8 @@ class RuntimeStore {
   }
 
   private async universeAction(action: UniverseAction): Promise<void> {
-    const { project, universe } = this.requireUniverse();
-    await this.send({ scope: "universe", action: { project, universe, action } });
-    this.universeSolve = null;
-    this.universeSolveError = null;
-    this.universeSolveGeneration += 1;
-    this.universeSolveCache.clear();
+    const {project, universe} = this.requireUniverse();
+    await this.dispatchUniverse(project, universe, action);
   }
 
   async addUniverseLocal(location: Location, kind: MechanicKind): Promise<void> {
@@ -1112,6 +1135,7 @@ class RuntimeStore {
   async autoPlanSelectedUniverse(): Promise<void> {
     const { project, universe } = this.requireUniverse();
     const generation = ++this.universeSolveGeneration;
+    const operation = ++this.universeOperationVersion;
     this.universeSolveError = null;
     this.busy = true;
     let planned: UniverseSolveResult | null = null;
@@ -1126,8 +1150,9 @@ class RuntimeStore {
       this.universeSolveError = error instanceof Error ? error.message : String(error);
     } finally {
       this.busy = false;
+      const current = operation === this.universeOperationVersion;
       await this.refresh();
-      if (planned && this.selectedProjectId === project && this.selectedUniverseId === universe) {
+      if (current && operation === this.universeOperationVersion && planned && this.selectedProjectId === project && this.selectedUniverseId === universe) {
         this.universeSolve = planned;
         this.universeSolveCache.set(`${project}:${universe}`, planned);
       }
@@ -1135,9 +1160,12 @@ class RuntimeStore {
   }
 
   async solveSelectedUniverse(): Promise<void> {
+    this.universeOperationVersion++;
     const { project, universe } = this.requireUniverse();
     const generation = ++this.universeSolveGeneration;
     this.universeSolveError = null;
+    this.universeSolving = true;
+    clearTimeout(this.universeSolveTimer);
     try {
       const result = await solveUniverse(project, universe);
       if (generation !== this.universeSolveGeneration) return;
@@ -1149,10 +1177,13 @@ class RuntimeStore {
       if (this.selectedProjectId !== project || this.selectedUniverseId !== universe) return;
       this.universeSolve = null;
       this.universeSolveError = error instanceof Error ? error.message : String(error);
+    } finally {
+      if (generation === this.universeSolveGeneration) this.universeSolving = false;
     }
   }
 
   async removeFactory(factory: FactoryId): Promise<void> {
+    if (this.selectedUniverseId === factory) return this.removeUniverse(factory);
     const project = this.requireProject();
     await this.send({
       scope: "project",
@@ -1171,6 +1202,9 @@ class RuntimeStore {
 
   /** 重命名工厂。 */
   async setFactoryName(name: string): Promise<void> {
+    if (this.selectedUniverseId != null) {
+      await this.send({scope:'project',action:{project:this.requireProject(),action:{'rename-universe':{universe:this.selectedUniverseId,name}}}}); return;
+    }
     const { project, factory } = this.requireFactory();
     await this.send({
       scope: "factory",
@@ -1569,6 +1603,10 @@ class RuntimeStore {
 
   /** 克隆工厂（整份追加为新工厂）。 */
   async cloneFactory(factory: FactoryId): Promise<void> {
+    if (this.selectedUniverseId === factory) {
+      const result = await this.send({scope:'project',action:{project:this.requireProject(),action:{'clone-universe':{universe:factory}}}});
+      await this.selectUniverse(result.created.universes.at(-1) ?? factory); return;
+    }
     const project = this.requireProject();
     await this.send({
       scope: "project",
@@ -1740,12 +1778,82 @@ class RuntimeStore {
     });
   }
 
-  /** Shared command API for cards and future factory views. */
+  universeSolving = $state(false);
+  private universeOperationVersion = 0;
+  private universeSolveTimer: ReturnType<typeof setTimeout> | undefined;
+  universeAddLocation = $state<Location>({kind: 'planet', name: 'nauvis'});
+  private universePreviewCache = new Map<string, Promise<UniversePreview>>();
+  loadUniversePreview(project: number, universe: number): Promise<UniversePreview> {
+    const p = this.document?.projects.find(p => p.id === project);
+    const key = JSON.stringify([project, universe, p?.context_id, this.effectiveContextId, p?.settings, p?.universes?.find(u => u.id === universe)]);
+    let pending = this.universePreviewCache.get(key);
+    if (!pending) {
+      if (this.universePreviewCache.size > 8) this.universePreviewCache.clear();
+      pending = universePreview(project, universe).catch(error => {this.universePreviewCache.delete(key); throw error;});
+      this.universePreviewCache.set(key, pending);
+    }
+    return pending;
+  }
+  mechanicFactory({project, factory, kind}: MechanicScope) {
+    const p = this.document?.projects.find(p => p.id === project);
+    if (kind === 'universe') { const u = p?.universes?.find(u => u.id === factory); return u ? universeView(u) : null; }
+    return p?.factories.find(f => f.id === factory) ?? null;
+  }
+  async dispatchUniverse(project: number, universe: number, action: UniverseAction) {
+    if (this.selectedProjectId === project && this.selectedUniverseId === universe) this.universeSolveGeneration++;
+    await this.send({scope: 'universe', action: {project, universe, action}});
+    this.universeSolveCache.delete(`${project}:${universe}`);
+    if (this.selectedProjectId === project && this.selectedUniverseId === universe) {
+      this.universeSolve = null;
+      clearTimeout(this.universeSolveTimer);
+      this.universeSolveTimer = setTimeout(() => {
+        if (this.selectedProjectId === project && this.selectedUniverseId === universe) void this.solveSelectedUniverse();
+      }, 180);
+    }
+  }
+  /** Scope captured once; a universe projection never becomes the selected factory. */
   mechanicCommands(scope: MechanicScope = this.requireFactory()): MechanicCommands {
+    scope = Object.freeze({...scope});
     return new MechanicCommands({
-      send: message => this.send(message),
-      getFactory: ({project, factory}) => this.document?.projects.find(p => p.id === project)
-        ?.factories.find(f => f.id === factory) ?? null,
+      getFactory: scope => this.mechanicFactory(scope),
+      send: async message => {
+        if (scope.kind !== 'universe') return this.send(message);
+        if (message.scope !== 'factory') throw new Error('无效的机制操作');
+        const action = message.action.action;
+        const send = (action: UniverseAction) => this.dispatchUniverse(scope.project, scope.factory, action);
+        if (typeof action === 'string') throw new Error('宇宙工厂不支持该操作');
+        if ('mechanic' in action) {
+          const {mechanic, action: edit} = action.mechanic;
+          const entry = this.mechanicFactory(scope)?.mechanics.find(e => e.id === mechanic);
+          if (entry?.transfer && typeof edit === 'object' && 'item-launch' in edit && typeof edit['item-launch'] === 'object' && 'set-item' in edit['item-launch']) {
+            return send({'set-transfer-item': {mechanic, item: edit['item-launch']['set-item'].item}});
+          }
+          return send({mechanic: action.mechanic});
+        }
+        if ('cleanup' in action) {
+          const result = this.universeSolveCache.get(`${scope.project}:${scope.factory}`) ?? (this.universeSolve?.project === scope.project && this.universeSolve?.universe === scope.factory ? this.universeSolve : null);
+          const status = result?.status;
+          if (status?.status !== 'solved') return;
+          const amounts = new Map(status.mechanics.map(m => [m.mechanic,m.amount]));
+          const entries = [...(this.mechanicFactory(scope)?.mechanics ?? [])];
+          if (action.cleanup === 'remove-unused') {
+            for (const entry of entries) if (!(amounts.get(entry.id) ?? 0)) await send({'remove-mechanic':{mechanic:entry.id}});
+          } else {
+            entries.sort((a,b)=>(amounts.get(b.id)??0)-(amounts.get(a.id)??0));
+            for (let position=entries.length-1;position>=0;position--) await send({'reorder-mechanic':{mechanic:entries[position].id,position}});
+          }
+          return;
+        }
+        if ('mechanic-list' in action) {
+          const list = action['mechanic-list'];
+          if ('add' in list) return send({'add-local-mechanic': {location: this.universeAddLocation, kind: list.add.kind}});
+          if ('clone' in list) return send({'clone-mechanic': list.clone});
+          if ('remove' in list) return send({'remove-mechanic': list.remove});
+          if ('reorder' in list) return send({'reorder-mechanic': list.reorder});
+          if ('set-enabled' in list) return send({'set-mechanic-enabled': list['set-enabled']});
+        }
+        throw new Error('宇宙工厂不支持该操作');
+      },
     }, scope);
   }
 

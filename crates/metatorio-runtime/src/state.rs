@@ -839,6 +839,45 @@ impl RuntimeState {
 
         self.universe(project_id, universe_id)?;
         match action {
+            UniverseAction::CloneMechanic { mechanic } => {
+                let mut entry = self
+                    .universe(project_id, universe_id)?
+                    .mechanics
+                    .iter()
+                    .find(|e| e.id == mechanic)
+                    .cloned()
+                    .ok_or(RuntimeError::UniverseMechanicNotFound {
+                        project: project_id,
+                        universe: universe_id,
+                        mechanic,
+                    })?;
+                let id = self.allocate_id();
+                entry.id = id;
+                self.universe_mut(project_id, universe_id)?
+                    .mechanics
+                    .push(entry);
+                let mut outcome = Outcome::meta(project_id);
+                outcome.created.mechanic(id);
+                Ok(outcome)
+            }
+            UniverseAction::SetTransferItem { mechanic, item } => {
+                let entry = self
+                    .universe_mut(project_id, universe_id)?
+                    .mechanics
+                    .iter_mut()
+                    .find(|e| e.id == mechanic)
+                    .ok_or(RuntimeError::UniverseMechanicNotFound {
+                        project: project_id,
+                        universe: universe_id,
+                        mechanic,
+                    })?;
+                let LocatedMechanic::Transfer(transfer) = &mut entry.mechanic else {
+                    return Err(RuntimeError::InvalidValue("机制不是火箭转移".into()));
+                };
+                let changed = replace(&mut transfer.item, item);
+                Ok(Outcome::meta_if(changed, project_id))
+            }
+
             UniverseAction::AddLocalMechanic { location, kind } => {
                 let mechanic_id = self.allocate_id();
                 let mechanic = kind
@@ -1079,6 +1118,38 @@ impl RuntimeState {
                         target,
                     })?;
                 let changed = move_item(&mut universe.targets, index, position);
+                Ok(Outcome::meta_if(changed, project_id))
+            }
+            UniverseAction::ReorderTargetExpression {
+                expression,
+                position,
+            } => {
+                let universe = self.universe_mut(project_id, universe_id)?;
+                let index = universe
+                    .target_expressions
+                    .iter()
+                    .position(|e| e.id == expression)
+                    .ok_or(RuntimeError::InvalidValue("目标表达式不存在".into()))?;
+                let changed = move_item(&mut universe.target_expressions, index, position);
+                Ok(Outcome::meta_if(changed, project_id))
+            }
+            UniverseAction::ReorderTargetExpressionTerm {
+                expression,
+                term,
+                position,
+            } => {
+                let entry = self
+                    .universe_mut(project_id, universe_id)?
+                    .target_expressions
+                    .iter_mut()
+                    .find(|e| e.id == expression)
+                    .ok_or(RuntimeError::InvalidValue("目标表达式不存在".into()))?;
+                let index = entry
+                    .terms
+                    .iter()
+                    .position(|e| e.id == term)
+                    .ok_or(RuntimeError::InvalidValue("目标表达式项不存在".into()))?;
+                let changed = move_item(&mut entry.terms, index, position);
                 Ok(Outcome::meta_if(changed, project_id))
             }
             UniverseAction::AddTargetExpression => {

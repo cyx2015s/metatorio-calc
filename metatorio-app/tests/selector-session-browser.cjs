@@ -93,6 +93,7 @@ const url = `http://127.0.0.1:${port}`;
       const document = structuredClone(window.__layoutDocument), requests = [], messages = [];
       const host = {
         document, selectedProjectId: 1, selectedFactoryId: 2, effectiveContextId: 'test',
+        mechanicFactory: ({project, factory}) => document.projects.find(p=>p.id===project)?.factories.find(f=>f.id===factory) ?? null,
         getDetail: async () => ({categories: ['crafting']}),
         localizedName: (_kind, name) => name,
         mechanicCommands(scope) {

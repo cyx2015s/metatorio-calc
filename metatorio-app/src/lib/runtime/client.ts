@@ -46,6 +46,9 @@ export async function getDocument(): Promise<AppDocument> {
   return call("get_document");
 }
 
+export interface UniversePreview { mechanics: { id: number; flows: import('./types').LocatedFlow[]; error: string | null; solar_balance?: import('./types').SolarBalance | null }[]; sources: import('./types').LocatedDualVar[] }
+export function universePreview(project: number, universe: number): Promise<UniversePreview> { return call('universe_preview', {project, universe}); }
+
 export async function solveUniverse(project: number, universe: UniverseId): Promise<UniverseSolveResult> {
   return call("solve_universe", { project, universe });
 }
